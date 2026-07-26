@@ -1,5 +1,5 @@
 # Static Go binary in a scratch image (~8 MB, no shell/libc).
-FROM golang:1.23-alpine AS build
+FROM golang:1.26-alpine AS build
 WORKDIR /src
 COPY go.mod .
 COPY *.go .

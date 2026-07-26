@@ -18,7 +18,7 @@ jobs:
     name: Public repository safety
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
@@ -28,10 +28,12 @@ jobs:
     name: Go formatting and tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
-          go-version: "1.23.x"
+          # The forward-auth module uses Go 1.25; older modules remain
+          # source-compatible and are tested by the newest required toolchain.
+          go-version: "1.25.x"
           cache-dependency-path: "**/go.sum"
       - name: Check formatting
         shell: bash
@@ -51,7 +53,7 @@ jobs:
     name: Tailwind frontend
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
@@ -70,7 +72,7 @@ jobs:
     name: Scripts and Compose
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
