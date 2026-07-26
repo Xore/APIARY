@@ -1,0 +1,152 @@
+# analyze.yml
+# Honeypot-stack: Multi-scanner analysis pipeline
+#
+# Triggers when new files are committed to:
+#   samples/           (Cowrie/Dionaea downloads, raw files)
+#   uploads/           (manually staged samples)
+#
+# What it does:
+#   1. Detect all new/changed files in the commit
+#   2. Extract archives (zip/tar/gz/7z) with password 'infected'
+#   3. Hash-check each extracted file against all scanners first
+#      (skip upload if already known to VT/MalwareBazaar)
+#   4. Upload unknown executables to:
+#      - VirusTotal         (70+ AV engines)
+#      - MalwareBazaar      (abuse.ch community)
+#      - Hybrid-Analysis    (behavioural sandbox)
+#      - CAPE Sandbox       (cuckoo fork, self-hosted or public)
+#      - Malshare           (hash lookup + upload)
+#      - Any.run            (interactive sandbox, if key present)
+#   5. Write consolidated JSON report per sample
+#   6. Commit reports/ back to repo
+#
+# Required secrets (Settings → Secrets → Actions):
+#   VT_API_KEY            VirusTotal API key (free tier: 4 req/min)
+#   MALWAREBAZAAR_API_KEY abuse.ch API key (free, register at bazaar.abuse.ch)
+#   HYBRID_ANALYSIS_KEY   Hybrid-Analysis API key (free tier)
+#   MALSHARE_API_KEY      Malshare API key (free, register at malshare.com)
+#   ANYRUN_API_KEY        Any.run API key (optional, paid)
+#   CAPE_API_URL          CAPE sandbox URL (optional, e.g. http://cape.internal)
+#   CAPE_API_KEY          CAPE API key (optional)
+#   GH_PAT                GitHub PAT with repo+workflow scope (for git push)
+
+name: Multi-Scanner Analysis
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'samples/**'
+      - 'uploads/**'
+  workflow_dispatch:
+    inputs:
+      target_path:
+        description: 'Path to scan (e.g. samples/PE/evil.exe or samples/)'
+        required: false
+        default: 'samples/'
+
+permissions:
+  contents: write
+
+jobs:
+  scan:
+    name: Scan Samples
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      # ───────────────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+          fetch-depth: 2   # need prev commit to detect changed files
+
+      # ───────────────────────────────────────────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install --quiet \
+            requests \
+            python-magic \
+            py7zr \
+            rarfile \
+            pyzipper
+          # p7zip for 7z extraction
+          sudo apt-get install -qq -y p7zip-full
+
+      # ───────────────────────────────────────────────────────────────────
+      - name: Detect changed sample files
+        id: changed
+        run: |
+          # If manually triggered with a specific path, use that
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TARGET="${{ github.event.inputs.target_path }}"
+            if [ -f "$TARGET" ]; then
+              echo "$TARGET" > /tmp/changed_files.txt
+            else
+              find "$TARGET" -type f 2>/dev/null > /tmp/changed_files.txt
+            fi
+          else
+            # Detect files changed in the last commit
+            git diff --name-only HEAD~1 HEAD -- 'samples/' 'uploads/' \
+              | grep -v '/$' \
+              > /tmp/changed_files.txt || true
+          fi
+          echo "Changed files:"
+          cat /tmp/changed_files.txt
+          COUNT=$(wc -l < /tmp/changed_files.txt)
+          echo "count=$COUNT" >> $GITHUB_OUTPUT
+
+      # ───────────────────────────────────────────────────────────────────
+      - name: Run multi-scanner
+        if: steps.changed.outputs.count != '0'
+        env:
+          VT_API_KEY:            ${{ secrets.VT_API_KEY }}
+          MALWAREBAZAAR_API_KEY: ${{ secrets.MALWAREBAZAAR_API_KEY }}
+          HYBRID_ANALYSIS_KEY:   ${{ secrets.HYBRID_ANALYSIS_KEY }}
+          MALSHARE_API_KEY:      ${{ secrets.MALSHARE_API_KEY }}
+          ANYRUN_API_KEY:        ${{ secrets.ANYRUN_API_KEY }}
+          CAPE_API_URL:          ${{ secrets.CAPE_API_URL }}
+          CAPE_API_KEY:          ${{ secrets.CAPE_API_KEY }}
+        run: |
+          python3 analysis/scan_samples.py \
+            --file-list /tmp/changed_files.txt \
+            --output-dir reports/scanner/ \
+            --archive-passwords infected,malware,infected123,virus \
+            --wait-results
+
+      # ───────────────────────────────────────────────────────────────────
+      - name: Commit scanner reports
+        if: steps.changed.outputs.count != '0'
+        run: |
+          git config user.name  honeypot-bot
+          git config user.email honeypot-bot@noreply
+          git add reports/scanner/
+          git diff --cached --quiet \
+            || git commit -m "bot: scanner results $(date +%Y-%m-%d) [skip ci]"
+          git push
+
+      - name: Summary
+        if: steps.changed.outputs.count != '0'
+        run: |
+          echo '## Scanner Results' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          if ls reports/scanner/*.json 2>/dev/null; then
+            for f in reports/scanner/*.json; do
+              sha=$(basename $f .json)
+              detections=$(python3 -c "
+import json, sys
+data = json.load(open('$f'))
+vt = data.get('virustotal', {})
+pos = vt.get('positives', '?')
+total = vt.get('total', '?')
+print(f'{pos}/{total}')
+")
+              echo "| $sha | $detections |" >> $GITHUB_STEP_SUMMARY
+            done
+          fi
