@@ -438,7 +438,7 @@ async function refreshDashboard(){
     if (!r.ok) return;
     const doc = new DOMParser().parseFromString(await r.text(), "text/html");
     const next = doc.querySelector(".wrap"),current=document.querySelector("[data-hp-page-content]")||document.querySelector(".wrap");
-    if (next&&current) {const mapCard=current.querySelector('[data-attack-map-card]'),incomingMap=next.querySelector('[data-attack-map-card]');if(mapCard&&incomingMap)incomingMap.replaceWith(mapCard);if(window.replaceHoneypotPage)window.replaceHoneypotPage(next);else current.replaceWith(next);if(window.initDashboardTabs)window.initDashboardTabs();if(window.initHoneypotMaps)window.initHoneypotMaps();if(window.honeypotLeaflet?.map){setTimeout(()=>window.honeypotLeaflet.map.invalidateSize(false),0);if(window.updateHoneypotMap)window.updateHoneypotMap();}}
+    if (next&&current) {const preserveMap=Boolean(current.querySelector('[data-attack-map-card]')&&next.querySelector('[data-attack-map-card]'));if(window.replaceHoneypotPage)window.replaceHoneypotPage(next,{preserveMap});else current.replaceWith(next);if(window.initDashboardTabs)window.initDashboardTabs();if(window.initHoneypotMaps)window.initHoneypotMaps();}
   } catch {} finally {refreshing=false}
 }
 if(window.EventSource){const es=new EventSource('/api/stream');es.addEventListener('update',refreshDashboard);es.onerror=()=>{};}

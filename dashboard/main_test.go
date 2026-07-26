@@ -432,7 +432,10 @@ func TestAdminLTEAssetsAreEmbeddedAndReferenced(t *testing.T) {
 	if !strings.Contains(string(adapter), "window.replaceHoneypotPage = mountPage") {
 		t.Fatal("AdminLTE adapter does not expose the live-refresh content mount")
 	}
-	if !strings.Contains(pageTemplate, `document.querySelector("[data-hp-page-content]")`) || !strings.Contains(pageTemplate, "window.replaceHoneypotPage(next)") {
+	if !strings.Contains(pageTemplate, `document.querySelector("[data-hp-page-content]")`) || !strings.Contains(pageTemplate, "window.replaceHoneypotPage(next,{preserveMap})") {
 		t.Fatal("dashboard refresh does not target the AdminLTE content container")
+	}
+	if !strings.Contains(string(adapter), "refreshOverviewPreservingMap") || !strings.Contains(string(adapter), "child !== mapCard") {
+		t.Fatal("dashboard refresh does not preserve the connected Leaflet map")
 	}
 }
