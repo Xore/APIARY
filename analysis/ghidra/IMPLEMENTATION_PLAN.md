@@ -17,6 +17,11 @@ All analysis runs in Docker and produces structured output committed to
 [Xore/Honeypot](https://github.com/Xore/Honeypot) alongside VirusTotal and
 JoeSandbox reports.
 
+> **Dashboard integration**: for triggering these analyses from the
+> operations dashboard and viewing every artifact inline (functions,
+> strings, imports, crypto hits, call graph, AI triage), see
+> [DASHBOARD_INTEGRATION_PLAN.md](DASHBOARD_INTEGRATION_PLAN.md).
+
 ---
 
 ## Architecture
