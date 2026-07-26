@@ -18,8 +18,8 @@ jobs:
     name: Public repository safety
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
       - run: python scripts/check-public-leaks.py
@@ -28,8 +28,8 @@ jobs:
     name: Go formatting and tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           # The forward-auth module uses Go 1.25; older modules remain
           # source-compatible and are tested by the newest required toolchain.
@@ -53,8 +53,8 @@ jobs:
     name: Tailwind frontend
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "24"
           cache: npm
@@ -72,8 +72,8 @@ jobs:
     name: Scripts and Compose
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
       - name: Python syntax
