@@ -158,36 +158,65 @@ func determineSandboxTarget(data []byte) (target sandboxTarget, dynamic bool) {
    payloads-page notice can say e.g. "Sandbox analysis (Windows VM)
    requested for …" instead of a generic message.
 
-### New field: Ghidra selection on the submit form
+### New field + dedicated button: Ghidra selection on the payloads page
 
-The payloads-page "Submit to sandbox" form gets one additional field —
-it does **not** replace the separate "Run Ghidra analysis" button from
-`analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md` Phase 3, it complements it
-for the common case of "detonate and statically reverse-engineer in one
-click":
+Each payload row gets **two** independent ways to queue Ghidra, covering
+both the "detonate and reverse-engineer together" case and the "static
+analysis only, no VM at all" case:
+
+1. A **checkbox on the sandbox submit form** — queues Ghidra alongside
+   whichever VM the determination path picked.
+2. A **dedicated "Send to Ghidra" button** — queues Ghidra on its own,
+   with no VM submission at all (e.g. for the `Dynamic: false` payloads
+   the determination path rejects from VM submission — DLLs, documents,
+   static libraries — Ghidra is often the *only* applicable analysis).
+
+This is the same standalone button described in
+`analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md` Phase 3 — shown here
+alongside the sandbox form so the two entry points are visibly distinct
+on the page rather than one being buried inside the other:
 
 ```html
-<form method="post" action="/sandbox/submit" class="inline">
-  <input type="hidden" name="hash" value="{{.SHA256}}">
-  <label class="checkbox">
-    <input type="checkbox" name="ghidra" value="1">
-    Also run Ghidra static analysis
-  </label>
-  <button type="submit" class="btn-sm">Submit to sandbox</button>
-</form>
+<div class="payload-actions">
+  <form method="post" action="/sandbox/submit" class="inline">
+    <input type="hidden" name="hash" value="{{.SHA256}}">
+    <label class="checkbox">
+      <input type="checkbox" name="ghidra" value="1">
+      Also run Ghidra static analysis
+    </label>
+    <button type="submit" class="btn-sm">Submit to sandbox</button>
+  </form>
+
+  <form method="post" action="/ghidra/submit" class="inline">
+    <input type="hidden" name="hash" value="{{.SHA256}}">
+    <button type="submit" class="btn-sm btn-secondary">Send to Ghidra</button>
+  </form>
+  {{if .GhidraResult}}<a href="/ghidra/{{.SHA256}}" class="badge">Ghidra: {{.GhidraResult.RiskLabel}}</a>{{end}}
+</div>
 ```
 
-`serveSandboxSubmit` reads `r.FormValue("ghidra") == "1"` and, if set,
-performs step 6 above. No new permission check is needed — it's gated by
-the same `requireAdmin` + `sameOriginRequest` checks already guarding the
-whole handler, and the Ghidra spool write reuses
-`analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md`'s existing
-`O_CREATE|O_EXCL` idempotent-write pattern verbatim.
+Both paths converge on the same spool and worker — there is exactly one
+way Ghidra analysis gets queued under the hood
+(`GHIDRA_REQUEST_DIR`/`serveGhidraSubmit` from
+`analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md` Phase 2), just two UI
+entry points into it:
+
+- `serveSandboxSubmit` reads `r.FormValue("ghidra") == "1"` and, if set,
+  writes the Ghidra spool entry itself as one extra step alongside the VM
+  request (step 6 above).
+- The dedicated button posts directly to the existing `/ghidra/submit`
+  route (`serveGhidraSubmit`) — no changes needed there at all.
+
+No new permission check is needed for either — both are gated by the same
+`requireAdmin` + `sameOriginRequest` checks already guarding their
+respective handlers, and both write with the same idempotent
+`O_CREATE|O_EXCL` pattern, so clicking both the checkbox and the button
+(or double-clicking either) never queues a duplicate run.
 
 The dashboard never decides *which* VM Ghidra needs — Ghidra's headless
 container analyzes the binary directly and doesn't care which detonation
-backend (if any) also ran it, so the Ghidra checkbox is independent of the
-Windows/Linux determination above.
+backend (if any) also ran it, so Ghidra submission (via either entry
+point) is entirely independent of the Windows/Linux determination above.
 
 ---
 
