@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           # The forward-auth module uses Go 1.25; older modules remain
           # source-compatible and are tested by the newest required toolchain.
