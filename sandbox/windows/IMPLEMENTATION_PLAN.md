@@ -1,7 +1,7 @@
 # Windows 11 Malware Sandbox — Golden Image Implementation Plan
 
 > **Status**: In Progress  
-> **Last updated**: 2026-07-26  
+> **Last updated**: 2026-07-27  
 > **Host platform**: KVM + QEMU + libvirt + docker-compose (NO VMware)
 
 ---
@@ -10,11 +10,12 @@
 
 The analysis host runs **KVM/QEMU/libvirt** and **docker-compose** only.
 - No VMware Workstation, no VirtualBox, no Hyper-V
+- No GitHub Actions — the sandbox is triggered **from the dashboard**, not CI
 - All VM lifecycle (create, snapshot, revert, destroy) via `virsh` / `qemu-img`
-- REMnux gateway replaced by **Docker Compose services** (INetSim, Zeek, Suricata, mitmproxy)
+- Gateway services run as **Docker Compose services** (INetSim, Zeek, Suricata, mitmproxy)
 - Golden image built automatically with **Packer + QEMU builder**
-- Orchestrator uses `libvirt` Python API (`libvirt-python`) instead of pyVmomi
-- Self-hosted GitHub Actions runner runs directly on the KVM host
+- Orchestrator uses `libvirt` Python API (`libvirt-python`)
+- Results written to a spool directory the dashboard reads — **no outbound network, no git push**
 
 ---
 
@@ -40,19 +41,43 @@ KVM Host (Linux)
 │   ├── zeek         — reads tap/mirror of virbr-sandbox
 │   └── suricata     — IDS on virbr-sandbox
 │
-└── Orchestrator (Python, runs on host)
+└── Host-side sandbox worker (systemd path unit)
+    ├── Watches SANDBOX_REQUEST_DIR for {hash}.request files
+    │   written by the dashboard (sandbox_submit.go)
     ├── virsh snapshot-revert → golden image
     ├── WinRM → copy sample, start tools, detonate
     ├── Wait observation window
     ├── Collect artifacts via SMB / virsh guest-agent
-    └── Push reports → Xore/Honeypot repo
+    └── Write {hash}_sandbox.json → SANDBOX_RESULTS_DIR
+        (dashboard reads this; no git push, no outbound connection)
 ```
+
+---
+
+## Wiring Pattern — mirrors Ghidra dashboard integration
+
+The sandbox follows the **exact same spool-file pattern** as the Ghidra
+integration (`analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md`):
+
+| Concern | Sandbox (this plan) | Ghidra (reference) |
+|---|---|---|
+| Trigger | `POST /sandbox/submit` → writes `{hash}.request` to `SANDBOX_REQUEST_DIR` | `POST /ghidra/submit` → writes `{sha256}.request` to `GHIDRA_REQUEST_DIR` |
+| Worker | Host-side systemd path unit (`honeypot-sandbox-worker.path`), never run by the dashboard | Host-side systemd path unit (`honeypot-ghidra-worker.path`) |
+| Results | Worker writes `{hash}_sandbox.json` to `SANDBOX_RESULTS_DIR`; dashboard only reads | Worker writes `{sha256}_ghidra.json` to `GHIDRA_RESULTS_DIR`; dashboard only reads |
+| Trust boundary | Dashboard never touches Docker, libvirt, or the VM directly | Same |
+| List page | `GET /sandbox` → `sandboxData()` → `{{define "sandbox"}}` | `GET /ghidra` → `ghidraData()` |
+| Detail page | `GET /sandbox/{job}` | `GET /ghidra/{sha256}` |
+| JSON API | `GET /api/sandbox`, `/api/sandbox/{job}` | `GET /api/ghidra`, `/api/ghidra/{sha256}` |
+| Export | `GET /export/sandbox/{job}` (bundle download) | `GET /export/ghidra/{sha256}` |
+
+No new trust boundary is introduced. The dashboard container stays
+unprivileged and **never** calls `virsh`, `docker`, or WinRM directly.
 
 ---
 
 ## Research: Golden Image vs Snapshots
 
-See full comparison: [`docs/golden_image_vs_snapshots.md`](../docs/golden_image_vs_snapshots.md)
+See full comparison: [`docs/golden_image_vs_snapshots.md`](docs/golden_image_vs_snapshots.md)
 
 ### TL;DR for this project
 
@@ -62,7 +87,6 @@ See full comparison: [`docs/golden_image_vs_snapshots.md`](../docs/golden_image_
 | **Reproducibility** | 100% — always byte-identical | 99% — depends on snapshot age |
 | **Storage** | 1× full image + thin clones | 1 image + delta chains |
 | **Rebuild** | Packer re-runs from scratch | Manual or scripted |
-| **Best for** | CI/CD pipeline, many parallel runs | Single analyst workstation |
 | **Our approach** | Packer builds base qcow2 | virsh snapshot on top for fast revert |
 
 **Decision**: Use Packer to build a reproducible base `qcow2` (golden image),
@@ -126,9 +150,7 @@ iptables -I FORWARD -i eth0 -o virbr-sandbox -j DROP
 See: [`packer/win11-analysis.pkr.hcl`](packer/win11-analysis.pkr.hcl)
 
 Packer automates the full Windows 11 install + FLARE-VM + logging config
-into a single reproducible `qcow2` image. Based on
-[proactivelabs/packer-windows](https://github.com/proactivelabs/packer-windows)
-and [Mikroways/windows-packer-terraform-libvirt](https://github.com/Mikroways/windows-packer-terraform-libvirt).
+into a single reproducible `qcow2` image.
 
 ### Build
 ```bash
@@ -163,7 +185,6 @@ packer build win11-analysis.pkr.hcl
 packer build -force win11-analysis.pkr.hcl
 
 # Update just the logging config without full rebuild:
-# Use virt-customize (libguestfs) to patch the qcow2 in-place
 virt-customize -a /golden-images/win11-analysis.qcow2 \
     --upload sysmon_config.xml:/Windows/sysmon_config.xml \
     --run-command 'C:\Windows\sysmon64.exe -c C:\Windows\sysmon_config.xml'
@@ -196,23 +217,11 @@ virsh snapshot-revert win11-sandbox GOLDEN_READY --running
 # Takes ~5-10 seconds
 ```
 
-### Snapshot vs Clone decision per use case
-
-| Use case | Method |
-|----------|--------|
-| Analyst runs one sample at a time | `virsh snapshot-revert` (5-10s) |
-| CI parallel runs (multiple samples) | Clone from golden qcow2 per run |
-| Monthly golden image refresh | `packer build -force` |
-| Quick config patch | `virt-customize` on qcow2 |
-
 ---
 
 ## Phase 3 — Windows 11 Hardening for Malware Analysis
 
 See: [`setup/harden_analysis_vm.ps1`](setup/harden_analysis_vm.ps1)
-
-Hardening for a malware analysis lab has **opposite goals** to production hardening:
-we want maximum visibility, minimum interference, and anti-sandbox-detection.
 
 ### 3.1 Disable Noise Sources
 ```
@@ -226,8 +235,7 @@ we want maximum visibility, minimum interference, and anti-sandbox-detection.
 ✓ SmartScreen disabled
 ✓ Action Center / notifications disabled
 ✓ OneDrive removed
-✓ Windows Defender Application Guard disabled
-✓ Memory integrity (HVCI) disabled (interferes with some malware)
+✓ Memory integrity (HVCI) disabled
 ```
 
 ### 3.2 Enable Maximum Telemetry (Analyst Side)
@@ -258,35 +266,35 @@ we want maximum visibility, minimum interference, and anti-sandbox-detection.
 ✓ Screen: 1920x1080
 ✓ QEMU CPU model: host-passthrough (exposes real CPU, not QEMU)
 ✓ QEMU vendor string: mask with -cpu ...,vendor=GenuineIntel
-✓ No QEMU-specific devices visible (virtio drivers have no QEMU strings)
-✓ Disk serial: random realistic value (not QEMU HARDDISK default)
+✓ No QEMU-specific devices visible
+✓ Disk serial: random realistic value
 ✓ MAC address: real OUI prefix (Intel/Realtek, not QEMU 52:54:00)
 ✓ BIOS: SeaBIOS/OVMF with patched vendor strings
-✓ Uptime: > 3 days before analysis (some malware checks uptime)
+✓ Uptime: > 3 days before analysis
 ✓ > 50 processes running at analysis time
 ```
 
 ### 3.4 KVM-Specific Anti-Detection
-```
-# In VM XML — mask QEMU/KVM from guest
+```xml
+<!-- In VM XML — mask QEMU/KVM from guest -->
 <cpu mode='host-passthrough'>
   <feature policy='disable' name='hypervisor'/>
 </cpu>
 <features>
   <acpi/><apic/>
-  <kvm><hidden state='on'/></kvm>   ← hides KVM CPUID leaf
-  <vmport state='off'/>              ← disables VMware port (some malware checks both)
+  <kvm><hidden state='on'/></kvm>   <!-- hides KVM CPUID leaf -->
+  <vmport state='off'/>              <!-- disables VMware port -->
 </features>
 
-# Disk: use virtio-blk with custom serial
+<!-- Disk: virtio-blk with custom serial -->
 <disk type='file' device='disk'>
   <driver name='qemu' type='qcow2' cache='none'/>
-  <serial>WD-WX31A74K3593</serial>   ← looks like a real WD drive
+  <serial>WD-WX31A74K3593</serial>
 </disk>
 
-# NIC: use e1000e model with Intel OUI MAC
+<!-- NIC: e1000e with Intel OUI MAC -->
 <interface type='network'>
-  <mac address='00:1A:2B:3C:4D:5E'/> ← Intel OUI
+  <mac address='00:1A:2B:3C:4D:5E'/>
   <model type='e1000e'/>
 </interface>
 ```
@@ -297,27 +305,25 @@ we want maximum visibility, minimum interference, and anti-sandbox-detection.
 
 See: [`docker-compose.sandbox.yml`](../../docker-compose.sandbox.yml)
 
-Instead of a separate REMnux VM, all gateway services run as Docker containers
-on the same host, connected to the `virbr-sandbox` bridge.
+All gateway services run as Docker containers on the same host, connected
+to the `virbr-sandbox` bridge. No container has outbound internet access.
 
 ```yaml
-# Key services:
+# Key services (all on sandbox-net, no WAN routing):
 inetsim:    # fake DNS/HTTP/HTTPS/SMTP/FTP/IRC — responds to everything
 mitmproxy:  # SSL intercept of HTTP/S, logs full request/response + bodies
 zeek:       # protocol analysis (conn.log, dns.log, http.log, files.log)
 suricata:   # IDS alerts, ET rules
 ```
 
-All containers attach to the host bridge `virbr-sandbox` via `macvlan` driver
-or via a dedicated `sandbox-net` Docker network routed through the bridge.
-
 ---
 
 ## Phase 5 — Orchestration (KVM / libvirt)
 
-See: [`orchestrate/run_sample.py`](orchestrate/run_sample.py) (updated)
+See: [`orchestrate/run_sample.py`](orchestrate/run_sample.py)
 
-Orchestrator uses `libvirt-python` API instead of vmrun:
+The orchestrator is invoked by the **host-side systemd worker** (Phase 7),
+never directly by the dashboard. It uses `libvirt-python`:
 
 ```python
 import libvirt
@@ -340,13 +346,14 @@ dom.revertToSnapshot(snap, libvirt.VIR_DOMAIN_SNAPSHOT_REVERT_RUNNING)
 7.  Sleep observation window (default: 300s)
 8.  WinRM: Stop-ProcMon, export CSV; Regshot snap2+diff
 9.  WinRM: wevtutil export Sysmon + PowerShell EVTX
-10. virsh qemu-agent-command (copy files from guest via guest agent)
+10. virsh qemu-agent-command → copy artifacts from guest
     OR mount via SMB share on guest
 11. docker compose stop → collect Zeek/Suricata/mitmproxy logs
 12. extract_iocs.py → ioc_extracted.json
 13. generate_report.py → report.pdf
-14. virsh snapshot-revert GOLDEN_READY  (cleanup, always runs)
-15. git add reports/ iocs/ && git push
+14. Write {hash}_sandbox.json → SANDBOX_RESULTS_DIR       ← dashboard reads this
+15. virsh snapshot-revert GOLDEN_READY  (cleanup, always runs)
+    NO git push. NO outbound connection.
 ```
 
 ---
@@ -354,7 +361,7 @@ dom.revertToSnapshot(snap, libvirt.VIR_DOMAIN_SNAPSHOT_REVERT_RUNNING)
 ## Phase 6 — Artifact Collection
 
 ```
-reports/windows-sandbox/<sha256>/
+SANDBOX_RESULTS_DIR/{sha256}/
 ├── metadata.json
 ├── sysmon.evtx + sysmon.json
 ├── powershell_4104.evtx
@@ -366,50 +373,145 @@ reports/windows-sandbox/<sha256>/
 │   ├── http_requests.log
 │   └── downloads/          ← second-stage payloads caught by FakeNet
 ├── network.pcap             ← from Zeek/tcpdump on host bridge
-├── zeek_logs/               ← conn.log, dns.log, http.log, files.log
+├── zeek_logs/
 ├── suricata_alerts.json
-├── mitmproxy_flows.bin      ← full HTTP/S flows
+├── mitmproxy_flows.bin
 ├── file_drops/
 ├── ioc_extracted.json
 └── report.pdf
+
+# Plus the top-level result summary the dashboard reads:
+SANDBOX_RESULTS_DIR/{sha256}_sandbox.json
 ```
 
 ---
 
-## Phase 7 — GitHub Actions Integration
+## Phase 7 — Dashboard Integration (spool-file pattern)
 
-Requires a **self-hosted runner** on the KVM host (cannot use ubuntu-latest).
-See [`runner/README.md`](runner/README.md) for setup.
+The sandbox is triggered **from the dashboard payloads page** — the same
+one-click pattern used by Ghidra
+(`analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md`). There is no CI/CD
+involvement and no outbound network connection.
 
-```yaml
-windows_sandbox:
-  name: Windows 11 KVM Detonation
-  runs-on: [self-hosted, kvm, windows-sandbox]
-  needs: [analyze]
-  if: |
-    contains(toJson(github.event.commits.*.modified), 'samples/PE') ||
-    contains(toJson(github.event.commits.*.added), 'samples/PE')
-  steps:
-    - uses: actions/checkout@v4
-    - name: Detonate PE samples
-      env:
-        LIBVIRT_URI: qemu:///system
-        VM_NAME: win11-sandbox
-        VM_HOST: 10.10.10.2
-        VM_USER: analyst
-        VM_PASS: ${{ secrets.WIN_SANDBOX_PASS }}
-        GOLDEN_SNAPSHOT: GOLDEN_READY
-      run: python3 sandbox/windows/orchestrate/run_sample.py --file-list /tmp/changed_files.txt
-    - name: Commit artifacts
-      run: |
-        git config user.name honeypot-bot
-        git config user.email honeypot-bot@noreply
-        git add reports/windows-sandbox/ iocs/
-        git diff --cached --quiet || git commit -m "bot: kvm sandbox results [skip ci]"
-        git push
+### 7.1 Trigger flow
+
+```
+Analyst clicks "Submit to sandbox" on /payloads
+  → POST /sandbox/submit  (dashboard: sandbox_submit.go)
+      validates hash, confirms payload exists via s.payloadPath(hash)
+      writes {hash}.request to SANDBOX_REQUEST_DIR  (O_CREATE|O_EXCL)
+      redirects to /payloads?analysis=queued&hash=…
+
+systemd path unit (honeypot-sandbox-worker.path) detects new .request
+  → honeypot-sandbox-worker.service fires
+      runs orchestrate/run_sample.py
+      writes {hash}_sandbox.json → SANDBOX_RESULTS_DIR
+      deletes {hash}.request
+      updates status.json (queued/running/done counts)
+
+Dashboard reads results
+  → GET /sandbox          → loadSandboxResults() → {{define "sandbox"}}
+  → GET /sandbox/{job}    → loadSandboxResult(hash)
+  → GET /api/sandbox      → serveGandboxAPI()
+  → GET /export/sandbox/{job} → stream report.pdf or artifact zip
 ```
 
-Add `WIN_SANDBOX_PASS` as a **repository secret**.
+### 7.2 Systemd worker units
+
+```ini
+# /etc/systemd/system/honeypot-sandbox-worker.path
+[Unit]
+Description=Watch for honeypot sandbox detonation requests
+After=libvirtd.service docker.service
+
+[Path]
+PathChanged=/sandbox-requests
+Unit=honeypot-sandbox-worker.service
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```ini
+# /etc/systemd/system/honeypot-sandbox-worker.service
+[Unit]
+Description=Honeypot sandbox detonation worker (one-shot)
+After=libvirtd.service docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/honeypot-sandbox/run_pending.sh
+Environment=SANDBOX_REQUEST_DIR=/sandbox-requests
+Environment=SANDBOX_RESULTS_DIR=/sandbox-results
+Environment=LIBVIRT_URI=qemu:///system
+Environment=VM_DOMAIN=win11-sandbox
+Environment=GOLDEN_SNAPSHOT=GOLDEN_READY
+Environment=VM_HOST=10.10.10.2
+Environment=VM_USER=analyst
+Environment=OBSERVATION_SECS=300
+```
+
+### 7.3 Docker Compose wiring
+
+```yaml
+# docker-compose.yml (main stack)
+services:
+  dashboard:
+    environment:
+      - SANDBOX_REQUEST_DIR=/sandbox-requests
+      - SANDBOX_RESULTS_DIR=/sandbox-results
+    volumes:
+      - sandbox-requests:/sandbox-requests        # read-write (dashboard writes markers)
+      - sandbox-results:/sandbox-results:ro        # read-only (dashboard reads results)
+
+volumes:
+  sandbox-requests:
+  sandbox-results:
+```
+
+The host-side systemd worker owns read-write access to both volumes.
+The dashboard container **never** calls `virsh`, `docker`, or WinRM.
+
+### 7.4 Environment variables (add to `.env.example`)
+
+```dotenv
+# ── Windows sandbox dashboard integration ─────────────────────────────
+SANDBOX_REQUEST_DIR=/sandbox-requests
+SANDBOX_RESULTS_DIR=/sandbox-results
+SANDBOX_ALERT_RISK_SCORE=50
+VM_DOMAIN=win11-sandbox
+GOLDEN_SNAPSHOT=GOLDEN_READY
+VM_HOST=10.10.10.2
+VM_USER=analyst
+OBSERVATION_SECS=300
+```
+
+### 7.5 Queue health + alerting
+
+Extend the existing alert-check block in `main.go` (~line 1690) with
+sandbox-worker health checks — same pattern as Ghidra:
+
+```go
+sandboxStatus := loadSandboxStatus()
+if sandboxStatus.HandoffOld {
+    s.checkAlerts(fmt.Sprintf(
+        "sandbox handoff stalled: %d request(s) waiting for host worker",
+        sandboxStatus.Handoff))
+}
+if sandboxStatus.WorkerState == "stale" || sandboxStatus.WorkerState == "error" {
+    s.checkAlerts(fmt.Sprintf(
+        "sandbox worker unhealthy: state=%s queued=%d running=%d",
+        sandboxStatus.WorkerState, sandboxStatus.Queued, sandboxStatus.Running))
+}
+for _, result := range loadSandboxResults() {
+    if result.RiskScore < sandboxAlertThreshold() {
+        continue
+    }
+    s.checkAlerts(fmt.Sprintf(
+        "sandbox high-risk result: sha256=%s score=%d verdict=%s",
+        result.SHA256, result.RiskScore, result.Verdict))
+}
+```
 
 ---
 
@@ -421,7 +523,6 @@ Add `WIN_SANDBOX_PASS` as a **repository secret**.
 | virsh / libvirt-python | VM lifecycle + snapshots | Host |
 | FLARE-VM (mandiant) | 100+ analysis tools | Guest |
 | Sysmon + SwiftOnSecurity config | Process/network/registry telemetry | Guest |
-| Enable-All-The-Logs (bobby-tablez) | One-shot logging enablement | Guest |
 | PowerShell 4104/4103/Transcription | PS downloader capture | Guest |
 | FakeNet-NG (mandiant) | Intercept ALL outbound traffic | Guest |
 | ProcMon / Regshot | Process + registry diff | Guest |
@@ -432,6 +533,7 @@ Add `WIN_SANDBOX_PASS` as a **repository secret**.
 | WinRM | Remote orchestration | Host→Guest |
 | QEMU guest agent | File copy without network | Host→Guest |
 | python-evtx | Parse EVTX to JSON | Host |
+| systemd path unit | Spool-file trigger (no CI/CD) | Host |
 
 ---
 
@@ -459,8 +561,10 @@ sandbox/windows/
 │   ├── run_sample.py             ← KVM detonation orchestrator
 │   ├── extract_iocs.py           ← IOC extraction from EVTX + logs
 │   └── generate_report.py        ← PDF report generator
-├── runner/
-│   └── README.md                 ← self-hosted runner setup (KVM host)
+├── worker/
+│   ├── run_pending.sh            ← called by systemd, processes spool queue
+│   ├── honeypot-sandbox-worker.path    ← systemd path unit
+│   └── honeypot-sandbox-worker.service ← systemd oneshot service
 └── docs/
     └── golden_image_vs_snapshots.md
 ```
