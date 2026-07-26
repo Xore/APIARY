@@ -15,7 +15,7 @@ torch==2.12.1+cpu
 pyod==2.0.0
 
 # Redis pub/sub
-redis==5.0.4
+redis==8.0.1
 
 # Utilities
 python-dateutil==2.9.0
