@@ -5,7 +5,7 @@ elasticsearch==8.13.0
 scikit-learn==1.9.0
 joblib==1.5.3
 numpy==1.26.4
-pandas==2.2.2
+pandas==3.0.5
 
 # Deep learning (CPU-only PyTorch)
 torch==2.13.0+cpu
