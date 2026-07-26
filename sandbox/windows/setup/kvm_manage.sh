@@ -62,4 +62,36 @@ status_vm() {
     echo "=== VM State ==="
     virsh domstate "$VM_NAME" 2>/dev/null || echo "not found"
     echo "=== Snapshots ==="
-    virsh snapshot-list "$VM_NAME" 2>/dev/null || echo "no snaps
+    virsh snapshot-list "$VM_NAME" 2>/dev/null || echo "no snapshots"
+}
+
+net_setup() {
+    log "Creating sandbox network: $NET_NAME"
+    [[ -f "$NET_XML" ]] || die "Network XML not found: $NET_XML"
+    virsh net-define "$NET_XML"
+    virsh net-start "$NET_NAME"
+    virsh net-autostart "$NET_NAME"
+    log "Network '$NET_NAME' created and started."
+}
+
+net_teardown() {
+    log "Removing sandbox network: $NET_NAME"
+    virsh net-destroy "$NET_NAME" 2>/dev/null || true
+    virsh net-undefine "$NET_NAME" 2>/dev/null || true
+    log "Network '$NET_NAME' removed."
+}
+
+CMD="${1:-}"
+[[ -n "$CMD" ]] || { echo "Usage: $0 <create|snapshot|revert|start|stop|status|net-setup|net-teardown>"; exit 1; }
+
+case "$CMD" in
+    create)       create_vm      ;;
+    snapshot)     take_snapshot  ;;
+    revert)       revert_vm      ;;
+    start)        start_vm       ;;
+    stop)         stop_vm        ;;
+    status)       status_vm      ;;
+    net-setup)    net_setup      ;;
+    net-teardown) net_teardown   ;;
+    *) die "Unknown command: $CMD. Run $0 without args for usage." ;;
+esac
