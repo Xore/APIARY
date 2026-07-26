@@ -1,0 +1,65 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Deployment target
+        type: choice
+        required: true
+        default: home
+        options: [home, vps, both]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: honeypot-production
+  cancel-in-progress: false
+
+jobs:
+  home:
+    if: inputs.target == 'home' || inputs.target == 'both'
+    runs-on: [self-hosted, linux, x64, honeypot-home]
+    environment: production-home
+    steps:
+      - uses: actions/checkout@v6
+      - name: Synchronize Dockge source without runtime state
+        shell: bash
+        run: |
+          destination=/opt/stacks/honeypot-stack
+          rsync -a --delete-delay \
+            --exclude '.git/' --exclude '.github/' --exclude '.env' \
+            --exclude 'logs/' --exclude 'state/' --exclude 'dashboard-state/' \
+            --exclude 'analysis/geoip/*.mmdb' --exclude 'sandbox/results/' \
+            ./ "$destination/"
+          cp "$destination/docker-compose.yml" "$destination/compose.yml"
+          cd "$destination"
+          docker compose -f compose.yml config --quiet
+          docker compose -f compose.yml up -d --build
+
+  vps:
+    if: inputs.target == 'vps' || inputs.target == 'both'
+    runs-on: ubuntu-latest
+    environment: production-vps
+    steps:
+      - uses: actions/checkout@v6
+      - name: Configure deployment key
+        shell: bash
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/honeypot_vps
+          chmod 600 ~/.ssh/honeypot_vps
+      - name: Synchronize and restart plain Compose VPS stack
+        shell: bash
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+        run: |
+          ssh_options=(-i ~/.ssh/honeypot_vps -p "${VPS_PORT:-2222}" -o StrictHostKeyChecking=accept-new)
+          rsync -az --delete-delay --exclude '.env' -e "ssh ${ssh_options[*]}" vps/ "${VPS_USER:-root}@${VPS_HOST}:/root/vps/"
+          ssh "${ssh_options[@]}" "${VPS_USER:-root}@${VPS_HOST}" \
+            'cd /root/vps && docker compose -f docker-compose.yml config --quiet && docker compose -f docker-compose.yml up -d --build'

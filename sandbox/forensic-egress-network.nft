@@ -1,0 +1,14 @@
+table inet honeypot_sandbox_egress {
+  chain input {
+    type filter hook input priority -200; policy accept;
+    iifname "virbr-hpsbx" udp dport 53 accept
+    iifname "virbr-hpsbx" tcp dport { 53, 3128 } accept
+    iifname "virbr-hpsbx" counter reject with icmpx type admin-prohibited
+  }
+
+  chain forward {
+    type filter hook forward priority -200; policy accept;
+    iifname "virbr-hpsbx" counter reject with icmpx type admin-prohibited
+    oifname "virbr-hpsbx" counter reject with icmpx type admin-prohibited
+  }
+}

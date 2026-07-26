@@ -1,0 +1,57 @@
+# ============================================================================
+# honeypot-web.rules — web-attack detection for the HTTP honeypots
+# ============================================================================
+# Targets the cleartext HTTP honeypots (http-honeypot decoy pages, SNARE/
+# TANNER). These fire on Suricata's http app-layer parser, which detects HTTP
+# on ANY port — so the raw-tunnelled :8081 http honeypot and plain :80 decoy
+# traffic are inspected. NOTE: traffic that arrives TLS-encrypted through
+# Traefik on :443 is opaque to Suricata; the JA3/TLS rules below cover the
+# encrypted side, the http rules cover cleartext.
+#
+# Credential/brute-force patterns adapted from:
+#   "Setup and Tune an OT SOC, Part 2: Suricata Custom Rules and Alert
+#   Fine-tunes" (biero-llagas, Medium) — default-cred base64 detection and
+#   rate-tracked login brute force.
+#
+# SID range 92040000–92049999.
+# ============================================================================
+
+# -- Default credential submission: HTTP Basic "admin:admin"
+#    (base64 "YWRtaW46YWRtaW4=") — the exact pattern the OT-SOC article used
+#    against a GUDE PLC web UI. A hit means a scanner is spraying default creds.
+alert http any any -> $HOME_NET any (msg:"HONEYPOT-WEB Default credential admin:admin (HTTP Basic)"; flow:to_server,established; http.header; content:"Authorization|3a| Basic YWRtaW46YWRtaW4|3d|"; nocase; classtype:attempted-admin; sid:92040001; rev:1; metadata:technique default-creds;)
+
+# -- Other very common default Basic creds seen in ICS/router botnets:
+#    root:root (cm9vdDpyb290), admin:password (YWRtaW46cGFzc3dvcmQ=).
+alert http any any -> $HOME_NET any (msg:"HONEYPOT-WEB Default credential root:root (HTTP Basic)"; flow:to_server,established; http.header; content:"Authorization|3a| Basic cm9vdDpyb290"; nocase; classtype:attempted-admin; sid:92040002; rev:1; metadata:technique default-creds;)
+alert http any any -> $HOME_NET any (msg:"HONEYPOT-WEB Default credential admin:password (HTTP Basic)"; flow:to_server,established; http.header; content:"Authorization|3a| Basic YWRtaW46cGFzc3dvcmQ|3d|"; nocase; classtype:attempted-admin; sid:92040003; rev:1; metadata:technique default-creds;)
+
+# -- Login brute force: repeated POSTs to a login/auth endpoint from one src.
+#    threshold "limit" so we get one alert per burst, not one per attempt.
+alert http any any -> $HOME_NET any (msg:"HONEYPOT-WEB Login brute force (repeated POST to auth endpoint)"; flow:to_server,established; http.method; content:"POST"; http.uri; pcre:"/(login|signin|auth|admin|wp-login|user)/i"; threshold:type both, track by_src, count 10, seconds 60; classtype:attempted-admin; sid:92040010; rev:1; metadata:technique brute-force;)
+
+# -- Credential stuffing on Basic auth: many distinct Basic headers from one
+#    src in a short window (any base64 blob after "Basic ").
+alert http any any -> $HOME_NET any (msg:"HONEYPOT-WEB HTTP Basic auth brute force"; flow:to_server,established; http.header; content:"Authorization|3a| Basic"; nocase; threshold:type threshold, track by_src, count 15, seconds 60; classtype:attempted-admin; sid:92040011; rev:1; metadata:technique brute-force;)
+
+# -- Web-app attack payloads against the decoy (SNARE/TANNER territory). These
+#    duplicate some ET coverage but are honeypot-scoped and always meaningful
+#    here (there is no benign app to false-positive on).
+alert http any any -> $HOME_NET any (msg:"HONEYPOT-WEB SQL injection attempt in URI"; flow:to_server,established; http.uri; pcre:"/(\bunion\b.+\bselect\b|\bor\b\s+1=1|sleep\(|benchmark\(|information_schema)/i"; classtype:web-application-attack; sid:92040020; rev:1; metadata:technique sqli;)
+alert http any any -> $HOME_NET any (msg:"HONEYPOT-WEB Local/Remote file inclusion attempt in URI"; flow:to_server,established; http.uri; pcre:"/(\.\.\/){2,}|\/etc\/passwd|php:\/\/(filter|input)|data:\/\//i"; classtype:web-application-attack; sid:92040021; rev:1; metadata:technique lfi-rfi;)
+alert http any any -> $HOME_NET any (msg:"HONEYPOT-WEB OS command injection attempt in URI"; flow:to_server,established; http.uri; pcre:"/(\x3b|\x7c|%3b|%7c|`|\$\()\s*(cat|wget|curl|nc|bash|sh|id|uname|whoami)\b/i"; classtype:web-application-attack; sid:92040022; rev:1; metadata:technique command-injection;)
+alert http any any -> $HOME_NET any (msg:"HONEYPOT-WEB Shellshock attempt in header"; flow:to_server,established; http.header; content:"() {"; classtype:web-application-attack; sid:92040023; rev:1; metadata:technique cve-2014-6271;)
+
+# -- Recon / mass-scanner user-agents hitting the decoy web surface.
+alert http any any -> $HOME_NET any (msg:"HONEYPOT-WEB Scanner user-agent (sqlmap/nikto/nmap/masscan/zgrab)"; flow:to_server,established; http.user_agent; pcre:"/(sqlmap|nikto|nmap|masscan|zgrab|nuclei|dirbuster|gobuster|wpscan)/i"; classtype:attempted-recon; sid:92040030; rev:1; metadata:technique scanning;)
+
+# -- Webshell / backdoor upload or access attempts.
+alert http any any -> $HOME_NET any (msg:"HONEYPOT-WEB Common webshell path requested"; flow:to_server,established; http.uri; pcre:"/(c99|r57|shell|cmd|b374k|wso|adminer|eval-stdin)\.php/i"; classtype:web-application-attack; sid:92040031; rev:1; metadata:technique webshell;)
+
+# ---------------------------------------------------------------------------
+# TLS side — visible even when the payload is encrypted (Traefik :443).
+# ---------------------------------------------------------------------------
+
+# -- SNI probing by raw IP / no Host: scanners often send blank or IP SNI.
+#    (Kept low severity; abuse.ch JA3 blacklist ruleset does the heavy lifting.)
+alert tls any any -> $HOME_NET 443 (msg:"HONEYPOT-WEB TLS handshake with no SNI (direct-IP scanner)"; flow:to_server,established; tls.sni; content:!"."; classtype:attempted-recon; sid:92040040; rev:1; metadata:technique scanning;)

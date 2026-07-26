@@ -1,0 +1,6 @@
+Meridian Retail Systems GmbH
+Device: HH-PRINT-07
+Model: Lexmark MS810dn
+Location: Hamburg DC1 / Dispatch Office
+Firmware: LW80.DN2.P024
+Status: READY

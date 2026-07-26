@@ -1,0 +1,10 @@
+{
+  "bos_token": "<|begin_of_text|>",
+  "eos_token": "<|end_of_text|>",
+  "model_max_length": 8192,
+  "tokenizer_class": "PreTrainedTokenizerFast",
+  "add_bos_token": true,
+  "add_eos_token": false,
+  "clean_up_tokenization_spaces": true,
+  "padding_side": "right"
+}

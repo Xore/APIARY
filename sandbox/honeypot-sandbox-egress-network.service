@@ -1,0 +1,13 @@
+[Unit]
+Description=Firewall and host endpoint for controlled honeypot forensic egress
+After=libvirtd.service virtqemud.socket
+Before=honeypot-sandbox-egress-dns.service honeypot-sandbox-egress-proxy.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/libexec/honeypot-sandbox/forensic-egress-network.sh start
+ExecStop=/usr/local/libexec/honeypot-sandbox/forensic-egress-network.sh stop
+
+[Install]
+WantedBy=multi-user.target

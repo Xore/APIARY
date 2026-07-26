@@ -1,0 +1,22 @@
+Active Internet connections (w/o servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State
+tcp        0      0 gpu01:ssh               10.10.0.52:54821        ESTABLISHED
+tcp        0      0 gpu01:8080              10.10.0.1:41233         ESTABLISHED
+tcp        0      0 gpu01:8080              10.10.0.14:39102        ESTABLISHED
+tcp        0      0 gpu01:5000              10.10.0.1:55910         ESTABLISHED
+tcp        0      0 gpu01:44812             ad.nexusai.local:ldap   ESTABLISHED
+tcp        0      0 gpu01:44813             ad.nexusai.local:ldap   ESTABLISHED
+tcp        0      0 gpu01:44911             ad.nexusai.local:kerberos ESTABLISHED
+tcp        0      0 gpu01:52301             ad.nexusai.local:microsoft-ds ESTABLISHED
+tcp        0      0 gpu01:52302             ad.nexusai.local:microsoft-ds ESTABLISHED
+tcp        0      0 gpu01:57001             fs01.nexusai.local:microsoft-ds ESTABLISHED
+tcp        0      0 gpu01:57002             fs02.nexusai.local:microsoft-ds ESTABLISHED
+tcp        0      0 gpu01:9100              10.10.0.5:48820         ESTABLISHED
+tcp        0      0 gpu01:8090              10.10.0.1:33801         ESTABLISHED
+tcp6       0      0 [::]:microsoft-ds       [::]:*                  LISTEN
+tcp6       0      0 [::]:netbios-ssn        [::]:*                  LISTEN
+tcp6       0      0 [::]:8080               [::]:*                  LISTEN
+tcp6       0      0 [::]:5000               [::]:*                  LISTEN
+tcp6       0      0 [::]:ssh                [::]:*                  LISTEN
+udp        0      0 gpu01:netbios-ns        0.0.0.0:*
+udp        0      0 gpu01:netbios-dgm       0.0.0.0:*

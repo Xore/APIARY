@@ -1,0 +1,422 @@
+# Traefik dynamic configuration
+# File is watched — changes apply instantly without restarting Traefik.
+#
+# All HTTP services require the Cloudflare DNS record to be PROXIED (orange cloud).
+# Game servers (TCP/UDP) require DNS-only (grey cloud).
+#
+# Backend URL = socat container name : socat LISTEN port (NOT the home port)
+# socat forwards: VPS listen port → 10.8.0.2:home-exposed-port → app
+#
+# socat container         listen  →  home exposed  →  app internal
+# socat-static            :8080   →  10.8.0.2:8080  (nginx)
+# socat-hp-http           :8081   →  10.8.0.2:19081 (http-honeypot :8080)
+# socat-hp-snare          :8082   →  10.8.0.2:19082 (snare :8080)
+# socat-hp-dashboard      :8090   →  10.8.0.2:19090 (dashboard :8080)
+# socat-hp-kibana         :5601   →  10.8.0.2:19601 (kibana :5601)
+# socat-hp-tanner         :8091   →  10.8.0.2:19091 (tanner_web :8091)
+# socat-hp-evebox         :5636   →  10.8.0.2:19636 (evebox :5636)
+# socat-hp-arkime         :8005   →  10.8.0.2:19080 (arkime viewer :8005)
+#
+# Traefik dashboard — localhost only:
+#   curl http://localhost:8080/dashboard/
+#   curl http://localhost:8080/api/rawdata
+
+http:
+
+  routers:
+
+    # Traefik dashboard — localhost only (traefik-local entrypoint)
+    traefik-api:
+      rule: "PathPrefix(`/api`) || PathPrefix(`/dashboard`)"
+      entryPoints: [traefik-local]
+      service: api@internal
+      middlewares: [local-only]
+
+    auth-portal:
+      rule: "Host(`auth.honeypot.example`)"
+      entryPoints: [websecure]
+      service: auth-portal
+      tls:
+        options: modern
+      middlewares: [security-headers, rate-limit-auth]
+
+    static-site:
+      rule: "Host(`www.honeypot.example`) || Host(`honeypot.example`) || Host(`static.honeypot.example`)"
+      entryPoints: [websecure]
+      service: static-site
+      tls:
+        options: modern
+      middlewares: [security-headers, rate-limit]
+
+    python-api:
+      rule: "Host(`api.honeypot.example`)"
+      entryPoints: [websecure]
+      service: python-api
+      tls:
+        options: modern
+      middlewares: [security-headers, rate-limit]
+
+    redis-api:
+      rule: "Host(`redis-api.honeypot.example`)"
+      entryPoints: [websecure]
+      service: redis-api
+      tls:
+        options: modern
+      middlewares: [security-headers, rate-limit]
+
+    node-api:
+      rule: "Host(`node.honeypot.example`)"
+      entryPoints: [websecure]
+      service: node-api
+      tls:
+        options: modern
+      middlewares: [security-headers, rate-limit]
+
+    uptime-kuma:
+      rule: "Host(`status.honeypot.example`)"
+      entryPoints: [websecure]
+      service: uptime-kuma
+      tls:
+        options: modern
+      middlewares: [security-headers, rate-limit]
+
+    filebrowser:
+      rule: "Host(`files.honeypot.example`)"
+      entryPoints: [websecure]
+      service: filebrowser
+      tls:
+        options: modern
+      middlewares: [security-headers, rate-limit]
+
+    vui-blog:
+      rule: "Host(`vui.honeypot.example`)"
+      entryPoints: [websecure]
+      service: vui-blog
+      tls:
+        options: modern
+      middlewares: [security-headers, rate-limit]
+
+    vui-blog-auth:
+      rule: "Host(`blog-auth.honeypot.example`)"
+      entryPoints: [websecure]
+      service: vui-blog-auth
+      tls:
+        options: modern
+      middlewares: [security-headers, rate-limit]
+
+    honeypot-http:
+      rule: "Host(`decoy.honeypot.example`)"
+      entryPoints: [websecure]
+      service: honeypot-web
+      tls:
+        options: modern
+      middlewares: [security-headers]
+
+    honeypot-web:
+      rule: "HostRegexp(`^.+$`)"
+      priority: 1
+      entryPoints: [websecure]
+      service: honeypot-web
+      tls:
+        options: modern
+      middlewares: [security-headers]
+
+    honeypot-snare:
+      rule: "Host(`www-portal.honeypot.example`) || Host(`snare.honeypot.example`)"
+      entryPoints: [websecure]
+      service: honeypot-snare
+      tls:
+        options: modern
+      middlewares: [security-headers]
+
+    honeypot-dashboard:
+      rule: "Host(`dashboard.honeypot.example`) || Host(`honeypot.honeypot.example`)"
+      entryPoints: [websecure]
+      service: honeypot-dashboard
+      tls:
+        options: modern
+      middlewares: [security-headers, forward-auth]
+
+    honeypot-kibana:
+      rule: "Host(`kibana.honeypot.example`)"
+      entryPoints: [websecure]
+      service: honeypot-kibana
+      tls:
+        options: modern
+      middlewares: [security-headers, forward-auth]
+
+    honeypot-tanner:
+      rule: "Host(`tanner.honeypot.example`)"
+      entryPoints: [websecure]
+      service: honeypot-tanner
+      tls:
+        options: modern
+      middlewares: [security-headers, forward-auth]
+
+    honeypot-evebox:
+      rule: "Host(`evebox.honeypot.example`)"
+      entryPoints: [websecure]
+      service: honeypot-evebox
+      tls:
+        options: modern
+      middlewares: [security-headers, forward-auth]
+
+    honeypot-arkime:
+      rule: "Host(`arkime.honeypot.example`)"
+      entryPoints: [websecure]
+      service: honeypot-arkime
+      tls:
+        options: modern
+      middlewares: [security-headers, forward-auth]
+
+    svelte-blog:
+      rule: "Host(`svelte.honeypot.example`)"
+      entryPoints: [websecure]
+      service: svelte-blog
+      tls:
+        options: modern
+      middlewares: [security-headers, rate-limit]
+
+    csharp-api:
+      rule: "Host(`csharp.honeypot.example`)"
+      entryPoints: [websecure]
+      service: csharp-api
+      tls:
+        options: modern
+      middlewares: [security-headers, rate-limit-api]
+
+    go-api:
+      rule: "Host(`go.honeypot.example`)"
+      entryPoints: [websecure]
+      service: go-api
+      tls:
+        options: modern
+      middlewares: [security-headers, rate-limit-api]
+
+    rust-api:
+      rule: "Host(`rust.honeypot.example`)"
+      entryPoints: [websecure]
+      service: rust-api
+      tls:
+        options: modern
+      middlewares: [security-headers, rate-limit-api]
+
+    upstream:
+      rule: "Host(`ha.honeypot.example`)"
+      entryPoints: [websecure]
+      service: upstream
+      tls:
+        options: modern
+      middlewares: [security-headers, rate-limit]
+
+  services:
+
+    static-site:
+      loadBalancer:
+        servers:
+          - url: "http://socat-static:8080"
+        passHostHeader: true
+
+    python-api:
+      loadBalancer:
+        servers:
+          - url: "http://socat-python-api:5000"
+        passHostHeader: true
+
+    redis-api:
+      loadBalancer:
+        servers:
+          - url: "http://socat-redis-api:5001"
+        passHostHeader: true
+
+    node-api:
+      loadBalancer:
+        servers:
+          - url: "http://socat-node-api:3000"
+        passHostHeader: true
+
+    uptime-kuma:
+      loadBalancer:
+        servers:
+          - url: "http://socat-uptime-kuma:3001"
+        passHostHeader: true
+
+    filebrowser:
+      loadBalancer:
+        servers:
+          - url: "http://socat-filebrowser:8070"
+        passHostHeader: true
+
+    vui-blog:
+      loadBalancer:
+        servers:
+          - url: "http://socat-vui-blog:3000"
+        passHostHeader: true
+
+    vui-blog-auth:
+      loadBalancer:
+        servers:
+          - url: "http://socat-vui-blog-auth:3000"
+        passHostHeader: true
+
+    auth-portal:
+      loadBalancer:
+        servers:
+          - url: "http://auth-portal:4181"
+        passHostHeader: true
+
+    honeypot-web:
+      loadBalancer:
+        servers:
+          - url: "http://socat-hp-http:8081"
+        passHostHeader: true
+
+    honeypot-snare:
+      loadBalancer:
+        servers:
+          - url: "http://socat-hp-snare:8082"
+        passHostHeader: true
+
+    honeypot-dashboard:
+      loadBalancer:
+        servers:
+          - url: "http://socat-hp-dashboard:8090"
+        passHostHeader: true
+
+    honeypot-kibana:
+      loadBalancer:
+        servers:
+          - url: "http://socat-hp-kibana:5601"
+        passHostHeader: true
+
+    honeypot-tanner:
+      loadBalancer:
+        servers:
+          - url: "http://socat-hp-tanner:8091"
+        passHostHeader: true
+
+    honeypot-evebox:
+      loadBalancer:
+        servers:
+          - url: "http://socat-hp-evebox:5636"
+        passHostHeader: true
+
+    honeypot-arkime:
+      loadBalancer:
+        servers:
+          - url: "http://socat-hp-arkime:8005"
+        passHostHeader: true
+
+    svelte-blog:
+      loadBalancer:
+        servers:
+          - url: "http://socat-svelte-blog:4174"
+        passHostHeader: true
+
+    csharp-api:
+      loadBalancer:
+        servers:
+          - url: "http://socat-csharp-api:5002"
+        passHostHeader: true
+
+    go-api:
+      loadBalancer:
+        servers:
+          - url: "http://socat-go-api:5003"
+        passHostHeader: true
+
+    rust-api:
+      loadBalancer:
+        servers:
+          - url: "http://socat-rust-api:5004"
+        passHostHeader: true
+
+    upstream:
+      loadBalancer:
+        servers:
+          - url: "http://socat-upstream:8123"
+        passHostHeader: true
+
+  middlewares:
+
+    local-only:
+      ipAllowList:
+        sourceRange:
+          - "127.0.0.1/32"
+          - "::1/128"
+
+    security-headers:
+      headers:
+        frameDeny: true
+        contentTypeNosniff: true
+        browserXssFilter: true
+        referrerPolicy: "strict-origin-when-cross-origin"
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        customResponseHeaders:
+          X-Powered-By: ""
+          Server: ""
+
+    rate-limit:
+      rateLimit:
+        average: 100
+        burst: 200
+        period: 1s
+
+    rate-limit-api:
+      rateLimit:
+        average: 30
+        burst: 60
+        period: 1s
+
+    rate-limit-auth:
+      rateLimit:
+        average: 8
+        burst: 16
+        period: 10s
+        sourceCriterion:
+          requestHeaderName: CF-Connecting-IP
+
+    forward-auth:
+      forwardAuth:
+        address: "http://auth-portal:4181/_auth/verify"
+        trustForwardHeader: true
+        maxResponseBodySize: 65536
+        authResponseHeaders:
+          - X-Auth-User
+          - X-Auth-Role
+
+tcp:
+  routers:
+    minecraft:
+      rule: "HostSNI(`*`)"
+      entryPoints: [minecraft]
+      service: minecraft
+
+  services:
+    minecraft:
+      loadBalancer:
+        servers:
+          - address: "socat-minecraft:25565"
+
+udp:
+  routers:
+    game-udp:
+      entryPoints: [game-udp]
+      service: game-udp
+
+  services:
+    game-udp:
+      loadBalancer:
+        servers:
+          - address: "socat-game-udp:27015"
+
+tls:
+  options:
+    modern:
+      minVersion: VersionTLS13
+      sniStrict: true
+  certificates:
+    - certFile: /etc/traefik/certs/origin.pem
+      keyFile: /etc/traefik/certs/origin-key.pem

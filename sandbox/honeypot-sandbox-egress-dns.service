@@ -1,0 +1,18 @@
+[Unit]
+Description=Logged real DNS for controlled honeypot forensic egress
+Requires=honeypot-sandbox-egress-network.service
+After=honeypot-sandbox-egress-network.service network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/dnsmasq --keep-in-foreground --conf-file=/etc/honeypot-sandbox/dnsmasq.conf --pid-file=/run/honeypot-sandbox-dnsmasq.pid
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/log/honeypot-sandbox/dns /run
+
+[Install]
+WantedBy=multi-user.target

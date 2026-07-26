@@ -1,0 +1,33 @@
+USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+root           1  0.0  0.0 168940 13312 ?        Ss   Jul18   0:03 /sbin/init splash
+root           2  0.0  0.0      0     0 ?        S    Jul18   0:00 [kthreadd]
+root           3  0.0  0.0      0     0 ?        I<   Jul18   0:00 [rcu_gp]
+root           4  0.0  0.0      0     0 ?        I<   Jul18   0:00 [rcu_par_gp]
+root          10  0.0  0.0      0     0 ?        S    Jul18   0:00 [ksoftirqd/0]
+root          11  0.1  0.0      0     0 ?        I    Jul18   2:14 [rcu_sched]
+root         487  0.0  0.0  26544  5120 ?        Ss   Jul18   0:00 /lib/systemd/systemd-udevd
+root         612  0.0  0.0 313856  8192 ?        SLsl Jul18   0:00 /sbin/multipathd -d -s
+root         872  0.0  0.0  99072  6144 ?        Ssl  Jul18   0:01 /lib/systemd/systemd-timesyncd
+message+     923  0.0  0.0   8792  4096 ?        Ss   Jul18   0:02 /usr/bin/dbus-daemon --system --address=systemd: --nofork --nopidfile --systemd-activation --syslog-only
+root         931  0.0  0.0  30464  8192 ?        Ss   Jul18   0:00 /usr/sbin/cron -f -P
+root         938  0.0  0.0  15480  7168 ?        Ss   Jul18   0:00 sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups
+root        1412  0.0  0.0  15872  7168 ?        Ss   Jul18   0:00 /usr/sbin/sshd -D
+root        1847  0.2  0.4 2184320 2097152 ?     Ssl  Jul18   4:32 /usr/bin/python3 /opt/inference/serve.py --model /data/models/llama3-70b --port 8080 --workers 4
+root        1848  8.4  3.1 4294967 16252928 ?    Sl   Jul18  98:14  \_ /opt/inference/serve.py worker --gpu 0
+root        1849  9.1  3.1 4294967 16252928 ?    Sl   Jul18 107:22  \_ /opt/inference/serve.py worker --gpu 1
+root        2103  1.1  2.4 3145728 12582912 ?    Ssl  Jul18  13:41 /usr/bin/python3 /opt/training/train.py --config /data/configs/finetune_llama3.yaml --resume
+root        2104  7.8  2.4 3145728 12582912 ?    Sl   Jul18  91:03  \_ /opt/training/train.py dataloader --workers 8
+www-data    2341  0.0  0.0 900096  8192 ?        Ss   Jul18   0:00 /usr/sbin/apache2 -k start
+root        2601  0.0  0.0  56320  4096 ?        Ss   Jul18   0:00 /usr/sbin/winbindd --foreground --no-process-group
+root        2602  0.0  0.0  56320  3072 ?        S    Jul18   0:00  \_ /usr/sbin/winbindd --foreground --no-process-group
+nobody      2744  0.0  0.0  32768  4096 ?        Ss   Jul18   0:14 /usr/sbin/nmbd --foreground --no-process-group
+nobody      2745  0.0  0.0 139264  8192 ?        Ss   Jul18   0:07 /usr/sbin/smbd --foreground --no-process-group
+nobody      2746  0.0  0.0 139264  5120 ?        S    Jul18   0:00  \_ /usr/sbin/smbd --foreground --no-process-group
+root        3011  0.0  0.0  14336  4096 ?        S    Jul18   0:00 /usr/sbin/sssd
+root        3012  0.0  0.0  65536  8192 ?        S    Jul18   0:01  \_ /usr/libexec/sssd/sssd_be --domain nexusai.local --uid 0 --gid 0
+root        3013  0.0  0.0  40960  5120 ?        S    Jul18   0:00  \_ /usr/libexec/sssd/sssd_nss
+root        3014  0.0  0.0  40960  4096 ?        S    Jul18   0:00  \_ /usr/libexec/sssd/sssd_pam
+root        3201  0.0  0.0  98304  8192 ?        Ssl  Jul18   0:03 /usr/sbin/prometheus-node-exporter --web.listen-address=:9100
+root        4102  0.0  0.0  32768  5120 ?        Ss   Jul18   0:00 /usr/bin/python3 /opt/mlflow/bin/mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri /data/mlflow
+jenkins     4401  0.0  0.1 3276800 524288 ?      Sl   Jul18   1:22 java -Xmx2g -jar /opt/jenkins/jenkins.war --httpPort=8090
+root        5901  0.0  0.0  10240  1024 pts/0    R+   13:47   0:00 ps aux

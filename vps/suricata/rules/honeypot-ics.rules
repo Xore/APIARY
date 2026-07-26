@@ -1,0 +1,167 @@
+# ============================================================================
+# honeypot-ics.rules — ICS/SCADA attack detection for the Conpot honeypot
+# ============================================================================
+# Conpot exposes S7comm (TCP 102/1102/2102), Modbus (TCP 502/1502/2502),
+# IEC-104 (2404), Guardian AST (10001), Kamstrup (1025/50100), SNMP (161/udp),
+# BACnet (47808/udp), IPMI (623/udp), EtherNet/IP (44818/tcp), and DNP3
+# (20000/tcp).
+#
+# KEY DIFFERENCE FROM A PRODUCTION IDS: this is a honeypot. There are no
+# legitimate PLC clients — *every* ICS packet reaching these ports is an
+# attacker probing or manipulating the decoy. So the "authorized vs.
+# unauthorized host" split from the source material collapses: we alert on
+# everything, but keep per-function-code granularity so the alert tells you
+# exactly *which* ICS technique was attempted (recon read vs. PLC STOP vs.
+# memory wipe vs. firmware download).
+#
+# S7comm signatures adapted from:
+#   Fischer, "Erstellung eines Frameworks zur Erkennung von Angriffen auf
+#   speicherprogrammierbare Steuerungen am Beispiel des S7comm-Protokolls",
+#   BSI / Bachelorarbeit. Byte offsets are ISO-on-TCP: TPKT(4)+COTP(3) puts
+#   the S7 header at offset 7; ROSCTR at 7, parameter function code at 17
+#   (job) / 19 (ack_data), userdata subfunction at 22.
+#
+# SID range 92010000–92039999 is local/custom (outside ET 2xxxxxx and the
+# thesis' 25343xxxxx). rev bumps when a rule body changes.
+# ============================================================================
+
+
+# ---------------------------------------------------------------------------
+# S7comm (Siemens S7-300/1200, TCP 102) — ROSCTR + function-code detection
+# ---------------------------------------------------------------------------
+
+# -- Generic S7comm presence: any packet carrying the S7 protocol id (0x32).
+#    Cheap tripwire; ET/Conpot recon scanners hit this first.
+alert tcp any any -> $HOME_NET 102 (msg:"HONEYPOT-ICS S7comm traffic to PLC (protocol id 0x32)"; flow:to_server,established; content:"|32|"; offset:7; depth:1; classtype:attempted-recon; sid:92010001; rev:1; metadata:protocol s7comm, honeypot conpot;)
+
+# -- Setup Communication (function 0xF0): first S7comm exchange of any session.
+#    Marks a real S7 client library (not just a TCP port scan) talking to us.
+alert tcp any any -> $HOME_NET 102 (msg:"HONEYPOT-ICS S7comm Setup Communication (session established)"; flow:to_server,established; dsize:>20; content:"|32 01|"; offset:7; depth:2; content:"|f0|"; offset:17; depth:1; classtype:attempted-recon; sid:92010002; rev:1; metadata:protocol s7comm;)
+
+# -- Read Var (function 0x04): reading PLC memory/tags — reconnaissance.
+alert tcp any any -> $HOME_NET 102 (msg:"HONEYPOT-ICS S7comm Read Var (PLC memory/tag read)"; flow:to_server,established; dsize:>20; content:"|32 01|"; offset:7; depth:2; content:"|04|"; offset:17; depth:1; classtype:attempted-recon; sid:92010003; rev:1; metadata:protocol s7comm;)
+
+# -- Write Var (function 0x05): writing PLC memory/tags — process manipulation.
+alert tcp any any -> $HOME_NET 102 (msg:"HONEYPOT-ICS S7comm Write Var (PLC memory/tag WRITE)"; flow:to_server,established; dsize:>20; content:"|32 01|"; offset:7; depth:2; content:"|05|"; offset:17; depth:1; classtype:attempted-admin; sid:92010004; rev:1; metadata:protocol s7comm, impact process-manipulation;)
+
+# -- PLC STOP (function 0x29): halts the controller — high-impact control.
+alert tcp any any -> $HOME_NET 102 (msg:"HONEYPOT-ICS S7comm PLC STOP command"; flow:to_server,established; content:"|32 01|"; offset:7; depth:2; content:"|29|"; offset:17; depth:1; classtype:attempted-admin; sid:92010005; rev:1; metadata:protocol s7comm, impact loss-of-control;)
+
+# -- PLC START / hot restart (function 0x28).
+alert tcp any any -> $HOME_NET 102 (msg:"HONEYPOT-ICS S7comm PLC START command"; flow:to_server,established; content:"|32 01|"; offset:7; depth:2; content:"|28|"; offset:17; depth:1; classtype:attempted-admin; sid:92010006; rev:1; metadata:protocol s7comm, impact control;)
+
+# -- Program DOWNLOAD to PLC (0x1A request / 0x1B block / 0x1C ended):
+#    attacker pushing new logic/firmware into the controller.
+alert tcp any any -> $HOME_NET 102 (msg:"HONEYPOT-ICS S7comm Request Download (logic push to PLC)"; flow:to_server,established; content:"|32 01|"; offset:7; depth:2; content:"|1a|"; offset:17; depth:1; classtype:attempted-admin; sid:92010007; rev:1; metadata:protocol s7comm, impact logic-tampering;)
+alert tcp any any -> $HOME_NET 102 (msg:"HONEYPOT-ICS S7comm Download Block"; flow:to_server,established; content:"|32 01|"; offset:7; depth:2; content:"|1b|"; offset:17; depth:1; classtype:attempted-admin; sid:92010008; rev:1; metadata:protocol s7comm, impact logic-tampering;)
+alert tcp any any -> $HOME_NET 102 (msg:"HONEYPOT-ICS S7comm Download Ended"; flow:to_server,established; content:"|32 01|"; offset:7; depth:2; content:"|1c|"; offset:17; depth:1; classtype:attempted-admin; sid:92010009; rev:1; metadata:protocol s7comm, impact logic-tampering;)
+
+# -- Program UPLOAD from PLC (0x1D start / 0x1E upload / 0x1F end):
+#    attacker exfiltrating the control program (IP theft / target study).
+alert tcp any any -> $HOME_NET 102 (msg:"HONEYPOT-ICS S7comm Start Upload (logic exfil from PLC)"; flow:to_server,established; content:"|32 01|"; offset:7; depth:2; content:"|1d|"; offset:17; depth:1; classtype:attempted-recon; sid:92010010; rev:1; metadata:protocol s7comm, impact exfiltration;)
+alert tcp any any -> $HOME_NET 102 (msg:"HONEYPOT-ICS S7comm Upload"; flow:to_server,established; content:"|32 01|"; offset:7; depth:2; content:"|1e|"; offset:17; depth:1; classtype:attempted-recon; sid:92010011; rev:1; metadata:protocol s7comm, impact exfiltration;)
+alert tcp any any -> $HOME_NET 102 (msg:"HONEYPOT-ICS S7comm End Upload"; flow:to_server,established; content:"|32 01|"; offset:7; depth:2; content:"|1f|"; offset:17; depth:1; classtype:attempted-recon; sid:92010012; rev:1; metadata:protocol s7comm, impact exfiltration;)
+
+# -- S7comm UserData (ROSCTR 0x07) — parameter head 00 01 12 at offset 17,
+#    subfunction group/code at offset 22. These carry the "management" ops.
+
+# PLC password / security function (subfunction 0x45 0x01): auth attempt.
+alert tcp any any -> $HOME_NET 102 (msg:"HONEYPOT-ICS S7comm PLC password / security function"; flow:to_server,established; content:"|32 07|"; offset:7; depth:2; content:"|00 01 12|"; offset:17; depth:3; content:"|45 01|"; offset:22; depth:2; classtype:attempted-admin; sid:92010020; rev:1; metadata:protocol s7comm, technique auth;)
+
+# Set PLC clock (Time function subfunction 0x47 0x02): tamper with timestamps.
+alert tcp any any -> $HOME_NET 102 (msg:"HONEYPOT-ICS S7comm Set PLC clock (time tampering)"; flow:to_server,established; content:"|32 07|"; offset:7; depth:2; content:"|00 01 12|"; offset:17; depth:3; content:"|47 02|"; offset:22; depth:2; classtype:attempted-admin; sid:92010021; rev:1; metadata:protocol s7comm;)
+
+# List blocks / block functions (subfunction 0x43 0x02, id 0x30 0x45): recon.
+alert tcp any any -> $HOME_NET 102 (msg:"HONEYPOT-ICS S7comm List Blocks (program enumeration)"; flow:to_server,established; content:"|32 07|"; offset:7; depth:2; content:"|00 01 12|"; offset:17; depth:3; content:"|43 02|"; offset:22; depth:2; classtype:attempted-recon; sid:92010022; rev:1; metadata:protocol s7comm;)
+
+# CPU functions / SZL read (subfunction 0x44): system-status recon, very common
+# first move (grabs CPU model, serial, firmware — what Conpot answers).
+alert tcp any any -> $HOME_NET 102 (msg:"HONEYPOT-ICS S7comm CPU functions / SZL read (device fingerprint)"; flow:to_server,established; content:"|32 07|"; offset:7; depth:2; content:"|00 01 12|"; offset:17; depth:3; content:"|44|"; offset:22; depth:1; classtype:attempted-recon; sid:92010023; rev:1; metadata:protocol s7comm;)
+
+# Programmer command MEMORY RESET / erase (subfunction 0x41 0x0c): wipe PLC.
+alert tcp any any -> $HOME_NET 102 (msg:"HONEYPOT-ICS S7comm Programmer command ERASE / memory reset"; flow:to_server,established; content:"|32 07|"; offset:7; depth:2; content:"|00 01 12|"; offset:17; depth:3; content:"|41 0c|"; offset:22; depth:2; classtype:attempted-admin; sid:92010024; rev:1; metadata:protocol s7comm, impact destructive;)
+
+# Programmer command FORCES (subfunction 0x41 0x10): force I/O values.
+alert tcp any any -> $HOME_NET 102 (msg:"HONEYPOT-ICS S7comm Programmer command FORCE (I/O forcing)"; flow:to_server,established; content:"|32 07|"; offset:7; depth:2; content:"|00 01 12|"; offset:17; depth:3; content:"|41 10|"; offset:22; depth:2; classtype:attempted-admin; sid:92010025; rev:1; metadata:protocol s7comm, impact process-manipulation;)
+
+# -- Rate anomaly: a burst of S7comm jobs to the PLC (scan/flood/brute).
+#    Inline threshold — fires once per 60s once >100 jobs from a source.
+alert tcp any any -> $HOME_NET 102 (msg:"HONEYPOT-ICS S7comm high request rate (scan/flood)"; flow:to_server,established; content:"|32 01|"; offset:7; depth:2; threshold:type threshold, track by_src, count 100, seconds 60; classtype:attempted-dos; sid:92010030; rev:1; metadata:protocol s7comm;)
+
+
+# ---------------------------------------------------------------------------
+# Modbus/TCP (TCP 502) — MBAP header is 7 bytes; protocol id 0x0000 at
+# offset 2, unit id at 6, function code at offset 7. Content-matching (rather
+# than the modbus app-layer keyword) so these fire regardless of whether the
+# modbus parser is enabled in suricata.yaml.
+# ---------------------------------------------------------------------------
+
+# -- Generic Modbus request (confirms real Modbus, protocol id 0x0000).
+alert tcp any any -> $HOME_NET 502 (msg:"HONEYPOT-ICS Modbus request to honeypot"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; classtype:attempted-recon; sid:92020001; rev:1; metadata:protocol modbus, honeypot conpot;)
+
+# -- Read function codes (0x01 coils, 0x02 discrete, 0x03 holding, 0x04 input):
+#    reconnaissance / process-value harvesting. One rule, low severity.
+alert tcp any any -> $HOME_NET 502 (msg:"HONEYPOT-ICS Modbus Read Coils (fc01)"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|01|"; offset:7; depth:1; classtype:attempted-recon; sid:92020002; rev:1; metadata:protocol modbus;)
+alert tcp any any -> $HOME_NET 502 (msg:"HONEYPOT-ICS Modbus Read Discrete Inputs (fc02)"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|02|"; offset:7; depth:1; classtype:attempted-recon; sid:92020003; rev:1; metadata:protocol modbus;)
+alert tcp any any -> $HOME_NET 502 (msg:"HONEYPOT-ICS Modbus Read Holding Registers (fc03)"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|03|"; offset:7; depth:1; classtype:attempted-recon; sid:92020004; rev:1; metadata:protocol modbus;)
+alert tcp any any -> $HOME_NET 502 (msg:"HONEYPOT-ICS Modbus Read Input Registers (fc04)"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|04|"; offset:7; depth:1; classtype:attempted-recon; sid:92020005; rev:1; metadata:protocol modbus;)
+
+# -- WRITE function codes — process manipulation. Higher severity.
+alert tcp any any -> $HOME_NET 502 (msg:"HONEYPOT-ICS Modbus Write Single Coil (fc05)"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|05|"; offset:7; depth:1; classtype:attempted-admin; sid:92020006; rev:1; metadata:protocol modbus, impact process-manipulation;)
+alert tcp any any -> $HOME_NET 502 (msg:"HONEYPOT-ICS Modbus Write Single Register (fc06)"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|06|"; offset:7; depth:1; classtype:attempted-admin; sid:92020007; rev:1; metadata:protocol modbus, impact process-manipulation;)
+alert tcp any any -> $HOME_NET 502 (msg:"HONEYPOT-ICS Modbus Write Multiple Coils (fc15)"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|0f|"; offset:7; depth:1; classtype:attempted-admin; sid:92020008; rev:1; metadata:protocol modbus, impact process-manipulation;)
+alert tcp any any -> $HOME_NET 502 (msg:"HONEYPOT-ICS Modbus Write Multiple Registers (fc16)"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|10|"; offset:7; depth:1; classtype:attempted-admin; sid:92020009; rev:1; metadata:protocol modbus, impact process-manipulation;)
+
+# -- Diagnostics (fc08): sub-function 0x0004 = Force Listen-Only, 0x0001 =
+#    Restart Comms — can silence/DoS a real slave.
+alert tcp any any -> $HOME_NET 502 (msg:"HONEYPOT-ICS Modbus Diagnostics (fc08 - possible restart/listen-only)"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|08|"; offset:7; depth:1; classtype:attempted-dos; sid:92020010; rev:1; metadata:protocol modbus, impact availability;)
+
+# -- Recon function codes: Report Server ID (fc17) and Read Device Id /
+#    Encapsulated Interface Transport (fc43/0x2b) — device fingerprinting.
+alert tcp any any -> $HOME_NET 502 (msg:"HONEYPOT-ICS Modbus Report Server ID (fc17 recon)"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|11|"; offset:7; depth:1; classtype:attempted-recon; sid:92020011; rev:1; metadata:protocol modbus;)
+alert tcp any any -> $HOME_NET 502 (msg:"HONEYPOT-ICS Modbus Read Device Identification (fc43/0x2b recon)"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|2b|"; offset:7; depth:1; content:"|0e|"; offset:8; depth:1; classtype:attempted-recon; sid:92020012; rev:1; metadata:protocol modbus;)
+
+# -- Illegal / vendor-specific function code sweep (fc >= 0x41 that aren't the
+#    standard set): often nmap modbus scripts or exploit tooling.
+alert tcp any any -> $HOME_NET 502 (msg:"HONEYPOT-ICS Modbus non-standard/high function code (scanner/exploit)"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; content:"|5a|"; offset:7; depth:1; classtype:attempted-recon; sid:92020013; rev:1; metadata:protocol modbus;)
+
+# -- Rate anomaly: burst of Modbus writes from one source (flood/brute).
+alert tcp any any -> $HOME_NET 502 (msg:"HONEYPOT-ICS Modbus high write rate (flood/manipulation burst)"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; pcre:"/^.{7}[\x05\x06\x0f\x10]/s"; threshold:type threshold, track by_src, count 50, seconds 60; classtype:attempted-dos; sid:92020020; rev:1; metadata:protocol modbus;)
+
+
+# ---------------------------------------------------------------------------
+# Other ICS protocols Conpot answers on — presence/recon tripwires.
+# ---------------------------------------------------------------------------
+
+# -- EtherNet/IP List Identity (TCP 44818): CIP device enumeration.
+alert tcp any any -> $HOME_NET 44818 (msg:"HONEYPOT-ICS EtherNet/IP connection (CIP recon)"; flow:to_server,established; classtype:attempted-recon; sid:92030001; rev:1; metadata:protocol enip, honeypot conpot;)
+
+# -- BACnet (UDP 47808): building-automation recon (Who-Is etc.).
+alert udp any any -> $HOME_NET 47808 (msg:"HONEYPOT-ICS BACnet packet (BMS recon)"; content:"|81|"; offset:0; depth:1; classtype:attempted-recon; sid:92030002; rev:1; metadata:protocol bacnet, honeypot conpot;)
+
+# -- IPMI (UDP 623): BMC / out-of-band management probing.
+alert udp any any -> $HOME_NET 623 (msg:"HONEYPOT-ICS IPMI/RMCP packet (BMC recon)"; content:"|06 00 ff 07|"; offset:0; depth:4; classtype:attempted-recon; sid:92030003; rev:1; metadata:protocol ipmi, honeypot conpot;)
+
+# -- Additional OT personas. Alternate ports are intentional: one public IP
+#    can expose only one PLC on the canonical S7/Modbus ports.
+alert tcp any any -> $HOME_NET [1102,2102] (msg:"HONEYPOT-ICS S7comm traffic to additional Siemens PLC"; flow:to_server,established; content:"|32|"; offset:7; depth:1; classtype:attempted-recon; sid:92030010; rev:1; metadata:protocol s7comm, honeypot conpot;)
+alert tcp any any -> $HOME_NET [1102,2102] (msg:"HONEYPOT-ICS S7comm Write Var on additional Siemens PLC"; flow:to_server,established; content:"|32 01|"; offset:7; depth:2; content:"|05|"; offset:17; depth:1; classtype:attempted-admin; sid:92030011; rev:1; metadata:protocol s7comm, impact process-manipulation;)
+alert tcp any any -> $HOME_NET [1102,2102] (msg:"HONEYPOT-ICS S7comm PLC STOP on additional Siemens PLC"; flow:to_server,established; content:"|32 01|"; offset:7; depth:2; content:"|29|"; offset:17; depth:1; classtype:attempted-admin; sid:92030012; rev:1; metadata:protocol s7comm, impact loss-of-control;)
+alert tcp any any -> $HOME_NET [1502,2502] (msg:"HONEYPOT-ICS Modbus request to additional PLC"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; classtype:attempted-recon; sid:92030013; rev:1; metadata:protocol modbus, honeypot conpot;)
+alert tcp any any -> $HOME_NET [1502,2502] (msg:"HONEYPOT-ICS Modbus write to additional PLC"; flow:to_server,established; content:"|00 00|"; offset:2; depth:2; pcre:"/^.{7}[\x05\x06\x0f\x10]/s"; classtype:attempted-admin; sid:92030014; rev:1; metadata:protocol modbus, impact process-manipulation;)
+alert tcp any any -> $HOME_NET 2404 (msg:"HONEYPOT-ICS IEC-60870-5-104 connection"; flow:to_server,established; classtype:attempted-recon; sid:92030015; rev:1; metadata:protocol iec104, honeypot conpot;)
+alert tcp any any -> $HOME_NET 10001 (msg:"HONEYPOT-ICS Guardian AST tank-monitor connection"; flow:to_server,established; classtype:attempted-recon; sid:92030016; rev:1; metadata:protocol guardian-ast, honeypot conpot;)
+alert tcp any any -> $HOME_NET [1025,50100] (msg:"HONEYPOT-ICS Kamstrup smart-meter connection"; flow:to_server,established; classtype:attempted-recon; sid:92030017; rev:1; metadata:protocol kamstrup, honeypot conpot;)
+
+# -- DNP3 RTU at ElbeGrid substation 23. Suricata's DNP3 application parser
+#    supplies the function keyword, so these remain stable across frame sizes.
+alert tcp any any -> $HOME_NET 20000 (msg:"HONEYPOT-ICS DNP3 connection to substation RTU"; flow:to_server,established; content:"|05 64|"; depth:2; classtype:attempted-recon; sid:92030020; rev:1; metadata:protocol dnp3, honeypot dnp3, mitre_tactic_id TA0102, mitre_technique_id T0846;)
+alert tcp any any -> $HOME_NET 20000 (msg:"HONEYPOT-ICS DNP3 READ process values"; flow:to_server,established; dnp3_func:read; classtype:attempted-recon; sid:92030021; rev:1; metadata:protocol dnp3, impact collection, mitre_tactic_id TA0009, mitre_technique_id T0802;)
+alert tcp any any -> $HOME_NET 20000 (msg:"HONEYPOT-ICS DNP3 WRITE process value"; flow:to_server,established; dnp3_func:write; classtype:attempted-admin; sid:92030022; rev:1; metadata:protocol dnp3, impact process-manipulation, mitre_tactic_id TA0105, mitre_technique_id T0831;)
+alert tcp any any -> $HOME_NET 20000 (msg:"HONEYPOT-ICS DNP3 SELECT control point"; flow:to_server,established; dnp3_func:select; classtype:attempted-admin; sid:92030023; rev:1; metadata:protocol dnp3, impact process-manipulation, mitre_tactic_id TA0105, mitre_technique_id T0855;)
+alert tcp any any -> $HOME_NET 20000 (msg:"HONEYPOT-ICS DNP3 OPERATE control point"; flow:to_server,established; dnp3_func:operate; classtype:attempted-admin; sid:92030024; rev:1; metadata:protocol dnp3, impact process-manipulation, mitre_tactic_id TA0105, mitre_technique_id T0855;)
+alert tcp any any -> $HOME_NET 20000 (msg:"HONEYPOT-ICS DNP3 DIRECT OPERATE control point"; flow:to_server,established; dnp3_func:direct_operate; classtype:attempted-admin; sid:92030025; rev:1; metadata:protocol dnp3, impact process-manipulation, mitre_tactic_id TA0105, mitre_technique_id T0855;)
+alert tcp any any -> $HOME_NET 20000 (msg:"HONEYPOT-ICS DNP3 COLD RESTART RTU"; flow:to_server,established; dnp3_func:cold_restart; classtype:attempted-dos; sid:92030026; rev:1; metadata:protocol dnp3, impact availability, mitre_tactic_id TA0105, mitre_technique_id T0814;)
+alert tcp any any -> $HOME_NET 20000 (msg:"HONEYPOT-ICS DNP3 WARM RESTART RTU"; flow:to_server,established; dnp3_func:warm_restart; classtype:attempted-dos; sid:92030027; rev:1; metadata:protocol dnp3, impact availability, mitre_tactic_id TA0105, mitre_technique_id T0814;)
+alert tcp any any -> $HOME_NET 20000 (msg:"HONEYPOT-ICS DNP3 STOP APPLICATION"; flow:to_server,established; dnp3_func:stop_appl; classtype:attempted-dos; sid:92030028; rev:1; metadata:protocol dnp3, impact loss-of-control, mitre_tactic_id TA0105, mitre_technique_id T0814;)
+alert tcp any any -> $HOME_NET 20000 (msg:"HONEYPOT-ICS DNP3 START APPLICATION"; flow:to_server,established; dnp3_func:start_appl; classtype:attempted-admin; sid:92030029; rev:1; metadata:protocol dnp3, impact control, mitre_tactic_id TA0105, mitre_technique_id T0855;)

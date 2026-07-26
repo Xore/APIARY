@@ -1,0 +1,400 @@
+# VPS — Traefik reverse proxy + socat bridges + auth-portal
+# Every socat service must be on the 'proxy' network so Traefik can reach it.
+# The socat command forwards from the proxy network into the WireGuard tunnel (10.8.0.2).
+#
+# Home server WireGuard IP: 10.8.0.2
+# Each port here must match the port the app binds to on the home server.
+#
+# Suricata runs here on the VPS and sniffs the public interface.
+# Logs are written to /opt/stacks/honeypot-stack/logs/suricata/ on the VPS.
+# EveBox on the home server reads them via sshfs/NFS mount over WireGuard:
+#   sshfs root@10.8.0.1:/opt/stacks/honeypot-stack/logs/suricata \
+#         /opt/stacks/honeypot-stack/logs/suricata -o ro,allow_other
+
+services:
+
+  # ===== TRAEFIK =====
+  traefik:
+    image: traefik:v3.7
+    container_name: traefik
+    restart: unless-stopped
+    ports:
+      - "443:443"
+      - "80:80"
+      - "25565:25565"
+      - "27015:27015/udp"
+    environment:
+      - TZ=Europe/Berlin
+    volumes:
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+      - ./traefik/certs:/etc/traefik/certs:ro
+    networks:
+      - proxy
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+
+  # ===== AUTH PORTAL =====
+  auth-portal:
+    build:
+      context: ./forward-auth
+      dockerfile: Dockerfile
+    image: xore-auth-portal:local
+    container_name: auth-portal
+    restart: unless-stopped
+    environment:
+      - LISTEN_ADDR=:4181
+      - AUTH_HOST=${AUTH_HOST:-auth.honeypot.example}
+      - COOKIE_DOMAIN=${COOKIE_DOMAIN:-.honeypot.example}
+      - COOKIE_NAME=${COOKIE_NAME:-xore_sso}
+      - COOKIE_SECRET=${COOKIE_SECRET:?set COOKIE_SECRET in .env}
+      - COOKIE_SECRET_PREVIOUS=${COOKIE_SECRET_PREVIOUS:-}
+      # bootstrap only — used once to create the initial admin in users.json
+      - AUTH_USERNAME=${AUTH_USERNAME:-admin}
+      - AUTH_PASSWORD=${AUTH_PASSWORD:?set AUTH_PASSWORD in .env}
+      - TOTP_SECRET=${TOTP_SECRET:-}
+      - USERS_FILE=/data/users.json
+      - REQUIRE_TOTP=${REQUIRE_TOTP:-true}
+      - TRUST_DEVICE_DAYS=${TRUST_DEVICE_DAYS:-0}
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-}
+      - WEBHOOK_URL=${WEBHOOK_URL:-}
+      - METRICS_TOKEN=${METRICS_TOKEN:-}
+      - TOTP_ISSUER=${TOTP_ISSUER:-}
+      - SESSION_TTL_HOURS=${SESSION_TTL_HOURS:-12}
+      - MAX_ATTEMPTS=${MAX_ATTEMPTS:-5}
+      - LOCKOUT_MINUTES=${LOCKOUT_MINUTES:-15}
+      - MIN_DWELL_SECONDS=${MIN_DWELL_SECONDS:-2}
+      - FORM_TTL_MINUTES=${FORM_TTL_MINUTES:-15}
+      - COOKIE_SECURE=${COOKIE_SECURE:-true}
+      - MAX_BODY_KB=${MAX_BODY_KB:-64}
+      - TZ=Europe/Berlin
+    volumes:
+      - auth-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/forward-auth", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - proxy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 32M
+
+  # Guarded one-shot recovery tool. It is excluded from normal startup by its
+  # profile and can access only the auth-data volume plus a local backup folder.
+  # See docs/AUTH-PORTAL-CREDENTIAL-RECOVERY.md before running it.
+  auth-credentials-reset:
+    image: alpine:3.20
+    profiles: [auth-maintenance]
+    restart: "no"
+    network_mode: none
+    environment:
+      - AUTH_RESET_CONFIRM=${AUTH_RESET_CONFIRM:-}
+    entrypoint: ["/bin/sh", "/usr/local/sbin/reset-auth-data"]
+    volumes:
+      - auth-data:/data
+      - ./auth-backups:/backup
+      - ./forward-auth/reset-auth-data.sh:/usr/local/sbin/reset-auth-data:ro
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 32M
+
+  socat-static:
+    image: alpine/socat:latest
+    container_name: socat-static
+    restart: unless-stopped
+    command: TCP4-LISTEN:8080,fork,reuseaddr TCP4:10.8.0.2:8080
+    networks: [proxy]
+
+  socat-python-api:
+    image: alpine/socat:latest
+    container_name: socat-python-api
+    restart: unless-stopped
+    command: TCP4-LISTEN:5000,fork,reuseaddr TCP4:10.8.0.2:5000
+    networks: [proxy]
+
+  socat-redis-api:
+    image: alpine/socat:latest
+    container_name: socat-redis-api
+    restart: unless-stopped
+    command: TCP4-LISTEN:5001,fork,reuseaddr TCP4:10.8.0.2:5001
+    networks: [proxy]
+
+  socat-node-api:
+    image: alpine/socat:latest
+    container_name: socat-node-api
+    restart: unless-stopped
+    command: TCP4-LISTEN:3000,fork,reuseaddr TCP4:10.8.0.2:3000
+    networks: [proxy]
+
+  socat-uptime-kuma:
+    image: alpine/socat:latest
+    container_name: socat-uptime-kuma
+    restart: unless-stopped
+    command: TCP4-LISTEN:3001,fork,reuseaddr TCP4:10.8.0.2:3001
+    networks: [proxy]
+
+  socat-filebrowser:
+    image: alpine/socat:latest
+    container_name: socat-filebrowser
+    restart: unless-stopped
+    command: TCP4-LISTEN:8070,fork,reuseaddr TCP4:10.8.0.2:8070
+    networks: [proxy]
+
+  socat-vui-blog:
+    image: alpine/socat:latest
+    container_name: socat-vui-blog
+    restart: unless-stopped
+    command: TCP4-LISTEN:3000,fork,reuseaddr TCP4:10.8.0.2:3000
+    networks: [proxy]
+
+  socat-vui-blog-auth:
+    image: alpine/socat:latest
+    container_name: socat-vui-blog-auth
+    restart: unless-stopped
+    command: TCP4-LISTEN:3000,fork,reuseaddr TCP4:10.8.0.2:3000
+    networks: [proxy]
+
+  socat-svelte-blog:
+    image: alpine/socat:latest
+    container_name: socat-svelte-blog
+    restart: unless-stopped
+    command: TCP4-LISTEN:4174,fork,reuseaddr TCP4:10.8.0.2:4174
+    networks: [proxy]
+
+  socat-csharp-api:
+    image: alpine/socat:latest
+    container_name: socat-csharp-api
+    restart: unless-stopped
+    command: TCP4-LISTEN:5002,fork,reuseaddr TCP4:10.8.0.2:5002
+    networks: [proxy]
+
+  socat-go-api:
+    image: alpine/socat:latest
+    container_name: socat-go-api
+    restart: unless-stopped
+    command: TCP4-LISTEN:5003,fork,reuseaddr TCP4:10.8.0.2:5003
+    networks: [proxy]
+
+  socat-rust-api:
+    image: alpine/socat:latest
+    container_name: socat-rust-api
+    restart: unless-stopped
+    command: TCP4-LISTEN:5004,fork,reuseaddr TCP4:10.8.0.2:5004
+    networks: [proxy]
+
+  socat-upstream:
+    image: alpine/socat:latest
+    container_name: socat-upstream
+    restart: unless-stopped
+    command: TCP4-LISTEN:8123,fork,reuseaddr TCP4:10.8.0.2:8123
+    networks: [proxy]
+
+  socat-minecraft:
+    image: alpine/socat:latest
+    container_name: socat-minecraft
+    restart: unless-stopped
+    command: TCP4-LISTEN:25565,fork,reuseaddr TCP4:10.8.0.2:25565
+    networks: [proxy]
+
+  socat-game-udp:
+    image: alpine/socat:latest
+    container_name: socat-game-udp
+    restart: unless-stopped
+    command: UDP4-LISTEN:27015,fork,reuseaddr UDP4:10.8.0.2:27015
+    networks: [proxy]
+
+  # =====================================================================
+  # HONEYPOT — portbridge + socat bridges
+  # =====================================================================
+  portbridge:
+    build: ./portbridge
+    image: xore-portbridge:local
+    container_name: hp-portbridge
+    restart: unless-stopped
+    network_mode: host
+    # PROXY protocol (":pp" suffix) preserves the real attacker IP across the
+    # WireGuard hop. It is enabled ONLY for sensors that parse the PROXY header:
+    #   - multipot ports (25/5432/5900/6379/9200/2375) with PROXY_PROTOCOL=1
+    # cowrie ssh/telnet (22/23) do NOT use :pp: Twisted 26.4.0's "haproxy:"
+    # endpoint failed to apply the parsed address, so cowrie runs plain tcp
+    # endpoints and its real IPs come from the CONN_LOG below instead.
+    # It is NOT enabled for dionaea (21/69/135/445/1433/1723/1883/1900/3306/
+    # 5060/9100/11211/27017), DNP3 (20000), or conpot
+    # (102/1102/2102, 502/1502/2502, 2404 and other OT ports) — those would
+    # choke on the header bytes. For those,
+    # CONN_LOG records the real IP per connection instead; that file must be
+    # shipped to the home stack (same sshfs/NFS mount pattern as suricata) so
+    # the dashboard can attribute the raw ports too.
+    # http (8081) stays PROXY-free: it is reached via Traefik, which supplies a
+    # trusted X-Forwarded-For already.
+    environment:
+      - LISTEN_IP=0.0.0.0
+      - CONN_LOG=/logs/portbridge/portbridge.json
+      - "RULES=tcp:22:10.8.0.2:19022 tcp:23:10.8.0.2:19023 tcp:25:10.8.0.2:19025:pp tcp:5432:10.8.0.2:5432:pp tcp:5900:10.8.0.2:5900:pp tcp:6379:10.8.0.2:6379:pp tcp:9200:10.8.0.2:9200:pp tcp:2375:10.8.0.2:2375:pp tcp:8888:10.8.0.2:18083:pp tcp:8081:10.8.0.2:19081 tcp:21:10.8.0.2:21 tcp:135:10.8.0.2:135 tcp:445:10.8.0.2:445 tcp:1433:10.8.0.2:1433 tcp:3306:10.8.0.2:3306 tcp:27017:10.8.0.2:27017 tcp:1723:10.8.0.2:1723 tcp:1883:10.8.0.2:1883 tcp:5060:10.8.0.2:5060 tcp:9100:10.8.0.2:9100 tcp:11211:10.8.0.2:11211 tcp:20000:10.8.0.2:20000 tcp:102:10.8.0.2:102 tcp:1102:10.8.0.2:1102 tcp:2102:10.8.0.2:2102 tcp:502:10.8.0.2:502 tcp:1502:10.8.0.2:1502 tcp:2502:10.8.0.2:2502 tcp:2404:10.8.0.2:2404 tcp:10001:10.8.0.2:10001 tcp:1025:10.8.0.2:1025 tcp:50100:10.8.0.2:50100 tcp:44818:10.8.0.2:44818 udp:69:10.8.0.2:1069 udp:161:10.8.0.2:19161 udp:1900:10.8.0.2:1900 udp:47808:10.8.0.2:47808 udp:623:10.8.0.2:623 udp:5060:10.8.0.2:5060"
+    volumes:
+      # portbridge connection log — ship this dir to the home stack's
+      # /opt/stacks/honeypot-stack/logs/portbridge so the dashboard ingests it.
+      - /opt/stacks/honeypot-stack/logs/portbridge:/logs/portbridge
+
+  socat-hp-http:
+    image: alpine/socat:latest
+    container_name: socat-hp-http
+    restart: unless-stopped
+    command: TCP4-LISTEN:8081,fork,reuseaddr TCP4:10.8.0.2:19081
+    networks: [proxy]
+
+  socat-hp-snare:
+    image: alpine/socat:latest
+    container_name: socat-hp-snare
+    restart: unless-stopped
+    command: TCP4-LISTEN:8082,fork,reuseaddr TCP4:10.8.0.2:19082
+    networks: [proxy]
+
+  socat-hp-dashboard:
+    image: alpine/socat:latest
+    container_name: socat-hp-dashboard
+    restart: unless-stopped
+    command: TCP4-LISTEN:8090,fork,reuseaddr TCP4:10.8.0.2:19090
+    networks: [proxy]
+
+  socat-hp-kibana:
+    image: alpine/socat:latest
+    container_name: socat-hp-kibana
+    restart: unless-stopped
+    command: TCP4-LISTEN:5601,fork,reuseaddr TCP4:10.8.0.2:19601
+    networks: [proxy]
+
+  socat-hp-tanner:
+    image: alpine/socat:latest
+    container_name: socat-hp-tanner
+    restart: unless-stopped
+    command: TCP4-LISTEN:8091,fork,reuseaddr TCP4:10.8.0.2:19091
+    networks: [proxy]
+
+  socat-hp-evebox:
+    image: alpine/socat:latest
+    container_name: socat-hp-evebox
+    restart: unless-stopped
+    command: TCP4-LISTEN:5636,fork,reuseaddr TCP4:10.8.0.2:19636
+    networks: [proxy]
+
+  socat-hp-arkime:
+    image: alpine/socat:latest
+    container_name: socat-hp-arkime
+    restart: unless-stopped
+    command: TCP4-LISTEN:8005,fork,reuseaddr TCP4:10.8.0.2:19080
+    networks: [proxy]
+
+  # =====================================================================
+  # SURICATA IDS
+  #
+  # The jasonish/suricata entrypoint runs:
+  #   chown suricata:suricata /etc/suricata/suricata.yaml
+  #   chown suricata:suricata /etc/suricata/threshold.config
+  # before exec-ing Suricata. Both mounts must be read-write (no :ro) so
+  # the chown succeeds. The entrypoint does not modify file contents.
+  #
+  # -c /etc/suricata/suricata.yaml forces Suricata to load the mounted
+  # config instead of the image's baked-in default. Without -c, the
+  # mounted yaml is ignored entirely and pcap-log never activates.
+  # =====================================================================
+  suricata-update:
+    image: jasonish/suricata:latest
+    container_name: hp-suricata-update
+    restart: "no"
+    network_mode: host
+    volumes:
+      - suricata-rules:/var/lib/suricata
+      - ./suricata:/custom:ro
+    environment: [TZ=Europe/Berlin]
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        suricata-update update-sources
+        suricata-update enable-source et/open
+        suricata-update enable-source oisf/trafficid
+        suricata-update enable-source abuse.ch/sslbl-blacklist
+        suricata-update enable-source abuse.ch/sslbl-ja3
+        suricata-update enable-source etnetera/aggressive
+        suricata-update enable-source tgreen/hunting
+        suricata-update disable-source ptresearch/attackdetection || true
+        suricata-update \
+          --local /custom/rules \
+          --suricata-conf /custom/suricata.yaml \
+          --disable-conf /custom/disable.conf \
+          --no-reload
+
+  suricata:
+    image: jasonish/suricata:latest
+    container_name: hp-suricata
+    restart: unless-stopped
+    network_mode: host
+    cap_add: [NET_ADMIN, NET_RAW, SYS_NICE]
+    command:
+      - "-c"
+      - "/etc/suricata/suricata.yaml"
+      - "-i"
+      - "${SURICATA_IFACE:-ens6}"
+      - "--set"
+      - "vars.address-groups.HOME_NET=${SURICATA_HOME_NET:-any}"
+      - "--set"
+      - "vars.address-groups.EXTERNAL_NET=${SURICATA_EXTERNAL_NET:-any}"
+      - "--set"
+      - "app-layer.protocols.modbus.enabled=yes"
+      - "--set"
+      - "app-layer.protocols.enip.enabled=yes"
+      - "--set"
+      - "app-layer.protocols.dnp3.enabled=yes"
+      # NOTE: the WireGuard tunnel (udp 51820) is excluded via bpf-filter in
+      # suricata.yaml's af-packet section -- see comment there. A positional
+      # BPF arg here is silently ignored in this setup.
+    volumes:
+      - /opt/stacks/honeypot-stack/logs/suricata:/var/log/suricata
+      - suricata-rules:/var/lib/suricata
+      # No :ro — the jasonish/suricata entrypoint chowns these files before
+      # launching Suricata. :ro causes chown to fail and the container to
+      # crash-loop. The entrypoint does not modify file contents.
+      - ./suricata/threshold.config:/etc/suricata/threshold.config
+      - ./suricata/suricata.yaml:/etc/suricata/suricata.yaml
+    environment: [TZ=Europe/Berlin]
+    depends_on:
+      suricata-update:
+        condition: service_completed_successfully
+    deploy:
+      resources: { limits: { cpus: "1.0", memory: 768M } }
+
+networks:
+  proxy:
+    name: proxy
+    driver: bridge
+
+volumes:
+  go-cache:
+  suricata-rules:
+  auth-data:

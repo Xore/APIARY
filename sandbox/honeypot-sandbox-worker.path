@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for queued honeypot sandbox jobs
+
+[Path]
+PathChanged=/var/lib/honeypot-sandbox/inbox/queued
+Unit=honeypot-sandbox-worker.service
+
+[Install]
+WantedBy=multi-user.target

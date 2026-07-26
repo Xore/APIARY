@@ -1,0 +1,195 @@
+// multipot — a multi-protocol low-interaction honeypot in a single Go binary.
+//
+// It opens a listener per service (FTP, SMTP, Redis, MySQL, PostgreSQL, VNC,
+// Elasticsearch, …), answers with a realistic banner/handshake for each, and
+// records every connection, command and credential as one JSON line per event.
+//
+// Nothing it emulates is real — no data, no execution. Keep it on an isolated
+// network (see docker-compose.yml) so it can only ever be a sensor.
+package main
+
+import (
+	"encoding/json"
+	"io"
+	"net"
+	"os"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+)
+
+// event is one JSON log line. Fields are omitempty so each protocol only emits
+// what's relevant.
+type event struct {
+	Time     string `json:"time"`
+	Sensor   string `json:"sensor"`
+	Persona  string `json:"persona_id"`
+	Site     string `json:"site_id"`
+	Asset    string `json:"asset_id"`
+	Org      string `json:"organization"`
+	Proto    string `json:"proto"`
+	Port     int    `json:"port"`
+	SrcIP    string `json:"src_ip"`
+	Event    string `json:"event"`
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
+	Command  string `json:"command,omitempty"`
+	Data     string `json:"data,omitempty"`
+	Client   string `json:"client,omitempty"`
+	Bytes    int    `json:"bytes,omitempty"`
+}
+
+type logger struct {
+	mu  sync.Mutex
+	out io.Writer
+	f   *os.File
+}
+
+func newLogger(path string) *logger {
+	l := &logger{out: os.Stdout}
+	if path != "" {
+		if f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640); err == nil {
+			l.f = f
+		}
+	}
+	return l
+}
+
+func (l *logger) emit(e event) {
+	e.Time = time.Now().UTC().Format(time.RFC3339)
+	e.Sensor = "multipot"
+	e.Persona = "nexusai-core"
+	e.Site = "nexusai-berlin-core"
+	e.Org = "NexusAI Research GmbH"
+	if e.Asset == "" {
+		e.Asset = assetForProto(e.Proto)
+	}
+	line, _ := json.Marshal(e)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.out.Write(line)
+	l.out.Write([]byte("\n"))
+	if l.f != nil {
+		l.f.Write(line)
+		l.f.Write([]byte("\n"))
+	}
+}
+
+func assetForProto(proto string) string {
+	return map[string]string{
+		"smtp": "mail01", "postgres": "pg-db-02", "redis": "cache01",
+		"vnc": "ops-vnc-01", "elasticsearch": "es-logs-01", "docker": "build01",
+		"ftp": "legacy-files-01", "mysql": "mysql-legacy-01",
+		"mssql": "erp-sql-01", "mongodb": "catalog-doc-01",
+	}[proto]
+}
+
+func getenv(k, def string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return def
+}
+
+func srcIP(c net.Conn) string {
+	host, _, err := net.SplitHostPort(c.RemoteAddr().String())
+	if err != nil {
+		return c.RemoteAddr().String()
+	}
+	return host
+}
+
+// service ties a protocol name + port to its connection handler.
+type service struct {
+	proto   string
+	port    int
+	handler func(net.Conn, *logger, int)
+}
+
+// The default fleet. Ports are the container-internal ports; docker-compose
+// maps them to the matching host ports.
+//
+// Protocols listed in MULTIPOT_DISABLE (comma-separated) are skipped — use this
+// to cede ports to a higher-interaction honeypot in the same stack, e.g.
+// MULTIPOT_DISABLE=ftp,mysql,mssql,mongodb when Dionaea owns 21/3306/1433/27017.
+func services() []service {
+	all := []service{
+		{"ftp", 21, handleFTP},
+		{"smtp", 25, handleSMTP},
+		{"mysql", 3306, handleMySQL},
+		{"postgres", 5432, handlePostgres},
+		{"redis", 6379, handleRedis},
+		{"vnc", 5900, handleVNC},
+		{"elasticsearch", 9200, handleElastic},
+		// Binary/complex protocols we don't fully emulate still get logged raw:
+		{"mssql", 1433, handleGeneric},
+		{"mongodb", 27017, handleGeneric},
+		{"docker", 2375, handleDocker},
+	}
+	disabled := map[string]bool{}
+	for _, p := range strings.Split(os.Getenv("MULTIPOT_DISABLE"), ",") {
+		if p = strings.TrimSpace(strings.ToLower(p)); p != "" {
+			disabled[p] = true
+		}
+	}
+	var out []service
+	for _, s := range all {
+		if !disabled[s.proto] {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func serve(s service, log *logger, proxy bool) {
+	ln, err := net.Listen("tcp", ":"+strconv.Itoa(s.port))
+	if err != nil {
+		log.emit(event{Proto: s.proto, Port: s.port, Event: "listen_error", Data: err.Error()})
+		return
+	}
+	log.emit(event{Proto: s.proto, Port: s.port, Event: "listening"})
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			continue
+		}
+		go func() {
+			// If fronted by portbridge with PROXY protocol, recover the real
+			// attacker address before anything reads/logs the connection.
+			conn = decodeProxy(conn, proxy)
+			defer conn.Close()
+			// Hard cap on how long any single attacker can hold a connection.
+			conn.SetDeadline(time.Now().Add(45 * time.Second))
+			log.emit(event{Proto: s.proto, Port: s.port, SrcIP: srcIP(conn), Event: "connect"})
+			s.handler(conn, log, s.port)
+		}()
+	}
+}
+
+func main() {
+	// -healthcheck: succeeds if any one listener is up (used by the scratch
+	// image's Docker HEALTHCHECK). We probe the Redis port.
+	if len(os.Args) > 1 && os.Args[1] == "-healthcheck" {
+		c, err := net.DialTimeout("tcp", "127.0.0.1:6379", 2*time.Second)
+		if err != nil {
+			os.Exit(1)
+		}
+		c.Close()
+		os.Exit(0)
+	}
+
+	log := newLogger(getenv("LOG_FILE", "/var/log/honeypot/multipot.json"))
+	proxy := getenv("PROXY_PROTOCOL", "") == "1"
+
+	var wg sync.WaitGroup
+	for _, s := range services() {
+		wg.Add(1)
+		go func(s service) {
+			defer wg.Done()
+			serve(s, log, proxy)
+		}(s)
+	}
+	log.emit(event{Proto: "-", Event: "multipot_started", Data: strconv.Itoa(len(services())) + " listeners"})
+	wg.Wait()
+}

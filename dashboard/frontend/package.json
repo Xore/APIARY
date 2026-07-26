@@ -1,0 +1,17 @@
+{
+  "name": "honeypot-dashboard-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "npm run build:api && npm run build:css",
+    "build:api": "esbuild src/api.ts --bundle --format=iife --global-name=HoneypotAPI --outfile=../static/hp-api.js --minify",
+    "build:css": "tailwindcss -i src/shell.css -o ../static/hp-tailwind.css --minify"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
+    "esbuild": "^0.25.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.0"
+  }
+}

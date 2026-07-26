@@ -1,0 +1,20 @@
+127.0.0.1   localhost
+127.0.1.1   gpu01.nexusai.local gpu01
+10.10.10.42 gpu01.nexusai.local gpu01
+
+# NexusAI corporate infrastructure
+10.10.1.10  ad.nexusai.local ad
+10.10.1.10  nexusai.local
+10.10.1.10  _ldap._tcp.nexusai.local
+10.10.1.20  fs01.nexusai.local fs01
+10.10.1.21  fs02.nexusai.local fs02
+10.10.1.30  monitor.nexusai.local monitor
+10.10.1.31  jenkins.nexusai.local jenkins
+10.10.0.1   gw.nexusai.local gw
+10.10.0.5   prometheus.nexusai.local prometheus
+
+::1     ip6-localhost ip6-loopback
+fe00::0 ip6-localnet
+ff00::0 ip6-mcastprefix
+ff02::1 ip6-allnodes
+ff02::2 ip6-allrouters

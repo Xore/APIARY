@@ -1,0 +1,106 @@
+{
+  "schema": 1,
+  "personas": {
+    "nexusai-gpu01": {
+      "organization": "NexusAI Research GmbH",
+      "site_id": "nexusai-berlin-ml",
+      "asset_id": "gpu01",
+      "hostname": "gpu01.nexusai.local",
+      "role": "GPU inference and model-training node",
+      "os": "Ubuntu 22.04.4 LTS",
+      "kernel": "5.15.0-119-generic",
+      "services": ["cowrie"]
+    },
+    "nexusai-core": {
+      "organization": "NexusAI Research GmbH",
+      "site_id": "nexusai-berlin-core",
+      "asset_id": "backend-estate",
+      "domain": "nexusai.local",
+      "role": "Corporate application backend estate",
+      "assets": {
+        "smtp": "mail01", "postgres": "pg-db-02", "redis": "cache01",
+        "vnc": "ops-vnc-01", "elasticsearch": "es-logs-01", "docker": "build01"
+      },
+      "services": ["multipot"]
+    },
+    "nexusai-edge": {
+      "organization": "NexusAI Research GmbH",
+      "site_id": "nexusai-eu-edge",
+      "asset_id": "web-edge-01",
+      "hostname": "web-edge-01.nexusai.example",
+      "role": "Public documentation and account edge",
+      "services": ["http-honeypot"]
+    },
+    "nexusai-platform": {
+      "organization": "NexusAI Research GmbH",
+      "site_id": "nexusai-eu-cloud",
+      "asset_id": "platform-gw-03",
+      "hostname": "platform-gw-03.nexusai.internal",
+      "role": "Kubernetes, registry and inference API gateway",
+      "services": ["api-honeypot"]
+    },
+    "meridian-legacy": {
+      "organization": "Meridian Retail Systems Ltd.",
+      "site_id": "meridian-hamburg-dc1",
+      "asset_id": "legacy-svc-02",
+      "hostname": "legacy-svc-02.meridian.internal",
+      "role": "Legacy file, voice and database integration server",
+      "services": ["dionaea"]
+    },
+    "rheinwerk-water-s7-200": {
+      "organization": "Rheinwerk Municipal Water",
+      "site_id": "rheinwerk-intake",
+      "asset_id": "plc-intake-01",
+      "vendor": "Siemens", "model": "S7-200", "firmware": "02.01",
+      "services": ["conpot"]
+    },
+    "rheinwerk-water-s7-1200": {
+      "organization": "Rheinwerk Municipal Water",
+      "site_id": "rheinwerk-treatment",
+      "asset_id": "plc-filter-02",
+      "vendor": "Siemens", "model": "CPU 1215C DC/DC/DC", "firmware": "4.5.1",
+      "services": ["conpot-s7-1200"]
+    },
+    "nordchem-s7-1500": {
+      "organization": "NordChem Process Industries",
+      "site_id": "nordchem-reactor-4",
+      "asset_id": "plc-reactor-04",
+      "vendor": "Siemens", "model": "CPU 1516-3 PN/DP", "firmware": "2.9.4",
+      "services": ["conpot-s7-1500"]
+    },
+    "elbegrid-iec104": {
+      "organization": "ElbeGrid Distribution",
+      "site_id": "elbegrid-substation-17",
+      "asset_id": "rtu-sub17-a",
+      "role": "110/20 kV substation RTU", "services": ["conpot-iec104"]
+    },
+    "elbegrid-dnp3": {
+      "organization": "ElbeGrid Distribution",
+      "site_id": "elbegrid-substation-23",
+      "asset_id": "rtu-sub23-b",
+      "vendor": "SEL", "model": "RTAC 3555", "firmware": "R151-V2",
+      "role": "20 kV distribution substation DNP3 outstation",
+      "services": ["dnp3"]
+    },
+    "northfuel-guardian": {
+      "organization": "NorthFuel Service GmbH",
+      "site_id": "northfuel-station-042",
+      "asset_id": "tankmon-042",
+      "role": "Automatic tank gauge", "services": ["conpot-guardian"]
+    },
+    "stadtwaerme-kamstrup": {
+      "organization": "Stadtwaerme Nord",
+      "site_id": "stadtwaerme-loop-west",
+      "asset_id": "heatmeter-west-0382",
+      "vendor": "Kamstrup", "model": "MULTICAL 382", "services": ["conpot-kamstrup"]
+    },
+    "meridian-customer-portal": {
+      "organization": "Meridian Retail Systems Ltd.",
+      "site_id": "meridian-public-web",
+      "asset_id": "customer-portal-02",
+      "hostname": "portal.meridian.example",
+      "role": "Customer order and service portal",
+      "services": ["snare", "tanner"]
+    }
+  }
+}

@@ -1,0 +1,10 @@
+Ticket cache: FILE:/tmp/krb5cc_1000
+Default principal: svc-gpu01@NEXUSAI.LOCAL
+
+Valid starting       Expires              Service principal
+07/21/2026 18:42:11  07/22/2026 04:42:11  krbtgt/NEXUSAI.LOCAL@NEXUSAI.LOCAL
+        renew until 07/28/2026 18:42:08
+07/21/2026 18:42:14  07/22/2026 04:42:11  cifs/fs01.nexusai.local@NEXUSAI.LOCAL
+        renew until 07/28/2026 18:42:08
+07/21/2026 18:42:14  07/22/2026 04:42:11  ldap/ad.nexusai.local@NEXUSAI.LOCAL
+        renew until 07/28/2026 18:42:08

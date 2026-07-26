@@ -1,0 +1,93 @@
+name: Quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  public-safety:
+    name: Public repository safety
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: python scripts/check-public-leaks.py
+
+  go:
+    name: Go formatting and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.23.x"
+          cache-dependency-path: "**/go.sum"
+      - name: Check formatting
+        shell: bash
+        run: |
+          files="$(find . -path '*/vendor' -prune -o -name '*.go' -type f -print)"
+          test -z "$(gofmt -l $files)" || { gofmt -l $files; exit 1; }
+      - name: Test every Go module
+        shell: bash
+        run: |
+          while IFS= read -r module; do
+            echo "::group::${module%/go.mod}"
+            (cd "${module%/go.mod}" && go test ./...)
+            echo "::endgroup::"
+          done < <(find . -path '*/vendor' -prune -o -name go.mod -type f -print | sort)
+
+  frontend:
+    name: Tailwind frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: dashboard/frontend/package-lock.json
+      - run: npm ci
+        working-directory: dashboard/frontend
+      - run: npm run typecheck
+        working-directory: dashboard/frontend
+      - run: npm run build
+        working-directory: dashboard/frontend
+      - name: Generated assets are current
+        run: git diff --exit-code -- dashboard/static/hp-api.js dashboard/static/hp-tailwind.css
+
+  scripts-and-compose:
+    name: Scripts and Compose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Python syntax
+        shell: bash
+        run: find . -path '*/vendor' -prune -o -name '*.py' -type f -print0 | xargs -0 -r python -m py_compile
+      - name: Shell syntax and high-severity ShellCheck
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          find . -name '*.sh' -type f -print0 | xargs -0 -r -n1 bash -n
+          find . -name '*.sh' -type f -print0 | xargs -0 -r shellcheck --severity=error
+      - name: Validate home and VPS Compose
+        shell: bash
+        run: |
+          cp .env.example .env
+          cp vps/.env.example vps/.env
+          docker compose -f docker-compose.yml config --quiet
+          docker compose -f vps/docker-compose.yml config --quiet

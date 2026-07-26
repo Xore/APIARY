@@ -1,0 +1,182 @@
+%YAML 1.1
+---
+# Minimal Suricata config for the VPS honeypot.
+# All values not listed here fall back to Suricata compiled-in defaults.
+# The jasonish/suricata image default config is NOT included — this file
+# replaces it.
+#
+# IMPORTANT: HOME_NET must never be "any". Rules using !$HOME_NET with
+# HOME_NET=any produce a NIL address range and fail to parse at startup.
+# Set HOME_NET to the actual VPS public IP via SURICATA_HOME_NET in .env.
+# The --set override in docker-compose.yml injects it at runtime.
+#
+# pcap subdir: Suricata will NOT create pcap/ automatically.
+# Run once on the host before starting the container:
+#   mkdir -p /opt/stacks/honeypot-stack/logs/suricata/pcap
+
+# ── Host mode ────────────────────────────────────────────────────────────────
+# router: VPS sees both inbound and outbound traffic on the public interface.
+#         Suricata inspects all packets regardless of direction, which is
+#         correct for a single-NIC host that is both origin and destination.
+#         (sniffer-only is the default and only inspects packets destined for
+#         the local host, missing outbound flows from honeypot services.)
+host-mode: router
+
+vars:
+  address-groups:
+    # Overridden at runtime by --set vars.address-groups.HOME_NET in compose.
+    # Fallback value here must be a real CIDR, never "any".
+    HOME_NET:        "[192.168.0.0/16]"
+    EXTERNAL_NET:    "!$HOME_NET"
+    HTTP_SERVERS:    "$HOME_NET"
+    SMTP_SERVERS:    "$HOME_NET"
+    SQL_SERVERS:     "$HOME_NET"
+    DNS_SERVERS:     "$HOME_NET"
+    TELNET_SERVERS:  "$HOME_NET"
+    AIM_SERVERS:     "$EXTERNAL_NET"
+    DC_SERVERS:      "$HOME_NET"
+    DNP3_CLIENT:     "$HOME_NET"
+    DNP3_SERVER:     "$HOME_NET"
+    MODBUS_CLIENT:   "$HOME_NET"
+    MODBUS_SERVER:   "$HOME_NET"
+    ENIP_CLIENT:     "$HOME_NET"
+    ENIP_SERVER:     "$HOME_NET"
+  port-groups:
+    HTTP_PORTS:      "80"
+    SHELLCODE_PORTS: "!80"
+    ORACLE_PORTS:    1521
+    SSH_PORTS:       22
+    DNP3_PORTS:      20000
+    MODBUS_PORTS:    502
+    FILE_DATA_PORTS: "[$HTTP_PORTS,110,143]"
+    FTP_PORTS:       21
+    VXLAN_PORTS:     4789
+    TEREDO_PORTS:    3544
+
+default-log-dir: /var/log/suricata
+
+stats:
+  enabled: yes
+  interval: 8
+
+outputs:
+  # ── EVE JSON (primary log for EveBox + filebeat) ──────────────────────
+  - eve-log:
+      enabled: yes
+      filetype: regular
+      filename: eve.json
+      community-id: true
+      community-id-seed: 0
+      types:
+        - alert:
+            payload: yes
+            payload-printable: yes
+            packet: yes
+            metadata: yes
+            http-body: yes
+            http-body-printable: yes
+            tagged-packets: yes
+        - anomaly:
+            enabled: yes
+        - http:
+            extended: yes
+        - dns:
+            query: yes
+            answer: yes
+        - tls:
+            extended: yes
+        - files:
+            force-magic: yes
+        - smtp: {}
+        - ssh: {}
+        - flow: {}
+        - netflow: {}
+        - dhcp:
+            enabled: no
+            extended: no
+
+  # ── PCAP log — full packet capture, rotated by size ──────────────────
+  # Files land in /var/log/suricata/pcap/ on the host.
+  # The pcap/ subdir must exist before the container starts — Suricata
+  # will NOT create it. If missing it falls back to the root log dir.
+  # Run once on the host: mkdir -p .../logs/suricata/pcap
+  - pcap-log:
+      enabled: yes
+      filename: pcap/log.pcap
+      # 4mb is Suricata's hard minimum (values below crash pcap-log with
+      # "limit less than allowed minimum of 4194304 bytes"). Small limit =
+      # low Arkime ingest latency, since a file is only importable once
+      # rotated/closed. 12500 files gives ~50GB retention.
+      limit: 4mb
+      max-files: 12500
+      compression: none
+      mode: normal
+      use-stream-depth: no
+      honor-pass-rules: no
+
+  # ── Fast log (human-readable alert summary) ───────────────────────────
+  - fast:
+      enabled: yes
+      filename: fast.log
+      append: yes
+
+  # ── Stats log ─────────────────────────────────────────────────────────
+  - stats:
+      enabled: yes
+      filename: stats.log
+      totals: yes
+      threads: no
+
+  - syslog:
+      enabled: no
+
+# ── App-layer parsers (ICS enabled for Conpot traffic) ───────────────────
+app-layer:
+  protocols:
+    modbus:
+      enabled: yes
+      detection-ports:
+        dp: 502
+    enip:
+      enabled: yes
+    dnp3:
+      enabled: yes
+      detection-ports:
+        dp: 20000
+    tls:
+      enabled: yes
+      detection-ports:
+        dp: 443
+    http:
+      enabled: yes
+    ftp:
+      enabled: yes
+    ssh:
+      enabled: yes
+    smtp:
+      enabled: yes
+    dns:
+      tcp:
+        enabled: yes
+      udp:
+        enabled: yes
+
+# ── Rule / classification files ──────────────────────────────────────────
+default-rule-path: /var/lib/suricata/rules
+rule-files:
+  - suricata.rules
+
+classification-file: /etc/suricata/classification.config
+reference-config-file: /etc/suricata/reference.config
+threshold-file: /etc/suricata/threshold.config
+
+# ── Capture (af-packet) ──────────────────────────────────────────────────
+# bpf-filter excludes the WireGuard tunnel to the home server. Without it,
+# Suricata captures its own log traffic (sshfs reads of pcap/eve.json ride
+# the tunnel on this interface) creating a feedback loop that fills
+# pcap-log with 100MB every few seconds. The command-line positional BPF
+# form is ignored in this setup, so it must live here.
+af-packet:
+  - interface: ens6
+    bpf-filter: "not udp port 51820"
+  - interface: default

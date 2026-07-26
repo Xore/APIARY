@@ -1,0 +1,48 @@
+# ============================================================================
+# honeypot-scan.rules — interaction + recon telemetry for the raw sensors
+# ============================================================================
+# In a honeypot every one of these ports is a decoy with no legitimate users,
+# so *any* established connection is attacker interaction worth recording.
+# These give clean per-service, per-source attribution in EveBox/Kibana that
+# complements the sensors' own JSON logs. Each uses `threshold type limit` so a
+# chatty session produces one alert per source per window, not a flood.
+#
+# Suricata runs on the VPS public NIC (ens6), so src_ip here is the REAL
+# attacker address (before the WireGuard tunnel to the home sensors).
+#
+# SID range 92050000–92059999.
+# ============================================================================
+
+# -- cowrie SSH / Telnet ----------------------------------------------------
+alert tcp any any -> $HOME_NET 22 (msg:"HONEYPOT-SCAN SSH interaction (cowrie)"; flow:to_server,established; threshold:type limit, track by_src, count 1, seconds 300; classtype:attempted-recon; sid:92050001; rev:1; metadata:sensor cowrie;)
+alert tcp any any -> $HOME_NET 23 (msg:"HONEYPOT-SCAN Telnet interaction (cowrie)"; flow:to_server,established; threshold:type limit, track by_src, count 1, seconds 300; classtype:attempted-recon; sid:92050002; rev:1; metadata:sensor cowrie;)
+
+# -- dionaea services -------------------------------------------------------
+alert tcp any any -> $HOME_NET 21 (msg:"HONEYPOT-SCAN FTP interaction (dionaea)"; flow:to_server,established; threshold:type limit, track by_src, count 1, seconds 300; classtype:attempted-recon; sid:92050010; rev:1; metadata:sensor dionaea;)
+alert tcp any any -> $HOME_NET 445 (msg:"HONEYPOT-SCAN SMB interaction (dionaea)"; flow:to_server,established; threshold:type limit, track by_src, count 1, seconds 300; classtype:attempted-recon; sid:92050011; rev:1; metadata:sensor dionaea;)
+alert tcp any any -> $HOME_NET 1433 (msg:"HONEYPOT-SCAN MSSQL interaction (dionaea)"; flow:to_server,established; threshold:type limit, track by_src, count 1, seconds 300; classtype:attempted-recon; sid:92050012; rev:1; metadata:sensor dionaea;)
+alert tcp any any -> $HOME_NET 3306 (msg:"HONEYPOT-SCAN MySQL interaction (dionaea)"; flow:to_server,established; threshold:type limit, track by_src, count 1, seconds 300; classtype:attempted-recon; sid:92050013; rev:1; metadata:sensor dionaea;)
+alert tcp any any -> $HOME_NET 27017 (msg:"HONEYPOT-SCAN MongoDB interaction (dionaea)"; flow:to_server,established; threshold:type limit, track by_src, count 1, seconds 300; classtype:attempted-recon; sid:92050014; rev:1; metadata:sensor dionaea;)
+alert tcp any any -> $HOME_NET 1723 (msg:"HONEYPOT-SCAN PPTP interaction (dionaea)"; flow:to_server,established; threshold:type limit, track by_src, count 1, seconds 300; classtype:attempted-recon; sid:92050015; rev:1; metadata:sensor dionaea;)
+
+# -- multipot light sensors -------------------------------------------------
+alert tcp any any -> $HOME_NET 25 (msg:"HONEYPOT-SCAN SMTP interaction (multipot)"; flow:to_server,established; threshold:type limit, track by_src, count 1, seconds 300; classtype:attempted-recon; sid:92050020; rev:1; metadata:sensor multipot;)
+alert tcp any any -> $HOME_NET 5432 (msg:"HONEYPOT-SCAN Postgres interaction (multipot)"; flow:to_server,established; threshold:type limit, track by_src, count 1, seconds 300; classtype:attempted-recon; sid:92050021; rev:1; metadata:sensor multipot;)
+alert tcp any any -> $HOME_NET 5900 (msg:"HONEYPOT-SCAN VNC interaction (multipot)"; flow:to_server,established; threshold:type limit, track by_src, count 1, seconds 300; classtype:attempted-recon; sid:92050022; rev:1; metadata:sensor multipot;)
+alert tcp any any -> $HOME_NET 6379 (msg:"HONEYPOT-SCAN Redis interaction (multipot)"; flow:to_server,established; threshold:type limit, track by_src, count 1, seconds 300; classtype:attempted-recon; sid:92050023; rev:1; metadata:sensor multipot;)
+alert tcp any any -> $HOME_NET 9200 (msg:"HONEYPOT-SCAN Elasticsearch interaction (multipot)"; flow:to_server,established; threshold:type limit, track by_src, count 1, seconds 300; classtype:attempted-recon; sid:92050024; rev:1; metadata:sensor multipot;)
+alert tcp any any -> $HOME_NET 2375 (msg:"HONEYPOT-SCAN Docker API interaction (multipot)"; flow:to_server,established; threshold:type limit, track by_src, count 1, seconds 300; classtype:attempted-recon; sid:92050025; rev:1; metadata:sensor multipot;)
+
+# -- Exposed Docker API command execution (2375/2376): container escape / RCE
+#    hunting. If someone POSTs to /containers/create or /exec it's an attack.
+alert http any any -> $HOME_NET [2375,2376] (msg:"HONEYPOT-SCAN Docker API container/exec create (RCE attempt)"; flow:to_server,established; http.uri; pcre:"/\/(containers\/create|exec|images\/create)/"; classtype:attempted-admin; sid:92050026; rev:1; metadata:sensor multipot, technique rce;)
+
+# -- Redis unauthenticated abuse: CONFIG SET / SLAVEOF / module load — the
+#    classic Redis RCE chain (write SSH key / cron / load module).
+alert tcp any any -> $HOME_NET 6379 (msg:"HONEYPOT-SCAN Redis CONFIG/SLAVEOF/MODULE abuse (RCE chain)"; flow:to_server,established; content:"|0d 0a|$6|0d 0a|CONFIG"; nocase; classtype:attempted-admin; sid:92050027; rev:1; metadata:sensor multipot, technique rce;)
+
+# ---------------------------------------------------------------------------
+# Horizontal scan detector: one source touching the honeypot rapidly across
+# many connections. Broad on purpose — there are no benign clients here.
+# ---------------------------------------------------------------------------
+alert tcp any any -> $HOME_NET any (msg:"HONEYPOT-SCAN Rapid multi-connection from single source (port sweep)"; flags:S,12; threshold:type threshold, track by_src, count 30, seconds 60; classtype:attempted-recon; sid:92050100; rev:1; metadata:technique horizontal-scan;)

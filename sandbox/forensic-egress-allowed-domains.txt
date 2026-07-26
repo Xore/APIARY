@@ -1,0 +1,10 @@
+# Retrieval-only domains available to proxy-aware forensic samples.
+.github.com
+.githubusercontent.com
+.githubassets.com
+.github.io
+.githubstatus.com
+.codeload.github.com
+.objects.githubusercontent.com
+.raw.githubusercontent.com
+.pastebin.com

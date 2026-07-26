@@ -1,0 +1,20 @@
+services:
+  portal:
+    image: registry.nexusai.local/portal:2.14.3
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - worker
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  worker:
+    image: registry.nexusai.local/portal-worker:2.14.3
+    restart: unless-stopped
+    env_file: .env
+    command: ["node", "worker.js"]
+
+  # Postgres and Redis run on dedicated hosts (db-01 / cache-01), not here.

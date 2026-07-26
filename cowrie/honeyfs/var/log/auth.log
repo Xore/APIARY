@@ -1,0 +1,13 @@
+Jul  8 06:25:01 gpu01 CRON[214913]: pam_unix(cron:session): session opened for user svc-backup(uid=1002) by (uid=0)
+Jul  8 06:25:01 gpu01 CRON[214913]: pam_unix(cron:session): session closed for user svc-backup
+Jul  8 08:12:44 gpu01 sshd[215402]: Accepted publickey for mwagner from 10.20.4.2 port 51894 ssh2: ED25519 SHA256:Yk9p2Qw7Rt4yUc1Vx8Nm3aZd6Bf0Hj5Ge2Sk9Ln4Op
+Jul  8 08:12:44 gpu01 sshd[215402]: pam_unix(sshd:session): session opened for user mwagner(uid=1001) by (uid=0)
+Jul  8 08:41:12 gpu01 sudo:  mwagner : TTY=pts/0 ; PWD=/opt/nexusai-inference ; USER=root ; COMMAND=/usr/bin/systemctl restart portal
+Jul  8 08:41:12 gpu01 sudo: pam_unix(sudo:session): session opened for user root(uid=0) by mwagner(uid=1001)
+Jul  8 09:03:55 gpu01 sshd[216871]: Accepted publickey for deploy from 10.20.4.12 port 40122 ssh2: ED25519 SHA256:2mKfq7wZP0nL9xVc3rT8aQd1Ye6Uf4Hj0Bg5Sk2MnXk
+Jul  8 09:03:55 gpu01 systemd-logind[712]: New session 4123 of user deploy.
+Jul  8 11:47:20 gpu01 sshd[219030]: Invalid user admin from 198.51.100.37 port 60122
+Jul  8 11:47:20 gpu01 sshd[219030]: Connection closed by invalid user admin 198.51.100.37 port 60122 [preauth]
+Jul  8 14:22:09 gpu01 sshd[221544]: Failed password for root from 203.0.113.88 port 55010 ssh2
+Jul  8 14:22:12 gpu01 sshd[221544]: Connection closed by authenticating user root 203.0.113.88 port 55010 [preauth]
+Jul  8 18:00:01 gpu01 CRON[224701]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)

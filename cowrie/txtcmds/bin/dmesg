@@ -1,0 +1,20 @@
+[    0.000000] Linux version 5.15.0-119-generic (buildd@lcy02-amd64-081) #129-Ubuntu SMP Fri Aug 2 19:25:20 UTC 2024
+[    0.000000] Command line: BOOT_IMAGE=/boot/vmlinuz-5.15.0-119-generic root=/dev/mapper/ubuntu--vg-ubuntu--lv ro quiet splash
+[    0.000000] DMI: Dell Inc. PowerEdge R7525/0PY5F1, BIOS 2.18.1 05/14/2024
+[    0.018442] smpboot: Allowing 128 CPUs, 0 hotplug CPUs
+[    0.213807] smp: Brought up 2 nodes, 128 CPUs
+[    0.842091] ACPI: Power Button [PWRF]
+[    1.104822] megaraid_sas 0000:21:00.0: firmware supports msix : (128)
+[    1.337415] nvme nvme0: pci function 0000:41:00.0
+[    1.349103] nvme nvme1: pci function 0000:81:00.0
+[    2.019744] ixgbe 0000:43:00.0 ens1f0: renamed from eth0
+[    2.411932] NVRM: loading NVIDIA UNIX x86_64 Kernel Module  535.183.01
+[    2.527117] nvidia-modeset: Loading NVIDIA Kernel Mode Setting Driver for UNIX platforms  535.183.01
+[    3.119406] EXT4-fs (dm-0): mounted filesystem with ordered data mode
+[    4.802216] systemd[1]: Detected architecture x86-64.
+[    5.327014] audit: type=1400 audit(1721364045.411:2): apparmor="STATUS" operation="profile_load" profile="unconfined" name="docker-default"
+[    7.115744] nfs: Registering the id_resolver key type
+[    8.004991] CIFS: Attempting to mount //fs01.nexusai.local/models
+[    8.126382] CIFS: VFS: cifs_mount succeeded for //fs01.nexusai.local/models
+[    9.773155] docker0: port 1(veth91af39e) entered blocking state
+[   10.007331] systemd[1]: Startup finished in 3.912s (kernel) + 6.071s (userspace) = 9.983s.

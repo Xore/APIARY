@@ -1,0 +1,8 @@
+Filesystem      Size  Used Avail Use% Mounted on
+udev            1.9G     0  1.9G   0% /dev
+tmpfs           394M  1.1M  393M   1% /run
+/dev/vda1        79G   28G   47G  38% /
+tmpfs           2.0G     0  2.0G   0% /dev/shm
+tmpfs           5.0M     0  5.0M   0% /run/lock
+/dev/vda15      124M   12M  113M  10% /boot/efi
+tmpfs           394M     0  394M   0% /run/user/1000

@@ -1,0 +1,26 @@
+[Unicode]
+Unicode=yes
+
+[System Access]
+MinimumPasswordAge = 1
+MaximumPasswordAge = 90
+MinimumPasswordLength = 14
+PasswordComplexity = 1
+PasswordHistorySize = 24
+LockoutBadCount = 5
+ResetLockoutCount = 30
+LockoutDuration = -1
+
+[Event Audit]
+AuditSystemEvents = 3
+AuditLogonEvents = 3
+AuditObjectAccess = 3
+AuditPrivilegeUse = 3
+AuditPolicyChange = 3
+AuditAccountManage = 3
+AuditProcessTracking = 0
+AuditDSAccess = 3
+AuditAccountLogon = 3
+
+[Registry Values]
+MACHINE\System\CurrentControlSet\Control\Lsa\SCENoApplyLegacyAuditPolicy=4,1

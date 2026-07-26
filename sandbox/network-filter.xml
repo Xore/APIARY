@@ -1,0 +1,9 @@
+<filter name='honeypot-sandbox-strict' chain='root'>
+  <!-- Enforced by the host on each sandbox NIC. Preserve normal IPv4/IPv6/ARP
+       analysis traffic but prevent source-MAC spoofing and non-IP L2 frames. -->
+  <filterref filter='no-mac-spoofing'/>
+  <filterref filter='allow-arp'/>
+  <filterref filter='allow-ipv4'/>
+  <filterref filter='allow-ipv6'/>
+  <filterref filter='no-other-l2-traffic'/>
+</filter>

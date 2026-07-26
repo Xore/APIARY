@@ -1,0 +1,71 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Europe/Berlin
+    groups:
+      actions-compatible:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    labels: [dependencies, github-actions]
+
+  - package-ecosystem: gomod
+    directories:
+      - /dashboard
+      - /dnp3-honeypot
+      - /http-honeypot
+      - /multipot
+      - /portbridge
+      - /tftp-relay
+      - /vps/forward-auth
+      - /vps/portbridge
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:15"
+      timezone: Europe/Berlin
+    groups:
+      go-compatible:
+        patterns: ["*"]
+        update-types: [minor, patch]
+        group-by: dependency-name
+    labels: [dependencies, go]
+
+  - package-ecosystem: npm
+    directory: /dashboard/frontend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:30"
+      timezone: Europe/Berlin
+    groups:
+      frontend-compatible:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    labels: [dependencies, frontend]
+
+  - package-ecosystem: docker
+    directories:
+      - /dashboard
+      - /dnp3-honeypot
+      - /http-honeypot
+      - /multipot
+      - /portbridge
+      - /tftp-relay
+      - /vps/forward-auth
+      - /vps/portbridge
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:45"
+      timezone: Europe/Berlin
+    groups:
+      container-compatible:
+        patterns: ["*"]
+        update-types: [minor, patch]
+        group-by: dependency-name
+    labels: [dependencies, containers]

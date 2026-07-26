@@ -1,0 +1,28 @@
+[Unicode]
+Unicode=yes
+
+[System Access]
+MinimumPasswordAge = 1
+MaximumPasswordAge = 90
+MinimumPasswordLength = 14
+PasswordComplexity = 1
+PasswordHistorySize = 24
+LockoutBadCount = 10
+ResetLockoutCount = 15
+LockoutDuration = 30
+RequireLogonToChangePassword = 0
+ForceLogoffWhenHourExpire = 0
+ClearTextPassword = 0
+
+[Kerberos Policy]
+MaxTicketAge = 10
+MaxRenewAge = 7
+MaxServiceAge = 600
+MaxClockSkew = 5
+TicketValidateClient = 1
+
+[Registry Values]
+MACHINE\System\CurrentControlSet\Control\Lsa\NoLMHash=4,1
+MACHINE\System\CurrentControlSet\Control\Lsa\LmCompatibilityLevel=4,5
+MACHINE\System\CurrentControlSet\Control\Lsa\RestrictAnonymous=4,1
+MACHINE\System\CurrentControlSet\Services\LanManServer\Parameters\RequireSecuritySignature=4,1

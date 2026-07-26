@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for dashboard sandbox-analysis requests
+
+[Path]
+DirectoryNotEmpty=/var/lib/honeypot-sandbox/requests/pending
+Unit=honeypot-sandbox-web-requests.service
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,13 @@
+[Unit]
+Description=One-shot isolated honeypot sample analysis
+After=local-fs.target
+Before=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/honeypot-guest-runner
+TimeoutStartSec=180
+StandardInput=null
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,14 @@
+# NexusAI GPU node backup schedule
+# Managed by Ansible (roles/backup)  Do not edit manually.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+MAILTO=devops@nexusai.local
+
+# Daily at 02:00 CEST (Mon-Sat)
+0 2 * * 1-6  root  /opt/nexusai/bin/run-backup.sh daily  >> /var/log/nexusai-backup.log 2>&1
+
+# Weekly on Sunday at 01:00 CEST
+0 1 * * 0    root  /opt/nexusai/bin/run-backup.sh weekly >> /var/log/nexusai-backup.log 2>&1
+
+# Monthly on 1st Sunday at 01:00 CEST (detected by script)
+0 1 1-7 * 0  root  /opt/nexusai/bin/run-backup.sh monthly >> /var/log/nexusai-backup.log 2>&1

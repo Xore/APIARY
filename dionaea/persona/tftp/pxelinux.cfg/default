@@ -1,0 +1,6 @@
+DEFAULT meridian-recovery
+PROMPT 0
+TIMEOUT 50
+LABEL meridian-recovery
+  KERNEL images/ubuntu-22.04/vmlinuz
+  APPEND initrd=images/ubuntu-22.04/initrd.img ip=dhcp autoinstall ds=nocloud-net;s=http://legacy-svc-02.meridian.internal/seed/

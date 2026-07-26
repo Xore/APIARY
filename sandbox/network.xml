@@ -1,0 +1,5 @@
+<network ipv6="no">
+  <name>honeypot-sandbox</name>
+  <bridge name="virbr-hpsbx" stp="on" delay="0"/>
+  <!-- Deliberately no forward, IP, DHCP, DNS, or host gateway element. -->
+</network>

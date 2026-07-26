@@ -1,0 +1,1254 @@
+# honeypot-stack — multi-service honeypot (HOME side, runs under Dockge).
+#
+# Topology:
+#   attacker -> VPS public port -> [Traefik (HTTP) | portbridge socat (raw TCP/UDP)]
+#            -> WireGuard tunnel -> THIS stack on the home server (10.8.0.2)
+#
+# Every sensor binds on HP_BIND (default 10.8.0.2) — never the home LAN.
+# Logs: /opt/stacks/honeypot-stack/logs/<service>/
+#
+# Cowrie runs the GPU server persona (Dell PowerEdge R7525 / dual EPYC 7742
+# / 2x NVIDIA A100 / nexusai.local AD domain). Dynamic txtcmds (free/df/dd/ss
+# and /proc/version|cpuinfo|meminfo) are regenerated on every container start
+# via bin/gen-dynamic-txtcmds.py.
+#
+# NOTE: /proc bind-mounts are intentionally absent. Linux 5.12+ runc enforces
+# proc-safety and refuses any bind-mount whose destination sits inside /proc,
+# even with :ro. Hardware identity for /proc paths is served through Cowrie's
+# txtcmds layer instead (see bin/gen-dynamic-txtcmds.py :: gen_proc_files).
+# The /sys/class/dmi/id mounts are outside /proc and work fine.
+
+# Common runtime guardrails. JSON-file limits apply only to `docker logs`;
+# sensor files under ./logs have their own rotation service below.
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  # Validate the canonical manifest and seed mutable runtime personas before
+  # any sensor starts. Compiled/baked personas are checked by the validator;
+  # Dionaea's FTP/TFTP/UPnP/printer files are copied into its persistent volume.
+  persona-apply:
+    <<: *runtime-defaults
+    image: python:3.12-alpine
+    container_name: hp-persona-apply
+    restart: no
+    working_dir: /stack
+    command: ["python3", "/stack/personas/apply_personas.py"]
+    volumes:
+      - ./:/stack:ro
+      - dionaea-lib:/dionaea
+      - /opt/stacks/honeypot-stack/state/personas:/state
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+
+  # ===================== Log dir ownership bootstrap =====================
+  log-init:
+    <<: *runtime-defaults
+    image: busybox:latest
+    container_name: hp-log-init
+    restart: no
+    depends_on:
+      persona-apply:
+        condition: service_completed_successfully
+    command:
+      - sh
+      - -c
+      - >
+        set -x
+
+        mkdir -p /logs/cowrie/downloads /logs/conpot /logs/conpot-s7-1200 \
+                 /logs/conpot-s7-1500 /logs/conpot-iec104 \
+                 /logs/conpot-guardian /logs/conpot-kamstrup /logs/api-honeypot /logs/dionaea \
+                 /logs/multipot /logs/http-honeypot /logs/tanner /logs/snare /logs/dnp3 \
+                 /logs/suricata/pcap /logs/portbridge
+        chown 2000:2000  /logs/cowrie /logs/conpot /logs/conpot-s7-1200 \
+                         /logs/conpot-s7-1500 /logs/conpot-iec104 \
+                         /logs/conpot-guardian /logs/conpot-kamstrup
+
+        chown 1000:1000  /logs/dionaea
+
+        chown 65534:65534 /logs/multipot /logs/http-honeypot /logs/api-honeypot /logs/tanner /logs/dnp3
+
+        # Arkime capture/viewer run as nobody (uid 65534) inside the official image
+
+        chown 65534:65534 /logs/suricata/pcap || true
+
+        chmod 755 /logs
+
+        mkdir -p /snapshots
+
+        chown 1000:1000 /snapshots
+
+        mkdir -p /yara-results
+
+        chown 0:0 /yara-results && chmod 700 /yara-results
+    volumes:
+      - /opt/stacks/honeypot-stack/logs:/logs
+      - /opt/stacks/honeypot-stack/state/elasticsearch-snapshots:/snapshots
+      - yara-results:/yara-results
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+
+  # Rotate verbose human-readable sensor logs without touching JSON event
+  # streams. copytruncate keeps writers alive without mounting Docker's socket.
+  log-maintenance:
+    <<: *runtime-defaults
+    image: busybox:1.36
+    container_name: hp-log-maintenance
+    restart: unless-stopped
+    command: ["sh", "/usr/local/bin/log-maintenance.sh"]
+    environment:
+      - MAX_LOG_BYTES=268435456
+      - CHECK_INTERVAL=300
+      - ROTATIONS=4
+      - START_DELAY=120
+    volumes:
+      - ./analysis/log-maintenance.sh:/usr/local/bin/log-maintenance.sh:ro
+      - /opt/stacks/honeypot-stack/logs:/logs
+    depends_on:
+      log-init:
+        condition: service_completed_successfully
+    networks:
+      - honeynet
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+
+  # Content-address duplicate cleanup. Paths remain valid because duplicates
+  # on the same filesystem are atomically replaced with hard links.
+  payload-dedupe:
+    <<: *runtime-defaults
+    image: python:3.12-alpine
+    container_name: hp-payload-dedupe
+    restart: unless-stopped
+    command: ["python3", "/app/dedupe-payloads.py"]
+    environment:
+      - PAYLOAD_DEDUPE_INTERVAL=${PAYLOAD_DEDUPE_INTERVAL:-3600}
+      - PAYLOAD_ROOTS=/payloads/cowrie:/payloads/dionaea/binaries:/payloads/scripts/script-payloads
+      - DEDUPE_STATE=/state/payload-dedupe.json
+    volumes:
+      - ./analysis/dedupe-payloads.py:/app/dedupe-payloads.py:ro
+      - /opt/stacks/honeypot-stack/logs/cowrie/downloads:/payloads/cowrie
+      - dionaea-lib:/payloads/dionaea
+      - dashboard-state:/payloads/scripts
+      - /opt/stacks/honeypot-stack/state/dedupe:/state
+    depends_on:
+      log-init:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+
+  # Real static YARA scanning in a networkless least-privilege sidecar. It has
+  # only DAC_READ_SEARCH because Dionaea captures are deliberately mode 0600;
+  # samples stay read-only and are never interpreted or executed.
+  yara-scanner:
+    <<: *runtime-defaults
+    build: ./analysis/yara
+    container_name: hp-yara-scanner
+    restart: unless-stopped
+    network_mode: none
+    user: "0:0"
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [DAC_READ_SEARCH]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,uid=0,gid=0
+    environment:
+      - YARA_SCAN_INTERVAL=${YARA_SCAN_INTERVAL:-900}
+      - YARA_MAX_BYTES=${YARA_MAX_BYTES:-67108864}
+      - YARA_PAYLOAD_ROOTS=/payloads/dionaea:/payloads/cowrie:/payloads/scripts/script-payloads
+      - YARA_RESULTS=/results/results.json
+    volumes:
+      - dionaea-lib:/payloads/dionaea:ro
+      - /opt/stacks/honeypot-stack/logs/cowrie/downloads:/payloads/cowrie:ro
+      - dashboard-state:/payloads/scripts:ro
+      - yara-results:/results
+    depends_on:
+      log-init:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+  # ===================== SSH / Telnet — GPU server persona =====================
+  cowrie:
+    <<: *runtime-defaults
+    build: ./cowrie
+    container_name: hp-cowrie
+    restart: unless-stopped
+    ports:
+      - ${HP_BIND:-10.8.0.2}:19022:2222
+      - ${HP_BIND:-10.8.0.2}:19023:2223
+    volumes:
+      - ./cowrie/cowrie.cfg:/cowrie/cowrie-git/etc/cowrie.cfg:ro
+      - ./cowrie/userdb.txt:/cowrie/cowrie-git/etc/userdb.txt:ro
+      - /opt/stacks/honeypot-stack/logs/cowrie:/cowrie/cowrie-git/var/log/cowrie
+      # Cowrie saves every uploaded/downloaded file by SHA-256, including shell,
+      # PowerShell, VBS, Python and JavaScript payloads.
+      - /opt/stacks/honeypot-stack/logs/cowrie/downloads:/cowrie/cowrie-git/var/lib/cowrie/downloads
+      # Hardware identity overrides for sysfs DMI nodes — these are outside
+      # /proc so runc proc-safety does not apply.
+      - ./cowrie/fakefs/sys/class/dmi/id/product_name:/sys/class/dmi/id/product_name:ro
+      - ./cowrie/fakefs/sys/class/dmi/id/sys_vendor:/sys/class/dmi/id/sys_vendor:ro
+      - ./cowrie/fakefs/sys/class/dmi/id/board_name:/sys/class/dmi/id/board_name:ro
+    environment:
+      - TZ=Europe/Berlin
+      - COWRIE_HOSTNAME=gpu01
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - honeynet
+    depends_on:
+      log-init:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+  # ===================== Multi-protocol light sensor =====================
+  multipot:
+    <<: *runtime-defaults
+    build: ./multipot
+    container_name: hp-multipot
+    restart: unless-stopped
+    ports:
+      - ${HP_BIND:-10.8.0.2}:19025:25
+      - ${HP_BIND:-10.8.0.2}:5432:5432
+      - ${HP_BIND:-10.8.0.2}:5900:5900
+      - ${HP_BIND:-10.8.0.2}:6379:6379
+      - ${HP_BIND:-10.8.0.2}:9200:9200
+      - ${HP_BIND:-10.8.0.2}:2375:2375
+    volumes:
+      - /opt/stacks/honeypot-stack/logs/multipot:/var/log/honeypot
+    environment:
+      - LOG_FILE=/var/log/honeypot/multipot.json
+      - MULTIPOT_DISABLE=ftp,mysql,mssql,mongodb
+      # Parse the PROXY header portbridge prepends (:pp rules) so every event
+      # carries the real attacker IP instead of the tunnel peer 10.8.0.1.
+      - PROXY_PROTOCOL=1
+      - TZ=Europe/Berlin
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - honeynet
+    depends_on:
+      log-init:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+  # ===================== Fake HTTP =====================
+  http-honeypot:
+    <<: *runtime-defaults
+    build: ./http-honeypot
+    container_name: hp-http
+    restart: unless-stopped
+    ports:
+      - ${HP_BIND:-10.8.0.2}:19081:8080
+    volumes:
+      - /opt/stacks/honeypot-stack/logs/http-honeypot:/var/log/honeypot
+    environment:
+      - LISTEN_ADDR=:8080
+      - SERVER_HEADER=nginx/1.24.0 (Ubuntu)
+      - SENSOR_NAME=http-honeypot
+      - PERSONA_ID=nexusai-edge
+      - SITE_ID=nexusai-eu-edge
+      - ASSET_ID=web-edge-01
+      - ORGANIZATION=NexusAI Research GmbH
+      - LOG_FILE=/var/log/honeypot/http.json
+      - TZ=Europe/Berlin
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - honeynet
+    depends_on:
+      log-init:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+
+  # Raw API/cloud decoy: cloud metadata, Kubernetes, Docker Registry,
+  # DevOps admin panels and OpenAI-compatible bearer-token probes.
+  api-honeypot:
+    <<: *runtime-defaults
+    build: ./http-honeypot
+    container_name: hp-api-honeypot
+    restart: unless-stopped
+    ports:
+      - ${HP_BIND:-10.8.0.2}:18083:8080
+    volumes:
+      - /opt/stacks/honeypot-stack/logs/api-honeypot:/var/log/honeypot
+    environment:
+      - LISTEN_ADDR=:8080
+      - SERVER_HEADER=envoy
+      - SENSOR_NAME=api-honeypot
+      - PERSONA_ID=nexusai-platform
+      - SITE_ID=nexusai-eu-cloud
+      - ASSET_ID=platform-gw-03
+      - ORGANIZATION=NexusAI Research GmbH
+      - LOG_FILE=/var/log/honeypot/api.json
+      - PROXY_PROTOCOL=1
+      - TZ=Europe/Berlin
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    networks: [honeynet]
+    depends_on:
+      log-init: { condition: service_completed_successfully }
+    deploy:
+      resources: { limits: { cpus: "0.5", memory: 128M } }
+  # ===================== Live analysis dashboard =====================
+  dashboard:
+    <<: *runtime-defaults
+    build: ./dashboard
+    container_name: hp-dashboard
+    restart: unless-stopped
+    ports:
+      - ${HP_BIND:-10.8.0.2}:19090:8080
+    volumes:
+      - /opt/stacks/honeypot-stack/logs:/logs:ro
+      # Optional GeoIP: drop a "start_ip,end_ip,country" CSV as
+      # dashboard/geoip/country.csv (DB-IP lite export works as-is). Absent →
+      # geo stays off; cf-ipcountry still enriches tanner/http events.
+      - ./dashboard/geoip:/geoip:ro
+      - ./analysis/geoip:/geoip-mmdb:ro
+      # Unified read-only payload inventory: Dionaea binaries, Cowrie
+      # transfers, and dashboard-retained inline script artifacts are all
+      # listed, source-labelled, analysed, and downloadable from /payloads.
+      - dionaea-lib:/dionaea-lib:ro
+      - /opt/stacks/honeypot-stack/logs/cowrie/downloads:/cowrie-downloads:ro
+      - dashboard-state:/state
+      - yara-results:/yara:ro
+      - /var/lib/honeypot-sandbox/export:/sandbox-results:ro
+      # Narrow intent channel for the Analyze button. The dashboard never
+      # receives access to libvirt, systemd, Docker, or sandbox samples.
+      - /var/lib/honeypot-sandbox/requests/pending:/sandbox-requests
+    environment:
+      - LISTEN_ADDR=:8080
+      - LOG_DIR=/logs
+      - GEOIP_CSV=/geoip/country.csv
+      - GEOIP_CITY_MMDB=/geoip-mmdb/GeoLite2-City.mmdb
+      - GEOIP_ASN_MMDB=/geoip-mmdb/GeoLite2-ASN.mmdb
+      - THREAT_CIDRS_FILE=/geoip/threat-cidrs.csv
+      - MAP_TILE_URL=${HONEYPOT_MAP_TILE_URL:-https://tile.openstreetmap.org/{z}/{x}/{y}.png}
+      - MAP_ATTRIBUTION=${HONEYPOT_MAP_ATTRIBUTION:-© OpenStreetMap contributors}
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - FILEBEAT_URL=http://filebeat:5066
+      - KIBANA_PUBLIC_URL=${KIBANA_PUBLIC_URL:-https://kibana.honeypot.example}
+      - EVEBOX_PUBLIC_URL=${EVEBOX_PUBLIC_URL:-https://evebox.honeypot.example}
+      - ARKIME_PUBLIC_URL=${ARKIME_PUBLIC_URL:-https://arkime.honeypot.example}
+      - ALERT_STATE_FILE=/state/alerts.json
+      - ALERT_COOLDOWN=${HONEYPOT_ALERT_COOLDOWN:-6h}
+      - PAYLOAD_DIRS=/dionaea-lib/binaries,/cowrie-downloads
+      - SCRIPT_PAYLOAD_DIR=/state/script-payloads
+      - YARA_RESULTS_FILE=/yara/results.json
+      - INTELLIGENCE_STATE_FILE=/state/intelligence.json
+      - SANDBOX_RESULTS_DIR=/sandbox-results
+      - SANDBOX_REQUEST_DIR=/sandbox-requests
+      - SANDBOX_ALERT_RISK_SCORE=${SANDBOX_ALERT_RISK_SCORE:-50}
+      - ALERT_CAMPAIGN_SCORE=${HONEYPOT_ALERT_CAMPAIGN_SCORE:-80}
+      - DASHBOARD_REQUIRE_ADMIN=${DASHBOARD_REQUIRE_ADMIN:-true}
+      - EXPECTED_SENSORS=cowrie,multipot,http,api-honeypot,dionaea,dnp3,conpot,conpot-s7-1200,conpot-s7-1500,conpot-iec104,conpot-guardian,conpot-kamstrup,tanner,suricata
+      - ALERT_WEBHOOK_URL=${HONEYPOT_ALERT_WEBHOOK_URL:-}
+      - TZ=Europe/Berlin
+    networks:
+      - honeynet
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/dashboard", "-healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          # The dashboard reads the tail (tailCap=8M) of every
+          # JSON log each cycle. The Suricata eve.json mounted at /logs/suricata
+          # is ~1.25G, so its 8M tail parses into tens of thousands of event
+          # structs — 32M OOM-restarted the container in a loop (53x).
+          # 1G leaves GC headroom for correlation and payload inventory work.
+          memory: 1G
+  # ===================== Dionaea — malware / service capture =====================
+  dionaea:
+    <<: *runtime-defaults
+    image: dinotools/dionaea:latest
+    container_name: hp-dionaea
+    restart: unless-stopped
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        cd /opt/dionaea
+
+        test -f etc/dionaea/dionaea.cfg || cp -van template/etc .
+
+        cp -van template/lib/dionaea/. var/lib/dionaea/ 2>/dev/null || true
+
+        cp -van template/log/dionaea/. var/log/dionaea/ 2>/dev/null || true
+
+        mkdir -p var/lib/dionaea/binaries var/lib/dionaea/bistreams var/lib/dionaea/ftp/root \
+                 var/lib/dionaea/tftp/root var/lib/dionaea/upnp/root var/lib/dionaea/printer/root \
+                 var/lib/dionaea/roots/ftp var/lib/dionaea/roots/tftp \
+                 var/lib/dionaea/roots/www var/lib/dionaea/roots/upnp
+        mkdir -p etc/dionaea/ihandlers-enabled
+
+        printf -- '- name: log_json\n  config:\n    handlers:\n      - file:///opt/dionaea/var/log/dionaea/dionaea.json\n' \
+                > etc/dionaea/ihandlers-enabled/log_json.yaml
+
+        printf -- '- name: log_incident\n  config:\n    handlers:\n      - file:///opt/dionaea/var/log/dionaea/dionaea_incident.json\n' \
+                > etc/dionaea/ihandlers-enabled/log_incident.yaml
+
+        printf -- '- name: store\n' \
+                > etc/dionaea/ihandlers-enabled/store.yaml
+
+        sed -i 's/^default.levels=.*/default.levels=info,warning,error/' \
+               etc/dionaea/dionaea.cfg
+        chown -R dionaea:dionaea var/lib/dionaea var/log/dionaea
+
+        export DIONAEA_SKIP_INIT=1
+
+        exec /usr/local/sbin/entrypoint.sh
+    ports:
+      - ${HP_BIND:-10.8.0.2}:21:21
+      - ${HP_BIND:-10.8.0.2}:445:445
+      - ${HP_BIND:-10.8.0.2}:1433:1433
+      - ${HP_BIND:-10.8.0.2}:3306:3306
+      - ${HP_BIND:-10.8.0.2}:27017:27017
+      - ${HP_BIND:-10.8.0.2}:1723:1723
+      - ${HP_BIND:-10.8.0.2}:5060:5060
+      - ${HP_BIND:-10.8.0.2}:5060:5060/udp
+      - ${HP_BIND:-10.8.0.2}:135:135
+      - ${HP_BIND:-10.8.0.2}:1883:1883
+      - ${HP_BIND:-10.8.0.2}:9100:9100
+      - ${HP_BIND:-10.8.0.2}:11211:11211
+      - ${HP_BIND:-10.8.0.2}:69:69/udp
+      - ${HP_BIND:-10.8.0.2}:1900:1900/udp
+    volumes:
+      - /opt/stacks/honeypot-stack/logs/dionaea:/opt/dionaea/var/log/dionaea
+      - dionaea-lib:/opt/dionaea/var/lib/dionaea
+      - ./dionaea/persona:/persona:ro
+      - ./dionaea/services/ftp.yaml:/opt/dionaea/etc/dionaea/services-enabled/ftp.yaml:ro
+      - ./dionaea/services/smb.yaml:/opt/dionaea/etc/dionaea/services-enabled/smb.yaml:ro
+      - ./dionaea/services/sip.yaml:/opt/dionaea/etc/dionaea/services-enabled/sip.yaml:ro
+      - ./dionaea/services/printer.yaml:/opt/dionaea/etc/dionaea/services-enabled/printer.yaml:ro
+      - ./dionaea/services/tftp.yaml:/opt/dionaea/etc/dionaea/services-enabled/tftp.yaml:ro
+      - ./dionaea/services/upnp.yaml:/opt/dionaea/etc/dionaea/services-enabled/upnp.yaml:ro
+    environment:
+      - TZ=Europe/Berlin
+    cap_add:
+      - SYS_PTRACE
+    networks:
+      - honeynet
+    depends_on:
+      log-init:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1024M
+
+  # TFTP selects a dynamic server transfer port after the request. Relay that
+  # exchange inside the Docker network so the WireGuard/public edge can retain
+  # one stable UDP port while Dionaea remains the actual sensor and logger.
+  tftp-relay:
+    <<: *runtime-defaults
+    build: ./tftp-relay
+    container_name: hp-tftp-relay
+    restart: unless-stopped
+    environment:
+      - TFTP_TARGET=dionaea:69
+    ports:
+      - ${HP_BIND:-10.8.0.2}:1069:1069/udp
+    networks:
+      - honeynet
+    depends_on:
+      dionaea:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
+  # ===================== Conpot — ICS / SCADA =====================
+  conpot:
+    <<: *runtime-defaults
+    build: ./conpot
+    container_name: hp-conpot
+    restart: unless-stopped
+    environment:
+      - CONPOT_CONFIG=/etc/conpot/conpot.cfg
+      - CONPOT_TEMPLATE=s7_200
+      - CONPOT_LOG=/var/log/conpot/conpot.log
+      - CONPOT_JSON_LOG=/var/log/conpot/conpot.json
+      - CONPOT_TMP=/tmp/conpot
+      - TZ=Europe/Berlin
+    tmpfs:
+      - /tmp/conpot:uid=2000,gid=2000
+    ports:
+      - ${HP_BIND:-10.8.0.2}:102:102
+      - ${HP_BIND:-10.8.0.2}:502:502
+      - ${HP_BIND:-10.8.0.2}:19161:161/udp
+      - ${HP_BIND:-10.8.0.2}:47808:47808/udp
+      - ${HP_BIND:-10.8.0.2}:623:623/udp
+      - ${HP_BIND:-10.8.0.2}:44818:44818
+    volumes:
+      - /opt/stacks/honeypot-stack/logs/conpot:/var/log/conpot
+    cap_add:
+      - SYS_PTRACE
+    networks:
+      - honeynet
+    depends_on:
+      log-init:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  # Three separately fingerprintable Siemens PLCs are exposed: the built-in
+  # S7-200 above on TCP/102, plus these S7-1200 and S7-1500 personas on
+  # alternate public ports. Each has an independent event stream.
+  conpot-s7-1200:
+    <<: *runtime-defaults
+    build: ./conpot
+    container_name: hp-conpot-s7-1200
+    restart: unless-stopped
+    environment:
+      - CONPOT_CONFIG=/etc/conpot/conpot.cfg
+      - CONPOT_TEMPLATE=s7_1200
+      - CONPOT_LOG=/var/log/conpot/conpot.log
+      - CONPOT_JSON_LOG=/var/log/conpot/conpot.json
+      - CONPOT_TMP=/tmp/conpot
+      - TZ=Europe/Berlin
+    tmpfs: ["/tmp/conpot:uid=2000,gid=2000"]
+    ports:
+      - ${HP_BIND:-10.8.0.2}:1102:102
+      - ${HP_BIND:-10.8.0.2}:1502:502
+    volumes:
+      - /opt/stacks/honeypot-stack/logs/conpot-s7-1200:/var/log/conpot
+    cap_add: [SYS_PTRACE]
+    networks: [honeynet]
+    depends_on:
+      log-init: { condition: service_completed_successfully }
+    deploy:
+      resources: { limits: { cpus: "0.75", memory: 384M } }
+
+  conpot-s7-1500:
+    <<: *runtime-defaults
+    build: ./conpot
+    container_name: hp-conpot-s7-1500
+    restart: unless-stopped
+    environment:
+      - CONPOT_CONFIG=/etc/conpot/conpot.cfg
+      - CONPOT_TEMPLATE=s7_1500
+      - CONPOT_LOG=/var/log/conpot/conpot.log
+      - CONPOT_JSON_LOG=/var/log/conpot/conpot.json
+      - CONPOT_TMP=/tmp/conpot
+      - TZ=Europe/Berlin
+    tmpfs: ["/tmp/conpot:uid=2000,gid=2000"]
+    ports:
+      - ${HP_BIND:-10.8.0.2}:2102:102
+      - ${HP_BIND:-10.8.0.2}:2502:502
+    volumes:
+      - /opt/stacks/honeypot-stack/logs/conpot-s7-1500:/var/log/conpot
+    cap_add: [SYS_PTRACE]
+    networks: [honeynet]
+    depends_on:
+      log-init: { condition: service_completed_successfully }
+    deploy:
+      resources: { limits: { cpus: "0.75", memory: 384M } }
+
+  # Additional industrial attack surfaces from Conpot's maintained templates.
+  conpot-iec104:
+    <<: *runtime-defaults
+    build: ./conpot
+    container_name: hp-conpot-iec104
+    restart: unless-stopped
+    environment:
+      - CONPOT_CONFIG=/etc/conpot/conpot.cfg
+      - CONPOT_TEMPLATE=IEC104
+      - CONPOT_LOG=/var/log/conpot/conpot.log
+      - CONPOT_JSON_LOG=/var/log/conpot/conpot.json
+      - CONPOT_TMP=/tmp/conpot
+      - TZ=Europe/Berlin
+    tmpfs: ["/tmp/conpot:uid=2000,gid=2000"]
+    ports: ["${HP_BIND:-10.8.0.2}:2404:2404"]
+    volumes:
+      - /opt/stacks/honeypot-stack/logs/conpot-iec104:/var/log/conpot
+    cap_add: [SYS_PTRACE]
+    networks: [honeynet]
+    depends_on:
+      log-init: { condition: service_completed_successfully }
+    deploy:
+      resources: { limits: { cpus: "0.5", memory: 256M } }
+
+  conpot-guardian:
+    <<: *runtime-defaults
+    build: ./conpot
+    container_name: hp-conpot-guardian
+    restart: unless-stopped
+    environment:
+      - CONPOT_CONFIG=/etc/conpot/conpot.cfg
+      - CONPOT_TEMPLATE=guardian_ast
+      - CONPOT_LOG=/var/log/conpot/conpot.log
+      - CONPOT_JSON_LOG=/var/log/conpot/conpot.json
+      - CONPOT_TMP=/tmp/conpot
+      - TZ=Europe/Berlin
+    tmpfs: ["/tmp/conpot:uid=2000,gid=2000"]
+    ports: ["${HP_BIND:-10.8.0.2}:10001:10001"]
+    volumes:
+      - /opt/stacks/honeypot-stack/logs/conpot-guardian:/var/log/conpot
+    cap_add: [SYS_PTRACE]
+    networks: [honeynet]
+    depends_on:
+      log-init: { condition: service_completed_successfully }
+    deploy:
+      resources: { limits: { cpus: "0.5", memory: 256M } }
+
+  conpot-kamstrup:
+    <<: *runtime-defaults
+    build: ./conpot
+    container_name: hp-conpot-kamstrup
+    restart: unless-stopped
+    environment:
+      - CONPOT_CONFIG=/etc/conpot/conpot.cfg
+      - CONPOT_TEMPLATE=kamstrup_382
+      - CONPOT_LOG=/var/log/conpot/conpot.log
+      - CONPOT_JSON_LOG=/var/log/conpot/conpot.json
+      - CONPOT_TMP=/tmp/conpot
+      - TZ=Europe/Berlin
+    tmpfs: ["/tmp/conpot:uid=2000,gid=2000"]
+    ports:
+      - ${HP_BIND:-10.8.0.2}:1025:1025
+      - ${HP_BIND:-10.8.0.2}:50100:50100
+    volumes:
+      - /opt/stacks/honeypot-stack/logs/conpot-kamstrup:/var/log/conpot
+    cap_add: [SYS_PTRACE]
+    networks: [honeynet]
+    depends_on:
+      log-init: { condition: service_completed_successfully }
+    deploy:
+      resources: { limits: { cpus: "0.5", memory: 256M } }
+  # Optional official GeoLite2 updater. Enable the `geoip-update` profile after
+  # setting MAXMIND_ACCOUNT_ID and MAXMIND_LICENSE_KEY in Dockge's .env.
+  geoipupdate:
+    image: ghcr.io/maxmind/geoipupdate:v7.1.1
+    container_name: hp-geoipupdate
+    profiles: [geoip-update]
+    restart: unless-stopped
+    environment:
+      - GEOIPUPDATE_ACCOUNT_ID=${MAXMIND_ACCOUNT_ID:-}
+      - GEOIPUPDATE_LICENSE_KEY=${MAXMIND_LICENSE_KEY:-}
+      - GEOIPUPDATE_EDITION_IDS=GeoLite2-City GeoLite2-ASN
+      - GEOIPUPDATE_FREQUENCY=24
+    volumes:
+      - ./analysis/geoip:/usr/share/GeoIP
+    deploy:
+      resources: { limits: { cpus: "0.25", memory: 128M } }
+  # ===================== ELK analysis =====================
+  elasticsearch:
+    <<: *runtime-defaults
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    container_name: hp-elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      # 2g heap: the per-event-type index layout multiplies shard count, and
+      # geoip mmdb files + reindex jobs OOM-killed the node at 512m (exit 137).
+      - ES_JAVA_OPTS=-Xms4g -Xmx4g
+      # No internet egress on this host — the GeoLite2 auto-downloader can
+      # never succeed. Geo databases (db-ip lite) are provided locally via
+      # the ingest-geoip mount below and used by the geoip-honeypot pipeline.
+      - ingest.geoip.downloader.enabled=false
+      - path.repo=/snapshots
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+      - ./analysis/geoip:/usr/share/elasticsearch/config/ingest-geoip:ro
+      - /opt/stacks/honeypot-stack/state/elasticsearch-snapshots:/snapshots
+    networks:
+      - honeynet
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -sf http://localhost:9200/_cluster/health || exit 1
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 8G
+  kibana:
+    <<: *runtime-defaults
+    image: docker.elastic.co/kibana/kibana:8.13.4
+    container_name: hp-kibana
+    restart: unless-stopped
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - XPACK_SECURITY_ENABLED=false
+      - XPACK_FLEET_ENABLED=false
+      - TELEMETRY_ENABLED=false
+      - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=${KIBANA_ENCRYPTION_KEY:-CHANGE_ME_32_CHAR_MINIMUM_KEY_1234}
+    ports:
+      - ${HP_BIND:-10.8.0.2}:19601:5601
+    networks:
+      - honeynet
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+  elasticsearch-setup:
+    <<: *runtime-defaults
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    container_name: hp-elasticsearch-setup
+    restart: no
+    entrypoint: ["sh", "/usr/local/bin/elasticsearch-setup.sh"]
+    environment:
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+    volumes:
+      - ./analysis/elasticsearch-setup.sh:/usr/local/bin/elasticsearch-setup.sh:ro
+    networks:
+      - honeynet
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+  honeypot-kibana-setup:
+    <<: *runtime-defaults
+    image: curlimages/curl:8.10.1
+    container_name: hp-honeypot-kibana-setup
+    restart: no
+    entrypoint: ["sh", "/usr/local/bin/honeypot-kibana-setup.sh"]
+    environment:
+      - KIBANA_URL=http://kibana:5601
+    volumes:
+      - ./analysis/honeypot-kibana-setup.sh:/usr/local/bin/honeypot-kibana-setup.sh:ro
+    networks: [honeynet]
+    depends_on:
+      kibana:
+        condition: service_started
+      elasticsearch-setup:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+  filebeat:
+    <<: *runtime-defaults
+    image: docker.elastic.co/beats/filebeat:8.13.4
+    container_name: hp-filebeat
+    restart: unless-stopped
+    user: root
+    command:
+      - filebeat
+      - -e
+      - --strict.perms=false
+    volumes:
+      - ./analysis/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      # Persist the filestream registry so recreating Filebeat does not ingest
+      # the complete historical log corpus a second time.
+      - /opt/stacks/honeypot-stack/state/filebeat:/usr/share/filebeat/data
+      - /opt/stacks/honeypot-stack/logs:/logs:ro
+      - /opt/stacks/honeypot-stack/logs/suricata:/var/log/suricata:ro
+    networks:
+      - honeynet
+    depends_on:
+      elasticsearch-setup:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "3.0"
+          memory: 2G
+  # ===================== EveBox — Suricata EVE web GUI =====================
+  evebox:
+    <<: *runtime-defaults
+    image: jasonish/evebox:latest
+    container_name: hp-evebox
+    restart: unless-stopped
+    command:
+      - evebox
+      - server
+      - --datastore
+      - sqlite
+      - -D
+      - /var/lib/evebox
+      - --input
+      - /var/log/suricata/eve.json
+      - --host
+      - 0.0.0.0
+      - --port
+      - "5636"
+      - --no-tls
+      - --no-auth
+    ports:
+      - ${HP_BIND:-10.8.0.2}:19636:5636
+    volumes:
+      - /opt/stacks/honeypot-stack/logs/suricata:/var/log/suricata:ro
+      - evebox-data:/var/lib/evebox
+    networks:
+      - honeynet
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+  # ===================== Arkime — full PCAP search & analysis =====================
+  #
+  # Image: ghcr.io/arkime/arkime/arkime:v6-latest
+  #   NOTE: three path segments (arkime/arkime/arkime) — the two-segment path
+  #   ghcr.io/arkime/arkime is the repository namespace and returns 'denied'
+  #   without authentication. The correct pullable image is the three-segment form.
+  #
+  # Consumes PCAP files written by Suricata (pcap-log output) from:
+  #   /opt/stacks/honeypot-stack/logs/suricata/pcap/
+  # Suricata rotates files matching pcap/log.%n.%t.pcap - Arkime capture watches
+  # the directory and imports each file as it is closed/rotated.
+  #
+  # Arkime stores session metadata in the existing Elasticsearch instance
+  # (hp-elasticsearch). No separate OpenSearch is needed.
+  #
+  # First-run DB init (arkime-init) runs once and exits. It bootstraps the
+  # Elasticsearch indices and creates the admin user defined in .env.
+  # --upgrade --ifneeded on the main containers keeps schema in sync on upgrades.
+  #
+  # Web UI: http://${HP_BIND}:19080 (normally proxied by the VPS gateway).
+  # Credentials: ARKIME_ADMIN_PASSWORD in .env (default: change-me-arkime)
+  # =========================================================================
+  arkime-init:
+    <<: *runtime-defaults
+    image: ghcr.io/arkime/arkime/arkime:v6-latest
+    container_name: hp-arkime-init
+    restart: no
+    command:
+      - /bin/sh
+      - -c
+      - >
+        set -e
+
+        # Wait for Elasticsearch to be ready
+
+        until curl -sf http://elasticsearch:9200/_cluster/health > /dev/null; do
+          echo "Waiting for Elasticsearch..."; sleep 5
+        done
+
+        # Bootstrap or upgrade the Arkime DB non-interactively. db.pl prompts
+
+        # ("INIT" to erase on init over an existing DB, "RED" when cluster
+
+        # health is red) and aborts without a TTY - pipe the expected answer.
+
+        # INIT is only auto-typed when no Arkime DB exists yet (DB Version -1),
+
+        # so it can never wipe existing session data.
+
+        if /opt/arkime/db/db.pl --insecure http://elasticsearch:9200 info 2>/dev/null \
+             | grep 'DB Version' | grep -vq -- '-1'; then
+          echo RED | /opt/arkime/db/db.pl --insecure http://elasticsearch:9200 upgradenoprompt
+        else
+          echo INIT | /opt/arkime/db/db.pl --insecure http://elasticsearch:9200 init
+        fi
+
+        # Create admin user (errors if it already exists - that's fine)
+
+        /opt/arkime/bin/arkime_add_user.sh admin "Admin" \
+          "${ARKIME_ADMIN_PASSWORD:-change-me-arkime}" --admin \
+          || echo "admin user already exists, keeping it"
+    volumes:
+      - ./arkime/config.ini:/opt/arkime/etc/config.ini:ro
+    environment:
+      - TZ=Europe/Berlin
+      - ARKIME_ADMIN_PASSWORD=${ARKIME_ADMIN_PASSWORD:-change-me-arkime}
+      - ARKIME__elasticsearch=http://elasticsearch:9200
+      - ARKIME__passwordSecret=${ARKIME_PASSWORD_SECRET:-change-me-in-env}
+    networks:
+      - honeynet
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+  # ===================== PCAP sync (sshfs -> local disk) =================
+  # The Suricata pcap dir is an sshfs mount from the VPS. inotify never fires
+  # across sshfs, so arkime-capture --monitor cannot see new files there.
+  # This sidecar copies rotated (closed) pcaps to a local dir where inotify
+  # works. The newest file is skipped (Suricata is still writing it).
+  # Plain cp to the final name on purpose: Arkime's monitor reacts to
+  # IN_CLOSE_WRITE only, which fires when the copy finishes -- a rename
+  # (IN_MOVED_TO) would be invisible to it.
+  # Local copies older than 50 days are pruned (~50GB, matching the VPS
+  # ring of 50000 x 1mb; the viewer needs these files for packet payloads).
+  pcap-sync:
+    <<: *runtime-defaults
+    image: busybox:latest
+    container_name: hp-pcap-sync
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - |
+        while true; do
+          newest=$$(ls -t /src 2>/dev/null | head -1)
+          for f in /src/*.pcap.*; do
+            [ -e "$$f" ] || continue
+            n=$$(basename "$$f")
+            [ "$$n" = "$$newest" ] && continue
+            [ -e "/dst/$$n" ] && continue
+            cp -p "$$f" "/dst/$$n"
+          done
+          find /dst -type f -name 'log.pcap.*' -mtime +50 -delete
+          sleep 30
+        done
+    volumes:
+      - /opt/stacks/honeypot-stack/logs/suricata/pcap:/src:ro
+      - /opt/stacks/honeypot-stack/logs/arkime-raw:/dst
+    depends_on:
+      log-init:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+  # ===================== DNP3 — electrical substation RTU =====================
+  dnp3:
+    <<: *runtime-defaults
+    build: ./dnp3-honeypot
+    container_name: hp-dnp3
+    restart: unless-stopped
+    environment:
+      - LISTEN_ADDR=:20000
+      - LOG_PATH=/var/log/honeypot/dnp3.json
+      - TZ=Europe/Berlin
+    ports:
+      - ${HP_BIND:-10.8.0.2}:20000:20000
+    volumes:
+      - /opt/stacks/honeypot-stack/logs/dnp3:/var/log/honeypot
+    networks: [honeynet]
+    depends_on:
+      log-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/dnp3-honeypot", "-healthcheck"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+  arkime-capture:
+    <<: *runtime-defaults
+    image: ghcr.io/arkime/arkime/arkime:v6-latest
+    container_name: hp-arkime-capture
+    restart: unless-stopped
+    # Offline import mode: -R watches the locally synced pcap dir (see
+    # pcap-sync above), --monitor keeps watching for new files via inotify,
+    # --skip ignores files already indexed (safe across restarts).
+    # No --update-geo: it needs MaxMind credentials and only produces
+    # "AccountID required" noise without them.
+    command: /opt/arkime/bin/docker.sh capture --wait-for-db
+      http://elasticsearch:9200 --db 'http://elasticsearch:9200 upgradenoprompt --ifneeded'
+      -- -R file:///opt/arkime/raw --monitor --skip --host honeypot-vps
+    volumes:
+      - ./arkime/config.ini:/opt/arkime/etc/config.ini:ro
+      - ./arkime/geo:/opt/arkime/geo:ro
+      - /opt/stacks/honeypot-stack/logs/arkime-raw:/opt/arkime/raw:ro
+      - arkime-pcap:/opt/arkime/pcap
+    environment:
+      - TZ=Europe/Berlin
+      - ARKIME__elasticsearch=http://elasticsearch:9200
+      - ARKIME__passwordSecret=${ARKIME_PASSWORD_SECRET:-change-me-in-env}
+      - ARKIME__dropUser=nobody
+      - ARKIME__dropGroup=daemon
+    networks:
+      - honeynet
+    depends_on:
+      arkime-init:
+        condition: service_completed_successfully
+      log-init:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 6G
+  arkime-viewer:
+    <<: *runtime-defaults
+    image: ghcr.io/arkime/arkime/arkime:v6-latest
+    container_name: hp-arkime-viewer
+    restart: unless-stopped
+    command: /opt/arkime/bin/docker.sh viewer --wait-for-db http://elasticsearch:9200
+    ports:
+      - ${HP_BIND:-10.8.0.2}:19080:8005
+    volumes:
+      - ./arkime/config.ini:/opt/arkime/etc/config.ini:ro
+      - ./arkime/geo:/opt/arkime/geo:ro
+      - /opt/stacks/honeypot-stack/logs/arkime-raw:/opt/arkime/raw:ro
+      - arkime-pcap:/opt/arkime/pcap
+    environment:
+      - TZ=Europe/Berlin
+      - ARKIME__elasticsearch=http://elasticsearch:9200
+      - ARKIME__pcapDir=/opt/arkime/raw
+      - ARKIME__passwordSecret=${ARKIME_PASSWORD_SECRET:-change-me-in-env}
+    networks:
+      - honeynet
+    depends_on:
+      arkime-init:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+  # ===================== SNARE + TANNER web-app honeypot =====================
+  # Docker-backed emulators use this disposable nested daemon. Never replace
+  # it with a bind mount of the homeserver's /var/run/docker.sock.
+  tanner_docker:
+    <<: *runtime-defaults
+    build: ./tanner/sandbox
+    container_name: hp-tanner-docker
+    restart: unless-stopped
+    privileged: true
+    environment:
+      - DOCKER_TLS_CERTDIR=
+    tmpfs:
+      - /var/lib/docker:mode=0700,size=2147483648
+      - /run:mode=0755,size=67108864
+    healthcheck:
+      test: ["CMD-SHELL", "test -e /run/tanner-sandbox-ready && docker info >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks:
+      - tanner_local
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 3G
+  tanner_redis:
+    <<: *runtime-defaults
+    build: ./tanner/redis
+    container_name: hp-tanner-redis
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - tanner_local
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+  tanner_phpox:
+    <<: *runtime-defaults
+    build: ./tanner/phpox
+    container_name: hp-tanner-phpox
+    restart: unless-stopped
+    networks:
+      - tanner_local
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+  tanner_api:
+    <<: *runtime-defaults
+    build: ./tanner/tanner
+    container_name: hp-tanner-api
+    restart: unless-stopped
+    command: tannerapi
+    tmpfs:
+      - /tmp/tanner:uid=65534,gid=65534
+      - /var/log/tanner:uid=65534,gid=65534
+    volumes:
+      - ./tanner/tanner/config.yaml:/opt/tanner/data/config.yaml:ro
+    depends_on:
+      tanner_redis:
+        condition: service_healthy
+    networks:
+      - tanner_local
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+  tanner_web:
+    <<: *runtime-defaults
+    build: ./tanner/tanner
+    container_name: hp-tanner-web
+    restart: unless-stopped
+    command: tannerweb
+    tmpfs:
+      - /tmp/tanner:uid=65534,gid=65534
+      - /var/log/tanner:uid=65534,gid=65534
+    volumes:
+      - ./tanner/tanner/config.yaml:/opt/tanner/data/config.yaml:ro
+    ports:
+      - ${HP_BIND:-10.8.0.2}:19091:8091
+    depends_on:
+      tanner_redis:
+        condition: service_healthy
+    networks:
+      - tanner_local
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+  tanner:
+    <<: *runtime-defaults
+    build: ./tanner/tanner
+    container_name: hp-tanner
+    restart: unless-stopped
+    command: tanner
+    environment:
+      - DOCKER_HOST=tcp://tanner_docker:2375
+    tmpfs:
+      - /tmp/tanner:uid=65534,gid=65534
+      - /opt/tanner/files:uid=65534,gid=65534
+    volumes:
+      - ./tanner/tanner/config.yaml:/opt/tanner/data/config.yaml:ro
+      - /opt/stacks/honeypot-stack/logs/tanner:/var/log/tanner
+    depends_on:
+      log-init:
+        condition: service_completed_successfully
+      tanner_redis:
+        condition: service_healthy
+      tanner_api:
+        condition: service_started
+      tanner_web:
+        condition: service_started
+      tanner_phpox:
+        condition: service_started
+      tanner_docker:
+        condition: service_healthy
+    networks:
+      - tanner_local
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+  snare_clone:
+    <<: *runtime-defaults
+    build:
+      context: ./snare
+      args:
+        PAGE_URL: portal.meridian.example
+        TANNER: tanner
+    container_name: hp-snare-clone
+    command:
+      - sh
+      - -c
+      - |
+        cp -a /opt/persona-pages/. /opt/snare/pages/
+    restart: no
+    volumes:
+      - snare-pages:/opt/snare/pages
+    networks:
+      - tanner_local
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+  snare:
+    <<: *runtime-defaults
+    build:
+      context: ./snare
+      args:
+        PAGE_URL: portal.meridian.example
+        TANNER: tanner
+        PORT: "8080"
+    container_name: hp-snare
+    restart: unless-stopped
+    ports:
+      - ${HP_BIND:-10.8.0.2}:19082:8080
+    volumes:
+      - /opt/stacks/honeypot-stack/logs/snare:/opt/snare
+      - snare-pages:/opt/snare/pages
+    depends_on:
+      tanner:
+        condition: service_started
+      snare_clone:
+        condition: service_completed_successfully
+      log-init:
+        condition: service_completed_successfully
+    networks:
+      - tanner_local
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+networks:
+  honeynet:
+    name: honeynet
+    driver: bridge
+  tanner_local:
+    driver: bridge
+volumes:
+  es-data: null
+  dionaea-lib: null
+  snare-pages: null
+  evebox-data: null
+  arkime-pcap: null # Arkime-processed PCAP index files
+  dashboard-state: null
+  yara-results: null

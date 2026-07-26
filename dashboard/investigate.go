@@ -1,0 +1,93 @@
+package main
+
+import (
+	"encoding/csv"
+	"net/http"
+	"net/url"
+	"sort"
+	"strconv"
+	"time"
+)
+
+type commandRow struct {
+	Sensor   string
+	Command  string
+	Count    int
+	Sources  string
+	Sessions int
+	First    string
+	Last     string
+	Link     string
+}
+
+type commandsPage struct {
+	Generated time.Time
+	Rows      []commandRow
+}
+
+func (s *store) commandsData() commandsPage {
+	type agg struct {
+		row      commandRow
+		sources  map[string]bool
+		sessions map[string]bool
+		first    time.Time
+		last     time.Time
+	}
+	groups := map[string]*agg{}
+	for _, e := range s.getEvents() {
+		if e.Command == "" {
+			continue
+		}
+		key := e.Sensor + "\x00" + e.Command
+		a := groups[key]
+		if a == nil {
+			a = &agg{row: commandRow{Sensor: e.Sensor, Command: e.Command}, sources: map[string]bool{}, sessions: map[string]bool{}}
+			groups[key] = a
+		}
+		a.row.Count++
+		a.sources[e.SrcIP], a.sessions[e.Session] = e.SrcIP != "", e.Session != ""
+		if a.first.IsZero() || e.when.Before(a.first) {
+			a.first = e.when
+		}
+		if e.when.After(a.last) {
+			a.last = e.when
+		}
+	}
+	rows := make([]commandRow, 0, len(groups))
+	for _, a := range groups {
+		a.row.Sources = sortedSet(a.sources, 6)
+		a.row.Sessions = len(a.sessions)
+		a.row.First, a.row.Last = a.first.Format("2006-01-02 15:04"), a.last.Format("2006-01-02 15:04")
+		a.row.Link = eventsURL(url.Values{"sensor": {a.row.Sensor}, "cmd": {a.row.Command}})
+		rows = append(rows, a.row)
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Count != rows[j].Count {
+			return rows[i].Count > rows[j].Count
+		}
+		return rows[i].Last > rows[j].Last
+	})
+	return commandsPage{Generated: time.Now(), Rows: rows}
+}
+
+func (s *store) exportEventsCSV(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="honeypot-events.csv"`)
+	c := csv.NewWriter(w)
+	defer c.Flush()
+	_ = c.Write([]string{"time", "sensor", "source_ip", "country", "city", "asn", "organization", "provider", "protocol", "port", "username", "password", "command", "path", "alert", "session", "payload_hash", "detail"})
+	for _, e := range parseFilter(r).filtered(s.getEvents()) {
+		_ = c.Write([]string{e.Time, e.Sensor, e.SrcIP, e.Country, e.City, strconv.FormatUint(uint64(e.ASN), 10), e.Org, firstNonEmpty(e.Intel, e.Provider), e.Proto, e.Port, e.User, e.Pass, e.Command, e.Path, e.Alert, e.Session, e.Shasum, e.Detail})
+	}
+}
+
+func (s *store) exportCommandsCSV(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="honeypot-commands.csv"`)
+	c := csv.NewWriter(w)
+	defer c.Flush()
+	_ = c.Write([]string{"sensor", "command", "count", "sources", "sessions", "first", "last"})
+	for _, row := range s.commandsData().Rows {
+		_ = c.Write([]string{row.Sensor, row.Command, strconv.Itoa(row.Count), row.Sources, strconv.Itoa(row.Sessions), row.First, row.Last})
+	}
+}

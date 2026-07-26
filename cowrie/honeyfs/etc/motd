@@ -1,0 +1,17 @@
+Linux gpu01 5.15.0-119-generic #129-Ubuntu SMP Fri Aug 2 19:25:20 UTC 2024 x86_64
+
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/pro
+
+  System information as of Sun 21 Jul 2026 00:42:18 CEST
+
+  ## gpu01 — NexusAI GPU inference and training node (production) ##
+  - GPUs:     2 x NVIDIA A100-SXM4-80GB
+  - Runtime:  NVIDIA Container Toolkit / CUDA 12.4
+  - Models:   /mnt/fs/models
+  - Service:  /opt/nexusai-inference (systemd: nexusai-inference.service)
+  - Runbook:  https://wiki.nexusai.local/ops/gpu01
+
+Expanded Security Maintenance for Applications is not enabled.
+12 updates can be applied immediately; 3 are standard security updates.

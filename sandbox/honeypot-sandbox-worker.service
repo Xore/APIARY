@@ -1,0 +1,14 @@
+[Unit]
+Description=Process queued honeypot payloads in isolated KVM guests
+After=libvirtd.service virtnetworkd.socket
+Requires=libvirtd.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/honeypot-sandbox
+ExecStart=/usr/local/libexec/honeypot-sandbox/worker.sh
+UMask=0077
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+TimeoutStartSec=20min

@@ -1,0 +1,8 @@
+00:00.0 Host bridge: Advanced Micro Devices, Inc. [AMD] Starship/Matisse Root Complex
+00:01.0 IOMMU: Advanced Micro Devices, Inc. [AMD] Starship/Matisse IOMMU
+07:00.0 3D controller: NVIDIA Corporation GA100 [A100 SXM4 80GB] (rev a1)
+0f:00.0 3D controller: NVIDIA Corporation GA100 [A100 SXM4 80GB] (rev a1)
+18:00.0 Ethernet controller: Intel Corporation Ethernet Controller X710 for 10GbE SFP+ (rev 02)
+19:00.0 Ethernet controller: Intel Corporation Ethernet Controller X710 for 10GbE SFP+ (rev 02)
+1a:00.0 Non-Volatile memory controller: Samsung Electronics Co Ltd NVMe SSD Controller PM9A1/PM9A3/980PRO (rev 01)
+1b:00.0 Non-Volatile memory controller: Samsung Electronics Co Ltd NVMe SSD Controller PM9A1/PM9A3/980PRO (rev 01)

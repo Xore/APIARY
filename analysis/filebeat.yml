@@ -1,0 +1,175 @@
+# Filebeat — tail the shared honeypot JSON logs and ship to Elasticsearch.
+#
+# Mapping strategy:
+#   Sensor logs  → honeypot-YYYY.MM.DD   (fields namespaced under honeypot.*)
+#   Suricata EVE → suricata-YYYY.MM.DD   (fields namespaced under suricata.*)
+#
+# Using separate namespaces prevents field-type collisions when two sensors
+# write the same key (e.g. "type", "src_ip") with different value types.
+# Elasticsearch 400s are almost always caused by merging all sources into root.
+
+filebeat.inputs:
+  # Honeypot sensor logs (cowrie / http / multipot / dionaea / conpot / tanner).
+  # Each sensor writes to its own subdirectory: /logs/<service>/<file>.json
+  - type: filestream
+    id: honeypot-json
+    paths:
+      - /logs/*.json
+      - /logs/cowrie/*.json
+      - /logs/http-honeypot/*.json
+      - /logs/api-honeypot/*.json
+      - /logs/multipot/*.json
+      - /logs/dionaea/dionaea.json
+      - /logs/conpot*/*.json
+      - /logs/tanner/*.json
+      - /logs/dnp3/*.json
+    # Keep an extra guard for a top-level Suricata mount. Explicit per-sensor
+    # paths above ensure incidents and portbridge metadata cannot be decoded
+    # into the shared honeypot namespace.
+    exclude_files: ['suricata']
+    parsers:
+      - ndjson:
+          target: "honeypot"   # nest parsed fields under honeypot.* to avoid root collisions
+          overwrite_keys: true
+          add_error_key: true
+    fields:
+      logset: sensors
+    fields_under_root: true
+
+  # Dionaea incidents intentionally stay as raw JSON in `message`. Different
+  # incident origins reuse the same data keys with incompatible value types;
+  # dynamically expanding them would cause Elasticsearch mapping rejections.
+  # The complete record remains searchable and the dashboard parses the file
+  # directly into normalized fields.
+  - type: filestream
+    id: dionaea-incidents-raw-v1
+    paths:
+      - /logs/dionaea/dionaea_incident.json
+    fields:
+      logset: sensors
+      sensor: dionaea
+      event_format: incident-json
+    fields_under_root: true
+
+  # Suricata IDS events (alerts, http, dns, tls, flow).
+  - type: filestream
+    id: suricata-eve
+    paths:
+      - /var/log/suricata/eve.json
+    parsers:
+      - ndjson:
+          target: "suricata"   # nest under suricata.* — matches EveBox expectations
+          overwrite_keys: true
+          add_error_key: true
+    fields:
+      logset: suricata
+    fields_under_root: true
+
+processors:
+  # Lifecycle records use an empty src_ip. Remove that field before the
+  # Elasticsearch IP mapping/GeoIP processor sees it; the record remains
+  # searchable and no longer enters the dead-letter index.
+  - drop_fields:
+      fields: ["honeypot.src_ip"]
+      ignore_missing: true
+      when.equals:
+        honeypot.src_ip: ""
+  # Attach stable defender-side identity to formats that cannot emit persona
+  # metadata themselves. Conditions use the mounted source path, never
+  # attacker-controlled content.
+  - add_fields:
+      target: honeypot
+      fields: {persona_id: nexusai-gpu01, site_id: nexusai-berlin-ml, asset_id: gpu01, organization: NexusAI Research GmbH}
+      when.contains: {log.file.path: "/logs/cowrie/"}
+  - add_fields:
+      target: honeypot
+      fields: {persona_id: meridian-legacy, site_id: meridian-hamburg-dc1, asset_id: legacy-svc-02, organization: Meridian Retail Systems Ltd.}
+      when.contains: {log.file.path: "/logs/dionaea/"}
+  - add_fields:
+      target: honeypot
+      fields: {persona_id: rheinwerk-water-s7-1200, site_id: rheinwerk-treatment, asset_id: plc-filter-02, organization: Rheinwerk Municipal Water}
+      when.contains: {log.file.path: "/logs/conpot-s7-1200/"}
+  - add_fields:
+      target: honeypot
+      fields: {persona_id: nordchem-s7-1500, site_id: nordchem-reactor-4, asset_id: plc-reactor-04, organization: NordChem Process Industries}
+      when.contains: {log.file.path: "/logs/conpot-s7-1500/"}
+  - add_fields:
+      target: honeypot
+      fields: {persona_id: elbegrid-iec104, site_id: elbegrid-substation-17, asset_id: rtu-sub17-a, organization: ElbeGrid Distribution}
+      when.contains: {log.file.path: "/logs/conpot-iec104/"}
+  - add_fields:
+      target: honeypot
+      fields: {persona_id: northfuel-guardian, site_id: northfuel-station-042, asset_id: tankmon-042, organization: NorthFuel Service GmbH}
+      when.contains: {log.file.path: "/logs/conpot-guardian/"}
+  - add_fields:
+      target: honeypot
+      fields: {persona_id: stadtwaerme-kamstrup, site_id: stadtwaerme-loop-west, asset_id: heatmeter-west-0382, organization: Stadtwaerme Nord}
+      when.contains: {log.file.path: "/logs/conpot-kamstrup/"}
+  - add_fields:
+      target: honeypot
+      fields: {persona_id: rheinwerk-water-s7-200, site_id: rheinwerk-intake, asset_id: plc-intake-01, organization: Rheinwerk Municipal Water}
+      when.contains: {log.file.path: "/logs/conpot/"}
+  - add_fields:
+      target: honeypot
+      fields: {persona_id: meridian-customer-portal, site_id: meridian-public-web, asset_id: customer-portal-02, organization: Meridian Retail Systems Ltd.}
+      when.contains: {log.file.path: "/logs/tanner/"}
+  # NOTE on stats events: they carry ~600 engine-internal counter fields and
+  # once exhausted the shared daily index's field limit (2026-07-19 outage).
+  # With per-event-type indices (see output below) they are contained in
+  # their own suricata-stats-* index, so they are shipped again. The
+  # suricata-* index template raises total_fields.limit to 5000.
+  - add_fields:
+      target: ""
+      fields:
+        pipeline: honeypot
+  # Strip filebeat internal fields that can collide with honeypot field names
+  - drop_fields:
+      fields: ["agent", "ecs", "input", "log.offset"]
+      ignore_missing: true
+
+output.elasticsearch:
+  hosts: ["http://elasticsearch:9200"]
+  # Suricata events are split per event type (suricata-alert-*, suricata-dns-*,
+  # suricata-flow-*, ...) like the SELKS/KTS layout the SN-* dashboards expect.
+  # Each SN dashboard queries only its own protocol index; the generic
+  # suricata-* data view still matches all of them.
+  indices:
+    - index: "suricata-v2-%{[suricata.event_type]}-%{+yyyy.MM.dd}"
+      when.equals:
+        logset: "suricata"
+    - index: "honeypot-v2-%{+yyyy.MM.dd}"
+      when.equals:
+        logset: "sensors"
+
+  # Preserve the original event if Elasticsearch ever rejects it despite the
+  # flattened mapping. This prevents silent data loss and records the cause.
+  non_indexable_policy.dead_letter_index:
+    index: "dead-letter-honeypot"
+
+  # Four bulk workers let Elasticsearch catch up after an outage without
+  # sacrificing durable Filebeat registry checkpoints.
+  worker: 4
+  bulk_max_size: 4096
+  compression_level: 1
+
+queue.mem:
+  events: 32768
+  flush.min_events: 4096
+  flush.timeout: 2s
+
+# Disable Filebeat's automatic template / ILM management. elasticsearch-setup
+# installs the versioned honeypot template; Suricata retains its own template.
+setup.template.enabled: false
+setup.ilm.enabled: false
+
+# In Kibana: create data views for honeypot-* and suricata-*
+# Useful fields: honeypot.src_ip, honeypot.username, honeypot.password,
+#                honeypot.proto, honeypot.category, honeypot.input
+#                suricata.src_ip, suricata.alert.signature, suricata.event_type
+logging.level: warning
+
+# Internal monitoring is reachable only on the private Compose network. The
+# custom dashboard uses it to surface publisher acknowledgements/failures.
+http.enabled: true
+http.host: 0.0.0.0
+http.port: 5066

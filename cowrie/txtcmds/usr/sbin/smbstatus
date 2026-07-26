@@ -1,0 +1,12 @@
+
+Samba version 4.15.13-Ubuntu
+PID     Username     Group        Machine                                   Protocol Version  Encryption           Signing
+----------------------------------------------------------------------------------------------------------------------------------------
+2745    svc-gpu01    domain users gpu01        (ipv4:10.10.10.42:52301)  SMB3_11           -                    AES-128-GMAC
+2745    svc-gpu01    domain users ad           (ipv4:10.10.1.10:445)     SMB3_11           AES-128-CCM          AES-128-GMAC
+
+Service      pid     Machine       Connected at                     Encryption   Signing
+---------------------------------------------------------------------------------------------
+netlogon     2745    10.10.1.10    Sun Jul 19 04:11:33 2026 CEST    AES-128-CCM  AES-128-GMAC
+sysvol       2745    10.10.1.10    Sun Jul 19 04:11:33 2026 CEST    AES-128-CCM  AES-128-GMAC
+IPC$         2745    10.10.1.10    Sun Jul 19 04:11:33 2026 CEST    -            AES-128-GMAC

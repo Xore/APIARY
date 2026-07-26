@@ -1,0 +1,32 @@
+# Cowrie credential database.
+# Only active when auth_class = UserDB in cowrie.cfg.
+# The shipped config uses AuthRandom — this file is the fallback / override.
+#
+# Format:  username:x:password
+#   *  matches any password
+#   !  denies a specific password (deny rules must precede the wildcard)
+
+root:x:!honeypot
+root:x:!root
+root:x:123456
+root:x:password
+root:x:admin
+root:x:toor
+root:x:*
+
+admin:x:admin
+admin:x:*
+
+ubuntu:x:ubuntu
+ubuntu:x:*
+
+oracle:x:oracle
+oracle:x:*
+
+pi:x:raspberry
+git:x:git
+
+# Domain service accounts (plausible for an AD-joined ML node)
+svc-gpu01:x:*
+jdoe:x:*
+asmith:x:*
