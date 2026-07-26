@@ -2,13 +2,13 @@
 elasticsearch==8.13.0
 
 # ML core
-scikit-learn==1.4.2
+scikit-learn==1.5.0
 joblib==1.4.2
 numpy==1.26.4
 pandas==2.2.2
 
 # Deep learning (CPU-only PyTorch)
-torch==2.3.0+cpu
+torch==2.12.1+cpu
 --extra-index-url https://download.pytorch.org/whl/cpu
 
 # Outlier detection (HBOS)
@@ -19,5 +19,5 @@ redis==5.0.4
 
 # Utilities
 python-dateutil==2.9.0
-requests==2.32.3
+requests==2.33.0
 loguru==0.7.2
