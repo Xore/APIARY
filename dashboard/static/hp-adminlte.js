@@ -215,8 +215,13 @@
           headers.forEach((columnHeader, index) => {
             const label = document.createElement("label");
             label.className = "d-block text-nowrap";
-            label.innerHTML = `<input class="form-check-input me-2" type="checkbox" checked> ${columnHeader.textContent.trim() || `Column ${index + 1}`}`;
-            label.querySelector("input").addEventListener("change", event => {
+            const input = document.createElement("input");
+            input.className = "form-check-input me-2";
+            input.type = "checkbox";
+            input.checked = true;
+            label.appendChild(input);
+            label.appendChild(document.createTextNode(` ${columnHeader.textContent.trim() || `Column ${index + 1}`}`));
+            input.addEventListener("change", event => {
               table.querySelectorAll("tr").forEach(row => { if (row.cells[index]) row.cells[index].hidden = !event.target.checked; });
             });
             menu.appendChild(label);
