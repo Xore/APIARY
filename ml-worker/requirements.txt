@@ -12,7 +12,7 @@ torch==2.13.0+cpu
 --extra-index-url https://download.pytorch.org/whl/cpu
 
 # Outlier detection (HBOS)
-pyod==2.0.0
+pyod==3.6.2
 
 # Redis pub/sub
 redis==5.0.4
