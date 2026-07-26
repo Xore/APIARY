@@ -1,0 +1,46 @@
+# Docker Compose for the Ghidra headless REST service + Rev·Deck AI frontend
+# Run: docker compose -f docker-compose.ghidra.yml up
+# Requires: .env file (see analysis/ghidra/revdeck/README.md)
+
+version: '3.9'
+
+services:
+  ghidra:
+    image: biniamfd/ghidra-headless-rest:1.2.1@sha256:971591a3a8448d8ed969079b452306e806f36079c3ddd298f4a618d6e2f1442d
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:9090:9090'
+    volumes:
+      - ghidra_projects:/data/ghidra_projects
+      - ./samples:/data/samples:ro   # mount samples read-only
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      ANALYSIS_TIMEOUT: '3600'   # 1h for large binaries
+    healthcheck:
+      test: ['CMD', 'curl', '-sf', 'http://localhost:9090/readyz']
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  revdeck:
+    # biniamf/ai-reverse-engineering — AI-assisted analysis frontend
+    # https://github.com/biniamf/ai-reverse-engineering
+    build:
+      context: ./revdeck/ai-reverse-engineering
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:5000:5000'
+    env_file: .env
+    environment:
+      GHIDRA_API_BASE: 'http://ghidra:9090'
+    depends_on:
+      ghidra:
+        condition: service_healthy
+    volumes:
+      - revdeck_chats:/app/webui/chats
+
+volumes:
+  ghidra_projects:
+  revdeck_chats:
