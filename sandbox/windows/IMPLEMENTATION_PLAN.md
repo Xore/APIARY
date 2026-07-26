@@ -42,13 +42,17 @@ KVM Host (Linux)
 │   └── suricata     — IDS on virbr-sandbox
 │
 └── Host-side sandbox worker (systemd path unit)
-    ├── Watches SANDBOX_REQUEST_DIR for {hash}.request files
-    │   written by the dashboard (sandbox_submit.go)
+    ├── Watches WINDOWS_SANDBOX_REQUEST_DIR for {hash}.request files
+    │   written by the dashboard (sandbox_submit.go) — routed here only
+    │   after the dashboard's determination path (see below) classifies
+    │   the payload as Windows; everything else goes to the pre-existing
+    │   Linux runner (sandbox/linux-runner.service, sandbox/worker.sh)
+    │   watching the original SANDBOX_REQUEST_DIR
     ├── virsh snapshot-revert → golden image
     ├── WinRM → copy sample, start tools, detonate
     ├── Wait observation window
     ├── Collect artifacts via SMB / virsh guest-agent
-    └── Write {hash}_sandbox.json → SANDBOX_RESULTS_DIR
+    └── Write {hash}_sandbox.json → WINDOWS_SANDBOX_RESULTS_DIR
         (dashboard reads this; no git push, no outbound connection)
 ```
 
@@ -61,8 +65,8 @@ integration (`analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md`):
 
 | Concern | Sandbox (this plan) | Ghidra (reference) |
 |---|---|---|
-| Trigger | `POST /sandbox/submit` → writes `{hash}.request` to `SANDBOX_REQUEST_DIR` | `POST /ghidra/submit` → writes `{sha256}.request` to `GHIDRA_REQUEST_DIR` |
-| Worker | Host-side systemd path unit (`honeypot-sandbox-worker.path`), never run by the dashboard | Host-side systemd path unit (`honeypot-ghidra-worker.path`) |
+| Trigger | `POST /sandbox/submit` → determines Windows vs Linux (see below), writes `{hash}.request` to `WINDOWS_SANDBOX_REQUEST_DIR` or `SANDBOX_REQUEST_DIR` accordingly, plus optionally to `GHIDRA_REQUEST_DIR` if the submit form's Ghidra checkbox was set | `POST /ghidra/submit` → writes `{sha256}.request` to `GHIDRA_REQUEST_DIR` |
+| Worker | Host-side systemd path unit (`honeypot-windows-sandbox-worker.path`), never run by the dashboard | Host-side systemd path unit (`honeypot-ghidra-worker.path`) |
 | Results | Worker writes `{hash}_sandbox.json` to `SANDBOX_RESULTS_DIR`; dashboard only reads | Worker writes `{sha256}_ghidra.json` to `GHIDRA_RESULTS_DIR`; dashboard only reads |
 | Trust boundary | Dashboard never touches Docker, libvirt, or the VM directly | Same |
 | List page | `GET /sandbox` → `sandboxData()` → `{{define "sandbox"}}` | `GET /ghidra` → `ghidraData()` |
@@ -72,6 +76,118 @@ integration (`analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md`):
 
 No new trust boundary is introduced. The dashboard container stays
 unprivileged and **never** calls `virsh`, `docker`, or WinRM directly.
+
+---
+
+## Determination Path — Windows VM vs Linux VM
+
+Today `/sandbox/submit` writes one request to one spool directory and
+assumes a single backend. With two VM backends (this Windows plan, and the
+pre-existing Linux runner at `sandbox/linux-runner.service` /
+`sandbox/run-linux-sample.sh`), the dashboard needs to pick the right one
+**per submission**, using content the dashboard already computes for every
+captured payload today.
+
+### Signal: reuse `classifyPayload` — no new classifier
+
+`dashboard/payload_kind.go`'s `classifyPayload(data []byte) payloadClassification`
+already sniffs magic bytes (`MZ` → `debug/pe`, `\x7fELF` → `debug/elf`,
+script shebangs/headers) and returns a `Platform` of `"Windows"`,
+`"Linux"`, or `"Cross-platform"` for every kind of payload the dashboard
+already stores — this is the exact same classification already shown on
+the payload detail page ("Windows PE forensics" card, etc). Routing needs
+no new detection logic, only a decision on top of the existing field.
+
+| `classifyPayload(...).Code` | `.Platform` | Routed to |
+|---|---|---|
+| `pe-exe` (Windows PE executable) | `Windows` | **Windows VM** (this plan) |
+| `pe-dll` (Windows DLL) | `Windows` | **Windows VM** — DLL is loaded via `rundll32`/a loader stub in the guest, not double-clicked |
+| `vbscript`, `batch`, `powershell`, `jscript` | `Windows` | **Windows VM** — these need `cscript.exe`/`cmd.exe`/PowerShell/Wine-equivalents that only exist in the Windows golden image |
+| `elf-exe` (Linux ELF executable) | `Linux` | **Linux VM** (pre-existing `sandbox/run-linux-sample.sh` path) |
+| `elf-library` (Linux `.so`) | `Linux` | **Linux VM** — static analysis only, `Dynamic: false`, no detonation either way |
+| `shell`, `python`, `javascript`, `php` | `Linux` / `Cross-platform` | **Linux VM** — the existing Linux runner already detonates these under `strace`; Windows adds nothing to `bash`/CPython/Node.js analysis |
+| anything with `Dynamic: false` (documents, static-only libraries) | — | **No VM at all** — static analysis only, matches existing `classifyPayload` behavior (`pdf`, `ole`, `pe-dll`, `elf-library`) |
+
+### Determination function (`dashboard/sandbox_submit.go`)
+
+```go
+type sandboxTarget string
+
+const (
+	targetWindows sandboxTarget = "windows"
+	targetLinux   sandboxTarget = "linux"
+)
+
+// determineSandboxTarget classifies the payload the same way the payload
+// detail page already does, and picks a VM backend. Only Windows-native
+// executables/DLLs/scripts need the Windows golden image; everything else
+// — including cross-platform scripts — already detonates correctly on the
+// existing Linux runner.
+func determineSandboxTarget(data []byte) (target sandboxTarget, dynamic bool) {
+	c := classifyPayload(data)
+	if !c.Dynamic {
+		return "", false // static-only payload — no VM submission possible
+	}
+	if c.Platform == "Windows" {
+		return targetWindows, true
+	}
+	return targetLinux, true // Linux and Cross-platform both run on the Linux VM
+}
+```
+
+### Updated `serveSandboxSubmit` flow
+
+1. Validate `hash`, confirm the payload exists via `s.payloadPath(hash)` —
+   unchanged.
+2. Read the payload (already required to classify it for the payloads
+   page), call `determineSandboxTarget(data)`.
+3. If `dynamic == false`: reject with `400` ("this payload has no dynamic
+   detonation path — see its static analysis instead") rather than queuing
+   a VM run that would never do anything.
+4. If `target == targetWindows`: write `{hash}.request` to
+   `WINDOWS_SANDBOX_REQUEST_DIR` (this plan's worker, Phase 7).
+5. If `target == targetLinux`: write `{hash}.request` to the existing
+   `SANDBOX_REQUEST_DIR` (unchanged — the pre-existing Linux runner already
+   watches this directory; no changes needed on that side at all).
+6. If the submit form's new **Ghidra** field (below) was checked, also
+   write `{hash}.request` (well, `{sha256}.request`) to `GHIDRA_REQUEST_DIR`
+   per `analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md` — independent of
+   which VM was chosen, since Ghidra is static analysis and applies to any
+   binary/DLL regardless of which detonation backend runs it.
+7. Redirect to `/payloads?analysis=queued&hash=…&target={target}` so the
+   payloads-page notice can say e.g. "Sandbox analysis (Windows VM)
+   requested for …" instead of a generic message.
+
+### New field: Ghidra selection on the submit form
+
+The payloads-page "Submit to sandbox" form gets one additional field —
+it does **not** replace the separate "Run Ghidra analysis" button from
+`analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md` Phase 3, it complements it
+for the common case of "detonate and statically reverse-engineer in one
+click":
+
+```html
+<form method="post" action="/sandbox/submit" class="inline">
+  <input type="hidden" name="hash" value="{{.SHA256}}">
+  <label class="checkbox">
+    <input type="checkbox" name="ghidra" value="1">
+    Also run Ghidra static analysis
+  </label>
+  <button type="submit" class="btn-sm">Submit to sandbox</button>
+</form>
+```
+
+`serveSandboxSubmit` reads `r.FormValue("ghidra") == "1"` and, if set,
+performs step 6 above. No new permission check is needed — it's gated by
+the same `requireAdmin` + `sameOriginRequest` checks already guarding the
+whole handler, and the Ghidra spool write reuses
+`analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md`'s existing
+`O_CREATE|O_EXCL` idempotent-write pattern verbatim.
+
+The dashboard never decides *which* VM Ghidra needs — Ghidra's headless
+container analyzes the binary directly and doesn't care which detonation
+backend (if any) also ran it, so the Ghidra checkbox is independent of the
+Windows/Linux determination above.
 
 ---
 
@@ -351,7 +467,7 @@ dom.revertToSnapshot(snap, libvirt.VIR_DOMAIN_SNAPSHOT_REVERT_RUNNING)
 11. docker compose stop → collect Zeek/Suricata/mitmproxy logs
 12. extract_iocs.py → ioc_extracted.json
 13. generate_report.py → report.pdf
-14. Write {hash}_sandbox.json → SANDBOX_RESULTS_DIR       ← dashboard reads this
+14. Write {hash}_sandbox.json → WINDOWS_SANDBOX_RESULTS_DIR   ← dashboard reads this
 15. virsh snapshot-revert GOLDEN_READY  (cleanup, always runs)
     NO git push. NO outbound connection.
 ```
@@ -361,7 +477,7 @@ dom.revertToSnapshot(snap, libvirt.VIR_DOMAIN_SNAPSHOT_REVERT_RUNNING)
 ## Phase 6 — Artifact Collection
 
 ```
-SANDBOX_RESULTS_DIR/{sha256}/
+WINDOWS_SANDBOX_RESULTS_DIR/{sha256}/
 ├── metadata.json
 ├── sysmon.evtx + sysmon.json
 ├── powershell_4104.evtx
@@ -381,7 +497,7 @@ SANDBOX_RESULTS_DIR/{sha256}/
 └── report.pdf
 
 # Plus the top-level result summary the dashboard reads:
-SANDBOX_RESULTS_DIR/{sha256}_sandbox.json
+WINDOWS_SANDBOX_RESULTS_DIR/{sha256}_sandbox.json
 ```
 
 ---
@@ -396,53 +512,76 @@ involvement and no outbound network connection.
 ### 7.1 Trigger flow
 
 ```
-Analyst clicks "Submit to sandbox" on /payloads
+Analyst checks (optionally) "Also run Ghidra static analysis" and clicks
+"Submit to sandbox" on /payloads
   → POST /sandbox/submit  (dashboard: sandbox_submit.go)
       validates hash, confirms payload exists via s.payloadPath(hash)
-      writes {hash}.request to SANDBOX_REQUEST_DIR  (O_CREATE|O_EXCL)
-      redirects to /payloads?analysis=queued&hash=…
+      reads payload, calls determineSandboxTarget(data)   ← see
+        "Determination Path" above
+        ├── dynamic == false → 400, no VM submission possible
+        ├── target == windows → writes {hash}.request to
+        │     WINDOWS_SANDBOX_REQUEST_DIR  (O_CREATE|O_EXCL)
+        └── target == linux   → writes {hash}.request to
+              SANDBOX_REQUEST_DIR  (unchanged, pre-existing Linux runner)
+      if ghidra=1 on the form: also writes {hash}.request to
+        GHIDRA_REQUEST_DIR (independent of target, see
+        analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md)
+      redirects to /payloads?analysis=queued&hash=…&target={target}
 
-systemd path unit (honeypot-sandbox-worker.path) detects new .request
-  → honeypot-sandbox-worker.service fires
-      runs orchestrate/run_sample.py
-      writes {hash}_sandbox.json → SANDBOX_RESULTS_DIR
-      deletes {hash}.request
-      updates status.json (queued/running/done counts)
+Windows path:
+  systemd path unit (honeypot-windows-sandbox-worker.path) detects new
+  .request in WINDOWS_SANDBOX_REQUEST_DIR
+    → honeypot-windows-sandbox-worker.service fires
+        runs orchestrate/run_sample.py (this plan)
+        writes {hash}_sandbox.json (Platform: "Windows") →
+          WINDOWS_SANDBOX_RESULTS_DIR
+        deletes {hash}.request
+        updates status.json (queued/running/done counts)
 
-Dashboard reads results
+Linux path (pre-existing, unchanged):
+  sandbox/linux-runner.service / sandbox/worker.sh detects new .request
+  in SANDBOX_REQUEST_DIR, runs sandbox/run-linux-sample.sh, writes
+  {hash}_sandbox.json (Platform: "Linux") → SANDBOX_RESULTS_DIR
+
+Dashboard reads results from BOTH result directories, merged by
+loadSandboxResults() into one list (Platform field distinguishes them)
   → GET /sandbox          → loadSandboxResults() → {{define "sandbox"}}
   → GET /sandbox/{job}    → loadSandboxResult(hash)
-  → GET /api/sandbox      → serveGandboxAPI()
+  → GET /api/sandbox      → serveSandboxAPI()
   → GET /export/sandbox/{job} → stream report.pdf or artifact zip
 ```
 
 ### 7.2 Systemd worker units
 
+Named and pathed distinctly from the pre-existing Linux worker
+(`sandbox/linux-runner.service`) so both can run on the same host without
+colliding:
+
 ```ini
-# /etc/systemd/system/honeypot-sandbox-worker.path
+# /etc/systemd/system/honeypot-windows-sandbox-worker.path
 [Unit]
-Description=Watch for honeypot sandbox detonation requests
+Description=Watch for honeypot Windows sandbox detonation requests
 After=libvirtd.service docker.service
 
 [Path]
-PathChanged=/sandbox-requests
-Unit=honeypot-sandbox-worker.service
+PathChanged=/windows-sandbox-requests
+Unit=honeypot-windows-sandbox-worker.service
 
 [Install]
 WantedBy=multi-user.target
 ```
 
 ```ini
-# /etc/systemd/system/honeypot-sandbox-worker.service
+# /etc/systemd/system/honeypot-windows-sandbox-worker.service
 [Unit]
-Description=Honeypot sandbox detonation worker (one-shot)
+Description=Honeypot Windows sandbox detonation worker (one-shot)
 After=libvirtd.service docker.service
 
 [Service]
 Type=oneshot
-ExecStart=/opt/honeypot-sandbox/run_pending.sh
-Environment=SANDBOX_REQUEST_DIR=/sandbox-requests
-Environment=SANDBOX_RESULTS_DIR=/sandbox-results
+ExecStart=/opt/honeypot-sandbox/windows/run_pending.sh
+Environment=WINDOWS_SANDBOX_REQUEST_DIR=/windows-sandbox-requests
+Environment=WINDOWS_SANDBOX_RESULTS_DIR=/windows-sandbox-results
 Environment=LIBVIRT_URI=qemu:///system
 Environment=VM_DOMAIN=win11-sandbox
 Environment=GOLDEN_SNAPSHOT=GOLDEN_READY
@@ -458,27 +597,38 @@ Environment=OBSERVATION_SECS=300
 services:
   dashboard:
     environment:
-      - SANDBOX_REQUEST_DIR=/sandbox-requests
-      - SANDBOX_RESULTS_DIR=/sandbox-results
+      - SANDBOX_REQUEST_DIR=/sandbox-requests               # Linux (unchanged)
+      - SANDBOX_RESULTS_DIR=/sandbox-results                # Linux (unchanged)
+      - WINDOWS_SANDBOX_REQUEST_DIR=/windows-sandbox-requests
+      - WINDOWS_SANDBOX_RESULTS_DIR=/windows-sandbox-results
     volumes:
-      - sandbox-requests:/sandbox-requests        # read-write (dashboard writes markers)
-      - sandbox-results:/sandbox-results:ro        # read-only (dashboard reads results)
+      - sandbox-requests:/sandbox-requests                    # read-write
+      - sandbox-results:/sandbox-results:ro                   # read-only
+      - windows-sandbox-requests:/windows-sandbox-requests    # read-write
+      - windows-sandbox-results:/windows-sandbox-results:ro   # read-only
 
 volumes:
   sandbox-requests:
   sandbox-results:
+  windows-sandbox-requests:
+  windows-sandbox-results:
 ```
 
-The host-side systemd worker owns read-write access to both volumes.
-The dashboard container **never** calls `virsh`, `docker`, or WinRM.
+Each host-side systemd worker owns read-write access to its own pair of
+volumes only — the Windows worker never sees the Linux spool and vice
+versa. The dashboard container **never** calls `virsh`, `docker`, or WinRM.
 
 ### 7.4 Environment variables (add to `.env.example`)
 
 ```dotenv
-# ── Windows sandbox dashboard integration ─────────────────────────────
+# ── Linux sandbox (pre-existing, unchanged) ───────────────────────────
 SANDBOX_REQUEST_DIR=/sandbox-requests
 SANDBOX_RESULTS_DIR=/sandbox-results
 SANDBOX_ALERT_RISK_SCORE=50
+
+# ── Windows sandbox dashboard integration (this plan) ─────────────────
+WINDOWS_SANDBOX_REQUEST_DIR=/windows-sandbox-requests
+WINDOWS_SANDBOX_RESULTS_DIR=/windows-sandbox-results
 VM_DOMAIN=win11-sandbox
 GOLDEN_SNAPSHOT=GOLDEN_READY
 VM_HOST=10.10.10.2
@@ -562,9 +712,9 @@ sandbox/windows/
 │   ├── extract_iocs.py           ← IOC extraction from EVTX + logs
 │   └── generate_report.py        ← PDF report generator
 ├── worker/
-│   ├── run_pending.sh            ← called by systemd, processes spool queue
-│   ├── honeypot-sandbox-worker.path    ← systemd path unit
-│   └── honeypot-sandbox-worker.service ← systemd oneshot service
+│   ├── run_pending.sh                          ← called by systemd, processes spool queue
+│   ├── honeypot-windows-sandbox-worker.path    ← systemd path unit
+│   └── honeypot-windows-sandbox-worker.service ← systemd oneshot service
 └── docs/
     └── golden_image_vs_snapshots.md
 ```
