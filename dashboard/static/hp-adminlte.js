@@ -538,7 +538,59 @@
 
     const headerTarget = wrapper.querySelector("[data-hp-page-header]");
     const pageContent = wrapper.querySelector("[data-hp-page-content]");
-    const mountPage = source => {
+    const refreshOverviewPreservingMap = source => {
+      const currentLive = pageContent.querySelector("#panel-live");
+      const incomingLive = source.querySelector("#panel-live");
+      const mapCard = currentLive?.querySelector(":scope > [data-attack-map-card]");
+      const incomingMap = incomingLive?.querySelector(":scope > [data-attack-map-card]");
+      if (!currentLive || !incomingLive || !mapCard || !incomingMap) return false;
+
+      const pageHeader = source.querySelector(":scope > header");
+      headerTarget.replaceChildren(...(pageHeader ? [pageHeader] : []));
+      source.querySelector(":scope > footer")?.remove();
+
+      const childKey = element => {
+        if (element.id) return `#${element.id}`;
+        if (element.matches(".row.g-3")) return "overview-kpis";
+        if (element.matches(".dashboard-tabs")) return "overview-tabs";
+        return "";
+      };
+      [...source.children].forEach(incoming => {
+        if (incoming === incomingLive) return;
+        const key = childKey(incoming);
+        if (!key) return;
+        const current = key.startsWith("#")
+          ? pageContent.querySelector(`:scope > ${key}`)
+          : pageContent.querySelector(key === "overview-kpis" ? ":scope > .row.g-3" : ":scope > .dashboard-tabs");
+        current?.replaceWith(incoming);
+      });
+
+      // Rebuild the live panel around the existing map node. The Leaflet
+      // container never leaves the connected DOM, so its viewport is untouched.
+      [...currentLive.children].forEach(child => {
+        if (child !== mapCard) child.remove();
+      });
+      let afterMap = false;
+      [...incomingLive.children].forEach(incoming => {
+        if (incoming === incomingMap) {
+          afterMap = true;
+          return;
+        }
+        if (afterMap) currentLive.appendChild(incoming);
+        else currentLive.insertBefore(incoming, mapCard);
+      });
+      source.remove();
+      return true;
+    };
+
+    const mountPage = (source, options = {}) => {
+      if (options.preserveMap && refreshOverviewPreservingMap(source)) {
+        normalizeControls(pageContent);
+        normalizeCards(pageContent);
+        enhanceTables(pageContent);
+        initLazyViews(pageContent);
+        return;
+      }
       const pageHeader = source.querySelector(":scope > header");
       headerTarget.replaceChildren(...(pageHeader ? [pageHeader] : []));
       source.querySelector(":scope > footer")?.remove();
