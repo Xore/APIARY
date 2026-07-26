@@ -1,6 +1,6 @@
 # dashboard — multi-stage Go build
 # Reads honeypot JSON logs from /logs and serves a live analysis UI.
-FROM golang:1.23-alpine AS builder
+FROM golang:1.26-alpine AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
 COPY vendor ./vendor
