@@ -8,7 +8,7 @@ COPY static ./static
 COPY *.go .
 RUN CGO_ENABLED=0 GOOS=linux go build -mod=vendor -trimpath -ldflags "-s -w" -o /dashboard .
 
-FROM alpine:3.20
+FROM alpine:3.24
 RUN apk add --no-cache ca-certificates tzdata
 COPY --from=builder /dashboard /usr/local/bin/dashboard
 EXPOSE 8080
