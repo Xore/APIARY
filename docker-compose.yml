@@ -280,6 +280,10 @@ services:
       - ASSET_ID=web-edge-01
       - ORGANIZATION=NexusAI Research GmbH
       - LOG_FILE=/var/log/honeypot/http.json
+      # Parse the PROXY header portbridge prepends on raw port 8081 (":pp"
+      # rule); the listener sniffs it, so Traefik-routed requests (no header)
+      # keep working and are attributed via XFF from the tunnel peer instead.
+      - PROXY_PROTOCOL=1
       - TZ=Europe/Berlin
     security_opt:
       - no-new-privileges:true
@@ -334,7 +338,17 @@ services:
     ports:
       - ${HP_BIND:-10.8.0.2}:19090:8080
     volumes:
-      - /opt/stacks/honeypot-stack/logs:/logs:ro
+      # rslave propagation: /logs/portbridge and /logs/suricata are sshfs
+      # mounts from the VPS on the host. They must be established BEFORE this
+      # container starts (never x-systemd.automount — autofs triggers return
+      # EPERM to container processes), and rslave lets later host-side
+      # remounts propagate in without recreating the container.
+      - type: bind
+        source: /opt/stacks/honeypot-stack/logs
+        target: /logs
+        read_only: true
+        bind:
+          propagation: rslave
       # Optional GeoIP: drop a "start_ip,end_ip,country" CSV as
       # dashboard/geoip/country.csv (DB-IP lite export works as-is). Absent →
       # geo stays off; cf-ipcountry still enriches tanner/http events.
@@ -511,6 +525,10 @@ services:
       - CONPOT_LOG=/var/log/conpot/conpot.log
       - CONPOT_JSON_LOG=/var/log/conpot/conpot.json
       - CONPOT_TMP=/tmp/conpot
+      # gevent PROXY shim baked into the image (conpot/proxy_patch.py): consume
+      # the PROXY header portbridge prepends (":pp" rules) and log the real
+      # attacker IP instead of tunnel peer 10.8.0.1.
+      - CONPOT_PROXY_PROTOCOL=1
       - TZ=Europe/Berlin
     tmpfs:
       - /tmp/conpot:uid=2000,gid=2000
@@ -550,6 +568,10 @@ services:
       - CONPOT_LOG=/var/log/conpot/conpot.log
       - CONPOT_JSON_LOG=/var/log/conpot/conpot.json
       - CONPOT_TMP=/tmp/conpot
+      # gevent PROXY shim baked into the image (conpot/proxy_patch.py): consume
+      # the PROXY header portbridge prepends (":pp" rules) and log the real
+      # attacker IP instead of tunnel peer 10.8.0.1.
+      - CONPOT_PROXY_PROTOCOL=1
       - TZ=Europe/Berlin
     tmpfs: ["/tmp/conpot:uid=2000,gid=2000"]
     ports:
@@ -575,6 +597,10 @@ services:
       - CONPOT_LOG=/var/log/conpot/conpot.log
       - CONPOT_JSON_LOG=/var/log/conpot/conpot.json
       - CONPOT_TMP=/tmp/conpot
+      # gevent PROXY shim baked into the image (conpot/proxy_patch.py): consume
+      # the PROXY header portbridge prepends (":pp" rules) and log the real
+      # attacker IP instead of tunnel peer 10.8.0.1.
+      - CONPOT_PROXY_PROTOCOL=1
       - TZ=Europe/Berlin
     tmpfs: ["/tmp/conpot:uid=2000,gid=2000"]
     ports:
@@ -601,6 +627,10 @@ services:
       - CONPOT_LOG=/var/log/conpot/conpot.log
       - CONPOT_JSON_LOG=/var/log/conpot/conpot.json
       - CONPOT_TMP=/tmp/conpot
+      # gevent PROXY shim baked into the image (conpot/proxy_patch.py): consume
+      # the PROXY header portbridge prepends (":pp" rules) and log the real
+      # attacker IP instead of tunnel peer 10.8.0.1.
+      - CONPOT_PROXY_PROTOCOL=1
       - TZ=Europe/Berlin
     tmpfs: ["/tmp/conpot:uid=2000,gid=2000"]
     ports: ["${HP_BIND:-10.8.0.2}:2404:2404"]
@@ -624,6 +654,10 @@ services:
       - CONPOT_LOG=/var/log/conpot/conpot.log
       - CONPOT_JSON_LOG=/var/log/conpot/conpot.json
       - CONPOT_TMP=/tmp/conpot
+      # gevent PROXY shim baked into the image (conpot/proxy_patch.py): consume
+      # the PROXY header portbridge prepends (":pp" rules) and log the real
+      # attacker IP instead of tunnel peer 10.8.0.1.
+      - CONPOT_PROXY_PROTOCOL=1
       - TZ=Europe/Berlin
     tmpfs: ["/tmp/conpot:uid=2000,gid=2000"]
     ports: ["${HP_BIND:-10.8.0.2}:10001:10001"]
@@ -647,6 +681,10 @@ services:
       - CONPOT_LOG=/var/log/conpot/conpot.log
       - CONPOT_JSON_LOG=/var/log/conpot/conpot.json
       - CONPOT_TMP=/tmp/conpot
+      # gevent PROXY shim baked into the image (conpot/proxy_patch.py): consume
+      # the PROXY header portbridge prepends (":pp" rules) and log the real
+      # attacker IP instead of tunnel peer 10.8.0.1.
+      - CONPOT_PROXY_PROTOCOL=1
       - TZ=Europe/Berlin
     tmpfs: ["/tmp/conpot:uid=2000,gid=2000"]
     ports:
@@ -965,6 +1003,9 @@ services:
     environment:
       - LISTEN_ADDR=:20000
       - LOG_PATH=/var/log/honeypot/dnp3.json
+      # Parse the PROXY header portbridge prepends (":pp" rule on 20000) so
+      # events carry the real attacker IP instead of tunnel peer 10.8.0.1.
+      - PROXY_PROTOCOL=1
       - TZ=Europe/Berlin
     ports:
       - ${HP_BIND:-10.8.0.2}:20000:20000

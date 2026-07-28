@@ -32,7 +32,6 @@ analysis/geoip/*.mmdb
 analysis/geoip/*.tar.gz
 dashboard/geoip/country.csv
 vps/auth-backups/
-vps/forward-auth/data/
 
 # Build and test output
 *.exe

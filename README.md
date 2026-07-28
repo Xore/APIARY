@@ -30,7 +30,7 @@ optional on-demand `geoip-update` maintenance job. Two deployment pieces:
 | Piece | Runs on | What |
 |---|---|---|
 | this repository ([home stack](.)) | **home** | every home sensor (Cowrie, multipot, Dionaea, Conpot, HTTP/API, SNARE/TANNER), dashboard, ELK, EveBox, and Arkime |
-| [`vps/`](vps/) | **VPS** | Traefik, forward-auth, portbridge raw tunnels, Suricata, and HTTP bridges |
+| [`vps/`](vps/) | **VPS** | Traefik, portbridge raw tunnels, Suricata, and HTTP bridges (SSO via [Xore/auth-backend](https://github.com/Xore/auth-backend)) |
 
 ## Sensors
 
@@ -112,9 +112,12 @@ at 25 MiB with three files, independently from sensor event files under
 
 Each is bridged to the VPS by its own `socat-hp-*` service (the [reverse-proxy](../reverse-proxy/)
 pattern — one socat per service, the reliable/consistent way) and routed by
-Traefik with the shared `forward-auth` middleware. Configure the integrated
-`auth-portal` service through `/root/vps/.env`, then point proxied Cloudflare
-records at the VPS for each subdomain.
+Traefik with the shared `forward-auth` middleware. The auth portal is NOT part
+of this stack anymore — deploy the standalone
+[Xore/auth-backend](https://github.com/Xore/auth-backend) stack onto the VPS's
+`proxy` network (it provides the `auth-portal` container the middleware
+resolves by name), then point proxied Cloudflare records at the VPS for each
+subdomain.
 
 ### SNARE + TANNER
 
@@ -182,15 +185,20 @@ Web UI: `http://<HP_BIND>:19080` (`arkime.<domain>` via Traefik).
 > recovers the real attacker IP three ways:
 >
 > - **PROXY protocol.** portbridge rules tagged `:pp` prepend a HAProxy PROXY v1
->   header carrying the real client address. **cowrie** (via a Twisted
->   `haproxy:` endpoint) and **multipot** (`PROXY_PROTOCOL=1`) parse it, so every
->   SSH/telnet/redis/… event logs the true IP and port.
-> - **X-Forwarded-For.** The **HTTP** honeypots keep the real client IP from
->   Traefik/Cloudflare (`cf-connecting-ip` also yields a free country code).
+>   header carrying the real client address. **multipot** and the
+>   **http/api-honeypots** (`PROXY_PROTOCOL=1`), **dnp3** (`PROXY_PROTOCOL=1`)
+>   and **all conpot sensors** (`CONPOT_PROXY_PROTOCOL=1`, gevent shim baked in
+>   by `conpot/proxy_patch.py`) parse it, so those events log the true IP and
+>   port. The http listener sniffs the header, so Traefik-routed requests (no
+>   header) keep working too.
+> - **X-Forwarded-For.** Traefik-routed **HTTP** requests arrive from the tunnel
+>   peer with Traefik's XFF; the http-honeypot trusts XFF only from that peer.
 > - **portbridge connection log.** For sensors that can't parse PROXY
->   (**dionaea**, **conpot**), portbridge's `CONN_LOG` records the real IP per
->   connection; ship that dir to the home stack (same mount pattern as Suricata)
->   and the dashboard attributes those ports too.
+>   (**cowrie** — Twisted's `haproxy:` endpoint parses but does not apply the
+>   address — and **dionaea**), portbridge's `CONN_LOG` records the real IP per
+>   connection; ship that dir to the home stack (same mount pattern as
+>   Suricata, but **without `x-systemd.automount`** — autofs triggers return
+>   EPERM to container processes) and the dashboard joins it by source port.
 >
 > Suricata already sees real IPs (it sniffs the public interface on the VPS).
 > Net result: the live dashboard can pivot on a single attacker IP across every

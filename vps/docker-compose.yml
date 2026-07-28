@@ -1,6 +1,13 @@
-# VPS — Traefik reverse proxy + socat bridges + auth-portal
+# VPS — Traefik reverse proxy + socat bridges
 # Every socat service must be on the 'proxy' network so Traefik can reach it.
 # The socat command forwards from the proxy network into the WireGuard tunnel (10.8.0.2).
+#
+# SSO/forward-auth for this stack's admin surfaces lives in the standalone
+# repository https://github.com/Xore/auth-backend (deploy it separately, e.g.
+# at /root/auth-backend). It runs an `auth-portal` container attached to this
+# stack's `proxy` network; the `forward-auth` middleware and the `auth-portal`
+# router/service in traefik/dynamic.yml resolve that container by name. This
+# compose file deliberately does NOT build or run forward-auth anymore.
 #
 # Home server WireGuard IP: 10.8.0.2
 # Each port here must match the port the app binds to on the home server.
@@ -41,86 +48,6 @@ services:
         limits:
           cpus: "0.5"
           memory: 128M
-
-  # ===== AUTH PORTAL =====
-  auth-portal:
-    build:
-      context: ./forward-auth
-      dockerfile: Dockerfile
-    image: xore-auth-portal:local
-    container_name: auth-portal
-    restart: unless-stopped
-    environment:
-      - LISTEN_ADDR=:4181
-      - AUTH_HOST=${AUTH_HOST:-auth.honeypot.example}
-      - COOKIE_DOMAIN=${COOKIE_DOMAIN:-.honeypot.example}
-      - COOKIE_NAME=${COOKIE_NAME:-xore_sso}
-      - COOKIE_SECRET=${COOKIE_SECRET:?set COOKIE_SECRET in .env}
-      - COOKIE_SECRET_PREVIOUS=${COOKIE_SECRET_PREVIOUS:-}
-      # bootstrap only — used once to create the initial admin in users.json
-      - AUTH_USERNAME=${AUTH_USERNAME:-admin}
-      - AUTH_PASSWORD=${AUTH_PASSWORD:?set AUTH_PASSWORD in .env}
-      - TOTP_SECRET=${TOTP_SECRET:-}
-      - USERS_FILE=/data/users.json
-      - REQUIRE_TOTP=${REQUIRE_TOTP:-true}
-      - TRUST_DEVICE_DAYS=${TRUST_DEVICE_DAYS:-0}
-      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-}
-      - WEBHOOK_URL=${WEBHOOK_URL:-}
-      - METRICS_TOKEN=${METRICS_TOKEN:-}
-      - TOTP_ISSUER=${TOTP_ISSUER:-}
-      - SESSION_TTL_HOURS=${SESSION_TTL_HOURS:-12}
-      - MAX_ATTEMPTS=${MAX_ATTEMPTS:-5}
-      - LOCKOUT_MINUTES=${LOCKOUT_MINUTES:-15}
-      - MIN_DWELL_SECONDS=${MIN_DWELL_SECONDS:-2}
-      - FORM_TTL_MINUTES=${FORM_TTL_MINUTES:-15}
-      - COOKIE_SECURE=${COOKIE_SECURE:-true}
-      - MAX_BODY_KB=${MAX_BODY_KB:-64}
-      - TZ=Europe/Berlin
-    volumes:
-      - auth-data:/data
-    read_only: true
-    tmpfs:
-      - /tmp:size=8m,mode=1777
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    healthcheck:
-      test: ["CMD", "/usr/local/bin/forward-auth", "-healthcheck"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 5s
-    networks:
-      - proxy
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 32M
-
-  # Guarded one-shot recovery tool. It is excluded from normal startup by its
-  # profile and can access only the auth-data volume plus a local backup folder.
-  # See docs/AUTH-PORTAL-CREDENTIAL-RECOVERY.md before running it.
-  auth-credentials-reset:
-    image: alpine:3.20
-    profiles: [auth-maintenance]
-    restart: "no"
-    network_mode: none
-    environment:
-      - AUTH_RESET_CONFIRM=${AUTH_RESET_CONFIRM:-}
-    entrypoint: ["/bin/sh", "/usr/local/sbin/reset-auth-data"]
-    volumes:
-      - auth-data:/data
-      - ./auth-backups:/backup
-      - ./forward-auth/reset-auth-data.sh:/usr/local/sbin/reset-auth-data:ro
-    security_opt:
-      - no-new-privileges:true
-    deploy:
-      resources:
-        limits:
-          cpus: "0.25"
-          memory: 32M
 
   socat-static:
     image: alpine/socat:latest
@@ -237,28 +164,59 @@ services:
     restart: unless-stopped
     network_mode: host
     # PROXY protocol (":pp" suffix) preserves the real attacker IP across the
-    # WireGuard hop. It is enabled ONLY for sensors that parse the PROXY header:
-    #   - multipot ports (25/5432/5900/6379/9200/2375) with PROXY_PROTOCOL=1
+    # WireGuard hop. It is enabled for every sensor that parses the header:
+    #   - multipot (25/5432/5900/6379/9200/2375) with PROXY_PROTOCOL=1
+    #   - http-honeypot (8081) and api-honeypot (8888) with PROXY_PROTOCOL=1 —
+    #     their listener sniffs the header, so Traefik-routed requests (which
+    #     arrive without one via socat-hp-http) keep working
+    #   - dnp3 (20000) with PROXY_PROTOCOL=1
+    #   - all conpot TCP ports (102/1102/2102, 502/1502/2502, 2404, 10001,
+    #     1025, 50100, 44818) via the gevent PROXY shim baked into the conpot
+    #     image (conpot/proxy_patch.py, CONPOT_PROXY_PROTOCOL=1)
     # cowrie ssh/telnet (22/23) do NOT use :pp: Twisted 26.4.0's "haproxy:"
-    # endpoint failed to apply the parsed address, so cowrie runs plain tcp
-    # endpoints and its real IPs come from the CONN_LOG below instead.
-    # It is NOT enabled for dionaea (21/69/135/445/1433/1723/1883/1900/3306/
-    # 5060/9100/11211/27017), DNP3 (20000), or conpot
-    # (102/1102/2102, 502/1502/2502, 2404 and other OT ports) — those would
-    # choke on the header bytes. For those,
-    # CONN_LOG records the real IP per connection instead; that file must be
-    # shipped to the home stack (same sshfs/NFS mount pattern as suricata) so
-    # the dashboard can attribute the raw ports too.
-    # http (8081) stays PROXY-free: it is reached via Traefik, which supplies a
-    # trusted X-Forwarded-For already.
+    # endpoint parses but does not apply the PROXY address (verified: getPeer()
+    # still returns the tunnel peer), so cowrie runs plain tcp endpoints and
+    # its real IPs come from the CONN_LOG below instead.
+    # dionaea (21/69/135/445/1433/1723/1883/1900/3306/5060/9100/11211/27017)
+    # cannot parse the header either — CONN_LOG covers it too. That file must
+    # be shipped to the home stack (same sshfs/NFS mount pattern as suricata,
+    # WITHOUT x-systemd.automount — autofs triggers return EPERM to container
+    # processes) so the dashboard can attribute the raw ports.
     environment:
       - LISTEN_IP=0.0.0.0
       - CONN_LOG=/logs/portbridge/portbridge.json
-      - "RULES=tcp:22:10.8.0.2:19022 tcp:23:10.8.0.2:19023 tcp:25:10.8.0.2:19025:pp tcp:5432:10.8.0.2:5432:pp tcp:5900:10.8.0.2:5900:pp tcp:6379:10.8.0.2:6379:pp tcp:9200:10.8.0.2:9200:pp tcp:2375:10.8.0.2:2375:pp tcp:8888:10.8.0.2:18083:pp tcp:8081:10.8.0.2:19081 tcp:21:10.8.0.2:21 tcp:135:10.8.0.2:135 tcp:445:10.8.0.2:445 tcp:1433:10.8.0.2:1433 tcp:3306:10.8.0.2:3306 tcp:27017:10.8.0.2:27017 tcp:1723:10.8.0.2:1723 tcp:1883:10.8.0.2:1883 tcp:5060:10.8.0.2:5060 tcp:9100:10.8.0.2:9100 tcp:11211:10.8.0.2:11211 tcp:20000:10.8.0.2:20000 tcp:102:10.8.0.2:102 tcp:1102:10.8.0.2:1102 tcp:2102:10.8.0.2:2102 tcp:502:10.8.0.2:502 tcp:1502:10.8.0.2:1502 tcp:2502:10.8.0.2:2502 tcp:2404:10.8.0.2:2404 tcp:10001:10.8.0.2:10001 tcp:1025:10.8.0.2:1025 tcp:50100:10.8.0.2:50100 tcp:44818:10.8.0.2:44818 udp:69:10.8.0.2:1069 udp:161:10.8.0.2:19161 udp:1900:10.8.0.2:1900 udp:47808:10.8.0.2:47808 udp:623:10.8.0.2:623 udp:5060:10.8.0.2:5060"
+      - "RULES=tcp:22:10.8.0.2:19022 tcp:23:10.8.0.2:19023 tcp:25:10.8.0.2:19025:pp tcp:5432:10.8.0.2:5432:pp tcp:5900:10.8.0.2:5900:pp tcp:6379:10.8.0.2:6379:pp tcp:9200:10.8.0.2:9200:pp tcp:2375:10.8.0.2:2375:pp tcp:8888:10.8.0.2:18083:pp tcp:8081:10.8.0.2:19081:pp tcp:21:10.8.0.2:21 tcp:135:10.8.0.2:135 tcp:445:10.8.0.2:445 tcp:1433:10.8.0.2:1433 tcp:3306:10.8.0.2:3306 tcp:27017:10.8.0.2:27017 tcp:1723:10.8.0.2:1723 tcp:1883:10.8.0.2:1883 tcp:5060:10.8.0.2:5060 tcp:9100:10.8.0.2:9100 tcp:11211:10.8.0.2:11211 tcp:20000:10.8.0.2:20000:pp tcp:102:10.8.0.2:102:pp tcp:1102:10.8.0.2:1102:pp tcp:2102:10.8.0.2:2102:pp tcp:502:10.8.0.2:502:pp tcp:1502:10.8.0.2:1502:pp tcp:2502:10.8.0.2:2502:pp tcp:2404:10.8.0.2:2404:pp tcp:10001:10.8.0.2:10001:pp tcp:1025:10.8.0.2:1025:pp tcp:50100:10.8.0.2:50100:pp tcp:44818:10.8.0.2:44818:pp udp:69:10.8.0.2:1069 udp:161:10.8.0.2:19161 udp:1900:10.8.0.2:1900 udp:47808:10.8.0.2:47808 udp:623:10.8.0.2:623 udp:5060:10.8.0.2:5060"
     volumes:
       # portbridge connection log — ship this dir to the home stack's
       # /opt/stacks/honeypot-stack/logs/portbridge so the dashboard ingests it.
       - /opt/stacks/honeypot-stack/logs/portbridge:/logs/portbridge
+
+  # Bounds the portbridge connection log (copytruncate: the writer keeps its
+  # O_APPEND fd). Keeps the file small enough that the home dashboard's 8 MiB
+  # tail read always covers the same recent-connection window as the sensor
+  # logs it is joined against.
+  portbridge-log-rotate:
+    image: busybox:1.36
+    container_name: hp-portbridge-log-rotate
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - |
+        while true; do
+          f=/logs/portbridge/portbridge.json
+          if [ -f "$$f" ] && [ $$(stat -c %s "$$f") -gt 67108864 ]; then
+            cp "$$f" "$$f.1" 2>/dev/null && : > "$$f"
+          fi
+          sleep 300
+        done
+    volumes:
+      - /opt/stacks/honeypot-stack/logs/portbridge:/logs/portbridge
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 32M
 
   socat-hp-http:
     image: alpine/socat:latest
@@ -397,4 +355,3 @@ networks:
 volumes:
   go-cache:
   suricata-rules:
-  auth-data:

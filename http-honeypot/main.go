@@ -83,18 +83,25 @@ func getenv(k, def string) string {
 	return def
 }
 
-func clientIP(r *http.Request, trustXFF bool) string {
-	// If fronted by a trusted proxy (Traefik/Cloudflare), trust the first XFF
-	// hop. When reached raw through portbridge, XFF is attacker-controlled — the
-	// PROXY-protocol RemoteAddr is authoritative, so ignore XFF entirely.
-	if trustXFF {
+// tunnelPeerIP is the WireGuard address of the VPS edge. Requests arriving
+// from it came through Traefik -> socat (Traefik sets X-Forwarded-For) or
+// through a raw portbridge rule without ":pp". Only from that peer may
+// X-Forwarded-For be consulted; everywhere else it is attacker-controlled.
+const tunnelPeerIP = "10.8.0.1"
+
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	// Behind a ":pp" portbridge rule the PROXY-aware listener has already
+	// rewritten RemoteAddr to the real attacker address — it wins over any
+	// header. Traefik-routed requests still show the tunnel peer, so take the
+	// first XFF hop Traefik recorded.
+	if host == tunnelPeerIP {
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 			return strings.TrimSpace(strings.Split(xff, ",")[0])
 		}
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
 	}
 	return host
 }
@@ -157,7 +164,6 @@ type server struct {
 	site      string
 	asset     string
 	org       string
-	trustXFF  bool // trust X-Forwarded-For (true behind Traefik; false raw via portbridge)
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -171,7 +177,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Site:      s.site,
 		Asset:     s.asset,
 		Org:       s.org,
-		SrcIP:     clientIP(r, s.trustXFF),
+		SrcIP:     clientIP(r),
 		Method:    r.Method,
 		Host:      r.Host,
 		Path:      r.URL.Path,
@@ -391,9 +397,10 @@ func main() {
 		os.Exit(0)
 	}
 
-	// PROXY_PROTOCOL=1: fronted by portbridge with a PROXY header carrying the
-	// real attacker IP. In that mode X-Forwarded-For is attacker-controlled and
-	// must not be trusted — the PROXY RemoteAddr wins instead.
+	// PROXY_PROTOCOL=1: fronted by portbridge with a ":pp" rule, which prepends
+	// a PROXY header carrying the real attacker IP. The listener sniffs the
+	// header, so Traefik-routed requests (no PROXY header, peer 10.8.0.1) keep
+	// working too; clientIP decides per request whether XFF may be trusted.
 	proxy := getenv("PROXY_PROTOCOL", "") == "1"
 
 	s := &server{
@@ -404,7 +411,6 @@ func main() {
 		site:      getenv("SITE_ID", "nexusai-eu-edge"),
 		asset:     getenv("ASSET_ID", "web-edge-01"),
 		org:       getenv("ORGANIZATION", "NexusAI Research GmbH"),
-		trustXFF:  !proxy,
 	}
 
 	addr := getenv("LISTEN_ADDR", ":8080")

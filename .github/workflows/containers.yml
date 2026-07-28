@@ -31,8 +31,6 @@ jobs:
             context: portbridge
           - image: tftp-relay
             context: tftp-relay
-          - image: forward-auth
-            context: vps/forward-auth
           - image: vps-portbridge
             context: vps/portbridge
     steps:

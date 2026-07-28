@@ -141,6 +141,12 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	// PROXY_PROTOCOL=1: fronted by portbridge with a ":pp" rule, which prepends
+	// a PROXY header carrying the real attacker IP. Without it every session
+	// would be logged from the WireGuard tunnel peer 10.8.0.1.
+	if os.Getenv("PROXY_PROTOCOL") == "1" {
+		ln = &proxyListener{ln}
+	}
 	log := newLogger(os.Getenv("LOG_PATH"))
 	for {
 		c, err := ln.Accept()

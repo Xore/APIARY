@@ -21,7 +21,6 @@ updates:
       - /multipot
       - /portbridge
       - /tftp-relay
-      - /vps/forward-auth
       - /vps/portbridge
     schedule:
       interval: weekly
@@ -56,7 +55,6 @@ updates:
       - /multipot
       - /portbridge
       - /tftp-relay
-      - /vps/forward-auth
       - /vps/portbridge
     schedule:
       interval: weekly
