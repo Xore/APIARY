@@ -364,18 +364,22 @@ commands/credentials, payloads, enriched IDS alerts, and ingest failures.
   without a separate legend. The responsive navigation becomes an accessible
   menu on narrow displays, and light, dark, and automatic themes remain
   available.
-  The frontend uses the native **AdminLTE 4.1.0** application shell and
-  Bootstrap components, plus vendored Bootstrap Icons 1.13.1. It is fully
-  self-contained: AdminLTE, Bootstrap Icons, the small data-visualization
-  compatibility layer, and Leaflet are served from the dashboard binary
-  rather than a CDN.
-  The fixed desktop sidebar becomes an off-canvas navigation panel on narrow
-  screens, while the application toolbar keeps activity, health, and theme
-  controls available across every investigation page.
-  The toolbar also routes IP addresses, payload hashes, session IDs, ASNs,
+  The frontend follows the shared [**Xore/theme**](https://github.com/Xore/theme)
+  design system (migration guide:
+  [MIGRATE-HONEYPOT-STACK.md](https://github.com/Xore/theme/blob/main/docs/MIGRATE-HONEYPOT-STACK.md)):
+  a semantic, server-rendered application shell (toolbar, sidebar, main
+  canvas, command bar) styled by the vendored `theme.css` plus a small
+  compiled Tailwind utility layer. It is fully self-contained: the theme,
+  the dashboard-specific layer, and Leaflet are served from the dashboard
+  binary rather than a CDN.
+  The fixed desktop sidebar becomes a compact rail and then an off-canvas
+  navigation panel on narrow screens, while the 32px application toolbar keeps
+  activity, health, and theme controls (dark, light, system) available across
+  every investigation page.
+  The command bar also routes IP addresses, payload hashes, session IDs, ASNs,
   HTTP paths, and free-text input directly to the appropriate investigation.
   Event results use server-side pagination (25 rows by default; `per_page`
-  accepts 25–500), and native AdminLTE tools collapse or maximize cards.
+  accepts 25–500).
   Every longer table and API-fed list initially displays 25 entries, then
   reveals the next 25 near the end of the page or through an accessible
   **Load 25 more** control. This also covers payloads, alerts, sandbox results,
@@ -391,7 +395,7 @@ commands/credentials, payloads, enriched IDS alerts, and ingest failures.
   provider classes shared by multiple source IPs. Campaign rows now explain
   exactly which cross-sensor, credential, payload, alert, or fingerprint factors
   produced their correlation score. The navbar alert badge shows unacknowledged
-  alert state, while source health uses AdminLTE info boxes for feeds,
+  alert state, while source health uses neutral metric tiles for feeds,
   Elasticsearch, Filebeat, and dead letters.
   `/api/campaigns` exposes the same correlation data. A balanced recent feed
   prevents one noisy sensor from hiding lower-volume sensors. The

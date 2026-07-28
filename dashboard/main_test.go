@@ -1,6 +1,7 @@
 package main
 
 import (
+	"html/template"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -399,17 +400,15 @@ func TestCompactTextKeepsShortValuesAndEllipsizesLongValues(t *testing.T) {
 	}
 }
 
-func TestAdminLTEAssetsAreEmbeddedAndReferenced(t *testing.T) {
+func TestTailwindAssetsAreEmbeddedAndReferenced(t *testing.T) {
 	assets := map[string]int{
-		"static/adminlte-4.1.0.min.css":         250000,
-		"static/adminlte-4.1.0.min.js":          20000,
-		"static/bootstrap-icons-1.13.1.min.css": 50000,
-		"static/fonts/bootstrap-icons.woff":     100000,
-		"static/fonts/bootstrap-icons.woff2":    100000,
-		"static/hp-adminlte.css":                3000,
-		"static/hp-adminlte.js":                 8000,
-		"static/ADMINLTE-LICENSE.txt":           1000,
-		"static/BOOTSTRAP-ICONS-LICENSE.txt":    1000,
+		"static/hp-tailwind.css":     10000,
+		"static/theme.css":           10000,
+		"static/hp-api.js":           500,
+		"static/hp-app.js":           8000,
+		"static/leaflet.css":         10000,
+		"static/leaflet.js":          100000,
+		"static/LEAFLET-LICENSE.txt": 1000,
 	}
 	for name, minimum := range assets {
 		data, err := staticAssets.ReadFile(name)
@@ -420,22 +419,62 @@ func TestAdminLTEAssetsAreEmbeddedAndReferenced(t *testing.T) {
 			t.Fatalf("dashboard asset %q is unexpectedly small: %d bytes", name, len(data))
 		}
 	}
-	for _, reference := range []string{"/static/adminlte-4.1.0.min.css", "/static/adminlte-4.1.0.min.js", "/static/bootstrap-icons-1.13.1.min.css", "/static/hp-adminlte.css", "/static/hp-adminlte.js"} {
+	for _, reference := range []string{"/static/hp-tailwind.css", "/static/theme.css", "/static/hp-api.js", "/static/hp-app.js", "/static/leaflet.css", "/static/leaflet.js"} {
 		if !strings.Contains(pageTemplate, reference) {
 			t.Fatalf("shared page template does not load %q", reference)
 		}
 	}
-	adapter, err := staticAssets.ReadFile("static/hp-adminlte.js")
+	adapter, err := staticAssets.ReadFile("static/hp-app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(adapter), "window.replaceHoneypotPage = mountPage") {
-		t.Fatal("AdminLTE adapter does not expose the live-refresh content mount")
+		t.Fatal("dashboard enhancement layer does not expose the live-refresh content mount")
 	}
 	if !strings.Contains(pageTemplate, `document.querySelector("[data-hp-page-content]")`) || !strings.Contains(pageTemplate, "window.replaceHoneypotPage(next,{preserveMap})") {
-		t.Fatal("dashboard refresh does not target the AdminLTE content container")
+		t.Fatal("dashboard refresh does not target the server-rendered content container")
 	}
 	if !strings.Contains(string(adapter), "refreshOverviewPreservingMap") || !strings.Contains(string(adapter), "child !== mapCard") {
 		t.Fatal("dashboard refresh does not preserve the connected Leaflet map")
+	}
+}
+
+// TestSemanticShellIsServerRendered executes the overview page template with
+// an empty snapshot and asserts the Xore theme shell primitives, every
+// navigation route, and the command bar are present in the initial HTML.
+func TestSemanticShellIsServerRendered(t *testing.T) {
+	funcs := template.FuncMap{
+		"worldMap": func() template.HTML { return "" },
+		"json":     func(any) string { return "" },
+		"dict":     func(...any) map[string]any { return nil },
+	}
+	tmpl, err := template.New("t").Funcs(funcs).Parse(pageTemplate)
+	if err != nil {
+		t.Fatalf("dashboard template does not parse: %v", err)
+	}
+	var out strings.Builder
+	if err := tmpl.ExecuteTemplate(&out, "page", snapshot{}); err != nil {
+		t.Fatalf("overview page does not execute with an empty snapshot: %v", err)
+	}
+	html := out.String()
+	for _, want := range []string{
+		`class="app-shell"`, `class="app-toolbar"`, `app-toolbar__title`,
+		`class="app-sidebar"`, `class="app-main"`, `sidebar__profile`,
+		`hp-command-dock command-bar`, `data-hp-page-content`,
+		`data-hp-theme-toggle`, `data-hp-alert-count`, `data-hp-recents`,
+		`class="avatar" data-hp-user-avatar`, `data-hp-user-name`, `data-hp-user-role`,
+		"/static/theme.css", `localStorage.getItem("hp-theme")`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("rendered shell is missing %q", want)
+		}
+	}
+	for _, route := range []string{
+		"/", "/source-health", "/alerts", "/events", "/ips", "/campaigns",
+		"/clusters", "/commands", "/payloads", "/sandbox", "/history", "/dead-letters",
+	} {
+		if !strings.Contains(html, `data-hp-nav="`+route+`" href="`+route+`"`) {
+			t.Fatalf("rendered shell is missing navigation route %q", route)
+		}
 	}
 }

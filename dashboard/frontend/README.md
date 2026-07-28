@@ -1,8 +1,53 @@
 # Typed frontend boundary
 
-This directory owns the browser-facing API contracts. The production image
-serves the committed `static/hp-api.js` bundle, so Node.js is not required at
-runtime. Run `npm ci`, `npm run typecheck`, and `npm run build` after changing
-the TypeScript API client. Server-rendered HTML remains the resilient initial
-render while AdminLTE progressively adds live navigation and investigation
-controls.
+This directory owns the browser-facing assets of the dashboard. The
+production image serves the committed bundles in `../static/`, so Node.js is
+not required at runtime. Run `npm ci`, `npm run typecheck`, and
+`npm run build` after changing anything here.
+
+## Vendored theme
+
+`../static/theme.css` is a byte-identical copy of the shared Xore theme
+(https://github.com/Xore/theme), vendored at commit `9e11b23`. It owns the
+design tokens (dark, light, and system modes), the app-shell primitives
+(`.app-shell`, `.app-toolbar`, `.app-sidebar`, `.app-main`, `.command-bar`),
+and the shared components (`.card`, `.btn`, `.badge`, `.form-input`,
+`.data-table`, `.tabs`, `.metric`). `theme.js` is intentionally not vendored —
+`hp-app.js` owns theme preference, navigation, and command-dock behavior.
+
+To re-sync after a theme release, from the repository root:
+
+```bash
+cp ../theme/theme.css dashboard/static/theme.css
+```
+
+then update the recorded commit above and rebuild the frontend bundle.
+
+## Architecture
+
+- **Server-rendered shell.** Every page is a Go `html/template`. The app
+  shell — `{{define "topbar"}}` (`.app-toolbar`), `{{define "sidebar"}}`
+  (`.app-sidebar`), and the `[data-hp-page-content]` main container inside
+  `.app-main` — is rendered server-side in `../page_style.go` and the
+  `../page_*.go` templates. There is no client-side DOM transform.
+- **Tailwind v4 on top of the vendored theme.** `src/shell.css` maps the
+  theme's CSS custom properties onto `tw:` utilities via `@theme inline` (so
+  utilities follow dark, light, and system modes) and keeps only
+  dashboard-specific component rules (`.hp-stat`, `overview-header`, sensor
+  `badge b-*`, `table.recent`, Leaflet overrides, command-dock internals).
+  It compiles to `static/hp-tailwind.css` with the `tw:` prefix and
+  `important`. `@source` scans `../page*.go` and `../static/hp-app.js` for
+  utility usage.
+- **hp-api.js** — the typed API client (`src/api.ts`, esbuild bundle).
+- **hp-app.js** — hand-written, framework-free enhancement layer in
+  `../static/` (not built here): SSE live updates, in-place overview refresh
+  that preserves the connected Leaflet map, dashboard tabs, lazy table-row
+  loading, the investigation command dock (`/` shortcut), alert-bell polling,
+  recent investigations, active-nav marking, sidebar collapse, the toolbar
+  theme toggle (system/dark/light via `localStorage["hp-theme"]`), and the
+  sidebar profile row (`/api/whoami`).
+- **Leaflet** stays vendored for the attack-origin map.
+
+After editing templates or `hp-app.js`, re-run `npm run build` so the
+Tailwind scan picks up new `tw:` utilities, then `go build ./... &&
+go test ./...` from `dashboard/`.
