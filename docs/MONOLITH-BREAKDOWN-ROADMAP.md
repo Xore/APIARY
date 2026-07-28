@@ -79,3 +79,6 @@ fine as-is; record the decision).
 | Date | Step | Result | Commit |
 |---|---|---|---|
 | 2026-07-28 | Roadmap created | — | (this commit) |
+| 2026-07-28 | Extract `store.go` + `classify.go` from `dashboard/main.go` | build/test/vet/gofmt green | `e830b53` |
+| 2026-07-28 | Extract `campaigns.go` + `links.go` + `filters.go` | build/test/vet/gofmt green | `3f0d3ed` |
+| 2026-07-28 | Extract `pages_data.go` + `payloads_data.go` + `util.go`; `main.go` down to 380 lines (only `main()`) | build/test/vet/gofmt green | `80cd6bb` |
