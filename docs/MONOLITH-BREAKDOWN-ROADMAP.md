@@ -54,7 +54,7 @@ Rules:
 
 Verification per commit: build + test green, `git diff --check` clean.
 
-## Phase 2 — Python light touch (optional, only where a seam exists)
+## Phase 2 — Python light touch (optional, only where a seam exists) — DONE 2026-07-28
 
 The Python scripts are 260–312 lines — borderline. Do **not** force splits.
 For each of `run_sample.py`, `export-result.py`, `worker.py`, `analyze.py`:
@@ -68,11 +68,34 @@ For each of `run_sample.py`, `export-result.py`, `worker.py`, `analyze.py`:
    `python3 -m py_compile <file>` and, where a Dockerfile exists, rely on the
    existing compose build.
 
-## Phase 3 — `http-honeypot/main.go` (optional)
+Outcome (reviewed 2026-07-28): **all four kept as-is — no clean seam.**
+
+- `sandbox/windows/orchestrate/run_sample.py`: every helper is a step of one
+  detonation pipeline (revert → copy → telemetry → execute → collect →
+  revert); the "VM control primitives" all share module-level env-derived
+  constants, so extraction would move config, not a concern.
+- `sandbox/export-result.py`: single concern — build a bounded JSON summary
+  from guest artifacts. Readers (`text`/`lines`/`pe_forensics`/`pcap_summary`)
+  and the payload assembly in `main()` are the same concern.
+- `ml-worker/worker.py`: single concern — the poll/score/write service loop;
+  the ES helpers exist only to serve that loop.
+- `analysis/analyze.py`: parsing, `Stats` aggregation, and table printing are
+  tightly coupled (`main()` reads `st.*` attributes directly); no seam that
+  survives without an artificial API.
+
+No code changed, so no Dockerfile impact (ml-worker/analysis ship whole
+directories anyway).
+
+## Phase 3 — `http-honeypot/main.go` (optional) — DONE 2026-07-28
 
 442 lines: split persona/page rendering from server wiring only if the split
 is obvious (it already has `pages.go` and `proxyproto.go` siblings — likely
 fine as-is; record the decision).
+
+Outcome: **kept as-is.** Page/persona content already lives in `pages.go` and
+the PROXY listener in `proxyproto.go`; what remains in `main.go` is one
+concern — request intake, classification, response routing, and wiring — and
+`persona_test.go` passes against it.
 
 ## Progress log
 
@@ -82,3 +105,8 @@ fine as-is; record the decision).
 | 2026-07-28 | Extract `store.go` + `classify.go` from `dashboard/main.go` | build/test/vet/gofmt green | `e830b53` |
 | 2026-07-28 | Extract `campaigns.go` + `links.go` + `filters.go` | build/test/vet/gofmt green | `3f0d3ed` |
 | 2026-07-28 | Extract `pages_data.go` + `payloads_data.go` + `util.go`; `main.go` down to 380 lines (only `main()`) | build/test/vet/gofmt green | `80cd6bb` |
+| 2026-07-28 | Phase 2 review: `sandbox/windows/orchestrate/run_sample.py` | kept as-is — no clean seam (all helpers are steps of one detonation pipeline) | (this commit) |
+| 2026-07-28 | Phase 2 review: `sandbox/export-result.py` | kept as-is — no clean seam (single concern: bounded JSON summary) | (this commit) |
+| 2026-07-28 | Phase 2 review: `ml-worker/worker.py` | kept as-is — no clean seam (single concern: poll/score/write loop) | (this commit) |
+| 2026-07-28 | Phase 2 review: `analysis/analyze.py` | kept as-is — no clean seam (aggregation and reporting tightly coupled) | (this commit) |
+| 2026-07-28 | Phase 3 review: `http-honeypot/main.go` | kept as-is — persona/page content already in `pages.go`; remaining is one concern | (this commit) |
