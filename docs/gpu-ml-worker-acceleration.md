@@ -1,0 +1,375 @@
+# GPU Acceleration for the ML Worker — Implementation Guide
+
+> **Status:** Implementation guide — not yet deployed. The ML worker itself
+> is scaffolded (see [`ml-worker-plan.md`](ml-worker-plan.md), roadmap v0.1).
+> **Audience:** A human operator or an AI coding agent implementing this feature.
+> **Companion guide:** [`gpu-llm-analysis-worker.md`](gpu-llm-analysis-worker.md)
+> — the GPU is shared between both workloads; §5 here is the coordination
+> contract.
+
+---
+
+## Table of Contents
+
+1. [Goal & Scope](#1-goal--scope)
+2. [What the GPU Buys (and What It Doesn't)](#2-what-the-gpu-buys-and-what-it-doesnt)
+3. [Hardware & Compatibility Contract](#3-hardware--compatibility-contract)
+4. [Implementation: CUDA-enabled ML Worker](#4-implementation-cuda-enabled-ml-worker)
+5. [GPU Sharing Contract with the LLM Worker](#5-gpu-sharing-contract-with-the-llm-worker)
+6. [Implementation: Embedding-based Clustering](#6-implementation-embedding-based-clustering)
+7. [Acceptance Tests](#7-acceptance-tests)
+8. [Rollback](#8-rollback)
+9. [Guardrails](#9-guardrails)
+10. [AI Implementer Checklist](#10-ai-implementer-checklist)
+
+---
+
+## 1. Goal & Scope
+
+Two upgrades to the planned `ml-worker` service that use the homeserver's
+NVIDIA GPU:
+
+- **A. CUDA-accelerated models** — run the LSTM autoencoder (and any future
+  PyTorch models) on the GPU instead of CPU, cutting the 6-hour retrain
+  from minutes-per-epoch on CPU to seconds, and shrinking per-poll
+  inference latency.
+- **B. Embedding-based similarity** — add a lightweight
+  `sentence-transformers` model on the GPU to embed Cowrie commands,
+  usernames/passwords, and script payloads into vectors, enabling
+  clustering of "same-actor / same-tool" activity and ES kNN similarity
+  search.
+
+**Out of scope:** the LLM analysis layer (separate guide), supervised
+classification, and any change to the anomaly-score contract in
+[`ml-worker-plan.md`](ml-worker-plan.md) — scores, indices, and the
+dashboard API stay identical.
+
+---
+
+## 2. What the GPU Buys (and What It Doesn't)
+
+| Component | GPU helps? | Notes |
+|---|---|---|
+| LSTM-AE training (6 h retrain) | **Yes — large** | 10–50× vs CPU at this model size |
+| LSTM-AE inference (per-poll windows) | Yes, moderate | Small batches; mainly latency |
+| IsoForest (scikit-learn) | **No** | CPU-only algorithm; leave as-is. Do not add a GPU dataframe library for this |
+| HBOS (pyod) | **No** | Histogram math; CPU is already milliseconds |
+| Sentence-transformers embeddings | **Yes** | New capability; impractical at volume on CPU within a 30 s poll cycle |
+
+The honest summary: the GPU makes the **deep model cheap enough to retrain
+often** and **unlocks embeddings**. It does not speed up the sklearn/pyod
+parts, and it does not make the models more accurate.
+
+---
+
+## 3. Hardware & Compatibility Contract
+
+Verified on the homeserver on 2026-07-28 (same machine as the LLM guide;
+re-verify before pinning anything):
+
+- GPU: Quadro RTX 4000, 8192 MiB, **compute capability 7.5 (Turing)**.
+- Driver 580.173.02 (CUDA 13.0) — backward-compatible with CUDA 12.x
+  runtime wheels.
+- nvidia-container-toolkit 1.19.1 present; `docker run --rm --gpus all
+  nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi -L` succeeds.
+- Stack network is `honeynet`; the `analysis-net` referenced in
+  `ml-worker/docker-compose.override.yml` does not exist yet — either
+  create it or use `honeynet` consistently (decide once, apply to both
+  override files).
+
+**Wheel compatibility rule for Turing (sm_75):** PyTorch CUDA wheels
+(`+cu121` / `+cu124`) ship sm_75 kernels; they work. Flash-attention and
+some xformers builds do not — do not add them. No bf16 on Turing: any
+training code must use fp32 (default) or fp16 with loss scaling, never
+bare `bfloat16`.
+
+---
+
+## 4. Implementation: CUDA-enabled ML Worker
+
+All changes are confined to `ml-worker/`.
+
+### 4.1 `ml-worker/requirements.txt`
+
+Replace the CPU wheel lines:
+
+```diff
+-# Deep learning (CPU-only PyTorch)
+-torch==2.13.0+cpu
+---extra-index-url https://download.pytorch.org/whl/cpu
++# Deep learning (CUDA PyTorch — see docs/gpu-ml-worker-acceleration.md §3)
++torch==2.13.0+cu124
++--extra-index-url https://download.pytorch.org/whl/cu124
++
++# Embeddings (§6)
++sentence-transformers==3.0.1
+
+ # Outlier detection (HBOS)
+ pyod==3.6.2
+```
+
+> **Version pin guardrail:** the `+cu124` build of the exact pinned version
+> must exist on `https://download.pytorch.org/whl/cu124/torch/` — check
+> before building. If it does not, pick the closest `+cu124` release and
+> update the pin. Never silently fall back to the `+cpu` wheel; a CPU
+> wheel in a GPU deployment must fail the acceptance test T2, not pass
+> unnoticed.
+
+### 4.2 `ml-worker/Dockerfile`
+
+```diff
+-# System deps for PyTorch (CPU-only) and scipy
++# System deps for PyTorch (CUDA wheels are self-contained; gcc for sklearn)
+ RUN apt-get update && apt-get install -y --no-install-recommends \
+     gcc g++ libgomp1 \
+     && rm -rf /var/lib/apt/lists/*
+```
+
+No base-image change is needed: the official CUDA PyTorch wheels bundle
+CUDA runtime libraries, so `python:3.12-slim` + the driver on the host is
+sufficient. (The `nvidia/cuda` base image is only needed when compiling
+CUDA code.)
+
+### 4.3 Device selection in code (`ml-worker/models/`)
+
+One helper, used by LSTM-AE and the embedder — auto-detect with CPU
+fallback so the same image runs on GPU-less dev machines:
+
+```python
+import torch
+
+def get_device() -> torch.device:
+    if torch.cuda.is_available():
+        return torch.device("cuda:0")
+    return torch.device("cpu")
+```
+
+Rules:
+
+- Log the selected device and GPU name at worker startup (one line,
+  `loguru` INFO) — acceptance test T2 greps for it.
+- Inference (per-poll scoring) runs on the selected device with
+  `torch.no_grad()` and batch size ≤ 64 — bounded VRAM.
+- Training (6 h retrain) uses fp32, batch size 128, and
+  `torch.cuda.empty_cache()` after each retrain.
+
+### 4.4 `ml-worker/docker-compose.override.yml`
+
+```diff
+   ml-worker:
+     ...
++    deploy:
++      resources:
++        reservations:
++          devices:
++            - driver: nvidia
++              count: 1
++              capabilities: [gpu]
+     environment:
+       ...
++      ML_DEVICE: auto            # auto | cpu — 'cpu' forces CPU for debugging
+```
+
+Keep the existing `mem_limit: 2g` / `cpus: "2.0"`; GPU memory is governed
+by §5, not by `mem_limit`.
+
+---
+
+## 5. GPU Sharing Contract with the LLM Worker
+
+One RTX 4000 (8192 MiB) is shared between `ollama` (LLM guide) and
+`ml-worker`. Both guides must be deployed with these numbers or not at all.
+
+| Consumer | Typical VRAM | When active |
+|---|---|---|
+| ollama (`qwen2.5:7b-instruct-q4_K_M`) | ~5.5 GiB | On LLM requests; unloads 10 min after last use (`OLLAMA_KEEP_ALIVE=10m`) |
+| ml-worker inference (LSTM-AE + embedder) | ~0.5–1 GiB | Every poll cycle (30 s), briefly |
+| ml-worker retrain | ~1–2 GiB | Every 6 h, minutes |
+
+Rules:
+
+- **Peak budget ≤ 7 GiB.** The table peaks at ~7.5 GiB only if retrain
+  collides with an active LLM request — avoid by scheduling: set
+  `RETRAIN_INTERVAL` so retrains land at least 1 h away from the LLM daily
+  report (`DAILY_REPORT_HOUR`), e.g. retrain at 00:00/06:00/12:00/18:00
+  UTC with the report at 06:00 → shift retrain to 01:00/07:00/13:00/19:00.
+- **On CUDA OOM, do not crash:** wrap train/infer calls, catch
+  `torch.cuda.OutOfMemoryError`, log WARN, fall back to CPU for that cycle
+  (`get_device()` override), and continue. Anomaly detection must degrade,
+  not stop.
+- Never set `PYTORCH_CUDA_ALLOC_CONF` or memory fractions in the compose
+  file to "reserve" VRAM — both containers must see the whole device and
+  stay within their budgets by behaviour, or the scheduling rule fails
+  silently.
+- `nvidia-smi dmon -s u` on the host is the ground truth when debugging
+  contention.
+
+---
+
+## 6. Implementation: Embedding-based Clustering
+
+New module `ml-worker/models/embedder.py`, invoked from the worker loop
+after anomaly scoring (same poll cycle).
+
+### 6.1 Model
+
+`sentence-transformers/all-MiniLM-L6-v2` — 384-dim, ~90 MiB, fast on GPU,
+well-suited to short strings (commands, credential pairs, payload
+snippets). Downloaded on first use; **prefetch at image build time** so the
+runtime container needs no internet:
+
+```dockerfile
+# ml-worker/Dockerfile — after pip install
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+```
+
+### 6.2 What gets embedded
+
+| Source | Text embedded | ES field written |
+|---|---|---|
+| Cowrie session | joined command list (first 4k chars) | `ml-embeddings` index, `kind=session` |
+| Cowrie auth | `username` + `\n` + `password` | `kind=credential` |
+| Script payload | first 4k chars of text payload | `kind=payload` |
+
+### 6.3 `ml-embeddings` index (create on startup if missing)
+
+```json
+{
+  "mappings": {
+    "properties": {
+      "@timestamp":   { "type": "date" },
+      "kind":         { "type": "keyword" },
+      "source_id":    { "type": "keyword" },
+      "src_ip":       { "type": "ip" },
+      "text_preview": { "type": "text" },
+      "embedding": {
+        "type": "dense_vector",
+        "dims": 384,
+        "index": true,
+        "similarity": "cosine"
+      }
+    }
+  }
+}
+```
+
+ES 8.13 supports indexed `dense_vector` + kNN search out of the box; no
+plugins. Query example (find sessions similar to a given one):
+
+```json
+POST ml-embeddings/_search
+{
+  "knn": { "field": "embedding", "query_vector": [<384 floats>], "k": 10, "num_candidates": 100 },
+  "filter": { "term": { "kind": "session" } }
+}
+```
+
+### 6.4 Clustering use (v1 keep-simple version)
+
+Do **not** add a clustering library in v1. The two immediately useful
+queries are kNN similarity (above) and "novel text" detection: a new
+session whose max cosine similarity to the last 30 days of sessions is
+below 0.6 is novel → bump its `composite_score` contribution in the
+explanation field. Anything beyond that (HDBSCAN, actor attribution) is a
+separate design doc.
+
+---
+
+## 7. Acceptance Tests
+
+```bash
+# T1 GPU visible in the ml-worker container
+docker exec hp-ml-worker python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+# expect: True Quadro RTX 4000
+
+# T2 worker actually selected CUDA
+docker logs hp-ml-worker 2>&1 | grep -i "device"
+# expect one line like: device=cuda:0 (Quadro RTX 4000)
+
+# T3 retrain completes on GPU within budget
+docker exec hp-ml-worker python -c "..."  # trigger one retrain manually
+nvidia-smi --query-gpu=memory.used --format=csv   # stays < 2 GiB for ml-worker
+
+# T4 coexistence: run an ollama request during a retrain; both succeed,
+#    no OOM in either container's logs
+docker logs hp-ml-worker 2>&1 | grep -ci "OutOfMemory"   # expect 0
+
+# T5 embeddings index exists with correct dims
+curl -s "http://<WG_IP>:9200/ml-embeddings/_mapping" | grep -q '"dims":384'
+
+# T6 CPU fallback: ML_DEVICE=cpu docker compose up -d ml-worker
+#    → worker starts, logs device=cpu, still scores anomalies
+
+# T7 no published ports on ml-worker (unchanged from base plan)
+docker port hp-ml-worker   # expect: empty
+```
+
+---
+
+## 8. Rollback
+
+```bash
+git checkout -- ml-worker/requirements.txt ml-worker/Dockerfile \
+                ml-worker/docker-compose.override.yml
+docker compose -f docker-compose.yml -f ml-worker/docker-compose.override.yml \
+  up -d --build ml-worker
+# optional: drop derived data
+curl -XDELETE "http://<WG_IP>:9200/ml-embeddings"
+```
+
+The CPU-only image builds from the reverted files with no further changes
+(the device helper falls back automatically).
+
+---
+
+## 9. Guardrails
+
+- **G1 — Public repository.** No real IPs, domains, credentials, or
+  captured payload text in code, docs, tests, or sample data. TEST-NET
+  ranges and `example.com` only (same policy as the README).
+- **G2 — Version verification, not assumption.** Confirm the pinned
+  `+cu124` wheel exists (§4.1) and supports sm_75 (§3) before building;
+  confirm the sentence-transformers pin installs offline-prefetchable
+  weights. Record verified pins in this document when deploying.
+- **G3 — CPU fallback always works.** The same image must run correctly
+  with no GPU (dev machines, CI). Device selection is auto-detected, never
+  hard-coded to `cuda`.
+- **G4 — Graceful degradation.** CUDA OOM → warn + CPU fallback for that
+  cycle. Missing embedder weights → skip embeddings, keep anomaly scoring.
+  The core pipeline never stops because an accelerator feature failed.
+- **G5 — VRAM discipline.** Respect §5: bounded batches, `empty_cache`
+  after retrain, retrain schedule offset from the LLM daily report, no
+  VRAM reservation env hacks.
+- **G6 — Attacker data stays local and untouched.** Embeddings are derived
+  annotations written to a new index; raw events are never modified, and
+  nothing is sent to external model hubs at runtime (weights are prefetched
+  at build time, §6.1).
+- **G7 — No scope creep.** IsoForest/HBOS stay on CPU (§2). No new
+  clustering frameworks, no RAPIDS, no flash-attention. Each of those is a
+  separate decision with its own doc.
+- **G8 — Image size awareness.** CUDA wheels add ~2.5 GiB to the image.
+  That is acceptable here (local deployment, 195 GiB free disk verified),
+  but do not additionally switch to a `nvidia/cuda` devel base image —
+  wheels already bundle the runtime (§4.2).
+
+---
+
+## 10. AI Implementer Checklist
+
+1. [ ] Re-verify §3 on the homeserver (GPU, toolkit, network name); abort
+       and report on mismatch.
+2. [ ] Check the pinned torch `+cu124` wheel exists on the PyTorch wheel
+       index; adjust the pin if needed and record the change in §4.1.
+3. [ ] Apply the diffs in §4.1, §4.2, §4.4.
+4. [ ] Add `get_device()` helper; wire it into `models/lstm_autoencoder.py`
+       for both training and inference; add the startup device log line.
+5. [ ] Add the `torch.cuda.OutOfMemoryError` → CPU-fallback wrapper (§5).
+6. [ ] Add `models/embedder.py` + `ml-embeddings` index creation (§6),
+       including the build-time weight prefetch in the Dockerfile.
+7. [ ] Set retrain schedule offset from the LLM report hour (§5) in the
+       compose environment.
+8. [ ] Build and start; run acceptance tests T1–T7. Do not mark done while
+       any fail.
+9. [ ] `git diff --cached | grep -E '([0-9]{1,3}\.){3}[0-9]{1,3}'` — only
+       documentation ranges may appear (G1).
+10. [ ] Update the status line to "Deployed" and record verified pins.

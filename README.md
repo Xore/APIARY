@@ -8,6 +8,11 @@ raw-tunnelled with a port bridge.
 Start with the self-contained [CGNAT deployment guide](docs/CGNAT-DEPLOYMENT.md).
 Repository automation, deployment environments, and runner setup are documented
 in the [CI/CD guide](docs/CI-CD.md).
+Analysis and GPU guides: [ML worker plan](docs/ml-worker-plan.md),
+[GPU LLM analysis worker](docs/gpu-llm-analysis-worker.md), and
+[GPU acceleration for the ML worker](docs/gpu-ml-worker-acceleration.md)
+(the homeserver's NVIDIA GPU runs local LLM log/payload analysis and
+CUDA-accelerated anomaly detection — no data leaves the machine).
 This is a public repository: copy the example environment files locally and
 never commit real addresses, credentials, captures, payloads, or sandbox images.
 
