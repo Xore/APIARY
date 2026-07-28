@@ -52,8 +52,13 @@
 }
 
 /* theme.css sets `svg { display: block }`, which would defeat the hidden
-   attribute used by the dashboard's live badges, panels, and theme icons. */
-[hidden] { display: none !important; }
+   attribute used by the dashboard's live badges, panels, and theme icons.
+   Must live in @layer utilities with extra specificity: Tailwind emits
+   utilities as layered !important rules, and layered !important beats
+   unlayered !important regardless of source order. */
+@layer utilities {
+  body [hidden] { display: none !important; }
+}
 
 .mono, pre.code {
   font-family: var(--hp-mono);

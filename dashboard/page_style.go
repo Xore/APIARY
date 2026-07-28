@@ -5,7 +5,7 @@ const pageStyle = `
 <script>(function(){try{var t=localStorage.getItem("hp-theme");if(t==="light"||t==="dark"){document.documentElement.dataset.theme=t;}else if(t){localStorage.removeItem("hp-theme");}}catch(e){}})();</script>
 <link rel="stylesheet" href="/static/theme.css?v=20260728-1">
 <link rel="stylesheet" href="/static/leaflet.css?v=20260727-1">
-<link rel="stylesheet" href="/static/hp-tailwind.css?v=20260728-1">
+<link rel="stylesheet" href="/static/hp-tailwind.css?v=20260728-2">
 <script defer src="/static/leaflet.js?v=20260727-1"></script>
 <script defer src="/static/hp-api.js?v=20260727-1"></script>
 <script defer src="/static/hp-app.js?v=20260728-1"></script>
