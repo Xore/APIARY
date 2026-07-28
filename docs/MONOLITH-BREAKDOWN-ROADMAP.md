@@ -97,6 +97,24 @@ the PROXY listener in `proxyproto.go`; what remains in `main.go` is one
 concern — request intake, classification, response routing, and wiring — and
 `persona_test.go` passes against it.
 
+## Phase 4 — second-pass refinement of the Phase 1 results — DONE 2026-07-28
+
+The Phase 1 split left two larger files worth one more pass:
+
+- `dashboard/store.go` (676 lines): the 328-line `rebuild()` aggregation core
+  moved verbatim into `dashboard/aggregate.go`. `store.go` (344 lines) now
+  holds the store/snapshot types, accessors, and `notifyLoop()`;
+  `aggregate.go` (341 lines) holds the log-scanning/aggregation cycle.
+- `dashboard/classify.go` (522 lines, `classify()` ≈ 325 lines): **kept
+  as-is** — it is a single cohesive classification function; splitting it
+  would require logic changes, violating the no-behavior-change rule.
+- `dashboard/report_pdf.go` (628 lines): **kept as-is** — single concern
+  (PDF rendering).
+
+Everything below 350 lines per file is considered done; no further splits
+planned. The remaining follow-up from the redesign guide (extra tests, visual
+acceptance matrix) is tracked in `docs/DASHBOARD-UI-REDESIGN-GUIDE.md` §4.
+
 ## Progress log
 
 | Date | Step | Result | Commit |
@@ -110,3 +128,4 @@ concern — request intake, classification, response routing, and wiring — and
 | 2026-07-28 | Phase 2 review: `ml-worker/worker.py` | kept as-is — no clean seam (single concern: poll/score/write loop) | (this commit) |
 | 2026-07-28 | Phase 2 review: `analysis/analyze.py` | kept as-is — no clean seam (aggregation and reporting tightly coupled) | (this commit) |
 | 2026-07-28 | Phase 3 review: `http-honeypot/main.go` | kept as-is — persona/page content already in `pages.go`; remaining is one concern | (this commit) |
+| 2026-07-28 | Phase 4: extract `rebuild()` from `store.go` into `aggregate.go` (store 676→344 lines); `classify.go`/`report_pdf.go` reviewed, kept as-is | build/vet/test green | (this commit) |

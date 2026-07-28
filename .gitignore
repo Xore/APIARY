@@ -44,6 +44,11 @@ build/
 output/
 tmp/
 dashboard/dashboard
+dnp3-honeypot/dnp3-honeypot
+http-honeypot/http-honeypot
+multipot/multipot
+portbridge/portbridge
+tftp-relay/tftp-relay
 node_modules/
 *.tsbuildinfo
 npm-debug.log*
