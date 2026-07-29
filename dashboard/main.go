@@ -146,15 +146,9 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(currentRuntime())
 	})
-	// Forward-auth identity for the sidebar profile row (headers only, no secrets).
-	http.HandleFunc("/api/whoami", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "no-store")
-		json.NewEncoder(w).Encode(map[string]string{
-			"user": r.Header.Get("X-Auth-User"),
-			"role": r.Header.Get("X-Auth-Role"),
-		})
-	})
+	// Current identity is resolved live through auth-backend. Caller-supplied
+	// X-Auth-* headers are intentionally ignored.
+	http.HandleFunc("/api/whoami", serveWhoAmI)
 	http.HandleFunc("/api/map-points", s.serveMapPoints)
 	http.HandleFunc("/api/stream", s.serveEventsSSE)
 	http.HandleFunc("/api/alerts", s.serveAlertsAPI)

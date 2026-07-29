@@ -1,10 +1,13 @@
 # User Settings and Dashboard Configuration Roadmap
 
-> **Status:** Proposed cross-repository implementation plan
+> **Status:** Gate A implementation in progress; settings stores and UI remain proposed
 >
 > **Identity authority:** [`Xore/auth-backend`](https://github.com/Xore/auth-backend)
 >
 > **UI reference:** [`Xore/theme`](https://github.com/Xore/theme)
+>
+> **Gate A review baseline:** `theme@efcc979`, `auth-backend@adaec4e`,
+> `honeypot-stack@bca2d3e`
 
 This roadmap adds a full-viewport settings surface to the honeypot dashboard,
 using the shared Xore theme and the user system already provided by
@@ -37,23 +40,48 @@ deletion semantics, and a second high-value credential store.
 
 ## 2. Identity contract with auth-backend
 
-The dashboard currently receives only `X-Auth-User` and `X-Auth-Role`. A
-username is mutable and is not a safe persistence key. Extend auth-backend's
-forward-auth response with:
+`X-Auth-Role` is not an adequate authorization credential by itself. It is
+plain request metadata and can be forged whenever a caller reaches the
+dashboard without traversing the exact Traefik middleware chain. Encrypting
+the header would conceal a non-secret value without proving freshness,
+session validity, revocation state, or account status.
 
-| Header | Meaning |
-|---|---|
-| `X-Auth-Subject` | Stable opaque user UUID; never reused |
-| `X-Auth-User` | Current username |
-| `X-Auth-Display-Name` | Optional display label |
-| `X-Auth-Role` | Authoritative coarse role (`admin` or `user`) |
-| `X-Auth-Generation` | Optional account/session generation for cache invalidation |
+The authoritative contract is live service-to-service introspection:
 
-Traefik must copy only headers returned by the trusted forward-auth response
-and strip same-named client request headers. The dashboard must reject
-preference writes when `X-Auth-Subject` is absent. A temporary compatibility
-mode may hash the normalized username, but it must be read-only and removed
-after every active account has a subject.
+```text
+browser -> Traefik forward-auth -> dashboard
+                                  |
+                                  +-> POST auth-backend /_auth/introspect
+                                      bearer service token + session cookie
+```
+
+The dashboard forwards only the configured auth session cookie, never all
+browser cookies. Auth-backend revalidates the PASETO session, session
+revocation, idle timeout, disabled state, user generation, current role, and
+allowed target host on every introspection request. The endpoint returns:
+
+```json
+{
+  "subject": "opaque-uuid",
+  "username": "analyst",
+  "display_name": "Analyst",
+  "role": "user",
+  "generation": 3
+}
+```
+
+The service bearer token is a separate random secret, at least 32 bytes, stored
+only in protected deployment configuration. It is not a user credential and
+is never returned to the browser. Introspection is HTTPS-only outside
+loopback tests, bounded to 4 KiB requests and 8 KiB responses, rejects
+redirects, and fails closed.
+
+Traefik strips all client-supplied `X-Auth-*` identity headers before
+forward-auth. `X-Auth-User` may still be copied as a non-authoritative display
+hint for legacy upstreams, but the dashboard ignores all such headers for
+identity and authorization. There is no username-hash compatibility identity:
+preference and administrator writes require a successful introspection result
+with an immutable subject.
 
 The dashboard's `/api/whoami` response becomes:
 
@@ -88,8 +116,8 @@ Create a small dashboard-owned user record on first authenticated request:
 }
 ```
 
-The projection is not authorization state. Every request uses the current
-trusted auth headers; the stored role is diagnostic only.
+The projection is not authorization state. Privileged requests use a current
+auth-backend introspection result; the stored role is diagnostic only.
 
 ### Useful per-user preferences
 
@@ -287,13 +315,38 @@ against accidental navigation with unsaved changes.
 ### Gate A — Cross-repository contracts
 
 1. Pin the reviewed `theme` and `auth-backend` commits.
-2. Add the immutable subject/display-name headers to auth-backend.
-3. Configure Traefik response-header copying and spoofed-header stripping.
-4. Add integration tests proving direct client headers cannot impersonate
-   another subject or role.
+2. Add immutable subjects and the authenticated introspection endpoint to
+   auth-backend.
+3. Configure Traefik spoofed-header stripping and remove authoritative role
+   propagation.
+4. Make dashboard administrator checks and `/api/whoami` use live
+   introspection.
+5. Add integration tests proving direct client headers cannot impersonate
+   another subject or role and auth outages fail closed.
 
-**Exit:** the dashboard receives a stable subject and trusted role in production
-and tests; legacy username-only mode is visibly degraded and read-only.
+**Exit:** the dashboard receives a stable subject and current role from
+auth-backend in production and tests; unsigned identity headers grant no
+capabilities.
+
+#### Gate A rollout and rollback
+
+Roll out in dependency order:
+
+1. Generate one `openssl rand -hex 32` value and install it as
+   `AUTH_INTROSPECTION_TOKEN` in auth-backend and the dashboard. Restrict both
+   `.env` files to mode `0600`.
+2. Deploy auth-backend first and verify that unauthenticated, wrong-token, and
+   invalid-session introspection calls are rejected.
+3. Deploy the Traefik header-strip middleware and dashboard together.
+4. Verify `/api/whoami`, one user denial, one administrator action, direct
+   forged `X-Auth-Role`, auth-backend outage behavior, and role/disable
+   changes.
+
+For rollback, restore the previous dashboard and Traefik configuration first.
+The unused introspection endpoint can remain enabled during rollback; remove or
+rotate its token only after no deployed consumer uses it. Never deploy the new
+dashboard before auth-backend and the shared token are ready, because
+privileged actions intentionally fail closed.
 
 ### Milestone B — Settings domain and stores
 
@@ -342,8 +395,8 @@ content or reveal/edit secrets.
 
 1. Add stable deep links from dashboard panes to auth-backend account/admin
    panes.
-2. Optionally add a minimal authenticated read-only profile endpoint to
-   auth-backend if headers cannot supply required display metadata.
+2. Extend the authenticated introspection response only when additional
+   read-only profile metadata is required.
 3. Keep credential mutation entirely within auth-backend's origin and CSRF
    boundary.
 4. Define account deletion behavior for orphaned dashboard preferences.
@@ -423,10 +476,10 @@ Before editing:
 Required architecture:
 - Do not create dashboard passwords, login cookies, sessions, roles, passkeys,
   TOTP, recovery, or another credential database.
-- Add a stable opaque X-Auth-Subject contract in auth-backend and forward it
-  through Traefik. Strip spoofed client identity headers at the trust boundary.
-- Authorize every request from current trusted headers. Stored role snapshots
-  are diagnostic only.
+- Add a stable opaque subject and authenticated session-introspection contract
+  in auth-backend. Strip spoofed client identity headers at the trust boundary.
+- Authorize privileged requests from current introspection results, never from
+  caller-supplied headers. Stored role snapshots are diagnostic only.
 - Refuse preference writes without a trusted immutable subject.
 - Keep credential and account-security mutations on the auth-backend origin;
   the dashboard exposes links, not credential-proxy APIs.
@@ -444,8 +497,8 @@ Required architecture:
   read-only; it must not take down investigations.
 
 Delivery order:
-A. Implement and test the immutable identity/header trust contract across
-   auth-backend, Traefik, and dashboard.
+A. Implement and test the immutable identity/introspection trust contract
+   across auth-backend, Traefik, and dashboard.
 B. Implement typed settings domains, identity middleware, atomic stores,
    revisions, validation, migration, ETags, and audit logging.
 C. Implement self-service preference APIs and migrate recognized localStorage

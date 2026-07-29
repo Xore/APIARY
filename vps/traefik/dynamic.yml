@@ -135,7 +135,7 @@ http:
       service: honeypot-dashboard
       tls:
         options: modern
-      middlewares: [security-headers, forward-auth]
+      middlewares: [security-headers, strip-auth-identity, forward-auth]
 
     honeypot-kibana:
       rule: "Host(`kibana.honeypot.example`)"
@@ -143,7 +143,7 @@ http:
       service: honeypot-kibana
       tls:
         options: modern
-      middlewares: [security-headers, forward-auth]
+      middlewares: [security-headers, strip-auth-identity, forward-auth]
 
     honeypot-tanner:
       rule: "Host(`tanner.honeypot.example`)"
@@ -151,7 +151,7 @@ http:
       service: honeypot-tanner
       tls:
         options: modern
-      middlewares: [security-headers, forward-auth]
+      middlewares: [security-headers, strip-auth-identity, forward-auth]
 
     honeypot-evebox:
       rule: "Host(`evebox.honeypot.example`)"
@@ -159,7 +159,7 @@ http:
       service: honeypot-evebox
       tls:
         options: modern
-      middlewares: [security-headers, forward-auth]
+      middlewares: [security-headers, strip-auth-identity, forward-auth]
 
     honeypot-arkime:
       rule: "Host(`arkime.honeypot.example`)"
@@ -167,7 +167,7 @@ http:
       service: honeypot-arkime
       tls:
         options: modern
-      middlewares: [security-headers, forward-auth]
+      middlewares: [security-headers, strip-auth-identity, forward-auth]
 
     svelte-blog:
       rule: "Host(`svelte.honeypot.example`)"
@@ -378,6 +378,17 @@ http:
         sourceCriterion:
           requestHeaderName: CF-Connecting-IP
 
+    # Remove identity hints supplied by the browser before forward-auth runs.
+    # Protected backends must use live introspection for authorization.
+    strip-auth-identity:
+      headers:
+        customRequestHeaders:
+          X-Auth-Subject: ""
+          X-Auth-User: ""
+          X-Auth-Display-Name: ""
+          X-Auth-Role: ""
+          X-Auth-Generation: ""
+
     forward-auth:
       forwardAuth:
         address: "http://auth-portal:4181/_auth/verify"
@@ -385,7 +396,6 @@ http:
         maxResponseBodySize: 65536
         authResponseHeaders:
           - X-Auth-User
-          - X-Auth-Role
 
 tcp:
   routers:

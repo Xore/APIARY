@@ -579,14 +579,15 @@
       applyTheme(themeOrder[(themeOrder.indexOf(currentTheme()) + 1) % themeOrder.length]);
     });
 
-    /* Sidebar profile row from the forward-auth identity headers */
+    /* Sidebar profile row from live auth-backend session introspection */
     fetch("/api/whoami", {cache: "no-store"}).then(r => r.ok ? r.json() : null).then(identity => {
-      if (!identity || !identity.user) return;
+      if (!identity || !identity.username) return;
       const name = shell.querySelector("[data-hp-user-name]");
       const avatar = shell.querySelector("[data-hp-user-avatar]");
       const role = shell.querySelector("[data-hp-user-role]");
-      if (name) name.textContent = identity.user;
-      if (avatar) avatar.textContent = identity.user.trim().slice(0, 2).toUpperCase();
+      const label = identity.display_name || identity.username;
+      if (name) name.textContent = label;
+      if (avatar) avatar.textContent = label.trim().slice(0, 2).toUpperCase();
       if (role && identity.role) {
         role.textContent = identity.role;
         role.classList.toggle("badge--accent", identity.role === "admin");

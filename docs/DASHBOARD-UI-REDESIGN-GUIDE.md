@@ -45,9 +45,9 @@
 - **Sidebar**: brand, "New investigation" (`/` shortcut), nav groups
   Monitor / Investigate / Evidence covering all 12 routes, recent
   investigations (route/label/timestamp only — never event bodies), and a
-  bottom `.sidebar__profile` row. Username/role come from the forward-auth
-  `X-Auth-User` / `X-Auth-Role` headers via `GET /api/whoami` (headers only,
-  no secrets) and are filled by `hp-app.js`.
+  bottom `.sidebar__profile` row. Username/role come from live auth-backend
+  session introspection via `GET /api/whoami`; unsigned `X-Auth-*` request
+  headers are ignored. The row is filled by `hp-app.js`.
 - **Templates**: the old ~106 KB `page.go` was split into nine files —
   `page_style.go` (head/shell/shared partials), `page_overview.go`,
   `page_events.go`, `page_ips.go` (+ attacker), `page_session.go`,
