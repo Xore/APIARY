@@ -9,6 +9,7 @@ fi
 release=${SANDBOX_UBUNTU_RELEASE:-noble}
 image_name=${SANDBOX_UBUNTU_IMAGE:-${release}-server-cloudimg-amd64.img}
 image_url="https://cloud-images.ubuntu.com/${release}/current"
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 root_dir=/var/lib/honeypot-sandbox
 base="$root_dir/base/ubuntu-${release}.qcow2"
 work=$(mktemp -d /var/lib/honeypot-sandbox/base/.prepare.XXXXXX)
@@ -76,5 +77,6 @@ virt-customize -a "$base.new" \
 
 mv -f -- "$base.new" "$base"
 chmod 0640 "$base"
+bash "$script_dir/extract-linux-boot.sh" "$base"
 qemu-img info "$base"
 echo "Verified Linux base prepared: $base"
