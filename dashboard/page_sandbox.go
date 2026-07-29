@@ -72,7 +72,7 @@ const pageSandbox = `
 {{end}}</pre>{{else}}<p class="empty">No tracked path changes.</p>{{end}}</div>
         <div class="card half"><h2>Standard output</h2><pre class="code">{{.Detail.Stdout}}</pre></div>
         <div class="card half"><h2>Standard error</h2><pre class="code">{{.Detail.Stderr}}</pre></div>
-        <div class="card half"><h2>Process difference</h2><p class="note">Commands added or removed between the pre- and post-execution snapshots. Volatile PID and resource columns are ignored.</p>{{if .Detail.ProcessDiff.Added}}<details open><summary>Added ({{len .Detail.ProcessDiff.Added}})</summary><pre class="code tw:mt-2">{{range .Detail.ProcessDiff.Added}}+ {{.}}
+        <div class="card half"><h2>Process difference</h2><p class="note">Userspace commands added or removed between the pre- and post-execution snapshots. Volatile PID/resource columns and kernel-worker churn are ignored.</p>{{if .Detail.ProcessDiff.Added}}<details open><summary>Added ({{len .Detail.ProcessDiff.Added}})</summary><pre class="code tw:mt-2">{{range .Detail.ProcessDiff.Added}}+ {{.}}
 {{end}}</pre></details>{{else}}<p class="empty">No added processes.</p>{{end}}{{if .Detail.ProcessDiff.Removed}}<details open class="tw:mt-3"><summary>Removed ({{len .Detail.ProcessDiff.Removed}})</summary><pre class="code tw:mt-2">{{range .Detail.ProcessDiff.Removed}}- {{.}}
 {{end}}</pre></details>{{else}}<p class="empty">No removed processes.</p>{{end}}</div>
         <div class="card half"><h2>Sockets difference</h2><p class="note">Socket rows added or removed between the pre- and post-execution snapshots.</p>{{if .Detail.SocketDiff.Added}}<details open><summary>Added ({{len .Detail.SocketDiff.Added}})</summary><pre class="code tw:mt-2">{{range .Detail.SocketDiff.Added}}+ {{.}}

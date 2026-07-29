@@ -219,10 +219,12 @@ def main():
     network["guest_pcap_bytes"] = guest_network["bytes"]
     network["guest_protocols"] = guest_network["protocols"]
     network["guest_events"] = guest_network["events"]
-    dns = dns_pcap_summary(result / "guest-network.pcap")
-    dns_queries = dns["queries"]
+    host_dns = dns_pcap_summary(result / "network.pcap")
+    guest_dns = dns_pcap_summary(result / "guest-network.pcap")
+    dns_queries = list(dict.fromkeys(host_dns["queries"] + guest_dns["queries"]))[:500]
+    dns_events = host_dns["events"] if len(host_dns["events"]) >= len(guest_dns["events"]) else guest_dns["events"]
     network["dns_queries"] = dns_queries
-    network["dns_events"] = dns["events"]
+    network["dns_events"] = dns_events
     network["attempts"] = inet_connects[:100]
     windows = pe_forensics(result / "pe-forensics.json")
     classification = json_object(result / "classification.json")
