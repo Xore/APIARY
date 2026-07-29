@@ -429,7 +429,10 @@ func serveSandboxExport(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/export/sandbox/")
 	artifactKind := ""
 	job := strings.TrimSuffix(name, ".json")
-	if strings.HasSuffix(name, ".host.pcap") {
+	if strings.HasSuffix(name, ".pdf") {
+		job = strings.TrimSuffix(name, ".pdf")
+		artifactKind = "report"
+	} else if strings.HasSuffix(name, ".host.pcap") {
 		job = strings.TrimSuffix(name, ".host.pcap")
 		artifactKind = "host"
 	} else if strings.HasSuffix(name, ".guest.pcap") {
@@ -446,6 +449,15 @@ func serveSandboxExport(w http.ResponseWriter, r *http.Request) {
 	}
 	if artifactKind != "" {
 		if !requireAdmin(w, r) {
+			return
+		}
+		if artifactKind == "report" {
+			body := renderSandboxReportPDF(*data.Detail, time.Now())
+			w.Header().Set("Content-Type", "application/pdf")
+			w.Header().Set("Content-Disposition", `attachment; filename="`+job+`-report.pdf"`)
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Write(body)
 			return
 		}
 		expectedURL := data.Detail.HostPCAPURL
