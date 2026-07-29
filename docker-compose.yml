@@ -725,7 +725,7 @@ services:
       - xpack.security.enabled=false
       # 2g heap: the per-event-type index layout multiplies shard count, and
       # geoip mmdb files + reindex jobs OOM-killed the node at 512m (exit 137).
-      - ES_JAVA_OPTS=-Xms4g -Xmx4g
+      - ES_JAVA_OPTS=-Xms6g -Xmx6g
       # No internet egress on this host — the GeoLite2 auto-downloader can
       # never succeed. Geo databases (db-ip lite) are provided locally via
       # the ingest-geoip mount below and used by the geoip-honeypot pipeline.
@@ -748,8 +748,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "4.0"
-          memory: 8G
+          cpus: "6.0"
+          memory: 12G
   kibana:
     <<: *runtime-defaults
     image: docker.elastic.co/kibana/kibana:8.13.4
@@ -850,12 +850,17 @@ services:
     command:
       - evebox
       - server
-      - --datastore
+      - --config
+      - /etc/evebox/evebox.yaml
+      - --database
       - sqlite
       - -D
       - /var/lib/evebox
       - --input
       - /var/log/suricata/eve.json
+      # If an SSHFS remount changes the source inode, never replay the complete
+      # multi-gigabyte EVE file into SQLite. A valid bookmark still wins.
+      - --end
       - --host
       - 0.0.0.0
       - --port
@@ -865,6 +870,7 @@ services:
     ports:
       - ${HP_BIND:-10.8.0.2}:19636:5636
     volumes:
+      - ./analysis/evebox.yaml:/etc/evebox/evebox.yaml:ro
       - /opt/stacks/honeypot-stack/logs/suricata:/var/log/suricata:ro
       - evebox-data:/var/lib/evebox
     networks:
@@ -872,8 +878,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.0"
-          memory: 1G
+          cpus: "4.0"
+          memory: 4G
   # ===================== Arkime — full PCAP search & analysis =====================
   #
   # Image: ghcr.io/arkime/arkime/arkime:v6-latest
