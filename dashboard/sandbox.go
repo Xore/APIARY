@@ -235,7 +235,11 @@ func normalizeSandboxResult(row *sandboxResult) {
 	if row.FailureReason == "" && row.TimeoutReason == "host deadline" {
 		row.FailureReason = "The virtual machine did not reach the guest analysis service before the host deadline."
 	}
-	if row.Incomplete && row.RiskLevel == "" {
+	if row.Incomplete {
+		if row.ExitStatus == "unknown" && row.TimeoutReason == "host deadline" {
+			row.ExitStatus = "host-timeout"
+		}
+		row.RiskScore = 0
 		row.RiskLevel = "unrated"
 	}
 }
