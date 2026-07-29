@@ -40,6 +40,61 @@ the only internet-facing component.
 5. In Dockge, validate and deploy the stack.
 6. Run `python3 analysis/verify-stack.py` and inspect `/source-health`.
 
+### Boot-safe home networking and VPS log mounts
+
+The home stack reads Suricata and portbridge logs through read-only SSHFS
+mounts over `wg0`. `_netdev` only orders an fstab mount after
+`network-online.target`; it does not guarantee that the WireGuard interface is
+ready. Likewise, SSHFS's `reconnect` option only reconnects a session that was
+successfully established once.
+
+On the reference homeserver, the 10 GbE interface `ens9f0` is the required
+uplink. `eno1` and `eno2` are optional. Install the Netplan override first:
+
+```bash
+sudo ./setup-home-network.sh
+sudo netplan try
+```
+
+The first command writes and validates
+`/etc/netplan/90-honeypot-uplink.yaml`, but deliberately does not change the
+live network. `netplan try` applies it with an automatic rollback unless it is
+confirmed. Run this from the local console or through the required interface.
+To use different interface names, set `REQUIRED_INTERFACE`,
+`SECONDARY_INTERFACE`, and `UNUSED_INTERFACE` for the installer.
+
+The override makes the required uplink use the preferred DHCP route metric,
+marks the other interfaces optional, and pins
+`systemd-networkd-wait-online` to the required routable interface. It does not
+hard-code the DHCP address.
+
+After confirming Netplan, install the mount ordering and recovery unit:
+
+```bash
+sudo ./setup-suricata-logs-home.sh
+```
+
+This installer requires the existing Suricata and portbridge entries in
+`/etc/fstab`. It adds drop-ins that make both generated mount units require and
+start after `wg-quick@wg0.service`. It also enables
+`honeypot-log-mounts.service`, which retries failed mounts every 15 seconds and
+restarts EveBox and Filebeat after recovery so they discover `eve.json`.
+
+Verify the installed state:
+
+```bash
+systemctl status systemd-networkd-wait-online wg-quick@wg0 \
+  honeypot-log-mounts.service
+findmnt /opt/stacks/honeypot-stack/logs/suricata
+findmnt /opt/stacks/honeypot-stack/logs/portbridge
+docker logs --since 5m hp-evebox
+```
+
+The expected boot order is required uplink, WireGuard, SSHFS mounts, then
+ingestion recovery. A temporarily unavailable VPS may delay ingestion, but the
+retry service prevents the mounts from remaining failed until the next manual
+intervention.
+
 ## VPS deployment
 
 1. Copy `vps/.env.example` to `/root/vps/.env`.
