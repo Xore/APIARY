@@ -508,6 +508,10 @@
 
     /* Sidebar collapse (persisted) / mobile off-canvas open */
     const collapseStorageKey = "hp-sidebar-collapsed";
+    const setSidebarCollapsed = collapsed => {
+      shell.classList.toggle("hp-collapsed", collapsed);
+      try { localStorage.setItem(collapseStorageKey, collapsed ? "1" : "0"); } catch {}
+    };
     if (innerWidth > 520 && localStorage.getItem(collapseStorageKey) === "1") shell.classList.add("hp-collapsed");
     shell.querySelector("[data-hp-sidebar-toggle]")?.addEventListener("click", () => {
       if (innerWidth <= 520) {
@@ -515,6 +519,7 @@
       } else {
         const collapsed = shell.classList.toggle("hp-collapsed");
         try { localStorage.setItem(collapseStorageKey, collapsed ? "1" : "0"); } catch {}
+        savePrefs({collapsed_sidebar: collapsed});
       }
     });
     shell.querySelectorAll("[data-hp-nav]").forEach(link => link.addEventListener("click", () => {
@@ -576,8 +581,78 @@
     };
     applyTheme(currentTheme());
     themeToggle?.addEventListener("click", () => {
-      applyTheme(themeOrder[(themeOrder.indexOf(currentTheme()) + 1) % themeOrder.length]);
+      const next = themeOrder[(themeOrder.indexOf(currentTheme()) + 1) % themeOrder.length];
+      applyTheme(next);
+      savePrefs({theme: next});
     });
+
+    /* ---------- server-backed preferences (roadmap Milestone C) ----------
+       The server is the source of truth when reachable; localStorage stays a
+       per-browser mirror so the pre-JS theme bootstrap and offline behavior
+       are unchanged. Recognized legacy keys are migrated to the server once. */
+    const prefState = {ready: false, etag: "", prefs: null};
+    const prefHeaders = () => ({
+      "Content-Type": "application/json",
+      ...(prefState.etag ? {"If-Match": prefState.etag} : {}),
+    });
+    const readPrefResponse = async response => {
+      if (!response.ok) return null;
+      prefState.etag = response.headers.get("ETag") || prefState.etag;
+      const data = await response.json().catch(() => null);
+      if (data && data.preferences) prefState.prefs = data.preferences;
+      return data && data.preferences ? data.preferences : null;
+    };
+    /* Fire-and-forget write; a conflict means another browser won, so resync
+       and let the server state win (multi-browser consistency). */
+    const savePrefs = patch => {
+      if (!prefState.ready) return;
+      fetch("/api/settings/me/preferences", {
+        method: "PATCH", headers: prefHeaders(), body: JSON.stringify(patch),
+      }).then(response => {
+        if (response.status === 409) return syncPrefs().then(() => null);
+        return readPrefResponse(response);
+      }).catch(() => {});
+    };
+    const applyEffectivePrefs = prefs => {
+      if (!prefs) return;
+      if (prefs.theme === "dark" || prefs.theme === "light" || prefs.theme === "system") applyTheme(prefs.theme);
+      if (innerWidth > 520 && typeof prefs.collapsed_sidebar === "boolean") setSidebarCollapsed(prefs.collapsed_sidebar);
+    };
+    /* One-time migration of recognized localStorage preferences. The marker
+       is set before the write so a failed migration never loops. */
+    const migrateLocalPrefs = async () => {
+      const marker = "hp-prefs-migrated";
+      try { if (localStorage.getItem(marker)) return null; } catch { return null; }
+      const patch = {};
+      const theme = currentTheme();
+      if (theme !== "system") patch.theme = theme;
+      try {
+        const collapsed = localStorage.getItem(collapseStorageKey);
+        if (collapsed === "1") patch.collapsed_sidebar = true;
+        else if (collapsed === "0") patch.collapsed_sidebar = false;
+      } catch {}
+      try { localStorage.setItem(marker, "1"); } catch {}
+      if (!Object.keys(patch).length) return null;
+      try {
+        return await readPrefResponse(await fetch("/api/settings/me/preferences", {
+          method: "PATCH", headers: prefHeaders(), body: JSON.stringify(patch),
+        }));
+      } catch { return null; }
+    };
+    const syncPrefs = async () => {
+      try {
+        const response = await fetch("/api/settings/me", {cache: "no-store"});
+        if (!response.ok) return; // logged out or offline: local mirror stays authoritative
+        prefState.etag = response.headers.get("ETag") || "";
+        const data = await response.json().catch(() => null);
+        if (!data || !data.preferences) return;
+        prefState.prefs = data.preferences;
+        prefState.ready = true;
+        const migrated = await migrateLocalPrefs();
+        applyEffectivePrefs(migrated || prefState.prefs);
+      } catch {}
+    };
+    syncPrefs();
 
     /* Sidebar profile row from live auth-backend session introspection */
     fetch("/api/whoami", {cache: "no-store"}).then(r => r.ok ? r.json() : null).then(identity => {
