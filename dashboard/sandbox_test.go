@@ -22,10 +22,16 @@ func TestSandboxResultsAreBoundedAndValidated(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "linux-invalid.json"), []byte(`{"job":"bad","sha256":"../escape"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	failed := `{"version":2,"job":"linux-timeout","sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","completed_at":"2026-01-03T00:00:00Z","exit_status":"unknown","timeout_reason":"host deadline","risk_score":20,"risk_level":"low"}`
+	if err := os.WriteFile(filepath.Join(dir, "linux-timeout.json"), []byte(failed), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	rows := loadSandboxResults()
-	if len(rows) != 2 || rows[0].Job != "windows-test" || !rows[0].Windows.Detected ||
-		rows[0].Windows.ExecutionMode != "wine" || len(rows[0].NetworkSummary.DNSQueries) != 1 ||
-		rows[1].Job != "linux-test" || rows[1].Stdout != "<script>" {
+	if len(rows) != 3 || rows[0].Job != "linux-timeout" || !rows[0].Incomplete ||
+		rows[0].RunStatus != "failed" || rows[0].FailureReason == "" ||
+		rows[1].Job != "windows-test" || !rows[1].Windows.Detected ||
+		rows[1].Windows.ExecutionMode != "wine" || len(rows[1].NetworkSummary.DNSQueries) != 1 ||
+		rows[2].Job != "linux-test" || rows[2].Stdout != "<script>" {
 		t.Fatalf("unexpected sandbox rows: %#v", rows)
 	}
 	data, err := sandboxData("linux-test", "")

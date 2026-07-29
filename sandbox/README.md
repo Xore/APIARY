@@ -117,6 +117,26 @@ repository's harmless fixture:
 sudo bash sandbox/verify-linux-sandbox.sh
 ```
 
+If a report says `host-timeout` or `guest-no-result`, the payload was not
+successfully analyzed. Empty evidence in that report is an infrastructure
+failure, not proof that the payload was inactive. The runner records the guest
+serial console, QEMU log, domain state, and last host phase in the root-only
+result and includes bounded diagnostics in the dashboard export. Rebuild the
+base, reinstall the worker, and pass the harmless smoke test before accepting
+new submissions:
+
+```bash
+sudo bash sandbox/prepare-linux-base.sh
+sudo bash sandbox/repair-permissions.sh
+sudo bash sandbox/install-worker.sh
+sudo bash sandbox/verify-linux-sandbox.sh
+```
+
+Prepared cloud images have cloud-init and network-online waits disabled. The
+sample guest uses offline injection and a fixed sandbox interface, so those
+boot-time services are unnecessary and can otherwise prevent the one-shot
+analysis service from starting before the host deadline.
+
 After rebuilding the Wine-enabled base, validate Windows PE parsing, headless
 Wine, both PCAPs, export, and overlay destruction with Wine's harmless Notepad
 fixture:

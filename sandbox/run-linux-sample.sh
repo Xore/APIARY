@@ -69,6 +69,7 @@ trap cleanup EXIT INT TERM
 mkdir -p "$result"
 chmod 0700 "$result"
 date -u +%FT%TZ >"$result/host-started-at.txt"
+printf 'preparing-overlay\n' >"$result/host-phase.txt"
 qemu-img create -q -f qcow2 -F qcow2 -b "$base" "$overlay"
 virt-customize -a "$overlay" \
   --mkdir /opt/honeypot/input \
@@ -84,12 +85,16 @@ virt-customize -a "$overlay" \
   --write "/etc/honeypot-sandbox-windows-mode:$windows_mode" \
   --write "/etc/honeypot-sandbox-network-mode:$network_mode" \
   --run-command 'ln -sf /etc/systemd/system/linux-runner.service /etc/systemd/system/multi-user.target.wants/linux-runner.service' \
-  --run-command 'rm -f /etc/machine-id && touch /etc/machine-id'
+  --run-command 'rm -f /etc/machine-id && touch /etc/machine-id' \
+  --run-command 'rm -rf /var/lib/cloud/instance /var/lib/cloud/instances'
 
 # libguestfs may replace the overlay inode during customization, so explicitly
 # restore the narrow per-file ACL after it finishes instead of relying only on
 # the overlay directory's default ACL.
 setfacl -m u:libvirt-qemu:rw "$overlay"
+touch "$result/console.log"
+setfacl -m u:libvirt-qemu:rwx "$result"
+setfacl -m u:libvirt-qemu:rw "$result/console.log"
 
 # Capture on the host bridge, filtered to this job's fixed MAC. The guest never
 # receives packet-capture access and cannot alter the root-owned PCAP.
@@ -99,22 +104,33 @@ pcap_pid=$!
 sleep 1
 kill -0 "$pcap_pid" 2>/dev/null || { cat "$result/tcpdump.log" >&2; exit 1; }
 
+printf 'starting-guest\n' >"$result/host-phase.txt"
 virt-install --name "$vm" --import --transient --noautoconsole \
   --memory "$memory_mb" --vcpus 2 --cpu host-model --osinfo ubuntu24.04 \
   --disk "path=$overlay,format=qcow2,bus=virtio,cache=none" \
   --network "network=honeypot-sandbox,model=virtio,mac=$mac,filterref.filter=honeypot-sandbox-strict" \
   --graphics none --video none --sound none \
-  --console pty,target.type=serial
+  --serial "file,path=$result/console.log"
 
+printf 'waiting-for-guest\n' >"$result/host-phase.txt"
 deadline=$((SECONDS + 240))
 while virsh domstate "$vm" >/dev/null 2>&1 && (( SECONDS < deadline )); do
   sleep 2
 done
 if virsh domstate "$vm" >/dev/null 2>&1; then
   echo "VM exceeded host deadline; forcing shutdown" >"$result/host-timeout.txt"
+  virsh domstate "$vm" --reason >"$result/domain-state.txt" 2>&1 || true
+  virsh dominfo "$vm" >"$result/domain-info.txt" 2>&1 || true
+  virsh dumpxml "$vm" >"$result/domain.xml" 2>&1 || true
+  virsh qemu-monitor-command "$vm" --hmp "info status" >"$result/qemu-status.txt" 2>&1 || true
+  printf 'host-timeout\n' >"$result/host-phase.txt"
   virsh destroy "$vm" >/dev/null
 fi
 stop_capture
+
+if [[ -f /var/log/libvirt/qemu/$vm.log ]]; then
+  tail -c 65536 "/var/log/libvirt/qemu/$vm.log" >"$result/qemu.log" 2>/dev/null || true
+fi
 
 virt-copy-out -a "$overlay" /var/lib/honeypot-result "$result"
 mv "$result/honeypot-result"/* "$result"/ 2>/dev/null || true
@@ -123,9 +139,11 @@ printf '%s  %s\n' "$hash" "$(basename "$sample")" >"$result/submitted.sha256"
 jq -n \
   --arg job "$job" --arg sha256 "$hash" --arg sample "$(basename "$sample")" \
   --arg completed_at "$(date -u +%FT%TZ)" \
-  --arg exit_status "$(cat "$result/exit-status.txt" 2>/dev/null || printf unknown)" \
-  '{version:1,job:$job,sha256:$sha256,sample:$sample,completed_at:$completed_at,exit_status:$exit_status,network:"isolated",overlay_destroyed:true}' \
+  --arg exit_status "$(if [[ -f $result/host-timeout.txt ]]; then printf host-timeout; else cat "$result/exit-status.txt" 2>/dev/null || printf guest-no-result; fi)" \
+  --arg network "$network_mode" \
+  '{version:1,job:$job,sha256:$sha256,sample:$sample,completed_at:$completed_at,exit_status:$exit_status,network:$network,overlay_destroyed:true}' \
   >"$result/report.json"
+setfacl -b "$result" "$result/console.log" 2>/dev/null || true
 chmod -R go-rwx "$result"
 echo "Analysis complete: $result"
 echo "RESULT_DIR=$result"
