@@ -82,7 +82,7 @@ func TestSandboxResultComputesProcessAndSocketDifferences(t *testing.T) {
 	row := sandboxResult{
 		Artifacts: sandboxArtifacts{
 			ProcessesBefore: []string{"USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND", "root 10 0 0 1 1 ? S 00:00 0:00 /usr/bin/old --flag"},
-			ProcessesAfter:  []string{"root 42 1 2 3 4 ? S 00:01 0:01 /usr/bin/new --flag"},
+			ProcessesAfter:  []string{"root 42 1 2 3 4 ? S 00:01 0:01 /usr/bin/new --flag", "root 43 0 0 0 0 ? I 00:01 0:00 [kworker/0:1-events]"},
 		},
 		SocketsBefore: []string{"tcp LISTEN 0 10 127.0.0.1:1 0.0.0.0:*"},
 		SocketsAfter:  []string{"tcp LISTEN 0 10 127.0.0.1:2 0.0.0.0:*"},

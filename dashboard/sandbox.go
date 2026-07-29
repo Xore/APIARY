@@ -268,7 +268,11 @@ func normalizeSandboxProcess(line string) string {
 	if len(fields) < 11 || (fields[0] == "USER" && fields[1] == "PID") {
 		return ""
 	}
-	return fields[0] + " " + strings.Join(fields[10:], " ")
+	command := strings.Join(fields[10:], " ")
+	if strings.HasPrefix(command, "[") && strings.HasSuffix(command, "]") {
+		return ""
+	}
+	return fields[0] + " " + command
 }
 
 func sandboxLineDifference(before, after []string, normalize func(string) string) sandboxDifference {

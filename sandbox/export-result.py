@@ -203,14 +203,16 @@ def main():
     report = json.loads((result / "report.json").read_text(encoding="utf-8"))
 
     calls = collections.Counter()
-    inet_connects = []
+    network_syscalls = []
     for trace in sorted((result / "trace").glob("strace.*"))[:64]:
         for line in lines(trace, 20000):
             match = re.search(r"\s([A-Za-z_][A-Za-z0-9_]*)\(", line)
             if match:
                 calls[match.group(1)] += 1
-                if match.group(1) == "connect" and ("sa_family=AF_INET," in line or "sa_family=AF_INET6," in line):
-                    inet_connects.append(line[:1024])
+                if match.group(1) in ("connect", "sendto", "sendmsg") and (
+                    "sa_family=AF_INET," in line or "sa_family=AF_INET6," in line
+                ):
+                    network_syscalls.append(line[:1024])
 
     changed = lines(result / "files-created-or-changed.tsv")
     network = pcap_summary(result / "network.pcap")
@@ -219,11 +221,13 @@ def main():
     network["guest_pcap_bytes"] = guest_network["bytes"]
     network["guest_protocols"] = guest_network["protocols"]
     network["guest_events"] = guest_network["events"]
-    dns = dns_pcap_summary(result / "guest-network.pcap")
-    dns_queries = dns["queries"]
+    host_dns = dns_pcap_summary(result / "network.pcap")
+    guest_dns = dns_pcap_summary(result / "guest-network.pcap")
+    dns_queries = list(dict.fromkeys(host_dns["queries"] + guest_dns["queries"]))[:500]
+    dns_events = host_dns["events"] if len(host_dns["events"]) >= len(guest_dns["events"]) else guest_dns["events"]
     network["dns_queries"] = dns_queries
-    network["dns_events"] = dns["events"]
-    network["attempts"] = inet_connects[:100]
+    network["dns_events"] = dns_events
+    network["attempts"] = network_syscalls[:100]
     windows = pe_forensics(result / "pe-forensics.json")
     classification = json_object(result / "classification.json")
     if windows:
@@ -261,8 +265,8 @@ def main():
         technique("T1053.003", "Cron", "scheduled task or service path changed")
     if calls["execve"] or calls["execveat"]:
         technique("T1059", "Command and Scripting Interpreter", "execve/execveat observed")
-    if inet_connects or network["packets"]:
-        technique("T1046", "Network Service Discovery", "connect syscall or network packets observed")
+    if network_syscalls and dns_queries:
+        technique("T1071.004", "DNS", "DNS capture accompanied by a payload-attributed network syscall")
     if calls["chmod"] or calls["fchmod"] or calls["fchmodat"]:
         technique("T1222.002", "Linux File Permissions Modification", "chmod-family syscall observed")
     if calls["unlink"] or calls["unlinkat"]:
@@ -283,12 +287,11 @@ def main():
 
     risk_score = 5
     risk_score += min(20, len(changed) // 5)
-    risk_score += 15 if inet_connects else 0
-    risk_score += 10 if network["packets"] else 0
+    risk_score += 15 if network_syscalls else 0
     risk_score += 25 if any(item["id"] in ("T1098.004", "T1053.003") for item in techniques) else 0
     risk_score += 20 if any(calls[name] for name in ("setuid", "setgid", "mount", "ptrace", "bpf")) else 0
     risk_score += min(25, 5 * len(suspicious_imports))
-    risk_score += 10 if dns_queries else 0
+    risk_score += 10 if dns_queries and network_syscalls else 0
     risk_score += 15 if timeout_reason else 0
     risk_score = min(100, risk_score)
     risk_level = "critical" if risk_score >= 75 else "high" if risk_score >= 50 else "medium" if risk_score >= 25 else "low"
