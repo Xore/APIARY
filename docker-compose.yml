@@ -842,6 +842,36 @@ services:
           cpus: "3.0"
           memory: 2G
   # ===================== EveBox — Suricata EVE web GUI =====================
+  # SSHFS does not propagate remote inotify events. Relay new bytes into a
+  # local file with a persistent source offset so EveBox receives reliable
+  # local filesystem notifications and remounts cannot trigger full replays.
+  eve-relay:
+    <<: *runtime-defaults
+    image: busybox:1.36
+    container_name: hp-eve-relay
+    restart: unless-stopped
+    command:
+      - sh
+      - /usr/local/bin/eve-relay.sh
+    environment:
+      - EVE_RELAY_POLL_SECONDS=2
+    volumes:
+      - ./analysis/eve-relay.sh:/usr/local/bin/eve-relay.sh:ro
+      - /opt/stacks/honeypot-stack/logs/suricata:/source:ro
+      - eve-relay-data:/relay
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /relay/eve.json && test -s /relay/source.offset"]
+      interval: 2s
+      timeout: 1s
+      retries: 30
+    networks:
+      - honeynet
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+
   evebox:
     <<: *runtime-defaults
     image: jasonish/evebox:latest
@@ -857,9 +887,9 @@ services:
       - -D
       - /var/lib/evebox
       - --input
-      - /var/log/suricata/eve.json
-      # If an SSHFS remount changes the source inode, never replay the complete
-      # multi-gigabyte EVE file into SQLite. A valid bookmark still wins.
+      - /var/log/eve-relay/eve.json
+      # A new relay starts at the current source EOF. On first boot, EveBox
+      # likewise starts at the relay EOF and ingests only fresh events.
       - --end
       - --host
       - 0.0.0.0
@@ -871,8 +901,11 @@ services:
       - ${HP_BIND:-10.8.0.2}:19636:5636
     volumes:
       - ./analysis/evebox.yaml:/etc/evebox/evebox.yaml:ro
-      - /opt/stacks/honeypot-stack/logs/suricata:/var/log/suricata:ro
+      - eve-relay-data:/var/log/eve-relay:ro
       - evebox-data:/var/lib/evebox
+    depends_on:
+      eve-relay:
+        condition: service_healthy
     networks:
       - honeynet
     deploy:
@@ -1296,6 +1329,7 @@ volumes:
   dionaea-lib: null
   snare-pages: null
   evebox-data: null
+  eve-relay-data: null
   arkime-pcap: null # Arkime-processed PCAP index files
   dashboard-state: null
   yara-results: null
