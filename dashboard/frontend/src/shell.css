@@ -67,6 +67,9 @@
 
 /* ── App shell adaptations (theme.css owns .app-shell geometry) ─────────── */
 .app-shell { height: 100dvh; transition: grid-template-columns var(--transition); }
+/* The modal host is a direct app-shell child. It must not consume a grid cell;
+   its fixed-position backdrops remain layout-neutral through display:contents. */
+#hp-modal-root { display: contents; }
 .app-shell.hp-collapsed { --sidebar-width: 0px; }
 .app-shell.hp-collapsed .app-sidebar { padding: 0; border-right: none; overflow: hidden; }
 /* Accessible off-canvas navigation under 520px (sidebar is display:none). */
