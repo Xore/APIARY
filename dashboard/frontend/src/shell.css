@@ -101,17 +101,17 @@
   display: flex; align-items: center; gap: 8px; width: 100%;
   min-height: 32px; padding: 6px 9px; margin: 0 0 4px;
   border: none; border-radius: var(--radius-control);
-  background: var(--accent); color: var(--text-on-accent);
+  background: var(--btn-inverted-bg); color: var(--btn-inverted-text);
   font-size: 12px; font-weight: 500; font-family: inherit;
   cursor: pointer; transition: background var(--transition-fast);
 }
-.hp-new-investigation:hover { background: var(--accent-hover); }
+.hp-new-investigation:hover { background: var(--btn-inverted-bg-hover); }
 .hp-new-investigation svg { width: 14px; height: 14px; }
 .hp-new-investigation kbd {
   margin-left: auto;
-  border-color: color-mix(in srgb, var(--text-on-accent) 35%, transparent);
-  background: color-mix(in srgb, var(--text-on-accent) 14%, transparent);
-  color: var(--text-on-accent);
+  border-color: color-mix(in srgb, var(--btn-inverted-text) 35%, transparent);
+  background: color-mix(in srgb, var(--btn-inverted-text) 14%, transparent);
+  color: var(--btn-inverted-text);
 }
 
 .hp-recents { margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--border-subtle); }
@@ -249,7 +249,7 @@
 .section-heading p { margin: 4px 0 0; font-size: 12px; color: var(--text-secondary); }
 .section-link {
   font-size: 12px; font-weight: 500; white-space: nowrap;
-  color: var(--accent); text-decoration: none;
+  color: var(--text-link); text-decoration: none;
 }
 .section-link:hover { text-decoration: underline; }
 
@@ -266,7 +266,7 @@
 }
 .overview-header h1 {
   margin: 0; font-size: clamp(1.5rem, 2.2vw, 2rem);
-  font-weight: 600; letter-spacing: -0.02em; line-height: 1.1;
+  font-family: var(--font-display); font-weight: 400; letter-spacing: -0.035em; line-height: 1.1;
   color: var(--text-primary);
 }
 .overview-header .subtitle {
@@ -294,7 +294,7 @@
   margin-bottom: 16px; padding: 3px;
   background: var(--surface-1);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: calc(var(--radius-control) + 3px);
 }
 .dashboard-tab {
   display: flex; align-items: center; gap: 8px;
@@ -356,13 +356,7 @@ td.s-waiting { color: var(--text-muted); }
 
 /* ── Filter rows and chips ──────────────────────────────────────────────── */
 .filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
-.chip {
-  display: inline-flex; align-items: center;
-  padding: 3px 10px; border-radius: var(--radius-pill);
-  border: 1px solid var(--border-subtle);
-  font: 11px var(--hp-mono); color: var(--text-secondary); text-decoration: none;
-}
-a.chip:hover { color: var(--accent); border-color: var(--accent); }
+.filters .chip { font-family: var(--hp-mono); font-size: 11px; text-decoration: none; }
 .hp-input, input.search {
   flex: 1; min-width: 180px; min-height: 34px;
   background: var(--surface-1);
@@ -376,7 +370,7 @@ a.chip:hover { color: var(--accent); border-color: var(--accent); }
 .hp-input::placeholder, input.search::placeholder { color: var(--text-muted); }
 .hp-input:focus, input.search:focus {
   border-color: var(--border-focus);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--border-focus) 22%, transparent);
 }
 button.copy {
   background: transparent; border: 1px solid var(--border-strong);
@@ -528,10 +522,10 @@ footer {
   background: color-mix(in srgb, var(--surface-0) 86%, transparent) !important;
   color: var(--text-muted) !important;
 }
-.leaflet-control-attribution a { color: var(--accent) !important; }
+.leaflet-control-attribution a { color: var(--text-link) !important; }
 .leaflet-tooltip.attack-tooltip {
   padding: 8px 10px;
-  border: 1px solid var(--border-strong); border-radius: 8px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-control);
   background: var(--surface-raised); color: var(--text-primary);
   font: 11px/1.45 var(--hp-mono);
   box-shadow: var(--shadow-raised);
@@ -587,7 +581,7 @@ footer {
   display: block; max-width: 360px; padding: 11px 13px;
   background: var(--surface-raised);
   border: 1px solid var(--border-strong); border-left: 3px solid var(--success);
-  border-radius: 8px;
+  border-radius: var(--radius-panel);
   box-shadow: var(--shadow-raised);
   color: var(--text-primary); font-size: 12px; text-decoration: none;
   animation: hp-panel-in 150ms ease-out;
@@ -614,12 +608,39 @@ footer {
   display: grid; place-items: center;
   width: 26px; height: 26px;
   border: none; border-radius: var(--radius-control);
-  background: var(--accent); color: var(--text-on-accent); cursor: pointer;
+  background: var(--btn-inverted-bg); color: var(--btn-inverted-text); cursor: pointer;
   transition: background var(--transition-fast);
 }
-.hp-command-actions button:hover { background: var(--accent-hover); }
+.hp-command-actions button:hover { background: var(--btn-inverted-bg-hover); }
 .hp-command-actions button svg { width: 13px; height: 13px; margin: 0; }
 .hp-sr-only {
   position: absolute; width: 1px; height: 1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+
+/* Shared modal contract integration. Visual panel/backdrop styling comes from
+   theme.css; this layer only positions the live completion message. */
+.hp-modal-status {
+  position: fixed;
+  z-index: 350;
+  top: 44px;
+  right: 16px;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 10px 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-panel);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-raised);
+  color: var(--text-primary);
+  font-size: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-6px);
+  transition: opacity var(--transition), transform var(--transition);
+}
+.hp-modal-status.open { opacity: 1; transform: none; }
+.hp-modal-status[data-state="error"] { border-color: var(--danger); }
+
+@media (prefers-reduced-motion: reduce) {
+  .hp-modal-status { transition: none; }
 }

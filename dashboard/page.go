@@ -9,4 +9,4 @@ package main
 //	"ips"    — /ips: every source IP with first/last seen and sensors hit
 //
 // All share the "style" block and the embedded Tailwind/Leaflet frontend assets.
-const pageTemplate = pageStyle + pageOverview + pageEvents + pageIPs + pageSession + pageIntel + pagePayloads + pageSandbox + pageOps
+var pageTemplate = pageStyle + pageOverview + pageEvents + pageIPs + pageSession + pageIntel + pagePayloads + pageSandbox + pageOps

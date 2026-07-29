@@ -8,7 +8,8 @@ not required at runtime. Run `npm ci`, `npm run typecheck`, and
 ## Vendored theme
 
 `../static/theme.css` is a byte-identical copy of the shared Xore theme
-(https://github.com/Xore/theme), vendored at commit `9e11b23`. It owns the
+(https://github.com/Xore/theme), vendored at commit `31ea47f`
+(`31ea47ff9e272b032d85b2019feb1e6e59e72954`). It owns the
 design tokens (dark, light, and system modes), the app-shell primitives
 (`.app-shell`, `.app-toolbar`, `.app-sidebar`, `.app-main`, `.command-bar`),
 and the shared components (`.card`, `.btn`, `.badge`, `.form-input`,
