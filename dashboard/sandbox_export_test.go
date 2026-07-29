@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSandboxPCAPExportRequiresAdminAndServesRegularCapture(t *testing.T) {
@@ -75,6 +77,102 @@ func TestSandboxDiagnosticsExportRequiresAdmin(t *testing.T) {
 	}
 	if got := allowed.Header().Get("Content-Type"); got != "application/zip" {
 		t.Fatalf("content type = %q", got)
+	}
+}
+
+func TestSandboxPDFExportRequiresAdmin(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SANDBOX_RESULTS_DIR", dir)
+	t.Setenv("DASHBOARD_REQUIRE_ADMIN", "true")
+	job := "linux-20260729T164848Z-cbe0b83cb4a0"
+	hash := strings.Repeat("c", 64)
+	result := `{
+		"version":3,
+		"job":"` + job + `",
+		"sha256":"` + hash + `",
+		"run_status":"completed",
+		"guest_started":true,
+		"risk_score":22,
+		"risk_level":"low",
+		"duration_seconds":14.5,
+		"analysis_path":"Linux executable detonation",
+		"network_summary":{"dns_queries":["ntp.ubuntu.com","api.snapcraft.io"]},
+		"artifacts":{
+			"processes_before":["root 10 0 0 1 1 ? S 00:00 0:00 /usr/bin/old"],
+			"processes_after":["root 20 0 0 1 1 ? S 00:01 0:00 /usr/bin/new"]
+		},
+		"sockets_before":["tcp LISTEN 0 10 127.0.0.1:1 0.0.0.0:*"],
+		"sockets_after":["tcp LISTEN 0 10 127.0.0.1:2 0.0.0.0:*"]
+	}`
+	if err := os.WriteFile(filepath.Join(dir, job+".json"), []byte(result), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := "/export/sandbox/" + job + ".pdf"
+
+	denied := httptest.NewRecorder()
+	serveSandboxExport(denied, httptest.NewRequest(http.MethodGet, path, nil))
+	if denied.Code != http.StatusForbidden {
+		t.Fatalf("unauthorized status = %d, want %d", denied.Code, http.StatusForbidden)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, path, nil)
+	request.Header.Set("X-Auth-Role", "admin")
+	allowed := httptest.NewRecorder()
+	serveSandboxExport(allowed, request)
+	if allowed.Code != http.StatusOK || !bytes.HasPrefix(allowed.Body.Bytes(), []byte("%PDF-1.4")) {
+		t.Fatalf("authorized response = status %d, PDF prefix %t", allowed.Code, bytes.HasPrefix(allowed.Body.Bytes(), []byte("%PDF-1.4")))
+	}
+	if got := allowed.Header().Get("Content-Type"); got != "application/pdf" {
+		t.Fatalf("content type = %q", got)
+	}
+	if disposition := allowed.Header().Get("Content-Disposition"); !strings.Contains(disposition, job+"-report.pdf") {
+		t.Fatalf("content disposition = %q", disposition)
+	}
+}
+
+func TestRenderSandboxReportPDF(t *testing.T) {
+	result := sandboxResult{
+		Job: "linux-20260729T164848Z-cbe0b83cb4a0", SHA256: strings.Repeat("c", 64),
+		Hashes:    sandboxHashes{MD5: strings.Repeat("a", 32), SHA1: strings.Repeat("b", 40), SHA256: strings.Repeat("c", 64)},
+		RunStatus: "completed", GuestStarted: true, RiskScore: 22, RiskLevel: "low", Duration: 14.5,
+		StartedAt: "2026-07-29T16:48:48Z", CompletedAt: "2026-07-29T16:49:03Z",
+		AnalysisPath: "Linux executable detonation", ExecutionMode: "native guest execution",
+		ProcessDiff: sandboxDifference{Added: []string{"root /usr/bin/sample --detonate"}, Removed: []string{"root /usr/bin/old"}},
+		SocketDiff:  sandboxDifference{Added: []string{"tcp ESTAB 127.0.0.1:5000 127.0.0.1:53"}},
+		NetworkSummary: sandboxNetwork{
+			Packets: 24, Bytes: 4096, GuestPackets: 18, GuestPCAPBytes: 2048,
+			DNSQueries: []string{"ntp.ubuntu.com", "api.snapcraft.io"},
+			Attempts:   []string{"UDP 10.0.2.15:40200 -> 10.0.2.3:53"},
+		},
+		ChangedFiles: []string{"/tmp/sandbox-observation"},
+		TopSyscalls:  []sandboxCount{{Name: "openat", Count: 42}},
+		Techniques:   []sandboxTechnique{{ID: "T1059", Name: "Command and Scripting Interpreter", Evidence: "sample executed in the guest"}},
+	}
+	body := renderSandboxReportPDF(result, time.Date(2026, 7, 29, 17, 0, 0, 0, time.UTC))
+	if !bytes.HasPrefix(body, []byte("%PDF-1.4")) || !bytes.Contains(body, []byte("%%EOF")) {
+		t.Fatal("renderSandboxReportPDF() did not produce a complete PDF")
+	}
+	for _, expected := range []string{"Sandbox Dynamic Analysis Report", "Process difference", "Sockets difference", "ntp.ubuntu.com", "api.snapcraft.io"} {
+		if !bytes.Contains(body, []byte(expected)) {
+			t.Fatalf("rendered PDF is missing %q", expected)
+		}
+	}
+	if output := os.Getenv("SANDBOX_PDF_TEST_OUTPUT"); output != "" {
+		if err := os.WriteFile(output, body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestSandboxResultActionsIncludePDFAndVirusTotal(t *testing.T) {
+	for _, expected := range []string{
+		`href="/export/sandbox/{{.Detail.Job}}.pdf"`,
+		`href="https://www.virustotal.com/gui/file/{{.Detail.SHA256}}"`,
+		`rel="noopener noreferrer"`,
+	} {
+		if !strings.Contains(pageSandbox, expected) {
+			t.Fatalf("sandbox result actions are missing %q", expected)
+		}
 	}
 }
 

@@ -319,9 +319,11 @@ func (w *pdfReportWriter) newPage() {
 	w.page = &pdfPage{}
 	w.doc.pages = append(w.doc.pages, w.page)
 	w.y = pdfPageHeight - 68
-	w.rect(0, pdfPageHeight-48, pdfPageWidth, 48, 0.055, 0.102, 0.180)
-	w.text(32, pdfPageHeight-29, 12, true, 1, 1, 1, "XORE//HONEYPOT")
-	w.text(pdfPageWidth-188, pdfPageHeight-29, 7.5, false, 0.76, 0.82, 0.90, "DEFENSIVE SECURITY OPERATIONS")
+	w.rect(0, 0, pdfPageWidth, pdfPageHeight, 0.125, 0.125, 0.122)
+	w.rect(0, pdfPageHeight-48, pdfPageWidth, 48, 0.102, 0.102, 0.098)
+	w.line(0, pdfPageHeight-48, pdfPageWidth, pdfPageHeight-48, 0.20, 0.20, 0.19)
+	w.text(32, pdfPageHeight-29, 12, true, 0.914, 0.902, 0.875, "XORE//HONEYPOT")
+	w.text(pdfPageWidth-188, pdfPageHeight-29, 7.5, false, 0.55, 0.56, 0.55, "DEFENSIVE SECURITY OPERATIONS")
 }
 
 func (w *pdfReportWriter) ensure(height float64) {
@@ -331,38 +333,38 @@ func (w *pdfReportWriter) ensure(height float64) {
 }
 
 func (w *pdfReportWriter) cover(data reportData) {
-	w.text(32, w.y, 24, true, 0.055, 0.102, 0.180, data.Title)
+	w.displayText(32, w.y, 25, 0.914, 0.902, 0.875, data.Title)
 	w.y -= 29
-	w.text(32, w.y, 11, true, 0.04, 0.45, 0.75, "REPORT SCOPE")
+	w.text(32, w.y, 9, true, 0.851, 0.467, 0.341, "REPORT SCOPE")
 	w.y -= 17
 	for _, line := range wrapPDFText(data.Scope, 88) {
-		w.text(32, w.y, 10, false, 0.18, 0.23, 0.30, line)
+		w.text(32, w.y, 10, false, 0.914, 0.902, 0.875, line)
 		w.y -= 14
 	}
 	w.y -= 4
-	w.text(32, w.y, 8.5, false, 0.35, 0.40, 0.47, "Generated: "+data.Generated.Format("2006-01-02 15:04:05 MST"))
+	w.text(32, w.y, 8.5, false, 0.55, 0.56, 0.55, "Generated: "+data.Generated.Format("2006-01-02 15:04:05 MST"))
 	w.y -= 13
 	window := firstNonEmpty(data.Summary.FirstSeen, "not available") + " to " + firstNonEmpty(data.Summary.LastSeen, "not available")
-	w.text(32, w.y, 8.5, false, 0.35, 0.40, 0.47, "Observed window: "+window)
+	w.text(32, w.y, 8.5, false, 0.55, 0.56, 0.55, "Observed window: "+window)
 	w.y -= 13
-	w.text(32, w.y, 8.5, false, 0.55, 0.16, 0.16, "Classification: PRIVATE - contains hostile-source telemetry and forensic indicators")
+	w.text(32, w.y, 8.5, false, 0.851, 0.467, 0.341, "Classification: PRIVATE - contains hostile-source telemetry and forensic indicators")
 	w.y -= 28
 }
 
 func (w *pdfReportWriter) section(title string) {
 	w.ensure(38)
 	w.y -= 8
-	w.rect(32, w.y-5, 4, 18, 0.04, 0.45, 0.75)
-	w.text(44, w.y, 14, true, 0.055, 0.102, 0.180, title)
+	w.rect(32, w.y-5, 4, 18, 0.851, 0.467, 0.341)
+	w.displayText(44, w.y, 15, 0.914, 0.902, 0.875, title)
 	w.y -= 25
-	w.line(32, w.y+7, pdfPageWidth-32, w.y+7, 0.82, 0.85, 0.89)
+	w.line(32, w.y+7, pdfPageWidth-32, w.y+7, 0.20, 0.20, 0.19)
 }
 
 func (w *pdfReportWriter) paragraph(value string) {
 	lines := wrapPDFText(value, 100)
 	w.ensure(float64(len(lines))*13 + 10)
 	for _, line := range lines {
-		w.text(36, w.y, 9, false, 0.18, 0.23, 0.30, line)
+		w.text(36, w.y, 9, false, 0.74, 0.74, 0.71, line)
 		w.y -= 13
 	}
 	w.y -= 6
@@ -389,10 +391,10 @@ func (w *pdfReportWriter) metricGrid(summary reportSummary) {
 		}
 		x := 32 + float64(i%4)*(cellW+7)
 		y := w.y - cellH
-		w.rect(x, y, cellW, cellH, 0.95, 0.97, 0.99)
-		w.strokeRect(x, y, cellW, cellH, 0.82, 0.86, 0.91)
-		w.text(x+10, y+31, 15, true, 0.055, 0.102, 0.180, metric.value)
-		w.text(x+10, y+14, 7.5, true, 0.35, 0.40, 0.47, strings.ToUpper(metric.label))
+		w.rect(x, y, cellW, cellH, 0.173, 0.173, 0.165)
+		w.strokeRect(x, y, cellW, cellH, 0.24, 0.24, 0.23)
+		w.text(x+10, y+31, 15, true, 0.914, 0.902, 0.875, metric.value)
+		w.text(x+10, y+14, 7.5, true, 0.55, 0.56, 0.55, strings.ToUpper(metric.label))
 		if i%4 == 3 {
 			w.y -= cellH + 8
 		}
@@ -405,18 +407,18 @@ func (w *pdfReportWriter) bullets(title string, items []string) {
 		return
 	}
 	w.ensure(28)
-	w.text(36, w.y, 10.5, true, 0.055, 0.102, 0.180, title)
+	w.text(36, w.y, 10.5, true, 0.914, 0.902, 0.875, title)
 	w.y -= 17
 	for _, item := range items {
 		lines := wrapPDFText(item, 92)
 		w.ensure(float64(len(lines))*12 + 5)
-		w.text(39, w.y, 9, true, 0.04, 0.45, 0.75, "-")
+		w.text(39, w.y, 9, true, 0.851, 0.467, 0.341, "-")
 		for index, line := range lines {
 			x := 50.0
 			if index > 0 {
 				x = 50
 			}
-			w.text(x, w.y, 8.7, false, 0.18, 0.23, 0.30, line)
+			w.text(x, w.y, 8.7, false, 0.74, 0.74, 0.71, line)
 			w.y -= 12
 		}
 		w.y -= 3
@@ -439,15 +441,15 @@ func (w *pdfReportWriter) topTable(title, label string, rows []kv) {
 		height := math.Max(25, float64(len(lines))*11+9)
 		w.ensure(height)
 		if index%2 == 1 {
-			w.rect(32, w.y-height+5, pdfPageWidth-64, height, 0.975, 0.982, 0.99)
+			w.rect(32, w.y-height+5, pdfPageWidth-64, height, 0.151, 0.151, 0.145)
 		}
 		barWidth := 115 * float64(row.Count) / float64(maxCount)
-		w.rect(pdfPageWidth-184, w.y-12, barWidth, 5, 0.20, 0.64, 0.88)
+		w.rect(pdfPageWidth-184, w.y-12, barWidth, 5, 0.427, 0.655, 0.925)
 		for _, line := range lines {
-			w.text(38, w.y-7, 8.3, false, 0.18, 0.23, 0.30, line)
+			w.text(38, w.y-7, 8.3, false, 0.74, 0.74, 0.71, line)
 			w.y -= 11
 		}
-		w.text(pdfPageWidth-55, w.y+float64(len(lines))*11-7, 8.5, true, 0.055, 0.102, 0.180, strconv.Itoa(row.Count))
+		w.text(pdfPageWidth-55, w.y+float64(len(lines))*11-7, 8.5, true, 0.914, 0.902, 0.875, strconv.Itoa(row.Count))
 		w.y -= 8
 	}
 	w.y -= 4
@@ -455,9 +457,9 @@ func (w *pdfReportWriter) topTable(title, label string, rows []kv) {
 
 func (w *pdfReportWriter) tableHeader(left, right string) {
 	w.ensure(23)
-	w.rect(32, w.y-17, pdfPageWidth-64, 22, 0.055, 0.102, 0.180)
-	w.text(38, w.y-10, 8, true, 1, 1, 1, strings.ToUpper(left))
-	w.text(pdfPageWidth-68, w.y-10, 8, true, 1, 1, 1, strings.ToUpper(right))
+	w.rect(32, w.y-17, pdfPageWidth-64, 22, 0.220, 0.220, 0.208)
+	w.text(38, w.y-10, 8, true, 0.914, 0.902, 0.875, strings.ToUpper(left))
+	w.text(pdfPageWidth-68, w.y-10, 8, true, 0.914, 0.902, 0.875, strings.ToUpper(right))
 	w.y -= 24
 }
 
@@ -479,13 +481,13 @@ func (w *pdfReportWriter) operationalAlerts(alerts []alertRecord) {
 		height := math.Max(25, float64(len(lines))*11+9)
 		w.ensure(height)
 		if index%2 == 1 {
-			w.rect(32, w.y-height+5, pdfPageWidth-64, height, 0.975, 0.982, 0.99)
+			w.rect(32, w.y-height+5, pdfPageWidth-64, height, 0.151, 0.151, 0.145)
 		}
 		for _, line := range lines {
-			w.text(38, w.y-7, 8.2, false, 0.18, 0.23, 0.30, line)
+			w.text(38, w.y-7, 8.2, false, 0.74, 0.74, 0.71, line)
 			w.y -= 11
 		}
-		w.text(pdfPageWidth-55, w.y+float64(len(lines))*11-7, 8.5, true, 0.055, 0.102, 0.180, strconv.Itoa(alert.Count))
+		w.text(pdfPageWidth-55, w.y+float64(len(lines))*11-7, 8.5, true, 0.914, 0.902, 0.875, strconv.Itoa(alert.Count))
 		w.y -= 8
 	}
 }
@@ -505,12 +507,12 @@ func (w *pdfReportWriter) eventAppendix(events []storedEvent) {
 		height := 25 + float64(len(lines))*10
 		w.ensure(height)
 		if index%2 == 0 {
-			w.rect(32, w.y-height+7, pdfPageWidth-64, height, 0.975, 0.982, 0.99)
+			w.rect(32, w.y-height+7, pdfPageWidth-64, height, 0.151, 0.151, 0.145)
 		}
-		w.text(38, w.y-6, 7.8, true, 0.055, 0.102, 0.180, head)
+		w.text(38, w.y-6, 7.8, true, 0.914, 0.902, 0.875, head)
 		w.y -= 14
 		for _, line := range lines {
-			w.text(38, w.y-5, 7.8, false, 0.25, 0.30, 0.37, line)
+			w.text(38, w.y-5, 7.8, false, 0.66, 0.67, 0.65, line)
 			w.y -= 10
 		}
 		w.y -= 6
@@ -535,6 +537,11 @@ func (w *pdfReportWriter) text(x, y, size float64, bold bool, r, g, b float64, v
 	}
 	fmt.Fprintf(&w.page.content, "BT /%s %.2f Tf %.3f %.3f %.3f rg %.2f %.2f Td (%s) Tj ET\n",
 		font, size, r, g, b, x, y, escapePDFText(value))
+}
+
+func (w *pdfReportWriter) displayText(x, y, size, r, g, b float64, value string) {
+	fmt.Fprintf(&w.page.content, "BT /F3 %.2f Tf %.3f %.3f %.3f rg %.2f %.2f Td (%s) Tj ET\n",
+		size, r, g, b, x, y, escapePDFText(value))
 }
 
 func (w *pdfReportWriter) rect(x, y, width, height, r, g, b float64) {
@@ -591,21 +598,22 @@ func (d *pdfDocument) bytes() []byte {
 	if len(d.pages) == 0 {
 		d.pages = append(d.pages, &pdfPage{})
 	}
-	objects := make([][]byte, 4+len(d.pages)*2)
+	objects := make([][]byte, 5+len(d.pages)*2)
 	objects[0] = []byte("<< /Type /Catalog /Pages 2 0 R >>")
 	var kids strings.Builder
 	for index := range d.pages {
-		fmt.Fprintf(&kids, "%d 0 R ", 5+index*2)
+		fmt.Fprintf(&kids, "%d 0 R ", 6+index*2)
 	}
 	objects[1] = []byte(fmt.Sprintf("<< /Type /Pages /Count %d /Kids [%s] >>", len(d.pages), kids.String()))
 	objects[2] = []byte("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>")
 	objects[3] = []byte("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>")
+	objects[4] = []byte("<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman /Encoding /WinAnsiEncoding >>")
 	for index, page := range d.pages {
-		pageNumber := 5 + index*2
+		pageNumber := 6 + index*2
 		contentNumber := pageNumber + 1
-		footer := fmt.Sprintf("BT /F1 7.5 Tf 0.35 0.40 0.47 rg 32 27 Td (PRIVATE - XORE//HONEYPOT) Tj ET\nBT /F1 7.5 Tf 0.35 0.40 0.47 rg 516 27 Td (Page %d of %d) Tj ET\n", index+1, len(d.pages))
+		footer := fmt.Sprintf("BT /F1 7.5 Tf 0.55 0.56 0.55 rg 32 27 Td (PRIVATE - XORE//HONEYPOT) Tj ET\nBT /F1 7.5 Tf 0.55 0.56 0.55 rg 516 27 Td (Page %d of %d) Tj ET\n", index+1, len(d.pages))
 		stream := append(append([]byte(nil), page.content.Bytes()...), []byte(footer)...)
-		objects[pageNumber-1] = []byte(fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %.0f %.0f] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents %d 0 R >>", pdfPageWidth, pdfPageHeight, contentNumber))
+		objects[pageNumber-1] = []byte(fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %.0f %.0f] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> >> /Contents %d 0 R >>", pdfPageWidth, pdfPageHeight, contentNumber))
 		objects[contentNumber-1] = append([]byte(fmt.Sprintf("<< /Length %d >>\nstream\n", len(stream))), append(stream, []byte("endstream")...)...)
 	}
 
