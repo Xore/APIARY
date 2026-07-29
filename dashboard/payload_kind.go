@@ -30,7 +30,7 @@ func classifyPayload(data []byte) payloadClassification {
 		if f, err := pe.NewFile(bytes.NewReader(data)); err == nil {
 			defer f.Close()
 			if f.FileHeader.Characteristics&0x2000 != 0 {
-				return payloadKind("pe-dll", "Windows DLL", "Windows", "library", "PE forensics; DLL is not invoked automatically", false)
+				return payloadKind("pe-dll", "Windows DLL", "Windows", "library", "PE forensics and Wine DLL detonation", true)
 			}
 			return payloadKind("pe-exe", "Windows PE executable", "Windows", "executable", "PE forensics and Wine detonation", true)
 		}

@@ -100,7 +100,18 @@ case "$kind" in
     fi
     ;;
   pe-dll)
-    printf 'static-dll\n' >"$result/execution-mode.txt"
+    if [[ $windows_mode == wine ]]; then
+      dll_entry=$(jq -r '
+        ([.exports[]? | select(startswith("ordinal:") | not)] | first) //
+        ([.exports[]? | select(startswith("ordinal:")) | sub("^ordinal:"; "#")] | first) //
+        "#1"
+      ' "$result/pe-forensics.json" 2>/dev/null || printf '#1')
+      runner=(wine rundll32.exe "${wine_sample},${dll_entry}")
+      wine_route=true
+      printf 'wine-pe-dll\n' >"$result/execution-mode.txt"
+    else
+      printf 'static-policy\n' >"$result/execution-mode.txt"
+    fi
     ;;
   vbscript)
     if [[ $windows_mode == wine ]]; then

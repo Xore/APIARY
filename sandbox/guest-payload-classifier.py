@@ -52,7 +52,7 @@ def classify(data):
     if data.startswith(b"MZ"):
         if pe_is_dll(data):
             return result("pe-dll", "Windows DLL", "Windows", "library",
-                          "PE forensics; DLL is not invoked automatically", False)
+                          "PE forensics and Wine DLL detonation", True)
         return result("pe-exe", "Windows PE executable", "Windows", "executable",
                       "PE forensics and Wine detonation", True)
     if data.startswith(b"\x7fELF"):
