@@ -546,3 +546,107 @@ Verification:
 Do not deploy, merge, change production auth configuration, create users, or
 rotate credentials unless separately and explicitly authorized.
 ```
+
+## 12. Addendum — honeypot system configuration tiers (2026-07-29)
+
+This addendum extends the global configuration model (§4) and the
+administrator panes (§7) with operational settings for the honeypot stack
+itself. It changes no authority boundaries: everything below lives in the
+dashboard-owned configuration store, never in auth-backend's Administration →
+Configuration pane and never in deployment secrets.
+
+### Placement decision
+
+Honeypot system settings do **not** belong in the auth-backend settings app
+that the dashboard's settings popup embeds. Putting them there would couple
+the repositories, mix operational state into the credential store, and weaken
+the rule that credential mutation never crosses origins. The settings surface
+presented to the operator is dashboard-owned; its account pane deep-links or
+embeds auth-backend, and the panes below carry honeypot configuration.
+
+### Tier 1 — live-safe, dashboard-consumed (impact class `live`/`new-request`)
+
+Apply immediately; no service restart:
+
+- alert display severity floor and acknowledgement labels;
+- default event time window, allowed rows-per-page values, maximum export rows;
+- bounded refresh interval choices and live-toast toggles;
+- map basemap chosen from a deployment allowlist (never an arbitrary URL);
+- feature visibility (experimental ML/LLM panels), maintenance banner,
+  dashboard read-only mode.
+
+These are the fields already enumerated in §4 and are delivered through
+Milestones B–E unchanged.
+
+### Tier 2 — staged operational thresholds (impact class `restart-required`)
+
+Currently environment-only and consumed at container start:
+
+- `HONEYPOT_ALERT_COOLDOWN` and `HONEYPOT_ALERT_CAMPAIGN_SCORE`;
+- `SANDBOX_ALERT_RISK_SCORE`;
+- `YARA_SCAN_INTERVAL` and `YARA_MAX_BYTES`;
+- `PAYLOAD_DEDUPE_INTERVAL`.
+
+v1 model: the UI accepts typed, range-bounded values, shows the validation
+preview with impact `restart-required`, and persists them into a **staging
+area** of the configuration store. Saving never restarts anything. The pane
+renders a staged-vs-active diff plus the exact apply command for the operator
+(for example `docker compose -f compose.yml up -d dashboard yara-scanner`).
+A later iteration may teach individual services to read a shared read-only
+`/state/honeypot-config.json` (mtime-watched) instead of their environment,
+with the environment kept as an immutable override — converting a Tier 2
+setting into Tier 1 one service at a time. Automatic restarts after saving
+remain excluded (§10).
+
+### Tier 3 — never editable through the UI
+
+- webhook URLs/tokens, `AUTH_INTROSPECTION_TOKEN`, Arkime/Kibana secrets;
+- `HP_BIND`, Docker socket, network, Compose, environment, or filesystem
+  mutation;
+- arbitrary map tile URLs, sensor behavior, anything influencing malware
+  execution.
+
+The settings API enforces this with a server-side denylist and a regression
+test proving no future schema field can mark a Tier 3 value as editable.
+
+### Schema and API additions
+
+- New `honeypot` configuration namespace beside `presentation`/`behavior`.
+  Every field declares: type and bounds, impact class, target service, and
+  whether a deployment environment value pins it (env-pinned fields are
+  reported but rejected on write).
+- `GET /api/settings/config` reports each value's **source** (compiled
+  default / environment / persisted / staged), so the pane can display
+  `active: 6h (environment), staged: 2h — applies on restart` instead of a
+  silent lie. Staged values are covered by the same revision, ETag, audit,
+  and rollback machinery as every other setting.
+
+### UI pane
+
+Add one administrator pane to §7:
+
+11. **Honeypot operations** — Tier 1 fields save live; Tier 2 fields save
+    into the staging area with a staged-vs-active diff view and a copyable
+    apply command; rollback restores a prior revision. The pane is hidden for
+    non-administrators via server-side capabilities, never by hiding client
+    controls alone.
+
+### Delivery sequence
+
+1. Milestones B–E with Tier 1 fields only.
+2. Read-only effective-config viewer exposing every current environment knob
+   and its source (zero mutation risk, immediately useful).
+3. Tier 2 staging with manual, operator-run apply.
+4. Optional per-service config-file consumers enabling hot reload.
+
+### Additional tests (extends §9)
+
+- staged-vs-active consistency across dashboard restarts;
+- env-pinned fields rejected on write but still reported with source
+  `environment`;
+- Tier 3 denylist regression: schema fields cannot mark excluded values
+  editable;
+- staged values participate in revision history, ETag conflicts, and
+  rollback;
+- store outage still yields safe defaults and read-only behavior for the new
+  namespace.
