@@ -49,6 +49,7 @@ Source documents:
 - [`DASHBOARD-RENDER-ENGINE-GUIDE.md`](DASHBOARD-RENDER-ENGINE-GUIDE.md)
 - [`DASHBOARD-UI-REDESIGN-GUIDE.md`](DASHBOARD-UI-REDESIGN-GUIDE.md)
 - [`settings-user-configuration-roadmap.md`](settings-user-configuration-roadmap.md)
+- [`dashboard-profile-actions-roadmap.md`](dashboard-profile-actions-roadmap.md)
 
 Deliverables:
 
@@ -61,6 +62,8 @@ Deliverables:
 4. Add role-aware action, command routing, lazy-list, live-map preservation,
    and modal state tests.
 5. Automate the dark/light desktop/tablet/mobile visual acceptance matrix.
+6. Add the authenticated profile action menu and route settings, administrator
+   settings, and logout to auth-backend.
 
 Exit criteria are the completion criteria in the render-engine guide §9 plus a
 successful live deployment after Gate 0.
