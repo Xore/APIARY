@@ -158,9 +158,11 @@ ride the tunnel on the same interface) — a feedback loop that inflates
 pcap-log to 100 MB every few seconds. A positional BPF arg on the suricata
 command line is silently ignored; it must live in the yaml.
 
-The home server mounts the VPS log dir read-only via sshfs/fstab
-(`setup-suricata-logs-home.sh`). Rule updates: `suricata-update` runs as a
-one-shot container before each suricata start.
+The home server mounts the VPS log dir read-only via sshfs/fstab. Use
+`setup-home-network.sh` to select the required uplink and
+`setup-suricata-logs-home.sh` to install WireGuard-aware mount ordering and
+retries. Rule updates: `suricata-update` runs as a one-shot container before
+each suricata start.
 
 ### Arkime — full packet capture search
 
