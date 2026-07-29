@@ -159,15 +159,14 @@ document.getElementById('dead-run').onclick=loadDead;deadQ.onkeydown=e=>{if(e.ke
             <span class="gen">acknowledged alerts stay suppressed until reopened</span>
           </div>
         </header>
-        <div class="filters" id="alerts-filters"><a class="chip" href="/">&larr; dashboard</a><button class="copy" onclick="loadAlerts()">refresh</button></div>
+        <div class="filters" id="alerts-filters"><a class="chip" href="/">&larr; dashboard</a><button class="copy" id="alerts-refresh" type="button">refresh</button></div>
         <div class="card wide" id="alerts-card"><table class="recent"><thead><tr><th>state</th><th>key</th><th>message</th><th>observed</th><th>last seen</th><th>last notified</th><th>action</th></tr></thead><tbody id="alert-rows"></tbody></table><p id="alert-empty" class="empty">loading</p></div>
         <footer id="alerts-footer">xore//honeypot &bull; acknowledged alerts stay suppressed until reopened</footer>
       </div>
     </main>
 </div>
 <script>
-async function setAck(key,ack){await fetch('/api/alerts',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({key,ack:String(ack)})});loadAlerts()}
-async function loadAlerts(){const rows=document.getElementById('alert-rows'),empty=document.getElementById('alert-empty');try{const a=await (await fetch('/api/alerts')).json();rows.innerHTML='';for(const r of a){const tr=document.createElement('tr');const vals=[r.Acknowledged?'acknowledged':'open',r.Key,r.Message,r.Count,new Date(r.LastSeen).toLocaleString(),new Date(r.LastNotified).toLocaleString()];for(const v of vals){const td=document.createElement('td');td.className='v';td.textContent=v;tr.appendChild(td)}const td=document.createElement('td'),b=document.createElement('button');b.className='copy';b.textContent=r.Acknowledged?'reopen':'acknowledge';b.onclick=()=>setAck(r.Key,!r.Acknowledged);td.appendChild(b);tr.appendChild(td);rows.appendChild(tr)}empty.textContent=a.length?'':'no alerts recorded'}catch(e){empty.textContent=String(e)}}loadAlerts();
+async function loadAlerts(){const rows=document.getElementById('alert-rows'),empty=document.getElementById('alert-empty');try{const a=await (await fetch('/api/alerts')).json();rows.innerHTML='';for(const r of a){const tr=document.createElement('tr');const vals=[r.Acknowledged?'acknowledged':'open',r.Key,r.Message,r.Count,new Date(r.LastSeen).toLocaleString(),new Date(r.LastNotified).toLocaleString()];for(const v of vals){const td=document.createElement('td');td.className='v';td.textContent=v;tr.appendChild(td)}const td=document.createElement('td'),b=document.createElement('button');b.className='copy';b.type='button';b.textContent=r.Acknowledged?'reopen':'acknowledge';b.dataset.hpAlertAck=String(!r.Acknowledged);b.dataset.hpAlertKey=r.Key;b.dataset.hpAlertMessage=r.Message;td.appendChild(b);tr.appendChild(td);rows.appendChild(tr)}empty.textContent=a.length?'':'no alerts recorded'}catch(e){empty.textContent=String(e)}}document.getElementById('alerts-refresh').addEventListener('click',loadAlerts);loadAlerts();
 </script>
 </body>
 </html>

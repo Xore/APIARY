@@ -406,6 +406,7 @@ func TestTailwindAssetsAreEmbeddedAndReferenced(t *testing.T) {
 		"static/theme.css":           10000,
 		"static/hp-api.js":           500,
 		"static/hp-app.js":           8000,
+		"static/hp-modals.js":        5000,
 		"static/leaflet.css":         10000,
 		"static/leaflet.js":          100000,
 		"static/LEAFLET-LICENSE.txt": 1000,
@@ -419,7 +420,7 @@ func TestTailwindAssetsAreEmbeddedAndReferenced(t *testing.T) {
 			t.Fatalf("dashboard asset %q is unexpectedly small: %d bytes", name, len(data))
 		}
 	}
-	for _, reference := range []string{"/static/hp-tailwind.css", "/static/theme.css", "/static/hp-api.js", "/static/hp-app.js", "/static/leaflet.css", "/static/leaflet.js"} {
+	for _, reference := range []string{"/static/hp-tailwind.css", "/static/theme.css", "/static/hp-api.js", "/static/hp-modals.js", "/static/hp-app.js", "/static/leaflet.css", "/static/leaflet.js"} {
 		if !strings.Contains(pageTemplate, reference) {
 			t.Fatalf("shared page template does not load %q", reference)
 		}
@@ -463,6 +464,8 @@ func TestSemanticShellIsServerRendered(t *testing.T) {
 		`hp-command-dock command-bar`, `data-hp-page-content`,
 		`data-hp-theme-toggle`, `data-hp-alert-count`, `data-hp-recents`,
 		`class="avatar" data-hp-user-avatar`, `data-hp-user-name`, `data-hp-user-role`,
+		`id="hp-modal-root"`, `id="hp-confirm-backdrop"`, `role="alertdialog"`,
+		`aria-hidden="true" inert`, `/static/hp-modals.js`,
 		"/static/theme.css", `localStorage.getItem("hp-theme")`,
 	} {
 		if !strings.Contains(html, want) {
@@ -475,6 +478,41 @@ func TestSemanticShellIsServerRendered(t *testing.T) {
 	} {
 		if !strings.Contains(html, `data-hp-nav="`+route+`" href="`+route+`"`) {
 			t.Fatalf("rendered shell is missing navigation route %q", route)
+		}
+	}
+}
+
+func TestRenderEngineSecurityPrimitives(t *testing.T) {
+	first := nonce()
+	second := nonce()
+	if first == "" || second == "" || first == second {
+		t.Fatalf("CSP nonces must be non-empty and unique: %q %q", first, second)
+	}
+	recorder := httptest.NewRecorder()
+	secHeaders(recorder, first)
+	policy := recorder.Header().Get("Content-Security-Policy")
+	for _, want := range []string{
+		"default-src 'self'", "'nonce-" + first + "'",
+		"form-action 'self'", "base-uri 'none'", "frame-ancestors 'none'",
+	} {
+		if !strings.Contains(policy, want) {
+			t.Fatalf("CSP is missing %q: %s", want, policy)
+		}
+	}
+	if recorder.Header().Get("X-Content-Type-Options") != "nosniff" ||
+		recorder.Header().Get("X-Frame-Options") != "DENY" {
+		t.Fatalf("security headers are incomplete: %v", recorder.Header())
+	}
+}
+
+func TestSharedPartialsComeFromEmbeddedUI(t *testing.T) {
+	partial := mustReadUI("partials/dashboard.html")
+	for _, want := range []string{
+		`{{define "style"}}`, `{{define "sidebar"}}`, `{{define "topbar"}}`,
+		`{{define "tbl"}}`, `{{define "techniques"}}`,
+	} {
+		if !strings.Contains(partial, want) {
+			t.Fatalf("embedded dashboard partial is missing %q", want)
 		}
 	}
 }

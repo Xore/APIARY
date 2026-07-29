@@ -1,5 +1,12 @@
 # AI implementation guide: render the dashboard with the Xore/auth-backend engine
 
+> **Implementation status (2026-07-29):** Phase 1 has started. The shared
+> head/shell/template blocks now load from the embedded `dashboard/ui/` tree;
+> nonce and security-header primitives exist for the later CSP cutover; the
+> current Xore/theme stylesheet is vendored; and the shared modal controller
+> protects alert acknowledgement and sandbox submission. Route templates and
+> remaining modal inventory still migrate in the phase order below.
+
 ## Objective
 
 Render every page of the honeypot-stack dashboard (`dashboard/`) with the same

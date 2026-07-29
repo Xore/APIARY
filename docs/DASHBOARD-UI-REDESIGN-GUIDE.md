@@ -17,7 +17,7 @@
 ## 1. Vendored theme (Phase 1 — done)
 
 - `dashboard/static/theme.css` is a **byte-identical** copy of
-  `Xore/theme@9e11b23` (`9e11b23a65a10271e93721f8a06a2dd636953497`).
+  `Xore/theme@31ea47f` (`31ea47ff9e272b032d85b2019feb1e6e59e72954`).
 - Sync command (run from the repo root, with a local clone of Xore/theme at
   `../theme`):
 
@@ -112,9 +112,10 @@ From the migration guide — keep these green in every future change:
   detail, sandbox queue/detail, alerts, source health, and the open command
   bar at 1440×900, 1024×768, and 390×844 in dark and light; compare against
   `Xore/theme/examples/workspace.html` and `components.html`.
-- **Modals**: if settings panes, a command palette dialog, or destructive
-  confirmations are added later, follow `Xore/theme` → `docs/MODALS.md`
-  (native `<dialog>`, focus trapping, Escape layering, confirmation contract).
+- **Modals**: the shared modal root/controller and the first consequential
+  flows (alert acknowledgement and sandbox submission) now follow
+  `Xore/theme` → `docs/MODALS.md`. Event detail, payload preview, export
+  options, and destructive dead-letter actions remain to be migrated.
 - Production deployment only when explicitly authorized.
 
 ## 5. Cross-references
