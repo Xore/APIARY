@@ -650,3 +650,55 @@ footer {
 @media (prefers-reduced-motion: reduce) {
   .hp-modal-status { transition: none; }
 }
+
+/* ── Account menu + settings popup (hp-account.js) ──────────────────────── */
+.hp-account { position: relative; }
+button.sidebar__profile {
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+button.sidebar__profile:hover { background: var(--surface-2); }
+button.sidebar__profile:disabled { cursor: default; }
+button.sidebar__profile:disabled:hover { background: transparent; }
+.hp-account-menu {
+  position: absolute;
+  z-index: 80;
+  left: 8px;
+  right: 8px;
+  bottom: calc(100% + 6px);
+  min-width: 0;
+  animation: hp-panel-in 150ms ease-out;
+}
+.hp-account-menu .dropdown__item svg { width: 14px; height: 14px; opacity: 0.72; flex: none; }
+.hp-account-note { color: var(--text-muted); cursor: default; }
+.hp-account-note:hover { background: transparent; }
+
+.hp-settings-modal { flex-direction: column; }
+.hp-settings-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: none;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--sidebar-bg);
+}
+.hp-settings-head h2 { flex: 1; margin: 0; font-size: 14px; }
+.hp-settings-external { font-size: 12px; text-decoration: none; }
+.hp-settings-external:hover { text-decoration: underline; }
+.hp-settings-modal .modal__close { position: static; flex: none; }
+.hp-settings-frame {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  background: var(--app-bg);
+}
