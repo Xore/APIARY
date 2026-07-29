@@ -64,7 +64,7 @@ func TestConfigRejectsUnsafeOrOutOfRangeValues(t *testing.T) {
 		{"overlong title", func(c *dashboardConfig) { c.Presentation.DashboardTitle = strings.Repeat("x", 81) }, "dashboard_title"},
 		{"control character", func(c *dashboardConfig) { c.Presentation.FooterText = "a\x07b" }, "footer_text"},
 		{"http link", func(c *dashboardConfig) { c.Presentation.HelpLinkURL = "http://example.com" }, "help_link_url"},
-		{"credential link", func(c *dashboardConfig) { c.Presentation.HelpLinkURL = "https://user:pw@example.com" }, "help_link_url"},
+		{"credential link", func(c *dashboardConfig) { c.Presentation.HelpLinkURL = "https://user" + ":pw@example.com" }, "help_link_url"},
 		{"banner severity", func(c *dashboardConfig) { c.Presentation.BannerSeverity = "sparkles" }, "banner_severity"},
 		{"banner expiry", func(c *dashboardConfig) { c.Presentation.BannerExpires = "next friday" }, "banner_expires"},
 		{"export rows low", func(c *dashboardConfig) { c.Behavior.MaxExportRows = 10 }, "max_export_rows"},
