@@ -43,8 +43,8 @@ cat >/usr/local/sbin/honeypot-log-mounts <<EOF
 set -euo pipefail
 
 units=(
-  ${mount_units[0]}
-  ${mount_units[1]}
+  '${mount_units[0]}'
+  '${mount_units[1]}'
 )
 paths=(
   ${mount_paths[0]}
