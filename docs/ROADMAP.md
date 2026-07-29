@@ -70,6 +70,9 @@ successful live deployment after Gate 0.
 
 Source: [`ml-worker-plan.md`](ml-worker-plan.md)
 
+Coordinated execution order for ML, LLM, dashboard delivery, and shared GPU
+operation: [`ml-gpu-coordinated-roadmap.md`](ml-gpu-coordinated-roadmap.md).
+
 1. Audit the existing scaffold against its claimed v0.1 behavior.
 2. Add deterministic synthetic fixtures and unit tests.
 3. Add feature engineering for all documented sources.
@@ -158,6 +161,7 @@ Sequence:
 
 - `DASHBOARD-RENDER-ENGINE-GUIDE.md`
 - `DASHBOARD-UI-REDESIGN-GUIDE.md`
+- `ml-gpu-coordinated-roadmap.md`
 - `ml-worker-plan.md`
 - `gpu-ml-worker-acceleration.md`
 - `gpu-llm-analysis-worker.md`
@@ -197,4 +201,3 @@ When multiple items are ready, select work in this order:
 4. deterministic CPU/dry-run foundations;
 5. user-facing integrations;
 6. GPU optimization and deception enhancements.
-
