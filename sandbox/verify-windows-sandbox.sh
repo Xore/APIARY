@@ -8,7 +8,7 @@ work=$(mktemp -d /var/lib/honeypot-sandbox/base/.windows-smoke.XXXXXX)
 request=
 trap 'rm -rf -- "$work"; rm -f -- ${request:+"$request"}' EXIT
 
-virt-copy-out -a "$base" /home/sandbox/.wine/drive_c/windows/system32/notepad.exe "$work"
+virt-copy-out --ro -a "$base" /home/sandbox/.wine/drive_c/windows/system32/notepad.exe "$work"
 sample="$work/notepad.exe"
 [[ -f $sample ]] || {
   echo "Wine fixture missing; rebuild the golden image with prepare-linux-base.sh" >&2
@@ -22,7 +22,7 @@ bash "$script_dir/run-linux-sample.sh" \
 result=$(sed -n 's/^RESULT_DIR=//p' "$log" | tail -n 1)
 [[ -n $result && -f $result/report.json && -s $result/pe-forensics.json ]]
 [[ $(jq -r .detected "$result/pe-forensics.json") == true ]]
-[[ $(cat "$result/execution-mode.txt") == wine ]]
+[[ $(cat "$result/execution-mode.txt") == wine-pe ]]
 [[ -s $result/network.pcap && -s $result/guest-network.pcap ]]
 [[ ! -e /var/lib/honeypot-sandbox/overlays/"$(basename "$result")".qcow2 ]]
 
@@ -32,6 +32,6 @@ jq -n --arg sha256 "$(cut -d' ' -f1 "$result/submitted.sha256")" \
   '{version:1,sha256:$sha256,requested_at:$requested_at,source:"smoke-test",capture_name:"wine-notepad.exe"}' >"$request"
 exported="/var/lib/honeypot-sandbox/export/$(basename "$result").json"
 python3 "$script_dir/export-result.py" --request "$request" --result "$result" --output "$exported"
-jq -e '.windows_forensics.detected == true and .windows_forensics.execution_mode == "wine"' "$exported" >/dev/null
+jq -e '.windows_forensics.detected == true and .windows_forensics.execution_mode == "wine-pe"' "$exported" >/dev/null
 
 echo "Windows/Wine sandbox smoke test passed: $result"

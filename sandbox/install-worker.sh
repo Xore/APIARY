@@ -4,6 +4,7 @@ set -euo pipefail
 [[ ${EUID} -eq 0 ]] || { echo "Run as root" >&2; exit 1; }
 command -v tcpdump >/dev/null || { echo "tcpdump is required; rerun sandbox/install-host.sh" >&2; exit 1; }
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+bash "$script_dir/extract-linux-boot.sh"
 target=/usr/local/libexec/honeypot-sandbox
 install -d -m 0755 -o root -g root "$target"
 for file in run-linux-sample.sh guest-runner.sh guest-pe-forensics.py guest-payload-classifier.py linux-runner.service worker.sh process-web-requests.sh export-result.py status-export.py cleanup.sh; do

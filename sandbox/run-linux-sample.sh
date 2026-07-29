@@ -18,6 +18,8 @@ if [[ -r /etc/default/honeypot-sandbox ]]; then
   source /etc/default/honeypot-sandbox
 fi
 base=${SANDBOX_LINUX_BASE:-$root_dir/base/ubuntu-noble.qcow2}
+kernel=${SANDBOX_LINUX_KERNEL:-$root_dir/base/boot/vmlinuz}
+initrd=${SANDBOX_LINUX_INITRD:-$root_dir/base/boot/initrd.img}
 windows_mode=${SANDBOX_WINDOWS_MODE:-wine}
 network_mode=${SANDBOX_NETWORK_MODE:-isolated}
 memory_mb=${SANDBOX_VM_MEMORY_MB:-3072}
@@ -34,6 +36,10 @@ memory_mb=${SANDBOX_VM_MEMORY_MB:-3072}
   exit 1
 }
 [[ -r $base ]] || { echo "Missing base image: run sandbox/prepare-linux-base.sh" >&2; exit 1; }
+[[ -r $kernel && -r $initrd ]] || {
+  echo "Missing direct-boot kernel: run sandbox/extract-linux-boot.sh" >&2
+  exit 1
+}
 virsh net-info honeypot-sandbox >/dev/null
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -106,8 +112,9 @@ kill -0 "$pcap_pid" 2>/dev/null || { cat "$result/tcpdump.log" >&2; exit 1; }
 
 printf 'starting-guest\n' >"$result/host-phase.txt"
 virt-install --name "$vm" --import --transient --noautoconsole \
-  --memory "$memory_mb" --vcpus 2 --cpu host-model --osinfo ubuntu24.04 \
-  --disk "path=$overlay,format=qcow2,bus=virtio,cache=none" \
+  --memory "$memory_mb" --vcpus 2 --cpu host-model,disable=vmx --osinfo ubuntu24.04 \
+  --boot "kernel=$kernel,initrd=$initrd,kernel_args=root=LABEL=cloudimg-rootfs ro console=tty1 console=ttyS0" \
+  --disk "path=$overlay,format=qcow2,bus=sata,cache=none" \
   --network "network=honeypot-sandbox,model=virtio,mac=$mac,filterref.filter=honeypot-sandbox-strict" \
   --graphics none --video none --sound none \
   --serial "file,path=$result/console.log"
