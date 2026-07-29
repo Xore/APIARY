@@ -29,6 +29,7 @@ func TestSandboxResultsAreBoundedAndValidated(t *testing.T) {
 	rows := loadSandboxResults()
 	if len(rows) != 3 || rows[0].Job != "linux-timeout" || !rows[0].Incomplete ||
 		rows[0].RunStatus != "failed" || rows[0].FailureReason == "" ||
+		rows[0].ExitStatus != "host-timeout" || rows[0].RiskScore != 0 || rows[0].RiskLevel != "unrated" ||
 		rows[1].Job != "windows-test" || !rows[1].Windows.Detected ||
 		rows[1].Windows.ExecutionMode != "wine" || len(rows[1].NetworkSummary.DNSQueries) != 1 ||
 		rows[2].Job != "linux-test" || rows[2].Stdout != "<script>" {
