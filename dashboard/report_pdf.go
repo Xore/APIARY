@@ -352,7 +352,8 @@ func (w *pdfReportWriter) cover(data reportData) {
 }
 
 func (w *pdfReportWriter) section(title string) {
-	w.ensure(38)
+	// Keep a section heading with at least one useful row or paragraph beneath it.
+	w.ensure(70)
 	w.y -= 8
 	w.rect(32, w.y-5, 4, 18, 0.851, 0.467, 0.341)
 	w.displayText(44, w.y, 15, 0.914, 0.902, 0.875, title)

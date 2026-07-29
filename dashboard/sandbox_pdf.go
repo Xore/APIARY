@@ -97,6 +97,7 @@ func renderSandboxReportPDF(result sandboxResult, generated time.Time) []byte {
 		writer.sandboxWindowsForensics(result.Windows)
 	}
 
+	writer.ensure(150)
 	writer.section("Evidence access and limitations")
 	writer.paragraph("The administrator dashboard provides the sanitized JSON result and, when retained, host PCAP, guest PCAP, and a bounded diagnostics bundle. Use the SHA-256 on the result page to open the corresponding VirusTotal file record.")
 	writer.paragraph("Dynamic analysis records what this bounded isolated run observed. Missing evidence is not proof of benign behavior. Emulation, guest time limits, environment checks, unsupported formats, encrypted traffic, and delayed execution can reduce visibility. Risk scoring and ATT&CK mappings are deterministic triage aids, not attribution or a compromise verdict.")

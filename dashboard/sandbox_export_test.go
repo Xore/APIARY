@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -147,6 +148,9 @@ func TestRenderSandboxReportPDF(t *testing.T) {
 		ChangedFiles: []string{"/tmp/sandbox-observation"},
 		TopSyscalls:  []sandboxCount{{Name: "openat", Count: 42}},
 		Techniques:   []sandboxTechnique{{ID: "T1059", Name: "Command and Scripting Interpreter", Evidence: "sample executed in the guest"}},
+	}
+	for index := 0; index < 35; index++ {
+		result.TopSyscalls = append(result.TopSyscalls, sandboxCount{Name: "representative_call_" + strconv.Itoa(index), Count: 100 - index})
 	}
 	body := renderSandboxReportPDF(result, time.Date(2026, 7, 29, 17, 0, 0, 0, time.UTC))
 	if !bytes.HasPrefix(body, []byte("%PDF-1.4")) || !bytes.Contains(body, []byte("%%EOF")) {
