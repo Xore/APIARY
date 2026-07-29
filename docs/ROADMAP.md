@@ -48,6 +48,7 @@ Source documents:
 
 - [`DASHBOARD-RENDER-ENGINE-GUIDE.md`](DASHBOARD-RENDER-ENGINE-GUIDE.md)
 - [`DASHBOARD-UI-REDESIGN-GUIDE.md`](DASHBOARD-UI-REDESIGN-GUIDE.md)
+- [`settings-user-configuration-roadmap.md`](settings-user-configuration-roadmap.md)
 
 Deliverables:
 
@@ -161,6 +162,7 @@ Sequence:
 
 - `DASHBOARD-RENDER-ENGINE-GUIDE.md`
 - `DASHBOARD-UI-REDESIGN-GUIDE.md`
+- `settings-user-configuration-roadmap.md`
 - `ml-gpu-coordinated-roadmap.md`
 - `ml-worker-plan.md`
 - `gpu-ml-worker-acceleration.md`
