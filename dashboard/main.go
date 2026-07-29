@@ -154,6 +154,9 @@ func main() {
 	// Current identity is resolved live through auth-backend. Caller-supplied
 	// X-Auth-* headers are intentionally ignored.
 	http.HandleFunc("/api/whoami", s.serveWhoAmI)
+	http.HandleFunc("/api/settings/me", s.serveSettingsMe)
+	http.HandleFunc("/api/settings/me/preferences", s.servePreferencesPatch)
+	http.HandleFunc("/api/settings/me/preferences/reset", s.servePreferencesReset)
 	http.HandleFunc("/api/map-points", s.serveMapPoints)
 	http.HandleFunc("/api/stream", s.serveEventsSSE)
 	http.HandleFunc("/api/alerts", s.serveAlertsAPI)
