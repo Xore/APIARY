@@ -66,7 +66,10 @@ virt-customize -a "$base.new" \
   --run-command 'apt-get clean && rm -rf /var/lib/apt/lists/*' \
   --run-command 'systemctl disable --now ssh.service ssh.socket 2>/dev/null || true' \
   --run-command 'systemctl disable --now systemd-resolved.service 2>/dev/null || true' \
-  --run-command 'systemctl mask cloud-init-network.service 2>/dev/null || true' \
+  --run-command 'systemctl mask cloud-init-local.service cloud-init-network.service cloud-init.service cloud-config.service cloud-final.service systemd-networkd-wait-online.service 2>/dev/null || true' \
+  --run-command 'rm -rf /var/lib/cloud/instance /var/lib/cloud/instances' \
+  --run-command 'ln -sf /lib/systemd/system/multi-user.target /etc/systemd/system/default.target' \
+  --run-command 'systemctl enable serial-getty@ttyS0.service 2>/dev/null || true' \
   --run-command 'mkdir -p /opt/honeypot/input /var/lib/honeypot-result' \
   --run-command 'chown sandbox:sandbox /opt/honeypot/input' \
   --selinux-relabel

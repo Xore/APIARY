@@ -61,6 +61,11 @@ type sandboxArtifacts struct {
 	GuestTCPDumpLog     string   `json:"guest_tcpdump_log"`
 	ClassificationError string   `json:"classification_error"`
 	PEForensicsError    string   `json:"pe_forensics_error"`
+	ConsoleLog          string   `json:"console_log"`
+	QEMULog             string   `json:"qemu_log"`
+	DomainState         string   `json:"domain_state"`
+	QEMUStatus          string   `json:"qemu_status"`
+	HostPhase           string   `json:"host_phase"`
 }
 
 type sandboxPESection struct {
@@ -111,6 +116,9 @@ type sandboxResult struct {
 	CompletedAt    string                `json:"completed_at"`
 	Duration       float64               `json:"duration_seconds"`
 	ExitStatus     string                `json:"exit_status"`
+	RunStatus      string                `json:"run_status"`
+	GuestStarted   bool                  `json:"guest_started"`
+	FailureReason  string                `json:"failure_reason"`
 	TimeoutReason  string                `json:"timeout_reason"`
 	RiskScore      int                   `json:"risk_score"`
 	RiskLevel      string                `json:"risk_level"`
@@ -137,6 +145,7 @@ type sandboxResult struct {
 	HostPCAPSize   int64                 `json:"-"`
 	GuestPCAPURL   string                `json:"-"`
 	GuestPCAPSize  int64                 `json:"-"`
+	Incomplete     bool                  `json:"-"`
 }
 
 type sandboxQueueCounts struct {
@@ -200,6 +209,7 @@ func loadSandboxResults() []sandboxResult {
 		if json.Unmarshal(body, &row) != nil || !hashName.MatchString(row.SHA256) || row.Job == "" {
 			continue
 		}
+		normalizeSandboxResult(&row)
 		rows = append(rows, row)
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].CompletedAt > rows[j].CompletedAt })
@@ -207,6 +217,27 @@ func loadSandboxResults() []sandboxResult {
 		rows = rows[:250]
 	}
 	return rows
+}
+
+func normalizeSandboxResult(row *sandboxResult) {
+	if row == nil {
+		return
+	}
+	row.Incomplete = row.RunStatus == "failed" || row.TimeoutReason != "" ||
+		row.ExitStatus == "unknown" || row.ExitStatus == "guest-no-result" || row.ExitStatus == "host-timeout"
+	if row.RunStatus == "" {
+		if row.Incomplete {
+			row.RunStatus = "failed"
+		} else {
+			row.RunStatus = "completed"
+		}
+	}
+	if row.FailureReason == "" && row.TimeoutReason == "host deadline" {
+		row.FailureReason = "The virtual machine did not reach the guest analysis service before the host deadline."
+	}
+	if row.Incomplete && row.RiskLevel == "" {
+		row.RiskLevel = "unrated"
+	}
 }
 
 func loadSandboxStatus() sandboxQueueStatus {

@@ -198,6 +198,15 @@ def main():
     duration_seconds = max(0, round((completed - started).total_seconds(), 3)) if started and completed else 0
     exit_status = str(report.get("exit_status", "unknown"))
     timeout_reason = "host deadline" if (result / "host-timeout.txt").exists() else ("guest execution deadline" if exit_status in ("124", "137") else "")
+    guest_started = (result / "started-at.txt").exists()
+    run_status = "failed" if timeout_reason or not guest_started else "completed"
+    failure_reason = ""
+    if timeout_reason == "host deadline" and not guest_started:
+        failure_reason = "The virtual machine did not reach the guest analysis service before the host deadline."
+    elif timeout_reason:
+        failure_reason = f"Analysis exceeded the {timeout_reason}."
+    elif not guest_started:
+        failure_reason = "The guest analysis service did not produce a result."
 
     techniques = []
     technique_ids = set()
@@ -244,6 +253,9 @@ def main():
     risk_score += 15 if timeout_reason else 0
     risk_score = min(100, risk_score)
     risk_level = "critical" if risk_score >= 75 else "high" if risk_score >= 50 else "medium" if risk_score >= 25 else "low"
+    if not guest_started:
+        risk_score = 0
+        risk_level = "unrated"
 
     payload = {
         "version": 2,
@@ -256,6 +268,9 @@ def main():
         "completed_at": completed_at,
         "duration_seconds": duration_seconds,
         "exit_status": exit_status,
+        "run_status": run_status,
+        "guest_started": guest_started,
+        "failure_reason": failure_reason,
         "timeout_reason": timeout_reason,
         "risk_score": risk_score,
         "risk_level": risk_level,
@@ -296,6 +311,11 @@ def main():
             "guest_tcpdump_log": text(result / "guest-tcpdump.log", 8192),
             "classification_error": text(result / "classification-error.txt", 4096),
             "pe_forensics_error": text(result / "pe-forensics-error.txt", 4096),
+            "console_log": text(result / "console.log", 32768),
+            "qemu_log": text(result / "qemu.log", 32768),
+            "domain_state": text(result / "domain-state.txt", 4096),
+            "qemu_status": text(result / "qemu-status.txt", 4096),
+            "host_phase": text(result / "host-phase.txt", 256).strip(),
         },
         "techniques": techniques,
         "truncated": True,
