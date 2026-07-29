@@ -210,6 +210,7 @@ type settingsService struct {
 	config *atomicSettingsStore[dashboardConfig]
 	users  *userStore
 	audit  *auditLogger
+	writes *writeLimiter
 }
 
 func newSettingsService(configPath, usersPath, auditPath string) *settingsService {
@@ -218,6 +219,7 @@ func newSettingsService(configPath, usersPath, auditPath string) *settingsServic
 		config: newAtomicSettingsStore(configPath, defaultDashboardConfig(), validateConfig),
 		users:  newUserStore(usersPath, audit),
 		audit:  audit,
+		writes: newWriteLimiter(),
 	}
 	if service.config.Degraded() {
 		fmt.Printf("dashboard: settings config store at %s unreadable — serving defaults read-only\n", configPath)
