@@ -40,10 +40,12 @@ network:
   ethernets:
     ${required_interface}:
       dhcp4: true
+      dhcp-identifier: mac
       optional: false
       dhcp4-overrides:
         route-metric: 50
     ${secondary_interface}:
+      dhcp-identifier: mac
       optional: true
       dhcp4-overrides:
         route-metric: 200
