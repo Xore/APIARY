@@ -2,11 +2,12 @@
 <script>(function(){try{var t=localStorage.getItem("hp-theme");if(t==="light"||t==="dark"){document.documentElement.dataset.theme=t;}else if(t){localStorage.removeItem("hp-theme");}}catch(e){}})();</script>
 <link rel="stylesheet" href="/static/theme.css?v=20260729-1">
 <link rel="stylesheet" href="/static/leaflet.css?v=20260727-1">
-<link rel="stylesheet" href="/static/hp-tailwind.css?v=20260729-2">
+<link rel="stylesheet" href="/static/hp-tailwind.css?v=20260729-3">
 <script defer src="/static/leaflet.js?v=20260727-1"></script>
 <script defer src="/static/hp-api.js?v=20260727-1"></script>
 <script defer src="/static/hp-modals.js?v=20260729-1"></script>
 <script defer src="/static/hp-app.js?v=20260729-1"></script>
+<script defer src="/static/hp-account.js?v=20260729-1"></script>
 {{end}}
 
 {{define "sidebar"}}
@@ -40,12 +41,26 @@
     <div class="hp-recents-label"><span id="hp-recents-heading">Recent investigations</span><button type="button" data-hp-clear-recents title="Clear recent investigations" aria-label="Clear recent investigations"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
     <div data-hp-recents></div>
   </section>
-  <div class="sidebar__profile">
-    <span class="avatar" data-hp-user-avatar aria-hidden="true">&middot;</span>
-    <div>
-      <div class="hp-profile-name" data-hp-user-name>dashboard operator</div>
-      <span class="badge badge--muted" data-hp-user-role hidden></span>
+  <div class="hp-account" data-hp-account>
+    <div class="dropdown hp-account-menu" role="menu" aria-label="Account actions" data-hp-account-menu hidden>
+      <button class="dropdown__item" type="button" role="menuitem" data-hp-account-settings hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h7M15 18h5"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="13" cy="18" r="2"/></svg>
+        <span>Settings&#8230;</span>
+      </button>
+      <div class="dropdown__divider"></div>
+      <a class="dropdown__item" role="menuitem" data-hp-account-logout href="#" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        <span>Log out</span>
+      </a>
+      <span class="dropdown__item hp-account-note" data-hp-account-note hidden>Account service unavailable</span>
     </div>
+    <button class="sidebar__profile hp-account-trigger" type="button" data-hp-account-trigger aria-haspopup="menu" aria-expanded="false" aria-label="Account actions" disabled>
+      <span class="avatar" data-hp-user-avatar aria-hidden="true">&middot;</span>
+      <div>
+        <div class="hp-profile-name" data-hp-user-name>&hellip;</div>
+        <span class="badge badge--muted" data-hp-user-role hidden></span>
+      </div>
+    </button>
   </div>
 </aside>
 {{end}}
@@ -88,6 +103,15 @@
       </div>
     </section>
   </div>
+  <div class="modal-backdrop" id="hp-settings-backdrop" data-hp-settings-backdrop aria-hidden="true" inert></div>
+  <section class="modal hp-settings-modal" id="hp-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="hp-settings-title" aria-hidden="true" inert>
+    <div class="hp-settings-head">
+      <h2 id="hp-settings-title">Account settings</h2>
+      <a class="hp-settings-external" data-hp-settings-external href="#" target="_blank" rel="noopener noreferrer">Open in new tab</a>
+      <button class="modal__close" type="button" data-hp-settings-close aria-label="Close settings">&#10005;</button>
+    </div>
+    <iframe class="hp-settings-frame" data-hp-settings-frame title="Account settings" src="about:blank" referrerpolicy="no-referrer"></iframe>
+  </section>
 </div>
 {{end}}
 
