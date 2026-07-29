@@ -445,11 +445,7 @@ func TestTailwindAssetsAreEmbeddedAndReferenced(t *testing.T) {
 // an empty snapshot and asserts the Xore theme shell primitives, every
 // navigation route, and the command bar are present in the initial HTML.
 func TestSemanticShellIsServerRendered(t *testing.T) {
-	funcs := template.FuncMap{
-		"worldMap": func() template.HTML { return "" },
-		"json":     func(any) string { return "" },
-		"dict":     func(...any) map[string]any { return nil },
-	}
+	funcs := templateFuncs(nil, "")
 	tmpl, err := template.New("t").Funcs(funcs).Parse(pageTemplate)
 	if err != nil {
 		t.Fatalf("dashboard template does not parse: %v", err)

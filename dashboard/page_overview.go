@@ -19,8 +19,8 @@ const pageOverview = `
         <header class="overview-header" id="overview-header">
           <div>
             <div class="eyebrow">Security operations</div>
-            <h1>Honeypot command center</h1>
-            <p class="subtitle">Live attack telemetry, captured evidence, correlated campaigns, and collection health in one operational view.</p>
+            <h1>{{presentation.DashboardTitle}}</h1>
+            <p class="subtitle">{{if presentation.DashboardSubtitle}}{{presentation.DashboardSubtitle}}{{else}}Live attack telemetry, captured evidence, correlated campaigns, and collection health in one operational view.{{end}}</p>
           </div>
           <div class="live-panel">
             <span class="live-pill"><span class="live-dot"></span>Live telemetry</span>
@@ -160,7 +160,7 @@ const pageOverview = `
 
         </div>
 
-        <footer id="overview-footer">xore//honeypot &bull; defensive sensor &bull; do not expose without auth</footer>
+        <footer id="overview-footer">{{if presentation.FooterText}}{{presentation.FooterText}}{{else}}xore//honeypot &bull; defensive sensor &bull; do not expose without auth{{end}}</footer>
       </div>
     </main>
 </div>

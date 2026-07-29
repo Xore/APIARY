@@ -14,7 +14,7 @@
 <aside class="app-sidebar" aria-label="Primary navigation">
   <a href="/" class="hp-brand">
     <span class="hp-brand-mark"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
-    <span class="hp-brand-text"><strong>XORE<span class="hp-brand-accent">//</span>HP</strong><small>Defensive operations</small></span>
+    <span class="hp-brand-text"><strong>{{brandHTML}}</strong><small>{{presentation.ProductLabel}}</small></span>
   </a>
   <button class="hp-new-investigation" type="button" data-hp-focus-investigation>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -84,6 +84,7 @@
     </button>
     <span class="hp-live-state" title="Dashboard refresh is active"><span class="live-dot"></span>Live</span>
   </div>
+  {{with activeBanner}}<div class="alert alert--{{.Severity}}" role="status" style="flex-basis:100%;order:5;margin:8px 8px 0">{{.Text}}</div>{{end}}
 </header>
 <form class="hp-command-dock command-bar" role="search" data-hp-investigate>
   <label class="hp-sr-only" for="hp-investigation-query">Investigate an indicator</label>

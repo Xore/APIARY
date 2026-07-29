@@ -9,11 +9,7 @@ import (
 // renderSettings executes the settings template with the given admin flag.
 func renderSettings(t *testing.T, admin bool) string {
 	t.Helper()
-	tmpl, err := template.New("t").Funcs(template.FuncMap{
-		"worldMap": func() template.HTML { return "" },
-		"json":     func(any) string { return "" },
-		"dict":     func(...any) map[string]any { return nil },
-	}).Parse(pageTemplate)
+	tmpl, err := template.New("t").Funcs(templateFuncs(nil, "")).Parse(pageTemplate)
 	if err != nil {
 		t.Fatalf("dashboard template does not parse: %v", err)
 	}

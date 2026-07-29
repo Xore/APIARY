@@ -65,11 +65,7 @@ func TestSandboxStatusAndTemplate(t *testing.T) {
 	if loaded = loadSandboxStatus(); loaded.Handoff != 1 {
 		t.Fatalf("handoff=%d want=1", loaded.Handoff)
 	}
-	funcs := template.FuncMap{
-		"worldMap": func() template.HTML { return "" },
-		"json":     func(any) string { return "" },
-		"dict":     func(...any) map[string]any { return nil },
-	}
+	funcs := templateFuncs(nil, "")
 	if _, err := template.New("dashboard").Funcs(funcs).Parse(pageTemplate); err != nil {
 		t.Fatalf("dashboard template does not parse: %v", err)
 	}

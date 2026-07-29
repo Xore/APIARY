@@ -230,7 +230,7 @@ func defaultDashboardConfig() dashboardConfig {
 		Presentation: presentationConfig{
 			AppName:        "XORE//HP",
 			ProductLabel:   "Defensive operations",
-			DashboardTitle: "Honeypot dashboard",
+			DashboardTitle: "Honeypot command center",
 			AIDisclaimer:   "AI-generated analysis may be wrong; verify against raw evidence.",
 		},
 		Behavior: behaviorConfig{

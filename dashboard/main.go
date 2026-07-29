@@ -121,21 +121,9 @@ func main() {
 	}()
 
 	// `dict` lets the template pass named args into the reusable "tbl" block.
-	funcs := template.FuncMap{
-		"worldMap": func() template.HTML { return template.HTML(worldMapSVG) },
-		"json": func(value any) string {
-			b, _ := json.MarshalIndent(value, "", "  ")
-			return string(b)
-		},
-		"dict": func(pairs ...any) map[string]any {
-			m := make(map[string]any, len(pairs)/2)
-			for i := 0; i+1 < len(pairs); i += 2 {
-				key, _ := pairs[i].(string)
-				m[key] = pairs[i+1]
-			}
-			return m
-		},
-	}
+	// The presentation funcs wire the admin-configurable shell copy (Milestone
+	// E) into every page at render time.
+	funcs := templateFuncs(s, template.HTML(worldMapSVG))
 	tmpl := template.Must(template.New("t").Funcs(funcs).Parse(pageTemplate))
 
 	html := func(w http.ResponseWriter) {
