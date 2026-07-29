@@ -1,0 +1,13 @@
+# EveBox's embedded SQLite database is a searchable operational cache. The
+# complete Suricata history remains in Elasticsearch under its own ILM policy.
+#
+# Bound this cache by both age and size. High-volume alert storms can produce
+# tens of gigabytes per day, so an age-only policy is not sufficient.
+database:
+  type: sqlite
+  retention:
+    days: 7
+    size: "40 GB"
+
+defaults:
+  time-range: 24h
