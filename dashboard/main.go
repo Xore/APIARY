@@ -230,6 +230,14 @@ func main() {
 		s.es.history(w, r, true)
 	})
 	http.HandleFunc("/export/report.pdf", s.servePDFReport)
+	http.HandleFunc("/settings", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/settings" {
+			http.NotFound(w, r)
+			return
+		}
+		html(w)
+		tmpl.ExecuteTemplate(w, "settings", nil)
+	})
 	http.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
 		html(w)
 		tmpl.ExecuteTemplate(w, "events", s.eventsData(r))

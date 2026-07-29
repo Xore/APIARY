@@ -407,6 +407,7 @@ func TestTailwindAssetsAreEmbeddedAndReferenced(t *testing.T) {
 		"static/hp-api.js":           500,
 		"static/hp-app.js":           8000,
 		"static/hp-modals.js":        5000,
+		"static/hp-settings.js":      8000,
 		"static/leaflet.css":         10000,
 		"static/leaflet.js":          100000,
 		"static/LEAFLET-LICENSE.txt": 1000,
