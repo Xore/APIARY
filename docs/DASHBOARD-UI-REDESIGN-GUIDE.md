@@ -77,12 +77,17 @@
 - Rebuild the frontend layer after editing `dashboard/frontend/src/`:
 
   ```bash
-  docker run --rm -v "$PWD/dashboard:/app" -w /app/frontend node:22-alpine \
-    sh -c "npm ci && npm run typecheck && npm run build"
+  ./scripts/build-dashboard-frontend.sh
   ```
 
-  (or `npm --prefix dashboard/frontend ci && npm --prefix dashboard/frontend run build`
-  when Node is available locally)
+  The script runs `npm ci`, `typecheck`, and `build` (with a local npm, or a
+  `node:22-alpine` docker fallback) and then verifies that the compiled assets
+  (`static/hp-api.js`, `static/hp-tailwind.css`) are current — the same check
+  the "Tailwind frontend" CI job enforces with `git diff --exit-code`. Pass
+  `--check` to fail instead of only reporting when the committed output is
+  stale. Commit the regenerated assets together with the source change, and
+  never hand-edit the compiled files: the minifier's property ordering cannot
+  be reproduced by hand.
 
 ## 3. Invariants that must not regress
 
