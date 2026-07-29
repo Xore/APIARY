@@ -50,7 +50,7 @@ func TestClassifyPEDLL(t *testing.T) {
 	binary.LittleEndian.PutUint16(data[0x84:], 0x14c)
 	binary.LittleEndian.PutUint16(data[0x94:], 0)
 	binary.LittleEndian.PutUint16(data[0x96:], 0x2000)
-	if got := classifyPayload(data); got.Code != "pe-dll" || got.Dynamic {
-		t.Fatalf("classifyPayload() = %#v, want static pe-dll", got)
+	if got := classifyPayload(data); got.Code != "pe-dll" || !got.Dynamic {
+		t.Fatalf("classifyPayload() = %#v, want dynamic pe-dll", got)
 	}
 }

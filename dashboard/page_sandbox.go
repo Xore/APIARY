@@ -28,7 +28,7 @@ const pageSandbox = `
         </header>
 
         {{if .Detail}}
-        <div class="filters" id="sandbox-detail-actions"><a class="chip" href="/sandbox">&larr; all sandbox results</a><a class="chip" href="/payload-analysis/{{.Detail.SHA256}}">static analysis</a><a class="chip" href="/events?shasum={{.Detail.SHA256}}">related events</a><a class="chip" href="/export/sandbox/{{.Detail.Job}}.json">sanitized JSON &darr;</a>{{if .Detail.HostPCAPURL}}<a class="chip" href="{{.Detail.HostPCAPURL}}" title="Raw host-bridge packet capture for Wireshark">host PCAP ({{.Detail.HostPCAPSize}} bytes) &darr;</a>{{end}}{{if .Detail.GuestPCAPURL}}<a class="chip" href="{{.Detail.GuestPCAPURL}}" title="Raw guest capture including loopback DNS for Wireshark">guest PCAP ({{.Detail.GuestPCAPSize}} bytes) &darr;</a>{{end}}</div>
+        <div class="filters" id="sandbox-detail-actions"><a class="chip" href="/sandbox">&larr; all sandbox results</a><a class="chip" href="/payload-analysis/{{.Detail.SHA256}}">static analysis</a><a class="chip" href="/events?shasum={{.Detail.SHA256}}">related events</a><a class="chip" href="/export/sandbox/{{.Detail.Job}}.json">sanitized JSON &darr;</a>{{if .Detail.HostPCAPURL}}<a class="chip" href="{{.Detail.HostPCAPURL}}" title="Raw host-bridge packet capture for Wireshark">host PCAP ({{.Detail.HostPCAPSize}} bytes) &darr;</a>{{end}}{{if .Detail.GuestPCAPURL}}<a class="chip" href="{{.Detail.GuestPCAPURL}}" title="Raw guest capture including loopback DNS for Wireshark">guest PCAP ({{.Detail.GuestPCAPSize}} bytes) &darr;</a>{{end}}{{if .Detail.DiagnosticsURL}}<a class="chip" href="{{.Detail.DiagnosticsURL}}" title="Bounded administrator evidence bundle">diagnostics ZIP ({{.Detail.DiagnosticsSize}} bytes) &darr;</a>{{end}}</div>
         {{if .Detail.Incomplete}}<div class="tw:mb-6 tw:rounded-lg tw:border tw:border-red tw:bg-red-subtle tw:px-4 tw:py-4 tw:text-red" role="alert"><strong>Analysis did not run to completion.</strong> {{if .Detail.FailureReason}}{{.Detail.FailureReason}}{{else}}The guest returned no usable analysis artifacts.{{end}} The empty evidence sections below are an infrastructure failure, not a clean payload result. Re-submit only after the sandbox health check passes.</div>{{end}}
 
         <div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-4 tw:gap-3 tw:mb-6" id="sandbox-detail-stats">
@@ -72,6 +72,12 @@ const pageSandbox = `
 {{end}}</pre>{{else}}<p class="empty">No tracked path changes.</p>{{end}}</div>
         <div class="card half"><h2>Standard output</h2><pre class="code">{{.Detail.Stdout}}</pre></div>
         <div class="card half"><h2>Standard error</h2><pre class="code">{{.Detail.Stderr}}</pre></div>
+        <div class="card half"><h2>Process difference</h2><p class="note">Commands added or removed between the pre- and post-execution snapshots. Volatile PID and resource columns are ignored.</p>{{if .Detail.ProcessDiff.Added}}<details open><summary>Added ({{len .Detail.ProcessDiff.Added}})</summary><pre class="code tw:mt-2">{{range .Detail.ProcessDiff.Added}}+ {{.}}
+{{end}}</pre></details>{{else}}<p class="empty">No added processes.</p>{{end}}{{if .Detail.ProcessDiff.Removed}}<details open class="tw:mt-3"><summary>Removed ({{len .Detail.ProcessDiff.Removed}})</summary><pre class="code tw:mt-2">{{range .Detail.ProcessDiff.Removed}}- {{.}}
+{{end}}</pre></details>{{else}}<p class="empty">No removed processes.</p>{{end}}</div>
+        <div class="card half"><h2>Sockets difference</h2><p class="note">Socket rows added or removed between the pre- and post-execution snapshots.</p>{{if .Detail.SocketDiff.Added}}<details open><summary>Added ({{len .Detail.SocketDiff.Added}})</summary><pre class="code tw:mt-2">{{range .Detail.SocketDiff.Added}}+ {{.}}
+{{end}}</pre></details>{{else}}<p class="empty">No added sockets.</p>{{end}}{{if .Detail.SocketDiff.Removed}}<details open class="tw:mt-3"><summary>Removed ({{len .Detail.SocketDiff.Removed}})</summary><pre class="code tw:mt-2">{{range .Detail.SocketDiff.Removed}}- {{.}}
+{{end}}</pre></details>{{else}}<p class="empty">No removed sockets.</p>{{end}}</div>
         <div class="card half"><h2>Sockets before</h2><pre class="code">{{range .Detail.SocketsBefore}}{{.}}
 {{end}}</pre></div><div class="card half"><h2>Sockets after</h2><pre class="code">{{range .Detail.SocketsAfter}}{{.}}
 {{end}}</pre></div>
@@ -79,7 +85,7 @@ const pageSandbox = `
 {{end}}</pre></details><details class="tw:mt-3"><summary>Processes after detonation ({{len .Detail.Artifacts.ProcessesAfter}})</summary><pre class="code tw:mt-2">{{range .Detail.Artifacts.ProcessesAfter}}{{.}}
 {{end}}</pre></details><details class="tw:mt-3"><summary>Host tcpdump log</summary><pre class="code tw:mt-2">{{.Detail.Artifacts.HostTCPDumpLog}}</pre></details><details class="tw:mt-3"><summary>Guest tcpdump log</summary><pre class="code tw:mt-2">{{.Detail.Artifacts.GuestTCPDumpLog}}</pre></details>{{if .Detail.Artifacts.ClassificationError}}<details class="tw:mt-3" open><summary>Classifier error</summary><pre class="code tw:mt-2">{{.Detail.Artifacts.ClassificationError}}</pre></details>{{end}}{{if .Detail.Artifacts.PEForensicsError}}<details class="tw:mt-3" open><summary>PE parser error</summary><pre class="code tw:mt-2">{{.Detail.Artifacts.PEForensicsError}}</pre></details>{{end}}</div>
         </div>
-        <p class="note tw:mt-3">Guest-produced text is untrusted, HTML-escaped, and size-bounded. Raw PCAP downloads require the administrator role; complete raw result directories and syscall traces remain root-only on the homeserver.</p>
+        <p class="note tw:mt-3">Guest-produced text is untrusted, HTML-escaped, and size-bounded. Raw PCAP and diagnostics downloads require the administrator role; complete raw result directories and syscall traces remain root-only on the homeserver.</p>
         {{else}}
         <div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:xl:grid-cols-5 tw:gap-3 tw:mb-6" id="sandbox-status-stats">
           <div class="hp-stat"><span class="hp-stat-value">{{.Status.WorkerState}}</span><span class="hp-stat-label">Worker</span></div>
