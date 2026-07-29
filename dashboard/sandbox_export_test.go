@@ -16,6 +16,7 @@ func TestSandboxPCAPExportRequiresAdminAndServesRegularCapture(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("SANDBOX_RESULTS_DIR", dir)
 	t.Setenv("DASHBOARD_REQUIRE_ADMIN", "true")
+	configureIdentityTestBackend(t, "admin")
 	job := "linux-20260726T000000Z-0123456789ab"
 	hash := strings.Repeat("a", 64)
 	result := `{"version":3,"job":"` + job + `","sha256":"` + hash + `"}`
@@ -36,7 +37,7 @@ func TestSandboxPCAPExportRequiresAdminAndServesRegularCapture(t *testing.T) {
 	}
 
 	request := httptest.NewRequest(http.MethodGet, path, nil)
-	request.Header.Set("X-Auth-Role", "admin")
+	addIdentityTestCookie(request)
 	allowed := httptest.NewRecorder()
 	serveSandboxExport(allowed, request)
 	if allowed.Code != http.StatusOK || allowed.Body.Len() != len(pcap) {
@@ -51,6 +52,7 @@ func TestSandboxDiagnosticsExportRequiresAdmin(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("SANDBOX_RESULTS_DIR", dir)
 	t.Setenv("DASHBOARD_REQUIRE_ADMIN", "true")
+	configureIdentityTestBackend(t, "admin")
 	job := "windows-20260729T000000Z-0123456789ab"
 	hash := strings.Repeat("b", 64)
 	result := `{"version":3,"job":"` + job + `","sha256":"` + hash + `"}`
@@ -70,7 +72,7 @@ func TestSandboxDiagnosticsExportRequiresAdmin(t *testing.T) {
 	}
 
 	request := httptest.NewRequest(http.MethodGet, path, nil)
-	request.Header.Set("X-Auth-Role", "admin")
+	addIdentityTestCookie(request)
 	allowed := httptest.NewRecorder()
 	serveSandboxExport(allowed, request)
 	if allowed.Code != http.StatusOK || allowed.Body.Len() != len(bundle) {
@@ -85,6 +87,7 @@ func TestSandboxPDFExportRequiresAdmin(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("SANDBOX_RESULTS_DIR", dir)
 	t.Setenv("DASHBOARD_REQUIRE_ADMIN", "true")
+	configureIdentityTestBackend(t, "admin")
 	job := "linux-20260729T164848Z-cbe0b83cb4a0"
 	hash := strings.Repeat("c", 64)
 	result := `{
@@ -117,7 +120,7 @@ func TestSandboxPDFExportRequiresAdmin(t *testing.T) {
 	}
 
 	request := httptest.NewRequest(http.MethodGet, path, nil)
-	request.Header.Set("X-Auth-Role", "admin")
+	addIdentityTestCookie(request)
 	allowed := httptest.NewRecorder()
 	serveSandboxExport(allowed, request)
 	if allowed.Code != http.StatusOK || !bytes.HasPrefix(allowed.Body.Bytes(), []byte("%PDF-1.4")) {

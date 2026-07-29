@@ -16,11 +16,12 @@ func TestSandboxSubmitWritesOnlyValidatedExistingHash(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("DASHBOARD_REQUIRE_ADMIN", "true")
+	configureIdentityTestBackend(t, "admin")
 	t.Setenv("SANDBOX_REQUEST_DIR", requests)
 	s := &store{payloadDirs: []string{payloads}}
 	r := httptest.NewRequest(http.MethodPost, "https://honeypot.example/sandbox/submit", strings.NewReader("hash="+hash))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	r.Header.Set("X-Auth-Role", "admin")
+	addIdentityTestCookie(r)
 	r.Header.Set("Origin", "https://honeypot.example")
 	w := httptest.NewRecorder()
 	s.serveSandboxSubmit(w, r)
@@ -34,13 +35,14 @@ func TestSandboxSubmitWritesOnlyValidatedExistingHash(t *testing.T) {
 
 func TestSandboxSubmitRejectsCrossSiteAndUnknownPayload(t *testing.T) {
 	t.Setenv("DASHBOARD_REQUIRE_ADMIN", "true")
+	configureIdentityTestBackend(t, "admin")
 	t.Setenv("SANDBOX_REQUEST_DIR", t.TempDir())
 	hash := strings.Repeat("b", 64)
 	s := &store{payloadDirs: []string{t.TempDir()}}
 	for _, origin := range []string{"https://evil.example", "https://honeypot.example"} {
 		r := httptest.NewRequest(http.MethodPost, "https://honeypot.example/sandbox/submit", strings.NewReader("hash="+hash))
 		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		r.Header.Set("X-Auth-Role", "admin")
+		addIdentityTestCookie(r)
 		r.Header.Set("Origin", origin)
 		w := httptest.NewRecorder()
 		s.serveSandboxSubmit(w, r)

@@ -390,6 +390,11 @@ services:
       - SANDBOX_ALERT_RISK_SCORE=${SANDBOX_ALERT_RISK_SCORE:-50}
       - ALERT_CAMPAIGN_SCORE=${HONEYPOT_ALERT_CAMPAIGN_SCORE:-80}
       - DASHBOARD_REQUIRE_ADMIN=${DASHBOARD_REQUIRE_ADMIN:-true}
+      - AUTH_INTROSPECTION_URL=${AUTH_INTROSPECTION_URL:-https://auth.honeypot.example/_auth/introspect}
+      - AUTH_INTROSPECTION_TOKEN=${AUTH_INTROSPECTION_TOKEN:-}
+      - AUTH_TARGET_HOST=${AUTH_TARGET_HOST:-honeypot.example}
+      - AUTH_SESSION_COOKIE_NAME=${AUTH_SESSION_COOKIE_NAME:-xore_sso}
+      - AUTH_ACCOUNT_URL=${AUTH_ACCOUNT_URL:-https://auth.honeypot.example/auth/app?pane=account}
       - EXPECTED_SENSORS=cowrie,multipot,http,api-honeypot,dionaea,dnp3,conpot,conpot-s7-1200,conpot-s7-1500,conpot-iec104,conpot-guardian,conpot-kamstrup,tanner,suricata
       - ALERT_WEBHOOK_URL=${HONEYPOT_ALERT_WEBHOOK_URL:-}
       - TZ=Europe/Berlin

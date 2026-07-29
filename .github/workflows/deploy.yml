@@ -35,6 +35,7 @@ jobs:
             ./ "$destination/"
           cp "$destination/docker-compose.yml" "$destination/compose.yml"
           cd "$destination"
+          test ! -f .env || chmod 600 .env
           docker compose -f compose.yml config --quiet
           docker compose -f compose.yml up -d --build
 
@@ -62,4 +63,4 @@ jobs:
           ssh_options=(-i ~/.ssh/honeypot_vps -p "${VPS_PORT:-2222}" -o StrictHostKeyChecking=accept-new)
           rsync -az --delete-delay --exclude '.env' -e "ssh ${ssh_options[*]}" vps/ "${VPS_USER:-root}@${VPS_HOST}:/root/vps/"
           ssh "${ssh_options[@]}" "${VPS_USER:-root}@${VPS_HOST}" \
-            'cd /root/vps && docker compose -f docker-compose.yml config --quiet && docker compose -f docker-compose.yml up -d --build'
+            'cd /root/vps && { test ! -f .env || chmod 600 .env; } && docker compose -f docker-compose.yml config --quiet && docker compose -f docker-compose.yml up -d --build'
