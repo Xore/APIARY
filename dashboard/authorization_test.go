@@ -90,7 +90,7 @@ func TestWhoAmIReturnsStableSubjectAndCapabilities(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/whoami", nil)
 	addIdentityTestCookie(request)
 	response := httptest.NewRecorder()
-	serveWhoAmI(response, request)
+	(&store{}).serveWhoAmI(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
 	}

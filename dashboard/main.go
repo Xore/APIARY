@@ -106,6 +106,11 @@ func main() {
 	}
 	s.alerts = newAlertManager(getenv("ALERT_STATE_FILE", "/state/alerts.json"), cooldown)
 	s.intelligence = &intelligenceStore{path: getenv("INTELLIGENCE_STATE_FILE", "/state/intelligence.json")}
+	s.settings = newSettingsService(
+		getenv("DASHBOARD_CONFIG_FILE", "/state/dashboard-config.json"),
+		getenv("DASHBOARD_USERS_FILE", "/state/dashboard-users.json"),
+		getenv("DASHBOARD_AUDIT_FILE", "/state/dashboard-audit.jsonl"),
+	)
 	s.rebuild()
 	go s.notifyLoop(os.Getenv("ALERT_WEBHOOK_URL"))
 	go func() {
@@ -148,7 +153,7 @@ func main() {
 	})
 	// Current identity is resolved live through auth-backend. Caller-supplied
 	// X-Auth-* headers are intentionally ignored.
-	http.HandleFunc("/api/whoami", serveWhoAmI)
+	http.HandleFunc("/api/whoami", s.serveWhoAmI)
 	http.HandleFunc("/api/map-points", s.serveMapPoints)
 	http.HandleFunc("/api/stream", s.serveEventsSSE)
 	http.HandleFunc("/api/alerts", s.serveAlertsAPI)

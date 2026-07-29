@@ -60,7 +60,40 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	return false
 }
 
-func serveWhoAmI(w http.ResponseWriter, r *http.Request) {
+// capabilitiesFor maps a trusted role to dashboard capabilities. Capability
+// lists are computed server-side only; client code never derives permission
+// from a badge or a hidden control (roadmap §2).
+func capabilitiesFor(role string) []string {
+	capabilities := []string{"preferences:write", "evidence:read"}
+	if role == "admin" {
+		capabilities = append(capabilities, "configuration:write", "evidence:admin")
+	}
+	return capabilities
+}
+
+// requireIdentity is the identity middleware for the settings APIs added in
+// Milestones C and E: it resolves the current session through live
+// introspection and writes the error response on failure. Authorization
+// beyond "any authenticated subject" (admin-only endpoints) additionally
+// checks identity.Role at the call site.
+func requireIdentity(w http.ResponseWriter, r *http.Request) (authenticatedIdentity, bool) {
+	identity, err := resolveIdentity(r)
+	if err != nil {
+		if errors.Is(err, errIdentityUnavailable) {
+			http.Error(w, "identity service unavailable", http.StatusServiceUnavailable)
+		} else {
+			http.Error(w, "authentication required", http.StatusUnauthorized)
+		}
+		return authenticatedIdentity{}, false
+	}
+	return identity, true
+}
+
+// serveWhoAmI answers the current identity and refreshes the dashboard-owned
+// user projection as a side effect. The projection is diagnostic and
+// best-effort; a projection write failure must never break the identity
+// response itself.
+func (s *store) serveWhoAmI(w http.ResponseWriter, r *http.Request) {
 	identity, err := resolveIdentity(r)
 	if err != nil {
 		if errors.Is(err, errIdentityUnavailable) {
@@ -70,15 +103,14 @@ func serveWhoAmI(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	capabilities := []string{"preferences:write", "evidence:read"}
-	if identity.Role == "admin" {
-		capabilities = append(capabilities, "configuration:write", "evidence:admin")
+	if s != nil && s.settings != nil {
+		s.settings.users.Upsert(identity)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(whoAmIResponse{
 		authenticatedIdentity: identity,
-		Capabilities:          capabilities,
+		Capabilities:          capabilitiesFor(identity.Role),
 		AuthAccountURL:        strings.TrimSpace(os.Getenv("AUTH_ACCOUNT_URL")),
 	})
 }
