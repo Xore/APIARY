@@ -6,12 +6,9 @@ import (
 	"testing"
 )
 
-// TestSettingsPageIsPermanentDialog executes the /settings template and
-// asserts the permanent-dialog contract from the roadmap: the page IS a
-// modal, the nested confirmation is a DESCENDANT of it (browser top-layer
-// invariant), Escape has no close control, and every personal pane and
-// preference control is server-rendered.
-func TestSettingsPageIsPermanentDialog(t *testing.T) {
+// renderSettings executes the settings template with the given admin flag.
+func renderSettings(t *testing.T, admin bool) string {
+	t.Helper()
 	tmpl, err := template.New("t").Funcs(template.FuncMap{
 		"worldMap": func() template.HTML { return "" },
 		"json":     func(any) string { return "" },
@@ -21,10 +18,19 @@ func TestSettingsPageIsPermanentDialog(t *testing.T) {
 		t.Fatalf("dashboard template does not parse: %v", err)
 	}
 	var out strings.Builder
-	if err := tmpl.ExecuteTemplate(&out, "settings", nil); err != nil {
+	if err := tmpl.ExecuteTemplate(&out, "settings", settingsPageData{Admin: admin}); err != nil {
 		t.Fatalf("settings page does not execute: %v", err)
 	}
-	html := out.String()
+	return out.String()
+}
+
+// TestSettingsPageIsPermanentDialog executes the /settings template and
+// asserts the permanent-dialog contract from the roadmap: the page IS a
+// modal, the nested confirmation is a DESCENDANT of it (browser top-layer
+// invariant), Escape has no close control, and every personal pane and
+// preference control is server-rendered.
+func TestSettingsPageIsPermanentDialog(t *testing.T) {
+	html := renderSettings(t, false)
 
 	for _, want := range []string{
 		`data-permanent-dialog`, `modal modal--permanent`, `id="hp-settings"`,
@@ -105,9 +111,59 @@ func TestSettingsControllerContract(t *testing.T) {
 		"/api/whoami",                  // read-only identity
 		"/_auth/logout",                // logout stays on the auth origin
 		"state.confirmCallback = null", // confirm executes exactly once
+		// Administration (Milestone E): validate → confirm → PATCH, env pins,
+		// staged honeypot thresholds, history/rollback, users, and audit.
+		"/api/settings/config",
+		"/api/settings/config/validate",
+		"/api/settings/config/rollback",
+		"/api/settings/config/history",
+		"/api/settings/users",
+		"/api/settings/audit",
+		"restart-required", // staged impact is confirmed explicitly
+		"(environment)",    // env-pinned fields show their source
+		"data-cfg",         // admin controls are keyed by data-cfg
+		"flattenConfig",    // dotted-name snapshots drive dirty tracking
 	} {
 		if !strings.Contains(js, want) {
 			t.Fatalf("hp-settings.js missing behavior %q", want)
+		}
+	}
+}
+
+// TestSettingsAdminPanesAreServerGated proves the administration panes exist
+// only in documents rendered for a live-introspected admin (§12: hiding is
+// server-side, never client-side alone). A non-admin document carries no
+// admin markup at all — no controls to merely "hide".
+func TestSettingsAdminPanesAreServerGated(t *testing.T) {
+	admin := renderSettings(t, true)
+	for _, want := range []string{
+		`data-hp-pane-nav="branding"`, `data-hp-pane-nav="behavior"`, `data-hp-pane-nav="honeypot"`,
+		`data-hp-pane-nav="users"`, `data-hp-pane-nav="history"`, `data-hp-pane-nav="audit"`,
+		`data-hp-pane="branding"`, `data-hp-pane="behavior"`, `data-hp-pane="honeypot"`,
+		`data-hp-pane="users"`, `data-hp-pane="history"`, `data-hp-pane="audit"`,
+		`data-cfg="presentation.app_name"`, `data-cfg="presentation.help_link_url"`,
+		`data-cfg="presentation.banner_severity"`, `data-cfg="presentation.ai_disclaimer"`,
+		`data-cfg="behavior.default_landing"`, `data-cfg="behavior.rows_per_page_options"`,
+		`data-cfg="behavior.maintenance_mode"`, `data-cfg="behavior.read_only"`,
+		`data-cfg="honeypot.alert_cooldown"`, `data-cfg="honeypot.yara_max_bytes"`,
+		`data-cfg-source="honeypot.alert_cooldown"`,
+		`data-hp-cfg-save="branding"`, `data-hp-cfg-save="behavior"`, `data-hp-cfg-save="honeypot"`,
+		`data-hp-users-list`, `data-hp-history-list`, `data-hp-audit-list`, `data-hp-audit-filter`,
+		`data-hp-apply-command`,
+	} {
+		if !strings.Contains(admin, want) {
+			t.Fatalf("admin settings document missing marker %q", want)
+		}
+	}
+
+	user := renderSettings(t, false)
+	for _, absent := range []string{
+		`data-hp-pane-nav="branding"`, `data-hp-pane="branding"`, `data-cfg=`,
+		`data-hp-users-list`, `data-hp-history-list`, `data-hp-audit-list`,
+		`Administration`,
+	} {
+		if strings.Contains(user, absent) {
+			t.Fatalf("non-admin settings document must not contain admin marker %q", absent)
 		}
 	}
 }

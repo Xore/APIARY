@@ -5,6 +5,16 @@ package main
 // Xore/theme): a native dialog with data-permanent-dialog that owns scrolling
 // and cannot close on Escape, with the nested save/reset confirmation as a
 // descendant so the browser top-layer invariant holds.
+//
+// The administration panes (Milestone E) render only when the server resolved
+// the caller as an admin — hiding is server-side, never client-side alone
+// (§12): non-admins receive a document without any admin markup at all.
+//
+// settingsPageData carries the template inputs for the "settings" page.
+type settingsPageData struct {
+	Admin bool
+}
+
 const pageSettings = `
 {{define "settings"}}<!doctype html>
 <html lang="en">
@@ -15,7 +25,7 @@ const pageSettings = `
 <title>Settings — xore//honeypot</title>
 <script>(function(){try{var t=localStorage.getItem("hp-theme");if(t==="light"||t==="dark"){document.documentElement.dataset.theme=t;}else if(t){localStorage.removeItem("hp-theme");}}catch(e){}})();</script>
 <link rel="stylesheet" href="/static/theme.css?v=20260729-1">
-<script defer src="/static/hp-settings.js?v=20260730-1"></script>
+<script defer src="/static/hp-settings.js?v=20260730-2"></script>
 <style>
   .hp-settings-page{height:100dvh;overflow:hidden}
   .hp-settings-page .settings-layout__content{height:100dvh}
@@ -29,6 +39,20 @@ const pageSettings = `
   .hp-settings-pane[hidden],.hp-field[hidden]{display:none}
   .sidebar__item.is-dirty::after{content:"";width:6px;height:6px;margin-left:auto;border-radius:50%;background:var(--accent)}
   .hp-cap-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+  .hp-cfg-source{margin:6px 0 0;font-size:11px;color:var(--text-muted)}
+  .hp-cfg-source strong{color:var(--text-secondary);font-weight:600}
+  .hp-table-wrap{overflow-x:auto}
+  .hp-table{width:100%;border-collapse:collapse;font-size:13px}
+  .hp-table th{text-align:left;padding:8px 10px;color:var(--text-muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border-subtle)}
+  .hp-table td{padding:8px 10px;border-bottom:1px solid var(--border-subtle);color:var(--text-secondary)}
+  .hp-audit-filter{width:auto;min-width:180px}
+  .hp-rev-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border-subtle)}
+  .hp-rev-row:last-child{border-bottom:0}
+  .hp-rev-meta{flex:1;min-width:0;font-size:13px;color:var(--text-secondary)}
+  .hp-rev-meta small{display:block;color:var(--text-muted);font-size:11px;margin-top:2px}
+  .hp-audit-row{padding:8px 0;border-bottom:1px solid var(--border-subtle);font-size:12px;color:var(--text-secondary)}
+  .hp-audit-row:last-child{border-bottom:0}
+  .hp-audit-row small{color:var(--text-muted)}
   @media(max-width:720px){
     .hp-settings-page{height:auto;overflow:auto}
     .hp-settings-page .settings-layout__content{height:auto}
@@ -49,6 +73,15 @@ const pageSettings = `
     <button class="sidebar__item" type="button" data-hp-pane-nav="navigation">Navigation &amp; tables</button>
     <button class="sidebar__item" type="button" data-hp-pane-nav="time">Time &amp; live data</button>
     <button class="sidebar__item" type="button" data-hp-pane-nav="map">Map &amp; investigation</button>
+    {{if .Admin}}
+    <div class="sidebar__section-label">Administration</div>
+    <button class="sidebar__item" type="button" data-hp-pane-nav="branding">Branding &amp; text</button>
+    <button class="sidebar__item" type="button" data-hp-pane-nav="behavior">Dashboard behavior</button>
+    <button class="sidebar__item" type="button" data-hp-pane-nav="honeypot">Honeypot operations</button>
+    <button class="sidebar__item" type="button" data-hp-pane-nav="users">Users</button>
+    <button class="sidebar__item" type="button" data-hp-pane-nav="history">Configuration history</button>
+    <button class="sidebar__item" type="button" data-hp-pane-nav="audit">Audit log</button>
+    {{end}}
     <div class="sidebar__section-label">Dashboard</div>
     <a class="sidebar__item" href="/" data-hp-settings-back>&larr; Back to dashboard</a>
   </aside>
@@ -328,6 +361,242 @@ const pageSettings = `
           <button class="btn btn-primary" type="button" data-hp-save="map" disabled>Save changes</button>
         </div>
       </section>
+
+      {{if .Admin}}
+      <!-- Branding & text: the presentation namespace. Plain bounded text,
+           escaped on output; links are https-only (roadmap §4). -->
+      <section class="hp-settings-pane" data-hp-pane="branding" aria-label="Branding and text" hidden>
+        <section class="card">
+          <div class="card__header"><div><h3>Product identity</h3><p class="card__meta">Names and labels shown across the dashboard.</p></div></div>
+          <div class="hp-field settings-field" data-hp-search="branding app name product title">
+            <label class="form-label" for="hp-cfg-app-name">Application name</label>
+            <input class="form-input" id="hp-cfg-app-name" data-cfg="presentation.app_name" maxlength="60" autocomplete="off">
+          </div>
+          <div class="hp-field settings-field" data-hp-search="branding product label short">
+            <label class="form-label" for="hp-cfg-product-label">Product label</label>
+            <input class="form-input" id="hp-cfg-product-label" data-cfg="presentation.product_label" maxlength="30" autocomplete="off">
+          </div>
+          <div class="hp-field settings-field" data-hp-search="branding dashboard title heading">
+            <label class="form-label" for="hp-cfg-title">Dashboard title</label>
+            <input class="form-input" id="hp-cfg-title" data-cfg="presentation.dashboard_title" maxlength="80" autocomplete="off">
+          </div>
+          <div class="hp-field settings-field" data-hp-search="branding subtitle subheading">
+            <label class="form-label" for="hp-cfg-subtitle">Dashboard subtitle</label>
+            <input class="form-input" id="hp-cfg-subtitle" data-cfg="presentation.dashboard_subtitle" maxlength="200" autocomplete="off">
+          </div>
+          <div class="hp-field settings-field" data-hp-search="branding organization site name">
+            <label class="form-label" for="hp-cfg-org">Organization name</label>
+            <input class="form-input" id="hp-cfg-org" data-cfg="presentation.org_name" maxlength="80" autocomplete="off">
+          </div>
+          <div class="hp-field settings-field" data-hp-search="branding overview intro welcome">
+            <label class="form-label" for="hp-cfg-intro">Overview introduction</label>
+            <textarea class="form-input" id="hp-cfg-intro" data-cfg="presentation.overview_intro" rows="3" maxlength="500"></textarea>
+          </div>
+        </section>
+        <section class="card">
+          <div class="card__header"><div><h3>Help &amp; notices</h3><p class="card__meta">Configurable copy. Plain text only — no markup, https links only.</p></div></div>
+          <div class="hp-field settings-field" data-hp-search="help link label contact">
+            <label class="form-label" for="hp-cfg-help-label">Help link label</label>
+            <input class="form-input" id="hp-cfg-help-label" data-cfg="presentation.help_link_label" maxlength="40" autocomplete="off">
+          </div>
+          <div class="hp-field settings-field" data-hp-search="help link url contact https">
+            <label class="form-label" for="hp-cfg-help-url">Help link URL (https only)</label>
+            <input class="form-input" id="hp-cfg-help-url" data-cfg="presentation.help_link_url" type="url" autocomplete="off" spellcheck="false" placeholder="https://">
+          </div>
+          <div class="hp-field settings-field" data-hp-search="banner maintenance incident text notice">
+            <label class="form-label" for="hp-cfg-banner">Banner text</label>
+            <input class="form-input" id="hp-cfg-banner" data-cfg="presentation.banner_text" maxlength="280" autocomplete="off">
+          </div>
+          <div class="hp-field settings-field" data-hp-search="banner severity info warning danger">
+            <label class="form-label" for="hp-cfg-banner-sev">Banner severity</label>
+            <select class="form-input" id="hp-cfg-banner-sev" data-cfg="presentation.banner_severity">
+              <option value="">None</option>
+              <option value="info">Info</option>
+              <option value="success">Success</option>
+              <option value="warning">Warning</option>
+              <option value="danger">Danger</option>
+            </select>
+          </div>
+          <div class="hp-field settings-field" data-hp-search="banner expires expiry time">
+            <label class="form-label" for="hp-cfg-banner-exp">Banner expiry (RFC 3339, empty = no expiry)</label>
+            <input class="form-input" id="hp-cfg-banner-exp" data-cfg="presentation.banner_expires" autocomplete="off" spellcheck="false" placeholder="2026-08-01T00:00:00Z">
+          </div>
+          <div class="hp-field settings-field" data-hp-search="footer text">
+            <label class="form-label" for="hp-cfg-footer">Footer text</label>
+            <input class="form-input" id="hp-cfg-footer" data-cfg="presentation.footer_text" maxlength="200" autocomplete="off">
+          </div>
+          <div class="hp-field settings-field" data-hp-search="ai disclaimer analysis generated">
+            <label class="form-label" for="hp-cfg-ai">AI analysis disclaimer</label>
+            <textarea class="form-input" id="hp-cfg-ai" data-cfg="presentation.ai_disclaimer" rows="2" maxlength="300"></textarea>
+          </div>
+          <div class="hp-field settings-field" data-hp-search="privacy notice evidence handling">
+            <label class="form-label" for="hp-cfg-privacy">Evidence-handling / privacy notice</label>
+            <textarea class="form-input" id="hp-cfg-privacy" data-cfg="presentation.privacy_notice" rows="2" maxlength="300"></textarea>
+          </div>
+        </section>
+        <div class="settings-actions">
+          <button class="btn btn-primary" type="button" data-hp-cfg-save="branding" disabled>Save changes</button>
+        </div>
+      </section>
+
+      <!-- Dashboard behavior: safe bounded defaults and feature visibility. -->
+      <section class="hp-settings-pane" data-hp-pane="behavior" aria-label="Dashboard behavior" hidden>
+        <section class="card">
+          <div class="card__header"><div><h3>Defaults</h3><p class="card__meta">Global defaults users can still override per session.</p></div></div>
+          <div class="hp-field settings-field" data-hp-search="behavior default landing page route">
+            <label class="form-label" for="hp-cfg-landing">Default landing page</label>
+            <select class="form-input" id="hp-cfg-landing" data-cfg="behavior.default_landing">
+              <option value="/">Overview</option>
+              <option value="/events">Events</option>
+              <option value="/ips">Source IPs</option>
+              <option value="/campaigns">Campaigns</option>
+              <option value="/map">Map</option>
+              <option value="/alerts">Alerts</option>
+            </select>
+          </div>
+          <div class="hp-field settings-field" data-hp-search="behavior default time window range">
+            <label class="form-label" for="hp-cfg-window">Default time window</label>
+            <select class="form-input" id="hp-cfg-window" data-cfg="behavior.default_time_window">
+              <option value="1h">Last hour</option>
+              <option value="6h">Last 6 hours</option>
+              <option value="24h">Last 24 hours</option>
+              <option value="7d">Last 7 days</option>
+              <option value="30d">Last 30 days</option>
+            </select>
+          </div>
+          <div class="hp-field settings-field" data-hp-search="behavior rows per page options sizes">
+            <label class="form-label" for="hp-cfg-rows">Rows-per-page choices (comma-separated, from 10/25/50/100)</label>
+            <input class="form-input" id="hp-cfg-rows" data-cfg="behavior.rows_per_page_options" data-cfg-kind="ints" autocomplete="off" spellcheck="false" placeholder="25, 50, 100">
+          </div>
+          <div class="hp-field settings-field" data-hp-search="behavior export rows maximum limit">
+            <label class="form-label" for="hp-cfg-export">Maximum export rows (100–100000)</label>
+            <input class="form-input" id="hp-cfg-export" data-cfg="behavior.max_export_rows" data-cfg-kind="int" inputmode="numeric" autocomplete="off">
+          </div>
+          <div class="hp-field settings-field" data-hp-search="behavior refresh interval options seconds">
+            <label class="form-label" for="hp-cfg-refresh">Refresh interval choices in seconds (from 10/15/30/60/120/300)</label>
+            <input class="form-input" id="hp-cfg-refresh" data-cfg="behavior.refresh_interval_seconds_options" data-cfg-kind="ints" autocomplete="off" spellcheck="false" placeholder="15, 30, 60, 300">
+          </div>
+          <div class="hp-field settings-field" data-hp-search="behavior source stale minutes threshold">
+            <label class="form-label" for="hp-cfg-stale">Source stale threshold in minutes (2–120)</label>
+            <input class="form-input" id="hp-cfg-stale" data-cfg="behavior.source_stale_minutes" data-cfg-kind="int" inputmode="numeric" autocomplete="off">
+          </div>
+          <div class="hp-field settings-field" data-hp-search="behavior map provider basemap">
+            <label class="form-label" for="hp-cfg-provider">Default map provider</label>
+            <select class="form-input" id="hp-cfg-provider" data-cfg="behavior.map_provider">
+              <option value="osm">OpenStreetMap</option>
+              <option value="offline">Offline tiles</option>
+            </select>
+          </div>
+        </section>
+        <section class="card">
+          <div class="card__header"><div><h3>Feature visibility</h3><p class="card__meta">Applies live for every user.</p></div></div>
+          <div class="hp-field card__row" data-hp-search="behavior ml llm experimental panels machine learning">
+            <div><div class="card__label">Experimental ML/LLM panels</div><div class="card__value">Show machine-learning analysis panels in investigations.</div></div>
+            <label class="switch"><input type="checkbox" data-cfg="behavior.show_ml_panels" aria-label="Experimental ML panels"><span></span></label>
+          </div>
+          <div class="hp-field card__row" data-hp-search="behavior maintenance mode banner">
+            <div><div class="card__label">Maintenance mode</div><div class="card__value">Announce maintenance across the dashboard.</div></div>
+            <label class="switch"><input type="checkbox" data-cfg="behavior.maintenance_mode" aria-label="Maintenance mode"><span></span></label>
+          </div>
+          <div class="hp-field card__row" data-hp-search="behavior read only mode freeze">
+            <div><div class="card__label">Read-only mode</div><div class="card__value">Freeze evidence-changing dashboard actions.</div></div>
+            <label class="switch"><input type="checkbox" data-cfg="behavior.read_only" aria-label="Read-only mode"><span></span></label>
+          </div>
+        </section>
+        <div class="settings-actions">
+          <button class="btn btn-primary" type="button" data-hp-cfg-save="behavior" disabled>Save changes</button>
+        </div>
+      </section>
+
+      <!-- Honeypot operations: Tier 2 staged thresholds (§12). Saving stages
+           values only; applying them is an operator-run restart, never
+           automatic. Environment-pinned fields are disabled and reported. -->
+      <section class="hp-settings-pane" data-hp-pane="honeypot" aria-label="Honeypot operations" hidden>
+        <div class="alert alert--info hp-field" data-hp-search="honeypot staged restart apply operations">
+          These thresholds are <strong>staged</strong>: saving updates the dashboard configuration store, and the
+          consuming services pick them up on their next restart. Apply with
+          <code data-hp-apply-command>docker compose up -d</code> on the affected services.
+        </div>
+        <section class="card">
+          <div class="card__header"><div><h3>Alerting</h3><p class="card__meta">Staged operational thresholds.</p></div></div>
+          <div class="hp-field settings-field" data-hp-search="honeypot alert cooldown duration">
+            <label class="form-label" for="hp-cfg-cooldown">Alert cooldown (5m–168h)</label>
+            <input class="form-input" id="hp-cfg-cooldown" data-cfg="honeypot.alert_cooldown" autocomplete="off" spellcheck="false" placeholder="6h">
+            <p class="hp-cfg-source" data-cfg-source="honeypot.alert_cooldown"></p>
+          </div>
+          <div class="hp-field settings-field" data-hp-search="honeypot alert campaign score threshold">
+            <label class="form-label" for="hp-cfg-campaign">Alert campaign score (0–100)</label>
+            <input class="form-input" id="hp-cfg-campaign" data-cfg="honeypot.alert_campaign_score" data-cfg-kind="int" inputmode="numeric" autocomplete="off">
+            <p class="hp-cfg-source" data-cfg-source="honeypot.alert_campaign_score"></p>
+          </div>
+          <div class="hp-field settings-field" data-hp-search="honeypot sandbox alert risk score">
+            <label class="form-label" for="hp-cfg-risk">Sandbox alert risk score (0–100)</label>
+            <input class="form-input" id="hp-cfg-risk" data-cfg="honeypot.sandbox_alert_risk_score" data-cfg-kind="int" inputmode="numeric" autocomplete="off">
+            <p class="hp-cfg-source" data-cfg-source="honeypot.sandbox_alert_risk_score"></p>
+          </div>
+        </section>
+        <section class="card">
+          <div class="card__header"><div><h3>Scanners</h3><p class="card__meta">YARA and payload pipeline thresholds.</p></div></div>
+          <div class="hp-field settings-field" data-hp-search="honeypot yara scan interval seconds">
+            <label class="form-label" for="hp-cfg-yara-interval">YARA scan interval in seconds (300–86400)</label>
+            <input class="form-input" id="hp-cfg-yara-interval" data-cfg="honeypot.yara_scan_interval_seconds" data-cfg-kind="int" inputmode="numeric" autocomplete="off">
+            <p class="hp-cfg-source" data-cfg-source="honeypot.yara_scan_interval_seconds"></p>
+          </div>
+          <div class="hp-field settings-field" data-hp-search="honeypot yara max bytes limit">
+            <label class="form-label" for="hp-cfg-yara-bytes">YARA max bytes (1048576–1073741824)</label>
+            <input class="form-input" id="hp-cfg-yara-bytes" data-cfg="honeypot.yara_max_bytes" data-cfg-kind="int64" inputmode="numeric" autocomplete="off">
+            <p class="hp-cfg-source" data-cfg-source="honeypot.yara_max_bytes"></p>
+          </div>
+          <div class="hp-field settings-field" data-hp-search="honeypot payload dedupe interval seconds">
+            <label class="form-label" for="hp-cfg-dedupe">Payload dedupe interval in seconds (300–86400)</label>
+            <input class="form-input" id="hp-cfg-dedupe" data-cfg="honeypot.payload_dedupe_interval_seconds" data-cfg-kind="int" inputmode="numeric" autocomplete="off">
+            <p class="hp-cfg-source" data-cfg-source="honeypot.payload_dedupe_interval_seconds"></p>
+          </div>
+        </section>
+        <div class="settings-actions">
+          <button class="btn btn-primary" type="button" data-hp-cfg-save="honeypot" disabled>Stage changes</button>
+        </div>
+      </section>
+
+      <!-- Users: read-only projection of dashboard activity. Account
+           management stays in auth-backend; this pane never edits anyone. -->
+      <section class="hp-settings-pane" data-hp-pane="users" aria-label="Users" hidden>
+        <section class="card hp-field" data-hp-search="users accounts activity role last seen">
+          <div class="card__header">
+            <div><h3>Projected dashboard users</h3><p class="card__meta">Diagnostic projection of who used the dashboard. Account management lives in the auth service.</p></div>
+            <a class="btn btn-secondary btn-sm" href="#" target="_blank" rel="noopener noreferrer" data-hp-users-admin-link hidden>Manage users</a>
+          </div>
+          <div class="hp-table-wrap"><table class="hp-table">
+            <thead><tr><th>User</th><th>Role</th><th>First seen</th><th>Last seen</th><th>Pref. rev.</th></tr></thead>
+            <tbody data-hp-users-list><tr><td colspan="5">Loading&hellip;</td></tr></tbody>
+          </table></div>
+        </section>
+      </section>
+
+      <!-- Configuration history: retained revisions with rollback. -->
+      <section class="hp-settings-pane" data-hp-pane="history" aria-label="Configuration history" hidden>
+        <section class="card hp-field" data-hp-search="history revisions rollback configuration">
+          <div class="card__header"><div><h3>Configuration revisions</h3><p class="card__meta">Newest first. Rollback restores a retained revision as a new revision.</p></div></div>
+          <div data-hp-history-list><p class="card__meta">Loading&hellip;</p></div>
+        </section>
+      </section>
+
+      <!-- Audit log: settings mutations, filterable by action. -->
+      <section class="hp-settings-pane" data-hp-pane="audit" aria-label="Audit log" hidden>
+        <section class="card hp-field" data-hp-search="audit log changes events actor">
+          <div class="card__header">
+            <div><h3>Settings audit log</h3><p class="card__meta">Newest first. Sensitive values are never logged.</p></div>
+            <select class="form-input hp-audit-filter" data-hp-audit-filter aria-label="Filter by action">
+              <option value="">All actions</option>
+              <option value="preferences.update">Preference changes</option>
+              <option value="config.update">Config updates</option>
+              <option value="config.rollback">Config rollbacks</option>
+            </select>
+          </div>
+          <div data-hp-audit-list><p class="card__meta">Loading&hellip;</p></div>
+        </section>
+      </section>
+      {{end}}
     </div>
   </main>
   </div>

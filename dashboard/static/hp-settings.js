@@ -45,9 +45,17 @@
     appearance: { title: "Appearance",             desc: "Theme, density, motion, and readability of the dashboard." },
     navigation: { title: "Navigation & tables",    desc: "Where you land, how the sidebar behaves, and how tables render." },
     time:       { title: "Time & live data",       desc: "Timezone, clock formats, refresh cadence, and notifications." },
-    map:        { title: "Map & investigation",    desc: "Basemap, clustering, and drill-down defaults for investigations." }
+    map:        { title: "Map & investigation",    desc: "Basemap, clustering, and drill-down defaults for investigations." },
+    branding:   { title: "Branding & text",        desc: "Product labels, help links, notices, and footer copy. Plain text; https links only." },
+    behavior:   { title: "Dashboard behavior",     desc: "Safe bounded defaults and feature visibility for every user." },
+    honeypot:   { title: "Honeypot operations",    desc: "Staged operational thresholds. Saving never restarts anything — apply with an operator-run restart." },
+    users:      { title: "Users",                  desc: "Read-only projection of dashboard activity. Accounts are managed in the auth service." },
+    history:    { title: "Configuration history",  desc: "Retained configuration revisions with rollback." },
+    audit:      { title: "Audit log",              desc: "Settings changes with actor, fields, and result." }
   };
   const PANE_NAMES = Object.keys(PANE_META);
+  const ADMIN_PANES = ["branding", "behavior", "honeypot", "users", "history", "audit"];
+  const isAdmin = navItems.some(nav => ADMIN_PANES.includes(nav.dataset.hpPaneNav));
 
   /* ---- state ---- */
   const state = { etag: "", prefs: null, snapshot: {}, dirty: {}, confirmCallback: null, confirmInitiator: null };
@@ -94,15 +102,17 @@
   /* ---- dirty tracking ---- */
   function computeDirty() {
     state.dirty = {};
-    if (!state.snapshot) return;
-    controls.forEach(el => {
-      const name = el.dataset.pref;
-      const pane = paneOf(el);
-      if (!pane) return;
-      const current = controlValue(el);
-      const original = state.snapshot[name];
-      if (JSON.stringify(current) !== JSON.stringify(original)) state.dirty[pane] = true;
-    });
+    if (state.snapshot) {
+      controls.forEach(el => {
+        const name = el.dataset.pref;
+        const pane = paneOf(el);
+        if (!pane) return;
+        const current = controlValue(el);
+        const original = state.snapshot[name];
+        if (JSON.stringify(current) !== JSON.stringify(original)) state.dirty[pane] = true;
+      });
+    }
+    if (isAdmin && cfg.loaded) computeCfgDirty();
     saveButtons.forEach(btn => { btn.disabled = !state.dirty[btn.dataset.hpSave]; });
     navItems.forEach(nav => nav.classList.toggle("is-dirty", Boolean(state.dirty[nav.dataset.hpPaneNav])));
   }
@@ -132,7 +142,8 @@
   }
 
   function showPane(name, replace = true) {
-    if (!PANE_META[name]) name = "account"; // ?pane= fallback for unknown names
+    // Unknown names — and admin panes absent for non-admins — fall back.
+    if (!PANE_META[name] || !panes.some(p => p.dataset.hpPane === name)) name = "account";
     panes.forEach(p => { p.hidden = p.dataset.hpPane !== name; });
     navItems.forEach(nav => nav.classList.toggle("active", nav.dataset.hpPaneNav === name));
     title.textContent = PANE_META[name].title;
@@ -143,6 +154,12 @@
       const url = new URL(window.location.href);
       url.searchParams.set("pane", name);
       history.replaceState(null, "", url);
+    }
+    if (isAdmin) {
+      if (name === "branding" || name === "behavior" || name === "honeypot") loadConfig();
+      else if (name === "users") loadUsers();
+      else if (name === "history") loadHistory();
+      else if (name === "audit") loadAudit();
     }
   }
 
@@ -424,6 +441,315 @@
       subjectEl.textContent = "";
     }
   }
+
+  /* ================= administration (Milestone E) =================
+   * Everything below only runs when the server rendered the admin panes
+   * (live-introspected admin role); the markup is absent otherwise. Config
+   * edits go through the validate preview → confirm → PATCH flow, honeypot
+   * fields pinned by the deployment environment are disabled with their
+   * source shown, and rollback restores a retained revision as a new one. */
+
+  const cfgControls = isAdmin ? Array.from(document.querySelectorAll("[data-cfg]")) : [];
+  const cfgSaveButtons = isAdmin ? Array.from(document.querySelectorAll("[data-hp-cfg-save]")) : [];
+  const cfg = { loaded: false, loading: false, etag: "", snapshot: {}, sources: {}, pinned: {} };
+
+  function flattenConfig(obj, prefix, out) {
+    Object.keys(obj || {}).forEach(key => {
+      const value = obj[key];
+      const dotted = prefix ? prefix + "." + key : key;
+      if (value && typeof value === "object" && !Array.isArray(value)) flattenConfig(value, dotted, out);
+      else out[dotted] = value;
+    });
+    return out;
+  }
+
+  function readCfgControl(el) {
+    if (el.type === "checkbox") return el.checked;
+    const kind = el.dataset.cfgKind || "string";
+    const raw = el.value.trim();
+    if (kind === "int" || kind === "int64") {
+      const n = parseInt(raw, 10);
+      return Number.isNaN(n) ? raw : n;
+    }
+    if (kind === "ints") {
+      if (!raw) return [];
+      return raw.split(",").map(part => {
+        const n = parseInt(part.trim(), 10);
+        return Number.isNaN(n) ? part.trim() : n;
+      });
+    }
+    return raw;
+  }
+
+  function writeCfgControl(el, value) {
+    if (el.type === "checkbox") { el.checked = Boolean(value); return; }
+    if (Array.isArray(value)) { el.value = value.join(", "); return; }
+    el.value = value == null ? "" : String(value);
+  }
+
+  // computeCfgDirty adds admin-pane dirtiness into state.dirty; it is called
+  // from computeDirty (which owns the reset) and never runs standalone.
+  function computeCfgDirty() {
+    cfgControls.forEach(el => {
+      const pane = paneOf(el);
+      if (!pane || el.disabled) return;
+      const current = readCfgControl(el);
+      const original = cfg.snapshot[el.dataset.cfg];
+      if (JSON.stringify(current) !== JSON.stringify(original)) state.dirty[pane] = true;
+    });
+    cfgSaveButtons.forEach(btn => { btn.disabled = !state.dirty[btn.dataset.hpCfgSave]; });
+  }
+
+  function applyCfgToControls() {
+    cfgControls.forEach(el => {
+      writeCfgControl(el, cfg.snapshot[el.dataset.cfg]);
+      const pinned = cfg.sources[el.dataset.cfg] === "environment";
+      el.disabled = pinned;
+    });
+    document.querySelectorAll("[data-cfg-source]").forEach(badge => {
+      const field = badge.dataset.cfgSource;
+      const source = cfg.sources[field] || "persisted";
+      if (source === "environment") {
+        const envValue = cfg.pinned[field.replace(/^honeypot\./, "")];
+        badge.innerHTML = "active: <strong></strong> (environment) — pinned; the staged value applies only if the pin is removed";
+        badge.querySelector("strong").textContent = envValue != null ? String(envValue) : "";
+      } else if (source === "staged") {
+        badge.textContent = "staged — applies on the next service restart";
+      } else if (source === "compiled") {
+        badge.textContent = "compiled default — the configuration store is unavailable";
+      } else {
+        badge.textContent = "persisted";
+      }
+    });
+  }
+
+  async function loadConfig() {
+    if (!isAdmin || cfg.loading) return;
+    cfg.loading = true;
+    try {
+      const { body, etag } = await api("/api/settings/config");
+      cfg.etag = etag;
+      cfg.snapshot = flattenConfig(body.config, "", {});
+      cfg.sources = body.sources || {};
+      cfg.pinned = body.pinned_environment || {};
+      cfg.loaded = true;
+      applyCfgToControls();
+      computeDirty();
+    } catch (error) {
+      setStatus("Configuration could not be loaded — " + error.message.trim(), "error");
+    } finally { cfg.loading = false; }
+  }
+
+  function collectCfgPatch(pane) {
+    const patch = {};
+    cfgControls.forEach(el => {
+      if (paneOf(el) !== pane || el.disabled) return;
+      const dotted = el.dataset.cfg;
+      const current = readCfgControl(el);
+      if (JSON.stringify(current) === JSON.stringify(cfg.snapshot[dotted])) return;
+      const [namespace, field] = dotted.split(".");
+      if (!patch[namespace]) patch[namespace] = {};
+      patch[namespace][field] = current;
+    });
+    return patch;
+  }
+
+  function requestCfgSave(pane, initiator) {
+    const patch = collectCfgPatch(pane);
+    if (!Object.keys(patch).length) return;
+    // Validate first: the preview names every changed field with its impact
+    // class, so the operator confirms restart-required staging explicitly.
+    api("/api/settings/config/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch)
+    }).then(({ body }) => {
+      if (!body.valid) {
+        setStatus("Not saved: " + (body.problems || []).join("; "), "error");
+        return;
+      }
+      const changes = (body.changes || []).map(c => c.field + " (" + c.impact + ")");
+      const staged = (body.changes || []).some(c => c.impact === "restart-required");
+      openConfirm({
+        titleText: staged ? "Stage configuration?" : "Save configuration?",
+        descText: "Apply these changes: " + changes.join(", ") + ".",
+        warningText: staged ? "Restart-required values are staged only. Saving never restarts a service — apply them with an operator-run restart." : "",
+        actionLabel: staged ? "Stage changes" : "Save configuration",
+        danger: staged,
+        initiator,
+        onConfirm: async () => {
+          try {
+            const { body: saved, etag } = await api("/api/settings/config", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json", "If-Match": cfg.etag },
+              body: JSON.stringify(patch)
+            });
+            cfg.etag = etag;
+            cfg.snapshot = flattenConfig(saved.config, "", {});
+            cfg.sources = saved.sources || {};
+            cfg.pinned = saved.pinned_environment || {};
+            applyCfgToControls();
+            computeDirty();
+            setStatus(staged ? "Changes staged — they apply on the next service restart." : "Configuration saved.", "ok");
+          } catch (error) {
+            if (error.status === 409) {
+              cfg.loaded = false;
+              loadConfig().then(() => setStatus("Configuration changed in another session — reloaded latest values.", "error"));
+            } else {
+              setStatus("Not saved: " + error.message.trim(), "error");
+            }
+          }
+        }
+      });
+    }).catch(error => setStatus("Validation failed: " + error.message.trim(), "error"));
+  }
+
+  cfgSaveButtons.forEach(btn => btn.addEventListener("click", () => requestCfgSave(btn.dataset.hpCfgSave, btn)));
+  cfgControls.forEach(el => {
+    el.addEventListener("change", computeDirty);
+    if (el.tagName === "INPUT" && el.type !== "checkbox" || el.tagName === "TEXTAREA") {
+      el.addEventListener("input", computeDirty);
+      el.addEventListener("keydown", event => {
+        if (event.key !== "Enter" || el.tagName === "TEXTAREA") return;
+        const pane = paneOf(el);
+        if (!pane || !state.dirty[pane]) return;
+        event.preventDefault();
+        requestCfgSave(pane, el);
+      });
+    }
+  });
+
+  /* ---- users (read-only projection) ---- */
+  async function loadUsers() {
+    const list = document.querySelector("[data-hp-users-list]");
+    const adminLink = document.querySelector("[data-hp-users-admin-link]");
+    if (!list) return;
+    try {
+      const { body } = await api("/api/settings/users");
+      list.textContent = "";
+      const users = body.users || [];
+      if (!users.length) {
+        list.innerHTML = '<tr><td colspan="5">No projected users yet.</td></tr>';
+        return;
+      }
+      users.forEach(user => {
+        const row = document.createElement("tr");
+        [user.last_display_name || user.last_username, user.role_snapshot, user.first_seen_at, user.last_seen_at, String(user.preferences_version)]
+          .forEach(text => {
+            const cell = document.createElement("td");
+            cell.textContent = text;
+            row.appendChild(cell);
+          });
+        list.appendChild(row);
+      });
+      if (adminLink) {
+        try {
+          const response = await fetch("/api/whoami", { cache: "no-store" });
+          const identity = response.ok ? await response.json() : null;
+          const accountURL = identity && identity.auth_account_url ? identity.auth_account_url.trim() : "";
+          if (accountURL) { adminLink.href = new URL(accountURL).origin; adminLink.hidden = false; }
+        } catch { /* link stays hidden */ }
+      }
+    } catch (error) {
+      list.innerHTML = '<tr><td colspan="5">Users could not be loaded.</td></tr>';
+      setStatus("Users could not be loaded — " + error.message.trim(), "error");
+    }
+  }
+
+  /* ---- configuration history + rollback ---- */
+  async function loadHistory() {
+    const list = document.querySelector("[data-hp-history-list]");
+    if (!list) return;
+    try {
+      const { body } = await api("/api/settings/config/history");
+      list.textContent = "";
+      const entries = body.entries || [];
+      if (!entries.length) { list.innerHTML = '<p class="card__meta">No retained revisions.</p>'; return; }
+      entries.forEach(entry => {
+        const row = document.createElement("div");
+        row.className = "hp-rev-row";
+        const meta = document.createElement("div");
+        meta.className = "hp-rev-meta";
+        const label = document.createElement("div");
+        label.textContent = "Revision " + entry.revision + " — " + entry.action + (entry.revision === body.current_revision ? " (current)" : "");
+        const detail = document.createElement("small");
+        detail.textContent = entry.time + " · " + (entry.actor_username || entry.actor_subject) + ((entry.fields || []).length ? " · " + entry.fields.join(", ") : "");
+        meta.appendChild(label);
+        meta.appendChild(detail);
+        row.appendChild(meta);
+        if (entry.revision !== body.current_revision) {
+          const button = document.createElement("button");
+          button.className = "btn btn-ghost btn-sm";
+          button.type = "button";
+          button.textContent = "Rollback";
+          button.addEventListener("click", () => requestRollback(entry.revision, button));
+          row.appendChild(button);
+        }
+        list.appendChild(row);
+      });
+    } catch (error) {
+      list.innerHTML = '<p class="card__meta">History could not be loaded.</p>';
+      setStatus("History could not be loaded — " + error.message.trim(), "error");
+    }
+  }
+
+  function requestRollback(revision, initiator) {
+    openConfirm({
+      titleText: "Roll back configuration?",
+      descText: "Restore revision " + revision + " as a new revision. The current state stays in history.",
+      warningText: "Every configuration field returns to the retained snapshot of revision " + revision + ".",
+      actionLabel: "Roll back",
+      danger: true,
+      initiator,
+      onConfirm: async () => {
+        try {
+          const { body, etag } = await api("/api/settings/config/rollback", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "If-Match": cfg.etag },
+            body: JSON.stringify({ revision })
+          });
+          cfg.etag = etag;
+          cfg.snapshot = flattenConfig(body.config, "", {});
+          cfg.sources = body.sources || {};
+          cfg.pinned = body.pinned_environment || {};
+          applyCfgToControls();
+          computeDirty();
+          setStatus("Configuration rolled back to revision " + revision + ".", "ok");
+          loadHistory();
+        } catch (error) {
+          if (error.status === 409) setStatus("Configuration changed in another session — reload and retry.", "error");
+          else setStatus("Rollback failed: " + error.message.trim(), "error");
+        }
+      }
+    });
+  }
+
+  /* ---- audit log ---- */
+  async function loadAudit() {
+    const list = document.querySelector("[data-hp-audit-list]");
+    const filter = document.querySelector("[data-hp-audit-filter]");
+    if (!list) return;
+    const action = filter ? filter.value : "";
+    try {
+      const { body } = await api("/api/settings/audit" + (action ? "?action=" + encodeURIComponent(action) : ""));
+      list.textContent = "";
+      const events = body.events || [];
+      if (!events.length) { list.innerHTML = '<p class="card__meta">No audit events.</p>'; return; }
+      events.forEach(event => {
+        const row = document.createElement("div");
+        row.className = "hp-audit-row";
+        const time = event.time ? new Date(event.time).toLocaleString() : "";
+        const fields = (event.fields || []).length ? " — " + event.fields.join(", ") : "";
+        row.textContent = time + " · " + (event.actor_username || event.actor_subject) + " · " + event.action + fields + " · " + event.result;
+        list.appendChild(row);
+      });
+    } catch (error) {
+      list.innerHTML = '<p class="card__meta">Audit log could not be loaded.</p>';
+      setStatus("Audit log could not be loaded — " + error.message.trim(), "error");
+    }
+  }
+  const auditFilter = document.querySelector("[data-hp-audit-filter]");
+  if (auditFilter) auditFilter.addEventListener("change", loadAudit);
 
   /* ---- boot ---- */
   const initialPane = new URLSearchParams(window.location.search).get("pane") || "account";

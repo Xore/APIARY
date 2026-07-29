@@ -243,7 +243,13 @@ func main() {
 			return
 		}
 		html(w)
-		tmpl.ExecuteTemplate(w, "settings", nil)
+		// Admin panes render only for a live-introspected admin; any identity
+		// failure degrades to the personal panes, never to an error page.
+		data := settingsPageData{}
+		if identity, err := resolveIdentity(r); err == nil && identity.Role == "admin" {
+			data.Admin = true
+		}
+		tmpl.ExecuteTemplate(w, "settings", data)
 	})
 	http.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
 		html(w)
