@@ -46,6 +46,42 @@ state, synchronizes the repository, writes Dockge's authoritative
 Require a manual reviewer on `production-home`; never accept pull-request code
 on this production runner.
 
+### How files reach the homeserver
+
+The home job runs **on the homeserver itself**. GitHub does not open an inbound
+SSH connection to the home network:
+
+1. The permanently installed Actions runner polls GitHub for an approved job.
+2. `actions/checkout` downloads the selected repository commit into the
+   runner's temporary work directory.
+3. Local `rsync` copies that checkout into `/opt/stacks/honeypot-stack`.
+4. The workflow copies `docker-compose.yml` to `compose.yml`, which is the
+   filename Dockge manages.
+5. `docker compose config --quiet` validates the deployed configuration.
+6. `docker compose up -d --build` builds local images and reconciles the
+   running stack.
+
+The runner therefore needs outbound HTTPS access to GitHub, local filesystem
+access to the Dockge stack, and access to the Docker socket. It does not need a
+publicly reachable SSH port.
+
+The synchronization uses `--delete-delay`, so repository-controlled files
+removed from Git are removed from the destination near the end of a successful
+transfer. These host-owned paths are explicitly preserved:
+
+| Preserved path | Reason |
+|---|---|
+| `.env` | production addresses, credentials, and local settings |
+| `logs/` | sensor and imported VPS logs |
+| `state/`, `dashboard-state/` | application checkpoints and state |
+| `analysis/geoip/*.mmdb` | locally downloaded licensed databases |
+| `sandbox/results/` | runtime malware-analysis output |
+| `.git/`, `.github/` | not needed by the deployed stack |
+
+The runner's service account, rather than the workflow YAML, determines the
+effective host permissions. Register it only on the trusted homeserver and do
+not give the `production-home` environment to pull-request workflows.
+
 ## VPS deployment
 
 Create a protected `production-vps` environment with a required reviewer and
@@ -63,8 +99,72 @@ The workflow preserves `/root/vps/.env`, synchronizes `vps/`, validates
 Use a dedicated key restricted to the deployment host and rotate it if workflow
 logs or repository access are ever compromised.
 
+### How files reach the VPS
+
+The VPS job runs on a short-lived GitHub-hosted Ubuntu runner:
+
+1. `actions/checkout` downloads the selected repository commit.
+2. The protected `VPS_SSH_KEY` secret is written to a temporary file with mode
+   `0600`.
+3. The job constructs SSH options from `VPS_HOST`, `VPS_USER`, and `VPS_PORT`.
+   The user defaults to `root` and the port defaults to `2222`.
+4. `rsync` sends only the repository's `vps/` directory over SSH to
+   `/root/vps/`.
+5. A second SSH command runs on the VPS, validates
+   `/root/vps/docker-compose.yml`, and executes
+   `docker compose up -d --build`.
+6. GitHub destroys the hosted runner, including its temporary key file, after
+   the job.
+
+`/root/vps/.env` is excluded from synchronization. `--delete-delay` removes
+other destination files that no longer exist under the repository's `vps/`
+directory, so persistent VPS data must live in named volumes, bind mounts
+outside `/root/vps`, or the preserved `.env`.
+
+The SSH key is the direct production credential in this path. Restrict it to
+the intended VPS, keep it in the protected environment rather than repository
+secrets where possible, and require environment approval before the job can
+read it.
+
+## Delivery paths at a glance
+
+```text
+Home:
+GitHub -> outbound-polling self-hosted runner on homeserver
+       -> local rsync /opt/stacks/honeypot-stack
+       -> Dockge compose.yml -> docker compose up
+
+VPS:
+GitHub-hosted runner -> rsync + SSH over VPS_PORT
+                     -> /root/vps
+                     -> docker compose up on VPS
+```
+
+Selecting `both` creates both jobs from the same workflow run. They share the
+`honeypot-production` concurrency group, but the home and VPS jobs are
+otherwise independent: one can fail while the other succeeds. Always inspect
+both job results before calling a two-target deployment complete.
+
 ## Running a deployment
 
 Open **Actions → Deploy → Run workflow**, select `home`, `vps`, or `both`, then
 approve the relevant protected environment. Deployments are intentionally
 manual; a push to a public repository never changes production by itself.
+
+The workflow deploys the commit selected in the **Run workflow** dialog,
+normally the current `main`. Merging a pull request starts checks and container
+publishing, but does not invoke `Deploy`; an operator must dispatch it
+separately.
+
+For each target, verify the run after Compose finishes:
+
+- the deployment job used the expected commit SHA;
+- `docker compose ps` shows the intended services running and healthy;
+- Dashboard, EveBox, Kibana, and Arkime respond where applicable;
+- Filebeat and Elasticsearch report no output errors;
+- source timestamps and indexed document counts continue advancing.
+
+If the home runner is offline, the home job remains queued. If an environment
+approval is missing, the job waits before gaining access to that environment's
+secrets or runner. A VPS authentication failure stops before the remote Compose
+command; a Compose validation failure stops before services are reconciled.
