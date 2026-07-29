@@ -110,6 +110,7 @@ func main() {
 		getenv("DASHBOARD_CONFIG_FILE", "/state/dashboard-config.json"),
 		getenv("DASHBOARD_USERS_FILE", "/state/dashboard-users.json"),
 		getenv("DASHBOARD_AUDIT_FILE", "/state/dashboard-audit.jsonl"),
+		getenv("DASHBOARD_CONFIG_HISTORY_FILE", "/state/dashboard-config-history.jsonl"),
 	)
 	s.rebuild()
 	go s.notifyLoop(os.Getenv("ALERT_WEBHOOK_URL"))
@@ -157,6 +158,12 @@ func main() {
 	http.HandleFunc("/api/settings/me", s.serveSettingsMe)
 	http.HandleFunc("/api/settings/me/preferences", s.servePreferencesPatch)
 	http.HandleFunc("/api/settings/me/preferences/reset", s.servePreferencesReset)
+	http.HandleFunc("/api/settings/config", s.serveSettingsConfig)
+	http.HandleFunc("/api/settings/config/validate", s.serveSettingsConfigValidate)
+	http.HandleFunc("/api/settings/config/rollback", s.serveSettingsConfigRollback)
+	http.HandleFunc("/api/settings/config/history", s.serveSettingsConfigHistory)
+	http.HandleFunc("/api/settings/users", s.serveSettingsUsers)
+	http.HandleFunc("/api/settings/audit", s.serveSettingsAudit)
 	http.HandleFunc("/api/map-points", s.serveMapPoints)
 	http.HandleFunc("/api/stream", s.serveEventsSSE)
 	http.HandleFunc("/api/alerts", s.serveAlertsAPI)

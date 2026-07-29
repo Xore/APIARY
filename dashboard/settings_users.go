@@ -7,6 +7,7 @@ package main
 // immutable subject.
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -207,19 +208,21 @@ func (u *userStore) ResetPreferences(actor authenticatedIdentity, ifMatch, reque
 // created once at startup; routes for the settings APIs attach to it in
 // Milestones C and E.
 type settingsService struct {
-	config *atomicSettingsStore[dashboardConfig]
-	users  *userStore
-	audit  *auditLogger
-	writes *writeLimiter
+	config  *atomicSettingsStore[dashboardConfig]
+	users   *userStore
+	audit   *auditLogger
+	history *configHistory
+	writes  *writeLimiter
 }
 
-func newSettingsService(configPath, usersPath, auditPath string) *settingsService {
+func newSettingsService(configPath, usersPath, auditPath, historyPath string) *settingsService {
 	audit := newAuditLogger(auditPath)
 	service := &settingsService{
-		config: newAtomicSettingsStore(configPath, defaultDashboardConfig(), validateConfig),
-		users:  newUserStore(usersPath, audit),
-		audit:  audit,
-		writes: newWriteLimiter(),
+		config:  newAtomicSettingsStore(configPath, defaultDashboardConfig(), validateConfig),
+		users:   newUserStore(usersPath, audit),
+		audit:   audit,
+		history: newConfigHistory(historyPath),
+		writes:  newWriteLimiter(),
 	}
 	if service.config.Degraded() {
 		fmt.Printf("dashboard: settings config store at %s unreadable — serving defaults read-only\n", configPath)
@@ -230,6 +233,20 @@ func newSettingsService(configPath, usersPath, auditPath string) *settingsServic
 		fmt.Printf("dashboard: settings users store at %s unreadable — serving defaults read-only\n", usersPath)
 	} else if service.users.inner.Recovered() {
 		fmt.Printf("dashboard: settings users store recovered from backup generation at %s\n", usersPath)
+	}
+	// Seed the configuration history with the loaded revision so the initial
+	// state stays rollback-able even before the first administrator write.
+	if service.history != nil && len(service.history.read(1)) == 0 {
+		payload, _ := service.config.Get()
+		if raw, err := json.Marshal(payload); err == nil {
+			service.history.append(configHistoryEntry{
+				Revision: service.config.Revision(),
+				Actor:    "system",
+				Username: "system",
+				Action:   "seed",
+				Payload:  raw,
+			})
+		}
 	}
 	return service
 }

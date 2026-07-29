@@ -19,6 +19,7 @@ func newSettingsAPITestStore(t *testing.T, role string) *store {
 		filepath.Join(dir, "config.json"),
 		filepath.Join(dir, "users.json"),
 		filepath.Join(dir, "audit.jsonl"),
+		filepath.Join(dir, "history.jsonl"),
 	)}
 }
 
