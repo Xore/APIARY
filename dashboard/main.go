@@ -120,6 +120,26 @@ func main() {
 		}
 	}()
 
+	// Orphan-preference retention (Milestone F): accounts deleted or disabled
+	// in auth-backend stop producing activity immediately — live introspection
+	// already revokes their access on the very next request — and this sweep
+	// expires their stored dashboard preferences after the retention window.
+	retentionDays := 90
+	if raw := strings.TrimSpace(os.Getenv("DASHBOARD_USER_RETENTION_DAYS")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			retentionDays = parsed
+		}
+	}
+	go func() {
+		maxAge := time.Duration(retentionDays) * 24 * time.Hour
+		for {
+			if removed := s.settings.users.SweepRetention(time.Now().UTC(), maxAge); removed > 0 {
+				fmt.Printf("dashboard: settings retention removed %d orphaned user projection(s)\n", removed)
+			}
+			time.Sleep(24 * time.Hour)
+		}
+	}()
+
 	// `dict` lets the template pass named args into the reusable "tbl" block.
 	// The presentation funcs wire the admin-configurable shell copy (Milestone
 	// E) into every page at render time.

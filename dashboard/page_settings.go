@@ -25,7 +25,7 @@ const pageSettings = `
 <title>Settings — xore//honeypot</title>
 <script>(function(){try{var t=localStorage.getItem("hp-theme");if(t==="light"||t==="dark"){document.documentElement.dataset.theme=t;}else if(t){localStorage.removeItem("hp-theme");}}catch(e){}})();</script>
 <link rel="stylesheet" href="/static/theme.css?v=20260729-1">
-<script defer src="/static/hp-settings.js?v=20260730-2"></script>
+<script defer src="/static/hp-settings.js?v=20260730-3"></script>
 <style>
   .hp-settings-page{height:100dvh;overflow:hidden}
   .hp-settings-page .settings-layout__content{height:100dvh}
@@ -53,6 +53,7 @@ const pageSettings = `
   .hp-audit-row{padding:8px 0;border-bottom:1px solid var(--border-subtle);font-size:12px;color:var(--text-secondary)}
   .hp-audit-row:last-child{border-bottom:0}
   .hp-audit-row small{color:var(--text-muted)}
+  .hp-head-actions{display:flex;gap:8px;flex-shrink:0}
   @media(max-width:720px){
     .hp-settings-page{height:auto;overflow:auto}
     .hp-settings-page .settings-layout__content{height:auto}
@@ -113,9 +114,25 @@ const pageSettings = `
         </section>
         <section class="card hp-field" data-hp-search="account security password passkeys sessions two-factor authentication logout">
           <div class="card__title">Account &amp; security</div>
-          <div class="card__desc">Password, passkeys, two-factor authentication, sessions, and recovery email are managed on the auth origin — never through this dashboard.</div>
+          <div class="card__desc">Password, passkeys, two-factor authentication, sessions, and recovery email are managed on the auth origin — never through this dashboard. Each link opens the matching auth-backend pane in a new tab.</div>
           <div class="card__row">
-            <div><div class="card__label">Security settings</div><div class="card__value">Opens the auth-backend account app in a new tab.</div></div>
+            <div><div class="card__label">Profile &amp; password</div><div class="card__value">Account details, password change, and recovery email.</div></div>
+            <a class="btn btn-secondary btn-sm" href="#" target="_blank" rel="noopener noreferrer" hidden data-hp-acct-deep="account">Open</a>
+          </div>
+          <div class="card__row">
+            <div><div class="card__label">Passkeys</div><div class="card__value">Register and remove hardware keys and platform authenticators.</div></div>
+            <a class="btn btn-secondary btn-sm" href="#" target="_blank" rel="noopener noreferrer" hidden data-hp-acct-deep="passkeys">Open</a>
+          </div>
+          <div class="card__row">
+            <div><div class="card__label">Privacy &amp; two-factor</div><div class="card__value">TOTP enrollment, backup codes, and privacy options.</div></div>
+            <a class="btn btn-secondary btn-sm" href="#" target="_blank" rel="noopener noreferrer" hidden data-hp-acct-deep="privacy">Open</a>
+          </div>
+          <div class="card__row">
+            <div><div class="card__label">Sessions &amp; devices</div><div class="card__value">Active sessions and trusted devices; revoke any of them.</div></div>
+            <a class="btn btn-secondary btn-sm" href="#" target="_blank" rel="noopener noreferrer" hidden data-hp-acct-deep="sessions">Open</a>
+          </div>
+          <div class="card__row">
+            <div><div class="card__label">Security settings</div><div class="card__value">Opens the auth-backend account app landing pane in a new tab.</div></div>
             <a class="btn btn-secondary btn-sm" href="#" target="_blank" rel="noopener noreferrer" data-hp-acct-link>Manage account</a>
           </div>
           <div class="card__row">
@@ -564,7 +581,10 @@ const pageSettings = `
         <section class="card hp-field" data-hp-search="users accounts activity role last seen">
           <div class="card__header">
             <div><h3>Projected dashboard users</h3><p class="card__meta">Diagnostic projection of who used the dashboard. Account management lives in the auth service.</p></div>
-            <a class="btn btn-secondary btn-sm" href="#" target="_blank" rel="noopener noreferrer" data-hp-users-admin-link hidden>Manage users</a>
+            <div class="hp-head-actions">
+              <a class="btn btn-secondary btn-sm" href="#" target="_blank" rel="noopener noreferrer" data-hp-users-admin-link hidden>Manage users</a>
+              <a class="btn btn-ghost btn-sm" href="#" target="_blank" rel="noopener noreferrer" data-hp-users-audit-link hidden>Auth audit log</a>
+            </div>
           </div>
           <div class="hp-table-wrap"><table class="hp-table">
             <thead><tr><th>User</th><th>Role</th><th>First seen</th><th>Last seen</th><th>Pref. rev.</th></tr></thead>

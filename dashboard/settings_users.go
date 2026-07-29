@@ -126,6 +126,48 @@ func (u *userStore) Upsert(identity authenticatedIdentity) {
 
 var errNoProjectionWrite = errors.New("projection already current")
 
+// SweepRetention removes projections — including their stored preferences —
+// whose last authenticated activity is older than maxAge (roadmap Milestone
+// F): when an auth-backend account is deleted or disabled it can no longer
+// produce activity, so its orphaned dashboard preferences expire through this
+// retention sweep instead of living forever. Every removal is audited with
+// the affected subject; the sweep returns the number of removed projections.
+func (u *userStore) SweepRetention(now time.Time, maxAge time.Duration) int {
+	if u == nil || maxAge <= 0 {
+		return 0
+	}
+	cutoff := now.Add(-maxAge)
+	var removed []userProjection
+	_, _, err := u.inner.Update("", func(doc *usersDocument) error {
+		kept := doc.Users[:0]
+		for _, user := range doc.Users {
+			if user.LastSeen.Before(cutoff) {
+				removed = append(removed, user)
+				continue
+			}
+			kept = append(kept, user)
+		}
+		if len(removed) == 0 {
+			return errNoProjectionWrite
+		}
+		doc.Users = kept
+		return nil
+	})
+	if err != nil {
+		return 0
+	}
+	for _, user := range removed {
+		u.audit.log(auditEvent{
+			Actor:    "system",
+			Username: "retention",
+			Action:   "users.retention",
+			Fields:   []string{user.Subject, user.LastUsername},
+			Result:   "success",
+		})
+	}
+	return len(removed)
+}
+
 // Preferences returns one subject's preferences with the ETag of the
 // underlying document.
 func (u *userStore) Preferences(subject string) (userPreferences, string, bool) {

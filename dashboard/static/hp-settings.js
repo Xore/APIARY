@@ -430,10 +430,20 @@
       const accountURL = typeof identity.auth_account_url === "string" ? identity.auth_account_url.trim() : "";
       if (accountURL) {
         try {
+          const base = new URL(accountURL);
           linkEl.href = accountURL;
-          logoutEl.href = new URL(accountURL).origin + "/_auth/logout";
+          logoutEl.href = base.origin + "/_auth/logout";
           linkEl.hidden = false;
           logoutEl.hidden = false;
+          // Stable deep links into the auth app's panes (Milestone F): the
+          // auth origin owns every credential mutation; the dashboard only
+          // ever links there.
+          document.querySelectorAll("[data-hp-acct-deep]").forEach(a => {
+            const deep = new URL(accountURL);
+            deep.searchParams.set("pane", a.dataset.hpAcctDeep);
+            a.href = deep.toString();
+            a.hidden = false;
+          });
         } catch { linkEl.hidden = true; logoutEl.hidden = true; }
       } else { linkEl.hidden = true; logoutEl.hidden = true; }
     } catch {
@@ -647,8 +657,21 @@
           const response = await fetch("/api/whoami", { cache: "no-store" });
           const identity = response.ok ? await response.json() : null;
           const accountURL = identity && identity.auth_account_url ? identity.auth_account_url.trim() : "";
-          if (accountURL) { adminLink.href = new URL(accountURL).origin; adminLink.hidden = false; }
-        } catch { /* link stays hidden */ }
+          if (accountURL) {
+            // Deep links into the auth app's admin panes (Milestone F).
+            const users = new URL(accountURL);
+            users.searchParams.set("pane", "admin-users");
+            adminLink.href = users.toString();
+            adminLink.hidden = false;
+            const auditLink = document.querySelector("[data-hp-users-audit-link]");
+            if (auditLink) {
+              const logs = new URL(accountURL);
+              logs.searchParams.set("pane", "admin-logs");
+              auditLink.href = logs.toString();
+              auditLink.hidden = false;
+            }
+          }
+        } catch { /* links stay hidden */ }
       }
     } catch (error) {
       list.innerHTML = '<tr><td colspan="5">Users could not be loaded.</td></tr>';
