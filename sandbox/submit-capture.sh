@@ -19,9 +19,44 @@ scripts_root="$(docker volume inspect honeypot-stack_dashboard-state --format '{
 [[ $dionaea_root == /* && -d $dionaea_root ]] && { roots+=("$dionaea_root"); labels+=(dionaea); }
 [[ $scripts_root == /* && -d $scripts_root ]] && { roots+=("$scripts_root"); labels+=(scripts); }
 
+if [[ -e $queue/$hash.json ]]; then
+  echo "Capture already queued: $hash"
+  exit 0
+fi
+
+previous_request=
+if [[ ${#hash} -eq 64 && -f $root_dir/inbox/completed/$hash.json ]]; then
+  previous_request=$root_dir/inbox/completed/$hash.json
+  latest_export=
+  shopt -s nullglob
+  matching_exports=("$root_dir/export/"*-"${hash:0:12}".json)
+  shopt -u nullglob
+  if ((${#matching_exports[@]})); then
+    latest_export=$(printf '%s\n' "${matching_exports[@]}" | sort | tail -n 1)
+  fi
+  if [[ -z $latest_export ]] ||
+      [[ $(jq -r '.sha256 // empty' "$latest_export" 2>/dev/null) != "$hash" ]] ||
+      [[ $(jq -r '.run_status // "completed"' "$latest_export" 2>/dev/null) != failed ]]; then
+    echo "Capture already analyzed: $hash"
+    exit 0
+  fi
+fi
+
 candidate=
 source_name=
+if [[ -n $previous_request ]]; then
+  previous_source=$(jq -r '.source // empty' "$previous_request")
+  previous_name=$(jq -r '.capture_name // empty' "$previous_request")
+  if [[ $previous_name != */* && -n $previous_name ]]; then
+    for index in "${!roots[@]}"; do
+      [[ ${labels[$index]} == "$previous_source" ]] || continue
+      found=$(find "${roots[$index]}" -xdev -type f -name "$previous_name" -print -quit 2>/dev/null || true)
+      if [[ -n $found ]]; then candidate=$found; source_name=${labels[$index]}; break; fi
+    done
+  fi
+fi
 for index in "${!roots[@]}"; do
+  [[ -z $candidate ]] || break
   root=${roots[$index]}
   found=$(find "$root" -xdev -type f -name "$hash" -print -quit 2>/dev/null || true)
   if [[ -n $found ]]; then candidate=$found; source_name=${labels[$index]}; break; fi
@@ -38,10 +73,12 @@ fi
 [[ -n $candidate ]] || { echo "No captured payload resolves to $hash" >&2; exit 1; }
 
 sha256=$(sha256sum "$candidate" | awk '{print $1}')
-if [[ -e $root_dir/inbox/completed/$sha256.json || -e $queue/$sha256.json ]]; then
+if [[ $sha256 != "$hash" ]] &&
+    { [[ -e $root_dir/inbox/completed/$sha256.json ]] || [[ -e $queue/$sha256.json ]]; }; then
   echo "Capture already queued or analyzed: $sha256"
   exit 0
 fi
+[[ -z $previous_request ]] || rm -f "$previous_request"
 install -m 0400 -o root -g root "$candidate" "$samples/$sha256.new"
 mv -f "$samples/$sha256.new" "$samples/$sha256"
 request="$queue/$sha256.json"

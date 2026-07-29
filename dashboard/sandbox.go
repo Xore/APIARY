@@ -105,47 +105,56 @@ type sandboxWindows struct {
 	Truncated         bool                `json:"truncated"`
 }
 
+type sandboxDifference struct {
+	Added   []string
+	Removed []string
+}
+
 type sandboxResult struct {
-	Version        int                   `json:"version"`
-	Job            string                `json:"job"`
-	SHA256         string                `json:"sha256"`
-	CaptureName    string                `json:"capture_name"`
-	Source         string                `json:"source"`
-	RequestedAt    string                `json:"requested_at"`
-	StartedAt      string                `json:"started_at"`
-	CompletedAt    string                `json:"completed_at"`
-	Duration       float64               `json:"duration_seconds"`
-	ExitStatus     string                `json:"exit_status"`
-	RunStatus      string                `json:"run_status"`
-	GuestStarted   bool                  `json:"guest_started"`
-	FailureReason  string                `json:"failure_reason"`
-	TimeoutReason  string                `json:"timeout_reason"`
-	RiskScore      int                   `json:"risk_score"`
-	RiskLevel      string                `json:"risk_level"`
-	Network        string                `json:"network"`
-	FileType       string                `json:"file_type"`
-	Platform       string                `json:"platform"`
-	AnalysisPath   string                `json:"analysis_path"`
-	ExecutionMode  string                `json:"execution_mode"`
-	Classification sandboxClassification `json:"classification"`
-	Hashes         sandboxHashes         `json:"hashes"`
-	Stdout         string                `json:"stdout"`
-	Stderr         string                `json:"stderr"`
-	RunnerLog      string                `json:"runner_log"`
-	ChangedFiles   []string              `json:"changed_files"`
-	SocketsBefore  []string              `json:"sockets_before"`
-	SocketsAfter   []string              `json:"sockets_after"`
-	TopSyscalls    []sandboxCount        `json:"top_syscalls"`
-	NetworkSummary sandboxNetwork        `json:"network_summary"`
-	Windows        sandboxWindows        `json:"windows_forensics"`
-	Artifacts      sandboxArtifacts      `json:"artifacts"`
-	Techniques     []sandboxTechnique    `json:"techniques"`
-	Truncated      bool                  `json:"truncated"`
-	HostPCAPURL    string                `json:"-"`
-	HostPCAPSize   int64                 `json:"-"`
-	GuestPCAPURL   string                `json:"-"`
-	GuestPCAPSize  int64                 `json:"-"`
-	Incomplete     bool                  `json:"-"`
+	Version         int                   `json:"version"`
+	Job             string                `json:"job"`
+	SHA256          string                `json:"sha256"`
+	CaptureName     string                `json:"capture_name"`
+	Source          string                `json:"source"`
+	RequestedAt     string                `json:"requested_at"`
+	StartedAt       string                `json:"started_at"`
+	CompletedAt     string                `json:"completed_at"`
+	Duration        float64               `json:"duration_seconds"`
+	ExitStatus      string                `json:"exit_status"`
+	RunStatus       string                `json:"run_status"`
+	GuestStarted    bool                  `json:"guest_started"`
+	FailureReason   string                `json:"failure_reason"`
+	TimeoutReason   string                `json:"timeout_reason"`
+	RiskScore       int                   `json:"risk_score"`
+	RiskLevel       string                `json:"risk_level"`
+	Network         string                `json:"network"`
+	FileType        string                `json:"file_type"`
+	Platform        string                `json:"platform"`
+	AnalysisPath    string                `json:"analysis_path"`
+	ExecutionMode   string                `json:"execution_mode"`
+	Classification  sandboxClassification `json:"classification"`
+	Hashes          sandboxHashes         `json:"hashes"`
+	Stdout          string                `json:"stdout"`
+	Stderr          string                `json:"stderr"`
+	RunnerLog       string                `json:"runner_log"`
+	ChangedFiles    []string              `json:"changed_files"`
+	SocketsBefore   []string              `json:"sockets_before"`
+	SocketsAfter    []string              `json:"sockets_after"`
+	TopSyscalls     []sandboxCount        `json:"top_syscalls"`
+	NetworkSummary  sandboxNetwork        `json:"network_summary"`
+	Windows         sandboxWindows        `json:"windows_forensics"`
+	Artifacts       sandboxArtifacts      `json:"artifacts"`
+	Techniques      []sandboxTechnique    `json:"techniques"`
+	Truncated       bool                  `json:"truncated"`
+	HostPCAPURL     string                `json:"-"`
+	HostPCAPSize    int64                 `json:"-"`
+	GuestPCAPURL    string                `json:"-"`
+	GuestPCAPSize   int64                 `json:"-"`
+	DiagnosticsURL  string                `json:"-"`
+	DiagnosticsSize int64                 `json:"-"`
+	ProcessDiff     sandboxDifference     `json:"-"`
+	SocketDiff      sandboxDifference     `json:"-"`
+	Incomplete      bool                  `json:"-"`
 }
 
 type sandboxQueueCounts struct {
@@ -242,6 +251,53 @@ func normalizeSandboxResult(row *sandboxResult) {
 		row.RiskScore = 0
 		row.RiskLevel = "unrated"
 	}
+	row.ProcessDiff = sandboxLineDifference(
+		row.Artifacts.ProcessesBefore,
+		row.Artifacts.ProcessesAfter,
+		normalizeSandboxProcess,
+	)
+	row.SocketDiff = sandboxLineDifference(row.SocketsBefore, row.SocketsAfter, normalizeSandboxLine)
+}
+
+func normalizeSandboxLine(line string) string {
+	return strings.Join(strings.Fields(line), " ")
+}
+
+func normalizeSandboxProcess(line string) string {
+	fields := strings.Fields(line)
+	if len(fields) < 11 || (fields[0] == "USER" && fields[1] == "PID") {
+		return ""
+	}
+	return fields[0] + " " + strings.Join(fields[10:], " ")
+}
+
+func sandboxLineDifference(before, after []string, normalize func(string) string) sandboxDifference {
+	beforeSet := make(map[string]struct{}, len(before))
+	afterSet := make(map[string]struct{}, len(after))
+	for _, line := range before {
+		if value := normalize(line); value != "" {
+			beforeSet[value] = struct{}{}
+		}
+	}
+	for _, line := range after {
+		if value := normalize(line); value != "" {
+			afterSet[value] = struct{}{}
+		}
+	}
+	var diff sandboxDifference
+	for value := range afterSet {
+		if _, found := beforeSet[value]; !found {
+			diff.Added = append(diff.Added, value)
+		}
+	}
+	for value := range beforeSet {
+		if _, found := afterSet[value]; !found {
+			diff.Removed = append(diff.Removed, value)
+		}
+	}
+	sort.Strings(diff.Added)
+	sort.Strings(diff.Removed)
+	return diff
 }
 
 func loadSandboxStatus() sandboxQueueStatus {
@@ -311,31 +367,33 @@ func sandboxData(job, query string) (sandboxPageData, error) {
 	for i := range data.Rows {
 		if data.Rows[i].Job == job {
 			data.Detail = &data.Rows[i]
-			attachSandboxPCAPs(data.Detail)
+			attachSandboxDownloads(data.Detail)
 			return data, nil
 		}
 	}
 	return data, errors.New("sandbox result not found")
 }
 
-func attachSandboxPCAPs(result *sandboxResult) {
+func attachSandboxDownloads(result *sandboxResult) {
 	if result == nil {
 		return
 	}
 	for _, item := range []struct {
-		suffix string
-		url    *string
-		size   *int64
+		name    string
+		minSize int64
+		maxSize int64
+		url     *string
+		size    *int64
 	}{
-		{"host", &result.HostPCAPURL, &result.HostPCAPSize},
-		{"guest", &result.GuestPCAPURL, &result.GuestPCAPSize},
+		{result.Job + ".host.pcap", 24, 64 << 20, &result.HostPCAPURL, &result.HostPCAPSize},
+		{result.Job + ".guest.pcap", 24, 64 << 20, &result.GuestPCAPURL, &result.GuestPCAPSize},
+		{result.Job + ".diagnostics.zip", 22, 16 << 20, &result.DiagnosticsURL, &result.DiagnosticsSize},
 	} {
-		name := result.Job + "." + item.suffix + ".pcap"
-		info, err := os.Lstat(filepath.Join(sandboxResultsDir(), name))
-		if err != nil || !info.Mode().IsRegular() || info.Size() < 24 || info.Size() > 64<<20 {
+		info, err := os.Lstat(filepath.Join(sandboxResultsDir(), item.name))
+		if err != nil || !info.Mode().IsRegular() || info.Size() < item.minSize || info.Size() > item.maxSize {
 			continue
 		}
-		*item.url = "/export/sandbox/" + name
+		*item.url = "/export/sandbox/" + item.name
 		*item.size = info.Size()
 	}
 }
@@ -365,27 +423,38 @@ func serveSandboxAPI(w http.ResponseWriter, r *http.Request) {
 
 func serveSandboxExport(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/export/sandbox/")
-	pcapKind := ""
+	artifactKind := ""
 	job := strings.TrimSuffix(name, ".json")
 	if strings.HasSuffix(name, ".host.pcap") {
 		job = strings.TrimSuffix(name, ".host.pcap")
-		pcapKind = "host"
+		artifactKind = "host"
 	} else if strings.HasSuffix(name, ".guest.pcap") {
 		job = strings.TrimSuffix(name, ".guest.pcap")
-		pcapKind = "guest"
+		artifactKind = "guest"
+	} else if strings.HasSuffix(name, ".diagnostics.zip") {
+		job = strings.TrimSuffix(name, ".diagnostics.zip")
+		artifactKind = "diagnostics"
 	}
 	data, err := sandboxData(job, "")
 	if err != nil || data.Detail == nil {
 		http.NotFound(w, r)
 		return
 	}
-	if pcapKind != "" {
+	if artifactKind != "" {
 		if !requireAdmin(w, r) {
 			return
 		}
 		expectedURL := data.Detail.HostPCAPURL
-		if pcapKind == "guest" {
+		maxSize := int64(64 << 20)
+		minSize := int64(24)
+		contentType := "application/vnd.tcpdump.pcap"
+		if artifactKind == "guest" {
 			expectedURL = data.Detail.GuestPCAPURL
+		} else if artifactKind == "diagnostics" {
+			expectedURL = data.Detail.DiagnosticsURL
+			maxSize = 16 << 20
+			minSize = 22
+			contentType = "application/zip"
 		}
 		if expectedURL == "" || expectedURL != r.URL.Path {
 			http.NotFound(w, r)
@@ -393,7 +462,7 @@ func serveSandboxExport(w http.ResponseWriter, r *http.Request) {
 		}
 		path := filepath.Join(sandboxResultsDir(), name)
 		info, err := os.Lstat(path)
-		if err != nil || !info.Mode().IsRegular() || info.Size() < 24 || info.Size() > 64<<20 {
+		if err != nil || !info.Mode().IsRegular() || info.Size() < minSize || info.Size() > maxSize {
 			http.NotFound(w, r)
 			return
 		}
@@ -403,7 +472,7 @@ func serveSandboxExport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer f.Close()
-		w.Header().Set("Content-Type", "application/vnd.tcpdump.pcap")
+		w.Header().Set("Content-Type", contentType)
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
 		http.ServeContent(w, r, name, info.ModTime(), f)

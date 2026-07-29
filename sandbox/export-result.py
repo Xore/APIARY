@@ -6,11 +6,24 @@ import collections
 import json
 import re
 import subprocess
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
 MAX_TEXT = 32768
 MAX_LINES = 200
+MAX_BUNDLE_FILE = 1024 * 1024
+MAX_BUNDLE_TOTAL = 8 * 1024 * 1024
+BUNDLE_FILES = (
+    "report.json", "stdout.txt", "stderr.txt", "runner.log",
+    "processes-before.txt", "processes-after.txt",
+    "sockets-before.txt", "sockets-after.txt",
+    "files-created-or-changed.tsv", "kernel.txt", "classification.json",
+    "classification-error.txt", "pe-forensics.json", "pe-forensics-error.txt",
+    "exiftool.txt", "pe-objdump.txt", "authenticode.txt",
+    "strings-ascii.txt", "strings-utf16le.txt", "console.log", "qemu.log",
+    "domain-state.txt", "qemu-status.txt", "tcpdump.log", "guest-tcpdump.log",
+)
 
 
 def text(path: Path, limit=MAX_TEXT):
@@ -34,6 +47,32 @@ def json_object(path: Path, limit=131072):
 
 def hash_value(path: Path):
     return text(path, 256).split(" ", 1)[0].strip().lower()
+
+
+def diagnostics_path(output: Path):
+    if output.name.endswith(".json.new"):
+        return output.with_name(output.name[:-9] + ".diagnostics.zip.new")
+    if output.name.endswith(".json"):
+        return output.with_name(output.name[:-5] + ".diagnostics.zip")
+    return output.with_name(output.name + ".diagnostics.zip")
+
+
+def write_diagnostics_bundle(result: Path, output: Path):
+    total = 0
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name in BUNDLE_FILES:
+            path = result / name
+            try:
+                if path.is_symlink() or not path.is_file():
+                    continue
+                data = path.read_bytes()[:MAX_BUNDLE_FILE]
+            except OSError:
+                continue
+            if total + len(data) > MAX_BUNDLE_TOTAL:
+                break
+            archive.writestr(name, data)
+            total += len(data)
+    output.chmod(0o640)
 
 
 def pe_forensics(path: Path):
@@ -324,6 +363,7 @@ def main():
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     output.chmod(0o640)
+    write_diagnostics_bundle(result, diagnostics_path(output))
 
 
 if __name__ == "__main__":

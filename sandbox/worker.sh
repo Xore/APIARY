@@ -41,6 +41,8 @@ while true; do
         if /usr/local/libexec/honeypot-sandbox/export-result.py \
             --request "$running" --result "$result" --output "$export_tmp"; then
           mv "$export_tmp" "${export_tmp%.new}"
+          bundle_tmp="${export_tmp%.json.new}.diagnostics.zip.new"
+          [[ ! -f $bundle_tmp ]] || mv "$bundle_tmp" "${bundle_tmp%.new}"
           job=$(basename "$result")
           for capture in network.pcap guest-network.pcap; do
             [[ -f $result/$capture && ! -L $result/$capture ]] || continue
