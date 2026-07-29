@@ -341,6 +341,7 @@ func (s *store) patchSettingsConfig(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
+		s.settings.configFailures.Add(1)
 		s.auditConfigResult(identity, r, "config.update", fields, err)
 		writePreferenceError(w, err)
 		return
@@ -452,6 +453,7 @@ func (s *store) serveSettingsConfigRollback(w http.ResponseWriter, r *http.Reque
 		return nil
 	})
 	if err != nil {
+		s.settings.configFailures.Add(1)
 		s.auditConfigResult(identity, r, "config.rollback", nil, err)
 		writePreferenceError(w, err)
 		return

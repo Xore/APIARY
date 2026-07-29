@@ -49,6 +49,7 @@ Source documents:
 - [`DASHBOARD-RENDER-ENGINE-GUIDE.md`](DASHBOARD-RENDER-ENGINE-GUIDE.md)
 - [`DASHBOARD-UI-REDESIGN-GUIDE.md`](DASHBOARD-UI-REDESIGN-GUIDE.md)
 - [`settings-user-configuration-roadmap.md`](settings-user-configuration-roadmap.md)
+- [`settings-operations.md`](settings-operations.md)
 - [`dashboard-profile-actions-roadmap.md`](dashboard-profile-actions-roadmap.md)
 
 Deliverables:

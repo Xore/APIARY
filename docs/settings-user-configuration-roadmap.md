@@ -416,6 +416,14 @@ preferences expire through retention.
 **Exit:** a 72-hour multi-user soak passes with no identity crossover, lost
 writes, XSS, privilege escalation, or settings-induced dashboard outage.
 
+**Status: shipped.** Metrics for store health, revision, save failures,
+projections, audit volume, and retention removals are exposed on `/metrics`
+(`honeypot_settings_*`); `scripts/backup-state.sh` archives the
+`dashboard-state` volume (which holds every settings file) with pruning; and
+`docs/settings-operations.md` documents restore, rollback, break-glass
+disabling, and the staged rollout sequence. The 72-hour soak is an
+operational follow-up run on the deployed stack, not a code artifact.
+
 ## 9. Test matrix
 
 - forged identity/role headers at the public proxy;

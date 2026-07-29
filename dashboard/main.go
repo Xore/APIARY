@@ -134,6 +134,7 @@ func main() {
 		maxAge := time.Duration(retentionDays) * 24 * time.Hour
 		for {
 			if removed := s.settings.users.SweepRetention(time.Now().UTC(), maxAge); removed > 0 {
+				s.settings.retentionRemoved.Add(uint64(removed))
 				fmt.Printf("dashboard: settings retention removed %d orphaned user projection(s)\n", removed)
 			}
 			time.Sleep(24 * time.Hour)

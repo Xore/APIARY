@@ -273,6 +273,7 @@ func (s *store) servePreferencesPatch(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
+		s.settings.preferenceFailures.Add(1)
 		writePreferenceError(w, err)
 		return
 	}
@@ -293,6 +294,7 @@ func (s *store) servePreferencesReset(w http.ResponseWriter, r *http.Request) {
 	}
 	etag, err := s.settings.users.ResetPreferences(identity, r.Header.Get("If-Match"), requestID(r), clientIP(r))
 	if err != nil {
+		s.settings.preferenceFailures.Add(1)
 		writePreferenceError(w, err)
 		return
 	}

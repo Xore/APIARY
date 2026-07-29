@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"sync/atomic"
 	"time"
 )
 
@@ -255,6 +256,11 @@ type settingsService struct {
 	audit   *auditLogger
 	history *configHistory
 	writes  *writeLimiter
+
+	// Milestone G operational counters, exported through /metrics.
+	preferenceFailures atomic.Uint64
+	configFailures     atomic.Uint64
+	retentionRemoved   atomic.Uint64
 }
 
 func newSettingsService(configPath, usersPath, auditPath, historyPath string) *settingsService {

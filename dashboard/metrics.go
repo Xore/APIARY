@@ -42,6 +42,36 @@ func (s *store) serveMetrics(w http.ResponseWriter, r *http.Request) {
 	if value := cgroupBytes("/sys/fs/cgroup/memory.current"); value >= 0 {
 		fmt.Fprintf(w, "honeypot_dashboard_memory_bytes %s\n", strconv.FormatInt(value, 10))
 	}
+	s.writeSettingsMetrics(w)
+}
+
+// writeSettingsMetrics exposes the Milestone G operational view of the
+// settings subsystem: store health (read-only / degraded / recovered flags),
+// configuration revision, retained audit volume, and failure counters. All
+// flags are gauges so alerting can fire on any transition to 1.
+func (s *store) writeSettingsMetrics(w http.ResponseWriter) {
+	settings := s.settings
+	if settings == nil {
+		return
+	}
+	flag := func(value bool) int {
+		if value {
+			return 1
+		}
+		return 0
+	}
+	fmt.Fprintf(w, "# HELP honeypot_settings_config_revision Current dashboard configuration revision.\n# TYPE honeypot_settings_config_revision gauge\nhoneypot_settings_config_revision %d\n", settings.config.Revision())
+	fmt.Fprintf(w, "# HELP honeypot_settings_store_readonly Settings store refusing writes (1) or healthy (0).\n# TYPE honeypot_settings_store_readonly gauge\n")
+	fmt.Fprintf(w, "honeypot_settings_store_readonly{store=\"config\"} %d\nhoneypot_settings_store_readonly{store=\"users\"} %d\n", flag(settings.config.ReadOnly()), flag(settings.users.inner.ReadOnly()))
+	fmt.Fprintf(w, "# HELP honeypot_settings_store_degraded Settings store serving compiled defaults because its file is unreadable.\n# TYPE honeypot_settings_store_degraded gauge\n")
+	fmt.Fprintf(w, "honeypot_settings_store_degraded{store=\"config\"} %d\nhoneypot_settings_store_degraded{store=\"users\"} %d\n", flag(settings.config.Degraded()), flag(settings.users.inner.Degraded()))
+	fmt.Fprintf(w, "# HELP honeypot_settings_store_recovered Settings store recovered from its backup generation at startup.\n# TYPE honeypot_settings_store_recovered gauge\n")
+	fmt.Fprintf(w, "honeypot_settings_store_recovered{store=\"config\"} %d\nhoneypot_settings_store_recovered{store=\"users\"} %d\n", flag(settings.config.Recovered()), flag(settings.users.inner.Recovered()))
+	fmt.Fprintf(w, "# HELP honeypot_settings_projected_users Users with a dashboard projection and stored preferences.\n# TYPE honeypot_settings_projected_users gauge\nhoneypot_settings_projected_users %d\n", len(settings.users.Projections()))
+	fmt.Fprintf(w, "# HELP honeypot_settings_audit_events Settings audit events retained in the current log generation (capped at 500).\n# TYPE honeypot_settings_audit_events gauge\nhoneypot_settings_audit_events %d\n", len(settings.audit.read(500)))
+	fmt.Fprintf(w, "# HELP honeypot_settings_save_failures_total Rejected settings writes by kind.\n# TYPE honeypot_settings_save_failures_total counter\n")
+	fmt.Fprintf(w, "honeypot_settings_save_failures_total{kind=\"preferences\"} %d\nhoneypot_settings_save_failures_total{kind=\"config\"} %d\n", settings.preferenceFailures.Load(), settings.configFailures.Load())
+	fmt.Fprintf(w, "# HELP honeypot_settings_retention_removed_total Orphaned user projections removed by the retention sweep.\n# TYPE honeypot_settings_retention_removed_total counter\nhoneypot_settings_retention_removed_total %d\n", settings.retentionRemoved.Load())
 }
 
 func cgroupBytes(path string) int64 {
