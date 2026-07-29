@@ -5,6 +5,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 COPY vendor ./vendor
 COPY static ./static
+COPY ui ./ui
 COPY *.go .
 RUN CGO_ENABLED=0 GOOS=linux go build -mod=vendor -trimpath -ldflags "-s -w" -o /dashboard .
 
