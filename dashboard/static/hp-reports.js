@@ -150,6 +150,18 @@
     return state.templates.find((template) => template.id === (state.template && state.template.id)) || null;
   }
 
+  /* Show or hide one studio step. If the step being hidden is the one on
+     screen, fall back to Design rather than leaving the operator on a blank
+     panel. */
+  function setStepAvailable(name, available) {
+    const tab = document.querySelector(`[data-dashboard-tab="${name}"]`);
+    if (!tab) return;
+    tab.hidden = !available;
+    if (!available && tab.classList.contains("active")) {
+      document.querySelector('[data-dashboard-tab="design"]')?.click();
+    }
+  }
+
   function selectTemplate(id, applyPreset) {
     const template = state.templates.find((candidate) => candidate.id === id);
     if (!template) return;
@@ -159,6 +171,9 @@
     els.sandboxSection.hidden = !sandbox;
     els.elementsSection.hidden = sandbox;
     els.scopeSection.hidden = sandbox;
+    // A sandbox report is scoped by its analysis job, so the Scope step does
+    // not apply: hide the tab too, or it would open an empty panel.
+    setStepAvailable("scope", !sandbox);
     if (sandbox) loadSandboxJobs();
     if (applyPreset) {
       state.editing = null;

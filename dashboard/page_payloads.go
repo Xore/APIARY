@@ -112,21 +112,43 @@ const pagePayloads = `
           <div class="hp-stat"><span class="hp-stat-value">{{len .IOCs}}</span><span class="hp-stat-label">Extracted IOCs</span></div>
         </div>
 
-        <div class="tw:grid tw:grid-cols-12 tw:gap-3.5" id="analysis-grid">
+        <div class="dashboard-tabs" role="tablist" aria-label="Payload analysis views">
+          <button class="dashboard-tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-identity" data-dashboard-tab="identity"><span>01</span>Identity</button>
+          <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-findings" data-dashboard-tab="findings"><span>02</span>Findings</button>
+          <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-content" data-dashboard-tab="content"><span>03</span>Content</button>
+        </div>
+
+        <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-identity" role="tabpanel" data-dashboard-panel="identity">
+          <div class="section-heading"><div><h2>What this file is</h2><p>Type, hashes, and whether it has been detonated in the isolated sandbox.</p></div></div>
           <div class="card wide"><h2>Identity and selected analysis path</h2><table><tbody><tr><td>identified type</td><td class="v"><strong>{{.Classification.Label}}</strong> <span class="badge badge--muted">{{.Classification.Code}}</span></td></tr><tr><td>platform / category</td><td class="v">{{.Classification.Platform}} / {{.Classification.Category}}</td></tr><tr><td>sandbox route</td><td class="v">{{.Classification.AnalysisPath}}</td></tr><tr><td>dynamic execution</td><td class="v">{{if .Classification.Dynamic}}supported for this type{{else}}not automatic; static analysis only{{end}}</td></tr><tr><td>magic</td><td class="v">{{.Magic}}</td></tr><tr><td>MIME</td><td class="v">{{.MIME}}</td></tr><tr><td>size</td><td class="v">{{.Size}}</td></tr><tr><td>entropy</td><td class="v">{{.Entropy}}</td></tr><tr><td>MD5</td><td class="v">{{.MD5}}</td></tr><tr><td>SHA-1</td><td class="v">{{.SHA1}}</td></tr><tr><td>SHA-256</td><td class="v">{{.SHA256}}</td></tr></tbody></table>{{if .Truncated}}<p class="note">deep inspection capped at 16 MiB; hashes cover the complete file</p>{{end}}</div>
-          {{if or .ScriptType .Indicators}}<div class="card wide"><h2>Script classification</h2><table><tbody>{{if .ScriptType}}<tr><td>language/type</td><td class="v">{{.ScriptType}}</td></tr>{{end}}{{if .Indicators}}<tr><td>behavior indicators</td><td class="v">{{range .Indicators}}<span class="chip">{{.}}</span> {{end}}</td></tr>{{end}}</tbody></table><p class="note">Heuristic static findings only. Captured content is never interpreted or executed.</p></div>{{end}}
+          {{if or .ScriptType .Indicators}}<div class="card half"><h2>Script classification</h2><table><tbody>{{if .ScriptType}}<tr><td>language/type</td><td class="v">{{.ScriptType}}</td></tr>{{end}}{{if .Indicators}}<tr><td>behavior indicators</td><td class="v">{{range .Indicators}}<span class="chip">{{.}}</span> {{end}}</td></tr>{{end}}</tbody></table><p class="note">Heuristic static findings only. Captured content is never interpreted or executed.</p></div>{{end}}
+          <div class="card {{if or .ScriptType .Indicators}}half{{else}}wide{{end}}"><h2>Isolated dynamic analysis</h2>{{if .SandboxRuns}}<table><thead><tr><th>completed</th><th>exit</th><th>changed paths</th><th>details</th></tr></thead><tbody>{{range .SandboxRuns}}<tr><td>{{.CompletedAt}}</td><td class="n">{{.ExitStatus}}</td><td class="n">{{len .ChangedFiles}}</td><td><a class="lnk" href="/sandbox/{{.Job | urlquery}}">sandbox report &rarr;</a></td></tr>{{end}}</tbody></table>{{else}}<p class="empty">No completed KVM sandbox run for this payload. Use <strong>Analyze in sandbox</strong> to queue one.</p>{{end}}</div>
+        </div>
+
+        <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-findings" role="tabpanel" data-dashboard-panel="findings" hidden>
+          <div class="section-heading"><div><h2>What the scanners found</h2><p>YARA matches, built-in heuristics, and the indicators worth pivoting on.</p></div></div>
           <div class="card wide"><h2>YARA static scan</h2>{{if .YARAMatches}}<table><tbody>{{range .YARAMatches}}<tr><td><span class="badge badge--red">match</span></td><td class="v">{{.}}</td></tr>{{end}}</tbody></table>{{else}}<p class="empty">{{if .YARAScanned}}No YARA rules matched this sample.{{else}}Waiting for the isolated YARA scanner.{{end}}</p>{{end}}{{if .YARAError}}<p class="note tw:text-red">{{.YARAError}}</p>{{end}}{{if .YARAScanned}}<p class="note">Scanned {{.YARAScanned}} by the networkless YARA sidecar. A match is a triage signal, not attribution.</p>{{end}}</div>
-          <div class="card wide"><h2>Isolated dynamic analysis</h2>{{if .SandboxRuns}}<table><thead><tr><th>completed</th><th>exit</th><th>changed paths</th><th>details</th></tr></thead><tbody>{{range .SandboxRuns}}<tr><td>{{.CompletedAt}}</td><td class="n">{{.ExitStatus}}</td><td class="n">{{len .ChangedFiles}}</td><td><a class="lnk" href="/sandbox/{{.Job | urlquery}}">sandbox report &rarr;</a></td></tr>{{end}}</tbody></table>{{else}}<p class="empty">No completed KVM sandbox run for this payload. Use <strong>Analyze in sandbox</strong> to queue one.</p>{{end}}</div>
           <div class="card half"><h2>Rule matches</h2>{{if .Rules}}<table><thead><tr><th>severity</th><th>rule</th><th>reason</th></tr></thead><tbody>{{range .Rules}}<tr><td><span class="badge badge--muted">{{.Severity}}</span></td><td class="v">{{.Name}}</td><td class="v">{{.Description}}</td></tr>{{end}}</tbody></table>{{else}}<p class="empty">No built-in static rules matched.</p>{{end}}<p class="note">Deterministic YARA-style heuristics; no sample execution or attribution.</p></div>
           <div class="card half"><h2>Extracted indicators</h2>{{if .IOCs}}<table><tbody>{{range .IOCs}}<tr><td class="v"><a href="/events?q={{. | urlquery}}" title="search telemetry for this indicator">{{.}}</a></td></tr>{{end}}</tbody></table>{{else}}<p class="empty">No URL, domain, or IP indicators found.</p>{{end}}</div>
-          <div class="card wide"><h2>Hex / ASCII preview — first 512 bytes</h2><pre class="code">{{.Hexdump}}</pre></div>
-          <div class="card"><h2>Executable metadata</h2>{{if .FormatInfo}}<pre class="code">{{range .FormatInfo}}{{.}}
-{{end}}</pre>{{else}}<p class="empty">not a recognized PE/ELF file</p>{{end}}</div>
-          <div class="card"><h2>Decoded / deobfuscated candidates</h2>{{if .Decoded}}{{range .Decoded}}<p class="note">{{.Kind}} from <code>{{.Source}}</code></p><pre class="code">{{.Preview}}</pre>{{end}}{{else}}<p class="empty">no bounded Base64, hex, URL or UTF-16 candidates found</p>{{end}}</div>
-          <div class="card"><h2>Printable strings</h2>{{if .ASCII}}<pre class="code">{{range .ASCII}}{{.}}
-{{end}}</pre>{{else}}<p class="empty">none</p>{{end}}</div>
-          <div class="card"><h2>UTF-16LE strings</h2>{{if .UTF16}}<pre class="code">{{range .UTF16}}{{.}}
-{{end}}</pre>{{else}}<p class="empty">none</p>{{end}}</div>
+        </div>
+
+        <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-content" role="tabpanel" data-dashboard-panel="content" hidden>
+          <div class="section-heading"><div><h2>What is inside the file</h2><p>Raw bytes, metadata, and extracted text. Each block opens in the evidence viewer, where it can be filtered.</p></div></div>
+          <div class="card wide"><h2>Bytes and metadata</h2><p class="note">The sample is read, never interpreted or executed.</p><button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-hexdump">Hex / ASCII preview</button> {{if .FormatInfo}}<button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-format">Executable metadata</button>{{else}}<span class="chip">not a recognized PE/ELF file</span>{{end}}</div>
+          <div class="card half"><h2>Extracted text</h2>{{if or .ASCII .UTF16}}<p class="note">{{len .ASCII}} printable and {{len .UTF16}} wide-character sequence{{if ne (len .UTF16) 1}}s{{end}} extracted.</p>{{if .ASCII}}<button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-ascii">Printable strings ({{len .ASCII}})</button> {{end}}{{if .UTF16}}<button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-utf16">UTF-16LE strings ({{len .UTF16}})</button>{{end}}{{else}}<p class="empty">No printable sequences extracted.</p>{{end}}</div>
+          <div class="card half"><h2>Decoded candidates</h2>{{if .Decoded}}<p class="note">{{len .Decoded}} bounded Base64, hex, URL or UTF-16 candidate{{if ne (len .Decoded) 1}}s{{end}} recovered.</p><button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-decoded">Open decoded candidates</button>{{else}}<p class="empty">no bounded Base64, hex, URL or UTF-16 candidates found</p>{{end}}</div>
+        </div>
+
+        <!-- Evidence bodies: raw file content the viewer opens on demand. -->
+        <div class="hp-evidence-source" hidden>
+          <div data-hp-evidence-body="pl-hexdump" data-hp-evidence-title="Hex / ASCII preview — first 512 bytes"><pre class="code">{{.Hexdump}}</pre></div>
+          <div data-hp-evidence-body="pl-format" data-hp-evidence-title="Executable metadata"><pre class="code">{{range .FormatInfo}}{{.}}
+{{end}}</pre></div>
+          <div data-hp-evidence-body="pl-ascii" data-hp-evidence-title="Printable strings" data-hp-evidence-note="Printable sequences extracted from the sample. Filter to find a specific indicator."><pre class="code">{{range .ASCII}}{{.}}
+{{end}}</pre></div>
+          <div data-hp-evidence-body="pl-utf16" data-hp-evidence-title="UTF-16LE strings" data-hp-evidence-note="Wide-character sequences extracted from the sample."><pre class="code">{{range .UTF16}}{{.}}
+{{end}}</pre></div>
+          <div data-hp-evidence-body="pl-decoded" data-hp-evidence-title="Decoded / deobfuscated candidates" data-hp-evidence-note="Bounded decodes of encoded content found in the sample. Never executed.">{{range .Decoded}}<p class="note">{{.Kind}} from <code>{{.Source}}</code></p><pre class="code">{{.Preview}}</pre>{{end}}</div>
         </div>
 
         <footer id="analysis-footer">xore//honeypot &bull; static analysis only &bull; never execute captured samples</footer>

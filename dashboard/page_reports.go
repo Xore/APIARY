@@ -34,9 +34,22 @@ const pageReports = `
 .hp-rp-swatch { width: 30px; height: 22px; border-radius: var(--radius-xs); border: 1px solid var(--border-strong); flex: none; }
 .hp-rp-swatch--dark { background: #20201f; box-shadow: inset 0 -7px 0 #d97757; }
 .hp-rp-swatch--light { background: #f7f6f2; box-shadow: inset 0 -7px 0 #c76548; }
-.hp-rp-section { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border-subtle); }
-.hp-rp-section > h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); margin: 0 0 10px; font-weight: 600; }
-.hp-rp-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 18px; }
+/* Each studio step is its own card now, so the old inline separator rule only
+   needs to keep the cards apart. */
+.hp-rp-section { margin-top: 0; }
+.hp-rp-section[hidden] { display: none; }
+/* The action bar acts on the whole definition, so it stays put across every
+   designer step instead of living at the bottom of one of them. */
+.hp-rp-actions {
+  position: sticky; bottom: 0; z-index: 5;
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  margin-top: 14px; padding: 12px 14px;
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-panel);
+  background: var(--surface-raised); box-shadow: var(--shadow-raised);
+}
+/* The Library step is a record of past work, not part of the definition. */
+[data-hp-reports]:has([data-dashboard-panel="library"]:not([hidden])) .hp-rp-actions { display: none; }
+.dashboard-panel > .card + .card { margin-top: 14px; }
 .hp-rp-status { font-size: 12px; color: var(--text-muted); }
 .hp-rp-status[data-state="error"] { color: var(--danger); }
 .hp-rp-status[data-state="ok"] { color: var(--success); }
@@ -70,13 +83,24 @@ const pageReports = `
         </header>
 
         <div data-hp-reports>
-          <div class="card wide" id="hp-rp-designer">
-            <h2>Designer</h2>
-            <p class="note">Pick a template as the starting point, then adjust elements, scope, theme, and branding until the report says exactly what you need.</p>
-            <div class="hp-rp-templates" id="hp-rp-templates" role="group" aria-label="Report templates"></div>
+          <div class="dashboard-tabs" role="tablist" aria-label="Reports studio steps">
+            <button class="dashboard-tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-design" data-dashboard-tab="design"><span>01</span>Design</button>
+            <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-scope" data-dashboard-tab="scope"><span>02</span>Scope</button>
+            <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-schedule" data-dashboard-tab="schedule"><span>03</span>Schedule</button>
+            <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-branding" data-dashboard-tab="branding"><span>04</span>Branding</button>
+            <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-library" data-dashboard-tab="library"><span>05</span>Library</button>
+          </div>
 
-            <form id="hp-rp-form" novalidate>
-              <div class="hp-rp-grid">
+          <form id="hp-rp-form" novalidate>
+            <div class="dashboard-panel" id="panel-design" role="tabpanel" data-dashboard-panel="design">
+              <div class="card wide" id="hp-rp-designer">
+                <h2>Start from a template</h2>
+                <p class="note">Pick the closest starting point, then adjust it across the steps above. Nothing is generated until you say so.</p>
+                <div class="hp-rp-templates" id="hp-rp-templates" role="group" aria-label="Report templates"></div>
+              </div>
+              <div class="card wide">
+                <h2>Report basics</h2>
+                <div class="hp-rp-grid">
                 <div class="hp-rp-field"><label for="hp-rp-name">Report name</label><input id="hp-rp-name" maxlength="60" required placeholder="Weekly board briefing"></div>
                 <div class="hp-rp-field"><label for="hp-rp-window">Observation window</label><select id="hp-rp-window"></select></div>
                 <div class="hp-rp-field"><label for="hp-rp-appendix">Event appendix limit</label><input id="hp-rp-appendix" type="number" min="0" max="500" step="10" value="120"></div>
@@ -86,15 +110,26 @@ const pageReports = `
                     <button type="button" data-theme="light" aria-pressed="false"><span class="hp-rp-swatch hp-rp-swatch--light"></span>Light</button>
                   </div>
                 </div>
+                </div>
               </div>
-
-              <div class="hp-rp-section" id="hp-rp-elements-section">
-                <h3>Elements</h3>
+              <div class="card wide hp-rp-section" id="hp-rp-elements-section">
+                <h2>Elements</h2>
+                <p class="note">Each element becomes a section of the PDF, in this order.</p>
                 <div class="hp-rp-elements" id="hp-rp-elements"></div>
               </div>
+              <div class="card wide hp-rp-section" id="hp-rp-sandbox-section" hidden>
+                <h2>Sandbox run</h2>
+                <div class="hp-rp-grid">
+                  <div class="hp-rp-field"><label for="hp-rp-sandbox-job">Analysis job</label><select id="hp-rp-sandbox-job"></select></div>
+                </div>
+                <p class="note">Sandbox reports have a fixed evidence structure; theme and branding still apply.</p>
+              </div>
+            </div>
 
-              <div class="hp-rp-section" id="hp-rp-scope-section">
-                <h3>Scope &amp; search criteria</h3>
+            <div class="dashboard-panel" id="panel-scope" role="tabpanel" data-dashboard-panel="scope" hidden>
+              <div class="card wide hp-rp-section" id="hp-rp-scope-section">
+                <h2>Scope &amp; search criteria</h2>
+                <p class="note">Leave a field empty to place no restriction on it. The report covers exactly what these criteria match.</p>
                 <div class="hp-rp-grid">
                   <div class="hp-rp-field"><label for="hp-rp-scope-ip">Source IP</label><input id="hp-rp-scope-ip" maxlength="64" placeholder="203.0.113.42"></div>
                   <div class="hp-rp-field"><label for="hp-rp-scope-network">Network (CIDR)</label><input id="hp-rp-scope-network" maxlength="64" placeholder="203.0.113.0/24"></div>
@@ -108,17 +143,11 @@ const pageReports = `
                   <div class="hp-rp-field"><label for="hp-rp-scope-text">Free text</label><input id="hp-rp-scope-text" maxlength="200" placeholder="matches across all event fields"></div>
                 </div>
               </div>
+            </div>
 
-              <div class="hp-rp-section" id="hp-rp-sandbox-section" hidden>
-                <h3>Sandbox run</h3>
-                <div class="hp-rp-grid">
-                  <div class="hp-rp-field"><label for="hp-rp-sandbox-job">Analysis job</label><select id="hp-rp-sandbox-job"></select></div>
-                </div>
-                <p class="note">Sandbox reports have a fixed evidence structure; theme and branding still apply.</p>
-              </div>
-
-              <div class="hp-rp-section" id="hp-rp-schedule-section">
-                <h3>Schedule</h3>
+            <div class="dashboard-panel" id="panel-schedule" role="tabpanel" data-dashboard-panel="schedule" hidden>
+              <div class="card wide hp-rp-section" id="hp-rp-schedule-section">
+                <h2>Schedule</h2>
                 <div class="hp-rp-grid">
                   <div class="hp-rp-field"><label for="hp-rp-sched-enabled">Recurring generation</label><label style="display:flex;gap:8px;align-items:center;font-size:13px;color:var(--text-secondary);text-transform:none;letter-spacing:0"><input type="checkbox" id="hp-rp-sched-enabled" style="accent-color:var(--accent)"> run this report automatically</label></div>
                   <div class="hp-rp-field"><label for="hp-rp-sched-frequency">Frequency</label><select id="hp-rp-sched-frequency"><option value="daily">daily</option><option value="weekly">weekly</option><option value="monthly">monthly</option></select></div>
@@ -129,9 +158,12 @@ const pageReports = `
                 </div>
                 <p class="note">Times are UTC. Scheduled reports render through the same pipeline as manual ones and appear in the history with origin <em>schedule</em>; the retention cap prunes the oldest artifacts automatically.</p>
               </div>
+            </div>
 
-              <div class="hp-rp-section">
-                <h3>Branding</h3>
+            <div class="dashboard-panel" id="panel-branding" role="tabpanel" data-dashboard-panel="branding" hidden>
+              <div class="card wide hp-rp-section">
+                <h2>Branding</h2>
+                <p class="note">Applied to every page of the PDF. Empty fields fall back to the template defaults.</p>
                 <div class="hp-rp-grid">
                   <div class="hp-rp-field"><label for="hp-rp-brand-title">Report title</label><input id="hp-rp-brand-title" maxlength="80" placeholder="defaults to the template title"></div>
                   <div class="hp-rp-field"><label for="hp-rp-brand-author">Author</label><input id="hp-rp-brand-author" maxlength="60" placeholder="SOC team"></div>
@@ -141,15 +173,17 @@ const pageReports = `
                   <div class="hp-rp-field"><label for="hp-rp-brand-classification">Classification line</label><input id="hp-rp-brand-classification" maxlength="120" placeholder="PRIVATE - contains hostile-source telemetry"></div>
                 </div>
               </div>
+            </div>
 
-              <div class="hp-rp-actions">
-                <button class="btn btn-primary" type="submit" id="hp-rp-save">Save definition</button>
-                <button class="btn btn-secondary" type="button" id="hp-rp-generate">Generate now</button>
-                <button class="btn btn-secondary" type="button" id="hp-rp-reset">Reset to template</button>
-                <span class="hp-rp-status" id="hp-rp-status" role="status"></span>
-              </div>
-            </form>
-          </div>
+            <div class="hp-rp-actions" id="hp-rp-actions">
+              <button class="btn btn-primary" type="submit" id="hp-rp-save">Save definition</button>
+              <button class="btn btn-secondary" type="button" id="hp-rp-generate">Generate now</button>
+              <button class="btn btn-secondary" type="button" id="hp-rp-reset">Reset to template</button>
+              <span class="hp-rp-status" id="hp-rp-status" role="status"></span>
+            </div>
+          </form>
+
+          <div class="dashboard-panel" id="panel-library" role="tabpanel" data-dashboard-panel="library" hidden>
 
           <div class="card wide" id="hp-rp-definitions-card">
             <h2>Saved definitions</h2>
@@ -174,6 +208,7 @@ const pageReports = `
               <iframe id="hp-rp-viewer-frame" title="Generated report preview"></iframe>
             </div>
           </div>
+          </div>
 
           <p class="note" id="hp-rp-admin-note" hidden>Designing and generating reports requires the administrator role &mdash; sign in with an admin account to use the studio.</p>
         </div>
@@ -181,7 +216,7 @@ const pageReports = `
       </div>
     </main>
 </div>
-<script defer src="/static/hp-reports.js?v=20260730-1"></script>
+<script defer src="/static/hp-reports.js?v=20260730-2"></script>
 </body>
 </html>
 {{end}}

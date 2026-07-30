@@ -1,0 +1,157 @@
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"html/template"
+	"regexp"
+	"strings"
+	"testing"
+	"time"
+)
+
+// Templates are long single-line HTML strings assembled by hand, so an
+// unbalanced <div> is easy to introduce and invisible in review: the browser
+// silently re-parents everything after it, which quietly breaks descendant
+// selectors and the modal containment the theme contract depends on. Balance
+// every container element of every rendered page.
+
+var containerTag = regexp.MustCompile(`<(/?)(div|form|section|main|aside|header|footer|nav|table|tbody|thead|tr|td|th|ul|ol|li|details|dialog|button|label|select|pre)\b[^>]*>`)
+
+// voidOrSelfClosing skips tags written as <div …/> (none today) and anything
+// inside a comment, which the sandbox and reports pages both use.
+var htmlComment = regexp.MustCompile(`(?s)<!--.*?-->`)
+
+func assertBalanced(t *testing.T, name, html string) {
+	t.Helper()
+	html = htmlComment.ReplaceAllString(html, "")
+	var stack []string
+	for _, m := range containerTag.FindAllStringSubmatchIndex(html, -1) {
+		closing := html[m[2]:m[3]] == "/"
+		tag := strings.ToLower(html[m[4]:m[5]])
+		if !closing {
+			stack = append(stack, tag)
+			continue
+		}
+		if len(stack) == 0 {
+			t.Fatalf("%s: stray closing </%s> at byte %d", name, tag, m[0])
+		}
+		top := stack[len(stack)-1]
+		if top != tag {
+			t.Fatalf("%s: </%s> closes an open <%s> at byte %d (context: %s)",
+				name, tag, top, m[0], excerpt(html, m[0]))
+		}
+		stack = stack[:len(stack)-1]
+	}
+	if len(stack) != 0 {
+		t.Fatalf("%s: %d unclosed element(s): %v", name, len(stack), stack)
+	}
+}
+
+func excerpt(html string, at int) string {
+	start := at - 90
+	if start < 0 {
+		start = 0
+	}
+	return strings.ReplaceAll(html[start:at], "\n", " ")
+}
+
+func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
+	s := searchTestStore(t)
+	tmpl, err := template.New("dashboard").Funcs(templateFuncs(s, "")).Parse(pageTemplate)
+	if err != nil {
+		t.Fatalf("dashboard template does not parse: %v", err)
+	}
+
+	now := time.Now()
+	sandboxDetail := &sandboxResult{Job: "job-1", SHA256: strings.Repeat("a", 64), CaptureAvailable: true}
+	windowsDetail := &sandboxResult{Job: "job-2", SHA256: strings.Repeat("b", 64)}
+	windowsDetail.Windows.Detected = true
+
+	pages := []struct {
+		name string
+		data any
+	}{
+		{"page", snapshot{}},
+		{"events", eventsPage{Generated: now}},
+		{"ips", ipsPage{Generated: now}},
+		{"search", s.searchData("wp-login")},
+		{"reports", snapshot{}},
+		{"sandbox", sandboxPageData{Generated: now, Detail: sandboxDetail}},
+		{"sandbox-windows", sandboxPageData{Generated: now, Detail: windowsDetail}},
+		{"sandbox-list", sandboxPageData{Generated: now}},
+		{"payload-analysis", binaryAnalysis{}},
+		{"payloads", payloadsPage{Generated: now}},
+		{"source-health", snapshot{}},
+		{"commands", commandsPage{Generated: now}},
+		{"alerts", snapshot{}},
+	}
+	for _, page := range pages {
+		name := page.name
+		if name == "sandbox-windows" || name == "sandbox-list" {
+			name = "sandbox"
+		}
+		var buf bytes.Buffer
+		if err := tmpl.ExecuteTemplate(&buf, name, page.data); err != nil {
+			t.Fatalf("%s does not render: %v", page.name, err)
+		}
+		assertBalanced(t, page.name, buf.String())
+	}
+}
+
+// Every tab must own a panel and vice versa, on every page that groups cards.
+func TestTabsAndPanelsAgreeOnEveryPage(t *testing.T) {
+	tmpl, err := template.New("dashboard").Funcs(templateFuncs(nil, "")).Parse(pageTemplate)
+	if err != nil {
+		t.Fatalf("dashboard template does not parse: %v", err)
+	}
+	now := time.Now()
+	detail := &sandboxResult{Job: "job-1", SHA256: strings.Repeat("a", 64)}
+	detail.Windows.Detected = true
+
+	for _, page := range []struct {
+		template string
+		label    string
+		data     any
+	}{
+		{"page", "overview", snapshot{}},
+		{"sandbox", "sandbox detail", sandboxPageData{Generated: now, Detail: detail}},
+		{"payload-analysis", "payload analysis", binaryAnalysis{}},
+		{"reports", "reports studio", snapshot{}},
+	} {
+		var buf bytes.Buffer
+		if err := tmpl.ExecuteTemplate(&buf, page.template, page.data); err != nil {
+			t.Fatalf("%s does not render: %v", page.label, err)
+		}
+		html := buf.String()
+		tabs := map[string]bool{}
+		for _, m := range tabName.FindAllStringSubmatch(html, -1) {
+			tabs[m[1]] = true
+		}
+		panels := map[string]bool{}
+		for _, m := range panelName.FindAllStringSubmatch(html, -1) {
+			panels[m[1]] = true
+		}
+		if len(tabs) == 0 {
+			t.Fatalf("%s renders no tabs", page.label)
+		}
+		if diff := symmetricDifference(tabs, panels); diff != "" {
+			t.Fatalf("%s: %s", page.label, diff)
+		}
+	}
+}
+
+func symmetricDifference(tabs, panels map[string]bool) string {
+	var problems []string
+	for tab := range tabs {
+		if !panels[tab] {
+			problems = append(problems, fmt.Sprintf("tab %q has no panel", tab))
+		}
+	}
+	for panel := range panels {
+		if !tabs[panel] {
+			problems = append(problems, fmt.Sprintf("panel %q has no tab", panel))
+		}
+	}
+	return strings.Join(problems, "; ")
+}
