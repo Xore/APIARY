@@ -858,36 +858,19 @@ services:
           cpus: "3.0"
           memory: 2G
   # ===================== EveBox — Suricata EVE web GUI =====================
-  # SSHFS does not propagate remote inotify events. Relay new bytes into a
-  # local file with a persistent source offset so EveBox receives reliable
-  # local filesystem notifications and remounts cannot trigger full replays.
-  eve-relay:
-    <<: *runtime-defaults
-    image: busybox:1.36
-    container_name: hp-eve-relay
-    restart: unless-stopped
-    command:
-      - sh
-      - /usr/local/bin/eve-relay.sh
-    environment:
-      - EVE_RELAY_POLL_SECONDS=2
-    volumes:
-      - ./analysis/eve-relay.sh:/usr/local/bin/eve-relay.sh:ro
-      - /opt/stacks/honeypot-stack/logs/suricata:/source:ro
-      - eve-relay-data:/relay
-    healthcheck:
-      test: ["CMD-SHELL", "test -f /relay/eve.json && test -s /relay/source.offset"]
-      interval: 2s
-      timeout: 1s
-      retries: 30
-    networks:
-      - honeynet
-    deploy:
-      resources:
-        limits:
-          cpus: "0.25"
-          memory: 128M
-
+  # EveBox queries Elasticsearch directly, where Filebeat already ships the
+  # Suricata history as suricata-v2-*. It keeps no database of its own.
+  #
+  # It previously ingested a local copy of eve.json into an embedded SQLite
+  # store, which meant the same events were stored twice and the console owned
+  # a file that grew without a usable bound: alert queries exceeded their
+  # 5-second timeout at 4.2 GB and the UI rendered blank. Reading the indices
+  # that already exist removes both the duplicate and the growth. Retention is
+  # now the suricata-7d ILM policy on the indices themselves.
+  #
+  # Dropping the SQLite input also retires the eve-relay sidecar, which existed
+  # only because SSHFS does not propagate remote inotify events to a file
+  # watcher. Nothing watches files any more.
   evebox:
     <<: *runtime-defaults
     image: jasonish/evebox:latest
@@ -896,17 +879,16 @@ services:
     command:
       - evebox
       - server
-      - --config
-      - /etc/evebox/evebox.yaml
       - --database
-      - sqlite
-      - -D
-      - /var/lib/evebox
-      - --input
-      - /var/log/eve-relay/eve.json
-      # A new relay starts at the current source EOF. On first boot, EveBox
-      # likewise starts at the relay EOF and ingests only fresh events.
-      - --end
+      - elasticsearch
+      - --elasticsearch
+      - http://elasticsearch:9200
+      - --index
+      - suricata-v2
+      # Filebeat nests each EVE record under suricata.eve.* and the
+      # geoip-honeypot pipeline promotes the addresses into ECS
+      # source/destination fields. --ecs is how EveBox reads that layout.
+      - --ecs
       - --host
       - 0.0.0.0
       - --port
@@ -916,19 +898,23 @@ services:
     ports:
       - ${HP_BIND:-10.8.0.2}:19636:5636
     volumes:
-      - ./analysis/evebox.yaml:/etc/evebox/evebox.yaml:ro
-      - eve-relay-data:/var/log/eve-relay:ro
-      - evebox-data:/var/lib/evebox
+      # The image declares VOLUME /var/lib/evebox, so a volume is created here
+      # either way; name it so it is visible rather than anonymous. It now
+      # holds only config.sqlite — saved filters, comments, and escalations,
+      # a few hundred kilobytes. The event store that used to live beside it
+      # is gone: events are read from Elasticsearch.
+      - evebox-config:/var/lib/evebox
     depends_on:
-      eve-relay:
+      elasticsearch:
         condition: service_healthy
     networks:
       - honeynet
     deploy:
       resources:
         limits:
-          cpus: "4.0"
-          memory: 4G
+          # A query proxy over Elasticsearch, not a database host.
+          cpus: "1.0"
+          memory: 512M
   # ===================== Arkime — full PCAP search & analysis =====================
   #
   # Image: ghcr.io/arkime/arkime/arkime:v6-latest
@@ -1341,11 +1327,10 @@ networks:
   tanner_local:
     driver: bridge
 volumes:
+  evebox-config: null
   es-data: null
   dionaea-lib: null
   snare-pages: null
-  evebox-data: null
-  eve-relay-data: null
   arkime-pcap: null # Arkime-processed PCAP index files
   dashboard-state: null
   yara-results: null

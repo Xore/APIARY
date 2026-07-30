@@ -140,7 +140,6 @@ flowchart TB
   filebeat["Filebeat"]
   dashboard["Live dashboard"]
   kibana["Kibana"]
-  eveRelay["EVE relay"]
   evebox["EveBox"]
   pcapSync["PCAP sync"]
   arkCapture["Arkime capture"]
@@ -185,8 +184,7 @@ flowchart TB
   dashboard --> es
   dashboard -.->|"health only"| filebeat
 
-  logs -->|"VPS EVE mount"| eveRelay
-  eveRelay --> evebox
+  es --> evebox
 
   logs -->|"closed VPS PCAP files"| pcapSync
   pcapSync --> arkCapture
@@ -219,7 +217,6 @@ flowchart LR
   vpsPcap["VPS rotating PCAP"]
   portLog["VPS portbridge log"]
   sshfs["Read-only SSHFS mounts"]
-  relay["eve-relay<br/>persistent byte offset"]
   filebeat["Filebeat<br/>filestream registry"]
   live["Dashboard parser<br/>bounded file tails"]
   normalize["Normalization + GeoIP +<br/>source-IP correlation"]
@@ -251,8 +248,7 @@ flowchart LR
   live --> normalize
   portLog --> normalize
 
-  sshfs --> relay
-  relay --> evebox
+  es --> evebox
 
   sshfs --> sync
   sync -->|"local close-write event"| arkime
@@ -270,15 +266,17 @@ The analysis layers serve different purposes:
 | Elasticsearch setup | templates and pipelines | flattened heterogeneous sensor fields, GeoIP, ILM, dead-letter fallback | mapping safety and retention |
 | Kibana | Elasticsearch | saved searches, visualizations, archive investigations | long-range analysis |
 | Suricata | public-interface packets | signatures, protocol events, flows, rotating PCAP | IDS and network evidence |
-| EveBox | locally relayed EVE bytes | alert-focused SQLite/UI view | fast Suricata triage |
+| EveBox | the `suricata-v2-*` indices | alert-focused UI over Elasticsearch | fast Suricata triage |
 | Arkime | closed PCAP files | indexed sessions plus retained packet files | full-packet search and payload inspection |
 | Dashboard correlation | normalized events and portbridge metadata | attacker profiles, sessions, clusters, campaigns, ATT&CK context | evidence-led behavioral investigation |
 
-`eve-relay` and `pcap-sync` exist because remote SSHFS writes do not produce
-usable local inotify events. The EVE relay copies only new bytes using a
-persistent source offset. PCAP sync skips the newest file because Suricata may
-still be writing it, then copies closed files locally so Arkime receives the
-`IN_CLOSE_WRITE` event it expects.
+`pcap-sync` exists because remote SSHFS writes do not produce usable local
+inotify events: it skips the newest file because Suricata may still be writing
+it, then copies closed files locally so Arkime receives the `IN_CLOSE_WRITE`
+event it expects.
+
+EveBox needs no such sidecar. It queries the `suricata-v2-*` indices Filebeat
+already writes, so it holds no copy of the event data and nothing to outgrow.
 
 ### Captured payload lifecycle and static analysis
 

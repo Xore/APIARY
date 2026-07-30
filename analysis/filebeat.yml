@@ -58,7 +58,12 @@ filebeat.inputs:
       - /var/log/suricata/eve.json
     parsers:
       - ndjson:
-          target: "suricata"   # nest under suricata.* — matches EveBox expectations
+          # suricata.eve.* is the layout EveBox reads in --ecs mode, and it is
+          # the same nesting Elastic's own Suricata module uses. EveBox is the
+          # only consumer of this shape; queries elsewhere use the promoted ECS
+          # fields (source.ip, destination.ip, network.transport) that the
+          # geoip-honeypot pipeline derives from it.
+          target: "suricata.eve"
           overwrite_keys: true
           add_error_key: true
     fields:
@@ -130,11 +135,10 @@ processors:
 output.elasticsearch:
   hosts: ["http://elasticsearch:9200"]
   # Suricata events are split per event type (suricata-alert-*, suricata-dns-*,
-  # suricata-flow-*, ...) like the SELKS/KTS layout the SN-* dashboards expect.
-  # Each SN dashboard queries only its own protocol index; the generic
-  # suricata-* data view still matches all of them.
+  # suricata-flow-*, ...). EveBox reads the whole suricata-v2-* set through one
+  # index prefix; the generic suricata-* data view still matches all of them.
   indices:
-    - index: "suricata-v2-%{[suricata.event_type]}-%{+yyyy.MM.dd}"
+    - index: "suricata-v2-%{[suricata.eve.event_type]}-%{+yyyy.MM.dd}"
       when.equals:
         logset: "suricata"
     - index: "honeypot-v2-%{+yyyy.MM.dd}"
