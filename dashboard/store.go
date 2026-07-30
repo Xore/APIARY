@@ -24,9 +24,14 @@ const (
 )
 
 type snapshot struct {
-	Generated      time.Time
-	Total          int
-	UniqueIPs      int
+	Generated time.Time
+	Total     int
+	UniqueIPs int
+	// Unattributed counts events that reached a sensor over the WireGuard
+	// tunnel and could not be joined back to a real client IP. They are real
+	// attacks with an unknown source, deliberately not attributed to the tunnel
+	// peer; see aggregate.go and issue #54.
+	Unattributed   int
 	Logins         int
 	Last24h        int
 	Previous24h    int

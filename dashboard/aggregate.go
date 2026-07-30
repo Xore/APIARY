@@ -15,6 +15,7 @@ import (
 func (s *store) rebuild() {
 	var (
 		total, logins, last24, previous24, downloads int
+		unattributed                                 int
 		srcIPs                                       = map[string]int{}
 		sensors                                      = map[string]int{}
 		protos                                       = map[string]int{}
@@ -71,9 +72,28 @@ func (s *store) rebuild() {
 			// IP by matching the connection's src_port to the via_port portbridge
 			// dialed from — every event in one connection shares that port, so
 			// the whole chain (and its geo lookup below) gets the real IP.
+			//
+			// When the join misses, the source is unknown, not 10.8.0.1: that
+			// address is our own VPS tunnel end and is never an attacker.
+			// Recording it as one puts our own infrastructure at the top of
+			// /ips, inflates UniqueIPs, and feeds it to the geo lookup, the map,
+			// campaign correlation, and eventually external abuse reporting.
+			// Clearing the IP instead keeps the event — it is a real attack —
+			// while every aggregate below, all of which already require a
+			// non-empty IP, correctly declines to attribute it. The recovery gap
+			// is reported as Unattributed rather than disguised as an attacker.
+			//
+			// The miss is systematic, not incidental: portbridge logs UDP with
+			// no via_port at all, and conpot's PROXY shim is TCP-only, so conpot
+			// SNMP/BACnet/IPMI has no recovery path in either direction. See
+			// issue #54.
+			lostSource := false
 			if ev.ip == tunnelPeerIP {
 				if real := viaLookup(viaMap, eventSrcPort(e), ev.port); real != "" {
 					ev.ip = real
+				} else {
+					ev.ip = ""
+					lostSource = true
 				}
 			}
 			if key := dedupeKey(ev); key != "" {
@@ -81,6 +101,11 @@ func (s *store) rebuild() {
 					continue
 				}
 				seen[key] = true
+			}
+			// Counted after the dedupe check so the figure matches the number of
+			// events actually shown, not the number of raw log lines read.
+			if lostSource {
+				unattributed++
 			}
 			geo := geoInfo{Country: ev.country}
 			if s.geo != nil && ev.ip != "" {
@@ -296,6 +321,7 @@ func (s *store) rebuild() {
 		Generated:      now,
 		Total:          total,
 		UniqueIPs:      len(srcIPs),
+		Unattributed:   unattributed,
 		Logins:         logins,
 		Last24h:        last24,
 		Previous24h:    previous24,
