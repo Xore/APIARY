@@ -2,26 +2,32 @@
 """
 run_sample.py — Windows 11 sandbox detonation orchestrator
 
-Controls the Windows 11 VM via WinRM:
-1. Reverts to golden snapshot
+Drives the VM through libvirt and the guest through WinRM:
+1. Reverts the domain to the golden snapshot
 2. Copies sample to VM
 3. Starts telemetry (ProcMon, FakeNet-NG)
 4. Executes sample
 5. Waits observation window
 6. Collects all artifacts
 7. Reverts VM (cleanup)
-8. Pushes artifacts to Xore/Honeypot
+
+Artifacts are written to the local results directory only. This orchestrator
+performs no outbound network access and never pushes anywhere: the analysis
+host has no route off the sandbox bridge, and the dashboard reads results from
+the spool. See IMPLEMENTATION_PLAN.md "Host Constraints".
 
 Requires:
-  pip install pywinrm paramiko requests python-evtx
+  pip install pywinrm paramiko python-evtx
+  libvirt with the golden domain defined (see IMPLEMENTATION_PLAN.md Phase 2)
 
 Env vars:
   VM_HOST            IP of Windows VM (for WinRM)
   VM_USER            Windows username
   VM_PASS            Windows password
-  VMRUN_PATH         Path to vmrun binary (VMware)
-  VMX_PATH           Path to .vmx file
-  GOLDEN_SNAPSHOT    Snapshot name (default: SNAPSHOT_3_GOLDEN)
+  LIBVIRT_URI        libvirt connection URI (default: qemu:///system)
+  VM_DOMAIN          libvirt domain name (default: win11-sandbox)
+  VIRSH_PATH         Path to the virsh binary (default: /usr/bin/virsh)
+  GOLDEN_SNAPSHOT    Snapshot name (default: GOLDEN_READY)
   OBSERVATION_SECS   Seconds to observe (default: 300)
 """
 
@@ -47,11 +53,12 @@ log = logging.getLogger(__name__)
 VM_HOST         = os.environ.get('VM_HOST',          '10.10.10.2')
 VM_USER         = os.environ.get('VM_USER',          'analyst')
 VM_PASS         = os.environ.get('VM_PASS',          'malware')
-VMRUN_PATH      = os.environ.get('VMRUN_PATH',       '/usr/bin/vmrun')
-VMX_PATH        = os.environ.get('VMX_PATH',         '/vms/win11-analysis/win11.vmx')
-GOLDEN_SNAP     = os.environ.get('GOLDEN_SNAPSHOT',  'SNAPSHOT_3_GOLDEN')
+VIRSH_PATH      = os.environ.get('VIRSH_PATH',       '/usr/bin/virsh')
+LIBVIRT_URI     = os.environ.get('LIBVIRT_URI',      'qemu:///system')
+VM_DOMAIN       = os.environ.get('VM_DOMAIN',        'win11-sandbox')
+GOLDEN_SNAP     = os.environ.get('GOLDEN_SNAPSHOT',  'GOLDEN_READY')
 OBS_SECS        = int(os.environ.get('OBSERVATION_SECS', '300'))
-ARTIFACT_DIR    = Path('reports/windows-sandbox')
+ARTIFACT_DIR    = Path(os.environ.get('WINDOWS_SANDBOX_RESULTS_DIR', 'reports/windows-sandbox'))
 SAMPLE_SHARE    = f'\\\\{VM_HOST}\\Samples'
 LOGS_SHARE      = f'\\\\{VM_HOST}\\Logs'
 
@@ -64,20 +71,29 @@ def sha256_of(path: Path) -> str:
     return h.hexdigest()
 
 
-def vmrun(cmd: list) -> str:
-    """Execute vmrun command."""
-    result = subprocess.run([VMRUN_PATH] + cmd, capture_output=True, text=True, timeout=120)
+def virsh(cmd: list, timeout: int = 120) -> str:
+    """Execute a virsh command against the configured libvirt URI."""
+    result = subprocess.run(
+        [VIRSH_PATH, '--connect', LIBVIRT_URI] + cmd,
+        capture_output=True, text=True, timeout=timeout,
+    )
     if result.returncode != 0:
-        raise RuntimeError(f'vmrun failed: {result.stderr}')
+        raise RuntimeError(f'virsh {" ".join(cmd)} failed: {result.stderr.strip()}')
     return result.stdout.strip()
 
 
 def revert_to_golden():
-    log.info(f'Reverting VM to snapshot: {GOLDEN_SNAP}')
-    vmrun(['revertToSnapshot', VMX_PATH, GOLDEN_SNAP])
-    vmrun(['start', VMX_PATH, 'nogui'])
-    log.info('VM starting, waiting 60s for boot...')
-    time.sleep(60)
+    """Restore the domain to the golden snapshot and leave it running.
+
+    snapshot-revert --running restores the saved memory state, so the guest
+    resumes already booted rather than cold-starting; the caller still waits on
+    WinRM because the previous run's revert may have raced the guest's network
+    stack coming back. Every detonation starts from this exact state, which is
+    what makes the runs comparable and the guest disposable.
+    """
+    log.info(f'Reverting {VM_DOMAIN} to snapshot: {GOLDEN_SNAP}')
+    virsh(['snapshot-revert', VM_DOMAIN, '--snapshotname', GOLDEN_SNAP, '--running'])
+    log.info('Domain reverted and running; waiting for WinRM')
 
 
 def winrm_run(ps_command: str, timeout: int = 60) -> dict:
@@ -234,11 +250,11 @@ def collect_artifacts(sha: str, out_dir: Path):
     log.info(f'Artifacts collected to {out_dir}')
 
 
-def detonate(sample_path: Path):
+def detonate(sample_path: Path, results_dir: Path = None):
     if not sample_path.exists() or sample_path.name == '.gitkeep':
         return
     sha   = sha256_of(sample_path)
-    out   = ARTIFACT_DIR / sha
+    out   = (results_dir or ARTIFACT_DIR) / sha
 
     log.info(f'=== Detonating: {sample_path} ({sha[:16]}...) ===')
 
@@ -251,6 +267,7 @@ def detonate(sample_path: Path):
         'observation_secs': OBS_SECS,
     }, indent=2))
 
+    failed = None
     try:
         revert_to_golden()
         wait_for_winrm()
@@ -268,14 +285,22 @@ def detonate(sample_path: Path):
         collect_artifacts(sha, out)
 
     except Exception as e:
-        log.error(f'Detonation failed: {e}', exc_info=True)
+        # Recorded, then re-raised once the guest is safely back at the golden
+        # snapshot. Swallowing this would let the worker retire the spool entry
+        # as though a report had been produced.
+        log.error('Detonation failed', exc_info=True)
+        failed = e
     finally:
-        # Always revert to clean state
+        # Always revert, including after a failed detonation: the guest has run
+        # untrusted code and must never survive into the next sample.
         log.info('Reverting VM to golden snapshot (cleanup)...')
         try:
-            vmrun(['revertToSnapshot', VMX_PATH, GOLDEN_SNAP])
+            virsh(['snapshot-revert', VM_DOMAIN, '--snapshotname', GOLDEN_SNAP, '--running'])
         except Exception as e:
             log.error(f'VM revert failed: {e}')
+
+    if failed is not None:
+        raise failed
 
     log.info(f'Run complete. Artifacts: {out}')
 
@@ -285,7 +310,11 @@ def main():
     parser.add_argument('--file-list',   help='File with list of sample paths')
     parser.add_argument('--sample',      help='Single sample path')
     parser.add_argument('--filter-type', help='Only process files in this subfolder (PE, ELF...)')
+    parser.add_argument('--results-dir',
+                        help='Where to write per-sample artifact directories '
+                             '(default: $WINDOWS_SANDBOX_RESULTS_DIR)')
     args = parser.parse_args()
+    results_dir = Path(args.results_dir) if args.results_dir else ARTIFACT_DIR
 
     paths = []
     if args.file_list:
@@ -300,13 +329,22 @@ def main():
     if args.filter_type:
         paths = [p for p in paths if args.filter_type.upper() in p.parts]
 
+    failures = 0
     for p in paths:
         try:
-            detonate(p)
+            detonate(p, results_dir)
         except Exception as e:
             log.error(f'Error: {p}: {e}', exc_info=True)
+            failures += 1
         time.sleep(5)
+
+    # The spool worker keys off this exit code: a non-zero status keeps the
+    # request on disk for inspection rather than retiring it as complete.
+    if failures:
+        log.error(f'{failures} of {len(paths)} sample(s) failed to detonate')
+        return 1
+    return 0
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

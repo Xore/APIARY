@@ -1,7 +1,11 @@
 # Windows 11 Malware Sandbox — Golden Image Implementation Plan
 
-> **Status**: In Progress — Phase 7's dashboard half is implemented; the host
-> half (golden image, orchestrator, systemd worker) is not.  
+> **Status**: In Progress — Phase 7's dashboard half is implemented, and the
+> host half now has its orchestrator, spool worker, and systemd units. What
+> remains is the golden image itself (Phases 1–3) and the gateway compose
+> (Phase 4); until a `win11-sandbox` domain with a `GOLDEN_READY` snapshot
+> exists, the worker will revert-fail on every request and preserve it as
+> `.request.failed`.  
 > **Last updated**: 2026-07-30  
 > **Host platform**: KVM + QEMU + libvirt + docker-compose (NO VMware)
 
@@ -553,10 +557,25 @@ WINDOWS_SANDBOX_RESULTS_DIR/{sha256}_sandbox.json
 > no reader. Do the Ghidra plan first, then come back for step 6 — it is two
 > lines in `serveSandboxSubmit` once the spool exists.
 >
-> **Also not implemented — the host half.** Nothing consumes
-> `/windows-sandbox-requests` yet. Phases 1–6 (Packer golden image,
-> orchestrator, artifact collection) and §7.2's systemd units are still
-> ahead, which is why the Compose default leaves the backend switched off.
+> **Host half — implemented 2026-07-30.** `/windows-sandbox-requests` now has
+> a consumer: `run_pending.sh` drains the spool and
+> `honeypot-windows-sandbox-worker.{path,service}` drive it, with
+> `honeypot-windows-sandbox.default.example` as the host configuration
+> template. The worker takes a non-blocking lock so overlapping path-unit
+> triggers collapse into one drain, claims each request before detonating so a
+> crash cannot replay it, and preserves a request as `.request.failed` when the
+> orchestrator exits non-zero rather than retiring it as complete.
+>
+> `orchestrate/run_sample.py` was written against VMware — `vmrun`, a `.vmx`
+> path, and snapshot `SNAPSHOT_3_GOLDEN` — which contradicted this plan's own
+> "No VMware Workstation" constraint and would never have run on this host. It
+> now drives libvirt (`virsh --connect $LIBVIRT_URI snapshot-revert`), takes
+> `--results-dir`, and returns a non-zero exit on a failed detonation so the
+> worker can tell a real report from a broken run.
+>
+> **Still ahead:** Phases 1–3 (Packer golden image, VM lifecycle, guest
+> hardening) and Phase 4 (gateway Compose). The Compose default leaves the
+> backend switched off until a golden domain exists.
 
 The sandbox is triggered **from the dashboard payloads page** — the same
 one-click pattern used by Ghidra

@@ -1,0 +1,37 @@
+# Host-side configuration for the Windows sandbox worker.
+# Install to /etc/default/honeypot-windows-sandbox (mode 0600 — it holds the
+# guest password). Read by honeypot-windows-sandbox-worker.service.
+#
+# This file lives on the analysis host, not in the dashboard container. The
+# dashboard never calls virsh, docker, or WinRM: it only writes a request into
+# the spool below (IMPLEMENTATION_PLAN.md §7.1).
+
+# ── Spool the dashboard shares with this worker ──────────────────────────
+# Must match WINDOWS_SANDBOX_REQUEST_DIR / WINDOWS_SANDBOX_RESULTS_DIR in the
+# dashboard's environment, or a submission is written where nothing reads it.
+WINDOWS_SANDBOX_REQUEST_DIR=/windows-sandbox-requests
+WINDOWS_SANDBOX_RESULTS_DIR=/windows-sandbox-results
+
+# Where the captured samples themselves live. The request carries only a
+# SHA-256; the worker resolves it here and refuses a request it cannot match.
+WINDOWS_SANDBOX_SAMPLES_DIR=/var/lib/honeypot-sandbox/inbox/samples
+
+# ── libvirt domain ───────────────────────────────────────────────────────
+LIBVIRT_URI=qemu:///system
+VM_DOMAIN=win11-sandbox
+# Every detonation starts by reverting to this snapshot, so the guest is
+# disposable and successive runs are comparable (Phase 2).
+GOLDEN_SNAPSHOT=GOLDEN_READY
+
+# ── Guest access (WinRM over the isolated sandbox bridge) ────────────────
+# 10.10.10.0/24 has no route to the WAN; the host firewall drops forwarding.
+VM_HOST=10.10.10.2
+VM_USER=analyst
+# Set a real value here and keep this file mode 0600. The credential only ever
+# reaches a guest that is reverted after every run.
+VM_PASS=changeme
+
+# ── Detonation window ────────────────────────────────────────────────────
+# Seconds to observe after execution. TimeoutStartSec in the service unit must
+# stay comfortably above this multiplied by a plausible queue depth.
+OBSERVATION_SECS=300
