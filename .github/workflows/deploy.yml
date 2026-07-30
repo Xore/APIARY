@@ -61,6 +61,56 @@ jobs:
           VPS_PORT: ${{ secrets.VPS_PORT }}
         run: |
           ssh_options=(-i ~/.ssh/honeypot_vps -p "${VPS_PORT:-2222}" -o StrictHostKeyChecking=accept-new)
-          rsync -az --delete-delay --exclude '.env' -e "ssh ${ssh_options[*]}" vps/ "${VPS_USER:-root}@${VPS_HOST}:/root/vps/"
+
+          # Snapshot the environment-specific files before touching the host, so
+          # a mistake here is recoverable without reissuing certificates.
+          ssh "${ssh_options[@]}" "${VPS_USER:-root}@${VPS_HOST}" \
+            'set -eu; cd /root/vps 2>/dev/null || exit 0
+             stamp=$(date -u +%Y%m%dT%H%M%SZ)
+             install -d -m 700 /root/vps-backups
+             set -- ; for p in traefik/certs traefik/dynamic.yml .env; do
+               test -e "$p" && set -- "$@" "$p"
+             done
+             test "$#" -gt 0 && tar czf "/root/vps-backups/pre-deploy-$stamp.tar.gz" "$@"
+             ls -1t /root/vps-backups/pre-deploy-*.tar.gz | tail -n +11 | xargs -r rm -f'
+
+          # --delete-delay removes anything on the VPS that is absent from the
+          # repository. Three things must therefore never be synchronized:
+          #   .env                  secrets, host-specific
+          #   traefik/certs/        issued certificates — deleting these takes
+          #                         TLS down and they cannot be regenerated here
+          #   traefik/dynamic.yml   carries the real domain; the committed copy
+          #                         is a honeypot.example placeholder, so copying
+          #                         it over the live file breaks every router
+          rsync -az --delete-delay \
+            --exclude '.env' \
+            --exclude 'traefik/certs/' \
+            --exclude 'traefik/dynamic.yml' \
+            -e "ssh ${ssh_options[*]}" vps/ "${VPS_USER:-root}@${VPS_HOST}:/root/vps/"
+
           ssh "${ssh_options[@]}" "${VPS_USER:-root}@${VPS_HOST}" \
             'cd /root/vps && { test ! -f .env || chmod 600 .env; } && docker compose -f docker-compose.yml config --quiet && docker compose -f docker-compose.yml up -d --build'
+
+      - name: Verify the live Traefik configuration survived
+        shell: bash
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+        run: |
+          ssh_options=(-i ~/.ssh/honeypot_vps -p "${VPS_PORT:-2222}" -o StrictHostKeyChecking=accept-new)
+          ssh "${ssh_options[@]}" "${VPS_USER:-root}@${VPS_HOST}" 'set -eu
+            cd /root/vps
+            fail=0
+            for f in traefik/certs/origin.pem traefik/certs/origin-key.pem traefik/dynamic.yml; do
+              if [ ! -s "$f" ]; then echo "::error::$f is missing or empty after deploy"; fail=1; fi
+            done
+            if grep -q "honeypot.example" traefik/dynamic.yml 2>/dev/null; then
+              echo "::error::traefik/dynamic.yml contains placeholder domains — routing is down"
+              fail=1
+            fi
+            if [ -s traefik/certs/origin.pem ] && ! openssl x509 -in traefik/certs/origin.pem -noout >/dev/null 2>&1; then
+              echo "::error::traefik/certs/origin.pem is not a parseable certificate"
+              fail=1
+            fi
+            exit "$fail"'

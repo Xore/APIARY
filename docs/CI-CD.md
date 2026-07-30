@@ -108,18 +108,40 @@ The VPS job runs on a short-lived GitHub-hosted Ubuntu runner:
    `0600`.
 3. The job constructs SSH options from `VPS_HOST`, `VPS_USER`, and `VPS_PORT`.
    The user defaults to `root` and the port defaults to `2222`.
-4. `rsync` sends only the repository's `vps/` directory over SSH to
+4. The job snapshots the environment-specific files on the VPS into
+   `/root/vps-backups/pre-deploy-<timestamp>.tar.gz`, keeping the ten most
+   recent archives.
+5. `rsync` sends only the repository's `vps/` directory over SSH to
    `/root/vps/`.
-5. A second SSH command runs on the VPS, validates
+6. A second SSH command runs on the VPS, validates
    `/root/vps/docker-compose.yml`, and executes
    `docker compose up -d --build`.
-6. GitHub destroys the hosted runner, including its temporary key file, after
+7. A verification step fails the job if the certificates or `dynamic.yml` are
+   missing, empty, unparseable, or still carry placeholder domains.
+8. GitHub destroys the hosted runner, including its temporary key file, after
    the job.
 
-`/root/vps/.env` is excluded from synchronization. `--delete-delay` removes
-other destination files that no longer exist under the repository's `vps/`
-directory, so persistent VPS data must live in named volumes, bind mounts
-outside `/root/vps`, or the preserved `.env`.
+### Files the VPS owns, not the repository
+
+`--delete-delay` removes destination files that no longer exist under the
+repository's `vps/` directory, and overwrites the ones that do. Three paths are
+therefore excluded from synchronization because the VPS copy is authoritative:
+
+| Path | Why it is excluded |
+|---|---|
+| `.env` | Secrets and host-specific values. |
+| `traefik/certs/` | Issued TLS certificates. They do not exist in the repository, so an unexcluded `--delete-delay` deletes them, and the workflow cannot reissue them. |
+| `traefik/dynamic.yml` | Carries the deployment's real domain. The committed copy is a `honeypot.example` placeholder, so copying it over the live file leaves every router matching a domain that no requests use. |
+
+All three were lost or overwritten in a single `target: both` run before these
+exclusions existed: the certificates were deleted and Traefik fell back to
+self-signed, and every router silently stopped matching. Persistent VPS data
+must live in named volumes, bind mounts outside `/root/vps`, or one of the
+excluded paths above.
+
+When a routing change does need to reach production, edit
+`/root/vps/traefik/dynamic.yml` on the VPS directly — Traefik's file provider
+watches it and reloads without a restart.
 
 The SSH key is the direct production credential in this path. Restrict it to
 the intended VPS, keep it in the protected environment rather than repository
