@@ -76,12 +76,37 @@
 
       <ImageInstall>
         <OSImage>
+          <!-- The retail/ESD media carries seven editions and no ei.cfg, so
+               setup shows an edition picker unless one is named here. In an
+               unattended headless build nothing answers it and Packer waits
+               out winrm_timeout with no diagnostic. Pro is the analysis
+               baseline: the N editions omit the Media Feature Pack that some
+               samples and tooling expect, and Home has no Group Policy for
+               the hardening pass. Run wiminfo against sources/install.esd if
+               the media is ever replaced — this string must match a Name
+               exactly. -->
+          <InstallFrom>
+            <MetaData wcm:action="add">
+              <Key>/IMAGE/NAME</Key>
+              <Value>Windows 11 Pro</Value>
+            </MetaData>
+          </InstallFrom>
           <InstallTo><DiskID>0</DiskID><PartitionID>3</PartitionID></InstallTo>
           <WillShowUI>OnError</WillShowUI>
         </OSImage>
       </ImageInstall>
 
       <UserData>
+        <!-- Empty ProductKey suppresses the "enter a product key" prompt,
+             which is the other place an unattended install stops. The guest
+             stays unactivated on purpose: it never reaches the internet, and
+             it is reverted to the golden snapshot after every detonation, so
+             activation would buy nothing. Unactivated Windows runs
+             indefinitely with only cosmetic personalisation limits. -->
+        <ProductKey>
+          <Key></Key>
+          <WillShowUI>Never</WillShowUI>
+        </ProductKey>
         <AcceptEula>true</AcceptEula>
         <FullName>John Doe</FullName>
         <Organization>Acme Corp</Organization>
