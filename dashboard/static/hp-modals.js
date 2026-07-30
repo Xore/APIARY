@@ -113,12 +113,15 @@
     if (!form || form.dataset.hpConfirmed === "true") return;
     event.preventDefault();
     const hash = form.querySelector('input[name="hash"]')?.value || "selected payload";
+    // A form may reword the confirmation (re-analysis reads differently from a
+    // first submission); the consequence warning stays identical either way.
     open({
       trigger: event.submitter || form,
-      title: "Submit payload to the sandbox?",
-      description: "This queues the captured artifact for execution in the isolated malware-analysis environment.",
+      title: form.dataset.hpConfirmTitle || "Submit payload to the sandbox?",
+      description: form.dataset.hpConfirmDescription
+        || "This queues the captured artifact for execution in the isolated malware-analysis environment.",
       warning: `The payload ${hash} will be detonated and may generate network, process, and filesystem activity.`,
-      confirmLabel: "Submit to sandbox",
+      confirmLabel: form.dataset.hpConfirmLabel || "Submit to sandbox",
       onConfirm: () => {
         form.dataset.hpConfirmed = "true";
         form.requestSubmit(event.submitter || undefined);

@@ -155,6 +155,10 @@ type sandboxResult struct {
 	ProcessDiff     sandboxDifference     `json:"-"`
 	SocketDiff      sandboxDifference     `json:"-"`
 	Incomplete      bool                  `json:"-"`
+	// CaptureAvailable reports whether the original capture is still in a
+	// payload directory. Re-analysis needs the sample itself, so the detail
+	// page only offers the button when the submit endpoint could satisfy it.
+	CaptureAvailable bool `json:"-"`
 }
 
 type sandboxQueueCounts struct {
@@ -188,6 +192,9 @@ type sandboxPageData struct {
 	Status     sandboxQueueStatus
 	Query      string
 	StaticYARA []string
+	// Analysis carries the ?analysis= marker set by the submit redirect so the
+	// detail page can confirm a queued re-analysis in place.
+	Analysis string
 }
 
 func sandboxResultsDir() string { return getenv("SANDBOX_RESULTS_DIR", "/sandbox-results") }

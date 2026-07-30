@@ -52,7 +52,39 @@ func (s *store) serveSandboxSubmit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "sandbox request spool unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	http.Redirect(w, r, "/payloads?analysis=queued&hash="+url.QueryEscape(hash), http.StatusSeeOther)
+	http.Redirect(w, r, submitReturnURL(r.FormValue("return"), hash), http.StatusSeeOther)
+}
+
+// submitReturnURL resolves where to send the browser after a queued request.
+// Re-analysis is initiated from a sandbox run, so returning to /payloads would
+// throw the investigation away. Only same-origin dashboard paths from a fixed
+// allowlist are honored; anything else falls back to the payload inventory.
+func submitReturnURL(raw, hash string) string {
+	fallback := "/payloads?analysis=queued&hash=" + url.QueryEscape(hash)
+	raw = strings.TrimSpace(raw)
+	if raw == "" || !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") {
+		return fallback
+	}
+	target, err := url.Parse(raw)
+	if err != nil || target.IsAbs() || target.Host != "" {
+		return fallback
+	}
+	allowed := false
+	for _, prefix := range []string{"/sandbox/", "/payload-analysis/", "/payloads"} {
+		if strings.HasPrefix(target.Path, prefix) {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return fallback
+	}
+	query := target.Query()
+	query.Set("analysis", "queued")
+	query.Set("hash", hash)
+	target.RawQuery = query.Encode()
+	target.Fragment = ""
+	return target.String()
 }
 
 func sameOriginRequest(r *http.Request) bool {

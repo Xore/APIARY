@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -174,6 +175,49 @@ func TestSandboxResultActionsLinkReportsStudioAndVirusTotal(t *testing.T) {
 	}
 	if strings.Contains(pageSandbox, `/export/sandbox/{{.Detail.Job}}.pdf`) {
 		t.Fatal("sandbox result page must not offer a direct PDF export; only the Reports studio generates PDFs")
+	}
+}
+
+// Re-analysis is only offered while the capture is still on disk, and it must
+// carry the job back so a queued run returns to the investigation it came from.
+func TestSandboxDetailOffersReanalysisOnlyWhileTheCaptureExists(t *testing.T) {
+	tmpl, err := template.New("dashboard").Funcs(templateFuncs(nil, "")).Parse(pageTemplate)
+	if err != nil {
+		t.Fatalf("dashboard template does not parse: %v", err)
+	}
+	render := func(available bool) string {
+		data := sandboxPageData{
+			Generated: time.Now(),
+			Detail: &sandboxResult{
+				Job:              "job-2026-07-30",
+				SHA256:           strings.Repeat("a", 64),
+				CaptureAvailable: available,
+			},
+		}
+		var buf bytes.Buffer
+		if err := tmpl.ExecuteTemplate(&buf, "sandbox", data); err != nil {
+			t.Fatalf("render(available=%v): %v", available, err)
+		}
+		return buf.String()
+	}
+
+	withCapture := render(true)
+	for _, expected := range []string{
+		`action="/sandbox/submit"`,
+		`name="return" value="/sandbox/job-2026-07-30"`,
+		`Re-analyze`,
+	} {
+		if !strings.Contains(withCapture, expected) {
+			t.Fatalf("re-analysis control is missing %q", expected)
+		}
+	}
+
+	withoutCapture := render(false)
+	if strings.Contains(withoutCapture, `action="/sandbox/submit"`) {
+		t.Fatal("re-analysis must not be offered once the capture is gone")
+	}
+	if !strings.Contains(withoutCapture, "no longer in a payload directory") {
+		t.Fatal("a missing capture must be explained rather than silently dropping the control")
 	}
 }
 

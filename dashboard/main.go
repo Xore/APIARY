@@ -387,6 +387,9 @@ func main() {
 			return
 		}
 		data.StaticYARA = s.yaraForSHA(data.Detail.SHA256).Matches
+		_, captureErr := s.payloadPath(data.Detail.SHA256)
+		data.Detail.CaptureAvailable = captureErr == nil
+		data.Analysis = r.URL.Query().Get("analysis")
 		html(w)
 		tmpl.ExecuteTemplate(w, "sandbox", data)
 	})
