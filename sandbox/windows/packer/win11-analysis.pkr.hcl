@@ -89,8 +89,26 @@ source "qemu" "win11" {
   memory         = var.memory
   cpus           = var.cpus
   disk_size      = var.disk_size
-  disk_interface = "virtio" # fast + common in real VMs
-  net_device     = "e1000e" # Intel NIC — looks real
+  # AHCI, not virtio. Two reasons, and they point the same way:
+  #
+  # Windows 11 setup ships no virtio-blk driver, so a virtio disk simply does
+  # not appear — setup stops on "Select location to install Windows 11" with
+  # an empty disk list and "Hardware not showing up?". Supplying the driver
+  # would mean carrying the virtio-win ISO and a driver path in the answer
+  # file.
+  #
+  # And a virtio controller is itself one of the loudest "you are in a VM"
+  # signals a sample can read. This guest is meant to look like a physical
+  # workstation, so AHCI is the better disguise as well as the one that
+  # installs unattended. The cost is throughput, which does not matter for a
+  # guest that runs one sample at a time.
+  #
+  # The value is "ide", not "sata": QEMU's -drive if= knows no sata bus and
+  # refuses to start with "unsupported bus type 'sata'". On the q35 machine
+  # type the ide bus *is* the ICH9 AHCI controller, so the guest sees a SATA
+  # disk regardless of what the option is called.
+  disk_interface = "ide"
+  net_device     = "e1000e" # Intel NIC — likewise real hardware, not virtio-net
   # host-passthrough: guest sees real CPU model, not QEMU default
   cpu_model = "host"
 
@@ -135,12 +153,22 @@ source "qemu" "win11" {
   accelerator = "kvm"
   headless    = true
 
-  # The Windows installer stops at "Press any key to boot from CD or DVD".
-  # Nothing presses it in a headless build, so the firmware falls through to
-  # the UEFI shell and the build hangs. Send the keypress, then let
-  # autounattend.xml drive the rest of the install.
-  boot_wait    = "2s"
-  boot_command = ["<enter>"]
+  # "Press any key to boot from CD or DVD" has to be answered while it is on
+  # screen, and that window is narrow and late: OVMF spends roughly fifteen
+  # seconds initialising first, then the prompt lasts about five. A single
+  # keypress at boot_wait = 2s is delivered into the firmware long before the
+  # prompt exists, is discarded, and the guest falls through to
+  # "No bootable option or device was found" — which looks like broken media
+  # rather than a timing bug.
+  #
+  # So keep boot_wait short and spam Enter across the whole window instead.
+  # Extra presses after the installer has started are harmless; it is already
+  # reading autounattend.xml by then.
+  boot_wait = "5s"
+  boot_command = [
+    "<enter><wait2><enter><wait2><enter><wait2><enter><wait2><enter>",
+    "<wait2><enter><wait2><enter><wait2><enter><wait2><enter><wait2><enter>",
+  ]
 }
 
 build {
