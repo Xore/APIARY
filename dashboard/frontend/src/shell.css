@@ -389,6 +389,30 @@ button.copy:hover { color: var(--text-primary); background: var(--surface-2); }
   -webkit-backdrop-filter: blur(8px);
 }
 
+/* ── Evidence viewer (hp-evidence.js) ───────────────────────────────────── */
+.hp-evidence-modal {
+  flex-direction: column;
+  width: min(1000px, calc(100vw - 40px));
+  max-height: calc(100dvh - 48px);
+}
+.hp-evidence-modal .modal__header { flex: none; background: var(--sidebar-bg); }
+.hp-evidence-modal .modal__close { position: static; flex: none; }
+.hp-evidence-count { flex: none; color: var(--text-muted); font-size: var(--font-size-xs); white-space: nowrap; }
+.hp-evidence-note { flex: none; margin: 12px 16px 0; }
+.hp-evidence-body { flex: 1; min-height: 0; padding: 12px 16px 16px; overflow: auto; }
+.hp-evidence-body pre { max-height: none; margin: 0; }
+.hp-evidence-body table { width: 100%; }
+/* The card chrome belongs to the page; inside the viewer the block is the
+   whole surface. */
+.hp-evidence-body .card { padding: 0; border: 0; background: transparent; }
+.hp-evidence-body .card > h2 { display: none; }
+
+@media (max-width: 720px) {
+  .hp-evidence-modal { width: 100vw; max-height: 100dvh; border-radius: 0; }
+  .hp-evidence-modal .modal__header { flex-wrap: wrap; }
+  .hp-evidence-modal .modal__header .search-field { max-width: none; }
+}
+
 /* Search results: supporting context under each matched value. */
 .searchhit__detail {
   margin-top: 2px;

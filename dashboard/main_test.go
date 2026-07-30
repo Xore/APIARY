@@ -420,6 +420,7 @@ func TestTailwindAssetsAreEmbeddedAndReferenced(t *testing.T) {
 		"static/hp-api.js":           500,
 		"static/hp-app.js":           8000,
 		"static/hp-modals.js":        5000,
+		"static/hp-evidence.js":      4000,
 		"static/hp-settings.js":      8000,
 		"static/leaflet.css":         10000,
 		"static/leaflet.js":          100000,
@@ -434,7 +435,7 @@ func TestTailwindAssetsAreEmbeddedAndReferenced(t *testing.T) {
 			t.Fatalf("dashboard asset %q is unexpectedly small: %d bytes", name, len(data))
 		}
 	}
-	for _, reference := range []string{"/static/hp-tailwind.css", "/static/theme.css", "/static/hp-api.js", "/static/hp-modals.js", "/static/hp-app.js", "/static/leaflet.css", "/static/leaflet.js"} {
+	for _, reference := range []string{"/static/hp-tailwind.css", "/static/theme.css", "/static/hp-api.js", "/static/hp-modals.js", "/static/hp-evidence.js", "/static/hp-app.js", "/static/leaflet.css", "/static/leaflet.js"} {
 		if !strings.Contains(pageTemplate, reference) {
 			t.Fatalf("shared page template does not load %q", reference)
 		}

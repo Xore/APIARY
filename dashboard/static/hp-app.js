@@ -384,21 +384,32 @@
   });
   window.initHoneypotMaps = initMaps;
 
-  /* ---------- overview workspace tabs ---------- */
+  /* ---------- workspace tabs ----------
+     Any page can group its cards: render .dashboard-tabs buttons with
+     data-dashboard-tab and matching [data-dashboard-panel] sections. The valid
+     names come from the DOM, so a page declares its own views without this
+     controller knowing them. The first tab is the default. */
+  const tabButtons = () => Array.from(document.querySelectorAll("[data-dashboard-tab]"));
   const activateDashboardTab = name => {
-    const valid = ["live", "threats", "behavior", "evidence"];
-    if (!valid.includes(name)) name = "live";
+    const buttons = tabButtons();
+    if (!buttons.length) return;
+    const valid = buttons.map(b => b.dataset.dashboardTab);
+    if (!valid.includes(name)) name = valid[0];
     window.honeypotDashboardTab = name;
     document.querySelectorAll("[data-dashboard-panel]").forEach(p => p.hidden = p.dataset.dashboardPanel !== name);
-    document.querySelectorAll("[data-dashboard-tab]").forEach(b => {
+    buttons.forEach(b => {
       const active = b.dataset.dashboardTab === name;
       b.classList.toggle("active", active);
       b.setAttribute("aria-selected", String(active));
       b.tabIndex = active ? 0 : -1;
     });
-    if (name === "live" && window.honeypotLeaflet?.map) setTimeout(() => window.honeypotLeaflet.map.invalidateSize(false), 0);
+    // Leaflet cannot size itself while its container is hidden.
+    const shown = document.querySelector(`[data-dashboard-panel="${CSS.escape(name)}"]`);
+    if (shown?.querySelector(".leaflet-map") && window.honeypotLeaflet?.map) {
+      setTimeout(() => window.honeypotLeaflet.map.invalidateSize(false), 0);
+    }
   };
-  window.initDashboardTabs = () => activateDashboardTab(window.honeypotDashboardTab || location.hash.replace("#", "") || "live");
+  window.initDashboardTabs = () => activateDashboardTab(window.honeypotDashboardTab || location.hash.replace("#", ""));
 
   /* ---------- live page mounting (SSE / interval refresh) ---------- */
   const pageContent = document.querySelector("[data-hp-page-content]");

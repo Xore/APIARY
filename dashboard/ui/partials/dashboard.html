@@ -2,11 +2,12 @@
 <script>(function(){try{var t=localStorage.getItem("hp-theme");if(t==="light"||t==="dark"){document.documentElement.dataset.theme=t;}else if(t){localStorage.removeItem("hp-theme");}}catch(e){}})();</script>
 <link rel="stylesheet" href="/static/theme.css?v=20260730-1">
 <link rel="stylesheet" href="/static/leaflet.css?v=20260727-1">
-<link rel="stylesheet" href="/static/hp-tailwind.css?v=20260730-4">
+<link rel="stylesheet" href="/static/hp-tailwind.css?v=20260730-5">
 <script defer src="/static/leaflet.js?v=20260727-1"></script>
 <script defer src="/static/hp-api.js?v=20260727-1"></script>
 <script defer src="/static/hp-modals.js?v=20260730-2"></script>
-<script defer src="/static/hp-app.js?v=20260730-2"></script>
+<script defer src="/static/hp-evidence.js?v=20260730-1"></script>
+<script defer src="/static/hp-app.js?v=20260730-3"></script>
 <script defer src="/static/hp-account.js?v=20260730-1"></script>
 <script defer src="/static/hp-settings.js?v=20260730-5"></script>
 <script defer src="/static/hp-reports.js?v=20260730-1"></script>
@@ -104,6 +105,22 @@
       </div>
     </section>
   </div>
+  <!-- Evidence viewer: raw analysis output (strings, stdout, socket tables,
+       hex previews) opens here instead of padding the page it belongs to. -->
+  <div class="modal-backdrop" id="hp-evidence-backdrop" aria-hidden="true" inert></div>
+  <section class="modal hp-evidence-modal" id="hp-evidence-modal" role="dialog" aria-modal="true" aria-label="Evidence" aria-hidden="true" inert>
+    <div class="modal__header">
+      <h2 class="modal__header-title" data-hp-evidence-title-target>Evidence</h2>
+      <label class="search-field" data-hp-evidence-search-field>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="search" data-hp-evidence-search placeholder="Filter lines&hellip;" aria-label="Filter evidence lines">
+      </label>
+      <span class="hp-evidence-count" data-hp-evidence-count aria-live="polite"></span>
+      <button class="modal__close" type="button" data-hp-evidence-close aria-label="Close evidence">&#10005;</button>
+    </div>
+    <p class="note hp-evidence-note" data-hp-evidence-note-target hidden></p>
+    <div class="hp-evidence-body" data-hp-evidence-body-target></div>
+  </section>
   <div class="modal-backdrop" id="hp-settings-backdrop" data-hp-settings-backdrop aria-hidden="true" inert></div>
   <div id="hp-dash-settings-root"></div>
   <section class="modal hp-settings-modal" id="hp-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="hp-settings-title" aria-hidden="true" inert>
