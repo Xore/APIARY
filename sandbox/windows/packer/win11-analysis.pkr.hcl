@@ -11,7 +11,7 @@
 #   packer init win11-analysis.pkr.hcl
 #   packer validate win11-analysis.pkr.hcl
 #   packer build -var iso_checksum=sha256:<hex> win11-analysis.pkr.hcl
-# Output: /golden-images/win11-analysis.qcow2  (~25-35 GB, 3-5 h)
+# Output: $output_dir/win11-analysis.qcow2  (~25-35 GB, 3-5 h)
 #
 # The ISO is not fetched here. Download the Windows 11 Enterprise evaluation
 # yourself, accept Microsoft's licence, and place it at var.iso_path.
@@ -26,8 +26,11 @@ packer {
 }
 
 variable "iso_path" {
-  description = "Path to Windows 11 evaluation ISO"
-  default     = "/isos/Win11_Eval_x64.iso"
+  description = "Path to the Windows 11 installation ISO"
+  # Deliberately on /var (1.5 TB spindle), not the 233 GB root NVMe. The ISO
+  # is 6.5 GB and the golden image adds 25-35 GB on top; filling the OS disk
+  # to build a sandbox image is not a trade worth making.
+  default = "/var/dockge/sandbox/isos/Win11_Eval_x64.iso"
 }
 
 variable "iso_checksum" {
@@ -42,7 +45,8 @@ variable "iso_checksum" {
 }
 
 variable "output_dir" {
-  default = "/golden-images"
+  # Same reasoning as iso_path: the qcow2 lives on the large disk.
+  default = "/var/dockge/sandbox/golden-images"
 }
 
 variable "vm_name" {
