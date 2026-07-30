@@ -162,10 +162,8 @@ func TestRenderSandboxReportPDF(t *testing.T) {
 	}
 }
 
-func TestSandboxResultActionsLinkReportsStudioAndVirusTotal(t *testing.T) {
+func TestSandboxResultActionsLinkVirusTotalWithoutAReportShortcut(t *testing.T) {
 	for _, expected := range []string{
-		`href="/reports"`,
-		`PDF report via Reports studio`,
 		`href="https://www.virustotal.com/gui/file/{{.Detail.SHA256}}"`,
 		`rel="noopener noreferrer"`,
 	} {
@@ -175,6 +173,29 @@ func TestSandboxResultActionsLinkReportsStudioAndVirusTotal(t *testing.T) {
 	}
 	if strings.Contains(pageSandbox, `/export/sandbox/{{.Detail.Job}}.pdf`) {
 		t.Fatal("sandbox result page must not offer a direct PDF export; only the Reports studio generates PDFs")
+	}
+	// Reports are reached through the left navigation only; per-page shortcuts
+	// were removed so every page has one obvious route to the studio.
+	if strings.Contains(pageSandbox, `href="/reports"`) {
+		t.Fatal("sandbox result page must not carry its own Reports studio shortcut")
+	}
+}
+
+// Every page-level "Report …" button was removed; the sidebar entry is the
+// single way into the Reports studio.
+func TestOnlyTheNavigationLinksTheReportsStudio(t *testing.T) {
+	pages := map[string]string{
+		"overview": pageOverview, "events": pageEvents, "ips": pageIPs,
+		"session": pageSession, "intel": pageIntel, "ops": pageOps,
+		"sandbox": pageSandbox, "payloads": pagePayloads, "search": pageSearch,
+	}
+	for name, page := range pages {
+		if strings.Contains(page, `href="/reports"`) {
+			t.Fatalf("%s still links the Reports studio outside the navigation", name)
+		}
+	}
+	if !strings.Contains(pageStyle, `data-hp-nav="/reports" href="/reports"`) {
+		t.Fatal("the sidebar must keep the Reports studio navigation entry")
 	}
 }
 

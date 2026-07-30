@@ -44,7 +44,6 @@ const pageEvents = `
             <p class="subtitle">Every normalized event across all sensors &mdash; pivot on any value, or export the exact filtered scope.</p>
           </div>
           <div class="live-panel">
-            <a class="btn btn-sm btn-primary" href="/reports" title="Open the Reports studio to design a PDF for this scope"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Report this scope</a>
             <span class="gen">generated {{.Generated.Format "2006-01-02 15:04:05 MST"}}</span>
           </div>
         </header>
