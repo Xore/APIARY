@@ -1,0 +1,152 @@
+name: Diagnostics
+
+# Read-only observability for the deployed stacks.
+#
+# OPS-001 is blocked on restoring SSH/Dockge access to the homeserver, but the
+# production-home Actions runner is registered on that host and is therefore an
+# access path that already exists and is already authorized. This workflow uses
+# it to answer the Gate 0 questions — is the Compose stack up, is the VPS
+# Suricata mount current, does sensor -> Elasticsearch -> Dashboard still flow —
+# without a shell session and without changing any production state.
+#
+# Every command here must stay read-only. No up/down/restart/build/rm/pull, no
+# writes into the stack directory, no secret or address echoed into the log.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Stack to inspect
+        type: choice
+        required: true
+        default: home
+        options: [home, vps, both]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: honeypot-diagnostics
+  cancel-in-progress: true
+
+jobs:
+  home:
+    if: inputs.target == 'home' || inputs.target == 'both'
+    runs-on: [self-hosted, linux, x64, honeypot-home]
+    environment: production-home
+    steps:
+      - name: Inspect the home Compose stack
+        shell: bash
+        run: |
+          set -uo pipefail
+          stack=/opt/stacks/honeypot-stack
+          report() { printf '%s\n' "$*" >> "$GITHUB_STEP_SUMMARY"; printf '%s\n' "$*"; }
+          section() { report ''; report "## $*"; report ''; }
+
+          report "# Home stack diagnostics"
+          if [ ! -d "$stack" ]; then
+            report "Stack directory is missing. The home stack has never been deployed to this host."
+            exit 0
+          fi
+
+          # Dockge runs compose.yml; deploy.yml copies docker-compose.yml onto it.
+          compose="$stack/compose.yml"
+          [ -f "$compose" ] || compose="$stack/docker-compose.yml"
+
+          section "Compose services"
+          if [ ! -f "$compose" ]; then
+            report "No Compose file in \`$stack\`."
+          else
+            report '```'
+            docker compose -f "$compose" --project-directory "$stack" ps -a \
+              2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || report "compose ps failed"
+            report '```'
+          fi
+
+          section "Container health"
+          report '```'
+          docker ps -a --filter 'name=hp-' \
+            --format 'table {{.Names}}\t{{.State}}\t{{.Status}}' \
+            2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || report "docker ps failed"
+          report '```'
+
+          # HP_BIND is an internal WireGuard address; read it, never print it.
+          bind=$(sed -n 's/^HP_BIND=//p' "$stack/.env" 2>/dev/null | head -1)
+          bind=${bind:-10.8.0.2}
+
+          section "Dashboard"
+          if curl -fsS --max-time 10 "http://$bind:19090/healthz" >/dev/null 2>&1; then
+            report "healthz: responding"
+          else
+            report "healthz: **unreachable** — the dashboard container is down or not bound"
+          fi
+
+          section "Sensor to Elasticsearch to Dashboard"
+          report 'The dashboard derives these from its own tail plus a live Elasticsearch query,'
+          report 'so a coherent set here is the end-to-end pipeline check Gate 0 asks for.'
+          report '```'
+          curl -fsS --max-time 15 "http://$bind:19090/metrics" 2>/dev/null \
+            | grep -E '^honeypot_(events|unique_sources|sensor_events|elasticsearch|dead_letters|filebeat)' \
+            | tee -a "$GITHUB_STEP_SUMMARY" || report "metrics unavailable"
+          report '```'
+          report 'honeypot_elasticsearch_state: 1 green, 2 yellow, 3 red, 0 unknown.'
+
+          section "Elasticsearch cluster"
+          report '```'
+          docker exec hp-elasticsearch \
+            curl -fsS --max-time 10 'http://localhost:9200/_cluster/health?pretty' \
+            2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || report "Elasticsearch is not answering inside its container"
+          report '```'
+
+          section "VPS Suricata mount"
+          eve="$stack/logs/suricata/eve.json"
+          if ! mountpoint -q "$stack/logs/suricata"; then
+            report "\`logs/suricata\` is **not a mount point** — the sshfs mount from the VPS is gone."
+            report "Filebeat and EveBox are reading a stale local directory, if anything."
+          else
+            report "\`logs/suricata\` is mounted."
+          fi
+          if [ -f "$eve" ]; then
+            age=$(( $(date +%s) - $(stat -c %Y "$eve") ))
+            report "\`eve.json\`: $(stat -c %s "$eve") bytes, last written ${age}s ago."
+            if [ "$age" -gt 900 ]; then
+              report "That is over fifteen minutes old — treat the Suricata feed as **stale**."
+            fi
+          else
+            report "\`eve.json\` is missing."
+          fi
+
+          section "Filebeat"
+          report '```'
+          docker logs --tail 20 hp-filebeat 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || report "no Filebeat container"
+          report '```'
+
+  vps:
+    if: inputs.target == 'vps' || inputs.target == 'both'
+    runs-on: ubuntu-latest
+    environment: production-vps
+    steps:
+      - name: Configure deployment key
+        shell: bash
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/honeypot_vps
+          chmod 600 ~/.ssh/honeypot_vps
+      - name: Inspect the VPS edge
+        shell: bash
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+        run: |
+          set -uo pipefail
+          report() { printf '%s\n' "$*" >> "$GITHUB_STEP_SUMMARY"; printf '%s\n' "$*"; }
+          ssh_options=(-i ~/.ssh/honeypot_vps -p "${VPS_PORT:-2222}" -o StrictHostKeyChecking=accept-new)
+          report "# VPS edge diagnostics"
+          report '```'
+          ssh "${ssh_options[@]}" "${VPS_USER:-root}@${VPS_HOST}" \
+            'cd /root/vps && docker compose -f docker-compose.yml ps -a; echo; echo "--- suricata eve.json ---"; stat -c "%s bytes, modified %y" /root/vps/logs/suricata/eve.json 2>&1; echo; echo "--- wireguard peers ---"; wg show 2>&1 | grep -E "interface|latest handshake|transfer" ' \
+            2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || report "SSH to the VPS failed"
+          report '```'
