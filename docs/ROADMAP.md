@@ -150,6 +150,15 @@ analysis host and does not gate anything in the main stack.
 | Ghidra request spool and payload-page entry points | [#76](https://github.com/Xore/honeypot-stack/issues/76) |
 | Ghidra pipeline phases 3–5 | [#78](https://github.com/Xore/honeypot-stack/issues/78) |
 
+## Operational hygiene
+
+| Deliverable | Issue |
+|---|---|
+| Bound the Suricata `eve.json` growth on the VPS without breaking Filebeat | [#79](https://github.com/Xore/honeypot-stack/issues/79) |
+
+Not urgent and not blocked, but it is a disk-exhaustion path whose first
+symptom would be missing events rather than a disk alert.
+
 ## Attribution
 
 | Deliverable | Issue |
