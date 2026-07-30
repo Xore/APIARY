@@ -4,7 +4,7 @@ This is the coordination source of truth for Kimi, Codex, and Sonnet.
 Use it to claim work, record evidence, request review, and hand off unfinished
 tasks without duplicating changes.
 
-Last reconciled: 2026-07-29
+Last reconciled: 2026-07-30
 
 ## Working agreement
 
@@ -49,8 +49,8 @@ These are default coordination lanes, not exclusive capabilities.
 
 | ID | Priority | Status | Owner | Reviewer | Work item | Depends on | Branch / PR | Updated | Next action |
 |---|---:|---|---|---|---|---|---|---|---|
-| OPS-001 | P0 | `BLOCKED` | Codex | Sonnet | Restore observability and deployment access for the home stack | User restores home SSH/Dockge access or runner | — | 2026-07-29 | Register the `production-home` runner and restore `production-vps` secrets; then inspect/recover the stopped home Compose stack |
-| DASH-001 | P0 | `IN_PROGRESS` | Codex | Sonnet | Finish file-based dashboard render-engine migration and CSP cutover | OPS-001 for live acceptance | `codex/align-dashboard-theme-rendering`, [PR #26](https://github.com/Xore/honeypot-stack/pull/26) | 2026-07-29 | Move ops pages first from `page_*.go` into embedded `ui/*.html`; preserve route output and add nonce tests |
+| OPS-001 | P0 | `BLOCKED` | Codex | Sonnet | Restore observability and deployment access for the home stack | User restores home SSH/Dockge access | — | 2026-07-30 | Runner and VPS secrets are done. Remaining: inspect/recover the stopped home Compose stack, verify the VPS Suricata mount, and record the sensor→ES→Dashboard check |
+| DASH-001 | P0 | `IN_PROGRESS` | Codex | Sonnet | Finish file-based dashboard render-engine migration and CSP cutover | OPS-001 for live acceptance | [PR #26](https://github.com/Xore/honeypot-stack/pull/26) merged 2026-07-29; follow-up branch not yet opened | 2026-07-30 | Move ops pages first from `page_*.go` into embedded `ui/*.html`; preserve route output and add nonce tests |
 | DASH-002 | P1 | `READY` | — | Sonnet | Complete modal inventory: event detail, payload preview, exports, remaining destructive actions | DASH-001 partials; modal controller exists | — | 2026-07-29 | Specify data attributes/API boundaries for event detail and payload preview, then implement one modal per reviewable change |
 | DASH-003 | P1 | `READY` | — | Kimi | Add missing dashboard regression tests and visual acceptance matrix | DASH-001, DASH-002 | — | 2026-07-29 | Turn the matrix in `DASHBOARD-UI-REDESIGN-GUIDE.md` §4 into repeatable browser checks |
 | ML-001 | P1 | `READY` | — | Codex | Reconcile and validate the existing ML worker v0.1 scaffold | OPS-001 for live ES checks | — | 2026-07-29 | Compare `ml-worker/` to `ml-worker-plan.md`, add unit fixtures, and decide whether v0.1 is actually runnable before changing its status |

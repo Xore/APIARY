@@ -3,7 +3,7 @@
 This roadmap converts the plans under `docs/` into an executable sequence.
 Day-to-day ownership and handoffs live in [`WORK-LEDGER.md`](WORK-LEDGER.md).
 
-Last audited: 2026-07-29
+Last audited: 2026-07-30
 
 ## Current baseline
 
@@ -11,8 +11,13 @@ Last audited: 2026-07-29
   data.
 - The home service surface is currently unavailable: Dashboard, EveBox,
   Kibana, Arkime, and tested honeypot ports refuse connections.
-- The dashboard theme alignment and render-engine foundation are on
-  `codex/align-dashboard-theme-rendering` / PR #26.
+- Dashboard theme alignment and the render-engine foundation merged to `main`
+  via [PR #26](https://github.com/Xore/honeypot-stack/pull/26) on 2026-07-29.
+  The migration itself is unfinished: partials are extracted and the theme is
+  vendored with a lock file, but most routes still render from `page_*.go`
+  constants and the CSP cutover has not happened.
+- CI credentials are in place: the `production-home` runner is online and the
+  VPS deployment secrets are set. Deployment is no longer credential-blocked.
 - `ml-worker/` exists as a scaffold but is not present as a root Compose
   service and has no verified live acceptance evidence.
 - `llm-worker/` and `reporter/` do not exist.
@@ -28,11 +33,24 @@ Nothing ingestion-dependent can be accepted until this gate is green.
 2. Recover the home Docker/Dockge Compose stack.
 3. Verify the VPS Suricata mount on the home host is current and visible inside
    Dashboard, Filebeat, and EveBox.
-4. Register the `production-home` Actions runner.
-5. Restore `production-vps` environment secrets: `VPS_HOST`, `VPS_SSH_KEY`,
-   and optional `VPS_USER`/`VPS_PORT`.
+4. ✅ 2026-07-30 — `production-home` Actions runner registered: `supermicro`,
+   online, labels `self-hosted,Linux,X64,honeypot-home`, matching
+   `deploy.yml`'s `runs-on`. The `home` job needs no secrets; it rsyncs
+   locally on the runner.
+5. ✅ 2026-07-30 — VPS deployment credentials restored: `VPS_HOST`,
+   `VPS_SSH_KEY`, `VPS_USER`, `VPS_PORT`.
 6. Record a green end-to-end check: sensor log → Filebeat/Elasticsearch →
    Dashboard and EveBox.
+
+Note on item 5: the four values are set as **repository** secrets, not as
+`production-vps` environment secrets. The `vps` job reads them either way —
+repository secrets are visible to every job, and an environment secret of the
+same name would simply take precedence. Environment scope is the tighter
+option, because it restricts the credentials to jobs that declare
+`environment: production-vps` rather than exposing them to every workflow in
+the repository. Worth moving before the secret set grows; not a blocker.
+
+Only items 1–3 and 6 remain, and all four depend on homeserver access.
 
 Exit criteria:
 
