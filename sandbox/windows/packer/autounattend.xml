@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- autounattend.xml — Windows 11 unattended install for Packer/QEMU -->
-<!-- Place on floppy image (A:\autounattend.xml) -->
+<!-- Delivered on the secondary CD built by Packer cd_files, not a floppy:
+     the q35 machine type has no floppy controller. Windows setup searches
+     removable media for autounattend.xml, so no drive letter is assumed. -->
 <!-- Ref: https://github.com/proactivelabs/packer-windows -->
 <unattend xmlns="urn:schemas-microsoft-com:unattend">
 

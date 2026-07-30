@@ -3,10 +3,18 @@
 # Based on: https://github.com/proactivelabs/packer-windows
 # Requires: packer plugins install github.com/hashicorp/qemu
 #
+# Build host requirements (all present on the analysis host as of 2026-07-30):
+#   /dev/kvm, qemu-system-x86_64, swtpm  (TPM 2.0 emulation for Windows 11)
+#   /usr/share/OVMF/OVMF_CODE_4M.secboot.fd + OVMF_VARS_4M.ms.fd
+#
 # Usage:
 #   packer init win11-analysis.pkr.hcl
-#   packer build win11-analysis.pkr.hcl
-# Output: /golden-images/win11-analysis.qcow2
+#   packer validate win11-analysis.pkr.hcl
+#   packer build -var iso_checksum=sha256:<hex> win11-analysis.pkr.hcl
+# Output: /golden-images/win11-analysis.qcow2  (~25-35 GB, 3-5 h)
+#
+# The ISO is not fetched here. Download the Windows 11 Enterprise evaluation
+# yourself, accept Microsoft's licence, and place it at var.iso_path.
 
 packer {
   required_plugins {
@@ -23,8 +31,14 @@ variable "iso_path" {
 }
 
 variable "iso_checksum" {
-  description = "SHA256 of ISO (update when downloading new ISO)"
-  default     = "none:skip"  # replace with actual checksum
+  description = <<-EOT
+    Checksum of the Windows 11 evaluation ISO, as "sha256:<hex>".
+    "none" skips verification — acceptable only for a hand-placed ISO whose
+    provenance you already trust, because a tampered installer would be
+    baked into every subsequent detonation guest. Prefer the real value:
+      sha256sum /isos/Win11_Eval_x64.iso
+  EOT
+  default     = "none"
 }
 
 variable "output_dir" {
@@ -44,7 +58,7 @@ variable "cpus" {
 }
 
 variable "disk_size" {
-  default = "90000"  # 90 GB — malware checks disk size
+  default = "90000" # 90 GB — malware checks disk size
 }
 
 variable "winrm_user" {
@@ -57,8 +71,8 @@ variable "winrm_pass" {
 
 source "qemu" "win11" {
   # Boot from ISO
-  iso_url          = var.iso_path
-  iso_checksum     = var.iso_checksum
+  iso_url      = var.iso_path
+  iso_checksum = var.iso_checksum
 
   # Output
   output_directory = var.output_dir
@@ -67,42 +81,55 @@ source "qemu" "win11" {
   format           = "qcow2"
 
   # Hardware — anti-sandbox-detection
-  machine_type     = "q35"
-  memory           = var.memory
-  cpus             = var.cpus
-  disk_size        = var.disk_size
-  disk_interface   = "virtio"          # fast + common in real VMs
-  net_device       = "e1000e"          # Intel NIC — looks real
+  machine_type   = "q35"
+  memory         = var.memory
+  cpus           = var.cpus
+  disk_size      = var.disk_size
+  disk_interface = "virtio" # fast + common in real VMs
+  net_device     = "e1000e" # Intel NIC — looks real
   # host-passthrough: guest sees real CPU model, not QEMU default
-  cpu_model        = "host"
+  cpu_model = "host"
 
-  # UEFI boot (required for Windows 11)
-  efi_boot         = true
+  # UEFI + Secure Boot. Windows 11 setup refuses to install without both, and
+  # the .ms firmware pair is the one with Microsoft's keys already enrolled.
+  efi_boot          = true
   efi_firmware_code = "/usr/share/OVMF/OVMF_CODE_4M.secboot.fd"
   efi_firmware_vars = "/usr/share/OVMF/OVMF_VARS_4M.ms.fd"
 
-  # Floppy with autounattend.xml for unattended install
-  floppy_files     = ["autounattend.xml"]
+  # TPM 2.0 — the other hard Windows 11 requirement. Without this the
+  # installer stops at "This PC can't run Windows 11" and the build hangs
+  # until winrm_timeout expires with no usable diagnostic. The plugin starts
+  # swtpm itself; /usr/bin/swtpm must exist on the build host.
+  tpm_device_type = "tpm-tis"
+
+  # autounattend.xml is delivered on a secondary CD, not a floppy. The q35
+  # machine type has no floppy controller, so floppy_files silently produces
+  # an installer that sits on the language prompt forever.
+  cd_files = ["autounattend.xml"]
+  cd_label = "cidata"
 
   # WinRM communicator (enabled by SetupComplete.cmd in autounattend)
-  communicator     = "winrm"
-  winrm_username   = var.winrm_user
-  winrm_password   = var.winrm_pass
-  winrm_timeout    = "6h"   # FLARE-VM takes 2-4 hours
-  winrm_use_ssl    = false
-  winrm_insecure   = true
+  communicator   = "winrm"
+  winrm_username = var.winrm_user
+  winrm_password = var.winrm_pass
+  winrm_timeout  = "6h" # FLARE-VM takes 2-4 hours
+  winrm_use_ssl  = false
+  winrm_insecure = true
 
   # Shutdown after provisioning
   shutdown_command = "shutdown /s /t 10 /f /d p:4:1 /c 'Packer build complete'"
   shutdown_timeout = "30m"
 
   # Accelerator
-  accelerator      = "kvm"
-  headless         = true
+  accelerator = "kvm"
+  headless    = true
 
-  # Boot wait for Windows installer
-  boot_wait        = "3s"
-  # No boot_command needed — autounattend.xml handles everything
+  # The Windows installer stops at "Press any key to boot from CD or DVD".
+  # Nothing presses it in a headless build, so the firmware falls through to
+  # the UEFI shell and the build hangs. Send the keypress, then let
+  # autounattend.xml drive the rest of the install.
+  boot_wait    = "2s"
+  boot_command = ["<enter>"]
 }
 
 build {
@@ -111,11 +138,11 @@ build {
 
   # Step 1: Run main setup script (Chocolatey, FLARE-VM, Sysmon, logging, hardening)
   provisioner "powershell" {
-    script          = "scripts/setup_analysis.ps1"
-    elevated_user   = var.winrm_user
+    script            = "scripts/setup_analysis.ps1"
+    elevated_user     = var.winrm_user
     elevated_password = var.winrm_pass
     # Long timeout for FLARE-VM install
-    timeout         = "5h"
+    timeout = "5h"
   }
 
   # Step 2: Final cleanup + sysprep-lite (do NOT full sysprep — breaks some tools)
