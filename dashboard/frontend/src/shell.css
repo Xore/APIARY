@@ -2,7 +2,9 @@
 @import "tailwindcss/theme.css" layer(theme) prefix(tw);
 @import "tailwindcss/utilities.css" layer(utilities) prefix(tw) important;
 
-@source "../../page*.go";
+/* Route templates moved out of the page_*.go constants into the embedded ui
+   tree, so that is where the tw: utilities are now written. */
+@source "../../ui/**/*.html";
 @source "../../static/hp-app.js";
 
 /* ==========================================================================
