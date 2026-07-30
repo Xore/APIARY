@@ -366,6 +366,19 @@ func TestProtocolDisplayNormalization(t *testing.T) {
 	}
 }
 
+// The overview reloads itself in place, so it has to honor the pause too —
+// otherwise the one page that churns most would ignore the switch.
+func TestOverviewRefreshHonorsTheLivePause(t *testing.T) {
+	for _, expected := range []string{
+		`window.HoneypotLive&&window.HoneypotLive.paused()`,
+		`addEventListener('hp-live-resumed',refreshDashboard)`,
+	} {
+		if !strings.Contains(pageOverview, expected) {
+			t.Fatalf("overview refresh script is missing %q", expected)
+		}
+	}
+}
+
 func TestOverviewRecentExcludesInternalAndCaptureHealthNoise(t *testing.T) {
 	if !isOverviewNoise(storedEvent{Sensor: "suricata", Alert: "SURICATA IPv4 truncated packet"}) {
 		t.Fatal("capture-health alert should not occupy the overview feed")
@@ -463,6 +476,8 @@ func TestSemanticShellIsServerRendered(t *testing.T) {
 		// The dock resolves server-side, so it must be a real GET form: an
 		// unrecognised query has to reach /search rather than be guessed at.
 		`method="get" action="/search"`, `name="q"`,
+		// LIVE is a switch, not a decoration: it pauses every refresh path.
+		`data-hp-live-toggle`, `aria-pressed="false"`,
 		`class="avatar" data-hp-user-avatar`, `data-hp-user-name`, `data-hp-user-role`,
 		`id="hp-modal-root"`, `id="hp-confirm-backdrop"`, `role="alertdialog"`,
 		`aria-hidden="true" inert`, `/static/hp-modals.js`,

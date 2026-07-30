@@ -134,12 +134,19 @@
 }
 
 /* ── Live indicator ─────────────────────────────────────────────────────── */
+/* Refresh switch, not just an indicator: click to pause every live update. */
 .hp-live-state {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 2px 6px;
+  border: 1px solid transparent; border-radius: var(--radius-control);
+  background: transparent; font-family: inherit;
   font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
-  color: var(--success);
+  color: var(--success); cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
 }
+.hp-live-state:hover { border-color: color-mix(in srgb, currentColor 35%, transparent); background: var(--surface-2); }
+.hp-live-state--paused { color: var(--text-muted); }
+.hp-live-state--paused .live-dot { background: var(--text-muted); animation: none; }
 .live-dot {
   width: 7px; height: 7px; border-radius: 50%;
   background: var(--success);

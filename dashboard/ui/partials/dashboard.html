@@ -2,11 +2,11 @@
 <script>(function(){try{var t=localStorage.getItem("hp-theme");if(t==="light"||t==="dark"){document.documentElement.dataset.theme=t;}else if(t){localStorage.removeItem("hp-theme");}}catch(e){}})();</script>
 <link rel="stylesheet" href="/static/theme.css?v=20260730-1">
 <link rel="stylesheet" href="/static/leaflet.css?v=20260727-1">
-<link rel="stylesheet" href="/static/hp-tailwind.css?v=20260730-2">
+<link rel="stylesheet" href="/static/hp-tailwind.css?v=20260730-3">
 <script defer src="/static/leaflet.js?v=20260727-1"></script>
 <script defer src="/static/hp-api.js?v=20260727-1"></script>
 <script defer src="/static/hp-modals.js?v=20260730-1"></script>
-<script defer src="/static/hp-app.js?v=20260730-1"></script>
+<script defer src="/static/hp-app.js?v=20260730-2"></script>
 <script defer src="/static/hp-account.js?v=20260730-1"></script>
 <script defer src="/static/hp-settings.js?v=20260730-4"></script>
 <script defer src="/static/hp-reports.js?v=20260730-1"></script>
@@ -78,7 +78,7 @@
       <svg data-hp-theme-icon="dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
       <svg data-hp-theme-icon="light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
     </button>
-    <span class="hp-live-state" title="Dashboard refresh is active"><span class="live-dot"></span>Live</span>
+    <button class="hp-live-state" type="button" data-hp-live-toggle aria-pressed="false" title="Dashboard refresh is active — pause it"><span class="live-dot"></span><span data-hp-live-label>Live</span></button>
   </div>
   {{with activeBanner}}<div class="alert alert--{{.Severity}}" role="status" style="flex-basis:100%;order:5;margin:8px 8px 0">{{.Text}}</div>{{end}}
 </header>

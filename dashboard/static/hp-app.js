@@ -52,6 +52,28 @@
      form, so a query that names no entity lands on grouped results instead of
      the 404 a client-side format guess produced. */
 
+  /* ---------- live refresh state (toolbar LIVE toggle) ----------
+     One switch for every refresh path: the overview's in-place reload, the
+     alert-bell poll, and the SSE new-event toast. The choice is persisted, so
+     reading a stalled table is not undone by navigating to the next page. */
+  const livePausedKey = "hp-live-paused";
+  const liveListeners = new Set();
+  let livePaused = false;
+  try { livePaused = localStorage.getItem(livePausedKey) === "1"; } catch {}
+  const setLivePaused = paused => {
+    if (paused === livePaused) return;
+    livePaused = paused;
+    try { localStorage.setItem(livePausedKey, paused ? "1" : "0"); } catch {}
+    liveListeners.forEach(listener => { try { listener(paused); } catch {} });
+  };
+  window.HoneypotLive = Object.freeze({
+    paused: () => livePaused,
+    pause: () => setLivePaused(true),
+    resume: () => setLivePaused(false),
+    toggle: () => setLivePaused(!livePaused),
+    onChange: listener => { liveListeners.add(listener); return () => liveListeners.delete(listener); },
+  });
+
   /* ---------- lazy loading (sentinel + offset fetching) ---------- */
   // Keep long investigation views responsive without traditional page links.
   // The first 25 rows are visible immediately; another 25 are revealed when
@@ -640,6 +662,7 @@
 
     /* Alert bell badge (60s polling) */
     const refreshAlertCount = async () => {
+      if (window.HoneypotLive.paused()) return;
       try {
         const records = await (await fetch("/api/alerts", {cache: "no-store"})).json();
         const count = records.filter(record => !record.Acknowledged).length;
@@ -652,12 +675,38 @@
     refreshAlertCount();
     setInterval(refreshAlertCount, 60000);
 
+    /* LIVE toggle: one switch over every refresh path. */
+    const liveToggle = shell.querySelector("[data-hp-live-toggle]");
+    if (liveToggle) {
+      const liveLabel = liveToggle.querySelector("[data-hp-live-label]");
+      const renderLiveState = paused => {
+        liveToggle.classList.toggle("hp-live-state--paused", paused);
+        liveToggle.setAttribute("aria-pressed", paused ? "true" : "false");
+        liveToggle.title = paused
+          ? "Dashboard refresh is paused — resume it"
+          : "Dashboard refresh is active — pause it";
+        if (liveLabel) liveLabel.textContent = paused ? "Paused" : "Live";
+      };
+      renderLiveState(window.HoneypotLive.paused());
+      window.HoneypotLive.onChange(renderLiveState);
+      liveToggle.addEventListener("click", () => {
+        window.HoneypotLive.toggle();
+        // Resuming shows current data rather than whatever went stale while
+        // updates were suppressed.
+        if (!window.HoneypotLive.paused()) {
+          refreshAlertCount();
+          dispatchEvent(new CustomEvent("hp-live-resumed"));
+        }
+      });
+    }
+
     /* SSE live updates on non-overview pages (overview refreshes in place) */
     if (location.pathname !== "/" && window.EventSource) {
       let knownTotal = null;
       fetch("/api/events?per_page=25", {cache: "no-store"}).then(r => r.json()).then(data => { knownTotal = data.Total; }).catch(() => {});
       const stream = new EventSource("/api/stream");
       stream.addEventListener("update", async () => {
+        if (window.HoneypotLive.paused()) return;
         try {
           const data = await (await fetch("/api/events?per_page=25", {cache: "no-store"})).json();
           if (knownTotal !== null && data.Total > knownTotal) showLiveToast(`${data.Total - knownTotal} new honeypot event${data.Total - knownTotal === 1 ? "" : "s"}`, "/events");

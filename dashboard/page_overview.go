@@ -167,6 +167,9 @@ const pageOverview = `
 <script>
 let refreshing=false;
 async function refreshDashboard(){
+  // The toolbar LIVE control owns every refresh path; while it is paused the
+  // overview must keep the snapshot the operator is reading.
+  if(window.HoneypotLive&&window.HoneypotLive.paused())return;
   if(refreshing)return;refreshing=true;
   try {
     const r = await fetch(location.pathname, {cache: "no-store"});
@@ -178,6 +181,7 @@ async function refreshDashboard(){
 }
 if(window.EventSource){const es=new EventSource('/api/stream');es.addEventListener('update',refreshDashboard);es.onerror=()=>{};}
 setInterval(refreshDashboard, 60000);
+addEventListener('hp-live-resumed',refreshDashboard);
 </script>
 </body>
 </html>
