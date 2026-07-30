@@ -101,6 +101,10 @@
   closeButton.addEventListener("click", closeSettings);
   backdrop.addEventListener("click", closeSettings);
 
+  /* Let sibling controllers (the dashboard settings modal) dismiss the
+     floating menu when they take over from one of its items. */
+  window.HoneypotAccountMenu = Object.freeze({ close: () => closeMenu() });
+
   /* Keyboard contract: Escape closes the deepest temporary layer first; Tab
      stays inside the open popup. */
   document.addEventListener("keydown", event => {

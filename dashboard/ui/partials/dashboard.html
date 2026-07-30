@@ -7,7 +7,8 @@
 <script defer src="/static/hp-api.js?v=20260727-1"></script>
 <script defer src="/static/hp-modals.js?v=20260729-1"></script>
 <script defer src="/static/hp-app.js?v=20260729-2"></script>
-<script defer src="/static/hp-account.js?v=20260729-1"></script>
+<script defer src="/static/hp-account.js?v=20260730-1"></script>
+<script defer src="/static/hp-settings.js?v=20260730-4"></script>
 {{end}}
 
 {{define "sidebar"}}
@@ -43,7 +44,7 @@
   </section>
   <div class="hp-account" data-hp-account>
     <div class="dropdown hp-account-menu" role="menu" aria-label="Account actions" data-hp-account-menu hidden>
-      <a class="dropdown__item" role="menuitem" href="/settings" data-hp-account-dashboard-settings>
+      <a class="dropdown__item" role="menuitem" href="#settings" data-hp-account-dashboard-settings>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         <span>Dashboard settings</span>
       </a>
@@ -109,6 +110,7 @@
     </section>
   </div>
   <div class="modal-backdrop" id="hp-settings-backdrop" data-hp-settings-backdrop aria-hidden="true" inert></div>
+  <div id="hp-dash-settings-root"></div>
   <section class="modal hp-settings-modal" id="hp-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="hp-settings-title" aria-hidden="true" inert>
     <div class="hp-settings-head">
       <h2 id="hp-settings-title">Account settings</h2>

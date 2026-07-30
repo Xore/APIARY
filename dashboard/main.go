@@ -246,19 +246,21 @@ func main() {
 		s.es.history(w, r, true)
 	})
 	http.HandleFunc("/export/report.pdf", s.servePDFReport)
-	http.HandleFunc("/settings", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/settings" {
+	// Settings modal fragment: the shell fetches this once per session and
+	// opens it as a centered overlay; there is no standalone /settings page.
+	// Admin panes render only for a live-introspected admin; any identity
+	// failure degrades to the personal panes, never to an error page.
+	http.HandleFunc("/api/settings/modal", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/settings/modal" {
 			http.NotFound(w, r)
 			return
 		}
 		html(w)
-		// Admin panes render only for a live-introspected admin; any identity
-		// failure degrades to the personal panes, never to an error page.
 		data := settingsPageData{}
 		if identity, err := resolveIdentity(r); err == nil && identity.Role == "admin" {
 			data.Admin = true
 		}
-		tmpl.ExecuteTemplate(w, "settings", data)
+		tmpl.ExecuteTemplate(w, "settingsModal", data)
 	})
 	http.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
 		html(w)

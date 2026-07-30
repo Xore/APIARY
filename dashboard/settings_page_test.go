@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// renderSettings executes the settings template with the given admin flag.
+// renderSettings executes the settings modal fragment with the given admin flag.
 func renderSettings(t *testing.T, admin bool) string {
 	t.Helper()
 	tmpl, err := template.New("t").Funcs(templateFuncs(nil, "")).Parse(pageTemplate)
@@ -14,24 +14,25 @@ func renderSettings(t *testing.T, admin bool) string {
 		t.Fatalf("dashboard template does not parse: %v", err)
 	}
 	var out strings.Builder
-	if err := tmpl.ExecuteTemplate(&out, "settings", settingsPageData{Admin: admin}); err != nil {
-		t.Fatalf("settings page does not execute: %v", err)
+	if err := tmpl.ExecuteTemplate(&out, "settingsModal", settingsPageData{Admin: admin}); err != nil {
+		t.Fatalf("settings modal does not execute: %v", err)
 	}
 	return out.String()
 }
 
-// TestSettingsPageIsPermanentDialog executes the /settings template and
-// asserts the permanent-dialog contract from the roadmap: the page IS a
-// modal, the nested confirmation is a DESCENDANT of it (browser top-layer
-// invariant), Escape has no close control, and every personal pane and
-// preference control is server-rendered.
-func TestSettingsPageIsPermanentDialog(t *testing.T) {
+// TestSettingsModalIsCenteredOverlay executes the settings fragment and
+// asserts the centered-modal contract: it is a fragment (no page chrome), it
+// opens as a closable overlay with backdrop and close control, the nested
+// confirmation is a DESCENDANT of it (browser top-layer invariant), and every
+// personal pane and preference control is server-rendered.
+func TestSettingsModalIsCenteredOverlay(t *testing.T) {
 	html := renderSettings(t, false)
 
 	for _, want := range []string{
-		`data-permanent-dialog`, `modal modal--permanent`, `id="hp-settings"`,
-		`data-hp-settings-search`, `data-hp-settings-back`, `data-hp-settings-status`,
-		`/static/hp-settings.js`,
+		`class="modal hp-dash-settings"`, `id="hp-settings"`,
+		`id="hp-dash-settings-backdrop"`, `data-hp-settings-close`, `modal__close`,
+		`aria-labelledby="hp-dash-settings-title"`, `id="hp-dash-settings-title"`,
+		`data-hp-settings-search`, `data-hp-settings-status`,
 		`data-hp-pane="account"`, `data-hp-pane="appearance"`, `data-hp-pane="navigation"`,
 		`data-hp-pane="time"`, `data-hp-pane="map"`,
 		`data-hp-pane-nav="account"`, `data-hp-pane-nav="appearance"`,
@@ -44,7 +45,18 @@ func TestSettingsPageIsPermanentDialog(t *testing.T) {
 		`data-hp-confirm-cancel`, `data-hp-confirm-action`, `role="alertdialog"`,
 	} {
 		if !strings.Contains(html, want) {
-			t.Fatalf("settings page missing marker %q", want)
+			t.Fatalf("settings modal missing marker %q", want)
+		}
+	}
+
+	// A fragment, not a page: no document chrome, no script/stylesheet tags,
+	// and no permanent-dialog leftovers from the old /settings page.
+	for _, absent := range []string{
+		"<!doctype", "<html", "<head>", "<head ", "<body", "<script",
+		"data-permanent-dialog", "modal--permanent", `data-hp-settings-back`,
+	} {
+		if strings.Contains(html, absent) {
+			t.Fatalf("settings modal must not contain page marker %q", absent)
 		}
 	}
 
@@ -58,32 +70,28 @@ func TestSettingsPageIsPermanentDialog(t *testing.T) {
 		"map_animation", "default_event_window", "preserve_filters",
 	} {
 		if !strings.Contains(html, `data-pref="`+pref+`"`) {
-			t.Fatalf("settings page missing control for preference %q", pref)
+			t.Fatalf("settings modal missing control for preference %q", pref)
 		}
 	}
 
-	// The nested confirmation must appear INSIDE the permanent dialog: the
-	// permanent dialog opens first, and both confirm elements follow it.
-	dialogAt := strings.Index(html, `data-permanent-dialog`)
+	// The nested confirmation must appear INSIDE the modal: the modal opens
+	// first, and both confirm elements follow it.
+	dialogAt := strings.Index(html, `id="hp-settings"`)
 	backdropAt := strings.Index(html, `id="hp-settings-confirm-backdrop"`)
 	confirmAt := strings.Index(html, `id="hp-settings-confirm"`)
 	if dialogAt < 0 || backdropAt < dialogAt || confirmAt < backdropAt {
-		t.Fatal("nested confirmation must be a descendant of the permanent dialog")
+		t.Fatal("nested confirmation must be a descendant of the settings modal")
 	}
 
-	// A permanent dialog has no close affordance and no placeholder identity.
-	if strings.Contains(html, "modal__close") {
-		t.Fatal("permanent settings dialog must not render a close control")
-	}
 	if strings.Contains(html, "dashboard operator") {
-		t.Fatal("settings page must render only the auth-backend provided identity")
+		t.Fatal("settings modal must render only the auth-backend provided identity")
 	}
 }
 
-// TestSettingsControllerContract pins the client behaviors the permanent
-// dialog and its nested confirmation rely on, so a refactor of hp-settings.js
-// cannot silently drop the modal contract, the Escape policy, or the
-// concurrency handling.
+// TestSettingsControllerContract pins the client behaviors the centered modal
+// and its nested confirmation rely on, so a refactor of hp-settings.js cannot
+// silently drop the modal contract, the Escape policy, or the concurrency
+// handling.
 func TestSettingsControllerContract(t *testing.T) {
 	data, err := staticAssets.ReadFile("static/hp-settings.js")
 	if err != nil {
@@ -91,11 +99,13 @@ func TestSettingsControllerContract(t *testing.T) {
 	}
 	js := string(data)
 	for _, want := range []string{
-		"showModal()", // opens as a true modal
-		`"cancel", event => event.preventDefault()`, // Escape never closes settings
+		"/api/settings/modal", // lazy fragment fetch
+		"hp-dash-settings-root",
+		`"#settings"`, // hash opens the modal (old /settings bookmarks)
+		`"Escape"`,    // Escape closes the modal
+		"closeSettings",
+		"showModal()",                  // nested confirm is a true modal
 		"beforeunload",                 // unsaved-changes guard
-		`.get("pane")`,                 // ?pane= deep link
-		"history.replaceState",         // pane switches update the URL
 		`PANE_META[name]`,              // unknown pane names fall back
 		"/api/settings/me",             // load endpoint
 		"/api/settings/me/preferences", // save endpoint
@@ -122,6 +132,19 @@ func TestSettingsControllerContract(t *testing.T) {
 	} {
 		if !strings.Contains(js, want) {
 			t.Fatalf("hp-settings.js missing behavior %q", want)
+		}
+	}
+
+	// The controller must scope its DOM queries to the injected fragment so
+	// the host page can never collide with the settings DOM.
+	for _, absent := range []string{
+		`document.querySelector("[data-pref]")`,
+		`document.querySelectorAll("[data-pref]")`,
+		"history.replaceState", // a modal never rewrites the page URL
+		`.get("pane")`,         // no ?pane= page deep links anymore
+	} {
+		if strings.Contains(js, absent) {
+			t.Fatalf("hp-settings.js must not contain %q", absent)
 		}
 	}
 }
@@ -164,15 +187,22 @@ func TestSettingsAdminPanesAreServerGated(t *testing.T) {
 	}
 }
 
-// TestSettingsLinkedFromAccountMenu ensures the dashboard shell exposes the
-// /settings page from the account dropdown next to the auth-account popup.
+// TestSettingsLinkedFromAccountMenu ensures the dashboard shell opens the
+// settings modal from the account dropdown next to the auth-account popup,
+// loads the modal controller on every page, and provides the injection root.
 func TestSettingsLinkedFromAccountMenu(t *testing.T) {
 	partial := mustReadUI("partials/dashboard.html")
 	if !strings.Contains(partial, `data-hp-account-dashboard-settings`) ||
-		!strings.Contains(partial, `href="/settings"`) {
-		t.Fatal("account menu must link to the /settings page")
+		!strings.Contains(partial, `href="#settings"`) {
+		t.Fatal("account menu must open the settings modal via the #settings hash")
 	}
 	if !strings.Contains(partial, "Account &amp; security") {
 		t.Fatal("auth-account popup entry must be labeled Account & security")
+	}
+	if !strings.Contains(partial, "/static/hp-settings.js") {
+		t.Fatal("shell must load the settings modal controller on every page")
+	}
+	if !strings.Contains(partial, `id="hp-dash-settings-root"`) {
+		t.Fatal("shell must provide the settings modal injection root")
 	}
 }

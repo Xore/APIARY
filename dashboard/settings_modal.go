@@ -1,34 +1,29 @@
 package main
 
-// pageSettings is the permanent full-viewport settings dialog from roadmap §7
-// (Milestone D), following the Xore theme modal contract (docs/MODALS.md in
-// Xore/theme): a native dialog with data-permanent-dialog that owns scrolling
-// and cannot close on Escape, with the nested save/reset confirmation as a
-// descendant so the browser top-layer invariant holds.
+// settingsModal is the centered settings dialog rendered as a reusable
+// fragment (roadmap §7): hp-settings.js fetches it once per session from
+// /api/settings/modal, injects it into the dashboard shell's modal root, and
+// drives it as an application-managed overlay per the theme modal contract
+// (docs/MODALS.md in Xore/theme). The nested save/reset confirmation is a
+// native dialog descendant of the modal, so the top-layer invariant holds.
 //
 // The administration panes (Milestone E) render only when the server resolved
 // the caller as an admin — hiding is server-side, never client-side alone
 // (§12): non-admins receive a document without any admin markup at all.
 //
-// settingsPageData carries the template inputs for the "settings" page.
+// settingsPageData carries the template inputs for the settings modal.
 type settingsPageData struct {
 	Admin bool
 }
 
-const pageSettings = `
-{{define "settings"}}<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex, nofollow">
-<title>Settings — xore//honeypot</title>
-<script>(function(){try{var t=localStorage.getItem("hp-theme");if(t==="light"||t==="dark"){document.documentElement.dataset.theme=t;}else if(t){localStorage.removeItem("hp-theme");}}catch(e){}})();</script>
-<link rel="stylesheet" href="/static/theme.css?v=20260729-1">
-<script defer src="/static/hp-settings.js?v=20260730-3"></script>
+const settingsModal = `
+{{define "settingsModal"}}
 <style>
-  .hp-settings-page{height:100dvh;overflow:hidden}
-  .hp-settings-page .settings-layout__content{height:100dvh}
+  .hp-dash-settings{width:min(1120px,calc(100vw - 40px));height:min(820px,calc(100dvh - 40px))}
+  .hp-dash-settings > .settings-layout{width:100%;height:100%;min-height:0}
+  .hp-dash-settings .settings-layout__sidebar{overflow-y:auto}
+  .hp-dash-settings .settings-layout__content{height:100%;overflow-y:auto}
+  .hp-dash-settings > .modal__close{position:absolute;top:12px;right:12px;z-index:3}
   .hp-settings-column{width:min(100%,880px)}
   .hp-settings-head{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:24px}
   .hp-settings-head h1{margin-bottom:6px}
@@ -54,17 +49,13 @@ const pageSettings = `
   .hp-audit-row:last-child{border-bottom:0}
   .hp-audit-row small{color:var(--text-muted)}
   .hp-head-actions{display:flex;gap:8px;flex-shrink:0}
-  @media(max-width:720px){
-    .hp-settings-page{height:auto;overflow:auto}
-    .hp-settings-page .settings-layout__content{height:auto}
-  }
   @media(prefers-reduced-motion:reduce){
-    .hp-settings-page *{animation:none!important;transition:none!important}
+    .hp-dash-settings *{animation:none!important;transition:none!important}
   }
 </style>
-</head>
-<body class="hp-settings-page">
-<dialog class="modal modal--permanent" id="hp-settings" data-permanent-dialog aria-modal="true" aria-labelledby="hp-settings-title">
+<div class="modal-backdrop" id="hp-dash-settings-backdrop" aria-hidden="true" inert></div>
+<section class="modal hp-dash-settings" id="hp-settings" role="dialog" aria-modal="true" aria-labelledby="hp-dash-settings-title" aria-hidden="true" inert>
+  <button class="modal__close" type="button" data-hp-settings-close aria-label="Close settings">&#10005;</button>
   <div class="settings-layout">
   <aside class="settings-layout__sidebar" aria-label="Settings sections">
     <div class="sidebar__search"><span>&#8982;</span><input aria-label="Search settings" placeholder="Search settings" data-hp-settings-search type="search" autocomplete="off"></div>
@@ -83,15 +74,13 @@ const pageSettings = `
     <button class="sidebar__item" type="button" data-hp-pane-nav="history">Configuration history</button>
     <button class="sidebar__item" type="button" data-hp-pane-nav="audit">Audit log</button>
     {{end}}
-    <div class="sidebar__section-label">Dashboard</div>
-    <a class="sidebar__item" href="/" data-hp-settings-back>&larr; Back to dashboard</a>
   </aside>
 
   <main class="settings-layout__content">
     <div class="hp-settings-column">
       <header class="hp-settings-head">
         <div>
-          <h1 id="hp-settings-title">Settings</h1>
+          <h1 id="hp-dash-settings-title">Settings</h1>
           <p data-hp-pane-desc>Manage your dashboard identity and preferences.</p>
         </div>
       </header>
@@ -621,8 +610,8 @@ const pageSettings = `
   </main>
   </div>
 
-  <!-- Nested confirmation. It is a descendant of the permanent dialog, per
-       the theme modal contract, so the browser top-layer invariant holds. -->
+  <!-- Nested confirmation. It is a descendant of the settings modal, per the
+       theme modal contract, so the browser top-layer invariant holds. -->
   <div class="edit-dialog-backdrop" id="hp-settings-confirm-backdrop" aria-hidden="true" inert></div>
   <dialog class="edit-dialog" id="hp-settings-confirm" role="alertdialog" aria-modal="true" aria-labelledby="hp-settings-confirm-title" aria-describedby="hp-settings-confirm-desc">
     <h2 class="edit-dialog__title" id="hp-settings-confirm-title">Save preferences?</h2>
@@ -633,8 +622,6 @@ const pageSettings = `
       <button class="btn btn-primary" type="button" data-hp-confirm-action>Save preferences</button>
     </div>
   </dialog>
-</dialog>
-</body>
-</html>
+</section>
 {{end}}
 `
