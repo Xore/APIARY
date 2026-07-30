@@ -397,11 +397,30 @@ button.copy:hover { color: var(--text-primary); background: var(--surface-2); }
   font: 10px var(--hp-mono); text-decoration: none;
 }
 .lnk.sess { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); }
-.eventmeta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+/* Event detail cell: the sensor message is the headline, and its pivots are
+   bundled underneath in labelled groups (decoy identity, pivots, network
+   origin, detection, analysis) instead of one undifferentiated run of links. */
+.eventdetail { color: var(--text-primary); }
+.eventmeta {
+  display: flex; flex-direction: column; gap: 3px;
+  margin-top: 7px; padding-left: 9px;
+  border-left: 1px solid var(--border-subtle);
+}
+.eventmeta__group { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px; }
+.eventmeta__label {
+  flex: none; width: 66px;
+  font-size: var(--font-size-xs); font-weight: 600;
+  letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text-muted); cursor: help;
+}
 .eventmeta .lnk {
   display: inline-block; max-width: 420px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: 11px; color: var(--accent);
+  font-size: var(--font-size-xs); color: var(--accent);
+}
+
+@media (max-width: 720px) {
+  .eventmeta__label { width: auto; }
 }
 
 /* ── "Open in…" dropdown (event explorer rows) ──────────────────────────── */
