@@ -7,7 +7,11 @@
 > exists, the worker will revert-fail on every request and preserve it as
 > `.request.failed`.  
 > **Last updated**: 2026-07-30  
-> **Host platform**: KVM + QEMU + libvirt + docker-compose (NO VMware)
+> **Host platform**: KVM + QEMU + libvirt + docker-compose (NO VMware)  
+> **Phase 1 tracking**: [#47](https://github.com/Xore/honeypot-stack/issues/47)
+> — one issue per remaining step, each with its own verification and failure
+> modes. Start there rather than from this document if you are picking the
+> work up cold.
 
 ---
 
