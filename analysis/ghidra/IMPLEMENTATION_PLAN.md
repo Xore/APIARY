@@ -1,6 +1,7 @@
 # Ghidra Payload Analysis — Implementation Plan
 
-> **Status**: Planned / In Progress  
+> **Status**: Design document; phases 3-5 are unbuilt  
+> **Tracked in**: [#78](https://github.com/Xore/honeypot-stack/issues/78)  
 > **Last updated**: 2026-07-26  
 > **Author**: honeypot-stack automated planning
 

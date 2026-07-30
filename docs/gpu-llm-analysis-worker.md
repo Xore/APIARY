@@ -1,6 +1,6 @@
 # GPU LLM Analysis Worker — Implementation Guide
 
-> **Status:** Implementation guide — not yet deployed.
+> **Status:** Implementation guide — not yet deployed. Tracked in [#66](https://github.com/Xore/honeypot-stack/issues/66).
 > **Audience:** A human operator or an AI coding agent implementing this feature.
 > **Prerequisite reading:** [`ml-worker-plan.md`](ml-worker-plan.md) (data
 > sources, ES layout, dashboard SSE pattern),

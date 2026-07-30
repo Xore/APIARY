@@ -215,8 +215,20 @@ docs/
 
 ---
 
-## Open Questions
+## Resolved design decisions
 
-- [ ] Should `reporter` consume raw log files (simple, no infra change) or a Redis pub-sub channel (lower latency, requires adding Redis to compose)? → Start with file tailing; migrate to Redis when ml-worker pubsub is implemented.
-- [ ] Report Suricata IDS alerts (from Arkime capture) in addition to honeypot hits? → Yes, add in Phase 2.
-- [ ] Auto-ban at firewall level (nftables/ipset) in addition to reporting? → Separate issue; keep reporter stateless and reporting-only.
+These were open when the plan was written. They are settled; the implementation
+work they govern is tracked in
+[#68](https://github.com/Xore/honeypot-stack/issues/68) and
+[#69](https://github.com/Xore/honeypot-stack/issues/69).
+
+- **Ingest via file tailing, not a message bus.** A Redis pub-sub channel has
+  lower latency but adds a service to Compose for a reporter whose cooldown
+  windows are measured in hours. Tail the logs; revisit only if `ml-worker`
+  brings pubsub in for its own reasons.
+- **Suricata IDS alerts are in scope**, alongside honeypot hits, from Phase 2
+  ([#69](https://github.com/Xore/honeypot-stack/issues/69)).
+- **No auto-banning.** The reporter stays stateless and reporting-only.
+  Firewall enforcement is a different trust boundary and a different failure
+  mode: a false positive that costs an abuse report is recoverable, one that
+  installs an nftables rule is not.

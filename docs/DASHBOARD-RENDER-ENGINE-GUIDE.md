@@ -1,11 +1,19 @@
 # AI implementation guide: render the dashboard with the Xore/auth-backend engine
 
-> **Implementation status (2026-07-29):** Phase 1 has started. The shared
-> head/shell/template blocks now load from the embedded `dashboard/ui/` tree;
-> nonce and security-header primitives exist for the later CSP cutover; the
-> current Xore/theme stylesheet is vendored; and the shared modal controller
-> protects alert acknowledgement and sandbox submission. Route templates and
-> remaining modal inventory still migrate in the phase order below.
+> **Implementation status (2026-07-30):** the template migration is **done** —
+> the shared head/shell blocks and all fourteen route templates load from the
+> embedded `dashboard/ui/` tree, and a test fails the build if markup moves back
+> into Go. Nonce and security-header primitives exist for the later CSP cutover,
+> the current Xore/theme stylesheet is vendored, and the shared modal controller
+> protects alert acknowledgement and sandbox submission.
+>
+> What is left is tracked in issues, not in the phase list below: the CSP
+> cutover is [#58](https://github.com/Xore/honeypot-stack/issues/58), the
+> remaining modal inventory is
+> [#59](https://github.com/Xore/honeypot-stack/issues/59), and tests plus the
+> visual acceptance matrix are
+> [#60](https://github.com/Xore/honeypot-stack/issues/60). The phases below
+> remain as the design record for how the migration was structured.
 
 ## Objective
 

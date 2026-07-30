@@ -1,10 +1,10 @@
 # GitHub Analysis Integration — Implementation Roadmap
 
-> **Status**: Planned
+> **Status**: Design document — nothing here is built yet
 > **Last updated**: 2026-07-30
 > **Upstream pipeline**: [`Xore/honeypot`](https://github.com/Xore/honeypot) — `.github/workflows/analyze.yml`
 > **Precedent**: [`analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md`](../analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md)
-> **Ledger item**: `GHA-001` (see [`WORK-LEDGER.md`](WORK-LEDGER.md))
+> **Tracked in**: [#73](https://github.com/Xore/honeypot-stack/issues/73) (YARA corpus sync) and [#74](https://github.com/Xore/honeypot-stack/issues/74) (publisher and dashboard button)
 
 ---
 
@@ -35,8 +35,9 @@ The reason is a trust boundary, not taste:
   Hybrid-Analysis, Malshare, JoeSandbox, MetaDefender, CAPE, Any.run).
 - Captures are attacker-supplied bytes. They can contain third-party data,
   credentials harvested elsewhere, or content that identifies the sensor.
-- `WORK-LEDGER.md` §7 already binds this repository: *"External reporting
-  features remain in dry-run mode until separately approved."*
+- `WORK-LEDGER.md` → "How to work an issue", rule 7 already binds this
+  repository: *"External reporting features stay in dry-run until separately
+  approved."*
 
 So the design is: **one deliberate, authenticated, per-sample, auditable
 action**, with a dry-run default.
@@ -436,17 +437,7 @@ contain no real indicators, per the `WORK-LEDGER.md` review checklist.
 
 ## Open questions
 
-1. **Retention.** Upstream is public and permanent. Is there a class of capture
-   that must never be published — for example anything from the home network
-   range, or anything whose extracted strings contain a non-attacker identifier?
-   A denylist check in `publish-sample.sh` is cheap to add and impossible to
-   retrofit after a push.
-2. **Password-protected archives.** Upstream's README documents committing
-   samples zipped with the password `infected`. Raw binaries are currently
-   committed unzipped. Decide one convention before the publisher exists;
-   changing it later invalidates every existing `reports/scanner/*.json` path.
-3. **Quota.** VirusTotal's free tier is 500 requests/day across eight scanners
-   sharing one workflow. Does the publisher need a per-day submission cap of its
-   own, or is the button's manual nature a sufficient rate limiter?
-
-These are Phase 1 blockers, not Phase 0 blockers.
+Retention denylist, archive convention, and submission quota. All three are
+Phase 1 blockers and all three are decisions rather than implementation, so
+they are being made in the issue rather than in this document:
+[#74](https://github.com/Xore/honeypot-stack/issues/74).

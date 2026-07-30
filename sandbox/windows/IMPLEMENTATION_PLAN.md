@@ -231,7 +231,8 @@ point) is entirely independent of the Windows/Linux determination above.
 
 ## Research: Golden Image vs Snapshots
 
-See full comparison: [`docs/golden_image_vs_snapshots.md`](docs/golden_image_vs_snapshots.md)
+See full comparison:
+[`docs/kvm-snapshot-vs-golden-image.md`](../../docs/kvm-snapshot-vs-golden-image.md)
 
 ### TL;DR for this project
 
@@ -375,7 +376,11 @@ virsh snapshot-revert win11-sandbox GOLDEN_READY --running
 
 ## Phase 3 — Windows 11 Hardening for Malware Analysis
 
-See: [`setup/harden_analysis_vm.ps1`](setup/harden_analysis_vm.ps1)
+Implemented in
+[`packer/scripts/setup_analysis.ps1`](packer/scripts/setup_analysis.ps1) — the
+hardening and anti-evasion phases run at image-build time, not as a separate
+script. (Earlier revisions of this plan named a `setup/harden_analysis_vm.ps1`
+that was never written.)
 
 ### 3.1 Disable Noise Sources
 ```
@@ -556,10 +561,11 @@ WINDOWS_SANDBOX_RESULTS_DIR/{sha256}_sandbox.json
 > **Deliberately not implemented — step 6 and the Ghidra field below.**
 > `serveGhidraSubmit`, the `/ghidra/submit` route, and `GHIDRA_REQUEST_DIR`
 > do not exist in the dashboard; they are Phase 2 of
-> `analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md`. Adding the checkbox and
-> the second form now would ship a button that 404s and a spool write with
-> no reader. Do the Ghidra plan first, then come back for step 6 — it is two
-> lines in `serveSandboxSubmit` once the spool exists.
+> `analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md`, tracked in
+> [#76](https://github.com/Xore/honeypot-stack/issues/76). Adding the checkbox
+> and the second form now would ship a button that 404s and a spool write with
+> no reader. Do #76 first, then come back for step 6 — it is two lines in
+> `serveSandboxSubmit` once the spool exists.
 >
 > **Host half — implemented 2026-07-30.** `/windows-sandbox-requests` now has
 > a consumer: `run_pending.sh` drains the spool and

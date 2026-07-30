@@ -104,24 +104,27 @@ From the migration guide — keep these green in every future change:
 - `theme.css` stays byte-identical to a recorded Xore/theme commit; dashboard
   overrides live only in `shell.css`.
 
-## 4. Remaining work (per the migration guide)
+## 4. Remaining work
 
-- **Automated validation** on every change: `git diff --check`,
-  `docker compose config --quiet`, `go test ./...` (in `dashboard/`),
-  frontend `ci` / `typecheck` / `build`.
-- **Additional tests** the guide asks for, not yet all present (a shell/route
-  test exists in `main_test.go`): role-aware actions, command routing, theme
-  persistence, table/lazy-list state, live updates preserving map state.
-- **Visual acceptance matrix**: capture overview, event explorer (results +
-  empty), attacker profile, session replay, campaigns, payload inventory +
-  detail, sandbox queue/detail, alerts, source health, and the open command
-  bar at 1440×900, 1024×768, and 390×844 in dark and light; compare against
-  `Xore/theme/examples/workspace.html` and `components.html`.
-- **Modals**: the shared modal root/controller and the first consequential
-  flows (alert acknowledgement and sandbox submission) now follow
-  `Xore/theme` → `docs/MODALS.md`. Event detail, payload preview, export
-  options, and destructive dead-letter actions remain to be migrated.
-- Production deployment only when explicitly authorized.
+Tracked as issues, not as a checklist here:
+
+| What is left | Issue |
+|---|---|
+| Event detail, payload preview, export options, destructive dead-letter modals | [#59](https://github.com/Xore/honeypot-stack/issues/59) |
+| Behavioural tests and the visual acceptance matrix | [#60](https://github.com/Xore/honeypot-stack/issues/60) |
+| CSP cutover with a per-request nonce | [#58](https://github.com/Xore/honeypot-stack/issues/58) |
+| Profile action menu, route/administrator settings, logout | [#77](https://github.com/Xore/honeypot-stack/issues/77) |
+
+The shared modal root/controller and the first consequential flows — alert
+acknowledgement and sandbox submission — already follow `Xore/theme` →
+`docs/MODALS.md`, and are the reference for the rest.
+
+Two standing rules that are not work items and so stay here:
+
+- **Validate every change**: `git diff --check`, `docker compose config
+  --quiet`, `go test ./...` in `dashboard/`, and frontend `ci` / `typecheck` /
+  `build`.
+- **Production deployment only when explicitly authorized.**
 
 ## 5. Cross-references
 

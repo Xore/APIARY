@@ -1,6 +1,7 @@
 # Ghidra Dashboard Integration — Implementation Plan
 
-> **Status**: Planned
+> **Status**: Design document — nothing here is built yet
+> **Tracked in**: [#76](https://github.com/Xore/honeypot-stack/issues/76)
 > **Last updated**: 2026-07-27
 > **Author**: honeypot-stack automated planning
 > **Depends on**: [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (Ghidra headless + Rev·Deck + GhidrAssist)

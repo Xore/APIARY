@@ -6,7 +6,11 @@ This folder holds the honeypot-side tooling that feeds it and the local analysis
 scripts that run on the sensor host.
 
 > The integration between this repository's dashboard and that pipeline is
-> planned in [`docs/github-analysis-integration-roadmap.md`](../docs/github-analysis-integration-roadmap.md).
+> designed in [`docs/github-analysis-integration-roadmap.md`](../docs/github-analysis-integration-roadmap.md)
+> and tracked in [#73](https://github.com/Xore/honeypot-stack/issues/73)
+> (upstream YARA corpus sync) and
+> [#74](https://github.com/Xore/honeypot-stack/issues/74) (the manual
+> publisher). None of it is built yet.
 > Publication is **not** automatic — see "Publication is manual" below.
 
 ---

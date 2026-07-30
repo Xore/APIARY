@@ -2,7 +2,8 @@ name: Diagnostics
 
 # Read-only observability for the deployed stacks.
 #
-# OPS-001 is blocked on restoring SSH/Dockge access to the homeserver, but the
+# Gate 0 (issue #57) is blocked on restoring SSH/Dockge access to the homeserver,
+# but the
 # production-home Actions runner is registered on that host and is therefore an
 # access path that already exists and is already authorized. This workflow uses
 # it to answer the Gate 0 questions — is the Compose stack up, is the VPS

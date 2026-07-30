@@ -8,8 +8,10 @@ raw-tunnelled with a port bridge.
 Start with the self-contained [CGNAT deployment guide](docs/CGNAT-DEPLOYMENT.md).
 Repository automation, deployment environments, and runner setup are documented
 in the [CI/CD guide](docs/CI-CD.md).
-Current priorities, ownership, and cross-agent handoffs are tracked in the
-[roadmap](docs/ROADMAP.md) and [shared work ledger](docs/WORK-LEDGER.md).
+Work is tracked in [GitHub issues](https://github.com/Xore/honeypot-stack/issues).
+The [roadmap](docs/ROADMAP.md) says what order it happens in, and the
+[working agreement](docs/WORK-LEDGER.md) says how issues are claimed and
+reviewed.
 Analysis and GPU guides: [ML worker plan](docs/ml-worker-plan.md),
 [GPU LLM analysis worker](docs/gpu-llm-analysis-worker.md), and
 [GPU acceleration for the ML worker](docs/gpu-ml-worker-acceleration.md)
@@ -524,9 +526,9 @@ at 25 MiB with three files, independently from sensor event files under
 | EveBox (Suricata events) | `evebox.<domain>` | `evebox` :5636 |
 | Arkime (packet sessions) | `arkime.<domain>` | `arkime-viewer` :8005 |
 
-Each is bridged to the VPS by its own `socat-hp-*` service (the [reverse-proxy](../reverse-proxy/)
-pattern — one socat per service, the reliable/consistent way) and routed by
-Traefik with the shared `forward-auth` middleware. The auth portal is NOT part
+Each is bridged to the VPS by its own `socat-hp-*` service (one socat per
+service, the reliable/consistent way) and routed by
+[Traefik](vps/traefik/) with the shared `forward-auth` middleware. The auth portal is NOT part
 of this stack anymore — deploy the standalone
 [Xore/auth-backend](https://github.com/Xore/auth-backend) stack onto the VPS's
 `proxy` network (it provides the `auth-portal` container the middleware
@@ -658,8 +660,9 @@ must be up and the `portbridge/` build folder present.
 ## Configure the VPS
 
 ### 1. Free port 22 first
-Move real admin SSH to 2222 ([`scripts/harden-vps.sh`](../../scripts/harden-vps.sh))
-so cowrie can own 22 — confirm 2222 works before continuing.
+Move real admin SSH to 2222 so cowrie can own 22 — confirm 2222 works before
+continuing. There is no script for this step; do it by hand and keep the old
+session open until the new port answers.
 
 ### 2. Firewall
 ```bash

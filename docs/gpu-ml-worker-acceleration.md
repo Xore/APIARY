@@ -1,6 +1,7 @@
 # GPU Acceleration for the ML Worker — Implementation Guide
 
-> **Status:** Implementation guide — not yet deployed. The ML worker itself
+> **Status:** Implementation guide — not yet deployed. Tracked in
+> [#67](https://github.com/Xore/honeypot-stack/issues/67). The ML worker itself
 > is scaffolded (see [`ml-worker-plan.md`](ml-worker-plan.md), roadmap v0.1).
 > **Audience:** A human operator or an AI coding agent implementing this feature.
 > **Companion guide:** [`gpu-llm-analysis-worker.md`](gpu-llm-analysis-worker.md)
