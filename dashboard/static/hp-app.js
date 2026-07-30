@@ -48,36 +48,9 @@
     return path;
   };
 
-  /* ---------- investigation router ---------- */
-  const investigationURL = value => {
-    const query = value.trim();
-    if (!query) return "";
-    if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(query) || query.includes(":")) return `/investigate/ip/${encodeURIComponent(query)}`;
-    if (/^[a-f\d]{32,64}$/i.test(query)) return `/payload-analysis/${encodeURIComponent(query)}`;
-    if (/^as\d+$/i.test(query)) return `/events?asn=${encodeURIComponent(query.replace(/^as/i, ""))}`;
-    if (query.startsWith("/")) return `/events?path=${encodeURIComponent(query)}`;
-    if (/^[a-f\d]{8,31}$/i.test(query)) return `/sessions/${encodeURIComponent(query)}`;
-    return `/events?q=${encodeURIComponent(query)}`;
-  };
-
-  /* ---------- recent investigations (localStorage) ---------- */
-  const escapeHTML = value => String(value).replace(/[&<>"']/g, character => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[character]));
-  const recentStorageKey = "hp-recent-investigations";
-  const readRecents = () => {
-    try { return JSON.parse(localStorage.getItem(recentStorageKey) || "[]"); } catch { return []; }
-  };
-  const rememberCurrentInvestigation = () => {
-    if (location.pathname === "/" || ["/source-health", "/alerts"].includes(location.pathname)) return;
-    // Route, label, and timestamp only — never event bodies, credentials,
-    // commands, or payload content in local storage.
-    const url = location.pathname + location.search + location.hash;
-    const record = {url, label: pageName(), seen: Date.now()};
-    const records = [record, ...readRecents().filter(item => item.url !== url)].slice(0, 12);
-    try { localStorage.setItem(recentStorageKey, JSON.stringify(records)); } catch {}
-  };
-  const recentHTML = () => readRecents().map(item =>
-    `<a class="hp-recent-link" href="${escapeHTML(item.url)}"><strong>${escapeHTML(item.label)}</strong></a>`
-  ).join("") || `<p class="hp-recents-empty">Investigations you open will appear here.</p>`;
+  /* Investigation routing is server-side (/search): the dock is a plain GET
+     form, so a query that names no entity lands on grouped results instead of
+     the 404 a client-side format guess produced. */
 
   /* ---------- lazy loading (sentinel + offset fetching) ---------- */
   // Keep long investigation views responsive without traditional page links.
@@ -497,14 +470,9 @@
     const identity = shell.querySelector("[data-hp-page-name]");
     if (identity) identity.textContent = pageName();
 
-    /* Recent investigations */
-    rememberCurrentInvestigation();
-    const recentsTarget = shell.querySelector("[data-hp-recents]");
-    if (recentsTarget) recentsTarget.innerHTML = recentHTML();
-    shell.querySelector("[data-hp-clear-recents]")?.addEventListener("click", () => {
-      localStorage.removeItem(recentStorageKey);
-      if (recentsTarget) recentsTarget.innerHTML = recentHTML();
-    });
+    /* The recent-investigations rail was removed; drop anything an earlier
+       version of the dashboard left behind in this browser. */
+    try { localStorage.removeItem("hp-recent-investigations"); } catch {}
 
     /* Sidebar collapse (persisted) / mobile off-canvas open */
     const collapseStorageKey = "hp-sidebar-collapsed";
@@ -529,8 +497,9 @@
       if (event.key === "Escape") shell.classList.remove("hp-nav-open");
     });
 
-    /* Command dock / investigation router (server-rendered as part of the
-       shell; theme .command-bar positions it and sidebar collapse inherits) */
+    /* Command dock (server-rendered as part of the shell; theme .command-bar
+       positions it and sidebar collapse inherits). Enter submits, Shift+Enter
+       adds a line, "/" focuses it from anywhere. */
     const search = shell.querySelector("[data-hp-investigate]");
     const searchInput = search?.querySelector("textarea");
     const resizeSearch = () => {
@@ -544,12 +513,10 @@
         search.requestSubmit();
       }
     });
+    // The form is a plain GET to /search; only block the empty submission.
     search?.addEventListener("submit", event => {
-      event.preventDefault();
-      const target = investigationURL(searchInput.value);
-      if (target) location.assign(target);
+      if (!searchInput?.value.trim()) event.preventDefault();
     });
-    shell.querySelector("[data-hp-focus-investigation]")?.addEventListener("click", () => searchInput?.focus());
     addEventListener("keydown", event => {
       if (event.key === "/" && !event.ctrlKey && !event.metaKey && !event.altKey && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || "")) {
         event.preventDefault();

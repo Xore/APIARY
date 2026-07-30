@@ -278,6 +278,11 @@ func main() {
 		html(w)
 		tmpl.ExecuteTemplate(w, "events", s.eventsData(r))
 	})
+	// The investigation command dock submits here. Resolution is server-side so
+	// a query that names nothing lands on grouped results instead of a 404.
+	http.HandleFunc("/search", func(w http.ResponseWriter, r *http.Request) {
+		s.serveSearch(w, r, tmpl)
+	})
 	http.HandleFunc("/ips", func(w http.ResponseWriter, r *http.Request) {
 		html(w)
 		data := s.ipsData()

@@ -2,11 +2,11 @@
 <script>(function(){try{var t=localStorage.getItem("hp-theme");if(t==="light"||t==="dark"){document.documentElement.dataset.theme=t;}else if(t){localStorage.removeItem("hp-theme");}}catch(e){}})();</script>
 <link rel="stylesheet" href="/static/theme.css?v=20260730-1">
 <link rel="stylesheet" href="/static/leaflet.css?v=20260727-1">
-<link rel="stylesheet" href="/static/hp-tailwind.css?v=20260730-1">
+<link rel="stylesheet" href="/static/hp-tailwind.css?v=20260730-2">
 <script defer src="/static/leaflet.js?v=20260727-1"></script>
 <script defer src="/static/hp-api.js?v=20260727-1"></script>
-<script defer src="/static/hp-modals.js?v=20260729-1"></script>
-<script defer src="/static/hp-app.js?v=20260729-2"></script>
+<script defer src="/static/hp-modals.js?v=20260730-1"></script>
+<script defer src="/static/hp-app.js?v=20260730-1"></script>
 <script defer src="/static/hp-account.js?v=20260730-1"></script>
 <script defer src="/static/hp-settings.js?v=20260730-4"></script>
 <script defer src="/static/hp-reports.js?v=20260730-1"></script>
@@ -18,10 +18,6 @@
     <span class="hp-brand-mark"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
     <span class="hp-brand-text"><strong>{{brandHTML}}</strong><small>{{presentation.ProductLabel}}</small></span>
   </a>
-  <button class="hp-new-investigation" type="button" data-hp-focus-investigation>
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-    <span>New investigation</span><kbd>/</kbd>
-  </button>
   <nav class="app-sidebar__body" aria-label="Dashboard sections">
     <div class="sidebar__section-label">Monitor</div>
     <a class="sidebar__item" data-hp-nav="/" href="/"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Overview</span></a>
@@ -41,10 +37,6 @@
     <a class="sidebar__item" data-hp-nav="/history" href="/history"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg><span>Elasticsearch history</span></a>
     <a class="sidebar__item" data-hp-nav="/dead-letters" href="/dead-letters"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span>Ingest dead letters</span></a>
   </nav>
-  <section class="hp-recents" aria-labelledby="hp-recents-heading">
-    <div class="hp-recents-label"><span id="hp-recents-heading">Recent investigations</span><button type="button" data-hp-clear-recents title="Clear recent investigations" aria-label="Clear recent investigations"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
-    <div data-hp-recents></div>
-  </section>
   <div class="hp-account" data-hp-account>
     <div class="dropdown hp-account-menu" role="menu" aria-label="Account actions" data-hp-account-menu hidden>
       <a class="dropdown__item" role="menuitem" href="#settings" data-hp-account-dashboard-settings>
@@ -90,9 +82,9 @@
   </div>
   {{with activeBanner}}<div class="alert alert--{{.Severity}}" role="status" style="flex-basis:100%;order:5;margin:8px 8px 0">{{.Text}}</div>{{end}}
 </header>
-<form class="hp-command-dock command-bar" role="search" data-hp-investigate>
+<form class="hp-command-dock command-bar" role="search" method="get" action="/search" data-hp-investigate>
   <label class="hp-sr-only" for="hp-investigation-query">Investigate an indicator</label>
-  <textarea id="hp-investigation-query" rows="1" placeholder="Investigate an IP, ASN, payload hash, session, HTTP path or free text…" aria-label="Investigate an indicator"></textarea>
+  <textarea id="hp-investigation-query" name="q" rows="1" placeholder="Investigate an IP, ASN, payload hash, session, HTTP path or free text…" aria-label="Investigate an indicator"></textarea>
   <div class="hp-command-actions">
     <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>Investigation command</span>
     <span class="hp-command-hint">Enter to open</span>

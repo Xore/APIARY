@@ -103,63 +103,12 @@
 .hp-brand-accent { color: var(--accent); }
 .hp-brand-text small { display: block; font-size: 10px; color: var(--text-muted); }
 
-.hp-new-investigation {
-  display: flex; align-items: center; gap: 8px; width: 100%;
-  min-height: 32px; padding: 6px 9px; margin: 0 0 4px;
-  border: none; border-radius: var(--radius-control);
-  background: var(--btn-inverted-bg); color: var(--btn-inverted-text);
-  font-size: 12px; font-weight: 500; font-family: inherit;
-  cursor: pointer; transition: background var(--transition-fast);
-}
-.hp-new-investigation:hover { background: var(--btn-inverted-bg-hover); }
-.hp-new-investigation svg { width: 14px; height: 14px; }
-.hp-new-investigation kbd {
-  margin-left: auto;
-  border-color: color-mix(in srgb, var(--btn-inverted-text) 35%, transparent);
-  background: color-mix(in srgb, var(--btn-inverted-text) 14%, transparent);
-  color: var(--btn-inverted-text);
-}
-
-.hp-recents { margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--border-subtle); }
-.hp-recents-label {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 0 9px 4px;
-  color: var(--text-muted);
-  font-size: var(--font-size-xs); font-weight: 600; letter-spacing: 0.075em; text-transform: uppercase;
-}
-.hp-recents-label button {
-  display: grid; place-items: center; padding: 2px;
-  border: none; border-radius: var(--radius-xs);
-  background: transparent; color: var(--text-muted); cursor: pointer;
-  transition: color var(--transition-fast), background var(--transition-fast);
-}
-.hp-recents-label button:hover { color: var(--text-primary); background: var(--surface-2); }
-.hp-recents-label button svg { width: 12px; height: 12px; }
-.hp-recent-link {
-  display: block; padding: 5px 9px;
-  border-radius: var(--radius-control);
-  text-decoration: none;
-  transition: background var(--transition-fast);
-}
-.hp-recent-link:hover { background: var(--surface-2); }
-.hp-recent-link strong {
-  display: block;
-  font-size: 12px; font-weight: 500; color: var(--text-secondary);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.hp-recent-link:hover strong { color: var(--text-primary); }
-.hp-recents-empty { margin: 0; padding: 4px 9px; font-size: 12px; color: var(--text-muted); }
-
 .hp-profile-name { font-size: 13px; color: var(--text-primary); }
 
 /* Compact rail ≤720px: icons only (theme.css hides item text/profile div). */
 @media (max-width: 720px) {
   .app-sidebar .hp-brand { justify-content: center; padding-inline: 0; }
-  .app-sidebar .hp-brand-text,
-  .app-sidebar .hp-recents,
-  .app-sidebar .hp-new-investigation span,
-  .app-sidebar .hp-new-investigation kbd { display: none; }
-  .app-sidebar .hp-new-investigation { justify-content: center; padding: 6px; }
+  .app-sidebar .hp-brand-text { display: none; }
 }
 
 /* ── Toolbar ────────────────────────────────────────────────────────────── */
@@ -421,6 +370,13 @@ button.copy:hover { color: var(--text-primary); background: var(--surface-2); }
 
 @media (max-width: 720px) {
   .eventmeta__label { width: auto; }
+}
+
+/* Search results: supporting context under each matched value. */
+.searchhit__detail {
+  margin-top: 2px;
+  font-size: var(--font-size-xs); color: var(--text-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
 /* ── "Open in…" dropdown (event explorer rows) ──────────────────────────── */

@@ -459,7 +459,10 @@ func TestSemanticShellIsServerRendered(t *testing.T) {
 		`class="app-shell"`, `class="app-toolbar"`, `app-toolbar__title`,
 		`class="app-sidebar"`, `class="app-main"`, `sidebar__profile`,
 		`hp-command-dock command-bar`, `data-hp-page-content`,
-		`data-hp-theme-toggle`, `data-hp-alert-count`, `data-hp-recents`,
+		`data-hp-theme-toggle`, `data-hp-alert-count`,
+		// The dock resolves server-side, so it must be a real GET form: an
+		// unrecognised query has to reach /search rather than be guessed at.
+		`method="get" action="/search"`, `name="q"`,
 		`class="avatar" data-hp-user-avatar`, `data-hp-user-name`, `data-hp-user-role`,
 		`id="hp-modal-root"`, `id="hp-confirm-backdrop"`, `role="alertdialog"`,
 		`aria-hidden="true" inert`, `/static/hp-modals.js`,
@@ -467,6 +470,14 @@ func TestSemanticShellIsServerRendered(t *testing.T) {
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("rendered shell is missing %q", want)
+		}
+	}
+	// Both sidebar controls were removed: the button did nothing, and the
+	// recents rail was the only reason the shell wrote investigation routes
+	// into local storage.
+	for _, gone := range []string{`data-hp-recents`, `hp-new-investigation`, `data-hp-focus-investigation`} {
+		if strings.Contains(html, gone) {
+			t.Fatalf("rendered shell still carries the removed control %q", gone)
 		}
 	}
 	for _, route := range []string{
