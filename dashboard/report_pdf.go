@@ -20,17 +20,138 @@ type pdfPage struct {
 	content bytes.Buffer
 }
 
+// pdfRGB is a PDF device color (0–1 per channel).
+type pdfRGB struct{ r, g, b float64 }
+
+// pdfTheme carries every palette decision of the rendered report, so a
+// definition can render dark (screen-style) or light (print-style) PDFs.
+// Both palettes are snapshots of the canonical Xore/theme tokens — the light
+// set matches the Xore/Honeypot scan-report design, the dark set is its
+// canonical dark counterpart.
+type pdfTheme struct {
+	Page        pdfRGB // app-bg
+	HeaderBand  pdfRGB // top band background (sidebar-bg / surface-1)
+	HeaderRule  pdfRGB // band separator and section rules (border-strong)
+	BrandText   pdfRGB // headings, metric values, brand marks (text-primary)
+	MutedText   pdfRGB // subtitles, metadata, footer (text-muted)
+	BodyText    pdfRGB // paragraphs and table rows
+	Accent      pdfRGB // section bars, labels, bullet dashes (accent)
+	Card        pdfRGB // metric card background (surface-1 / surface-0)
+	CardBorder  pdfRGB // metric card outline (border-subtle)
+	AltRow      pdfRGB // zebra striping
+	TableHeader pdfRGB // table header band (surface-raised / surface-2)
+	Bar         pdfRGB // count bars (text-link)
+	FaintText   pdfRGB // appendix detail lines
+	Success     pdfRGB // clean / low-risk semantics
+	Warning     pdfRGB // elevated-risk semantics
+	Danger      pdfRGB // detected / high-risk semantics
+	Link        pdfRGB // link and information accents
+}
+
+// pdfThemeDark is the canonical Xore/theme dark palette (theme.css :root).
+func pdfThemeDark() pdfTheme {
+	return pdfTheme{
+		Page:        pdfRGB{0.125, 0.125, 0.122}, // #20201f
+		HeaderBand:  pdfRGB{0.118, 0.118, 0.110}, // #1e1e1c
+		HeaderRule:  pdfRGB{0.204, 0.204, 0.196}, // #343432
+		BrandText:   pdfRGB{0.914, 0.902, 0.875}, // #e9e6df
+		MutedText:   pdfRGB{0.549, 0.561, 0.553}, // #8c8f8d
+		BodyText:    pdfRGB{0.740, 0.740, 0.710},
+		Accent:      pdfRGB{0.851, 0.467, 0.341}, // #d97757
+		Card:        pdfRGB{0.173, 0.173, 0.165}, // #2c2c2a
+		CardBorder:  pdfRGB{0.239, 0.239, 0.231}, // #3d3d3b
+		AltRow:      pdfRGB{0.151, 0.151, 0.145},
+		TableHeader: pdfRGB{0.220, 0.220, 0.208}, // #383835
+		Bar:         pdfRGB{0.427, 0.655, 0.925}, // #6da7ec
+		FaintText:   pdfRGB{0.660, 0.670, 0.650},
+		Success:     pdfRGB{0.475, 0.788, 0.620}, // #79c99e
+		Warning:     pdfRGB{0.871, 0.702, 0.416}, // #deb36a
+		Danger:      pdfRGB{0.863, 0.467, 0.455}, // #dc7774
+		Link:        pdfRGB{0.427, 0.655, 0.925}, // #6da7ec
+	}
+}
+
+// pdfThemeLight is the canonical Xore/theme light palette — the print-safe
+// token snapshot from the Xore/Honeypot scan-report design (report.py).
+func pdfThemeLight() pdfTheme {
+	return pdfTheme{
+		Page:        pdfRGB{0.969, 0.965, 0.949}, // #f7f6f2
+		HeaderBand:  pdfRGB{0.957, 0.949, 0.929}, // #f4f2ed
+		HeaderRule:  pdfRGB{0.819, 0.813, 0.798}, // border-strong composite
+		BrandText:   pdfRGB{0.184, 0.169, 0.153}, // #2f2b27
+		MutedText:   pdfRGB{0.569, 0.541, 0.510}, // #918a82
+		BodyText:    pdfRGB{0.300, 0.280, 0.250}, // primary/secondary blend
+		Accent:      pdfRGB{0.780, 0.396, 0.282}, // #c76548
+		Card:        pdfRGB{0.984, 0.980, 0.969}, // #fbfaf7
+		CardBorder:  pdfRGB{0.908, 0.903, 0.891}, // border-subtle composite
+		AltRow:      pdfRGB{0.961, 0.955, 0.937}, // rgba(#f4f2ed, 0.65) on app-bg
+		TableHeader: pdfRGB{0.922, 0.914, 0.890}, // #ebe9e3
+		Bar:         pdfRGB{0.165, 0.471, 0.839}, // #2a78d6
+		FaintText:   pdfRGB{0.569, 0.541, 0.510},
+		Success:     pdfRGB{0.247, 0.529, 0.392}, // #3f8764
+		Warning:     pdfRGB{0.608, 0.420, 0.145}, // #9b6b25
+		Danger:      pdfRGB{0.702, 0.310, 0.298}, // #b34f4c
+		Link:        pdfRGB{0.165, 0.471, 0.839}, // #2a78d6
+	}
+}
+
+func pdfThemeNamed(name string) pdfTheme {
+	if name == "light" {
+		return pdfThemeLight()
+	}
+	return pdfThemeDark()
+}
+
+// pdfBranding carries the operator-configurable identity of a report:
+// header/footer copy, classification line, and author. Empty fields fall
+// back to the deployment defaults so existing output stays byte-identical.
+type pdfBranding struct {
+	HeaderLeft     string
+	HeaderRight    string
+	FooterLeft     string
+	Classification string
+	Author         string
+}
+
+func defaultPDFBranding() pdfBranding {
+	return pdfBranding{
+		HeaderLeft:     "XORE//HONEYPOT",
+		HeaderRight:    "DEFENSIVE SECURITY OPERATIONS",
+		FooterLeft:     "PRIVATE - XORE//HONEYPOT",
+		Classification: "PRIVATE - contains hostile-source telemetry and forensic indicators",
+	}
+}
+
+func (b pdfBranding) withDefaults() pdfBranding {
+	defaults := defaultPDFBranding()
+	if b.HeaderLeft == "" {
+		b.HeaderLeft = defaults.HeaderLeft
+	}
+	if b.HeaderRight == "" {
+		b.HeaderRight = defaults.HeaderRight
+	}
+	if b.FooterLeft == "" {
+		b.FooterLeft = defaults.FooterLeft
+	}
+	if b.Classification == "" {
+		b.Classification = defaults.Classification
+	}
+	return b
+}
+
 type pdfDocument struct {
-	pages []*pdfPage
+	pages      []*pdfPage
+	theme      pdfTheme
+	footerLeft string
 }
 
 type pdfReportWriter struct {
-	doc        *pdfDocument
-	page       *pdfPage
-	y          float64
-	pageNumber int
-	title      string
-	scope      string
+	doc      *pdfDocument
+	page     *pdfPage
+	y        float64
+	title    string
+	scope    string
+	branding pdfBranding
 }
 
 type reportSummary struct {
@@ -292,8 +413,20 @@ func reportRecommendations(data reportData) []string {
 	return recommendations
 }
 
+// renderSecurityReportPDF keeps the historical executive layout with the
+// dark theme and default branding; scheduled/custom reports go through
+// renderThemedReportPDF with their own theme and branding.
 func renderSecurityReportPDF(data reportData) []byte {
-	writer := &pdfReportWriter{doc: &pdfDocument{}, title: data.Title, scope: data.Scope}
+	return renderThemedReportPDF(data, pdfThemeDark(), defaultPDFBranding())
+}
+
+func renderThemedReportPDF(data reportData, theme pdfTheme, branding pdfBranding) []byte {
+	writer := &pdfReportWriter{
+		doc:      &pdfDocument{theme: theme, footerLeft: branding.withDefaults().FooterLeft},
+		title:    data.Title,
+		scope:    data.Scope,
+		branding: branding.withDefaults(),
+	}
 	writer.newPage()
 	writer.cover(data)
 	writer.section("Executive summary")
@@ -314,16 +447,18 @@ func renderSecurityReportPDF(data reportData) []byte {
 	return writer.doc.bytes()
 }
 
+func (w *pdfReportWriter) theme() pdfTheme { return w.doc.theme }
+
 func (w *pdfReportWriter) newPage() {
-	w.pageNumber++
+	t := w.theme()
 	w.page = &pdfPage{}
 	w.doc.pages = append(w.doc.pages, w.page)
 	w.y = pdfPageHeight - 68
-	w.rect(0, 0, pdfPageWidth, pdfPageHeight, 0.125, 0.125, 0.122)
-	w.rect(0, pdfPageHeight-48, pdfPageWidth, 48, 0.102, 0.102, 0.098)
-	w.line(0, pdfPageHeight-48, pdfPageWidth, pdfPageHeight-48, 0.20, 0.20, 0.19)
-	w.text(32, pdfPageHeight-29, 12, true, 0.914, 0.902, 0.875, "XORE//HONEYPOT")
-	w.text(pdfPageWidth-188, pdfPageHeight-29, 7.5, false, 0.55, 0.56, 0.55, "DEFENSIVE SECURITY OPERATIONS")
+	w.rect(0, 0, pdfPageWidth, pdfPageHeight, t.Page)
+	w.rect(0, pdfPageHeight-48, pdfPageWidth, 48, t.HeaderBand)
+	w.line(0, pdfPageHeight-48, pdfPageWidth, pdfPageHeight-48, t.HeaderRule)
+	w.text(32, pdfPageHeight-29, 12, true, t.BrandText, w.branding.HeaderLeft)
+	w.text(pdfPageWidth-188, pdfPageHeight-29, 7.5, false, t.MutedText, w.branding.HeaderRight)
 }
 
 func (w *pdfReportWriter) ensure(height float64) {
@@ -333,57 +468,81 @@ func (w *pdfReportWriter) ensure(height float64) {
 }
 
 func (w *pdfReportWriter) cover(data reportData) {
-	w.displayText(32, w.y, 25, 0.914, 0.902, 0.875, data.Title)
+	t := w.theme()
+	w.displayText(32, w.y, 25, t.BrandText, data.Title)
 	w.y -= 29
-	w.text(32, w.y, 9, true, 0.851, 0.467, 0.341, "REPORT SCOPE")
+	w.text(32, w.y, 9, true, t.Accent, "REPORT SCOPE")
 	w.y -= 17
 	for _, line := range wrapPDFText(data.Scope, 88) {
-		w.text(32, w.y, 10, false, 0.914, 0.902, 0.875, line)
+		w.text(32, w.y, 10, false, t.BrandText, line)
 		w.y -= 14
 	}
 	w.y -= 4
-	w.text(32, w.y, 8.5, false, 0.55, 0.56, 0.55, "Generated: "+data.Generated.Format("2006-01-02 15:04:05 MST"))
+	if w.branding.Author != "" {
+		w.text(32, w.y, 8.5, false, t.MutedText, "Author: "+w.branding.Author)
+		w.y -= 13
+	}
+	w.text(32, w.y, 8.5, false, t.MutedText, "Generated: "+data.Generated.Format("2006-01-02 15:04:05 MST"))
 	w.y -= 13
 	window := firstNonEmpty(data.Summary.FirstSeen, "not available") + " to " + firstNonEmpty(data.Summary.LastSeen, "not available")
-	w.text(32, w.y, 8.5, false, 0.55, 0.56, 0.55, "Observed window: "+window)
+	w.text(32, w.y, 8.5, false, t.MutedText, "Observed window: "+window)
 	w.y -= 13
-	w.text(32, w.y, 8.5, false, 0.851, 0.467, 0.341, "Classification: PRIVATE - contains hostile-source telemetry and forensic indicators")
+	w.text(32, w.y, 8.5, false, t.Accent, "Classification: "+w.branding.Classification)
 	w.y -= 28
 }
 
 func (w *pdfReportWriter) section(title string) {
+	t := w.theme()
 	// Keep a section heading with at least one useful row or paragraph beneath it.
 	w.ensure(70)
 	w.y -= 8
-	w.rect(32, w.y-5, 4, 18, 0.851, 0.467, 0.341)
-	w.displayText(44, w.y, 15, 0.914, 0.902, 0.875, title)
+	w.rect(32, w.y-5, 4, 18, t.Accent)
+	w.displayText(44, w.y, 15, t.BrandText, title)
 	w.y -= 25
-	w.line(32, w.y+7, pdfPageWidth-32, w.y+7, 0.20, 0.20, 0.19)
+	w.line(32, w.y+7, pdfPageWidth-32, w.y+7, t.HeaderRule)
 }
 
 func (w *pdfReportWriter) paragraph(value string) {
+	t := w.theme()
 	lines := wrapPDFText(value, 100)
 	w.ensure(float64(len(lines))*13 + 10)
 	for _, line := range lines {
-		w.text(36, w.y, 9, false, 0.74, 0.74, 0.71, line)
+		w.text(36, w.y, 9, false, t.BodyText, line)
 		w.y -= 13
 	}
 	w.y -= 6
 }
 
+// riskColor maps a triage level to the theme's semantic color, mirroring the
+// badge system of the canonical scan-report design.
+func (t pdfTheme) riskColor(level string) pdfRGB {
+	switch strings.ToLower(level) {
+	case "low", "clean", "minimal":
+		return t.Success
+	case "medium", "elevated", "guard":
+		return t.Warning
+	case "high", "critical", "severe":
+		return t.Danger
+	default:
+		return t.BrandText
+	}
+}
+
 func (w *pdfReportWriter) metricGrid(summary reportSummary) {
+	t := w.theme()
 	metrics := []struct {
 		label string
 		value string
+		color pdfRGB
 	}{
-		{"Matching events", strconv.Itoa(summary.Events)},
-		{"Unique sources", strconv.Itoa(summary.UniqueSources)},
-		{"Alert records", strconv.Itoa(summary.Alerts)},
-		{"High severity", strconv.Itoa(summary.HighSeverity)},
-		{"Login attempts", strconv.Itoa(summary.Logins)},
-		{"Payload observations", strconv.Itoa(summary.Payloads)},
-		{"Sessions", strconv.Itoa(summary.Sessions)},
-		{"Risk rating", fmt.Sprintf("%d - %s", summary.RiskScore, strings.ToUpper(summary.RiskLevel))},
+		{"Matching events", strconv.Itoa(summary.Events), t.BrandText},
+		{"Unique sources", strconv.Itoa(summary.UniqueSources), t.BrandText},
+		{"Alert records", strconv.Itoa(summary.Alerts), t.BrandText},
+		{"High severity", strconv.Itoa(summary.HighSeverity), t.BrandText},
+		{"Login attempts", strconv.Itoa(summary.Logins), t.BrandText},
+		{"Payload observations", strconv.Itoa(summary.Payloads), t.BrandText},
+		{"Sessions", strconv.Itoa(summary.Sessions), t.BrandText},
+		{"Risk rating", fmt.Sprintf("%d - %s", summary.RiskScore, strings.ToUpper(summary.RiskLevel)), t.riskColor(summary.RiskLevel)},
 	}
 	cellW, cellH := 126.5, 54.0
 	for i, metric := range metrics {
@@ -392,10 +551,10 @@ func (w *pdfReportWriter) metricGrid(summary reportSummary) {
 		}
 		x := 32 + float64(i%4)*(cellW+7)
 		y := w.y - cellH
-		w.rect(x, y, cellW, cellH, 0.173, 0.173, 0.165)
-		w.strokeRect(x, y, cellW, cellH, 0.24, 0.24, 0.23)
-		w.text(x+10, y+31, 15, true, 0.914, 0.902, 0.875, metric.value)
-		w.text(x+10, y+14, 7.5, true, 0.55, 0.56, 0.55, strings.ToUpper(metric.label))
+		w.rect(x, y, cellW, cellH, t.Card)
+		w.strokeRect(x, y, cellW, cellH, t.CardBorder)
+		w.text(x+10, y+31, 15, true, metric.color, metric.value)
+		w.text(x+10, y+14, 7.5, true, t.MutedText, strings.ToUpper(metric.label))
 		if i%4 == 3 {
 			w.y -= cellH + 8
 		}
@@ -404,22 +563,23 @@ func (w *pdfReportWriter) metricGrid(summary reportSummary) {
 }
 
 func (w *pdfReportWriter) bullets(title string, items []string) {
+	t := w.theme()
 	if len(items) == 0 {
 		return
 	}
 	w.ensure(28)
-	w.text(36, w.y, 10.5, true, 0.914, 0.902, 0.875, title)
+	w.text(36, w.y, 10.5, true, t.BrandText, title)
 	w.y -= 17
 	for _, item := range items {
 		lines := wrapPDFText(item, 92)
 		w.ensure(float64(len(lines))*12 + 5)
-		w.text(39, w.y, 9, true, 0.851, 0.467, 0.341, "-")
+		w.text(39, w.y, 9, true, t.Accent, "-")
 		for index, line := range lines {
 			x := 50.0
 			if index > 0 {
 				x = 50
 			}
-			w.text(x, w.y, 8.7, false, 0.74, 0.74, 0.71, line)
+			w.text(x, w.y, 8.7, false, t.BodyText, line)
 			w.y -= 12
 		}
 		w.y -= 3
@@ -428,6 +588,7 @@ func (w *pdfReportWriter) bullets(title string, items []string) {
 }
 
 func (w *pdfReportWriter) topTable(title, label string, rows []kv) {
+	t := w.theme()
 	if len(rows) == 0 {
 		return
 	}
@@ -442,29 +603,31 @@ func (w *pdfReportWriter) topTable(title, label string, rows []kv) {
 		height := math.Max(25, float64(len(lines))*11+9)
 		w.ensure(height)
 		if index%2 == 1 {
-			w.rect(32, w.y-height+5, pdfPageWidth-64, height, 0.151, 0.151, 0.145)
+			w.rect(32, w.y-height+5, pdfPageWidth-64, height, t.AltRow)
 		}
 		barWidth := 115 * float64(row.Count) / float64(maxCount)
-		w.rect(pdfPageWidth-184, w.y-12, barWidth, 5, 0.427, 0.655, 0.925)
+		w.rect(pdfPageWidth-184, w.y-12, barWidth, 5, t.Bar)
 		for _, line := range lines {
-			w.text(38, w.y-7, 8.3, false, 0.74, 0.74, 0.71, line)
+			w.text(38, w.y-7, 8.3, false, t.BodyText, line)
 			w.y -= 11
 		}
-		w.text(pdfPageWidth-55, w.y+float64(len(lines))*11-7, 8.5, true, 0.914, 0.902, 0.875, strconv.Itoa(row.Count))
+		w.text(pdfPageWidth-55, w.y+float64(len(lines))*11-7, 8.5, true, t.BrandText, strconv.Itoa(row.Count))
 		w.y -= 8
 	}
 	w.y -= 4
 }
 
 func (w *pdfReportWriter) tableHeader(left, right string) {
+	t := w.theme()
 	w.ensure(23)
-	w.rect(32, w.y-17, pdfPageWidth-64, 22, 0.220, 0.220, 0.208)
-	w.text(38, w.y-10, 8, true, 0.914, 0.902, 0.875, strings.ToUpper(left))
-	w.text(pdfPageWidth-68, w.y-10, 8, true, 0.914, 0.902, 0.875, strings.ToUpper(right))
+	w.rect(32, w.y-17, pdfPageWidth-64, 22, t.TableHeader)
+	w.text(38, w.y-10, 8, true, t.BrandText, strings.ToUpper(left))
+	w.text(pdfPageWidth-68, w.y-10, 8, true, t.BrandText, strings.ToUpper(right))
 	w.y -= 24
 }
 
 func (w *pdfReportWriter) operationalAlerts(alerts []alertRecord) {
+	t := w.theme()
 	if len(alerts) == 0 {
 		return
 	}
@@ -482,18 +645,19 @@ func (w *pdfReportWriter) operationalAlerts(alerts []alertRecord) {
 		height := math.Max(25, float64(len(lines))*11+9)
 		w.ensure(height)
 		if index%2 == 1 {
-			w.rect(32, w.y-height+5, pdfPageWidth-64, height, 0.151, 0.151, 0.145)
+			w.rect(32, w.y-height+5, pdfPageWidth-64, height, t.AltRow)
 		}
 		for _, line := range lines {
-			w.text(38, w.y-7, 8.2, false, 0.74, 0.74, 0.71, line)
+			w.text(38, w.y-7, 8.2, false, t.BodyText, line)
 			w.y -= 11
 		}
-		w.text(pdfPageWidth-55, w.y+float64(len(lines))*11-7, 8.5, true, 0.914, 0.902, 0.875, strconv.Itoa(alert.Count))
+		w.text(pdfPageWidth-55, w.y+float64(len(lines))*11-7, 8.5, true, t.BrandText, strconv.Itoa(alert.Count))
 		w.y -= 8
 	}
 }
 
 func (w *pdfReportWriter) eventAppendix(events []storedEvent) {
+	t := w.theme()
 	w.section("Evidence appendix - representative events")
 	if len(events) == 0 {
 		w.paragraph("No matching event records were available.")
@@ -508,12 +672,12 @@ func (w *pdfReportWriter) eventAppendix(events []storedEvent) {
 		height := 25 + float64(len(lines))*10
 		w.ensure(height)
 		if index%2 == 0 {
-			w.rect(32, w.y-height+7, pdfPageWidth-64, height, 0.151, 0.151, 0.145)
+			w.rect(32, w.y-height+7, pdfPageWidth-64, height, t.AltRow)
 		}
-		w.text(38, w.y-6, 7.8, true, 0.914, 0.902, 0.875, head)
+		w.text(38, w.y-6, 7.8, true, t.BrandText, head)
 		w.y -= 14
 		for _, line := range lines {
-			w.text(38, w.y-5, 7.8, false, 0.66, 0.67, 0.65, line)
+			w.text(38, w.y-5, 7.8, false, t.FaintText, line)
 			w.y -= 10
 		}
 		w.y -= 6
@@ -531,30 +695,30 @@ func (w *pdfReportWriter) parameters(data reportData) {
 	w.paragraph("Limitations: honeypot interactions show hostile or suspicious activity directed at decoy services. GeoIP, ASN, provider, behavioral mappings, and risk scoring are contextual triage aids. They do not prove attribution, physical location, successful compromise, or impact to production systems.")
 }
 
-func (w *pdfReportWriter) text(x, y, size float64, bold bool, r, g, b float64, value string) {
+func (w *pdfReportWriter) text(x, y, size float64, bold bool, color pdfRGB, value string) {
 	font := "F1"
 	if bold {
 		font = "F2"
 	}
 	fmt.Fprintf(&w.page.content, "BT /%s %.2f Tf %.3f %.3f %.3f rg %.2f %.2f Td (%s) Tj ET\n",
-		font, size, r, g, b, x, y, escapePDFText(value))
+		font, size, color.r, color.g, color.b, x, y, escapePDFText(value))
 }
 
-func (w *pdfReportWriter) displayText(x, y, size, r, g, b float64, value string) {
+func (w *pdfReportWriter) displayText(x, y, size float64, color pdfRGB, value string) {
 	fmt.Fprintf(&w.page.content, "BT /F3 %.2f Tf %.3f %.3f %.3f rg %.2f %.2f Td (%s) Tj ET\n",
-		size, r, g, b, x, y, escapePDFText(value))
+		size, color.r, color.g, color.b, x, y, escapePDFText(value))
 }
 
-func (w *pdfReportWriter) rect(x, y, width, height, r, g, b float64) {
-	fmt.Fprintf(&w.page.content, "%.3f %.3f %.3f rg %.2f %.2f %.2f %.2f re f\n", r, g, b, x, y, width, height)
+func (w *pdfReportWriter) rect(x, y, width, height float64, color pdfRGB) {
+	fmt.Fprintf(&w.page.content, "%.3f %.3f %.3f rg %.2f %.2f %.2f %.2f re f\n", color.r, color.g, color.b, x, y, width, height)
 }
 
-func (w *pdfReportWriter) strokeRect(x, y, width, height, r, g, b float64) {
-	fmt.Fprintf(&w.page.content, "%.3f %.3f %.3f RG 0.6 w %.2f %.2f %.2f %.2f re S\n", r, g, b, x, y, width, height)
+func (w *pdfReportWriter) strokeRect(x, y, width, height float64, color pdfRGB) {
+	fmt.Fprintf(&w.page.content, "%.3f %.3f %.3f RG 0.6 w %.2f %.2f %.2f %.2f re S\n", color.r, color.g, color.b, x, y, width, height)
 }
 
-func (w *pdfReportWriter) line(x1, y1, x2, y2, r, g, b float64) {
-	fmt.Fprintf(&w.page.content, "%.3f %.3f %.3f RG 0.6 w %.2f %.2f m %.2f %.2f l S\n", r, g, b, x1, y1, x2, y2)
+func (w *pdfReportWriter) line(x1, y1, x2, y2 float64, color pdfRGB) {
+	fmt.Fprintf(&w.page.content, "%.3f %.3f %.3f RG 0.6 w %.2f %.2f m %.2f %.2f l S\n", color.r, color.g, color.b, x1, y1, x2, y2)
 }
 
 func escapePDFText(value string) string {
@@ -599,6 +763,11 @@ func (d *pdfDocument) bytes() []byte {
 	if len(d.pages) == 0 {
 		d.pages = append(d.pages, &pdfPage{})
 	}
+	muted := d.theme.MutedText
+	footerLeft := d.footerLeft
+	if footerLeft == "" {
+		footerLeft = defaultPDFBranding().FooterLeft
+	}
 	objects := make([][]byte, 5+len(d.pages)*2)
 	objects[0] = []byte("<< /Type /Catalog /Pages 2 0 R >>")
 	var kids strings.Builder
@@ -612,7 +781,8 @@ func (d *pdfDocument) bytes() []byte {
 	for index, page := range d.pages {
 		pageNumber := 6 + index*2
 		contentNumber := pageNumber + 1
-		footer := fmt.Sprintf("BT /F1 7.5 Tf 0.55 0.56 0.55 rg 32 27 Td (PRIVATE - XORE//HONEYPOT) Tj ET\nBT /F1 7.5 Tf 0.55 0.56 0.55 rg 516 27 Td (Page %d of %d) Tj ET\n", index+1, len(d.pages))
+		footer := fmt.Sprintf("BT /F1 7.5 Tf %.3f %.3f %.3f rg 32 27 Td (%s) Tj ET\nBT /F1 7.5 Tf %.3f %.3f %.3f rg 516 27 Td (Page %d of %d) Tj ET\n",
+			muted.r, muted.g, muted.b, escapePDFText(footerLeft), muted.r, muted.g, muted.b, index+1, len(d.pages))
 		stream := append(append([]byte(nil), page.content.Bytes()...), []byte(footer)...)
 		objects[pageNumber-1] = []byte(fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %.0f %.0f] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> >> /Contents %d 0 R >>", pdfPageWidth, pdfPageHeight, contentNumber))
 		objects[contentNumber-1] = append([]byte(fmt.Sprintf("<< /Length %d >>\nstream\n", len(stream))), append(stream, []byte("endstream")...)...)

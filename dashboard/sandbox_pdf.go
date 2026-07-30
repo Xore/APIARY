@@ -15,9 +15,10 @@ type sandboxPDFMetric struct {
 
 func renderSandboxReportPDF(result sandboxResult, generated time.Time) []byte {
 	writer := &pdfReportWriter{
-		doc:   &pdfDocument{},
-		title: "Sandbox Dynamic Analysis Report",
-		scope: result.Job,
+		doc:      &pdfDocument{theme: pdfThemeDark(), footerLeft: defaultPDFBranding().FooterLeft},
+		title:    "Sandbox Dynamic Analysis Report",
+		scope:    result.Job,
+		branding: defaultPDFBranding(),
 	}
 	writer.newPage()
 	writer.cover(reportData{
@@ -114,6 +115,7 @@ func sandboxAssessment(result sandboxResult) string {
 }
 
 func (w *pdfReportWriter) sandboxMetricGrid(metrics []sandboxPDFMetric) {
+	t := w.theme()
 	cellW, cellH := 126.5, 54.0
 	for index, metric := range metrics {
 		if index%4 == 0 {
@@ -121,14 +123,14 @@ func (w *pdfReportWriter) sandboxMetricGrid(metrics []sandboxPDFMetric) {
 		}
 		x := 32 + float64(index%4)*(cellW+7)
 		y := w.y - cellH
-		w.rect(x, y, cellW, cellH, 0.173, 0.173, 0.165)
-		w.strokeRect(x, y, cellW, cellH, 0.24, 0.24, 0.23)
+		w.rect(x, y, cellW, cellH, t.Card)
+		w.strokeRect(x, y, cellW, cellH, t.CardBorder)
 		value := firstNonEmpty(metric.Value, "not available")
 		if len(value) > 22 {
 			value = value[:19] + "..."
 		}
-		w.text(x+10, y+31, 13, true, 0.914, 0.902, 0.875, value)
-		w.text(x+10, y+14, 7.5, true, 0.55, 0.56, 0.55, strings.ToUpper(metric.Label))
+		w.text(x+10, y+31, 13, true, t.BrandText, value)
+		w.text(x+10, y+14, 7.5, true, t.MutedText, strings.ToUpper(metric.Label))
 		if index%4 == 3 || index == len(metrics)-1 {
 			w.y -= cellH + 8
 		}
@@ -137,6 +139,7 @@ func (w *pdfReportWriter) sandboxMetricGrid(metrics []sandboxPDFMetric) {
 }
 
 func (w *pdfReportWriter) sandboxKeyValues(title string, rows [][2]string) {
+	t := w.theme()
 	w.section(title)
 	for index, row := range rows {
 		if strings.TrimSpace(row[1]) == "" {
@@ -146,11 +149,11 @@ func (w *pdfReportWriter) sandboxKeyValues(title string, rows [][2]string) {
 		height := max(24.0, float64(len(lines))*11+10)
 		w.ensure(height)
 		if index%2 == 0 {
-			w.rect(32, w.y-height+5, pdfPageWidth-64, height, 0.151, 0.151, 0.145)
+			w.rect(32, w.y-height+5, pdfPageWidth-64, height, t.AltRow)
 		}
-		w.text(38, w.y-7, 8, true, 0.55, 0.56, 0.55, strings.ToUpper(row[0]))
+		w.text(38, w.y-7, 8, true, t.MutedText, strings.ToUpper(row[0]))
 		for lineIndex, line := range lines {
-			w.text(176, w.y-7-float64(lineIndex)*11, 8.2, false, 0.914, 0.902, 0.875, line)
+			w.text(176, w.y-7-float64(lineIndex)*11, 8.2, false, t.BrandText, line)
 		}
 		w.y -= height
 	}
