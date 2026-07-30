@@ -611,8 +611,9 @@ const settingsModal = `
   </div>
 
   <!-- Nested confirmation. It is a descendant of the settings modal, per the
-       theme modal contract, so the browser top-layer invariant holds. -->
-  <div class="edit-dialog-backdrop" id="hp-settings-confirm-backdrop" aria-hidden="true" inert></div>
+       theme modal contract, so the browser top-layer invariant holds. It is a
+       native dialog opened with showModal(), so it uses its own ::backdrop —
+       MODALS.md forbids pairing that with an ordinary sibling backdrop. -->
   <dialog class="edit-dialog" id="hp-settings-confirm" role="alertdialog" aria-modal="true" aria-labelledby="hp-settings-confirm-title" aria-describedby="hp-settings-confirm-desc">
     <h2 class="edit-dialog__title" id="hp-settings-confirm-title">Save preferences?</h2>
     <p class="edit-dialog__desc" id="hp-settings-confirm-desc"></p>

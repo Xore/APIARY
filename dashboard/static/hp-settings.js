@@ -114,6 +114,9 @@
     if (!isOpen || !modal) return;
     const confirm = modal.querySelector("#hp-settings-confirm");
     if (confirm && confirm.open) return;
+    // The shared destructive confirmation can also sit above this modal; it
+    // owns Escape while open, so the settings surface must not close too.
+    if (window.HoneypotModals?.isOpen()) return;
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
@@ -154,7 +157,6 @@
     const panes = qa("[data-hp-pane]");
     const saveButtons = qa("[data-hp-save]");
     const resetAll = q("[data-hp-reset-all]");
-    const confirmBackdrop = q("#hp-settings-confirm-backdrop");
     const confirmDialog = q("#hp-settings-confirm");
     const confirmTitle = q("#hp-settings-confirm-title");
     const confirmDesc = q("#hp-settings-confirm-desc");
@@ -323,8 +325,6 @@
       confirmAction.textContent = actionLabel;
       confirmAction.classList.toggle("btn-danger", Boolean(danger));
       confirmAction.classList.toggle("btn-primary", !danger);
-      confirmBackdrop.classList.add("open");
-      confirmBackdrop.inert = false;
       try { confirmDialog.showModal(); } catch { /* already open */ }
       confirmAction.focus();
     }
@@ -332,8 +332,6 @@
     function closeConfirm(refocus = true) {
       state.confirmCallback = null;
       if (confirmDialog && confirmDialog.open) confirmDialog.close();
-      confirmBackdrop.classList.remove("open");
-      confirmBackdrop.inert = true;
       if (refocus && state.confirmInitiator) state.confirmInitiator.focus();
       state.confirmInitiator = null;
     }
@@ -350,8 +348,6 @@
       });
       // Native Esc on the confirm closes ONLY the confirm (modal stays open).
       confirmDialog.addEventListener("close", () => {
-        confirmBackdrop.classList.remove("open");
-        confirmBackdrop.inert = true;
         if (state.confirmCallback) { // closed via Escape, not via the action
           state.confirmCallback = null;
           if (state.confirmInitiator) { state.confirmInitiator.focus(); state.confirmInitiator = null; }

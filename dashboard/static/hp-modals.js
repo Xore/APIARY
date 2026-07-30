@@ -85,7 +85,11 @@
   document.addEventListener("keydown", (event) => {
     if (!backdrop.classList.contains("open")) return;
     if (event.key === "Escape" && !running) {
+      // Escape closes the deepest temporary layer only. Both this controller
+      // and the settings modal listen on document, so ordinary propagation
+      // stopping would not reach the sibling listener.
       event.preventDefault();
+      event.stopImmediatePropagation();
       close();
       return;
     }
@@ -157,5 +161,11 @@
     });
   });
 
-  window.HoneypotModals = Object.freeze({ confirm: open, close });
+  // isOpen lets another controller yield Escape to this layer without relying
+  // on which script registered its document listener first.
+  window.HoneypotModals = Object.freeze({
+    confirm: open,
+    close,
+    isOpen: () => backdrop.classList.contains("open"),
+  });
 })();

@@ -41,7 +41,7 @@ func TestSettingsModalIsCenteredOverlay(t *testing.T) {
 		`data-hp-save="time"`, `data-hp-save="map"`, `data-hp-reset-all`,
 		`data-hp-acct-name`, `data-hp-acct-subject`, `data-hp-acct-role`,
 		`data-hp-acct-caps`, `data-hp-acct-link`, `data-hp-acct-logout`,
-		`id="hp-settings-confirm-backdrop"`, `id="hp-settings-confirm"`,
+		`id="hp-settings-confirm"`,
 		`data-hp-confirm-cancel`, `data-hp-confirm-action`, `role="alertdialog"`,
 	} {
 		if !strings.Contains(html, want) {
@@ -54,6 +54,9 @@ func TestSettingsModalIsCenteredOverlay(t *testing.T) {
 	for _, absent := range []string{
 		"<!doctype", "<html", "<head>", "<head ", "<body", "<script",
 		"data-permanent-dialog", "modal--permanent", `data-hp-settings-back`,
+		// MODALS.md strategy 1: a native dialog opened with showModal() uses
+		// its own ::backdrop and must not be paired with a sibling backdrop.
+		`id="hp-settings-confirm-backdrop"`,
 	} {
 		if strings.Contains(html, absent) {
 			t.Fatalf("settings modal must not contain page marker %q", absent)
@@ -75,16 +78,31 @@ func TestSettingsModalIsCenteredOverlay(t *testing.T) {
 	}
 
 	// The nested confirmation must appear INSIDE the modal: the modal opens
-	// first, and both confirm elements follow it.
+	// first and the confirmation follows it, before the modal closes.
 	dialogAt := strings.Index(html, `id="hp-settings"`)
-	backdropAt := strings.Index(html, `id="hp-settings-confirm-backdrop"`)
 	confirmAt := strings.Index(html, `id="hp-settings-confirm"`)
-	if dialogAt < 0 || backdropAt < dialogAt || confirmAt < backdropAt {
+	if dialogAt < 0 || confirmAt < dialogAt || !strings.HasSuffix(strings.TrimSpace(html), "</section>") {
 		t.Fatal("nested confirmation must be a descendant of the settings modal")
 	}
 
 	if strings.Contains(html, "dashboard operator") {
 		t.Fatal("settings modal must render only the auth-backend provided identity")
+	}
+}
+
+// The shared confirmation is the deepest layer when it is open, so it must
+// stop the keydown reaching the settings modal's own document listener —
+// plain stopPropagation would not, since both listen on document.
+func TestSharedConfirmationOwnsEscapeWhileOpen(t *testing.T) {
+	data, err := staticAssets.ReadFile("static/hp-modals.js")
+	if err != nil {
+		t.Fatal("static/hp-modals.js must be embedded with the dashboard assets")
+	}
+	js := string(data)
+	for _, want := range []string{"stopImmediatePropagation()", "isOpen:"} {
+		if !strings.Contains(js, want) {
+			t.Fatalf("shared confirmation controller is missing %q", want)
+		}
 	}
 }
 
@@ -129,6 +147,9 @@ func TestSettingsControllerContract(t *testing.T) {
 		"(environment)",    // env-pinned fields show their source
 		"data-cfg",         // admin controls are keyed by data-cfg
 		"flattenConfig",    // dotted-name snapshots drive dirty tracking
+		// Escape belongs to the deepest layer: the settings surface yields to
+		// the shared destructive confirmation as well as to its own.
+		"window.HoneypotModals?.isOpen()",
 	} {
 		if !strings.Contains(js, want) {
 			t.Fatalf("hp-settings.js missing behavior %q", want)

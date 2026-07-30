@@ -379,6 +379,16 @@ button.copy:hover { color: var(--text-primary); background: var(--surface-2); }
   .eventmeta__label { width: auto; }
 }
 
+/* The nested settings confirmation is a native dialog, so its scrim is the
+   browser's own ::backdrop (MODALS.md strategy 1 — never a sibling element).
+   Match the .edit-dialog-backdrop treatment theme.css gives the
+   application-managed overlays. */
+#hp-settings-confirm::backdrop {
+  background: var(--overlay-bg);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
 /* Search results: supporting context under each matched value. */
 .searchhit__detail {
   margin-top: 2px;
