@@ -100,10 +100,17 @@ source "qemu" "win11" {
   efi_firmware_code = "/usr/share/OVMF/OVMF_CODE_4M.secboot.fd"
   efi_firmware_vars = "/usr/share/OVMF/OVMF_VARS_4M.ms.fd"
 
-  # TPM 2.0 — the other hard Windows 11 requirement. Without this the
-  # installer stops at "This PC can't run Windows 11" and the build hangs
-  # until winrm_timeout expires with no usable diagnostic. The plugin starts
-  # swtpm itself; /usr/bin/swtpm must exist on the build host.
+  # TPM 2.0 — the other hard Windows 11 requirement. Without it the installer
+  # stops at "This PC can't run Windows 11" and the build hangs until
+  # winrm_timeout expires with no usable diagnostic.
+  #
+  # Both settings are required. vtpm is the switch that makes the plugin start
+  # swtpm and pass -tpmdev/-device to QEMU; tpm_device_type only chooses the
+  # model. Setting the model alone is silently accepted by `packer validate`
+  # and produces a QEMU command line with no TPM at all — verified by reading
+  # /proc/<qemu>/cmdline on a run that had only tpm_device_type set.
+  # /usr/bin/swtpm must exist on the build host.
+  vtpm            = true
   tpm_device_type = "tpm-tis"
 
   # autounattend.xml is delivered on a secondary CD, not a floppy. The q35
