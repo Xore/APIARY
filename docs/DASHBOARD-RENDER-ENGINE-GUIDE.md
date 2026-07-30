@@ -27,7 +27,7 @@ with line numbers**. The pins are:
 | Repository | Pinned commit |
 |---|---|
 | `Xore/auth-backend` | [`a789089`](https://github.com/Xore/auth-backend/tree/a789089fd85397c2ded300c6ac2a91f386b25fc6) |
-| `Xore/theme` | [`9e11b23`](https://github.com/Xore/theme/tree/9e11b23a65a10271e93721f8a06a2dd636953497) |
+| `Xore/theme` | [`7612eb5`](https://github.com/Xore/theme/tree/7612eb5f16589621744a1e734a57b27060c2ed91) |
 | `Xore/honeypot-stack` | [`e3b6bc9`](https://github.com/Xore/honeypot-stack/tree/e3b6bc92c5149492fcaddb7526c3934d51dd3513) |
 
 When you implement, re-fetch the referenced files at `main` and treat the line
@@ -36,9 +36,9 @@ CSS classes, template names) are the stable anchors.
 
 Read first, in this order:
 
-1. [`Xore/theme` → `docs/TOKENS.md`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/docs/TOKENS.md) — token contract.
-2. [`Xore/theme` → `docs/MODALS.md`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/docs/MODALS.md) — modal behavior contract.
-3. [`Xore/theme` → `docs/MIGRATE-HONEYPOT-STACK.md`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/docs/MIGRATE-HONEYPOT-STACK.md) — migration invariants.
+1. [`Xore/theme` → `docs/TOKENS.md`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/docs/TOKENS.md) — token contract.
+2. [`Xore/theme` → `docs/MODALS.md`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/docs/MODALS.md) — modal behavior contract.
+3. [`Xore/theme` → `docs/MIGRATE-HONEYPOT-STACK.md`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/docs/MIGRATE-HONEYPOT-STACK.md) — migration invariants.
 4. `docs/DASHBOARD-UI-REDESIGN-GUIDE.md` (this repo) — current dashboard state.
 
 Before editing:
@@ -71,15 +71,15 @@ func staticHandler() http.Handler {
 }
 ```
 
-- `ui/` holds the vendored `theme.css` (byte-identical to the pinned
-  `Xore/theme` commit — verify with a SHA-256 comparison against
-  [`Xore/theme/theme.css`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/theme.css)),
-  page templates, and compiled CSS. No CDN, no external fonts, no runtime
-  Node.js.
+- `static/` holds the vendored `theme.css` (byte-identical to the pinned
+  `Xore/theme` commit — verified by `scripts/check-vendored-theme.sh` against
+  [`Xore/theme/theme.css`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/theme.css))
+  and the compiled CSS/JS; `ui/partials/` holds the shared page templates.
+  No CDN, no external fonts, no runtime Node.js.
 - Pages link `/static/theme.css`; the palette is never inlined into Go code.
   All colors in page-level CSS reference theme custom properties
   (`var(--surface-1)`, `var(--accent)`, … — token list in
-  [`docs/TOKENS.md` §Surface hierarchy](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/docs/TOKENS.md#L8-L21)).
+  [`docs/TOKENS.md` §Surface hierarchy](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/docs/TOKENS.md#L7-L18)).
 
 ### 1.2 Three rendering patterns
 
@@ -170,7 +170,7 @@ and is sent as an `X-Csrf` header on every mutating fetch
 ### 1.5 Modal architecture (the part to copy faithfully)
 
 From `ui/app.html`, implementing
-[`Xore/theme/docs/MODALS.md`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/docs/MODALS.md):
+[`Xore/theme/docs/MODALS.md`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/docs/MODALS.md):
 
 - **Permanent surface**: one native `<dialog class="modal modal--permanent">`
   ([`app.html#L91-L92`](https://github.com/Xore/auth-backend/blob/a789089fd85397c2ded300c6ac2a91f386b25fc6/forward-auth/ui/app.html#L91-L92)),
@@ -181,13 +181,13 @@ From `ui/app.html`, implementing
   no close button, and its native `cancel` event is `preventDefault()`'ed so
   Escape can never close it
   ([`app.html#L1117`](https://github.com/Xore/auth-backend/blob/a789089fd85397c2ded300c6ac2a91f386b25fc6/forward-auth/ui/app.html#L1117)).
-  This implements [MODALS.md §Permanent settings behavior](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/docs/MODALS.md#L64-L78).
+  This implements [MODALS.md §Permanent settings behavior](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/docs/MODALS.md#L64-L82).
 - **Nested overlays are descendants of the dialog.** The edit, rotate-key,
   and danger confirmations are `<div class="edit-dialog-backdrop">` elements
   placed *inside* the `<dialog>`
   ([`app.html#L112-L148`](https://github.com/Xore/auth-backend/blob/a789089fd85397c2ded300c6ac2a91f386b25fc6/forward-auth/ui/app.html#L112-L148)),
   because a native top-layer dialog hides any sibling overlay regardless of
-  `z-index` — the [top-layer invariant, MODALS.md#L18-L62](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/docs/MODALS.md#L18-L62).
+  `z-index` — the [top-layer invariant, MODALS.md#L18-L62](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/docs/MODALS.md#L18-L62).
   Never render an overlay next to a permanent native dialog.
 - **State machine per overlay**: closed = `aria-hidden="true"` + `inert` +
   no `.open` class; opening removes `inert`, sets `aria-hidden="false"`,
@@ -195,7 +195,7 @@ From `ui/app.html`, implementing
   [`openDangerDialog`/`closeDangerDialog`, `app.html#L224-L243`](https://github.com/Xore/auth-backend/blob/a789089fd85397c2ded300c6ac2a91f386b25fc6/forward-auth/ui/app.html#L224-L243)
   and [`openEditDialog`, `app.html#L306-L333`](https://github.com/Xore/auth-backend/blob/a789089fd85397c2ded300c6ac2a91f386b25fc6/forward-auth/ui/app.html#L306-L333).
   Opacity alone never "closes" anything
-  ([MODALS.md §State and accessibility](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/docs/MODALS.md#L111-L124)).
+  ([MODALS.md §State and accessibility](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/docs/MODALS.md#L115-L128)).
 - **Confirmation contract**: initiating click/Enter opens the warning →
   warning names the action and its consequences (the copy table in
   [`confirmAct`, `app.html#L252-L303`](https://github.com/Xore/auth-backend/blob/a789089fd85397c2ded300c6ac2a91f386b25fc6/forward-auth/ui/app.html#L252-L303)) →
@@ -203,13 +203,13 @@ From `ui/app.html`, implementing
   and returns focus → Confirm clears the pending callback *before* running it
   ([`runDangerAction`, `app.html#L244-L250`](https://github.com/Xore/auth-backend/blob/a789089fd85397c2ded300c6ac2a91f386b25fc6/forward-auth/ui/app.html#L244-L250))
   so double-Enter cannot fire twice, executes once, and reports via a flash
-  toast. Required by [MODALS.md §Confirmation behavior](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/docs/MODALS.md#L80-L97).
+  toast. Required by [MODALS.md §Confirmation behavior](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/docs/MODALS.md#L84-L101).
 - **Keyboard layering**: Escape closes the deepest open layer first (danger →
   rotate → edit → action menu), never the permanent surface
   ([`app.html#L1092-L1108`](https://github.com/Xore/auth-backend/blob/a789089fd85397c2ded300c6ac2a91f386b25fc6/forward-auth/ui/app.html#L1092-L1108)).
   Enter in a config field opens the same confirmation as its Save button
   ([`app.html#L1199-L1205`](https://github.com/Xore/auth-backend/blob/a789089fd85397c2ded300c6ac2a91f386b25fc6/forward-auth/ui/app.html#L1199-L1205)).
-  Rules from [MODALS.md §Keyboard rules](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/docs/MODALS.md#L99-L109).
+  Rules from [MODALS.md §Keyboard rules](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/docs/MODALS.md#L103-L113).
 - **Roles**: `role="dialog"` for edits, `role="alertdialog"` for
   consequential confirmations, always `aria-modal="true"` +
   `aria-labelledby` ([`app.html#L113`, `L126`, `L138`](https://github.com/Xore/auth-backend/blob/a789089fd85397c2ded300c6ac2a91f386b25fc6/forward-auth/ui/app.html#L112-L148)).
@@ -252,17 +252,20 @@ All references pinned to `Xore/honeypot-stack@e3b6bc9`.
   [`main.go#L118-L133`](https://github.com/Xore/honeypot-stack/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L118-L133)
   with a `FuncMap` (`worldMap`, `json`, `dict`) and executed per route with
   typed data structs (`s.get()`, `s.eventsData(r)`, `s.attackerData(ip)`, …).
-- The semantic shell is already server-rendered in `page_style.go`:
-  `{{define "style"}}` ([L4-L12](https://github.com/Xore/honeypot-stack/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/page_style.go#L4-L12)),
-  `{{define "sidebar"}}` ([L14-L53](https://github.com/Xore/honeypot-stack/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/page_style.go#L14-L53)),
+- The semantic shell is already server-rendered in `ui/partials/dashboard.html`:
+  `{{define "style"}}` ([L1-L13](https://github.com/Xore/honeypot-stack/blob/main/dashboard/ui/partials/dashboard.html#L1-L13)),
+  `{{define "sidebar"}}` ([L15-L74](https://github.com/Xore/honeypot-stack/blob/main/dashboard/ui/partials/dashboard.html#L15-L74)),
   `{{define "topbar"}}` incl. the `.command-bar` investigation dock
-  ([L55-L80](https://github.com/Xore/honeypot-stack/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/page_style.go#L55-L80)),
+  ([L76-L126](https://github.com/Xore/honeypot-stack/blob/main/dashboard/ui/partials/dashboard.html#L76-L126)),
   and the shared `tbl`/`techniques` blocks
-  ([L82-L97](https://github.com/Xore/honeypot-stack/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/page_style.go#L82-L97)).
+  ([L128-L141](https://github.com/Xore/honeypot-stack/blob/main/dashboard/ui/partials/dashboard.html#L128-L141)).
   No client-side DOM reconstruction.
 - `dashboard/static/theme.css` is vendored byte-identical to
-  `Xore/theme@9e11b23` (sync procedure in
-  [`dashboard/frontend/README.md`](https://github.com/Xore/honeypot-stack/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/frontend/README.md));
+  `Xore/theme@7612eb5`. The pin lives in
+  [`dashboard/frontend/theme.lock`](https://github.com/Xore/honeypot-stack/blob/main/dashboard/frontend/theme.lock)
+  and is enforced on every push by `scripts/check-vendored-theme.sh`
+  (the `Vendored Xore/theme is in sync` job); re-vendor with
+  `scripts/sync-theme.sh`;
   `hp-tailwind.css` is the dashboard layer compiled from
   `dashboard/frontend/src/shell.css`; `hp-app.js` is the hand-written
   enhancement layer (SSE, lazy rows, live refresh, theme toggle, recents).
@@ -370,7 +373,7 @@ func (s *server) renderEvents(w http.ResponseWriter, r *http.Request) {
 ### 3.3 Shared head and shell partial
 
 `partials/head.html` reproduces the current `{{define "style"}}`
-([`page_style.go#L4-L12`](https://github.com/Xore/honeypot-stack/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/page_style.go#L4-L12))
+([`ui/partials/dashboard.html#L1-L13`](https://github.com/Xore/honeypot-stack/blob/main/dashboard/ui/partials/dashboard.html#L1-L13))
 but with the pre-paint theme script nonce'd, like auth-backend's `pageHead`
 ([`page.go#L230-L240`](https://github.com/Xore/auth-backend/blob/a789089fd85397c2ded300c6ac2a91f386b25fc6/forward-auth/page.go#L230-L240)):
 
@@ -421,19 +424,19 @@ in templates to carry `nonce="{{.Nonce}}"`.
 
 Organize by the operator's workflow: **detect → triage → investigate →
 preserve evidence**. The existing three sidebar groups
-([`page_style.go#L14-L53`](https://github.com/Xore/honeypot-stack/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/page_style.go#L14-L53))
+([`ui/partials/dashboard.html#L15-L74`](https://github.com/Xore/honeypot-stack/blob/main/dashboard/ui/partials/dashboard.html#L15-L74))
 already encode this — keep them, and make every page answer exactly one
 question. All primitives cited below exist in `theme.css` (`.metric-grid`/
-`.metric` at [L396-L410](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/theme.css#L396-L410),
-`.badge` at [L412-L431](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/theme.css#L412-L431),
-`.data-table`/`.table-scroll` at [L470-L492](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/theme.css#L470-L492),
-`.card` at [L366-L373](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/theme.css#L366-L373)).
+`.metric` at [L444-L458](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/theme.css#L444-L458),
+`.badge` at [L460-L481](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/theme.css#L460-L481),
+`.data-table`/`.table-scroll` at [L519-L541](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/theme.css#L519-L541),
+`.card` at [L414-L442](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/theme.css#L414-L442)).
 
 ### 4.1 Monitor (answer: "is something happening right now?")
 
 | Route | Question answered | Layout |
 |---|---|---|
-| `/` overview | What is the current threat picture? | Full width. `.metric-grid` KPI row (events 24h, unique sources, payloads, open alerts — neutral tiles, severity only in badges). Attack-origin map (Leaflet, state preserved across refresh). Activity feed + top-N `tbl` cards (top IPs, usernames, passwords, commands, paths — the shared block at [`page_style.go#L82-L91`](https://github.com/Xore/honeypot-stack/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/page_style.go#L82-L91)). Source-health strip. |
+| `/` overview | What is the current threat picture? | Full width. `.metric-grid` KPI row (events 24h, unique sources, payloads, open alerts — neutral tiles, severity only in badges). Attack-origin map (Leaflet, state preserved across refresh). Activity feed + top-N `tbl` cards (top IPs, usernames, passwords, commands, paths — the shared block at [`ui/partials/dashboard.html#L128-L137`](https://github.com/Xore/honeypot-stack/blob/main/dashboard/ui/partials/dashboard.html#L128-L137)). Source-health strip. |
 | `/source-health` | Are all sensors and the pipeline alive? | `.app-content` (1120px). Status grid: one card per expected sensor with last-seen, event rate, and a `.badge` state (green/red). Elasticsearch/filebeat status rows. |
 | `/alerts` | What needs acknowledgement? | `.app-content`. Alert table (rule, severity badge, first/last fired, count) with per-row **Acknowledge** action → confirmation modal (§5). |
 
@@ -443,7 +446,7 @@ question. All primitives cited below exist in `theme.css` (`.metric-grid`/
 |---|---|---|
 | `/events` | Which raw events match my filter? | Full width. Sticky filter bar (time range, sensor, IP, free text) → lazy 25-row `.data-table` in `.table-scroll`, expandable normalized JSON per row, "load more" sentinel, CSV export. Row click opens the **event detail modal** (§5) instead of navigating away when only reading. |
 | `/ips` | Which sources attack us? | Full width lazy table: IP, country/ASN (GeoIP), first/last seen, sensor spread, event count. Row → `/investigate/ip/{ip}`. |
-| `/investigate/ip/{ip}` | What did this one source do, in order? | `.app-content--wide` (1360px). Header card: IP, geo/ASN, totals, MITRE `techniques` block (shared template at [`page_style.go#L93-L97`](https://github.com/Xore/honeypot-stack/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/page_style.go#L93-L97)). Below: chronological **attack-chain timeline** (vertical, timestamped events, session boundaries), linked sessions and payload references. |
+| `/investigate/ip/{ip}` | What did this one source do, in order? | `.app-content--wide` (1360px). Header card: IP, geo/ASN, totals, MITRE `techniques` block (shared template at [`ui/partials/dashboard.html#L139-L141`](https://github.com/Xore/honeypot-stack/blob/main/dashboard/ui/partials/dashboard.html#L139-L141)). Below: chronological **attack-chain timeline** (vertical, timestamped events, session boundaries), linked sessions and payload references. |
 | `/sessions/{id}` | What happened inside this session? | `.app-content--wide`. Session header (src, duration, credentials tried) + replay timeline of commands with mono font, linked payload hashes. |
 | `/campaigns` | Which activity is coordinated? | `.app-content`. Campaign cards: shared fingerprint, member IPs, time span, event volume. |
 | `/clusters` | Which infrastructure is shared? | `.app-content`. Cluster table (ASN/prefix, members, first/last seen). |
@@ -461,8 +464,8 @@ question. All primitives cited below exist in `theme.css` (`.metric-grid`/
 ### 4.4 Cross-cutting presentation rules
 
 - KPI tiles stay neutral; severity appears only in `.badge` text, never as
-  whole-panel color ([token contract, TOKENS.md §Semantic color](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/docs/TOKENS.md#L31-L32);
-  the `--*-soft` badge surfaces at [`theme.css#L425-L431`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/theme.css#L425-L431)).
+  whole-panel color ([token contract, TOKENS.md §Semantic color](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/docs/TOKENS.md#L27-L42);
+  the `--*-soft` badge surfaces at [`theme.css#L473-L480`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/theme.css#L473-L480)).
 - Identifiers (IPs, hashes, sessions, commands) always render in the mono
   stack and are copy-on-click where useful — reuse the auth-backend
   clipboard pattern ([`copyToClipboard`, `app.html#L173-L188`](https://github.com/Xore/auth-backend/blob/a789089fd85397c2ded300c6ac2a91f386b25fc6/forward-auth/ui/app.html#L173-L188)
@@ -470,13 +473,13 @@ question. All primitives cited below exist in `theme.css` (`.metric-grid`/
   with the flash toast as feedback.
 - Every list page has an explicit empty state (`(none)`/`empty-row`) and an
   error state; every table is horizontally scrollable on narrow screens
-  (`.table-scroll`, [`theme.css#L492`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/theme.css#L492)).
+  (`.table-scroll`, [`theme.css#L541`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/theme.css#L541)).
 - Widths: full width for map/large tables, 1120px `.app-content` for
   list/status pages, 1360px `.app-content--wide` for investigations
-  (geometry tokens in [TOKENS.md §Geometry](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/docs/TOKENS.md#L34-L45)).
+  (geometry tokens in [TOKENS.md §Geometry](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/docs/TOKENS.md#L44-L52)).
 - The `.command-bar` investigation dock
-  ([`page_style.go#L73-L80`](https://github.com/Xore/honeypot-stack/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/page_style.go#L73-L80),
-  themed at [`theme.css#L667-L681`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/theme.css#L667-L681))
+  ([`ui/partials/dashboard.html#L93-L101`](https://github.com/Xore/honeypot-stack/blob/main/dashboard/ui/partials/dashboard.html#L93-L101),
+  themed at [`theme.css#L953-L967`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/theme.css#L953-L967))
   stays the global entry point (`/` shortcut) — it is a command bar, not a
   modal; do not convert it.
 - Live behavior is non-negotiable: SSE toasts
@@ -489,15 +492,15 @@ question. All primitives cited below exist in `theme.css` (`.metric-grid`/
 ## 5. Modal plan for the dashboard
 
 The dashboard currently has no modals; add them per
-[`Xore/theme/docs/MODALS.md`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/docs/MODALS.md).
+[`Xore/theme/docs/MODALS.md`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/docs/MODALS.md).
 The dashboard shell is an ordinary server-rendered page (not a permanent
 dialog), so dashboard modals are **temporary application-managed overlays**
 rendered in a single `#modal-root` at the end of `partials/shell.html`. If
 any native `<dialog>` is ever used as a permanent surface, every overlay
 becomes its descendant — the
-[top-layer invariant](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/docs/MODALS.md#L18-L62)
+[top-layer invariant](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/docs/MODALS.md#L18-L62)
 is absolute. The theme provides the visual base (`.modal-backdrop`/`.modal`
-at [`theme.css#L683-L714`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/theme.css#L683-L714));
+at [`theme.css#L969-L1002`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/theme.css#L969-L1002));
 the behavior contract comes from auth-backend (§1.5).
 
 ### 5.1 Modal inventory
@@ -550,7 +553,7 @@ Tab cycles within the open layer. All wiring via delegation — no inline
 handlers (CSP, §3.5).
 
 Regression checks to automate (from
-[MODALS.md §Required regression checks](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/docs/MODALS.md#L136-L150),
+[MODALS.md §Required regression checks](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/docs/MODALS.md#L140-L154),
 jsdom or browser test):
 
 - closed overlays have `inert` + `aria-hidden="true"` and zero dimensions;
@@ -569,7 +572,7 @@ jsdom or browser test):
    No route changes yet.
 2. **Partials**: extract `{{define "style"/"sidebar"/"topbar"/"tbl"/
    "techniques"}}` from
-   [`page_style.go`](https://github.com/Xore/honeypot-stack/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/page_style.go)
+   [`ui/partials/dashboard.html`](https://github.com/Xore/honeypot-stack/blob/main/dashboard/ui/partials/dashboard.html)
    into `ui/partials/*.html` with the nonce'd head. Wire parsing; verify
    every route still renders.
 3. **Page migration**: move one route's template per commit, easiest first:
@@ -605,7 +608,7 @@ npm --prefix dashboard/frontend run build   # after any template/hp-app.js edit
 Add/extend Go tests (pattern: existing `main_test.go`) for: initial shell
 HTML per route, nonce presence on inline blocks, CSP header shape, row-
 fragment endpoints, and the modal DOM contract. Visual acceptance matrix per
-[MIGRATE-HONEYPOT-STACK.md §Visual acceptance](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/docs/MIGRATE-HONEYPOT-STACK.md)
+[MIGRATE-HONEYPOT-STACK.md §Visual acceptance](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/docs/MIGRATE-HONEYPOT-STACK.md)
 — all routes at 1440×900, 1024×768, 390×844, dark and light, including each
 open modal state.
 
@@ -674,38 +677,38 @@ open modal state.
 | Content delegation + Enter-in-field confirm | [`forward-auth/ui/app.html#L1197-L1205`](https://github.com/Xore/auth-backend/blob/a789089fd85397c2ded300c6ac2a91f386b25fc6/forward-auth/ui/app.html#L1197-L1205) |
 | State poll interval + initial pane from URL | [`forward-auth/ui/app.html#L1207-L1212`](https://github.com/Xore/auth-backend/blob/a789089fd85397c2ded300c6ac2a91f386b25fc6/forward-auth/ui/app.html#L1207-L1212) |
 
-### Xore/theme @ `9e11b23` — the design system
+### Xore/theme @ `7612eb5` — the design system
 
 | Construct | Location |
 |---|---|
-| Top-layer invariant + containment examples | [`docs/MODALS.md#L18-L62`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/docs/MODALS.md#L18-L62) |
-| Permanent settings behavior | [`docs/MODALS.md#L64-L78`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/docs/MODALS.md#L64-L78) |
-| Confirmation behavior | [`docs/MODALS.md#L80-L97`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/docs/MODALS.md#L80-L97) |
-| Keyboard rules | [`docs/MODALS.md#L99-L109`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/docs/MODALS.md#L99-L109) |
-| State and accessibility | [`docs/MODALS.md#L111-L124`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/docs/MODALS.md#L111-L124) |
-| Required regression checks | [`docs/MODALS.md#L136-L150`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/docs/MODALS.md#L136-L150) |
-| Surface/text tokens | [`docs/TOKENS.md#L8-L32`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/docs/TOKENS.md#L8-L32) |
-| Geometry tokens | [`docs/TOKENS.md#L34-L45`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/docs/TOKENS.md#L34-L45) |
-| `.btn` variants | [`theme.css#L224-L259`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/theme.css#L224-L259) |
-| `.form-input` | [`theme.css#L278-L299`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/theme.css#L278-L299) |
-| `.card` | [`theme.css#L366-L373`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/theme.css#L366-L373) |
-| `.metric-grid` / `.metric` | [`theme.css#L396-L410`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/theme.css#L396-L410) |
-| `.badge` semantic modifiers | [`theme.css#L412-L431`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/theme.css#L412-L431) |
-| `.tabs` | [`theme.css#L449`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/theme.css#L449) |
-| `.data-table` / `.table-scroll` | [`theme.css#L470-L492`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/theme.css#L470-L492) |
-| `.toast` | [`theme.css#L573`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/theme.css#L573) |
-| App-shell primitives (`.app-shell` → `.command-bar`) | [`theme.css#L607-L681`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/theme.css#L607-L681) |
-| `.modal-backdrop` / `.modal` | [`theme.css#L683-L714`](https://github.com/Xore/theme/blob/9e11b23a65a10271e93721f8a06a2dd636953497/theme.css#L683-L714) |
+| Top-layer invariant + containment examples | [`docs/MODALS.md#L18-L62`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/docs/MODALS.md#L18-L62) |
+| Permanent settings behavior | [`docs/MODALS.md#L64-L82`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/docs/MODALS.md#L64-L82) |
+| Confirmation behavior | [`docs/MODALS.md#L84-L101`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/docs/MODALS.md#L84-L101) |
+| Keyboard rules | [`docs/MODALS.md#L103-L113`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/docs/MODALS.md#L103-L113) |
+| State and accessibility | [`docs/MODALS.md#L115-L128`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/docs/MODALS.md#L115-L128) |
+| Required regression checks | [`docs/MODALS.md#L140-L154`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/docs/MODALS.md#L140-L154) |
+| Surface/text tokens | [`docs/TOKENS.md#L7-L42`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/docs/TOKENS.md#L7-L42) |
+| Geometry tokens | [`docs/TOKENS.md#L44-L52`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/docs/TOKENS.md#L44-L52) |
+| `.btn` variants | [`theme.css#L272-L307`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/theme.css#L272-L307) |
+| `.form-input` | [`theme.css#L326-L349`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/theme.css#L326-L349) |
+| `.card` | [`theme.css#L414-L442`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/theme.css#L414-L442) |
+| `.metric-grid` / `.metric` | [`theme.css#L444-L458`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/theme.css#L444-L458) |
+| `.badge` semantic modifiers | [`theme.css#L460-L481`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/theme.css#L460-L481) |
+| `.tabs` | [`theme.css#L498-L517`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/theme.css#L498-L517) |
+| `.data-table` / `.table-scroll` | [`theme.css#L519-L541`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/theme.css#L519-L541) |
+| `.toast` | [`theme.css#L679-L691`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/theme.css#L679-L691) |
+| App-shell primitives (`.app-shell` → `.command-bar`) | [`theme.css#L892-L967`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/theme.css#L892-L967) |
+| `.modal-backdrop` / `.modal` | [`theme.css#L969-L1002`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/theme.css#L969-L1002) |
 
 ### Xore/honeypot-stack @ `e3b6bc9` — the baseline being migrated
 
 | Construct | Location |
 |---|---|
 | `pageTemplate` const concatenation | [`dashboard/page.go#L12`](https://github.com/Xore/honeypot-stack/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/page.go#L12) |
-| `{{define "style"}}` (asset links, pre-paint theme script) | [`dashboard/page_style.go#L4-L12`](https://github.com/Xore/honeypot-stack/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/page_style.go#L4-L12) |
-| `{{define "sidebar"}}` (nav groups, recents, profile) | [`dashboard/page_style.go#L14-L53`](https://github.com/Xore/honeypot-stack/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/page_style.go#L14-L53) |
-| `{{define "topbar"}}` + investigation command dock | [`dashboard/page_style.go#L55-L80`](https://github.com/Xore/honeypot-stack/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/page_style.go#L55-L80) |
-| Shared `tbl` / `techniques` blocks | [`dashboard/page_style.go#L82-L97`](https://github.com/Xore/honeypot-stack/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/page_style.go#L82-L97) |
+| `{{define "style"}}` (asset links, pre-paint theme script) | [`dashboard/ui/partials/dashboard.html#L1-L13`](https://github.com/Xore/honeypot-stack/blob/main/dashboard/ui/partials/dashboard.html#L1-L13) |
+| `{{define "sidebar"}}` (nav groups, recents, profile) | [`dashboard/ui/partials/dashboard.html#L15-L74`](https://github.com/Xore/honeypot-stack/blob/main/dashboard/ui/partials/dashboard.html#L15-L74) |
+| `{{define "topbar"}}` + investigation command dock | [`dashboard/ui/partials/dashboard.html#L76-L126`](https://github.com/Xore/honeypot-stack/blob/main/dashboard/ui/partials/dashboard.html#L76-L126) |
+| Shared `tbl` / `techniques` blocks | [`dashboard/ui/partials/dashboard.html#L128-L141`](https://github.com/Xore/honeypot-stack/blob/main/dashboard/ui/partials/dashboard.html#L128-L141) |
 | Template `FuncMap` + one-time parse | [`dashboard/main.go#L118-L133`](https://github.com/Xore/honeypot-stack/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L118-L133) |
 | `/api/whoami` (forward-auth identity) | [`dashboard/main.go#L150-L157`](https://github.com/Xore/honeypot-stack/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L150-L157) |
 | SSE stream | [`dashboard/main.go#L159`](https://github.com/Xore/honeypot-stack/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L159) |

@@ -8,21 +8,35 @@ not required at runtime. Run `npm ci`, `npm run typecheck`, and
 ## Vendored theme
 
 `../static/theme.css` is a byte-identical copy of the shared Xore theme
-(https://github.com/Xore/theme), vendored at commit `31ea47f`
-(`31ea47ff9e272b032d85b2019feb1e6e59e72954`). It owns the
-design tokens (dark, light, and system modes), the app-shell primitives
+(https://github.com/Xore/theme). The pinned commit and its SHA-256 live in
+[`theme.lock`](./theme.lock) — that file is the single source of truth, and
+`scripts/check-vendored-theme.sh` enforces it in CI. It owns the
+design tokens (dark, light, and system modes, plus the `--space-*` and
+`--font-size-*` scales), the app-shell primitives
 (`.app-shell`, `.app-toolbar`, `.app-sidebar`, `.app-main`, `.command-bar`),
 and the shared components (`.card`, `.btn`, `.badge`, `.form-input`,
 `.data-table`, `.tabs`, `.metric`). `theme.js` is intentionally not vendored —
-`hp-app.js` owns theme preference, navigation, and command-dock behavior.
+`hp-app.js` owns theme preference, navigation, and command-dock behavior, and
+`hp-modals.js`/`hp-settings.js` own the modal contract.
 
 To re-sync after a theme release, from the repository root:
 
 ```bash
-cp ../theme/theme.css dashboard/static/theme.css
+scripts/sync-theme.sh ../theme
 ```
 
-then update the recorded commit above and rebuild the frontend bundle.
+The script copies the stylesheet, rewrites `theme.lock` with the new commit
+and hash, and reminds you to rebuild the frontend bundle. Verify at any time
+with:
+
+```bash
+scripts/check-vendored-theme.sh
+```
+
+When the vendored copy changes, re-read the shared docs before adapting the
+dashboard: `docs/TOKENS.md` (token contract), `docs/MODALS.md` (modal
+behavior contract), and `docs/MIGRATE-HONEYPOT-STACK.md` (migration
+invariants) in `Xore/theme`.
 
 ## Architecture
 

@@ -1,0 +1,7 @@
+# Vendored Xore/theme pin. Written by scripts/sync-theme.sh, enforced by
+# scripts/check-vendored-theme.sh. dashboard/static/theme.css must stay
+# byte-identical to theme.css at this commit.
+repository=https://github.com/Xore/theme
+commit=7612eb5f16589621744a1e734a57b27060c2ed91
+date=2026-07-30T12:46:00+02:00
+sha256=07f859aaa8f1212e76b5edf10c68f6c542810c2218448fa9377b0dd757017c06

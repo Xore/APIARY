@@ -67,6 +67,14 @@ jobs:
       - name: Generated assets are current
         run: git diff --exit-code -- dashboard/static/hp-api.js dashboard/static/hp-tailwind.css
 
+  vendored-theme:
+    name: Vendored Xore/theme is in sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: theme.css matches the pinned commit
+        run: scripts/check-vendored-theme.sh
+
   scripts-and-compose:
     name: Scripts and Compose
     runs-on: ubuntu-latest
