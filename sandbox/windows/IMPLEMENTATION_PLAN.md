@@ -1,7 +1,8 @@
 # Windows 11 Malware Sandbox — Golden Image Implementation Plan
 
-> **Status**: In Progress  
-> **Last updated**: 2026-07-27  
+> **Status**: In Progress — Phase 7's dashboard half is implemented; the host
+> half (golden image, orchestrator, systemd worker) is not.  
+> **Last updated**: 2026-07-30  
 > **Host platform**: KVM + QEMU + libvirt + docker-compose (NO VMware)
 
 ---
@@ -532,6 +533,30 @@ WINDOWS_SANDBOX_RESULTS_DIR/{sha256}_sandbox.json
 ---
 
 ## Phase 7 — Dashboard Integration (spool-file pattern)
+
+> **Implemented 2026-07-30** (dashboard side only):
+> `determineSandboxTarget`, per-target spools via `sandboxRequestDir`, the
+> `Dynamic: false` rejection, `&target=` on the return URL and the payloads
+> notice, merged results/status/exports across both result directories, and
+> the `WINDOWS_SANDBOX_REQUEST_DIR` / `WINDOWS_SANDBOX_RESULTS_DIR` wiring in
+> `.env.example` and `docker-compose.yml`. Both variables are empty by
+> default: until an operator sets them, Windows submissions are refused with
+> a message naming the missing backend rather than misrouted into the Linux
+> spool. Tests live in `dashboard/sandbox_target_test.go` and
+> `dashboard/sandbox_test.go`.
+>
+> **Deliberately not implemented — step 6 and the Ghidra field below.**
+> `serveGhidraSubmit`, the `/ghidra/submit` route, and `GHIDRA_REQUEST_DIR`
+> do not exist in the dashboard; they are Phase 2 of
+> `analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md`. Adding the checkbox and
+> the second form now would ship a button that 404s and a spool write with
+> no reader. Do the Ghidra plan first, then come back for step 6 — it is two
+> lines in `serveSandboxSubmit` once the spool exists.
+>
+> **Also not implemented — the host half.** Nothing consumes
+> `/windows-sandbox-requests` yet. Phases 1–6 (Packer golden image,
+> orchestrator, artifact collection) and §7.2's systemd units are still
+> ahead, which is why the Compose default leaves the backend switched off.
 
 The sandbox is triggered **from the dashboard payloads page** — the same
 one-click pattern used by Ghidra

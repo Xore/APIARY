@@ -9,6 +9,48 @@ import (
 	"strings"
 )
 
+// sandboxTarget names a detonation backend. Each has its own request spool and
+// its own host-side worker; the dashboard only decides which spool to write to.
+type sandboxTarget string
+
+const (
+	targetWindows sandboxTarget = "windows"
+	targetLinux   sandboxTarget = "linux"
+)
+
+// determineSandboxTarget classifies the payload exactly the way the payloads
+// page already labels it, then picks a backend. Only Windows-native
+// executables, DLLs, and scripts need the Windows guest; Linux and
+// cross-platform samples already detonate correctly on the existing runner,
+// which has the interpreters for them.
+//
+// The Dynamic check has to come first. Several classifications are both
+// Windows-platform and static-only — an OLE document is the clearest case —
+// and routing those by platform would queue a run the worker can never
+// perform.
+func determineSandboxTarget(data []byte) (sandboxTarget, bool) {
+	c := classifyPayload(data)
+	if !c.Dynamic {
+		return "", false
+	}
+	if c.Platform == "Windows" {
+		return targetWindows, true
+	}
+	return targetLinux, true
+}
+
+// sandboxRequestDir maps a target to its spool. An unset Windows spool means
+// the Windows worker is not deployed on this host, which is the normal state
+// before that stack exists; submissions for it are refused rather than
+// silently redirected into the Linux spool, where the Linux runner would try
+// to execute a PE file.
+func sandboxRequestDir(target sandboxTarget) string {
+	if target == targetWindows {
+		return getenv("WINDOWS_SANDBOX_REQUEST_DIR", "")
+	}
+	return getenv("SANDBOX_REQUEST_DIR", "/sandbox-requests")
+}
+
 // serveSandboxSubmit accepts only an existing capture hash. The dashboard
 // writes no sample data and has no access to libvirt, Docker, or systemd; a
 // root-owned host service consumes this narrow request spool.
@@ -34,13 +76,24 @@ func (s *store) serveSandboxSubmit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid payload hash", http.StatusBadRequest)
 		return
 	}
-	if _, err := s.payloadPath(hash); err != nil {
+	path, err := s.payloadPath(hash)
+	if err != nil {
 		http.Error(w, "captured payload not found", http.StatusNotFound)
 		return
 	}
-	dir := getenv("SANDBOX_REQUEST_DIR", "/sandbox-requests")
+	head, err := readPayloadHead(path)
+	if err != nil {
+		http.Error(w, "captured payload is unreadable", http.StatusNotFound)
+		return
+	}
+	target, dynamic := determineSandboxTarget(head)
+	if !dynamic {
+		http.Error(w, "this payload has no dynamic detonation path — see its static analysis instead", http.StatusBadRequest)
+		return
+	}
+	dir := sandboxRequestDir(target)
 	if dir == "" {
-		http.Error(w, "sandbox web submission is disabled", http.StatusServiceUnavailable)
+		http.Error(w, "the "+string(target)+" sandbox is not configured on this host", http.StatusServiceUnavailable)
 		return
 	}
 	request := filepath.Join(dir, hash+".request")
@@ -52,26 +105,48 @@ func (s *store) serveSandboxSubmit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "sandbox request spool unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	http.Redirect(w, r, submitReturnURL(r.FormValue("return"), hash), http.StatusSeeOther)
+	http.Redirect(w, r, submitReturnURL(r.FormValue("return"), hash, target), http.StatusSeeOther)
+}
+
+// readPayloadHead reads the same prefix the payloads listing classifies from.
+// classifyPayload never inspects past 64 KiB, so this is the whole input to the
+// decision, and reading exactly what the table read guarantees the button
+// cannot route somewhere the row's own platform label contradicts.
+func readPayloadHead(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	head := make([]byte, 64<<10)
+	n, err := f.Read(head)
+	if n == 0 && err != nil {
+		return nil, err
+	}
+	return head[:n], nil
 }
 
 // submitReturnURL resolves where to send the browser after a queued request.
 // Re-analysis is initiated from a sandbox run, so returning to /payloads would
 // throw the investigation away. Only same-origin dashboard paths from a fixed
 // allowlist are honored; anything else falls back to the payload inventory.
-func submitReturnURL(raw, hash string) string {
-	fallback := "/payloads?analysis=queued&hash=" + url.QueryEscape(hash)
+//
+// The target rides along so the landing page can name the backend that was
+// chosen. Two guests now accept work and they have very different queue depths,
+// so "queued" alone no longer tells an analyst where to look.
+func submitReturnURL(raw, hash string, target sandboxTarget) string {
+	fallback := "/payloads?analysis=queued&hash=" + url.QueryEscape(hash) + "&target=" + url.QueryEscape(string(target))
 	raw = strings.TrimSpace(raw)
 	if raw == "" || !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") {
 		return fallback
 	}
-	target, err := url.Parse(raw)
-	if err != nil || target.IsAbs() || target.Host != "" {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.IsAbs() || parsed.Host != "" {
 		return fallback
 	}
 	allowed := false
 	for _, prefix := range []string{"/sandbox/", "/payload-analysis/", "/payloads"} {
-		if strings.HasPrefix(target.Path, prefix) {
+		if strings.HasPrefix(parsed.Path, prefix) {
 			allowed = true
 			break
 		}
@@ -79,12 +154,13 @@ func submitReturnURL(raw, hash string) string {
 	if !allowed {
 		return fallback
 	}
-	query := target.Query()
+	query := parsed.Query()
 	query.Set("analysis", "queued")
 	query.Set("hash", hash)
-	target.RawQuery = query.Encode()
-	target.Fragment = ""
-	return target.String()
+	query.Set("target", string(target))
+	parsed.RawQuery = query.Encode()
+	parsed.Fragment = ""
+	return parsed.String()
 }
 
 func sameOriginRequest(r *http.Request) bool {

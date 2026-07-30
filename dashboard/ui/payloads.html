@@ -6,7 +6,7 @@
   <td class="n">{{.SizeH}}</td>
   <td class="n">{{.Copies}}</td>
   <td class="v"><a class="lnk" href="/payload-analysis/{{.Hash}}">static analysis &rarr;</a></td>
-  <td class="v"><form method="post" action="/sandbox/submit"><input type="hidden" name="hash" value="{{.Hash}}"><button class="btn btn-sm btn-danger" type="submit" title="{{.AnalysisPath}}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg> Analyze</button></form></td>
+  <td class="v">{{if .Dynamic}}<form method="post" action="/sandbox/submit"><input type="hidden" name="hash" value="{{.Hash}}"><button class="btn btn-sm btn-danger" type="submit" title="Detonate in the {{if eq .Platform "Windows"}}Windows{{else}}Linux{{end}} guest &mdash; {{.AnalysisPath}}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg> Analyze</button></form>{{else}}<span class="tw:text-muted" title="{{.AnalysisPath}}">no detonation path</span>{{end}}</td>
   <td class="v"><a class="lnk" href="/payload/{{.Hash}}">download &darr;</a></td>
   <td class="v"><a class="lnk" href="/events?shasum={{.Hash}}">related events &rarr;</a></td>
 </tr>{{end}}
@@ -101,7 +101,8 @@
           </div>
         </header>
 
-        <div class="filters" id="analysis-filters"><a class="chip" href="/payloads">&larr; payloads</a><a class="chip" href="/events?shasum={{.Hash}}">related events</a><a class="chip" href="{{.VT}}" target="_blank" rel="noopener noreferrer">VirusTotal &rarr;</a><a class="chip" href="/payload/{{.Hash}}">download isolated sample &darr;</a><form method="post" action="/sandbox/submit"><input type="hidden" name="hash" value="{{.Hash}}"><button class="btn btn-sm btn-danger" type="submit" title="Execute this payload in the isolated KVM Linux sandbox"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg> Analyze in sandbox</button></form></div>
+        <div class="filters" id="analysis-filters"><a class="chip" href="/payloads">&larr; payloads</a><a class="chip" href="/events?shasum={{.Hash}}">related events</a><a class="chip" href="{{.VT}}" target="_blank" rel="noopener noreferrer">VirusTotal &rarr;</a><a class="chip" href="/payload/{{.Hash}}">download isolated sample &darr;</a>{{if .Classification.Dynamic}}<form method="post" action="/sandbox/submit"><input type="hidden" name="hash" value="{{.Hash}}"><button class="btn btn-sm btn-danger" type="submit" title="Execute this payload in the isolated KVM {{if eq .Classification.Platform "Windows"}}Windows{{else}}Linux{{end}} sandbox"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg> Analyze in {{if eq .Classification.Platform "Windows"}}Windows{{else}}Linux{{end}} sandbox</button></form>{{end}}</div>
+        {{if not .Classification.Dynamic}}<p class="note">{{.Classification.Label}} has no dynamic detonation path &mdash; {{.Classification.AnalysisPath}}. The evidence below is the whole analysis for this artifact.</p>{{end}}
 
         <div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:gap-3 tw:mb-6" id="analysis-kpis">
           <div class="hp-stat"><span class="hp-stat-value">{{.RiskScore}} / 100 &bull; {{.RiskLevel}}</span><span class="hp-stat-label">Static risk</span></div>

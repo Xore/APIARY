@@ -351,7 +351,15 @@ func main() {
 		html(w)
 		data := s.payloadsData(r.URL.Query().Get("source"))
 		if r.URL.Query().Get("analysis") == "queued" && hashName.MatchString(r.URL.Query().Get("hash")) {
-			data.Notice = "Sandbox analysis requested for " + shortHash(r.URL.Query().Get("hash")) + ". The isolated worker will process it shortly."
+			guest := "isolated"
+			switch sandboxTarget(r.URL.Query().Get("target")) {
+			case targetWindows:
+				guest = "Windows"
+			case targetLinux:
+				guest = "Linux"
+			}
+			data.Notice = "Sandbox analysis requested for " + shortHash(r.URL.Query().Get("hash")) +
+				". The " + guest + " worker will process it shortly."
 		}
 		if len(data.Files) > 25 {
 			data.Files = data.Files[:25]

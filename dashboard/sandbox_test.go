@@ -70,3 +70,91 @@ func TestSandboxStatusAndTemplate(t *testing.T) {
 		t.Fatalf("dashboard template does not parse: %v", err)
 	}
 }
+
+// The Windows guest writes to its own spool and its own export directory. The
+// sandbox page is a single list, so both have to merge into one view without
+// either backend's absence breaking the other's.
+func TestSandboxMergesBothBackends(t *testing.T) {
+	linuxResults, windowsResults := t.TempDir(), t.TempDir()
+	linuxRequests, windowsRequests := t.TempDir(), t.TempDir()
+	t.Setenv("SANDBOX_RESULTS_DIR", linuxResults)
+	t.Setenv("WINDOWS_SANDBOX_RESULTS_DIR", windowsResults)
+	t.Setenv("SANDBOX_REQUEST_DIR", linuxRequests)
+	t.Setenv("WINDOWS_SANDBOX_REQUEST_DIR", windowsRequests)
+
+	write := func(dir, name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(linuxResults, "linux-a.json",
+		`{"version":2,"job":"linux-a","sha256":"`+strings.Repeat("a", 64)+`","completed_at":"2026-01-01T00:00:00Z","platform":"Linux"}`)
+	write(windowsResults, "windows-b.json",
+		`{"version":2,"job":"windows-b","sha256":"`+strings.Repeat("b", 64)+`","completed_at":"2026-01-02T00:00:00Z","platform":"Windows"}`)
+
+	rows := loadSandboxResults()
+	if len(rows) != 2 || rows[0].Job != "windows-b" || rows[1].Job != "linux-a" {
+		t.Fatalf("results did not merge in completion order: %#v", rows)
+	}
+	if _, err := sandboxData("windows-b", ""); err != nil {
+		t.Fatalf("a Windows run is not reachable by job id: %v", err)
+	}
+
+	// A Windows worker that is configured but has never run has no status
+	// file. Reporting the whole queue as unavailable because of that would
+	// call a healthy Linux stack broken.
+	write(linuxResults, "status.json",
+		`{"updated_at":"2026-01-01T00:00:00Z","worker_state":"idle","counts":{"queued":1,"running":0,"completed":2,"failed":0},"jobs":[]}`)
+	if got := loadSandboxStatus(); got.WorkerState != "idle" || got.Counts.Completed != 2 {
+		t.Fatalf("a missing Windows status poisoned the merge: %#v", got)
+	}
+
+	write(windowsResults, "status.json",
+		`{"updated_at":"2026-01-02T00:00:00Z","worker_state":"running","counts":{"queued":3,"running":1,"completed":5,"failed":2},"jobs":[]}`)
+	got := loadSandboxStatus()
+	if got.Counts.Queued != 4 || got.Counts.Completed != 7 || got.Counts.Failed != 2 {
+		t.Fatalf("counts did not sum across backends: %#v", got.Counts)
+	}
+	// The Windows file claims "running" but its timestamp is far in the past,
+	// so the per-backend staleness check demotes it before the merge, and the
+	// merge then prefers it over the healthy Linux "idle". Both halves matter:
+	// a wedged backend must not hide behind a working one.
+	if got.WorkerState != "stale" {
+		t.Fatalf("worker_state=%q, want the degraded backend's state to win", got.WorkerState)
+	}
+	if got.UpdatedAt != "2026-01-02T00:00:00Z" {
+		t.Fatalf("updated_at=%q, want the most recent report", got.UpdatedAt)
+	}
+
+	// Both spools feed one handoff count, so a backlog on either one is
+	// visible on the page.
+	write(linuxRequests, strings.Repeat("a", 64)+".request", "")
+	write(windowsRequests, strings.Repeat("b", 64)+".request", "")
+	if got = loadSandboxStatus(); got.Handoff != 2 {
+		t.Fatalf("handoff=%d, want both spools counted", got.Handoff)
+	}
+}
+
+// Exports resolve per artifact rather than from a single directory, or every
+// Windows run's PCAP and diagnostics bundle would 404.
+func TestSandboxExportsResolveAcrossBackends(t *testing.T) {
+	linuxResults, windowsResults := t.TempDir(), t.TempDir()
+	t.Setenv("SANDBOX_RESULTS_DIR", linuxResults)
+	t.Setenv("WINDOWS_SANDBOX_RESULTS_DIR", windowsResults)
+	body := `{"version":2,"job":"windows-c","sha256":"` + strings.Repeat("c", 64) + `","completed_at":"2026-01-03T00:00:00Z"}`
+	if err := os.WriteFile(filepath.Join(windowsResults, "windows-c.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pcap := append([]byte{0xd4, 0xc3, 0xb2, 0xa1}, make([]byte, 64)...)
+	if err := os.WriteFile(filepath.Join(windowsResults, "windows-c.host.pcap"), pcap, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	data, err := sandboxData("windows-c", "")
+	if err != nil || data.Detail == nil {
+		t.Fatalf("detail lookup failed: %v", err)
+	}
+	if data.Detail.HostPCAPURL != "/export/sandbox/windows-c.host.pcap" || data.Detail.HostPCAPSize != int64(len(pcap)) {
+		t.Fatalf("host PCAP was not found in the Windows results directory: %#v", data.Detail)
+	}
+}

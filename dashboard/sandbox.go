@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -199,40 +200,85 @@ type sandboxPageData struct {
 
 func sandboxResultsDir() string { return getenv("SANDBOX_RESULTS_DIR", "/sandbox-results") }
 
-func loadSandboxResults() []sandboxResult {
-	dir := sandboxResultsDir()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
+// sandboxResultsDirs lists every backend's result directory. The Windows guest
+// is a separate host worker with its own spool, so it gets its own mount rather
+// than sharing the Linux one; an unset variable means that worker is not
+// deployed here, which is the normal state on a Linux-only host.
+func sandboxResultsDirs() []string {
+	dirs := []string{sandboxResultsDir()}
+	if windows := getenv("WINDOWS_SANDBOX_RESULTS_DIR", ""); windows != "" && windows != dirs[0] {
+		dirs = append(dirs, windows)
 	}
-	rows := make([]sandboxResult, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() ||
-			(!strings.HasPrefix(entry.Name(), "linux-") && !strings.HasPrefix(entry.Name(), "windows-")) ||
-			!strings.HasSuffix(entry.Name(), ".json") {
-			continue
+	return dirs
+}
+
+func sandboxRequestDirs() []string {
+	dirs := []string{}
+	for _, dir := range []string{sandboxRequestDir(targetLinux), sandboxRequestDir(targetWindows)} {
+		if dir != "" && !slices.Contains(dirs, dir) {
+			dirs = append(dirs, dir)
 		}
-		path := filepath.Join(dir, entry.Name())
-		info, err := entry.Info()
-		if err != nil || info.Size() > 1024*1024 {
-			continue
-		}
-		body, err := os.ReadFile(path)
+	}
+	return dirs
+}
+
+func loadSandboxResults() []sandboxResult {
+	var rows []sandboxResult
+	seen := map[string]bool{}
+	for _, dir := range sandboxResultsDirs() {
+		entries, err := os.ReadDir(dir)
 		if err != nil {
 			continue
 		}
-		var row sandboxResult
-		if json.Unmarshal(body, &row) != nil || !hashName.MatchString(row.SHA256) || row.Job == "" {
-			continue
+		for _, entry := range entries {
+			if entry.IsDir() ||
+				(!strings.HasPrefix(entry.Name(), "linux-") && !strings.HasPrefix(entry.Name(), "windows-")) ||
+				!strings.HasSuffix(entry.Name(), ".json") {
+				continue
+			}
+			path := filepath.Join(dir, entry.Name())
+			info, err := entry.Info()
+			if err != nil || info.Size() > 1024*1024 {
+				continue
+			}
+			body, err := os.ReadFile(path)
+			if err != nil {
+				continue
+			}
+			var row sandboxResult
+			if json.Unmarshal(body, &row) != nil || !hashName.MatchString(row.SHA256) || row.Job == "" {
+				continue
+			}
+			// Job identifies a run across the whole surface: it is the key for
+			// the detail route and the export filenames. Two backends offering
+			// the same one would make those routes ambiguous, so the first
+			// directory listed wins and the duplicate is dropped.
+			if seen[row.Job] {
+				continue
+			}
+			seen[row.Job] = true
+			normalizeSandboxResult(&row)
+			rows = append(rows, row)
 		}
-		normalizeSandboxResult(&row)
-		rows = append(rows, row)
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].CompletedAt > rows[j].CompletedAt })
 	if len(rows) > 250 {
 		rows = rows[:250]
 	}
 	return rows
+}
+
+// sandboxArtifactFile locates a downloadable artifact across every backend's
+// result directory. Only regular files are accepted, and the name is always a
+// job-derived basename, so this cannot be steered outside those directories.
+func sandboxArtifactFile(name string) (string, os.FileInfo, bool) {
+	for _, dir := range sandboxResultsDirs() {
+		path := filepath.Join(dir, name)
+		if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() {
+			return path, info, true
+		}
+	}
+	return "", nil, false
 }
 
 func normalizeSandboxResult(row *sandboxResult) {
@@ -311,11 +357,72 @@ func sandboxLineDifference(before, after []string, normalize func(string) string
 	return diff
 }
 
+// sandboxWorkerStateRank orders worker states from healthy to broken so a
+// merge across backends surfaces the worst one. A degraded Windows worker must
+// not be hidden behind a healthy Linux worker just because the Linux status
+// file was read first.
+var sandboxWorkerStateRank = map[string]int{"idle": 1, "running": 2, "stale": 3}
+
+// loadSandboxStatus merges the queue status of every configured backend into
+// the single view the sandbox page renders.
+//
+// Only readable status files take part in the merge. A Windows worker that is
+// configured but has not run yet has no status.json, and treating that as
+// "unavailable" would report a healthy stack as broken. The signal for a
+// backend that is genuinely dead is its spool filling up, which HandoffOld
+// already reports.
 func loadSandboxStatus() sandboxQueueStatus {
-	path := filepath.Join(sandboxResultsDir(), "status.json")
+	var merged sandboxQueueStatus
+	found := false
+	for _, dir := range sandboxResultsDirs() {
+		status, ok := readSandboxQueueFile(dir)
+		if !ok {
+			if !found && merged.WorkerState == "" {
+				merged.WorkerState = status.WorkerState
+			}
+			continue
+		}
+		if !found {
+			merged, found = status, true
+		} else {
+			merged.Counts.Queued += status.Counts.Queued
+			merged.Counts.Running += status.Counts.Running
+			merged.Counts.Completed += status.Counts.Completed
+			merged.Counts.Failed += status.Counts.Failed
+			merged.Jobs = append(merged.Jobs, status.Jobs...)
+			if status.UpdatedAt > merged.UpdatedAt {
+				merged.UpdatedAt = status.UpdatedAt
+			}
+			if sandboxWorkerStateRank[status.WorkerState] > sandboxWorkerStateRank[merged.WorkerState] {
+				merged.WorkerState = status.WorkerState
+			}
+		}
+	}
+	for _, dir := range sandboxRequestDirs() {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".request") || !hashName.MatchString(strings.TrimSuffix(entry.Name(), ".request")) {
+				continue
+			}
+			merged.Handoff++
+			if info, err := entry.Info(); err == nil && time.Since(info.ModTime()) > 5*time.Minute {
+				merged.HandoffOld = true
+			}
+		}
+	}
+	return merged
+}
+
+// readSandboxQueueFile reads one backend's status.json. ok is false when the
+// file is missing or unusable, in which case WorkerState carries the reason.
+func readSandboxQueueFile(dir string) (sandboxQueueStatus, bool) {
+	path := filepath.Join(dir, "status.json")
 	body, err := os.ReadFile(path)
 	if err != nil || len(body) > 256*1024 {
-		return sandboxQueueStatus{WorkerState: "unavailable"}
+		return sandboxQueueStatus{WorkerState: "unavailable"}, false
 	}
 	var raw struct {
 		UpdatedAt   string `json:"updated_at"`
@@ -332,21 +439,10 @@ func loadSandboxStatus() sandboxQueueStatus {
 		} `json:"jobs"`
 	}
 	if json.Unmarshal(body, &raw) != nil {
-		return sandboxQueueStatus{WorkerState: "invalid"}
+		return sandboxQueueStatus{WorkerState: "invalid"}, false
 	}
 	status := sandboxQueueStatus{UpdatedAt: raw.UpdatedAt, WorkerState: raw.WorkerState,
 		Counts: sandboxQueueCounts{raw.Counts.Queued, raw.Counts.Running, raw.Counts.Completed, raw.Counts.Failed}}
-	if entries, err := os.ReadDir(getenv("SANDBOX_REQUEST_DIR", "/sandbox-requests")); err == nil {
-		for _, entry := range entries {
-			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".request") || !hashName.MatchString(strings.TrimSuffix(entry.Name(), ".request")) {
-				continue
-			}
-			status.Handoff++
-			if info, err := entry.Info(); err == nil && time.Since(info.ModTime()) > 5*time.Minute {
-				status.HandoffOld = true
-			}
-		}
-	}
 	for _, item := range raw.Jobs {
 		if !hashName.MatchString(item.SHA256) {
 			continue
@@ -356,7 +452,7 @@ func loadSandboxStatus() sandboxQueueStatus {
 	if updated, err := time.Parse(time.RFC3339Nano, status.UpdatedAt); err == nil && status.WorkerState == "running" && time.Since(updated) > 10*time.Minute {
 		status.WorkerState = "stale"
 	}
-	return status
+	return status, true
 }
 
 func sandboxData(job, query string) (sandboxPageData, error) {
@@ -400,8 +496,8 @@ func attachSandboxDownloads(result *sandboxResult) {
 		{result.Job + ".guest.pcap", 24, 64 << 20, &result.GuestPCAPURL, &result.GuestPCAPSize},
 		{result.Job + ".diagnostics.zip", 22, 16 << 20, &result.DiagnosticsURL, &result.DiagnosticsSize},
 	} {
-		info, err := os.Lstat(filepath.Join(sandboxResultsDir(), item.name))
-		if err != nil || !info.Mode().IsRegular() || info.Size() < item.minSize || info.Size() > item.maxSize {
+		_, info, ok := sandboxArtifactFile(item.name)
+		if !ok || info.Size() < item.minSize || info.Size() > item.maxSize {
 			continue
 		}
 		*item.url = "/export/sandbox/" + item.name
@@ -471,9 +567,8 @@ func serveSandboxExport(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		path := filepath.Join(sandboxResultsDir(), name)
-		info, err := os.Lstat(path)
-		if err != nil || !info.Mode().IsRegular() || info.Size() < minSize || info.Size() > maxSize {
+		path, info, ok := sandboxArtifactFile(name)
+		if !ok || info.Size() < minSize || info.Size() > maxSize {
 			http.NotFound(w, r)
 			return
 		}
