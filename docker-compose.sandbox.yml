@@ -1,0 +1,200 @@
+# docker-compose.sandbox.yml — Phase 4 gateway services for the Windows
+# detonation guest. See sandbox/windows/IMPLEMENTATION_PLAN.md §Phase 4.
+#
+# ┌─ THIS IS NOT PART OF THE HONEYPOT STACK ──────────────────────────────┐
+# │ Do not merge these services into docker-compose.yml and do not start  │
+# │ them alongside it. They exist to answer live malware on an isolated   │
+# │ bridge and are started and stopped around a single detonation:        │
+# │                                                                       │
+# │   docker compose -f docker-compose.sandbox.yml up -d    (step 3)      │
+# │   docker compose -f docker-compose.sandbox.yml stop     (step 11)     │
+# │                                                                       │
+# │ run_sample.py drives both, per sample.                                │
+# └───────────────────────────────────────────────────────────────────────┘
+#
+# Address plan on 10.10.10.0/24 (sandbox/windows/setup/sandbox-network.xml):
+#
+#   10.10.10.1    INetSim        the fake internet — DNS, HTTP/S, SMTP, FTP, IRC
+#   10.10.10.2    the guest      static DHCP lease pinned to its MAC
+#   10.10.10.3    mitmproxy      opt-in TLS interception (profile: mitm)
+#   10.10.10.254  the host       libvirt bridge address; no forwarding to WAN
+#
+# Zeek and Suricata are not on that subnet at all. They sniff the bridge from
+# the host side, which is the only vantage point that sees traffic the guest
+# sends to an address nothing answers on.
+#
+# Isolation, restated because it is the whole point: the macvlan below is
+# `internal`, the libvirt network has no <forward>, and Phase 0 adds an
+# iptables DROP pair across virbr-sandbox. Three independent barriers. Removing
+# any one of them because "the container needs to pull something" puts live
+# malware on the internet — build images ahead of time instead.
+
+name: honeypot-sandbox-gateway
+
+x-gateway-defaults: &gateway-defaults
+  restart: "no" # per-detonation lifecycle; never resurrect a stopped capture
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+
+  # ===== INETSIM — answers everything =====
+  # A sample that gets a connection refused stops early and tells you nothing.
+  # INetSim resolves every name to itself and serves a plausible response on
+  # every port, so the sample keeps going and the whole C2 conversation lands
+  # in the logs.
+  inetsim:
+    <<: *gateway-defaults
+    build:
+      context: ./sandbox/windows/gateway/inetsim
+    image: honeypot-sandbox-inetsim:local
+    container_name: sbx-inetsim
+    networks:
+      sandbox:
+        ipv4_address: 10.10.10.1
+    volumes:
+      # dns_default_ip in this file is 10.10.10.1 — every lookup the guest
+      # makes comes straight back here.
+      - ./sandbox/windows/config/inetsim.conf:/etc/inetsim/inetsim.conf:ro
+      # Reports, service logs, and — the valuable part — anything the sample
+      # downloaded. RESULTS_DIR is set per detonation by run_sample.py.
+      - ${SANDBOX_RESULTS_DIR:-./sandbox/results/current}/fakenet_logs:/var/log/inetsim
+    cap_drop:
+      - ALL
+    cap_add:
+      # Binds 21/25/53/80/443. Nothing else is needed.
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+
+  # ===== MITMPROXY — opt-in, one sample at a time =====
+  # Off by default (`--profile mitm` to start it), because turning it on means
+  # editing dns_default_ip to 10.10.10.3 so HTTP/S lands here first — and that
+  # same change points SMTP, FTP and IRC at a proxy that does not speak them.
+  # Worth it when you need decrypted request bodies from a specific sample;
+  # a net loss as a standing default.
+  #
+  # The guest must trust the mitmproxy CA for TLS interception to be silent.
+  # Install it in the golden image before taking GOLDEN_READY — a certificate
+  # error is itself an evasion trigger for some families.
+  mitmproxy:
+    <<: *gateway-defaults
+    profiles: ["mitm"]
+    image: mitmproxy/mitmproxy:latest
+    container_name: sbx-mitmproxy
+    networks:
+      sandbox:
+        ipv4_address: 10.10.10.3
+    command: >
+      mitmdump
+      --mode reverse:http://10.10.10.1
+      --listen-host 0.0.0.0
+      --listen-port 80
+      --set stream_large_bodies=10m
+      --save-stream-file /flows/mitmproxy_flows.bin
+    volumes:
+      - ${SANDBOX_RESULTS_DIR:-./sandbox/results/current}:/flows
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+
+  # ===== ZEEK — protocol record of the whole detonation =====
+  # host networking plus NET_ADMIN/NET_RAW because it needs the bridge device
+  # itself, not a container interface. This is a genuine privilege grant and it
+  # is why only the two sniffers get it — INetSim and mitmproxy above run with
+  # ALL capabilities dropped.
+  zeek:
+    <<: *gateway-defaults
+    image: zeek/zeek:latest
+    container_name: sbx-zeek
+    network_mode: host
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    security_opt:
+      - no-new-privileges:true
+    command: >
+      zeek -i ${SANDBOX_BRIDGE:-virbr-sandbox}
+      -e "redef Log::default_logdir = \"/zeek-logs\";"
+      local
+    volumes:
+      - ${SANDBOX_RESULTS_DIR:-./sandbox/results/current}/zeek_logs:/zeek-logs
+
+  # ===== SURICATA — signature alerts on the same bridge =====
+  # Same image as the VPS sensor, so rule handling and eve.json parsing behave
+  # identically to everything else in this repository.
+  suricata:
+    <<: *gateway-defaults
+    image: jasonish/suricata:latest
+    container_name: sbx-suricata
+    network_mode: host
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_NICE
+    security_opt:
+      - no-new-privileges:true
+    command: >
+      -i ${SANDBOX_BRIDGE:-virbr-sandbox}
+      --set outputs.1.eve-log.filename=suricata_alerts.json
+    volumes:
+      - ${SANDBOX_RESULTS_DIR:-./sandbox/results/current}:/var/log/suricata
+    environment:
+      # Rules are refreshed on the host, on demand, with internet. Never from
+      # here: a detonation must not depend on a network fetch, and this
+      # container has no route to one anyway.
+      - SURICATA_OPTIONS=
+
+  # ===== TCPDUMP — the raw pcap Phase 6 lists =====
+  # Zeek's logs are derived evidence. The pcap is the primary record, and the
+  # one thing you cannot reconstruct afterwards if a parser turns out to have
+  # been wrong about a protocol.
+  tcpdump:
+    <<: *gateway-defaults
+    image: nicolaka/netshoot:latest
+    container_name: sbx-tcpdump
+    network_mode: host
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    security_opt:
+      - no-new-privileges:true
+    command: >
+      tcpdump -i ${SANDBOX_BRIDGE:-virbr-sandbox}
+      -s 0 -U -w /capture/network.pcap
+    volumes:
+      - ${SANDBOX_RESULTS_DIR:-./sandbox/results/current}:/capture
+
+networks:
+  # macvlan over the libvirt bridge: the containers get real addresses on the
+  # guest's L2 segment, so the guest reaches them without any routing.
+  #
+  # `internal: true` removes the default route Docker would otherwise install
+  # via the gateway. That gateway is the host, whose FORWARD chain already
+  # drops sandbox traffic — this is the second of the three barriers, not the
+  # only one.
+  #
+  # Side effect of macvlan, and it is the expected one: the host itself cannot
+  # talk to these containers. Collect their output from the bind-mounted
+  # results directory, not over the network.
+  sandbox:
+    driver: macvlan
+    internal: true
+    driver_opts:
+      parent: ${SANDBOX_BRIDGE:-virbr-sandbox}
+    ipam:
+      config:
+        - subnet: 10.10.10.0/24
+          gateway: 10.10.10.254

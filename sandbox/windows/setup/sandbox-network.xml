@@ -1,0 +1,63 @@
+<!--
+  sandbox-network.xml — the isolated libvirt network the detonation guest
+  lives on. Defined by `kvm_manage.sh net-setup`.
+
+  ┌─ WHY THERE IS NO <forward> ELEMENT ───────────────────────────────────┐
+  │ Its absence is the isolation. With no <forward>, libvirt creates the  │
+  │ bridge and runs dnsmasq on it, but installs no NAT and no forwarding  │
+  │ rule — the guest can reach the host bridge address and nothing else.  │
+  │ Adding <forward mode='nat'/> here would give live malware a route to  │
+  │ the internet from inside your network. Do not add it "temporarily".   │
+  └───────────────────────────────────────────────────────────────────────┘
+
+  Verify before the first detonation, and after any libvirt or host
+  firewall change:
+
+    virsh net-dumpxml sandbox | grep -c forward   # must print 0
+    iptables -S FORWARD | grep virbr-sandbox      # must show the DROP pair
+
+  And from inside the guest, which is the check that actually counts:
+
+    ping -n 1 1.1.1.1     # must fail
+    nslookup example.com  # must resolve to the INetSim address, not the truth
+
+  IMPLEMENTATION_PLAN.md §Phase 0 pairs this with belt-and-braces rules
+  that do not depend on libvirt getting it right:
+
+    iptables -I FORWARD -i virbr-sandbox -o <wan-if> -j DROP
+    iptables -I FORWARD -i <wan-if> -o virbr-sandbox -j DROP
+-->
+<network>
+  <name>sandbox</name>
+  <bridge name='virbr-sandbox' stp='on' delay='0'/>
+
+  <!-- Zeek and Suricata sniff this bridge from the host (Phase 4), so it
+       has to be a normal Linux bridge with a host-side address — not an
+       <forward mode='none'/> isolated port group. -->
+  <ip address='10.10.10.254' netmask='255.255.255.0'>
+    <dhcp>
+      <!-- A one-address pool. The guest's MAC is fixed in win11-kvm.xml and
+           pinned here, so VM_HOST=10.10.10.2 in the worker environment is
+           always right and the orchestrator never has to discover a lease.
+           A second guest on this network would fail to get an address,
+           which is the correct outcome: two samples detonating on one
+           bridge would contaminate each other's network evidence. -->
+      <range start='10.10.10.2' end='10.10.10.2'/>
+      <host mac='00:1a:a0:3c:4d:5e' name='win11-sandbox' ip='10.10.10.2'/>
+    </dhcp>
+  </ip>
+
+  <!-- The guest is handed 10.10.10.254 as its resolver by DHCP, and dnsmasq
+       forwards every query to INetSim, which answers all of them with its
+       own address. That is what keeps a sample talking: a lookup that fails
+       ends the conversation and the report says nothing.
+
+       The forwarder is the *only* one. With no upstream resolver listed,
+       there is no path by which a real name could ever be resolved, even if
+       the FORWARD rules were removed. If INetSim is not running the guest
+       gets SERVFAIL — the correct failure, and a visible one. -->
+  <dns>
+    <forwarder addr='10.10.10.1'/>
+  </dns>
+  <domain name='sandbox.local'/>
+</network>

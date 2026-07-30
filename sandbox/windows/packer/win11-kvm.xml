@@ -1,0 +1,217 @@
+<!--
+  win11-kvm.xml — libvirt domain for the Windows 11 detonation guest.
+
+  Defined by `setup/kvm_manage.sh create`, which first makes a thin qcow2
+  clone of the Packer output so the golden image itself is never written to.
+
+  ┌─ THE ONE RULE ────────────────────────────────────────────────────────┐
+  │ The hardware here must match what win11-analysis.pkr.hcl built the    │
+  │ image with. Windows binds its boot-critical storage driver at install │
+  │ time and will not boot if the disk moves to another bus; changing the │
+  │ firmware pair invalidates the UEFI boot entry; removing the TPM makes │
+  │ BitLocker and the Windows 11 requirement checks fail. Every value     │
+  │ below is followed by the packer setting it mirrors.                   │
+  └───────────────────────────────────────────────────────────────────────┘
+
+  Paths assume the analysis host layout used by the Packer build: the large
+  /var spindle, not the root NVMe. Override with the env vars in
+  kvm_manage.sh if your host differs — but change them in both places.
+-->
+<domain type='kvm'>
+  <name>win11-sandbox</name>
+
+  <!-- memory = "8192", cpus = "4" in win11-analysis.pkr.hcl. Also the floor
+       for looking like a workstation: a sample that finds 2 GB and 1 vCPU
+       has found a sandbox. -->
+  <memory unit='MiB'>8192</memory>
+  <currentMemory unit='MiB'>8192</currentMemory>
+  <vcpu placement='static'>4</vcpu>
+
+  <!-- SMBIOS strings are the cheapest VM tell there is: the QEMU defaults
+       announce "QEMU"/"Bochs" in every DMI field, and reading them is a
+       two-line WMI query. Present a plausible OEM workstation instead.
+       The values are fictional but internally consistent; nothing here
+       identifies a real machine or a real licence. -->
+  <sysinfo type='smbios'>
+    <bios>
+      <entry name='vendor'>American Megatrends Inc.</entry>
+      <entry name='version'>2.14.1</entry>
+      <entry name='date'>05/22/2023</entry>
+    </bios>
+    <system>
+      <entry name='manufacturer'>Dell Inc.</entry>
+      <entry name='product'>OptiPlex 7010</entry>
+      <entry name='version'>Not Specified</entry>
+      <entry name='serial'>7QK4JN2</entry>
+      <entry name='family'>OptiPlex</entry>
+    </system>
+    <baseBoard>
+      <entry name='manufacturer'>Dell Inc.</entry>
+      <entry name='product'>0KRC95</entry>
+      <entry name='version'>A01</entry>
+    </baseBoard>
+  </sysinfo>
+
+  <os>
+    <!-- machine_type = "q35". Also the only machine type that carries the
+         ICH9 AHCI controller the disk below hangs off. -->
+    <type arch='x86_64' machine='q35'>hvm</type>
+    <smbios mode='sysinfo'/>
+
+    <!-- efi_firmware_code / efi_firmware_vars, verbatim. The .secboot code
+         and .ms vars are a matched pair: the "ms" variables carry
+         Microsoft's keys, which is what makes Secure Boot satisfy the
+         Windows 11 installer instead of blocking it.
+
+         secure='yes' on the loader requires <smm state='on'/> below;
+         libvirt rejects the domain otherwise.
+
+         format='qcow2' on the nvram is not cosmetic. libvirt refuses an
+         internal snapshot of a pflash domain when the variable store is
+         raw — and an internal snapshot is exactly what GOLDEN_READY is. If
+         your libvirt is older than 8.1 and rejects it anyway, the fallback
+         is an external snapshot, which changes the revert command in
+         kvm_manage.sh and run_sample.py. -->
+    <loader readonly='yes' secure='yes' type='pflash'>/usr/share/OVMF/OVMF_CODE_4M.secboot.fd</loader>
+    <nvram template='/usr/share/OVMF/OVMF_VARS_4M.ms.fd' format='qcow2'>/var/lib/libvirt/qemu/nvram/win11-sandbox_VARS.qcow2</nvram>
+    <boot dev='hd'/>
+  </os>
+
+  <features>
+    <acpi/>
+    <apic/>
+    <!-- Required by loader secure='yes'. -->
+    <smm state='on'/>
+    <!-- Hides the KVM CPUID signature leaf (0x40000000 -> "KVMKVMKVM"),
+         which is the single most common hypervisor check in commodity
+         malware. IMPLEMENTATION_PLAN.md §3.4.
+
+         Its sibling from §3.4 — <feature policy='disable' name='hypervisor'/>
+         on the CPU — is deliberately NOT set. Clearing the hypervisor bit
+         hides the paravirtual clock and timer enlightenments along with
+         it, and Windows guests are prone to clock drift and boot stalls
+         without them. Enable it only if a specific sample is seen checking
+         CPUID.1:ECX[31], and re-verify the guest still boots. -->
+    <kvm>
+      <hidden state='on'/>
+    </kvm>
+    <!-- Port 0x5658 answers only under VMware. Off, so the guest does not
+         look like the wrong hypervisor either. -->
+    <vmport state='off'/>
+  </features>
+
+  <!-- cpu_model = "host" in packer. migratable='off' keeps the full host
+       feature set visible rather than the migration-safe subset, which is
+       both faster and more convincing. This guest is never migrated. -->
+  <cpu mode='host-passthrough' check='none' migratable='off'/>
+
+  <clock offset='localtime'>
+    <timer name='rtc' tickpolicy='catchup'/>
+    <timer name='pit' tickpolicy='delay'/>
+    <timer name='hpet' present='no'/>
+  </clock>
+
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <!-- A sample that crashes the guest must leave the corpse for the
+       orchestrator to see, not silently reboot into a clean desktop and
+       make the run look uneventful. -->
+  <on_crash>preserve</on_crash>
+
+  <pm>
+    <suspend-to-mem enabled='no'/>
+    <suspend-to-disk enabled='no'/>
+  </pm>
+
+  <devices>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+
+    <!-- disk_interface = "ide" in packer, which on q35 *is* the ICH9 AHCI
+         controller — QEMU's -drive if= has no "sata" value, but the guest
+         sees a SATA disk. Here the bus is named honestly as 'sata'; it is
+         the same controller. Do not "upgrade" this to virtio: Windows 11
+         setup carries no virtio-blk driver, the installed image has no
+         boot-critical virtio driver bound, and a virtio controller is a
+         loud VM tell on top of that.
+
+         The serial is what a guest reads back as the physical drive
+         identifier. A WD-style string reads as a real disk; the QEMU
+         default ("QM00001") does not.
+
+         cache='none' + io='native' keep host page cache out of the picture
+         so a revert really does discard everything the sample wrote. -->
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2' cache='none' io='native' discard='unmap'/>
+      <source file='/var/dockge/sandbox/vms/win11-sandbox.qcow2'/>
+      <target dev='sda' bus='sata'/>
+      <serial>WD-WX31A74K3593</serial>
+      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
+    </disk>
+
+    <!-- An empty optical drive. Samples arrive over the SMB share that
+         run_sample.py writes to (\\10.10.10.2\Samples), never on media,
+         but a workstation with no CD-ROM at all is itself unusual. -->
+    <disk type='file' device='cdrom'>
+      <driver name='qemu' type='raw'/>
+      <target dev='sdb' bus='sata'/>
+      <readonly/>
+      <address type='drive' controller='0' bus='0' target='0' unit='1'/>
+    </disk>
+
+    <controller type='sata' index='0'/>
+    <controller type='pci' index='0' model='pcie-root'/>
+    <controller type='pci' index='1' model='pcie-root-port'/>
+    <controller type='pci' index='2' model='pcie-root-port'/>
+    <controller type='pci' index='3' model='pcie-root-port'/>
+    <controller type='usb' index='0' model='qemu-xhci' ports='8'/>
+
+    <!-- net_device = "e1000e" in packer: an Intel 82574L, a card that
+         genuinely shipped in workstations.
+
+         The MAC is fixed on purpose and is the anchor for the whole
+         orchestration: sandbox-network.xml pins it to 10.10.10.2 with a
+         static DHCP lease, and VM_HOST in the worker's environment is that
+         address. Change it here and the orchestrator loses the guest.
+
+         The OUI is Intel's (00:1A:A0), not QEMU's 52:54:00 — the latter is
+         a one-lookup giveaway. -->
+    <interface type='network'>
+      <mac address='00:1a:a0:3c:4d:5e'/>
+      <source network='sandbox'/>
+      <model type='e1000e'/>
+    </interface>
+
+    <!-- No <channel> for the QEMU guest agent, and none is wanted. The
+         agent is a virtio-serial port named org.qemu.guest_agent.0 that
+         any process in the guest can enumerate, and it is a documented
+         sandbox indicator. Artifacts come out over SMB after the guest is
+         frozen instead — see run_sample.py. -->
+
+    <!-- VNC on loopback only. This is how the guest is watched during a
+         detonation and how the Packer install was debugged; exposing it on
+         any other interface would put a live malware desktop on the
+         network. No password is set because the socket is not reachable —
+         if you ever move this off 127.0.0.1, add one. -->
+    <graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'/>
+    <video>
+      <model type='qxl' ram='65536' vram='65536' vgamem='16384' heads='1'/>
+    </video>
+
+    <input type='tablet' bus='usb'/>
+    <input type='keyboard' bus='ps2'/>
+
+    <!-- vtpm = true, tpm_device_type = "tpm-tis". Both halves matter: the
+         model alone produces a domain with no TPM. Windows 11 will not
+         install or, once installed, will fail its health checks without
+         one. swtpm must be present on the host. -->
+    <tpm model='tpm-tis'>
+      <backend type='emulator' version='2.0'/>
+    </tpm>
+
+    <!-- No <rng> device. virtio-rng is another virtio tell for a guest
+         that is meant to look like bare metal, and the guest has no
+         throughput need for it. -->
+
+    <memballoon model='none'/>
+  </devices>
+</domain>

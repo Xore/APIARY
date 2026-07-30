@@ -14,11 +14,16 @@
 
 set -euo pipefail
 
-VM_NAME="win11-sandbox"
-GOLDEN_IMAGE="/golden-images/win11-analysis.qcow2"
-VM_DISK="/vms/${VM_NAME}.qcow2"
+VM_NAME="${VM_NAME:-win11-sandbox}"
+# Defaults follow win11-analysis.pkr.hcl: the build deliberately puts both the
+# ISO and the 25-35 GB golden image on the large /var spindle rather than the
+# 233 GB root NVMe. Override for a host with a different layout — but then also
+# update the <source file> in packer/win11-kvm.xml, which cannot read this.
+SANDBOX_ROOT="${SANDBOX_ROOT:-/var/dockge/sandbox}"
+GOLDEN_IMAGE="${GOLDEN_IMAGE:-$SANDBOX_ROOT/golden-images/win11-analysis.qcow2}"
+VM_DISK="${VM_DISK:-$SANDBOX_ROOT/vms/${VM_NAME}.qcow2}"
 VM_XML="$(dirname "$0")/../packer/win11-kvm.xml"
-SNAP_NAME="GOLDEN_READY"
+SNAP_NAME="${SNAP_NAME:-GOLDEN_READY}"
 NET_NAME="sandbox"
 NET_XML="$(dirname "$0")/sandbox-network.xml"
 
@@ -28,9 +33,16 @@ die()  { echo "[ERROR] $*" >&2; exit 1; }
 create_vm() {
     log "Creating thin-clone VM disk from golden image..."
     [[ -f "$GOLDEN_IMAGE" ]] || die "Golden image not found: $GOLDEN_IMAGE. Run packer build first."
-    mkdir -p /vms
+    [[ -f "$VM_XML" ]] || die "Domain XML not found: $VM_XML"
+    # A backing-file clone, not a copy: reverting is cheap and the golden image
+    # is never written to, so a sample cannot contaminate future runs.
+    [[ -e "$VM_DISK" ]] && die "$VM_DISK already exists. Remove it deliberately — it may hold a detonated guest."
+    mkdir -p "$(dirname "$VM_DISK")"
     qemu-img create -f qcow2 -F qcow2 -b "$GOLDEN_IMAGE" "$VM_DISK"
     log "Disk created: $VM_DISK (thin clone, CoW)"
+    if ! grep -q "$VM_DISK" "$VM_XML"; then
+        log "WARNING: $VM_XML does not reference $VM_DISK — the domain will boot the wrong disk."
+    fi
     log "Defining VM in libvirt..."
     virsh define "$VM_XML"
     log "VM '$VM_NAME' defined. Run: $0 start"

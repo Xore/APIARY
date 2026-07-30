@@ -250,6 +250,28 @@ def collect_artifacts(sha: str, out_dir: Path):
     log.info(f'Artifacts collected to {out_dir}')
 
 
+def post_process(out_dir: Path):
+    """Steps 12 and 13 of the run cycle: IOCs, then the readable report.
+
+    Both are derived products. The artifacts in out_dir are the evidence, and
+    they are already on disk by the time this runs — so a parser that chokes on
+    a malformed EVTX must not be allowed to fail the detonation and make the
+    worker retry a sample that already ran. Each step is logged and stepped
+    over; re-running either by hand against out_dir is safe and idempotent.
+    """
+    try:
+        from extract_iocs import extract_all
+        extract_all(out_dir)
+    except Exception:
+        log.error('IOC extraction failed; artifacts are unaffected', exc_info=True)
+
+    try:
+        from generate_report import build_report
+        build_report(out_dir)
+    except Exception:
+        log.error('Report generation failed; artifacts are unaffected', exc_info=True)
+
+
 def detonate(sample_path: Path, results_dir: Path = None):
     if not sample_path.exists() or sample_path.name == '.gitkeep':
         return
@@ -283,6 +305,7 @@ def detonate(sample_path: Path, results_dir: Path = None):
         regshot_after()
         stop_procmon()
         collect_artifacts(sha, out)
+        post_process(out)
 
     except Exception as e:
         # Recorded, then re-raised once the guest is safely back at the golden

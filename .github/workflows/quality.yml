@@ -100,3 +100,8 @@ jobs:
           cp vps/.env.example vps/.env
           docker compose -f docker-compose.yml config --quiet
           docker compose -f vps/docker-compose.yml config --quiet
+          # The sandbox gateway is never started here — it answers live malware
+          # on an isolated bridge that does not exist on a CI runner. Validating
+          # it still matters: run_sample.py shells out to this file mid-detonation,
+          # and a syntax error would surface as a failed run on the analysis host.
+          docker compose -f docker-compose.sandbox.yml config --quiet
