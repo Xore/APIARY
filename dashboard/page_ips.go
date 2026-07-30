@@ -92,8 +92,7 @@ const pageIPs = `
         <div class="filters">
           <a class="chip" href="/ips">&larr; attack sources</a>
           <a class="chip" href="/events?ip={{.IP | urlquery}}">all matching events</a>
-          <a class="btn btn-sm btn-primary" href="/export/report.pdf?ip={{.IP | urlquery}}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>IP report</a>
-          <a class="btn btn-sm btn-danger" href="/export/report.pdf?ip={{.IP | urlquery}}&amp;type=alert"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M12 18v-6"/><line x1="9" y1="15" x2="15" y2="15"/></svg>IP alerts PDF</a>
+          <a class="btn btn-sm btn-primary" href="/reports" title="Design an IP or IP-alerts PDF for this source in the Reports studio"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Report this source</a>
         </div>
 
         <div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:gap-3 tw:mb-6" id="attacker-kpis">

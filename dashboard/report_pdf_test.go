@@ -3,21 +3,11 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"net/url"
 	"os"
 	"strings"
 	"testing"
 	"time"
 )
-
-func TestReportURLPreservesScopeAndDropsPagination(t *testing.T) {
-	values := url.Values{"ip": {"58.221.195.130"}, "type": {"alert"}, "page": {"9"}, "per_page": {"25"}}
-	got := reportURL(values)
-	want := "/export/report.pdf?ip=58.221.195.130&type=alert"
-	if got != want {
-		t.Fatalf("reportURL() = %q, want %q", got, want)
-	}
-}
 
 func sampleReportData(now time.Time) reportData {
 	var events []storedEvent

@@ -112,8 +112,13 @@ func main() {
 		getenv("DASHBOARD_AUDIT_FILE", "/state/dashboard-audit.jsonl"),
 		getenv("DASHBOARD_CONFIG_HISTORY_FILE", "/state/dashboard-config-history.jsonl"),
 	)
+	s.reports = newReportStore(
+		getenv("DASHBOARD_REPORTS_FILE", "/state/reports.json"),
+		getenv("DASHBOARD_REPORTS_DIR", "/state/reports"),
+	)
 	s.rebuild()
 	go s.notifyLoop(os.Getenv("ALERT_WEBHOOK_URL"))
+	go s.reportScheduleLoop()
 	go func() {
 		for range time.Tick(15 * time.Second) {
 			s.rebuild()
@@ -245,7 +250,14 @@ func main() {
 		}
 		s.es.history(w, r, true)
 	})
-	http.HandleFunc("/export/report.pdf", s.servePDFReport)
+	// Reports studio (R2): the single surface that designs, schedules, and
+	// produces PDFs. The legacy /export/report.pdf endpoint and the per-page
+	// PDF buttons were removed; dashboard pages link here instead.
+	http.HandleFunc("/api/reports/templates", s.serveReportTemplates)
+	http.HandleFunc("/api/reports/definitions", s.serveReportDefinitions)
+	http.HandleFunc("/api/reports/definitions/", s.serveReportDefinitionByID)
+	http.HandleFunc("/api/reports/generated", s.serveReportsGenerated)
+	http.HandleFunc("/api/reports/generated/", s.serveReportGeneratedByID)
 	// Settings modal fragment: the shell fetches this once per session and
 	// opens it as a centered overlay; there is no standalone /settings page.
 	// Admin panes render only for a live-introspected admin; any identity
@@ -325,6 +337,10 @@ func main() {
 	http.HandleFunc("/alerts", func(w http.ResponseWriter, r *http.Request) {
 		html(w)
 		tmpl.ExecuteTemplate(w, "alerts", s.get())
+	})
+	http.HandleFunc("/reports", func(w http.ResponseWriter, r *http.Request) {
+		html(w)
+		tmpl.ExecuteTemplate(w, "reports", s.get())
 	})
 	http.HandleFunc("/payloads", func(w http.ResponseWriter, r *http.Request) {
 		html(w)

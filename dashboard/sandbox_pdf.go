@@ -13,12 +13,20 @@ type sandboxPDFMetric struct {
 	Value string
 }
 
+// renderSandboxReportPDF keeps the historical dark, default-branded sandbox
+// report; Reports studio definitions go through the themed variant.
 func renderSandboxReportPDF(result sandboxResult, generated time.Time) []byte {
+	return renderThemedSandboxReportPDF(result, generated, pdfThemeDark(), defaultPDFBranding())
+}
+
+// renderThemedSandboxReportPDF renders a sandbox analysis run with the
+// definition's theme and branding.
+func renderThemedSandboxReportPDF(result sandboxResult, generated time.Time, theme pdfTheme, branding pdfBranding) []byte {
 	writer := &pdfReportWriter{
-		doc:      &pdfDocument{theme: pdfThemeDark(), footerLeft: defaultPDFBranding().FooterLeft},
+		doc:      &pdfDocument{theme: theme, footerLeft: branding.withDefaults().FooterLeft},
 		title:    "Sandbox Dynamic Analysis Report",
 		scope:    result.Job,
-		branding: defaultPDFBranding(),
+		branding: branding.withDefaults(),
 	}
 	writer.newPage()
 	writer.cover(reportData{

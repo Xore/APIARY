@@ -166,6 +166,7 @@ type store struct {
 	alerts            *alertManager
 	intelligence      *intelligenceStore
 	settings          *settingsService // typed settings stores; nil only in partial test fixtures
+	reports           *reportStore     // Reports studio definitions + generated PDFs; nil only in test fixtures
 	yaraFile          string
 	expected          []string // configured feeds shown even before their first event
 	subs              map[chan struct{}]struct{}

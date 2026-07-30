@@ -57,7 +57,6 @@ type eventsPage struct {
 	PrevURL   string
 	NextURL   string
 	RowsURL   string
-	ReportURL string
 	Chain     bool // single-IP view rendered chronologically as an attack chain
 	IP        string
 	Events    []storedEvent
@@ -240,7 +239,6 @@ func (s *store) eventsData(r *http.Request) eventsPage {
 		PrevURL:   prevURL,
 		NextURL:   nextURL,
 		RowsURL:   rowsURL,
-		ReportURL: reportURL(r.URL.Query()),
 		Chain:     chain,
 		IP:        f.ip,
 		Events:    out,

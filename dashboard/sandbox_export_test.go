@@ -83,7 +83,11 @@ func TestSandboxDiagnosticsExportRequiresAdmin(t *testing.T) {
 	}
 }
 
-func TestSandboxPDFExportRequiresAdmin(t *testing.T) {
+// TestSandboxPDFExportRemoved proves PDF generation is consolidated in the
+// Reports studio (R2): the legacy per-run export path no longer serves PDFs,
+// not even to administrators. Sandbox PDFs are produced from a report
+// definition with the sandbox template instead.
+func TestSandboxPDFExportRemoved(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("SANDBOX_RESULTS_DIR", dir)
 	t.Setenv("DASHBOARD_REQUIRE_ADMIN", "true")
@@ -111,26 +115,12 @@ func TestSandboxPDFExportRequiresAdmin(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, job+".json"), []byte(result), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	path := "/export/sandbox/" + job + ".pdf"
-
-	denied := httptest.NewRecorder()
-	serveSandboxExport(denied, httptest.NewRequest(http.MethodGet, path, nil))
-	if denied.Code != http.StatusForbidden {
-		t.Fatalf("unauthorized status = %d, want %d", denied.Code, http.StatusForbidden)
-	}
-
-	request := httptest.NewRequest(http.MethodGet, path, nil)
+	request := httptest.NewRequest(http.MethodGet, "/export/sandbox/"+job+".pdf", nil)
 	addIdentityTestCookie(request)
-	allowed := httptest.NewRecorder()
-	serveSandboxExport(allowed, request)
-	if allowed.Code != http.StatusOK || !bytes.HasPrefix(allowed.Body.Bytes(), []byte("%PDF-1.4")) {
-		t.Fatalf("authorized response = status %d, PDF prefix %t", allowed.Code, bytes.HasPrefix(allowed.Body.Bytes(), []byte("%PDF-1.4")))
-	}
-	if got := allowed.Header().Get("Content-Type"); got != "application/pdf" {
-		t.Fatalf("content type = %q", got)
-	}
-	if disposition := allowed.Header().Get("Content-Disposition"); !strings.Contains(disposition, job+"-report.pdf") {
-		t.Fatalf("content disposition = %q", disposition)
+	response := httptest.NewRecorder()
+	serveSandboxExport(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("legacy sandbox PDF export status = %d, want %d", response.Code, http.StatusNotFound)
 	}
 }
 
@@ -171,15 +161,19 @@ func TestRenderSandboxReportPDF(t *testing.T) {
 	}
 }
 
-func TestSandboxResultActionsIncludePDFAndVirusTotal(t *testing.T) {
+func TestSandboxResultActionsLinkReportsStudioAndVirusTotal(t *testing.T) {
 	for _, expected := range []string{
-		`href="/export/sandbox/{{.Detail.Job}}.pdf"`,
+		`href="/reports"`,
+		`PDF report via Reports studio`,
 		`href="https://www.virustotal.com/gui/file/{{.Detail.SHA256}}"`,
 		`rel="noopener noreferrer"`,
 	} {
 		if !strings.Contains(pageSandbox, expected) {
 			t.Fatalf("sandbox result actions are missing %q", expected)
 		}
+	}
+	if strings.Contains(pageSandbox, `/export/sandbox/{{.Detail.Job}}.pdf`) {
+		t.Fatal("sandbox result page must not offer a direct PDF export; only the Reports studio generates PDFs")
 	}
 }
 

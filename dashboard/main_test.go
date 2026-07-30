@@ -472,6 +472,7 @@ func TestSemanticShellIsServerRendered(t *testing.T) {
 	for _, route := range []string{
 		"/", "/source-health", "/alerts", "/events", "/ips", "/campaigns",
 		"/clusters", "/commands", "/payloads", "/sandbox", "/history", "/dead-letters",
+		"/reports",
 	} {
 		if !strings.Contains(html, `data-hp-nav="`+route+`" href="`+route+`"`) {
 			t.Fatalf("rendered shell is missing navigation route %q", route)

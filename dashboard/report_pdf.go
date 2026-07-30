@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"math"
-	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -189,65 +187,11 @@ type reportData struct {
 	Recommendations   []string
 }
 
-func (s *store) servePDFReport(w http.ResponseWriter, r *http.Request) {
-	if !requireAdmin(w, r) {
-		return
-	}
-	data := s.reportData(r)
-	body := renderSecurityReportPDF(data)
-	filename := reportFilename(parseFilter(r))
-	w.Header().Set("Content-Type", "application/pdf")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Write(body)
-}
-
-func reportURL(values url.Values) string {
-	query := make(url.Values, len(values))
-	for key, entries := range values {
-		if key == "page" || key == "per_page" || key == "offset" {
-			continue
-		}
-		query[key] = append([]string(nil), entries...)
-	}
-	if encoded := query.Encode(); encoded != "" {
-		return "/export/report.pdf?" + encoded
-	}
-	return "/export/report.pdf"
-}
-
-func reportFilename(f filter) string {
-	scope := "executive"
-	switch {
-	case f.ip != "":
-		scope = "ip-" + f.ip
-	case f.asn != "":
-		scope = "asn-" + strings.TrimPrefix(strings.ToUpper(f.asn), "AS")
-	case f.cidr != "":
-		scope = "network-" + f.cidr
-	case f.sig != "":
-		scope = "signature-" + f.sig
-	case f.typ == "alert":
-		scope = "all-alerts"
-	case f.sensor != "":
-		scope = "sensor-" + f.sensor
-	case f.country != "":
-		scope = "country-" + f.country
-	}
-	var clean strings.Builder
-	for _, char := range strings.ToLower(scope) {
-		if char >= 'a' && char <= 'z' || char >= '0' && char <= '9' || char == '-' || char == '.' {
-			clean.WriteRune(char)
-		} else {
-			clean.WriteByte('-')
-		}
-	}
-	return "honeypot-" + strings.Trim(clean.String(), "-") + "-report.pdf"
-}
-
-func (s *store) reportData(r *http.Request) reportData {
-	f := parseFilter(r)
+// reportDataFor builds the report dataset for a telemetry filter. The
+// Reports studio constructs the filter from a definition's scope; the
+// dashboard's page-level direct PDF exports were removed in R2 — the
+// generator is the single place that produces PDFs.
+func (s *store) reportDataFor(f filter) reportData {
 	events := f.filtered(s.getEvents())
 	data := reportData{
 		Generated: time.Now(),
@@ -413,14 +357,62 @@ func reportRecommendations(data reportData) []string {
 	return recommendations
 }
 
+// allReportElements is the historical full-report layout order, kept as the
+// security-template default and for the legacy render entry points.
+var allReportElements = []string{
+	elementCover, elementMetrics, elementAssessment, elementFindings, elementRecommendations,
+	elementTopSensors, elementTopSources, elementTopSignatures, elementTopASNs, elementTopCountries,
+	elementTopPorts, elementOperationalAlert, elementEventAppendix, elementParameters,
+}
+
 // renderSecurityReportPDF keeps the historical executive layout with the
-// dark theme and default branding; scheduled/custom reports go through
-// renderThemedReportPDF with their own theme and branding.
+// dark theme and default branding.
 func renderSecurityReportPDF(data reportData) []byte {
 	return renderThemedReportPDF(data, pdfThemeDark(), defaultPDFBranding())
 }
 
 func renderThemedReportPDF(data reportData, theme pdfTheme, branding pdfBranding) []byte {
+	return renderReportElements(data, theme, branding, allReportElements, 120)
+}
+
+// renderDefinitionPDF renders a Reports studio definition: its theme,
+// branding, element selection, and appendix bound.
+func renderDefinitionPDF(data reportData, def reportDefinition) []byte {
+	limit := def.AppendixLimit
+	if limit <= 0 {
+		limit = 120
+	}
+	return renderReportElements(data, pdfThemeNamed(def.Theme), def.Branding.pdf(), def.Elements, limit)
+}
+
+// normalizeReportElements keeps the designer's ordering but anchors the cover
+// at the start and the parameters section at the end when selected.
+func normalizeReportElements(elements []string) []string {
+	var body []string
+	hasCover, hasParameters := false, false
+	for _, element := range elements {
+		switch element {
+		case elementCover:
+			hasCover = true
+		case elementParameters:
+			hasParameters = true
+		default:
+			body = append(body, element)
+		}
+	}
+	out := body
+	if hasCover {
+		out = append([]string{elementCover}, out...)
+	}
+	if hasParameters {
+		out = append(out, elementParameters)
+	}
+	return out
+}
+
+// renderReportElements drives the writer from an element list, so a
+// definition renders exactly the sections the operator selected.
+func renderReportElements(data reportData, theme pdfTheme, branding pdfBranding, elements []string, appendixLimit int) []byte {
 	writer := &pdfReportWriter{
 		doc:      &pdfDocument{theme: theme, footerLeft: branding.withDefaults().FooterLeft},
 		title:    data.Title,
@@ -428,22 +420,40 @@ func renderThemedReportPDF(data reportData, theme pdfTheme, branding pdfBranding
 		branding: branding.withDefaults(),
 	}
 	writer.newPage()
-	writer.cover(data)
-	writer.section("Executive summary")
-	writer.metricGrid(data.Summary)
-	writer.section("Assessment")
-	writer.paragraph(fmt.Sprintf("Overall triage score: %d/100 (%s). This deterministic score prioritizes alert volume, severity, payload observations, sensor spread, commands, and open operational alerts; it is not an attribution or compromise verdict.", data.Summary.RiskScore, strings.ToUpper(data.Summary.RiskLevel)))
-	writer.bullets("Key findings", data.Findings)
-	writer.bullets("Recommended actions", data.Recommendations)
-	writer.topTable("Top sensors", "Sensor", data.TopSensors)
-	writer.topTable("Top source addresses", "Source IP", data.TopSources)
-	writer.topTable("Top alert signatures", "Signature", data.TopSignatures)
-	writer.topTable("Top autonomous systems", "ASN / organization", data.TopASNs)
-	writer.topTable("Top countries", "Country", data.TopCountries)
-	writer.topTable("Top destination ports", "Port", data.TopPorts)
-	writer.operationalAlerts(data.OperationalAlerts)
-	writer.eventAppendix(data.Events)
-	writer.parameters(data)
+	for _, element := range normalizeReportElements(elements) {
+		switch element {
+		case elementCover:
+			writer.cover(data)
+		case elementMetrics:
+			writer.section("Executive summary")
+			writer.metricGrid(data.Summary)
+		case elementAssessment:
+			writer.section("Assessment")
+			writer.paragraph(fmt.Sprintf("Overall triage score: %d/100 (%s). This deterministic score prioritizes alert volume, severity, payload observations, sensor spread, commands, and open operational alerts; it is not an attribution or compromise verdict.", data.Summary.RiskScore, strings.ToUpper(data.Summary.RiskLevel)))
+		case elementFindings:
+			writer.bullets("Key findings", data.Findings)
+		case elementRecommendations:
+			writer.bullets("Recommended actions", data.Recommendations)
+		case elementTopSensors:
+			writer.topTable("Top sensors", "Sensor", data.TopSensors)
+		case elementTopSources:
+			writer.topTable("Top source addresses", "Source IP", data.TopSources)
+		case elementTopSignatures:
+			writer.topTable("Top alert signatures", "Signature", data.TopSignatures)
+		case elementTopASNs:
+			writer.topTable("Top autonomous systems", "ASN / organization", data.TopASNs)
+		case elementTopCountries:
+			writer.topTable("Top countries", "Country", data.TopCountries)
+		case elementTopPorts:
+			writer.topTable("Top destination ports", "Port", data.TopPorts)
+		case elementOperationalAlert:
+			writer.operationalAlerts(data.OperationalAlerts)
+		case elementEventAppendix:
+			writer.eventAppendix(data.Events, appendixLimit)
+		case elementParameters:
+			writer.parameters(data)
+		}
+	}
 	return writer.doc.bytes()
 }
 
@@ -656,14 +666,14 @@ func (w *pdfReportWriter) operationalAlerts(alerts []alertRecord) {
 	}
 }
 
-func (w *pdfReportWriter) eventAppendix(events []storedEvent) {
+func (w *pdfReportWriter) eventAppendix(events []storedEvent, appendixLimit int) {
 	t := w.theme()
 	w.section("Evidence appendix - representative events")
-	if len(events) == 0 {
+	if len(events) == 0 || appendixLimit <= 0 {
 		w.paragraph("No matching event records were available.")
 		return
 	}
-	limit := min(120, len(events))
+	limit := min(appendixLimit, len(events))
 	w.paragraph(fmt.Sprintf("Showing the newest %d of %d matching records. Use the dashboard Event Explorer or Elasticsearch export for the complete machine-readable dataset.", limit, len(events)))
 	for index, event := range events[:limit] {
 		detail := firstNonEmpty(event.Alert, event.Detail, event.Command, event.Path, "event")
