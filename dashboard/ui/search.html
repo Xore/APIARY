@@ -1,0 +1,71 @@
+{{define "search"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>xore//honeypot — search {{.Query}}</title>
+{{template "style"}}
+</head>
+<body>
+<div class="app-shell">
+  {{template "topbar" .}}
+  {{template "sidebar" .}}
+  <main class="app-main">
+      <div class="wrap tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
+        <header class="overview-header" id="search-header">
+          <div>
+            <div class="eyebrow">Investigate</div>
+            <h1>search results</h1>
+            <p class="subtitle">Every source the dashboard holds, matched against <strong>{{.Query}}</strong>.</p>
+          </div>
+          <div class="live-panel">
+            <span class="gen">generated {{.Generated.Format "2006-01-02 15:04:05 MST"}}</span>
+          </div>
+        </header>
+
+        <div class="filters" id="search-filters">
+          <span class="chip">{{.Query}}</span>
+          <span class="chip">{{.Total}} matches</span>
+        </div>
+
+        {{if .Groups}}
+        <div class="tw:grid tw:grid-cols-12 tw:gap-3.5" id="search-results">
+          {{range .Groups}}
+          <div class="card half">
+            <h2>{{.Title}}</h2>
+            <p class="note">{{.Hint}}</p>
+            <table><tbody>
+              {{range .Hits}}
+              <tr>
+                <td class="n">{{if .Count}}{{.Count}}{{end}}</td>
+                <td class="v"><a href="{{.URL}}">{{.Label}}</a>{{if .Detail}}<div class="searchhit__detail">{{.Detail}}</div>{{end}}</td>
+              </tr>
+              {{end}}
+            </tbody></table>
+            {{if .More}}<p class="note tw:mt-2"><a class="lnk" href="{{.MoreURL}}">{{.More}} more &rarr;</a></p>{{end}}
+          </div>
+          {{end}}
+        </div>
+        {{else}}
+        <div class="card wide">
+          <div class="empty-state">
+            <h3>Nothing matched &ldquo;{{.Query}}&rdquo;</h3>
+            <p>No sensor event, session, payload, command, credential, detection, fingerprint, decoy, or sandbox run mentions this value. Sensors only hold the retention window configured for this deployment &mdash; an older indicator may have aged out.</p>
+            <div class="filters">
+              <a class="chip" href="/events">browse all events</a>
+              <a class="chip" href="/ips">attack sources</a>
+              <a class="chip" href="/payloads">captured payloads</a>
+              <a class="chip" href="/history">search Elasticsearch history</a>
+            </div>
+          </div>
+        </div>
+        {{end}}
+
+        <footer id="search-footer">xore//honeypot &bull; defensive sensor &bull; do not expose without auth</footer>
+      </div>
+    </main>
+</div>
+</body>
+</html>
+{{end}}

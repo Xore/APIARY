@@ -15,6 +15,9 @@ Dockerfile text eol=lf
 *.md text eol=lf
 *.css text eol=lf
 *.js text eol=lf
+# Embedded dashboard templates are build inputs, not just source: pin them to LF
+# so the rendered bytes do not depend on the checkout platform.
+*.html text eol=lf
 *.ts text eol=lf
 
 dashboard/vendor/** linguist-vendored

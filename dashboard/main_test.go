@@ -541,3 +541,54 @@ func TestSharedPartialsComeFromEmbeddedUI(t *testing.T) {
 		}
 	}
 }
+
+// Every route template now renders from the embedded ui tree. Assert both
+// halves of that migration: each page file supplies the template names its Go
+// binding claims, and no Go source declares a {{define}} of its own — a second
+// definition of one name silently wins or fails to parse depending on
+// concatenation order, which is exactly the regression this migration invites.
+func TestRouteTemplatesRenderFromEmbeddedUI(t *testing.T) {
+	pages := map[string][]string{
+		"overview.html":                {"page"},
+		"events.html":                  {"everow", "eventrows", "events"},
+		"ips.html":                     {"iprow", "iprows", "ips", "attacker"},
+		"session.html":                 {"session"},
+		"intel.html":                   {"clusters", "campaigns", "campaignrows", "commands"},
+		"payloads.html":                {"payloadrow", "payloadrows", "payloads", "payload-analysis"},
+		"sandbox.html":                 {"sandbox"},
+		"history.html":                 {"history"},
+		"dead_letters.html":            {"dead-letters"},
+		"source_health.html":           {"source-health"},
+		"alerts.html":                  {"alerts"},
+		"reports.html":                 {"reports"},
+		"search.html":                  {"search"},
+		"partials/settings_modal.html": {"settingsModal"},
+	}
+	for name, names := range pages {
+		body := mustReadUI(name)
+		for _, define := range names {
+			if !strings.Contains(body, `{{define "`+define+`"}}`) {
+				t.Fatalf("embedded %s is missing the %q template", name, define)
+			}
+		}
+		if !strings.Contains(pageTemplate, body) {
+			t.Fatalf("pageTemplate does not include embedded %s", name)
+		}
+	}
+	sources, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, source := range sources {
+		if strings.HasSuffix(source, "_test.go") {
+			continue
+		}
+		body, err := os.ReadFile(source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(body), `{{define "`) {
+			t.Fatalf("%s declares a template inline; route markup belongs in dashboard/ui/", source)
+		}
+	}
+}

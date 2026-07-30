@@ -1,43 +1,5 @@
 package main
 
-const pageSession = `
-{{define "session"}}<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex, nofollow">
-<title>xore//honeypot &mdash; session {{.ID}}</title>
-{{template "style"}}
-</head>
-<body>
-<div class="app-shell">
-  {{template "topbar" .}}
-  {{template "sidebar" .}}
-  <main class="app-main">
-      <div class="wrap app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
-        <header class="overview-header">
-          <div>
-            <div class="eyebrow">Session replay</div>
-            <h1>{{.ID}}</h1>
-            <p class="subtitle">{{.IP}} {{if .Country}}&bull; {{.Country}}{{end}} &bull; {{.First}} &mdash; {{.Last}}</p>
-          </div>
-          <div class="live-panel">
-            <span class="gen">{{.Total}} normalized events</span>
-          </div>
-        </header>
-
-        <div class="filters"><a class="chip" href="/events">&larr; event explorer</a>{{if .IP}}<a class="chip" href="/investigate/ip/{{.IP | urlquery}}">attacker profile</a>{{end}}<a class="chip" href="/events?session={{.ID | urlquery}}">filtered events</a></div>
-
-        <div class="tw:grid tw:grid-cols-12 tw:gap-3.5">{{template "tbl" (dict "t" "Sensors" "rows" .Sensors "class" "half" "hint" "none")}}{{template "tbl" (dict "t" "Credentials" "rows" .Credentials "class" "half" "hint" "none")}}{{template "tbl" (dict "t" "Commands" "rows" .Commands "class" "half" "hint" "none")}}{{template "tbl" (dict "t" "Payload hashes" "rows" .Payloads "class" "half" "hint" "none")}}{{template "techniques" .Techniques}}
-        <div class="card wide"><h2>Chronological replay</h2><p class="note">Oldest to newest. Commands, credentials, downloads, fingerprints, and investigation pivots remain linked.</p><table class="recent"><thead><tr><th>time</th><th>sensor</th><th>source</th><th>port</th><th>detail</th></tr></thead><tbody>{{range .Events}}{{template "everow" .}}{{end}}</tbody></table></div></div>
-
-        <footer>xore//honeypot &bull; session investigation</footer>
-      </div>
-    </main>
-</div>
-</body>
-</html>
-{{end}}
-
-`
+// Route templates live in the embedded ui tree; see
+// docs/DASHBOARD-RENDER-ENGINE-GUIDE.md §6 step 3. Markup is unchanged.
+var pageSession = mustReadUI("session.html")

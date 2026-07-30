@@ -1,0 +1,39 @@
+{{define "dead-letters"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>xore//honeypot &mdash; ingest dead letters</title>
+{{template "style"}}
+</head>
+<body>
+<div class="app-shell">
+  {{template "topbar" .}}
+  {{template "sidebar" .}}
+  <main class="app-main">
+      <div class="wrap app-content tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
+        <header class="overview-header" id="dead-header">
+          <div>
+            <div class="eyebrow">Pipeline diagnostics</div>
+            <h1>Ingest dead letters</h1>
+            <p class="subtitle">Documents Elasticsearch rejected, with their original error and field shape for remediation.</p>
+          </div>
+          <div class="live-panel">
+            <span class="gen">{{.ES.RecentDeadLetters}} in 24h &bull; {{.ES.DeadLetters}} retained</span>
+          </div>
+        </header>
+        <div class="filters" id="dead-filters"><a class="chip" href="/source-health">&larr; source health</a><input id="dead-q" class="search" placeholder="optional Elasticsearch query" aria-label="Dead-letter query"><button id="dead-run" class="copy">search</button></div>
+        <div class="card wide" id="dead-card"><p id="dead-meta" class="note">Loading rejected documents&hellip;</p><div id="dead-rows" data-hp-lazy-list></div></div>
+        <footer id="dead-footer">xore//honeypot &bull; ingestion failure diagnostics</footer>
+      </div>
+    </main>
+</div>
+<script>
+const deadQ=document.getElementById('dead-q'),deadRows=document.getElementById('dead-rows'),deadMeta=document.getElementById('dead-meta');
+async function loadDead(){const q=deadQ.value.trim(),u='/api/dead-letters?limit=200'+(q?'&q='+encodeURIComponent(q):'');deadMeta.textContent='loading';try{const j=await (await fetch(u,{cache:'no-store'})).json(),hits=j.hits?.hits||[];deadMeta.textContent=hits.length+' rejected documents shown';deadRows.innerHTML='';for(const hit of hits){const d=document.createElement('details');d.className='tw:border-b tw:border-subtle tw:py-2';const source=hit._source||{},stamp=source['@timestamp']||'',error=source.error?.message||source.error?.type||'rejected document';const summary=document.createElement('summary');summary.className='v';summary.textContent=stamp+' - '+error;const pre=document.createElement('pre');pre.className='code tw:mt-2';pre.textContent=JSON.stringify(source,null,2);d.append(summary,pre);deadRows.appendChild(d)}if(!hits.length)deadRows.textContent='No matching dead letters.'}catch(e){deadMeta.textContent='query failed';deadRows.textContent=String(e)}}
+document.getElementById('dead-run').onclick=loadDead;deadQ.onkeydown=e=>{if(e.key==='Enter')loadDead()};loadDead();
+</script>
+</body>
+</html>
+{{end}}
