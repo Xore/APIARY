@@ -13,9 +13,11 @@ Last audited: 2026-07-30
   Kibana, Arkime, and tested honeypot ports refuse connections.
 - Dashboard theme alignment and the render-engine foundation merged to `main`
   via [PR #26](https://github.com/Xore/honeypot-stack/pull/26) on 2026-07-29.
-  The migration itself is unfinished: partials are extracted and the theme is
-  vendored with a lock file, but most routes still render from `page_*.go`
-  constants and the CSP cutover has not happened.
+  The page migration finished on 2026-07-30: all fourteen route templates now
+  live in `dashboard/ui/`, each `page_*.go` is a one-line binding, and a test
+  fails the build if markup moves back into Go. The CSP cutover has not
+  happened — it needs a per-request nonce threaded into every page data
+  struct — and the modal inventory is still partial.
 - CI credentials are in place: the `production-home` runner is online and the
   VPS deployment secrets are set. Deployment is no longer credential-blocked.
 - `ml-worker/` exists as a scaffold but is not present as a root Compose
@@ -42,6 +44,12 @@ Nothing ingestion-dependent can be accepted until this gate is green.
 6. Record a green end-to-end check: sensor log → Filebeat/Elasticsearch →
    Dashboard and EveBox.
 
+7. ✅ 2026-07-30 — a read-only `Diagnostics` workflow
+   ([`diagnostics.yml`](../.github/workflows/diagnostics.yml)) can now inspect
+   both stacks on demand. It runs on the `production-home` runner, so items 2,
+   3, and 6 can be *observed* without homeserver shell access; only the
+   recovery in item 2 still needs a human at a terminal.
+
 Note on item 5: the four values are set as **repository** secrets, not as
 `production-vps` environment secrets. The `vps` job reads them either way —
 repository secrets are visible to every job, and an environment secret of the
@@ -50,7 +58,9 @@ option, because it restricts the credentials to jobs that declare
 `environment: production-vps` rather than exposing them to every workflow in
 the repository. Worth moving before the secret set grows; not a blocker.
 
-Only items 1–3 and 6 remain, and all four depend on homeserver access.
+Only items 1–3 and 6 remain. Items 3 and 6 are now answerable from the
+Diagnostics workflow; item 2 is answerable there but not fixable there, and
+item 1 is entirely the user's.
 
 Exit criteria:
 
@@ -72,8 +82,9 @@ Source documents:
 
 Deliverables:
 
-1. Move shared partials and route templates from Go constants into embedded
-   `dashboard/ui/` files in the documented order.
+1. ✅ 2026-07-30 — shared partials and all fourteen route templates now live in
+   embedded `dashboard/ui/` files. Optional follow-up: split the multi-template
+   bundles (`intel.html`, `payloads.html`, `ips.html`) one file per route.
 2. Add typed render methods, per-request nonces, and CSP headers only after all
    inline-handler dependencies are removed.
 3. Complete event detail, payload preview, export, and destructive-action
