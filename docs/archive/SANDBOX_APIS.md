@@ -1,5 +1,16 @@
 # Sandbox API Capability Reference
 
+> **Archived 2026-07-30.** Superseded by
+> [`Xore/honeypot/docs/SCANNERS.md`](https://github.com/Xore/honeypot/blob/main/docs/SCANNERS.md),
+> which is the live reference for all eight integrated scanners.
+>
+> This document described a two-scanner design (VirusTotal + JoeSandbox) that the
+> upstream pipeline outgrew: Hybrid-Analysis, Malshare, MetaDefender, CAPE, and
+> Any.run are now integrated, and the "not currently integrated" table below is
+> therefore wrong. Retained for the design rationale in the final section.
+>
+> Current plan: [`docs/github-analysis-integration-roadmap.md`](../github-analysis-integration-roadmap.md).
+
 Comparison of sandbox/analysis services usable for automated honeypot payload submission.
 
 ## VirusTotal API v3

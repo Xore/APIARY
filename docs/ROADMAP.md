@@ -115,7 +115,23 @@ false-positive review.
 - Measure ES/file polling before introducing Redis.
 - Preserve SSE and current dashboard resource limits.
 
-### 3C. Guarded LLM worker
+### 3C. GitHub scanner integration
+
+Source: [`github-analysis-integration-roadmap.md`](github-analysis-integration-roadmap.md)
+
+- Reconcile `analysis/` documentation with the eight-scanner `Xore/honeypot`
+  pipeline, and retire the cron-driven `collect.sh` publication path.
+- Pull the upstream auto-generated YARA corpus back to the local scanner.
+- Add a manual, admin-only, confirm-gated dashboard button that spools one
+  sample to a root-owned host publisher; the dashboard holds no token and runs
+  no git.
+- Default to dry-run. Real publication requires separate explicit
+  authorization, as with the IP reporter.
+
+Phases 0 and 4 (documentation reconciliation, YARA corpus sync) are the only
+items in this release that do not require Gate 0.
+
+### 3D. Guarded LLM worker
 
 Source: [`gpu-llm-analysis-worker.md`](gpu-llm-analysis-worker.md)
 
@@ -172,6 +188,7 @@ Sequence:
 - `gpu-ml-worker-acceleration.md`
 - `gpu-llm-analysis-worker.md`
 - `ip-reporting-plan.md`
+- `github-analysis-integration-roadmap.md`
 
 ### Operational runbooks
 
@@ -194,7 +211,15 @@ Sequence:
 - `DASHBOARD-UI-REDESIGN-GUIDE.md` — archive only after the render-engine guide
   absorbs its remaining test and visual acceptance requirements.
 
-Archiving is intentionally a separate work item (`DOC-001`) so link repair and
+### Archived
+
+Moved to [`archive/`](archive/) with a supersession header and inbound links
+repaired:
+
+- `archive/SANDBOX_APIS.md` — two-scanner capability comparison, superseded by
+  `Xore/honeypot/docs/SCANNERS.md`.
+
+Archiving is otherwise a separate work item (`DOC-001`) so link repair and
 status verification happen before files move.
 
 ## Priority rule

@@ -65,6 +65,8 @@ These are default coordination lanes, not exclusive capabilities.
 | KVM-001 | P2 | `READY` | — | Kimi | Reconcile KVM/network-analysis guides with implemented sandbox tooling | OPS-001 for host verification | — | 2026-07-29 | Produce a gap list: implemented scripts, host-only steps, stale paths, and missing automation |
 | NOISE-001 | P3 | `READY` | — | Sonnet | Design a safe background-noise prototype that cannot contaminate evidence | KVM-001 and isolation review | — | 2026-07-29 | Threat-model attribution, filtering, and capture labeling before adding any packet generator |
 | DOC-001 | P2 | `READY` | — | Kimi | Verify completed/stale docs and prepare archive move | Current roadmap stabilized | — | 2026-07-29 | Validate archive candidates listed in `ROADMAP.md`; update inbound links before moving files |
+| GHA-001 | P2 | `READY` | — | Sonnet | Pull the upstream auto-generated YARA corpus from `Xore/honeypot` into the local scanner | — | — | 2026-07-30 | Implement `sync-yara.sh` per roadmap Phase 4: fetch, `yara --compile` validate, pin the upstream SHA in a lock file, keep local rules in a separate subtree |
+| GHA-002 | P2 | `READY` | — | Codex | Build the manual GitHub-analysis publisher and dashboard button | GHA-001, OPS-001 for host access | — | 2026-07-30 | Resolve the three open questions in the roadmap (retention denylist, archive convention, quota cap) before writing `analysis/github/`; dry-run default must be a test, not a convention |
 
 ## Handoff template
 

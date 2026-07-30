@@ -1,81 +1,136 @@
 # Malware Analysis Pipeline
 
-This folder documents and hosts the analysis pipeline that automatically submits honeypot-captured payloads to **VirusTotal** and **JoeSandbox**, generates PDF reports, and commits everything to [Xore/Honeypot](https://github.com/Xore/Honeypot).
+Captured payloads are analysed by a multi-scanner GitHub Actions pipeline that
+lives in a **separate repository**, [`Xore/honeypot`](https://github.com/Xore/honeypot).
+This folder holds the honeypot-side tooling that feeds it and the local analysis
+scripts that run on the sensor host.
+
+> The integration between this repository's dashboard and that pipeline is
+> planned in [`docs/github-analysis-integration-roadmap.md`](../docs/github-analysis-integration-roadmap.md).
+> Publication is **not** automatic — see "Publication is manual" below.
 
 ---
 
 ## Architecture
 
 ```
-honeypot-stack (this repo)         Xore/Honeypot (sample archive)
-┌───────────────────────────┐       ┌───────────────────────────┐
-│  Cowrie / Dionaea / Conpot  │       │  samples/ELF/             │
-│  ↓ capture payloads         │       │  samples/PE/              │
-│  analysis/collect.sh        │  ──►  │  samples/Scripts/         │
-│  ↓ push to Honeypot repo    │       │  reports/virustotal/*.pdf  │
-│  GitHub Actions trigger     │       │  reports/joesandbox/*.pdf  │
-└───────────────────────────┘       │  iocs/hashes.csv           │
-                                        └───────────────────────────┘
-        │                                      ↑
-        │           External APIs              │
-        │  ┌─────────────────────┐          │
-        └─►│ VirusTotal API v3     │          │
-           │ JoeSandbox Cloud API  │────────┘
-           └─────────────────────┘
+honeypot-stack (this repo)          Xore/honeypot (sample archive + pipeline)
+┌────────────────────────────┐      ┌────────────────────────────────────┐
+│ Cowrie / Dionaea / Conpot  │      │ samples/{ELF,PE,Scripts,Docs,…}/    │
+│   ↓ capture payloads       │ ──►  │   ↓ push triggers analyze.yml       │
+│ dashboard → button →       │      │ reports/scanner/<sha256>.json       │
+│   host publisher (planned) │      │ reports/pdf/, reports/yara/         │
+└────────────────────────────┘      │ iocs/hashes.csv, iocs/families.csv  │
+                                    │ yara-rules/ + yara-rules/auto/      │
+        ▲                           └────────────────────────────────────┘
+        │  results read back                     │
+        └────────────────────────────────────────┘
+                                                 │
+                                    8 scanner APIs (VT, MalwareBazaar,
+                                    Hybrid-Analysis, Malshare, JoeSandbox,
+                                    MetaDefender, CAPE, Any.run)
 ```
 
 ---
 
-## Components
+## Components in this folder
 
-| File | Purpose |
-|------|---------|
-| `analysis/collect.sh` | Run on the honeypot host; copies new payloads from Cowrie/Dionaea, then pushes to Xore/Honeypot |
-| `analysis/pipeline.py` | Standalone pipeline script (same logic as Honeypot repo's `.github/scripts/analyze_samples.py`) |
-| `analysis/SANDBOX_APIS.md` | API capability comparison and rate limit reference |
+| Path | Purpose |
+|---|---|
+| `analyze.py` | Offline triage of Cowrie / http-honeypot / multipot / Dionaea JSON logs. Stdlib only |
+| `collect.sh` | **Deprecated.** Cron-driven bulk copy of captures into a clone of `Xore/honeypot`. Superseded by the dashboard button; kept for a one-time manual backfill |
+| `dedupe-payloads.py` | Collapses duplicate captures by SHA-256 |
+| `yara/` | Networkless YARA scanner sidecar and local rules |
+| `ghidra/` | Headless Ghidra reverse-engineering pipeline and its dashboard integration plan |
+| `elasticsearch-setup.sh`, `honeypot-kibana-setup.sh`, `filebeat.yml`, `evebox.yaml` | Log pipeline and search UI provisioning |
+| `backup-honeypot.sh`, `verify-backup.sh`, `log-maintenance.sh`, `RECOVERY.md` | Retention and recovery |
+| `verify-stack.py` | Post-deploy health check |
 
-The actual GitHub Actions workflow lives in [Xore/Honeypot/.github/workflows/analyze.yml](https://github.com/Xore/Honeypot/blob/main/.github/workflows/analyze.yml) and runs automatically when samples are pushed there.
+The GitHub Actions workflow itself lives at
+[`Xore/honeypot/.github/workflows/analyze.yml`](https://github.com/Xore/honeypot/blob/main/.github/workflows/analyze.yml).
+The authoritative scanner capability reference is
+[`Xore/honeypot/docs/SCANNERS.md`](https://github.com/Xore/honeypot/blob/main/docs/SCANNERS.md).
 
 ---
 
-## Quick Start
+## Publication is manual
 
-### 1. Set Secrets in Xore/Honeypot
+Pushing a capture to `Xore/honeypot` publishes it to a **public repository** and
+to up to eight third-party scanner APIs. That is an irreversible external
+disclosure, so it is never triggered by a timer or a directory watcher.
 
-Go to **Settings → Secrets and variables → Actions**:
+The intended path is a per-sample, admin-only, confirm-gated button in the
+dashboard, backed by a root-owned host publisher — the same spool-file pattern
+the KVM sandbox already uses. `collect.sh` predates that design and should not
+be installed on a cron.
 
-| Secret | How to get |
-|--------|------------|
-| `VT_API_KEY` | https://www.virustotal.com → Profile → API Key (free tier: 4 req/min, 500/day) |
-| `JOESANDBOX_API_KEY` | https://www.joesandbox.com → Account → API Key (free community tier available) |
-| `GH_PAT` | GitHub → Settings → Developer Settings → PAT with `repo` write scope |
+---
 
-### 2. Install collect.sh on the honeypot host
+## Upstream pipeline
+
+### Triggers
+
+| Trigger | Behaviour |
+|---|---|
+| `push` to `main` touching `samples/**` | Scans only **Added or Renamed** files (`--diff-filter=AR`). Modified files are deliberately skipped — an existing sample was already scanned when it was added |
+| `pull_request` | Dry run; results are never committed |
+| `schedule` — Sundays 02:00 UTC | Full rescan of `samples/`, refreshing detection scores |
+| `workflow_dispatch` | Manual run with an optional `sample_path` input |
+
+### Steps
+
+1. Detect new sample files.
+2. YARA pre-scan (`yara-rules/*.yar` + `yara-rules/auto/*.yar`) — offline
+   detection before any API quota is spent.
+3. Multi-scanner analysis (`analyze_samples.py`): hash lookup, upload if
+   unknown, poll for results → `reports/scanner/<sha256>.json`; append
+   `iocs/hashes.csv` and `iocs/families.csv`.
+4. Auto YARA generation (`generate_yara.py`): reads the scanner reports, runs
+   `strings -n 8` over the sample, normalises family names, scores and selects
+   detection strings, emits `yara-rules/auto/<family>.yar`, validates with
+   `yara --compile`. Invalid rules go to `_invalid/` for review.
+5. IOC changelog update (`iocs/CHANGELOG.md`).
+6. PDF report generation (`report.py` → `reports/pdf/`).
+7. Artifact upload, retained 90 days.
+8. Commit `reports/`, `iocs/`, and `yara-rules/auto/` with `[skip ci]`.
+
+### Failure contract
+
+A single scanner API failure never aborts the job, and the JSON report is always
+written. The job hard-fails only when no scanner secrets are set at all, the
+file list cannot be read, or every scanner errored on every file (exit 2).
+
+### Scanners
+
+| Scanner | Secret | Free tier |
+|---|---|---|
+| VirusTotal | `VT_API_KEY` | 4 req/min, 500/day — 70+ AV engines |
+| MalwareBazaar | `MALWAREBAZAAR_API_KEY` | Yes — `Auth-Key` header required on every request |
+| Hybrid-Analysis | `HYBRID_ANALYSIS_KEY` | Yes — `env_id=110` (Win7-64) on free tier |
+| Malshare | `MALSHARE_API_KEY` | Yes |
+| JoeSandbox | `JOESANDBOX_API_KEY` | Community tier, limited submissions |
+| MetaDefender | `METADEFENDER_API_KEY` | Yes — 37+ engines |
+| CAPE Sandbox | `CAPE_API_URL` + `CAPE_API_KEY` | Self-hosted |
+| Any.run | `ANYRUN_API_KEY` | Paid only |
+
+`GH_PAT` (repo write scope) is always required, for the pipeline's own commits.
+At least one scanner secret must be present.
+
+Secrets are configured in `Xore/honeypot` under
+**Settings → Secrets and variables → Actions**. None of them belong in this
+repository, in `.env`, or in any container.
+
+---
+
+## Local triage
 
 ```bash
-cp analysis/collect.sh /opt/honeypot-collect.sh
-chmod +x /opt/honeypot-collect.sh
-
-# Add cron: run every 30 min
-echo '*/30 * * * * root /opt/honeypot-collect.sh' >> /etc/cron.d/honeypot-collect
+# Summarise sensor logs without leaving the host
+python3 analysis/analyze.py /path/to/logdir --top 15 --json summary.json
 ```
-
-### 3. Manual single-sample analysis
 
 ```bash
-pip install requests vt-py weasyprint jinja2
-export VT_API_KEY=your_key
-export JOESANDBOX_API_KEY=your_key
-python3 analysis/pipeline.py --sample /path/to/malware.elf
+# Copy logs out of the Docker volume first
+docker run --rm -v honeypot_honeypot-logs:/logs -v "$PWD":/out \
+    alpine sh -c 'cp /logs/*.json /out/'
 ```
-
----
-
-## API Rate Limits Reference
-
-| Service | Free Tier | Paid Tier | File Size Limit |
-|---------|-----------|-----------|------------------|
-| VirusTotal | 4 req/min, 500/day | Per SLA | 32 MB (direct), 650 MB (URL upload) |
-| JoeSandbox | Community: limited submissions/month | Business/Enterprise | 100 MB |
-
-The pipeline uses a **16-second sleep** between VT requests to stay safely under the public 4 req/min cap. JoeSandbox uses `report-cache: 1` to avoid re-analysing already-known samples.
