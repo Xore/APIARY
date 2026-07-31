@@ -175,6 +175,7 @@ type store struct {
 	yaraFile          string
 	expected          []string // configured feeds shown even before their first event
 	subs              map[chan struct{}]struct{}
+	authAccountURL    string // validated once at startup; see validatedAuthAccountURL
 }
 
 // rebuild re-reads every log file and recomputes the snapshot.

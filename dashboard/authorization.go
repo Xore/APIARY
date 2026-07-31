@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -111,8 +112,40 @@ func (s *store) serveWhoAmI(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(whoAmIResponse{
 		authenticatedIdentity: identity,
 		Capabilities:          capabilitiesFor(identity.Role),
-		AuthAccountURL:        strings.TrimSpace(os.Getenv("AUTH_ACCOUNT_URL")),
+		AuthAccountURL:        s.authAccountURL,
 	})
+}
+
+// validatedAuthAccountURL resolves and validates AUTH_ACCOUNT_URL once at
+// startup. An unset value just leaves the settings menu item hidden
+// (hp-account.js). A set-but-malformed one is worse: it reaches the browser
+// as an opaque src, and the only symptom is a blank iframe inside the
+// settings modal with nothing but the browser console to explain it — so a
+// bad value is rejected here, loudly, before the server takes any traffic,
+// instead of failing silently in front of whichever user opens Settings
+// first (issue #93).
+func validatedAuthAccountURL() string {
+	raw := strings.TrimSpace(os.Getenv("AUTH_ACCOUNT_URL"))
+	if raw == "" {
+		return ""
+	}
+	accountURL, err := url.Parse(raw)
+	if err != nil || accountURL.User != nil || accountURL.Fragment != "" || accountURL.Hostname() == "" ||
+		(accountURL.Scheme != "https" && !(accountURL.Scheme == "http" && isLoopbackHost(accountURL.Hostname()))) {
+		fmt.Fprintf(os.Stderr, "dashboard: AUTH_ACCOUNT_URL %q is not a valid HTTPS URL; the settings menu item will stay hidden\n", raw)
+		return ""
+	}
+	introspection := strings.TrimSpace(os.Getenv("AUTH_INTROSPECTION_URL"))
+	authOrigin, err := url.Parse(introspection)
+	if introspection == "" || err != nil || authOrigin.Hostname() == "" {
+		fmt.Fprintf(os.Stderr, "dashboard: AUTH_ACCOUNT_URL is set but AUTH_INTROSPECTION_URL is not a usable URL, so the auth origin cannot be confirmed; the settings menu item will stay hidden\n")
+		return ""
+	}
+	if !strings.EqualFold(accountURL.Hostname(), authOrigin.Hostname()) {
+		fmt.Fprintf(os.Stderr, "dashboard: AUTH_ACCOUNT_URL host %q does not match the AUTH_INTROSPECTION_URL auth origin %q; the settings menu item will stay hidden\n", accountURL.Hostname(), authOrigin.Hostname())
+		return ""
+	}
+	return raw
 }
 
 func resolveIdentity(r *http.Request) (authenticatedIdentity, error) {
