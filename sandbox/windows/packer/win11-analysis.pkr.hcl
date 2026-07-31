@@ -94,10 +94,10 @@ source "qemu" "win11" {
   format           = "qcow2"
 
   # Hardware — anti-sandbox-detection
-  machine_type   = "q35"
-  memory         = var.memory
-  cpus           = var.cpus
-  disk_size      = var.disk_size
+  machine_type = "q35"
+  memory       = var.memory
+  cpus         = var.cpus
+  disk_size    = var.disk_size
   # AHCI, not virtio. Two reasons, and they point the same way:
   #
   # Windows 11 setup ships no virtio-blk driver, so a virtio disk simply does
@@ -156,7 +156,7 @@ source "qemu" "win11" {
   # only thing a 6h value buys is that a guest which never brings WinRM up
   # burns a whole working day before saying so, which is exactly what
   # happened. Install plus OOBE is well under 45 minutes on this host.
-  winrm_timeout = "45m"
+  winrm_timeout  = "45m"
   winrm_use_ssl  = false
   winrm_insecure = true
 
