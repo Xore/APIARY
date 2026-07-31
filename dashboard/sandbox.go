@@ -269,9 +269,16 @@ func loadSandboxResults() []sandboxResult {
 }
 
 // sandboxArtifactFile locates a downloadable artifact across every backend's
-// result directory. Only regular files are accepted, and the name is always a
-// job-derived basename, so this cannot be steered outside those directories.
+// result directory. name is expected to be a job-derived basename, but
+// serveSandboxExport's caller derives it from the request path, so it is
+// re-validated here rather than trusted: rejecting anything that is not its
+// own filepath.Base, or that contains "..", makes escaping the join
+// impossible at the choke point instead of a property argued from the
+// handler three frames away. Mirrors the ReportPDF check in ghidra.go.
 func sandboxArtifactFile(name string) (string, os.FileInfo, bool) {
+	if name == "" || name != filepath.Base(name) || strings.Contains(name, "..") {
+		return "", nil, false
+	}
 	for _, dir := range sandboxResultsDirs() {
 		path := filepath.Join(dir, name)
 		if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() {

@@ -45,6 +45,43 @@ func TestSandboxResultsAreBoundedAndValidated(t *testing.T) {
 	}
 }
 
+// sandboxArtifactFile is the choke point for two CodeQL go/path-injection
+// alerts (#4, #21): https://github.com/Xore/honeypot-stack/issues/80. The
+// property has to hold at the join itself, not be argued from the callers
+// three frames away.
+func TestSandboxArtifactFileRejectsTraversal(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SANDBOX_RESULTS_DIR", dir)
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.pcap")
+	if err := os.WriteFile(secret, []byte("do-not-serve"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rel, err := filepath.Rel(dir, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		"../" + filepath.Base(outside) + "/secret.pcap",
+		rel,
+		"..",
+		"sub/../../escape",
+		"/" + secret,
+	} {
+		if _, _, ok := sandboxArtifactFile(name); ok {
+			t.Fatalf("sandboxArtifactFile(%q) resolved outside the results directory", name)
+		}
+	}
+
+	legit := filepath.Join(dir, "linux-test.host.pcap")
+	if err := os.WriteFile(legit, []byte("pcap"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := sandboxArtifactFile("linux-test.host.pcap"); !ok {
+		t.Fatal("sandboxArtifactFile rejected a legitimate basename")
+	}
+}
+
 func TestSandboxStatusAndTemplate(t *testing.T) {
 	dir := t.TempDir()
 	requests := t.TempDir()
