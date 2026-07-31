@@ -102,10 +102,34 @@ $sysmonPath = 'C:\Tools\SysinternalsSuite'
 if (-not (Test-Path "$sysmonPath\Sysmon64.exe")) {
     choco install sysinternals -y --no-progress
 }
+# The config comes from a third-party branch at build time, so two things can
+# go wrong and neither should cost three hours. DownloadFile throws a
+# terminating error, which would abort the whole provisioner at Phase 9 over a
+# momentary blip on a host we do not control.
+#
+# Sysmon without a config still logs process creation, network connections and
+# image loads — a thinner record than SwiftOnSecurity's, but the detonation is
+# still observed. Losing that is much better than losing the build.
 $configUrl = 'https://raw.githubusercontent.com/SwiftOnSecurity/sysmon-config/master/sysmonconfig-export.xml'
 $configPath = 'C:\Windows\sysmon_config.xml'
-(New-Object Net.WebClient).DownloadFile($configUrl, $configPath)
-& "$sysmonPath\Sysmon64.exe" -accepteula -i $configPath
+$sysmonConfigured = $false
+try {
+    (New-Object Net.WebClient).DownloadFile($configUrl, $configPath)
+    # A 404 or a captive-portal page downloads happily and is not XML. Sysmon
+    # would reject it with a message no one reads until a report comes back
+    # empty, so check here instead.
+    [xml](Get-Content $configPath) | Out-Null
+    & "$sysmonPath\Sysmon64.exe" -accepteula -i $configPath
+    $sysmonConfigured = $true
+    Write-Host '[+] Sysmon installed with sysmon-config'
+} catch {
+    Write-Warning "[!] Sysmon config unusable ($($_.Exception.Message)) - falling back to defaults"
+    & "$sysmonPath\Sysmon64.exe" -accepteula -i
+}
+# Record which of the two ran. A report that looks thin should be traceable to
+# this without guessing.
+"sysmon_config=$(if ($sysmonConfigured) { 'sysmon-config' } else { 'defaults' })" |
+    Set-Content 'C:\golden_image_provenance.txt'
 Write-Host '[+] Sysmon installed'
 
 # ── PowerShell Logging ────────────────────────────────────────────────────
