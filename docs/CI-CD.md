@@ -148,6 +148,25 @@ the intended VPS, keep it in the protected environment rather than repository
 secrets where possible, and require environment approval before the job can
 read it.
 
+## Diagnostics
+
+`diagnostics.yml` is the read-only counterpart to `deploy.yml`, and it is
+`workflow_dispatch` only. It mirrors the deployment topology: the home job runs
+on the `[self-hosted, linux, x64, honeypot-home]` runner, and the VPS job runs
+on a GitHub-hosted runner over the same SSH deployment key. Neither changes
+anything — they report container state, recent logs, and disk and volume usage.
+
+It exists because the alternative to a scoped read-only workflow is an operator
+opening an interactive shell on production to answer a question, and that is
+how a diagnosis turns into an accidental change. Keep it read-only. It must
+never gain a step that restarts a service, prunes a volume, or writes a file —
+if a finding calls for action, the action goes through `deploy.yml` and its
+environment approval.
+
+The workflow reads `HP_BIND` and deliberately never prints it: it is an
+internal WireGuard address, and the job's output is visible to anyone who can
+read the Actions log.
+
 ## Delivery paths at a glance
 
 ```text

@@ -49,8 +49,14 @@ Open http://127.0.0.1:5000
 | `attack_surface_triage` | Top dangerous functions, scored |
 | `vulnerability_hypothesis` | CVE-style analysis for high-value targets |
 
-All outputs are saved to `reports/ghidra/<sha256>/revdeck_triage.json`
-and embedded in the final PDF report.
+All outputs are saved to `reports/ghidra/<sha256>/revdeck_triage.json` by
+`revdeck_triage()` in [`ghidra_analyze.py`](../ghidra_analyze.py). That is where
+they stop. Nothing in this repository turns them into a PDF — report generation
+is a phase 5 deliverable in
+[#78](https://github.com/Xore/honeypot-stack/issues/78). (Earlier revisions of
+this file said the triage was "embedded in the final PDF report," which was
+never true here; the PDF pipeline that exists lives in `Xore/honeypot` and does
+not read these files.)
 
 ## Evidence Grounding
 
