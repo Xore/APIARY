@@ -382,9 +382,16 @@ services:
       - MAP_ATTRIBUTION=${HONEYPOT_MAP_ATTRIBUTION:-© OpenStreetMap contributors}
       - ELASTICSEARCH_URL=http://elasticsearch:9200
       - FILEBEAT_URL=http://filebeat:5066
-      - KIBANA_PUBLIC_URL=${KIBANA_PUBLIC_URL:-https://kibana.honeypot.example}
-      - EVEBOX_PUBLIC_URL=${EVEBOX_PUBLIC_URL:-https://evebox.honeypot.example}
-      - ARKIME_PUBLIC_URL=${ARKIME_PUBLIC_URL:-https://arkime.honeypot.example}
+      # Where the Open-in links on an event point. Set HONEYPOT_DOMAIN and the
+      # dashboard derives https://<tool>.<domain>; the three explicit URLs
+      # override it for path-routed deployments. All four are deliberately
+      # empty by default: these URLs carry the IP under investigation, so an
+      # unset variable must produce no link rather than a plausible-looking one
+      # aimed at a domain we do not own. See issue #97.
+      - HONEYPOT_DOMAIN=${HONEYPOT_DOMAIN:-}
+      - KIBANA_PUBLIC_URL=${KIBANA_PUBLIC_URL:-}
+      - EVEBOX_PUBLIC_URL=${EVEBOX_PUBLIC_URL:-}
+      - ARKIME_PUBLIC_URL=${ARKIME_PUBLIC_URL:-}
       - ALERT_STATE_FILE=/state/alerts.json
       - ALERT_COOLDOWN=${HONEYPOT_ALERT_COOLDOWN:-6h}
       - PAYLOAD_DIRS=/dionaea-lib/binaries,/cowrie-downloads
