@@ -75,6 +75,7 @@ func templateFuncs(s *store, world template.HTML) template.FuncMap {
 		return cfg.Behavior
 	}
 	return template.FuncMap{
+		"asset":    assetURL,
 		"worldMap": func() template.HTML { return world },
 		"json": func(value any) string {
 			b, _ := json.MarshalIndent(value, "", "  ")
