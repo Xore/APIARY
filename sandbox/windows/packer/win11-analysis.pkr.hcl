@@ -259,8 +259,12 @@ build {
     # deliberately NOT elevated, so the command runs directly over WinRM and a
     # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
     # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one.
-    valid_exit_codes = [0, 1, 267014, 3010, 1641]
+    # fix covered the elevated code and not this one. 16001 is a third variant
+    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
+    # full 1200s with no error, WinRM simply going EOF right as the script
+    # tried to return - a reboot landing on the connection instead of a
+    # scheduled task or a mid-command process.
+    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
     timeout          = "40m"
   }
   provisioner "powershell" {
@@ -276,8 +280,12 @@ build {
     # deliberately NOT elevated, so the command runs directly over WinRM and a
     # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
     # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one.
-    valid_exit_codes = [0, 1, 267014, 3010, 1641]
+    # fix covered the elevated code and not this one. 16001 is a third variant
+    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
+    # full 1200s with no error, WinRM simply going EOF right as the script
+    # tried to return - a reboot landing on the connection instead of a
+    # scheduled task or a mid-command process.
+    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
     timeout          = "40m"
   }
   provisioner "powershell" {
@@ -293,8 +301,12 @@ build {
     # deliberately NOT elevated, so the command runs directly over WinRM and a
     # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
     # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one.
-    valid_exit_codes = [0, 1, 267014, 3010, 1641]
+    # fix covered the elevated code and not this one. 16001 is a third variant
+    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
+    # full 1200s with no error, WinRM simply going EOF right as the script
+    # tried to return - a reboot landing on the connection instead of a
+    # scheduled task or a mid-command process.
+    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
     timeout          = "40m"
   }
   provisioner "powershell" {
@@ -310,8 +322,12 @@ build {
     # deliberately NOT elevated, so the command runs directly over WinRM and a
     # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
     # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one.
-    valid_exit_codes = [0, 1, 267014, 3010, 1641]
+    # fix covered the elevated code and not this one. 16001 is a third variant
+    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
+    # full 1200s with no error, WinRM simply going EOF right as the script
+    # tried to return - a reboot landing on the connection instead of a
+    # scheduled task or a mid-command process.
+    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
     timeout          = "40m"
   }
   provisioner "powershell" {
@@ -327,8 +343,12 @@ build {
     # deliberately NOT elevated, so the command runs directly over WinRM and a
     # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
     # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one.
-    valid_exit_codes = [0, 1, 267014, 3010, 1641]
+    # fix covered the elevated code and not this one. 16001 is a third variant
+    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
+    # full 1200s with no error, WinRM simply going EOF right as the script
+    # tried to return - a reboot landing on the connection instead of a
+    # scheduled task or a mid-command process.
+    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
     timeout          = "40m"
   }
   provisioner "powershell" {
@@ -344,8 +364,12 @@ build {
     # deliberately NOT elevated, so the command runs directly over WinRM and a
     # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
     # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one.
-    valid_exit_codes = [0, 1, 267014, 3010, 1641]
+    # fix covered the elevated code and not this one. 16001 is a third variant
+    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
+    # full 1200s with no error, WinRM simply going EOF right as the script
+    # tried to return - a reboot landing on the connection instead of a
+    # scheduled task or a mid-command process.
+    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
     timeout          = "40m"
   }
   provisioner "powershell" {
@@ -361,8 +385,12 @@ build {
     # deliberately NOT elevated, so the command runs directly over WinRM and a
     # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
     # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one.
-    valid_exit_codes = [0, 1, 267014, 3010, 1641]
+    # fix covered the elevated code and not this one. 16001 is a third variant
+    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
+    # full 1200s with no error, WinRM simply going EOF right as the script
+    # tried to return - a reboot landing on the connection instead of a
+    # scheduled task or a mid-command process.
+    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
     timeout          = "40m"
   }
   provisioner "powershell" {
@@ -378,8 +406,12 @@ build {
     # deliberately NOT elevated, so the command runs directly over WinRM and a
     # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
     # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one.
-    valid_exit_codes = [0, 1, 267014, 3010, 1641]
+    # fix covered the elevated code and not this one. 16001 is a third variant
+    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
+    # full 1200s with no error, WinRM simply going EOF right as the script
+    # tried to return - a reboot landing on the connection instead of a
+    # scheduled task or a mid-command process.
+    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
     timeout          = "40m"
   }
   provisioner "powershell" {
@@ -395,8 +427,12 @@ build {
     # deliberately NOT elevated, so the command runs directly over WinRM and a
     # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
     # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one.
-    valid_exit_codes = [0, 1, 267014, 3010, 1641]
+    # fix covered the elevated code and not this one. 16001 is a third variant
+    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
+    # full 1200s with no error, WinRM simply going EOF right as the script
+    # tried to return - a reboot landing on the connection instead of a
+    # scheduled task or a mid-command process.
+    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
     timeout          = "40m"
   }
   provisioner "powershell" {
@@ -412,8 +448,12 @@ build {
     # deliberately NOT elevated, so the command runs directly over WinRM and a
     # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
     # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one.
-    valid_exit_codes = [0, 1, 267014, 3010, 1641]
+    # fix covered the elevated code and not this one. 16001 is a third variant
+    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
+    # full 1200s with no error, WinRM simply going EOF right as the script
+    # tried to return - a reboot landing on the connection instead of a
+    # scheduled task or a mid-command process.
+    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
     timeout          = "40m"
   }
   provisioner "powershell" {
@@ -429,8 +469,12 @@ build {
     # deliberately NOT elevated, so the command runs directly over WinRM and a
     # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
     # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one.
-    valid_exit_codes = [0, 1, 267014, 3010, 1641]
+    # fix covered the elevated code and not this one. 16001 is a third variant
+    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
+    # full 1200s with no error, WinRM simply going EOF right as the script
+    # tried to return - a reboot landing on the connection instead of a
+    # scheduled task or a mid-command process.
+    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
     timeout          = "40m"
   }
   provisioner "powershell" {
@@ -446,8 +490,12 @@ build {
     # deliberately NOT elevated, so the command runs directly over WinRM and a
     # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
     # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one.
-    valid_exit_codes = [0, 1, 267014, 3010, 1641]
+    # fix covered the elevated code and not this one. 16001 is a third variant
+    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
+    # full 1200s with no error, WinRM simply going EOF right as the script
+    # tried to return - a reboot landing on the connection instead of a
+    # scheduled task or a mid-command process.
+    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
     timeout          = "40m"
   }
 
