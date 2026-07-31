@@ -81,7 +81,32 @@ Templates are files under `dashboard/ui/`, not `{{define}}` blocks in
 
 ---
 
-## Phase 1 — Host-side Ghidra worker (spool consumer) ⬜ Planned
+## Phase 1 — Host-side Ghidra worker (spool consumer) ✅ Built
+
+Implemented as [`worker/ghidra-worker.py`](worker/ghidra-worker.py) plus
+`honeypot-ghidra-worker.{path,service}`, mirroring the sandbox workers: a
+non-blocking `flock` so overlapping path-unit triggers collapse into one
+drain, requests claimed (`.request.running`) before work starts so a crash
+cannot replay a sample, hashes re-validated in the worker rather than trusted
+from the spool, and results written via a temp file plus `os.replace` so the
+dashboard can never read a half-written JSON.
+
+Two behaviours worth keeping if this is ever rewritten:
+
+* **A failed analysis still writes a result**, with `exit_status: "error"` and
+  the reason. A dashboard that says "failed, because X" beats one where the
+  job silently never appears.
+* **An unreachable REST service leaves the queue untouched** and exits
+  non-zero. Draining a spool into failures because a container was down would
+  destroy the queue over an operator's `docker compose up`.
+
+> **The REST API contract is UNVERIFIED.** `/analyze`, `/status/{job}`,
+> `/functions/{job}`, `/strings/{job}` and `/imports/{job}` are taken from
+> this document, not from a running `biniamfd/ghidra-headless-rest:1.2.1`.
+> They are confined to the `GhidraClient` class so correcting them is a change
+> in one place. Run `ghidra-worker.py --selftest` against a live container
+> before trusting any result. The spool logic around them is covered by an
+> end-to-end test against a stub server (15 assertions, all passing).
 
 ### Goal
 A root-owned systemd path unit + oneshot service, structurally identical to
@@ -251,7 +276,7 @@ alerts.
 
 ---
 
-## Phase 5 — Environment variables (add to `.env.example`)
+## Phase 5 — Environment variables ✅ Built (commented out)
 
 ```dotenv
 # ── Ghidra dashboard integration ──────────────────────────────────────
