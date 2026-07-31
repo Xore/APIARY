@@ -38,8 +38,16 @@ services:
       - ./traefik/certs:/etc/traefik/certs:ro
     networks:
       - proxy
+    # #117: `traefik healthcheck` does a full binary re-exec (new Go runtime
+    # init, config parse) rather than a lightweight HTTP call. Measured
+    # 6-9s per invocation under this container's 0.5 CPU limit, so it never
+    # completed inside a 5s timeout and the container was permanently
+    # reported unhealthy despite serving real traffic the whole time. `wget`
+    # against the ping entrypoint (traefik.yml: ping.entryPoint =
+    # traefik-local, bound to 127.0.0.1:8080) does the same liveness check
+    # in well under 100ms.
     healthcheck:
-      test: ["CMD", "traefik", "healthcheck"]
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/ping"]
       interval: 30s
       timeout: 5s
       retries: 3
