@@ -1,0 +1,231 @@
+#!/usr/bin/env bash
+# install-analysis-host.sh — stand up the Ghidra analysis backend on this host.
+#
+# Brings up two containers and wires the host-side worker to them:
+#
+#   ghidra   biniamfd/ghidra-headless-rest, the decompiler behind /analyze
+#   ollama   the local model that produces ai_triage (#103)
+#
+# Both publish on 127.0.0.1 only. Between them they hold captured malware and
+# every string extracted from it, and the triage prompts are that text — so the
+# model has to be on this host, and the worker refuses to talk to one that is
+# not (see endpoint_is_local in worker/ghidra-worker.py).
+#
+# On a host running Dockge the compose file is deployed into a stack directory
+# under /opt/stacks, the same place deploy.yml puts the honeypot stack, so the
+# containers show up as a stack Dockge manages rather than as strays it can see
+# but not touch. That directory is a deployment copy: edit the file in this
+# repository and re-run this script, do not edit it there.
+#
+# Idempotent: safe to re-run after a pull, a model change, or a reboot. An
+# existing /etc/default/honeypot-ghidra is never overwritten.
+#
+# Usage:
+#   sudo analysis/ghidra/install-analysis-host.sh          # containers + worker
+#   analysis/ghidra/install-analysis-host.sh --containers-only
+#
+# Options:
+#   --containers-only  Bring up/refresh the containers and stop. Needs docker
+#                      but not root, which is the half an operator in the
+#                      docker group can run.
+#   --model NAME       Model to pull (default qwen3:8b, or GHIDRA_TRIAGE_MODEL
+#                      from /etc/default/honeypot-ghidra if that file exists).
+#   --no-gpu           Run the model on CPU even if an NVIDIA runtime is present.
+#   --skip-pull        Do not pull the model. For a host that already has it.
+#   --stack-dir PATH   Where to deploy the compose file. Defaults to
+#                      /opt/stacks/ghidra when /opt/stacks exists, else the
+#                      repository directory. Pass "" to run in place.
+#   -h, --help         This text.
+
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+compose_file="$here/docker-compose.ghidra.yml"
+gpu_file="$here/docker-compose.ghidra.gpu.yml"
+env_file=/etc/default/honeypot-ghidra
+target=/opt/honeypot-ghidra
+
+CONTAINERS_ONLY=0
+USE_GPU=auto
+SKIP_PULL=0
+MODEL=""
+# The compose project name comes from the directory holding the compose file,
+# and it prefixes the volume names — ghidra_ollama_models holds several GB of
+# weights. Keep this directory called "ghidra" or the next run pulls them again
+# into a differently named volume and orphans the old one.
+STACK_DIR="$([ -d /opt/stacks ] && echo /opt/stacks/ghidra || true)"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --containers-only) CONTAINERS_ONLY=1; shift ;;
+    --model) MODEL="${2:?--model needs a value}"; shift 2 ;;
+    --no-gpu) USE_GPU=no; shift ;;
+    --skip-pull) SKIP_PULL=1; shift ;;
+    --stack-dir) STACK_DIR="${2?--stack-dir needs a value}"; shift 2 ;;
+    # The header comment is the help text, printed up to the first line that
+    # is not one - so editing the header cannot leave --help quoting code.
+    -h|--help) awk 'NR>1 && !/^#/{exit} NR>1{sub(/^# ?/,""); print}' "$0"; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+say() { printf '\n== %s\n' "$*"; }
+die() { echo "error: $*" >&2; exit 1; }
+
+# The model name defaults to whatever the worker is already configured to use.
+# A script that pulls qwen3:8b onto a host configured for something else leaves
+# several GB on disk and triage still not working.
+# Read it only if the file is there: under `set -e` with pipefail, sed's exit 2
+# on a missing file kills the script inside the assignment, and 2>/dev/null
+# hides even the reason. That is how this script first ran on a fresh host —
+# silently, doing nothing, exiting 0 to its caller.
+if [ -z "$MODEL" ] && [ -r "$env_file" ]; then
+  MODEL="$(sed -n 's/^GHIDRA_TRIAGE_MODEL=//p' "$env_file" | tail -n1)"
+  MODEL="${MODEL%\"}"; MODEL="${MODEL#\"}"   # tolerate a quoted value
+fi
+MODEL="${MODEL:-qwen3:8b}"
+
+# ── Preflight ────────────────────────────────────────────────────────────────
+command -v docker >/dev/null 2>&1 || die "docker is required"
+command -v curl >/dev/null 2>&1 || die "curl is required (the readiness checks use it)"
+docker compose version >/dev/null 2>&1 || die "the docker compose plugin is required"
+docker info >/dev/null 2>&1 ||
+  die "cannot talk to the docker daemon (not running, or this user is not in the docker group)"
+
+# Weights, the Ghidra image and a project directory. 20G is the point below
+# which the pull will probably fail partway through, which is a worse way to
+# find out than this.
+avail="$(df -Pk /var/lib/docker 2>/dev/null || df -Pk /)"
+avail="$(printf '%s\n' "$avail" | awk 'NR==2 {print int($4/1024/1024)}')"
+[ "${avail:-0}" -ge 20 ] ||
+  echo "warning: only ${avail}G free where docker stores images; the model pull needs several" >&2
+
+if [ "$USE_GPU" = auto ]; then
+  if docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q '"nvidia"'; then
+    USE_GPU=yes
+  else
+    USE_GPU=no
+    echo "note: no nvidia container runtime; the model will run on CPU" >&2
+  fi
+fi
+
+# ── Deploy the compose file ──────────────────────────────────────────────────
+# Dockge lists a stack per directory under /opt/stacks and shells out to
+# `docker compose` inside it with no -f, so the GPU settings have to reach it
+# as compose.override.yml — the one extra file compose loads on its own. A
+# stack whose card says "not managed by Dockge" is one whose start, stop and
+# logs buttons do nothing, which is worth this copy.
+if [ -n "$STACK_DIR" ]; then
+  say "deploying the compose file to $STACK_DIR"
+  mkdir -p "$STACK_DIR"
+  cp "$compose_file" "$STACK_DIR/compose.yml"
+  if [ "$USE_GPU" = yes ]; then
+    cp "$gpu_file" "$STACK_DIR/compose.override.yml"
+  else
+    # Leaving a stale override behind would keep asking for a card that is no
+    # longer wanted, and compose would load it without being asked.
+    rm -f "$STACK_DIR/compose.override.yml"
+  fi
+  compose_file="$STACK_DIR/compose.yml"
+  gpu_file="$STACK_DIR/compose.override.yml"
+fi
+
+files=(-f "$compose_file")
+# if, not `[ ... ] && ...`: a trailing false test is itself the script's exit
+# status under set -e, so the CPU path would quit here.
+if [ "$USE_GPU" = yes ]; then
+  files+=(-f "$gpu_file")
+fi
+
+dc() { docker compose "${files[@]}" "$@"; }
+
+# ── Containers ───────────────────────────────────────────────────────────────
+say "starting ghidra and ollama (gpu=$USE_GPU)"
+dc pull --quiet ghidra ollama
+dc up -d ghidra ollama
+
+# `up -d` returns when the containers are started, not when the services inside
+# them answer. Ghidra unpacks its own installation on first boot and takes a
+# while; polling here means the verification below tests the service rather
+# than the race.
+say "waiting for the services to answer"
+wait_for() {
+  local service="$1" url="$2" tries=120
+  while [ "$tries" -gt 0 ]; do
+    if curl -sf -m 3 "$url" >/dev/null 2>&1; then
+      echo "  $service is up"
+      return 0
+    fi
+    tries=$((tries - 1))
+    sleep 5
+  done
+  dc ps --format '{{.Name}}	{{.Status}}' >&2 || true
+  die "$service did not answer at $url after 10 minutes"
+}
+wait_for ghidra http://127.0.0.1:9090/v1/health
+wait_for ollama http://127.0.0.1:11434/api/tags
+
+if [ "$SKIP_PULL" = 0 ]; then
+  say "pulling model $MODEL"
+  # Pulls are resumable and skip layers already present, so re-running this is
+  # cheap; checking first would only save the round trip.
+  dc exec -T ollama ollama pull "$MODEL"
+fi
+dc exec -T ollama ollama list
+
+if [ "$CONTAINERS_ONLY" = 1 ]; then
+  say "containers only - stopping here"
+  echo "The worker half needs root:"
+  echo "  sudo $0"
+  exit 0
+fi
+
+# ── Host-side worker ─────────────────────────────────────────────────────────
+[ "$(id -u)" -eq 0 ] || die "installing the worker needs root; re-run with sudo, or pass --containers-only"
+
+say "installing the worker into $target"
+install -d -m 0755 -o root -g root "$target" "$target/worker"
+install -m 0755 -o root -g root "$here/worker/ghidra-worker.py" "$target/worker/ghidra-worker.py"
+# The unit files point Documentation= at this, and it is the only description
+# of the result format an operator on the host can read.
+install -m 0644 -o root -g root "$here/DASHBOARD_INTEGRATION_PLAN.md" "$target/DASHBOARD_INTEGRATION_PLAN.md"
+
+if [ ! -e "$env_file" ]; then
+  install -m 0644 -o root -g root "$here/worker/honeypot-ghidra.default.example" "$env_file"
+  echo "  wrote $env_file from the example"
+else
+  echo "  kept the existing $env_file (compare against worker/honeypot-ghidra.default.example)"
+fi
+
+# 0700: the request spool is a list of hashes the dashboard wants analysed and
+# the results are full string dumps of live malware. Same posture as the
+# sandbox spools.
+install -d -m 0700 -o root -g root \
+  /var/lib/honeypot-ghidra/requests/pending /var/lib/honeypot-ghidra/results
+
+for unit in honeypot-ghidra-worker.service honeypot-ghidra-worker.path; do
+  install -m 0644 -o root -g root "$here/worker/$unit" "/etc/systemd/system/$unit"
+done
+systemctl daemon-reload
+systemctl reset-failed honeypot-ghidra-worker.service 2>/dev/null || true
+systemctl enable --now honeypot-ghidra-worker.path
+
+# ── Verify ───────────────────────────────────────────────────────────────────
+# Against the running services, with the worker's own environment file, rather
+# than trusting that the steps above added up. --selftest runs a real binary
+# through /analyze and reports whether the model endpoint is reachable, local,
+# and serving the configured model.
+say "verifying"
+set -a
+# A host file, written above if it was absent, so there is nothing to follow.
+# shellcheck source=/dev/null
+. "$env_file"
+set +a
+python3 "$target/worker/ghidra-worker.py" --selftest || die "selftest failed - see above"
+
+say "done"
+echo "The dashboard needs these in its .env to show the queue:"
+echo "  GHIDRA_REQUEST_DIR=/ghidra-requests"
+echo "  GHIDRA_RESULTS_DIR=/ghidra-results"
+echo "Then: docker compose up -d dashboard"
+systemctl --no-pager --plain is-active honeypot-ghidra-worker.path

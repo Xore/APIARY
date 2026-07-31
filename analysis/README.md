@@ -45,7 +45,7 @@ honeypot-stack (this repo)          Xore/honeypot (sample archive + pipeline)
 | `collect.sh` | **Deprecated.** Cron-driven bulk copy of captures into a clone of `Xore/honeypot`. Superseded by the dashboard button; kept for a one-time manual backfill |
 | `dedupe-payloads.py` | Collapses duplicate captures by SHA-256 |
 | `yara/` | Networkless YARA scanner sidecar, local rules, and the vendored upstream corpus (`yara/sync-yara.sh`) |
-| `ghidra/` | Headless Ghidra reverse-engineering pipeline and its dashboard integration plan |
+| `ghidra/` | Headless Ghidra reverse-engineering pipeline, local-model triage, and the analysis-host installer ([`ghidra/README.md`](ghidra/README.md)) |
 | `elasticsearch-setup.sh`, `honeypot-kibana-setup.sh`, `filebeat.yml`, `evebox.yaml` | Log pipeline and search UI provisioning |
 | `backup-honeypot.sh`, `verify-backup.sh`, `log-maintenance.sh`, `RECOVERY.md` | Retention and recovery |
 | `verify-stack.py` | Post-deploy health check |

@@ -119,7 +119,27 @@ VirusTotal/JoeSandbox jobs complete.
 
 ---
 
-## Phase 2 — AI-Assisted Analysis via Rev·Deck ✅ Ready to implement
+## Phase 2 — AI-Assisted Analysis ✅ Built (2026-07-31, #103)
+
+> **Built, but not the way this section describes.** The two workflows below
+> run against a local OpenAI-compatible endpoint from the worker itself
+> (`worker/ghidra-worker.py`), not through Rev·Deck, and populate `ai_triage`
+> on the result. Rev·Deck stays in the compose file behind a profile as an
+> analyst-facing chat UI.
+>
+> Two lines below are wrong and were the reason:
+>
+> - *"Deploy Rev·Deck as a service"* — its build context is not vendored; the
+>   operator has to clone it by hand, so there is no running contract to code
+>   against. The endpoint table in this document was already wrong about five
+>   of six Ghidra endpoints, which is what taking a plan for a service costs.
+> - *"local Ollama or cloud LLM endpoint via `.env`"* — a cloud endpoint is
+>   not an option. The prompts carry text lifted out of captured malware.
+>   `endpoint_is_local()` refuses any endpoint that is not this host or its
+>   network, and there is no override flag.
+>
+> `attack_surface_triage` and `vulnerability_hypothesis` are not run.
+> Operator documentation: [`README.md`](README.md#ai-triage-and-the-local-only-rule).
 
 ### Source
 [biniamf/ai-reverse-engineering](https://github.com/biniamf/ai-reverse-engineering)
