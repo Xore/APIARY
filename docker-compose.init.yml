@@ -4,8 +4,10 @@
 #
 # Deploy this stack once (or re-run it whenever a bootstrap step needs to run
 # again -- every job here is idempotent) before or alongside honeypot-stack.
-# `docker compose up` runs every job below to completion and exits; nothing
-# in this file stays running.
+# `docker compose up` runs every job below to completion and exits, with one
+# exception: geoipupdate (#123) is long-running by design (it loops on its
+# own update schedule) and was moved here only because it's optional and
+# GeoIP-adjacent, not because it's a bootstrap step anything depends on.
 #
 # Cross-stack wiring, and why:
 #
@@ -236,6 +238,30 @@ services:
         limits:
           cpus: "2.0"
           memory: 1G
+
+  # #123: not actually a bootstrap job -- unlike everything else in this
+  # file, geoipupdate is long-running (restart: unless-stopped, loops
+  # internally on GEOIPUPDATE_FREQUENCY) and nothing depends on it
+  # completing. Moved here anyway because it's optional (profiles:
+  # [geoip-update], off unless MAXMIND_ACCOUNT_ID/LICENSE_KEY are set) and
+  # its only reason to exist in honeypot-stack was proximity to the other
+  # GeoIP-adjacent setup, which already lives here. See docker-compose.yml
+  # for why one-shot jobs live in this stack at all -- this one just
+  # doesn't need the depends_on/marker machinery that motivates the rest.
+  geoipupdate:
+    image: ghcr.io/maxmind/geoipupdate:v7.1.1
+    container_name: hp-geoipupdate
+    profiles: [geoip-update]
+    restart: unless-stopped
+    environment:
+      - GEOIPUPDATE_ACCOUNT_ID=${MAXMIND_ACCOUNT_ID:-}
+      - GEOIPUPDATE_LICENSE_KEY=${MAXMIND_LICENSE_KEY:-}
+      - GEOIPUPDATE_EDITION_IDS=GeoLite2-City GeoLite2-ASN
+      - GEOIPUPDATE_FREQUENCY=24
+    volumes:
+      - /opt/stacks/honeypot-stack/analysis/geoip:/usr/share/GeoIP
+    deploy:
+      resources: { limits: { cpus: "0.25", memory: 128M } }
 
 networks:
   honeynet:

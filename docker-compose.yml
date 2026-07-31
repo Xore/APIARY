@@ -901,22 +901,6 @@ services:
           cpus: "0.25"
           memory: 64M
 
-  # Optional official GeoLite2 updater. Enable the `geoip-update` profile after
-  # setting MAXMIND_ACCOUNT_ID and MAXMIND_LICENSE_KEY in Dockge's .env.
-  geoipupdate:
-    image: ghcr.io/maxmind/geoipupdate:v7.1.1
-    container_name: hp-geoipupdate
-    profiles: [geoip-update]
-    restart: unless-stopped
-    environment:
-      - GEOIPUPDATE_ACCOUNT_ID=${MAXMIND_ACCOUNT_ID:-}
-      - GEOIPUPDATE_LICENSE_KEY=${MAXMIND_LICENSE_KEY:-}
-      - GEOIPUPDATE_EDITION_IDS=GeoLite2-City GeoLite2-ASN
-      - GEOIPUPDATE_FREQUENCY=24
-    volumes:
-      - ./analysis/geoip:/usr/share/GeoIP
-    deploy:
-      resources: { limits: { cpus: "0.25", memory: 128M } }
   # ===================== ELK analysis =====================
   elasticsearch:
     <<: *runtime-defaults
