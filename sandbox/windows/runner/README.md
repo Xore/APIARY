@@ -1,128 +1,61 @@
-# Self-Hosted GitHub Actions Runner Setup
+# Detonation is not triggered by GitHub Actions
 
-The Windows sandbox detonation job requires a **self-hosted runner** on the
-host machine that runs **QEMU/KVM + libvirt** (via docker-compose) and
-controls the Windows 11 analysis VM.
+> **Status (2026-07-31):** this directory is a placeholder. It used to hold a
+> setup guide for a self-hosted runner that would detonate samples from a CI
+> workflow. That approach was replaced by the systemd spool worker described
+> below, and the guide was removed rather than kept: it named a workflow
+> (`Xore/Honeypot/.github/workflows/analyze.yml`) that does not exist in a
+> repository that is not this one, and it disagreed with the shipped
+> configuration on the domain name, the snapshot name, the guest credentials
+> and the bridge.
 
-The standard `ubuntu-latest` GitHub-hosted runner cannot connect to a local
-KVM guest or call `virsh` / `qemu-img`.
+## What actually triggers a detonation
 
-## Setup
+The dashboard writes `{sha256}.request` into the request spool and never touches
+a hypervisor itself. A root-owned path unit notices the file and drains the
+queue:
 
-### 1. Prerequisites on the KVM host
+| Piece | File |
+|---|---|
+| Path unit watching the spool | `sandbox/windows/honeypot-windows-sandbox-worker.path` |
+| Oneshot service it starts | `sandbox/windows/honeypot-windows-sandbox-worker.service` |
+| Queue drain, one sample at a time under `flock` | `sandbox/windows/run_pending.sh` |
+| Per-sample orchestration | `sandbox/windows/orchestrate/run_sample.py` |
+| Host-specific values (never in the repo) | `/etc/default/honeypot-windows-sandbox` |
 
-Ensure the host has KVM and libvirt installed and that the runner user is in
-the `libvirt` and `kvm` groups:
+This is the same trust boundary the Linux sandbox uses (`sandbox/worker.sh`),
+and it is the boundary for the same reason: the dashboard container is
+unprivileged, holds no credentials, and can do nothing more privileged than
+create a file whose name is a hash it has already validated. See
+[`../IMPLEMENTATION_PLAN.md`](../IMPLEMENTATION_PLAN.md) §7.1.
 
-```bash
-apt install qemu-kvm libvirt-daemon-system virtinst virt-manager
-usermod -aG libvirt,kvm $USER
+## Why not a CI runner
 
-# Verify KVM is available
-virtsh list --all
-```
+The self-hosted runner is not the problem — one already exists and is in use.
+`deploy.yml` and `diagnostics.yml` both run on
+`[self-hosted, linux, x64, honeypot-home]`, on the same host as libvirt. Adding
+detonation to it would have needed no new infrastructure.
 
-### 2. Install the runner on your KVM host (Linux)
+It is the wrong place for it anyway:
 
-```bash
-# Create runner directory
-mkdir -p /opt/actions-runner && cd /opt/actions-runner
+- **A workflow run is triggerable by anything that can push or open a PR.**
+  Detonation must be gated on an authenticated dashboard action against a
+  capture the stack already holds, resolved by SHA-256. A CI trigger widens
+  that to whoever can cause a workflow to fire.
+- **A runner job needs the guest credentials in its environment.** The old
+  guide put `VM_PASS` in `/opt/actions-runner/.env`, readable by every job the
+  runner executes. The spool worker reads them from a root-owned
+  `EnvironmentFile` that no workflow and no container can see.
+- **Detonation is queue work, not build work.** `run_pending.sh` holds a
+  non-blocking lock so overlapping triggers collapse into one drain — a second
+  concurrent detonation would revert the snapshot out from under the first.
+  Two workflow runs have no such interlock.
+- **The result has to come back read-only.** The worker writes
+  `{sha256}_sandbox.json` where the dashboard mounts it read-only. A workflow
+  would have to push artifacts somewhere the dashboard could read, which means
+  either giving the dashboard network egress or giving CI write access to its
+  data — both are the boundary this design exists to avoid.
 
-# Download (check https://github.com/actions/runner/releases for latest)
-curl -o actions-runner-linux-x64-2.317.0.tar.gz -L \
-  https://github.com/actions/runner/releases/download/v2.317.0/actions-runner-linux-x64-2.317.0.tar.gz
-tar xzf ./actions-runner-linux-x64-2.317.0.tar.gz
-
-# Configure (get token from Xore/Honeypot → Settings → Actions → Runners → New self-hosted runner)
-./config.sh --url https://github.com/Xore/Honeypot \
-            --token <RUNNER_TOKEN> \
-            --name honeypot-kvm-host \
-            --labels self-hosted,kvm,windows-sandbox
-
-# Install as systemd service
-sudo ./svc.sh install
-sudo ./svc.sh start
-```
-
-### 3. Install dependencies on the runner host
-
-```bash
-pip install pywinrm python-evtx lxml requests smbprotocol
-apt install smbclient libvirt-clients qemu-utils
-```
-
-### 4. Set runner environment variables
-
-In `/opt/actions-runner/.env`:
-```bash
-VM_HOST=10.10.10.2
-VM_USER=analyst
-VM_PASS=malware
-# libvirt connection URI (local KVM)
-LIBVIRT_URI=qemu:///system
-# libvirt domain name of the Windows 11 analysis VM
-VM_DOMAIN=win11-analysis
-# Snapshot name to revert to before each detonation
-GOLDEN_SNAPSHOT=golden-clean
-OBSERVATION_SECS=300
-```
-
-### 5. Snapshot management with virsh
-
-Create the golden snapshot after provisioning the clean Windows 11 VM:
-
-```bash
-# Shut down the VM cleanly first
-virsh shutdown win11-analysis
-
-# Create the golden snapshot
-virsh snapshot-create-as win11-analysis golden-clean \
-  --description "Clean Windows 11 baseline" \
-  --atomic
-
-# Verify
-virsh snapshot-list win11-analysis
-```
-
-The CI workflow reverts to this snapshot before every detonation:
-
-```bash
-# Revert
-virsh snapshot-revert win11-analysis golden-clean
-# Start
-virsh start win11-analysis
-```
-
-### 6. Workflow label usage
-
-In `Xore/Honeypot/.github/workflows/analyze.yml`:
-```yaml
-windows_sandbox:
-  runs-on: [self-hosted, kvm, windows-sandbox]
-```
-
-### 7. Integration with docker-compose
-
-The honeypot-stack uses docker-compose to orchestrate the surrounding services
-(Elasticsearch, Logstash, dashboard, etc.). The KVM host is the same machine.
-Ensure the runner service starts **after** docker-compose:
-
-```ini
-# /etc/systemd/system/actions-runner.service (relevant section)
-[Unit]
-After=network-online.target docker.service
-Wants=network-online.target
-```
-
-The Windows VM sits on a **libvirt isolated network** (`virbr1`, host-only)
-that is separate from the docker bridge networks, so it cannot reach the
-containers directly unless you add an explicit bridge rule.
-
-### Security Note
-
-> ⚠️ Never expose the self-hosted runner or the analysis VMs to the
-> internet. The Windows 11 KVM guest should be on an isolated libvirt
-> host-only network (`virbr1`). Block all outbound traffic from the
-> guest at the libvirt network level except the WinRM port (5985/5986)
-> used by the runner, and GitHub API (for workflow reporting) from the
-> host.
+Nothing here is scheduled work. If a CI-driven path is ever wanted (for
+example, a nightly regression detonation of a known-benign fixture), it is a
+new proposal and needs an issue, not a revival of this file.
