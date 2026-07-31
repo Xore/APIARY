@@ -6,7 +6,7 @@ After=docker.service
 [Path]
 # The dashboard writes {sha256}.request here; it never calls the Ghidra REST
 # service itself. Same trust boundary as the sandbox spools.
-PathChanged=/ghidra-requests
+PathChanged=/var/lib/honeypot-ghidra/requests/pending
 Unit=honeypot-ghidra-worker.service
 
 [Install]

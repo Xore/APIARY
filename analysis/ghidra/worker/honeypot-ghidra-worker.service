@@ -30,7 +30,17 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/ghidra-requests /ghidra-results /run/lock
+# HOST paths, not the container ones. /ghidra-requests and /ghidra-results are
+# where docker-compose.yml mounts these directories *inside the dashboard
+# container*; this unit runs on the host, where they do not exist. Listing the
+# container paths here combined with ProtectSystem=strict leaves the worker
+# unable to write anywhere, and the first symptom is a read-only filesystem
+# error on a spool the operator can see is perfectly writable.
+#
+# These must agree with GHIDRA_REQUEST_DIR and GHIDRA_RESULTS_DIR in
+# /etc/default/honeypot-ghidra. systemd cannot expand EnvironmentFile values
+# here, so pointing the worker at a different directory means editing both.
+ReadWritePaths=/var/lib/honeypot-ghidra/requests/pending /var/lib/honeypot-ghidra/results /run/lock
 
 [Install]
 WantedBy=multi-user.target
