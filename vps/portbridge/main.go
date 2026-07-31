@@ -96,10 +96,12 @@ func newConnLogger(path string) *connLogger {
 }
 
 // log appends one JSON line per connection. via is portbridge's upstream local
-// address — the port it dialed the honeypot FROM. For TCP that equals the
-// src_port the honeypot observes over the tunnel (iptables DNAT preserves the
-// source), so a honeypot that can only see the tunnel peer (cowrie: 10.8.0.1)
-// can be joined back to the real src_ip recorded here via via_port. nil for UDP.
+// address — the port it dialed the honeypot FROM. That equals the src_port the
+// honeypot observes over the tunnel (iptables DNAT preserves the source), so a
+// honeypot that can only see the tunnel peer (cowrie: 10.8.0.1) can be joined
+// back to the real src_ip recorded here via via_port. UDP has one such socket
+// per client session, so it carries a via_port too; nil only if a caller has
+// no upstream address to report.
 func (c *connLogger) log(r rule, src net.Addr, via net.Addr) {
 	if c == nil || c.f == nil {
 		return
@@ -285,7 +287,15 @@ func serveUDP(ip string, r rule, cl *connLogger) {
 			}
 			session = &udpSession{conn: up, target: target}
 			sessions[key] = session
-			cl.log(r, client, nil) // log once per new client session (UDP: no via_port)
+			// Log once per new client session. The per-session socket is bound
+			// before the first datagram leaves, so its local port is already
+			// assigned — and it is the src_port the honeypot sees for every
+			// datagram of this session, exactly like the TCP via_port. Without
+			// it the UDP sensors (conpot SNMP/BACnet/IPMI, dionaea tftp/upnp/
+			// sip) have no recovery path at all: conpot's PROXY shim is TCP-only
+			// by construction, so nothing else can carry the real source across
+			// the tunnel. See issue #75.
+			cl.log(r, client, up.LocalAddr())
 			// Return path accepts a reply from any port on the target host. This is
 			// required by TFTP, whose server selects a new transfer-ID port after
 			// the request; subsequent client datagrams follow that selected port.

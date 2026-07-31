@@ -384,8 +384,14 @@ Responsible for:
 
 ## 10. Docker Compose Integration
 
-The ML worker runs as a Docker service on the internal `analysis-net` network
-(Zone C — never exposed to internet). See `ml-worker/docker-compose.override.yml`.
+The ML worker runs as a Docker service on the stack's internal network. That
+network is **`honeynet`**. Earlier revisions of this section said `analysis-net`,
+a name that came from the four-zone topology in
+[`honeypot-network-isolation.md`](honeypot-network-isolation.md) and never
+existed in `docker-compose.yml`; `ml-worker/docker-compose.override.yml` was
+written against it and is broken as a result —
+[#61](https://github.com/Xore/honeypot-stack/issues/61). Do not copy a network
+name out of this document into a compose file; read `docker-compose.yml`.
 
 ```yaml
 # ml-worker/docker-compose.override.yml
@@ -393,7 +399,7 @@ services:
   ml-worker:
     build: ./ml-worker
     restart: unless-stopped
-    networks: [analysis-net]
+    networks: [honeynet]
     depends_on: [elasticsearch, redis]
     volumes:
       - ml-models:/models
@@ -423,7 +429,7 @@ entry in the main `docker-compose.yml`:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    networks: [analysis-net]
+    networks: [honeynet]
     command: redis-server --save "" --appendonly no
     cap_drop: [ALL]
 ```
