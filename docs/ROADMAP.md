@@ -8,7 +8,7 @@ in, and why. The work itself lives in
 Every deliverable below links to its issue. If something is described here with
 no issue behind it, that is a gap: open one.
 
-Last audited: 2026-07-30
+Last audited: 2026-07-31
 
 ## Current baseline
 
@@ -52,7 +52,7 @@ Source documents:
 | CSP cutover with a per-request nonce | [#58](https://github.com/Xore/honeypot-stack/issues/58) |
 | Event detail, payload preview, export and destructive-action modals | [#59](https://github.com/Xore/honeypot-stack/issues/59) |
 | Behavioural tests and the visual acceptance matrix | [#60](https://github.com/Xore/honeypot-stack/issues/60) |
-| Profile action menu, route/administrator settings, logout | [#77](https://github.com/Xore/honeypot-stack/issues/77) |
+| Profile action menu, route/administrator settings, logout | ✅ [#77](https://github.com/Xore/honeypot-stack/issues/77) |
 | Settings subsystem: introspection token rollout and the 72-hour soak | [#81](https://github.com/Xore/honeypot-stack/issues/81) |
 
 The CSP header goes on **last**, after every inline handler is gone. Shipping it
@@ -129,7 +129,7 @@ baselines from Release 2 and stable output contracts from Release 3.
 
 | Deliverable | Issue |
 |---|---|
-| Reconcile the KVM/network-analysis guides against the implemented tooling | [#70](https://github.com/Xore/honeypot-stack/issues/70) |
+| Reconcile the KVM/network-analysis guides against the implemented tooling | ✅ [#70](https://github.com/Xore/honeypot-stack/issues/70) |
 | Background-noise design that cannot contaminate evidence | [#71](https://github.com/Xore/honeypot-stack/issues/71) |
 
 Sources: [`kvm-network-traffic-analysis.md`](kvm-network-traffic-analysis.md),
