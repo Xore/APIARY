@@ -146,7 +146,7 @@
 
       <OOBE>
         <HideEULAPage>true</HideEULAPage>
-        <HideLocalAccountScreen>false</HideLocalAccountScreen>
+        <HideLocalAccountScreen>true</HideLocalAccountScreen>
         <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
         <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
         <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
@@ -174,11 +174,26 @@
         <Username>analyst</Username>
       </AutoLogon>
 
-      <!-- Enable WinRM via SetupComplete -->
+      <!-- Bring WinRM up. This is the step Packer waits six hours for, so it
+           is written defensively.
+
+           `winrm quickconfig -q` alone is the trap: it refuses to create the
+           firewall exception whenever a connection profile is Public, which is
+           exactly what a fresh guest on QEMU user-mode networking gets. It
+           exits non-zero, nothing listens on 5985, and the build dies with
+           only "Timeout waiting for WinRM" six hours later.
+           Enable-PSRemoting -SkipNetworkProfileCheck is the documented way
+           past it. The service is then forced to Automatic and started so a
+           reboot during provisioning cannot leave it down.
+
+           C:\winrm-ready.txt is the post-mortem marker: if a build times out
+           on WinRM again, mount the qcow2 and check for it to tell "OOBE never
+           reached first logon" apart from "first logon ran but WinRM did not
+           come up". -->
       <FirstLogonCommands>
         <SynchronousCommand wcm:action="add">
           <Order>1</Order>
-          <CommandLine>cmd /c winrm quickconfig -q</CommandLine>
+          <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private -ErrorAction SilentlyContinue; Enable-PSRemoting -Force -SkipNetworkProfileCheck"</CommandLine>
           <RequiresUserInput>false</RequiresUserInput>
         </SynchronousCommand>
         <SynchronousCommand wcm:action="add">
@@ -196,6 +211,10 @@
         <SynchronousCommand wcm:action="add">
           <Order>5</Order>
           <CommandLine>cmd /c net localgroup "Remote Management Users" analyst /add</CommandLine>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>6</Order>
+          <CommandLine>powershell -NoProfile -Command "Set-Service WinRM -StartupType Automatic; Start-Service WinRM; Set-Content -Path C:\winrm-ready.txt -Value (Get-Date -Format o)"</CommandLine>
         </SynchronousCommand>
       </FirstLogonCommands>
 
