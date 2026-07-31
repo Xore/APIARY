@@ -33,11 +33,11 @@
           <Path>reg add HKLM\SYSTEM\Setup\LabConfig /v BypassTPMCheck /t REG_DWORD /d 1 /f</Path>
         </RunSynchronousCommand>
         <RunSynchronousCommand wcm:action="add">
-          <Order>3</Order>
+          <Order>2</Order>
           <Path>reg add HKLM\SYSTEM\Setup\LabConfig /v BypassSecureBootCheck /t REG_DWORD /d 1 /f</Path>
         </RunSynchronousCommand>
         <RunSynchronousCommand wcm:action="add">
-          <Order>4</Order>
+          <Order>3</Order>
           <Path>reg add HKLM\SYSTEM\Setup\LabConfig /v BypassRAMCheck /t REG_DWORD /d 1 /f</Path>
         </RunSynchronousCommand>
       </RunSynchronous>
@@ -134,31 +134,6 @@
       <SkipAutoActivation>true</SkipAutoActivation>
     </component>
 
-    <!-- Windows 11 turns on device encryption automatically when a TPM is
-         present, and this image has one. The guest still boots on a fresh TPM
-         (the volume sits on a clear key until a Microsoft account signs in),
-         so this is not about boot — it is about forensics: an encrypted volume
-         cannot be mounted from the host, and reading artifacts out of a
-         detonated guest offline is a core sandbox workflow. Measured: an
-         encrypted build refused to mount with "unknown filesystem type
-         'BitLocker'".
-
-         This key lives under HKLM\SYSTEM, which Defender's Tamper Protection
-         does not guard, so unlike the Defender policy keys it actually sticks.
-         Defender itself is handled at first logon instead — see below. -->
-    <component name="Microsoft-Windows-Deployment"
-               processorArchitecture="amd64"
-               publicKeyToken="31bf3856ad364e35"
-               language="neutral" versionScope="nonSxS"
-               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
-      <RunSynchronous>
-        <RunSynchronousCommand wcm:action="add">
-          <Order>1</Order>
-          <Description>Prevent automatic BitLocker device encryption</Description>
-          <Path>reg add "HKLM\SYSTEM\CurrentControlSet\Control\BitLocker" /v PreventDeviceEncryption /t REG_DWORD /d 1 /f</Path>
-        </RunSynchronousCommand>
-      </RunSynchronous>
-    </component>
   </settings>
 
   <!-- ===== OOBE System ===== -->
@@ -241,34 +216,47 @@
              The .ps1 extension and powershell.exe process exclusions matter as
              much as the paths, because AMSI scans script *content* rather than
              the file's location. -->
+        <!-- BitLocker prevention lives here rather than in a specialize-pass
+             RunSynchronous component. Adding that component was the only
+             setup-time change between the build that installed cleanly and
+             the one that died with 0x8007000D (ERROR_INVALID_DATA) before
+             writing a single gigabyte — Windows Setup rejected the answer
+             file. Device encryption does not begin until after OOBE, so first
+             logon is early enough, and this keeps the setup-time answer file
+             identical to the shape that is known to install. -->
         <SynchronousCommand wcm:action="add">
           <Order>1</Order>
-          <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "foreach ($p in @('C:\Windows\Temp','C:\Tools','C:\ProgramData\chocolatey','C:\Users\analyst','C:\Samples','C:\Logs')) { try { Add-MpPreference -ExclusionPath $p -ErrorAction SilentlyContinue } catch {} }; try { Add-MpPreference -ExclusionExtension 'ps1','exe','dll' -ErrorAction SilentlyContinue } catch {}; try { Add-MpPreference -ExclusionProcess 'powershell.exe' -ErrorAction SilentlyContinue } catch {}; try { Set-MpPreference -MAPSReporting Disabled -SubmitSamplesConsent NeverSend -ErrorAction SilentlyContinue } catch {}; ((Get-MpPreference).ExclusionPath -join ', ') | Set-Content C:\defender-exclusions.txt"</CommandLine>
+          <CommandLine>reg add "HKLM\SYSTEM\CurrentControlSet\Control\BitLocker" /v PreventDeviceEncryption /t REG_DWORD /d 1 /f</CommandLine>
           <RequiresUserInput>false</RequiresUserInput>
         </SynchronousCommand>
         <SynchronousCommand wcm:action="add">
           <Order>2</Order>
-          <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private -ErrorAction SilentlyContinue; Enable-PSRemoting -Force -SkipNetworkProfileCheck"</CommandLine>
+          <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "foreach ($p in @('C:\Windows\Temp','C:\Tools','C:\ProgramData\chocolatey','C:\Users\analyst','C:\Samples','C:\Logs')) { try { Add-MpPreference -ExclusionPath $p -ErrorAction SilentlyContinue } catch {} }; try { Add-MpPreference -ExclusionExtension 'ps1','exe','dll' -ErrorAction SilentlyContinue } catch {}; try { Add-MpPreference -ExclusionProcess 'powershell.exe' -ErrorAction SilentlyContinue } catch {}; try { Set-MpPreference -MAPSReporting Disabled -SubmitSamplesConsent NeverSend -ErrorAction SilentlyContinue } catch {}; ((Get-MpPreference).ExclusionPath -join ', ') | Set-Content C:\defender-exclusions.txt"</CommandLine>
           <RequiresUserInput>false</RequiresUserInput>
         </SynchronousCommand>
         <SynchronousCommand wcm:action="add">
           <Order>3</Order>
-          <CommandLine>cmd /c winrm set winrm/config/service @{AllowUnencrypted="true"}</CommandLine>
+          <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private -ErrorAction SilentlyContinue; Enable-PSRemoting -Force -SkipNetworkProfileCheck"</CommandLine>
+          <RequiresUserInput>false</RequiresUserInput>
         </SynchronousCommand>
         <SynchronousCommand wcm:action="add">
           <Order>4</Order>
-          <CommandLine>cmd /c winrm set winrm/config/service/auth @{Basic="true"}</CommandLine>
+          <CommandLine>cmd /c winrm set winrm/config/service @{AllowUnencrypted="true"}</CommandLine>
         </SynchronousCommand>
         <SynchronousCommand wcm:action="add">
           <Order>5</Order>
-          <CommandLine>cmd /c netsh advfirewall firewall add rule name="WinRM" dir=in action=allow protocol=tcp localport=5985</CommandLine>
+          <CommandLine>cmd /c winrm set winrm/config/service/auth @{Basic="true"}</CommandLine>
         </SynchronousCommand>
         <SynchronousCommand wcm:action="add">
           <Order>6</Order>
-          <CommandLine>cmd /c net localgroup "Remote Management Users" analyst /add</CommandLine>
+          <CommandLine>cmd /c netsh advfirewall firewall add rule name="WinRM" dir=in action=allow protocol=tcp localport=5985</CommandLine>
         </SynchronousCommand>
         <SynchronousCommand wcm:action="add">
           <Order>7</Order>
+          <CommandLine>cmd /c net localgroup "Remote Management Users" analyst /add</CommandLine>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>8</Order>
           <CommandLine>powershell -NoProfile -Command "Set-Service WinRM -StartupType Automatic; Start-Service WinRM; Set-Content -Path C:\winrm-ready.txt -Value (Get-Date -Format o)"</CommandLine>
         </SynchronousCommand>
         <!-- The specialize-pass policy keys are what actually stop AMSI, but
@@ -277,7 +265,7 @@
              Defender again, C:\defender-off.txt says whether this ran and what
              the engine reported afterwards. -->
         <SynchronousCommand wcm:action="add">
-          <Order>8</Order>
+          <Order>9</Order>
           <CommandLine>powershell -NoProfile -Command "try { Set-MpPreference -DisableRealtimeMonitoring $true -DisableScriptScanning $true -DisableBehaviorMonitoring $true -ErrorAction Stop } catch {}; try { (Get-MpComputerStatus | Select-Object RealTimeProtectionEnabled,AntivirusEnabled,IsTamperProtected | Out-String) | Set-Content C:\defender-off.txt } catch { 'Get-MpComputerStatus unavailable' | Set-Content C:\defender-off.txt }"</CommandLine>
         </SynchronousCommand>
       </FirstLogonCommands>
