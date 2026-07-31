@@ -35,6 +35,12 @@ type ghidraTriage struct {
 	RiskLevel   string   `json:"risk_level"`
 	Behaviors   []string `json:"behaviors"`
 	Model       string   `json:"model"`
+	// EvidenceShown says how much of the binary the model actually saw —
+	// "150/312 imports, 200/11482 strings (longest first...)". A real sample
+	// overflows any context window, so the assessment is formed from a subset,
+	// and the size of that subset is the single most useful thing for deciding
+	// how much weight it deserves. Empty on results written before #103.
+	EvidenceShown string `json:"evidence_shown"`
 }
 
 type ghidraResult struct {

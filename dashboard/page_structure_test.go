@@ -77,7 +77,12 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 		Strings:    []string{"evil.example"},
 		Imports:    []string{"kernel32.dll!CreateProcessA"},
 		FindCrypt:  []ghidraCrypto{{Address: "0x402a10", Constant: "AES Te0", Algorithm: "AES"}},
-		AITriage:   &ghidraTriage{Workflow: "program_triage", RiskLevel: "high", Behaviors: []string{"spawns a process"}},
+		AITriage: &ghidraTriage{
+			Workflow: "program_triage", RiskLevel: "high",
+			Behaviors:     []string{"spawns a process"},
+			Model:         "qwen3:8b",
+			EvidenceShown: "12/312 imports, 200/11482 strings (longest first, deduplicated, >=6 chars), 40/40 functions (largest first)",
+		},
 	}
 
 	pages := []struct {

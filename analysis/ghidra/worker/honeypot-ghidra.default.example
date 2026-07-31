@@ -1,0 +1,50 @@
+# /etc/default/honeypot-ghidra — host-specific settings for the Ghidra worker.
+# Installed by analysis/ghidra/install-analysis-host.sh if it does not exist;
+# an existing file is never overwritten, so edits survive a re-install.
+#
+# Read by honeypot-ghidra-worker.service. Nothing here is a secret, but the
+# spool paths must agree with ReadWritePaths= in that unit: systemd cannot
+# expand these values, so moving a spool means editing both files.
+
+# ── Spools ───────────────────────────────────────────────────────────────────
+# The dashboard writes {sha256}.request into the request directory and reads
+# {sha256}_ghidra.json back out of the results directory. docker-compose.yml
+# mounts both into the dashboard container as /ghidra-requests and
+# /ghidra-results; these are the host paths, which is what the worker needs.
+GHIDRA_REQUEST_DIR=/var/lib/honeypot-ghidra/requests/pending
+GHIDRA_RESULTS_DIR=/var/lib/honeypot-ghidra/results
+
+# Where the payload store keeps captured samples, named by hash. Shared with
+# the sandbox worker, read-only as far as this worker is concerned.
+GHIDRA_SAMPLES_DIR=/var/lib/honeypot-sandbox/inbox/samples
+
+# ── Ghidra REST service ──────────────────────────────────────────────────────
+# Published on loopback by docker-compose.ghidra.yml.
+GHIDRA_API_BASE=http://127.0.0.1:9090
+
+# Per-binary budget, in seconds. Longer than the container's own
+# ANALYSIS_TIMEOUT (3600) so a slow-but-progressing analysis is not killed by
+# the client while the server is still working.
+GHIDRA_ANALYSIS_TIMEOUT=4200
+
+# ── AI triage (#103) ─────────────────────────────────────────────────────────
+# An OpenAI-compatible endpoint. It MUST be local: the prompts carry strings,
+# imports and function names taken straight out of a captured sample, and the
+# worker refuses to send them to a host that is not loopback, RFC1918, or a
+# name that cannot resolve off this network. There is no override for that.
+#
+# Set this empty to switch triage off; results then carry "ai_triage": null and
+# everything else is unaffected.
+GHIDRA_TRIAGE_API_BASE=http://127.0.0.1:11434/v1
+GHIDRA_TRIAGE_MODEL=qwen3:8b
+
+# Seconds for one workflow call. Two calls run per sample.
+GHIDRA_TRIAGE_TIMEOUT=300
+
+# How much of the binary the model is shown. Raising these needs a model with
+# the context window to match; whatever is set here is reported verbatim in the
+# result's evidence_shown field, so an analyst can see what the assessment was
+# actually based on.
+GHIDRA_TRIAGE_MAX_STRINGS=200
+GHIDRA_TRIAGE_MAX_IMPORTS=150
+GHIDRA_TRIAGE_MAX_FUNCTIONS=100

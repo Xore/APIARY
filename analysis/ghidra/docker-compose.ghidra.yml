@@ -1,8 +1,12 @@
-# Docker Compose for the Ghidra headless REST service + Rev·Deck AI frontend
-# Run: docker compose -f docker-compose.ghidra.yml up
-# Requires: .env file (see analysis/ghidra/revdeck/README.md)
-
-version: '3.9'
+# Docker Compose for the analysis host: the Ghidra headless REST service and
+# the local model that backs AI triage.
+#
+# Run: analysis/ghidra/install-analysis-host.sh
+#   or docker compose -f docker-compose.ghidra.yml up -d ghidra ollama
+#
+# Neither service is reachable off this host. Both publish on 127.0.0.1 only,
+# because between them they hold captured malware and every string extracted
+# from it.
 
 services:
   ghidra:
@@ -12,7 +16,10 @@ services:
       - '127.0.0.1:9090:9090'
     volumes:
       - ghidra_projects:/data/ghidra_projects
-      - ./samples:/data/samples:ro   # mount samples read-only
+      # No ./samples bind mount. The worker submits each binary to /analyze as
+      # a multipart upload, so the service never reads a shared directory —
+      # and a bind mount whose source does not exist has docker create it as
+      # root inside the checkout, which then travels with every deploy rsync.
     security_opt:
       - no-new-privileges:true
     environment:
@@ -27,18 +34,74 @@ services:
       timeout: 5s
       retries: 10
 
+  ollama:
+    # Backs ai_triage in the Ghidra worker (#103). The worker speaks the
+    # OpenAI-compatible dialect at /v1, so any local server of that shape can
+    # take this slot; Ollama is here because it is what the plan named and it
+    # pulls its own weights.
+    image: ollama/ollama:0.12.11
+    restart: unless-stopped
+    ports:
+      # Loopback only. The prompts carry strings, imports and function names
+      # lifted straight out of captured samples; this port must not be a way
+      # to read them from elsewhere on the LAN.
+      - '127.0.0.1:11434:11434'
+    volumes:
+      - ollama_models:/root/.ollama
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      # Keep the model resident between samples. A drain analyses a queue one
+      # binary at a time, and reloading several GB of weights per workflow call
+      # costs more than the inference does.
+      OLLAMA_KEEP_ALIVE: '30m'
+      # One request at a time. Ghidra decompilation is already competing for
+      # this host, and a queue of parallel generations on an 8 GB card is how
+      # you get an out-of-memory unload mid-analysis.
+      OLLAMA_NUM_PARALLEL: '1'
+    healthcheck:
+      test: ['CMD', 'ollama', 'ps']
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    # No GPU reservation here on purpose. A device reservation the host cannot
+    # satisfy is a hard "could not select device driver" on `up`, so the base
+    # file is the one that works everywhere and the card is opted into with
+    # docker-compose.ghidra.gpu.yml. Ollama on CPU is slower; the worker cannot
+    # tell the difference.
+
   revdeck:
-    # biniamf/ai-reverse-engineering — AI-assisted analysis frontend
-    # https://github.com/biniamf/ai-reverse-engineering
+    # biniamf/ai-reverse-engineering — the analyst-facing chat UI.
+    #
+    # Behind a profile, and not started by default, for two reasons. Its build
+    # context is not vendored: ./revdeck/ai-reverse-engineering must be cloned
+    # by hand (see revdeck/README.md), and while it is missing an unprofiled
+    # service here would fail `docker compose up` for the whole file including
+    # the two services that do exist. And triage does not go through it — the
+    # worker calls the model directly, so that #103's local-only rule is
+    # enforced in code rather than in this file's .env.
+    #
+    #   git clone https://github.com/biniamf/ai-reverse-engineering \
+    #     analysis/ghidra/revdeck/ai-reverse-engineering
+    #   docker compose --profile revdeck up -d revdeck
+    profiles: ['revdeck']
     build:
       context: ./revdeck/ai-reverse-engineering
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
       - '127.0.0.1:5000:5000'
-    env_file: .env
+    # required: false — the profile keeps this service out of a default `up`,
+    # but a missing env_file is a config-time error that would still break
+    # `docker compose config` for the whole file.
+    env_file:
+      - path: .env
+        required: false
     environment:
       GHIDRA_API_BASE: 'http://ghidra:9090'
+      # Point it at the local model too. Its own README documents an OpenRouter
+      # option; using it would send sample-derived text off the host.
+      API_BASE: 'http://ollama:11434/v1'
     depends_on:
       ghidra:
         condition: service_healthy
@@ -47,4 +110,5 @@ services:
 
 volumes:
   ghidra_projects:
+  ollama_models:
   revdeck_chats:

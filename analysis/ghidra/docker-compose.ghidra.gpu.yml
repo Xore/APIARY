@@ -1,0 +1,22 @@
+# Hand the local model an NVIDIA card. Overlay, never used alone:
+#
+#   docker compose -f docker-compose.ghidra.yml -f docker-compose.ghidra.gpu.yml \
+#     up -d ghidra ollama
+#
+# install-analysis-host.sh adds this file when `docker info` reports an nvidia
+# runtime. It is an overlay rather than part of the base file because a device
+# reservation the host cannot satisfy fails `up` outright — a host without the
+# card should get a slower analysis, not a broken one.
+#
+# Ghidra is deliberately not given the GPU: decompilation is CPU work and would
+# only compete for the card with the model it is feeding.
+
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
