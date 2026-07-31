@@ -80,6 +80,29 @@ func (m *alertManager) acknowledge(key string, ack bool) bool {
 	return true
 }
 
+// acknowledgeAll flips every record that is not already in the requested state
+// and reports how many changed. list() only returns the newest 200, so this
+// deliberately covers records the alerts page never rendered: "acknowledge
+// all" that quietly left older alerts open would be the more surprising
+// behaviour. The count is what lets the caller say what actually happened
+// instead of assuming it matched the rows on screen.
+func (m *alertManager) acknowledgeAll(ack bool) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	changed := 0
+	for _, r := range m.records {
+		if r.Acknowledged == ack {
+			continue
+		}
+		r.Acknowledged = ack
+		changed++
+	}
+	if changed > 0 {
+		m.saveLocked()
+	}
+	return changed
+}
+
 func (m *alertManager) saveLocked() {
 	if m.path == "" {
 		return
@@ -103,6 +126,16 @@ func (s *store) serveAlertsAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		key := strings.TrimSpace(r.FormValue("key"))
 		ack := r.FormValue("ack") != "false"
+		// scope=all is spelled out rather than inferred from an empty key, so a
+		// form that loses its key cannot silently acknowledge the whole board.
+		if r.FormValue("scope") == "all" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"changed": s.alerts.acknowledgeAll(ack),
+				"alerts":  s.alerts.list(),
+			})
+			return
+		}
 		if !s.alerts.acknowledge(key, ack) {
 			http.NotFound(w, r)
 			return

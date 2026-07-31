@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"net/url"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -228,9 +227,9 @@ func (s *store) rebuild() {
 				Detail:        ev.detail,
 				IsLogin:       ev.isLogin,
 				HasCredential: ev.isLogin && validCredentialPair(ev.user, ev.pass),
-				Kibana:        investigationURL(os.Getenv("KIBANA_PUBLIC_URL"), "kibana", ev.ip, ev.when),
-				EveBox:        investigationURL(os.Getenv("EVEBOX_PUBLIC_URL"), "evebox", ev.ip, ev.when),
-				Arkime:        investigationURL(os.Getenv("ARKIME_PUBLIC_URL"), "arkime", ev.ip, ev.when),
+				Kibana:        investigationURL(investigationBase("kibana"), "kibana", ev.ip, ev.when),
+				EveBox:        investigationURL(investigationBase("evebox"), "evebox", ev.ip, ev.when),
+				Arkime:        investigationURL(investigationBase("arkime"), "arkime", ev.ip, ev.when),
 			})
 		}
 	}

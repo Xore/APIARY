@@ -2,14 +2,34 @@ package main
 
 import (
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
 
 func eventsURL(v url.Values) string { return "/events?" + v.Encode() }
 
+// investigationBase resolves where one external investigation tool lives.
+//
+// The explicit per-tool variable wins, so a path-routed deployment
+// (hp.example.org/evebox) can still say exactly what it means. Otherwise the
+// base is derived from HONEYPOT_DOMAIN, because the subdomain-per-tool layout
+// is the common one and three URLs to keep in step is three chances to get it
+// wrong. With neither set there is no link: see investigationURL for why a
+// guess is worse than an absence here.
+func investigationBase(kind string) string {
+	if explicit := os.Getenv(strings.ToUpper(kind) + "_PUBLIC_URL"); strings.TrimSpace(explicit) != "" {
+		return strings.TrimSpace(explicit)
+	}
+	domain := strings.Trim(strings.TrimSpace(os.Getenv("HONEYPOT_DOMAIN")), ".")
+	if domain == "" {
+		return ""
+	}
+	return "https://" + kind + "." + domain
+}
+
 func investigationURL(base, kind, ip string, when time.Time) string {
-	if base == "" || ip == "" {
+	if base == "" || ip == "" || isPlaceholderHost(base) {
 		return ""
 	}
 	base = strings.TrimRight(base, "/")
@@ -25,6 +45,23 @@ func investigationURL(base, kind, ip string, when time.Time) string {
 		from, to := when.Add(-5*time.Minute).UTC().Format(time.RFC3339), when.Add(5*time.Minute).UTC().Format(time.RFC3339)
 		return base + "/app/discover#/?_g=" + url.QueryEscape("(time:(from:'"+from+"',to:'"+to+"'))") + "&_a=" + url.QueryEscape("(query:(language:kuery,query:'"+ip+"'))")
 	}
+}
+
+// isPlaceholderHost reports whether a configured base still points at the
+// documentation domain. Every investigation link carries the IP under
+// investigation in its URL, and honeypot.example is not ours: rendering the
+// link anyway would put observed attacker addresses one DNS answer away from a
+// third party, and would look identical to a working link while doing it. RFC
+// 2606 reserves .example precisely so nothing real can be reached this way, so
+// treating the whole TLD as "not configured" costs no legitimate deployment.
+// An absent menu entry is the honest presentation of an unset variable.
+func isPlaceholderHost(base string) bool {
+	u, err := url.Parse(base)
+	if err != nil {
+		return true
+	}
+	host := strings.ToLower(u.Hostname())
+	return host == "example" || strings.HasSuffix(host, ".example")
 }
 
 // linkRows attaches a single-param /events drill-down link to each row.

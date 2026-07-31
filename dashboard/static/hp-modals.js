@@ -134,6 +134,35 @@
   });
 
   document.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-hp-alert-ack-all]");
+    if (!button) return;
+    // The page shows the newest 200 records; the server acknowledges every open
+    // one. Say so before confirming, and report the number the server actually
+    // changed afterwards rather than the number that happened to be on screen.
+    const shown = Number(button.dataset.hpAlertOpenCount || "0");
+    open({
+      trigger: button,
+      title: "Acknowledge every open alert?",
+      description:
+        "Acknowledging suppresses repeat notifications until each alert is reopened. Reopening is one alert at a time.",
+      warning: `${shown} open alert${shown === 1 ? "" : "s"} listed here, plus any older ones this page does not show.`,
+      confirmLabel: "Acknowledge all",
+      danger: true,
+      onConfirm: async () => {
+        const response = await fetch("/api/alerts", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ scope: "all", ack: "true" }),
+        });
+        if (!response.ok) throw new Error(`Alert update failed (${response.status})`);
+        const { changed = 0 } = await response.json();
+        if (typeof window.loadAlerts === "function") await window.loadAlerts();
+        return `${changed} alert${changed === 1 ? "" : "s"} acknowledged.`;
+      },
+    });
+  });
+
+  document.addEventListener("click", (event) => {
     const button = event.target.closest("[data-hp-alert-ack]");
     if (!button) return;
     const acknowledge = button.dataset.hpAlertAck === "true";
