@@ -387,6 +387,7 @@ func main() {
 	})
 	http.HandleFunc("/sandbox/submit", s.serveSandboxSubmit)
 	http.HandleFunc("/ghidra/submit", s.serveGhidraSubmit)
+	http.HandleFunc("/github-analysis/submit", s.serveGitHubAnalysisSubmit)
 	http.HandleFunc("/ghidra", func(w http.ResponseWriter, r *http.Request) {
 		html(w)
 		data, _ := ghidraData("", r.URL.Query().Get("q"))

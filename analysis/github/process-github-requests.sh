@@ -81,6 +81,8 @@ publishes_today() {
   printf '%s\n' "$count"
 }
 
+published_this_drain=0
+
 shopt -s nullglob
 while true; do
   requests=("$pending"/*.request)
@@ -144,6 +146,7 @@ while true; do
 
     if output=$("$script_dir/publish-sample.sh" "$sha" "$sample" 2>&1); then
       rm -f "$request"
+      published_this_drain=1
       logger -t honeypot-github "published $sha: $output"
     else
       write_result "$sha" "error" "\"error\":$(jq -Rn --arg e "$output" '$e')"
@@ -156,7 +159,12 @@ done
 
 # A burst can enqueue additional jobs while the path-triggered worker is
 # already active; starting the collector after the handoff closes that
-# systemd path-unit race, same reasoning as the sandbox worker. Best-effort:
-# request processing above is already complete by this point, dry-run mode
-# has nothing to collect, and systemd may legitimately be absent (tests).
-systemctl start --no-block honeypot-github-collect.service 2>/dev/null || true
+# systemd path-unit race, same reasoning as the sandbox worker. Only when
+# something was actually published this drain: a dry-run-only pass (the
+# default, and every test run) has nothing for the collector to do, and
+# systemctl reaching for a dbus that may not be running (containers, tests)
+# can cost several real seconds even when the unit doesn't exist to fail
+# fast against.
+if [[ $published_this_drain == 1 ]]; then
+  systemctl start --no-block honeypot-github-collect.service 2>/dev/null || true
+fi

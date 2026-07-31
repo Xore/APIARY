@@ -102,6 +102,21 @@ jobs:
           sudo apt-get install -y shellcheck
           find . -name '*.sh' -type f -print0 | xargs -0 -r -n1 bash -n
           find . -name '*.sh' -type f -print0 | xargs -0 -r shellcheck --severity=error
+      - name: GitHub-analysis publisher stays dry-run by default
+        shell: bash
+        run: |
+          # The one property this whole feature depends on (#74):
+          # GITHUB_PUBLISH_ENABLED unset must never reach publish-sample.sh,
+          # the only thing that can commit, zip, or push. WORK-LEDGER.md
+          # rule 7 requires this be a test, not a convention -- run it on
+          # every change, not just when analysis/github/ itself changes,
+          # since a change elsewhere (an env var default, a shared helper)
+          # could silently break the gate just as easily.
+          for t in analysis/github/tests/*.sh; do
+            echo "::group::$t"
+            bash "$t"
+            echo "::endgroup::"
+          done
       - name: Vendored YARA corpus is intact and loadable
         shell: bash
         run: |

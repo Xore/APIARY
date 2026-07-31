@@ -113,18 +113,25 @@
   });
 
   document.addEventListener("submit", (event) => {
-    // Both analysis spools confirm before queueing, but they are not the same
-    // action and must not claim to be: the sandbox executes the payload, while
-    // Ghidra only reads it. The default warning below describes detonation, so
-    // any form whose consequence differs has to state its own — a Ghidra
-    // re-run warning about "network, process, and filesystem activity" would
-    // be plainly false, and a confirmation nobody believes is worse than none.
-    const form = event.target.closest('form[action="/sandbox/submit"], form[action="/ghidra/submit"]');
+    // All three analysis spools confirm before queueing, but they are not the
+    // same action and must not claim to be: the sandbox executes the payload,
+    // Ghidra only reads it, and GitHub analysis publishes it externally to a
+    // public repository and third-party scanners. The default warning below
+    // describes detonation, so any form whose consequence differs has to
+    // state its own — a Ghidra re-run warning about "network, process, and
+    // filesystem activity" would be plainly false, and a confirmation nobody
+    // believes is worse than none. github-analysis/submit always sets its own
+    // text (below in payloads.html) precisely because "will be detonated" is
+    // wrong for it in the other direction: publication is not local at all.
+    const form = event.target.closest(
+      'form[action="/sandbox/submit"], form[action="/ghidra/submit"], form[action="/github-analysis/submit"]',
+    );
     if (!form || form.dataset.hpConfirmed === "true") return;
     // Only forms that opt in are interrupted. The payloads page carries a
     // Ghidra button on every row, and a modal per row for a read-only action
     // is confirmation fatigue; the re-analysis forms set these attributes
-    // because those overwrite an existing result.
+    // because those overwrite an existing result. Sandbox and github-analysis
+    // both always confirm — this skip is Ghidra-specific.
     if (form.action.endsWith("/ghidra/submit") && !form.dataset.hpConfirmTitle) return;
     event.preventDefault();
     const hash = form.querySelector('input[name="hash"]')?.value || "selected payload";
