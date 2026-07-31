@@ -45,8 +45,15 @@ func TestUDPConnLogViaPortIsTheSourcePortTheHoneypotSees(t *testing.T) {
 
 	// serveUDP binds asynchronously, so keep sending until it forwards one.
 	// Every datagram comes from the same client socket, so they all belong to
-	// one session and produce exactly one log line.
-	client, err := net.Dial("udp4", net.JoinHostPort("127.0.0.1", r.listenPort))
+	// one session and produce exactly one log line. The socket is deliberately
+	// unconnected: a connected UDP socket on Linux surfaces the ICMP
+	// port-unreachable from a datagram sent before serveUDP bound as an error
+	// on the *next* write, which has nothing to do with what is being tested.
+	bridge, err := net.ResolveUDPAddr("udp4", net.JoinHostPort("127.0.0.1", r.listenPort))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +62,7 @@ func TestUDPConnLogViaPortIsTheSourcePortTheHoneypotSees(t *testing.T) {
 	var srcPort int
 	deadline := time.After(10 * time.Second)
 	for srcPort == 0 {
-		if _, err := client.Write([]byte("probe")); err != nil {
+		if _, err := client.WriteToUDP([]byte("probe"), bridge); err != nil {
 			t.Fatal(err)
 		}
 		select {
