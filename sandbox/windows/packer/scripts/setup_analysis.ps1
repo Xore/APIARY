@@ -11,16 +11,36 @@ Write-Host ' Honeypot-Stack: Windows 11 Analysis VM Setup'
 Write-Host ' Running inside Packer QEMU build'
 Write-Host '================================================================'
 
-# ── Network: static IP + DNS ──────────────────────────────────────────────
-Write-Host '[Phase 1] Network configuration...'
+# ── Network: leave it alone ───────────────────────────────────────────────
+Write-Host '[Phase 1] Network configuration (DHCP - nothing to do)...'
 $adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Select-Object -First 1
-New-NetIPAddress -InterfaceAlias $adapter.Name `
-    -IPAddress '10.10.10.2' -PrefixLength 24 -DefaultGateway '10.10.10.1' `
-    -ErrorAction SilentlyContinue
-Set-DnsClientServerAddress -InterfaceAlias $adapter.Name -ServerAddresses '10.10.10.1'
-# During Packer build we need real internet for Chocolatey — revert DNS after
-# Use host NAT temporarily; set INetSim DNS after build
-Set-DnsClientServerAddress -InterfaceAlias $adapter.Name -ServerAddresses '8.8.8.8','1.1.1.1'
+#
+# ┌─ DO NOT ASSIGN A STATIC IP HERE ──────────────────────────────────────┐
+# │ This script runs inside Packer, over the network it is configuring.   │
+# │ A previous version did:                                               │
+# │                                                                       │
+# │   New-NetIPAddress -IPAddress 10.10.10.2 -DefaultGateway 10.10.10.1   │
+# │                                                                       │
+# │ and killed the build every time. QEMU user-mode networking puts the   │
+# │ guest on 10.0.2.15 via 10.0.2.2, and Packer reaches WinRM through a   │
+# │ hostfwd to it. Adding a default route via 10.10.10.1 — an address     │
+# │ that does not exist until the guest is on the sandbox bridge — takes  │
+# │ out WinRM and the guest's internet in one statement.                  │
+# │                                                                       │
+# │ The failure is quiet and expensive. Packer runs this as an elevated   │
+# │ scheduled task, so the script keeps going after contact is lost: the  │
+# │ log freezes at this phase while the guest spends hours failing every  │
+# │ Chocolatey download, until the 5h provisioner timeout. Observed       │
+# │ 2026-07-31 — three hours in, WinRM answering nothing, qcow2 being     │
+# │ written but never growing.                                            │
+# │                                                                       │
+# │ Nothing needs to be configured. setup/sandbox-network.xml reserves    │
+# │ 10.10.10.2 for this guest's MAC and hands out INetSim as the resolver │
+# │ via dhcp-option=6, so DHCP produces the right answer on the sandbox   │
+# │ bridge and QEMU's NAT produces the right answer during the build.     │
+# │ The address belongs to the network definition, not to the guest.      │
+# └───────────────────────────────────────────────────────────────────────┘
+Write-Host "[+] Adapter '$($adapter.Name)' left on DHCP"
 
 # ── Disable Windows Defender ─────────────────────────────────────────────
 Write-Host '[Phase 2] Disabling Windows Defender...'
@@ -256,6 +276,18 @@ New-Item $recent -ItemType Directory -Force | Out-Null
 Write-Host '[+] Decoy environment created'
 
 # ── Final DNS: set to INetSim (10.10.10.1) ────────────────────────────────
+# Safe here and only here — this is the last phase, so it cannot cost the
+# build its internet the way the old Phase 1 static IP did. Unlike an address
+# and a gateway, a resolver the guest cannot reach yet breaks nothing until
+# the guest is on the sandbox bridge.
+#
+# Deliberately belt-and-braces: setup/sandbox-network.xml already hands out
+# 10.10.10.1 via dhcp-option=6, and this survives a guest that somehow misses
+# the DHCP option. The cost is that 10.10.10.1 is now written down in three
+# places — here, that file, and the inetsim ipv4_address in
+# docker-compose.sandbox.yml. All three are pinned constants; change one and
+# you must change all three, or the static entry here will silently win over
+# DHCP and every lookup will go to a dead address.
 Write-Host '[Phase 14] Setting DNS to INetSim gateway (10.10.10.1)...'
 $adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Select-Object -First 1
 Set-DnsClientServerAddress -InterfaceAlias $adapter.Name -ServerAddresses '10.10.10.1'
