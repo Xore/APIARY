@@ -1225,6 +1225,14 @@ services:
     <<: *runtime-defaults
     build: ./tanner/redis
     container_name: hp-tanner-redis
+    # Measured against the live baseline (2026-07-31): this service binds only
+    # unprivileged ports and needs no capability at all, so nothing is added
+    # back. Verified by recreating it and comparing its listening port against
+    # the pre-change value — see #89.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
     healthcheck:
       test:
@@ -1245,6 +1253,14 @@ services:
     <<: *runtime-defaults
     build: ./tanner/phpox
     container_name: hp-tanner-phpox
+    # Measured against the live baseline (2026-07-31): this service binds only
+    # unprivileged ports and needs no capability at all, so nothing is added
+    # back. Verified by recreating it and comparing its listening port against
+    # the pre-change value — see #89.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
     networks:
       - tanner_local
@@ -1257,6 +1273,14 @@ services:
     <<: *runtime-defaults
     build: ./tanner/tanner
     container_name: hp-tanner-api
+    # Measured against the live baseline (2026-07-31): this service binds only
+    # unprivileged ports and needs no capability at all, so nothing is added
+    # back. Verified by recreating it and comparing its listening port against
+    # the pre-change value — see #89.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
     command: tannerapi
     tmpfs:
@@ -1278,6 +1302,14 @@ services:
     <<: *runtime-defaults
     build: ./tanner/tanner
     container_name: hp-tanner-web
+    # Measured against the live baseline (2026-07-31): this service binds only
+    # unprivileged ports and needs no capability at all, so nothing is added
+    # back. Verified by recreating it and comparing its listening port against
+    # the pre-change value — see #89.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
     command: tannerweb
     tmpfs:
@@ -1301,6 +1333,14 @@ services:
     <<: *runtime-defaults
     build: ./tanner/tanner
     container_name: hp-tanner
+    # Measured against the live baseline (2026-07-31): this service binds only
+    # unprivileged ports and needs no capability at all, so nothing is added
+    # back. Verified by recreating it and comparing its listening port against
+    # the pre-change value — see #89.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
     command: tanner
     environment:
@@ -1363,6 +1403,18 @@ services:
         TANNER: tanner
         PORT: "8080"
     container_name: hp-snare
+    # SNARE drops privileges at startup (setgid/setuid), which is why the
+    # otherwise-empty set the other tanner services use makes it exit with
+    # PermissionError: [Errno 1] Operation not permitted before it binds.
+    # SETUID+SETGID is the measured minimum; CHOWN and DAC_OVERRIDE were
+    # tested on top and changed nothing, so they are not granted.
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
     ports:
       - ${HP_BIND:-10.8.0.2}:19082:8080
