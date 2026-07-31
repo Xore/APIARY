@@ -464,6 +464,10 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    # Restarted by the autoheal sidecar on unhealthy, not by restart: alone --
+    # see #119, the same gap #111 found and fixed for conpot.
+    labels:
+      - autoheal=true
     deploy:
       resources:
         limits:
@@ -944,6 +948,10 @@ services:
       timeout: 10s
       retries: 10
       start_period: 60s
+    # Restarted by the autoheal sidecar on unhealthy, not by restart: alone --
+    # see #119, the same gap #111 found and fixed for conpot.
+    labels:
+      - autoheal=true
     deploy:
       resources:
         limits:
@@ -1150,6 +1158,11 @@ services:
       timeout: 3s
       retries: 3
       start_period: 5s
+    # Restarted by the autoheal sidecar on unhealthy, not by restart: alone --
+    # see #119, the same gap #111 found and fixed for conpot. dnp3 is the
+    # same class of directly-exposed industrial-protocol sensor.
+    labels:
+      - autoheal=true
     deploy:
       resources:
         limits:
@@ -1239,6 +1252,10 @@ services:
       timeout: 5s
       retries: 20
       start_period: 30s
+    # Restarted by the autoheal sidecar on unhealthy, not by restart: alone --
+    # see #119, the same gap #111 found and fixed for conpot.
+    labels:
+      - autoheal=true
     networks:
       - tanner_local
     deploy:
@@ -1267,6 +1284,10 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    # Restarted by the autoheal sidecar on unhealthy, not by restart: alone --
+    # see #119, the same gap #111 found and fixed for conpot.
+    labels:
+      - autoheal=true
     networks:
       - tanner_local
     deploy:
