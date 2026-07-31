@@ -2,8 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -101,6 +104,15 @@ func TestTunnelPeerIsRecoveredOrLeftUnattributed(t *testing.T) {
 		if row.IP == tunnelPeerIP {
 			t.Fatalf("/ips still lists the tunnel peer: %+v", row)
 		}
+	}
+
+	// #75 asks for the gap to be judged on a before-and-after number. The
+	// read-only diagnostics workflow can reach /metrics on the home runner but
+	// not /source-health, so the count has to be exported to be answerable.
+	recorder := httptest.NewRecorder()
+	s.serveMetrics(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(recorder.Body.String(), "honeypot_unattributed_events 1\n") {
+		t.Fatalf("/metrics does not report the recovery gap:\n%s", recorder.Body.String())
 	}
 }
 

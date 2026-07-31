@@ -87,10 +87,12 @@ jobs:
           report 'so a coherent set here is the end-to-end pipeline check Gate 0 asks for.'
           report '```'
           curl -fsS --max-time 15 "http://$bind:19090/metrics" 2>/dev/null \
-            | grep -E '^honeypot_(events|unique_sources|sensor_events|elasticsearch|dead_letters|filebeat)' \
+            | grep -E '^honeypot_(events|unique_sources|unattributed|sensor_events|elasticsearch|dead_letters|filebeat)' \
             | tee -a "$GITHUB_STEP_SUMMARY" || report "metrics unavailable"
           report '```'
           report 'honeypot_elasticsearch_state: 1 green, 2 yellow, 3 red, 0 unknown.'
+          report 'honeypot_unattributed_events: events carried over the tunnel that could not be'
+          report 'joined back to a real source — the recovery gap #54 measured and #75 closes.'
 
           section "Elasticsearch cluster"
           report '```'
