@@ -119,7 +119,7 @@ fi
 if wants dionaea; then
   # Wipe JSON event logs only — NOT the dionaea-lib Docker volume which
   # holds captured binaries (smb/ftp/tftp roots). To also purge binaries:
-  #   docker compose stop dionaea && docker volume rm honeypot-stack_dionaea-lib
+  #   docker compose stop dionaea && docker volume rm dionaea-lib
   wipe_dir "${LOGS_BASE}/dionaea"
   CLEAR_FILEBEAT=true
 fi
