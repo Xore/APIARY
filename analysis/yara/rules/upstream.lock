@@ -1,0 +1,11 @@
+# Vendored upstream YARA corpus. Written by analysis/yara/sync-yara.sh,
+# enforced by scripts/check-yara-corpus.sh. analysis/yara/rules/upstream/ must
+# stay byte-identical to yara-rules/ at this commit, minus any file dropped for
+# failing to compile or redefining a rule name (see files= vs upstream_files=).
+repository=https://github.com/Xore/Honeypot
+ref=main
+commit=a8b512a141a8ad037d6006a3e361767bf5063747
+commit_date=2026-07-29T18:31:25Z
+files=20
+upstream_files=24
+manifest_sha256=ad47031472cbcae9bd7542a12db6f4abcd7c239501e47c20e8dada2bb5104d9e

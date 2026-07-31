@@ -93,6 +93,26 @@ jobs:
           sudo apt-get install -y shellcheck
           find . -name '*.sh' -type f -print0 | xargs -0 -r -n1 bash -n
           find . -name '*.sh' -type f -print0 | xargs -0 -r shellcheck --severity=error
+      - name: Vendored YARA corpus is intact and loadable
+        shell: bash
+        run: |
+          # yara(1) refuses to start on a corpus with one bad rule rather than
+          # skipping it, so a rule file edited in place or dropped from
+          # index.yar takes the whole scanner down silently.
+          #
+          # Run in the scanner's own base image rather than against the runner's
+          # apt yara: "does it compile" is only a useful answer from the
+          # compiler that will actually load it, and the two versions differ.
+          # The image is read from the Dockerfile so a base bump moves CI too.
+          image="$(awk '/^FROM /{print $2; exit}' analysis/yara/Dockerfile)"
+          echo "validating against $image"
+          docker run --rm -v "$PWD:/w" -w /w "$image" sh -c '
+            apk add --no-cache bash git yara >/dev/null
+            yara --version
+            scripts/check-yara-corpus.sh
+            yara -w analysis/yara/rules/index.yar /dev/null
+            analysis/yara/test_sync_yara.sh
+          '
       - name: Validate home and VPS Compose
         shell: bash
         run: |

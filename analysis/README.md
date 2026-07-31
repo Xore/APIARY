@@ -8,9 +8,9 @@ scripts that run on the sensor host.
 > The integration between this repository's dashboard and that pipeline is
 > designed in [`docs/github-analysis-integration-roadmap.md`](../docs/github-analysis-integration-roadmap.md)
 > and tracked in [#73](https://github.com/Xore/honeypot-stack/issues/73)
-> (upstream YARA corpus sync) and
+> (upstream YARA corpus sync — built, see [`yara/`](yara/)) and
 > [#74](https://github.com/Xore/honeypot-stack/issues/74) (the manual
-> publisher). None of it is built yet.
+> publisher, not built yet).
 > Publication is **not** automatic — see "Publication is manual" below.
 
 ---
@@ -44,7 +44,7 @@ honeypot-stack (this repo)          Xore/honeypot (sample archive + pipeline)
 | `analyze.py` | Offline triage of Cowrie / http-honeypot / multipot / Dionaea JSON logs. Stdlib only |
 | `collect.sh` | **Deprecated.** Cron-driven bulk copy of captures into a clone of `Xore/honeypot`. Superseded by the dashboard button; kept for a one-time manual backfill |
 | `dedupe-payloads.py` | Collapses duplicate captures by SHA-256 |
-| `yara/` | Networkless YARA scanner sidecar and local rules |
+| `yara/` | Networkless YARA scanner sidecar, local rules, and the vendored upstream corpus (`yara/sync-yara.sh`) |
 | `ghidra/` | Headless Ghidra reverse-engineering pipeline and its dashboard integration plan |
 | `elasticsearch-setup.sh`, `honeypot-kibana-setup.sh`, `filebeat.yml`, `evebox.yaml` | Log pipeline and search UI provisioning |
 | `backup-honeypot.sh`, `verify-backup.sh`, `log-maintenance.sh`, `RECOVERY.md` | Retention and recovery |
