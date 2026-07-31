@@ -112,17 +112,30 @@ guide as finished, copy-pasteable code.
 The old §9.1 opened a file handle in a **running** guest over the QEMU guest
 agent, streamed the sample in base64, and called `guest-exec` to run it.
 
-Both sandboxes refuse this. Samples are injected with `virt-copy-in` /
-libguestfs **while the VM is powered off**, and results are extracted with
-`virt-copy-out` after forced shutdown; the overlay is then destroyed. The point
-is that there is no host-to-guest management service at all, so a compromised
-guest has no channel to push data back through. Adding a guest agent to make
-injection more convenient removes the property the whole design is built on.
+The **Linux runner** refuses this outright. Samples are injected with
+`virt-copy-in` / libguestfs **while the VM is powered off**, results are
+extracted with `virt-copy-out` after forced shutdown, and the overlay is then
+destroyed. There is no host-to-guest management service at all, so a
+compromised guest has no channel to push data back through.
 
-The Windows guest does install the QEMU guest agent in the golden image for
-host-side file copy, which is a narrower grant than `guest-exec` on a live
-infected VM — but it is still the looser of the two and is not the mechanism
-for getting a sample in.
+The **Windows orchestrator does not have this property**, and an earlier
+revision of this section wrongly claimed it did. `run_sample.py` waits for
+WinRM on the booted guest and drives the whole run through it — sample copy
+over SMB, then ProcMon, FakeNet, Regshot and execution as PowerShell
+invocations. The reason is real: the telemetry tools have to be started before
+the sample and stopped after it, from outside its control, which offline
+injection alone cannot do. The cost is equally real: a credentialed service
+listening inside a guest that is deliberately running malware.
+
+That is [#94](https://github.com/Xore/honeypot-stack/issues/94) — a decision to
+make before the golden image is built, since the credentials and the share are
+baked into it. Until it is made, treat the Windows sandbox's isolation as
+resting on the *network* barriers in §2 alone, not on the absence of a
+management channel.
+
+The QEMU guest agent is also installed in the golden image for host-side file
+copy. It is a narrower grant than `guest-exec` on a live infected VM, and it is
+not how a sample gets in.
 
 ### 3.2 No libvirt lifecycle hooks
 

@@ -12,6 +12,13 @@
 > — one issue per remaining step, each with its own verification and failure
 > modes. Start there rather than from this document if you are picking the
 > work up cold.
+>
+> **Decide [#94](https://github.com/Xore/honeypot-stack/issues/94) before
+> building the image.** Every WinRM and SMB step below assumes a credentialed
+> management channel into a running infected guest, and the credentials and the
+> share are baked into the golden image — which makes this cheap to settle now
+> and expensive to settle later. [#91](https://github.com/Xore/honeypot-stack/issues/91)
+> covers the image-side defects the same channel depends on.
 
 ---
 
@@ -42,9 +49,9 @@ KVM Host (Linux)
 │   ├── FakeNet-NG (intercepts all outbound traffic on the guest)
 │   ├── PowerShell ScriptBlock logging (Event 4104)
 │   ├── ETW / ProcMon / Regshot
-│   └── WinRM (port 5985) — remote orchestration from host
+│   └── WinRM (port 5985) — remote orchestration from host (see #94)
 │
-├── Docker network: sandbox-net (10.10.10.0/24, same bridge)
+├── Docker network: `sandbox` (macvlan, internal: true, 10.10.10.0/24)
 │   ├── inetsim      (10.10.10.1)  — fake DNS/HTTP/SMTP/FTP/IRC
 │   ├── mitmproxy    (10.10.10.1:8080) — SSL intercept, HTTP/S MITM
 │   ├── zeek         — reads tap/mirror of virbr-sandbox
@@ -784,20 +791,25 @@ sandbox/windows/
 ├── setup/
 │   ├── prepare_vm.ps1            ← manual prep (if not using Packer)
 │   ├── enable_logging.ps1        ← Sysmon + PS logging
-│   ├── harden_analysis_vm.ps1    ← full hardening + anti-evasion
-│   └── kvm_manage.sh             ← virsh helper: create/snapshot/revert
+│   ├── kvm_manage.sh             ← virsh helper: create/snapshot/revert
+│   └── sandbox-network.xml       ← the libvirt network; no <forward> is the point
 ├── config/
-│   ├── sysmon_config.xml         ← SwiftOnSecurity config
 │   ├── fakenet.ini               ← FakeNet-NG config
-│   └── inetsim.conf              ← INetSim config (used by Docker service)
+│   └── inetsim.conf              ← INetSim config (used by the gateway service)
+├── gateway/inetsim/              ← gateway container build context
 ├── orchestrate/
 │   ├── run_sample.py             ← KVM detonation orchestrator
 │   ├── extract_iocs.py           ← IOC extraction from EVTX + logs
 │   └── generate_report.py        ← PDF report generator
-├── worker/
-│   ├── run_pending.sh                          ← called by systemd, processes spool queue
-│   ├── honeypot-windows-sandbox-worker.path    ← systemd path unit
-│   └── honeypot-windows-sandbox-worker.service ← systemd oneshot service
+├── runner/README.md              ← host-side runner notes
+├── run_pending.sh                            ← called by systemd, drains the spool under flock
+├── honeypot-windows-sandbox-worker.path      ← systemd path unit
+├── honeypot-windows-sandbox-worker.service   ← systemd oneshot service
+├── honeypot-windows-sandbox.default.example  ← /etc/default template
 └── docs/
-    └── golden_image_vs_snapshots.md
+    └── packer-golden-image-guide.md
 ```
+
+The worker files are at the top of `sandbox/windows/`, not under a `worker/`
+subdirectory — the systemd units reference the real paths. `sysmon_config.xml`
+is not vendored; it is fetched from SwiftOnSecurity during the Packer build.

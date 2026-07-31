@@ -12,6 +12,23 @@ This roadmap reconciles the three source plans with the repository as it
 exists on 2026-07-29. It establishes a correct CPU ML pipeline and stable data
 contracts before adding dashboard, LLM, or GPU complexity.
 
+**Nothing below is built.** This document is the sequencing — what order, and
+why. The work is claimed and reviewed in issues:
+
+| Gate / Milestone | Issue |
+|---|---|
+| A — runtime and hardware truth | [#82](https://github.com/Xore/honeypot-stack/issues/82) |
+| B, C — ML foundation and reliable ES pipeline | [#61](https://github.com/Xore/honeypot-stack/issues/61), [#62](https://github.com/Xore/honeypot-stack/issues/62) |
+| D — temporal/composite quality and lifecycle | [#63](https://github.com/Xore/honeypot-stack/issues/63), [#65](https://github.com/Xore/honeypot-stack/issues/65) |
+| E — dashboard ML delivery | [#64](https://github.com/Xore/honeypot-stack/issues/64) |
+| F — guarded LLM worker, dry-run only | [#66](https://github.com/Xore/honeypot-stack/issues/66) |
+| G — local Ollama canary | [#83](https://github.com/Xore/honeypot-stack/issues/83) |
+| H — ML GPU acceleration | [#67](https://github.com/Xore/honeypot-stack/issues/67) |
+| I — shared GPU operations and rollout | [#84](https://github.com/Xore/honeypot-stack/issues/84) |
+
+If a deliverable here has no issue, that is the gap: open one. Do not track
+progress by editing this file.
+
 ## 1. Baseline and required corrections
 
 The existing `ml-worker/` is a scaffold, not a working v0.1 release:

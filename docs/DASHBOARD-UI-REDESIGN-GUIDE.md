@@ -113,7 +113,7 @@ Tracked as issues, not as a checklist here:
 | Event detail, payload preview, export options, destructive dead-letter modals | [#59](https://github.com/Xore/honeypot-stack/issues/59) |
 | Behavioural tests and the visual acceptance matrix | [#60](https://github.com/Xore/honeypot-stack/issues/60) |
 | CSP cutover with a per-request nonce | [#58](https://github.com/Xore/honeypot-stack/issues/58) |
-| Profile action menu, route/administrator settings, logout | [#77](https://github.com/Xore/honeypot-stack/issues/77) |
+| Profile action menu, route/administrator settings, logout | Built ([#77](https://github.com/Xore/honeypot-stack/issues/77) closed). Remaining gap: [#93](https://github.com/Xore/honeypot-stack/issues/93) |
 
 The shared modal root/controller and the first consequential flows — alert
 acknowledgement and sandbox submission — already follow `Xore/theme` →
