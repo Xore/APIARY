@@ -59,10 +59,38 @@ sudo analysis/ghidra/install-analysis-host.sh                # the worker half
 | `--model NAME` | Model to pull. Defaults to `GHIDRA_TRIAGE_MODEL` from `/etc/default/honeypot-ghidra` if that file exists, else `qwen3:8b` |
 | `--no-gpu` | Run the model on CPU even if an NVIDIA runtime is present |
 | `--skip-pull` | Do not pull the model |
+| `--stack-dir PATH` | Where to deploy the compose file. `""` runs it in place |
 
 The script is idempotent — safe to re-run after an image bump, a model change,
 or a reboot — and an existing `/etc/default/honeypot-ghidra` is never
 overwritten.
+
+### Where the stack lives
+
+On a host running Dockge (`/opt/stacks` exists) the compose file is deployed to
+`/opt/stacks/ghidra/compose.yml`, which is what makes Dockge treat it as a stack
+it owns rather than containers it can see but not start, stop, or read logs
+from. **That copy is a deployment artifact**: edit
+`docker-compose.ghidra.yml` here and re-run the script, because the next run
+overwrites it.
+
+The directory name is the compose project name and therefore the prefix on the
+volumes — `ghidra_ollama_models` holds several GB of weights. Renaming it pulls
+the model again into a new volume and orphans the old one.
+
+GPU settings arrive as `compose.override.yml`, the one extra file `docker
+compose` loads without being told to, because Dockge runs compose with no `-f`
+of its own.
+
+Containers created from somewhere else keep the compose labels they were born
+with, and `up -d` leaves them alone because nothing about the service changed.
+Once, after moving an already-running stack:
+
+```bash
+cd /opt/stacks/ghidra && docker compose up -d --force-recreate
+```
+
+Named volumes are keyed on the project name, so the weights survive that.
 
 **The containers half** pulls both images, brings up `ghidra` and `ollama`,
 polls until each actually answers (`up -d` returns when a container has
@@ -250,8 +278,8 @@ not configured for leaves several GB on disk and triage still not working.
 
 ```bash
 # What is loaded, what is on disk
-docker compose -f analysis/ghidra/docker-compose.ghidra.yml exec ollama ollama ps
-docker compose -f analysis/ghidra/docker-compose.ghidra.yml exec ollama ollama list
+docker compose -f /opt/stacks/ghidra/compose.yml exec ollama ollama ps
+docker compose -f /opt/stacks/ghidra/compose.yml exec ollama ollama list
 ```
 
 ### Rev·Deck

@@ -11,6 +11,12 @@
 # model has to be on this host, and the worker refuses to talk to one that is
 # not (see endpoint_is_local in worker/ghidra-worker.py).
 #
+# On a host running Dockge the compose file is deployed into a stack directory
+# under /opt/stacks, the same place deploy.yml puts the honeypot stack, so the
+# containers show up as a stack Dockge manages rather than as strays it can see
+# but not touch. That directory is a deployment copy: edit the file in this
+# repository and re-run this script, do not edit it there.
+#
 # Idempotent: safe to re-run after a pull, a model change, or a reboot. An
 # existing /etc/default/honeypot-ghidra is never overwritten.
 #
@@ -26,6 +32,9 @@
 #                      from /etc/default/honeypot-ghidra if that file exists).
 #   --no-gpu           Run the model on CPU even if an NVIDIA runtime is present.
 #   --skip-pull        Do not pull the model. For a host that already has it.
+#   --stack-dir PATH   Where to deploy the compose file. Defaults to
+#                      /opt/stacks/ghidra when /opt/stacks exists, else the
+#                      repository directory. Pass "" to run in place.
 #   -h, --help         This text.
 
 set -euo pipefail
@@ -40,6 +49,11 @@ CONTAINERS_ONLY=0
 USE_GPU=auto
 SKIP_PULL=0
 MODEL=""
+# The compose project name comes from the directory holding the compose file,
+# and it prefixes the volume names — ghidra_ollama_models holds several GB of
+# weights. Keep this directory called "ghidra" or the next run pulls them again
+# into a differently named volume and orphans the old one.
+STACK_DIR="$([ -d /opt/stacks ] && echo /opt/stacks/ghidra || true)"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -47,6 +61,7 @@ while [ $# -gt 0 ]; do
     --model) MODEL="${2:?--model needs a value}"; shift 2 ;;
     --no-gpu) USE_GPU=no; shift ;;
     --skip-pull) SKIP_PULL=1; shift ;;
+    --stack-dir) STACK_DIR="${2?--stack-dir needs a value}"; shift 2 ;;
     # The header comment is the help text, printed up to the first line that
     # is not one - so editing the header cannot leave --help quoting code.
     -h|--help) awk 'NR>1 && !/^#/{exit} NR>1{sub(/^# ?/,""); print}' "$0"; exit 0 ;;
@@ -85,7 +100,6 @@ avail="$(printf '%s\n' "$avail" | awk 'NR==2 {print int($4/1024/1024)}')"
 [ "${avail:-0}" -ge 20 ] ||
   echo "warning: only ${avail}G free where docker stores images; the model pull needs several" >&2
 
-files=(-f "$compose_file")
 if [ "$USE_GPU" = auto ]; then
   if docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q '"nvidia"'; then
     USE_GPU=yes
@@ -94,6 +108,29 @@ if [ "$USE_GPU" = auto ]; then
     echo "note: no nvidia container runtime; the model will run on CPU" >&2
   fi
 fi
+
+# ── Deploy the compose file ──────────────────────────────────────────────────
+# Dockge lists a stack per directory under /opt/stacks and shells out to
+# `docker compose` inside it with no -f, so the GPU settings have to reach it
+# as compose.override.yml — the one extra file compose loads on its own. A
+# stack whose card says "not managed by Dockge" is one whose start, stop and
+# logs buttons do nothing, which is worth this copy.
+if [ -n "$STACK_DIR" ]; then
+  say "deploying the compose file to $STACK_DIR"
+  mkdir -p "$STACK_DIR"
+  cp "$compose_file" "$STACK_DIR/compose.yml"
+  if [ "$USE_GPU" = yes ]; then
+    cp "$gpu_file" "$STACK_DIR/compose.override.yml"
+  else
+    # Leaving a stale override behind would keep asking for a card that is no
+    # longer wanted, and compose would load it without being asked.
+    rm -f "$STACK_DIR/compose.override.yml"
+  fi
+  compose_file="$STACK_DIR/compose.yml"
+  gpu_file="$STACK_DIR/compose.override.yml"
+fi
+
+files=(-f "$compose_file")
 # if, not `[ ... ] && ...`: a trailing false test is itself the script's exit
 # status under set -e, so the CPU path would quit here.
 if [ "$USE_GPU" = yes ]; then
