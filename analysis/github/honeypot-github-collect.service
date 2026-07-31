@@ -1,0 +1,19 @@
+[Unit]
+Description=Pull scanner verdicts for pending GitHub-analysis publications
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/honeypot-github.env
+ExecStart=/usr/bin/python3 /usr/local/libexec/honeypot-github/collect-results.py
+UMask=0077
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+TimeoutStartSec=10min
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/honeypot-github

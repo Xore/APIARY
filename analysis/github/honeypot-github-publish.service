@@ -1,0 +1,25 @@
+[Unit]
+Description=Validate and gate dashboard GitHub-analysis publish requests
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/honeypot-github.env
+ExecStart=/usr/local/libexec/honeypot-github/process-github-requests.sh
+UMask=0077
+Nice=10
+TimeoutStartSec=5min
+
+NoNewPrivileges=true
+PrivateTmp=true
+# Not ProtectSystem=strict: this unit needs docker.sock (via the docker CLI,
+# for docker volume inspect), git network egress to push to GITHUB_REPO, and
+# `file -b` against arbitrary sample paths under the capture stores -- a
+# narrower filesystem allowlist than the Ghidra/sandbox workers use is not a
+# clean fit here. `full` still protects /usr, /boot, /efi.
+ProtectSystem=full
+ReadWritePaths=/var/lib/honeypot-github /run/lock /run/docker.sock
+
+[Install]
+WantedBy=multi-user.target

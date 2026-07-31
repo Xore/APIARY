@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for dashboard GitHub-analysis publish requests
+
+[Path]
+DirectoryNotEmpty=/var/lib/honeypot-github/requests/pending
+Unit=honeypot-github-publish.service
+
+[Install]
+WantedBy=multi-user.target

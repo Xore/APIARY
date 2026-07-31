@@ -170,10 +170,20 @@ that upstream actually implements.
 
 ---
 
-## Phase 1 — Host-side publisher ⬜
+## Phase 1 — Host-side publisher 🔶 built 2026-07-31, not installed
 
 `analysis/github/`, root-owned, installed by an `install-github-publisher.sh`
 modelled on `sandbox/install-worker.sh`.
+
+**Status:** every file below is written and the dry-run half of the exit
+criterion is proven by `analysis/github/tests/test_dry_run.sh` (plus
+`test_rejections.sh` for malformed/unresolvable requests) rather than
+hand-placed, per `WORK-LEDGER.md` rule 7. Deliberately **not installed on the
+production homeserver** and no `GH_PAT` has been created — the second half of
+the exit criterion (a real push against a throwaway fork) needs the
+operator's separate explicit authorization, same as the IP reporter (#68).
+See #74 for the three open questions this phase depended on and how they
+were decided.
 
 ### `process-github-requests.sh`
 
