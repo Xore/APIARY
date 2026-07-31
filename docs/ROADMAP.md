@@ -171,7 +171,7 @@ symptom would be missing events rather than a disk alert.
 | Deliverable | Issue |
 |---|---|
 | Stop attributing tunnelled traffic to the WireGuard peer | ✅ [#54](https://github.com/Xore/honeypot-stack/issues/54) |
-| Close the VPS-side source-recovery gap | [#75](https://github.com/Xore/honeypot-stack/issues/75) |
+| Close the VPS-side source-recovery gap | ✅ [#75](https://github.com/Xore/honeypot-stack/issues/75) |
 
 ## Documentation disposition
 
