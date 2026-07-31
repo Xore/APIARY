@@ -13,6 +13,10 @@ Type=oneshot
 # directory) live outside the repository. The leading - keeps the unit usable
 # before an operator has written the file.
 EnvironmentFile=-/etc/default/honeypot-ghidra
+# Optional host dependency: graphviz. Without `dot` the worker still writes
+# {sha}_callgraph.dot and the analysis completes; only the rendered picture is
+# missing, and the page says so rather than showing a broken image.
+#   apt-get install graphviz
 ExecStart=/usr/bin/python3 /opt/honeypot-ghidra/worker/ghidra-worker.py
 UMask=0077
 # Decompiling a large binary is CPU-hungry background work on a host that is

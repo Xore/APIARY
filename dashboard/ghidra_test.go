@@ -424,3 +424,64 @@ func TestGhidraAlertsOnHighAIRisk(t *testing.T) {
 		t.Errorf("risk level outside the configured set alerted: %v", messages)
 	}
 }
+
+// The call-graph SVG carries function names recovered from the sample, so the
+// filename is re-validated even though the worker produced it.
+func TestAttachGhidraCallGraphRejectsBadNames(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GHIDRA_RESULTS_DIR", dir)
+	if err := os.WriteFile(filepath.Join(dir, "secret.svg"), []byte("<svg/>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"../secret.svg", "sub/x.svg", "notsvg.txt", "../../etc/passwd"} {
+		row := ghidraResult{SHA256: shaA, CallGraphSVG: bad}
+		attachGhidraCallGraph(&row)
+		if row.CallGraphURL != "" {
+			t.Errorf("%q produced a call-graph URL", bad)
+		}
+	}
+}
+
+func TestServeGhidraCallGraph(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GHIDRA_RESULTS_DIR", dir)
+	svg := `<svg xmlns="http://www.w3.org/2000/svg"><text>f</text></svg>`
+	if err := os.WriteFile(filepath.Join(dir, shaA+"_callgraph.svg"), []byte(svg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	w := httptest.NewRecorder()
+	serveGhidraExport(w, httptest.NewRequest(http.MethodGet,
+		"/export/ghidra/"+shaA+"/callgraph.svg", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "image/svg+xml" {
+		t.Errorf("Content-Type = %q", ct)
+	}
+	// Attacker-influenced content rendered as a document: the CSP and nosniff
+	// headers are the reason navigating straight to this URL is not a script
+	// execution path.
+	if csp := w.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'none'") {
+		t.Errorf("missing restrictive CSP, got %q", csp)
+	}
+	if w.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Error("missing nosniff")
+	}
+
+	// A hash with no rendered graph must 404, not serve someone else's file.
+	w = httptest.NewRecorder()
+	serveGhidraExport(w, httptest.NewRequest(http.MethodGet,
+		"/export/ghidra/"+shaB+"/callgraph.svg", nil))
+	if w.Code != http.StatusNotFound {
+		t.Errorf("missing graph: got %d, want 404", w.Code)
+	}
+
+	// Traversal in the hash position must not escape the results directory.
+	w = httptest.NewRecorder()
+	serveGhidraExport(w, httptest.NewRequest(http.MethodGet,
+		"/export/ghidra/../../etc/passwd/callgraph.svg", nil))
+	if w.Code != http.StatusNotFound {
+		t.Errorf("traversal: got %d, want 404", w.Code)
+	}
+}

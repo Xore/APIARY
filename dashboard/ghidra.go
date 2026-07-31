@@ -20,6 +20,7 @@ type ghidraFunction struct {
 	Address   string `json:"address"`
 	Name      string `json:"name"`
 	Signature string `json:"signature"`
+	Size      int    `json:"size"`
 }
 
 type ghidraCrypto struct {
@@ -57,9 +58,10 @@ type ghidraResult struct {
 	AITriage     *ghidraTriage `json:"ai_triage"`
 	ReportPDF    string        `json:"report_pdf"`
 
-	// Set by the dashboard, not the worker: a download route, present only
-	// when the file actually exists and is a plausible size.
-	ExportURL string `json:"export_url,omitempty"`
+	// Set by the dashboard, not the worker: download routes, present only when
+	// the file actually exists.
+	ExportURL    string `json:"export_url,omitempty"`
+	CallGraphURL string `json:"call_graph_url,omitempty"`
 }
 
 // ghidraQueueStatus matches the status.json the worker writes. Flat, unlike
@@ -180,7 +182,11 @@ func loadGhidraStatus() ghidraQueueStatus {
 // built, so today this normally does nothing — which is the point: no link is
 // offered for a file that is not there.
 func attachGhidraDownload(row *ghidraResult) {
-	if row == nil || row.ReportPDF == "" {
+	if row == nil {
+		return
+	}
+	attachGhidraCallGraph(row)
+	if row.ReportPDF == "" {
 		return
 	}
 	// The worker controls this value, but it lands in a filesystem path, so
@@ -194,6 +200,28 @@ func attachGhidraDownload(row *ghidraResult) {
 		return
 	}
 	row.ExportURL = "/export/ghidra/" + row.SHA256
+}
+
+// attachGhidraCallGraph exposes the rendered call graph, if one exists. The
+// worker writes {sha}_callgraph.svg only when graphviz is installed on the
+// host, so on a host without it this correctly offers nothing rather than a
+// broken image.
+func attachGhidraCallGraph(row *ghidraResult) {
+	if row.CallGraphSVG == "" {
+		return
+	}
+	// Worker-controlled, but it becomes a filesystem path: bare filename only.
+	if row.CallGraphSVG != filepath.Base(row.CallGraphSVG) ||
+		strings.Contains(row.CallGraphSVG, "..") ||
+		!strings.HasSuffix(row.CallGraphSVG, ".svg") {
+		row.CallGraphSVG = ""
+		return
+	}
+	info, err := os.Stat(filepath.Join(ghidraResultsDir(), row.CallGraphSVG))
+	if err != nil || info.IsDir() || info.Size() == 0 {
+		return
+	}
+	row.CallGraphURL = "/export/ghidra/" + row.SHA256 + "/callgraph.svg"
 }
 
 func ghidraData(sha256, query string) (ghidraPageData, error) {
@@ -274,6 +302,10 @@ func serveGhidraAPI(w http.ResponseWriter, r *http.Request) {
 // worse download than the JSON the API already serves.
 func serveGhidraExport(w http.ResponseWriter, r *http.Request) {
 	sha := strings.TrimPrefix(r.URL.Path, "/export/ghidra/")
+	if rest, ok := strings.CutSuffix(sha, "/callgraph.svg"); ok {
+		serveGhidraCallGraph(w, r, rest)
+		return
+	}
 	if !hashName.MatchString(sha) {
 		http.NotFound(w, r)
 		return
@@ -396,4 +428,41 @@ func ghidraAlerts(s *store, messages *[]string, markOnly bool) {
 			"ghidra flagged sample: sha256=%s crypto_hits=%d imports=%d %s",
 			result.SHA256, len(result.FindCrypt), len(result.Imports), detail))
 	}
+}
+
+// serveGhidraCallGraph streams the rendered call graph.
+//
+// The node labels are function names recovered from the sample, so this SVG is
+// attacker-influenced content. An <img> tag cannot execute script in an SVG,
+// but a browser navigating directly to this URL renders it as a document,
+// where it can. Hence the headers: a default-src 'none' CSP leaves nothing for
+// embedded script or remote references to reach, and nosniff keeps the
+// declared type authoritative. The page embeds it with <img> regardless.
+func serveGhidraCallGraph(w http.ResponseWriter, r *http.Request, sha string) {
+	if !hashName.MatchString(sha) {
+		http.NotFound(w, r)
+		return
+	}
+	dir := ghidraResultsDir()
+	if dir == "" {
+		http.NotFound(w, r)
+		return
+	}
+	// Built from the validated hash, never from a client-supplied filename.
+	path := filepath.Join(dir, sha+"_callgraph.svg")
+	f, err := os.Open(path)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || info.IsDir() {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	http.ServeContent(w, r, "callgraph.svg", info.ModTime(), f)
 }

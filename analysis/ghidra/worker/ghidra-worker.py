@@ -35,6 +35,8 @@ import json
 import mimetypes
 import os
 import re
+import struct
+import subprocess
 import sys
 import time
 import urllib.error
@@ -68,6 +70,58 @@ HTTP_TIMEOUT = int(os.environ.get("GHIDRA_HTTP_TIMEOUT", "60"))
 # number that looks like the real total.
 FUNCTION_PAGE = int(os.environ.get("GHIDRA_FUNCTION_PAGE", "500"))
 MAX_FUNCTIONS = int(os.environ.get("GHIDRA_MAX_FUNCTIONS", "20000"))
+
+# Call-graph seeds. The service exposes neighbourhoods, not a bulk edge dump
+# (/v1/query is a text search), so the graph is walked from the largest
+# functions outward and merged. limit is capped at 500 server-side.
+GRAPH_SEEDS = int(os.environ.get("GHIDRA_GRAPH_SEEDS", "60"))
+GRAPH_DEPTH = int(os.environ.get("GHIDRA_GRAPH_DEPTH", "2"))
+
+# Cryptographic constants, scanned against the sample file directly.
+#
+# Not done through Ghidra: these are byte patterns, Ghidra adds nothing, and
+# the service's hexdump endpoint is bounded per region so a whole-binary scan
+# would mean hundreds of requests plus range discovery. The worker already
+# holds the bytes.
+#
+# Corrected from analysis/ghidra/scripts/findcrypt.py, which had two faults
+# that matter because an alert path is built on this:
+#
+#   * "expand 32-byte k" was labelled RC4_INIT_CHECK. It is the ChaCha20 and
+#     Salsa20 constant; RC4 has no such table. A wrong algorithm name on an
+#     analyst's screen is worse than no name.
+#   * b"expa" (4 bytes) and DE AD BE EF (4 bytes) were separate signatures.
+#     Four bytes is far too short: 0xDEADBEEF is a ubiquitous sentinel in
+#     ordinary software, and "expa" is both a prefix of the ChaCha constant
+#     and common text. Both would have fired on benign binaries constantly.
+#
+#   * SHA-256's K table was packed big-endian. On x86 these are stored
+#     little-endian: the big-endian form scores 0 hits against libcrypto.so.3
+#     while the little-endian form scores 5. SHA-256 detection could never
+#     have fired on any x86 sample. Same correction applied to SHA-1.
+#
+# Minimum length is now 8 bytes. A signature that cannot meet that is not
+# evidence of anything.
+CRYPTO_SIGNATURES = [
+    # (label, algorithm, bytes, verified)
+    # "verified" means the pattern was confirmed to hit on a binary known to
+    # contain that algorithm — libcrypto.so.3 or libz.so.1 on x86-64,
+    # 2026-07-31. Unverified entries are kept because they are correct in
+    # principle, but they have never been observed firing, so a report that
+    # relies on one deserves a second look.
+    ("AES S-box",             "AES",       bytes([0x63,0x7c,0x77,0x7b,0xf2,0x6b,0x6f,0xc5]), True),
+    ("AES inverse S-box",     "AES",       bytes([0x52,0x09,0x6a,0xd5,0x30,0x36,0xa5,0x38]), True),
+    ("ChaCha20/Salsa20 sigma", "ChaCha20", b"expand 32-byte k", True),
+    ("MD5 init state",        "MD5",       struct.pack("<IIII", 0x67452301, 0xEFCDAB89,
+                                                       0x98BADCFE, 0x10325476), True),
+    ("SHA-256 K constants",   "SHA-256",   struct.pack("<IIII", 0x428a2f98, 0x71374491,
+                                                       0xb5c0fbcf, 0xe9b5dba5), True),
+    ("CRC-32 table",          "CRC-32",    struct.pack("<IIII", 0x00000000, 0x77073096,
+                                                       0xEE0E612C, 0x990951BA), True),
+    ("DES initial permutation", "DES",     bytes([0x3a,0x32,0x2a,0x22,0x1a,0x12,0x0a,0x02]), False),
+    ("SHA-1 init state",      "SHA-1",     struct.pack("<IIIII", 0x67452301, 0xEFCDAB89,
+                                                       0x98BADCFE, 0x10325476, 0xC3D2E1F0), False),
+]
 
 
 def now() -> str:
@@ -198,6 +252,9 @@ class GhidraClient:
                 "address": f.get("addr", ""),
                 "name": f.get("name") or f.get("canonical_name", ""),
                 "signature": f.get("signature", ""),
+                # Kept for the call-graph seeding below, which must pick the
+                # largest functions rather than the first ones.
+                "size": f.get("size") or 0,
             } for f in items)
             total = page.get("total", len(out))
             offset += len(items)
@@ -238,6 +295,119 @@ class GhidraClient:
         except GhidraError as e:
             log(f"  [!] imports: {e}")
         return out
+
+
+def scan_crypto(sample: Path) -> list:
+    """Scan the sample for cryptographic constant tables.
+
+    Addresses are reported as "file+0x<offset>", not virtual addresses. The
+    mapping from file offset to VA needs section headers this worker does not
+    parse, and an offset labelled as an address would be quietly wrong in a
+    field an analyst may act on. Saying which one it is costs nothing.
+    """
+    try:
+        data = sample.read_bytes()
+    except OSError as e:
+        log(f"  [!] crypto scan: {e}")
+        return []
+    hits = []
+    for label, algorithm, sig, _verified in CRYPTO_SIGNATURES:
+        start = 0
+        while True:
+            at = data.find(sig, start)
+            if at < 0:
+                break
+            hits.append({
+                "address": f"file+0x{at:x}",
+                "constant": label,
+                "algorithm": algorithm,
+            })
+            start = at + 1
+            # One table can repeat; report a few and stop rather than filling
+            # the report with the same finding.
+            if sum(1 for h in hits if h["constant"] == label) >= 4:
+                break
+    return hits
+
+
+def build_call_graph(client: "GhidraClient", job: str, functions: list,
+                     sha: str) -> str | None:
+    """Walk the call graph and render it, returning the SVG filename or None.
+
+    The service has no bulk edge dump — /v1/query is a text search — so the
+    graph is assembled from neighbourhood queries seeded at the largest
+    functions, which is where the original scripts/call_graph.py also started.
+    Server-side limit is capped at 500.
+    """
+    # Seed from the LARGEST functions, not the first ones.
+    #
+    # The endpoint returns functions in address order, so functions[:N] is the
+    # bottom of the address space — PLT thunks and init stubs, which are tiny
+    # and call nothing. Seeding there produced a graph of 63 nodes and 6 edges
+    # on a binary with 11228 functions: technically a call graph, and useless.
+    # Body size is the same heuristic scripts/call_graph.py used.
+    ranked = sorted(functions, key=lambda f: -(f.get("size") or 0))
+    seeds = [f["address"] for f in ranked[:GRAPH_SEEDS] if f.get("address")]
+    if not seeds:
+        return None
+    nodes: dict[str, str] = {}
+    edges: set[tuple[str, str]] = set()
+    for addr in seeds:
+        try:
+            g = client._request(
+                "GET",
+                f"/v1/results/{job}/graph/{addr}?depth={GRAPH_DEPTH}&limit=500")
+        except GhidraError as e:
+            log(f"  [!] graph {addr}: {e}")
+            continue
+        if not isinstance(g, dict):
+            continue
+        for n in g.get("nodes", []):
+            if n.get("addr"):
+                nodes[n["addr"]] = n.get("name") or n["addr"]
+        for e in g.get("edges", []):
+            # The service names these "source"/"target" — not from/to or
+            # src/dst, both of which were guessed wrong the first time and
+            # produced a silent zero-edge graph.
+            src, dst = e.get("source"), e.get("target")
+            if src and dst:
+                edges.add((src, dst))
+    if not edges:
+        log("  [.] call graph: no edges recovered")
+        return None
+
+    def q(text: str) -> str:
+        # Function names come from the sample and are attacker-controlled.
+        # Escape for DOT, and drop anything non-printable rather than trusting
+        # graphviz with it.
+        clean = "".join(c for c in text if c.isprintable() and c not in '"\\')
+        return clean[:64]
+
+    dot_lines = ["digraph callgraph {", '  node [shape=box, fontsize=9];']
+    for addr, name in sorted(nodes.items()):
+        dot_lines.append(f'  "{q(addr)}" [label="{q(name)}"];')
+    for src, dst in sorted(edges):
+        dot_lines.append(f'  "{q(src)}" -> "{q(dst)}";')
+    dot_lines.append("}")
+    dot_path = RESULTS_DIR / f"{sha}_callgraph.dot"
+    dot_path.write_text("\n".join(dot_lines))
+    dot_path.chmod(0o600)
+
+    svg_path = RESULTS_DIR / f"{sha}_callgraph.svg"
+    try:
+        subprocess.run(["dot", "-Tsvg", str(dot_path), "-o", str(svg_path)],
+                       check=True, capture_output=True, timeout=120)
+    except FileNotFoundError:
+        # graphviz is an optional host dependency. Without it the DOT is still
+        # written and usable; only the inline picture is lost.
+        log("  [.] graphviz 'dot' not installed - DOT written, no SVG")
+        return None
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        log(f"  [!] graphviz failed: {e}")
+        return None
+    svg_path.chmod(0o600)
+    log(f"  [+] call graph: {len(nodes)} nodes, {len(edges)} edges")
+    return svg_path.name
 
 
 def write_result(sha: str, payload: dict) -> None:
@@ -316,8 +486,8 @@ def analyse_one(client: GhidraClient, sha: str, sample: Path,
         # Populated by IMPLEMENTATION_PLAN.md phases 3-5 (see #102, #103), which
         # are not built. Emitted as empty rather than omitted so the dashboard
         # reads one stable shape and needs no special case for older results.
-        "findcrypt": [],
-        "call_graph_svg": None,
+        "findcrypt": scan_crypto(sample),
+        "call_graph_svg": build_call_graph(client, job, parts["functions"], sha),
         "ai_triage": None,
         "report_pdf": None,
     }
