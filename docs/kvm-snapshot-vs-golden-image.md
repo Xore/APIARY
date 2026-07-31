@@ -2,6 +2,15 @@
 
 > **Environment:** KVM host (not a nested hypervisor). All commands target
 > `libvirt` / `virsh` running directly on the bare-metal KVM host.
+>
+> **Status (2026-07-31):** this is a decision guide, and §1–§6 are kept as
+> written — the comparison is what makes the choice re-checkable later.
+> §7–§10 were a build prescription rather than reasoning, and described a
+> topology that does not exist (`malware-isolated` on `virbr-mal`/`10.66.0.1`,
+> INetSim `apt`-installed on the host, `sandbox/reset-vm.sh` as the runner).
+> They were replaced by §7, which records what this stack actually chose and
+> points at the implementation. The `reset-vm.sh` references are
+> [#90](https://github.com/Xore/honeypot-stack/issues/90).
 
 ---
 
@@ -13,11 +22,8 @@
 4. [KVM External Snapshots](#4-kvm-external-snapshots)
 5. [Golden Images with qcow2 Backing Files](#5-golden-images-with-qcow2-backing-files)
 6. [Decision Guide](#6-decision-guide)
-7. [Recommended Workflow for This Stack](#7-recommended-workflow-for-this-stack)
-8. [Automation Scripts](#8-automation-scripts)
-9. [Network Isolation](#9-network-isolation)
-10. [Hardening the KVM Host](#10-hardening-the-kvm-host)
-11. [Pitfalls & Known Issues](#11-pitfalls--known-issues)
+7. [What This Stack Chose](#7-what-this-stack-chose)
+8. [Pitfalls & Known Issues](#8-pitfalls--known-issues)
 
 ---
 
@@ -125,8 +131,9 @@ External snapshots write new data to a separate overlay file, leaving the
 original disk untouched. The original becomes a read-only backing file.
 
 > ⚠️ **libvirt does not implement `snapshot-revert` for external snapshots.**
-> Reverting requires editing domain XML manually or using the helper script
-> in [§8](#8-automation-scripts).
+> Reverting requires editing the domain XML manually, or discarding the overlay
+> and recreating it — which is what §5 does by default and why this stack does
+> not use external snapshots at all.
 
 ### 4.1 Create an External Snapshot
 
@@ -167,7 +174,7 @@ rm /var/lib/libvirt/snapshots/<vm-name>-ext-clean.qcow2
 virsh start <vm-name>
 ```
 
-The helper script `sandbox/reset-vm.sh` automates this — see §8.
+This is the mechanism `kvm_manage.sh` uses; there is no separate helper script.
 
 ---
 
@@ -275,132 +282,63 @@ Are you running automated / high-volume sample ingestion?
 
 ---
 
-## 7. Recommended Workflow for This Stack
+## 7. What This Stack Chose
 
-The honeypot-stack uses **Cowrie → Dionaea → sample drop** as the capture
-pipeline. The recommended VM topology on a KVM host:
+**Golden image plus thin overlay, for both sandboxes.** The deciding factor was
+row three of §2: a single base can back N concurrent guests, and the reset is a
+file deletion rather than a hypervisor operation. Nothing in the pipeline needs
+memory snapshots or a chain of states, which is what would have argued for §3
+or §4.
 
-```
-KVM Host (bare metal)
-├── golden/
-│   ├── golden-win10.qcow2      (read-only, Windows analysis VM)
-│   └── golden-ubuntu22.qcow2   (read-only, Linux ELF analysis VM)
-├── overlays/
-│   ├── analysis-<hash1>.qcow2  (active run, thin overlay)
-│   └── analysis-<hash2>.qcow2  (concurrent run)
-└── snapshots/
-    └── (internal snapshots for ad-hoc manual testing)
-```
+Where it lives:
 
-### End-to-End Automated Analysis Flow
+| Piece | File |
+|---|---|
+| Windows image build | `sandbox/windows/packer/win11-analysis.pkr.hcl` |
+| Overlay create / revert / destroy | `sandbox/windows/setup/kvm_manage.sh` |
+| Per-sample orchestration | `sandbox/windows/orchestrate/run_sample.py` |
+| Linux transient guests | `sandbox/run-linux-sample.sh` |
+| Storage root | `/var/dockge/sandbox/{isos,golden-images,vms}` |
 
-```
-1. Cowrie / Dionaea captures sample → drops to samples/
-2. GitHub Action (Honeypot repo) triggers → scanner APIs run
-3. Simultaneously: sandbox/reset-vm.sh spawns fresh overlay VM
-4. Sample is transferred into the VM via virtio-serial or shared dir
-5. VM executes sample; tcpdump + auditd + Sysmon capture all activity
-6. After TTL (e.g. 5 min): artifacts collected, overlay VM destroyed
-7. Artifacts pushed to analysis/ dir for further processing
-```
+Two things the earlier version of this section got wrong and are worth stating
+plainly, because both are load-bearing:
 
----
+- **The sample is not transferred into a running guest.** It goes into the
+  overlay with `virt-copy-in` while the VM is powered off, and results come out
+  with `virt-copy-out` after a forced shutdown. There is deliberately no
+  host-to-guest management channel. See
+  [`windows11-malware-lab-hardening.md`](windows11-malware-lab-hardening.md) §5.
+- **Isolation is not one missing `<forward>` element.** It is that, plus an
+  `internal: true` macvlan, plus a Phase 0 iptables DROP pair, and INetSim runs
+  as a container on the bridge rather than as a host service. See
+  [`honeypot-network-isolation.md`](honeypot-network-isolation.md) and
+  [`kvm-network-traffic-analysis.md`](kvm-network-traffic-analysis.md).
 
-## 8. Automation Scripts
+Host hardening (AppArmor enforcing, no clipboard channel or USB redirection on
+analysis domains, `memtune`/`cputune` limits, a separate storage path for
+golden images) is host-only procedure; it is summarised in
+[`honeypot-network-isolation.md`](honeypot-network-isolation.md) §4 rather than
+duplicated here.
 
-See [`sandbox/reset-vm.sh`](../sandbox/reset-vm.sh) for a ready-to-use
-all-in-one helper that handles:
-
-- Destroying a running VM
-- Reverting an internal snapshot **or** recreating from golden image
-- Starting the clean VM
-- Optionally copying a sample into the VM via `virsh qemu-agent-command`
-
----
-
-## 9. Network Isolation
-
-Malware VMs **must not** reach the internet or the KVM host network.
-Recommended libvirt network setup:
-
-```xml
-<!-- /etc/libvirt/qemu/networks/malware-isolated.xml -->
-<network>
-  <name>malware-isolated</name>
-  <bridge name="virbr-mal" stp="on" delay="0"/>
-  <!-- No <forward> element = fully isolated, no NAT, no routing -->
-  <ip address="10.66.0.1" netmask="255.255.255.0">
-    <dhcp>
-      <range start="10.66.0.2" end="10.66.0.50"/>
-    </dhcp>
-  </ip>
-</network>
-```
-
-```bash
-# Apply
-virsh net-define   /etc/libvirt/qemu/networks/malware-isolated.xml
-virsh net-autostart malware-isolated
-virsh net-start     malware-isolated
-```
-
-To simulate internet for C2 callback analysis, run a **INetSim** or
-**FakeNet-NG** instance on the host at `10.66.0.1` — malware sees responses
-but no real traffic leaves the host.
-
-```bash
-# Install INetSim on the KVM host
-apt install inetsim
-# Edit /etc/inetsim/inetsim.conf: service_bind_address 10.66.0.1
-systemctl start inetsim
-```
+No golden image has been built yet —
+[#47](https://github.com/Xore/honeypot-stack/issues/47). The lifecycle around
+it (checksum on build output, scheduled rebuild) is
+[#86](https://github.com/Xore/honeypot-stack/issues/86).
 
 ---
 
-## 10. Hardening the KVM Host
-
-The KVM host itself is the last line of defence. A compromised guest must not
-reach the host.
-
-```bash
-# 1. Prevent VMs from writing to host paths via virtio-fs
-#    (only use virtio-serial for controlled file transfer)
-
-# 2. AppArmor / SELinux
-#    Ubuntu: libvirt ships with AppArmor profiles
-aa-enforce /etc/apparmor.d/usr.sbin.libvirtd
-aa-enforce /etc/apparmor.d/usr.lib.libvirt.virt-aa-helper
-
-# 3. No shared clipboard, no USB passthrough on analysis VMs
-#    Ensure the domain XML does NOT contain:
-#    <channel type='spicevmc'> or <redirdev bus='usb'>
-
-# 4. Separate storage pool for golden images — different mount point
-mkdir -p /mnt/golden
-mount /dev/sdX1 /mnt/golden
-chown root:root /mnt/golden && chmod 755 /mnt/golden
-
-# 5. Audit QEMU processes
-auditctl -w /usr/bin/qemu-system-x86_64 -p x -k kvm_exec
-
-# 6. Limit QEMU resource usage
-#    Set <memtune> and <cputune> in domain XML to prevent
-#    malware from starving the host.
-```
-
----
-
-## 11. Pitfalls & Known Issues
+## 8. Pitfalls & Known Issues
 
 | Issue | Cause | Fix |
 |-------|-------|-----|
 | Internal snapshot revert fails with "domain is running" | VM still running | `virsh destroy <vm>` first |
-| External snapshot revert not available in `virsh` | libvirt limitation | Use `blockcommit` or the `reset-vm.sh` script |
-| qcow2 image grows unboundedly | Snapshots never pruned | Schedule `virt-sparsify` + snapshot cleanup weekly |
-| Golden image accidentally modified | booted directly | `chmod 444` on golden; always boot overlays |
-| Analysis VM reaches internet | Wrong network | Attach VM to `malware-isolated` network only |
-| Concurrent VMs corrupt golden image | Multiple writers | qcow2 backing files are always read-only to guests — safe by design |
-| `virt-clone` is slow | Copies full disk | Use `--preserve-data` + pre-created overlay to avoid copy |
+| External snapshot revert not available in `virsh` | libvirt limitation | Use `blockcommit`, or discard the overlay and recreate |
+| qcow2 image grows unboundedly | Snapshots never pruned | `virt-sparsify` plus snapshot cleanup. For results rather than images, `honeypot-sandbox-cleanup.timer` already handles retention |
+| Golden image accidentally modified | Booted directly | `chmod 444` on the golden image; always boot overlays |
+| Analysis VM reaches internet | An isolation barrier was removed | All three barriers, not just the network XML — see §7 |
+| Concurrent VMs corrupt golden image | Multiple writers | qcow2 backing files are read-only to guests; safe by design |
+| `virt-clone` is slow | Copies the full disk | `--preserve-data` with a pre-created overlay |
+| Two guests running for one sample | A detonation started outside `run_pending.sh`'s `flock` | Nothing but the worker may start a run |
 
 ---
 
