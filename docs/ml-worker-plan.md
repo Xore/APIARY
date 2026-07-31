@@ -1,25 +1,31 @@
 # ML Worker — Implementation Plan
 
-> **Status:** Design document. `ml-worker/` is a scaffold that is not wired into
-> Compose and has never been observed running; the dashboard has no
-> `/api/ml/anomalies` endpoint and no `ml_anomalies.go`. Everything below
-> describes the intended system, not the built one.  
+> **Status:** `ml-worker/` now has its own Dockge stack
+> ([`docker-compose.yml`](../ml-worker/docker-compose.yml) +
+> [`docker-compose.ml-worker.gpu.yml`](../ml-worker/docker-compose.ml-worker.gpu.yml),
+> mirroring `analysis/ghidra/`) and builds, connects to Elasticsearch, and
+> polls without crashing — verified live against a disposable ES 8.13.4
+> container (#62). The dashboard still has no `/api/ml/anomalies` endpoint
+> and no `ml_anomalies.go`. `extract_features()` still reads the wrong
+> schema (see §5.3) and the worker is not deployed anywhere.  
 > **Worker location:** [`ml-worker/`](../ml-worker/)  
 > **Tracked in:** [#61](https://github.com/Xore/honeypot-stack/issues/61)–[#65](https://github.com/Xore/honeypot-stack/issues/65)
 > — see the roadmap table in §12.
 >
 > **v0.1 audit verdict (#61, 2026-07-31): not runnable, evidenced.**
-> `docker build ./ml-worker` fails outright (`pyod`'s `numba` dependency has
+> `docker build ./ml-worker` failed outright (`pyod`'s `numba` dependency had
 > no version compatible with the pinned `numpy==2.5.1` on Python 3.12 —
-> reproduced twice, locally and in-container). Even past that, `worker.py`'s
+> reproduced twice, locally and in-container; fixed in #62 by pinning
+> `numpy==2.4.6`/`numba==0.66.0`/`llvmlite==0.48.0`). `worker.py`'s
 > `SOURCE_INDICES` (`cowrie-*`, `dionaea-*`, `honeypot-network-*`, `conpot-*`,
-> `http-honeypot-*`) match zero indices on the live homeserver: the real
+> `http-honeypot-*`) still match zero indices on the live homeserver: the real
 > shape is a unified `honeypot-v2-*` stream (all sensors, disambiguated by
-> `event.sensor`) plus `suricata-v2-<type>-*`. And `extract_features()` reads
-> flat top-level fields that don't exist in a real document — sensor data is
-> nested under `honeypot.*`/`source.*`/`network.*`. Six more defects (three
-> already flagged in `ml-gpu-coordinated-roadmap.md` §1, three new) are
-> proven executably in `ml-worker/tests/test_worker_audit.py`. Full writeup:
+> `event.sensor`) plus `suricata-v2-<type>-*`. And `extract_features()` still
+> reads flat top-level fields that don't exist in a real document — sensor
+> data is nested under `honeypot.*`/`source.*`/`network.*`, and even those
+> aren't uniform across sensors (§5.3). Six more defects (three already
+> flagged in `ml-gpu-coordinated-roadmap.md` §1, three new) are proven
+> executably in `ml-worker/tests/test_worker_audit.py`. Full writeup:
 > [issue #61](https://github.com/Xore/honeypot-stack/issues/61). This is a
 > Milestone B rewrite, not a v0.1 polish pass.
 
@@ -222,6 +228,36 @@ For each `src_ip`, build a sliding window of the last 15 events:
 ]
 # Shape: (batch, 15, 6)
 ```
+
+### 5.3 Real Document Schema Contract (#62 task 32)
+
+The table above describes intended features; it does not describe where
+those values actually live in a real Elasticsearch document. `extract_features()`
+currently reads none of it correctly (§1's audit verdict) — every source
+nests its data under `honeypot.*`/`source.*`/`network.*`/`event.*`, not at
+the top level, and the raw field names differ per sensor.
+
+Ground truth for all 5 sources — real sensor logging source read directly
+(not assumed), ingest pipeline (`analysis/elasticsearch-setup.sh`'s
+`geoip-honeypot`) read directly for what actually gets ECS-promoted — is in
+[`ml-worker/tests/fixtures.py`](../ml-worker/tests/fixtures.py), exercised by
+[`ml-worker/tests/test_schema_contract.py`](../ml-worker/tests/test_schema_contract.py).
+Summary:
+
+| Source | Index | `event.sensor` | Raw fields live under | ECS-promoted |
+|---|---|---|---|---|
+| Cowrie | `honeypot-v2-*` | `cowrie` (from `eventid` prefix) | `honeypot.*` (Cowrie's own JSONlog: `src_ip`, `dst_port`, `username`, `password`, `input`, `protocol`, ...) | `source.ip`, `destination.port`, `user.name` — **not** `network.protocol` (Cowrie writes `protocol`, pipeline reads `proto`) |
+| Dionaea (connection log) | `honeypot-v2-*` | **unset** — `dionaea.json` has no `sensor`/`eventid` field and the pipeline has no further fallback | `honeypot.*` (`log_json.py`: `src_ip`, `dst_port`, `connection.protocol`, ...) | `source.ip`, `destination.port` — but **unfilterable by `event.sensor:dionaea`** |
+| Dionaea (incidents) | `honeypot-v2-*` | `dionaea` (static filebeat field on that input) | `honeypot.message` as an **opaque JSON string** — deliberately not field-parsed (`log_incident.py`'s heterogeneous per-origin shape) | none — no structured fields at all |
+| Conpot | `honeypot-v2-*` | `conpot-<variant>` (from the log **file path**, not any field) | `honeypot.*` (`json_log.py`: `src_ip`, `dst_port`, `data_type`, `request`, `response`; no `sensor`, no `proto`) | `source.ip`, `destination.port`, `ot.persona` — **not** `network.protocol` (protocol info is in `data_type`) |
+| HTTP honeypot | `honeypot-v2-*` | `http-honeypot` (`honeypot.sensor` set directly, this repo's own `main.go`) | `honeypot.*` (flat: `src_ip`, `username`, `password`, `path`, ...) | `source.ip`, `user.name`, `url.path` — the most complete promotion of the 5 |
+| Suricata / network | `suricata-v2-<event_type>-*` | `suricata` | `suricata.eve.*` (standard EVE JSON), **not** `honeypot.*` at all | `source.ip`, `destination.ip`, `destination.port`, `network.transport`, `event.category` |
+
+The Dionaea and Conpot `event.sensor` gaps are ingest-pipeline issues, not
+`extract_features()` bugs — `extract_features()` can't fix them, but does
+need to read `honeypot.*` directly for these two sources rather than relying
+on `event.sensor` filtering to even find them. Filed separately as
+[#132](https://github.com/Xore/honeypot-stack/issues/132).
 
 ---
 
