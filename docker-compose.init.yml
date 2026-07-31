@@ -20,6 +20,13 @@
 #   marker: log-init depends on persona-apply within this same file, and
 #   nothing outside this stack depends on honeypot-kibana-setup at all.
 #
+#   state/init-markers/ must be mode 777 on the host before this stack's
+#   first run. The jobs that write into it run as different container
+#   UIDs -- root for the busybox/arkime images, the image's own non-root
+#   user for elasticsearch-setup -- and a root-owned 755 directory 403's
+#   that second one. .github/workflows/deploy.yml creates it that way;
+#   a manual bootstrap needs the same `install -d -m 777`.
+#
 #   honeynet. elasticsearch-setup, honeypot-kibana-setup, and arkime-init
 #   reach elasticsearch/kibana in the main stack over this network, which
 #   honeypot-stack creates with a fixed name (not project-prefixed)
@@ -236,7 +243,13 @@ networks:
     external: true
 
 volumes:
+  # Created by honeypot-stack (name: overrides there too); referenced here
+  # the same way honeynet is, since honeypot-stack is the primary owner --
+  # dionaea, yara-scanner, payload-dedupe, and the dashboard all read these
+  # too, and only honeypot-stack ever runs continuously.
   dionaea-lib:
     name: dionaea-lib
+    external: true
   yara-results:
     name: yara-results
+    external: true
