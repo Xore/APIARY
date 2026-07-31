@@ -157,7 +157,41 @@ that:
 
 ---
 
-## Phase 2 — Dashboard: trigger + read (`ghidra.go`, `ghidra_submit.go`) ⬜ Planned
+## Phase 2 — Dashboard: trigger + read (`ghidra.go`, `ghidra_submit.go`) ✅ Built
+
+`POST /ghidra/submit`, `GET /api/ghidra[/{sha256}|/status]` and
+`GET /export/ghidra/{sha256}` are registered. The HTML page routes are
+deliberately **not**: `{{define "ghidra"}}` is phase 3 below, and registering
+`/ghidra` against a template that does not exist would give a route that 500s.
+The JSON API is complete and usable without it.
+
+Two deviations from the sketch below, both deliberate:
+
+* **No dynamic/static gate on submit.** `serveSandboxSubmit` refuses payloads
+  with no detonation path, which is right for a sandbox. Ghidra disassembles
+  anything containing code — including the PE DLLs and documents the sandbox
+  correctly refuses — and those are frequently the samples where static
+  analysis is the *only* thing available.
+* **`submitReturnURL`'s open-redirect guard was extracted, not copied**, into
+  `safeReturnPath(raw, allowed)` in `sandbox_submit.go`, and both submit
+  handlers now share it. Per [#80](https://github.com/Xore/honeypot-stack/issues/80)
+  a bare `strings.HasPrefix(raw, "/")` lets `//evil.example` through; a guard
+  that exists in two copies is one that gets fixed in one copy.
+
+`ghidraQueueStatus` is flat rather than mirroring `sandboxQueueStatus`'s
+nested `Counts`, because it has to match exactly what the phase 1 worker
+writes, and one shape written in one place beats symmetry with a struct it
+shares nothing with. It carries two fields the sandbox equivalent has no need
+for: `Configured` (false when `GHIDRA_RESULTS_DIR` is unset, i.e. the worker
+was never deployed) and `Stale` (status.json not rewritten recently) — without
+which "nothing is queued" and "nothing is running" render identically.
+
+Covered by `ghidra_test.go`: offsite-redirect rejection, the shared allowlist,
+newest-first ordering, malformed results not hiding valid ones, filename
+trusted over document body for identity, all four status states, `report_pdf`
+traversal rejection, export 404s for bad hashes and for results with no report
+yet, the four API routes, and search deliberately not matching the string
+table.
 
 ### `serveGhidraSubmit` (mirrors `serveSandboxSubmit`)
 - `POST /ghidra/submit`, admin-only (`requireAdmin`), same-origin only

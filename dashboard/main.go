@@ -242,6 +242,13 @@ func main() {
 	http.HandleFunc("/api/sandbox", serveSandboxAPI)
 	http.HandleFunc("/api/sandbox/", serveSandboxAPI)
 	http.HandleFunc("/export/sandbox/", serveSandboxExport)
+	// Ghidra static analysis. The HTML page is deliberately absent: it is
+	// DASHBOARD_INTEGRATION_PLAN.md phase 3, and registering /ghidra now would
+	// mean a route that 500s on a template that does not exist. The JSON API
+	// is complete and usable on its own.
+	http.HandleFunc("/api/ghidra", serveGhidraAPI)
+	http.HandleFunc("/api/ghidra/", serveGhidraAPI)
+	http.HandleFunc("/export/ghidra/", serveGhidraExport)
 	http.HandleFunc("/metrics", s.serveMetrics)
 	http.HandleFunc("/export/history.json", func(w http.ResponseWriter, r *http.Request) {
 		if s.es == nil {
@@ -383,6 +390,7 @@ func main() {
 		tmpl.ExecuteTemplate(w, "payloadrows", data)
 	})
 	http.HandleFunc("/sandbox/submit", s.serveSandboxSubmit)
+	http.HandleFunc("/ghidra/submit", s.serveGhidraSubmit)
 	http.HandleFunc("/sandbox", func(w http.ResponseWriter, r *http.Request) {
 		html(w)
 		data, _ := sandboxData("", r.URL.Query().Get("q"))

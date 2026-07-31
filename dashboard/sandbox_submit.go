@@ -136,22 +136,8 @@ func readPayloadHead(path string) ([]byte, error) {
 // so "queued" alone no longer tells an analyst where to look.
 func submitReturnURL(raw, hash string, target sandboxTarget) string {
 	fallback := "/payloads?analysis=queued&hash=" + url.QueryEscape(hash) + "&target=" + url.QueryEscape(string(target))
-	raw = strings.TrimSpace(raw)
-	if raw == "" || !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") {
-		return fallback
-	}
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.IsAbs() || parsed.Host != "" {
-		return fallback
-	}
-	allowed := false
-	for _, prefix := range []string{"/sandbox/", "/payload-analysis/", "/payloads"} {
-		if strings.HasPrefix(parsed.Path, prefix) {
-			allowed = true
-			break
-		}
-	}
-	if !allowed {
+	parsed, ok := safeReturnPath(raw, []string{"/sandbox/", "/payload-analysis/", "/payloads"})
+	if !ok {
 		return fallback
 	}
 	query := parsed.Query()
@@ -161,6 +147,33 @@ func submitReturnURL(raw, hash string, target sandboxTarget) string {
 	parsed.RawQuery = query.Encode()
 	parsed.Fragment = ""
 	return parsed.String()
+}
+
+// safeReturnPath validates an operator-supplied return path and reports
+// whether it may be redirected to. Extracted so the Ghidra submit handler
+// shares this exact check rather than carrying a second copy: an open-redirect
+// guard that exists twice is one that will be fixed once.
+//
+// A leading "/" is deliberately not sufficient on its own — "//evil.example"
+// also starts with "/" and is a protocol-relative URL to another host. See
+// https://github.com/Xore/honeypot-stack/issues/80. The allowlist is the
+// primary control; the scheme, host, and "//" checks close the ways a value
+// can look like a dashboard path without being one.
+func safeReturnPath(raw string, allowed []string) (*url.URL, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") {
+		return nil, false
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.IsAbs() || parsed.Host != "" {
+		return nil, false
+	}
+	for _, prefix := range allowed {
+		if strings.HasPrefix(parsed.Path, prefix) {
+			return parsed, true
+		}
+	}
+	return nil, false
 }
 
 func sameOriginRequest(r *http.Request) bool {
