@@ -18,9 +18,14 @@
 > python3 analysis/ghidra/worker/ghidra-worker.py --selftest
 > ```
 >
-> Still unbuilt: `findcrypt` and `call_graph_svg` are always empty (#102) and
-> `ai_triage` is always null (#103). The worker has not been deployed on any
-> host (#104).
+> **`ai_triage` is populated** (2026-07-31, #103). The worker runs the
+> `program_triage` and `suspicious_behavior` workflows against a local
+> OpenAI-compatible endpoint after collection, and refuses to send
+> sample-derived text to one that is not local. Operator documentation is in
+> [`README.md`](README.md#ai-triage-and-the-local-only-rule).
+>
+> Still unbuilt: `findcrypt` and `call_graph_svg` are always empty (#102). The
+> worker has not been deployed on any host (#104).
 
 > **Status**: Design document — nothing here is built yet
 > **Tracked in**: [#76](https://github.com/Xore/honeypot-stack/issues/76)

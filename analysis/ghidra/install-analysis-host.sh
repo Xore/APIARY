@@ -47,7 +47,9 @@ while [ $# -gt 0 ]; do
     --model) MODEL="${2:?--model needs a value}"; shift 2 ;;
     --no-gpu) USE_GPU=no; shift ;;
     --skip-pull) SKIP_PULL=1; shift ;;
-    -h|--help) sed -n '2,36p' "$0"; exit 0 ;;
+    # The header comment is the help text, printed up to the first line that
+    # is not one - so editing the header cannot leave --help quoting code.
+    -h|--help) awk 'NR>1 && !/^#/{exit} NR>1{sub(/^# ?/,""); print}' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -58,10 +60,15 @@ die() { echo "error: $*" >&2; exit 1; }
 # The model name defaults to whatever the worker is already configured to use.
 # A script that pulls qwen3:8b onto a host configured for something else leaves
 # several GB on disk and triage still not working.
-if [ -z "$MODEL" ]; then
-  MODEL="$(sed -n 's/^GHIDRA_TRIAGE_MODEL=//p' "$env_file" 2>/dev/null | tail -n1)"
-  MODEL="${MODEL:-qwen3:8b}"
+# Read it only if the file is there: under `set -e` with pipefail, sed's exit 2
+# on a missing file kills the script inside the assignment, and 2>/dev/null
+# hides even the reason. That is how this script first ran on a fresh host —
+# silently, doing nothing, exiting 0 to its caller.
+if [ -z "$MODEL" ] && [ -r "$env_file" ]; then
+  MODEL="$(sed -n 's/^GHIDRA_TRIAGE_MODEL=//p' "$env_file" | tail -n1)"
+  MODEL="${MODEL%\"}"; MODEL="${MODEL#\"}"   # tolerate a quoted value
 fi
+MODEL="${MODEL:-qwen3:8b}"
 
 # ── Preflight ────────────────────────────────────────────────────────────────
 command -v docker >/dev/null 2>&1 || die "docker is required"
@@ -87,7 +94,11 @@ if [ "$USE_GPU" = auto ]; then
     echo "note: no nvidia container runtime; the model will run on CPU" >&2
   fi
 fi
-[ "$USE_GPU" = yes ] && files+=(-f "$gpu_file")
+# if, not `[ ... ] && ...`: a trailing false test is itself the script's exit
+# status under set -e, so the CPU path would quit here.
+if [ "$USE_GPU" = yes ]; then
+  files+=(-f "$gpu_file")
+fi
 
 dc() { docker compose "${files[@]}" "$@"; }
 
@@ -168,8 +179,11 @@ systemctl enable --now honeypot-ghidra-worker.path
 # through /analyze and reports whether the model endpoint is reachable, local,
 # and serving the configured model.
 say "verifying"
-# shellcheck source=/dev/null  - a host file, written above if it was absent
-set -a; . "$env_file"; set +a
+set -a
+# A host file, written above if it was absent, so there is nothing to follow.
+# shellcheck source=/dev/null
+. "$env_file"
+set +a
 python3 "$target/worker/ghidra-worker.py" --selftest || die "selftest failed - see above"
 
 say "done"
