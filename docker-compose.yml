@@ -65,26 +65,6 @@ services:
           cpus: "0.1"
           memory: 32M
 
-  init-wait-arkime-init:
-    <<: *runtime-defaults
-    image: busybox:latest
-    container_name: hp-init-wait-arkime-init
-    restart: no
-    command:
-      - sh
-      - -c
-      - >
-        until [ -f /markers/arkime-init.done ]; do
-          echo "waiting for honeypot-init: arkime-init..."; sleep 3;
-        done
-    volumes:
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
-    deploy:
-      resources:
-        limits:
-          cpus: "0.1"
-          memory: 32M
-
   # Rotate verbose human-readable sensor logs without touching JSON event
   # streams. copytruncate keeps writers alive without mounting Docker's socket.
   log-maintenance:
@@ -1057,8 +1037,8 @@ services:
   # First-run DB init (arkime-init) lives in docker-compose.init.yml (the
   # honeypot-init stack) and runs once and exits there. It bootstraps the
   # Elasticsearch indices and creates the admin user defined in .env;
-  # arkime-capture/arkime-viewer below wait on init-wait-arkime-init, which
-  # polls for the completion marker it writes.
+  # arkime-capture/arkime-viewer below wait on its completion marker
+  # directly (#126) rather than depends_on-ing a same-project shim.
   #
   # Web UI: http://${HP_BIND}:19080 (normally proxied by the VPS gateway).
   # Credentials: ARKIME_ADMIN_PASSWORD in .env (default: change-me-arkime)
@@ -1152,14 +1132,26 @@ services:
     # --skip ignores files already indexed (safe across restarts).
     # No --update-geo: it needs MaxMind credentials and only produces
     # "AccountID required" noise without them.
-    command: /opt/arkime/bin/docker.sh capture --wait-for-db
-      http://elasticsearch:9200 --db 'http://elasticsearch:9200 upgradenoprompt --ifneeded'
-      -- -R file:///opt/arkime/raw --monitor --skip --host honeypot-vps
+    #
+    # #126: waits on both markers directly instead of depends_on-ing
+    # init-wait-arkime-init/init-wait-log (same-project-only mechanism).
+    # The arkime image has no ENTRYPOINT of its own, only this CMD, so the
+    # wait is spliced straight into command: rather than needing a separate
+    # entrypoint: override.
+    command:
+      - sh
+      - -c
+      - >
+        until [ -f /markers/arkime-init.done ] && [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec /opt/arkime/bin/docker.sh capture --wait-for-db http://elasticsearch:9200
+        --db 'http://elasticsearch:9200 upgradenoprompt --ifneeded'
+        -- -R file:///opt/arkime/raw --monitor --skip --host honeypot-vps
     volumes:
       - ./arkime/config.ini:/opt/arkime/etc/config.ini:ro
       - ./arkime/geo:/opt/arkime/geo:ro
       - /opt/stacks/honeypot-stack/logs/arkime-raw:/opt/arkime/raw:ro
       - arkime-pcap:/opt/arkime/pcap
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
     environment:
       - TZ=Europe/Berlin
       - ARKIME__elasticsearch=http://elasticsearch:9200
@@ -1168,11 +1160,6 @@ services:
       - ARKIME__dropGroup=daemon
     networks:
       - honeynet
-    depends_on:
-      init-wait-arkime-init:
-        condition: service_completed_successfully
-      init-wait-log:
-        condition: service_completed_successfully
     deploy:
       resources:
         limits:
@@ -1183,7 +1170,15 @@ services:
     image: ghcr.io/arkime/arkime/arkime:v6-latest
     container_name: hp-arkime-viewer
     restart: unless-stopped
-    command: /opt/arkime/bin/docker.sh viewer --wait-for-db http://elasticsearch:9200
+    # #126: waits on the marker directly instead of depends_on-ing
+    # init-wait-arkime-init (same-project-only mechanism). No ENTRYPOINT on
+    # this image, only this CMD, so the wait goes straight into command:.
+    command:
+      - sh
+      - -c
+      - >
+        until [ -f /markers/arkime-init.done ]; do sleep 3; done;
+        exec /opt/arkime/bin/docker.sh viewer --wait-for-db http://elasticsearch:9200
     ports:
       - ${HP_BIND:-10.8.0.2}:19080:8005
     volumes:
@@ -1191,6 +1186,7 @@ services:
       - ./arkime/geo:/opt/arkime/geo:ro
       - /opt/stacks/honeypot-stack/logs/arkime-raw:/opt/arkime/raw:ro
       - arkime-pcap:/opt/arkime/pcap
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
     environment:
       - TZ=Europe/Berlin
       - ARKIME__elasticsearch=http://elasticsearch:9200
@@ -1198,9 +1194,6 @@ services:
       - ARKIME__passwordSecret=${ARKIME_PASSWORD_SECRET:-change-me-in-env}
     networks:
       - honeynet
-    depends_on:
-      init-wait-arkime-init:
-        condition: service_completed_successfully
     deploy:
       resources:
         limits:
