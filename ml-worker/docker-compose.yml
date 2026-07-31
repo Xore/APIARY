@@ -1,0 +1,67 @@
+# ml-worker — anomaly detection, as its own Dockge stack.
+#
+# Not part of the root docker-compose.yml, and not the old
+# docker-compose.override.yml this replaces (that file targeted a network,
+# analysis-net, that never existed anywhere in this repository -- #61).
+#
+# Modelled on analysis/ghidra/docker-compose.ghidra.yml's shape (own stack,
+# CPU-safe base, optional GPU overlay), but NOT on its isolation model.
+# Ghidra's stack is deliberately loopback-only with no honeynet access,
+# because it receives samples over a file spool and must never be reachable
+# from the sensor network. ml-worker's entire job is the opposite: it has to
+# read Elasticsearch continuously, so it joins honeynet as an external
+# network -- the same pattern docker-compose.init.yml already uses to reach
+# elasticsearch from a separate stack (#111).
+#
+# No Redis here, unlike the old override. ml-gpu-coordinated-roadmap.md §1
+# decision 1: "Elasticsearch is the initial dashboard transport. Redis/SSE is
+# optional until polling cost and latency show it is needed." Adding a
+# broker before that measurement exists is a new stateful service, a new
+# failure mode, and a new thing to secure on the honeypot host, for a
+# problem not yet shown to exist. See #64 when that measurement happens.
+#
+# Deploy: copy this file to /opt/stacks/ml-worker/compose.yml (Dockge's
+# naming convention), and docker-compose.ml-worker.gpu.yml to
+# compose.override.yml only on a host with an nvidia container runtime --
+# see that file's own header for why this stack does not need it yet.
+
+services:
+  ml-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hp-ml-worker
+    restart: unless-stopped
+    networks:
+      - honeynet
+    environment:
+      ES_HOST: http://elasticsearch:9200
+      POLL_INTERVAL: "30"
+      RETRAIN_INTERVAL: "21600"
+      ML_ALERT_THRESHOLD: "0.75"
+      MODEL_DIR: /models
+      LOG_LEVEL: INFO
+    volumes:
+      - ml-models:/models
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          # PyTorch + sklearn + a rolling feature DataFrame can be
+          # memory-hungry; 2G is the same allotment the old override used,
+          # kept until Milestone C's 24h throughput baseline says otherwise.
+          cpus: "2.0"
+          memory: 2g
+
+networks:
+  honeynet:
+    name: honeynet
+    external: true
+
+volumes:
+  ml-models:

@@ -26,7 +26,13 @@ from models.lstm_autoencoder import LSTMAEModel
 # Configuration (all overridable via env vars)
 # ---------------------------------------------------------------------------
 ES_HOST          = os.getenv("ES_HOST",           "http://elasticsearch:9200")
-REDIS_URL        = os.getenv("REDIS_URL",         "redis://redis:6379/0")
+# Empty, not a redis:// default: absent unless explicitly configured, and
+# best-effort when it is. ml-gpu-coordinated-roadmap.md §1 decision 1 /
+# Milestone B step 5 -- Elasticsearch is the authoritative write and the
+# initial dashboard transport; Redis is a notification nice-to-have, and the
+# base ml-worker/docker-compose.yml no longer runs a Redis service at all
+# (#62). A REDIS_URL set on a host that added one back still works.
+REDIS_URL        = os.getenv("REDIS_URL",         "")
 POLL_INTERVAL    = int(os.getenv("POLL_INTERVAL",   "30"))     # seconds
 RETRAIN_INTERVAL = int(os.getenv("RETRAIN_INTERVAL", "21600")) # 6 hours
 THRESHOLD        = float(os.getenv("ML_ALERT_THRESHOLD", "0.75"))
@@ -108,7 +114,7 @@ def fetch_new_events(es: Elasticsearch, index_pattern: str,
     return events
 
 
-def write_anomaly(es: Elasticsearch, rdb: redis.Redis,
+def write_anomaly(es: Elasticsearch, rdb: "redis.Redis | None",
                  event: dict, scores: dict, explanation: str) -> None:
     src = event.get("_source", {})
     composite = (
@@ -134,13 +140,22 @@ def write_anomaly(es: Elasticsearch, rdb: redis.Redis,
         "proto":             src.get("proto"),
     }
 
+    # The Elasticsearch write is the authoritative action -- a dashboard
+    # polling ml-anomalies will see this finding regardless of what happens
+    # below. Redis is a best-effort wake-up only (ml-gpu-coordinated-roadmap.md
+    # §1 decision 1), so a broker that is absent, unreachable, or refusing
+    # connections must never be able to take an anomaly write down with it.
     es.index(index=ANOMALY_INDEX, document=doc)
-    rdb.publish(REDIS_CHANNEL, json.dumps({
-        "severity": doc["severity"],
-        "composite_score": doc["composite_score"],
-        "src_ip": doc["src_ip"],
-        "explanation": explanation[:120],
-    }))
+    if rdb is not None:
+        try:
+            rdb.publish(REDIS_CHANNEL, json.dumps({
+                "severity": doc["severity"],
+                "composite_score": doc["composite_score"],
+                "src_ip": doc["src_ip"],
+                "explanation": explanation[:120],
+            }))
+        except Exception as exc:
+            logger.warning(f"Redis publish failed (non-fatal, ES write already committed): {exc}")
     logger.info(f"Anomaly [{doc['severity']}] score={composite:.3f} src={doc['src_ip']}")
 
 
@@ -151,7 +166,9 @@ def run_worker() -> None:
     logger.info("ML Worker starting...")
 
     es  = Elasticsearch(ES_HOST, request_timeout=30)
-    rdb = redis.from_url(REDIS_URL)
+    rdb = redis.from_url(REDIS_URL) if REDIS_URL else None
+    if rdb is None:
+        logger.info("REDIS_URL not set -- anomaly notifications are ES-only (this is the default, see #62)")
 
     # Wait for Elasticsearch to be ready
     for attempt in range(30):

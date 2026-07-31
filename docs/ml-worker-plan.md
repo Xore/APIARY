@@ -399,55 +399,37 @@ Responsible for:
 
 ## 10. Docker Compose Integration
 
-The ML worker runs as a Docker service on the stack's internal network. That
-network is **`honeynet`**. Earlier revisions of this section said `analysis-net`,
-a name that came from the four-zone topology in
-[`honeypot-network-isolation.md`](honeypot-network-isolation.md) and never
-existed in `docker-compose.yml`; `ml-worker/docker-compose.override.yml` was
-written against it and is broken as a result —
-[#61](https://github.com/Xore/honeypot-stack/issues/61). Do not copy a network
-name out of this document into a compose file; read `docker-compose.yml`.
+**Rewritten 2026-07-31 (#62).** ml-worker is its own Dockge stack now, not a
+service folded into the root `docker-compose.yml`, and the file this section
+used to show (`ml-worker/docker-compose.override.yml`, built against a
+network named `analysis-net` that never existed anywhere in this
+repository — [#61](https://github.com/Xore/honeypot-stack/issues/61)) has
+been deleted, not patched. The real files:
 
-```yaml
-# ml-worker/docker-compose.override.yml
-services:
-  ml-worker:
-    build: ./ml-worker
-    restart: unless-stopped
-    networks: [honeynet]
-    depends_on: [elasticsearch, redis]
-    volumes:
-      - ml-models:/models
-    environment:
-      - ES_HOST=http://elasticsearch:9200
-      - REDIS_URL=redis://redis:6379/0
-      - POLL_INTERVAL=30
-      - RETRAIN_INTERVAL=21600
-      - ML_ALERT_THRESHOLD=0.75
-      - LOG_LEVEL=INFO
-    security_opt:
-      - no-new-privileges:true
-    cap_drop: [ALL]
-    read_only: true
-    tmpfs:
-      - /tmp
+- [`ml-worker/docker-compose.yml`](../ml-worker/docker-compose.yml) — the
+  CPU-safe base. Joins `honeynet` as an **external** network (the same
+  pattern `docker-compose.init.yml` uses, `external: true`, since
+  `docker-compose.yml` creates `honeynet` with a fixed, non-project-prefixed
+  name precisely so a second stack can attach to it) — ml-worker has to read
+  Elasticsearch continuously, unlike `analysis/ghidra/`'s stack, which is
+  deliberately loopback-only with no honeynet access because it only ever
+  receives samples over a file spool.
+- [`ml-worker/docker-compose.ml-worker.gpu.yml`](../ml-worker/docker-compose.ml-worker.gpu.yml) —
+  an inert GPU overlay in the same shape as
+  `analysis/ghidra/docker-compose.ghidra.gpu.yml` (device reservation only).
+  Isolation Forest and HBOS stay CPU-only regardless; nothing in the
+  worker's code path uses CUDA until Milestone H
+  ([#67](https://github.com/Xore/honeypot-stack/issues/67)), which itself
+  requires a measured CPU baseline from this milestone first. Whether that
+  phase shares the ghidra stack's `ollama` instance for embeddings or gets
+  its own is #67's decision, not assumed here.
 
-volumes:
-  ml-models:
-```
-
-**Redis** is added to the stack as a lightweight pub/sub broker between the
-ML worker and the dashboard SSE stream. It requires one additional service
-entry in the main `docker-compose.yml`:
-
-```yaml
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    networks: [honeynet]
-    command: redis-server --save "" --appendonly no
-    cap_drop: [ALL]
-```
+No Redis in the base stack. `ml-gpu-coordinated-roadmap.md` §1 decision 1:
+Elasticsearch is the initial dashboard transport, and Redis/SSE is added only
+if polling cost and latency are measured and shown to be insufficient — see
+[#64](https://github.com/Xore/honeypot-stack/issues/64). Do not copy a
+network name or a Redis dependency out of this document into a compose file;
+read the actual files above.
 
 ---
 
