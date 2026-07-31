@@ -127,12 +127,87 @@
       <RegisteredOrganization>Acme Corp</RegisteredOrganization>
     </component>
 
-    <!-- Disable Windows Defender during install -->
     <component name="Microsoft-Windows-Security-SPP-UX"
                processorArchitecture="amd64"
                publicKeyToken="31bf3856ad364e35"
                language="neutral" versionScope="nonSxS">
       <SkipAutoActivation>true</SkipAutoActivation>
+    </component>
+
+    <!-- Turn Defender off before anything else runs.
+
+         This has to happen here, in specialize, and not in the provisioning
+         script: AMSI rejected setup_analysis.ps1 at its very first line with
+         "This script contains malicious content", so the script that was
+         supposed to disable Defender could never parse. The build still
+         "succeeded" and produced a Windows install with no FLARE-VM, no
+         Sysmon and no logging — a silently useless golden image.
+
+         specialize runs as SYSTEM before OOBE, which is also before Tamper
+         Protection starts enforcing, so these keys stick. Doing the same thing
+         later, from the provisioner, does not work.
+
+         This is deliberately aggressive and it is correct *only* for a
+         disposable malware-detonation guest that never touches a real network
+         and is reverted after every sample. Do not lift these settings into
+         any other image.
+
+         SpynetReporting/SubmitSamplesConsent matter for a different reason:
+         with MAPS enabled, the first detonation would upload the captured
+         sample to Microsoft. A sandbox must not exfiltrate the evidence it
+         was given. -->
+    <component name="Microsoft-Windows-Deployment"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral" versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <RunSynchronous>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Description>Disable Tamper Protection</Description>
+          <Path>reg add "HKLM\SOFTWARE\Microsoft\Windows Defender\Features" /v TamperProtection /t REG_DWORD /d 0 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <Description>Disable Defender antivirus</Description>
+          <Path>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender" /v DisableAntiSpyware /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>3</Order>
+          <Description>Disable real-time monitoring — this is what runs AMSI</Description>
+          <Path>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" /v DisableRealtimeMonitoring /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>4</Order>
+          <Description>Disable behaviour monitoring</Description>
+          <Path>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" /v DisableBehaviorMonitoring /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>5</Order>
+          <Description>Disable on-access protection</Description>
+          <Path>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" /v DisableOnAccessProtection /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>6</Order>
+          <Description>Disable script scanning</Description>
+          <Path>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" /v DisableScanOnRealtimeEnable /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>7</Order>
+          <Description>Never send samples to Microsoft — the sample is the evidence</Description>
+          <Path>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Spynet" /v SpynetReporting /t REG_DWORD /d 0 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>8</Order>
+          <Description>Never submit sample files</Description>
+          <Path>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Spynet" /v SubmitSamplesConsent /t REG_DWORD /d 2 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>9</Order>
+          <Description>Disable SmartScreen</Description>
+          <Path>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\System" /v EnableSmartScreen /t REG_DWORD /d 0 /f</Path>
+        </RunSynchronousCommand>
+      </RunSynchronous>
     </component>
   </settings>
 
@@ -215,6 +290,15 @@
         <SynchronousCommand wcm:action="add">
           <Order>6</Order>
           <CommandLine>powershell -NoProfile -Command "Set-Service WinRM -StartupType Automatic; Start-Service WinRM; Set-Content -Path C:\winrm-ready.txt -Value (Get-Date -Format o)"</CommandLine>
+        </SynchronousCommand>
+        <!-- The specialize-pass policy keys are what actually stop AMSI, but
+             repeat the intent through the supported API now the service is
+             running, and record the outcome. If a future build is blocked by
+             Defender again, C:\defender-off.txt says whether this ran and what
+             the engine reported afterwards. -->
+        <SynchronousCommand wcm:action="add">
+          <Order>7</Order>
+          <CommandLine>powershell -NoProfile -Command "try { Set-MpPreference -DisableRealtimeMonitoring $true -DisableScriptScanning $true -DisableBehaviorMonitoring $true -ErrorAction Stop } catch {}; try { (Get-MpComputerStatus | Select-Object RealTimeProtectionEnabled,AntivirusEnabled,IsTamperProtected | Out-String) | Set-Content C:\defender-off.txt } catch { 'Get-MpComputerStatus unavailable' | Set-Content C:\defender-off.txt }"</CommandLine>
         </SynchronousCommand>
       </FirstLogonCommands>
 

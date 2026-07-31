@@ -54,11 +54,20 @@ variable "vm_name" {
 }
 
 variable "memory" {
-  default = "8192"
+  # 16 GB of the host's 91 GB. Two payoffs at once: FLARE-VM unpacks a great
+  # deal of tooling and benefits from the page cache, and a guest with 8 GB
+  # reads as a sandbox to anything that looks — the same reasoning that put
+  # disk_size at 90 GB. Leaves ~54 GB for Elasticsearch and the sensors, which
+  # share this host.
+  default = "16384"
 }
 
 variable "cpus" {
-  default = "4"
+  # 8 of the host's 16 threads. QEMU was pinning all four of the previous
+  # allocation (291% CPU) through the install, and FLARE-VM — the two-to-four
+  # hour phase — is the part that actually parallelises. Leaves 8 threads for
+  # the honeypot stack running alongside.
+  default = "8"
 }
 
 variable "disk_size" {
@@ -152,7 +161,10 @@ source "qemu" "win11" {
   winrm_insecure = true
 
   # Shutdown after provisioning
-  shutdown_command = "shutdown /s /t 10 /f /d p:4:1 /c 'Packer build complete'"
+  # Windows shutdown wants double quotes around /c. With single quotes it
+  # rejects the arguments, prints its usage text, never shuts down, and the
+  # build then sits out the whole shutdown_timeout below.
+  shutdown_command = "shutdown /s /t 10 /f /d p:4:1 /c \"Packer build complete\""
   shutdown_timeout = "30m"
 
   # Accelerator
