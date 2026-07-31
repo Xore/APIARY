@@ -1,16 +1,16 @@
 {{define "style"}}
 <script>(function(){try{var t=localStorage.getItem("hp-theme");if(t==="light"||t==="dark"){document.documentElement.dataset.theme=t;}else if(t){localStorage.removeItem("hp-theme");}}catch(e){}})();</script>
-<link rel="stylesheet" href="/static/theme.css?v=20260730-1">
-<link rel="stylesheet" href="/static/leaflet.css?v=20260727-1">
-<link rel="stylesheet" href="/static/hp-tailwind.css?v=20260730-6">
-<script defer src="/static/leaflet.js?v=20260727-1"></script>
-<script defer src="/static/hp-api.js?v=20260727-1"></script>
-<script defer src="/static/hp-modals.js?v=20260730-2"></script>
-<script defer src="/static/hp-evidence.js?v=20260730-1"></script>
-<script defer src="/static/hp-app.js?v=20260730-3"></script>
-<script defer src="/static/hp-account.js?v=20260730-1"></script>
-<script defer src="/static/hp-settings.js?v=20260730-5"></script>
-<script defer src="/static/hp-reports.js?v=20260730-2"></script>
+<link rel="stylesheet" href="{{asset "/static/theme.css"}}">
+<link rel="stylesheet" href="{{asset "/static/leaflet.css"}}">
+<link rel="stylesheet" href="{{asset "/static/hp-tailwind.css"}}">
+<script defer src="{{asset "/static/leaflet.js"}}"></script>
+<script defer src="{{asset "/static/hp-api.js"}}"></script>
+<script defer src="{{asset "/static/hp-modals.js"}}"></script>
+<script defer src="{{asset "/static/hp-evidence.js"}}"></script>
+<script defer src="{{asset "/static/hp-app.js"}}"></script>
+<script defer src="{{asset "/static/hp-account.js"}}"></script>
+<script defer src="{{asset "/static/hp-settings.js"}}"></script>
+<script defer src="{{asset "/static/hp-reports.js"}}"></script>
 {{end}}
 
 {{define "sidebar"}}
