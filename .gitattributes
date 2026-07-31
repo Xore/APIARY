@@ -20,7 +20,16 @@ Dockerfile text eol=lf
 *.html text eol=lf
 *.ts text eol=lf
 
+# The vendored YARA corpus is checked byte-for-byte against
+# analysis/yara/rules/upstream/MANIFEST, so line endings are part of the
+# content, not a presentation detail: a CRLF checkout fails
+# scripts/check-yara-corpus.sh. Covers the extensionless MANIFEST, AUTO_RULES,
+# and DROPPED as well as the rules themselves.
+*.yar text eol=lf
+analysis/yara/rules/** text eol=lf
+
 dashboard/vendor/** linguist-vendored
+analysis/yara/rules/upstream/** linguist-vendored
 dashboard/static/*.min.* linguist-generated
 dashboard/static/hp-tailwind.css linguist-generated
 dashboard/worldmap_generated.go linguist-generated
