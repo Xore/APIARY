@@ -141,7 +141,13 @@ source "qemu" "win11" {
   communicator   = "winrm"
   winrm_username = var.winrm_user
   winrm_password = var.winrm_pass
-  winrm_timeout  = "6h" # FLARE-VM takes 2-4 hours
+  # Time to wait for WinRM to first answer — not the provisioning budget,
+  # which is the provisioner's own timeout below. It was 6h on the theory that
+  # FLARE-VM takes 2-4 hours, but FLARE-VM runs *after* this connects. The
+  # only thing a 6h value buys is that a guest which never brings WinRM up
+  # burns a whole working day before saying so, which is exactly what
+  # happened. Install plus OOBE is well under 45 minutes on this host.
+  winrm_timeout = "45m"
   winrm_use_ssl  = false
   winrm_insecure = true
 
