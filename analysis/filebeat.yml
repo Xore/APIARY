@@ -52,10 +52,16 @@ filebeat.inputs:
     fields_under_root: true
 
   # Suricata IDS events (alerts, http, dns, tls, flow).
+  # #79: eve.json now rotates hourly server-side (vps/suricata/suricata.yaml)
+  # into eve-<timestamp>.json instead of growing forever, so this can no
+  # longer be a single literal filename. file_identity defaults to
+  # inode/device (not path), so a harvester already attached to a file stays
+  # attached through Suricata's rename-on-rotate and reads it to EOF; this
+  # glob only needs to pick up each newly created file.
   - type: filestream
     id: suricata-eve
     paths:
-      - /var/log/suricata/eve.json
+      - /var/log/suricata/eve-*.json
     parsers:
       - ndjson:
           # suricata.eve.* is the layout EveBox reads in --ecs mode, and it is

@@ -61,10 +61,21 @@ stats:
 
 outputs:
   # ── EVE JSON (primary log for EveBox + filebeat) ──────────────────────
+  # #79: eve.json had no rotation from any side and grew ~1GB/day forever.
+  # logrotate+copytruncate was rejected — Filebeat tracks by inode/offset,
+  # and a truncate-in-place under an open harvester loses data. Suricata's
+  # own rotate-interval closes the current file, renames it (the timestamp
+  # baked into filename below), and opens a fresh one -- Filebeat's default
+  # file_identity (inode/device, not path) keeps its harvester attached to
+  # the renamed file through EOF regardless of the name change, then picks
+  # up the new file via the paths glob in analysis/filebeat.yml. Retention
+  # of the rotated files themselves is handled by the
+  # suricata-log-maintenance service below, not by Suricata.
   - eve-log:
       enabled: yes
       filetype: regular
-      filename: eve.json
+      filename: eve-%Y-%m-%d-%H.json
+      rotate-interval: hour
       community-id: true
       community-id-seed: 0
       types:

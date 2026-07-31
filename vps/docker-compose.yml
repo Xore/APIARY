@@ -357,6 +357,26 @@ services:
     deploy:
       resources: { limits: { cpus: "1.0", memory: 768M } }
 
+  # #79: prune rotated eve-*.json files past their retention window. See
+  # suricata-log-maintenance.sh for why this is a separate small loop
+  # instead of extending Suricata's own rotation or the home stack's
+  # log-maintenance service (that one's sshfs mount of this same directory
+  # is read-only from the home side).
+  suricata-log-maintenance:
+    image: busybox:1.36
+    container_name: hp-suricata-log-maintenance
+    restart: unless-stopped
+    command: ["sh", "/usr/local/bin/suricata-log-maintenance.sh"]
+    environment:
+      - RETENTION_MINUTES=4320
+      - CHECK_INTERVAL=3600
+      - START_DELAY=60
+    volumes:
+      - ./suricata-log-maintenance.sh:/usr/local/bin/suricata-log-maintenance.sh:ro
+      - /opt/stacks/honeypot-stack/logs/suricata:/logs/suricata
+    deploy:
+      resources: { limits: { cpus: "0.1", memory: 32M } }
+
 networks:
   proxy:
     name: proxy

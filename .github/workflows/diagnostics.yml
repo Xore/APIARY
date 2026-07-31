@@ -102,22 +102,29 @@ jobs:
           report '```'
 
           section "VPS Suricata mount"
-          eve="$stack/logs/suricata/eve.json"
-          if ! mountpoint -q "$stack/logs/suricata"; then
+          # #79: eve.json rotates hourly into eve-<timestamp>.json, so there
+          # is no single fixed filename any more. The freshest file is the
+          # one still being written; total bytes covers the whole retained
+          # window (suricata-log-maintenance.sh prunes past it).
+          suricata_dir="$stack/logs/suricata"
+          if ! mountpoint -q "$suricata_dir"; then
             report "\`logs/suricata\` is **not a mount point** — the sshfs mount from the VPS is gone."
             report "Filebeat and EveBox are reading a stale local directory, if anything."
           else
             report "\`logs/suricata\` is mounted."
           fi
-          if [ -f "$eve" ]; then
-            age=$(( $(date +%s) - $(stat -c %Y "$eve") ))
-            report "\`eve.json\`: $(stat -c %s "$eve") bytes, last written ${age}s ago."
+          latest=$(ls -t "$suricata_dir"/eve-*.json 2>/dev/null | head -1 || true)
+          if [ -n "$latest" ]; then
+            age=$(( $(date +%s) - $(stat -c %Y "$latest") ))
+            total=$(du -cb "$suricata_dir"/eve-*.json 2>/dev/null | tail -1 | cut -f1)
+            report "\`$(basename "$latest")\`: last written ${age}s ago. Retained eve-*.json total: ${total} bytes."
             if [ "$age" -gt 900 ]; then
               report "That is over fifteen minutes old — treat the Suricata feed as **stale**."
             fi
           else
-            report "\`eve.json\` is missing."
+            report "No \`eve-*.json\` files found."
           fi
+          report "$(df -h "$suricata_dir" | tail -1 | awk '{print "VPS filesystem: "$2" total, "$4" available ("$5" used)"}')"
 
           section "Filebeat"
           report '```'
@@ -149,7 +156,31 @@ jobs:
           ssh_options=(-i ~/.ssh/honeypot_vps -p "${VPS_PORT:-2222}" -o StrictHostKeyChecking=accept-new)
           report "# VPS edge diagnostics"
           report '```'
+          # #79: the eve.json path here pointed at /root/vps/logs/suricata,
+          # which does not exist on the VPS — the real log volume is the
+          # absolute host path vps/docker-compose.yml actually mounts,
+          # /opt/stacks/honeypot-stack/logs/suricata. This block was
+          # silently checking a nonexistent file. eve.json also now rotates
+          # hourly into eve-<timestamp>.json (see suricata.yaml), so this
+          # reports the freshest rotated file plus the retained total and
+          # free disk space on the VPS's own partition.
           ssh "${ssh_options[@]}" "${VPS_USER:-root}@${VPS_HOST}" \
-            'cd /root/vps && docker compose -f docker-compose.yml ps -a; echo; echo "--- suricata eve.json ---"; stat -c "%s bytes, modified %y" /root/vps/logs/suricata/eve.json 2>&1; echo; echo "--- wireguard peers ---"; wg show 2>&1 | grep -E "interface|latest handshake|transfer" ' \
+            'cd /root/vps && docker compose -f docker-compose.yml ps -a
+             echo
+             echo "--- suricata eve-*.json ---"
+             dir=/opt/stacks/honeypot-stack/logs/suricata
+             latest=$(ls -t "$dir"/eve-*.json 2>/dev/null | head -1)
+             if [ -n "$latest" ]; then
+               stat -c "%n: %s bytes, modified %y" "$latest"
+               echo "Retained total: $(du -cb "$dir"/eve-*.json 2>/dev/null | tail -1 | cut -f1) bytes"
+             else
+               echo "No eve-*.json files found in $dir"
+             fi
+             echo
+             echo "--- disk free ---"
+             df -h /
+             echo
+             echo "--- wireguard peers ---"
+             wg show 2>&1 | grep -E "interface|latest handshake|transfer"' \
             2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || report "SSH to the VPS failed"
           report '```'
