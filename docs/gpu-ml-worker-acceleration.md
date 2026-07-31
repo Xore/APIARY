@@ -65,8 +65,9 @@ parts, and it does not make the models more accurate.
 
 ## 3. Hardware & Compatibility Contract
 
-Verified on the homeserver on 2026-07-28 (same machine as the LLM guide;
-re-verify before pinning anything):
+Observed on the homeserver on 2026-07-28 (same machine as the LLM guide) and
+not re-checked since. [#82](https://github.com/Xore/honeypot-stack/issues/82)
+produces the record that replaces this list; re-verify before pinning anything.
 
 - GPU: Quadro RTX 4000, 8192 MiB, **compute capability 7.5 (Turing)**.
 - Driver 580.173.02 (CUDA 13.0) — backward-compatible with CUDA 12.x
@@ -355,22 +356,21 @@ The CPU-only image builds from the reverted files with no further changes
 
 ---
 
-## 10. AI Implementer Checklist
+## 10. Where the steps live
 
-1. [ ] Re-verify §3 on the homeserver (GPU, toolkit, network name); abort
-       and report on mismatch.
-2. [ ] Check the pinned torch `+cu124` wheel exists on the PyTorch wheel
-       index; adjust the pin if needed and record the change in §4.1.
-3. [ ] Apply the diffs in §4.1, §4.2, §4.4.
-4. [ ] Add `get_device()` helper; wire it into `models/lstm_autoencoder.py`
-       for both training and inference; add the startup device log line.
-5. [ ] Add the `torch.cuda.OutOfMemoryError` → CPU-fallback wrapper (§5).
-6. [ ] Add `models/embedder.py` + `ml-embeddings` index creation (§6),
-       including the build-time weight prefetch in the Dockerfile.
-7. [ ] Set retrain schedule offset from the LLM report hour (§5) in the
-       compose environment.
-8. [ ] Build and start; run acceptance tests T1–T7. Do not mark done while
-       any fail.
-9. [ ] `git diff --cached | grep -E '([0-9]{1,3}\.){3}[0-9]{1,3}'` — only
-       documentation ranges may appear (G1).
-10. [ ] Update the status line to "Deployed" and record verified pins.
+| Step | Issue |
+|---|---|
+| Re-verify §3 — GPU, toolkit, network name — and confirm the pinned `+cu124` wheel exists for the exact version | [#82](https://github.com/Xore/honeypot-stack/issues/82) |
+| Resolve `analysis-net` vs `honeynet` across both override files | [#61](https://github.com/Xore/honeypot-stack/issues/61) |
+| The §4 diffs, `get_device()`, the OOM→CPU wrapper, `models/embedder.py` and the `ml-embeddings` index, acceptance tests T1–T7 | [#67](https://github.com/Xore/honeypot-stack/issues/67) |
+| Retrain windows offset from the LLM report hour (§5) | [#84](https://github.com/Xore/honeypot-stack/issues/84) |
+
+The step most likely to be skipped is the second one in §4.1's guardrail:
+confirm the `+cu124` wheel exists for the exact pinned version **before**
+building. Pip will happily resolve to the CPU wheel, the image will build, the
+worker will start, and everything will look correct except that the GPU is
+idle. That failure is silent, which is why T2 greps the log line rather than
+trusting the build.
+
+Record the verified pins here when this deploys, and update the status line.
+Do not restore the checklist form — see [`security-fixes.md`](security-fixes.md).

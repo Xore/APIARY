@@ -1,6 +1,13 @@
 # GPU LLM Analysis Worker — Implementation Guide
 
-> **Status:** Implementation guide — not yet deployed. Tracked in [#66](https://github.com/Xore/honeypot-stack/issues/66).
+> **Status:** Implementation guide — not yet deployed. `llm-worker/` does not
+> exist. Build order: [#82](https://github.com/Xore/honeypot-stack/issues/82)
+> re-verifies the hardware contract in §2,
+> [#66](https://github.com/Xore/honeypot-stack/issues/66) builds the worker
+> offline and dry-run, [#83](https://github.com/Xore/honeypot-stack/issues/83)
+> pulls a real model and runs the canary, and
+> [#84](https://github.com/Xore/honeypot-stack/issues/84) shares the GPU with
+> the ML worker.
 > **Audience:** A human operator or an AI coding agent implementing this feature.
 > **Prerequisite reading:** [`ml-worker-plan.md`](ml-worker-plan.md) (data
 > sources, ES layout, dashboard SSE pattern),
@@ -57,10 +64,14 @@ hosted API (see [Guardrails §13](#13-guardrails-read-before-implementing)).
 
 ---
 
-## 2. Hardware Contract (verified)
+## 2. Hardware Contract
 
-Verified on the homeserver (`supermicro`) on 2026-07-28. Re-verify with the
-commands below before sizing anything — do not trust this table blindly.
+Observed on the homeserver (`supermicro`) on 2026-07-28 and **not re-checked
+since**. Treat it as the sizing hypothesis, not as fact: the VRAM budget in §5,
+the model choice, and the quantization level all fall out of this table, so a
+single wrong row invalidates the design rather than a detail of it.
+[#82](https://github.com/Xore/honeypot-stack/issues/82) produces the record
+that replaces it. Run the commands below yourself before sizing anything.
 
 | Fact | Value | Verify with |
 |---|---|---|
@@ -534,25 +545,29 @@ No existing service is touched; rollback cannot affect the sensors.
 
 ---
 
-## 14. AI Implementer Checklist
+## 14. Where the steps live
 
-Ordered, verifiable steps for an AI agent implementing this guide.
+The implementation steps that used to sit here as a checklist are now the
+bodies of the issues, so there is one place to see what is done:
 
-1. [ ] Re-verify the hardware contract with the commands in §2; abort and
-       report if the GPU, runtime, or `honeynet` network is missing.
-2. [ ] Create `llm-worker/` with `Dockerfile` (python:3.12-slim, non-root),
-       `requirements.txt`, `worker.py`, `docker-compose.override.yml` from §6.
-3. [ ] Implement `worker.py` per §7: ES checkpoint, U1 session aggregation,
-       U2 payload scan, daily report, optional redis publish.
-4. [ ] Implement §8 exactly: system prompt constant, sanitization function
-       (unit-test the delimiter-neutralization), pydantic schema, one retry,
-       error docs.
-5. [ ] Create the `llm-analysis` index on startup if missing (§9 mapping).
-6. [ ] Run the model pull (§6 setup sequence), then bring the services up.
-7. [ ] Run acceptance tests T1–T7 (§11). Do not mark the task done while
-       any fail.
-8. [ ] Confirm no real IPs/domains/payloads were written into any file
-       (G1): `git diff --cached | grep -E '([0-9]{1,3}\.){3}[0-9]{1,3}'`
-       must only show TEST-NET / WireGuard documentation ranges.
-9. [ ] Update this document's status line from "Implementation guide" to
-       "Deployed" and note the pinned image/model digests.
+| Step | Issue |
+|---|---|
+| Re-verify §2's hardware contract; abort if the GPU, runtime or `honeynet` is missing | [#82](https://github.com/Xore/honeypot-stack/issues/82) |
+| Create `llm-worker/` (§6), implement `worker.py` (§7), the §8 guardrails, and the §9 index | [#66](https://github.com/Xore/honeypot-stack/issues/66) |
+| Pull the model, bring the services up, run acceptance tests T1–T7 (§11) | [#83](https://github.com/Xore/honeypot-stack/issues/83) |
+| Coordinate GPU windows with ML retraining (§5, G6) | [#84](https://github.com/Xore/honeypot-stack/issues/84) |
+
+Two of those steps are worth calling out because they are easy to defer and
+expensive to defer:
+
+- **The §8 sanitization needs its own unit tests, written with the code.** The
+  delimiter-neutralization in §8.2 rule 3 is the one an implementer skips as
+  trivial, and it is the one that decides whether `</untrusted_data>` inside a
+  captured payload ends the data block early.
+- **T6 is the acceptance test that matters.** A worker that passes T1–T5 and
+  fails T6 is a working prompt-injection target with good uptime.
+
+When this ships, update the status line at the top of this file and record the
+pinned image and model digests (G7). Do not turn this section back into a
+checklist — see [`security-fixes.md`](security-fixes.md) for what happens to
+state mirrored into a document.

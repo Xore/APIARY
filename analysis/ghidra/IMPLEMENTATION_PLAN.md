@@ -1,8 +1,15 @@
 # Ghidra Payload Analysis — Implementation Plan
 
-> **Status**: Design document; phases 3-5 are unbuilt  
-> **Tracked in**: [#78](https://github.com/Xore/honeypot-stack/issues/78)  
-> **Last updated**: 2026-07-26  
+> **Status**: Design document. Phases 3–5 are unbuilt, and phases 1–2 are
+> partly built — `ghidra_analyze.py` and five of the six `scripts/` exporters
+> exist; the import exporter, the Rev·Deck compose file and the whole `report/`
+> tree do not.  
+> **Tracked in**: [#78](https://github.com/Xore/honeypot-stack/issues/78)
+> (phases 3–5), [#76](https://github.com/Xore/honeypot-stack/issues/76)
+> (dashboard spool and entry points),
+> [#85](https://github.com/Xore/honeypot-stack/issues/85) (non-Ghidra static
+> tooling)  
+> **Last updated**: 2026-07-31  
 > **Author**: honeypot-stack automated planning
 
 ---
@@ -37,20 +44,25 @@ honeypot-stack/
         ├── scripts/                 ← Ghidra Python scripts (Jython / Pyhidra)
         │   ├── export_functions.py
         │   ├── export_strings.py
-        │   ├── export_imports.py
+        │   ├── export_imports.py    ← MISSING
         │   ├── findcrypt.py         ← crypto constant detection
         │   ├── yara_scan.py         ← run YARA rules inside Ghidra
         │   └── call_graph.py
         ├── revdeck/                 ← biniamf/ai-reverse-engineering integration
-        │   ├── docker-compose.revdeck.yml
+        │   ├── docker-compose.revdeck.yml   ← MISSING
         │   └── README.md
         ├── ghidrassist/             ← symgraph/GhidrAssist plugin config
         │   └── README.md
-        └── report/
+        └── report/                  ← MISSING, entire directory (#78 phase 5)
             ├── generate_report.py   ← combines all analysis → PDF
             └── templates/
                 └── ghidra_report.html
 ```
+
+This is the *target* layout. Three entries marked MISSING do not exist:
+`scripts/export_imports.py`, `revdeck/docker-compose.revdeck.yml`, and the
+whole `report/` tree. The import table is listed as a Phase 1 export, so its
+absence means Phase 1 is not actually complete.
 
 ---
 
@@ -229,24 +241,36 @@ ghidra:
 
 ## Tooling Summary
 
-| Tool | Role | Mode | Status |
-|------|------|------|--------|
-| `biniamfd/ghidra-headless-rest` | Ghidra REST backend | Automated (Docker) | ✅ Phase 1 |
-| `biniamf/ai-reverse-engineering` (Rev·Deck) | AI triage | Automated + Interactive | ✅ Phase 2 |
-| `symgraph/GhidrAssist` | In-GUI AI chat | Interactive only | ⬜ Phase 3 |
-| `AllsafeCyberSecurity/ghidra_scripts` | Malware scripts | Headless | ⬜ Phase 4 |
-| `py-findcrypt-ghidra` | Crypto detection | Headless | ⬜ Phase 4 |
-| `0x6d696368/ghidra_scripts` | RC4/YARA/stack strings | Headless | ⬜ Phase 4 |
-| `0xdea/ghidra-scripts` | Vuln research | Headless | ⬜ Phase 4 |
-| `CapaExplorer` | CAPA import | Post-process | ⬜ Phase 4 |
-| `gotools` | Go binary support | Headless plugin | ⬜ Phase 4 |
-| `VTgrepGHIDRA` | VT code search | Interactive | ⬜ Phase 4 |
+The ✅/⬜ column this table used to carry meant "which phase," not "is it
+built," and it read as the latter. Phase is what it says now; nothing in this
+table is deployed.
+
+| Tool | Role | Mode | Phase |
+|------|------|------|-------|
+| `biniamfd/ghidra-headless-rest` | Ghidra REST backend | Automated (Docker) | 1 |
+| `biniamf/ai-reverse-engineering` (Rev·Deck) | AI triage | Automated + Interactive | 2 |
+| `symgraph/GhidrAssist` | In-GUI AI chat | Interactive only | 3 — [#78](https://github.com/Xore/honeypot-stack/issues/78) |
+| `AllsafeCyberSecurity/ghidra_scripts` | Malware scripts | Headless | 4 — [#78](https://github.com/Xore/honeypot-stack/issues/78) |
+| `py-findcrypt-ghidra` | Crypto detection | Headless | 4 — [#78](https://github.com/Xore/honeypot-stack/issues/78) |
+| `0x6d696368/ghidra_scripts` | RC4/YARA/stack strings | Headless | 4 — [#78](https://github.com/Xore/honeypot-stack/issues/78) |
+| `0xdea/ghidra-scripts` | Vuln research | Headless | 4 — [#78](https://github.com/Xore/honeypot-stack/issues/78) |
+| `CapaExplorer` | CAPA import | Post-process | 4 — decide with [#85](https://github.com/Xore/honeypot-stack/issues/85) |
+| `gotools` | Go binary support | Headless plugin | 4 — [#78](https://github.com/Xore/honeypot-stack/issues/78) |
+| `VTgrepGHIDRA` | VT code search | Interactive | 4 — [#78](https://github.com/Xore/honeypot-stack/issues/78) |
+
+`CapaExplorer` imports `capa` output into Ghidra, so it and #85's `capa`
+decision are one decision. Deciding them apart produces either a plugin with no
+tool behind it or a tool whose results never reach the analyst.
 
 ---
 
 ## Additional Static Analysis Tooling
 
-Beyond Ghidra, the following tools are planned for the pipeline:
+Beyond Ghidra, these tools have been *considered* for the pipeline. None is
+integrated, and the useful next step is to cut the list rather than build all
+nine — see [#85](https://github.com/Xore/honeypot-stack/issues/85), which
+argues for `capa`, `ssdeep`/`tlsh` and `lief`, treats `floss` as a separate
+risk class because it emulates code, and puts the burden of proof on the rest.
 
 | Tool | Purpose | Install |
 |------|---------|----------|
@@ -260,4 +284,7 @@ Beyond Ghidra, the following tools are planned for the pipeline:
 | `lief` | ELF/PE/Mach-O parsing | `pip install lief` |
 | `yara-python` | YARA rule matching | `pip install yara-python` |
 
-See `analysis/ghidra/scripts/` for implementations integrating these.
+Earlier revisions of this file ended with "See `analysis/ghidra/scripts/` for
+implementations integrating these." There are none. That directory holds
+`call_graph.py`, `export_functions.py`, `export_strings.py`, `findcrypt.py` and
+`yara_scan.py`, and nothing in it uses any tool above.
