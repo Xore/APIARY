@@ -2,7 +2,14 @@
 
 > **Status**: Design document — nothing here is built yet
 > **Tracked in**: [#76](https://github.com/Xore/honeypot-stack/issues/76)
-> **Last updated**: 2026-07-27
+> **Last updated**: 2026-07-31
+>
+> **Re-anchored 2026-07-31.** The dashboard was restructured after this plan
+> was written: the monolithic `main.go` was broken up, and every route template
+> moved out of Go into embedded files under `dashboard/ui/`. The file and line
+> references below were all stale, and Phase 3 in particular would have told an
+> implementer to put markup back into `page.go` — which a test now fails the
+> build for.
 > **Author**: honeypot-stack automated planning
 > **Depends on**: [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (Ghidra headless + Rev·Deck + GhidrAssist)
 
@@ -66,8 +73,11 @@ honeypot-stack/
     │                            loadGhidraStatus(), ghidraData(), serveGhidraAPI(),
     │                            serveGhidraExport()
     ├── ghidra_submit.go     ← NEW: mirrors sandbox_submit.go — serveGhidraSubmit()
-    └── page.go              ← adds {{define "ghidra"}} template block
+    └── ui/ghidra.html       ← NEW: template file, alongside ui/sandbox.html
 ```
+
+Templates are files under `dashboard/ui/`, not `{{define}}` blocks in
+`page.go`. `page.go` is 811 bytes and contains no markup at all.
 
 ---
 
@@ -134,8 +144,11 @@ that:
   with `O_CREATE|O_EXCL` (idempotent — a second click while queued is a
   no-op, exactly like sandbox submission).
 - Redirects to `/payloads?analysis=queued&hash=…` — same notice pattern
-  already wired at `main.go:~2732` ("Sandbox analysis requested for …"),
-  extended with "Ghidra analysis requested for …".
+  `submitReturnURL` in `sandbox_submit.go` already implements, extended with
+  "Ghidra analysis requested for …". Reuse that function's **allowlist** of
+  permitted redirect prefixes rather than writing a fresh prefix check; see
+  [#80](https://github.com/Xore/honeypot-stack/issues/80) for why
+  `strings.HasPrefix(raw, "/")` is not sufficient on its own.
 
 ### `ghidra.go` (mirrors `sandbox.go`)
 - `ghidraResultsDir()` / `ghidraRequestDir()` — env-var accessors.
@@ -149,7 +162,7 @@ that:
   `report_pdf` (Phase 5 of IMPLEMENTATION_PLAN.md) or a zip of raw
   artifacts if no PDF exists yet.
 
-### Routes to register in `main.go` (next to the existing sandbox block, ~line 2755)
+### Routes to register in `main.go` (next to the existing sandbox block; `main.go` is 446 lines and route registration is near its end)
 ```go
 http.HandleFunc("/ghidra/submit", s.serveGhidraSubmit)
 http.HandleFunc("/ghidra", func(w http.ResponseWriter, r *http.Request) {
@@ -171,7 +184,7 @@ http.HandleFunc("/export/ghidra/", serveGhidraExport)
 
 ## Phase 3 — UI: payloads page action + result view ⬜ Planned
 
-### Payloads list (`{{define "payloads"}}` in `page.go`)
+### Payloads list (`dashboard/ui/payloads.html`)
 Add a second per-row button next to the existing sandbox-submit form:
 ```html
 <form method="post" action="/ghidra/submit" class="inline">
@@ -181,7 +194,7 @@ Add a second per-row button next to the existing sandbox-submit form:
 {{if .GhidraResult}}<a href="/ghidra/{{.SHA256}}" class="badge">Ghidra: {{.GhidraResult.RiskLabel}}</a>{{end}}
 ```
 
-### New `{{define "ghidra"}}` template block (mirrors `{{define "sandbox"}}` at `page.go:622`)
+### New `dashboard/ui/ghidra.html` (mirrors `dashboard/ui/sandbox.html`)
 Cards for:
 - Function list (paginated, address + name + signature), link-through to
   decompiled pseudocode for flagged/suspicious functions only (avoid
@@ -200,7 +213,7 @@ Cards for:
   IMPLEMENTATION_PLAN.md Phase 2's "no hallucination on facts" design.
 - "Download full report" button → `/export/ghidra/{sha256}`.
 
-### List page (`{{define "ghidra"}}` list mode, same as `sandbox` list mode)
+### List page (`ghidra.html` list mode, same as `sandbox.html` list mode)
 One row per analyzed sample: hash, family guess (from AI triage if
 present), risk level, crypto/import highlights, timestamp, link to detail.
 
@@ -208,8 +221,10 @@ present), risk level, crypto/import highlights, timestamp, link to detail.
 
 ## Phase 4 — Queue health + alerting ⬜ Planned
 
-Extend the existing alert-check block in `main.go` (~line 1690, right after
-the sandbox checks) with the Ghidra equivalents:
+Extend the existing alert-check block in `dashboard/store.go` (~line 295,
+right after the `sandboxStatus.HandoffOld` check) with the Ghidra equivalents.
+There is no `checkAlerts` method any more; the checks live inline in `store.go`
+and go through `s.alerts.observe(key, message, markOnly)`:
 
 ```go
 ghidraStatus := loadGhidraStatus()
@@ -305,6 +320,6 @@ separately by whatever validates `docker-compose.ghidra.yml` itself).
 |---|---|---|
 | Host worker | `ghidra-worker.py`, 2 systemd units | Same spool pattern as sandbox worker |
 | Dashboard Go | `ghidra.go`, `ghidra_submit.go`, ~6 routes | `requireAdmin`, `sameOriginRequest`, `hashName`, `s.payloadPath`, `s.alerts` |
-| Templates | `{{define "ghidra"}}` block, payloads-page button | AdminLTE frontend assets, existing card/table CSS |
+| Templates | `dashboard/ui/ghidra.html`, payloads-page button | Shared partials in `dashboard/ui/partials/`, existing card/table CSS |
 | Env vars | `GHIDRA_REQUEST_DIR`, `GHIDRA_RESULTS_DIR`, `GHIDRA_API_BASE`, `GHIDRA_ALERT_RISK_SCORE` | — |
 | Trust boundary | None — dashboard still never touches Docker/libvirt/the Ghidra REST API directly | Sandbox's existing spool-file security model |
