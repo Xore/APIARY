@@ -82,9 +82,23 @@ via `-c`). Notable settings:
 - `pcap-log` — full packet capture to `logs/suricata/pcap/`. **Create the dir
   first** or Suricata falls back to the log root:
   `mkdir -p /opt/stacks/honeypot-stack/logs/suricata/pcap`
+  Bounded: `limit: 4mb` × `max-files: 12500` is a ~50 GB ring. 4 MB is
+  Suricata's hard minimum — below it `pcap-log` crashes at startup — and a
+  small file is what keeps Arkime ingest latency low, since a file is only
+  importable once it has rotated closed.
 - `eve-log` with `community-id`, payloads, HTTP bodies, and ICS app-layer
   events (modbus/enip/dnp3 parsers enabled) for EveBox/filebeat.
+  **Unbounded**: `filetype: regular` with no rotation, so `eve.json` grows
+  until the disk fills — 4.4 GB and climbing as of the last check. Payloads and
+  HTTP bodies are the reason it grows as fast as it does. Tracked in
+  [#79](https://github.com/Xore/honeypot-stack/issues/79); do not assume the
+  ring that bounds `pcap-log` covers this file too.
 - The `threshold.config` here is wired via `threshold-file:`.
+- `af-packet` carries `bpf-filter: "not udp port 51820"`. Without it Suricata
+  inspects the WireGuard tunnel — every home-sensor event a second time, as
+  encrypted UDP it cannot parse — and fills `pcap-log` with 100 MB every few
+  seconds. The positional command-line BPF form is ignored in this setup, so the
+  filter has to live in `suricata.yaml`.
 
 ## Adding / editing rules
 

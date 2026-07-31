@@ -40,19 +40,29 @@ invariants) in `Xore/theme`.
 
 ## Architecture
 
-- **Server-rendered shell.** Every page is a Go `html/template`. The app
-  shell — `{{define "topbar"}}` (`.app-toolbar`), `{{define "sidebar"}}`
+- **Server-rendered shell, markup in `../ui/`.** Every page is a Go
+  `html/template`, but no template text lives in Go any more. The app shell —
+  `{{define "topbar"}}` (`.app-toolbar`), `{{define "sidebar"}}`
   (`.app-sidebar`), and the `[data-hp-page-content]` main container inside
-  `.app-main` — is rendered server-side in `../page_style.go` and the
-  `../page_*.go` templates. There is no client-side DOM transform.
+  `.app-main` — is `../ui/partials/dashboard.html`, and each route's markup is
+  its own file under `../ui/` (`overview.html`, `events.html`, `ips.html`, …).
+  The `../page_*.go` files hold page *data*, not markup.
+  There is no client-side DOM transform.
+
+  This is enforced, not conventional: `TestRouteTemplatesRenderFromEmbeddedUI`
+  in `../main_test.go` checks each expected `{{define}}` is present in its `ui/`
+  file and reaches `pageTemplate`, then greps every non-test `.go` file in
+  `dashboard/` and fails the build on any `{{define "` it finds. Putting markup
+  back into a `page_*.go` breaks CI.
 - **Tailwind v4 on top of the vendored theme.** `src/shell.css` maps the
   theme's CSS custom properties onto `tw:` utilities via `@theme inline` (so
   utilities follow dark, light, and system modes) and keeps only
   dashboard-specific component rules (`.hp-stat`, `overview-header`, sensor
   `badge b-*`, `table.recent`, Leaflet overrides, command-dock internals).
   It compiles to `static/hp-tailwind.css` with the `tw:` prefix and
-  `important`. `@source` scans `../page*.go` and `../static/hp-app.js` for
-  utility usage.
+  `important`. `@source` scans `../../ui/**/*.html` and `../../static/hp-app.js`
+  for utility usage — so a `tw:` class added to a Go file would be silently
+  dropped from the bundle, which is a second reason markup belongs in `ui/`.
 - **hp-api.js** — the typed API client (`src/api.ts`, esbuild bundle).
 - **hp-app.js** — hand-written, framework-free enhancement layer in
   `../static/` (not built here): SSE live updates, in-place overview refresh
@@ -63,6 +73,6 @@ invariants) in `Xore/theme`.
   sidebar profile row (`/api/whoami`).
 - **Leaflet** stays vendored for the attack-origin map.
 
-After editing templates or `hp-app.js`, re-run `npm run build` so the
+After editing `../ui/*.html` or `hp-app.js`, re-run `npm run build` so the
 Tailwind scan picks up new `tw:` utilities, then `go build ./... &&
 go test ./...` from `dashboard/`.

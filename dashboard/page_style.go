@@ -1,6 +1,7 @@
 package main
 
-// The shared dashboard head, shell, and reusable partials now live in the
-// embedded ui tree. Route templates remain in page_*.go while the render-engine
-// migration proceeds one page at a time.
+// The shared dashboard head, shell, and reusable partials live in the embedded
+// ui tree, as does every route template — the migration is finished. The
+// page_*.go files hold page data only; TestRouteTemplatesRenderFromEmbeddedUI
+// fails the build on any {{define}} that reappears in a .go file here.
 var pageStyle = mustReadUI("partials/dashboard.html")
