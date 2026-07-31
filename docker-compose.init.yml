@@ -239,6 +239,37 @@ services:
           cpus: "2.0"
           memory: 1G
 
+  # #124: moved from honeypot-stack -- hp-snare depended on this completing
+  # via condition: service_completed_successfully, which cannot cross a
+  # Compose project boundary (same reason log-init/elasticsearch-setup/
+  # arkime-init write markers instead of being depended on directly). Writes
+  # snare-clone.done here; hp-snare's entrypoint waits for it the same way
+  # every other init-wait-* replacement does.
+  snare-clone:
+    <<: *runtime-defaults
+    build:
+      context: /opt/stacks/honeypot-stack/snare
+      args:
+        PAGE_URL: portal.meridian.example
+        TANNER: tanner
+    container_name: hp-snare-clone
+    restart: no
+    command:
+      - sh
+      - -c
+      - |
+        rm -f /markers/snare-clone.done
+        cp -a /opt/persona-pages/. /opt/snare/pages/
+        mkdir -p /markers && touch /markers/snare-clone.done
+    volumes:
+      - snare-pages:/opt/snare/pages
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
   # #123: not actually a bootstrap job -- unlike everything else in this
   # file, geoipupdate is long-running (restart: unless-stopped, loops
   # internally on GEOIPUPDATE_FREQUENCY) and nothing depends on it
@@ -279,3 +310,10 @@ volumes:
   yara-results:
     name: yara-results
     external: true
+  # #124: opposite direction from the two above -- snare-clone (this stack)
+  # writes it, hp-snare (honeypot-stack) reads it. Owned here (no
+  # external: true) because honeypot-init deploys first: docker-compose.yml
+  # references this one as external, which would fail on a first-ever
+  # deploy if honeypot-stack tried to own it instead.
+  snare-pages:
+    name: snare-pages

@@ -1401,29 +1401,6 @@ services:
         limits:
           cpus: "2.0"
           memory: 2G
-  snare_clone:
-    <<: *runtime-defaults
-    build:
-      context: ./snare
-      args:
-        PAGE_URL: portal.meridian.example
-        TANNER: tanner
-    container_name: hp-snare-clone
-    command:
-      - sh
-      - -c
-      - |
-        cp -a /opt/persona-pages/. /opt/snare/pages/
-    restart: no
-    volumes:
-      - snare-pages:/opt/snare/pages
-    networks:
-      - tanner_local
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 1G
   snare:
     <<: *runtime-defaults
     build:
@@ -1446,16 +1423,26 @@ services:
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped
+    # #124: snare_clone used to be a same-project one-shot job this depended
+    # on via condition: service_completed_successfully. It moved to
+    # honeypot-init (that condition cannot cross a Compose project boundary
+    # -- same reason the init-wait-* services exist), so this waits on its
+    # completion marker directly instead, same mechanism as init-wait-log.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        until [ -f /markers/snare-clone.done ]; do sleep 3; done;
+        exec /usr/local/bin/snare-entry.sh
     ports:
       - ${HP_BIND:-10.8.0.2}:19082:8080
     volumes:
       - /opt/stacks/honeypot-stack/logs/snare:/opt/snare
       - snare-pages:/opt/snare/pages
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
     depends_on:
       tanner:
         condition: service_started
-      snare_clone:
-        condition: service_completed_successfully
       init-wait-log:
         condition: service_completed_successfully
     networks:
@@ -1480,7 +1467,12 @@ volumes:
   # of the same-looking volume instead of the one the other actually reads.
   dionaea-lib:
     name: dionaea-lib
-  snare-pages: null
+  # #124: opposite direction from dionaea-lib/yara-results above -- snare-
+  # clone (honeypot-init, deploys first) writes this, hp-snare (here) only
+  # reads it. Owned by honeypot-init instead, so this side is external.
+  snare-pages:
+    name: snare-pages
+    external: true
   arkime-pcap: null # Arkime-processed PCAP index files
   dashboard-state: null
   yara-results:
