@@ -104,6 +104,46 @@ func TestTunnelPeerIsRecoveredOrLeftUnattributed(t *testing.T) {
 	}
 }
 
+// The VPS rotates the portbridge conn log by copytruncate. If the join only
+// read the live file, every rotation would blank the map and re-open the gap
+// #54 measured — the events would still be there, just unattributable again.
+// UDP is the case that depends on this most: it has no PROXY-protocol
+// alternative, so the conn log is its only route to a real source. See #75.
+func TestViaMapSpansTheRotatedConnLog(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+
+	// The SNMP connection was recorded before the last rotation; only the
+	// newer FTP one is still in the live file.
+	writeLog(t, root, "portbridge/portbridge.json.1", map[string]any{
+		"time": now, "sensor": "portbridge", "event": "connect", "proto": "udp",
+		"port": 161.0, "src_ip": "198.51.100.7", "src_port": 33001.0, "via_port": 41002.0,
+	})
+	writeLog(t, root, "portbridge/portbridge.json", map[string]any{
+		"time": now, "sensor": "portbridge", "event": "connect", "proto": "tcp",
+		"port": 21.0, "src_ip": "203.0.113.9", "src_port": 51000.0, "via_port": 41003.0,
+	})
+	writeLog(t, root, "conpot/conpot.json", map[string]any{
+		"timestamp": now, "sensorid": "snmp", "data_type": "snmp",
+		"src_ip": tunnelPeerIP, "src_port": 41002.0, "dst_port": 161.0,
+		"event_type": "snmp_get",
+	})
+
+	s := &store{dir: root}
+	s.rebuild()
+
+	if snap := s.get(); snap.Unattributed != 0 {
+		t.Fatalf("Unattributed=%d, want the rotated-out connection still joined", snap.Unattributed)
+	}
+	events := s.getEvents()
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want only the conpot probe (portbridge records are transport metadata)", len(events))
+	}
+	if events[0].SrcIP != "198.51.100.7" {
+		t.Fatalf("SrcIP=%q, want the attacker recorded in the rotated conn log", events[0].SrcIP)
+	}
+}
+
 // The via_port join is the only thing standing between a real attacker IP and
 // being discarded, so a miss must be caused by a genuinely absent record — not
 // by a listen-port mismatch that viaLookup should have tolerated.

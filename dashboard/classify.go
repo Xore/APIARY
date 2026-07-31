@@ -52,24 +52,31 @@ type viaEntry struct {
 // recent entry whose listen port matches the event (see viaLookup).
 func (s *store) buildViaMap() map[int][]viaEntry {
 	m := map[int][]viaEntry{}
-	data := readTail(filepath.Join(s.dir, "portbridge", "portbridge.json"))
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
+	// The VPS rotator copytruncates the live log to portbridge.json.1, so the
+	// previous generation is read first — oldest entries first, because
+	// viaLookup takes the newest match. Reading only the live file means a
+	// rotation empties the map, and every tunnelled event whose connection was
+	// recorded before it goes unattributed until the file refills.
+	for _, name := range []string{"portbridge.json.1", "portbridge.json"} {
+		data := readTail(filepath.Join(s.dir, "portbridge", name))
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			var e map[string]any
+			if json.Unmarshal([]byte(line), &e) != nil {
+				continue
+			}
+			if str(e["sensor"]) != "portbridge" {
+				continue
+			}
+			vp := int(numFloat(e["via_port"]))
+			if vp == 0 {
+				continue
+			}
+			m[vp] = append(m[vp], viaEntry{ip: str(e["src_ip"]), port: num(e["port"])})
 		}
-		var e map[string]any
-		if json.Unmarshal([]byte(line), &e) != nil {
-			continue
-		}
-		if str(e["sensor"]) != "portbridge" {
-			continue
-		}
-		vp := int(numFloat(e["via_port"]))
-		if vp == 0 {
-			continue
-		}
-		m[vp] = append(m[vp], viaEntry{ip: str(e["src_ip"]), port: num(e["port"])})
 	}
 	return m
 }
