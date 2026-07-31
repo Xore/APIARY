@@ -516,8 +516,32 @@ services:
       - ./dionaea/services/upnp.yaml:/opt/dionaea/etc/dionaea/services-enabled/upnp.yaml:ro
     environment:
       - TZ=Europe/Berlin
+    # Capabilities measured, not guessed (2026-07-31). Baseline was run first —
+    # default caps + SYS_PTRACE — and each reduction re-measured against the
+    # exact set of listening ports, because a container that stays up with dead
+    # listeners is a honeypot that looks deployed and collects nothing.
+    #
+    #   default caps + SYS_PTRACE          39 listeners   <- baseline
+    #   default caps, no SYS_PTRACE        39 listeners   <- identical
+    #   cap_drop ALL                       container exits
+    #   + NET_BIND_SERVICE                 container exits
+    #   + CHOWN,SETUID,SETGID              39 listeners
+    #   + DAC_OVERRIDE                     39 listeners, identical port set
+    #
+    # SYS_PTRACE is dropped: it permits attaching to and controlling other
+    # processes, and dionaea demonstrably does not need it. The rest are what
+    # the entrypoint actually requires — chown -R on the data dirs, dropping to
+    # the dionaea user, and binding 21/135/445 and friends.
+    cap_drop:
+      - ALL
     cap_add:
-      - SYS_PTRACE
+      - NET_BIND_SERVICE
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+    security_opt:
+      - no-new-privileges:true
     networks:
       - honeynet
     depends_on:
@@ -579,8 +603,25 @@ services:
       - ${HP_BIND:-10.8.0.2}:44818:44818
     volumes:
       - /opt/stacks/honeypot-stack/logs/conpot:/var/log/conpot
+    # Measured the same way (2026-07-31), against the repo's own image rather
+    # than the upstream base — the base alone exits before binding, so a probe
+    # against it would have measured nothing:
+    #
+    #   default caps + SYS_PTRACE          ports 21,80,102,502,44818  <- baseline
+    #   default caps, no SYS_PTRACE        identical
+    #   cap_drop ALL                       container exits
+    #   + NET_BIND_SERVICE                 identical to baseline
+    #   + no-new-privileges                identical to baseline
+    #
+    # conpot already runs as uid 2000, so it needs no SETUID/SETGID; the single
+    # capability it cannot do without is binding 102/502/161/623. SYS_PTRACE was
+    # never needed here either.
+    cap_drop:
+      - ALL
     cap_add:
-      - SYS_PTRACE
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
     networks:
       - honeynet
     depends_on:
