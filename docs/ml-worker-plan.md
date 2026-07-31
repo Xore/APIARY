@@ -7,6 +7,21 @@
 > **Worker location:** [`ml-worker/`](../ml-worker/)  
 > **Tracked in:** [#61](https://github.com/Xore/honeypot-stack/issues/61)–[#65](https://github.com/Xore/honeypot-stack/issues/65)
 > — see the roadmap table in §12.
+>
+> **v0.1 audit verdict (#61, 2026-07-31): not runnable, evidenced.**
+> `docker build ./ml-worker` fails outright (`pyod`'s `numba` dependency has
+> no version compatible with the pinned `numpy==2.5.1` on Python 3.12 —
+> reproduced twice, locally and in-container). Even past that, `worker.py`'s
+> `SOURCE_INDICES` (`cowrie-*`, `dionaea-*`, `honeypot-network-*`, `conpot-*`,
+> `http-honeypot-*`) match zero indices on the live homeserver: the real
+> shape is a unified `honeypot-v2-*` stream (all sensors, disambiguated by
+> `event.sensor`) plus `suricata-v2-<type>-*`. And `extract_features()` reads
+> flat top-level fields that don't exist in a real document — sensor data is
+> nested under `honeypot.*`/`source.*`/`network.*`. Six more defects (three
+> already flagged in `ml-gpu-coordinated-roadmap.md` §1, three new) are
+> proven executably in `ml-worker/tests/test_worker_audit.py`. Full writeup:
+> [issue #61](https://github.com/Xore/honeypot-stack/issues/61). This is a
+> Milestone B rewrite, not a v0.1 polish pass.
 
 ---
 
@@ -482,6 +497,18 @@ Dockerfile, `worker.py`, and a `docker-compose.override.yml`, but it is not a
 service in the root Compose file, it has no tests or fixtures, and nothing here
 has been observed running against live data. #61 is the audit that decides
 whether the scaffold is a v0.1 or a starting point.
+
+**The audit is done, and the answer is starting point.** `ml-worker/` does not
+build, would not see any real data if it did (wrong index patterns, wrong
+document schema), and its temporal model trains on one feature vector and
+scores on a different, incompatible one. See the status callout at the top of
+this document and issue #61 for the evidence. `ml-worker/tests/` now exists
+and every finding is an executable test, which is the fixture/test deliverable
+Milestone B step 2 asks for — but the modularization Milestone B actually
+requires (splitting config/ES-access/normalization/features/models/
+persistence/orchestration into testable units, fixtures for all five sources,
+corrected temporal features) has not been done. That is real, separate work
+from this audit.
 
 Read [`ml-gpu-coordinated-roadmap.md`](ml-gpu-coordinated-roadmap.md) before
 starting any of these. It supersedes this plan's sequencing and records
