@@ -28,76 +28,77 @@ x-runtime-defaults: &runtime-defaults
       max-file: "3"
 
 services:
-  # Validate the canonical manifest and seed mutable runtime personas before
-  # any sensor starts. Compiled/baked personas are checked by the validator;
-  # Dionaea's FTP/TFTP/UPnP/printer files are copied into its persistent volume.
-  persona-apply:
-    <<: *runtime-defaults
-    image: python:3.12-alpine
-    container_name: hp-persona-apply
-    restart: no
-    working_dir: /stack
-    command: ["python3", "/stack/personas/apply_personas.py"]
-    volumes:
-      - ./:/stack:ro
-      - dionaea-lib:/dionaea
-      - /opt/stacks/honeypot-stack/state/personas:/state
-    deploy:
-      resources:
-        limits:
-          cpus: "0.25"
-          memory: 128M
-
-  # ===================== Log dir ownership bootstrap =====================
-  log-init:
+  # persona-apply, log-init, elasticsearch-setup, honeypot-kibana-setup, and
+  # arkime-init used to run here as one-shot bootstrap jobs. They now live in
+  # docker-compose.init.yml, deployed as the separate honeypot-init stack, so
+  # this file holds only services that run continuously. See that file's
+  # header for the full reasoning (#111).
+  #
+  # The three init-wait-* services below are the replacement for
+  # depends_on: condition: service_completed_successfully against those jobs
+  # -- that condition cannot cross a Compose project boundary. Each polls for
+  # the completion marker its counterpart in honeypot-init writes, and every
+  # service that used to depend on the moved job now depends on the matching
+  # wait service instead, with the same condition: service_completed_successfully.
+  init-wait-log:
     <<: *runtime-defaults
     image: busybox:latest
-    container_name: hp-log-init
+    container_name: hp-init-wait-log
     restart: no
-    depends_on:
-      persona-apply:
-        condition: service_completed_successfully
     command:
       - sh
       - -c
       - >
-        set -x
-
-        mkdir -p /logs/cowrie/downloads /logs/conpot /logs/conpot-s7-1200 \
-                 /logs/conpot-s7-1500 /logs/conpot-iec104 \
-                 /logs/conpot-guardian /logs/conpot-kamstrup /logs/api-honeypot /logs/dionaea \
-                 /logs/multipot /logs/http-honeypot /logs/tanner /logs/snare /logs/dnp3 \
-                 /logs/suricata/pcap /logs/portbridge
-        chown 2000:2000  /logs/cowrie /logs/conpot /logs/conpot-s7-1200 \
-                         /logs/conpot-s7-1500 /logs/conpot-iec104 \
-                         /logs/conpot-guardian /logs/conpot-kamstrup
-
-        chown 1000:1000  /logs/dionaea
-
-        chown 65534:65534 /logs/multipot /logs/http-honeypot /logs/api-honeypot /logs/tanner /logs/dnp3
-
-        # Arkime capture/viewer run as nobody (uid 65534) inside the official image
-
-        chown 65534:65534 /logs/suricata/pcap || true
-
-        chmod 755 /logs
-
-        mkdir -p /snapshots
-
-        chown 1000:1000 /snapshots
-
-        mkdir -p /yara-results
-
-        chown 0:0 /yara-results && chmod 700 /yara-results
+        until [ -f /markers/log-init.done ]; do
+          echo "waiting for honeypot-init: log-init..."; sleep 3;
+        done
     volumes:
-      - /opt/stacks/honeypot-stack/logs:/logs
-      - /opt/stacks/honeypot-stack/state/elasticsearch-snapshots:/snapshots
-      - yara-results:/yara-results
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
     deploy:
       resources:
         limits:
-          cpus: "0.25"
-          memory: 128M
+          cpus: "0.1"
+          memory: 32M
+
+  init-wait-elasticsearch-setup:
+    <<: *runtime-defaults
+    image: busybox:latest
+    container_name: hp-init-wait-elasticsearch-setup
+    restart: no
+    command:
+      - sh
+      - -c
+      - >
+        until [ -f /markers/elasticsearch-setup.done ]; do
+          echo "waiting for honeypot-init: elasticsearch-setup..."; sleep 3;
+        done
+    volumes:
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 32M
+
+  init-wait-arkime-init:
+    <<: *runtime-defaults
+    image: busybox:latest
+    container_name: hp-init-wait-arkime-init
+    restart: no
+    command:
+      - sh
+      - -c
+      - >
+        until [ -f /markers/arkime-init.done ]; do
+          echo "waiting for honeypot-init: arkime-init..."; sleep 3;
+        done
+    volumes:
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 32M
 
   # Rotate verbose human-readable sensor logs without touching JSON event
   # streams. copytruncate keeps writers alive without mounting Docker's socket.
@@ -116,7 +117,7 @@ services:
       - ./analysis/log-maintenance.sh:/usr/local/bin/log-maintenance.sh:ro
       - /opt/stacks/honeypot-stack/logs:/logs
     depends_on:
-      log-init:
+      init-wait-log:
         condition: service_completed_successfully
     networks:
       - honeynet
@@ -145,7 +146,7 @@ services:
       - dashboard-state:/payloads/scripts
       - /opt/stacks/honeypot-stack/state/dedupe:/state
     depends_on:
-      log-init:
+      init-wait-log:
         condition: service_completed_successfully
     deploy:
       resources:
@@ -180,7 +181,7 @@ services:
       - dashboard-state:/payloads/scripts:ro
       - yara-results:/results
     depends_on:
-      log-init:
+      init-wait-log:
         condition: service_completed_successfully
     deploy:
       resources:
@@ -218,7 +219,7 @@ services:
     networks:
       - honeynet
     depends_on:
-      log-init:
+      init-wait-log:
         condition: service_completed_successfully
     deploy:
       resources:
@@ -254,7 +255,7 @@ services:
     networks:
       - honeynet
     depends_on:
-      log-init:
+      init-wait-log:
         condition: service_completed_successfully
     deploy:
       resources:
@@ -292,7 +293,7 @@ services:
     networks:
       - honeynet
     depends_on:
-      log-init:
+      init-wait-log:
         condition: service_completed_successfully
     deploy:
       resources:
@@ -326,7 +327,7 @@ services:
     cap_drop: [ALL]
     networks: [honeynet]
     depends_on:
-      log-init: { condition: service_completed_successfully }
+      init-wait-log: { condition: service_completed_successfully }
     deploy:
       resources: { limits: { cpus: "0.5", memory: 128M } }
   # ===================== Live analysis dashboard =====================
@@ -545,7 +546,7 @@ services:
     networks:
       - honeynet
     depends_on:
-      log-init:
+      init-wait-log:
         condition: service_completed_successfully
     deploy:
       resources:
@@ -603,6 +604,23 @@ services:
       - ${HP_BIND:-10.8.0.2}:44818:44818
     volumes:
       - /opt/stacks/honeypot-stack/logs/conpot:/var/log/conpot
+    # A TCP connect (Docker's default "is the port open" notion of healthy)
+    # passes even while conpot is completely wedged: the kernel backlog
+    # completes the handshake without the process's help. This sends a real
+    # Modbus request and requires a real response, which only a live gevent
+    # reactor can produce. See conpot/healthcheck.py and #111.
+    healthcheck:
+      test: ["CMD", "python3", "/usr/local/bin/conpot-healthcheck.py", "modbus"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    # Restarted by the autoheal sidecar on unhealthy, not by restart: alone --
+    # Docker's restart policy reacts to the process exiting, not to health
+    # status, so an unhealthy-but-still-running container sits there forever
+    # without this label and a watcher for it.
+    labels:
+      - autoheal=true
     # Measured the same way (2026-07-31), against the repo's own image rather
     # than the upstream base — the base alone exits before binding, so a probe
     # against it would have measured nothing:
@@ -625,7 +643,7 @@ services:
     networks:
       - honeynet
     depends_on:
-      log-init:
+      init-wait-log:
         condition: service_completed_successfully
     deploy:
       resources:
@@ -659,9 +677,17 @@ services:
     volumes:
       - /opt/stacks/honeypot-stack/logs/conpot-s7-1200:/var/log/conpot
     cap_add: [SYS_PTRACE]
+    healthcheck:
+      test: ["CMD", "python3", "/usr/local/bin/conpot-healthcheck.py", "modbus"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    labels:
+      - autoheal=true
     networks: [honeynet]
     depends_on:
-      log-init: { condition: service_completed_successfully }
+      init-wait-log: { condition: service_completed_successfully }
     deploy:
       resources: { limits: { cpus: "0.75", memory: 384M } }
 
@@ -688,9 +714,17 @@ services:
     volumes:
       - /opt/stacks/honeypot-stack/logs/conpot-s7-1500:/var/log/conpot
     cap_add: [SYS_PTRACE]
+    healthcheck:
+      test: ["CMD", "python3", "/usr/local/bin/conpot-healthcheck.py", "modbus"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    labels:
+      - autoheal=true
     networks: [honeynet]
     depends_on:
-      log-init: { condition: service_completed_successfully }
+      init-wait-log: { condition: service_completed_successfully }
     deploy:
       resources: { limits: { cpus: "0.75", memory: 384M } }
 
@@ -716,9 +750,17 @@ services:
     volumes:
       - /opt/stacks/honeypot-stack/logs/conpot-iec104:/var/log/conpot
     cap_add: [SYS_PTRACE]
+    healthcheck:
+      test: ["CMD", "python3", "/usr/local/bin/conpot-healthcheck.py", "iec104"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    labels:
+      - autoheal=true
     networks: [honeynet]
     depends_on:
-      log-init: { condition: service_completed_successfully }
+      init-wait-log: { condition: service_completed_successfully }
     deploy:
       resources: { limits: { cpus: "0.5", memory: 256M } }
 
@@ -743,9 +785,17 @@ services:
     volumes:
       - /opt/stacks/honeypot-stack/logs/conpot-guardian:/var/log/conpot
     cap_add: [SYS_PTRACE]
+    healthcheck:
+      test: ["CMD", "python3", "/usr/local/bin/conpot-healthcheck.py", "guardian_ast"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    labels:
+      - autoheal=true
     networks: [honeynet]
     depends_on:
-      log-init: { condition: service_completed_successfully }
+      init-wait-log: { condition: service_completed_successfully }
     deploy:
       resources: { limits: { cpus: "0.5", memory: 256M } }
 
@@ -772,11 +822,57 @@ services:
     volumes:
       - /opt/stacks/honeypot-stack/logs/conpot-kamstrup:/var/log/conpot
     cap_add: [SYS_PTRACE]
+    healthcheck:
+      test: ["CMD", "python3", "/usr/local/bin/conpot-healthcheck.py", "kamstrup"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    labels:
+      - autoheal=true
     networks: [honeynet]
     depends_on:
-      log-init: { condition: service_completed_successfully }
+      init-wait-log: { condition: service_completed_successfully }
     deploy:
       resources: { limits: { cpus: "0.5", memory: 256M } }
+
+  # A healthcheck alone does not restart anything: Docker's restart policy
+  # reacts to the container process exiting, not to health status, so an
+  # unhealthy-but-still-running container just sits there marked unhealthy
+  # forever. Verified empirically while fixing #111 -- a plain
+  # restart: unless-stopped container that fails its healthcheck accrues zero
+  # restarts. This is the actual missing piece; conpot already inherits a
+  # CPU-threshold healthcheck from its base image and it changes nothing on
+  # its own.
+  #
+  # This is the first service in the stack with the real host
+  # /var/run/docker.sock, and that is deliberate, not casual: tanner_docker
+  # above looks similar but is not the same trust boundary -- it runs its own
+  # disposable nested Docker daemon and never touches the host socket. To
+  # keep this exception as narrow as tanner_docker's, autoheal only acts on
+  # containers explicitly labeled autoheal=true (the image's default
+  # behavior; AUTOHEAL_CONTAINER_LABEL is set below anyway so that scope is
+  # visible here rather than relying on an unstated default). Today that is
+  # the six conpot services and nothing else.
+  autoheal:
+    <<: *runtime-defaults
+    image: willfarrell/autoheal:1.2.0
+    container_name: hp-autoheal
+    restart: unless-stopped
+    environment:
+      - AUTOHEAL_CONTAINER_LABEL=autoheal
+      - AUTOHEAL_INTERVAL=30
+      - AUTOHEAL_START_PERIOD=60
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
+
   # Optional official GeoLite2 updater. Enable the `geoip-update` profile after
   # setting MAXMIND_ACCOUNT_ID and MAXMIND_LICENSE_KEY in Dockge's .env.
   geoipupdate:
@@ -852,47 +948,6 @@ services:
         limits:
           cpus: "2.0"
           memory: 2G
-  elasticsearch-setup:
-    <<: *runtime-defaults
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
-    container_name: hp-elasticsearch-setup
-    restart: no
-    entrypoint: ["sh", "/usr/local/bin/elasticsearch-setup.sh"]
-    environment:
-      - ELASTICSEARCH_URL=http://elasticsearch:9200
-    volumes:
-      - ./analysis/elasticsearch-setup.sh:/usr/local/bin/elasticsearch-setup.sh:ro
-    networks:
-      - honeynet
-    depends_on:
-      elasticsearch:
-        condition: service_healthy
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 256M
-  honeypot-kibana-setup:
-    <<: *runtime-defaults
-    image: curlimages/curl:8.10.1
-    container_name: hp-honeypot-kibana-setup
-    restart: no
-    entrypoint: ["sh", "/usr/local/bin/honeypot-kibana-setup.sh"]
-    environment:
-      - KIBANA_URL=http://kibana:5601
-    volumes:
-      - ./analysis/honeypot-kibana-setup.sh:/usr/local/bin/honeypot-kibana-setup.sh:ro
-    networks: [honeynet]
-    depends_on:
-      kibana:
-        condition: service_started
-      elasticsearch-setup:
-        condition: service_completed_successfully
-    deploy:
-      resources:
-        limits:
-          cpus: "0.25"
-          memory: 128M
   filebeat:
     <<: *runtime-defaults
     image: docker.elastic.co/beats/filebeat:8.13.4
@@ -913,7 +968,7 @@ services:
     networks:
       - honeynet
     depends_on:
-      elasticsearch-setup:
+      init-wait-elasticsearch-setup:
         condition: service_completed_successfully
     deploy:
       resources:
@@ -993,69 +1048,15 @@ services:
   # Arkime stores session metadata in the existing Elasticsearch instance
   # (hp-elasticsearch). No separate OpenSearch is needed.
   #
-  # First-run DB init (arkime-init) runs once and exits. It bootstraps the
-  # Elasticsearch indices and creates the admin user defined in .env.
-  # --upgrade --ifneeded on the main containers keeps schema in sync on upgrades.
+  # First-run DB init (arkime-init) lives in docker-compose.init.yml (the
+  # honeypot-init stack) and runs once and exits there. It bootstraps the
+  # Elasticsearch indices and creates the admin user defined in .env;
+  # arkime-capture/arkime-viewer below wait on init-wait-arkime-init, which
+  # polls for the completion marker it writes.
   #
   # Web UI: http://${HP_BIND}:19080 (normally proxied by the VPS gateway).
   # Credentials: ARKIME_ADMIN_PASSWORD in .env (default: change-me-arkime)
   # =========================================================================
-  arkime-init:
-    <<: *runtime-defaults
-    image: ghcr.io/arkime/arkime/arkime:v6-latest
-    container_name: hp-arkime-init
-    restart: no
-    command:
-      - /bin/sh
-      - -c
-      - >
-        set -e
-
-        # Wait for Elasticsearch to be ready
-
-        until curl -sf http://elasticsearch:9200/_cluster/health > /dev/null; do
-          echo "Waiting for Elasticsearch..."; sleep 5
-        done
-
-        # Bootstrap or upgrade the Arkime DB non-interactively. db.pl prompts
-
-        # ("INIT" to erase on init over an existing DB, "RED" when cluster
-
-        # health is red) and aborts without a TTY - pipe the expected answer.
-
-        # INIT is only auto-typed when no Arkime DB exists yet (DB Version -1),
-
-        # so it can never wipe existing session data.
-
-        if /opt/arkime/db/db.pl --insecure http://elasticsearch:9200 info 2>/dev/null \
-             | grep 'DB Version' | grep -vq -- '-1'; then
-          echo RED | /opt/arkime/db/db.pl --insecure http://elasticsearch:9200 upgradenoprompt
-        else
-          echo INIT | /opt/arkime/db/db.pl --insecure http://elasticsearch:9200 init
-        fi
-
-        # Create admin user (errors if it already exists - that's fine)
-
-        /opt/arkime/bin/arkime_add_user.sh admin "Admin" \
-          "${ARKIME_ADMIN_PASSWORD:-change-me-arkime}" --admin \
-          || echo "admin user already exists, keeping it"
-    volumes:
-      - ./arkime/config.ini:/opt/arkime/etc/config.ini:ro
-    environment:
-      - TZ=Europe/Berlin
-      - ARKIME_ADMIN_PASSWORD=${ARKIME_ADMIN_PASSWORD:-change-me-arkime}
-      - ARKIME__elasticsearch=http://elasticsearch:9200
-      - ARKIME__passwordSecret=${ARKIME_PASSWORD_SECRET:-change-me-in-env}
-    networks:
-      - honeynet
-    depends_on:
-      elasticsearch:
-        condition: service_healthy
-    deploy:
-      resources:
-        limits:
-          cpus: "2.0"
-          memory: 1G
   # ===================== PCAP sync (sshfs -> local disk) =================
   # The Suricata pcap dir is an sshfs mount from the VPS. inotify never fires
   # across sshfs, so arkime-capture --monitor cannot see new files there.
@@ -1091,7 +1092,7 @@ services:
       - /opt/stacks/honeypot-stack/logs/suricata/pcap:/src:ro
       - /opt/stacks/honeypot-stack/logs/arkime-raw:/dst
     depends_on:
-      log-init:
+      init-wait-log:
         condition: service_completed_successfully
     deploy:
       resources:
@@ -1117,7 +1118,7 @@ services:
       - /opt/stacks/honeypot-stack/logs/dnp3:/var/log/honeypot
     networks: [honeynet]
     depends_on:
-      log-init:
+      init-wait-log:
         condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "/dnp3-honeypot", "-healthcheck"]
@@ -1157,9 +1158,9 @@ services:
     networks:
       - honeynet
     depends_on:
-      arkime-init:
+      init-wait-arkime-init:
         condition: service_completed_successfully
-      log-init:
+      init-wait-log:
         condition: service_completed_successfully
     deploy:
       resources:
@@ -1187,7 +1188,7 @@ services:
     networks:
       - honeynet
     depends_on:
-      arkime-init:
+      init-wait-arkime-init:
         condition: service_completed_successfully
     deploy:
       resources:
@@ -1352,7 +1353,7 @@ services:
       - ./tanner/tanner/config.yaml:/opt/tanner/data/config.yaml:ro
       - /opt/stacks/honeypot-stack/logs/tanner:/var/log/tanner
     depends_on:
-      log-init:
+      init-wait-log:
         condition: service_completed_successfully
       tanner_redis:
         condition: service_healthy
@@ -1426,7 +1427,7 @@ services:
         condition: service_started
       snare_clone:
         condition: service_completed_successfully
-      log-init:
+      init-wait-log:
         condition: service_completed_successfully
     networks:
       - tanner_local
@@ -1444,8 +1445,14 @@ networks:
 volumes:
   evebox-config: null
   es-data: null
-  dionaea-lib: null
+  # Named explicitly, like honeynet above: honeypot-init's persona-apply and
+  # log-init (a separate Compose project) write into these same two volumes,
+  # and a project-prefixed default name would give each stack its own copy
+  # of the same-looking volume instead of the one the other actually reads.
+  dionaea-lib:
+    name: dionaea-lib
   snare-pages: null
   arkime-pcap: null # Arkime-processed PCAP index files
   dashboard-state: null
-  yara-results: null
+  yara-results:
+    name: yara-results

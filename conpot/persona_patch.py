@@ -103,8 +103,13 @@ patch_existing("IEC104",
 patch_existing("guardian_ast",
     {"unit": "Guardian AST tank monitor", "vendor": "Veeder-Root", "description": "NorthFuel station 042 automatic tank gauge"},
     {"station_name": "NORTHFUEL STATION 042", "product1": "DIESEL", "product2": "E10",
-     "product3": "SUPER PLUS", "product4": "ADBLUE", "vol1": 18472.6, "vol2": 12631.4,
-     "vol3": 8842.1, "vol4": 3270.8, "temp1": 13.8, "temp2": 14.1,
+     "product3": "SUPER PLUS", "product4": "ADBLUE",
+     # guardian_ast_server.py passes these straight into random.randint(vol,
+     # vol + 200), which raises ValueError on anything but an int — a float
+     # here crashes every single connection handler. temp1-4 are only ever
+     # formatted as strings, so they stay floats.
+     "vol1": 18472, "vol2": 12631,
+     "vol3": 8842, "vol4": 3270, "temp1": 13.8, "temp2": 14.1,
      "temp3": 13.6, "temp4": 14.0})
 
 patch_existing("kamstrup_382",

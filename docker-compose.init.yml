@@ -1,0 +1,242 @@
+# honeypot-init — one-shot bootstrap jobs for honeypot-stack, run as a
+# separate Dockge stack so the main stack's compose file only holds services
+# that run continuously. Moved out of docker-compose.yml while fixing #111.
+#
+# Deploy this stack once (or re-run it whenever a bootstrap step needs to run
+# again -- every job here is idempotent) before or alongside honeypot-stack.
+# `docker compose up` runs every job below to completion and exits; nothing
+# in this file stays running.
+#
+# Cross-stack wiring, and why:
+#
+#   Completion markers. log-init, elasticsearch-setup, and arkime-init write
+#   a "<job>.done" file to state/init-markers/ on success, and remove it
+#   first, so a reader never sees a stale marker from a previous run while
+#   this run is still in progress. honeypot-stack's init-wait-* services
+#   poll for these files instead of depends_on: condition:
+#   service_completed_successfully, because that condition cannot cross a
+#   Compose project boundary -- it only resolves against a service defined
+#   in the same file. persona-apply and honeypot-kibana-setup need no
+#   marker: log-init depends on persona-apply within this same file, and
+#   nothing outside this stack depends on honeypot-kibana-setup at all.
+#
+#   honeynet. elasticsearch-setup, honeypot-kibana-setup, and arkime-init
+#   reach elasticsearch/kibana in the main stack over this network, which
+#   honeypot-stack creates with a fixed name (not project-prefixed)
+#   specifically so a second stack can attach to it.
+#
+#   dionaea-lib / yara-results. Named the same way, for the same reason:
+#   persona-apply/log-init and the main stack's
+#   dionaea/yara-scanner/payload-dedupe/dashboard must land on the identical
+#   physical volume, not two project-scoped copies that happen to share a
+#   name.
+#
+#   /opt/stacks/honeypot-stack absolute paths. This stack has no checkout of
+#   its own -- it reads the scripts, config, and persona manifest it needs
+#   straight out of the honeypot-stack checkout by absolute path, since a
+#   Dockge stack directory otherwise holds only its own compose.yml and .env.
+#
+#   ARKIME_ADMIN_PASSWORD and ARKIME_PASSWORD_SECRET in this stack's .env
+#   MUST match the same two values in honeypot-stack's .env exactly --
+#   arkime-init sets the secret that arkime-capture/arkime-viewer (main
+#   stack) use for session auth. Dockge gives each stack its own .env, so
+#   this is a manual sync, not automatic.
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  # Validate the canonical manifest and seed mutable runtime personas before
+  # any sensor starts. Compiled/baked personas are checked by the validator;
+  # Dionaea's FTP/TFTP/UPnP/printer files are copied into its persistent volume.
+  persona-apply:
+    <<: *runtime-defaults
+    image: python:3.12-alpine
+    container_name: hp-persona-apply
+    restart: no
+    working_dir: /stack
+    command: ["python3", "/stack/personas/apply_personas.py"]
+    volumes:
+      - /opt/stacks/honeypot-stack:/stack:ro
+      - dionaea-lib:/dionaea
+      - /opt/stacks/honeypot-stack/state/personas:/state
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+
+  # ===================== Log dir ownership bootstrap =====================
+  log-init:
+    <<: *runtime-defaults
+    image: busybox:latest
+    container_name: hp-log-init
+    restart: no
+    depends_on:
+      persona-apply:
+        condition: service_completed_successfully
+    command:
+      - sh
+      - -c
+      - >
+        set -x
+
+        rm -f /markers/log-init.done
+
+        mkdir -p /logs/cowrie/downloads /logs/conpot /logs/conpot-s7-1200 \
+                 /logs/conpot-s7-1500 /logs/conpot-iec104 \
+                 /logs/conpot-guardian /logs/conpot-kamstrup /logs/api-honeypot /logs/dionaea \
+                 /logs/multipot /logs/http-honeypot /logs/tanner /logs/snare /logs/dnp3 \
+                 /logs/suricata/pcap /logs/portbridge
+        chown 2000:2000  /logs/cowrie /logs/conpot /logs/conpot-s7-1200 \
+                         /logs/conpot-s7-1500 /logs/conpot-iec104 \
+                         /logs/conpot-guardian /logs/conpot-kamstrup
+
+        chown 1000:1000  /logs/dionaea
+
+        chown 65534:65534 /logs/multipot /logs/http-honeypot /logs/api-honeypot /logs/tanner /logs/dnp3
+
+        # Arkime capture/viewer run as nobody (uid 65534) inside the official image
+
+        chown 65534:65534 /logs/suricata/pcap || true
+
+        chmod 755 /logs
+
+        mkdir -p /snapshots
+
+        chown 1000:1000 /snapshots
+
+        mkdir -p /yara-results
+
+        chown 0:0 /yara-results && chmod 700 /yara-results
+
+        mkdir -p /markers && touch /markers/log-init.done
+    volumes:
+      - /opt/stacks/honeypot-stack/logs:/logs
+      - /opt/stacks/honeypot-stack/state/elasticsearch-snapshots:/snapshots
+      - yara-results:/yara-results
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+
+  elasticsearch-setup:
+    <<: *runtime-defaults
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    container_name: hp-elasticsearch-setup
+    restart: no
+    entrypoint:
+      - sh
+      - -c
+      - >
+        rm -f /markers/elasticsearch-setup.done &&
+        sh /usr/local/bin/elasticsearch-setup.sh &&
+        mkdir -p /markers && touch /markers/elasticsearch-setup.done
+    environment:
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+    volumes:
+      - /opt/stacks/honeypot-stack/analysis/elasticsearch-setup.sh:/usr/local/bin/elasticsearch-setup.sh:ro
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers
+    networks:
+      - honeynet
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  honeypot-kibana-setup:
+    <<: *runtime-defaults
+    image: curlimages/curl:8.10.1
+    container_name: hp-honeypot-kibana-setup
+    restart: no
+    entrypoint: ["sh", "/usr/local/bin/honeypot-kibana-setup.sh"]
+    environment:
+      - KIBANA_URL=http://kibana:5601
+    volumes:
+      - /opt/stacks/honeypot-stack/analysis/honeypot-kibana-setup.sh:/usr/local/bin/honeypot-kibana-setup.sh:ro
+    networks: [honeynet]
+    depends_on:
+      elasticsearch-setup:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+
+  arkime-init:
+    <<: *runtime-defaults
+    image: ghcr.io/arkime/arkime/arkime:v6-latest
+    container_name: hp-arkime-init
+    restart: no
+    command:
+      - /bin/sh
+      - -c
+      - >
+        set -e
+
+        rm -f /markers/arkime-init.done
+
+        # Wait for Elasticsearch to be ready
+
+        until curl -sf http://elasticsearch:9200/_cluster/health > /dev/null; do
+          echo "Waiting for Elasticsearch..."; sleep 5
+        done
+
+        # Bootstrap or upgrade the Arkime DB non-interactively. db.pl prompts
+
+        # ("INIT" to erase on init over an existing DB, "RED" when cluster
+
+        # health is red) and aborts without a TTY - pipe the expected answer.
+
+        # INIT is only auto-typed when no Arkime DB exists yet (DB Version -1),
+
+        # so it can never wipe existing session data.
+
+        if /opt/arkime/db/db.pl --insecure http://elasticsearch:9200 info 2>/dev/null \
+             | grep 'DB Version' | grep -vq -- '-1'; then
+          echo RED | /opt/arkime/db/db.pl --insecure http://elasticsearch:9200 upgradenoprompt
+        else
+          echo INIT | /opt/arkime/db/db.pl --insecure http://elasticsearch:9200 init
+        fi
+
+        # Create admin user (errors if it already exists - that's fine)
+
+        /opt/arkime/bin/arkime_add_user.sh admin "Admin" \
+          "${ARKIME_ADMIN_PASSWORD:-change-me-arkime}" --admin \
+          || echo "admin user already exists, keeping it"
+
+        mkdir -p /markers && touch /markers/arkime-init.done
+    volumes:
+      - /opt/stacks/honeypot-stack/arkime/config.ini:/opt/arkime/etc/config.ini:ro
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers
+    environment:
+      - TZ=Europe/Berlin
+      - ARKIME_ADMIN_PASSWORD=${ARKIME_ADMIN_PASSWORD:-change-me-arkime}
+      - ARKIME__elasticsearch=http://elasticsearch:9200
+      - ARKIME__passwordSecret=${ARKIME_PASSWORD_SECRET:-change-me-in-env}
+    networks:
+      - honeynet
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+
+networks:
+  honeynet:
+    name: honeynet
+    external: true
+
+volumes:
+  dionaea-lib:
+    name: dionaea-lib
+  yara-results:
+    name: yara-results

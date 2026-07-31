@@ -128,6 +128,11 @@ jobs:
           cp .env.example .env
           cp vps/.env.example vps/.env
           docker compose -f docker-compose.yml config --quiet
+          # honeypot-init is a separate Dockge stack (#111) that attaches to
+          # honeypot-stack's honeynet network and two of its named volumes by
+          # external reference; config validation does not require those to
+          # actually exist, so no honeypot-stack setup is needed here either.
+          docker compose -f docker-compose.init.yml config --quiet
           docker compose -f vps/docker-compose.yml config --quiet
           # The sandbox gateway is never started here — it answers live malware
           # on an isolated bridge that does not exist on a CI runner. Validating

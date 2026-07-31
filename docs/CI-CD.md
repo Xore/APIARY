@@ -82,6 +82,21 @@ The runner's service account, rather than the workflow YAML, determines the
 effective host permissions. Register it only on the trusted homeserver and do
 not give the `production-home` environment to pull-request workflows.
 
+### honeypot-init
+
+`docker-compose.init.yml` runs as a second, separate Dockge stack at
+`/opt/stacks/honeypot-init`, not as part of `honeypot-stack`. It holds the
+one-shot bootstrap jobs (log directory ownership, persona seeding,
+Elasticsearch/Kibana/Arkime first-run setup) that used to live in the main
+compose file; see that file's header for the full reasoning (#111). The same
+`home` job deploys it right after `honeypot-stack`, from the same checkout.
+
+Its `.env` is created once by hand on the homeserver and is never touched by
+this workflow — `ARKIME_ADMIN_PASSWORD` and `ARKIME_PASSWORD_SECRET` in it
+must be kept identical to the same two values in `honeypot-stack`'s `.env`,
+and an automated sync has no safe way to verify that a value it did not set
+is still correct.
+
 ## VPS deployment
 
 Create a protected `production-vps` environment with a required reviewer and

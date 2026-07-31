@@ -39,6 +39,24 @@ jobs:
           docker compose -f compose.yml config --quiet
           docker compose -f compose.yml up -d --build
 
+      - name: Synchronize honeypot-init (one-shot bootstrap jobs stack)
+        shell: bash
+        run: |
+          # A separate Dockge stack, not a subdirectory of honeypot-stack --
+          # see docker-compose.init.yml's header for why (#111). Its own .env
+          # is never touched here, same reasoning as honeypot-stack's .env
+          # above: ARKIME_ADMIN_PASSWORD/ARKIME_PASSWORD_SECRET in it must
+          # keep matching honeypot-stack's real values, which an automated
+          # sync has no safe way to verify.
+          destination=/opt/stacks/honeypot-init
+          install -d -m 755 "$destination"
+          install -d -m 755 /opt/stacks/honeypot-stack/state/init-markers
+          cp docker-compose.init.yml "$destination/compose.yml"
+          cd "$destination"
+          test ! -f .env || chmod 600 .env
+          docker compose -f compose.yml config --quiet
+          docker compose -f compose.yml up -d
+
   vps:
     if: inputs.target == 'vps' || inputs.target == 'both'
     runs-on: ubuntu-latest
