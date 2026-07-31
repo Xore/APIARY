@@ -1,6 +1,20 @@
 # IP Blocklist Reporting Plan
 
-Automatically report attacker IPs observed by the honeypot stack to public threat-intel blocklists via their APIs.
+Report attacker IPs observed by the honeypot stack to public threat-intel
+blocklists via their APIs.
+
+> **Status (2026-07-31):** design only. There is no `reporter` service in
+> `docker-compose.yml` and no `reporter/` directory; an earlier revision of this
+> section said the sidecar was "already wired into the existing event bus",
+> which it never was. Phase 1 is
+> [#68](https://github.com/Xore/honeypot-stack/issues/68), Phase 2 is
+> [#69](https://github.com/Xore/honeypot-stack/issues/69).
+>
+> **Reporting is outbound and irreversible.** An abuse report cannot be
+> unsent, and it names a third party's address from this stack. The reporter
+> ships dry-run by default and stays that way until live reporting is
+> separately approved — that is a standing constraint on this feature, not a
+> Phase 1 convenience.
 
 ---
 
@@ -9,8 +23,10 @@ Automatically report attacker IPs observed by the honeypot stack to public threa
 - Report every IP that touches a honeypot sensor to one or more blocklist feeds
 - Deduplicate: never report the same IP twice within a cooldown window
 - Respect rate limits of each upstream API
-- Run as a lightweight sidecar container (`reporter`) already wired into the existing `docker-compose.yml` event bus
-- No manual intervention after initial key setup in `.env`
+- Run as a lightweight sidecar container (`reporter`), tailing sensor logs from
+  the volumes the stack already writes
+- After keys are set in `.env` and dry-run output has been reviewed, no
+  per-report human step
 
 ---
 
@@ -30,7 +46,8 @@ Primary target: **AbuseIPDB** — widely used, has a public confidence score, an
 
 ```
 Cowrie / Dionaea / Conpot / HTTP-honeypot / DNP3
-        │  (JSON events → shared Docker volume / Redis pub-sub)
+        │  (JSON event logs on the shared Docker volumes, tailed —
+        │   not Redis pub-sub; see "Resolved design decisions")
         ▼
   ┌─────────────┐
   │  reporter   │  new Docker Compose service
