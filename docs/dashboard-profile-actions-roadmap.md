@@ -5,10 +5,18 @@
 > allowed. The milestone list and its exit criteria have been removed — they
 > described work that is done, and a plan nobody can fail is just noise.
 >
-> The one live gap is that the settings pane is a bare iframe onto the auth
-> origin, which this document explicitly ruled out and which carries four
-> unmet preconditions: [#93](https://github.com/Xore/honeypot-stack/issues/93).
-> The remaining deployment verification for the settings stack is
+> The settings pane is a bare iframe onto the auth origin, which this document
+> originally ruled out except behind explicit preconditions:
+> [#93](https://github.com/Xore/honeypot-stack/issues/93). Three of the four
+> are done: `frame-ancestors` is enforced on the auth origin (auth-backend's
+> `APP_FRAME_ANCESTORS`, verified live), `AUTH_ACCOUNT_URL` is validated at
+> dashboard startup against the configured auth origin
+> (`validatedAuthAccountURL` in `authorization.go`), and the dashboard side of
+> the close/expiry `postMessage` contract is in `hp-account.js`. The
+> auth-backend side of that contract — actually posting `close`/`expired` to
+> the parent — has not shipped yet; until it does, the frame's own expiry or a
+> logout inside it will not close the modal. The remaining deployment
+> verification for the settings stack is
 > [#81](https://github.com/Xore/honeypot-stack/issues/81).
 
 ---
@@ -47,10 +55,32 @@ straight to the iframe, and the reason is a good one: account credentials,
 passkeys and session management never enter the dashboard origin at all. The
 dashboard cannot leak what it never handles.
 
-What it does not get for free is everything the preconditions covered —
-`frame-ancestors` on the auth origin, a close/expiry signal from the frame, and
-validation of the configured URL. Those are [#93](https://github.com/Xore/honeypot-stack/issues/93).
-**Do not replace the modal to close them.** The gaps are additive.
+What it does not get for free is everything the preconditions covered:
+`frame-ancestors` on the auth origin, validation of the configured URL, and a
+close/expiry signal from the frame. Tracked in
+[#93](https://github.com/Xore/honeypot-stack/issues/93), **do not replace the
+modal to close them** — the gaps are additive.
+
+- **`frame-ancestors`** — done. auth-backend serves the settings app with
+  `frame-ancestors` (and a matching `X-Frame-Options` relaxation) scoped to an
+  explicit allowlist, `APP_FRAME_ANCESTORS` (`forward-auth/config.go`'s
+  `parseFrameAncestors`: https-only, deduped, capped at 8 origins), enforced
+  by `allowAppFraming` in `forward-auth/apppage.go`. Verified live on the
+  VPS: `APP_FRAME_ANCESTORS` is set to the dashboard's own public origin.
+- **URL validation** — done. `validatedAuthAccountURL` in
+  `dashboard/authorization.go` runs once at startup: rejects anything that
+  isn't a clean HTTPS URL (or HTTP to loopback), and rejects a host that
+  doesn't match `AUTH_INTROSPECTION_URL`'s. A bad value is logged loudly to
+  stderr and the settings item just stays hidden — never a silently blank
+  iframe.
+- **Close/expiry signal** — half done. `dashboard/static/hp-account.js`
+  listens for `postMessage`, checking both `event.source` (must be the
+  settings iframe's own `contentWindow`) and `event.origin` (must match the
+  account URL's origin) before trusting `{source:"xore-auth-app",
+  type:"close"|"expired"}`: `"close"` dismisses the modal, `"expired"`
+  dismisses it and re-fetches `/api/whoami`. auth-backend does not yet post
+  either message — that's the remaining half of #93, tracked separately since
+  it lands in a different repository (`Xore/auth-backend`).
 
 ## 4. Rules that still bind
 
@@ -81,8 +111,10 @@ Re-pin and re-read these before changing the modal or the dropdown:
 - `Xore/theme` `efcc979faaa7d2dc9b533dfb0bfe8891ca3a9356` —
   `examples/components.html` (Floating layers), `docs/MODALS.md`,
   `docs/ADOPTION.md`
-- `Xore/auth-backend` `125c8371feaa7ddf99623744356c8d57281d6149` —
-  `forward-auth/ui/app.html`, panes `account` and `admin-settings`
+- `Xore/auth-backend` `184b5bccb29afc25dde35525c5b5c2e742f3a828` —
+  `forward-auth/ui/app.html`, panes `account` and `admin-settings`;
+  `forward-auth/apppage.go` (`allowAppFraming`); `forward-auth/config.go`
+  (`parseFrameAncestors`)
 
 ## References
 
