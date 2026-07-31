@@ -308,3 +308,119 @@ func TestGhidraDataQueryIgnoresStrings(t *testing.T) {
 		t.Errorf("query did not match imports: %+v", data.Rows)
 	}
 }
+
+func ghidraAlertMessages(t *testing.T, dir string) []string {
+	t.Helper()
+	t.Setenv("GHIDRA_RESULTS_DIR", dir)
+	var messages []string
+	// s.alerts nil means "no dedupe sink configured", which makes every check
+	// emit — exactly what a unit test wants.
+	ghidraAlerts(&store{}, &messages, false)
+	return messages
+}
+
+func hasAlert(messages []string, substr string) bool {
+	for _, m := range messages {
+		if strings.Contains(m, substr) {
+			return true
+		}
+	}
+	return false
+}
+
+// An unconfigured host has not opted into Ghidra at all; alerting about a
+// subsystem nobody deployed is pure noise.
+func TestGhidraAlertsSilentWhenUnconfigured(t *testing.T) {
+	t.Setenv("GHIDRA_RESULTS_DIR", "")
+	var messages []string
+	ghidraAlerts(&store{}, &messages, false)
+	if len(messages) != 0 {
+		t.Fatalf("unconfigured host produced alerts: %v", messages)
+	}
+}
+
+func TestGhidraAlertsOnStaleWorker(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "status.json")
+	if err := os.WriteFile(path, []byte(`{"version":1,"queued":3}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * ghidraStatusStaleAfter)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	messages := ghidraAlertMessages(t, dir)
+	if !hasAlert(messages, "not draining") {
+		t.Fatalf("no stale-worker alert: %v", messages)
+	}
+	// The queue depth belongs in the message; "the worker is stuck" without it
+	// does not tell the reader whether anything is actually waiting.
+	if !hasAlert(messages, "3 queued") {
+		t.Errorf("stale alert omits the queue depth: %v", messages)
+	}
+}
+
+func TestGhidraAlertsOnFailedResult(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "status.json"),
+		[]byte(`{"version":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeGhidraResult(t, dir, shaA, map[string]any{
+		"exit_status": "error", "error": "analysis exceeded 4200s",
+	})
+	messages := ghidraAlertMessages(t, dir)
+	if !hasAlert(messages, "analysis failed") || !hasAlert(messages, "exceeded 4200s") {
+		t.Fatalf("failed result did not alert with its reason: %v", messages)
+	}
+}
+
+// Crypto constants alone must not page: a stock AES table is in a great deal
+// of benign software, and an alert people learn to ignore is worse than none.
+func TestGhidraCryptoAloneDoesNotAlertByDefault(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "status.json"),
+		[]byte(`{"version":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeGhidraResult(t, dir, shaA, map[string]any{
+		"exit_status": "ok",
+		"findcrypt":   []map[string]string{{"address": "0x1", "constant": "AES Te0", "algorithm": "AES"}},
+	})
+
+	if messages := ghidraAlertMessages(t, dir); hasAlert(messages, "flagged") {
+		t.Fatalf("crypto alone alerted with the default config: %v", messages)
+	}
+
+	t.Setenv("GHIDRA_ALERT_ON_CRYPTO", "true")
+	if messages := ghidraAlertMessages(t, dir); !hasAlert(messages, "flagged") {
+		t.Fatalf("opting in did not enable the crypto alert: %v", messages)
+	}
+}
+
+func TestGhidraAlertsOnHighAIRisk(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "status.json"),
+		[]byte(`{"version":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeGhidraResult(t, dir, shaA, map[string]any{
+		"exit_status": "ok",
+		"ai_triage":   map[string]any{"risk_level": "high", "model": "qwen3:8b"},
+	})
+	messages := ghidraAlertMessages(t, dir)
+	if !hasAlert(messages, "flagged") {
+		t.Fatalf("high AI risk did not alert: %v", messages)
+	}
+	// The reader must be told this is a model's guess, in the alert itself —
+	// the detail page's disclaimer is not visible from a webhook.
+	if !hasAlert(messages, "UNVERIFIED") {
+		t.Errorf("AI-risk alert does not mark itself unverified: %v", messages)
+	}
+
+	// A level outside the configured set stays quiet.
+	t.Setenv("GHIDRA_ALERT_RISK_LEVELS", "critical")
+	if messages := ghidraAlertMessages(t, dir); hasAlert(messages, "flagged") {
+		t.Errorf("risk level outside the configured set alerted: %v", messages)
+	}
+}

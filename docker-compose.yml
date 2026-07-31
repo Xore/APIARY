@@ -371,6 +371,14 @@ services:
       # dashboard refuses Windows submissions until then.
       - /var/lib/honeypot-windows-sandbox/export:/windows-sandbox-results:ro
       - /var/lib/honeypot-windows-sandbox/requests/pending:/windows-sandbox-requests
+      # Ghidra static analysis: a third spool, same shape and same boundary.
+      # Bind mounts rather than named volumes because the consumer is a host
+      # systemd unit (analysis/ghidra/worker/), not a compose service — a named
+      # volume would be awkward for it to reach and would put the queue inside
+      # Docker's lifecycle. Results are read-only here: the dashboard displays
+      # them and must never be able to forge one.
+      - /var/lib/honeypot-ghidra/results:/ghidra-results:ro
+      - /var/lib/honeypot-ghidra/requests/pending:/ghidra-requests
     environment:
       - LISTEN_ADDR=:8080
       - LOG_DIR=/logs
@@ -406,6 +414,13 @@ services:
       - WINDOWS_SANDBOX_RESULTS_DIR=${WINDOWS_SANDBOX_RESULTS_DIR:-}
       - WINDOWS_SANDBOX_REQUEST_DIR=${WINDOWS_SANDBOX_REQUEST_DIR:-}
       - SANDBOX_ALERT_RISK_SCORE=${SANDBOX_ALERT_RISK_SCORE:-50}
+      # Empty until the host-side Ghidra worker exists; see .env.example. The
+      # mounts above are always present so enabling it is a .env change, not a
+      # Compose edit — the same arrangement as the Windows backend.
+      - GHIDRA_RESULTS_DIR=${GHIDRA_RESULTS_DIR:-}
+      - GHIDRA_REQUEST_DIR=${GHIDRA_REQUEST_DIR:-}
+      - GHIDRA_ALERT_RISK_LEVELS=${GHIDRA_ALERT_RISK_LEVELS:-high,critical}
+      - GHIDRA_ALERT_ON_CRYPTO=${GHIDRA_ALERT_ON_CRYPTO:-false}
       - ALERT_CAMPAIGN_SCORE=${HONEYPOT_ALERT_CAMPAIGN_SCORE:-80}
       - DASHBOARD_REQUIRE_ADMIN=${DASHBOARD_REQUIRE_ADMIN:-true}
       - AUTH_INTROSPECTION_URL=${AUTH_INTROSPECTION_URL:-https://auth.honeypot.example/_auth/introspect}

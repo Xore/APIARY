@@ -1,5 +1,25 @@
 # Ghidra Dashboard Integration — Implementation Plan
 
+> **Status: all six phases built** (2026-07-31). Host worker, dashboard API,
+> UI, alerting, environment and compose wiring are in place, tested, and
+> rendered in a browser against fixture results.
+>
+> **One thing is NOT verified: the Ghidra REST API contract.** `/analyze`,
+> `/status/{job}`, `/functions/{job}`, `/strings/{job}` and `/imports/{job}`
+> come from this document, not from a running
+> `biniamfd/ghidra-headless-rest:1.2.1`. No result has ever come from actual
+> Ghidra. Everything downstream is correct with respect to *this plan*, which
+> is not the same as correct. They are confined to the `GhidraClient` class in
+> `worker/ghidra-worker.py` so correcting them is a one-class change.
+>
+> Before trusting any output, run:
+>
+> ```bash
+> python3 analysis/ghidra/worker/ghidra-worker.py --selftest
+> ```
+>
+> against a live container, and fix whatever it reports.
+
 > **Status**: Design document — nothing here is built yet
 > **Tracked in**: [#76](https://github.com/Xore/honeypot-stack/issues/76)
 > **Last updated**: 2026-07-31
@@ -319,7 +339,40 @@ present), risk level, crypto/import highlights, timestamp, link to detail.
 
 ---
 
-## Phase 4 — Queue health + alerting ⬜ Planned
+## Phase 4 — Queue health + alerting ✅ Built
+
+`ghidraAlerts()` in `ghidra.go`, called from the inline check block in
+`store.go` next to the sandbox checks. No new transport — same `s.alerts` sink.
+
+The sketch below was written against fields this implementation does not have
+(`HandoffOld`, `Handoff`, `WorkerState`, `AITriage.Interesting`, and a numeric
+`GHIDRA_ALERT_RISK_SCORE`). The worker reports a flat queue and a **string**
+risk level, so the checks are written against what is actually produced:
+
+| Check | Fires when |
+|---|---|
+| `ghidra:worker` | `status.json` is stale — one alert carrying the queue depth, not separate stalled-handoff and unhealthy-worker alerts, since both describe one fault |
+| `ghidra:failed` | the queue holds failed requests |
+| `ghidra:error:{sha}` | a result has `exit_status: "error"`, reported with its reason |
+| `ghidra:flagged:{sha}` | AI triage risk is in `GHIDRA_ALERT_RISK_LEVELS` (default `high,critical`) |
+
+Three deliberate restraints:
+
+* **Nothing fires when `GHIDRA_RESULTS_DIR` is unset.** Alerting about a
+  subsystem the operator never deployed is pure noise.
+* **Crypto constants alone do not alert**, behind `GHIDRA_ALERT_ON_CRYPTO`
+  (default `false`). A stock AES table is in a great deal of benign software,
+  and the analysis page already says their presence does not show malicious
+  use. Paging on it would train the reader to ignore the alert. The constants
+  are always *shown*; this only controls whether they notify.
+* **AI-risk alerts say `UNVERIFIED` and name the model, in the message.** The
+  detail page's disclaimer is not visible from a webhook, and an alert that
+  launders a model's guess into an apparent finding is worse than no alert.
+
+Covered by `ghidra_test.go`: silence when unconfigured, the stale-worker alert
+including its queue depth, a failed result alerting with its reason, crypto
+staying quiet by default and firing when opted in, and AI-risk alerts marking
+themselves unverified and respecting the configured level set.
 
 Extend the existing alert-check block in `dashboard/store.go` (~line 295,
 right after the `sandboxStatus.HandoffOld` check) with the Ghidra equivalents.
@@ -367,7 +420,24 @@ the Ghidra REST service directly.
 
 ---
 
-## Phase 6 — Compose wiring ⬜ Planned
+## Phase 6 — Compose wiring ✅ Built
+
+**Bind mounts, not the named volumes sketched below.** The consumer is a host
+systemd unit, not a compose service; a named volume would be awkward for it to
+reach and would put the analysis queue inside Docker's lifecycle. This is why
+the Windows sandbox spool is a bind mount too, and Ghidra follows that working
+precedent rather than the sketch:
+
+```yaml
+  - /var/lib/honeypot-ghidra/results:/ghidra-results:ro   # display only
+  - /var/lib/honeypot-ghidra/requests/pending:/ghidra-requests
+```
+
+Results are read-only into the dashboard: it renders them and must never be
+able to forge one. The mounts are unconditional while `GHIDRA_RESULTS_DIR` and
+`GHIDRA_REQUEST_DIR` default to empty, so enabling the backend is a `.env`
+change rather than a Compose edit — the same arrangement the Windows backend
+uses. `docker compose config` validates.
 
 `docker-compose.yml` (main stack) gets the request/results directories
 mounted read-only into the dashboard container and read-write into wherever

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -315,4 +316,84 @@ func serveGhidraExport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/pdf")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+sha+`_ghidra.pdf"`)
 	http.ServeContent(w, r, row.ReportPDF, info.ModTime(), f)
+}
+
+// ghidraAlerts appends Ghidra queue and finding alerts, riding the same
+// s.alerts sink as the sandbox and Suricata checks. No new transport.
+//
+// The plan sketched this against fields that do not exist here — HandoffOld,
+// WorkerState, AITriage.Interesting, and a numeric GHIDRA_ALERT_RISK_SCORE.
+// The worker reports a flat queue and a *string* risk level, so the checks
+// below are written against what is actually produced rather than against the
+// struct the sketch imagined.
+func ghidraAlerts(s *store, messages *[]string, markOnly bool) {
+	status := loadGhidraStatus()
+	if !status.Configured {
+		// The worker was never deployed on this host. Alerting about a
+		// subsystem the operator has not opted into is pure noise.
+		return
+	}
+
+	emit := func(key, message string) {
+		if s.alerts == nil || s.alerts.observe(key, message, markOnly) {
+			if !markOnly {
+				*messages = append(*messages, message)
+			}
+		}
+	}
+
+	// One alert for "not draining", carrying the queue depth, rather than
+	// separate stalled-handoff and unhealthy-worker alerts: both describe the
+	// same fault and would page twice for one cause.
+	if status.Stale {
+		emit("ghidra:worker", fmt.Sprintf(
+			"ghidra worker not draining: queue file is stale, %d queued, %d running (check honeypot-ghidra-worker.path)",
+			status.Queued, status.Running))
+	}
+	if status.Failed > 0 {
+		emit("ghidra:failed", fmt.Sprintf("ghidra queue has %d failed request(s)", status.Failed))
+	}
+
+	// Alert-worthy findings. Two things are deliberately NOT here:
+	//
+	// Crypto constants alone. A stock AES table appears in a great deal of
+	// benign software, and the page already says their presence does not show
+	// malicious use. Paging on it would train the reader to ignore the alert.
+	// GHIDRA_ALERT_ON_CRYPTO=true opts in for an operator who wants it.
+	//
+	// A numeric risk threshold. There is no score to threshold — the worker
+	// records a string level from the AI triage, so the levels that alert are
+	// named instead.
+	alertLevels := map[string]bool{}
+	for _, level := range strings.Split(getenv("GHIDRA_ALERT_RISK_LEVELS", "high,critical"), ",") {
+		if level = strings.ToLower(strings.TrimSpace(level)); level != "" {
+			alertLevels[level] = true
+		}
+	}
+	alertOnCrypto := strings.EqualFold(getenv("GHIDRA_ALERT_ON_CRYPTO", "false"), "true")
+
+	for _, result := range loadGhidraResults() {
+		if result.ExitStatus == "error" {
+			emit("ghidra:error:"+result.SHA256, fmt.Sprintf(
+				"ghidra analysis failed: sha256=%s reason=%s", result.SHA256, result.Error))
+			continue
+		}
+		risky := result.AITriage != nil &&
+			alertLevels[strings.ToLower(strings.TrimSpace(result.AITriage.RiskLevel))]
+		crypto := alertOnCrypto && len(result.FindCrypt) > 0
+		if !risky && !crypto {
+			continue
+		}
+		// The AI level is an unverified model guess — the detail page says so,
+		// and an alert that hides that would be worse than one that does not
+		// fire. Say it in the message, where the reader actually sees it.
+		detail := "crypto constants only"
+		if risky {
+			detail = fmt.Sprintf("AI-guessed risk=%s (UNVERIFIED, %s)",
+				result.AITriage.RiskLevel, result.AITriage.Model)
+		}
+		emit("ghidra:flagged:"+result.SHA256, fmt.Sprintf(
+			"ghidra flagged sample: sha256=%s crypto_hits=%d imports=%d %s",
+			result.SHA256, len(result.FindCrypt), len(result.Imports), detail))
+	}
 }
