@@ -1,6 +1,16 @@
 # User Settings and Dashboard Configuration Roadmap
 
-> **Status:** Gate A implementation in progress; settings stores and UI remain proposed
+> **Status (2026-07-31):** built. Gate A's dashboard and proxy work is in the
+> tree — live introspection in `dashboard/authorization.go`, the
+> `strip-auth-identity` middleware on every authenticated router in
+> `vps/traefik/dynamic.yml`, and tests that forge `X-Auth-Role` and assert it
+> grants nothing. Milestones B through G have shipped: typed stores with
+> revisions and audit log, `/api/settings/me`, the settings dialog, admin
+> configuration with rollback, retention, and `honeypot_settings_*` metrics.
+> What remains is not code — deployment verification of the shared
+> introspection token and the 72-hour multi-user soak, tracked in
+> [#81](https://github.com/Xore/honeypot-stack/issues/81). Earlier revisions of
+> this header said "stores and UI remain proposed" long after both existed.
 >
 > **Identity authority:** [`Xore/auth-backend`](https://github.com/Xore/auth-backend)
 >

@@ -53,6 +53,7 @@ Source documents:
 | Event detail, payload preview, export and destructive-action modals | [#59](https://github.com/Xore/honeypot-stack/issues/59) |
 | Behavioural tests and the visual acceptance matrix | [#60](https://github.com/Xore/honeypot-stack/issues/60) |
 | Profile action menu, route/administrator settings, logout | [#77](https://github.com/Xore/honeypot-stack/issues/77) |
+| Settings subsystem: introspection token rollout and the 72-hour soak | [#81](https://github.com/Xore/honeypot-stack/issues/81) |
 
 The CSP header goes on **last**, after every inline handler is gone. Shipping it
 early means either a broken dashboard or a policy quietly written loose enough

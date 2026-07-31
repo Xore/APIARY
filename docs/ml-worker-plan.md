@@ -1,8 +1,12 @@
 # ML Worker — Implementation Plan
 
-> **Status:** Scaffolded — implementation in progress.  
+> **Status:** Design document. `ml-worker/` is a scaffold that is not wired into
+> Compose and has never been observed running; the dashboard has no
+> `/api/ml/anomalies` endpoint and no `ml_anomalies.go`. Everything below
+> describes the intended system, not the built one.  
 > **Worker location:** [`ml-worker/`](../ml-worker/)  
-> **Dashboard integration:** New `/api/ml/anomalies` endpoint + live panel on the dashboard.
+> **Tracked in:** [#61](https://github.com/Xore/honeypot-stack/issues/61)–[#65](https://github.com/Xore/honeypot-stack/issues/65)
+> — see the roadmap table in §12.
 
 ---
 
@@ -455,17 +459,29 @@ Drift detection:
 
 ## 12. Roadmap
 
-| Phase | Milestone | Status |
-|-------|-----------|--------|
-| **v0.1** | Scaffold: Dockerfile, worker.py, IsoForest, ES write | ✅ Scaffolded |
-| **v0.2** | HBOS fast filter + feature engineering for all 5 sources | 🔲 Todo |
-| **v0.3** | LSTM-AE temporal model + sequence windowing | 🔲 Todo |
-| **v0.4** | Composite scoring + explanation generation | 🔲 Todo |
-| **v0.5** | Redis pub/sub → dashboard SSE integration | 🔲 Todo |
-| **v0.6** | `dashboard/ml_anomalies.go` + API endpoints | 🔲 Todo |
-| **v0.7** | Dashboard UI panel (`page.go` / frontend) | 🔲 Todo |
-| **v0.8** | Retraining scheduler + model versioning | 🔲 Todo |
-| **v1.0** | Drift detection + alert threshold tuning UI | 🔲 Todo |
+| Phase | Milestone | Issue |
+|-------|-----------|-------|
+| **v0.1** | Scaffold: Dockerfile, worker.py, IsoForest, ES write | [#61](https://github.com/Xore/honeypot-stack/issues/61) |
+| **v0.2** | HBOS fast filter + feature engineering for all 5 sources | [#62](https://github.com/Xore/honeypot-stack/issues/62) |
+| **v0.3** | LSTM-AE temporal model + sequence windowing | [#63](https://github.com/Xore/honeypot-stack/issues/63) |
+| **v0.4** | Composite scoring + explanation generation | [#63](https://github.com/Xore/honeypot-stack/issues/63) |
+| **v0.5** | Redis pub/sub → dashboard SSE integration | [#64](https://github.com/Xore/honeypot-stack/issues/64) |
+| **v0.6** | `dashboard/ml_anomalies.go` + API endpoints | [#64](https://github.com/Xore/honeypot-stack/issues/64) |
+| **v0.7** | Dashboard UI panel | [#64](https://github.com/Xore/honeypot-stack/issues/64) |
+| **v0.8** | Retraining scheduler + model versioning | [#65](https://github.com/Xore/honeypot-stack/issues/65) |
+| **v1.0** | Drift detection + alert threshold tuning UI | [#65](https://github.com/Xore/honeypot-stack/issues/65) |
+
+v0.1 is listed as an issue rather than as done on purpose. `ml-worker/` holds a
+Dockerfile, `worker.py`, and a `docker-compose.override.yml`, but it is not a
+service in the root Compose file, it has no tests or fixtures, and nothing here
+has been observed running against live data. #61 is the audit that decides
+whether the scaffold is a v0.1 or a starting point.
+
+Read [`ml-gpu-coordinated-roadmap.md`](ml-gpu-coordinated-roadmap.md) before
+starting any of these. It supersedes this plan's sequencing and records
+corrections to the design below — notably that timestamp-only checkpoints are
+not safe, that clipped model scores must not be treated as probabilities, and
+that the `0.75` threshold in §4.4 is an assumption rather than a measurement.
 
 ---
 
