@@ -34,7 +34,7 @@
     note.hidden = available;
     trigger.disabled = false;
   };
-  fetch("/api/whoami", {cache: "no-store"}).then(response => response.ok ? response.json() : null).then(identity => {
+  const refreshIdentity = () => fetch("/api/whoami", {cache: "no-store"}).then(response => response.ok ? response.json() : null).then(identity => {
     accountURL = identity && typeof identity.auth_account_url === "string" ? identity.auth_account_url.trim() : "";
     let logoutURL = "";
     try {
@@ -46,6 +46,7 @@
     }
     settleIdentity(Boolean(accountURL));
   }).catch(() => settleIdentity(false));
+  refreshIdentity();
 
   /* ---- floating menu ---- */
   const openMenu = () => {
@@ -100,6 +101,24 @@
   settingsItem.addEventListener("click", openSettings);
   closeButton.addEventListener("click", closeSettings);
   backdrop.addEventListener("click", closeSettings);
+
+  /* The frame's own session can expire, or the embedded app can complete an
+     action (e.g. logging out) that leaves it on a page never meant to sit
+     inside this modal — the parent has no other way to learn either
+     happened (issue #93). auth-backend posts {source:"xore-auth-app",
+     type:"close"|"expired"} only to origins it was told at render time are
+     allowed to embed it (APP_FRAME_ANCESTORS), so both the source frame and
+     the message origin are checked before acting on it. */
+  window.addEventListener("message", event => {
+    if (!settingsOpen || event.source !== frame.contentWindow || !accountURL) return;
+    let frameOrigin;
+    try { frameOrigin = new URL(accountURL).origin; } catch { return; }
+    if (event.origin !== frameOrigin) return;
+    const data = event.data;
+    if (!data || typeof data !== "object" || data.source !== "xore-auth-app") return;
+    if (data.type === "close") { closeSettings(); return; }
+    if (data.type === "expired") { closeSettings(); refreshIdentity(); }
+  });
 
   /* Let sibling controllers (the dashboard settings modal) dismiss the
      floating menu when they take over from one of its items. */
