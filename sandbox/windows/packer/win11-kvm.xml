@@ -23,9 +23,9 @@
   <!-- memory = "8192", cpus = "4" in win11-analysis.pkr.hcl. Also the floor
        for looking like a workstation: a sample that finds 2 GB and 1 vCPU
        has found a sandbox. -->
-  <memory unit='MiB'>8192</memory>
+  <memory unit='MiB'>16384</memory>
   <currentMemory unit='MiB'>8192</currentMemory>
-  <vcpu placement='static'>4</vcpu>
+  <vcpu placement='static'>8</vcpu>
 
   <!-- SMBIOS strings are the cheapest VM tell there is: the QEMU defaults
        announce "QEMU"/"Bochs" in every DMI field, and reading them is a
@@ -194,7 +194,11 @@
          if you ever move this off 127.0.0.1, add one. -->
     <graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'/>
     <video>
-      <model type='qxl' ram='65536' vram='65536' vgamem='16384' heads='1'/>
+      <!-- Not QXL: it enumerates in Device Manager as a Red Hat QXL
+           controller, which is as loud a VM tell as a virtio disk. Plain VGA
+           is unremarkable and still gives a usable VNC console for
+           diagnostics. -->
+      <model type='vga' vram='16384' heads='1'/>
     </video>
 
     <input type='tablet' bus='usb'/>
