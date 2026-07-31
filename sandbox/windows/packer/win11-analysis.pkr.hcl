@@ -247,63 +247,207 @@ build {
   # Not elevated: these only poll for a file, and a non-elevated provisioner
   # is not run as a scheduled task, so it has one less way to be killed.
   provisioner "powershell" {
-    script           = "scripts/03-flarevm-wait.ps1"
-    valid_exit_codes = [0, 267014, 3010, 1641]
+    script = "scripts/03-flarevm-wait.ps1"
+    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
+    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
+    # code from it means the run was interrupted, not that the script decided
+    # something was wrong.
+    #
+    # Which code you get depends on how the provisioner runs. An elevated
+    # provisioner is a scheduled task and returns 267014
+    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
+    # deliberately NOT elevated, so the command runs directly over WinRM and a
+    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
+    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
+    # fix covered the elevated code and not this one.
+    valid_exit_codes = [0, 1, 267014, 3010, 1641]
     timeout          = "40m"
   }
   provisioner "powershell" {
-    script           = "scripts/03-flarevm-wait.ps1"
-    valid_exit_codes = [0, 267014, 3010, 1641]
+    script = "scripts/03-flarevm-wait.ps1"
+    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
+    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
+    # code from it means the run was interrupted, not that the script decided
+    # something was wrong.
+    #
+    # Which code you get depends on how the provisioner runs. An elevated
+    # provisioner is a scheduled task and returns 267014
+    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
+    # deliberately NOT elevated, so the command runs directly over WinRM and a
+    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
+    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
+    # fix covered the elevated code and not this one.
+    valid_exit_codes = [0, 1, 267014, 3010, 1641]
     timeout          = "40m"
   }
   provisioner "powershell" {
-    script           = "scripts/03-flarevm-wait.ps1"
-    valid_exit_codes = [0, 267014, 3010, 1641]
+    script = "scripts/03-flarevm-wait.ps1"
+    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
+    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
+    # code from it means the run was interrupted, not that the script decided
+    # something was wrong.
+    #
+    # Which code you get depends on how the provisioner runs. An elevated
+    # provisioner is a scheduled task and returns 267014
+    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
+    # deliberately NOT elevated, so the command runs directly over WinRM and a
+    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
+    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
+    # fix covered the elevated code and not this one.
+    valid_exit_codes = [0, 1, 267014, 3010, 1641]
     timeout          = "40m"
   }
   provisioner "powershell" {
-    script           = "scripts/03-flarevm-wait.ps1"
-    valid_exit_codes = [0, 267014, 3010, 1641]
+    script = "scripts/03-flarevm-wait.ps1"
+    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
+    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
+    # code from it means the run was interrupted, not that the script decided
+    # something was wrong.
+    #
+    # Which code you get depends on how the provisioner runs. An elevated
+    # provisioner is a scheduled task and returns 267014
+    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
+    # deliberately NOT elevated, so the command runs directly over WinRM and a
+    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
+    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
+    # fix covered the elevated code and not this one.
+    valid_exit_codes = [0, 1, 267014, 3010, 1641]
     timeout          = "40m"
   }
   provisioner "powershell" {
-    script           = "scripts/03-flarevm-wait.ps1"
-    valid_exit_codes = [0, 267014, 3010, 1641]
+    script = "scripts/03-flarevm-wait.ps1"
+    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
+    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
+    # code from it means the run was interrupted, not that the script decided
+    # something was wrong.
+    #
+    # Which code you get depends on how the provisioner runs. An elevated
+    # provisioner is a scheduled task and returns 267014
+    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
+    # deliberately NOT elevated, so the command runs directly over WinRM and a
+    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
+    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
+    # fix covered the elevated code and not this one.
+    valid_exit_codes = [0, 1, 267014, 3010, 1641]
     timeout          = "40m"
   }
   provisioner "powershell" {
-    script           = "scripts/03-flarevm-wait.ps1"
-    valid_exit_codes = [0, 267014, 3010, 1641]
+    script = "scripts/03-flarevm-wait.ps1"
+    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
+    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
+    # code from it means the run was interrupted, not that the script decided
+    # something was wrong.
+    #
+    # Which code you get depends on how the provisioner runs. An elevated
+    # provisioner is a scheduled task and returns 267014
+    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
+    # deliberately NOT elevated, so the command runs directly over WinRM and a
+    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
+    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
+    # fix covered the elevated code and not this one.
+    valid_exit_codes = [0, 1, 267014, 3010, 1641]
     timeout          = "40m"
   }
   provisioner "powershell" {
-    script           = "scripts/03-flarevm-wait.ps1"
-    valid_exit_codes = [0, 267014, 3010, 1641]
+    script = "scripts/03-flarevm-wait.ps1"
+    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
+    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
+    # code from it means the run was interrupted, not that the script decided
+    # something was wrong.
+    #
+    # Which code you get depends on how the provisioner runs. An elevated
+    # provisioner is a scheduled task and returns 267014
+    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
+    # deliberately NOT elevated, so the command runs directly over WinRM and a
+    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
+    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
+    # fix covered the elevated code and not this one.
+    valid_exit_codes = [0, 1, 267014, 3010, 1641]
     timeout          = "40m"
   }
   provisioner "powershell" {
-    script           = "scripts/03-flarevm-wait.ps1"
-    valid_exit_codes = [0, 267014, 3010, 1641]
+    script = "scripts/03-flarevm-wait.ps1"
+    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
+    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
+    # code from it means the run was interrupted, not that the script decided
+    # something was wrong.
+    #
+    # Which code you get depends on how the provisioner runs. An elevated
+    # provisioner is a scheduled task and returns 267014
+    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
+    # deliberately NOT elevated, so the command runs directly over WinRM and a
+    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
+    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
+    # fix covered the elevated code and not this one.
+    valid_exit_codes = [0, 1, 267014, 3010, 1641]
     timeout          = "40m"
   }
   provisioner "powershell" {
-    script           = "scripts/03-flarevm-wait.ps1"
-    valid_exit_codes = [0, 267014, 3010, 1641]
+    script = "scripts/03-flarevm-wait.ps1"
+    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
+    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
+    # code from it means the run was interrupted, not that the script decided
+    # something was wrong.
+    #
+    # Which code you get depends on how the provisioner runs. An elevated
+    # provisioner is a scheduled task and returns 267014
+    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
+    # deliberately NOT elevated, so the command runs directly over WinRM and a
+    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
+    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
+    # fix covered the elevated code and not this one.
+    valid_exit_codes = [0, 1, 267014, 3010, 1641]
     timeout          = "40m"
   }
   provisioner "powershell" {
-    script           = "scripts/03-flarevm-wait.ps1"
-    valid_exit_codes = [0, 267014, 3010, 1641]
+    script = "scripts/03-flarevm-wait.ps1"
+    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
+    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
+    # code from it means the run was interrupted, not that the script decided
+    # something was wrong.
+    #
+    # Which code you get depends on how the provisioner runs. An elevated
+    # provisioner is a scheduled task and returns 267014
+    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
+    # deliberately NOT elevated, so the command runs directly over WinRM and a
+    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
+    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
+    # fix covered the elevated code and not this one.
+    valid_exit_codes = [0, 1, 267014, 3010, 1641]
     timeout          = "40m"
   }
   provisioner "powershell" {
-    script           = "scripts/03-flarevm-wait.ps1"
-    valid_exit_codes = [0, 267014, 3010, 1641]
+    script = "scripts/03-flarevm-wait.ps1"
+    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
+    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
+    # code from it means the run was interrupted, not that the script decided
+    # something was wrong.
+    #
+    # Which code you get depends on how the provisioner runs. An elevated
+    # provisioner is a scheduled task and returns 267014
+    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
+    # deliberately NOT elevated, so the command runs directly over WinRM and a
+    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
+    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
+    # fix covered the elevated code and not this one.
+    valid_exit_codes = [0, 1, 267014, 3010, 1641]
     timeout          = "40m"
   }
   provisioner "powershell" {
-    script           = "scripts/03-flarevm-wait.ps1"
-    valid_exit_codes = [0, 267014, 3010, 1641]
+    script = "scripts/03-flarevm-wait.ps1"
+    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
+    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
+    # code from it means the run was interrupted, not that the script decided
+    # something was wrong.
+    #
+    # Which code you get depends on how the provisioner runs. An elevated
+    # provisioner is a scheduled task and returns 267014
+    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
+    # deliberately NOT elevated, so the command runs directly over WinRM and a
+    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
+    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
+    # fix covered the elevated code and not this one.
+    valid_exit_codes = [0, 1, 267014, 3010, 1641]
     timeout          = "40m"
   }
 
