@@ -1,6 +1,17 @@
 # Generating Realistic Background Noise in Honeypot Networks
 
-> **Scope:** KVM host running Docker-based honeypot stack.  
+> **Status (2026-07-31): research. Nothing here is implemented, and none of
+> the addresses below exist.** This is kept as a technique reference — the
+> fingerprints in §1 and §9 are the durable part, and they are what any future
+> attempt has to answer. Tracked as
+> [#92](https://github.com/Xore/honeypot-stack/issues/92), which is not
+> scheduled: the observer this design is written against has to be identified
+> before any of it is worth building.
+>
+> Read §2 as an illustrative topology, not as this stack's. The commands below
+> are unmodified from the original research and refer to `virbr0` /
+> `10.0.1.0/24`, which are the document's own example network.
+
 > **Goal:** Make honeypot VMs and containers look indistinguishable from a live production network by injecting realistic ambient traffic — without contaminating your captured attacker data.
 
 ---
@@ -60,6 +71,16 @@ The goal is to eliminate all of these tells.
 ```
 
 The **noise-injector** runs on the KVM host itself (or a dedicated sidecar container bridged to `virbr0`) and emits packets directly onto the same L2 segment as the honeypot containers. Attacker traffic arriving from outside passes through the same bridge and is captured by Arkime/Zeek without modification.
+
+> **This is where the research and this stack part company.** The exposed
+> honeypots are containers on the `honeynet` Docker network, on a VPS, reached
+> from the internet through `portbridge` — there is no shared L2 segment with a
+> host-side injector on it, and no attacker holding a capture of one. The place
+> in this stack that *does* match the picture above is a sandbox guest on
+> `virbr-sandbox`, which sees exactly one neighbour (INetSim) and no ambient
+> traffic at all. Note also that `honeypot-sandbox-strict` blocks source-MAC
+> spoofing by design, so the §5 injector cannot run on a sandbox guest's own
+> segment as written. See [#92](https://github.com/Xore/honeypot-stack/issues/92).
 
 ---
 
@@ -448,6 +469,13 @@ You should see a mix of ARP, DNS UDP, NTP UDP, and ICMP within 30 seconds.
 ## 8. Isolating Noise from Attacker Captures
 
 Background noise **must not** pollute your attacker intelligence. Achieve separation at two levels:
+
+> This is the constraint that decides whether the whole idea is affordable. A
+> noise source that inflates event counts, the attack graph, or the top-talkers
+> list is worse than a silent honeypot, and every consumer needs the exclusion —
+> Suricata, Arkime, Zeek, and the dashboard's own counting. The precedent
+> already exists: the VPS sensor keeps the WireGuard tunnel out of its capture
+> with `bpf-filter: "not udp port 51820"` in `suricata.yaml`.
 
 ### 8.1 BPF filter in Arkime / Zeek
 
