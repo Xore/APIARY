@@ -65,6 +65,17 @@ The script is idempotent — safe to re-run after an image bump, a model change,
 or a reboot — and an existing `/etc/default/honeypot-ghidra` is never
 overwritten.
 
+One optional host package, deliberately not installed by the script because
+package managers are the one thing that differs on every host:
+
+```bash
+sudo apt install graphviz
+```
+
+Without `dot` the call graph is still recovered and written as DOT; only the
+rendered SVG is missing, and the worker says so (`[.] graphviz 'dot' not
+installed`) rather than failing.
+
 ### Where the stack lives
 
 On a host running Dockge (`/opt/stacks` exists) the compose file is deployed to
