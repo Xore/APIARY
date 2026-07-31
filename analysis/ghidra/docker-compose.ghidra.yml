@@ -18,7 +18,11 @@ services:
     environment:
       ANALYSIS_TIMEOUT: '3600'   # 1h for large binaries
     healthcheck:
-      test: ['CMD', 'curl', '-sf', 'http://localhost:9090/readyz']
+      # /readyz does not exist on this image — it 404s, and curl -sf treats
+      # that as failure, so the service never became healthy and revdeck's
+      # depends_on: service_healthy would have waited forever. The real
+      # endpoint is /v1/health, verified against 1.2.1 on 2026-07-31.
+      test: ['CMD', 'curl', '-sf', 'http://localhost:9090/v1/health']
       interval: 15s
       timeout: 5s
       retries: 10

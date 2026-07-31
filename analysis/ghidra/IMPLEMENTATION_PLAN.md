@@ -83,14 +83,34 @@ Use [`biniamfd/ghidra-headless-rest:latest`](https://hub.docker.com/r/biniamfd/g
 — the same image that powers Rev·Deck. It exposes a REST API on port 9090.
 
 ### REST API Endpoints Used
-| Endpoint | Purpose |
-|----------|---------|
-| `POST /analyze` | Submit binary for headless analysis |
-| `GET /functions` | List all functions |
-| `GET /decompile/{addr}` | Decompile a function |
-| `GET /strings` | All strings |
-| `GET /imports` | Dynamic imports |
-| `GET /export/ghidra-zip` | Download full Ghidra project archive |
+
+Verified 2026-07-31 against `biniamfd/ghidra-headless-rest:1.2.1`
+(Ghidra 11.3.2, artifact schema 2.1). **The table this section used to carry
+was wrong in five of six rows** — it was written from the upstream README, not
+from the running service, and it disagreed with the one in
+`DASHBOARD_INTEGRATION_PLAN.md`. The service is FastAPI; `GET /openapi.json` is
+the authority if this drifts again.
+
+| Endpoint | Purpose | Response envelope |
+|---|---|---|
+| `GET /v1/health` | Liveness — **not** `/readyz`, which 404s | `{"status":"ok"}` |
+| `POST /analyze` | Submit a binary, multipart field `file` | `{"job_id","status"}` |
+| `GET /status/{job_id}` | Poll; `queued` → `running` → `done` | object, incl. `analyzer_version` and the service's own `sha256` |
+| `GET /results/{job_id}/functions` | Functions, **paged** (`offset`/`limit`, default 100) | `{"total","offset","limit","functions":[…]}` |
+| `GET /results/{job_id}/strings` | Strings | `{"count","strings":[{"addr","s",…}]}` |
+| `GET /results/{job_id}/imports` | Imports | **bare array** of `{"name","library",…}` |
+| `GET /results/{job_id}/function/{addr}/decompile` | Pseudocode for one function | — |
+| `GET /v1/jobs/{job_id}/export` | Project archive (was `/export/ghidra-zip`) | — |
+
+Three things worth knowing before writing a client:
+
+* The last three collection endpoints use **three different envelopes** — a
+  paged object, a counted object, and a bare array. `GhidraClient` normalises
+  them so the stored result has one shape.
+* Functions are paged at 100 by default. `/bin/ls` alone returns 412, so a
+  client that reads the first page only silently truncates almost everything.
+* Field names are not what the result schema uses: functions carry `addr`, and
+  strings are objects with the text under `s`. Imports become `library!name`.
 
 ### Trigger
 GitHub Actions in `Xore/Honeypot` already triggers on sample push.

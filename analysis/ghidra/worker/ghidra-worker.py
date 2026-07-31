@@ -21,12 +21,11 @@ Stdlib only, deliberately: this runs on the host outside any container, and a
 worker that needs pip install before it can drain a queue is a worker that
 will be broken after the next OS upgrade.
 
-API CONTRACT — UNVERIFIED. The endpoints below come from
-DASHBOARD_INTEGRATION_PLAN.md Phase 1, not from a running container. They have
-never been exercised against biniamfd/ghidra-headless-rest:1.2.1. Everything
-touching the REST service is confined to GhidraClient so that correcting the
-shapes is a change in one class. Run --selftest against a live container
-before trusting any result this produces.
+API CONTRACT — verified 2026-07-31 against
+biniamfd/ghidra-headless-rest:1.2.1 (Ghidra 11.3.2, artifact schema 2.1) by
+running a real binary through it. The endpoints originally taken from the plan
+documents were wrong; see GhidraClient for what the service actually exposes.
+Re-check with --selftest after any image change.
 """
 
 from __future__ import annotations
@@ -62,6 +61,14 @@ ANALYSIS_TIMEOUT = int(os.environ.get("GHIDRA_ANALYSIS_TIMEOUT", "4200"))
 POLL_INTERVAL = int(os.environ.get("GHIDRA_POLL_INTERVAL", "10"))
 HTTP_TIMEOUT = int(os.environ.get("GHIDRA_HTTP_TIMEOUT", "60"))
 
+# /results/{job}/functions is paged and defaults to limit=100. Ask for larger
+# pages to cut round trips, and stop at MAX_FUNCTIONS so one enormous binary
+# cannot produce a result document too large for the dashboard to render. When
+# the cap truncates, the result says so rather than silently showing a round
+# number that looks like the real total.
+FUNCTION_PAGE = int(os.environ.get("GHIDRA_FUNCTION_PAGE", "500"))
+MAX_FUNCTIONS = int(os.environ.get("GHIDRA_MAX_FUNCTIONS", "20000"))
+
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -78,9 +85,28 @@ class GhidraError(RuntimeError):
 class GhidraClient:
     """Every call to the Ghidra REST service lives here.
 
-    Isolated on purpose: the endpoint names and payload shapes are taken from
-    the integration plan and have not been checked against a running
-    container, so this is the one class expected to need correcting.
+    Verified against biniamfd/ghidra-headless-rest:1.2.1 on 2026-07-31 by
+    submitting a real binary and reading the responses. The service is FastAPI
+    and publishes /openapi.json, which is the authority if this drifts.
+
+    The endpoints in DASHBOARD_INTEGRATION_PLAN.md and IMPLEMENTATION_PLAN.md
+    were both wrong, and they disagreed with each other. What is actually
+    exposed:
+
+        GET  /v1/health                     {"status": "ok"}   (NOT /readyz)
+        POST /analyze          multipart field "file"
+                               -> {"job_id": "...", "status": "queued"}
+        GET  /status/{job_id}  -> {"status": "queued|running|done", ...}
+        GET  /results/{job_id}/functions?offset=&limit=
+                               -> {"total","offset","limit","functions":[...]}
+        GET  /results/{job_id}/strings
+                               -> {"count", "strings": [{"addr","s",...}]}
+        GET  /results/{job_id}/imports
+                               -> [ {"name","library","address",...} ]   (bare list)
+
+    Note the three different envelope shapes across those last three: a paged
+    object, a counted object, and a bare array. They are normalised here so the
+    result JSON the dashboard reads has one stable shape.
     """
 
     def __init__(self, base: str) -> None:
@@ -107,15 +133,15 @@ class GhidraClient:
             raise GhidraError(f"{method} {path} -> {e}") from e
 
     def ready(self) -> bool:
-        """The container's own healthcheck endpoint."""
+        """/v1/health. The compose healthcheck used /readyz, which 404s."""
         try:
-            self._request("GET", "/readyz", timeout=10)
-            return True
+            resp = self._request("GET", "/v1/health", timeout=10)
+            return isinstance(resp, dict) and resp.get("status") == "ok"
         except GhidraError:
             return False
 
     def analyze(self, sample: Path) -> str:
-        """Upload a binary. Returns the job/program id used by later calls."""
+        """Upload a binary. Returns the job id used by every later call."""
         boundary = uuid.uuid4().hex
         filename = sample.name
         ctype = mimetypes.guess_type(filename)[0] or "application/octet-stream"
@@ -131,41 +157,86 @@ class GhidraClient:
             "POST", "/analyze", body=b"".join(parts),
             content_type=f"multipart/form-data; boundary={boundary}",
             timeout=ANALYSIS_TIMEOUT)
-        if isinstance(resp, dict):
-            for key in ("id", "job_id", "program_id", "program"):
-                if resp.get(key):
-                    return str(resp[key])
-        raise GhidraError(f"/analyze gave no usable job id: {resp!r}")
+        if isinstance(resp, dict) and resp.get("job_id"):
+            return str(resp["job_id"])
+        raise GhidraError(f"/analyze gave no job_id: {resp!r}")
 
-    def wait(self, job: str) -> None:
-        """Block until analysis finishes, or raise on timeout."""
+    def wait(self, job: str) -> dict:
+        """Block until analysis finishes. Returns the final status document.
+
+        Observed states: queued -> running -> done. The status document also
+        carries analyzer_version and the service's own sha256 of the sample,
+        both worth recording in the result for provenance.
+        """
         deadline = time.monotonic() + ANALYSIS_TIMEOUT
         while time.monotonic() < deadline:
             resp = self._request("GET", f"/status/{job}")
             state = (resp or {}).get("status") if isinstance(resp, dict) else None
-            if state in ("done", "complete", "completed", "finished"):
-                return
-            if state in ("error", "failed"):
+            if state == "done":
+                return resp
+            if state in ("error", "failed", "cancelled"):
                 raise GhidraError(f"analysis of {job} failed server-side: {resp!r}")
             time.sleep(POLL_INTERVAL)
         raise GhidraError(f"analysis of {job} exceeded {ANALYSIS_TIMEOUT}s")
 
-    def collect(self, job: str) -> dict:
-        """Fetch the artifacts the result JSON is built from.
+    def _functions(self, job: str) -> list:
+        """Page through /results/{job}/functions.
 
-        A missing section is recorded as empty rather than fatal: a report
-        with strings but no imports is still worth having, and losing the
-        whole analysis because one endpoint moved would be the wrong trade.
+        The endpoint is paged and defaults to limit=100. A stripped binary can
+        have thousands of functions, so taking the first page only would
+        silently truncate every large sample — the kind of loss that looks like
+        a small binary rather than a bug.
         """
-        out: dict = {}
-        for key, path in (("functions", f"/functions/{job}"),
-                          ("strings",   f"/strings/{job}"),
-                          ("imports",   f"/imports/{job}")):
-            try:
-                out[key] = self._request("GET", path) or []
-            except GhidraError as e:
-                log(f"  [!] {key}: {e}")
-                out[key] = []
+        out, offset = [], 0
+        while True:
+            page = self._request(
+                "GET", f"/results/{job}/functions?offset={offset}&limit={FUNCTION_PAGE}")
+            if not isinstance(page, dict):
+                break
+            items = page.get("functions") or []
+            out.extend({
+                "address": f.get("addr", ""),
+                "name": f.get("name") or f.get("canonical_name", ""),
+                "signature": f.get("signature", ""),
+            } for f in items)
+            total = page.get("total", len(out))
+            offset += len(items)
+            if not items or offset >= total or len(out) >= MAX_FUNCTIONS:
+                break
+        return out
+
+    def collect(self, job: str) -> dict:
+        """Fetch the artifacts the result JSON is built from, normalised.
+
+        A single failing section is recorded as empty rather than fatal: a
+        report with strings but no imports is still worth having. Every section
+        failing is a different matter and is caught by the caller — that means
+        the contract is broken, not that the binary is empty.
+        """
+        out: dict = {"functions": [], "strings": [], "imports": []}
+        try:
+            out["functions"] = self._functions(job)
+        except GhidraError as e:
+            log(f"  [!] functions: {e}")
+        try:
+            resp = self._request("GET", f"/results/{job}/strings")
+            items = resp.get("strings", []) if isinstance(resp, dict) else (resp or [])
+            # Each entry is an object; "s" holds the text.
+            out["strings"] = [i.get("s", "") for i in items if isinstance(i, dict) and i.get("s")]
+        except GhidraError as e:
+            log(f"  [!] strings: {e}")
+        try:
+            resp = self._request("GET", f"/results/{job}/imports")
+            # Bare list here, unlike the two above.
+            items = resp if isinstance(resp, list) else (resp or {}).get("imports", [])
+            # "library!name" is the format the plan specified and the format
+            # the dashboard search matches on.
+            out["imports"] = [
+                f"{i.get('library', '?')}!{i.get('name', '')}"
+                for i in items if isinstance(i, dict) and i.get("name")
+            ]
+        except GhidraError as e:
+            log(f"  [!] imports: {e}")
         return out
 
 
@@ -207,8 +278,23 @@ def analyse_one(client: GhidraClient, sha: str, sample: Path,
     started = now()
     job = client.analyze(sample)
     log(f"  analysing {sha} as job {job}")
-    client.wait(job)
+    status = client.wait(job)
     parts = client.collect(job)
+
+    # Every section empty means the API contract is broken, not that the binary
+    # is empty. Reporting that as a clean "ok" result is the failure mode this
+    # worker most needs to avoid: the dashboard would render a tidy analysis
+    # showing no imports and no strings, and an analyst would read it as a fact
+    # about the sample. A real binary always yields at least one of the three.
+    if not any(parts[k] for k in ("functions", "strings", "imports")):
+        raise GhidraError(
+            f"job {job} completed but returned no functions, strings or "
+            f"imports - the API contract is probably broken (run --selftest)")
+
+    truncated = len(parts["functions"]) >= MAX_FUNCTIONS
+    if truncated:
+        log(f"  [!] function list truncated at {MAX_FUNCTIONS}")
+
     return {
         "version": RESULT_VERSION,
         "sha256": sha,
@@ -216,12 +302,20 @@ def analyse_one(client: GhidraClient, sha: str, sample: Path,
         "started_at": started,
         "completed_at": now(),
         "exit_status": "ok",
+        # Straight from the service, so a result can be tied to the analyser
+        # that produced it after an image upgrade. service_sha256 is the
+        # service's own hash of what it received: if it disagrees with the
+        # filename hash, something substituted the sample in transit.
+        "analyzer_version": status.get("analyzer_version", ""),
+        "artifact_schema_version": status.get("artifact_schema_version", ""),
+        "service_sha256": status.get("sha256", ""),
         "functions": parts["functions"],
+        "functions_truncated": truncated,
         "strings": parts["strings"],
         "imports": parts["imports"],
-        # Populated by IMPLEMENTATION_PLAN.md phases 3-5, which are not built
-        # yet. Emitted as empty rather than omitted so the dashboard can read
-        # one stable shape and does not need to special-case older results.
+        # Populated by IMPLEMENTATION_PLAN.md phases 3-5 (see #102, #103), which
+        # are not built. Emitted as empty rather than omitted so the dashboard
+        # reads one stable shape and needs no special case for older results.
         "findcrypt": [],
         "call_graph_svg": None,
         "ai_triage": None,
@@ -304,22 +398,51 @@ def drain() -> int:
 
 
 def selftest() -> int:
-    """Check reachability and endpoint shapes against a live container.
+    """Check reachability and the endpoint contract against a live container.
 
-    Exists because the API contract in this file is unverified. Run it once
-    against a running biniamfd/ghidra-headless-rest before trusting output.
+    The contract was verified once, on 2026-07-31, against
+    biniamfd/ghidra-headless-rest:1.2.1. This exists so an image upgrade that
+    moves an endpoint is caught deliberately rather than by an analyst noticing
+    that every report has become empty.
     """
     client = GhidraClient(API_BASE)
+    ok = client.ready()
     print(f"API_BASE      : {API_BASE}")
-    print(f"/readyz       : {'OK' if client.ready() else 'UNREACHABLE'}")
+    print(f"/v1/health    : {'OK' if ok else 'UNREACHABLE'}")
     print(f"REQUEST_DIR   : {REQUEST_DIR} (exists={REQUEST_DIR.is_dir()})")
     print(f"RESULTS_DIR   : {RESULTS_DIR} (exists={RESULTS_DIR.is_dir()})")
     print(f"SAMPLES_DIR   : {SAMPLES_DIR} (exists={SAMPLES_DIR.is_dir()})")
-    print("\nNOTE: /analyze, /status, /functions, /strings and /imports are")
-    print("taken from DASHBOARD_INTEGRATION_PLAN.md and are NOT verified.")
-    print("Confirm them against the container's own API docs before relying")
-    print("on any result this worker writes.")
-    return 0 if client.ready() else 1
+    if not ok:
+        print("\nStart it with:")
+        print("  docker compose -f analysis/ghidra/docker-compose.ghidra.yml up -d ghidra")
+        return 1
+
+    # Exercise the whole chain on a known-good local binary. Anything with code
+    # in it will do; the point is the API, not the sample.
+    probe = Path("/bin/true")
+    if not probe.is_file():
+        print("\n/bin/true not present - skipping the round trip")
+        return 0
+    print(f"\nround trip on {probe} ...")
+    try:
+        job = client.analyze(probe)
+        status = client.wait(job)
+        parts = client.collect(job)
+    except GhidraError as e:
+        print(f"  FAILED: {e}")
+        print("  The endpoint contract has probably changed. Compare against")
+        print(f"  {API_BASE}/openapi.json, which is the authority.")
+        return 1
+    print(f"  job            : {job}")
+    print(f"  analyzer       : {status.get('analyzer_version')} "
+          f"(artifacts {status.get('artifact_schema_version')})")
+    for key in ("functions", "strings", "imports"):
+        print(f"  {key:<15}: {len(parts[key])}")
+    if not any(parts[k] for k in ("functions", "strings", "imports")):
+        print("  FAILED: every section empty - the contract is broken")
+        return 1
+    print("\ncontract OK")
+    return 0
 
 
 def main() -> int:

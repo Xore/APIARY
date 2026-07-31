@@ -6,33 +6,57 @@ from pathlib import Path
 
 WORKER = str(Path(__file__).resolve().parent / "ghidra-worker.py")
 
+# Real field names, captured from the live service. Functions use "addr" (not
+# "address"); strings are objects with the text under "s"; imports are objects
+# the worker joins into "library!name".
+FUNCS = [{"addr": "0x401000", "name": "sub_401000", "signature": "int f()",
+          "canonical_name": "sub_401000"}]
+STRINGS = ["hello", "evil.example"]
+IMPORTS = [{"name": "CreateProcessA", "library": "kernel32.dll",
+            "address": "0xexternal:01", "ordinal": None}]
+
 
 class Stub(BaseHTTPRequestHandler):
+    """Serves the REAL biniamfd/ghidra-headless-rest:1.2.1 contract.
+
+    Shapes captured from a live container on 2026-07-31, not invented. That
+    matters: the first version of this stub served endpoints taken from the
+    plan documents, every one of which was wrong, and the suite passed anyway.
+    A stub that agrees with the code instead of with the service tests nothing.
+
+    Note the three different envelopes below — paged object, counted object,
+    bare array. They are genuinely inconsistent in the real API.
+    """
+
     def log_message(self, *a): pass
 
-    def _json(self, obj, code=200):
-        b = json.dumps(obj).encode()
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(b)))
-        self.end_headers()
-        self.wfile.write(b)
+    def _j(self, o, c=200):
+        b = json.dumps(o).encode()
+        self.send_response(c); self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
 
     def do_GET(self):
-        p = self.path
-        if p == "/readyz":                 return self._json({"ok": True})
-        if p.startswith("/status/"):       return self._json({"status": "done"})
-        if p.startswith("/functions/"):    return self._json(
-            [{"address": "0x401000", "name": "sub_401000", "signature": "int f()"}])
-        if p.startswith("/strings/"):      return self._json(["hello", "evil.com"])
-        if p.startswith("/imports/"):      return self._json(["kernel32.dll!CreateProcessA"])
-        self._json({"err": "nope"}, 404)
+        p = self.path.split("?")[0]
+        if p == "/v1/health":
+            return self._j({"status": "ok"})
+        if p.startswith("/status/"):
+            return self._j({"status": "done", "analyzer_version": "ghidra-11.3.2",
+                            "artifact_schema_version": "2.1", "sha256": "a" * 64})
+        if p.endswith("/functions"):
+            return self._j({"total": len(FUNCS), "offset": 0, "limit": 500,
+                            "functions": FUNCS})
+        if p.endswith("/strings"):
+            return self._j({"count": len(STRINGS),
+                            "strings": [{"addr": "0x1", "s": v} for v in STRINGS]})
+        if p.endswith("/imports"):
+            return self._j(IMPORTS)
+        self._j({"detail": "Not Found"}, 404)
 
     def do_POST(self):
         if self.path == "/analyze":
             self.rfile.read(int(self.headers.get("Content-Length", 0)))
-            return self._json({"id": "job-123"})
-        self._json({"err": "nope"}, 404)
+            return self._j({"job_id": "job-123", "status": "queued"})
+        self._j({"detail": "Not Found"}, 404)
 
 
 def run(env, tmp):
@@ -77,8 +101,13 @@ def main():
         d = json.loads(rf.read_text())
         check(d["exit_status"] == "ok", "exit_status ok")
         check(d["sha256"] == good, "sha256 recorded")
-        check(len(d["strings"]) == 2, "strings collected")
-        check(len(d["imports"]) == 1, "imports collected")
+        check(len(d["strings"]) == 2, "strings collected (unwrapped from .s)")
+        check(d["imports"] == ["kernel32.dll!CreateProcessA"],
+              "imports joined as library!name")
+        check(d["functions"][0]["address"] == "0x401000",
+              "function addr mapped to address")
+        check(d.get("analyzer_version") == "ghidra-11.3.2",
+              "analyzer version recorded from /status")
         check(d["version"] == 1, "version stamped")
         check(all(k in d for k in ("findcrypt", "call_graph_svg", "ai_triage",
                                    "report_pdf")), "future keys present")

@@ -4,21 +4,23 @@
 > UI, alerting, environment and compose wiring are in place, tested, and
 > rendered in a browser against fixture results.
 >
-> **One thing is NOT verified: the Ghidra REST API contract.** `/analyze`,
-> `/status/{job}`, `/functions/{job}`, `/strings/{job}` and `/imports/{job}`
-> come from this document, not from a running
-> `biniamfd/ghidra-headless-rest:1.2.1`. No result has ever come from actual
-> Ghidra. Everything downstream is correct with respect to *this plan*, which
-> is not the same as correct. They are confined to the `GhidraClient` class in
-> `worker/ghidra-worker.py` so correcting them is a one-class change.
+> **The REST API contract is now verified** (2026-07-31) against
+> `biniamfd/ghidra-headless-rest:1.2.1` — Ghidra 11.3.2, artifact schema 2.1 —
+> by running real binaries end to end. Five of the six endpoints originally
+> taken from these plans were wrong. The corrected table lives in
+> [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md#rest-api-endpoints-used);
+> `GET /openapi.json` on the service is the authority.
 >
-> Before trusting any output, run:
+> Re-check after any image change:
 >
 > ```bash
+> docker compose -f analysis/ghidra/docker-compose.ghidra.yml up -d ghidra
 > python3 analysis/ghidra/worker/ghidra-worker.py --selftest
 > ```
 >
-> against a live container, and fix whatever it reports.
+> Still unbuilt: `findcrypt` and `call_graph_svg` are always empty (#102) and
+> `ai_triage` is always null (#103). The worker has not been deployed on any
+> host (#104).
 
 > **Status**: Design document — nothing here is built yet
 > **Tracked in**: [#76](https://github.com/Xore/honeypot-stack/issues/76)
