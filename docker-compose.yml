@@ -34,12 +34,17 @@ services:
   # this file holds only services that run continuously. See that file's
   # header for the full reasoning (#111).
   #
-  # The three init-wait-* services below are the replacement for
-  # depends_on: condition: service_completed_successfully against those jobs
-  # -- that condition cannot cross a Compose project boundary. Each polls for
-  # the completion marker its counterpart in honeypot-init writes, and every
-  # service that used to depend on the moved job now depends on the matching
-  # wait service instead, with the same condition: service_completed_successfully.
+  # The init-wait-* services below exist because depends_on: condition:
+  # service_completed_successfully cannot cross a Compose project boundary --
+  # each polls for the completion marker its counterpart in honeypot-init
+  # writes, and dependents wait on the matching shim with that same
+  # condition. Being migrated off, service by service, per #130: instead of
+  # a same-project depends_on against a shim, a dependent's own entrypoint
+  # waits on the marker file directly (mount
+  # state/init-markers:ro, same file each shim already polls). Once a shim
+  # has zero remaining dependents it's deleted -- init-wait-elasticsearch-
+  # setup is already gone (#125); filebeat waits on its own marker now, same
+  # pattern any migrated service below follows.
   init-wait-log:
     <<: *runtime-defaults
     image: busybox:latest
@@ -51,26 +56,6 @@ services:
       - >
         until [ -f /markers/log-init.done ]; do
           echo "waiting for honeypot-init: log-init..."; sleep 3;
-        done
-    volumes:
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
-    deploy:
-      resources:
-        limits:
-          cpus: "0.1"
-          memory: 32M
-
-  init-wait-elasticsearch-setup:
-    <<: *runtime-defaults
-    image: busybox:latest
-    container_name: hp-init-wait-elasticsearch-setup
-    restart: no
-    command:
-      - sh
-      - -c
-      - >
-        until [ -f /markers/elasticsearch-setup.done ]; do
-          echo "waiting for honeypot-init: elasticsearch-setup..."; sleep 3;
         done
     volumes:
       - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
@@ -970,10 +955,17 @@ services:
     container_name: hp-filebeat
     restart: unless-stopped
     user: root
+    # #125: init-wait-elasticsearch-setup used to gate this via same-project
+    # depends_on: condition: service_completed_successfully. Waits on the
+    # marker directly instead -- filebeat's own image entrypoint still runs
+    # first and execs this command, same as before, just with the wait
+    # spliced in ahead of the real filebeat invocation.
     command:
-      - filebeat
-      - -e
-      - --strict.perms=false
+      - sh
+      - -c
+      - >
+        until [ -f /markers/elasticsearch-setup.done ]; do sleep 3; done;
+        exec filebeat -e --strict.perms=false
     volumes:
       - ./analysis/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
       # Persist the filestream registry so recreating Filebeat does not ingest
@@ -981,11 +973,9 @@ services:
       - /opt/stacks/honeypot-stack/state/filebeat:/usr/share/filebeat/data
       - /opt/stacks/honeypot-stack/logs:/logs:ro
       - /opt/stacks/honeypot-stack/logs/suricata:/var/log/suricata:ro
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
     networks:
       - honeynet
-    depends_on:
-      init-wait-elasticsearch-setup:
-        condition: service_completed_successfully
     deploy:
       resources:
         limits:
