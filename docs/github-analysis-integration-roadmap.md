@@ -118,9 +118,14 @@ honeypot-stack/
 └── dashboard/
     ├── github_analysis.go                 ← NEW: mirrors sandbox.go
     ├── github_analysis_submit.go          ← NEW: mirrors sandbox_submit.go
-    ├── page_github_analysis.go            ← NEW: list + detail templates
+    ├── page_github_analysis.go            ← NEW: list + detail page data, mirrors page_sandbox.go
+    ├── ui/github_analysis.html            ← NEW: the markup, alongside ui/sandbox.html
     └── page_payloads.go                   ← adds the per-row button
 ```
+
+The `page_*.go` files hold page **data**; the markup is a file under
+`dashboard/ui/`. Putting templates back into Go fails the build — see the
+render-engine guide.
 
 Data flow:
 
