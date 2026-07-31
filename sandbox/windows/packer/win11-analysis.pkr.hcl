@@ -193,7 +193,7 @@ build {
   name    = "win11-analysis"
   sources = ["source.qemu.win11"]
 
-  # Step 0: Stage the FakeNet config. setup_analysis.ps1 moves it into
+  # Step 0: Stage the FakeNet config. 04-tools.ps1 moves it into
   # C:\Tools\FakeNet\configs\ once that directory exists; run_sample.py passes
   # it to fakenet -c at every detonation, so it has to be baked in here.
   # Destination is Temp because it is the one directory guaranteed to exist
@@ -203,16 +203,127 @@ build {
     destination = "C:/Windows/Temp/honeypot_fakenet.ini"
   }
 
-  # Step 1: Run main setup script (Chocolatey, FLARE-VM, Sysmon, logging, hardening)
+  # ┌─ WHY THIS IS FOUR SCRIPTS AND NOT ONE ────────────────────────────────┐
+  # │ FLARE-VM installs through Boxstarter, which reboots the guest an      │
+  # │ unpredictable number of times and resumes via auto-login. Packer runs │
+  # │ an elevated provisioner as a Windows scheduled task, so every one of  │
+  # │ those reboots terminates the running task with 0x41306               │
+  # │ (SCHED_S_TASK_TERMINATED), which Packer reports as                    │
+  # │ "Script exited with non-zero exit status: 267014".                    │
+  # │                                                                       │
+  # │ With hardening, FLARE-VM and tooling in a single script that was      │
+  # │ fatal: the 2026-07-31 14:27 build died after 30 minutes with          │
+  # │ FLARE-VM's debloat.vm already installed, and the Sysmon/FakeNet/      │
+  # │ Regshot phases never ran at all.                                      │
+  # │                                                                       │
+  # │ So: do the fast local work first (step 1), trigger FLARE-VM and let   │
+  # │ go of it (step 2), absorb the reboots in bounded idempotent slices    │
+  # │ (step 3, repeated), then install the tooling once the guest has       │
+  # │ settled (step 4). 267014 is accepted wherever a reboot can land.      │
+  # └───────────────────────────────────────────────────────────────────────┘
+
+  # Step 1: hardening + Chocolatey. Fast, local, no reboots.
   provisioner "powershell" {
-    script            = "scripts/setup_analysis.ps1"
+    script            = "scripts/01-hardening.ps1"
     elevated_user     = var.winrm_user
     elevated_password = var.winrm_pass
-    # Long timeout for FLARE-VM install
-    timeout = "5h"
+    timeout           = "30m"
   }
 
-  # Step 2: Final cleanup + sysprep-lite (do NOT full sysprep — breaks some tools)
+  # Step 2: trigger FLARE-VM and return. Boxstarter may reboot immediately, so
+  # a terminated task here is a normal outcome, not a failure.
+  provisioner "powershell" {
+    script            = "scripts/02-flarevm-start.ps1"
+    elevated_user     = var.winrm_user
+    elevated_password = var.winrm_pass
+    valid_exit_codes  = [0, 267014, 3010, 1641]
+    timeout           = "30m"
+  }
+
+  # Step 3: twelve 20-minute wait slices — a 4 h ceiling, matching FLARE-VM's
+  # documented 2-4 h. Each slice returns immediately once the completion
+  # marker exists, so finishing early costs nothing but a few WinRM round
+  # trips. A reboot simply ends the current slice and the next one picks up.
+  # Not elevated: these only poll for a file, and a non-elevated provisioner
+  # is not run as a scheduled task, so it has one less way to be killed.
+  provisioner "powershell" {
+    script           = "scripts/03-flarevm-wait.ps1"
+    valid_exit_codes = [0, 267014, 3010, 1641]
+    timeout          = "40m"
+  }
+  provisioner "powershell" {
+    script           = "scripts/03-flarevm-wait.ps1"
+    valid_exit_codes = [0, 267014, 3010, 1641]
+    timeout          = "40m"
+  }
+  provisioner "powershell" {
+    script           = "scripts/03-flarevm-wait.ps1"
+    valid_exit_codes = [0, 267014, 3010, 1641]
+    timeout          = "40m"
+  }
+  provisioner "powershell" {
+    script           = "scripts/03-flarevm-wait.ps1"
+    valid_exit_codes = [0, 267014, 3010, 1641]
+    timeout          = "40m"
+  }
+  provisioner "powershell" {
+    script           = "scripts/03-flarevm-wait.ps1"
+    valid_exit_codes = [0, 267014, 3010, 1641]
+    timeout          = "40m"
+  }
+  provisioner "powershell" {
+    script           = "scripts/03-flarevm-wait.ps1"
+    valid_exit_codes = [0, 267014, 3010, 1641]
+    timeout          = "40m"
+  }
+  provisioner "powershell" {
+    script           = "scripts/03-flarevm-wait.ps1"
+    valid_exit_codes = [0, 267014, 3010, 1641]
+    timeout          = "40m"
+  }
+  provisioner "powershell" {
+    script           = "scripts/03-flarevm-wait.ps1"
+    valid_exit_codes = [0, 267014, 3010, 1641]
+    timeout          = "40m"
+  }
+  provisioner "powershell" {
+    script           = "scripts/03-flarevm-wait.ps1"
+    valid_exit_codes = [0, 267014, 3010, 1641]
+    timeout          = "40m"
+  }
+  provisioner "powershell" {
+    script           = "scripts/03-flarevm-wait.ps1"
+    valid_exit_codes = [0, 267014, 3010, 1641]
+    timeout          = "40m"
+  }
+  provisioner "powershell" {
+    script           = "scripts/03-flarevm-wait.ps1"
+    valid_exit_codes = [0, 267014, 3010, 1641]
+    timeout          = "40m"
+  }
+  provisioner "powershell" {
+    script           = "scripts/03-flarevm-wait.ps1"
+    valid_exit_codes = [0, 267014, 3010, 1641]
+    timeout          = "40m"
+  }
+
+  # Step 4: settle the guest before installing tooling. Boxstarter routinely
+  # leaves a pending reboot behind, and Sysmon's driver install is not
+  # something to attempt in that state.
+  provisioner "windows-restart" {
+    restart_timeout = "30m"
+  }
+
+  # Step 5: the analysis tooling run_sample.py actually depends on. Runs once,
+  # after the reboots are over. Also records whether FLARE-VM made it.
+  provisioner "powershell" {
+    script            = "scripts/04-tools.ps1"
+    elevated_user     = var.winrm_user
+    elevated_password = var.winrm_pass
+    timeout           = "60m"
+  }
+
+  # Step 6: final cleanup + sysprep-lite (do NOT full sysprep — breaks some tools)
   provisioner "powershell" {
     inline = [
       # Clear event logs (start fresh for analysis)

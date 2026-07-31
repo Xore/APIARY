@@ -335,7 +335,7 @@ packer build win11-analysis.pkr.hcl
 ### What Packer Does
 1. Boot Windows 11 ISO with `autounattend.xml` (fully unattended install)
 2. WinRM auto-enabled via `SetupComplete.cmd` in autounattend
-3. PowerShell provisioner runs `setup_analysis.ps1`:
+3. PowerShell provisioners run `01-hardening.ps1`, `02-flarevm-start.ps1`, `03-flarevm-wait.ps1` (x12), `04-tools.ps1`:
    - Installs FLARE-VM (Chocolatey)
    - Installs Sysmon + SwiftOnSecurity config
    - Enables PS ScriptBlock/Module/Transcription logging
@@ -388,7 +388,7 @@ virsh snapshot-revert win11-sandbox GOLDEN_READY --running
 ## Phase 3 — Windows 11 Hardening for Malware Analysis
 
 Implemented in
-[`packer/scripts/setup_analysis.ps1`](packer/scripts/setup_analysis.ps1) — the
+[`packer/scripts/`](packer/scripts/) — four provisioner scripts, the
 hardening and anti-evasion phases run at image-build time, not as a separate
 script. (Earlier revisions of this plan named a `setup/harden_analysis_vm.ps1`
 that was never written.)
@@ -791,7 +791,7 @@ sandbox/windows/
 │   ├── win11-kvm.xml             ← libvirt domain XML template
 │   ├── autounattend.xml          ← Windows unattended install answer file
 │   └── scripts/
-│       └── setup_analysis.ps1    ← runs inside VM during Packer build
+│       └── 01-hardening.ps1 … 04-tools.ps1  ← run inside VM during build
 ├── setup/
 │   ├── prepare_vm.ps1            ← manual prep (if not using Packer)
 │   ├── enable_logging.ps1        ← Sysmon + PS logging

@@ -192,7 +192,7 @@
            come up". -->
       <FirstLogonCommands>
         <!-- Defender exclusions come first, deliberately: the instant WinRM
-             answers, Packer starts uploading setup_analysis.ps1, and if
+             answers, Packer starts uploading 01-hardening.ps1, and if
              Defender is still inspecting content that upload is rejected
              mid-stream.
 

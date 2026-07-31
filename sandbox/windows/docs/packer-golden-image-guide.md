@@ -48,7 +48,7 @@ KVM Host
   │     ├── 2. autounattend.xml on secondary CD → fully unattended install
   │     ├── 3. WinRM auto-enabled via FirstLogonCommands
   │     ├── 4. Packer connects via WinRM → runs PowerShell provisioners
-  │     ├── 5. setup_analysis.ps1: Chocolatey → FLARE-VM → Sysmon →
+  │     ├── 5. 01-hardening → 02-flarevm-start → 03-wait ×12 → 04-tools:
   │     │                        PS logging → FakeNet-NG → hardening
   │     └── 6. Shutdown → export win11-analysis.qcow2
   │
@@ -362,7 +362,7 @@ and WinRM still did not come up. Mount the qcow2 (or take a screenshot with
 
 ## Step 4: The Provisioner Script
 
-File: [`sandbox/windows/packer/scripts/setup_analysis.ps1`](../packer/scripts/setup_analysis.ps1)
+File: [`sandbox/windows/packer/scripts/`](../packer/scripts/) (01-hardening, 02-flarevm-start, 03-flarevm-wait, 04-tools)
 
 This runs inside the Windows VM via WinRM during the Packer build.
 It has 14 sequential phases, numbered in the script's own `[Phase n]` output:
