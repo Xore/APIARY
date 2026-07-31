@@ -4,7 +4,7 @@
 > the addresses below exist.** This is kept as a technique reference — the
 > fingerprints in §1 and §9 are the durable part, and they are what any future
 > attempt has to answer. Tracked as
-> [#92](https://github.com/Xore/honeypot-stack/issues/92), which is not
+> [#71](https://github.com/Xore/honeypot-stack/issues/71), which is not
 > scheduled: the observer this design is written against has to be identified
 > before any of it is worth building.
 >
@@ -80,7 +80,7 @@ The **noise-injector** runs on the KVM host itself (or a dedicated sidecar conta
 > `virbr-sandbox`, which sees exactly one neighbour (INetSim) and no ambient
 > traffic at all. Note also that `honeypot-sandbox-strict` blocks source-MAC
 > spoofing by design, so the §5 injector cannot run on a sandbox guest's own
-> segment as written. See [#92](https://github.com/Xore/honeypot-stack/issues/92).
+> segment as written. See [#71](https://github.com/Xore/honeypot-stack/issues/71).
 
 ---
 
