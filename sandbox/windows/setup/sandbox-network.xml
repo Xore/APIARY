@@ -27,7 +27,7 @@
     iptables -I FORWARD -i virbr-sandbox -o <wan-if> -j DROP
     iptables -I FORWARD -i <wan-if> -o virbr-sandbox -j DROP
 -->
-<network>
+<network xmlns:dnsmasq='http://libvirt.org/schemas/network/dnsmasq/1.0'>
   <name>sandbox</name>
   <bridge name='virbr-sandbox' stp='on' delay='0'/>
 
@@ -47,17 +47,33 @@
     </dhcp>
   </ip>
 
-  <!-- The guest is handed 10.10.10.254 as its resolver by DHCP, and dnsmasq
-       forwards every query to INetSim, which answers all of them with its
-       own address. That is what keeps a sample talking: a lookup that fails
-       ends the conversation and the report says nothing.
+  <!-- DNS goes straight from the guest to INetSim. Every lookup is answered
+       with INetSim's own address, which is what keeps a sample talking: a
+       lookup that fails ends the conversation and the report says nothing.
 
-       The forwarder is the *only* one. With no upstream resolver listed,
-       there is no path by which a real name could ever be resolved, even if
-       the FORWARD rules were removed. If INetSim is not running the guest
-       gets SERVFAIL — the correct failure, and a visible one. -->
-  <dns>
-    <forwarder addr='10.10.10.1'/>
-  </dns>
+       ┌─ WHY NOT <dns><forwarder addr='10.10.10.1'/></dns> ────────────────┐
+       │ That was the earlier shape, and it cannot work here. It hands the  │
+       │ guest 10.10.10.254 as its resolver and asks libvirt's dnsmasq to   │
+       │ forward to INetSim. dnsmasq runs on the *host*, and INetSim is a   │
+       │ macvlan container — a host cannot talk to a macvlan child of its   │
+       │ own parent interface. docker-compose.sandbox.yml says so outright: │
+       │ "the host itself cannot talk to these containers." So every query  │
+       │ would SERVFAIL and every sample would go quiet.                    │
+       │                                                                    │
+       │ dhcp-option=6 replaces the resolver rather than chaining to it, so │
+       │ the guest queries 10.10.10.1 directly and the host is not in the   │
+       │ path at all. One less hop and one less thing to be running.        │
+       └────────────────────────────────────────────────────────────────────┘
+
+       There is still no upstream resolver anywhere, so no path by which a
+       real name could resolve even if the FORWARD rules were removed. If
+       INetSim is down the guest gets no answer — the correct failure, and a
+       visible one.
+
+       Verify from inside the guest, which is the check that counts:
+         nslookup example.com    # must answer 10.10.10.1, not the truth -->
   <domain name='sandbox.local'/>
+  <dnsmasq:options>
+    <dnsmasq:option value='dhcp-option=6,10.10.10.1'/>
+  </dnsmasq:options>
 </network>

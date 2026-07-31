@@ -285,15 +285,19 @@ usermod -aG kvm,libvirt,docker $USER
 
 ### Isolated libvirt Network
 
-```xml
-<!-- /etc/libvirt/qemu/networks/sandbox.xml -->
-<network>
-  <name>sandbox</name>
-  <bridge name='virbr-sandbox'/>
-  <ip address='10.10.10.254' netmask='255.255.255.0'/>
-  <!-- NO <forward> = fully isolated, no NAT, no routing to WAN -->
-</network>
-```
+The network is defined by [`setup/sandbox-network.xml`](setup/sandbox-network.xml)
+— read it there rather than from a copy here. The sketch this section used to
+carry had neither the DHCP reservation nor the DNS option, and a network
+defined from it would come up without the pinned `10.10.10.2` lease that
+`VM_HOST` depends on.
+
+The three things that file gets right, and that any replacement must too:
+
+| | Why |
+|---|---|
+| No `<forward>` element | Its absence *is* the isolation — no NAT, no route to WAN. Never add it "temporarily". |
+| One-address DHCP pool, pinned to the guest MAC | `VM_HOST=10.10.10.2` is always correct, so the orchestrator never discovers a lease. A second guest failing to get an address is the desired outcome: two samples on one bridge contaminate each other's network evidence. |
+| `dhcp-option=6,10.10.10.1` — not `<dns><forwarder/></dns>` | The guest must query INetSim *directly*. A forwarder would route DNS through libvirt's dnsmasq, a host process, which cannot reach a macvlan container — every lookup would SERVFAIL and every sample would go quiet. |
 
 ```bash
 virsh net-define /etc/libvirt/qemu/networks/sandbox.xml

@@ -193,6 +193,16 @@ build {
   name    = "win11-analysis"
   sources = ["source.qemu.win11"]
 
+  # Step 0: Stage the FakeNet config. setup_analysis.ps1 moves it into
+  # C:\Tools\FakeNet\configs\ once that directory exists; run_sample.py passes
+  # it to fakenet -c at every detonation, so it has to be baked in here.
+  # Destination is Temp because it is the one directory guaranteed to exist
+  # before any provisioner has run.
+  provisioner "file" {
+    source      = "../config/fakenet.ini"
+    destination = "C:/Windows/Temp/honeypot_fakenet.ini"
+  }
+
   # Step 1: Run main setup script (Chocolatey, FLARE-VM, Sysmon, logging, hardening)
   provisioner "powershell" {
     script            = "scripts/setup_analysis.ps1"

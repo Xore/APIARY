@@ -158,7 +158,50 @@ if (-not (Get-Command fakenet -ErrorAction SilentlyContinue)) {
     (New-Object Net.WebClient).DownloadFile($url, 'C:\Tools\FakeNet\fakenet.zip')
     Expand-Archive 'C:\Tools\FakeNet\fakenet.zip' 'C:\Tools\FakeNet' -Force
 }
+
+# run_sample.py launches fakenet with
+#   -c C:\Tools\FakeNet\configs\honeypot_fakenet.ini
+# so the config has to be in the golden image, not applied at detonation time.
+# The template's file provisioner stages it in Temp (the only directory that
+# reliably exists before this script runs); it comes from config/fakenet.ini in
+# the repo so there is one copy to review, not two.
+$fnConfigDir = 'C:\Tools\FakeNet\configs'
+New-Item $fnConfigDir -ItemType Directory -Force | Out-Null
+$staged = 'C:\Windows\Temp\honeypot_fakenet.ini'
+if (Test-Path $staged) {
+    Move-Item $staged "$fnConfigDir\honeypot_fakenet.ini" -Force
+    Write-Host '[+] FakeNet config installed'
+} else {
+    Write-Warning '[!] honeypot_fakenet.ini was not staged - FakeNet will use defaults'
+}
 Write-Host '[+] FakeNet-NG installed'
+
+# ── Install Regshot ───────────────────────────────────────────────────────
+# orchestrate/run_sample.py shells out to a hard-coded
+# C:\Tools\Regshot\Regshot-x64-Unicode.exe for the before/after registry diff.
+# Chocolatey drops the binary under its own lib tree, so copy it to the path
+# the orchestrator expects rather than teaching the orchestrator a second one —
+# every other tool it drives lives under C:\Tools\.
+Write-Host '[Phase 11b] Installing Regshot...'
+$regshotDir = 'C:\Tools\Regshot'
+$regshotExe = "$regshotDir\Regshot-x64-Unicode.exe"
+New-Item $regshotDir -ItemType Directory -Force | Out-Null
+choco install regshot -y --no-progress -ErrorAction SilentlyContinue
+if (-not (Test-Path $regshotExe)) {
+    $found = Get-ChildItem 'C:\ProgramData\chocolatey\lib' -Recurse `
+        -Filter 'Regshot*x64*Unicode*.exe' -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($found) { Copy-Item $found.FullName $regshotExe -Force }
+}
+if (Test-Path $regshotExe) {
+    Write-Host '[+] Regshot installed'
+} else {
+    # Not fatal: a detonation without a registry diff is still a usable report,
+    # and failing the whole 3-hour build over one optional tool is worse. The
+    # marker file is what the smoke test checks.
+    Write-Warning '[!] Regshot NOT installed - registry diffs will be missing'
+    'MISSING' | Set-Content 'C:\Tools\Regshot\MISSING.txt'
+}
 
 # ── QEMU Guest Agent ─────────────────────────────────────────────────────
 Write-Host '[Phase 12] Installing QEMU guest agent...'
