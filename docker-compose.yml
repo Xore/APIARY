@@ -137,8 +137,15 @@ services:
     command: ["python3", "/app/dedupe-payloads.py"]
     environment:
       - PAYLOAD_DEDUPE_INTERVAL=${PAYLOAD_DEDUPE_INTERVAL:-3600}
-      - PAYLOAD_ROOTS=/payloads/cowrie:/payloads/dionaea/binaries:/payloads/scripts/script-payloads
+      - PAYLOAD_ROOTS=/payloads/cowrie:/payloads/dionaea/binaries:/payloads/scripts/script-payloads:/payloads/dionaea/bistreams
       - DEDUPE_STATE=/state/payload-dedupe.json
+      # bistreams/ is Dionaea's raw per-connection capture stream -- every
+      # accepted connection, payload or not, not just extracted samples.
+      # 82% duplicate by content in a live sample (repeat scanner traffic)
+      # and otherwise unbounded; pruned by age before dedup runs each pass,
+      # which also keeps what dedup has to hash from growing forever. See #112.
+      - BISTREAMS_ROOT=/payloads/dionaea/bistreams
+      - BISTREAMS_RETENTION_DAYS=${BISTREAMS_RETENTION_DAYS:-30}
     volumes:
       - ./analysis/dedupe-payloads.py:/app/dedupe-payloads.py:ro
       - /opt/stacks/honeypot-stack/logs/cowrie/downloads:/payloads/cowrie
@@ -151,7 +158,12 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.25"
+          # Was 0.25/128M; bistreams/ added tens of thousands of files and
+          # tens of GB to what this container hashes every pass (#112).
+          # Chunked reads keep per-file memory bounded regardless of file
+          # size, so 128M is still enough; the CPU bump is so a pass over
+          # the full backlog finishes comfortably inside one interval.
+          cpus: "0.5"
           memory: 128M
 
   # Real static YARA scanning in a networkless least-privilege sidecar. It has
