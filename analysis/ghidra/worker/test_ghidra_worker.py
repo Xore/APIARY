@@ -121,6 +121,37 @@ class ModelStub(BaseHTTPRequestHandler):
         self.wfile.write(b)
 
 
+class TruncatingModelStub(ModelStub):
+    """A server whose context window is too small, behaving as Ollama does.
+
+    This is the shape of the bug that made the guard necessary: no error, no
+    HTTP status, a well-formed answer — about the fragment of the prompt that
+    fitted. Ollama's default 4096-token window turned a 24 KB evidence block
+    into 473 prompt tokens and a description of a command line that was not in
+    the sample. The only signal that anything went wrong is the token count the
+    server reports about itself.
+    """
+
+    def do_POST(self):
+        raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        request = json.loads(raw)
+        TruncatingModelStub.prompts.append(request)
+        body = {
+            "choices": [{"message": {
+                "role": "assistant",
+                # Confident, plausible, and about nothing that was sent.
+                "content": '{"family_guess": "Mirai variant", '
+                           '"risk_level": "critical", '
+                           '"behaviors": ["connects to a hardcoded C2 address"]}',
+            }}],
+            "usage": {"prompt_tokens": 40},
+        }
+        b = json.dumps(body).encode()
+        self.send_response(200); self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(b))); self.end_headers()
+        self.wfile.write(b)
+
+
 def serve(handler):
     srv = HTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -176,6 +207,24 @@ def test_unit():
                       ("", ""), (None, ""), (7, "")]:
         got = w.normalise_risk(raw)
         check(got == want, f"normalise_risk({raw!r}) -> {got!r} (want {want!r})")
+
+    print("--- _prompt_was_truncated ---")
+    # Real numbers from the analysis host: 25000 characters of evidence read as
+    # 473 tokens on a 4096-token window, and as 7984 on a 16384-token one.
+    check(w._prompt_was_truncated({"prompt_tokens": 473}, 25000), "473 of 25000 chars")
+    check(not w._prompt_was_truncated({"prompt_tokens": 7984}, 25000),
+          "7984 of 25000 chars is a full read")
+    # Every way of not knowing has to mean "keep the answer". A server that
+    # reports nothing, or reports zero because it served the prompt from a
+    # cached prefix, is not evidence of truncation — and guessing wrong here
+    # throws away triage on a setup that works.
+    for usage, why in [(None, "no usage block"), ({}, "empty usage"),
+                       ({"prompt_tokens": 0}, "zero (cached prefix)"),
+                       ({"prompt_tokens": None}, "null count"),
+                       ({"prompt_tokens": "473"}, "count is a string")]:
+        check(not w._prompt_was_truncated(usage, 25000), f"unknown is kept: {why}")
+    # A short prompt is not a truncated one.
+    check(not w._prompt_was_truncated({"prompt_tokens": 40}, 400), "40 of 400 chars")
 
 
 def test_spool(ghidra):
@@ -250,7 +299,7 @@ def triage_run(tmp, name, ghidra, extra):
     return r, (json.loads(result.read_text()) if result.is_file() else None)
 
 
-def test_triage(ghidra, model):
+def test_triage(ghidra, model, truncating):
     tmp = Path(tempfile.mkdtemp())
 
     print("--- triage against a local model ---")
@@ -288,6 +337,19 @@ def test_triage(ghidra, model):
               for p in ModelStub.prompts),
           "the system prompt names the evidence as untrusted")
 
+    print("--- an answer to a truncated prompt is discarded ---")
+    r, d = triage_run(tmp, "trunc", ghidra,
+                      {"GHIDRA_TRIAGE_API_BASE": f"{truncating}/v1",
+                       "GHIDRA_TRIAGE_MODEL": "stub-model"})
+    check(r.returncode == 0, "exit 0 when the endpoint truncates")
+    check(d is not None and d["exit_status"] == "ok", "the analysis still completes")
+    # The stub's answer parses and reads well. Keeping it would put "critical"
+    # and a named family on a report the model never saw the evidence for.
+    check(d is not None and d["ai_triage"] is None,
+          f"ai_triage left null (got {d and d['ai_triage']!r})")
+    check("context window is too small" in r.stderr,
+          f"the reason is logged (stderr: {r.stderr[-300:]!r})")
+
     print("--- a non-local endpoint is refused ---")
     r, d = triage_run(tmp, "remote", ghidra,
                       {"GHIDRA_TRIAGE_API_BASE": "https://openrouter.ai/api/v1"})
@@ -309,9 +371,10 @@ def test_triage(ghidra, model):
 def main():
     ghidra = serve(Stub)
     model = serve(ModelStub)
+    truncating = serve(TruncatingModelStub)
     test_unit()
     test_spool(ghidra)
-    test_triage(ghidra, model)
+    test_triage(ghidra, model, truncating)
     print(f"\n{len(fails)} failure(s)")
     for f in fails:
         print(f"  - {f}")

@@ -144,7 +144,7 @@ which documents each setting inline. The ones worth knowing:
 | `GHIDRA_TRIAGE_API_BASE` | `http://127.0.0.1:11434/v1` | Empty switches triage off |
 | `GHIDRA_TRIAGE_MODEL` | `qwen3:8b` | Recorded in every result |
 | `GHIDRA_TRIAGE_TIMEOUT` | `300` | Per workflow call; two calls run per sample |
-| `GHIDRA_TRIAGE_MAX_STRINGS` / `_IMPORTS` / `_FUNCTIONS` | `200` / `150` / `100` | How much of the binary the model is shown |
+| `GHIDRA_TRIAGE_MAX_STRINGS` / `_IMPORTS` / `_FUNCTIONS` | `200` / `150` / `100` | How much of the binary the model is shown. Around 8000 tokens together — see [the context window](#the-context-window-is-part-of-the-configuration) before raising them |
 
 Spool paths are also set here, and must agree with `ReadWritePaths=` in
 `honeypot-ghidra-worker.service`: systemd cannot expand these values, so moving
@@ -182,6 +182,30 @@ The judgement is syntactic, not a DNS lookup, because a resolver answer can be
 moved by whoever controls the zone — and the failure actually being guarded
 against is an operator pasting an `api.openai.com` or `openrouter.ai` URL into
 config.
+
+### The context window is part of the configuration
+
+The evidence block for a real binary is around 8000 tokens. Ollama's default
+window is 4096 whatever the model can do — `qwen3:8b` advertises 40960 — and an
+overlong prompt is **truncated, not refused**. There is no error, no HTTP
+status, and the model answers from whichever fragment survived.
+
+Measured here on `/usr/bin/wget`: at the default the reply described a command
+line with hardcoded credentials that appears nowhere in the sample; at 16384
+the same prompt returns `{"family_guess": "wget", "risk_level": "low"}`.
+
+So the compose file sets `OLLAMA_CONTEXT_LENGTH=16384`. It has to be set on the
+server, because `/v1/chat/completions` has no field for context length — only
+Ollama's native API and that variable can reach it. Budget about 1.8 GB of KV
+cache on top of the weights; `qwen3:8b` Q4_K_M then reports 7.8 GB and just
+fits an 8 GB card. On a smaller card lower it rather than let it spill to CPU,
+and lower the evidence budgets to match.
+
+The worker does not trust the setting. Every reply is checked against the token
+count the server reports about itself, and an answer whose prompt was truncated
+is discarded with the reason logged. A window that is too small therefore shows
+up as **missing** triage, never as invented findings. `--selftest` probes for it
+directly, so it is visible at install time rather than in a malware report.
 
 Triage fails soft, in every direction. No endpoint configured, an endpoint that
 is refused, one that is unreachable, a model error, an answer that will not
@@ -250,7 +274,7 @@ API_BASE      : http://127.0.0.1:9090
 REQUEST_DIR   : /var/lib/honeypot-ghidra/requests/pending (exists=True)
 RESULTS_DIR   : /var/lib/honeypot-ghidra/results (exists=True)
 SAMPLES_DIR   : /var/lib/honeypot-sandbox/inbox/samples (exists=True)
-TRIAGE        : http://127.0.0.1:11434/v1 OK, model qwen3:8b available
+TRIAGE        : http://127.0.0.1:11434/v1 OK, model qwen3:8b available, context fits a full evidence block (7936 tokens read)
 
 round trip on /bin/true ...
   job            : 4761e1f6b74841db9f744c552cc94240
@@ -281,6 +305,18 @@ not configured for leaves several GB on disk and triage still not working.
 docker compose -f /opt/stacks/ghidra/compose.yml exec ollama ollama ps
 docker compose -f /opt/stacks/ghidra/compose.yml exec ollama ollama list
 ```
+
+`ollama ps` has a `CONTEXT` column and a `PROCESSOR` column. Those are the two
+that decide whether triage works and how long it takes:
+
+```
+NAME      ID            SIZE     PROCESSOR    CONTEXT
+qwen3:8b  500a1f067a9f  7.8 GB   100% GPU     16384
+```
+
+`4096` there means the window setting is not reaching the container. Anything
+other than `100% GPU` means part of the model is on CPU, which on this host is
+the difference between a minute and a quarter of an hour per sample.
 
 ### Rev·Deck
 

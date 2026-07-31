@@ -613,15 +613,44 @@ supported by a specific import, string or function in the evidence. At most \
 }
 
 
+# Below one token per this many characters of prompt, the server did not read
+# what was sent. Ordinary English runs about 4; the evidence block, being
+# symbol names and paths, runs a little denser. 12 is a 3x margin, wide enough
+# that a tokeniser this code knows nothing about will not trip it.
+#
+# The number that matters on the other side: Ollama defaults to a 4096-token
+# context whatever the model supports, and an overlong prompt is truncated
+# rather than refused. A 24 KB evidence block came back as 473 prompt tokens
+# and an answer describing a command line that was not in the sample.
+TRIAGE_MIN_CHARS_PER_TOKEN = 12
+
+
+def _prompt_was_truncated(usage: object, prompt_chars: int) -> bool:
+    """True when the server's own token count says it dropped most of the prompt.
+
+    Deliberately one-sided. A count of zero or a missing usage block means the
+    server did not tell us — several report nothing when a cached prefix is
+    reused — and unknown has to mean "keep the answer", or a working setup
+    would start throwing away good triage.
+    """
+    if not isinstance(usage, dict):
+        return False
+    tokens = usage.get("prompt_tokens")
+    if not isinstance(tokens, int) or tokens <= 0:
+        return False
+    return tokens * TRIAGE_MIN_CHARS_PER_TOKEN < prompt_chars
+
+
 def _ask_model(workflow: str, evidence: str) -> dict | None:
     """One chat completion. Returns the parsed object, or None on any failure."""
+    user = (f"{TRIAGE_WORKFLOWS[workflow]}\n\n"
+            f"=== EVIDENCE ===\n{evidence}\n=== END EVIDENCE ===")
+    prompt_chars = len(TRIAGE_SYSTEM) + len(user)
     body = json.dumps({
         "model": TRIAGE_MODEL,
         "messages": [
             {"role": "system", "content": TRIAGE_SYSTEM},
-            {"role": "user",
-             "content": f"{TRIAGE_WORKFLOWS[workflow]}\n\n"
-                        f"=== EVIDENCE ===\n{evidence}\n=== END EVIDENCE ==="},
+            {"role": "user", "content": user},
         ],
         # Deterministic enough to reproduce, and JSON asked for explicitly.
         # Servers that do not implement response_format ignore it, which is why
@@ -645,6 +674,20 @@ def _ask_model(workflow: str, evidence: str) -> dict | None:
         return None
     except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
         log(f"  [!] triage {workflow}: {e}")
+        return None
+
+    # Before the answer is worth parsing: did the model actually see the
+    # question? A truncated prompt does not fail, it produces a confident
+    # answer about the fragment that survived, and that is worse than nothing —
+    # an invented finding on a malware report is read as a real one.
+    if _prompt_was_truncated(resp.get("usage"), prompt_chars):
+        log(f"  [!] triage {workflow}: the endpoint read only "
+            f"{resp['usage']['prompt_tokens']} tokens of a {prompt_chars}-character "
+            f"prompt - its context window is too small and it truncated rather "
+            f"than refused. Discarding the answer. Raise the context "
+            f"(OLLAMA_CONTEXT_LENGTH on the ollama service, ~16384 for the "
+            f"default budgets) or lower GHIDRA_TRIAGE_MAX_STRINGS/_IMPORTS/"
+            f"_FUNCTIONS.")
         return None
 
     try:
@@ -753,7 +796,56 @@ def triage_state() -> str:
     if TRIAGE_MODEL not in names:
         return (f"{TRIAGE_API_BASE} OK but {TRIAGE_MODEL} is not pulled "
                 f"(served: {', '.join(names) or 'nothing'})")
-    return f"{TRIAGE_API_BASE} OK, model {TRIAGE_MODEL} available"
+    return (f"{TRIAGE_API_BASE} OK, model {TRIAGE_MODEL} available, "
+            f"{triage_context_state()}")
+
+
+def triage_context_state() -> str:
+    """Whether the endpoint's context window fits a real evidence block.
+
+    Worth a probe at install time because the failure mode is invisible at
+    run time: a server whose window is too small truncates the prompt and
+    answers anyway. Finding that out from a malware report is finding it out
+    too late.
+
+    Sends filler the size of a full evidence block and asks for one token
+    back, so this is a prefill and nothing more, then compares the server's
+    own count against what it was given.
+    """
+    # Roughly what _evidence produces at the default budgets, in the same shape
+    # (short symbol-like lines) so it tokenises about the same way.
+    filler = "\n".join(f"  FUN_{i:08x} sym_{i}_probe_padding" for i in range(700))
+    prompt_chars = len(TRIAGE_SYSTEM) + len(filler)
+    body = json.dumps({
+        "model": TRIAGE_MODEL,
+        "messages": [
+            {"role": "system", "content": TRIAGE_SYSTEM},
+            {"role": "user", "content": filler},
+        ],
+        "max_tokens": 1,
+        "temperature": 0,
+        "stream": False,
+    }).encode()
+    req = urllib.request.Request(
+        f"{TRIAGE_API_BASE}/chat/completions", data=body, method="POST")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Authorization", "Bearer not-used")
+    try:
+        with urllib.request.urlopen(req, timeout=TRIAGE_TIMEOUT) as r:
+            resp = json.loads(r.read())
+    except (urllib.error.HTTPError, urllib.error.URLError,
+            TimeoutError, OSError, ValueError) as e:
+        return f"context probe failed ({e})"
+
+    usage = resp.get("usage")
+    tokens = usage.get("prompt_tokens") if isinstance(usage, dict) else None
+    if not isinstance(tokens, int) or tokens <= 0:
+        return "context unknown (the server reports no token usage)"
+    if _prompt_was_truncated(usage, prompt_chars):
+        return (f"CONTEXT TOO SMALL - it read {tokens} tokens of a "
+                f"{prompt_chars}-character probe. Triage will be discarded "
+                f"rather than trusted; raise OLLAMA_CONTEXT_LENGTH to 16384")
+    return f"context fits a full evidence block ({tokens} tokens read)"
 
 
 def write_result(sha: str, payload: dict) -> None:
