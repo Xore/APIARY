@@ -47,7 +47,17 @@ jobs:
           # markers themselves are empty sentinel files with nothing sensitive
           # in them. A 755 root-owned directory 403'd elasticsearch-setup's
           # own touch on the first rollout of this stack.
-          install -d -m 777 /opt/stacks/honeypot-stack/state/init-markers
+          #
+          # Not `install -d`: Docker auto-creates this path root:root the
+          # first time any container bind-mounts it, and `install -d -m 777`
+          # on an existing directory still issues a chmod even when the mode
+          # already matches -- which the runner's own non-root user cannot do
+          # on a directory it does not own. A root-in-container chmod against
+          # the bind mount sidesteps the runner user's permissions entirely,
+          # the same trick log-init already uses for host paths it does not
+          # own either.
+          docker run --rm -v /opt/stacks/honeypot-stack/state:/state busybox \
+            sh -c 'mkdir -p /state/init-markers && chmod 777 /state/init-markers'
           cp docker-compose.init.yml "$destination/compose.yml"
           cd "$destination"
           test ! -f .env || chmod 600 .env
