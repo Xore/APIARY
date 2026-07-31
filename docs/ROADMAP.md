@@ -69,8 +69,12 @@ across ML, LLM, dashboard delivery and shared GPU:
 
 | Deliverable | Issue |
 |---|---|
+| Runtime compatibility record: GPU, drivers and every ML/LLM pin verified live | [#82](https://github.com/Xore/honeypot-stack/issues/82) |
 | Audit the scaffold against claimed v0.1 behaviour; fixtures and unit tests | [#61](https://github.com/Xore/honeypot-stack/issues/61) |
 | Feature engineering and HBOS fast filtering | [#62](https://github.com/Xore/honeypot-stack/issues/62) |
+
+#82 gates both the ML and LLM tracks. Everything below it assumes host facts
+that nobody has verified since they were written down.
 
 Compose integration comes only after resource, checkpoint and failure behaviour
 are explicit. Do not begin GPU acceleration here — prove a CPU baseline and
@@ -97,6 +101,7 @@ false-positive review. Auto-banning is out of scope.
 | 3C — Upstream YARA corpus sync | [#73](https://github.com/Xore/honeypot-stack/issues/73) |
 | 3C — Manual, admin-only GitHub-analysis publisher and dashboard button | [#74](https://github.com/Xore/honeypot-stack/issues/74) |
 | 3D — Guarded LLM analysis worker, offline and dry-run | [#66](https://github.com/Xore/honeypot-stack/issues/66) |
+| 3D — Local Ollama canary with a real model, synthetic first | [#83](https://github.com/Xore/honeypot-stack/issues/83) |
 
 Source documents:
 [`github-analysis-integration-roadmap.md`](github-analysis-integration-roadmap.md),
@@ -113,6 +118,7 @@ holds no token and runs no `git`.
 | Deliverable | Issue |
 |---|---|
 | CUDA selection, GPU-sharing budget, embedding clustering | [#67](https://github.com/Xore/honeypot-stack/issues/67) |
+| Shared-GPU slot scheduling, collision drills, 72-hour soak | [#84](https://github.com/Xore/honeypot-stack/issues/84) |
 | Retraining, versioning, drift detection, rollback, thresholds (v0.8–v1.0) | [#65](https://github.com/Xore/honeypot-stack/issues/65) |
 
 Sources: [`gpu-ml-worker-acceleration.md`](gpu-ml-worker-acceleration.md),
