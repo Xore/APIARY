@@ -613,10 +613,14 @@ Web UI: `http://<HP_BIND>:19080` (`arkime.<domain>` via Traefik).
 >   peer with Traefik's XFF; the http-honeypot trusts XFF only from that peer.
 > - **portbridge connection log.** For sensors that can't parse PROXY
 >   (**cowrie** — Twisted's `haproxy:` endpoint parses but does not apply the
->   address — and **dionaea**), portbridge's `CONN_LOG` records the real IP per
->   connection; ship that dir to the home stack (same mount pattern as
->   Suricata, but **without `x-systemd.automount`** — autofs triggers return
->   EPERM to container processes) and the dashboard joins it by source port.
+>   address — and **dionaea**), and for **every UDP port**, where PROXY protocol
+>   has no meaning at all, portbridge's `CONN_LOG` records the real IP per
+>   connection along with the upstream source port it will arrive on; ship that
+>   dir to the home stack (same mount pattern as Suricata, but **without
+>   `x-systemd.automount`** — autofs triggers return EPERM to container
+>   processes) and the dashboard joins it by source port. The join reaches back
+>   one log rotation; connections older than that are reported as
+>   **Unattributed** on `/source-health` rather than blamed on the tunnel peer.
 >
 > Suricata already sees real IPs (it sniffs the public interface on the VPS).
 > Net result: the live dashboard can pivot on a single attacker IP across every

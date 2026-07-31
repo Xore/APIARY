@@ -18,6 +18,10 @@ func (s *store) serveMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "# HELP honeypot_events_total Normalized events in the dashboard tail.\n# TYPE honeypot_events_total gauge\nhoneypot_events_total %d\n", snap.Total)
 	fmt.Fprintf(w, "# HELP honeypot_events_24h Events observed in the last 24 hours.\n# TYPE honeypot_events_24h gauge\nhoneypot_events_24h %d\n", snap.Last24h)
 	fmt.Fprintf(w, "honeypot_unique_sources %d\nhoneypot_payload_observations %d\n", snap.UniqueIPs, snap.Downloads)
+	// The size of the source-recovery gap (#54, #75). /source-health shows it to
+	// a human; exporting it is what lets a change to the VPS side be judged on a
+	// before-and-after number instead of an impression.
+	fmt.Fprintf(w, "# HELP honeypot_unattributed_events Events that reached a sensor over the tunnel and could not be joined back to a real source.\n# TYPE honeypot_unattributed_events gauge\nhoneypot_unattributed_events %d\n", snap.Unattributed)
 	for _, sensor := range snap.Sensors {
 		fmt.Fprintf(w, "honeypot_sensor_events{sensor=\"%s\",state=\"%s\"} %d\n", metricLabel(sensor.Name), metricLabel(sensor.State), sensor.Count)
 	}

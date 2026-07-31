@@ -83,10 +83,11 @@ func (s *store) rebuild() {
 			// non-empty IP, correctly declines to attribute it. The recovery gap
 			// is reported as Unattributed rather than disguised as an attacker.
 			//
-			// The miss is systematic, not incidental: portbridge logs UDP with
-			// no via_port at all, and conpot's PROXY shim is TCP-only, so conpot
-			// SNMP/BACnet/IPMI has no recovery path in either direction. See
-			// issue #54.
+			// What is left after issue #75 is the join window, not a missing
+			// recovery path: UDP now carries a via_port like TCP, and the map
+			// spans one log rotation. A miss means the connection that produced
+			// this event has aged out of the portbridge log the dashboard can
+			// still see. See issue #54 for why the peer is never substituted.
 			lostSource := false
 			if ev.ip == tunnelPeerIP {
 				if real := viaLookup(viaMap, eventSrcPort(e), ev.port); real != "" {

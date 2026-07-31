@@ -18,6 +18,9 @@
 // Regardless of the flag, if CONN_LOG names a file portbridge appends one JSON
 // line per accepted connection with the real source IP, so even the
 // PROXY-unaware ports get attributed once the log is surfaced to the dashboard.
+// Each line carries via_port — the local port of the upstream socket, which is
+// the src_port the honeypot sees — for UDP sessions as well as TCP. UDP has no
+// PROXY-protocol equivalent, so that join is its only route to a real source.
 //
 // LISTEN_IP (default 0.0.0.0) is the interface to bind. On the VPS raw-tunnel
 // side run with network_mode: host so it can reach the WireGuard peer; set
