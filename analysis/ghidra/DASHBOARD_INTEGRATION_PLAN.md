@@ -24,10 +24,23 @@
 > sample-derived text to one that is not local. Operator documentation is in
 > [`README.md`](README.md#ai-triage-and-the-local-only-rule).
 >
-> Still unbuilt: `findcrypt` and `call_graph_svg` are always empty (#102). The
-> worker has not been deployed on any host (#104).
+> **`findcrypt` and `call_graph_svg` are populated** (2026-07-31, #102, in
+> `4101e9a`). Crypto constants are scanned against the sample bytes directly
+> rather than through Ghidra, and are reported as `file+0x<offset>` — file
+> offsets, not virtual addresses, because mapping one to the other needs
+> section headers this worker does not parse. The call graph is walked from
+> neighbourhood queries and seeded by function body size; `dot` is an optional
+> host package, and without it the DOT is still written and `call_graph_svg`
+> stays null.
+>
+> **The worker is deployed** on the analysis host (2026-07-31): containers as a
+> Dockge stack, `honeypot-ghidra-worker.path` active, and the dashboard writing
+> requests it drains. #104 stays open for the rest — this is one host, set up
+> by hand-running the installer, not a deployment story.
 
-> **Status**: Design document — nothing here is built yet
+> **Status**: Built — see the block at the top of this file. This line said
+> "nothing here is built yet" until 2026-07-31, six phases after it stopped
+> being true, and it was still being read as current.
 > **Tracked in**: [#76](https://github.com/Xore/honeypot-stack/issues/76)
 > **Last updated**: 2026-07-31
 >
@@ -289,8 +302,9 @@ Deviations from the sketch below, all deliberate:
   and has no import or string scoring to borrow. Inventing a severity heuristic
   here would put an unexplainable "suspicious" label on an analyst's screen.
   Deferred to phase 4, which has to define thresholds anyway.
-* **No call-graph SVG.** `call_graph_svg` is null until IMPLEMENTATION_PLAN.md
-  phases 3-5 produce one.
+* ~~**No call-graph SVG.**~~ Built since, in #102: the card renders the SVG
+  inline with `<img>`, and explains the absence rather than showing a broken
+  image when `dot` is not installed on the analysis host.
 
 The AI triage card carries a standing disclaimer naming the model and telling
 the reader to verify each claim against the other tabs. The sketch asked for
