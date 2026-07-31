@@ -33,11 +33,11 @@
           <Path>reg add HKLM\SYSTEM\Setup\LabConfig /v BypassTPMCheck /t REG_DWORD /d 1 /f</Path>
         </RunSynchronousCommand>
         <RunSynchronousCommand wcm:action="add">
-          <Order>2</Order>
+          <Order>3</Order>
           <Path>reg add HKLM\SYSTEM\Setup\LabConfig /v BypassSecureBootCheck /t REG_DWORD /d 1 /f</Path>
         </RunSynchronousCommand>
         <RunSynchronousCommand wcm:action="add">
-          <Order>3</Order>
+          <Order>4</Order>
           <Path>reg add HKLM\SYSTEM\Setup\LabConfig /v BypassRAMCheck /t REG_DWORD /d 1 /f</Path>
         </RunSynchronousCommand>
       </RunSynchronous>
@@ -134,28 +134,18 @@
       <SkipAutoActivation>true</SkipAutoActivation>
     </component>
 
-    <!-- Turn Defender off before anything else runs.
+    <!-- Windows 11 turns on device encryption automatically when a TPM is
+         present, and this image has one. The guest still boots on a fresh TPM
+         (the volume sits on a clear key until a Microsoft account signs in),
+         so this is not about boot — it is about forensics: an encrypted volume
+         cannot be mounted from the host, and reading artifacts out of a
+         detonated guest offline is a core sandbox workflow. Measured: an
+         encrypted build refused to mount with "unknown filesystem type
+         'BitLocker'".
 
-         This has to happen here, in specialize, and not in the provisioning
-         script: AMSI rejected setup_analysis.ps1 at its very first line with
-         "This script contains malicious content", so the script that was
-         supposed to disable Defender could never parse. The build still
-         "succeeded" and produced a Windows install with no FLARE-VM, no
-         Sysmon and no logging — a silently useless golden image.
-
-         specialize runs as SYSTEM before OOBE, which is also before Tamper
-         Protection starts enforcing, so these keys stick. Doing the same thing
-         later, from the provisioner, does not work.
-
-         This is deliberately aggressive and it is correct *only* for a
-         disposable malware-detonation guest that never touches a real network
-         and is reverted after every sample. Do not lift these settings into
-         any other image.
-
-         SpynetReporting/SubmitSamplesConsent matter for a different reason:
-         with MAPS enabled, the first detonation would upload the captured
-         sample to Microsoft. A sandbox must not exfiltrate the evidence it
-         was given. -->
+         This key lives under HKLM\SYSTEM, which Defender's Tamper Protection
+         does not guard, so unlike the Defender policy keys it actually sticks.
+         Defender itself is handled at first logon instead — see below. -->
     <component name="Microsoft-Windows-Deployment"
                processorArchitecture="amd64"
                publicKeyToken="31bf3856ad364e35"
@@ -164,48 +154,8 @@
       <RunSynchronous>
         <RunSynchronousCommand wcm:action="add">
           <Order>1</Order>
-          <Description>Disable Tamper Protection</Description>
-          <Path>reg add "HKLM\SOFTWARE\Microsoft\Windows Defender\Features" /v TamperProtection /t REG_DWORD /d 0 /f</Path>
-        </RunSynchronousCommand>
-        <RunSynchronousCommand wcm:action="add">
-          <Order>2</Order>
-          <Description>Disable Defender antivirus</Description>
-          <Path>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender" /v DisableAntiSpyware /t REG_DWORD /d 1 /f</Path>
-        </RunSynchronousCommand>
-        <RunSynchronousCommand wcm:action="add">
-          <Order>3</Order>
-          <Description>Disable real-time monitoring — this is what runs AMSI</Description>
-          <Path>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" /v DisableRealtimeMonitoring /t REG_DWORD /d 1 /f</Path>
-        </RunSynchronousCommand>
-        <RunSynchronousCommand wcm:action="add">
-          <Order>4</Order>
-          <Description>Disable behaviour monitoring</Description>
-          <Path>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" /v DisableBehaviorMonitoring /t REG_DWORD /d 1 /f</Path>
-        </RunSynchronousCommand>
-        <RunSynchronousCommand wcm:action="add">
-          <Order>5</Order>
-          <Description>Disable on-access protection</Description>
-          <Path>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" /v DisableOnAccessProtection /t REG_DWORD /d 1 /f</Path>
-        </RunSynchronousCommand>
-        <RunSynchronousCommand wcm:action="add">
-          <Order>6</Order>
-          <Description>Disable script scanning</Description>
-          <Path>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection" /v DisableScanOnRealtimeEnable /t REG_DWORD /d 1 /f</Path>
-        </RunSynchronousCommand>
-        <RunSynchronousCommand wcm:action="add">
-          <Order>7</Order>
-          <Description>Never send samples to Microsoft — the sample is the evidence</Description>
-          <Path>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Spynet" /v SpynetReporting /t REG_DWORD /d 0 /f</Path>
-        </RunSynchronousCommand>
-        <RunSynchronousCommand wcm:action="add">
-          <Order>8</Order>
-          <Description>Never submit sample files</Description>
-          <Path>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Spynet" /v SubmitSamplesConsent /t REG_DWORD /d 2 /f</Path>
-        </RunSynchronousCommand>
-        <RunSynchronousCommand wcm:action="add">
-          <Order>9</Order>
-          <Description>Disable SmartScreen</Description>
-          <Path>reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\System" /v EnableSmartScreen /t REG_DWORD /d 0 /f</Path>
+          <Description>Prevent automatic BitLocker device encryption</Description>
+          <Path>reg add "HKLM\SYSTEM\CurrentControlSet\Control\BitLocker" /v PreventDeviceEncryption /t REG_DWORD /d 1 /f</Path>
         </RunSynchronousCommand>
       </RunSynchronous>
     </component>
@@ -266,29 +216,59 @@
            reached first logon" apart from "first logon ran but WinRM did not
            come up". -->
       <FirstLogonCommands>
+        <!-- Defender exclusions come first, deliberately: the instant WinRM
+             answers, Packer starts uploading setup_analysis.ps1, and if
+             Defender is still inspecting content that upload is rejected
+             mid-stream.
+
+             Disabling Defender outright is not possible here. Tamper
+             Protection is on by default in Windows 11 and guards its own
+             registry key against SYSTEM as well as Administrators — measured
+             on a booted build: every policy key written during specialize was
+             absent or reverted, and a direct write returned "Requested
+             registry access is not allowed". specialize is simply not early
+             enough; Defender is already protecting itself by then.
+
+             Exclusions are what Tamper Protection does permit, and they are
+             enough. Measured on the same guest: uploading the provisioning
+             script failed at offset 1800 with "This script contains malicious
+             content"; after adding these exclusions the identical content
+             uploaded and parsed. Note that Add-MpPreference succeeds while
+             Get-MpComputerStatus still reports RealTimeProtectionEnabled=True
+             — the exclusions apply even though the engine stays on, which is
+             the outcome we want: no protection theatre, no blocked tooling.
+
+             The .ps1 extension and powershell.exe process exclusions matter as
+             much as the paths, because AMSI scans script *content* rather than
+             the file's location. -->
         <SynchronousCommand wcm:action="add">
           <Order>1</Order>
-          <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private -ErrorAction SilentlyContinue; Enable-PSRemoting -Force -SkipNetworkProfileCheck"</CommandLine>
+          <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "foreach ($p in @('C:\Windows\Temp','C:\Tools','C:\ProgramData\chocolatey','C:\Users\analyst','C:\Samples','C:\Logs')) { try { Add-MpPreference -ExclusionPath $p -ErrorAction SilentlyContinue } catch {} }; try { Add-MpPreference -ExclusionExtension 'ps1','exe','dll' -ErrorAction SilentlyContinue } catch {}; try { Add-MpPreference -ExclusionProcess 'powershell.exe' -ErrorAction SilentlyContinue } catch {}; try { Set-MpPreference -MAPSReporting Disabled -SubmitSamplesConsent NeverSend -ErrorAction SilentlyContinue } catch {}; ((Get-MpPreference).ExclusionPath -join ', ') | Set-Content C:\defender-exclusions.txt"</CommandLine>
           <RequiresUserInput>false</RequiresUserInput>
         </SynchronousCommand>
         <SynchronousCommand wcm:action="add">
           <Order>2</Order>
-          <CommandLine>cmd /c winrm set winrm/config/service @{AllowUnencrypted="true"}</CommandLine>
+          <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private -ErrorAction SilentlyContinue; Enable-PSRemoting -Force -SkipNetworkProfileCheck"</CommandLine>
+          <RequiresUserInput>false</RequiresUserInput>
         </SynchronousCommand>
         <SynchronousCommand wcm:action="add">
           <Order>3</Order>
-          <CommandLine>cmd /c winrm set winrm/config/service/auth @{Basic="true"}</CommandLine>
+          <CommandLine>cmd /c winrm set winrm/config/service @{AllowUnencrypted="true"}</CommandLine>
         </SynchronousCommand>
         <SynchronousCommand wcm:action="add">
           <Order>4</Order>
-          <CommandLine>cmd /c netsh advfirewall firewall add rule name="WinRM" dir=in action=allow protocol=tcp localport=5985</CommandLine>
+          <CommandLine>cmd /c winrm set winrm/config/service/auth @{Basic="true"}</CommandLine>
         </SynchronousCommand>
         <SynchronousCommand wcm:action="add">
           <Order>5</Order>
-          <CommandLine>cmd /c net localgroup "Remote Management Users" analyst /add</CommandLine>
+          <CommandLine>cmd /c netsh advfirewall firewall add rule name="WinRM" dir=in action=allow protocol=tcp localport=5985</CommandLine>
         </SynchronousCommand>
         <SynchronousCommand wcm:action="add">
           <Order>6</Order>
+          <CommandLine>cmd /c net localgroup "Remote Management Users" analyst /add</CommandLine>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>7</Order>
           <CommandLine>powershell -NoProfile -Command "Set-Service WinRM -StartupType Automatic; Start-Service WinRM; Set-Content -Path C:\winrm-ready.txt -Value (Get-Date -Format o)"</CommandLine>
         </SynchronousCommand>
         <!-- The specialize-pass policy keys are what actually stop AMSI, but
@@ -297,7 +277,7 @@
              Defender again, C:\defender-off.txt says whether this ran and what
              the engine reported afterwards. -->
         <SynchronousCommand wcm:action="add">
-          <Order>7</Order>
+          <Order>8</Order>
           <CommandLine>powershell -NoProfile -Command "try { Set-MpPreference -DisableRealtimeMonitoring $true -DisableScriptScanning $true -DisableBehaviorMonitoring $true -ErrorAction Stop } catch {}; try { (Get-MpComputerStatus | Select-Object RealTimeProtectionEnabled,AntivirusEnabled,IsTamperProtected | Out-String) | Set-Content C:\defender-off.txt } catch { 'Get-MpComputerStatus unavailable' | Set-Content C:\defender-off.txt }"</CommandLine>
         </SynchronousCommand>
       </FirstLogonCommands>
