@@ -67,6 +67,18 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 	sandboxDetail := &sandboxResult{Job: "job-1", SHA256: strings.Repeat("a", 64), CaptureAvailable: true}
 	windowsDetail := &sandboxResult{Job: "job-2", SHA256: strings.Repeat("b", 64)}
 	windowsDetail.Windows.Detected = true
+	// Populated rather than zero-valued: several ghidra.html sections only
+	// render when their slice is non-empty, and an empty fixture would walk
+	// the "no results" branch of every one of them.
+	ghidraDetail := &ghidraResult{
+		SHA256:     strings.Repeat("c", 64),
+		ExitStatus: "ok",
+		Functions:  []ghidraFunction{{Address: "0x401000", Name: "sub_401000"}},
+		Strings:    []string{"evil.example"},
+		Imports:    []string{"kernel32.dll!CreateProcessA"},
+		FindCrypt:  []ghidraCrypto{{Address: "0x402a10", Constant: "AES Te0", Algorithm: "AES"}},
+		AITriage:   &ghidraTriage{Workflow: "program_triage", RiskLevel: "high", Behaviors: []string{"spawns a process"}},
+	}
 
 	pages := []struct {
 		name string
@@ -80,6 +92,8 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 		{"sandbox", sandboxPageData{Generated: now, Detail: sandboxDetail}},
 		{"sandbox-windows", sandboxPageData{Generated: now, Detail: windowsDetail}},
 		{"sandbox-list", sandboxPageData{Generated: now}},
+		{"ghidra", ghidraPageData{Generated: now, Detail: ghidraDetail}},
+		{"ghidra-list", ghidraPageData{Generated: now}},
 		{"payload-analysis", binaryAnalysis{}},
 		{"payloads", payloadsPage{Generated: now}},
 		{"source-health", snapshot{}},
@@ -88,8 +102,15 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 	}
 	for _, page := range pages {
 		name := page.name
+		// The "-windows"/"-list" suffixes name a *variant* of a page — the
+		// same template rendered against data that takes a different branch —
+		// so both modes get their markup checked, not just whichever one a
+		// zero-valued fixture happens to reach.
 		if name == "sandbox-windows" || name == "sandbox-list" {
 			name = "sandbox"
+		}
+		if name == "ghidra-list" {
+			name = "ghidra"
 		}
 		var buf bytes.Buffer
 		if err := tmpl.ExecuteTemplate(&buf, name, page.data); err != nil {
@@ -108,6 +129,15 @@ func TestTabsAndPanelsAgreeOnEveryPage(t *testing.T) {
 	now := time.Now()
 	detail := &sandboxResult{Job: "job-1", SHA256: strings.Repeat("a", 64)}
 	detail.Windows.Detected = true
+	ghidraDetail := &ghidraResult{
+		SHA256:     strings.Repeat("c", 64),
+		ExitStatus: "ok",
+		Functions:  []ghidraFunction{{Address: "0x401000", Name: "sub_401000"}},
+		Strings:    []string{"evil.example"},
+		Imports:    []string{"kernel32.dll!CreateProcessA"},
+		FindCrypt:  []ghidraCrypto{{Address: "0x402a10", Constant: "AES Te0", Algorithm: "AES"}},
+		AITriage:   &ghidraTriage{Workflow: "program_triage", RiskLevel: "high"},
+	}
 
 	for _, page := range []struct {
 		template string
@@ -116,6 +146,7 @@ func TestTabsAndPanelsAgreeOnEveryPage(t *testing.T) {
 	}{
 		{"page", "overview", snapshot{}},
 		{"sandbox", "sandbox detail", sandboxPageData{Generated: now, Detail: detail}},
+		{"ghidra", "ghidra detail", ghidraPageData{Generated: now, Detail: ghidraDetail}},
 		{"payload-analysis", "payload analysis", binaryAnalysis{}},
 		{"reports", "reports studio", snapshot{}},
 	} {

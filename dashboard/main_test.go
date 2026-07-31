@@ -556,6 +556,7 @@ func TestRouteTemplatesRenderFromEmbeddedUI(t *testing.T) {
 		"intel.html":                   {"clusters", "campaigns", "campaignrows", "commands"},
 		"payloads.html":                {"payloadrow", "payloadrows", "payloads", "payload-analysis"},
 		"sandbox.html":                 {"sandbox"},
+		"ghidra.html":                  {"ghidra"},
 		"history.html":                 {"history"},
 		"dead_letters.html":            {"dead-letters"},
 		"source_health.html":           {"source-health"},

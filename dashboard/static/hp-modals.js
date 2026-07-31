@@ -113,8 +113,19 @@
   });
 
   document.addEventListener("submit", (event) => {
-    const form = event.target.closest('form[action="/sandbox/submit"]');
+    // Both analysis spools confirm before queueing, but they are not the same
+    // action and must not claim to be: the sandbox executes the payload, while
+    // Ghidra only reads it. The default warning below describes detonation, so
+    // any form whose consequence differs has to state its own — a Ghidra
+    // re-run warning about "network, process, and filesystem activity" would
+    // be plainly false, and a confirmation nobody believes is worse than none.
+    const form = event.target.closest('form[action="/sandbox/submit"], form[action="/ghidra/submit"]');
     if (!form || form.dataset.hpConfirmed === "true") return;
+    // Only forms that opt in are interrupted. The payloads page carries a
+    // Ghidra button on every row, and a modal per row for a read-only action
+    // is confirmation fatigue; the re-analysis forms set these attributes
+    // because those overwrite an existing result.
+    if (form.action.endsWith("/ghidra/submit") && !form.dataset.hpConfirmTitle) return;
     event.preventDefault();
     const hash = form.querySelector('input[name="hash"]')?.value || "selected payload";
     // A form may reword the confirmation (re-analysis reads differently from a
@@ -124,7 +135,8 @@
       title: form.dataset.hpConfirmTitle || "Submit payload to the sandbox?",
       description: form.dataset.hpConfirmDescription
         || "This queues the captured artifact for execution in the isolated malware-analysis environment.",
-      warning: `The payload ${hash} will be detonated and may generate network, process, and filesystem activity.`,
+      warning: form.dataset.hpConfirmWarning
+        || `The payload ${hash} will be detonated and may generate network, process, and filesystem activity.`,
       confirmLabel: form.dataset.hpConfirmLabel || "Submit to sandbox",
       onConfirm: () => {
         form.dataset.hpConfirmed = "true";

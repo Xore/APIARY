@@ -241,7 +241,48 @@ http.HandleFunc("/export/ghidra/", serveGhidraExport)
 
 ---
 
-## Phase 3 — UI: payloads page action + result view ⬜ Planned
+## Phase 3 — UI: payloads page action + result view ✅ Built
+
+`ui/ghidra.html` (list + detail), a **Ghidra** button on every payloads row and
+on the payload detail page, a sidebar entry, and the `/ghidra` + `/ghidra/{sha}`
+routes phase 2 deliberately left unregistered.
+
+Deviations from the sketch below, all deliberate:
+
+* **The button is on every row, not only detonatable ones.** The row reading
+  "no detonation path" is exactly where static analysis is the only option, so
+  gating the Ghidra button on `.Dynamic` would hide it from the payloads that
+  need it most.
+* **No pseudocode in the page.** Functions, imports and strings open in the
+  existing `hp-evidence` overlay rather than rendering inline. Dumping
+  decompiled output for every function is called out as a mistake in the
+  sketch; the same argument applies to a 4000-row string table.
+* **No "interesting strings" filter and no `SuspiciousImports` grouping.** Both
+  were to reuse heuristics from `payload_kind.go`, which classifies file *types*
+  and has no import or string scoring to borrow. Inventing a severity heuristic
+  here would put an unexplainable "suspicious" label on an analyst's screen.
+  Deferred to phase 4, which has to define thresholds anyway.
+* **No call-graph SVG.** `call_graph_svg` is null until IMPLEMENTATION_PLAN.md
+  phases 3-5 produce one.
+
+The AI triage card carries a standing disclaimer naming the model and telling
+the reader to verify each claim against the other tabs. The sketch asked for
+per-claim evidence links; the worker does not record which function or string
+grounded a claim, so there is nothing to link to. A visible "unverified" banner
+is honest — fabricated evidence anchors would not be.
+
+`hp-modals.js` needed a fix: it matched `form[action="/sandbox/submit"]` only,
+so the Ghidra re-analyze form's `data-hp-confirm-*` attributes did nothing. It
+now also matches `/ghidra/submit`, but only when the form opts in via
+`data-hp-confirm-title` — a modal on every payloads row for a read-only action
+is confirmation fatigue. The default warning describes detonation, so Ghidra
+forms set `data-hp-confirm-warning`; a Ghidra confirmation claiming "network,
+process, and filesystem activity" would be false.
+
+Verified in a browser against fixture results, not only by tests: list and
+detail both render, tab switching updates `aria-selected` and swaps panels, the
+evidence overlay opens and closes on Escape per `docs/MODALS.md`, a malformed
+hash 404s, and an errored result shows its failure reason.
 
 ### Payloads list (`dashboard/ui/payloads.html`)
 Add a second per-row button next to the existing sandbox-submit form:
