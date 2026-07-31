@@ -812,9 +812,11 @@ def triage_context_state() -> str:
     back, so this is a prefill and nothing more, then compares the server's
     own count against what it was given.
     """
-    # Roughly what _evidence produces at the default budgets, in the same shape
-    # (short symbol-like lines) so it tokenises about the same way.
-    filler = "\n".join(f"  FUN_{i:08x} sym_{i}_probe_padding" for i in range(700))
+    # Sized to what _evidence produces at the default budgets — about 8000
+    # tokens — and in the same shape, short symbol-like lines, because those
+    # tokenise far worse than prose and prose would under-measure. Not larger:
+    # a probe that overshoots would condemn a window that real evidence fits.
+    filler = "\n".join(f"  FUN_{i:08x} sym_{i}_probe_padding" for i in range(420))
     prompt_chars = len(TRIAGE_SYSTEM) + len(filler)
     body = json.dumps({
         "model": TRIAGE_MODEL,

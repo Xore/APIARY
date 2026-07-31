@@ -274,7 +274,7 @@ API_BASE      : http://127.0.0.1:9090
 REQUEST_DIR   : /var/lib/honeypot-ghidra/requests/pending (exists=True)
 RESULTS_DIR   : /var/lib/honeypot-ghidra/results (exists=True)
 SAMPLES_DIR   : /var/lib/honeypot-sandbox/inbox/samples (exists=True)
-TRIAGE        : http://127.0.0.1:11434/v1 OK, model qwen3:8b available, context fits a full evidence block (7936 tokens read)
+TRIAGE        : http://127.0.0.1:11434/v1 OK, model qwen3:8b available, context fits a full evidence block (7972 tokens read)
 
 round trip on /bin/true ...
   job            : 4761e1f6b74841db9f744c552cc94240
