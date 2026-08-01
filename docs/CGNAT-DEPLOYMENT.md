@@ -46,9 +46,10 @@ the only internet-facing component.
 3. Copy `.env.example` to `.env` in `/opt/stacks/honeypot-stack/` and generate
    every value marked `CHANGE_ME`.
 4. Create `/opt/stacks/honeypot-init/`, copy `docker-compose.init.yml` from
-   the repo into it as `compose.yml`, and copy its own `.env.example` to
-   `.env` (set `ARKIME_ADMIN_PASSWORD`/`ARKIME_PASSWORD_SECRET` — the latter
-   must match the value in `honeypot-stack`'s `.env` exactly).
+   the repo into it as `compose.yml`, and copy the repo's
+   `honeypot-init.env.example` to `.env` there (set
+   `ARKIME_ADMIN_PASSWORD`/`ARKIME_PASSWORD_SECRET` — the latter must match
+   the value in `honeypot-stack`'s `.env` exactly).
 5. Before first deploying `honeypot-init`:
    `install -d -m 777 /opt/stacks/honeypot-stack/state/init-markers` — its
    jobs run as several different container UIDs, and a root-owned 755
@@ -185,6 +186,8 @@ Create proxied DNS records for the HTTP services you enable, normally:
 - `tanner`
 - `evebox`
 - `arkime`
+- `revdeck` (optional — only if the `analysis/ghidra/` stack's `revdeck`
+  profile is enabled; see `analysis/ghidra/revdeck/README.md`)
 
 All names point to the VPS. Raw TCP/UDP sensors need no DNS record.
 

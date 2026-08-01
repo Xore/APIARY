@@ -35,10 +35,24 @@ MODEL_NAME=anthropic/claude-opus-4.8
 
 ```bash
 cd analysis/ghidra
-docker compose -f docker-compose.ghidra.yml up
+docker compose -f docker-compose.ghidra.yml --profile revdeck up -d
 ```
 
-Open http://127.0.0.1:5000
+Open http://127.0.0.1:5000 — loopback-only by default, same as `ghidra`/
+`ollama`/`statictools` in this compose file.
+
+### Reaching it remotely (Traefik + forward-auth SSO)
+
+Set `HP_BIND` in this directory's `.env` (copy from `.env.example`) to the
+same WireGuard address `honeypot-stack`'s own `HP_BIND` uses, then redeploy
+this stack — `revdeck`'s port publish reads it, everything else in this file
+stays loopback-only regardless. The VPS side (`socat-hp-revdeck` in
+`vps/docker-compose.yml`, the `honeypot-revdeck` router in
+`vps/traefik/dynamic.yml`) is already wired to a `revdeck.<domain>` route
+behind the same shared forward-auth SSO middleware every other investigation
+UI (dashboard, Kibana, Arkime, ...) uses — register the DNS record and it's
+reachable at `https://revdeck.<your-domain>`. No new auth pattern; this is
+the existing one extended to one more service.
 
 ## Automated Workflows Used
 
