@@ -183,12 +183,42 @@ func TestMLAnomalyStatsFrom24hCutoffAndTopIPs(t *testing.T) {
 // TestMLAnomaliesPageRendersFromCache proves the page itself (not just the
 // API) reflects the cache, and that a disabled/no-ES state renders a clear
 // empty state instead of a broken or misleading table.
+func TestSourceLinkPivotsToTheExactDocument(t *testing.T) {
+	a := mlAnomaly{SourceEventID: "abc123", SourceIndex: "suricata-v2-flow-2026.08.01"}
+	link := a.SourceLink()
+
+	u, err := url.Parse(link)
+	if err != nil {
+		t.Fatalf("SourceLink produced an unparseable URL %q: %v", link, err)
+	}
+	if u.Path != "/history" {
+		t.Fatalf("expected /history, got path %q", u.Path)
+	}
+	q := u.Query().Get("q")
+	if !strings.Contains(q, `_id:"abc123"`) || !strings.Contains(q, `_index:"suricata-v2-flow-2026.08.01"`) {
+		t.Fatalf("query %q is missing the exact _id/_index pin", q)
+	}
+}
+
+func TestSourceLinkEmptyWhenEitherFieldMissing(t *testing.T) {
+	for _, a := range []mlAnomaly{
+		{SourceEventID: "", SourceIndex: "suricata-v2-flow-2026.08.01"},
+		{SourceEventID: "abc123", SourceIndex: ""},
+		{},
+	} {
+		if got := a.SourceLink(); got != "" {
+			t.Fatalf("expected no link with a missing field, got %q", got)
+		}
+	}
+}
+
 func TestMLAnomaliesPageRendersFromCache(t *testing.T) {
 	c := &mlAnomalyStore{}
 	c.absorb([]mlAnomaly{
 		{Timestamp: "2026-08-01T10:00:00Z", Severity: "critical", SrcIP: "203.0.113.9", CompositeScore: 0.96,
-			ModelScores: map[string]float64{"isolation_forest": 0.9, "lstm_ae": 0.95, "hbos": 0.8},
-			Explanation: "Port scan: 47 unique ports"},
+			ModelScores:   map[string]float64{"isolation_forest": 0.9, "lstm_ae": 0.95, "hbos": 0.8},
+			Explanation:   "Port scan: 47 unique ports",
+			SourceEventID: "abc123", SourceIndex: "suricata-v2-flow-2026.08.01"},
 	})
 	s := &store{mlAnomalies: c, es: &esClient{}}
 	funcs := templateFuncs(s, "")
@@ -200,7 +230,7 @@ func TestMLAnomaliesPageRendersFromCache(t *testing.T) {
 		t.Fatalf("ml-anomalies page does not render: %v", err)
 	}
 	html := out.String()
-	for _, want := range []string{"203.0.113.9", "critical", "Port scan: 47 unique ports", "0.96"} {
+	for _, want := range []string{"203.0.113.9", "critical", "Port scan: 47 unique ports", "0.96", "/history?q="} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("rendered page is missing %q", want)
 		}

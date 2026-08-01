@@ -43,6 +43,27 @@ type mlAnomaly struct {
 	Proto          string             `json:"proto"`
 }
 
+// SourceLink pivots from an anomaly back to the exact honeypot event that
+// produced it (#173, ml-gpu-coordinated-roadmap.md Milestone E bullet 3:
+// "link to immutable source identity"). SourceEventID is a raw
+// Elasticsearch document _id, not one of the dashboard's own normalized
+// event filters (filters.go's `filter` has no id/event_id field, and the
+// bounded in-memory events cache isn't guaranteed to still hold an old
+// event by the time its anomaly is viewed) -- so this goes through
+// /history's existing raw-query-string search instead of /events, the
+// same "direct Elasticsearch-document-style link" /history already
+// provides. _index is included alongside _id: source_event_id is only
+// unique within its own source index (write_anomaly()'s own anomaly_doc_id
+// comment notes honeypot-v2-*/suricata-v2-* auto-generated IDs are not
+// guaranteed disjoint from each other), so the query pins both.
+func (a mlAnomaly) SourceLink() string {
+	if a.SourceEventID == "" || a.SourceIndex == "" {
+		return ""
+	}
+	q := `_id:"` + a.SourceEventID + `" AND _index:"` + a.SourceIndex + `"`
+	return "/history?" + url.Values{"q": {q}}.Encode()
+}
+
 // mlAnomalyCacheCap bounds the in-memory cache -- a stated worst case, same
 // reasoning as ml-worker's own MAX_TRAIN_SAMPLES (#62)/MAX_TRAIN_WINDOWS
 // (#63): the dashboard is memory-capped on purpose, and an unbounded cache

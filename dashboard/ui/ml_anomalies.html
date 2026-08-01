@@ -34,7 +34,7 @@
           <div class="card wide">
             {{if .Anomalies}}
             <table class="recent">
-              <thead><tr><th>time</th><th>severity</th><th>score</th><th>source ip</th><th>model scores</th><th>explanation</th></tr></thead>
+              <thead><tr><th>time</th><th>severity</th><th>score</th><th>source ip</th><th>model scores</th><th>explanation</th><th>source event</th></tr></thead>
               <tbody>
                 {{range .Anomalies}}<tr>
                   <td>{{.Timestamp}}</td>
@@ -43,6 +43,7 @@
                   <td class="v">{{if .SrcIP}}<a href="/events?ip={{.SrcIP | urlquery}}">{{.SrcIP}}</a>{{if .SrcCountry}} <span class="cc">{{.SrcCountry}}</span>{{end}}{{else}}<span class="tw:text-muted">unattributed</span>{{end}}</td>
                   <td class="v"><small>iso {{printf "%.2f" (index .ModelScores "isolation_forest")}} &bull; lstm {{printf "%.2f" (index .ModelScores "lstm_ae")}} &bull; hbos {{printf "%.2f" (index .ModelScores "hbos")}}</small></td>
                   <td class="v">{{.Explanation}}</td>
+                  <td class="v">{{if .SourceLink}}<a href="{{.SourceLink}}">view source</a>{{else}}<span class="tw:text-muted">&mdash;</span>{{end}}</td>
                 </tr>{{end}}
               </tbody>
             </table>
