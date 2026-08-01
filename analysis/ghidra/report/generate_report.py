@@ -237,10 +237,18 @@ def capa_section(result: dict) -> str:
         return section(
             "Capabilities (capa)",
             empty("not observed"),
-            "capa's default backend covers x86/amd64/arm64 only — absent "
-            "here also means an unsupported architecture (e.g. MIPS/ARM32, "
-            "common in this honeypot's IoT catch), same as a sidecar that "
-            "was unavailable (#78).",
+            "The statictools sidecar was unreachable, or this host has capa "
+            "switched off — a genuinely unsupported architecture reports a "
+            "distinct message instead of this one (#195).",
+        )
+    if capa.get("unsupported"):
+        return section(
+            "Capabilities (capa)",
+            empty(f"not applicable: {capa['unsupported']}"),
+            "This is capa declining the sample, not a sidecar failure — its "
+            "default backend covers x86/amd64/arm64 only, so MIPS/ARM32 "
+            "samples (common in this honeypot's IoT catch) land here on "
+            "every run (#195).",
         )
     rows = [
         ("Architecture", capa.get("arch")),
