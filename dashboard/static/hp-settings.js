@@ -382,7 +382,7 @@
     }
 
     /* ---- API ---- */
-    async function api(path, options = {}) {
+    async function apiOnce(path, options) {
       const response = await fetch(path, {
         cache: "no-store",
         ...options,
@@ -396,6 +396,32 @@
       const etag = response.headers.get("ETag") || "";
       const body = await response.json();
       return { body, etag };
+    }
+
+    // #212: `docker compose up -d dashboard` recreates the container --
+    // there is a real several-to-tens-of-seconds window with no listener at
+    // all, which Cloudflare/Traefik surface as a 502/503/504 whose raw JSON
+    // body used to get dumped straight into the status line. GETs are safe
+    // to retry blind; a single retry after the gap has historically closed
+    // clears most of these without the caller ever seeing an error. Writes
+    // are never retried here -- a blind retry on a POST/PATCH risks a
+    // double-write if the first attempt actually landed.
+    async function api(path, options = {}) {
+      const method = (options.method || "GET").toUpperCase();
+      try {
+        return await apiOnce(path, options);
+      } catch (error) {
+        if (method !== "GET" || ![502, 503, 504].includes(error.status)) throw error;
+        await new Promise(resolve => setTimeout(resolve, 4000));
+        try {
+          return await apiOnce(path, options);
+        } catch (retryError) {
+          if (![502, 503, 504].includes(retryError.status)) throw retryError;
+          const friendly = new Error("the server is temporarily unavailable, possibly redeploying — try again in a moment");
+          friendly.status = retryError.status;
+          throw friendly;
+        }
+      }
     }
 
     async function reloadPreferences(note) {
