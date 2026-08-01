@@ -32,6 +32,30 @@ func renderOverview(t *testing.T, configure func(*dashboardConfig)) string {
 	return out.String()
 }
 
+// #181: mlPanelsEnabled is the single source of truth the /ml-anomalies
+// handler gates on (main.go) -- the nav link's visibility is asserted
+// separately in TestMLAnomaliesNavReflectsShowMLPanels, but both must agree
+// with this same underlying value or the page ends up hidden-but-reachable
+// or linked-but-404ing.
+func TestMLPanelsEnabledTracksLiveConfig(t *testing.T) {
+	if (*store)(nil).mlPanelsEnabled() {
+		t.Fatal("a nil store must fall back to the compiled default (off)")
+	}
+	s := newSettingsAPITestStore(t, "admin")
+	if s.mlPanelsEnabled() {
+		t.Fatal("compiled default must be off")
+	}
+	if _, _, err := s.settings.config.Update("", func(c *dashboardConfig) error {
+		c.Behavior.ShowMLPanels = true
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !s.mlPanelsEnabled() {
+		t.Fatal("must reflect the live setting once enabled")
+	}
+}
+
 func TestShellRendersConfiguredPresentation(t *testing.T) {
 	html := renderOverview(t, func(c *dashboardConfig) {
 		c.Presentation.AppName = "SOCOPS//NOC"

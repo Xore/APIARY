@@ -496,14 +496,35 @@ func TestSemanticShellIsServerRendered(t *testing.T) {
 			t.Fatalf("rendered shell still carries the removed control %q", gone)
 		}
 	}
+	// /ml-anomalies is conditional on behavior.show_ml_panels (#181, default
+	// off) -- it belongs in TestMLAnomaliesNavReflectsShowMLPanels below, not
+	// in this "always present" list.
 	for _, route := range []string{
-		"/", "/source-health", "/alerts", "/ml-anomalies", "/events", "/ips", "/campaigns",
+		"/", "/source-health", "/alerts", "/events", "/ips", "/campaigns",
 		"/clusters", "/commands", "/payloads", "/sandbox", "/history", "/dead-letters",
 		"/reports",
 	} {
 		if !strings.Contains(html, `data-hp-nav="`+route+`" href="`+route+`"`) {
 			t.Fatalf("rendered shell is missing navigation route %q", route)
 		}
+	}
+	if strings.Contains(html, `data-hp-nav="/ml-anomalies"`) {
+		t.Fatal("ML anomalies nav link must be absent when show_ml_panels is off (compiled default)")
+	}
+}
+
+// #181: "Experimental ML/LLM panels" persisted correctly but nothing ever
+// read it, so /ml-anomalies stayed reachable (nav and direct URL) regardless
+// of the toggle. This asserts the nav link tracks the live setting, not just
+// the compiled default asserted above.
+func TestMLAnomaliesNavReflectsShowMLPanels(t *testing.T) {
+	off := renderOverview(t, nil)
+	if strings.Contains(off, `data-hp-nav="/ml-anomalies"`) {
+		t.Fatal("nav link present while show_ml_panels is off")
+	}
+	on := renderOverview(t, func(c *dashboardConfig) { c.Behavior.ShowMLPanels = true })
+	if !strings.Contains(on, `data-hp-nav="/ml-anomalies" href="/ml-anomalies"`) {
+		t.Fatal("nav link absent while show_ml_panels is on")
 	}
 }
 

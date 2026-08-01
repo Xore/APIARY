@@ -360,6 +360,10 @@ func main() {
 		renderPage(w, tmpl, "alerts", &data)
 	})
 	http.HandleFunc("/ml-anomalies", func(w http.ResponseWriter, r *http.Request) {
+		if !s.mlPanelsEnabled() {
+			http.NotFound(w, r)
+			return
+		}
 		data := s.mlAnomaliesData()
 		renderPage(w, tmpl, "ml-anomalies", &data)
 	})

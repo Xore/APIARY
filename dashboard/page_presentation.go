@@ -57,6 +57,21 @@ func brandHTML(name string) template.HTML {
 	return template.HTML(escaped) //nolint:gosec // escaped above; only the accent span is added
 }
 
+// mlPanelsEnabled reports the live behavior.show_ml_panels setting (#181):
+// the "Experimental ML/LLM panels" toggle persisted correctly but nothing
+// ever read it, so /ml-anomalies stayed reachable regardless of its state.
+// This is the single source of truth for that gate -- the sidebar's nav
+// link (via the "behavior" template func above) and this handler check must
+// agree, or the page would be hidden but still directly reachable by URL
+// (or linked but 404ing) depending on which side went stale.
+func (s *store) mlPanelsEnabled() bool {
+	if s == nil || s.settings == nil {
+		return defaultDashboardConfig().Behavior.ShowMLPanels
+	}
+	cfg, _ := s.settings.config.Get()
+	return cfg.Behavior.ShowMLPanels
+}
+
 // templateFuncs builds the FuncMap shared by every dashboard page. The
 // presentation funcs resolve the effective configuration at render time; a
 // nil store or settings service serves the compiled defaults, so the shell
@@ -103,6 +118,7 @@ func templateFuncs(s *store, world template.HTML) template.FuncMap {
 			return strconv.FormatUint(h.Sum64(), 36)
 		},
 		"presentation": presentation,
+		"behavior":     behavior,
 		"brandHTML":    func() template.HTML { return brandHTML(presentation().AppName) },
 		"activeBanner": func() *bannerView { return activeBannerView(presentation(), behavior(), time.Now()) },
 	}
