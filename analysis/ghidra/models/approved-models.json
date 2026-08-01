@@ -136,8 +136,8 @@
       },
       "contract": {
         "effective_schema_sha256": "74e706316ad88295592a866cb163644a477063bfc6a13c6f4231f726c9e81851",
-        "prompt_contract_version": "session-v3",
-        "prompt_suffix_sha256": "8fb97fa803d3903fae6544f989a09758387082d347ee2e43011665676b9509a2",
+        "prompt_contract_version": "session-v4",
+        "prompt_suffix_sha256": "2620a768da34f37f2cecbb84477b217f3f4fd549656b98b5f6919eb29dc62a50",
         "system_prompt_sha256": "d72f92a2b0f4d145f25cf6c73ef872f32a6942cbb882b4ccb976edb381e2f403"
       },
       "gates": {
