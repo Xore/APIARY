@@ -1060,6 +1060,25 @@ services:
   # Dropping the SQLite input also retires the eve-relay sidecar, which existed
   # only because SSHFS does not propagate remote inotify events to a file
   # watcher. Nothing watches files any more.
+  #
+  # #121: every start logs "Failed to find template for index suricata-v2"
+  # followed by a 400 from a legacy `_template/suricata-v2` PUT -- confirmed
+  # cosmetic and expected, not a bug on our side. EveBox 0.27.0's own startup
+  # code (src/elastic/util.rs, check_and_set_field_limit) unconditionally
+  # GETs a legacy template named after --index to check its field limit, then
+  # unconditionally tries to PUT one raising it to 5000 if that GET 404s --
+  # there's no CLI flag to skip this (checked `evebox server --help`). The
+  # PUT collides because ES 8.x forbids creating a legacy template whose
+  # pattern overlaps an existing composable one, and our suricata-events
+  # template (analysis/elasticsearch-setup.sh) already matches `suricata-*`.
+  # Confirmed zero actual impact: that same template already sets
+  # `index.mapping.total_fields.limit: 5000` -- the exact value EveBox is
+  # trying to set -- so nothing is under-provisioned. EveBox also logs the
+  # 400 as "Successfully updated" regardless, because it never checks the
+  # response status; that's an upstream logging bug, not a sign anything
+  # failed twice. Do not try to pre-create a legacy suricata-v2 template to
+  # silence this -- it would hit the identical collision, since the
+  # overlap is with our composable template's pattern, not EveBox's.
   evebox:
     <<: *runtime-defaults
     image: jasonish/evebox:latest
