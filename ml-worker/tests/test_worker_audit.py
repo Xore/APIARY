@@ -20,7 +20,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from models.isolation_forest import IsoForestModel  # noqa: E402
-from models.lstm_autoencoder import LSTMAEModel, INPUT_DIM, SEQ_LEN  # noqa: E402
+from models.lstm_autoencoder import LSTMAEModel, SEQ_LEN  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -109,48 +109,24 @@ class TestNeutralScoreCannotAlert:
 
 
 class TestLSTMTrainInferenceSkew:
-    """Finding #5: LSTMAEModel.score() and .retrain() build the 6-dim
-    temporal vector two different, incompatible ways."""
+    """Finding #5 (historical): LSTMAEModel.score() and .retrain() built the
+    6-dim temporal vector two different, incompatible ways -- score()
+    received a slice of the unrelated 15-dim IsoForest vector instead of the
+    documented [hour, port, proto, entropy, inter_arrival, cmd_count] vector
+    retrain() actually trained on. Fixed in #63: both now call the shared
+    models.lstm_autoencoder.featurise_temporal() against the real src dict.
+    Current behavior is proven in test_temporal_features.py instead."""
 
-    def test_retrain_featurise_and_score_slicing_disagree_positionally(self):
-        model = LSTMAEModel(model_dir="/tmp/does-not-matter")
-        src = REAL_SHAPED_DOCUMENT["_source"]
-
-        # What retrain() actually trains on for this event (_featurise, the
-        # documented [hour, port, proto, entropy, inter_arrival, cmd_count]
-        # vector from plan §5.2):
-        trained_on = model._featurise(src)
-
-        # What score() actually receives at inference time: the first
-        # INPUT_DIM=6 slots of the 15-dim IsoForest vector, per the comment
-        # in lstm_autoencoder.py itself ("Just use first 6 dims as
-        # approximation until refactor").
-        iso_model = IsoForestModel(model_dir="/tmp/does-not-matter")
-        iso_features = iso_model.extract_features(src).flatten()
-        scored_on = iso_features[:INPUT_DIM]
-
-        # Index 1 alone proves the point: _featurise puts a port fraction
-        # there; the IsoForest vector puts day_of_week there instead. A model
-        # trained on one and scored on the other is not evaluating the
-        # feature it was fit against. _featurise's index 1 is always in
-        # [0, 1] (a normalised port); the IsoForest vector's index 1 is
-        # day_of_week, an integer in [0, 6] -- the two value spaces don't
-        # even overlap except at the single point 0 or 1.
-        assert 0.0 <= trained_on[1] <= 1.0
-        assert iso_features[1] in (0, 1, 2, 3, 4, 5, 6)
-        assert scored_on[1] == iso_features[1], "sanity: score() really does receive the IsoForest vector, not _featurise's"
-
-    def test_score_path_ignores_the_src_dict_entirely(self):
-        # score()'s own first line is dead code that proves the bug: it
-        # calls self._featurise({}) -- an empty dict -- and immediately
-        # discards the result, per its own inline comment ("placeholder").
-        # The real src is never passed to score() by worker.py at all;
-        # only the pre-computed IsoForest feature vector is.
+    def test_score_and_retrain_now_share_one_featuriser(self):
         import inspect
-        source = inspect.getsource(LSTMAEModel.score)
-        assert "_featurise({})" in source, (
-            "score() no longer contains the dead placeholder call -- if this "
-            "fails because it was fixed, delete this test, not the fix"
+        from models import lstm_autoencoder
+
+        score_src = inspect.getsource(LSTMAEModel.score)
+        retrain_src = inspect.getsource(LSTMAEModel.retrain)
+        assert "featurise_temporal(" in score_src
+        assert "featurise_temporal(" in retrain_src
+        assert "[:INPUT_DIM]" not in score_src, (
+            "score() must not reach into an unrelated model's feature vector by slicing it"
         )
 
 
@@ -159,8 +135,10 @@ class TestBufferStateNotPersisted:
 
     def test_load_latest_does_not_restore_buffers(self):
         model = LSTMAEModel(model_dir="/tmp/does-not-matter")
+        src = dict(REAL_SHAPED_DOCUMENT["_source"])
+        src["source"] = {"ip": "203.0.113.9"}
         for _ in range(SEQ_LEN):
-            model.score("203.0.113.9", np.zeros((1, 15), dtype=np.float32))
+            model.score(src)
         assert len(model._buffers["203.0.113.9"]) == SEQ_LEN
 
         # Simulate a restart: a fresh instance loading from the same

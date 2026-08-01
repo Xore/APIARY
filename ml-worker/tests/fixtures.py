@@ -295,6 +295,53 @@ MALFORMED_MISSING_TIMESTAMP = {
     },
 }
 
+# ---------------------------------------------------------------------------
+# 6. A same-IP, time-ordered sequence of real-shaped Cowrie events (#63
+#    evaluation fixtures) -- needed to exercise LSTMAEModel's sliding-window
+#    building and inter-arrival computation, which single-event fixtures
+#    can't: those need >1 event from the same src_ip with distinct
+#    @timestamp values, in the shape COWRIE_COMMAND_INPUT already
+#    establishes as real.
+# ---------------------------------------------------------------------------
+def _cowrie_command_at(offset_s: float, input_text: str) -> dict:
+    from datetime import datetime, timedelta, timezone
+
+    base = datetime(2026, 7, 31, 19, 40, 0, tzinfo=timezone.utc)
+    ts = (base + timedelta(seconds=offset_s)).isoformat().replace("+00:00", "Z")
+    return {
+        "_index": ".ds-honeypot-v2-2026.07.31-2026.07.31-000001",
+        "_id": f"fixture-cowrie-seq-{offset_s}",
+        "_source": {
+            "@timestamp": ts,
+            "pipeline": "honeypot",
+            "logset": "sensors",
+            "honeypot": {
+                "eventid": "cowrie.command.input",
+                "timestamp": ts,
+                "session": "seq-session-1",
+                "sensor": "cowrie",
+                "src_ip": "203.0.113.9",
+                "src_port": 51422,
+                "dst_ip": "10.8.0.2",
+                "dst_port": 22,
+                "protocol": "ssh",
+                "input": input_text,
+            },
+            "source": {"ip": "203.0.113.9"},
+            "destination": {"port": 22},
+            "network": {"transport": "tcp"},
+            "event": {"sensor": "cowrie"},
+        },
+    }
+
+
+# 16 events (> SEQ_LEN=15), 2s apart, same src_ip -- fills one full sliding
+# window plus one extra event to prove the window slides rather than growing
+# unbounded.
+COWRIE_SAME_IP_SEQUENCE = [
+    _cowrie_command_at(i * 2.0, f"cmd-{i}") for i in range(16)
+]
+
 ALL_REAL_DOCUMENTS = [
     COWRIE_LOGIN_FAILED,
     COWRIE_COMMAND_INPUT,

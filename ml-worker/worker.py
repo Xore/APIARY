@@ -61,6 +61,15 @@ SEVERITY_BANDS = [
     (0.75, "medium"),
 ]
 
+# Ensemble formula, docs/ml-worker-plan.md §4.4. Single source of truth (#63)
+# -- previously duplicated verbatim in write_anomaly() and the main loop,
+# a silent-drift risk on any future weight tuning.
+COMPOSITE_WEIGHTS = {"isolation_forest": 0.4, "lstm_ae": 0.4, "hbos": 0.2}
+
+
+def compute_composite(scores: dict) -> float:
+    return sum(COMPOSITE_WEIGHTS[k] * scores.get(k, 0.0) for k in COMPOSITE_WEIGHTS)
+
 
 def severity(score: float) -> str:
     for threshold, label in SEVERITY_BANDS:
@@ -130,11 +139,7 @@ def fetch_new_events(es: Elasticsearch, index_pattern: str,
 def write_anomaly(es: Elasticsearch, rdb: "redis.Redis | None",
                  event: dict, scores: dict, explanation: str) -> None:
     src = event.get("_source", {})
-    composite = (
-        0.4 * scores.get("isolation_forest", 0.0)
-        + 0.4 * scores.get("lstm_ae", 0.0)
-        + 0.2 * scores.get("hbos", 0.0)
-    )
+    composite = compute_composite(scores)
     if composite < THRESHOLD:
         return
 
@@ -252,17 +257,14 @@ def run_worker() -> None:
 
                 # Only run LSTM if HBOS flagged as potentially anomalous
                 if hbos_score > 0.5:
-                    lstm_score = lstm_model.score(
-                        src_ip=src.get("src_ip") or src.get("id.orig_h", "0.0.0.0"),
-                        features=features,
-                    )
+                    lstm_score = lstm_model.score(src)
 
                 scores = {
                     "isolation_forest": iso_score,
                     "hbos":             hbos_score,
                     "lstm_ae":          lstm_score,
                 }
-                composite = 0.4*iso_score + 0.4*lstm_score + 0.2*hbos_score
+                composite = compute_composite(scores)
 
                 if composite >= THRESHOLD:
                     explanation = iso_model.explain(features, scores)

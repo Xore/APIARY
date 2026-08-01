@@ -188,6 +188,11 @@ composite_score = 0.4 × norm(IsoForest) + 0.4 × LSTM_AE + 0.2 × HBOS
 Only events with `composite_score ≥ 0.75` are written to `ml-anomalies` and
 shown on the dashboard (tunable via `ML_ALERT_THRESHOLD` env var).
 
+`worker.py`'s `compute_composite()` is the single source of truth for this
+formula (#63) — previously duplicated verbatim at both call sites (the main
+loop's threshold gate and `write_anomaly()`'s own recomputation), a silent
+drift risk on any future weight tuning.
+
 ---
 
 ## 5. Feature Engineering
@@ -228,6 +233,34 @@ For each `src_ip`, build a sliding window of the last 15 events:
 ]
 # Shape: (batch, 15, 6)
 ```
+
+**Implementation status (#63):** `models/lstm_autoencoder.py`'s
+`featurise_temporal(src, inter_arrival_s)` builds this vector against the
+real schema in §5.3 (reusing `models/isolation_forest.py`'s field readers),
+not a flat schema. `payload_entropy` and `cmd_count_norm` stay at documented
+neutral defaults for the same reason §5.1's `extract_features()` leaves them
+unwired — no sensor emits a consistent raw-payload field or a real
+per-session command counter. `inter_arrival_log` is real: `LSTMAEModel`
+tracks last-seen-per-`src_ip` state (`_last_seen`) both online (`score()`)
+and during batch retraining (`retrain()`, sorted by `@timestamp` per IP so
+the computed deltas match what online scoring would have seen).
+
+`LSTMAEModel.score(src)` takes the raw ES `_source` dict directly (the same
+contract as `IsoForestModel.extract_features()`) — it previously received a
+slice of the unrelated 15-dim IsoForest vector, a positional mismatch that
+meant no anomaly was ever actually explained by real temporal behavior. It
+returns `0.0` before a src_ip's window has `SEQ_LEN` events (real "not
+enough history yet") and a bounded-CPU-fallback `0.5` — this codebase's
+established neutral-default convention — if inference itself raises, so a
+scoring failure can never silently read as "confirmed normal".
+
+`retrain()` is bounded by `MAX_TRAIN_WINDOWS` (4,000) — mirrors
+`MAX_TRAIN_SAMPLES`'s rationale in §5.1: building every overlapping
+length-15 window per `src_ip` with no other cap means one IP dominating the
+`MAX_TRAIN_SAMPLES`-capped fetch could otherwise produce up to ~20,000
+overlapping windows in a single CPU fine-tune cycle. Capping states the
+worst case instead of leaving it to emerge from whatever the busiest
+attacker happened to send that day.
 
 ### 5.3 Real Document Schema Contract (#62 task 32)
 
