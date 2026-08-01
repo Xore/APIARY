@@ -6,8 +6,10 @@ import { spawn } from "node:child_process";
 const root = mkdtempSync(join(tmpdir(), "honeypot-dashboard-e2e-"));
 const logs = join(root, "logs");
 const state = join(root, "state");
+const payloads = join(root, "payloads");
 mkdirSync(join(logs, "cowrie"), { recursive: true });
 mkdirSync(state, { recursive: true });
+mkdirSync(payloads, { recursive: true });
 
 const now = Date.now();
 const events = Array.from({ length: 60 }, (_, index) => JSON.stringify({
@@ -21,6 +23,7 @@ const events = Array.from({ length: 60 }, (_, index) => JSON.stringify({
   session: `browser-session-${String(index).padStart(2, "0")}`,
 })).join("\n");
 writeFileSync(join(logs, "cowrie", "cowrie.json"), `${events}\n`);
+writeFileSync(join(payloads, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"), "#!/bin/sh\ncurl http://example.invalid/fixture\n");
 
 const stateFile = (name) => join(state, name);
 const child = spawn("go", ["run", "."], {
@@ -39,6 +42,8 @@ const child = spawn("go", ["run", "."], {
     DASHBOARD_CONFIG_HISTORY_FILE: stateFile("config-history.jsonl"),
     DASHBOARD_REPORTS_FILE: stateFile("reports.json"),
     DASHBOARD_REPORTS_DIR: stateFile("reports"),
+    ANALYSIS_WORKBENCH_DIR: stateFile("analysis-workbench"),
+    PAYLOAD_DIRS: payloads,
   },
   stdio: "inherit",
 });

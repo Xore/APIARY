@@ -21,6 +21,8 @@
     ]],
     ["Evidence", [
       ["Captured payloads", "/payloads"],
+      ["Analysis workbench", "/payload-workbench"],
+      ["Workbench results", "/payload-workbench/results"],
       ["Sandbox results", "/sandbox"],
       ["Elasticsearch history", "/history"],
       ["Ingest dead letters", "/dead-letters"],
@@ -42,6 +44,8 @@
   const activeHref = () => {
     const path = location.pathname;
     if (path.startsWith("/payload-analysis") || path.startsWith("/payload/")) return "/payloads";
+    if (path === "/payload-workbench/results") return "/payload-workbench/results";
+    if (path.startsWith("/payload-workbench/")) return "/payload-workbench";
     if (path.startsWith("/sandbox/")) return "/sandbox";
     if (path.startsWith("/sessions/")) return "/events";
     if (path.startsWith("/investigate/ip/")) return "/ips";

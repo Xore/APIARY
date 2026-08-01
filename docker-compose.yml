@@ -398,6 +398,10 @@ services:
       # them and must never be able to forge one.
       - /var/lib/honeypot-ghidra/results:/ghidra-results:ro
       - /var/lib/honeypot-ghidra/requests/pending:/ghidra-requests
+      # Privileged read-only adapter for #158's owner-only model-status file.
+      # The dashboard sees only an AF_UNIX HTTP socket and never mounts the
+      # 0600 host artifact or gains a model-management action.
+      - /run/honeypot-model-status:/model-status:ro
       # GitHub-analysis publishing: a fourth spool, same shape and same
       # boundary as the three above. The dashboard writes {sha256}.request
       # and never talks to git, GitHub, or holds GH_PAT -- that lives only in
@@ -454,6 +458,8 @@ services:
       - GITHUB_ANALYSIS_RESULTS_DIR=${GITHUB_ANALYSIS_RESULTS_DIR:-}
       - ALERT_CAMPAIGN_SCORE=${HONEYPOT_ALERT_CAMPAIGN_SCORE:-80}
       - DASHBOARD_REQUIRE_ADMIN=${DASHBOARD_REQUIRE_ADMIN:-true}
+      - ANALYSIS_WORKBENCH_DIR=/state/analysis-workbench
+      - MODEL_STATUS_SOCKET=/model-status/status.sock
       - AUTH_INTROSPECTION_URL=${AUTH_INTROSPECTION_URL:-https://auth.honeypot.example/_auth/introspect}
       - AUTH_INTROSPECTION_TOKEN=${AUTH_INTROSPECTION_TOKEN:-}
       - AUTH_TARGET_HOST=${AUTH_TARGET_HOST:-honeypot.example}

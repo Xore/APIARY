@@ -123,6 +123,7 @@ func main() {
 		getenv("DASHBOARD_REPORTS_FILE", "/state/reports.json"),
 		getenv("DASHBOARD_REPORTS_DIR", "/state/reports"),
 	)
+	s.workbench = newWorkbenchService(getenv("ANALYSIS_WORKBENCH_DIR", "/state/analysis-workbench"))
 	s.rebuild()
 	go s.notifyLoop(os.Getenv("ALERT_WEBHOOK_URL"))
 	go s.reportScheduleLoop()
@@ -261,6 +262,10 @@ func main() {
 	http.HandleFunc("/api/github-analysis", s.serveGitHubAnalysisAPI)
 	http.HandleFunc("/api/github-analysis/", s.serveGitHubAnalysisAPI)
 	http.HandleFunc("/export/github-analysis/", s.serveGitHubAnalysisExport)
+	http.HandleFunc("/api/payload-workbench/registry/", s.serveWorkbenchRegistry)
+	http.HandleFunc("/api/payload-workbench/recipes", s.serveWorkbenchRecipes)
+	http.HandleFunc("/api/payload-workbench/runs", s.serveWorkbenchRuns)
+	http.HandleFunc("/api/payload-workbench/runs/", s.serveWorkbenchRuns)
 	http.HandleFunc("/metrics", s.serveMetrics)
 	http.HandleFunc("/export/history.json", func(w http.ResponseWriter, r *http.Request) {
 		if s.es == nil {
@@ -408,6 +413,15 @@ func main() {
 	http.HandleFunc("/sandbox/submit", s.serveSandboxSubmit)
 	http.HandleFunc("/ghidra/submit", s.serveGhidraSubmit)
 	http.HandleFunc("/github-analysis/submit", s.serveGitHubAnalysisSubmit)
+	http.HandleFunc("/payload-workbench", func(w http.ResponseWriter, r *http.Request) {
+		s.serveWorkbenchIndex(w, r, tmpl)
+	})
+	http.HandleFunc("/payload-workbench/results", func(w http.ResponseWriter, r *http.Request) {
+		s.serveWorkbenchResults(w, r, tmpl)
+	})
+	http.HandleFunc("/payload-workbench/", func(w http.ResponseWriter, r *http.Request) {
+		s.serveWorkbenchPage(w, r, tmpl)
+	})
 	http.HandleFunc("/ghidra", func(w http.ResponseWriter, r *http.Request) {
 		data, _ := ghidraData("", r.URL.Query().Get("q"))
 		data.Analysis = r.URL.Query().Get("analysis")
