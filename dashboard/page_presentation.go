@@ -94,6 +94,19 @@ func templateFuncs(s *store, world template.HTML) template.FuncMap {
 	return template.FuncMap{
 		"asset":    assetURL,
 		"worldMap": func() template.HTML { return world },
+		// barPx converts a 0-100 activity-chart Pct into a literal pixel
+		// height for the overview chart. A CSS height:{pct}% (and later a
+		// calc()-against-a-custom-property attempt) both depended on a flex
+		// item's percentage-height resolving against its parent -- .col's
+		// height:100% doesn't count as a "definite" size for that because
+		// .chart uses align-items:flex-end, not stretch, so the bar always
+		// collapsed to its 2px min-height regardless of the real count.
+		// This pattern dates to the very first commit and has silently never
+		// worked; a literal inline pixel value leaves nothing for a browser
+		// to resolve. 134 is .chart's 155px height minus its 6px+15px
+		// padding (box-sizing: border-box is global) -- .col's own actual
+		// track height, confirmed via a live computed-style check.
+		"barPx": func(pct int) int { return pct * 134 / 100 },
 		"json": func(value any) string {
 			b, _ := json.MarshalIndent(value, "", "  ")
 			return string(b)

@@ -45,7 +45,7 @@
           <div class="card wide chart-card">
             <h2>Activity — last 24h</h2>
             <div class="chart">
-              {{range .Timeline}}<div class="col{{if not .Count}} zero{{end}}" data-tip="{{.Label}}:00 — {{.Count}} events" aria-label="{{.Label}}:00, {{.Count}} events" tabindex="0"><div class="bar" style="--pct:{{.Pct}}"></div><span>{{.Label}}</span></div>{{end}}
+              {{range .Timeline}}<div class="col{{if not .Count}} zero{{end}}" data-tip="{{.Label}}:00 — {{.Count}} events" aria-label="{{.Label}}:00, {{.Count}} events" tabindex="0"><div class="bar" style="height:{{barPx .Pct}}px"></div><span>{{.Label}}</span></div>{{end}}
             </div>
             <p class="note">Each bar is one local-time hour. Hover or focus a bar for the exact event count; select the 24-hour KPI above to inspect those events.</p>
           </div>
