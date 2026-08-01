@@ -295,6 +295,20 @@ services:
     command: TCP4-LISTEN:5000,fork,reuseaddr TCP4:10.8.0.2:19500
     networks: [proxy]
 
+  # Dockge itself (host-level infra, /var/dockge/compose.yaml on the home
+  # server -- not part of this repo, unlike everything else bridged here).
+  # Has /var/run/docker.sock mounted read-write: root-equivalent control
+  # over the whole homeserver, not a scoped investigation UI. Exposed behind
+  # the same forward-auth SSO as everything else, on the operator's explicit
+  # ask and with that risk spelled out and accepted -- see the commit that
+  # added this.
+  socat-hp-dockge:
+    image: alpine/socat:latest
+    container_name: socat-hp-dockge
+    restart: unless-stopped
+    command: TCP4-LISTEN:5001,fork,reuseaddr TCP4:10.8.0.2:5001
+    networks: [proxy]
+
   # =====================================================================
   # SURICATA IDS
   #

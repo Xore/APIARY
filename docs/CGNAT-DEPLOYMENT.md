@@ -188,6 +188,12 @@ Create proxied DNS records for the HTTP services you enable, normally:
 - `arkime`
 - `revdeck` (optional — only if the `analysis/ghidra/` stack's `revdeck`
   profile is enabled; see `analysis/ghidra/revdeck/README.md`)
+- `traefik` (optional — Traefik's own dashboard/API, read-only, behind
+  forward-auth same as everything else here)
+- `dockge` (optional — **root-equivalent host control**: Dockge has
+  `/var/run/docker.sock` mounted read-write. forward-auth SSO is
+  defense-in-depth here, not a substitute for treating this subdomain as
+  sensitive as SSH access to the homeserver itself)
 
 All names point to the VPS. Raw TCP/UDP sensors need no DNS record.
 

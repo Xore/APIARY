@@ -17,6 +17,9 @@
 # socat-hp-evebox         :5636   →  10.8.0.2:19636 (evebox :5636)
 # socat-hp-arkime         :8005   →  10.8.0.2:19080 (arkime viewer :8005)
 # socat-hp-revdeck        :5000   →  10.8.0.2:19500 (revdeck :5000, ghidra stack)
+# socat-hp-dockge         :5001   →  10.8.0.2:5001  (dockge :5001, host infra
+#                                     with root-equivalent /var/run/docker.sock
+#                                     access -- not a scoped UI like the rest)
 #
 # Traefik dashboard — localhost only:
 #   curl http://localhost:8080/dashboard/
@@ -32,6 +35,23 @@ http:
       entryPoints: [traefik-local]
       service: api@internal
       middlewares: [local-only]
+
+    # Same api@internal service as traefik-api above, on the public entrypoint
+    # instead of loopback-only traefik-local. No socat bridge needed — unlike
+    # every other honeypot-revdeck-style router, this points at a service that
+    # lives inside this same Traefik instance, not something on the other end
+    # of the WireGuard tunnel. api.insecure is still false in traefik.yml, and
+    # Traefik's dashboard API has no write/mutate endpoints — it only reads
+    # back the routing config this file already defines — but that config
+    # (backend URLs, service/middleware names) is still information a random
+    # visitor shouldn't get, hence forward-auth rather than leaving this open.
+    traefik-dashboard:
+      rule: "Host(`traefik.honeypot.example`) && (PathPrefix(`/api`) || PathPrefix(`/dashboard`))"
+      entryPoints: [websecure]
+      service: api@internal
+      tls:
+        options: modern
+      middlewares: [security-headers, strip-auth-identity, forward-auth]
 
     auth-portal:
       rule: "Host(`auth.honeypot.example`)"
@@ -178,6 +198,14 @@ http:
         options: modern
       middlewares: [security-headers, strip-auth-identity, forward-auth]
 
+    honeypot-dockge:
+      rule: "Host(`dockge.honeypot.example`)"
+      entryPoints: [websecure]
+      service: honeypot-dockge
+      tls:
+        options: modern
+      middlewares: [security-headers, strip-auth-identity, forward-auth]
+
     svelte-blog:
       rule: "Host(`svelte.honeypot.example`)"
       entryPoints: [websecure]
@@ -320,6 +348,12 @@ http:
       loadBalancer:
         servers:
           - url: "http://socat-hp-revdeck:5000"
+        passHostHeader: true
+
+    honeypot-dockge:
+      loadBalancer:
+        servers:
+          - url: "http://socat-hp-dockge:5001"
         passHostHeader: true
 
     svelte-blog:
