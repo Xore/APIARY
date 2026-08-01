@@ -13,6 +13,39 @@
 Set-ExecutionPolicy Unrestricted -Scope LocalMachine -Force
 $ErrorActionPreference = 'Continue'
 
+# Confirmed live (build errored after 6h15m despite every phase below it
+# succeeding, including this script's own final "Setup complete" banner):
+# `choco install X -ErrorAction SilentlyContinue` does not do what it looks
+# like it does. -ErrorAction is a PowerShell cmdlet parameter; choco.exe is
+# a native executable, so PowerShell never strips it -- choco's own CLI
+# parser receives "-ErrorAction" and "SilentlyContinue" as literal argv and
+# reads the latter as one more package name to install ("Chocolatey
+# installed 3/4 packages. 1 packages failed... SilentlyContinue not
+# installed"). That phantom package always fails, choco.exe exits non-zero,
+# and because $LASTEXITCODE is only ever set by a native command (no
+# PowerShell cmdlet touches it), that stale non-zero value survives
+# untouched all the way to the end of the script -- which is exactly what
+# Packer's own `exit $LastExitCode` provisioner wrapper reads as this
+# script's overall result. Same failure class as the wevtutil incident
+# documented in win11-analysis.pkr.hcl: a native command's exit code
+# silently overriding real success, deleting a multi-hour build over
+# tooling nothing downstream depends on.
+#
+# Invoke-OptionalChoco is the fix: run choco for real (no bogus flag to
+# corrupt its argv), then explicitly consume and clear $LASTEXITCODE so a
+# failed optional package is visible in the log but can never again poison
+# this script's own final exit status. Every call site below already has
+# its own fallback/marker-file handling for "the tool didn't show up" --
+# this only fixes how that failure gets reported, not what happens after.
+function Invoke-OptionalChoco {
+    param([Parameter(Mandatory)][string]$Package)
+    & choco install $Package -y --no-progress
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "[!] choco install $Package exited $LASTEXITCODE -- continuing, see the fallback/marker handling below"
+        $global:LASTEXITCODE = 0
+    }
+}
+
 Write-Host '================================================================'
 Write-Host ' Honeypot-Stack: Windows 11 Analysis VM - tooling'
 Write-Host '================================================================'
@@ -108,7 +141,7 @@ Set-ItemProperty `
 
 # ── Install FakeNet-NG ────────────────────────────────────────────────────
 Write-Host '[Phase 11] Installing FakeNet-NG...'
-choco install fakenet-ng -y --no-progress -ErrorAction SilentlyContinue
+Invoke-OptionalChoco -Package fakenet-ng
 # Fallback: manual install from GitHub releases
 if (-not (Get-Command fakenet -ErrorAction SilentlyContinue)) {
     $url = 'https://github.com/mandiant/flare-fakenet-ng/releases/latest/download/fakenet.zip'
@@ -144,7 +177,7 @@ Write-Host '[Phase 11b] Installing Regshot...'
 $regshotDir = 'C:\Tools\Regshot'
 $regshotExe = "$regshotDir\Regshot-x64-Unicode.exe"
 New-Item $regshotDir -ItemType Directory -Force | Out-Null
-choco install regshot -y --no-progress -ErrorAction SilentlyContinue
+Invoke-OptionalChoco -Package regshot
 if (-not (Test-Path $regshotExe)) {
     $found = Get-ChildItem 'C:\ProgramData\chocolatey\lib' -Recurse `
         -Filter 'Regshot*x64*Unicode*.exe' -ErrorAction SilentlyContinue |
@@ -163,7 +196,7 @@ if (Test-Path $regshotExe) {
 
 # ── QEMU Guest Agent ─────────────────────────────────────────────────────
 Write-Host '[Phase 12] Installing QEMU guest agent...'
-choco install qemu-guest-agent -y --no-progress -ErrorAction SilentlyContinue
+Invoke-OptionalChoco -Package qemu-guest-agent
 Start-Service QEMU-GA -ErrorAction SilentlyContinue
 
 # ── Analysis Directories ─────────────────────────────────────────────────
@@ -220,3 +253,11 @@ Set-DnsClientServerAddress -InterfaceAlias $adapter.Name -ServerAddresses '10.10
 Write-Host '================================================================'
 Write-Host '[+] Setup complete. Packer will now shut down and export qcow2.'
 Write-Host '================================================================'
+
+# Explicit, not implicit: Packer's provisioner wrapper does `exit
+# $LastExitCode`, which reads whatever a native command last left behind --
+# see Invoke-OptionalChoco's comment above for the incident that taught
+# this. Every native call in this script already resets it, but this line
+# means a future edit that adds one more without remembering that can never
+# again cost a real, successful build over nothing.
+exit 0
