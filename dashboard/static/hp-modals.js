@@ -209,6 +209,31 @@
     });
   });
 
+  document.addEventListener("click", (event) => {
+    // Export options (#59): confirms the exact scope about to be downloaded
+    // before navigating, so a filter the operator forgot was active can't
+    // silently produce a CSV that doesn't match what they think they're
+    // getting. The URL itself already carries the current filter query
+    // string -- server-computed (pages_data.go's eventsData/ExportURL), not
+    // reconstructed here, so this can never drift from what the page shows.
+    const button = event.target.closest("[data-hp-export-url]");
+    if (!button) return;
+    const url = button.dataset.hpExportUrl;
+    const count = Number(button.dataset.hpExportCount || "0");
+    const label = button.dataset.hpExportLabel || "row";
+    open({
+      trigger: button,
+      title: "Export the current filtered view?",
+      description: `Downloads a CSV of exactly the ${count} ${label}${count === 1 ? "" : "s"} matching the filters shown on this page, not the full unfiltered set.`,
+      confirmLabel: "Download CSV",
+      danger: false,
+      onConfirm: () => {
+        window.location.href = url;
+        return "Export started.";
+      },
+    });
+  });
+
   // isOpen lets another controller yield Escape to this layer without relying
   // on which script registered its document listener first.
   window.HoneypotModals = Object.freeze({

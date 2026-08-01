@@ -53,6 +53,7 @@
         <div class="filters" id="events-filters">
           {{range .Filters}}<span class="chip">{{.}}</span>{{end}}
           <span class="chip">{{.Total}} events</span>
+          <button class="chip" type="button" data-hp-export-url="{{.ExportURL}}" data-hp-export-count="{{.Total}}" data-hp-export-label="event">export CSV &darr;</button>
         </div>
 
         {{if .Chain}}<p class="note">chronological &mdash; the attack reads top to bottom, from first contact to last event</p>{{end}}

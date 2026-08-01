@@ -58,6 +58,7 @@ type eventsPage struct {
 	PrevURL   string
 	NextURL   string
 	RowsURL   string
+	ExportURL string
 	Chain     bool // single-IP view rendered chronologically as an attack chain
 	IP        string
 	Events    []storedEvent
@@ -228,6 +229,18 @@ func (s *store) eventsData(r *http.Request) eventsPage {
 	if encoded := rowsQuery.Encode(); encoded != "" {
 		rowsURL += "?" + encoded
 	}
+	// ExportURL mirrors RowsURL's own "same filters, strip pagination" query
+	// (a fresh r.URL.Query() call -- rowsQuery above is already mutated) so
+	// /export/events.csv (investigate.go, already filters via parseFilter(r))
+	// exports exactly the scope the page is showing, not page/per_page along
+	// with it and not the unfiltered set (#59).
+	exportQuery := r.URL.Query()
+	exportQuery.Del("page")
+	exportQuery.Del("per_page")
+	exportURL := "/export/events.csv"
+	if encoded := exportQuery.Encode(); encoded != "" {
+		exportURL += "?" + encoded
+	}
 	return eventsPage{
 		Generated: time.Now(),
 		Filters:   f.describe(),
@@ -242,6 +255,7 @@ func (s *store) eventsData(r *http.Request) eventsPage {
 		PrevURL:   prevURL,
 		NextURL:   nextURL,
 		RowsURL:   rowsURL,
+		ExportURL: exportURL,
 		Chain:     chain,
 		IP:        f.ip,
 		Events:    out,
