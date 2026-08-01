@@ -45,13 +45,22 @@ http:
     # back the routing config this file already defines — but that config
     # (backend URLs, service/middleware names) is still information a random
     # visitor shouldn't get, hence forward-auth rather than leaving this open.
+    # Matches the whole host, not just /api and /dashboard like the
+    # loopback-only traefik-api router above — a visitor going straight to
+    # https://traefik.<domain>/ (the obvious thing to type) hit a bare
+    # Host+PathPrefix rule with no match at all, which Traefik answers with a
+    # flat 421 Misdirected Request (caught live: an operator saw exactly this
+    # after DNS started resolving). traefik-dashboard-redirect below sends
+    # that one path to /dashboard/; api@internal handles /api and /dashboard
+    # itself same as before, everything else under this host still 404s from
+    # api@internal, same as it always would have.
     traefik-dashboard:
-      rule: "Host(`traefik.honeypot.example`) && (PathPrefix(`/api`) || PathPrefix(`/dashboard`))"
+      rule: "Host(`traefik.honeypot.example`)"
       entryPoints: [websecure]
       service: api@internal
       tls:
         options: modern
-      middlewares: [security-headers, strip-auth-identity, forward-auth]
+      middlewares: [security-headers, strip-auth-identity, forward-auth, traefik-dashboard-redirect]
 
     auth-portal:
       rule: "Host(`auth.honeypot.example`)"
@@ -418,6 +427,23 @@ http:
         average: 30
         burst: 60
         period: 1s
+
+    # Only attached to the traefik-dashboard router, after forward-auth in
+    # that router's middleware chain so this never fires for an unauthenticated
+    # visitor (they hit the login redirect first, same as everywhere else).
+    # Catches the bare root (/ or nothing) and /dashboard with no trailing
+    # slash -- Traefik's dashboard 404s without the slash (verified live:
+    # /dashboard -> 404, /dashboard/ -> the real UI; true even for the
+    # original loopback-only access, not something this added). Anchored so
+    # it does NOT match /dashboard/ itself (already correct) or /api/... --
+    # the optional (dashboard)? group followed immediately by $ means an
+    # already-trailing-slash path has one more character than this pattern
+    # allows and falls through untouched, avoiding a redirect loop.
+    traefik-dashboard-redirect:
+      redirectRegex:
+        regex: "^https://([^/]+)/(dashboard)?$"
+        replacement: "https://${1}/dashboard/"
+        permanent: false
 
     rate-limit-auth:
       rateLimit:
