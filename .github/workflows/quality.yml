@@ -168,6 +168,19 @@ jobs:
             yara -w analysis/yara/rules/index.yar /dev/null
             analysis/yara/test_sync_yara.sh
           '
+      - name: Rev-eng benchmark corpus is reproducible and safe (#159)
+        shell: bash
+        run: |
+          # Runs in the corpus's own documented build environment
+          # (debian:trixie-slim, matching corpus/README.md's "Rebuilding"
+          # section exactly), not the runner's own toolchain — the whole
+          # point is verifying that THIS environment reproduces the
+          # committed manifest.json byte-for-byte, which only means
+          # something if it is the same environment the corpus claims
+          # provenance against.
+          docker run --rm -v "$PWD:/w" -w /w debian:trixie-slim bash -c '
+            analysis/ghidra/benchmarks/corpus/ci_verify.sh
+          '
       - name: Validate home and VPS Compose
         shell: bash
         run: |

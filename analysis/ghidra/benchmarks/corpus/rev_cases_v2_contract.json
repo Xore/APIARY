@@ -1,0 +1,24 @@
+{
+  "note": "A versioned scoring contract, separate from analysis/ghidra/models/approved-models.json -- that file is #158's own governance artifact (which model is approved to run in production, and the model-drift gates it must keep passing); this one is #159's own artifact (which cases this corpus's rubric covers, and a hash tying it to one exact rubric revision). Distinct because #159's corpus can grow (new cases, new architectures) on its own schedule without that being a #158 model-approval event, and #158 can requalify a model without touching this file. Checked by validate_manifest.py on every change.",
+  "contract_version": "rev-cases-v2",
+  "schema_version": 1,
+  "rubric_file": "rev_cases_v2_rubric.json",
+  "rubric_sha256": "00009b8a2428373e66fbad77eb644a457f52006713414e5404d5d85bd423ac4d",
+  "case_count": 14,
+  "cases": [
+    "checksum_rotate",
+    "error_handling_alloc",
+    "file_write_persist",
+    "format_string_bug",
+    "indirect_dispatch",
+    "integer_overflow_alloc",
+    "linked_list_sum",
+    "loopback_connect",
+    "process_and_injection",
+    "safe_strcpy",
+    "tlv_parser",
+    "use_after_free",
+    "vulnerable_strcpy",
+    "xor_decode_loop"
+  ]
+}

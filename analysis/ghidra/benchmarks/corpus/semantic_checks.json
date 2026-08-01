@@ -1,0 +1,2184 @@
+{
+  "checked": 240,
+  "failed": 0,
+  "cases_covered": [
+    "checksum_rotate",
+    "error_handling_alloc",
+    "file_write_persist",
+    "format_string_bug",
+    "indirect_dispatch",
+    "integer_overflow_alloc",
+    "linked_list_sum",
+    "safe_strcpy",
+    "tlv_parser",
+    "use_after_free",
+    "vulnerable_strcpy",
+    "xor_decode_loop"
+  ],
+  "cases_excluded": {
+    "process_and_injection": "forks and execs a real child process; nothing to assert beyond pid != -1",
+    "loopback_connect": "opens a real network socket/connect(); no assertion needs a live syscall"
+  },
+  "results": [
+    {
+      "case": "checksum_rotate",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "checksum_rotate",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "checksum_rotate",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "checksum_rotate",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "checksum_rotate",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "checksum_rotate",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "checksum_rotate",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "checksum_rotate",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "checksum_rotate",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "checksum_rotate",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "checksum_rotate",
+      "toolchain": "clang-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "checksum_rotate",
+      "toolchain": "clang-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "checksum_rotate",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "checksum_rotate",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "checksum_rotate",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "checksum_rotate",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "checksum_rotate",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "checksum_rotate",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "checksum_rotate",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "checksum_rotate",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "error_handling_alloc",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "error_handling_alloc",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "error_handling_alloc",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "error_handling_alloc",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "error_handling_alloc",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "error_handling_alloc",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "error_handling_alloc",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "error_handling_alloc",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "error_handling_alloc",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "error_handling_alloc",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "error_handling_alloc",
+      "toolchain": "clang-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "error_handling_alloc",
+      "toolchain": "clang-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "error_handling_alloc",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "error_handling_alloc",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "error_handling_alloc",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "error_handling_alloc",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "error_handling_alloc",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "error_handling_alloc",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "error_handling_alloc",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "error_handling_alloc",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "file_write_persist",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "file_write_persist",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "file_write_persist",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "file_write_persist",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "file_write_persist",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "file_write_persist",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "file_write_persist",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "file_write_persist",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "file_write_persist",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "file_write_persist",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "file_write_persist",
+      "toolchain": "clang-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "file_write_persist",
+      "toolchain": "clang-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "file_write_persist",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "file_write_persist",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "file_write_persist",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "file_write_persist",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "file_write_persist",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "file_write_persist",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "file_write_persist",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "file_write_persist",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "format_string_bug",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "hello worldPASS"
+    },
+    {
+      "case": "format_string_bug",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "hello worldPASS"
+    },
+    {
+      "case": "format_string_bug",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "hello worldPASS"
+    },
+    {
+      "case": "format_string_bug",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "hello worldPASS"
+    },
+    {
+      "case": "format_string_bug",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "hello worldPASS"
+    },
+    {
+      "case": "format_string_bug",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "hello worldPASS"
+    },
+    {
+      "case": "format_string_bug",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "hello worldPASS"
+    },
+    {
+      "case": "format_string_bug",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "hello worldPASS"
+    },
+    {
+      "case": "format_string_bug",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "hello worldPASS"
+    },
+    {
+      "case": "format_string_bug",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "hello worldPASS"
+    },
+    {
+      "case": "format_string_bug",
+      "toolchain": "clang-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "hello worldPASS"
+    },
+    {
+      "case": "format_string_bug",
+      "toolchain": "clang-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "hello worldPASS"
+    },
+    {
+      "case": "format_string_bug",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "hello worldPASS"
+    },
+    {
+      "case": "format_string_bug",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "hello worldPASS"
+    },
+    {
+      "case": "format_string_bug",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "hello worldPASS"
+    },
+    {
+      "case": "format_string_bug",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "hello worldPASS"
+    },
+    {
+      "case": "format_string_bug",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "hello worldPASS"
+    },
+    {
+      "case": "format_string_bug",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "hello worldPASS"
+    },
+    {
+      "case": "format_string_bug",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "hello worldPASS"
+    },
+    {
+      "case": "format_string_bug",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "hello worldPASS"
+    },
+    {
+      "case": "indirect_dispatch",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "indirect_dispatch",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "indirect_dispatch",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "indirect_dispatch",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "indirect_dispatch",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "indirect_dispatch",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "indirect_dispatch",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "indirect_dispatch",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "indirect_dispatch",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "indirect_dispatch",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "indirect_dispatch",
+      "toolchain": "clang-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "indirect_dispatch",
+      "toolchain": "clang-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "indirect_dispatch",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "indirect_dispatch",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "indirect_dispatch",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "indirect_dispatch",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "indirect_dispatch",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "indirect_dispatch",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "indirect_dispatch",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "indirect_dispatch",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "integer_overflow_alloc",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "integer_overflow_alloc",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "integer_overflow_alloc",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "integer_overflow_alloc",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "integer_overflow_alloc",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "integer_overflow_alloc",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "integer_overflow_alloc",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "integer_overflow_alloc",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "integer_overflow_alloc",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "integer_overflow_alloc",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "integer_overflow_alloc",
+      "toolchain": "clang-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "integer_overflow_alloc",
+      "toolchain": "clang-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "integer_overflow_alloc",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "integer_overflow_alloc",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "integer_overflow_alloc",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "integer_overflow_alloc",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "integer_overflow_alloc",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "integer_overflow_alloc",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "integer_overflow_alloc",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "integer_overflow_alloc",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "linked_list_sum",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "linked_list_sum",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "linked_list_sum",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "linked_list_sum",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "linked_list_sum",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "linked_list_sum",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "linked_list_sum",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "linked_list_sum",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "linked_list_sum",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "linked_list_sum",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "linked_list_sum",
+      "toolchain": "clang-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "linked_list_sum",
+      "toolchain": "clang-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "linked_list_sum",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "linked_list_sum",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "linked_list_sum",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "linked_list_sum",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "linked_list_sum",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "linked_list_sum",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "linked_list_sum",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "linked_list_sum",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "safe_strcpy",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "safe_strcpy",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "safe_strcpy",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "safe_strcpy",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "safe_strcpy",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "safe_strcpy",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "safe_strcpy",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "safe_strcpy",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "safe_strcpy",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "safe_strcpy",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "safe_strcpy",
+      "toolchain": "clang-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "safe_strcpy",
+      "toolchain": "clang-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "safe_strcpy",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "safe_strcpy",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "safe_strcpy",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "safe_strcpy",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "safe_strcpy",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "safe_strcpy",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "safe_strcpy",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "safe_strcpy",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "tlv_parser",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "tlv_parser",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "tlv_parser",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "tlv_parser",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "tlv_parser",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "tlv_parser",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "tlv_parser",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "tlv_parser",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "tlv_parser",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "tlv_parser",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "tlv_parser",
+      "toolchain": "clang-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "tlv_parser",
+      "toolchain": "clang-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "tlv_parser",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "tlv_parser",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "tlv_parser",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "tlv_parser",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "tlv_parser",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "tlv_parser",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "tlv_parser",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "tlv_parser",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "use_after_free",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "use_after_free",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "use_after_free",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "use_after_free",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "use_after_free",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "use_after_free",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "use_after_free",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "use_after_free",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "use_after_free",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "use_after_free",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "use_after_free",
+      "toolchain": "clang-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "use_after_free",
+      "toolchain": "clang-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "use_after_free",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "use_after_free",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "use_after_free",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "use_after_free",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "use_after_free",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "use_after_free",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "use_after_free",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "use_after_free",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "vulnerable_strcpy",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "vulnerable_strcpy",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "vulnerable_strcpy",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "vulnerable_strcpy",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "vulnerable_strcpy",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "vulnerable_strcpy",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "vulnerable_strcpy",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "vulnerable_strcpy",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "vulnerable_strcpy",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "vulnerable_strcpy",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "vulnerable_strcpy",
+      "toolchain": "clang-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "vulnerable_strcpy",
+      "toolchain": "clang-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "vulnerable_strcpy",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "vulnerable_strcpy",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "vulnerable_strcpy",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "vulnerable_strcpy",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "vulnerable_strcpy",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "vulnerable_strcpy",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "vulnerable_strcpy",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "vulnerable_strcpy",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "xor_decode_loop",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "xor_decode_loop",
+      "toolchain": "gcc-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "xor_decode_loop",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "xor_decode_loop",
+      "toolchain": "clang-x86_64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "xor_decode_loop",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "xor_decode_loop",
+      "toolchain": "gcc-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "xor_decode_loop",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "xor_decode_loop",
+      "toolchain": "clang-aarch64",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "xor_decode_loop",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "xor_decode_loop",
+      "toolchain": "gcc-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "xor_decode_loop",
+      "toolchain": "clang-i686",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "xor_decode_loop",
+      "toolchain": "clang-i686",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "xor_decode_loop",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "xor_decode_loop",
+      "toolchain": "gcc-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "xor_decode_loop",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "xor_decode_loop",
+      "toolchain": "clang-mipsel",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "xor_decode_loop",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "xor_decode_loop",
+      "toolchain": "gcc-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "xor_decode_loop",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O0",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    },
+    {
+      "case": "xor_decode_loop",
+      "toolchain": "clang-armhf",
+      "opt_level": "-O2",
+      "stage": "execute",
+      "passed": true,
+      "exit_code": 0,
+      "output": "PASS"
+    }
+  ]
+}
