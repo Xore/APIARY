@@ -451,6 +451,15 @@ class IsoForestModel:
 
 
 def _symlink(target: str, link: str) -> None:
-    if os.path.lexists(link):
-        os.remove(link)
-    os.symlink(target, link)
+    """Atomically point `link` at `target` (#169). Writes a temporary
+    symlink in the same directory, then os.replace()s it onto `link` --
+    os.replace is an atomic rename on POSIX when source and destination
+    share a filesystem (true here: both live directly under model_dir), so
+    a process killed between these two calls can never observe `link`
+    missing. It's either the previous target or the new one, never absent
+    -- unlike the previous remove-then-symlink sequence, which had a window
+    where `link` didn't exist at all."""
+    directory = os.path.dirname(link) or "."
+    temp_link = os.path.join(directory, f".{os.path.basename(link)}.tmp-{os.getpid()}-{time.time_ns()}")
+    os.symlink(target, temp_link)
+    os.replace(temp_link, link)

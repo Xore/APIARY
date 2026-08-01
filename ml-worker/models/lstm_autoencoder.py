@@ -8,6 +8,7 @@ Based on: CNN-BiLSTM-AE architecture (Park et al., MDPI 2025)
 See docs/ml-worker-plan.md §4.2 and §5.2.
 """
 import copy
+import json
 import os
 import time
 import collections
@@ -22,7 +23,7 @@ from loguru import logger
 
 from models.isolation_forest import (
     _get_ip, _get_port, _get_transport_proto, _proto_enc, _ts_to_hour,
-    _accept_decision, HOLDOUT_FRACTION, HOLDOUT_MIN, RetrainResult,
+    _accept_decision, _symlink, HOLDOUT_FRACTION, HOLDOUT_MIN, RetrainResult,
 )
 from models.lifecycle import prune_old_versions, write_version_metadata
 
@@ -43,6 +44,15 @@ BATCH_SIZE  = 32
 # fine-tune cycle -- stated worst case, not whatever the busiest attacker
 # happened to send that day.
 MAX_TRAIN_WINDOWS = 4_000
+
+# #170: each IP's own window is already bounded (deque(maxlen=SEQ_LEN)), but
+# the NUMBER of distinct IPs tracked across a long-running worker is not --
+# unbounded IP cardinality is a real memory/disk question in its own right,
+# not something to persist without a cap just because the per-IP windows
+# already are. Persisting only the most-recently-active IPs means a source
+# that's gone quiet stops taking up sidecar space, which is also the set
+# most likely to still matter across a short restart.
+MAX_PERSISTED_IPS = 2_000
 
 
 def _ts_to_epoch(ts_str: Optional[str]) -> Optional[float]:
@@ -162,6 +172,7 @@ class LSTMAEModel:
         # meaningful "previous model" to hold anything to (#65).
         self._trained = False
         self._load_latest()
+        self._load_buffers()
 
     def score(self, src: dict) -> float:
         """
@@ -320,9 +331,7 @@ class LSTMAEModel:
         os.makedirs(self.model_dir, exist_ok=True)
         torch.save({"model": self.net.state_dict(), "threshold": self.threshold}, path)
         link = os.path.join(self.model_dir, "current_lstm_ae.pt")
-        if os.path.lexists(link):
-            os.remove(link)
-        os.symlink(path, link)
+        _symlink(path, link)  # atomic promotion (#169) -- shared with IsoForestModel
         # Version metadata + retention (#65, docs/ml-worker-plan.md §11.3) --
         # same contract as IsoForestModel._save().
         write_version_metadata(self.model_dir, "lstm_ae", ts, {"timestamp": ts, **asdict(result)})
@@ -335,3 +344,47 @@ class LSTMAEModel:
             self.net.load_state_dict(ckpt["model"])
             self.threshold = ckpt.get("threshold", 0.05)
             self._trained = True
+
+    def _buffers_path(self) -> str:
+        return os.path.join(self.model_dir, "current_lstm_ae_buffers.json")
+
+    def save_buffers(self) -> None:
+        """Persist per-IP sliding windows so a restart doesn't reopen a real
+        temporal-detection coverage gap for sessions in progress (#170) --
+        _load_latest() only ever restored the network weights and
+        threshold, never this. Bounded to the MAX_PERSISTED_IPS
+        most-recently-active IPs (by _last_seen); written atomically
+        (temp file + os.replace) so a crash mid-write can't corrupt the
+        sidecar or leave it half-written.
+        """
+        items = sorted(self._last_seen.items(), key=lambda kv: kv[1], reverse=True)[:MAX_PERSISTED_IPS]
+        kept_ips = {ip for ip, _ in items}
+        payload = {
+            "buffers": {
+                ip: [vec.tolist() for vec in self._buffers[ip]]
+                for ip in kept_ips if ip in self._buffers
+            },
+            "last_seen": dict(items),
+        }
+        path = self._buffers_path()
+        os.makedirs(self.model_dir, exist_ok=True)
+        temp_path = f"{path}.tmp-{os.getpid()}-{time.time_ns()}"
+        with open(temp_path, "w") as handle:
+            json.dump(payload, handle)
+        os.replace(temp_path, path)
+
+    def _load_buffers(self) -> None:
+        path = self._buffers_path()
+        if not os.path.exists(path):
+            return
+        try:
+            with open(path) as handle:
+                payload = json.load(handle)
+        except (OSError, ValueError) as exc:
+            logger.warning(f"Failed to load persisted LSTM-AE buffers (non-fatal, starting cold): {exc}")
+            return
+        for ip, vectors in payload.get("buffers", {}).items():
+            self._buffers[ip] = collections.deque(
+                (np.array(vec, dtype=np.float32) for vec in vectors), maxlen=SEQ_LEN
+            )
+        self._last_seen.update(payload.get("last_seen", {}))
