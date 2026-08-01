@@ -191,7 +191,7 @@ http:
       middlewares: [security-headers, strip-auth-identity, forward-auth]
 
     honeypot-revdeck:
-      rule: "Host(`revdeck.honeypot.example`)"
+      rule: "Host(`rev.honeypot.example`)"
       entryPoints: [websecure]
       service: honeypot-revdeck
       tls:

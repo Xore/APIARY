@@ -48,10 +48,10 @@ same WireGuard address `honeypot-stack`'s own `HP_BIND` uses, then redeploy
 this stack — `revdeck`'s port publish reads it, everything else in this file
 stays loopback-only regardless. The VPS side (`socat-hp-revdeck` in
 `vps/docker-compose.yml`, the `honeypot-revdeck` router in
-`vps/traefik/dynamic.yml`) is already wired to a `revdeck.<domain>` route
+`vps/traefik/dynamic.yml`) is already wired to a `rev.<domain>` route
 behind the same shared forward-auth SSO middleware every other investigation
 UI (dashboard, Kibana, Arkime, ...) uses — register the DNS record and it's
-reachable at `https://revdeck.<your-domain>`. No new auth pattern; this is
+reachable at `https://rev.<your-domain>`. No new auth pattern; this is
 the existing one extended to one more service.
 
 ## Automated Workflows Used

@@ -186,8 +186,8 @@ Create proxied DNS records for the HTTP services you enable, normally:
 - `tanner`
 - `evebox`
 - `arkime`
-- `revdeck` (optional — only if the `analysis/ghidra/` stack's `revdeck`
-  profile is enabled; see `analysis/ghidra/revdeck/README.md`)
+- `rev` (optional — Rev·Deck; only if the `analysis/ghidra/` stack's
+  `revdeck` profile is enabled; see `analysis/ghidra/revdeck/README.md`)
 - `traefik` (optional — Traefik's own dashboard/API, read-only, behind
   forward-auth same as everything else here)
 - `dockge` (optional — **root-equivalent host control**: Dockge has
