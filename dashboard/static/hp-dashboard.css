@@ -114,6 +114,12 @@ body [hidden] { display: none !important; }
 .hp-live-state:hover { border-color: color-mix(in srgb, currentColor 35%, transparent); background: var(--surface-2); }
 .hp-live-state--paused { color: var(--text-muted); }
 .hp-live-state--paused .live-dot { background: var(--text-muted); animation: none; }
+/* #210: the one live indicator now covers what a separate overview-only
+   .live-pill used to (paused, and a stalled/reconnecting SSE connection) --
+   consolidated here since this toolbar control is global and clickable,
+   where the old pill was neither. */
+.hp-live-state--stalled { color: var(--warning); }
+.hp-live-state--stalled .live-dot { background: var(--warning); animation: none; }
 .live-dot {
   width: 7px; height: 7px; border-radius: 50%;
   background: var(--success);
@@ -203,25 +209,12 @@ a.metric:hover { border-color: var(--border-strong); background: var(--surface-2
   max-width: 700px; margin: 8px 0 0;
   font-size: 13px; line-height: 1.55; color: var(--text-secondary);
 }
+/* #210: the overview header used to duplicate the toolbar's LIVE toggle
+   with a separate, non-interactive .live-pill (added in #201). Removed --
+   the toolbar toggle is now the single indicator, global and clickable,
+   and covers the same paused/stalled states (see .hp-live-state--stalled
+   above). */
 .live-panel { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
-.live-pill {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 6px 11px;
-  border: 1px solid color-mix(in srgb, var(--success) 25%, transparent); border-radius: var(--radius-pill);
-  background: var(--success-soft); color: var(--success);
-  font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
-}
-/* #201: reflect the same paused/stalled states the toolbar's LIVE toggle
-   already showed, on the pill that used to just always say "Live telemetry"
-   regardless of either. */
-.live-pill--paused {
-  border-color: var(--border-subtle); background: var(--surface-2); color: var(--text-muted);
-}
-.live-pill--paused .live-dot { background: var(--text-muted); animation: none; }
-.live-pill--stalled {
-  border-color: color-mix(in srgb, var(--warning) 25%, transparent); background: var(--warning-soft); color: var(--warning);
-}
-.live-pill--stalled .live-dot { background: var(--warning); animation: none; }
 .gen { font: 11px var(--hp-mono); color: var(--text-muted); }
 @media (max-width: 800px) {
   .overview-header { grid-template-columns: 1fr; align-items: start; }

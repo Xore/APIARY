@@ -70,12 +70,29 @@
     try { localStorage.setItem(livePausedKey, paused ? "1" : "0"); } catch {}
     liveListeners.forEach(listener => { try { listener(paused); } catch {} });
   };
+  /* #210: connection health is tracked separately from the paused switch --
+     a page's own EventSource (this file's, on non-overview pages, or the
+     overview page's own in-place-refresh one) reports here so the single
+     global toolbar indicator reflects a stalled/reconnecting SSE connection
+     no matter which page actually holds it open. Native EventSource retries
+     with its own backoff after onerror; this only reflects that state, it
+     does not implement reconnection itself. */
+  const liveConnListeners = new Set();
+  let liveConnHealthy = true;
+  const setLiveConnHealthy = healthy => {
+    if (healthy === liveConnHealthy) return;
+    liveConnHealthy = healthy;
+    liveConnListeners.forEach(listener => { try { listener(healthy); } catch {} });
+  };
   window.HoneypotLive = Object.freeze({
     paused: () => livePaused,
     pause: () => setLivePaused(true),
     resume: () => setLivePaused(false),
     toggle: () => setLivePaused(!livePaused),
     onChange: listener => { liveListeners.add(listener); return () => liveListeners.delete(listener); },
+    connectionHealthy: () => liveConnHealthy,
+    setConnectionHealthy: setLiveConnHealthy,
+    onConnectionChange: listener => { liveConnListeners.add(listener); return () => liveConnListeners.delete(listener); },
   });
 
   /* ---------- lazy loading (sentinel + offset fetching) ---------- */
@@ -739,20 +756,28 @@
     refreshAlertCount();
     setInterval(refreshAlertCount, 60000);
 
-    /* LIVE toggle: one switch over every refresh path. */
+    /* LIVE toggle: one switch over every refresh path, and (#210) the single
+       global indicator for connection health too -- there is no separate
+       per-page pill any more. */
     const liveToggle = shell.querySelector("[data-hp-live-toggle]");
     if (liveToggle) {
       const liveLabel = liveToggle.querySelector("[data-hp-live-label]");
-      const renderLiveState = paused => {
+      const renderLiveState = () => {
+        const paused = window.HoneypotLive.paused();
+        const stalled = !paused && !window.HoneypotLive.connectionHealthy();
         liveToggle.classList.toggle("hp-live-state--paused", paused);
+        liveToggle.classList.toggle("hp-live-state--stalled", stalled);
         liveToggle.setAttribute("aria-pressed", paused ? "true" : "false");
         liveToggle.title = paused
           ? "Dashboard refresh is paused — resume it"
-          : "Dashboard refresh is active — pause it";
-        if (liveLabel) liveLabel.textContent = paused ? "Paused" : "Live";
+          : stalled
+            ? "Live connection lost — reconnecting automatically"
+            : "Dashboard refresh is active — pause it";
+        if (liveLabel) liveLabel.textContent = paused ? "Paused" : stalled ? "Reconnecting…" : "Live";
       };
-      renderLiveState(window.HoneypotLive.paused());
+      renderLiveState();
       window.HoneypotLive.onChange(renderLiveState);
+      window.HoneypotLive.onConnectionChange(renderLiveState);
       liveToggle.addEventListener("click", () => {
         window.HoneypotLive.toggle();
         // Resuming shows current data rather than whatever went stale while
@@ -769,6 +794,8 @@
       let knownTotal = null;
       fetch("/api/events?per_page=25", {cache: "no-store"}).then(r => r.json()).then(data => { knownTotal = data.Total; }).catch(() => {});
       const stream = new EventSource("/api/stream");
+      stream.addEventListener("open", () => window.HoneypotLive.setConnectionHealthy(true));
+      stream.onerror = () => window.HoneypotLive.setConnectionHealthy(false);
       stream.addEventListener("update", async () => {
         if (window.HoneypotLive.paused()) return;
         try {

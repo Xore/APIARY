@@ -131,22 +131,55 @@ func TestOverviewRefreshTargetsTheCurrentPageContentSelector(t *testing.T) {
 	}
 }
 
-// TestOverviewLivePillReflectsActualState (#201): the overview header's
-// "Live telemetry" pill used to be static markup with no JS binding at all
-// -- it always said "Live telemetry" regardless of the toolbar LIVE toggle
-// being paused, or the SSE connection having died. It must now be wired to
-// both: the toolbar's paused state (window.HoneypotLive) and the
-// EventSource's own connection health (onerror/open), not just decorative
-// text.
-func TestOverviewLivePillReflectsActualState(t *testing.T) {
-	if !strings.Contains(pageTemplate, `data-hp-live-pill`) {
-		t.Fatal("overview header's live-pill has no stable hook for JS to bind to")
+// TestOverviewHasNoDuplicateLiveIndicator (#210): the overview header used
+// to carry its own "Live telemetry" pill (#201) alongside the toolbar's
+// global LIVE toggle -- two indicators that could show related-but-distinct
+// state, and only one of which was actually clickable. The pill is gone;
+// the overview's own EventSource must still report connection health, but
+// into window.HoneypotLive's shared state rather than rendering anything
+// itself.
+func TestOverviewHasNoDuplicateLiveIndicator(t *testing.T) {
+	for _, marker := range []string{`data-hp-live-pill`, `class="live-pill"`, `renderLivePill`, `sseHealthy`} {
+		if strings.Contains(pageTemplate, marker) {
+			t.Fatalf("overview header must not carry its own live-status pill any more, found %q", marker)
+		}
 	}
-	if !strings.Contains(pageTemplate, `window.HoneypotLive.onChange(renderLivePill)`) {
-		t.Fatal("overview's live-pill must reflect window.HoneypotLive's paused state, not just the toolbar toggle")
+	if !strings.Contains(pageTemplate, `window.HoneypotLive.setConnectionHealthy(true)`) ||
+		!strings.Contains(pageTemplate, `window.HoneypotLive.setConnectionHealthy(false)`) {
+		t.Fatal("overview's EventSource must report open/error into window.HoneypotLive's shared connection state")
 	}
 	if !strings.Contains(pageTemplate, `es.onerror=`) || strings.Contains(pageTemplate, `es.onerror=()=>{};`) {
 		t.Fatal("overview's EventSource must react to onerror instead of silently ignoring connection failures")
+	}
+}
+
+// TestToolbarLiveToggleIsTheSingleGlobalIndicator (#210): the toolbar's
+// [data-hp-live-toggle] is shared across every page (it lives in the
+// "topbar" partial), so it -- not a page-local pill -- must be the one
+// place that reflects both the paused switch and a stalled/reconnecting
+// connection, and the one thing a click actually controls.
+func TestToolbarLiveToggleIsTheSingleGlobalIndicator(t *testing.T) {
+	if !strings.Contains(pageTemplate, `data-hp-live-toggle`) {
+		t.Fatal("shared topbar must render the LIVE toggle")
+	}
+	appJS, err := staticAssets.ReadFile("static/hp-app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(appJS)
+	for _, marker := range []string{
+		`connectionHealthy:`,
+		`setConnectionHealthy`,
+		`onConnectionChange:`,
+		`hp-live-state--stalled`,
+		`window.HoneypotLive.onConnectionChange(renderLiveState)`,
+	} {
+		if !strings.Contains(js, marker) {
+			t.Fatalf("hp-app.js missing %q -- the toolbar toggle must render paused AND stalled state", marker)
+		}
+	}
+	if !strings.Contains(js, `stream.addEventListener("open", () => window.HoneypotLive.setConnectionHealthy(true));`) {
+		t.Fatal("the non-overview EventSource must also report connection health, not just the overview's own")
 	}
 }
 
