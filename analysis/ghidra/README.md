@@ -21,9 +21,13 @@ dashboard container            host (root)                    containers (loopba
 │   submit         │             │ worker.path/.svc  │  :9090  │ headless REST    │
 │                  │             │                   │         └──────────────────┘
 │ GET /ghidra/{sha}│ ◄────────── │ ghidra-worker.py  │ ──────► ┌──────────────────┐
-└──────────────────┘  _ghidra.json└───────────────────┘ :11434 │ ollama           │
-                                                                │ local model      │
-                                                                └──────────────────┘
+└──────────────────┘  _ghidra.json│                   │ :11434 │ ollama           │
+                                   │                   │        │ local model      │
+                                   │                   │        └──────────────────┘
+                                   │                   │ ──────► ┌──────────────────┐
+                                   └───────────────────┘  :9091  │ statictools      │
+                                                                 │ ssdeep/tlsh/lief │
+                                                                 └──────────────────┘
 ```
 
 The dashboard never talks to either container, or to Docker. It writes a
@@ -156,6 +160,7 @@ which documents each setting inline. The ones worth knowing:
 | `GHIDRA_TRIAGE_MODEL` | `qwen3:8b` | Recorded in every result |
 | `GHIDRA_TRIAGE_TIMEOUT` | `300` | Per workflow call; two calls run per sample |
 | `GHIDRA_TRIAGE_MAX_STRINGS` / `_IMPORTS` / `_FUNCTIONS` | `200` / `150` / `100` | How much of the binary the model is shown. Around 8000 tokens together — see [the context window](#the-context-window-is-part-of-the-configuration) before raising them |
+| `STATICTOOLS_API_BASE` | `http://127.0.0.1:9091` | ssdeep/tlsh/lief sidecar (#138). Empty switches it off |
 
 Spool paths are also set here, and must agree with `ReadWritePaths=` in
 `honeypot-ghidra-worker.service`: systemd cannot expand these values, so moving
@@ -286,6 +291,7 @@ REQUEST_DIR   : /var/lib/honeypot-ghidra/requests/pending (exists=True)
 RESULTS_DIR   : /var/lib/honeypot-ghidra/results (exists=True)
 SAMPLES_DIR   : /var/lib/honeypot-sandbox/inbox/samples (exists=True)
 TRIAGE        : http://127.0.0.1:11434/v1 OK, model qwen3:8b available, context fits a full evidence block (7972 tokens read)
+STATICTOOLS   : http://127.0.0.1:9091 OK
 
 round trip on /bin/true ...
   job            : 4761e1f6b74841db9f744c552cc94240
@@ -293,6 +299,8 @@ round trip on /bin/true ...
   functions      : 96
   strings        : 180
   imports        : 38
+  fuzzy_hashes   : {'ssdeep': '3:...', 'ssdeep_error': None, 'tlsh': None, 'tlsh_error': 'input too small or too uniform to hash (TNULL)'}
+  lief           : ok, format=ELF
 
 contract OK
 ```

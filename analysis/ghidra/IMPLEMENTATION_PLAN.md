@@ -304,6 +304,14 @@ tool behind it or a tool whose results never reach the analyst.
 
 ## Additional Static Analysis Tooling
 
+> **`ssdeep`/`tlsh` and `lief` are built** (2026-08-01, [#138](https://github.com/Xore/honeypot-stack/issues/138)):
+> a loopback-only sidecar, `analysis/ghidra/statictools/`, run alongside
+> `ghidra`/`ollama` by `docker-compose.ghidra.yml`. The worker calls it after
+> collection via `fuzzy_hash()`/`lief_parse()` and writes `fuzzy_hashes`/`lief`
+> onto the result, fail-soft like `ai_triage`. `floss` is not — its risk
+> profile (code emulation) needs its own sandboxing decision, tracked
+> separately in #138.
+
 Beyond Ghidra, nine tools were once listed as *considered* for the pipeline,
 with no decision behind any of them. [#85](https://github.com/Xore/honeypot-stack/issues/85)
 asked for a short list with reasons instead of a wish list; this is that

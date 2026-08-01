@@ -29,6 +29,41 @@ type ghidraCrypto struct {
 	Algorithm string `json:"algorithm"`
 }
 
+type ghidraFuzzyHashes struct {
+	SSDeep      string `json:"ssdeep"`
+	SSDeepError string `json:"ssdeep_error"`
+	TLSH        string `json:"tlsh"`
+	TLSHError   string `json:"tlsh_error"`
+}
+
+type ghidraSection struct {
+	Name    string   `json:"name"`
+	Size    int      `json:"size"`
+	Entropy *float64 `json:"entropy"`
+}
+
+// ghidraLief mirrors what analysis/ghidra/statictools/server.py's
+// lief_parse() returns, forwarded verbatim by the worker (#85, #138).
+// Libraries and Stripped are format-specific (ELF/PE/Mach-O) and are absent
+// -- zero value, not an error -- on a format that does not have the concept.
+type ghidraLief struct {
+	Format            string          `json:"format"`
+	Architecture      string          `json:"architecture"`
+	Entrypoint        string          `json:"entrypoint"`
+	IsPIE             bool            `json:"is_pie"`
+	SectionCount      int             `json:"section_count"`
+	SectionsTruncated bool            `json:"sections_truncated"`
+	Sections          []ghidraSection `json:"sections"`
+	Libraries         []string        `json:"libraries"`
+	// Stripped, IsDLL and CompileTimestamp are ELF/PE-specific and absent on
+	// a format that has no such concept (e.g. Mach-O). Pointers so the
+	// template can tell "absent" from "false"/"zero" rather than rendering a
+	// claim the sidecar never made.
+	Stripped         *bool  `json:"stripped"`
+	IsDLL            *bool  `json:"is_dll"`
+	CompileTimestamp *int64 `json:"compile_timestamp"`
+}
+
 type ghidraTriage struct {
 	Workflow    string   `json:"workflow"`
 	FamilyGuess string   `json:"family_guess"`
@@ -60,9 +95,11 @@ type ghidraResult struct {
 	Imports   []string         `json:"imports"`
 	FindCrypt []ghidraCrypto   `json:"findcrypt"`
 
-	CallGraphSVG string        `json:"call_graph_svg"`
-	AITriage     *ghidraTriage `json:"ai_triage"`
-	ReportPDF    string        `json:"report_pdf"`
+	CallGraphSVG string             `json:"call_graph_svg"`
+	AITriage     *ghidraTriage      `json:"ai_triage"`
+	FuzzyHashes  *ghidraFuzzyHashes `json:"fuzzy_hashes"`
+	Lief         *ghidraLief        `json:"lief"`
+	ReportPDF    string             `json:"report_pdf"`
 
 	// Set by the dashboard, not the worker: download routes, present only when
 	// the file actually exists.

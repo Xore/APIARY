@@ -1,12 +1,13 @@
-# Docker Compose for the analysis host: the Ghidra headless REST service and
-# the local model that backs AI triage.
+# Docker Compose for the analysis host: the Ghidra headless REST service, the
+# local model that backs AI triage, and the fuzzy-hashing/structural-parsing
+# sidecar.
 #
 # Run: analysis/ghidra/install-analysis-host.sh
-#   or docker compose -f docker-compose.ghidra.yml up -d ghidra ollama
+#   or docker compose -f docker-compose.ghidra.yml up -d ghidra ollama statictools
 #
-# Neither service is reachable off this host. Both publish on 127.0.0.1 only,
-# because between them they hold captured malware and every string extracted
-# from it.
+# None of the three is reachable off this host. All publish on 127.0.0.1
+# only, because between them they hold captured malware and every string,
+# fuzzy hash and structural fact extracted from it.
 
 services:
   ghidra:
@@ -88,6 +89,27 @@ services:
     # file is the one that works everywhere and the card is opted into with
     # docker-compose.ghidra.gpu.yml. Ollama on CPU is slower; the worker cannot
     # tell the difference.
+
+  statictools:
+    # Fuzzy hashing (ssdeep/tlsh, #85) and structural parsing (lief, #85) for
+    # worker/ghidra-worker.py's fuzzy_hash()/lief_parse() calls (#138). A
+    # container rather than a host pip install for the same reason the worker
+    # itself is stdlib-only: see statictools/server.py's module docstring.
+    build: ./statictools
+    restart: unless-stopped
+    ports:
+      # Loopback only, same reasoning as ghidra/ollama above: the request
+      # bodies are raw bytes from captured samples.
+      - '127.0.0.1:9091:9091'
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    healthcheck:
+      test: ['CMD', 'python3', '-c',
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9091/v1/health', timeout=3).status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
 
   revdeck:
     # biniamf/ai-reverse-engineering — the analyst-facing chat UI.

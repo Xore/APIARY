@@ -37,6 +37,12 @@
 > Dockge stack, `honeypot-ghidra-worker.path` active, and the dashboard writing
 > requests it drains. #104 stays open for the rest — this is one host, set up
 > by hand-running the installer, not a deployment story.
+>
+> **`fuzzy_hashes` and `lief` are populated** (2026-08-01, #85, #138). A
+> fourth loopback-only container, `statictools`, runs ssdeep/tlsh and lief
+> outside the worker's own stdlib-only process — see that file's module
+> docstring for why. Fails soft like `ai_triage`: sidecar down or format not
+> recognised both leave the field `null` rather than failing the analysis.
 
 > **Status**: Built — see the block at the top of this file. This line said
 > "nothing here is built yet" until 2026-07-31, six phases after it stopped
@@ -176,7 +182,7 @@ that:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "sha256": "…",
   "requested_at": "…", "started_at": "…", "completed_at": "…",
   "exit_status": "ok",
@@ -191,9 +197,21 @@ that:
     "behaviors": ["…"],
     "model": "qwen3:8b"
   },
+  "fuzzy_hashes": {"ssdeep": "…", "ssdeep_error": null, "tlsh": "…", "tlsh_error": null},
+  "lief": {"format": "ELF", "architecture": "X86_64", "entrypoint": "0x6760",
+           "is_pie": true, "section_count": 30, "sections_truncated": false,
+           "sections": [{"name": ".text", "size": 12345, "entropy": 6.2}],
+           "libraries": ["libc.so.6"], "stripped": true},
   "report_pdf": "{sha256}_ghidra.pdf"
 }
 ```
+
+`fuzzy_hashes` and `lief` (#85, #138) come from `analysis/ghidra/statictools/`,
+a loopback-only sidecar next to `ghidra`/`ollama`. Both are `null` the same way
+`ai_triage` is: sidecar unreachable, or (for `lief` specifically) the sample's
+format was not recognised. `stripped`/`is_dll`/`compile_timestamp` on `lief`
+are format-specific and simply absent — not `false`/`0` — on a format that has
+no such concept.
 
 ---
 

@@ -152,6 +152,51 @@ class TruncatingModelStub(ModelStub):
         self.wfile.write(b)
 
 
+class StaticToolsStub(BaseHTTPRequestHandler):
+    """Serves the statictools sidecar contract: raw bytes in, JSON out.
+
+    No multipart, unlike the Ghidra stub above — this is our own service, so
+    the simplest correct contract was picked rather than one imposed by a
+    third party. A request whose body is exactly b"CORRUPT" stands in for a
+    file lief cannot parse, so the 422 path is exercised without needing a
+    real unparseable binary in the test tree.
+    """
+
+    def log_message(self, *a): pass
+
+    def do_GET(self):
+        if self.path == "/v1/health":
+            body = json.dumps({"status": "ok"}).encode()
+            self.send_response(200); self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body))); self.end_headers()
+            return self.wfile.write(body)
+        self.send_response(404); self.end_headers()
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        data = self.rfile.read(length)
+        if self.path == "/v1/fuzzy-hash":
+            body = json.dumps({"ssdeep": "3:stub:stub", "ssdeep_error": None,
+                               "tlsh": "T1STUB", "tlsh_error": None}).encode()
+            status = 200
+        elif self.path == "/v1/lief-parse":
+            if data == b"CORRUPT":
+                body = json.dumps({"error": "lief did not recognise this file's format"}).encode()
+                status = 422
+            else:
+                body = json.dumps({"format": "ELF", "entrypoint": "0x1000",
+                                   "sections": [{"name": ".text", "size": 100, "entropy": 6.1}],
+                                   "section_count": 1, "sections_truncated": False,
+                                   "libraries": ["libc.so.6"], "stripped": True}).encode()
+                status = 200
+        else:
+            body = json.dumps({"error": "not found"}).encode()
+            status = 404
+        self.send_response(status); self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body))); self.end_headers()
+        self.wfile.write(body)
+
+
 def serve(handler):
     srv = HTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -166,14 +211,14 @@ def load_worker():
     return mod
 
 
-def spool(tmp, name):
+def spool(tmp, name, data=b"MZ\x90\x00fake pe"):
     """A fresh request/results/samples triple with one valid request queued."""
     base = tmp / name
     req, res, smp = base / "req", base / "res", base / "smp"
     for d in (req, res, smp):
         d.mkdir(parents=True)
     sha = "a" * 64
-    (smp / sha).write_bytes(b"MZ\x90\x00fake pe")
+    (smp / sha).write_bytes(data)
     (req / f"{sha}.request").write_text("")
     return req, res, smp, sha
 
@@ -242,8 +287,9 @@ def test_spool(ghidra):
     env = {"GHIDRA_REQUEST_DIR": str(req), "GHIDRA_RESULTS_DIR": str(res),
            "GHIDRA_SAMPLES_DIR": str(smp), "GHIDRA_API_BASE": ghidra,
            "GHIDRA_LOCK": str(tmp / "lock"),
-           # Off for this half. Spool discipline must not depend on a model.
-           "GHIDRA_TRIAGE_API_BASE": ""}
+           # Off for this half. Spool discipline must not depend on a model
+           # or the fuzzy-hash/lief sidecar.
+           "GHIDRA_TRIAGE_API_BASE": "", "STATICTOOLS_API_BASE": ""}
     r = run(env)
 
     print("--- worker stderr ---"); print(r.stderr.strip())
@@ -263,10 +309,13 @@ def test_spool(ghidra):
               "function addr mapped to address")
         check(d.get("analyzer_version") == "ghidra-11.3.2",
               "analyzer version recorded from /status")
-        check(d["version"] == 1, "version stamped")
+        check(d["version"] == 2, "version stamped")
         check(all(k in d for k in ("findcrypt", "call_graph_svg", "ai_triage",
-                                   "report_pdf")), "every result key present")
+                                   "fuzzy_hashes", "lief", "report_pdf")),
+              "every result key present")
         check(d["ai_triage"] is None, "triage disabled leaves ai_triage null")
+        check(d["fuzzy_hashes"] is None, "statictools disabled leaves fuzzy_hashes null")
+        check(d["lief"] is None, "statictools disabled leaves lief null")
         check(oct(rf.stat().st_mode)[-3:] == "600", "result is 0600")
 
     check(not (req / f"{good}.request").exists(), "consumed request removed")
@@ -292,7 +341,10 @@ def triage_run(tmp, name, ghidra, extra):
     req, res, smp, sha = spool(tmp, name)
     env = {"GHIDRA_REQUEST_DIR": str(req), "GHIDRA_RESULTS_DIR": str(res),
            "GHIDRA_SAMPLES_DIR": str(smp), "GHIDRA_API_BASE": ghidra,
-           "GHIDRA_LOCK": str(tmp / f"lock-{name}")}
+           "GHIDRA_LOCK": str(tmp / f"lock-{name}"),
+           # Off here too: this helper is for triage tests, and the sidecar
+           # has its own dedicated test function below.
+           "STATICTOOLS_API_BASE": ""}
     env.update(extra)
     r = run(env)
     result = res / f"{sha}_ghidra.json"
@@ -368,13 +420,70 @@ def test_triage(ghidra, model, truncating):
     check(d is not None and d["ai_triage"] is None, "ai_triage left null")
 
 
+def statictools_run(tmp, name, ghidra, extra, data=b"MZ\x90\x00fake pe"):
+    """Drain one request with the given statictools settings; return its result."""
+    req, res, smp, sha = spool(tmp, name, data=data)
+    env = {"GHIDRA_REQUEST_DIR": str(req), "GHIDRA_RESULTS_DIR": str(res),
+           "GHIDRA_SAMPLES_DIR": str(smp), "GHIDRA_API_BASE": ghidra,
+           "GHIDRA_LOCK": str(tmp / f"lock-{name}"),
+           # Off here too: this is testing the sidecar, not the model.
+           "GHIDRA_TRIAGE_API_BASE": ""}
+    env.update(extra)
+    r = run(env)
+    result = res / f"{sha}_ghidra.json"
+    return r, (json.loads(result.read_text()) if result.is_file() else None)
+
+
+def test_statictools(ghidra, statictools):
+    tmp = Path(tempfile.mkdtemp())
+
+    print("--- fuzzy hash and lief parse against the sidecar ---")
+    r, d = statictools_run(tmp, "ok", ghidra, {"STATICTOOLS_API_BASE": statictools})
+    check(r.returncode == 0, "exit 0 with statictools on")
+    check(d is not None and d["exit_status"] == "ok", "the analysis completes")
+    if d:
+        check(d["fuzzy_hashes"] == {"ssdeep": "3:stub:stub", "ssdeep_error": None,
+                                    "tlsh": "T1STUB", "tlsh_error": None},
+              f"fuzzy_hashes carried through (got {d['fuzzy_hashes']!r})")
+        check(d["lief"] is not None and d["lief"]["format"] == "ELF",
+              f"lief carried through (got {d['lief']!r})")
+        check(d["lief"]["stripped"] is True, "lief boolean fields survive JSON round trip")
+
+    print("--- lief 422 (unrecognised format) leaves lief null, not an error ---")
+    r, d = statictools_run(tmp, "corrupt", ghidra,
+                           {"STATICTOOLS_API_BASE": statictools}, data=b"CORRUPT")
+    check(r.returncode == 0, "exit 0 on a format lief cannot parse")
+    check(d is not None and d["exit_status"] == "ok",
+          "the Ghidra analysis is unaffected by a lief 422")
+    check(d is not None and d["lief"] is None, "lief left null, not an error result")
+    check(d is not None and d["fuzzy_hashes"] is not None,
+          "fuzzy_hashes is independent of lief and still ran")
+
+    print("--- disabled leaves both fields null ---")
+    r, d = statictools_run(tmp, "disabled", ghidra, {"STATICTOOLS_API_BASE": ""})
+    check(r.returncode == 0, "exit 0 with statictools disabled")
+    check(d is not None and d["fuzzy_hashes"] is None, "fuzzy_hashes left null")
+    check(d is not None and d["lief"] is None, "lief left null")
+
+    print("--- an unreachable sidecar fails soft ---")
+    r, d = statictools_run(tmp, "down", ghidra,
+                           {"STATICTOOLS_API_BASE": "http://127.0.0.1:1"})
+    check(r.returncode == 0, "exit 0 with the sidecar down")
+    check(d is not None and d["exit_status"] == "ok",
+          "the Ghidra analysis completes without the sidecar")
+    check(d is not None and d["fuzzy_hashes"] is None, "fuzzy_hashes left null")
+    check(d is not None and d["lief"] is None, "lief left null")
+
+
 def main():
     ghidra = serve(Stub)
     model = serve(ModelStub)
     truncating = serve(TruncatingModelStub)
+    statictools = serve(StaticToolsStub)
     test_unit()
     test_spool(ghidra)
     test_triage(ghidra, model, truncating)
+    test_statictools(ghidra, statictools)
     print(f"\n{len(fails)} failure(s)")
     for f in fails:
         print(f"  - {f}")
