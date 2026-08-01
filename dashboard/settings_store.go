@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
@@ -36,6 +37,33 @@ var (
 	errStaleRevision = errors.New("settings were modified concurrently; reload and retry")
 	errUnknownRecord = errors.New("no settings record for this subject")
 )
+
+// stripWeakPrefix removes a leading weak-validator marker ("W/") from an
+// incoming If-Match value before comparing it against a freshly computed
+// strong ETag. #177: every settings save through this store -- preferences
+// and admin configuration alike -- failed as a false conflict, unconditionally,
+// since the feature shipped, even for a single session on the very first
+// attempt. Traced live (temporary server-side logging comparing the exact
+// bytes): the client's If-Match arrived as `W/"r0-...` while this store's
+// own freshly computed ETag was `"r0-...` -- byte-identical except for the
+// weak marker. This dashboard never emits a weak ETag itself, so something
+// in the proxy chain in front of it (Cloudflare and Traefik both sit in
+// front, and both can transparently compress responses; either downgrading
+// a strong validator to weak on a compressed response is standard proxy
+// behavior, not a bug in that layer) added it on the way to the browser,
+// which then dutifully echoed it back as If-Match. A naive byte-for-byte
+// comparison against the freshly computed strong ETag never matches, even
+// though the underlying value is identical. Stripping the marker before
+// comparing is safe specifically because we control both ends: the "weak"
+// value only ever differs from our own strong one by this exact prefix,
+// added by an intermediary we trust, never by an actual different
+// representation.
+func stripWeakPrefix(etag string) string {
+	if strings.HasPrefix(etag, "W/") {
+		return etag[2:]
+	}
+	return etag
+}
 
 // maxSettingsBytes bounds a single settings document on load. Settings are
 // small typed documents; anything larger is corruption or abuse.
@@ -189,7 +217,7 @@ func (s *atomicSettingsStore[T]) Update(ifMatch string, mutate func(*T) error) (
 	if s.readOnly {
 		return "", nil, errStoreReadOnly
 	}
-	if ifMatch != "" && ifMatch != s.etagLocked() {
+	if ifMatch != "" && stripWeakPrefix(ifMatch) != s.etagLocked() {
 		return "", nil, errStaleRevision
 	}
 	// Deep-copy through JSON so mutations can never alias slices or maps

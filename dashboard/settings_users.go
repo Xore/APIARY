@@ -247,7 +247,7 @@ func (u *userStore) UpdatePreferences(actor authenticatedIdentity, ifMatch, requ
 				continue
 			}
 			user := &doc.Users[i]
-			if ifMatch != "" && ifMatch != preferencesETag(user.Preferences, user.PreferencesRevision) {
+			if ifMatch != "" && stripWeakPrefix(ifMatch) != preferencesETag(user.Preferences, user.PreferencesRevision) {
 				return errStaleRevision
 			}
 			if err := mutate(&user.Preferences); err != nil {

@@ -129,6 +129,48 @@ func TestStoreRejectsStaleETag(t *testing.T) {
 	}
 }
 
+// #177: a compressing intermediary (Traefik's compress middleware, in
+// production) rewrites a strong ETag to a weak one ("r0-abc" -> W/"r0-abc")
+// on its way to the browser, per the standard proxy convention that a
+// content-encoding transformation downgrades strong validators. The browser
+// then echoes that weakened value back as If-Match. This must still be
+// accepted as a match against the equivalent strong ETag -- it was silently
+// rejecting every save, unconditionally, before this was fixed.
+func TestStoreAcceptsWeakETagFromIfMatch(t *testing.T) {
+	store, _ := newTestConfigStore(t)
+	_, etag := store.Get()
+	weak := "W/" + etag
+	if _, _, err := store.Update(weak, func(c *dashboardConfig) error {
+		c.Presentation.DashboardTitle = "Weakened"
+		return nil
+	}); err != nil {
+		t.Fatalf("a weak-prefixed If-Match for the current ETag must be accepted, got %v", err)
+	}
+	cfg, _ := store.Get()
+	if cfg.Presentation.DashboardTitle != "Weakened" {
+		t.Fatalf("update did not apply: %+v", cfg.Presentation)
+	}
+}
+
+// A weak-prefixed but otherwise stale ETag must still conflict -- stripping
+// the marker must not turn this into an unconditional write.
+func TestStoreRejectsStaleWeakETag(t *testing.T) {
+	store, _ := newTestConfigStore(t)
+	_, first := store.Get()
+	if _, _, err := store.Update(first, func(c *dashboardConfig) error {
+		c.Presentation.DashboardTitle = "First"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.Update("W/"+first, func(c *dashboardConfig) error {
+		c.Presentation.DashboardTitle = "Second"
+		return nil
+	}); !errors.Is(err, errStaleRevision) {
+		t.Fatalf("a stale ETag must still conflict even with a weak prefix, got %v", err)
+	}
+}
+
 func TestStoreValidationFailureLeavesStateUntouched(t *testing.T) {
 	store, path := newTestConfigStore(t)
 	before, beforeETag := store.Get()

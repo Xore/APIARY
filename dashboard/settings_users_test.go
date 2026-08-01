@@ -159,6 +159,51 @@ func TestPreferencesETagConflict(t *testing.T) {
 	}
 }
 
+// #177: this is the exact bug reported live -- a compressing intermediary
+// (Traefik's compress middleware, in production) rewrites this dashboard's
+// own strong ETag to a weak one on its way to the browser, which echoes it
+// back verbatim as If-Match. Before this was fixed, EVERY preference save
+// ever attempted failed as a false conflict, unconditionally, even on a
+// single tab's very first attempt, because the comparison was a naive
+// byte-for-byte match against a value that could never carry the W/ prefix.
+func TestPreferencesAcceptsWeakETagFromIfMatch(t *testing.T) {
+	users := newTestUserStore(t)
+	alice := testIdentity("subject-alice-000009", "alice", "user")
+	users.Upsert(alice)
+	_, etag, _ := users.Preferences(alice.Subject)
+	weak := "W/" + etag
+	if _, err := users.UpdatePreferences(alice, weak, "req-weak-1", "", func(p *userPreferences) error {
+		p.HighContrast = true
+		return nil
+	}); err != nil {
+		t.Fatalf("a weak-prefixed If-Match for the current ETag must be accepted, got %v", err)
+	}
+	prefs, _, _ := users.Preferences(alice.Subject)
+	if !prefs.HighContrast {
+		t.Fatal("update did not apply")
+	}
+}
+
+// A weak-prefixed but otherwise stale preferences ETag must still conflict.
+func TestPreferencesRejectsStaleWeakETag(t *testing.T) {
+	users := newTestUserStore(t)
+	alice := testIdentity("subject-alice-000010", "alice", "user")
+	users.Upsert(alice)
+	_, stale, _ := users.Preferences(alice.Subject)
+	if _, err := users.UpdatePreferences(alice, stale, "req-weak-2", "", func(p *userPreferences) error {
+		p.Theme = "dark"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := users.UpdatePreferences(alice, "W/"+stale, "req-weak-3", "", func(p *userPreferences) error {
+		p.Theme = "light"
+		return nil
+	}); !errors.Is(err, errStaleRevision) {
+		t.Fatalf("a stale weak-prefixed ETag must still conflict, got %v", err)
+	}
+}
+
 func TestResetPreferencesRestoresDefaults(t *testing.T) {
 	users := newTestUserStore(t)
 	alice := testIdentity("subject-alice-000004", "alice", "user")
