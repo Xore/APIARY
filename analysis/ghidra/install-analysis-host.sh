@@ -208,6 +208,7 @@ say "installing the worker into $target"
 install -d -m 0755 -o root -g root "$target" "$target/worker" "$target/models"
 install -m 0755 -o root -g root "$here/worker/ghidra-worker.py" "$target/worker/ghidra-worker.py"
 install -m 0755 -o root -g root "$here/models/model-governance.py" "$target/models/model-governance.py"
+install -m 0755 -o root -g root "$here/models/model-status-adapter.py" "$target/models/model-status-adapter.py"
 install -m 0644 -o root -g root \
   "$here/models/approved-models.json" "$target/models/approved-models.json"
 install -m 0644 -o root -g root \
@@ -235,13 +236,14 @@ install -d -m 0700 -o root -g root \
 for unit in honeypot-ghidra-worker.service honeypot-ghidra-worker.path; do
   install -m 0644 -o root -g root "$here/worker/$unit" "/etc/systemd/system/$unit"
 done
-for unit in honeypot-model-drift.service honeypot-model-drift.timer; do
+for unit in honeypot-model-drift.service honeypot-model-drift.timer honeypot-model-status-adapter.service; do
   install -m 0644 -o root -g root "$here/models/$unit" "/etc/systemd/system/$unit"
 done
 systemctl daemon-reload
 systemctl reset-failed honeypot-ghidra-worker.service 2>/dev/null || true
 systemctl enable --now honeypot-ghidra-worker.path
 systemctl enable --now honeypot-model-drift.timer
+systemctl enable --now honeypot-model-status-adapter.service
 
 # ── Verify ───────────────────────────────────────────────────────────────────
 # Against the running services, with the worker's own environment file, rather

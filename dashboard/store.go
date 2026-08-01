@@ -172,8 +172,9 @@ type store struct {
 	mlAnomalies       *mlAnomalyStore // ml-worker's scored anomalies, polled via es (#64); nil until initialised in main()
 	alerts            *alertManager
 	intelligence      *intelligenceStore
-	settings          *settingsService // typed settings stores; nil only in partial test fixtures
-	reports           *reportStore     // Reports studio definitions + generated PDFs; nil only in test fixtures
+	settings          *settingsService  // typed settings stores; nil only in partial test fixtures
+	reports           *reportStore      // Reports studio definitions + generated PDFs; nil only in test fixtures
+	workbench         *workbenchService // immutable recipes + correlated analyzer runs (#155)
 	yaraFile          string
 	expected          []string // configured feeds shown even before their first event
 	subs              map[chan struct{}]struct{}

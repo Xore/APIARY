@@ -12,6 +12,7 @@ const routes = [
   "/payloads",
   "/sandbox",
   "/ghidra",
+  "/payload-workbench/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
   "/history",
   "/dead-letters",
   "/reports",
@@ -194,5 +195,18 @@ test.describe("dashboard browser behaviour", () => {
     await expect(page.locator("#hp-rp-admin-note")).toBeHidden();
     await expect(page.locator("#hp-rp-save")).toBeEnabled();
     await expect(page.locator("#hp-rp-generate")).toBeEnabled();
+  });
+
+  test("payload workbench runs applicable analyzers and keeps external publication separate", async ({ page }) => {
+    await page.goto("/payload-workbench/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
+    await expect(page.getByRole("heading", { name: "Payload workbench" })).toBeVisible();
+    await expect(page.locator('[data-wb-analyzer][data-analyzer-id="deterministic"] input[type="checkbox"]')).toBeChecked();
+    await expect(page.locator('[data-wb-analyzer][data-analyzer-id="revdeck"] input[type="checkbox"]')).toBeDisabled();
+    await expect(page.getByText("never in Run all", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Start analysis run" }).focus();
+    await expect(page.getByRole("button", { name: "Start analysis run" })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".wb-run").first()).toContainText("completed");
+    await expect(page.locator(".wb-run").first().getByRole("link", { name: /Open native result/ })).toHaveAttribute("href", /\/payload-analysis\//);
   });
 });

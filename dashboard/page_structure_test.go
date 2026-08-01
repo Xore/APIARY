@@ -16,7 +16,7 @@ import (
 // selectors and the modal containment the theme contract depends on. Balance
 // every container element of every rendered page.
 
-var containerTag = regexp.MustCompile(`<(/?)(div|form|section|main|aside|header|footer|nav|table|tbody|thead|tr|td|th|ul|ol|li|details|dialog|button|label|select|pre)\b[^>]*>`)
+var containerTag = regexp.MustCompile(`<(/?)(div|form|section|article|main|aside|header|footer|nav|table|tbody|thead|tr|td|th|ul|ol|li|details|dialog|button|label|select|textarea|pre)\b[^>]*>`)
 
 // voidOrSelfClosing skips tags written as <div …/> (none today) and anything
 // inside a comment, which the sandbox and reports pages both use.
@@ -125,6 +125,7 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 		{"github-analysis", githubAnalysisPageData{Generated: now, Detail: githubAnalysisDetail}},
 		{"github-analysis-list", githubAnalysisPageData{Generated: now}},
 		{"payload-analysis", binaryAnalysis{}},
+		{"payload-workbench", workbenchPageData{Generated: now, SHA256: strings.Repeat("e", 64), Classification: payloadKind("binary", "Binary", "Unknown", "binary", "Static", false), Analyzers: workbenchRegistry(payloadKind("binary", "Binary", "Unknown", "binary", "Static", false)), ModelStatus: workbenchModelStatus{Overall: "unavailable", AdvisoryOnly: true}}},
 		{"payloads", payloadsPage{Generated: now}},
 		{"source-health", snapshot{}},
 		{"commands", commandsPage{Generated: now}},
