@@ -388,8 +388,26 @@ Every 6 hours (RETRAIN_INTERVAL):
 
 ### `ml-worker-state` index
 
-Stores per-index scroll checkpoints (last processed `@timestamp`) so the
-worker resumes cleanly after a restart without reprocessing old events.
+Stores per-index checkpoints so the worker resumes cleanly after a restart
+without reprocessing old events. **Implemented (#168):** each checkpoint is
+`{last_timestamp, seen_ids}`, not a bare timestamp -- `seen_ids` are the
+document IDs already processed exactly AT `last_timestamp`.
+`fetch_new_events()` requeries inclusively (`gte`, not the original
+exclusive `gt`) and filters out only those specific IDs, so a sibling
+document sharing the checkpointed timestamp but not yet processed is still
+seen on the next poll rather than silently and permanently skipped (the
+"timestamp-only checkpoints can skip equal-timestamp events" bug
+`ml-gpu-coordinated-roadmap.md` §1 names explicitly). `seen_ids` stays
+bounded by however many documents share one exact timestamp, not by total
+history -- it's replaced, not appended to, every time the checkpoint
+advances to a new timestamp.
+
+`ml-anomalies` writes are also idempotent as of #168:
+`write_anomaly()`'s document ID is `anomaly_doc_id(source_index,
+source_event_id)`, deterministic from the source event's own identity
+rather than an ES-assigned random one, so a replayed event (checkpoint
+reset, crash-retry, or the equal-timestamp requery above) overwrites the
+same finding instead of duplicating it.
 
 ---
 
@@ -691,9 +709,11 @@ from this audit.
 
 Read [`ml-gpu-coordinated-roadmap.md`](ml-gpu-coordinated-roadmap.md) before
 starting any of these. It supersedes this plan's sequencing and records
-corrections to the design below — notably that timestamp-only checkpoints are
-not safe, that clipped model scores must not be treated as probabilities, and
-that the `0.75` threshold in §4.4 is an assumption rather than a measurement.
+corrections to the design below — that timestamp-only checkpoints are not
+safe is now fixed (#168, §7 above); clipped model scores must still not be
+treated as probabilities, and the `0.75` threshold in §4.4 is still an
+assumption rather than a measurement ([#174](https://github.com/Xore/honeypot-stack/issues/174),
+open, blocked on live data from [#167](https://github.com/Xore/honeypot-stack/issues/167)).
 
 ---
 

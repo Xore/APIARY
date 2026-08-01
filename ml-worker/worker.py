@@ -95,27 +95,81 @@ def ensure_index(es: Elasticsearch, index: str, mapping: dict) -> None:
         logger.info(f"Created index {index}")
 
 
-def load_checkpoint(es: Elasticsearch, index_pattern: str) -> str:
-    """Return the last processed @timestamp for this index pattern."""
+def load_checkpoint(es: Elasticsearch, index_pattern: str) -> dict:
+    """Return the complete checkpoint tuple for this index pattern:
+    {"last_timestamp": str, "seen_ids": [str, ...]}.
+
+    seen_ids are the document IDs already processed exactly AT
+    last_timestamp (#168) -- a plain timestamp checkpoint with an exclusive
+    `gt` requery silently drops any sibling document that shares the exact
+    @timestamp with the checkpointed one but arrived (or was returned by ES)
+    after the checkpoint was saved. ml-gpu-coordinated-roadmap.md §1 names
+    this explicitly: "timestamp-only checkpoints can skip equal-timestamp
+    events." Pairing the timestamp with the set of IDs already handled at
+    that exact boundary, and requerying inclusively (see fetch_new_events),
+    fixes it without needing a full PIT/search_after implementation.
+    """
     try:
         doc = es.get(index=STATE_INDEX,
                      id=hashlib.md5(index_pattern.encode()).hexdigest())
-        return doc["_source"]["last_timestamp"]
+        source = doc["_source"]
+        return {
+            "last_timestamp": source["last_timestamp"],
+            "seen_ids": source.get("seen_ids", []),
+        }
     except Exception:
         # Default: start from 1 hour ago on first run
-        return (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        return {
+            "last_timestamp": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+            "seen_ids": [],
+        }
 
 
-def save_checkpoint(es: Elasticsearch, index_pattern: str, ts: str) -> None:
+def save_checkpoint(es: Elasticsearch, index_pattern: str, last_timestamp: str, seen_ids: list) -> None:
     doc_id = hashlib.md5(index_pattern.encode()).hexdigest()
     es.index(index=STATE_INDEX, id=doc_id,
-             document={"index_pattern": index_pattern, "last_timestamp": ts})
+             document={
+                 "index_pattern": index_pattern,
+                 "last_timestamp": last_timestamp,
+                 "seen_ids": seen_ids,
+             })
+
+
+def advance_checkpoint(events: list, previous: dict) -> dict:
+    """Compute the next checkpoint tuple (#168) from a batch of processed
+    events (ascending by @timestamp) and the checkpoint they were fetched
+    against. Keeps only the IDs at the NEW max timestamp -- everything
+    strictly before it can never be re-queried once the checkpoint advances
+    past it (an inclusive requery against the new, later last_timestamp
+    excludes anything earlier entirely), so seen_ids stays bounded by
+    however many documents happen to share one exact timestamp, not by
+    total history.
+    """
+    if not events:
+        return previous
+    max_ts = max(e["_source"].get("@timestamp", "") for e in events)
+    if not max_ts:
+        return previous
+    seen_ids = [e["_id"] for e in events if e["_source"].get("@timestamp") == max_ts]
+    return {"last_timestamp": max_ts, "seen_ids": seen_ids}
 
 
 def fetch_new_events(es: Elasticsearch, index_pattern: str,
                     since: str, page_size: int = 500,
-                    max_total: "int | None" = None) -> list:
-    """Scroll new events from the given index pattern since timestamp.
+                    max_total: "int | None" = None,
+                    exclude_ids: "set | None" = None) -> list:
+    """Scroll events from the given index pattern at or after `since`
+    (inclusive).
+
+    Inclusive (gte) rather than the original exclusive (gt) so a caller
+    protecting a persisted checkpoint (#168) can safely re-include the exact
+    boundary timestamp and filter out only the specific documents already
+    processed there via exclude_ids -- gt alone can never distinguish
+    "already handled" from "arrived later with the same timestamp" and
+    silently drops the latter. exclude_ids is optional: the retrain path
+    below has no persisted checkpoint to protect (it always re-fetches a
+    fresh 24h window from a freshly computed wall-clock `since` on every
+    call) and leaves it unset.
 
     max_total bounds how much this pulls into memory in one call -- the
     normal poll path leaves it unset (checkpoints keep each call small
@@ -123,9 +177,10 @@ def fetch_new_events(es: Elasticsearch, index_pattern: str,
     no other cap, and MAX_TRAIN_SAMPLES only bounds what retrain() fits on
     AFTER everything's already been fetched and held in memory (#62 task 33).
     """
+    exclude_ids = exclude_ids or set()
     events = []
     query = {
-        "query": {"range": {"@timestamp": {"gt": since}}},
+        "query": {"range": {"@timestamp": {"gte": since}}},
         "sort":  [{"@timestamp": {"order": "asc"}}],
         "size":  page_size,
     }
@@ -134,7 +189,10 @@ def fetch_new_events(es: Elasticsearch, index_pattern: str,
         scroll_id = resp["_scroll_id"]
         hits = resp["hits"]["hits"]
         while hits:
-            events.extend(hits)
+            for hit in hits:
+                if hit["_id"] in exclude_ids:
+                    continue
+                events.append(hit)
             if max_total is not None and len(events) >= max_total:
                 events = events[:max_total]
                 break
@@ -198,6 +256,16 @@ def write_drift_metric(es: Elasticsearch, window: int, rate: float) -> None:
         logger.warning(f"Failed to write drift metric (non-fatal): {exc}")
 
 
+def anomaly_doc_id(source_index: "str | None", source_event_id: "str | None") -> str:
+    """Deterministic ES document ID for ml-anomalies (#168), derived from
+    the source event's own identity rather than letting Elasticsearch
+    assign a random one. source_index is included (not source_event_id
+    alone) because that ID is only unique within its own source index --
+    honeypot-v2-* and suricata-v2-* auto-generated IDs are not guaranteed
+    disjoint from each other."""
+    return hashlib.md5(f"{source_index or ''}|{source_event_id or ''}".encode()).hexdigest()
+
+
 def write_anomaly(es: Elasticsearch, rdb: "redis.Redis | None",
                  event: dict, scores: dict, explanation: str) -> None:
     src = event.get("_source", {})
@@ -230,7 +298,13 @@ def write_anomaly(es: Elasticsearch, rdb: "redis.Redis | None",
     # below. Redis is a best-effort wake-up only (ml-gpu-coordinated-roadmap.md
     # §1 decision 1), so a broker that is absent, unreachable, or refusing
     # connections must never be able to take an anomaly write down with it.
-    es.index(index=ANOMALY_INDEX, document=doc)
+    #
+    # id= is deterministic from the source event (#168), not ES-assigned:
+    # the same source event reprocessed -- a checkpoint replay, a
+    # crash-retry, or fetch_new_events' own equal-timestamp boundary
+    # requery -- overwrites the same anomaly document instead of creating a
+    # duplicate finding for something scored exactly once conceptually.
+    es.index(index=ANOMALY_INDEX, id=anomaly_doc_id(doc["source_index"], doc["source_event_id"]), document=doc)
     if rdb is not None:
         try:
             rdb.publish(REDIS_CHANNEL, json.dumps({
@@ -322,8 +396,11 @@ def run_worker() -> None:
         cycle_start = time.time()
 
         for index_pattern in SOURCE_INDICES:
-            since     = load_checkpoint(es, index_pattern)
-            events    = fetch_new_events(es, index_pattern, since)
+            checkpoint = load_checkpoint(es, index_pattern)
+            events     = fetch_new_events(
+                es, index_pattern, checkpoint["last_timestamp"],
+                exclude_ids=set(checkpoint["seen_ids"]),
+            )
 
             if not events:
                 continue
@@ -354,10 +431,11 @@ def run_worker() -> None:
                     explanation = iso_model.explain(features, scores)
                     write_anomaly(es, rdb, event, scores, explanation)
 
-            # Update checkpoint to latest event timestamp
-            latest_ts = events[-1]["_source"].get("@timestamp")
-            if latest_ts:
-                save_checkpoint(es, index_pattern, latest_ts)
+            # Advance the checkpoint (#168): the new (timestamp, seen_ids)
+            # tuple, not just the last event's timestamp -- see
+            # advance_checkpoint()'s own docstring for why.
+            new_checkpoint = advance_checkpoint(events, checkpoint)
+            save_checkpoint(es, index_pattern, new_checkpoint["last_timestamp"], new_checkpoint["seen_ids"])
 
         # Drift detection (#65): a full window of real scores, sustained
         # above DRIFT_ANOMALY_RATE, forces an early retrain instead of

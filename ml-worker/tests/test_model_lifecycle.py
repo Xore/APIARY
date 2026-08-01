@@ -254,13 +254,30 @@ class TestLSTMRetrainAcceptanceGate:
 
     def test_rejected_finetune_writes_no_new_version_files(self, tmp_path, monkeypatch):
         model = LSTMAEModel(model_dir=str(tmp_path))
-        model.retrain(_lstm_sources())
+        first = model.retrain(_lstm_sources())
+        assert first.accepted is True
         before = set(os.listdir(tmp_path))
 
-        monkeypatch.setattr(lstm_mod, "_anomaly_rate", lambda net, threshold, X: 0.9)
-        model.retrain(_lstm_sources())
+        # A naive constant mock (return 0.9 unconditionally) is a trap here:
+        # if the *previous* rate is also mocked to 0.9, 0.9 <= 0.9*ACCEPT_TOLERANCE
+        # is trivially true and the "rejected" premise never actually holds --
+        # this test would then only pass by accident, contingent on whether
+        # the FIRST (real, unmocked) retrain happened to be accepted, which
+        # depends on unseeded model initialization. Same call-order rig as
+        # the rollback test above: real score for the first (previous) call,
+        # forced-high for the second (candidate).
+        real_anomaly_rate = lstm_mod._anomaly_rate
+        calls = []
+
+        def rigged(net, threshold, X):
+            calls.append(1)
+            return real_anomaly_rate(net, threshold, X) if len(calls) == 1 else 0.9
+
+        monkeypatch.setattr(lstm_mod, "_anomaly_rate", rigged)
+        second = model.retrain(_lstm_sources())
         after = set(os.listdir(tmp_path))
 
+        assert second.accepted is False
         assert after == before, "a rejected fine-tune must not be saved to disk at all"
 
     def test_too_few_windows_is_rejected_without_raising(self, tmp_path):
