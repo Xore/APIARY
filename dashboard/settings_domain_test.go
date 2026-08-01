@@ -131,8 +131,70 @@ func TestMigratePayloadRejectsUnsupportedVersions(t *testing.T) {
 	if _, err := migratePayload(settingsSchemaVersion+1, payload); err == nil {
 		t.Fatal("a newer schema version must be rejected")
 	}
-	if _, err := migratePayload(settingsSchemaVersion-1, payload); err == nil {
-		t.Fatal("an older version without a registered migration must be rejected")
+	// Version settingsSchemaVersion-1 now has a registered migration
+	// (migrateAddMLAlertThresholdDefault); a version further back than any
+	// registered step must still be rejected.
+	if _, err := migratePayload(settingsSchemaVersion-2, payload); err == nil {
+		t.Fatal("a version with no registered migration path must be rejected")
+	}
+}
+
+// #65/#180: honeypot.ml_alert_threshold was added as a required,
+// range-validated field without a schema version bump or a migration.
+// Confirmed live: any dashboard-config.json persisted before this field
+// existed decoded fine (a missing field just zero-values) but then failed
+// validateConfig's [0.5, 0.99] bounds check on the resulting 0, so the
+// store fell back to compiled defaults, read-only, discarding every other
+// saved setting until an operator intervened. This is the exact
+// reproduction, using the real load path (migratePayload then strictDecode
+// then validateConfig), not just the migration function in isolation.
+func TestMigrationBackfillsMissingMLAlertThreshold(t *testing.T) {
+	preExistingPayload := json.RawMessage(`{"presentation":{"app_name":"X","ai_disclaimer":"d"},` +
+		`"behavior":{"default_landing":"/","default_time_window":"24h","rows_per_page_options":[25,50,100],` +
+		`"max_export_rows":10000,"refresh_interval_seconds_options":[15,30,60,300],"source_stale_minutes":10,"map_provider":"osm"},` +
+		`"honeypot":{"alert_cooldown":"6h","alert_campaign_score":80,"sandbox_alert_risk_score":50,` +
+		`"yara_scan_interval_seconds":900,"yara_max_bytes":67108864,"payload_dedupe_interval_seconds":3600}}`)
+	migrated, err := migratePayload(1, preExistingPayload)
+	if err != nil {
+		t.Fatalf("migration from version 1 must succeed: %v", err)
+	}
+	var cfg dashboardConfig
+	if !strictDecode(migrated, &cfg) {
+		t.Fatal("migrated payload must still strict-decode into dashboardConfig")
+	}
+	if err := validateConfig(cfg); err != nil {
+		t.Fatalf("migrated payload must pass validation, got: %v", err)
+	}
+	if cfg.Honeypot.MLAlertThreshold != defaultDashboardConfig().Honeypot.MLAlertThreshold {
+		t.Fatalf("ml_alert_threshold = %v, want the compiled default %v",
+			cfg.Honeypot.MLAlertThreshold, defaultDashboardConfig().Honeypot.MLAlertThreshold)
+	}
+
+	// A payload that already has the field (written by a newer binary, or
+	// migrated once already) must be left alone, not overwritten.
+	alreadySet := json.RawMessage(`{"presentation":{},"behavior":{},"honeypot":{"ml_alert_threshold":0.9}}`)
+	migratedAgain, err := migratePayload(1, alreadySet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg2 dashboardConfig
+	if !strictDecode(migratedAgain, &cfg2) {
+		t.Fatal("strict decode failed")
+	}
+	if cfg2.Honeypot.MLAlertThreshold != 0.9 {
+		t.Fatalf("migration overwrote an already-present value: got %v, want 0.9", cfg2.Honeypot.MLAlertThreshold)
+	}
+
+	// A payload with no "honeypot" object at all (e.g. the unrelated
+	// per-subject preferences/projection document, which shares this same
+	// migration registry) must pass through completely unchanged.
+	unrelated := json.RawMessage(`{"users":[{"subject":"x"}]}`)
+	passedThrough, err := migratePayload(1, unrelated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(passedThrough) != string(unrelated) {
+		t.Fatalf("migration must not touch a payload with no honeypot object, got %s", passedThrough)
 	}
 }
 

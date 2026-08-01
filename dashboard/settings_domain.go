@@ -23,13 +23,55 @@ var errSettingsValidation = errors.New("settings validation failed")
 
 // settingsSchemaVersion is the current on-disk schema. The migration registry
 // below exists so future versions slot in without touching the store layer.
-const settingsSchemaVersion = 1
+const settingsSchemaVersion = 2
 
-// migrations upgrades a persisted payload from schema version N to N+1. v1 is
-// the initial schema, so the registry is empty; unknown older versions fail
-// loudly instead of being silently misread, and newer versions are rejected
-// so a rolled-back binary never truncates data it does not understand.
-var migrations = map[int]func(json.RawMessage) (json.RawMessage, error){} //nolint:unused // registry for future schema versions
+// migrations upgrades a persisted payload from schema version N to N+1.
+// Unknown older versions fail loudly instead of being silently misread, and
+// newer versions are rejected so a rolled-back binary never truncates data
+// it does not understand.
+var migrations = map[int]func(json.RawMessage) (json.RawMessage, error){
+	1: migrateAddMLAlertThresholdDefault,
+}
+
+// migrateAddMLAlertThresholdDefault backfills honeypot.ml_alert_threshold
+// (#65) for config documents persisted before that field existed. It was
+// added as a required, range-validated field without a schema version bump
+// or a migration -- confirmed live: any pre-existing dashboard-config.json
+// decoded fine (missing fields just zero-value) but then failed
+// honeypot.ml_alert_threshold's [0.5, 0.99] bounds check on the resulting
+// 0, so validateConfig rejected it and the store fell back to serving
+// compiled defaults, read-only, discarding every other saved setting
+// (branding, feature toggles, everything) until an operator intervened.
+//
+// This registry is shared by every atomicSettingsStore, including the
+// unrelated per-user preferences/projection document, so this must be a
+// no-op for any payload shape that isn't a dashboardConfig: no "honeypot"
+// object, or one that already has the field (already migrated, or written
+// by a newer binary that always includes it).
+func migrateAddMLAlertThresholdDefault(payload json.RawMessage) (json.RawMessage, error) {
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &doc); err != nil {
+		return payload, nil
+	}
+	honeypotRaw, ok := doc["honeypot"]
+	if !ok {
+		return payload, nil
+	}
+	var honeypot map[string]json.RawMessage
+	if err := json.Unmarshal(honeypotRaw, &honeypot); err != nil {
+		return payload, nil
+	}
+	if _, exists := honeypot["ml_alert_threshold"]; exists {
+		return payload, nil
+	}
+	honeypot["ml_alert_threshold"] = json.RawMessage(fmt.Sprintf("%v", defaultDashboardConfig().Honeypot.MLAlertThreshold))
+	newHoneypot, err := json.Marshal(honeypot)
+	if err != nil {
+		return nil, err
+	}
+	doc["honeypot"] = newHoneypot
+	return json.Marshal(doc)
+}
 
 // ---------------------------------------------------------------------------
 // Per-user preferences (roadmap §3)
