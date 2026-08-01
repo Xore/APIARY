@@ -35,6 +35,7 @@ def config(**changes):
         max_jobs_per_cycle=20,
         max_payload_scan_files=5000,
         session_idle_seconds=300,
+        session_lookback_seconds=3600,
         daily_report_hour=6,
         context_length=8192,
         output_tokens=512,
@@ -115,6 +116,29 @@ class EndpointAndGateTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 parsed.validate_synthetic_canary()
 
+    def test_production_session_canary_is_u1_only_and_single_job(self):
+        config(
+            enabled=True,
+            dry_run=False,
+            allow_captured_data=True,
+            session_enabled=True,
+            max_jobs_per_cycle=1,
+        ).validate_production_session_canary()
+        for parsed in (
+            config(enabled=True),
+            config(enabled=True, dry_run=False, allow_captured_data=True, session_enabled=True),
+            config(
+                enabled=True,
+                dry_run=False,
+                allow_captured_data=True,
+                session_enabled=True,
+                payload_enabled=True,
+                max_jobs_per_cycle=1,
+            ),
+        ):
+            with self.assertRaises(ValueError):
+                parsed.validate_production_session_canary()
+
     def test_keep_alive_is_bounded(self):
         self.assertEqual(worker.keep_alive_seconds("30s"), 30)
         self.assertEqual(worker.keep_alive_seconds("10m"), 600)
@@ -162,6 +186,71 @@ class SessionAccumulatorTests(unittest.TestCase):
         self.assertTrue(accumulator.auth_success)
         self.assertTrue(accumulator.closed)
         self.assertEqual(accumulator.duration_seconds, 42.5)
+
+    def test_collection_uses_stable_cowrie_event_ids_not_container_sensor(self):
+        fake_es = MagicMock()
+        fake_es.search.return_value = {"hits": {"hits": []}}
+        parsed = config(session_lookback_seconds=86400)
+        llm_worker = worker.LLMWorker(parsed, es=fake_es)
+        with patch.object(llm_worker, "load_checkpoint", return_value="2026-08-01T00:00:00Z"):
+            self.assertEqual(llm_worker.collect_session_events(), 0)
+        body = fake_es.search.call_args.kwargs["body"]
+        filters = body["query"]["bool"]["filter"]
+        self.assertIn({"terms": {"honeypot.eventid": list(worker.COWRIE_SESSION_EVENT_IDS)}}, filters)
+        self.assertFalse(any("event.sensor" in str(item) for item in filters))
+        self.assertEqual(body["sort"], [{"@timestamp": {"order": "asc"}}])
+
+    def test_close_only_scanner_session_does_not_create_accumulator_state(self):
+        fake_es = MagicMock()
+        fake_es.search.return_value = {
+            "hits": {
+                "hits": [
+                    {
+                        "_index": "honeypot-v2-fixture",
+                        "_id": "closed-only",
+                        "_source": {
+                            "@timestamp": "2026-08-01T12:00:00Z",
+                            "honeypot": {
+                                "eventid": "cowrie.session.closed",
+                                "session": "scanner-only-fixture",
+                            },
+                        },
+                    }
+                ]
+            }
+        }
+        llm_worker = worker.LLMWorker(config(), es=fake_es)
+        with (
+            patch.object(llm_worker, "load_checkpoint", return_value="2026-08-01T00:00:00Z"),
+            patch.object(llm_worker, "load_accumulator", return_value=worker.SessionAccumulator("scanner-only-fixture")),
+            patch.object(llm_worker, "save_checkpoint") as save_checkpoint,
+        ):
+            self.assertEqual(llm_worker.collect_session_events(), 1)
+        fake_es.index.assert_not_called()
+        save_checkpoint.assert_called_once_with("sessions", "2026-08-01T12:00:00Z")
+
+
+class ProductionCanaryTests(unittest.TestCase):
+    def test_canary_scans_bounded_cycles_and_stops_after_one_session(self):
+        parsed = config(
+            enabled=True,
+            dry_run=False,
+            allow_captured_data=True,
+            session_enabled=True,
+            max_jobs_per_cycle=1,
+        )
+        fake_worker = MagicMock()
+        fake_worker.run_once.side_effect = [
+            {"events": 2000, "sessions": 0},
+            {"events": 600, "sessions": 1},
+        ]
+        with patch.object(worker, "LLMWorker", return_value=fake_worker):
+            result = worker.run_production_session_canary(parsed, 20)
+        self.assertEqual(result["cycles"], 2)
+        self.assertEqual(result["events"], 2600)
+        self.assertEqual(result["sessions"], 1)
+        self.assertEqual(result["payloads"], 0)
+        self.assertEqual(result["reports"], 0)
 
 
 class OllamaContractTests(unittest.TestCase):

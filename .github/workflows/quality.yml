@@ -194,4 +194,6 @@ jobs:
           docker compose -f llm-worker/docker-compose.yml \
             -f llm-worker/docker-compose.synthetic-canary.yml config --quiet
           docker compose -f llm-worker/docker-compose.yml \
+            -f llm-worker/docker-compose.production-session-canary.yml config --quiet
+          docker compose -f llm-worker/docker-compose.yml \
             -f llm-worker/docker-compose.captured-data.yml config --quiet

@@ -38,6 +38,11 @@ class SanitizationTests(unittest.TestCase):
         self.assertNotIn("<untrusted_data>", result.text.lower())
         self.assertFalse(result.truncated)
 
+    def test_chpasswd_pipeline_redacts_only_the_credential_value(self):
+        result = sanitize_text('echo "root:fixture-password"|chpasswd|bash', 1000)
+        self.assertNotIn("fixture-password", result.text)
+        self.assertEqual(result.text, 'echo "root:[REDACTED]"|chpasswd|bash')
+
     def test_truncation_is_visible_and_bounded(self):
         result = sanitize_text("x" * 100, 40)
         self.assertTrue(result.truncated)
@@ -131,6 +136,38 @@ class DeterministicPostprocessingTests(unittest.TestCase):
         flags = deterministic_flags("echo fixture | base64")
         self.assertIn("encoded_or_chunked_content", flags)
         self.assertNotIn("critical_credential_exfiltration_chain", flags)
+
+    def test_persistence_evidence_overrides_understated_model_classification(self):
+        evidence = sanitize_text(
+            'sudo mkdir -p /root/.ssh && echo "ssh-ed25519 AAAAfixture" > /root/.ssh/authorized_keys\n'
+            'echo "root:fixture-password" | chpasswd',
+            12000,
+        ).text
+        raw = SessionAnalysis(
+            summary="The attacker performed reconnaissance and password cracking.",
+            intent="reconnaissance",
+            mitre_attack=["T1087", "T1548.002", "T1563.001"],
+            iocs=[],
+            severity="medium",
+            confidence="high",
+        )
+        processed, flags = postprocess_annotation(raw, evidence)
+        self.assertNotIn("fixture-password", evidence)
+        self.assertEqual(processed.intent, "persistence")
+        self.assertEqual(processed.severity, "high")
+        self.assertIn("T1098.004", processed.mitre_attack)
+        self.assertIn("T1098", processed.mitre_attack)
+        self.assertIn("T1548.003", processed.mitre_attack)
+        self.assertNotIn("T1548.002", processed.mitre_attack)
+        self.assertNotIn("T1563.001", processed.mitre_attack)
+        self.assertNotIn("password cracking", processed.summary.lower())
+        self.assertNotIn("lacks evidence of active credential modification", processed.summary.lower())
+        self.assertIn("changes an account credential", processed.summary.lower())
+        self.assertIn("no password-cracking tool is present", processed.summary.lower())
+        self.assertIn("ssh_authorized_keys_persistence", flags)
+        self.assertIn("account_credential_change", flags)
+        self.assertIn("corrected_password_cracking_claim", flags)
+        self.assertIn("corrected_ungrounded_mitre", flags)
 
 
 if __name__ == "__main__":

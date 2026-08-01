@@ -4,7 +4,8 @@
 >
 > Scope: issue #83 synthetic phase only
 >
-> Production/captured-data status: **disabled and not exercised**
+> Production/captured-data status: **U1 one-shot accepted**; see
+> [llm-production-canary-record.md](llm-production-canary-record.md)
 
 The one-shot canary ran on the homeserver against the pinned local artifacts:
 
@@ -38,6 +39,5 @@ stack attaches Elasticsearch to `honeypot-llm-data`; the Ghidra stack attaches
 Ollama to `honeypot-llm`. The worker joins both only in the separately gated
 mode and no longer joins the non-internal `honeynet` bridge.
 
-Moving from these synthetic fixtures to attacker-authored production input is
-still the explicit authorization boundary documented in #83. U2 payload and
-daily-report jobs remain disabled.
+The separately authorized U1-only production canary subsequently passed.
+U2 payload and daily-report jobs remain disabled.
