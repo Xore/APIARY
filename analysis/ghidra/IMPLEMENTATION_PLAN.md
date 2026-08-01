@@ -257,25 +257,23 @@ reports/ghidra/{sha256}_ghidra.pdf
 
 ---
 
-## GitHub Actions Integration
+## Dashboard/Worker Integration
 
-Extend `.github/workflows/analyze.yml` in `Xore/Honeypot` with:
+Superseded by [#107](https://github.com/Xore/honeypot-stack/issues/107): this
+section used to describe extending a `.github/workflows/analyze.yml` in a
+different repo (`Xore/Honeypot`) to invoke `ghidra_analyze.py` against a REST
+contract that issue #101 disproved against the real
+`biniamfd/ghidra-headless-rest:1.2.1` image. That script and its bash sibling
+`headless_analyze.sh` are deleted; there is no GitHub Actions integration.
 
-```yaml
-ghidra:
-  name: Ghidra Headless Analysis
-  runs-on: ubuntu-latest
-  needs: [analyze]   # run after VT/Joe
-  services:
-    ghidra:
-      image: biniamfd/ghidra-headless-rest:latest
-      ports:
-        - 9090:9090
-  steps:
-    - uses: actions/checkout@v4
-    - name: Run Ghidra analysis
-      run: python3 .github/scripts/ghidra_analyze.py --file-list /tmp/changed_files.txt
-```
+The actual, deployed architecture is a host-based spool, not CI: the
+dashboard (unprivileged, no credentials, no outbound calls) writes a
+`.request` marker file into `GHIDRA_REQUEST_DIR`, and
+[`worker/ghidra-worker.py`](worker/ghidra-worker.py) — running under the
+`honeypot-ghidra-worker.path`/`.service` systemd units on the homeserver —
+drains the spool and talks to the real Ghidra REST service. See
+`DASHBOARD_INTEGRATION_PLAN.md` for the dashboard side and
+`worker/ghidra-worker.py`'s module docstring for the verified REST contract.
 
 ---
 

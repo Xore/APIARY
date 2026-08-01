@@ -49,14 +49,18 @@ Open http://127.0.0.1:5000
 | `attack_surface_triage` | Top dangerous functions, scored |
 | `vulnerability_hypothesis` | CVE-style analysis for high-value targets |
 
-All outputs are saved to `reports/ghidra/<sha256>/revdeck_triage.json` by
-`revdeck_triage()` in [`ghidra_analyze.py`](../ghidra_analyze.py). That is where
-they stop. Nothing in this repository turns them into a PDF — report generation
-is a phase 5 deliverable in
-[#78](https://github.com/Xore/honeypot-stack/issues/78). (Earlier revisions of
-this file said the triage was "embedded in the final PDF report," which was
-never true here; the PDF pipeline that exists lives in `Xore/honeypot` and does
-not read these files.)
+Nothing in this repository automates Rev·Deck yet. The earlier
+`revdeck_triage()` function in `ghidra_analyze.py` called this stack's
+`/api/upload`/`/api/chat` endpoints, but the `revdeck` container in
+`docker-compose.ghidra.yml` has never been deployed or run, so that contract
+was as unverified as the disproven Ghidra REST contract
+[#101](https://github.com/Xore/honeypot-stack/issues/101) found broken —
+both were deleted together under
+[#107](https://github.com/Xore/honeypot-stack/issues/107). Automating Rev·Deck
+triage against a verified contract, and turning its output into a report, is
+tracked by [#78](https://github.com/Xore/honeypot-stack/issues/78). Until
+then, this stack is interactive-only: bring it up with `docker compose` and
+use the UI at http://127.0.0.1:5000 by hand.
 
 ## Evidence Grounding
 

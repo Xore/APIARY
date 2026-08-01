@@ -31,7 +31,7 @@
 | `sandbox/export-result.py` | 310 | Light touch |
 | `ml-worker/worker.py` | 261 | Light touch |
 | `analysis/analyze.py` | 260 | Light touch |
-| `analysis/ghidra/ghidra_analyze.py` | 223 | Fine as-is |
+| `analysis/ghidra/ghidra_analyze.py` | 223 | Fine as-is (file later deleted entirely under [#107](https://github.com/Xore/honeypot-stack/issues/107) — unrelated to this roadmap's split-vs-keep question) |
 | Other Python (`conpot/persona_patch.py`, `sandbox/guest-*.py`, …) | <210 | Fine as-is |
 
 Note: `dashboard/page.go` was already split into nine per-page template files
