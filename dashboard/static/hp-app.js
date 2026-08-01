@@ -526,6 +526,21 @@
     shell.querySelectorAll("[data-hp-nav]").forEach(link => link.addEventListener("click", () => {
       if (innerWidth <= 520) shell.classList.remove("hp-nav-open");
     }));
+
+    /* Command bar show/hide (client-only, per-browser -- explicitly not a
+       server-persisted setting: it's a quick toggle, not a preference). */
+    const commandDockHiddenKey = "hp-command-dock-hidden";
+    const commandDock = document.querySelector(".hp-command-dock");
+    const commandDockToggle = shell.querySelector("[data-hp-command-dock-toggle]");
+    const setCommandDockHidden = hide => {
+      if (commandDock) commandDock.hidden = hide;
+      commandDockToggle?.setAttribute("aria-pressed", hide ? "false" : "true");
+      try { localStorage.setItem(commandDockHiddenKey, hide ? "1" : "0"); } catch {}
+    };
+    try { if (localStorage.getItem(commandDockHiddenKey) === "1") setCommandDockHidden(true); } catch {}
+    commandDockToggle?.addEventListener("click", () => {
+      setCommandDockHidden(!(commandDock?.hidden));
+    });
     addEventListener("keydown", event => {
       if (event.key === "Escape") shell.classList.remove("hp-nav-open");
     });
