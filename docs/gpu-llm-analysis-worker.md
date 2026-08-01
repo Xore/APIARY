@@ -129,7 +129,7 @@ default.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ honeynet (internal Docker bridge, no internet exposure)          │
+│ honeynet (shared Docker bridge; not an egress boundary)          │
 │                                                                  │
 │  cowrie / dionaea / filebeat ──▶ elasticsearch ◀──┐              │
 │                                                    │ scroll poll  │
