@@ -108,7 +108,7 @@ class GovernanceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "status.json"
             governance.write_status(path, {"overall": "approved"})
-            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o640)
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
     def test_case_gate_cannot_be_hidden_by_aggregate(self):
         report = self.report()

@@ -15,7 +15,7 @@ python3 /opt/honeypot-ghidra/models/model-governance.py check-runtime \
   --warn-only
 ```
 
-The status file contains only state and reason codes. It contains no prompts, model replies, captured data, container paths, or credentials, and is written mode `0640`. Grant a specific group/read-only mount if a dashboard later needs it; do not make it world-readable. `approved`, `drift`, and `unavailable` are advisory states: the service exits successfully with `--warn-only`, so an LLM problem never stops ingestion or deterministic analysis. Omit `--warn-only` in an operator check when drift should produce a non-zero exit status. The command only reads `/api/version`, `/api/tags`, Docker inspection metadata, and `nvidia-smi` telemetry.
+The status file contains only state and reason codes. It contains no prompts, model replies, captured data, container paths, or credentials, and is written owner-only mode `0600`. If a dashboard later needs it, expose only the sanitized object through a privileged read-only endpoint; do not mount or relax the host file. `approved`, `drift`, and `unavailable` are advisory states: the service exits successfully with `--warn-only`, so an LLM problem never stops ingestion or deterministic analysis. Omit `--warn-only` in an operator check when drift should produce a non-zero exit status. The command only reads `/api/version`, `/api/tags`, Docker inspection metadata, and `nvidia-smi` telemetry.
 
 ## When requalification is mandatory
 

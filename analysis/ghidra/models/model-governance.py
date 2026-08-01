@@ -340,7 +340,7 @@ def write_status(path: Path | None, status: dict[str, Any]) -> None:
     try:
         temporary.write_bytes(data)
         os.replace(temporary, path)
-        os.chmod(path, 0o640)
+        os.chmod(path, 0o600)
     finally:
         temporary.unlink(missing_ok=True)
 
