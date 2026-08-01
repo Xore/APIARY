@@ -70,8 +70,8 @@
                 <line x1="0" y1="75" x2="1000" y2="75"/><line x1="0" y1="150" x2="1000" y2="150"/><line x1="0" y1="225" x2="1000" y2="225"/><line x1="0" y1="300" x2="1000" y2="300"/><line x1="0" y1="375" x2="1000" y2="375"/>
               </g>
               {{worldMap}}
-              {{range .MapPoints}}<a href="/events?ip={{.IP | urlquery}}"><circle cx="{{printf "%.1f" .X}}" cy="{{printf "%.1f" .Y}}" r="{{.R}}"><title>{{.IP}} — {{.City}} {{.Country}} — AS{{.ASN}} {{.Org}} — {{.Count}} events</title></circle></a>{{end}}
-            </svg></div></div><p class="note">Approximate geolocation only. Marker radius is geographic—not fixed-size—so it changes naturally with zoom and is weighted by event count. Hover for IP, city, ASN and provider; select a marker for all related events. Map data © OpenStreetMap contributors.</p></div>{{end}}
+              {{range .MapPoints}}<a href="{{.Link}}"><circle cx="{{printf "%.1f" .X}}" cy="{{printf "%.1f" .Y}}" r="{{.R}}"><title>{{if .City}}{{.City}}, {{end}}{{.Country}} — {{.IPCount}} IPs — {{.Count}} events</title></circle></a>{{end}}
+            </svg></div></div><p class="note">Approximate geolocation only. One marker per city, accumulating every IP that geolocated there. Marker radius is geographic—not fixed-size—so it changes naturally with zoom and is weighted by event count. Hover for city, country and IP count; select a marker for all related events. Map data © OpenStreetMap contributors.</p></div>{{end}}
 
           <div class="section-heading"><div><h2>Collection status</h2><p>Sensor activity and the protocols currently attracting traffic.</p></div><a class="section-link" href="/source-health">Open pipeline health &rarr;</a></div>
           <div class="card half sensor-card">

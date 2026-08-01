@@ -314,7 +314,10 @@ func TestFingerprintAndASNRowsLinkToExactEvents(t *testing.T) {
 }
 
 func TestMapPointsGeoJSON(t *testing.T) {
-	got := mapPointsGeoJSON([]mapPoint{{IP: "203.0.113.7", Lat: 52.5, Lon: 13.4, ASN: 64500, Org: "Example Networks", Provider: "hosting", Count: 9}})
+	// #228: a marker is a city (accumulated across every IP that geolocated
+	// there), not a single IP -- the drill-down must filter by city+country,
+	// not link to one arbitrary contributing IP.
+	got := mapPointsGeoJSON([]mapPoint{{City: "Berlin", Country: "DE", Lat: 52.5, Lon: 13.4, Count: 9, IPCount: 4}})
 	if got.Type != "FeatureCollection" || len(got.Features) != 1 {
 		t.Fatalf("unexpected GeoJSON collection: %+v", got)
 	}
@@ -322,8 +325,16 @@ func TestMapPointsGeoJSON(t *testing.T) {
 	if f.Geometry.Type != "Point" || f.Geometry.Coordinates != [2]float64{13.4, 52.5} {
 		t.Fatalf("GeoJSON coordinates must be longitude, latitude: %+v", f.Geometry)
 	}
-	if f.Properties.Events != "/investigate/ip/203.0.113.7" || f.Properties.Count != 9 || f.Properties.ASN != 64500 {
+	if f.Properties.Events != "/events?city=Berlin&country=DE" || f.Properties.Count != 9 || f.Properties.IPCount != 4 {
 		t.Fatalf("incomplete map properties: %+v", f.Properties)
+	}
+}
+
+func TestMapPointsGeoJSONFallsBackToCountryWhenCityUnresolved(t *testing.T) {
+	got := mapPointsGeoJSON([]mapPoint{{Country: "DE", Lat: 51.0, Lon: 9.0, Count: 3, IPCount: 3}})
+	events := got.Features[0].Properties.Events
+	if events != "/events?country=DE" {
+		t.Fatalf("want a country-only drill-down when city is unresolved, got %q", events)
 	}
 }
 

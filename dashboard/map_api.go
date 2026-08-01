@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"net/http"
-	"net/url"
 )
 
 type mapFeatureCollection struct {
@@ -23,15 +22,11 @@ type mapGeometry struct {
 }
 
 type mapProperties struct {
-	IP       string `json:"ip"`
-	Country  string `json:"country,omitempty"`
-	City     string `json:"city,omitempty"`
-	ASN      uint   `json:"asn,omitempty"`
-	Org      string `json:"organization,omitempty"`
-	Provider string `json:"provider_type,omitempty"`
-	Intel    string `json:"intel,omitempty"`
-	Count    int    `json:"count"`
-	Events   string `json:"events_url"`
+	Country string `json:"country,omitempty"`
+	City    string `json:"city,omitempty"`
+	Count   int    `json:"count"`
+	IPCount int    `json:"ip_count"`
+	Events  string `json:"events_url"`
 }
 
 func mapPointsGeoJSON(points []mapPoint) mapFeatureCollection {
@@ -41,9 +36,14 @@ func mapPointsGeoJSON(points []mapPoint) mapFeatureCollection {
 			Type:     "Feature",
 			Geometry: mapGeometry{Type: "Point", Coordinates: [2]float64{p.Lon, p.Lat}},
 			Properties: mapProperties{
-				IP: p.IP, Country: p.Country, City: p.City, ASN: p.ASN, Org: p.Org,
-				Provider: p.Provider, Intel: p.Intel, Count: p.Count,
-				Events: "/investigate/ip/" + url.PathEscape(p.IP),
+				Country: p.Country, City: p.City, Count: p.Count, IPCount: p.IPCount,
+				// #228: drills into every event for this city (or country,
+				// when GeoIP never resolved a city), not one
+				// arbitrarily-chosen IP's events -- matching what the
+				// marker is now actually showing. Same helper the
+				// server-rendered SVG fallback map uses for p.Link, so the
+				// two can never drift apart.
+				Events: mapPointEventsURL(p.City, p.Country),
 			},
 		})
 	}

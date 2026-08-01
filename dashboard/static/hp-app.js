@@ -359,11 +359,13 @@
   /* ---------- Leaflet attack map ---------- */
   const attackRadius = count => Math.min(350000, 35000 + Math.sqrt(Math.max(1, count)) * 8000);
   const attackDetails = p => {
+    // #228: one marker per city (or country, when GeoIP never resolved a
+    // city) accumulating every IP that landed there, not one marker per IP.
     const box = document.createElement("div"), title = document.createElement("strong");
-    title.textContent = p.ip + " — " + p.count + " events";
+    const place = p.city && p.country ? [p.city, p.country].join(", ") : p.city || p.country || "Unknown location";
+    title.textContent = place + " — " + p.count + " events";
     box.append(title);
-    const rows = [p.city && p.country ? [p.city, p.country].join(", ") : p.city || p.country, p.asn ? "AS" + p.asn + (p.organization ? " " + p.organization : "") : p.organization, p.intel || p.provider_type].filter(Boolean);
-    rows.forEach(v => { box.append(document.createElement("br"), document.createTextNode(v)); });
+    box.append(document.createElement("br"), document.createTextNode(p.ip_count + (p.ip_count === 1 ? " source IP" : " source IPs")));
     box.append(document.createElement("br"));
     const hint = document.createElement("span");
     hint.textContent = "Select marker to show all related events";
@@ -427,12 +429,12 @@
               if (!el) return;
               el.setAttribute("tabindex", "0");
               el.setAttribute("role", "link");
-              el.setAttribute("aria-label", p.ip + ", " + p.count + " events");
+              el.setAttribute("aria-label", (p.city && p.country ? p.city + ", " + p.country : p.city || p.country || "Unknown location") + ", " + p.count + " events");
               el.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); location.assign(p.events_url); } });
             });
           }
         }).addTo(origins);
-        status.textContent = data.features.length + " geolocated sources • zoom " + map.getZoom();
+        status.textContent = data.features.length + " geolocated locations • zoom " + map.getZoom();
       } catch (e) {
         status.textContent = "Attack origin update failed: " + e.message;
       }

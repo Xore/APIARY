@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"net/netip"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,20 +27,38 @@ type kv struct {
 	Title string `json:",omitempty"` // full value when Key is shortened for display
 }
 
+// mapPoint is one marker on the overview attack map: an accumulated city (or,
+// when GeoIP only resolved to country level, a country), not a single IP.
+// #228: ASN/org/provider/intel are deliberately absent -- those are per-IP
+// attributes, and a cluster of many IPs behind one city marker will often mix
+// several of each, so showing whichever happened to be counted would read as
+// representative when it is really an arbitrary sample. That breakdown
+// already exists properly as its own leaderboard (ASNs/Providers on the
+// overview page); the map's job is geographic density, not attribution.
 type mapPoint struct {
-	IP       string  `json:"ip"`
-	Country  string  `json:"country,omitempty"`
-	City     string  `json:"city,omitempty"`
-	Lat      float64 `json:"lat"`
-	Lon      float64 `json:"lon"`
-	ASN      uint    `json:"asn,omitempty"`
-	Org      string  `json:"organization,omitempty"`
-	Provider string  `json:"provider_type,omitempty"`
-	Intel    string  `json:"intel,omitempty"`
-	Count    int     `json:"count"`
-	X        float64 `json:"-"`
-	Y        float64 `json:"-"`
-	R        int     `json:"-"`
+	Country string  `json:"country,omitempty"`
+	City    string  `json:"city,omitempty"`
+	Lat     float64 `json:"lat"`
+	Lon     float64 `json:"lon"`
+	Count   int     `json:"count"`
+	IPCount int     `json:"ip_count"`
+	Link    string  `json:"-"` // /events?city=&country= drill-down, shared by the SVG fallback and the GeoJSON API
+	X       float64 `json:"-"`
+	Y       float64 `json:"-"`
+	R       int     `json:"-"`
+}
+
+// mapPointEventsURL is the drill-down target for a city (or, when GeoIP only
+// resolved to country level, country) marker -- every event from that place,
+// not one arbitrarily-chosen contributing IP. Shared by the server-rendered
+// SVG fallback map (aggregate.go) and the Leaflet GeoJSON API (map_api.go)
+// so the two never drift apart.
+func mapPointEventsURL(city, country string) string {
+	q := url.Values{"country": {country}}
+	if city != "" {
+		q.Set("city", city)
+	}
+	return eventsURL(q)
 }
 
 // eventsPage is the data for the /events drill-down view.

@@ -29,12 +29,21 @@ func (s *store) rebuild() {
 		providers                                    = map[string]int{}
 		clients                                      = map[string]int{}
 		fingerprints                                 = map[string]int{}
-		points                                       = map[string]*mapPoint{}
-		payloads                                     = map[string]*payloadRow{}
-		lastSeen                                     = map[string]time.Time{}
-		sensorHourly                                 = map[string]*[24]int{}
-		evs                                          []storedEvent
-		seen                                         = map[string]bool{}
+		// #228: keyed by city+country, not by source IP -- a marker is a
+		// place, not an address, so every IP that geolocates to the same
+		// city accumulates onto the one point instead of overplotting a
+		// separate circle per IP. pointIPs tracks the distinct contributing
+		// IPs per key for the marker's IPCount; it lives alongside points
+		// rather than inside mapPoint because that struct is copied into
+		// pointRows and serialized, and a per-point set has no JSON shape
+		// worth keeping once IPCount is computed.
+		points       = map[string]*mapPoint{}
+		pointIPs     = map[string]map[string]struct{}{}
+		payloads     = map[string]*payloadRow{}
+		lastSeen     = map[string]time.Time{}
+		sensorHourly = map[string]*[24]int{}
+		evs          []storedEvent
+		seen         = map[string]bool{}
 	)
 	now := time.Now()
 
@@ -165,12 +174,20 @@ func (s *store) rebuild() {
 				providers[provider]++
 			}
 			if geo.Lat != 0 || geo.Lon != 0 {
-				p := points[ev.ip]
+				// City empty means the GeoIP data only resolved to
+				// country level; those IPs still cluster together onto one
+				// per-country point rather than falling back to one point
+				// per IP, consistent with how Country alone already reads
+				// as a single dot rather than a jitter of siblings.
+				key := geo.City + "\x00" + geo.Country
+				p := points[key]
 				if p == nil {
-					p = &mapPoint{IP: ev.ip, Country: geo.Country, City: geo.City, Lat: geo.Lat, Lon: geo.Lon, ASN: geo.ASN, Org: geo.Org, Provider: geo.Provider, Intel: geo.Intel}
-					points[ev.ip] = p
+					p = &mapPoint{Country: geo.Country, City: geo.City, Lat: geo.Lat, Lon: geo.Lon}
+					points[key] = p
+					pointIPs[key] = map[string]struct{}{}
 				}
 				p.Count++
+				pointIPs[key][ev.ip] = struct{}{}
 			}
 			if ev.shasum != "" {
 				downloads++
@@ -291,10 +308,12 @@ func (s *store) rebuild() {
 		return payloadRows[i].Shasum < payloadRows[j].Shasum
 	})
 	var pointRows []mapPoint
-	for _, p := range points {
+	for key, p := range points {
 		p.X = (p.Lon + 180) / 360 * 1000
 		p.Y = (90 - p.Lat) / 180 * 450
 		p.R = min(14, 3+int(math.Sqrt(float64(p.Count))))
+		p.IPCount = len(pointIPs[key])
+		p.Link = mapPointEventsURL(p.City, p.Country)
 		pointRows = append(pointRows, *p)
 	}
 	sort.Slice(pointRows, func(i, j int) bool { return pointRows[i].Count > pointRows[j].Count })

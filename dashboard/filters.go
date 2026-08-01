@@ -13,7 +13,7 @@ type filter struct {
 	ip, cidr, port, sensor, proto, path string // exact match, except CIDR containment
 	persona, site, asset                string // exact honeypot identity metadata
 	cred, cmd, session, shasum          string // exact match
-	cat, country, client                string // exact match
+	cat, country, city, client          string // exact match
 	fingerprint, provider, org, asn     string // exact enriched metadata
 	sig, q                              string // case-insensitive substring
 	typ                                 string // login | command | alert | download
@@ -28,7 +28,7 @@ func parseFilter(r *http.Request) filter {
 		proto: v.Get("proto"), path: v.Get("path"), cred: v.Get("cred"),
 		persona: v.Get("persona"), site: v.Get("site"), asset: v.Get("asset"),
 		cmd: v.Get("cmd"), session: v.Get("session"), shasum: v.Get("shasum"),
-		cat: v.Get("cat"), country: v.Get("country"), client: v.Get("client"),
+		cat: v.Get("cat"), country: v.Get("country"), city: v.Get("city"), client: v.Get("client"),
 		fingerprint: v.Get("fingerprint"), provider: v.Get("provider"), org: v.Get("org"), asn: v.Get("asn"),
 		sig: v.Get("sig"), q: v.Get("q"), typ: v.Get("type"),
 	}
@@ -91,6 +91,9 @@ func (f filter) match(e storedEvent) bool {
 		return false
 	}
 	if f.country != "" && e.Country != f.country {
+		return false
+	}
+	if f.city != "" && e.City != f.city {
 		return false
 	}
 	if f.client != "" && e.ClientVer != f.client {
@@ -167,6 +170,7 @@ func (f filter) describe() []string {
 	add("payload", shortHash(f.shasum))
 	add("category", f.cat)
 	add("country", f.country)
+	add("city", f.city)
 	add("client", f.client)
 	add("fingerprint", f.fingerprint)
 	add("provider", f.provider)
