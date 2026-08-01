@@ -126,6 +126,14 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 		{"github-analysis-list", githubAnalysisPageData{Generated: now}},
 		{"payload-analysis", binaryAnalysis{}},
 		{"payload-workbench-index", payloadsPage{Generated: now, Enabled: true, Files: []capturedFile{{Hash: strings.Repeat("e", 64), Kind: "Binary", Platform: "Linux", MIME: "application/octet-stream", SizeH: "1 KiB", Sources: []string{"dionaea"}}}}},
+		{"workbench-results", workbenchResultsPageData{
+			Generated: now,
+			Runs: []workbenchRun{{
+				ID: "run_1234567890abcdef", PayloadSHA256: strings.Repeat("e", 64), PayloadKind: "binary",
+				RecipeName: "Static first", RecipeRevision: 1, State: "completed", CreatedAt: now,
+				Children: []workbenchChild{{AnalyzerID: "deterministic", DisplayName: "Deterministic", State: "completed", UpdatedAt: now, ResultURL: "/payload-analysis/" + strings.Repeat("e", 64)}},
+			}},
+		}},
 		{"payload-workbench", workbenchPageData{Generated: now, SHA256: strings.Repeat("e", 64), Classification: payloadKind("binary", "Binary", "Unknown", "binary", "Static", false), Analyzers: workbenchRegistry(payloadKind("binary", "Binary", "Unknown", "binary", "Static", false)), ModelStatus: workbenchModelStatus{Overall: "unavailable", AdvisoryOnly: true}}},
 		{"payloads", payloadsPage{Generated: now}},
 		{"source-health", snapshot{}},

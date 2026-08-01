@@ -416,6 +416,9 @@ func main() {
 	http.HandleFunc("/payload-workbench", func(w http.ResponseWriter, r *http.Request) {
 		s.serveWorkbenchIndex(w, r, tmpl)
 	})
+	http.HandleFunc("/payload-workbench/results", func(w http.ResponseWriter, r *http.Request) {
+		s.serveWorkbenchResults(w, r, tmpl)
+	})
 	http.HandleFunc("/payload-workbench/", func(w http.ResponseWriter, r *http.Request) {
 		s.serveWorkbenchPage(w, r, tmpl)
 	})

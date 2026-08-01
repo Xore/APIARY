@@ -12,6 +12,8 @@ const routes = [
   "/payloads",
   "/sandbox",
   "/ghidra",
+  "/payload-workbench",
+  "/payload-workbench/results",
   "/payload-workbench/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
   "/history",
   "/dead-letters",

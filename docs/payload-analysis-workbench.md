@@ -1,6 +1,6 @@
 # Payload analysis workbench
 
-The dashboard's `/payload-workbench/{sha256}` route is the unified, local-first orchestration surface for issue #155. It is a separate page rather than an extension of `/ghidra`: recipes and parent runs span deterministic analysis, Ghidra, and two sandbox backends, while `/ghidra/{sha256}`, `/sandbox/{job}` and `/payload-analysis/{sha256}` remain the canonical native result renderers.
+The dashboard's `/payload-workbench` route selects captured evidence and `/payload-workbench/{sha256}` is the unified, local-first orchestration surface for issue #155. It is a separate page rather than an extension of `/ghidra`: recipes and parent runs span deterministic analysis, Ghidra, and two sandbox backends, while `/ghidra/{sha256}`, `/sandbox/{job}` and `/payload-analysis/{sha256}` remain the canonical native result renderers.
 
 ## Trust boundary
 
@@ -29,6 +29,8 @@ Recipes are stored under `/state/analysis-workbench/recipes.json`. Each edit app
 Parent runs live as bounded JSON documents under `/state/analysis-workbench/runs/`. The idempotency digest covers owner, captured hash, recipe ID/revision, and the normalized typed selection. Repeating the same request returns the existing run instead of queueing duplicate children; a deliberate rerun uses the bounded child retry action.
 
 Child lifecycle states are `queued`, `claimed`, `running`, `completed`, `skipped`, `failed`, `timed_out`, and `cancelled`. Polling reconciles request markers, existing worker status files, and native result timestamps. One failed child produces a `partial` parent when another child completed, and every completed child links to its native escaped result.
+
+`/payload-workbench/results` is the owner-isolated cross-payload review surface. It reconciles retained runs before rendering, summarizes active/completed/partial/failed states, supports bounded server-side search by hash, recipe, analyzer, or state, and links every child to its canonical native report when one exists. Retry and cancellation remain on the selected payload's workbench page so operational mutations stay contextual.
 
 ## HTTP contracts
 

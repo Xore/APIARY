@@ -445,13 +445,24 @@ func (w *workbenchService) loadRunLocked(id, owner string) (workbenchRun, error)
 }
 
 func (w *workbenchService) listRuns(hash, owner string) []workbenchRun {
+	return w.listRunsForOwnerAndHash(owner, hash, 25)
+}
+
+func (w *workbenchService) listRunsForOwner(owner string, limit int) []workbenchRun {
+	return w.listRunsForOwnerAndHash(owner, "", limit)
+}
+
+func (w *workbenchService) listRunsForOwnerAndHash(owner, hash string, limit int) []workbenchRun {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if limit <= 0 || limit > workbenchMaxRuns {
+		limit = workbenchMaxRuns
+	}
 	var visible []workbenchRun
 	for _, run := range w.loadRunsLocked() {
 		if run.Owner == owner && (hash == "" || run.PayloadSHA256 == hash) {
 			visible = append(visible, run)
-			if len(visible) == 25 {
+			if len(visible) == limit {
 				break
 			}
 		}

@@ -116,7 +116,7 @@ def main() -> int:
     finally:
         os.umask(old_umask)
     server.status_file = args.status_file
-    os.chmod(args.socket, 0o660)
+    os.chmod(args.socket, 0o600)
     try:
         server.serve_forever()
     finally:

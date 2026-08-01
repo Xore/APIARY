@@ -228,6 +228,23 @@ func TestWorkbenchIndexProvidesPayloadSelection(t *testing.T) {
 	}
 }
 
+func TestWorkbenchResultsAreSearchableAndOwnerIsolated(t *testing.T) {
+	s, _ := newWorkbenchFixture(t, []byte("payload"))
+	if _, _, err := s.createWorkbenchRun(workbenchRunRequest{PayloadSHA256: workbenchTestHash, RecipeName: "Accuracy first", Analyzers: deterministicSelection()}, "owner-a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.createWorkbenchRun(workbenchRunRequest{PayloadSHA256: workbenchTestHash, RecipeName: "Other owner", Analyzers: deterministicSelection()}, "owner-b"); err != nil {
+		t.Fatal(err)
+	}
+	data := s.workbenchResultsData("accuracy", "owner-a")
+	if len(data.Runs) != 1 || data.Runs[0].Owner != "owner-a" || data.Counts.Completed != 1 {
+		t.Fatalf("owner-isolated results = %+v", data)
+	}
+	if got := s.workbenchResultsData("other owner", "owner-a"); len(got.Runs) != 0 {
+		t.Fatalf("search leaked another owner's run: %+v", got.Runs)
+	}
+}
+
 func TestWorkbenchTimeoutAndOwnerIsolation(t *testing.T) {
 	s, root := newWorkbenchFixture(t, []byte("MZ"+strings.Repeat("\x00", 200)))
 	requests, results := filepath.Join(root, "ghidra-requests"), filepath.Join(root, "ghidra-results")

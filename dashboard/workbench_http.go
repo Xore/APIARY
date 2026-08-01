@@ -20,6 +20,22 @@ type workbenchPageData struct {
 	ModelStatus    workbenchModelStatus
 }
 
+type workbenchResultsCounts struct {
+	Total     int
+	Active    int
+	Completed int
+	Partial   int
+	Failed    int
+}
+
+type workbenchResultsPageData struct {
+	pageMeta
+	Generated time.Time
+	Query     string
+	Runs      []workbenchRun
+	Counts    workbenchResultsCounts
+}
+
 func (s *store) serveWorkbenchIndex(w http.ResponseWriter, r *http.Request, tmpl *template.Template) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
@@ -31,6 +47,63 @@ func (s *store) serveWorkbenchIndex(w http.ResponseWriter, r *http.Request, tmpl
 		data.Files = data.Files[:50]
 	}
 	renderPage(w, tmpl, "payload-workbench-index", &data)
+}
+
+func (s *store) workbenchResultsData(query, owner string) workbenchResultsPageData {
+	data := workbenchResultsPageData{Generated: time.Now(), Query: strings.TrimSpace(query)}
+	if s == nil || s.workbench == nil || !s.workbench.configured() {
+		return data
+	}
+	needle := strings.ToLower(data.Query)
+	for _, candidate := range s.workbench.listRunsForOwner(owner, workbenchMaxRuns) {
+		run, err := s.getWorkbenchRun(candidate.ID, owner)
+		if err != nil {
+			continue
+		}
+		if needle != "" && !workbenchRunMatches(run, needle) {
+			continue
+		}
+		data.Runs = append(data.Runs, run)
+		switch run.State {
+		case "queued", "running":
+			data.Counts.Active++
+		case "completed":
+			data.Counts.Completed++
+		case "partial":
+			data.Counts.Partial++
+		default:
+			data.Counts.Failed++
+		}
+	}
+	data.Counts.Total = len(data.Runs)
+	return data
+}
+
+func workbenchRunMatches(run workbenchRun, needle string) bool {
+	values := []string{run.ID, run.PayloadSHA256, run.PayloadKind, run.RecipeName, run.State}
+	for _, child := range run.Children {
+		values = append(values, child.AnalyzerID, child.DisplayName, child.State, child.Summary, child.Reason)
+	}
+	for _, value := range values {
+		if strings.Contains(strings.ToLower(value), needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *store) serveWorkbenchResults(w http.ResponseWriter, r *http.Request, tmpl *template.Template) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "GET required", http.StatusMethodNotAllowed)
+		return
+	}
+	identity, ok := workbenchIdentity(w, r)
+	if !ok {
+		return
+	}
+	data := s.workbenchResultsData(r.URL.Query().Get("q"), identity.Subject)
+	renderPage(w, tmpl, "workbench-results", &data)
 }
 
 type workbenchRecipeRequest struct {
