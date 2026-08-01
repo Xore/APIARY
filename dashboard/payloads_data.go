@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -26,7 +27,21 @@ type capturedFile struct {
 	Dynamic      bool
 	Sources      []string
 	Copies       int
+	// Preview and PreviewTruncated back the /payloads list "Preview" action
+	// (#59): a hex dump of the same file head already read for MIME
+	// sniffing below, capped further to payloadPreviewCap so the row stays
+	// cheap to render. The byte read here is real (this is not the deeper
+	// io.ReadAll(analysisReadCap) analyzePayload does for /payload-analysis/),
+	// it is just bounded much smaller because every visible row pays this
+	// cost on every scan, not one file on demand.
+	Preview          string
+	PreviewTruncated bool
 }
+
+// payloadPreviewCap bounds the /payloads list preview action -- distinct
+// from and much smaller than analysisReadCap (payload_analysis.go), which
+// backs the deliberate, one-file-at-a-time /payload-analysis/ detail page.
+const payloadPreviewCap = 512
 
 type payloadSourceStat struct {
 	Name   string
@@ -174,6 +189,7 @@ func (s *store) scanPayloads() payloadsPage {
 			}
 			mime := "application/octet-stream"
 			classification := classifyPayload(nil)
+			var preview string
 			if f, err := os.Open(path); err == nil {
 				head := make([]byte, 64<<10)
 				n, _ := f.Read(head)
@@ -181,6 +197,11 @@ func (s *store) scanPayloads() payloadsPage {
 				head = head[:n]
 				mime = http.DetectContentType(head)
 				classification = classifyPayload(head)
+				previewBytes := head
+				if len(previewBytes) > payloadPreviewCap {
+					previewBytes = previewBytes[:payloadPreviewCap]
+				}
+				preview = hex.Dump(previewBytes)
 			}
 			files[hash] = &capturedFile{
 				Hash: hash, Size: fi.Size(), SizeH: humanBytes(fi.Size()),
@@ -188,6 +209,7 @@ func (s *store) scanPayloads() payloadsPage {
 				Kind: classification.Label, KindCode: classification.Code,
 				Platform: classification.Platform, AnalysisPath: classification.AnalysisPath,
 				Dynamic: classification.Dynamic, Copies: 1,
+				Preview: preview, PreviewTruncated: fi.Size() > payloadPreviewCap,
 			}
 			return nil
 		})
