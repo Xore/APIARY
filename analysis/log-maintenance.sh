@@ -41,7 +41,17 @@ sleep "$start_delay"
 while true; do
   rotate /logs/dionaea/dionaea.log
   rotate /logs/dionaea/dionaea-errors.log
-  rotate /logs/conpot/conpot.log
+  # #115: six conpot personas (conpot, conpot-s7-1200, conpot-s7-1500,
+  # conpot-iec104, conpot-guardian, conpot-kamstrup) each write their own
+  # /logs/conpot*/conpot.log, matching the compose file's own volume layout
+  # -- a single hardcoded path here only ever covered the base one. The glob
+  # covers all of them, present or future, without another hardcoded line
+  # per persona; an unmatched glob passes through as the literal pattern
+  # string under this shell's default globbing, which rotate()'s own
+  # [ -f "$file" ] guard already treats as "nothing to do."
+  for f in /logs/conpot*/conpot.log; do
+    rotate "$f"
+  done
   rotate /logs/cowrie/cowrie.log
   sleep "$interval"
 done
