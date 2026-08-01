@@ -185,6 +185,17 @@ a.metric:hover { border-color: var(--border-strong); background: var(--surface-2
 .card:has(table) { overflow: auto; }
 .card table { min-width: 0; }
 .card.wide table { min-width: 720px; }
+/* The payloads list row ends in a kebab menu (#205) whose popover is
+   position:absolute and must escape the row -- overflow:auto on an
+   ancestor clips it regardless of scroll position, popover open or not
+   (CSS has no "auto but only clip the axis that's actually overflowing"
+   mode: setting overflow-x:auto alone still forces overflow-y to compute
+   as auto too, per the overflow spec's own visible-becomes-auto rule).
+   Every other cell here already wraps (td.v's word-break:break-all
+   handles the hash column), so this table was never actually depending
+   on the horizontal scroll .card:has(table) exists for. */
+#payloads-table-card { overflow: visible; }
+#payloads-table-card table { min-width: 0; }
 @media (max-width: 1180px) {
   .card { grid-column: span 6; }
   .card.wide, .wide { grid-column: 1 / -1; }
