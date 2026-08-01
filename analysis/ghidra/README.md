@@ -15,26 +15,30 @@ configure it, and how to read what it produces.
 ## What runs where
 
 ```
-dashboard container            host (root)                    containers (loopback)
-┌──────────────────┐   .request  ┌───────────────────┐  HTTP   ┌──────────────────┐
-│ POST /ghidra/    │ ──────────► │ honeypot-ghidra-  │ ──────► │ ghidra           │
-│   submit         │             │ worker.path/.svc  │  :9090  │ headless REST    │
-│                  │             │                   │         └──────────────────┘
-│ GET /ghidra/{sha}│ ◄────────── │ ghidra-worker.py  │ ──────► ┌──────────────────┐
-└──────────────────┘  _ghidra.json│                   │ :11434 │ ollama           │
-                                   │                   │        │ local model      │
-                                   │                   │        └──────────────────┘
-                                   │                   │ ──────► ┌──────────────────┐
-                                   └───────────────────┘  :9091  │ statictools      │
-                                                                 │ ssdeep/tlsh/lief │
-                                                                 └──────────────────┘
+dashboard container                host (root)                containers (loopback)
+
+┌──────────────────┐    .request    ┌───────────────────┐
+│ POST /ghidra/     │ ─────────────► │ honeypot-ghidra-   │
+│   submit          │                │ worker.path/.svc   │
+│                    │                │                    │
+│ GET /ghidra/{sha}  │ ◄───────────── │ ghidra-worker.py   │
+└────────────────────┘ _ghidra.json  └──────────┬──────────┘
+                                                  │
+                          ┌───────────────────────┼───────────────────────┐
+                          │ HTTP :9090             │ HTTP :11434           │ HTTP :9091
+                          ▼                        ▼                       ▼
+                 ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐
+                 │ ghidra           │   │ ollama           │   │ statictools      │
+                 │ headless REST    │   │ local model      │   │ ssdeep/tlsh/lief │
+                 └──────────────────┘   └──────────────────┘   └──────────────────┘
 ```
 
-The dashboard never talks to either container, or to Docker. It writes a
-`{sha256}.request` marker into one directory and reads `{sha256}_ghidra.json`
-out of another — the same spool pattern the KVM sandbox already uses. Both
-container ports are published on `127.0.0.1` only: between them they hold
-captured malware and every string extracted from it.
+The dashboard never talks to any of the three containers, or to Docker. It
+writes a `{sha256}.request` marker into one directory and reads
+`{sha256}_ghidra.json` out of another — the same spool pattern the KVM
+sandbox already uses. Every container port is published on `127.0.0.1` only:
+between them they hold captured malware and every string, fuzzy hash and
+structural fact extracted from it.
 
 The worker is **stdlib-only Python 3** on purpose. A worker that needs
 `pip install` before it can drain a queue is a worker that will be broken after
