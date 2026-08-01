@@ -51,6 +51,17 @@ ACCEPT_TOLERANCE  = 3.0  # candidate's holdout anomaly rate may be at most this 
 # model, not something every caller has to remember to enforce.
 MAX_TRAIN_SAMPLES = 20_000
 
+# #190: n_jobs=-1 requests one worker per HOST-visible core (this codebase's
+# reference deployment has 16), not per the container's actual `cpus: "2.0"`
+# cgroup quota -- the same category of mismatch that caused LSTM-AE's real
+# thread-pool livelock (models/lstm_autoencoder.py, discovered the same
+# session this was audited). IsolationForest.predict()/score_samples() use
+# this setting too, not just fit() -- so an oversubscribed pool here sits on
+# the hot per-event scoring path, not just the occasional retrain. Bounded to
+# match the compose file's cpu limit instead of auto-detecting a core count
+# the scheduler will never actually grant this container.
+N_JOBS = int(os.getenv("ML_N_JOBS", "2"))
+
 # Known scanner ASNs / Tor exit prefix heuristic (extend as needed)
 KNOWN_SCANNER_PREFIXES = {
     "45.33",   # Linode/Akamai scan ranges
@@ -382,7 +393,7 @@ class IsoForestModel:
             n_estimators=N_ESTIMATORS,
             contamination=CONTAMINATION,
             random_state=42,
-            n_jobs=-1,
+            n_jobs=N_JOBS,
         )
         candidate_hbos = HBOS(contamination=CONTAMINATION)
         try:

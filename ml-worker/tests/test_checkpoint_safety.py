@@ -98,6 +98,53 @@ class TestFetchNewEventsEqualTimestampSafety:
             "the equal-timestamp sibling must be seen in the next cycle, not lost"
 
 
+class TestBoundedPollBatch:
+    """#190: the regular poll path used to have no cap at all, unlike the
+    retrain path (MAX_TRAIN_SAMPLES) -- a large enough backlog turned into
+    one arbitrarily long scoring pass with no checkpoint progress until it
+    finished. fetch_new_events()'s own max_total behavior is already
+    covered elsewhere (test_worker_fixes.py); this proves the regular poll
+    loop is actually wired to pass it, since driving run_worker() itself
+    (an infinite loop with a real ES connection) isn't practical here."""
+
+    def test_poll_loop_fetch_is_bounded_by_max_poll_batch(self):
+        import inspect
+        source = inspect.getsource(worker.run_worker)
+        assert "max_total=MAX_POLL_BATCH" in source
+
+    def test_max_poll_batch_is_configured_and_positive(self):
+        assert worker.MAX_POLL_BATCH > 0
+
+
+class TestBacklogMetric:
+    """#190: a poll cycle that fully used its MAX_POLL_BATCH cap almost
+    certainly has more behind it -- surfaced as a metric rather than only
+    discoverable by querying Elasticsearch directly."""
+
+    def test_backlog_count_returns_the_count(self):
+        es = MagicMock()
+        es.count.return_value = {"count": 4213}
+        assert worker.backlog_count(es, "suricata-v2-*", "2026-08-01T10:00:00Z") == 4213
+
+    def test_backlog_count_query_failure_returns_none_not_raise(self):
+        es = MagicMock()
+        es.count.side_effect = ConnectionError("ES unreachable")
+        assert worker.backlog_count(es, "suricata-v2-*", "2026-08-01T10:00:00Z") is None
+
+    def test_write_backlog_metric_records_index_and_count(self):
+        es = MagicMock()
+        worker.write_backlog_metric(es, "suricata-v2-*", 4213)
+        doc = es.index.call_args.kwargs["document"]
+        assert doc["kind"] == "backlog"
+        assert doc["source_index"] == "suricata-v2-*"
+        assert doc["backlog_count"] == 4213
+
+    def test_backlog_metric_write_failure_does_not_raise(self):
+        es = MagicMock()
+        es.index.side_effect = ConnectionError("ES unreachable")
+        worker.write_backlog_metric(es, "suricata-v2-*", 100)  # must not raise
+
+
 class TestAnomalyDocIdIsDeterministic:
     def test_same_source_identity_produces_the_same_id(self):
         a = worker.anomaly_doc_id("honeypot-v2-2026.08.01", "evt-1")

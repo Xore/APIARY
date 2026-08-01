@@ -207,6 +207,22 @@ class TestAtomicSymlinkPromotion:
         assert "os.remove(link)" not in source and "os.symlink(path, link)" not in source
 
 
+class TestBoundedParallelism:
+    """#190: n_jobs=-1 requests one worker per HOST-visible core, not per
+    the container's actual cgroup CPU quota (docker-compose.yml's
+    `cpus: "2.0"`) -- the same category of mismatch that caused LSTM-AE's
+    real thread-pool livelock, except this one sits on the hot per-event
+    scoring path (predict()/score_samples() use n_jobs too, not just
+    fit()), not just the occasional retrain."""
+
+    def test_candidate_iso_forest_uses_the_bounded_n_jobs_not_negative_one(self, tmp_path):
+        model = IsoForestModel(model_dir=str(tmp_path))
+        result = model.retrain([fixtures.COWRIE_LOGIN_FAILED["_source"]] * 120)
+        assert result.accepted is True
+        assert model.iso.n_jobs == iso_mod.N_JOBS
+        assert model.iso.n_jobs != -1
+
+
 class TestLifecycleHelpers:
     def test_prune_old_versions_keeps_only_the_newest_n(self, tmp_path):
         for ts in [100, 200, 300, 400, 500]:
