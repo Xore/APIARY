@@ -88,7 +88,7 @@
     </button>
     <button class="hp-live-state" type="button" data-hp-live-toggle aria-pressed="false" title="Dashboard refresh is active — pause it"><span class="live-dot"></span><span data-hp-live-label>Live</span></button>
   </div>
-  {{with activeBanner}}<div class="alert alert--{{.Severity}}" role="status" style="flex-basis:100%;order:5;margin:8px 8px 0">{{.Text}}</div>{{end}}
+  {{with activeBanner}}<div class="alert alert--{{.Severity}} app-toolbar__banner" role="status">{{.Text}}</div>{{end}}
 </header>
 <div id="hp-flash" class="hp-modal-status" role="status" aria-live="polite"></div>
 <div id="hp-modal-root">

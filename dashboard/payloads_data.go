@@ -46,6 +46,34 @@ type capturedFile struct {
 	// correctly regardless of source, because it hashes the full content.
 	GitHubAnalysisURL   string
 	GitHubAnalysisLabel string
+	// OriginLabel/OriginLink answer "what event did this payload come from"
+	// (#205) -- capture is filesystem-based (scanPayloads walks disk, never
+	// touches an event), so this is recovered by matching this file's hash
+	// against the in-memory event feed's Shasum field and keeping the
+	// earliest hit, i.e. the event that first brought the file in. OriginLink
+	// only points somewhere when that event has a Session: that is the one
+	// case with a real per-event destination (/sessions/{id}); Dionaea
+	// captures normally carry no session, so OriginLabel alone (still real
+	// information -- which sensor, when) is what those get.
+	OriginLabel string
+	OriginLink  string
+}
+
+// earliestEventByShasum answers "which event first produced this hash" for
+// every shasum-bearing event in one pass, so payloadsData can look each
+// captured file's origin up by a single map read instead of rescanning the
+// whole event feed per row.
+func earliestEventByShasum(events []storedEvent) map[string]storedEvent {
+	out := make(map[string]storedEvent)
+	for _, ev := range events {
+		if ev.Shasum == "" {
+			continue
+		}
+		if existing, ok := out[ev.Shasum]; !ok || ev.when.Before(existing.when) {
+			out[ev.Shasum] = ev
+		}
+	}
+	return out
 }
 
 // payloadPreviewCap bounds the /payloads list preview action -- distinct
@@ -115,6 +143,7 @@ func (s *store) payloadsData(filter string) payloadsPage {
 	for _, result := range loadGitHubAnalysisResults() {
 		verdicts[result.SHA256] = result
 	}
+	origins := earliestEventByShasum(s.getEvents())
 	var total int64
 	for _, file := range base.Files {
 		if filter != "" {
@@ -134,6 +163,12 @@ func (s *store) payloadsData(filter string) payloadsPage {
 			file.GitHubAnalysisLabel = result.ExitStatus
 			if result.Verdict != nil {
 				file.GitHubAnalysisLabel = fmt.Sprintf("%d/%d %s", result.Verdict.Malicious, result.Verdict.Total, result.Verdict.Level)
+			}
+		}
+		if origin, ok := origins[file.Hash]; ok {
+			file.OriginLabel = origin.Sensor + " · " + origin.Time
+			if origin.Session != "" {
+				file.OriginLink = "/sessions/" + url.PathEscape(origin.Session)
 			}
 		}
 		p.Files = append(p.Files, file)

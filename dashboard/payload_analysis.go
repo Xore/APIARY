@@ -67,6 +67,11 @@ type binaryAnalysis struct {
 	SandboxRuns    []sandboxResult
 	GitHubAnalysis *githubAnalysisResult
 	VT             string
+	// OriginLabel/OriginLink mirror capturedFile's fields of the same name
+	// (payloads_data.go) -- see earliestEventByShasum for how these are
+	// recovered from the event feed rather than stored with the capture.
+	OriginLabel string
+	OriginLink  string
 }
 
 func (s *store) analyzePayload(name string) (binaryAnalysis, error) {
@@ -131,6 +136,12 @@ func (s *store) analyzePayload(name string) (binaryAnalysis, error) {
 			row := result
 			a.GitHubAnalysis = &row
 			break
+		}
+	}
+	if origin, ok := earliestEventByShasum(s.getEvents())[a.SHA256]; ok {
+		a.OriginLabel = origin.Sensor + " · " + origin.Time
+		if origin.Session != "" {
+			a.OriginLink = "/sessions/" + url.PathEscape(origin.Session)
 		}
 	}
 	if len(a.YARAMatches) > 0 {
