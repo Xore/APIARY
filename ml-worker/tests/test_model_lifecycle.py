@@ -156,6 +156,99 @@ class TestRetrainAcceptanceGate:
         assert meta["holdout_samples"] == result.holdout_samples
 
 
+class TestPercentileCalibration:
+    """#174: found live that IsolationForest.score_samples() commonly ran
+    ~-0.48 for real production traffic (the old formula assumed a center
+    of 0), and HBOS.decision_function() commonly ran 26-32 (the old
+    formula divided by 10 and clipped) -- every real score saturated at
+    the ceiling (100% of a 4000-event live sample had hbos_score == 1.0
+    exactly). _percentile_normalize() anchors to each model's OWN p50/p99
+    instead of a fixed formula, so it can't go stale the same way."""
+
+    def test_p50_maps_to_the_typical_anchor(self):
+        assert iso_mod._percentile_normalize(-0.48, p50=-0.48, p99=-0.68, lower_is_more_anomalous=True) == pytest.approx(0.2)
+
+    def test_p99_maps_to_the_tail_anchor(self):
+        assert iso_mod._percentile_normalize(-0.68, p50=-0.48, p99=-0.68, lower_is_more_anomalous=True) == pytest.approx(0.95)
+
+    def test_beyond_p99_extrapolates_and_clips_at_one(self):
+        # More extreme than anything this model's own fit produced --
+        # still meaningfully "very anomalous", clipped at the ceiling.
+        assert iso_mod._percentile_normalize(-0.90, p50=-0.48, p99=-0.68, lower_is_more_anomalous=True) == 1.0
+
+    def test_below_p50_extrapolates_and_clips_at_zero(self):
+        assert iso_mod._percentile_normalize(-0.10, p50=-0.48, p99=-0.68, lower_is_more_anomalous=True) == 0.0
+
+    def test_hbos_direction_is_reversed_higher_raw_is_more_anomalous(self):
+        # pyod convention: higher decision_function = more anomalous,
+        # opposite of sklearn's IsolationForest.
+        typical = iso_mod._percentile_normalize(26.66, p50=26.66, p99=30.94, lower_is_more_anomalous=False)
+        tail = iso_mod._percentile_normalize(30.94, p50=26.66, p99=30.94, lower_is_more_anomalous=False)
+        assert typical == pytest.approx(0.2)
+        assert tail == pytest.approx(0.95)
+
+    def test_degenerate_equal_anchors_returns_neutral(self):
+        assert iso_mod._percentile_normalize(5.0, p50=5.0, p99=5.0, lower_is_more_anomalous=False) == 0.5
+
+
+class TestRetrainAttachesCalibration:
+    # A handful of distinct, repeating clusters -- enough real diversity
+    # that IsolationForest/HBOS don't collapse to a single tied raw score
+    # (a narrow synthetic spread would test the fixture, not the
+    # calibration logic), but a cluster count that evenly divides BOTH the
+    # 90-train/50-holdout split (n=140, HOLDOUT_MIN=50) so both sides see
+    # an identical proportional mix -- an uneven cycle (e.g. 7 clusters
+    # into a 90/50 split) left a couple of holdout points looking
+    # slightly rarer than in train, which the acceptance gate (#65, a
+    # separate, already-tested concern) correctly, if too sensitively for
+    # this fixture's purposes, flagged.
+    _PORT_CLUSTERS = (22, 445, 3389, 8080, 21)
+
+    def _varied_sources(self, n=140):
+        out = []
+        for i in range(n):
+            out.append({
+                **fixtures.COWRIE_LOGIN_FAILED["_source"],
+                "destination": {"port": self._PORT_CLUSTERS[i % len(self._PORT_CLUSTERS)]},
+            })
+        return out
+
+    def test_accepted_retrain_attaches_calibration_to_both_models(self, tmp_path):
+        model = IsoForestModel(model_dir=str(tmp_path))
+        result = model.retrain(self._varied_sources())
+        assert result.accepted is True
+        assert hasattr(model.iso, "hp_calib") and "p50" in model.iso.hp_calib and "p99" in model.iso.hp_calib
+        assert hasattr(model.hbos, "hp_calib") and "p50" in model.hbos.hp_calib and "p99" in model.hbos.hp_calib
+
+    def test_calibration_survives_a_save_and_reload(self, tmp_path):
+        model = IsoForestModel(model_dir=str(tmp_path))
+        model.retrain(self._varied_sources())
+        original_calib = model.iso.hp_calib
+
+        reloaded = IsoForestModel(model_dir=str(tmp_path))
+        assert hasattr(reloaded.iso, "hp_calib")
+        assert reloaded.iso.hp_calib == original_calib
+
+    def test_scores_no_longer_saturate_after_a_calibrated_retrain(self, tmp_path):
+        # The actual live symptom this issue reports: hbos_score()/score()
+        # pinned at exactly 1.0 for essentially all real traffic.
+        model = IsoForestModel(model_dir=str(tmp_path))
+        model.retrain(self._varied_sources())
+
+        iso_scores, hbos_scores = [], []
+        for port in self._PORT_CLUSTERS:
+            features = model.extract_features({
+                **fixtures.COWRIE_LOGIN_FAILED["_source"],
+                "destination": {"port": port},
+            })
+            iso_scores.append(model.score(features))
+            hbos_scores.append(model.hbos_score(features))
+
+        for name, values in [("iso", iso_scores), ("hbos", hbos_scores)]:
+            assert not all(v == 1.0 for v in values), f"{name} scores must not all saturate at the ceiling post-calibration"
+            assert len(set(values)) > 1, f"{name} scores must show real spread across genuinely different inputs, not a single tied value"
+
+
 class TestAtomicSymlinkPromotion:
     """#169: _symlink() must never leave `link` missing, even if the
     process is killed between removing the old link and creating the new
