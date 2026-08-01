@@ -131,6 +131,25 @@ func TestOverviewRefreshTargetsTheCurrentPageContentSelector(t *testing.T) {
 	}
 }
 
+// TestOverviewLivePillReflectsActualState (#201): the overview header's
+// "Live telemetry" pill used to be static markup with no JS binding at all
+// -- it always said "Live telemetry" regardless of the toolbar LIVE toggle
+// being paused, or the SSE connection having died. It must now be wired to
+// both: the toolbar's paused state (window.HoneypotLive) and the
+// EventSource's own connection health (onerror/open), not just decorative
+// text.
+func TestOverviewLivePillReflectsActualState(t *testing.T) {
+	if !strings.Contains(pageTemplate, `data-hp-live-pill`) {
+		t.Fatal("overview header's live-pill has no stable hook for JS to bind to")
+	}
+	if !strings.Contains(pageTemplate, `window.HoneypotLive.onChange(renderLivePill)`) {
+		t.Fatal("overview's live-pill must reflect window.HoneypotLive's paused state, not just the toolbar toggle")
+	}
+	if !strings.Contains(pageTemplate, `es.onerror=`) || strings.Contains(pageTemplate, `es.onerror=()=>{};`) {
+		t.Fatal("overview's EventSource must react to onerror instead of silently ignoring connection failures")
+	}
+}
+
 // TestNoUnnoncedInlineScriptOrStyleRemains is the structural half of #58's
 // completion criterion ("no un-nonced inline script or style remains"): a
 // regression test that would fail the moment someone adds a new inline

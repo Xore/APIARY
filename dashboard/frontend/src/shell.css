@@ -251,6 +251,17 @@ a.metric:hover { border-color: var(--border-strong); background: var(--surface-2
   background: var(--success-soft); color: var(--success);
   font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
 }
+/* #201: reflect the same paused/stalled states the toolbar's LIVE toggle
+   already showed, on the pill that used to just always say "Live telemetry"
+   regardless of either. */
+.live-pill--paused {
+  border-color: var(--border-subtle); background: var(--surface-2); color: var(--text-muted);
+}
+.live-pill--paused .live-dot { background: var(--text-muted); animation: none; }
+.live-pill--stalled {
+  border-color: color-mix(in srgb, var(--warning) 25%, transparent); background: var(--warning-soft); color: var(--warning);
+}
+.live-pill--stalled .live-dot { background: var(--warning); animation: none; }
 .gen { font: 11px var(--hp-mono); color: var(--text-muted); }
 @media (max-width: 800px) {
   .overview-header { grid-template-columns: 1fr; align-items: start; }

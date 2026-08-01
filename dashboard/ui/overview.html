@@ -20,7 +20,7 @@
             <p class="subtitle">{{if presentation.DashboardSubtitle}}{{presentation.DashboardSubtitle}}{{else}}Live attack telemetry, captured evidence, correlated campaigns, and collection health in one operational view.{{end}}</p>
           </div>
           <div class="live-panel">
-            <span class="live-pill"><span class="live-dot"></span>Live telemetry</span>
+            <span class="live-pill" data-hp-live-pill><span class="live-dot"></span><span data-hp-live-pill-label>Live telemetry</span></span>
             <span class="gen">updated {{.Generated.Format "2006-01-02 15:04:05 MST"}} &bull; refreshes automatically</span>
           </div>
         </header>
@@ -188,7 +188,34 @@ async function refreshDashboard(){
     if (next&&current) {const preserveMap=Boolean(current.querySelector('[data-attack-map-card]')&&next.querySelector('[data-attack-map-card]'));if(window.replaceHoneypotPage)window.replaceHoneypotPage(next,{preserveMap});else current.replaceWith(next);if(window.initDashboardTabs)window.initDashboardTabs();if(window.initHoneypotMaps)window.initHoneypotMaps();}
   } catch {} finally {refreshing=false}
 }
-if(window.EventSource){const es=new EventSource('/api/stream');es.addEventListener('update',refreshDashboard);es.onerror=()=>{};}
+/* #201: the pill used to be static markup that always said "Live telemetry"
+   no matter what was actually happening -- paused, or the SSE connection
+   dead -- so it could look live while every refresh path had stopped.
+   sseHealthy tracks the EventSource itself (native EventSource retries
+   with its own backoff after onerror; this only reflects that state, it
+   does not implement reconnection); the toolbar LIVE toggle's paused state
+   is read directly since it can change independently of the connection.
+   Paused wins the label when both are true: it is the explicit,
+   operator-chosen state, not a fault. */
+let sseHealthy=true;
+const livePill=document.querySelector('[data-hp-live-pill]');
+const livePillLabel=livePill&&livePill.querySelector('[data-hp-live-pill-label]');
+function renderLivePill(){
+  if(!livePill)return;
+  const paused=Boolean(window.HoneypotLive&&window.HoneypotLive.paused());
+  const stalled=!paused&&!sseHealthy;
+  livePill.classList.toggle('live-pill--paused',paused);
+  livePill.classList.toggle('live-pill--stalled',stalled);
+  if(livePillLabel)livePillLabel.textContent=paused?'Paused':stalled?'Reconnecting…':'Live telemetry';
+}
+if(window.HoneypotLive)window.HoneypotLive.onChange(renderLivePill);
+if(window.EventSource){
+  const es=new EventSource('/api/stream');
+  es.addEventListener('update',refreshDashboard);
+  es.addEventListener('open',()=>{sseHealthy=true;renderLivePill();});
+  es.onerror=()=>{sseHealthy=false;renderLivePill();};
+}
+renderLivePill();
 setInterval(refreshDashboard, 60000);
 addEventListener('hp-live-resumed',refreshDashboard);
 </script>
