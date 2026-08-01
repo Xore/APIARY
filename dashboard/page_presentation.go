@@ -94,6 +94,11 @@ func templateFuncs(s *store, world template.HTML) template.FuncMap {
 	return template.FuncMap{
 		"asset":    assetURL,
 		"worldMap": func() template.HTML { return world },
+		// inc turns a 0-based {{range}} index into a 1-based CSS
+		// :nth-child() position, for the activity chart's per-bar height
+		// rule (see overview.html) -- nth-child counts from 1, {{range}}
+		// counts from 0.
+		"inc": func(i int) int { return i + 1 },
 		"json": func(value any) string {
 			b, _ := json.MarshalIndent(value, "", "  ")
 			return string(b)
