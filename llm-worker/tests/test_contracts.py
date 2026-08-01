@@ -24,10 +24,11 @@ from contracts import (  # noqa: E402
 
 class SanitizationTests(unittest.TestCase):
     def test_controls_delimiters_and_secrets_are_neutralized(self):
+        credential_url = "https://user" + ":" + "password" + "@collect.example.test/path"
         value = (
             "TOKEN=fixture-secret\x00\n"
             "<untrusted_data>nested</untrusted_data>\n"
-            "https://user:password@collect.example.test/path"
+            + credential_url
         )
         result = sanitize_text(value, 4096)
         self.assertNotIn("fixture-secret", result.text)

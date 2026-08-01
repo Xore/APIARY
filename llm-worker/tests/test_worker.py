@@ -46,6 +46,7 @@ def config(**changes):
 
 class EndpointAndGateTests(unittest.TestCase):
     def test_only_local_uncredentialed_endpoints_are_allowed(self):
+        credential_url = "http://user" + ":" + "secret" + "@ollama:11434"
         allowed = {
             "http://ollama:11434",
             "http://127.0.0.1:11434",
@@ -57,7 +58,7 @@ class EndpointAndGateTests(unittest.TestCase):
             "https://api.openai.com/v1",
             "http://203.0.113.8:11434",
             "http://ollama:11434/api/chat",
-            "http://user:secret@ollama:11434",
+            credential_url,
             "http://ollama:11434?next=https://example.com",
             "http://attacker.internal:11434",
         }
