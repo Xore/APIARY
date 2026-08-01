@@ -525,15 +525,56 @@ def lief_parse(sample: Path) -> dict | None:
     return _statictools_post("/v1/lief-parse", data)
 
 
+def _capa_post(data: bytes) -> dict | None:
+    """POST to /v1/capa, preserving the unsupported-architecture reason.
+
+    Unlike _statictools_post (used by fuzzy_hash()/lief_parse(), where an
+    unrecognised format and a down sidecar are deliberately indistinguishable
+    — see lief_parse()'s own docstring), capa's 422 body carries a
+    distinguishing "unsupported" key the server only sends for the
+    correctly-declined case (statictools/server.py's Handler, contract
+    proven by /v1/capa's own 422 shape), never for a generic error. #195
+    asked for this distinction to survive at least one layer up rather than
+    collapsing to the same null every other failure produces — this is that
+    layer. Any other failure (network error, non-422 HTTP status, a 422 with
+    no "unsupported" key) still returns None, same as before.
+    """
+    req = urllib.request.Request(
+        f"{STATICTOOLS_API_BASE}/v1/capa", data=data, method="POST")
+    req.add_header("Content-Type", "application/octet-stream")
+    try:
+        with urllib.request.urlopen(req, timeout=STATICTOOLS_TIMEOUT) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        body = e.read()
+        try:
+            parsed = json.loads(body)
+        except ValueError:
+            parsed = {}
+        reason = parsed.get("unsupported") if isinstance(parsed, dict) else None
+        if e.code == 422 and reason:
+            log(f"  [.] statictools /v1/capa: HTTP 422: {reason}")
+            return {"unsupported": reason}
+        level = "[.]" if e.code == 422 else "[!]"
+        log(f"  {level} statictools /v1/capa: HTTP {e.code}: "
+            f"{(parsed.get('error') if isinstance(parsed, dict) else None) or body[:200]}")
+        return None
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
+        log(f"  [!] statictools /v1/capa: {e}")
+        return None
+
+
 def capa_scan(sample: Path) -> dict | None:
     """MITRE ATT&CK/MBC capability tags via capa, via the statictools sidecar.
 
-    None if the sidecar is unavailable, OR capa's default backend does not
-    cover this sample's architecture/format/OS (it only covers x86/amd64/
-    arm64 — no MIPS or ARM32, both common in this honeypot's IoT catch; see
-    #195 and the statictools server's _CAPA_UNSUPPORTED_EXIT_CODES). Same
-    "no signal" collapse as lief_parse() above: the sidecar reports 422 for
-    the unsupported case and _statictools_post already logs that quietly.
+    None if the sidecar is unavailable or the request otherwise failed.
+    {"unsupported": reason} if capa's default backend declined this sample's
+    architecture/format/OS (it only covers x86/amd64/arm64 — no MIPS or
+    ARM32, both common in this honeypot's IoT catch) — a real, distinct
+    signal from "no data," per #195: an operator reading "unsupported
+    architecture" on a MIPS sample should not have to wonder whether the
+    sidecar was actually reachable. A dict with "capabilities" (a real,
+    successful scan) is the only other shape this returns.
     """
     if not STATICTOOLS_API_BASE:
         return None
@@ -542,7 +583,7 @@ def capa_scan(sample: Path) -> dict | None:
     except OSError as e:
         log(f"  [!] capa scan: {e}")
         return None
-    return _statictools_post("/v1/capa", data)
+    return _capa_post(data)
 
 
 def _revdeck_multipart(sample: Path) -> tuple[bytes, str]:

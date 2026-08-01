@@ -209,11 +209,37 @@ func TestLoadGhidraResultsDecodesCapa(t *testing.T) {
 	}
 }
 
-// Absent covers both "sidecar unavailable" and "capa's default backend does
-// not support this sample's architecture/format/OS" — the worker's
-// _statictools_post() already collapses both to nil before this ever reaches
-// the dashboard, so decoding a result with no "capa" key at all must not
-// panic or synthesize a zero-valued struct (#78).
+// capa's own architecture/format/OS decline is a distinct signal from
+// "sidecar unavailable" as of #195 — the worker's capa_scan() now forwards
+// {"unsupported": reason} instead of collapsing it to the same nil a down
+// sidecar produces (TestLoadGhidraResultsCapaAbsentIsNil below).
+func TestLoadGhidraResultsDecodesCapaUnsupported(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GHIDRA_RESULTS_DIR", dir)
+	writeGhidraResult(t, dir, shaA, map[string]any{
+		"exit_status": "ok",
+		"capa": map[string]any{
+			"unsupported": "unsupported architecture -- capa's default backend covers only x86/amd64/arm64",
+		},
+	})
+
+	rows := loadGhidraResults()
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	capa := rows[0].Capa
+	if capa == nil || capa.Unsupported == "" {
+		t.Fatalf("capa.Unsupported should decode: %+v", capa)
+	}
+	if capa.Arch != "" || len(capa.Capabilities) != 0 {
+		t.Fatalf("an unsupported result should carry no capability data: %+v", capa)
+	}
+}
+
+// Absent (nil *ghidraCapa entirely) means the sidecar was unreachable, or
+// capa is switched off on this host — decoding a result with no "capa" key
+// at all must not panic or synthesize a zero-valued struct (#78). Distinct
+// from the Unsupported case above since #195.
 func TestLoadGhidraResultsCapaAbsentIsNil(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("GHIDRA_RESULTS_DIR", dir)

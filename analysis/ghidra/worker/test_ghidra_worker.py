@@ -563,8 +563,10 @@ def test_statictools(ghidra, statictools):
     check(d is not None and d["lief"] is None, "lief left null, not an error result")
     check(d is not None and d["fuzzy_hashes"] is not None,
           "fuzzy_hashes is independent of lief and still ran")
-    check(d is not None and d["capa"] is None,
-          "capa 422 (unsupported architecture) leaves capa null too, not an error result")
+    check(d is not None and d["capa"] == {"unsupported": "unsupported architecture"},
+          f"capa 422 (unsupported architecture) is preserved as a distinct "
+          f"signal, not collapsed to null like a down sidecar (#195) "
+          f"(got {d and d['capa']!r})")
 
     print("--- disabled leaves every field null ---")
     r, d = statictools_run(tmp, "disabled", ghidra, {"STATICTOOLS_API_BASE": ""})

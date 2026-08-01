@@ -85,12 +85,15 @@ type ghidraMBC struct {
 }
 
 // ghidraCapa mirrors what analysis/ghidra/statictools/server.py's
-// capa_scan() returns, forwarded verbatim by the worker (#78). Unlike Lief,
-// the worker's capa_scan() never forwards the sidecar's {"unsupported": ...}
-// 422 shape here — _statictools_post() already collapses any HTTP error,
-// 422 included, to nil, so on the Go side "no capa data" (nil *ghidraCapa)
-// covers both "sidecar down" and "capa's default backend does not support
-// this architecture" the same way absent Lief output already does.
+// capa_scan() returns, forwarded through the worker's own capa_scan() (#78).
+// nil *ghidraCapa means the sidecar was unreachable or capa isn't configured
+// on this host. Unsupported set (everything else empty) means the opposite:
+// the sidecar answered and capa itself declined the sample — its default
+// backend covers x86/amd64/arm64 only, so MIPS/ARM32 (common in this
+// honeypot's IoT catch) lands here on every run. Collapsing both to the same
+// "no capa data" was the original behavior; #195 asked for the distinction
+// to survive at least this far, since an operator reading "not observed" on
+// a MIPS sample shouldn't have to wonder whether the sidecar was even up.
 type ghidraCapa struct {
 	Arch                  string             `json:"arch"`
 	OS                    string             `json:"os"`
@@ -99,6 +102,7 @@ type ghidraCapa struct {
 	CapabilitiesTruncated bool               `json:"capabilities_truncated"`
 	Attack                []ghidraAttack     `json:"attack"`
 	MBC                   []ghidraMBC        `json:"mbc"`
+	Unsupported           string             `json:"unsupported,omitempty"`
 }
 
 // ghidraRevDeckCitations mirrors the "citations" object _revdeck_chat() in
