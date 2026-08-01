@@ -106,7 +106,7 @@ func TestEveryFullPageRouteUsesRenderPage(t *testing.T) {
 		`"page"`, `"events"`, `"search"`, `"ips"`, `"attacker"`, `"session"`, `"clusters"`,
 		`"campaigns"`, `"history"`, `"dead-letters"`, `"source-health"`,
 		`"alerts"`, `"reports"`, `"payloads"`, `"ghidra"`, `"sandbox"`,
-		`"commands"`, `"payload-analysis"`,
+		`"commands"`, `"payload-analysis"`, `"ml-anomalies"`,
 	}
 	for _, route := range routes {
 		if !strings.Contains(src.String(), "renderPage(w, tmpl, "+route) {

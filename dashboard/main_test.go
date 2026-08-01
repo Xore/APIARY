@@ -497,7 +497,7 @@ func TestSemanticShellIsServerRendered(t *testing.T) {
 		}
 	}
 	for _, route := range []string{
-		"/", "/source-health", "/alerts", "/events", "/ips", "/campaigns",
+		"/", "/source-health", "/alerts", "/ml-anomalies", "/events", "/ips", "/campaigns",
 		"/clusters", "/commands", "/payloads", "/sandbox", "/history", "/dead-letters",
 		"/reports",
 	} {

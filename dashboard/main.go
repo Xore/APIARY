@@ -97,10 +97,13 @@ func main() {
 	}
 	if esURL := os.Getenv("ELASTICSEARCH_URL"); esURL != "" {
 		s.es = newESClient(esURL, os.Getenv("FILEBEAT_URL"))
+		s.mlAnomalies = &mlAnomalyStore{}
 		s.es.refresh()
+		s.refreshMLAnomalies()
 		go func() {
 			for range time.Tick(time.Minute) {
 				s.es.refresh()
+				s.refreshMLAnomalies()
 			}
 		}()
 	}
@@ -185,6 +188,8 @@ func main() {
 	http.HandleFunc("/api/map-points", s.serveMapPoints)
 	http.HandleFunc("/api/stream", s.serveEventsSSE)
 	http.HandleFunc("/api/alerts", s.serveAlertsAPI)
+	http.HandleFunc("/api/ml/anomalies", s.serveMLAnomaliesAPI)
+	http.HandleFunc("/api/ml/stats", s.serveMLStatsAPI)
 	http.HandleFunc("/api/events", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(s.eventsData(r))
@@ -350,6 +355,10 @@ func main() {
 	http.HandleFunc("/alerts", func(w http.ResponseWriter, r *http.Request) {
 		data := s.get()
 		renderPage(w, tmpl, "alerts", &data)
+	})
+	http.HandleFunc("/ml-anomalies", func(w http.ResponseWriter, r *http.Request) {
+		data := s.mlAnomaliesData()
+		renderPage(w, tmpl, "ml-anomalies", &data)
 	})
 	http.HandleFunc("/reports", func(w http.ResponseWriter, r *http.Request) {
 		data := s.get()
