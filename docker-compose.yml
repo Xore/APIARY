@@ -72,7 +72,14 @@ services:
     image: busybox:1.36
     container_name: hp-log-maintenance
     restart: unless-stopped
-    command: ["sh", "/usr/local/bin/log-maintenance.sh"]
+    # #127: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism).
+    command:
+      - sh
+      - -c
+      - >
+        until [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec sh /usr/local/bin/log-maintenance.sh
     environment:
       - MAX_LOG_BYTES=268435456
       - CHECK_INTERVAL=300
@@ -81,9 +88,7 @@ services:
     volumes:
       - ./analysis/log-maintenance.sh:/usr/local/bin/log-maintenance.sh:ro
       - /opt/stacks/honeypot-stack/logs:/logs
-    depends_on:
-      init-wait-log:
-        condition: service_completed_successfully
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
     networks:
       - honeynet
     deploy:
@@ -99,7 +104,14 @@ services:
     image: python:3.12-alpine
     container_name: hp-payload-dedupe
     restart: unless-stopped
-    command: ["python3", "/app/dedupe-payloads.py"]
+    # #127: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism).
+    command:
+      - sh
+      - -c
+      - >
+        until [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec python3 /app/dedupe-payloads.py
     environment:
       - PAYLOAD_DEDUPE_INTERVAL=${PAYLOAD_DEDUPE_INTERVAL:-3600}
       - PAYLOAD_ROOTS=/payloads/cowrie:/payloads/dionaea/binaries:/payloads/scripts/script-payloads:/payloads/dionaea/bistreams
@@ -117,9 +129,7 @@ services:
       - dionaea-lib:/payloads/dionaea
       - dashboard-state:/payloads/scripts
       - /opt/stacks/honeypot-stack/state/dedupe:/state
-    depends_on:
-      init-wait-log:
-        condition: service_completed_successfully
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
     deploy:
       resources:
         limits:
@@ -449,10 +459,14 @@ services:
     image: dinotools/dionaea:latest
     container_name: hp-dionaea
     restart: unless-stopped
+    # #127: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism).
     entrypoint:
       - /bin/sh
       - -c
       - >
+        until [ -f /markers/log-init.done ]; do sleep 3; done
+
         cd /opt/dionaea
 
         test -f etc/dionaea/dionaea.cfg || cp -van template/etc .
@@ -508,6 +522,7 @@ services:
       - ./dionaea/services/printer.yaml:/opt/dionaea/etc/dionaea/services-enabled/printer.yaml:ro
       - ./dionaea/services/tftp.yaml:/opt/dionaea/etc/dionaea/services-enabled/tftp.yaml:ro
       - ./dionaea/services/upnp.yaml:/opt/dionaea/etc/dionaea/services-enabled/upnp.yaml:ro
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
     environment:
       - TZ=Europe/Berlin
     # Capabilities measured, not guessed (2026-07-31). Baseline was run first —
@@ -538,9 +553,6 @@ services:
       - no-new-privileges:true
     networks:
       - honeynet
-    depends_on:
-      init-wait-log:
-        condition: service_completed_successfully
     deploy:
       resources:
         limits:
@@ -575,6 +587,19 @@ services:
     build: ./conpot
     container_name: hp-conpot
     restart: unless-stopped
+    # #127: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). Reproduces the base
+    # image's own CMD (checked directly: no ENTRYPOINT, just
+    # `sh -c "exec /usr/bin/conpot --mibcache $CONPOT_TMP ..."`) with the
+    # wait spliced in ahead of it -- $$ is compose's escaping for a literal
+    # $, so these survive as real env var references at the shell.
+    command:
+      - sh
+      - -c
+      - >
+        until [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec /usr/bin/conpot --mibcache $$CONPOT_TMP --temp_dir $$CONPOT_TMP
+        --template $$CONPOT_TEMPLATE --logfile $$CONPOT_LOG --config $$CONPOT_CONFIG
     environment:
       - CONPOT_CONFIG=/etc/conpot/conpot.cfg
       - CONPOT_TEMPLATE=s7_200
@@ -597,6 +622,7 @@ services:
       - ${HP_BIND:-10.8.0.2}:44818:44818
     volumes:
       - /opt/stacks/honeypot-stack/logs/conpot:/var/log/conpot
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
     # A TCP connect (Docker's default "is the port open" notion of healthy)
     # passes even while conpot is completely wedged: the kernel backlog
     # completes the handshake without the process's help. This sends a real
@@ -635,9 +661,6 @@ services:
       - no-new-privileges:true
     networks:
       - honeynet
-    depends_on:
-      init-wait-log:
-        condition: service_completed_successfully
     deploy:
       resources:
         limits:
@@ -652,6 +675,16 @@ services:
     build: ./conpot
     container_name: hp-conpot-s7-1200
     restart: unless-stopped
+    # #127: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). See conpot above for why
+    # this reproduces the base image's own CMD.
+    command:
+      - sh
+      - -c
+      - >
+        until [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec /usr/bin/conpot --mibcache $$CONPOT_TMP --temp_dir $$CONPOT_TMP
+        --template $$CONPOT_TEMPLATE --logfile $$CONPOT_LOG --config $$CONPOT_CONFIG
     environment:
       - CONPOT_CONFIG=/etc/conpot/conpot.cfg
       - CONPOT_TEMPLATE=s7_1200
@@ -669,6 +702,7 @@ services:
       - ${HP_BIND:-10.8.0.2}:1502:502
     volumes:
       - /opt/stacks/honeypot-stack/logs/conpot-s7-1200:/var/log/conpot
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
     cap_add: [SYS_PTRACE]
     healthcheck:
       test: ["CMD", "python3", "/usr/local/bin/conpot-healthcheck.py", "modbus"]
@@ -679,8 +713,6 @@ services:
     labels:
       - autoheal=true
     networks: [honeynet]
-    depends_on:
-      init-wait-log: { condition: service_completed_successfully }
     deploy:
       resources: { limits: { cpus: "0.75", memory: 384M } }
 
@@ -689,6 +721,16 @@ services:
     build: ./conpot
     container_name: hp-conpot-s7-1500
     restart: unless-stopped
+    # #127: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). See conpot above for why
+    # this reproduces the base image's own CMD.
+    command:
+      - sh
+      - -c
+      - >
+        until [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec /usr/bin/conpot --mibcache $$CONPOT_TMP --temp_dir $$CONPOT_TMP
+        --template $$CONPOT_TEMPLATE --logfile $$CONPOT_LOG --config $$CONPOT_CONFIG
     environment:
       - CONPOT_CONFIG=/etc/conpot/conpot.cfg
       - CONPOT_TEMPLATE=s7_1500
@@ -706,6 +748,7 @@ services:
       - ${HP_BIND:-10.8.0.2}:2502:502
     volumes:
       - /opt/stacks/honeypot-stack/logs/conpot-s7-1500:/var/log/conpot
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
     cap_add: [SYS_PTRACE]
     healthcheck:
       test: ["CMD", "python3", "/usr/local/bin/conpot-healthcheck.py", "modbus"]
@@ -716,8 +759,6 @@ services:
     labels:
       - autoheal=true
     networks: [honeynet]
-    depends_on:
-      init-wait-log: { condition: service_completed_successfully }
     deploy:
       resources: { limits: { cpus: "0.75", memory: 384M } }
 
@@ -727,6 +768,16 @@ services:
     build: ./conpot
     container_name: hp-conpot-iec104
     restart: unless-stopped
+    # #127: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). See conpot above for why
+    # this reproduces the base image's own CMD.
+    command:
+      - sh
+      - -c
+      - >
+        until [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec /usr/bin/conpot --mibcache $$CONPOT_TMP --temp_dir $$CONPOT_TMP
+        --template $$CONPOT_TEMPLATE --logfile $$CONPOT_LOG --config $$CONPOT_CONFIG
     environment:
       - CONPOT_CONFIG=/etc/conpot/conpot.cfg
       - CONPOT_TEMPLATE=IEC104
@@ -742,6 +793,7 @@ services:
     ports: ["${HP_BIND:-10.8.0.2}:2404:2404"]
     volumes:
       - /opt/stacks/honeypot-stack/logs/conpot-iec104:/var/log/conpot
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
     cap_add: [SYS_PTRACE]
     healthcheck:
       test: ["CMD", "python3", "/usr/local/bin/conpot-healthcheck.py", "iec104"]
@@ -752,8 +804,6 @@ services:
     labels:
       - autoheal=true
     networks: [honeynet]
-    depends_on:
-      init-wait-log: { condition: service_completed_successfully }
     deploy:
       resources: { limits: { cpus: "0.5", memory: 256M } }
 
@@ -762,6 +812,16 @@ services:
     build: ./conpot
     container_name: hp-conpot-guardian
     restart: unless-stopped
+    # #127: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). See conpot above for why
+    # this reproduces the base image's own CMD.
+    command:
+      - sh
+      - -c
+      - >
+        until [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec /usr/bin/conpot --mibcache $$CONPOT_TMP --temp_dir $$CONPOT_TMP
+        --template $$CONPOT_TEMPLATE --logfile $$CONPOT_LOG --config $$CONPOT_CONFIG
     environment:
       - CONPOT_CONFIG=/etc/conpot/conpot.cfg
       - CONPOT_TEMPLATE=guardian_ast
@@ -777,6 +837,7 @@ services:
     ports: ["${HP_BIND:-10.8.0.2}:10001:10001"]
     volumes:
       - /opt/stacks/honeypot-stack/logs/conpot-guardian:/var/log/conpot
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
     cap_add: [SYS_PTRACE]
     healthcheck:
       test: ["CMD", "python3", "/usr/local/bin/conpot-healthcheck.py", "guardian_ast"]
@@ -787,8 +848,6 @@ services:
     labels:
       - autoheal=true
     networks: [honeynet]
-    depends_on:
-      init-wait-log: { condition: service_completed_successfully }
     deploy:
       resources: { limits: { cpus: "0.5", memory: 256M } }
 
@@ -797,6 +856,16 @@ services:
     build: ./conpot
     container_name: hp-conpot-kamstrup
     restart: unless-stopped
+    # #127: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). See conpot above for why
+    # this reproduces the base image's own CMD.
+    command:
+      - sh
+      - -c
+      - >
+        until [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec /usr/bin/conpot --mibcache $$CONPOT_TMP --temp_dir $$CONPOT_TMP
+        --template $$CONPOT_TEMPLATE --logfile $$CONPOT_LOG --config $$CONPOT_CONFIG
     environment:
       - CONPOT_CONFIG=/etc/conpot/conpot.cfg
       - CONPOT_TEMPLATE=kamstrup_382
@@ -814,6 +883,7 @@ services:
       - ${HP_BIND:-10.8.0.2}:50100:50100
     volumes:
       - /opt/stacks/honeypot-stack/logs/conpot-kamstrup:/var/log/conpot
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
     cap_add: [SYS_PTRACE]
     healthcheck:
       test: ["CMD", "python3", "/usr/local/bin/conpot-healthcheck.py", "kamstrup"]
@@ -824,8 +894,6 @@ services:
     labels:
       - autoheal=true
     networks: [honeynet]
-    depends_on:
-      init-wait-log: { condition: service_completed_successfully }
     deploy:
       resources: { limits: { cpus: "0.5", memory: 256M } }
 
@@ -1058,10 +1126,13 @@ services:
     image: busybox:latest
     container_name: hp-pcap-sync
     restart: unless-stopped
+    # #127: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism).
     command:
       - sh
       - -c
       - |
+        until [ -f /markers/log-init.done ]; do sleep 3; done
         while true; do
           newest=$$(ls -t /src 2>/dev/null | head -1)
           for f in /src/*.pcap.*; do
@@ -1077,9 +1148,7 @@ services:
     volumes:
       - /opt/stacks/honeypot-stack/logs/suricata/pcap:/src:ro
       - /opt/stacks/honeypot-stack/logs/arkime-raw:/dst
-    depends_on:
-      init-wait-log:
-        condition: service_completed_successfully
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
     deploy:
       resources:
         limits:
