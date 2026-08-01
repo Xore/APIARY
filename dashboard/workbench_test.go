@@ -208,6 +208,26 @@ func TestWorkbenchMissingPayloadAndPathTraversal(t *testing.T) {
 	}
 }
 
+func TestWorkbenchIndexProvidesPayloadSelection(t *testing.T) {
+	s, _ := newWorkbenchFixture(t, []byte("payload"))
+	s.payloadCache = s.scanPayloads()
+	s.payloadCacheAt = time.Now()
+	tmpl := template.Must(template.New("t").Funcs(templateFuncs(s, "")).Parse(pageTemplate))
+	response := httptest.NewRecorder()
+	s.serveWorkbenchIndex(response, httptest.NewRequest(http.MethodGet, "/payload-workbench", nil), tmpl)
+	if response.Code != http.StatusOK {
+		t.Fatalf("workbench index status = %d body=%s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, "/payload-workbench/"+workbenchTestHash) || !strings.Contains(body, "Select a captured payload") {
+		t.Fatalf("workbench index does not offer a captured payload: %s", body)
+	}
+	partial := mustReadUI("partials/dashboard.html")
+	if !strings.Contains(partial, `data-hp-nav="/payload-workbench" href="/payload-workbench"`) {
+		t.Fatal("workbench sidebar link does not target the workbench landing page")
+	}
+}
+
 func TestWorkbenchTimeoutAndOwnerIsolation(t *testing.T) {
 	s, root := newWorkbenchFixture(t, []byte("MZ"+strings.Repeat("\x00", 200)))
 	requests, results := filepath.Join(root, "ghidra-requests"), filepath.Join(root, "ghidra-results")

@@ -20,6 +20,19 @@ type workbenchPageData struct {
 	ModelStatus    workbenchModelStatus
 }
 
+func (s *store) serveWorkbenchIndex(w http.ResponseWriter, r *http.Request, tmpl *template.Template) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "GET required", http.StatusMethodNotAllowed)
+		return
+	}
+	data := s.payloadsData("")
+	if len(data.Files) > 50 {
+		data.Files = data.Files[:50]
+	}
+	renderPage(w, tmpl, "payload-workbench-index", &data)
+}
+
 type workbenchRecipeRequest struct {
 	ID           string               `json:"id,omitempty"`
 	BaseRevision int                  `json:"base_revision,omitempty"`

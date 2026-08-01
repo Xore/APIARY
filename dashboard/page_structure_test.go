@@ -125,6 +125,7 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 		{"github-analysis", githubAnalysisPageData{Generated: now, Detail: githubAnalysisDetail}},
 		{"github-analysis-list", githubAnalysisPageData{Generated: now}},
 		{"payload-analysis", binaryAnalysis{}},
+		{"payload-workbench-index", payloadsPage{Generated: now, Enabled: true, Files: []capturedFile{{Hash: strings.Repeat("e", 64), Kind: "Binary", Platform: "Linux", MIME: "application/octet-stream", SizeH: "1 KiB", Sources: []string{"dionaea"}}}}},
 		{"payload-workbench", workbenchPageData{Generated: now, SHA256: strings.Repeat("e", 64), Classification: payloadKind("binary", "Binary", "Unknown", "binary", "Static", false), Analyzers: workbenchRegistry(payloadKind("binary", "Binary", "Unknown", "binary", "Static", false)), ModelStatus: workbenchModelStatus{Overall: "unavailable", AdvisoryOnly: true}}},
 		{"payloads", payloadsPage{Generated: now}},
 		{"source-health", snapshot{}},

@@ -1,3 +1,26 @@
+{{define "payload-workbench-index"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
+<title>xore//honeypot &mdash; payload workbench</title>
+{{template "style" .}}
+</head>
+<body><div class="app-shell">{{template "topbar" .}}{{template "sidebar" .}}
+<main class="app-main"><div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
+  <header class="overview-header"><div><div class="eyebrow">Unified analysis</div><h1>Payload workbench</h1><p class="subtitle">Choose captured evidence, then build a typed recipe and run every applicable local analyzer from one page.</p></div><div class="live-panel"><span class="gen">{{.UniqueTotal}} unique captures &bull; generated {{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></div></header>
+  <div class="filters"><a class="chip" href="/payloads">Captured payload inventory</a><span class="chip">Select one payload to begin</span></div>
+  <section class="card wide" aria-labelledby="wb-select-title">
+    <div class="section-heading"><div><h2 id="wb-select-title">Select a captured payload</h2><p>The workbench derives analyzer applicability from the selected artifact. Opening an artifact does not execute it.</p></div></div>
+    {{if not .Enabled}}<p class="empty">Payload serving is disabled. Configure PAYLOAD_DIRS and/or SCRIPT_PAYLOAD_DIR.</p>
+    {{else if .Loading}}<p class="note" data-payload-warming><span class="live-dot" aria-hidden="true"></span> Preparing the payload inventory. This page will update automatically.</p><script nonce="{{.Nonce}}">setTimeout(()=>location.reload(),1500)</script>
+    {{else if .Files}}<table class="recent"><thead><tr><th>captured</th><th>source</th><th>SHA-256</th><th>type</th><th>size</th><th>action</th></tr></thead><tbody>
+      {{range .Files}}<tr><td>{{.Mtime}}</td><td>{{range .Sources}}<span class="badge badge--muted">{{.}}</span> {{end}}</td><td class="v">{{.Hash}}</td><td><strong>{{.Kind}}</strong><br><span class="tw:text-muted">{{.Platform}} &bull; {{.MIME}}</span></td><td class="n">{{.SizeH}}</td><td><a class="btn btn-sm btn-primary" href="/payload-workbench/{{.Hash}}">Open workbench</a></td></tr>{{end}}
+    </tbody></table>{{if gt .ResultTotal 50}}<p class="note">Showing the 50 most recent captures. Open the full inventory to find older evidence.</p>{{end}}
+    {{else}}<p class="empty">No payloads captured yet.</p>{{end}}
+  </section>
+  <footer>xore//honeypot &bull; select evidence before orchestration &bull; captured files remain inert</footer>
+</div></main></div></body></html>{{end}}
+
 {{define "payload-workbench"}}<!doctype html>
 <html lang="en">
 <head>
