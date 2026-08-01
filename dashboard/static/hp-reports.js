@@ -72,6 +72,14 @@
     template: null, // currently selected template object
     theme: "dark",
     forbidden: false,
+    // True while a save/generate triggered from the designer (Save
+    // definition, Generate now, or a native Enter-key submit of the name
+    // field) is in flight. Both buttons share one flag rather than each
+    // guarding itself: Enter in #hp-rp-name fires the form's native submit
+    // (Save) independently of a near-simultaneous click on Generate, and
+    // without a shared guard both call saveDefinition() concurrently,
+    // producing a genuine 409 for whichever read the ETag second (#211).
+    busy: false,
   };
 
   function setStatus(message, kind) {
@@ -348,18 +356,32 @@
     return payload.generated;
   }
 
+  function withDesignerBusy(task) {
+    if (state.busy) return;
+    state.busy = true;
+    els.save.disabled = true;
+    els.generate.disabled = true;
+    task().catch((error) => setStatus(error.message, "error")).finally(() => {
+      state.busy = false;
+      // showForbidden() disables every control in the form permanently on a
+      // 403 (role revoked mid-session); do not undo that.
+      if (state.forbidden) return;
+      els.save.disabled = false;
+      els.generate.disabled = false;
+    });
+  }
+
   els.form.addEventListener("submit", (event) => {
     event.preventDefault();
-    saveDefinition().catch((error) => setStatus(error.message, "error"));
+    withDesignerBusy(saveDefinition);
   });
 
   els.generate.addEventListener("click", () => {
-    (async () => {
-      const definition = state.editing
-        ? await saveDefinition() // keep the stored design in sync before rendering
-        : (await saveDefinition());
+    setStatus("Generating…");
+    withDesignerBusy(async () => {
+      const definition = await saveDefinition(); // keep the stored design in sync before rendering
       await generateFrom(definition.id);
-    })().catch((error) => setStatus(error.message, "error"));
+    });
   });
 
   els.reset.addEventListener("click", () => {
@@ -427,7 +449,14 @@
         window.scrollTo({ top: 0, behavior: "smooth" });
       }
     } else if (run) {
-      generateFrom(run.dataset.run).catch((error) => setStatus(error.message, "error"));
+      // Per-row guard, independent of the designer's shared busy flag and of
+      // every other row's own button: nothing here needs saveDefinition(),
+      // so only this one button double-clicking can double-generate (#211).
+      if (run.disabled) return;
+      run.disabled = true;
+      generateFrom(run.dataset.run)
+        .catch((error) => setStatus(error.message, "error"))
+        .finally(() => { if (!state.forbidden) run.disabled = false; });
     } else if (drop) {
       confirmAction(drop, {
         title: `Delete “${drop.dataset.name}”?`,
