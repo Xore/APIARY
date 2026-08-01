@@ -60,8 +60,11 @@
   --shadow-raised: 0 8px 26px rgba(0, 0, 0, 0.24);
   --shadow-dialog: 0 24px 80px rgba(0, 0, 0, 0.52);
   --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
-  --transition-fast: 120ms ease;
-  --transition: 160ms ease;
+  /* A standard ease-out curve (fast start, gentle settle) rather than the
+     linear-ish default `ease` keyword -- every hover/focus/panel transition
+     in the theme reads slightly more deliberate with the same durations. */
+  --transition-fast: 120ms cubic-bezier(0, 0, 0.2, 1);
+  --transition: 160ms cubic-bezier(0, 0, 0.2, 1);
 
   --toolbar-height: 32px;
   --sidebar-width: 224px;
