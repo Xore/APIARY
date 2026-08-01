@@ -476,18 +476,17 @@ footer {
 }
 
 /* ── Activity chart ─────────────────────────────────────────────────────── */
-/* The hour labels get their own gutter below the chart rather than a slot
-   inside each column. Sharing the column's flex flow, a label both lifted and
-   shrank the bar above it — and only every third column has one, so the bars
-   were reading against three different baselines. Height grows by the gutter
-   so the plot area itself is unchanged. */
-.chart { display: flex; align-items: flex-end; gap: 3px; height: 155px; padding-top: 6px; padding-bottom: 15px; }
-.col {
-  position: relative; flex: 1; height: 100%;
-  display: flex; flex-direction: column; justify-content: flex-end;
-  min-width: 0; cursor: help;
-}
-.col::after {
+/* Bars, layout, and the --v custom property mechanism are Xore/theme's
+   shared .mini-chart component (static/theme.css) -- see that repo's
+   docs/CSP.md. Everything here is the dashboard-specific layer on top:
+   the hover/focus tooltip and the hour label under every third bar.
+   The label gets its own gutter below the chart rather than a slot
+   inside the bar itself -- sharing the bar's flex flow, a label there
+   would both lift and shrink the bar above it, and only every third bar
+   has one, so bars would read against three different baselines. */
+#activity-chart { height: 155px; padding-top: 6px; padding-bottom: 15px; }
+#activity-chart span { position: relative; cursor: help; }
+#activity-chart span::after {
   content: attr(data-tip);
   position: absolute; z-index: 6; left: 50%; top: 5px;
   transform: translate(-50%, -6px);
@@ -499,19 +498,15 @@ footer {
   opacity: 0; pointer-events: none;
   transition: opacity var(--transition-fast), transform var(--transition-fast);
 }
-.col:hover::after, .col:focus-visible::after { opacity: 1; transform: translate(-50%, 0); }
-.col .bar {
-  background: var(--accent);
-  border-radius: 2px 2px 0 0; min-height: 2px; opacity: 0.85;
-}
-.col.zero .bar { background: var(--surface-2); min-height: 2px; opacity: 1; }
-.col span {
+#activity-chart span:hover::after, #activity-chart span:focus-visible::after { opacity: 1; transform: translate(-50%, 0); }
+#activity-chart span.zero { background: var(--surface-2); border-top-color: var(--surface-2); }
+#activity-chart span em {
   position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
   margin-top: 4px; white-space: nowrap;
-  font: 9px var(--hp-mono); color: var(--text-muted);
+  font: 9px var(--hp-mono); font-style: normal; color: var(--text-muted);
   text-align: center; display: none;
 }
-.col:nth-child(3n+1) span { display: block; }
+#activity-chart span:nth-child(3n+1) em { display: block; }
 
 /* ── Leaflet attack map (dark-tile filter scoped to dark mode only) ─────── */
 .map-shell {

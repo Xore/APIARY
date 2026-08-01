@@ -2,6 +2,8 @@
  * Xore Theme
  * A quiet, warm desktop-productivity interface for self-hosted applications.
  * Framework-free, dependency-free, and safe to copy into another repository.
+ *
+ * Vendored from github.com/Xore/theme @ 7da09cd5f34e7c7e7441da12a1d71457b66cd831
  */
 
 :root {
@@ -456,6 +458,29 @@ select.form-input { cursor: pointer; }
 .metric__label { color: var(--text-muted); font-size: var(--font-size-xs); }
 .metric__value { margin-top: 6px; color: var(--text-primary); font-size: 24px; font-weight: 600; letter-spacing: -0.03em; }
 .metric__trend { margin-top: 4px; color: var(--text-secondary); font-size: var(--font-size-xs); }
+
+/* Each bar's height comes from --v (0-100), not an inline height/width.
+   Read docs/CSP.md before setting --v: under a strict style-src (a nonce
+   with no 'unsafe-inline', the only policy that actually stops injected
+   CSS) a nonce covers a style or link element, never a style attribute --
+   so style="--v:58" is silently dropped exactly like style="height:58%"
+   would be. Set --v per bar from a nonced <style> element instead. --v
+   defaults to 0 here so a consumer that never sets it renders a flat,
+   empty chart rather than an invalid computed height. Height is a
+   component default; wrap in a taller container and add height: 100% to
+   .mini-chart, or set a taller default with a modifier class, for a
+   larger chart. */
+.mini-chart { display: flex; align-items: flex-end; gap: 4px; height: 64px; }
+.mini-chart span {
+  --v: 0;
+  flex: 1;
+  min-width: 0;
+  height: calc(var(--v) * 1%);
+  min-height: 2px;
+  border-radius: 3px 3px 0 0;
+  background: var(--accent-soft);
+  border-top: 2px solid var(--accent);
+}
 
 .badge {
   display: inline-flex;
