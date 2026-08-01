@@ -480,6 +480,47 @@ select.form-input { cursor: pointer; }
   border-top: 2px solid var(--accent);
 }
 
+/* A row-labeled grid of small shaded cells (contribution-graph style) for
+   a two-dimensional count -- e.g. one row per category, one column per time
+   bucket. Each cell reads its intensity from --v (0-100), the same
+   nonced-<style>-element pattern as .mini-chart above: see docs/CSP.md,
+   which already names "a heatmap cell's color" as a covered case. --v
+   defaults to 0 so an unset cell renders as the flattest shade, not an
+   invalid color-mix() percentage.
+   Consumers should quantize --v into a small number of steps (5 is a good
+   default, matching the reference contribution-graph look) rather than
+   passing raw continuous counts -- a heatmap reads as "roughly how much",
+   not a precise value, and 100 subtly different shades is visual noise a
+   human can't actually use. Precise values belong in the cell's title
+   attribute (or a data-tip/tooltip layer the consumer adds), not the shade
+   itself. */
+.heatmap { display: flex; flex-direction: column; gap: 3px; }
+.heatmap__row { display: flex; align-items: center; gap: 8px; }
+.heatmap__label {
+  flex: none;
+  width: 96px;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.heatmap__cells { display: flex; flex: 1; min-width: 0; gap: 3px; }
+.heatmap__cell {
+  --v: 0;
+  flex: 1;
+  min-width: 0;
+  aspect-ratio: 1;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--accent) calc(var(--v) * 1%), var(--surface-2));
+}
+/* Optional low→high key, e.g. under the grid: reuses the same --v cells so
+   the key's shades always match the grid's, even if a consumer changes the
+   accent token. */
+.heatmap__legend { display: flex; align-items: center; gap: 4px; color: var(--text-muted); font-size: var(--font-size-xs); }
+.heatmap__legend .heatmap__cell { flex: none; width: 10px; height: 10px; }
+
 .badge {
   display: inline-flex;
   align-items: center;

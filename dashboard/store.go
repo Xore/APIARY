@@ -59,7 +59,7 @@ type snapshot struct {
 	MapPoints      []mapPoint
 	Payloads       []payloadRow
 	Campaigns      []campaignRow
-	Timeline       []bucket
+	SensorHeatmap  []heatmapRow
 	Recent         []storedEvent
 	ES             esStatus
 	Runtime        runtimeStatus
@@ -102,9 +102,19 @@ type sensorRow struct {
 	Link  string `json:",omitempty"`
 }
 
-// bucket is one hour of the 24h activity chart. Pct is the bar height
-// relative to the busiest hour (0-100).
-type bucket struct {
+// heatmapRow is one sensor's row in the "Activity by sensor" heatmap
+// (#191/#193, replacing the single 24h bar chart): one cell per hour of a
+// 24h window. Pct is quantized into five steps (0/25/50/75/100) against the
+// busiest single cell across every row, not per-row -- a quiet sensor's own
+// busiest hour should not read as visually "hot" as the noisiest sensor's
+// peak. See Xore/theme's docs/CSP.md for why Pct feeds a nonced <style>
+// element instead of an inline style attribute.
+type heatmapRow struct {
+	Sensor string
+	Cells  []heatmapCell
+}
+
+type heatmapCell struct {
 	Label string
 	Count int
 	Pct   int

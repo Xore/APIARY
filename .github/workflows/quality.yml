@@ -49,7 +49,7 @@ jobs:
           done < <(find . -path '*/vendor' -prune -o -name go.mod -type f -print | sort)
 
   frontend:
-    name: Tailwind frontend
+    name: Dashboard frontend
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -65,7 +65,7 @@ jobs:
       - run: npm run build
         working-directory: dashboard/frontend
       - name: Generated assets are current
-        run: git diff --exit-code -- dashboard/static/hp-api.js dashboard/static/hp-tailwind.css
+        run: git diff --exit-code -- dashboard/static/hp-api.js
 
   dashboard-browser:
     name: Dashboard browser matrix
