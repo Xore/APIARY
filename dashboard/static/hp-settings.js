@@ -174,10 +174,11 @@
       behavior:   { title: "Dashboard behavior",     desc: "Safe bounded defaults and feature visibility for every user." },
       honeypot:   { title: "Honeypot operations",    desc: "Staged operational thresholds. Saving never restarts anything — apply with an operator-run restart." },
       users:      { title: "Users",                  desc: "Read-only projection of dashboard activity. Accounts are managed in the auth service." },
+      services:   { title: "Services",                desc: "Live container status for sensors, probes, and analysis workers, with start/stop/restart and logs." },
       history:    { title: "Configuration history",  desc: "Retained configuration revisions with rollback." },
       audit:      { title: "Audit log",              desc: "Settings changes with actor, fields, and result." }
     };
-    const ADMIN_PANES = ["branding", "behavior", "honeypot", "users", "history", "audit"];
+    const ADMIN_PANES = ["branding", "behavior", "honeypot", "users", "services", "history", "audit"];
     const isAdmin = navItems.some(nav => ADMIN_PANES.includes(nav.dataset.hpPaneNav));
 
     /* ---- state ----
@@ -293,6 +294,7 @@
       if (isAdmin) {
         if (name === "branding" || name === "behavior" || name === "honeypot") loadConfig();
         else if (name === "users") loadUsers();
+        else if (name === "services") loadServices();
         else if (name === "history") loadHistory();
         else if (name === "audit") loadAudit();
       }
@@ -806,6 +808,143 @@
         setStatus("Users could not be loaded — " + error.message.trim(), "error");
       }
     }
+
+    /* ---- services: status + start/stop/restart/logs (#197) ----
+       Every action crosses hp-services-adapter's own AF_UNIX socket
+       (services_control.go); this pane only ever sees whatever that adapter
+       chooses to report, and the adapter -- not this code -- enforces which
+       container names are ever reachable. */
+    const SERVICE_STATE_BADGE = {
+      running: "badge--success",
+      restarting: "badge--warning",
+      created: "badge--warning",
+      paused: "badge--muted",
+      removing: "badge--muted",
+      exited: "badge--danger",
+      dead: "badge--danger",
+      not_found: "badge--muted",
+      unknown: "badge--muted"
+    };
+
+    async function loadServices() {
+      const list = q("[data-hp-services-list]");
+      if (!list) return;
+      list.innerHTML = '<tr><td colspan="5">Loading&hellip;</td></tr>';
+      try {
+        const { body } = await api("/api/settings/services");
+        renderServices(body.services || []);
+        if (body.available === false) {
+          setStatus("Services adapter unavailable" + (body.reason ? " — " + body.reason : "") + ".", "error");
+        }
+      } catch (error) {
+        list.innerHTML = '<tr><td colspan="5">Services could not be loaded.</td></tr>';
+        setStatus("Services could not be loaded — " + error.message.trim(), "error");
+      }
+    }
+
+    function renderServices(services) {
+      const list = q("[data-hp-services-list]");
+      list.textContent = "";
+      if (!services.length) { list.innerHTML = '<tr><td colspan="5">No services reported.</td></tr>'; return; }
+      services.forEach(svc => {
+        const row = document.createElement("tr");
+
+        const nameCell = document.createElement("td");
+        nameCell.textContent = svc.name;
+        row.appendChild(nameCell);
+
+        const stateCell = document.createElement("td");
+        const stateBadge = document.createElement("span");
+        stateBadge.className = "badge " + (SERVICE_STATE_BADGE[svc.state] || "badge--muted");
+        stateBadge.textContent = svc.state;
+        stateCell.appendChild(stateBadge);
+        row.appendChild(stateCell);
+
+        const healthCell = document.createElement("td");
+        healthCell.textContent = svc.health || "—";
+        row.appendChild(healthCell);
+
+        const restartCell = document.createElement("td");
+        restartCell.textContent = svc.restart_count == null ? "—" : String(svc.restart_count);
+        row.appendChild(restartCell);
+
+        const actionsCell = document.createElement("td");
+        actionsCell.className = "hp-services-actions";
+        if (svc.state === "running" || svc.state === "restarting") {
+          actionsCell.appendChild(serviceActionButton(svc.name, "stop", "Stop", true));
+          actionsCell.appendChild(serviceActionButton(svc.name, "restart", "Restart", true));
+        } else {
+          actionsCell.appendChild(serviceActionButton(svc.name, "start", "Start", false));
+        }
+        const logsButton = document.createElement("button");
+        logsButton.className = "btn btn-ghost btn-sm";
+        logsButton.type = "button";
+        logsButton.textContent = "Logs";
+        logsButton.disabled = svc.state === "not_found";
+        logsButton.addEventListener("click", () => viewServiceLogs(svc.name));
+        actionsCell.appendChild(logsButton);
+        row.appendChild(actionsCell);
+
+        list.appendChild(row);
+      });
+    }
+
+    function serviceActionButton(name, action, label, danger) {
+      const button = document.createElement("button");
+      button.className = "btn btn-sm " + (danger ? "btn-secondary" : "btn-primary");
+      button.type = "button";
+      button.textContent = label;
+      button.addEventListener("click", () => requestServiceAction(name, action, button));
+      return button;
+    }
+
+    function requestServiceAction(name, action, initiator) {
+      openConfirm({
+        titleText: action[0].toUpperCase() + action.slice(1) + " " + name + "?",
+        descText: "This sends " + action + " to the live container through the services adapter.",
+        warningText: action === "stop" ? name + " stops accepting connections until it is started again." : "",
+        actionLabel: action[0].toUpperCase() + action.slice(1),
+        danger: action !== "start",
+        initiator,
+        onConfirm: async () => {
+          try {
+            await api("/api/settings/services/" + encodeURIComponent(name) + "/" + action, { method: "POST" });
+            setStatus(name + ": " + action + " succeeded.", "ok");
+          } catch (error) {
+            setStatus(name + ": " + action + " failed — " + error.message.trim(), "error");
+          } finally {
+            loadServices();
+          }
+        }
+      });
+    }
+
+    async function viewServiceLogs(name) {
+      const trigger = q("[data-hp-services-log-trigger]");
+      const source = q('[data-hp-evidence-body="services-log"]');
+      const pre = q("[data-hp-services-log-pre]");
+      if (!trigger || !source || !pre) return;
+      pre.textContent = "Loading…";
+      source.dataset.hpEvidenceTitle = "Logs: " + name;
+      trigger.click();
+      // The evidence viewer clones the source node's children at open time,
+      // so once it's open the clone -- not this hidden source -- is what's
+      // visible; update both so a later re-open also starts from the latest.
+      const modalPre = document.querySelector('#hp-evidence-modal [data-hp-evidence-body-target] pre');
+      try {
+        const { body } = await api("/api/settings/services/" + encodeURIComponent(name) + "/logs?lines=500");
+        const text = body.log || "(no output)";
+        pre.textContent = text;
+        if (modalPre) modalPre.textContent = text;
+      } catch (error) {
+        const text = "Logs could not be loaded — " + error.message.trim();
+        pre.textContent = text;
+        if (modalPre) modalPre.textContent = text;
+      }
+    }
+
+    const servicesRefresh = q("[data-hp-services-refresh]");
+    if (servicesRefresh) servicesRefresh.addEventListener("click", loadServices);
 
     /* ---- configuration history + rollback ---- */
     async function loadHistory() {
