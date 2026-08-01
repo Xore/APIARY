@@ -167,11 +167,22 @@ choco install qemu-guest-agent -y --no-progress -ErrorAction SilentlyContinue
 Start-Service QEMU-GA -ErrorAction SilentlyContinue
 
 # ── Analysis Directories ─────────────────────────────────────────────────
+# #91: these shares were 'Everyone' -- FullAccess on Samples, ReadAccess on
+# Logs -- on a machine whose entire purpose is running a detonated sample
+# with a writable, network-reachable path and a lab-shaped share name to
+# find. Checked orchestrate/run_sample.py before narrowing this rather than
+# removing the shares outright as #91 first suggested: it authenticates to
+# both over SMB explicitly as -U 'analyst%<pass>' (copy_sample_to_vm,
+# collect_artifacts), never relying on anonymous/Everyone access, so
+# 'Everyone' was already redundant with what the orchestrator actually
+# needs -- narrowing to the analyst account changes nothing for it and
+# closes the share to every other process on the box, detonated sample
+# included.
 @('C:\Samples','C:\Logs','C:\Drops','C:\Captures') | ForEach-Object {
     New-Item $_ -ItemType Directory -Force | Out-Null
 }
-New-SmbShare -Name 'Samples' -Path 'C:\Samples' -FullAccess 'Everyone' -ErrorAction SilentlyContinue
-New-SmbShare -Name 'Logs'    -Path 'C:\Logs'    -ReadAccess 'Everyone' -ErrorAction SilentlyContinue
+New-SmbShare -Name 'Samples' -Path 'C:\Samples' -FullAccess 'analyst' -ErrorAction SilentlyContinue
+New-SmbShare -Name 'Logs'    -Path 'C:\Logs'    -ReadAccess 'analyst' -ErrorAction SilentlyContinue
 
 # ── Anti-Evasion: Decoy Environment ──────────────────────────────────────
 Write-Host '[Phase 13] Setting up decoy user environment...'

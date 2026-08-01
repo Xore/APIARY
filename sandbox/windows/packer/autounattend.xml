@@ -121,7 +121,13 @@
                processorArchitecture="amd64"
                publicKeyToken="31bf3856ad364e35"
                language="neutral" versionScope="nonSxS">
-      <ComputerName>DESKTOP-AN4LY5T</ComputerName>
+      <!-- #91: was DESKTOP-AN4LY5T. Phase 13 (04-tools.ps1) goes to real
+           trouble building a decoy user environment -- decoy documents, fake
+           recent-file shortcuts -- and then named the machine after the
+           thing it's hiding. A substring check for ANALY/SANDBOX/MALWARE in
+           the hostname is among the cheapest evasion checks a sample can
+           run. Unremarkable and fixed, since it's baked into the image. -->
+      <ComputerName>DESKTOP-JK3PLQ2</ComputerName>
       <TimeZone>UTC</TimeZone>
       <RegisteredOwner>John Doe</RegisteredOwner>
       <RegisteredOrganization>Acme Corp</RegisteredOrganization>

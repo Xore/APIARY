@@ -6,7 +6,9 @@ param(
     [string]$REMnuxIP    = '10.10.10.1',
     [string]$AnalystIP   = '10.10.10.2',
     [string]$SubnetMask  = '255.255.255.0',
-    [string]$Hostname    = 'DESKTOP-AN4LY5T'
+    # #91: was DESKTOP-AN4LY5T -- a substring check for ANALY/SANDBOX/MALWARE
+    # in the hostname is among the cheapest evasion checks a sample can run.
+    [string]$Hostname    = 'DESKTOP-JK3PLQ2'
 )
 
 Write-Host '[*] Preparing Windows 11 Malware Analysis VM...' -ForegroundColor Cyan
