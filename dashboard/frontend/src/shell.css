@@ -613,31 +613,21 @@ footer {
 }
 .hp-toast:hover { color: var(--text-primary); }
 
-/* ── Command dock internals (theme.css positions .command-bar) ──────────── */
-.hp-command-dock textarea {
+/* ── Investigation command palette ───────────────────────────────────────
+   theme.css's .modal--palette / .command-palette__field position and frame
+   the dialog (#193, closing #183 -- was a permanently-docked .command-bar,
+   now the same top-anchored search-everything modal the reference
+   screenshots show). This is just the one dashboard-specific adaptation:
+   a resizing <textarea> in place of the palette's usual single-line
+   <input>, because pasting a multi-line indicator (a cert, a log
+   fragment) is a real, existing feature, not a redesign choice. */
+.command-palette__field textarea {
   display: block; width: 100%; resize: none;
   border: none; background: transparent; outline: none;
-  color: var(--text-primary); font: 13px/1.5 var(--hp-font);
-  max-height: 120px; padding: 4px 6px;
+  color: var(--text-primary); font: inherit;
+  max-height: 120px; padding: 0;
 }
-.hp-command-dock textarea::placeholder { color: var(--text-muted); }
-.hp-command-actions {
-  display: flex; align-items: center; gap: 10px;
-  margin-top: 4px; padding: 7px 6px 2px;
-  border-top: 1px solid var(--border-subtle);
-  font-size: 11px; color: var(--text-muted);
-}
-.hp-command-actions svg { width: 12px; height: 12px; vertical-align: -2px; margin-right: 4px; }
-.hp-command-hint { margin-left: auto; }
-.hp-command-actions button {
-  display: grid; place-items: center;
-  width: 26px; height: 26px;
-  border: none; border-radius: var(--radius-control);
-  background: var(--btn-inverted-bg); color: var(--btn-inverted-text); cursor: pointer;
-  transition: background var(--transition-fast);
-}
-.hp-command-actions button:hover { background: var(--btn-inverted-bg-hover); }
-.hp-command-actions button svg { width: 13px; height: 13px; margin: 0; }
+.command-palette__field textarea::placeholder { color: var(--text-muted); }
 .hp-sr-only {
   position: absolute; width: 1px; height: 1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;

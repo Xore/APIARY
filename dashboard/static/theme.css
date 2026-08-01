@@ -3,7 +3,7 @@
  * A quiet, warm desktop-productivity interface for self-hosted applications.
  * Framework-free, dependency-free, and safe to copy into another repository.
  *
- * Vendored from github.com/Xore/theme @ 7da09cd5f34e7c7e7441da12a1d71457b66cd831
+ * Vendored from github.com/Xore/theme @ 3a5d58b1be4090b044da45b382460abb34a420fd
  */
 
 :root {
@@ -1176,6 +1176,64 @@ pre {
 .modal--promo .modal__body { min-width: 0; padding: 30px 28px; overflow-y: auto; }
 .modal--promo .modal__media { background: var(--artwork-bg); }
 .modal--promo .modal__media img { width: 100%; height: 100%; object-fit: cover; }
+
+/* Command palette — a search-everything dialog, anchored near the top of
+   the viewport rather than dead-centered like .modal's default, sized to
+   its content instead of a fixed box. .modal__close (already absolute,
+   top-right) drops in unchanged; .command-palette__field is the input row
+   in place of .modal__header, and .command-palette__results is optional --
+   a palette with only a field and no results list is a complete, valid
+   instance of this component. */
+.modal--palette {
+  top: 14dvh;
+  height: auto;
+  max-height: min(72dvh, 560px);
+  transform: translateX(-50%);
+  flex-direction: column;
+  width: min(680px, calc(100vw - 40px));
+}
+.command-palette__field {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 44px 14px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.command-palette__field svg { flex: none; width: 18px; height: 18px; color: var(--text-muted); }
+.command-palette__field input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  outline: 0;
+  color: var(--text-primary);
+  font-size: var(--font-size-lg);
+}
+.command-palette__field input::placeholder { color: var(--text-muted); }
+.command-palette__results { min-height: 0; padding: 6px; overflow-y: auto; }
+.command-palette__row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--font-size-footnote);
+  text-align: left;
+  cursor: pointer;
+}
+.command-palette__row:hover, .command-palette__row.active { background: var(--surface-2); }
+.command-palette__row svg { flex: none; width: 15px; height: 15px; color: var(--text-muted); }
+.command-palette__row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.command-palette__row-meta { flex: none; color: var(--text-muted); font-size: var(--font-size-xs); }
+.command-palette__empty { padding: 28px 16px; color: var(--text-muted); font-size: var(--font-size-caption); text-align: center; }
+@media (max-width: 767.98px) {
+  .modal--palette { top: 8dvh; width: calc(100vw - 24px); }
+}
 
 /* Pill button — fully rounded calls to action. */
 .btn--pill { padding-inline: 18px; border-radius: var(--radius-pill); }

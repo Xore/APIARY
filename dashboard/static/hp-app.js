@@ -510,6 +510,9 @@
     /* The recent-investigations rail was removed; drop anything an earlier
        version of the dashboard left behind in this browser. */
     try { localStorage.removeItem("hp-recent-investigations"); } catch {}
+    /* Ditto for the command bar's old show/hide preference: it's a modal
+       now (#193), there's nothing left to hide. */
+    try { localStorage.removeItem("hp-command-dock-hidden"); } catch {}
 
     /* Sidebar collapse (persisted) / mobile off-canvas open */
     const collapseStorageKey = "hp-sidebar-collapsed";
@@ -531,29 +534,51 @@
       if (innerWidth <= 520) shell.classList.remove("hp-nav-open");
     }));
 
-    /* Command bar show/hide (client-only, per-browser -- explicitly not a
-       server-persisted setting: it's a quick toggle, not a preference). */
-    const commandDockHiddenKey = "hp-command-dock-hidden";
-    const commandDock = document.querySelector(".hp-command-dock");
-    const commandDockToggle = shell.querySelector("[data-hp-command-dock-toggle]");
-    const setCommandDockHidden = hide => {
-      if (commandDock) commandDock.hidden = hide;
-      commandDockToggle?.setAttribute("aria-pressed", hide ? "false" : "true");
-      try { localStorage.setItem(commandDockHiddenKey, hide ? "1" : "0"); } catch {}
+    /* Investigation command palette (#193, closing #183): a modal, not a
+       permanently-docked bar. Follows the same application-managed modal
+       contract (Xore/theme docs/MODALS.md) as hp-evidence.js/hp-settings.js:
+       inert + aria-hidden when closed, focus moved in on open and restored
+       on close, Escape and a backdrop click close it. */
+    const commandPalette = document.getElementById("hp-command-palette");
+    const commandPaletteBackdrop = document.getElementById("hp-command-palette-backdrop");
+    const commandPaletteOpener = shell.querySelector("[data-hp-command-palette-open]");
+    const search = commandPalette?.querySelector("[data-hp-investigate]");
+    const searchInput = search?.querySelector("textarea");
+    let commandPaletteRestoreFocus = null;
+
+    const openCommandPalette = trigger => {
+      if (!commandPalette || !commandPaletteBackdrop) return;
+      commandPaletteRestoreFocus = trigger || document.activeElement;
+      commandPaletteBackdrop.removeAttribute("inert");
+      commandPaletteBackdrop.setAttribute("aria-hidden", "false");
+      commandPaletteBackdrop.classList.add("open");
+      commandPalette.removeAttribute("inert");
+      commandPalette.setAttribute("aria-hidden", "false");
+      commandPalette.classList.add("open");
+      searchInput?.focus();
     };
-    try { if (localStorage.getItem(commandDockHiddenKey) === "1") setCommandDockHidden(true); } catch {}
-    commandDockToggle?.addEventListener("click", () => {
-      setCommandDockHidden(!(commandDock?.hidden));
-    });
+    const closeCommandPalette = () => {
+      if (!commandPalette || !commandPaletteBackdrop) return;
+      commandPalette.classList.remove("open");
+      commandPalette.setAttribute("aria-hidden", "true");
+      commandPalette.setAttribute("inert", "");
+      commandPaletteBackdrop.classList.remove("open");
+      commandPaletteBackdrop.setAttribute("aria-hidden", "true");
+      commandPaletteBackdrop.setAttribute("inert", "");
+      if (commandPaletteRestoreFocus?.isConnected) commandPaletteRestoreFocus.focus();
+      commandPaletteRestoreFocus = null;
+    };
+    commandPaletteOpener?.addEventListener("click", () => openCommandPalette(commandPaletteOpener));
+    commandPalette?.querySelector("[data-hp-command-palette-close]")?.addEventListener("click", closeCommandPalette);
+    commandPaletteBackdrop?.addEventListener("click", closeCommandPalette);
     addEventListener("keydown", event => {
-      if (event.key === "Escape") shell.classList.remove("hp-nav-open");
+      if (event.key !== "Escape") return;
+      if (commandPalette?.classList.contains("open")) closeCommandPalette();
+      else shell.classList.remove("hp-nav-open");
     });
 
-    /* Command dock (server-rendered as part of the shell; theme .command-bar
-       positions it and sidebar collapse inherits). Enter submits, Shift+Enter
-       adds a line, "/" focuses it from anywhere. */
-    const search = shell.querySelector("[data-hp-investigate]");
-    const searchInput = search?.querySelector("textarea");
+    /* Enter submits, Shift+Enter adds a line, "/" opens the palette from
+       anywhere (matching the old always-focused-bar shortcut). */
     const resizeSearch = () => {
       searchInput.style.height = "auto";
       searchInput.style.height = `${Math.min(120, searchInput.scrollHeight)}px`;
@@ -572,7 +597,7 @@
     addEventListener("keydown", event => {
       if (event.key === "/" && !event.ctrlKey && !event.metaKey && !event.altKey && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || "")) {
         event.preventDefault();
-        searchInput?.focus();
+        openCommandPalette();
       }
     });
 
