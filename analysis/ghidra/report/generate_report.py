@@ -287,6 +287,50 @@ def capa_section(result: dict) -> str:
     )
 
 
+def floss_section(result: dict) -> str:
+    floss = result.get("floss")
+    if not floss:
+        return section(
+            "Obfuscated Strings (floss)",
+            empty("not observed"),
+            "The statictools sidecar was unreachable, or this host has "
+            "floss switched off — a genuinely unsupported format reports a "
+            "distinct message instead of this one (#207).",
+        )
+    if floss.get("unsupported"):
+        return section(
+            "Obfuscated Strings (floss)",
+            empty(f"not applicable: {floss['unsupported']}"),
+            "This is floss declining the sample, not a sidecar failure — "
+            "its decoding/stack-string analysis covers PE and raw "
+            "shellcode only, so the ELF samples common in this honeypot's "
+            "catch land here on every run (#207).",
+        )
+
+    def strings_block(title: str, key: str) -> str:
+        items = floss.get(key) or []
+        total = floss.get(f"{key}_total", len(items))
+        rows = [(s,) for s in items]
+        return f"<h3>{title} ({total})</h3>" + table(["string"], rows)
+
+    body = (
+        strings_block("Decoded strings", "decoded_strings")
+        + strings_block("Stack strings", "stack_strings")
+        + strings_block("Tight strings", "tight_strings")
+        + strings_block("Static strings", "static_strings")
+    )
+    if floss.get("truncated"):
+        body += '<p class="note">One or more string lists were truncated.</p>'
+
+    return section(
+        "Obfuscated Strings (floss)",
+        body,
+        "Decoded/stack/tight strings are recovered by emulating the "
+        "sample, not by scanning raw bytes — they surface strings a "
+        "plain strings dump on the binary itself would miss entirely.",
+    )
+
+
 def ai_triage_section(result: dict) -> str:
     triage = result.get("ai_triage")
     if not triage:
@@ -402,6 +446,7 @@ def build_html(result: dict, results_dir: Path) -> str:
         structural_section(result),
         fuzzy_hash_section(result),
         capa_section(result),
+        floss_section(result),
         ai_triage_section(result),
         revdeck_section(result),
     ])

@@ -1,5 +1,6 @@
-# statictools — ssdeep/tlsh fuzzy hashing, lief structural parsing, and capa
-# capability tagging, as an isolated sidecar rather than a host pip install.
+# statictools — ssdeep/tlsh fuzzy hashing, lief structural parsing, capa
+# capability tagging, and floss obfuscated-string extraction, as an isolated
+# sidecar rather than a host pip install.
 # See server.py's module docstring for why: worker/ghidra-worker.py is
 # deliberately stdlib-only on the host, and these are exactly the compiled/
 # C-extension dependencies that rule exists to keep off it.
@@ -21,9 +22,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 #   - six, cffi: imported directly by ssdeep/binding.py at build time; not
 #     declared as build requirements, so pip's dependency resolution never
 #     installs them on its own.
+# flare-floss's own binary2strings dependency needs a C++11 compiler at
+# build time (build-essential above already covers it, verified against
+# this same base image, 2026-08-01 -- no separate package needed).
 RUN pip install --no-cache-dir -U pip 'setuptools<81' wheel six cffi \
     && pip install --no-cache-dir --no-build-isolation ssdeep \
-    && pip install --no-cache-dir py-tlsh lief flare-capa==9.4.0
+    && pip install --no-cache-dir py-tlsh lief flare-capa==9.4.0 flare-floss==3.1.1
 
 # capa-rules must match capa's own version exactly (Mandiant's own
 # requirement -- rule schema drifts between releases). Pinned by tag and

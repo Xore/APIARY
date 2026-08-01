@@ -53,11 +53,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-# 4: added revdeck (#78). Informational only — nothing reads this field to
+# 5: added floss (#207). Informational only — nothing reads this field to
 # decide how to parse the rest of the document; it exists so a result can be
-# tied to the worker version that produced it. (3: added capa. 2: added
-# fuzzy_hashes and lief (#138).)
-RESULT_VERSION = 4
+# tied to the worker version that produced it. (4: added revdeck (#78). 3:
+# added capa. 2: added fuzzy_hashes and lief (#138).)
+RESULT_VERSION = 5
 
 REQUEST_DIR = Path(os.environ.get("GHIDRA_REQUEST_DIR", "/ghidra-requests"))
 RESULTS_DIR = Path(os.environ.get("GHIDRA_RESULTS_DIR", "/ghidra-results"))
@@ -584,6 +584,66 @@ def capa_scan(sample: Path) -> dict | None:
         log(f"  [!] capa scan: {e}")
         return None
     return _capa_post(data)
+
+
+def _floss_post(data: bytes) -> dict | None:
+    """POST to /v1/floss, preserving the unsupported-format reason.
+
+    Same shape as _capa_post() above, for the same reason (#207): floss's
+    422 body carries a distinguishing "unsupported" key the server only
+    sends for the correctly-declined case, never for a generic error, so
+    that survives as {"unsupported": reason} instead of collapsing to the
+    same None every other failure produces. Any other failure (network
+    error, non-422 HTTP status, a 422 with no "unsupported" key) still
+    returns None.
+    """
+    req = urllib.request.Request(
+        f"{STATICTOOLS_API_BASE}/v1/floss", data=data, method="POST")
+    req.add_header("Content-Type", "application/octet-stream")
+    try:
+        with urllib.request.urlopen(req, timeout=STATICTOOLS_TIMEOUT) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        body = e.read()
+        try:
+            parsed = json.loads(body)
+        except ValueError:
+            parsed = {}
+        reason = parsed.get("unsupported") if isinstance(parsed, dict) else None
+        if e.code == 422 and reason:
+            log(f"  [.] statictools /v1/floss: HTTP 422: {reason}")
+            return {"unsupported": reason}
+        level = "[.]" if e.code == 422 else "[!]"
+        log(f"  {level} statictools /v1/floss: HTTP {e.code}: "
+            f"{(parsed.get('error') if isinstance(parsed, dict) else None) or body[:200]}")
+        return None
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
+        log(f"  [!] statictools /v1/floss: {e}")
+        return None
+
+
+def floss_scan(sample: Path) -> dict | None:
+    """Obfuscated/decoded string recovery via floss, via the statictools sidecar.
+
+    None if the sidecar is unavailable or the request otherwise failed.
+    {"unsupported": reason} if floss declined this sample's format — its
+    emulation-based categories (decoded/stack/tight strings, the actual
+    "obfuscated string solver" value floss adds beyond plain extraction)
+    only cover PE and raw shellcode, confirmed directly against a real ELF
+    binary (#207). This pipeline's own catch is predominantly ELF (MIPS/
+    ARM32 IoT malware), so this fires often — a real, distinct signal from
+    "no data," same reasoning capa_scan() above already applies for its own
+    architecture-coverage gap (#195). A dict with "static_strings" etc. (a
+    real, successful scan) is the only other shape this returns.
+    """
+    if not STATICTOOLS_API_BASE:
+        return None
+    try:
+        data = sample.read_bytes()
+    except OSError as e:
+        log(f"  [!] floss scan: {e}")
+        return None
+    return _floss_post(data)
 
 
 def _revdeck_multipart(sample: Path) -> tuple[bytes, str]:
@@ -1396,6 +1456,7 @@ def analyse_one(client: GhidraClient, sha: str, sample: Path,
     fuzzy = fuzzy_hash(sample)
     lief_info = lief_parse(sample)
     capa_info = capa_scan(sample)
+    floss_info = floss_scan(sample)
     revdeck_info = revdeck_triage(sample)
     if revdeck_info:
         log(f"  [+] revdeck ({revdeck_info['workflow']}, "
@@ -1426,6 +1487,7 @@ def analyse_one(client: GhidraClient, sha: str, sample: Path,
         "fuzzy_hashes": fuzzy,
         "lief": lief_info,
         "capa": capa_info,
+        "floss": floss_info,
         "revdeck": revdeck_info,
         # Overwritten below by generate_report(), which needs the rest of
         # this dict built first. Emitted as null here rather than omitted so
@@ -1501,7 +1563,8 @@ def drain() -> int:
                 "error": str(e),
                 "functions": [], "strings": [], "imports": [], "findcrypt": [],
                 "call_graph_svg": None, "ai_triage": None,
-                "fuzzy_hashes": None, "lief": None, "capa": None, "revdeck": None,
+                "fuzzy_hashes": None, "lief": None, "capa": None, "floss": None,
+                "revdeck": None,
                 "report_pdf": None,
             })
             claimed.rename(claimed.with_suffix(".failed"))
@@ -1563,11 +1626,26 @@ def selftest() -> int:
     fuzzy = fuzzy_hash(probe)
     lief_info = lief_parse(probe)
     capa_info = capa_scan(probe)
+    floss_info = floss_scan(probe)
     print(f"  fuzzy_hashes   : {fuzzy}")
     print(f"  lief           : "
           f"{'ok, format=' + lief_info['format'] if lief_info else None}")
-    print(f"  capa           : "
-          f"{'ok, capabilities=' + str(len(capa_info['capabilities'])) if capa_info else None}")
+    # capa_info/floss_info can be a real result, {"unsupported": reason}
+    # (#195/#207), or None -- indexing straight into "capabilities"/
+    # "static_strings_total" without checking for "unsupported" first would
+    # KeyError the moment --selftest runs against a sample either one
+    # declines, latent until it does (this repo's own probe, amd64 ELF
+    # /bin/true, happens to be capa-supported, so it never tripped this).
+    if capa_info and "unsupported" in capa_info:
+        print(f"  capa           : declined - {capa_info['unsupported']}")
+    else:
+        print(f"  capa           : "
+              f"{'ok, capabilities=' + str(len(capa_info['capabilities'])) if capa_info else None}")
+    if floss_info and "unsupported" in floss_info:
+        print(f"  floss          : declined - {floss_info['unsupported']}")
+    else:
+        print(f"  floss          : "
+              f"{'ok, static_strings=' + str(floss_info['static_strings_total']) if floss_info else None}")
     if REVDECK_API_BASE:
         # Not run by default even when configured: this is a live upload plus
         # a real bounded LLM conversation on shared infrastructure, not a
