@@ -159,6 +159,28 @@ http:
         options: modern
       middlewares: [security-headers]
 
+    # Narrow relaxation of the blanket clickjacking protection below, scoped
+    # to exactly the one route the dashboard frames itself (#211): its own
+    # downloadable-report PDF viewer. Everything else on this host still
+    # gets X-Frame-Options: DENY via the honeypot-dashboard router right
+    # below. This exists because serveGeneratedPDF (dashboard/reports_api.go,
+    # served via http.ServeContent) never goes through the Go app's own
+    # secHeaders()/renderPage() path (that's only wired into full-page HTML
+    # template renders), so the PDF response's only framing header was this
+    # edge middleware's own DENY -- blocking the dashboard from framing its
+    # own same-origin PDF, not a third party. A longer, more specific rule
+    # than honeypot-dashboard's bare Host() match, so Traefik prefers it
+    # automatically without an explicit priority (the same rule-specificity
+    # behavior honeypot-web's low-priority catch-all above already depends
+    # on, just the opposite direction: more specific wins here on its own).
+    honeypot-dashboard-pdf:
+      rule: "(Host(`dashboard.honeypot.example`) || Host(`honeypot.honeypot.example`)) && PathRegexp(`^/api/reports/generated/[^/]+/pdf$`)"
+      entryPoints: [websecure]
+      service: honeypot-dashboard
+      tls:
+        options: modern
+      middlewares: [security-headers-dashboard-pdf, strip-auth-identity, forward-auth]
+
     honeypot-dashboard:
       rule: "Host(`dashboard.honeypot.example`) || Host(`honeypot.honeypot.example`)"
       entryPoints: [websecure]
@@ -406,6 +428,24 @@ http:
     security-headers:
       headers:
         frameDeny: true
+        contentTypeNosniff: true
+        browserXssFilter: true
+        referrerPolicy: "strict-origin-when-cross-origin"
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        customResponseHeaders:
+          X-Powered-By: ""
+          Server: ""
+
+    # Identical to security-headers except X-Frame-Options: SAMEORIGIN in
+    # place of DENY -- attached only to honeypot-dashboard-pdf above, never
+    # the general honeypot-dashboard router, so every other dashboard route
+    # keeps the stricter DENY. SAMEORIGIN still refuses framing from any
+    # third-party origin; it only allows the dashboard to frame its own PDF.
+    security-headers-dashboard-pdf:
+      headers:
+        customFrameOptionsValue: "SAMEORIGIN"
         contentTypeNosniff: true
         browserXssFilter: true
         referrerPolicy: "strict-origin-when-cross-origin"

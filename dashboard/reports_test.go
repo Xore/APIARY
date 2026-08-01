@@ -45,6 +45,25 @@ func sampleDefinition(template string) reportDefinition {
 	return def
 }
 
+// TestWriteReportStoreErrorUsesReportWording proves report-definition
+// conflicts get their own message rather than writePreferenceError's
+// hardcoded "preferences changed concurrently" -- the wrong subsystem's
+// name on a resource that is not a preference (#211).
+func TestWriteReportStoreErrorUsesReportWording(t *testing.T) {
+	w := httptest.NewRecorder()
+	writeReportStoreError(w, errStaleRevision)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusConflict)
+	}
+	body := strings.TrimSpace(w.Body.String())
+	if strings.Contains(body, "preferences") {
+		t.Fatalf("report conflict message still names preferences: %q", body)
+	}
+	if !strings.Contains(body, "report definition") {
+		t.Fatalf("report conflict message does not name the actual resource: %q", body)
+	}
+}
+
 // TestReportTemplateCatalogValid proves every published preset produces a
 // valid definition, so the designer can always start from a template.
 func TestReportTemplateCatalogValid(t *testing.T) {

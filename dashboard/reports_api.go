@@ -22,6 +22,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -53,11 +54,28 @@ func writeReportsJSON(w http.ResponseWriter, etag string, status int, payload an
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
-// writeReportStoreError maps store failures onto the settings API contract:
-// conflicts, validation, missing records, and read-only stores stay
-// distinguishable without parsing text.
+// writeReportStoreError maps store failures onto the settings API contract's
+// status codes (conflicts, validation, missing records, read-only stores stay
+// distinguishable without parsing text) -- reports_store.go returns the same
+// sentinel errors settings_store.go does. Not a passthrough to
+// writePreferenceError: that hardcoded "preferences changed concurrently;
+// reload and retry" for errStaleRevision, which is the wrong subsystem's name
+// on a report-definition conflict (#211) and reads as evidence of a bug in
+// the wrong place entirely.
 func writeReportStoreError(w http.ResponseWriter, err error) {
-	writePreferenceError(w, err)
+	switch {
+	case errors.Is(err, errStaleRevision):
+		http.Error(w, "this report definition changed concurrently; reload and retry", http.StatusConflict)
+	case errors.Is(err, errSettingsValidation):
+		// Validation messages name fields and bounds, never values.
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+	case errors.Is(err, errUnknownRecord):
+		http.Error(w, "no reports record yet; reload the page first", http.StatusNotFound)
+	case errors.Is(err, errStoreReadOnly):
+		http.Error(w, "reports store is read-only; contact an administrator", http.StatusServiceUnavailable)
+	default:
+		http.Error(w, "report definition could not be saved", http.StatusInternalServerError)
+	}
 }
 
 func (s *store) serveReportTemplates(w http.ResponseWriter, r *http.Request) {
