@@ -304,25 +304,37 @@ tool behind it or a tool whose results never reach the analyst.
 
 ## Additional Static Analysis Tooling
 
-Beyond Ghidra, these tools have been *considered* for the pipeline. None is
-integrated, and the useful next step is to cut the list rather than build all
-nine — see [#85](https://github.com/Xore/honeypot-stack/issues/85), which
-argues for `capa`, `ssdeep`/`tlsh` and `lief`, treats `floss` as a separate
-risk class because it emulates code, and puts the burden of proof on the rest.
+Beyond Ghidra, nine tools were once listed as *considered* for the pipeline,
+with no decision behind any of them. [#85](https://github.com/Xore/honeypot-stack/issues/85)
+asked for a short list with reasons instead of a wish list; this is that
+decision, made 2026-08-01. Each one added is third-party code that runs
+against live malware on the analysis host and has to be pinned, updated and
+trusted, so the burden of proof was on inclusion, not exclusion.
 
-| Tool | Purpose | Install |
-|------|---------|----------|
-| `capa` | Behavior tagging (MITRE ATT&CK) | `pip install flare-capa` |
-| `binwalk` | Firmware/packed binary unpacking | `apt install binwalk` |
-| `strings2` / `floss` | Advanced string extraction (obfuscated) | `pip install flare-floss` |
-| `radare2` | Cross-check disassembly, scripting | `apt install radare2` |
-| `exiftool` | File metadata extraction | `apt install exiftool` |
-| `ssdeep` / `tlsh` | Fuzzy hashing for family clustering | `pip install ssdeep tlsh-python` |
-| `pefile` | PE parsing (for Windows samples) | `pip install pefile` |
-| `lief` | ELF/PE/Mach-O parsing | `pip install lief` |
-| `yara-python` | YARA rule matching | `pip install yara-python` |
+**Decided in:**
+
+| Tool | Purpose | Why |
+|------|---------|-----|
+| `capa` | Behavior tagging (MITRE ATT&CK) | Strongest case: the tag vocabulary is what the LLM worker ([#66](https://github.com/Xore/honeypot-stack/issues/66)) and the dashboard already speak. Has a Ghidra integration path via `CapaExplorer`, so pin/scope this together with [#78](https://github.com/Xore/honeypot-stack/issues/78) phase 4 rather than separately. |
+| `ssdeep` / `tlsh` | Fuzzy hashing for family clustering | Cheap, offline, never executes the sample. Gives family clustering exact SHA-256 dedup cannot — a real capability, not a duplicate of anything else in the pipeline. |
+| `lief` | ELF/PE/Mach-O parsing | One library covers every format `pefile` would have been added for, so it replaces that entry rather than sitting beside it. |
+| `floss` | Obfuscated string extraction | Genuinely useful on packed/obfuscated binaries, but it *emulates* code to unpack strings — a different risk class from the three above. Needs the sandbox boundary decided as part of integrating it, not a plain `pip install`. Replaces the `strings2` line below outright: `strings2` is the tool `floss` superseded, not a second option. |
+
+**Decided out — each duplicates something already in the pipeline, not just something Ghidra could do:**
+
+| Tool | Would have added | Why it's out |
+|------|-------------------|---------------|
+| `yara-python` | YARA rule matching | The stack already runs a dedicated, hardened YARA pipeline: `analysis/yara/` + `dashboard/yara.go` + the `hp-yara-scanner` service, vendored/pinned corpus ([#73](https://github.com/Xore/honeypot-stack/issues/73)/[#106](https://github.com/Xore/honeypot-stack/issues/106)), `network_mode: none`, `read_only: true`, rules baked in at build. Wrapping `yara-python` inside a Ghidra script would be a second, less-hardened YARA execution path with no scanning capability the existing one lacks. Not merely redundant with Ghidra — redundant with a more hardened system that already ships. |
+| `pefile` | PE parsing | Fully subsumed by `lief` above; two PE parsers to pin and trust is worse than one. |
+| `binwalk` | Firmware/packed binary unpacking | Ghidra's own loaders plus `lief` already cover the formats this pipeline is in scope for; no sample so far has needed firmware unpacking. |
+| `radare2` | Cross-check disassembly, scripting | Duplicates the disassembler this whole pipeline is built on. A second disassembler to pin and trust, with no capability Ghidra lacks. |
+| `exiftool` | File metadata extraction | Ghidra and `lief` already surface what matters for triage; standalone metadata extraction earns its keep on document-format malware, which is not this pipeline's samples today. |
+| `strings2` | Advanced string extraction | Superseded by `floss` (see above); listing both was the original table conflating an old tool with the one that replaced it. |
 
 Earlier revisions of this file ended with "See `analysis/ghidra/scripts/` for
 implementations integrating these." There are none. That directory holds
-`call_graph.py`, `export_functions.py`, `export_strings.py`, `findcrypt.py` and
-`yara_scan.py`, and nothing in it uses any tool above.
+`call_graph.py`, `export_functions.py`, `export_strings.py` and
+`yara_scan.py`, and nothing in it uses any tool above. (`findcrypt.py` was
+deleted in [#136](https://github.com/Xore/honeypot-stack/issues/136): it was
+superseded by `scan_crypto()` in `worker/ghidra-worker.py`, whose comment
+records the three bugs the old script had.)
