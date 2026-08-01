@@ -105,6 +105,29 @@ type ghidraCapa struct {
 	Unsupported           string             `json:"unsupported,omitempty"`
 }
 
+// ghidraFloss mirrors what analysis/ghidra/statictools/server.py's
+// floss_scan() returns, forwarded through the worker's own floss_scan()
+// (#207). nil *ghidraFloss means the sidecar was unreachable or floss isn't
+// configured on this host. Unsupported set (everything else empty) means
+// the opposite: the sidecar answered and floss itself declined the sample —
+// its decoding/stack-string analysis covers PE and raw shellcode only, so
+// the ELF samples common in this honeypot's catch land here on every run.
+// Same nil/unsupported/data three-state shape as ghidraCapa above (#195),
+// for the same reason: an operator reading "not observed" on an ELF sample
+// shouldn't have to wonder whether the sidecar was even up.
+type ghidraFloss struct {
+	StaticStrings       []string `json:"static_strings"`
+	StaticStringsTotal  int      `json:"static_strings_total"`
+	StackStrings        []string `json:"stack_strings"`
+	StackStringsTotal   int      `json:"stack_strings_total"`
+	TightStrings        []string `json:"tight_strings"`
+	TightStringsTotal   int      `json:"tight_strings_total"`
+	DecodedStrings      []string `json:"decoded_strings"`
+	DecodedStringsTotal int      `json:"decoded_strings_total"`
+	Truncated           bool     `json:"truncated"`
+	Unsupported         string   `json:"unsupported,omitempty"`
+}
+
 // ghidraRevDeckCitations mirrors the "citations" object _revdeck_chat() in
 // ghidra-worker.py builds from Rev·Deck's own "citations" SSE event.
 type ghidraRevDeckCitations struct {
@@ -170,6 +193,7 @@ type ghidraResult struct {
 	FuzzyHashes  *ghidraFuzzyHashes `json:"fuzzy_hashes"`
 	Lief         *ghidraLief        `json:"lief"`
 	Capa         *ghidraCapa        `json:"capa"`
+	Floss        *ghidraFloss       `json:"floss"`
 	RevDeck      *ghidraRevDeck     `json:"revdeck"`
 	ReportPDF    string             `json:"report_pdf"`
 

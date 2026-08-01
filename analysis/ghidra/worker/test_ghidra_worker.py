@@ -212,6 +212,28 @@ class StaticToolsStub(BaseHTTPRequestHandler):
                             "behavior": "Socket Communication", "method": "Send Data"}],
                 }).encode()
                 status = 200
+        elif self.path == "/v1/floss":
+            if data == b"CORRUPT":
+                # Stands in for floss declining a format its decoding/
+                # stack-string analysis does not cover -- PE and raw
+                # shellcode only, confirmed against a real ELF binary (#207).
+                # Same 422-plus-"unsupported"-key contract as capa above.
+                body = json.dumps({
+                    "error": "floss cannot decode strings for this sample",
+                    "unsupported": "unsupported format for string decoding "
+                                    "-- floss's decoding/stack-string "
+                                    "analysis covers PE and raw shellcode "
+                                    "only"}).encode()
+                status = 422
+            else:
+                body = json.dumps({
+                    "static_strings": ["/lib/ld-linux.so"], "static_strings_total": 1,
+                    "stack_strings": ["stub-stack-string"], "stack_strings_total": 1,
+                    "tight_strings": [], "tight_strings_total": 0,
+                    "decoded_strings": ["stub-decoded-c2.example"], "decoded_strings_total": 1,
+                    "truncated": False,
+                }).encode()
+                status = 200
         else:
             body = json.dumps({"error": "not found"}).encode()
             status = 404
@@ -400,14 +422,16 @@ def test_spool(ghidra):
               "function addr mapped to address")
         check(d.get("analyzer_version") == "ghidra-11.3.2",
               "analyzer version recorded from /status")
-        check(d["version"] == 4, "version stamped")
+        check(d["version"] == 5, "version stamped")
         check(all(k in d for k in ("findcrypt", "call_graph_svg", "ai_triage",
-                                   "fuzzy_hashes", "lief", "capa", "revdeck", "report_pdf")),
+                                   "fuzzy_hashes", "lief", "capa", "floss", "revdeck",
+                                   "report_pdf")),
               "every result key present")
         check(d["ai_triage"] is None, "triage disabled leaves ai_triage null")
         check(d["fuzzy_hashes"] is None, "statictools disabled leaves fuzzy_hashes null")
         check(d["lief"] is None, "statictools disabled leaves lief null")
         check(d["capa"] is None, "statictools disabled leaves capa null")
+        check(d["floss"] is None, "statictools disabled leaves floss null")
         check(d["revdeck"] is None, "revdeck disabled by default leaves revdeck null")
         check(oct(rf.stat().st_mode)[-3:] == "600", "result is 0600")
 
@@ -553,6 +577,10 @@ def test_statictools(ghidra, statictools):
               "capa capabilities survive JSON round trip")
         check(d["capa"]["attack"][0]["id"] == "T1071.001",
               "capa ATT&CK entries survive JSON round trip")
+        check(d["floss"] is not None and d["floss"]["static_strings_total"] == 1,
+              f"floss carried through (got {d['floss']!r})")
+        check(d["floss"]["decoded_strings"] == ["stub-decoded-c2.example"],
+              "floss decoded strings survive JSON round trip")
 
     print("--- lief 422 (unrecognised format) leaves lief null, not an error ---")
     r, d = statictools_run(tmp, "corrupt", ghidra,
@@ -567,6 +595,10 @@ def test_statictools(ghidra, statictools):
           f"capa 422 (unsupported architecture) is preserved as a distinct "
           f"signal, not collapsed to null like a down sidecar (#195) "
           f"(got {d and d['capa']!r})")
+    check(d is not None and d["floss"] is not None and "unsupported" in d["floss"],
+          f"floss 422 (unsupported format) is preserved as a distinct "
+          f"signal, not collapsed to null like a down sidecar (#207) "
+          f"(got {d and d['floss']!r})")
 
     print("--- disabled leaves every field null ---")
     r, d = statictools_run(tmp, "disabled", ghidra, {"STATICTOOLS_API_BASE": ""})
@@ -574,6 +606,7 @@ def test_statictools(ghidra, statictools):
     check(d is not None and d["fuzzy_hashes"] is None, "fuzzy_hashes left null")
     check(d is not None and d["lief"] is None, "lief left null")
     check(d is not None and d["capa"] is None, "capa left null")
+    check(d is not None and d["floss"] is None, "floss left null")
 
     print("--- an unreachable sidecar fails soft ---")
     r, d = statictools_run(tmp, "down", ghidra,
@@ -584,6 +617,7 @@ def test_statictools(ghidra, statictools):
     check(d is not None and d["fuzzy_hashes"] is None, "fuzzy_hashes left null")
     check(d is not None and d["lief"] is None, "lief left null")
     check(d is not None and d["capa"] is None, "capa left null")
+    check(d is not None and d["floss"] is None, "floss left null")
 
 
 def revdeck_run(tmp, name, ghidra, extra):

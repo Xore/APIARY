@@ -31,6 +31,13 @@ REST service:
                                {"error": "...", "unsupported": "..."} (422) if
                                capa's default backend cannot handle this
                                sample's architecture/format/OS (#78)
+    POST /v1/floss          body: raw bytes
+                            -> string summary (200), or
+                               {"error": "...", "unsupported": "..."} (422) if
+                               floss's decoding/stack-string analysis does not
+                               cover this sample's format -- PE and raw
+                               shellcode only, confirmed against a real ELF
+                               binary (#207)
 """
 from __future__ import annotations
 
@@ -292,6 +299,107 @@ def capa_scan(data: bytes) -> dict:
     return _capa_summarise(json.loads(proc.stdout))
 
 
+# flare-floss's own timeout budget -- kept comfortably under
+# worker/ghidra-worker.py's STATICTOOLS_TIMEOUT (300s, the client's own wait
+# budget per request), same reasoning as CAPA_TIMEOUT above: so this
+# process's own timeout fires first and returns a clean 500 instead of the
+# worker giving up on the connection while floss is still emulating,
+# orphaning the subprocess.
+FLOSS_TIMEOUT = int(os.environ.get("FLOSS_TIMEOUT", "240"))
+MAX_STRINGS_PER_CATEGORY = 200  # same truncation reasoning as MAX_CAPABILITIES.
+
+# floss's own error text when its emulation-based categories (decoded/stack/
+# tight strings -- the actual "obfuscated string solver" value floss adds
+# beyond plain string extraction) do not cover this sample's format.
+# Confirmed directly against a real ELF binary and a separate corrupt/
+# garbage file: both hit this identical message, since floss's format
+# auto-detection cannot identify a valid PE/shellcode structure in either
+# case (#207). Matched on message text, not floss's exit code alone (255,
+# floss's one generic "analysis failed" code for this and other fatal
+# errors) -- the code alone can't distinguish "declined this format" from
+# "crashed for some other reason."
+_FLOSS_UNSUPPORTED_MARKER = ("FLOSS currently supports the following formats "
+                             "for string decoding and stackstrings")
+
+
+def _floss_strings(entries: list | None) -> tuple[list[str], int]:
+    items = [e.get("string", "") for e in (entries or []) if e.get("string")]
+    return items[:MAX_STRINGS_PER_CATEGORY], len(items)
+
+
+def _floss_summarise(doc: dict) -> dict:
+    """Reduce floss's full result document to a report-sized shape.
+
+    floss's raw -j output carries per-string metadata (stack frame offsets,
+    decoding-routine addresses, ...) useful for an interactive explorer, far
+    more than a triage report or dashboard card needs -- same "evidence over
+    verbose metadata" shape _capa_summarise() above already gives.
+    """
+    strings = doc.get("strings") or {}
+    static, static_total = _floss_strings(strings.get("static_strings"))
+    stack, stack_total = _floss_strings(strings.get("stack_strings"))
+    tight, tight_total = _floss_strings(strings.get("tight_strings"))
+    decoded, decoded_total = _floss_strings(strings.get("decoded_strings"))
+    return {
+        "static_strings": static,
+        "static_strings_total": static_total,
+        "stack_strings": stack,
+        "stack_strings_total": stack_total,
+        "tight_strings": tight,
+        "tight_strings_total": tight_total,
+        "decoded_strings": decoded,
+        "decoded_strings_total": decoded_total,
+        "truncated": (
+            len(static) < static_total or len(stack) < stack_total or
+            len(tight) < tight_total or len(decoded) < decoded_total
+        ),
+    }
+
+
+def floss_scan(data: bytes) -> dict:
+    """Run floss's full default analysis (static, stack, tight, and decoded
+    strings) against one sample.
+
+    Returns a string summary (see _floss_summarise), or {"unsupported": "..."}
+    when floss declined this input. That fires often on this pipeline's own
+    catch: floss's emulation-based categories only cover PE and raw
+    shellcode (confirmed directly, see _FLOSS_UNSUPPORTED_MARKER above), and
+    this honeypot's catch is predominantly ELF (MIPS/ARM32 IoT malware) --
+    a real, distinct signal, not a bug in this endpoint, the same shape as
+    capa's own architecture-coverage gap (#195). Deliberately does not retry
+    in a static-strings-only mode on the unsupported path: that category
+    duplicates what the worker already gets from Ghidra's own
+    /results/{job}/strings endpoint, so there is nothing to gain from
+    running it, only wasted compute on a large sample. Raises RuntimeError
+    for anything else, so the handler can tell a real failure from an
+    expected non-match.
+    """
+    fd, tmp_path = tempfile.mkstemp(prefix="floss-")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        proc = subprocess.run(
+            ["floss", "-j", tmp_path],
+            capture_output=True, timeout=FLOSS_TIMEOUT, text=True,
+        )
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+    if proc.returncode != 0:
+        if _FLOSS_UNSUPPORTED_MARKER in (proc.stderr or ""):
+            return {"unsupported": "unsupported format for string decoding "
+                                    "-- floss's decoding/stack-string "
+                                    "analysis covers PE and raw shellcode "
+                                    "only"}
+        raise RuntimeError(
+            f"floss exited {proc.returncode}: {(proc.stderr or '')[:2000]}")
+
+    return _floss_summarise(json.loads(proc.stdout))
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "honeypot-statictools/1"
 
@@ -353,6 +461,21 @@ class Handler(BaseHTTPRequestHandler):
             if "unsupported" in result:
                 return self._json(
                     {"error": "capa cannot analyse this sample",
+                     "unsupported": result["unsupported"]}, 422)
+            return self._json(result)
+        if self.path == "/v1/floss":
+            data = self._read_body()
+            if data is None:
+                return
+            try:
+                result = floss_scan(data)
+            except subprocess.TimeoutExpired:
+                return self._json({"error": "floss timed out"}, 500)
+            except (RuntimeError, OSError, ValueError) as e:
+                return self._json({"error": str(e)}, 500)
+            if "unsupported" in result:
+                return self._json(
+                    {"error": "floss cannot decode strings for this sample",
                      "unsupported": result["unsupported"]}, 422)
             return self._json(result)
         self._json({"error": "not found"}, 404)

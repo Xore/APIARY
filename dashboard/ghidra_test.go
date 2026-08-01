@@ -251,6 +251,80 @@ func TestLoadGhidraResultsCapaAbsentIsNil(t *testing.T) {
 	}
 }
 
+func TestLoadGhidraResultsDecodesFloss(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GHIDRA_RESULTS_DIR", dir)
+	writeGhidraResult(t, dir, shaA, map[string]any{
+		"exit_status": "ok",
+		"floss": map[string]any{
+			"static_strings": []string{"/lib/ld-linux.so"}, "static_strings_total": 1,
+			"stack_strings": []string{"stub-stack-string"}, "stack_strings_total": 1,
+			"tight_strings": []string{}, "tight_strings_total": 0,
+			"decoded_strings": []string{"stub-decoded-c2.example"}, "decoded_strings_total": 1,
+			"truncated": false,
+		},
+	})
+
+	rows := loadGhidraResults()
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	floss := rows[0].Floss
+	if floss == nil || floss.Unsupported != "" {
+		t.Fatalf("floss did not decode: %+v", floss)
+	}
+	if len(floss.StaticStrings) != 1 || floss.StaticStrings[0] != "/lib/ld-linux.so" ||
+		floss.StaticStringsTotal != 1 {
+		t.Fatalf("floss static_strings did not decode: %+v", floss)
+	}
+	if len(floss.DecodedStrings) != 1 || floss.DecodedStrings[0] != "stub-decoded-c2.example" {
+		t.Fatalf("floss decoded_strings did not decode: %+v", floss)
+	}
+}
+
+// floss's own PE/shellcode-only decline is a distinct signal from "sidecar
+// unavailable", the same three-state shape capa's own #195 established —
+// the worker's floss_scan() forwards {"unsupported": reason} instead of
+// collapsing it to the same nil a down sidecar produces
+// (TestLoadGhidraResultsFlossAbsentIsNil below) (#207).
+func TestLoadGhidraResultsDecodesFlossUnsupported(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GHIDRA_RESULTS_DIR", dir)
+	writeGhidraResult(t, dir, shaA, map[string]any{
+		"exit_status": "ok",
+		"floss": map[string]any{
+			"unsupported": "unsupported format for string decoding -- floss's decoding/stack-string analysis covers PE and raw shellcode only",
+		},
+	})
+
+	rows := loadGhidraResults()
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	floss := rows[0].Floss
+	if floss == nil || floss.Unsupported == "" {
+		t.Fatalf("floss.Unsupported should decode: %+v", floss)
+	}
+	if floss.StaticStringsTotal != 0 || len(floss.StaticStrings) != 0 {
+		t.Fatalf("an unsupported result should carry no string data: %+v", floss)
+	}
+}
+
+// Absent (nil *ghidraFloss entirely) means the sidecar was unreachable, or
+// floss is switched off on this host — decoding a result with no "floss" key
+// at all must not panic or synthesize a zero-valued struct, mirroring
+// TestLoadGhidraResultsCapaAbsentIsNil (#207).
+func TestLoadGhidraResultsFlossAbsentIsNil(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GHIDRA_RESULTS_DIR", dir)
+	writeGhidraResult(t, dir, shaA, map[string]any{"exit_status": "ok"})
+
+	rows := loadGhidraResults()
+	if len(rows) != 1 || rows[0].Floss != nil {
+		t.Fatalf("floss should be nil when the worker omitted it: %+v", rows)
+	}
+}
+
 // _revdeck_chat() in ghidra-worker.py forwards this shape verbatim, including
 // a "max_turns" status kept as a deliberate partial answer rather than
 // discarded (#78). Steps is checked as a pointer dereference the same way
