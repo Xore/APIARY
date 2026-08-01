@@ -332,14 +332,15 @@ def test_spool(ghidra):
               "function addr mapped to address")
         check(d.get("analyzer_version") == "ghidra-11.3.2",
               "analyzer version recorded from /status")
-        check(d["version"] == 3, "version stamped")
+        check(d["version"] == 4, "version stamped")
         check(all(k in d for k in ("findcrypt", "call_graph_svg", "ai_triage",
-                                   "fuzzy_hashes", "lief", "capa", "report_pdf")),
+                                   "fuzzy_hashes", "lief", "capa", "revdeck", "report_pdf")),
               "every result key present")
         check(d["ai_triage"] is None, "triage disabled leaves ai_triage null")
         check(d["fuzzy_hashes"] is None, "statictools disabled leaves fuzzy_hashes null")
         check(d["lief"] is None, "statictools disabled leaves lief null")
         check(d["capa"] is None, "statictools disabled leaves capa null")
+        check(d["revdeck"] is None, "revdeck disabled by default leaves revdeck null")
         check(oct(rf.stat().st_mode)[-3:] == "600", "result is 0600")
 
     check(not (req / f"{good}.request").exists(), "consumed request removed")
