@@ -187,6 +187,8 @@ func main() {
 	http.HandleFunc("/api/settings/config/rollback", s.serveSettingsConfigRollback)
 	http.HandleFunc("/api/settings/config/history", s.serveSettingsConfigHistory)
 	http.HandleFunc("/api/settings/users", s.serveSettingsUsers)
+	http.HandleFunc("/api/settings/services", s.serveSettingsServices)
+	http.HandleFunc("/api/settings/services/", s.serveSettingsServiceItem)
 	http.HandleFunc("/api/settings/audit", s.serveSettingsAudit)
 	http.HandleFunc("/api/map-points", s.serveMapPoints)
 	http.HandleFunc("/api/stream", s.serveEventsSSE)

@@ -36,6 +36,7 @@
 .hp-audit-row:last-child{border-bottom:0}
 .hp-audit-row small{color:var(--text-muted)}
 .hp-head-actions{display:flex;gap:8px;flex-shrink:0}
+.hp-services-actions{display:flex;gap:6px;flex-wrap:wrap}
 @media(prefers-reduced-motion:reduce){
   .hp-dash-settings *{animation:none!important;transition:none!important}
 }
