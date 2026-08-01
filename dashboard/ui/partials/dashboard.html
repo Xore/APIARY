@@ -106,7 +106,8 @@
       <textarea id="hp-investigation-query" name="q" rows="1" placeholder="Investigate an IP, ASN, payload hash, session, HTTP path or free text…" aria-label="Investigate an indicator"></textarea>
       <button class="modal__close" type="button" data-hp-command-palette-close aria-label="Close">&#10005;</button>
     </form>
-    <p class="command-palette__empty">Press Enter to open an investigation for this query.</p>
+    <div class="command-palette__results" data-hp-command-palette-results role="listbox" hidden></div>
+    <p class="command-palette__empty" data-hp-command-palette-empty>Press Enter to open an investigation for this query.</p>
   </section>
   <div class="edit-dialog-backdrop" id="hp-confirm-backdrop" aria-hidden="true" inert>
     <section class="edit-dialog" role="alertdialog" aria-modal="true" aria-labelledby="hp-confirm-title" aria-describedby="hp-confirm-description">

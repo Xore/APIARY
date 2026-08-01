@@ -601,9 +601,108 @@
       searchInput.style.height = `${Math.min(120, searchInput.scrollHeight)}px`;
     };
     searchInput?.addEventListener("input", resizeSearch);
+
+    /* Live quick-search preview (#213): the palette's own results list, fed
+       by /api/quick-search, which reuses the same grouped-search backend the
+       /search page renders from. This is a preview, not a replacement for
+       Enter -- Enter still submits the form to /search unless a row is
+       keyboard-highlighted or the row itself is clicked. */
+    const resultsBox = commandPalette?.querySelector("[data-hp-command-palette-results]");
+    const emptyHint = commandPalette?.querySelector("[data-hp-command-palette-empty]");
+    let quickSearchRows = [];
+    let activeRow = -1;
+    let quickSearchAbort = null;
+    let quickSearchTimer = null;
+
+    const renderRow = hit => {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "command-palette__row";
+      row.setAttribute("role", "option");
+      row.setAttribute("aria-selected", "false");
+      row.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>';
+      const title = document.createElement("span");
+      title.className = "command-palette__row-title";
+      title.textContent = hit.title;
+      const meta = document.createElement("span");
+      meta.className = "command-palette__row-meta";
+      meta.textContent = hit.meta;
+      meta.dataset.group = hit.meta;
+      row.append(title, meta);
+      row.addEventListener("click", () => { location.href = hit.url; });
+      return row;
+    };
+
+    // The active row trades its group/category label for a keyboard hint --
+    // the rest keep showing which source they matched from.
+    const setActiveRow = index => {
+      const rows = resultsBox ? [...resultsBox.children] : [];
+      rows.forEach((row, i) => {
+        const active = i === index;
+        row.classList.toggle("active", active);
+        row.setAttribute("aria-selected", active ? "true" : "false");
+        const meta = row.querySelector(".command-palette__row-meta");
+        if (meta) meta.textContent = active ? "Enter" : meta.dataset.group;
+      });
+      activeRow = index;
+      if (index >= 0) rows[index]?.scrollIntoView({ block: "nearest" });
+    };
+
+    const clearQuickSearch = () => {
+      quickSearchAbort?.abort();
+      quickSearchRows = [];
+      activeRow = -1;
+      if (resultsBox) { resultsBox.hidden = true; resultsBox.replaceChildren(); }
+      if (emptyHint) emptyHint.hidden = false;
+    };
+
+    const runQuickSearch = query => {
+      quickSearchAbort?.abort();
+      if (!query) { clearQuickSearch(); return; }
+      quickSearchAbort = new AbortController();
+      fetch(`/api/quick-search?q=${encodeURIComponent(query)}`, { signal: quickSearchAbort.signal })
+        .then(res => (res.ok ? res.json() : { results: [] }))
+        .then(data => {
+          quickSearchRows = data.results || [];
+          activeRow = -1;
+          if (!resultsBox) return;
+          if (quickSearchRows.length === 0) {
+            resultsBox.hidden = true;
+            resultsBox.replaceChildren();
+            if (emptyHint) emptyHint.hidden = false;
+            return;
+          }
+          resultsBox.replaceChildren(...quickSearchRows.map(renderRow));
+          resultsBox.hidden = false;
+          if (emptyHint) emptyHint.hidden = true;
+          setActiveRow(0);
+        })
+        .catch(() => {});
+    };
+
+    searchInput?.addEventListener("input", () => {
+      clearTimeout(quickSearchTimer);
+      const query = searchInput.value.trim();
+      quickSearchTimer = setTimeout(() => runQuickSearch(query), 150);
+    });
+
     searchInput?.addEventListener("keydown", event => {
+      if (event.key === "ArrowDown" && quickSearchRows.length) {
+        event.preventDefault();
+        setActiveRow(Math.min(activeRow + 1, quickSearchRows.length - 1));
+        return;
+      }
+      if (event.key === "ArrowUp" && quickSearchRows.length) {
+        event.preventDefault();
+        setActiveRow(Math.max(activeRow - 1, -1));
+        return;
+      }
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
+        if (activeRow >= 0 && quickSearchRows[activeRow]) {
+          location.href = quickSearchRows[activeRow].url;
+          return;
+        }
         search.requestSubmit();
       }
     });
