@@ -110,6 +110,27 @@ func TestSetAuthFrameOriginRejectsUnusableInput(t *testing.T) {
 	}
 }
 
+// TestOverviewRefreshTargetsTheCurrentPageContentSelector (#199): the
+// overview page's in-place live-refresh script selects both the freshly-
+// fetched and the currently-mounted page content by querySelector -- #184
+// (commit 84bd9dc) renamed every page wrapper's class from .wrap to
+// app-content/app-content--wide, updated every template and shell.css, but
+// missed this one client-side selector. It kept matching nothing in the
+// fresh document forever after, so refreshDashboard() silently no-opped on
+// every SSE update and every 60s poll: the toolbar said LIVE, nothing ever
+// moved. [data-hp-page-content] is the stable attribute every page wrapper
+// actually carries (see shell_layout_test.go) -- pin both lookups to it so
+// a future class rename can't quietly break this again.
+func TestOverviewRefreshTargetsTheCurrentPageContentSelector(t *testing.T) {
+	if strings.Contains(pageTemplate, `querySelector(".wrap")`) {
+		t.Fatal(`overview's refresh script still queries the removed .wrap class -- ` +
+			`it will silently stop finding page content the moment .wrap doesn't exist`)
+	}
+	if !strings.Contains(pageTemplate, `doc.querySelector("[data-hp-page-content]")`) {
+		t.Fatal("overview's refresh script must select the freshly-fetched page content by [data-hp-page-content]")
+	}
+}
+
 // TestNoUnnoncedInlineScriptOrStyleRemains is the structural half of #58's
 // completion criterion ("no un-nonced inline script or style remains"): a
 // regression test that would fail the moment someone adds a new inline

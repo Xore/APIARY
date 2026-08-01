@@ -184,7 +184,7 @@ async function refreshDashboard(){
     const r = await fetch(location.pathname, {cache: "no-store"});
     if (!r.ok) return;
     const doc = new DOMParser().parseFromString(await r.text(), "text/html");
-    const next = doc.querySelector(".wrap"),current=document.querySelector("[data-hp-page-content]")||document.querySelector(".wrap");
+    const next = doc.querySelector("[data-hp-page-content]"),current=document.querySelector("[data-hp-page-content]");
     if (next&&current) {const preserveMap=Boolean(current.querySelector('[data-attack-map-card]')&&next.querySelector('[data-attack-map-card]'));if(window.replaceHoneypotPage)window.replaceHoneypotPage(next,{preserveMap});else current.replaceWith(next);if(window.initDashboardTabs)window.initDashboardTabs();if(window.initHoneypotMaps)window.initHoneypotMaps();}
   } catch {} finally {refreshing=false}
 }
