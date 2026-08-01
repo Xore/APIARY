@@ -56,13 +56,8 @@ honeypot-stack/
     └── ghidra/
         ├── IMPLEMENTATION_PLAN.md   ← this file
         ├── docker-compose.ghidra.yml   ← also defines revdeck, profile-gated
-        ├── scripts/                 ← Ghidra Python scripts (Jython / Pyhidra)
-        │   ├── export_functions.py
-        │   ├── export_strings.py
-        │   ├── export_imports.py
-        │   ├── findcrypt.py         ← deleted, see #136
-        │   ├── yara_scan.py         ← run YARA rules inside Ghidra
-        │   └── call_graph.py
+        ├── scripts/                 ← vestigial, see below (#141)
+        │   └── export_imports.py
         ├── revdeck/                 ← biniamf/ai-reverse-engineering integration
         │   └── README.md
         ├── ghidrassist/             ← symgraph/GhidrAssist plugin config
@@ -72,6 +67,20 @@ honeypot-stack/
 ```
 
 This is the *target* layout. Every entry now exists.
+
+**`scripts/` is vestigial, not part of the live pipeline** ([#141](https://github.com/Xore/honeypot-stack/issues/141)):
+these were written as `analyzeHeadless ... -postScript <file>` Jython scripts
+for the headless-mode design this document originally described, superseded
+by the REST-API-driven host worker below. `export_functions.py`,
+`export_strings.py`, `call_graph.py` and `yara_scan.py` are deleted —
+`worker/ghidra-worker.py` gets functions/strings/imports via
+`/results/{job}/...` REST calls and walks its own call graph via
+`/v1/results/{job}/graph/{addr}`, never invoking `analyzeHeadless` or a
+postScript at all; `findcrypt.py` was already deleted earlier for the same
+reason ([#136](https://github.com/Xore/honeypot-stack/issues/136),
+superseded by `scan_crypto()` in the worker). `export_imports.py` is the one
+survivor, added to match its four siblings' shape but not wired into
+anything either — kept for now rather than folded into this cleanup.
 
 Three corrections against the layout this section used to show:
 
@@ -101,16 +110,24 @@ Three corrections against the layout this section used to show:
   either — one Python file covering both HTML and inlined CSS isn't enough
   code to be worth splitting.
 
-`scripts/export_imports.py` was added following the shape of its four
-siblings — it walks `FunctionManager.getExternalFunctions()` and writes
-`{address, name, library}` per import, same as the other exporters write
-their own JSON alongside it in the project directory.
-
 ---
 
-## Phase 1 — Headless Ghidra (Docker) ✅ Ready to implement
+## Phase 1 — Headless Ghidra (Docker)
 
-### Goal
+**"Goal" and "Trigger" below describe a design that was never built** —
+`analyzeHeadless` invoked directly in a container, postScripts writing JSON
+to a project directory, triggered from `Xore/Honeypot`'s own GitHub Actions.
+None of that exists. What actually runs is `biniamfd/ghidra-headless-rest`
+(below) behind a REST client (`worker/ghidra-worker.py`'s `GhidraClient`),
+triggered by a host-side spool — see
+[Dashboard/Worker Integration](#dashboardworker-integration) for the real
+trigger, and [#141](https://github.com/Xore/honeypot-stack/issues/141) for
+the `scripts/` postScripts this superseded. The **Docker Image** and
+**REST API Endpoints Used** sections immediately below are accurate and
+current — verified against the running service, not left over from the
+abandoned design.
+
+### Goal (superseded, see above)
 Run Ghidra's `analyzeHeadless` in a container against every new sample in
 `Xore/Honeypot/samples/`. Export:
 - Function list (address, name, signature)
@@ -154,10 +171,9 @@ Three things worth knowing before writing a client:
 * Field names are not what the result schema uses: functions carry `addr`, and
   strings are objects with the text under `s`. Imports become `library!name`.
 
-### Trigger
-GitHub Actions in `Xore/Honeypot` already triggers on sample push.
-The existing `analyze.yml` will be extended with a `ghidra` job that runs after
-VirusTotal/JoeSandbox jobs complete.
+### Trigger (superseded, see the note at the top of this phase)
+See [Dashboard/Worker Integration](#dashboardworker-integration) for the
+real trigger — a host-side spool, not GitHub Actions.
 
 ---
 
@@ -444,10 +460,12 @@ trusted, so the burden of proof was on inclusion, not exclusion.
 | `strings2` | Advanced string extraction | Superseded by `floss` (see above); listing both was the original table conflating an old tool with the one that replaced it. |
 
 Earlier revisions of this file ended with "See `analysis/ghidra/scripts/` for
-implementations integrating these." There are none. That directory holds
-`call_graph.py`, `export_functions.py`, `export_imports.py`,
-`export_strings.py` and `yara_scan.py`, and nothing in it uses any tool
-above. (`findcrypt.py` was deleted in
-[#136](https://github.com/Xore/honeypot-stack/issues/136): it was superseded
-by `scan_crypto()` in `worker/ghidra-worker.py`, whose comment records the
-three bugs the old script had.)
+implementations integrating these." There are none. That directory now holds
+only `export_imports.py`, unused by anything (see the "Architecture" section
+above); the other four postScripts it once held (`call_graph.py`,
+`export_functions.py`, `export_strings.py`, `yara_scan.py`) were deleted in
+[#141](https://github.com/Xore/honeypot-stack/issues/141), same reasoning as
+`findcrypt.py`'s deletion in
+[#136](https://github.com/Xore/honeypot-stack/issues/136): superseded by
+`scan_crypto()` in `worker/ghidra-worker.py`, whose comment records the
+three bugs the old script had.
