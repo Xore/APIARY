@@ -501,17 +501,6 @@ footer {
 }
 .col:hover::after, .col:focus-visible::after { opacity: 1; transform: translate(-50%, 0); }
 .col .bar {
-  /* Not height:{pct}% -- .bar's containing block is .col, a flex item
-     whose own height:100% depends on .chart's align-items:flex-end (not
-     stretch), which browsers don't reliably treat as a "definite" size
-     for a descendant's percentage height to resolve against. That left
-     every bar computing to its min-height regardless of --pct, showing a
-     flat baseline no matter the real count (#185 follow-up). calc()
-     against the chart's known content-box track height (155px height -
-     6px + 15px padding, border-box) sidesteps percentage resolution
-     entirely.
-  */
-  height: calc(1.34px * var(--pct, 0));
   background: var(--accent);
   border-radius: 2px 2px 0 0; min-height: 2px; opacity: 0.85;
 }
