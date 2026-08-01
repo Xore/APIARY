@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"net/url"
 )
 
 // pageMeta is embedded (anonymously) in every top-level page data struct so
@@ -48,13 +49,47 @@ func nonce() string {
 	return base64.RawURLEncoding.EncodeToString(raw[:])
 }
 
+// authFrameOrigin is the auth-backend origin the settings iframe embeds
+// (scheme://host, no path), resolved once at startup -- see
+// setAuthFrameOrigin. Empty when settings embedding is disabled (unset or
+// invalid AUTH_ACCOUNT_URL; validatedAuthAccountURL already logs why and
+// hides the settings menu item in that case, so this stays silent).
+var authFrameOrigin string
+
+// setAuthFrameOrigin derives authFrameOrigin from validatedAuthAccountURL's
+// already-verified value, called once at startup (main.go) with the exact
+// same string used for AuthAccountURL in the /api/whoami response, so
+// there's one source of truth instead of parsing AUTH_ACCOUNT_URL twice.
+//
+// Without this, secHeaders' CSP had no frame-src directive at all, so it
+// fell back to default-src 'self' -- which blocks framing any other origin,
+// including auth-backend's own settings page. The browser's own console
+// error names the exact mechanism: "Framing '...' violates ... directive:
+// default-src 'self' ... Note that 'frame-src' was not explicitly set". A
+// relaxed frame-ancestors on auth-backend's side (#196) can never fix this:
+// frame-ancestors is the *embedded* page's opt-in for who may frame it;
+// frame-src is the *embedding* page's own opt-in for what it may frame, and
+// only the dashboard can set that for itself.
+func setAuthFrameOrigin(accountURL string) {
+	u, err := url.Parse(accountURL)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return
+	}
+	authFrameOrigin = u.Scheme + "://" + u.Host
+}
+
 func secHeaders(w http.ResponseWriter, nonceValue string) {
+	frameSrc := "frame-src 'self'"
+	if authFrameOrigin != "" {
+		frameSrc += " " + authFrameOrigin
+	}
 	w.Header().Set("Content-Security-Policy",
 		"default-src 'self'; "+
 			"script-src 'self' 'nonce-"+nonceValue+"'; "+
 			"style-src 'self' 'nonce-"+nonceValue+"'; "+
 			"img-src 'self' data: https://tile.openstreetmap.org; "+
 			"connect-src 'self' https://tile.openstreetmap.org; "+
+			frameSrc+"; "+
 			"font-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Content-Type-Options", "nosniff")

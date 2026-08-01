@@ -34,10 +34,12 @@ func main() {
 		os.Exit(0)
 	}
 
+	authAccountURL := validatedAuthAccountURL()
+	setAuthFrameOrigin(authAccountURL)
 	s := &store{
 		dir:            getenv("LOG_DIR", "/logs"),
 		yaraFile:       os.Getenv("YARA_RESULTS_FILE"),
-		authAccountURL: validatedAuthAccountURL(),
+		authAccountURL: authAccountURL,
 	}
 	for _, name := range strings.Split(os.Getenv("EXPECTED_SENSORS"), ",") {
 		if name = strings.TrimSpace(name); name != "" && name != "portbridge" {
