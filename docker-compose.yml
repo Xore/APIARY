@@ -746,7 +746,24 @@ services:
     volumes:
       - /opt/stacks/honeypot-stack/logs/conpot-s7-1200:/var/log/conpot
       - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
-    cap_add: [SYS_PTRACE]
+    # #133: measured the same way as the base conpot service (2026-08-01) --
+    # same image/entrypoint/uid 2000, so the baseline is the internal listener
+    # set (netstat inside the container, not just the published ports:
+    # 21,80,102,161,502,623,44818,47808 are all bound even though only
+    # 102/502 are published here) before and after the reduction:
+    #
+    #   default caps + SYS_PTRACE     same 10 internal listeners  <- baseline
+    #   cap_drop ALL + NET_BIND_SERVICE + no-new-privileges   identical
+    #
+    # Needs NET_BIND_SERVICE (unlike guardian/kamstrup below): several of
+    # those internal listeners (21, 80, 102, 161, 502, 623) are privileged
+    # ports regardless of which host ports are actually published.
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD", "python3", "/usr/local/bin/conpot-healthcheck.py", "modbus"]
       interval: 60s
@@ -792,7 +809,14 @@ services:
     volumes:
       - /opt/stacks/honeypot-stack/logs/conpot-s7-1500:/var/log/conpot
       - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
-    cap_add: [SYS_PTRACE]
+    # #133: measured the same way as conpot-s7-1200 above (identical
+    # image/entrypoint/template family, identical internal listener set).
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD", "python3", "/usr/local/bin/conpot-healthcheck.py", "modbus"]
       interval: 60s
@@ -837,7 +861,16 @@ services:
     volumes:
       - /opt/stacks/honeypot-stack/logs/conpot-iec104:/var/log/conpot
       - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
-    cap_add: [SYS_PTRACE]
+    # #133: measured (2026-08-01). The IEC104 template's only *published*
+    # port is 2404 (unprivileged), but it still internally binds SNMP on 161
+    # -- confirmed via netstat inside the running container, not assumed from
+    # the port: list -- so NET_BIND_SERVICE is still required here.
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD", "python3", "/usr/local/bin/conpot-healthcheck.py", "iec104"]
       interval: 60s
@@ -881,7 +914,23 @@ services:
     volumes:
       - /opt/stacks/honeypot-stack/logs/conpot-guardian:/var/log/conpot
       - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
-    cap_add: [SYS_PTRACE]
+    # #133: measured (2026-08-01). Guardian_ast only binds one unprivileged
+    # port (10001), so the first attempt tried cap_drop ALL with no cap_add
+    # at all -- it failed immediately: `exec: /usr/bin/conpot: Operation not
+    # permitted`. Root cause (confirmed via `getcap` inside a working
+    # sibling): /usr/bin/python3.11, which actually runs conpot, has the file
+    # capability cap_net_bind_service=ep set. With no-new-privileges, exec-ing
+    # a binary carrying a file capability requires the caller to already hold
+    # that capability -- the kernel refuses to grant it via the file bit --
+    # regardless of which ports the process goes on to bind. So every conpot
+    # persona needs NET_BIND_SERVICE, not just the ones publishing privileged
+    # ports.
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD", "python3", "/usr/local/bin/conpot-healthcheck.py", "guardian_ast"]
       interval: 60s
@@ -927,7 +976,17 @@ services:
     volumes:
       - /opt/stacks/honeypot-stack/logs/conpot-kamstrup:/var/log/conpot
       - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
-    cap_add: [SYS_PTRACE]
+    # #133: measured (2026-08-01) -- needs NET_BIND_SERVICE too, for the same
+    # reason as guardian above: it's a file capability on /usr/bin/python3.11
+    # itself, required to exec it at all under no-new-privileges, independent
+    # of which ports kamstrup_382 goes on to bind (1025/50100 are both
+    # unprivileged, but that turned out not to matter).
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD", "python3", "/usr/local/bin/conpot-healthcheck.py", "kamstrup"]
       interval: 60s
