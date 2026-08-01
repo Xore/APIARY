@@ -165,12 +165,27 @@ curl -fsS -X PUT "$es_url/_index_template/suricata-events" \
         "geo": { "properties": { "location": { "type": "geo_point" }, "country_iso_code": { "type": "keyword" }, "city_name": { "type": "keyword" } } },
         "as": { "properties": { "asn": { "type": "long" }, "organization_name": { "type": "keyword" }, "type": { "type": "keyword" } } }
       } },
-      "destination": { "properties": { "ip": { "type": "ip", "ignore_malformed": true }, "port": { "type": "integer", "ignore_malformed": true } } },
+      "destination": { "properties": {
+        "ip": { "type": "ip", "ignore_malformed": true },
+        "port": { "type": "integer", "ignore_malformed": true },
+        "geo": { "properties": { "location": { "type": "geo_point" }, "country_iso_code": { "type": "keyword" }, "city_name": { "type": "keyword" } } }
+      } },
       "network": { "properties": { "transport": { "type": "keyword" }, "protocol": { "type": "keyword" } } }
     } }
   }
 }
 JSON
+
+# #166: destination.geo.location was previously left to dynamic mapping here
+# (unlike source.geo.location just above), so it came in as a plain
+# {lat,lon} float object instead of geo_point on every live suricata-*
+# index -- destination-side geo queries/map visualizations silently
+# couldn't use it. A separate, untracked template ('suricata-field-limit',
+# lower priority, never applied) had the correct destination.geo.location
+# mapping and nothing else useful; folded that fix in here instead of
+# keeping two templates for one setting. Existing indices keep their old
+# dynamic mapping until suricata-7d ILM rolls them off; only new indices
+# pick this up.
 
 curl -fsS -X PUT "$es_url/_index_template/honeypot-dead-letter" \
   -H 'Content-Type: application/json' \
