@@ -71,6 +71,7 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 	// render when their slice is non-empty, and an empty fixture would walk
 	// the "no results" branch of every one of them.
 	stripped := true
+	revdeckSteps := 4
 	ghidraDetail := &ghidraResult{
 		SHA256:     strings.Repeat("c", 64),
 		ExitStatus: "ok",
@@ -95,6 +96,12 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 			Capabilities: []ghidraCapability{{Name: "create TCP socket", Namespace: "communication/socket/tcp", Matches: 2}},
 			Attack:       []ghidraAttack{{ID: "T1071.001", Tactic: "COMMAND_AND_CONTROL", Technique: "Application Layer Protocol", Subtechnique: "Web Protocols"}},
 			MBC:          []ghidraMBC{{ID: "C0001", Objective: "Communication", Behavior: "Socket Communication", Method: "Send Data"}},
+		},
+		RevDeck: &ghidraRevDeck{
+			Workflow: "program_triage", Status: "max_turns", Answer: "This binary looks benign.",
+			Steps: &revdeckSteps, ToolCalls: 3,
+			Citations: &ghidraRevDeckCitations{Valid: []string{"func@0x401000"}, Invalid: []string{"func@0xdead"}},
+			Warnings:  []string{"capped tool budget"},
 		},
 	}
 	// Populated rather than zero-valued, same reasoning as ghidraDetail:

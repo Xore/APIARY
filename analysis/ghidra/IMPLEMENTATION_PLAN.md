@@ -6,14 +6,20 @@
 > 3, 4 and 5 are built — five of the six `scripts/` exporters exist
 > (`findcrypt.py` was deleted, superseded by `scan_crypto()` in the worker),
 > the `revdeck` service is deployed (profile-gated in
-> `docker-compose.ghidra.yml`, interactive-only), GhidrAssist has a verified
-> pinned-artifact install procedure (`ghidrassist/README.md`, see
+> `docker-compose.ghidra.yml`) and, as of 2026-08-01 (#78), the worker
+> automates it too — `worker/ghidra-worker.py`'s `revdeck_triage()` drives a
+> verified upload/poll/chat contract against it, off by default behind
+> `REVDECK_API_BASE`, writing a `revdeck` field distinct from the worker's own
+> `ai_triage` — GhidrAssist has a verified pinned-artifact install procedure
+> (`ghidrassist/README.md`, see
 > [#192](https://github.com/Xore/honeypot-stack/issues/192) for a caveat
 > found along the way), and `report/generate_report.py` renders an HTML
-> report from every automated worker result, including a capa section.
-> Still missing: a verified request/result contract for automating Rev·Deck
-> triage, which is what the dashboard's `revdeck` workbench adapter is
-> waiting on.  
+> report from every automated worker result, including capa and revdeck
+> sections. Still missing: a *standalone*, independently orchestrated
+> dashboard workbench adapter for Rev·Deck (its own submission path and
+> result link) — today it only runs embedded inside the `ghidra` analyzer's
+> own pipeline, which the `revdeck` workbench entry in
+> [`workbench_domain.go`](../../dashboard/workbench_domain.go) still notes.  
 > **Tracked in**: [#78](https://github.com/Xore/honeypot-stack/issues/78)
 > (phases 3–5), [#76](https://github.com/Xore/honeypot-stack/issues/76)
 > (dashboard spool and entry points),
@@ -79,10 +85,16 @@ Three corrections against the layout this section used to show:
   reachable over the WireGuard `HP_BIND` address through the same Traefik +
   forward-auth SSO path as every other investigation UI. `revdeck/` now holds
   only its `README.md`. That closes the compose gap this document used to
-  list; the LLM automation *contract* on top of it — what #78 phase 2/3 and
-  the dashboard's `revdeck` workbench adapter
-  ([`workbench_domain.go`](../../dashboard/workbench_domain.go)) are actually
-  waiting on — is still unbuilt.
+  list, and as of 2026-08-01 (#78) the LLM automation *contract* on top of it
+  is built too — `worker/ghidra-worker.py`'s `revdeck_triage()`, verified
+  against a real clone of `biniamf/ai-reverse-engineering` (see
+  `revdeck/README.md`). What is still unbuilt is specifically the
+  *standalone* piece: the dashboard's `revdeck` workbench adapter
+  ([`workbench_domain.go`](../../dashboard/workbench_domain.go)) is a
+  separately orchestrated, independently selectable analyzer with its own
+  submission path and result link, which is a different thing from Rev·Deck
+  running automatically as an enrichment embedded in the `ghidra` analyzer's
+  own result — that part remains `Available: false`.
 - `report/` has no `templates/` subdirectory. [`generate_report.py`](report/generate_report.py)
   follows [#56](https://github.com/Xore/honeypot-stack/issues/56)'s
   `sandbox/windows/orchestrate/generate_report.py`, which doesn't use one
@@ -170,6 +182,20 @@ VirusTotal/JoeSandbox jobs complete.
 >
 > `attack_surface_triage` and `vulnerability_hypothesis` are not run.
 > Operator documentation: [`README.md`](README.md#ai-triage-and-the-local-only-rule).
+>
+> **Update, 2026-08-01 (#78): Rev·Deck itself is now also automated**, as a
+> second and independent enrichment alongside the local `triage()` above —
+> not the same feature, and not a correction of the "Rev·Deck stays interactive"
+> line above at the time it was written. `worker/ghidra-worker.py`'s
+> `revdeck_triage()` drives a verified upload/poll/chat contract against the
+> `revdeck` container itself (off by default behind `REVDECK_API_BASE`,
+> local-only enforced the same way), running exactly one no-address workflow
+> per analysis (`program_triage` by default; `suspicious_behavior` is the
+> other candidate, swappable via `REVDECK_WORKFLOW`, not run alongside it).
+> `attack_surface_triage` and `vulnerability_hypothesis` still are not run —
+> both require an analyst-selected function address, so they remain
+> interactive-only. See [`revdeck/README.md`](revdeck/README.md#automated-triage-78)
+> for the full contract and rationale.
 
 ### Source
 [biniamf/ai-reverse-engineering](https://github.com/biniamf/ai-reverse-engineering)
@@ -321,7 +347,9 @@ what `worker/ghidra-worker.py` produces today:
   ├── Structural info (lief: format, architecture, entry point, sections)
   ├── Fuzzy hashes (ssdeep/tlsh)
   ├── Capabilities (capa: ATT&CK/MBC tags, added 2026-08-01 #78)
-  └── AI triage (Rev·Deck / local-model output, if configured)
+  ├── AI triage (the worker's own local-model output, if configured, #103)
+  └── Rev·Deck automated triage (a second, independent AI aid, if configured,
+        added 2026-08-01 #78)
 ```
 
 A PDF is optional, not the default: `generate_report.py --pdf` renders one via

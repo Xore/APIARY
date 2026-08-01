@@ -101,6 +101,35 @@ type ghidraCapa struct {
 	MBC                   []ghidraMBC        `json:"mbc"`
 }
 
+// ghidraRevDeckCitations mirrors the "citations" object _revdeck_chat() in
+// ghidra-worker.py builds from Rev·Deck's own "citations" SSE event.
+type ghidraRevDeckCitations struct {
+	Valid   []string `json:"valid"`
+	Invalid []string `json:"invalid"`
+}
+
+// ghidraRevDeck mirrors the dict _revdeck_chat() in ghidra-worker.py returns
+// (#78): the result of Rev·Deck's own bounded autonomous tool-calling loop
+// against the Ghidra REST service, a second and independent AI aid alongside
+// AITriage above rather than a replacement for it. Nil when REVDECK_API_BASE
+// is unset, the endpoint was refused as non-local or unreachable, or the run
+// produced no usable answer. Steps is a pointer for the same reason Lief's
+// pointer fields are above: the template needs to tell "absent" from "zero".
+//
+// Status "max_turns" is not a failure — it is Rev·Deck's own forced
+// best-effort synthesis after its step budget ran out, and _revdeck_chat()
+// deliberately keeps that answer rather than discarding it, the same way
+// triage() above keeps a half-assessment when only one workflow answers.
+type ghidraRevDeck struct {
+	Workflow  string                  `json:"workflow"`
+	Status    string                  `json:"status"`
+	Answer    string                  `json:"answer"`
+	Steps     *int                    `json:"steps"`
+	ToolCalls int                     `json:"tool_calls"`
+	Citations *ghidraRevDeckCitations `json:"citations"`
+	Warnings  []string                `json:"warnings"`
+}
+
 type ghidraTriage struct {
 	Workflow    string   `json:"workflow"`
 	FamilyGuess string   `json:"family_guess"`
@@ -137,6 +166,7 @@ type ghidraResult struct {
 	FuzzyHashes  *ghidraFuzzyHashes `json:"fuzzy_hashes"`
 	Lief         *ghidraLief        `json:"lief"`
 	Capa         *ghidraCapa        `json:"capa"`
+	RevDeck      *ghidraRevDeck     `json:"revdeck"`
 	ReportPDF    string             `json:"report_pdf"`
 
 	// Set by the dashboard, not the worker: download routes, present only when

@@ -220,6 +220,74 @@ class StaticToolsStub(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+class RevDeckStub(BaseHTTPRequestHandler):
+    """Serves the Rev·Deck contract verified against a real clone of
+    biniamf/ai-reverse-engineering (see the comment block above
+    REVDECK_API_BASE in ghidra-worker.py): POST /upload, GET /status/{job_id},
+    POST /chat as an SSE stream of "data: {json}\\n\\n" lines.
+
+    _status_calls tracks polls per job_id so /status can answer "running" once
+    and "done" after, exercising the poll loop rather than resolving on the
+    first call. chat_mode picks which of Rev·Deck's real terminal shapes the
+    stream ends with: a normal "complete" finish, a "max_turns" forced
+    best-effort synthesis (kept, not discarded — a deliberate choice baked
+    into _revdeck_chat()), a mid-stream "error" event, or a "complete" finish
+    with no token events at all (an answer-less completion).
+    """
+
+    chat_mode = "complete"
+    _status_calls: dict = {}
+
+    def log_message(self, *a): pass
+
+    def _j(self, o, c=200):
+        b = json.dumps(o).encode()
+        self.send_response(c); self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
+
+    def do_GET(self):
+        if self.path.startswith("/status/"):
+            job_id = self.path[len("/status/"):]
+            calls = RevDeckStub._status_calls.get(job_id, 0) + 1
+            RevDeckStub._status_calls[job_id] = calls
+            return self._j({"job_id": job_id, "status": "running" if calls == 1 else "done"})
+        self.send_response(404); self.end_headers()
+
+    def do_POST(self):
+        if self.path == "/upload":
+            self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            return self._j({"job_id": "rd-job-1", "status": "queued"})
+        if self.path == "/chat":
+            self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            return self._chat_stream()
+        self.send_response(404); self.end_headers()
+
+    def _chat_stream(self):
+        events = [
+            {"type": "activity_start", "content": "Starting program_triage"},
+            {"type": "tool_call", "name": "get_functions", "args": {}},
+            {"type": "tool_result", "content": "12 functions found"},
+        ]
+        if self.chat_mode == "error":
+            events.append({"type": "error", "content": "stub: something broke"})
+        elif self.chat_mode == "empty":
+            events.append({"type": "done", "status": "complete", "steps": 1})
+        else:
+            for tok in ("This ", "binary ", "looks ", "benign."):
+                events.append({"type": "token", "content": tok})
+            events.append({"type": "warning", "content": "capped tool budget"})
+            events.append({"type": "citations", "valid": ["func@0x401000"], "invalid": []})
+            status = "max_turns" if self.chat_mode == "max_turns" else "complete"
+            events.append({"type": "done", "status": status, "steps": 4})
+
+        body = "".join(f"data: {json.dumps(e)}\n\n" for e in events).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
 def serve(handler):
     srv = HTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -516,6 +584,108 @@ def test_statictools(ghidra, statictools):
     check(d is not None and d["capa"] is None, "capa left null")
 
 
+def revdeck_run(tmp, name, ghidra, extra):
+    """Drain one request with the given revdeck settings; return its result.
+
+    REVDECK_POLL_INTERVAL=0 so _revdeck_wait()'s poll loop does not sleep for
+    real between the "running" and "done" stub responses.
+    """
+    req, res, smp, sha = spool(tmp, name)
+    env = {"GHIDRA_REQUEST_DIR": str(req), "GHIDRA_RESULTS_DIR": str(res),
+           "GHIDRA_SAMPLES_DIR": str(smp), "GHIDRA_API_BASE": ghidra,
+           "GHIDRA_LOCK": str(tmp / f"lock-{name}"),
+           # Off here too: this helper is for revdeck tests, not triage/statictools.
+           "GHIDRA_TRIAGE_API_BASE": "", "STATICTOOLS_API_BASE": "",
+           "REVDECK_POLL_INTERVAL": "0"}
+    env.update(extra)
+    r = run(env)
+    result = res / f"{sha}_ghidra.json"
+    return r, (json.loads(result.read_text()) if result.is_file() else None)
+
+
+def test_revdeck(ghidra, revdeck):
+    tmp = Path(tempfile.mkdtemp())
+
+    print("--- disabled by default leaves revdeck null ---")
+    r, d = revdeck_run(tmp, "disabled", ghidra, {})
+    check(r.returncode == 0, "exit 0 with REVDECK_API_BASE unset")
+    check(d is not None and d["revdeck"] is None,
+          "revdeck disabled by default (empty REVDECK_API_BASE) leaves revdeck null")
+
+    print("--- happy path: upload -> poll -> chat SSE ---")
+    RevDeckStub.chat_mode = "complete"
+    RevDeckStub._status_calls.clear()
+    r, d = revdeck_run(tmp, "ok", ghidra, {"REVDECK_API_BASE": revdeck})
+    check(r.returncode == 0, "exit 0 with revdeck on")
+    check(d is not None and d["exit_status"] == "ok", "the analysis completes")
+    if d:
+        rd = d["revdeck"]
+        check(rd is not None, "revdeck populated")
+        if rd:
+            check(rd["workflow"] == "program_triage",
+                  f"workflow recorded (got {rd.get('workflow')!r})")
+            check(rd["status"] == "complete",
+                  f"status recorded (got {rd.get('status')!r})")
+            check(rd["answer"] == "This binary looks benign.",
+                  f"answer concatenated from token events (got {rd.get('answer')!r})")
+            check(rd["tool_calls"] == 1,
+                  f"tool_calls counted (got {rd.get('tool_calls')!r})")
+            check(rd["citations"] == {"valid": ["func@0x401000"], "invalid": []},
+                  f"citations carried through (got {rd.get('citations')!r})")
+            check(rd["warnings"] == ["capped tool budget"],
+                  f"warnings carried through (got {rd.get('warnings')!r})")
+    check(RevDeckStub._status_calls.get("rd-job-1", 0) >= 2,
+          f"poll loop actually exercised (>=2 status calls, got "
+          f"{RevDeckStub._status_calls.get('rd-job-1', 0)})")
+
+    print("--- an 'error' done-status discards the answer ---")
+    RevDeckStub.chat_mode = "error"
+    RevDeckStub._status_calls.clear()
+    r, d = revdeck_run(tmp, "error", ghidra, {"REVDECK_API_BASE": revdeck})
+    check(r.returncode == 0, "exit 0 with an error event")
+    check(d is not None and d["exit_status"] == "ok",
+          "the Ghidra analysis is unaffected by a revdeck error")
+    check(d is not None and d["revdeck"] is None, "revdeck left null on an error event")
+
+    print("--- a 'max_turns' done-status is KEPT as a partial answer ---")
+    RevDeckStub.chat_mode = "max_turns"
+    RevDeckStub._status_calls.clear()
+    r, d = revdeck_run(tmp, "maxturns", ghidra, {"REVDECK_API_BASE": revdeck})
+    check(r.returncode == 0, "exit 0 with a max_turns finish")
+    if d:
+        rd = d["revdeck"]
+        check(rd is not None,
+              "a max_turns answer is kept, not discarded (deliberate design choice)")
+        if rd:
+            check(rd["status"] == "max_turns",
+                  f"status recorded as max_turns (got {rd.get('status')!r})")
+            check(rd["answer"] == "This binary looks benign.",
+                  "the partial answer is kept")
+
+    print("--- an empty answer is discarded ---")
+    RevDeckStub.chat_mode = "empty"
+    RevDeckStub._status_calls.clear()
+    r, d = revdeck_run(tmp, "empty", ghidra, {"REVDECK_API_BASE": revdeck})
+    check(r.returncode == 0, "exit 0 with an empty answer")
+    check(d is not None and d["revdeck"] is None,
+          "revdeck left null when the answer is empty")
+
+    print("--- a non-local REVDECK_API_BASE is refused ---")
+    RevDeckStub.chat_mode = "complete"
+    r, d = revdeck_run(tmp, "remote", ghidra, {"REVDECK_API_BASE": "https://openrouter.ai/api/v1"})
+    check(r.returncode == 0, "exit 0 with a non-local endpoint")
+    check(d is not None and d["revdeck"] is None, "revdeck left null")
+    check("refusing" in r.stderr, f"the refusal is logged (stderr: {r.stderr[-200:]!r})")
+
+    print("--- an unreachable REVDECK_API_BASE fails soft ---")
+    # Port 1 on loopback: local by the rule, and nothing is listening.
+    r, d = revdeck_run(tmp, "down", ghidra, {"REVDECK_API_BASE": "http://127.0.0.1:1"})
+    check(r.returncode == 0, "exit 0 with revdeck unreachable")
+    check(d is not None and d["exit_status"] == "ok",
+          "the analysis completes without revdeck")
+    check(d is not None and d["revdeck"] is None, "revdeck left null")
+
+
 def test_approved_contract():
     """The qualified benchmark prompt must be the prompt used in production."""
     root = Path(__file__).resolve().parents[3]
@@ -548,10 +718,12 @@ def main():
     model = serve(ModelStub)
     truncating = serve(TruncatingModelStub)
     statictools = serve(StaticToolsStub)
+    revdeck = serve(RevDeckStub)
     test_unit()
     test_spool(ghidra)
     test_triage(ghidra, model, truncating)
     test_statictools(ghidra, statictools)
+    test_revdeck(ghidra, revdeck)
     test_approved_contract()
     print(f"\n{len(fails)} failure(s)")
     for f in fails:

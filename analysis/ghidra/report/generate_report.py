@@ -307,6 +307,54 @@ def ai_triage_section(result: dict) -> str:
     )
 
 
+def revdeck_section(result: dict) -> str:
+    rd = result.get("revdeck")
+    if not rd:
+        return section(
+            "Rev·Deck automated triage",
+            empty("not observed"),
+            "A second, independent AI aid alongside AI triage above, driving "
+            "Rev·Deck's own bounded autonomous tool-calling loop against the "
+            "Ghidra service (#78); absent when REVDECK_API_BASE is unset, "
+            "the sidecar was unreachable, or the run produced no usable "
+            "answer.",
+        )
+    rows = [
+        ("Workflow", rd.get("workflow")),
+        ("Status", rd.get("status")),
+        ("Steps", rd.get("steps")),
+        ("Tool calls", rd.get("tool_calls")),
+    ]
+    body = kv_table(rows)
+
+    body += "<h3>Answer</h3>"
+    answer = rd.get("answer") or ""
+    body += f"<p>{esc(answer, 8000)}</p>" if answer else empty("not observed")
+
+    citations = rd.get("citations") or {}
+    valid_rows = [(c,) for c in (citations.get("valid") or [])]
+    invalid_rows = [(c,) for c in (citations.get("invalid") or [])]
+    if valid_rows or invalid_rows:
+        body += "<h3>Citations</h3>" + table(["valid"], valid_rows)
+        if invalid_rows:
+            body += table(["invalid"], invalid_rows)
+
+    warning_rows = [(w,) for w in (rd.get("warnings") or [])]
+    if warning_rows:
+        body += "<h3>Warnings</h3>" + table(["warning"], warning_rows)
+
+    return section(
+        "Rev·Deck automated triage",
+        body,
+        "A second, independent AI aid — Rev·Deck's own bounded autonomous "
+        "tool-calling loop against the Ghidra service, distinct from AI "
+        "triage above. A \"max_turns\" status means the step budget ran out "
+        "before the model finished; the answer is still its best-effort "
+        "synthesis, kept rather than discarded, and worth reading with the "
+        "same skepticism as any other unverified claim here.",
+    )
+
+
 CSS = """
 :root { color-scheme: light dark; }
 body { font: 14px/1.55 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
@@ -347,6 +395,7 @@ def build_html(result: dict, results_dir: Path) -> str:
         fuzzy_hash_section(result),
         capa_section(result),
         ai_triage_section(result),
+        revdeck_section(result),
     ])
 
     return f"""<!doctype html>

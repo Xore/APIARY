@@ -170,6 +170,13 @@ that:
 4. Polls `/functions`, `/strings`, `/imports`, `/export/ghidra-zip` per
    IMPLEMENTATION_PLAN.md Phase 1, and — if Rev·Deck is configured — runs
    the `program_triage` + `suspicious_behavior` workflows from Phase 2.
+   **Not how this was actually built (#78, 2026-08-01):** the worker's own
+   local `triage()` (Phase 2, `ai_triage` field) runs both workflows against
+   a local OpenAI-compatible endpoint, never through Rev·Deck. Rev·Deck
+   automation is a separate, later addition — `revdeck_triage()` — that runs
+   exactly *one* of its own autonomous workflows per analysis (default
+   `program_triage`), writing a distinct `revdeck` field. See
+   [`revdeck/README.md`](revdeck/README.md#automated-triage-78).
 5. Writes one normalized `{sha256}_ghidra.json` to `GHIDRA_RESULTS_DIR`
    (default `/ghidra-results`), matching the `sandboxResult` struct's shape
    and conventions (`version`, `requested_at`/`started_at`/`completed_at`,
@@ -202,6 +209,12 @@ that:
            "is_pie": true, "section_count": 30, "sections_truncated": false,
            "sections": [{"name": ".text", "size": 12345, "entropy": 6.2}],
            "libraries": ["libc.so.6"], "stripped": true},
+  "revdeck": {
+    "workflow": "program_triage", "status": "complete",
+    "answer": "…", "steps": 4, "tool_calls": 3,
+    "citations": {"valid": ["func@0x401000"], "invalid": []},
+    "warnings": []
+  },
   "report_pdf": "{sha256}_ghidra.pdf"
 }
 ```
@@ -212,6 +225,17 @@ a loopback-only sidecar next to `ghidra`/`ollama`. Both are `null` the same way
 format was not recognised. `stripped`/`is_dll`/`compile_timestamp` on `lief`
 are format-specific and simply absent — not `false`/`0` — on a format that has
 no such concept.
+
+`revdeck` (#78, added 2026-08-01) is a second, independent AI aid, distinct
+from `ai_triage` — Rev·Deck's own bounded autonomous tool-calling loop against
+the Ghidra service, not the worker's own single-shot evidence-extraction
+prompt. `null` when `REVDECK_API_BASE` is unset (the default), the endpoint
+was refused as non-local or unreachable, or the run produced no usable
+answer. `status: "max_turns"` is not a failure — it means the step budget ran
+out before the model reached its own conclusion, and the partial answer is
+kept rather than discarded. See
+[`revdeck/README.md`](revdeck/README.md#automated-triage-78) for the full
+contract.
 
 ---
 
@@ -366,10 +390,15 @@ Cards for:
 - FindCrypt hits.
 - Call graph, rendered as an inline SVG (`call_graph_svg` from the result
   JSON) rather than requiring a DOT viewer.
-- AI triage card (Rev·Deck `program_triage`/`suspicious_behavior` output)
-  — clearly labeled as AI-generated and evidence-linked back to the
-  specific function/string/import that grounded each claim, per
-  IMPLEMENTATION_PLAN.md Phase 2's "no hallucination on facts" design.
+- AI triage card (the worker's own local-model `program_triage`/
+  `suspicious_behavior` output, `ai_triage`) — clearly labeled as
+  AI-generated and evidence-linked back to the specific function/string/
+  import that grounded each claim, per IMPLEMENTATION_PLAN.md Phase 2's "no
+  hallucination on facts" design.
+- Rev·Deck automated triage card (`revdeck`, #78, built 2026-08-01) — a
+  second, independent AI card: Rev·Deck's own bounded autonomous
+  tool-calling loop against the Ghidra service, with its citations and any
+  warnings from the run, distinct from the AI triage card above.
 - "Download full report" button → `/export/ghidra/{sha256}`.
 
 ### List page (`ghidra.html` list mode, same as `sandbox.html` list mode)

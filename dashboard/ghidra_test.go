@@ -224,6 +224,67 @@ func TestLoadGhidraResultsCapaAbsentIsNil(t *testing.T) {
 	}
 }
 
+// _revdeck_chat() in ghidra-worker.py forwards this shape verbatim, including
+// a "max_turns" status kept as a deliberate partial answer rather than
+// discarded (#78). Steps is checked as a pointer dereference the same way
+// Lief's CompileTimestamp is, since the field exists to tell "absent" from
+// "zero" apart on the template side.
+func TestLoadGhidraResultsDecodesRevDeck(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GHIDRA_RESULTS_DIR", dir)
+
+	raw := `{
+		"version": 4, "exit_status": "ok", "completed_at": "2026-08-01T10:00:00+00:00",
+		"revdeck": {"workflow": "program_triage", "status": "max_turns",
+		            "answer": "This binary looks benign.", "steps": 4, "tool_calls": 3,
+		            "citations": {"valid": ["func@0x401000"], "invalid": ["func@0xdead"]},
+		            "warnings": ["capped tool budget"]}
+	}`
+	if err := os.WriteFile(filepath.Join(dir, shaA+"_ghidra.json"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rows := loadGhidraResults()
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	row := rows[0]
+
+	if row.RevDeck == nil || row.RevDeck.Workflow != "program_triage" ||
+		row.RevDeck.Status != "max_turns" || row.RevDeck.Answer != "This binary looks benign." {
+		t.Fatalf("revdeck did not decode: %+v", row.RevDeck)
+	}
+	if row.RevDeck.Steps == nil || *row.RevDeck.Steps != 4 {
+		t.Fatalf("revdeck steps did not decode: %+v", row.RevDeck.Steps)
+	}
+	if row.RevDeck.ToolCalls != 3 {
+		t.Fatalf("revdeck tool_calls did not decode: %+v", row.RevDeck.ToolCalls)
+	}
+	if row.RevDeck.Citations == nil || len(row.RevDeck.Citations.Valid) != 1 ||
+		row.RevDeck.Citations.Valid[0] != "func@0x401000" || len(row.RevDeck.Citations.Invalid) != 1 {
+		t.Fatalf("revdeck citations did not decode: %+v", row.RevDeck.Citations)
+	}
+	if len(row.RevDeck.Warnings) != 1 || row.RevDeck.Warnings[0] != "capped tool budget" {
+		t.Fatalf("revdeck warnings did not decode: %+v", row.RevDeck.Warnings)
+	}
+}
+
+// Absent covers every reason revdeck_triage() returns None in the worker
+// (REVDECK_API_BASE unset, non-local, unreachable, or no usable answer) --
+// all collapse to the same nil field before this ever reaches the dashboard,
+// so decoding a result with no "revdeck" key at all must not panic or
+// synthesize a zero-valued struct (#78).
+func TestLoadGhidraResultsRevDeckAbsentIsNil(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GHIDRA_RESULTS_DIR", dir)
+	writeGhidraResult(t, dir, shaA, map[string]any{"exit_status": "ok"})
+
+	rows := loadGhidraResults()
+	if len(rows) != 1 || rows[0].RevDeck != nil {
+		t.Fatalf("revdeck should be nil when the worker omitted it: %+v", rows)
+	}
+}
+
 // Identity comes from the filename, which the worker derived from a validated
 // request — not from the document body, which could disagree with it.
 func TestLoadGhidraResultsTrustsFilenameOverBody(t *testing.T) {
