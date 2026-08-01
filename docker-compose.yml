@@ -1224,6 +1224,53 @@ services:
         limits:
           cpus: "3.0"
           memory: 2G
+  # ===================== Reporter — external IP abuse reporting =====================
+  # #68 (Phase 1 of docs/ip-reporting-plan.md): tails the same sensor JSON
+  # logs Filebeat does, and would report attacker IPs to AbuseIPDB. Ships
+  # dry-run by default (no REPORTER_LIVE, no ABUSEIPDB_API_KEY below) --
+  # per WORK-LEDGER.md rule 7, production reporting needs separate explicit
+  # authorization after a sampled false-positive review of dry-run output.
+  # reporter/dryrun_test.go proves this is unable to reach the network in
+  # that state, not just configured not to.
+  reporter:
+    <<: *runtime-defaults
+    build: ./reporter
+    container_name: hp-reporter
+    restart: unless-stopped
+    # Root, same reasoning as filebeat directly above: every sensor's JSON
+    # log is 0640, owned by that sensor's own UID, no "other" read bit. A
+    # fixed non-root UID could read none of them. Numeric "0:0", not the
+    # string "root": this image is FROM scratch (Dockerfile) with no
+    # /etc/passwd for Docker to resolve a username against -- confirmed
+    # live, "user: root" here failed with "unable to find user root: no
+    # matching entries in passwd file", unlike filebeat's Alpine-based
+    # image just above, which has a real passwd file and can use the name.
+    user: "0:0"
+    environment:
+      - REPORTER_LIVE=${REPORTER_LIVE:-}
+      - ABUSEIPDB_API_KEY=${ABUSEIPDB_API_KEY:-}
+      - REPORTER_COOLDOWN_HOURS=${REPORTER_COOLDOWN_HOURS:-24}
+      - REPORTER_MIN_EVENTS=${REPORTER_MIN_EVENTS:-3}
+      - REPORTER_POLL_SECONDS=30
+    volumes:
+      - /opt/stacks/honeypot-stack/logs:/logs:ro
+      - reporter-data:/data
+      - ./reporter/whitelist.txt:/config/whitelist.txt:ro
+    # Deliberately not on honeynet: this container has no legitimate reason
+    # to reach any other container on that network, only to read log files
+    # (bind mount, not network) and -- once live -- reach AbuseIPDB over the
+    # public internet, which the default bridge network already provides.
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_READ_SEARCH
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
   # ===================== EveBox — Suricata EVE web GUI =====================
   # EveBox queries Elasticsearch directly, where Filebeat already ships the
   # Suricata history as suricata-v2-*. It keeps no database of its own.
@@ -1770,3 +1817,4 @@ volumes:
   yara-results:
     name: yara-results
   services-adapter-socket: null # #197: AF_UNIX control socket shared between hp-services-adapter and the dashboard
+  reporter-data: null # #68: reporter's SQLite dedup/tail-offset store and audit log

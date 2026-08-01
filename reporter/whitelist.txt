@@ -1,0 +1,14 @@
+# reporter whitelist -- IPs/CIDRs that must never be reported, one per line.
+# Blank lines and lines starting with # are ignored. Format: a bare IP
+# (treated as /32 or /128) or a CIDR.
+#
+# RFC1918/loopback/link-local and the WireGuard tunnel peer (10.8.0.1, #54)
+# are already excluded unconditionally by whitelist.go -- this file is for
+# additional operator-specific exclusions: this stack's own public IPs,
+# Tor exits you don't want reported, known-benign scanners you've verified
+# by hand, etc.
+#
+# Tracked directly (not gitignored), same convention as
+# dashboard/geoip/threat-cidrs.csv -- edit in place, your changes are a
+# local diff on this deployment's checkout, not a separate untracked file
+# Compose has to be told exists.
