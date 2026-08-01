@@ -182,6 +182,10 @@ After collection the worker runs two workflows against the model —
 `program_triage` and `suspicious_behavior` — and writes the answer to
 `ai_triage` on the result.
 
+The default, context, and explicit non-thinking request mode come from the
+[task-specific live-host evaluation](../../docs/local-llm-model-evaluation.md),
+not a general model leaderboard.
+
 The endpoint is OpenAI-compatible (`/v1/chat/completions`), the dialect that
 Ollama, llama.cpp's server, vLLM and LM Studio all serve, so the backend is
 swappable. What is not swappable is that it must be **local**.
@@ -217,9 +221,10 @@ the same prompt returns `{"family_guess": "wget", "risk_level": "low"}`.
 So the compose file sets `OLLAMA_CONTEXT_LENGTH=16384`. It has to be set on the
 server, because `/v1/chat/completions` has no field for context length — only
 Ollama's native API and that variable can reach it. Budget about 1.8 GB of KV
-cache on top of the weights; `qwen3:8b` Q4_K_M then reports 7.8 GB and just
-fits an 8 GB card. On a smaller card lower it rather than let it spill to CPU,
-and lower the evidence budgets to match.
+cache on top of the weights; `qwen3:8b` Q4_K_M reports 7.8 GB total on the live
+host and offloads about 1 GB to system RAM. CPU/RAM offload is supported and is
+not a correctness failure. On a genuinely memory-constrained host, lower the
+window and the evidence budgets together rather than accept truncation.
 
 The worker does not trust the setting. Every reply is checked against the token
 count the server reports about itself, and an answer whose prompt was truncated
@@ -334,12 +339,12 @@ that decide whether triage works and how long it takes:
 
 ```
 NAME      ID            SIZE     PROCESSOR    CONTEXT
-qwen3:8b  500a1f067a9f  7.8 GB   100% GPU     16384
+qwen3:8b  500a1f067a9f  7.8 GB   12%/88% CPU/GPU  16384
 ```
 
-`4096` there means the window setting is not reaching the container. Anything
-other than `100% GPU` means part of the model is on CPU, which on this host is
-the difference between a minute and a quarter of an hour per sample.
+`4096` there means the window setting is not reaching the container. A mixed
+CPU/GPU value is expected and allowed on this host; use measured latency and
+system-RAM capacity to operate it, not `100% GPU` as a correctness gate.
 
 ### Rev·Deck
 
@@ -358,5 +363,6 @@ python3 analysis/ghidra/worker/test_ghidra_worker.py
 
 Stdlib only, both sides stubbed, runs in seconds, and runs in CI on every
 change. It covers spool discipline, the endpoint contract, risk normalisation,
-the evidence budget, `<think>` stripping — and that a non-local endpoint is
-refused, which is a rule worth only as much as the thing that checks it.
+the evidence budget, explicit non-thinking mode, defensive `<think>` stripping
+— and that a non-local endpoint is refused, which is a rule worth only as much
+as the thing that checks it.

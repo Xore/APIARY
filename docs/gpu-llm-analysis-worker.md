@@ -56,7 +56,7 @@ hosted API (see [Guardrails §13](#13-guardrails-read-before-implementing)).
 - **LLM-driven live deception** (generating honeypot responses in real time).
   Reasons: inference latency is fingerprintable, per-session cost is high,
   a prompt-injection in an attacker-controlled session could make the
-  honeypot emit out-of-character output, and a local 7B model breaks
+  honeypot emit out-of-character output, and a small local model breaks
   character easily. This guide is **read-only analysis** of already
   captured data.
 - Any automated blocking/firewall action based on LLM output.
@@ -121,7 +121,7 @@ All outputs are written to the `llm-analysis` ES index (§9) and are
 │  ┌───────────────┐   HTTP :11434 (internal only)   │              │
 │  │ ollama        │◀──────────────┐                 │              │
 │  │ GPU: RTX 4000 │               │                 │              │
-│  │ qwen2.5:7b    │        ┌──────┴───────┐         │              │
+│  │ qwen3.5:4b    │        ┌──────┴───────┐         │              │
 │  │ nomic-embed   │        │ llm-worker   │─────────┘              │
 │  └───────────────┘        │ (python)     │                        │
 │                           │              │──▶ ES: llm-analysis    │
@@ -150,13 +150,15 @@ Design decisions:
 
 ## 5. Model Selection & VRAM Budget
 
-GPU: 8192 MiB. Reserve ~500 MiB for driver/context overhead → **budget
-≤ 7.3 GiB loaded at once.**
+GPU: 8192 MiB. Reserve ~500 MiB for driver/context overhead, so target
+≤ 7.3 GiB GPU-resident at once. Larger total allocations may offload to system
+RAM; that is supported on this host. Accuracy outranks residency and latency,
+but only one chat model may be loaded at a time.
 
 | Role | Model | Approx. VRAM | Why |
 |---|---|---|---|
-| Chat / analysis | `qwen2.5:7b-instruct-q4_K_M` | ~5.5 GiB (weights + 4k ctx) | Strong instruction-following and JSON output at this size; good multilingual coverage for attacker commands in any language |
-| Chat alternative | `llama3.1:8b-instruct-q4_K_M` | ~5.7 GiB | Slightly better reasoning, weaker JSON discipline |
+| Chat / analysis | `qwen3.5:4b` | ~3.4-3.7 GiB (8k-16k ctx) | Highest measured session score (94.3%), both injection checks passed; exact result in `local-llm-model-evaluation.md` |
+| Chat alternative | `qwen3:8b` | ~7.8 GB total at 16k, with ~1 GB CPU/RAM offload on this host | Lower session score (90.6%) but exact 16k sentinel and all injection checks passed |
 | Embeddings (optional, §10) | `nomic-embed-text` | ~0.3 GiB | Only loaded when embedding endpoints are used |
 
 Hard rules:
@@ -168,6 +170,9 @@ Hard rules:
   can use the GPU for retraining.
 - Context: cap prompts at ~6k tokens (truncate attacker content, §8).
   KV cache grows with context; do not raise `num_ctx` beyond 8192.
+- Send `think: false`. Ollama enables thinking by default for this model; the
+  benchmark showed that a bounded request can otherwise spend its whole output
+  budget on a hidden trace and return no usable JSON.
 - If the ML worker's GPU retraining is enabled later, schedule retraining
   windows away from the daily LLM report (see the other guide §5).
 
@@ -193,20 +198,20 @@ services:
 
   # --- one-shot model pull (setup only; the ONLY GPU-side internet use) ---
   ollama-pull:
-    image: ollama/ollama:latest          # GUARDRAIL: pin a digest before production
+    image: ollama/ollama:0.32.0@sha256:57f573b47f1f71ebb445789f279fe3e596a8beab182f7cf486db9205bad87c5a
     container_name: hp-ollama-pull
     volumes:
       - ollama-models:/root/.ollama
     entrypoint: ["/bin/sh", "-c"]
     command:
       - "ollama serve & sleep 3 &&
-         ollama pull qwen2.5:7b-instruct-q4_K_M &&
+         ollama pull qwen3.5:4b &&
          ollama pull nomic-embed-text"
     profiles: ["setup"]                  # only runs when explicitly requested
 
   # --- inference server (steady state, no published ports) ---
   ollama:
-    image: ollama/ollama:latest          # GUARDRAIL: same pinned digest as ollama-pull
+    image: ollama/ollama:0.32.0@sha256:57f573b47f1f71ebb445789f279fe3e596a8beab182f7cf486db9205bad87c5a
     container_name: hp-ollama
     restart: unless-stopped
     networks: [honeynet]
@@ -248,7 +253,7 @@ services:
       ES_HOST: http://elasticsearch:9200
       OLLAMA_URL: http://ollama:11434
       REDIS_URL: redis://tanner-redis:6379/0   # reuse existing redis if reachable; else add one
-      LLM_MODEL: qwen2.5:7b-instruct-q4_K_M
+      LLM_MODEL: qwen3.5:4b
       POLL_INTERVAL: "60"
       MAX_CONTENT_CHARS: "12000"
       DAILY_REPORT_HOUR: "6"             # UTC
@@ -464,11 +469,11 @@ docker exec hp-ollama nvidia-smi -L
 # expect: GPU 0: Quadro RTX 4000 ...
 
 # T2 model present and loadable
-docker exec hp-ollama ollama list | grep qwen2.5
-docker exec hp-ollama ollama run qwen2.5:7b-instruct-q4_K_M \
-  "Reply with the single word: ok" --verbose 2>&1 | grep -i ok
+docker exec hp-ollama ollama list | grep qwen3.5
+docker exec hp-ollama ollama run qwen3.5:4b --think=false --verbose \
+  "Reply with the single word: ok" 2>&1 | grep -i ok
 
-# T3 inference uses the GPU (VRAM > 4 GiB while a request runs)
+# T3 inference uses the GPU (VRAM > 3 GiB while a request runs)
 nvidia-smi --query-gpu=memory.used --format=csv
 
 # T4 no published ports

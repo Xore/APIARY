@@ -1,0 +1,14 @@
+# Reproduction-only import attempt for the REx86 LoRA published with
+# https://arxiv.org/abs/2510.20975. This does not create a model with Ollama
+# 0.32.0: Qwen is absent from that release's supported Safetensors adapter
+# architectures. Keep the file so the compatibility result can be reproduced
+# and re-tested after an Ollama upgrade. Place the adapter beside this file as
+# REx86/adapter_model.safetensors before running `ollama create`.
+#
+# The paper trained against the *base* Qwen2.5-Coder-7B checkpoint, not the
+# instruct model. Do not silently switch bases: Ollama documents mismatched
+# adapters as undefined behaviour.
+FROM qwen2.5-coder:7b-base-q4_K_M
+ADAPTER REx86/adapter_model.safetensors
+PARAMETER num_ctx 16384
+PARAMETER temperature 0

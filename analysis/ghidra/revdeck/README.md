@@ -23,7 +23,7 @@ cp ai-reverse-engineering/.env.example ai-reverse-engineering/.env
 # Option 1: Local Ollama (free, private)
 API_BASE=http://127.0.0.1:11434/v1
 API_KEY=not-used
-MODEL_NAME=qwen3:8b
+MODEL_NAME=qwen2.5-coder:7b-instruct-q4_K_M
 
 # Option 2: OpenRouter (hosted)
 API_BASE=https://openrouter.ai/api/v1
@@ -36,6 +36,11 @@ MODEL_NAME=anthropic/claude-opus-4.8
 ```bash
 cd analysis/ghidra
 docker compose -f docker-compose.ghidra.yml --profile revdeck up -d
+
+# Pull the independently selected interactive model into the shared Ollama
+# volume (the analysis-host installer only guarantees the Ghidra model).
+docker compose -f docker-compose.ghidra.yml exec ollama \
+    ollama pull qwen2.5-coder:7b-instruct-q4_K_M
 ```
 
 Open http://127.0.0.1:5000 — loopback-only by default, same as `ghidra`/
@@ -75,6 +80,12 @@ triage against a verified contract, and turning its output into a report, is
 tracked by [#78](https://github.com/Xore/honeypot-stack/issues/78). Until
 then, this stack is interactive-only: bring it up with `docker compose` and
 use the UI at http://127.0.0.1:5000 by hand.
+
+The local default comes from the task-specific
+[model evaluation](../../../docs/local-llm-model-evaluation.md): it tied for
+the highest Rev·Deck score, passed the x86 intent case, and does not depend on
+the thinking-control field that the current upstream Rev·Deck client does not
+send.
 
 ## Evidence Grounding
 
