@@ -21,6 +21,21 @@ import torch
 import torch.nn as nn
 from loguru import logger
 
+# PyTorch sizes its intra-op thread pool to the HOST's visible CPU count by
+# default, not the container's cgroup CPU quota (docker-compose.yml caps
+# this service at 2.0 CPUs; the homeserver has 16). Under that mismatch,
+# every nn.LSTM forward pass spawns far more threads than the quota can
+# actually run concurrently, and they contend for CPU time rather than
+# making progress -- observed live as a hard stall (200%+ CPU, zero
+# throughput, checkpoints frozen) the first time LSTMAEModel.score() ever
+# ran under real load. It never ran before that: hbos_score is exactly 0.5
+# (never > 0.5) until the first retrain accepts a real model, so this
+# codepath was untested against the container's actual CPU limit until
+# then. The model here is tiny (SEQ_LEN=15, HIDDEN_DIM=64) -- there is
+# nothing to gain from multi-threading a single sequence through it, so
+# pin this process to one thread rather than tune it to match "2.0".
+torch.set_num_threads(1)
+
 from models.isolation_forest import (
     _get_ip, _get_port, _get_transport_proto, _proto_enc, _ts_to_hour,
     _accept_decision, _symlink, HOLDOUT_FRACTION, HOLDOUT_MIN, RetrainResult,
