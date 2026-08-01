@@ -444,6 +444,19 @@ footer {
    just the gap between the grid and its low->high legend underneath. */
 .heatmap__legend { margin-top: 8px; }
 
+/* ── Card-grid inventories (#213 phase 4) ────────────────────────────────
+   .project-card/.project-grid chrome is Xore/theme's shared component; it
+   ships as a <div> with cursor:pointer left for a click handler. This page
+   wraps each card in a real <a> instead (keyboard nav, open-in-new-tab,
+   no JS needed) -- an anchor is inline by default, so it needs its own
+   display/color/underline reset to lay out and read exactly like the div
+   the component was designed as. */
+a.project-card { display: block; color: inherit; text-decoration: none; }
+/* A SHA-256 is far longer than any title .project-card was designed to
+   hold; truncate with an ellipsis rather than wrapping a hash across
+   several lines. */
+#ghidra-results .project-card__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-caption); }
+
 /* ── Leaflet attack map (dark-tile filter scoped to dark mode only) ─────── */
 .map-shell {
   position: relative; overflow: hidden;

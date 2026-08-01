@@ -99,7 +99,27 @@
 
         <form class="filters" id="ghidra-filters" method="get" action="/ghidra"><a class="chip" href="/payloads">&larr; captured payloads</a><input class="hp-input" name="q" value="{{.Query}}" placeholder="hash, imported symbol or family" aria-label="Search Ghidra results"><button class="copy" type="submit">search</button>{{if .Query}}<a class="chip" href="/ghidra">clear</a>{{end}}<span class="chip">{{len .Rows}} analyses</span>{{if .Status.UpdatedAt}}<span class="chip">status {{.Status.UpdatedAt}}</span>{{end}}</form>
 
-        <div class="card wide" id="ghidra-results"><p class="note">Administrators queue analyses with the <strong>Ghidra</strong> button on the payloads page. Unlike the sandbox, this runs on any binary containing code &mdash; including DLLs and documents that have no detonation path, where static analysis is the only route available. Search matches hashes, imported symbols, and the triage family guess; the string table is deliberately excluded, since almost every binary would match almost every query.</p>{{if .Rows}}<table class="data-table"><thead><tr><th>completed</th><th>SHA-256</th><th>family</th><th>functions</th><th>imports</th><th>crypto</th><th>exit</th><th>details</th></tr></thead><tbody>{{range .Rows}}<tr><td>{{.CompletedAt}}</td><td class="v"><a href="/payload-analysis/{{.SHA256}}">{{.SHA256}}</a></td><td>{{if .AITriage}}{{if .AITriage.FamilyGuess}}{{.AITriage.FamilyGuess}}{{else}}&mdash;{{end}}{{else}}&mdash;{{end}}</td><td class="n">{{len .Functions}}</td><td class="n">{{len .Imports}}</td><td class="n">{{len .FindCrypt}}</td><td class="n">{{if eq .ExitStatus "error"}}<span class="badge badge--muted tw:text-red">error</span>{{else}}{{.ExitStatus}}{{end}}</td><td><a class="lnk" href="/ghidra/{{.SHA256}}">investigate &rarr;</a></td></tr>{{end}}</tbody></table>{{else}}<p class="empty">No Ghidra analyses match this view.</p>{{end}}</div>
+        <div id="ghidra-results">
+          <p class="note">Administrators queue analyses with the <strong>Ghidra</strong> button on the payloads page. Unlike the sandbox, this runs on any binary containing code &mdash; including DLLs and documents that have no detonation path, where static analysis is the only route available. Search matches hashes, imported symbols, and the triage family guess; the string table is deliberately excluded, since almost every binary would match almost every query.</p>
+          {{if .Rows}}
+          <div class="project-grid">
+            {{range .Rows}}
+            <a class="project-card" href="/ghidra/{{.SHA256}}">
+              <div class="project-card__header">
+                <span class="project-card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></span>
+                <span class="project-card__title mono">{{.SHA256}}</span>
+                <div class="project-card__badges">
+                  {{if eq .ExitStatus "error"}}<span class="badge badge--muted tw:text-red">error</span>{{else}}<span class="badge badge--muted">{{.ExitStatus}}</span>{{end}}
+                  {{if .AITriage}}{{if .AITriage.FamilyGuess}}<span class="badge badge--accent">{{.AITriage.FamilyGuess}}</span>{{end}}{{end}}
+                </div>
+              </div>
+              <p class="project-card__desc">{{len .Functions}} function{{if ne (len .Functions) 1}}s{{end}} &bull; {{len .Imports}} import{{if ne (len .Imports) 1}}s{{end}}{{if .FindCrypt}} &bull; {{len .FindCrypt}} crypto constant{{if ne (len .FindCrypt) 1}}s{{end}}{{end}}</p>
+              <div class="project-card__meta"><span>completed {{.CompletedAt}}</span></div>
+            </a>
+            {{end}}
+          </div>
+          {{else}}<p class="empty">No Ghidra analyses match this view.</p>{{end}}
+        </div>
 
         {{end}}
 
