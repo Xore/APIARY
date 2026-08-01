@@ -53,10 +53,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-# 2: added fuzzy_hashes and lief (#138). Informational only — nothing reads
-# this field to decide how to parse the rest of the document; it exists so a
-# result can be tied to the worker version that produced it.
-RESULT_VERSION = 2
+# 4: added revdeck (#78). Informational only — nothing reads this field to
+# decide how to parse the rest of the document; it exists so a result can be
+# tied to the worker version that produced it. (3: added capa. 2: added
+# fuzzy_hashes and lief (#138).)
+RESULT_VERSION = 4
 
 REQUEST_DIR = Path(os.environ.get("GHIDRA_REQUEST_DIR", "/ghidra-requests"))
 RESULTS_DIR = Path(os.environ.get("GHIDRA_RESULTS_DIR", "/ghidra-results"))
@@ -98,7 +99,11 @@ GRAPH_DEPTH = int(os.environ.get("GHIDRA_GRAPH_DEPTH", "2"))
 # as GHIDRA_TRIAGE_API_BASE.
 STATICTOOLS_API_BASE = os.environ.get(
     "STATICTOOLS_API_BASE", "http://127.0.0.1:9091").rstrip("/")
-STATICTOOLS_TIMEOUT = int(os.environ.get("STATICTOOLS_TIMEOUT", "120"))
+# capa's rule matching (added #78) is the slow path on this endpoint — plain
+# ssdeep/tlsh/lief calls return in well under a second. 300s gives capa room
+# on a large binary without letting one stuck request wedge the drain loop
+# indefinitely.
+STATICTOOLS_TIMEOUT = int(os.environ.get("STATICTOOLS_TIMEOUT", "300"))
 
 # ── AI triage (#103) ─────────────────────────────────────────────────────────
 #
@@ -133,6 +138,68 @@ TRIAGE_MAX_STRINGS = int(os.environ.get("GHIDRA_TRIAGE_MAX_STRINGS", "200"))
 TRIAGE_MAX_IMPORTS = int(os.environ.get("GHIDRA_TRIAGE_MAX_IMPORTS", "150"))
 TRIAGE_MAX_FUNCTIONS = int(os.environ.get("GHIDRA_TRIAGE_MAX_FUNCTIONS", "100"))
 TRIAGE_STRING_CHARS = int(os.environ.get("GHIDRA_TRIAGE_STRING_CHARS", "200"))
+
+# ── Rev·Deck automated triage (#78) ─────────────────────────────────────────
+#
+# biniamf/ai-reverse-engineering, vendored by an operator into
+# analysis/ghidra/revdeck/ai-reverse-engineering (see revdeck/README.md) and
+# run behind docker-compose.ghidra.yml's `revdeck` profile. A second,
+# independent aid alongside triage() above, not a replacement: that function
+# asks the local model one narrow JSON-extraction question over a bounded
+# evidence slice built by this worker, while this drives Rev·Deck's own
+# bounded autonomous tool-calling loop against the same Ghidra REST service
+# and returns a cited narrative answer.
+#
+# Contract verified 2026-08-01 against a real clone of biniamf/
+# ai-reverse-engineering — webui/app.py, webui/ghidra_assistant.py,
+# webui/workflows.py, webui/ghidra_client.py, webui/file_preflight.py,
+# webui/validation.py — not from a plan document. What it actually exposes:
+#
+#   POST /upload          multipart "file" (+ "analyze_as_raw": "true")
+#                          -> {"job_id": "...", "status": "queued"|"done", ...}
+#   GET  /status/{job_id}  -> {"status": "queued|running|done|failed|
+#                               cancelled|interrupted", ...}
+#   POST /chat             JSON {"message", "job_id", "mode": "autonomous",
+#                                 "workflow": "program_triage"}
+#                          -> text/event-stream, one "data: {json}\n\n" line
+#                             per event. Event "type"s seen in source:
+#                             activity_start, token, tool_call, tool_result,
+#                             warning, citations, error, done.
+#
+# analyze_as_raw=true is always sent: the 409 "confirmation_required" gate in
+# file_preflight.classify_file() only fires for content that decodes as
+# >=97% printable UTF-8, which a captured binary essentially never is, but
+# forcing it removes the case entirely rather than trusting that.
+#
+# Set REVDECK_API_BASE empty to switch this off entirely, same convention as
+# STATICTOOLS_API_BASE/GHIDRA_TRIAGE_API_BASE. Unlike those two, empty is the
+# *default*: revdeck is profile-gated and, per revdeck/README.md, has never
+# shipped running — an operator opts in once it actually is.
+REVDECK_API_BASE = os.environ.get("REVDECK_API_BASE", "").rstrip("/")
+# program_triage has no requires_address and most directly parallels what
+# triage() above already does: a whole-program summary, no analyst-selected
+# target. suspicious_behavior is the other no-address workflow worth trying;
+# swap it in per-deployment rather than running both and doubling the cost of
+# every analysis.
+REVDECK_WORKFLOW = os.environ.get("REVDECK_WORKFLOW", "program_triage")
+REVDECK_MESSAGE = os.environ.get(
+    "REVDECK_MESSAGE",
+    "Run the standard automated triage workflow for this job and summarize "
+    "the program.")
+REVDECK_UPLOAD_TIMEOUT = int(os.environ.get("REVDECK_UPLOAD_TIMEOUT", "300"))
+REVDECK_POLL_INTERVAL = int(os.environ.get("REVDECK_POLL_INTERVAL", "5"))
+# Generous: nothing here guarantees Rev·Deck's own upload lands on the same
+# job analyse_one() already created (that depends on the Ghidra service
+# deduplicating by sha256 server-side), so this has to tolerate a second full
+# analysis rather than assume an instant cache hit.
+REVDECK_STATUS_TIMEOUT = int(os.environ.get("REVDECK_STATUS_TIMEOUT", "1800"))
+# The workflow's own default_budget bounds model turns; this bounds wall
+# clock for the whole streamed exchange, generously, on a shared GPU.
+REVDECK_CHAT_TIMEOUT = int(os.environ.get("REVDECK_CHAT_TIMEOUT", "900"))
+# Answers are narrative prose (unlike triage()'s bounded JSON fields) and
+# unbounded evidence tool_result payloads never get echoed into it, but the
+# final synthesis text has no server-side cap; hold the line here too.
+REVDECK_ANSWER_CHARS = int(os.environ.get("REVDECK_ANSWER_CHARS", "8000"))
 
 # GHIDRA_ALERT_RISK_LEVELS in the dashboard matches these exactly. A model that
 # free-forms "Highly Suspicious" would silently never alert, so anything that
@@ -458,6 +525,226 @@ def lief_parse(sample: Path) -> dict | None:
     return _statictools_post("/v1/lief-parse", data)
 
 
+def capa_scan(sample: Path) -> dict | None:
+    """MITRE ATT&CK/MBC capability tags via capa, via the statictools sidecar.
+
+    None if the sidecar is unavailable, OR capa's default backend does not
+    cover this sample's architecture/format/OS (it only covers x86/amd64/
+    arm64 — no MIPS or ARM32, both common in this honeypot's IoT catch; see
+    #195 and the statictools server's _CAPA_UNSUPPORTED_EXIT_CODES). Same
+    "no signal" collapse as lief_parse() above: the sidecar reports 422 for
+    the unsupported case and _statictools_post already logs that quietly.
+    """
+    if not STATICTOOLS_API_BASE:
+        return None
+    try:
+        data = sample.read_bytes()
+    except OSError as e:
+        log(f"  [!] capa scan: {e}")
+        return None
+    return _statictools_post("/v1/capa", data)
+
+
+def _revdeck_multipart(sample: Path) -> tuple[bytes, str]:
+    """Build the /upload multipart body: the sample plus analyze_as_raw=true."""
+    boundary = uuid.uuid4().hex
+    filename = sample.name
+    ctype = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    parts = [
+        f"--{boundary}\r\n".encode(),
+        (f'Content-Disposition: form-data; name="file"; '
+         f'filename="{filename}"\r\n').encode(),
+        f"Content-Type: {ctype}\r\n\r\n".encode(),
+        sample.read_bytes(),
+        f"\r\n--{boundary}\r\n".encode(),
+        b'Content-Disposition: form-data; name="analyze_as_raw"\r\n\r\n',
+        b"true",
+        f"\r\n--{boundary}--\r\n".encode(),
+    ]
+    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
+
+
+def _revdeck_upload(sample: Path) -> str | None:
+    """POST /upload. Returns the job id, or None on any failure."""
+    body, ctype = _revdeck_multipart(sample)
+    req = urllib.request.Request(
+        f"{REVDECK_API_BASE}/upload", data=body, method="POST")
+    req.add_header("Content-Type", ctype)
+    try:
+        with urllib.request.urlopen(req, timeout=REVDECK_UPLOAD_TIMEOUT) as r:
+            resp = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        log(f"  [!] revdeck upload: HTTP {e.code}: {e.read()[:200]!r}")
+        return None
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
+        log(f"  [!] revdeck upload: {e}")
+        return None
+    job_id = resp.get("job_id") if isinstance(resp, dict) else None
+    if not job_id:
+        log(f"  [!] revdeck upload: no job_id in {resp!r:.200}")
+        return None
+    return str(job_id)
+
+
+def _revdeck_wait(job_id: str) -> bool:
+    """Poll GET /status/{job_id} until a terminal state. True only for "done"."""
+    deadline = time.monotonic() + REVDECK_STATUS_TIMEOUT
+    while time.monotonic() < deadline:
+        req = urllib.request.Request(f"{REVDECK_API_BASE}/status/{job_id}")
+        try:
+            with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as r:
+                resp = json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            log(f"  [!] revdeck status: HTTP {e.code}: {e.read()[:200]!r}")
+            return False
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
+            log(f"  [!] revdeck status: {e}")
+            return False
+        state = resp.get("status") if isinstance(resp, dict) else None
+        if state == "done":
+            return True
+        # TERMINAL_JOB_STATES in ghidra_client.py, minus "done".
+        if state in ("failed", "cancelled", "interrupted"):
+            log(f"  [!] revdeck: job {job_id} ended in state {state!r}")
+            return False
+        time.sleep(REVDECK_POLL_INTERVAL)
+    log(f"  [!] revdeck: job {job_id} did not reach done within "
+        f"{REVDECK_STATUS_TIMEOUT}s")
+    return False
+
+
+def _revdeck_chat(job_id: str) -> dict | None:
+    """POST /chat and consume the SSE stream. Returns a summary dict or None.
+
+    Each event is one "data: {json}\\n\\n" line (webui/app.py's generate()).
+    token events are concatenated into the answer; tool_call is counted;
+    warning/citations are kept; error or an empty/non-terminal-with-no-answer
+    stream is treated as failure, same as every other enrichment here.
+    """
+    body = json.dumps({
+        "message": REVDECK_MESSAGE,
+        "job_id": job_id,
+        "mode": "autonomous",
+        "workflow": REVDECK_WORKFLOW,
+    }).encode()
+    req = urllib.request.Request(f"{REVDECK_API_BASE}/chat", data=body, method="POST")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Accept", "text/event-stream")
+    try:
+        response = urllib.request.urlopen(req, timeout=REVDECK_CHAT_TIMEOUT)
+    except urllib.error.HTTPError as e:
+        log(f"  [!] revdeck chat: HTTP {e.code}: {e.read()[:200]!r}")
+        return None
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        log(f"  [!] revdeck chat: {e}")
+        return None
+
+    tokens: list[str] = []
+    warnings: list[str] = []
+    citations: dict | None = None
+    tool_calls = 0
+    status = None
+    steps = None
+    error_content = None
+    try:
+        with response as r:
+            for raw_line in r:
+                line = raw_line.decode("utf-8", "replace").strip("\r\n")
+                if not line.startswith("data:"):
+                    continue
+                payload = line[len("data:"):].strip()
+                if not payload:
+                    continue
+                try:
+                    event = json.loads(payload)
+                except ValueError:
+                    continue
+                if not isinstance(event, dict):
+                    continue
+                etype = event.get("type")
+                if etype == "token":
+                    content = event.get("content")
+                    if isinstance(content, str):
+                        tokens.append(content)
+                elif etype == "tool_call":
+                    tool_calls += 1
+                elif etype == "warning":
+                    content = event.get("content")
+                    if isinstance(content, str):
+                        warnings.append(content)
+                elif etype == "citations":
+                    citations = {
+                        "valid": event.get("valid") or [],
+                        "invalid": event.get("invalid") or [],
+                    }
+                elif etype == "error":
+                    error_content = event.get("content")
+                elif etype == "done":
+                    status = event.get("status")
+                    steps = event.get("steps")
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        log(f"  [!] revdeck chat: stream interrupted: {e}")
+        return None
+
+    if error_content:
+        log(f"  [!] revdeck chat: {error_content}")
+        return None
+    answer = "".join(tokens).strip()
+    # "complete" is a normal finish; "max_turns" is a forced best-effort
+    # synthesis after the step budget ran out (chat_completion_stream in
+    # webui/ghidra_assistant.py) and still worth keeping, same as triage()
+    # above keeping a half-assessment when only one workflow answers. Only
+    # "error" or an empty answer is discarded.
+    if status not in ("complete", "max_turns") or not answer:
+        log(f"  [!] revdeck chat: ended with status {status!r}, no usable "
+            f"answer - discarding")
+        return None
+
+    return {
+        "workflow": REVDECK_WORKFLOW,
+        "status": status,
+        "answer": _clean(answer, REVDECK_ANSWER_CHARS),
+        "steps": steps,
+        "tool_calls": tool_calls,
+        "citations": citations,
+        "warnings": [w for w in (_clean(x, 300) for x in warnings) if w][:10],
+    }
+
+
+def revdeck_triage(sample: Path) -> dict | None:
+    """Ask Rev·Deck's own autonomous workflow to triage this sample.
+
+    Fail-soft, same convention as fuzzy_hash()/lief_parse()/capa_scan(): this
+    is an optional enrichment on top of a finished Ghidra run, and losing it
+    because the revdeck sidecar was not deployed, unreachable, or produced a
+    bad stream must not throw away that analysis. None covers every one of
+    those cases identically.
+    """
+    try:
+        return _revdeck_triage(sample)
+    except Exception as e:  # noqa: BLE001
+        log(f"  [!] revdeck triage failed unexpectedly: {e!r}")
+        return None
+
+
+def _revdeck_triage(sample: Path) -> dict | None:
+    if not REVDECK_API_BASE:
+        return None
+    if not endpoint_is_local(REVDECK_API_BASE):
+        # Same rule as triage() and #103, applied harder: this sends the
+        # sample itself, not just text pulled out of it.
+        log(f"  [!] revdeck: {REVDECK_API_BASE} is not a local endpoint - "
+            f"refusing to send the sample to it (see #103); skipping "
+            f"revdeck triage")
+        return None
+    job_id = _revdeck_upload(sample)
+    if not job_id:
+        return None
+    if not _revdeck_wait(job_id):
+        return None
+    return _revdeck_chat(job_id)
+
+
 def build_call_graph(client: "GhidraClient", job: str, functions: list,
                      sha: str) -> str | None:
     """Walk the call graph and render it, returning the SVG filename or None.
@@ -536,6 +823,27 @@ def build_call_graph(client: "GhidraClient", job: str, functions: list,
     svg_path.chmod(0o600)
     log(f"  [+] call graph: {len(nodes)} nodes, {len(edges)} edges")
     return svg_path.name
+
+
+def generate_report(result: dict) -> str | None:
+    """Render this result as an HTML report via report/generate_report.py.
+
+    Mirrors sandbox/windows/orchestrate/run_sample.py's own
+    ``from generate_report import build_report`` pattern: a local sibling
+    import, not a pip dependency, and fail-soft the same way triage() and
+    fuzzy_hash() are — a report-rendering bug must not throw away a finished
+    analysis. Runs last, from the fully-assembled result dict, so it can
+    describe everything above it including its own absence.
+    """
+    try:
+        report_dir = str(Path(__file__).resolve().parent.parent / "report")
+        if report_dir not in sys.path:
+            sys.path.insert(0, report_dir)
+        from generate_report import build_report
+        return build_report(result, RESULTS_DIR)
+    except Exception as e:  # noqa: BLE001
+        log(f"  [!] report generation failed: {e!r}")
+        return None
 
 
 def endpoint_is_local(base: str) -> bool:
@@ -863,7 +1171,7 @@ def _triage(parts: dict) -> dict | None:
 
 
 def statictools_state() -> str:
-    """One line saying whether fuzzy_hash()/lief_parse() will run, for --selftest."""
+    """One line saying whether fuzzy_hash()/lief_parse()/capa_scan() will run, for --selftest."""
     if not STATICTOOLS_API_BASE:
         return "disabled (STATICTOOLS_API_BASE is empty)"
     try:
@@ -951,6 +1259,36 @@ def triage_context_state() -> str:
     return f"context fits a full evidence block ({tokens} tokens read)"
 
 
+def revdeck_state() -> str:
+    """One line saying whether revdeck_triage() will run, for --selftest.
+
+    /readyz (not /healthz) on purpose: it probes Ghidra reachability and LLM
+    configuration, the two things _revdeck_triage() actually depends on,
+    rather than just "the Flask process is up".
+    """
+    if not REVDECK_API_BASE:
+        return "disabled (REVDECK_API_BASE is empty)"
+    if not endpoint_is_local(REVDECK_API_BASE):
+        return f"REFUSED - {REVDECK_API_BASE} is not local, revdeck will not run"
+    req = urllib.request.Request(f"{REVDECK_API_BASE}/readyz")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            body = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        try:
+            body = json.loads(e.read())
+        except ValueError:
+            return f"{REVDECK_API_BASE} UNREACHABLE (HTTP {e.code})"
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
+        return f"{REVDECK_API_BASE} UNREACHABLE ({e})"
+    ghidra = body.get("ghidra", {}) if isinstance(body, dict) else {}
+    llm = body.get("llm", {}) if isinstance(body, dict) else {}
+    if body.get("ready"):
+        return f"{REVDECK_API_BASE} OK, workflow={REVDECK_WORKFLOW}"
+    return (f"{REVDECK_API_BASE} NOT READY (ghidra_reachable="
+            f"{ghidra.get('reachable')}, llm_configured={llm.get('configured')})")
+
+
 def write_result(sha: str, payload: dict) -> None:
     """Write the result JSON atomically.
 
@@ -1016,8 +1354,14 @@ def analyse_one(client: GhidraClient, sha: str, sample: Path,
 
     fuzzy = fuzzy_hash(sample)
     lief_info = lief_parse(sample)
+    capa_info = capa_scan(sample)
+    revdeck_info = revdeck_triage(sample)
+    if revdeck_info:
+        log(f"  [+] revdeck ({revdeck_info['workflow']}, "
+            f"status={revdeck_info['status']}): "
+            f"{revdeck_info['tool_calls']} tool call(s)")
 
-    return {
+    result = {
         "version": RESULT_VERSION,
         "sha256": sha,
         "requested_at": requested_at,
@@ -1040,11 +1384,16 @@ def analyse_one(client: GhidraClient, sha: str, sample: Path,
         "ai_triage": ai_triage,
         "fuzzy_hashes": fuzzy,
         "lief": lief_info,
-        # Populated by IMPLEMENTATION_PLAN.md phase 5 (#102), which is not
-        # built. Emitted as null rather than omitted so the dashboard reads one
-        # stable shape and needs no special case for older results.
+        "capa": capa_info,
+        "revdeck": revdeck_info,
+        # Overwritten below by generate_report(), which needs the rest of
+        # this dict built first. Emitted as null here rather than omitted so
+        # the dashboard reads one stable shape even if report generation
+        # fails and leaves it unset.
         "report_pdf": None,
     }
+    result["report_pdf"] = generate_report(result)
+    return result
 
 
 def drain() -> int:
@@ -1111,7 +1460,8 @@ def drain() -> int:
                 "error": str(e),
                 "functions": [], "strings": [], "imports": [], "findcrypt": [],
                 "call_graph_svg": None, "ai_triage": None,
-                "fuzzy_hashes": None, "lief": None, "report_pdf": None,
+                "fuzzy_hashes": None, "lief": None, "capa": None, "revdeck": None,
+                "report_pdf": None,
             })
             claimed.rename(claimed.with_suffix(".failed"))
         finally:
@@ -1139,6 +1489,7 @@ def selftest() -> int:
     print(f"SAMPLES_DIR   : {SAMPLES_DIR} (exists={SAMPLES_DIR.is_dir()})")
     print(f"TRIAGE        : {triage_state()}")
     print(f"STATICTOOLS   : {statictools_state()}")
+    print(f"REVDECK       : {revdeck_state()}")
     if not ok:
         print("\nStart it with:")
         print("  docker compose -f analysis/ghidra/docker-compose.ghidra.yml up -d ghidra")
@@ -1170,9 +1521,20 @@ def selftest() -> int:
         return 1
     fuzzy = fuzzy_hash(probe)
     lief_info = lief_parse(probe)
+    capa_info = capa_scan(probe)
     print(f"  fuzzy_hashes   : {fuzzy}")
     print(f"  lief           : "
           f"{'ok, format=' + lief_info['format'] if lief_info else None}")
+    print(f"  capa           : "
+          f"{'ok, capabilities=' + str(len(capa_info['capabilities'])) if capa_info else None}")
+    if REVDECK_API_BASE:
+        # Not run by default even when configured: this is a live upload plus
+        # a real bounded LLM conversation on shared infrastructure, not a
+        # cheap contract probe like the three calls above it. revdeck_state()
+        # already reports reachability/readiness without spending that.
+        print(f"  revdeck        : configured but skipped here - see REVDECK "
+              f"line above; revdeck_triage() itself is exercised by an "
+              f"actual analysis, not --selftest")
     print("\ncontract OK")
     return 0
 

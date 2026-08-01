@@ -64,6 +64,72 @@ type ghidraLief struct {
 	CompileTimestamp *int64 `json:"compile_timestamp"`
 }
 
+type ghidraCapability struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Matches   int    `json:"matches"`
+}
+
+type ghidraAttack struct {
+	ID           string `json:"id"`
+	Tactic       string `json:"tactic"`
+	Technique    string `json:"technique"`
+	Subtechnique string `json:"subtechnique"`
+}
+
+type ghidraMBC struct {
+	ID        string `json:"id"`
+	Objective string `json:"objective"`
+	Behavior  string `json:"behavior"`
+	Method    string `json:"method"`
+}
+
+// ghidraCapa mirrors what analysis/ghidra/statictools/server.py's
+// capa_scan() returns, forwarded verbatim by the worker (#78). Unlike Lief,
+// the worker's capa_scan() never forwards the sidecar's {"unsupported": ...}
+// 422 shape here — _statictools_post() already collapses any HTTP error,
+// 422 included, to nil, so on the Go side "no capa data" (nil *ghidraCapa)
+// covers both "sidecar down" and "capa's default backend does not support
+// this architecture" the same way absent Lief output already does.
+type ghidraCapa struct {
+	Arch                  string             `json:"arch"`
+	OS                    string             `json:"os"`
+	Format                string             `json:"format"`
+	Capabilities          []ghidraCapability `json:"capabilities"`
+	CapabilitiesTruncated bool               `json:"capabilities_truncated"`
+	Attack                []ghidraAttack     `json:"attack"`
+	MBC                   []ghidraMBC        `json:"mbc"`
+}
+
+// ghidraRevDeckCitations mirrors the "citations" object _revdeck_chat() in
+// ghidra-worker.py builds from Rev·Deck's own "citations" SSE event.
+type ghidraRevDeckCitations struct {
+	Valid   []string `json:"valid"`
+	Invalid []string `json:"invalid"`
+}
+
+// ghidraRevDeck mirrors the dict _revdeck_chat() in ghidra-worker.py returns
+// (#78): the result of Rev·Deck's own bounded autonomous tool-calling loop
+// against the Ghidra REST service, a second and independent AI aid alongside
+// AITriage above rather than a replacement for it. Nil when REVDECK_API_BASE
+// is unset, the endpoint was refused as non-local or unreachable, or the run
+// produced no usable answer. Steps is a pointer for the same reason Lief's
+// pointer fields are above: the template needs to tell "absent" from "zero".
+//
+// Status "max_turns" is not a failure — it is Rev·Deck's own forced
+// best-effort synthesis after its step budget ran out, and _revdeck_chat()
+// deliberately keeps that answer rather than discarding it, the same way
+// triage() above keeps a half-assessment when only one workflow answers.
+type ghidraRevDeck struct {
+	Workflow  string                  `json:"workflow"`
+	Status    string                  `json:"status"`
+	Answer    string                  `json:"answer"`
+	Steps     *int                    `json:"steps"`
+	ToolCalls int                     `json:"tool_calls"`
+	Citations *ghidraRevDeckCitations `json:"citations"`
+	Warnings  []string                `json:"warnings"`
+}
+
 type ghidraTriage struct {
 	Workflow    string   `json:"workflow"`
 	FamilyGuess string   `json:"family_guess"`
@@ -99,6 +165,8 @@ type ghidraResult struct {
 	AITriage     *ghidraTriage      `json:"ai_triage"`
 	FuzzyHashes  *ghidraFuzzyHashes `json:"fuzzy_hashes"`
 	Lief         *ghidraLief        `json:"lief"`
+	Capa         *ghidraCapa        `json:"capa"`
+	RevDeck      *ghidraRevDeck     `json:"revdeck"`
 	ReportPDF    string             `json:"report_pdf"`
 
 	// Set by the dashboard, not the worker: download routes, present only when

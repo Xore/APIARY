@@ -104,10 +104,11 @@ services:
     # tell the difference.
 
   statictools:
-    # Fuzzy hashing (ssdeep/tlsh, #85) and structural parsing (lief, #85) for
-    # worker/ghidra-worker.py's fuzzy_hash()/lief_parse() calls (#138). A
-    # container rather than a host pip install for the same reason the worker
-    # itself is stdlib-only: see statictools/server.py's module docstring.
+    # Fuzzy hashing (ssdeep/tlsh, #85), structural parsing (lief, #85), and
+    # capa capability tagging (#78) for worker/ghidra-worker.py's
+    # fuzzy_hash()/lief_parse()/capa_scan() calls (#138). A container rather
+    # than a host pip install for the same reason the worker itself is
+    # stdlib-only: see statictools/server.py's module docstring.
     build: ./statictools
     restart: unless-stopped
     ports:
@@ -117,6 +118,14 @@ services:
     security_opt:
       - no-new-privileges:true
     read_only: true
+    tmpfs:
+      # capa has no stdin mode -- it needs each sample on disk. server.py's
+      # capa_scan() writes it under $TMPDIR per request and unlinks it right
+      # after; this is the only thing that writes anywhere in this service,
+      # everything else stays in memory (fuzzy_hash/lief_parse read the POST
+      # body directly). Without this the read_only root above leaves capa
+      # with nowhere to write and every request fails.
+      - /tmp
     healthcheck:
       test: ['CMD', 'python3', '-c',
              "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9091/v1/health', timeout=3).status==200 else 1)"]
