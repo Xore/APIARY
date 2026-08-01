@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -100,6 +102,13 @@ class GovernanceTests(unittest.TestCase):
         self.assertEqual(status["overall"], "drift")
         self.assertEqual(status["slots"]["ghidra"]["codes"], ["model_missing"])
         self.assertTrue(status["advisory_only"])
+
+    @unittest.skipIf(os.name == "nt", "Windows does not implement POSIX chmod bits")
+    def test_status_file_is_not_world_readable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "status.json"
+            governance.write_status(path, {"overall": "approved"})
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o640)
 
     def test_case_gate_cannot_be_hidden_by_aggregate(self):
         report = self.report()
