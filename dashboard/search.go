@@ -201,6 +201,9 @@ func (s *store) searchData(query string) searchPage {
 	if runs := s.searchSandbox(needle); len(runs.Hits) > 0 {
 		groups = append(groups, runs)
 	}
+	if analyses := s.searchGitHubAnalysis(needle); len(analyses.Hits) > 0 {
+		groups = append(groups, analyses)
+	}
 	if matchingEvents > 0 {
 		groups = append(groups, searchGroup{
 			Title: "Events",
@@ -233,6 +236,22 @@ func (s *store) searchSandbox(needle string) searchGroup {
 	}
 	return runs.group("Sandbox runs", "Completed dynamic analysis", "/sandbox",
 		func(v string) string { return "/sandbox/" + url.PathEscape(v) })
+}
+
+func (s *store) searchGitHubAnalysis(needle string) searchGroup {
+	rows := newCounter()
+	for _, result := range loadGitHubAnalysisResults() {
+		verdictLevel := ""
+		if result.Verdict != nil {
+			verdictLevel = result.Verdict.Level
+		}
+		haystack := strings.ToLower(strings.Join([]string{result.SHA256, result.Family, result.ExitStatus, verdictLevel}, " "))
+		if strings.Contains(haystack, needle) {
+			rows.add(result.SHA256, strings.TrimSpace(result.Family+" "+verdictLevel))
+		}
+	}
+	return rows.group("GitHub analyses", "External scanner verdicts", "/github-analysis",
+		func(v string) string { return "/github-analysis/" + url.PathEscape(v) })
 }
 
 func (s *store) serveSearch(w http.ResponseWriter, r *http.Request, tmpl *template.Template) {

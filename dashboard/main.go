@@ -258,6 +258,9 @@ func main() {
 	http.HandleFunc("/api/ghidra", serveGhidraAPI)
 	http.HandleFunc("/api/ghidra/", serveGhidraAPI)
 	http.HandleFunc("/export/ghidra/", serveGhidraExport)
+	http.HandleFunc("/api/github-analysis", s.serveGitHubAnalysisAPI)
+	http.HandleFunc("/api/github-analysis/", s.serveGitHubAnalysisAPI)
+	http.HandleFunc("/export/github-analysis/", s.serveGitHubAnalysisExport)
 	http.HandleFunc("/metrics", s.serveMetrics)
 	http.HandleFunc("/export/history.json", func(w http.ResponseWriter, r *http.Request) {
 		if s.es == nil {
@@ -419,6 +422,25 @@ func main() {
 		}
 		data.Analysis = r.URL.Query().Get("analysis")
 		renderPage(w, tmpl, "ghidra", &data)
+	})
+	http.HandleFunc("/github-analysis", func(w http.ResponseWriter, r *http.Request) {
+		data, _ := s.githubAnalysisData("", r.URL.Query().Get("q"))
+		data.Analysis = r.URL.Query().Get("analysis")
+		renderPage(w, tmpl, "github-analysis", &data)
+	})
+	http.HandleFunc("/github-analysis/", func(w http.ResponseWriter, r *http.Request) {
+		sha, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/github-analysis/"))
+		if err != nil || !hashName.MatchString(sha) {
+			http.NotFound(w, r)
+			return
+		}
+		data, err := s.githubAnalysisData(strings.ToLower(sha), "")
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		data.Analysis = r.URL.Query().Get("analysis")
+		renderPage(w, tmpl, "github-analysis", &data)
 	})
 	http.HandleFunc("/sandbox", func(w http.ResponseWriter, r *http.Request) {
 		data, _ := sandboxData("", r.URL.Query().Get("q"))

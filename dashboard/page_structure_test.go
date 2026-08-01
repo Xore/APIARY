@@ -91,6 +91,22 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 			Libraries: []string{"libc.so.6"}, Stripped: &stripped,
 		},
 	}
+	// Populated rather than zero-valued, same reasoning as ghidraDetail:
+	// every optional field is set so every template branch (scanner table,
+	// provenance links, artifacts list) renders instead of its empty state.
+	githubAnalysisDetail := &githubAnalysisResult{
+		SHA256: strings.Repeat("d", 64), ExitStatus: "ok",
+		RequestedAt: "2026-07-31T09:00:00+00:00", StartedAt: "2026-07-31T09:00:05+00:00",
+		CompletedAt: "2026-07-31T09:05:00+00:00", RequestedBy: "xore",
+		Commit: "0123456789abcdef0123456789abcdef01234567", RunID: 42,
+		RunURL:     "https://github.com/Xore/honeypot/actions/runs/42",
+		SamplePath: "samples/" + strings.Repeat("d", 64), Family: "mirai",
+		Verdict:       &githubAnalysisVerdict{Malicious: 3, Suspicious: 1, Total: 5, Level: "malicious"},
+		Scanners:      []githubAnalysisScanner{{Source: "clamav", OK: true, Positives: 1, Total: 1, Permalink: "https://example.invalid/report"}, {Source: "yara", OK: false, Error: "timed out"}},
+		YARAAutoRules: []string{"rules/auto/mirai_" + strings.Repeat("d", 8) + ".yar"},
+		ReportPDF:     "reports/" + strings.Repeat("d", 64) + ".pdf",
+		ExportURL:     "/export/github-analysis/" + strings.Repeat("d", 64),
+	}
 
 	pages := []struct {
 		name string
@@ -106,6 +122,8 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 		{"sandbox-list", sandboxPageData{Generated: now}},
 		{"ghidra", ghidraPageData{Generated: now, Detail: ghidraDetail}},
 		{"ghidra-list", ghidraPageData{Generated: now}},
+		{"github-analysis", githubAnalysisPageData{Generated: now, Detail: githubAnalysisDetail}},
+		{"github-analysis-list", githubAnalysisPageData{Generated: now}},
 		{"payload-analysis", binaryAnalysis{}},
 		{"payloads", payloadsPage{Generated: now}},
 		{"source-health", snapshot{}},
@@ -123,6 +141,9 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 		}
 		if name == "ghidra-list" {
 			name = "ghidra"
+		}
+		if name == "github-analysis-list" {
+			name = "github-analysis"
 		}
 		var buf bytes.Buffer
 		if err := tmpl.ExecuteTemplate(&buf, name, page.data); err != nil {
@@ -150,6 +171,11 @@ func TestTabsAndPanelsAgreeOnEveryPage(t *testing.T) {
 		FindCrypt:  []ghidraCrypto{{Address: "0x402a10", Constant: "AES Te0", Algorithm: "AES"}},
 		AITriage:   &ghidraTriage{Workflow: "program_triage", RiskLevel: "high"},
 	}
+	githubAnalysisDetail := &githubAnalysisResult{
+		SHA256: strings.Repeat("d", 64), ExitStatus: "ok",
+		Verdict:  &githubAnalysisVerdict{Malicious: 3, Total: 5, Level: "malicious"},
+		Scanners: []githubAnalysisScanner{{Source: "clamav", OK: true, Positives: 1, Total: 1}},
+	}
 
 	for _, page := range []struct {
 		template string
@@ -159,6 +185,7 @@ func TestTabsAndPanelsAgreeOnEveryPage(t *testing.T) {
 		{"page", "overview", snapshot{}},
 		{"sandbox", "sandbox detail", sandboxPageData{Generated: now, Detail: detail}},
 		{"ghidra", "ghidra detail", ghidraPageData{Generated: now, Detail: ghidraDetail}},
+		{"github-analysis", "github analysis detail", githubAnalysisPageData{Generated: now, Detail: githubAnalysisDetail}},
 		{"payload-analysis", "payload analysis", binaryAnalysis{}},
 		{"reports", "reports studio", snapshot{}},
 	} {
