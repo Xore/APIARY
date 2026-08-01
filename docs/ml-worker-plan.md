@@ -1,13 +1,15 @@
 # ML Worker — Implementation Plan
 
-> **Status:** `ml-worker/` now has its own Dockge stack
+> **Status:** `ml-worker/` has its own Dockge stack
 > ([`docker-compose.yml`](../ml-worker/docker-compose.yml) +
 > [`docker-compose.ml-worker.gpu.yml`](../ml-worker/docker-compose.ml-worker.gpu.yml),
-> mirroring `analysis/ghidra/`) and builds, connects to Elasticsearch, and
-> polls without crashing — verified live against a disposable ES 8.13.4
-> container (#62). The dashboard still has no `/api/ml/anomalies` endpoint
-> and no `ml_anomalies.go`. `extract_features()` still reads the wrong
-> schema (see §5.3) and the worker is not deployed anywhere.  
+> mirroring `analysis/ghidra/`), builds, connects to Elasticsearch, and polls
+> without crashing (#62). `extract_features()`/`featurise_temporal()` read
+> the real per-sensor schema (#62 task 33, #63). The dashboard delivers
+> scores via `/api/ml/anomalies`+`/api/ml/stats`+`/ml-anomalies`,
+> Elasticsearch-polled, no Redis (#64). Retraining acceptance, versioning,
+> rollback, drift detection, and operator threshold controls are #65 —
+> see §11.
 > **Worker location:** [`ml-worker/`](../ml-worker/)  
 > **Tracked in:** [#61](https://github.com/Xore/honeypot-stack/issues/61)–[#65](https://github.com/Xore/honeypot-stack/issues/65)
 > — see the roadmap table in §12.
@@ -521,30 +523,139 @@ read the actual files above.
 
 ---
 
-## 11. Model Lifecycle & Retraining
+## 11. Model Lifecycle & Retraining (#65)
+
+**Cold start** (synthetic baseline pre-training from public datasets) is
+*not* in #65's scope and is not implemented — `IsoForestModel`/`LSTMAEModel`
+return the documented neutral default (`0.5`) until the first real retrain,
+per `models/isolation_forest.py`'s own class docstring. This is a pre-
+existing, accepted limitation (`test_worker_audit.py::TestNeutralScoreCannotAlert`),
+not something #65 asks to change.
+
+### 11.1 The acceptance bar (defined first, per #65's own instruction)
+
+Retraining here is **unsupervised** — there is no labeled "this event was
+actually malicious" ground truth to score a new model's precision/recall
+against, and manufacturing one would be dishonest. That rules out the usual
+"beat the baseline on a held-out labeled set" gate. What's still checkable
+without labels, and what a genuinely broken retrain would actually break:
+
+1. **The new model scores without error.** A fit that produces `NaN`/`Inf`
+   scores or throws on a held-out batch is rejected outright — this alone
+   would have caught, for instance, the Kamstrup default-register float bug
+   (#132-adjacent) if it had reached a model boundary instead of a parser.
+2. **The new model's anomaly rate doesn't blow up relative to the model
+   it would replace**, measured on the *same* held-out slice so the
+   comparison isn't confounded by traffic changing between measurements.
+   Concretely: `retrain()` reserves the newest slice of its input batch
+   (`HOLDOUT_FRACTION`, default 10%, floor `HOLDOUT_MIN` events) as holdout,
+   fits on the rest, then scores the holdout with *both* the outgoing model
+   (if one exists) and the new candidate. The candidate is accepted only if
+   `new_anomaly_rate <= max(previous_anomaly_rate, CONTAMINATION) * ACCEPT_TOLERANCE`
+   (`ACCEPT_TOLERANCE` default `3.0`). A model that suddenly calls 40% of
+   recent traffic anomalous when the outgoing one called 1% is almost
+   certainly reacting to a data/feature bug, not a real shift in attacker
+   behavior — and a real, gradual shift is exactly what re-running this gate
+   every `RETRAIN_INTERVAL` is supposed to keep up with, so rejecting one
+   cycle costs nothing but the wait for the next.
+3. **No prior model exists yet** (first-ever retrain): the gate degrades to
+   check 1 only — there is nothing to compare against, and refusing the
+   first model forever would defeat the point.
+
+A rejected candidate is discarded (not saved, not promoted); the currently
+active model keeps serving. Both outcomes are recorded as evidence — see
+§11.4 — so "why didn't the model update" is answerable from `ml-worker-metrics`
+without re-deriving it from logs.
+
+This is a coarse gate, not a quality benchmark — it catches "something is
+clearly broken," not "this model is meaningfully better." A finer
+(precision-oriented, e.g. against manually curated known-bad indicators) bar
+is future work, out of #65's scope, and should be proposed as its own issue
+if wanted.
+
+### 11.2 Online learning (unchanged from the original draft, still accurate)
 
 ```
-Cold start (no data yet):
-  → IsoForest / HBOS initialised with synthetic "normal" baseline
-    drawn from public honeypot datasets (KDD99, UNSW-NB15 benign subset)
-  → LSTM-AE initialised with random weights, warm-up period 2h
-
-Online learning (continuous):
-  → HBOS histograms updated incrementally every poll cycle (no refit needed)
-  → IsoForest: full retrain every 6h on rolling 24h window
-  → LSTM-AE: online fine-tune every 6h (5 epochs, LR=1e-5)
-
-Model versioning:
-  → Each retrain writes: /models/isoforest_{timestamp}.joblib
-                          /models/lstm_ae_{timestamp}.pt
-                          /models/hbos_{timestamp}.joblib
-  → Symlinks /models/current/* always point to the active version
-  → Last 3 versions retained for rollback
-
-Drift detection:
-  → If the rolling anomaly rate exceeds 15% (model may be seeing novelty
-    as normal), trigger early retraining and alert the dashboard
+  → HBOS/IsoForest: full retrain every RETRAIN_INTERVAL (default 6h) on the
+    rolling 24h window, gated by §11.1
+  → LSTM-AE: fine-tune on the same cycle (5 epochs, LR=1e-5), gated the same
+    way (§11.1's anomaly-rate check applies to its reconstruction-loss-based
+    score, not a second, different metric)
 ```
+
+### 11.3 Model versioning & rollback
+
+- Each accepted retrain still writes `/models/{isoforest,hbos}_{ts}.joblib`
+  and `/models/lstm_ae_{ts}.pt`, with `current_*` symlinks repointed to the
+  new version — this part of the original draft was already implemented.
+  What was missing: **nothing pruned old versions**, so `/models/` grew two
+  new files per model per `RETRAIN_INTERVAL` forever (roughly 8/day at the
+  6h default, unbounded over the container's lifetime).
+- `models/lifecycle.py` (new) adds `prune_old_versions(model_dir, prefix,
+  keep=MAX_RETAINED_VERSIONS)` — `MAX_RETAINED_VERSIONS=3`, matching the
+  original draft's "last 3 versions retained for rollback." Runs after every
+  accepted promotion, never on rejection (a rejected candidate was never
+  saved, so there's nothing of its own to prune).
+- Each accepted version also gets a `{name}_{ts}.meta.json` sidecar
+  (`lifecycle.write_version_metadata`) recording `timestamp`,
+  `train_samples`, `holdout_samples`, `anomaly_rate`, and
+  `previous_anomaly_rate` — the same evidence written to `ml-worker-metrics`
+  (§11.4), kept alongside the model file itself so it survives independent
+  of Elasticsearch retention.
+- **Rollback**: ml-worker has no HTTP control surface (a pure background
+  poller, deliberately — adding one is out of scope here and not requested).
+  `ml-worker/rollback.py` is a standalone script an operator runs inside the
+  container (`docker exec ... python3 rollback.py isoforest <timestamp>`):
+  it repoints `current_{name}.joblib`/`.pt` to the requested still-retained
+  version. Takes effect on the worker's next restart (`_load_latest()` runs
+  once, at process start) — the same "staged, requires an operator restart"
+  contract already established for `honeypotConfig` fields on the dashboard
+  side (§11.5), not a new pattern.
+
+### 11.4 Drift detection
+
+`worker.py`'s main loop already computes a `composite_score` for every
+event it processes; drift detection adds a rolling counter (deque of the
+last `DRIFT_WINDOW` — default 500 — composite scores) alongside it. If the
+fraction `>= THRESHOLD` exceeds `DRIFT_ANOMALY_RATE` (default `0.15`,
+matching the original draft's "15%"):
+
+- an early retrain is triggered (the next poll cycle retrains regardless of
+  how much of `RETRAIN_INTERVAL` remains), and
+- a `ml-worker-metrics` document is written flagging the drift event
+  (`kind: "drift"`, the observed rate, window size) so the dashboard's
+  `/ml-anomalies` page (#64) — or a future panel reading this index directly
+  — has something to show; #65 does not add a dashboard UI for this, only
+  the evidence.
+
+A sustained high rate can mean either a real attack campaign or a stale
+model failing to generalize — this mechanism can't tell which, which is why
+it triggers *retraining* (gated by §11.1, so a bad retrain still can't make
+things worse) rather than any automatic response to the traffic itself.
+
+### 11.5 Operator-facing threshold controls
+
+`ML_ALERT_THRESHOLD` becomes a Tier-2 staged field in the dashboard's
+`honeypotConfig` (`dashboard/settings_domain.go`), following the exact
+existing pattern every other field there already uses (`AlertCooldown`,
+`YaraScanIntervalSeconds`, ...): a default, an environment-variable pin
+(`ML_ALERT_THRESHOLD` — the same variable name `worker.py` itself reads, so
+a dashboard-staged value and the deployment environment can never mean two
+different things), and an explicit "staged only, apply with an operator
+restart" contract — this is not a new capability for the dashboard to grow,
+it is the same one it already has for six other fields.
+
+### 11.6 New/changed constants (`ml-worker/models/isolation_forest.py`,
+`ml-worker/models/lstm_autoencoder.py`, `ml-worker/models/lifecycle.py`)
+
+| Constant | Default | Meaning |
+|---|---|---|
+| `HOLDOUT_FRACTION` | 0.1 | Fraction of each retrain batch reserved for the acceptance check, never trained on |
+| `HOLDOUT_MIN` | 50 | Floor on holdout size regardless of fraction, so a small batch still gets a meaningful check |
+| `ACCEPT_TOLERANCE` | 3.0 | A candidate's holdout anomaly rate may be at most this many times the outgoing model's (or `CONTAMINATION`, if none exists) before rejection |
+| `MAX_RETAINED_VERSIONS` | 3 | Versions kept on disk per model after pruning |
+| `DRIFT_WINDOW` | 500 | Rolling window size (events) for drift's anomaly-rate counter |
+| `DRIFT_ANOMALY_RATE` | 0.15 | Fraction of `DRIFT_WINDOW` scoring `>= THRESHOLD` that triggers early retrain + a metrics doc |
 
 ---
 

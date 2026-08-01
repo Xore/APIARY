@@ -86,7 +86,14 @@ class TestBoundedRetrain:
     honeypot's 24h retrain window)."""
 
     def test_retrain_fits_on_at_most_the_capped_sample_count(self, monkeypatch, tmp_path):
+        # #65 split retrain() into train/holdout: MAX_TRAIN_SAMPLES now
+        # bounds the total (train + holdout) considered, not what
+        # IsolationForest.fit() sees directly (that's train_samples, a
+        # sub-slice). HOLDOUT_MIN/HOLDOUT_FRACTION pinned here so the split
+        # is exact and the test doesn't depend on their production defaults.
         monkeypatch.setattr(iso_mod, "MAX_TRAIN_SAMPLES", 5)
+        monkeypatch.setattr(iso_mod, "HOLDOUT_MIN", 1)
+        monkeypatch.setattr(iso_mod, "HOLDOUT_FRACTION", 0.2)
         model = iso_mod.IsoForestModel(model_dir=str(tmp_path))
         sources = [fixtures.COWRIE_LOGIN_FAILED["_source"]] * 50  # far over the patched cap
 
@@ -98,9 +105,11 @@ class TestBoundedRetrain:
             return orig_fit(self, X, *a, **kw)
 
         monkeypatch.setattr(iso_mod.IsolationForest, "fit", spy_fit)
-        model.retrain(sources)
+        result = model.retrain(sources)
 
-        assert fit_sample_counts == [5], "IsolationForest.fit() must never see more than MAX_TRAIN_SAMPLES rows"
+        assert fit_sample_counts == [4], "IsolationForest.fit() must only see the train split (5 capped - 1 holdout)"
+        assert result.train_samples + result.holdout_samples == 5, \
+            "MAX_TRAIN_SAMPLES must still bound the total (train + holdout) considered"
 
     def test_fetch_new_events_stops_scrolling_once_max_total_is_reached(self):
         es = MagicMock()

@@ -12,6 +12,7 @@ import os
 import time
 import json
 import hashlib
+from collections import deque
 from datetime import datetime, timezone, timedelta
 
 import numpy as np
@@ -38,6 +39,16 @@ RETRAIN_INTERVAL = int(os.getenv("RETRAIN_INTERVAL", "21600")) # 6 hours
 THRESHOLD        = float(os.getenv("ML_ALERT_THRESHOLD", "0.75"))
 MODEL_DIR        = os.getenv("MODEL_DIR",         "/models")
 LOG_LEVEL        = os.getenv("LOG_LEVEL",         "INFO")
+
+# Drift detection (#65, docs/ml-worker-plan.md §11.4): a rolling window over
+# the last DRIFT_WINDOW composite scores this worker actually computed.
+# Exceeding DRIFT_ANOMALY_RATE could mean a real attack campaign or a stale
+# model failing to generalize -- this can't tell which, which is why it
+# triggers *retraining* (still gated by the acceptance bar, so a bad
+# retrain still can't make things worse) rather than any automatic response
+# to the traffic itself.
+DRIFT_WINDOW       = int(os.getenv("DRIFT_WINDOW", "500"))
+DRIFT_ANOMALY_RATE = float(os.getenv("DRIFT_ANOMALY_RATE", "0.15"))
 
 # Source indices to monitor. #61 found these matched zero real indices --
 # the actual shape (docs/ml-worker-plan.md §2/§5.3, verified live 2026-07-31)
@@ -136,6 +147,57 @@ def fetch_new_events(es: Elasticsearch, index_pattern: str,
     return events
 
 
+def write_retrain_metric(es: Elasticsearch, model_name: str, result) -> None:
+    """Evidence for one retrain() call, accepted or not (#65,
+    docs/ml-worker-plan.md §11.1/§11.4). Best-effort like write_anomaly()'s
+    Redis publish: a metrics-write failure must never take down the retrain
+    cycle that already succeeded or failed on its own terms."""
+    doc = {
+        "@timestamp": datetime.now(timezone.utc).isoformat(),
+        "kind": "retrain",
+        "model": model_name,
+        "accepted": result.accepted,
+        "reason": result.reason,
+        "train_samples": result.train_samples,
+        "holdout_samples": result.holdout_samples,
+        "anomaly_rate_new": round(result.anomaly_rate_new, 4),
+        "anomaly_rate_previous": round(result.anomaly_rate_previous, 4) if result.anomaly_rate_previous is not None else None,
+    }
+    try:
+        es.index(index=METRICS_INDEX, document=doc)
+    except Exception as exc:
+        logger.warning(f"Failed to write retrain metric for {model_name} (non-fatal): {exc}")
+    level = logger.info if result.accepted else logger.warning
+    level(f"retrain[{model_name}] accepted={result.accepted} reason={result.reason}")
+
+
+def drift_rate_if_triggered(recent_flags, window: int, rate_threshold: float) -> "float | None":
+    """Pure decision function (#65): given the rolling window of recent
+    composite>=THRESHOLD flags, returns the observed rate if drift should
+    trigger, else None. Separated from run_worker()'s loop so the trigger
+    condition is testable directly rather than only by driving the whole
+    infinite polling loop."""
+    if len(recent_flags) < window:
+        return None
+    rate = sum(recent_flags) / len(recent_flags)
+    return rate if rate > rate_threshold else None
+
+
+def write_drift_metric(es: Elasticsearch, window: int, rate: float) -> None:
+    """Evidence for one drift-detection trigger (#65, docs/ml-worker-plan.md
+    §11.4). Best-effort, same rationale as write_retrain_metric()."""
+    doc = {
+        "@timestamp": datetime.now(timezone.utc).isoformat(),
+        "kind": "drift",
+        "drift_window": window,
+        "drift_rate": round(rate, 4),
+    }
+    try:
+        es.index(index=METRICS_INDEX, document=doc)
+    except Exception as exc:
+        logger.warning(f"Failed to write drift metric (non-fatal): {exc}")
+
+
 def write_anomaly(es: Elasticsearch, rdb: "redis.Redis | None",
                  event: dict, scores: dict, explanation: str) -> None:
     src = event.get("_source", {})
@@ -226,12 +288,33 @@ def run_worker() -> None:
         }
     })
     ensure_index(es, STATE_INDEX, {"mappings": {"properties": {}}})
+    # #65: METRICS_INDEX was declared but never written to until now --
+    # retrain acceptance/rejection evidence (docs/ml-worker-plan.md §11.1)
+    # and drift-detection events (§11.4) both land here.
+    ensure_index(es, METRICS_INDEX, {
+        "mappings": {
+            "properties": {
+                "@timestamp":            {"type": "date"},
+                "kind":                  {"type": "keyword"},  # "retrain" | "drift"
+                "model":                 {"type": "keyword"},
+                "accepted":              {"type": "boolean"},
+                "reason":                {"type": "text"},
+                "train_samples":         {"type": "integer"},
+                "holdout_samples":       {"type": "integer"},
+                "anomaly_rate_new":      {"type": "float"},
+                "anomaly_rate_previous": {"type": "float"},
+                "drift_window":          {"type": "integer"},
+                "drift_rate":            {"type": "float"},
+            }
+        }
+    })
 
     # Initialise models
     iso_model  = IsoForestModel(model_dir=MODEL_DIR)
     lstm_model = LSTMAEModel(model_dir=MODEL_DIR)
 
     last_retrain = time.time()
+    recent_flags = deque(maxlen=DRIFT_WINDOW)  # composite >= THRESHOLD, drift detection (#65)
 
     logger.info(f"Worker ready. Poll={POLL_INTERVAL}s Threshold={THRESHOLD}")
 
@@ -265,6 +348,7 @@ def run_worker() -> None:
                     "lstm_ae":          lstm_score,
                 }
                 composite = compute_composite(scores)
+                recent_flags.append(composite >= THRESHOLD)
 
                 if composite >= THRESHOLD:
                     explanation = iso_model.explain(features, scores)
@@ -274,6 +358,23 @@ def run_worker() -> None:
             latest_ts = events[-1]["_source"].get("@timestamp")
             if latest_ts:
                 save_checkpoint(es, index_pattern, latest_ts)
+
+        # Drift detection (#65): a full window of real scores, sustained
+        # above DRIFT_ANOMALY_RATE, forces an early retrain instead of
+        # waiting out the rest of RETRAIN_INTERVAL. The window is cleared
+        # after triggering so a persistent drift condition retrains once
+        # and then re-accumulates a fresh window, rather than firing again
+        # every single poll cycle on the same stale evidence.
+        drift_rate = drift_rate_if_triggered(recent_flags, DRIFT_WINDOW, DRIFT_ANOMALY_RATE)
+        if drift_rate is not None:
+            logger.warning(
+                f"Drift detected: {drift_rate:.1%} anomaly rate over the last "
+                f"{DRIFT_WINDOW} events (threshold {DRIFT_ANOMALY_RATE:.0%}) -- "
+                "triggering an early retrain"
+            )
+            write_drift_metric(es, DRIFT_WINDOW, drift_rate)
+            last_retrain = 0  # forces the retrain block below to fire this cycle
+            recent_flags.clear()
 
         # Periodic retraining
         if time.time() - last_retrain > RETRAIN_INTERVAL:
@@ -287,9 +388,12 @@ def run_worker() -> None:
                 ))
 
             if len(all_events) > 100:
-                iso_model.retrain([e["_source"] for e in all_events])
-                lstm_model.retrain([e["_source"] for e in all_events])
-                logger.info(f"Retrained on {len(all_events)} events")
+                sources = [e["_source"] for e in all_events]
+                iso_result = iso_model.retrain(sources)
+                lstm_result = lstm_model.retrain(sources)
+                write_retrain_metric(es, "isolation_forest_hbos", iso_result)
+                write_retrain_metric(es, "lstm_ae", lstm_result)
+                logger.info(f"Retrain cycle on {len(all_events)} events complete")
             last_retrain = time.time()
 
         elapsed = time.time() - cycle_start

@@ -15,11 +15,14 @@ import math
 import time
 import joblib
 import numpy as np
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
 from sklearn.ensemble import IsolationForest
 from pyod.models.hbos import HBOS
+
+from models.lifecycle import prune_old_versions, write_version_metadata
 
 # ------------------------------------------------------------------
 # Constants
@@ -27,6 +30,16 @@ from pyod.models.hbos import HBOS
 N_FEATURES    = 15
 CONTAMINATION = 0.01   # assume ~1% of events are anomalous
 N_ESTIMATORS  = 200
+
+# Acceptance gate (#65, docs/ml-worker-plan.md §11.1) -- unsupervised
+# retraining has no labels to score precision/recall against, so the bar is
+# label-free: does the candidate score without error, and does its anomaly
+# rate on a holdout slice stay within tolerance of the model it would
+# replace, measured on the SAME slice so the comparison isn't confounded by
+# traffic changing between two different measurements in time.
+HOLDOUT_FRACTION = 0.1   # newest slice of each retrain batch, never trained on
+HOLDOUT_MIN       = 50   # floor regardless of fraction, so small batches still get a real check
+ACCEPT_TOLERANCE  = 3.0  # candidate's holdout anomaly rate may be at most this many times the reference rate
 
 # Worst-case retrain() cost bound (#62 task 33 -- "bounded HBOS", not just
 # "usually fast"). IsolationForest.fit() is O(n_samples * N_ESTIMATORS *
@@ -180,6 +193,48 @@ def _get_duration(src: dict) -> float:
     return float((src.get("honeypot") or {}).get("duration") or 0.0)
 
 
+@dataclass
+class RetrainResult:
+    """Evidence for one retrain() call -- accepted or not, and why. Returned
+    to the caller (worker.py) so it can be written to ml-worker-metrics
+    (#65, docs/ml-worker-plan.md §11.4); also embedded verbatim in the
+    accepted version's metadata sidecar (lifecycle.write_version_metadata)."""
+    accepted: bool
+    reason: str
+    train_samples: int
+    holdout_samples: int
+    anomaly_rate_new: float
+    anomaly_rate_previous: Optional[float]
+
+
+def _accept_decision(candidate_rate: float, previous_rate: Optional[float]) -> tuple:
+    """The acceptance policy itself (#65, docs/ml-worker-plan.md §11.1),
+    isolated from fitting/scoring so it's testable with plain floats rather
+    than needing a real stochastic model fit to land on a particular
+    outcome. Returns (accepted, reason)."""
+    reference_rate = previous_rate if previous_rate is not None else CONTAMINATION
+    ceiling = max(reference_rate, CONTAMINATION) * ACCEPT_TOLERANCE
+    if candidate_rate <= ceiling:
+        return True, "accepted"
+    return False, (
+        f"holdout anomaly rate {candidate_rate:.3f} exceeds {ceiling:.3f} "
+        f"(reference {reference_rate:.3f} x tolerance {ACCEPT_TOLERANCE})"
+    )
+
+
+def _anomaly_rate(iso: IsolationForest, hbos: HBOS, X: np.ndarray) -> float:
+    """Fraction of X either model's OWN contamination-driven decision
+    boundary calls anomalous -- IsolationForest.predict()==-1,
+    HBOS.predict()==1 -- not an externally chosen score cutoff, so this rate
+    reflects what each model actually learned rather than an arbitrary
+    threshold picked to make the comparison come out a certain way."""
+    if len(X) == 0:
+        return 0.0
+    iso_flag = iso.predict(X) == -1
+    hbos_flag = hbos.predict(X) == 1
+    return float(np.logical_or(iso_flag, hbos_flag).mean())
+
+
 class IsoForestModel:
     """
     Wraps IsolationForest + HBOS.
@@ -285,8 +340,14 @@ class IsoForestModel:
 
         return ". ".join(parts) + "."
 
-    def retrain(self, sources: list) -> None:
-        """Retrain IsoForest and HBOS on a list of raw ES source dicts.
+    def retrain(self, sources: list) -> RetrainResult:
+        """Retrain candidate IsoForest/HBOS models and gate promotion on the
+        acceptance bar (#65, docs/ml-worker-plan.md §11.1) -- fit on a train
+        split, evaluate label-free on a holdout split never trained on, and
+        only replace the currently active model if the candidate's holdout
+        anomaly rate stays within ACCEPT_TOLERANCE of the outgoing model's
+        (or CONTAMINATION, if this is the first-ever retrain). A rejected
+        candidate is discarded; the active model keeps serving.
 
         Capped at MAX_TRAIN_SAMPLES regardless of how many sources the
         caller collected -- see the constant's comment for the cost
@@ -298,27 +359,68 @@ class IsoForestModel:
         if len(sources) > MAX_TRAIN_SAMPLES:
             sources = sources[-MAX_TRAIN_SAMPLES:]
 
-        X = np.vstack([self.extract_features(s) for s in sources])
-        X = X.reshape(len(sources), N_FEATURES)
+        n = len(sources)
+        if n < 2:
+            return RetrainResult(
+                accepted=False, reason="not enough data to retrain",
+                train_samples=n, holdout_samples=0,
+                anomaly_rate_new=0.0, anomaly_rate_previous=None,
+            )
 
-        self.iso = IsolationForest(
+        # Holdout is the newest slice -- never trained on, evaluated after
+        # fitting. sources are the caller's fetch order (worker.py sorts
+        # ascending by @timestamp), so this is the most-recent-events split,
+        # not a random one.
+        holdout_n = min(max(HOLDOUT_MIN, int(n * HOLDOUT_FRACTION)), n - 1)
+        train_sources = sources[:n - holdout_n]
+        holdout_sources = sources[n - holdout_n:]
+
+        X_train = np.vstack([self.extract_features(s) for s in train_sources]).reshape(len(train_sources), N_FEATURES)
+        X_holdout = np.vstack([self.extract_features(s) for s in holdout_sources]).reshape(len(holdout_sources), N_FEATURES)
+
+        candidate_iso = IsolationForest(
             n_estimators=N_ESTIMATORS,
             contamination=CONTAMINATION,
             random_state=42,
             n_jobs=-1,
         )
-        self.iso.fit(X)
+        candidate_hbos = HBOS(contamination=CONTAMINATION)
+        try:
+            candidate_iso.fit(X_train)
+            candidate_hbos.fit(X_train)
+            candidate_rate = _anomaly_rate(candidate_iso, candidate_hbos, X_holdout)
+            if not np.isfinite(candidate_rate):
+                raise ValueError(f"non-finite anomaly rate: {candidate_rate}")
+        except Exception as exc:
+            return RetrainResult(
+                accepted=False, reason=f"candidate failed to fit or score holdout: {exc}",
+                train_samples=len(train_sources), holdout_samples=len(holdout_sources),
+                anomaly_rate_new=0.0, anomaly_rate_previous=None,
+            )
 
-        self.hbos = HBOS(contamination=CONTAMINATION)
-        self.hbos.fit(X)
+        previous_rate = None
+        if self.iso is not None and self.hbos is not None:
+            previous_rate = _anomaly_rate(self.iso, self.hbos, X_holdout)
 
-        self._save()
+        accept, reason = _accept_decision(candidate_rate, previous_rate)
+        result = RetrainResult(
+            accepted=accept, reason=reason,
+            train_samples=len(train_sources), holdout_samples=len(holdout_sources),
+            anomaly_rate_new=candidate_rate, anomaly_rate_previous=previous_rate,
+        )
+
+        if accept:
+            self.iso = candidate_iso
+            self.hbos = candidate_hbos
+            self._save(result)
+
+        return result
 
     # ------------------------------------------------------------------
     # Persistence
     # ------------------------------------------------------------------
 
-    def _save(self) -> None:
+    def _save(self, result: RetrainResult) -> None:
         ts = int(time.time())
         iso_path  = os.path.join(self.model_dir, f"isoforest_{ts}.joblib")
         hbos_path = os.path.join(self.model_dir, f"hbos_{ts}.joblib")
@@ -328,6 +430,16 @@ class IsoForestModel:
         # Update symlinks
         _symlink(iso_path,  os.path.join(self.model_dir, "current_isoforest.joblib"))
         _symlink(hbos_path, os.path.join(self.model_dir, "current_hbos.joblib"))
+        # Version metadata + retention (#65, docs/ml-worker-plan.md §11.3):
+        # the evidence for why this version was promoted, kept next to the
+        # model file itself so it survives independent of Elasticsearch
+        # retention, and pruning back to MAX_RETAINED_VERSIONS so /models/
+        # doesn't grow two files per model every RETRAIN_INTERVAL forever.
+        meta = {"timestamp": ts, **asdict(result)}
+        write_version_metadata(self.model_dir, "isoforest", ts, meta)
+        write_version_metadata(self.model_dir, "hbos", ts, meta)
+        prune_old_versions(self.model_dir, "isoforest")
+        prune_old_versions(self.model_dir, "hbos")
 
     def _load_latest(self) -> None:
         iso_link  = os.path.join(self.model_dir, "current_isoforest.joblib")

@@ -7,9 +7,11 @@ Anomaly = reconstruction loss above threshold.
 Based on: CNN-BiLSTM-AE architecture (Park et al., MDPI 2025)
 See docs/ml-worker-plan.md §4.2 and §5.2.
 """
+import copy
 import os
 import time
 import collections
+from dataclasses import asdict
 from datetime import datetime
 from typing import Optional
 
@@ -20,7 +22,9 @@ from loguru import logger
 
 from models.isolation_forest import (
     _get_ip, _get_port, _get_transport_proto, _proto_enc, _ts_to_hour,
+    _accept_decision, HOLDOUT_FRACTION, HOLDOUT_MIN, RetrainResult,
 )
+from models.lifecycle import prune_old_versions, write_version_metadata
 
 SEQ_LEN   = 15    # sliding window length (events per sequence)
 INPUT_DIM = 6     # features per timestep (see §5.2 in plan)
@@ -76,6 +80,21 @@ def featurise_temporal(src: dict, inter_arrival_s: float) -> np.ndarray:
         [hour_norm, port_norm, proto_norm, entropy_norm, inter_log, cmd_count_norm],
         dtype=np.float32,
     )
+
+
+def _anomaly_rate(net: "BiLSTMAE", threshold: float, X: torch.Tensor) -> float:
+    """Fraction of X (a batch of SEQ_LEN windows) this net/threshold pair
+    would call anomalous -- score() >= 0.5, i.e. reconstruction loss over
+    2x this model's own calibrated baseline. Mirrors IsoForestModel's
+    _anomaly_rate in spirit (#65, docs/ml-worker-plan.md §11.1): each
+    model's own declared boundary, not an externally chosen cutoff."""
+    if len(X) == 0:
+        return 0.0
+    net.eval()
+    with torch.no_grad():
+        recon = net(X)
+        per_sequence_loss = nn.functional.mse_loss(recon, X, reduction="none").mean(dim=(1, 2))
+    return float((per_sequence_loss > threshold * 2).float().mean().item())
 
 
 class BiLSTMAE(nn.Module):
@@ -135,6 +154,13 @@ class LSTMAEModel:
         )
         # Per-IP last-seen event epoch, for real inter-arrival computation.
         self._last_seen: dict = {}
+        # True once a real fit (loaded from disk or accepted by retrain())
+        # exists -- distinct from "self.net exists", since BiLSTMAE() is
+        # always constructed with random weights at __init__. Without this,
+        # the very first retrain would compare its candidate against an
+        # untrained random net's reconstruction loss, which isn't a
+        # meaningful "previous model" to hold anything to (#65).
+        self._trained = False
         self._load_latest()
 
     def score(self, src: dict) -> float:
@@ -181,11 +207,16 @@ class LSTMAEModel:
         # Normalise: above threshold → score > 0.5
         return float(min(loss / (self.threshold * 4), 1.0))
 
-    def retrain(self, sources: list) -> None:
+    def retrain(self, sources: list) -> RetrainResult:
         """
-        Fine-tune the model on recent events, grouped and time-ordered by
+        Fine-tune a candidate on recent events, grouped and time-ordered by
         src_ip so inter-arrival is computed the same way score() computes it
-        online.
+        online, then gate promotion on the acceptance bar (#65,
+        docs/ml-worker-plan.md §11.1) -- shared with IsoForestModel via
+        _accept_decision(), evaluated on a holdout slice of windows never
+        trained on. A rejected fine-tune is rolled back (the in-place
+        gradient steps are undone by restoring the pre-retrain weights), so
+        the active model is unaffected either way.
 
         Bounded per MAX_TRAIN_WINDOWS -- see the constant's comment for the
         cost rationale; caps the actual fit() input the same way
@@ -213,10 +244,32 @@ class LSTMAEModel:
         if len(sequences) > MAX_TRAIN_WINDOWS:
             sequences = sequences[-MAX_TRAIN_WINDOWS:]
 
-        if len(sequences) < BATCH_SIZE:
-            return  # not enough data
+        n = len(sequences)
+        if n < BATCH_SIZE + HOLDOUT_MIN:
+            return RetrainResult(
+                accepted=False, reason="not enough windows to retrain",
+                train_samples=n, holdout_samples=0,
+                anomaly_rate_new=0.0, anomaly_rate_previous=None,
+            )
 
-        dataset = torch.tensor(np.array(sequences), dtype=torch.float32)
+        # Holdout is the newest windows, never trained on -- same rationale
+        # as IsoForestModel.retrain(): the most-recent-events split, not a
+        # random one, since sequences are already time-ordered per IP.
+        holdout_n = min(max(HOLDOUT_MIN, int(n * HOLDOUT_FRACTION)), n - BATCH_SIZE)
+        train_sequences = sequences[:n - holdout_n]
+        holdout_sequences = sequences[n - holdout_n:]
+        X_holdout = torch.tensor(np.array(holdout_sequences), dtype=torch.float32).to(self.device)
+
+        # Score the OUTGOING model on the holdout before any weights change.
+        previous_rate = _anomaly_rate(self.net, self.threshold, X_holdout) if self._trained else None
+
+        # Fine-tuning is in-place (optimiser.step() mutates self.net's
+        # weights directly) -- snapshot first so a rejected candidate can be
+        # reverted rather than left half-applied.
+        original_state = copy.deepcopy(self.net.state_dict())
+        original_threshold = self.threshold
+
+        dataset = torch.tensor(np.array(train_sequences), dtype=torch.float32)
         loader  = torch.utils.data.DataLoader(
             dataset, batch_size=BATCH_SIZE, shuffle=True
         )
@@ -224,7 +277,6 @@ class LSTMAEModel:
         optimiser = torch.optim.Adam(self.net.parameters(), lr=LR_FINETUNE)
         self.net.train()
         for epoch in range(FINETUNE_EPOCHS):
-            total_loss = 0.0
             for batch in loader:
                 batch = batch.to(self.device)
                 optimiser.zero_grad()
@@ -232,20 +284,37 @@ class LSTMAEModel:
                 loss  = nn.functional.mse_loss(recon, batch)
                 loss.backward()
                 optimiser.step()
-                total_loss += loss.item()
 
-        # Update threshold to 2× mean reconstruction loss
+        # Candidate threshold: 2x mean reconstruction loss over the train
+        # split (unchanged formula from the original draft).
         self.net.eval()
-        losses = []
+        train_losses = []
         with torch.no_grad():
             for batch in loader:
                 batch = batch.to(self.device)
                 recon = self.net(batch)
-                losses.append(nn.functional.mse_loss(recon, batch).item())
-        self.threshold = float(np.mean(losses)) * 2.0
-        self._save()
+                train_losses.append(nn.functional.mse_loss(recon, batch).item())
+        candidate_threshold = float(np.mean(train_losses)) * 2.0 if train_losses else original_threshold
 
-    def _save(self) -> None:
+        candidate_rate = _anomaly_rate(self.net, candidate_threshold, X_holdout)
+        accept, reason = _accept_decision(candidate_rate, previous_rate)
+        result = RetrainResult(
+            accepted=accept, reason=reason,
+            train_samples=len(train_sequences), holdout_samples=len(holdout_sequences),
+            anomaly_rate_new=candidate_rate, anomaly_rate_previous=previous_rate,
+        )
+
+        if accept:
+            self.threshold = candidate_threshold
+            self._trained = True
+            self._save(result)
+        else:
+            self.net.load_state_dict(original_state)  # undo the in-place fine-tune
+            self.threshold = original_threshold
+
+        return result
+
+    def _save(self, result: RetrainResult) -> None:
         ts   = int(time.time())
         path = os.path.join(self.model_dir, f"lstm_ae_{ts}.pt")
         os.makedirs(self.model_dir, exist_ok=True)
@@ -254,6 +323,10 @@ class LSTMAEModel:
         if os.path.lexists(link):
             os.remove(link)
         os.symlink(path, link)
+        # Version metadata + retention (#65, docs/ml-worker-plan.md §11.3) --
+        # same contract as IsoForestModel._save().
+        write_version_metadata(self.model_dir, "lstm_ae", ts, {"timestamp": ts, **asdict(result)})
+        prune_old_versions(self.model_dir, "lstm_ae")
 
     def _load_latest(self) -> None:
         link = os.path.join(self.model_dir, "current_lstm_ae.pt")
@@ -261,3 +334,4 @@ class LSTMAEModel:
             ckpt = torch.load(link, map_location=self.device)
             self.net.load_state_dict(ckpt["model"])
             self.threshold = ckpt.get("threshold", 0.05)
+            self._trained = True

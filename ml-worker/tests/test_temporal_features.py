@@ -90,7 +90,13 @@ class TestBoundedCPUFallback:
         import torch
         import models.lstm_autoencoder as lstm_mod
 
+        # #65 split retrain() into train/holdout: MAX_TRAIN_WINDOWS still
+        # bounds the total considered, but what DataLoader actually sees is
+        # the train split (total - holdout). HOLDOUT_MIN is imported into
+        # this module's namespace from isolation_forest.py, so it has to be
+        # patched here, not on the module it was originally defined in.
         monkeypatch.setattr(lstm_mod, "MAX_TRAIN_WINDOWS", 40)
+        monkeypatch.setattr(lstm_mod, "HOLDOUT_MIN", 5)
         model = LSTMAEModel(model_dir="/tmp/does-not-matter-5")
         sources = [doc["_source"] for doc in fixtures.COWRIE_SAME_IP_SEQUENCE] * 5  # far over the patched cap
 
@@ -102,10 +108,12 @@ class TestBoundedCPUFallback:
             return orig_loader(dataset, *a, **kw)
 
         monkeypatch.setattr(torch.utils.data, "DataLoader", spy_loader)
-        model.retrain(sources)
+        result = model.retrain(sources)
 
-        assert seen_dataset_sizes, "retrain() must have actually trained given >BATCH_SIZE windows"
+        assert seen_dataset_sizes, "retrain() must have actually trained given >BATCH_SIZE+HOLDOUT_MIN windows"
         assert seen_dataset_sizes[0] <= 40
+        assert result.train_samples + result.holdout_samples <= 40, \
+            "MAX_TRAIN_WINDOWS must still bound the total (train + holdout) considered"
 
 
 class TestComputeCompositeIsTheSingleSourceOfTruth:
