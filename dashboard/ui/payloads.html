@@ -1,12 +1,23 @@
-{{define "payloadrow"}}<tr>
-  <td>{{.Mtime}}</td>
-  <td>{{range .Sources}}<span class="badge badge--muted">{{.}}</span> {{end}}</td>
-  <td class="v">{{.Hash}}{{if .GitHubAnalysisURL}} <a class="badge badge--muted" href="{{.GitHubAnalysisURL}}" title="GitHub analysis verdict">{{.GitHubAnalysisLabel}}</a>{{end}}</td>
-  <td class="v"><strong>{{.Kind}}</strong><br><span class="tw:text-muted">{{.Platform}} &bull; {{.MIME}}</span><br><small title="{{.AnalysisPath}}">{{if .Dynamic}}dynamic route ready{{else}}static-only route{{end}}</small></td>
-  <td class="n">{{.SizeH}}</td>
-  <td class="n">{{.Copies}}</td>
-  <td class="v">{{if .OriginLabel}}{{if .OriginLink}}<a class="lnk" href="{{.OriginLink}}" title="Open the session this payload was captured in">{{.OriginLabel}} &rarr;</a>{{else}}<span title="No session recorded for this capture">{{.OriginLabel}}</span>{{end}}{{else}}<span class="tw:text-muted">unknown</span>{{end}}</td>
-  <td class="v">
+{{/* A payload card keeps .project-card as a plain, non-linking container --
+     unlike a single-destination card (e.g. Ghidra results), a payload has
+     several distinct actions (static analysis, workbench, preview, download,
+     publish), and HTML forbids nesting interactive controls (the action
+     menu's <details>/<button>/<form>) inside an <a>. The hash itself is the
+     one direct link (to static analysis, matching the old table's hash-cell
+     link); every other action lives in the "..." menu, unchanged. */}}
+{{define "payloadrow"}}<div class="project-card">
+  <div class="project-card__header">
+    <span class="project-card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>
+    <a class="project-card__title mono" href="/payload-analysis/{{.Hash}}">{{.Hash}}</a>
+    <div class="project-card__badges">
+      {{range .Sources}}<span class="badge badge--muted">{{.}}</span>{{end}}
+      {{if .GitHubAnalysisURL}}<a class="badge badge--muted" href="{{.GitHubAnalysisURL}}" title="GitHub analysis verdict">{{.GitHubAnalysisLabel}}</a>{{end}}
+    </div>
+  </div>
+  <p class="project-card__desc"><strong>{{.Kind}}</strong> &bull; {{.Platform}} &bull; {{.MIME}} &bull; {{.SizeH}}{{if gt .Copies 1}} &bull; {{.Copies}} copies{{end}} &bull; <span title="{{.AnalysisPath}}">{{if .Dynamic}}dynamic route ready{{else}}static-only route{{end}}</span></p>
+  <div class="project-card__meta">
+    <span>{{.Mtime}}</span>
+    {{if .OriginLabel}}{{if .OriginLink}}<a class="lnk" href="{{.OriginLink}}" title="Open the session this payload was captured in">{{.OriginLabel}} &rarr;</a>{{else}}<span title="No session recorded for this capture">{{.OriginLabel}}</span>{{end}}{{else}}<span class="tw:text-muted">unknown origin</span>{{end}}
     <details class="action-menu">
       <summary aria-label="Payload actions" title="Payload actions">&#8942;</summary>
       <div class="action-menu__popover" role="menu">
@@ -18,8 +29,8 @@
         <form method="post" action="/github-analysis/submit" data-hp-confirm-title="Publish to Xore/honeypot?" data-hp-confirm-description="This uploads the sample to the public Xore/honeypot repository and to third-party scanner APIs." data-hp-confirm-warning="This cannot be undone." data-hp-confirm-label="Publish sample"><input type="hidden" name="hash" value="{{.Hash}}"><input type="hidden" name="confirm" value="publish"><button class="action-menu__item action-menu__item--danger" role="menuitem" type="submit">Publish to Xore/honeypot</button></form>
       </div>
     </details>
-  </td>
-</tr>{{end}}
+  </div>
+</div>{{end}}
 {{define "payloadrows"}}{{range .Files}}{{template "payloadrow" .}}{{end}}{{end}}
 
 {{define "payloads"}}<!doctype html>
@@ -67,12 +78,9 @@
             {{if not .Enabled}}<p class="empty">payload serving is disabled (set PAYLOAD_DIRS and/or SCRIPT_PAYLOAD_DIR)</p>
             {{else if .Loading}}<p class="note" data-payload-warming><span class="live-dot" aria-hidden="true"></span> Preparing the payload inventory. This page will update automatically.</p><script nonce="{{.Nonce}}">setTimeout(()=>location.reload(),1500)</script>
             {{else if .Files}}
-            <table class="recent data-table">
-              <thead><tr><th>captured</th><th>source</th><th>hash</th><th>type</th><th>size</th><th>copies</th><th>origin event</th><th>actions</th></tr></thead>
-              <tbody data-hp-page-url="/api/payload-rows?source={{.Filter | urlquery}}" data-hp-total="{{.ResultTotal}}">
-              {{template "payloadrows" .}}
-              </tbody>
-            </table>
+            <div class="project-grid" id="payloads-results" data-hp-lazy-list data-hp-page-url="/api/payload-rows?source={{.Filter | urlquery}}" data-hp-total="{{.ResultTotal}}">
+            {{template "payloadrows" .}}
+            </div>
             {{else}}<p class="empty">no payloads captured yet</p>{{end}}
           </div>
         </div>

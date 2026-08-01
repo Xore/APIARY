@@ -1,6 +1,9 @@
 package main
 
 import (
+	"html/template"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -56,7 +59,87 @@ func TestPayloadsPageDropsRedundantActionButtons(t *testing.T) {
 	if !strings.Contains(pagePayloads, `class="action-menu"`) {
 		t.Fatal("payloads list row is missing the per-row action-menu kebab that replaced the flat button row")
 	}
-	if !strings.Contains(pagePayloads, "origin event") {
-		t.Fatal(`payloads list header is missing the "origin event" column (#205)`)
+	// The list moved from a <table> to a .project-card grid (#213 phase 4),
+	// so there is no "origin event" column header left to check for -- the
+	// origin session link itself (title text below) is the thing #205 needs
+	// to still be present.
+	if !strings.Contains(pagePayloads, "Open the session this payload was captured in") {
+		t.Fatal("payloads card is missing the origin-session link (#205)")
+	}
+}
+
+// The /payloads list renders as a .project-grid/.project-card grid (#213
+// phase 4), not the old <table>. Unlike a single-destination card (e.g.
+// Ghidra results), a payload has several distinct actions -- the whole
+// card cannot be one link (HTML forbids nesting the action menu's
+// <details>/<button>/<form> inside an <a>) -- so only the hash title
+// itself links out, to the same /payload-analysis/ destination the old
+// table's hash cell used, and every other action stays in the kebab menu.
+func TestPayloadsPageRendersAsCardGrid(t *testing.T) {
+	dir := t.TempDir()
+	hash := strings.Repeat("c", 64)
+	if err := os.WriteFile(filepath.Join(dir, hash), []byte("#!/bin/sh\necho hi\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &store{payloadDirs: []string{dir}}
+	s.payloadCache = s.scanPayloads()
+	s.payloadCacheAt = time.Now()
+
+	funcs := templateFuncs(s, "")
+	tmpl := template.Must(template.New("t").Funcs(funcs).Parse(pageTemplate))
+	page := s.payloadsData("")
+	var out strings.Builder
+	if err := tmpl.ExecuteTemplate(&out, "payloads", &page); err != nil {
+		t.Fatalf("payloads page does not render: %v", err)
+	}
+	html := out.String()
+
+	if strings.Contains(html, `<table class="recent data-table">`) {
+		t.Fatal("payloads list still renders the old table markup, want a card grid")
+	}
+	if !strings.Contains(html, "project-grid") || !strings.Contains(html, "project-card") {
+		t.Fatal("payloads list is missing the .project-grid/.project-card markup")
+	}
+	if !strings.Contains(html, `href="/payload-analysis/`+hash+`"`) {
+		t.Fatalf("card for %s does not link its title to the static analysis page", hash)
+	}
+	if !strings.Contains(html, `class="action-menu"`) {
+		t.Fatal("payloads card is missing the action-menu kebab")
+	}
+	if !strings.Contains(html, "project-card__icon") {
+		t.Fatal("payloads card is missing its leading icon")
+	}
+}
+
+// The lazy-load container is a plain <div>, not a <table>, so it must use
+// the generic data-hp-lazy-list contract (with a remote page URL for the
+// same offset-based /api/payload-rows pagination the table used), not the
+// table-specific tbody attributes.
+func TestPayloadsPageResultsUseGenericLazyListContract(t *testing.T) {
+	dir := t.TempDir()
+	hash := strings.Repeat("d", 64)
+	if err := os.WriteFile(filepath.Join(dir, hash), []byte("#!/bin/sh\necho hi\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &store{payloadDirs: []string{dir}}
+	s.payloadCache = s.scanPayloads()
+	s.payloadCacheAt = time.Now()
+
+	funcs := templateFuncs(s, "")
+	tmpl := template.Must(template.New("t").Funcs(funcs).Parse(pageTemplate))
+	page := s.payloadsData("")
+	var out strings.Builder
+	if err := tmpl.ExecuteTemplate(&out, "payloads", &page); err != nil {
+		t.Fatalf("payloads page does not render: %v", err)
+	}
+	html := out.String()
+
+	if !strings.Contains(html, `data-hp-lazy-list`) {
+		t.Fatal("payloads results container is missing data-hp-lazy-list")
+	}
+	if !strings.Contains(html, `data-hp-page-url="/api/payload-rows`) {
+		t.Fatal("payloads results container is missing its remote page URL")
 	}
 }
