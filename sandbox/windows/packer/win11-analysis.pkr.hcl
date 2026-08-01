@@ -653,18 +653,39 @@ build {
   }
 
   # Step 6: final cleanup + sysprep-lite (do NOT full sysprep — breaks some tools)
+  #
+  # This step is best-effort housekeeping only -- nothing here should ever be
+  # able to fail a build that has already done 6+ hours of real work.
+  # Confirmed live: it did exactly that. `wevtutil cl` is a native exe, not a
+  # cmdlet, so `-ErrorAction SilentlyContinue` (which only affects cmdlets)
+  # does nothing for it -- and PowerShell's $LastExitCode only updates on a
+  # native-command invocation, so whatever `wevtutil` last returned silently
+  # became the WHOLE PROVISIONER's exit code once packer's execute_command
+  # wrapper ran `exit $LastExitCode`, even though every later cmdlet in this
+  # block (Remove-Item, WriteAllText, Write-Output) succeeded. One run had
+  # Sysmon not actually installed (a FLARE-VM package retry can legitimately
+  # leave it missing), so `wevtutil cl Microsoft-Windows-Sysmon/Operational`
+  # failed with "channel not found", that exit code rode untouched through
+  # the rest of the script, and packer marked "Build ... errored after 6
+  # hours 26 minutes" and deleted the entire output directory -- despite
+  # setup, FLARE-VM, and the decoy environment having all completed
+  # successfully. Each native call is now wrapped to force $LASTEXITCODE
+  # back to 0 regardless of outcome, and the block ends on an explicit
+  # `exit 0` as a second line of defense against any future best-effort step
+  # added here doing the same thing.
   provisioner "powershell" {
     inline = [
       # Clear event logs (start fresh for analysis)
       "Get-EventLog -List | ForEach-Object { Clear-EventLog -LogName $_.Log -ErrorAction SilentlyContinue }",
-      "wevtutil cl Microsoft-Windows-Sysmon/Operational",
-      "wevtutil cl Microsoft-Windows-PowerShell/Operational",
+      "wevtutil cl Microsoft-Windows-Sysmon/Operational 2>$null; $global:LASTEXITCODE = 0",
+      "wevtutil cl Microsoft-Windows-PowerShell/Operational 2>$null; $global:LASTEXITCODE = 0",
       # Clear temp files
       "Remove-Item -Recurse -Force C:\\Windows\\Temp\\* -ErrorAction SilentlyContinue",
       "Remove-Item -Recurse -Force C:\\Users\\analyst\\AppData\\Local\\Temp\\* -ErrorAction SilentlyContinue",
       # Mark build timestamp
       "[System.IO.File]::WriteAllText('C:\\golden_image_build.txt', (Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC'))",
-      "Write-Output 'Golden image build complete'"
+      "Write-Output 'Golden image build complete'",
+      "exit 0"
     ]
   }
 }
