@@ -1121,12 +1121,13 @@ services:
   #
   # First-run DB init (arkime-init) lives in docker-compose.init.yml (the
   # honeypot-init stack) and runs once and exits there. It bootstraps the
-  # Elasticsearch indices and creates the admin user defined in .env;
+  # Elasticsearch indices and creates the admin user, locked to SSO via
+  # --webauthonly -- no local password exists to log in with (#122, #134);
   # arkime-capture/arkime-viewer below wait on its completion marker
   # directly (#126) rather than depends_on-ing a same-project shim.
   #
   # Web UI: http://${HP_BIND}:19080 (normally proxied by the VPS gateway).
-  # Credentials: ARKIME_ADMIN_PASSWORD in .env (default: change-me-arkime)
+  # Auth: SSO only, via auth-backend (authMode=header in arkime/config.ini).
   # =========================================================================
   # ===================== PCAP sync (sshfs -> local disk) =================
   # The Suricata pcap dir is an sshfs mount from the VPS. inotify never fires
