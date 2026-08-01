@@ -21,6 +21,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -49,19 +50,51 @@ type event struct {
 }
 
 type logger struct {
-	mu  sync.Mutex
-	out io.Writer
-	f   *os.File
+	mu   sync.Mutex
+	out  io.Writer
+	f    *os.File
+	path string
+	size int64
+	max  int64
 }
 
 func newLogger(path string) *logger {
-	l := &logger{out: os.Stdout}
+	// #120: same fix as multipot's logger -- this file is exempt from
+	// analysis/log-maintenance.sh's copytruncate (JSON event streams need
+	// Filebeat's inode/offset tracking to stay intact, per #79), so nothing
+	// else bounds its size. Rotate the way Suricata's rotate-interval does:
+	// close, rename aside, reopen fresh at the same path.
+	l := &logger{out: os.Stdout, path: path, max: getenvInt64("LOG_MAX_BYTES", 67108864)}
 	if path != "" {
 		if f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640); err == nil {
 			l.f = f
+			if st, err := f.Stat(); err == nil {
+				l.size = st.Size()
+			}
 		}
 	}
 	return l
+}
+
+// rotate closes the current file, renames it aside with a timestamp suffix,
+// and reopens a fresh file at the original path. Filebeat's file_identity
+// defaults to inode/device, not path, so its harvester stays attached to the
+// renamed file through EOF; the fresh file is picked up by the same glob
+// that already covers the original name. Callers must hold l.mu.
+func (l *logger) rotate() {
+	if l.f == nil || l.path == "" {
+		return
+	}
+	l.f.Close()
+	stamp := time.Now().UTC().Format("20060102-150405")
+	os.Rename(l.path, l.path+"."+stamp)
+	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
+	if err != nil {
+		l.f = nil
+		return
+	}
+	l.f = f
+	l.size = 0
 }
 
 func (l *logger) log(e event) {
@@ -71,14 +104,29 @@ func (l *logger) log(e event) {
 	l.out.Write(line)
 	l.out.Write([]byte("\n"))
 	if l.f != nil {
-		l.f.Write(line)
-		l.f.Write([]byte("\n"))
+		if l.max > 0 && l.size >= l.max {
+			l.rotate()
+		}
+		if l.f != nil {
+			n1, _ := l.f.Write(line)
+			n2, _ := l.f.Write([]byte("\n"))
+			l.size += int64(n1 + n2)
+		}
 	}
 }
 
 func getenv(k, def string) string {
 	if v := os.Getenv(k); v != "" {
 		return v
+	}
+	return def
+}
+
+func getenvInt64(k string, def int64) int64 {
+	if v := os.Getenv(k); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return n
+		}
 	}
 	return def
 }

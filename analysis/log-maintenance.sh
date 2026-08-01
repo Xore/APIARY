@@ -1,12 +1,20 @@
 #!/bin/sh
 set -eu
 
-# Rotate human-readable sensor logs. JSON event streams are intentionally left
-# alone so Filebeat inode/offset tracking and dashboard ingestion stay intact.
+# Rotate human-readable sensor logs. JSON event streams are exempt from THIS
+# copytruncate rotation so Filebeat inode/offset tracking and dashboard
+# ingestion stay intact -- but as of #120 several of them now rotate
+# themselves natively (cowrie's own CowrieDailyLogFile, and a self-rotating
+# logger in multipot/http-honeypot's Go writers), the same way #79 gave
+# Suricata's eve.json a rotate-interval instead of an external copytruncate.
+# Those writers close/rename/reopen on their own; all that's left for this
+# script to do is prune the renamed files once they age out, same as
+# vps/suricata-log-maintenance.sh already does for eve-*.json.
 max_bytes="${MAX_LOG_BYTES:-268435456}"
 interval="${CHECK_INTERVAL:-300}"
 rotations="${ROTATIONS:-4}"
 start_delay="${START_DELAY:-60}"
+json_retention_min="${JSON_RETENTION_MINUTES:-4320}"   # 3 days, matches vps/suricata-log-maintenance.sh
 
 size_of() {
   stat -c %s "$1" 2>/dev/null || wc -c < "$1"
@@ -53,5 +61,20 @@ while true; do
     rotate "$f"
   done
   rotate /logs/cowrie/cowrie.log
+
+  # #120: prune self-rotated JSON files once they age past retention. The
+  # currently-open file is always being actively written, so -mmin naturally
+  # excludes it without a separate exclusion -- same reasoning as
+  # vps/suricata-log-maintenance.sh's eve-*.json pruning. cowrie's own
+  # CowrieDailyLogFile suffixes with a plain date (cowrie.json.2026-08-02);
+  # the Go writers (multipot, http-honeypot for both http.json and
+  # api.json) suffix with a full timestamp (multipot.json.20260802-153045).
+  # Both start with a digit right after the extra dot, so one glob per
+  # directory covers either shape.
+  find /logs/cowrie -maxdepth 1 -name 'cowrie.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  find /logs/multipot -maxdepth 1 -name 'multipot.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  find /logs/http-honeypot -maxdepth 1 -name 'http.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  find /logs/api-honeypot -maxdepth 1 -name 'api.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+
   sleep "$interval"
 done

@@ -101,6 +101,71 @@ func freeUDPPort(t *testing.T) int {
 	return c.LocalAddr().(*net.UDPAddr).Port
 }
 
+// #120: portbridge.json has no external rotation (it's shipped to the home
+// stack over a read-only sshfs mount, so nothing there can rotate it either),
+// so the logger has to bound its own size the way Suricata's rotate-interval
+// bounds eve.json -- close, rename aside, reopen fresh at the same path.
+// This asserts the rename actually happens, the original path keeps
+// receiving new lines afterward, and no line is lost across the rotation.
+func TestConnLoggerRotatesAtMaxBytesWithoutLosingLines(t *testing.T) {
+	t.Setenv("LOG_MAX_BYTES", "1")
+	logPath := filepath.Join(t.TempDir(), "portbridge.json")
+	cl := newConnLogger(logPath)
+	t.Cleanup(func() { cl.f.Close() })
+
+	r := rule{proto: "tcp", listenPort: "22", target: "10.8.0.2:19022"}
+	src := &net.TCPAddr{IP: net.IPv4(198, 51, 100, 1), Port: 40000}
+	cl.log(r, src, nil)
+	cl.log(r, src, nil)
+
+	dir := filepath.Dir(logPath)
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rotated, current int
+	for _, f := range files {
+		switch {
+		case f.Name() == "portbridge.json":
+			current++
+		case strings.HasPrefix(f.Name(), "portbridge.json."):
+			rotated++
+		}
+	}
+	if rotated != 1 {
+		t.Fatalf("want exactly 1 rotated file after 2 writes with LOG_MAX_BYTES=1, got %d (files: %v)", rotated, files)
+	}
+	if current != 1 {
+		t.Fatalf("want the original path still present and receiving writes, got %d", current)
+	}
+
+	// Every line across both files must still be a valid, complete record --
+	// rotation must never truncate or split one mid-write.
+	total := 0
+	for _, f := range files {
+		if f.Name() != "portbridge.json" && !strings.HasPrefix(f.Name(), "portbridge.json.") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, f.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+			if line == "" {
+				continue
+			}
+			var rec map[string]any
+			if err := json.Unmarshal([]byte(line), &rec); err != nil {
+				t.Fatalf("corrupt line across rotation: %v (%q)", err, line)
+			}
+			total++
+		}
+	}
+	if total != 2 {
+		t.Fatalf("want both log lines to survive across the rotation, got %d", total)
+	}
+}
+
 func lastConnLogRecord(t *testing.T, path string) map[string]any {
 	t.Helper()
 	data, err := os.ReadFile(path)

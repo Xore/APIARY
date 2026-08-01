@@ -52,8 +52,13 @@ services:
   # existing entrypoint override, and a Dockerfile ENTRYPOINT respectively)
   # all converging on the same fix.
 
-  # Rotate verbose human-readable sensor logs without touching JSON event
-  # streams. copytruncate keeps writers alive without mounting Docker's socket.
+  # Rotate verbose human-readable sensor logs (copytruncate, keeps writers
+  # alive without mounting Docker's socket) and, per #120, prune JSON event
+  # streams that now rotate themselves natively (cowrie, multipot,
+  # http-honeypot/api-honeypot) once the renamed files age past retention.
+  # The live JSON files this container never touches directly: Filebeat
+  # inode/offset tracking and dashboard ingestion require them to stay open
+  # and in place.
   log-maintenance:
     <<: *runtime-defaults
     image: busybox:1.36
@@ -72,6 +77,7 @@ services:
       - CHECK_INTERVAL=300
       - ROTATIONS=4
       - START_DELAY=120
+      - JSON_RETENTION_MINUTES=4320
     volumes:
       - ./analysis/log-maintenance.sh:/usr/local/bin/log-maintenance.sh:ro
       - /opt/stacks/honeypot-stack/logs:/logs
@@ -486,6 +492,19 @@ services:
     # see #119, the same gap #111 found and fixed for conpot.
     labels:
       - autoheal=true
+    # #118: measured (2026-08-02). Runs as root by default (no USER in
+    # dashboard/Dockerfile) and reads read-only mounts owned by every
+    # sensor's own UID under /logs, plus dionaea-lib, cowrie-downloads,
+    # yara-results, sandbox/ghidra/github-analysis results -- the same
+    # "root, but needs the permission-bypass capability that comes with
+    # root, not just the UID" situation as filebeat above. DAC_READ_SEARCH
+    # restored clean reads across all of them.
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_READ_SEARCH
+    security_opt:
+      - no-new-privileges:true
     deploy:
       resources:
         limits:
@@ -1103,6 +1122,18 @@ services:
     # see #119, the same gap #111 found and fixed for conpot.
     labels:
       - autoheal=true
+    # #118: measured (2026-08-02) against this exact service, following the
+    # same methodology as #89's dionaea/conpot/snare/tanner pass. Baseline:
+    # already runs as 1000:0 (not root), only publishes an internal,
+    # unprivileged 9200 (no ports: mapping at all -- reached by name over
+    # honeynet/llm-data), no mlockall (bootstrap.memory_lock is not set
+    # above). cap_drop: ALL with no cap_add stayed healthy and served
+    # _cluster/health -- no capability the image's own default set granted
+    # was actually load-bearing here.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     deploy:
       resources:
         limits:
@@ -1126,6 +1157,13 @@ services:
     depends_on:
       elasticsearch:
         condition: service_healthy
+    # #118: measured (2026-08-02). Already runs as UID 1000 (not root),
+    # publishes only the unprivileged 5601. cap_drop: ALL with no cap_add
+    # stayed up and served the login page.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     deploy:
       resources:
         limits:
@@ -1158,6 +1196,29 @@ services:
       - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
     networks:
       - honeynet
+    # #118: measured (2026-08-02). This one runs as root (user: root above,
+    # needed to read across every sensor UID under /logs) rather than a
+    # fixed non-root UID like the other four -- so unlike them, cap_drop:
+    # ALL alone was expected to be the risky case: root's usual ability to
+    # bypass file permission checks IS a capability, not something a bare
+    # UID of 0 gets for free once capabilities are dropped. First attempt
+    # (DAC_READ_SEARCH, read-only bypass, same as yara-scanner above) was
+    # not enough on its own: filebeat exited in a restart loop on "unable
+    # to try a lock of the data path: open
+    # /usr/share/filebeat/data/filebeat.lock: permission denied" --
+    # DAC_READ_SEARCH only bypasses read/search checks, and this directory
+    # (a host bind mount owned by a non-root host user) needs a WRITE
+    # bypass to create that lock file. DAC_OVERRIDE covers read, write, and
+    # execute checks together (capabilities(7)), so it supersedes
+    # DAC_READ_SEARCH here rather than stacking with it -- confirmed clean
+    # start and Elasticsearch still receiving fresh honeypot-v2-*/
+    # suricata-v2-* documents afterward.
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
+    security_opt:
+      - no-new-privileges:true
     deploy:
       resources:
         limits:
@@ -1234,6 +1295,13 @@ services:
         condition: service_healthy
     networks:
       - honeynet
+    # #118: measured (2026-08-02). Publishes only the unprivileged 5636 and
+    # owns nothing but its own config.sqlite volume. cap_drop: ALL with no
+    # cap_add stayed up and served the UI.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     deploy:
       resources:
         limits:

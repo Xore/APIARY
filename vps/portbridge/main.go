@@ -82,8 +82,11 @@ func getenv(k, def string) string {
 // the real attacker IP to every port — including PROXY-unaware ones. nil / no
 // file means connection logging is disabled.
 type connLogger struct {
-	mu sync.Mutex
-	f  *os.File
+	mu   sync.Mutex
+	f    *os.File
+	path string
+	size int64
+	max  int64
 }
 
 func newConnLogger(path string) *connLogger {
@@ -95,7 +98,45 @@ func newConnLogger(path string) *connLogger {
 		fmt.Fprintf(os.Stderr, "portbridge: CONN_LOG %s: %v (connection logging off)\n", path, err)
 		return nil
 	}
-	return &connLogger{f: f}
+	c := &connLogger{f: f, path: path, max: getenvInt64("LOG_MAX_BYTES", 67108864)}
+	if st, err := f.Stat(); err == nil {
+		c.size = st.Size()
+	}
+	return c
+}
+
+// rotate closes the current file, renames it aside with a timestamp suffix,
+// and reopens a fresh file at the original path -- same fix and same
+// reasoning as #79's Suricata rotate-interval and #120's multipot/
+// http-honeypot loggers: this file has no external rotation (it's shipped
+// to the home stack over a read-only sshfs mount, so nothing on that side
+// can rotate it either -- see #120's portbridge-log-maintenance service for
+// pruning the renamed files), and Filebeat's inode-based file_identity
+// keeps its harvester attached through the rename regardless. Callers must
+// hold c.mu.
+func (c *connLogger) rotate() {
+	if c.f == nil || c.path == "" {
+		return
+	}
+	c.f.Close()
+	stamp := time.Now().UTC().Format("20060102-150405")
+	os.Rename(c.path, c.path+"."+stamp)
+	f, err := os.OpenFile(c.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
+	if err != nil {
+		c.f = nil
+		return
+	}
+	c.f = f
+	c.size = 0
+}
+
+func getenvInt64(k string, def int64) int64 {
+	if v := os.Getenv(k); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return n
+		}
+	}
+	return def
 }
 
 // log appends one JSON line per connection. via is portbridge's upstream local
@@ -129,8 +170,15 @@ func (c *connLogger) log(r rule, src net.Addr, via net.Addr) {
 	line, _ := json.Marshal(rec)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.f.Write(line)
-	c.f.Write([]byte("\n"))
+	if c.max > 0 && c.size >= c.max {
+		c.rotate()
+	}
+	if c.f == nil {
+		return
+	}
+	n1, _ := c.f.Write(line)
+	n2, _ := c.f.Write([]byte("\n"))
+	c.size += int64(n1 + n2)
 }
 
 func splitHostPort(a net.Addr) (string, int) {

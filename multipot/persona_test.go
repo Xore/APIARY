@@ -5,9 +5,70 @@ import (
 	"encoding/json"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// #120: multipot.json has no external rotation (analysis/log-maintenance.sh
+// intentionally exempts JSON event streams so Filebeat's inode/offset
+// tracking survives, per #79), so the logger bounds its own size the same
+// way Suricata's rotate-interval bounds eve.json: close, rename aside,
+// reopen fresh at the same path. This asserts the rename actually happens,
+// the original path keeps receiving new lines afterward, and no line is
+// lost across the rotation.
+func TestLoggerRotatesAtMaxBytesWithoutLosingLines(t *testing.T) {
+	t.Setenv("LOG_MAX_BYTES", "1")
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "multipot.json")
+	log := newLogger(logPath)
+	t.Cleanup(func() { log.f.Close() })
+
+	log.emit(event{Proto: "redis", Event: "connect"})
+	log.emit(event{Proto: "redis", Event: "connect"})
+
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rotated, current int
+	for _, f := range files {
+		switch {
+		case f.Name() == "multipot.json":
+			current++
+		case strings.HasPrefix(f.Name(), "multipot.json."):
+			rotated++
+		}
+	}
+	if rotated != 1 {
+		t.Fatalf("want exactly 1 rotated file after 2 writes with LOG_MAX_BYTES=1, got %d (files: %v)", rotated, files)
+	}
+	if current != 1 {
+		t.Fatalf("want the original path still present and receiving writes, got %d", current)
+	}
+
+	total := 0
+	for _, f := range files {
+		data, err := os.ReadFile(filepath.Join(dir, f.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+			if line == "" {
+				continue
+			}
+			var rec event
+			if err := json.Unmarshal([]byte(line), &rec); err != nil {
+				t.Fatalf("corrupt line across rotation: %v (%q)", err, line)
+			}
+			total++
+		}
+	}
+	if total != 2 {
+		t.Fatalf("want both log lines to survive across the rotation, got %d", total)
+	}
+}
 
 func TestPersonaMetadataAndProtocolAssets(t *testing.T) {
 	var output bytes.Buffer

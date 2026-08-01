@@ -41,19 +41,57 @@ type event struct {
 }
 
 type logger struct {
-	mu  sync.Mutex
-	out io.Writer
-	f   *os.File
+	mu   sync.Mutex
+	out  io.Writer
+	f    *os.File
+	path string
+	size int64
+	max  int64
 }
 
 func newLogger(path string) *logger {
-	l := &logger{out: os.Stdout}
+	// #120: this file has no external rotation (JSON event streams are
+	// intentionally exempt from analysis/log-maintenance.sh's copytruncate,
+	// same reasoning as #79 -- Filebeat tracks by inode/offset, and an
+	// in-place truncate under an open harvester loses data). Suricata's own
+	// fix for eve.json was rotate-interval: close, rename, reopen at the
+	// same path. This is that same pattern for a writer that can just check
+	// its own byte count on every write instead of a wall-clock interval.
+	l := &logger{out: os.Stdout, path: path, max: getenvInt64("LOG_MAX_BYTES", 67108864)}
 	if path != "" {
 		if f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640); err == nil {
 			l.f = f
+			if st, err := f.Stat(); err == nil {
+				l.size = st.Size()
+			}
 		}
 	}
 	return l
+}
+
+// rotate closes the current file, renames it aside with a timestamp suffix,
+// and reopens a fresh file at the original path. Filebeat's file_identity
+// defaults to inode/device, not path, so its harvester stays attached to the
+// renamed file through EOF; the fresh file is picked up by the same glob
+// that already covers the original name. Callers must hold l.mu.
+func (l *logger) rotate() {
+	if l.f == nil || l.path == "" {
+		return
+	}
+	l.f.Close()
+	stamp := time.Now().UTC().Format("20060102-150405")
+	if err := os.Rename(l.path, l.path+"."+stamp); err != nil {
+		// Rename failing (e.g. path already gone) shouldn't stop logging --
+		// reopening O_APPEND on the original path either resumes the same
+		// file or creates a new one, either of which beats losing the fd.
+	}
+	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
+	if err != nil {
+		l.f = nil
+		return
+	}
+	l.f = f
+	l.size = 0
 }
 
 func (l *logger) emit(e event) {
@@ -71,8 +109,14 @@ func (l *logger) emit(e event) {
 	l.out.Write(line)
 	l.out.Write([]byte("\n"))
 	if l.f != nil {
-		l.f.Write(line)
-		l.f.Write([]byte("\n"))
+		if l.max > 0 && l.size >= l.max {
+			l.rotate()
+		}
+		if l.f != nil {
+			n1, _ := l.f.Write(line)
+			n2, _ := l.f.Write([]byte("\n"))
+			l.size += int64(n1 + n2)
+		}
 	}
 }
 
@@ -88,6 +132,15 @@ func assetForProto(proto string) string {
 func getenv(k, def string) string {
 	if v := os.Getenv(k); v != "" {
 		return v
+	}
+	return def
+}
+
+func getenvInt64(k string, def int64) int64 {
+	if v := os.Getenv(k); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return n
+		}
 	}
 	return def
 }
