@@ -45,11 +45,13 @@
 #   straight out of the honeypot-stack checkout by absolute path, since a
 #   Dockge stack directory otherwise holds only its own compose.yml and .env.
 #
-#   ARKIME_ADMIN_PASSWORD and ARKIME_PASSWORD_SECRET in this stack's .env
-#   MUST match the same two values in honeypot-stack's .env exactly --
-#   arkime-init sets the secret that arkime-capture/arkime-viewer (main
-#   stack) use for session auth. Dockge gives each stack its own .env, so
-#   this is a manual sync, not automatic.
+#   ARKIME_PASSWORD_SECRET in this stack's .env MUST match the same value in
+#   honeypot-stack's .env exactly -- arkime-init sets the secret that
+#   arkime-capture/arkime-viewer (main stack) use for session auth. Dockge
+#   gives each stack its own .env, so this is a manual sync, not automatic.
+#   ARKIME_ADMIN_PASSWORD does not need to match anything: --webauthonly
+#   (see arkime-init below) discards it immediately, so it's a required
+#   positional argument to arkime_add_user.sh with no functional effect.
 
 x-runtime-defaults: &runtime-defaults
   logging:
@@ -216,11 +218,28 @@ services:
           echo INIT | /opt/arkime/db/db.pl --insecure http://elasticsearch:9200 init
         fi
 
-        # Create admin user (errors if it already exists - that's fine)
+        # Create the admin user once, locked to SSO (#122, #134). Plain
+        # --admin left the account with a real local password *and*
+        # headerAuthEnabled=false by default, so every re-run of this job --
+        # i.e. every deploy, since arkime-init is a one-shot that reruns each
+        # time -- did an unconditional op_type=index PUT of a fresh user doc
+        # over the existing one, silently flipping headerAuthEnabled back to
+        # false and undoing the SSO fix (that's what #134 caught). --admin
+        # alone never errors on an existing user; addUser.js only rejects a
+        # duplicate when --createOnly forces op_type=create.
+        #
+        # --webauthonly sets headerAuthEnabled=true and replaces passStore
+        # with a random, never-recorded value -- there is deliberately no
+        # local Arkime password to fall back to, since authMode=header in
+        # config.ini means auth-backend is the only intended login path.
+        # --createOnly makes the whole call idempotent: once the doc exists,
+        # every later run hits a version conflict, addUser.js logs "User
+        # already exists" and leaves the doc untouched instead of clobbering
+        # it again.
 
         /opt/arkime/bin/arkime_add_user.sh admin "Admin" \
-          "${ARKIME_ADMIN_PASSWORD:-change-me-arkime}" --admin \
-          || echo "admin user already exists, keeping it"
+          "${ARKIME_ADMIN_PASSWORD:-change-me-arkime}" --admin --webauthonly --createOnly \
+          || echo "admin user already exists (createOnly), nothing changed"
 
         mkdir -p /markers && touch /markers/arkime-init.done
     volumes:
@@ -228,6 +247,9 @@ services:
       - /opt/stacks/honeypot-stack/state/init-markers:/markers
     environment:
       - TZ=Europe/Berlin
+      # arkime_add_user.sh still requires a positional password argument,
+      # but --webauthonly above discards it immediately in favor of a random
+      # passStore -- this value is never actually used to log in (#134).
       - ARKIME_ADMIN_PASSWORD=${ARKIME_ADMIN_PASSWORD:-change-me-arkime}
       - ARKIME__elasticsearch=http://elasticsearch:9200
       - ARKIME__passwordSecret=${ARKIME_PASSWORD_SECRET:-change-me-in-env}
