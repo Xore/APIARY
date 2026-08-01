@@ -204,7 +204,21 @@ services:
       - ./cowrie/fakefs/sys/class/dmi/id/board_name:/sys/class/dmi/id/board_name:ro
       - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
     environment:
-      - TZ=Europe/Berlin
+      # #185: cowrie's own twisted/plugins/cowrie_plugin.py reads
+      # [honeypot] timezone from cowrie.cfg (unset here, so it falls back
+      # to "UTC") and does `os.environ["TZ"] = tz` at startup -- but never
+      # calls time.tzset() afterwards. On glibc that mutation doesn't
+      # retroactively change how the C library resolves local time, so
+      # with TZ=Europe/Berlin at container start, cowrie went on
+      # formatting real CEST wall-clock time while its own env-derived
+      # code path (which DOES read os.environ directly, not through
+      # glibc) believed TZ was "UTC" and appended a bare "Z" suffix --
+      # every event timestamp was mislabeled UTC while actually running
+      # +2h ahead, which silently dropped cowrie from the dashboard's 24h
+      # activity chart (negative age = "future" event). Setting TZ=UTC
+      # here matches cowrie's own default exactly, so the mutation is a
+      # no-op and the Z label is finally true.
+      - TZ=UTC
       - COWRIE_HOSTNAME=gpu01
     security_opt:
       - no-new-privileges:true
