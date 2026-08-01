@@ -19,8 +19,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - image: conpot
+            context: conpot
           - image: dashboard
             context: dashboard
+          - image: dionaea
+            context: dionaea
           - image: dnp3-honeypot
             context: dnp3-honeypot
           - image: http-honeypot
