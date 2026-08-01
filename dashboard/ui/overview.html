@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>xore//honeypot</title>
-{{template "style"}}
+{{template "style" .}}
 </head>
 <body>
 <div class="app-shell">
@@ -160,7 +160,7 @@
       </div>
     </main>
 </div>
-<script>
+<script nonce="{{.Nonce}}">
 let refreshing=false;
 async function refreshDashboard(){
   // The toolbar LIVE control owns every refresh path; while it is paused the

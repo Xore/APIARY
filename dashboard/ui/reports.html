@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>xore//honeypot — Reports studio</title>
-{{template "style"}}
-<style>
+{{template "style" .}}
+<style nonce="{{.Nonce}}">
 .hp-rp-templates { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; margin: 4px 0 18px; }
 .hp-rp-template { text-align: left; background: var(--surface-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-panel); padding: 12px 14px; cursor: pointer; color: var(--text-primary); transition: border-color .15s ease, background .15s ease; }
 .hp-rp-template:hover { border-color: var(--border-strong); background: var(--surface-hover); }

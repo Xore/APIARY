@@ -24,6 +24,7 @@ const (
 )
 
 type snapshot struct {
+	pageMeta
 	Generated time.Time
 	Total     int
 	UniqueIPs int

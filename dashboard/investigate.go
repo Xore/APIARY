@@ -21,6 +21,7 @@ type commandRow struct {
 }
 
 type commandsPage struct {
+	pageMeta
 	Generated time.Time
 	Rows      []commandRow
 }

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>xore//honeypot — Elasticsearch history</title>
-{{template "style"}}
+{{template "style" .}}
 </head>
 <body>
 <div class="app-shell">
@@ -30,7 +30,7 @@
       </div>
     </main>
 </div>
-<script>
+<script nonce="{{.Nonce}}">
 const q=document.getElementById('history-q'), out=document.getElementById('history-results'), meta=document.getElementById('history-meta');
 q.value=new URLSearchParams(location.search).get('q')||'';
 async function run(){const query=q.value.trim(), u='/api/history?limit=200'+(query?'&q='+encodeURIComponent(query):'');document.getElementById('history-export').href='/export/history.json?limit=500'+(query?'&q='+encodeURIComponent(query):'');document.getElementById('history-export-top').href='/export/history.json?limit=500'+(query?'&q='+encodeURIComponent(query):'');meta.textContent='loading…';try{const r=await fetch(u);const j=await r.json();const hits=j.hits?.hits||[];meta.textContent=hits.length+' documents shown';out.textContent=hits.map(h=>JSON.stringify(h._source,null,2)).join('\n\n')}catch(e){meta.textContent='query failed';out.textContent=String(e)}}

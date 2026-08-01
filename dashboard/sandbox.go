@@ -187,6 +187,7 @@ type sandboxQueueStatus struct {
 }
 
 type sandboxPageData struct {
+	pageMeta
 	Generated  time.Time
 	Rows       []sandboxResult
 	Detail     *sandboxResult

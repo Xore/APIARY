@@ -37,6 +37,7 @@ type searchGroup struct {
 }
 
 type searchPage struct {
+	pageMeta
 	Generated time.Time
 	Query     string
 	Groups    []searchGroup
@@ -244,6 +245,6 @@ func (s *store) serveSearch(w http.ResponseWriter, r *http.Request, tmpl *templa
 		http.Redirect(w, r, target, http.StatusSeeOther)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	tmpl.ExecuteTemplate(w, "search", s.searchData(query))
+	data := s.searchData(query)
+	renderPage(w, tmpl, "search", &data)
 }

@@ -36,6 +36,7 @@ type payloadSourceStat struct {
 }
 
 type payloadsPage struct {
+	pageMeta
 	Generated   time.Time
 	Enabled     bool
 	Loading     bool

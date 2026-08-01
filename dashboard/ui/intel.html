@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>xore//honeypot &mdash; infrastructure clusters</title>
-{{template "style"}}
+{{template "style" .}}
 </head>
 <body>
 <div class="app-shell">
@@ -40,7 +40,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>xore//honeypot &mdash; campaigns</title>
-{{template "style"}}
+{{template "style" .}}
 </head>
 <body>
 <div class="app-shell">
@@ -101,7 +101,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>xore//honeypot &mdash; executed commands</title>
-{{template "style"}}
+{{template "style" .}}
 </head>
 <body>
 <div class="app-shell">
@@ -128,7 +128,7 @@
       </div>
     </main>
 </div>
-<script>document.querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>navigator.clipboard.writeText(b.dataset.copy));</script>
+<script nonce="{{.Nonce}}">document.querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>navigator.clipboard.writeText(b.dataset.copy));</script>
 </body>
 </html>
 {{end}}

@@ -100,6 +100,7 @@ func aggregateTechniques(events []storedEvent) []attackTechnique {
 }
 
 type sessionPage struct {
+	pageMeta
 	Generated                                time.Time
 	ID, IP, Country, First, Last             string
 	Total                                    int
@@ -153,6 +154,7 @@ type clusterRow struct {
 }
 
 type clustersPage struct {
+	pageMeta
 	Generated time.Time
 	Rows      []clusterRow
 }

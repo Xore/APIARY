@@ -44,6 +44,7 @@ type mapPoint struct {
 
 // eventsPage is the data for the /events drill-down view.
 type eventsPage struct {
+	pageMeta
 	Generated time.Time
 	Filters   []string
 	Total     int
@@ -63,6 +64,7 @@ type eventsPage struct {
 }
 
 type attackerPage struct {
+	pageMeta
 	Generated    time.Time
 	IP           string
 	Country      string
@@ -153,6 +155,7 @@ type ipRow struct {
 }
 
 type ipsPage struct {
+	pageMeta
 	Generated time.Time
 	Rows      []ipRow
 	Total     int

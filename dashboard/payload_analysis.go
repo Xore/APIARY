@@ -37,6 +37,7 @@ type ruleMatch struct {
 }
 
 type binaryAnalysis struct {
+	pageMeta
 	Hash           string
 	Size           string
 	MIME           string

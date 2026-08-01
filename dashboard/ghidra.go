@@ -93,6 +93,7 @@ type ghidraQueueStatus struct {
 }
 
 type ghidraPageData struct {
+	pageMeta
 	Generated time.Time
 	Rows      []ghidraResult
 	Detail    *ghidraResult

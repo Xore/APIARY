@@ -282,8 +282,8 @@ func main() {
 		tmpl.ExecuteTemplate(w, "settingsModal", data)
 	})
 	http.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
-		html(w)
-		tmpl.ExecuteTemplate(w, "events", s.eventsData(r))
+		data := s.eventsData(r)
+		renderPage(w, tmpl, "events", &data)
 	})
 	// The investigation command dock submits here. Resolution is server-side so
 	// a query that names nothing lands on grouped results instead of a 404.
@@ -291,12 +291,11 @@ func main() {
 		s.serveSearch(w, r, tmpl)
 	})
 	http.HandleFunc("/ips", func(w http.ResponseWriter, r *http.Request) {
-		html(w)
 		data := s.ipsData()
 		if len(data.Rows) > 25 {
 			data.Rows = data.Rows[:25]
 		}
-		tmpl.ExecuteTemplate(w, "ips", data)
+		renderPage(w, tmpl, "ips", &data)
 	})
 	http.HandleFunc("/investigate/ip/", func(w http.ResponseWriter, r *http.Request) {
 		ip, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/investigate/ip/"))
@@ -309,8 +308,7 @@ func main() {
 			http.NotFound(w, r)
 			return
 		}
-		html(w)
-		tmpl.ExecuteTemplate(w, "attacker", data)
+		renderPage(w, tmpl, "attacker", &data)
 	})
 	http.HandleFunc("/sessions/", func(w http.ResponseWriter, r *http.Request) {
 		id, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/sessions/"))
@@ -323,39 +321,37 @@ func main() {
 			http.NotFound(w, r)
 			return
 		}
-		html(w)
-		tmpl.ExecuteTemplate(w, "session", data)
+		renderPage(w, tmpl, "session", &data)
 	})
 	http.HandleFunc("/clusters", func(w http.ResponseWriter, r *http.Request) {
-		html(w)
-		tmpl.ExecuteTemplate(w, "clusters", s.clustersData())
+		data := s.clustersData()
+		renderPage(w, tmpl, "clusters", &data)
 	})
 	http.HandleFunc("/campaigns", func(w http.ResponseWriter, r *http.Request) {
-		html(w)
-		tmpl.ExecuteTemplate(w, "campaigns", s.get())
+		data := s.get()
+		renderPage(w, tmpl, "campaigns", &data)
 	})
 	http.HandleFunc("/history", func(w http.ResponseWriter, r *http.Request) {
-		html(w)
-		tmpl.ExecuteTemplate(w, "history", s.get())
+		data := s.get()
+		renderPage(w, tmpl, "history", &data)
 	})
 	http.HandleFunc("/dead-letters", func(w http.ResponseWriter, r *http.Request) {
-		html(w)
-		tmpl.ExecuteTemplate(w, "dead-letters", s.get())
+		data := s.get()
+		renderPage(w, tmpl, "dead-letters", &data)
 	})
 	http.HandleFunc("/source-health", func(w http.ResponseWriter, r *http.Request) {
-		html(w)
-		tmpl.ExecuteTemplate(w, "source-health", s.get())
+		data := s.get()
+		renderPage(w, tmpl, "source-health", &data)
 	})
 	http.HandleFunc("/alerts", func(w http.ResponseWriter, r *http.Request) {
-		html(w)
-		tmpl.ExecuteTemplate(w, "alerts", s.get())
+		data := s.get()
+		renderPage(w, tmpl, "alerts", &data)
 	})
 	http.HandleFunc("/reports", func(w http.ResponseWriter, r *http.Request) {
-		html(w)
-		tmpl.ExecuteTemplate(w, "reports", s.get())
+		data := s.get()
+		renderPage(w, tmpl, "reports", &data)
 	})
 	http.HandleFunc("/payloads", func(w http.ResponseWriter, r *http.Request) {
-		html(w)
 		data := s.payloadsData(r.URL.Query().Get("source"))
 		if r.URL.Query().Get("analysis") == "queued" && hashName.MatchString(r.URL.Query().Get("hash")) {
 			guest := "isolated"
@@ -371,7 +367,7 @@ func main() {
 		if len(data.Files) > 25 {
 			data.Files = data.Files[:25]
 		}
-		tmpl.ExecuteTemplate(w, "payloads", data)
+		renderPage(w, tmpl, "payloads", &data)
 	})
 	http.HandleFunc("/api/payload-rows", func(w http.ResponseWriter, r *http.Request) {
 		data := s.payloadsData(r.URL.Query().Get("source"))
@@ -393,10 +389,9 @@ func main() {
 	http.HandleFunc("/ghidra/submit", s.serveGhidraSubmit)
 	http.HandleFunc("/github-analysis/submit", s.serveGitHubAnalysisSubmit)
 	http.HandleFunc("/ghidra", func(w http.ResponseWriter, r *http.Request) {
-		html(w)
 		data, _ := ghidraData("", r.URL.Query().Get("q"))
 		data.Analysis = r.URL.Query().Get("analysis")
-		tmpl.ExecuteTemplate(w, "ghidra", data)
+		renderPage(w, tmpl, "ghidra", &data)
 	})
 	http.HandleFunc("/ghidra/", func(w http.ResponseWriter, r *http.Request) {
 		sha, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/ghidra/"))
@@ -410,13 +405,11 @@ func main() {
 			return
 		}
 		data.Analysis = r.URL.Query().Get("analysis")
-		html(w)
-		tmpl.ExecuteTemplate(w, "ghidra", data)
+		renderPage(w, tmpl, "ghidra", &data)
 	})
 	http.HandleFunc("/sandbox", func(w http.ResponseWriter, r *http.Request) {
-		html(w)
 		data, _ := sandboxData("", r.URL.Query().Get("q"))
-		tmpl.ExecuteTemplate(w, "sandbox", data)
+		renderPage(w, tmpl, "sandbox", &data)
 	})
 	http.HandleFunc("/sandbox/", func(w http.ResponseWriter, r *http.Request) {
 		job, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/sandbox/"))
@@ -433,12 +426,11 @@ func main() {
 		_, captureErr := s.payloadPath(data.Detail.SHA256)
 		data.Detail.CaptureAvailable = captureErr == nil
 		data.Analysis = r.URL.Query().Get("analysis")
-		html(w)
-		tmpl.ExecuteTemplate(w, "sandbox", data)
+		renderPage(w, tmpl, "sandbox", &data)
 	})
 	http.HandleFunc("/commands", func(w http.ResponseWriter, r *http.Request) {
-		html(w)
-		tmpl.ExecuteTemplate(w, "commands", s.commandsData())
+		data := s.commandsData()
+		renderPage(w, tmpl, "commands", &data)
 	})
 	http.HandleFunc("/payload-analysis/", func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(r.URL.Path, "/payload-analysis/")
@@ -447,8 +439,7 @@ func main() {
 			http.NotFound(w, r)
 			return
 		}
-		html(w)
-		tmpl.ExecuteTemplate(w, "payload-analysis", analysis)
+		renderPage(w, tmpl, "payload-analysis", &analysis)
 	})
 	http.HandleFunc("/export/events.csv", s.exportEventsCSV)
 	http.HandleFunc("/export/commands.csv", s.exportCommandsCSV)
@@ -464,8 +455,8 @@ func main() {
 			http.NotFound(w, r)
 			return
 		}
-		html(w)
-		tmpl.ExecuteTemplate(w, "page", s.get())
+		data := s.get()
+		renderPage(w, tmpl, "page", &data)
 	})
 
 	srv := &http.Server{

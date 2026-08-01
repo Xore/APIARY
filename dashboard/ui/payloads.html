@@ -19,7 +19,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>xore//honeypot — captured payloads</title>
-{{template "style"}}
+{{template "style" .}}
 </head>
 <body>
 <div class="app-shell">
@@ -55,7 +55,7 @@
               only in an isolated analysis VM.
             </p>
             {{if not .Enabled}}<p class="empty">payload serving is disabled (set PAYLOAD_DIRS and/or SCRIPT_PAYLOAD_DIR)</p>
-            {{else if .Loading}}<p class="note" data-payload-warming><span class="live-dot" aria-hidden="true"></span> Preparing the payload inventory. This page will update automatically.</p><script>setTimeout(()=>location.reload(),1500)</script>
+            {{else if .Loading}}<p class="note" data-payload-warming><span class="live-dot" aria-hidden="true"></span> Preparing the payload inventory. This page will update automatically.</p><script nonce="{{.Nonce}}">setTimeout(()=>location.reload(),1500)</script>
             {{else if .Files}}
             <table class="recent">
               <thead><tr><th>captured</th><th>source</th><th>hash</th><th>type</th><th>size</th><th>copies</th><th>static</th><th>dynamic</th><th>download</th><th>events</th></tr></thead>
@@ -82,7 +82,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
 <title>xore//honeypot — payload analysis</title>
-{{template "style"}}
+{{template "style" .}}
 </head>
 <body>
 <div class="app-shell">
