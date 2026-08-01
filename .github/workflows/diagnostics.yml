@@ -177,6 +177,19 @@ jobs:
                echo "No eve-*.json files found in $dir"
              fi
              echo
+             echo "--- suricata ruleset age (#116) ---"
+             rules=/var/lib/docker/volumes/vps_suricata-rules/_data/rules/suricata.rules
+             if [ -f "$rules" ]; then
+               age=$(( $(date +%s) - $(stat -c %Y "$rules") ))
+               stat -c "%n: %s bytes, compiled %y" "$rules"
+               echo "Age: ${age}s"
+               if [ "$age" -gt 43200 ]; then
+                 echo "That is over twelve hours old -- check hp-suricata-rules-refresh (docker logs hp-suricata-rules-refresh)."
+               fi
+             else
+               echo "No compiled suricata.rules found at $rules"
+             fi
+             echo
              echo "--- disk free ---"
              df -h /
              echo
