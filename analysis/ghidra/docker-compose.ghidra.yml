@@ -118,6 +118,16 @@ services:
     security_opt:
       - no-new-privileges:true
     read_only: true
+    # The image runs as nobody (uid 65534, #232), whose /etc/passwd entry
+    # gives it /nonexistent as a home directory -- Debian's own placeholder
+    # for a service account with no real home. Something capa depends on
+    # resolves a HOME-relative cache path (not the per-request sample
+    # tempfile below, which server.py already handles) and tries to write
+    # there, which fails: /nonexistent doesn't exist and the root above is
+    # read-only. Pointing HOME at the one writable mount already declared
+    # (tmpfs below) fixes it without adding a second writable path to audit.
+    environment:
+      - HOME=/tmp
     tmpfs:
       # capa has no stdin mode -- it needs each sample on disk. server.py's
       # capa_scan() writes it under $TMPDIR per request and unlinks it right
