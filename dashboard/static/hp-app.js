@@ -590,7 +590,16 @@
        The server is the source of truth when reachable; localStorage stays a
        per-browser mirror so the pre-JS theme bootstrap and offline behavior
        are unchanged. Recognized legacy keys are migrated to the server once. */
-    const prefState = {ready: false, etag: "", prefs: null};
+    /* #156: hp-settings.js (the settings modal, part of this same shell)
+       used to track its own independent copy of the preferences ETag. Any
+       write from here -- the theme toggle below, or the one-time
+       localStorage migration -- advanced the server's per-subject revision
+       without hp-settings.js knowing, so its next save carried a stale
+       If-Match and failed with a false "changed in another session"
+       conflict on the very first settings edit after a page load. Sharing
+       one object as the single source of truth for the current ETag/prefs
+       fixes that at the source instead of just recovering from the 409. */
+    const prefState = window.HpPreferences = window.HpPreferences || {ready: false, etag: "", prefs: null};
     const prefHeaders = () => ({
       "Content-Type": "application/json",
       ...(prefState.etag ? {"If-Match": prefState.etag} : {}),

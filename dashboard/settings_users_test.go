@@ -218,6 +218,119 @@ func TestProjectionCapEvictsLeastRecentlySeen(t *testing.T) {
 	}
 }
 
+// #156: a held preferences ETag must survive unrelated activity elsewhere in
+// the shared users document -- another subject's projection Upsert (e.g.
+// their own session's routine last_seen_at bookkeeping) must never make an
+// unrelated subject's save look like a concurrent edit.
+func TestPreferencesETagUnaffectedByOtherSubjectActivity(t *testing.T) {
+	users := newTestUserStore(t)
+	alice := testIdentity("subject-alice-000006", "alice", "user")
+	bob := testIdentity("subject-bob-00000002", "bob", "user")
+	users.Upsert(alice)
+	users.Upsert(bob)
+
+	_, aliceEtag, ok := users.Preferences(alice.Subject)
+	if !ok {
+		t.Fatal("alice projection missing")
+	}
+
+	// Bob's own projection changes materially (a role change, forcing past
+	// the upsert throttle) and writes his own preferences -- neither should
+	// touch alice's token.
+	bobPromoted := bob
+	bobPromoted.Role = "admin"
+	users.Upsert(bobPromoted)
+	if _, err := users.UpdatePreferences(bobPromoted, "", "req-bob-1", "", func(p *userPreferences) error {
+		p.Theme = "dark"
+		return nil
+	}); err != nil {
+		t.Fatalf("bob's own update must succeed: %v", err)
+	}
+
+	if _, err := users.UpdatePreferences(alice, aliceEtag, "req-alice-1", "", func(p *userPreferences) error {
+		p.HighContrast = true
+		return nil
+	}); err != nil {
+		t.Fatalf("alice's save was falsely treated as a conflict after bob's unrelated activity: %v", err)
+	}
+}
+
+// #156: a genuine two-session conflict on the SAME subject's preferences
+// must still be caught -- and the losing session must be able to reload the
+// latest values and retry successfully, without losing its own change if it
+// re-applies it on top of the fresh state.
+func TestPreferencesConflictReloadAndRetry(t *testing.T) {
+	users := newTestUserStore(t)
+	alice := testIdentity("subject-alice-000007", "alice", "user")
+	users.Upsert(alice)
+
+	_, sessionAEtag, _ := users.Preferences(alice.Subject)
+	sessionBEtag := sessionAEtag
+
+	// Session B (e.g. a second browser tab) saves first.
+	if _, err := users.UpdatePreferences(alice, sessionBEtag, "req-b-1", "", func(p *userPreferences) error {
+		p.Theme = "dark"
+		return nil
+	}); err != nil {
+		t.Fatalf("session B's save must succeed: %v", err)
+	}
+
+	// Session A, still holding the pre-B token, must be told about the
+	// genuine conflict rather than silently overwriting session B's change.
+	if _, err := users.UpdatePreferences(alice, sessionAEtag, "req-a-1", "", func(p *userPreferences) error {
+		p.HighContrast = true
+		return nil
+	}); !errors.Is(err, errStaleRevision) {
+		t.Fatalf("a real second-session write must conflict, got %v", err)
+	}
+
+	// Session A reloads and retries: the retry must succeed and must not
+	// lose session B's theme change.
+	_, freshEtag, _ := users.Preferences(alice.Subject)
+	if _, err := users.UpdatePreferences(alice, freshEtag, "req-a-2", "", func(p *userPreferences) error {
+		p.HighContrast = true
+		return nil
+	}); err != nil {
+		t.Fatalf("retry after reload must succeed: %v", err)
+	}
+	final, _, _ := users.Preferences(alice.Subject)
+	if final.Theme != "dark" || !final.HighContrast {
+		t.Fatalf("retry must preserve the other session's change: %+v", final)
+	}
+}
+
+// #156: several saves in a row from one session, each chaining the
+// previously returned ETag, must all succeed -- this is the ordinary
+// "change a few preferences one after another" path the bug report
+// described as consistently failing.
+func TestPreferencesRapidSequentialUpdatesFromOneSession(t *testing.T) {
+	users := newTestUserStore(t)
+	alice := testIdentity("subject-alice-000008", "alice", "user")
+	users.Upsert(alice)
+
+	_, etag, _ := users.Preferences(alice.Subject)
+	edits := []func(*userPreferences){
+		func(p *userPreferences) { p.HighContrast = true },
+		func(p *userPreferences) { p.Theme = "dark" },
+		func(p *userPreferences) { p.Density = "compact" },
+		func(p *userPreferences) { p.RowsPerPage = 100 },
+	}
+	for i, edit := range edits {
+		next, err := users.UpdatePreferences(alice, etag, "req-seq-"+strconv.Itoa(i), "", func(p *userPreferences) error {
+			edit(p)
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("rapid sequential update %d failed: %v", i, err)
+		}
+		etag = next
+	}
+	final, _, _ := users.Preferences(alice.Subject)
+	if !final.HighContrast || final.Theme != "dark" || final.Density != "compact" || final.RowsPerPage != 100 {
+		t.Fatalf("sequential updates did not all apply: %+v", final)
+	}
+}
+
 func TestAuditRecordsPreferenceOutcomes(t *testing.T) {
 	users := newTestUserStore(t)
 	alice := testIdentity("subject-alice-000005", "alice", "user")

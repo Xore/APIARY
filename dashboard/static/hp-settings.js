@@ -180,8 +180,25 @@
     const ADMIN_PANES = ["branding", "behavior", "honeypot", "users", "history", "audit"];
     const isAdmin = navItems.some(nav => ADMIN_PANES.includes(nav.dataset.hpPaneNav));
 
-    /* ---- state ---- */
-    const state = { etag: "", prefs: null, snapshot: {}, dirty: {}, confirmCallback: null, confirmInitiator: null };
+    /* ---- state ----
+       #156: the ETag/prefs fields are read from and written back to
+       window.HpPreferences (hp-app.js's own preferences client, part of the
+       same page shell) instead of being tracked independently here. hp-app.js
+       writes preferences too (theme toggle, one-time localStorage
+       migration); an independent copy here would fall out of date the
+       moment either of those fired, and the next save would be rejected as
+       a false conflict even though nothing was actually edited concurrently
+       by another session. */
+    const shared = () => window.HpPreferences || (window.HpPreferences = {ready: false, etag: "", prefs: null});
+    const state = { snapshot: {}, dirty: {}, confirmCallback: null, confirmInitiator: null };
+    Object.defineProperty(state, "etag", {
+      get() { return shared().etag; },
+      set(value) { shared().etag = value; },
+    });
+    Object.defineProperty(state, "prefs", {
+      get() { return shared().prefs; },
+      set(value) { shared().prefs = value; shared().ready = true; },
+    });
 
     /* ---- control helpers (three control types, keyed by data-pref) ---- */
     const controls = qa("[data-pref]");

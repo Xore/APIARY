@@ -7,6 +7,8 @@ package main
 // immutable subject.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,14 +27,35 @@ const maxProjectedUsers = 1000
 const projectionWriteInterval = 5 * time.Minute
 
 type userProjection struct {
-	Subject            string          `json:"subject"`
-	LastUsername       string          `json:"last_username"`
-	LastDisplayName    string          `json:"last_display_name,omitempty"`
-	RoleSnapshot       string          `json:"role_snapshot"`
-	FirstSeen          time.Time       `json:"first_seen_at"`
-	LastSeen           time.Time       `json:"last_seen_at"`
-	PreferencesVersion int             `json:"preferences_version"`
-	Preferences        userPreferences `json:"preferences"`
+	Subject             string          `json:"subject"`
+	LastUsername        string          `json:"last_username"`
+	LastDisplayName     string          `json:"last_display_name,omitempty"`
+	RoleSnapshot        string          `json:"role_snapshot"`
+	FirstSeen           time.Time       `json:"first_seen_at"`
+	LastSeen            time.Time       `json:"last_seen_at"`
+	PreferencesVersion  int             `json:"preferences_version"`
+	PreferencesRevision int64           `json:"preferences_revision"`
+	Preferences         userPreferences `json:"preferences"`
+}
+
+// preferencesETag computes an optimistic-concurrency token scoped to one
+// subject's own preferences (revision + content hash), never the shared
+// users document. #156: the document-wide ETag this used to reuse changed
+// whenever ANY subject's projection was touched -- including another
+// session's own read-triggered Upsert bumping its last_seen_at, which
+// happens on ordinary use, not just a real edit. A held token routinely
+// went stale before its own owner's next save, so an unrelated session (or
+// this same session's own background activity) made every save look like a
+// concurrent edit. Scoping the token to (subject, its own revision, its own
+// preferences) means only a genuine second write to THIS subject's
+// preferences can ever invalidate it.
+func preferencesETag(prefs userPreferences, revision int64) string {
+	raw, err := json.Marshal(prefs)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(raw)
+	return fmt.Sprintf(`"r%d-%s"`, revision, hex.EncodeToString(sum[:6]))
 }
 
 type usersDocument struct {
@@ -169,13 +192,14 @@ func (u *userStore) SweepRetention(now time.Time, maxAge time.Duration) int {
 	return len(removed)
 }
 
-// Preferences returns one subject's preferences with the ETag of the
-// underlying document.
+// Preferences returns one subject's preferences with a per-subject ETag
+// (#156) -- unaffected by any other subject's projection or preference
+// writes.
 func (u *userStore) Preferences(subject string) (userPreferences, string, bool) {
-	doc, etag := u.inner.Get()
+	doc, _ := u.inner.Get()
 	for _, user := range doc.Users {
 		if user.Subject == subject {
-			return user.Preferences, etag, true
+			return user.Preferences, preferencesETag(user.Preferences, user.PreferencesRevision), true
 		}
 	}
 	return userPreferences{}, "", false
@@ -198,6 +222,16 @@ func (u *userStore) Projections() []userProjection {
 // projection yet cannot write preferences — the projection is created by the
 // first authenticated request, so this also enforces "no preference writes
 // without a trusted subject".
+//
+// #156: the conflict check happens here, against this subject's own
+// preferences revision, rather than being delegated to the generic
+// atomicSettingsStore's whole-document ifMatch check (so ifMatch="" is
+// passed through below). The whole document holds every subject's
+// projection; gating on its ETag meant any other subject's write -- or this
+// subject's own Upsert-driven last_seen_at bump on a later, unrelated
+// request -- could invalidate a token this subject never had a chance to
+// use yet. A per-subject revision only advances when this subject's own
+// preferences actually change.
 func (u *userStore) UpdatePreferences(actor authenticatedIdentity, ifMatch, requestID, clientIP string, mutate func(*userPreferences) error) (string, error) {
 	event := auditEvent{
 		Actor:     actor.Subject,
@@ -206,12 +240,22 @@ func (u *userStore) UpdatePreferences(actor authenticatedIdentity, ifMatch, requ
 		ClientIP:  clientIP,
 		Action:    "preferences.update",
 	}
-	etag, changed, err := u.inner.Update(ifMatch, func(doc *usersDocument) error {
+	var newEtag string
+	_, changed, err := u.inner.Update("", func(doc *usersDocument) error {
 		for i := range doc.Users {
 			if doc.Users[i].Subject != actor.Subject {
 				continue
 			}
-			return mutate(&doc.Users[i].Preferences)
+			user := &doc.Users[i]
+			if ifMatch != "" && ifMatch != preferencesETag(user.Preferences, user.PreferencesRevision) {
+				return errStaleRevision
+			}
+			if err := mutate(&user.Preferences); err != nil {
+				return err
+			}
+			user.PreferencesRevision++
+			newEtag = preferencesETag(user.Preferences, user.PreferencesRevision)
+			return nil
 		}
 		return errUnknownRecord
 	})
@@ -232,7 +276,7 @@ func (u *userStore) UpdatePreferences(actor authenticatedIdentity, ifMatch, requ
 	if err != nil {
 		return "", err
 	}
-	return etag, nil
+	return newEtag, nil
 }
 
 // ResetPreferences restores compiled defaults for one subject.
