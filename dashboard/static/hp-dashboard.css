@@ -436,40 +436,8 @@ footer {
   color: var(--text-muted); text-align: center;
 }
 
-/* ── Activity chart ─────────────────────────────────────────────────────── */
-/* Bars, layout, and the --v custom property mechanism are Xore/theme's
-   shared .mini-chart component (static/theme.css) -- see that repo's
-   docs/CSP.md. Everything here is the dashboard-specific layer on top:
-   the hover/focus tooltip and the hour label under every third bar.
-   The label gets its own gutter below the chart rather than a slot
-   inside the bar itself -- sharing the bar's flex flow, a label there
-   would both lift and shrink the bar above it, and only every third bar
-   has one, so bars would read against three different baselines. */
-#activity-chart { height: 155px; padding-top: 6px; padding-bottom: 15px; }
-#activity-chart span { position: relative; cursor: help; }
-#activity-chart span::after {
-  content: attr(data-tip);
-  position: absolute; z-index: 6; left: 50%; top: 5px;
-  transform: translate(-50%, -6px);
-  padding: 6px 8px;
-  border: 1px solid var(--border-strong); border-radius: 8px;
-  background: var(--surface-raised); color: var(--text-primary);
-  box-shadow: var(--shadow-raised);
-  font: 11px var(--hp-mono); white-space: nowrap;
-  opacity: 0; pointer-events: none;
-  transition: opacity var(--transition-fast), transform var(--transition-fast);
-}
-#activity-chart span:hover::after, #activity-chart span:focus-visible::after { opacity: 1; transform: translate(-50%, 0); }
-#activity-chart span.zero { background: var(--surface-2); border-top-color: var(--surface-2); }
-#activity-chart span em {
-  position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
-  margin-top: 4px; white-space: nowrap;
-  font: 9px var(--hp-mono); font-style: normal; color: var(--text-muted);
-  text-align: center; display: none;
-}
-#activity-chart span:nth-child(3n+1) em { display: block; }
-
-/* ── Activity-by-sensor heatmap (#193) ────────────────────────────────────
+/* ── Activity-by-sensor heatmap (#191/#193, replacing the single-bar
+   24h activity chart) ─────────────────────────────────────────────────
    .heatmap/.heatmap__* chrome is Xore/theme's shared component; this is
    just the gap between the grid and its low->high legend underneath. */
 .heatmap__legend { margin-top: 8px; }

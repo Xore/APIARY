@@ -42,33 +42,13 @@
 
         <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-live" role="tabpanel" data-dashboard-panel="live">
           <div class="section-heading"><div><h2>Current activity</h2><p>What is happening now, when traffic arrived, and where it originated.</p></div><a class="section-link" href="/events?since=24h">View last 24 hours &rarr;</a></div>
-          <div class="card wide chart-card">
-            <h2>Activity — last 24h</h2>
-            <div class="mini-chart" id="activity-chart" aria-label="Hourly event activity, last 24 hours">
-              {{range .Timeline}}<span{{if not .Count}} class="zero"{{end}} data-tip="{{.Label}}:00 — {{.Count}} events" aria-label="{{.Label}}:00, {{.Count}} events" tabindex="0"><em>{{.Label}}</em></span>{{end}}
-            </div>
-            {{/* .mini-chart itself (bars, layout, the --v custom property
-                 mechanism) is Xore/theme's shared component -- see
-                 static/theme.css and github.com/Xore/theme's docs/CSP.md.
-                 The tooltip and hour-label additions below are dashboard-
-                 specific (hp-dashboard.css: #activity-chart span). Setting --v
-                 through a nonced style element, not an inline style
-                 attribute, is required: the page's CSP (script/style-src
-                 use a per-request nonce, no unsafe-inline) blocks style
-                 attributes entirely -- a nonce only ever covers a style or
-                 link element -- so every bar would silently collapse to
-                 its stylesheet min-height otherwise. */}}
-            <style nonce="{{.Nonce}}">{{range $i, $b := .Timeline}}#activity-chart span:nth-child({{inc $i}}){--v:{{$b.Pct}}}
-{{end}}</style>
-            <p class="note">Each bar is one local-time hour. Hover or focus a bar for the exact event count; select the 24-hour KPI above to inspect those events.</p>
-          </div>
-
           {{if .SensorHeatmap}}<div class="card wide chart-card">
-            <h2>Activity by sensor — last 24h</h2>
+            <h2>Activity — last 24h</h2>
             {{/* .heatmap is Xore/theme's shared component (see
                  static/theme.css and github.com/Xore/theme's docs/CSP.md) --
-                 same nonced-style-element requirement as .mini-chart
-                 above, addressed by row then column. */}}
+                 same nonced-style-element requirement as its .mini-chart
+                 sibling component, addressed by row then column instead of
+                 a single index. */}}
             <div class="heatmap" aria-label="Hourly event activity per sensor, last 24 hours">
               {{range .SensorHeatmap}}<div class="heatmap__row"><span class="heatmap__label">{{.Sensor}}</span><div class="heatmap__cells">{{range .Cells}}<span class="heatmap__cell" title="{{.Label}} — {{.Count}} events" tabindex="0"></span>{{end}}</div></div>
               {{end}}
@@ -77,6 +57,9 @@
 {{end}}{{end}}.heatmap__legend .heatmap__cell:nth-of-type(1){--v:0}.heatmap__legend .heatmap__cell:nth-of-type(2){--v:25}.heatmap__legend .heatmap__cell:nth-of-type(3){--v:50}.heatmap__legend .heatmap__cell:nth-of-type(4){--v:75}.heatmap__legend .heatmap__cell:nth-of-type(5){--v:100}</style>
             <div class="heatmap__legend"><span>Less</span><span class="heatmap__cell"></span><span class="heatmap__cell"></span><span class="heatmap__cell"></span><span class="heatmap__cell"></span><span class="heatmap__cell"></span><span>More</span></div>
             <p class="note">Sensors with the most events in the last 24 hours, hour by hour. Hover or focus a cell for the exact count.</p>
+          </div>{{else}}<div class="card wide chart-card">
+            <h2>Activity — last 24h</h2>
+            <p class="empty">No events in the last 24 hours.</p>
           </div>{{end}}
 
           {{if .MapPoints}}<div class="card wide map-card" data-attack-map-card><h2>Attack origins &mdash; live geographic view</h2>
