@@ -1,14 +1,16 @@
 # Ghidra Payload Analysis — Implementation Plan
 
-> **Status**: Design document. Phase 4 (plugin selection) and phase 3
-> (GhidrAssist) are unbuilt. Phases 1, 2 and 5 are built — five of the six
-> `scripts/` exporters exist (`findcrypt.py` was deleted, superseded by
-> `scan_crypto()` in the worker), the `revdeck` service is deployed
-> (profile-gated in `docker-compose.ghidra.yml`, interactive-only), and
-> `report/generate_report.py` renders an HTML report from every automated
-> worker result. Still missing: a verified request/result contract for
-> automating Rev·Deck triage, which is what the dashboard's `revdeck`
-> workbench adapter is waiting on.  
+> **Status**: Design document. Phase 4 (plugin selection) is unbuilt. Phases
+> 1, 2, 3 and 5 are built — five of the six `scripts/` exporters exist
+> (`findcrypt.py` was deleted, superseded by `scan_crypto()` in the worker),
+> the `revdeck` service is deployed (profile-gated in
+> `docker-compose.ghidra.yml`, interactive-only), GhidrAssist has a verified
+> pinned-artifact install procedure (`ghidrassist/README.md`, see
+> [#192](https://github.com/Xore/honeypot-stack/issues/192) for a caveat
+> found along the way), and `report/generate_report.py` renders an HTML
+> report from every automated worker result. Still missing: a verified
+> request/result contract for automating Rev·Deck triage, which is what the
+> dashboard's `revdeck` workbench adapter is waiting on.  
 > **Tracked in**: [#78](https://github.com/Xore/honeypot-stack/issues/78)
 > (phases 3–5), [#76](https://github.com/Xore/honeypot-stack/issues/76)
 > (dashboard spool and entry points),
@@ -202,7 +204,7 @@ MAX_UPLOAD_BYTES=104857600
 
 ---
 
-## Phase 3 — GhidrAssist Plugin ⬜ Planned
+## Phase 3 — GhidrAssist Plugin ✅ Built (2026-08-01, #78)
 
 ### Source
 [symgraph/GhidrAssist](https://github.com/symgraph/GhidrAssist)
@@ -216,21 +218,32 @@ GhidrAssist is a Ghidra extension (Java plugin) providing:
 - Right-click "Ask AI" on any code location
 
 ### Integration Plan
-- Build the plugin from source using the provided `build.gradle`
-- Install in the Ghidra container via extension ZIP
-- Configure with same LLM endpoint as Rev·Deck
-- Use for **interactive** (non-automated) analyst sessions
-- Not part of the automated CI pipeline — analyst-facing only
+GhidrAssist runs inside an analyst's own local Ghidra GUI — there is no GUI
+Ghidra container in this stack to install it into (`ghidra` in
+`docker-compose.ghidra.yml` is `biniamfd/ghidra-headless-rest`, headless
+only). Same as Rev·Deck, it is:
+- **Interactive only** — analyst-facing, run by hand against a local install
+- Not part of the automated worker pipeline
+- Configured with the same LLM endpoint as Rev·Deck
 
-### Build Steps
-```bash
-cd analysis/ghidra/ghidrassist
-git clone https://github.com/symgraph/GhidrAssist
-cd GhidrAssist
-export GHIDRA_INSTALL_DIR=/opt/ghidra
-gradle buildExtension
-# Output: dist/ghidra_*_GhidrAssist.zip
-```
+### Install
+
+[`ghidrassist/README.md`](ghidrassist/README.md) has the full procedure. In
+short: download a pinned, checksummed release ZIP (`ghidra_<version>_PUBLIC_<date>_GhidrAssist.zip`
+from a [GhidrAssist release](https://github.com/symgraph/GhidrAssist/releases),
+matching this repo's practice of pinning third-party artifacts by digest)
+rather than cloning source and running `gradle buildExtension` against an
+unpinned `HEAD` — no Gradle/Ghidra-SDK build toolchain needed, and no
+unverified upstream code executes locally as part of the build.
+
+**The release zip needs one manual step before installing.** Checked the
+2.0.0, 2.1.0 and 2.2.0 release assets: all three bundle the maintainer's own
+runtime state — real RE chat-session transcripts, a stale Lucene search
+index, and a `.claude/settings.local.json` leaking their home directory path
+— none of which are in GhidrAssist's tracked source tree. Tracked as
+[#192](https://github.com/Xore/honeypot-stack/issues/192); the README's
+install steps strip the three leaked paths from the extracted zip before
+pointing Ghidra's extension installer at it.
 
 ---
 
