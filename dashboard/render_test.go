@@ -83,11 +83,11 @@ func TestSecHeadersFrameSrcMatchesAuthAccountOrigin(t *testing.T) {
 		t.Fatalf("frame-src must not name an origin when AUTH_ACCOUNT_URL is unset: %q", csp)
 	}
 
-	setAuthFrameOrigin("https://auth.xore.rocks/auth/app?pane=account")
+	setAuthFrameOrigin("https://auth.example.test/auth/app?pane=account")
 	w2 := httptest.NewRecorder()
 	secHeaders(w2, nonce())
 	csp2 := w2.Header().Get("Content-Security-Policy")
-	if !strings.Contains(csp2, "frame-src 'self' https://auth.xore.rocks") {
+	if !strings.Contains(csp2, "frame-src 'self' https://auth.example.test") {
 		t.Fatalf("frame-src must include the auth account origin (path/query stripped), got: %q", csp2)
 	}
 	if strings.Contains(csp2, "/auth/app") {
