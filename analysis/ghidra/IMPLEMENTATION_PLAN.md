@@ -2,8 +2,8 @@
 
 > **Status**: Design document. Phases 3–5 are unbuilt, and phases 1–2 are
 > partly built — `ghidra_analyze.py` and five of the six `scripts/` exporters
-> exist; the import exporter, the Rev·Deck compose file and the whole `report/`
-> tree do not.  
+> exist (`findcrypt.py` was deleted, superseded by `scan_crypto()` in the
+> worker); the Rev·Deck compose file and the whole `report/` tree do not.  
 > **Tracked in**: [#78](https://github.com/Xore/honeypot-stack/issues/78)
 > (phases 3–5), [#76](https://github.com/Xore/honeypot-stack/issues/76)
 > (dashboard spool and entry points),
@@ -44,8 +44,8 @@ honeypot-stack/
         ├── scripts/                 ← Ghidra Python scripts (Jython / Pyhidra)
         │   ├── export_functions.py
         │   ├── export_strings.py
-        │   ├── export_imports.py    ← MISSING
-        │   ├── findcrypt.py         ← crypto constant detection
+        │   ├── export_imports.py
+        │   ├── findcrypt.py         ← deleted, see #136
         │   ├── yara_scan.py         ← run YARA rules inside Ghidra
         │   └── call_graph.py
         ├── revdeck/                 ← biniamf/ai-reverse-engineering integration
@@ -59,10 +59,12 @@ honeypot-stack/
                 └── ghidra_report.html
 ```
 
-This is the *target* layout. Three entries marked MISSING do not exist:
-`scripts/export_imports.py`, `revdeck/docker-compose.revdeck.yml`, and the
-whole `report/` tree. The import table is listed as a Phase 1 export, so its
-absence means Phase 1 is not actually complete.
+This is the *target* layout. Two entries marked MISSING do not exist:
+`revdeck/docker-compose.revdeck.yml` and the whole `report/` tree.
+`scripts/export_imports.py` was added following the shape of its four
+siblings — it walks `FunctionManager.getExternalFunctions()` and writes
+`{address, name, library}` per import, same as the other exporters write
+their own JSON alongside it in the project directory.
 
 ---
 
@@ -341,8 +343,9 @@ trusted, so the burden of proof was on inclusion, not exclusion.
 
 Earlier revisions of this file ended with "See `analysis/ghidra/scripts/` for
 implementations integrating these." There are none. That directory holds
-`call_graph.py`, `export_functions.py`, `export_strings.py` and
-`yara_scan.py`, and nothing in it uses any tool above. (`findcrypt.py` was
-deleted in [#136](https://github.com/Xore/honeypot-stack/issues/136): it was
-superseded by `scan_crypto()` in `worker/ghidra-worker.py`, whose comment
-records the three bugs the old script had.)
+`call_graph.py`, `export_functions.py`, `export_imports.py`,
+`export_strings.py` and `yara_scan.py`, and nothing in it uses any tool
+above. (`findcrypt.py` was deleted in
+[#136](https://github.com/Xore/honeypot-stack/issues/136): it was superseded
+by `scan_crypto()` in `worker/ghidra-worker.py`, whose comment records the
+three bugs the old script had.)
