@@ -58,6 +58,28 @@ LOG_LEVEL        = os.getenv("LOG_LEVEL",         "INFO")
 DRIFT_WINDOW       = int(os.getenv("DRIFT_WINDOW", "500"))
 DRIFT_ANOMALY_RATE = float(os.getenv("DRIFT_ANOMALY_RATE", "0.15"))
 
+# #190: the regular poll path had no cap, unlike the retrain path
+# (MAX_TRAIN_SAMPLES) -- a backlog large enough to need more than one
+# cycle (from downtime, a slow retrain blocking this same loop, or just a
+# traffic burst) turned into a single, arbitrarily long scoring pass with
+# no checkpoint progress and no crash-safety net until the whole thing
+# finished. Capped to the same order of magnitude as one retrain's own
+# fetch -- large enough that ordinary cycles still complete in one pass,
+# small enough that a real backlog now checkpoints incrementally across
+# several cycles instead of one unbounded one.
+MAX_POLL_BATCH = int(os.getenv("MAX_POLL_BATCH", "5000"))
+
+# #188: fetch_new_events() already retries every POLL_INTERVAL by nature of
+# the main loop calling it again next cycle -- no separate backoff/jitter is
+# added here, since a fixed retry is simpler and there's no evidence a
+# backend that's briefly unreachable benefits from anything more elaborate.
+# What was missing was distinguishing "briefly lost ES, recovered" from
+# "unreachable for an extended period" -- this many CONSECUTIVE failed
+# cycles for one index pattern before it's treated as sustained rather
+# than a transient blip (the one blip actually observed, #167/#188's own
+# report, self-healed after exactly one cycle).
+ES_UNAVAILABLE_ALERT_AFTER = int(os.getenv("ES_UNAVAILABLE_ALERT_AFTER", "3"))
+
 # Source indices to monitor. #61 found these matched zero real indices --
 # the actual shape (docs/ml-worker-plan.md §2/§5.3, verified live 2026-07-31)
 # is one unified honeypot-v2-* data stream for every sensor (disambiguated
@@ -165,9 +187,18 @@ def advance_checkpoint(events: list, previous: dict) -> dict:
 def fetch_new_events(es: Elasticsearch, index_pattern: str,
                     since: str, page_size: int = 500,
                     max_total: "int | None" = None,
-                    exclude_ids: "set | None" = None) -> list:
+                    exclude_ids: "set | None" = None) -> "tuple[list, bool]":
     """Scroll events from the given index pattern at or after `since`
-    (inclusive).
+    (inclusive). Returns (events, ok) -- ok is False when the ES call
+    itself failed, distinct from a genuinely empty (events=[], ok=True)
+    poll (#188: the caller could not previously tell "nothing new" apart
+    from "the fetch failed", since both returned an empty list the same
+    way). A scroll that fails partway still returns whatever pages were
+    already read with ok=False -- safe to checkpoint against per
+    advance_checkpoint's own equal-timestamp handling (#168): every event
+    already read sorts at or before anything not yet read, so advancing
+    only as far as what's in hand can't skip anything, it just leaves the
+    rest for the next poll to pick back up.
 
     Inclusive (gte) rather than the original exclusive (gt) so a caller
     protecting a persisted checkpoint (#168) can safely re-include the exact
@@ -210,7 +241,8 @@ def fetch_new_events(es: Elasticsearch, index_pattern: str,
         es.clear_scroll(scroll_id=scroll_id)
     except Exception as exc:
         logger.warning(f"Fetch error for {index_pattern}: {exc}")
-    return events
+        return events, False
+    return events, True
 
 
 def write_retrain_metric(es: Elasticsearch, model_name: str, result) -> None:
@@ -235,6 +267,67 @@ def write_retrain_metric(es: Elasticsearch, model_name: str, result) -> None:
         logger.warning(f"Failed to write retrain metric for {model_name} (non-fatal): {exc}")
     level = logger.info if result.accepted else logger.warning
     level(f"retrain[{model_name}] accepted={result.accepted} reason={result.reason}")
+
+
+def write_es_unavailable_metric(es: Elasticsearch, index_pattern: str,
+                               consecutive_failures: int, downtime_seconds: int) -> None:
+    """Retrospective evidence that Elasticsearch was unreachable for a
+    sustained period, not a transient blip (#188) -- written on recovery,
+    not during the outage. Elasticsearch is unreachable BY DEFINITION for
+    as long as this would need to write, so there's no way to surface a
+    sustained outage in real time through the only channel this worker has
+    (this same ES index); the log's ERROR-level line (see run_worker(),
+    logged once the outage crosses ES_UNAVAILABLE_ALERT_AFTER cycles) is
+    the real-time signal, this is the durable, after-the-fact record.
+    downtime_seconds is an estimate (consecutive_failures * POLL_INTERVAL),
+    not measured wall-clock time, since nothing here observes ES going down
+    the instant it happens."""
+    doc = {
+        "@timestamp":           datetime.now(timezone.utc).isoformat(),
+        "kind":                 "es_unavailable",
+        "source_index":         index_pattern,
+        "consecutive_failures": consecutive_failures,
+        "downtime_seconds":     downtime_seconds,
+    }
+    try:
+        es.index(index=METRICS_INDEX, document=doc)
+    except Exception as exc:
+        logger.warning(f"Failed to write es_unavailable metric (non-fatal): {exc}")
+    logger.warning(
+        f"{index_pattern}: Elasticsearch recovered after {consecutive_failures} consecutive "
+        f"failed poll cycles (~{downtime_seconds}s) -- treating that as a sustained outage, not a blip"
+    )
+
+
+def backlog_count(es: Elasticsearch, index_pattern: str, since: str) -> "int | None":
+    """How many documents are queued at or after this checkpoint (#190) --
+    called only when a poll cycle's fetch hit MAX_POLL_BATCH, so this stays
+    a signal tied to genuine buildup rather than an every-30s metric write
+    regardless of whether there's anything to report (ml-worker-metrics has
+    no retention policy of its own; a lag metric worth having in steady
+    state is a separate, deliberate addition, not a side effect of this
+    fix). None on a query failure -- best-effort, must never take the poll
+    cycle down over a metric."""
+    try:
+        resp = es.count(index=index_pattern, body={"query": {"range": {"@timestamp": {"gte": since}}}})
+        return resp.get("count")
+    except Exception as exc:
+        logger.warning(f"Backlog count failed for {index_pattern} (non-fatal): {exc}")
+        return None
+
+
+def write_backlog_metric(es: Elasticsearch, index_pattern: str, backlog: int) -> None:
+    doc = {
+        "@timestamp":    datetime.now(timezone.utc).isoformat(),
+        "kind":          "backlog",
+        "source_index":  index_pattern,
+        "backlog_count": backlog,
+    }
+    try:
+        es.index(index=METRICS_INDEX, document=doc)
+    except Exception as exc:
+        logger.warning(f"Failed to write backlog metric (non-fatal): {exc}")
+    logger.warning(f"{index_pattern}: {backlog} events still queued past the checkpoint after this cycle's capped batch")
 
 
 def write_malformed_event_metric(es: Elasticsearch, event: dict, exc: Exception) -> None:
@@ -515,6 +608,9 @@ def run_worker() -> None:
                 "source_event_id":       {"type": "keyword"},  # kind="malformed_event" (#171)
                 "source_index":          {"type": "keyword"},
                 "error":                 {"type": "text"},
+                "backlog_count":         {"type": "integer"},  # kind="backlog" (#190)
+                "consecutive_failures":  {"type": "integer"},  # kind="es_unavailable" (#188)
+                "downtime_seconds":      {"type": "integer"},
             }
         }
     })
@@ -526,6 +622,7 @@ def run_worker() -> None:
     retrain_slots = parse_retrain_slots(RETRAIN_SLOTS_UTC)
     last_fired_slot_id = load_last_fired_slot(es)  # #172: persisted, not restart-relative
     recent_flags = deque(maxlen=DRIFT_WINDOW)  # composite >= THRESHOLD, drift detection (#65)
+    consecutive_es_failures = {idx: 0 for idx in SOURCE_INDICES}  # #188
 
     logger.info(f"Worker ready. Poll={POLL_INTERVAL}s Threshold={THRESHOLD}")
 
@@ -534,10 +631,33 @@ def run_worker() -> None:
 
         for index_pattern in SOURCE_INDICES:
             checkpoint = load_checkpoint(es, index_pattern)
-            events     = fetch_new_events(
+            events, ok = fetch_new_events(
                 es, index_pattern, checkpoint["last_timestamp"],
                 exclude_ids=set(checkpoint["seen_ids"]),
+                max_total=MAX_POLL_BATCH,
             )
+
+            # #188: distinguish a transient blip from a sustained outage --
+            # fetch_new_events() already retries next cycle either way (no
+            # separate backoff), this only tracks how many cycles in a row
+            # have failed for THIS index pattern.
+            if not ok:
+                consecutive_es_failures[index_pattern] += 1
+                n = consecutive_es_failures[index_pattern]
+                if n == ES_UNAVAILABLE_ALERT_AFTER:
+                    logger.error(
+                        f"{index_pattern}: Elasticsearch has failed {n} consecutive poll "
+                        f"cycles (~{n * POLL_INTERVAL}s) -- treating as a sustained outage, not a blip"
+                    )
+            elif consecutive_es_failures[index_pattern] >= ES_UNAVAILABLE_ALERT_AFTER:
+                # Recovered after crossing the sustained-outage threshold --
+                # this is the only point a durable record of it can be
+                # written, since ES itself was unreachable for its duration.
+                n = consecutive_es_failures[index_pattern]
+                write_es_unavailable_metric(es, index_pattern, n, n * POLL_INTERVAL)
+                consecutive_es_failures[index_pattern] = 0
+            else:
+                consecutive_es_failures[index_pattern] = 0
 
             if not events:
                 continue
@@ -551,6 +671,15 @@ def run_worker() -> None:
             # advance_checkpoint()'s own docstring for why.
             new_checkpoint = advance_checkpoint(events, checkpoint)
             save_checkpoint(es, index_pattern, new_checkpoint["last_timestamp"], new_checkpoint["seen_ids"])
+
+            # #190: MAX_POLL_BATCH being exactly what came back means there's
+            # very likely more behind it -- surface that now (a count query,
+            # not another fetch) rather than let it stay invisible until an
+            # operator happens to query Elasticsearch directly.
+            if len(events) >= MAX_POLL_BATCH:
+                remaining = backlog_count(es, index_pattern, new_checkpoint["last_timestamp"])
+                if remaining:
+                    write_backlog_metric(es, index_pattern, remaining)
 
         # #170: persist LSTM-AE's per-IP sliding windows every cycle, not
         # just on retrain -- a crash/OOM/restart between retrains would
@@ -585,15 +714,30 @@ def run_worker() -> None:
         due_slot_id = next_retrain_slot_id(datetime.now(timezone.utc), retrain_slots)
         scheduled_due = due_slot_id is not None and due_slot_id != last_fired_slot_id
 
+        # #190: this runs synchronously in the same loop as event polling --
+        # observed live to block it for ~8 minutes (LSTM fine-tuning on a
+        # real 40k-event batch), during which nothing above this line runs
+        # at all. Deliberately left this way rather than moved to a
+        # background thread: the acceptance gate's promise (a rejected
+        # candidate never replaces the active model, #65) and the atomic
+        # promotion fix (#169) both assume nothing else is concurrently
+        # reading self.iso/self.hbos/self.net while retrain() mutates them
+        # in place (LSTM especially -- fine-tuning literally steps the live
+        # model's weights before deciding whether to keep them). Making this
+        # concurrent needs a real concurrency story for that, not just
+        # spawning a thread. Revisit if Milestone I's shared-GPU scheduling
+        # (#84) needs retrain and polling decoupled; MAX_POLL_BATCH above at
+        # least bounds how large a backlog blocking this causes.
         if drift_rate is not None or scheduled_due:
             logger.info("Starting model retraining...")
             all_events = []
             for idx in SOURCE_INDICES:
                 since_24h = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
-                all_events.extend(fetch_new_events(
+                idx_events, _ok = fetch_new_events(
                     es, idx, since_24h, page_size=5000,
                     max_total=MAX_TRAIN_SAMPLES,
-                ))
+                )
+                all_events.extend(idx_events)
 
             if len(all_events) > 100:
                 sources = [e["_source"] for e in all_events]

@@ -34,10 +34,12 @@ func main() {
 		os.Exit(0)
 	}
 
+	authAccountURL := validatedAuthAccountURL()
+	setAuthFrameOrigin(authAccountURL)
 	s := &store{
 		dir:            getenv("LOG_DIR", "/logs"),
 		yaraFile:       os.Getenv("YARA_RESULTS_FILE"),
-		authAccountURL: validatedAuthAccountURL(),
+		authAccountURL: authAccountURL,
 	}
 	for _, name := range strings.Split(os.Getenv("EXPECTED_SENSORS"), ",") {
 		if name = strings.TrimSpace(name); name != "" && name != "portbridge" {
@@ -185,8 +187,11 @@ func main() {
 	http.HandleFunc("/api/settings/config/rollback", s.serveSettingsConfigRollback)
 	http.HandleFunc("/api/settings/config/history", s.serveSettingsConfigHistory)
 	http.HandleFunc("/api/settings/users", s.serveSettingsUsers)
+	http.HandleFunc("/api/settings/services", s.serveSettingsServices)
+	http.HandleFunc("/api/settings/services/", s.serveSettingsServiceItem)
 	http.HandleFunc("/api/settings/audit", s.serveSettingsAudit)
 	http.HandleFunc("/api/map-points", s.serveMapPoints)
+	http.HandleFunc("/api/quick-search", s.serveQuickSearch)
 	http.HandleFunc("/api/stream", s.serveEventsSSE)
 	http.HandleFunc("/api/alerts", s.serveAlertsAPI)
 	http.HandleFunc("/api/ml/anomalies", s.serveMLAnomaliesAPI)

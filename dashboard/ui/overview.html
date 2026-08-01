@@ -20,45 +20,46 @@
             <p class="subtitle">{{if presentation.DashboardSubtitle}}{{presentation.DashboardSubtitle}}{{else}}Live attack telemetry, captured evidence, correlated campaigns, and collection health in one operational view.{{end}}</p>
           </div>
           <div class="live-panel">
-            <span class="live-pill"><span class="live-dot"></span>Live telemetry</span>
             <span class="gen">updated {{.Generated.Format "2006-01-02 15:04:05 MST"}} &bull; refreshes automatically</span>
           </div>
         </header>
 
         <div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:xl:grid-cols-5 tw:gap-3 tw:mb-6" id="overview-kpis">
-          <a class="hp-stat" href="/events" title="Open all normalized events in the current dashboard window"><span class="hp-stat-value">{{.Total}}</span><span class="hp-stat-label">All events</span></a>
-          <a class="hp-stat" href="/events?since=24h" title="Open events received during the last 24 hours"><span class="hp-stat-value">{{.Last24h}}</span><span class="hp-stat-label">Events in 24 hours</span><span class="hp-stat-detail" title="Compared with the directly preceding 24-hour period">{{.Change24h}} &bull; {{.ActivityState}}</span></a>
-          <a class="hp-stat" href="/ips" title="Distinct attacker source addresses observed by the sensors"><span class="hp-stat-value">{{.UniqueIPs}}</span><span class="hp-stat-label">Attack sources</span></a>
-          <a class="hp-stat" href="/events?type=login" title="Authentication attempts captured by interactive honeypots"><span class="hp-stat-value">{{.Logins}}</span><span class="hp-stat-label">Login attempts</span></a>
-          <a class="hp-stat" href="/events?type=download" title="Downloads, uploads, and high-confidence script artifacts captured safely"><span class="hp-stat-value">{{.Downloads}}</span><span class="hp-stat-label">Captured payloads</span></a>
+          <a class="metric" href="/events" title="Open all normalized events in the current dashboard window"><div class="metric__value">{{.Total}}</div><div class="metric__label">All events</div></a>
+          <a class="metric" href="/events?since=24h" title="Open events received during the last 24 hours"><div class="metric__value">{{.Last24h}}</div><div class="metric__label">Events in 24 hours</div><div class="metric__trend" title="Compared with the directly preceding 24-hour period">{{.Change24h}} &bull; {{.ActivityState}}</div></a>
+          <a class="metric" href="/ips" title="Distinct attacker source addresses observed by the sensors"><div class="metric__value">{{.UniqueIPs}}</div><div class="metric__label">Attack sources</div></a>
+          <a class="metric" href="/events?type=login" title="Authentication attempts captured by interactive honeypots"><div class="metric__value">{{.Logins}}</div><div class="metric__label">Login attempts</div></a>
+          <a class="metric" href="/events?type=download" title="Downloads, uploads, and high-confidence script artifacts captured safely"><div class="metric__value">{{.Downloads}}</div><div class="metric__label">Captured payloads</div></a>
         </div>
 
-        <div class="dashboard-tabs" role="tablist" aria-label="Dashboard views">
-          <button class="dashboard-tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-live" data-dashboard-tab="live"><span>01</span>Live operations</button>
-          <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-threats" data-dashboard-tab="threats"><span>02</span>Threat landscape</button>
-          <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-behavior" data-dashboard-tab="behavior"><span>03</span>Attacker behavior</button>
-          <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-evidence" data-dashboard-tab="evidence"><span>04</span>Evidence &amp; campaigns</button>
+        <div class="tabs" role="tablist" aria-label="Dashboard views">
+          <button class="tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-live" data-dashboard-tab="live"><span>01</span>Live operations</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-threats" data-dashboard-tab="threats"><span>02</span>Threat landscape</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-behavior" data-dashboard-tab="behavior"><span>03</span>Attacker behavior</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-evidence" data-dashboard-tab="evidence"><span>04</span>Evidence &amp; campaigns</button>
         </div>
 
         <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-live" role="tabpanel" data-dashboard-panel="live">
           <div class="section-heading"><div><h2>Current activity</h2><p>What is happening now, when traffic arrived, and where it originated.</p></div><a class="section-link" href="/events?since=24h">View last 24 hours &rarr;</a></div>
-          <div class="card wide chart-card">
+          {{if .SensorHeatmap}}<div class="card wide chart-card">
             <h2>Activity — last 24h</h2>
-            <div class="chart">
-              {{range .Timeline}}<div class="col{{if not .Count}} zero{{end}}" data-tip="{{.Label}}:00 — {{.Count}} events" aria-label="{{.Label}}:00, {{.Count}} events" tabindex="0"><div class="bar"></div><span>{{.Label}}</span></div>{{end}}
+            {{/* .heatmap is Xore/theme's shared component (see
+                 static/theme.css and github.com/Xore/theme's docs/CSP.md) --
+                 same nonced-style-element requirement as its .mini-chart
+                 sibling component, addressed by row then column instead of
+                 a single index. */}}
+            <div class="heatmap" aria-label="Hourly event activity per sensor, last 24 hours">
+              {{range .SensorHeatmap}}<div class="heatmap__row"><span class="heatmap__label">{{.Sensor}}</span><div class="heatmap__cells">{{range .Cells}}<span class="heatmap__cell" title="{{.Label}} — {{.Count}} events" tabindex="0"></span>{{end}}</div></div>
+              {{end}}
             </div>
-            {{/* The page's CSP (script/style-src use a per-request nonce,
-                 no unsafe-inline) blocks inline style attributes -- a nonce
-                 only covers a style or link element, never an attribute. An
-                 inline per-bar height was silently dropped by every
-                 CSP-enforcing browser, leaving every bar at its stylesheet
-                 min-height regardless of the real count. A nonced style
-                 element with one nth-child rule per bar stays fully
-                 CSP-compliant without loosening the policy. */}}
-            <style nonce="{{.Nonce}}">{{range $i, $b := .Timeline}}.chart .col:nth-child({{inc $i}}) .bar{height:{{$b.Pct}}%}
-{{end}}</style>
-            <p class="note">Each bar is one local-time hour. Hover or focus a bar for the exact event count; select the 24-hour KPI above to inspect those events.</p>
-          </div>
+            <style nonce="{{.Nonce}}">{{range $r, $row := .SensorHeatmap}}{{range $c, $cell := $row.Cells}}.heatmap__row:nth-child({{inc $r}}) .heatmap__cells span:nth-child({{inc $c}}){--v:{{$cell.Pct}}}
+{{end}}{{end}}.heatmap__legend .heatmap__cell:nth-of-type(1){--v:0}.heatmap__legend .heatmap__cell:nth-of-type(2){--v:25}.heatmap__legend .heatmap__cell:nth-of-type(3){--v:50}.heatmap__legend .heatmap__cell:nth-of-type(4){--v:75}.heatmap__legend .heatmap__cell:nth-of-type(5){--v:100}</style>
+            <div class="heatmap__legend"><span>Less</span><span class="heatmap__cell"></span><span class="heatmap__cell"></span><span class="heatmap__cell"></span><span class="heatmap__cell"></span><span class="heatmap__cell"></span><span>More</span></div>
+            <p class="note">Sensors with the most events in the last 24 hours, hour by hour. Hover or focus a cell for the exact count.</p>
+          </div>{{else}}<div class="card wide chart-card">
+            <h2>Activity — last 24h</h2>
+            <p class="empty">No events in the last 24 hours.</p>
+          </div>{{end}}
 
           {{if .MapPoints}}<div class="card wide map-card" data-attack-map-card><h2>Attack origins &mdash; live geographic view</h2>
             <div class="map-shell" data-map-shell><div id="attack-map" class="leaflet-map" data-tile-url="{{.MapTileURL}}" data-attribution="{{.MapAttribution}}" role="region" aria-label="interactive map of geolocated attack origins"></div><div class="map-status" data-map-status aria-live="polite">Loading attack origins…</div>
@@ -77,7 +78,7 @@
             <h2>Sensor feeds</h2>
             <p class="note">Active = recent traffic, quiet = online with no recent event, stale = its log has stopped updating. A quiet honeypot is not necessarily offline.</p>
             {{if .Sensors}}
-            <table><tbody>
+            <table class="data-table"><tbody>
               {{range .Sensors}}
               <tr><td class="n">{{.Count}}</td>
                   <td><a class="badge b-{{.Name}}" href="{{.Link}}">{{.Name}}</a></td>
@@ -94,7 +95,7 @@
           <div class="card wide">
             <h2>Recent events</h2>
             {{if .Recent}}
-            <table class="recent">
+            <table class="recent data-table">
               <thead><tr><th>time</th><th>sensor</th><th>source ip</th><th>port</th><th>detail</th></tr></thead>
               <tbody>
               {{range .Recent}}{{template "everow" .}}{{end}}
@@ -137,7 +138,7 @@
             <h2>Captured payloads</h2>
             <p class="note">Inert copies of malware and high-confidence scripts captured by Dionaea, Cowrie, and command telemetry. Static analysis never executes the payload.</p>
             {{if .Payloads}}
-            <table>
+            <table class="data-table">
               <thead><tr><th>seen</th><th>sha-256</th><th>attacker target path</th><th>lookup</th></tr></thead>
               <tbody>
               {{range .Payloads}}
@@ -157,7 +158,7 @@
             <h2>Correlated campaigns â€” rolling 7 days</h2>
             <p class="note">Groups related source networks across sensors. Score rises with volume, sensor/port spread, reused credentials, payloads, IDS alerts, and matching fingerprints.</p>
             {{if .Campaigns}}
-            <table class="recent">
+            <table class="recent data-table">
               <thead><tr><th>score</th><th>network</th><th>events</th><th>ips</th><th>sensors</th><th>ports</th><th>creds</th><th>files</th><th>alerts</th><th>ASNs</th><th>provider</th><th>fingerprints</th><th>sequence</th><th>first</th><th>last</th></tr></thead>
               <tbody>{{template "campaignrows" .Campaigns}}</tbody>
             </table>
@@ -181,11 +182,23 @@ async function refreshDashboard(){
     const r = await fetch(location.pathname, {cache: "no-store"});
     if (!r.ok) return;
     const doc = new DOMParser().parseFromString(await r.text(), "text/html");
-    const next = doc.querySelector(".wrap"),current=document.querySelector("[data-hp-page-content]")||document.querySelector(".wrap");
+    const next = doc.querySelector("[data-hp-page-content]"),current=document.querySelector("[data-hp-page-content]");
     if (next&&current) {const preserveMap=Boolean(current.querySelector('[data-attack-map-card]')&&next.querySelector('[data-attack-map-card]'));if(window.replaceHoneypotPage)window.replaceHoneypotPage(next,{preserveMap});else current.replaceWith(next);if(window.initDashboardTabs)window.initDashboardTabs();if(window.initHoneypotMaps)window.initHoneypotMaps();}
   } catch {} finally {refreshing=false}
 }
-if(window.EventSource){const es=new EventSource('/api/stream');es.addEventListener('update',refreshDashboard);es.onerror=()=>{};}
+/* #210: the overview page used to track its own SSE connection health for a
+   page-local .live-pill. That pill is gone -- the toolbar's LIVE toggle
+   (shared across every page) is now the single indicator, so this reports
+   the same open/error signal into window.HoneypotLive's global connection
+   state instead of rendering anything itself. Native EventSource retries
+   with its own backoff after onerror; this only reflects that state, it
+   does not implement reconnection. */
+if(window.EventSource){
+  const es=new EventSource('/api/stream');
+  es.addEventListener('update',refreshDashboard);
+  es.addEventListener('open',()=>{if(window.HoneypotLive)window.HoneypotLive.setConnectionHealthy(true);});
+  es.onerror=()=>{if(window.HoneypotLive)window.HoneypotLive.setConnectionHealthy(false);};
+}
 setInterval(refreshDashboard, 60000);
 addEventListener('hp-live-resumed',refreshDashboard);
 </script>

@@ -283,10 +283,62 @@ func loadGhidraStatus() ghidraQueueStatus {
 		return status
 	}
 	status.Configured = true
-	if info, err := os.Stat(path); err == nil {
-		status.Stale = time.Since(info.ModTime()) > ghidraStatusStaleAfter
+	if info, err := os.Stat(path); err == nil && time.Since(info.ModTime()) > ghidraStatusStaleAfter {
+		// A cold status.json alone does not mean the worker is dead: it is a
+		// systemd *path* unit (honeypot-ghidra-worker.path), triggered only
+		// when a request lands in the spool, and it only rewrites status.json
+		// from inside that run. Zero submissions for 30+ minutes -- routine
+		// for a quiet honeypot -- leaves status.json stale with the worker
+		// completely healthy (#204). Only call it stale when the *live* spool
+		// (not the counts status.json itself last recorded, which predate
+		// whatever made it go stale) actually has something queued or
+		// running that isn't being drained; an old timestamp over an empty
+		// spool is just "nothing to do". Live counts also replace the
+		// stale/misleading ones from status.json so ghidraAlerts' message
+		// reports what is really sitting in the spool right now.
+		if queued, running, ok := ghidraLiveSpoolCounts(); ok {
+			status.Stale = queued+running > 0
+			if status.Stale {
+				status.Queued, status.Running = queued, running
+			}
+		} else {
+			// No request spool configured/readable to re-check against, but
+			// GHIDRA_RESULTS_DIR is set: an unusual split configuration, or a
+			// permissions problem. Fall back to the original, more
+			// conservative "cold file means stale" behavior rather than
+			// guessing that everything is fine.
+			status.Stale = true
+		}
 	}
 	return status
+}
+
+// ghidraLiveSpoolCounts re-checks the request spool directly rather than
+// trusting status.json's Queued/Running fields, which are exactly the values
+// that went stale -- a request that arrived after the worker's last drain
+// would not be reflected in them at all. ok is false when the spool isn't
+// configured or isn't readable, distinct from a genuinely empty spool.
+func ghidraLiveSpoolCounts() (queued, running int, ok bool) {
+	dir := ghidraRequestDir()
+	if dir == "" {
+		return 0, 0, false
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, 0, false
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		switch name := entry.Name(); {
+		case strings.HasSuffix(name, ".request.running"):
+			running++
+		case strings.HasSuffix(name, ".request"):
+			queued++
+		}
+	}
+	return queued, running, true
 }
 
 // attachGhidraDownload exposes a download route only for a report that exists.

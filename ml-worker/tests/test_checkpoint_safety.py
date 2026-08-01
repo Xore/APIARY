@@ -52,7 +52,7 @@ class TestFetchNewEventsEqualTimestampSafety:
         es = MagicMock()
         page = lambda hits: {"_scroll_id": "sid", "hits": {"hits": hits}}
         es.search.return_value = page([])
-        worker.fetch_new_events(es, "honeypot-v2-*", "2026-08-01T10:00:00Z")
+        worker.fetch_new_events(es, "honeypot-v2-*", "2026-08-01T10:00:00Z")  # returns (events, ok); ok=True unused here
         query = es.search.call_args.kwargs["body"]
         assert query["query"]["range"]["@timestamp"] == {"gte": "2026-08-01T10:00:00Z"}, \
             "must requery inclusively so a same-timestamp sibling can be re-seen and then filtered by exclude_ids"
@@ -64,7 +64,8 @@ class TestFetchNewEventsEqualTimestampSafety:
         es.search.return_value = {"_scroll_id": "sid", "hits": {"hits": hits}}
         es.scroll.return_value = {"_scroll_id": "sid", "hits": {"hits": []}}
 
-        events = worker.fetch_new_events(es, "honeypot-v2-*", boundary_ts, exclude_ids={"already-seen"})
+        events, ok = worker.fetch_new_events(es, "honeypot-v2-*", boundary_ts, exclude_ids={"already-seen"})
+        assert ok is True
 
         ids = [e["_id"] for e in events]
         assert ids == ["brand-new"], \
@@ -82,8 +83,9 @@ class TestFetchNewEventsEqualTimestampSafety:
         es.search.return_value = {"_scroll_id": "sid", "hits": {"hits": [_hit("first", boundary_ts)]}}
         es.scroll.return_value = {"_scroll_id": "sid", "hits": {"hits": []}}
         checkpoint = {"last_timestamp": "2026-08-01T09:00:00Z", "seen_ids": []}
-        events = worker.fetch_new_events(es, "honeypot-v2-*", checkpoint["last_timestamp"],
-                                          exclude_ids=set(checkpoint["seen_ids"]))
+        events, ok = worker.fetch_new_events(es, "honeypot-v2-*", checkpoint["last_timestamp"],
+                                              exclude_ids=set(checkpoint["seen_ids"]))
+        assert ok is True
         checkpoint = worker.advance_checkpoint(events, checkpoint)
         assert checkpoint == {"last_timestamp": boundary_ts, "seen_ids": ["first"]}
 
@@ -91,11 +93,122 @@ class TestFetchNewEventsEqualTimestampSafety:
         es.search.return_value = {"_scroll_id": "sid", "hits": {"hits": [
             _hit("first", boundary_ts), _hit("second", boundary_ts),
         ]}}
-        events = worker.fetch_new_events(es, "honeypot-v2-*", checkpoint["last_timestamp"],
-                                          exclude_ids=set(checkpoint["seen_ids"]))
+        events, ok = worker.fetch_new_events(es, "honeypot-v2-*", checkpoint["last_timestamp"],
+                                              exclude_ids=set(checkpoint["seen_ids"]))
+        assert ok is True
 
         assert [e["_id"] for e in events] == ["second"], \
             "the equal-timestamp sibling must be seen in the next cycle, not lost"
+
+
+class TestFetchNewEventsDistinguishesFailureFromEmpty:
+    """#188: fetch_new_events() used to return an empty list the same way
+    whether nothing was new or the ES call itself failed -- the caller had
+    no way to tell "briefly lost ES" apart from "nothing to do"."""
+
+    def test_a_failed_search_call_returns_ok_false(self):
+        es = MagicMock()
+        es.search.side_effect = ConnectionError("ES unreachable")
+        events, ok = worker.fetch_new_events(es, "honeypot-v2-*", "2026-08-01T10:00:00Z")
+        assert events == []
+        assert ok is False
+
+    def test_a_genuinely_empty_poll_is_ok_true(self):
+        es = MagicMock()
+        es.search.return_value = {"_scroll_id": "sid", "hits": {"hits": []}}
+        events, ok = worker.fetch_new_events(es, "honeypot-v2-*", "2026-08-01T10:00:00Z")
+        assert events == []
+        assert ok is True
+
+    def test_a_failure_partway_through_scrolling_still_returns_what_was_read(self):
+        es = MagicMock()
+        es.search.return_value = {"_scroll_id": "sid", "hits": {"hits": [_hit("first", "2026-08-01T10:00:00Z")]}}
+        es.scroll.side_effect = ConnectionError("ES unreachable mid-scroll")
+        events, ok = worker.fetch_new_events(es, "honeypot-v2-*", "2026-08-01T09:00:00Z")
+        assert [e["_id"] for e in events] == ["first"], "events already read before the failure must not be discarded"
+        assert ok is False
+
+
+class TestESUnavailableMetric:
+    """#188: a sustained (not transient) Elasticsearch outage gets a
+    durable, retrospective record -- there's no way to write it DURING the
+    outage (ES is unreachable by definition), so it's written on recovery."""
+
+    def test_write_es_unavailable_metric_records_index_failures_and_downtime(self):
+        es = MagicMock()
+        worker.write_es_unavailable_metric(es, "suricata-v2-*", 5, 150)
+        doc = es.index.call_args.kwargs["document"]
+        assert doc["kind"] == "es_unavailable"
+        assert doc["source_index"] == "suricata-v2-*"
+        assert doc["consecutive_failures"] == 5
+        assert doc["downtime_seconds"] == 150
+
+    def test_es_unavailable_metric_write_failure_does_not_raise(self):
+        es = MagicMock()
+        es.index.side_effect = ConnectionError("ES unreachable")
+        worker.write_es_unavailable_metric(es, "suricata-v2-*", 5, 150)  # must not raise
+
+
+class TestPollLoopTracksConsecutiveFailures:
+    """#188: run_worker()'s main loop must unpack fetch_new_events()'s
+    (events, ok) return and act on ok, tracking consecutive failures per
+    index pattern -- proven against the source since driving the whole
+    infinite loop with a real ES connection isn't practical here (same
+    rationale as #190's TestBoundedPollBatch)."""
+
+    def test_main_loop_unpacks_events_and_ok_and_tracks_failures(self):
+        import inspect
+        source = inspect.getsource(worker.run_worker)
+        assert "events, ok = fetch_new_events(" in source
+        assert "consecutive_es_failures" in source
+        assert "write_es_unavailable_metric(" in source
+
+
+class TestBoundedPollBatch:
+    """#190: the regular poll path used to have no cap at all, unlike the
+    retrain path (MAX_TRAIN_SAMPLES) -- a large enough backlog turned into
+    one arbitrarily long scoring pass with no checkpoint progress until it
+    finished. fetch_new_events()'s own max_total behavior is already
+    covered elsewhere (test_worker_fixes.py); this proves the regular poll
+    loop is actually wired to pass it, since driving run_worker() itself
+    (an infinite loop with a real ES connection) isn't practical here."""
+
+    def test_poll_loop_fetch_is_bounded_by_max_poll_batch(self):
+        import inspect
+        source = inspect.getsource(worker.run_worker)
+        assert "max_total=MAX_POLL_BATCH" in source
+
+    def test_max_poll_batch_is_configured_and_positive(self):
+        assert worker.MAX_POLL_BATCH > 0
+
+
+class TestBacklogMetric:
+    """#190: a poll cycle that fully used its MAX_POLL_BATCH cap almost
+    certainly has more behind it -- surfaced as a metric rather than only
+    discoverable by querying Elasticsearch directly."""
+
+    def test_backlog_count_returns_the_count(self):
+        es = MagicMock()
+        es.count.return_value = {"count": 4213}
+        assert worker.backlog_count(es, "suricata-v2-*", "2026-08-01T10:00:00Z") == 4213
+
+    def test_backlog_count_query_failure_returns_none_not_raise(self):
+        es = MagicMock()
+        es.count.side_effect = ConnectionError("ES unreachable")
+        assert worker.backlog_count(es, "suricata-v2-*", "2026-08-01T10:00:00Z") is None
+
+    def test_write_backlog_metric_records_index_and_count(self):
+        es = MagicMock()
+        worker.write_backlog_metric(es, "suricata-v2-*", 4213)
+        doc = es.index.call_args.kwargs["document"]
+        assert doc["kind"] == "backlog"
+        assert doc["source_index"] == "suricata-v2-*"
+        assert doc["backlog_count"] == 4213
+
+    def test_backlog_metric_write_failure_does_not_raise(self):
+        es = MagicMock()
+        es.index.side_effect = ConnectionError("ES unreachable")
+        worker.write_backlog_metric(es, "suricata-v2-*", 100)  # must not raise
 
 
 class TestAnomalyDocIdIsDeterministic:

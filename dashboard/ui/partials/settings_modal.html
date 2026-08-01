@@ -21,6 +21,7 @@
     <button class="sidebar__item" type="button" data-hp-pane-nav="behavior">Dashboard behavior</button>
     <button class="sidebar__item" type="button" data-hp-pane-nav="honeypot">Honeypot operations</button>
     <button class="sidebar__item" type="button" data-hp-pane-nav="users">Users</button>
+    <button class="sidebar__item" type="button" data-hp-pane-nav="services">Services</button>
     <button class="sidebar__item" type="button" data-hp-pane-nav="history">Configuration history</button>
     <button class="sidebar__item" type="button" data-hp-pane-nav="audit">Audit log</button>
     {{end}}
@@ -530,10 +531,32 @@
               <a class="btn btn-ghost btn-sm" href="#" target="_blank" rel="noopener noreferrer" data-hp-users-audit-link hidden>Auth audit log</a>
             </div>
           </div>
-          <div class="hp-table-wrap"><table class="hp-table">
+          <div class="table-scroll"><table class="data-table">
             <thead><tr><th>User</th><th>Role</th><th>First seen</th><th>Last seen</th><th>Pref. rev.</th></tr></thead>
             <tbody data-hp-users-list><tr><td colspan="5">Loading&hellip;</td></tr></tbody>
           </table></div>
+        </section>
+      </section>
+
+      <!-- Services: real container status + start/stop/restart/logs for the
+           allowlisted sensor/probe/analysis-worker set (#197). The dashboard
+           itself holds no Docker access -- every action here crosses an
+           AF_UNIX socket to hp-services-adapter, which owns the real
+           allowlist and the real docker.sock. -->
+      <section class="hp-settings-pane" data-hp-pane="services" aria-label="Services" hidden>
+        <section class="card hp-field" data-hp-search="services sensors probes containers start stop restart logs status health">
+          <div class="card__header">
+            <div><h3>Sensors, probes &amp; workers</h3><p class="card__meta">Live container status. Actions cross a narrow allowlisted adapter — the dashboard never holds Docker access directly.</p></div>
+            <div class="hp-head-actions">
+              <button class="btn btn-ghost btn-sm" type="button" data-hp-services-refresh>Refresh</button>
+            </div>
+          </div>
+          <div class="hp-table-wrap"><table class="hp-table">
+            <thead><tr><th>Service</th><th>State</th><th>Health</th><th>Restarts</th><th>Actions</th></tr></thead>
+            <tbody data-hp-services-list><tr><td colspan="5">Loading&hellip;</td></tr></tbody>
+          </table></div>
+          <button type="button" hidden data-hp-evidence="services-log" data-hp-services-log-trigger>View logs</button>
+          <div hidden data-hp-evidence-body="services-log" data-hp-evidence-note="Most recent lines, newest at the bottom."><pre data-hp-services-log-pre></pre></div>
         </section>
       </section>
 

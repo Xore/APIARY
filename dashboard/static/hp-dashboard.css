@@ -1,66 +1,26 @@
-@layer theme, utilities;
-@import "tailwindcss/theme.css" layer(theme) prefix(tw);
-@import "tailwindcss/utilities.css" layer(utilities) prefix(tw) important;
+/* Dashboard-specific styling (#191/#193). The vendored static/theme.css owns
+   every color, border, radius, shadow, and motion token (dark, light, and
+   system modes) plus the shared components (.app-shell, .card, .btn,
+   .badge, .form-input, .data-table, .tabs, .metric, .modal--palette,
+   .toast). This file is everything left after that: layout glue, one-off
+   dashboard components theme.css has no concept of (sensor badges, the
+   attack map, the event-detail metadata grouping, ...), and the small
+   number of one-off spacing/layout rules that used to be Tailwind utility
+   classes -- see the "one-off utilities" section at the end. There is no
+   build step: this file is hand-written and loaded as-is, the same way
+   theme.css itself is. */
 
-/* Route templates moved out of the page_*.go constants into the embedded ui
-   tree, so that is where the tw: utilities are now written. */
-@source "../../ui/**/*.html";
-@source "../../static/hp-app.js";
-
-/* ==========================================================================
-   Xore theme integration. The vendored static/theme.css owns every color,
-   border, radius, shadow, and motion token (dark, light, and system modes)
-   plus the shared components (.app-shell, .card, .btn, .badge, .form-input,
-   .data-table, .tabs, .metric, .command-bar). This file only maps those
-   tokens onto tw: utilities and keeps dashboard-specific components.
-   ========================================================================== */
 :root {
   --hp-font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   --hp-mono: "SF Mono", "Fira Code", "Cascadia Code", ui-monospace, monospace;
 }
 
-@theme inline {
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-  --font-mono: "SF Mono", "Fira Code", "Cascadia Code", ui-monospace, monospace;
-
-  --color-canvas: var(--app-bg);
-  --color-surface-0: var(--surface-0);
-  --color-surface-1: var(--surface-1);
-  --color-surface-2: var(--surface-2);
-  --color-surface-3: var(--surface-3);
-
-  --color-line: var(--border-subtle);
-  --color-subtle: var(--border-subtle);
-  --color-line-strong: var(--border-strong);
-  --color-focus: var(--border-focus);
-
-  --color-ink: var(--text-primary);
-  --color-ink-2: var(--text-secondary);
-  --color-ink-3: var(--text-muted);
-  --color-muted: var(--text-muted);
-
-  --color-accent: var(--accent);
-  --color-accent-hover: var(--accent-hover);
-  --color-accent-subtle: var(--accent-soft);
-
-  --color-green: var(--success);
-  --color-green-subtle: var(--success-soft);
-  --color-blue: var(--info);
-  --color-blue-subtle: var(--info-soft);
-  --color-orange: var(--warning);
-  --color-orange-subtle: var(--warning-soft);
-  --color-red: var(--danger);
-  --color-red-subtle: var(--danger-soft);
-}
-
 /* theme.css sets `svg { display: block }`, which would defeat the hidden
    attribute used by the dashboard's live badges, panels, and theme icons.
-   Must live in @layer utilities with extra specificity: Tailwind emits
-   utilities as layered !important rules, and layered !important beats
-   unlayered !important regardless of source order. */
-@layer utilities {
-  body [hidden] { display: none !important; }
-}
+   body[hidden] already outranks a bare svg{} selector on specificity alone
+   (extra attribute selector), but !important is kept here defensively --
+   this rule silently breaking would show every hidden icon at once. */
+body [hidden] { display: none !important; }
 
 .mono, pre.code {
   font-family: var(--hp-mono);
@@ -86,6 +46,15 @@
     border-right: 1px solid var(--border-subtle);
     box-shadow: var(--shadow-dialog);
   }
+  /* #210/#215: the live indicator is now the single global one (was
+     previously a page-local pill with room to say "Reconnecting…" on the
+     overview page only). In the compact toolbar that text is the widest
+     content it ever shows -- at this width it overflowed the viewport by a
+     couple of pixels. Same "icon only, drop the text" pattern the sidebar
+     brand already uses at its own compact breakpoint above; the dot's
+     color (green/gray/orange) and the title attribute still carry the
+     state. */
+  .hp-live-state [data-hp-live-label] { display: none; }
 }
 
 .hp-brand {
@@ -115,6 +84,11 @@
 
 /* ── Toolbar ────────────────────────────────────────────────────────────── */
 .hp-toolbar-actions { display: flex; align-items: center; gap: 2px; }
+/* #208: was an inline style="" on the operator-configured maintenance/
+   incident banner -- silently dropped by the CSP (a nonce covers a style
+   or link element, never a style attribute). Forces the banner onto its
+   own row, after the toolbar's other flex children. */
+.app-toolbar__banner { flex-basis: 100%; order: 5; margin: 8px 8px 0; }
 .hp-icon-btn {
   position: relative;
   display: grid; place-items: center;
@@ -149,6 +123,12 @@
 .hp-live-state:hover { border-color: color-mix(in srgb, currentColor 35%, transparent); background: var(--surface-2); }
 .hp-live-state--paused { color: var(--text-muted); }
 .hp-live-state--paused .live-dot { background: var(--text-muted); animation: none; }
+/* #210: the one live indicator now covers what a separate overview-only
+   .live-pill used to (paused, and a stalled/reconnecting SSE connection) --
+   consolidated here since this toolbar control is global and clickable,
+   where the old pill was neither. */
+.hp-live-state--stalled { color: var(--warning); }
+.hp-live-state--stalled .live-dot { background: var(--warning); animation: none; }
 .live-dot {
   width: 7px; height: 7px; border-radius: 50%;
   background: var(--success);
@@ -159,25 +139,15 @@
   50%      { box-shadow: 0 0 0 6px color-mix(in srgb, var(--success) 4%, transparent); }
 }
 
-/* ── KPI tiles (neutral; severity lives in text/badges, not tiles) ──────── */
-.hp-stat {
-  display: block;
-  background: var(--surface-1);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-panel);
-  padding: 14px 15px;
-  text-decoration: none;
-  transition: border-color var(--transition-fast), background var(--transition-fast);
-}
-.hp-stat:hover { border-color: var(--border-strong); background: var(--surface-2); }
-.hp-stat-value { display: block; font-size: 24px; font-weight: 600; letter-spacing: -0.03em; line-height: 1.15; color: var(--text-primary); }
-.hp-stat-value--text { font-size: 14px; font-weight: 600; line-height: 1.4; }
-.hp-stat-label {
-  display: block; margin-top: 6px;
-  font-size: 11px;
-  color: var(--text-muted);
-}
-.hp-stat-detail { display: block; margin-top: 4px; font-size: 11px; color: var(--text-secondary); }
+/* ── KPI tiles ──────────────────────────────────────────────────────────
+   theme.css's .metric/.metric__* owns the tile box, value, label, and
+   trend text (#191 -- this used to be a parallel .hp-stat implementation
+   of the exact same component). Several dashboard tiles are links
+   (overview, source-health link a KPI to the page it summarizes); theme's
+   .metric has no anchor variant, so that's the one bit of glue left here. */
+a.metric { display: block; text-decoration: none; transition: border-color var(--transition-fast), background var(--transition-fast); }
+a.metric:hover { border-color: var(--border-strong); background: var(--surface-2); }
+.metric__value--text { font-size: 14px; font-weight: 600; line-height: 1.4; }
 
 /* ── Card grid placement (theme.css owns .card visuals) ─────────────────── */
 .card { grid-column: span 4; margin-bottom: 0; overflow: hidden; }
@@ -195,6 +165,17 @@
 .card:has(table) { overflow: auto; }
 .card table { min-width: 0; }
 .card.wide table { min-width: 720px; }
+/* The payloads list row ends in a kebab menu (#205) whose popover is
+   position:absolute and must escape the row -- overflow:auto on an
+   ancestor clips it regardless of scroll position, popover open or not
+   (CSS has no "auto but only clip the axis that's actually overflowing"
+   mode: setting overflow-x:auto alone still forces overflow-y to compute
+   as auto too, per the overflow spec's own visible-becomes-auto rule).
+   Every other cell here already wraps (td.v's word-break:break-all
+   handles the hash column), so this table was never actually depending
+   on the horizontal scroll .card:has(table) exists for. */
+#payloads-table-card { overflow: visible; }
+#payloads-table-card table { min-width: 0; }
 @media (max-width: 1180px) {
   .card { grid-column: span 6; }
   .card.wide, .wide { grid-column: 1 / -1; }
@@ -237,63 +218,45 @@
   max-width: 700px; margin: 8px 0 0;
   font-size: 13px; line-height: 1.55; color: var(--text-secondary);
 }
+/* #210: the overview header used to duplicate the toolbar's LIVE toggle
+   with a separate, non-interactive .live-pill (added in #201). Removed --
+   the toolbar toggle is now the single indicator, global and clickable,
+   and covers the same paused/stalled states (see .hp-live-state--stalled
+   above). */
 .live-panel { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
-.live-pill {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 6px 11px;
-  border: 1px solid color-mix(in srgb, var(--success) 25%, transparent); border-radius: var(--radius-pill);
-  background: var(--success-soft); color: var(--success);
-  font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
-}
 .gen { font: 11px var(--hp-mono); color: var(--text-muted); }
 @media (max-width: 800px) {
   .overview-header { grid-template-columns: 1fr; align-items: start; }
   .live-panel { align-items: flex-start; }
 }
 
-/* ── Dashboard tabs (mirrors theme .tabs/.tab) ──────────────────────────── */
-.dashboard-tabs {
-  grid-column: 1 / -1;
-  display: flex; flex-wrap: wrap; gap: 2px;
-  margin-bottom: 16px; padding: 3px;
-  background: var(--surface-1);
-  border: 1px solid var(--border-subtle);
-  border-radius: calc(var(--radius-control) + 3px);
-}
-.dashboard-tab {
-  display: flex; align-items: center; gap: 8px;
-  min-height: 28px; padding: 5px 10px;
-  border: none; border-radius: var(--radius-control);
-  background: transparent; color: var(--text-secondary);
-  font-size: 12px; font-family: inherit;
-  cursor: pointer; transition: background var(--transition-fast), color var(--transition-fast);
-}
-.dashboard-tab span {
+/* ── Dashboard tabs ─────────────────────────────────────────────────────
+   theme.css's .tabs/.tab owns the chrome (border, background, radius,
+   active/hover color) -- this used to be a parallel .dashboard-tabs/
+   .dashboard-tab implementation of the same component (#191). What's left:
+   the tab bar sits in a CSS grid of .card elements and must span every
+   column (theme's .tabs is inline-flex, sized for a plain row); and each
+   tab carries a numbered badge <span> theme's plain-text .tab has no
+   concept of. */
+.tabs { grid-column: 1 / -1; display: flex; flex-wrap: wrap; margin-bottom: 16px; }
+.tabs .tab { display: flex; align-items: center; gap: 8px; }
+.tabs .tab span {
   display: grid; place-items: center;
   width: 20px; height: 20px; border-radius: 5px;
   background: var(--surface-2); color: var(--text-muted);
   font: 700 9px var(--hp-mono);
 }
-.dashboard-tab:hover { color: var(--text-primary); }
-.dashboard-tab.active { background: var(--surface-3); color: var(--text-primary); }
-.dashboard-tab.active span { background: var(--accent); color: var(--text-on-accent); }
+.tabs .tab.active span { background: var(--accent); color: var(--text-on-accent); }
 .dashboard-panel { animation: hp-panel-in 150ms ease-out; }
 @keyframes hp-panel-in { from { opacity: 0.35; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
-/* ── Data tables (dashboard tables are unclassed; theme owns .data-table) ─ */
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th {
-  padding: 8px 10px; border-bottom: 1px solid var(--border-subtle);
-  font-size: 11px; font-weight: 500;
-  color: var(--text-muted); text-align: left;
-}
-td {
-  padding: 10px; border-bottom: 1px solid var(--border-subtle);
-  color: var(--text-primary); font-size: 12px; vertical-align: top;
-}
-tbody tr:last-child td { border-bottom: none; }
-tbody tr { transition: background var(--transition-fast); }
-tbody tr:hover { background: var(--surface-hover); }
+/* ── Data tables ────────────────────────────────────────────────────────
+   theme.css's .data-table owns the box model (padding, border-bottom
+   rules, row hover) -- every table in the dashboard now carries that
+   class (#191; used to be unclassed and reimplemented here). What's left
+   is honeypot-specific column semantics theme has no concept of: numeric/
+   value/age/state columns and the sensor-hue badges below. */
+.data-table tbody tr { transition: background var(--transition-fast); }
 td.n { color: var(--accent); font-family: var(--hp-mono); font-size: 12px; text-align: right; white-space: nowrap; }
 td.n a { color: inherit; text-decoration: none; border-bottom: 1px dotted color-mix(in srgb, var(--accent) 45%, transparent); }
 td.n a:hover { color: var(--text-primary); border-color: var(--accent); }
@@ -475,43 +438,11 @@ footer {
   color: var(--text-muted); text-align: center;
 }
 
-/* ── Activity chart ─────────────────────────────────────────────────────── */
-/* The hour labels get their own gutter below the chart rather than a slot
-   inside each column. Sharing the column's flex flow, a label both lifted and
-   shrank the bar above it — and only every third column has one, so the bars
-   were reading against three different baselines. Height grows by the gutter
-   so the plot area itself is unchanged. */
-.chart { display: flex; align-items: flex-end; gap: 3px; height: 155px; padding-top: 6px; padding-bottom: 15px; }
-.col {
-  position: relative; flex: 1; height: 100%;
-  display: flex; flex-direction: column; justify-content: flex-end;
-  min-width: 0; cursor: help;
-}
-.col::after {
-  content: attr(data-tip);
-  position: absolute; z-index: 6; left: 50%; top: 5px;
-  transform: translate(-50%, -6px);
-  padding: 6px 8px;
-  border: 1px solid var(--border-strong); border-radius: 8px;
-  background: var(--surface-raised); color: var(--text-primary);
-  box-shadow: var(--shadow-raised);
-  font: 11px var(--hp-mono); white-space: nowrap;
-  opacity: 0; pointer-events: none;
-  transition: opacity var(--transition-fast), transform var(--transition-fast);
-}
-.col:hover::after, .col:focus-visible::after { opacity: 1; transform: translate(-50%, 0); }
-.col .bar {
-  background: var(--accent);
-  border-radius: 2px 2px 0 0; min-height: 2px; opacity: 0.85;
-}
-.col.zero .bar { background: var(--surface-2); min-height: 2px; opacity: 1; }
-.col span {
-  position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
-  margin-top: 4px; white-space: nowrap;
-  font: 9px var(--hp-mono); color: var(--text-muted);
-  text-align: center; display: none;
-}
-.col:nth-child(3n+1) span { display: block; }
+/* ── Activity-by-sensor heatmap (#191/#193, replacing the single-bar
+   24h activity chart) ─────────────────────────────────────────────────
+   .heatmap/.heatmap__* chrome is Xore/theme's shared component; this is
+   just the gap between the grid and its low->high legend underneath. */
+.heatmap__legend { margin-top: 8px; }
 
 /* ── Leaflet attack map (dark-tile filter scoped to dark mode only) ─────── */
 .map-shell {
@@ -602,47 +533,35 @@ footer {
 .hp-lazy-controls > span:first-child { font-size: 12px; color: var(--text-muted); }
 .hp-lazy-sentinel { width: 1px; height: 1px; }
 
-/* ── Live toast (hp-app.js) ─────────────────────────────────────────────── */
+/* ── Live toast (hp-app.js) ──────────────────────────────────────────────
+   theme.css's .toast owns the box (padding, border, radius, background,
+   shadow, color, size) -- this used to be a parallel .hp-toast
+   reimplementation of the exact same chrome (#191/#193). What's left: the
+   fixed stacking container (theme has no concept of "several toasts queued
+   in the corner"), and the left accent stripe marking this specific toast
+   as a live-update notification, which theme's plain .toast has no color
+   variant for. */
 .hp-toast-stack {
   position: fixed; top: 44px; right: 16px; z-index: 2000;
   display: flex; flex-direction: column; gap: 8px;
 }
-.hp-toast {
-  display: block; max-width: 360px; padding: 11px 13px;
-  background: var(--surface-raised);
-  border: 1px solid var(--border-strong); border-left: 3px solid var(--success);
-  border-radius: var(--radius-panel);
-  box-shadow: var(--shadow-raised);
-  color: var(--text-primary); font-size: 12px; text-decoration: none;
-  animation: hp-panel-in 150ms ease-out;
-}
-.hp-toast:hover { color: var(--text-primary); }
+.hp-toast { border-left: 3px solid var(--success); text-decoration: none; animation: hp-panel-in 150ms ease-out; }
 
-/* ── Command dock internals (theme.css positions .command-bar) ──────────── */
-.hp-command-dock textarea {
+/* ── Investigation command palette ───────────────────────────────────────
+   theme.css's .modal--palette / .command-palette__field position and frame
+   the dialog (#193, closing #183 -- was a permanently-docked .command-bar,
+   now the same top-anchored search-everything modal the reference
+   screenshots show). This is just the one dashboard-specific adaptation:
+   a resizing <textarea> in place of the palette's usual single-line
+   <input>, because pasting a multi-line indicator (a cert, a log
+   fragment) is a real, existing feature, not a redesign choice. */
+.command-palette__field textarea {
   display: block; width: 100%; resize: none;
   border: none; background: transparent; outline: none;
-  color: var(--text-primary); font: 13px/1.5 var(--hp-font);
-  max-height: 120px; padding: 4px 6px;
+  color: var(--text-primary); font: inherit;
+  max-height: 120px; padding: 0;
 }
-.hp-command-dock textarea::placeholder { color: var(--text-muted); }
-.hp-command-actions {
-  display: flex; align-items: center; gap: 10px;
-  margin-top: 4px; padding: 7px 6px 2px;
-  border-top: 1px solid var(--border-subtle);
-  font-size: 11px; color: var(--text-muted);
-}
-.hp-command-actions svg { width: 12px; height: 12px; vertical-align: -2px; margin-right: 4px; }
-.hp-command-hint { margin-left: auto; }
-.hp-command-actions button {
-  display: grid; place-items: center;
-  width: 26px; height: 26px;
-  border: none; border-radius: var(--radius-control);
-  background: var(--btn-inverted-bg); color: var(--btn-inverted-text); cursor: pointer;
-  transition: background var(--transition-fast);
-}
-.hp-command-actions button:hover { background: var(--btn-inverted-bg-hover); }
-.hp-command-actions button svg { width: 13px; height: 13px; margin: 0; }
+.command-palette__field textarea::placeholder { color: var(--text-muted); }
 .hp-sr-only {
   position: absolute; width: 1px; height: 1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
@@ -757,4 +676,76 @@ button.sidebar__profile:disabled:hover { background: transparent; }
   .wb-analyzer-grid,
   .wb-child-grid,
   .wb-option-grid { grid-template-columns: 1fr; }
+}
+
+/* ── One-off utilities ──────────────────────────────────────────────────
+   #191 asked to drop the Tailwind build entirely. These ~30 classes are
+   what templates actually used out of it -- one-off spacing/layout/color
+   rules on a handful of elements, never a design-system decision, so they
+   stay put as plain hand-written CSS rather than becoming new named
+   semantic classes (that would just be inventing a second small utility
+   system to replace the first). The class names themselves (still
+   "tw:foo") are unchanged from before -- only the tool that used to
+   generate this file is gone. Renaming them out of the "tw:" prefix is
+   left for a follow-up if it's ever worth touching ~450 call sites for a
+   purely cosmetic rename. */
+.tw\:col-span-12 { grid-column: span 12 / span 12; }
+.tw\:mt-2 { margin-top: 8px; }
+.tw\:mt-3 { margin-top: 12px; }
+.tw\:mt-5 { margin-top: 20px; }
+.tw\:mr-auto { margin-right: auto; }
+.tw\:mb-3 { margin-bottom: 12px; }
+.tw\:mb-4 { margin-bottom: 16px; }
+.tw\:mb-5 { margin-bottom: 20px; }
+.tw\:mb-6 { margin-bottom: 24px; }
+.tw\:block { display: block; }
+.tw\:flex { display: flex; }
+.tw\:grid { display: grid; }
+.tw\:inline { display: inline; }
+.tw\:max-w-full { max-width: 100%; }
+.tw\:list-disc { list-style-type: disc; }
+.tw\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.tw\:grid-cols-12 { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+.tw\:flex-wrap { flex-wrap: wrap; }
+.tw\:items-center { align-items: center; }
+.tw\:items-start { align-items: flex-start; }
+.tw\:justify-between { justify-content: space-between; }
+.tw\:gap-2 { gap: 8px; }
+.tw\:gap-3 { gap: 12px; }
+.tw\:gap-3\.5 { gap: 14px; }
+.tw\:rounded-lg { border-radius: var(--radius-md); }
+.tw\:rounded-md { border-radius: var(--radius-xs); }
+.tw\:border { border-style: solid; border-width: 1px; }
+.tw\:border-b { border-bottom-style: solid; border-bottom-width: 1px; }
+.tw\:border-orange { border-color: var(--warning); }
+.tw\:border-red { border-color: var(--danger); }
+.tw\:border-subtle { border-color: var(--border-subtle); }
+.tw\:bg-orange-subtle { background-color: var(--warning-soft); }
+.tw\:bg-red-subtle { background-color: var(--danger-soft); }
+.tw\:bg-surface-1 { background-color: var(--surface-1); }
+.tw\:bg-white { background-color: #fff; }
+.tw\:px-4 { padding-inline: 16px; }
+.tw\:px-6 { padding-inline: 24px; }
+.tw\:py-2 { padding-block: 8px; }
+.tw\:py-3 { padding-block: 12px; }
+.tw\:py-4 { padding-block: 16px; }
+.tw\:pt-7 { padding-top: 28px; }
+.tw\:pb-24 { padding-bottom: 96px; }
+.tw\:pl-5 { padding-left: 20px; }
+.tw\:text-sm { font-size: .875rem; line-height: 1.4286; }
+.tw\:text-green { color: var(--success); }
+.tw\:text-muted { color: var(--text-muted); }
+.tw\:text-orange { color: var(--warning); }
+.tw\:text-red { color: var(--danger); }
+@media (min-width: 640px) {
+  .tw\:sm\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .tw\:sm\:grid-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (min-width: 1024px) {
+  .tw\:lg\:px-8 { padding-inline: 32px; }
+}
+@media (min-width: 1280px) {
+  .tw\:xl\:col-span-4 { grid-column: span 4 / span 4; }
+  .tw\:xl\:col-span-8 { grid-column: span 8 / span 8; }
+  .tw\:xl\:grid-cols-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 }

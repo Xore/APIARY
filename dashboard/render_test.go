@@ -62,6 +62,127 @@ func TestRenderPageSendsCSPAndPerRequestNonce(t *testing.T) {
 	}
 }
 
+// TestSecHeadersFrameSrcMatchesAuthAccountOrigin (#196 follow-up): the
+// dashboard's own CSP had no frame-src directive at all, so it fell back to
+// default-src 'self' -- which silently blocked the settings iframe from
+// ever framing auth-backend, no matter how permissive auth-backend's own
+// frame-ancestors was (a relaxed frame-ancestors is the *embedded* page's
+// opt-in for who may frame it; frame-src is the *embedding* page's own
+// opt-in for what it may frame -- only the dashboard can grant itself that).
+func TestSecHeadersFrameSrcMatchesAuthAccountOrigin(t *testing.T) {
+	defer func(prev string) { authFrameOrigin = prev }(authFrameOrigin)
+
+	authFrameOrigin = ""
+	w := httptest.NewRecorder()
+	secHeaders(w, nonce())
+	csp := w.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "frame-src 'self'") {
+		t.Fatalf("CSP must always send an explicit frame-src, got: %q", csp)
+	}
+	if strings.Contains(csp, "frame-src 'self' http") {
+		t.Fatalf("frame-src must not name an origin when AUTH_ACCOUNT_URL is unset: %q", csp)
+	}
+
+	setAuthFrameOrigin("https://auth.example.test/auth/app?pane=account")
+	w2 := httptest.NewRecorder()
+	secHeaders(w2, nonce())
+	csp2 := w2.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp2, "frame-src 'self' https://auth.example.test") {
+		t.Fatalf("frame-src must include the auth account origin (path/query stripped), got: %q", csp2)
+	}
+	if strings.Contains(csp2, "/auth/app") {
+		t.Fatalf("frame-src must be an origin, not the full account URL with its path: %q", csp2)
+	}
+}
+
+// TestSetAuthFrameOriginRejectsUnusableInput ensures a malformed value
+// (which validatedAuthAccountURL should already have filtered, but this
+// function has no way to know that from a bare string) leaves the CSP at
+// its safe default rather than emitting a broken frame-src directive.
+func TestSetAuthFrameOriginRejectsUnusableInput(t *testing.T) {
+	defer func(prev string) { authFrameOrigin = prev }(authFrameOrigin)
+	for _, bad := range []string{"", "not a url", "/relative/path", "https://"} {
+		authFrameOrigin = "sentinel"
+		setAuthFrameOrigin(bad)
+		if authFrameOrigin != "sentinel" {
+			t.Fatalf("setAuthFrameOrigin(%q) must leave authFrameOrigin untouched, got %q", bad, authFrameOrigin)
+		}
+	}
+}
+
+// TestOverviewRefreshTargetsTheCurrentPageContentSelector (#199): the
+// overview page's in-place live-refresh script selects both the freshly-
+// fetched and the currently-mounted page content by querySelector -- #184
+// (commit 84bd9dc) renamed every page wrapper's class from .wrap to
+// app-content/app-content--wide, updated every template and shell.css, but
+// missed this one client-side selector. It kept matching nothing in the
+// fresh document forever after, so refreshDashboard() silently no-opped on
+// every SSE update and every 60s poll: the toolbar said LIVE, nothing ever
+// moved. [data-hp-page-content] is the stable attribute every page wrapper
+// actually carries (see shell_layout_test.go) -- pin both lookups to it so
+// a future class rename can't quietly break this again.
+func TestOverviewRefreshTargetsTheCurrentPageContentSelector(t *testing.T) {
+	if strings.Contains(pageTemplate, `querySelector(".wrap")`) {
+		t.Fatal(`overview's refresh script still queries the removed .wrap class -- ` +
+			`it will silently stop finding page content the moment .wrap doesn't exist`)
+	}
+	if !strings.Contains(pageTemplate, `doc.querySelector("[data-hp-page-content]")`) {
+		t.Fatal("overview's refresh script must select the freshly-fetched page content by [data-hp-page-content]")
+	}
+}
+
+// TestOverviewHasNoDuplicateLiveIndicator (#210): the overview header used
+// to carry its own "Live telemetry" pill (#201) alongside the toolbar's
+// global LIVE toggle -- two indicators that could show related-but-distinct
+// state, and only one of which was actually clickable. The pill is gone;
+// the overview's own EventSource must still report connection health, but
+// into window.HoneypotLive's shared state rather than rendering anything
+// itself.
+func TestOverviewHasNoDuplicateLiveIndicator(t *testing.T) {
+	for _, marker := range []string{`data-hp-live-pill`, `class="live-pill"`, `renderLivePill`, `sseHealthy`} {
+		if strings.Contains(pageTemplate, marker) {
+			t.Fatalf("overview header must not carry its own live-status pill any more, found %q", marker)
+		}
+	}
+	if !strings.Contains(pageTemplate, `window.HoneypotLive.setConnectionHealthy(true)`) ||
+		!strings.Contains(pageTemplate, `window.HoneypotLive.setConnectionHealthy(false)`) {
+		t.Fatal("overview's EventSource must report open/error into window.HoneypotLive's shared connection state")
+	}
+	if !strings.Contains(pageTemplate, `es.onerror=`) || strings.Contains(pageTemplate, `es.onerror=()=>{};`) {
+		t.Fatal("overview's EventSource must react to onerror instead of silently ignoring connection failures")
+	}
+}
+
+// TestToolbarLiveToggleIsTheSingleGlobalIndicator (#210): the toolbar's
+// [data-hp-live-toggle] is shared across every page (it lives in the
+// "topbar" partial), so it -- not a page-local pill -- must be the one
+// place that reflects both the paused switch and a stalled/reconnecting
+// connection, and the one thing a click actually controls.
+func TestToolbarLiveToggleIsTheSingleGlobalIndicator(t *testing.T) {
+	if !strings.Contains(pageTemplate, `data-hp-live-toggle`) {
+		t.Fatal("shared topbar must render the LIVE toggle")
+	}
+	appJS, err := staticAssets.ReadFile("static/hp-app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(appJS)
+	for _, marker := range []string{
+		`connectionHealthy:`,
+		`setConnectionHealthy`,
+		`onConnectionChange:`,
+		`hp-live-state--stalled`,
+		`window.HoneypotLive.onConnectionChange(renderLiveState)`,
+	} {
+		if !strings.Contains(js, marker) {
+			t.Fatalf("hp-app.js missing %q -- the toolbar toggle must render paused AND stalled state", marker)
+		}
+	}
+	if !strings.Contains(js, `stream.addEventListener("open", () => window.HoneypotLive.setConnectionHealthy(true));`) {
+		t.Fatal("the non-overview EventSource must also report connection health, not just the overview's own")
+	}
+}
+
 // TestNoUnnoncedInlineScriptOrStyleRemains is the structural half of #58's
 // completion criterion ("no un-nonced inline script or style remains"): a
 // regression test that would fail the moment someone adds a new inline

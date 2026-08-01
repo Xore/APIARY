@@ -389,6 +389,43 @@ services:
     deploy:
       resources: { limits: { cpus: "1.0", memory: 768M } }
 
+  # #116: suricata-update (above) only ever runs once, at deploy time -- it
+  # is a one-shot gating Suricata's own startup so a fresh volume never
+  # starts with zero rules. ET Open/TrafficID/SSLBL/hunting-rules publish on
+  # their own upstream cadence; deploys don't. This is a separate standing
+  # service rather than turning suricata-update into a loop, because that
+  # would break its service_completed_successfully gate (a loop never
+  # exits). depends_on: service_started means this plays no role in the
+  # cold-start guarantee -- it only keeps an already-running Suricata's
+  # rules current. See suricata-rules-refresh.sh for the reload mechanism.
+  suricata-rules-refresh:
+    image: jasonish/suricata:latest
+    container_name: hp-suricata-rules-refresh
+    restart: unless-stopped
+    network_mode: host
+    # Shares Suricata's PID namespace so this can signal it directly
+    # (SIGUSR2 live reload) without docker.sock access or changing
+    # Suricata's own container isolation. Live reload is disabled by
+    # default (ENABLE_LIVE_RELOAD unset below) -- verified live on
+    # 2026-08-01 that it OOM-kills Suricata against its current 768M
+    # limit; this service only refreshes rules on disk until that's
+    # raised. See suricata-rules-refresh.sh's header for the full story.
+    pid: "service:suricata"
+    volumes:
+      - suricata-rules:/var/lib/suricata
+      - ./suricata:/custom:ro
+      - ./suricata-rules-refresh.sh:/usr/local/bin/suricata-rules-refresh.sh:ro
+    environment:
+      - TZ=Europe/Berlin
+      - REFRESH_INTERVAL_SECONDS=21600
+      - START_DELAY=21600
+    entrypoint: ["/bin/sh", "/usr/local/bin/suricata-rules-refresh.sh"]
+    depends_on:
+      suricata:
+        condition: service_started
+    deploy:
+      resources: { limits: { cpus: "0.5", memory: 512M } }
+
   # #79: prune rotated eve-*.json files past their retention window. See
   # suricata-log-maintenance.sh for why this is a separate small loop
   # instead of extending Suricata's own rotation or the home stack's

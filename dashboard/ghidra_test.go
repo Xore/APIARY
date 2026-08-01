@@ -332,9 +332,10 @@ func TestLoadGhidraStatus(t *testing.T) {
 		}
 	})
 
-	t.Run("stale status", func(t *testing.T) {
+	t.Run("stale status, no request dir configured", func(t *testing.T) {
 		dir := t.TempDir()
 		t.Setenv("GHIDRA_RESULTS_DIR", dir)
+		t.Setenv("GHIDRA_REQUEST_DIR", "")
 		path := filepath.Join(dir, "status.json")
 		if err := os.WriteFile(path, []byte(`{"version":1}`), 0o600); err != nil {
 			t.Fatal(err)
@@ -344,7 +345,62 @@ func TestLoadGhidraStatus(t *testing.T) {
 			t.Fatal(err)
 		}
 		if s := loadGhidraStatus(); !s.Stale {
-			t.Error("an old status.json should be reported stale")
+			t.Error("an old status.json with no request dir to re-check should fall back to stale")
+		}
+	})
+
+	// #204: an idle honeypot with zero Ghidra submissions for 30+ minutes is
+	// routine, not a broken worker -- the systemd path unit that drains the
+	// spool (and rewrites status.json) only fires on a new request, so its
+	// timestamp naturally goes cold when there is nothing to do. Staleness
+	// must be judged against what is actually sitting in the request spool
+	// right now, not status.json's own (also stale) queued/running counts.
+	t.Run("stale status.json but empty live spool is not stale", func(t *testing.T) {
+		resultsDir, requestDir := t.TempDir(), t.TempDir()
+		t.Setenv("GHIDRA_RESULTS_DIR", resultsDir)
+		t.Setenv("GHIDRA_REQUEST_DIR", requestDir)
+		path := filepath.Join(resultsDir, "status.json")
+		// The stale counts themselves claim work is pending -- proving the
+		// live spool check, not these stale numbers, is what decides.
+		if err := os.WriteFile(path, []byte(`{"version":1,"queued":3,"running":1}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		old := time.Now().Add(-2 * ghidraStatusStaleAfter)
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+		s := loadGhidraStatus()
+		if s.Stale {
+			t.Errorf("a cold status.json over an empty request spool must not be stale, got %+v", s)
+		}
+	})
+
+	t.Run("stale status.json with pending live spool is stale, with live counts", func(t *testing.T) {
+		resultsDir, requestDir := t.TempDir(), t.TempDir()
+		t.Setenv("GHIDRA_RESULTS_DIR", resultsDir)
+		t.Setenv("GHIDRA_REQUEST_DIR", requestDir)
+		path := filepath.Join(resultsDir, "status.json")
+		// Stale counts say "nothing pending"; the live spool disagrees --
+		// e.g. a request arrived after the worker's last (also stuck) drain.
+		if err := os.WriteFile(path, []byte(`{"version":1,"queued":0,"running":0}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		old := time.Now().Add(-2 * ghidraStatusStaleAfter)
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+		const shaC = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+		for _, name := range []string{shaA + ".request", shaB + ".request", shaC + ".request.running"} {
+			if err := os.WriteFile(filepath.Join(requestDir, name), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		s := loadGhidraStatus()
+		if !s.Stale {
+			t.Fatalf("a cold status.json over a non-empty request spool must be stale, got %+v", s)
+		}
+		if s.Queued != 2 || s.Running != 1 {
+			t.Errorf("Stale should report the live spool counts, not status.json's stale ones: got queued=%d running=%d", s.Queued, s.Running)
 		}
 	})
 }

@@ -51,6 +51,17 @@ ACCEPT_TOLERANCE  = 3.0  # candidate's holdout anomaly rate may be at most this 
 # model, not something every caller has to remember to enforce.
 MAX_TRAIN_SAMPLES = 20_000
 
+# #190: n_jobs=-1 requests one worker per HOST-visible core (this codebase's
+# reference deployment has 16), not per the container's actual `cpus: "2.0"`
+# cgroup quota -- the same category of mismatch that caused LSTM-AE's real
+# thread-pool livelock (models/lstm_autoencoder.py, discovered the same
+# session this was audited). IsolationForest.predict()/score_samples() use
+# this setting too, not just fit() -- so an oversubscribed pool here sits on
+# the hot per-event scoring path, not just the occasional retrain. Bounded to
+# match the compose file's cpu limit instead of auto-detecting a core count
+# the scheduler will never actually grant this container.
+N_JOBS = int(os.getenv("ML_N_JOBS", "2"))
+
 # Known scanner ASNs / Tor exit prefix heuristic (extend as needed)
 KNOWN_SCANNER_PREFIXES = {
     "45.33",   # Linode/Akamai scan ranges
@@ -222,6 +233,32 @@ def _accept_decision(candidate_rate: float, previous_rate: Optional[float]) -> t
     )
 
 
+def _percentile_normalize(raw: float, p50: float, p99: float, lower_is_more_anomalous: bool) -> float:
+    """Map a raw model score to [0, 1] using THIS model's own observed p50
+    (typical/unremarkable) and p99 (near the top of what its own fit
+    actually produced) as anchors, instead of a fixed linear formula that
+    assumes a hand-picked "typical range" (#174).
+
+    Found live: IsolationForest.score_samples() commonly ran ~-0.48 for
+    real production traffic, nowhere near the old formula's assumed
+    center of 0 -- and HBOS.decision_function() commonly ran 26-32, while
+    the old formula divided by 10 and clipped, so every real score
+    saturated at the ceiling (100% of a 4000-event live sample). Anchoring
+    to p50/p99 computed fresh from each retrain's own holdout data means
+    this can't go stale the way a hand-picked constant did: it recalibrates
+    every retrain to whatever that fit actually produced.
+
+    p50 maps to 0.2 (typical, unremarkable -- half of everything is
+    literally this ordinary), p99 maps to 0.95 (only the top 1% of this
+    model's OWN fit gets this high, consistent with CONTAMINATION=0.01).
+    Extrapolates and clips beyond either anchor.
+    """
+    if p99 == p50:
+        return 0.5
+    frac = (p50 - raw) / (p50 - p99) if lower_is_more_anomalous else (raw - p50) / (p99 - p50)
+    return float(np.clip(0.2 + frac * 0.75, 0.0, 1.0))
+
+
 def _anomaly_rate(iso: IsolationForest, hbos: HBOS, X: np.ndarray) -> float:
     """Fraction of X either model's OWN contamination-driven decision
     boundary calls anomalous -- IsolationForest.predict()==-1,
@@ -302,9 +339,15 @@ class IsoForestModel:
         if self.iso is None:
             return 0.5
         # sklearn IsoForest: score_samples returns negative scores;
-        # more negative = more anomalous. Map to [0, 1].
+        # more negative = more anomalous.
         raw = self.iso.score_samples(features)[0]
-        # Typical range: [-0.5, 0.5] → normalise
+        calib = getattr(self.iso, "hp_calib", None)
+        if calib is not None:
+            return _percentile_normalize(raw, calib["p50"], calib["p99"], lower_is_more_anomalous=True)
+        # Fallback for a model saved before #174 (no calibration attached
+        # yet) -- the original fixed-range formula, kept only so an
+        # in-flight model isn't left with no score() at all until its next
+        # retrain recalibrates it.
         return float(np.clip((-raw) * 2, 0.0, 1.0))
 
     def hbos_score(self, features: np.ndarray) -> float:
@@ -312,7 +355,12 @@ class IsoForestModel:
         if self.hbos is None:
             return 0.5
         raw = self.hbos.decision_function(features)[0]
-        # pyod returns unnormalised scores; clip to reasonable range
+        calib = getattr(self.hbos, "hp_calib", None)
+        if calib is not None:
+            # pyod convention: higher decision_function = more anomalous
+            # (opposite of sklearn's IsolationForest).
+            return _percentile_normalize(raw, calib["p50"], calib["p99"], lower_is_more_anomalous=False)
+        # Fallback for a model saved before #174 -- see score()'s comment.
         return float(np.clip(raw / 10.0, 0.0, 1.0))
 
     def explain(self, features: np.ndarray, scores: dict) -> str:
@@ -382,7 +430,7 @@ class IsoForestModel:
             n_estimators=N_ESTIMATORS,
             contamination=CONTAMINATION,
             random_state=42,
-            n_jobs=-1,
+            n_jobs=N_JOBS,
         )
         candidate_hbos = HBOS(contamination=CONTAMINATION)
         try:
@@ -391,6 +439,22 @@ class IsoForestModel:
             candidate_rate = _anomaly_rate(candidate_iso, candidate_hbos, X_holdout)
             if not np.isfinite(candidate_rate):
                 raise ValueError(f"non-finite anomaly rate: {candidate_rate}")
+            # #174: calibration anchors travel with the fitted model object
+            # itself (joblib.dump/load preserve arbitrary extra attributes,
+            # not just sklearn/pyod's own) -- computed from THIS retrain's
+            # own holdout, so score()/hbos_score() recalibrate every retrain
+            # instead of trusting a constant that can go stale.
+            if len(X_holdout) > 0:
+                iso_raw_holdout = candidate_iso.score_samples(X_holdout)
+                hbos_raw_holdout = candidate_hbos.decision_function(X_holdout)
+                candidate_iso.hp_calib = {
+                    "p50": float(np.percentile(iso_raw_holdout, 50)),
+                    "p99": float(np.percentile(iso_raw_holdout, 99)),
+                }
+                candidate_hbos.hp_calib = {
+                    "p50": float(np.percentile(hbos_raw_holdout, 50)),
+                    "p99": float(np.percentile(hbos_raw_holdout, 99)),
+                }
         except Exception as exc:
             return RetrainResult(
                 accepted=False, reason=f"candidate failed to fit or score holdout: {exc}",

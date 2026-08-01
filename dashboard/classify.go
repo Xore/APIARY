@@ -437,6 +437,16 @@ func personaForSensor(sensor string) (persona, site, asset, org string) {
 
 // when extracts a timestamp from the record in whatever shape the sensor
 // logged it (ISO string under several key names, or a unix epoch number).
+//
+// The display string is always formatted in UTC (#198), regardless of which
+// Location the value happened to parse into. A Z-suffixed string parses as
+// UTC; suricata's eve.json "...+0200" parses into a fixed +0200 Location;
+// time.Unix's epoch branch returns the server process's local zone
+// (Europe/Berlin here). time.Time comparisons (used everywhere else for
+// age/sort) don't care about Location, so leaving t itself alone is fine --
+// only t.Format printed the wrong wall-clock, silently disagreeing by
+// exactly the CEST/UTC offset between sensors that happen to log in
+// different formats.
 func when(e map[string]any) (time.Time, string) {
 	for _, k := range []string{"timestamp", "time", "@timestamp", "start_time", "ts"} {
 		switch v := e[k].(type) {
@@ -448,7 +458,7 @@ func when(e map[string]any) (time.Time, string) {
 				"2006-01-02T15:04:05.999999-0700", // suricata eve.json
 				"2006-01-02T15:04:05.999999", "2006-01-02 15:04:05,999", "2006-01-02 15:04:05"} {
 				if t, err := time.Parse(layout, v); err == nil {
-					return t, t.Format("2006-01-02 15:04:05")
+					return t, t.UTC().Format("2006-01-02 15:04:05")
 				}
 			}
 			return time.Time{}, v // unknown format — display raw, sorts last
@@ -457,7 +467,7 @@ func when(e map[string]any) (time.Time, string) {
 				continue
 			}
 			t := time.Unix(int64(v), int64((v-float64(int64(v)))*1e9))
-			return t, t.Format("2006-01-02 15:04:05")
+			return t, t.UTC().Format("2006-01-02 15:04:05")
 		}
 	}
 	return time.Time{}, ""

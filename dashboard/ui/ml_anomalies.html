@@ -27,14 +27,14 @@
         <p class="empty">Elasticsearch integration is disabled, so ml-worker anomaly scores cannot be polled. Set ELASTICSEARCH_URL to enable this page.</p>
         {{else}}
         <div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-4 tw:gap-3 tw:mb-6" id="ml-kpis">
-          <div class="hp-stat"><span class="hp-stat-value">{{.Stats.Total24h}}</span><span class="hp-stat-label">Anomalies, 24h</span></div>
-          {{range .Stats.BySeverity}}<div class="hp-stat"><span class="hp-stat-value">{{.Count}}</span><span class="hp-stat-label">{{.Key}}</span></div>{{end}}
+          <div class="metric"><div class="metric__value">{{.Stats.Total24h}}</div><div class="metric__label">Anomalies, 24h</div></div>
+          {{range .Stats.BySeverity}}<div class="metric"><div class="metric__value">{{.Count}}</div><div class="metric__label">{{.Key}}</div></div>{{end}}
         </div>
         <div class="tw:grid tw:grid-cols-12 tw:gap-3.5" id="ml-grid">
           <div class="card wide">
             {{if .Anomalies}}
-            <table class="recent">
-              <thead><tr><th>time</th><th>severity</th><th>score</th><th>source ip</th><th>model scores</th><th>explanation</th></tr></thead>
+            <table class="recent data-table">
+              <thead><tr><th>time</th><th>severity</th><th>score</th><th>source ip</th><th>model scores</th><th>explanation</th><th>source event</th></tr></thead>
               <tbody>
                 {{range .Anomalies}}<tr>
                   <td>{{.Timestamp}}</td>
@@ -43,13 +43,14 @@
                   <td class="v">{{if .SrcIP}}<a href="/events?ip={{.SrcIP | urlquery}}">{{.SrcIP}}</a>{{if .SrcCountry}} <span class="cc">{{.SrcCountry}}</span>{{end}}{{else}}<span class="tw:text-muted">unattributed</span>{{end}}</td>
                   <td class="v"><small>iso {{printf "%.2f" (index .ModelScores "isolation_forest")}} &bull; lstm {{printf "%.2f" (index .ModelScores "lstm_ae")}} &bull; hbos {{printf "%.2f" (index .ModelScores "hbos")}}</small></td>
                   <td class="v">{{.Explanation}}</td>
+                  <td class="v">{{if .SourceLink}}<a href="{{.SourceLink}}">view source</a>{{else}}<span class="tw:text-muted">&mdash;</span>{{end}}</td>
                 </tr>{{end}}
               </tbody>
             </table>
             {{else}}<p class="empty">No anomalies scored above the alert threshold yet.</p>{{end}}
           </div>
           {{if .Stats.TopSrcIPs}}
-          <div class="card wide"><h2>Top source IPs, 24h</h2><table><thead><tr><th>source ip</th><th>anomalies</th></tr></thead><tbody>{{range .Stats.TopSrcIPs}}<tr><td class="v"><a href="{{.Link}}">{{.Key}}</a></td><td class="n">{{.Count}}</td></tr>{{end}}</tbody></table></div>
+          <div class="card wide"><h2>Top source IPs, 24h</h2><table class="data-table"><thead><tr><th>source ip</th><th>anomalies</th></tr></thead><tbody>{{range .Stats.TopSrcIPs}}<tr><td class="v"><a href="{{.Link}}">{{.Key}}</a></td><td class="n">{{.Count}}</td></tr>{{end}}</tbody></table></div>
           {{end}}
         </div>
         {{end}}

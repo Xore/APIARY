@@ -70,12 +70,29 @@
     try { localStorage.setItem(livePausedKey, paused ? "1" : "0"); } catch {}
     liveListeners.forEach(listener => { try { listener(paused); } catch {} });
   };
+  /* #210: connection health is tracked separately from the paused switch --
+     a page's own EventSource (this file's, on non-overview pages, or the
+     overview page's own in-place-refresh one) reports here so the single
+     global toolbar indicator reflects a stalled/reconnecting SSE connection
+     no matter which page actually holds it open. Native EventSource retries
+     with its own backoff after onerror; this only reflects that state, it
+     does not implement reconnection itself. */
+  const liveConnListeners = new Set();
+  let liveConnHealthy = true;
+  const setLiveConnHealthy = healthy => {
+    if (healthy === liveConnHealthy) return;
+    liveConnHealthy = healthy;
+    liveConnListeners.forEach(listener => { try { listener(healthy); } catch {} });
+  };
   window.HoneypotLive = Object.freeze({
     paused: () => livePaused,
     pause: () => setLivePaused(true),
     resume: () => setLivePaused(false),
     toggle: () => setLivePaused(!livePaused),
     onChange: listener => { liveListeners.add(listener); return () => liveListeners.delete(listener); },
+    connectionHealthy: () => liveConnHealthy,
+    setConnectionHealthy: setLiveConnHealthy,
+    onConnectionChange: listener => { liveConnListeners.add(listener); return () => liveConnListeners.delete(listener); },
   });
 
   /* ---------- lazy loading (sentinel + offset fetching) ---------- */
@@ -293,7 +310,7 @@
     }
     const toast = document.createElement("a");
     toast.href = href;
-    toast.className = "hp-toast";
+    toast.className = "toast hp-toast";
     toast.textContent = message;
     stack.appendChild(toast);
     setTimeout(() => toast.remove(), 8000);
@@ -389,7 +406,7 @@
   window.initHoneypotMaps = initMaps;
 
   /* ---------- workspace tabs ----------
-     Any page can group its cards: render .dashboard-tabs buttons with
+     Any page can group its cards: render .tabs buttons with
      data-dashboard-tab and matching [data-dashboard-panel] sections. The valid
      names come from the DOM, so a page declares its own views without this
      controller knowing them. The first tab is the default. */
@@ -426,7 +443,7 @@
 
     const childKey = element => {
       if (element.id) return `#${element.id}`;
-      if (element.matches(".dashboard-tabs")) return "overview-tabs";
+      if (element.matches(".tabs")) return "overview-tabs";
       return "";
     };
     [...source.children].forEach(incoming => {
@@ -435,7 +452,7 @@
       if (!key) return;
       const current = key.startsWith("#")
         ? pageContent.querySelector(`:scope > ${key}`)
-        : pageContent.querySelector(":scope > .dashboard-tabs");
+        : pageContent.querySelector(":scope > .tabs");
       current?.replaceWith(incoming);
     });
 
@@ -510,6 +527,9 @@
     /* The recent-investigations rail was removed; drop anything an earlier
        version of the dashboard left behind in this browser. */
     try { localStorage.removeItem("hp-recent-investigations"); } catch {}
+    /* Ditto for the command bar's old show/hide preference: it's a modal
+       now (#193), there's nothing left to hide. */
+    try { localStorage.removeItem("hp-command-dock-hidden"); } catch {}
 
     /* Sidebar collapse (persisted) / mobile off-canvas open */
     const collapseStorageKey = "hp-sidebar-collapsed";
@@ -531,37 +551,158 @@
       if (innerWidth <= 520) shell.classList.remove("hp-nav-open");
     }));
 
-    /* Command bar show/hide (client-only, per-browser -- explicitly not a
-       server-persisted setting: it's a quick toggle, not a preference). */
-    const commandDockHiddenKey = "hp-command-dock-hidden";
-    const commandDock = document.querySelector(".hp-command-dock");
-    const commandDockToggle = shell.querySelector("[data-hp-command-dock-toggle]");
-    const setCommandDockHidden = hide => {
-      if (commandDock) commandDock.hidden = hide;
-      commandDockToggle?.setAttribute("aria-pressed", hide ? "false" : "true");
-      try { localStorage.setItem(commandDockHiddenKey, hide ? "1" : "0"); } catch {}
+    /* Investigation command palette (#193, closing #183): a modal, not a
+       permanently-docked bar. Follows the same application-managed modal
+       contract (Xore/theme docs/MODALS.md) as hp-evidence.js/hp-settings.js:
+       inert + aria-hidden when closed, focus moved in on open and restored
+       on close, Escape and a backdrop click close it. */
+    const commandPalette = document.getElementById("hp-command-palette");
+    const commandPaletteBackdrop = document.getElementById("hp-command-palette-backdrop");
+    const commandPaletteOpener = shell.querySelector("[data-hp-command-palette-open]");
+    const search = commandPalette?.querySelector("[data-hp-investigate]");
+    const searchInput = search?.querySelector("textarea");
+    let commandPaletteRestoreFocus = null;
+
+    const openCommandPalette = trigger => {
+      if (!commandPalette || !commandPaletteBackdrop) return;
+      commandPaletteRestoreFocus = trigger || document.activeElement;
+      commandPaletteBackdrop.removeAttribute("inert");
+      commandPaletteBackdrop.setAttribute("aria-hidden", "false");
+      commandPaletteBackdrop.classList.add("open");
+      commandPalette.removeAttribute("inert");
+      commandPalette.setAttribute("aria-hidden", "false");
+      commandPalette.classList.add("open");
+      searchInput?.focus();
     };
-    try { if (localStorage.getItem(commandDockHiddenKey) === "1") setCommandDockHidden(true); } catch {}
-    commandDockToggle?.addEventListener("click", () => {
-      setCommandDockHidden(!(commandDock?.hidden));
-    });
+    const closeCommandPalette = () => {
+      if (!commandPalette || !commandPaletteBackdrop) return;
+      commandPalette.classList.remove("open");
+      commandPalette.setAttribute("aria-hidden", "true");
+      commandPalette.setAttribute("inert", "");
+      commandPaletteBackdrop.classList.remove("open");
+      commandPaletteBackdrop.setAttribute("aria-hidden", "true");
+      commandPaletteBackdrop.setAttribute("inert", "");
+      if (commandPaletteRestoreFocus?.isConnected) commandPaletteRestoreFocus.focus();
+      commandPaletteRestoreFocus = null;
+    };
+    commandPaletteOpener?.addEventListener("click", () => openCommandPalette(commandPaletteOpener));
+    commandPalette?.querySelector("[data-hp-command-palette-close]")?.addEventListener("click", closeCommandPalette);
+    commandPaletteBackdrop?.addEventListener("click", closeCommandPalette);
     addEventListener("keydown", event => {
-      if (event.key === "Escape") shell.classList.remove("hp-nav-open");
+      if (event.key !== "Escape") return;
+      if (commandPalette?.classList.contains("open")) closeCommandPalette();
+      else shell.classList.remove("hp-nav-open");
     });
 
-    /* Command dock (server-rendered as part of the shell; theme .command-bar
-       positions it and sidebar collapse inherits). Enter submits, Shift+Enter
-       adds a line, "/" focuses it from anywhere. */
-    const search = shell.querySelector("[data-hp-investigate]");
-    const searchInput = search?.querySelector("textarea");
+    /* Enter submits, Shift+Enter adds a line, "/" opens the palette from
+       anywhere (matching the old always-focused-bar shortcut). */
     const resizeSearch = () => {
       searchInput.style.height = "auto";
       searchInput.style.height = `${Math.min(120, searchInput.scrollHeight)}px`;
     };
     searchInput?.addEventListener("input", resizeSearch);
+
+    /* Live quick-search preview (#213): the palette's own results list, fed
+       by /api/quick-search, which reuses the same grouped-search backend the
+       /search page renders from. This is a preview, not a replacement for
+       Enter -- Enter still submits the form to /search unless a row is
+       keyboard-highlighted or the row itself is clicked. */
+    const resultsBox = commandPalette?.querySelector("[data-hp-command-palette-results]");
+    const emptyHint = commandPalette?.querySelector("[data-hp-command-palette-empty]");
+    let quickSearchRows = [];
+    let activeRow = -1;
+    let quickSearchAbort = null;
+    let quickSearchTimer = null;
+
+    const renderRow = hit => {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "command-palette__row";
+      row.setAttribute("role", "option");
+      row.setAttribute("aria-selected", "false");
+      row.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>';
+      const title = document.createElement("span");
+      title.className = "command-palette__row-title";
+      title.textContent = hit.title;
+      const meta = document.createElement("span");
+      meta.className = "command-palette__row-meta";
+      meta.textContent = hit.meta;
+      meta.dataset.group = hit.meta;
+      row.append(title, meta);
+      row.addEventListener("click", () => { location.href = hit.url; });
+      return row;
+    };
+
+    // The active row trades its group/category label for a keyboard hint --
+    // the rest keep showing which source they matched from.
+    const setActiveRow = index => {
+      const rows = resultsBox ? [...resultsBox.children] : [];
+      rows.forEach((row, i) => {
+        const active = i === index;
+        row.classList.toggle("active", active);
+        row.setAttribute("aria-selected", active ? "true" : "false");
+        const meta = row.querySelector(".command-palette__row-meta");
+        if (meta) meta.textContent = active ? "Enter" : meta.dataset.group;
+      });
+      activeRow = index;
+      if (index >= 0) rows[index]?.scrollIntoView({ block: "nearest" });
+    };
+
+    const clearQuickSearch = () => {
+      quickSearchAbort?.abort();
+      quickSearchRows = [];
+      activeRow = -1;
+      if (resultsBox) { resultsBox.hidden = true; resultsBox.replaceChildren(); }
+      if (emptyHint) emptyHint.hidden = false;
+    };
+
+    const runQuickSearch = query => {
+      quickSearchAbort?.abort();
+      if (!query) { clearQuickSearch(); return; }
+      quickSearchAbort = new AbortController();
+      fetch(`/api/quick-search?q=${encodeURIComponent(query)}`, { signal: quickSearchAbort.signal })
+        .then(res => (res.ok ? res.json() : { results: [] }))
+        .then(data => {
+          quickSearchRows = data.results || [];
+          activeRow = -1;
+          if (!resultsBox) return;
+          if (quickSearchRows.length === 0) {
+            resultsBox.hidden = true;
+            resultsBox.replaceChildren();
+            if (emptyHint) emptyHint.hidden = false;
+            return;
+          }
+          resultsBox.replaceChildren(...quickSearchRows.map(renderRow));
+          resultsBox.hidden = false;
+          if (emptyHint) emptyHint.hidden = true;
+          setActiveRow(0);
+        })
+        .catch(() => {});
+    };
+
+    searchInput?.addEventListener("input", () => {
+      clearTimeout(quickSearchTimer);
+      const query = searchInput.value.trim();
+      quickSearchTimer = setTimeout(() => runQuickSearch(query), 150);
+    });
+
     searchInput?.addEventListener("keydown", event => {
+      if (event.key === "ArrowDown" && quickSearchRows.length) {
+        event.preventDefault();
+        setActiveRow(Math.min(activeRow + 1, quickSearchRows.length - 1));
+        return;
+      }
+      if (event.key === "ArrowUp" && quickSearchRows.length) {
+        event.preventDefault();
+        setActiveRow(Math.max(activeRow - 1, -1));
+        return;
+      }
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
+        if (activeRow >= 0 && quickSearchRows[activeRow]) {
+          location.href = quickSearchRows[activeRow].url;
+          return;
+        }
         search.requestSubmit();
       }
     });
@@ -572,7 +713,7 @@
     addEventListener("keydown", event => {
       if (event.key === "/" && !event.ctrlKey && !event.metaKey && !event.altKey && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || "")) {
         event.preventDefault();
-        searchInput?.focus();
+        openCommandPalette();
       }
     });
 
@@ -714,20 +855,28 @@
     refreshAlertCount();
     setInterval(refreshAlertCount, 60000);
 
-    /* LIVE toggle: one switch over every refresh path. */
+    /* LIVE toggle: one switch over every refresh path, and (#210) the single
+       global indicator for connection health too -- there is no separate
+       per-page pill any more. */
     const liveToggle = shell.querySelector("[data-hp-live-toggle]");
     if (liveToggle) {
       const liveLabel = liveToggle.querySelector("[data-hp-live-label]");
-      const renderLiveState = paused => {
+      const renderLiveState = () => {
+        const paused = window.HoneypotLive.paused();
+        const stalled = !paused && !window.HoneypotLive.connectionHealthy();
         liveToggle.classList.toggle("hp-live-state--paused", paused);
+        liveToggle.classList.toggle("hp-live-state--stalled", stalled);
         liveToggle.setAttribute("aria-pressed", paused ? "true" : "false");
         liveToggle.title = paused
           ? "Dashboard refresh is paused — resume it"
-          : "Dashboard refresh is active — pause it";
-        if (liveLabel) liveLabel.textContent = paused ? "Paused" : "Live";
+          : stalled
+            ? "Live connection lost — reconnecting automatically"
+            : "Dashboard refresh is active — pause it";
+        if (liveLabel) liveLabel.textContent = paused ? "Paused" : stalled ? "Reconnecting…" : "Live";
       };
-      renderLiveState(window.HoneypotLive.paused());
+      renderLiveState();
       window.HoneypotLive.onChange(renderLiveState);
+      window.HoneypotLive.onConnectionChange(renderLiveState);
       liveToggle.addEventListener("click", () => {
         window.HoneypotLive.toggle();
         // Resuming shows current data rather than whatever went stale while
@@ -744,6 +893,8 @@
       let knownTotal = null;
       fetch("/api/events?per_page=25", {cache: "no-store"}).then(r => r.json()).then(data => { knownTotal = data.Total; }).catch(() => {});
       const stream = new EventSource("/api/stream");
+      stream.addEventListener("open", () => window.HoneypotLive.setConnectionHealthy(true));
+      stream.onerror = () => window.HoneypotLive.setConnectionHealthy(false);
       stream.addEventListener("update", async () => {
         if (window.HoneypotLive.paused()) return;
         try {

@@ -32,7 +32,7 @@ func (s *store) rebuild() {
 		points                                       = map[string]*mapPoint{}
 		payloads                                     = map[string]*payloadRow{}
 		lastSeen                                     = map[string]time.Time{}
-		hourly                                       [24]int
+		sensorHourly                                 = map[string]*[24]int{}
 		evs                                          []storedEvent
 		seen                                         = map[string]bool{}
 	)
@@ -186,8 +186,12 @@ func (s *store) rebuild() {
 			}
 			if !ev.when.IsZero() {
 				if age := now.Sub(ev.when); age >= 0 && age < 24*time.Hour {
-					hourly[23-int(age.Hours())]++
+					hour := 23 - int(age.Hours())
 					last24++
+					if sensorHourly[ev.sensor] == nil {
+						sensorHourly[ev.sensor] = &[24]int{}
+					}
+					sensorHourly[ev.sensor][hour]++
 				} else if age >= 24*time.Hour && age < 48*time.Hour {
 					previous24++
 				}
@@ -266,18 +270,12 @@ func (s *store) rebuild() {
 		cmdRows[i].Link = eventsURL(url.Values{"sensor": {sensor}, "cmd": {cmd}})
 	}
 
-	// 24h chart: scale every bar against the busiest hour.
-	maxHour := 1
-	for _, c := range hourly {
-		if c > maxHour {
-			maxHour = c
-		}
-	}
-	timeline := make([]bucket, len(hourly))
-	for i, c := range hourly {
-		t := now.Add(-time.Duration(len(hourly)-1-i) * time.Hour)
-		timeline[i] = bucket{Label: t.Format("15"), Count: c, Pct: c * 100 / maxHour}
-	}
+	// Activity-by-sensor heatmap (#191/#193): replaced the single 24h bar
+	// chart -- per-sensor breakdown is strictly more information for the
+	// same space. Capped to the busiest sensorHeatmapRows sensors in the
+	// window; more rows than that reads as noise, not signal, and a sensor
+	// with zero events in the last 24h has nothing worth a row here.
+	sensorHeatmap := buildSensorHeatmap(sensorHourly, now)
 
 	// Payload rows sorted by frequency, with a VirusTotal link per hash.
 	var payloadRows []payloadRow
@@ -348,7 +346,7 @@ func (s *store) rebuild() {
 		MapPoints:      pointRows,
 		Payloads:       payloadRows,
 		Campaigns:      campaigns,
-		Timeline:       timeline,
+		SensorHeatmap:  sensorHeatmap,
 		Recent:         recents,
 		Runtime:        currentRuntime(),
 		YARA:           yaraSummary(s.yaraFile),
@@ -364,4 +362,79 @@ func (s *store) rebuild() {
 		s.intelligence.save(intelligenceSnapshot{Version: 1, Generated: now, Campaigns: campaigns, Clusters: s.clustersData().Rows})
 	}
 	s.broadcast()
+}
+
+// sensorHeatmapRows caps the "Activity by sensor" heatmap to its busiest
+// sensors in the current 24h window -- a row for every sensor that has ever
+// logged anything would be mostly empty rows, not a signal.
+const sensorHeatmapRows = 6
+
+// buildSensorHeatmap turns the per-sensor, per-hour counts collected during
+// rebuild into heatmapRow's, quantizing each cell's shade into five steps
+// against the single busiest cell across every selected row -- a global
+// scale, not per-row, so a quiet sensor's own peak hour never reads as
+// visually "hot" as the noisiest sensor's.
+func buildSensorHeatmap(sensorHourly map[string]*[24]int, now time.Time) []heatmapRow {
+	type totaled struct {
+		sensor string
+		hours  *[24]int
+		total  int
+	}
+	all := make([]totaled, 0, len(sensorHourly))
+	for sensor, hours := range sensorHourly {
+		total := 0
+		for _, c := range hours {
+			total += c
+		}
+		if total == 0 {
+			continue
+		}
+		all = append(all, totaled{sensor: sensor, hours: hours, total: total})
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].total != all[j].total {
+			return all[i].total > all[j].total
+		}
+		return all[i].sensor < all[j].sensor
+	})
+	if len(all) > sensorHeatmapRows {
+		all = all[:sensorHeatmapRows]
+	}
+	if len(all) == 0 {
+		return nil
+	}
+
+	maxCell := 1
+	for _, row := range all {
+		for _, c := range row.hours {
+			if c > maxCell {
+				maxCell = c
+			}
+		}
+	}
+	quantize := func(count int) int {
+		switch {
+		case count <= 0:
+			return 0
+		case count*4 <= maxCell:
+			return 25
+		case count*4 <= maxCell*2:
+			return 50
+		case count*4 <= maxCell*3:
+			return 75
+		default:
+			return 100
+		}
+	}
+
+	rows := make([]heatmapRow, len(all))
+	for r, row := range all {
+		cells := make([]heatmapCell, len(row.hours))
+		for i, c := range row.hours {
+			t := now.Add(-time.Duration(len(row.hours)-1-i) * time.Hour)
+			cells[i] = heatmapCell{Label: t.Format("15") + ":00", Count: c, Pct: quantize(c)}
+		}
+		rows[r] = heatmapRow{Sensor: row.sensor, Cells: cells}
+	}
+	return rows
 }

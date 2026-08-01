@@ -413,9 +413,9 @@ func TestCompactTextKeepsShortValuesAndEllipsizesLongValues(t *testing.T) {
 	}
 }
 
-func TestTailwindAssetsAreEmbeddedAndReferenced(t *testing.T) {
+func TestDashboardCSSAssetsAreEmbeddedAndReferenced(t *testing.T) {
 	assets := map[string]int{
-		"static/hp-tailwind.css":     10000,
+		"static/hp-dashboard.css":    10000,
 		"static/theme.css":           10000,
 		"static/hp-api.js":           500,
 		"static/hp-app.js":           8000,
@@ -435,7 +435,7 @@ func TestTailwindAssetsAreEmbeddedAndReferenced(t *testing.T) {
 			t.Fatalf("dashboard asset %q is unexpectedly small: %d bytes", name, len(data))
 		}
 	}
-	for _, reference := range []string{"/static/hp-tailwind.css", "/static/theme.css", "/static/hp-api.js", "/static/hp-modals.js", "/static/hp-evidence.js", "/static/hp-app.js", "/static/leaflet.css", "/static/leaflet.js"} {
+	for _, reference := range []string{"/static/hp-dashboard.css", "/static/theme.css", "/static/hp-api.js", "/static/hp-modals.js", "/static/hp-evidence.js", "/static/hp-app.js", "/static/leaflet.css", "/static/leaflet.js"} {
 		if !strings.Contains(pageTemplate, reference) {
 			t.Fatalf("shared page template does not load %q", reference)
 		}
@@ -457,7 +457,7 @@ func TestTailwindAssetsAreEmbeddedAndReferenced(t *testing.T) {
 
 // TestSemanticShellIsServerRendered executes the overview page template with
 // an empty snapshot and asserts the Xore theme shell primitives, every
-// navigation route, and the command bar are present in the initial HTML.
+// navigation route, and the command palette are present in the initial HTML.
 func TestSemanticShellIsServerRendered(t *testing.T) {
 	funcs := templateFuncs(nil, "")
 	tmpl, err := template.New("t").Funcs(funcs).Parse(pageTemplate)
@@ -472,9 +472,9 @@ func TestSemanticShellIsServerRendered(t *testing.T) {
 	for _, want := range []string{
 		`class="app-shell"`, `class="app-toolbar"`, `app-toolbar__title`,
 		`class="app-sidebar"`, `class="app-main"`, `sidebar__profile`,
-		`hp-command-dock command-bar`, `data-hp-page-content`,
+		`id="hp-command-palette"`, `class="modal modal--palette"`, `data-hp-page-content`,
 		`data-hp-theme-toggle`, `data-hp-alert-count`,
-		// The dock resolves server-side, so it must be a real GET form: an
+		// The palette resolves server-side, so it must be a real GET form: an
 		// unrecognised query has to reach /search rather than be guessed at.
 		`method="get" action="/search"`, `name="q"`,
 		// LIVE is a switch, not a decoration: it pauses every refresh path.

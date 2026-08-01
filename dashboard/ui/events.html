@@ -62,7 +62,7 @@
         <div class="tw:grid tw:grid-cols-12 tw:gap-3.5" id="events-grid">
           <div class="card wide">
             {{if .Events}}
-            <table class="recent">
+            <table class="recent data-table">
               <thead><tr><th>time</th><th>sensor</th><th>source ip</th><th>port</th><th>detail</th></tr></thead>
               <tbody data-hp-page-url="{{.RowsURL}}" data-hp-total="{{.Total}}" data-hp-offset="{{.Offset}}">
               {{template "eventrows" .}}
