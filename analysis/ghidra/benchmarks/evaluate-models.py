@@ -70,6 +70,10 @@ account password is persistence. A chpasswd/passwd command changes credentials; 
 it password cracking unless actual cracking or brute-force tooling is present.
 Only emit an ATT&CK ID when specific command evidence supports it. An ordinary SSH login is
 not SSH Session Hijacking (T1563.001). T1548.002 is Windows-only; Linux sudo is T1548.003.
+Map an account credential change to T1098 and an SSH authorized-key addition to T1098.004;
+rate confirmed account or SSH-key persistence at least high. When credential access is
+combined with encoding or chunking and outbound transfer, describe each observed component
+and set severity to critical. Mention alternate egress only when the commands show it.
 
 Return JSON with exactly these keys:
 {
@@ -113,7 +117,7 @@ def contract_for(slot: str) -> dict[str, Any]:
         }
     if slot == "sessions":
         return {
-            "prompt_contract_version": "session-v2",
+            "prompt_contract_version": "session-v3",
             "system_prompt_sha256": hashlib.sha256(SESSION_SYSTEM.encode()).hexdigest(),
             "prompt_suffix_sha256": hashlib.sha256(SESSION_SUFFIX.encode()).hexdigest(),
             "effective_schema_sha256": SESSION_EFFECTIVE_SCHEMA_SHA256,

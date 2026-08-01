@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_vali
 
 
 SCHEMA_VERSION = "2"
-SESSION_PROMPT_VERSION = "session-v2"
+SESSION_PROMPT_VERSION = "session-v3"
 PAYLOAD_PROMPT_VERSION = "payload-v1"
 REPORT_PROMPT_VERSION = "report-v1"
 
@@ -360,6 +360,10 @@ account password is persistence. A chpasswd/passwd command changes credentials; 
 it password cracking unless actual cracking or brute-force tooling is present.
 Only emit an ATT&CK ID when specific command evidence supports it. An ordinary SSH login is
 not SSH Session Hijacking (T1563.001). T1548.002 is Windows-only; Linux sudo is T1548.003.
+Map an account credential change to T1098 and an SSH authorized-key addition to T1098.004;
+rate confirmed account or SSH-key persistence at least high. When credential access is
+combined with encoding or chunking and outbound transfer, describe each observed component
+and set severity to critical. Mention alternate egress only when the commands show it.
 
 Return JSON with exactly these keys:
 {{
