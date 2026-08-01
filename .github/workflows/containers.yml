@@ -29,6 +29,8 @@ jobs:
             context: dnp3-honeypot
           - image: http-honeypot
             context: http-honeypot
+          - image: llm-worker
+            context: llm-worker
           - image: multipot
             context: multipot
           - image: portbridge

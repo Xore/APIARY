@@ -1,0 +1,10 @@
+# Match the repository's Elasticsearch 8.x compatibility pin. A 9.x client
+# sends compatible-with=9 headers that Elasticsearch 8.13.4 rejects.
+elasticsearch==8.19.3
+
+# Strict output contracts and JSON Schema sent to Ollama structured output.
+pydantic==2.13.4
+
+# Local-only Ollama client. The worker disables environment proxy use and
+# redirects before sending attacker-derived text.
+requests==2.34.2
