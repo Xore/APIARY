@@ -734,6 +734,12 @@ def _ask_model(workflow: str, evidence: str) -> dict | None:
         # the reply is still parsed defensively below.
         "temperature": 0,
         "stream": False,
+        # Ollama enables thinking by default for Qwen 3/3.5. Triage is a
+        # bounded JSON extraction task, not a chain-of-thought consumer; make
+        # it return the answer inside the timeout instead of spending the
+        # generation budget on a hidden reasoning trace. Current Ollama's
+        # OpenAI-compatible endpoint documents "none" for this field.
+        "reasoning_effort": "none",
         "response_format": {"type": "json_object"},
     }).encode()
 

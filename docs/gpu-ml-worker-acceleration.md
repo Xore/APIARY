@@ -184,7 +184,7 @@ One RTX 4000 (8192 MiB) is shared between `ollama` (LLM guide) and
 
 | Consumer | Typical VRAM | When active |
 |---|---|---|
-| ollama (`qwen2.5:7b-instruct-q4_K_M`) | ~5.5 GiB | On LLM requests; unloads 10 min after last use (`OLLAMA_KEEP_ALIVE=10m`) |
+| ollama (`qwen3.5:4b`) | ~3.4-3.7 GiB | On LLM requests; unloads 10 min after last use (`OLLAMA_KEEP_ALIVE=10m`) |
 | ml-worker inference (LSTM-AE + embedder) | ~0.5–1 GiB | Every poll cycle (30 s), briefly |
 | ml-worker retrain | ~1–2 GiB | Every 6 h, minutes |
 

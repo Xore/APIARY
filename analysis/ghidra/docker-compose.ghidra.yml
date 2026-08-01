@@ -38,9 +38,10 @@ services:
   ollama:
     # Backs ai_triage in the Ghidra worker (#103). The worker speaks the
     # OpenAI-compatible dialect at /v1, so any local server of that shape can
-    # take this slot; Ollama is here because it is what the plan named and it
-    # pulls its own weights.
-    image: ollama/ollama:0.12.11
+    # take this slot. Ollama is retained because issue #144 benchmarked the
+    # pinned runtime and local model contract on the deployment GPU; see
+    # docs/local-llm-model-evaluation.md.
+    image: ollama/ollama:0.32.0@sha256:57f573b47f1f71ebb445789f279fe3e596a8beab182f7cf486db9205bad87c5a
     restart: unless-stopped
     ports:
       # Loopback only. The prompts carry strings, imports and function names
@@ -60,6 +61,10 @@ services:
       # this host, and a queue of parallel generations on an 8 GB card is how
       # you get an out-of-memory unload mid-analysis.
       OLLAMA_NUM_PARALLEL: '1'
+      # Triage and Rev·Deck have independent model selections. Ollama must
+      # evict the resident model when the other task needs a different one,
+      # not try to keep both multi-gigabyte models on an 8 GB card.
+      OLLAMA_MAX_LOADED_MODELS: '1'
       # Ollama defaults to 4096 regardless of what the model can do, and the
       # evidence block for a real binary is around 8000 tokens. The overflow is
       # not an error: the prompt is silently cut and the model answers from
@@ -72,12 +77,12 @@ services:
       # dialect has no field for context length — only Ollama's native API and
       # this variable can set it.
       #
-      # 16384 costs about 1.8 GB of KV cache on top of the weights: qwen3:8b
-      # Q4_K_M then reports 7.8 GB and just fits an 8 GB card. On a smaller
-      # card lower this rather than letting it spill to CPU. The worker checks
-      # the token accounting on every call and discards answers whose prompt
-      # was truncated, so getting this wrong shows up as missing triage rather
-      # than as invented findings.
+      # At 16384 qwen3:8b reports 7.8 GB total and offloads about 1 GB to system
+      # RAM on the 8 GB analysis card. CPU/RAM offload is supported here; it is
+      # a latency/capacity characteristic, not a correctness failure. The
+      # worker checks token accounting on every call and discards answers whose
+      # prompt was truncated, so an actually insufficient window shows up as
+      # missing triage rather than invented findings.
       OLLAMA_CONTEXT_LENGTH: '16384'
     healthcheck:
       test: ['CMD', 'ollama', 'ps']
@@ -165,7 +170,7 @@ services:
       # Independent from GHIDRA_TRIAGE_MODEL on purpose: interactive Rev·Deck
       # chat and the worker's automated triage are different-shaped tasks
       # (#144), no reason to assume they want the same model.
-      MODEL_NAME: '${REVDECK_MODEL:-qwen3:8b}'
+      MODEL_NAME: '${REVDECK_MODEL:-qwen2.5-coder:7b-instruct-q4_K_M}'
       CHATS_DIR: '/data/chats'
       LOG_FILE: '/var/log/revdeck/web.log'
     depends_on:
