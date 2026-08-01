@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSandboxResultsAreBoundedAndValidated(t *testing.T) {
@@ -193,5 +194,52 @@ func TestSandboxExportsResolveAcrossBackends(t *testing.T) {
 	}
 	if data.Detail.HostPCAPURL != "/export/sandbox/windows-c.host.pcap" || data.Detail.HostPCAPSize != int64(len(pcap)) {
 		t.Fatalf("host PCAP was not found in the Windows results directory: %#v", data.Detail)
+	}
+}
+
+// The sandbox results list renders as a .project-grid/.project-card grid
+// (#227, following #221/#226), not the old <table>. Each card links
+// straight to /sandbox/{job} -- the same destination the old "investigate"
+// link used, not the hash cell's /payload-analysis/ link.
+func TestSandboxResultsPageRendersAsCardGrid(t *testing.T) {
+	funcs := templateFuncs(nil, "")
+	tmpl := template.Must(template.New("dashboard").Funcs(funcs).Parse(pageTemplate))
+
+	shaOK := strings.Repeat("e", 64)
+	data := sandboxPageData{
+		Generated: time.Now(),
+		Rows: []sandboxResult{
+			{
+				Job: "job-1", SHA256: shaOK, Source: "dionaea", CompletedAt: "2026-08-01T10:00:00Z",
+				RiskScore: 80, RiskLevel: "high", Duration: 42.5, ExitStatus: "ok",
+				NetworkSummary: sandboxNetwork{Packets: 12},
+			},
+			{
+				Job: "job-2", SHA256: strings.Repeat("f", 64), Source: "cowrie", CompletedAt: "2026-08-01T09:00:00Z",
+				ExitStatus: "error",
+			},
+		},
+	}
+
+	var buf strings.Builder
+	if err := tmpl.ExecuteTemplate(&buf, "sandbox", &data); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	body := buf.String()
+
+	if strings.Contains(body, `id="sandbox-results"><p`) && strings.Contains(body, "<table") {
+		t.Fatal("sandbox results still render as a table, want a card grid")
+	}
+	if !strings.Contains(body, "project-grid") || !strings.Contains(body, "project-card") {
+		t.Fatal("sandbox results are missing the .project-grid/.project-card markup")
+	}
+	if !strings.Contains(body, `href="/sandbox/job-1"`) {
+		t.Fatalf("card for %s does not link to /sandbox/job-1", shaOK)
+	}
+	if strings.Contains(body, `href="/payload-analysis/`+shaOK+`"`) {
+		t.Fatal("sandbox card should no longer link the hash to /payload-analysis/ -- that is a click away from the detail page")
+	}
+	if !strings.Contains(body, ">error<") {
+		t.Fatal("exit-status badge for the failed run is missing")
 	}
 }

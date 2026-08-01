@@ -2,6 +2,7 @@ package main
 
 import (
 	"html/template"
+	"os"
 	"strings"
 	"testing"
 )
@@ -62,5 +63,38 @@ func TestReportsPageRenders(t *testing.T) {
 		if !strings.Contains(html, want) {
 			t.Fatalf("rendered reports page is missing %q", want)
 		}
+	}
+}
+
+// Generated reports render as a .project-grid/.project-card grid (#227,
+// following #221/#226), not the old <table>. Each card is a role="button"
+// (hp-reports.js), since it can't be a real <a>/<button> -- the Download
+// link and Delete button nested inside it are both interactive content,
+// which HTML forbids inside another interactive element.
+func TestReportsPageGeneratedReportsUseCardGrid(t *testing.T) {
+	if strings.Contains(pageReports, `id="hp-rp-generated-table"`) {
+		t.Fatal("reports page still has the old generated-reports <table>")
+	}
+	if !strings.Contains(pageReports, `class="project-grid" id="hp-rp-generated"`) {
+		t.Fatal("reports page is missing the .project-grid container for generated reports")
+	}
+
+	body, err := os.ReadFile("static/hp-reports.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(body)
+	for _, want := range []string{
+		`data-hp-report-card="${escapeHTML(report.id)}"`,
+		`role="button"`,
+		`data-hp-report-actions`,
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("hp-reports.js is missing %q", want)
+		}
+	}
+	// The old per-row "View" button is gone -- the whole card is the trigger now.
+	if strings.Contains(source, `data-view="${escapeHTML(report.id)}">View</button>`) {
+		t.Fatal("hp-reports.js still has the standalone per-row View button")
 	}
 }

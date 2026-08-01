@@ -455,7 +455,8 @@ a.project-card { display: block; color: inherit; text-decoration: none; }
 /* A SHA-256 is far longer than any title .project-card was designed to
    hold; truncate with an ellipsis rather than wrapping a hash across
    several lines. */
-#ghidra-results .project-card__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-caption); }
+#ghidra-results .project-card__title,
+#sandbox-results .project-card__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-caption); }
 /* A payload's SHA-256 title is a real <a> here (not the whole card --
    payload cards have several distinct actions, so they cannot be one big
    link; see the "payloadrow" template comment), but is otherwise the same
@@ -476,6 +477,20 @@ a.project-card { display: block; color: inherit; text-decoration: none; }
 #payloads-results .project-card__title:hover { color: var(--accent); border-color: var(--accent); }
 #payloads-results .project-card__meta { flex-wrap: wrap; }
 #payloads-results .project-card__meta .action-menu { margin-left: auto; }
+/* A workbench run's payload hash lives in the meta row, sharing it with the
+   created timestamp -- give the hash the shrink-and-ellipsize treatment and
+   let the timestamp keep its natural width, so a long hash never pushes the
+   timestamp out of the card. */
+#workbench-results-list .project-card__meta span.mono { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A generated report's title is an operator-chosen name, not bounded the way
+   a hash is -- same overflow risk, same fix. The card is role="button" (see
+   hp-reports.js -- it can't be a real <a>, the Download link and Delete
+   button inside it are both interactive content), so it also needs the
+   pointer cursor a real <a>/<button> would carry for free. */
+#hp-rp-generated .project-card { cursor: pointer; }
+#hp-rp-generated .project-card__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#hp-rp-generated .project-card__meta { flex-wrap: wrap; }
+#hp-rp-generated .project-card__meta .hp-rp-row-actions { margin-left: auto; }
 
 /* ── Leaflet attack map (dark-tile filter scoped to dark mode only) ─────── */
 .map-shell {
