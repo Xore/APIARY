@@ -274,8 +274,9 @@ All references pinned to `Xore/honeypot-stack@e3b6bc9`.
   and is enforced on every push by `scripts/check-vendored-theme.sh`
   (the `Vendored Xore/theme is in sync` job); re-vendor with
   `scripts/sync-theme.sh`;
-  `hp-tailwind.css` is the dashboard layer compiled from
-  `dashboard/frontend/src/shell.css`; `hp-app.js` is the hand-written
+  `hp-dashboard.css` is the hand-written dashboard layer (no build step,
+  loaded as-is like `theme.css` itself — #191 removed the Tailwind build
+  entirely); `hp-app.js` is the hand-written
   enhancement layer (SSE, lazy rows, live refresh, theme toggle, recents).
   Static assets are embedded via [`dashboard/assets.go`](https://github.com/Xore/honeypot-stack/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/assets.go)
   (`//go:embed static`) and served with long-cache headers at
@@ -322,7 +323,7 @@ dashboard/
     source_health.html
     history.html
     dead_letters.html
-  static/                  # unchanged: theme.css, hp-tailwind.css, hp-app.js,
+  static/                  # unchanged: theme.css, hp-dashboard.css, hp-app.js,
                            # hp-api.js, hp-modals.js (NEW), leaflet.*
   ui.go                    # NEW — embed, mustReadUI, template parsing, FuncMap
   render.go                # NEW — PageData structs + renderX methods, secHeaders+nonce
@@ -388,7 +389,7 @@ but with the pre-paint theme script nonce'd, like auth-backend's `pageHead`
 ```html
 <link rel="stylesheet" href="/static/theme.css?v={{.AssetVersion}}">
 <link rel="stylesheet" href="/static/leaflet.css?v={{.AssetVersion}}">
-<link rel="stylesheet" href="/static/hp-tailwind.css?v={{.AssetVersion}}">
+<link rel="stylesheet" href="/static/hp-dashboard.css?v={{.AssetVersion}}">
 <script nonce="{{.Nonce}}">(function(){try{var t=localStorage.getItem("hp-theme");
 if(t==="light"||t==="dark"){document.documentElement.dataset.theme=t;}}catch(e){}})();</script>
 <script defer src="/static/leaflet.js?v={{.AssetVersion}}"></script>
@@ -629,7 +630,7 @@ open modal state.
 - `data-hp-*` hooks, `class="wrap"` + `data-hp-page-content`, and the
   `sidebar`/`topbar` template names stay load-bearing.
 - `theme.css` stays byte-identical to the recorded `Xore/theme` commit;
-  dashboard-specific CSS lives only in `shell.css`/`hp-tailwind.css`;
+  dashboard-specific CSS lives only in `hp-dashboard.css`;
   page CSS uses only theme custom properties for color.
 - No CDN assets, no external fonts, no inline event handlers, no palette
   redefinition in Go strings.

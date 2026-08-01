@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
 # build-dashboard-frontend.sh — regenerate the dashboard's compiled frontend
-# assets (dashboard/static/hp-api.js + dashboard/static/hp-tailwind.css) from
-# dashboard/frontend/src/.
+# asset (dashboard/static/hp-api.js) from dashboard/frontend/src/.
 #
-# The "Tailwind frontend" CI job (.github/workflows/quality.yml) rebuilds
-# these files and fails when the committed output is stale, so run this after
-# every edit under dashboard/frontend/src/ and commit the regenerated assets
-# together with your source change. Never hand-edit the compiled files — the
+# #191 removed the Tailwind CSS build entirely: dashboard/static/hp-dashboard.css
+# is hand-written and loaded as-is, same as theme.css, with no build step of
+# its own. Only hp-api.js (the TypeScript/esbuild bundle) is still generated.
+#
+# The "Dashboard frontend" CI job (.github/workflows/quality.yml) rebuilds
+# hp-api.js and fails when the committed output is stale, so run this after
+# every edit under dashboard/frontend/src/ and commit the regenerated asset
+# together with your source change. Never hand-edit the compiled file — the
 # minifier's property ordering cannot be reproduced by hand.
 #
 # Usage:
 #   ./scripts/build-dashboard-frontend.sh          # build, report asset status
-#   ./scripts/build-dashboard-frontend.sh --check  # build, fail if assets are stale (like CI)
+#   ./scripts/build-dashboard-frontend.sh --check  # build, fail if the asset is stale (like CI)
 #
 # Can be run from any directory; the script locates the stack root itself.
 # Requires: npm (Node 22+) or, as a fallback, docker.
@@ -20,13 +23,13 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FRONTEND="$ROOT/dashboard/frontend"
-ASSETS=(dashboard/static/hp-api.js dashboard/static/hp-tailwind.css)
+ASSETS=(dashboard/static/hp-api.js)
 
 MODE=report
 for arg in "$@"; do
   case "$arg" in
     --check) MODE=check ;;
-    -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     *) echo "unknown argument: $arg (try --help)" >&2; exit 2 ;;
   esac
 done

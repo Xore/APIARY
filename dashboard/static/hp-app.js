@@ -293,7 +293,7 @@
     }
     const toast = document.createElement("a");
     toast.href = href;
-    toast.className = "hp-toast";
+    toast.className = "toast hp-toast";
     toast.textContent = message;
     stack.appendChild(toast);
     setTimeout(() => toast.remove(), 8000);

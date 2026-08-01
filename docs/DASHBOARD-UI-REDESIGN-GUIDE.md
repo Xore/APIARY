@@ -31,7 +31,7 @@
 - `theme.js` is intentionally **not** vendored: `dashboard/static/hp-app.js`
   owns theme preference, navigation, tabs, and keyboard shortcuts.
 - Load order in every page head (`page_style.go`, `{{define "style"}}`):
-  `theme.css` → `leaflet.css` → `hp-tailwind.css` (dashboard layer), then the
+  `theme.css` → `leaflet.css` → `hp-dashboard.css` (dashboard layer), then the
   deferred scripts (`leaflet.js`, `hp-api.js`, `hp-app.js`). A pre-paint inline
   script applies the saved theme preference (`localStorage hp-theme`:
   `light` / `dark` / absent = system) so there is no flash.
@@ -58,14 +58,14 @@
 - **Content widths**: overview/events/ips/payloads run full-width (map + large
   tables); list/status pages use `.app-content` (1120 px); investigation pages
   (attacker, session, payload-analysis) use `.app-content--wide` (1360 px).
-- **Dashboard layer** (`dashboard/frontend/src/shell.css` →
-  `static/hp-tailwind.css`): Tailwind v4 with the `tw:` prefix; its `@theme
-  inline` block aliases every color/radius to the theme's CSS variables, so
-  utilities follow dark, light, **and** system modes. It keeps only
+- **Dashboard layer** (`static/hp-dashboard.css`, hand-written, no build
+  step — #191 removed the Tailwind build entirely): keeps only
   dashboard-specific components (KPI tiles, sensor badges, map/Leaflet
-  overrides, tabs, lazy-list hooks, toasts); generic primitives (`.card`,
-  `.btn`, `.badge`, `.form-input`, `.data-table`, `.tabs`, `.metric`,
-  `.app-shell`…) come from `theme.css`.
+  overrides, tabs, lazy-list hooks, toast stacking) plus a small number of
+  one-off spacing/layout rules that used to be Tailwind utility classes;
+  generic primitives (`.card`, `.btn`, `.badge`, `.form-input`,
+  `.data-table`, `.tabs`, `.metric`, `.app-shell`, `.toast`…) come from
+  `theme.css`.
 - **Behavior** (`dashboard/static/hp-app.js`): SSE live updates, overview
   refresh that preserves the Leaflet map (pan/zoom/selection), lazy 25-row
   table loading, command-bar investigation router, alert-bell polling,
@@ -81,13 +81,14 @@
   ```
 
   The script runs `npm ci`, `typecheck`, and `build` (with a local npm, or a
-  `node:22-alpine` docker fallback) and then verifies that the compiled assets
-  (`static/hp-api.js`, `static/hp-tailwind.css`) are current — the same check
-  the "Tailwind frontend" CI job enforces with `git diff --exit-code`. Pass
-  `--check` to fail instead of only reporting when the committed output is
-  stale. Commit the regenerated assets together with the source change, and
-  never hand-edit the compiled files: the minifier's property ordering cannot
-  be reproduced by hand.
+  `node:22-alpine` docker fallback) and then verifies that the compiled asset
+  (`static/hp-api.js`) is current — the same check the "Dashboard frontend"
+  CI job enforces with `git diff --exit-code`. Pass `--check` to fail instead
+  of only reporting when the committed output is stale. Commit the
+  regenerated asset together with the source change, and never hand-edit it:
+  the minifier's property ordering cannot be reproduced by hand.
+  `static/hp-dashboard.css` is a separate, hand-written file with no build
+  step of its own — edit it directly.
 
 ## 3. Invariants that must not regress
 
@@ -102,7 +103,7 @@ From the migration guide — keep these green in every future change:
   `data-hp-*` JS hooks, and the `{{template "sidebar" .}}` /
   `{{template "topbar" .}}` calls are load-bearing — do not remove them.
 - `theme.css` stays byte-identical to a recorded Xore/theme commit; dashboard
-  overrides live only in `shell.css`.
+  overrides live only in `hp-dashboard.css`.
 
 ## 4. Remaining work
 

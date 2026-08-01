@@ -51,7 +51,7 @@
                  mechanism) is Xore/theme's shared component -- see
                  static/theme.css and github.com/Xore/theme's docs/CSP.md.
                  The tooltip and hour-label additions below are dashboard-
-                 specific (shell.css: #activity-chart span). Setting --v
+                 specific (hp-dashboard.css: #activity-chart span). Setting --v
                  through a nonced style element, not an inline style
                  attribute, is required: the page's CSP (script/style-src
                  use a per-request nonce, no unsafe-inline) blocks style
@@ -62,6 +62,22 @@
 {{end}}</style>
             <p class="note">Each bar is one local-time hour. Hover or focus a bar for the exact event count; select the 24-hour KPI above to inspect those events.</p>
           </div>
+
+          {{if .SensorHeatmap}}<div class="card wide chart-card">
+            <h2>Activity by sensor — last 24h</h2>
+            {{/* .heatmap is Xore/theme's shared component (see
+                 static/theme.css and github.com/Xore/theme's docs/CSP.md) --
+                 same nonced-style-element requirement as .mini-chart
+                 above, addressed by row then column. */}}
+            <div class="heatmap" aria-label="Hourly event activity per sensor, last 24 hours">
+              {{range .SensorHeatmap}}<div class="heatmap__row"><span class="heatmap__label">{{.Sensor}}</span><div class="heatmap__cells">{{range .Cells}}<span class="heatmap__cell" title="{{.Label}} — {{.Count}} events" tabindex="0"></span>{{end}}</div></div>
+              {{end}}
+            </div>
+            <style nonce="{{.Nonce}}">{{range $r, $row := .SensorHeatmap}}{{range $c, $cell := $row.Cells}}.heatmap__row:nth-child({{inc $r}}) .heatmap__cells span:nth-child({{inc $c}}){--v:{{$cell.Pct}}}
+{{end}}{{end}}.heatmap__legend .heatmap__cell:nth-of-type(1){--v:0}.heatmap__legend .heatmap__cell:nth-of-type(2){--v:25}.heatmap__legend .heatmap__cell:nth-of-type(3){--v:50}.heatmap__legend .heatmap__cell:nth-of-type(4){--v:75}.heatmap__legend .heatmap__cell:nth-of-type(5){--v:100}</style>
+            <div class="heatmap__legend"><span>Less</span><span class="heatmap__cell"></span><span class="heatmap__cell"></span><span class="heatmap__cell"></span><span class="heatmap__cell"></span><span class="heatmap__cell"></span><span>More</span></div>
+            <p class="note">Sensors with the most events in the last 24 hours, hour by hour. Hover or focus a cell for the exact count.</p>
+          </div>{{end}}
 
           {{if .MapPoints}}<div class="card wide map-card" data-attack-map-card><h2>Attack origins &mdash; live geographic view</h2>
             <div class="map-shell" data-map-shell><div id="attack-map" class="leaflet-map" data-tile-url="{{.MapTileURL}}" data-attribution="{{.MapAttribution}}" role="region" aria-label="interactive map of geolocated attack origins"></div><div class="map-status" data-map-status aria-live="polite">Loading attack origins…</div>
