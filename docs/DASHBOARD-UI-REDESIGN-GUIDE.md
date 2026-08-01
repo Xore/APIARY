@@ -111,7 +111,7 @@ Tracked as issues, not as a checklist here:
 | What is left | Issue |
 |---|---|
 | Event detail, payload preview, export options, destructive dead-letter modals | [#59](https://github.com/Xore/honeypot-stack/issues/59) |
-| Behavioural tests and the visual acceptance matrix | [#60](https://github.com/Xore/honeypot-stack/issues/60) |
+| Behavioural tests and the visual acceptance matrix | Built ([#60](https://github.com/Xore/honeypot-stack/issues/60)) |
 | CSP cutover with a per-request nonce | [#58](https://github.com/Xore/honeypot-stack/issues/58) |
 | Profile action menu, route/administrator settings, logout | Built ([#77](https://github.com/Xore/honeypot-stack/issues/77) closed). Remaining gap: [#93](https://github.com/Xore/honeypot-stack/issues/93) |
 
@@ -123,7 +123,7 @@ Two standing rules that are not work items and so stay here:
 
 - **Validate every change**: `git diff --check`, `docker compose config
   --quiet`, `go test ./...` in `dashboard/`, and frontend `ci` / `typecheck` /
-  `build`.
+  `build` / `test:browser`.
 - **Production deployment only when explicitly authorized.**
 
 ## 5. Cross-references
