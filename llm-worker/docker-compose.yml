@@ -1,0 +1,61 @@
+# Safe #66 deployment: synthetic checks only, on an internal Docker network
+# with no route to Elasticsearch, Ollama, captured payloads, or the Internet.
+#
+#   docker compose -f llm-worker/docker-compose.yml up -d --build
+#
+# #83 owns use of docker-compose.captured-data.yml and the explicit canary
+# authorization. Do not fold those mounts/networks into this base file.
+
+services:
+  llm-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hp-llm-worker
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      LLM_ENABLED: '${LLM_ENABLED:-false}'
+      LLM_DRY_RUN: '${LLM_DRY_RUN:-true}'
+      LLM_ALLOW_CAPTURED_DATA: '${LLM_ALLOW_CAPTURED_DATA:-false}'
+      LLM_SESSION_ENABLED: '${LLM_SESSION_ENABLED:-false}'
+      LLM_PAYLOAD_ENABLED: '${LLM_PAYLOAD_ENABLED:-false}'
+      LLM_DAILY_REPORT_ENABLED: '${LLM_DAILY_REPORT_ENABLED:-false}'
+      LLM_MODEL: '${LLM_MODEL:-qwen3.5:4b}'
+      LLM_CONTEXT_LENGTH: '${LLM_CONTEXT_LENGTH:-8192}'
+      LLM_OUTPUT_TOKENS: '${LLM_OUTPUT_TOKENS:-512}'
+      POLL_INTERVAL: '${POLL_INTERVAL:-60}'
+      MAX_CONTENT_CHARS: '${MAX_CONTENT_CHARS:-12000}'
+      MAX_PAYLOAD_BYTES: '${MAX_PAYLOAD_BYTES:-1048576}'
+      MAX_EVENTS_PER_CYCLE: '${MAX_EVENTS_PER_CYCLE:-2000}'
+      MAX_JOBS_PER_CYCLE: '${MAX_JOBS_PER_CYCLE:-20}'
+      MAX_PAYLOAD_SCAN_FILES: '${MAX_PAYLOAD_SCAN_FILES:-5000}'
+      SESSION_IDLE_SECONDS: '${SESSION_IDLE_SECONDS:-300}'
+      DAILY_REPORT_HOUR: '${DAILY_REPORT_HOUR:-6}'
+      LOG_LEVEL: '${LOG_LEVEL:-INFO}'
+    networks:
+      - synthetic-only
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=0700
+    healthcheck:
+      test: ['CMD', 'python', 'worker.py', '--healthcheck']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1g
+          pids: 128
+
+networks:
+  synthetic-only:
+    internal: true

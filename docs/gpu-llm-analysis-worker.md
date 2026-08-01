@@ -1,11 +1,12 @@
 # GPU LLM Analysis Worker — Implementation Guide
 
-> **Status:** Implementation guide — not yet deployed. `llm-worker/` does not
-> exist. Build order: [#82](https://github.com/Xore/honeypot-stack/issues/82)
-> re-verifies the hardware contract in §2,
-> [#66](https://github.com/Xore/honeypot-stack/issues/66) builds the worker
-> offline and dry-run, [#83](https://github.com/Xore/honeypot-stack/issues/83)
-> pulls a real model and runs the canary, and
+> **Status:** [#66](https://github.com/Xore/honeypot-stack/issues/66) now
+> provides `llm-worker/` in offline, synthetic dry-run mode. Its isolated
+> base stack has been built and smoke-tested on the homeserver; it publishes
+> no ports and has no route or mount to captured data. Build order continues
+> with [#82](https://github.com/Xore/honeypot-stack/issues/82), then
+> [#83](https://github.com/Xore/honeypot-stack/issues/83) for the separately
+> authorized synthetic/production canary, and
 > [#84](https://github.com/Xore/honeypot-stack/issues/84) shares the GPU with
 > the ML worker.
 > **Audience:** A human operator or an AI coding agent implementing this feature.
@@ -66,12 +67,12 @@ hosted API (see [Guardrails §13](#13-guardrails-read-before-implementing)).
 
 ## 2. Hardware Contract
 
-Observed on the homeserver (`supermicro`) on 2026-07-28 and **not re-checked
-since**. Treat it as the sizing hypothesis, not as fact: the VRAM budget in §5,
-the model choice, and the quantization level all fall out of this table, so a
-single wrong row invalidates the design rather than a detail of it.
-[#82](https://github.com/Xore/honeypot-stack/issues/82) produces the record
-that replaces it. Run the commands below yourself before sizing anything.
+Re-verified on the live homeserver during
+[#144](https://github.com/Xore/honeypot-stack/issues/144) on 2026-08-01.
+Exact measurements, model IDs, scoring, and the CPU/offload trade-offs are in
+[`local-llm-model-evaluation.md`](local-llm-model-evaluation.md). Issue #82
+still owns the broader reproducible host-capability record used by later GPU
+worker milestones.
 
 | Fact | Value | Verify with |
 |---|---|---|
@@ -92,8 +93,9 @@ that replaces it. Run the commands below yourself before sizing anything.
   weights + ~1 GB KV cache) with headroom. Do not load two chat models.
 - Turing (sm_75) has no bf16 support; use quantized GGUF via Ollama/llama.cpp,
   not raw fp16 transformers inference.
-- The GPU is idle today (`1 MiB / 8192 MiB`, 0 % util) — no contention with
-  existing services.
+- GPU occupancy is dynamic. Never infer availability from the historical idle
+  sample; check it immediately before a canary or benchmark. CPU/system-RAM
+  offload is allowed, and this project prioritizes accuracy over latency.
 
 ---
 
@@ -111,6 +113,19 @@ All outputs are written to the `llm-analysis` ES index (§9) and are
 ---
 
 ## 4. Architecture Overview
+
+The implementation uses two deliberately different network states:
+
+- `llm-worker/docker-compose.yml` is the #66 default. It joins only an
+  internal `synthetic-only` network and cannot reach Elasticsearch, Ollama,
+  capture volumes, or the Internet.
+- `llm-worker/docker-compose.captured-data.yml` is an explicit #83 exposure
+  override. It bridges the worker to `honeynet` for Elasticsearch and to the
+  separate internal `honeypot-llm` network for the already-shared Ghidra
+  Ollama service. Ollama itself never joins `honeynet`.
+
+The diagram below describes the later captured-data state, not the #66 safe
+default.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -180,115 +195,48 @@ Hard rules:
 
 ## 6. Docker Compose Integration
 
-New directory: `llm-worker/` containing `Dockerfile`, `requirements.txt`,
-`worker.py`, and `docker-compose.override.yml`. Deploy from the repo root:
+The checked-in files are canonical; the inline Compose example below is a
+design sketch retained for context and must not be copied into production:
+
+- [`../llm-worker/docker-compose.yml`](../llm-worker/docker-compose.yml) —
+  safe synthetic-only base, read-only, non-root, no ports or capture mounts;
+- [`../llm-worker/docker-compose.captured-data.yml`](../llm-worker/docker-compose.captured-data.yml)
+  — #83-only network and read-only volume grant;
+- [`../analysis/ghidra/docker-compose.ghidra.yml`](../analysis/ghidra/docker-compose.ghidra.yml)
+  — the pinned shared Ollama service and narrow `honeypot-llm` network.
+
+The base is the only mode exercised by #66:
 
 ```bash
-docker compose -f docker-compose.yml -f llm-worker/docker-compose.override.yml up -d
+docker compose -f llm-worker/docker-compose.yml up -d --build
+docker exec hp-llm-worker python worker.py --selftest
+docker port hp-llm-worker  # empty
 ```
 
-> **Deployment note (homeserver):** the live stack is managed by Dockge at
-> `/opt/stacks/honeypot-stack/compose.yml`. Merge these services into that
-> file (or the repo's `docker-compose.yml` and redeploy) rather than
-> maintaining a drifted local copy.
+Do not apply the captured-data override until #83's explicit authorization and
+review. Merely changing environment variables in the base stack cannot create
+the missing routes or mounts.
 
-```yaml
-# llm-worker/docker-compose.override.yml
-services:
-
-  # --- one-shot model pull (setup only; the ONLY GPU-side internet use) ---
-  ollama-pull:
-    image: ollama/ollama:0.32.0@sha256:57f573b47f1f71ebb445789f279fe3e596a8beab182f7cf486db9205bad87c5a
-    container_name: hp-ollama-pull
-    volumes:
-      - ollama-models:/root/.ollama
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - "ollama serve & sleep 3 &&
-         ollama pull qwen3.5:4b &&
-         ollama pull nomic-embed-text"
-    profiles: ["setup"]                  # only runs when explicitly requested
-
-  # --- inference server (steady state, no published ports) ---
-  ollama:
-    image: ollama/ollama:0.32.0@sha256:57f573b47f1f71ebb445789f279fe3e596a8beab182f7cf486db9205bad87c5a
-    container_name: hp-ollama
-    restart: unless-stopped
-    networks: [honeynet]
-    volumes:
-      - ollama-models:/root/.ollama
-    environment:
-      OLLAMA_MAX_LOADED_MODELS: "1"
-      OLLAMA_NUM_PARALLEL: "1"
-      OLLAMA_KEEP_ALIVE: 10m
-      OLLAMA_HOST: 0.0.0.0:11434         # internal bridge only — never publish
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-        limits:
-          memory: 12G
-    security_opt: [no-new-privileges:true]
-    healthcheck:
-      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-
-  # --- analysis worker (CPU-only client) ---
-  llm-worker:
-    build: ./llm-worker
-    container_name: hp-llm-worker
-    restart: unless-stopped
-    networks: [honeynet]
-    depends_on:
-      elasticsearch:
-        condition: service_healthy
-      ollama:
-        condition: service_healthy
-    environment:
-      ES_HOST: http://elasticsearch:9200
-      OLLAMA_URL: http://ollama:11434
-      REDIS_URL: redis://tanner-redis:6379/0   # reuse existing redis if reachable; else add one
-      LLM_MODEL: qwen3.5:4b
-      POLL_INTERVAL: "60"
-      MAX_CONTENT_CHARS: "12000"
-      DAILY_REPORT_HOUR: "6"             # UTC
-      LOG_LEVEL: INFO
-    security_opt: [no-new-privileges:true]
-    cap_drop: [ALL]
-    read_only: true
-    tmpfs: [/tmp]
-    mem_limit: 1g
-    cpus: "1.0"
-
-volumes:
-  ollama-models:
-```
-
-Setup sequence (models land in the named volume; runtime needs no internet):
+For #83, validate the grant without starting it:
 
 ```bash
-docker compose -f docker-compose.yml -f llm-worker/docker-compose.override.yml \
-  --profile setup run --rm ollama-pull
-docker compose -f docker-compose.yml -f llm-worker/docker-compose.override.yml up -d
+docker compose \
+  -f llm-worker/docker-compose.yml \
+  -f llm-worker/docker-compose.captured-data.yml \
+  config --quiet
 ```
 
-**Redis note:** the repo's ml-worker plan introduces its own `redis` on an
-`analysis-net` that does not exist yet; the live stack already runs
-`hp-tanner-redis`. Prefer the ml-worker's dedicated redis once it exists;
-until then the SSE notification is optional — the worker must start and run
-correctly with `REDIS_URL` unset (log a warning, skip publishing).
+The live stack is managed by Dockge under `/opt/stacks`. Deploy only from a
+reviewed merged revision; do not maintain a second hand-edited Compose copy.
+Model pulling stays an explicit operator action in the Ghidra/Ollama stack.
 
 ---
 
 ## 7. LLM Worker Pipeline
 
-`llm-worker/worker.py` — single-process loop, mirrors `ml-worker/worker.py`
-conventions (env-var config, loguru logging, ES checkpoint index).
+`llm-worker/worker.py` is a single-process loop with environment configuration,
+standard structured logging, and an Elasticsearch state index in captured-data
+mode. Dry-run mode constructs neither an Elasticsearch nor an Ollama client.
 
 ```
 loop every POLL_INTERVAL seconds:
@@ -296,8 +244,8 @@ loop every POLL_INTERVAL seconds:
   1. Read checkpoint from ES index llm-worker-state
      (per job-type: last processed @timestamp)
 
-  2. U1 sessions: ES aggregation on cowrie events —
-     group by session id, ≥5 commands, since checkpoint
+  2. U1 sessions: bounded chronological Cowrie event fetch —
+     accumulate by raw session id client-side, ≥5 commands, since checkpoint
      → for each session build a transcript (§8.2), call Ollama,
        validate JSON (§8.4), write doc to llm-analysis
 
@@ -309,14 +257,19 @@ loop every POLL_INTERVAL seconds:
      aggregate last 24h of llm-analysis + ml-anomalies
      → report prompt → llm-analysis with doc_type=report
 
-  5. Publish each new doc id to redis channel 'llm-analysis-events'
-     (best-effort; skip when REDIS_URL unset)
-
-  6. Write checkpoint; sleep POLL_INTERVAL
+  5. Write a bounded health heartbeat and sleep POLL_INTERVAL
 ```
 
-Dependencies (`requirements.txt`): `elasticsearch` (same pin as ml-worker),
-`requests`, `redis`, `loguru`, `pydantic` (output schema validation).
+Dependencies (`requirements.txt`): `elasticsearch`, `requests`, and `pydantic`
+(output schema validation). Redis/SSE publication is intentionally deferred to
+the dashboard integration issues; the #66 worker has no inbound API or Redis
+dependency.
+
+The client-side accumulator is deliberate: the live `honeypot-v2-*` mapping
+currently exposes `event.sensor` and `process.command_line`, while Cowrie's raw
+`honeypot.session`, `honeypot.eventid`, and duration values are present only in
+`_source`. Issue #132 owns promotion of those fields into a stable searchable
+ingest contract before dashboard/correlation consumers rely on them.
 Dockerfile: `python:3.12-slim`, non-root user, same pattern as
 `ml-worker/Dockerfile` — **no CUDA libraries in this image**; it is an HTTP
 client.
@@ -461,7 +414,10 @@ Mirror the pattern planned for `ml-anomalies` in
 
 ## 11. Acceptance Tests
 
-Run on the homeserver after deployment. All must pass.
+The isolated unit, build, Compose, and runtime checks run on the homeserver for
+#66. The GPU/model/captured-event tests below belong to #83 and must not be
+treated as authorization to enable captured-data mode. All must pass during
+that later canary.
 
 ```bash
 # T1 GPU visible inside the ollama container
@@ -499,7 +455,15 @@ nvidia-smi --query-gpu=memory.used --format=csv
 
 ## 12. Rollback
 
-The change is additive (new containers + new ES indices only):
+The #66 dry-run rollback removes only the isolated worker container/network;
+it creates no Elasticsearch index:
+
+```bash
+docker compose -f llm-worker/docker-compose.yml down
+```
+
+After a later #83 canary, rollback remains additive (worker plus derived ES
+indices only):
 
 ```bash
 docker stop hp-llm-worker hp-ollama && docker rm hp-llm-worker hp-ollama
@@ -557,8 +521,8 @@ bodies of the issues, so there is one place to see what is done:
 
 | Step | Issue |
 |---|---|
-| Re-verify §2's hardware contract; abort if the GPU, runtime or `honeynet` is missing | [#82](https://github.com/Xore/honeypot-stack/issues/82) |
-| Create `llm-worker/` (§6), implement `worker.py` (§7), the §8 guardrails, and the §9 index | [#66](https://github.com/Xore/honeypot-stack/issues/66) |
+| Record the broader reproducible host contract used by all later GPU milestones | [#82](https://github.com/Xore/honeypot-stack/issues/82) |
+| Create `llm-worker/` (§6), implement `worker.py` (§7), the §8 guardrails, and validate its isolated dry-run | [#66](https://github.com/Xore/honeypot-stack/issues/66) |
 | Pull the model, bring the services up, run acceptance tests T1–T7 (§11) | [#83](https://github.com/Xore/honeypot-stack/issues/83) |
 | Coordinate GPU windows with ML retraining (§5, G6) | [#84](https://github.com/Xore/honeypot-stack/issues/84) |
 

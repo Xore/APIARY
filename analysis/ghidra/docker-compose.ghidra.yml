@@ -50,6 +50,14 @@ services:
       - '127.0.0.1:11434:11434'
     volumes:
       - ollama_models:/root/.ollama
+    networks:
+      default:
+      # A narrow internal network shared only with the guarded #66 worker.
+      # Ollama does not join honeynet: sensors must never be able to submit
+      # prompts or observe model traffic. The worker is the sole bridge and
+      # still has no listening port.
+      llm_clients:
+        aliases: [ollama]
     security_opt:
       - no-new-privileges:true
     environment:
@@ -207,3 +215,8 @@ volumes:
   ollama_models:
   revdeck_chats:
   revdeck_logs:
+
+networks:
+  llm_clients:
+    name: honeypot-llm
+    internal: true

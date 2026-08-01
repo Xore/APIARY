@@ -1,0 +1,36 @@
+# Exposure override for #83's explicitly authorized canary. The base file is
+# useful and healthy without this override; adding it grants read-only capture
+# access plus routes to Elasticsearch and the shared, local-only Ollama server.
+# All three worker gates still default false/true/false in the safe direction.
+
+services:
+  llm-worker:
+    environment:
+      ES_HOST: 'http://elasticsearch:9200'
+      OLLAMA_URL: 'http://ollama:11434'
+      LLM_PAYLOAD_ROOTS: '/payloads/cowrie:/payloads/scripts/script-payloads'
+    networks:
+      - synthetic-only
+      - honeynet
+      - llm-backend
+    volumes:
+      # Cowrie saves uploaded/downloaded files by SHA-256. Text-only scanning
+      # is additionally enforced in worker.py; nothing here is executed.
+      - /opt/stacks/honeypot-stack/logs/cowrie/downloads:/payloads/cowrie:ro
+      # Dashboard-retained inline scripts. The live canary must verify that
+      # the unprivileged worker can read the intended files without widening
+      # the volume's permissions globally.
+      - dashboard-state:/payloads/scripts:ro
+
+networks:
+  honeynet:
+    name: honeynet
+    external: true
+  llm-backend:
+    name: honeypot-llm
+    external: true
+
+volumes:
+  dashboard-state:
+    name: honeypot-stack_dashboard-state
+    external: true
