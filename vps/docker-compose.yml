@@ -405,7 +405,11 @@ services:
     network_mode: host
     # Shares Suricata's PID namespace so this can signal it directly
     # (SIGUSR2 live reload) without docker.sock access or changing
-    # Suricata's own container isolation -- see suricata-rules-refresh.sh.
+    # Suricata's own container isolation. Live reload is disabled by
+    # default (ENABLE_LIVE_RELOAD unset below) -- verified live on
+    # 2026-08-01 that it OOM-kills Suricata against its current 768M
+    # limit; this service only refreshes rules on disk until that's
+    # raised. See suricata-rules-refresh.sh's header for the full story.
     pid: "service:suricata"
     volumes:
       - suricata-rules:/var/lib/suricata

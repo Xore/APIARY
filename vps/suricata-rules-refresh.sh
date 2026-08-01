@@ -19,25 +19,42 @@ set -eu
 #
 # Reload: no unix-command control socket is configured in suricata.yaml,
 # so suricata-update itself has no live-reload path here (--no-reload is
-# kept). Reload is done directly with SIGUSR2, Suricata's own documented
-# live-rule-reload signal -- chosen over adding docker.sock access (a much
-# bigger privilege grant just to run `docker kill`) because docker-
-# compose.yml already gives this service `pid: "service:suricata"`: it
-# shares Suricata's PID namespace, so the process is directly visible and
-# signalable without touching Suricata's own container isolation or
-# granting anything host-wide.
+# kept). The mechanism below -- SIGUSR2, Suricata's own documented
+# live-rule-reload signal, sent to PID 1 in the shared namespace this
+# container joins via docker-compose.yml's `pid: "service:suricata"` (no
+# docker.sock needed) -- is real and was verified working: Suricata logged
+# "rule reload starting" then "62843 rules successfully loaded, 0 rules
+# failed, 0 rules skipped".
+#
+# It is disabled by default (ENABLE_LIVE_RELOAD unset) because that same
+# live test OOM-killed Suricata a few seconds later: dmesg confirmed a
+# cgroup OOM kill against suricata's 768M memory limit
+# (docker-compose.yml). A live reload builds the entire new detection
+# engine while the old one is still active (no detection gap), so memory
+# roughly doubles for the transition -- 768M has no headroom for that with
+# today's ~63k-rule set, even though it's enough for steady-state. Docker's
+# restart: unless-stopped brought Suricata back within seconds and it
+# rejoined the interface cleanly, but repeating that every refresh cycle,
+# unattended, on a live IDS is not acceptable. Raise suricata's memory
+# limit first (with headroom measured against a real reload, not guessed),
+# then set ENABLE_LIVE_RELOAD=1. Until then this service only keeps rules
+# fresh on disk -- the next deploy or manual restart picks them up.
+enable_live_reload="${ENABLE_LIVE_RELOAD:-}"
 
 interval="${REFRESH_INTERVAL_SECONDS:-21600}"  # 6h -- ET Open and friends do not publish more often than this
 start_delay="${START_DELAY:-21600}"            # first refresh well after the deploy-time suricata-update already ran
 
 reload_suricata() {
-  pid="$(pgrep -o -x suricata 2>/dev/null || true)"
-  if [ -z "$pid" ]; then
-    echo "suricata-rules-refresh: no running suricata process visible, skipping reload" >&2
+  if [ -z "$enable_live_reload" ]; then
+    echo "suricata-rules-refresh: rules on disk refreshed; live reload is disabled (ENABLE_LIVE_RELOAD unset) -- see this script's header" >&2
+    return 0
+  fi
+  if ! kill -0 1 2>/dev/null; then
+    echo "suricata-rules-refresh: no process visible at PID 1, skipping reload" >&2
     return 1
   fi
-  kill -USR2 "$pid"
-  echo "suricata-rules-refresh: sent SIGUSR2 (live rule reload) to suricata pid $pid" >&2
+  kill -USR2 1
+  echo "suricata-rules-refresh: sent SIGUSR2 (live rule reload) to suricata (pid 1 in the shared namespace)" >&2
 }
 
 sleep "$start_delay"
