@@ -210,6 +210,8 @@ install -m 0755 -o root -g root "$here/worker/ghidra-worker.py" "$target/worker/
 install -m 0755 -o root -g root "$here/models/model-governance.py" "$target/models/model-governance.py"
 install -m 0644 -o root -g root \
   "$here/models/approved-models.json" "$target/models/approved-models.json"
+install -m 0644 -o root -g root \
+  "$here/models/session-schema.json" "$target/models/session-schema.json"
 install -m 0644 -o root -g root "$here/models/README.md" "$target/models/README.md"
 # The unit files point Documentation= at this, and it is the only description
 # of the result format an operator on the host can read.

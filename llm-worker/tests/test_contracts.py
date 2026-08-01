@@ -49,6 +49,10 @@ class SanitizationTests(unittest.TestCase):
             session_contract_fingerprints(),
             manifest["slots"]["sessions"]["contract"],
         )
+        checked_in_schema = json.loads(
+            (root / "analysis/ghidra/models/session-schema.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(checked_in_schema, SessionAnalysis.model_json_schema())
 
     def test_chpasswd_pipeline_redacts_only_the_credential_value(self):
         result = sanitize_text('echo "root:fixture-password"|chpasswd|bash', 1000)

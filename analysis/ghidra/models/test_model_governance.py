@@ -116,6 +116,10 @@ class GovernanceTests(unittest.TestCase):
         import sys
         sys.modules["qualification_benchmark"] = benchmark
         spec.loader.exec_module(benchmark)
+        self.assertEqual(
+            benchmark._sha256_json(benchmark.session_schema()),
+            self.manifest["slots"]["sessions"]["contract"]["effective_schema_sha256"],
+        )
         for case in benchmark.SESSION_CASES:
             self.assertIsInstance(case.required_mitre, tuple, case.name)
             self.assertIsInstance(case.forbidden_summary, tuple, case.name)

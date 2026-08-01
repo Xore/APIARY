@@ -20,6 +20,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 
@@ -129,6 +130,14 @@ def contract_for(slot: str) -> dict[str, Any]:
             "response_schema_sha256": None,
         }
     raise ValueError(f"unknown slot: {slot}")
+
+
+def session_schema() -> dict[str, Any]:
+    path = Path(__file__).resolve().parents[1] / "models" / "session-schema.json"
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if _sha256_json(value) != SESSION_EFFECTIVE_SCHEMA_SHA256:
+        raise ValueError("session schema artifact does not match the approved effective schema hash")
+    return value
 
 
 @dataclass(frozen=True)
@@ -446,7 +455,14 @@ def model_artifact(base_url: str, model: str) -> dict[str, Any]:
     raise ValueError(f"model tag is not installed: {model}")
 
 
-def chat(base_url: str, model: str, system: str, prompt: str, context: int, json_mode: bool) -> dict[str, Any]:
+def chat(
+    base_url: str,
+    model: str,
+    system: str,
+    prompt: str,
+    context: int,
+    json_mode: bool | dict[str, Any],
+) -> dict[str, Any]:
     body: dict[str, Any] = {
         "model": model,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
@@ -461,7 +477,7 @@ def chat(base_url: str, model: str, system: str, prompt: str, context: int, json
         "options": {"temperature": 0, "num_ctx": context, "num_predict": 512, "seed": 144},
     }
     if json_mode:
-        body["format"] = "json"
+        body["format"] = json_mode if isinstance(json_mode, dict) else "json"
     started = time.monotonic()
     response = request_json(f"{base_url}/api/chat", body)
     wall_seconds = time.monotonic() - started
@@ -539,13 +555,14 @@ def score_triage(base_url: str, model: str, context: int) -> list[dict[str, Any]
 
 def score_sessions(base_url: str, model: str, context: int) -> list[dict[str, Any]]:
     results = []
+    schema = session_schema()
     for case in SESSION_CASES:
         prompt = (
             "Analyze this captured SSH honeypot session.\n\n"
             f"Session metadata: duration=180s, commands={case.transcript.count(chr(10)) + 1}, auth_success=true\n\n"
             f"<untrusted_data>\n{case.transcript}\n</untrusted_data>\n\n{SESSION_SUFFIX}"
         )
-        raw = chat(base_url, model, SESSION_SYSTEM, prompt, min(context, 8192), True)
+        raw = chat(base_url, model, SESSION_SYSTEM, prompt, min(context, 8192), schema)
         parsed = parse_object(raw["content"])
         points = 0
         keys = {"summary", "intent", "mitre_attack", "iocs", "severity", "confidence"}
