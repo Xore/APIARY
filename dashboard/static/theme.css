@@ -62,9 +62,12 @@
   --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
   /* A standard ease-out curve (fast start, gentle settle) rather than the
      linear-ish default `ease` keyword -- every hover/focus/panel transition
-     in the theme reads slightly more deliberate with the same durations. */
-  --transition-fast: 120ms cubic-bezier(0, 0, 0.2, 1);
-  --transition: 160ms cubic-bezier(0, 0, 0.2, 1);
+     in the theme reads slightly more deliberate with the same durations.
+     Exposed on its own so the entrance-animation utilities below (and any
+     consumer's own keyframes) can reuse the exact same curve. */
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --transition-fast: 120ms var(--ease-out);
+  --transition: 160ms var(--ease-out);
 
   --toolbar-height: 32px;
   --sidebar-width: 224px;
@@ -271,6 +274,64 @@ p { color: var(--text-secondary); }
   from { opacity: 0; transform: translate(-50%, calc(-50% + 8px)) scale(0.99); }
   to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
+
+/* ── Entrance/attention motion utilities ─────────────────────────────────
+   Four small, additive animation utilities -- opt-in classes, not tied to
+   any specific component, so any consumer can reach for them. All four
+   are automatically neutralized by the prefers-reduced-motion rule at the
+   bottom of this file (animation-duration drops to ~0). */
+
+/* A freshly-rendered list's rows fade/settle in with a slight stagger
+   instead of all appearing at once -- add .stagger-in to the row
+   container (e.g. a <tbody> or a menu's item list). Pure CSS: nth-child
+   selectors carry the delay, so there is nothing to wire up per row and
+   no per-element custom property to set (contrast with .mini-chart/
+   .heatmap, where the value truly is per-request data -- a stagger index
+   is not). Covers the first 12 rows explicitly; rows beyond that share
+   the last delay rather than keep growing, so a long list doesn't leave
+   its tail waiting a full second to appear. */
+@keyframes stagger-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+.stagger-in > * {
+  animation: stagger-in 220ms var(--ease-out) backwards;
+}
+.stagger-in > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-in > *:nth-child(2) { animation-delay: 45ms; }
+.stagger-in > *:nth-child(3) { animation-delay: 90ms; }
+.stagger-in > *:nth-child(4) { animation-delay: 135ms; }
+.stagger-in > *:nth-child(5) { animation-delay: 180ms; }
+.stagger-in > *:nth-child(6) { animation-delay: 225ms; }
+.stagger-in > *:nth-child(7) { animation-delay: 270ms; }
+.stagger-in > *:nth-child(8) { animation-delay: 315ms; }
+.stagger-in > *:nth-child(9) { animation-delay: 360ms; }
+.stagger-in > *:nth-child(10) { animation-delay: 405ms; }
+.stagger-in > *:nth-child(11) { animation-delay: 450ms; }
+.stagger-in > *:nth-child(n + 12) { animation-delay: 495ms; }
+
+/* A one-shot attention ring for a value that just changed -- a live-
+   refreshed table row, a cell whose count just updated. Add the class,
+   remove it on `animationend` (or just leave it: the animation does not
+   repeat on its own). Color comes from --accent so it reads as "this
+   changed", not as a semantic success/warning/danger signal. */
+@keyframes flash-ring {
+  from {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 55%, transparent),
+      0 0 16px 2px color-mix(in srgb, var(--accent) 25%, transparent);
+  }
+  to { box-shadow: 0 0 #0000, 0 0 #0000; }
+}
+.flash { animation: flash-ring 900ms var(--ease-out); }
+
+/* A timeline/session-replay entry settling into place -- a touch more
+   pronounced than .stagger-in's plain fade+lift, since a timeline reads
+   one block at a time rather than as a batch of equivalent rows. */
+@keyframes timeline-block-in {
+  from { opacity: 0; filter: blur(4px); transform: translateY(5px) scale(0.98); }
+  to { opacity: 1; filter: blur(0); transform: none; }
+}
+.timeline-block { animation: timeline-block-in 320ms var(--ease-out) backwards; }
 
 .btn {
   display: inline-flex;
@@ -743,6 +804,18 @@ select.form-input { cursor: pointer; }
   color: var(--danger);
 }
 
+/* Direction-agnostic by default (a toast can be stacked top-right,
+   bottom-center, wherever the consumer places it) -- .toast--slide-in-right
+   below is the opt-in modifier for a consumer that knows its own stack
+   sits on one side and wants the toast to visibly arrive from off-screen. */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes toast-slide-in-right {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: none; }
+}
 .toast {
   display: flex;
   max-width: 360px;
@@ -755,7 +828,9 @@ select.form-input { cursor: pointer; }
   box-shadow: var(--shadow-raised);
   color: var(--text-primary);
   font-size: var(--font-size-caption);
+  animation: toast-in 200ms var(--ease-out) backwards;
 }
+.toast--slide-in-right { animation: toast-slide-in-right 200ms var(--ease-out) backwards; }
 
 kbd {
   padding: 2px 5px;
@@ -907,6 +982,12 @@ pre {
   gap: 14px;
 }
 .project-card {
+  /* A grid item's default min-width is auto (content-based), so an
+     unbreakable long title (a hash, a URL) would widen the whole track
+     instead of respecting the title's own overflow:hidden/ellipsis -- the
+     classic CSS Grid + nowrap-text trap. min-width: 0 lets the item (and
+     everything nested in it) actually shrink to the track's size. */
+  min-width: 0;
   padding: 18px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-panel);
@@ -918,12 +999,26 @@ pre {
 .project-card__header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
   margin-bottom: 8px;
 }
-.project-card__title { color: var(--text-primary); font-size: var(--font-size-body); font-weight: 600; }
+/* An icon and/or multiple badges are both optional -- a header with just a
+   title behaves exactly as before (the title filling the row takes over
+   space-between's old job of pushing a lone badge to the far end). */
+.project-card__icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: var(--radius-control);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.project-card__icon svg { width: 16px; height: 16px; }
+.project-card__title { flex: 1; min-width: 0; color: var(--text-primary); font-size: var(--font-size-body); font-weight: 600; }
 .project-card__badge { flex: none; }
+.project-card__badges { display: flex; flex: none; flex-wrap: wrap; gap: 5px; }
 .project-card__desc {
   color: var(--text-secondary);
   font-size: var(--font-size-caption);
@@ -941,6 +1036,59 @@ pre {
   color: var(--text-muted);
   font-size: var(--font-size-xs);
 }
+
+/* ── Catalog card ─────────────────────────────────────────────────────
+   .project-card (above) is "your own items" -- a plain title/description/
+   meta list. This is for a browsable directory of things you *add*
+   (skills, connectors, plugins): a leading icon slot, a badge row for
+   flags like New/Community/#N popular, and a trailing round add button. */
+.catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+.catalog-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-panel);
+  background: var(--surface-1);
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+.catalog-card:hover { background: var(--surface-2); border-color: var(--border-strong); }
+.catalog-card__header { display: flex; align-items: flex-start; gap: 10px; }
+.catalog-card__icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: var(--radius-control);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.catalog-card__icon svg { width: 18px; height: 18px; }
+.catalog-card__title-group { flex: 1; min-width: 0; }
+.catalog-card__title { color: var(--text-primary); font-size: var(--font-size-body); font-weight: 600; }
+.catalog-card__badges { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
+.catalog-card__desc { flex: 1; color: var(--text-secondary); font-size: var(--font-size-caption); line-height: 1.5; }
+.catalog-card__add {
+  display: grid;
+  place-items: center;
+  align-self: flex-end;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+.catalog-card__add:hover { background: var(--accent); border-color: var(--accent); color: var(--text-on-accent); }
+.catalog-card__add svg { width: 14px; height: 14px; }
 
 /* ── Modal header with search ────────────────────────────────────── */
 

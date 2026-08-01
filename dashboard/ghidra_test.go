@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -713,5 +714,75 @@ func TestServeGhidraCallGraph(t *testing.T) {
 		"/export/ghidra/../../etc/passwd/callgraph.svg", nil))
 	if w.Code != http.StatusNotFound {
 		t.Errorf("traversal: got %d, want 404", w.Code)
+	}
+}
+
+// The Ghidra results list renders as a .project-grid/.project-card grid
+// (#213 phase 4), not the old <table>. Each card links to the Ghidra
+// detail page (not /payload-analysis/ -- that shortcut lived on the old
+// hash cell and is still one click away from the detail page itself),
+// and carries an exit-status badge plus a family-guess badge when triage
+// offered one.
+func TestGhidraResultsPageRendersAsCardGrid(t *testing.T) {
+	s := &store{}
+	tmpl := template.Must(template.New("dashboard").Funcs(templateFuncs(s, "")).Parse(pageTemplate))
+
+	data := ghidraPageData{
+		Generated: time.Now(),
+		Status:    ghidraQueueStatus{Configured: true},
+		Rows: []ghidraResult{
+			{
+				SHA256: shaA, CompletedAt: "2026-08-01T10:00:00Z", ExitStatus: "success",
+				Functions: []ghidraFunction{{Name: "main"}}, Imports: []string{"malloc", "connect"},
+				AITriage: &ghidraTriage{FamilyGuess: "mirai"},
+			},
+			{
+				SHA256: shaB, CompletedAt: "2026-08-01T09:00:00Z", ExitStatus: "error",
+			},
+		},
+	}
+
+	var buf strings.Builder
+	if err := tmpl.ExecuteTemplate(&buf, "ghidra", &data); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	body := buf.String()
+
+	if strings.Contains(body, `id="ghidra-results"><p`) && strings.Contains(body, "<table") {
+		t.Fatalf("ghidra results still render as a table, want a card grid")
+	}
+	if !strings.Contains(body, "project-grid") || !strings.Contains(body, "project-card") {
+		t.Fatalf("results list is missing the .project-grid/.project-card markup")
+	}
+	if !strings.Contains(body, `href="/ghidra/`+shaA+`"`) {
+		t.Fatalf("card for %s does not link to its Ghidra detail page", shaA)
+	}
+	if !strings.Contains(body, ">mirai<") {
+		t.Fatalf("family-guess badge for %s is missing", shaA)
+	}
+	if !strings.Contains(body, ">error<") {
+		t.Fatalf("exit-status badge for %s is missing", shaB)
+	}
+	if strings.Count(body, "project-card__icon") != len(data.Rows) {
+		t.Fatalf("expected one leading icon per row")
+	}
+}
+
+// A query that matches nothing keeps the plain empty state, not an empty grid.
+func TestGhidraResultsPageEmptyStateHasNoCardGrid(t *testing.T) {
+	s := &store{}
+	tmpl := template.Must(template.New("dashboard").Funcs(templateFuncs(s, "")).Parse(pageTemplate))
+
+	data := ghidraPageData{Generated: time.Now(), Status: ghidraQueueStatus{Configured: true}}
+	var buf strings.Builder
+	if err := tmpl.ExecuteTemplate(&buf, "ghidra", &data); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	body := buf.String()
+	if strings.Contains(body, "project-grid") {
+		t.Fatalf("empty result set should not render a .project-grid")
+	}
+	if !strings.Contains(body, "No Ghidra analyses match this view.") {
+		t.Fatalf("missing the empty-state message")
 	}
 }
