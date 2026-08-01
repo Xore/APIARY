@@ -83,6 +83,16 @@ func getenv(k, def string) string {
 	return def
 }
 
+// waitForMarker blocks until path exists, polling every 3s. See #128.
+func waitForMarker(path string) {
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(3 * time.Second)
+	}
+}
+
 // tunnelPeerIP is the WireGuard address of the VPS edge. Requests arriving
 // from it came through Traefik -> socat (Traefik sets X-Forwarded-For) or
 // through a raw portbridge rule without ":pp". Only from that peer may
@@ -396,6 +406,14 @@ func main() {
 		}
 		os.Exit(0)
 	}
+
+	// #128: same-project depends_on: condition: service_completed_successfully
+	// against a shim can't reach honeypot-init (different Compose project),
+	// so every other service in this stack waits on honeypot-init's
+	// completion marker directly instead -- normally via an entrypoint:
+	// wrapper, but this image is FROM scratch with no shell to wrap with,
+	// so the wait lives here instead.
+	waitForMarker("/markers/log-init.done")
 
 	// PROXY_PROTOCOL=1: fronted by portbridge with a ":pp" rule, which prepends
 	// a PROXY header carrying the real attacker IP. The listener sniffs the

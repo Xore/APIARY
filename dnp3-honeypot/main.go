@@ -133,6 +133,15 @@ func main() {
 		c.Close()
 		return
 	}
+
+	// #128: same-project depends_on: condition: service_completed_successfully
+	// against a shim can't reach honeypot-init (different Compose project),
+	// so every other service in this stack waits on honeypot-init's
+	// completion marker directly instead -- normally via an entrypoint:
+	// wrapper, but this image is FROM scratch with no shell to wrap with,
+	// so the wait lives here instead.
+	waitForMarker("/markers/log-init.done")
+
 	addr := os.Getenv("LISTEN_ADDR")
 	if strings.TrimSpace(addr) == "" {
 		addr = ":20000"
@@ -153,5 +162,15 @@ func main() {
 		if err == nil {
 			go serve(c, log)
 		}
+	}
+}
+
+// waitForMarker blocks until path exists, polling every 3s. See #128.
+func waitForMarker(path string) {
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(3 * time.Second)
 	}
 }

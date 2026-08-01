@@ -92,6 +92,16 @@ func getenv(k, def string) string {
 	return def
 }
 
+// waitForMarker blocks until path exists, polling every 3s. See #128.
+func waitForMarker(path string) {
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(3 * time.Second)
+	}
+}
+
 func srcIP(c net.Conn) string {
 	host, _, err := net.SplitHostPort(c.RemoteAddr().String())
 	if err != nil {
@@ -178,6 +188,14 @@ func main() {
 		c.Close()
 		os.Exit(0)
 	}
+
+	// #128: same-project depends_on: condition: service_completed_successfully
+	// against a shim can't reach honeypot-init (different Compose project),
+	// so every other service in this stack waits on honeypot-init's
+	// completion marker directly instead -- normally via an entrypoint:
+	// wrapper, but this image is FROM scratch with no shell to wrap with,
+	// so the wait lives here instead.
+	waitForMarker("/markers/log-init.done")
 
 	log := newLogger(getenv("LOG_FILE", "/var/log/honeypot/multipot.json"))
 	proxy := getenv("PROXY_PROTOCOL", "") == "1"

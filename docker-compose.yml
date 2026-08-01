@@ -224,15 +224,11 @@ services:
     container_name: hp-multipot
     restart: unless-stopped
     # #128: waits on the marker directly instead of depends_on-ing
-    # init-wait-log (same-project-only mechanism). Reproduces the
-    # Dockerfile's own ENTRYPOINT (checked directly: ["/multipot"]) with
-    # the wait spliced in.
-    entrypoint:
-      - /bin/sh
-      - -c
-      - >
-        until [ -f /markers/log-init.done ]; do sleep 3; done;
-        exec /multipot
+    # init-wait-log (same-project-only mechanism). Unlike most other
+    # services, this image is FROM scratch with no shell -- an
+    # entrypoint: sh -c wrapper can't run here (`exec: "/bin/sh": stat
+    # /bin/sh: no such file or directory`, caught deploying this the first
+    # time). The wait lives in the Go binary itself instead (main.go).
     ports:
       - ${HP_BIND:-10.8.0.2}:19025:25
       - ${HP_BIND:-10.8.0.2}:5432:5432
@@ -268,15 +264,11 @@ services:
     container_name: hp-http
     restart: unless-stopped
     # #128: waits on the marker directly instead of depends_on-ing
-    # init-wait-log (same-project-only mechanism). Reproduces the
-    # Dockerfile's own ENTRYPOINT (checked directly: ["/honeypot"]) with
-    # the wait spliced in.
-    entrypoint:
-      - /bin/sh
-      - -c
-      - >
-        until [ -f /markers/log-init.done ]; do sleep 3; done;
-        exec /honeypot
+    # init-wait-log (same-project-only mechanism). This image is FROM
+    # scratch with no shell -- an entrypoint: sh -c wrapper can't run here
+    # (`exec: "/bin/sh": stat /bin/sh: no such file or directory`, caught
+    # deploying this the first time). The wait lives in the Go binary
+    # itself instead (main.go).
     ports:
       - ${HP_BIND:-10.8.0.2}:19081:8080
     volumes:
@@ -316,15 +308,11 @@ services:
     container_name: hp-api-honeypot
     restart: unless-stopped
     # #128: waits on the marker directly instead of depends_on-ing
-    # init-wait-log (same-project-only mechanism). Reproduces the
-    # Dockerfile's own ENTRYPOINT (checked directly: ["/honeypot"]) with
-    # the wait spliced in.
-    entrypoint:
-      - /bin/sh
-      - -c
-      - >
-        until [ -f /markers/log-init.done ]; do sleep 3; done;
-        exec /honeypot
+    # init-wait-log (same-project-only mechanism). This image is FROM
+    # scratch with no shell -- an entrypoint: sh -c wrapper can't run here
+    # (`exec: "/bin/sh": stat /bin/sh: no such file or directory`, caught
+    # deploying this the first time). The wait lives in the Go binary
+    # itself instead (main.go, shared build with http-honeypot).
     ports:
       - ${HP_BIND:-10.8.0.2}:18083:8080
     volumes:
@@ -1190,15 +1178,11 @@ services:
     container_name: hp-dnp3
     restart: unless-stopped
     # #128: waits on the marker directly instead of depends_on-ing
-    # init-wait-log (same-project-only mechanism). Reproduces the
-    # Dockerfile's own ENTRYPOINT (checked directly: ["/dnp3-honeypot"])
-    # with the wait spliced in.
-    entrypoint:
-      - /bin/sh
-      - -c
-      - >
-        until [ -f /markers/log-init.done ]; do sleep 3; done;
-        exec /dnp3-honeypot
+    # init-wait-log (same-project-only mechanism). This image is FROM
+    # scratch with no shell -- an entrypoint: sh -c wrapper can't run here
+    # (`exec: "/bin/sh": stat /bin/sh: no such file or directory`, caught
+    # deploying this the first time). The wait lives in the Go binary
+    # itself instead (main.go).
     environment:
       - LISTEN_ADDR=:20000
       - LOG_PATH=/var/log/honeypot/dnp3.json
