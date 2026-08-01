@@ -15,10 +15,19 @@ Internet
 
 ## Authoritative deployment paths
 
-- Home server: Dockge manages `/opt/stacks/honeypot-stack/compose.yml`.
+- Home server: Dockge manages **two** stacks —
+  `/opt/stacks/honeypot-init/compose.yml` (one-shot bootstrap jobs: log paths,
+  Elasticsearch templates, Arkime schema, persona validation) and
+  `/opt/stacks/honeypot-stack/compose.yml` (the sensors and everything else
+  that runs continuously). They're separate Compose projects because a
+  same-project `depends_on: condition: service_completed_successfully` can't
+  reach across one — `honeypot-stack`'s services wait on completion markers
+  `honeypot-init` writes instead. See the root `README.md`'s "Home container
+  interaction map" for the full picture.
 - VPS: plain Docker Compose manages `/root/vps/docker-compose.yml`.
-- The repository home Compose source is `docker-compose.yml`; copy it to the
-  Dockge path as `compose.yml`.
+- The repository home Compose sources are `docker-compose.yml`
+  (`honeypot-stack`) and `docker-compose.init.yml` (`honeypot-init`); copy
+  each to its Dockge stack directory as `compose.yml`.
 - The public gateway source is under `vps/`.
 
 Dockge is used only on the home server. The VPS uses `docker compose` directly.
@@ -33,12 +42,35 @@ the only internet-facing component.
 ## Home deployment
 
 1. Establish WireGuard and verify that the VPS can reach `10.8.0.2`.
-2. Copy `.env.example` to `.env` and generate every value marked `CHANGE_ME`.
-3. Copy this repository to `/opt/stacks/honeypot-stack/`.
-4. Ensure the repository `docker-compose.yml` is also present as
+2. Copy this repository to `/opt/stacks/honeypot-stack/`.
+3. Copy `.env.example` to `.env` in `/opt/stacks/honeypot-stack/` and generate
+   every value marked `CHANGE_ME`.
+4. Create `/opt/stacks/honeypot-init/`, copy `docker-compose.init.yml` from
+   the repo into it as `compose.yml`, and copy its own `.env.example` to
+   `.env` (set `ARKIME_ADMIN_PASSWORD`/`ARKIME_PASSWORD_SECRET` — the latter
+   must match the value in `honeypot-stack`'s `.env` exactly).
+5. Before first deploying `honeypot-init`:
+   `install -d -m 777 /opt/stacks/honeypot-stack/state/init-markers` — its
+   jobs run as several different container UIDs, and a root-owned 755
+   directory 403's the non-root ones.
+6. Ensure the repository `docker-compose.yml` is also present as
    `/opt/stacks/honeypot-stack/compose.yml`.
-5. In Dockge, validate and deploy the stack.
-6. Run `python3 analysis/verify-stack.py` and inspect `/source-health`.
+7. In Dockge, validate and deploy **`honeypot-init` first**, then
+   `honeypot-stack`. `honeypot-stack`'s sensors wait on `honeypot-init`'s
+   completion markers at their own entrypoint rather than a Compose-level
+   dependency (they can't cross a Compose project boundary) — deploying
+   `honeypot-stack` first won't fail, but nothing finishes initialising
+   (log paths, Elasticsearch templates, Arkime schema) until `honeypot-init`
+   has run at least once. See the root `README.md`'s "Home container
+   interaction map" for why these are two stacks.
+8. Run `python3 analysis/verify-stack.py` and inspect `/source-health`.
+
+Each stack is a folder under your Dockge stacks dir (default `/opt/stacks/`).
+Upload the whole home folder via SFTP — compose **and** the build
+sub-folders (`cowrie/`, `multipot/`, `http-honeypot/`, `dashboard/`, …) —
+since Dockge's own editor only edits the compose file. After editing Go
+source or honeyfs content, rebuild from the `honeypot-stack` stack's Dockge
+**terminal**: `docker compose -f compose.yml up -d --build`.
 
 ### Boot-safe home networking and VPS log mounts
 
@@ -97,13 +129,49 @@ intervention.
 
 ## VPS deployment
 
-1. Copy `vps/.env.example` to `/root/vps/.env`.
-2. Replace all example domains, the Suricata `HOME_NET`, authentication
+1. Move real admin SSH to `2222` first, so cowrie can own `22` — confirm
+   `2222` works before continuing. There is no script for this step; do it
+   by hand and keep the old session open until the new port answers.
+2. `sudo ufw allow 2222/tcp comment 'REAL admin SSH'` and
+   `sudo ufw allow 80,443/tcp comment 'Traefik'` — outside
+   `honeypot-firewall.sh`'s scope (below), so do these by hand too.
+3. Copy `vps/.env.example` to `/root/vps/.env`.
+4. Replace all example domains, the Suricata `HOME_NET`, authentication
    credentials, cookie secrets, and TOTP values.
-3. Copy `vps/` contents to `/root/vps/`.
-4. Validate with `docker compose -f /root/vps/docker-compose.yml config`.
-5. Start with `docker compose -f /root/vps/docker-compose.yml up -d --build`.
-6. Apply `vps/honeypot-firewall.sh` only after reviewing the exposed ports.
+5. Copy `vps/` contents to `/root/vps/`.
+6. Validate with `docker compose -f /root/vps/docker-compose.yml config`.
+7. Start with `docker compose -f /root/vps/docker-compose.yml up -d --build`.
+8. Apply `vps/honeypot-firewall.sh` only after reviewing the exposed ports —
+   it opens the raw OT/IoT ports `portbridge` forwards. **Checked while
+   writing this section**: the script does not open `21`/`22`/`23`/`25`
+   (FTP/SSH/Telnet/SMTP), even though those are live honeypot ports too
+   (Dionaea FTP, cowrie SSH/Telnet, multipot SMTP) — worth a follow-up look
+   at whether that's intentional (opened elsewhere, or deliberately manual
+   given `22`'s overlap with real admin SSH) or a script that fell behind as
+   sensors were added.
+
+`portbridge` binds every raw port on the public interface and forwards it
+over WireGuard to `10.8.0.2`; the `socat-hp-*` services put the HTTP
+honeypots on the `proxy` network for Traefik. The reusable Traefik router
+template is in [`vps/traefik/dynamic.yml`](../vps/traefik/dynamic.yml):
+`honeypot-http` (`decoy.<domain>`) + `honeypot-web` (catch-all) → fake nginx,
+`honeypot-snare` (`www-portal.<domain>` and `snare.<domain>`) → SNARE, and
+five forward-auth-protected investigation routes for the dashboard, Kibana,
+TANNER, EveBox, and Arkime. Each has a matching `socat-hp-*` bridge in
+[`vps/docker-compose.yml`](../vps/docker-compose.yml).
+
+Traefik is an HTTP(S) reverse proxy — it adds TLS, per-subdomain routing and
+auth to the web honeypots and dashboards. The other protocols (SSH, SMB,
+MySQL, Modbus, …) aren't HTTP, so Traefik can't route them; `portbridge`
+forwards them raw. Both paths terminate on the VPS public IP.
+
+> **Source IP:** the HTTP honeypots recover the real client IP from
+> `X-Forwarded-For` (Traefik/Cloudflare). Some raw sensor logs initially
+> contain the **VPS WireGuard IP**, but the dashboard correlates those
+> connections with the portbridge connection log and attributes the real
+> attacker — see "Source-IP preservation" below. The HTTPS catch-all only
+> catches requests with a valid SNI/`Host`; raw-IP scanners are caught by the
+> direct `:8081` tunnel instead.
 
 ## DNS
 
