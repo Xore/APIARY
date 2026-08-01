@@ -188,9 +188,10 @@ jobs:
           docker compose -f analysis/ghidra/docker-compose.ghidra.yml config --quiet
           docker compose -f analysis/ghidra/docker-compose.ghidra.yml \
             -f analysis/ghidra/docker-compose.ghidra.gpu.yml config --quiet
-          # #66's base file is synthetic and network-isolated. The second
-          # validation proves the explicitly gated #83 exposure overlay still
-          # composes, but neither worker nor model is started in CI.
+          # #66's base file is synthetic and network-isolated. Validate both
+          # #83 overlays, but start neither worker nor model in CI.
           docker compose -f llm-worker/docker-compose.yml config --quiet
+          docker compose -f llm-worker/docker-compose.yml \
+            -f llm-worker/docker-compose.synthetic-canary.yml config --quiet
           docker compose -f llm-worker/docker-compose.yml \
             -f llm-worker/docker-compose.captured-data.yml config --quiet

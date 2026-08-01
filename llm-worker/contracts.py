@@ -12,9 +12,9 @@ import hashlib
 import ipaddress
 import re
 from dataclasses import dataclass
-from typing import Literal, TypeVar
+from typing import Annotated, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 
 SCHEMA_VERSION = "1"
@@ -43,6 +43,9 @@ INTENTS = (
 SEVERITIES = ("low", "medium", "high", "critical")
 CONFIDENCES = ("low", "medium", "high")
 MITRE_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
+# Ollama's llama.cpp grammar converter does not accept the PCRE ``\d`` escape;
+# the equivalent explicit digit class keeps the JSON Schema portable.
+MitreId = Annotated[str, StringConstraints(pattern=r"^T[0-9]{4}(?:\.[0-9]{3})?$")]
 
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _CLOSE_DELIMITER_RE = re.compile(r"</\s*untrusted_data\s*>", re.IGNORECASE)
@@ -99,7 +102,7 @@ class SessionAnalysis(StrictAnnotation):
         "data-theft",
         "unknown",
     ]
-    mitre_attack: list[str] = Field(max_length=20)
+    mitre_attack: list[MitreId] = Field(max_length=20)
     iocs: list[str] = Field(max_length=50)
     severity: Literal["low", "medium", "high", "critical"]
     confidence: Literal["low", "medium", "high"]
@@ -121,7 +124,7 @@ class PayloadAnalysis(StrictAnnotation):
     summary: str = Field(min_length=1, max_length=1200)
     language: str = Field(min_length=1, max_length=80)
     behaviors: list[str] = Field(max_length=10)
-    mitre_attack: list[str] = Field(max_length=20)
+    mitre_attack: list[MitreId] = Field(max_length=20)
     iocs: list[str] = Field(max_length=50)
     severity: Literal["low", "medium", "high", "critical"]
     confidence: Literal["low", "medium", "high"]

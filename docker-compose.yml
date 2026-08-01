@@ -973,7 +973,9 @@ services:
       - ./analysis/geoip:/usr/share/elasticsearch/config/ingest-geoip:ro
       - /opt/stacks/honeypot-stack/state/elasticsearch-snapshots:/snapshots
     networks:
-      - honeynet
+      honeynet:
+      llm-data:
+        aliases: [elasticsearch]
     healthcheck:
       test:
         - CMD-SHELL
@@ -1557,6 +1559,12 @@ networks:
   honeynet:
     name: honeynet
     driver: bridge
+  # Narrow #83 data plane. The LLM worker joins this internal network instead
+  # of honeynet, so captured text has no Docker route to the Internet.
+  llm-data:
+    name: honeypot-llm-data
+    driver: bridge
+    internal: true
   tanner_local:
     driver: bridge
 volumes:

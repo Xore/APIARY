@@ -1,0 +1,33 @@
+# One-shot #83 real-model canary. It grants only a route to the internal local
+# Ollama service: no Elasticsearch network, capture mounts, or job flags.
+
+services:
+  llm-worker:
+    restart: 'no'
+    healthcheck:
+      disable: true
+    command:
+      - python
+      - -u
+      - worker.py
+      - --synthetic-canary
+      - --idle-unload-timeout
+      - '90'
+    environment:
+      LLM_ENABLED: 'true'
+      LLM_DRY_RUN: 'true'
+      LLM_ALLOW_CAPTURED_DATA: 'false'
+      LLM_SESSION_ENABLED: 'false'
+      LLM_PAYLOAD_ENABLED: 'false'
+      LLM_DAILY_REPORT_ENABLED: 'false'
+      OLLAMA_URL: 'http://ollama:11434'
+      LLM_EXPECTED_MODEL_DIGEST: '2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd'
+      LLM_KEEP_ALIVE: '30s'
+    networks:
+      - synthetic-only
+      - llm-backend
+
+networks:
+  llm-backend:
+    name: honeypot-llm
+    external: true
