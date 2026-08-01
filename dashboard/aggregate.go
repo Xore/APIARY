@@ -3,13 +3,16 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"net/url"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 )
+
+// mapPointRadius is the fixed SVG-fallback marker radius (viewBox units).
+// #228: not scaled by event count -- see the comment where it's assigned.
+const mapPointRadius = 6
 
 func (s *store) rebuild() {
 	var (
@@ -311,7 +314,11 @@ func (s *store) rebuild() {
 	for key, p := range points {
 		p.X = (p.Lon + 180) / 360 * 1000
 		p.Y = (90 - p.Lat) / 180 * 450
-		p.R = min(14, 3+int(math.Sqrt(float64(p.Count))))
+		// #228: fixed, not scaled by Count -- same reasoning as the Leaflet
+		// map's circleMarker switch in hp-app.js. A count-scaled radius on
+		// a high-traffic country-level point (no city resolved) could grow
+		// large enough to visually cover a real city's own marker nearby.
+		p.R = mapPointRadius
 		p.IPCount = len(pointIPs[key])
 		p.Link = mapPointEventsURL(p.City, p.Country)
 		pointRows = append(pointRows, *p)

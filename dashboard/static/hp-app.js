@@ -357,7 +357,14 @@
   };
 
   /* ---------- Leaflet attack map ---------- */
-  const attackRadius = count => Math.min(350000, 35000 + Math.sqrt(Math.max(1, count)) * 8000);
+  // #228: a fixed pixel radius via circleMarker, not a real-world-meters
+  // L.circle sized by event count. A count-scaled L.circle on a
+  // high-traffic country-level point (GeoIP resolved no city) could reach
+  // tens of kilometers of real radius -- zoomed in on an actual city inside
+  // that country, the huge circle visually swallowed the city's own,
+  // separate marker. A constant on-screen size never grows to cover
+  // anything else, at any zoom.
+  const attackMarkerRadius = 7;
   const attackDetails = p => {
     // #228: one marker per city (or country, when GeoIP never resolved a
     // city) accumulating every IP that landed there, not one marker per IP.
@@ -419,7 +426,7 @@
         const data = await r.json();
         origins.clearLayers();
         L.geoJSON(data, {
-          pointToLayer: (feature, latlng) => L.circle(latlng, {radius: attackRadius(feature.properties.count), color: "#fecaca", weight: 1.2, opacity: 0.92, fillColor: "#f87171", fillOpacity: 0.58}),
+          pointToLayer: (feature, latlng) => L.circleMarker(latlng, {radius: attackMarkerRadius, color: "#fecaca", weight: 1.2, opacity: 0.92, fillColor: "#f87171", fillOpacity: 0.58}),
           onEachFeature: (feature, layer) => {
             const p = feature.properties;
             layer.bindTooltip(attackDetails(p), {className: "attack-tooltip", sticky: true, direction: "top"});
