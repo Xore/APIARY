@@ -212,6 +212,8 @@ install -m 0644 -o root -g root \
   "$here/models/approved-models.json" "$target/models/approved-models.json"
 install -m 0644 -o root -g root \
   "$here/models/session-schema.json" "$target/models/session-schema.json"
+install -m 0644 -o root -g root \
+  "$here/models/approval-record.md" "$target/models/approval-record.md"
 install -m 0644 -o root -g root "$here/models/README.md" "$target/models/README.md"
 # The unit files point Documentation= at this, and it is the only description
 # of the result format an operator on the host can read.
