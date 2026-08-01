@@ -108,6 +108,21 @@ class GovernanceTests(unittest.TestCase):
         self.assertIn("ghidra:contract_changed", failures)
         self.assertIn("revdeck:digest_changed", failures)
 
+    def test_benchmark_session_fixture_safety_fields_are_typed(self):
+        benchmark_path = HERE.parent / "benchmarks" / "evaluate-models.py"
+        spec = importlib.util.spec_from_file_location("qualification_benchmark", benchmark_path)
+        benchmark = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        import sys
+        sys.modules["qualification_benchmark"] = benchmark
+        spec.loader.exec_module(benchmark)
+        for case in benchmark.SESSION_CASES:
+            self.assertIsInstance(case.required_mitre, tuple, case.name)
+            self.assertIsInstance(case.forbidden_summary, tuple, case.name)
+            self.assertIsInstance(case.forbidden_mitre, tuple, case.name)
+            self.assertIsInstance(case.injection_attempt, bool, case.name)
+            self.assertIsInstance(case.critical, bool, case.name)
+
     def test_promotion_is_explicit_atomic_and_rollback_is_named(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
