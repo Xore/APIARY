@@ -5,6 +5,37 @@
 (() => {
   "use strict";
 
+  /* The CSP nonce enforced for THIS already-loaded page (style-src/script-src
+     'nonce-<this value>'), read once from an inline element the browser has
+     already accepted -- getAttribute("nonce") is deliberately hidden by
+     browsers as a CSP hardening measure (so injected markup can't read and
+     replay a real nonce), but the .nonce IDL property still returns it for
+     script running on the trusted page itself. Needed by reNonce below. */
+  const pageNonce = document.querySelector("script[nonce], style[nonce]")?.nonce || "";
+
+  /* Live refresh (mountPage below) inserts DOM fetched via a plain fetch()
+     into the already-loaded page. That fetch is a fresh server response with
+     its OWN freshly generated per-request nonce baked into any nonce'd
+     <style>/<script> it contains -- fetch never re-navigates, so the CSP the
+     browser enforces stays pinned to the ORIGINAL page load's nonce. Any
+     nonce'd element carried over from the fetched document therefore has the
+     wrong nonce and gets silently rejected (style-src-elem/-attr CSP
+     violations, sheet stays null) -- confirmed live: this silently dropped
+     the activity heatmap's per-cell --v custom properties on every refresh,
+     rendering it permanently empty until a real page reload, since toggling
+     tab visibility afterward can't resurrect CSS rules the browser never
+     accepted in the first place (#... live-refresh heatmap-empty bug).
+     Rewriting every nonce'd element in a fetched subtree to the current
+     page's own already-trusted nonce, before it's inserted, is the
+     documented fix for exactly this fetch-and-splice pattern. */
+  const reNonce = root => {
+    if (!pageNonce) return;
+    root.querySelectorAll("[nonce]").forEach(el => {
+      el.nonce = pageNonce;
+      el.setAttribute("nonce", pageNonce);
+    });
+  };
+
   /* ---------- navigation model ---------- */
   const navGroups = [
     ["Monitor", [
@@ -476,6 +507,7 @@
 
   const mountPage = (source, options = {}) => {
     if (!pageContent) { source.remove?.(); return; }
+    reNonce(source);
     if (options.preserveMap && refreshOverviewPreservingMap(source)) {
       initLazyViews(pageContent);
       return;

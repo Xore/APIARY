@@ -183,6 +183,37 @@ func TestToolbarLiveToggleIsTheSingleGlobalIndicator(t *testing.T) {
 	}
 }
 
+// TestLiveRefreshRenoncesFetchedContent (#220): mountPage splices DOM
+// fetched via plain fetch() into the already-loaded page. That fetch is a
+// fresh server response carrying its own freshly-generated per-request CSP
+// nonce -- fetch never re-navigates, so the browser keeps enforcing the
+// ORIGINAL page load's nonce. Any nonce'd element (e.g. the overview
+// activity heatmap's per-cell <style> block) carried over from the fetched
+// document therefore has the wrong nonce and gets silently rejected
+// (confirmed live: this permanently blanked the heatmap after the first
+// refresh, and toggling a tab's hidden attribute afterward can't
+// resurrect CSS rules the browser never accepted). mountPage must rewrite
+// every nonce'd element in a fetched subtree to the current page's own
+// already-trusted nonce before inserting it.
+func TestLiveRefreshRenoncesFetchedContent(t *testing.T) {
+	appJS, err := staticAssets.ReadFile("static/hp-app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(appJS)
+	if !strings.Contains(js, `.nonce || document.querySelector("style[nonce]")?.nonce`) &&
+		!strings.Contains(js, `document.querySelector("script[nonce], style[nonce]")?.nonce`) {
+		t.Fatal(`hp-app.js must read the CURRENT page's own trusted nonce via the .nonce IDL property -- ` +
+			`getAttribute("nonce") is deliberately hidden by browsers as a CSP hardening measure and always returns ""`)
+	}
+	if !strings.Contains(js, "const reNonce") {
+		t.Fatal("hp-app.js must define a helper that re-nonces fetched content before it is inserted into the live page")
+	}
+	if !strings.Contains(js, "reNonce(source)") {
+		t.Fatal("mountPage must call reNonce on fetched content before either replacement path runs")
+	}
+}
+
 // TestNoUnnoncedInlineScriptOrStyleRemains is the structural half of #58's
 // completion criterion ("no un-nonced inline script or style remains"): a
 // regression test that would fail the moment someone adds a new inline
