@@ -10,7 +10,9 @@ package main
 
 import (
 	"encoding/json"
+	"hash/fnv"
 	"html/template"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -88,6 +90,17 @@ func templateFuncs(s *store, world template.HTML) template.FuncMap {
 				m[key] = pairs[i+1]
 			}
 			return m
+		},
+		// eventKey gives each event row a stable-within-the-page DOM key for
+		// the shared evidence-viewer contract (#59): identical marshaled
+		// content always yields the same key, distinct content practically
+		// never collides. Non-cryptographic on purpose -- this is a DOM
+		// lookup key, not a security boundary.
+		"eventKey": func(e storedEvent) string {
+			b, _ := json.Marshal(e)
+			h := fnv.New64a()
+			h.Write(b)
+			return strconv.FormatUint(h.Sum64(), 36)
 		},
 		"presentation": presentation,
 		"brandHTML":    func() template.HTML { return brandHTML(presentation().AppName) },

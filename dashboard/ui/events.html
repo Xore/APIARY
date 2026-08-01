@@ -1,11 +1,16 @@
 {{define "everow"}}
+{{$key := eventKey .}}
 <tr>
   <td>{{.Time}}</td>
   <td><a class="badge b-{{.Sensor}}" href="/events?sensor={{.Sensor | urlquery}}">{{.Sensor}}</a></td>
   <td class="v">{{if .SrcIP}}<a href="/events?ip={{.SrcIP | urlquery}}" title="attack chain for {{.SrcIP}}">{{.SrcIP}}</a>{{else}}<span class="tw:text-muted" title="This event reached the sensor over the WireGuard tunnel and could not be joined back to a real client address. The tunnel peer is our own VPS, so it is deliberately not shown as the source.">unattributed</span>{{end}}{{if .Country}} <a class="cc" href="/events?country={{.Country | urlquery}}">{{.Country}}</a>{{end}}</td>
   <td class="v">{{if .Port}}<a href="/events?port={{.Port | urlquery}}">:{{.Port}}</a>{{end}}</td>
   <td class="v">
-    <div class="eventdetail">{{.Detail}}</div>
+    <div class="eventdetail">{{.Detail}} <button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="{{$key}}" title="View the full normalized event">details</button></div>
+    <div hidden data-hp-evidence-body="{{$key}}" data-hp-evidence-title="Event detail — {{.Sensor}} {{.Time}}" data-hp-evidence-note="Full normalized event as stored by the dashboard. Read-only.">
+      {{if or .SrcIP .Session}}<p class="note">{{if .SrcIP}}<a class="lnk" href="/investigate/ip/{{.SrcIP | urlquery}}">attacker profile for {{.SrcIP}}</a>{{end}}{{if and .SrcIP .Session}} &bull; {{end}}{{if .Session}}<a class="lnk sess" href="/sessions/{{.Session | urlquery}}">replay session {{.Session}}</a>{{end}}</p>{{end}}
+      <pre class="code">{{json .}}</pre>
+    </div>
     <div class="eventmeta">
       {{if or .Persona .Site .Asset}}<div class="eventmeta__group"><span class="eventmeta__label" title="Which emulated identity was targeted">decoy</span>{{if .Persona}}<a class="lnk" href="/events?persona={{.Persona | urlquery}}" title="show events for this honeypot persona">persona {{.Persona}}</a>{{end}}{{if .Site}}<a class="lnk" href="/events?site={{.Site | urlquery}}" title="show events for this fictional site">site {{.Site}}</a>{{end}}{{if .Asset}}<a class="lnk" href="/events?asset={{.Asset | urlquery}}" title="show events for this emulated asset">asset {{.Asset}}</a>{{end}}</div>{{end}}
       {{if or .Session .Fingerprint .Command .HasCredential .Path}}<div class="eventmeta__group"><span class="eventmeta__label" title="Pivot to every other event sharing this value">pivot</span>{{if .Session}}<a class="lnk sess" href="/sessions/{{.Session | urlquery}}" title="replay the complete session">session {{.Session}}</a>{{end}}{{if .Fingerprint}}<a class="lnk" href="/events?fingerprint={{.Fingerprint | urlquery}}" title="show every event with this exact fingerprint">{{if .FingerKind}}{{.FingerKind}}{{else}}fingerprint{{end}}: {{.Fingerprint}}</a>{{end}}{{if .Command}}<a class="lnk" href="/events?cmd={{.Command | urlquery}}" title="show every occurrence of this exact command">command</a>{{end}}{{if .HasCredential}}<a class="lnk" href="/events?cred={{printf "%s / %s" .User .Pass | urlquery}}" title="show every use of these credentials">credentials</a>{{end}}{{if .Path}}<a class="lnk" href="/events?path={{.Path | urlquery}}" title="show every request for this exact path">path {{.Path}}</a>{{end}}</div>{{end}}
