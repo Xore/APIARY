@@ -143,13 +143,14 @@ intervention.
 6. Validate with `docker compose -f /root/vps/docker-compose.yml config`.
 7. Start with `docker compose -f /root/vps/docker-compose.yml up -d --build`.
 8. Apply `vps/honeypot-firewall.sh` only after reviewing the exposed ports —
-   it opens the raw OT/IoT ports `portbridge` forwards. **Checked while
-   writing this section**: the script does not open `21`/`22`/`23`/`25`
-   (FTP/SSH/Telnet/SMTP), even though those are live honeypot ports too
-   (Dionaea FTP, cowrie SSH/Telnet, multipot SMTP) — worth a follow-up look
-   at whether that's intentional (opened elsewhere, or deliberately manual
-   given `22`'s overlap with real admin SSH) or a script that fell behind as
-   sensors were added.
+   it opens every raw (non-Traefik) port `portbridge` forwards, including
+   `21`/`22`/`23`/`25` (Dionaea FTP, cowrie SSH/Telnet, multipot SMTP).
+   Portbridge's `22` is a separate host listener from real admin SSH — it
+   only binds there because step 1 already moved admin SSH to `2222` — so
+   opening it does not affect step 2's rule. Run
+   `vps/check-firewall-portbridge-sync.sh` after editing either
+   `honeypot-firewall.sh` or portbridge's `RULES` env var; it fails loudly if
+   the two fall out of sync again (#152).
 
 `portbridge` binds every raw port on the public interface and forwards it
 over WireGuard to `10.8.0.2`; the `socat-hp-*` services put the HTTP
