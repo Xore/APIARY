@@ -13,6 +13,7 @@ conflict below before trying to install them together)
 """
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -131,50 +132,121 @@ class TestLSTMTrainInferenceSkew:
 
 
 class TestBufferStateNotPersisted:
-    """Finding #6: per-source-IP sliding windows are pure in-memory state."""
+    """Finding #6, fixed in #170: per-source-IP sliding windows used to be
+    pure in-memory state, silently reset on every restart. Now persisted to
+    a bounded JSON sidecar (LSTMAEModel.save_buffers()/_load_buffers()),
+    loaded automatically in __init__. Per this test's own prior docstring
+    instruction ("if this fails, buffer persistence was added -- update this
+    test to assert survival instead of loss"), it now asserts survival."""
 
-    def test_load_latest_does_not_restore_buffers(self):
-        model = LSTMAEModel(model_dir="/tmp/does-not-matter")
+    def test_buffers_survive_a_restart_once_saved(self, tmp_path):
+        model = LSTMAEModel(model_dir=str(tmp_path))
         src = dict(REAL_SHAPED_DOCUMENT["_source"])
         src["source"] = {"ip": "203.0.113.9"}
         for _ in range(SEQ_LEN):
             model.score(src)
         assert len(model._buffers["203.0.113.9"]) == SEQ_LEN
+        model.save_buffers()
 
         # Simulate a restart: a fresh instance loading from the same
-        # model_dir. _load_latest() only restores net weights + threshold.
-        restarted = LSTMAEModel(model_dir="/tmp/does-not-matter")
-        assert len(restarted._buffers["203.0.113.9"]) == 0, (
-            "if this fails, buffer persistence was added -- update this test "
-            "to assert survival instead of loss"
-        )
+        # model_dir. _load_buffers() (called from __init__) must restore it.
+        restarted = LSTMAEModel(model_dir=str(tmp_path))
+        assert len(restarted._buffers["203.0.113.9"]) == SEQ_LEN
+        assert "203.0.113.9" in restarted._last_seen
+
+    def test_restart_without_a_prior_save_starts_cold(self, tmp_path):
+        # No save_buffers() call -- a restart with nothing persisted yet
+        # (e.g. the very first poll cycle after a fresh deploy) must not
+        # raise, and must simply start with empty buffers.
+        restarted = LSTMAEModel(model_dir=str(tmp_path))
+        assert len(restarted._buffers["203.0.113.9"]) == 0
+
+    def test_persistence_is_bounded_to_the_most_recently_active_ips(self, tmp_path, monkeypatch):
+        from models import lstm_autoencoder as lstm_mod
+        monkeypatch.setattr(lstm_mod, "MAX_PERSISTED_IPS", 2)
+
+        model = LSTMAEModel(model_dir=str(tmp_path))
+        src = dict(REAL_SHAPED_DOCUMENT["_source"])
+        for i, ip in enumerate(["203.0.113.1", "203.0.113.2", "203.0.113.3"]):
+            src = dict(src)
+            src["source"] = {"ip": ip}
+            src["@timestamp"] = f"2026-07-31T19:14:{12 + i:02d}.000Z"  # strictly increasing _last_seen
+            model.score(src)
+        model.save_buffers()
+
+        restarted = LSTMAEModel(model_dir=str(tmp_path))
+        assert len(restarted._last_seen) == 2, "must not persist more than MAX_PERSISTED_IPS entries"
+        assert "203.0.113.1" not in restarted._last_seen, \
+            "the least-recently-active IP must be the one dropped when bounding"
+        assert "203.0.113.2" in restarted._last_seen and "203.0.113.3" in restarted._last_seen
 
 
 class TestUnhandledEventErrorsCrashTheBatch:
-    """Finding #8 (roadmap: 'malformed payloads ... are not isolated from
-    the processing loop'): there is no per-event try/except in worker.py's
-    main loop, so one bad event takes down the whole poll cycle.
+    """Finding #8, fixed in #171 (roadmap: 'malformed payloads ... are not
+    isolated from the processing loop'): worker.py's per-event extract/
+    score/write path is now wrapped per-event inside
+    score_and_write_events(), extracted from run_worker()'s loop so this is
+    directly testable. extract_features() itself is UNCHANGED and still
+    raises on a malformed field (proven below) -- the fix is in the caller
+    catching that, not in extract_features() defensively tolerating
+    anything."""
 
-    The original reproduction (a malformed payload_hex value) no longer
-    raises: #62 task 33 stopped extract_features() from reading payload_hex
-    at all, since no real sensor emits a consistent raw-payload field to
-    begin with (see fixtures.py / docs/ml-worker-plan.md §5.3) -- that
-    specific crash is gone as a side effect, not a targeted fix. The
-    underlying finding is still open: worker.py's main loop still has no
-    try/except around the per-event extract/score/write path, so any other
-    unexpected shape (e.g. a non-numeric destination.port) would still take
-    the batch down. Not in #62 task 33's scope (extract_features() + bounded
-    HBOS); tracked as remaining work, not re-filed as a new issue."""
-
-    def test_extract_features_tolerates_a_non_numeric_port(self):
+    def test_extract_features_still_raises_on_a_non_numeric_port(self):
         model = IsoForestModel(model_dir="/tmp/does-not-matter")
         malformed = {"@timestamp": "2026-07-31T00:00:00Z", "destination": {"port": "not-a-port"}}
         with pytest.raises(ValueError):
-            # Still reproduces the batch-crashing finding, just via a field
-            # extract_features() actually reads now instead of the retired
-            # payload_hex path -- proves the *loop* still needs a guard, even
-            # though extract_features()'s own field reads are fixed.
+            # extract_features() itself is intentionally NOT made
+            # defensive -- the guard belongs in the caller (below), so any
+            # other unexpected shape is still caught the same way instead
+            # of needing its own field-specific fix.
             model.extract_features(malformed)
+
+    def test_one_malformed_event_does_not_stop_the_rest_of_the_batch(self):
+        import worker
+
+        iso_model = IsoForestModel(model_dir="/tmp/does-not-matter")
+        lstm_model = LSTMAEModel(model_dir="/tmp/does-not-matter")
+        es = MagicMock()
+        recent_flags = []
+
+        valid_event = {
+            "_id": "valid-1", "_index": "honeypot-v2-2026.07.31",
+            "_source": dict(REAL_SHAPED_DOCUMENT["_source"]),
+        }
+        malformed_event = {
+            "_id": "malformed-1", "_index": "honeypot-v2-2026.07.31",
+            "_source": {"@timestamp": "2026-07-31T00:00:00Z", "destination": {"port": "not-a-port"}},
+        }
+        another_valid_event = {
+            "_id": "valid-2", "_index": "honeypot-v2-2026.07.31",
+            "_source": dict(REAL_SHAPED_DOCUMENT["_source"]),
+        }
+
+        # Must not raise, despite the malformed event sandwiched between
+        # two valid ones.
+        worker.score_and_write_events(
+            es, None, iso_model, lstm_model,
+            [valid_event, malformed_event, another_valid_event], recent_flags,
+        )
+
+        # Both valid events were still scored.
+        assert len(recent_flags) == 2
+
+        # The malformed event was recorded as a best-effort, reviewable metric.
+        malformed_calls = [
+            call for call in es.index.call_args_list
+            if call.kwargs.get("document", {}).get("kind") == "malformed_event"
+        ]
+        assert len(malformed_calls) == 1
+        assert malformed_calls[0].kwargs["document"]["source_event_id"] == "malformed-1"
+        assert malformed_calls[0].kwargs["document"]["source_index"] == "honeypot-v2-2026.07.31"
+
+    def test_malformed_event_metric_write_failure_does_not_raise(self):
+        import worker
+
+        es = MagicMock()
+        es.index.side_effect = ConnectionError("ES unreachable")
+        worker.write_malformed_event_metric(es, {"_id": "x", "_index": "y"}, ValueError("boom"))  # must not raise
 
 
 if __name__ == "__main__":

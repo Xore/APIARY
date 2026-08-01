@@ -1,0 +1,93 @@
+{{define "payload-workbench-index"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
+<title>xore//honeypot &mdash; payload workbench</title>
+{{template "style" .}}
+</head>
+<body><div class="app-shell">{{template "topbar" .}}{{template "sidebar" .}}
+<main class="app-main"><div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
+  <header class="overview-header"><div><div class="eyebrow">Unified analysis</div><h1>Payload workbench</h1><p class="subtitle">Choose captured evidence, then build a typed recipe and run every applicable local analyzer from one page.</p></div><div class="live-panel"><span class="gen">{{.UniqueTotal}} unique captures &bull; generated {{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></div></header>
+  <div class="filters"><a class="chip" href="/payloads">Captured payload inventory</a><a class="chip" href="/payload-workbench/results">Workbench results</a><span class="chip">Select one payload to begin</span></div>
+  <section class="card wide" aria-labelledby="wb-select-title">
+    <div class="section-heading"><div><h2 id="wb-select-title">Select a captured payload</h2><p>The workbench derives analyzer applicability from the selected artifact. Opening an artifact does not execute it.</p></div></div>
+    {{if not .Enabled}}<p class="empty">Payload serving is disabled. Configure PAYLOAD_DIRS and/or SCRIPT_PAYLOAD_DIR.</p>
+    {{else if .Loading}}<p class="note" data-payload-warming><span class="live-dot" aria-hidden="true"></span> Preparing the payload inventory. This page will update automatically.</p><script nonce="{{.Nonce}}">setTimeout(()=>location.reload(),1500)</script>
+    {{else if .Files}}<table class="recent"><thead><tr><th>captured</th><th>source</th><th>SHA-256</th><th>type</th><th>size</th><th>action</th></tr></thead><tbody>
+      {{range .Files}}<tr><td>{{.Mtime}}</td><td>{{range .Sources}}<span class="badge badge--muted">{{.}}</span> {{end}}</td><td class="v">{{.Hash}}</td><td><strong>{{.Kind}}</strong><br><span class="tw:text-muted">{{.Platform}} &bull; {{.MIME}}</span></td><td class="n">{{.SizeH}}</td><td><a class="btn btn-sm btn-primary" href="/payload-workbench/{{.Hash}}">Open workbench</a></td></tr>{{end}}
+    </tbody></table>{{if gt .ResultTotal 50}}<p class="note">Showing the 50 most recent captures. Open the full inventory to find older evidence.</p>{{end}}
+    {{else}}<p class="empty">No payloads captured yet.</p>{{end}}
+  </section>
+  <footer>xore//honeypot &bull; select evidence before orchestration &bull; captured files remain inert</footer>
+</div></main></div></body></html>{{end}}
+
+{{define "workbench-results"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
+<title>xore//honeypot &mdash; workbench results</title>
+{{template "style" .}}
+</head>
+<body><div class="app-shell">{{template "topbar" .}}{{template "sidebar" .}}
+<main class="app-main"><div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
+  <header class="overview-header"><div><div class="eyebrow">Unified analysis</div><h1>Workbench results</h1><p class="subtitle">Review correlated analyzer runs across captured payloads without losing successful child results when another backend fails.</p></div><div class="live-panel"><span class="gen">generated {{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></div></header>
+  <div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:xl:grid-cols-5 tw:gap-3 tw:mb-6">
+    <div class="hp-stat"><span class="hp-stat-value">{{.Counts.Total}}</span><span class="hp-stat-label">Matching runs</span></div><div class="hp-stat"><span class="hp-stat-value">{{.Counts.Active}}</span><span class="hp-stat-label">Active</span></div><div class="hp-stat"><span class="hp-stat-value">{{.Counts.Completed}}</span><span class="hp-stat-label">Completed</span></div><div class="hp-stat"><span class="hp-stat-value">{{.Counts.Partial}}</span><span class="hp-stat-label">Partial</span></div><div class="hp-stat"><span class="hp-stat-value">{{.Counts.Failed}}</span><span class="hp-stat-label">Failed / stopped</span></div>
+  </div>
+  <form class="filters" method="get" action="/payload-workbench/results"><a class="chip" href="/payload-workbench">Start analysis</a><a class="chip" href="/payloads">Captured payloads</a><input class="hp-input" name="q" value="{{.Query}}" placeholder="hash, recipe, analyzer or state" aria-label="Search workbench results"><button class="copy" type="submit">search</button>{{if .Query}}<a class="chip" href="/payload-workbench/results">clear</a>{{end}}</form>
+  <section aria-labelledby="wb-results-title"><div class="section-heading"><div><h2 id="wb-results-title">Retained analysis runs</h2><p>Only runs owned by the current administrator session are shown.</p></div></div>
+    {{if .Runs}}{{range .Runs}}<article class="card wide wb-run" id="{{.ID}}"><div class="wb-run-head"><div><h3>{{.RecipeName}} &bull; r{{.RecipeRevision}}</h3><p class="note">{{.CreatedAt.Format "2006-01-02 15:04:05 MST"}} &bull; {{.ID}}</p></div><span class="badge wb-state wb-state--{{.State}}">{{.State}}</span></div>
+      <div class="filters"><a class="chip" href="/payload-workbench/{{.PayloadSHA256}}">Manage run</a><a class="chip" href="/payload-analysis/{{.PayloadSHA256}}">Static analysis</a><span class="chip" title="Captured payload hash">{{.PayloadSHA256}}</span><span class="chip">{{.PayloadKind}}</span></div>
+      <table><thead><tr><th>analyzer</th><th>state</th><th>updated</th><th>result</th></tr></thead><tbody>{{range .Children}}<tr><td><strong>{{.DisplayName}}</strong><br><span class="tw:text-muted">{{.AnalyzerID}}</span></td><td><span class="badge wb-state wb-state--{{.State}}">{{.State}}</span></td><td>{{.UpdatedAt.Format "2006-01-02 15:04:05 MST"}}</td><td>{{if .ResultURL}}<a class="lnk" href="{{.ResultURL}}">Open native result &rarr;</a>{{else}}<span class="tw:text-muted">{{if .Summary}}{{.Summary}}{{else if .Reason}}{{.Reason}}{{else}}No result yet{{end}}</span>{{end}}</td></tr>{{end}}</tbody></table>
+    </article>{{end}}{{else}}<div class="card wide"><p class="empty">No workbench runs match this view.</p></div>{{end}}
+  </section>
+  <footer>xore//honeypot &bull; owner-isolated correlated results &bull; native analyzer reports remain canonical</footer>
+</div></main></div></body></html>{{end}}
+
+{{define "payload-workbench"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
+<title>xore//honeypot &mdash; payload workbench</title>
+{{template "style" .}}<script defer src="{{asset "/static/hp-workbench.js"}}"></script>
+</head>
+<body><div class="app-shell">{{template "topbar" .}}{{template "sidebar" .}}
+<main class="app-main"><div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content data-wb-root data-payload-sha256="{{.SHA256}}">
+  <header class="overview-header"><div><div class="eyebrow">Unified analysis</div><h1>Payload workbench</h1><p class="subtitle">Build a typed recipe, fan out through existing worker spools, and follow every result in one run.</p></div><div class="live-panel"><span class="gen">{{.Classification.Label}} &bull; generated {{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></div></header>
+  <div class="filters"><a class="chip" href="/payload-workbench/results">&larr; workbench results</a><a class="chip" href="/payload-analysis/{{.SHA256}}">static analysis</a><a class="chip" href="/events?shasum={{.SHA256}}">related events</a><span class="chip" title="Full SHA-256">{{.SHA256}}</span></div>
+  <div class="tw:mb-5 tw:rounded-lg tw:border tw:border-orange tw:bg-orange-subtle tw:px-4 tw:py-4" role="note"><strong>Static checks and detonation are different trust decisions.</strong> Running every applicable analyzer does not make a payload safe. Dynamic backends remain isolated and cannot be pointed at the protected live VM or given Internet egress from this page.</div>
+
+  <section class="card wide tw:mb-5" aria-labelledby="wb-model-health"><div class="tw:flex tw:flex-wrap tw:items-center tw:gap-2"><h2 id="wb-model-health" class="tw:mr-auto">Approved local-model health</h2><span class="badge badge--muted">advisory only</span>{{if .ModelStatus.Available}}<span class="badge wb-state--{{.ModelStatus.Overall}}">{{.ModelStatus.Overall}}</span>{{else}}<span class="badge badge--muted">unavailable</span>{{end}}</div>
+    {{if .ModelStatus.Available}}<p class="note">Checked {{.ModelStatus.CheckedAt}} through the privileged read-only adapter. Drift or unavailability never disables ingestion or deterministic analysis.</p><div class="tw:flex tw:flex-wrap tw:gap-2">{{range $name, $slot := .ModelStatus.Slots}}<span class="chip">{{$name}}: {{$slot.Status}}{{range $slot.Codes}} &bull; {{.}}{{end}}</span>{{end}}</div>{{else}}<p class="note">{{.ModelStatus.Reason}}. Deterministic analysis remains available; there are deliberately no pull, replace, or promote controls here.</p>{{end}}
+  </section>
+
+  <form data-wb-form class="tw:grid tw:grid-cols-12 tw:gap-3.5">
+    <section class="card tw:col-span-12 tw:xl:col-span-8" aria-labelledby="wb-analyzers-title">
+      <div class="tw:flex tw:flex-wrap tw:items-start tw:justify-between tw:gap-3 tw:mb-4"><div><h2 id="wb-analyzers-title">Analyzer recipe</h2><p class="note">Availability and applicability are derived on the server from this captured sample and operator configuration.</p></div><button class="btn btn-sm btn-secondary" type="button" data-wb-run-all>Run all applicable</button></div>
+      <div class="wb-analyzer-grid">{{range .Analyzers}}
+        <article class="wb-analyzer{{if not .Applicable}} is-disabled{{else if not .Available}} is-disabled{{end}}" data-wb-analyzer data-analyzer-id="{{.ID}}" data-ready="{{if and .Applicable .Available}}true{{else}}false{{end}}">
+          <div class="wb-analyzer-head"><input id="wb-{{.ID}}" type="checkbox" value="{{.ID}}"{{if and .Applicable .Available}} checked{{else}} disabled{{end}} aria-describedby="wb-{{.ID}}-reason"><label for="wb-{{.ID}}"><strong>{{.DisplayName}}</strong></label>{{if .Detonates}}<span class="badge badge--red">detonation</span>{{else}}<span class="badge badge--muted">static</span>{{end}}{{if .GPU}}<span class="badge badge--muted">shared GPU</span>{{end}}{{if .LocalOnly}}<span class="badge badge--muted">local only</span>{{end}}</div>
+          <p>{{.Description}}</p><p class="note" id="wb-{{.ID}}-reason"><strong>{{.Availability}}</strong> &mdash; {{.Reason}}</p>
+          {{if and .Applicable .Available}}<details class="wb-options"><summary>Orchestration options</summary><div class="wb-option-grid">
+            <label>Timeout (seconds)<input class="form-input" type="number" name="{{.ID}}-timeout" min="{{.OptionSchema.TimeoutMinSeconds}}" max="{{.OptionSchema.TimeoutMaxSeconds}}" value="{{.DefaultOptions.TimeoutSeconds}}"></label>
+            <label>Maximum queue age (seconds)<input class="form-input" type="number" name="{{.ID}}-queue-age" min="{{.OptionSchema.QueueAgeMinSeconds}}" max="{{.OptionSchema.QueueAgeMaxSeconds}}" value="{{.DefaultOptions.MaxQueueAgeSeconds}}"></label>
+            <label>Retry allowance<input class="form-input" type="number" name="{{.ID}}-retry" min="0" max="{{.OptionSchema.RetryLimitMax}}" value="{{.DefaultOptions.RetryLimit}}"></label>
+          </div></details>{{end}}
+        </article>{{end}}
+      </div>
+    </section>
+    <aside class="card tw:col-span-12 tw:xl:col-span-4" aria-labelledby="wb-recipe-title">
+      <h2 id="wb-recipe-title">Saved recipe</h2>
+      <label class="tw:block tw:mb-3">Use a saved revision<select class="form-input" data-wb-recipe-select><option value="">One-off selection</option></select></label>
+      <label class="tw:block tw:mb-3">Name<input class="form-input" data-wb-recipe-name maxlength="80" value="Full local analysis"></label>
+      <label class="tw:block tw:mb-3">Description<textarea class="form-input" data-wb-recipe-description maxlength="400" rows="3">Accuracy-first local analysis of one captured payload.</textarea></label>
+      <label class="tw:block tw:mb-3">Scope<select class="form-input" data-wb-recipe-scope><option value="private">Private</option><option value="shared">Shared with analysts</option></select></label>
+      <div class="tw:flex tw:flex-wrap tw:gap-2"><button class="btn btn-sm btn-secondary" type="button" data-wb-save>Save as new revision</button><button class="btn btn-sm btn-primary" type="submit" data-wb-run>Start analysis run</button></div>
+      <p class="note" data-wb-message role="status" aria-live="polite"></p>
+    </aside>
+  </form>
+
+  <section class="tw:mt-5" aria-labelledby="wb-runs-title"><div class="section-heading"><div><h2 id="wb-runs-title">Correlated runs</h2><p>Partial results remain available when another backend fails or times out.</p></div></div><div data-wb-runs aria-live="polite"><div class="card wide"><p class="empty">Loading analysis runs&hellip;</p></div></div></section>
+  <section class="card wide tw:mt-5" aria-labelledby="wb-external-title"><div class="tw:flex tw:flex-wrap tw:items-center tw:gap-2"><h2 id="wb-external-title" class="tw:mr-auto">External publication</h2><span class="badge badge--red">leaves local trust boundary</span><span class="badge badge--muted">never in Run all</span></div><p>GitHub analysis uploads captured material externally. It remains a separate administrator-only workflow with the existing confirmation phrase, dry-run guard, and audit trail.</p><a class="lnk" href="/github-analysis">Open the separately gated GitHub publisher &rarr;</a></section>
+  <footer>xore//honeypot &bull; immutable recipe snapshots &bull; bounded local orchestration</footer>
+</div></main></div></body></html>{{end}}

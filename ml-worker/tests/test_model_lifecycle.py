@@ -8,6 +8,7 @@ Run: python3 -m pytest ml-worker/tests/test_model_lifecycle.py -v
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -153,6 +154,57 @@ class TestRetrainAcceptanceGate:
         assert meta["accepted"] is True
         assert meta["train_samples"] == result.train_samples
         assert meta["holdout_samples"] == result.holdout_samples
+
+
+class TestAtomicSymlinkPromotion:
+    """#169: _symlink() must never leave `link` missing, even if the
+    process is killed between removing the old link and creating the new
+    one -- proven here via a monkeypatched os.replace() that raises after
+    the temporary symlink has already been created, simulating a crash in
+    exactly that window."""
+
+    def test_creates_a_working_symlink(self, tmp_path):
+        target = tmp_path / "model_v1.joblib"
+        target.write_text("v1")
+        link = tmp_path / "current.joblib"
+        iso_mod._symlink(str(target), str(link))
+        assert os.readlink(str(link)) == str(target)
+
+    def test_promotion_replaces_an_existing_link(self, tmp_path):
+        old_target = tmp_path / "model_v1.joblib"
+        old_target.write_text("v1")
+        new_target = tmp_path / "model_v2.joblib"
+        new_target.write_text("v2")
+        link = tmp_path / "current.joblib"
+        iso_mod._symlink(str(old_target), str(link))
+        iso_mod._symlink(str(new_target), str(link))
+        assert os.readlink(str(link)) == str(new_target)
+
+    def test_link_survives_a_crash_between_symlink_and_replace(self, tmp_path, monkeypatch):
+        old_target = tmp_path / "model_v1.joblib"
+        old_target.write_text("v1")
+        new_target = tmp_path / "model_v2.joblib"
+        new_target.write_text("v2")
+        link = tmp_path / "current.joblib"
+        iso_mod._symlink(str(old_target), str(link))  # establish "previously promoted" state
+
+        def crash_before_replace(*args, **kwargs):
+            raise OSError("simulated crash between symlink() and replace()")
+
+        monkeypatch.setattr(iso_mod.os, "replace", crash_before_replace)
+        with pytest.raises(OSError):
+            iso_mod._symlink(str(new_target), str(link))
+
+        assert os.path.lexists(str(link)), "link must never be missing, even mid-crash"
+        assert os.readlink(str(link)) == str(old_target), \
+            "a crash before the atomic rename must leave the PREVIOUS promotion intact"
+
+    def test_lstm_save_uses_the_same_atomic_helper(self):
+        import inspect
+        source = inspect.getsource(lstm_mod.LSTMAEModel._save)
+        assert "_symlink(" in source, \
+            "LSTMAEModel._save must use the shared atomic _symlink(), not its own remove-then-symlink"
+        assert "os.remove(link)" not in source and "os.symlink(path, link)" not in source
 
 
 class TestLifecycleHelpers:
@@ -333,6 +385,71 @@ class TestWriteRetrainMetric:
             anomaly_rate_new=0.0, anomaly_rate_previous=None,
         )
         worker.write_retrain_metric(es, "lstm_ae", result)  # must not raise
+
+
+class TestExplicitRetrainSchedule:
+    """#172: RETRAIN_SLOTS_UTC replaces the restart-relative
+    RETRAIN_INTERVAL-since-process-start timer with explicit UTC
+    wall-clock slots, so retrain timing is predictable and coordinable
+    (Milestone I / #84) rather than drifting with every deploy/crash."""
+
+    def test_parses_comma_separated_hh_mm_into_sorted_tuples(self):
+        assert worker.parse_retrain_slots("15:00,03:00,09:00") == [(3, 0), (9, 0), (15, 0)]
+
+    def test_parse_tolerates_blank_entries(self):
+        assert worker.parse_retrain_slots("03:00,,09:00,") == [(3, 0), (9, 0)]
+
+    def test_boundary_is_the_most_recent_slot_already_passed_today(self):
+        slots = [(3, 0), (9, 0), (15, 0), (21, 0)]
+        now = datetime(2026, 8, 1, 16, 30, tzinfo=timezone.utc)
+        slot_id = worker.next_retrain_slot_id(now, slots)
+        assert slot_id == datetime(2026, 8, 1, 15, 0, tzinfo=timezone.utc).isoformat()
+
+    def test_before_any_slot_today_uses_yesterdays_last_slot(self):
+        slots = [(3, 0), (9, 0), (15, 0), (21, 0)]
+        now = datetime(2026, 8, 1, 1, 0, tzinfo=timezone.utc)  # before 03:00
+        slot_id = worker.next_retrain_slot_id(now, slots)
+        assert slot_id == datetime(2026, 7, 31, 21, 0, tzinfo=timezone.utc).isoformat()
+
+    def test_no_slots_configured_returns_none(self):
+        assert worker.next_retrain_slot_id(datetime.now(timezone.utc), []) is None
+
+    def test_does_not_retrain_again_between_slot_boundaries(self):
+        # "does not retrain between them": the same slot id is returned for
+        # any time within the same slot window, so comparing against
+        # last_fired_slot_id correctly refuses to fire twice for it.
+        slots = [(3, 0), (15, 0)]
+        first_check = worker.next_retrain_slot_id(datetime(2026, 8, 1, 15, 1, tzinfo=timezone.utc), slots)
+        second_check = worker.next_retrain_slot_id(datetime(2026, 8, 1, 20, 59, tzinfo=timezone.utc), slots)
+        assert first_check == second_check == datetime(2026, 8, 1, 15, 0, tzinfo=timezone.utc).isoformat()
+
+    def test_schedule_decision_does_not_depend_on_process_start_time(self):
+        # The whole point of #172: two "processes" that started at wildly
+        # different times must agree on what's due right now, since the
+        # function takes no start-time input at all -- unlike the old
+        # time.time() - last_retrain (where last_retrain was set at
+        # process start).
+        slots = [(3, 0), (15, 0)]
+        now = datetime(2026, 8, 1, 16, 0, tzinfo=timezone.utc)
+        process_started_at_dawn = worker.next_retrain_slot_id(now, slots)
+        process_started_five_minutes_ago = worker.next_retrain_slot_id(now, slots)
+        assert process_started_at_dawn == process_started_five_minutes_ago
+
+    def test_last_fired_slot_persists_and_loads_back(self):
+        es = MagicMock()
+        worker.save_last_fired_slot(es, "2026-08-01T15:00:00+00:00")
+        doc = es.index.call_args.kwargs["document"]
+        assert doc["last_fired_slot_id"] == "2026-08-01T15:00:00+00:00"
+
+    def test_no_persisted_slot_yet_loads_as_none(self):
+        es = MagicMock()
+        es.get.side_effect = Exception("not found")
+        assert worker.load_last_fired_slot(es) is None
+
+    def test_persisted_slot_loads_back_correctly(self):
+        es = MagicMock()
+        es.get.return_value = {"_source": {"last_fired_slot_id": "2026-08-01T09:00:00+00:00"}}
+        assert worker.load_last_fired_slot(es) == "2026-08-01T09:00:00+00:00"
 
 
 class TestDriftDetection:

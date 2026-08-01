@@ -13,7 +13,7 @@ import time
 import json
 import hashlib
 from collections import deque
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, time as dt_time, timezone, timedelta
 
 import numpy as np
 import redis
@@ -35,7 +35,15 @@ ES_HOST          = os.getenv("ES_HOST",           "http://elasticsearch:9200")
 # (#62). A REDIS_URL set on a host that added one back still works.
 REDIS_URL        = os.getenv("REDIS_URL",         "")
 POLL_INTERVAL    = int(os.getenv("POLL_INTERVAL",   "30"))     # seconds
-RETRAIN_INTERVAL = int(os.getenv("RETRAIN_INTERVAL", "21600")) # 6 hours
+# #172: explicit UTC wall-clock slots, not a restart-relative interval --
+# ml-gpu-coordinated-roadmap.md §1 decision 7: "Explicit UTC slots replace
+# restart-relative retraining intervals so GPU workloads can actually be
+# separated." A restart-relative timer (the old RETRAIN_INTERVAL-since-
+# process-start) can't be scheduled against anything else, since its next
+# firing depends on when the process happened to (re)start. Four slots
+# roughly matches the old 6h-interval default's cadence, now at fixed,
+# predictable times instead.
+RETRAIN_SLOTS_UTC = os.getenv("RETRAIN_SLOTS_UTC", "03:00,09:00,15:00,21:00")
 THRESHOLD        = float(os.getenv("ML_ALERT_THRESHOLD", "0.75"))
 MODEL_DIR        = os.getenv("MODEL_DIR",         "/models")
 LOG_LEVEL        = os.getenv("LOG_LEVEL",         "INFO")
@@ -229,6 +237,131 @@ def write_retrain_metric(es: Elasticsearch, model_name: str, result) -> None:
     level(f"retrain[{model_name}] accepted={result.accepted} reason={result.reason}")
 
 
+def write_malformed_event_metric(es: Elasticsearch, event: dict, exc: Exception) -> None:
+    """Evidence that one event was skipped rather than crashing the batch
+    (#171) -- best-effort, same rationale as write_retrain_metric()/
+    write_drift_metric(): a metrics-write failure must never make a
+    skip-and-continue decision take anything else down with it."""
+    doc = {
+        "@timestamp":      datetime.now(timezone.utc).isoformat(),
+        "kind":            "malformed_event",
+        "source_event_id": event.get("_id"),
+        "source_index":    event.get("_index"),
+        "error":           str(exc),
+    }
+    try:
+        es.index(index=METRICS_INDEX, document=doc)
+    except Exception as write_exc:
+        logger.warning(f"Failed to write malformed-event metric (non-fatal): {write_exc}")
+    logger.warning(f"Skipping malformed event {doc['source_event_id']} in {doc['source_index']}: {exc}")
+
+
+def score_and_write_events(es: Elasticsearch, rdb, iso_model, lstm_model,
+                          events: list, recent_flags) -> None:
+    """Score every event in one fetched batch, writing anomalies over
+    THRESHOLD and updating recent_flags for drift detection. Extracted from
+    run_worker()'s loop so a malformed event's failure mode is directly
+    testable (#171) rather than only reachable by driving the whole
+    infinite polling loop.
+
+    One event's failure (a non-numeric destination.port, any other shape
+    extract_features() doesn't defensively handle) is caught, logged with
+    enough context to diagnose, and recorded as a best-effort metric --
+    never allowed to abort the rest of the batch. run_worker() advances the
+    checkpoint after this returns, over the full `events` list regardless
+    of which ones failed here, so a malformed event's position is always
+    skipped past rather than being re-fetched and failing again forever
+    (roadmap baseline: "bad events cannot stop a batch").
+    """
+    for event in events:
+        try:
+            src = event.get("_source", {})
+            features = iso_model.extract_features(src)
+
+            iso_score  = iso_model.score(features)
+            hbos_score = iso_model.hbos_score(features)  # fast pre-filter
+            lstm_score = 0.0
+
+            # Only run LSTM if HBOS flagged as potentially anomalous
+            if hbos_score > 0.5:
+                lstm_score = lstm_model.score(src)
+
+            scores = {
+                "isolation_forest": iso_score,
+                "hbos":             hbos_score,
+                "lstm_ae":          lstm_score,
+            }
+            composite = compute_composite(scores)
+            recent_flags.append(composite >= THRESHOLD)
+
+            if composite >= THRESHOLD:
+                explanation = iso_model.explain(features, scores)
+                write_anomaly(es, rdb, event, scores, explanation)
+        except Exception as exc:
+            write_malformed_event_metric(es, event, exc)
+
+
+def parse_retrain_slots(raw: str) -> list:
+    """Parse RETRAIN_SLOTS_UTC (#172) -- comma-separated HH:MM values, UTC
+    -- into sorted (hour, minute) tuples. Empty/blank entries are skipped
+    so a trailing comma or blank env var doesn't raise."""
+    slots = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        hour_str, minute_str = part.split(":")
+        slots.append((int(hour_str), int(minute_str)))
+    return sorted(slots)
+
+
+def next_retrain_slot_id(now: datetime, slots: list) -> "str | None":
+    """Pure decision function (#172): given the current UTC time and the
+    configured slot boundaries, return an identifier (that boundary's own
+    ISO timestamp) for the most recent slot that has already passed --
+    today's, or yesterday's last one if none have passed yet today. None if
+    no slots are configured.
+
+    This identifier is compared against the last one a retrain actually
+    fired for (persisted, see load/save_last_fired_slot) to decide whether
+    one is due. Because it's derived purely from wall-clock time and the
+    configured schedule -- never from when this process happened to start
+    -- two workers (or the same worker restarted at any two different
+    times) asked "what's due right now?" always agree, which is exactly
+    the coordination property a restart-relative interval couldn't offer.
+    """
+    if not slots:
+        return None
+    today = now.date()
+    candidates = [datetime.combine(today, dt_time(h, m), tzinfo=timezone.utc) for h, m in slots]
+    passed = [c for c in candidates if c <= now]
+    if passed:
+        boundary = max(passed)
+    else:
+        h, m = slots[-1]
+        boundary = datetime.combine(today - timedelta(days=1), dt_time(h, m), tzinfo=timezone.utc)
+    return boundary.isoformat()
+
+
+RETRAIN_SCHEDULE_STATE_ID = "retrain-schedule"
+
+
+def load_last_fired_slot(es: Elasticsearch) -> "str | None":
+    """Persisted (not in-memory) so a restart doesn't immediately re-fire
+    the slot it just handled minutes ago -- in-memory-only state would
+    reintroduce restart-sensitivity through the back door (#172)."""
+    try:
+        doc = es.get(index=STATE_INDEX, id=RETRAIN_SCHEDULE_STATE_ID)
+        return doc["_source"].get("last_fired_slot_id")
+    except Exception:
+        return None
+
+
+def save_last_fired_slot(es: Elasticsearch, slot_id: str) -> None:
+    es.index(index=STATE_INDEX, id=RETRAIN_SCHEDULE_STATE_ID,
+             document={"last_fired_slot_id": slot_id})
+
+
 def drift_rate_if_triggered(recent_flags, window: int, rate_threshold: float) -> "float | None":
     """Pure decision function (#65): given the rolling window of recent
     composite>=THRESHOLD flags, returns the observed rate if drift should
@@ -379,6 +512,9 @@ def run_worker() -> None:
                 "anomaly_rate_previous": {"type": "float"},
                 "drift_window":          {"type": "integer"},
                 "drift_rate":            {"type": "float"},
+                "source_event_id":       {"type": "keyword"},  # kind="malformed_event" (#171)
+                "source_index":          {"type": "keyword"},
+                "error":                 {"type": "text"},
             }
         }
     })
@@ -387,7 +523,8 @@ def run_worker() -> None:
     iso_model  = IsoForestModel(model_dir=MODEL_DIR)
     lstm_model = LSTMAEModel(model_dir=MODEL_DIR)
 
-    last_retrain = time.time()
+    retrain_slots = parse_retrain_slots(RETRAIN_SLOTS_UTC)
+    last_fired_slot_id = load_last_fired_slot(es)  # #172: persisted, not restart-relative
     recent_flags = deque(maxlen=DRIFT_WINDOW)  # composite >= THRESHOLD, drift detection (#65)
 
     logger.info(f"Worker ready. Poll={POLL_INTERVAL}s Threshold={THRESHOLD}")
@@ -407,29 +544,7 @@ def run_worker() -> None:
 
             logger.debug(f"{index_pattern}: {len(events)} new events")
 
-            for event in events:
-                src = event.get("_source", {})
-                features = iso_model.extract_features(src)
-
-                iso_score   = iso_model.score(features)
-                hbos_score  = iso_model.hbos_score(features)  # fast pre-filter
-                lstm_score  = 0.0
-
-                # Only run LSTM if HBOS flagged as potentially anomalous
-                if hbos_score > 0.5:
-                    lstm_score = lstm_model.score(src)
-
-                scores = {
-                    "isolation_forest": iso_score,
-                    "hbos":             hbos_score,
-                    "lstm_ae":          lstm_score,
-                }
-                composite = compute_composite(scores)
-                recent_flags.append(composite >= THRESHOLD)
-
-                if composite >= THRESHOLD:
-                    explanation = iso_model.explain(features, scores)
-                    write_anomaly(es, rdb, event, scores, explanation)
+            score_and_write_events(es, rdb, iso_model, lstm_model, events, recent_flags)
 
             # Advance the checkpoint (#168): the new (timestamp, seen_ids)
             # tuple, not just the last event's timestamp -- see
@@ -437,12 +552,21 @@ def run_worker() -> None:
             new_checkpoint = advance_checkpoint(events, checkpoint)
             save_checkpoint(es, index_pattern, new_checkpoint["last_timestamp"], new_checkpoint["seen_ids"])
 
+        # #170: persist LSTM-AE's per-IP sliding windows every cycle, not
+        # just on retrain -- a crash/OOM/restart between retrains would
+        # otherwise still lose in-progress sessions' temporal state even
+        # though the fix exists. Cheap and bounded (MAX_PERSISTED_IPS), so
+        # every POLL_INTERVAL is a fine cadence rather than needing a
+        # separate timer or graceful-shutdown hook.
+        lstm_model.save_buffers()
+
         # Drift detection (#65): a full window of real scores, sustained
-        # above DRIFT_ANOMALY_RATE, forces an early retrain instead of
-        # waiting out the rest of RETRAIN_INTERVAL. The window is cleared
-        # after triggering so a persistent drift condition retrains once
-        # and then re-accumulates a fresh window, rather than firing again
-        # every single poll cycle on the same stale evidence.
+        # above DRIFT_ANOMALY_RATE, forces an early retrain regardless of
+        # the scheduled slots below -- this stays event-driven (#172 only
+        # concerns the *scheduled* path). The window is cleared after
+        # triggering so a persistent drift condition retrains once and then
+        # re-accumulates a fresh window, rather than firing again every
+        # single poll cycle on the same stale evidence.
         drift_rate = drift_rate_if_triggered(recent_flags, DRIFT_WINDOW, DRIFT_ANOMALY_RATE)
         if drift_rate is not None:
             logger.warning(
@@ -451,11 +575,17 @@ def run_worker() -> None:
                 "triggering an early retrain"
             )
             write_drift_metric(es, DRIFT_WINDOW, drift_rate)
-            last_retrain = 0  # forces the retrain block below to fire this cycle
             recent_flags.clear()
 
-        # Periodic retraining
-        if time.time() - last_retrain > RETRAIN_INTERVAL:
+        # #172: scheduled retraining now fires at explicit UTC slot
+        # boundaries (persisted last_fired_slot_id), not a restart-relative
+        # interval -- see parse_retrain_slots()/next_retrain_slot_id()'s own
+        # docstrings for why this makes the schedule coordinable rather
+        # than dependent on when this process happened to (re)start.
+        due_slot_id = next_retrain_slot_id(datetime.now(timezone.utc), retrain_slots)
+        scheduled_due = due_slot_id is not None and due_slot_id != last_fired_slot_id
+
+        if drift_rate is not None or scheduled_due:
             logger.info("Starting model retraining...")
             all_events = []
             for idx in SOURCE_INDICES:
@@ -472,7 +602,16 @@ def run_worker() -> None:
                 write_retrain_metric(es, "isolation_forest_hbos", iso_result)
                 write_retrain_metric(es, "lstm_ae", lstm_result)
                 logger.info(f"Retrain cycle on {len(all_events)} events complete")
-            last_retrain = time.time()
+
+            if scheduled_due:
+                # Mark this slot handled regardless of whether len(all_events)
+                # cleared the 100-event floor -- otherwise a quiet slot would
+                # keep re-attempting (and re-fetching 24h of events) every
+                # single POLL_INTERVAL for the rest of the day instead of
+                # waiting for the next slot, same as the old code always
+                # resetting last_retrain even on a no-op cycle.
+                last_fired_slot_id = due_slot_id
+                save_last_fired_slot(es, due_slot_id)
 
         elapsed = time.time() - cycle_start
         sleep_for = max(0, POLL_INTERVAL - elapsed)

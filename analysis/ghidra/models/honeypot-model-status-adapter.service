@@ -1,0 +1,29 @@
+[Unit]
+Description=Read-only model status adapter for the honeypot dashboard
+Documentation=file:/opt/honeypot-ghidra/models/README.md
+After=honeypot-model-drift.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/honeypot-ghidra/models/model-status-adapter.py --status-file /var/lib/honeypot-ghidra/model-status.json --socket /run/honeypot-model-status/status.sock
+Restart=on-failure
+RuntimeDirectory=honeypot-model-status
+RuntimeDirectoryMode=0750
+UMask=0117
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateNetwork=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+ReadOnlyPaths=-/var/lib/honeypot-ghidra/model-status.json
+
+[Install]
+WantedBy=multi-user.target
