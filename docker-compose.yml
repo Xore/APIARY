@@ -34,36 +34,23 @@ services:
   # this file holds only services that run continuously. See that file's
   # header for the full reasoning (#111).
   #
-  # The init-wait-* services below exist because depends_on: condition:
-  # service_completed_successfully cannot cross a Compose project boundary --
-  # each polls for the completion marker its counterpart in honeypot-init
-  # writes, and dependents wait on the matching shim with that same
-  # condition. Being migrated off, service by service, per #130: instead of
-  # a same-project depends_on against a shim, a dependent's own entrypoint
-  # waits on the marker file directly (mount
-  # state/init-markers:ro, same file each shim already polls). Once a shim
-  # has zero remaining dependents it's deleted -- init-wait-elasticsearch-
-  # setup is already gone (#125); filebeat waits on its own marker now, same
-  # pattern any migrated service below follows.
-  init-wait-log:
-    <<: *runtime-defaults
-    image: busybox:latest
-    container_name: hp-init-wait-log
-    restart: no
-    command:
-      - sh
-      - -c
-      - >
-        until [ -f /markers/log-init.done ]; do
-          echo "waiting for honeypot-init: log-init..."; sleep 3;
-        done
-    volumes:
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
-    deploy:
-      resources:
-        limits:
-          cpus: "0.1"
-          memory: 32M
+  # There used to be three init-wait-* shim services here (log,
+  # elasticsearch-setup, arkime-init), one per honeypot-init job something
+  # in this file needed to wait on. They existed because depends_on:
+  # condition: service_completed_successfully cannot cross a Compose
+  # project boundary -- each shim polled for the completion marker its
+  # counterpart in honeypot-init writes, and dependents waited on the
+  # matching shim with that same condition.
+  #
+  # All three are gone now (#130): every dependent's own entrypoint waits
+  # on the relevant marker directly instead (mount
+  # state/init-markers:ro, same files the shims used to poll -- e.g.
+  # `until [ -f /markers/log-init.done ]; do sleep 3; done; exec <real
+  # command>`), which needs no same-project relationship at all. See any
+  # service below for the pattern -- conpot, dionaea, and cowrie are good
+  # examples of three different starting shapes (CMD-only image,
+  # existing entrypoint override, and a Dockerfile ENTRYPOINT respectively)
+  # all converging on the same fix.
 
   # Rotate verbose human-readable sensor logs without touching JSON event
   # streams. copytruncate keeps writers alive without mounting Docker's socket.
@@ -152,6 +139,17 @@ services:
     network_mode: none
     user: "0:0"
     read_only: true
+    # #128: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). Reproduces the
+    # Dockerfile's own ENTRYPOINT (checked directly:
+    # ["python3", "/app/scanner.py"]) with the wait spliced in. read_only
+    # doesn't block this -- the wait only reads, never writes.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        until [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec python3 /app/scanner.py
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     cap_add: [DAC_READ_SEARCH]
@@ -167,9 +165,7 @@ services:
       - /opt/stacks/honeypot-stack/logs/cowrie/downloads:/payloads/cowrie:ro
       - dashboard-state:/payloads/scripts:ro
       - yara-results:/results
-    depends_on:
-      init-wait-log:
-        condition: service_completed_successfully
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
     deploy:
       resources:
         limits:
@@ -181,6 +177,16 @@ services:
     build: ./cowrie
     container_name: hp-cowrie
     restart: unless-stopped
+    # #128: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). Reproduces the
+    # Dockerfile's own ENTRYPOINT (checked directly:
+    # ["/cowrie/cowrie-git/bin/entrypoint.sh"]) with the wait spliced in.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        until [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec /cowrie/cowrie-git/bin/entrypoint.sh
     ports:
       - ${HP_BIND:-10.8.0.2}:19022:2222
       - ${HP_BIND:-10.8.0.2}:19023:2223
@@ -196,6 +202,7 @@ services:
       - ./cowrie/fakefs/sys/class/dmi/id/product_name:/sys/class/dmi/id/product_name:ro
       - ./cowrie/fakefs/sys/class/dmi/id/sys_vendor:/sys/class/dmi/id/sys_vendor:ro
       - ./cowrie/fakefs/sys/class/dmi/id/board_name:/sys/class/dmi/id/board_name:ro
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
     environment:
       - TZ=Europe/Berlin
       - COWRIE_HOSTNAME=gpu01
@@ -205,9 +212,6 @@ services:
       - ALL
     networks:
       - honeynet
-    depends_on:
-      init-wait-log:
-        condition: service_completed_successfully
     deploy:
       resources:
         limits:
@@ -219,6 +223,16 @@ services:
     build: ./multipot
     container_name: hp-multipot
     restart: unless-stopped
+    # #128: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). Reproduces the
+    # Dockerfile's own ENTRYPOINT (checked directly: ["/multipot"]) with
+    # the wait spliced in.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        until [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec /multipot
     ports:
       - ${HP_BIND:-10.8.0.2}:19025:25
       - ${HP_BIND:-10.8.0.2}:5432:5432
@@ -228,6 +242,7 @@ services:
       - ${HP_BIND:-10.8.0.2}:2375:2375
     volumes:
       - /opt/stacks/honeypot-stack/logs/multipot:/var/log/honeypot
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
     environment:
       - LOG_FILE=/var/log/honeypot/multipot.json
       - MULTIPOT_DISABLE=ftp,mysql,mssql,mongodb
@@ -241,9 +256,6 @@ services:
       - ALL
     networks:
       - honeynet
-    depends_on:
-      init-wait-log:
-        condition: service_completed_successfully
     deploy:
       resources:
         limits:
@@ -255,10 +267,21 @@ services:
     build: ./http-honeypot
     container_name: hp-http
     restart: unless-stopped
+    # #128: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). Reproduces the
+    # Dockerfile's own ENTRYPOINT (checked directly: ["/honeypot"]) with
+    # the wait spliced in.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        until [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec /honeypot
     ports:
       - ${HP_BIND:-10.8.0.2}:19081:8080
     volumes:
       - /opt/stacks/honeypot-stack/logs/http-honeypot:/var/log/honeypot
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
     environment:
       - LISTEN_ADDR=:8080
       - SERVER_HEADER=nginx/1.24.0 (Ubuntu)
@@ -279,9 +302,6 @@ services:
       - ALL
     networks:
       - honeynet
-    depends_on:
-      init-wait-log:
-        condition: service_completed_successfully
     deploy:
       resources:
         limits:
@@ -295,10 +315,21 @@ services:
     build: ./http-honeypot
     container_name: hp-api-honeypot
     restart: unless-stopped
+    # #128: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). Reproduces the
+    # Dockerfile's own ENTRYPOINT (checked directly: ["/honeypot"]) with
+    # the wait spliced in.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        until [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec /honeypot
     ports:
       - ${HP_BIND:-10.8.0.2}:18083:8080
     volumes:
       - /opt/stacks/honeypot-stack/logs/api-honeypot:/var/log/honeypot
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
     environment:
       - LISTEN_ADDR=:8080
       - SERVER_HEADER=envoy
@@ -313,8 +344,6 @@ services:
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     networks: [honeynet]
-    depends_on:
-      init-wait-log: { condition: service_completed_successfully }
     deploy:
       resources: { limits: { cpus: "0.5", memory: 128M } }
   # ===================== Live analysis dashboard =====================
@@ -1160,6 +1189,16 @@ services:
     build: ./dnp3-honeypot
     container_name: hp-dnp3
     restart: unless-stopped
+    # #128: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). Reproduces the
+    # Dockerfile's own ENTRYPOINT (checked directly: ["/dnp3-honeypot"])
+    # with the wait spliced in.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        until [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec /dnp3-honeypot
     environment:
       - LISTEN_ADDR=:20000
       - LOG_PATH=/var/log/honeypot/dnp3.json
@@ -1171,10 +1210,8 @@ services:
       - ${HP_BIND:-10.8.0.2}:20000:20000
     volumes:
       - /opt/stacks/honeypot-stack/logs/dnp3:/var/log/honeypot
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
     networks: [honeynet]
-    depends_on:
-      init-wait-log:
-        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "/dnp3-honeypot", "-healthcheck"]
       interval: 30s
@@ -1424,7 +1461,16 @@ services:
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped
-    command: tanner
+    # #128: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). Reproduces the
+    # Dockerfile's own CMD (checked directly: ["tanner"], no ENTRYPOINT)
+    # with the wait spliced in ahead of it.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        until [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec tanner
     environment:
       - DOCKER_HOST=tcp://tanner_docker:2375
     tmpfs:
@@ -1433,9 +1479,8 @@ services:
     volumes:
       - ./tanner/tanner/config.yaml:/opt/tanner/data/config.yaml:ro
       - /opt/stacks/honeypot-stack/logs/tanner:/var/log/tanner
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
     depends_on:
-      init-wait-log:
-        condition: service_completed_successfully
       tanner_redis:
         condition: service_healthy
       tanner_api:
@@ -1480,11 +1525,13 @@ services:
     # honeypot-init (that condition cannot cross a Compose project boundary
     # -- same reason the init-wait-* services exist), so this waits on its
     # completion marker directly instead, same mechanism as init-wait-log.
+    # #128: same treatment for the init-wait-log dependency -- both markers
+    # gate startup now.
     entrypoint:
       - /bin/sh
       - -c
       - >
-        until [ -f /markers/snare-clone.done ]; do sleep 3; done;
+        until [ -f /markers/snare-clone.done ] && [ -f /markers/log-init.done ]; do sleep 3; done;
         exec /usr/local/bin/snare-entry.sh
     ports:
       - ${HP_BIND:-10.8.0.2}:19082:8080
@@ -1495,8 +1542,6 @@ services:
     depends_on:
       tanner:
         condition: service_started
-      init-wait-log:
-        condition: service_completed_successfully
     networks:
       - tanner_local
     deploy:
