@@ -121,6 +121,9 @@ TRIAGE_API_BASE = os.environ.get(
     "GHIDRA_TRIAGE_API_BASE", "http://127.0.0.1:11434/v1").rstrip("/")
 TRIAGE_MODEL = os.environ.get("GHIDRA_TRIAGE_MODEL", "qwen3:8b")
 TRIAGE_TIMEOUT = int(os.environ.get("GHIDRA_TRIAGE_TIMEOUT", "300"))
+TRIAGE_OUTPUT_TOKENS = int(os.environ.get("GHIDRA_TRIAGE_OUTPUT_TOKENS", "512"))
+TRIAGE_SEED = int(os.environ.get("GHIDRA_TRIAGE_SEED", "144"))
+TRIAGE_PROMPT_VERSION = "ghidra-triage-v1"
 
 # Prompt budget. A real binary has thousands of strings and functions and will
 # overflow any context window, so the model sees a subset — and which subset it
@@ -733,6 +736,8 @@ def _ask_model(workflow: str, evidence: str) -> dict | None:
         # Servers that do not implement response_format ignore it, which is why
         # the reply is still parsed defensively below.
         "temperature": 0,
+        "max_tokens": TRIAGE_OUTPUT_TOKENS,
+        "seed": TRIAGE_SEED,
         "stream": False,
         # Ollama enables thinking by default for Qwen 3/3.5. Triage is a
         # bounded JSON extraction task, not a chain-of-thought consumer; make

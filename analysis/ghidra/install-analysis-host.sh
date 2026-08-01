@@ -205,8 +205,12 @@ fi
 [ "$(id -u)" -eq 0 ] || die "installing the worker needs root; re-run with sudo, or pass --containers-only"
 
 say "installing the worker into $target"
-install -d -m 0755 -o root -g root "$target" "$target/worker"
+install -d -m 0755 -o root -g root "$target" "$target/worker" "$target/models"
 install -m 0755 -o root -g root "$here/worker/ghidra-worker.py" "$target/worker/ghidra-worker.py"
+install -m 0755 -o root -g root "$here/models/model-governance.py" "$target/models/model-governance.py"
+install -m 0644 -o root -g root \
+  "$here/models/approved-models.json" "$target/models/approved-models.json"
+install -m 0644 -o root -g root "$here/models/README.md" "$target/models/README.md"
 # The unit files point Documentation= at this, and it is the only description
 # of the result format an operator on the host can read.
 install -m 0644 -o root -g root "$here/DASHBOARD_INTEGRATION_PLAN.md" "$target/DASHBOARD_INTEGRATION_PLAN.md"
@@ -227,9 +231,13 @@ install -d -m 0700 -o root -g root \
 for unit in honeypot-ghidra-worker.service honeypot-ghidra-worker.path; do
   install -m 0644 -o root -g root "$here/worker/$unit" "/etc/systemd/system/$unit"
 done
+for unit in honeypot-model-drift.service honeypot-model-drift.timer; do
+  install -m 0644 -o root -g root "$here/models/$unit" "/etc/systemd/system/$unit"
+done
 systemctl daemon-reload
 systemctl reset-failed honeypot-ghidra-worker.service 2>/dev/null || true
 systemctl enable --now honeypot-ghidra-worker.path
+systemctl enable --now honeypot-model-drift.timer
 
 # ── Verify ───────────────────────────────────────────────────────────────────
 # Against the running services, with the worker's own environment file, rather
@@ -243,6 +251,12 @@ set -a
 . "$env_file"
 set +a
 python3 "$target/worker/ghidra-worker.py" --selftest || die "selftest failed - see above"
+# Advisory by design: model unavailability or drift warns but must not stop
+# deterministic Ghidra output, the session worker, or event ingestion.
+python3 "$target/models/model-governance.py" check-runtime \
+  --manifest "$target/models/approved-models.json" \
+  --status-file /var/lib/honeypot-ghidra/model-status.json \
+  --warn-only || true
 
 say "done"
 echo "The dashboard needs these in its .env to show the queue:"

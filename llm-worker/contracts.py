@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import json
 import re
 from dataclasses import dataclass
 from typing import Annotated, Literal, TypeVar
@@ -369,6 +370,20 @@ Return JSON with exactly these keys:
   "severity": "one of: {'|'.join(SEVERITIES)}",
   "confidence": "one of: {'|'.join(CONFIDENCES)}"
 }}"""
+
+
+def session_contract_fingerprints() -> dict[str, str]:
+    """Hashes of the exact production prompt/schema qualified by #158."""
+    fixture = SanitizedText("__EVIDENCE__", False, "0" * 64)
+    rendered = session_prompt(fixture, 180, 3, True)
+    suffix = rendered.split("</untrusted_data>\n\n", 1)[1]
+    schema = json.dumps(SessionAnalysis.model_json_schema(), sort_keys=True, separators=(",", ":"))
+    return {
+        "prompt_contract_version": SESSION_PROMPT_VERSION,
+        "system_prompt_sha256": hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest(),
+        "prompt_suffix_sha256": hashlib.sha256(suffix.encode()).hexdigest(),
+        "effective_schema_sha256": hashlib.sha256(schema.encode()).hexdigest(),
+    }
 
 
 def payload_prompt(payload: SanitizedText, sha256: str, byte_count: int) -> str:
