@@ -87,6 +87,72 @@
         ["error", "failure", "check", "fails"]
       ],
       "forbidden": []
+    },
+    "safe_strcpy": {
+      "source": "safe_strcpy.c",
+      "ground_truth": "Same call shape as vulnerable_strcpy.c (copies attacker-controlled input into a fixed 64-byte stack buffer, then strcmp's against \"admin\") but bounds-checked: computes the input length first, clamps it to the buffer size, and copies via memcpy with an explicit null terminator -- truncates long input rather than overflowing. Deliberately paired with vulnerable_strcpy.c as a benign near-neighbor: same shape, safe implementation, to test whether a model overclaims a vulnerability on code that only superficially resembles a known-bad pattern.",
+      "required_groups": [
+        ["bounds", "bounds check", "bounds-checked", "clamp", "truncat"],
+        ["length", "strlen", "size"],
+        ["memcpy", "null terminat", "terminator"],
+        ["not vulnerable", "no overflow", "safe", "no vulnerability", "not exploitable", "bounded"]
+      ],
+      "forbidden": ["buffer overflow", "stack overflow", "vulnerable", "unsafe", "exploitable"]
+    },
+    "integer_overflow_alloc": {
+      "source": "integer_overflow_alloc.c",
+      "ground_truth": "Multiplies an attacker-controlled count and element size to compute an allocation size, with no overflow check on the multiplication -- a large enough count*size wraps, malloc returns a buffer far smaller than intended, and the memcpy that follows (sized to the same wrapped total) writes past the true allocation: a classic integer-overflow-to-heap-overflow bug.",
+      "required_groups": [
+        ["integer overflow", "overflow", "wrap", "wraps", "wraparound"],
+        ["multipl", "count", "size"],
+        ["malloc", "allocat", "heap"],
+        ["memcpy", "undersized", "smaller than", "heap overflow", "heap buffer overflow"]
+      ],
+      "forbidden": []
+    },
+    "use_after_free": {
+      "source": "use_after_free.c",
+      "ground_truth": "Frees s->token when s->expired is set, but does not null out the pointer or re-check the flag afterward -- a later call (or the same call falling through) that writes into s->token via the loop writes through a dangling pointer: a use-after-free.",
+      "required_groups": [
+        ["use after free", "use-after-free", "dangling", "freed"],
+        ["free"],
+        ["not null", "not reset", "not cleared", "missing", "no check", "does not"],
+        ["write", "loop", "token"]
+      ],
+      "forbidden": []
+    },
+    "checksum_rotate": {
+      "source": "checksum_rotate.c",
+      "ground_truth": "Computes a rotate-and-add checksum: for each byte, rotates the running accumulator left by 5 bits and adds the byte, length-bounded loop. A different crypto-like primitive shape than xor_decode_loop.c's byte-XOR -- bit rotation plus accumulation, the pattern behind many simple non-cryptographic hash/checksum functions, not an XOR cipher.",
+      "required_groups": [
+        ["rotate", "rotation", "shift", "circular"],
+        ["accumulat", "checksum", "hash", "running total"],
+        ["loop", "iterate", "each byte"],
+        ["length", "count", "size", "len"]
+      ],
+      "forbidden": ["xor cipher", "xor decode", "xor encrypt"]
+    },
+    "format_string_bug": {
+      "source": "format_string_bug.c",
+      "ground_truth": "Passes attacker-controlled input directly as printf's format-string argument instead of as a %s value argument -- any %n/%x/%s sequence embedded in the caller-supplied string is interpreted as a format directive, giving an attacker a stack-read (and, via %n, a stack-write) primitive.",
+      "required_groups": [
+        ["format string"],
+        ["printf"],
+        ["%n", "%x", "%s", "format specifier", "format directive"],
+        ["read primitive", "write primitive", "leak", "arbitrary write", "stack"]
+      ],
+      "forbidden": []
+    },
+    "file_write_persist": {
+      "source": "file_write_persist.c",
+      "ground_truth": "Writes a fixed marker filename (\".hp-corpus-marker\") into a caller-supplied directory -- a persistence-style disk write, safe by the same shape as loopback_connect.c's network fixture: the thing that could make this dangerous (which file gets written) is not attacker-controlled, since the filename is fixed by the function and only the containing directory is a parameter.",
+      "required_groups": [
+        ["file", "write", "fopen", "persist"],
+        ["fixed filename", "hardcoded filename", "fixed name", "constant filename", "not attacker-controlled"],
+        ["directory", "caller-supplied", "parameter", "path"],
+        ["error", "failure", "check", "fails", "bounds"]
+      ],
+      "forbidden": []
     }
   }
 }

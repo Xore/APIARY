@@ -1,7 +1,22 @@
 import hashlib
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
+
+# gcc/clang embed the process's current working directory into DWARF debug
+# info as DW_AT_comp_dir, and every path passed to -c below is already
+# absolute -- so the only environment-dependent thing left that can make two
+# reproducible-in-principle builds hash differently is whatever directory
+# the caller happened to be in when this script started. Confirmed, not
+# assumed: two builds of the same source, same toolchain, same everything
+# else, one invoked from "/" and one from "/w", produced .o files that
+# differed in exactly one place -- DW_AT_comp_dir ("/" vs "/w") -- with
+# byte-identical disassembly otherwise. Fixing the cwd here removes the
+# dependency on the caller entirely, rather than requiring every future
+# caller to remember to invoke this from the same directory forever.
+os.chdir("/")
 
 SRC_DIR = Path("/src")
 OUT_DIR = Path("/work/corpus")
@@ -96,21 +111,22 @@ TOOLCHAINS = [
     },
 ]
 
-OPT_LEVELS = ["-O0", "-O2"]
+OPT_LEVELS = ["-O0", "-O1", "-O2", "-O3", "-Os"]
 
 # #159's "Provenance and ground truth" section requires every case to record
 # "whether the case is suitable for training, validation, or test only," and
 # to "keep test-only cases separated so later fine-tuning cannot contaminate
-# evaluation." Every one of these 8 cases has already been used as scored
-# evaluation data (rev_cases_v2_rubric.json, run against #160's REx86
-# comparison) -- none of them has ever been shown to a model as a training
-# example. Tagging any of them "train" now would be retroactively wrong, not
-# just premature, so all 8 are "test" until new cases are added specifically
-# as train/validation material. The split is recorded per case (not per
-# build variant): every toolchain/opt-level/strip combination of one case
-# gets the same split, since splitting a single case's own variants across
-# train and test would let a model see the same underlying case in both
-# and leak exactly the case-level knowledge the split exists to prevent.
+# evaluation." Every one of these 14 cases has already been used (or, for the
+# 6 added alongside this comment, is going to be used from the moment they
+# exist) as scored evaluation data (rev_cases_v2_rubric.json) -- none of them
+# has ever been shown to a model as a training example. Tagging any of them
+# "train" now would be retroactively wrong, not just premature, so all 14 are
+# "test" until new cases are added specifically as train/validation material.
+# The split is recorded per case (not per build variant): every toolchain/
+# opt-level/strip combination of one case gets the same split, since
+# splitting a single case's own variants across train and test would let a
+# model see the same underlying case in both and leak exactly the case-level
+# knowledge the split exists to prevent.
 CASE_SPLITS = {
     "error_handling_alloc.c": "test",
     "indirect_dispatch.c": "test",
@@ -120,6 +136,12 @@ CASE_SPLITS = {
     "tlv_parser.c": "test",
     "vulnerable_strcpy.c": "test",
     "xor_decode_loop.c": "test",
+    "safe_strcpy.c": "test",
+    "integer_overflow_alloc.c": "test",
+    "use_after_free.c": "test",
+    "checksum_rotate.c": "test",
+    "format_string_bug.c": "test",
+    "file_write_persist.c": "test",
 }
 
 # Maps each non-native arch to the cross binutils prefix that can actually
@@ -244,6 +266,14 @@ def main():
         json.dump({"builds": manifest, "errors": errors}, f, indent=2)
 
     print(f"\n{len(manifest)} builds succeeded, {len(errors)} failed")
+    # A cross-compile that broke (a missing package, a toolchain regression)
+    # must not look like success just because the script reached the end --
+    # ci_verify.sh's manifest diff would probably catch this indirectly
+    # (fewer/different entries), but "probably, indirectly" is exactly the
+    # kind of silent gap this corpus's own provenance rules argue against
+    # everywhere else.
+    if errors:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
