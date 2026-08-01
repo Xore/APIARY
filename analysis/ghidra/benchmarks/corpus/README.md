@@ -30,33 +30,63 @@ prompt-injection resistance, and is never executed.
 
 Each of the 8 sources is compiled with:
 
-- **Toolchains**: `gcc-x86_64` (native GCC), `clang-x86_64` (Clang targeting
-  the same triple), `gcc-aarch64` (GCC cross-compiler). 3 of #159's "x86,
-  x86-64, ARM64, and one additional architecture" -- x86-64 and ARM64 are
-  covered; 32-bit x86 and a fourth architecture are not yet built.
-- **Optimization levels**: `-O0`, `-O2`. 2 of #159's "multiple optimization
-  levels" -- `-O1`/`-O3`/`-Os` are not yet built.
-- **Stripped and unstripped** variants of every build (`strip --strip-all`).
+- **Toolchains**: `gcc` and `clang` across five architectures --
+  `x86_64`, `aarch64`, `i686` (32-bit x86), `mipsel`, and `armhf`. All 4 of
+  #159's "x86, x86-64, ARM64, and one additional architecture" are now
+  covered. `mipsel` and `armhf` were both built, one architecture beyond
+  what #159 literally asks for: `mipsel` is the historically dominant
+  architecture for router/IoT botnet malware (the Mirai family and its many
+  derivatives overwhelmingly target MIPS home routers, matching this
+  honeypot's own captured-sample profile) and `armhf` covers the broader
+  modern embedded/IoT surface (IP cameras, newer routers, general Cortex-A
+  devices) -- #195 names both as gaps in capa's own architecture coverage,
+  not just one, so both were built rather than picking.
+- **Optimization levels**: `-O0`, `-O2`. Still 2 of #159's "multiple
+  optimization levels" -- `-O1`/`-O3`/`-Os` are not yet built.
+- **Stripped and unstripped** variants of every build (`strip --strip-all`,
+  using the architecture-specific `strip`/`objdump` for every non-native
+  target -- the host's native tools silently misread a foreign-architecture
+  object's own instruction set rather than erroring, so this matters for
+  correctness, not just cleanliness).
+- **Train/validation/test split**, recorded per case in `CASE_SPLITS` and
+  carried onto every build variant of that case (`"split"` field). All 8
+  cases are currently `"test"`: every one has already been used as scored
+  evaluation data (#160's REx86 comparison), never shown to a model as a
+  training example, so tagging any of them `"train"` now would be
+  retroactively wrong. Splitting a single case's own toolchain/opt-level
+  variants across train and test was deliberately avoided -- that would let
+  a model see the same underlying case in both and leak exactly the
+  case-level knowledge the split exists to prevent.
 
-8 sources x 3 toolchains x 2 opt levels = 48 builds, each with both a
-stripped and unstripped variant recorded (`manifest.json`).
+8 sources x 10 toolchains x 2 opt levels = 160 builds, each with both a
+stripped and unstripped variant recorded (`manifest.json`). The original 48
+`gcc-x86_64`/`clang-x86_64`/`gcc-aarch64` builds are unchanged (identical
+SHA-256s) from before this expansion -- #160's already-published evaluation
+results, which ran against the `gcc-x86_64 -O0` slice, are unaffected.
 
 For every build, `manifest.json` records: exact compile command, compiler
-identity and version, target triple, optimization level, SHA-256 and size of
-both the stripped and unstripped object file, and the full `objdump -d`
-disassembly of both variants (with inline source for the unstripped one).
+identity and version, target triple, optimization level, train/validation/
+test split, SHA-256 and size of both the stripped and unstripped object
+file, and the full `objdump -d` disassembly of both variants (with inline
+source for the unstripped one).
 
-**Build environment**: `debian:trixie-slim`, GCC `14.2.0-19` (Debian), Clang
-`19.1.7-3+b1` (Debian), GNU Binutils `2.44-3` (Debian) -- for the `gcc-aarch64`
-toolchain, `gcc-aarch64-linux-gnu` + `libc6-dev-arm64-cross` at the same
-Debian trixie package versions. Compiled to relocatable object files (`-c`),
-not linked executables -- there is no `main`, matching #144's `REV_CASES`
-style of showing a single function's code, not a whole program.
+**Build environment**: `debian:trixie-slim`, GCC `14.2.0` (Debian), Clang
+`19.1.7-3+b1` (Debian), GNU Binutils `2.44` (Debian). Cross-compilation
+packages: `gcc-aarch64-linux-gnu`, `gcc-multilib-i686-linux-gnu`,
+`gcc-mipsel-linux-gnu`, `gcc-arm-linux-gnueabihf`, and their matching
+`libc6-dev-*-cross`/binutils packages, all at the same Debian trixie
+versions. `clang` cross-compiles to every non-native target via its own
+`--target=` flag, reusing whichever gcc-cross package's libc headers and
+binutils are already installed -- no separate Clang cross-toolchain package
+needed. Compiled to relocatable object files (`-c`), not linked executables
+-- there is no `main`, matching #144's `REV_CASES` style of showing a single
+function's code, not a whole program.
 
 **Determinism verified**: built twice into separate output directories;
 after normalizing the one build-directory-dependent string objdump embeds in
-its own header line (`build_corpus.py`'s `normalize_disassembly`), all 48
-disassembly outputs were byte-identical across the two builds.
+its own header line (`build_corpus.py`'s `normalize_disassembly`), all 160
+disassembly outputs (the original 48 plus the 112 this expansion added) were
+byte-identical across the two builds.
 
 ## Scoring rubric (`rev_cases_v2_rubric.json`)
 
@@ -75,14 +105,19 @@ than one hand-picked case to run against, with real compiled artifacts,
 recorded provenance, and a scoring rubric fixed before any output was
 inspected -- a genuine step past #144's single-case-per-category smoke test.
 
-**Does not yet**: cover the full architecture matrix (only x86-64 + ARM64,
-not also plain x86 or a fourth ISA), the full optimization spread (only
--O0/-O2), CI verification of provenance/hashes/fixture safety (#159's
+**Does not yet**: cover the full optimization spread (only -O0/-O2, not
+-O1/-O3/-Os), CI verification of provenance/hashes/fixture safety (#159's
 "Tooling and CI" section), a formal versioned scoring-contract file separate
-from this rubric, or semantic-equivalence/executable checks. Confidence
-should be scoped to "one compiler/optimization/strip slice across 8 cases,"
-not a general reverse-engineering quality claim -- consistent with #159's own
-instruction not to present a small slice as a broad conclusion.
+from this rubric, or semantic-equivalence/executable checks. The case/category
+breadth is still #144's original 8 (now built across 5 architectures and 2
+compilers instead of 3 toolchains, not expanded with new source fixtures) --
+narrower than the full "loops, data structures, parsing, crypto-like
+primitives, indirect calls, error handling... benign, vulnerable,
+behavior-shaped" breadth #159 asks for in the abstract. Confidence should be
+scoped to "8 cases across 5 architectures, 2 compilers, 2 optimization
+levels, stripped and unstripped," not a general reverse-engineering quality
+claim -- consistent with #159's own instruction not to present a small slice
+as a broad conclusion.
 
 ## Rebuilding
 
@@ -90,8 +125,16 @@ instruction not to present a small slice as a broad conclusion.
 docker run -d --name corpus-build --cap-drop ALL --security-opt no-new-privileges \
   --pids-limit 512 --memory=8g --memory-swap=8g \
   -v <empty-work-dir>:/work -v $(pwd)/src:/src:ro debian:trixie-slim sleep infinity
-docker exec corpus-build apt-get -o APT::Sandbox::User=root update -qq
-docker exec corpus-build apt-get -o APT::Sandbox::User=root install -y --no-install-recommends \
-  gcc gcc-aarch64-linux-gnu libc6-dev-arm64-cross clang binutils binutils-aarch64-linux-gnu python3
+# --cap-drop ALL takes CAP_SETUID/CAP_SETGID too, which apt's own internal
+# privilege-drop sandbox (root -> _apt for fetches) needs -- the container
+# is already the security boundary, so disable apt's redundant one instead
+# of adding capabilities back.
+docker exec -u root corpus-build apt-get -o APT::Sandbox::User=root update -qq
+docker exec -u root corpus-build apt-get -o APT::Sandbox::User=root install -y --no-install-recommends \
+  gcc clang binutils python3 \
+  gcc-aarch64-linux-gnu libc6-dev-arm64-cross \
+  gcc-multilib-i686-linux-gnu \
+  gcc-mipsel-linux-gnu \
+  gcc-arm-linux-gnueabihf
 docker exec corpus-build python3 /work/build_corpus.py
 ```
