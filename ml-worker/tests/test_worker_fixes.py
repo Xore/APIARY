@@ -119,7 +119,8 @@ class TestBoundedRetrain:
         es.search.return_value = page(4)
         es.scroll.side_effect = [page(4), page(4)]
 
-        events = worker.fetch_new_events(es, "honeypot-v2-*", "2026-07-31T00:00:00Z", page_size=4, max_total=5)
+        events, ok = worker.fetch_new_events(es, "honeypot-v2-*", "2026-07-31T00:00:00Z", page_size=4, max_total=5)
 
+        assert ok is True
         assert len(events) == 5
         assert es.scroll.call_count == 1, "must stop after the first scroll page already exceeds max_total, not fetch a third page"
