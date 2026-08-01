@@ -13,6 +13,15 @@
 #   packer build -var iso_checksum=sha256:<hex> win11-analysis.pkr.hcl
 # Output: $output_dir/win11-analysis.qcow2  (~25-35 GB, 3-5 h)
 #
+# Prefer build-with-retry.sh <checksum> [max_attempts] over calling `packer
+# build` directly: packer's WinRM communicator treats some transport errors
+# (a "401 - invalid content type" mid-poll response, seen after 4h20m of
+# otherwise-healthy progress on 2026-08-01, #194) as fatal on the first
+# occurrence despite logging them with the same "Retryable error:" prefix
+# used for errors it does retry. There is no packer-level knob for this --
+# winrm_timeout below only governs the initial connect wait -- so the retry
+# lives one level up, around the whole build.
+#
 # The ISO is not fetched here. Download the Windows 11 Enterprise evaluation
 # yourself, accept Microsoft's licence, and place it at var.iso_path.
 
