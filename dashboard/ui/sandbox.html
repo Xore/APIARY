@@ -151,7 +151,28 @@
         </div>
         <form class="filters" id="sandbox-filters" method="get" action="/sandbox"><a class="chip" href="/payloads">&larr; captured payloads</a><input class="hp-input" name="q" value="{{.Query}}" placeholder="hash, source, file type, risk or job" aria-label="Search sandbox results"><button class="copy" type="submit">search</button>{{if .Query}}<a class="chip" href="/sandbox">clear</a>{{end}}<span class="chip">{{len .Rows}} retained runs</span><span class="chip">status {{.Status.UpdatedAt}}</span></form>
         {{if .Status.Jobs}}<div class="card wide" id="sandbox-jobs"><h2>Active and failed queue jobs</h2><table class="data-table"><thead><tr><th>state</th><th>requested</th><th>source</th><th>SHA-256</th></tr></thead><tbody>{{range .Status.Jobs}}<tr><td><span class="badge badge--muted">{{.State}}</span></td><td>{{.RequestedAt}}</td><td>{{.Source}}</td><td class="v">{{.SHA256}}</td></tr>{{end}}</tbody></table></div>{{end}}
-        <div class="card wide" id="sandbox-results"><p class="note">Authenticated administrators submit captures with the <strong>Analyze</strong> button. “Awaiting handoff” means the dashboard request has not reached the root-owned host watcher; “KVM queued” means it is staged for the isolated worker. CLI fallback: <code>sudo honeypot-sandbox-submit &lt;hash&gt;</code>.</p>{{if .Status.HandoffOld}}<div class="tw:mb-4 tw:rounded-md tw:border tw:border-red tw:bg-red-subtle tw:px-4 tw:py-3 tw:text-red"><strong>Sandbox handoff stalled.</strong> Requests have waited over five minutes. Check <code>honeypot-sandbox-web-requests.path</code> and its service.</div>{{end}}{{if .Rows}}<table class="data-table"><thead><tr><th>completed</th><th>source</th><th>SHA-256</th><th>risk</th><th>duration</th><th>packets</th><th>exit</th><th>details</th></tr></thead><tbody>{{range .Rows}}<tr><td>{{.CompletedAt}}</td><td><span class="badge badge--muted">{{.Source}}</span></td><td class="v"><a href="/payload-analysis/{{.SHA256}}">{{.SHA256}}</a></td><td>{{.RiskScore}} / {{.RiskLevel}}</td><td class="n">{{.Duration}}s</td><td class="n">{{.NetworkSummary.Packets}}</td><td class="n">{{.ExitStatus}}</td><td><a class="lnk" href="/sandbox/{{.Job | urlquery}}">investigate &rarr;</a></td></tr>{{end}}</tbody></table>{{else}}<p class="empty">No completed sandbox exports match this view.</p>{{end}}</div>
+        <div id="sandbox-results">
+          <p class="note">Authenticated administrators submit captures with the <strong>Analyze</strong> button. “Awaiting handoff” means the dashboard request has not reached the root-owned host watcher; “KVM queued” means it is staged for the isolated worker. CLI fallback: <code>sudo honeypot-sandbox-submit &lt;hash&gt;</code>.</p>
+          {{if .Status.HandoffOld}}<div class="tw:mb-4 tw:rounded-md tw:border tw:border-red tw:bg-red-subtle tw:px-4 tw:py-3 tw:text-red"><strong>Sandbox handoff stalled.</strong> Requests have waited over five minutes. Check <code>honeypot-sandbox-web-requests.path</code> and its service.</div>{{end}}
+          {{if .Rows}}
+          <div class="project-grid">
+            {{range .Rows}}
+            <a class="project-card" href="/sandbox/{{.Job | urlquery}}">
+              <div class="project-card__header">
+                <span class="project-card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg></span>
+                <span class="project-card__title mono">{{.SHA256}}</span>
+                <div class="project-card__badges">
+                  <span class="badge badge--muted">{{.Source}}</span>
+                  {{if eq .ExitStatus "error"}}<span class="badge badge--muted tw:text-red">error</span>{{end}}
+                </div>
+              </div>
+              <p class="project-card__desc">risk {{.RiskScore}} / 100 &bull; {{.RiskLevel}} &bull; {{.Duration}}s &bull; {{.NetworkSummary.Packets}} packets</p>
+              <div class="project-card__meta"><span>completed {{.CompletedAt}}</span></div>
+            </a>
+            {{end}}
+          </div>
+          {{else}}<p class="empty">No completed sandbox exports match this view.</p>{{end}}
+        </div>
         {{end}}
 
         <footer id="sandbox-footer">xore//honeypot &bull; isolated KVM dynamic analysis &bull; summaries only</footer>

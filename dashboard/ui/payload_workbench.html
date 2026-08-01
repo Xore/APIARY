@@ -36,10 +36,26 @@
   </div>
   <form class="filters" method="get" action="/payload-workbench/results"><a class="chip" href="/payload-workbench">Start analysis</a><a class="chip" href="/payloads">Captured payloads</a><input class="hp-input" name="q" value="{{.Query}}" placeholder="hash, recipe, analyzer or state" aria-label="Search workbench results"><button class="copy" type="submit">search</button>{{if .Query}}<a class="chip" href="/payload-workbench/results">clear</a>{{end}}</form>
   <section aria-labelledby="wb-results-title"><div class="section-heading"><div><h2 id="wb-results-title">Retained analysis runs</h2><p>Only runs owned by the current administrator session are shown.</p></div></div>
-    {{if .Runs}}{{range .Runs}}<article class="card wide wb-run" id="{{.ID}}"><div class="wb-run-head"><div><h3>{{.RecipeName}} &bull; r{{.RecipeRevision}}</h3><p class="note">{{.CreatedAt.Format "2006-01-02 15:04:05 MST"}} &bull; {{.ID}}</p></div><span class="badge wb-state wb-state--{{.State}}">{{.State}}</span></div>
-      <div class="filters"><a class="chip" href="/payload-workbench/{{.PayloadSHA256}}">Manage run</a><a class="chip" href="/payload-analysis/{{.PayloadSHA256}}">Static analysis</a><span class="chip" title="Captured payload hash">{{.PayloadSHA256}}</span><span class="chip">{{.PayloadKind}}</span></div>
-      <table class="data-table"><thead><tr><th>analyzer</th><th>state</th><th>updated</th><th>result</th></tr></thead><tbody>{{range .Children}}<tr><td><strong>{{.DisplayName}}</strong><br><span class="tw:text-muted">{{.AnalyzerID}}</span></td><td><span class="badge wb-state wb-state--{{.State}}">{{.State}}</span></td><td>{{.UpdatedAt.Format "2006-01-02 15:04:05 MST"}}</td><td>{{if .ResultURL}}<a class="lnk" href="{{.ResultURL}}">Open native result &rarr;</a>{{else}}<span class="tw:text-muted">{{if .Summary}}{{.Summary}}{{else if .Reason}}{{.Reason}}{{else}}No result yet{{end}}</span>{{end}}</td></tr>{{end}}</tbody></table>
-    </article>{{end}}{{else}}<div class="card wide"><p class="empty">No workbench runs match this view.</p></div>{{end}}
+    <div id="workbench-results-list">
+    {{if .Runs}}
+    <div class="project-grid">
+      {{range .Runs}}
+      <a class="project-card" href="/payload-workbench/{{.PayloadSHA256}}">
+        <div class="project-card__header">
+          <span class="project-card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V9M10 19V5M16 19v-7M22 19V3"/><path d="M2 19h22"/></svg></span>
+          <span class="project-card__title">{{.RecipeName}} &bull; r{{.RecipeRevision}}</span>
+          <div class="project-card__badges"><span class="badge wb-state wb-state--{{.State}}">{{.State}}</span></div>
+        </div>
+        <p class="project-card__desc">{{.PayloadKind}} payload &bull; {{len .Children}} analyzer{{if ne (len .Children) 1}}s{{end}}</p>
+        <div class="project-card__meta">
+          <span class="mono">{{.PayloadSHA256}}</span>
+          <span>{{.CreatedAt.Format "2006-01-02 15:04:05 MST"}}</span>
+        </div>
+      </a>
+      {{end}}
+    </div>
+    {{else}}<div class="card wide"><p class="empty">No workbench runs match this view.</p></div>{{end}}
+    </div>
   </section>
   <footer>xore//honeypot &bull; owner-isolated correlated results &bull; native analyzer reports remain canonical</footer>
 </div></main></div></body></html>{{end}}

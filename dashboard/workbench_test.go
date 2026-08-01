@@ -302,3 +302,51 @@ func TestWorkbenchTemplateAndScriptUseEscapedDOMSinks(t *testing.T) {
 		}
 	}
 }
+
+// The workbench results list renders as a .project-grid/.project-card grid
+// (#227, following #221/#226), not one full-width card per run with a
+// nested per-analyzer table. Each card links to /payload-workbench/{sha} --
+// the same "Manage run" destination the old card offered -- whose own
+// data-wb-runs section (hp-workbench.js) already renders the full
+// per-analyzer breakdown for every run on that payload, so nothing here is
+// lost by dropping the inline table from the list view.
+func TestWorkbenchResultsPageRendersAsCardGrid(t *testing.T) {
+	funcs := templateFuncs(nil, "")
+	tmpl := template.Must(template.New("dashboard").Funcs(funcs).Parse(pageTemplate))
+
+	sha := strings.Repeat("e", 64)
+	now := time.Now()
+	data := workbenchResultsPageData{
+		Generated: now,
+		Runs: []workbenchRun{{
+			ID: "run_1234567890abcdef", PayloadSHA256: sha, PayloadKind: "binary",
+			RecipeName: "Static first", RecipeRevision: 1, State: "completed", CreatedAt: now,
+			Children: []workbenchChild{
+				{AnalyzerID: "deterministic", DisplayName: "Deterministic", State: "completed", UpdatedAt: now, ResultURL: "/payload-analysis/" + sha},
+				{AnalyzerID: "ghidra", DisplayName: "Ghidra", State: "failed", UpdatedAt: now, Reason: "timed out"},
+			},
+		}},
+	}
+
+	var buf strings.Builder
+	if err := tmpl.ExecuteTemplate(&buf, "workbench-results", &data); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	body := buf.String()
+
+	if strings.Contains(body, "<table") {
+		t.Fatal("workbench results still render an inline analyzer table, want a card grid")
+	}
+	if !strings.Contains(body, "project-grid") || !strings.Contains(body, "project-card") {
+		t.Fatal("workbench results are missing the .project-grid/.project-card markup")
+	}
+	if !strings.Contains(body, `href="/payload-workbench/`+sha+`"`) {
+		t.Fatal("workbench card does not link to the Manage run destination")
+	}
+	if !strings.Contains(body, `wb-state--completed`) {
+		t.Fatal("workbench card is missing the run's overall state badge")
+	}
+	if !strings.Contains(body, "2 analyzers") {
+		t.Fatal("workbench card is missing the analyzer count summary")
+	}
+}

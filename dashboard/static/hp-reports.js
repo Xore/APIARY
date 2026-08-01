@@ -494,24 +494,35 @@
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 
+  // Each report is a .project-card (#227) -- selecting it opens the same
+  // inline viewer the old "View" button did. It can't be a real <a> (the
+  // Download link and Delete button inside it are both interactive content,
+  // which HTML forbids nesting inside a link), so it gets a role="button"
+  // and its own click/keydown handling below instead, exactly mirroring
+  // what a native <a>/<button> would give for free.
   async function refreshGenerated() {
     const payload = await apiJSON("/api/reports/generated");
     state.generated = payload.generated || [];
     els.generatedEmpty.hidden = state.generated.length > 0;
     els.generated.innerHTML = state.generated.map((report) => `
-      <tr>
-        <td><strong>${escapeHTML(report.title || report.name)}</strong><br><small class="hp-rp-tag">${escapeHTML(report.name)}</small></td>
-        <td><span class="hp-rp-tag">${escapeHTML(report.template)}</span></td>
-        <td><span class="hp-rp-tag ${report.theme === "light" ? "hp-rp-tag--light" : ""}">${escapeHTML(report.theme)}</span></td>
-        <td>${escapeHTML(report.origin)}</td>
-        <td>${escapeHTML(formatTime(report.created_at))}</td>
-        <td>${escapeHTML(formatSize(report.size_bytes))}</td>
-        <td><div class="hp-rp-row-actions">
-          <button class="btn btn-sm btn-secondary" type="button" data-view="${escapeHTML(report.id)}">View</button>
-          <a class="btn btn-sm btn-primary" href="/api/reports/generated/${escapeHTML(report.id)}/pdf?download=1">Download</a>
-          <button class="btn btn-sm btn-danger" type="button" data-purge="${escapeHTML(report.id)}" data-name="${escapeHTML(report.title || report.name)}">Delete</button>
-        </div></td>
-      </tr>`).join("");
+      <article class="project-card" data-hp-report-card="${escapeHTML(report.id)}" role="button" tabindex="0" aria-label="View ${escapeHTML(report.title || report.name)}">
+        <div class="project-card__header">
+          <span class="project-card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>
+          <span class="project-card__title">${escapeHTML(report.title || report.name)}</span>
+          <div class="project-card__badges">
+            <span class="badge badge--muted">${escapeHTML(report.template)}</span>
+            <span class="badge badge--muted">${escapeHTML(report.theme)}</span>
+          </div>
+        </div>
+        <p class="project-card__desc">${escapeHTML(report.origin)} &bull; ${escapeHTML(formatSize(report.size_bytes))}</p>
+        <div class="project-card__meta">
+          <span>${escapeHTML(formatTime(report.created_at))}</span>
+          <div class="hp-rp-row-actions" data-hp-report-actions>
+            <a class="btn btn-sm btn-primary" href="/api/reports/generated/${escapeHTML(report.id)}/pdf?download=1">Download</a>
+            <button class="btn btn-sm btn-danger" type="button" data-purge="${escapeHTML(report.id)}" data-name="${escapeHTML(report.title || report.name)}">Delete</button>
+          </div>
+        </div>
+      </article>`).join("");
   }
 
   function openViewer(report) {
@@ -526,13 +537,14 @@
     els.viewerFrame.src = "about:blank";
   });
 
+  function openReportCard(card) {
+    const report = state.generated.find((candidate) => candidate.id === card.dataset.hpReportCard);
+    if (report) openViewer(report);
+  }
+
   els.generated.addEventListener("click", (event) => {
-    const view = event.target.closest("[data-view]");
     const purge = event.target.closest("[data-purge]");
-    if (view) {
-      const report = state.generated.find((candidate) => candidate.id === view.dataset.view);
-      if (report) openViewer(report);
-    } else if (purge) {
+    if (purge) {
       confirmAction(purge, {
         title: `Delete “${purge.dataset.name}”?`,
         description: "The generated PDF is removed from the history and from disk. The design that produced it is kept.",
@@ -547,7 +559,21 @@
           return "Report deleted.";
         },
       });
+      return;
     }
+    if (event.target.closest("[data-hp-report-actions]")) return; // let Download navigate natively
+    const card = event.target.closest("[data-hp-report-card]");
+    if (card) openReportCard(card);
+  });
+
+  els.generated.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    // Only the card's own role="button" activates this way -- a focused
+    // Download link or Delete button already gets its native Enter/Space
+    // behavior and must not also trigger the card underneath it.
+    if (event.target.dataset?.hpReportCard === undefined) return;
+    event.preventDefault();
+    openReportCard(event.target);
   });
 
   function confirmAction(trigger, options) {
