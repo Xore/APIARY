@@ -78,6 +78,8 @@ func TestConfigRejectsUnsafeOrOutOfRangeValues(t *testing.T) {
 		{"yara interval", func(c *dashboardConfig) { c.Honeypot.YaraScanIntervalSeconds = 60 }, "yara_scan_interval_seconds"},
 		{"yara bytes", func(c *dashboardConfig) { c.Honeypot.YaraMaxBytes = 1 }, "yara_max_bytes"},
 		{"dedupe interval", func(c *dashboardConfig) { c.Honeypot.PayloadDedupeIntervalSeconds = 100000 }, "payload_dedupe_interval_seconds"},
+		{"ml threshold low", func(c *dashboardConfig) { c.Honeypot.MLAlertThreshold = 0.1 }, "ml_alert_threshold"},
+		{"ml threshold high", func(c *dashboardConfig) { c.Honeypot.MLAlertThreshold = 1.0 }, "ml_alert_threshold"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -95,15 +97,29 @@ func TestHoneypotEnvPinsReportDeploymentOverrides(t *testing.T) {
 	env := map[string]string{
 		"HONEYPOT_ALERT_COOLDOWN": "12h",
 		"YARA_SCAN_INTERVAL":      "1800",
+		"ML_ALERT_THRESHOLD":      "0.8",
 	}
 	pinned := pinnedHoneypotFields(func(name string) string { return env[name] })
-	if len(pinned) != 2 || pinned["alert_cooldown"] != "12h" || pinned["yara_scan_interval_seconds"] != "1800" {
+	if len(pinned) != 3 || pinned["alert_cooldown"] != "12h" || pinned["yara_scan_interval_seconds"] != "1800" ||
+		pinned["ml_alert_threshold"] != "0.8" {
 		t.Fatalf("unexpected pinned fields: %#v", pinned)
 	}
 	for field := range honeypotFieldEnv() {
-		if _, ok := pinned[field]; ok && field != "alert_cooldown" && field != "yara_scan_interval_seconds" {
+		if _, ok := pinned[field]; ok && field != "alert_cooldown" && field != "yara_scan_interval_seconds" && field != "ml_alert_threshold" {
 			t.Fatalf("field %s must not be pinned", field)
 		}
+	}
+}
+
+// TestMLAlertThresholdMatchesWorkerEnvVarName is #65's own correctness
+// requirement (docs/ml-worker-plan.md §11.5): a dashboard-staged value and
+// the deployment environment must never mean two different things for this
+// field, which only holds if the env var name is exactly the one
+// ml-worker/worker.py itself reads.
+func TestMLAlertThresholdMatchesWorkerEnvVarName(t *testing.T) {
+	if honeypotFieldEnv()["ml_alert_threshold"] != "ML_ALERT_THRESHOLD" {
+		t.Fatalf("ml_alert_threshold must pin to ML_ALERT_THRESHOLD, the exact env var worker.py reads, got %q",
+			honeypotFieldEnv()["ml_alert_threshold"])
 	}
 }
 

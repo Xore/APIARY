@@ -490,6 +490,11 @@
             <input class="form-input" id="hp-cfg-risk" data-cfg="honeypot.sandbox_alert_risk_score" data-cfg-kind="int" inputmode="numeric" autocomplete="off">
             <p class="hp-cfg-source" data-cfg-source="honeypot.sandbox_alert_risk_score"></p>
           </div>
+          <div class="hp-field settings-field" data-hp-search="honeypot ml worker anomaly alert threshold">
+            <label class="form-label" for="hp-cfg-ml-threshold">ML anomaly alert threshold (0.5–0.99)</label>
+            <input class="form-input" id="hp-cfg-ml-threshold" data-cfg="honeypot.ml_alert_threshold" data-cfg-kind="float" inputmode="decimal" autocomplete="off">
+            <p class="hp-cfg-source" data-cfg-source="honeypot.ml_alert_threshold"></p>
+          </div>
         </section>
         <section class="card">
           <div class="card__header"><div><h3>Scanners</h3><p class="card__meta">YARA and payload pipeline thresholds.</p></div></div>

@@ -217,6 +217,11 @@ type honeypotConfig struct {
 	YaraScanIntervalSeconds      int    `json:"yara_scan_interval_seconds"`
 	YaraMaxBytes                 int64  `json:"yara_max_bytes"`
 	PayloadDedupeIntervalSeconds int    `json:"payload_dedupe_interval_seconds"`
+	// MLAlertThreshold (#65, docs/ml-worker-plan.md §11.5) pins the same
+	// ML_ALERT_THRESHOLD env var ml-worker/worker.py itself reads -- a
+	// dashboard-staged value and the deployment environment can never mean
+	// two different things for this field.
+	MLAlertThreshold float64 `json:"ml_alert_threshold"`
 }
 
 type dashboardConfig struct {
@@ -249,6 +254,7 @@ func defaultDashboardConfig() dashboardConfig {
 			YaraScanIntervalSeconds:      900,
 			YaraMaxBytes:                 67108864,
 			PayloadDedupeIntervalSeconds: 3600,
+			MLAlertThreshold:             0.75, // matches worker.py's own ML_ALERT_THRESHOLD default
 		},
 	}
 }
@@ -265,6 +271,7 @@ func honeypotFieldEnv() map[string]string {
 		"yara_scan_interval_seconds":      "YARA_SCAN_INTERVAL",
 		"yara_max_bytes":                  "YARA_MAX_BYTES",
 		"payload_dedupe_interval_seconds": "PAYLOAD_DEDUPE_INTERVAL",
+		"ml_alert_threshold":              "ML_ALERT_THRESHOLD",
 	}
 }
 
@@ -381,6 +388,9 @@ func validateConfig(c dashboardConfig) error {
 	}
 	if h.PayloadDedupeIntervalSeconds < 300 || h.PayloadDedupeIntervalSeconds > 86400 {
 		problems = append(problems, "honeypot.payload_dedupe_interval_seconds must be between 300 and 86400")
+	}
+	if h.MLAlertThreshold < 0.5 || h.MLAlertThreshold > 0.99 {
+		problems = append(problems, "honeypot.ml_alert_threshold must be between 0.5 and 0.99")
 	}
 
 	if len(problems) > 0 {

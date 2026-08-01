@@ -595,6 +595,10 @@
           return Number.isNaN(n) ? part.trim() : n;
         });
       }
+      if (kind === "float") {
+        const n = parseFloat(raw);
+        return Number.isNaN(n) ? raw : n;
+      }
       return raw;
     }
 

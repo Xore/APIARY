@@ -86,12 +86,13 @@ type behaviorPatch struct {
 }
 
 type honeypotPatch struct {
-	AlertCooldown                *string `json:"alert_cooldown"`
-	AlertCampaignScore           *int    `json:"alert_campaign_score"`
-	SandboxAlertRiskScore        *int    `json:"sandbox_alert_risk_score"`
-	YaraScanIntervalSeconds      *int    `json:"yara_scan_interval_seconds"`
-	YaraMaxBytes                 *int64  `json:"yara_max_bytes"`
-	PayloadDedupeIntervalSeconds *int    `json:"payload_dedupe_interval_seconds"`
+	AlertCooldown                *string  `json:"alert_cooldown"`
+	AlertCampaignScore           *int     `json:"alert_campaign_score"`
+	SandboxAlertRiskScore        *int     `json:"sandbox_alert_risk_score"`
+	YaraScanIntervalSeconds      *int     `json:"yara_scan_interval_seconds"`
+	YaraMaxBytes                 *int64   `json:"yara_max_bytes"`
+	PayloadDedupeIntervalSeconds *int     `json:"payload_dedupe_interval_seconds"`
+	MLAlertThreshold             *float64 `json:"ml_alert_threshold"`
 }
 
 type configPatch struct {
@@ -197,6 +198,10 @@ func (p configPatch) apply(c *dashboardConfig) []string {
 		if q.PayloadDedupeIntervalSeconds != nil {
 			c.Honeypot.PayloadDedupeIntervalSeconds = *q.PayloadDedupeIntervalSeconds
 			fields = append(fields, "honeypot.payload_dedupe_interval_seconds")
+		}
+		if q.MLAlertThreshold != nil {
+			c.Honeypot.MLAlertThreshold = *q.MLAlertThreshold
+			fields = append(fields, "honeypot.ml_alert_threshold")
 		}
 	}
 	return fields
