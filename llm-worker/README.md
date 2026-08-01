@@ -25,6 +25,25 @@ the separate `docker-compose.captured-data.yml` network/volume grant. Setting
 an environment variable in the base stack cannot create a network path it does
 not have.
 
+## Synthetic real-model canary
+
+Issue #83's first phase is a one-shot test of the pinned local model. It joins
+only the internal `honeypot-llm` network and has no Elasticsearch route or
+capture mount:
+
+```bash
+docker compose \
+  -f llm-worker/docker-compose.yml \
+  -f llm-worker/docker-compose.synthetic-canary.yml \
+  up --build --abort-on-container-exit --exit-code-from llm-worker
+```
+
+The command runs reconnaissance and injection/exfiltration sessions made
+entirely from TEST-NET fixtures. It fails closed on schema, factuality,
+injection-marker, grounded-IOC, deterministic-severity, model-digest, or
+idle-unload errors. The 30-second canary keep-alive is deliberately short;
+normal worker requests retain the bounded 10-minute default.
+
 ## Captured-data canary
 
 Do not enable this as part of #66. Issue
@@ -39,13 +58,15 @@ docker compose \
   config --quiet
 ```
 
-The override attaches the worker to `honeynet` for Elasticsearch and to the
-internal `honeypot-llm` network for the one Ollama instance already measured
-and pinned by #144. Ollama is not placed on `honeynet`, and the worker publishes
-no port. The override mounts only Cowrie downloads and retained inline scripts
-read-only. Version 1 accepts regular text files no larger than 1 MiB, refuses
-symlinks and NUL-containing/binary data, and hashes content itself instead of
-trusting a filename.
+The override attaches the worker to the internal `honeypot-llm-data` network
+for Elasticsearch and the internal `honeypot-llm` network for the one Ollama
+instance already measured and pinned by #144. The root stack owns the former
+and attaches only Elasticsearch; the Ghidra stack owns the latter and attaches
+Ollama. The worker never joins the Internet-routable `honeynet` bridge and
+publishes no port. The override mounts only Cowrie downloads and retained
+inline scripts read-only. Version 1 accepts regular text files no larger than
+1 MiB, refuses symlinks and NUL-containing/binary data, and hashes content
+itself instead of trusting a filename.
 
 ## Guardrails
 
@@ -80,8 +101,9 @@ python llm-worker/worker.py --selftest
 
 Fixtures are synthetic and use TEST-NET addresses. Tests cover delimiter and
 secret neutralization, exact schemas, local endpoints, disabled proxies and
-redirects, thinking control, IOC grounding, deterministic criticality,
-idempotent session accumulation, and safe text-payload scanning.
+redirects, thinking control, constrained ATT&CK IDs, IOC grounding,
+deterministic criticality, idempotent session accumulation, and safe
+text-payload scanning.
 
 ## Result contract
 

@@ -111,9 +111,9 @@ with `--network none` and a read-only runtime filesystem.
 
 - #67 must use `torch==2.13.0+cu126`, retain the verified CPU fallback, and
   prefetch the embedding model by immutable revision.
-- #83 must treat `honeynet` as connectivity, not egress isolation. The narrow
-  `honeypot-llm` network remains internal, but the worker's `honeynet`
-  attachment needs outbound-policy review before captured-data mode.
+- #83 replaces the worker's planned `honeynet` attachment with the internal
+  `honeypot-llm-data` Elasticsearch network. Together with the internal
+  `honeypot-llm` model network, the worker has no Docker route to the Internet.
 - #132 remains the owner for mapped session/event/cursor fields.
 - Host Python must not leak into worker assumptions; Python 3.12 is the
   verified container contract.

@@ -27,6 +27,7 @@ def config(**changes):
         es_host="http://elasticsearch:9200",
         ollama_url="http://ollama:11434",
         model="qwen3.5:4b",
+        expected_model_digest="a" * 64,
         poll_interval=60,
         max_content_chars=12000,
         max_payload_bytes=1 << 20,
@@ -37,6 +38,7 @@ def config(**changes):
         daily_report_hour=6,
         context_length=8192,
         output_tokens=512,
+        keep_alive="10m",
         payload_roots=(),
         log_level="INFO",
     )
@@ -102,6 +104,24 @@ class EndpointAndGateTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "OLLAMA_URL"):
                 worker.Config.from_env()
 
+    def test_synthetic_canary_requires_safe_gates(self):
+        config(enabled=True).validate_synthetic_canary()
+        for parsed in (
+            config(enabled=False),
+            config(enabled=True, dry_run=False, allow_captured_data=True, session_enabled=True),
+            config(enabled=True, allow_captured_data=True),
+            config(enabled=True, session_enabled=True),
+        ):
+            with self.assertRaises(ValueError):
+                parsed.validate_synthetic_canary()
+
+    def test_keep_alive_is_bounded(self):
+        self.assertEqual(worker.keep_alive_seconds("30s"), 30)
+        self.assertEqual(worker.keep_alive_seconds("10m"), 600)
+        for value in ("-1", "forever", "25h", "1d"):
+            with self.assertRaises(ValueError):
+                worker.keep_alive_seconds(value)
+
 
 class SessionAccumulatorTests(unittest.TestCase):
     def event(self, event_id="cowrie.command.input", command="id"):
@@ -145,6 +165,21 @@ class SessionAccumulatorTests(unittest.TestCase):
 
 
 class OllamaContractTests(unittest.TestCase):
+    def test_model_digest_must_match_the_approved_pin(self):
+        fake_response = MagicMock()
+        fake_response.is_redirect = False
+        fake_response.is_permanent_redirect = False
+        fake_response.raise_for_status.return_value = None
+        fake_response.json.return_value = {
+            "models": [{"name": "qwen3.5:4b", "digest": "b" * 64}]
+        }
+        fake_session = MagicMock()
+        fake_session.get.return_value = fake_response
+        with patch.object(worker.requests, "Session", return_value=fake_session):
+            client = worker.OllamaClient(config())
+            with self.assertRaisesRegex(worker.ModelRequestError, "does not match"):
+                client.model_digest()
+
     def test_native_request_disables_thinking_and_uses_schema(self):
         fake_response = MagicMock()
         fake_response.is_redirect = False
@@ -177,9 +212,44 @@ class OllamaContractTests(unittest.TestCase):
         self.assertFalse(request["json"]["think"])
         self.assertEqual(request["json"]["options"]["num_ctx"], 8192)
         self.assertEqual(request["json"]["format"]["additionalProperties"], False)
+        mitre_items = request["json"]["format"]["properties"]["mitre_attack"]["items"]
+        self.assertEqual(mitre_items["pattern"], r"^T[0-9]{4}(?:\.[0-9]{3})?$")
         self.assertEqual(annotation.intent, "reconnaissance")
         self.assertEqual(telemetry["prompt_tokens"], 100)
         self.assertFalse(fake_session.trust_env)
+
+    def test_synthetic_canary_uses_only_synthetic_cases_and_checks_unload(self):
+        responses = [
+            SessionAnalysis(
+                summary="System reconnaissance commands were observed.",
+                intent="reconnaissance",
+                mitre_attack=["T1087"],
+                iocs=[],
+                severity="medium",
+                confidence="high",
+            ),
+            SessionAnalysis(
+                summary="Credential material was encoded and transferred.",
+                intent="data-theft",
+                mitre_attack=["T1552", "T1041"],
+                iocs=[],
+                severity="high",
+                confidence="high",
+            ),
+        ]
+        fake_client = MagicMock()
+        fake_client.model_digest.return_value = "a" * 64
+        fake_client.analyze.side_effect = [(item, {"prompt_tokens": 100, "output_tokens": 30}) for item in responses]
+        fake_client.wait_until_unloaded.return_value = 32000
+        with patch.object(worker, "OllamaClient", return_value=fake_client):
+            result = worker.run_synthetic_model_canary(config(enabled=True), idle_timeout=90)
+        self.assertEqual(result["mode"], "synthetic-model-canary")
+        self.assertEqual(result["idle_unload_ms"], 32000)
+        self.assertEqual(result["cases"][1]["severity"], "critical")
+        self.assertIn("prompt_injection_text", result["cases"][1]["deterministic_flags"])
+        prompts = [call.args[0] for call in fake_client.analyze.call_args_list]
+        self.assertTrue(all("<untrusted_data>" in prompt for prompt in prompts))
+        self.assertTrue(all("fixture-secret" not in prompt for prompt in prompts))
 
 
 class PayloadSafetyTests(unittest.TestCase):
