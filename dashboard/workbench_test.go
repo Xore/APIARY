@@ -350,3 +350,39 @@ func TestWorkbenchResultsPageRendersAsCardGrid(t *testing.T) {
 		t.Fatal("workbench card is missing the analyzer count summary")
 	}
 }
+
+// The workbench's payload picker ("Select a captured payload") renders as
+// a .project-grid/.project-card grid too, matching the other card-grid
+// conversions -- each card is a single whole-card link (unlike the
+// captured-payloads inventory's cards, a picker row has exactly one
+// action) straight to /payload-workbench/{hash}, the same destination the
+// old "Open workbench" button used.
+func TestWorkbenchIndexRendersAsCardGrid(t *testing.T) {
+	funcs := templateFuncs(nil, "")
+	tmpl := template.Must(template.New("dashboard").Funcs(funcs).Parse(pageTemplate))
+
+	hash := strings.Repeat("e", 64)
+	data := payloadsPage{
+		Generated: time.Now(), Enabled: true,
+		Files: []capturedFile{{Hash: hash, Kind: "Binary", Platform: "Linux", MIME: "application/octet-stream", SizeH: "1 KiB", Sources: []string{"dionaea"}}},
+	}
+
+	var buf strings.Builder
+	if err := tmpl.ExecuteTemplate(&buf, "payload-workbench-index", &data); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	body := buf.String()
+
+	if strings.Contains(body, "<table") {
+		t.Fatal("workbench payload picker still renders a table, want a card grid")
+	}
+	if !strings.Contains(body, "project-grid") || !strings.Contains(body, "project-card") {
+		t.Fatal("workbench payload picker is missing the .project-grid/.project-card markup")
+	}
+	if !strings.Contains(body, `href="/payload-workbench/`+hash+`"`) {
+		t.Fatal("workbench picker card does not link to the workbench for that hash")
+	}
+	if strings.Contains(body, "Open workbench") {
+		t.Fatal("the old standalone \"Open workbench\" button should be gone -- the whole card is the link now")
+	}
+}

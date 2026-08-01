@@ -13,9 +13,21 @@
     <div class="section-heading"><div><h2 id="wb-select-title">Select a captured payload</h2><p>The workbench derives analyzer applicability from the selected artifact. Opening an artifact does not execute it.</p></div></div>
     {{if not .Enabled}}<p class="empty">Payload serving is disabled. Configure PAYLOAD_DIRS and/or SCRIPT_PAYLOAD_DIR.</p>
     {{else if .Loading}}<p class="note" data-payload-warming><span class="live-dot" aria-hidden="true"></span> Preparing the payload inventory. This page will update automatically.</p><script nonce="{{.Nonce}}">setTimeout(()=>location.reload(),1500)</script>
-    {{else if .Files}}<table class="recent data-table"><thead><tr><th>captured</th><th>source</th><th>SHA-256</th><th>type</th><th>size</th><th>action</th></tr></thead><tbody>
-      {{range .Files}}<tr><td>{{.Mtime}}</td><td>{{range .Sources}}<span class="badge badge--muted">{{.}}</span> {{end}}</td><td class="v">{{.Hash}}</td><td><strong>{{.Kind}}</strong><br><span class="tw:text-muted">{{.Platform}} &bull; {{.MIME}}</span></td><td class="n">{{.SizeH}}</td><td><a class="btn btn-sm btn-primary" href="/payload-workbench/{{.Hash}}">Open workbench</a></td></tr>{{end}}
-    </tbody></table>{{if gt .ResultTotal 50}}<p class="note">Showing the 50 most recent captures. Open the full inventory to find older evidence.</p>{{end}}
+    {{else if .Files}}
+    <div class="project-grid" id="wb-select-results">
+      {{range .Files}}
+      <a class="project-card" href="/payload-workbench/{{.Hash}}">
+        <div class="project-card__header">
+          <span class="project-card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4z"/><path d="M14 17h6M17 14v6"/></svg></span>
+          <span class="project-card__title mono">{{.Hash}}</span>
+          <div class="project-card__badges">{{range .Sources}}<span class="badge badge--muted">{{.}}</span>{{end}}</div>
+        </div>
+        <p class="project-card__desc"><strong>{{.Kind}}</strong> &bull; {{.Platform}} &bull; {{.MIME}} &bull; {{.SizeH}}</p>
+        <div class="project-card__meta"><span>captured {{.Mtime}}</span></div>
+      </a>
+      {{end}}
+    </div>
+    {{if gt .ResultTotal 50}}<p class="note">Showing the 50 most recent captures. Open the full inventory to find older evidence.</p>{{end}}
     {{else}}<p class="empty">No payloads captured yet.</p>{{end}}
   </section>
   <footer>xore//honeypot &bull; select evidence before orchestration &bull; captured files remain inert</footer>
