@@ -133,15 +133,20 @@
   const lazyPageSize = 25;
   const lazyTables = new WeakMap();
   const lazyLists = new WeakMap();
-  const remoteTables = new WeakMap();
+  // Backs both a remote-paginated <table> (keyed by the table, body is its
+  // tBodies[0]) and a remote-paginated card list (keyed by the list div
+  // itself, body === the same div) -- the logic below only ever counts
+  // body.children and appends via insertAdjacentHTML, neither of which
+  // cares whether body is a <tbody> or a plain container.
+  const remoteContainers = new WeakMap();
   const lazyObserver = "IntersectionObserver" in window ? new IntersectionObserver(entries => {
     entries.filter(entry => entry.isIntersecting).forEach(entry => {
       const table = entry.target.__hpLazyTable;
       if (table) revealLazyRows(table);
       const list = entry.target.__hpLazyList;
       if (list) revealLazyItems(list);
-      const remote = entry.target.__hpRemoteTable;
-      if (remote) loadRemoteRows(remote);
+      const remote = entry.target.__hpRemoteContainer;
+      if (remote) loadRemoteItems(remote);
     });
   }, {rootMargin: "500px 0px"}) : null;
 
@@ -172,10 +177,10 @@
     updateLazyTable(table);
   };
 
-  const updateRemoteTable = table => {
-    const state = remoteTables.get(table);
+  const updateRemoteContainer = key => {
+    const state = remoteContainers.get(key);
     if (!state) return;
-    const loadedThrough = state.offset + state.body.rows.length;
+    const loadedThrough = state.offset + state.body.children.length;
     state.counter.textContent = `${Math.min(loadedThrough, state.total)} of ${state.total} entries`;
     const more = loadedThrough < state.total;
     state.controls.hidden = state.total <= lazyPageSize;
@@ -185,9 +190,9 @@
     else lazyObserver?.observe(state.sentinel);
   };
 
-  const loadRemoteRows = async table => {
-    const state = remoteTables.get(table);
-    const nextOffset = state ? state.offset + state.body.rows.length : 0;
+  const loadRemoteItems = async key => {
+    const state = remoteContainers.get(key);
+    const nextOffset = state ? state.offset + state.body.children.length : 0;
     if (!state || state.loading || nextOffset >= state.total) return;
     state.loading = true;
     state.button.disabled = true;
@@ -199,10 +204,10 @@
         headers: {"X-Requested-With": "honeypot-dashboard"},
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const rows = await response.text();
-      if (!rows.trim()) state.total = nextOffset;
-      else state.body.insertAdjacentHTML("beforeend", rows);
-      updateRemoteTable(table);
+      const items = await response.text();
+      if (!items.trim()) state.total = nextOffset;
+      else state.body.insertAdjacentHTML("beforeend", items);
+      updateRemoteContainer(key);
     } catch (error) {
       state.counter.textContent = `Could not load more entries (${error.message})`;
     } finally {
@@ -211,15 +216,15 @@
     }
   };
 
-  const attachRemoteTable = (table, body) => {
+  const attachRemoteContainer = (key, body) => {
     const controls = document.createElement("div");
     controls.className = "hp-lazy-controls";
     controls.setAttribute("aria-live", "polite");
     controls.innerHTML = lazyControlsHTML();
-    table.after(controls);
+    key.after(controls);
     const state = {
       body,
-      total: Number.parseInt(body.dataset.hpTotal || `${body.rows.length}`, 10),
+      total: Number.parseInt(body.dataset.hpTotal || `${body.children.length}`, 10),
       offset: Number.parseInt(body.dataset.hpOffset || "0", 10),
       url: body.dataset.hpPageUrl,
       controls,
@@ -228,18 +233,18 @@
       sentinel: controls.querySelector(".hp-lazy-sentinel"),
       loading: false,
     };
-    state.sentinel.__hpRemoteTable = table;
-    state.button.addEventListener("click", () => loadRemoteRows(table));
-    remoteTables.set(table, state);
-    updateRemoteTable(table);
+    state.sentinel.__hpRemoteContainer = key;
+    state.button.addEventListener("click", () => loadRemoteItems(key));
+    remoteContainers.set(key, state);
+    updateRemoteContainer(key);
   };
 
   const attachLazyTable = table => {
-    if (lazyTables.has(table) || remoteTables.has(table) || table.dataset.hpNoLazy !== undefined) return;
+    if (lazyTables.has(table) || remoteContainers.has(table) || table.dataset.hpNoLazy !== undefined) return;
     const body = table.tBodies[0];
     if (!body) return;
     if (body.dataset.hpPageUrl) {
-      attachRemoteTable(table, body);
+      attachRemoteContainer(table, body);
       return;
     }
     const controls = document.createElement("div");
@@ -296,7 +301,11 @@
   };
 
   const attachLazyList = list => {
-    if (lazyLists.has(list)) return;
+    if (lazyLists.has(list) || remoteContainers.has(list)) return;
+    if (list.dataset.hpPageUrl) {
+      attachRemoteContainer(list, list);
+      return;
+    }
     const controls = document.createElement("div");
     controls.className = "hp-lazy-controls";
     controls.setAttribute("aria-live", "polite");

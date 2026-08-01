@@ -456,6 +456,26 @@ a.project-card { display: block; color: inherit; text-decoration: none; }
    hold; truncate with an ellipsis rather than wrapping a hash across
    several lines. */
 #ghidra-results .project-card__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-caption); }
+/* A payload's SHA-256 title is a real <a> here (not the whole card --
+   payload cards have several distinct actions, so they cannot be one big
+   link; see the "payloadrow" template comment), but is otherwise the same
+   long-hash-in-a-card problem as Ghidra's. The "..." action menu is a
+   sibling in the meta row, not part of the title, and stays pinned to the
+   row's trailing edge regardless of how long the origin-event text next to
+   it runs. */
+#payloads-results .project-card { cursor: default; }
+#payloads-results .project-card__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-caption);
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px dotted var(--border-strong);
+}
+#payloads-results .project-card__title:hover { color: var(--accent); border-color: var(--accent); }
+#payloads-results .project-card__meta { flex-wrap: wrap; }
+#payloads-results .project-card__meta .action-menu { margin-left: auto; }
 
 /* ── Leaflet attack map (dark-tile filter scoped to dark mode only) ─────── */
 .map-shell {
