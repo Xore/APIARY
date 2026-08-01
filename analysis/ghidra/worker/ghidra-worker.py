@@ -538,6 +538,27 @@ def build_call_graph(client: "GhidraClient", job: str, functions: list,
     return svg_path.name
 
 
+def generate_report(result: dict) -> str | None:
+    """Render this result as an HTML report via report/generate_report.py.
+
+    Mirrors sandbox/windows/orchestrate/run_sample.py's own
+    ``from generate_report import build_report`` pattern: a local sibling
+    import, not a pip dependency, and fail-soft the same way triage() and
+    fuzzy_hash() are — a report-rendering bug must not throw away a finished
+    analysis. Runs last, from the fully-assembled result dict, so it can
+    describe everything above it including its own absence.
+    """
+    try:
+        report_dir = str(Path(__file__).resolve().parent.parent / "report")
+        if report_dir not in sys.path:
+            sys.path.insert(0, report_dir)
+        from generate_report import build_report
+        return build_report(result, RESULTS_DIR)
+    except Exception as e:  # noqa: BLE001
+        log(f"  [!] report generation failed: {e!r}")
+        return None
+
+
 def endpoint_is_local(base: str) -> bool:
     """Is this model endpoint on the host or its own network?
 
@@ -1017,7 +1038,7 @@ def analyse_one(client: GhidraClient, sha: str, sample: Path,
     fuzzy = fuzzy_hash(sample)
     lief_info = lief_parse(sample)
 
-    return {
+    result = {
         "version": RESULT_VERSION,
         "sha256": sha,
         "requested_at": requested_at,
@@ -1040,11 +1061,14 @@ def analyse_one(client: GhidraClient, sha: str, sample: Path,
         "ai_triage": ai_triage,
         "fuzzy_hashes": fuzzy,
         "lief": lief_info,
-        # Populated by IMPLEMENTATION_PLAN.md phase 5 (#102), which is not
-        # built. Emitted as null rather than omitted so the dashboard reads one
-        # stable shape and needs no special case for older results.
+        # Overwritten below by generate_report(), which needs the rest of
+        # this dict built first. Emitted as null here rather than omitted so
+        # the dashboard reads one stable shape even if report generation
+        # fails and leaves it unset.
         "report_pdf": None,
     }
+    result["report_pdf"] = generate_report(result)
+    return result
 
 
 def drain() -> int:

@@ -1,15 +1,20 @@
 # Ghidra Payload Analysis — Implementation Plan
 
-> **Status**: Design document. Phases 3–5 are unbuilt, and phases 1–2 are
-> partly built — `ghidra_analyze.py` and five of the six `scripts/` exporters
-> exist (`findcrypt.py` was deleted, superseded by `scan_crypto()` in the
-> worker); the Rev·Deck compose file and the whole `report/` tree do not.  
+> **Status**: Design document. Phase 4 (plugin selection) and phase 3
+> (GhidrAssist) are unbuilt. Phases 1, 2 and 5 are built — five of the six
+> `scripts/` exporters exist (`findcrypt.py` was deleted, superseded by
+> `scan_crypto()` in the worker), the `revdeck` service is deployed
+> (profile-gated in `docker-compose.ghidra.yml`, interactive-only), and
+> `report/generate_report.py` renders an HTML report from every automated
+> worker result. Still missing: a verified request/result contract for
+> automating Rev·Deck triage, which is what the dashboard's `revdeck`
+> workbench adapter is waiting on.  
 > **Tracked in**: [#78](https://github.com/Xore/honeypot-stack/issues/78)
 > (phases 3–5), [#76](https://github.com/Xore/honeypot-stack/issues/76)
 > (dashboard spool and entry points),
 > [#85](https://github.com/Xore/honeypot-stack/issues/85) (non-Ghidra static
 > tooling)  
-> **Last updated**: 2026-07-31  
+> **Last updated**: 2026-08-01  
 > **Author**: honeypot-stack automated planning
 
 ---
@@ -39,8 +44,7 @@ honeypot-stack/
 └── analysis/
     └── ghidra/
         ├── IMPLEMENTATION_PLAN.md   ← this file
-        ├── docker-compose.ghidra.yml
-        ├── headless_analyze.sh      ← wrapper: runs Ghidra headless on a sample
+        ├── docker-compose.ghidra.yml   ← also defines revdeck, profile-gated
         ├── scripts/                 ← Ghidra Python scripts (Jython / Pyhidra)
         │   ├── export_functions.py
         │   ├── export_strings.py
@@ -49,18 +53,37 @@ honeypot-stack/
         │   ├── yara_scan.py         ← run YARA rules inside Ghidra
         │   └── call_graph.py
         ├── revdeck/                 ← biniamf/ai-reverse-engineering integration
-        │   ├── docker-compose.revdeck.yml   ← MISSING
         │   └── README.md
         ├── ghidrassist/             ← symgraph/GhidrAssist plugin config
         │   └── README.md
-        └── report/                  ← MISSING, entire directory (#78 phase 5)
-            ├── generate_report.py   ← combines all analysis → PDF
-            └── templates/
-                └── ghidra_report.html
+        └── report/
+            └── generate_report.py   ← {sha256}_ghidra.json → HTML report
 ```
 
-This is the *target* layout. Two entries marked MISSING do not exist:
-`revdeck/docker-compose.revdeck.yml` and the whole `report/` tree.
+This is the *target* layout. Every entry now exists.
+
+Three corrections against the layout this section used to show:
+
+- `headless_analyze.sh` is gone — deleted alongside `ghidra_analyze.py` under
+  [#107](https://github.com/Xore/honeypot-stack/issues/107); see
+  [Dashboard/Worker Integration](#dashboardworker-integration) below.
+- `revdeck/docker-compose.revdeck.yml` was never built as a standalone file.
+  The `revdeck` service was instead folded into `docker-compose.ghidra.yml`
+  itself, gated behind the `revdeck` profile (commits `9244b87`, `8e828f0`,
+  2026-08-01) — hardened (`read_only`, `cap_drop: ALL`, no-new-privileges),
+  reachable over the WireGuard `HP_BIND` address through the same Traefik +
+  forward-auth SSO path as every other investigation UI. `revdeck/` now holds
+  only its `README.md`. That closes the compose gap this document used to
+  list; the LLM automation *contract* on top of it — what #78 phase 2/3 and
+  the dashboard's `revdeck` workbench adapter
+  ([`workbench_domain.go`](../../dashboard/workbench_domain.go)) are actually
+  waiting on — is still unbuilt.
+- `report/` has no `templates/` subdirectory. [`generate_report.py`](report/generate_report.py)
+  follows [#56](https://github.com/Xore/honeypot-stack/issues/56)'s
+  `sandbox/windows/orchestrate/generate_report.py`, which doesn't use one
+  either — one Python file covering both HTML and inlined CSS isn't enough
+  code to be worth splitting.
+
 `scripts/export_imports.py` was added following the shape of its four
 siblings — it walks `FunctionManager.getExternalFunctions()` and writes
 `{address, name, library}` per import, same as the other exporters write
@@ -238,24 +261,45 @@ gradle buildExtension
 
 ---
 
-## Phase 5 — Report Generation ⬜ Planned
+## Phase 5 — Report Generation ✅ Built (2026-08-01, #78)
 
-Combine all analysis artifacts into a single PDF per sample:
+Built as [`report/generate_report.py`](report/generate_report.py), reusing the
+shape of [`sandbox/windows/orchestrate/generate_report.py`](../../sandbox/windows/orchestrate/generate_report.py)
+(#56) rather than inventing a second reporting style: offline, one escaping
+chokepoint (`esc()`), missing artifacts degrade to "not observed" instead of
+raising. `worker/ghidra-worker.py`'s `generate_report()` wrapper calls it
+(fail-soft, like `triage()`/`fuzzy_hash()`) as the last step of
+`analyse_one()`, writing `{sha256}_ghidra_report.html` beside the result JSON
+and recording its bare filename in the existing `report_pdf` field — the
+dashboard's `attachGhidraDownload` already serves it correctly, since
+`http.ServeContent` infers content-type from the filename extension rather
+than the field name.
+
+The original plan below described a single combined PDF pulling in VT,
+JoeSandbox, and CAPA data. That data doesn't exist in this pipeline — there is
+no Phase 0 VT/JoeSandbox stage and no CAPA integration (Phase 4 is still
+planned) — so the report actually built is scoped to what
+`worker/ghidra-worker.py` produces today:
 
 ```
-reports/ghidra/{sha256}_ghidra.pdf
-  ├── File metadata (hash, type, size, magic)
-  ├── VT detection summary (from Phase 0 pipeline)
-  ├── JoeSandbox score (from Phase 0 pipeline)
-  ├── Ghidra: function list + suspicious function pseudocode
-  ├── Ghidra: string table + interesting strings highlighted
-  ├── Ghidra: import table
-  ├── Ghidra: crypto constants (FindCrypt)
-  ├── Ghidra: call graph (rendered as SVG/PNG)
-  ├── CAPA results (behavior tags)
-  ├── AI triage summary (Rev·Deck output)
-  └── YARA rule suggestions
+{ghidra-results}/{sha256}_ghidra_report.html
+  ├── Sample metadata (hash, exit status, timing, analyzer/schema versions,
+  │     service_sha256 integrity check)
+  ├── Functions (address, name, signature, size)
+  ├── Strings
+  ├── Imports (library!name)
+  ├── Cryptographic constants (from scan_crypto())
+  ├── Call graph (inlined SVG, if build_call_graph() produced one)
+  ├── Structural info (lief: format, architecture, entry point, sections)
+  ├── Fuzzy hashes (ssdeep/tlsh)
+  └── AI triage (Rev·Deck / local-model output, if configured)
 ```
+
+A PDF is optional, not the default: `generate_report.py --pdf` renders one via
+WeasyPrint if it's installed, but the worker only ever produces the HTML file.
+CAPA output and YARA rule suggestions are not sections here — CAPA integration
+is still Phase 4 (`CapaExplorer`, unbuilt), and this pipeline does not generate
+YARA rule suggestions at all.
 
 ---
 
