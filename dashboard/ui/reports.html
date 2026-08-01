@@ -46,10 +46,6 @@
 .hp-rp-status { font-size: 12px; color: var(--text-muted); }
 .hp-rp-status[data-state="error"] { color: var(--danger); }
 .hp-rp-status[data-state="ok"] { color: var(--success); }
-.hp-rp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.hp-rp-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); padding: 8px 10px; border-bottom: 1px solid var(--border-strong); }
-.hp-rp-table td { padding: 9px 10px; border-bottom: 1px solid var(--border-subtle); vertical-align: middle; }
-.hp-rp-table tr:hover td { background: var(--surface-hover); }
 .hp-rp-tag { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--text-secondary); }
 .hp-rp-tag--light { background: var(--info-soft); color: var(--info); }
 .hp-rp-row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -76,12 +72,12 @@
         </header>
 
         <div data-hp-reports>
-          <div class="dashboard-tabs" role="tablist" aria-label="Reports studio steps">
-            <button class="dashboard-tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-design" data-dashboard-tab="design"><span>01</span>Design</button>
-            <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-scope" data-dashboard-tab="scope"><span>02</span>Scope</button>
-            <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-schedule" data-dashboard-tab="schedule"><span>03</span>Schedule</button>
-            <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-branding" data-dashboard-tab="branding"><span>04</span>Branding</button>
-            <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-library" data-dashboard-tab="library"><span>05</span>Library</button>
+          <div class="tabs" role="tablist" aria-label="Reports studio steps">
+            <button class="tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-design" data-dashboard-tab="design"><span>01</span>Design</button>
+            <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-scope" data-dashboard-tab="scope"><span>02</span>Scope</button>
+            <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-schedule" data-dashboard-tab="schedule"><span>03</span>Schedule</button>
+            <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-branding" data-dashboard-tab="branding"><span>04</span>Branding</button>
+            <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-library" data-dashboard-tab="library"><span>05</span>Library</button>
           </div>
 
           <form id="hp-rp-form" novalidate>
@@ -181,7 +177,7 @@
           <div class="card wide" id="hp-rp-definitions-card">
             <h2>Saved definitions</h2>
             <p class="note">Saved designs you can re-generate, refine, or schedule.</p>
-            <table class="hp-rp-table" id="hp-rp-definitions-table">
+            <table class="data-table" id="hp-rp-definitions-table">
               <thead><tr><th>Name</th><th>Template</th><th>Theme</th><th>Window</th><th>Schedule</th><th>Updated</th><th>Actions</th></tr></thead>
               <tbody id="hp-rp-definitions"></tbody>
             </table>
@@ -191,7 +187,7 @@
           <div class="card wide" id="hp-rp-generated-card">
             <h2>Generated reports</h2>
             <p class="note">Newest first. View inline, download the PDF, or delete stale artifacts.</p>
-            <table class="hp-rp-table" id="hp-rp-generated-table">
+            <table class="data-table" id="hp-rp-generated-table">
               <thead><tr><th>Title</th><th>Template</th><th>Theme</th><th>Origin</th><th>Created</th><th>Size</th><th>Actions</th></tr></thead>
               <tbody id="hp-rp-generated"></tbody>
             </table>

@@ -26,18 +26,18 @@
         </header>
 
         <div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:xl:grid-cols-5 tw:gap-3 tw:mb-6" id="overview-kpis">
-          <a class="hp-stat" href="/events" title="Open all normalized events in the current dashboard window"><span class="hp-stat-value">{{.Total}}</span><span class="hp-stat-label">All events</span></a>
-          <a class="hp-stat" href="/events?since=24h" title="Open events received during the last 24 hours"><span class="hp-stat-value">{{.Last24h}}</span><span class="hp-stat-label">Events in 24 hours</span><span class="hp-stat-detail" title="Compared with the directly preceding 24-hour period">{{.Change24h}} &bull; {{.ActivityState}}</span></a>
-          <a class="hp-stat" href="/ips" title="Distinct attacker source addresses observed by the sensors"><span class="hp-stat-value">{{.UniqueIPs}}</span><span class="hp-stat-label">Attack sources</span></a>
-          <a class="hp-stat" href="/events?type=login" title="Authentication attempts captured by interactive honeypots"><span class="hp-stat-value">{{.Logins}}</span><span class="hp-stat-label">Login attempts</span></a>
-          <a class="hp-stat" href="/events?type=download" title="Downloads, uploads, and high-confidence script artifacts captured safely"><span class="hp-stat-value">{{.Downloads}}</span><span class="hp-stat-label">Captured payloads</span></a>
+          <a class="metric" href="/events" title="Open all normalized events in the current dashboard window"><div class="metric__value">{{.Total}}</div><div class="metric__label">All events</div></a>
+          <a class="metric" href="/events?since=24h" title="Open events received during the last 24 hours"><div class="metric__value">{{.Last24h}}</div><div class="metric__label">Events in 24 hours</div><div class="metric__trend" title="Compared with the directly preceding 24-hour period">{{.Change24h}} &bull; {{.ActivityState}}</div></a>
+          <a class="metric" href="/ips" title="Distinct attacker source addresses observed by the sensors"><div class="metric__value">{{.UniqueIPs}}</div><div class="metric__label">Attack sources</div></a>
+          <a class="metric" href="/events?type=login" title="Authentication attempts captured by interactive honeypots"><div class="metric__value">{{.Logins}}</div><div class="metric__label">Login attempts</div></a>
+          <a class="metric" href="/events?type=download" title="Downloads, uploads, and high-confidence script artifacts captured safely"><div class="metric__value">{{.Downloads}}</div><div class="metric__label">Captured payloads</div></a>
         </div>
 
-        <div class="dashboard-tabs" role="tablist" aria-label="Dashboard views">
-          <button class="dashboard-tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-live" data-dashboard-tab="live"><span>01</span>Live operations</button>
-          <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-threats" data-dashboard-tab="threats"><span>02</span>Threat landscape</button>
-          <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-behavior" data-dashboard-tab="behavior"><span>03</span>Attacker behavior</button>
-          <button class="dashboard-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-evidence" data-dashboard-tab="evidence"><span>04</span>Evidence &amp; campaigns</button>
+        <div class="tabs" role="tablist" aria-label="Dashboard views">
+          <button class="tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-live" data-dashboard-tab="live"><span>01</span>Live operations</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-threats" data-dashboard-tab="threats"><span>02</span>Threat landscape</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-behavior" data-dashboard-tab="behavior"><span>03</span>Attacker behavior</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-evidence" data-dashboard-tab="evidence"><span>04</span>Evidence &amp; campaigns</button>
         </div>
 
         <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-live" role="tabpanel" data-dashboard-panel="live">
@@ -80,7 +80,7 @@
             <h2>Sensor feeds</h2>
             <p class="note">Active = recent traffic, quiet = online with no recent event, stale = its log has stopped updating. A quiet honeypot is not necessarily offline.</p>
             {{if .Sensors}}
-            <table><tbody>
+            <table class="data-table"><tbody>
               {{range .Sensors}}
               <tr><td class="n">{{.Count}}</td>
                   <td><a class="badge b-{{.Name}}" href="{{.Link}}">{{.Name}}</a></td>
@@ -97,7 +97,7 @@
           <div class="card wide">
             <h2>Recent events</h2>
             {{if .Recent}}
-            <table class="recent">
+            <table class="recent data-table">
               <thead><tr><th>time</th><th>sensor</th><th>source ip</th><th>port</th><th>detail</th></tr></thead>
               <tbody>
               {{range .Recent}}{{template "everow" .}}{{end}}
@@ -140,7 +140,7 @@
             <h2>Captured payloads</h2>
             <p class="note">Inert copies of malware and high-confidence scripts captured by Dionaea, Cowrie, and command telemetry. Static analysis never executes the payload.</p>
             {{if .Payloads}}
-            <table>
+            <table class="data-table">
               <thead><tr><th>seen</th><th>sha-256</th><th>attacker target path</th><th>lookup</th></tr></thead>
               <tbody>
               {{range .Payloads}}
@@ -160,7 +160,7 @@
             <h2>Correlated campaigns â€” rolling 7 days</h2>
             <p class="note">Groups related source networks across sensors. Score rises with volume, sensor/port spread, reused credentials, payloads, IDS alerts, and matching fingerprints.</p>
             {{if .Campaigns}}
-            <table class="recent">
+            <table class="recent data-table">
               <thead><tr><th>score</th><th>network</th><th>events</th><th>ips</th><th>sensors</th><th>ports</th><th>creds</th><th>files</th><th>alerts</th><th>ASNs</th><th>provider</th><th>fingerprints</th><th>sequence</th><th>first</th><th>last</th></tr></thead>
               <tbody>{{template "campaignrows" .Campaigns}}</tbody>
             </table>

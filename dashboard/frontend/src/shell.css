@@ -159,25 +159,15 @@
   50%      { box-shadow: 0 0 0 6px color-mix(in srgb, var(--success) 4%, transparent); }
 }
 
-/* ── KPI tiles (neutral; severity lives in text/badges, not tiles) ──────── */
-.hp-stat {
-  display: block;
-  background: var(--surface-1);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-panel);
-  padding: 14px 15px;
-  text-decoration: none;
-  transition: border-color var(--transition-fast), background var(--transition-fast);
-}
-.hp-stat:hover { border-color: var(--border-strong); background: var(--surface-2); }
-.hp-stat-value { display: block; font-size: 24px; font-weight: 600; letter-spacing: -0.03em; line-height: 1.15; color: var(--text-primary); }
-.hp-stat-value--text { font-size: 14px; font-weight: 600; line-height: 1.4; }
-.hp-stat-label {
-  display: block; margin-top: 6px;
-  font-size: 11px;
-  color: var(--text-muted);
-}
-.hp-stat-detail { display: block; margin-top: 4px; font-size: 11px; color: var(--text-secondary); }
+/* ── KPI tiles ──────────────────────────────────────────────────────────
+   theme.css's .metric/.metric__* owns the tile box, value, label, and
+   trend text (#191 -- this used to be a parallel .hp-stat implementation
+   of the exact same component). Several dashboard tiles are links
+   (overview, source-health link a KPI to the page it summarizes); theme's
+   .metric has no anchor variant, so that's the one bit of glue left here. */
+a.metric { display: block; text-decoration: none; transition: border-color var(--transition-fast), background var(--transition-fast); }
+a.metric:hover { border-color: var(--border-strong); background: var(--surface-2); }
+.metric__value--text { font-size: 14px; font-weight: 600; line-height: 1.4; }
 
 /* ── Card grid placement (theme.css owns .card visuals) ─────────────────── */
 .card { grid-column: span 4; margin-bottom: 0; overflow: hidden; }
@@ -251,49 +241,33 @@
   .live-panel { align-items: flex-start; }
 }
 
-/* ── Dashboard tabs (mirrors theme .tabs/.tab) ──────────────────────────── */
-.dashboard-tabs {
-  grid-column: 1 / -1;
-  display: flex; flex-wrap: wrap; gap: 2px;
-  margin-bottom: 16px; padding: 3px;
-  background: var(--surface-1);
-  border: 1px solid var(--border-subtle);
-  border-radius: calc(var(--radius-control) + 3px);
-}
-.dashboard-tab {
-  display: flex; align-items: center; gap: 8px;
-  min-height: 28px; padding: 5px 10px;
-  border: none; border-radius: var(--radius-control);
-  background: transparent; color: var(--text-secondary);
-  font-size: 12px; font-family: inherit;
-  cursor: pointer; transition: background var(--transition-fast), color var(--transition-fast);
-}
-.dashboard-tab span {
+/* ── Dashboard tabs ─────────────────────────────────────────────────────
+   theme.css's .tabs/.tab owns the chrome (border, background, radius,
+   active/hover color) -- this used to be a parallel .dashboard-tabs/
+   .dashboard-tab implementation of the same component (#191). What's left:
+   the tab bar sits in a CSS grid of .card elements and must span every
+   column (theme's .tabs is inline-flex, sized for a plain row); and each
+   tab carries a numbered badge <span> theme's plain-text .tab has no
+   concept of. */
+.tabs { grid-column: 1 / -1; display: flex; flex-wrap: wrap; margin-bottom: 16px; }
+.tabs .tab { display: flex; align-items: center; gap: 8px; }
+.tabs .tab span {
   display: grid; place-items: center;
   width: 20px; height: 20px; border-radius: 5px;
   background: var(--surface-2); color: var(--text-muted);
   font: 700 9px var(--hp-mono);
 }
-.dashboard-tab:hover { color: var(--text-primary); }
-.dashboard-tab.active { background: var(--surface-3); color: var(--text-primary); }
-.dashboard-tab.active span { background: var(--accent); color: var(--text-on-accent); }
+.tabs .tab.active span { background: var(--accent); color: var(--text-on-accent); }
 .dashboard-panel { animation: hp-panel-in 150ms ease-out; }
 @keyframes hp-panel-in { from { opacity: 0.35; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
-/* ── Data tables (dashboard tables are unclassed; theme owns .data-table) ─ */
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th {
-  padding: 8px 10px; border-bottom: 1px solid var(--border-subtle);
-  font-size: 11px; font-weight: 500;
-  color: var(--text-muted); text-align: left;
-}
-td {
-  padding: 10px; border-bottom: 1px solid var(--border-subtle);
-  color: var(--text-primary); font-size: 12px; vertical-align: top;
-}
-tbody tr:last-child td { border-bottom: none; }
-tbody tr { transition: background var(--transition-fast); }
-tbody tr:hover { background: var(--surface-hover); }
+/* ── Data tables ────────────────────────────────────────────────────────
+   theme.css's .data-table owns the box model (padding, border-bottom
+   rules, row hover) -- every table in the dashboard now carries that
+   class (#191; used to be unclassed and reimplemented here). What's left
+   is honeypot-specific column semantics theme has no concept of: numeric/
+   value/age/state columns and the sensor-hue badges below. */
+.data-table tbody tr { transition: background var(--transition-fast); }
 td.n { color: var(--accent); font-family: var(--hp-mono); font-size: 12px; text-align: right; white-space: nowrap; }
 td.n a { color: inherit; text-decoration: none; border-bottom: 1px dotted color-mix(in srgb, var(--accent) 45%, transparent); }
 td.n a:hover { color: var(--text-primary); border-color: var(--accent); }

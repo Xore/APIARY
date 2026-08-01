@@ -23,10 +23,6 @@
 .hp-cap-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 .hp-cfg-source{margin:6px 0 0;font-size:11px;color:var(--text-muted)}
 .hp-cfg-source strong{color:var(--text-secondary);font-weight:600}
-.hp-table-wrap{overflow-x:auto}
-.hp-table{width:100%;border-collapse:collapse;font-size:13px}
-.hp-table th{text-align:left;padding:8px 10px;color:var(--text-muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border-subtle)}
-.hp-table td{padding:8px 10px;border-bottom:1px solid var(--border-subtle);color:var(--text-secondary)}
 .hp-audit-filter{width:auto;min-width:180px}
 .hp-rev-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border-subtle)}
 .hp-rev-row:last-child{border-bottom:0}

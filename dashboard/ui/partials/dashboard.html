@@ -152,7 +152,7 @@
 <div class="card {{.class}}">
   <h2>{{.t}}</h2>
   {{if .rows}}
-  <table><tbody>
+  <table class="data-table"><tbody>
     {{range .rows}}<tr><td class="n">{{if .Link}}<a href="{{.Link}}" title="show all {{.Count}} related events">{{.Count}}</a>{{else}}{{.Count}}{{end}}</td><td class="v">{{if .Link}}<a href="{{.Link}}" title="{{if .Title}}{{.Title}}{{else}}show all related events{{end}}">{{.Key}}</a>{{else}}{{.Key}}{{end}}</td></tr>{{end}}
   </tbody></table>
   {{else}}<p class="empty">{{if .hint}}{{.hint}}{{else}}(none){{end}}</p>{{end}}
@@ -160,5 +160,5 @@
 {{end}}
 
 {{define "techniques"}}
-{{if .}}<div class="card wide"><h2>MITRE ATT&amp;CK behavior mapping</h2><p class="note">Evidence-based behavioral context only; this does not identify or attribute an actor.</p><table><thead><tr><th>domain</th><th>technique</th><th>observations</th><th>evidence</th></tr></thead><tbody>{{range .}}<tr><td><span class="badge badge--muted">{{.Domain}}</span></td><td class="v"><a href="{{.URL}}" target="_blank" rel="noopener noreferrer">{{.ID}} &mdash; {{.Name}}</a></td><td class="n">{{.Count}}</td><td class="v">{{.Evidence}}</td></tr>{{end}}</tbody></table></div>{{end}}
+{{if .}}<div class="card wide"><h2>MITRE ATT&amp;CK behavior mapping</h2><p class="note">Evidence-based behavioral context only; this does not identify or attribute an actor.</p><table class="data-table"><thead><tr><th>domain</th><th>technique</th><th>observations</th><th>evidence</th></tr></thead><tbody>{{range .}}<tr><td><span class="badge badge--muted">{{.Domain}}</span></td><td class="v"><a href="{{.URL}}" target="_blank" rel="noopener noreferrer">{{.ID}} &mdash; {{.Name}}</a></td><td class="n">{{.Count}}</td><td class="v">{{.Evidence}}</td></tr>{{end}}</tbody></table></div>{{end}}
 {{end}}

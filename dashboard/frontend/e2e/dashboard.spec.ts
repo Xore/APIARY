@@ -130,7 +130,7 @@ test.describe("dashboard browser behaviour", () => {
 
       const incoming = document.createElement("div");
       incoming.innerHTML = `
-        <div class="dashboard-tabs" data-browser-replacement="tabs"></div>
+        <div class="tabs" data-browser-replacement="tabs"></div>
         <div id="panel-live" data-dashboard-panel="live">
           <div data-browser-replacement="before"></div>
           <div data-attack-map-card><div id="replacement-map">replace me</div></div>

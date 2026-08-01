@@ -56,10 +56,12 @@ invariants) in `Xore/theme`.
   back into a `page_*.go` breaks CI.
 - **Tailwind v4 on top of the vendored theme.** `src/shell.css` maps the
   theme's CSS custom properties onto `tw:` utilities via `@theme inline` (so
-  utilities follow dark, light, and system modes) and keeps only
-  dashboard-specific component rules (`.hp-stat`, `overview-header`, sensor
-  `badge b-*`, `table.recent`, Leaflet overrides, command-dock internals).
-  It compiles to `static/hp-tailwind.css` with the `tw:` prefix and
+  utilities follow dark, light, and system modes). KPI tiles, tabs, and data
+  tables are theme.css's own `.metric`, `.tabs`/`.tab`, and `.data-table`
+  primitives now (#191); what's left here is genuinely dashboard-specific:
+  `overview-header`, sensor `badge b-*` hues, per-column table semantics
+  (`td.n`/`td.v`/`td.ago`/`td.state`), Leaflet overrides, command-palette
+  internals. It compiles to `static/hp-tailwind.css` with the `tw:` prefix and
   `important`. `@source` scans `../../ui/**/*.html` and `../../static/hp-app.js`
   for utility usage — so a `tw:` class added to a Go file would be silently
   dropped from the bundle, which is a second reason markup belongs in `ui/`.

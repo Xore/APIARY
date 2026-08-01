@@ -389,7 +389,7 @@
   window.initHoneypotMaps = initMaps;
 
   /* ---------- workspace tabs ----------
-     Any page can group its cards: render .dashboard-tabs buttons with
+     Any page can group its cards: render .tabs buttons with
      data-dashboard-tab and matching [data-dashboard-panel] sections. The valid
      names come from the DOM, so a page declares its own views without this
      controller knowing them. The first tab is the default. */
@@ -426,7 +426,7 @@
 
     const childKey = element => {
       if (element.id) return `#${element.id}`;
-      if (element.matches(".dashboard-tabs")) return "overview-tabs";
+      if (element.matches(".tabs")) return "overview-tabs";
       return "";
     };
     [...source.children].forEach(incoming => {
@@ -435,7 +435,7 @@
       if (!key) return;
       const current = key.startsWith("#")
         ? pageContent.querySelector(`:scope > ${key}`)
-        : pageContent.querySelector(":scope > .dashboard-tabs");
+        : pageContent.querySelector(":scope > .tabs");
       current?.replaceWith(incoming);
     });
 
