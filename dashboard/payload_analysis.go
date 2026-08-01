@@ -65,6 +65,7 @@ type binaryAnalysis struct {
 	YARAScanned    string
 	YARAError      string
 	SandboxRuns    []sandboxResult
+	GitHubAnalysis *githubAnalysisResult
 	VT             string
 }
 
@@ -123,6 +124,13 @@ func (s *store) analyzePayload(name string) (binaryAnalysis, error) {
 	for _, run := range loadSandboxResults() {
 		if strings.EqualFold(run.SHA256, a.SHA256) {
 			a.SandboxRuns = append(a.SandboxRuns, run)
+		}
+	}
+	for _, result := range loadGitHubAnalysisResults() {
+		if strings.EqualFold(result.SHA256, a.SHA256) {
+			row := result
+			a.GitHubAnalysis = &row
+			break
 		}
 	}
 	if len(a.YARAMatches) > 0 {

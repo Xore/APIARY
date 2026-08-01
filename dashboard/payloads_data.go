@@ -36,6 +36,16 @@ type capturedFile struct {
 	// cost on every scan, not one file on demand.
 	Preview          string
 	PreviewTruncated bool
+	// GitHubAnalysisURL/GitHubAnalysisLabel back the /payloads list verdict
+	// badge. Populated by a cheap exact-hash match against results already
+	// keyed by SHA256 (see payloadsData): this catches every SHA256-named
+	// capture, but not a Dionaea file named by its MD5 -- computing that
+	// file's real SHA256 for every row on every list render would make the
+	// already-expensive directory scan worse for a badge nothing else on
+	// this page pays that cost for. /payload-analysis/{hash} always shows it
+	// correctly regardless of source, because it hashes the full content.
+	GitHubAnalysisURL   string
+	GitHubAnalysisLabel string
 }
 
 // payloadPreviewCap bounds the /payloads list preview action -- distinct
@@ -101,6 +111,10 @@ func (s *store) payloadsData(filter string) payloadsPage {
 	for i := range p.Sources {
 		p.Sources[i].Active = p.Sources[i].Name == filter
 	}
+	verdicts := map[string]githubAnalysisResult{}
+	for _, result := range loadGitHubAnalysisResults() {
+		verdicts[result.SHA256] = result
+	}
 	var total int64
 	for _, file := range base.Files {
 		if filter != "" {
@@ -113,6 +127,13 @@ func (s *store) payloadsData(filter string) payloadsPage {
 			}
 			if !matched {
 				continue
+			}
+		}
+		if result, ok := verdicts[file.Hash]; ok {
+			file.GitHubAnalysisURL = "/github-analysis/" + file.Hash
+			file.GitHubAnalysisLabel = result.ExitStatus
+			if result.Verdict != nil {
+				file.GitHubAnalysisLabel = fmt.Sprintf("%d/%d %s", result.Verdict.Malicious, result.Verdict.Total, result.Verdict.Level)
 			}
 		}
 		p.Files = append(p.Files, file)
