@@ -273,13 +273,30 @@ only). Same as Rev·Deck, it is:
 
 ### Install
 
-[`ghidrassist/README.md`](ghidrassist/README.md) has the full procedure. In
-short: download a pinned, checksummed release ZIP (`ghidra_<version>_PUBLIC_<date>_GhidrAssist.zip`
-from a [GhidrAssist release](https://github.com/symgraph/GhidrAssist/releases),
-matching this repo's practice of pinning third-party artifacts by digest)
-rather than cloning source and running `gradle buildExtension` against an
-unpinned `HEAD` — no Gradle/Ghidra-SDK build toolchain needed, and no
-unverified upstream code executes locally as part of the build.
+[`ghidrassist/README.md`](ghidrassist/README.md) has the full procedure.
+**Updated 2026-08-01 (#225)**: building from a pinned source commit
+(`gradle buildExtension` against `2.2.0`, commit
+`c436fcb55d2b43f4341c7aa76c90d9be8c147da1`) is now the recommended path, not
+the rejected one this section originally argued against — the earlier
+reasoning ("no unverified upstream code executes locally") had it backwards:
+a *pinned commit* is exactly as verified as a pinned release asset, and
+sidesteps the leak below entirely rather than requiring every future
+install to remember to strip three specific paths by hand. Verified for
+real, not just argued for: built cleanly against a real Ghidra 12.1 install,
+output inspected file-by-file, no leaked paths present. The pinned-zip path
+(below) remains documented as a faster alternative for anyone who doesn't
+want to set up a local Gradle/Ghidra-SDK build.
+
+**Found while verifying the from-source build**: `2.2.0` does not build
+against Ghidra **11.3.2** — this repo's own pinned
+`biniamfd/ghidra-headless-rest` version — at all (`ghidra.program.model.
+listing.CommentType` does not exist in that API). Confirmed independently:
+`2.2.0`'s own release only ships prebuilt zips for Ghidra `12.0`/`12.1`, no
+`11.3.2` asset exists either. Not a regression from this phase — GhidrAssist
+was never runnable against the headless container in the first place, it
+only ever ran in an analyst's own local Ghidra GUI (a separate install,
+likely already 12.x) — but worth recording precisely rather than leaving an
+implicit assumption unverified.
 
 **The release zip needs one manual step before installing.** Checked the
 2.0.0, 2.1.0 and 2.2.0 release assets: all three bundle the maintainer's own
@@ -288,7 +305,9 @@ index, and a `.claude/settings.local.json` leaking their home directory path
 — none of which are in GhidrAssist's tracked source tree. Tracked as
 [#192](https://github.com/Xore/honeypot-stack/issues/192); the README's
 install steps strip the three leaked paths from the extracted zip before
-pointing Ghidra's extension installer at it.
+pointing Ghidra's extension installer at it. The from-source build above
+does not need this step at all — the leak only exists in the packaged
+release asset, never in the source tree it's built from.
 
 ---
 
