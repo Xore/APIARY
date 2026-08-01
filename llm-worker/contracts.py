@@ -17,8 +17,8 @@ from typing import Annotated, Literal, TypeVar
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 
-SCHEMA_VERSION = "1"
-SESSION_PROMPT_VERSION = "session-v1"
+SCHEMA_VERSION = "2"
+SESSION_PROMPT_VERSION = "session-v2"
 PAYLOAD_PROMPT_VERSION = "payload-v1"
 REPORT_PROMPT_VERSION = "report-v1"
 
@@ -33,6 +33,8 @@ Rules:
 
 INTENTS = (
     "reconnaissance",
+    "persistence",
+    "credential-access",
     "payload-deployment",
     "cryptomining",
     "botnet-recruitment",
@@ -54,6 +56,9 @@ _SECRET_ASSIGNMENT_RE = re.compile(
     r"(?i)\b(password|passwd|token|secret|api[_-]?key)\s*([=:])\s*([^\s'\";]{1,512})"
 )
 _CREDENTIAL_URL_RE = re.compile(r"(?i)(https?://)([^/\s:@]+):([^/\s@]+)@")
+_CHPASSWD_CREDENTIAL_RE = re.compile(
+    r"(?i)(\b(?:echo|printf)\s+)([\"']?)([a-z_][a-z0-9_.-]{0,31}):([^|\"'\r\n]{1,512})(\2)(\s*\|\s*chpasswd\b)"
+)
 _URL_RE = re.compile(r"(?i)\bhttps?://[^\s<>'\"]{1,512}")
 _IP_RE = re.compile(r"(?<![\w:])(?:\d{1,3}\.){3}\d{1,3}(?![\w:])")
 _DOMAIN_RE = re.compile(
@@ -79,6 +84,20 @@ _OUTBOUND_RE = re.compile(
 _ALTERNATE_EGRESS_RE = re.compile(
     r"(?i)(/etc/hosts|socket\.create_connection|raw\s+socket|alternate.{0,24}egress)"
 )
+_SSH_PERSISTENCE_RE = re.compile(
+    r"(?i)(?:\.ssh/authorized_keys|\bauthorized_keys\b|chattr\s+\+i.{0,80}(?:\.ssh|authorized_keys))"
+)
+_ACCOUNT_CREDENTIAL_CHANGE_RE = re.compile(
+    r"(?i)(?:\bchpasswd\b|\bpasswd\s+(?:--stdin\s+)?(?:root|[a-z_][a-z0-9_.-]{0,31})\b)"
+)
+_PASSWORD_CRACKING_TOOL_RE = re.compile(r"(?i)\b(?:hashcat|john|hydra|medusa|ncrack)\b")
+_PASSWORD_CRACKING_CLAIM_RE = re.compile(r"(?i)\bpassword cracking\b")
+_SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+")
+_LINUX_SESSION_RE = re.compile(r"(?i)(?:/(?:root|etc|proc)/|\bchpasswd\b|\bauthorized_keys\b)")
+_SUDO_RE = re.compile(r"(?i)\bsudo\b")
+_SSH_HIJACK_RE = re.compile(
+    r"(?i)(?:SSH_AUTH_SOCK|/tmp/ssh-|tmux\s+attach|screen\s+-x|hijack.{0,40}ssh)"
+)
 
 
 class StrictAnnotation(BaseModel):
@@ -95,6 +114,8 @@ class SessionAnalysis(StrictAnnotation):
     summary: str = Field(min_length=1, max_length=1200)
     intent: Literal[
         "reconnaissance",
+        "persistence",
+        "credential-access",
         "payload-deployment",
         "cryptomining",
         "botnet-recruitment",
@@ -177,7 +198,14 @@ class SanitizedText:
 
 def _redact_secrets(value: str) -> str:
     value = _SECRET_ASSIGNMENT_RE.sub(lambda match: f"{match.group(1)}{match.group(2)}[REDACTED]", value)
-    return _CREDENTIAL_URL_RE.sub(r"\1[REDACTED]@", value)
+    value = _CREDENTIAL_URL_RE.sub(r"\1[REDACTED]@", value)
+    return _CHPASSWD_CREDENTIAL_RE.sub(
+        lambda match: (
+            f"{match.group(1)}{match.group(2)}{match.group(3)}:[REDACTED]"
+            f"{match.group(5)}{match.group(6)}"
+        ),
+        value,
+    )
 
 
 def sanitize_text(value: object, max_chars: int) -> SanitizedText:
@@ -241,6 +269,8 @@ def deterministic_flags(text: str) -> list[str]:
     encoded = bool(_ENCODING_RE.search(text))
     outbound = bool(_OUTBOUND_RE.search(text))
     alternate = bool(_ALTERNATE_EGRESS_RE.search(text))
+    ssh_persistence = bool(_SSH_PERSISTENCE_RE.search(text))
+    credential_change = bool(_ACCOUNT_CREDENTIAL_CHANGE_RE.search(text))
     if credential:
         flags.append("credential_access")
     if encoded:
@@ -249,9 +279,24 @@ def deterministic_flags(text: str) -> list[str]:
         flags.append("outbound_transfer")
     if alternate:
         flags.append("alternate_egress")
+    if ssh_persistence:
+        flags.append("ssh_authorized_keys_persistence")
+    if credential_change:
+        flags.append("account_credential_change")
     if credential and encoded and outbound:
         flags.append("critical_credential_exfiltration_chain")
     return flags
+
+
+def _correct_password_cracking_summary(summary: str) -> str:
+    """Replace an unsupported cracking sentence without changing its polarity."""
+    sentences = _SENTENCE_BOUNDARY_RE.split(summary.strip())
+    grounded = [sentence for sentence in sentences if not _PASSWORD_CRACKING_CLAIM_RE.search(sentence)]
+    grounded.append(
+        "A captured chpasswd/passwd command changes an account credential; "
+        "no password-cracking tool is present."
+    )
+    return " ".join(grounded)[:1200]
 
 
 def postprocess_annotation(annotation: AnnotationT, evidence: str) -> tuple[AnnotationT, list[str]]:
@@ -260,6 +305,39 @@ def postprocess_annotation(annotation: AnnotationT, evidence: str) -> tuple[Anno
     updates: dict[str, object] = {}
     if hasattr(annotation, "iocs"):
         updates["iocs"] = extract_iocs(evidence)
+    persistence_evidence = any(
+        flag in flags for flag in ("ssh_authorized_keys_persistence", "account_credential_change")
+    )
+    if isinstance(annotation, SessionAnalysis):
+        grounded_mitre = list(annotation.mitre_attack)
+        corrected_mitre = False
+        if _LINUX_SESSION_RE.search(evidence) and "T1548.002" in grounded_mitre:
+            grounded_mitre.remove("T1548.002")
+            corrected_mitre = True
+            if _SUDO_RE.search(evidence) and "T1548.003" not in grounded_mitre:
+                grounded_mitre.append("T1548.003")
+        if "T1563.001" in grounded_mitre and not _SSH_HIJACK_RE.search(evidence):
+            grounded_mitre.remove("T1563.001")
+            corrected_mitre = True
+        if persistence_evidence:
+            updates["intent"] = "persistence"
+        if "ssh_authorized_keys_persistence" in flags and "T1098.004" not in grounded_mitre:
+            grounded_mitre.append("T1098.004")
+        if "account_credential_change" in flags and "T1098" not in grounded_mitre:
+            grounded_mitre.append("T1098")
+        if grounded_mitre != annotation.mitre_attack:
+            updates["mitre_attack"] = grounded_mitre[:20]
+        if corrected_mitre:
+            flags.append("corrected_ungrounded_mitre")
+    if persistence_evidence and hasattr(annotation, "severity") and annotation.severity in {"low", "medium"}:
+        updates["severity"] = "high"
+    if (
+        "account_credential_change" in flags
+        and not _PASSWORD_CRACKING_TOOL_RE.search(evidence)
+        and _PASSWORD_CRACKING_CLAIM_RE.search(annotation.summary)
+    ):
+        updates["summary"] = _correct_password_cracking_summary(annotation.summary)
+        flags.append("corrected_password_cracking_claim")
     if "critical_credential_exfiltration_chain" in flags and hasattr(annotation, "severity"):
         updates["severity"] = "critical"
     if not updates:
@@ -275,6 +353,12 @@ Session metadata: duration={max(0.0, duration_seconds):.1f}s, commands={max(0, c
 <untrusted_data>
 {transcript.text}
 </untrusted_data>
+
+Ground every claim in the captured commands. Installing SSH authorized keys or changing an
+account password is persistence. A chpasswd/passwd command changes credentials; do not call
+it password cracking unless actual cracking or brute-force tooling is present.
+Only emit an ATT&CK ID when specific command evidence supports it. An ordinary SSH login is
+not SSH Session Hijacking (T1563.001). T1548.002 is Windows-only; Linux sudo is T1548.003.
 
 Return JSON with exactly these keys:
 {{

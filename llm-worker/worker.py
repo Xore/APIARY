@@ -52,7 +52,7 @@ from contracts import (
 )
 
 
-WORKER_VERSION = "0.2.0"
+WORKER_VERSION = "0.3.0"
 ANALYSIS_INDEX = "llm-analysis"
 STATE_INDEX = "llm-worker-state"
 STATUS_PATH = Path(
@@ -62,6 +62,12 @@ MODEL_RESPONSE_CAP = 64 * 1024
 HASH_NAME_RE = re.compile(r"(?i)^[0-9a-f]{32,64}$")
 MODEL_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 KEEP_ALIVE_RE = re.compile(r"^(?:0|[1-9][0-9]*[smh])$")
+COWRIE_SESSION_EVENT_IDS = (
+    "cowrie.command.input",
+    "cowrie.command.failed",
+    "cowrie.login.success",
+    "cowrie.session.closed",
+)
 LOG = logging.getLogger("llm-worker")
 
 AnnotationT = TypeVar("AnnotationT", bound=StrictAnnotation)
@@ -159,6 +165,7 @@ class Config:
     max_jobs_per_cycle: int
     max_payload_scan_files: int
     session_idle_seconds: int
+    session_lookback_seconds: int
     daily_report_hour: int
     context_length: int
     output_tokens: int
@@ -194,6 +201,7 @@ class Config:
             max_jobs_per_cycle=env_int("MAX_JOBS_PER_CYCLE", 20, 1, 100),
             max_payload_scan_files=env_int("MAX_PAYLOAD_SCAN_FILES", 5000, 20, 50000),
             session_idle_seconds=env_int("SESSION_IDLE_SECONDS", 300, 30, 86400),
+            session_lookback_seconds=env_int("SESSION_LOOKBACK_SECONDS", 3600, 300, 604800),
             daily_report_hour=env_int("DAILY_REPORT_HOUR", 6, 0, 23),
             context_length=env_int("LLM_CONTEXT_LENGTH", 8192, 2048, 8192),
             output_tokens=env_int("LLM_OUTPUT_TOKENS", 512, 128, 2048),
@@ -238,6 +246,16 @@ class Config:
             raise ValueError("OLLAMA_URL must be an uncredentialed local/internal HTTP endpoint")
         if not self.expected_model_digest:
             raise ValueError("synthetic canary requires LLM_EXPECTED_MODEL_DIGEST")
+
+    def validate_production_session_canary(self) -> None:
+        """Restrict the authorized production canary to one U1 result."""
+        self.validate_mode()
+        if self.dry_run or not self.session_enabled:
+            raise ValueError("production session canary requires captured U1 mode")
+        if self.payload_enabled or self.daily_report_enabled:
+            raise ValueError("production session canary requires U2 and daily reports to remain disabled")
+        if self.max_jobs_per_cycle != 1:
+            raise ValueError("production session canary requires MAX_JOBS_PER_CYCLE=1")
 
 
 class ModelRequestError(RuntimeError):
@@ -580,7 +598,7 @@ class LLMWorker:
                 return value
         except NotFoundError:
             pass
-        return (utcnow() - timedelta(hours=1)).isoformat()
+        return (utcnow() - timedelta(seconds=self.config.session_lookback_seconds)).isoformat()
 
     def save_checkpoint(self, job: str, timestamp: str) -> None:
         assert self.es is not None
@@ -609,11 +627,15 @@ class LLMWorker:
                     "bool": {
                         "filter": [
                             {"range": {"@timestamp": {"gt": since}}},
-                            {"term": {"event.sensor": "cowrie"}},
+                            {"terms": {"honeypot.eventid": list(COWRIE_SESSION_EVENT_IDS)}},
                         ]
                     }
                 },
-                "sort": [{"@timestamp": {"order": "asc"}}, {"_id": {"order": "asc"}}],
+                # Elasticsearch 8.13 returns zero data-stream hits when `_id`
+                # is used as a sort key. Timestamp-only ordering is safe for
+                # this bounded, idempotent accumulator; #132 owns the stable
+                # promoted cursor fields needed for a stronger tie-breaker.
+                "sort": [{"@timestamp": {"order": "asc"}}],
                 "size": self.config.max_events_per_cycle,
                 "_source": [
                     "@timestamp",
@@ -631,19 +653,45 @@ class LLMWorker:
         )
         hits = response.get("hits", {}).get("hits", [])
         latest = ""
+        usable = 0
+        accumulated = 0
+        close_only_skipped = 0
         for hit in hits:
             source = hit.get("_source") if isinstance(hit.get("_source"), dict) else {}
             session_id = bounded_string(nested(source, "honeypot", "session"), 128)
             timestamp = bounded_string(source.get("@timestamp"), 64)
             if not session_id or not timestamp:
                 continue
+            usable += 1
             accumulator = self.load_accumulator(session_id)
+            event_id = bounded_string(nested(source, "honeypot", "eventid"), 120).lower()
+            # Most Cowrie connections close without ever reaching a command.
+            # Do not create one state document per scanner-only connection;
+            # a close event is useful only after this bounded accumulator has
+            # already observed authentication or command evidence.
+            if (
+                event_id == "cowrie.session.closed"
+                and accumulator.command_count == 0
+                and not accumulator.auth_success
+            ):
+                latest = max(latest, timestamp)
+                close_only_skipped += 1
+                continue
             if not accumulator.finalized:
                 accumulator.add_event(hit, self.config.max_content_chars)
                 self.es.index(index=STATE_INDEX, id=accumulator.state_id, document=accumulator.document())
+                accumulated += 1
             latest = max(latest, timestamp)
         if latest:
             self.save_checkpoint("sessions", latest)
+        LOG.info(
+            "session scan selected=%d usable=%d accumulated=%d close_only_skipped=%d checkpoint_advanced=%s",
+            len(hits),
+            usable,
+            accumulated,
+            close_only_skipped,
+            bool(latest),
+        )
         return len(hits)
 
     def ready_sessions(self) -> list[tuple[str, SessionAccumulator]]:
@@ -981,15 +1029,22 @@ class LLMWorker:
         if not self.es.ping():
             raise RuntimeError("Elasticsearch is unavailable")
         self.ensure_indices()
-        sessions = payloads = reports = 0
+        events = sessions = payloads = reports = 0
         if self.config.session_enabled:
-            self.collect_session_events()
+            events = self.collect_session_events()
             sessions = self.analyze_ready_sessions()
         if self.config.payload_enabled:
             payloads = self.analyze_payloads()
         if self.config.daily_report_enabled:
             reports = self.analyze_daily_report()
-        return {"mode": "captured-data", "selftest": False, "sessions": sessions, "payloads": payloads, "reports": reports}
+        return {
+            "mode": "captured-data",
+            "selftest": False,
+            "events": events,
+            "sessions": sessions,
+            "payloads": payloads,
+            "reports": reports,
+        }
 
 
 def write_status(result: dict[str, Any], ok: bool = True) -> None:
@@ -1138,6 +1193,28 @@ def run_synthetic_model_canary(config: Config, idle_timeout: int = 0) -> dict[st
     }
 
 
+def run_production_session_canary(config: Config, max_cycles: int) -> dict[str, Any]:
+    """Process bounded captured U1 windows until exactly one result is written."""
+    config.validate_production_session_canary()
+    if max_cycles < 1 or max_cycles > 100:
+        raise ValueError("--max-canary-cycles must be between 1 and 100")
+    worker = LLMWorker(config)
+    scanned_events = 0
+    for cycle in range(1, max_cycles + 1):
+        result = worker.run_once()
+        scanned_events += int(result.get("events", 0))
+        if int(result.get("sessions", 0)) == 1:
+            return {
+                "mode": "captured-session-canary",
+                "cycles": cycle,
+                "events": scanned_events,
+                "sessions": 1,
+                "payloads": 0,
+                "reports": 0,
+            }
+    raise RuntimeError("no eligible captured U1 session completed within the bounded canary scan")
+
+
 def configure_logging(level: str) -> None:
     logging.basicConfig(
         level=getattr(logging, level, logging.INFO),
@@ -1161,6 +1238,17 @@ def main() -> int:
         default=0,
         help="wait up to this many seconds for the canary model to unload",
     )
+    parser.add_argument(
+        "--production-session-canary",
+        action="store_true",
+        help="write at most one authorized captured U1 result and exit",
+    )
+    parser.add_argument(
+        "--max-canary-cycles",
+        type=int,
+        default=20,
+        help="maximum bounded event windows for the production U1 canary",
+    )
     args = parser.parse_args()
     try:
         config = Config.from_env()
@@ -1182,6 +1270,14 @@ def main() -> int:
             result = run_synthetic_model_canary(config, args.idle_unload_timeout)
         except (ValueError, ModelRequestError, ModelResponseError) as exc:
             print(f"synthetic model canary failed: {exc}", file=sys.stderr)
+            return 1
+        print(json.dumps(result, sort_keys=True))
+        return 0
+    if args.production_session_canary:
+        try:
+            result = run_production_session_canary(config, args.max_canary_cycles)
+        except (ValueError, RuntimeError, ModelRequestError, ModelResponseError) as exc:
+            print(f"production session canary failed: {exc}", file=sys.stderr)
             return 1
         print(json.dumps(result, sort_keys=True))
         return 0

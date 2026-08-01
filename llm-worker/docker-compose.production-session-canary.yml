@@ -1,0 +1,42 @@
+# One-shot authorized #83 production U1 canary. This grants Elasticsearch and
+# Ollama routes but no payload filesystem mounts. It writes at most one session
+# analysis, while U2 payload analysis and daily reports remain disabled.
+
+services:
+  llm-worker:
+    restart: 'no'
+    command:
+      - python
+      - -u
+      - worker.py
+      - --production-session-canary
+      - --max-canary-cycles
+      - '20'
+    healthcheck:
+      disable: true
+    environment:
+      LLM_ENABLED: 'true'
+      LLM_DRY_RUN: 'false'
+      LLM_ALLOW_CAPTURED_DATA: 'true'
+      LLM_SESSION_ENABLED: 'true'
+      LLM_PAYLOAD_ENABLED: 'false'
+      LLM_DAILY_REPORT_ENABLED: 'false'
+      ES_HOST: 'http://elasticsearch:9200'
+      OLLAMA_URL: 'http://ollama:11434'
+      LLM_EXPECTED_MODEL_DIGEST: '2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd'
+      LLM_KEEP_ALIVE: '30s'
+      MAX_EVENTS_PER_CYCLE: '2000'
+      MAX_JOBS_PER_CYCLE: '1'
+      SESSION_LOOKBACK_SECONDS: '86400'
+    networks:
+      - synthetic-only
+      - llm-data
+      - llm-backend
+
+networks:
+  llm-data:
+    name: honeypot-llm-data
+    external: true
+  llm-backend:
+    name: honeypot-llm
+    external: true

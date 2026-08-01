@@ -3,11 +3,10 @@
 > **Status:** [#66](https://github.com/Xore/honeypot-stack/issues/66) provides
 > the guarded worker and [#82](https://github.com/Xore/honeypot-stack/issues/82)
 > records the verified runtime. [#83](https://github.com/Xore/honeypot-stack/issues/83)
-> has passed its synthetic real-model phase; captured production input remains
-> disabled pending the issue's separate authorization boundary. Build order
-> continues with that authorized production canary, then
-> [#84](https://github.com/Xore/honeypot-stack/issues/84) shares the GPU with
-> the ML worker.
+> has passed both its synthetic real-model phase and its authorized, bounded
+> production U1 canary. U2 and daily reports remain disabled. Build order
+> continues with [#84](https://github.com/Xore/honeypot-stack/issues/84),
+> which shares the GPU with the ML worker.
 > **Audience:** A human operator or an AI coding agent implementing this feature.
 > **Prerequisite reading:** [`ml-worker-plan.md`](ml-worker-plan.md) (data
 > sources, ES layout, dashboard SSE pattern),
@@ -113,13 +112,16 @@ All outputs are written to the `llm-analysis` ES index (§9) and are
 
 ## 4. Architecture Overview
 
-The implementation uses two deliberately different network states:
+The implementation uses deliberately different network states:
 
 - `llm-worker/docker-compose.yml` is the #66 default. It joins only an
   internal `synthetic-only` network and cannot reach Elasticsearch, Ollama,
   capture volumes, or the Internet.
 - `llm-worker/docker-compose.synthetic-canary.yml` grants only the internal
   `honeypot-llm` route needed for one-shot real-model tests.
+- `llm-worker/docker-compose.production-session-canary.yml` is the
+  authorized one-shot U1 grant: no payload mounts, one result maximum, then
+  exit.
 - `llm-worker/docker-compose.captured-data.yml` is an explicit #83 exposure
   override. It bridges the worker to separate internal `honeypot-llm-data`
   and `honeypot-llm` networks. Elasticsearch alone joins the former and the
@@ -196,6 +198,8 @@ design sketch retained for context and must not be copied into production:
   safe synthetic-only base, read-only, non-root, no ports or capture mounts;
 - [`../llm-worker/docker-compose.synthetic-canary.yml`](../llm-worker/docker-compose.synthetic-canary.yml)
   — one-shot synthetic real-model test with no capture/Elasticsearch access;
+- [`../llm-worker/docker-compose.production-session-canary.yml`](../llm-worker/docker-compose.production-session-canary.yml)
+  — bounded U1-only production acceptance with no payload mounts;
 - [`../llm-worker/docker-compose.captured-data.yml`](../llm-worker/docker-compose.captured-data.yml)
   — separately authorized #83 network and read-only volume grant;
 - [`../analysis/ghidra/docker-compose.ghidra.yml`](../analysis/ghidra/docker-compose.ghidra.yml)
@@ -218,11 +222,12 @@ docker compose \
   up --build --abort-on-container-exit --exit-code-from llm-worker
 ```
 
-Do not apply the captured-data override until #83's explicit authorization and
-review. Merely changing environment variables in either safe stack cannot
-create the missing routes or mounts.
+Run the authorized, bounded #83 production U1 acceptance with the base Compose
+file and `docker-compose.production-session-canary.yml`. The command
+exits nonzero unless it produces exactly one U1 result within the bounded scan.
+It cannot run U2 or reports and has no payload mount.
 
-For #83, validate the grant without starting it:
+Validate the broader later grant without starting it:
 
 ```bash
 docker compose \
@@ -454,8 +459,14 @@ docker compose -f llm-worker/docker-compose.yml \
 #      outside quoted IOC/summary context.
 
 # T7 synthetic idle: the canary uses 30s and fails unless /api/ps confirms
-#    unload within 90s. Production retains OLLAMA_KEEP_ALIVE=10m.
+#    unload within 90s. The one-shot production canary also uses 30s;
+#    a continuously enabled worker retains OLLAMA_KEEP_ALIVE=10m.
 nvidia-smi --query-gpu=memory.used --format=csv
+
+# T8 authorized U1-only production acceptance: exactly one result, no U2/report
+docker compose -f llm-worker/docker-compose.yml \
+  -f llm-worker/docker-compose.production-session-canary.yml \
+  up --build --abort-on-container-exit --exit-code-from llm-worker
 ```
 
 ---
@@ -469,18 +480,18 @@ it creates no Elasticsearch index:
 docker compose -f llm-worker/docker-compose.yml down
 ```
 
-After a later #83 canary, rollback remains additive (worker plus derived ES
+After a #83 canary, rollback remains additive (worker plus derived ES
 indices only):
 
 ```bash
-docker stop hp-llm-worker hp-ollama && docker rm hp-llm-worker hp-ollama
-# keep the ollama-models volume and llm-analysis index for a later retry,
-# or remove them explicitly:
-docker volume rm honeypot-stack_ollama-models
+docker rm -f hp-llm-worker
+# Keep the shared Ghidra Ollama service and its model volume. Retain the
+# advisory result by default, or remove only the derived indices explicitly:
 curl -XDELETE "http://<WG_IP>:9200/llm-analysis,llm-worker-state"
 ```
 
-No existing service is touched; rollback cannot affect the sensors.
+No existing service or raw data stream is touched; rollback cannot affect the
+sensors.
 
 ---
 

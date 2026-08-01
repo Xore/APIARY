@@ -46,10 +46,23 @@ normal worker requests retain the bounded 10-minute default.
 
 ## Captured-data canary
 
-Do not enable this as part of #66. Issue
-[#83](https://github.com/Xore/honeypot-stack/issues/83) owns the explicit
-authorization, synthetic-to-production transition, output review, and
-rollback:
+Issue [#83](https://github.com/Xore/honeypot-stack/issues/83) uses a narrower
+one-shot override for its authorized production U1 acceptance. It permits
+Elasticsearch and Ollama access, mounts no captured-payload directory, forces
+U2 and reports off, writes at most one session result, and exits:
+
+```bash
+docker compose \
+  -f llm-worker/docker-compose.yml \
+  -f llm-worker/docker-compose.production-session-canary.yml \
+  up --build --abort-on-container-exit --exit-code-from llm-worker
+```
+
+The override uses a 30-second keep-alive so idle unload is observable during
+acceptance. The production record is
+[`../docs/llm-production-canary-record.md`](../docs/llm-production-canary-record.md).
+The broader captured-data override remains a separately reviewed grant for
+later U2 work:
 
 ```bash
 docker compose \
@@ -73,9 +86,13 @@ itself instead of trusting a filename.
 - strict pydantic schemas reject extra keys, invalid enums, malformed ATT&CK
   IDs, and oversized fields;
 - control characters and prompt delimiters are neutralized, secrets in common
-  assignment/URL forms are redacted, and transcripts are capped;
+  assignment/URL/`chpasswd` forms are redacted, and transcripts are capped;
 - model-proposed IOCs are discarded and replaced with bounded indicators
   extracted literally from sanitized evidence;
+- SSH authorized-key and account-credential changes receive a deterministic
+  persistence classification, high severity floor, and grounded ATT&CK IDs;
+- unsupported password-cracking claims and platform-incompatible ATT&CK
+  mappings are corrected or removed before persistence;
 - a deterministic credential-access + encoding/chunking + outbound-transfer
   combination is forced to critical even if the model says high/low;
 - Ollama requests use structured output, temperature zero, `think: false`, an

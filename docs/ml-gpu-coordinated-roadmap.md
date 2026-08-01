@@ -190,6 +190,9 @@ tests pass. No captured data leaves the stack.
 
 **Depends on:** A, F, pinned artifacts, and stable Elasticsearch
 
+**Status (2026-08-01):** complete for synthetic and bounded production U1.
+U2 and daily reports stay disabled for their later milestones.
+
 1. Pull one approved chat model in an explicit setup job.
 2. Record Ollama image and model digests.
 3. Enable synthetic U1 summaries, then a small production canary; keep U2 and
