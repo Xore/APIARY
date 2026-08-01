@@ -1,4 +1,0 @@
-upstream/elf_malware.yar (does not compile: rule "ELF_Reverse_Shell" in upstream/elf_malware.yar(52): unreferenced string "$rs2")
-upstream/malicious_docs.yar (does not compile: rule "PDF_JavaScript_Exploit" in upstream/malicious_docs.yar(82): unreferenced string "$js2")
-upstream/miori_mirai.yar (does not compile: rule "Mirai_Generic" in upstream/miori_mirai.yar(56): unreferenced string "$af1")
-upstream/scripts.yar (does not compile: rule "PowerShell_Encoded_Command" in upstream/scripts.yar(85): unreferenced string "$ps3")
