@@ -115,6 +115,11 @@
 
 /* ── Toolbar ────────────────────────────────────────────────────────────── */
 .hp-toolbar-actions { display: flex; align-items: center; gap: 2px; }
+/* #208: was an inline style="" on the operator-configured maintenance/
+   incident banner -- silently dropped by the CSP (a nonce covers a style
+   or link element, never a style attribute). Forces the banner onto its
+   own row, after the toolbar's other flex children. */
+.app-toolbar__banner { flex-basis: 100%; order: 5; margin: 8px 8px 0; }
 .hp-icon-btn {
   position: relative;
   display: grid; place-items: center;

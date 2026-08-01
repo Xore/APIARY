@@ -47,6 +47,15 @@
 .hp-rp-status[data-state="error"] { color: var(--danger); }
 .hp-rp-status[data-state="ok"] { color: var(--success); }
 .hp-rp-tag { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--text-secondary); }
+/* #208: these two were inline style="" attributes, silently dropped by the
+   CSP's style-src nonce (which never covers a style attribute, only a
+   nonce'd style or link element -- see Xore/theme's docs/CSP.md, written
+   after this exact failure mode broke the overview activity chart, #191).
+   Neither value is per-request data, so a real rule in this page's own
+   nonce'd style block is correct -- no dynamic per-row styling to justify
+   one. */
+.hp-rp-toggle-row { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--text-secondary); text-transform: none; letter-spacing: 0; }
+.hp-rp-toggle-row input[type="checkbox"] { accent-color: var(--accent); }
 .hp-rp-tag--light { background: var(--info-soft); color: var(--info); }
 .hp-rp-row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .hp-rp-viewer { margin-top: 14px; border: 1px solid var(--border-strong); border-radius: var(--radius-panel); overflow: hidden; background: var(--surface-1); }
@@ -138,7 +147,7 @@
               <div class="card wide hp-rp-section" id="hp-rp-schedule-section">
                 <h2>Schedule</h2>
                 <div class="hp-rp-grid">
-                  <div class="hp-rp-field"><label for="hp-rp-sched-enabled">Recurring generation</label><label style="display:flex;gap:8px;align-items:center;font-size:13px;color:var(--text-secondary);text-transform:none;letter-spacing:0"><input type="checkbox" id="hp-rp-sched-enabled" style="accent-color:var(--accent)"> run this report automatically</label></div>
+                  <div class="hp-rp-field"><label for="hp-rp-sched-enabled">Recurring generation</label><label class="hp-rp-toggle-row"><input type="checkbox" id="hp-rp-sched-enabled"> run this report automatically</label></div>
                   <div class="hp-rp-field"><label for="hp-rp-sched-frequency">Frequency</label><select id="hp-rp-sched-frequency"><option value="daily">daily</option><option value="weekly">weekly</option><option value="monthly">monthly</option></select></div>
                   <div class="hp-rp-field"><label for="hp-rp-sched-hour">Hour (UTC)</label><input id="hp-rp-sched-hour" type="number" min="0" max="23" value="6"></div>
                   <div class="hp-rp-field"><label for="hp-rp-sched-minute">Minute</label><input id="hp-rp-sched-minute" type="number" min="0" max="59" value="30"></div>
