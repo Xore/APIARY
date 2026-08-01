@@ -50,6 +50,8 @@ multipot/multipot
 portbridge/portbridge
 tftp-relay/tftp-relay
 node_modules/
+playwright-report/
+test-results/
 *.tsbuildinfo
 npm-debug.log*
 

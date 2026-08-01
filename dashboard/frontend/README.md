@@ -76,3 +76,26 @@ invariants) in `Xore/theme`.
 After editing `../ui/*.html` or `hp-app.js`, re-run `npm run build` so the
 Tailwind scan picks up new `tw:` utilities, then `go build ./... &&
 go test ./...` from `dashboard/`.
+
+## Browser regression suite
+
+`npm run test:browser` starts the real Go dashboard against synthetic Cowrie
+telemetry and checks all fourteen HTML routes across the dark/light and
+desktop/tablet/mobile matrix. It also covers command routing, remote lazy-row
+paging, map-preserving live replacement, role-aware report actions, and shared
+confirmation-modal focus state. Playwright retains a trace and screenshot for
+failures.
+
+Install the browser once on a development machine, then run the suite:
+
+```bash
+npx playwright install chromium
+npm run test:browser
+```
+
+To run the same read-only checks against an already running deployment, skip
+the synthetic server by setting its base URL:
+
+```bash
+DASHBOARD_E2E_BASE_URL=https://dashboard.example npm run test:browser
+```

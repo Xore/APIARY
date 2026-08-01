@@ -67,6 +67,27 @@ jobs:
       - name: Generated assets are current
         run: git diff --exit-code -- dashboard/static/hp-api.js dashboard/static/hp-tailwind.css
 
+  dashboard-browser:
+    name: Dashboard browser matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25.x"
+          cache-dependency-path: dashboard/go.sum
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: dashboard/frontend/package-lock.json
+      - run: npm ci
+        working-directory: dashboard/frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: dashboard/frontend
+      - run: npm run test:browser
+        working-directory: dashboard/frontend
+
   vendored-theme:
     name: Vendored Xore/theme is in sync
     runs-on: ubuntu-latest
