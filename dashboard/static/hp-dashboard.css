@@ -46,6 +46,15 @@ body [hidden] { display: none !important; }
     border-right: 1px solid var(--border-subtle);
     box-shadow: var(--shadow-dialog);
   }
+  /* #210/#215: the live indicator is now the single global one (was
+     previously a page-local pill with room to say "Reconnecting…" on the
+     overview page only). In the compact toolbar that text is the widest
+     content it ever shows -- at this width it overflowed the viewport by a
+     couple of pixels. Same "icon only, drop the text" pattern the sidebar
+     brand already uses at its own compact breakpoint above; the dot's
+     color (green/gray/orange) and the title attribute still carry the
+     state. */
+  .hp-live-state [data-hp-live-label] { display: none; }
 }
 
 .hp-brand {
