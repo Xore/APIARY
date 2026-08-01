@@ -59,6 +59,13 @@ install -d -m 0755 "samples/$bucket"
 dest="samples/$bucket/$sha256.zip"
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
+# mktemp creates $tmp as an existing empty file; zip treats an existing
+# destination as an archive to update rather than create, and chokes on the
+# empty file with "zip error: Zip file structure invalid" (#249) -- every
+# invocation fails this way, regardless of the sample. Removing the empty
+# placeholder first (the trap above still cleans up the reserved name if zip
+# never runs) lets zip create a fresh archive instead.
+rm -f "$tmp"
 zip -q -j -P infected "$tmp" "$sample"
 mv -f "$tmp" "$dest"
 trap - EXIT
