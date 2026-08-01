@@ -8,7 +8,7 @@ services:
     environment:
       ES_HOST: 'http://elasticsearch:9200'
       OLLAMA_URL: 'http://ollama:11434'
-      LLM_EXPECTED_MODEL_DIGEST: '2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd'
+      LLM_EXPECTED_MODEL_DIGEST: '6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7'
       LLM_PAYLOAD_ROOTS: '/payloads/cowrie:/payloads/scripts/script-payloads'
     networks:
       - synthetic-only

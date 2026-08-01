@@ -254,6 +254,14 @@ class ProductionCanaryTests(unittest.TestCase):
 
 
 class OllamaContractTests(unittest.TestCase):
+    def test_default_model_matches_approved_session_slot(self):
+        manifest = json.loads(
+            (Path(__file__).resolve().parents[2] / "analysis/ghidra/models/approved-models.json").read_text()
+        )
+        with patch.dict(os.environ, {}, clear=True):
+            parsed = worker.Config.from_env()
+        self.assertEqual(parsed.model, manifest["slots"]["sessions"]["artifact"]["tag"])
+
     def test_model_digest_must_match_the_approved_pin(self):
         fake_response = MagicMock()
         fake_response.is_redirect = False

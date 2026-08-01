@@ -1,14 +1,15 @@
 # Local model benchmark
 
 This directory contains the task-specific acceptance benchmark used by
-[issue #144](https://github.com/Xore/honeypot-stack/issues/144). The decision
+[issue #144](https://github.com/Xore/honeypot-stack/issues/144) and governed by
+[issue #158](https://github.com/Xore/honeypot-stack/issues/158). The decision
 record, literature review, measurements, and recommendations live in
 [`docs/local-llm-model-evaluation.md`](../../../docs/local-llm-model-evaluation.md).
 
 ## Safety properties
 
-- Fixtures are synthetic and use only TEST-NET addresses, `.example.test`
-  names, and fake credentials.
+- Fixtures are synthetic and use only TEST-NET addresses, reserved
+  `.test`/`.invalid` names, and fake credentials.
 - Input is sent only to the configured Ollama URL, which defaults to loopback.
 - The script never executes fixture content or manages a process, container,
   VM, network rule, or model download.
@@ -20,20 +21,25 @@ side effects before committing it.
 
 ## Run
 
-Pull the exact tags first, then run on the analysis host:
+Install candidate tags as a separate reviewed operator action, then run the
+three approved/candidate slots on the analysis host. The benchmark never pulls
+them itself:
 
 ```bash
+install -d -m 0700 "$HOME/model-qualification"
 python3 evaluate-models.py \
-  qwen3:8b \
-  qwen3.5:4b \
-  qwen2.5:7b-instruct-q4_K_M \
-  --context 16384
+  --manifest ../models/approved-models.json \
+  --output "$HOME/model-qualification/qualification.json"
+python3 ../models/model-governance.py verify-report \
+  --manifest ../models/approved-models.json \
+  --report "$HOME/model-qualification/qualification.json"
 ```
 
-The output has short progress lines followed by one JSON report. Preserve the
-raw report outside the repository when it contains verbose model replies; put
-the scored measurements and reproducibility metadata in the decision record.
-Do not adjust expected answers after seeing a preferred model's output.
+Only short progress and the report hash are printed. Preserve the raw report
+outside the repository with bounded retention; put the scored measurements and
+reproducibility metadata in the decision record. Do not adjust expected answers
+after seeing a preferred model's output. Promotion and rollback are documented
+in [`../models/README.md`](../models/README.md).
 
 ## REx86 compatibility probe
 

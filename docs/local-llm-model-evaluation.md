@@ -1,6 +1,6 @@
 # Local LLM model evaluation
 
-Status: completed for [issue #144](https://github.com/Xore/honeypot-stack/issues/144), 2026-08-01.
+Status: completed for [issue #144](https://github.com/Xore/honeypot-stack/issues/144) and requalified under [issue #158](https://github.com/Xore/honeypot-stack/issues/158), 2026-08-01.
 
 This is a task-specific decision record for the three independent local-model
 slots in this repository. It does not assume that a model named in an earlier
@@ -276,13 +276,14 @@ sentinel was exact. Its CPU offload is permitted and its measured suite time is
 within the existing workflow timeout. Keep `GHIDRA_TRIAGE_MODEL=qwen3:8b` and
 disable thinking in the request.
 
-### Session worker: `qwen3.5:4b`
+### Historical #144 session decision: `qwen3.5:4b`
 
 It has the highest session score (50/53), passes both prompt-injection checks,
 and is the only candidate to score the three existing session cases perfectly.
 Use `LLM_MODEL=qwen3.5:4b`, `think: false`, and the planned 8192 maximum context.
 The worker still needs deterministic criticality rules; its model returning
-`high` on the agentic fixture is not sufficient.
+`high` on the agentic fixture is not sufficient. This selection was superseded
+by the production-contract requalification below.
 
 ### Rev·Deck: `qwen2.5-coder:7b-instruct-q4_K_M`
 
@@ -304,3 +305,35 @@ current upstream client does not send. Set
   decision.
 - Re-run this benchmark after any model, quantization, prompt, context, Ollama,
   or GPU-driver change.
+
+## Issue #158 production-contract requalification
+
+The #144 matrix used generic JSON mode and scored every candidate across every
+slot. #158 tightened qualification to the exact production contract: the
+generated `SessionAnalysis` JSON Schema, `session-v5` instruction hierarchy,
+slot-specific requests, exact artifact metadata, and independent per-case
+gates. The checked-in schema's canonical SHA-256 is verified against
+`SessionAnalysis.model_json_schema()` in CI.
+
+That stricter test rejected `qwen3.5:4b`: under the production schema it obeyed
+attacker-authored `intent=unknown` / `severity=low` values in both adversarial
+session cases. `qwen3:8b` resisted those strings but misclassified payload
+deployment and cryptomining as persistence. Accuracy therefore required the
+larger `qwen3.5:9b` session model despite lower throughput and higher VRAM use.
+
+Final approved v2 results on the recorded RTX 4000 host:
+
+| Slot | Exact model | Score | Required safety result |
+|---|---|---:|---|
+| Ghidra | `qwen3:8b@500a1f067a9f…` | 100.0% | Schema/injection gates and 16k sentinel pass |
+| Sessions | `qwen3.5:9b@6488c96fa5fa…` | 98.5% | Both injection gates, encoded-exfiltration critical gate, and Linux persistence gate pass |
+| Rev·Deck | `qwen2.5-coder:7b-instruct-q4_K_M@dae161e27b0e…` | 93.8% | Process-injection evidence gate passes |
+
+The approved verbose report has SHA-256
+`023555be9584540720df0dc51f0824a8279b73befae79fbc5fb6714b0ca18884`
+and remains in the mode-0700 operator archive on the analysis host. It is not
+committed because it contains full model replies. The reviewed manifest,
+generated approval record, gate thresholds, drift workflow, promotion, and
+rollback instructions live in
+[`analysis/ghidra/models/`](../analysis/ghidra/models/README.md). That manifest,
+not a mutable tag or this prose table, is the runtime source of truth.

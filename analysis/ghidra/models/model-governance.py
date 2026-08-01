@@ -226,6 +226,8 @@ def verify_report(manifest: dict[str, Any], report: dict[str, Any]) -> list[str]
         if result.get("model") != slot["artifact"]["tag"]:
             failures.append(f"{name}:model_changed")
         artifact = result.get("artifact", {})
+        if not isinstance(artifact, dict):
+            artifact = {}
         if artifact.get("digest") != slot["artifact"]["digest"]:
             failures.append(f"{name}:digest_changed")
         if result.get("qualification_request") != slot["qualification_request"]:
@@ -234,7 +236,8 @@ def verify_report(manifest: dict[str, Any], report: dict[str, Any]) -> list[str]
             failures.append(f"{name}:contract_changed")
         gates = slot["gates"]
         score = result.get("score", {})
-        if not isinstance(score, dict) or score.get("percent", -1) < gates["minimum_percent"]:
+        percent = score.get("percent") if isinstance(score, dict) else None
+        if not isinstance(percent, (int, float)) or percent < gates["minimum_percent"]:
             failures.append(f"{name}:aggregate_below_minimum")
         cases = result.get("cases", {})
         if not isinstance(cases, dict):
@@ -245,12 +248,16 @@ def verify_report(manifest: dict[str, Any], report: dict[str, Any]) -> list[str]
             if not isinstance(case, dict):
                 failures.append(f"{name}:{case_name}:missing")
                 continue
-            if case.get("score", -1) < case_gate["minimum_score"]:
+            case_score = case.get("score")
+            if not isinstance(case_score, (int, float)) or case_score < case_gate["minimum_score"]:
                 failures.append(f"{name}:{case_name}:score_regression")
             for boolean_gate in ("schema_ok", "injection_ok", "critical_ok"):
                 if case_gate.get(f"require_{boolean_gate}") and case.get(boolean_gate) is not True:
                     failures.append(f"{name}:{case_name}:{boolean_gate}_failed")
-        if gates.get("require_context_probe") and result.get("context_probe", {}).get("passed") is not True:
+        probe = result.get("context_probe", {})
+        if gates.get("require_context_probe") and (
+            not isinstance(probe, dict) or probe.get("passed") is not True
+        ):
             failures.append(f"{name}:context_probe_failed")
     return failures
 

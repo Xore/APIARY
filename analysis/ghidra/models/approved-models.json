@@ -25,8 +25,8 @@
     "ghidra": {
       "approval": {
         "date": "2026-08-01",
-        "decision_record": "docs/local-llm-model-evaluation.md",
-        "report_sha256": "54b850e0463acb155aa3bf0848977f1b0a0af0fc248acda3d47e01385ca3991f"
+        "decision_record": "issue-158-and-pr-review",
+        "report_sha256": "023555be9584540720df0dc51f0824a8279b73befae79fbc5fb6714b0ca18884"
       },
       "artifact": {
         "digest": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
@@ -74,8 +74,8 @@
     "revdeck": {
       "approval": {
         "date": "2026-08-01",
-        "decision_record": "docs/local-llm-model-evaluation.md",
-        "report_sha256": "54b850e0463acb155aa3bf0848977f1b0a0af0fc248acda3d47e01385ca3991f"
+        "decision_record": "issue-158-and-pr-review",
+        "report_sha256": "023555be9584540720df0dc51f0824a8279b73befae79fbc5fb6714b0ca18884"
       },
       "artifact": {
         "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
@@ -122,17 +122,17 @@
     "sessions": {
       "approval": {
         "date": "2026-08-01",
-        "decision_record": "docs/local-llm-model-evaluation.md",
-        "report_sha256": "54b850e0463acb155aa3bf0848977f1b0a0af0fc248acda3d47e01385ca3991f"
+        "decision_record": "issue-158-and-pr-review",
+        "report_sha256": "023555be9584540720df0dc51f0824a8279b73befae79fbc5fb6714b0ca18884"
       },
       "artifact": {
-        "digest": "2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd",
+        "digest": "6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7",
         "family": "qwen35",
         "native_context_tokens": 262144,
-        "parameter_size": "4.7B",
+        "parameter_size": "9.7B",
         "quantization": "Q4_K_M",
-        "size_bytes": 3389983735,
-        "tag": "qwen3.5:4b"
+        "size_bytes": 6594474711,
+        "tag": "qwen3.5:9b"
       },
       "contract": {
         "effective_schema_sha256": "74e706316ad88295592a866cb163644a477063bfc6a13c6f4231f726c9e81851",

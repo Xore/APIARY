@@ -185,14 +185,15 @@ One RTX 4000 (8192 MiB) is shared between `ollama` (LLM guide) and
 
 | Consumer | Typical VRAM | When active |
 |---|---|---|
-| ollama (`qwen3.5:4b`) | ~3.4-3.7 GiB | On LLM requests; unloads 10 min after last use (`OLLAMA_KEEP_ALIVE=10m`) |
+| ollama (`qwen3.5:9b`) | ~6.1 GiB at the measured 16k probe (production caps at 8k) | On LLM requests; unloads 10 min after last use (`OLLAMA_KEEP_ALIVE=10m`) |
 | ml-worker inference (LSTM-AE + embedder) | ~0.5–1 GiB | Every poll cycle (30 s), briefly |
 | ml-worker retrain | ~1–2 GiB | Every 6 h, minutes |
 
 Rules:
 
-- **Peak budget ≤ 7 GiB.** The table peaks at ~7.5 GiB only if retrain
-  collides with an active LLM request — avoid by scheduling: set
+- **Do not overlap GPU retraining with a loaded chat model.** The #158 accuracy
+  winner plus a 1–2 GiB retrain can exceed the 8192 MiB card. Unload Ollama or
+  use the documented CPU fallback before retraining; also avoid collisions by scheduling: set
   `RETRAIN_INTERVAL` so retrains land at least 1 h away from the LLM daily
   report (`DAILY_REPORT_HOUR`), e.g. retrain at 00:00/06:00/12:00/18:00
   UTC with the report at 06:00 → shift retrain to 01:00/07:00/13:00/19:00.

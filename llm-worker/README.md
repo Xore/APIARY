@@ -44,6 +44,12 @@ injection-marker, grounded-IOC, deterministic-severity, model-digest, or
 idle-unload errors. The 30-second canary keep-alive is deliberately short;
 normal worker requests retain the bounded 10-minute default.
 
+The current session default is the #158-qualified
+`qwen3.5:9b@6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7`.
+Its tag, digest, generated-schema hash, `session-v5` prompt hash, request
+settings, host/runtime record, and per-case gates are controlled by
+[`../analysis/ghidra/models/approved-models.json`](../analysis/ghidra/models/approved-models.json).
+
 ## Captured-data canary
 
 Issue [#83](https://github.com/Xore/honeypot-stack/issues/83) uses a narrower
@@ -73,7 +79,7 @@ docker compose \
 
 The override attaches the worker to the internal `honeypot-llm-data` network
 for Elasticsearch and the internal `honeypot-llm` network for the one Ollama
-instance already measured and pinned by #144. The root stack owns the former
+instance measured by #144 and requalified/pinned by #158. The root stack owns the former
 and attaches only Elasticsearch; the Ghidra stack owns the latter and attaches
 Ollama. The worker never joins the Internet-routable `honeynet` bridge and
 publishes no port. The override mounts only Cowrie downloads and retained

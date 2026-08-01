@@ -93,6 +93,14 @@ class GovernanceTests(unittest.TestCase):
         self.assertIn("model_digest_changed", status["slots"]["ghidra"]["codes"])
         self.assertIn("host_driver_changed", status["host"]["codes"])
 
+    def test_missing_model_is_drift_not_an_install_action(self):
+        snapshot = self.snapshot()
+        snapshot["models"] = snapshot["models"][1:]
+        status = governance.evaluate_drift(self.manifest, snapshot)
+        self.assertEqual(status["overall"], "drift")
+        self.assertEqual(status["slots"]["ghidra"]["codes"], ["model_missing"])
+        self.assertTrue(status["advisory_only"])
+
     def test_case_gate_cannot_be_hidden_by_aggregate(self):
         report = self.report()
         report["slots"]["sessions"]["score"]["percent"] = 100
