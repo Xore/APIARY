@@ -26,12 +26,20 @@ REST service:
                             -> structural metadata (200), or
                                {"error": "..."} (422) if lief did not
                                recognise the format
+    POST /v1/capa          body: raw bytes
+                            -> capability summary (200), or
+                               {"error": "...", "unsupported": "..."} (422) if
+                               capa's default backend cannot handle this
+                               sample's architecture/format/OS (#78)
 """
 from __future__ import annotations
 
 import json
 import logging
+import os
+import subprocess
 import sys
+import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import lief
@@ -180,6 +188,110 @@ def lief_parse(data: bytes) -> dict | None:
     return out
 
 
+CAPA_RULES_DIR = os.environ.get("CAPA_RULES_DIR", "/app/capa-rules")
+# capa's own rule matching is the slowest thing this service does -- ssdeep/
+# tlsh/lief are all sub-second, capa can run minutes on a large binary. Kept
+# comfortably under worker/ghidra-worker.py's STATICTOOLS_TIMEOUT (300s, the
+# client's own wait budget) so this process's timeout fires first and returns
+# a clean 500 instead of the worker giving up on the connection while capa is
+# still running, orphaning the subprocess.
+CAPA_TIMEOUT = int(os.environ.get("CAPA_TIMEOUT", "240"))
+MAX_CAPABILITIES = 500  # same reasoning as MAX_SECTIONS/MAX_LIBRARIES above.
+
+# capa (v9.4.0) exit codes that mean "capa correctly declined to analyse this
+# specific input", not "this service is broken" -- see the E_* constants in
+# https://github.com/mandiant/capa/blob/v9.4.0/capa/main.py. 17 (unsupported
+# architecture) is the one that matters most here: capa's default (vivisect)
+# backend only covers x86/amd64/arm64, so MIPS/ARM32/etc. samples -- common in
+# this honeypot's IoT catch -- hit this on every run. That is a real coverage
+# gap, tracked in #195, not a bug in this endpoint.
+_CAPA_UNSUPPORTED_EXIT_CODES = {
+    13: "corrupt or unrecognised file",
+    14: "file limitation short-circuited analysis (e.g. packed input)",
+    16: "unsupported file format",
+    17: "unsupported architecture -- capa's default backend covers only "
+        "x86/amd64/arm64",
+    18: "unsupported OS",
+}
+
+
+def _capa_summarise(doc: dict) -> dict:
+    """Reduce capa's full result document to a report-sized shape.
+
+    capa's raw -j output includes a full match-evidence tree per rule (every
+    location a feature matched, nested per basic block/function) -- useful
+    for an interactive explorer, far more than a triage report or dashboard
+    card needs. This keeps name/namespace/count per capability plus the
+    deduplicated ATT&CK/MBC tags, the same "evidence over verdict" shape
+    fuzzy_hash()/lief_parse() already give the rest of this pipeline.
+    """
+    analysis = ((doc.get("meta") or {}).get("analysis")) or {}
+    capabilities = []
+    attacks, mbcs = {}, {}
+    for rule_name, entry in (doc.get("rules") or {}).items():
+        meta = entry.get("meta") or {}
+        if meta.get("lib") or meta.get("is_subscope_rule"):
+            # Helper/subscope rules other rules build on, not capabilities in
+            # their own right -- capa's own default (non -v) text rendering
+            # excludes these from the top-level view the same way.
+            continue
+        capabilities.append({
+            "name": meta.get("name") or rule_name,
+            "namespace": meta.get("namespace") or "",
+            "matches": len(entry.get("matches") or []),
+        })
+        for a in meta.get("attack") or []:
+            attacks[a.get("id") or a.get("tactic", "")] = a
+        for m in meta.get("mbc") or []:
+            mbcs[m.get("id") or m.get("objective", "")] = m
+
+    capabilities.sort(key=lambda c: c["name"])
+    truncated = len(capabilities) > MAX_CAPABILITIES
+    return {
+        "arch": analysis.get("arch") or "",
+        "os": analysis.get("os") or "",
+        "format": analysis.get("format") or "",
+        "capabilities": capabilities[:MAX_CAPABILITIES],
+        "capabilities_truncated": truncated,
+        "attack": sorted(attacks.values(), key=lambda a: a.get("id", "")),
+        "mbc": sorted(mbcs.values(), key=lambda m: m.get("id", "")),
+    }
+
+
+def capa_scan(data: bytes) -> dict:
+    """Run capa's default backend against one sample.
+
+    Returns a capability summary (see _capa_summarise), or
+    {"unsupported": "..."} when capa declined this specific input --
+    routine for an architecture/format/OS its default backend does not cover,
+    the same "expected, not exceptional" treatment lief_parse() gives an
+    unrecognised format. Raises RuntimeError/ValueError for anything else, so
+    the handler can tell a real failure from an expected non-match.
+    """
+    fd, tmp_path = tempfile.mkstemp(prefix="capa-")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        proc = subprocess.run(
+            ["capa", "-j", "-q", "-r", CAPA_RULES_DIR, tmp_path],
+            capture_output=True, timeout=CAPA_TIMEOUT, text=True,
+        )
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+    reason = _CAPA_UNSUPPORTED_EXIT_CODES.get(proc.returncode)
+    if reason is not None:
+        return {"unsupported": reason}
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"capa exited {proc.returncode}: {(proc.stderr or '')[:2000]}")
+
+    return _capa_summarise(json.loads(proc.stdout))
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "honeypot-statictools/1"
 
@@ -228,6 +340,21 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(
                     {"error": "lief did not recognise this file's format"}, 422)
             return self._json(parsed)
+        if self.path == "/v1/capa":
+            data = self._read_body()
+            if data is None:
+                return
+            try:
+                result = capa_scan(data)
+            except subprocess.TimeoutExpired:
+                return self._json({"error": "capa timed out"}, 500)
+            except (RuntimeError, OSError, ValueError) as e:
+                return self._json({"error": str(e)}, 500)
+            if "unsupported" in result:
+                return self._json(
+                    {"error": "capa cannot analyse this sample",
+                     "unsupported": result["unsupported"]}, 422)
+            return self._json(result)
         self._json({"error": "not found"}, 404)
 
 

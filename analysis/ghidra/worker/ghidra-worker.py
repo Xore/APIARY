@@ -53,10 +53,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-# 2: added fuzzy_hashes and lief (#138). Informational only — nothing reads
-# this field to decide how to parse the rest of the document; it exists so a
-# result can be tied to the worker version that produced it.
-RESULT_VERSION = 2
+# 3: added capa (#78). Informational only — nothing reads this field to
+# decide how to parse the rest of the document; it exists so a result can be
+# tied to the worker version that produced it. (2: added fuzzy_hashes and
+# lief (#138).)
+RESULT_VERSION = 3
 
 REQUEST_DIR = Path(os.environ.get("GHIDRA_REQUEST_DIR", "/ghidra-requests"))
 RESULTS_DIR = Path(os.environ.get("GHIDRA_RESULTS_DIR", "/ghidra-results"))
@@ -98,7 +99,11 @@ GRAPH_DEPTH = int(os.environ.get("GHIDRA_GRAPH_DEPTH", "2"))
 # as GHIDRA_TRIAGE_API_BASE.
 STATICTOOLS_API_BASE = os.environ.get(
     "STATICTOOLS_API_BASE", "http://127.0.0.1:9091").rstrip("/")
-STATICTOOLS_TIMEOUT = int(os.environ.get("STATICTOOLS_TIMEOUT", "120"))
+# capa's rule matching (added #78) is the slow path on this endpoint — plain
+# ssdeep/tlsh/lief calls return in well under a second. 300s gives capa room
+# on a large binary without letting one stuck request wedge the drain loop
+# indefinitely.
+STATICTOOLS_TIMEOUT = int(os.environ.get("STATICTOOLS_TIMEOUT", "300"))
 
 # ── AI triage (#103) ─────────────────────────────────────────────────────────
 #
@@ -456,6 +461,26 @@ def lief_parse(sample: Path) -> dict | None:
         log(f"  [!] lief parse: {e}")
         return None
     return _statictools_post("/v1/lief-parse", data)
+
+
+def capa_scan(sample: Path) -> dict | None:
+    """MITRE ATT&CK/MBC capability tags via capa, via the statictools sidecar.
+
+    None if the sidecar is unavailable, OR capa's default backend does not
+    cover this sample's architecture/format/OS (it only covers x86/amd64/
+    arm64 — no MIPS or ARM32, both common in this honeypot's IoT catch; see
+    #195 and the statictools server's _CAPA_UNSUPPORTED_EXIT_CODES). Same
+    "no signal" collapse as lief_parse() above: the sidecar reports 422 for
+    the unsupported case and _statictools_post already logs that quietly.
+    """
+    if not STATICTOOLS_API_BASE:
+        return None
+    try:
+        data = sample.read_bytes()
+    except OSError as e:
+        log(f"  [!] capa scan: {e}")
+        return None
+    return _statictools_post("/v1/capa", data)
 
 
 def build_call_graph(client: "GhidraClient", job: str, functions: list,
@@ -884,7 +909,7 @@ def _triage(parts: dict) -> dict | None:
 
 
 def statictools_state() -> str:
-    """One line saying whether fuzzy_hash()/lief_parse() will run, for --selftest."""
+    """One line saying whether fuzzy_hash()/lief_parse()/capa_scan() will run, for --selftest."""
     if not STATICTOOLS_API_BASE:
         return "disabled (STATICTOOLS_API_BASE is empty)"
     try:
@@ -1037,6 +1062,7 @@ def analyse_one(client: GhidraClient, sha: str, sample: Path,
 
     fuzzy = fuzzy_hash(sample)
     lief_info = lief_parse(sample)
+    capa_info = capa_scan(sample)
 
     result = {
         "version": RESULT_VERSION,
@@ -1061,6 +1087,7 @@ def analyse_one(client: GhidraClient, sha: str, sample: Path,
         "ai_triage": ai_triage,
         "fuzzy_hashes": fuzzy,
         "lief": lief_info,
+        "capa": capa_info,
         # Overwritten below by generate_report(), which needs the rest of
         # this dict built first. Emitted as null here rather than omitted so
         # the dashboard reads one stable shape even if report generation
@@ -1135,7 +1162,7 @@ def drain() -> int:
                 "error": str(e),
                 "functions": [], "strings": [], "imports": [], "findcrypt": [],
                 "call_graph_svg": None, "ai_triage": None,
-                "fuzzy_hashes": None, "lief": None, "report_pdf": None,
+                "fuzzy_hashes": None, "lief": None, "capa": None, "report_pdf": None,
             })
             claimed.rename(claimed.with_suffix(".failed"))
         finally:
@@ -1194,9 +1221,12 @@ def selftest() -> int:
         return 1
     fuzzy = fuzzy_hash(probe)
     lief_info = lief_parse(probe)
+    capa_info = capa_scan(probe)
     print(f"  fuzzy_hashes   : {fuzzy}")
     print(f"  lief           : "
           f"{'ok, format=' + lief_info['format'] if lief_info else None}")
+    print(f"  capa           : "
+          f"{'ok, capabilities=' + str(len(capa_info['capabilities'])) if capa_info else None}")
     print("\ncontract OK")
     return 0
 

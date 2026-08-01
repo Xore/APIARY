@@ -90,6 +90,12 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 			SectionCount: 1, Sections: []ghidraSection{{Name: ".text", Size: 100}},
 			Libraries: []string{"libc.so.6"}, Stripped: &stripped,
 		},
+		Capa: &ghidraCapa{
+			Arch: "amd64", OS: "linux", Format: "elf",
+			Capabilities: []ghidraCapability{{Name: "create TCP socket", Namespace: "communication/socket/tcp", Matches: 2}},
+			Attack:       []ghidraAttack{{ID: "T1071.001", Tactic: "COMMAND_AND_CONTROL", Technique: "Application Layer Protocol", Subtechnique: "Web Protocols"}},
+			MBC:          []ghidraMBC{{ID: "C0001", Objective: "Communication", Behavior: "Socket Communication", Method: "Send Data"}},
+		},
 	}
 	// Populated rather than zero-valued, same reasoning as ghidraDetail:
 	// every optional field is set so every template branch (scanner table,

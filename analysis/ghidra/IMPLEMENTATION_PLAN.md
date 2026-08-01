@@ -1,16 +1,19 @@
 # Ghidra Payload Analysis — Implementation Plan
 
-> **Status**: Design document. Phase 4 (plugin selection) is unbuilt. Phases
-> 1, 2, 3 and 5 are built — five of the six `scripts/` exporters exist
+> **Status**: Design document. Phase 4 (plugin selection) is built as of
+> 2026-08-01 — scoped down to `capa` alone; the other eight candidates from
+> the original plugin list are decided out (see Phase 4 below). Phases 1, 2,
+> 3, 4 and 5 are built — five of the six `scripts/` exporters exist
 > (`findcrypt.py` was deleted, superseded by `scan_crypto()` in the worker),
 > the `revdeck` service is deployed (profile-gated in
 > `docker-compose.ghidra.yml`, interactive-only), GhidrAssist has a verified
 > pinned-artifact install procedure (`ghidrassist/README.md`, see
 > [#192](https://github.com/Xore/honeypot-stack/issues/192) for a caveat
 > found along the way), and `report/generate_report.py` renders an HTML
-> report from every automated worker result. Still missing: a verified
-> request/result contract for automating Rev·Deck triage, which is what the
-> dashboard's `revdeck` workbench adapter is waiting on.  
+> report from every automated worker result, including a capa section.
+> Still missing: a verified request/result contract for automating Rev·Deck
+> triage, which is what the dashboard's `revdeck` workbench adapter is
+> waiting on.  
 > **Tracked in**: [#78](https://github.com/Xore/honeypot-stack/issues/78)
 > (phases 3–5), [#76](https://github.com/Xore/honeypot-stack/issues/76)
 > (dashboard spool and entry points),
@@ -247,26 +250,39 @@ pointing Ghidra's extension installer at it.
 
 ---
 
-## Phase 4 — Awesome-Ghidra Plugin Selection ⬜ Planned
+## Phase 4 — Awesome-Ghidra Plugin Selection ✅ Built (2026-08-01, #78)
 
 ### Source
 [AllsafeCyberSecurity/awesome-ghidra](https://github.com/AllsafeCyberSecurity/awesome-ghidra)
 
-### Selected Plugins for Automated Pipeline
+Nine candidates were originally listed here with no decision behind any of
+them, same problem [#85](https://github.com/Xore/honeypot-stack/issues/85)
+found in the "Additional Static Analysis Tooling" list below. Applying the
+same standard — burden of proof on inclusion, since each addition is
+third-party code pinned/updated/trusted on the analysis host — exactly one
+of the nine survives: `capa`.
 
-| Plugin | Repo | Purpose | Integration Mode |
-|--------|------|---------|------------------|
-| `ghidra_scripts` (Allsafe) | [link](https://github.com/AllsafeCyberSecurity/ghidra_scripts) | Malware-specific scripts (MIPS, ARM, packing detection) | Headless script |
-| `py-findcrypt-ghidra` | [link](https://github.com/AllsafeCyberSecurity/py-findcrypt-ghidra) | Detects crypto constants (AES, RC4, XOR keys) | Headless script |
-| `ghidra_scripts` (0x6d696368) | [link](https://github.com/0x6d696368/ghidra_scripts) | RC4 decrypter, YARA search, stack string decoder | Headless script |
-| `ghidra_scripts` (0xdea) | [link](https://github.com/0xdea/ghidra-scripts) | Vuln research: memcpy pattern, format string, ROP gadgets | Headless script |
-| `CapaExplorer` | [link](https://github.com/reb311ion/CapaExplorer) | Import CAPA analysis results as Ghidra annotations | Post-process |
-| `ghidra_bridge` | [link](https://github.com/justfoxing/ghidra_bridge) | Python 3 bridge — enables external orchestration scripts | Library |
-| `GhidraAAS` (Cisco Talos) | [link](https://github.com/Cisco-Talos/Ghidraaas) | REST API wrapper for Ghidra (alternative to biniamfd image) | Service |
-| `gotools` | [link](https://github.com/felberj/gotools) | Go binary support — honeypots see many Go-based botnets | Headless plugin |
-| `VTgrepGHIDRA` | [link](https://github.com/Sentinel-One/VTgrepGHIDRA) | Search VirusTotal for similar code blocks from Ghidra | Interactive |
+### Decided in
 
-### Explicitly Excluded
+| Plugin | Purpose | Why |
+|--------|---------|-----|
+| `capa` | MITRE ATT&CK/MBC behavior tagging | Built as a `/v1/capa` endpoint on the existing `statictools` sidecar (`analysis/ghidra/statictools/`), **not** via `CapaExplorer`/Ghidra annotations — capa's own CLI runs against the raw sample directly, independent of and parallel to ssdeep/tlsh/lief. `worker/ghidra-worker.py`'s `capa_scan()` calls it fail-soft; `report/generate_report.py` and the dashboard's `ghidraCapa` card both render the result. **Known gap**: capa's default (vivisect) backend covers only x86/amd64/arm64 — no MIPS or ARM32, both common in this honeypot's IoT catch — so a real share of samples will show "not observed" for a reason unrelated to whether they have taggable behavior at all. Tracked in [#195](https://github.com/Xore/honeypot-stack/issues/195). |
+
+### Decided out — each duplicates something already in the pipeline, is out of scope, or needs an analyst that isn't in this automated pipeline
+
+| Plugin | Would have added | Why it's out |
+|--------|-------------------|---------------|
+| `CapaExplorer` | Import capa results into Ghidra as annotations | Superseded by the direct integration above: capa runs standalone against the raw sample in the statictools sidecar and its output reaches the analyst through the report/dashboard, not a Ghidra GUI session. Nothing needs importing back into Ghidra when no analyst is sitting in one. |
+| `py-findcrypt-ghidra` | Crypto constant detection | Already replaced before Phase 4 was ever scoped: `findcrypt.py` was deleted in [#136](https://github.com/Xore/honeypot-stack/issues/136), superseded by `scan_crypto()` in `worker/ghidra-worker.py`. Re-adding it here would reintroduce the three bugs that deletion's commit message records. |
+| `ghidra_scripts` (Allsafe) | Malware-specific scripts (MIPS, ARM, packing detection) | No capability named here beyond "malware scripts" — capa's behavior tags (packing detection is a capa rule category) and `scan_crypto()` already cover the concrete overlap. Nothing distinct enough to justify a third-party headless script bundle with no test coverage. |
+| `ghidra_scripts` (0x6d696368) | RC4 decrypter, YARA search, stack string decoder | The YARA search here duplicates the dedicated, hardened YARA pipeline (`analysis/yara/`) for the same reason #85 decided `yara-python` out. RC4 decryption and stack strings are real capabilities, but narrow enough to belong with `floss` (#85, still pending its own sandboxing decision) rather than a second, less-maintained script bundle. |
+| `ghidra_scripts` (0xdea) | Vuln research: memcpy pattern, format string, ROP gadgets | Out of scope, not just low priority: this pipeline triages what a sample *does*, not whether it has exploitable bugs. |
+| `ghidra_bridge` | Python 3 bridge for external orchestration scripts | Nothing here needs live Python-to-Ghidra orchestration — the REST backend (`biniamfd/ghidra-headless-rest`, phase 1) already is the orchestration boundary; `ghidra_bridge` would be a second, overlapping one. |
+| `GhidraAAS` (Cisco Talos) | REST API wrapper for Ghidra | Duplicates the REST backend already deployed and verified against a live container (`biniamfd/ghidra-headless-rest:1.2.1`, phase 1). Swapping backends now means re-verifying the entire contract this worker was built and tested against, for no new capability. |
+| `gotools` | Go binary support | Real gap — this honeypot's catch includes Go-based botnets — but Ghidra's own Go loader plus capa's Go-aware rules already cover meaningful ground, and no sample analysed so far has hit a case Ghidra's built-in support couldn't handle. Revisit if a specific sample demonstrates a concrete gap. |
+| `VTgrepGHIDRA` | Search VirusTotal for similar code blocks from Ghidra | Interactive-only by design (a GUI code-search workflow), and this pipeline has no analyst sitting in a live Ghidra session — same reasoning that keeps GhidrAssist and Rev·Deck's GUI modes out of the automated path. |
+
+### Also excluded (unchanged from the original plan)
 - `Ghidra-evm` — no Ethereum payloads in honeypot context
 - `JNI Helper` — no Android APK analysis currently
 - `OOAnalyzer` — C++ OOP recovery, overkill for ELF botnet binaries
@@ -290,9 +306,8 @@ than the field name.
 
 The original plan below described a single combined PDF pulling in VT,
 JoeSandbox, and CAPA data. That data doesn't exist in this pipeline — there is
-no Phase 0 VT/JoeSandbox stage and no CAPA integration (Phase 4 is still
-planned) — so the report actually built is scoped to what
-`worker/ghidra-worker.py` produces today:
+no Phase 0 VT/JoeSandbox stage — so the report actually built is scoped to
+what `worker/ghidra-worker.py` produces today:
 
 ```
 {ghidra-results}/{sha256}_ghidra_report.html
@@ -305,14 +320,14 @@ planned) — so the report actually built is scoped to what
   ├── Call graph (inlined SVG, if build_call_graph() produced one)
   ├── Structural info (lief: format, architecture, entry point, sections)
   ├── Fuzzy hashes (ssdeep/tlsh)
+  ├── Capabilities (capa: ATT&CK/MBC tags, added 2026-08-01 #78)
   └── AI triage (Rev·Deck / local-model output, if configured)
 ```
 
 A PDF is optional, not the default: `generate_report.py --pdf` renders one via
 WeasyPrint if it's installed, but the worker only ever produces the HTML file.
-CAPA output and YARA rule suggestions are not sections here — CAPA integration
-is still Phase 4 (`CapaExplorer`, unbuilt), and this pipeline does not generate
-YARA rule suggestions at all.
+YARA rule suggestions are not a section here — this pipeline does not generate
+those at all.
 
 ---
 
@@ -347,29 +362,31 @@ table is deployed.
 | `biniamfd/ghidra-headless-rest` | Ghidra REST backend | Automated (Docker) | 1 |
 | `biniamf/ai-reverse-engineering` (Rev·Deck) | AI triage | Automated + Interactive | 2 |
 | `symgraph/GhidrAssist` | In-GUI AI chat | Interactive only | 3 — [#78](https://github.com/Xore/honeypot-stack/issues/78) |
-| `AllsafeCyberSecurity/ghidra_scripts` | Malware scripts | Headless | 4 — [#78](https://github.com/Xore/honeypot-stack/issues/78) |
-| `py-findcrypt-ghidra` | Crypto detection | Headless | 4 — [#78](https://github.com/Xore/honeypot-stack/issues/78) |
-| `0x6d696368/ghidra_scripts` | RC4/YARA/stack strings | Headless | 4 — [#78](https://github.com/Xore/honeypot-stack/issues/78) |
-| `0xdea/ghidra-scripts` | Vuln research | Headless | 4 — [#78](https://github.com/Xore/honeypot-stack/issues/78) |
-| `CapaExplorer` | CAPA import | Post-process | 4 — decide with [#85](https://github.com/Xore/honeypot-stack/issues/85) |
-| `gotools` | Go binary support | Headless plugin | 4 — [#78](https://github.com/Xore/honeypot-stack/issues/78) |
-| `VTgrepGHIDRA` | VT code search | Interactive | 4 — [#78](https://github.com/Xore/honeypot-stack/issues/78) |
+| `capa` | Behavior tagging (MITRE ATT&CK/MBC) | Automated (statictools sidecar) | 4 — ✅ built, [#78](https://github.com/Xore/honeypot-stack/issues/78) |
+| `AllsafeCyberSecurity/ghidra_scripts` | Malware scripts | Headless | 4 — decided out, 2026-08-01 |
+| `py-findcrypt-ghidra` | Crypto detection | Headless | 4 — decided out, 2026-08-01 (superseded by `scan_crypto()`) |
+| `0x6d696368/ghidra_scripts` | RC4/YARA/stack strings | Headless | 4 — decided out, 2026-08-01 |
+| `0xdea/ghidra-scripts` | Vuln research | Headless | 4 — decided out, 2026-08-01 |
+| `CapaExplorer` | CAPA import | Post-process | 4 — decided out, 2026-08-01 (superseded by the direct `capa` integration above) |
+| `ghidra_bridge` | Python 3 bridge | Library | 4 — decided out, 2026-08-01 |
+| `GhidraAAS` (Cisco Talos) | REST API wrapper | Service | 4 — decided out, 2026-08-01 |
+| `gotools` | Go binary support | Headless plugin | 4 — decided out, 2026-08-01 |
+| `VTgrepGHIDRA` | VT code search | Interactive | 4 — decided out, 2026-08-01 |
 
-`CapaExplorer` imports `capa` output into Ghidra, so it and #85's `capa`
-decision are one decision. Deciding them apart produces either a plugin with no
-tool behind it or a tool whose results never reach the analyst.
+See Phase 4 above for the reasoning behind each decision.
 
 ---
 
 ## Additional Static Analysis Tooling
 
-> **`ssdeep`/`tlsh` and `lief` are built** (2026-08-01, [#138](https://github.com/Xore/honeypot-stack/issues/138)):
-> a loopback-only sidecar, `analysis/ghidra/statictools/`, run alongside
+> **`ssdeep`/`tlsh`, `lief` and `capa` are built** (`capa` 2026-08-01, #78; the
+> other two 2026-08-01, [#138](https://github.com/Xore/honeypot-stack/issues/138)):
+> the same loopback-only sidecar, `analysis/ghidra/statictools/`, run alongside
 > `ghidra`/`ollama` by `docker-compose.ghidra.yml`. The worker calls it after
-> collection via `fuzzy_hash()`/`lief_parse()` and writes `fuzzy_hashes`/`lief`
-> onto the result, fail-soft like `ai_triage`. `floss` is not — its risk
-> profile (code emulation) needs its own sandboxing decision, tracked
-> separately in #138.
+> collection via `fuzzy_hash()`/`lief_parse()`/`capa_scan()` and writes
+> `fuzzy_hashes`/`lief`/`capa` onto the result, fail-soft like `ai_triage`.
+> `floss` is not built — its risk profile (code emulation) needs its own
+> sandboxing decision, tracked separately in #138.
 
 Beyond Ghidra, nine tools were once listed as *considered* for the pipeline,
 with no decision behind any of them. [#85](https://github.com/Xore/honeypot-stack/issues/85)
@@ -382,7 +399,7 @@ trusted, so the burden of proof was on inclusion, not exclusion.
 
 | Tool | Purpose | Why |
 |------|---------|-----|
-| `capa` | Behavior tagging (MITRE ATT&CK) | Strongest case: the tag vocabulary is what the LLM worker ([#66](https://github.com/Xore/honeypot-stack/issues/66)) and the dashboard already speak. Has a Ghidra integration path via `CapaExplorer`, so pin/scope this together with [#78](https://github.com/Xore/honeypot-stack/issues/78) phase 4 rather than separately. |
+| `capa` | Behavior tagging (MITRE ATT&CK) | Strongest case: the tag vocabulary is what the LLM worker ([#66](https://github.com/Xore/honeypot-stack/issues/66)) and the dashboard already speak. Built 2026-08-01 as part of [#78](https://github.com/Xore/honeypot-stack/issues/78) phase 4 — see that section for the integration shape and the arch-coverage gap it left open. |
 | `ssdeep` / `tlsh` | Fuzzy hashing for family clustering | Cheap, offline, never executes the sample. Gives family clustering exact SHA-256 dedup cannot — a real capability, not a duplicate of anything else in the pipeline. |
 | `lief` | ELF/PE/Mach-O parsing | One library covers every format `pefile` would have been added for, so it replaces that entry rather than sitting beside it. |
 | `floss` | Obfuscated string extraction | Genuinely useful on packed/obfuscated binaries, but it *emulates* code to unpack strings — a different risk class from the three above. Needs the sandbox boundary decided as part of integrating it, not a plain `pip install`. Replaces the `strings2` line below outright: `strings2` is the tool `floss` superseded, not a second option. |

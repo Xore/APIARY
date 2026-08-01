@@ -64,6 +64,43 @@ type ghidraLief struct {
 	CompileTimestamp *int64 `json:"compile_timestamp"`
 }
 
+type ghidraCapability struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Matches   int    `json:"matches"`
+}
+
+type ghidraAttack struct {
+	ID           string `json:"id"`
+	Tactic       string `json:"tactic"`
+	Technique    string `json:"technique"`
+	Subtechnique string `json:"subtechnique"`
+}
+
+type ghidraMBC struct {
+	ID        string `json:"id"`
+	Objective string `json:"objective"`
+	Behavior  string `json:"behavior"`
+	Method    string `json:"method"`
+}
+
+// ghidraCapa mirrors what analysis/ghidra/statictools/server.py's
+// capa_scan() returns, forwarded verbatim by the worker (#78). Unlike Lief,
+// the worker's capa_scan() never forwards the sidecar's {"unsupported": ...}
+// 422 shape here — _statictools_post() already collapses any HTTP error,
+// 422 included, to nil, so on the Go side "no capa data" (nil *ghidraCapa)
+// covers both "sidecar down" and "capa's default backend does not support
+// this architecture" the same way absent Lief output already does.
+type ghidraCapa struct {
+	Arch                  string             `json:"arch"`
+	OS                    string             `json:"os"`
+	Format                string             `json:"format"`
+	Capabilities          []ghidraCapability `json:"capabilities"`
+	CapabilitiesTruncated bool               `json:"capabilities_truncated"`
+	Attack                []ghidraAttack     `json:"attack"`
+	MBC                   []ghidraMBC        `json:"mbc"`
+}
+
 type ghidraTriage struct {
 	Workflow    string   `json:"workflow"`
 	FamilyGuess string   `json:"family_guess"`
@@ -99,6 +136,7 @@ type ghidraResult struct {
 	AITriage     *ghidraTriage      `json:"ai_triage"`
 	FuzzyHashes  *ghidraFuzzyHashes `json:"fuzzy_hashes"`
 	Lief         *ghidraLief        `json:"lief"`
+	Capa         *ghidraCapa        `json:"capa"`
 	ReportPDF    string             `json:"report_pdf"`
 
 	// Set by the dashboard, not the worker: download routes, present only when

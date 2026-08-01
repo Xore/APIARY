@@ -189,6 +189,29 @@ class StaticToolsStub(BaseHTTPRequestHandler):
                                    "section_count": 1, "sections_truncated": False,
                                    "libraries": ["libc.so.6"], "stripped": True}).encode()
                 status = 200
+        elif self.path == "/v1/capa":
+            if data == b"CORRUPT":
+                # Stands in for capa's default backend declining an
+                # unsupported architecture/format/OS (exit 17 etc, #78) — the
+                # same 422 contract as lief-parse above, distinguished by the
+                # "unsupported" key server.py's do_POST adds.
+                body = json.dumps({"error": "capa cannot analyse this sample",
+                                   "unsupported": "unsupported architecture"}).encode()
+                status = 422
+            else:
+                body = json.dumps({
+                    "arch": "amd64", "os": "linux", "format": "elf",
+                    "capabilities": [{"name": "create TCP socket",
+                                      "namespace": "communication/socket/tcp",
+                                      "matches": 2}],
+                    "capabilities_truncated": False,
+                    "attack": [{"id": "T1071.001", "tactic": "COMMAND_AND_CONTROL",
+                               "technique": "Application Layer Protocol",
+                               "subtechnique": "Web Protocols"}],
+                    "mbc": [{"id": "C0001", "objective": "Communication",
+                            "behavior": "Socket Communication", "method": "Send Data"}],
+                }).encode()
+                status = 200
         else:
             body = json.dumps({"error": "not found"}).encode()
             status = 404
@@ -309,13 +332,14 @@ def test_spool(ghidra):
               "function addr mapped to address")
         check(d.get("analyzer_version") == "ghidra-11.3.2",
               "analyzer version recorded from /status")
-        check(d["version"] == 2, "version stamped")
+        check(d["version"] == 3, "version stamped")
         check(all(k in d for k in ("findcrypt", "call_graph_svg", "ai_triage",
-                                   "fuzzy_hashes", "lief", "report_pdf")),
+                                   "fuzzy_hashes", "lief", "capa", "report_pdf")),
               "every result key present")
         check(d["ai_triage"] is None, "triage disabled leaves ai_triage null")
         check(d["fuzzy_hashes"] is None, "statictools disabled leaves fuzzy_hashes null")
         check(d["lief"] is None, "statictools disabled leaves lief null")
+        check(d["capa"] is None, "statictools disabled leaves capa null")
         check(oct(rf.stat().st_mode)[-3:] == "600", "result is 0600")
 
     check(not (req / f"{good}.request").exists(), "consumed request removed")
@@ -454,6 +478,12 @@ def test_statictools(ghidra, statictools):
         check(d["lief"] is not None and d["lief"]["format"] == "ELF",
               f"lief carried through (got {d['lief']!r})")
         check(d["lief"]["stripped"] is True, "lief boolean fields survive JSON round trip")
+        check(d["capa"] is not None and d["capa"]["arch"] == "amd64",
+              f"capa carried through (got {d['capa']!r})")
+        check(d["capa"]["capabilities"][0]["name"] == "create TCP socket",
+              "capa capabilities survive JSON round trip")
+        check(d["capa"]["attack"][0]["id"] == "T1071.001",
+              "capa ATT&CK entries survive JSON round trip")
 
     print("--- lief 422 (unrecognised format) leaves lief null, not an error ---")
     r, d = statictools_run(tmp, "corrupt", ghidra,
@@ -464,12 +494,15 @@ def test_statictools(ghidra, statictools):
     check(d is not None and d["lief"] is None, "lief left null, not an error result")
     check(d is not None and d["fuzzy_hashes"] is not None,
           "fuzzy_hashes is independent of lief and still ran")
+    check(d is not None and d["capa"] is None,
+          "capa 422 (unsupported architecture) leaves capa null too, not an error result")
 
-    print("--- disabled leaves both fields null ---")
+    print("--- disabled leaves every field null ---")
     r, d = statictools_run(tmp, "disabled", ghidra, {"STATICTOOLS_API_BASE": ""})
     check(r.returncode == 0, "exit 0 with statictools disabled")
     check(d is not None and d["fuzzy_hashes"] is None, "fuzzy_hashes left null")
     check(d is not None and d["lief"] is None, "lief left null")
+    check(d is not None and d["capa"] is None, "capa left null")
 
     print("--- an unreachable sidecar fails soft ---")
     r, d = statictools_run(tmp, "down", ghidra,
@@ -479,6 +512,7 @@ def test_statictools(ghidra, statictools):
           "the Ghidra analysis completes without the sidecar")
     check(d is not None and d["fuzzy_hashes"] is None, "fuzzy_hashes left null")
     check(d is not None and d["lief"] is None, "lief left null")
+    check(d is not None and d["capa"] is None, "capa left null")
 
 
 def test_approved_contract():

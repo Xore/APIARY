@@ -166,6 +166,64 @@ func TestLoadGhidraResultsDecodesFuzzyHashesAndLief(t *testing.T) {
 	}
 }
 
+// The worker's capa_scan() forwards the sidecar's summary verbatim, and
+// _statictools_post() already collapses both "sidecar down" and the 422
+// "unsupported architecture/format/OS" case to a bare absent field — so on
+// the decode side there is only one shape to check: present, full summary
+// (#78).
+func TestLoadGhidraResultsDecodesCapa(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GHIDRA_RESULTS_DIR", dir)
+
+	raw := `{
+		"version": 3, "exit_status": "ok", "completed_at": "2026-08-01T10:00:00+00:00",
+		"capa": {"arch": "amd64", "os": "linux", "format": "elf",
+		         "capabilities": [{"name": "create TCP socket", "namespace": "communication/socket/tcp", "matches": 2}],
+		         "capabilities_truncated": false,
+		         "attack": [{"id": "T1071.001", "tactic": "COMMAND_AND_CONTROL", "technique": "Application Layer Protocol", "subtechnique": "Web Protocols"}],
+		         "mbc": [{"id": "C0001", "objective": "Communication", "behavior": "Socket Communication", "method": "Send Data"}]}
+	}`
+	if err := os.WriteFile(filepath.Join(dir, shaA+"_ghidra.json"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rows := loadGhidraResults()
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	row := rows[0]
+
+	if row.Capa == nil || row.Capa.Arch != "amd64" || row.Capa.OS != "linux" || row.Capa.Format != "elf" {
+		t.Fatalf("capa did not decode: %+v", row.Capa)
+	}
+	if len(row.Capa.Capabilities) != 1 || row.Capa.Capabilities[0].Name != "create TCP socket" ||
+		row.Capa.Capabilities[0].Matches != 2 {
+		t.Fatalf("capa capabilities did not decode: %+v", row.Capa.Capabilities)
+	}
+	if len(row.Capa.Attack) != 1 || row.Capa.Attack[0].ID != "T1071.001" {
+		t.Fatalf("capa attack did not decode: %+v", row.Capa.Attack)
+	}
+	if len(row.Capa.MBC) != 1 || row.Capa.MBC[0].ID != "C0001" {
+		t.Fatalf("capa mbc did not decode: %+v", row.Capa.MBC)
+	}
+}
+
+// Absent covers both "sidecar unavailable" and "capa's default backend does
+// not support this sample's architecture/format/OS" — the worker's
+// _statictools_post() already collapses both to nil before this ever reaches
+// the dashboard, so decoding a result with no "capa" key at all must not
+// panic or synthesize a zero-valued struct (#78).
+func TestLoadGhidraResultsCapaAbsentIsNil(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GHIDRA_RESULTS_DIR", dir)
+	writeGhidraResult(t, dir, shaA, map[string]any{"exit_status": "ok"})
+
+	rows := loadGhidraResults()
+	if len(rows) != 1 || rows[0].Capa != nil {
+		t.Fatalf("capa should be nil when the worker omitted it: %+v", rows)
+	}
+}
+
 // Identity comes from the filename, which the worker derived from a validated
 // request — not from the document body, which could disagree with it.
 func TestLoadGhidraResultsTrustsFilenameOverBody(t *testing.T) {

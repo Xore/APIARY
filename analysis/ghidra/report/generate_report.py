@@ -33,7 +33,7 @@ derived from, the sample. Escaped exactly once, at the moment it is placed
 into markup, by `esc()`. Nothing reaches the output any other way.
 
 **Absence is normal.** A result JSON without a call graph, AI triage, fuzzy
-hashes or lief output is the common case, not an error. Every section
+hashes, lief or capa output is the common case, not an error. Every section
 degrades to "not observed" rather than raising, because a partial report is
 evidence and a traceback is not.
 """
@@ -231,6 +231,54 @@ def structural_section(result: dict) -> str:
     return section("Structural info (lief)", body)
 
 
+def capa_section(result: dict) -> str:
+    capa = result.get("capa")
+    if not capa:
+        return section(
+            "Capabilities (capa)",
+            empty("not observed"),
+            "capa's default backend covers x86/amd64/arm64 only — absent "
+            "here also means an unsupported architecture (e.g. MIPS/ARM32, "
+            "common in this honeypot's IoT catch), same as a sidecar that "
+            "was unavailable (#78).",
+        )
+    rows = [
+        ("Architecture", capa.get("arch")),
+        ("OS", capa.get("os")),
+        ("Format", capa.get("format")),
+    ]
+    body = kv_table(rows)
+
+    cap_rows = [
+        (c.get("name"), c.get("namespace"), c.get("matches"))
+        for c in (capa.get("capabilities") or [])
+    ]
+    body += "<h3>Capabilities</h3>" + table(["name", "namespace", "matches"], cap_rows)
+    if capa.get("capabilities_truncated"):
+        body += '<p class="note">The capability list was truncated.</p>'
+
+    attack_rows = [
+        (a.get("id"), a.get("tactic"), a.get("technique"), a.get("subtechnique"))
+        for a in (capa.get("attack") or [])
+    ]
+    body += "<h3>MITRE ATT&amp;CK</h3>" + table(
+        ["id", "tactic", "technique", "subtechnique"], attack_rows)
+
+    mbc_rows = [
+        (m.get("id"), m.get("objective"), m.get("behavior"), m.get("method"))
+        for m in (capa.get("mbc") or [])
+    ]
+    body += "<h3>Malware Behavior Catalog</h3>" + table(
+        ["id", "objective", "behavior", "method"], mbc_rows)
+
+    return section(
+        "Capabilities (capa)",
+        body,
+        "Rule matches, not a verdict — a capability being tagged here means "
+        "code implementing it was found, not that it necessarily ran.",
+    )
+
+
 def ai_triage_section(result: dict) -> str:
     triage = result.get("ai_triage")
     if not triage:
@@ -297,6 +345,7 @@ def build_html(result: dict, results_dir: Path) -> str:
         call_graph_section(result, results_dir),
         structural_section(result),
         fuzzy_hash_section(result),
+        capa_section(result),
         ai_triage_section(result),
     ])
 
