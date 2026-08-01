@@ -121,6 +121,13 @@ if [ -n "$STACK_DIR" ]; then
   say "deploying the compose file to $STACK_DIR"
   mkdir -p "$STACK_DIR"
   cp "$compose_file" "$STACK_DIR/compose.yml"
+  # statictools is the first service in this file with a local build:
+  # context rather than an image:. Copying only the compose file (as ghidra/
+  # ollama always needed) leaves `build: ./statictools` pointing at a
+  # directory that does not exist in $STACK_DIR, caught deploying this the
+  # first time ("unable to prepare context: path .../statictools not found").
+  rm -rf "$STACK_DIR/statictools"
+  cp -r "$here/statictools" "$STACK_DIR/statictools"
   if [ "$USE_GPU" = yes ]; then
     cp "$gpu_file" "$STACK_DIR/compose.override.yml"
   else
@@ -138,6 +145,14 @@ files=(-f "$compose_file")
 if [ "$USE_GPU" = yes ]; then
   files+=(-f "$gpu_file")
 fi
+
+# On a Dockge host $STACK_DIR (/opt/stacks/ghidra) is itself a symlink into
+# /var/dockge/stacks, and buildx's filesystem-entitlements check treats a
+# build context reached through one as "possibly insecure," refusing to build
+# statictools without this. There is no untrusted party here to entitle
+# against — this is the operator's own stack directory — so the check is
+# switched off rather than granted piecemeal per invocation.
+export BUILDX_BAKE_ENTITLEMENTS_FS=0
 
 dc() { docker compose "${files[@]}" "$@"; }
 
