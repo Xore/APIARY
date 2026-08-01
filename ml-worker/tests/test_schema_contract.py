@@ -1,12 +1,13 @@
 """
-Feature-schema contract (#62 task 32): proves, against real-shaped fixtures
-for all 5 source types (fixtures.py), exactly which fields extract_features()
-currently reads correctly, reads wrong, or can't reach at all. This is the
-baseline #33's extract_features() rewrite must fix -- each assertion here
-documents one specific gap, not a general "it's broken" statement.
-
-The Dionaea/Cowrie/Conpot ECS-promotion gaps this file documents are ingest
-pipeline issues, not ml-worker bugs -- filed separately as #132.
+Feature-schema contract (#62 tasks 32/33): proves, against real-shaped
+fixtures for all 5 source types (fixtures.py), exactly which fields
+extract_features() reads correctly, reads wrong, or can't reach at all.
+Task 33 fixed the per-sensor field reads (models/isolation_forest.py's
+_get_ip/_get_port/_get_transport_proto/_get_username/_get_password/
+_get_duration) -- this file now proves the FIXED behavior per source, plus
+the handful of gaps that remain genuinely unfixable from extract_features()
+alone (either an ingest-pipeline gap -- #132 -- or a field no real sensor
+emits at all, e.g. Conpot's transport or HTTP-honeypot's own port).
 
 Run: python3 -m pytest ml-worker/tests/test_schema_contract.py -v
 """
@@ -17,7 +18,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from models.isolation_forest import IsoForestModel  # noqa: E402
+from models.isolation_forest import IsoForestModel, _get_ip, _get_port, _get_transport_proto  # noqa: E402
 import fixtures  # noqa: E402
 
 
@@ -26,27 +27,72 @@ def model():
     return IsoForestModel(model_dir="/tmp/does-not-matter")
 
 
-class TestAllFiveSourcesYieldOnlyDefaultedFeatures:
-    """extract_features() reads a flat top-level schema; every one of these
-    5 real-shaped sources nests its data instead, so every single source
-    currently produces the all-defaults feature vector regardless of what
-    the underlying event actually contains."""
+class TestIpAndPortNowCorrectlyResolvedPerSource:
+    """Every source whose real document actually carries an IP/port
+    (everything except the opaque dionaea-incident payload) now resolves it
+    -- checked directly via _get_ip()/_get_port() rather than through
+    is_known_scanner()/normalised-port, so the assertion can't accidentally
+    pass just because a synthetic fixture IP isn't scanner-listed."""
 
-    @pytest.mark.parametrize("doc", fixtures.ALL_REAL_DOCUMENTS, ids=lambda d: d["_id"])
-    def test_no_real_source_populates_the_ip_field(self, model, doc):
+    @pytest.mark.parametrize("doc", [
+        fixtures.COWRIE_LOGIN_FAILED, fixtures.COWRIE_COMMAND_INPUT,
+        fixtures.DIONAEA_CONNECTION_ACCEPT, fixtures.CONPOT_MODBUS_REQUEST,
+        fixtures.HTTP_HONEYPOT_LOGIN_ATTEMPT, fixtures.SURICATA_ALERT,
+    ], ids=lambda d: d["_id"])
+    def test_ip_resolves_to_the_real_address(self, doc):
         src = doc["_source"]
-        features = model.extract_features(src).flatten()
-        # is_known_scanner (index 12) depends on the ip lookup finding
-        # something; every source's real IP is unreachable via
-        # src.get("src_ip") or src.get("id.orig_h"), so it's always 0 even
-        # for fixtures whose source.ip / honeypot.src_ip is a real address.
-        assert features[12] == 0.0
+        assert _get_ip(src) == src["source"]["ip"]
 
-    @pytest.mark.parametrize("doc", fixtures.ALL_REAL_DOCUMENTS, ids=lambda d: d["_id"])
-    def test_no_real_source_populates_the_port_field(self, model, doc):
-        src = doc["_source"]
-        features = model.extract_features(src).flatten()
-        assert features[2] == 0.0, "port always defaults to 0/65535.0=0.0 despite every fixture carrying a real port 2-3 levels deep"
+    @pytest.mark.parametrize("doc,expected_port", [
+        (fixtures.COWRIE_LOGIN_FAILED, 22),
+        (fixtures.COWRIE_COMMAND_INPUT, 22),
+        (fixtures.DIONAEA_CONNECTION_ACCEPT, 445),
+        (fixtures.CONPOT_MODBUS_REQUEST, 502),
+        (fixtures.SURICATA_ALERT, 22),
+    ], ids=lambda x: x if isinstance(x, int) else x["_id"])
+    def test_port_resolves_to_the_real_value(self, doc, expected_port):
+        assert _get_port(doc["_source"]) == expected_port
+
+    def test_http_honeypot_port_stays_unset_because_none_is_ever_logged(self):
+        # Not a bug: main.go's own event struct has no port field at all --
+        # the honeypot always listens on the same implicit web port, so it's
+        # never worth logging per-event. Nothing for extract_features() to
+        # read here, honestly reflected as 0 rather than guessed.
+        assert _get_port(fixtures.HTTP_HONEYPOT_LOGIN_ATTEMPT["_source"]) == 0
+
+    def test_dionaea_incident_ip_and_port_stay_unset_because_payload_is_opaque(self):
+        # honeypot.message is a raw JSON string (log_incident.py's actual
+        # shape); there is no structured src_ip/dst_port here to read at all.
+        src = fixtures.DIONAEA_INCIDENT_RAW["_source"]
+        assert _get_ip(src) == ""
+        assert _get_port(src) == 0
+
+
+class TestTransportProtocolPerSource:
+    """proto_enc (index 3) encodes transport layer (tcp/udp/icmp), not
+    application protocol -- multipot's own `proto` field is application-layer
+    ("vnc"/"redis"/"mysql"/...; confirmed by reading protocols.go directly),
+    so _get_transport_proto() must not read it as-is."""
+
+    def test_cowrie_infers_tcp_structurally_ssh_and_telnet_are_tcp_only(self):
+        assert _get_transport_proto(fixtures.COWRIE_LOGIN_FAILED["_source"]) == "tcp"
+
+    def test_http_honeypot_infers_tcp_structurally(self):
+        assert _get_transport_proto(fixtures.HTTP_HONEYPOT_LOGIN_ATTEMPT["_source"]) == "tcp"
+
+    def test_dionaea_reads_the_actual_transport_field_not_the_app_layer_one(self):
+        src = fixtures.DIONAEA_CONNECTION_ACCEPT["_source"]
+        assert src["honeypot"]["connection"]["protocol"] == "smbd"  # app-layer, must NOT be returned
+        assert _get_transport_proto(src) == "tcp"                   # connection.transport, the real field
+
+    def test_conpot_has_no_honest_transport_inference_available(self):
+        # data_type ("modbus") is application-layer; Conpot's personas span
+        # both TCP (Modbus/S7comm/HTTP) and UDP (SNMP) with nothing in the
+        # event itself distinguishing which -- left unset rather than guessed.
+        assert _get_transport_proto(fixtures.CONPOT_MODBUS_REQUEST["_source"]) is None
+
+    def test_suricata_reads_the_ecs_promoted_transport_field(self):
+        assert _get_transport_proto(fixtures.SURICATA_ALERT["_source"]) == "tcp"
 
 
 class TestPerSourceFieldLocations:

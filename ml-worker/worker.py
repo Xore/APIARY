@@ -19,7 +19,7 @@ import redis
 from elasticsearch import Elasticsearch
 from loguru import logger
 
-from models.isolation_forest import IsoForestModel
+from models.isolation_forest import IsoForestModel, MAX_TRAIN_SAMPLES, _get_ip, _get_port, _get_transport_proto
 from models.lstm_autoencoder import LSTMAEModel
 
 # ---------------------------------------------------------------------------
@@ -39,13 +39,15 @@ THRESHOLD        = float(os.getenv("ML_ALERT_THRESHOLD", "0.75"))
 MODEL_DIR        = os.getenv("MODEL_DIR",         "/models")
 LOG_LEVEL        = os.getenv("LOG_LEVEL",         "INFO")
 
-# Source indices to monitor
+# Source indices to monitor. #61 found these matched zero real indices --
+# the actual shape (docs/ml-worker-plan.md §2/§5.3, verified live 2026-07-31)
+# is one unified honeypot-v2-* data stream for every sensor (disambiguated
+# per-event by extract_features()'s own field reads, not by index name --
+# event.sensor isn't reliably set for every sensor, see #132) plus
+# suricata-v2-<event_type>-* for network/IDS events.
 SOURCE_INDICES = [
-    "cowrie-*",
-    "dionaea-*",
-    "honeypot-network-*",
-    "conpot-*",
-    "http-honeypot-*",
+    "honeypot-v2-*",
+    "suricata-v2-*",
 ]
 
 ANOMALY_INDEX  = "ml-anomalies"
@@ -91,8 +93,16 @@ def save_checkpoint(es: Elasticsearch, index_pattern: str, ts: str) -> None:
 
 
 def fetch_new_events(es: Elasticsearch, index_pattern: str,
-                    since: str, page_size: int = 500) -> list:
-    """Scroll all new events from the given index pattern since timestamp."""
+                    since: str, page_size: int = 500,
+                    max_total: "int | None" = None) -> list:
+    """Scroll new events from the given index pattern since timestamp.
+
+    max_total bounds how much this pulls into memory in one call -- the
+    normal poll path leaves it unset (checkpoints keep each call small
+    already), but the retrain path's 24h window across 2 index patterns has
+    no other cap, and MAX_TRAIN_SAMPLES only bounds what retrain() fits on
+    AFTER everything's already been fetched and held in memory (#62 task 33).
+    """
     events = []
     query = {
         "query": {"range": {"@timestamp": {"gt": since}}},
@@ -105,6 +115,9 @@ def fetch_new_events(es: Elasticsearch, index_pattern: str,
         hits = resp["hits"]["hits"]
         while hits:
             events.extend(hits)
+            if max_total is not None and len(events) >= max_total:
+                events = events[:max_total]
+                break
             resp = es.scroll(scroll_id=scroll_id, scroll="2m")
             scroll_id = resp["_scroll_id"]
             hits = resp["hits"]["hits"]
@@ -125,19 +138,24 @@ def write_anomaly(es: Elasticsearch, rdb: "redis.Redis | None",
     if composite < THRESHOLD:
         return
 
+    # src_ip/dst_port/proto use the same real-document field reads as
+    # extract_features() (#62 task 33) -- src.get("src_ip") etc. never
+    # matches a real document's top level, so a correctly-fired anomaly
+    # would otherwise still get written with a null src_ip, which is the
+    # one field an operator actually needs to act on it.
     doc = {
         "@timestamp":        src.get("@timestamp", datetime.now(timezone.utc).isoformat()),
         "source_event_id":   event.get("_id"),
         "source_index":      event.get("_index"),
-        "src_ip":            src.get("src_ip") or src.get("id.orig_h"),
-        "src_country":       src.get("geoip", {}).get("country_iso_code"),
+        "src_ip":            _get_ip(src) or None,
+        "src_country":       (src.get("source") or {}).get("geo", {}).get("country_iso_code"),
         "composite_score":   round(composite, 4),
         "severity":          severity(composite),
         "model_scores":      {k: round(v, 4) for k, v in scores.items()},
         "explanation":       explanation,
-        "event_type":        src.get("event_type") or src.get("type"),
-        "dst_port":          src.get("dst_port") or src.get("id.resp_p"),
-        "proto":             src.get("proto"),
+        "event_type":        (src.get("event") or {}).get("category"),
+        "dst_port":          _get_port(src) or None,
+        "proto":             _get_transport_proto(src),
     }
 
     # The Elasticsearch write is the authoritative action -- a dashboard
@@ -261,7 +279,10 @@ def run_worker() -> None:
             all_events = []
             for idx in SOURCE_INDICES:
                 since_24h = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
-                all_events.extend(fetch_new_events(es, idx, since_24h, page_size=5000))
+                all_events.extend(fetch_new_events(
+                    es, idx, since_24h, page_size=5000,
+                    max_total=MAX_TRAIN_SAMPLES,
+                ))
 
             if len(all_events) > 100:
                 iso_model.retrain([e["_source"] for e in all_events])

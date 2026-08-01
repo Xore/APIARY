@@ -53,32 +53,23 @@ REAL_SHAPED_DOCUMENT = {
 
 
 class TestFieldSchemaMismatch:
-    """Findings #3: extract_features() reads a flat schema; real documents
-    nest sensor data under honeypot.*/source.*/network.* (ECS-flavored)."""
+    """Findings #3 (historical): extract_features() read a flat schema; real
+    documents nest sensor data under honeypot.*/source.*/network.*
+    (ECS-flavored). Fixed in #62 task 33 -- current per-source behavior
+    (what's now correctly read vs. still a documented gap) is proven in
+    test_schema_contract.py instead, against fixtures for all 5 sources, not
+    just this one. Kept here is the one assertion that's still true: the
+    naive flat lookup worker.py used to use never worked and never will,
+    which is exactly why it had to be replaced rather than patched."""
 
-    def test_real_document_yields_defaulted_features(self):
-        model = IsoForestModel(model_dir="/tmp/does-not-matter")
+    def test_the_old_naive_flat_lookup_never_finds_the_real_ip(self):
         src = REAL_SHAPED_DOCUMENT["_source"]
-        features = model.extract_features(src).flatten()
-
-        # None of extract_features()'s lookups (src_ip, dst_port, proto,
-        # payload_hex, username, password, cmd_count, duration,
-        # failed_logins_1h, unique_ports_1h) exist at the top level of a real
-        # document -- every one of them silently falls back to its default,
-        # even though this specific event carries a real src_ip, port, and
-        # protocol two or three levels deeper.
-        assert features[2] == 0.0, "port defaulted to 0 despite honeypot.port=5900 in the source doc"
-        assert features[3] == 3, "proto defaulted to 'unknown' (index 3) despite honeypot.proto='vnc'"
-        assert features[12] == 0, "is_known_scanner is 0 because ip resolved to '' (src_ip lookup found nothing)"
-
-    def test_extract_features_never_finds_the_real_ip(self):
-        model = IsoForestModel(model_dir="/tmp/does-not-matter")
-        src = REAL_SHAPED_DOCUMENT["_source"]
-        # extract_features's own ip lookup (used internally for
-        # is_known_scanner) mirrors src.get("src_ip") or src.get("id.orig_h"):
-        # both miss on a real document.
+        # This is the exact formula extract_features() used before #62 task
+        # 33 -- kept here, standalone, as a permanent demonstration of why it
+        # had to be replaced with the per-sensor honeypot.*/source.* reads in
+        # models/isolation_forest.py's _get_ip().
         ip = src.get("src_ip") or src.get("id.orig_h") or ""
-        assert ip == "", "the field lookup worker.py actually uses cannot see honeypot.src_ip"
+        assert ip == "", "the old flat lookup cannot see honeypot.src_ip, nested 2-3 levels down"
         assert src["honeypot"]["src_ip"] == "203.0.113.9", "the real value does exist, just three levels deeper"
 
 
@@ -184,16 +175,27 @@ class TestBufferStateNotPersisted:
 class TestUnhandledEventErrorsCrashTheBatch:
     """Finding #8 (roadmap: 'malformed payloads ... are not isolated from
     the processing loop'): there is no per-event try/except in worker.py's
-    main loop, so one bad event takes down the whole poll cycle."""
+    main loop, so one bad event takes down the whole poll cycle.
 
-    def test_odd_length_payload_hex_raises_uncaught(self):
+    The original reproduction (a malformed payload_hex value) no longer
+    raises: #62 task 33 stopped extract_features() from reading payload_hex
+    at all, since no real sensor emits a consistent raw-payload field to
+    begin with (see fixtures.py / docs/ml-worker-plan.md §5.3) -- that
+    specific crash is gone as a side effect, not a targeted fix. The
+    underlying finding is still open: worker.py's main loop still has no
+    try/except around the per-event extract/score/write path, so any other
+    unexpected shape (e.g. a non-numeric destination.port) would still take
+    the batch down. Not in #62 task 33's scope (extract_features() + bounded
+    HBOS); tracked as remaining work, not re-filed as a new issue."""
+
+    def test_extract_features_tolerates_a_non_numeric_port(self):
         model = IsoForestModel(model_dir="/tmp/does-not-matter")
-        malformed = {"@timestamp": "2026-07-31T00:00:00Z", "payload_hex": "abc"}  # odd length: not valid hex
+        malformed = {"@timestamp": "2026-07-31T00:00:00Z", "destination": {"port": "not-a-port"}}
         with pytest.raises(ValueError):
-            # This is exactly what worker.py's per-event loop calls with no
-            # surrounding try/except -- one malformed capture from an
-            # attacker (trivially producible) stops the entire index's batch,
-            # and every other index queued behind it in SOURCE_INDICES.
+            # Still reproduces the batch-crashing finding, just via a field
+            # extract_features() actually reads now instead of the retired
+            # payload_hex path -- proves the *loop* still needs a guard, even
+            # though extract_features()'s own field reads are fixed.
             model.extract_features(malformed)
 
 
