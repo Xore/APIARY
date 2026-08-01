@@ -241,6 +241,10 @@ func main() {
 			http.Error(w, "Elasticsearch integration disabled", http.StatusServiceUnavailable)
 			return
 		}
+		if r.Method == http.MethodDelete {
+			s.es.purgeDeadLetters(w, r)
+			return
+		}
 		s.es.deadLetters(w, r)
 	})
 	http.HandleFunc("/api/sandbox", serveSandboxAPI)

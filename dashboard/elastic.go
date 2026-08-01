@@ -71,6 +71,31 @@ func (c *esClient) request(path string) ([]byte, error) {
 	return b, nil
 }
 
+// requestMethod is request's mutating counterpart (POST/DELETE/...), used
+// only by purgeDeadLetters today. Kept separate from request rather than
+// generalizing it: every other Elasticsearch call in this file is
+// deliberately read-only, and a shared helper that silently accepted any
+// method would make that no longer obvious from the call site.
+func (c *esClient) requestMethod(method, path string) ([]byte, error) {
+	req, err := http.NewRequest(method, c.base+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	r, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Body.Close()
+	b, err := io.ReadAll(io.LimitReader(r.Body, 16<<20))
+	if err != nil {
+		return nil, err
+	}
+	if r.StatusCode/100 != 2 {
+		return nil, fmt.Errorf("Elasticsearch %s: %s", r.Status, strings.TrimSpace(string(b)))
+	}
+	return b, nil
+}
+
 func (c *esClient) count(index, query string) (int64, error) {
 	path := "/" + index + "/_count"
 	if query != "" {
@@ -166,6 +191,35 @@ func (c *esClient) deadLetters(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(b)
+}
+
+// purgeDeadLetters deletes dead-letter documents matching the same `q`
+// Lucene query-string param /dead-letters' own search box already uses --
+// the operator purges exactly the scope they were just looking at, never a
+// silently broader one (#59, same "filtered scope, not the unfiltered set"
+// rule the export modal enforces). An empty query is accepted (purges every
+// retained dead letter) but is never the default the client sends without
+// the operator explicitly clearing the search box first -- the confirmation
+// modal states the scope in words either way.
+func (c *esClient) purgeDeadLetters(w http.ResponseWriter, r *http.Request) {
+	path := "/dead-letter-honeypot*/_delete_by_query?conflicts=proceed"
+	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
+		path += "&q=" + url.QueryEscape(q)
+	}
+	b, err := c.requestMethod(http.MethodPost, path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	var result struct {
+		Deleted int64 `json:"deleted"`
+	}
+	if err := json.Unmarshal(b, &result); err != nil {
+		http.Error(w, "purge ran but the response could not be parsed", http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]int64{"deleted": result.Deleted})
 }
 
 func (c *esClient) refreshFilebeat(st *esStatus) {
