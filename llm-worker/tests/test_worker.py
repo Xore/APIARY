@@ -254,6 +254,14 @@ class ProductionCanaryTests(unittest.TestCase):
 
 
 class OllamaContractTests(unittest.TestCase):
+    def test_default_model_matches_approved_session_slot(self):
+        manifest = json.loads(
+            (Path(__file__).resolve().parents[2] / "analysis/ghidra/models/approved-models.json").read_text()
+        )
+        with patch.dict(os.environ, {}, clear=True):
+            parsed = worker.Config.from_env()
+        self.assertEqual(parsed.model, manifest["slots"]["sessions"]["artifact"]["tag"])
+
     def test_model_digest_must_match_the_approved_pin(self):
         fake_response = MagicMock()
         fake_response.is_redirect = False
@@ -297,9 +305,17 @@ class OllamaContractTests(unittest.TestCase):
             client = worker.OllamaClient(config())
             annotation, telemetry = client.analyze("fixture prompt", SessionAnalysis)
         request = fake_session.post.call_args.kwargs
+        manifest = json.loads(
+            (Path(__file__).resolve().parents[2] / "analysis/ghidra/models/approved-models.json").read_text()
+        )
+        approved = manifest["slots"]["sessions"]["runtime_request"]
         self.assertFalse(request["allow_redirects"])
-        self.assertFalse(request["json"]["think"])
-        self.assertEqual(request["json"]["options"]["num_ctx"], 8192)
+        self.assertEqual(request["json"]["think"], approved["thinking"])
+        self.assertEqual(request["json"]["keep_alive"], approved["keep_alive"])
+        self.assertEqual(request["json"]["options"]["num_ctx"], approved["context_tokens"])
+        self.assertEqual(request["json"]["options"]["num_predict"], approved["output_tokens"])
+        self.assertEqual(request["json"]["options"]["temperature"], approved["temperature"])
+        self.assertEqual(request["json"]["options"]["seed"], approved["seed"])
         self.assertEqual(request["json"]["format"]["additionalProperties"], False)
         mitre_items = request["json"]["format"]["properties"]["mitre_attack"]["items"]
         self.assertEqual(mitre_items["pattern"], r"^T[0-9]{4}(?:\.[0-9]{3})?$")

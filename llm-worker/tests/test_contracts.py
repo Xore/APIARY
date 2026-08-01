@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import json
 import unittest
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from contracts import (  # noqa: E402
     sanitize_commands,
     sanitize_text,
     session_prompt,
+    session_contract_fingerprints,
 )
 
 
@@ -37,6 +39,20 @@ class SanitizationTests(unittest.TestCase):
         self.assertNotIn("</untrusted_data>", result.text.lower())
         self.assertNotIn("<untrusted_data>", result.text.lower())
         self.assertFalse(result.truncated)
+
+    def test_approved_session_contract_matches_effective_generated_schema(self):
+        root = Path(__file__).resolve().parents[2]
+        manifest = json.loads(
+            (root / "analysis/ghidra/models/approved-models.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            session_contract_fingerprints(),
+            manifest["slots"]["sessions"]["contract"],
+        )
+        checked_in_schema = json.loads(
+            (root / "analysis/ghidra/models/session-schema.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(checked_in_schema, SessionAnalysis.model_json_schema())
 
     def test_chpasswd_pipeline_redacts_only_the_credential_value(self):
         result = sanitize_text('echo "root:fixture-password"|chpasswd|bash', 1000)

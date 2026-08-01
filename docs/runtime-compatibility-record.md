@@ -99,7 +99,7 @@ them. Issue #132 owns stable sensor/session/cursor promotion.
 | Embedding library | clean install on exact CPU environment; offline import/load | `sentence-transformers==3.0.1`; Transformers 4.57.6 | PASS |
 | Embedding model | API SHA, build-time prefetch, network-disabled encoding | `sentence-transformers/all-MiniLM-L6-v2@1110a243fdf4706b3f48f1d95db1a4f5529b4d41`; shape `(1, 384)` | PASS |
 | Ollama | image/container inspection and CLI version | `ollama/ollama:0.32.0@sha256:57f573b47f1f71ebb445789f279fe3e596a8beab182f7cf486db9205bad87c5a` | PASS |
-| Session chat model | local `/api/tags`, metadata only | `qwen3.5:4b`, digest `2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd`, GGUF Q4_K_M, 4.7B | PASS |
+| Session chat model at #82 verification | local `/api/tags`, metadata only | `qwen3.5:4b`, digest `2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd`, GGUF Q4_K_M, 4.7B | PASS; superseded by #158's exact `qwen3.5:9b` qualification |
 | Ollama embedding model | `ollama list` | none installed | NOT REQUIRED — ML owns embeddings in v1 |
 
 The CUDA check asserted one device, exact wheel version, capability `(7, 5)`,

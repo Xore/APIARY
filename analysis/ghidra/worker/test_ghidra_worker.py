@@ -390,6 +390,10 @@ def test_triage(ghidra, model, truncating):
           "the system prompt names the evidence as untrusted")
     check(all(p.get("reasoning_effort") == "none" for p in ModelStub.prompts),
           "bounded triage disables hidden reasoning")
+    check(all(p.get("max_tokens") == 512 for p in ModelStub.prompts),
+          "the approved output cap is sent to the model")
+    check(all(p.get("seed") == 144 for p in ModelStub.prompts),
+          "the approved deterministic seed is sent to the model")
 
     print("--- an answer to a truncated prompt is discarded ---")
     r, d = triage_run(tmp, "trunc", ghidra,
@@ -477,6 +481,33 @@ def test_statictools(ghidra, statictools):
     check(d is not None and d["lief"] is None, "lief left null")
 
 
+def test_approved_contract():
+    """The qualified benchmark prompt must be the prompt used in production."""
+    root = Path(__file__).resolve().parents[3]
+    worker_spec = importlib.util.spec_from_file_location("contract_worker", WORKER)
+    worker = importlib.util.module_from_spec(worker_spec)
+    sys.modules["contract_worker"] = worker
+    worker_spec.loader.exec_module(worker)
+    benchmark_path = root / "analysis/ghidra/benchmarks/evaluate-models.py"
+    benchmark_spec = importlib.util.spec_from_file_location("contract_benchmark", benchmark_path)
+    benchmark = importlib.util.module_from_spec(benchmark_spec)
+    sys.modules["contract_benchmark"] = benchmark
+    benchmark_spec.loader.exec_module(benchmark)
+    manifest = json.loads((root / "analysis/ghidra/models/approved-models.json").read_text())
+    check(worker.TRIAGE_PROMPT_VERSION == manifest["slots"]["ghidra"]["contract"]["prompt_contract_version"],
+          "Ghidra production prompt version matches the approved manifest")
+    check(worker.TRIAGE_SYSTEM == benchmark.TRIAGE_SYSTEM,
+          "Ghidra benchmark uses the production system prompt")
+    check(worker.TRIAGE_WORKFLOWS == benchmark.TRIAGE_WORKFLOWS,
+          "Ghidra benchmark uses the production workflow prompts")
+    check(benchmark.contract_for("ghidra") == manifest["slots"]["ghidra"]["contract"],
+          "Ghidra prompt and response-schema hashes match the manifest")
+    check(worker.TRIAGE_OUTPUT_TOKENS == manifest["slots"]["ghidra"]["runtime_request"]["output_tokens"],
+          "Ghidra output cap matches the approved runtime request")
+    check(worker.TRIAGE_SEED == manifest["slots"]["ghidra"]["runtime_request"]["seed"],
+          "Ghidra seed matches the approved runtime request")
+
+
 def main():
     ghidra = serve(Stub)
     model = serve(ModelStub)
@@ -486,6 +517,7 @@ def main():
     test_spool(ghidra)
     test_triage(ghidra, model, truncating)
     test_statictools(ghidra, statictools)
+    test_approved_contract()
     print(f"\n{len(fails)} failure(s)")
     for f in fails:
         print(f"  - {f}")

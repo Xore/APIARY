@@ -40,6 +40,8 @@ GHIDRA_TRIAGE_MODEL=qwen3:8b
 
 # Seconds for one workflow call. Two calls run per sample.
 GHIDRA_TRIAGE_TIMEOUT=300
+GHIDRA_TRIAGE_OUTPUT_TOKENS=512
+GHIDRA_TRIAGE_SEED=144
 
 # How much of the binary the model is shown. Raising these needs a model with
 # the context window to match; whatever is set here is reported verbatim in the

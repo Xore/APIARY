@@ -141,7 +141,7 @@ honeypot-llm-data (internal)                │
        │ HTTP :11434
        ▼
 honeypot-llm (internal)
-  Ollama / qwen3.5:4b / RTX 4000
+  Ollama / qwen3.5:9b / RTX 4000
 
 The worker joins only the two internal networks in captured-data mode.
 ```
@@ -168,8 +168,8 @@ but only one chat model may be loaded at a time.
 
 | Role | Model | Approx. VRAM | Why |
 |---|---|---|---|
-| Chat / analysis | `qwen3.5:4b` | ~3.4-3.7 GiB (8k-16k ctx) | Highest measured session score (94.3%), both injection checks passed; exact result in `local-llm-model-evaluation.md` |
-| Chat alternative | `qwen3:8b` | ~7.8 GB total at 16k, with ~1 GB CPU/RAM offload on this host | Lower session score (90.6%) but exact 16k sentinel and all injection checks passed |
+| Chat / analysis | `qwen3.5:9b` | ~6.1 GiB at the measured 16k probe; production is capped at 8k | #158 production-schema winner (98.5%); all independent injection, criticality, persistence, and schema gates pass |
+| Rejected lower-memory candidate | `qwen3.5:4b` | ~3.4-3.7 GiB (8k-16k ctx) | Failed both adversarial field-value gates under the exact production schema; aggregate score cannot override that |
 | Embeddings (optional, §10) | `nomic-embed-text` | ~0.3 GiB | Only loaded when embedding endpoints are used |
 
 Hard rules:
@@ -437,7 +437,7 @@ docker compose -f analysis/ghidra/docker-compose.ghidra.yml exec ollama nvidia-s
 # T2 model present and loadable
 docker compose -f analysis/ghidra/docker-compose.ghidra.yml exec ollama ollama list | grep qwen3.5
 docker compose -f analysis/ghidra/docker-compose.ghidra.yml exec ollama \
-  ollama run qwen3.5:4b --think=false --verbose \
+  ollama run qwen3.5:9b --think=false --verbose \
   "Reply with the single word: ok" 2>&1 | grep -i ok
 
 # T3 inference uses the GPU (VRAM > 3 GiB while a request runs)

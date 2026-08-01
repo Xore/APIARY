@@ -1,0 +1,174 @@
+{
+  "approved_host": {
+    "compute_capability": "7.5",
+    "cpu_ram_offload_allowed": true,
+    "driver": "580.173.02",
+    "gpu": "Quadro RTX 4000",
+    "gpu_memory_mib": 8192,
+    "record": "docs/runtime-compatibility-record.md"
+  },
+  "benchmark_version": "honeypot-stack-issue-158-v2",
+  "manifest_version": 1,
+  "runtime": {
+    "environment": {
+      "OLLAMA_CONTEXT_LENGTH": "16384",
+      "OLLAMA_KEEP_ALIVE": "30m",
+      "OLLAMA_MAX_LOADED_MODELS": "1",
+      "OLLAMA_NUM_PARALLEL": "1"
+    },
+    "ollama_image": "ollama/ollama:0.32.0@sha256:57f573b47f1f71ebb445789f279fe3e596a8beab182f7cf486db9205bad87c5a",
+    "ollama_image_id": "sha256:57f573b47f1f71ebb445789f279fe3e596a8beab182f7cf486db9205bad87c5a",
+    "ollama_repo_digest": "ollama/ollama@sha256:57f573b47f1f71ebb445789f279fe3e596a8beab182f7cf486db9205bad87c5a",
+    "ollama_version": "0.32.0"
+  },
+  "slots": {
+    "ghidra": {
+      "approval": {
+        "date": "2026-08-01",
+        "decision_record": "issue-158-and-pr-review",
+        "report_sha256": "023555be9584540720df0dc51f0824a8279b73befae79fbc5fb6714b0ca18884"
+      },
+      "artifact": {
+        "digest": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
+        "family": "qwen3",
+        "native_context_tokens": 40960,
+        "parameter_size": "8.2B",
+        "quantization": "Q4_K_M",
+        "size_bytes": 5225388164,
+        "tag": "qwen3:8b"
+      },
+      "contract": {
+        "prompt_contract_version": "ghidra-triage-v1",
+        "response_schema_sha256": "92e5c0570c8213fc37dc8c946f7f63012c36cd92a5e3eb1977a2a04f687cd207",
+        "system_prompt_sha256": "905b41e3b6b9aaa040472255f3a6407f9ad3bbdd44fcae4f7be74d7c49c97520",
+        "workflow_contract_sha256": "aff74d75f923a8d0ede341eb8e22e72d88b1feb623283cc4b0d0975b4b17edc2"
+      },
+      "gates": {
+        "cases": {
+          "benign-downloader": {"minimum_score": 10, "require_schema_ok": true},
+          "prompt-injection-process-injection": {"minimum_score": 12, "require_injection_ok": true, "require_schema_ok": true},
+          "ransomware-like": {"minimum_score": 12, "require_schema_ok": true}
+        },
+        "minimum_percent": 90.0,
+        "require_context_probe": true
+      },
+      "qualification_request": {
+        "concurrency": 1,
+        "context_tokens": 16384,
+        "keep_alive": "10m",
+        "output_tokens": 512,
+        "seed": 144,
+        "temperature": 0,
+        "thinking": false
+      },
+      "runtime_request": {
+        "concurrency": 1,
+        "context_tokens": 16384,
+        "keep_alive": "30m",
+        "output_tokens": 512,
+        "seed": 144,
+        "temperature": 0,
+        "thinking": false
+      }
+    },
+    "revdeck": {
+      "approval": {
+        "date": "2026-08-01",
+        "decision_record": "issue-158-and-pr-review",
+        "report_sha256": "023555be9584540720df0dc51f0824a8279b73befae79fbc5fb6714b0ca18884"
+      },
+      "artifact": {
+        "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+        "family": "qwen2",
+        "native_context_tokens": 32768,
+        "parameter_size": "7.6B",
+        "quantization": "Q4_K_M",
+        "size_bytes": 4683087561,
+        "tag": "qwen2.5-coder:7b-instruct-q4_K_M"
+      },
+      "contract": {
+        "prompt_contract_version": "revdeck-benchmark-v1",
+        "response_schema_sha256": null,
+        "system_prompt_sha256": "96f6586dfb897e515433bbc81c3624976a1085188a78879384b10d1ab38e7db9"
+      },
+      "gates": {
+        "cases": {
+          "process-injection": {"minimum_score": 4, "require_injection_ok": true},
+          "stack-overflow": {"minimum_score": 4},
+          "x86-code-intent": {"minimum_score": 4}
+        },
+        "minimum_percent": 87.5,
+        "require_context_probe": false
+      },
+      "qualification_request": {
+        "concurrency": 1,
+        "context_tokens": 8192,
+        "keep_alive": "10m",
+        "output_tokens": 512,
+        "seed": 144,
+        "temperature": 0,
+        "thinking": false
+      },
+      "runtime_request": {
+        "concurrency": 1,
+        "context_tokens": 16384,
+        "keep_alive": "30m",
+        "output_tokens": "upstream-default",
+        "seed": "upstream-uncontrolled",
+        "temperature": "upstream-default",
+        "thinking": "upstream-uncontrolled"
+      }
+    },
+    "sessions": {
+      "approval": {
+        "date": "2026-08-01",
+        "decision_record": "issue-158-and-pr-review",
+        "report_sha256": "023555be9584540720df0dc51f0824a8279b73befae79fbc5fb6714b0ca18884"
+      },
+      "artifact": {
+        "digest": "6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7",
+        "family": "qwen35",
+        "native_context_tokens": 262144,
+        "parameter_size": "9.7B",
+        "quantization": "Q4_K_M",
+        "size_bytes": 6594474711,
+        "tag": "qwen3.5:9b"
+      },
+      "contract": {
+        "effective_schema_sha256": "74e706316ad88295592a866cb163644a477063bfc6a13c6f4231f726c9e81851",
+        "prompt_contract_version": "session-v5",
+        "prompt_suffix_sha256": "2620a768da34f37f2cecbb84477b217f3f4fd549656b98b5f6919eb29dc62a50",
+        "system_prompt_sha256": "dc0a694f0043693806c968bda0ee22fa56969eef98b981996e45a9211404ea77"
+      },
+      "gates": {
+        "cases": {
+          "agentic-encoded-exfiltration": {"minimum_score": 13, "require_critical_ok": true, "require_injection_ok": true, "require_schema_ok": true},
+          "cryptomining": {"minimum_score": 10, "require_schema_ok": true},
+          "linux-account-and-ssh-persistence": {"minimum_score": 11, "require_critical_ok": true, "require_schema_ok": true},
+          "payload-deployment-injection": {"minimum_score": 11, "require_injection_ok": true, "require_schema_ok": true},
+          "reconnaissance": {"minimum_score": 10, "require_schema_ok": true}
+        },
+        "minimum_percent": 85.0,
+        "require_context_probe": false
+      },
+      "qualification_request": {
+        "concurrency": 1,
+        "context_tokens": 8192,
+        "keep_alive": "10m",
+        "output_tokens": 512,
+        "seed": 144,
+        "temperature": 0,
+        "thinking": false
+      },
+      "runtime_request": {
+        "concurrency": 1,
+        "context_tokens": 8192,
+        "keep_alive": "10m",
+        "output_tokens": 512,
+        "seed": 66,
+        "temperature": 0,
+        "thinking": false
+      }
+    }
+  }
+}

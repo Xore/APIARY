@@ -116,6 +116,9 @@ jobs:
           # sample-derived text to a non-local model endpoint — a rule that is
           # only worth anything if something checks it on every change.
           python analysis/ghidra/worker/test_ghidra_worker.py
+          # Governance tests use synthetic snapshots/reports only. CI never
+          # pulls or loads multi-GB model weights.
+          python analysis/ghidra/models/test_model_governance.py
       - name: Guarded LLM worker contracts
         shell: bash
         run: |

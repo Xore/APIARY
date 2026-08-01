@@ -1,0 +1,15 @@
+[Unit]
+Description=Read-only local model qualification drift check
+Documentation=file:/opt/honeypot-ghidra/models/README.md
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/honeypot-ghidra/models/model-governance.py check-runtime --manifest /opt/honeypot-ghidra/models/approved-models.json --base-url http://127.0.0.1:11434 --container ghidra-ollama-1 --status-file /var/lib/honeypot-ghidra/model-status.json --warn-only
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/honeypot-ghidra
+

@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodically check local model qualification drift
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30s
+Persistent=true
+Unit=honeypot-model-drift.service
+
+[Install]
+WantedBy=timers.target
