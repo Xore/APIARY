@@ -323,11 +323,13 @@ loop every POLL_INTERVAL seconds (default: 30s):
   7. Write events with composite_score ≥ ML_ALERT_THRESHOLD
      to ES index: ml-anomalies
      with fields: source_event_id, source_index, composite_score,
-                  model_scores{}, feature_contributions{},
-                  explanation, src_ip, @timestamp, severity
+                  model_scores{}, explanation, src_ip, @timestamp, severity
 
-  8. Emit SSE notification to dashboard via Redis pub/sub channel
-     'ml-anomaly-events'
+  8. Best-effort Redis publish to 'ml-anomaly-events' IF REDIS_URL is set
+     (#62: absent by default, ES write is the authoritative action and never
+     depends on this succeeding). The dashboard (#64) does not consume this
+     channel -- it polls ml-anomalies directly (§8/§9), so this step has no
+     required consumer today.
 
   9. Update checkpoint in ml-worker-state
 
@@ -391,45 +393,54 @@ worker resumes cleanly after a restart without reprocessing old events.
 
 ## 8. Dashboard API Contract
 
-New endpoints to add to `dashboard/main.go`:
+**Implemented (#64):** `dashboard/ml_anomalies.go`.
 
 ```
 GET  /api/ml/anomalies
-     Query params: limit (default 50), severity, since (ISO timestamp)
-     Response: JSON array of ml-anomaly documents
-
-GET  /api/ml/anomalies/stream
-     SSE stream — pushes new ml-anomaly documents in real time
-     via Redis pub/sub → dashboard SSE (matches existing stream.go pattern)
+     Query params: limit (default 50, capped at mlAnomalyCacheCap=200),
+     severity, since (RFC3339 timestamp)
+     Response: JSON array of ml-anomaly documents, newest @timestamp first
 
 GET  /api/ml/stats
-     Response: { total_anomalies_24h, by_severity, top_src_ips,
-                 model_last_retrained, events_processed_total }
+     Response: { total_anomalies_24h, by_severity, top_src_ips }
 ```
 
-Response document format:
+No `/api/ml/anomalies/stream` SSE endpoint and no Redis pub/sub -- #64's own
+rule ("do not add Redis until file or Elasticsearch polling has been
+measured and shown to be insufficient") and
+`ml-gpu-coordinated-roadmap.md` §1 decision 1 both rule it out, and neither
+has happened. The transport is Elasticsearch polling on the dashboard's
+existing 1-minute ES ticker (the same cadence `esClient.refresh()` already
+runs), landing in a capped in-memory cache -- the same pattern every other
+cheap, read-mostly dashboard dataset (`payloadCache`, `ipsCache`) already
+uses. `model_last_retrained` and `events_processed_total` from the original
+draft aren't served: neither is written anywhere by `ml-worker/worker.py`
+today, so exposing them would be fabricated, not delivered.
+
+Response document format (unchanged from the original draft except
+`feature_contributions`, which `write_anomaly()` in `worker.py` has never
+populated -- HBOS's per-feature histogram scores exist internally but were
+never wired into the written document, so it's omitted here rather than
+documented as present):
 
 ```json
 {
   "@timestamp": "2026-07-26T14:00:00Z",
+  "source_event_id": "abc123",
+  "source_index": "honeypot-v2-2026.07.26",
   "src_ip": "1.2.3.4",
   "src_country": "CN",
   "composite_score": 0.91,
   "severity": "high",
-  "explanation": "Unusual port scan pattern: 47 unique ports in 60s from new ASN. Payload entropy 7.8 (max observed: 4.2). First seen from this /24 subnet.",
   "model_scores": {
     "isolation_forest": 0.88,
     "lstm_ae": 0.94,
     "hbos": 0.82
   },
-  "feature_contributions": {
-    "unique_ports_1h": 0.41,
-    "payload_entropy": 0.33,
-    "src_country_enc": 0.26
-  },
-  "source_index": "honeypot-network-2026.07.26",
+  "explanation": "Unusual port scan pattern: 47 unique ports in 60s from new ASN.",
   "event_type": "conn",
-  "dst_port": 8545
+  "dst_port": 8545,
+  "proto": "tcp"
 }
 ```
 
@@ -437,32 +448,40 @@ Response document format:
 
 ## 9. Dashboard UI Integration
 
-Add a new **"ML Anomalies"** panel to the existing dashboard `page.go` /
-frontend:
+**Implemented (#64)** as its own route, `/ml-anomalies` (sidebar: Monitor
+group, next to Alerts), not an overview-page panel -- alerts have their own
+acknowledge/reopen workflow that doesn't apply to anomaly scores, and
+mixing the two on one page risked implying scores could be acted on the
+same way. Follows the existing read-only diagnostics pages (`/source-health`,
+`/dead-letters`): server-rendered from the in-memory cache on each request,
+refreshed on page load, no client-side polling and no changes to
+`stream.go`'s SSE contract.
 
-### 9.1 Panel Layout
+`dashboard/ml_anomalies.go`:
+- `refreshMLAnomalies()` polls `ml-anomalies`, called from the dashboard's
+  existing 1-minute Elasticsearch ticker (`main.go`, the same one
+  `esClient.refresh()` already runs on).
+- `mlAnomalyStore` is the capped (`mlAnomalyCacheCap`=200) in-memory cache,
+  same pattern as `payloadCache`/`ipsCache`.
+- Serves `/api/ml/anomalies`, `/api/ml/stats`, and `/ml-anomalies` (via the
+  shared `renderPage()` / CSP nonce path, #58) from that cache -- the
+  request path never calls Elasticsearch directly, so response cost is
+  bounded by the cache size regardless of query params.
+
+The KPI-tile-plus-table layout below replaces the original sparkline/emoji
+mockup -- the 24h trend sparkline was cosmetic and out of scope for "deliver
+scores to the dashboard":
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  🤖 ML Anomaly Detection                    [last retrained: 2h]│
-├──────────┬─────────────────────────────────────────────────────┤
-│ CRITICAL │ Composite Score │ Source IP   │ Explanation (truncated)│
-│ 0.96     │ ████████████    │ 45.33.12.7  │ 47 unique ports/60s...│
-│ HIGH     │ 0.91            │ 218.92.0.11 │ LSTM reconstruction...│
-│ HIGH     │ 0.88            │ 91.108.4.1  │ New payload entropy...│
-├──────────┴─────────────────────────────────────────────────────┤
-│  24h trend: ▁▁▁▂▃▅▆███▆▃▁▁▁▂  │ By severity: 🔴2 🟠14 🟡31  │
+│  ML anomaly detection                    generated <timestamp>  │
+├──────────┬──────────┬──────────┬──────────────────────────────-┤
+│ 24h: 12  │ critical:2│ high:5  │ medium:5                       │
+├──────────┴──────────┴──────────┴──────────────────────────────-┤
+│ time │ severity │ score │ source ip │ model scores │ explanation│
+│ ...  │ critical │ 0.96  │ 45.33.x.x │ iso .9 lstm .95 hbos .8 │…│
 └─────────────────────────────────────────────────────────────────┘
 ```
-
-### 9.2 New Go file: `dashboard/ml_anomalies.go`
-
-Responsible for:
-- Querying `ml-anomalies` ES index
-- Serving `/api/ml/anomalies` and `/api/ml/stats`
-- Connecting to Redis channel `ml-anomaly-events` and forwarding to the
-  existing SSE `stream.go` infrastructure
-- Rendering the panel template section (matching existing `page.go` style)
 
 ---
 
@@ -537,9 +556,7 @@ Drift detection:
 | **v0.2** | HBOS fast filter + feature engineering for all 5 sources | [#62](https://github.com/Xore/honeypot-stack/issues/62) |
 | **v0.3** | LSTM-AE temporal model + sequence windowing | [#63](https://github.com/Xore/honeypot-stack/issues/63) |
 | **v0.4** | Composite scoring + explanation generation | [#63](https://github.com/Xore/honeypot-stack/issues/63) |
-| **v0.5** | Redis pub/sub → dashboard SSE integration | [#64](https://github.com/Xore/honeypot-stack/issues/64) |
-| **v0.6** | `dashboard/ml_anomalies.go` + API endpoints | [#64](https://github.com/Xore/honeypot-stack/issues/64) |
-| **v0.7** | Dashboard UI panel | [#64](https://github.com/Xore/honeypot-stack/issues/64) |
+| **v0.5–v0.7** | Elasticsearch-polled delivery to the dashboard: `dashboard/ml_anomalies.go`, `/api/ml/anomalies`+`/api/ml/stats`, and the `/ml-anomalies` page — no Redis, per #64's own rule | Done ([#64](https://github.com/Xore/honeypot-stack/issues/64), closed) |
 | **v0.8** | Retraining scheduler + model versioning | [#65](https://github.com/Xore/honeypot-stack/issues/65) |
 | **v1.0** | Drift detection + alert threshold tuning UI | [#65](https://github.com/Xore/honeypot-stack/issues/65) |
 

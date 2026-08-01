@@ -53,7 +53,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-RESULT_VERSION = 1
+# 2: added fuzzy_hashes and lief (#138). Informational only — nothing reads
+# this field to decide how to parse the rest of the document; it exists so a
+# result can be tied to the worker version that produced it.
+RESULT_VERSION = 2
 
 REQUEST_DIR = Path(os.environ.get("GHIDRA_REQUEST_DIR", "/ghidra-requests"))
 RESULTS_DIR = Path(os.environ.get("GHIDRA_RESULTS_DIR", "/ghidra-results"))
@@ -83,6 +86,19 @@ MAX_FUNCTIONS = int(os.environ.get("GHIDRA_MAX_FUNCTIONS", "20000"))
 # functions outward and merged. limit is capped at 500 server-side.
 GRAPH_SEEDS = int(os.environ.get("GHIDRA_GRAPH_SEEDS", "60"))
 GRAPH_DEPTH = int(os.environ.get("GHIDRA_GRAPH_DEPTH", "2"))
+
+# ── Static tools: fuzzy hashing and structural parsing (#85, #138) ──────────
+#
+# ssdeep/tlsh and lief run in their own container (analysis/ghidra/statictools)
+# rather than as a host pip install, for the reason this file's own docstring
+# gives for staying stdlib-only: they are compiled/C-extension dependencies,
+# exactly what that rule exists to keep off the host.
+#
+# Set STATICTOOLS_API_BASE empty to switch this off entirely, same convention
+# as GHIDRA_TRIAGE_API_BASE.
+STATICTOOLS_API_BASE = os.environ.get(
+    "STATICTOOLS_API_BASE", "http://127.0.0.1:9091").rstrip("/")
+STATICTOOLS_TIMEOUT = int(os.environ.get("STATICTOOLS_TIMEOUT", "120"))
 
 # ── AI triage (#103) ─────────────────────────────────────────────────────────
 #
@@ -376,6 +392,67 @@ def scan_crypto(sample: Path) -> list:
             if sum(1 for h in hits if h["constant"] == label) >= 4:
                 break
     return hits
+
+
+def _statictools_post(path: str, data: bytes) -> dict | None:
+    """POST raw sample bytes to the statictools sidecar. None on any failure.
+
+    Fail-soft, same contract as triage(): this is an enrichment on top of a
+    finished Ghidra run, and losing it because a sidecar container was down
+    must not throw away the analysis it decorates.
+    """
+    req = urllib.request.Request(
+        f"{STATICTOOLS_API_BASE}{path}", data=data, method="POST")
+    req.add_header("Content-Type", "application/octet-stream")
+    try:
+        with urllib.request.urlopen(req, timeout=STATICTOOLS_TIMEOUT) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        # 422 is expected and unremarkable for lief-parse on a format lief
+        # does not recognise (a script, a corrupt file, ...) — log it quietly
+        # rather than at the same level as an actual failure.
+        body = e.read()
+        try:
+            reason = json.loads(body).get("error", "")
+        except ValueError:
+            reason = body[:200]
+        level = "[.]" if e.code == 422 else "[!]"
+        log(f"  {level} statictools {path}: HTTP {e.code}: {reason}")
+        return None
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
+        log(f"  [!] statictools {path}: {e}")
+        return None
+
+
+def fuzzy_hash(sample: Path) -> dict | None:
+    """ssdeep/tlsh of the sample, via the statictools sidecar. None if unavailable."""
+    if not STATICTOOLS_API_BASE:
+        return None
+    try:
+        data = sample.read_bytes()
+    except OSError as e:
+        log(f"  [!] fuzzy hash: {e}")
+        return None
+    return _statictools_post("/v1/fuzzy-hash", data)
+
+
+def lief_parse(sample: Path) -> dict | None:
+    """Structural metadata (format, sections, libraries, ...) via lief.
+
+    None if the sidecar is unavailable OR lief did not recognise the format —
+    the two are indistinguishable to the caller on purpose, same reasoning as
+    triage() and scan_crypto() above: an enrichment that did not run and one
+    that ran and found nothing both mean "nothing to show," and the result
+    schema treats them the same way (a null field, not a special case).
+    """
+    if not STATICTOOLS_API_BASE:
+        return None
+    try:
+        data = sample.read_bytes()
+    except OSError as e:
+        log(f"  [!] lief parse: {e}")
+        return None
+    return _statictools_post("/v1/lief-parse", data)
 
 
 def build_call_graph(client: "GhidraClient", job: str, functions: list,
@@ -774,6 +851,19 @@ def _triage(parts: dict) -> dict | None:
     }
 
 
+def statictools_state() -> str:
+    """One line saying whether fuzzy_hash()/lief_parse() will run, for --selftest."""
+    if not STATICTOOLS_API_BASE:
+        return "disabled (STATICTOOLS_API_BASE is empty)"
+    try:
+        req = urllib.request.Request(f"{STATICTOOLS_API_BASE}/v1/health")
+        with urllib.request.urlopen(req, timeout=10) as r:
+            ok = json.loads(r.read()).get("status") == "ok"
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
+        return f"{STATICTOOLS_API_BASE} UNREACHABLE ({e})"
+    return f"{STATICTOOLS_API_BASE} {'OK' if ok else 'responded, but not healthy'}"
+
+
 def triage_state() -> str:
     """One line saying whether triage will run, for --selftest.
 
@@ -913,6 +1003,9 @@ def analyse_one(client: GhidraClient, sha: str, sample: Path,
             f"risk={ai_triage['risk_level'] or 'unrated'} "
             f"family={ai_triage['family_guess'] or 'none offered'}")
 
+    fuzzy = fuzzy_hash(sample)
+    lief_info = lief_parse(sample)
+
     return {
         "version": RESULT_VERSION,
         "sha256": sha,
@@ -934,6 +1027,8 @@ def analyse_one(client: GhidraClient, sha: str, sample: Path,
         "findcrypt": scan_crypto(sample),
         "call_graph_svg": build_call_graph(client, job, parts["functions"], sha),
         "ai_triage": ai_triage,
+        "fuzzy_hashes": fuzzy,
+        "lief": lief_info,
         # Populated by IMPLEMENTATION_PLAN.md phase 5 (#102), which is not
         # built. Emitted as null rather than omitted so the dashboard reads one
         # stable shape and needs no special case for older results.
@@ -1004,7 +1099,8 @@ def drain() -> int:
                 "exit_status": "error",
                 "error": str(e),
                 "functions": [], "strings": [], "imports": [], "findcrypt": [],
-                "call_graph_svg": None, "ai_triage": None, "report_pdf": None,
+                "call_graph_svg": None, "ai_triage": None,
+                "fuzzy_hashes": None, "lief": None, "report_pdf": None,
             })
             claimed.rename(claimed.with_suffix(".failed"))
         finally:
@@ -1031,6 +1127,7 @@ def selftest() -> int:
     print(f"RESULTS_DIR   : {RESULTS_DIR} (exists={RESULTS_DIR.is_dir()})")
     print(f"SAMPLES_DIR   : {SAMPLES_DIR} (exists={SAMPLES_DIR.is_dir()})")
     print(f"TRIAGE        : {triage_state()}")
+    print(f"STATICTOOLS   : {statictools_state()}")
     if not ok:
         print("\nStart it with:")
         print("  docker compose -f analysis/ghidra/docker-compose.ghidra.yml up -d ghidra")
@@ -1060,6 +1157,11 @@ def selftest() -> int:
     if not any(parts[k] for k in ("functions", "strings", "imports")):
         print("  FAILED: every section empty - the contract is broken")
         return 1
+    fuzzy = fuzzy_hash(probe)
+    lief_info = lief_parse(probe)
+    print(f"  fuzzy_hashes   : {fuzzy}")
+    print(f"  lief           : "
+          f"{'ok, format=' + lief_info['format'] if lief_info else None}")
     print("\ncontract OK")
     return 0
 

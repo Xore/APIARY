@@ -16,6 +16,7 @@
 # socat-hp-tanner         :8091   →  10.8.0.2:19091 (tanner_web :8091)
 # socat-hp-evebox         :5636   →  10.8.0.2:19636 (evebox :5636)
 # socat-hp-arkime         :8005   →  10.8.0.2:19080 (arkime viewer :8005)
+# socat-hp-revdeck        :5000   →  10.8.0.2:19500 (revdeck :5000, ghidra stack)
 #
 # Traefik dashboard — localhost only:
 #   curl http://localhost:8080/dashboard/
@@ -169,6 +170,14 @@ http:
         options: modern
       middlewares: [security-headers, strip-auth-identity, forward-auth]
 
+    honeypot-revdeck:
+      rule: "Host(`revdeck.honeypot.example`)"
+      entryPoints: [websecure]
+      service: honeypot-revdeck
+      tls:
+        options: modern
+      middlewares: [security-headers, strip-auth-identity, forward-auth]
+
     svelte-blog:
       rule: "Host(`svelte.honeypot.example`)"
       entryPoints: [websecure]
@@ -305,6 +314,12 @@ http:
       loadBalancer:
         servers:
           - url: "http://socat-hp-arkime:8005"
+        passHostHeader: true
+
+    honeypot-revdeck:
+      loadBalancer:
+        servers:
+          - url: "http://socat-hp-revdeck:5000"
         passHostHeader: true
 
     svelte-blog:

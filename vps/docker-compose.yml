@@ -285,6 +285,16 @@ services:
     command: TCP4-LISTEN:8005,fork,reuseaddr TCP4:10.8.0.2:19080
     networks: [proxy]
 
+  # Rev·Deck (analysis/ghidra/docker-compose.ghidra.yml, profile: revdeck) --
+  # not part of this stack's home-side compose file, but reachable the same
+  # way once its own HP_BIND is set: see that file's revdeck service comment.
+  socat-hp-revdeck:
+    image: alpine/socat:latest
+    container_name: socat-hp-revdeck
+    restart: unless-stopped
+    command: TCP4-LISTEN:5000,fork,reuseaddr TCP4:10.8.0.2:19500
+    networks: [proxy]
+
   # =====================================================================
   # SURICATA IDS
   #

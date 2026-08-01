@@ -48,3 +48,13 @@ GHIDRA_TRIAGE_TIMEOUT=300
 GHIDRA_TRIAGE_MAX_STRINGS=200
 GHIDRA_TRIAGE_MAX_IMPORTS=150
 GHIDRA_TRIAGE_MAX_FUNCTIONS=100
+
+# ── Static tools: fuzzy hashing and structural parsing (#85, #138) ──────────
+# ssdeep/tlsh (family clustering) and lief (structural parsing) via their own
+# sidecar container, published on loopback by docker-compose.ghidra.yml — see
+# that file and analysis/ghidra/statictools/server.py for why this is not a
+# host pip install.
+#
+# Set this empty to switch it off; results then carry "fuzzy_hashes": null and
+# "lief": null, and everything else is unaffected.
+STATICTOOLS_API_BASE=http://127.0.0.1:9091

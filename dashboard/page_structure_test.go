@@ -70,6 +70,7 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 	// Populated rather than zero-valued: several ghidra.html sections only
 	// render when their slice is non-empty, and an empty fixture would walk
 	// the "no results" branch of every one of them.
+	stripped := true
 	ghidraDetail := &ghidraResult{
 		SHA256:     strings.Repeat("c", 64),
 		ExitStatus: "ok",
@@ -82,6 +83,12 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 			Behaviors:     []string{"spawns a process"},
 			Model:         "qwen3:8b",
 			EvidenceShown: "12/312 imports, 200/11482 strings (longest first, deduplicated, >=6 chars), 40/40 functions (largest first)",
+		},
+		FuzzyHashes: &ghidraFuzzyHashes{SSDeep: "3:stub:stub", TLSH: "T1STUB"},
+		Lief: &ghidraLief{
+			Format: "ELF", Architecture: "X86_64", Entrypoint: "0x401000", IsPIE: true,
+			SectionCount: 1, Sections: []ghidraSection{{Name: ".text", Size: 100}},
+			Libraries: []string{"libc.so.6"}, Stripped: &stripped,
 		},
 	}
 

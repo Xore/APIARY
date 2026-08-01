@@ -111,6 +111,61 @@ func TestLoadGhidraResults(t *testing.T) {
 	}
 }
 
+// The worker's statictools/server.py omits format-specific lief keys
+// entirely rather than emitting them as null (is_dll/compile_timestamp do
+// not exist for an ELF binary) — this decodes that real shape, not a
+// convenient stand-in, and checks the omitted keys land as nil pointers
+// rather than zero-valued false/0, which the template depends on to tell
+// "not applicable to this format" from "computed as false/zero" (#138).
+func TestLoadGhidraResultsDecodesFuzzyHashesAndLief(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GHIDRA_RESULTS_DIR", dir)
+
+	raw := `{
+		"version": 2, "exit_status": "ok", "completed_at": "2026-08-01T10:00:00+00:00",
+		"fuzzy_hashes": {"ssdeep": "3:AXGBicFlIT:AXGHFF", "ssdeep_error": null,
+		                 "tlsh": "T1STUB", "tlsh_error": null},
+		"lief": {"format": "ELF", "architecture": "X86_64", "entrypoint": "0x6760",
+		         "is_pie": true, "section_count": 1, "sections_truncated": false,
+		         "sections": [{"name": ".text", "size": 100, "entropy": 6.234}],
+		         "libraries": ["libc.so.6"], "stripped": false}
+	}`
+	if err := os.WriteFile(filepath.Join(dir, shaA+"_ghidra.json"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rows := loadGhidraResults()
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	row := rows[0]
+
+	if row.FuzzyHashes == nil || row.FuzzyHashes.SSDeep != "3:AXGBicFlIT:AXGHFF" {
+		t.Fatalf("fuzzy_hashes did not decode: %+v", row.FuzzyHashes)
+	}
+	if row.Lief == nil || row.Lief.Format != "ELF" || row.Lief.Architecture != "X86_64" {
+		t.Fatalf("lief did not decode: %+v", row.Lief)
+	}
+	if len(row.Lief.Sections) != 1 || row.Lief.Sections[0].Entropy == nil ||
+		*row.Lief.Sections[0].Entropy != 6.234 {
+		t.Fatalf("lief sections did not decode: %+v", row.Lief.Sections)
+	}
+	// stripped: false was SENT (present in the JSON), so it must decode as a
+	// non-nil pointer to false — not be confused with the omitted case below.
+	if row.Lief.Stripped == nil || *row.Lief.Stripped != false {
+		t.Fatalf("lief.stripped should be a non-nil pointer to false, got %+v", row.Lief.Stripped)
+	}
+	// is_dll and compile_timestamp were never sent (ELF has no such concept) —
+	// this is the case the pointer fields exist for.
+	if row.Lief.IsDLL != nil {
+		t.Fatalf("lief.is_dll should be nil when the worker never sent it, got %v", *row.Lief.IsDLL)
+	}
+	if row.Lief.CompileTimestamp != nil {
+		t.Fatalf("lief.compile_timestamp should be nil when the worker never sent it, got %v",
+			*row.Lief.CompileTimestamp)
+	}
+}
+
 // Identity comes from the filename, which the worker derived from a validated
 // request — not from the document body, which could disagree with it.
 func TestLoadGhidraResultsTrustsFilenameOverBody(t *testing.T) {

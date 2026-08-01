@@ -473,7 +473,7 @@ services:
   # ===================== Dionaea — malware / service capture =====================
   dionaea:
     <<: *runtime-defaults
-    image: dinotools/dionaea:latest
+    build: ./dionaea
     container_name: hp-dionaea
     restart: unless-stopped
     # #127: waits on the marker directly instead of depends_on-ing

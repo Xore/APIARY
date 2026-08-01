@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 # install-analysis-host.sh — stand up the Ghidra analysis backend on this host.
 #
-# Brings up two containers and wires the host-side worker to them:
+# Brings up three containers and wires the host-side worker to them:
 #
-#   ghidra   biniamfd/ghidra-headless-rest, the decompiler behind /analyze
-#   ollama   the local model that produces ai_triage (#103)
+#   ghidra       biniamfd/ghidra-headless-rest, the decompiler behind /analyze
+#   ollama       the local model that produces ai_triage (#103)
+#   statictools  ssdeep/tlsh fuzzy hashing and lief structural parsing (#138)
 #
-# Both publish on 127.0.0.1 only. Between them they hold captured malware and
-# every string extracted from it, and the triage prompts are that text — so the
-# model has to be on this host, and the worker refuses to talk to one that is
-# not (see endpoint_is_local in worker/ghidra-worker.py).
+# All three publish on 127.0.0.1 only. Between them they hold captured malware
+# and every string, fuzzy hash and structural fact extracted from it, and the
+# triage prompts are that text — so the model has to be on this host, and the
+# worker refuses to talk to one that is not (see endpoint_is_local in
+# worker/ghidra-worker.py).
 #
 # On a host running Dockge the compose file is deployed into a stack directory
 # under /opt/stacks, the same place deploy.yml puts the honeypot stack, so the
@@ -119,6 +121,13 @@ if [ -n "$STACK_DIR" ]; then
   say "deploying the compose file to $STACK_DIR"
   mkdir -p "$STACK_DIR"
   cp "$compose_file" "$STACK_DIR/compose.yml"
+  # statictools is the first service in this file with a local build:
+  # context rather than an image:. Copying only the compose file (as ghidra/
+  # ollama always needed) leaves `build: ./statictools` pointing at a
+  # directory that does not exist in $STACK_DIR, caught deploying this the
+  # first time ("unable to prepare context: path .../statictools not found").
+  rm -rf "$STACK_DIR/statictools"
+  cp -r "$here/statictools" "$STACK_DIR/statictools"
   if [ "$USE_GPU" = yes ]; then
     cp "$gpu_file" "$STACK_DIR/compose.override.yml"
   else
@@ -137,12 +146,23 @@ if [ "$USE_GPU" = yes ]; then
   files+=(-f "$gpu_file")
 fi
 
+# On a Dockge host $STACK_DIR (/opt/stacks/ghidra) is itself a symlink into
+# /var/dockge/stacks, and buildx's filesystem-entitlements check treats a
+# build context reached through one as "possibly insecure," refusing to build
+# statictools without this. There is no untrusted party here to entitle
+# against — this is the operator's own stack directory — so the check is
+# switched off rather than granted piecemeal per invocation.
+export BUILDX_BAKE_ENTITLEMENTS_FS=0
+
 dc() { docker compose "${files[@]}" "$@"; }
 
 # ── Containers ───────────────────────────────────────────────────────────────
-say "starting ghidra and ollama (gpu=$USE_GPU)"
+say "starting ghidra, ollama and statictools (gpu=$USE_GPU)"
 dc pull --quiet ghidra ollama
-dc up -d ghidra ollama
+# statictools has no image: entry, only build: — `pull` on it fails rather
+# than doing nothing, so it gets its own step.
+dc build --quiet statictools
+dc up -d ghidra ollama statictools
 
 # `up -d` returns when the containers are started, not when the services inside
 # them answer. Ghidra unpacks its own installation on first boot and takes a
@@ -164,6 +184,7 @@ wait_for() {
 }
 wait_for ghidra http://127.0.0.1:9090/v1/health
 wait_for ollama http://127.0.0.1:11434/api/tags
+wait_for statictools http://127.0.0.1:9091/v1/health
 
 if [ "$SKIP_PULL" = 0 ]; then
   say "pulling model $MODEL"
