@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -252,6 +253,62 @@ func (s *store) searchGitHubAnalysis(needle string) searchGroup {
 	}
 	return rows.group("GitHub analyses", "External scanner verdicts", "/github-analysis",
 		func(v string) string { return "/github-analysis/" + url.PathEscape(v) })
+}
+
+// quickSearchLimit caps the command palette's live preview list. It is a
+// preview, not the results page (that stays unbounded-per-group via
+// serveSearch/searchGroupLimit) -- a handful of top matches is enough to
+// decide whether to press Enter for the full grouped view or click straight
+// through to one match.
+const quickSearchLimit = 8
+
+type quickSearchHit struct {
+	Title string `json:"title"`
+	Meta  string `json:"meta"`
+	Group string `json:"group"`
+	URL   string `json:"url"`
+}
+
+// quickSearchResults flattens searchData's groups in their existing priority
+// order (Attack sources, Sessions, Payloads, ... -- the same order a query
+// would already surface on the full results page) into one capped list for
+// the command palette's live preview. An exact single-entity match (the same
+// check serveSearch uses to redirect instead of rendering a results page) is
+// always the first row, so a query that names one specific thing shows that
+// thing first regardless of which group it would otherwise fall into.
+func (s *store) quickSearchResults(query string) []quickSearchHit {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil
+	}
+	var hits []quickSearchHit
+	if target := s.searchRedirect(query); target != "" {
+		hits = append(hits, quickSearchHit{Title: query, Meta: "Enter", Group: "Exact match", URL: target})
+	}
+	for _, group := range s.searchData(query).Groups {
+		for _, hit := range group.Hits {
+			if len(hits) >= quickSearchLimit {
+				return hits
+			}
+			hits = append(hits, quickSearchHit{Title: hit.Label, Meta: group.Title, Group: group.Title, URL: hit.URL})
+		}
+	}
+	return hits
+}
+
+func (s *store) serveQuickSearch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "GET required", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	hits := s.quickSearchResults(r.URL.Query().Get("q"))
+	if hits == nil {
+		hits = []quickSearchHit{}
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"results": hits})
 }
 
 func (s *store) serveSearch(w http.ResponseWriter, r *http.Request, tmpl *template.Template) {

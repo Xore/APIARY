@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"html/template"
 	"net/http"
 	"net/http/httptest"
@@ -134,5 +135,84 @@ func TestSearchGroupsAreBounded(t *testing.T) {
 		if g.Title == "Requested paths" && g.More != 5 {
 			t.Fatalf("group %q hid %d matches, want 5 with a link to the rest", g.Title, g.More)
 		}
+	}
+}
+
+// The command palette's live preview: an exact-entity match always leads, and
+// a blank query produces no rows instead of the first page of everything.
+func TestQuickSearchResultsLeadsWithAnExactMatch(t *testing.T) {
+	s := searchTestStore(t)
+
+	hits := s.quickSearchResults("sess-alpha")
+	if len(hits) == 0 || hits[0].Group != "Exact match" || hits[0].URL != "/sessions/sess-alpha" {
+		t.Fatalf("quickSearchResults(sess-alpha) = %#v, want an exact match leading", hits)
+	}
+
+	if hits := s.quickSearchResults("   "); hits != nil {
+		t.Fatalf("a blank query produced results: %#v", hits)
+	}
+
+	if hits := s.quickSearchResults("hunter2"); len(hits) == 0 || hits[0].Group != "Credentials" {
+		t.Fatalf("quickSearchResults(hunter2) = %#v, want the Credentials group", hits)
+	}
+}
+
+// The preview stays capped even when the full results page has more to show.
+func TestQuickSearchResultsAreCapped(t *testing.T) {
+	now := time.Now().UTC()
+	events := make([]storedEvent, 0, quickSearchLimit+5)
+	for index := 0; index < quickSearchLimit+5; index++ {
+		events = append(events, storedEvent{
+			when: now, Time: now.Format(time.RFC3339), Sensor: "cowrie",
+			SrcIP: "203.0.113." + string(rune('0'+index%10)), Path: "/probe-" + string(rune('a'+index)),
+			Detail: "probe",
+		})
+	}
+	s := &store{events: events}
+	if hits := s.quickSearchResults("/probe-"); len(hits) != quickSearchLimit {
+		t.Fatalf("quickSearchResults returned %d hits, want the capped %d", len(hits), quickSearchLimit)
+	}
+}
+
+func TestServeQuickSearchReturnsJSONResults(t *testing.T) {
+	s := searchTestStore(t)
+
+	r := httptest.NewRequest(http.MethodGet, "/api/quick-search?q=hunter2", nil)
+	w := httptest.NewRecorder()
+	s.serveQuickSearch(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("serveQuickSearch status = %d, want 200", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", ct)
+	}
+	var body struct {
+		Results []quickSearchHit `json:"results"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("response is not valid JSON: %v", err)
+	}
+	if len(body.Results) == 0 {
+		t.Fatalf("expected at least one result for a known credential")
+	}
+
+	// An empty query answers with an empty array, not null, so the client
+	// never needs to special-case a missing "results" key.
+	r = httptest.NewRequest(http.MethodGet, "/api/quick-search?q=", nil)
+	w = httptest.NewRecorder()
+	s.serveQuickSearch(w, r)
+	if !strings.Contains(w.Body.String(), `"results":[]`) {
+		t.Fatalf("blank query body = %q, want an empty results array", w.Body.String())
+	}
+}
+
+func TestServeQuickSearchRejectsNonGET(t *testing.T) {
+	s := searchTestStore(t)
+	r := httptest.NewRequest(http.MethodPost, "/api/quick-search?q=hunter2", nil)
+	w := httptest.NewRecorder()
+	s.serveQuickSearch(w, r)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("serveQuickSearch status = %d, want 405", w.Code)
 	}
 }
