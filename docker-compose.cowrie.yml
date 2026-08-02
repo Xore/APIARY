@@ -1,0 +1,90 @@
+# honeypot-cowrie — #258: cowrie split into its own Dockge-managed stack.
+#
+# Same shape and same reasoning as docker-compose.conpot.yml (see that file's
+# header for the full #258 writeup): cowrie has no depends_on relationship on
+# any other honeypot, its own fully private network (cowrie_net), and every
+# volume here is a host bind mount, not a Docker named volume -- so no
+# external: true network/volume machinery is needed. Deployed as
+# /opt/stacks/honeypot-cowrie.
+#
+# The config-file mounts below (cowrie.cfg, userdb.txt, the fakefs DMI nodes)
+# used relative ./cowrie/... paths when this lived in docker-compose.yml --
+# relative to *that* file's own directory. Moved to absolute paths into the
+# honeypot-stack checkout, matching docker-compose.init.yml's snare-clone
+# build-context precedent and docker-compose.conpot.yml's own build: path.
+#
+# cowrie-downloads (the captured-payload directory under logs/cowrie) is
+# still a bind mount into the same host path other stacks already read from
+# (dashboard's PAYLOAD_DIRS, yara-scanner) -- unaffected by this move.
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  cowrie:
+    <<: *runtime-defaults
+    build: /opt/stacks/honeypot-stack/cowrie
+    container_name: hp-cowrie
+    restart: unless-stopped
+    # #128: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). Reproduces the
+    # Dockerfile's own ENTRYPOINT (checked directly:
+    # ["/cowrie/cowrie-git/bin/entrypoint.sh"]) with the wait spliced in.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        until [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec /cowrie/cowrie-git/bin/entrypoint.sh
+    ports:
+      - ${HP_BIND:-10.8.0.2}:19022:2222
+      - ${HP_BIND:-10.8.0.2}:19023:2223
+    volumes:
+      - /opt/stacks/honeypot-stack/cowrie/cowrie.cfg:/cowrie/cowrie-git/etc/cowrie.cfg:ro
+      - /opt/stacks/honeypot-stack/cowrie/userdb.txt:/cowrie/cowrie-git/etc/userdb.txt:ro
+      - /opt/stacks/honeypot-stack/logs/cowrie:/cowrie/cowrie-git/var/log/cowrie
+      # Cowrie saves every uploaded/downloaded file by SHA-256, including shell,
+      # PowerShell, VBS, Python and JavaScript payloads.
+      - /opt/stacks/honeypot-stack/logs/cowrie/downloads:/cowrie/cowrie-git/var/lib/cowrie/downloads
+      # Hardware identity overrides for sysfs DMI nodes — these are outside
+      # /proc so runc proc-safety does not apply.
+      - /opt/stacks/honeypot-stack/cowrie/fakefs/sys/class/dmi/id/product_name:/sys/class/dmi/id/product_name:ro
+      - /opt/stacks/honeypot-stack/cowrie/fakefs/sys/class/dmi/id/sys_vendor:/sys/class/dmi/id/sys_vendor:ro
+      - /opt/stacks/honeypot-stack/cowrie/fakefs/sys/class/dmi/id/board_name:/sys/class/dmi/id/board_name:ro
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+    environment:
+      # #185: cowrie's own twisted/plugins/cowrie_plugin.py reads
+      # [honeypot] timezone from cowrie.cfg (unset here, so it falls back
+      # to "UTC") and does `os.environ["TZ"] = tz` at startup -- but never
+      # calls time.tzset() afterwards. On glibc that mutation doesn't
+      # retroactively change how the C library resolves local time, so
+      # with TZ=Europe/Berlin at container start, cowrie went on
+      # formatting real CEST wall-clock time while its own env-derived
+      # code path (which DOES read os.environ directly, not through
+      # glibc) believed TZ was "UTC" and appended a bare "Z" suffix --
+      # every event timestamp was mislabeled UTC while actually running
+      # +2h ahead, which silently dropped cowrie from the dashboard's 24h
+      # activity chart (negative age = "future" event). Setting TZ=UTC
+      # here matches cowrie's own default exactly, so the mutation is a
+      # no-op and the Z label is finally true.
+      - TZ=UTC
+      - COWRIE_HOSTNAME=gpu01
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - cowrie_net
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+networks:
+  cowrie_net:
+    driver: bridge

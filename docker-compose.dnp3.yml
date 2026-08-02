@@ -1,0 +1,62 @@
+# honeypot-dnp3 — #258: dnp3 split into its own Dockge-managed stack. Same
+# shape and reasoning as docker-compose.conpot.yml -- no depends_on, its own
+# fully private network, only host bind mounts. Deployed as
+# /opt/stacks/honeypot-dnp3.
+#
+# autoheal (main stack) restarts this on unhealthy the same way it does
+# conpot -- unaffected by the move, since it watches by Docker label via
+# /var/run/docker.sock daemon-wide, not scoped to a compose project.
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  dnp3:
+    <<: *runtime-defaults
+    build: /opt/stacks/honeypot-stack/dnp3-honeypot
+    container_name: hp-dnp3
+    restart: unless-stopped
+    # #128: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). This image is FROM
+    # scratch with no shell -- an entrypoint: sh -c wrapper can't run here
+    # (`exec: "/bin/sh": stat /bin/sh: no such file or directory`, caught
+    # deploying this the first time). The wait lives in the Go binary
+    # itself instead (main.go).
+    environment:
+      - LISTEN_ADDR=:20000
+      - LOG_PATH=/var/log/honeypot/dnp3.json
+      # Parse the PROXY header portbridge prepends (":pp" rule on 20000) so
+      # events carry the real attacker IP instead of tunnel peer 10.8.0.1.
+      - PROXY_PROTOCOL=1
+      - TZ=Europe/Berlin
+    ports:
+      - ${HP_BIND:-10.8.0.2}:20000:20000
+    volumes:
+      - /opt/stacks/honeypot-stack/logs/dnp3:/var/log/honeypot
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+    networks: [dnp3_net]
+    healthcheck:
+      test: ["CMD", "/dnp3-honeypot", "-healthcheck"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    # Restarted by the autoheal sidecar (main stack) on unhealthy, not by
+    # restart: alone -- see #119, the same gap #111 found and fixed for
+    # conpot. dnp3 is the same class of directly-exposed industrial-protocol
+    # sensor.
+    labels:
+      - autoheal=true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+
+networks:
+  dnp3_net:
+    driver: bridge

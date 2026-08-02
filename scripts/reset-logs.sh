@@ -17,38 +17,64 @@
 # Run from the stack root (same dir as docker-compose.yml/compose.yml).
 # Requires: docker, sudo (log dirs are owned by container UIDs).
 #
-# #258 proof of concept: the six conpot services now deploy as their own
-# Dockge stack (/opt/stacks/honeypot-conpot/compose.yml), not inside
-# honeypot-stack's own compose.yml. A bare `docker compose stop/up` run from
-# this directory resolves against *this* directory's compose.yml (Compose's
-# default file-discovery prefers compose.yml over docker-compose.yml, which
-# is why this already worked against the deployed stack rather than the
-# repo-tracked filename) and would silently find nothing for conpot's
-# service names now that they live in a different project. conpot's stop/up
-# runs from that stack's own directory instead, matching how it was actually
-# deployed, so Compose resolves the same project it was created under.
+# #258: conpot, cowrie, multipot, http (http-honeypot+api-honeypot), and dnp3
+# each now deploy as their own Dockge stack (/opt/stacks/honeypot-<name>/
+# compose.yml), not inside honeypot-stack's own compose.yml. A bare
+# `docker compose stop/up` run from this directory resolves against *this*
+# directory's compose.yml (Compose's default file-discovery prefers
+# compose.yml over docker-compose.yml, which is why this already worked
+# against the deployed stack rather than the repo-tracked filename) and
+# would silently find nothing for those services' names now that they live
+# in a different project. Their stop/up runs from each stack's own directory
+# instead, matching how they were actually deployed, so Compose resolves the
+# same project each was created under.
 
 set -euo pipefail
 
 LOGS_BASE="/opt/stacks/honeypot-stack/logs"
 STATE_BASE="/opt/stacks/honeypot-stack/state"
-CONPOT_STACK_DIR="/opt/stacks/honeypot-conpot"
-CONPOT_SERVICES=(conpot conpot-s7-1200 conpot-s7-1500 conpot-iec104 conpot-guardian conpot-kamstrup)
+
+# Every target that moved into its own stack (#258), and which services live
+# there. cowrie is the one target with a foot in both worlds: cowrie itself
+# moved out, but payload-dedupe/yara-scanner (which read its captured
+# downloads) stayed in the main stack -- see the SERVICES array below.
+SPLIT_TARGETS=(conpot cowrie multipot http dnp3)
+declare -A SPLIT_STACK_DIR=(
+  [conpot]="/opt/stacks/honeypot-conpot"
+  [cowrie]="/opt/stacks/honeypot-cowrie"
+  [multipot]="/opt/stacks/honeypot-multipot"
+  [http]="/opt/stacks/honeypot-http"
+  [dnp3]="/opt/stacks/honeypot-dnp3"
+)
+declare -A SPLIT_STACK_SERVICES=(
+  [conpot]="conpot conpot-s7-1200 conpot-s7-1500 conpot-iec104 conpot-guardian conpot-kamstrup"
+  [cowrie]="cowrie"
+  [multipot]="multipot"
+  [http]="http-honeypot api-honeypot"
+  [dnp3]="dnp3"
+)
 
 DRY=false
 declare -A TARGETS
+have_target=false
 
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY=true ;;
     cowrie|conpot|multipot|http|dionaea|dnp3|tanner|suricata|all)
-      TARGETS["$arg"]=1 ;;
+      TARGETS["$arg"]=1
+      have_target=true ;;
     *) echo "Unknown argument: $arg" >&2; exit 1 ;;
   esac
 done
 
-# Default to all when no target given
-[[ ${#TARGETS[@]} -eq 0 ]] && TARGETS["all"]=1
+# Default to all when no target given. Not "${#TARGETS[@]} -eq 0" -- on a
+# freshly `declare -A`'d array with nothing ever assigned into it yet, this
+# bash version's `set -u` treats ${#TARGETS[@]} itself as an unbound
+# variable reference (confirmed: -v TARGETS[key] does not have this
+# problem, only the count expansion does), even though the array was
+# properly declared. A plain flag sidesteps the whole question.
+$have_target || TARGETS["all"]=1
 
 wants() {
   [[ -v TARGETS["all"] ]] || [[ -v TARGETS["$1"] ]]
@@ -87,34 +113,47 @@ delete_es() {
 # ─────────────────────────────────────────────────────────────────────────────
 # Build service list for stop/start
 # ─────────────────────────────────────────────────────────────────────────────
-# conpot is deliberately excluded from SERVICES -- it lives in its own
-# Dockge stack/compose project now (CONPOT_STACK_DIR above) and is
-# stopped/started there separately, not via this array.
+# cowrie/multipot/http/dnp3/conpot themselves are deliberately excluded from
+# SERVICES -- each lives in its own Dockge stack/compose project now
+# (SPLIT_STACK_DIR above) and is stopped/started there separately, via
+# split_stack_compose below, not through this array.
 SERVICES=()
-wants cowrie  && SERVICES+=(cowrie payload-dedupe yara-scanner)
-wants multipot && SERVICES+=(multipot)
-wants http    && SERVICES+=(http-honeypot api-honeypot)
+wants cowrie  && SERVICES+=(payload-dedupe yara-scanner)  # cowrie itself moved out (#258)
 wants dionaea && SERVICES+=(dionaea tftp-relay)
-wants dnp3    && SERVICES+=(dnp3)
 wants tanner  && SERVICES+=(tanner tanner_api tanner_web snare)
 wants suricata && SERVICES+=(evebox)  # suricata itself is host-level; evebox reads its logs
 
-conpot_compose() {
-  # `docker compose stop/up <service>` with a zero-length SERVICES array
-  # stops/starts *everything* in the compose file, not nothing -- so this
-  # (and the matching call for the main stack below) only fires when conpot
-  # is actually one of the requested targets.
-  if [ ! -d "$CONPOT_STACK_DIR" ]; then
-    echo "  (skip: $CONPOT_STACK_DIR does not exist -- honeypot-conpot not deployed here)"
+split_stack_compose() {
+  # split_stack_compose <target> <docker compose args...> -- e.g.
+  # `split_stack_compose cowrie stop` or `split_stack_compose dnp3 up -d`.
+  # A zero-length service list would make `docker compose stop/up` with no
+  # arguments act on *everything* in that compose file, not nothing, so
+  # callers only ever invoke this for a target actually in SPLIT_TARGETS.
+  local target="$1"; shift
+  local dir="${SPLIT_STACK_DIR[$target]}"
+  # Deliberate word-splitting of a fixed, script-defined list (not user
+  # input) into a services array -- SC2206 does not apply here.
+  # shellcheck disable=SC2206
+  local services=(${SPLIT_STACK_SERVICES[$target]})
+  if [ ! -d "$dir" ]; then
+    echo "  (skip $target: $dir does not exist -- honeypot-$target not deployed here)"
     return 0
   fi
-  ( cd "$CONPOT_STACK_DIR" && run docker compose "$@" "${CONPOT_SERVICES[@]}" )
+  ( cd "$dir" && run docker compose "$@" "${services[@]}" )
+}
+
+split_targets_wanted() {
+  local out=() t
+  for t in "${SPLIT_TARGETS[@]}"; do
+    wants "$t" && out+=("${SPLIT_STACK_SERVICES[$t]}")
+  done
+  echo "${out[*]}"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-STEP "Stopping: ${SERVICES[*]}$(wants conpot && echo " ${CONPOT_SERVICES[*]}")"
+STEP "Stopping: ${SERVICES[*]} $(split_targets_wanted)"
 [[ ${#SERVICES[@]} -gt 0 ]] && run docker compose stop "${SERVICES[@]}"
-wants conpot && conpot_compose stop
+for t in "${SPLIT_TARGETS[@]}"; do wants "$t" && split_stack_compose "$t" stop; done
 
 # ─────────────────────────────────────────────────────────────────────────────
 STEP "Wiping log files"
@@ -231,10 +270,12 @@ wants tanner   && delete_es "honeypot-tanner-*"
 wants suricata && delete_es "filebeat-*" && delete_es "honeypot-suricata-*"
 
 # ─────────────────────────────────────────────────────────────────────────────
-STEP "Starting: ${SERVICES[*]}$(wants conpot && echo " ${CONPOT_SERVICES[*]}")"
+STEP "Starting: ${SERVICES[*]} $(split_targets_wanted)"
 [[ ${#SERVICES[@]} -gt 0 ]] && run docker compose up -d "${SERVICES[@]}"
-wants conpot && conpot_compose up -d
+for t in "${SPLIT_TARGETS[@]}"; do wants "$t" && split_stack_compose "$t" up -d; done
 
 STEP "Done"
 echo "Tail logs with:  docker compose logs -f ${SERVICES[*]}"
-wants conpot && echo "  (cd $CONPOT_STACK_DIR && docker compose logs -f ${CONPOT_SERVICES[*]})"
+for t in "${SPLIT_TARGETS[@]}"; do
+  wants "$t" && echo "  (cd ${SPLIT_STACK_DIR[$t]} && docker compose logs -f ${SPLIT_STACK_SERVICES[$t]})"
+done

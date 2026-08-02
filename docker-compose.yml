@@ -177,183 +177,6 @@ services:
         limits:
           cpus: "1.0"
           memory: 512M
-  # ===================== SSH / Telnet — GPU server persona =====================
-  cowrie:
-    <<: *runtime-defaults
-    build: ./cowrie
-    container_name: hp-cowrie
-    restart: unless-stopped
-    # #128: waits on the marker directly instead of depends_on-ing
-    # init-wait-log (same-project-only mechanism). Reproduces the
-    # Dockerfile's own ENTRYPOINT (checked directly:
-    # ["/cowrie/cowrie-git/bin/entrypoint.sh"]) with the wait spliced in.
-    entrypoint:
-      - /bin/sh
-      - -c
-      - >
-        until [ -f /markers/log-init.done ]; do sleep 3; done;
-        exec /cowrie/cowrie-git/bin/entrypoint.sh
-    ports:
-      - ${HP_BIND:-10.8.0.2}:19022:2222
-      - ${HP_BIND:-10.8.0.2}:19023:2223
-    volumes:
-      - ./cowrie/cowrie.cfg:/cowrie/cowrie-git/etc/cowrie.cfg:ro
-      - ./cowrie/userdb.txt:/cowrie/cowrie-git/etc/userdb.txt:ro
-      - /opt/stacks/honeypot-stack/logs/cowrie:/cowrie/cowrie-git/var/log/cowrie
-      # Cowrie saves every uploaded/downloaded file by SHA-256, including shell,
-      # PowerShell, VBS, Python and JavaScript payloads.
-      - /opt/stacks/honeypot-stack/logs/cowrie/downloads:/cowrie/cowrie-git/var/lib/cowrie/downloads
-      # Hardware identity overrides for sysfs DMI nodes — these are outside
-      # /proc so runc proc-safety does not apply.
-      - ./cowrie/fakefs/sys/class/dmi/id/product_name:/sys/class/dmi/id/product_name:ro
-      - ./cowrie/fakefs/sys/class/dmi/id/sys_vendor:/sys/class/dmi/id/sys_vendor:ro
-      - ./cowrie/fakefs/sys/class/dmi/id/board_name:/sys/class/dmi/id/board_name:ro
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
-    environment:
-      # #185: cowrie's own twisted/plugins/cowrie_plugin.py reads
-      # [honeypot] timezone from cowrie.cfg (unset here, so it falls back
-      # to "UTC") and does `os.environ["TZ"] = tz` at startup -- but never
-      # calls time.tzset() afterwards. On glibc that mutation doesn't
-      # retroactively change how the C library resolves local time, so
-      # with TZ=Europe/Berlin at container start, cowrie went on
-      # formatting real CEST wall-clock time while its own env-derived
-      # code path (which DOES read os.environ directly, not through
-      # glibc) believed TZ was "UTC" and appended a bare "Z" suffix --
-      # every event timestamp was mislabeled UTC while actually running
-      # +2h ahead, which silently dropped cowrie from the dashboard's 24h
-      # activity chart (negative age = "future" event). Setting TZ=UTC
-      # here matches cowrie's own default exactly, so the mutation is a
-      # no-op and the Z label is finally true.
-      - TZ=UTC
-      - COWRIE_HOSTNAME=gpu01
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    networks:
-      - cowrie_net
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 512M
-  # ===================== Multi-protocol light sensor =====================
-  multipot:
-    <<: *runtime-defaults
-    build: ./multipot
-    container_name: hp-multipot
-    restart: unless-stopped
-    # #128: waits on the marker directly instead of depends_on-ing
-    # init-wait-log (same-project-only mechanism). Unlike most other
-    # services, this image is FROM scratch with no shell -- an
-    # entrypoint: sh -c wrapper can't run here (`exec: "/bin/sh": stat
-    # /bin/sh: no such file or directory`, caught deploying this the first
-    # time). The wait lives in the Go binary itself instead (main.go).
-    ports:
-      - ${HP_BIND:-10.8.0.2}:19025:25
-      - ${HP_BIND:-10.8.0.2}:5432:5432
-      - ${HP_BIND:-10.8.0.2}:5900:5900
-      - ${HP_BIND:-10.8.0.2}:6379:6379
-      - ${HP_BIND:-10.8.0.2}:9200:9200
-      - ${HP_BIND:-10.8.0.2}:2375:2375
-    volumes:
-      - /opt/stacks/honeypot-stack/logs/multipot:/var/log/honeypot
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
-    environment:
-      - LOG_FILE=/var/log/honeypot/multipot.json
-      - MULTIPOT_DISABLE=ftp,mysql,mssql,mongodb
-      # Parse the PROXY header portbridge prepends (:pp rules) so every event
-      # carries the real attacker IP instead of the tunnel peer 10.8.0.1.
-      - PROXY_PROTOCOL=1
-      - TZ=Europe/Berlin
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    networks:
-      - multipot_net
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 128M
-  # ===================== Fake HTTP =====================
-  http-honeypot:
-    <<: *runtime-defaults
-    build: ./http-honeypot
-    container_name: hp-http
-    restart: unless-stopped
-    # #128: waits on the marker directly instead of depends_on-ing
-    # init-wait-log (same-project-only mechanism). This image is FROM
-    # scratch with no shell -- an entrypoint: sh -c wrapper can't run here
-    # (`exec: "/bin/sh": stat /bin/sh: no such file or directory`, caught
-    # deploying this the first time). The wait lives in the Go binary
-    # itself instead (main.go).
-    ports:
-      - ${HP_BIND:-10.8.0.2}:19081:8080
-    volumes:
-      - /opt/stacks/honeypot-stack/logs/http-honeypot:/var/log/honeypot
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
-    environment:
-      - LISTEN_ADDR=:8080
-      - SERVER_HEADER=nginx/1.24.0 (Ubuntu)
-      - SENSOR_NAME=http-honeypot
-      - PERSONA_ID=nexusai-edge
-      - SITE_ID=nexusai-eu-edge
-      - ASSET_ID=web-edge-01
-      - ORGANIZATION=NexusAI Research GmbH
-      - LOG_FILE=/var/log/honeypot/http.json
-      # Parse the PROXY header portbridge prepends on raw port 8081 (":pp"
-      # rule); the listener sniffs it, so Traefik-routed requests (no header)
-      # keep working and are attributed via XFF from the tunnel peer instead.
-      - PROXY_PROTOCOL=1
-      - TZ=Europe/Berlin
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    networks:
-      - http_honeypot_net
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 128M
-
-  # Raw API/cloud decoy: cloud metadata, Kubernetes, Docker Registry,
-  # DevOps admin panels and OpenAI-compatible bearer-token probes.
-  api-honeypot:
-    <<: *runtime-defaults
-    build: ./http-honeypot
-    container_name: hp-api-honeypot
-    restart: unless-stopped
-    # #128: waits on the marker directly instead of depends_on-ing
-    # init-wait-log (same-project-only mechanism). This image is FROM
-    # scratch with no shell -- an entrypoint: sh -c wrapper can't run here
-    # (`exec: "/bin/sh": stat /bin/sh: no such file or directory`, caught
-    # deploying this the first time). The wait lives in the Go binary
-    # itself instead (main.go, shared build with http-honeypot).
-    ports:
-      - ${HP_BIND:-10.8.0.2}:18083:8080
-    volumes:
-      - /opt/stacks/honeypot-stack/logs/api-honeypot:/var/log/honeypot
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
-    environment:
-      - LISTEN_ADDR=:8080
-      - SERVER_HEADER=envoy
-      - SENSOR_NAME=api-honeypot
-      - PERSONA_ID=nexusai-platform
-      - SITE_ID=nexusai-eu-cloud
-      - ASSET_ID=platform-gw-03
-      - ORGANIZATION=NexusAI Research GmbH
-      - LOG_FILE=/var/log/honeypot/api.json
-      - PROXY_PROTOCOL=1
-      - TZ=Europe/Berlin
-    security_opt: [no-new-privileges:true]
-    cap_drop: [ALL]
-    networks: [api_honeypot_net]
-    deploy:
-      resources: { limits: { cpus: "0.5", memory: 128M } }
   # ===================== Live analysis dashboard =====================
   dashboard:
     <<: *runtime-defaults
@@ -1062,47 +885,6 @@ services:
         limits:
           cpus: "1.0"
           memory: 512M
-  # ===================== DNP3 — electrical substation RTU =====================
-  dnp3:
-    <<: *runtime-defaults
-    build: ./dnp3-honeypot
-    container_name: hp-dnp3
-    restart: unless-stopped
-    # #128: waits on the marker directly instead of depends_on-ing
-    # init-wait-log (same-project-only mechanism). This image is FROM
-    # scratch with no shell -- an entrypoint: sh -c wrapper can't run here
-    # (`exec: "/bin/sh": stat /bin/sh: no such file or directory`, caught
-    # deploying this the first time). The wait lives in the Go binary
-    # itself instead (main.go).
-    environment:
-      - LISTEN_ADDR=:20000
-      - LOG_PATH=/var/log/honeypot/dnp3.json
-      # Parse the PROXY header portbridge prepends (":pp" rule on 20000) so
-      # events carry the real attacker IP instead of tunnel peer 10.8.0.1.
-      - PROXY_PROTOCOL=1
-      - TZ=Europe/Berlin
-    ports:
-      - ${HP_BIND:-10.8.0.2}:20000:20000
-    volumes:
-      - /opt/stacks/honeypot-stack/logs/dnp3:/var/log/honeypot
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
-    networks: [dnp3_net]
-    healthcheck:
-      test: ["CMD", "/dnp3-honeypot", "-healthcheck"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
-      start_period: 5s
-    # Restarted by the autoheal sidecar on unhealthy, not by restart: alone --
-    # see #119, the same gap #111 found and fixed for conpot. dnp3 is the
-    # same class of directly-exposed industrial-protocol sensor.
-    labels:
-      - autoheal=true
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 128M
   arkime-capture:
     <<: *runtime-defaults
     image: ghcr.io/arkime/arkime/arkime:v6-latest
@@ -1451,20 +1233,12 @@ networks:
   # instead of each getting their own.
   dionaea_net:
     driver: bridge
-  cowrie_net:
-    driver: bridge
-  multipot_net:
-    driver: bridge
-  http_honeypot_net:
-    driver: bridge
-  api_honeypot_net:
-    driver: bridge
-  # conpot_net and the five other conpot_*_net networks moved to
-  # docker-compose.conpot.yml (#258 proof of concept, separate
-  # honeypot-conpot Dockge stack) -- each was already wholly private to its
-  # own persona, so nothing here ever referenced them.
-  dnp3_net:
-    driver: bridge
+  # cowrie_net, multipot_net, http_honeypot_net, api_honeypot_net,
+  # conpot_net (+ five other conpot_*_net), and dnp3_net all moved out --
+  # #258, split into docker-compose.cowrie.yml / .multipot.yml / .http.yml /
+  # .conpot.yml / .dnp3.yml, each its own separate Dockge stack. Each was
+  # already wholly private to its own service/family, so nothing here ever
+  # referenced them.
 volumes:
   evebox-config: null
   es-data: null

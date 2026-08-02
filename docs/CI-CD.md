@@ -119,6 +119,30 @@ Log directories (`logs/conpot*`) and the `state/init-markers` mount are
 pre-existing host paths `honeypot-stack`'s own rsync step already preserves;
 this stack does not create or own them, and has no `.env` of its own.
 
+### honeypot-cowrie, honeypot-multipot, honeypot-http, honeypot-dnp3 (#258)
+
+Four more standalone honeypots, split the same way as `honeypot-conpot` and
+for the same reason: each has no `depends_on` on any other service and its
+own fully private network, so no external network/volume treatment is
+needed. `docker-compose.http.yml` covers two services (`http-honeypot` and
+`api-honeypot`) in one stack -- they already share one build context and are
+already treated as one logical unit elsewhere (`scripts/reset-logs.sh`'s
+`http` target covers both). Deployed the same way as `honeypot-conpot`, in a
+single looped step (`.github/workflows/deploy.yml`) since the four stacks
+are otherwise identical in shape. Same log-directory/`.env` posture as
+`honeypot-conpot` above.
+
+Still monolithic in `honeypot-stack` as of this writing, deliberately: any
+service that shares a *named* Docker volume with something else (`dionaea`,
+`payload-dedupe`, `yara-scanner`, `dashboard` via `dionaea-lib`/
+`yara-results`; the ELK/dashboard plane via `honeynet`/`es-data`; the Tanner
+group via its own internal `depends_on` chain) needs that volume/network
+given an explicit shared `name:` in every stack that touches it before it
+can split safely -- the same mechanism `honeynet`/`es-data`/`evebox-config`
+already use to stay shared between `honeypot-stack` and `honeypot-init`
+today. Splitting those is more involved and tracked as ongoing work under
+#258, not attempted in the same pass as these five low-risk services.
+
 ## VPS deployment
 
 Create a protected `production-vps` environment with a required reviewer and
