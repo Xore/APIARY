@@ -132,16 +132,43 @@ single looped step (`.github/workflows/deploy.yml`) since the four stacks
 are otherwise identical in shape. Same log-directory/`.env` posture as
 `honeypot-conpot` above.
 
-Still monolithic in `honeypot-stack` as of this writing, deliberately: any
-service that shares a *named* Docker volume with something else (`dionaea`,
-`payload-dedupe`, `yara-scanner`, `dashboard` via `dionaea-lib`/
-`yara-results`; the ELK/dashboard plane via `honeynet`/`es-data`; the Tanner
-group via its own internal `depends_on` chain) needs that volume/network
-given an explicit shared `name:` in every stack that touches it before it
-can split safely -- the same mechanism `honeynet`/`es-data`/`evebox-config`
-already use to stay shared between `honeypot-stack` and `honeypot-init`
-today. Splitting those is more involved and tracked as ongoing work under
-#258, not attempted in the same pass as these five low-risk services.
+### honeypot-dashboard (#258)
+
+`docker-compose.dashboard.yml` runs as its own Dockge stack at
+`/opt/stacks/honeypot-dashboard`, bundling `dashboard` and
+`services-adapter` -- kept together because they talk to each other only
+over `services-adapter-socket`, a volume nothing else touches. Unlike the
+five services above, this pair could not be split with the "own fully
+private network" treatment: `dashboard` resolves `elasticsearch` and
+`filebeat` by service name over the shared `honeynet` network, and reads/
+writes three named Docker volumes `honeypot-stack`'s own services also
+touch -- `dionaea-lib`/`yara-results` (`dionaea`/`yara-scanner` write there,
+`dashboard` only reads) and `dashboard-state` (genuinely shared both ways:
+`payload-dedupe`/`yara-scanner` in the main stack read/write retained
+script payloads under `/payloads/scripts`, the same subtree this stack's
+own `SCRIPT_PAYLOAD_DIR=/state/script-payloads` writes). All four resources
+are declared with an explicit shared `name:` in both compose files, the
+same mechanism `honeynet`/`es-data`/`evebox-config` already use to stay
+shared between `honeypot-stack` and `honeypot-init`.
+
+The `home` job deploys this stack *after* `honeypot-stack`, not before like
+the standalone honeypots above -- Compose itself doesn't require the
+ordering (none of the shared resources are `external: true`, so whichever
+project runs first just creates them), but starting `honeypot-stack` first
+means the dashboard has real data to show immediately instead of booting
+against empty indices. `services-adapter-socket` stays private/unnamed to
+this stack; grepped every compose file to confirm nothing else references
+it.
+
+Per explicit instruction, this split did not preserve `dashboard-state`
+across the cutover -- the new stack starts with a fresh volume, and any
+alert/intelligence history in the old one is gone.
+
+Everything else that was still monolithic as of the earlier revision of
+this section (`dionaea`, `payload-dedupe`, `yara-scanner`, and the Tanner
+group) remains in `honeypot-stack` -- each is either the volume *owner*
+`dashboard` merely reads from, or part of a `depends_on` chain (Tanner) not
+yet worth splitting.
 
 ## VPS deployment
 

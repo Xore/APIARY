@@ -119,6 +119,27 @@ jobs:
           docker compose -f compose.yml config --quiet
           docker compose -f compose.yml up -d --build
 
+      # #258: dashboard + services-adapter split into their own Dockge stack,
+      # placed after honeypot-stack (unlike the standalone honeypots above)
+      # because it actually depends on that stack at runtime -- it resolves
+      # elasticsearch/filebeat by service name over the shared honeynet
+      # network, and reads dionaea-lib/yara-results/dashboard-state, three
+      # named volumes honeypot-stack's own services write. Compose itself
+      # doesn't enforce this order (none of those are `external: true`, so
+      # whichever project runs first would simply create them), but starting
+      # honeypot-stack first means the dashboard has something to show
+      # immediately rather than booting against empty indices.
+      - name: Synchronize honeypot-dashboard (#258 split)
+        shell: bash
+        run: |
+          destination=/opt/stacks/honeypot-dashboard
+          install -d -m 755 "$destination"
+          cp docker-compose.dashboard.yml "$destination/compose.yml"
+          cd "$destination"
+          test ! -f .env || chmod 600 .env
+          docker compose -f compose.yml config --quiet
+          docker compose -f compose.yml up -d --build
+
   vps:
     if: inputs.target == 'vps' || inputs.target == 'both'
     runs-on: ubuntu-latest
