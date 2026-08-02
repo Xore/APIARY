@@ -304,8 +304,9 @@ def collect_artifacts(sha: str, out_dir: Path):
 
 
 def capture_memory_dump(out_dir: Path):
-    """#296: a mid-run `virsh dump --memory-only`, taken from the host while
-    the guest is running -- analyzed afterward with Volatility 3
+    """#296: a `virsh dump --memory-only`, taken from the host while the
+    guest is still running -- right after the observation window, before
+    the sample is torn down -- and analyzed afterward with Volatility 3
     (windows.pslist, malfind, netscan). Unlike every other artifact this
     orchestrator collects (Sysmon EVTX, Procmon CSV, Regshot/Autoruns
     diffs), all written to disk inside a guest the sample has full control
