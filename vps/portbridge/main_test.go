@@ -41,7 +41,7 @@ func TestUDPConnLogViaPortIsTheSourcePortTheHoneypotSees(t *testing.T) {
 	// serveUDP never returns, so the log file stays open for the rest of the
 	// run; close it before the temp dir is torn down.
 	t.Cleanup(func() { cl.f.Close() })
-	go serveUDP("127.0.0.1", r, cl)
+	go serveUDP("127.0.0.1", r, cl, newBlackhole(""))
 
 	// serveUDP binds asynchronously, so keep sending until it forwards one.
 	// Every datagram comes from the same client socket, so they all belong to

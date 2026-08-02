@@ -27,6 +27,15 @@
 // LISTEN_IP=0.0.0.0 to expose publicly. On the home side set LISTEN_IP to the
 // WireGuard IP (10.8.0.2) and target 127.0.0.1.
 //
+// BLACKHOLE_LIST (#268), if set, names a local file of known mass-scanner IPv4
+// addresses (one per line, stamparm/maltrail's mass_scanner.txt format);
+// portbridge closes a matching source's connection immediately instead of
+// dialing the target, so it never reaches a honeypot listener, while Suricata
+// (which sniffs the interface independently) still sees and logs it. See
+// blackhole.go. Empty/unset disables the feature; nothing here ever fetches
+// the list itself over the network — that's portbridge-blackhole-refresh.sh's
+// job, gated behind the "blackhole" compose profile.
+//
 // Stdlib only; compiles to a tiny static binary.
 package main
 
@@ -207,6 +216,7 @@ func main() {
 		os.Exit(1)
 	}
 	cl := newConnLogger(os.Getenv("CONN_LOG"))
+	bh := newBlackhole(os.Getenv("BLACKHOLE_LIST"))
 
 	var wg sync.WaitGroup
 	for _, r := range rules {
@@ -215,12 +225,12 @@ func main() {
 			defer wg.Done()
 			switch r.proto {
 			case "tcp":
-				serveTCP(listenIP, r, cl)
+				serveTCP(listenIP, r, cl, bh)
 			case "udp":
 				if r.proxy {
 					fmt.Fprintf(os.Stderr, "portbridge: PROXY protocol not supported for udp rule :%s — ignoring pp flag\n", r.listenPort)
 				}
-				serveUDP(listenIP, r, cl)
+				serveUDP(listenIP, r, cl, bh)
 			default:
 				fmt.Fprintf(os.Stderr, "portbridge: unknown proto %q\n", r.proto)
 			}
@@ -230,7 +240,7 @@ func main() {
 	wg.Wait()
 }
 
-func serveTCP(ip string, r rule, cl *connLogger) {
+func serveTCP(ip string, r rule, cl *connLogger, bh *blackhole) {
 	addr := net.JoinHostPort(ip, r.listenPort)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -241,6 +251,16 @@ func serveTCP(ip string, r rule, cl *connLogger) {
 	for {
 		c, err := ln.Accept()
 		if err != nil {
+			continue
+		}
+		// #268: the TCP handshake already completed by the time Accept returns
+		// (Suricata, sniffing the interface independently, already saw it) —
+		// closing here without dialing upstream still keeps the connection from
+		// ever reaching the honeypot listener, which is the actual goal. No
+		// connLogger entry either: a blackholed mass-scanner hit is exactly the
+		// noise this feature exists to keep off the dashboard.
+		if host, _ := splitHostPort(c.RemoteAddr()); bh.blocked(host) {
+			c.Close()
 			continue
 		}
 		go pipeTCP(c, r, cl)
@@ -296,7 +316,7 @@ func proxyV1Header(client net.Conn) string {
 
 // serveUDP forwards datagrams with a small per-client session table so replies
 // find their way back.
-func serveUDP(ip string, r rule, cl *connLogger) {
+func serveUDP(ip string, r rule, cl *connLogger, bh *blackhole) {
 	listenNetwork := "udp4"
 	if parsed := net.ParseIP(ip); parsed != nil && parsed.To4() == nil {
 		listenNetwork = "udp6"
@@ -333,7 +353,15 @@ func serveUDP(ip string, r rule, cl *connLogger) {
 		key := client.String()
 		mu.Lock()
 		session, ok := sessions[key]
+		// #268: only gate new sessions, same reasoning as serveTCP's Accept-time
+		// check — a session already forwarding isn't worth tearing down
+		// mid-stream, and this only costs a map lookup (already paid for
+		// `ok` above) once a session exists, not a lookup per packet.
 		if !ok {
+			if host, _ := splitHostPort(client); bh.blocked(host) {
+				mu.Unlock()
+				continue
+			}
 			network := "udp4"
 			bind := &net.UDPAddr{IP: net.IPv4zero}
 			if target.IP.To4() == nil {

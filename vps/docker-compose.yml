@@ -202,6 +202,16 @@ services:
       # short-circuits before touching the network) so this stays optional
       # if p0f is ever undeployed.
       - P0F_API_SOCK=/run/p0f/p0f.sock
+      # #268: known-mass-scanner source IPs get dropped before dialing any
+      # target, so they never reach a honeypot listener; Suricata still sees
+      # them (it sniffs the interface independently of anything portbridge
+      # does with an accepted connection). Always set, at no cost when the
+      # "blackhole" compose profile isn't active: blackhole.go's reload()
+      # treats a missing file exactly like an unset BLACKHOLE_LIST, so an
+      # inactive profile just means this stays a permanent no-op rather than
+      # an error. See portbridge-blackhole-refresh.sh for what keeps the file
+      # current.
+      - BLACKHOLE_LIST=/blackhole/mass_scanner.txt
       - "RULES=tcp:22:10.8.0.2:19022 tcp:23:10.8.0.2:19023 tcp:25:10.8.0.2:19025:pp tcp:5432:10.8.0.2:5432:pp tcp:5900:10.8.0.2:5900:pp tcp:6379:10.8.0.2:6379:pp tcp:9200:10.8.0.2:9200:pp tcp:2375:10.8.0.2:2375:pp tcp:8888:10.8.0.2:18083:pp tcp:8081:10.8.0.2:19081:pp tcp:21:10.8.0.2:21 tcp:135:10.8.0.2:135 tcp:445:10.8.0.2:445 tcp:1433:10.8.0.2:1433 tcp:3306:10.8.0.2:3306 tcp:27017:10.8.0.2:27017 tcp:1723:10.8.0.2:1723 tcp:1883:10.8.0.2:1883 tcp:5060:10.8.0.2:5060 tcp:9100:10.8.0.2:9100 tcp:11211:10.8.0.2:11211 tcp:20000:10.8.0.2:20000:pp tcp:102:10.8.0.2:102:pp tcp:1102:10.8.0.2:1102:pp tcp:2102:10.8.0.2:2102:pp tcp:502:10.8.0.2:502:pp tcp:1502:10.8.0.2:1502:pp tcp:2502:10.8.0.2:2502:pp tcp:2404:10.8.0.2:2404:pp tcp:10001:10.8.0.2:10001:pp tcp:1025:10.8.0.2:1025:pp tcp:50100:10.8.0.2:50100:pp tcp:44818:10.8.0.2:44818:pp udp:69:10.8.0.2:1069 udp:161:10.8.0.2:19161 udp:1900:10.8.0.2:1900 udp:47808:10.8.0.2:47808 udp:623:10.8.0.2:623 udp:5060:10.8.0.2:5060"
     volumes:
       # portbridge connection log — ship this dir to the home stack's
@@ -212,9 +222,35 @@ services:
       # only needs the socket file's own permission bits, which the kernel
       # checks independently of the mount's read-only flag.
       - p0f-api-socket:/run/p0f:ro
+      # #268: read-only from portbridge's side -- only portbridge-blackhole-
+      # refresh (below) ever writes here. Populated only if that sidecar's
+      # "blackhole" profile is active; see BLACKHOLE_LIST's comment above for
+      # why an empty/missing volume is a safe no-op, not an error.
+      - portbridge-blackhole:/blackhole:ro
     depends_on:
       p0f:
         condition: service_started
+
+  # #268: keeps portbridge's mass-scanner blackhole list current. Opt-in via
+  # the "blackhole" compose profile (`docker compose --profile blackhole
+  # up`) -- portbridge itself needs no profile and no restart to pick this
+  # up either way, it just polls BLACKHOLE_LIST on a timer (blackhole.go).
+  # See portbridge-blackhole-refresh.sh for the full reasoning.
+  portbridge-blackhole-refresh:
+    image: curlimages/curl:latest
+    container_name: hp-portbridge-blackhole-refresh
+    restart: unless-stopped
+    user: root
+    entrypoint: ["/bin/sh", "/usr/local/bin/portbridge-blackhole-refresh.sh"]
+    environment:
+      - BLACKHOLE_LIST=/blackhole/mass_scanner.txt
+      - REFRESH_INTERVAL_SECONDS=86400
+    volumes:
+      - ./portbridge-blackhole-refresh.sh:/usr/local/bin/portbridge-blackhole-refresh.sh:ro
+      - portbridge-blackhole:/blackhole
+    profiles: ["blackhole"]
+    deploy:
+      resources: { limits: { cpus: "0.25", memory: 128M } }
 
   # Bounds the portbridge connection log (copytruncate: the writer keeps its
   # O_APPEND fd). The threshold is the home dashboard's tail-read cap (8 MiB),
@@ -542,3 +578,4 @@ volumes:
   go-cache:
   suricata-rules:
   p0f-api-socket:
+  portbridge-blackhole:
