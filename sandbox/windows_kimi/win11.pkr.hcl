@@ -97,6 +97,8 @@ build {
   provisioner "windows-restart" { restart_timeout = "30m" }
 
   provisioner "powershell" { script = "provision/50-chrome-history.ps1" }
+  provisioner "powershell" { script = "provision/60-living-persona.ps1" }
+  provisioner "powershell" { script = "provision/70-traffic-noise.ps1" }
 
   provisioner "windows-restart" { restart_timeout = "30m" }
 

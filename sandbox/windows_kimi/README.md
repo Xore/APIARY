@@ -27,7 +27,26 @@ provision/
 fakenet/detnode.ini      Tuned FakeNet config (fake finance intranet)
 build.sh                 Host prep + packer build
 detonate.sh              Create a throwaway overlay VM from the golden image
+tools/filter-pcap.sh     Strip tagged persona noise from captures
+RESEARCH.md              Deep research: evasion landscape, persona & noise design
 ```
+
+## Living persona + tagged noise (v2)
+
+- `provision/60-living-persona.ps1` — always-on daemon: human-curve mouse
+  movement (Bezier paths, ease-in-out velocity — passes LummaC2-style
+  smoothness checks), clicks, scrolling, occasional notepad typing.
+- `provision/70-traffic-noise.ps1` — background HTTP/DNS generator. All
+  noise is triple-tagged (domain suffix `mcg-persona.net`, header
+  `X-Persona-Noise: 1`, UA marker `MCGPersona/1.0`) so
+  `tools/filter-pcap.sh` can deterministically strip it from pcaps.
+  **Change the suffix in both files before first use.**
+- Sysmon (SwiftOnSecurity config) + PowerShell script-block logging are
+  installed by `30-tools.ps1`.
+
+See `RESEARCH.md` for the full rationale, GHOSTS integration option, and
+the recommended detonation runbook (warm-up → host-side capture →
+detonate 15-60 min → filter → diff → discard overlay).
 
 ## Quick start
 

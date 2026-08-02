@@ -65,4 +65,31 @@ foreach ($t in @('Process Explorer','Process Monitor','Autoruns','TCPView','PsEx
   Set-ItemProperty "HKCU:\Software\Sysinternals\$t" -Name EulaAccepted -Value 1 -Type DWord
 }
 
+# ---------------- Sysmon with SwiftOnSecurity config (highest-value
+# telemetry for payload analysis) ----------------
+choco install -y --no-progress sysmon -ErrorAction SilentlyContinue
+$soc = 'C:\ProgramData\persona\sysmonconfig.xml'
+Invoke-WebRequest -UseBasicParsing `
+  -Uri 'https://raw.githubusercontent.com/SwiftOnSecurity/sysmon-config/master/sysmonconfig-export.xml' `
+  -OutFile $soc -ErrorAction SilentlyContinue
+$sysmon = Get-ChildItem 'C:\ProgramData\chocolatey\lib\sysmon\tools\Sysmon64.exe','C:\Tools\sysmon\Sysmon64.exe' -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+if (-not $sysmon) { $sysmon = (Get-Command Sysmon64.exe -ErrorAction SilentlyContinue).Source }
+if ($sysmon -and (Test-Path $soc)) {
+  & $sysmon -accepteula -i $soc 2>$null
+  Write-Host "Sysmon installed: $sysmon"
+} else {
+  Write-Host 'Sysmon binary or config missing - install manually post-build.'
+}
+
+# Increase Sysmon + PowerShell Operational log sizes so long runs don't wrap
+wevtutil sl "Microsoft-Windows-Sysmon/Operational" /ms:268435456 2>$null
+wevtutil sl "Microsoft-Windows-PowerShell/Operational" /ms:134217728 2>$null
+# Enable PowerShell Script Block + Module logging (payload script visibility)
+$sb = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging'
+New-Item -Path $sb -Force | Out-Null
+Set-ItemProperty $sb -Name EnableScriptBlockLogging -Value 1 -Type DWord
+$ml = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging'
+New-Item -Path $ml -Force | Out-Null
+Set-ItemProperty $ml -Name EnableModuleLogging -Value 1 -Type DWord
+
 Write-Host '== 30-tools done =='
