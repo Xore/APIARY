@@ -62,6 +62,23 @@ def probe_guardian_ast(port):
     with socket.create_connection(("127.0.0.1", port), timeout=TIMEOUT) as s:
         s.sendall(req)
         _recv(s, minimum=2)
+        # #333: unlike this file's other single-exchange protocols,
+        # guardian_ast_server.py's handle() keeps the session open in its
+        # own while-True loop, expecting a next command over the same
+        # connection. Exiting the `with` block right after the minimum read
+        # above can abandon still-arriving response bytes (the full I20100
+        # report is longer than the 2-byte minimum), which makes the kernel
+        # send a TCP RST on close instead of a clean FIN -- confirmed live:
+        # the server's next sock.recv() on that same session then raised
+        # ConnectionResetError every single healthcheck cycle (60s),
+        # logged as an ERROR-level traceback for a completely benign,
+        # expected disconnect. Half-closing the write side first tells the
+        # server plainly "no more commands coming" -- its own
+        # `if not request: break` already handles that cleanly -- and
+        # draining until it closes its end avoids the RST entirely.
+        s.shutdown(socket.SHUT_WR)
+        while s.recv(4096):
+            pass
 
 
 def probe_kamstrup(port):
