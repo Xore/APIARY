@@ -435,250 +435,11 @@ services:
         limits:
           cpus: "1.0"
           memory: 1G
-  # ===================== SNARE + TANNER web-app honeypot =====================
-  # Docker-backed emulators use this disposable nested daemon. Never replace
-  # it with a bind mount of the homeserver's /var/run/docker.sock.
-  tanner_docker:
-    <<: *runtime-defaults
-    build: ./tanner/sandbox
-    container_name: hp-tanner-docker
-    restart: unless-stopped
-    privileged: true
-    environment:
-      - DOCKER_TLS_CERTDIR=
-    tmpfs:
-      - /var/lib/docker:mode=0700,size=2147483648
-      - /run:mode=0755,size=67108864
-    healthcheck:
-      test: ["CMD-SHELL", "test -e /run/tanner-sandbox-ready && docker info >/dev/null 2>&1"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
-      start_period: 30s
-    # Restarted by the autoheal sidecar on unhealthy, not by restart: alone --
-    # see #119, the same gap #111 found and fixed for conpot.
-    labels:
-      - autoheal=true
-    networks:
-      - tanner_local
-    deploy:
-      resources:
-        limits:
-          cpus: "2.0"
-          memory: 3G
-  tanner_redis:
-    <<: *runtime-defaults
-    build: ./tanner/redis
-    container_name: hp-tanner-redis
-    # Measured against the live baseline (2026-07-31): this service binds only
-    # unprivileged ports and needs no capability at all, so nothing is added
-    # back. Verified by recreating it and comparing its listening port against
-    # the pre-change value — see #89.
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    restart: unless-stopped
-    healthcheck:
-      test:
-        - CMD
-        - redis-cli
-        - ping
-      interval: 5s
-      timeout: 3s
-      retries: 10
-    # Restarted by the autoheal sidecar on unhealthy, not by restart: alone --
-    # see #119, the same gap #111 found and fixed for conpot.
-    labels:
-      - autoheal=true
-    networks:
-      - tanner_local
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 256M
-  tanner_phpox:
-    <<: *runtime-defaults
-    build: ./tanner/phpox
-    container_name: hp-tanner-phpox
-    # Measured against the live baseline (2026-07-31): this service binds only
-    # unprivileged ports and needs no capability at all, so nothing is added
-    # back. Verified by recreating it and comparing its listening port against
-    # the pre-change value — see #89.
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    restart: unless-stopped
-    networks:
-      - tanner_local
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 512M
-  tanner_api:
-    <<: *runtime-defaults
-    build: ./tanner/tanner
-    container_name: hp-tanner-api
-    # Measured against the live baseline (2026-07-31): this service binds only
-    # unprivileged ports and needs no capability at all, so nothing is added
-    # back. Verified by recreating it and comparing its listening port against
-    # the pre-change value — see #89.
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    restart: unless-stopped
-    command: tannerapi
-    tmpfs:
-      - /tmp/tanner:uid=65534,gid=65534
-      - /var/log/tanner:uid=65534,gid=65534
-    volumes:
-      - ./tanner/tanner/config.yaml:/opt/tanner/data/config.yaml:ro
-    depends_on:
-      tanner_redis:
-        condition: service_healthy
-    networks:
-      - tanner_local
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 1G
-  tanner_web:
-    <<: *runtime-defaults
-    build: ./tanner/tanner
-    container_name: hp-tanner-web
-    # Measured against the live baseline (2026-07-31): this service binds only
-    # unprivileged ports and needs no capability at all, so nothing is added
-    # back. Verified by recreating it and comparing its listening port against
-    # the pre-change value — see #89.
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    restart: unless-stopped
-    command: tannerweb
-    tmpfs:
-      - /tmp/tanner:uid=65534,gid=65534
-      - /var/log/tanner:uid=65534,gid=65534
-    volumes:
-      - ./tanner/tanner/config.yaml:/opt/tanner/data/config.yaml:ro
-    ports:
-      - ${HP_BIND:-10.8.0.2}:19091:8091
-    depends_on:
-      tanner_redis:
-        condition: service_healthy
-    networks:
-      - tanner_local
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 1G
-  tanner:
-    <<: *runtime-defaults
-    build: ./tanner/tanner
-    container_name: hp-tanner
-    # Measured against the live baseline (2026-07-31): this service binds only
-    # unprivileged ports and needs no capability at all, so nothing is added
-    # back. Verified by recreating it and comparing its listening port against
-    # the pre-change value — see #89.
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    restart: unless-stopped
-    # #128: waits on the marker directly instead of depends_on-ing
-    # init-wait-log (same-project-only mechanism). Reproduces the
-    # Dockerfile's own CMD (checked directly: ["tanner"], no ENTRYPOINT)
-    # with the wait spliced in ahead of it.
-    entrypoint:
-      - /bin/sh
-      - -c
-      - >
-        until [ -f /markers/log-init.done ]; do sleep 3; done;
-        exec tanner
-    environment:
-      - DOCKER_HOST=tcp://tanner_docker:2375
-    tmpfs:
-      - /tmp/tanner:uid=65534,gid=65534
-      - /opt/tanner/files:uid=65534,gid=65534
-    volumes:
-      - ./tanner/tanner/config.yaml:/opt/tanner/data/config.yaml:ro
-      - /opt/stacks/honeypot-stack/logs/tanner:/var/log/tanner
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
-    depends_on:
-      tanner_redis:
-        condition: service_healthy
-      tanner_api:
-        condition: service_started
-      tanner_web:
-        condition: service_started
-      tanner_phpox:
-        condition: service_started
-      tanner_docker:
-        condition: service_healthy
-    networks:
-      - tanner_local
-    deploy:
-      resources:
-        limits:
-          cpus: "2.0"
-          memory: 2G
-  snare:
-    <<: *runtime-defaults
-    build:
-      context: ./snare
-      args:
-        PAGE_URL: portal.meridian.example
-        TANNER: tanner
-        PORT: "8080"
-    container_name: hp-snare
-    # SNARE drops privileges at startup (setgid/setuid), which is why the
-    # otherwise-empty set the other tanner services use makes it exit with
-    # PermissionError: [Errno 1] Operation not permitted before it binds.
-    # SETUID+SETGID is the measured minimum; CHOWN and DAC_OVERRIDE were
-    # tested on top and changed nothing, so they are not granted.
-    cap_drop:
-      - ALL
-    cap_add:
-      - SETUID
-      - SETGID
-    security_opt:
-      - no-new-privileges:true
-    restart: unless-stopped
-    # #124: snare_clone used to be a same-project one-shot job this depended
-    # on via condition: service_completed_successfully. It moved to
-    # honeypot-init (that condition cannot cross a Compose project boundary
-    # -- same reason the init-wait-* services exist), so this waits on its
-    # completion marker directly instead, same mechanism as init-wait-log.
-    # #128: same treatment for the init-wait-log dependency -- both markers
-    # gate startup now.
-    entrypoint:
-      - /bin/sh
-      - -c
-      - >
-        until [ -f /markers/snare-clone.done ] && [ -f /markers/log-init.done ]; do sleep 3; done;
-        exec /usr/local/bin/snare-entry.sh
-    ports:
-      - ${HP_BIND:-10.8.0.2}:19082:8080
-    volumes:
-      - /opt/stacks/honeypot-stack/logs/snare:/opt/snare
-      - snare-pages:/opt/snare/pages
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
-    depends_on:
-      tanner:
-        condition: service_started
-    networks:
-      - tanner_local
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 1G
+  # The SNARE + TANNER web-app honeypot group (tanner_docker, tanner_redis,
+  # tanner_phpox, tanner_api, tanner_web, tanner, snare) moved to
+  # docker-compose.tanner.yml (#258): a separate honeypot-tanner Dockge
+  # stack. All seven form one depends_on chain, so they moved together --
+  # see that file's own header for the full reasoning.
 networks:
   # honeynet is the trusted analysis/management plane now (Elasticsearch,
   # Kibana, Filebeat, the dashboard, EveBox, Arkime) -- not the honeypots
@@ -686,8 +447,11 @@ networks:
   # shared bridge with Docker's default inter-container communication, so a
   # compromised honeypot could reach every other honeypot directly. None of
   # them need to: they write to bind-mounted log files for Filebeat to tail,
-  # not to each other or to Elasticsearch over the network, and no honeypot
-  # has a depends_on relationship on another except the pair noted below.
+  # not to each other or to Elasticsearch over the network. The one
+  # honeypot-per-network exception (#235), tftp-relay's depends_on: dionaea,
+  # lives entirely inside docker-compose.dionaea.yml now (#258), same as
+  # the Tanner group's own internal depends_on chain lives entirely inside
+  # docker-compose.tanner.yml.
   honeynet:
     name: honeynet
     driver: bridge
@@ -697,26 +461,16 @@ networks:
     name: honeypot-llm-data
     driver: bridge
     internal: true
-  tanner_local:
-    driver: bridge
   # cowrie_net, multipot_net, http_honeypot_net, api_honeypot_net,
-  # conpot_net (+ five other conpot_*_net), and dnp3_net all moved out --
-  # #258, split into docker-compose.cowrie.yml / .multipot.yml / .http.yml /
-  # .conpot.yml / .dnp3.yml, each its own separate Dockge stack. Each was
-  # already wholly private to its own service/family, so nothing here ever
-  # referenced them. dionaea_net moved out the same way, into
-  # docker-compose.dionaea.yml (#258) alongside dionaea/tftp-relay
-  # themselves -- the one honeypot-per-network exception (#235) tftp-relay's
-  # depends_on: dionaea created lives entirely inside that file now.
+  # conpot_net (+ five other conpot_*_net), dnp3_net, and dionaea_net all
+  # moved out -- #258, split into docker-compose.cowrie.yml / .multipot.yml
+  # / .http.yml / .conpot.yml / .dnp3.yml / .dionaea.yml, each its own
+  # separate Dockge stack. Each was already wholly private to its own
+  # service/family, so nothing here ever referenced them. tanner_local
+  # moved out the same way, into docker-compose.tanner.yml (#258).
 volumes:
   evebox-config: null
   es-data: null
-  # #124: snare-clone (honeypot-init, deploys first) writes this, hp-snare
-  # (here) only reads it. Owned by honeypot-init instead, so this side is
-  # external.
-  snare-pages:
-    name: snare-pages
-    external: true
   arkime-pcap: null # Arkime-processed PCAP index files
   # dionaea-lib, yara-results, dashboard-state, reporter-data, and
   # services-adapter-socket all moved out of this file (#258): the last

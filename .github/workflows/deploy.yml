@@ -95,11 +95,15 @@ jobs:
       # and its one cross-stack resource, dionaea-lib, is a non-external
       # shared-name volume Compose creates if absent -- no ordering
       # requirement forces it out of the loop the way honeypot-dashboard
-      # below needed its own step.
-      - name: Synchronize honeypot-cowrie/multipot/http/dnp3/dionaea (#258 split)
+      # below needed its own step. tanner joins for the same reason: its
+      # own private tanner_local, and its one cross-stack resource
+      # (snare-pages) is `external: true`, already created by
+      # honeypot-init's snare-clone job, which this workflow deploys before
+      # this step runs.
+      - name: Synchronize honeypot-cowrie/multipot/http/dnp3/dionaea/tanner (#258 split)
         shell: bash
         run: |
-          for stack in cowrie multipot http dnp3 dionaea; do
+          for stack in cowrie multipot http dnp3 dionaea tanner; do
             destination="/opt/stacks/honeypot-$stack"
             install -d -m 755 "$destination"
             cp "docker-compose.$stack.yml" "$destination/compose.yml"
