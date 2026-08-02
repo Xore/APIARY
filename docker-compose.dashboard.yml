@@ -222,7 +222,13 @@ services:
           # is ~1.25G, so its 8M tail parses into tens of thousands of event
           # structs — 32M OOM-restarted the container in a loop (53x).
           # 1G leaves GC headroom for correlation and payload inventory work.
-          memory: 1G
+          # Raised to 2G after live growth (accumulating log volume on this
+          # actively-attacked host, not a leak) pushed a rebuild cycle to
+          # ~1014MiB, right against the old 1G ceiling -- see #353 for the
+          # broader fix (an ES-backed cache instead of re-parsing every log
+          # file's tail from scratch on every cycle), this bump just buys
+          # headroom until that lands.
+          memory: 2G
 
   services-adapter:
     <<: *runtime-defaults
