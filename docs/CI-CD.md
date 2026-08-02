@@ -155,15 +155,17 @@ over `services-adapter-socket`, a volume nothing else touches. Unlike the
 five services above, this pair could not be split with the "own fully
 private network" treatment: `dashboard` resolves `elasticsearch` and
 `filebeat` by service name over the shared `honeynet` network, and reads/
-writes three named Docker volumes `honeypot-stack`'s own services also
-touch -- `dionaea-lib`/`yara-results` (`dionaea`/`yara-scanner` write there,
+writes three named Docker volumes other stacks also touch --
+`dionaea-lib`/`yara-results` (`docker-compose.dionaea.yml`'s `dionaea` and
+`docker-compose.payload-analysis.yml`'s `yara-scanner` write there,
 `dashboard` only reads) and `dashboard-state` (genuinely shared both ways:
-`payload-dedupe`/`yara-scanner` in the main stack read/write retained
-script payloads under `/payloads/scripts`, the same subtree this stack's
-own `SCRIPT_PAYLOAD_DIR=/state/script-payloads` writes). All four resources
-are declared with an explicit shared `name:` in both compose files, the
-same mechanism `honeynet`/`es-data`/`evebox-config` already use to stay
-shared between `honeypot-stack` and `honeypot-init`.
+`payload-dedupe`/`yara-scanner`, now in `docker-compose.payload-analysis.yml`,
+read/write retained script payloads under `/payloads/scripts`, the same
+subtree this stack's own `SCRIPT_PAYLOAD_DIR=/state/script-payloads`
+writes). All four resources are declared with an explicit shared `name:` in
+every compose file that touches them, the same mechanism
+`honeynet`/`es-data`/`evebox-config` already use to stay shared between
+`honeypot-stack` and `honeypot-init`.
 
 The `home` job deploys this stack *after* `honeypot-stack`, not before like
 the standalone honeypots above -- Compose itself doesn't require the
@@ -180,9 +182,10 @@ alert/intelligence history in the old one is gone.
 
 Everything else that was still monolithic as of the earlier revision of
 this section (`dionaea`, `payload-dedupe`, `yara-scanner`, and the Tanner
-group) remains in `honeypot-stack` -- each is either the volume *owner*
-`dashboard` merely reads from, or part of a `depends_on` chain (Tanner) not
-yet worth splitting.
+group) has since split out too -- see the `honeypot-dionaea` and
+`honeypot-payload-analysis` section below; only the Tanner group remains in
+`honeypot-stack`, as part of its own internal `depends_on` chain not yet
+worth splitting.
 
 ### honeypot-utilities (#258)
 
@@ -200,6 +203,42 @@ report attacker IPs to AbuseIPDB.
 None of the three share a named volume or network with anything outside
 this stack, so -- like the standalone honeypots -- it deploys ahead of
 `honeypot-stack` with no ordering requirement.
+
+### honeypot-dionaea and honeypot-payload-analysis (#258)
+
+`docker-compose.dionaea.yml` (`dionaea` and `tftp-relay`) and
+`docker-compose.payload-analysis.yml` (`payload-dedupe` and `yara-scanner`)
+split into two separate Dockge stacks, per explicit instruction rather than
+bundled together the way `dashboard`+`services-adapter` were. `dionaea` and
+`tftp-relay` stay paired -- `tftp-relay` has `depends_on: dionaea` and
+actually forwards TFTP traffic to it over `dionaea_net`, the one exception
+#235 carved out of "one honeypot per network."
+
+The split resource is `dionaea-lib`: `dionaea` writes captured
+binaries/bistreams there, `payload-dedupe`/`yara-scanner` in the other
+stack only read. Explicit shared `name:` in both compose files, same
+mechanism as everywhere else in #258. `payload-dedupe`/`yara-scanner` also
+still touch `dashboard-state` and `yara-results` (shared with
+`docker-compose.dashboard.yml`, unchanged by this split) and cowrie's
+downloads directory (a host bind mount, unaffected by which Compose
+project owns the container that writes to it).
+
+`docker-compose.dionaea.yml` deploys in the same looped step as
+`honeypot-cowrie`/`multipot`/`http`/`dnp3` (`.github/workflows/deploy.yml`)
+-- like them, it has no ordering requirement, since `dionaea-lib` is a
+non-external shared-name volume Compose creates if absent.
+`docker-compose.payload-analysis.yml` gets its own step right after, purely
+for readability (the "reader" half following the "writer" half); no hard
+ordering requirement here either.
+
+`scripts/reset-logs.sh` treats `dionaea` as a `SPLIT_TARGETS` entry like
+the other split honeypots. `payload-dedupe`/`yara-scanner` don't get their
+own CLI target -- there wasn't one before this split either -- but the
+script still stops/starts them (now via a dedicated
+`payload_analysis_compose` helper pointed at their own stack directory)
+whenever `cowrie` is targeted, same reasoning as before the split: they
+hold reads/hardlinks into `cowrie/downloads` that would race a concurrent
+wipe of that directory.
 
 ## VPS deployment
 
