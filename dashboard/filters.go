@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -17,8 +19,13 @@ type filter struct {
 	fingerprint, provider, org, asn     string // exact enriched metadata
 	sig, q                              string // case-insensitive substring
 	typ                                 string // login | command | alert | download
-	since                               time.Time
-	sinceStr                            string
+	// includeIPs (?ips=, repeatable) narrows a broader match -- typically
+	// fingerprint -- down to specific source IPs (#278): unset means every
+	// IP is shown, same as today; set means only these IPs are, so one IP
+	// behind a fingerprint shared by many can be isolated from the rest.
+	includeIPs []string
+	since      time.Time
+	sinceStr   string
 }
 
 func parseFilter(r *http.Request) filter {
@@ -31,6 +38,14 @@ func parseFilter(r *http.Request) filter {
 		cat: v.Get("cat"), country: v.Get("country"), city: v.Get("city"), client: v.Get("client"),
 		fingerprint: v.Get("fingerprint"), provider: v.Get("provider"), org: v.Get("org"), asn: v.Get("asn"),
 		sig: v.Get("sig"), q: v.Get("q"), typ: v.Get("type"),
+	}
+	// A plain <input type="text" name="ips"> left empty still submits
+	// "ips=" alongside any checked checkboxes of the same name -- drop
+	// blanks rather than treating them as "match the empty IP".
+	for _, ip := range v["ips"] {
+		if ip = strings.TrimSpace(ip); ip != "" {
+			f.includeIPs = append(f.includeIPs, ip)
+		}
 	}
 	if d, err := time.ParseDuration(v.Get("since")); err == nil && d > 0 {
 		f.since = time.Now().Add(-d)
@@ -45,6 +60,9 @@ func containsFold(haystack, needle string) bool {
 
 func (f filter) match(e storedEvent) bool {
 	if f.ip != "" && e.SrcIP != f.ip {
+		return false
+	}
+	if len(f.includeIPs) > 0 && !slices.Contains(f.includeIPs, e.SrcIP) {
 		return false
 	}
 	if f.cidr != "" {
@@ -179,6 +197,11 @@ func (f filter) describe() []string {
 	add("signature", f.sig)
 	add("type", f.typ)
 	add("search", f.q)
+	if len(f.includeIPs) == 1 {
+		add("isolated to ip", f.includeIPs[0])
+	} else if len(f.includeIPs) > 1 {
+		out = append(out, fmt.Sprintf("isolated to %d IPs", len(f.includeIPs)))
+	}
 	if f.sinceStr != "" {
 		out = append(out, "last "+f.sinceStr)
 	}

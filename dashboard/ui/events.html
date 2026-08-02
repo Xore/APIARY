@@ -32,6 +32,21 @@
 <meta name="robots" content="noindex, nofollow">
 <title>xore//honeypot — {{if .Chain}}attack chain {{.IP}}{{else}}events{{end}}</title>
 {{template "style" .}}
+<style nonce="{{.Nonce}}">
+/* #278: check/uncheck-to-filter menu isolating specific IPs behind a shared
+   fingerprint. Reuses .hp-open-in's floating-panel shell (event row "Open
+   in…" menu, same file); these rules cover the form-specific parts only. */
+.hp-ip-filter-menu { min-width: 260px; }
+.hp-ip-filter-list { max-height: 260px; overflow-y: auto; margin-bottom: 8px; }
+.hp-ip-filter-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: var(--radius-control); font-size: 12.5px; }
+.hp-ip-filter-row:hover { background: var(--surface-2); }
+.hp-ip-filter-row input[type="checkbox"] { accent-color: var(--accent); flex: none; }
+.hp-ip-filter-ip { flex: 1; min-width: 0; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hp-ip-filter-count { flex: none; color: var(--text-muted); font-size: 11px; }
+.hp-ip-filter-add { width: 100%; background: var(--surface-0); border: 1px solid var(--border-subtle); border-radius: var(--radius-control); color: var(--text-primary); padding: 6px 10px; font-size: 12.5px; margin: 4px 0 8px; }
+.hp-ip-filter-add:focus { outline: none; border-color: var(--border-focus); }
+.hp-ip-filter-actions { display: flex; gap: 8px; padding: 0 4px; }
+</style>
 </head>
 <body>
 <div class="app-shell">
@@ -53,6 +68,25 @@
         <div class="filters" id="events-filters">
           {{range .Filters}}<span class="chip">{{.}}</span>{{end}}
           <span class="chip">{{.Total}} events</span>
+          {{if .FingerprintIPs}}
+          <details class="hp-open-in">
+            <summary title="Check or uncheck IPs to isolate one attacker among several sharing this fingerprint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg> Isolate IP&hellip;</summary>
+            <div class="hp-open-in-menu hp-ip-filter-menu">
+              <div class="hp-open-in-heading">IPs behind this fingerprint</div>
+              <form method="get" action="/events">
+                {{range .FingerprintIPsQuery}}<input type="hidden" name="{{.Key}}" value="{{.Value}}">{{end}}
+                <div class="hp-ip-filter-list">
+                  {{range .FingerprintIPs}}<label class="hp-ip-filter-row"><input type="checkbox" name="ips" value="{{.IP}}"{{if .Checked}} checked{{end}}><span class="hp-ip-filter-ip">{{.IP}}</span><span class="hp-ip-filter-count">{{.Count}}</span></label>{{end}}
+                </div>
+                <input type="text" name="ips" class="hp-ip-filter-add" placeholder="Add another IP&hellip;" autocomplete="off" spellcheck="false">
+                <div class="hp-ip-filter-actions">
+                  <button class="btn btn-sm btn-primary" type="submit">Apply</button>
+                  {{if .ResetIPsURL}}<a class="btn btn-sm btn-secondary" href="{{.ResetIPsURL}}">Reset</a>{{end}}
+                </div>
+              </form>
+            </div>
+          </details>
+          {{end}}
           <button class="chip" type="button" data-hp-export-url="{{.ExportURL}}" data-hp-export-count="{{.Total}}" data-hp-export-label="event">export CSV &darr;</button>
         </div>
 

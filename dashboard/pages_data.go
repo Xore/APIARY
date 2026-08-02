@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -81,6 +82,71 @@ type eventsPage struct {
 	Chain     bool // single-IP view rendered chronologically as an attack chain
 	IP        string
 	Events    []storedEvent
+	// FingerprintIPs (#278): the distinct source IPs behind the current
+	// fingerprint filter, pre-checked to match includeIPs -- lets the page
+	// offer a check/uncheck list to isolate one IP among many sharing the
+	// same fingerprint. Nil unless a fingerprint filter is active and more
+	// than one IP is behind it.
+	FingerprintIPs []correlatedIP
+	// FingerprintIPsQuery preserves every other active filter as hidden
+	// form fields so applying an IP selection doesn't drop them (a GET
+	// form submission replaces the whole query string with its own fields).
+	FingerprintIPsQuery []queryPair
+	// ResetIPsURL clears the includeIPs narrowing (back to every IP for
+	// the current fingerprint); empty when no narrowing is active.
+	ResetIPsURL string
+}
+
+// correlatedIP is one distinct source IP behind the current fingerprint (or,
+// in future, another correlating field) match (#278).
+type correlatedIP struct {
+	IP      string
+	Count   int
+	Checked bool
+}
+
+type queryPair struct{ Key, Value string }
+
+// fingerprintIPCorrelation returns the distinct source IPs behind the
+// current fingerprint filter, evaluated against every filter except
+// includeIPs itself -- so unchecking one IP doesn't also shrink the
+// checklist down to just the IPs that remain checked. Nil when there's no
+// fingerprint filter active, or only one IP is behind it (nothing to
+// isolate).
+func fingerprintIPCorrelation(events []storedEvent, f filter) []correlatedIP {
+	if f.fingerprint == "" {
+		return nil
+	}
+	base := f
+	base.includeIPs = nil
+	counts := map[string]int{}
+	var order []string
+	for _, e := range events {
+		if e.SrcIP == "" || !base.match(e) {
+			continue
+		}
+		if _, seen := counts[e.SrcIP]; !seen {
+			order = append(order, e.SrcIP)
+		}
+		counts[e.SrcIP]++
+	}
+	if len(order) < 2 {
+		return nil
+	}
+	sort.Slice(order, func(i, j int) bool {
+		if counts[order[i]] != counts[order[j]] {
+			return counts[order[i]] > counts[order[j]]
+		}
+		return order[i] < order[j]
+	})
+	checked := func(ip string) bool {
+		return len(f.includeIPs) == 0 || slices.Contains(f.includeIPs, ip)
+	}
+	out := make([]correlatedIP, 0, len(order))
+	for _, ip := range order {
+		out = append(out, correlatedIP{IP: ip, Count: counts[ip], Checked: checked(ip)})
+	}
+	return out
 }
 
 type attackerPage struct {
@@ -275,24 +341,49 @@ func (s *store) eventsData(r *http.Request) eventsPage {
 	if encoded := exportQuery.Encode(); encoded != "" {
 		exportURL += "?" + encoded
 	}
+	// #278: hidden fields for the check/uncheck IP form so applying a
+	// selection doesn't drop every other active filter -- a GET form
+	// submission replaces the whole query string with just its own fields.
+	ipsQuery := r.URL.Query()
+	ipsQuery.Del("ips")
+	ipsQuery.Del("page")
+	ipsQuery.Del("per_page")
+	var fingerprintIPsQuery []queryPair
+	for key, values := range ipsQuery {
+		for _, v := range values {
+			fingerprintIPsQuery = append(fingerprintIPsQuery, queryPair{Key: key, Value: v})
+		}
+	}
+	resetIPsURL := ""
+	if len(f.includeIPs) > 0 {
+		resetQuery := r.URL.Query()
+		resetQuery.Del("ips")
+		resetIPsURL = "/events"
+		if encoded := resetQuery.Encode(); encoded != "" {
+			resetIPsURL += "?" + encoded
+		}
+	}
 	return eventsPage{
-		Generated: time.Now(),
-		Filters:   f.describe(),
-		Total:     total,
-		Shown:     len(out),
-		Offset:    start,
-		From:      start + boolInt(total > 0),
-		To:        end,
-		Page:      page,
-		Pages:     pages,
-		PerPage:   perPage,
-		PrevURL:   prevURL,
-		NextURL:   nextURL,
-		RowsURL:   rowsURL,
-		ExportURL: exportURL,
-		Chain:     chain,
-		IP:        f.ip,
-		Events:    out,
+		Generated:           time.Now(),
+		Filters:             f.describe(),
+		Total:               total,
+		Shown:               len(out),
+		Offset:              start,
+		From:                start + boolInt(total > 0),
+		To:                  end,
+		Page:                page,
+		Pages:               pages,
+		PerPage:             perPage,
+		PrevURL:             prevURL,
+		NextURL:             nextURL,
+		RowsURL:             rowsURL,
+		ExportURL:           exportURL,
+		Chain:               chain,
+		IP:                  f.ip,
+		Events:              out,
+		FingerprintIPs:      fingerprintIPCorrelation(events, f),
+		FingerprintIPsQuery: fingerprintIPsQuery,
+		ResetIPsURL:         resetIPsURL,
 	}
 }
 
