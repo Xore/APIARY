@@ -65,9 +65,20 @@ from inside the guest.
 
 ## 3. Container isolation
 
-Two Docker networks in `docker-compose.yml`: `honeynet` (the stack) and
-`tanner_local` (SNARE/TANNER and its dependencies). Not four, and not the names
-the old §9.1 used.
+`docker-compose.yml` gives each honeypot its own single-member Docker network
+(`cowrie_net`, `dionaea_net`, `conpot_net`, `conpot_s7_1200_net`, and so on) —
+[#235](https://github.com/Xore/honeypot-stack/issues/235): the stack used to
+put every honeypot on one shared `honeynet` bridge with Docker's default
+inter-container communication, so a compromise of one honeypot had a direct
+network path to every other honeypot. None of them need it — each writes to
+a bind-mounted log file for Filebeat to tail, not to another honeypot or to
+Elasticsearch over the network. The one real exception is `tftp-relay`, which
+has `depends_on: dionaea` and actually forwards TFTP traffic to it, so those
+two share `dionaea_net` instead of each getting their own.
+
+`honeynet` is now the trusted analysis/management plane only: Elasticsearch,
+Kibana, Filebeat, the dashboard, EveBox, Arkime, and `log-maintenance`. SNARE/
+TANNER and its dependencies keep their own separate `tanner_local`, unchanged.
 
 - `tanner_docker` is `privileged: true`. This is deliberate and should stay:
   TANNER's Docker-backed emulators need a daemon, and the design gives them a
@@ -76,10 +87,12 @@ the old §9.1 used.
   says so; do not "simplify" it into a socket mount.
 - No other container is privileged, and no honeypot-facing container mounts
   `/var/run/docker.sock`.
-- `cap_drop: [ALL]` and `no-new-privileges` are on `cowrie`, `multipot`,
-  `http-honeypot`, `api-honeypot` and `yara-scanner` — **not** on `dionaea`,
-  `conpot`, `snare` or `tanner`. That gap is
-  [#89](https://github.com/Xore/honeypot-stack/issues/89).
+- `cap_drop: [ALL]` and `no-new-privileges` are on every honeypot now
+  (`cowrie`, `multipot`, `http-honeypot`, `api-honeypot`, `dionaea`, `conpot`
+  and its personas, `snare`, `tanner` and its dependencies, `yara-scanner`) —
+  [#89](https://github.com/Xore/honeypot-stack/issues/89) (SNARE/TANNER) and
+  the per-service measurement passes referenced next to `dionaea`'s and
+  `conpot`'s own `cap_add` lists closed the gap this section used to describe.
 - `NET_ADMIN`/`NET_RAW` exist only on the three sandbox sniffers in
   `docker-compose.sandbox.yml`, a separate file brought up around a single
   detonation that must never be merged into `docker-compose.yml`.
