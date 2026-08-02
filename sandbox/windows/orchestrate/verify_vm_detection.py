@@ -91,17 +91,25 @@ def winrm_run(ps_command: str, timeout: int = 300) -> dict:
         read_timeout_sec=30, operation_timeout_sec=20,
     )
     import concurrent.futures
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(session.run_ps, ps_command)
-        try:
-            result = future.result(timeout=timeout)
-        except concurrent.futures.TimeoutError:
-            raise TimeoutError(
-                f'WinRM command did not return within {timeout}s -- likely hung '
-                f'on the guest (e.g. waiting on stdin). The underlying thread is '
-                f'abandoned, not killed; the guest-side process may still be '
-                f'running and should be checked/killed separately.'
-            )
+    # Deliberately not `with ThreadPoolExecutor(...) as pool:` -- confirmed
+    # live: that form's __exit__ calls shutdown(wait=True), which blocks
+    # synchronously until the abandoned thread finishes before the
+    # TimeoutError below can even propagate, silently defeating the timeout
+    # exactly the way this function exists to prevent. No shutdown() call at
+    # all here is deliberate: the pool and its one thread are simply dropped
+    # on timeout, since there is no way to forcibly kill a thread blocked
+    # inside pywinrm's HTTP call anyway.
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = pool.submit(session.run_ps, ps_command)
+    try:
+        result = future.result(timeout=timeout)
+    except concurrent.futures.TimeoutError:
+        raise TimeoutError(
+            f'WinRM command did not return within {timeout}s -- likely hung '
+            f'on the guest (e.g. waiting on stdin). The underlying thread is '
+            f'abandoned, not killed; the guest-side process may still be '
+            f'running and should be checked/killed separately.'
+        )
     return {
         'stdout': result.std_out.decode('utf-8', errors='replace'),
         'stderr': result.std_err.decode('utf-8', errors='replace'),
@@ -118,14 +126,14 @@ def push_tool(local_path: Path, remote_name: str):
     log.info(f'Pushed {local_path} -> C:\\Samples\\{remote_name}')
 
 
-def run_tool(remote_name: str, log_name: str) -> dict:
+def run_tool(remote_name: str, log_name: str, args: str = '', timeout: int = 300) -> dict:
     """Run a tool on the guest and return its exit code plus captured output.
 
     Uses Start-Process -PassThru -Wait rather than plain redirection so a
-    hard failure (e.g. STATUS_DLL_NOT_FOUND, confirmed live for al-khaser --
-    this golden image has no Visual C++ Redistributable installed) is
-    reported as a real, non-zero/negative exit code instead of silently
-    looking identical to "ran fine and printed nothing."
+    hard failure (e.g. STATUS_DLL_NOT_FOUND, confirmed live for al-khaser
+    before #368's VC++ Redistributable fix) is reported as a real,
+    non-zero/negative exit code instead of silently looking identical to
+    "ran fine and printed nothing."
 
     pafish (confirmed live) also waits on a keypress after finishing its
     checks; WinRM gives a launched process no interactive stdin, so without
@@ -133,16 +141,31 @@ def run_tool(remote_name: str, log_name: str) -> dict:
     then hang forever at 0% CPU waiting for input that will never come.
     "echo." pipes a single blank line in via -RedirectStandardInput to
     satisfy that read and let the process actually exit.
+
+    al-khaser is NOT actually a hang case, even though it looks identical to
+    one from the outside (0% CPU, WinRM timeout) -- confirmed live via
+    Get-Process...Threads: WaitReason was ExecutionDelay, i.e. genuinely
+    inside a Sleep() call, not stuck. Its own source
+    (al-khaser/Al-khaser.cpp) explains why: the default `--sleep`/`--delay`
+    is 600 seconds, applied across 9 different timing-check mechanisms run
+    sequentially (NtDelayExecution, a sleep loop, SetTimer, timeSetEvent,
+    WaitForSingleObject, WaitForMultipleObjects, IcmpSendEcho,
+    CreateWaitableTimer, CreateTimerQueueTimer) -- up to 90 minutes for that
+    one check category alone, by design (it's testing whether a sandbox's
+    sleep-skipping actually accelerates every one of those APIs, not just
+    the obvious one). The tool's own --help gives the fix: pass a shorter
+    explicit `--sleep N`, matching its own documented example usage.
     """
-    log.info(f'Running C:\\Samples\\{remote_name} ...')
+    log.info(f'Running C:\\Samples\\{remote_name} {args} ...')
     stdin_path = f'C:\\Logs\\{log_name}.stdin'
     out = winrm_run(
         f'"`n" | Out-File -Encoding ascii -NoNewline {stdin_path}; '
-        f'$p = Start-Process -FilePath C:\\Samples\\{remote_name} -PassThru -Wait '
+        f'$p = Start-Process -FilePath C:\\Samples\\{remote_name} -ArgumentList "{args}" -PassThru -Wait '
         f'-WindowStyle Hidden -RedirectStandardInput {stdin_path} '
         f'-RedirectStandardOutput C:\\Logs\\{log_name} '
         f'-RedirectStandardError C:\\Logs\\{log_name}.stderr; '
-        f'$p.ExitCode'
+        f'$p.ExitCode',
+        timeout=timeout,
     )
     exit_code = out['stdout'].strip()
     body = winrm_run(
@@ -209,7 +232,11 @@ def main():
 
     if args.al_khaser:
         push_tool(args.al_khaser, 'al-khaser.exe')
-        out = run_tool('al-khaser.exe', 'al_khaser_out.txt')
+        # Default --sleep/--delay is 600s x 9 timing mechanisms (up to 90min) --
+        # see run_tool()'s docstring. 30s per mechanism (its own documented
+        # example) still exercises every timing-evasion check, just without
+        # the multi-hour wall-clock cost of the tool's own default.
+        out = run_tool('al-khaser.exe', 'al_khaser_out.txt', args='--sleep 30', timeout=600)
         sections.append(render_section('al-khaser', out))
 
     tells = check_residual_tells()
