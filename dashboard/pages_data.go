@@ -262,6 +262,7 @@ type ipsPage struct {
 	Total     int
 	Filters   []string
 	RowsURL   string
+	filterBar
 }
 
 const defaultEventRows = 25
@@ -410,8 +411,12 @@ func (s *store) ipsData(r *http.Request) ipsPage {
 	if encoded := rowsQuery.Encode(); encoded != "" {
 		rowsURL += "?" + encoded
 	}
+	bar := buildFilterBar(r, "/ips",
+		[2]string{"ip", "IP"}, [2]string{"cidr", "CIDR"}, [2]string{"sensor", "Sensor"},
+		[2]string{"country", "Country"}, [2]string{"since", "Since (e.g. 24h)"})
 	finish := func(page ipsPage) ipsPage {
 		page.Filters, page.RowsURL = filters, rowsURL
+		page.filterBar = bar
 		return page
 	}
 	if len(filters) == 0 {

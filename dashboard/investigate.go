@@ -25,6 +25,7 @@ type commandsPage struct {
 	Generated time.Time
 	Rows      []commandRow
 	Filters   []string
+	filterBar
 }
 
 func (s *store) commandsData(r *http.Request) commandsPage {
@@ -70,7 +71,9 @@ func (s *store) commandsData(r *http.Request) commandsPage {
 		}
 		return rows[i].Last > rows[j].Last
 	})
-	return commandsPage{Generated: time.Now(), Rows: rows, Filters: f.describe()}
+	bar := buildFilterBar(r, "/commands",
+		[2]string{"sensor", "Sensor"}, [2]string{"q", "Command contains"}, [2]string{"since", "Since (e.g. 24h)"})
+	return commandsPage{Generated: time.Now(), Rows: rows, Filters: f.describe(), filterBar: bar}
 }
 
 func (s *store) exportEventsCSV(w http.ResponseWriter, r *http.Request) {

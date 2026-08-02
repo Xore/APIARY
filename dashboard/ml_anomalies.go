@@ -316,6 +316,7 @@ type mlAnomaliesPage struct {
 	Anomalies []mlAnomaly
 	Stats     mlAnomalyStats
 	Filters   []string
+	filterBar
 }
 
 // mlAnomaliesData applies the same mlAnomalyFilter serveMLAnomaliesAPI uses
@@ -324,7 +325,10 @@ type mlAnomaliesPage struct {
 // the table underneath it.
 func (s *store) mlAnomaliesData(r *http.Request) mlAnomaliesPage {
 	f := parseMLAnomalyFilter(r)
-	page := mlAnomaliesPage{Generated: time.Now(), Enabled: s.es != nil, Filters: f.describe()}
+	bar := buildFilterBar(r, "/ml-anomalies",
+		[2]string{"severity", "Severity"}, [2]string{"min_score", "Minimum score"},
+		[2]string{"country", "Country"}, [2]string{"event_type", "Event type"})
+	page := mlAnomaliesPage{Generated: time.Now(), Enabled: s.es != nil, Filters: f.describe(), filterBar: bar}
 	if s.mlAnomalies == nil {
 		return page
 	}

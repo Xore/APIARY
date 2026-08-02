@@ -151,6 +151,9 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 		{"payloads", payloadsPage{Generated: now}},
 		{"source-health", snapshot{}},
 		{"commands", commandsPage{Generated: now}},
+		{"clusters", clustersPage{Generated: now}},
+		{"campaigns", campaignsPage{Generated: now}},
+		{"ml-anomalies", mlAnomaliesPage{Generated: now, Enabled: true}},
 		{"alerts", snapshot{}},
 	}
 	for _, page := range pages {

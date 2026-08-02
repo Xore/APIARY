@@ -44,6 +44,7 @@ type searchPage struct {
 	Groups    []searchGroup
 	Total     int
 	Filters   []string
+	filterBar
 }
 
 // searchRedirect resolves a query that unambiguously names one entity. The
@@ -330,5 +331,7 @@ func (s *store) serveSearch(w http.ResponseWriter, r *http.Request, tmpl *templa
 		return
 	}
 	data := s.searchData(query, parseFilter(r))
+	data.filterBar = buildFilterBar(r, "/search",
+		[2]string{"sensor", "Sensor"}, [2]string{"country", "Country"}, [2]string{"since", "Since (e.g. 24h)"})
 	renderPage(w, tmpl, "search", &data)
 }

@@ -39,6 +39,7 @@
         <div class="filters">
           <a class="chip" href="/">&larr; dashboard</a>
           <span class="chip">{{.Total}} unique IPs</span>
+          {{template "filterbar" .}}
         </div>
 
         <div class="card wide" id="ips-table">

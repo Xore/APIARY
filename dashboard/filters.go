@@ -217,3 +217,67 @@ func (f filter) filtered(evs []storedEvent) []storedEvent {
 	}
 	return out
 }
+
+// filterField is one text-input control for the shared filter-bar template
+// partial (#280 Phase 4): a query-param name, a human label, and the
+// current value from the request, so the form round-trips pre-filled.
+type filterField struct {
+	Name  string
+	Label string
+	Value string
+}
+
+// filterBar is embedded by every page that gets the shared filter-bar UI:
+// the visible fields, hidden fields preserving every other currently active
+// query parameter (a GET form submission replaces the whole query string
+// with just its own fields, same reasoning as #278's includeIPs form), the
+// form's action URL, and a reset link populated only when at least one
+// field is currently set.
+type filterBar struct {
+	FilterFields   []filterField
+	FilterHidden   []queryPair
+	FilterAction   string
+	FilterResetURL string
+}
+
+// buildFilterBar constructs a filterBar for a request, given the page's own
+// path and an ordered list of {query param, label} pairs.
+func buildFilterBar(r *http.Request, action string, specs ...[2]string) filterBar {
+	v := r.URL.Query()
+	fields := make([]filterField, 0, len(specs))
+	names := make([]string, 0, len(specs))
+	active := false
+	for _, s := range specs {
+		val := v.Get(s[0])
+		if val != "" {
+			active = true
+		}
+		fields = append(fields, filterField{Name: s[0], Label: s[1], Value: val})
+		names = append(names, s[0])
+	}
+
+	hiddenQuery := r.URL.Query()
+	for _, n := range names {
+		hiddenQuery.Del(n)
+	}
+	var hidden []queryPair
+	for key, values := range hiddenQuery {
+		for _, val := range values {
+			hidden = append(hidden, queryPair{Key: key, Value: val})
+		}
+	}
+
+	resetURL := ""
+	if active {
+		resetQuery := r.URL.Query()
+		for _, n := range names {
+			resetQuery.Del(n)
+		}
+		resetURL = action
+		if encoded := resetQuery.Encode(); encoded != "" {
+			resetURL += "?" + encoded
+		}
+	}
+
+	return filterBar{FilterFields: fields, FilterHidden: hidden, FilterAction: action, FilterResetURL: resetURL}
+}

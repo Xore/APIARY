@@ -147,6 +147,32 @@
 </div>
 {{end}}
 
+{{/* #280 Phase 4: shared multi-attribute filter bar. A page includes it
+     with {{template "filterbar" .}} after embedding filterBar (filters.go)
+     into its own page struct and populating it via buildFilterBar(r, ...)
+     in its route handler / data function. Reuses the "Open in..." disclosure
+     shell (.hp-open-in, hp-dashboard.css) events.html already established --
+     same trigger/panel shape, form contents instead of a link list. No
+     JavaScript: a GET form whose hidden fields carry every other active
+     query parameter forward, matching #278's includeIPs form. */}}
+{{define "filterbar"}}
+{{if .FilterFields}}
+<details class="hp-open-in">
+  <summary title="Filter by one or more attributes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg> Filter&hellip;</summary>
+  <div class="hp-open-in-menu hp-filterbar-menu">
+    <form method="get" action="{{.FilterAction}}">
+      {{range .FilterHidden}}<input type="hidden" name="{{.Key}}" value="{{.Value}}">{{end}}
+      {{range .FilterFields}}<label class="hp-filterbar-field"><span>{{.Label}}</span><input type="text" name="{{.Name}}" value="{{.Value}}" autocomplete="off" spellcheck="false"></label>{{end}}
+      <div class="hp-filterbar-actions">
+        <button class="btn btn-sm btn-primary" type="submit">Apply</button>
+        {{if .FilterResetURL}}<a class="btn btn-sm btn-secondary" href="{{.FilterResetURL}}">Reset</a>{{end}}
+      </div>
+    </form>
+  </div>
+</details>
+{{end}}
+{{end}}
+
 {{define "tbl"}}
 <div class="card {{.class}}">
   <h2>{{.t}}</h2>
