@@ -28,7 +28,10 @@ Env vars:
   VM_DOMAIN          libvirt domain name (default: win11-sandbox)
   VIRSH_PATH         Path to the virsh binary (default: /usr/bin/virsh)
   GOLDEN_SNAPSHOT    Snapshot name (default: GOLDEN_READY)
-  OBSERVATION_SECS   Seconds to observe (default: 300)
+  OBSERVATION_SECS   Seconds to observe (default: 1800 -- #297, 15-60min
+                     recommended per RESEARCH.md; a short window is
+                     defeated by a sample doing nothing more than a long
+                     sleep before its real payload)
 """
 
 import os
@@ -57,7 +60,7 @@ VIRSH_PATH      = os.environ.get('VIRSH_PATH',       '/usr/bin/virsh')
 LIBVIRT_URI     = os.environ.get('LIBVIRT_URI',      'qemu:///system')
 VM_DOMAIN       = os.environ.get('VM_DOMAIN',        'win11-sandbox')
 GOLDEN_SNAP     = os.environ.get('GOLDEN_SNAPSHOT',  'GOLDEN_READY')
-OBS_SECS        = int(os.environ.get('OBSERVATION_SECS', '300'))
+OBS_SECS        = int(os.environ.get('OBSERVATION_SECS', '1800'))  # #297
 ARTIFACT_DIR    = Path(os.environ.get('WINDOWS_SANDBOX_RESULTS_DIR', 'reports/windows-sandbox'))
 SAMPLE_SHARE    = f'\\\\{VM_HOST}\\Samples'
 LOGS_SHARE      = f'\\\\{VM_HOST}\\Logs'
@@ -174,6 +177,47 @@ def regshot_before():
     log.info('Regshot: first snapshot taken')
 
 
+# #295: Regshot's registry diff shows keys/values that changed, but doesn't
+# specifically enumerate what got registered to run at startup/logon (Run
+# keys, scheduled tasks, services, WMI subscriptions, Winlogon helper DLLs
+# — all in Autoruns' scope). Sysinternals Suite (04-tools.ps1) already
+# installs autorunsc.exe for Sysmon/Procmon; this is the first thing that
+# actually invokes it.
+_AUTORUNSC_RESOLVE = (
+    "$autorunsc = @('C:\\Tools\\SysinternalsSuite\\autorunsc64.exe', "
+    "'C:\\Tools\\SysinternalsSuite\\autorunsc.exe') "
+    "| Where-Object { Test-Path $_ } | Select-Object -First 1; "
+)
+
+
+def autoruns_before():
+    winrm_run(
+        _AUTORUNSC_RESOLVE +
+        '& $autorunsc -a * -c -accepteula > C:\\Logs\\autoruns_before.csv; '
+        "Get-Service | ConvertTo-Csv -NoTypeInformation "
+        "| Out-File C:\\Logs\\services_before.csv",
+        timeout=120,
+    )
+    log.info('Autoruns + service list: first snapshot taken')
+
+
+def autoruns_after():
+    winrm_run(
+        _AUTORUNSC_RESOLVE +
+        '& $autorunsc -a * -c -accepteula > C:\\Logs\\autoruns_after.csv; '
+        "Get-Service | ConvertTo-Csv -NoTypeInformation "
+        "| Out-File C:\\Logs\\services_after.csv; "
+        "Compare-Object -ReferenceObject (Get-Content C:\\Logs\\autoruns_before.csv) "
+        "-DifferenceObject (Get-Content C:\\Logs\\autoruns_after.csv) "
+        "| Out-File C:\\Logs\\autoruns_diff.txt; "
+        "Compare-Object -ReferenceObject (Get-Content C:\\Logs\\services_before.csv) "
+        "-DifferenceObject (Get-Content C:\\Logs\\services_after.csv) "
+        "| Out-File C:\\Logs\\services_diff.txt",
+        timeout=120,
+    )
+    log.info('Autoruns + service list: second snapshot + diff saved')
+
+
 def execute_sample(vm_path: str):
     """Execute the sample on the Windows VM."""
     log.info(f'Executing sample: {vm_path}')
@@ -225,6 +269,15 @@ def collect_artifacts(sha: str, out_dir: Path):
         'powershell_scriptblock.evtx',
         'regshot_diff.txt',
         'fakenet_log.txt',
+        # #295: persistence diff -- what the sample registered to run at
+        # startup/logon, not just what Regshot's registry diff happened to
+        # show.
+        'autoruns_before.csv',
+        'autoruns_after.csv',
+        'autoruns_diff.txt',
+        'services_before.csv',
+        'services_after.csv',
+        'services_diff.txt',
     ]
     for fname in files_to_get:
         subprocess.run(
@@ -248,6 +301,29 @@ def collect_artifacts(sha: str, out_dir: Path):
     )
 
     log.info(f'Artifacts collected to {out_dir}')
+
+
+def capture_memory_dump(out_dir: Path):
+    """#296: a mid-run `virsh dump --memory-only`, taken from the host while
+    the guest is running -- analyzed afterward with Volatility 3
+    (windows.pslist, malfind, netscan). Unlike every other artifact this
+    orchestrator collects (Sysmon EVTX, Procmon CSV, Regshot/Autoruns
+    diffs), all written to disk inside a guest the sample has full control
+    of, this crosses the same trust boundary the snapshot-revert already
+    uses: virsh on the host, never anything the guest itself controls. It
+    survives a sample that detects the sandbox and self-terminates cleanly
+    before writing any of the guest-side artifacts.
+
+    Best-effort: a dump failure (e.g. libvirt built without live-dump
+    support) must not fail the whole detonation over one optional artifact.
+    """
+    mem_path = out_dir / 'memory.dmp'
+    log.info('Capturing guest memory (virsh dump --memory-only)...')
+    try:
+        virsh(['dump', VM_DOMAIN, str(mem_path), '--memory-only'], timeout=600)
+        log.info(f'Memory dump written: {mem_path}')
+    except Exception:
+        log.error('Memory dump failed; continuing without it', exc_info=True)
 
 
 def post_process(out_dir: Path):
@@ -297,12 +373,15 @@ def detonate(sample_path: Path, results_dir: Path = None):
         start_fakenet()
         start_procmon()
         regshot_before()
+        autoruns_before()
 
         execute_sample(vm_path)
         log.info(f'Observing for {OBS_SECS} seconds...')
         time.sleep(OBS_SECS)
 
+        capture_memory_dump(out)
         regshot_after()
+        autoruns_after()
         stop_procmon()
         collect_artifacts(sha, out)
         post_process(out)

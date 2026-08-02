@@ -23,6 +23,34 @@ Write-Host '================================================================'
 Write-Host ' Honeypot-Stack: Windows 11 Analysis VM - decoy content'
 Write-Host '================================================================'
 
+# #293: one persona threaded through every layer that can carry an
+# identity -- must agree with autounattend.xml's RegisteredOwner/
+# RegisteredOrganization and config/fakenet.ini's intranet page. A sample
+# that reads RegisteredOwner and then greps Recent Files/Outlook for the
+# same name should find it.
+$PersonaName    = 'Robert Tanaka'
+$PersonaInits   = 'RT'
+$PersonaCompany = 'Ashford Capital Partners'
+$PersonaEmail   = 'rtanaka@ashfordcapital.example'
+$PersonaShare   = '\\ACPNET-FS01\Finance'
+
+# Every file/folder this script creates gets a staggered, internally
+# ordered timestamp instead of sharing one build-time instant -- "files on
+# Desktop/Documents ... all created within seconds of each other" is
+# itself a cheap, documented sandbox tell (RESEARCH.md #1.1 from the
+# windows_kimi prototype, ported here as #293).
+function Set-AgedTimestamp([string]$Path, [int]$MinDays = 3, [int]$MaxDays = 380) {
+    $created = (Get-Date).AddDays(-(Get-Random -Minimum $MinDays -Maximum $MaxDays))
+    $written = $created.AddDays((Get-Random -Minimum 0 -Maximum 25)).AddHours((Get-Random -Minimum 0 -Maximum 8))
+    if ($written -gt (Get-Date)) { $written = (Get-Date).AddHours(-1) }
+    $accessed = $written.AddDays((Get-Random -Minimum 0 -Maximum 5))
+    if ($accessed -gt (Get-Date)) { $accessed = (Get-Date) }
+    $i = Get-Item $Path
+    $i.CreationTime   = $created
+    $i.LastWriteTime  = $written
+    $i.LastAccessTime = $accessed
+}
+
 # ── A genuinely valid minimal PDF ─────────────────────────────────────────
 # Hand-built rather than shelled out to a converter -- nothing in this
 # image can render one (no Office, no browser PDF export worth trusting),
@@ -134,6 +162,12 @@ M. Okafor,Aurelia Consulting,m.okafor@aurelia.example,+1-555-0198
 T. Lindqvist,Vantage Partners,t.lindqvist@vantage.example,+1-555-0117
 '@ | Set-Content "$docs\Client_Contacts.csv"
 
+# Age every decoy document individually instead of leaving them all at the
+# one instant Packer's file upload / Set-Content gave them (#293).
+@("$docs\HR_Policy_2026.pdf", "$docs\Vendor_Onboarding_Checklist.pdf",
+  "$docs\Project_Proposal.rtf", "$docs\Meeting_Notes_July.rtf",
+  "$docs\Client_Contacts.csv") | ForEach-Object { Set-AgedTimestamp -Path $_ }
+
 Write-Host '[+] Decoy documents created'
 
 # ── Recent-files: real shortcuts via WScript.Shell, not empty placeholder
@@ -148,9 +182,52 @@ $shell = New-Object -ComObject WScript.Shell
     $lnk = $shell.CreateShortcut("$recent\$name.lnk")
     $lnk.TargetPath = $target
     $lnk.Save()
+    Set-AgedTimestamp -Path "$recent\$name.lnk" -MinDays 1 -MaxDays 60
 }
 [System.Runtime.Interopservices.Marshal]::ReleaseComObject($shell) | Out-Null
 Write-Host '[+] Recent-files shortcuts created'
+
+# ── Persona identity: Office/Outlook, RunMRU, TypedPaths, OEMInformation ──
+# (#293) -- makes the RegisteredOwner in autounattend.xml agree with what a
+# sample finds if it reads Office's own UserInfo key, the Outlook profile,
+# Explorer's Run-dialog/address-bar MRU lists, or the OEM strings SMBIOS
+# already carries at the QEMU/libvirt level. A persona spread across
+# disconnected placeholders is itself a checkable inconsistency.
+Write-Host '[+] Writing persona registry identity'
+
+New-Item -Path 'HKCU:\Software\Microsoft\Office\16.0\Common\UserInfo' -Force | Out-Null
+Set-ItemProperty 'HKCU:\Software\Microsoft\Office\16.0\Common\UserInfo' -Name 'UserName' -Value $PersonaName
+Set-ItemProperty 'HKCU:\Software\Microsoft\Office\16.0\Common\UserInfo' -Name 'UserInitials' -Value $PersonaInits
+Set-ItemProperty 'HKCU:\Software\Microsoft\Office\16.0\Common\UserInfo' -Name 'Company' -Value $PersonaCompany
+
+New-Item -Path 'HKCU:\Software\Microsoft\Office\16.0\Outlook\Profiles\Outlook' -Force | Out-Null
+Set-ItemProperty 'HKCU:\Software\Microsoft\Office\16.0\Outlook\Profiles\Outlook' -Name 'DefaultProfile' -Value $PersonaEmail -ErrorAction SilentlyContinue
+New-Item -Path 'HKCU:\Software\Microsoft\Office\16.0\Outlook\Profiles\Outlook\9375CFF0413111d3B88A00104B2A6676' -Force | Out-Null
+Set-ItemProperty 'HKCU:\Software\Microsoft\Office\16.0\Outlook' -Name 'DefaultProfile' -Value 'Outlook' -ErrorAction SilentlyContinue
+
+$ru = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\RunMRU'
+New-Item -Path $ru -Force | Out-Null
+Set-ItemProperty $ru -Name a -Value "excel.exe`1"
+Set-ItemProperty $ru -Name b -Value "$PersonaShare`1"
+Set-ItemProperty $ru -Name c -Value "winword.exe`1"
+Set-ItemProperty $ru -Name d -Value "outlook.exe`1"
+Set-ItemProperty $ru -Name MRUList -Value 'abcd'
+
+$tp = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\TypedPaths'
+New-Item -Path $tp -Force | Out-Null
+Set-ItemProperty $tp -Name url1 -Value $PersonaShare
+Set-ItemProperty $tp -Name url2 -Value "$PersonaShare\Reports"
+Set-ItemProperty $tp -Name url3 -Value $docs
+
+# Matches the SMBIOS Dell OptiPlex identity already set at the QEMU/libvirt
+# level (win11-kvm.xml) -- OEMInformation is the OS-side half of the same
+# fake hardware identity.
+Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\OEMInformation' -Name Manufacturer -Value 'Dell Inc.' -Force
+Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\OEMInformation' -Name Model -Value 'OptiPlex 7010' -Force
+Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\OEMInformation' -Name SupportPhone -Value '+1 (212) 555-0119' -Force
+Set-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\OEMInformation' -Name SupportURL -Value "https://it.ashfordcapital.example" -Force
+
+Write-Host '[+] Persona registry identity written'
 
 # ── Decoy SMB share ────────────────────────────────────────────────────────
 # Read-only for the analyst account only, same posture #91 already fixed

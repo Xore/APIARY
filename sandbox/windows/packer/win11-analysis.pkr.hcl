@@ -212,6 +212,14 @@ build {
     destination = "C:/Windows/Temp/honeypot_fakenet.ini"
   }
 
+  # #294: the fake-intranet landing page FakeNet's HTTP/HTTPS listeners
+  # serve as their DefaultFiles -- staged the same way as the ini itself,
+  # moved into place by 04-tools.ps1 alongside it.
+  provisioner "file" {
+    source      = "../config/defaultFiles"
+    destination = "C:/Windows/Temp/honeypot_fakenet_defaultFiles"
+  }
+
   # FLARE-VM (Mandiant's 100+ tool RE distribution) was here through
   # 2026-08-02 and is deliberately gone now: run_sample.py's automated
   # detonation pipeline never called any tool FLARE-VM uniquely provided --
@@ -261,7 +269,39 @@ build {
     timeout           = "15m"
   }
 
-  # Step 5: final cleanup + sysprep-lite (do NOT full sysprep — breaks some tools)
+  # Step 5: Chrome browsing history seeding (#292). Installs Chrome/Python if
+  # needed, then seeds aged history rows straight into the SQLite DB so the
+  # profile isn't empty/default -- a T1497.002 check. Independent of
+  # 05-decoy-content.ps1's filesystem artifacts; only shares the persona
+  # identity #293 settled on.
+  provisioner "powershell" {
+    script            = "scripts/06-chrome-history.ps1"
+    elevated_user     = var.winrm_user
+    elevated_password = var.winrm_pass
+    timeout           = "20m"
+  }
+
+  # Step 6: living-persona daemon + background traffic noise (#290, #291).
+  # Registers two hidden AtLogOn scheduled tasks: one simulates human
+  # mouse/keyboard/scroll activity, the other issues background DNS/HTTP(S)
+  # noise tagged for later pcap filtering. Both need an interactive desktop
+  # session to actually do anything -- they only *register* here, run_sample.py's
+  # virsh boot + autologon flow is what gives them one.
+  provisioner "powershell" {
+    script            = "scripts/07-living-persona.ps1"
+    elevated_user     = var.winrm_user
+    elevated_password = var.winrm_pass
+    timeout           = "10m"
+  }
+
+  provisioner "powershell" {
+    script            = "scripts/08-traffic-noise.ps1"
+    elevated_user     = var.winrm_user
+    elevated_password = var.winrm_pass
+    timeout           = "10m"
+  }
+
+  # Step 7: final cleanup + sysprep-lite (do NOT full sysprep — breaks some tools)
   #
   # This step is best-effort housekeeping only -- nothing here should ever be
   # able to fail a build that has already done real work. Confirmed live (in

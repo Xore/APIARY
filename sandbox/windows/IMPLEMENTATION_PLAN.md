@@ -383,6 +383,13 @@ virsh snapshot-revert win11-sandbox GOLDEN_READY --running
 # Takes ~5-10 seconds
 ```
 
+Before trusting `GOLDEN_READY` as an acceptance point, run the pafish/
+al-khaser verification pass (#298) against the freshly-booted guest — see
+[`docs/vm-detection-verification.md`](docs/vm-detection-verification.md).
+Everything upstream of this (SMBIOS/CPUID spoofing, Defender/telemetry
+disables) is reasoned-through hardening against *known* checks; this is the
+only step that empirically confirms it holds up in a real booted guest.
+
 ---
 
 ## Phase 3 — Windows 11 Hardening for Malware Analysis
@@ -681,7 +688,7 @@ Environment=VM_DOMAIN=win11-sandbox
 Environment=GOLDEN_SNAPSHOT=GOLDEN_READY
 Environment=VM_HOST=10.10.10.2
 Environment=VM_USER=analyst
-Environment=OBSERVATION_SECS=300
+Environment=OBSERVATION_SECS=1800  # #297: 30min default, 15-60min recommended
 ```
 
 ### 7.3 Docker Compose wiring
@@ -727,7 +734,7 @@ VM_DOMAIN=win11-sandbox
 GOLDEN_SNAPSHOT=GOLDEN_READY
 VM_HOST=10.10.10.2
 VM_USER=analyst
-OBSERVATION_SECS=300
+OBSERVATION_SECS=1800
 ```
 
 ### 7.5 Queue health + alerting

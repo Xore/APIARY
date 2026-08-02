@@ -155,6 +155,16 @@ if (Test-Path $staged) {
 } else {
     Write-Warning '[!] honeypot_fakenet.ini was not staged - FakeNet will use defaults'
 }
+
+# #294: fake-intranet landing page the HTTP/HTTPS listeners' Webroot points
+# at (relative to $fnConfigDir, per honeypot_fakenet.ini's DefaultFiles).
+$stagedWebroot = 'C:\Windows\Temp\honeypot_fakenet_defaultFiles'
+if (Test-Path $stagedWebroot) {
+    Move-Item $stagedWebroot "$fnConfigDir\defaultFiles" -Force
+    Write-Host '[+] FakeNet intranet webroot installed'
+} else {
+    Write-Warning '[!] FakeNet defaultFiles were not staged - HTTP/HTTPS will use the stock 200 OK'
+}
 Write-Host '[+] FakeNet-NG installed'
 
 # ── Install Regshot ───────────────────────────────────────────────────────

@@ -108,8 +108,17 @@
           <WillShowUI>Never</WillShowUI>
         </ProductKey>
         <AcceptEula>true</AcceptEula>
-        <FullName>John Doe</FullName>
-        <Organization>Acme Corp</Organization>
+        <!-- #293: was John Doe / Acme Corp — generic and, worse,
+             disconnected from every other layer of the image (decoy
+             documents named unrelated people, no Office/Outlook identity,
+             no OEMInformation tie-in). One persona now threads through
+             this file, 05-decoy-content.ps1, and config/fakenet.ini's
+             intranet page: Robert Tanaka, Senior Financial Analyst at
+             Ashford Capital Partners. Change the name/company/domain
+             suffix together if this is ever re-themed — they are meant
+             to agree everywhere a sample can read them from. -->
+        <FullName>Robert Tanaka</FullName>
+        <Organization>Ashford Capital Partners</Organization>
       </UserData>
 
     </component>
@@ -122,16 +131,30 @@
                publicKeyToken="31bf3856ad364e35"
                language="neutral" versionScope="nonSxS">
       <!-- #91: was DESKTOP-AN4LY5T. scripts/05-decoy-content.ps1 goes to
-           real trouble building a decoy user environment -- decoy
-           documents, fake recent-file shortcuts -- and then named the
+           real trouble building a decoy user environment — decoy
+           documents, fake recent-file shortcuts — and then named the
            machine after the thing it's hiding. A substring check for
            ANALY/SANDBOX/MALWARE in the hostname is among the cheapest
            evasion checks a sample can run. Unremarkable and fixed, since
-           it's baked into the image. -->
-      <ComputerName>DESKTOP-JK3PLQ2</ComputerName>
-      <TimeZone>UTC</TimeZone>
-      <RegisteredOwner>John Doe</RegisteredOwner>
-      <RegisteredOrganization>Acme Corp</RegisteredOrganization>
+           it's baked into the image.
+           #293: renamed again from the still-generic DESKTOP-JK3PLQ2 to a
+           name that reads as this persona's real corporate asset tag. -->
+      <ComputerName>ACP-FIN0142</ComputerName>
+      <TimeZone>Eastern Standard Time</TimeZone>
+      <RegisteredOwner>Robert Tanaka</RegisteredOwner>
+      <RegisteredOrganization>Ashford Capital Partners</RegisteredOrganization>
+    </component>
+
+    <!-- Workgroup named like a corporate domain, matching the persona —
+         a bare WORKGROUP default is itself a tell next to everything else
+         built to look like a real finance-department workstation. -->
+    <component name="Microsoft-Windows-UnattendedJoin"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral" versionScope="nonSxS">
+      <Identification>
+        <JoinWorkgroup>ACPNET</JoinWorkgroup>
+      </Identification>
     </component>
 
     <component name="Microsoft-Windows-Security-SPP-UX"
