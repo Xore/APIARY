@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"path/filepath"
@@ -54,6 +53,13 @@ func (s *store) rebuild() {
 	// by joining on the tunnel ephemeral port recorded in the portbridge log.
 	viaMap, p0fOS := s.buildViaMap()
 
+	// #353: nextCache replaces s.logCache wholesale at the end of this
+	// function rather than being mutated in place -- a file that rotated
+	// out of logFiles()'s result this cycle (deleted, or renamed past
+	// classify's own rotation-suffix matching) simply has no entry copied
+	// forward, which is the prune: no separate sweep needed.
+	nextCache := make(map[string]*logFileState, len(s.logCache))
+
 	for _, fn := range logFiles(s.dir) {
 		rel, _ := filepath.Rel(s.dir, fn)
 		parts := strings.Split(filepath.ToSlash(rel), "/")
@@ -61,23 +67,12 @@ func (s *store) rebuild() {
 		if len(parts) > 1 {
 			dirSensor = parts[0]
 		}
-		for _, line := range strings.Split(string(readTail(fn)), "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			var e map[string]any
-			if json.Unmarshal([]byte(line), &e) != nil {
-				continue
-			}
-			ev := classify(e, dirSensor)
-			if ev.skip {
-				continue
-			}
-			ev.proto = normalizeProtocol(ev.proto)
-			// Commands containing inline shell/PowerShell/VBS/etc. programs are
-			// retained as inert, hash-addressed artifacts. They are never run.
-			s.captureScriptPayload(&ev)
+		cached, state := s.classifiedEventsFor(fn, dirSensor, s.logCache[fn], tailCap)
+		if state != nil {
+			nextCache[fn] = state
+		}
+		for _, entry := range cached {
+			ev := entry.ev
 			// cowrie / dionaea / conpot only see the tunnel peer (10.8.0.1)
 			// because their ports aren't PROXY-wrapped. Recover the real attacker
 			// IP by matching the connection's src_port to the via_port portbridge
@@ -99,9 +94,15 @@ func (s *store) rebuild() {
 			// spans one log rotation. A miss means the connection that produced
 			// this event has aged out of the portbridge log the dashboard can
 			// still see. See issue #54 for why the peer is never substituted.
+			//
+			// #353: this join runs fresh every cycle even for an event whose
+			// classification came from the cache -- see log_cache.go's own
+			// header comment for why that matters (a line read before its
+			// matching portbridge record landed must still get a chance to
+			// join once that record shows up on a later cycle).
 			lostSource := false
 			if ev.ip == tunnelPeerIP {
-				if real := viaLookup(viaMap, eventSrcPort(e), ev.port); real != "" {
+				if real := viaLookup(viaMap, entry.srcPort, ev.port); real != "" {
 					ev.ip = real
 				} else {
 					ev.ip = ""
@@ -396,6 +397,7 @@ func (s *store) rebuild() {
 	if s.es != nil {
 		snap.ES = s.es.get()
 	}
+	s.logCache = nextCache
 	s.mu.Lock()
 	s.snap = snap
 	s.events = evs
