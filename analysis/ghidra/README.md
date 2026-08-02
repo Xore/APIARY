@@ -8,32 +8,61 @@ Design and phase history live in
 [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) (the Ghidra pipeline) and
 [`DASHBOARD_INTEGRATION_PLAN.md`](DASHBOARD_INTEGRATION_PLAN.md) (how it reaches
 the dashboard). This file is the operator's copy: how to install it, how to
-configure it, and how to read what it produces.
+configure it, and how to read what it produces. The AI-triage workflow itself
+— local-only enforcement, the context-window pitfall, prompt injection — is
+split out into [`AI_TRIAGE.md`](AI_TRIAGE.md) (#142).
+
+## Contents
+
+- [What runs where](#what-runs-where)
+- [The statictools sidecar contract](#the-statictools-sidecar-contract)
+- [Install](#install)
+- [Configuration](#configuration)
+- [AI triage](#ai-triage) (moved to [`AI_TRIAGE.md`](AI_TRIAGE.md))
+- [Reading the result](#reading-the-result)
+- [Operations](#operations)
+- [Tests](#tests)
 
 ---
 
 ## What runs where
 
-```
-dashboard container                host (root)                containers (loopback)
+```mermaid
+flowchart LR
+  subgraph dashboardBox["dashboard container"]
+    direction TB
+    submit["POST /ghidra/submit"]
+    poll["GET /ghidra/{sha256}"]
+  end
 
-┌──────────────────┐    .request    ┌───────────────────┐
-│ POST /ghidra/     │ ─────────────► │ honeypot-ghidra-   │
-│   submit          │                │ worker.path/.svc   │
-│                    │                │                    │
-│ GET /ghidra/{sha}  │ ◄───────────── │ ghidra-worker.py   │
-└────────────────────┘ _ghidra.json  └──────────┬──────────┘
-                                                  │
-                          ┌───────────────────────┼───────────────────────┐
-                          │ HTTP :9090             │ HTTP :11434           │ HTTP :9091
-                          ▼                        ▼                       ▼
-                 ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐
-                 │ ghidra           │   │ ollama           │   │ statictools      │
-                 │ headless REST    │   │ local model      │   │ ssdeep/tlsh/lief │
-                 └──────────────────┘   └──────────────────┘   └──────────────────┘
+  subgraph hostBox["host (root)"]
+    direction TB
+    spool[("{sha256}.request<br/>spool marker")]
+    pathunit["honeypot-ghidra-worker<br/>.path / .service"]
+    worker["ghidra-worker.py"]
+    result[("{sha256}_ghidra.json<br/>+ HTML/PDF report")]
+  end
+
+  subgraph containers["containers (127.0.0.1 only)"]
+    direction TB
+    ghidra["ghidra<br/>headless REST :9090"]
+    ollama["ollama<br/>local model :11434"]
+    statictools["statictools<br/>ssdeep/tlsh/lief/capa/floss :9091"]
+    revdeck["revdeck (optional, profile-gated)<br/>:5000"]
+  end
+
+  submit -->|writes| spool
+  spool --> pathunit --> worker
+  worker -->|writes| result
+  result --> poll
+
+  worker -->|HTTP| ghidra
+  worker -.->|HTTP, optional| ollama
+  worker -.->|HTTP, optional| statictools
+  worker -.->|HTTP, optional| revdeck
 ```
 
-The dashboard never talks to any of the three containers, or to Docker. It
+The dashboard never talks to any of the four containers, or to Docker. It
 writes a `{sha256}.request` marker into one directory and reads
 `{sha256}_ghidra.json` out of another — the same spool pattern the KVM
 sandbox already uses. Every container port is published on `127.0.0.1` only:
@@ -43,6 +72,71 @@ structural fact extracted from it.
 The worker is **stdlib-only Python 3** on purpose. A worker that needs
 `pip install` before it can drain a queue is a worker that will be broken after
 the next OS upgrade.
+
+### The full request lifecycle
+
+The diagram above is what exists; this is what happens, in order, for one
+sample (#145 — the previous version of this diagram showed only which
+containers exist, not the request path through them):
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant Dashboard as dashboard container
+  participant Spool as request/results spool
+  participant Worker as ghidra-worker.py
+  participant Ghidra as ghidra (headless REST)
+  participant Static as statictools
+  participant Ollama as ollama
+  participant RevDeck as revdeck (optional)
+
+  Dashboard->>Spool: write {sha256}.request marker
+  Spool->>Worker: path unit wakes the worker
+  Worker->>Ghidra: POST /analyze (sample bytes)
+  Ghidra-->>Worker: job id
+  loop poll until done
+    Worker->>Ghidra: GET /status/{job}
+  end
+  Worker->>Ghidra: GET /results/{job}/functions,strings,imports,graph
+  Worker->>Static: POST /v1/fuzzy-hash, /v1/lief-parse, /v1/capa, /v1/floss
+  Static-->>Worker: data, {"unsupported": reason}, or fail-soft null
+  opt GHIDRA_TRIAGE_API_BASE configured and local
+    Worker->>Ollama: POST /v1/chat/completions (program_triage, suspicious_behavior)
+    Ollama-->>Worker: answer, or discarded if the prompt was truncated
+  end
+  opt REVDECK_API_BASE configured and local
+    Worker->>RevDeck: POST /upload, GET /status/{job}, POST /chat (SSE)
+    RevDeck-->>Worker: answer, citations, warnings
+  end
+  Worker->>Spool: write {sha256}_ghidra.json + HTML/PDF report
+  Dashboard->>Spool: GET /ghidra/{sha256} reads the result
+```
+
+Every sidecar call in that diagram is independently fail-soft: a down or
+disabled statictools, model, or Rev·Deck leaves its own field null and never
+fails the analysis (see [Reading the result](#reading-the-result)).
+
+---
+
+## The statictools sidecar contract
+
+`analysis/ghidra/statictools/` is the worker's only path to ssdeep/tlsh/lief/
+capa/floss — see [`server.py`](statictools/server.py)'s own module docstring
+for why they're a sidecar and not a host `pip install`. One caller (the
+worker), so raw bytes in, JSON out — no multipart:
+
+| Endpoint | Request | 200 response | 422 response |
+|---|---|---|---|
+| `GET /v1/health` | — | `{"status": "ok"}` | — |
+| `POST /v1/fuzzy-hash` | raw sample bytes | `{"ssdeep": ..., "ssdeep_error": ..., "tlsh": ..., "tlsh_error": ...}` (per-algorithm null+error, never a 422) | — |
+| `POST /v1/lief-parse` | raw sample bytes | structural metadata (format, entrypoint, sections, ...) | `{"error": "..."}` if lief did not recognise the format |
+| `POST /v1/capa` | raw sample bytes | capability/ATT&CK/MBC tags | `{"error": "...", "unsupported": "..."}` if capa's default (vivisect) backend can't handle this architecture/format/OS (#195) |
+| `POST /v1/floss` | raw sample bytes | decoded/stack/tight/static strings | `{"error": "...", "unsupported": "..."}` if floss's decoding/stack-string analysis doesn't cover this format — PE and raw shellcode only (#207) |
+
+The worker treats every non-`unsupported` failure (connection refused,
+timeout, malformed JSON) identically to the sidecar being switched off: the
+corresponding result field is left `null` and the rest of the analysis
+proceeds.
 
 ---
 
@@ -163,8 +257,10 @@ which documents each setting inline. The ones worth knowing:
 | `GHIDRA_TRIAGE_API_BASE` | `http://127.0.0.1:11434/v1` | Empty switches triage off |
 | `GHIDRA_TRIAGE_MODEL` | `qwen3:8b` | Recorded in every result |
 | `GHIDRA_TRIAGE_TIMEOUT` | `300` | Per workflow call; two calls run per sample |
-| `GHIDRA_TRIAGE_MAX_STRINGS` / `_IMPORTS` / `_FUNCTIONS` | `200` / `150` / `100` | How much of the binary the model is shown. Around 8000 tokens together — see [the context window](#the-context-window-is-part-of-the-configuration) before raising them |
-| `STATICTOOLS_API_BASE` | `http://127.0.0.1:9091` | ssdeep/tlsh/lief sidecar (#138). Empty switches it off |
+| `GHIDRA_TRIAGE_MAX_STRINGS` / `_IMPORTS` / `_FUNCTIONS` | `200` / `150` / `100` | How much of the binary the model is shown. Around 8000 tokens together — see [the context window](AI_TRIAGE.md#the-context-window-is-part-of-the-configuration) before raising them |
+| `STATICTOOLS_API_BASE` | `http://127.0.0.1:9091` | ssdeep/tlsh/lief/capa/floss sidecar, see [its contract above](#the-statictools-sidecar-contract). Empty switches it off |
+| `REVDECK_API_BASE` | *(empty)* | Empty switches Rev·Deck automation off (default). Same `endpoint_is_local()` rule as `GHIDRA_TRIAGE_API_BASE` |
+| `REVDECK_WORKFLOW` | `program_triage` | Which Rev·Deck workflow the worker drives; `suspicious_behavior` is swappable, not run alongside it |
 
 Spool paths are also set here, and must agree with `ReadWritePaths=` in
 `honeypot-ghidra-worker.service`: systemd cannot expand these values, so moving
@@ -176,109 +272,52 @@ Alerting is configured on the **dashboard** side, not here:
 
 ---
 
-## AI triage, and the local-only rule
+## AI triage
 
-After collection the worker runs two workflows against the model —
+After collection the worker runs two workflows against the local model —
 `program_triage` and `suspicious_behavior` — and writes the answer to
-`ai_triage` on the result.
+`ai_triage` on the result. It fails soft in every direction: no endpoint
+configured, one that's refused or unreachable, a model error, an unparseable
+answer, or a truncated prompt all leave `ai_triage` null with the rest of the
+analysis complete.
 
-The default, context, and explicit non-thinking request mode come from the
-[task-specific live-host evaluation](../../docs/local-llm-model-evaluation.md),
-not a general model leaderboard.
+**Local only, enforced in code, no override flag** — the prompt carries
+strings/imports/function names lifted straight out of a captured sample, so a
+hosted endpoint would be a data-exfiltration path, not a smaller version of
+the feature. See [`AI_TRIAGE.md`](AI_TRIAGE.md) for the local-only rule's
+exact syntactic test, the context-window truncation pitfall (measured, not
+theoretical — a too-small window silently changes the answer rather than
+erroring), the full data-flow diagram, and the prompt-injection posture.
 
-The endpoint is OpenAI-compatible (`/v1/chat/completions`), the dialect that
-Ollama, llama.cpp's server, vLLM and LM Studio all serve, so the backend is
-swappable. What is not swappable is that it must be **local**.
+---
 
-The prompts carry strings, imports and function names lifted straight out of a
-captured sample. Sending that to a hosted API is not a smaller version of this
-feature; it is a data-exfiltration path out of the analysis environment. So the
-rule is enforced in code — `endpoint_is_local()` in
-[`worker/ghidra-worker.py`](worker/ghidra-worker.py) — and **there is no
-override flag**:
+## Reading the result
 
-- IP literals must be loopback, RFC1918/ULA, or link-local.
-- A bare name with no dot is accepted; so is one ending `.local`, `.internal`,
-  `.lan`, `.localdomain`, `.home.arpa`.
-- Everything else is refused, before any request is made.
+Every result is `{sha256}_ghidra.json`. The fields below the always-present
+core (`sha256`, `exit_status`, `functions`, `strings`, `imports`, ...) come
+from optional sidecars, and each one distinguishes three states — this table
+is the single place that distinction lived only in prose and per-file
+docstrings before (#142):
 
-The judgement is syntactic, not a DNS lookup, because a resolver answer can be
-moved by whoever controls the zone — and the failure actually being guarded
-against is an operator pasting an `api.openai.com` or `openrouter.ai` URL into
-config.
+| Field | `null` means | `{"unsupported": reason}` means | present means |
+|---|---|---|---|
+| `fuzzy_hashes` | statictools unreachable or switched off | *(no unsupported state — ssdeep/tlsh each report their own `_error` instead)* | `{ssdeep, ssdeep_error, tlsh, tlsh_error}`, each hash independently nullable |
+| `lief` | statictools unreachable/off, **or** lief did not recognise the format | *(collapses to `null` — lief has no distinct decline signal, unlike capa/floss below)* | structural metadata: format, entrypoint, sections, libraries, ... |
+| `capa` | statictools unreachable/off | capa's default (vivisect) backend can't handle this architecture/format/OS — a real decline, not an outage ([#195](https://github.com/Xore/honeypot-stack/issues/195)) | capability/ATT&CK/MBC tags |
+| `floss` | statictools unreachable/off | floss's decoding/stack-string analysis only covers PE/raw shellcode — this honeypot's dominant ELF catch lands here on every run ([#207](https://github.com/Xore/honeypot-stack/issues/207)) | decoded/stack/tight/static strings |
+| `revdeck` | `REVDECK_API_BASE` unset, endpoint refused/unreachable, or no usable answer | *(no unsupported state)* | workflow/status/answer/tool_calls/citations |
+| `ai_triage` | no endpoint configured, refused, unreachable, model error, unparseable answer, or the prompt was truncated | *(no unsupported state)* | family_guess/risk_level/behaviors/model/evidence_shown — see [`AI_TRIAGE.md`](AI_TRIAGE.md) |
 
-### The context window is part of the configuration
+The `null`-vs-`unsupported` distinction matters operationally: an operator
+reading "not observed" for capa/floss on an ELF/MIPS sample would otherwise
+have to wonder whether the sidecar was even up. `lief` and `fuzzy_hashes`
+predate that pattern and still collapse every failure to one state — nothing
+today depends on separating them further.
 
-The evidence block for a real binary is around 8000 tokens. Ollama's default
-window is 4096 whatever the model can do — `qwen3:8b` advertises 40960 — and an
-overlong prompt is **truncated, not refused**. There is no error, no HTTP
-status, and the model answers from whichever fragment survived.
-
-Measured here on `/usr/bin/wget`: at the default the reply described a command
-line with hardcoded credentials that appears nowhere in the sample; at 16384
-the same prompt returns `{"family_guess": "wget", "risk_level": "low"}`.
-
-So the compose file sets `OLLAMA_CONTEXT_LENGTH=16384`. It has to be set on the
-server, because `/v1/chat/completions` has no field for context length — only
-Ollama's native API and that variable can reach it. Budget about 1.8 GB of KV
-cache on top of the weights; `qwen3:8b` Q4_K_M reports 7.8 GB total on the live
-host and offloads about 1 GB to system RAM. CPU/RAM offload is supported and is
-not a correctness failure. On a genuinely memory-constrained host, lower the
-window and the evidence budgets together rather than accept truncation.
-
-The worker does not trust the setting. Every reply is checked against the token
-count the server reports about itself, and an answer whose prompt was truncated
-is discarded with the reason logged. A window that is too small therefore shows
-up as **missing** triage, never as invented findings. `--selftest` probes for it
-directly, so it is visible at install time rather than in a malware report.
-
-Triage fails soft, in every direction. No endpoint configured, an endpoint that
-is refused, one that is unreachable, a model error, an answer that will not
-parse — each leaves `ai_triage` null with the rest of the analysis complete and
-the result written. Triage never fails an analysis.
-
-### Reading the result
-
-```json
-"ai_triage": {
-  "workflow": "program_triage+suspicious_behavior",
-  "family_guess": "Mirai variant",
-  "risk_level": "high",
-  "behaviors": ["connects to a hardcoded C2 address", "kills competing processes"],
-  "model": "qwen3:8b",
-  "evidence_shown": "150/312 imports, 200/11482 strings (longest first, deduplicated, >=6 chars), 100/847 functions (largest first)"
-}
-```
-
-- **`risk_level`** is normalised to `low` / `medium` / `high` / `critical`, or
-  left empty. Models return "Highly Suspicious" and "Moderate" given the chance,
-  and the dashboard's alert config matches exact strings — an un-normalised
-  level would silently never alert.
-- **`model`** is always recorded. The detail page and the alert text both name
-  it, because "the model said" is only useful if you know which model.
-- **`evidence_shown`** is the one to read first. A real sample overflows any
-  context window, so the assessment is formed from a subset; a claim the model
-  did **not** make may simply be something it was never shown.
-- **`behaviors`** carry no per-claim evidence links. The workflows do not
-  return that mapping, and inventing one would make a guess look like a
-  citation.
-
-`findcrypt` results are deliberately kept out of the prompt. Crypto constants
-carry their own caveat — presence does not show malicious use — and feeding
-them to a model invites exactly the over-reading the dashboard warns about.
-
-Every claim is a language model's reading of decompiled code. The detail page
-says so in an orange banner above the section, and the alert text carries
-`UNVERIFIED`, because a webhook is read where that banner is not visible.
-
-### Prompt injection
-
-The evidence is attacker-authored: it is text out of a sample that may well
-contain instructions aimed at whatever reads it. It is fenced in
-`=== EVIDENCE ===` markers, the system prompt names it as data rather than
-instructions, the answer is structurally constrained, and everything is
-re-normalised on the way out. That is containment, not immunity — which is why
-the banner stays.
+`findcrypt` results are deliberately kept out of every model prompt. Crypto
+constants carry their own caveat — presence does not show malicious use — and
+feeding them to a model invites exactly the over-reading the dashboard warns
+about.
 
 ---
 
@@ -301,6 +340,7 @@ RESULTS_DIR   : /var/lib/honeypot-ghidra/results (exists=True)
 SAMPLES_DIR   : /var/lib/honeypot-sandbox/inbox/samples (exists=True)
 TRIAGE        : http://127.0.0.1:11434/v1 OK, model qwen3:8b available, context fits a full evidence block (7972 tokens read)
 STATICTOOLS   : http://127.0.0.1:9091 OK
+REVDECK       : disabled (REVDECK_API_BASE is empty)
 
 round trip on /bin/true ...
   job            : 4761e1f6b74841db9f744c552cc94240
@@ -310,6 +350,8 @@ round trip on /bin/true ...
   imports        : 38
   fuzzy_hashes   : {'ssdeep': '3:...', 'ssdeep_error': None, 'tlsh': None, 'tlsh_error': 'input too small or too uniform to hash (TNULL)'}
   lief           : ok, format=ELF
+  capa           : ok, capabilities=2
+  floss          : declined - unsupported format for string decoding -- floss's decoding/stack-string analysis covers PE and raw shellcode only
 
 contract OK
 ```
@@ -349,9 +391,13 @@ system-RAM capacity to operate it, not `100% GPU` as a correctness gate.
 ### Rev·Deck
 
 The `revdeck` service is behind a `revdeck` profile and is not started by
-default. Its build context is not vendored, and triage does not go through it —
-the worker calls the model directly, so the local-only rule lives in code rather
-than in an operator's `.env`. See [`revdeck/README.md`](revdeck/README.md).
+default. Its build context is not vendored. Set `REVDECK_API_BASE` (subject to
+the same `endpoint_is_local()` rule as `GHIDRA_TRIAGE_API_BASE`) and the
+worker automates it too — `revdeck_triage()` drives a verified
+upload/poll/chat contract, writing a `revdeck` field distinct from the
+worker's own `ai_triage`, a second and independent AI aid rather than a
+replacement for it. Off by default. See
+[`revdeck/README.md`](revdeck/README.md).
 
 ---
 

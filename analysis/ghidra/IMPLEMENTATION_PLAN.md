@@ -197,7 +197,7 @@ real trigger — a host-side spool, not GitHub Actions.
 >   network, and there is no override flag.
 >
 > `attack_surface_triage` and `vulnerability_hypothesis` are not run.
-> Operator documentation: [`README.md`](README.md#ai-triage-and-the-local-only-rule).
+> Operator documentation: [`AI_TRIAGE.md`](AI_TRIAGE.md) (#142).
 >
 > **Update, 2026-08-01 (#78): Rev·Deck itself is now also automated**, as a
 > second and independent enrichment alongside the local `triage()` above —
