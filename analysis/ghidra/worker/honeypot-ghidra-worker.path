@@ -7,6 +7,11 @@ After=docker.service
 # The dashboard writes {sha256}.request here; it never calls the Ghidra REST
 # service itself. Same trust boundary as the sandbox spools.
 PathChanged=/var/lib/honeypot-ghidra/requests/pending
+# Standalone Rev·Deck spool (#78) -- a second, independent request directory
+# the same service also drains (drain_revdeck() in ghidra-worker.py). One
+# .path/.service pair watching two directories, rather than a second unit
+# pair, since both drains already run from the same script invocation.
+PathChanged=/var/lib/honeypot-revdeck/requests/pending
 Unit=honeypot-ghidra-worker.service
 
 [Install]

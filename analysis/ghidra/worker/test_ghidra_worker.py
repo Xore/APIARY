@@ -722,6 +722,110 @@ def test_revdeck(ghidra, revdeck):
     check(d is not None and d["revdeck"] is None, "revdeck left null")
 
 
+def revdeck_standalone_run(tmp, name, extra, data=b"MZ\x90\x00fake pe"):
+    """Drain one standalone revdeck-only request (#78) -- no Ghidra REST job
+    at all. ghidra_req/ghidra_res are separate and left empty, so drain()
+    finds nothing to do there; only drain_revdeck() has anything to process,
+    which is the whole point of the standalone spool: GHIDRA_API_BASE is
+    deliberately left pointing at a closed port, since a real Ghidra fixture
+    should not be a prerequisite for testing a path that never calls it.
+    """
+    base = tmp / name
+    ghidra_req, ghidra_res, smp = base / "greq", base / "gres", base / "smp"
+    rd_req, rd_res = base / "rdreq", base / "rdres"
+    for d in (ghidra_req, ghidra_res, smp, rd_req, rd_res):
+        d.mkdir(parents=True)
+    sha = "a" * 64
+    (smp / sha).write_bytes(data)
+    (rd_req / f"{sha}.request").write_text("")
+    env = {"GHIDRA_REQUEST_DIR": str(ghidra_req), "GHIDRA_RESULTS_DIR": str(ghidra_res),
+           "GHIDRA_SAMPLES_DIR": str(smp), "GHIDRA_API_BASE": "http://127.0.0.1:1",
+           "GHIDRA_LOCK": str(tmp / f"lock-{name}"),
+           "GHIDRA_TRIAGE_API_BASE": "", "STATICTOOLS_API_BASE": "",
+           "REVDECK_REQUEST_DIR": str(rd_req), "REVDECK_RESULTS_DIR": str(rd_res),
+           "REVDECK_POLL_INTERVAL": "0"}
+    env.update(extra)
+    r = run(env)
+    result = rd_res / f"{sha}_revdeck.json"
+    return r, (json.loads(result.read_text()) if result.is_file() else None), sha
+
+
+def test_revdeck_standalone(revdeck):
+    """The standalone spool (#78): drain_revdeck() drains REVDECK_REQUEST_DIR
+    independently of any Ghidra analysis, reusing revdeck_triage() exactly as
+    the embedded call inside analyse_one() does. The difference under test
+    here is what a null/absent answer means: for the embedded call it is one
+    field among many and the rest of the analysis still completed; here
+    Rev·Deck's answer is the entire request, so the same conditions this
+    file's test_revdeck() already covers must surface as this result's own
+    exit_status "error" instead of a quiet null.
+    """
+    tmp = Path(tempfile.mkdtemp())
+
+    print("--- standalone spool disabled (the default) is a silent no-op ---")
+    # An empty Ghidra queue too: a host running only the standalone revdeck
+    # path should not need Ghidra reachable at all to exit 0 (the fix this
+    # test itself is checking for -- drain() used to fail the whole run
+    # whenever Ghidra was unreachable, even with nothing queued there).
+    empty_req, empty_res, empty_smp = tmp / "ereq", tmp / "eres", tmp / "esmp"
+    for d in (empty_req, empty_res, empty_smp):
+        d.mkdir(parents=True)
+    r = run({"GHIDRA_REQUEST_DIR": str(empty_req), "GHIDRA_RESULTS_DIR": str(empty_res),
+             "GHIDRA_SAMPLES_DIR": str(empty_smp), "GHIDRA_API_BASE": "http://127.0.0.1:1",
+             "GHIDRA_LOCK": str(tmp / "lock-disabled"),
+             "GHIDRA_TRIAGE_API_BASE": "", "STATICTOOLS_API_BASE": "",
+             "REVDECK_REQUEST_DIR": "", "REVDECK_RESULTS_DIR": ""})
+    check(r.returncode == 0, "exit 0 with the standalone spool unset")
+
+    print("--- REVDECK_API_BASE unset leaves an explicit error, not a null ---")
+    RevDeckStub.chat_mode = "complete"
+    r, d, sha = revdeck_standalone_run(tmp, "unset", {})
+    check(r.returncode == 0, "exit 0 with REVDECK_API_BASE unset")
+    check(d is not None and d["exit_status"] == "error", "the request is a failure, not a silent null")
+    check(d is not None and d["revdeck"] is None, "revdeck left null")
+    check(d is not None and "REVDECK_API_BASE is not configured" in (d.get("error") or ""),
+          f"the reason names the actual gap (got {d and d.get('error')!r})")
+
+    print("--- happy path: standalone drain writes {sha}_revdeck.json ---")
+    RevDeckStub.chat_mode = "complete"
+    RevDeckStub._status_calls.clear()
+    r, d, sha = revdeck_standalone_run(tmp, "ok", {"REVDECK_API_BASE": revdeck})
+    check(r.returncode == 0, "exit 0 with revdeck on")
+    check(d is not None and d["exit_status"] == "ok", "the standalone request completes")
+    check(d is not None and d["sha256"] == sha, "sha256 recorded")
+    if d:
+        rd = d["revdeck"]
+        check(rd is not None, "revdeck populated")
+        if rd:
+            check(rd["workflow"] == "program_triage",
+                  f"workflow recorded (got {rd.get('workflow')!r})")
+            check(rd["tool_calls"] == 1,
+                  f"tool_calls counted (got {rd.get('tool_calls')!r})")
+
+    print("--- a non-local REVDECK_API_BASE is an explicit error ---")
+    r, d, sha = revdeck_standalone_run(
+        tmp, "remote", {"REVDECK_API_BASE": "https://openrouter.ai/api/v1"})
+    check(r.returncode == 0, "exit 0 with a non-local endpoint")
+    check(d is not None and d["exit_status"] == "error", "the request is a failure, not a silent null")
+    check(d is not None and "not a local endpoint" in (d.get("error") or ""),
+          f"the reason names the actual gap (got {d and d.get('error')!r})")
+
+    print("--- an unreachable REVDECK_API_BASE is an explicit error ---")
+    r, d, sha = revdeck_standalone_run(
+        tmp, "down", {"REVDECK_API_BASE": "http://127.0.0.1:1"})
+    check(r.returncode == 0, "exit 0 with revdeck unreachable")
+    check(d is not None and d["exit_status"] == "error", "the request is a failure, not a silent null")
+    check(d is not None and d["revdeck"] is None, "revdeck left null")
+
+    print("--- an empty answer is an explicit error, not a silent null ---")
+    RevDeckStub.chat_mode = "empty"
+    r, d, sha = revdeck_standalone_run(tmp, "empty", {"REVDECK_API_BASE": revdeck})
+    check(r.returncode == 0, "exit 0 with an empty answer")
+    check(d is not None and d["exit_status"] == "error", "the request is a failure, not a silent null")
+    check(d is not None and "no usable answer" in (d.get("error") or ""),
+          f"the reason explains the empty answer (got {d and d.get('error')!r})")
+
+
 def test_approved_contract():
     """The qualified benchmark prompt must be the prompt used in production."""
     root = Path(__file__).resolve().parents[3]
@@ -760,6 +864,7 @@ def main():
     test_triage(ghidra, model, truncating)
     test_statictools(ghidra, statictools)
     test_revdeck(ghidra, revdeck)
+    test_revdeck_standalone(revdeck)
     test_approved_contract()
     print(f"\n{len(fails)} failure(s)")
     for f in fails:

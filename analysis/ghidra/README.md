@@ -33,6 +33,8 @@ flowchart LR
     direction TB
     submit["POST /ghidra/submit"]
     poll["GET /ghidra/{sha256}"]
+    revdeckSubmit["workbench: select Rev·Deck"]
+    revdeckPoll["GET /revdeck/{sha256}"]
   end
 
   subgraph hostBox["host (root)"]
@@ -41,6 +43,8 @@ flowchart LR
     pathunit["honeypot-ghidra-worker<br/>.path / .service"]
     worker["ghidra-worker.py"]
     result[("{sha256}_ghidra.json<br/>+ HTML/PDF report")]
+    revdeckSpool[("standalone spool (#78)<br/>{sha256}.request")]
+    revdeckResult[("{sha256}_revdeck.json")]
   end
 
   subgraph containers["containers (127.0.0.1 only)"]
@@ -56,11 +60,22 @@ flowchart LR
   worker -->|writes| result
   result --> poll
 
+  revdeckSubmit -->|writes| revdeckSpool
+  revdeckSpool --> pathunit
+  worker -->|drain_revdeck writes| revdeckResult
+  revdeckResult --> revdeckPoll
+
   worker -->|HTTP| ghidra
   worker -.->|HTTP, optional| ollama
   worker -.->|HTTP, optional| statictools
   worker -.->|HTTP, optional| revdeck
 ```
+
+The same `.path`/`.service` pair also drains a second, independent spool for
+a standalone Rev·Deck request (#78) — one submission path that never touches
+the Ghidra REST service at all, distinct from the `revdeck` field the
+embedded call above writes onto a full Ghidra analysis. See
+[Rev·Deck](#revdeck) further down.
 
 The dashboard never talks to any of the four containers, or to Docker. It
 writes a `{sha256}.request` marker into one directory and reads
@@ -259,8 +274,9 @@ which documents each setting inline. The ones worth knowing:
 | `GHIDRA_TRIAGE_TIMEOUT` | `300` | Per workflow call; two calls run per sample |
 | `GHIDRA_TRIAGE_MAX_STRINGS` / `_IMPORTS` / `_FUNCTIONS` | `200` / `150` / `100` | How much of the binary the model is shown. Around 8000 tokens together — see [the context window](AI_TRIAGE.md#the-context-window-is-part-of-the-configuration) before raising them |
 | `STATICTOOLS_API_BASE` | `http://127.0.0.1:9091` | ssdeep/tlsh/lief/capa/floss sidecar, see [its contract above](#the-statictools-sidecar-contract). Empty switches it off |
-| `REVDECK_API_BASE` | *(empty)* | Empty switches Rev·Deck automation off (default). Same `endpoint_is_local()` rule as `GHIDRA_TRIAGE_API_BASE` |
+| `REVDECK_API_BASE` | *(empty)* | Empty switches Rev·Deck automation off (default). Same `endpoint_is_local()` rule as `GHIDRA_TRIAGE_API_BASE`. Gates both the embedded call inside a Ghidra analysis and the standalone spool below |
 | `REVDECK_WORKFLOW` | `program_triage` | Which Rev·Deck workflow the worker drives; `suspicious_behavior` is swappable, not run alongside it |
+| `REVDECK_REQUEST_DIR` / `REVDECK_RESULTS_DIR` | *(unset)* | A second, independent spool (#78) so a dashboard operator can ask for just Rev·Deck's opinion without paying for a full Ghidra analysis alongside it — see [Rev·Deck](#revdeck) below. `REVDECK_API_BASE` above still gates whether a request here can succeed |
 
 Spool paths are also set here, and must agree with `ReadWritePaths=` in
 `honeypot-ghidra-worker.service`: systemd cannot expand these values, so moving
@@ -398,6 +414,22 @@ upload/poll/chat contract, writing a `revdeck` field distinct from the
 worker's own `ai_triage`, a second and independent AI aid rather than a
 replacement for it. Off by default. See
 [`revdeck/README.md`](revdeck/README.md).
+
+Two ways to get that automation, both gated by `REVDECK_API_BASE`:
+
+- **Embedded** — every Ghidra analysis runs it automatically as one more
+  enrichment, the `revdeck` field on `{sha256}_ghidra.json`.
+- **Standalone** (#78) — set `REVDECK_REQUEST_DIR`/`REVDECK_RESULTS_DIR` and
+  select "Rev·Deck / GhidrAssist" on its own in the dashboard's analysis
+  workbench, without also running a full Ghidra analysis. `drain_revdeck()`
+  drains this second spool independently: `revdeck_triage()` only ever needed
+  the sample bytes, never the Ghidra REST job's own artifacts, so nothing
+  about running it alone duplicates work. Writes `{sha256}_revdeck.json`,
+  read back at `/revdeck/{sha256}`. Because Rev·Deck's answer *is* the whole
+  point of a standalone request, a null answer here is written as this
+  result's own `exit_status: "error"` (with a reason — endpoint not
+  configured, refused, unreachable, or an empty answer) rather than the quiet
+  `"revdeck": null` the embedded path leaves among many other fields.
 
 ---
 

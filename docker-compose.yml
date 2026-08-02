@@ -404,6 +404,11 @@ services:
       # them and must never be able to forge one.
       - /var/lib/honeypot-ghidra/results:/ghidra-results:ro
       - /var/lib/honeypot-ghidra/requests/pending:/ghidra-requests
+      # Standalone Rev·Deck spool (#78): a fourth, independent request/results
+      # pair alongside the Ghidra one above, same shape and same read-only
+      # results boundary. ghidra-worker.py's drain_revdeck() is the consumer.
+      - /var/lib/honeypot-revdeck/results:/revdeck-results:ro
+      - /var/lib/honeypot-revdeck/requests/pending:/revdeck-requests
       # Privileged read-only adapter for #158's owner-only model-status file.
       # The dashboard sees only an AF_UNIX HTTP socket and never mounts the
       # 0600 host artifact or gains a model-management action.
@@ -459,6 +464,8 @@ services:
       # Compose edit — the same arrangement as the Windows backend.
       - GHIDRA_RESULTS_DIR=${GHIDRA_RESULTS_DIR:-}
       - GHIDRA_REQUEST_DIR=${GHIDRA_REQUEST_DIR:-}
+      - REVDECK_RESULTS_DIR=${REVDECK_RESULTS_DIR:-}
+      - REVDECK_REQUEST_DIR=${REVDECK_REQUEST_DIR:-}
       - GHIDRA_ALERT_RISK_LEVELS=${GHIDRA_ALERT_RISK_LEVELS:-high,critical}
       - GHIDRA_ALERT_ON_CRYPTO=${GHIDRA_ALERT_ON_CRYPTO:-false}
       # Empty until analysis/github/install-github-publisher.sh has been run

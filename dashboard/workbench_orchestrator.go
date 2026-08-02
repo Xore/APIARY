@@ -140,6 +140,12 @@ func (s *store) submitWorkbenchChild(hash string, classification payloadClassifi
 		}
 		child.State, child.Reason, child.Cancelable = "queued", "waiting for the Windows sandbox handoff", true
 		return nil
+	case "revdeck":
+		if err := createWorkbenchMarker(revdeckRequestDir(), hash); err != nil {
+			return fmt.Errorf("Rev·Deck request spool unavailable: %w", err)
+		}
+		child.State, child.Reason, child.Cancelable = "queued", "waiting for the host-side Rev·Deck drain", true
+		return nil
 	default:
 		return errors.New("analyzer adapter is not implemented")
 	}
@@ -181,6 +187,7 @@ func workbenchResultAfter(value string, threshold time.Time) bool {
 func (s *store) reconcileWorkbenchRun(run workbenchRun) workbenchRun {
 	now := time.Now().UTC()
 	ghidraResults := loadGhidraResults()
+	revdeckResults := loadRevdeckResults()
 	sandboxResults := loadSandboxResults()
 	sandboxStatus := loadSandboxStatus()
 	for index := range run.Children {
@@ -210,6 +217,25 @@ func (s *store) reconcileWorkbenchRun(run workbenchRun) workbenchRun {
 				child.Cancelable = state == "queued"
 			}
 			child.Stale = loadGhidraStatus().Stale
+		case "revdeck":
+			if result, ok := newestRevdeckResult(run.PayloadSHA256, revdeckResults, child.CreatedAt); ok {
+				child.UpdatedAt = now
+				child.Cancelable = false
+				child.ResultURL = "/revdeck/" + run.PayloadSHA256
+				if result.ExitStatus == "error" || result.RevDeck == nil {
+					child.State, child.Reason = "failed", firstNonEmpty(result.Error, "Rev·Deck produced no usable answer")
+					child.Retryable = child.Attempts <= child.Options.RetryLimit
+				} else {
+					child.State, child.Reason = "completed", ""
+					child.Summary = fmt.Sprintf("%s (%s): %d tool call(s)", result.RevDeck.Workflow, result.RevDeck.Status, result.RevDeck.ToolCalls)
+				}
+				continue
+			}
+			state, reason := markerState(workbenchMarkerDir("revdeck"), run.PayloadSHA256)
+			if state != "" {
+				child.State, child.Reason = state, reason
+				child.Cancelable = state == "queued"
+			}
 		case "linux-sandbox", "windows-sandbox":
 			if result, ok := newestSandboxResult(child.AnalyzerID, run.PayloadSHA256, sandboxResults, child.CreatedAt); ok {
 				child.UpdatedAt = now
@@ -317,6 +343,8 @@ func workbenchMarkerDir(analyzerID string) string {
 		return sandboxRequestDir(targetWindows)
 	case "linux-sandbox":
 		return sandboxRequestDir(targetLinux)
+	case "revdeck":
+		return revdeckRequestDir()
 	default:
 		return ""
 	}

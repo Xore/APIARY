@@ -201,6 +201,22 @@ REVDECK_CHAT_TIMEOUT = int(os.environ.get("REVDECK_CHAT_TIMEOUT", "900"))
 # final synthesis text has no server-side cap; hold the line here too.
 REVDECK_ANSWER_CHARS = int(os.environ.get("REVDECK_ANSWER_CHARS", "8000"))
 
+# Standalone Rev·Deck spool (#78): a second, independent request/results pair
+# alongside GHIDRA_REQUEST_DIR/GHIDRA_RESULTS_DIR above, for a dashboard
+# operator who wants only Rev·Deck's opinion without paying for a full,
+# redundant Ghidra REST analysis alongside it. revdeck_triage() below takes
+# just a sample Path and was never actually coupled to the Ghidra REST job's
+# own artifacts (see the comment on REVDECK_STATUS_TIMEOUT above), so nothing
+# about running it here duplicates analyse_one()'s work. Empty disables this
+# spool entirely -- the embedded call inside analyse_one() is unaffected and
+# still governed by REVDECK_API_BASE alone.
+REVDECK_REQUEST_DIR = os.environ.get("REVDECK_REQUEST_DIR", "")
+REVDECK_RESULTS_DIR = os.environ.get("REVDECK_RESULTS_DIR", "")
+# Its own version line, not RESULT_VERSION above: this is a different,
+# smaller result document ({sha256}_revdeck.json), not a field on the
+# {sha256}_ghidra.json the rest of this file produces.
+REVDECK_STANDALONE_RESULT_VERSION = 1
+
 # GHIDRA_ALERT_RISK_LEVELS in the dashboard matches these exactly. A model that
 # free-forms "Highly Suspicious" would silently never alert, so anything that
 # does not normalise onto this set is recorded as unrated rather than passed
@@ -1423,6 +1439,109 @@ def write_status() -> None:
     os.replace(tmp, RESULTS_DIR / "status.json")
 
 
+def write_revdeck_result(results_dir: Path, sha: str, payload: dict) -> None:
+    """Same atomic-write shape as write_result(), for the standalone spool."""
+    results_dir.mkdir(parents=True, exist_ok=True)
+    final = results_dir / f"{sha}_revdeck.json"
+    tmp = results_dir / f".{sha}_revdeck.json.tmp"
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True))
+    os.replace(tmp, final)
+    final.chmod(0o600)
+
+
+def drain_revdeck() -> int:
+    """Drain the standalone Rev·Deck request spool (#78).
+
+    Mirrors drain()'s spool discipline (claim-before-work, malformed/missing
+    samples quarantined the same way) but talks to nothing except Rev·Deck
+    itself -- no Ghidra REST job is created. A request here fails for the
+    same reasons the embedded call inside analyse_one() would leave `revdeck`
+    null: no endpoint configured, one that's refused or unreachable, or an
+    answer that came back empty. The difference is what a null/absent result
+    means -- inside analyse_one() it is one field among many and the rest of
+    the analysis still completed; here Rev·Deck's answer *is* the entire
+    request, so the same outcome is written as this result's own error rather
+    than a quiet null the caller has to notice.
+    """
+    if not REVDECK_REQUEST_DIR or not REVDECK_RESULTS_DIR:
+        return 0
+    request_dir = Path(REVDECK_REQUEST_DIR)
+    results_dir = Path(REVDECK_RESULTS_DIR)
+    request_dir.mkdir(parents=True, exist_ok=True)
+    results_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(request_dir, 0o700)
+    os.chmod(results_dir, 0o700)
+
+    processed = 0
+    for request in sorted(request_dir.glob("*.request")):
+        sha = request.name[: -len(".request")]
+
+        if not SHA256_RE.match(sha):
+            log(f"skipping malformed revdeck request: {request.name}")
+            request.rename(request.with_suffix(".request.invalid"))
+            continue
+
+        sample = SAMPLES_DIR / sha
+        if not sample.is_file():
+            log(f"sample {sha} is not in {SAMPLES_DIR} - dropping revdeck request")
+            request.rename(request.with_suffix(".request.missing-sample"))
+            continue
+
+        try:
+            requested_at = datetime.fromtimestamp(
+                request.stat().st_mtime, timezone.utc).isoformat(timespec="seconds")
+        except OSError:
+            requested_at = now()
+
+        claimed = request.with_suffix(".request.running")
+        request.rename(claimed)
+        started = now()
+
+        if not REVDECK_API_BASE:
+            reason = "REVDECK_API_BASE is not configured on this worker"
+        elif not endpoint_is_local(REVDECK_API_BASE):
+            reason = f"refusing {REVDECK_API_BASE} - not a local endpoint"
+        else:
+            reason = None
+
+        revdeck_info = None if reason else revdeck_triage(sample)
+        if revdeck_info:
+            log(f"  [+] revdeck {sha} ({revdeck_info['workflow']}, "
+                f"status={revdeck_info['status']}): "
+                f"{revdeck_info['tool_calls']} tool call(s)")
+            write_revdeck_result(results_dir, sha, {
+                "version": REVDECK_STANDALONE_RESULT_VERSION,
+                "sha256": sha,
+                "requested_at": requested_at,
+                "started_at": started,
+                "completed_at": now(),
+                "exit_status": "ok",
+                "revdeck": revdeck_info,
+            })
+            claimed.unlink()
+        else:
+            if not reason:
+                reason = ("Rev·Deck produced no usable answer - see "
+                          "worker logs for the specific reason (unreachable, "
+                          "refused, or an empty/discarded answer)")
+            log(f"  [!] revdeck {sha}: {reason}")
+            write_revdeck_result(results_dir, sha, {
+                "version": REVDECK_STANDALONE_RESULT_VERSION,
+                "sha256": sha,
+                "requested_at": requested_at,
+                "started_at": started,
+                "completed_at": now(),
+                "exit_status": "error",
+                "error": reason,
+                "revdeck": None,
+            })
+            claimed.rename(claimed.with_suffix(".failed"))
+        processed += 1
+
+    log(f"drained {processed} standalone revdeck request(s)")
+    return 0
+
+
 def analyse_one(client: GhidraClient, sha: str, sample: Path,
                 requested_at: str) -> dict:
     started = now()
@@ -1505,17 +1624,26 @@ def drain() -> int:
     os.chmod(REQUEST_DIR, 0o700)
     os.chmod(RESULTS_DIR, 0o700)
 
+    pending = sorted(REQUEST_DIR.glob("*.request"))
     client = GhidraClient(API_BASE)
-    if not client.ready():
+    if pending and not client.ready():
         # Leave the spool untouched. The path unit fires again on the next
         # change, and an operator starting the container is the fix — losing
         # the queue because a container was down would be gratuitous.
         log(f"Ghidra REST service at {API_BASE} is not ready; leaving queue intact")
         write_status()
         return 1
+    if not pending:
+        # An empty queue does not need Ghidra reachable at all -- since #78,
+        # this same script invocation can also be woken by the independent
+        # revdeck spool alone (see drain_revdeck()), and a host that only
+        # uses that standalone path should not see this worker's systemd unit
+        # marked failed just because Ghidra was never started here.
+        write_status()
+        return 0
 
     processed = 0
-    for request in sorted(REQUEST_DIR.glob("*.request")):
+    for request in pending:
         sha = request.name[: -len(".request")]
 
         if not SHA256_RE.match(sha):
@@ -1594,6 +1722,10 @@ def selftest() -> int:
     print(f"TRIAGE        : {triage_state()}")
     print(f"STATICTOOLS   : {statictools_state()}")
     print(f"REVDECK       : {revdeck_state()}")
+    if REVDECK_REQUEST_DIR and REVDECK_RESULTS_DIR:
+        print(f"REVDECK_SPOOL : {REVDECK_REQUEST_DIR} -> {REVDECK_RESULTS_DIR}")
+    else:
+        print("REVDECK_SPOOL : disabled (REVDECK_REQUEST_DIR/_RESULTS_DIR not set)")
     if not ok:
         print("\nStart it with:")
         print("  docker compose -f analysis/ghidra/docker-compose.ghidra.yml up -d ghidra")
@@ -1671,7 +1803,9 @@ def main() -> int:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         return 0
-    return drain()
+    exit_code = drain()
+    drain_revdeck()
+    return exit_code
 
 
 if __name__ == "__main__":

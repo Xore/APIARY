@@ -60,3 +60,23 @@ GHIDRA_TRIAGE_MAX_FUNCTIONS=100
 # Set this empty to switch it off; results then carry "fuzzy_hashes": null and
 # "lief": null, and everything else is unaffected.
 STATICTOOLS_API_BASE=http://127.0.0.1:9091
+
+# ── Rev·Deck (#78) ───────────────────────────────────────────────────────────
+# A second, independent AI aid alongside GHIDRA_TRIAGE_API_BASE above, not a
+# replacement for it. Off by default (empty) -- the revdeck compose profile is
+# not started by default either; see revdeck/README.md. Same local-only rule
+# as GHIDRA_TRIAGE_API_BASE.
+#
+# Leave empty to leave every Rev·Deck path disabled; results then carry
+# "revdeck": null and everything else is unaffected.
+REVDECK_API_BASE=
+REVDECK_WORKFLOW=program_triage
+
+# Standalone Rev·Deck spool: a second, independent request/results pair so a
+# dashboard operator can ask for just Rev·Deck's opinion, without paying for
+# a full Ghidra REST analysis alongside it (see ghidra-worker.py's
+# drain_revdeck() for why that's possible at all). Distinct from
+# REVDECK_API_BASE above, which gates whether Rev·Deck runs at all, embedded
+# or standalone. Leave both empty to disable this spool entirely.
+REVDECK_REQUEST_DIR=/var/lib/honeypot-revdeck/requests/pending
+REVDECK_RESULTS_DIR=/var/lib/honeypot-revdeck/results
