@@ -181,6 +181,23 @@ http:
         options: modern
       middlewares: [security-headers-dashboard-pdf, strip-auth-identity, forward-auth]
 
+    # Same relaxation as honeypot-dashboard-pdf above, for the GitHub-analysis
+    # Report card's own inline PDF viewer (#309). serveGitHubAnalysisPDFProxy
+    # (dashboard/github_analysis.go) has the identical gap serveGeneratedPDF
+    # did: it never goes through secHeaders()/renderPage(), so without this
+    # router the only framing header on that response was the blanket
+    # honeypot-dashboard router's DENY below -- caught live, reported against
+    # this issue right after deploying #311 ("Refused to display
+    # '.../export/github-analysis/.../pdf' in a frame because it set
+    # 'X-Frame-Options' to 'deny'").
+    honeypot-dashboard-github-analysis-pdf:
+      rule: "(Host(`dashboard.honeypot.example`) || Host(`honeypot.honeypot.example`)) && PathRegexp(`^/export/github-analysis/[^/]+/pdf$`)"
+      entryPoints: [websecure]
+      service: honeypot-dashboard
+      tls:
+        options: modern
+      middlewares: [security-headers-dashboard-pdf, strip-auth-identity, forward-auth]
+
     honeypot-dashboard:
       rule: "Host(`dashboard.honeypot.example`) || Host(`honeypot.honeypot.example`)"
       entryPoints: [websecure]
