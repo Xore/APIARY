@@ -115,13 +115,17 @@ jobs:
              ls -1t /root/vps-backups/pre-deploy-*.tar.gz | tail -n +11 | xargs -r rm -f'
 
           # --delete-delay removes anything on the VPS that is absent from the
-          # repository. Three things must therefore never be synchronized:
+          # repository. Three things must therefore never be synchronized by
+          # the bulk rsync below:
           #   .env                  secrets, host-specific
           #   traefik/certs/        issued certificates — deleting these takes
           #                         TLS down and they cannot be regenerated here
           #   traefik/dynamic.yml   carries the real domain; the committed copy
-          #                         is a honeypot.example placeholder, so copying
-          #                         it over the live file breaks every router
+          #                         is a honeypot.example placeholder -- see
+          #                         the dedicated step below, which deploys
+          #                         this one deliberately differently (not
+          #                         "never touch it") now that DOMAIN is a
+          #                         secret instead of tribal knowledge.
           rsync -az --delete-delay \
             --exclude '.env' \
             --exclude 'traefik/certs/' \
@@ -130,6 +134,55 @@ jobs:
 
           ssh "${ssh_options[@]}" "${VPS_USER:-root}@${VPS_HOST}" \
             'cd /root/vps && { test ! -f .env || chmod 600 .env; } && docker compose -f docker-compose.yml config --quiet && docker compose -f docker-compose.yml up -d --build'
+
+      - name: Deploy Traefik dynamic config with the real domain substituted
+        shell: bash
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          DOMAIN: ${{ secrets.DOMAIN }}
+        run: |
+          # traefik/dynamic.yml is excluded from the bulk rsync above and
+          # deployed here instead, deliberately differently. Traefik's file
+          # provider has no env-var substitution the way docker-compose's
+          # ${VAR} syntax already gives every other host-specific value in
+          # this repo (docker-compose.yml's AUTH_INTROSPECTION_URL etc, which
+          # needed no change here) -- so the committed file is a placeholder
+          # (*.honeypot.example) and the DOMAIN secret substitutes it here,
+          # in CI, instead of via a manual live-only edit no one wrote down.
+          #
+          # The substituted file is written to the live path with a plain
+          # in-place `cat`, NOT copied via the rsync above (or any rename-
+          # into-place, including `mv`). Traefik's compose service bind-
+          # mounts this file at a single path
+          # (traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro), which Docker
+          # binds to the specific INODE present when the container started,
+          # not the path -- a rename-based replacement repoints the host
+          # path at a new inode while the already-running container keeps
+          # reading the old one, with no error of any kind to signal the
+          # mismatch. Learned this live: after "fixing" a broken domain this
+          # way once, the site kept serving the wrong config to real
+          # visitors even though every host-side check (cat, diff) showed
+          # the new file as correct. `cat new > existing_path` truncates and
+          # rewrites the EXISTING inode in place, which the bind mount does
+          # see immediately -- Traefik hot-reloads it with no restart
+          # needed (dynamic.yml's own header comment: "changes apply
+          # instantly without restarting Traefik").
+          if [ -z "$DOMAIN" ]; then
+            echo "::error::DOMAIN secret is not set -- refusing to deploy a config with placeholder domains"
+            exit 1
+          fi
+          sed "s/honeypot\.example/${DOMAIN}/g" vps/traefik/dynamic.yml > /tmp/dynamic.yml.deployable
+          python3 -c "import yaml; yaml.safe_load(open('/tmp/dynamic.yml.deployable'))"
+          if grep -q "honeypot.example" /tmp/dynamic.yml.deployable; then
+            echo "::error::generated dynamic.yml still contains placeholder domains after substitution"
+            exit 1
+          fi
+          scp -i ~/.ssh/honeypot_vps -P "${VPS_PORT:-2222}" -o StrictHostKeyChecking=accept-new \
+            /tmp/dynamic.yml.deployable "${VPS_USER:-root}@${VPS_HOST}:/tmp/dynamic.yml.deployable"
+          ssh "${ssh_options[@]}" "${VPS_USER:-root}@${VPS_HOST}" \
+            'cat /tmp/dynamic.yml.deployable > /root/vps/traefik/dynamic.yml && rm -f /tmp/dynamic.yml.deployable'
 
       - name: Verify the live Traefik configuration survived
         shell: bash
