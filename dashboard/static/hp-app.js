@@ -523,18 +523,25 @@
     return true;
   };
 
+  // Re-applies the timezone display preference (#282) to whatever this call
+  // just mounted. window.HpPreferences is the cross-scope bridge the
+  // DOMContentLoaded preferences block below populates -- mountPage is
+  // defined here, outside that closure, and reused by SSE/interval refresh
+  // long after the page first loads, so it cannot close over that block's
+  // own locals directly.
+  const reapplyTimezone = () => window.HpPreferences?.applyTimezone?.(window.HpPreferences.prefs?.timezone);
   const mountPage = (source, options = {}) => {
     if (!pageContent) { source.remove?.(); return; }
     reNonce(source);
     if (options.preserveMap && refreshOverviewPreservingMap(source)) {
       initLazyViews(pageContent);
-      applyTimezone(prefState.prefs?.timezone);
+      reapplyTimezone();
       return;
     }
     pageContent.replaceChildren(...source.children);
     source.remove();
     initLazyViews(pageContent);
-    applyTimezone(prefState.prefs?.timezone);
+    reapplyTimezone();
   };
   window.replaceHoneypotPage = mountPage;
 
@@ -862,6 +869,10 @@
         el.textContent = `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
       });
     };
+    // mountPage (outside this DOMContentLoaded closure, so it needs the
+    // window.HpPreferences bridge already established above) re-applies this
+    // on every live-refreshed page mount.
+    prefState.applyTimezone = applyTimezone;
     const applyEffectivePrefs = prefs => {
       if (!prefs) return;
       if (prefs.theme === "dark" || prefs.theme === "light" || prefs.theme === "system") applyTheme(prefs.theme);
