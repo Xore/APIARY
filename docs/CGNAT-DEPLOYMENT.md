@@ -151,6 +151,14 @@ intervention.
    `vps/check-firewall-portbridge-sync.sh` after editing either
    `honeypot-firewall.sh` or portbridge's `RULES` env var; it fails loudly if
    the two fall out of sync again (#152).
+9. Run `sudo vps/disable-nic-hw-gro.sh --apply` (#342). Most VPS providers
+   put the public interface on `virtio-net`, whose hardware-accelerated GRO
+   (`rx-gro-hw`) is a separate feature from the standard
+   `generic-receive-offload` toggle and coalesces multiple physical frames
+   into one oversized packet — Suricata's AF_PACKET capture then logs the
+   result as a "truncated packet" decoder-event alert (SID `2200003`/
+   `2200122`), which can dominate alert volume. This installs a
+   `systemd-networkd` `.link` file so the fix survives reboots.
 
 `portbridge` binds every raw port on the public interface and forwards it
 over WireGuard to `10.8.0.2`; the `socat-hp-*` services put the HTTP
