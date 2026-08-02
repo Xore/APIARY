@@ -1,15 +1,17 @@
 #Requires -RunAsAdministrator
-# 01-hardening.ps1 — Packer provisioner, step 1 of 4.
+# 01-hardening.ps1 — Packer provisioner, step 1 of win11-analysis.pkr.hcl's build.
 #
-# Guest hardening and Chocolatey. Everything here is fast, local, and must
-# complete before FLARE-VM starts rebooting the machine in step 2.
+# Guest hardening and Chocolatey. Fast and local.
 #
-# The build is split across four scripts because FLARE-VM installs via
-# Boxstarter, which reboots repeatedly by design. Packer runs an elevated
-# provisioner as a Windows scheduled task, so the first reboot terminates it
-# with 0x41306 (SCHED_S_TASK_TERMINATED, surfaced as exit 267014). When all
-# of this lived in one script, that killed the run and phases 9-14 never
-# executed. See win11-analysis.pkr.hcl for how the steps fit together.
+# This template used to also install FLARE-VM (via Boxstarter, which reboots
+# repeatedly by design) between this step and the tooling step, which is why
+# the build was split across more scripts than it needs now -- a Boxstarter
+# reboot mid-script silently terminated Packer's elevated scheduled-task
+# provisioner (0x41306/exit 267014), so no single script could span one
+# safely. FLARE-VM is gone as of 2026-08-02 (see win11-analysis.pkr.hcl and
+# 04-tools.ps1's headers for why); the settle-restart before 04-tools.ps1 is
+# the only remnant of that structure, kept as cheap insurance rather than
+# because anything here still reboots the guest.
 
 Set-ExecutionPolicy Unrestricted -Scope LocalMachine -Force
 $ErrorActionPreference = 'Continue'

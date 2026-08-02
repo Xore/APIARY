@@ -1,14 +1,15 @@
 #Requires -RunAsAdministrator
-# 04-tools.ps1 — Packer provisioner, step 4 of 4.
+# 04-tools.ps1 — Packer provisioner, step 3 of win11-analysis.pkr.hcl's build.
 #
 # The analysis tooling: Sysmon, PowerShell logging, FakeNet-NG, Regshot, the
 # QEMU guest agent, the analysis directories and shares, the decoy environment,
 # and the final resolver. Everything run_sample.py depends on in the guest is
-# installed here, deliberately independent of FLARE-VM — the orchestrator needs
-# Procmon, Regshot, FakeNet and Sysmon, and none of those come from FLARE-VM.
+# installed here -- Procmon, Regshot, FakeNet and Sysmon, none of which come
+# from (or ever required) FLARE-VM, which is why this template no longer
+# installs it at all as of 2026-08-02.
 #
-# Runs last, after the FLARE-VM wait slices in step 3, so Boxstarter's reboots
-# are finished by the time any of it executes.
+# Runs after the settle-restart (step 2 of the template), so any pending
+# reboot from 01-hardening.ps1 is finished by the time any of it executes.
 
 Set-ExecutionPolicy Unrestricted -Scope LocalMachine -Force
 $ErrorActionPreference = 'Continue'
@@ -50,19 +51,8 @@ Write-Host '================================================================'
 Write-Host ' Honeypot-Stack: Windows 11 Analysis VM - tooling'
 Write-Host '================================================================'
 
-# This is the one place the build judges FLARE-VM, because it is the first
-# point at which the answer is knowable. It is a warning, not a failure: the
-# detonation pipeline does not depend on FLARE-VM, so an image without it is
-# degraded for manual RE but still fully usable for automated analysis.
-# 04-tools.ps1 failing the build here would throw away several hours of work
-# over tooling nothing downstream calls.
-if (Test-Path 'C:\ProgramData\chocolatey\lib\flarevm.installer') {
-    Write-Host '[+] FLARE-VM present'
-    'flarevm=present' | Add-Content 'C:\golden_image_provenance.txt'
-} else {
-    Write-Warning '[!] FLARE-VM did NOT complete - image lacks the RE toolkit'
-    'flarevm=MISSING' | Add-Content 'C:\golden_image_provenance.txt'
-}
+'flarevm=not-installed (removed 2026-08-02, see win11-analysis.pkr.hcl)' | Add-Content 'C:\golden_image_provenance.txt'
+
 # ── Install Sysmon ────────────────────────────────────────────────────────
 Write-Host '[Phase 9] Installing Sysmon...'
 $sysmonPath = 'C:\Tools\SysinternalsSuite'
@@ -217,21 +207,10 @@ Start-Service QEMU-GA -ErrorAction SilentlyContinue
 New-SmbShare -Name 'Samples' -Path 'C:\Samples' -FullAccess 'analyst' -ErrorAction SilentlyContinue
 New-SmbShare -Name 'Logs'    -Path 'C:\Logs'    -ReadAccess 'analyst' -ErrorAction SilentlyContinue
 
-# ── Anti-Evasion: Decoy Environment ──────────────────────────────────────
-Write-Host '[Phase 13] Setting up decoy user environment...'
-# Create decoy documents
-$docs = "$env:USERPROFILE\Documents"
-@('Q3_Budget_2026.xlsx','Project_Proposal.docx','Meeting_Notes_July.txt',
-  'Client_Contacts.xlsx','HR_Policy_2026.pdf') | ForEach-Object {
-    [System.IO.File]::WriteAllText("$docs\$_", "Decoy file for $_ - created by honeypot-stack")
-}
-# Inject fake recent files
-$recent = "$env:APPDATA\Microsoft\Windows\Recent"
-New-Item $recent -ItemType Directory -Force | Out-Null
-@('Report_Final.docx','Budget_Q3.xlsx','Presentation.pptx') | ForEach-Object {
-    New-Item "$recent\$_.lnk" -ItemType File -Force | Out-Null
-}
-Write-Host '[+] Decoy environment created'
+# Decoy user environment (fake documents, a decoy SMB share, realistic
+# recent-files) lives in scripts/05-decoy-content.ps1, the next provisioner
+# in win11-analysis.pkr.hcl -- separate from this script deliberately, since
+# it's cosmetic and nothing run_sample.py touches, unlike everything above.
 
 # ── Final DNS: set to INetSim (10.10.10.1) ────────────────────────────────
 # Safe here and only here — this is the last phase, so it cannot cost the
@@ -246,7 +225,7 @@ Write-Host '[+] Decoy environment created'
 # docker-compose.sandbox.yml. All three are pinned constants; change one and
 # you must change all three, or the static entry here will silently win over
 # DHCP and every lookup will go to a dead address.
-Write-Host '[Phase 14] Setting DNS to INetSim gateway (10.10.10.1)...'
+Write-Host '[Phase 13] Setting DNS to INetSim gateway (10.10.10.1)...'
 $adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Select-Object -First 1
 Set-DnsClientServerAddress -InterfaceAlias $adapter.Name -ServerAddresses '10.10.10.1'
 

@@ -212,24 +212,17 @@ build {
     destination = "C:/Windows/Temp/honeypot_fakenet.ini"
   }
 
-  # ┌─ WHY THIS IS FOUR SCRIPTS AND NOT ONE ────────────────────────────────┐
-  # │ FLARE-VM installs through Boxstarter, which reboots the guest an      │
-  # │ unpredictable number of times and resumes via auto-login. Packer runs │
-  # │ an elevated provisioner as a Windows scheduled task, so every one of  │
-  # │ those reboots terminates the running task with 0x41306               │
-  # │ (SCHED_S_TASK_TERMINATED), which Packer reports as                    │
-  # │ "Script exited with non-zero exit status: 267014".                    │
-  # │                                                                       │
-  # │ With hardening, FLARE-VM and tooling in a single script that was      │
-  # │ fatal: the 2026-07-31 14:27 build died after 30 minutes with          │
-  # │ FLARE-VM's debloat.vm already installed, and the Sysmon/FakeNet/      │
-  # │ Regshot phases never ran at all.                                      │
-  # │                                                                       │
-  # │ So: do the fast local work first (step 1), trigger FLARE-VM and let   │
-  # │ go of it (step 2), absorb the reboots in bounded idempotent slices    │
-  # │ (step 3, repeated), then install the tooling once the guest has       │
-  # │ settled (step 4). 267014 is accepted wherever a reboot can land.      │
-  # └───────────────────────────────────────────────────────────────────────┘
+  # FLARE-VM (Mandiant's 100+ tool RE distribution) was here through
+  # 2026-08-02 and is deliberately gone now: run_sample.py's automated
+  # detonation pipeline never called any tool FLARE-VM uniquely provided --
+  # Procmon (SysinternalsSuite), Regshot, and FakeNet are all installed
+  # independently below, in 04-tools.ps1. FLARE-VM's own Boxstarter installer
+  # was also the source of nearly every build failure this template has ever
+  # hit (repeated unpredictable reboots, multi-hour installs, transient WinRM
+  # drops mid-install) for a toolset (disassemblers, debuggers) only useful
+  # for manual investigation this pipeline doesn't do. See the git history of
+  # this file for the multi-script reboot-slicing structure FLARE-VM required,
+  # if that manual-investigation tooling is ever wanted back.
 
   # Step 1: hardening + Chocolatey. Fast, local, no reboots.
   provisioner "powershell" {
@@ -239,421 +232,17 @@ build {
     timeout           = "30m"
   }
 
-  # Step 2: trigger FLARE-VM and return. Boxstarter may reboot immediately, so
-  # a terminated task here is a normal outcome, not a failure.
-  provisioner "powershell" {
-    script            = "scripts/02-flarevm-start.ps1"
-    elevated_user     = var.winrm_user
-    elevated_password = var.winrm_pass
-    valid_exit_codes  = [0, 267014, 3010, 1641]
-    timeout           = "30m"
-  }
-
-  # Step 3: eighteen 20-minute wait slices — a 6 h ceiling. Was twelve (4 h,
-  # matching FLARE-VM's documented 2-4 h) until the 31 Jul 19:48 build: all
-  # twelve slices ran out with FLARE-VM still actively installing (133
-  # choco packages and climbing on the final slice, not stalled — the
-  # completion marker is FLARE-VM's own metapackage folder under
-  # chocolatey\lib\, which only appears once every dependency has already
-  # resolved, so it's normal for the count to keep climbing right up until
-  # it appears). 04-tools.ps1 then correctly refused to call that a golden
-  # image (missing the RE toolkit) and exited 1, killing the whole build
-  # after 4h16m of real, legitimate progress. Extended rather than loosening
-  # 04-tools.ps1's own check — an image silently missing its toolkit is a
-  # worse failure mode than a build that takes longer.
-  # Each slice returns immediately once the completion
-  # marker exists, so finishing early costs nothing but a few WinRM round
-  # trips. A reboot simply ends the current slice and the next one picks up.
-  # Not elevated: these only poll for a file, and a non-elevated provisioner
-  # is not run as a scheduled task, so it has one less way to be killed.
-  provisioner "powershell" {
-    script = "scripts/03-flarevm-wait.ps1"
-    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
-    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
-    # code from it means the run was interrupted, not that the script decided
-    # something was wrong.
-    #
-    # Which code you get depends on how the provisioner runs. An elevated
-    # provisioner is a scheduled task and returns 267014
-    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
-    # deliberately NOT elevated, so the command runs directly over WinRM and a
-    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
-    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one. 16001 is a third variant
-    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
-    # full 1200s with no error, WinRM simply going EOF right as the script
-    # tried to return - a reboot landing on the connection instead of a
-    # scheduled task or a mid-command process.
-    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
-    timeout          = "40m"
-  }
-  provisioner "powershell" {
-    script = "scripts/03-flarevm-wait.ps1"
-    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
-    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
-    # code from it means the run was interrupted, not that the script decided
-    # something was wrong.
-    #
-    # Which code you get depends on how the provisioner runs. An elevated
-    # provisioner is a scheduled task and returns 267014
-    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
-    # deliberately NOT elevated, so the command runs directly over WinRM and a
-    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
-    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one. 16001 is a third variant
-    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
-    # full 1200s with no error, WinRM simply going EOF right as the script
-    # tried to return - a reboot landing on the connection instead of a
-    # scheduled task or a mid-command process.
-    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
-    timeout          = "40m"
-  }
-  provisioner "powershell" {
-    script = "scripts/03-flarevm-wait.ps1"
-    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
-    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
-    # code from it means the run was interrupted, not that the script decided
-    # something was wrong.
-    #
-    # Which code you get depends on how the provisioner runs. An elevated
-    # provisioner is a scheduled task and returns 267014
-    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
-    # deliberately NOT elevated, so the command runs directly over WinRM and a
-    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
-    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one. 16001 is a third variant
-    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
-    # full 1200s with no error, WinRM simply going EOF right as the script
-    # tried to return - a reboot landing on the connection instead of a
-    # scheduled task or a mid-command process.
-    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
-    timeout          = "40m"
-  }
-  provisioner "powershell" {
-    script = "scripts/03-flarevm-wait.ps1"
-    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
-    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
-    # code from it means the run was interrupted, not that the script decided
-    # something was wrong.
-    #
-    # Which code you get depends on how the provisioner runs. An elevated
-    # provisioner is a scheduled task and returns 267014
-    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
-    # deliberately NOT elevated, so the command runs directly over WinRM and a
-    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
-    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one. 16001 is a third variant
-    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
-    # full 1200s with no error, WinRM simply going EOF right as the script
-    # tried to return - a reboot landing on the connection instead of a
-    # scheduled task or a mid-command process.
-    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
-    timeout          = "40m"
-  }
-  provisioner "powershell" {
-    script = "scripts/03-flarevm-wait.ps1"
-    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
-    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
-    # code from it means the run was interrupted, not that the script decided
-    # something was wrong.
-    #
-    # Which code you get depends on how the provisioner runs. An elevated
-    # provisioner is a scheduled task and returns 267014
-    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
-    # deliberately NOT elevated, so the command runs directly over WinRM and a
-    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
-    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one. 16001 is a third variant
-    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
-    # full 1200s with no error, WinRM simply going EOF right as the script
-    # tried to return - a reboot landing on the connection instead of a
-    # scheduled task or a mid-command process.
-    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
-    timeout          = "40m"
-  }
-  provisioner "powershell" {
-    script = "scripts/03-flarevm-wait.ps1"
-    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
-    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
-    # code from it means the run was interrupted, not that the script decided
-    # something was wrong.
-    #
-    # Which code you get depends on how the provisioner runs. An elevated
-    # provisioner is a scheduled task and returns 267014
-    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
-    # deliberately NOT elevated, so the command runs directly over WinRM and a
-    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
-    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one. 16001 is a third variant
-    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
-    # full 1200s with no error, WinRM simply going EOF right as the script
-    # tried to return - a reboot landing on the connection instead of a
-    # scheduled task or a mid-command process.
-    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
-    timeout          = "40m"
-  }
-  provisioner "powershell" {
-    script = "scripts/03-flarevm-wait.ps1"
-    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
-    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
-    # code from it means the run was interrupted, not that the script decided
-    # something was wrong.
-    #
-    # Which code you get depends on how the provisioner runs. An elevated
-    # provisioner is a scheduled task and returns 267014
-    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
-    # deliberately NOT elevated, so the command runs directly over WinRM and a
-    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
-    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one. 16001 is a third variant
-    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
-    # full 1200s with no error, WinRM simply going EOF right as the script
-    # tried to return - a reboot landing on the connection instead of a
-    # scheduled task or a mid-command process.
-    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
-    timeout          = "40m"
-  }
-  provisioner "powershell" {
-    script = "scripts/03-flarevm-wait.ps1"
-    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
-    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
-    # code from it means the run was interrupted, not that the script decided
-    # something was wrong.
-    #
-    # Which code you get depends on how the provisioner runs. An elevated
-    # provisioner is a scheduled task and returns 267014
-    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
-    # deliberately NOT elevated, so the command runs directly over WinRM and a
-    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
-    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one. 16001 is a third variant
-    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
-    # full 1200s with no error, WinRM simply going EOF right as the script
-    # tried to return - a reboot landing on the connection instead of a
-    # scheduled task or a mid-command process.
-    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
-    timeout          = "40m"
-  }
-  provisioner "powershell" {
-    script = "scripts/03-flarevm-wait.ps1"
-    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
-    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
-    # code from it means the run was interrupted, not that the script decided
-    # something was wrong.
-    #
-    # Which code you get depends on how the provisioner runs. An elevated
-    # provisioner is a scheduled task and returns 267014
-    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
-    # deliberately NOT elevated, so the command runs directly over WinRM and a
-    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
-    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one. 16001 is a third variant
-    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
-    # full 1200s with no error, WinRM simply going EOF right as the script
-    # tried to return - a reboot landing on the connection instead of a
-    # scheduled task or a mid-command process.
-    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
-    timeout          = "40m"
-  }
-  provisioner "powershell" {
-    script = "scripts/03-flarevm-wait.ps1"
-    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
-    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
-    # code from it means the run was interrupted, not that the script decided
-    # something was wrong.
-    #
-    # Which code you get depends on how the provisioner runs. An elevated
-    # provisioner is a scheduled task and returns 267014
-    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
-    # deliberately NOT elevated, so the command runs directly over WinRM and a
-    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
-    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one. 16001 is a third variant
-    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
-    # full 1200s with no error, WinRM simply going EOF right as the script
-    # tried to return - a reboot landing on the connection instead of a
-    # scheduled task or a mid-command process.
-    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
-    timeout          = "40m"
-  }
-  provisioner "powershell" {
-    script = "scripts/03-flarevm-wait.ps1"
-    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
-    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
-    # code from it means the run was interrupted, not that the script decided
-    # something was wrong.
-    #
-    # Which code you get depends on how the provisioner runs. An elevated
-    # provisioner is a scheduled task and returns 267014
-    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
-    # deliberately NOT elevated, so the command runs directly over WinRM and a
-    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
-    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one. 16001 is a third variant
-    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
-    # full 1200s with no error, WinRM simply going EOF right as the script
-    # tried to return - a reboot landing on the connection instead of a
-    # scheduled task or a mid-command process.
-    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
-    timeout          = "40m"
-  }
-  provisioner "powershell" {
-    script = "scripts/03-flarevm-wait.ps1"
-    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
-    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
-    # code from it means the run was interrupted, not that the script decided
-    # something was wrong.
-    #
-    # Which code you get depends on how the provisioner runs. An elevated
-    # provisioner is a scheduled task and returns 267014
-    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
-    # deliberately NOT elevated, so the command runs directly over WinRM and a
-    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
-    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one. 16001 is a third variant
-    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
-    # full 1200s with no error, WinRM simply going EOF right as the script
-    # tried to return - a reboot landing on the connection instead of a
-    # scheduled task or a mid-command process.
-    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
-    timeout          = "40m"
-  }
-  provisioner "powershell" {
-    script = "scripts/03-flarevm-wait.ps1"
-    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
-    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
-    # code from it means the run was interrupted, not that the script decided
-    # something was wrong.
-    #
-    # Which code you get depends on how the provisioner runs. An elevated
-    # provisioner is a scheduled task and returns 267014
-    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
-    # deliberately NOT elevated, so the command runs directly over WinRM and a
-    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
-    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one. 16001 is a third variant
-    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
-    # full 1200s with no error, WinRM simply going EOF right as the script
-    # tried to return - a reboot landing on the connection instead of a
-    # scheduled task or a mid-command process.
-    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
-    timeout          = "40m"
-  }
-  provisioner "powershell" {
-    script = "scripts/03-flarevm-wait.ps1"
-    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
-    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
-    # code from it means the run was interrupted, not that the script decided
-    # something was wrong.
-    #
-    # Which code you get depends on how the provisioner runs. An elevated
-    # provisioner is a scheduled task and returns 267014
-    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
-    # deliberately NOT elevated, so the command runs directly over WinRM and a
-    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
-    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one. 16001 is a third variant
-    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
-    # full 1200s with no error, WinRM simply going EOF right as the script
-    # tried to return - a reboot landing on the connection instead of a
-    # scheduled task or a mid-command process.
-    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
-    timeout          = "40m"
-  }
-  provisioner "powershell" {
-    script = "scripts/03-flarevm-wait.ps1"
-    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
-    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
-    # code from it means the run was interrupted, not that the script decided
-    # something was wrong.
-    #
-    # Which code you get depends on how the provisioner runs. An elevated
-    # provisioner is a scheduled task and returns 267014
-    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
-    # deliberately NOT elevated, so the command runs directly over WinRM and a
-    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
-    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one. 16001 is a third variant
-    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
-    # full 1200s with no error, WinRM simply going EOF right as the script
-    # tried to return - a reboot landing on the connection instead of a
-    # scheduled task or a mid-command process.
-    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
-    timeout          = "40m"
-  }
-  provisioner "powershell" {
-    script = "scripts/03-flarevm-wait.ps1"
-    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
-    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
-    # code from it means the run was interrupted, not that the script decided
-    # something was wrong.
-    #
-    # Which code you get depends on how the provisioner runs. An elevated
-    # provisioner is a scheduled task and returns 267014
-    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
-    # deliberately NOT elevated, so the command runs directly over WinRM and a
-    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
-    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one. 16001 is a third variant
-    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
-    # full 1200s with no error, WinRM simply going EOF right as the script
-    # tried to return - a reboot landing on the connection instead of a
-    # scheduled task or a mid-command process.
-    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
-    timeout          = "40m"
-  }
-  provisioner "powershell" {
-    script = "scripts/03-flarevm-wait.ps1"
-    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
-    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
-    # code from it means the run was interrupted, not that the script decided
-    # something was wrong.
-    #
-    # Which code you get depends on how the provisioner runs. An elevated
-    # provisioner is a scheduled task and returns 267014
-    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
-    # deliberately NOT elevated, so the command runs directly over WinRM and a
-    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
-    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one. 16001 is a third variant
-    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
-    # full 1200s with no error, WinRM simply going EOF right as the script
-    # tried to return - a reboot landing on the connection instead of a
-    # scheduled task or a mid-command process.
-    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
-    timeout          = "40m"
-  }
-  provisioner "powershell" {
-    script = "scripts/03-flarevm-wait.ps1"
-    # 1 is accepted here and ONLY here. 03-flarevm-wait.ps1 contains no
-    # non-zero exit path — every branch ends in `exit 0` — so any non-zero
-    # code from it means the run was interrupted, not that the script decided
-    # something was wrong.
-    #
-    # Which code you get depends on how the provisioner runs. An elevated
-    # provisioner is a scheduled task and returns 267014
-    # (SCHED_S_TASK_TERMINATED) when a reboot kills it. These slices are
-    # deliberately NOT elevated, so the command runs directly over WinRM and a
-    # reboot mid-command surfaces as plain exit 1 instead. The 15:34 build died
-    # on exactly that after 1h37m, with FLARE-VM 58 packages in: the earlier
-    # fix covered the elevated code and not this one. 16001 is a third variant
-    # of the same reboot-kill: the 31 Jul 18:10 slice hit it after polling a
-    # full 1200s with no error, WinRM simply going EOF right as the script
-    # tried to return - a reboot landing on the connection instead of a
-    # scheduled task or a mid-command process.
-    valid_exit_codes = [0, 1, 16001, 267014, 3010, 1641]
-    timeout          = "40m"
-  }
-
-  # Step 4: settle the guest before installing tooling. Boxstarter routinely
-  # leaves a pending reboot behind, and Sysmon's driver install is not
-  # something to attempt in that state.
+  # Step 2: settle the guest before installing tooling. Cheap insurance
+  # against a pending reboot from 01-hardening.ps1 or Windows itself --
+  # Sysmon's driver install is not something to attempt in that state. No
+  # longer load-bearing the way it was for Boxstarter's routine reboots, but
+  # harmless and fast, so left in rather than removed.
   provisioner "windows-restart" {
     restart_timeout = "30m"
   }
 
-  # Step 5: the analysis tooling run_sample.py actually depends on. Runs once,
-  # after the reboots are over. Also records whether FLARE-VM made it.
+  # Step 3: the analysis tooling run_sample.py actually depends on. Runs once,
+  # after the settle-restart above.
   provisioner "powershell" {
     script            = "scripts/04-tools.ps1"
     elevated_user     = var.winrm_user
@@ -661,24 +250,39 @@ build {
     timeout           = "60m"
   }
 
-  # Step 6: final cleanup + sysprep-lite (do NOT full sysprep — breaks some tools)
+  # Step 4: decoy realism -- sample documents and a local SMB share, so the
+  # guest reads as a real workstation rather than a bare analysis box to
+  # anyone who lands on it. Independent of the tooling above; safe to skip
+  # or extend without touching run_sample.py's dependencies.
+  provisioner "powershell" {
+    script            = "scripts/05-decoy-content.ps1"
+    elevated_user     = var.winrm_user
+    elevated_password = var.winrm_pass
+    timeout           = "15m"
+  }
+
+  # Step 5: final cleanup + sysprep-lite (do NOT full sysprep — breaks some tools)
   #
   # This step is best-effort housekeeping only -- nothing here should ever be
-  # able to fail a build that has already done 6+ hours of real work.
-  # Confirmed live: it did exactly that. `wevtutil cl` is a native exe, not a
-  # cmdlet, so `-ErrorAction SilentlyContinue` (which only affects cmdlets)
-  # does nothing for it -- and PowerShell's $LastExitCode only updates on a
-  # native-command invocation, so whatever `wevtutil` last returned silently
-  # became the WHOLE PROVISIONER's exit code once packer's execute_command
-  # wrapper ran `exit $LastExitCode`, even though every later cmdlet in this
-  # block (Remove-Item, WriteAllText, Write-Output) succeeded. One run had
-  # Sysmon not actually installed (a FLARE-VM package retry can legitimately
-  # leave it missing), so `wevtutil cl Microsoft-Windows-Sysmon/Operational`
-  # failed with "channel not found", that exit code rode untouched through
-  # the rest of the script, and packer marked "Build ... errored after 6
-  # hours 26 minutes" and deleted the entire output directory -- despite
-  # setup, FLARE-VM, and the decoy environment having all completed
-  # successfully. Each native call is now wrapped to force $LASTEXITCODE
+  # able to fail a build that has already done real work. Confirmed live (in
+  # the earlier FLARE-VM-based version of this template, kept here as an
+  # accurate historical record even though the specific "FLARE-VM package
+  # retry" cause below no longer applies post-removal): it did exactly that.
+  # `wevtutil cl` is a native exe, not a cmdlet, so
+  # `-ErrorAction SilentlyContinue` (which only affects cmdlets) does nothing
+  # for it -- and PowerShell's $LastExitCode only updates on a native-command
+  # invocation, so whatever `wevtutil` last returned silently became the
+  # WHOLE PROVISIONER's exit code once packer's execute_command wrapper ran
+  # `exit $LastExitCode`, even though every later cmdlet in this block
+  # (Remove-Item, WriteAllText, Write-Output) succeeded. One run had Sysmon
+  # not actually installed (a FLARE-VM package retry could legitimately
+  # leave it missing, back when FLARE-VM was part of this build), so
+  # `wevtutil cl Microsoft-Windows-Sysmon/Operational` failed with "channel
+  # not found", that exit code rode untouched through the rest of the
+  # script, and packer marked "Build ... errored after 6 hours 26 minutes"
+  # and deleted the entire output directory -- despite setup, FLARE-VM, and
+  # the decoy environment having all completed successfully. Each native
+  # call is now wrapped to force $LASTEXITCODE
   # back to 0 regardless of outcome, and the block ends on an explicit
   # `exit 0` as a second line of defense against any future best-effort step
   # added here doing the same thing.
