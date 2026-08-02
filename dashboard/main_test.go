@@ -29,6 +29,31 @@ func TestEventPaginationAndAttackerProfile(t *testing.T) {
 	}
 }
 
+func TestAttackerProfileFingerprints(t *testing.T) {
+	s := &store{events: []storedEvent{
+		{SrcIP: "203.0.113.9", Sensor: "dionaea", Fingerprint: "Linux 3.11 and newer", FingerKind: "p0f OS", Time: "2026-08-01 01:00"},
+		{SrcIP: "203.0.113.9", Sensor: "dionaea", Fingerprint: "Linux 3.11 and newer", FingerKind: "p0f OS", Time: "2026-08-01 01:01"},
+		{SrcIP: "203.0.113.9", Sensor: "cowrie", Fingerprint: "abc123", FingerKind: "JA3", Time: "2026-08-01 01:02"},
+		{SrcIP: "203.0.113.9", Sensor: "cowrie", Time: "2026-08-01 01:03"},
+	}}
+	profile, ok := s.attackerData("203.0.113.9")
+	if !ok || len(profile.Fingerprints) != 2 {
+		t.Fatalf("unexpected fingerprint aggregation: %+v", profile.Fingerprints)
+	}
+	byKey := map[string]kv{}
+	for _, f := range profile.Fingerprints {
+		byKey[f.Title] = f
+	}
+	p0f, ok := byKey["Linux 3.11 and newer"]
+	if !ok || p0f.Count != 2 || p0f.Key != "p0f OS: Linux 3.11 and newer" || p0f.Link != "/events?fingerprint=Linux+3.11+and+newer" {
+		t.Fatalf("unexpected p0f fingerprint entry: %+v", p0f)
+	}
+	ja3, ok := byKey["abc123"]
+	if !ok || ja3.Count != 1 || ja3.Key != "JA3: abc123" || ja3.Link != "/events?fingerprint=abc123" {
+		t.Fatalf("unexpected JA3 fingerprint entry: %+v", ja3)
+	}
+}
+
 func TestEventExplorerDefaultsToLazyWindow(t *testing.T) {
 	s := &store{}
 	for i := 0; i < 60; i++ {
