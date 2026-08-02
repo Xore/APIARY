@@ -22,6 +22,7 @@ from loguru import logger
 
 from models.isolation_forest import IsoForestModel, MAX_TRAIN_SAMPLES, _get_ip, _get_port, _get_transport_proto
 from models.lstm_autoencoder import LSTMAEModel
+from models.session_features import SessionFeatureTracker
 
 # ---------------------------------------------------------------------------
 # Configuration (all overridable via env vars)
@@ -350,7 +351,7 @@ def write_malformed_event_metric(es: Elasticsearch, event: dict, exc: Exception)
 
 
 def score_and_write_events(es: Elasticsearch, rdb, iso_model, lstm_model,
-                          events: list, recent_flags) -> None:
+                          events: list, recent_flags, session_tracker=None) -> None:
     """Score every event in one fetched batch, writing anomalies over
     THRESHOLD and updating recent_flags for drift detection. Extracted from
     run_worker()'s loop so a malformed event's failure mode is directly
@@ -365,11 +366,19 @@ def score_and_write_events(es: Elasticsearch, rdb, iso_model, lstm_model,
     of which ones failed here, so a malformed event's position is always
     skipped past rather than being re-fetched and failing again forever
     (roadmap baseline: "bad events cannot stop a batch").
+
+    session_tracker (#277): supplies real cmd_count/failed_logins_1h/
+    unique_ports_1h, observed exactly once per event here and reused for
+    both iso_model.extract_features() and lstm_model.score() -- optional
+    (defaults to None, falling back to extract_features()'s own pre-#277
+    neutral defaults) only so existing direct callers/tests that don't care
+    about these three features don't have to construct a tracker.
     """
     for event in events:
         try:
             src = event.get("_source", {})
-            features = iso_model.extract_features(src)
+            session_feats = session_tracker.observe(src) if session_tracker is not None else {}
+            features = iso_model.extract_features(src, **session_feats)
 
             iso_score  = iso_model.score(features)
             hbos_score = iso_model.hbos_score(features)  # fast pre-filter
@@ -377,7 +386,7 @@ def score_and_write_events(es: Elasticsearch, rdb, iso_model, lstm_model,
 
             # Only run LSTM if HBOS flagged as potentially anomalous
             if hbos_score > 0.5:
-                lstm_score = lstm_model.score(src)
+                lstm_score = lstm_model.score(src, cmd_count=session_feats.get("cmd_count", 0))
 
             scores = {
                 "isolation_forest": iso_score,
@@ -616,8 +625,9 @@ def run_worker() -> None:
     })
 
     # Initialise models
-    iso_model  = IsoForestModel(model_dir=MODEL_DIR)
-    lstm_model = LSTMAEModel(model_dir=MODEL_DIR)
+    iso_model      = IsoForestModel(model_dir=MODEL_DIR)
+    lstm_model     = LSTMAEModel(model_dir=MODEL_DIR)
+    session_tracker = SessionFeatureTracker(model_dir=MODEL_DIR)  # #277: real cmd_count/failed_logins_1h/unique_ports_1h
 
     retrain_slots = parse_retrain_slots(RETRAIN_SLOTS_UTC)
     last_fired_slot_id = load_last_fired_slot(es)  # #172: persisted, not restart-relative
@@ -664,7 +674,7 @@ def run_worker() -> None:
 
             logger.debug(f"{index_pattern}: {len(events)} new events")
 
-            score_and_write_events(es, rdb, iso_model, lstm_model, events, recent_flags)
+            score_and_write_events(es, rdb, iso_model, lstm_model, events, recent_flags, session_tracker)
 
             # Advance the checkpoint (#168): the new (timestamp, seen_ids)
             # tuple, not just the last event's timestamp -- see
@@ -688,6 +698,7 @@ def run_worker() -> None:
         # every POLL_INTERVAL is a fine cadence rather than needing a
         # separate timer or graceful-shutdown hook.
         lstm_model.save_buffers()
+        session_tracker.save()  # #277: same rationale, for the cmd_count/rolling-window state
 
         # Drift detection (#65): a full window of real scores, sustained
         # above DRIFT_ANOMALY_RATE, forces an early retrain regardless of
