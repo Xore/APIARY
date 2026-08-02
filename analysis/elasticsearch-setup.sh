@@ -273,6 +273,15 @@ JSON
 # regenerate artifact, not high-volume raw telemetry. Plain single indices,
 # not data streams -- importer overwrites by deterministic _id (sha256, job
 # id, or run id) rather than appending, so there is nothing to roll over.
+#
+# ignore_above on the flattened field: found live (2026-08-02) importing real
+# sandbox results -- flattened stores each leaf value as a Lucene keyword
+# term, and sandbox.stdout/runner_log routinely carry multi-KB dmesg/boot
+# output past Lucene's 32766-byte term limit, which fails the *entire*
+# document, not just that one leaf, unlike honeypot-events-v2's `honeypot`
+# field (short per-sensor values only, never hit this). ignore_above makes
+# ES skip indexing (not storing) an overlong leaf instead -- still present
+# and returned in _source/the document view, just not term-searchable.
 for spec in \
   "ghidra-analysis-v1:ghidra" \
   "sandbox-analysis-v1:sandbox" \
@@ -297,7 +306,7 @@ do
     },
     "mappings": {
       "properties": {
-        "${ns}": { "type": "flattened" },
+        "${ns}": { "type": "flattened", "ignore_above": 32000 },
         "@timestamp": { "type": "date" },
         "event": { "properties": { "category": { "type": "keyword" } } },
         "file": { "properties": { "hash": { "properties": { "sha256": { "type": "keyword" } } } } },
