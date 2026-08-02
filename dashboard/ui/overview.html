@@ -183,7 +183,16 @@ async function refreshDashboard(){
     if (!r.ok) return;
     const doc = new DOMParser().parseFromString(await r.text(), "text/html");
     const next = doc.querySelector("[data-hp-page-content]"),current=document.querySelector("[data-hp-page-content]");
-    if (next&&current) {const preserveMap=Boolean(current.querySelector('[data-attack-map-card]')&&next.querySelector('[data-attack-map-card]'));if(window.replaceHoneypotPage)window.replaceHoneypotPage(next,{preserveMap});else current.replaceWith(next);if(window.initDashboardTabs)window.initDashboardTabs();if(window.initHoneypotMaps)window.initHoneypotMaps();}
+    // #347: window.replaceHoneypotPage (hp-app.js's mountPage) re-nonces the
+    // fetched fragment's nonced style and script elements against the live
+    // page's own CSP nonce before insertion -- each server response gets a
+    // fresh random nonce (dashboard/render.go's nonce()) that never matches
+    // the document already loaded. A plain unconditional DOM swap here would
+    // insert un-renonced markup and trip the style-src CSP directive. If
+    // hp-app.js (deferred) hasn't finished executing yet, skip this refresh
+    // cycle instead of inserting unsafe markup -- the next 'update' event or
+    // timer tick retries, and hp-app.js is always ready well before that.
+    if (next&&current&&window.replaceHoneypotPage) {const preserveMap=Boolean(current.querySelector('[data-attack-map-card]')&&next.querySelector('[data-attack-map-card]'));window.replaceHoneypotPage(next,{preserveMap});if(window.initDashboardTabs)window.initDashboardTabs();if(window.initHoneypotMaps)window.initHoneypotMaps();}
   } catch {} finally {refreshing=false}
 }
 /* #210: the overview page used to track its own SSE connection health for a

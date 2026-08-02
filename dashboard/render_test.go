@@ -131,6 +131,27 @@ func TestOverviewRefreshTargetsTheCurrentPageContentSelector(t *testing.T) {
 	}
 }
 
+// TestOverviewRefreshNeverInsertsUnrenoncedMarkup (#347): refreshDashboard()
+// used to fall back to a bare current.replaceWith(next) whenever
+// window.replaceHoneypotPage (hp-app.js's mountPage, which re-nonces the
+// fetched fragment's <style>/<script> tags against the live page's own CSP
+// nonce before insertion) wasn't defined yet -- e.g. an SSE 'update' firing
+// before the deferred hp-app.js script finishes executing. That fallback
+// inserted markup carrying a fresh per-response nonce that never matches the
+// CSP header already pinned to the live document, tripping style-src. The
+// fix is to skip the refresh cycle entirely rather than insert unsafe
+// markup; the next update or timer tick retries once hp-app.js is ready.
+func TestOverviewRefreshNeverInsertsUnrenoncedMarkup(t *testing.T) {
+	if strings.Contains(pageTemplate, "current.replaceWith(next)") {
+		t.Fatal("overview's refresh script must not fall back to replaceWith(next) -- " +
+			"that path skips reNonce and inserts markup carrying a mismatched CSP nonce")
+	}
+	if !strings.Contains(pageTemplate, "next&&current&&window.replaceHoneypotPage") {
+		t.Fatal("overview's refresh script must gate the DOM swap on window.replaceHoneypotPage " +
+			"being defined, so an early SSE update can't race hp-app.js's deferred load")
+	}
+}
+
 // TestOverviewHasNoDuplicateLiveIndicator (#210): the overview header used
 // to carry its own "Live telemetry" pill (#201) alongside the toolbar's
 // global LIVE toggle -- two indicators that could show related-but-distinct
