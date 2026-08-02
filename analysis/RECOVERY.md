@@ -1,5 +1,9 @@
 # Backup and recovery
 
+For a *deliberate* full reset on the same hosts (not disaster recovery), see
+[`docs/STACK-REBUILD.md`](../docs/STACK-REBUILD.md) instead — this doc is
+about restoring a backup archive onto a replacement host after data loss.
+
 Run `sudo analysis/backup-honeypot.sh` from the deployed stack. It creates a
 timestamped, mode-0700 directory beneath `/opt/backups/honeypot`, requests a
 consistent Elasticsearch snapshot, archives configuration/runtime state, and
