@@ -222,6 +222,30 @@ func TestSettingsAdminPanesAreServerGated(t *testing.T) {
 	}
 }
 
+// TestSettingsServicesPaneUsesThemeDataDisplay (#258 follow-up): the Services
+// pane was rendering its table with hp-table/hp-table-wrap, dead classes with
+// no CSS definition anywhere in this repo -- confirmed by grepping both
+// hp-dashboard.css and theme.css before this change. Restyled to match
+// Xore/theme's own "Data display" example (examples/components.html#data): a
+// metric-grid summary above a table-scroll/data-table pair.
+func TestSettingsServicesPaneUsesThemeDataDisplay(t *testing.T) {
+	admin := renderSettings(t, true)
+	for _, gone := range []string{`class="hp-table"`, `class="hp-table-wrap"`} {
+		if strings.Contains(admin, gone) {
+			t.Fatalf("services pane still renders the dead %q class", gone)
+		}
+	}
+	for _, want := range []string{
+		`data-hp-services-summary`,
+		`data-hp-services-metric="healthy"`, `data-hp-services-metric="attention"`, `data-hp-services-metric="total"`,
+		`class="table-scroll"`, `class="data-table"`,
+	} {
+		if !strings.Contains(admin, want) {
+			t.Fatalf("services pane is missing %q", want)
+		}
+	}
+}
+
 // TestSettingsLinkedFromAccountMenu ensures the dashboard shell opens the
 // settings modal from the account dropdown next to the auth-account popup,
 // loads the modal controller on every page, and provides the injection root.

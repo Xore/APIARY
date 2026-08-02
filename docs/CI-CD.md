@@ -89,13 +89,35 @@ not give the `production-home` environment to pull-request workflows.
 one-shot bootstrap jobs (log directory ownership, persona seeding,
 Elasticsearch/Kibana/Arkime first-run setup) that used to live in the main
 compose file; see that file's header for the full reasoning (#111). The same
-`home` job deploys it right after `honeypot-stack`, from the same checkout.
+`home` job deploys it right *before* `honeypot-stack`, from the same
+checkout: `honeypot-stack`'s own dependents block on completion markers this
+stack writes, and deploying it second made the very first rollout of that
+split hang for 29 minutes waiting on markers that could not exist yet.
 
 Its `.env` is created once by hand on the homeserver and is never touched by
 this workflow — `ARKIME_ADMIN_PASSWORD` and `ARKIME_PASSWORD_SECRET` in it
 must be kept identical to the same two values in `honeypot-stack`'s `.env`,
 and an automated sync has no safe way to verify that a value it did not set
 is still correct.
+
+### honeypot-conpot (#258 proof of concept)
+
+`docker-compose.conpot.yml` runs as a third, separate Dockge stack at
+`/opt/stacks/honeypot-conpot`: the six Conpot personas (base S7-200,
+S7-1200, S7-1500, IEC104, Guardian AST, Kamstrup) split out of
+`honeypot-stack`'s monolithic compose file, as a proof of concept for #258.
+The same `home` job deploys it alongside `honeypot-init`, before
+`honeypot-stack`, though (unlike `honeypot-init`) it has no hard ordering
+requirement -- each persona polls its own marker file rather than using a
+compose `depends_on` chain, so its `docker compose up -d` returns
+immediately either way. See `docker-compose.conpot.yml`'s own header for
+what this proved about #258's open questions (no external networks/volumes
+needed for a standalone honeypot persona; `autoheal`, which watches by Docker
+label rather than by compose project, needs no changes at all).
+
+Log directories (`logs/conpot*`) and the `state/init-markers` mount are
+pre-existing host paths `honeypot-stack`'s own rsync step already preserves;
+this stack does not create or own them, and has no `.env` of its own.
 
 ## VPS deployment
 

@@ -855,6 +855,20 @@
       not_found: "badge--muted",
       unknown: "badge--muted"
     };
+    const SERVICE_HEALTH_BADGE = {
+      healthy: "badge--success",
+      starting: "badge--warning",
+      unhealthy: "badge--danger"
+    };
+    // A service "needs attention" if it isn't cleanly running+healthy (or
+    // running with no healthcheck configured at all, svc.health == null) --
+    // matches the summary metric above the table to what the State/Health
+    // badges in each row already say, rather than a second definition of
+    // "healthy" that could silently disagree with them.
+    function serviceNeedsAttention(svc) {
+      if (svc.state !== "running" && svc.state !== "restarting") return true;
+      return svc.health != null && svc.health !== "healthy";
+    }
 
     async function loadServices() {
       const list = q("[data-hp-services-list]");
@@ -872,9 +886,25 @@
       }
     }
 
+    function renderServicesSummary(services) {
+      const summary = q("[data-hp-services-summary]");
+      if (!summary) return;
+      if (!services.length) { summary.hidden = true; return; }
+      const attention = services.filter(serviceNeedsAttention).length;
+      const healthy = services.length - attention;
+      summary.hidden = false;
+      q('[data-hp-services-metric="healthy"]').textContent = healthy + "/" + services.length;
+      q('[data-hp-services-metric="attention"]').textContent = String(attention);
+      q('[data-hp-services-metric="total"]').textContent = String(services.length);
+      const attentionTrend = q('[data-hp-services-metric-trend="attention"]');
+      attentionTrend.textContent = attention === 0 ? "None" : (attention === 1 ? "1 service" : attention + " services");
+      attentionTrend.className = "metric__trend " + (attention === 0 ? "text-secondary" : "text-danger");
+    }
+
     function renderServices(services) {
       const list = q("[data-hp-services-list]");
       list.textContent = "";
+      renderServicesSummary(services);
       if (!services.length) { list.innerHTML = '<tr><td colspan="5">No services reported.</td></tr>'; return; }
       services.forEach(svc => {
         const row = document.createElement("tr");
@@ -891,7 +921,14 @@
         row.appendChild(stateCell);
 
         const healthCell = document.createElement("td");
-        healthCell.textContent = svc.health || "—";
+        if (svc.health) {
+          const healthBadge = document.createElement("span");
+          healthBadge.className = "badge " + (SERVICE_HEALTH_BADGE[svc.health] || "badge--muted");
+          healthBadge.textContent = svc.health;
+          healthCell.appendChild(healthBadge);
+        } else {
+          healthCell.textContent = "—";
+        }
         row.appendChild(healthCell);
 
         const restartCell = document.createElement("td");

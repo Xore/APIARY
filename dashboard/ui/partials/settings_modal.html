@@ -551,6 +551,16 @@
            AF_UNIX socket to hp-services-adapter, which owns the real
            allowlist and the real docker.sock. -->
       <section class="hp-settings-pane" data-hp-pane="services" aria-label="Services" hidden>
+        <!-- #258 follow-up: restyled against Xore/theme's "Data display" example
+             (examples/components.html#data) -- a metric-grid summary above a
+             card-wrapped "recent activity"-shaped table, using the theme's own
+             .table-scroll/.data-table (the previous .hp-table-wrap/.hp-table
+             were dead classes with no CSS definition anywhere in this repo). -->
+        <div class="metric-grid" data-hp-services-summary hidden>
+          <div class="metric"><div class="metric__label">Healthy</div><div class="metric__value" data-hp-services-metric="healthy">—</div><div class="metric__trend text-secondary" data-hp-services-metric-trend="healthy">All operational</div></div>
+          <div class="metric"><div class="metric__label">Needs attention</div><div class="metric__value" data-hp-services-metric="attention">—</div><div class="metric__trend text-danger" data-hp-services-metric-trend="attention"></div></div>
+          <div class="metric"><div class="metric__label">Tracked</div><div class="metric__value" data-hp-services-metric="total">—</div><div class="metric__trend" data-hp-services-metric-trend="total">Sensors, probes &amp; workers</div></div>
+        </div>
         <section class="card hp-field" data-hp-search="services sensors probes containers start stop restart logs status health">
           <div class="card__header">
             <div><h3>Sensors, probes &amp; workers</h3><p class="card__meta">Live container status. Actions cross a narrow allowlisted adapter — the dashboard never holds Docker access directly.</p></div>
@@ -558,7 +568,7 @@
               <button class="btn btn-ghost btn-sm" type="button" data-hp-services-refresh>Refresh</button>
             </div>
           </div>
-          <div class="hp-table-wrap"><table class="hp-table">
+          <div class="table-scroll"><table class="data-table">
             <thead><tr><th>Service</th><th>State</th><th>Health</th><th>Restarts</th><th>Actions</th></tr></thead>
             <tbody data-hp-services-list><tr><td colspan="5">Loading&hellip;</td></tr></tbody>
           </table></div>
