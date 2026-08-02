@@ -348,7 +348,7 @@ func main() {
 		renderPage(w, tmpl, "session", &data)
 	})
 	http.HandleFunc("/clusters", func(w http.ResponseWriter, r *http.Request) {
-		data := s.clustersData(parseFilter(r))
+		data := s.clustersData(clustersRequestFilter(r))
 		// Cluster Kind (Fingerprint/Payload/Autonomous system/Provider class)
 		// only exists after clustersData's own aggregation groups events --
 		// it isn't a storedEvent attribute the shared filter type can match

@@ -49,15 +49,27 @@ type campaignsPage struct {
 
 func (s *store) campaignsData(r *http.Request) campaignsPage {
 	f := parseFilter(r)
-	// Default matches aggregate.go's own periodic snapshot window; ?since=
-	// overrides it, same meaning "since" already has everywhere else.
-	since := time.Now().Add(-7 * 24 * time.Hour)
-	if !f.since.IsZero() {
-		since = f.since
-	}
 	bar := buildFilterBar(r, "/campaigns",
 		[2]string{"cidr", "Network (CIDR)"}, [2]string{"asn", "ASN"}, [2]string{"sensor", "Sensor"},
 		[2]string{"since", "Since (e.g. 24h)"})
+
+	// #307: the plain, unfiltered page visit -- overwhelmingly the common
+	// case -- is answered from the already-fresh, already-paid-for
+	// aggregate.go rebuild() snapshot (at most 15s stale) instead of
+	// recomputing correlateCampaigns() over the full matching event set
+	// again on every single request. Any active filter still needs a live
+	// recompute, since the cached snapshot only ever holds the unfiltered
+	// defaultCorrelationWindow view.
+	if f.cidr == "" && f.asn == "" && f.sensor == "" && f.since.IsZero() {
+		return campaignsPage{Generated: time.Now(), Campaigns: s.get().Campaigns, Filters: f.describe(), filterBar: bar}
+	}
+
+	// Default matches aggregate.go's own periodic snapshot window; ?since=
+	// overrides it, same meaning "since" already has everywhere else.
+	since := time.Now().Add(-defaultCorrelationWindow)
+	if !f.since.IsZero() {
+		since = f.since
+	}
 	return campaignsPage{
 		Generated: time.Now(),
 		Campaigns: correlateCampaigns(f.filtered(s.getEvents()), since),
