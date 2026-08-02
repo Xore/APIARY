@@ -18,7 +18,12 @@ IOSchedulingClass=best-effort
 IOSchedulingPriority=7
 # One sample is a revert, a boot wait, an observation window and artifact
 # collection. Comfortably above OBSERVATION_SECS for a queue of several.
-TimeoutStartSec=45min
+# #297: OBSERVATION_SECS' default moved from 300s to 1800s (30 min), so
+# 45min no longer covers more than one sample -- bumped to keep the "queue
+# of several" headroom this comment already promised. Re-check this
+# multiplier if OBSERVATION_SECS is tuned further per the default file's
+# own note.
+TimeoutStartSec=6h
 
 [Install]
 WantedBy=multi-user.target

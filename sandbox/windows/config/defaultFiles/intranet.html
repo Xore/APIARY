@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<!-- #294: FakeNet's stock "fake 200 OK" answers every HTTP/HTTPS hit with
+     nothing to look at. A page that reads as a real corporate intranet is
+     more consistent with the rest of the persona this image carries
+     (SMBIOS Dell identity, #293's Robert Tanaka / Ashford Capital
+     Partners persona, decoy documents) than a generic stub -- and it's
+     what a human analyst or a sample's own "am I online" probe
+     (curl http://anything/) actually sees. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ashford Capital Partners &mdash; Finance Intranet</title>
+<style>
+  body { font-family: "Segoe UI", Arial, sans-serif; margin: 0; background: #f2f4f7; color: #1b1f27; }
+  header { background: #0b2545; color: #fff; padding: 18px 32px; }
+  header h1 { margin: 0; font-size: 20px; font-weight: 600; }
+  header p { margin: 4px 0 0; font-size: 13px; color: #b7c4dd; }
+  nav { background: #13315c; padding: 8px 32px; }
+  nav a { color: #dfe7f5; text-decoration: none; margin-right: 24px; font-size: 13px; }
+  main { padding: 32px; max-width: 760px; }
+  .card { background: #fff; border: 1px solid #dde2ea; border-radius: 4px; padding: 20px 24px; margin-bottom: 16px; }
+  .card h2 { margin-top: 0; font-size: 16px; }
+  .helpdesk { font-size: 13px; color: #555; }
+  footer { padding: 16px 32px; font-size: 11px; color: #8a93a3; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Ashford Capital Partners</h1>
+  <p>Finance &amp; Treasury Intranet</p>
+</header>
+<nav>
+  <a href="/erp">ERP / Dynamics</a>
+  <a href="/treasury">Treasury Portal</a>
+  <a href="/hr">HR Self-Service</a>
+</nav>
+<main>
+  <div class="card">
+    <h2>Welcome back</h2>
+    <p>This portal is for internal Finance department use only. For access
+    issues, VPN configuration, or password resets, contact the IT Help
+    Desk.</p>
+    <p class="helpdesk">IT Help Desk: extension 4471 &middot; helpdesk@ashfordcapital.example</p>
+  </div>
+  <div class="card">
+    <h2>Announcements</h2>
+    <p>FY2026 budget submissions are due to Controller review by end of
+    month. Treasury portal MFA now requires the hardware token &mdash; the
+    mobile app has been retired.</p>
+  </div>
+</main>
+<footer>&copy; Ashford Capital Partners. Internal use only.</footer>
+</body>
+</html>

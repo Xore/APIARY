@@ -34,4 +34,17 @@ VM_PASS=changeme
 # ── Detonation window ────────────────────────────────────────────────────
 # Seconds to observe after execution. TimeoutStartSec in the service unit must
 # stay comfortably above this multiplied by a plausible queue depth.
-OBSERVATION_SECS=300
+#
+# #297: 300s (5 min) was never chosen for this reason -- it was an
+# unexamined placeholder. windows_kimi/RESEARCH.md #4 item 7 and #1.3 both
+# argue for 15-60 minutes: a sample doing nothing more sophisticated than
+# Sleep(600000) before its real payload already defeats a 5-minute window,
+# independent of any anti-detection work elsewhere in the image, and the
+# living-persona daemon (#290) keeps GetLastInputInfo low for the whole
+# window regardless of length. The cost is throughput -- fewer detonations
+# per hour per available VM -- which is why this is a deliberate 30-minute
+# default (the middle of the recommended range) rather than the top of it.
+# Raise toward 3600 if long-sleep/date-gated logic bombs are a bigger
+# concern than queue depth for your deployment; lower toward 900 if the
+# reverse.
+OBSERVATION_SECS=1800
