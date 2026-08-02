@@ -105,6 +105,7 @@
           {{template "tbl" (dict "t" "HTTP paths" "rows" .Paths "class" "half" "hint" "none")}}
           {{template "tbl" (dict "t" "Payload hashes" "rows" .Payloads "class" "half" "hint" "none")}}
           {{template "tbl" (dict "t" "Alerts" "rows" .Alerts "class" "half" "hint" "none")}}
+          {{template "tbl" (dict "t" "Fingerprints" "rows" .Fingerprints "class" "half" "hint" "none")}}
           {{template "techniques" .Techniques}}
           <div class="card wide"><h2>Attack progression</h2><p class="note">Chronological, oldest to newest; capped to the latest 250 matching records.</p><table class="recent data-table"><thead><tr><th>time</th><th>sensor</th><th>source</th><th>port</th><th>detail</th></tr></thead><tbody>{{range .Events}}{{template "everow" .}}{{end}}</tbody></table></div>
         </div>

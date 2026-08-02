@@ -102,6 +102,7 @@ type attackerPage struct {
 	Payloads     []kv
 	Paths        []kv
 	Alerts       []kv
+	Fingerprints []kv
 	Events       []storedEvent
 	Techniques   []attackTechnique
 }
@@ -113,6 +114,7 @@ func (s *store) attackerData(ip string) (attackerPage, bool) {
 	p := attackerPage{Generated: time.Now(), IP: ip}
 	sensors, creds, commands := map[string]int{}, map[string]int{}, map[string]int{}
 	payloads, paths, alerts := map[string]int{}, map[string]int{}, map[string]int{}
+	fingerprints, fingerKinds := map[string]int{}, map[string]string{}
 	sessions := map[string]bool{}
 	for _, event := range s.getEvents() {
 		if event.SrcIP != ip {
@@ -145,6 +147,12 @@ func (s *store) attackerData(ip string) (attackerPage, bool) {
 		if event.Alert != "" {
 			alerts[event.Alert]++
 		}
+		if event.Fingerprint != "" {
+			fingerprints[event.Fingerprint]++
+			if _, seen := fingerKinds[event.Fingerprint]; !seen {
+				fingerKinds[event.Fingerprint] = firstNonEmpty(event.FingerKind, "fingerprint")
+			}
+		}
 	}
 	if p.Total == 0 {
 		return p, false
@@ -158,6 +166,13 @@ func (s *store) attackerData(ip string) (attackerPage, bool) {
 	p.Sessions = len(sessions)
 	p.Sensors, p.Creds, p.Commands = topN(sensors, 20), topN(creds, 15), topN(commands, 15)
 	p.Payloads, p.Paths, p.Alerts = topN(payloads, 15), topN(paths, 15), topN(alerts, 15)
+	p.Fingerprints = topN(fingerprints, 15)
+	for i := range p.Fingerprints {
+		fp := p.Fingerprints[i].Key
+		p.Fingerprints[i].Title = fp
+		p.Fingerprints[i].Key = fingerKinds[fp] + ": " + fp
+		p.Fingerprints[i].Link = eventsURL(url.Values{"fingerprint": {fp}})
+	}
 	p.Techniques = aggregateTechniques(p.Events)
 	return p, true
 }
