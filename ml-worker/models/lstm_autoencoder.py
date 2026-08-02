@@ -38,8 +38,10 @@ torch.set_num_threads(1)
 
 from models.isolation_forest import (
     _get_ip, _get_port, _get_transport_proto, _proto_enc, _ts_to_hour,
-    _accept_decision, _symlink, HOLDOUT_FRACTION, HOLDOUT_MIN, RetrainResult,
+    _accept_decision, _symlink, HOLDOUT_FRACTION, HOLDOUT_MIN, MAX_CMD_COUNT,
+    RetrainResult,
 )
+from models.session_features import compute_batch_session_features
 from models.lifecycle import prune_old_versions, write_version_metadata
 
 SEQ_LEN   = 15    # sliding window length (events per sequence)
@@ -79,20 +81,21 @@ def _ts_to_epoch(ts_str: Optional[str]) -> Optional[float]:
         return None
 
 
-def featurise_temporal(src: dict, inter_arrival_s: float) -> np.ndarray:
+def featurise_temporal(src: dict, inter_arrival_s: float, cmd_count: int = 0) -> np.ndarray:
     """Build the 6-dim per-timestep vector docs/ml-worker-plan.md §5.2
     documents: [hour_of_day, dst_port_norm, proto_enc, payload_entropy,
     inter_arrival_log, cmd_count_norm].
 
     Reads the real honeypot-v2-*/suricata-v2-* schema via
     models.isolation_forest's field readers (#62 task 32/33) rather than the
-    flat schema no real document has. payload_entropy and cmd_count_norm
-    stay at documented neutral defaults for the same reason
-    extract_features() leaves them unwired: no sensor emits a consistent
-    raw-payload field, and no per-session command counter was ever wired to
-    a real stateful aggregator. inter_arrival_s is the caller's
-    responsibility (LSTMAEModel tracks last-seen-per-IP state) so this stays
-    a pure, independently testable function.
+    flat schema no real document has. payload_entropy stays at its
+    documented neutral default -- no sensor emits a consistent raw-payload
+    field (#277 remaining scope). cmd_count is now real (#277): the caller
+    supplies it (models.session_features.SessionFeatureTracker for the
+    online path, compute_batch_session_features() for retrain()), the same
+    contract inter_arrival_s already used -- LSTMAEModel tracks the
+    per-session/per-IP state, this stays a pure, independently testable
+    function of (event, context).
     """
     ts = src.get("@timestamp") or src.get("timestamp")
     hour_norm  = _ts_to_hour(ts) / 23.0
@@ -100,7 +103,7 @@ def featurise_temporal(src: dict, inter_arrival_s: float) -> np.ndarray:
     proto_norm = _proto_enc(_get_transport_proto(src)) / 3.0
     entropy_norm = 0.0  # not wired -- see docstring
     inter_log  = min(float(np.log1p(max(inter_arrival_s, 0.0))) / 10.0, 1.0)
-    cmd_count_norm = 0.0  # not wired -- see docstring
+    cmd_count_norm = min(cmd_count, MAX_CMD_COUNT) / MAX_CMD_COUNT
     return np.array(
         [hour_norm, port_norm, proto_norm, entropy_norm, inter_log, cmd_count_norm],
         dtype=np.float32,
@@ -189,7 +192,7 @@ class LSTMAEModel:
         self._load_latest()
         self._load_buffers()
 
-    def score(self, src: dict) -> float:
+    def score(self, src: dict, cmd_count: int = 0) -> float:
         """
         Append this event to its src_ip's sliding window and return a
         reconstruction-loss-based anomaly score in [0, 1].
@@ -197,7 +200,12 @@ class LSTMAEModel:
         Takes the raw ES _source dict directly (like
         IsoForestModel.extract_features()) rather than a slice of an
         unrelated model's feature vector -- see the commit that fixed this
-        (#63) for why that was broken.
+        (#63) for why that was broken. cmd_count (#277) is the caller's
+        responsibility, same as inter_arrival_s -- worker.py's
+        score_and_write_events() supplies it from the SAME
+        SessionFeatureTracker.observe() call already made for
+        IsoForestModel.extract_features(), so one event is only ever
+        observed once.
 
         Returns 0.0 before SEQ_LEN events have accumulated for this IP (real
         "no signal yet", same as before). That is distinct from the bounded
@@ -213,7 +221,7 @@ class LSTMAEModel:
         if now is not None:
             self._last_seen[ip] = now
 
-        vec = featurise_temporal(src, inter_arrival)
+        vec = featurise_temporal(src, inter_arrival, cmd_count=cmd_count)
         self._buffers[ip].append(vec)
         if len(self._buffers[ip]) < SEQ_LEN:
             return 0.0  # not enough history yet
@@ -248,21 +256,28 @@ class LSTMAEModel:
         cost rationale; caps the actual fit() input the same way
         IsoForestModel.retrain()'s MAX_TRAIN_SAMPLES does (#62), keeping the
         most recent windows.
+
+        cmd_count (#277) is computed once for the whole batch via
+        compute_batch_session_features() -- same one-pass-per-retrain
+        contract as IsoForestModel.retrain(), not per-IP, since cmd_count is
+        keyed by Cowrie session, not by src_ip.
         """
+        batch_features = compute_batch_session_features(sources)
+
         by_ip: dict = collections.defaultdict(list)
-        for src in sources:
+        for src, feats in zip(sources, batch_features):
             ip = _get_ip(src) or "unknown"
             ts = _ts_to_epoch(src.get("@timestamp") or src.get("timestamp"))
-            by_ip[ip].append((ts if ts is not None else 0.0, src))
+            by_ip[ip].append((ts if ts is not None else 0.0, src, feats["cmd_count"]))
 
         sequences = []
         for ip, events in by_ip.items():
-            events.sort(key=lambda pair: pair[0])
+            events.sort(key=lambda triple: triple[0])
             vecs = []
             last_ts = None
-            for ts, src in events:
+            for ts, src, cmd_count in events:
                 inter = (ts - last_ts) if (last_ts is not None and ts >= last_ts) else 60.0
-                vecs.append(featurise_temporal(src, inter))
+                vecs.append(featurise_temporal(src, inter, cmd_count=cmd_count))
                 last_ts = ts
             for i in range(0, len(vecs) - SEQ_LEN + 1):
                 sequences.append(np.array(vecs[i:i + SEQ_LEN], dtype=np.float32))

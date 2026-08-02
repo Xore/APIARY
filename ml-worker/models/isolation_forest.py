@@ -31,6 +31,11 @@ N_FEATURES    = 15
 CONTAMINATION = 0.01   # assume ~1% of events are anomalous
 N_ESTIMATORS  = 200
 
+# Normalisation ceiling for cmd_count / cmd_count_norm (#277), shared with
+# models/lstm_autoencoder.py's featurise_temporal() so both models agree on
+# what "a lot of commands in one session" means.
+MAX_CMD_COUNT = 200
+
 # Acceptance gate (#65, docs/ml-worker-plan.md §11.1) -- unsupervised
 # retraining has no labels to score precision/recall against, so the bar is
 # label-free: does the candidate score without error, and does its anomaly
@@ -289,18 +294,29 @@ class IsoForestModel:
     # Public interface
     # ------------------------------------------------------------------
 
-    def extract_features(self, src: dict) -> np.ndarray:
+    def extract_features(self, src: dict, cmd_count: int = 0,
+                          failed_logins_1h: int = 0, unique_ports_1h: int = 1,
+                          payload_bytes: bytes = b"") -> np.ndarray:
         """Convert a real honeypot-v2-*/suricata-v2-* ES _source dict to a
         feature vector. See the module-level _get_* helpers and
         docs/ml-worker-plan.md §5.3 for exactly where each value is read
         from per sensor.
 
-        payload_hex, cmd_count, failed_logins_1h, and unique_ports_1h have
-        no consistent real source across the 5 sensors (no sensor emits a
-        uniform raw-payload field; the rolling-window counters were never
-        wired to an actual stateful aggregator) -- left at their documented
-        neutral defaults rather than faking a fix. See #62 task 33 / the
-        schema contract for detail.
+        cmd_count/failed_logins_1h/unique_ports_1h are now real (#277) --
+        the caller supplies them, computed once per batch by
+        models.session_features.SessionFeatureTracker (the live/online
+        path, worker.py's score_and_write_events()) or
+        compute_batch_session_features() (retrain()'s historical batches).
+        This mirrors featurise_temporal()'s inter_arrival_s contract in
+        models/lstm_autoencoder.py: the stateful bookkeeping (per-session
+        counters, rolling 1h windows) lives with the caller, not inside this
+        otherwise-pure function. Defaults (0/0/1) are the pre-#277 neutral
+        values, kept only so a caller that genuinely has no session/window
+        context (most direct unit tests) doesn't have to fabricate one.
+
+        payload_hex remains unwired -- no sensor in this stack's real
+        ingest pipeline emits a consistent raw-payload byte field (#277
+        remaining scope; see docs/ml-worker-plan.md §5.3).
         """
         ts   = src.get("@timestamp") or src.get("timestamp")
         ip   = _get_ip(src)
@@ -309,10 +325,6 @@ class IsoForestModel:
         username  = _get_username(src)
         password  = _get_password(src)
         duration  = _get_duration(src)
-        cmd_count = 0     # not wired -- see docstring
-        failed    = 0     # not wired -- see docstring
-        uniq_ports= 1     # not wired -- see docstring
-        payload_bytes = b""  # not wired -- see docstring
 
         features = np.array([
             _ts_to_hour(ts),                       # 0
@@ -320,13 +332,13 @@ class IsoForestModel:
             min(port, 65535) / 65535.0,            # 2  normalised port
             _proto_enc(_get_transport_proto(src)), # 3
             min(duration, 3600) / 3600.0,          # 4  session duration
-            min(cmd_count, 200) / 200.0,           # 5
+            min(cmd_count, MAX_CMD_COUNT) / MAX_CMD_COUNT, # 5
             _shannon_entropy(payload_bytes) / 8.0, # 6  payload entropy
             min(len(payload_bytes), 65535) / 65535.0, # 7 payload len
             min(len(username), 128) / 128.0,       # 8
             _str_entropy(password) / 8.0,          # 9
-            min(failed, 500) / 500.0,              # 10 failed logins rolling
-            min(uniq_ports, 65535) / 65535.0,      # 11 port scan width
+            min(failed_logins_1h, 500) / 500.0,    # 10 failed logins rolling
+            min(unique_ports_1h, 65535) / 65535.0, # 11 port scan width
             _is_known_scanner(ip),                 # 12 bool
             0.0,                                   # 13 reserved: is_tor_exit
             0.0,                                   # 14 reserved: is_vpn
@@ -403,6 +415,13 @@ class IsoForestModel:
         guaranteed) assumption that callers append in roughly chronological
         order; a cap that's approximately-recent is still a real bound and
         is far better than an unbounded one.
+
+        cmd_count/failed_logins_1h/unique_ports_1h (#277) are computed once
+        here via compute_batch_session_features() -- a pure, batch-local
+        pass over exactly this capped set of sources, deliberately not
+        shared with the live SessionFeatureTracker (see that module's own
+        docstring for why a historical retrain batch and "live so far"
+        state answer different questions).
         """
         if len(sources) > MAX_TRAIN_SAMPLES:
             sources = sources[-MAX_TRAIN_SAMPLES:]
@@ -415,16 +434,26 @@ class IsoForestModel:
                 anomaly_rate_new=0.0, anomaly_rate_previous=None,
             )
 
+        # Local import: models.session_features imports _get_ip/_get_port
+        # from this module, so importing it at module scope here would be
+        # circular.
+        from models.session_features import compute_batch_session_features
+        batch_features = compute_batch_session_features(sources)
+
         # Holdout is the newest slice -- never trained on, evaluated after
         # fitting. sources are the caller's fetch order (worker.py sorts
         # ascending by @timestamp), so this is the most-recent-events split,
         # not a random one.
         holdout_n = min(max(HOLDOUT_MIN, int(n * HOLDOUT_FRACTION)), n - 1)
-        train_sources = sources[:n - holdout_n]
-        holdout_sources = sources[n - holdout_n:]
+        train_sources, train_features = sources[:n - holdout_n], batch_features[:n - holdout_n]
+        holdout_sources, holdout_features = sources[n - holdout_n:], batch_features[n - holdout_n:]
 
-        X_train = np.vstack([self.extract_features(s) for s in train_sources]).reshape(len(train_sources), N_FEATURES)
-        X_holdout = np.vstack([self.extract_features(s) for s in holdout_sources]).reshape(len(holdout_sources), N_FEATURES)
+        X_train = np.vstack([
+            self.extract_features(s, **f) for s, f in zip(train_sources, train_features)
+        ]).reshape(len(train_sources), N_FEATURES)
+        X_holdout = np.vstack([
+            self.extract_features(s, **f) for s, f in zip(holdout_sources, holdout_features)
+        ]).reshape(len(holdout_sources), N_FEATURES)
 
         candidate_iso = IsolationForest(
             n_estimators=N_ESTIMATORS,

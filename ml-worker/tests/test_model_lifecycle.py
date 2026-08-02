@@ -205,10 +205,21 @@ class TestRetrainAttachesCalibration:
     _PORT_CLUSTERS = (22, 445, 3389, 8080, 21)
 
     def _varied_sources(self, n=140):
+        # Distinct src_ip per event (#277): compute_batch_session_features()
+        # now derives real failed_logins_1h/unique_ports_1h from src_ip +
+        # @timestamp -- 140 events sharing one identical src_ip AND
+        # @timestamp (the pre-#277 fixture shape) would all land on the same
+        # rolling window and produce a monotonically ramping
+        # failed_logins_1h (1..140) that swamps the port-cluster variance
+        # this test actually means to probe. A distinct src_ip per event
+        # keeps both real features at their realistic single-event value (1)
+        # so this test still isolates what it says it does.
         out = []
         for i in range(n):
+            ip = f"203.0.113.{(i % 250) + 1}"
             out.append({
                 **fixtures.COWRIE_LOGIN_FAILED["_source"],
+                "source": {"ip": ip},
                 "destination": {"port": self._PORT_CLUSTERS[i % len(self._PORT_CLUSTERS)]},
             })
         return out
