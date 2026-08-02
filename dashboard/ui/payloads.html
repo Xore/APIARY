@@ -65,6 +65,7 @@
           {{if .Filter}}<a class="chip" href="/payloads">all sources</a>{{else}}<span class="chip">all sources</span>{{end}}
           {{range .Sources}}{{if .Active}}<span class="chip">{{.Name}} {{.Count}}</span>{{else}}<a class="chip" href="{{.Link}}">{{.Name}} {{.Count}}</a>{{end}}{{end}}
           {{if .Enabled}}<span class="chip">{{len .Files}} loaded of {{.ResultTotal}} matching &bull; {{.UniqueTotal}} unique total &bull; {{.TotalH}}</span>{{end}}
+          {{template "filterbar" .}}
         </div>
 
         <div class="tw:grid tw:grid-cols-12 tw:gap-3.5" id="payloads-grid">
@@ -79,7 +80,7 @@
             {{if not .Enabled}}<p class="empty">payload serving is disabled (set PAYLOAD_DIRS and/or SCRIPT_PAYLOAD_DIR)</p>
             {{else if .Loading}}<p class="note" data-payload-warming><span class="live-dot" aria-hidden="true"></span> Preparing the payload inventory. This page will update automatically.</p><script nonce="{{.Nonce}}">setTimeout(()=>location.reload(),1500)</script>
             {{else if .Files}}
-            <div class="project-grid" id="payloads-results" data-hp-lazy-list data-hp-page-url="/api/payload-rows?source={{.Filter | urlquery}}" data-hp-total="{{.ResultTotal}}">
+            <div class="project-grid" id="payloads-results" data-hp-lazy-list data-hp-page-url="{{.RowsURL}}" data-hp-total="{{.ResultTotal}}">
             {{template "payloadrows" .}}
             </div>
             {{else}}<p class="empty">no payloads captured yet</p>{{end}}

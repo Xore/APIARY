@@ -255,6 +255,7 @@ type filterFieldOption struct {
 //   - kind is exactly the 4 cluster kinds intelligence.go's clustersData
 //     ever produces (Fingerprint/Payload/Autonomous system/Provider class)
 //     -- confirmed by reading that switch directly, not assumed.
+//   - state (#301) is alertRecord.Acknowledged's only two states.
 var filterSelectOptions = map[string][]filterFieldOption{
 	"event_type": {
 		{"", "any"}, {"login", "login"}, {"command", "command"},
@@ -267,6 +268,9 @@ var filterSelectOptions = map[string][]filterFieldOption{
 	"kind": {
 		{"", "any"}, {"Fingerprint", "Fingerprint"}, {"Payload", "Payload"},
 		{"Autonomous system", "Autonomous system"}, {"Provider class", "Provider class"},
+	},
+	"state": {
+		{"", "any"}, {"open", "open"}, {"acknowledged", "acknowledged"},
 	},
 }
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -122,5 +123,87 @@ func TestAlertsAPIEmptyKeyIsNotBulk(t *testing.T) {
 	}
 	if s.alerts.records["one"].Acknowledged {
 		t.Fatal("an empty key acknowledged an alert")
+	}
+}
+
+// #301: /alerts gains a filter bar (state, key-or-message substring) --
+// filtering itself happens client-side in alerts.html against the always-
+// unfiltered GET /api/alerts response (a shared endpoint other widgets also
+// call, and already capped at 200 records), so what's tested on the Go side
+// is the filter bar's own construction and the client-side wiring actually
+// being present in the rendered page, not row-level filtering logic.
+
+func TestAlertsStateIsAClosedTwoValueEnum(t *testing.T) {
+	opts, ok := filterSelectOptions["state"]
+	if !ok {
+		t.Fatal(`filterSelectOptions["state"] is missing -- state should render as a <select>, not free text`)
+	}
+	got := map[string]bool{}
+	for _, o := range opts {
+		got[o.Value] = true
+	}
+	// alertRecord.Acknowledged is a bool -- exactly two real states, plus the
+	// empty "any" value every other select field in this codebase uses.
+	for _, want := range []string{"", "open", "acknowledged"} {
+		if !got[want] {
+			t.Errorf("state options missing %q: %+v", want, opts)
+		}
+	}
+	if len(opts) != 3 {
+		t.Errorf("state should have exactly 3 options (any/open/acknowledged), got %+v", opts)
+	}
+}
+
+func TestAlertsFilterBarPreFillsFromRequest(t *testing.T) {
+	r := httptest.NewRequest("GET", "/alerts?state=open&q=mirai", nil)
+	bar := buildFilterBar(r, "/alerts", [2]string{"state", "State"}, [2]string{"q", "Key or message contains"})
+	if bar.FilterAction != "/alerts" {
+		t.Fatalf("FilterAction = %q, want /alerts", bar.FilterAction)
+	}
+	names := map[string]string{}
+	kinds := map[string]string{}
+	for _, f := range bar.FilterFields {
+		names[f.Name], kinds[f.Name] = f.Value, f.Kind
+	}
+	if names["state"] != "open" || kinds["state"] != "select" {
+		t.Errorf("state field not pre-filled as a select: %+v", bar.FilterFields)
+	}
+	if names["q"] != "mirai" {
+		t.Errorf("q field not pre-filled: %+v", bar.FilterFields)
+	}
+}
+
+// End-to-end through the real template: the filter bar disclosure renders
+// with the state <select> pre-filled, and the page's own script carries the
+// client-side filtering function that reads it back out of the URL.
+func TestAlertsPageRendersFilterBarAndClientSideFilterWiring(t *testing.T) {
+	funcs := templateFuncs(nil, "")
+	tmpl := template.Must(template.New("t").Funcs(funcs).Parse(pageTemplate))
+	r := httptest.NewRequest("GET", "/alerts?state=acknowledged", nil)
+	data := alertsPageData{
+		filterBar: buildFilterBar(r, "/alerts", [2]string{"state", "State"}, [2]string{"q", "Key or message contains"}),
+	}
+	var out strings.Builder
+	if err := tmpl.ExecuteTemplate(&out, "alerts", &data); err != nil {
+		t.Fatalf("alerts page does not render: %v", err)
+	}
+	html := out.String()
+
+	if !strings.Contains(html, `<select name="state">`) {
+		t.Error("state filter field did not render as a <select>")
+	}
+	if !strings.Contains(html, `value="acknowledged" selected`) {
+		t.Errorf("state select is not pre-filled from the request: %s", html)
+	}
+	if !strings.Contains(html, "function alertMatchesFilter") {
+		t.Error("client-side filter function is missing from the rendered page")
+	}
+	if !strings.Contains(html, "new URLSearchParams(location.search)") {
+		t.Error("loadAlerts no longer reads the active filter from the URL")
+	}
+	// "acknowledge all" must stay scoped to the whole board, not the filtered
+	// view -- renderAckAll must still be called with the unfiltered list.
+	if !strings.Contains(html, "renderAckAll(all)") {
+		t.Error("acknowledge-all count must be computed from the unfiltered alert list, not the filtered one")
 	}
 }

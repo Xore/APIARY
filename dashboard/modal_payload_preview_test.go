@@ -47,7 +47,7 @@ func TestPayloadPreviewModalContract(t *testing.T) {
 
 	funcs := templateFuncs(s, "")
 	tmpl := template.Must(template.New("t").Funcs(funcs).Parse(pageTemplate))
-	page := s.payloadsData("")
+	page := s.payloadsData(payloadsFilter{})
 	var out strings.Builder
 	if err := tmpl.ExecuteTemplate(&out, "payloads", &page); err != nil {
 		t.Fatalf("payloads page does not render: %v", err)

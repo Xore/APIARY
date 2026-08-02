@@ -386,7 +386,10 @@ func main() {
 		renderPage(w, tmpl, "source-health", &data)
 	})
 	http.HandleFunc("/alerts", func(w http.ResponseWriter, r *http.Request) {
-		data := s.get()
+		data := alertsPageData{
+			snapshot:  s.get(),
+			filterBar: buildFilterBar(r, "/alerts", [2]string{"state", "State"}, [2]string{"q", "Key or message contains"}),
+		}
 		renderPage(w, tmpl, "alerts", &data)
 	})
 	http.HandleFunc("/ml-anomalies", func(w http.ResponseWriter, r *http.Request) {
@@ -402,7 +405,10 @@ func main() {
 		renderPage(w, tmpl, "reports", &data)
 	})
 	http.HandleFunc("/payloads", func(w http.ResponseWriter, r *http.Request) {
-		data := s.payloadsData(r.URL.Query().Get("source"))
+		data := s.payloadsData(parsePayloadsFilter(r))
+		data.filterBar = buildFilterBar(r, "/payloads",
+			[2]string{"sensor", "Sensor"}, [2]string{"since", "Since (e.g. 24h)"}, [2]string{"q", "Hash contains"})
+		data.RowsURL = payloadsRowsURL(r)
 		if r.URL.Query().Get("analysis") == "queued" && hashName.MatchString(r.URL.Query().Get("hash")) {
 			guest := "isolated"
 			switch sandboxTarget(r.URL.Query().Get("target")) {
@@ -420,7 +426,7 @@ func main() {
 		renderPage(w, tmpl, "payloads", &data)
 	})
 	http.HandleFunc("/api/payload-rows", func(w http.ResponseWriter, r *http.Request) {
-		data := s.payloadsData(r.URL.Query().Get("source"))
+		data := s.payloadsData(parsePayloadsFilter(r))
 		offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 		if offset < 0 {
 			offset = 0
