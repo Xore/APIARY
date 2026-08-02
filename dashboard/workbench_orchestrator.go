@@ -184,7 +184,27 @@ func workbenchResultAfter(value string, threshold time.Time) bool {
 	return err == nil && !parsed.Before(threshold.Add(-time.Second))
 }
 
-func (s *store) reconcileWorkbenchRun(run workbenchRun) workbenchRun {
+// reconcileWorkbenchRun re-checks each non-terminal child against the
+// analyzers' own result/status files and updates the run accordingly. #348:
+// once every child is terminal, nothing about the run can change again --
+// terminalWorkbenchState children are already skipped below, but the four
+// loadXResults/loadSandboxStatus calls used to run unconditionally anyway,
+// each a full directory read + per-file JSON parse. A workbench results page
+// listing hundreds of long-finished runs paid that cost, in full, for every
+// run, on every view. The second return value reports whether anything
+// actually changed, so callers that persist the result can skip writing an
+// identical file back to disk for a run that had no work left to do.
+func (s *store) reconcileWorkbenchRun(run workbenchRun) (workbenchRun, bool) {
+	needsWork := false
+	for index := range run.Children {
+		if !terminalWorkbenchState(run.Children[index].State) {
+			needsWork = true
+			break
+		}
+	}
+	if !needsWork {
+		return run, false
+	}
 	now := time.Now().UTC()
 	ghidraResults := loadGhidraResults()
 	revdeckResults := loadRevdeckResults()
@@ -272,7 +292,7 @@ func (s *store) reconcileWorkbenchRun(run workbenchRun) workbenchRun {
 		child.UpdatedAt = now
 	}
 	updateWorkbenchRunState(&run)
-	return run
+	return run, true
 }
 
 func newestGhidraResult(hash string, results []ghidraResult, after time.Time) (ghidraResult, bool) {
@@ -357,7 +377,10 @@ func (s *store) getWorkbenchRun(id, owner string) (workbenchRun, error) {
 	if err != nil {
 		return workbenchRun{}, err
 	}
-	reconciled := s.reconcileWorkbenchRun(run)
+	reconciled, changed := s.reconcileWorkbenchRun(run)
+	if !changed {
+		return reconciled, nil
+	}
 	err = s.workbench.persistRunLocked(reconciled)
 	return reconciled, err
 }
@@ -369,7 +392,7 @@ func (s *store) workbenchChildAction(runID, analyzerID, action, owner string) (w
 	if err != nil {
 		return workbenchRun{}, err
 	}
-	run = s.reconcileWorkbenchRun(run)
+	run, _ = s.reconcileWorkbenchRun(run)
 	index := -1
 	for i := range run.Children {
 		if run.Children[i].AnalyzerID == analyzerID {
