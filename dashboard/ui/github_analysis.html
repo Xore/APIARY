@@ -6,6 +6,20 @@
 <meta name="robots" content="noindex, nofollow">
 <title>xore//honeypot &mdash; GitHub analysis</title>
 {{template "style" .}}
+<style nonce="{{.Nonce}}">
+/* #309: Report viewer, an application-managed overlay per the shared modal
+   contract (Xore/theme docs/MODALS.md) -- same shape as reports.html's own
+   generated-report viewer (.hp-rp-viewer), but this page has at most one
+   PDF per analysis, so there's no grid, just the one card/button that opens
+   this single modal. */
+.hp-ga-viewer { flex-direction: column; width: min(1000px, calc(100vw - 40px)); height: min(860px, calc(100dvh - 48px)); padding: 20px 20px 0; }
+.hp-ga-viewer #hp-ga-viewer-title { flex: none; margin: 0 40px 12px 0; font-size: var(--font-size-lg); }
+.hp-ga-viewer-frame { flex: 1; width: 100%; min-height: 0; border: 0; background: var(--surface-0); margin: 0 -20px; }
+@media (max-width: 720px) {
+  .hp-ga-viewer { width: 100vw; height: 100dvh; border-radius: 0; }
+}
+.hp-ga-report-actions { display: flex; gap: 10px; align-items: center; }
+</style>
 </head>
 <body>
 <div class="app-shell">
@@ -65,7 +79,7 @@
         <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-artifacts" role="tabpanel" data-dashboard-panel="artifacts" hidden>
           <div class="section-heading"><div><h2>What the pipeline produced</h2><p>Auto-generated detection content and the downloadable report.</p></div></div>
           <div class="card wide"><h2>Auto-generated YARA rules</h2>{{if .Detail.YARAAutoRules}}<p class="note">{{len .Detail.YARAAutoRules}} rule file{{if ne (len .Detail.YARAAutoRules) 1}}s{{end}} in the upstream repository reference this sample's hash.</p><ul class="tw:list-disc tw:pl-5">{{range .Detail.YARAAutoRules}}<li><code>{{.}}</code></li>{{end}}</ul>{{else}}<p class="empty">No auto-generated YARA rules reference this sample.</p>{{end}}</div>
-          <div class="card wide"><h2>Report</h2>{{if .Detail.ExportURL}}<p class="note">Redirects to the rendered PDF report in the upstream repository when one has been generated, or downloads this JSON record otherwise.</p><a class="lnk" href="{{.Detail.ExportURL}}">open report &darr;</a>{{else}}<p class="empty">No report is available for this analysis.</p>{{end}}</div>
+          <div class="card wide"><h2>Report</h2>{{if .Detail.ViewURL}}<p class="note">The rendered PDF report from the upstream repository.</p><div class="hp-ga-report-actions"><button class="btn btn-sm btn-primary" type="button" data-hp-ga-view-report="{{.Detail.ViewURL}}">view report</button><a class="lnk" href="{{.Detail.ViewURL}}?download=1">download &darr;</a></div>{{else if .Detail.ExportURL}}<p class="note">No PDF has been generated for this analysis yet &mdash; this downloads the JSON record instead.</p><a class="lnk" href="{{.Detail.ExportURL}}">download JSON &darr;</a>{{else}}<p class="empty">No report is available for this analysis.</p>{{end}}</div>
         </div>
 
         {{else}}
@@ -106,7 +120,18 @@
         <footer id="github-analysis-footer">xore//honeypot &bull; external scanning &bull; publication is irreversible and requires explicit confirmation</footer>
       </div>
     </main>
+  <!-- Report viewer (#309): application-managed centered overlay, same
+       shape and open/close mechanics as reports.html's own generated-
+       report viewer -- one PDF per analysis, so no grid, just this one
+       modal, opened by the Report card's "view report" button above. -->
+  <div class="modal-backdrop" id="hp-ga-viewer-backdrop" aria-hidden="true" inert></div>
+  <section class="modal hp-ga-viewer" id="hp-ga-viewer" role="dialog" aria-modal="true" aria-labelledby="hp-ga-viewer-title" aria-hidden="true" inert>
+    <button class="modal__close" type="button" id="hp-ga-viewer-close" aria-label="Close report viewer">&#10005;</button>
+    <h2 id="hp-ga-viewer-title">Report</h2>
+    <iframe class="hp-ga-viewer-frame" id="hp-ga-viewer-frame" title="GitHub analysis report preview"></iframe>
+  </section>
 </div>
+<script defer src="{{asset "/static/hp-github-analysis.js"}}"></script>
 </body>
 </html>
 {{end}}

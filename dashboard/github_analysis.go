@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -87,6 +88,13 @@ type githubAnalysisResult struct {
 	// Set by the dashboard, not the producer scripts.
 	ExportURL   string `json:"export_url,omitempty"`
 	RequestedBy string `json:"requested_by,omitempty"`
+	// ViewURL (#309) is set only when a real upstream PDF exists
+	// (githubAnalysisPDFURL succeeds) -- unlike ExportURL, which is always
+	// offered since it falls back to the JSON record. The detail page's
+	// Report card uses ViewURL's presence to decide whether to render the
+	// inline modal/iframe viewer at all, rather than opening one for a
+	// result that can only ever answer with JSON.
+	ViewURL string `json:"view_url,omitempty"`
 }
 
 // githubAnalysisQueueStatus matches the status.json collect-results.py
@@ -185,6 +193,9 @@ func loadGitHubAnalysisResults() []githubAnalysisResult {
 		// back to serving the JSON record when no PDF exists, so there is
 		// always something useful behind this link.
 		row.ExportURL = "/export/github-analysis/" + row.SHA256
+		if _, ok := githubAnalysisPDFURL(row); ok {
+			row.ViewURL = row.ExportURL + "/pdf"
+		}
 		rows = append(rows, row)
 	}
 	// Newest first. CompletedAt is an RFC3339 string from the producer
@@ -381,7 +392,19 @@ func (s *store) serveGitHubAnalysisAPI(w http.ResponseWriter, r *http.Request) {
 // wrong here, since a JSON record with a real verdict is always available
 // and more useful than a 404.
 func (s *store) serveGitHubAnalysisExport(w http.ResponseWriter, r *http.Request) {
-	sha := strings.ToLower(strings.TrimPrefix(r.URL.Path, "/export/github-analysis/"))
+	path := strings.TrimPrefix(r.URL.Path, "/export/github-analysis/")
+	// #309: the detail page's Report card views the PDF inline in an
+	// app-managed modal/iframe rather than redirecting straight to
+	// raw.githubusercontent.com (which the dashboard's own CSP frame-src
+	// would silently block anyway, render.go) or forcing a download. Kept
+	// as a suffix on this same handler/route, not a separately-registered
+	// pattern, matching this file's existing manual-path-parsing
+	// convention rather than introducing a second style.
+	if sha, ok := strings.CutSuffix(path, "/pdf"); ok {
+		s.serveGitHubAnalysisPDFProxy(w, r, strings.ToLower(sha))
+		return
+	}
+	sha := strings.ToLower(path)
 	if !hashName.MatchString(sha) {
 		http.NotFound(w, r)
 		return
@@ -409,6 +432,72 @@ func (s *store) serveGitHubAnalysisExport(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+sha+`_github-analysis.json"`)
 	json.NewEncoder(w).Encode(row)
+}
+
+// githubAnalysisPDFClient fetches the upstream report; a short, fixed
+// timeout so a slow or hanging raw.githubusercontent.com can never stall a
+// dashboard request indefinitely -- there is no retry/backoff concern here
+// the way there is for ml-worker's own ES polling, since this is a
+// synchronous, one-shot page-view fetch, not a background loop.
+var githubAnalysisPDFClient = &http.Client{Timeout: 15 * time.Second}
+
+// serveGitHubAnalysisPDFProxy streams the upstream raw.githubusercontent.com
+// PDF bytes through the dashboard itself, same-origin (#309). Framing
+// raw.githubusercontent.com directly would be silently blocked by the
+// dashboard's own CSP -- frame-src only permits 'self' and the auth origin
+// (render.go's secHeaders/setAuthFrameOrigin) -- so the bytes have to be
+// fetched server-side and re-served from this origin instead, the same
+// posture the pre-existing JSON fallback in serveGitHubAnalysisExport
+// already takes (serve the content itself rather than redirect to it).
+//
+// Content-Disposition defaults to inline (the Report card's modal/iframe);
+// ?download=1 switches to attachment, mirroring reports_api.go's
+// serveGeneratedPDF -- same one-endpoint-two-dispositions shape, so a
+// "download instead" action doesn't need a second route.
+func (s *store) serveGitHubAnalysisPDFProxy(w http.ResponseWriter, r *http.Request, sha string) {
+	if !hashName.MatchString(sha) {
+		http.NotFound(w, r)
+		return
+	}
+	dir := githubAnalysisResultsDir()
+	if dir == "" {
+		http.NotFound(w, r)
+		return
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, sha+".json"))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	var row githubAnalysisResult
+	if err := json.Unmarshal(raw, &row); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	pdfURL, ok := githubAnalysisPDFURL(row)
+	if !ok {
+		http.Error(w, "no report has been generated for this analysis yet", http.StatusNotFound)
+		return
+	}
+	resp, err := githubAnalysisPDFClient.Get(pdfURL)
+	if err != nil {
+		http.Error(w, "upstream report is not reachable", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		http.Error(w, "upstream report is not available", http.StatusBadGateway)
+		return
+	}
+	disposition := "inline"
+	if r.URL.Query().Get("download") == "1" {
+		disposition = "attachment"
+	}
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", disposition+`; filename="`+sha+`_github-analysis.pdf"`)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	io.Copy(w, resp.Body)
 }
 
 // githubAnalysisCommit matches a full, lowercase git commit SHA -- the only
