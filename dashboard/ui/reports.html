@@ -58,9 +58,16 @@
 .hp-rp-toggle-row input[type="checkbox"] { accent-color: var(--accent); }
 .hp-rp-tag--light { background: var(--info-soft); color: var(--info); }
 .hp-rp-row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-.hp-rp-viewer { margin-top: 14px; border: 1px solid var(--border-strong); border-radius: var(--radius-panel); overflow: hidden; background: var(--surface-1); }
-.hp-rp-viewer header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border-subtle); font-size: 13px; }
-.hp-rp-viewer iframe { display: block; width: 100%; height: 72vh; border: 0; background: var(--surface-0); }
+/* Report viewer: an application-managed overlay per the shared modal
+   contract (Xore/theme docs/MODALS.md), opened/closed the same way as the
+   dashboard settings modal (hp-settings.js) -- centered, not pinned below
+   the generated-reports grid. */
+.hp-rp-viewer { flex-direction: column; width: min(1000px, calc(100vw - 40px)); height: min(860px, calc(100dvh - 48px)); padding: 20px 20px 0; }
+.hp-rp-viewer #hp-rp-viewer-title { flex: none; margin: 0 40px 12px 0; font-size: var(--font-size-lg); }
+.hp-rp-viewer-frame { flex: 1; width: 100%; min-height: 0; border: 0; background: var(--surface-0); margin: 0 -20px; }
+@media (max-width: 720px) {
+  .hp-rp-viewer { width: 100vw; height: 100dvh; border-radius: 0; }
+}
 </style>
 </head>
 <body>
@@ -198,10 +205,6 @@
             <p class="note">Newest first. Select a card to view inline, download the PDF, or delete stale artifacts.</p>
             <div class="project-grid" id="hp-rp-generated"></div>
             <p class="empty" id="hp-rp-generated-empty" hidden>No reports generated yet.</p>
-            <div class="hp-rp-viewer" id="hp-rp-viewer" hidden>
-              <header><strong id="hp-rp-viewer-title">Report</strong><button class="btn btn-sm btn-secondary" type="button" id="hp-rp-viewer-close">Close viewer</button></header>
-              <iframe id="hp-rp-viewer-frame" title="Generated report preview"></iframe>
-            </div>
           </div>
           </div>
 
@@ -210,6 +213,14 @@
         <footer id="reports-footer">xore//honeypot &bull; reports studio</footer>
       </div>
     </main>
+  <!-- Report viewer: application-managed centered overlay, same shape and
+       open/close mechanics as the dashboard settings modal (hp-settings.js). -->
+  <div class="modal-backdrop" id="hp-rp-viewer-backdrop" aria-hidden="true" inert></div>
+  <section class="modal hp-rp-viewer" id="hp-rp-viewer" role="dialog" aria-modal="true" aria-labelledby="hp-rp-viewer-title" aria-hidden="true" inert>
+    <button class="modal__close" type="button" id="hp-rp-viewer-close" aria-label="Close report viewer">&#10005;</button>
+    <h2 id="hp-rp-viewer-title">Report</h2>
+    <iframe class="hp-rp-viewer-frame" id="hp-rp-viewer-frame" title="Generated report preview"></iframe>
+  </section>
 </div>
 <script defer src="{{asset "/static/hp-reports.js"}}"></script>
 </body>

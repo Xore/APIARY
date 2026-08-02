@@ -54,6 +54,7 @@
     definitionsEmpty: $("hp-rp-definitions-empty"),
     generated: $("hp-rp-generated"),
     generatedEmpty: $("hp-rp-generated-empty"),
+    viewerBackdrop: $("hp-rp-viewer-backdrop"),
     viewer: $("hp-rp-viewer"),
     viewerTitle: $("hp-rp-viewer-title"),
     viewerFrame: $("hp-rp-viewer-frame"),
@@ -80,6 +81,8 @@
     // without a shared guard both call saveDefinition() concurrently,
     // producing a genuine 409 for whichever read the ETag second (#211).
     busy: false,
+    viewerOpen: false,
+    viewerRestoreFocus: null,
   };
 
   function setStatus(message, kind) {
@@ -525,16 +528,69 @@
       </article>`).join("");
   }
 
+  // Centered application-managed overlay, opened/closed the same way as the
+  // dashboard settings modal (hp-settings.js): inert + aria-hidden toggled
+  // alongside .open, focus moved to the close control on open and restored
+  // to the trigger on close, Escape/Tab handled below (#211 -- this used to
+  // render inline below the generated-reports grid instead of as a modal).
   function openViewer(report) {
+    if (state.viewerOpen) return;
+    state.viewerOpen = true;
+    state.viewerRestoreFocus = document.activeElement;
     els.viewerTitle.textContent = report.title || report.name || "Generated report";
     els.viewerFrame.src = `/api/reports/generated/${report.id}/pdf`;
-    els.viewer.hidden = false;
-    els.viewer.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    els.viewerBackdrop.inert = false;
+    els.viewerBackdrop.setAttribute("aria-hidden", "false");
+    els.viewerBackdrop.classList.add("open");
+    els.viewer.inert = false;
+    els.viewer.setAttribute("aria-hidden", "false");
+    els.viewer.classList.add("open");
+    els.viewerClose.focus();
   }
 
-  els.viewerClose.addEventListener("click", () => {
-    els.viewer.hidden = true;
+  function closeViewer() {
+    if (!state.viewerOpen) return;
+    state.viewerOpen = false;
+    els.viewer.classList.remove("open");
+    els.viewer.setAttribute("aria-hidden", "true");
+    els.viewer.inert = true;
+    els.viewerBackdrop.classList.remove("open");
+    els.viewerBackdrop.setAttribute("aria-hidden", "true");
+    els.viewerBackdrop.inert = true;
     els.viewerFrame.src = "about:blank";
+    if (state.viewerRestoreFocus?.isConnected) state.viewerRestoreFocus.focus();
+    state.viewerRestoreFocus = null;
+  }
+
+  els.viewerClose.addEventListener("click", closeViewer);
+  els.viewerBackdrop.addEventListener("click", closeViewer);
+
+  // Keyboard contract (Xore/theme docs/MODALS.md), same as hp-settings.js:
+  // Escape closes the modal unless a destructive confirmation is stacked
+  // above it, and Tab stays inside the open modal.
+  document.addEventListener("keydown", (event) => {
+    if (!state.viewerOpen) return;
+    if (window.HoneypotModals?.isOpen()) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeViewer();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const controls = Array.from(els.viewer.querySelectorAll(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )).filter((el) => !el.hidden && el.offsetParent !== null);
+    if (!controls.length) return;
+    const first = controls[0];
+    const last = controls[controls.length - 1];
+    if (event.shiftKey && (document.activeElement === first || !els.viewer.contains(document.activeElement))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   });
 
   function openReportCard(card) {
@@ -551,10 +607,7 @@
         confirmLabel: "Delete report",
         onConfirm: async () => {
           await api(`/api/reports/generated/${purge.dataset.purge}`, { method: "DELETE" });
-          if (!els.viewer.hidden) {
-            els.viewer.hidden = true;
-            els.viewerFrame.src = "about:blank";
-          }
+          closeViewer();
           await refreshGenerated();
           return "Report deleted.";
         },
