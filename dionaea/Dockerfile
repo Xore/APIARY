@@ -5,5 +5,7 @@ FROM dinotools/dionaea:latest
 # dionaea can bind its privileged ports (21, 69, 445, ...); this Dockerfile
 # must not change that.
 COPY tftp_patch.py /tmp/tftp_patch.py
+COPY printer_patch.py /tmp/printer_patch.py
 RUN python3 /tmp/tftp_patch.py \
-    && rm /tmp/tftp_patch.py
+    && python3 /tmp/printer_patch.py \
+    && rm /tmp/tftp_patch.py /tmp/printer_patch.py
