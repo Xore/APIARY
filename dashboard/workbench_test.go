@@ -496,6 +496,48 @@ func TestWorkbenchResultsPageRendersAsCardGrid(t *testing.T) {
 	}
 }
 
+// TestWorkbenchResultsCardLinksDirectlyToSingleChildFindings (#350): a
+// results-list card always linked to the recipe/orchestration page and
+// showed a generic "N analyzers" line, never the actual findings -- landing
+// there meant an extra click through "Open native result" before seeing
+// anything a dynamic analyzer found. For the common single-analyzer-per-run
+// case (#351: the workbench now queues even a plain Linux sandbox run this
+// way), the card must link straight to that child's own detailed findings
+// page and show its summary inline.
+func TestWorkbenchResultsCardLinksDirectlyToSingleChildFindings(t *testing.T) {
+	funcs := templateFuncs(nil, "")
+	tmpl := template.Must(template.New("dashboard").Funcs(funcs).Parse(pageTemplate))
+
+	sha := strings.Repeat("f", 64)
+	now := time.Now()
+	data := workbenchResultsPageData{
+		Generated: now,
+		Runs: []workbenchRun{{
+			ID: "run_abcdef1234567890", PayloadSHA256: sha, PayloadKind: "binary",
+			RecipeName: "Linux sandbox", RecipeRevision: 1, State: "completed", CreatedAt: now,
+			Children: []workbenchChild{
+				{AnalyzerID: "linux-sandbox", DisplayName: "Linux sandbox", State: "completed", UpdatedAt: now, ResultURL: "/sandbox/job-123", Summary: "risk 62/100 (high); 4 techniques"},
+			},
+		}},
+	}
+
+	var buf strings.Builder
+	if err := tmpl.ExecuteTemplate(&buf, "workbench-results", &data); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	body := buf.String()
+
+	if !strings.Contains(body, `href="/sandbox/job-123"`) {
+		t.Fatal("a single-child completed run must link straight to that child's own findings page, not the orchestration page")
+	}
+	if strings.Contains(body, `href="/payload-workbench/`+sha+`"`) {
+		t.Fatal("a single-child completed run should not still link to the orchestration page")
+	}
+	if !strings.Contains(body, "risk 62/100 (high); 4 techniques") {
+		t.Fatal("workbench card must surface the child's findings summary instead of a generic analyzer count")
+	}
+}
+
 // The workbench's payload picker ("Select a captured payload") renders as
 // a .project-grid/.project-card grid too, matching the other card-grid
 // conversions -- each card is a single whole-card link (unlike the

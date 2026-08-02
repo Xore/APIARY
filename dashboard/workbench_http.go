@@ -79,6 +79,41 @@ func (s *store) workbenchResultsData(query, owner string) workbenchResultsPageDa
 	return data
 }
 
+// workbenchCardTarget is the results-list card's click-through destination
+// and findings summary. #350: the card always linked to the recipe/
+// orchestration page and showed a generic "N analyzers" line instead of
+// what was actually found -- for the common case of one child analyzer per
+// run (#351: the workbench now queues even a plain Linux sandbox run this
+// way), jump straight to that child's own detailed findings page instead of
+// the orchestration page, and surface its summary inline so the finding is
+// visible without an extra click. A run with more than one child has no
+// single "the" findings page, so it keeps linking to the orchestration
+// page, which already lists every child's own summary and native result
+// link once loaded.
+type workbenchCardTarget struct {
+	Href    string
+	Summary string
+}
+
+func workbenchRunSummary(run workbenchRun) workbenchCardTarget {
+	target := workbenchCardTarget{Href: "/payload-workbench/" + run.PayloadSHA256}
+	if len(run.Children) == 1 {
+		child := run.Children[0]
+		if child.State == "completed" && child.ResultURL != "" {
+			target.Href = child.ResultURL
+		}
+		target.Summary = child.Summary
+		return target
+	}
+	for _, child := range run.Children {
+		if child.Summary != "" {
+			target.Summary = child.Summary
+			break
+		}
+	}
+	return target
+}
+
 func workbenchRunMatches(run workbenchRun, needle string) bool {
 	values := []string{run.ID, run.PayloadSHA256, run.PayloadKind, run.RecipeName, run.State}
 	for _, child := range run.Children {

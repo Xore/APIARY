@@ -52,13 +52,14 @@
     {{if .Runs}}
     <div class="project-grid">
       {{range .Runs}}
-      <a class="project-card" href="/payload-workbench/{{.PayloadSHA256}}">
+      {{$target := workbenchRunSummary .}}
+      <a class="project-card" href="{{$target.Href}}">
         <div class="project-card__header">
           <span class="project-card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V9M10 19V5M16 19v-7M22 19V3"/><path d="M2 19h22"/></svg></span>
           <span class="project-card__title">{{.RecipeName}} &bull; r{{.RecipeRevision}}</span>
           <div class="project-card__badges"><span class="badge wb-state wb-state--{{.State}}">{{.State}}</span></div>
         </div>
-        <p class="project-card__desc">{{.PayloadKind}} payload &bull; {{len .Children}} analyzer{{if ne (len .Children) 1}}s{{end}}</p>
+        <p class="project-card__desc">{{if $target.Summary}}{{$target.Summary}}{{else}}{{.PayloadKind}} payload &bull; {{len .Children}} analyzer{{if ne (len .Children) 1}}s{{end}}{{end}}</p>
         <div class="project-card__meta">
           <span class="mono">{{.PayloadSHA256}}</span>
           <span>{{.CreatedAt.Format "2006-01-02 15:04:05 MST"}}</span>
