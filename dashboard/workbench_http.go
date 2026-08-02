@@ -225,7 +225,15 @@ func (s *store) serveWorkbenchPage(w http.ResponseWriter, r *http.Request, tmpl 
 	data := workbenchPageData{
 		Generated: time.Now(), SHA256: hash, Classification: classification,
 		Analyzers: workbenchRegistry(classification), ModelStatus: loadWorkbenchModelStatus(),
-		Correlation: s.correlateHash(hash),
+		// This page deliberately only reads the payload's head, not the
+		// full file (kept lightweight, #352/#364), so it has no cheaper way
+		// to know the true content SHA-256 when hash itself is a Dionaea
+		// capture's on-disk MD5 identity (#364). Local-store matching
+		// (Ghidra/sandbox/GitHub-analysis, all keyed by true SHA-256) can
+		// therefore under-report "known" for such a payload here -- the
+		// Elasticsearch side still matches correctly either way, since
+		// hashQuery checks both hash fields for whatever hash it's given.
+		Correlation: s.correlateHash(hash, ""),
 	}
 	renderPage(w, tmpl, "payload-workbench", &data)
 }

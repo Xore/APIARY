@@ -237,7 +237,12 @@ func (s *store) analyzePayload(name string) (binaryAnalysis, error) {
 			a.OriginLink = "/sessions/" + url.PathEscape(origin.Session)
 		}
 	}
-	a.Correlation = s.correlateHash(a.SHA256)
+	// a.Hash is whatever identifier addressed this payload on disk -- for a
+	// Dionaea capture that's an MD5 (#364), distinct from a.SHA256 (the true
+	// content hash computed above, what Ghidra/sandbox/GitHub-analysis key
+	// their own results by). Passing both lets the Elasticsearch side match
+	// on either; local-store matching only ever uses the true SHA-256.
+	a.Correlation = s.correlateHash(a.SHA256, a.Hash)
 	if len(a.YARAMatches) > 0 {
 		boost := 25
 		for _, match := range a.YARAMatches {

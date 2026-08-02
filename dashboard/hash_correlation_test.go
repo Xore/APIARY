@@ -4,6 +4,7 @@ import (
 	"html/template"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,8 +47,15 @@ func TestCorrelateHashChecksEverySourceIncludingGhidra(t *testing.T) {
 	es := httptest.NewServer(correlationSearchStub(t, &gotPath, hashCorrelationSample))
 	defer es.Close()
 
+	// altID simulates a Dionaea capture's on-disk MD5 identity, distinct
+	// from its true content SHA-256 (shaA) -- the bug this two-argument
+	// signature exists to fix: an earlier version of this code only ever
+	// queried Elasticsearch with the true SHA-256, silently missing every
+	// Dionaea sighting (which Elasticsearch only ever has under
+	// file.hash.md5, keyed by the MD5, not the SHA-256).
+	altID := "0123456789abcdef0123456789abcdef"
 	s := &store{es: newESClient(es.URL, "")}
-	result := s.correlateHash(shaA)
+	result := s.correlateHash(shaA, altID)
 
 	if !result.Known {
 		t.Fatal("expected Known=true when every source has a result")
@@ -64,8 +72,10 @@ func TestCorrelateHashChecksEverySourceIncludingGhidra(t *testing.T) {
 	if !result.ESAvailable || result.ESSightings != 2 {
 		t.Fatalf("ES sightings not found: available=%v sightings=%d", result.ESAvailable, result.ESSightings)
 	}
-	if !strings.Contains(gotPath, "file.hash.sha256") || !strings.Contains(gotPath, "file.hash.md5") {
-		t.Fatalf("query did not check both hash fields: %s", gotPath)
+	for _, want := range []string{`file.hash.sha256:"` + shaA + `"`, `file.hash.md5:"` + shaA + `"`, `file.hash.sha256:"` + altID + `"`, `file.hash.md5:"` + altID + `"`} {
+		if !strings.Contains(gotPath, url.QueryEscape(want)) {
+			t.Fatalf("query is missing %q -- both identifiers must be checked against both hash fields: %s", want, gotPath)
+		}
 	}
 }
 
@@ -83,7 +93,7 @@ func TestCorrelateHashReportsUnknownWhenNothingMatches(t *testing.T) {
 	defer es.Close()
 
 	s := &store{es: newESClient(es.URL, "")}
-	result := s.correlateHash(shaB)
+	result := s.correlateHash(shaB, "")
 	if result.Known {
 		t.Fatalf("expected Known=false with no matches anywhere, got %+v", result)
 	}
@@ -102,12 +112,33 @@ func TestCorrelateHashRejectsMalformedInputWithoutQuerying(t *testing.T) {
 
 	s := &store{es: newESClient(es.URL, "")}
 	for _, bad := range []string{"", "not-a-hash", `abc" OR "1`, "toolong" + strings.Repeat("a", 200)} {
-		if result := s.correlateHash(bad); result.Known {
+		if result := s.correlateHash(bad, ""); result.Known {
 			t.Errorf("correlateHash(%q) should never report Known=true for malformed input, got %+v", bad, result)
 		}
 	}
 	if called {
-		t.Fatal("malformed input must never reach the Elasticsearch query")
+		t.Fatal("malformed primary must never reach the Elasticsearch query")
+	}
+}
+
+// TestCorrelateHashRejectsMalformedAltID (#354): a well-formed primary must
+// still be queried, but a malformed altID (or one that happens to equal
+// primary) must never be added as a second query clause.
+func TestCorrelateHashRejectsMalformedAltID(t *testing.T) {
+	var gotPath string
+	es := httptest.NewServer(correlationSearchStub(t, &gotPath, `{"hits":{"total":{"value":0},"hits":[]}}`))
+	defer es.Close()
+
+	s := &store{es: newESClient(es.URL, "")}
+	for _, bad := range []string{"not-a-hash", `abc" OR "1`, shaA} {
+		gotPath = ""
+		s.correlateHash(shaA, bad)
+		if gotPath == "" {
+			t.Fatal("a well-formed primary must still be queried even when altID is malformed")
+		}
+		if strings.Count(gotPath, "file.hash.sha256") != 1 {
+			t.Fatalf("altID %q must not add a second query clause (malformed, or a no-op duplicate of primary): %s", bad, gotPath)
+		}
 	}
 }
 
