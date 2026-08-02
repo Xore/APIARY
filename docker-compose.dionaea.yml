@@ -1,0 +1,171 @@
+# honeypot-dionaea — #258: dionaea and tftp-relay split into their own
+# Dockge stack. Kept together, not further split into per-service stacks:
+# tftp-relay has depends_on: dionaea and actually forwards TFTP traffic to
+# it over dionaea_net (#235's one documented exception to "one honeypot per
+# network" -- see that network's own comment below), so they're one unit,
+# same shape as docker-compose.http.yml's http-honeypot+api-honeypot pair.
+#
+# dionaea-lib is the one resource this stack shares outside itself: it's
+# where dionaea writes captured binaries/bistreams, and
+# docker-compose.payload-analysis.yml's payload-dedupe/yara-scanner (also
+# #258, split out separately per explicit instruction rather than bundled
+# in here) read from it, same as docker-compose.dashboard.yml already does.
+# Given the explicit shared `name:` treatment honeynet/es-data already use
+# between honeypot-stack and honeypot-init.
+#
+# Deployed as /opt/stacks/honeypot-dionaea.
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  dionaea:
+    <<: *runtime-defaults
+    build: /opt/stacks/honeypot-stack/dionaea
+    container_name: hp-dionaea
+    restart: unless-stopped
+    # #127: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism).
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        until [ -f /markers/log-init.done ]; do sleep 3; done
+
+        cd /opt/dionaea
+
+        test -f etc/dionaea/dionaea.cfg || cp -van template/etc .
+
+        cp -van template/lib/dionaea/. var/lib/dionaea/ 2>/dev/null || true
+
+        cp -van template/log/dionaea/. var/log/dionaea/ 2>/dev/null || true
+
+        mkdir -p var/lib/dionaea/binaries var/lib/dionaea/bistreams var/lib/dionaea/ftp/root \
+                 var/lib/dionaea/tftp/root var/lib/dionaea/upnp/root var/lib/dionaea/printer/root \
+                 var/lib/dionaea/roots/ftp var/lib/dionaea/roots/tftp \
+                 var/lib/dionaea/roots/www var/lib/dionaea/roots/upnp
+        mkdir -p etc/dionaea/ihandlers-enabled
+
+        printf -- '- name: log_json\n  config:\n    handlers:\n      - file:///opt/dionaea/var/log/dionaea/dionaea.json\n' \
+                > etc/dionaea/ihandlers-enabled/log_json.yaml
+
+        printf -- '- name: log_incident\n  config:\n    handlers:\n      - file:///opt/dionaea/var/log/dionaea/dionaea_incident.json\n' \
+                > etc/dionaea/ihandlers-enabled/log_incident.yaml
+
+        printf -- '- name: store\n' \
+                > etc/dionaea/ihandlers-enabled/store.yaml
+
+        sed -i 's/^default.levels=.*/default.levels=info,warning,error/' \
+               etc/dionaea/dionaea.cfg
+        chown -R dionaea:dionaea var/lib/dionaea var/log/dionaea
+
+        export DIONAEA_SKIP_INIT=1
+
+        exec /usr/local/sbin/entrypoint.sh
+    ports:
+      - ${HP_BIND:-10.8.0.2}:21:21
+      - ${HP_BIND:-10.8.0.2}:445:445
+      - ${HP_BIND:-10.8.0.2}:1433:1433
+      - ${HP_BIND:-10.8.0.2}:3306:3306
+      - ${HP_BIND:-10.8.0.2}:27017:27017
+      - ${HP_BIND:-10.8.0.2}:1723:1723
+      - ${HP_BIND:-10.8.0.2}:5060:5060
+      - ${HP_BIND:-10.8.0.2}:5060:5060/udp
+      - ${HP_BIND:-10.8.0.2}:135:135
+      - ${HP_BIND:-10.8.0.2}:1883:1883
+      - ${HP_BIND:-10.8.0.2}:9100:9100
+      - ${HP_BIND:-10.8.0.2}:11211:11211
+      - ${HP_BIND:-10.8.0.2}:69:69/udp
+      - ${HP_BIND:-10.8.0.2}:1900:1900/udp
+    volumes:
+      - /opt/stacks/honeypot-stack/logs/dionaea:/opt/dionaea/var/log/dionaea
+      - dionaea-lib:/opt/dionaea/var/lib/dionaea
+      - /opt/stacks/honeypot-stack/dionaea/persona:/persona:ro
+      - /opt/stacks/honeypot-stack/dionaea/services/ftp.yaml:/opt/dionaea/etc/dionaea/services-enabled/ftp.yaml:ro
+      - /opt/stacks/honeypot-stack/dionaea/services/smb.yaml:/opt/dionaea/etc/dionaea/services-enabled/smb.yaml:ro
+      - /opt/stacks/honeypot-stack/dionaea/services/sip.yaml:/opt/dionaea/etc/dionaea/services-enabled/sip.yaml:ro
+      - /opt/stacks/honeypot-stack/dionaea/services/printer.yaml:/opt/dionaea/etc/dionaea/services-enabled/printer.yaml:ro
+      - /opt/stacks/honeypot-stack/dionaea/services/tftp.yaml:/opt/dionaea/etc/dionaea/services-enabled/tftp.yaml:ro
+      - /opt/stacks/honeypot-stack/dionaea/services/upnp.yaml:/opt/dionaea/etc/dionaea/services-enabled/upnp.yaml:ro
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+    environment:
+      - TZ=Europe/Berlin
+    # Capabilities measured, not guessed (2026-07-31). Baseline was run first —
+    # default caps + SYS_PTRACE — and each reduction re-measured against the
+    # exact set of listening ports, because a container that stays up with dead
+    # listeners is a honeypot that looks deployed and collects nothing.
+    #
+    #   default caps + SYS_PTRACE          39 listeners   <- baseline
+    #   default caps, no SYS_PTRACE        39 listeners   <- identical
+    #   cap_drop ALL                       container exits
+    #   + NET_BIND_SERVICE                 container exits
+    #   + CHOWN,SETUID,SETGID              39 listeners
+    #   + DAC_OVERRIDE                     39 listeners, identical port set
+    #
+    # SYS_PTRACE is dropped: it permits attaching to and controlling other
+    # processes, and dionaea demonstrably does not need it. The rest are what
+    # the entrypoint actually requires — chown -R on the data dirs, dropping to
+    # the dionaea user, and binding 21/135/445 and friends.
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dionaea_net
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1024M
+
+  # TFTP selects a dynamic server transfer port after the request. Relay that
+  # exchange inside the Docker network so the WireGuard/public edge can retain
+  # one stable UDP port while Dionaea remains the actual sensor and logger.
+  tftp-relay:
+    <<: *runtime-defaults
+    build: /opt/stacks/honeypot-stack/tftp-relay
+    container_name: hp-tftp-relay
+    restart: unless-stopped
+    environment:
+      - TFTP_TARGET=dionaea:69
+    ports:
+      - ${HP_BIND:-10.8.0.2}:1069:1069/udp
+    networks:
+      - dionaea_net
+    depends_on:
+      dionaea:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
+
+networks:
+  # One honeypot per network (#235), each with no other honeypot as a peer --
+  # a compromised honeypot has no network path to another honeypot's daemon.
+  # tftp-relay is the one real exception: it has depends_on: dionaea and
+  # actually forwards TFTP traffic to it, so those two share this network
+  # instead of each getting their own. Private to this stack -- nothing
+  # outside it ever referenced dionaea_net.
+  dionaea_net:
+    driver: bridge
+
+volumes:
+  # Shared with docker-compose.payload-analysis.yml (#258) -- explicit fixed
+  # name, matching docker-compose.yml's own historical declaration and the
+  # same mechanism honeynet/es-data already use between honeypot-stack and
+  # honeypot-init. dionaea writes captured binaries/bistreams here;
+  # payload-dedupe/yara-scanner (that other stack) only read.
+  dionaea-lib:
+    name: dionaea-lib

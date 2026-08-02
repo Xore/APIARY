@@ -90,11 +90,16 @@ jobs:
       # no depends_on and its own fully private network (same reasoning as
       # honeypot-conpot above, which is why the loop below is safe to treat
       # them identically) -- looped instead of one step per stack purely to
-      # avoid repeating the same six lines four times.
-      - name: Synchronize honeypot-cowrie/multipot/http/dnp3 (#258 split)
+      # avoid repeating the same six lines four times. dionaea joins this
+      # loop too: it has its own private dionaea_net (like the other four)
+      # and its one cross-stack resource, dionaea-lib, is a non-external
+      # shared-name volume Compose creates if absent -- no ordering
+      # requirement forces it out of the loop the way honeypot-dashboard
+      # below needed its own step.
+      - name: Synchronize honeypot-cowrie/multipot/http/dnp3/dionaea (#258 split)
         shell: bash
         run: |
-          for stack in cowrie multipot http dnp3; do
+          for stack in cowrie multipot http dnp3 dionaea; do
             destination="/opt/stacks/honeypot-$stack"
             install -d -m 755 "$destination"
             cp "docker-compose.$stack.yml" "$destination/compose.yml"
@@ -103,6 +108,24 @@ jobs:
               docker compose -f compose.yml config --quiet
               docker compose -f compose.yml up -d --build )
           done
+
+      # #258: payload-dedupe and yara-scanner split out separately from
+      # dionaea/tftp-relay above, per explicit instruction. Placed right
+      # after that step (not in its loop) purely for readability -- the
+      # "reader" half of the dionaea-lib sharing arrangement following the
+      # "writer" half. No hard ordering requirement either way: dionaea-lib/
+      # dashboard-state/yara-results are all non-external shared-name
+      # volumes Compose creates if absent, same as everywhere else in #258.
+      - name: Synchronize honeypot-payload-analysis (#258 split)
+        shell: bash
+        run: |
+          destination=/opt/stacks/honeypot-payload-analysis
+          install -d -m 755 "$destination"
+          cp docker-compose.payload-analysis.yml "$destination/compose.yml"
+          cd "$destination"
+          test ! -f .env || chmod 600 .env
+          docker compose -f compose.yml config --quiet
+          docker compose -f compose.yml up -d --build
 
       # #258: log-maintenance, autoheal, and reporter split into their own
       # Dockge stack -- host-wide utilities rather than one honeypot family.

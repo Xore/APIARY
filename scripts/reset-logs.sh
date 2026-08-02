@@ -37,14 +37,19 @@ STATE_BASE="/opt/stacks/honeypot-stack/state"
 # Every target that moved into its own stack (#258), and which services live
 # there. cowrie is the one target with a foot in both worlds: cowrie itself
 # moved out, but payload-dedupe/yara-scanner (which read its captured
-# downloads) stayed in the main stack -- see the SERVICES array below.
-SPLIT_TARGETS=(conpot cowrie multipot http dnp3)
+# downloads) live in yet another stack of their own now -- see
+# PAYLOAD_ANALYSIS_DIR/PAYLOAD_ANALYSIS_SERVICES below, not this array
+# (there's no standalone "payload-analysis" CLI target; those two are only
+# ever stopped/started as a side effect of `wants cowrie`, same reasoning
+# as when they still lived in the main stack).
+SPLIT_TARGETS=(conpot cowrie multipot http dnp3 dionaea)
 declare -A SPLIT_STACK_DIR=(
   [conpot]="/opt/stacks/honeypot-conpot"
   [cowrie]="/opt/stacks/honeypot-cowrie"
   [multipot]="/opt/stacks/honeypot-multipot"
   [http]="/opt/stacks/honeypot-http"
   [dnp3]="/opt/stacks/honeypot-dnp3"
+  [dionaea]="/opt/stacks/honeypot-dionaea"
 )
 declare -A SPLIT_STACK_SERVICES=(
   [conpot]="conpot conpot-s7-1200 conpot-s7-1500 conpot-iec104 conpot-guardian conpot-kamstrup"
@@ -52,7 +57,11 @@ declare -A SPLIT_STACK_SERVICES=(
   [multipot]="multipot"
   [http]="http-honeypot api-honeypot"
   [dnp3]="dnp3"
+  [dionaea]="dionaea tftp-relay"
 )
+
+PAYLOAD_ANALYSIS_DIR="/opt/stacks/honeypot-payload-analysis"
+PAYLOAD_ANALYSIS_SERVICES="payload-dedupe yara-scanner"
 
 DRY=false
 declare -A TARGETS
@@ -113,13 +122,11 @@ delete_es() {
 # ─────────────────────────────────────────────────────────────────────────────
 # Build service list for stop/start
 # ─────────────────────────────────────────────────────────────────────────────
-# cowrie/multipot/http/dnp3/conpot themselves are deliberately excluded from
-# SERVICES -- each lives in its own Dockge stack/compose project now
-# (SPLIT_STACK_DIR above) and is stopped/started there separately, via
-# split_stack_compose below, not through this array.
+# cowrie/multipot/http/dnp3/conpot/dionaea themselves are deliberately
+# excluded from SERVICES -- each lives in its own Dockge stack/compose
+# project now (SPLIT_STACK_DIR above) and is stopped/started there
+# separately, via split_stack_compose below, not through this array.
 SERVICES=()
-wants cowrie  && SERVICES+=(payload-dedupe yara-scanner)  # cowrie itself moved out (#258)
-wants dionaea && SERVICES+=(dionaea tftp-relay)
 wants tanner  && SERVICES+=(tanner tanner_api tanner_web snare)
 wants suricata && SERVICES+=(evebox)  # suricata itself is host-level; evebox reads its logs
 
@@ -142,6 +149,23 @@ split_stack_compose() {
   ( cd "$dir" && run docker compose "$@" "${services[@]}" )
 }
 
+payload_analysis_compose() {
+  # payload-dedupe/yara-scanner (docker-compose.payload-analysis.yml, #258)
+  # read cowrie's captured downloads as well as dionaea's, so this is called
+  # alongside cowrie's own split_stack_compose whenever `wants cowrie` --
+  # stopping them before wiping cowrie's log dir avoids a race between the
+  # wipe and their own hardlink/read pass over the same files, same
+  # reasoning as when they still lived in the main stack. Not itself a
+  # SPLIT_TARGETS entry: there's no standalone CLI target for it.
+  if [ ! -d "$PAYLOAD_ANALYSIS_DIR" ]; then
+    echo "  (skip payload-analysis: $PAYLOAD_ANALYSIS_DIR does not exist -- honeypot-payload-analysis not deployed here)"
+    return 0
+  fi
+  # shellcheck disable=SC2206
+  local services=(${PAYLOAD_ANALYSIS_SERVICES})
+  ( cd "$PAYLOAD_ANALYSIS_DIR" && run docker compose "$@" "${services[@]}" )
+}
+
 split_targets_wanted() {
   local out=() t
   for t in "${SPLIT_TARGETS[@]}"; do
@@ -151,9 +175,10 @@ split_targets_wanted() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-STEP "Stopping: ${SERVICES[*]} $(split_targets_wanted)"
+STEP "Stopping: ${SERVICES[*]} $(split_targets_wanted)$(wants cowrie && echo " $PAYLOAD_ANALYSIS_SERVICES")"
 [[ ${#SERVICES[@]} -gt 0 ]] && run docker compose stop "${SERVICES[@]}"
 for t in "${SPLIT_TARGETS[@]}"; do wants "$t" && split_stack_compose "$t" stop; done
+wants cowrie && payload_analysis_compose stop
 
 # ─────────────────────────────────────────────────────────────────────────────
 STEP "Wiping log files"
@@ -270,12 +295,14 @@ wants tanner   && delete_es "honeypot-tanner-*"
 wants suricata && delete_es "filebeat-*" && delete_es "honeypot-suricata-*"
 
 # ─────────────────────────────────────────────────────────────────────────────
-STEP "Starting: ${SERVICES[*]} $(split_targets_wanted)"
+STEP "Starting: ${SERVICES[*]} $(split_targets_wanted)$(wants cowrie && echo " $PAYLOAD_ANALYSIS_SERVICES")"
 [[ ${#SERVICES[@]} -gt 0 ]] && run docker compose up -d "${SERVICES[@]}"
 for t in "${SPLIT_TARGETS[@]}"; do wants "$t" && split_stack_compose "$t" up -d; done
+wants cowrie && payload_analysis_compose up -d
 
 STEP "Done"
 echo "Tail logs with:  docker compose logs -f ${SERVICES[*]}"
+wants cowrie && echo "  (cd $PAYLOAD_ANALYSIS_DIR && docker compose logs -f $PAYLOAD_ANALYSIS_SERVICES)"
 for t in "${SPLIT_TARGETS[@]}"; do
   wants "$t" && echo "  (cd ${SPLIT_STACK_DIR[$t]} && docker compose logs -f ${SPLIT_STACK_SERVICES[$t]})"
 done

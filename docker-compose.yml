@@ -46,230 +46,19 @@ services:
   # on the relevant marker directly instead (mount
   # state/init-markers:ro, same files the shims used to poll -- e.g.
   # `until [ -f /markers/log-init.done ]; do sleep 3; done; exec <real
-  # command>`), which needs no same-project relationship at all. See any
-  # service below for the pattern -- conpot, dionaea, and cowrie are good
-  # examples of three different starting shapes (CMD-only image,
-  # existing entrypoint override, and a Dockerfile ENTRYPOINT respectively)
-  # all converging on the same fix.
+  # command>`), which needs no same-project relationship at all. Three good
+  # examples of different starting shapes converging on the same fix --
+  # CMD-only image, existing entrypoint override, and a Dockerfile
+  # ENTRYPOINT respectively -- used to live right below (conpot, dionaea,
+  # cowrie) but have since split into their own #258 stacks; see snare,
+  # tanner, and arkime-capture below instead for the same pattern still
+  # local to this file.
 
-  # log-maintenance moved to docker-compose.utilities.yml (#258): a separate
-  # honeypot-utilities Dockge stack, alongside autoheal and reporter --
-  # host-wide utilities rather than one honeypot family.
-  # Content-address duplicate cleanup. Paths remain valid because duplicates
-  # on the same filesystem are atomically replaced with hard links.
-  payload-dedupe:
-    <<: *runtime-defaults
-    image: python:3.12-alpine
-    container_name: hp-payload-dedupe
-    restart: unless-stopped
-    # #127: waits on the marker directly instead of depends_on-ing
-    # init-wait-log (same-project-only mechanism).
-    command:
-      - sh
-      - -c
-      - >
-        until [ -f /markers/log-init.done ]; do sleep 3; done;
-        exec python3 /app/dedupe-payloads.py
-    environment:
-      - PAYLOAD_DEDUPE_INTERVAL=${PAYLOAD_DEDUPE_INTERVAL:-3600}
-      - PAYLOAD_ROOTS=/payloads/cowrie:/payloads/dionaea/binaries:/payloads/scripts/script-payloads:/payloads/dionaea/bistreams
-      - DEDUPE_STATE=/state/payload-dedupe.json
-      # bistreams/ is Dionaea's raw per-connection capture stream -- every
-      # accepted connection, payload or not, not just extracted samples.
-      # 82% duplicate by content in a live sample (repeat scanner traffic)
-      # and otherwise unbounded; pruned by age before dedup runs each pass,
-      # which also keeps what dedup has to hash from growing forever. See #112.
-      - BISTREAMS_ROOT=/payloads/dionaea/bistreams
-      - BISTREAMS_RETENTION_DAYS=${BISTREAMS_RETENTION_DAYS:-30}
-    volumes:
-      - ./analysis/dedupe-payloads.py:/app/dedupe-payloads.py:ro
-      - /opt/stacks/honeypot-stack/logs/cowrie/downloads:/payloads/cowrie
-      - dionaea-lib:/payloads/dionaea
-      - dashboard-state:/payloads/scripts
-      - /opt/stacks/honeypot-stack/state/dedupe:/state
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
-    deploy:
-      resources:
-        limits:
-          # Was 0.25/128M; bistreams/ added tens of thousands of files and
-          # tens of GB to what this container hashes every pass (#112).
-          # Chunked reads keep per-file memory bounded regardless of file
-          # size, so 128M is still enough; the CPU bump is so a pass over
-          # the full backlog finishes comfortably inside one interval.
-          cpus: "0.5"
-          memory: 128M
-
-  # Real static YARA scanning in a networkless least-privilege sidecar. It has
-  # only DAC_READ_SEARCH because Dionaea captures are deliberately mode 0600;
-  # samples stay read-only and are never interpreted or executed.
-  yara-scanner:
-    <<: *runtime-defaults
-    build: ./analysis/yara
-    container_name: hp-yara-scanner
-    restart: unless-stopped
-    network_mode: none
-    user: "0:0"
-    read_only: true
-    # #128: waits on the marker directly instead of depends_on-ing
-    # init-wait-log (same-project-only mechanism). Reproduces the
-    # Dockerfile's own ENTRYPOINT (checked directly:
-    # ["python3", "/app/scanner.py"]) with the wait spliced in. read_only
-    # doesn't block this -- the wait only reads, never writes.
-    entrypoint:
-      - /bin/sh
-      - -c
-      - >
-        until [ -f /markers/log-init.done ]; do sleep 3; done;
-        exec python3 /app/scanner.py
-    security_opt: [no-new-privileges:true]
-    cap_drop: [ALL]
-    cap_add: [DAC_READ_SEARCH]
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=64m,uid=0,gid=0
-    environment:
-      - YARA_SCAN_INTERVAL=${YARA_SCAN_INTERVAL:-900}
-      - YARA_MAX_BYTES=${YARA_MAX_BYTES:-67108864}
-      - YARA_PAYLOAD_ROOTS=/payloads/dionaea:/payloads/cowrie:/payloads/scripts/script-payloads
-      - YARA_RESULTS=/results/results.json
-    volumes:
-      - dionaea-lib:/payloads/dionaea:ro
-      - /opt/stacks/honeypot-stack/logs/cowrie/downloads:/payloads/cowrie:ro
-      - dashboard-state:/payloads/scripts:ro
-      - yara-results:/results
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 512M
-  # ===================== Dionaea — malware / service capture =====================
-  dionaea:
-    <<: *runtime-defaults
-    build: ./dionaea
-    container_name: hp-dionaea
-    restart: unless-stopped
-    # #127: waits on the marker directly instead of depends_on-ing
-    # init-wait-log (same-project-only mechanism).
-    entrypoint:
-      - /bin/sh
-      - -c
-      - >
-        until [ -f /markers/log-init.done ]; do sleep 3; done
-
-        cd /opt/dionaea
-
-        test -f etc/dionaea/dionaea.cfg || cp -van template/etc .
-
-        cp -van template/lib/dionaea/. var/lib/dionaea/ 2>/dev/null || true
-
-        cp -van template/log/dionaea/. var/log/dionaea/ 2>/dev/null || true
-
-        mkdir -p var/lib/dionaea/binaries var/lib/dionaea/bistreams var/lib/dionaea/ftp/root \
-                 var/lib/dionaea/tftp/root var/lib/dionaea/upnp/root var/lib/dionaea/printer/root \
-                 var/lib/dionaea/roots/ftp var/lib/dionaea/roots/tftp \
-                 var/lib/dionaea/roots/www var/lib/dionaea/roots/upnp
-        mkdir -p etc/dionaea/ihandlers-enabled
-
-        printf -- '- name: log_json\n  config:\n    handlers:\n      - file:///opt/dionaea/var/log/dionaea/dionaea.json\n' \
-                > etc/dionaea/ihandlers-enabled/log_json.yaml
-
-        printf -- '- name: log_incident\n  config:\n    handlers:\n      - file:///opt/dionaea/var/log/dionaea/dionaea_incident.json\n' \
-                > etc/dionaea/ihandlers-enabled/log_incident.yaml
-
-        printf -- '- name: store\n' \
-                > etc/dionaea/ihandlers-enabled/store.yaml
-
-        sed -i 's/^default.levels=.*/default.levels=info,warning,error/' \
-               etc/dionaea/dionaea.cfg
-        chown -R dionaea:dionaea var/lib/dionaea var/log/dionaea
-
-        export DIONAEA_SKIP_INIT=1
-
-        exec /usr/local/sbin/entrypoint.sh
-    ports:
-      - ${HP_BIND:-10.8.0.2}:21:21
-      - ${HP_BIND:-10.8.0.2}:445:445
-      - ${HP_BIND:-10.8.0.2}:1433:1433
-      - ${HP_BIND:-10.8.0.2}:3306:3306
-      - ${HP_BIND:-10.8.0.2}:27017:27017
-      - ${HP_BIND:-10.8.0.2}:1723:1723
-      - ${HP_BIND:-10.8.0.2}:5060:5060
-      - ${HP_BIND:-10.8.0.2}:5060:5060/udp
-      - ${HP_BIND:-10.8.0.2}:135:135
-      - ${HP_BIND:-10.8.0.2}:1883:1883
-      - ${HP_BIND:-10.8.0.2}:9100:9100
-      - ${HP_BIND:-10.8.0.2}:11211:11211
-      - ${HP_BIND:-10.8.0.2}:69:69/udp
-      - ${HP_BIND:-10.8.0.2}:1900:1900/udp
-    volumes:
-      - /opt/stacks/honeypot-stack/logs/dionaea:/opt/dionaea/var/log/dionaea
-      - dionaea-lib:/opt/dionaea/var/lib/dionaea
-      - ./dionaea/persona:/persona:ro
-      - ./dionaea/services/ftp.yaml:/opt/dionaea/etc/dionaea/services-enabled/ftp.yaml:ro
-      - ./dionaea/services/smb.yaml:/opt/dionaea/etc/dionaea/services-enabled/smb.yaml:ro
-      - ./dionaea/services/sip.yaml:/opt/dionaea/etc/dionaea/services-enabled/sip.yaml:ro
-      - ./dionaea/services/printer.yaml:/opt/dionaea/etc/dionaea/services-enabled/printer.yaml:ro
-      - ./dionaea/services/tftp.yaml:/opt/dionaea/etc/dionaea/services-enabled/tftp.yaml:ro
-      - ./dionaea/services/upnp.yaml:/opt/dionaea/etc/dionaea/services-enabled/upnp.yaml:ro
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
-    environment:
-      - TZ=Europe/Berlin
-    # Capabilities measured, not guessed (2026-07-31). Baseline was run first —
-    # default caps + SYS_PTRACE — and each reduction re-measured against the
-    # exact set of listening ports, because a container that stays up with dead
-    # listeners is a honeypot that looks deployed and collects nothing.
-    #
-    #   default caps + SYS_PTRACE          39 listeners   <- baseline
-    #   default caps, no SYS_PTRACE        39 listeners   <- identical
-    #   cap_drop ALL                       container exits
-    #   + NET_BIND_SERVICE                 container exits
-    #   + CHOWN,SETUID,SETGID              39 listeners
-    #   + DAC_OVERRIDE                     39 listeners, identical port set
-    #
-    # SYS_PTRACE is dropped: it permits attaching to and controlling other
-    # processes, and dionaea demonstrably does not need it. The rest are what
-    # the entrypoint actually requires — chown -R on the data dirs, dropping to
-    # the dionaea user, and binding 21/135/445 and friends.
-    cap_drop:
-      - ALL
-    cap_add:
-      - NET_BIND_SERVICE
-      - CHOWN
-      - SETUID
-      - SETGID
-      - DAC_OVERRIDE
-    security_opt:
-      - no-new-privileges:true
-    networks:
-      - dionaea_net
-    deploy:
-      resources:
-        limits:
-          cpus: "2.0"
-          memory: 1024M
-
-  # TFTP selects a dynamic server transfer port after the request. Relay that
-  # exchange inside the Docker network so the WireGuard/public edge can retain
-  # one stable UDP port while Dionaea remains the actual sensor and logger.
-  tftp-relay:
-    <<: *runtime-defaults
-    build: ./tftp-relay
-    container_name: hp-tftp-relay
-    restart: unless-stopped
-    environment:
-      - TFTP_TARGET=dionaea:69
-    ports:
-      - ${HP_BIND:-10.8.0.2}:1069:1069/udp
-    networks:
-      - dionaea_net
-    depends_on:
-      dionaea:
-        condition: service_started
-    deploy:
-      resources:
-        limits:
-          cpus: "0.25"
-          memory: 64M
+  # payload-dedupe and yara-scanner moved to docker-compose.payload-analysis.yml
+  # (#258); dionaea and tftp-relay moved to docker-compose.dionaea.yml (#258)
+  # -- split into two separate Dockge stacks per explicit instruction rather
+  # than bundled together, sharing dionaea-lib/dashboard-state/yara-results
+  # the same way docker-compose.dashboard.yml already does.
   # Conpot moved to docker-compose.conpot.yml (#258 proof of concept), and
   # autoheal moved to docker-compose.utilities.yml (#258) -- both separate
   # Dockge stacks now. autoheal needs no changes for any #258 split: it
@@ -910,50 +699,32 @@ networks:
     internal: true
   tanner_local:
     driver: bridge
-  # One honeypot per network (#235), each with no other honeypot as a peer --
-  # a compromised honeypot has no network path to another honeypot's daemon.
-  # tftp-relay is the one real exception: it has depends_on: dionaea and
-  # actually forwards TFTP traffic to it, so those two share dionaea_net
-  # instead of each getting their own.
-  dionaea_net:
-    driver: bridge
   # cowrie_net, multipot_net, http_honeypot_net, api_honeypot_net,
   # conpot_net (+ five other conpot_*_net), and dnp3_net all moved out --
   # #258, split into docker-compose.cowrie.yml / .multipot.yml / .http.yml /
   # .conpot.yml / .dnp3.yml, each its own separate Dockge stack. Each was
   # already wholly private to its own service/family, so nothing here ever
-  # referenced them.
+  # referenced them. dionaea_net moved out the same way, into
+  # docker-compose.dionaea.yml (#258) alongside dionaea/tftp-relay
+  # themselves -- the one honeypot-per-network exception (#235) tftp-relay's
+  # depends_on: dionaea created lives entirely inside that file now.
 volumes:
   evebox-config: null
   es-data: null
-  # Named explicitly, like honeynet above: docker-compose.dashboard.yml's
-  # dashboard service (#258, a separate Compose project) reads these two
-  # read-only, and a project-prefixed default name would give it its own
-  # empty copy instead of the one dionaea/yara-scanner here actually write.
-  dionaea-lib:
-    name: dionaea-lib
-  # #124: opposite direction from dionaea-lib/yara-results above -- snare-
-  # clone (honeypot-init, deploys first) writes this, hp-snare (here) only
-  # reads it. Owned by honeypot-init instead, so this side is external.
+  # #124: snare-clone (honeypot-init, deploys first) writes this, hp-snare
+  # (here) only reads it. Owned by honeypot-init instead, so this side is
+  # external.
   snare-pages:
     name: snare-pages
     external: true
   arkime-pcap: null # Arkime-processed PCAP index files
-  yara-results:
-    name: yara-results
-  # reporter-data moved with reporter to docker-compose.utilities.yml (#258)
-  # -- private to that stack, nothing here declares it any more.
-  #
-  # services-adapter-socket moved to docker-compose.dashboard.yml (#258,
-  # separate honeypot-dashboard Dockge stack) along with the two services
-  # that used it -- private to that stack now, nothing here declares it.
-  #
-  # dashboard-state, unlike that one, stays a THIRD shared volume, same
-  # mechanism as dionaea-lib/yara-results above: payload-dedupe and
-  # yara-scanner here read/write retained script payloads under
-  # /payloads/scripts (the same subtree the dashboard's own
-  # SCRIPT_PAYLOAD_DIR=/state/script-payloads writes), so this side needs
-  # the explicit name too, not the "just moves with dashboard" treatment
-  # services-adapter-socket got.
-  dashboard-state:
-    name: dashboard-state
+  # dionaea-lib, yara-results, dashboard-state, reporter-data, and
+  # services-adapter-socket all moved out of this file (#258): the last
+  # services here that touched them (dionaea/tftp-relay,
+  # payload-dedupe/yara-scanner, reporter, dashboard/services-adapter) have
+  # all split into their own Dockge stacks now, so nothing in
+  # docker-compose.yml declares or references any of the five any more.
+  # See docker-compose.dionaea.yml, docker-compose.payload-analysis.yml,
+  # docker-compose.utilities.yml, and docker-compose.dashboard.yml for where
+  # each now lives, and the explicit shared `name:` each carries where more
+  # than one stack still touches it.
