@@ -14,7 +14,7 @@ curl -fsS -X PUT "$es_url/_snapshot/honeypot-fs" \
 # Bounded retention prevents a noisy internet-wide scan or IDS signature from
 # filling the homeserver disk. Daily Filebeat names already provide rollover;
 # ILM handles deletion of the old daily indices/backing indices.
-for spec in honeypot-30d:30d suricata-7d:7d dead-letter-60d:60d portbridge-30d:30d; do
+for spec in honeypot-30d:30d suricata-7d:7d dead-letter-60d:60d portbridge-30d:30d analysis-results-180d:180d; do
   name=${spec%%:*}
   age=${spec#*:}
   curl -fsS -X PUT "$es_url/_ilm/policy/$name" \
@@ -255,6 +255,64 @@ curl -fsS -X PUT "$es_url/_index_template/portbridge-events" \
   }
 }
 JSON
+
+# #378: Ghidra/sandbox/GitHub-analysis/workbench-run results, ingested by
+# analysis/es-results-importer/importer.py (previously local-disk-only JSON
+# files, per the issue's gap analysis). Each result document is heterogeneous
+# and fairly deep (Ghidra alone has functions/capa/floss/lief/revdeck
+# sub-objects), so -- same call as honeypot-events-v2's `honeypot` field --
+# the full result is mapped `flattened` under a source-namespaced field
+# rather than hand-mapping every nested key, and only the handful of fields
+# actually needed for filtering/sorting/cross-index correlation are promoted
+# to real types. file.hash.sha256 uses the same ECS field
+# honeypot-events-v2 already populates from Dionaea's shasum, so a single
+# query across honeypot-v2-*,ghidra-analysis-v1,sandbox-analysis-v1,
+# github-analysis-v1 for one hash returns the raw capture event and every
+# analysis result for that sample in one pass. 180d retention (not 30d like
+# raw events): a completed analysis report is the valuable, expensive-to-
+# regenerate artifact, not high-volume raw telemetry. Plain single indices,
+# not data streams -- importer overwrites by deterministic _id (sha256, job
+# id, or run id) rather than appending, so there is nothing to roll over.
+for spec in \
+  "ghidra-analysis-v1:ghidra" \
+  "sandbox-analysis-v1:sandbox" \
+  "github-analysis-v1:github_analysis" \
+  "workbench-runs-v1:workbench"
+do
+  index_name=${spec%%:*}
+  ns=${spec#*:}
+  curl -fsS -X PUT "$es_url/_index_template/${index_name%-v1}" \
+    -H 'Content-Type: application/json' \
+    --data-binary "$(cat <<JSON
+{
+  "index_patterns": ["${index_name}"],
+  "priority": 460,
+  "template": {
+    "settings": {
+      "index.lifecycle.name": "analysis-results-180d",
+      "index.number_of_replicas": 0,
+      "index.mapping.total_fields.limit": 500,
+      "index.mapping.ignore_malformed": true,
+      "index.refresh_interval": "30s"
+    },
+    "mappings": {
+      "properties": {
+        "${ns}": { "type": "flattened" },
+        "@timestamp": { "type": "date" },
+        "event": { "properties": { "category": { "type": "keyword" } } },
+        "file": { "properties": { "hash": { "properties": { "sha256": { "type": "keyword" } } } } },
+        "exit_status": { "type": "keyword" },
+        "risk_level": { "type": "keyword" },
+        "risk_score": { "type": "integer", "ignore_malformed": true },
+        "family": { "type": "keyword" },
+        "platform": { "type": "keyword" }
+      }
+    }
+  }
+}
+JSON
+)" >/dev/null
+done
 
 curl -fsS -X PUT "$es_url/_index_template/honeypot-dead-letter" \
   -H 'Content-Type: application/json' \
