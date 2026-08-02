@@ -1,9 +1,13 @@
 /* GitHub-analysis Report viewer (#309): a single application-managed modal,
-   opened by the detail page's "view report" button. One PDF per analysis
-   -- no grid/list state to track, unlike reports studio's hp-reports.js
-   (whose openViewer/closeViewer this mirrors the shape of, not the code,
-   since that file's version is wired to a list of many generated reports
-   this page has no equivalent of). */
+   opened by the detail page's Report card -- a plain .project-card
+   (theme.css), same as reports studio's own generated-report cards, just
+   one of them here instead of a grid/list. It has no nested Download/
+   Delete actions the way reports studio's card does, so it's a real
+   role="button" the whole card activates, with its own Enter/Space
+   handling below (a native <button> gets that for free; a plain
+   role="button" element does not). Mirrors hp-reports.js's openViewer/
+   closeViewer shape, not its code -- that file's version is wired to a
+   list of many generated reports this page has no equivalent of. */
 (() => {
   "use strict";
 
@@ -46,6 +50,11 @@
   };
 
   trigger.addEventListener("click", openViewer);
+  trigger.addEventListener("keydown", event => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    openViewer();
+  });
   closeButton.addEventListener("click", closeViewer);
   backdrop.addEventListener("click", closeViewer);
 

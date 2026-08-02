@@ -9,16 +9,16 @@
 <style nonce="{{.Nonce}}">
 /* #309: Report viewer, an application-managed overlay per the shared modal
    contract (Xore/theme docs/MODALS.md) -- same shape as reports.html's own
-   generated-report viewer (.hp-rp-viewer), but this page has at most one
-   PDF per analysis, so there's no grid, just the one card/button that opens
-   this single modal. */
+   generated-report viewer (.hp-rp-viewer). The trigger itself is a plain
+   .project-card (theme.css), same as reports studio's generated-report
+   cards -- just the one card here, since this page has at most one PDF per
+   analysis, not a grid of many. */
 .hp-ga-viewer { flex-direction: column; width: min(1000px, calc(100vw - 40px)); height: min(860px, calc(100dvh - 48px)); padding: 20px 20px 0; }
 .hp-ga-viewer #hp-ga-viewer-title { flex: none; margin: 0 40px 12px 0; font-size: var(--font-size-lg); }
 .hp-ga-viewer-frame { flex: 1; width: 100%; min-height: 0; border: 0; background: var(--surface-0); margin: 0 -20px; }
 @media (max-width: 720px) {
   .hp-ga-viewer { width: 100vw; height: 100dvh; border-radius: 0; }
 }
-.hp-ga-report-actions { display: flex; gap: 10px; align-items: center; }
 </style>
 </head>
 <body>
@@ -79,7 +79,14 @@
         <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-artifacts" role="tabpanel" data-dashboard-panel="artifacts" hidden>
           <div class="section-heading"><div><h2>What the pipeline produced</h2><p>Auto-generated detection content and the downloadable report.</p></div></div>
           <div class="card wide"><h2>Auto-generated YARA rules</h2>{{if .Detail.YARAAutoRules}}<p class="note">{{len .Detail.YARAAutoRules}} rule file{{if ne (len .Detail.YARAAutoRules) 1}}s{{end}} in the upstream repository reference this sample's hash.</p><ul class="tw:list-disc tw:pl-5">{{range .Detail.YARAAutoRules}}<li><code>{{.}}</code></li>{{end}}</ul>{{else}}<p class="empty">No auto-generated YARA rules reference this sample.</p>{{end}}</div>
-          <div class="card wide"><h2>Report</h2>{{if .Detail.ViewURL}}<p class="note">The rendered PDF report from the upstream repository.</p><div class="hp-ga-report-actions"><button class="btn btn-sm btn-primary" type="button" data-hp-ga-view-report="{{.Detail.ViewURL}}">view report</button><a class="lnk" href="{{.Detail.ViewURL}}?download=1">download &darr;</a></div>{{else if .Detail.ExportURL}}<p class="note">No PDF has been generated for this analysis yet &mdash; this downloads the JSON record instead.</p><a class="lnk" href="{{.Detail.ExportURL}}">download JSON &darr;</a>{{else}}<p class="empty">No report is available for this analysis.</p>{{end}}</div>
+          <div class="card wide"><h2>Report</h2>{{if .Detail.ViewURL}}<div class="project-grid"><article class="project-card" data-hp-ga-view-report="{{.Detail.ViewURL}}" role="button" tabindex="0" aria-label="View PDF report">
+            <div class="project-card__header">
+              <span class="project-card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>
+              <span class="project-card__title">PDF report</span>
+            </div>
+            <p class="project-card__desc">The rendered PDF report from the upstream repository.</p>
+            <div class="project-card__meta"><span>completed {{.Detail.CompletedAt}}</span></div>
+          </article></div>{{else if .Detail.ExportURL}}<p class="note">No PDF has been generated for this analysis yet &mdash; this downloads the JSON record instead.</p><a class="lnk" href="{{.Detail.ExportURL}}">download JSON &darr;</a>{{else}}<p class="empty">No report is available for this analysis.</p>{{end}}</div>
         </div>
 
         {{else}}
