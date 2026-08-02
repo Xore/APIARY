@@ -360,6 +360,70 @@ func TestFingerprintAndEnrichmentFilters(t *testing.T) {
 	}
 }
 
+// #149: /events?family= pivots from a GitHub-analysis scanner attribution to
+// the sessions that delivered a matching payload.
+func TestFamilyFilterMatchesResolvedHashSet(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", dir)
+	writeGitHubAnalysisResult(t, dir, shaA, map[string]any{"exit_status": "ok", "family": "Mirai"})
+	writeGitHubAnalysisResult(t, dir, shaB, map[string]any{"exit_status": "ok", "family": "qbot"})
+
+	delivered := storedEvent{Shasum: shaA, Session: "session-a"}
+	other := storedEvent{Shasum: shaB, Session: "session-b"}
+	noPayload := storedEvent{Session: "session-c"}
+
+	f := parseFilter(httptest.NewRequest("GET", "/events?family=mirai", nil))
+	if !f.match(delivered) {
+		t.Error("event delivering the attributed hash did not match ?family=mirai")
+	}
+	if f.match(other) {
+		t.Error("event delivering a different family's hash matched")
+	}
+	if f.match(noPayload) {
+		t.Error("event with no payload at all matched a family filter")
+	}
+
+	// Case-insensitive, matching githubAnalysisHashesForFamily's own
+	// normalization -- a chip built from the exact casing GitHub-analysis
+	// stored must still resolve the same set as a hand-typed query.
+	if !parseFilter(httptest.NewRequest("GET", "/events?family=MIRAI", nil)).match(delivered) {
+		t.Error("family filter must be case-insensitive")
+	}
+
+	// A family no scanner ever attributed must exclude every event, not act
+	// as an unset filter -- the empty resolved set is the correct answer, and
+	// falling through to "match everything" would silently broaden the
+	// filter into every event that merely lacks a family.
+	unknown := parseFilter(httptest.NewRequest("GET", "/events?family=doesnotexist", nil))
+	if unknown.match(delivered) || unknown.match(other) || unknown.match(noPayload) {
+		t.Error("an unmatched family must exclude every event, not fall through to match-all")
+	}
+
+	if got := parseFilter(httptest.NewRequest("GET", "/events", nil)); got.family != "" || len(got.familyHashes) != 0 {
+		t.Errorf("no ?family= param should leave the filter inactive, got %+v", got)
+	}
+}
+
+func TestFamilyFilterChipIsBounded(t *testing.T) {
+	f := filter{family: strings.Repeat("a", familyDisplayCap+10)}
+	chips := f.describe()
+	found := false
+	for _, chip := range chips {
+		if strings.HasPrefix(chip, "family = ") {
+			found = true
+			if strings.HasSuffix(chip, strings.Repeat("a", familyDisplayCap+10)) {
+				t.Error("family chip rendered an unbounded value")
+			}
+			if !strings.HasSuffix(chip, "…") {
+				t.Errorf("family chip was not truncated: %q", chip)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no family chip in %v", chips)
+	}
+}
+
 func TestFingerprintAndASNRowsLinkToExactEvents(t *testing.T) {
 	fp := fingerprintRows(map[string]int{"HASSH\x00abc123": 4}, 10)
 	if len(fp) != 1 || fp[0].Key != "HASSH: abc123" || fp[0].Link != "/events?fingerprint=abc123" {

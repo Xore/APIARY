@@ -26,6 +26,15 @@ type filter struct {
 	includeIPs []string
 	since      time.Time
 	sinceStr   string
+	// family (?family=, #149) is not a storedEvent attribute the exact-match
+	// checks above can compare directly -- it names a GitHub-analysis scanner
+	// attribution, resolved up front by parseFilter into familyHashes (every
+	// SHA-256 the pipeline attributed to it) and matched against e.Shasum.
+	// family itself is kept only for chip display; matching always goes
+	// through familyHashes, so this can never broaden into an arbitrary
+	// substring/pattern test over event fields.
+	family       string
+	familyHashes map[string]bool
 }
 
 func parseFilter(r *http.Request) filter {
@@ -50,6 +59,10 @@ func parseFilter(r *http.Request) filter {
 	if d, err := time.ParseDuration(v.Get("since")); err == nil && d > 0 {
 		f.since = time.Now().Add(-d)
 		f.sinceStr = v.Get("since")
+	}
+	if family := strings.TrimSpace(v.Get("family")); family != "" {
+		f.family = family
+		f.familyHashes = githubAnalysisHashesForFamily(family)
 	}
 	return f
 }
@@ -103,6 +116,9 @@ func (f filter) match(e storedEvent) bool {
 		return false
 	}
 	if f.shasum != "" && e.Shasum != f.shasum {
+		return false
+	}
+	if f.family != "" && !f.familyHashes[e.Shasum] {
 		return false
 	}
 	if f.cat != "" && e.Category != f.cat {
@@ -186,6 +202,7 @@ func (f filter) describe() []string {
 	add("command", f.cmd)
 	add("session", f.session)
 	add("payload", shortHash(f.shasum))
+	add("family", boundedFamily(f.family))
 	add("category", f.cat)
 	add("country", f.country)
 	add("city", f.city)

@@ -72,6 +72,14 @@ type binaryAnalysis struct {
 	// recovered from the event feed rather than stored with the capture.
 	OriginLabel string
 	OriginLink  string
+	// Family/FamilyLink mirror capturedFile's fields of the same name (#149):
+	// Family is GitHubAnalysis.Family bounded for display (the template
+	// renders this, not GitHubAnalysis.Family directly, so a pathological
+	// upstream value can't blow out the card); FamilyLink is the
+	// /events?family= pivot to every other session that delivered this
+	// attribution.
+	Family     string
+	FamilyLink string
 }
 
 func (s *store) analyzePayload(name string) (binaryAnalysis, error) {
@@ -135,6 +143,10 @@ func (s *store) analyzePayload(name string) (binaryAnalysis, error) {
 		if strings.EqualFold(result.SHA256, a.SHA256) {
 			row := result
 			a.GitHubAnalysis = &row
+			if row.Family != "" {
+				a.Family = boundedFamily(row.Family)
+				a.FamilyLink = eventsURL(url.Values{"family": {row.Family}})
+			}
 			break
 		}
 	}

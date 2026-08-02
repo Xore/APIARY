@@ -46,6 +46,16 @@ type capturedFile struct {
 	// correctly regardless of source, because it hashes the full content.
 	GitHubAnalysisURL   string
 	GitHubAnalysisLabel string
+	// Family/FamilyLink surface the scanner-derived attribution from GitHub-
+	// analysis (result.Family) -- deliberately distinct from
+	// GitHubAnalysisLabel (detection ratio) and never merged with Ghidra's
+	// own AI-guessed FamilyGuess (ghidra.go), which is a separate, explicitly
+	// unverified local finding that stays on its own page. FamilyLink is the
+	// #149 /events?family= pivot to every session that delivered a payload
+	// with this attribution; GitHubAnalysisURL alongside it already links
+	// back to the supporting GitHub-analysis record.
+	Family     string
+	FamilyLink string
 	// OriginLabel/OriginLink answer "what event did this payload come from"
 	// (#205) -- capture is filesystem-based (scanPayloads walks disk, never
 	// touches an event), so this is recovered by matching this file's hash
@@ -163,6 +173,13 @@ func (s *store) payloadsData(filter string) payloadsPage {
 			file.GitHubAnalysisLabel = result.ExitStatus
 			if result.Verdict != nil {
 				file.GitHubAnalysisLabel = fmt.Sprintf("%d/%d %s", result.Verdict.Malicious, result.Verdict.Total, result.Verdict.Level)
+			}
+			if result.Family != "" {
+				file.Family = boundedFamily(result.Family)
+				// The link carries the full, untruncated value -- truncating
+				// first would let two different long family names collide at
+				// the display cut point and pivot to the wrong set of hashes.
+				file.FamilyLink = eventsURL(url.Values{"family": {result.Family}})
 			}
 		}
 		if origin, ok := origins[file.Hash]; ok {
