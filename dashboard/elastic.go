@@ -256,6 +256,46 @@ func (c *esClient) set(st esStatus) {
 	c.mu.Unlock()
 }
 
+// searchNamespace runs a bounded _search against index and returns each
+// hit's `field` sub-document, still JSON-encoded. #384: the four
+// #383-mirrored result indices (ghidra/sandbox/github-analysis/workbench)
+// store the producer's original, unmodified result JSON under a
+// source-namespaced field (see analysis/es-results-importer/importer.py's
+// build_document) -- so a caller can unmarshal the returned bytes straight
+// into the same struct it already unmarshals the local JSON file into,
+// with no separate ES-specific schema to maintain.
+//
+// size is capped at Elasticsearch's default index.max_result_window
+// (10000): these are analysis-result indices, not the high-volume event
+// stream, so an unpaged single page comfortably covers realistic corpus
+// sizes today. Revisit with search_after/scroll if that stops being true.
+func (c *esClient) searchNamespace(index, field string, size int) ([]json.RawMessage, error) {
+	if size <= 0 || size > 10000 {
+		size = 10000
+	}
+	b, err := c.request(fmt.Sprintf("/%s/_search?size=%d", index, size))
+	if err != nil {
+		return nil, err
+	}
+	var v struct {
+		Hits struct {
+			Hits []struct {
+				Source map[string]json.RawMessage `json:"_source"`
+			} `json:"hits"`
+		} `json:"hits"`
+	}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return nil, err
+	}
+	out := make([]json.RawMessage, 0, len(v.Hits.Hits))
+	for _, h := range v.Hits.Hits {
+		if raw, ok := h.Source[field]; ok {
+			out = append(out, raw)
+		}
+	}
+	return out, nil
+}
+
 func (c *esClient) history(w http.ResponseWriter, r *http.Request, attachment bool) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))

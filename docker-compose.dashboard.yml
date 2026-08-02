@@ -230,6 +230,61 @@ services:
           # headroom until that lands.
           memory: 2G
 
+  # #378: ships Ghidra/sandbox/GitHub-analysis/workbench-run results into
+  # Elasticsearch (ghidra-analysis-v1/sandbox-analysis-v1/github-analysis-v1/
+  # workbench-runs-v1, see analysis/elasticsearch-setup.sh) -- previously
+  # local-disk-JSON-only, per the issue's gap analysis. Read-only mirror:
+  # local JSON stays authoritative, this never writes back to the result
+  # directories. Same read-only spool boundaries as the dashboard service
+  # above -- no request-side mount, this only ever consumes finished results.
+  #
+  # Horizontal scaling (issue's second ask): SHARD_COUNT partitions files by
+  # sha256(path) across replicas; SHARD_INDEX defaults to the trailing "-N"
+  # docker compose assigns each replica's $HOSTNAME when scaled. To run more
+  # importers when the backlog is large: drop `container_name:` below (it
+  # would collide across replicas), set ES_IMPORTER_SHARD_COUNT to the
+  # replica count, then `docker compose up -d --scale es-results-importer=N`.
+  es-results-importer:
+    <<: *runtime-defaults
+    build: /opt/stacks/honeypot-stack/analysis/es-results-importer
+    container_name: hp-es-results-importer
+    restart: unless-stopped
+    volumes:
+      - /var/lib/honeypot-ghidra/results:/ghidra-results:ro
+      - /var/lib/honeypot-sandbox/export:/sandbox-results:ro
+      - /var/lib/honeypot-windows-sandbox/export:/windows-sandbox-results:ro
+      - /var/lib/honeypot-github/results:/github-analysis-results:ro
+      - dashboard-state:/state:ro
+      - es-importer-state:/state-importer
+    environment:
+      - ES_HOST=http://elasticsearch:9200
+      - IMPORT_INTERVAL=${ES_IMPORTER_INTERVAL:-300}
+      - IMPORTER_STATE=/state-importer/es-results-importer.json
+      - SHARD_COUNT=${ES_IMPORTER_SHARD_COUNT:-1}
+      - GHIDRA_RESULTS_DIR=/ghidra-results
+      - SANDBOX_RESULTS_DIR=/sandbox-results
+      - WINDOWS_SANDBOX_RESULTS_DIR=/windows-sandbox-results
+      - GITHUB_ANALYSIS_RESULTS_DIR=/github-analysis-results
+      - ANALYSIS_WORKBENCH_DIR=/state/analysis-workbench
+      - TZ=Europe/Berlin
+    networks:
+      - honeynet
+    # Same DAC_READ_SEARCH justification as the dashboard service above:
+    # the Ghidra/GitHub-analysis result directories are root-owned host bind
+    # mounts this container otherwise can't read.
+    user: "0:0"
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_READ_SEARCH
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
   services-adapter:
     <<: *runtime-defaults
     build: /opt/stacks/honeypot-stack/services-adapter
@@ -284,3 +339,7 @@ volumes:
   # migrated from the old one: per explicit instruction, this split does
   # not need to preserve existing state across the cutover.
   services-adapter-socket: null
+  # #378: es-results-importer's own last-imported-mtime bookkeeping. Private
+  # to this service -- losing it just means the next pass re-sends every
+  # result once (idempotent, deterministic _id), not a data loss.
+  es-importer-state: null

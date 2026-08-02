@@ -223,7 +223,48 @@ func sandboxRequestDirs() []string {
 	return dirs
 }
 
+// loadSandboxResults prefers #383's sandbox-analysis-v1 ES mirror (#384),
+// falling back to the local JSON files exactly as loadGhidraResults does --
+// see its doc comment for the fallback conditions. workbench_orchestrator.go's
+// reconcileWorkbenchRun calls loadSandboxResultsLocal directly instead, for
+// the same reconciliation-freshness reason as the Ghidra side.
 func loadSandboxResults() []sandboxResult {
+	if esResultsClient != nil {
+		if rows, ok := loadSandboxResultsES(esResultsClient); ok {
+			return rows
+		}
+	}
+	return loadSandboxResultsLocal()
+}
+
+func loadSandboxResultsES(es *esClient) ([]sandboxResult, bool) {
+	raws, err := es.searchNamespace("sandbox-analysis-v1", "sandbox", 10000)
+	if err != nil {
+		return nil, false
+	}
+	seen := map[string]bool{}
+	rows := make([]sandboxResult, 0, len(raws))
+	for _, raw := range raws {
+		var row sandboxResult
+		if json.Unmarshal(raw, &row) != nil || !hashName.MatchString(row.SHA256) || row.Job == "" || seen[row.Job] {
+			continue
+		}
+		seen[row.Job] = true
+		normalizeSandboxResult(&row)
+		rows = append(rows, row)
+	}
+	sortSandboxResults(&rows)
+	return rows, true
+}
+
+func sortSandboxResults(rows *[]sandboxResult) {
+	sort.Slice(*rows, func(i, j int) bool { return (*rows)[i].CompletedAt > (*rows)[j].CompletedAt })
+	if len(*rows) > 250 {
+		*rows = (*rows)[:250]
+	}
+}
+
+func loadSandboxResultsLocal() []sandboxResult {
 	var rows []sandboxResult
 	seen := map[string]bool{}
 	for _, dir := range sandboxResultsDirs() {
@@ -262,10 +303,7 @@ func loadSandboxResults() []sandboxResult {
 			rows = append(rows, row)
 		}
 	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].CompletedAt > rows[j].CompletedAt })
-	if len(rows) > 250 {
-		rows = rows[:250]
-	}
+	sortSandboxResults(&rows)
 	return rows
 }
 

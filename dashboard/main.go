@@ -100,6 +100,14 @@ func main() {
 	}
 	if esURL := os.Getenv("ELASTICSEARCH_URL"); esURL != "" {
 		s.es = newESClient(esURL, os.Getenv("FILEBEAT_URL"))
+		// #384: loadGhidraResults/loadSandboxResults/loadGitHubAnalysisResults
+		// are free functions called from many unrelated files (and directly by
+		// tests, with no store around), not store methods -- a package-level
+		// var lets them prefer #383's ES mirror when it's configured without a
+		// signature change at every call site. Falls back to the local JSON
+		// files unchanged whenever this stays nil (ELASTICSEARCH_URL unset,
+		// all existing tests).
+		esResultsClient = s.es
 		s.mlAnomalies = &mlAnomalyStore{}
 		s.es.refresh()
 		s.refreshMLAnomalies()

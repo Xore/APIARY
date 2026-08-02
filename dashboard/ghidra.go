@@ -243,7 +243,56 @@ func ghidraResultsDir() string { return getenv("GHIDRA_RESULTS_DIR", "") }
 // consuming the spool.
 const ghidraStatusStaleAfter = 30 * time.Minute
 
+// esResultsClient is nil unless ELASTICSEARCH_URL is configured (main.go).
+// See its doc comment there for why this is a package-level var rather than
+// a parameter threaded through loadGhidraResults' many call sites.
+var esResultsClient *esClient
+
+// loadGhidraResults prefers #383's ghidra-analysis-v1 ES mirror (#384) and
+// falls back to the local JSON files it always used to read -- either
+// because ES isn't configured, or because the query failed (index not
+// created yet, cluster unreachable). workbench_orchestrator.go's
+// reconcileWorkbenchRun deliberately calls loadGhidraResultsLocal directly
+// instead of this: it polls for job completion to flip run state, and the
+// ES mirror's import interval (5 minutes by default) would delay or miss
+// that transition.
 func loadGhidraResults() []ghidraResult {
+	if esResultsClient != nil {
+		if rows, ok := loadGhidraResultsES(esResultsClient); ok {
+			return rows
+		}
+	}
+	return loadGhidraResultsLocal()
+}
+
+func loadGhidraResultsES(es *esClient) ([]ghidraResult, bool) {
+	raws, err := es.searchNamespace("ghidra-analysis-v1", "ghidra", 10000)
+	if err != nil {
+		return nil, false
+	}
+	rows := make([]ghidraResult, 0, len(raws))
+	for _, raw := range raws {
+		var row ghidraResult
+		if json.Unmarshal(raw, &row) != nil || !hashName.MatchString(row.SHA256) {
+			continue
+		}
+		attachGhidraDownload(&row)
+		rows = append(rows, row)
+	}
+	sortGhidraResults(rows)
+	return rows, true
+}
+
+func sortGhidraResults(rows []ghidraResult) {
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].CompletedAt != rows[j].CompletedAt {
+			return rows[i].CompletedAt > rows[j].CompletedAt
+		}
+		return rows[i].SHA256 < rows[j].SHA256
+	})
+}
+
+func loadGhidraResultsLocal() []ghidraResult {
 	dir := ghidraResultsDir()
 	if dir == "" {
 		return nil
@@ -281,12 +330,7 @@ func loadGhidraResults() []ghidraResult {
 	// Newest first. CompletedAt is an RFC3339 string from the worker, which
 	// sorts correctly as text for a fixed offset; fall back to the hash so the
 	// order is stable rather than map-random when timestamps tie or are empty.
-	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].CompletedAt != rows[j].CompletedAt {
-			return rows[i].CompletedAt > rows[j].CompletedAt
-		}
-		return rows[i].SHA256 < rows[j].SHA256
-	})
+	sortGhidraResults(rows)
 	return rows
 }
 
