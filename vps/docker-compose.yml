@@ -197,11 +197,24 @@ services:
     environment:
       - LISTEN_IP=0.0.0.0
       - CONN_LOG=/logs/portbridge/portbridge.json
+      # #241: per-connection p0f OS-guess query, folded into CONN_LOG's "os"
+      # field by vps/portbridge/p0f.go. Empty/unset is a no-op (queryP0f
+      # short-circuits before touching the network) so this stays optional
+      # if p0f is ever undeployed.
+      - P0F_API_SOCK=/run/p0f/p0f.sock
       - "RULES=tcp:22:10.8.0.2:19022 tcp:23:10.8.0.2:19023 tcp:25:10.8.0.2:19025:pp tcp:5432:10.8.0.2:5432:pp tcp:5900:10.8.0.2:5900:pp tcp:6379:10.8.0.2:6379:pp tcp:9200:10.8.0.2:9200:pp tcp:2375:10.8.0.2:2375:pp tcp:8888:10.8.0.2:18083:pp tcp:8081:10.8.0.2:19081:pp tcp:21:10.8.0.2:21 tcp:135:10.8.0.2:135 tcp:445:10.8.0.2:445 tcp:1433:10.8.0.2:1433 tcp:3306:10.8.0.2:3306 tcp:27017:10.8.0.2:27017 tcp:1723:10.8.0.2:1723 tcp:1883:10.8.0.2:1883 tcp:5060:10.8.0.2:5060 tcp:9100:10.8.0.2:9100 tcp:11211:10.8.0.2:11211 tcp:20000:10.8.0.2:20000:pp tcp:102:10.8.0.2:102:pp tcp:1102:10.8.0.2:1102:pp tcp:2102:10.8.0.2:2102:pp tcp:502:10.8.0.2:502:pp tcp:1502:10.8.0.2:1502:pp tcp:2502:10.8.0.2:2502:pp tcp:2404:10.8.0.2:2404:pp tcp:10001:10.8.0.2:10001:pp tcp:1025:10.8.0.2:1025:pp tcp:50100:10.8.0.2:50100:pp tcp:44818:10.8.0.2:44818:pp udp:69:10.8.0.2:1069 udp:161:10.8.0.2:19161 udp:1900:10.8.0.2:1900 udp:47808:10.8.0.2:47808 udp:623:10.8.0.2:623 udp:5060:10.8.0.2:5060"
     volumes:
       # portbridge connection log — ship this dir to the home stack's
       # /opt/stacks/honeypot-stack/logs/portbridge so the dashboard ingests it.
       - /opt/stacks/honeypot-stack/logs/portbridge:/logs/portbridge
+      # p0f query socket (see the p0f service below and p0f/p0f.go). :ro --
+      # connecting to an existing socket doesn't write through the mount, it
+      # only needs the socket file's own permission bits, which the kernel
+      # checks independently of the mount's read-only flag.
+      - p0f-api-socket:/run/p0f:ro
+    depends_on:
+      p0f:
+        condition: service_started
 
   # Bounds the portbridge connection log (copytruncate: the writer keeps its
   # O_APPEND fd). The threshold is the home dashboard's tail-read cap (8 MiB),
@@ -446,6 +459,58 @@ services:
     deploy:
       resources: { limits: { cpus: "0.1", memory: 32M } }
 
+  # #241: passive OS/TCP-stack fingerprinting (p0f), same vantage point as
+  # Suricata and for the same reason -- portbridge terminates and
+  # re-establishes every connection via PROXY protocol before relaying to
+  # the home server, so a home-server-side p0f would only ever fingerprint
+  # portbridge's own stack, never the real attacker's. Two independent raw
+  # socket listeners on the same interface (Suricata + p0f) don't conflict;
+  # the kernel delivers a packet copy to each.
+  #
+  # Runs in API mode (-s, in p0f/Dockerfile's CMD), not a JSON log file:
+  # portbridge already sees every real attacker IP and queries p0f's socket
+  # directly per connection (vps/portbridge/p0f.go), folding the OS guess
+  # into the one JSON line it already writes -- no second log to ship over
+  # sshfs, correlate by IP, or rotate on this side.
+  p0f:
+    build: ./p0f
+    image: honeypot-stack-p0f:latest
+    container_name: hp-p0f
+    restart: unless-stopped
+    network_mode: host
+    # p0f's own binary already carries cap_sys_chroot/cap_setgid/cap_net_raw
+    # via setcap (p0f/Dockerfile) and runs as the non-root p0f user -- these
+    # three are the container-level capability set setcap actually draws
+    # from at exec time. Dropping everything else Docker grants by default
+    # (CHOWN, DAC_OVERRIDE, FOWNER, ...) narrows the container to only what
+    # p0f itself is permitted to use, matching the root compose file's
+    # cap_drop: [ALL] + explicit cap_add posture for sensors.
+    # No USER in p0f/Dockerfile: this host's Docker daemon defaults every
+    # container to no-new-privileges (/etc/docker/daemon.json), which blocks
+    # file-capability-based privilege gain at exec -- confirmed live, a
+    # setcap'd binary run as a non-root user still got "pcap_open_live:
+    # Operation not permitted" here. p0f runs as root and drops privileges
+    # itself instead (prepare_pcap()/open_api() run before drop_privs() in
+    # p0f.c's main()) via plain setuid()/setgid()/chroot() syscalls on
+    # capabilities already in the container's bounding set -- no exec-time
+    # gain involved, so no-new-privileges doesn't affect this path. cap_drop:
+    # [ALL] + this explicit list is what p0f's root startup is actually
+    # permitted to do: NET_RAW to open the raw socket, SETUID/SETGID/
+    # SYS_CHROOT for drop_privs' own calls, nothing else Docker grants root
+    # by default (CHOWN, DAC_OVERRIDE, FOWNER, ...).
+    cap_drop: [ALL]
+    cap_add: [NET_RAW, SETUID, SETGID, SYS_CHROOT]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    volumes:
+      # Query-socket directory shared with portbridge below. p0f creates and
+      # binds the socket here while still root (see above), so a plain named
+      # volume (root:root by default) is all this needs.
+      - p0f-api-socket:/run/p0f
+    environment: [TZ=Europe/Berlin]
+    deploy:
+      resources: { limits: { cpus: "0.5", memory: 256M } }
+
   # #120: prune rotated portbridge.json.* files past their retention window.
   # portbridge's own connLogger now rotates itself (vps/portbridge/main.go),
   # same fix as Suricata's rotate-interval above, but rotating doesn't prune
@@ -476,3 +541,4 @@ networks:
 volumes:
   go-cache:
   suricata-rules:
+  p0f-api-socket:
