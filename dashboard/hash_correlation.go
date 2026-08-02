@@ -38,17 +38,33 @@ type hashCorrelation struct {
 }
 
 // correlateHash answers #354's "is this hash known" question by checking
-// every source that can confirm it independently. hash is validated before
-// any lookup -- a malformed value must never reach an Elasticsearch query
-// string or a case-insensitive scan of untrusted-shaped input.
-func (s *store) correlateHash(hash string) hashCorrelation {
-	hash = strings.ToLower(strings.TrimSpace(hash))
-	if !hashName.MatchString(hash) {
+// every source that can confirm it independently.
+//
+// primary must be the payload's true content SHA-256 -- what Ghidra,
+// sandbox, and GitHub-analysis always key their own results by, since each
+// computes it from the captured bytes rather than trusting whatever a
+// sensor originally logged. altID is an additional identifier worth
+// checking in Elasticsearch too when it differs from primary: a Dionaea
+// capture's on-disk identity is its MD5 (dionaea's own convention, #364),
+// not a SHA-256, and that is genuinely what file.hash.md5 in Elasticsearch
+// carries for it -- searching only primary would silently miss every
+// Dionaea sighting. altID may be empty (a caller with no cheaper way to
+// know it, e.g. the workbench page, which deliberately avoids a full-file
+// read) -- local-store matching then only ever uses primary, since those
+// three sources have no MD5-keyed records to find regardless.
+//
+// Both identifiers are validated before use -- a malformed value must
+// never reach an Elasticsearch query string or a case-insensitive scan of
+// untrusted-shaped input.
+func (s *store) correlateHash(primary, altID string) hashCorrelation {
+	primary = strings.ToLower(strings.TrimSpace(primary))
+	altID = strings.ToLower(strings.TrimSpace(altID))
+	if !hashName.MatchString(primary) {
 		return hashCorrelation{}
 	}
 	result := hashCorrelation{}
 	for _, r := range loadGhidraResults() {
-		if strings.EqualFold(r.SHA256, hash) {
+		if strings.EqualFold(r.SHA256, primary) {
 			row := r
 			result.Ghidra = &row
 			result.Known = true
@@ -56,13 +72,13 @@ func (s *store) correlateHash(hash string) hashCorrelation {
 		}
 	}
 	for _, r := range loadSandboxResults() {
-		if strings.EqualFold(r.SHA256, hash) {
+		if strings.EqualFold(r.SHA256, primary) {
 			result.Sandbox = append(result.Sandbox, r)
 			result.Known = true
 		}
 	}
 	for _, r := range loadGitHubAnalysisResults() {
-		if strings.EqualFold(r.SHA256, hash) {
+		if strings.EqualFold(r.SHA256, primary) {
 			row := r
 			result.GitHub = &row
 			result.Known = true
@@ -70,7 +86,11 @@ func (s *store) correlateHash(hash string) hashCorrelation {
 		}
 	}
 	if s.es != nil {
-		if records, total, err := s.es.correlate(hashQuery(hash), 200); err == nil {
+		ids := []string{primary}
+		if altID != "" && altID != primary && hashName.MatchString(altID) {
+			ids = append(ids, altID)
+		}
+		if records, total, err := s.es.correlate(hashQuery(ids...), 200); err == nil {
 			result.ESAvailable = true
 			result.ESSightings = total
 			sensors := map[string]int{}
@@ -91,9 +111,12 @@ func (s *store) correlateHash(hash string) hashCorrelation {
 }
 
 // hashQuery matches either hash field the geoip-honeypot pipeline populates
-// -- cowrie's genuine SHA-256 (file.hash.sha256) or dionaea's MD5 (#354's
-// file.hash.md5) -- since a caller here only has "the identity hash this
-// payload is addressed by locally", not which algorithm produced it.
-func hashQuery(hash string) string {
-	return fmt.Sprintf(`file.hash.sha256:"%s" OR file.hash.md5:"%s"`, hash, hash)
+// -- cowrie's genuine SHA-256 (file.hash.sha256) or Dionaea's MD5 (#354's
+// file.hash.md5) -- for every identifier a caller has for this payload.
+func hashQuery(hashes ...string) string {
+	clauses := make([]string, 0, len(hashes)*2)
+	for _, h := range hashes {
+		clauses = append(clauses, fmt.Sprintf(`file.hash.sha256:"%s"`, h), fmt.Sprintf(`file.hash.md5:"%s"`, h))
+	}
+	return strings.Join(clauses, " OR ")
 }
