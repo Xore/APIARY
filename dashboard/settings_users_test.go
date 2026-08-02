@@ -24,10 +24,39 @@ func newTestUserStore(t *testing.T) *userStore {
 	return newUserStore(filepath.Join(dir, "users.json"), audit)
 }
 
+// TestUpsertSeedsSiteDefaultTimezone (#282): a brand new subject's own
+// Timezone preference starts as the operator's current
+// behavior.default_timezone, not a hardcoded "browser" literal -- the "real
+// site-wide default concept" #282 asked for. An empty/invalid site default
+// (e.g. a degraded config store) must still fall back to the compiled
+// "browser" default rather than seeding an unvalidated value.
+func TestUpsertSeedsSiteDefaultTimezone(t *testing.T) {
+	users := newTestUserStore(t)
+	withSite := testIdentity("subject-with-site-default", "analyst", "user")
+	users.Upsert(withSite, "Europe/Berlin")
+	prefs, _, found := users.Preferences(withSite.Subject)
+	if !found {
+		t.Fatal("projection was not created")
+	}
+	if prefs.Timezone != "Europe/Berlin" {
+		t.Fatalf("timezone = %q, want the site default Europe/Berlin", prefs.Timezone)
+	}
+
+	noSite := testIdentity("subject-no-site-default", "analyst", "user")
+	users.Upsert(noSite, "")
+	prefs2, _, found := users.Preferences(noSite.Subject)
+	if !found {
+		t.Fatal("projection was not created")
+	}
+	if prefs2.Timezone != "browser" {
+		t.Fatalf("timezone = %q, want the compiled fallback \"browser\" for an empty site default", prefs2.Timezone)
+	}
+}
+
 func TestProjectionUpsertCreatesAndRefreshes(t *testing.T) {
 	users := newTestUserStore(t)
 	identity := testIdentity("subject-aaaa-bbbb-cccc", "analyst", "user")
-	users.Upsert(identity)
+	users.Upsert(identity, "")
 	projections := users.Projections()
 	if len(projections) != 1 {
 		t.Fatalf("expected one projection, got %d", len(projections))
@@ -45,7 +74,7 @@ func TestProjectionUpsertCreatesAndRefreshes(t *testing.T) {
 	renamed := identity
 	renamed.Username = "senior-analyst"
 	renamed.Role = "admin"
-	users.Upsert(renamed)
+	users.Upsert(renamed, "")
 	projections = users.Projections()
 	if len(projections) != 1 || projections[0].LastUsername != "senior-analyst" || projections[0].RoleSnapshot != "admin" {
 		t.Fatalf("upsert did not refresh identity material: %+v", projections)
@@ -58,9 +87,9 @@ func TestProjectionUpsertCreatesAndRefreshes(t *testing.T) {
 func TestProjectionUpsertThrottlesRepeatedWrites(t *testing.T) {
 	users := newTestUserStore(t)
 	identity := testIdentity("subject-throttle-0001", "analyst", "user")
-	users.Upsert(identity)
+	users.Upsert(identity, "")
 	revisionAfterCreate := users.inner.Revision()
-	users.Upsert(identity) // within the throttle window: no rewrite
+	users.Upsert(identity, "") // within the throttle window: no rewrite
 	if users.inner.Revision() != revisionAfterCreate {
 		t.Fatal("throttled upsert must not rewrite the store")
 	}
@@ -68,8 +97,8 @@ func TestProjectionUpsertThrottlesRepeatedWrites(t *testing.T) {
 
 func TestProjectionRejectsInvalidSubjects(t *testing.T) {
 	users := newTestUserStore(t)
-	users.Upsert(testIdentity("bad subject!", "analyst", "user"))
-	users.Upsert(testIdentity("short", "analyst", "user"))
+	users.Upsert(testIdentity("bad subject!", "analyst", "user"), "")
+	users.Upsert(testIdentity("short", "analyst", "user"), "")
 	if len(users.Projections()) != 0 {
 		t.Fatal("invalid subjects must not be projected")
 	}
@@ -79,8 +108,8 @@ func TestPreferencesRoundTripAndIsolation(t *testing.T) {
 	users := newTestUserStore(t)
 	alice := testIdentity("subject-alice-000001", "alice", "user")
 	bob := testIdentity("subject-bob-00000001", "bob", "admin")
-	users.Upsert(alice)
-	users.Upsert(bob)
+	users.Upsert(alice, "")
+	users.Upsert(bob, "")
 
 	_, etag, ok := users.Preferences(alice.Subject)
 	if !ok {
@@ -126,7 +155,7 @@ func TestPreferencesRequireAProjectedSubject(t *testing.T) {
 func TestPreferencesValidationFailureLeavesStoreUntouched(t *testing.T) {
 	users := newTestUserStore(t)
 	alice := testIdentity("subject-alice-000002", "alice", "user")
-	users.Upsert(alice)
+	users.Upsert(alice, "")
 	_, err := users.UpdatePreferences(alice, "", "req-3", "", func(p *userPreferences) error {
 		p.RefreshInterval = 1 // outside the bounded choice set
 		return nil
@@ -143,7 +172,7 @@ func TestPreferencesValidationFailureLeavesStoreUntouched(t *testing.T) {
 func TestPreferencesETagConflict(t *testing.T) {
 	users := newTestUserStore(t)
 	alice := testIdentity("subject-alice-000003", "alice", "user")
-	users.Upsert(alice)
+	users.Upsert(alice, "")
 	_, stale, _ := users.Preferences(alice.Subject)
 	if _, err := users.UpdatePreferences(alice, stale, "req-4", "", func(p *userPreferences) error {
 		p.Theme = "dark"
@@ -169,7 +198,7 @@ func TestPreferencesETagConflict(t *testing.T) {
 func TestPreferencesAcceptsWeakETagFromIfMatch(t *testing.T) {
 	users := newTestUserStore(t)
 	alice := testIdentity("subject-alice-000009", "alice", "user")
-	users.Upsert(alice)
+	users.Upsert(alice, "")
 	_, etag, _ := users.Preferences(alice.Subject)
 	weak := "W/" + etag
 	if _, err := users.UpdatePreferences(alice, weak, "req-weak-1", "", func(p *userPreferences) error {
@@ -188,7 +217,7 @@ func TestPreferencesAcceptsWeakETagFromIfMatch(t *testing.T) {
 func TestPreferencesRejectsStaleWeakETag(t *testing.T) {
 	users := newTestUserStore(t)
 	alice := testIdentity("subject-alice-000010", "alice", "user")
-	users.Upsert(alice)
+	users.Upsert(alice, "")
 	_, stale, _ := users.Preferences(alice.Subject)
 	if _, err := users.UpdatePreferences(alice, stale, "req-weak-2", "", func(p *userPreferences) error {
 		p.Theme = "dark"
@@ -207,7 +236,7 @@ func TestPreferencesRejectsStaleWeakETag(t *testing.T) {
 func TestResetPreferencesRestoresDefaults(t *testing.T) {
 	users := newTestUserStore(t)
 	alice := testIdentity("subject-alice-000004", "alice", "user")
-	users.Upsert(alice)
+	users.Upsert(alice, "")
 	if _, err := users.UpdatePreferences(alice, "", "req-6", "", func(p *userPreferences) error {
 		p.Theme = "light"
 		p.NotifySound = true
@@ -215,7 +244,7 @@ func TestResetPreferencesRestoresDefaults(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := users.ResetPreferences(alice, "", "req-7", ""); err != nil {
+	if _, err := users.ResetPreferences(alice, "", "req-7", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	prefs, _, _ := users.Preferences(alice.Subject)
@@ -242,7 +271,7 @@ func TestProjectionCapEvictsLeastRecentlySeen(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	users.Upsert(testIdentity("subject-newcomer-000", "newcomer", "user"))
+	users.Upsert(testIdentity("subject-newcomer-000", "newcomer", "user"), "")
 	projections := users.Projections()
 	if len(projections) != maxProjectedUsers {
 		t.Fatalf("projection cap not enforced: %d records", len(projections))
@@ -271,8 +300,8 @@ func TestPreferencesETagUnaffectedByOtherSubjectActivity(t *testing.T) {
 	users := newTestUserStore(t)
 	alice := testIdentity("subject-alice-000006", "alice", "user")
 	bob := testIdentity("subject-bob-00000002", "bob", "user")
-	users.Upsert(alice)
-	users.Upsert(bob)
+	users.Upsert(alice, "")
+	users.Upsert(bob, "")
 
 	_, aliceEtag, ok := users.Preferences(alice.Subject)
 	if !ok {
@@ -284,7 +313,7 @@ func TestPreferencesETagUnaffectedByOtherSubjectActivity(t *testing.T) {
 	// touch alice's token.
 	bobPromoted := bob
 	bobPromoted.Role = "admin"
-	users.Upsert(bobPromoted)
+	users.Upsert(bobPromoted, "")
 	if _, err := users.UpdatePreferences(bobPromoted, "", "req-bob-1", "", func(p *userPreferences) error {
 		p.Theme = "dark"
 		return nil
@@ -307,7 +336,7 @@ func TestPreferencesETagUnaffectedByOtherSubjectActivity(t *testing.T) {
 func TestPreferencesConflictReloadAndRetry(t *testing.T) {
 	users := newTestUserStore(t)
 	alice := testIdentity("subject-alice-000007", "alice", "user")
-	users.Upsert(alice)
+	users.Upsert(alice, "")
 
 	_, sessionAEtag, _ := users.Preferences(alice.Subject)
 	sessionBEtag := sessionAEtag
@@ -351,7 +380,7 @@ func TestPreferencesConflictReloadAndRetry(t *testing.T) {
 func TestPreferencesRapidSequentialUpdatesFromOneSession(t *testing.T) {
 	users := newTestUserStore(t)
 	alice := testIdentity("subject-alice-000008", "alice", "user")
-	users.Upsert(alice)
+	users.Upsert(alice, "")
 
 	_, etag, _ := users.Preferences(alice.Subject)
 	edits := []func(*userPreferences){
@@ -379,7 +408,7 @@ func TestPreferencesRapidSequentialUpdatesFromOneSession(t *testing.T) {
 func TestAuditRecordsPreferenceOutcomes(t *testing.T) {
 	users := newTestUserStore(t)
 	alice := testIdentity("subject-alice-000005", "alice", "user")
-	users.Upsert(alice)
+	users.Upsert(alice, "")
 	if _, err := users.UpdatePreferences(alice, "", "req-8", "203.0.113.20", func(p *userPreferences) error {
 		p.Theme = "dark"
 		return nil

@@ -1,7 +1,7 @@
 {{define "everow"}}
 {{$key := eventKey .}}
 <tr>
-  <td>{{.Time}}</td>
+  <td data-hp-time{{if .UTC}} data-hp-utc="{{.UTC}}"{{end}}>{{.Time}}</td>
   <td><a class="badge b-{{.Sensor}}" href="/events?sensor={{.Sensor | urlquery}}">{{.Sensor}}</a></td>
   <td class="v">{{if .SrcIP}}<a href="/events?ip={{.SrcIP | urlquery}}" title="attack chain for {{.SrcIP}}">{{.SrcIP}}</a>{{else}}<span class="tw:text-muted" title="This event reached the sensor over the WireGuard tunnel and could not be joined back to a real client address. The tunnel peer is our own VPS, so it is deliberately not shown as the source.">unattributed</span>{{end}}{{if .Country}} <a class="cc" href="/events?country={{.Country | urlquery}}">{{.Country}}</a>{{end}}</td>
   <td class="v">{{if .Port}}<a href="/events?port={{.Port | urlquery}}">:{{.Port}}</a>{{end}}</td>

@@ -446,6 +446,11 @@
               <option value="offline">Offline tiles</option>
             </select>
           </div>
+          <div class="hp-field settings-field" data-hp-search="behavior default timezone iana zone new user">
+            <label class="form-label" for="hp-cfg-timezone">Default timezone for new users</label>
+            <input class="form-input" id="hp-cfg-timezone" data-cfg="behavior.default_timezone" autocomplete="off" spellcheck="false" placeholder="utc">
+            <div class="settings-field__desc">"browser", "utc", or an IANA zone such as Europe/Berlin. Only applies the first time a user is seen — their own Timezone preference always wins once set.</div>
+          </div>
         </section>
         <section class="card">
           <div class="card__header"><div><h3>Feature visibility</h3><p class="card__meta">Applies live for every user.</p></div></div>

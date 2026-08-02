@@ -489,6 +489,18 @@ func when(e map[string]any) (time.Time, string) {
 	return time.Time{}, ""
 }
 
+// utcOrEmpty renders t as RFC3339 for client-side timezone conversion
+// (#282), or "" for a zero time.Time -- when()'s "unknown format" branch
+// returns time.Time{} alongside the raw display string, and formatting a
+// zero value would hand the client "0001-01-01T00:00:00Z" to reformat into
+// something that looks like a real, if wrong, date.
+func utcOrEmpty(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
+}
+
 // ipOf hunts for a source address across the field names the sensors use.
 func ipOf(e map[string]any) string {
 	for _, k := range []string{"src_ip", "remote_ip", "peer_ip", "client_ip", "ip"} {

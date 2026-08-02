@@ -62,6 +62,40 @@ func TestEventDetailModalContract(t *testing.T) {
 	}
 }
 
+// TestEventTimestampCarriesUTCAttribute (#282): the events table's <td> must
+// expose the raw UTC instant as a machine-readable data-hp-utc attribute
+// alongside the fixed UTC display string, so client-side JS can reformat it
+// into the viewer's own timezone preference without a server round trip. An
+// event whose timestamp never parsed (UTC left "" by utcOrEmpty) must not
+// get the attribute at all -- reformatting a zero-value UTC string would
+// turn "the raw unparsed line" into a fabricated, wrong-looking date.
+func TestEventTimestampCarriesUTCAttribute(t *testing.T) {
+	s := &store{}
+	s.events = []storedEvent{
+		{Time: "2026-08-01 10:00:00", UTC: "2026-08-01T10:00:00Z", Sensor: "cowrie", SrcIP: "203.0.113.9", Detail: "login attempt"},
+		{Time: "unparseable-raw-line", UTC: "", Sensor: "cowrie", SrcIP: "203.0.113.10", Detail: "login attempt"},
+	}
+	funcs := templateFuncs(s, "")
+	tmpl := template.Must(template.New("t").Funcs(funcs).Parse(pageTemplate))
+
+	page := s.eventsData(httptest.NewRequest("GET", "/events", nil))
+	var out strings.Builder
+	if err := tmpl.ExecuteTemplate(&out, "events", &page); err != nil {
+		t.Fatalf("events page does not render: %v", err)
+	}
+	html := out.String()
+
+	if !strings.Contains(html, `data-hp-utc="2026-08-01T10:00:00Z"`) {
+		t.Fatal("rendered event row is missing its data-hp-utc attribute")
+	}
+	if !strings.Contains(html, "unparseable-raw-line") {
+		t.Fatal("the raw, unparsed timestamp string must still render as-is")
+	}
+	if strings.Contains(html, `data-hp-utc=""`) {
+		t.Fatal("an event with no parsed timestamp must not get an empty data-hp-utc attribute")
+	}
+}
+
 // TestEventDetailModalEscapesHostileContent proves the guide's own
 // requirement for this class of modal ("never inject raw ... bytes as
 // HTML") holds for the event-detail JSON dump specifically: html/template's

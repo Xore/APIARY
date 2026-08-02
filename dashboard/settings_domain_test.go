@@ -131,10 +131,14 @@ func TestMigratePayloadRejectsUnsupportedVersions(t *testing.T) {
 	if _, err := migratePayload(settingsSchemaVersion+1, payload); err == nil {
 		t.Fatal("a newer schema version must be rejected")
 	}
-	// Version settingsSchemaVersion-1 now has a registered migration
-	// (migrateAddMLAlertThresholdDefault); a version further back than any
-	// registered step must still be rejected.
-	if _, err := migratePayload(settingsSchemaVersion-2, payload); err == nil {
+	// Version 0 predates every registered migration step (1:
+	// migrateAddMLAlertThresholdDefault, 2: migrateAddDefaultTimezone) and
+	// must still be rejected rather than silently misread. Not expressed as
+	// settingsSchemaVersion-N: every step this repo has added so far keeps
+	// the migration chain unbroken back to version 1, so an N large enough
+	// to reach a genuinely unregistered version keeps changing as new steps
+	// land -- 0 is unregistered by construction, not by coincidence.
+	if _, err := migratePayload(0, payload); err == nil {
 		t.Fatal("a version with no registered migration path must be rejected")
 	}
 }
@@ -195,6 +199,62 @@ func TestMigrationBackfillsMissingMLAlertThreshold(t *testing.T) {
 	}
 	if string(passedThrough) != string(unrelated) {
 		t.Fatalf("migration must not touch a payload with no honeypot object, got %s", passedThrough)
+	}
+}
+
+// TestMigrationBackfillsMissingDefaultTimezone (#282) uses the exact shape of
+// a real pre-existing dashboard-config.json (schema version 2, no
+// behavior.default_timezone key) confirmed live on the deployed homeserver --
+// this is the same failure mode #65's ml_alert_threshold migration above
+// already fixed once: a required, validated field added without a migration
+// decodes fine (missing field just zero-values to "") but then fails
+// validTimezone("")'s check, so validateConfig rejects the whole document.
+func TestMigrationBackfillsMissingDefaultTimezone(t *testing.T) {
+	preExistingPayload := json.RawMessage(`{"presentation":{"app_name":"XORE//HP","ai_disclaimer":"d"},` +
+		`"behavior":{"default_landing":"/","default_time_window":"24h","rows_per_page_options":[25,50,100],` +
+		`"max_export_rows":10000,"refresh_interval_seconds_options":[15,30,60,300],"source_stale_minutes":10,"map_provider":"osm"},` +
+		`"honeypot":{"alert_cooldown":"6h","alert_campaign_score":80,"sandbox_alert_risk_score":50,` +
+		`"yara_scan_interval_seconds":900,"yara_max_bytes":67108864,"payload_dedupe_interval_seconds":3600,"ml_alert_threshold":0.75}}`)
+	migrated, err := migratePayload(2, preExistingPayload)
+	if err != nil {
+		t.Fatalf("migration from version 2 must succeed: %v", err)
+	}
+	var cfg dashboardConfig
+	if !strictDecode(migrated, &cfg) {
+		t.Fatal("migrated payload must still strict-decode into dashboardConfig")
+	}
+	if err := validateConfig(cfg); err != nil {
+		t.Fatalf("migrated payload must pass validation, got: %v", err)
+	}
+	if cfg.Behavior.DefaultTimezone != defaultDashboardConfig().Behavior.DefaultTimezone {
+		t.Fatalf("default_timezone = %q, want the compiled default %q",
+			cfg.Behavior.DefaultTimezone, defaultDashboardConfig().Behavior.DefaultTimezone)
+	}
+
+	// A payload that already has the field must be left alone.
+	alreadySet := json.RawMessage(`{"presentation":{},"behavior":{"default_timezone":"Europe/Berlin"},"honeypot":{}}`)
+	migratedAgain, err := migratePayload(2, alreadySet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg2 dashboardConfig
+	if !strictDecode(migratedAgain, &cfg2) {
+		t.Fatal("strict decode failed")
+	}
+	if cfg2.Behavior.DefaultTimezone != "Europe/Berlin" {
+		t.Fatalf("migration overwrote an already-present value: got %q, want Europe/Berlin", cfg2.Behavior.DefaultTimezone)
+	}
+
+	// A payload with no "behavior" object at all (the unrelated per-subject
+	// preferences/projection document, sharing this same migration registry)
+	// must pass through completely unchanged.
+	unrelated := json.RawMessage(`{"users":[{"subject":"x"}]}`)
+	passedThrough, err := migratePayload(2, unrelated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(passedThrough) != string(unrelated) {
+		t.Fatalf("migration must not touch a payload with no behavior object, got %s", passedThrough)
 	}
 }
 
