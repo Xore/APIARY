@@ -104,6 +104,22 @@ jobs:
               docker compose -f compose.yml up -d --build )
           done
 
+      # #258: log-maintenance, autoheal, and reporter split into their own
+      # Dockge stack -- host-wide utilities rather than one honeypot family.
+      # None of the three share a named volume/network with anything else,
+      # so (like the standalone honeypots above) this can deploy ahead of
+      # honeypot-stack with no ordering requirement.
+      - name: Synchronize honeypot-utilities (#258 split)
+        shell: bash
+        run: |
+          destination=/opt/stacks/honeypot-utilities
+          install -d -m 755 "$destination"
+          cp docker-compose.utilities.yml "$destination/compose.yml"
+          cd "$destination"
+          test ! -f .env || chmod 600 .env
+          docker compose -f compose.yml config --quiet
+          docker compose -f compose.yml up -d --build
+
       - name: Synchronize Dockge source without runtime state
         shell: bash
         run: |
