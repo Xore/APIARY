@@ -1,6 +1,6 @@
 [Unit]
 Description=Detonate queued honeypot payloads in the isolated Windows 11 guest
-Documentation=file:/opt/honeypot-sandbox/windows/IMPLEMENTATION_PLAN.md
+Documentation=file:/usr/local/libexec/honeypot-sandbox/windows/IMPLEMENTATION_PLAN.md
 After=libvirtd.service virtnetworkd.socket docker.service
 Requires=libvirtd.service
 
@@ -10,7 +10,12 @@ Type=oneshot
 # spool paths) live outside the repository. The leading - keeps the unit
 # usable before an operator has written the file.
 EnvironmentFile=-/etc/default/honeypot-windows-sandbox
-ExecStart=/opt/honeypot-sandbox/windows/run_pending.sh
+# /usr/local/libexec, not /opt: matches the Linux sandbox's own install
+# convention (sandbox/install-worker.sh) exactly -- small helper scripts
+# invoked by systemd, not user-facing binaries, so the FHS-standard libexec
+# location on the root disk is correct here; it's the multi-GB golden
+# images/ISOs that belong on the large /var spindle instead, not scripts.
+ExecStart=/usr/local/libexec/honeypot-sandbox/windows/run_pending.sh
 UMask=0077
 # Detonation is background work on a host that is also serving sensors.
 Nice=10
@@ -25,5 +30,7 @@ IOSchedulingPriority=7
 # own note.
 TimeoutStartSec=6h
 
-[Install]
-WantedBy=multi-user.target
+# No [Install] section, deliberately -- matches the Linux sandbox's own
+# honeypot-sandbox-worker.service (systemctl cat confirms it has none
+# either). This unit is only ever started by the .path unit's Unit=
+# trigger or an explicit `systemctl start`, never enabled for boot itself.
