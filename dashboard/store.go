@@ -169,34 +169,36 @@ type storedEvent struct {
 }
 
 type store struct {
-	mu                sync.RWMutex
-	subsMu            sync.Mutex
-	payloadMu         sync.Mutex
-	ipsMu             sync.Mutex
-	hashPathMu        sync.Mutex
-	hashPathCache     map[string]string // sha256 -> resolved payload path (#364)
-	snap              snapshot
-	events            []storedEvent // newest first; replaced wholesale each rebuild
-	payloadCache      payloadsPage
-	payloadCacheAt    time.Time
-	payloadRefreshing bool
-	ipsCache          ipsPage
-	ipsCacheAt        time.Time
-	dir               string
-	payloadDirs       []string // dionaea, cowrie and generated script artifact directories
-	scriptDir         string   // writable directory for safely retained inline scripts
-	geo               *geoDB   // nil if no GeoIP database configured
-	es                *esClient
-	mlAnomalies       *mlAnomalyStore // ml-worker's scored anomalies, polled via es (#64); nil until initialised in main()
-	alerts            *alertManager
-	intelligence      *intelligenceStore
-	settings          *settingsService  // typed settings stores; nil only in partial test fixtures
-	reports           *reportStore      // Reports studio definitions + generated PDFs; nil only in test fixtures
-	workbench         *workbenchService // immutable recipes + correlated analyzer runs (#155)
-	yaraFile          string
-	expected          []string // configured feeds shown even before their first event
-	subs              map[chan struct{}]struct{}
-	authAccountURL    string // validated once at startup; see validatedAuthAccountURL
+	mu                  sync.RWMutex
+	subsMu              sync.Mutex
+	payloadMu           sync.Mutex
+	ipsMu               sync.Mutex
+	hashPathMu          sync.Mutex
+	hashPathCache       map[string]string // sha256 -> resolved payload path (#364)
+	staticAnalysisMu    sync.Mutex
+	staticAnalysisCache map[string]staticAnalysisCacheEntry // path -> cached static analysis (#352)
+	snap                snapshot
+	events              []storedEvent // newest first; replaced wholesale each rebuild
+	payloadCache        payloadsPage
+	payloadCacheAt      time.Time
+	payloadRefreshing   bool
+	ipsCache            ipsPage
+	ipsCacheAt          time.Time
+	dir                 string
+	payloadDirs         []string // dionaea, cowrie and generated script artifact directories
+	scriptDir           string   // writable directory for safely retained inline scripts
+	geo                 *geoDB   // nil if no GeoIP database configured
+	es                  *esClient
+	mlAnomalies         *mlAnomalyStore // ml-worker's scored anomalies, polled via es (#64); nil until initialised in main()
+	alerts              *alertManager
+	intelligence        *intelligenceStore
+	settings            *settingsService  // typed settings stores; nil only in partial test fixtures
+	reports             *reportStore      // Reports studio definitions + generated PDFs; nil only in test fixtures
+	workbench           *workbenchService // immutable recipes + correlated analyzer runs (#155)
+	yaraFile            string
+	expected            []string // configured feeds shown even before their first event
+	subs                map[chan struct{}]struct{}
+	authAccountURL      string // validated once at startup; see validatedAuthAccountURL
 }
 
 // rebuild re-reads every log file and recomputes the snapshot.

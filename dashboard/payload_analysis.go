@@ -82,33 +82,75 @@ type binaryAnalysis struct {
 	FamilyLink string
 }
 
-func (s *store) analyzePayload(name string) (binaryAnalysis, error) {
-	if len(s.payloadDirs) == 0 || !hashName.MatchString(name) {
-		return binaryAnalysis{}, errors.New("invalid or unavailable payload")
-	}
-	path, err := s.payloadPath(name)
-	if err != nil {
-		return binaryAnalysis{}, err
-	}
+// payloadStaticAnalysis is the subset of binaryAnalysis that is a pure
+// function of one file's bytes -- hashes, entropy, extracted artifacts,
+// static risk scoring -- as opposed to YARA/sandbox/GitHub-analysis/origin
+// data, which can change over time for the same file and must always be
+// read fresh. #352: computing this static half means reading the full file
+// (MD5/SHA1/SHA256 over the whole thing) plus regex-based artifact and IOC
+// extraction over up to 4-16 MiB -- real, bounded work, but wasted when the
+// exact same file is viewed again, which is the common case (a payload
+// looked at more than once across the workbench, reports, and events
+// pages). Cached by store.staticAnalysisFor, keyed on a cheap path+size+
+// mtime fingerprint rather than content hash, since the hash itself is part
+// of what this computes.
+type payloadStaticAnalysis struct {
+	Size, MIME, Magic       string
+	Classification          payloadClassification
+	MD5, SHA1, SHA256       string
+	Entropy                 string
+	EntropyValue            float64
+	PackedLikely, Truncated bool
+	Hexdump                 string
+	ASCII, UTF16            []string
+	VT                      string
+	FormatInfo              []string
+	Decoded                 []decodedArtifact
+	ScriptType              string
+	Indicators, IOCs        []string
+	Rules                   []ruleMatch
+	StaticRiskScore         int
+	StaticRiskLevel         string
+}
+
+type staticAnalysisCacheEntry struct {
+	fingerprint string
+	analysis    payloadStaticAnalysis
+}
+
+func fileFingerprint(fi os.FileInfo) string {
+	return fmt.Sprintf("%d-%d", fi.Size(), fi.ModTime().UnixNano())
+}
+
+func (s *store) staticAnalysisFor(path string) (payloadStaticAnalysis, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return binaryAnalysis{}, err
+		return payloadStaticAnalysis{}, err
 	}
 	defer f.Close()
 	fi, err := f.Stat()
 	if err != nil || !fi.Mode().IsRegular() {
-		return binaryAnalysis{}, errors.New("payload is not a regular file")
+		return payloadStaticAnalysis{}, errors.New("payload is not a regular file")
+	}
+	fingerprint := fileFingerprint(fi)
+	if s != nil {
+		s.staticAnalysisMu.Lock()
+		cached, ok := s.staticAnalysisCache[path]
+		s.staticAnalysisMu.Unlock()
+		if ok && cached.fingerprint == fingerprint {
+			return cached.analysis, nil
+		}
 	}
 	h1, h2, h3 := md5.New(), sha1.New(), sha256.New()
 	if _, err := io.Copy(io.MultiWriter(h1, h2, h3), f); err != nil {
-		return binaryAnalysis{}, err
+		return payloadStaticAnalysis{}, err
 	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return binaryAnalysis{}, err
+		return payloadStaticAnalysis{}, err
 	}
 	data, err := io.ReadAll(io.LimitReader(f, analysisReadCap))
 	if err != nil {
-		return binaryAnalysis{}, err
+		return payloadStaticAnalysis{}, err
 	}
 	preview := data
 	if len(preview) > 512 {
@@ -116,8 +158,8 @@ func (s *store) analyzePayload(name string) (binaryAnalysis, error) {
 	}
 	entropy := shannonEntropy(data)
 	classification := classifyPayload(data)
-	a := binaryAnalysis{
-		Hash: name, Size: humanBytes(fi.Size()), MIME: http.DetectContentType(data), Magic: magicName(data),
+	a := payloadStaticAnalysis{
+		Size: humanBytes(fi.Size()), MIME: http.DetectContentType(data), Magic: magicName(data),
 		Classification: classification,
 		MD5:            hex.EncodeToString(h1.Sum(nil)), SHA1: hex.EncodeToString(h2.Sum(nil)), SHA256: hex.EncodeToString(h3.Sum(nil)),
 		Entropy: fmt.Sprintf("%.3f bits/byte", entropy), EntropyValue: entropy, PackedLikely: entropy >= 7.2, Truncated: fi.Size() > analysisReadCap,
@@ -131,7 +173,38 @@ func (s *store) analyzePayload(name string) (binaryAnalysis, error) {
 		a.ScriptType = classification.Label
 	}
 	a.IOCs = extractIOCs(data)
-	a.Rules, a.RiskScore, a.RiskLevel = payloadRules(a, data)
+	a.Rules, a.StaticRiskScore, a.StaticRiskLevel = payloadRules(a, data)
+	if s != nil {
+		s.staticAnalysisMu.Lock()
+		if s.staticAnalysisCache == nil {
+			s.staticAnalysisCache = make(map[string]staticAnalysisCacheEntry)
+		}
+		s.staticAnalysisCache[path] = staticAnalysisCacheEntry{fingerprint: fingerprint, analysis: a}
+		s.staticAnalysisMu.Unlock()
+	}
+	return a, nil
+}
+
+func (s *store) analyzePayload(name string) (binaryAnalysis, error) {
+	if len(s.payloadDirs) == 0 || !hashName.MatchString(name) {
+		return binaryAnalysis{}, errors.New("invalid or unavailable payload")
+	}
+	path, err := s.payloadPath(name)
+	if err != nil {
+		return binaryAnalysis{}, err
+	}
+	static, err := s.staticAnalysisFor(path)
+	if err != nil {
+		return binaryAnalysis{}, err
+	}
+	a := binaryAnalysis{
+		Hash: name, Size: static.Size, MIME: static.MIME, Magic: static.Magic, Classification: static.Classification,
+		MD5: static.MD5, SHA1: static.SHA1, SHA256: static.SHA256,
+		Entropy: static.Entropy, EntropyValue: static.EntropyValue, PackedLikely: static.PackedLikely, Truncated: static.Truncated,
+		Hexdump: static.Hexdump, ASCII: static.ASCII, UTF16: static.UTF16, VT: static.VT,
+		FormatInfo: static.FormatInfo, Decoded: static.Decoded, ScriptType: static.ScriptType, Indicators: static.Indicators, IOCs: static.IOCs,
+		Rules: static.Rules, RiskScore: static.StaticRiskScore, RiskLevel: static.StaticRiskLevel,
+	}
 	yara := s.yaraFor(name)
 	a.YARAMatches, a.YARAScanned, a.YARAError = yara.Matches, yara.ScannedAt, yara.Error
 	for _, run := range loadSandboxResults() {
@@ -183,7 +256,7 @@ func riskLevel(score int) string {
 	}
 }
 
-func payloadRules(a binaryAnalysis, data []byte) ([]ruleMatch, int, string) {
+func payloadRules(a payloadStaticAnalysis, data []byte) ([]ruleMatch, int, string) {
 	lower := strings.ToLower(string(data[:min(len(data), 2<<20)]))
 	var rules []ruleMatch
 	score := 0
