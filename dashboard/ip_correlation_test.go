@@ -155,6 +155,34 @@ func TestCorrelateCIDRAcceptsRangeQuery(t *testing.T) {
 	}
 }
 
+// TestCorrelateIPsBuildsTermsStyleQueryAndDropsInvalidEntries (#354):
+// clusters' member IPs can span many unrelated networks, so correlateIPs
+// (unlike correlateIP/correlateCIDR) matches any of a list of exact
+// addresses -- and must silently drop malformed entries from that list
+// rather than letting one bad value break or poison the whole query.
+func TestCorrelateIPsBuildsTermsStyleQueryAndDropsInvalidEntries(t *testing.T) {
+	var gotPath string
+	es := httptest.NewServer(correlationSearchStub(t, &gotPath, sampleCorrelationResponse))
+	defer es.Close()
+
+	c := newESClient(es.URL, "")
+	result := c.correlateIPs([]string{"203.0.113.5", "not-an-ip", "203.0.113.6"}, 50)
+	if !result.Available {
+		t.Fatal("correlateIPs reported unavailable despite a successful ES response")
+	}
+	wantQ := url.QueryEscape(`source.ip:("203.0.113.5" OR "203.0.113.6")`)
+	if !strings.Contains(gotPath, "q="+wantQ) {
+		t.Fatalf("query did not build a terms-style match with the invalid entry dropped: %s", gotPath)
+	}
+
+	if result := c.correlateIPs([]string{"not-an-ip", ""}, 50); result.Available {
+		t.Error("correlateIPs must report unavailable when every entry is invalid")
+	}
+	if result := c.correlateIPs(nil, 50); result.Available {
+		t.Error("correlateIPs must report unavailable for an empty list")
+	}
+}
+
 // TestCIDRCorrelationDataRequiresBothValidCIDRAndAvailableES (#354):
 // cidrCorrelationData powers campaigns' drill-down -- it must reject a
 // malformed CIDR before ever touching Elasticsearch, and report "not found"

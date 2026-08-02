@@ -263,3 +263,42 @@ func (c *esClient) correlateCIDR(cidr string, limit int) ipCorrelation {
 	}
 	return summarizeCorrelation(records, total)
 }
+
+// correlateIPsCap bounds how many IPs correlateIPs will fold into one Lucene
+// query string -- a cluster's member set is otherwise unbounded, and an
+// oversized query string is a real failure mode (URL/query-length limits),
+// not just a performance concern. #354's clusters correlation only ever
+// needs "is there Elasticsearch history for this cluster's members", so
+// silently capping to a bounded subset is an acceptable tradeoff.
+const correlateIPsCap = 200
+
+// correlateIPs answers #354's "do this even for clusters" ask: unlike
+// campaigns' compact CIDRs, a cluster's member IPs (dashboard/intelligence.go's
+// clustersData) can span many unrelated networks, so there is no single
+// CIDR range query that covers them -- this is the terms-query variant of
+// correlateIP/correlateCIDR instead, matching Elasticsearch's ip field type
+// against any of a list of exact addresses. Same "one query per drill-in,
+// never eager for a bulk list view" rule as correlateCIDR.
+func (c *esClient) correlateIPs(ips []string, limit int) ipCorrelation {
+	valid := make([]string, 0, len(ips))
+	for _, ip := range ips {
+		if net.ParseIP(ip) != nil {
+			valid = append(valid, ip)
+		}
+	}
+	if len(valid) == 0 {
+		return ipCorrelation{}
+	}
+	if len(valid) > correlateIPsCap {
+		valid = valid[:correlateIPsCap]
+	}
+	clauses := make([]string, len(valid))
+	for i, ip := range valid {
+		clauses[i] = fmt.Sprintf(`"%s"`, ip)
+	}
+	records, total, err := c.correlate("source.ip:("+strings.Join(clauses, " OR ")+")", limit)
+	if err != nil {
+		return ipCorrelation{}
+	}
+	return summarizeCorrelation(records, total)
+}

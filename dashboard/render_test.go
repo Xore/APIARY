@@ -277,7 +277,7 @@ func TestEveryFullPageRouteUsesRenderPage(t *testing.T) {
 	}
 	routes := []string{
 		`"page"`, `"events"`, `"search"`, `"ips"`, `"attacker"`, `"session"`, `"clusters"`,
-		`"campaigns"`, `"cidr-correlation"`, `"history"`, `"dead-letters"`, `"source-health"`,
+		`"campaigns"`, `"cidr-correlation"`, `"cluster-correlation"`, `"history"`, `"dead-letters"`, `"source-health"`,
 		`"alerts"`, `"reports"`, `"payloads"`, `"ghidra"`, `"sandbox"`,
 		`"commands"`, `"payload-analysis"`, `"ml-anomalies"`,
 	}
