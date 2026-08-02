@@ -132,6 +132,33 @@ func TestGitHubAnalysisPDFURLRejectsUntrustedInputs(t *testing.T) {
 	}
 }
 
+// analyze.yml commits the PDF in its own commit, after the original push
+// Commit records -- a URL built from Commit 404s, since the file does not
+// exist there yet (#255). ReportCommit must win whenever it is present;
+// falling back to Commit is only for results collect-results.py wrote
+// before ReportCommit existed.
+func TestGitHubAnalysisPDFURLPrefersReportCommit(t *testing.T) {
+	pushCommit := "0123456789abcdef0123456789abcdef01234567"
+	reportCommit := "abcdef0123456789abcdef0123456789abcdef01"
+	row := githubAnalysisResult{Commit: pushCommit, ReportCommit: reportCommit, ReportPDF: "reports/pdf/samples/x.pdf"}
+
+	got, ok := githubAnalysisPDFURL(row)
+	if !ok {
+		t.Fatal("expected a valid PDF URL to be accepted")
+	}
+	want := "https://raw.githubusercontent.com/Xore/honeypot/" + reportCommit + "/reports/pdf/samples/x.pdf"
+	if got != want {
+		t.Errorf("got %q, want the URL built from ReportCommit: %q", got, want)
+	}
+
+	// An invalid ReportCommit must not silently fall back to a still-valid
+	// Commit -- both are producer-controlled and untrusted independently.
+	bad := githubAnalysisResult{Commit: pushCommit, ReportCommit: "not-a-commit", ReportPDF: "reports/pdf/samples/x.pdf"}
+	if _, ok := githubAnalysisPDFURL(bad); ok {
+		t.Error("expected rejection when ReportCommit is present but malformed")
+	}
+}
+
 // A traversal attempt reaching serveGitHubAnalysisExport through the on-disk
 // result body (not the URL) must fall back to JSON rather than redirecting
 // off the validated report path.

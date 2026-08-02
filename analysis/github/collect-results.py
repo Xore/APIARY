@@ -22,6 +22,7 @@ import csv
 import fcntl
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -82,7 +83,15 @@ def find_run(commit: str) -> dict | None:
     return None
 
 
-def git_pull() -> None:
+def git_pull() -> str:
+    """Fast-forward the local clone to origin/main and return the resulting
+    HEAD commit -- the ref the PDF (and everything else build_result() reads
+    off disk) actually exists at. This is deliberately NOT the same as the
+    original push commit publish-sample.sh recorded: analyze.yml commits the
+    scanner JSON, YARA rules and PDF report in its own *later* commit, after
+    the original push. Using the stale push commit to build a
+    raw.githubusercontent.com URL 404s, because that file did not exist yet
+    at that commit (#255)."""
     subprocess.run(
         ["git", "-C", str(GITHUB_CLONE), "fetch", "--quiet", "origin"],
         check=True, timeout=120,
@@ -91,6 +100,10 @@ def git_pull() -> None:
         ["git", "-C", str(GITHUB_CLONE), "reset", "--quiet", "--hard", "origin/main"],
         check=True, timeout=60,
     )
+    return subprocess.run(
+        ["git", "-C", str(GITHUB_CLONE), "rev-parse", "HEAD"],
+        check=True, timeout=30, capture_output=True, text=True,
+    ).stdout.strip()
 
 
 def family_for(sha256: str) -> str:
@@ -118,17 +131,60 @@ def auto_rules_for(sha256: str) -> list:
     return hits
 
 
-def build_result(pending: dict, run: dict) -> dict:
+def safe_stem(name: str) -> str:
+    """Byte-for-byte match of Xore/honeypot's report.py::_safe_stem, since the
+    per-sample PDF filename this has to guess is built with it. Confirmed
+    against a real committed report (#255): the scanner JSON's own "filename"
+    is the *original* captured name from inside the pushed zip (e.g. "ChatGPT
+    Installer.exe", unrelated to the zip's own {sha256}.zip outer name), and
+    the real PDF is "ChatGPT_Installer.exe-<date>.pdf" -- the space replaced
+    by report.py's sanitizer, not the zip's basename at all.
+    """
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_")
+    return stem or "sample"
+
+
+def normalize_scanners(results: dict) -> list:
+    """Xore/honeypot's analyze_samples.py writes one dict per scanner class
+    under a top-level "results" key (not a "scanners" list), and marks
+    per-scanner success as "_ok" (underscore-prefixed), not "ok" -- confirmed
+    against a real committed report (#255). Flattens that into the normalized
+    shape dashboard/github_analysis.go's githubAnalysisScanner expects.
+    """
+    normalized = []
+    for name, r in (results or {}).items():
+        if not isinstance(r, dict):
+            continue
+        normalized.append({
+            "source": r.get("source") or name,
+            "ok": bool(r.get("_ok", False)),
+            "positives": r.get("positives") or 0,
+            "total": r.get("total") or 0,
+            "suspicious": bool(r.get("suspicious")),
+            "permalink": r.get("permalink") or "",
+            "error": r.get("error") or "",
+        })
+    return normalized
+
+
+def build_result(pending: dict, run: dict, report_commit: str) -> dict:
     sha256 = pending["sha256"]
     scanner_path = GITHUB_CLONE / "reports" / "scanner" / f"{sha256}.json"
     if not scanner_path.is_file():
         raise CollectError(f"run concluded but {scanner_path} was never committed")
     scanner = json.loads(scanner_path.read_text())
 
-    scanners = scanner.get("scanners", [])
-    positives = sum(s.get("positives", 0) for s in scanners if s.get("ok"))
-    total = sum(s.get("total", 0) for s in scanners if s.get("ok")) or None
-    malicious = sum(1 for s in scanners if s.get("ok") and s.get("positives", 0) > 0)
+    scanners = normalize_scanners(scanner.get("results", {}))
+    total = sum(s["total"] for s in scanners if s["ok"]) or None
+    # The dashboard displays this as a VirusTotal-style "X / Total" detection
+    # ratio (dashboard/ui/github_analysis.html), so it has to be the summed
+    # raw positives across scanners, not a count of how many distinct
+    # scanners flagged it -- a real sample VirusTotal alone flagged 64/74 on
+    # showed "2 / 110" under the scanner-count reading (2 scanners agreed),
+    # understating it enormously. The level thresholds below (>=10/>=3/>=1)
+    # only make sense against this reading too: with at most ~4 scanners
+    # tracked, "malicious >= 10 distinct scanners" was unreachable dead code.
+    malicious = sum(s["positives"] for s in scanners if s["ok"])
     level = "clean"
     if malicious >= 10:
         level = "high"
@@ -140,8 +196,20 @@ def build_result(pending: dict, run: dict) -> dict:
     sample_glob = list((GITHUB_CLONE / "samples" / pending.get("bucket", "")).glob(f"{sha256}.*"))
     sample_path = f"samples/{pending.get('bucket','')}/{sample_glob[0].name}" if sample_glob else ""
 
-    pdf_path = GITHUB_CLONE / "reports" / "pdf" / f"{sample_path}.pdf" if sample_path else None
-    report_pdf = f"reports/pdf/{sample_path}.pdf" if pdf_path and pdf_path.is_file() else None
+    # Xore/honeypot's report.py names the per-sample PDF
+    # "{safe_stem(original filename)}-{scan-date}.pdf", flat under
+    # reports/pdf/samples/ (no bucket subdirectory). The "original filename"
+    # is scanner["filename"] -- the name inside the pushed zip, as analyze_
+    # samples.py saw it after unzipping, which has nothing to do with the
+    # zip's own {sha256}.zip outer name. scan_date is scanned_at[:10] from
+    # this same scanner JSON. Confirmed against a real committed report and
+    # PDF (#255); the previous guess (the zip's basename, nested by bucket,
+    # no date) never matched a real file.
+    scan_date = (scanner.get("scanned_at") or "")[:10]
+    original_name = scanner.get("filename") or ""
+    pdf_name = f"{safe_stem(original_name)}-{scan_date}.pdf" if original_name and scan_date else None
+    pdf_path = GITHUB_CLONE / "reports" / "pdf" / "samples" / pdf_name if pdf_name else None
+    report_pdf = f"reports/pdf/samples/{pdf_name}" if pdf_path and pdf_path.is_file() else None
 
     return {
         "version": RESULT_VERSION,
@@ -151,6 +219,9 @@ def build_result(pending: dict, run: dict) -> dict:
         "completed_at": now(),
         "exit_status": "ok",
         "commit": pending.get("commit", ""),
+        # The commit the PDF/scanner report actually exist at, not the
+        # original push commit above -- see git_pull()'s docstring.
+        "report_commit": report_commit,
         "run_id": run.get("id"),
         "run_url": run.get("html_url", ""),
         "sample_path": sample_path,
@@ -224,8 +295,8 @@ def process_one(pending_file: Path) -> str:
         return "failed"
 
     try:
-        git_pull()
-        result = build_result(pending, run)
+        report_commit = git_pull()
+        result = build_result(pending, run, report_commit)
     except CollectError as e:
         log(f"  [!] {sha256}: {e}")
         return "running"

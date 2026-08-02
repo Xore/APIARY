@@ -1,6 +1,9 @@
 package main
 
 import (
+	"crypto/md5"
+	"crypto/sha256"
+	"encoding/hex"
 	"html/template"
 	"net/http/httptest"
 	"os"
@@ -223,6 +226,36 @@ func TestPayloadStaticAnalysis(t *testing.T) {
 	}
 	if a.SHA256 == "" || a.Hexdump == "" || len(a.Decoded) == 0 {
 		t.Fatalf("incomplete static analysis: %+v", a)
+	}
+}
+
+// Dionaea keeps its own on-disk naming convention (MD5), unrelated to this
+// pipeline -- a request for a capture's SHA-256 (the hash GitHub-analysis's
+// own reports and every other source use) never matches by filename alone.
+// /payload-analysis/{sha256} 404ing for exactly this case was reported live
+// (#255): a real Dionaea capture's GitHub-analysis "static analysis" link
+// carried its SHA-256, but the file on disk is named by its MD5.
+func TestPayloadStaticAnalysisFindsDionaeaCaptureBySHA256(t *testing.T) {
+	dir := t.TempDir()
+	content := []byte("MZ fake PE content for a Dionaea-style capture")
+	sum := sha256.Sum256(content)
+	sha256hex := hex.EncodeToString(sum[:])
+	md5sum := md5.Sum(content)
+	md5name := hex.EncodeToString(md5sum[:])
+
+	if err := os.WriteFile(filepath.Join(dir, md5name), content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &store{payloadDirs: []string{dir}}
+	if _, err := s.analyzePayload(sha256hex); err != nil {
+		t.Fatalf("lookup by SHA-256 for an MD5-named Dionaea capture failed: %v", err)
+	}
+
+	// A request that names nothing real must still 404, not scan forever or
+	// return an unrelated file.
+	if _, err := s.analyzePayload(strings.Repeat("f", 64)); err == nil {
+		t.Fatal("lookup for a hash that matches no file should fail, not silently succeed")
 	}
 }
 

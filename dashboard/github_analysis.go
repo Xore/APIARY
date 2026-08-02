@@ -65,8 +65,15 @@ type githubAnalysisResult struct {
 	Error    string `json:"error,omitempty"`     // error
 
 	Commit string `json:"commit,omitempty"`
-	RunID  int64  `json:"run_id,omitempty"`
-	RunURL string `json:"run_url,omitempty"`
+	// ReportCommit is the commit reports/scanner/reports/pdf actually exist
+	// at, not Commit (the original push) -- analyze.yml commits the scanner
+	// JSON, YARA rules and PDF in its own later commit, so a
+	// raw.githubusercontent.com URL built from Commit 404s (#255). Absent on
+	// results collect-results.py wrote before that field existed; fall back
+	// to Commit rather than showing no report at all in githubAnalysisPDFURL.
+	ReportCommit string `json:"report_commit,omitempty"`
+	RunID        int64  `json:"run_id,omitempty"`
+	RunURL       string `json:"run_url,omitempty"`
 
 	SamplePath    string                  `json:"sample_path,omitempty"`
 	Family        string                  `json:"family,omitempty"`
@@ -334,16 +341,26 @@ func (s *store) serveGitHubAnalysisExport(w http.ResponseWriter, r *http.Request
 var githubAnalysisCommit = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 // githubAnalysisPDFURL builds the raw.githubusercontent.com URL for a
-// result's report, validating both inputs first: Commit is producer-
+// result's report, validating both inputs first: the commit is producer-
 // controlled but becomes a URL path segment, and ReportPDF is producer-
 // controlled but becomes a second path segment -- treat both as untrusted,
 // the same posture attachGhidraDownload takes toward a worker-written
 // filename before turning it into a filesystem path.
+//
+// Uses ReportCommit, not Commit: analyze.yml commits the PDF in its own
+// commit, after the original push Commit records, so a URL built from
+// Commit 404s (#255) -- the file did not exist there yet. Falls back to
+// Commit only for results collect-results.py wrote before ReportCommit
+// existed, which is still better than refusing to link at all.
 func githubAnalysisPDFURL(row githubAnalysisResult) (string, bool) {
-	if row.ReportPDF == "" || row.Commit == "" {
+	commit := row.ReportCommit
+	if commit == "" {
+		commit = row.Commit
+	}
+	if row.ReportPDF == "" || commit == "" {
 		return "", false
 	}
-	if !githubAnalysisCommit.MatchString(row.Commit) {
+	if !githubAnalysisCommit.MatchString(commit) {
 		return "", false
 	}
 	if strings.Contains(row.ReportPDF, "..") || strings.HasPrefix(row.ReportPDF, "/") {
@@ -352,7 +369,7 @@ func githubAnalysisPDFURL(row githubAnalysisResult) (string, bool) {
 	u := url.URL{
 		Scheme: "https",
 		Host:   "raw.githubusercontent.com",
-		Path:   "/Xore/honeypot/" + row.Commit + "/" + row.ReportPDF,
+		Path:   "/Xore/honeypot/" + commit + "/" + row.ReportPDF,
 	}
 	return u.String(), true
 }
