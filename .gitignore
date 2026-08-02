@@ -31,6 +31,9 @@ pcap/
 analysis/geoip/*.mmdb
 analysis/geoip/*.tar.gz
 dashboard/geoip/country.csv
+# Generated/refreshed by refresh-threat-cidrs.sh (#244), same reasoning as
+# country.csv above -- threat-cidrs.csv.example is the tracked starter.
+dashboard/geoip/threat-cidrs.csv
 vps/auth-backups/
 
 # Build and test output

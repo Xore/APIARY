@@ -87,6 +87,7 @@ func main() {
 		} else {
 			s.geo = g
 			fmt.Fprintf(os.Stderr, "dashboard: GeoLite2 City/ASN loaded (intel prefixes: %d)\n", len(g.intel))
+			go g.threatIntelReloadLoop()
 		}
 	}
 	if p := os.Getenv("GEOIP_CSV"); s.geo == nil && p != "" {

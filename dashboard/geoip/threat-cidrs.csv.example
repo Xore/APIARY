@@ -1,0 +1,11 @@
+# Optional local intelligence overlays. Format: CIDR,label
+#
+# This is a starter template, not the live file: copy it to threat-cidrs.csv
+# (gitignored -- see .gitignore and dashboard/geoip/README.md) to get started
+# with manual entries only, or run ./refresh-threat-cidrs.sh (#244) to create
+# threat-cidrs.csv and auto-populate it from Spamhaus DROP, the Tor bulk exit
+# list, and AWS/GCP published ranges. When more than one CIDR matches the
+# same address, the highest-severity label wins (blocklist:* > tor-exit >
+# everything else), not file order -- see intelCategoryRank in geoip.go.
+#
+# 192.0.2.0/24,scanner
