@@ -154,7 +154,7 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 		{"clusters", clustersPage{Generated: now}},
 		{"campaigns", campaignsPage{Generated: now}},
 		{"ml-anomalies", mlAnomaliesPage{Generated: now, Enabled: true}},
-		{"alerts", snapshot{}},
+		{"alerts", alertsPageData{snapshot: snapshot{}}},
 	}
 	for _, page := range pages {
 		name := page.name

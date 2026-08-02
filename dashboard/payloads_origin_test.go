@@ -2,6 +2,7 @@ package main
 
 import (
 	"html/template"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,7 +89,7 @@ func TestPayloadsPageRendersAsCardGrid(t *testing.T) {
 
 	funcs := templateFuncs(s, "")
 	tmpl := template.Must(template.New("t").Funcs(funcs).Parse(pageTemplate))
-	page := s.payloadsData("")
+	page := s.payloadsData(payloadsFilter{})
 	var out strings.Builder
 	if err := tmpl.ExecuteTemplate(&out, "payloads", &page); err != nil {
 		t.Fatalf("payloads page does not render: %v", err)
@@ -129,7 +130,8 @@ func TestPayloadsPageResultsUseGenericLazyListContract(t *testing.T) {
 
 	funcs := templateFuncs(s, "")
 	tmpl := template.Must(template.New("t").Funcs(funcs).Parse(pageTemplate))
-	page := s.payloadsData("")
+	page := s.payloadsData(payloadsFilter{})
+	page.RowsURL = payloadsRowsURL(httptest.NewRequest("GET", "/payloads", nil))
 	var out strings.Builder
 	if err := tmpl.ExecuteTemplate(&out, "payloads", &page); err != nil {
 		t.Fatalf("payloads page does not render: %v", err)

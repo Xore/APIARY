@@ -11,6 +11,21 @@ import (
 	"time"
 )
 
+// alertsPageData is /alerts' own render type -- s.get() alone (used by most
+// other simple pages) returns the shared snapshot, which every page using it
+// must not gain unrelated fields on, so the new filterBar (#301) is layered
+// on top here instead of added to snapshot itself. Filtering the alert board
+// down to a state/key-or-message search happens client-side in alerts.html's
+// own JS against the always-unfiltered GET /api/alerts response (a small,
+// already-capped-at-200 list, and a shared endpoint other pages/widgets also
+// call -- see alerts.html for why that must not itself start filtering).
+// filterBar exists purely so the page gets the same pre-filled-form/reset-
+// link widget every other filterable page has.
+type alertsPageData struct {
+	snapshot
+	filterBar
+}
+
 type alertRecord struct {
 	Key          string
 	Message      string

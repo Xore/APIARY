@@ -67,6 +67,11 @@ type capturedFile struct {
 	// information -- which sensor, when) is what those get.
 	OriginLabel string
 	OriginLink  string
+	// Sensor is origin.Sensor alone (#301), distinct from OriginLabel's
+	// formatted "sensor · time" display string -- kept as its own field so
+	// payloadsData can filter on it exactly, without parsing OriginLabel back
+	// apart. Empty for captures with no matching event (normal for Dionaea).
+	Sensor string
 }
 
 // earliestEventByShasum answers "which event first produced this hash" for
@@ -100,6 +105,7 @@ type payloadSourceStat struct {
 
 type payloadsPage struct {
 	pageMeta
+	filterBar
 	Generated   time.Time
 	Enabled     bool
 	Loading     bool
@@ -110,6 +116,45 @@ type payloadsPage struct {
 	UniqueTotal int
 	TotalH      string
 	Notice      string
+	// RowsURL (#301) is /api/payload-rows carrying every currently active
+	// filter param (source/sensor/since/q), not just source= -- the lazy-list
+	// JS (hp-app.js's loadRemoteItems) only ever appends "&offset=N" to this
+	// exact string, so a filter missing here would silently stop applying
+	// past the first page of results.
+	RowsURL string
+}
+
+// payloadsFilter narrows payloadsData beyond the existing source chips
+// (#301): Sensor (exact match against a capture's origin event), Since (a
+// duration string like every other page's own ?since=, applied to the
+// capture's own Mtime), and Hash (case-insensitive substring, read from
+// ?q= -- ?hash= on this page is already the full-hash target of the
+// sandbox/Ghidra/GitHub-analysis "just queued" redirect notice
+// (ghidra_submit.go, sandbox_submit.go, github_analysis_submit.go), and
+// reusing that name for an unrelated substring filter would be a real
+// collision, not just a naming clash). A plain value struct rather than
+// *http.Request -- unlike most other *Data(r) functions, payloadsData is
+// also called from the payload-workbench index with an unrelated request
+// whose query string must never leak in as an accidental filter, so every
+// caller states its filter explicitly.
+type payloadsFilter struct {
+	Source, Sensor, Since, Hash string
+}
+
+func parsePayloadsFilter(r *http.Request) payloadsFilter {
+	v := r.URL.Query()
+	return payloadsFilter{
+		Source: v.Get("source"), Sensor: v.Get("sensor"),
+		Since: v.Get("since"), Hash: v.Get("q"),
+	}
+}
+
+// payloadsRowsURL builds the /api/payload-rows URL carrying every currently
+// active filter param -- shared by the /payloads handler and its tests, so
+// hp-app.js's lazy-list ("&offset=N" appended to exactly this string) always
+// respects the same filters the initial page did (#301).
+func payloadsRowsURL(r *http.Request) string {
+	return "/api/payload-rows?" + r.URL.Query().Encode()
 }
 
 func payloadSourceName(dir string) string {
@@ -134,8 +179,20 @@ func payloadSourceName(dir string) string {
 // merges identical hash-addressed artifacts, and preserves every contributing
 // source. Dionaea binaries, Cowrie transfers, and retained inline scripts are
 // therefore visible in one page instead of being presented as Dionaea-only.
-func (s *store) payloadsData(filter string) payloadsPage {
-	filter = strings.ToLower(strings.TrimSpace(filter))
+func (s *store) payloadsData(f payloadsFilter) payloadsPage {
+	source := strings.ToLower(strings.TrimSpace(f.Source))
+	sensor := strings.TrimSpace(f.Sensor)
+	hashSub := strings.ToLower(strings.TrimSpace(f.Hash))
+	// Same shape as filters.go's own since/sinceStr: a duration string
+	// ("24h") turned into a cutoff, compared against Mtime's own fixed-width
+	// "2006-01-02 15:04" format -- that format sorts lexicographically in
+	// the same order it sorts chronologically, so a plain string comparison
+	// is enough and no time.Parse round-trip is needed.
+	var sinceCutoff string
+	if d, err := time.ParseDuration(f.Since); err == nil && d > 0 {
+		sinceCutoff = time.Now().Add(-d).Format("2006-01-02 15:04")
+	}
+
 	s.refreshPayloadCacheAsync()
 	s.payloadMu.Lock()
 	defer s.payloadMu.Unlock()
@@ -143,11 +200,11 @@ func (s *store) payloadsData(filter string) payloadsPage {
 	p := payloadsPage{
 		Generated: time.Now(), Enabled: len(s.payloadDirs) != 0,
 		Loading: s.payloadCacheAt.IsZero() && s.payloadRefreshing,
-		Filter:  filter, UniqueTotal: base.UniqueTotal,
+		Filter:  source, UniqueTotal: base.UniqueTotal,
 		Sources: append([]payloadSourceStat(nil), base.Sources...),
 	}
 	for i := range p.Sources {
-		p.Sources[i].Active = p.Sources[i].Name == filter
+		p.Sources[i].Active = p.Sources[i].Name == source
 	}
 	verdicts := map[string]githubAnalysisResult{}
 	for _, result := range loadGitHubAnalysisResults() {
@@ -156,10 +213,10 @@ func (s *store) payloadsData(filter string) payloadsPage {
 	origins := earliestEventByShasum(s.getEvents())
 	var total int64
 	for _, file := range base.Files {
-		if filter != "" {
+		if source != "" {
 			matched := false
-			for _, source := range file.Sources {
-				if source == filter {
+			for _, s := range file.Sources {
+				if s == source {
 					matched = true
 					break
 				}
@@ -167,6 +224,22 @@ func (s *store) payloadsData(filter string) payloadsPage {
 			if !matched {
 				continue
 			}
+		}
+		if origin, ok := origins[file.Hash]; ok {
+			file.OriginLabel = origin.Sensor + " · " + origin.Time
+			file.Sensor = origin.Sensor
+			if origin.Session != "" {
+				file.OriginLink = "/sessions/" + url.PathEscape(origin.Session)
+			}
+		}
+		if sensor != "" && file.Sensor != sensor {
+			continue
+		}
+		if sinceCutoff != "" && file.Mtime < sinceCutoff {
+			continue
+		}
+		if hashSub != "" && !strings.Contains(file.Hash, hashSub) {
+			continue
 		}
 		if result, ok := verdicts[file.Hash]; ok {
 			file.GitHubAnalysisURL = "/github-analysis/" + file.Hash
@@ -180,12 +253,6 @@ func (s *store) payloadsData(filter string) payloadsPage {
 				// first would let two different long family names collide at
 				// the display cut point and pivot to the wrong set of hashes.
 				file.FamilyLink = eventsURL(url.Values{"family": {result.Family}})
-			}
-		}
-		if origin, ok := origins[file.Hash]; ok {
-			file.OriginLabel = origin.Sensor + " · " + origin.Time
-			if origin.Session != "" {
-				file.OriginLink = "/sessions/" + url.PathEscape(origin.Session)
 			}
 		}
 		p.Files = append(p.Files, file)

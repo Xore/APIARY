@@ -42,7 +42,7 @@ func (s *store) serveWorkbenchIndex(w http.ResponseWriter, r *http.Request, tmpl
 		http.Error(w, "GET required", http.StatusMethodNotAllowed)
 		return
 	}
-	data := s.payloadsData("")
+	data := s.payloadsData(payloadsFilter{})
 	if len(data.Files) > 50 {
 		data.Files = data.Files[:50]
 	}

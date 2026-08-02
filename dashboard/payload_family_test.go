@@ -33,7 +33,7 @@ func TestPayloadsDataSurfacesFamilyAttribution(t *testing.T) {
 	s.payloadCache = s.scanPayloads()
 	s.payloadCacheAt = time.Now()
 
-	page := s.payloadsData("")
+	page := s.payloadsData(payloadsFilter{})
 	if len(page.Files) != 1 {
 		t.Fatalf("expected 1 file, got %d: %+v", len(page.Files), page.Files)
 	}
@@ -67,7 +67,7 @@ func TestPayloadsDataLeavesFamilyEmptyWithoutAttribution(t *testing.T) {
 	s.payloadCache = s.scanPayloads()
 	s.payloadCacheAt = time.Now()
 
-	page := s.payloadsData("")
+	page := s.payloadsData(payloadsFilter{})
 	if len(page.Files) != 1 {
 		t.Fatalf("expected 1 file, got %d", len(page.Files))
 	}
@@ -168,7 +168,7 @@ func TestPayloadsPageRendersFamilyBadge(t *testing.T) {
 
 	funcs := templateFuncs(s, "")
 	tmpl := template.Must(template.New("t").Funcs(funcs).Parse(pageTemplate))
-	page := s.payloadsData("")
+	page := s.payloadsData(payloadsFilter{})
 	var out strings.Builder
 	if err := tmpl.ExecuteTemplate(&out, "payloads", &page); err != nil {
 		t.Fatalf("payloads page does not render: %v", err)

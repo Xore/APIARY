@@ -305,7 +305,7 @@ func TestPayloadInventoryIncludesEverySourceAndNestedArtifact(t *testing.T) {
 	s := &store{payloadDirs: []string{dionaea, cowrie, filepath.Dir(scripts)}}
 	s.payloadCache = s.scanPayloads()
 	s.payloadCacheAt = time.Now()
-	page := s.payloadsData("")
+	page := s.payloadsData(payloadsFilter{})
 	if page.UniqueTotal != 2 || page.ResultTotal != 2 || len(page.Files) != 2 || len(page.Sources) != 3 {
 		t.Fatalf("unexpected unified inventory: %+v", page)
 	}
@@ -314,7 +314,7 @@ func TestPayloadInventoryIncludesEverySourceAndNestedArtifact(t *testing.T) {
 			t.Fatalf("shared payload did not retain both sources: %+v", file)
 		}
 	}
-	filtered := s.payloadsData("cowrie")
+	filtered := s.payloadsData(payloadsFilter{Source: "cowrie"})
 	if filtered.ResultTotal != 1 || len(filtered.Files) != 1 || filtered.Files[0].Hash != shared {
 		t.Fatalf("cowrie source filter returned the wrong artifacts: %+v", filtered.Files)
 	}
