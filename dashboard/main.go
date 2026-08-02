@@ -348,6 +348,23 @@ func main() {
 	})
 	http.HandleFunc("/clusters", func(w http.ResponseWriter, r *http.Request) {
 		data := s.clustersData(parseFilter(r))
+		// Cluster Kind (Fingerprint/Payload/Autonomous system/Provider class)
+		// only exists after clustersData's own aggregation groups events --
+		// it isn't a storedEvent attribute the shared filter type can match
+		// on, so it's filtered here as a narrow post-aggregation step (#280
+		// Phase 4) instead of inside filter.match().
+		if kind := r.URL.Query().Get("kind"); kind != "" {
+			filtered := make([]clusterRow, 0, len(data.Rows))
+			for _, row := range data.Rows {
+				if row.Kind == kind {
+					filtered = append(filtered, row)
+				}
+			}
+			data.Rows = filtered
+			data.Filters = append(data.Filters, "kind = "+kind)
+		}
+		data.filterBar = buildFilterBar(r, "/clusters",
+			[2]string{"sensor", "Sensor"}, [2]string{"kind", "Kind"}, [2]string{"since", "Since (e.g. 24h)"})
 		renderPage(w, tmpl, "clusters", &data)
 	})
 	http.HandleFunc("/campaigns", func(w http.ResponseWriter, r *http.Request) {

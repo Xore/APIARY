@@ -44,6 +44,7 @@ type campaignsPage struct {
 	Generated time.Time
 	Campaigns []campaignRow
 	Filters   []string
+	filterBar
 }
 
 func (s *store) campaignsData(r *http.Request) campaignsPage {
@@ -54,10 +55,14 @@ func (s *store) campaignsData(r *http.Request) campaignsPage {
 	if !f.since.IsZero() {
 		since = f.since
 	}
+	bar := buildFilterBar(r, "/campaigns",
+		[2]string{"cidr", "Network (CIDR)"}, [2]string{"asn", "ASN"}, [2]string{"sensor", "Sensor"},
+		[2]string{"since", "Since (e.g. 24h)"})
 	return campaignsPage{
 		Generated: time.Now(),
 		Campaigns: correlateCampaigns(f.filtered(s.getEvents()), since),
 		Filters:   f.describe(),
+		filterBar: bar,
 	}
 }
 

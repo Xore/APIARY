@@ -158,6 +158,7 @@ type clustersPage struct {
 	Generated time.Time
 	Rows      []clusterRow
 	Filters   []string
+	filterBar
 }
 
 // clustersData takes a filter directly rather than *http.Request (unlike

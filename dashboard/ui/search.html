@@ -27,6 +27,7 @@
         <div class="filters" id="search-filters">
           <span class="chip">{{.Query}}</span>
           <span class="chip">{{.Total}} matches</span>
+          {{template "filterbar" .}}
         </div>
 
         {{if .Groups}}
