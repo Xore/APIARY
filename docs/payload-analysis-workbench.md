@@ -18,7 +18,7 @@ GitHub publication is deliberately absent from `Run all`. The workbench links to
 | `ghidra` | executable, library, or unknown binary | existing Ghidra request spool | shared GPU |
 | `linux-sandbox` | dynamically supported non-Windows payload | existing Linux web-request spool | Linux KVM |
 | `windows-sandbox` | dynamically supported Windows payload | existing Windows web-request spool | Windows KVM |
-| `revdeck` | code artifacts | unavailable until #78 defines the verified contract | shared GPU |
+| `revdeck` | code artifacts | independent spool (`REVDECK_REQUEST_DIR`/`REVDECK_RESULTS_DIR`), drained by `drain_revdeck()` -- no dependency on the Ghidra REST job (#78/#276) | shared GPU |
 
 Availability and applicability are computed on the server. An unavailable or incompatible child is retained as `skipped` with a reason, so a parent run explains what did not execute. Model drift is advisory and never changes this decision: deterministic analysis and ingestion continue when the model-status adapter is unavailable or reports drift.
 
@@ -70,6 +70,5 @@ The old `/ghidra/submit` and `/sandbox/submit` routes remain compatible. No work
 ## Limitations
 
 - Backend-specific settings appear only after the backend implements a typed request contract. The current empty-marker workers cannot truthfully accept duration/profile, report-stage, evidence-budget, or artifact-policy choices, so the UI does not pretend they can.
-- Rev·Deck/GhidrAssist remains visibly unavailable pending #78.
 - A sandbox request already claimed by the host cannot be cancelled from the dashboard.
 - Shared-GPU fairness and collision/soak validation remain tracked by #84; the registry exposes the concurrency class and does not bypass serialization.
