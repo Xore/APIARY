@@ -206,7 +206,14 @@
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const items = await response.text();
       if (!items.trim()) state.total = nextOffset;
-      else state.body.insertAdjacentHTML("beforeend", items);
+      else {
+        state.body.insertAdjacentHTML("beforeend", items);
+        // Rows fetched here carry the same data-hp-utc twins as the
+        // server-rendered first page (#346) -- the one-shot preference pass
+        // in the DOMContentLoaded block already ran long before this batch
+        // existed, so without this they'd sit in the UTC fallback forever.
+        reapplyTimezone();
+      }
       updateRemoteContainer(key);
     } catch (error) {
       state.counter.textContent = `Could not load more entries (${error.message})`;
