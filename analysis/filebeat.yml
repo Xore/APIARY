@@ -1,8 +1,9 @@
 # Filebeat — tail the shared honeypot JSON logs and ship to Elasticsearch.
 #
 # Mapping strategy:
-#   Sensor logs  → honeypot-YYYY.MM.DD   (fields namespaced under honeypot.*)
-#   Suricata EVE → suricata-YYYY.MM.DD   (fields namespaced under suricata.*)
+#   Sensor logs   → honeypot-YYYY.MM.DD    (fields namespaced under honeypot.*)
+#   Suricata EVE  → suricata-YYYY.MM.DD    (fields namespaced under suricata.*)
+#   Portbridge    → portbridge-YYYY.MM.DD  (fields namespaced under portbridge.*)
 #
 # Using separate namespaces prevents field-type collisions when two sensors
 # write the same key (e.g. "type", "src_ip") with different value types.
@@ -49,6 +50,34 @@ filebeat.inputs:
       logset: sensors
       sensor: dionaea
       event_format: incident-json
+    fields_under_root: true
+
+  # Portbridge tunnel-connection metadata: real attacker IP, the honeypot
+  # port it dialed, and (when available) a live p0f OS guess. #354:
+  # previously local-disk-only -- dashboard/classify.go's buildViaMap reads
+  # these files directly off disk, joined once per ~15s rebuild cycle
+  # against only the current + previous log-rotation generation. Shipping
+  # to Elasticsearch gives a durable, full-history, queryable record of
+  # every tunnel connection instead. Only the live, actively-growing file
+  # is tailed -- portbridge.json.1 (the copytruncate rotation target) is
+  # deliberately not globbed here: unlike a rename-on-rotate pattern
+  # (inode-stable, see the suricata-eve comment below), copytruncate
+  # overwrites .1 wholesale on every rotation, which a filestream input
+  # would see as a brand-new file each time and re-ingest in full,
+  # duplicating everything already shipped while portbridge.json was still
+  # the active file. buildViaMap's own file-tail join is unaffected by any
+  # of this and keeps running exactly as before -- this input is additive.
+  - type: filestream
+    id: portbridge-json
+    paths:
+      - /logs/portbridge/portbridge.json
+    parsers:
+      - ndjson:
+          target: "portbridge"
+          overwrite_keys: true
+          add_error_key: true
+    fields:
+      logset: portbridge
     fields_under_root: true
 
   # Suricata IDS events (alerts, http, dns, tls, flow).
@@ -150,6 +179,9 @@ output.elasticsearch:
     - index: "honeypot-v2-%{+yyyy.MM.dd}"
       when.equals:
         logset: "sensors"
+    - index: "portbridge-v2-%{+yyyy.MM.dd}"
+      when.equals:
+        logset: "portbridge"
 
   # Preserve the original event if Elasticsearch ever rejects it despite the
   # flattened mapping. This prevents silent data loss and records the cause.
@@ -172,10 +204,11 @@ queue.mem:
 setup.template.enabled: false
 setup.ilm.enabled: false
 
-# In Kibana: create data views for honeypot-* and suricata-*
+# In Kibana: create data views for honeypot-*, suricata-*, and portbridge-*
 # Useful fields: honeypot.src_ip, honeypot.username, honeypot.password,
 #                honeypot.proto, honeypot.category, honeypot.input
 #                suricata.src_ip, suricata.alert.signature, suricata.event_type
+#                portbridge.src_ip, portbridge.os, portbridge.via_port, portbridge.port
 logging.level: warning
 
 # Internal monitoring is reachable only on the private Compose network. The
