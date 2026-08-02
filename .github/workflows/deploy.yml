@@ -86,6 +86,24 @@ jobs:
           docker compose -f compose.yml config --quiet
           docker compose -f compose.yml up -d --build
 
+      # #258: four more standalone honeypots split the same way, each with
+      # no depends_on and its own fully private network (same reasoning as
+      # honeypot-conpot above, which is why the loop below is safe to treat
+      # them identically) -- looped instead of one step per stack purely to
+      # avoid repeating the same six lines four times.
+      - name: Synchronize honeypot-cowrie/multipot/http/dnp3 (#258 split)
+        shell: bash
+        run: |
+          for stack in cowrie multipot http dnp3; do
+            destination="/opt/stacks/honeypot-$stack"
+            install -d -m 755 "$destination"
+            cp "docker-compose.$stack.yml" "$destination/compose.yml"
+            ( cd "$destination"
+              test ! -f .env || chmod 600 .env
+              docker compose -f compose.yml config --quiet
+              docker compose -f compose.yml up -d --build )
+          done
+
       - name: Synchronize Dockge source without runtime state
         shell: bash
         run: |
