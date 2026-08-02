@@ -14,7 +14,7 @@ curl -fsS -X PUT "$es_url/_snapshot/honeypot-fs" \
 # Bounded retention prevents a noisy internet-wide scan or IDS signature from
 # filling the homeserver disk. Daily Filebeat names already provide rollover;
 # ILM handles deletion of the old daily indices/backing indices.
-for spec in honeypot-30d:30d suricata-7d:7d dead-letter-60d:60d; do
+for spec in honeypot-30d:30d suricata-7d:7d dead-letter-60d:60d portbridge-30d:30d; do
   name=${spec%%:*}
   age=${spec#*:}
   curl -fsS -X PUT "$es_url/_ilm/policy/$name" \
@@ -34,7 +34,7 @@ curl -fsS -X PUT "$es_url/_ingest/pipeline/geoip-honeypot" \
       "script": {
         "lang": "painless",
         "ignore_failure": true,
-        "source": "if (ctx.event == null) ctx.event = new HashMap(); if (ctx.source == null) ctx.source = new HashMap(); if (ctx.destination == null) ctx.destination = new HashMap(); if (ctx.network == null) ctx.network = new HashMap(); if (ctx.honeypot != null) { def h = ctx.honeypot; if (h.sensor != null) ctx.event.sensor = h.sensor; else if (h.eventid != null && h.eventid.toString().startsWith('cowrie.')) ctx.event.sensor = 'cowrie'; if (h.src_ip != null && h.src_ip != '') ctx.source.ip = h.src_ip; if (h.dst_ip != null && h.dst_ip != '') ctx.destination.ip = h.dst_ip; if (h.dst_port != null) ctx.destination.port = h.dst_port; else if (h.port != null) ctx.destination.port = h.port; if (h.proto != null) ctx.network.protocol = h.proto; else if (h.protocol != null) ctx.network.protocol = h.protocol; else if (h.data_type != null) ctx.network.protocol = h.data_type; if (h.username != null) { if (ctx.user == null) ctx.user = new HashMap(); ctx.user.name = h.username; } if (h.command != null || h.input != null) { if (ctx.process == null) ctx.process = new HashMap(); ctx.process.command_line = h.command != null ? h.command : h.input; } if (h.path != null) { if (ctx.url == null) ctx.url = new HashMap(); ctx.url.path = h.path; } if (h.shasum != null) { if (ctx.file == null) ctx.file = new HashMap(); if (ctx.file.hash == null) ctx.file.hash = new HashMap(); ctx.file.hash.sha256 = h.shasum; } if (h.category != null) ctx.event.category = h.category; } if (ctx.log != null && ctx.log.file != null && ctx.log.file.path != null) { String p = ctx.log.file.path; if (ctx.event.sensor == null && p.contains('/conpot')) { int a = p.indexOf('/conpot') + 1; int b = p.indexOf('/', a); ctx.event.sensor = b > a ? p.substring(a,b) : 'conpot'; } if (ctx.event.sensor == null && p.contains('/dionaea')) { ctx.event.sensor = 'dionaea'; } if (ctx.event.sensor != null && ctx.event.sensor.toString().startsWith('conpot')) { if (ctx.ot == null) ctx.ot = new HashMap(); ctx.ot.persona = ctx.event.sensor; } } if (ctx.suricata != null && ctx.suricata.eve != null) { def s = ctx.suricata.eve; ctx.event.sensor = 'suricata'; if (s.event_type != null) ctx.event.category = s.event_type; if (s.src_ip != null) ctx.source.ip = s.src_ip; if (s.dest_ip != null) ctx.destination.ip = s.dest_ip; if (s.dest_port != null) ctx.destination.port = s.dest_port; if (s.proto != null) ctx.network.transport = s.proto.toString().toLowerCase(); }"
+        "source": "if (ctx.event == null) ctx.event = new HashMap(); if (ctx.source == null) ctx.source = new HashMap(); if (ctx.destination == null) ctx.destination = new HashMap(); if (ctx.network == null) ctx.network = new HashMap(); if (ctx.honeypot != null) { def h = ctx.honeypot; if (h.sensor != null) ctx.event.sensor = h.sensor; else if (h.eventid != null && h.eventid.toString().startsWith('cowrie.')) ctx.event.sensor = 'cowrie'; if (h.src_ip != null && h.src_ip != '') ctx.source.ip = h.src_ip; if (h.dst_ip != null && h.dst_ip != '') ctx.destination.ip = h.dst_ip; if (h.dst_port != null) ctx.destination.port = h.dst_port; else if (h.port != null) ctx.destination.port = h.port; if (h.proto != null) ctx.network.protocol = h.proto; else if (h.protocol != null) ctx.network.protocol = h.protocol; else if (h.data_type != null) ctx.network.protocol = h.data_type; if (h.username != null) { if (ctx.user == null) ctx.user = new HashMap(); ctx.user.name = h.username; } if (h.command != null || h.input != null) { if (ctx.process == null) ctx.process = new HashMap(); ctx.process.command_line = h.command != null ? h.command : h.input; } if (h.path != null) { if (ctx.url == null) ctx.url = new HashMap(); ctx.url.path = h.path; } if (h.shasum != null) { if (ctx.file == null) ctx.file = new HashMap(); if (ctx.file.hash == null) ctx.file.hash = new HashMap(); ctx.file.hash.sha256 = h.shasum; } if (h.category != null) ctx.event.category = h.category; } if (ctx.log != null && ctx.log.file != null && ctx.log.file.path != null) { String p = ctx.log.file.path; if (ctx.event.sensor == null && p.contains('/conpot')) { int a = p.indexOf('/conpot') + 1; int b = p.indexOf('/', a); ctx.event.sensor = b > a ? p.substring(a,b) : 'conpot'; } if (ctx.event.sensor == null && p.contains('/dionaea')) { ctx.event.sensor = 'dionaea'; } if (ctx.event.sensor != null && ctx.event.sensor.toString().startsWith('conpot')) { if (ctx.ot == null) ctx.ot = new HashMap(); ctx.ot.persona = ctx.event.sensor; } } if (ctx.suricata != null && ctx.suricata.eve != null) { def s = ctx.suricata.eve; ctx.event.sensor = 'suricata'; if (s.event_type != null) ctx.event.category = s.event_type; if (s.src_ip != null) ctx.source.ip = s.src_ip; if (s.dest_ip != null) ctx.destination.ip = s.dest_ip; if (s.dest_port != null) ctx.destination.port = s.dest_port; if (s.proto != null) ctx.network.transport = s.proto.toString().toLowerCase(); } if (ctx.portbridge != null) { def pb = ctx.portbridge; ctx.event.sensor = 'portbridge'; ctx.event.category = pb.event != null ? pb.event.toString() : 'connect'; if (pb.src_ip != null && pb.src_ip != '') ctx.source.ip = pb.src_ip; if (pb.port != null) ctx.destination.port = pb.port; if (pb.proto != null) ctx.network.transport = pb.proto; }"
       }
     },
     {
@@ -77,6 +77,25 @@ curl -fsS -X PUT "$es_url/_ingest/pipeline/geoip-honeypot" \
     {
       "geoip": {
         "field": "honeypot.src_ip",
+        "target_field": "source.as",
+        "database_file": "GeoLite2-ASN.mmdb",
+        "properties": ["asn", "organization_name"],
+        "ignore_missing": true,
+        "ignore_failure": true
+      }
+    },
+    {
+      "geoip": {
+        "field": "portbridge.src_ip",
+        "target_field": "source.geo",
+        "database_file": "GeoLite2-City.mmdb",
+        "ignore_missing": true,
+        "ignore_failure": true
+      }
+    },
+    {
+      "geoip": {
+        "field": "portbridge.src_ip",
         "target_field": "source.as",
         "database_file": "GeoLite2-ASN.mmdb",
         "properties": ["asn", "organization_name"],
@@ -186,6 +205,48 @@ JSON
 # keeping two templates for one setting. Existing indices keep their old
 # dynamic mapping until suricata-7d ILM rolls them off; only new indices
 # pick this up.
+
+# #354: portbridge tunnel-connection records (real attacker IP, honeypot
+# port, p0f OS guess), shipped to ES for the first time -- previously
+# local-disk-only (dashboard/classify.go's buildViaMap). The geoip-honeypot
+# pipeline's normalization script promotes portbridge.src_ip into the same
+# source.ip / event.sensor ECS envelope honeypot-v2-* and suricata-* use, so
+# a single query across honeypot-v2-*,suricata-*,portbridge-v2-* for one
+# source.ip returns every correlated record for that IP in one pass -- no
+# per-index-family join needed. Plain daily indices like suricata-events
+# (not a data stream like honeypot-events-v2): portbridge's volume doesn't
+# need rollover, and this keeps the simpler index-per-day model.
+curl -fsS -X PUT "$es_url/_index_template/portbridge-events" \
+  -H 'Content-Type: application/json' \
+  --data-binary @- <<'JSON'
+{
+  "index_patterns": ["portbridge-v2-*"],
+  "priority": 470,
+  "template": {
+    "settings": {
+      "index.default_pipeline": "geoip-honeypot",
+      "index.lifecycle.name": "portbridge-30d",
+      "index.number_of_replicas": 0,
+      "index.mapping.total_fields.limit": 200,
+      "index.mapping.ignore_malformed": true,
+      "index.refresh_interval": "5s"
+    },
+    "mappings": {
+      "properties": {
+        "portbridge": { "type": "flattened" },
+        "event": { "properties": { "sensor": { "type": "keyword" }, "category": { "type": "keyword" } } },
+        "source": { "properties": {
+          "ip": { "type": "ip", "ignore_malformed": true },
+          "geo": { "properties": { "location": { "type": "geo_point" }, "country_iso_code": { "type": "keyword" }, "city_name": { "type": "keyword" } } },
+          "as": { "properties": { "asn": { "type": "long" }, "organization_name": { "type": "keyword" }, "type": { "type": "keyword" } } }
+        } },
+        "destination": { "properties": { "port": { "type": "integer", "ignore_malformed": true } } },
+        "network": { "properties": { "transport": { "type": "keyword" } } }
+      }
+    }
+  }
+}
+JSON
 
 curl -fsS -X PUT "$es_url/_index_template/honeypot-dead-letter" \
   -H 'Content-Type: application/json' \
