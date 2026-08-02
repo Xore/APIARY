@@ -559,7 +559,7 @@ func ghidraAlerts(s *store, messages *[]string, markOnly bool) {
 	}
 
 	emit := func(key, message string) {
-		if s.alerts == nil || s.alerts.observe(key, message, markOnly) {
+		if s.alerts == nil || s.alerts.observe(key, message, "", markOnly) {
 			if !markOnly {
 				*messages = append(*messages, message)
 			}

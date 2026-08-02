@@ -14,6 +14,7 @@ import (
 type alertRecord struct {
 	Key          string
 	Message      string
+	Link         string `json:",omitempty"` // optional drill-down URL to the events behind this alert
 	FirstSeen    time.Time
 	LastSeen     time.Time
 	LastNotified time.Time
@@ -36,7 +37,7 @@ func newAlertManager(path string, cooldown time.Duration) *alertManager {
 	return m
 }
 
-func (m *alertManager) observe(key, message string, markOnly bool) bool {
+func (m *alertManager) observe(key, message, link string, markOnly bool) bool {
 	now := time.Now()
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -45,7 +46,7 @@ func (m *alertManager) observe(key, message string, markOnly bool) bool {
 		r = &alertRecord{Key: key, Message: message, FirstSeen: now}
 		m.records[key] = r
 	}
-	r.Message, r.LastSeen, r.Count = message, now, r.Count+1
+	r.Message, r.Link, r.LastSeen, r.Count = message, link, now, r.Count+1
 	notify := !markOnly && !r.Acknowledged && (r.LastNotified.IsZero() || now.Sub(r.LastNotified) >= m.cooldown)
 	if notify || markOnly && r.LastNotified.IsZero() {
 		r.LastNotified = now
