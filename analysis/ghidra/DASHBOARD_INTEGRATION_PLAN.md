@@ -22,7 +22,7 @@
 > `program_triage` and `suspicious_behavior` workflows against a local
 > OpenAI-compatible endpoint after collection, and refuses to send
 > sample-derived text to one that is not local. Operator documentation is in
-> [`README.md`](README.md#ai-triage-and-the-local-only-rule).
+> [`AI_TRIAGE.md`](AI_TRIAGE.md) (#142).
 >
 > **`findcrypt` and `call_graph_svg` are populated** (2026-07-31, #102, in
 > `4101e9a`). Crypto constants are scanned against the sample bytes directly
