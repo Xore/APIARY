@@ -42,7 +42,7 @@ STATE_BASE="/opt/stacks/honeypot-stack/state"
 # (there's no standalone "payload-analysis" CLI target; those two are only
 # ever stopped/started as a side effect of `wants cowrie`, same reasoning
 # as when they still lived in the main stack).
-SPLIT_TARGETS=(conpot cowrie multipot http dnp3 dionaea)
+SPLIT_TARGETS=(conpot cowrie multipot http dnp3 dionaea tanner)
 declare -A SPLIT_STACK_DIR=(
   [conpot]="/opt/stacks/honeypot-conpot"
   [cowrie]="/opt/stacks/honeypot-cowrie"
@@ -50,6 +50,7 @@ declare -A SPLIT_STACK_DIR=(
   [http]="/opt/stacks/honeypot-http"
   [dnp3]="/opt/stacks/honeypot-dnp3"
   [dionaea]="/opt/stacks/honeypot-dionaea"
+  [tanner]="/opt/stacks/honeypot-tanner"
 )
 declare -A SPLIT_STACK_SERVICES=(
   [conpot]="conpot conpot-s7-1200 conpot-s7-1500 conpot-iec104 conpot-guardian conpot-kamstrup"
@@ -58,6 +59,12 @@ declare -A SPLIT_STACK_SERVICES=(
   [http]="http-honeypot api-honeypot"
   [dnp3]="dnp3"
   [dionaea]="dionaea tftp-relay"
+  # tanner_docker/tanner_redis/tanner_phpox are deliberately excluded here,
+  # same as before this split: they hold no open handles into logs/tanner
+  # or logs/snare (the two directories this script wipes for this target),
+  # so stopping/starting them on every wipe is unnecessary churn. Only the
+  # four that do -- tanner, tanner_api, tanner_web, snare -- are listed.
+  [tanner]="tanner tanner_api tanner_web snare"
 )
 
 PAYLOAD_ANALYSIS_DIR="/opt/stacks/honeypot-payload-analysis"
@@ -122,12 +129,11 @@ delete_es() {
 # ─────────────────────────────────────────────────────────────────────────────
 # Build service list for stop/start
 # ─────────────────────────────────────────────────────────────────────────────
-# cowrie/multipot/http/dnp3/conpot/dionaea themselves are deliberately
-# excluded from SERVICES -- each lives in its own Dockge stack/compose
-# project now (SPLIT_STACK_DIR above) and is stopped/started there
-# separately, via split_stack_compose below, not through this array.
+# cowrie/multipot/http/dnp3/conpot/dionaea/tanner themselves are
+# deliberately excluded from SERVICES -- each lives in its own Dockge
+# stack/compose project now (SPLIT_STACK_DIR above) and is stopped/started
+# there separately, via split_stack_compose below, not through this array.
 SERVICES=()
-wants tanner  && SERVICES+=(tanner tanner_api tanner_web snare)
 wants suricata && SERVICES+=(evebox)  # suricata itself is host-level; evebox reads its logs
 
 split_stack_compose() {

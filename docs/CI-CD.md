@@ -240,6 +240,41 @@ whenever `cowrie` is targeted, same reasoning as before the split: they
 hold reads/hardlinks into `cowrie/downloads` that would race a concurrent
 wipe of that directory.
 
+### honeypot-tanner (#258)
+
+`docker-compose.tanner.yml` bundles the whole SNARE + TANNER web-app
+honeypot group (`tanner_docker`, `tanner_redis`, `tanner_phpox`,
+`tanner_api`, `tanner_web`, `tanner`, `snare`) into one stack at
+`/opt/stacks/honeypot-tanner` -- all seven form a single `depends_on`
+chain, so unlike every other group in this document they were never a
+candidate for splitting further. `tanner_local`, the network carrying all
+of it, was already wholly private to this group (confirmed by grepping
+every compose file), so it moved with them unchanged.
+
+The one resource this stack shares with anything outside itself is
+`snare-pages`: written by `honeypot-init`'s `snare-clone` job, read only by
+`snare` here, `external: true` in both the old monolithic file and this one
+-- unaffected by the split. `autoheal` (`docker-compose.utilities.yml`)
+still restarts `tanner_docker`/`tanner_redis` on unhealthy via the
+`autoheal=true` label, same as always -- it needs no changes for this or
+any #258 split.
+
+Deployed in the same looped step as the other standalone honeypots
+(`.github/workflows/deploy.yml`) -- no ordering requirement, since
+`snare-pages` is already created by `honeypot-init`, which this workflow
+deploys before this step runs. `scripts/reset-logs.sh` treats `tanner` as
+a `SPLIT_TARGETS` entry, same as `dionaea`; only `tanner`, `tanner_api`,
+`tanner_web`, and `snare` are stopped/started on a wipe (unchanged from
+before the split) -- `tanner_docker`/`tanner_redis`/`tanner_phpox` hold no
+open handles into the log directories this script wipes for this target.
+
+With this split, the only services still in `honeypot-stack`'s own
+`docker-compose.yml` are the ELK/analysis plane (`elasticsearch`, `kibana`,
+`filebeat`, `evebox`, `arkime-capture`, `arkime-viewer`, `pcap-sync`) --
+tracked as the next #258 split. Once that moves out too, this file has no
+services left of its own, and retiring its deploy step entirely (rather
+than leaving it as a no-op stack) is the last step of #258.
+
 ## VPS deployment
 
 Create a protected `production-vps` environment with a required reviewer and
