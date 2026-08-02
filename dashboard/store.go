@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"runtime"
 	"strconv"
@@ -223,7 +224,8 @@ func (s *store) notifyLoop(endpoint string) {
 			}
 			key := "campaign:" + c.CIDR
 			message := fmt.Sprintf("honeypot campaign %s score=%d events=%d sensors=%s ports=%s", c.CIDR, c.Score, c.Events, c.Sensors, c.Ports)
-			if s.alerts == nil || s.alerts.observe(key, message, markOnly) {
+			link := eventsURL(url.Values{"cidr": {c.CIDR}})
+			if s.alerts == nil || s.alerts.observe(key, message, link, markOnly) {
 				if !markOnly {
 					messages = append(messages, message)
 				}
@@ -232,7 +234,7 @@ func (s *store) notifyLoop(endpoint string) {
 		for _, feed := range snap.Sensors {
 			if feed.State == "stale" {
 				message := "honeypot feed stale: " + feed.Name + " (last event " + feed.Ago + ")"
-				if s.alerts == nil || s.alerts.observe("stale:"+feed.Name, message, markOnly) {
+				if s.alerts == nil || s.alerts.observe("stale:"+feed.Name, message, "", markOnly) {
 					if !markOnly {
 						messages = append(messages, message)
 					}
@@ -241,7 +243,7 @@ func (s *store) notifyLoop(endpoint string) {
 		}
 		if snap.ActivityState == "spike" {
 			message := fmt.Sprintf("honeypot activity spike: %d events in 24h (%s)", snap.Last24h, snap.Change24h)
-			if s.alerts == nil || s.alerts.observe("activity:spike", message, markOnly) {
+			if s.alerts == nil || s.alerts.observe("activity:spike", message, "", markOnly) {
 				if !markOnly {
 					messages = append(messages, message)
 				}
@@ -250,7 +252,7 @@ func (s *store) notifyLoop(endpoint string) {
 		if snap.ES.Enabled {
 			if snap.ES.IngestState == "stale" || snap.ES.FilebeatState != "healthy" {
 				message := fmt.Sprintf("honeypot ingestion unhealthy: ingest=%s age=%s filebeat=%s", snap.ES.IngestState, snap.ES.LastIngestAge, snap.ES.FilebeatState)
-				if s.alerts == nil || s.alerts.observe("pipeline:ingestion", message, markOnly) {
+				if s.alerts == nil || s.alerts.observe("pipeline:ingestion", message, "", markOnly) {
 					if !markOnly {
 						messages = append(messages, message)
 					}
@@ -258,7 +260,7 @@ func (s *store) notifyLoop(endpoint string) {
 			}
 			if snap.ES.RecentDeadLetters > 0 {
 				message := fmt.Sprintf("honeypot ingest rejected %d documents in the last 24h", snap.ES.RecentDeadLetters)
-				if s.alerts == nil || s.alerts.observe("pipeline:dead-letters", message, markOnly) {
+				if s.alerts == nil || s.alerts.observe("pipeline:dead-letters", message, "", markOnly) {
 					if !markOnly {
 						messages = append(messages, message)
 					}
@@ -266,27 +268,28 @@ func (s *store) notifyLoop(endpoint string) {
 			}
 			if snap.ES.FilebeatFailed > 0 || snap.ES.FilebeatDropped > 0 {
 				message := fmt.Sprintf("Filebeat reports failed=%d dropped=%d active=%d", snap.ES.FilebeatFailed, snap.ES.FilebeatDropped, snap.ES.FilebeatActive)
-				if s.alerts == nil || s.alerts.observe("pipeline:filebeat-loss", message, markOnly) {
+				if s.alerts == nil || s.alerts.observe("pipeline:filebeat-loss", message, "", markOnly) {
 					if !markOnly {
 						messages = append(messages, message)
 					}
 				}
 			}
 		}
-		otSources := map[string]bool{}
+		otSources := map[string]string{}
 		for _, event := range s.getEvents() {
 			if event.when.IsZero() || time.Since(event.when) > 10*time.Minute {
 				continue
 			}
 			for _, item := range techniquesForEvent(event) {
 				if item.ID == "T1692.001" {
-					otSources[event.SrcIP+" via "+event.Sensor] = true
+					otSources[event.SrcIP+" via "+event.Sensor] = event.SrcIP
 				}
 			}
 		}
-		for source := range otSources {
+		for source, srcIP := range otSources {
 			message := "industrial control command/write attempt: " + source
-			if s.alerts == nil || s.alerts.observe("ot-command:"+source, message, markOnly) {
+			link := eventsURL(url.Values{"ip": {srcIP}})
+			if s.alerts == nil || s.alerts.observe("ot-command:"+source, message, link, markOnly) {
 				if !markOnly {
 					messages = append(messages, message)
 				}
@@ -298,7 +301,8 @@ func (s *store) notifyLoop(endpoint string) {
 					continue
 				}
 				message := fmt.Sprintf("YARA payload match: %s rules=%s source=%s", hash, strings.Join(sample.Matches, ","), sample.Source)
-				if s.alerts == nil || s.alerts.observe("yara:"+hash, message, markOnly) {
+				link := "/payload-analysis/" + url.PathEscape(hash)
+				if s.alerts == nil || s.alerts.observe("yara:"+hash, message, link, markOnly) {
 					if !markOnly {
 						messages = append(messages, message)
 					}
@@ -308,7 +312,7 @@ func (s *store) notifyLoop(endpoint string) {
 		sandboxStatus := loadSandboxStatus()
 		if sandboxStatus.HandoffOld {
 			message := fmt.Sprintf("sandbox handoff stalled: %d dashboard request(s) are waiting for the host watcher", sandboxStatus.Handoff)
-			if s.alerts == nil || s.alerts.observe("sandbox:handoff", message, markOnly) {
+			if s.alerts == nil || s.alerts.observe("sandbox:handoff", message, "", markOnly) {
 				if !markOnly {
 					messages = append(messages, message)
 				}
@@ -316,7 +320,7 @@ func (s *store) notifyLoop(endpoint string) {
 		}
 		if sandboxStatus.WorkerState == "stale" || sandboxStatus.WorkerState == "error" {
 			message := fmt.Sprintf("sandbox worker unhealthy: state=%s queued=%d running=%d", sandboxStatus.WorkerState, sandboxStatus.Counts.Queued, sandboxStatus.Counts.Running)
-			if s.alerts == nil || s.alerts.observe("sandbox:worker", message, markOnly) {
+			if s.alerts == nil || s.alerts.observe("sandbox:worker", message, "", markOnly) {
 				if !markOnly {
 					messages = append(messages, message)
 				}
@@ -324,7 +328,7 @@ func (s *store) notifyLoop(endpoint string) {
 		}
 		if sandboxStatus.Counts.Failed > 0 {
 			message := fmt.Sprintf("sandbox queue has %d failed job(s)", sandboxStatus.Counts.Failed)
-			if s.alerts == nil || s.alerts.observe("sandbox:failed", message, markOnly) {
+			if s.alerts == nil || s.alerts.observe("sandbox:failed", message, "", markOnly) {
 				if !markOnly {
 					messages = append(messages, message)
 				}
@@ -340,7 +344,8 @@ func (s *store) notifyLoop(endpoint string) {
 				continue
 			}
 			message := fmt.Sprintf("sandbox high-risk behavior: sha256=%s score=%d level=%s techniques=%d", result.SHA256, result.RiskScore, result.RiskLevel, len(result.Techniques))
-			if s.alerts == nil || s.alerts.observe("sandbox:risk:"+result.Job, message, markOnly) {
+			link := "/sandbox/" + url.PathEscape(result.Job)
+			if s.alerts == nil || s.alerts.observe("sandbox:risk:"+result.Job, message, link, markOnly) {
 				if !markOnly {
 					messages = append(messages, message)
 				}
