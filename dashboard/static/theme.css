@@ -258,6 +258,13 @@ p { color: var(--text-secondary); }
   text-transform: uppercase;
 }
 
+/* Visually hidden, still readable by assistive tech -- the standard
+   clip-rect technique, not display:none (which screen readers skip). */
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+
 :focus-visible {
   outline: 2px solid var(--border-focus);
   outline-offset: 2px;
