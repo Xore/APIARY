@@ -364,6 +364,29 @@ func main() {
 		}
 		renderPage(w, tmpl, "cidr-correlation", &data)
 	})
+	// #354: kind and value are carried as one URL-escaped path segment
+	// (joined by \x00, the same separator clustersData's own internal
+	// grouping key already uses) rather than two segments, since kind
+	// itself contains spaces ("Autonomous system", "Provider class") that
+	// would otherwise make it ambiguous where kind ends and value begins.
+	http.HandleFunc("/investigate/cluster/", func(w http.ResponseWriter, r *http.Request) {
+		raw, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/investigate/cluster/"))
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		kind, value, ok := strings.Cut(raw, "\x00")
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		data, ok := s.clusterCorrelationData(kind, value)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		renderPage(w, tmpl, "cluster-correlation", &data)
+	})
 	http.HandleFunc("/sessions/", func(w http.ResponseWriter, r *http.Request) {
 		id, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/sessions/"))
 		if err != nil {

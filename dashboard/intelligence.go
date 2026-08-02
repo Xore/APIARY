@@ -261,3 +261,76 @@ func (s *store) clustersData(f filter) clustersPage {
 	}
 	return clustersPage{Generated: time.Now(), Rows: rows, Filters: f.describe()}
 }
+
+// clusterIPs recomputes one specific cluster's member IP set by kind+value
+// -- the same grouping clustersData uses, scoped to a single key instead of
+// building all 250 rows at once. #354's "do this even for clusters": unlike
+// clustersData's own rows (which keep only a *count* of member IPs, per
+// clusterRow's doc comment), this is the one place that actually needs the
+// full IP list, to hand to esClient.correlateIPs.
+//
+// Deliberately unfiltered by date/sensor/etc (unlike clustersData(f
+// filter)): this recomputes "every IP this dashboard has ever seen sharing
+// this fingerprint/payload/ASN/provider", not whatever time window happened
+// to be active on the /clusters list view a user drilled in from -- a
+// broader, more useful answer for "what does the backend know about this
+// cluster overall", and it avoids threading filter state through yet
+// another route.
+func (s *store) clusterIPs(kind, value string) []string {
+	ips := map[string]bool{}
+	for _, e := range s.getEvents() {
+		var k, v string
+		switch kind {
+		case "Fingerprint":
+			k, v = "Fingerprint", e.Fingerprint
+		case "Payload":
+			k, v = "Payload", e.Shasum
+		case "Autonomous system":
+			if e.ASN != 0 {
+				k, v = "Autonomous system", fmt.Sprintf("AS%d %s", e.ASN, e.Org)
+			}
+		case "Provider class":
+			k, v = "Provider class", firstNonEmpty(e.Intel, e.Provider)
+		}
+		if k == kind && v == value && e.SrcIP != "" {
+			ips[e.SrcIP] = true
+		}
+	}
+	result := make([]string, 0, len(ips))
+	for ip := range ips {
+		result = append(result, ip)
+	}
+	return result
+}
+
+// clusterCorrelationPage is clusters' drill-down equivalent of campaigns'
+// cidrCorrelationPage (dashboard/ip_correlation.go) -- the same backend
+// query, scoped to a cluster's recomputed member IP set via Elasticsearch's
+// terms matching instead of a CIDR range. Its own page for the same reason
+// cidrCorrelationPage is its own page: querying eagerly for every row of
+// the clusters list would be an Elasticsearch round-trip per displayed
+// cluster (up to 250) on every page view.
+type clusterCorrelationPage struct {
+	pageMeta
+	Generated   time.Time
+	Kind, Value string
+	IPCount     int
+	Correlation ipCorrelation
+}
+
+func (s *store) clusterCorrelationData(kind, value string) (clusterCorrelationPage, bool) {
+	ips := s.clusterIPs(kind, value)
+	if len(ips) < 2 {
+		// Matches clustersData's own "not a cluster" threshold -- a single
+		// IP sharing a value with no one else isn't a cluster to correlate.
+		return clusterCorrelationPage{}, false
+	}
+	p := clusterCorrelationPage{Generated: time.Now(), Kind: kind, Value: value, IPCount: len(ips)}
+	if s.es != nil {
+		p.Correlation = s.es.correlateIPs(ips, 200)
+	}
+	if !p.Correlation.Available {
+		return p, false
+	}
+	return p, true
+}
