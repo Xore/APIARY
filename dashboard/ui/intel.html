@@ -67,7 +67,7 @@
         <div class="card wide" id="campaigns-table">
           {{if .Campaigns}}
           <table class="recent data-table">
-            <thead><tr><th>score</th><th>network</th><th>events</th><th>ips</th><th>sensors</th><th>ports</th><th>creds</th><th>files</th><th>alerts</th><th>ASNs</th><th>provider</th><th>fingerprints</th><th>sequence</th><th>why correlated</th><th>first</th><th>last</th></tr></thead>
+            <thead><tr><th>score</th><th>network</th><th>events</th><th>ips</th><th>sensors</th><th>ports</th><th>creds</th><th>files</th><th>alerts</th><th>ASNs</th><th>provider</th><th>fingerprints</th><th>sequence</th><th>why correlated</th><th>first</th><th>last</th><th></th></tr></thead>
             <tbody>{{template "campaignrows" .Campaigns}}</tbody>
           </table>
           {{else}}<p class="empty">no active campaigns in the last seven days</p>{{end}}
@@ -90,9 +90,61 @@
   <td class="n"><a href="{{.Link}}" title="show campaign credentials">{{.Creds}}</a></td><td class="n"><a href="{{.Link}}" title="show campaign payloads">{{.Payloads}}</a></td><td class="n"><a href="{{.Link}}" title="show campaign alerts">{{.Alerts}}</a></td>
   <td class="v"><a href="{{.Link}}" title="show campaign events and ASN details">{{.ASNs}}</a></td><td class="v"><a href="{{.Link}}" title="show campaign events and provider details">{{.Providers}}</a></td><td class="n"><a href="{{.Link}}" title="show campaign events and fingerprints">{{.Fingerprints}}</a></td><td class="v">{{.Sequence}}</td>
   <td class="v" title="why these events were grouped">{{.Explanation}}</td><td>{{.First}}</td><td>{{.Last}}</td>
+  <td><a class="lnk" href="/investigate/cidr/{{.CIDR | urlquery}}" title="#354: everything Elasticsearch has correlated for this network, including portbridge tunnel connections">ES &rarr;</a></td>
 </tr>
 {{end}}
 {{end}}
+
+{{define "cidr-correlation"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>xore//honeypot &mdash; network correlation {{.CIDR}}</title>
+{{template "style" .}}
+</head>
+<body>
+<div class="app-shell">
+  {{template "topbar" .}}
+  {{template "sidebar" .}}
+  <main class="app-main">
+      <div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
+        <header class="overview-header" id="cidr-correlation-header">
+          <div>
+            <div class="eyebrow">Correlation</div>
+            <h1>{{.CIDR}}</h1>
+            <p class="subtitle">#354: everything Elasticsearch has correlated for this network across honeypot, Suricata, and portbridge tunnel records.</p>
+          </div>
+          <div class="live-panel">
+            <span class="gen">generated {{.Generated.Format "2006-01-02 15:04:05 MST"}}</span>
+          </div>
+        </header>
+        <div class="filters">
+          <a class="chip" href="/campaigns">&larr; campaigns</a>
+          <a class="chip" href="/events?cidr={{.CIDR | urlquery}}&amp;since=168h">in-memory events for this network</a>
+        </div>
+        <div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:gap-3 tw:mb-6">
+          <div class="metric"><div class="metric__value">{{.Correlation.Total}}</div><div class="metric__label">Total matches</div></div>
+          <div class="metric"><div class="metric__value">{{.Correlation.TunnelConnections}}</div><div class="metric__label">Tunnel connections</div></div>
+          <div class="metric"><div class="metric__value">{{len .Correlation.Sensors}}</div><div class="metric__label">Distinct sensors</div></div>
+        </div>
+        <div class="tw:grid tw:grid-cols-12 tw:gap-3.5">
+          {{template "tbl" (dict "t" "Sensors" "rows" .Correlation.Sensors "class" "half" "hint" "none")}}
+          <div class="card wide">
+            <h2>Correlated records</h2>
+            <p class="note">{{if .Correlation.Truncated}}Showing the {{len .Correlation.Records}} most recent of {{.Correlation.Total}} total matches.{{else}}Newest first.{{end}}{{if .Correlation.TunnelOSGuesses}} p0f OS guesses seen over this network's tunnel connections: {{range $i, $os := .Correlation.TunnelOSGuesses}}{{if $i}}, {{end}}{{$os}}{{end}}.{{end}}</p>
+            <table class="recent data-table"><thead><tr><th>time</th><th>sensor</th><th>summary</th></tr></thead><tbody>
+              {{range .Correlation.Records}}<tr><td>{{.Time.Format "2006-01-02 15:04:05"}}</td><td>{{.Sensor}}</td><td>{{.Summary}}</td></tr>{{end}}
+            </tbody></table>
+          </div>
+        </div>
+        <footer id="cidr-correlation-footer">xore//honeypot &bull; Elasticsearch-backed network correlation</footer>
+      </div>
+    </main>
+</div>
+</body>
+</html>{{end}}
 
 {{define "commands"}}<!doctype html>
 <html lang="en">

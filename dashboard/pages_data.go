@@ -171,6 +171,13 @@ type attackerPage struct {
 	Fingerprints []kv
 	Events       []storedEvent
 	Techniques   []attackTechnique
+	// Correlation is #354's "ask the backend for everything" answer --
+	// Elasticsearch-backed, so it includes portbridge tunnel connections
+	// (never visible here before) and history beyond the in-memory,
+	// log-tail-bounded Events above. Advisory only: Available is false
+	// (never blocks the page) whenever Elasticsearch is unconfigured or the
+	// query fails.
+	Correlation ipCorrelation
 }
 
 func (s *store) attackerData(ip string) (attackerPage, bool) {
@@ -240,6 +247,9 @@ func (s *store) attackerData(ip string) (attackerPage, bool) {
 		p.Fingerprints[i].Link = eventsURL(url.Values{"fingerprint": {fp}})
 	}
 	p.Techniques = aggregateTechniques(p.Events)
+	if s.es != nil {
+		p.Correlation = s.es.correlateIP(ip, 100)
+	}
 	return p, true
 }
 
