@@ -50,6 +50,10 @@ func main() {
 		"conpot":        getenv("CONPOT_LOG", "/logs/conpot/conpot.json"),
 		"dnp3":          getenv("DNP3_LOG", "/logs/dnp3/dnp3.json"),
 	}
+	// Suricata's eve.json is not a fixed path: it rotates hourly into a new
+	// eve-<timestamp>.json file (vps/suricata/suricata.yaml), so it needs
+	// tailer.pollGlob rather than a plain poll (#69).
+	suricataGlob := getenv("SURICATA_LOG_GLOB", "/logs/suricata/eve-*.json")
 
 	dataDir := getenv("REPORTER_DATA_DIR", "/data")
 	if err := os.MkdirAll(dataDir, 0o750); err != nil {
@@ -96,6 +100,9 @@ func main() {
 			if err := tailer.poll(path, func(line []byte) { proc.handle(sensor, line) }); err != nil {
 				log.Printf("reporter: polling %s (%s): %v", sensor, path, err)
 			}
+		}
+		if err := tailer.pollGlob(suricataGlob, func(line []byte) { proc.handle("suricata", line) }); err != nil {
+			log.Printf("reporter: polling suricata (%s): %v", suricataGlob, err)
 		}
 		time.Sleep(interval)
 	}

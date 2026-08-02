@@ -92,6 +92,57 @@ func TestTailerHandlesRotation(t *testing.T) {
 	}
 }
 
+// TestTailerPollGlobHandlesRotatingFilenames (#69): eve.json doesn't
+// rename-and-reopen at a fixed path the way #120's Go sensors do -- it
+// rotates by writing a brand new eve-<timestamp>.json file each time
+// (vps/suricata/suricata.yaml). pollGlob has to pick up a new file created
+// after the first poll, and never re-deliver a line already consumed from
+// an earlier file.
+func TestTailerPollGlobHandlesRotatingFilenames(t *testing.T) {
+	dir := t.TempDir()
+	st, err := openStore(filepath.Join(dir, "reported.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	tl := newTailer(st)
+	pattern := filepath.Join(dir, "eve-*.json")
+
+	if err := os.WriteFile(filepath.Join(dir, "eve-2026-08-01-00.json"), []byte("first-file-line\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	if err := tl.pollGlob(pattern, func(l []byte) { got = append(got, string(l)) }); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "first-file-line" {
+		t.Fatalf("first poll: got %v, want [first-file-line]", got)
+	}
+
+	// Re-polling with no new file/data must not re-deliver anything.
+	got = nil
+	if err := tl.pollGlob(pattern, func(l []byte) { got = append(got, string(l)) }); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("second poll with nothing new: got %v, want none", got)
+	}
+
+	// Suricata's own rotation: a brand new filename, not a rename of the
+	// old one. The old file must not be re-read; only the new file's line
+	// should come through.
+	if err := os.WriteFile(filepath.Join(dir, "eve-2026-08-01-01.json"), []byte("second-file-line\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got = nil
+	if err := tl.pollGlob(pattern, func(l []byte) { got = append(got, string(l)) }); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "second-file-line" {
+		t.Fatalf("after rotation to a new filename: got %v, want [second-file-line]", got)
+	}
+}
+
 func TestTailerMissingFileIsNotAnError(t *testing.T) {
 	dir := t.TempDir()
 	st, err := openStore(filepath.Join(dir, "reported.db"))
