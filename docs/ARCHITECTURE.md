@@ -344,7 +344,7 @@ The analysis layers serve different purposes:
 | Suricata | public-interface packets | signatures, protocol events, flows, rotating PCAP | IDS and network evidence |
 | EveBox | the `suricata-v2-*` indices | alert-focused UI over Elasticsearch | fast Suricata triage |
 | Arkime | closed PCAP files | indexed sessions plus retained packet files | full-packet search and payload inspection |
-| Dashboard correlation | normalized events and portbridge metadata | attacker profiles, sessions, clusters, campaigns, ATT&CK context | evidence-led behavioral investigation |
+| Dashboard correlation (see "Correlation and enrichment" below) | normalized events and portbridge metadata | attacker profiles, sessions, clusters, campaigns, ATT&CK context | evidence-led behavioral investigation |
 
 `pcap-sync` exists because remote SSHFS writes do not produce usable local
 inotify events: it skips the newest file because Suricata may still be writing
@@ -353,6 +353,149 @@ event it expects.
 
 EveBox needs no such sidecar. It queries the `suricata-v2-*` indices Filebeat
 already writes, so it holds no copy of the event data and nothing to outgrow.
+
+## Correlation and enrichment
+
+Enrichment adds signal to a single event as it's ingested — GeoIP, an OS
+guess, a protocol fingerprint. Correlation is a separate, later step: given
+one IP, hash, or shared attribute, find every other record that shares it.
+Nothing here is eager. Enrichment happens once per event at ingest time;
+correlation only runs when an analyst drills into a specific IP, CIDR, hash,
+or cluster — the dashboard's list views never pay for a correlation query
+just to render a row.
+
+```mermaid
+flowchart TB
+  subgraph sources["Raw signal sources"]
+    direction LR
+    cowrieKex["Cowrie: SSH KEX negotiation<br/>-> HASSH (MD5)"]
+    cowrieBanner["Cowrie: SSH client banner<br/>e.g. SSH-2.0-OpenSSH_7.9"]
+    suricataTLS["Suricata: TLS ClientHello<br/>-> JA3 / JA4"]
+    httpUA["HTTP honeypots:<br/>User-Agent, x-ja3/x-ja4 headers"]
+    p0fSock(("p0f API socket<br/>VPS, network_mode: host"))
+    geoMMDB[("GeoLite2 City/ASN MMDB<br/>+ local threat-CIDR list")]
+  end
+
+  subgraph vpsEnrich["VPS — per-connection, at portbridge"]
+    portbridge["portbridge"]
+    portbridge -->|"query over Unix socket,<br/>300ms timeout"| p0fSock
+    p0fSock -->|"OS guess only —<br/>uptime/distance/NAT discarded"| portbridge
+  end
+  portbridge -->|"'os' field in conn-log JSON"| connlog[("portbridge connection log<br/>SSHFS to home")]
+
+  subgraph esEnrich["Elasticsearch ingest pipeline (geoip-honeypot)"]
+    esPipeline["3 index templates:<br/>honeypot-*, suricata-*, portbridge-*"]
+    esPipeline --> esGeo["writes source.geo,<br/>source.as, destination.geo"]
+  end
+
+  subgraph dashEnrich["Dashboard live parser — per rebuild cycle"]
+    classify["classify() —<br/>extract fingerprint + fingerKind<br/>per event"]
+    viaMap["portbridge via-map join —<br/>recover real attacker IP,<br/>p0f OS as fallback fingerprint<br/>when no HASSH/JA3/UA"]
+    localGeo["dashboard/geoip.go —<br/>local MMDB lookup on the<br/>real (post-join) IP"]
+    classify --> viaMap --> localGeo
+  end
+
+  cowrieKex --> classify
+  cowrieBanner --> classify
+  suricataTLS --> classify
+  httpUA --> classify
+  connlog --> viaMap
+  connlog -->|"Filebeat tails live file only"| esPipeline
+  geoMMDB --> esEnrich
+  geoMMDB --> localGeo
+
+  subgraph correlate["On-demand correlation (drill-in only)"]
+    direction LR
+    ipCorr["IP / CIDR correlation<br/>ip_correlation.go"]
+    hashCorr["Hash correlation<br/>hash_correlation.go"]
+    clusterCorr["Cluster correlation<br/>intelligence.go"]
+  end
+
+  analyst(["Analyst drills into<br/>an IP, CIDR, hash, or cluster"])
+  analyst -.->|"bounded ES query,<br/>independent of the live view above"| ipCorr
+  esGeo -.-> ipCorr
+  analyst -.-> hashCorr
+  analyst -.-> clusterCorr
+  classify -.->|"fingerprint value"| clusterCorr
+  ipCorr -.->|"shared fingerprint / payload /<br/>ASN / provider-class"| clusterCorr
+  hashCorr -.->|"Ghidra + sandbox + GitHub-analysis<br/>results, plus ES sightings"| payloadsPage["/payloads,<br/>workbench banner"]
+  ipCorr --> ipPage["/investigate/ip/*,<br/>/investigate/cidr/*"]
+  clusterCorr --> clusterPage["/clusters,<br/>/investigate/cluster/*"]
+```
+
+**p0f runs on the VPS, not at home, and only an OS guess survives.** It has
+to run there: `portbridge` terminates every TCP connection and re-establishes
+its own toward the sensor, so a p0f instance running at home would only ever
+fingerprint portbridge's own outbound connections, never the attacker's.
+Suricata and p0f both open raw sockets on the VPS's public interface and the
+kernel copies packets to each independently. p0f runs in **API mode** — there
+is no p0f log file anywhere — and `portbridge` queries its Unix socket once
+per connection with a 300ms timeout. The full p0f response carries uptime,
+NAT detection, link type, and distance in hops, but `portbridge` keeps only
+the OS name/flavor string (e.g. `"Linux 3.11 and newer"`) and discards the
+rest; a failed or inconclusive query is silently an empty string, never an
+error that could block the connection. That OS guess becomes the `"os"`
+field of the portbridge connection-log record traveling home over SSHFS —
+the only place p0f data exists once it leaves the VPS.
+
+**Protocol fingerprints are read, not computed, by this stack.** HASSH (an
+MD5 of the SSH client's offered key-exchange/encryption/MAC/compression
+algorithms, in order) is computed by Cowrie itself from the `cowrie.client.kex`
+event and just read into `ev.fingerprint`; the SSH client version banner
+(`cowrie.client.version`, e.g. `SSH-2.0-OpenSSH_7.9`) is a second, independent
+SSH-side signal. JA3/JA4 (hashes of a TLS ClientHello's version, cipher list,
+extensions, and curves) come from Suricata's `eve.json` `tls.ja3`/`tls.ja4`
+fields, or from `x-ja3`/`x-ja4` HTTP headers where an upstream proxy already
+computed them. All four fingerprint kinds — HASSH, SSH client banner, JA3/JA4,
+and HTTP User-Agent — are normalized into the same `(fingerprint, fingerKind)`
+pair by the dashboard's `classify()`, which is what lets cluster correlation
+group "these 6 source IPs all presented the identical HASSH" the same way it
+groups shared payload hashes or shared ASNs. p0f's OS string is deliberately
+a **fallback fingerprint**, used only when a connection produced none of the
+above (a scanner that never completes a real protocol handshake still gets a
+fingerprint-shaped signal to correlate on).
+
+**GeoIP runs twice, independently, against the same MMDB files** — not one
+feeding the other. The Elasticsearch `geoip-honeypot` ingest pipeline enriches
+every document across all three index templates (`honeypot-*`, `suricata-*`,
+`portbridge-*`) as it's indexed, writing ECS `source.geo`/`source.as`/
+`destination.geo`; this is what backs Kibana's maps. The dashboard's live
+parser does its own local lookup (`dashboard/geoip.go`, no external API —
+the home server has no egress) against the same `GeoLite2-City`/`GeoLite2-ASN`
+MMDBs, plus a locally-refreshed threat-CIDR list for provider/scanner
+classification. The dashboard's lookup happens **after** the portbridge
+real-IP join, so it enriches the actual attacker address, never the tunnel
+peer.
+
+**Correlation is three separate, purpose-built queries, not one engine:**
+
+- **IP/CIDR correlation** (`dashboard/ip_correlation.go`) answers "what else
+  has this address (or CIDR) done": one bounded Elasticsearch query
+  (≤200-500 records) across `honeypot-*`, `suricata-*`, and `portbridge-*`
+  on drill-in, summarized into a sensor breakdown, tunnel-OS guesses, and a
+  record list. Never run for list-page rows — only `/investigate/ip/{ip}`
+  and `/investigate/cidr/{cidr}`.
+- **Hash correlation** (`dashboard/hash_correlation.go`) answers "is this
+  payload already known": checks Ghidra results, sandbox results, GitHub
+  code-search results, and an Elasticsearch sighting count, all keyed by
+  SHA-256 — plus MD5 as a second identifier, because Dionaea's own on-disk
+  naming is MD5, not SHA-256, and a SHA-256-only search would silently miss
+  every Dionaea capture. Purely advisory: surfaced as a "known elsewhere"
+  card on `/payloads` and the workbench, never blocks a submission.
+- **Cluster correlation** (`dashboard/intelligence.go`) answers "what
+  connects these attacks": groups source IPs that share one of four
+  attribute kinds — fingerprint (HASSH/JA3/JA4/UA/p0f-OS), payload hash,
+  ASN, or threat-intel provider class — keeping only groups with 2 or more
+  distinct source IPs. `/clusters` lists them; drilling into one re-runs IP
+  correlation across every member IP, deliberately unfiltered by the list
+  view's date/sensor bounds.
+
+None of this claims attacker identity. A shared HASSH means two connections
+used the same SSH client software, not the same operator; a shared ASN means
+the same network, not the same actor. Correlation output is meant to compress
+investigation effort, not to be the verdict itself — see "Analysis result
+interpretation" below for how this stack keeps that distinction explicit
+throughout.
 
 ## Captured payload lifecycle and static analysis
 
