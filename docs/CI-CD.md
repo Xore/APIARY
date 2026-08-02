@@ -130,6 +130,7 @@ these environment secrets:
 | `VPS_HOST` | VPS hostname or address |
 | `VPS_USER` | deployment user, normally `root` |
 | `VPS_PORT` | SSH port, normally `2222` |
+| `DOMAIN` | the real production domain (e.g. `example.com`), substituted into `traefik/dynamic.yml`'s committed `*.honeypot.example` placeholders at deploy time -- see below |
 
 The workflow preserves `/root/vps/.env`, synchronizes `vps/`, validates
 `docker-compose.yml`, and recreates changed services with plain Docker Compose.
@@ -149,41 +150,70 @@ The VPS job runs on a short-lived GitHub-hosted Ubuntu runner:
    `/root/vps-backups/pre-deploy-<timestamp>.tar.gz`, keeping the ten most
    recent archives.
 5. `rsync` sends only the repository's `vps/` directory over SSH to
-   `/root/vps/`.
+   `/root/vps/`, **excluding** `traefik/dynamic.yml` (see below).
 6. A second SSH command runs on the VPS, validates
    `/root/vps/docker-compose.yml`, and executes
    `docker compose up -d --build`.
-7. A verification step fails the job if the certificates or `dynamic.yml` are
+7. A dedicated step generates the deployable `traefik/dynamic.yml` --
+   substitutes `DOMAIN` for every `*.honeypot.example` placeholder in the
+   committed template -- and validates the result (parses as YAML, no
+   leftover placeholders) *before* it ever touches the VPS. Only then is it
+   copied to a temporary path on the VPS and written into the live file
+   in place with `cat` (see below for why not a plain copy/rename).
+8. A verification step fails the job if the certificates or `dynamic.yml` are
    missing, empty, unparseable, or still carry placeholder domains.
-8. GitHub destroys the hosted runner, including its temporary key file, after
+9. GitHub destroys the hosted runner, including its temporary key file, after
    the job.
 
 ### Files the VPS owns, not the repository
 
 `--delete-delay` removes destination files that no longer exist under the
 repository's `vps/` directory, and overwrites the ones that do. Three paths are
-therefore excluded from synchronization because the VPS copy is authoritative:
+therefore excluded from the main `rsync` because the VPS copy is authoritative
+(or, for `dynamic.yml`, because it needs different handling entirely):
 
-| Path | Why it is excluded |
+| Path | Why it is excluded from the main sync |
 |---|---|
 | `.env` | Secrets and host-specific values. |
 | `traefik/certs/` | Issued TLS certificates. They do not exist in the repository, so an unexcluded `--delete-delay` deletes them, and the workflow cannot reissue them. |
-| `traefik/dynamic.yml` | Carries the deployment's real domain. The committed copy is a `honeypot.example` placeholder, so copying it over the live file leaves every router matching a domain that no requests use. |
+| `traefik/dynamic.yml` | Carries the deployment's real domain. The committed copy is a `*.honeypot.example` placeholder -- Traefik's file provider has no `${VAR}`-style substitution the way docker-compose already gives every other host-specific value in this repo, so this file can't just be templated in place the normal way. Deployed by its own dedicated step instead (step 7 above), which substitutes `DOMAIN` and writes the result separately. |
 
-All three were lost or overwritten in a single `target: both` run before these
-exclusions existed: the certificates were deleted and Traefik fell back to
-self-signed, and every router silently stopped matching. Persistent VPS data
-must live in named volumes, bind mounts outside `/root/vps`, or one of the
-excluded paths above.
+The certificates were lost once, in a single `target: both` run before that
+exclusion existed: Traefik fell back to self-signed and every router silently
+stopped matching. Persistent VPS data must live in named volumes, bind mounts
+outside `/root/vps`, or one of the excluded paths above.
 
-When a routing change does need to reach production, edit
-`/root/vps/traefik/dynamic.yml` on the VPS directly — Traefik's file provider
-watches it and reloads without a restart.
+**`dynamic.yml` deploys with a plain in-place `cat`, never a copy-then-rename
+(`scp`'s default, `rsync`, or `mv`).** Traefik's compose service bind-mounts
+this file at a single path
+(`traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro`), which Docker binds to the
+*specific inode* present when the container started, not the path. A
+rename-based replacement repoints the host path at a new inode while the
+already-running container keeps reading the orphaned old one -- silently, with
+no error of any kind, and every host-side check (`cat`, `diff`) shows the new
+content as correct anyway. This broke production once already, recovered only
+by noticing the container's own view (`docker exec traefik cat
+/etc/traefik/dynamic.yml`) disagreed with the host file. If you ever need to
+edit this file by hand instead of through the workflow (a *structural* router
+change, not just a domain difference -- see below), always write in place
+(`cat new > /root/vps/traefik/dynamic.yml`) and never `mv`/rename a
+replacement into it; `docker compose restart traefik` is the reliable recovery
+if a stale-inode mismatch ever happens anyway.
+
+Routine deploys need no manual step for this file at all now -- the workflow
+regenerates and redeploys it from the committed template plus `DOMAIN` every
+run. A structural change (a new router, a new middleware) still needs the
+*template* (`vps/traefik/dynamic.yml` in the repository) edited, committed, and
+deployed the normal way; only the domain substitution itself is automatic.
+Traefik's file provider watches the live file and reloads on any change with
+no restart needed, whether that change came from the workflow or a manual
+edit.
 
 The SSH key is the direct production credential in this path. Restrict it to
 the intended VPS, keep it in the protected environment rather than repository
 secrets where possible, and require environment approval before the job can
-read it.
+read it. `DOMAIN` is not itself sensitive (it is public DNS), but keep it in
+the same protected environment as the other VPS secrets for consistency.
 
 ## Diagnostics
 
