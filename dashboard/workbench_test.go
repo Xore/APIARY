@@ -427,6 +427,27 @@ func TestWorkbenchTemplateAndScriptUseEscapedDOMSinks(t *testing.T) {
 	}
 }
 
+// TestWorkbenchRunButtonGivesImmediateFeedback (#349): the "Start analysis
+// run" button only disabled itself on click, with no visible state change
+// and no status message until the fetch resolved -- indistinguishable from
+// the click not registering at all if the request took more than an instant
+// (the workbench results page's reconcile lock, #348, could make it take up
+// to ~30s). The submit handler must post a status message and swap the
+// button's own label to a busy state before the fetch starts, not after.
+func TestWorkbenchRunButtonGivesImmediateFeedback(t *testing.T) {
+	body, err := os.ReadFile("static/hp-workbench.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(body)
+	if !strings.Contains(source, `say("Submitting analysis run…")`) {
+		t.Fatal(`submitting the workbench run form must post an immediate status message before the fetch starts`)
+	}
+	if !strings.Contains(source, `withBusyButton(button, "Starting…"`) {
+		t.Fatal(`the Start analysis run button must switch to a visible busy label while the request is in flight, not just disable`)
+	}
+}
+
 // The workbench results list renders as a .project-grid/.project-card grid
 // (#227, following #221/#226), not one full-width card per run with a
 // nested per-analyzer table. Each card links to /payload-workbench/{sha} --
