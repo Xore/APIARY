@@ -127,10 +127,26 @@ func main() {
 		getenv("DASHBOARD_REPORTS_DIR", "/state/reports"),
 	)
 	s.workbench = newWorkbenchService(getenv("ANALYSIS_WORKBENCH_DIR", "/state/analysis-workbench"))
-	s.rebuild()
-	go s.notifyLoop(os.Getenv("ALERT_WEBHOOK_URL"))
-	go s.reportScheduleLoop()
+	// #353: rebuild() walks every log file under LOG_DIR and used to run
+	// synchronously here, before any route was even registered -- the
+	// process refused every connection, including /healthz, until that
+	// first full walk finished (confirmed live: tens of seconds on a
+	// busy host, sometimes flapping the container's own healthcheck into
+	// "unhealthy" and triggering an unwanted autoheal restart). Every
+	// s.get()/s.getEvents() call in the handlers registered below already
+	// runs per-request, not at init time, so there is nothing here that
+	// actually needs the first rebuild to have completed -- a request
+	// arriving before it finishes just sees the zero-value snapshot
+	// (empty lists, zero counts) for a few seconds instead of the
+	// connection being refused outright. notifyLoop's baseline pass is the
+	// one real dependency (it must not alert on campaigns that already
+	// existed at boot), so it stays sequenced after the first rebuild by
+	// launching from inside the same goroutine rather than being
+	// independently backgrounded.
 	go func() {
+		s.rebuild()
+		go s.notifyLoop(os.Getenv("ALERT_WEBHOOK_URL"))
+		go s.reportScheduleLoop()
 		for range time.Tick(15 * time.Second) {
 			s.rebuild()
 		}

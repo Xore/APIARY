@@ -287,3 +287,33 @@ func TestEveryFullPageRouteUsesRenderPage(t *testing.T) {
 		}
 	}
 }
+
+// TestFirstRebuildDoesNotBlockServerStartup (#353): rebuild() walks every
+// log file under LOG_DIR and used to run synchronously in main(), before
+// any route was registered or ListenAndServe was reached -- the process
+// refused every connection, including /healthz, until that first full walk
+// finished (confirmed live: tens of seconds on a busy host, occasionally
+// long enough to flap the container's own healthcheck into "unhealthy" and
+// trigger an unwanted autoheal restart). Every handler that reads
+// s.get()/s.getEvents() already does so per-request, not at init time, so
+// nothing between rebuild() and ListenAndServe() actually needs the first
+// rebuild to have completed. main() itself isn't unit-testable (it starts a
+// real listener and never returns), so this pins the structural fix
+// instead: s.rebuild()'s first call must be backgrounded, not a top-level
+// blocking statement.
+func TestFirstRebuildDoesNotBlockServerStartup(t *testing.T) {
+	body, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	if strings.Contains(src, "\ts.rebuild()\n\tgo s.notifyLoop") {
+		t.Fatal("main() calls s.rebuild() synchronously before registering routes -- " +
+			"this blocks the server from accepting any connection, including /healthz, " +
+			"until the first full log-directory walk completes")
+	}
+	if !strings.Contains(src, "go func() {\n\t\ts.rebuild()\n\t\tgo s.notifyLoop") {
+		t.Fatal("the first rebuild() call must be backgrounded (inside a goroutine) so " +
+			"route registration and ListenAndServe are never blocked by it")
+	}
+}
