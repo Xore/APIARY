@@ -1,0 +1,49 @@
+name: VPS - start blackhole compose profile
+
+# #268: docker-compose.yml's `blackhole` profile (portbridge-blackhole-refresh)
+# is deliberately opt-in -- `deploy.yml`'s vps job runs a plain
+# `docker compose up -d --build` with no --profile flag, so it never starts
+# profile-gated services. This is the one-time action that actually turns the
+# feature on, kept as its own narrowly-scoped workflow rather than widening
+# deploy.yml or adding a generic "run any command on the VPS" workflow -- the
+# blast radius of this workflow is exactly "start this one named profile",
+# nothing else.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: honeypot-production
+  cancel-in-progress: false
+
+jobs:
+  start-blackhole-profile:
+    runs-on: ubuntu-latest
+    environment: production-vps
+    steps:
+      - name: Configure deployment key
+        shell: bash
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/honeypot_vps
+          chmod 600 ~/.ssh/honeypot_vps
+      - name: Start the blackhole profile
+        shell: bash
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+        run: |
+          ssh_options=(-i ~/.ssh/honeypot_vps -p "${VPS_PORT:-2222}" -o StrictHostKeyChecking=accept-new)
+          # Named target (not a bare `--profile blackhole up -d`): Compose's
+          # profile flag also re-evaluates every profile-less service in the
+          # file, and `up -d` only recreates what actually changed -- but
+          # naming the one service this workflow exists to start keeps its
+          # blast radius exactly that, with no reliance on Compose's diffing
+          # to leave everything else untouched.
+          ssh "${ssh_options[@]}" "${VPS_USER:-root}@${VPS_HOST}" \
+            'cd /root/vps && docker compose -f docker-compose.yml --profile blackhole up -d portbridge-blackhole-refresh && docker compose -f docker-compose.yml ps portbridge-blackhole-refresh'
