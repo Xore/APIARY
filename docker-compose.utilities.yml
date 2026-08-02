@@ -1,0 +1,178 @@
+# honeypot-utilities — #258: log-maintenance, autoheal, and reporter split
+# into their own Dockge stack. Unlike every other #258 split so far, these
+# three don't belong to one honeypot family -- they watch/act across the
+# whole host:
+#   log-maintenance  rotates every sensor's logs under logs/ and prunes
+#                     self-rotating JSON streams past retention
+#   autoheal          restarts any container across ANY Compose project that
+#                     carries label autoheal=true, daemon-wide -- not scoped
+#                     to a project the way `docker compose restart` is. Today
+#                     that includes the six conpot personas
+#                     (docker-compose.conpot.yml), elasticsearch, and
+#                     tanner_docker/tanner_redis (docker-compose.yml and
+#                     docker-compose.tanner.yml respectively) -- confirmed by
+#                     grepping every compose file for autoheal=true, not
+#                     assumed. Needs no changes for any of #258's splits:
+#                     it watches Docker directly via docker.sock by label,
+#                     never by Compose project.
+#   reporter          tails every sensor's JSON logs (bind mount, not
+#                     honeynet) and would report attacker IPs to AbuseIPDB
+#                     once explicitly authorized (#68); ships dry-run by
+#                     default
+# None of the three share a named Docker volume or network with anything
+# else in another stack, so this is a low-risk split, same shape as
+# conpot/cowrie/etc: absolute build/bind-mount paths, own volumes where
+# still needed, nothing declared external or explicitly shared. Deployed as
+# /opt/stacks/honeypot-utilities.
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  # Rotate verbose human-readable sensor logs (copytruncate, keeps writers
+  # alive without mounting Docker's socket) and, per #120, prune JSON event
+  # streams that now rotate themselves natively (cowrie, multipot,
+  # http-honeypot/api-honeypot) once the renamed files age past retention.
+  # The live JSON files this container never touches directly: Filebeat
+  # inode/offset tracking and dashboard ingestion require them to stay open
+  # and in place.
+  log-maintenance:
+    <<: *runtime-defaults
+    image: busybox:1.36
+    container_name: hp-log-maintenance
+    restart: unless-stopped
+    # #127: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism).
+    command:
+      - sh
+      - -c
+      - >
+        until [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec sh /usr/local/bin/log-maintenance.sh
+    environment:
+      - MAX_LOG_BYTES=268435456
+      - CHECK_INTERVAL=300
+      - ROTATIONS=4
+      - START_DELAY=120
+      - JSON_RETENTION_MINUTES=4320
+    volumes:
+      - /opt/stacks/honeypot-stack/analysis/log-maintenance.sh:/usr/local/bin/log-maintenance.sh:ro
+      - /opt/stacks/honeypot-stack/logs:/logs
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+    networks:
+      - honeynet
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+
+  # This is the one service in this stack with the real host
+  # /var/run/docker.sock, and that is deliberate, not casual: tanner_docker
+  # (docker-compose.tanner.yml) looks similar but is not the same trust
+  # boundary -- it runs its own disposable nested Docker daemon and never
+  # touches the host socket. To keep this exception as narrow as
+  # tanner_docker's, autoheal only acts on containers explicitly labeled
+  # autoheal=true (the image's default behavior; AUTOHEAL_CONTAINER_LABEL is
+  # set below anyway so that scope is visible here rather than relying on an
+  # unstated default).
+  #
+  # A healthcheck alone does not restart anything: Docker's restart policy
+  # reacts to the container process exiting, not to health status, so an
+  # unhealthy-but-still-running container just sits there marked unhealthy
+  # forever. Verified empirically while fixing #111 -- a plain
+  # restart: unless-stopped container that fails its healthcheck accrues zero
+  # restarts. This is the actual missing piece.
+  autoheal:
+    <<: *runtime-defaults
+    image: willfarrell/autoheal:1.2.0
+    container_name: hp-autoheal
+    restart: unless-stopped
+    environment:
+      - AUTOHEAL_CONTAINER_LABEL=autoheal
+      - AUTOHEAL_INTERVAL=30
+      - AUTOHEAL_START_PERIOD=60
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    security_opt:
+      - no-new-privileges:true
+    # Talks to the Docker daemon over docker.sock only -- confirmed no other
+    # network need (its job is entirely "watch container health via the
+    # socket, restart the labeled ones"). Also sidesteps this host's
+    # address-pool exhaustion the same way services-adapter's network_mode:
+    # none did in docker-compose.dashboard.yml: both default pools (16
+    # /16 chunks in 172.16.0.0/12, 16 /20 chunks in 192.168.0.0/16) were
+    # down to their last free chunk by the time this stack was split out,
+    # each new project's implicit default network eating one more.
+    network_mode: none
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
+
+  # #68 (Phase 1 of docs/ip-reporting-plan.md): tails the same sensor JSON
+  # logs Filebeat does, and would report attacker IPs to AbuseIPDB. Ships
+  # dry-run by default (no REPORTER_LIVE, no ABUSEIPDB_API_KEY below) --
+  # per WORK-LEDGER.md rule 7, production reporting needs separate explicit
+  # authorization after a sampled false-positive review of dry-run output.
+  # reporter/dryrun_test.go proves this is unable to reach the network in
+  # that state, not just configured not to.
+  reporter:
+    <<: *runtime-defaults
+    build: /opt/stacks/honeypot-stack/reporter
+    container_name: hp-reporter
+    restart: unless-stopped
+    # Root, same reasoning as filebeat (docker-compose.elk.yml): every
+    # sensor's JSON log is 0640, owned by that sensor's own UID, no "other"
+    # read bit. A fixed non-root UID could read none of them. Numeric "0:0",
+    # not the string "root": this image is FROM scratch (Dockerfile) with no
+    # /etc/passwd for Docker to resolve a username against -- confirmed
+    # live, "user: root" here failed with "unable to find user root: no
+    # matching entries in passwd file".
+    user: "0:0"
+    environment:
+      - REPORTER_LIVE=${REPORTER_LIVE:-}
+      - ABUSEIPDB_API_KEY=${ABUSEIPDB_API_KEY:-}
+      - REPORTER_COOLDOWN_HOURS=${REPORTER_COOLDOWN_HOURS:-24}
+      - REPORTER_MIN_EVENTS=${REPORTER_MIN_EVENTS:-3}
+      - REPORTER_POLL_SECONDS=30
+    volumes:
+      - /opt/stacks/honeypot-stack/logs:/logs:ro
+      - reporter-data:/data
+      - /opt/stacks/honeypot-stack/reporter/whitelist.txt:/config/whitelist.txt:ro
+    # Deliberately not on honeynet: this container has no legitimate reason
+    # to reach any other container on that network, only to read log files
+    # (bind mount, not network) and -- once live -- reach AbuseIPDB over the
+    # public internet, which the default bridge network already provides.
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_READ_SEARCH
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+
+networks:
+  # Shared with the main stack -- explicit fixed name, not project-prefixed,
+  # non-external. log-maintenance is the only service here that touches it
+  # (it doesn't actually reach any peer over it, but preserves the
+  # pre-split behavior unchanged rather than dropping a network membership
+  # as a side effect of this split).
+  honeynet:
+    name: honeynet
+    driver: bridge
+
+volumes:
+  # Private to this stack -- nothing else references reporter-data
+  # (confirmed by grep across every compose file). Unnamed/project-scoped,
+  # same as it was in the monolithic compose file.
+  reporter-data: null

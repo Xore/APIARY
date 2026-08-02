@@ -46,6 +46,20 @@ state, synchronizes the repository, writes Dockge's authoritative
 Require a manual reviewer on `production-home`; never accept pull-request code
 on this production runner.
 
+Each #258 split adds at least one new Docker bridge network (a project's
+implicit default network, or an explicit private one like `dionaea_net`).
+The homeserver's own Docker daemon exhausted its built-in default address
+pools (`172.16.0.0/12` and `192.168.0.0/16`) partway through this split --
+every one of the ~30 pre-existing Compose projects on that host already
+claimed a chunk. Fixed once, at the host level, not per-stack: `/etc/docker/
+daemon.json` now sets `"default-address-pools": [{"base": "10.96.0.0/12",
+"size": 24}]` (4096 possible /24 subnets, chosen not to overlap the
+existing `10.8.0.0/24` WireGuard tunnel or `10.10.10.0/24` sandbox network),
+applied with `systemctl restart docker`. Not something this repository's
+CI can apply -- if a fresh homeserver ever exhausts its own default pools
+again, the fix is the same `daemon.json` edit plus a daemon restart, not a
+per-stack workaround.
+
 ### How files reach the homeserver
 
 The home job runs **on the homeserver itself**. GitHub does not open an inbound
@@ -169,6 +183,23 @@ this section (`dionaea`, `payload-dedupe`, `yara-scanner`, and the Tanner
 group) remains in `honeypot-stack` -- each is either the volume *owner*
 `dashboard` merely reads from, or part of a `depends_on` chain (Tanner) not
 yet worth splitting.
+
+### honeypot-utilities (#258)
+
+`docker-compose.utilities.yml` runs as its own Dockge stack at
+`/opt/stacks/honeypot-utilities`, bundling `log-maintenance`, `autoheal`,
+and `reporter` -- the first #258 split that isn't one honeypot family. All
+three watch or act across the whole host rather than belonging to a single
+sensor: `log-maintenance` rotates every sensor's logs, `autoheal` restarts
+any container across *any* Compose project carrying the `autoheal=true`
+label (it watches Docker directly via `docker.sock` by label, daemon-wide,
+so it needed no changes for this or any earlier #258 split), and `reporter`
+tails every sensor's JSON log to (eventually, once explicitly authorized)
+report attacker IPs to AbuseIPDB.
+
+None of the three share a named volume or network with anything outside
+this stack, so -- like the standalone honeypots -- it deploys ahead of
+`honeypot-stack` with no ordering requirement.
 
 ## VPS deployment
 
