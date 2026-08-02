@@ -14,8 +14,14 @@ import (
 type event struct {
 	IP     string
 	Sensor string
-	Kind   string // "login", "command", "download", "scan" -- feeds category mapping
-	When   time.Time
+	// Kind feeds categorize.go's category mapping. For every honeypot
+	// sensor this is one of "login", "command", "download", "scan". For
+	// "suricata" (#69) it's instead the alert's own Suricata classification
+	// category text verbatim (e.g. "Potentially Bad Traffic") -- a larger
+	// but equally fixed vocabulary, straight from Suricata's own
+	// classification.config, not a honeypot-specific coarse verb.
+	Kind string
+	When time.Time
 }
 
 // ipOf hunts for a source address across the field names honeypot sensors
@@ -79,7 +85,11 @@ func timeOf(e map[string]any) time.Time {
 		if v == "" {
 			continue
 		}
-		for _, layout := range []string{time.RFC3339, time.RFC3339Nano, "2006-01-02 15:04:05"} {
+		for _, layout := range []string{time.RFC3339, time.RFC3339Nano, "2006-01-02 15:04:05",
+			// Suricata's eve.json timestamp (#69): a numeric, colon-less zone
+			// offset ("+0200"), which none of the layouts above accept --
+			// confirmed directly: RFC3339/RFC3339Nano both require "+02:00".
+			"2006-01-02T15:04:05.999999-0700"} {
 			if t, err := time.Parse(layout, v); err == nil {
 				return t
 			}
@@ -95,9 +105,37 @@ func parseEvent(sensor string, line []byte) (event, bool) {
 	if err := json.Unmarshal(line, &raw); err != nil {
 		return event{}, false
 	}
+	if sensor == "suricata" {
+		return parseSuricataEvent(raw)
+	}
 	ip := ipOf(raw)
 	if ip == "" {
 		return event{}, false
 	}
 	return event{IP: ip, Sensor: sensor, Kind: kindOf(raw), When: timeOf(raw)}, true
+}
+
+// parseSuricataEvent handles eve.json's shape (#69), which looks nothing
+// like a honeypot sensor's own log line: "event_type" names one of several
+// unrelated record kinds (alert, http, dns, tls, flow, fileinfo, stats, ...),
+// most of them multiple orders of magnitude more numerous than actual
+// alerts and none of them reportable on their own -- an http/dns/flow
+// record is routine protocol telemetry, not evidence of abuse. Only
+// "alert" is ever reportable, and ok=false for everything else (not an
+// audit-worthy skip, the same "no IP at all" treatment ipOf's own miss
+// gets, since logging a "skipped: uncategorized" entry for every routine
+// flow/dns/http record here would swamp the audit log with noise -- eve.json
+// is dominated by exactly those record types on this deployment, confirmed
+// against real capture files).
+func parseSuricataEvent(raw map[string]any) (event, bool) {
+	if eventType, _ := raw["event_type"].(string); eventType != "alert" {
+		return event{}, false
+	}
+	ip := ipOf(raw)
+	if ip == "" {
+		return event{}, false
+	}
+	alert, _ := raw["alert"].(map[string]any)
+	category, _ := alert["category"].(string)
+	return event{IP: ip, Sensor: "suricata", Kind: category, When: timeOf(raw)}, true
 }

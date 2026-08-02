@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"io"
 	"os"
+	"path/filepath"
 	"syscall"
 )
 
@@ -87,6 +88,29 @@ func (t *tailer) poll(path string, fn func(line []byte)) error {
 	// at the last successfully consumed line -- save progress rather than
 	// losing it, and let the next poll retry from there.
 	return t.st.saveTailOffset(path, inode, offset)
+}
+
+// pollGlob is poll's counterpart for a sensor whose log rotates by creating
+// a brand new file rather than rename-and-reopen at a fixed path -- eve.json
+// (#69): Suricata rotates it hourly into eve-<timestamp>.json (see
+// vps/suricata/suricata.yaml), a new filename each time, not the same path
+// growing forever. poll's own per-path inode/offset tracking already
+// handles this correctly with zero new store schema: each distinct
+// eve-*.json filename is naturally its own key, so a file that stops
+// growing (rotated out) is simply never touched again, and a newly created
+// one starts fresh from byte 0 the first time this glob picks it up.
+func (t *tailer) pollGlob(pattern string, fn func(line []byte)) error {
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return err
+	}
+	var firstErr error
+	for _, path := range matches {
+		if err := t.poll(path, fn); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 func inodeOf(fi os.FileInfo) uint64 {
