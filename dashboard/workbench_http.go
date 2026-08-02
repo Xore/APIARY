@@ -275,7 +275,7 @@ func (s *store) serveWorkbenchRuns(w http.ResponseWriter, r *http.Request) {
 			}
 			runs := s.workbench.listRuns(hash, identity.Subject)
 			for index := range runs {
-				runs[index] = s.reconcileWorkbenchRun(runs[index])
+				runs[index], _ = s.reconcileWorkbenchRun(runs[index])
 			}
 			writeWorkbenchJSON(w, http.StatusOK, map[string]any{"runs": runs})
 		case http.MethodPost:

@@ -330,6 +330,45 @@ func TestWorkbenchResultsAreSearchableAndOwnerIsolated(t *testing.T) {
 	}
 }
 
+// TestReconcileWorkbenchRunSkipsWorkOnceEveryChildIsTerminal (#348):
+// getWorkbenchRun called reconcileWorkbenchRun -- four full result-directory
+// scans -- and persisted the run back to disk on every single call, even for
+// runs whose children were all long finished and could never change again.
+// A results-listing page with hundreds of historical runs paid that cost on
+// every view, confirmed live as a ~30s hang. reconcileWorkbenchRun must skip
+// the scans once every child is terminal, and getWorkbenchRun must skip the
+// redundant disk write when nothing changed.
+func TestReconcileWorkbenchRunSkipsWorkOnceEveryChildIsTerminal(t *testing.T) {
+	s, _ := newWorkbenchFixture(t, []byte("payload"))
+	run, _, err := s.createWorkbenchRun(workbenchRunRequest{PayloadSHA256: workbenchTestHash, Analyzers: deterministicSelection()}, "owner-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.State != "completed" {
+		t.Fatalf("fixture run must already be all-terminal, got state %q", run.State)
+	}
+
+	if reconciled, changed := s.reconcileWorkbenchRun(run); changed {
+		t.Fatalf("reconcile of an all-terminal run reported changed=true, should be a no-op: %+v", reconciled)
+	}
+
+	runPath := filepath.Join(s.workbench.runsDir(), run.ID+".json")
+	before, err := os.Stat(runPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.getWorkbenchRun(run.ID, "owner-a"); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(runPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !before.ModTime().Equal(after.ModTime()) {
+		t.Fatalf("getWorkbenchRun rewrote an unchanged all-terminal run to disk: mtime %v -> %v", before.ModTime(), after.ModTime())
+	}
+}
+
 func TestWorkbenchTimeoutAndOwnerIsolation(t *testing.T) {
 	s, root := newWorkbenchFixture(t, []byte("MZ"+strings.Repeat("\x00", 200)))
 	requests, results := filepath.Join(root, "ghidra-requests"), filepath.Join(root, "ghidra-results")
