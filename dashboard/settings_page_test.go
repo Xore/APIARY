@@ -143,6 +143,11 @@ func TestSettingsControllerContract(t *testing.T) {
 		"/api/settings/config/history",
 		"/api/settings/users",
 		"/api/settings/audit",
+		// #257: Elasticsearch history and dead-letters moved into admin-only
+		// panes, reusing the same endpoints the standalone pages used.
+		"/api/history",
+		"/api/dead-letters",
+		"/export/history.json",
 		"restart-required", // staged impact is confirmed explicitly
 		"(environment)",    // env-pinned fields show their source
 		"data-cfg",         // admin controls are keyed by data-cfg
@@ -179,8 +184,12 @@ func TestSettingsAdminPanesAreServerGated(t *testing.T) {
 	for _, want := range []string{
 		`data-hp-pane-nav="branding"`, `data-hp-pane-nav="behavior"`, `data-hp-pane-nav="honeypot"`,
 		`data-hp-pane-nav="users"`, `data-hp-pane-nav="services"`, `data-hp-pane-nav="history"`, `data-hp-pane-nav="audit"`,
+		`data-hp-pane-nav="elasticsearch"`, `data-hp-pane-nav="dead-letters"`,
 		`data-hp-pane="branding"`, `data-hp-pane="behavior"`, `data-hp-pane="honeypot"`,
 		`data-hp-pane="users"`, `data-hp-pane="services"`, `data-hp-pane="history"`, `data-hp-pane="audit"`,
+		`data-hp-pane="elasticsearch"`, `data-hp-pane="dead-letters"`,
+		`hp-es-history-results`, `hp-es-history-run`, `hp-es-history-export`,
+		`hp-dead-letters-rows`, `hp-dead-letters-run`, `hp-dead-letters-purge`,
 		`data-cfg="presentation.app_name"`, `data-cfg="presentation.help_link_url"`,
 		`data-cfg="presentation.banner_severity"`, `data-cfg="presentation.ai_disclaimer"`,
 		`data-cfg="behavior.default_landing"`, `data-cfg="behavior.rows_per_page_options"`,
@@ -203,6 +212,8 @@ func TestSettingsAdminPanesAreServerGated(t *testing.T) {
 		`data-hp-pane-nav="branding"`, `data-hp-pane="branding"`, `data-cfg=`,
 		`data-hp-users-list`, `data-hp-history-list`, `data-hp-audit-list`,
 		`data-hp-services-list`,
+		`data-hp-pane-nav="elasticsearch"`, `data-hp-pane="elasticsearch"`,
+		`data-hp-pane-nav="dead-letters"`, `data-hp-pane="dead-letters"`,
 		`Administration`,
 	} {
 		if strings.Contains(user, absent) {

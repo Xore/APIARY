@@ -570,11 +570,21 @@ func TestSemanticShellIsServerRendered(t *testing.T) {
 	// in this "always present" list.
 	for _, route := range []string{
 		"/", "/source-health", "/alerts", "/events", "/ips", "/campaigns",
-		"/clusters", "/commands", "/payloads", "/sandbox", "/history", "/dead-letters",
+		"/clusters", "/commands", "/payloads", "/sandbox",
 		"/reports",
 	} {
 		if !strings.Contains(html, `data-hp-nav="`+route+`" href="`+route+`"`) {
 			t.Fatalf("rendered shell is missing navigation route %q", route)
+		}
+	}
+	// #257: Elasticsearch history and ingest dead letters moved out of the
+	// primary Evidence nav into admin-only Settings panes -- ops/pipeline
+	// diagnostics, not analyst investigation evidence. The routes themselves
+	// still work (source-health and search link into them with specific
+	// queries/metrics), just no longer as standalone sidebar items.
+	for _, route := range []string{"/history", "/dead-letters"} {
+		if strings.Contains(html, `data-hp-nav="`+route+`" href="`+route+`"`) {
+			t.Fatalf("rendered shell still carries the removed sidebar nav route %q", route)
 		}
 	}
 	if strings.Contains(html, `data-hp-nav="/ml-anomalies"`) {

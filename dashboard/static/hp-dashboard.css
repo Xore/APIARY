@@ -457,7 +457,8 @@ a.project-card { display: block; color: inherit; text-decoration: none; }
    several lines. */
 #ghidra-results .project-card__title,
 #sandbox-results .project-card__title,
-#wb-select-results .project-card__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-caption); }
+#wb-select-results .project-card__title,
+#github-analysis-results .project-card__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-size-caption); }
 /* A payload's SHA-256 title is a real <a> here (not the whole card --
    payload cards have several distinct actions, so they cannot be one big
    link; see the "payloadrow" template comment), but is otherwise the same
