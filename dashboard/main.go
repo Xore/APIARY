@@ -335,6 +335,19 @@ func main() {
 		}
 		renderPage(w, tmpl, "attacker", &data)
 	})
+	http.HandleFunc("/investigate/cidr/", func(w http.ResponseWriter, r *http.Request) {
+		cidr, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/investigate/cidr/"))
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		data, ok := s.cidrCorrelationData(cidr)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		renderPage(w, tmpl, "cidr-correlation", &data)
+	})
 	http.HandleFunc("/sessions/", func(w http.ResponseWriter, r *http.Request) {
 		id, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/sessions/"))
 		if err != nil {

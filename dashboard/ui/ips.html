@@ -97,6 +97,7 @@
           <div class="metric"><div class="metric__value">{{.Total}}</div><div class="metric__label">Events</div></div>
           <div class="metric"><div class="metric__value">{{.Sessions}}</div><div class="metric__label">Sessions</div></div>
           <div class="metric"><div class="metric__value">{{.PayloadCount}}</div><div class="metric__label">Payload observations</div></div>
+          {{if .Correlation.Available}}<div class="metric"><div class="metric__value">{{.Correlation.TunnelConnections}}</div><div class="metric__label">Tunnel connections (ES)</div></div>{{end}}
         </div>
 
         <div class="tw:grid tw:grid-cols-12 tw:gap-3.5" id="attacker-grid">
@@ -108,6 +109,16 @@
           {{template "tbl" (dict "t" "Alerts" "rows" .Alerts "class" "half" "hint" "none")}}
           {{template "tbl" (dict "t" "Fingerprints" "rows" .Fingerprints "class" "half" "hint" "none")}}
           {{template "techniques" .Techniques}}
+          {{if .Correlation.Available}}
+          <div class="card wide" id="attacker-correlation">
+            <h2>Elasticsearch correlation</h2>
+            <p class="note">#354: everything the backend has seen for this IP across honeypot, Suricata, and portbridge tunnel records &mdash; not limited to the in-memory window the tables above draw from.{{if .Correlation.Truncated}} Showing the {{len .Correlation.Records}} most recent of {{.Correlation.Total}} total matches.{{end}}</p>
+            {{if .Correlation.TunnelOSGuesses}}<p><strong>p0f OS guesses seen over this tunnel:</strong> {{range $i, $os := .Correlation.TunnelOSGuesses}}{{if $i}}, {{end}}{{$os}}{{end}}</p>{{end}}
+            <table class="recent data-table"><thead><tr><th>time</th><th>sensor</th><th>summary</th></tr></thead><tbody>
+              {{range .Correlation.Records}}<tr><td>{{.Time.Format "2006-01-02 15:04:05"}}</td><td>{{.Sensor}}</td><td>{{.Summary}}</td></tr>{{end}}
+            </tbody></table>
+          </div>
+          {{end}}
           <div class="card wide"><h2>Attack progression</h2><p class="note">Chronological, oldest to newest; capped to the latest 250 matching records.</p><table class="recent data-table"><thead><tr><th>time</th><th>sensor</th><th>source</th><th>port</th><th>detail</th></tr></thead><tbody>{{range .Events}}{{template "everow" .}}{{end}}</tbody></table></div>
         </div>
 

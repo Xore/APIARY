@@ -717,7 +717,7 @@ func TestRouteTemplatesRenderFromEmbeddedUI(t *testing.T) {
 		"events.html":                  {"everow", "eventrows", "events"},
 		"ips.html":                     {"iprow", "iprows", "ips", "attacker"},
 		"session.html":                 {"session"},
-		"intel.html":                   {"clusters", "campaigns", "campaignrows", "commands"},
+		"intel.html":                   {"clusters", "campaigns", "campaignrows", "cidr-correlation", "commands"},
 		"payloads.html":                {"payloadrow", "payloadrows", "payloads", "payload-analysis"},
 		"payload_workbench.html":       {"payload-workbench-index", "workbench-results", "payload-workbench"},
 		"sandbox.html":                 {"sandbox"},
