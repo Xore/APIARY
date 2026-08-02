@@ -14,8 +14,13 @@ func categories(sensor, kind string) []int {
 	case sensor == "dionaea" && kind == "download":
 		return []int{20} // Malware
 	case sensor == "http-honeypot" || sensor == "api-honeypot":
-		if kind == "scan" {
+		switch kind {
+		case "scan":
 			return []int{21} // Web App Attack
+		case "login":
+			return []int{18} // Brute-Force -- a fake web login form credential
+			// attempt, same underlying abuse as cowrie's SSH login (#68 review
+			// found this combination falling through to nil/unreported).
 		}
 	case sensor == "multipot":
 		return []int{14} // Port Scan

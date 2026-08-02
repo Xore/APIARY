@@ -67,4 +67,10 @@ func TestCategoriesConservativeByDefault(t *testing.T) {
 	if cats := categories("cowrie", "login"); len(cats) == 0 {
 		t.Fatal("cowrie login should map to at least one category")
 	}
+	// Found during #68's dry-run review: a real http-honeypot "login" event
+	// (a fake web login form credential attempt) was falling through to nil
+	// -- categorize.go had a case for http-honeypot "scan" but not "login".
+	if cats := categories("http-honeypot", "login"); len(cats) == 0 {
+		t.Fatal("http-honeypot login should map to at least one category")
+	}
 }
