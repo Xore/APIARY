@@ -3,6 +3,7 @@ package main
 import (
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // #280: /clusters gained the same query-string filtering /events already
@@ -39,5 +40,47 @@ func TestClustersDataUnfilteredCallSiteStaysUnfiltered(t *testing.T) {
 	page := s.clustersData(filter{})
 	if len(page.Rows) != 1 || page.Rows[0].Sources != 2 {
 		t.Fatalf("expected the background snapshot path to see every source, got %+v", page.Rows)
+	}
+}
+
+// #307: an ordinary /clusters visit (no ?since=) used to correlate every
+// event this dashboard has ever recorded, unbounded -- clustersRequestFilter
+// is what the /clusters HTTP handler now uses instead of a bare
+// parseFilter(r), defaulting to defaultCorrelationWindow.
+func TestClustersRequestFilterDefaultsToTheCorrelationWindow(t *testing.T) {
+	r := httptest.NewRequest("GET", "/clusters", nil)
+	f := clustersRequestFilter(r)
+	if f.since.IsZero() {
+		t.Fatalf("expected a default since bound, got the zero value (unbounded)")
+	}
+	wantAround := time.Now().Add(-defaultCorrelationWindow)
+	if diff := f.since.Sub(wantAround); diff < -time.Minute || diff > time.Minute {
+		t.Fatalf("f.since = %v, want approximately %v (defaultCorrelationWindow ago)", f.since, wantAround)
+	}
+}
+
+func TestClustersRequestFilterRespectsAnExplicitSince(t *testing.T) {
+	r := httptest.NewRequest("GET", "/clusters?since=1h", nil)
+	f := clustersRequestFilter(r)
+	wantAround := time.Now().Add(-time.Hour)
+	if diff := f.since.Sub(wantAround); diff < -time.Minute || diff > time.Minute {
+		t.Fatalf("an explicit ?since=1h must not be overridden by the default window, got f.since = %v", f.since)
+	}
+}
+
+func TestClustersHandlerDefaultWindowExcludesOldEvents(t *testing.T) {
+	now := time.Now()
+	s := &store{events: []storedEvent{
+		{when: now.Add(-defaultCorrelationWindow - time.Hour), SrcIP: "8.8.8.8", Sensor: "cowrie", Fingerprint: "old-hassh"},
+		{when: now.Add(-defaultCorrelationWindow - time.Hour), SrcIP: "8.8.4.4", Sensor: "cowrie", Fingerprint: "old-hassh"},
+	}}
+	unbounded := s.clustersData(filter{})
+	if len(unbounded.Rows) != 1 {
+		t.Fatalf("sanity check failed: filter{} should still see the old cluster, got %+v", unbounded.Rows)
+	}
+
+	bounded := s.clustersData(clustersRequestFilter(httptest.NewRequest("GET", "/clusters", nil)))
+	if len(bounded.Rows) != 0 {
+		t.Fatalf("the default correlation window should exclude events older than it, got %+v", bounded.Rows)
 	}
 }

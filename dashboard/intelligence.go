@@ -2,11 +2,21 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"net/url"
 	"sort"
 	"strings"
 	"time"
 )
+
+// defaultCorrelationWindow bounds /campaigns and /clusters to a recent
+// slice of history by default (#307) -- both pages correlate every matching
+// event into per-key groups (per-CIDR for campaigns, per-fingerprint/
+// payload/ASN/provider for clusters), which means an unbounded default
+// walks the ENTIRE all-time event history on every page load. An operator
+// who genuinely needs the full history can still widen it explicitly via
+// ?since=. Shared by both so their defaults can't silently drift apart.
+const defaultCorrelationWindow = 7 * 24 * time.Hour
 
 // attackTechnique is a conservative, evidence-derived ATT&CK annotation. It
 // describes behavior observed by a honeypot; it is not an attribution claim.
@@ -159,6 +169,23 @@ type clustersPage struct {
 	Rows      []clusterRow
 	Filters   []string
 	filterBar
+}
+
+// clustersRequestFilter builds the filter a live /clusters HTTP request
+// should use (#307): same as parseFilter(r), except an absent ?since=
+// defaults to defaultCorrelationWindow instead of leaving the correlation
+// genuinely unbounded -- clustersData itself has no default at all (every
+// other filter.match() caller either has one, like campaignsData, or is
+// aggregate.go's own deliberately-unfiltered periodic snapshot call), so an
+// ordinary page visit walked every event this dashboard has ever recorded.
+// Kept separate from parseFilter/clustersData so that periodic snapshot
+// call site (clustersData(filter{})) stays genuinely unfiltered.
+func clustersRequestFilter(r *http.Request) filter {
+	f := parseFilter(r)
+	if f.since.IsZero() {
+		f.since = time.Now().Add(-defaultCorrelationWindow)
+	}
+	return f
 }
 
 // clustersData takes a filter directly rather than *http.Request (unlike
