@@ -22,7 +22,8 @@ func newTestProcessor(t *testing.T, minHits int) (*processor, *strings.Builder) 
 	var audit strings.Builder
 	al := newAuditLog(&audit)
 	send := dryRunSender{audit: al}
-	return newProcessor(wl, st, send, al, 24*time.Hour, minHits), &audit
+	sendBD := dryRunBlocklistDeSender{audit: al}
+	return newProcessor(wl, st, send, sendBD, al, 24*time.Hour, minHits), &audit
 }
 
 func lastAuditEntry(t *testing.T, audit *strings.Builder) auditEntry {
@@ -121,6 +122,38 @@ func TestProcessorDedupesBackfilledHistoryDespiteOldEventTimestamps(t *testing.T
 		t.Fatalf("second old-timestamped event for the same IP: got %+v, want skipped/cooldown -- "+
 			"if this is would_report again, cooldown bookkeeping regressed to using the event's own "+
 			"historical timestamp instead of wall-clock now", e)
+	}
+}
+
+// TestProcessorReportsToBothDestinationsIndependently (#69) is the property
+// that matters for the two-sender split in process.go: a single cowrie
+// login event is reportable to both AbuseIPDB and Blocklist.de (categorize.go
+// and blocklistDeService agree cowrie SSH activity is reportable to each),
+// and both must produce their own would_report entry with their own
+// service tag -- one destination's cooldown/dedup must not suppress or
+// stand in for the other's.
+func TestProcessorReportsToBothDestinationsIndependently(t *testing.T) {
+	proc, audit := newTestProcessor(t, 1)
+	proc.handle("cowrie", []byte(`{"eventid":"cowrie.login.failed","src_ip":"203.0.113.7"}`))
+
+	got := audit.String()
+	if !strings.Contains(got, `"action":"would_report","service":"abuseipdb"`) {
+		t.Fatalf("missing abuseipdb would_report entry: %s", got)
+	}
+	if !strings.Contains(got, `"action":"would_report","service":"blocklistde"`) {
+		t.Fatalf("missing blocklistde would_report entry: %s", got)
+	}
+
+	// A sensor/kind Blocklist.de doesn't map (http-honeypot login, per
+	// blocklistDeService's doc comment) must still report to AbuseIPDB alone.
+	audit.Reset()
+	proc.handle("http-honeypot", []byte(`{"src_ip":"203.0.113.8","username":"admin"}`))
+	got = audit.String()
+	if !strings.Contains(got, `"action":"would_report","service":"abuseipdb"`) {
+		t.Fatalf("missing abuseipdb would_report entry for http-honeypot login: %s", got)
+	}
+	if strings.Contains(got, `"service":"blocklistde"`) {
+		t.Fatalf("http-honeypot login should never touch blocklistde, got: %s", got)
 	}
 }
 
