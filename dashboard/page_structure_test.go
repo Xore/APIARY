@@ -128,7 +128,7 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 		{"page", snapshot{}},
 		{"events", eventsPage{Generated: now}},
 		{"ips", ipsPage{Generated: now}},
-		{"search", s.searchData("wp-login")},
+		{"search", s.searchData("wp-login", filter{})},
 		{"reports", snapshot{}},
 		{"sandbox", sandboxPageData{Generated: now, Detail: sandboxDetail}},
 		{"sandbox-windows", sandboxPageData{Generated: now, Detail: windowsDetail}},

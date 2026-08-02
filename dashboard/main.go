@@ -221,7 +221,7 @@ func main() {
 		tmpl.ExecuteTemplate(w, "eventrows", data)
 	})
 	http.HandleFunc("/api/ip-rows", func(w http.ResponseWriter, r *http.Request) {
-		data := s.ipsData()
+		data := s.ipsData(r)
 		offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 		if offset < 0 {
 			offset = 0
@@ -314,7 +314,7 @@ func main() {
 		s.serveSearch(w, r, tmpl)
 	})
 	http.HandleFunc("/ips", func(w http.ResponseWriter, r *http.Request) {
-		data := s.ipsData()
+		data := s.ipsData(r)
 		if len(data.Rows) > 25 {
 			data.Rows = data.Rows[:25]
 		}
@@ -347,7 +347,7 @@ func main() {
 		renderPage(w, tmpl, "session", &data)
 	})
 	http.HandleFunc("/clusters", func(w http.ResponseWriter, r *http.Request) {
-		data := s.clustersData()
+		data := s.clustersData(parseFilter(r))
 		renderPage(w, tmpl, "clusters", &data)
 	})
 	http.HandleFunc("/campaigns", func(w http.ResponseWriter, r *http.Request) {
@@ -501,7 +501,7 @@ func main() {
 		renderPage(w, tmpl, "sandbox", &data)
 	})
 	http.HandleFunc("/commands", func(w http.ResponseWriter, r *http.Request) {
-		data := s.commandsData()
+		data := s.commandsData(r)
 		renderPage(w, tmpl, "commands", &data)
 	})
 	http.HandleFunc("/payload-analysis/", func(w http.ResponseWriter, r *http.Request) {

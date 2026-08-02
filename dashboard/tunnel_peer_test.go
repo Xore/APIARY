@@ -100,7 +100,7 @@ func TestTunnelPeerIsRecoveredOrLeftUnattributed(t *testing.T) {
 		t.Fatalf("recovered=%d unattributed=%d, want one of each", recovered, blank)
 	}
 
-	for _, row := range s.buildIPsData().Rows {
+	for _, row := range s.buildIPsData(filter{}).Rows {
 		if row.IP == tunnelPeerIP {
 			t.Fatalf("/ips still lists the tunnel peer: %+v", row)
 		}

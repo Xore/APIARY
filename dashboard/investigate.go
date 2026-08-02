@@ -24,9 +24,11 @@ type commandsPage struct {
 	pageMeta
 	Generated time.Time
 	Rows      []commandRow
+	Filters   []string
 }
 
-func (s *store) commandsData() commandsPage {
+func (s *store) commandsData(r *http.Request) commandsPage {
+	f := parseFilter(r)
 	type agg struct {
 		row      commandRow
 		sources  map[string]bool
@@ -36,7 +38,7 @@ func (s *store) commandsData() commandsPage {
 	}
 	groups := map[string]*agg{}
 	for _, e := range s.getEvents() {
-		if e.Command == "" {
+		if e.Command == "" || !f.match(e) {
 			continue
 		}
 		key := e.Sensor + "\x00" + e.Command
@@ -68,7 +70,7 @@ func (s *store) commandsData() commandsPage {
 		}
 		return rows[i].Last > rows[j].Last
 	})
-	return commandsPage{Generated: time.Now(), Rows: rows}
+	return commandsPage{Generated: time.Now(), Rows: rows, Filters: f.describe()}
 }
 
 func (s *store) exportEventsCSV(w http.ResponseWriter, r *http.Request) {
@@ -82,13 +84,13 @@ func (s *store) exportEventsCSV(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *store) exportCommandsCSV(w http.ResponseWriter, _ *http.Request) {
+func (s *store) exportCommandsCSV(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="honeypot-commands.csv"`)
 	c := csv.NewWriter(w)
 	defer c.Flush()
 	_ = c.Write([]string{"sensor", "command", "count", "sources", "sessions", "first", "last"})
-	for _, row := range s.commandsData().Rows {
+	for _, row := range s.commandsData(r).Rows {
 		_ = c.Write([]string{row.Sensor, row.Command, strconv.Itoa(row.Count), row.Sources, strconv.Itoa(row.Sessions), row.First, row.Last})
 	}
 }

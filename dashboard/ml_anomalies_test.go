@@ -158,6 +158,47 @@ func TestMLAnomaliesAPIFiltersAndOrdersNewestFirst(t *testing.T) {
 	}
 }
 
+// TestMLAnomalyFilterExtraFields covers the fields mlAnomalyFilter adds
+// beyond severity/since/limit (#280): source IP, source country, event
+// type, protocol, and a minimum composite score threshold.
+func TestMLAnomalyFilterExtraFields(t *testing.T) {
+	c := &mlAnomalyStore{}
+	c.absorb([]mlAnomaly{
+		{Timestamp: "2026-08-01T10:00:00Z", SrcIP: "203.0.113.1", SrcCountry: "DE", EventType: "login", Proto: "ssh", CompositeScore: 0.9},
+		{Timestamp: "2026-08-01T10:05:00Z", SrcIP: "203.0.113.2", SrcCountry: "NL", EventType: "scan", Proto: "tcp", CompositeScore: 0.3},
+	})
+	s := &store{mlAnomalies: c}
+
+	cases := []struct {
+		query string
+		want  string // expected sole matching SrcIP, "" if expecting zero matches
+	}{
+		{"ip=203.0.113.1", "203.0.113.1"},
+		{"country=NL", "203.0.113.2"},
+		{"event_type=login", "203.0.113.1"},
+		{"proto=tcp", "203.0.113.2"},
+		{"min_score=0.5", "203.0.113.1"},
+		{"country=FR", ""},
+	}
+	for _, tc := range cases {
+		rec := httptest.NewRecorder()
+		s.serveMLAnomaliesAPI(rec, httptest.NewRequest("GET", "/api/ml/anomalies?"+tc.query, nil))
+		var got []mlAnomaly
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatalf("%s: %v", tc.query, err)
+		}
+		if tc.want == "" {
+			if len(got) != 0 {
+				t.Errorf("%s: expected zero matches, got %+v", tc.query, got)
+			}
+			continue
+		}
+		if len(got) != 1 || got[0].SrcIP != tc.want {
+			t.Errorf("%s: expected exactly %s, got %+v", tc.query, tc.want, got)
+		}
+	}
+}
+
 // TestMLAnomalyStatsFrom24hCutoffAndTopIPs proves the /api/ml/stats
 // aggregation: only anomalies within the last 24h count toward
 // total/by_severity, and top_src_ips ranks by count and caps at 10.

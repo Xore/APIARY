@@ -100,7 +100,7 @@ func TestInfrastructureClustersRequireSharedSources(t *testing.T) {
 		{SrcIP: "8.8.4.4", Sensor: "dionaea", Fingerprint: "shared-hassh", ASN: 15169, Org: "Google"},
 		{SrcIP: "1.1.1.1", Sensor: "cowrie", Fingerprint: "single"},
 	}}
-	page := s.clustersData()
+	page := s.clustersData(filter{})
 	if len(page.Rows) < 2 {
 		t.Fatalf("expected fingerprint and ASN clusters: %+v", page.Rows)
 	}

@@ -141,12 +141,67 @@ func (s *store) refreshMLAnomalies() {
 	s.mlAnomalies.absorb(items)
 }
 
+// mlAnomalyFilter holds the /ml-anomalies and /api/ml/anomalies query
+// parameters. All set fields must match (AND), mirroring filter's shape in
+// filters.go (#280) -- mlAnomaly isn't a storedEvent, so it gets its own
+// small filter instead of overloading that one.
+type mlAnomalyFilter struct {
+	severity, srcIP, srcCountry, eventType, proto string
+	minScore                                      float64
+	// since is deliberately an RFC3339 absolute cursor, not a duration like
+	// filter.sinceStr elsewhere -- docs/ml-worker-plan.md §8 and this API's
+	// own longstanding doc comment already specify since=<RFC3339>, and nothing
+	// makes that assumption unsafe to keep (no current consumer of this API
+	// at all, checked via grep, but the documented contract still stands).
+	since string
+}
+
+func parseMLAnomalyFilter(r *http.Request) mlAnomalyFilter {
+	v := r.URL.Query()
+	f := mlAnomalyFilter{
+		severity:   strings.TrimSpace(v.Get("severity")),
+		srcIP:      strings.TrimSpace(v.Get("ip")),
+		srcCountry: strings.TrimSpace(v.Get("country")),
+		eventType:  strings.TrimSpace(v.Get("event_type")),
+		proto:      strings.TrimSpace(v.Get("proto")),
+		since:      strings.TrimSpace(v.Get("since")),
+	}
+	if ms, err := strconv.ParseFloat(v.Get("min_score"), 64); err == nil {
+		f.minScore = ms
+	}
+	return f
+}
+
+func (f mlAnomalyFilter) match(a mlAnomaly) bool {
+	if f.severity != "" && a.Severity != f.severity {
+		return false
+	}
+	if f.srcIP != "" && a.SrcIP != f.srcIP {
+		return false
+	}
+	if f.srcCountry != "" && a.SrcCountry != f.srcCountry {
+		return false
+	}
+	if f.eventType != "" && a.EventType != f.eventType {
+		return false
+	}
+	if f.proto != "" && a.Proto != f.proto {
+		return false
+	}
+	if f.minScore > 0 && a.CompositeScore < f.minScore {
+		return false
+	}
+	if f.since != "" && a.Timestamp <= f.since {
+		return false
+	}
+	return true
+}
+
 // serveMLAnomaliesAPI implements GET /api/ml/anomalies from
-// docs/ml-worker-plan.md §8: limit (default 50, capped at the cache size),
-// severity, and since (RFC3339) filters over the cached, already-polled
-// set -- never a live Elasticsearch call on the request path, so this
-// endpoint's cost is bounded by mlAnomalyCacheCap regardless of query
-// params.
+// docs/ml-worker-plan.md §8: limit (default 50, capped at the cache size)
+// plus every mlAnomalyFilter field, over the cached, already-polled set --
+// never a live Elasticsearch call on the request path, so this endpoint's
+// cost is bounded by mlAnomalyCacheCap regardless of query params.
 func (s *store) serveMLAnomaliesAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if s.mlAnomalies == nil {
@@ -154,21 +209,16 @@ func (s *store) serveMLAnomaliesAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items := s.mlAnomalies.snapshot()
-	severity := strings.TrimSpace(r.URL.Query().Get("severity"))
-	since := strings.TrimSpace(r.URL.Query().Get("since"))
+	f := parseMLAnomalyFilter(r)
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit <= 0 || limit > mlAnomalyCacheCap {
 		limit = 50
 	}
 	filtered := make([]mlAnomaly, 0, len(items))
 	for _, item := range items {
-		if severity != "" && item.Severity != severity {
-			continue
+		if f.match(item) {
+			filtered = append(filtered, item)
 		}
-		if since != "" && item.Timestamp <= since {
-			continue
-		}
-		filtered = append(filtered, item)
 	}
 	// Newest first for the API and the page -- an operator scanning either
 	// wants the most recent anomaly on top, not buried after 200 older ones.

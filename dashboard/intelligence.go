@@ -157,9 +157,14 @@ type clustersPage struct {
 	pageMeta
 	Generated time.Time
 	Rows      []clusterRow
+	Filters   []string
 }
 
-func (s *store) clustersData() clustersPage {
+// clustersData takes a filter directly rather than *http.Request (unlike
+// ipsData/commandsData) because it has a genuine non-HTTP caller --
+// aggregate.go's periodic intelligence snapshot -- which has no request to
+// parse and always wants the unfiltered view (filter{}).
+func (s *store) clustersData(f filter) clustersPage {
 	type agg struct {
 		events       int
 		ips, sensors map[string]bool
@@ -181,6 +186,9 @@ func (s *store) clustersData() clustersPage {
 		a.sensors[sensor] = true
 	}
 	for _, e := range s.getEvents() {
+		if !f.match(e) {
+			continue
+		}
 		add("Fingerprint", e.Fingerprint, e.SrcIP, e.Sensor)
 		add("Payload", e.Shasum, e.SrcIP, e.Sensor)
 		if e.ASN != 0 {
@@ -223,5 +231,5 @@ func (s *store) clustersData() clustersPage {
 	if len(rows) > 250 {
 		rows = rows[:250]
 	}
-	return clustersPage{Generated: time.Now(), Rows: rows}
+	return clustersPage{Generated: time.Now(), Rows: rows, Filters: f.describe()}
 }

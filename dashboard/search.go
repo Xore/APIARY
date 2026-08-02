@@ -43,6 +43,7 @@ type searchPage struct {
 	Query     string
 	Groups    []searchGroup
 	Total     int
+	Filters   []string
 }
 
 // searchRedirect resolves a query that unambiguously names one entity. The
@@ -116,8 +117,8 @@ func (c *counter) group(title, hint, moreURL string, link func(string) string) s
 	return g
 }
 
-func (s *store) searchData(query string) searchPage {
-	page := searchPage{Generated: time.Now(), Query: query}
+func (s *store) searchData(query string, f filter) searchPage {
+	page := searchPage{Generated: time.Now(), Query: query, Filters: f.describe()}
 	needle := strings.ToLower(strings.TrimSpace(query))
 	if needle == "" {
 		return page
@@ -133,6 +134,9 @@ func (s *store) searchData(query string) searchPage {
 	}
 
 	for _, e := range s.getEvents() {
+		if !f.match(e) {
+			continue
+		}
 		matched := false
 		if contains(e.SrcIP) || contains(e.Org) || contains(e.Country) || contains(e.City) ||
 			(e.ASN != 0 && strings.Contains("as"+strconv.FormatUint(uint64(e.ASN), 10), needle)) {
@@ -276,6 +280,10 @@ type quickSearchHit struct {
 // check serveSearch uses to redirect instead of rendering a results page) is
 // always the first row, so a query that names one specific thing shows that
 // thing first regardless of which group it would otherwise fall into.
+// quickSearchResults feeds the topbar's typeahead popup, deliberately
+// unfiltered (filter{}) -- it's a lightweight dropdown, not the full
+// /search page, and #280's filter bar work is scoped to that page, not
+// this popup.
 func (s *store) quickSearchResults(query string) []quickSearchHit {
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -285,7 +293,7 @@ func (s *store) quickSearchResults(query string) []quickSearchHit {
 	if target := s.searchRedirect(query); target != "" {
 		hits = append(hits, quickSearchHit{Title: query, Meta: "Enter", Group: "Exact match", URL: target})
 	}
-	for _, group := range s.searchData(query).Groups {
+	for _, group := range s.searchData(query, filter{}).Groups {
 		for _, hit := range group.Hits {
 			if len(hits) >= quickSearchLimit {
 				return hits
@@ -321,6 +329,6 @@ func (s *store) serveSearch(w http.ResponseWriter, r *http.Request, tmpl *templa
 		http.Redirect(w, r, target, http.StatusSeeOther)
 		return
 	}
-	data := s.searchData(query)
+	data := s.searchData(query, parseFilter(r))
 	renderPage(w, tmpl, "search", &data)
 }

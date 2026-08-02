@@ -396,7 +396,7 @@ func (s *store) rebuild() {
 	s.events = evs
 	s.mu.Unlock()
 	if s.intelligence != nil && s.intelligence.due() {
-		s.intelligence.save(intelligenceSnapshot{Version: 1, Generated: now, Campaigns: campaigns, Clusters: s.clustersData().Rows})
+		s.intelligence.save(intelligenceSnapshot{Version: 1, Generated: now, Campaigns: campaigns, Clusters: s.clustersData(filter{}).Rows})
 	}
 	s.broadcast()
 }

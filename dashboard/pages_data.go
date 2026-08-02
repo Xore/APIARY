@@ -260,6 +260,8 @@ type ipsPage struct {
 	Generated time.Time
 	Rows      []ipRow
 	Total     int
+	Filters   []string
+	RowsURL   string
 }
 
 const defaultEventRows = 25
@@ -394,18 +396,38 @@ func boolInt(v bool) int {
 	return 0
 }
 
-func (s *store) ipsData() ipsPage {
-	s.ipsMu.Lock()
-	defer s.ipsMu.Unlock()
-	if !s.ipsCacheAt.IsZero() && time.Since(s.ipsCacheAt) < 30*time.Second {
-		return s.ipsCache
+// ipsData serves both /ips and /api/ip-rows. The 30s cache only ever holds
+// the unfiltered view -- once a filter (#280) is active, results are
+// request-specific, so those are always computed fresh instead of being
+// cached under (and potentially served back for) a completely different
+// query.
+func (s *store) ipsData(r *http.Request) ipsPage {
+	f := parseFilter(r)
+	filters := f.describe()
+	rowsQuery := r.URL.Query()
+	rowsQuery.Del("offset")
+	rowsURL := "/api/ip-rows"
+	if encoded := rowsQuery.Encode(); encoded != "" {
+		rowsURL += "?" + encoded
 	}
-	s.ipsCache = s.buildIPsData()
-	s.ipsCacheAt = time.Now()
-	return s.ipsCache
+	finish := func(page ipsPage) ipsPage {
+		page.Filters, page.RowsURL = filters, rowsURL
+		return page
+	}
+	if len(filters) == 0 {
+		s.ipsMu.Lock()
+		defer s.ipsMu.Unlock()
+		if !s.ipsCacheAt.IsZero() && time.Since(s.ipsCacheAt) < 30*time.Second {
+			return finish(s.ipsCache)
+		}
+		s.ipsCache = s.buildIPsData(f)
+		s.ipsCacheAt = time.Now()
+		return finish(s.ipsCache)
+	}
+	return finish(s.buildIPsData(f))
 }
 
-func (s *store) buildIPsData() ipsPage {
+func (s *store) buildIPsData(f filter) ipsPage {
 	type agg struct {
 		count, logins int
 		country       string
@@ -417,7 +439,7 @@ func (s *store) buildIPsData() ipsPage {
 	// events are newest-first: the first time we see an IP is its most recent
 	// event, the last time is its oldest.
 	for _, e := range s.getEvents() {
-		if e.SrcIP == "" {
+		if e.SrcIP == "" || !f.match(e) {
 			continue
 		}
 		a := m[e.SrcIP]

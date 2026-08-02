@@ -45,7 +45,7 @@
           {{if .Rows}}
           <table class="recent data-table">
             <thead><tr><th>events</th><th>source ip</th><th>cc</th><th>logins</th><th>sessions</th><th>sensors hit</th><th>first seen</th><th>last seen</th></tr></thead>
-            <tbody data-hp-page-url="/api/ip-rows" data-hp-total="{{.Total}}" data-hp-offset="0">
+            <tbody data-hp-page-url="{{.RowsURL}}" data-hp-total="{{.Total}}" data-hp-offset="0">
             {{template "iprows" .}}
             </tbody>
           </table>

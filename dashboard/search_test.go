@@ -78,7 +78,7 @@ func TestSearchGroupsMatchesAcrossSources(t *testing.T) {
 	}
 
 	// A password only names a credential, so the answer stays that narrow.
-	credentials := groupTitles(s.searchData("hunter2"))
+	credentials := groupTitles(s.searchData("hunter2", filter{}))
 	for _, want := range []string{"Credentials", "Events"} {
 		if !strings.Contains(credentials, want) {
 			t.Fatalf("groups %q are missing %q", credentials, want)
@@ -89,11 +89,11 @@ func TestSearchGroupsMatchesAcrossSources(t *testing.T) {
 	}
 
 	// A network name reaches the source through its enrichment, not its address.
-	if sources := groupTitles(s.searchData("Example Networks")); !strings.Contains(sources, "Attack sources") {
+	if sources := groupTitles(s.searchData("Example Networks", filter{})); !strings.Contains(sources, "Attack sources") {
 		t.Fatalf("groups %q are missing the enriched source match", sources)
 	}
 
-	paths := s.searchData("wp-login")
+	paths := s.searchData("wp-login", filter{})
 	found := false
 	for _, g := range paths.Groups {
 		if g.Title != "Requested paths" {
@@ -111,7 +111,7 @@ func TestSearchGroupsMatchesAcrossSources(t *testing.T) {
 		t.Fatal("a path substring did not surface the Requested paths group")
 	}
 
-	if empty := s.searchData("   "); len(empty.Groups) != 0 || empty.Total != 0 {
+	if empty := s.searchData("   ", filter{}); len(empty.Groups) != 0 || empty.Total != 0 {
 		t.Fatalf("a blank query produced results: %#v", empty)
 	}
 }
@@ -128,7 +128,7 @@ func TestSearchGroupsAreBounded(t *testing.T) {
 		})
 	}
 	s := &store{events: events}
-	for _, g := range s.searchData("/probe-").Groups {
+	for _, g := range s.searchData("/probe-", filter{}).Groups {
 		if len(g.Hits) > searchGroupLimit {
 			t.Fatalf("group %q returned %d hits, want at most %d", g.Title, len(g.Hits), searchGroupLimit)
 		}
