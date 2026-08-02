@@ -19,15 +19,24 @@ func TestBuildFilterBarPreFillsFromRequest(t *testing.T) {
 	if len(bar.FilterFields) != 3 {
 		t.Fatalf("expected 3 filter fields regardless of which are set, got %+v", bar.FilterFields)
 	}
-	if bar.FilterFields[0] != (filterField{Name: "ip", Label: "IP", Value: "203.0.113.9"}) {
-		t.Fatalf("ip field not pre-filled: %+v", bar.FilterFields[0])
+	// filterField now carries a Kind/Options (#303, a slice field), so it's
+	// no longer comparable via != -- check the fields this test actually
+	// cares about (name/label/value/kind) individually instead. ip/
+	// country/sensor are all autocomplete-eligible (filterAutocompleteFields,
+	// filters.go), backed by /api/filter-values -- see filter_values_test.go
+	// for that mechanism's own coverage.
+	wantField := func(i int, name, label, value string) {
+		f := bar.FilterFields[i]
+		if f.Name != name || f.Label != label || f.Value != value {
+			t.Fatalf("field %d = %+v, want name=%q label=%q value=%q", i, f, name, label, value)
+		}
+		if f.Kind != "autocomplete" {
+			t.Fatalf("field %d (%s) Kind = %q, want autocomplete", i, name, f.Kind)
+		}
 	}
-	if bar.FilterFields[1] != (filterField{Name: "country", Label: "Country", Value: "DE"}) {
-		t.Fatalf("country field not pre-filled: %+v", bar.FilterFields[1])
-	}
-	if bar.FilterFields[2] != (filterField{Name: "sensor", Label: "Sensor", Value: ""}) {
-		t.Fatalf("sensor field should be empty, got %+v", bar.FilterFields[2])
-	}
+	wantField(0, "ip", "IP", "203.0.113.9")
+	wantField(1, "country", "Country", "DE")
+	wantField(2, "sensor", "Sensor", "")
 
 	// page=2 is not one of the filter bar's own fields -- it must round-trip
 	// as a hidden field so submitting the filter form doesn't silently drop

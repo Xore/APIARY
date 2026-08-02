@@ -776,6 +776,132 @@
       }
     });
 
+    /* Generic "click to see real values, type to filter" dropdown (#303).
+       Attaches to any <input data-hp-filter-field="NAME"> anywhere on the
+       page -- the shared filter-bar's autocomplete fields (dashboard.html)
+       and reports.html's scope panel alike, one mechanism instead of a
+       bespoke implementation per form. Backed by /api/filter-values, which
+       shares its field-name keys with filters.go's filterAutocompleteFields
+       (dashboard-side) so "sensor"/"country"/"asn"/"ip"/"port"/"sig" mean
+       the same thing everywhere. Mirrors the quick-search preview above
+       (debounce + AbortController + keyboard nav) against a single field's
+       real values instead of the cross-entity search index. */
+    const filterAutocompleteInputs = [...document.querySelectorAll("[data-hp-filter-field]")];
+    if (filterAutocompleteInputs.length) {
+      const box = document.createElement("div");
+      box.className = "hp-filter-autocomplete";
+      box.setAttribute("role", "listbox");
+      box.hidden = true;
+      document.body.append(box);
+
+      let activeInput = null;
+      let optionRows = [];
+      let activeOption = -1;
+      let optionsAbort = null;
+      let optionsTimer = null;
+
+      const closeOptions = () => {
+        optionsAbort?.abort();
+        box.hidden = true;
+        box.replaceChildren();
+        optionRows = [];
+        activeOption = -1;
+        activeInput = null;
+      };
+
+      const positionOptions = input => {
+        const rect = input.getBoundingClientRect();
+        box.style.left = `${rect.left + scrollX}px`;
+        box.style.top = `${rect.bottom + scrollY + 4}px`;
+        box.style.width = `${rect.width}px`;
+      };
+
+      const selectOption = row => {
+        if (!activeInput) return;
+        activeInput.value = row.value;
+        activeInput.dispatchEvent(new Event("input", { bubbles: true }));
+        activeInput.dispatchEvent(new Event("change", { bubbles: true }));
+        closeOptions();
+      };
+
+      const renderOptions = () => {
+        box.replaceChildren(...optionRows.map((row, i) => {
+          const el = document.createElement("button");
+          el.type = "button";
+          el.className = "hp-filter-autocomplete__row";
+          el.setAttribute("role", "option");
+          el.setAttribute("aria-selected", i === activeOption ? "true" : "false");
+          el.classList.toggle("active", i === activeOption);
+          const label = document.createElement("span");
+          label.textContent = row.label;
+          el.append(label);
+          if (row.count) {
+            const count = document.createElement("small");
+            count.textContent = row.count;
+            el.append(count);
+          }
+          // mousedown, not click: fires before the input's blur, so picking
+          // a row doesn't let the outside-click handler close the box
+          // first and drop the selection.
+          el.addEventListener("mousedown", event => { event.preventDefault(); selectOption(row); });
+          return el;
+        }));
+        box.hidden = optionRows.length === 0;
+      };
+
+      const runFilterQuery = (input, query) => {
+        optionsAbort?.abort();
+        optionsAbort = new AbortController();
+        const field = input.dataset.hpFilterField;
+        fetch(`/api/filter-values?field=${encodeURIComponent(field)}&q=${encodeURIComponent(query)}`, { signal: optionsAbort.signal })
+          .then(res => (res.ok ? res.json() : { values: [] }))
+          .then(data => {
+            if (activeInput !== input) return;
+            optionRows = data.values || [];
+            activeOption = -1;
+            positionOptions(input);
+            renderOptions();
+          })
+          .catch(() => {});
+      };
+
+      filterAutocompleteInputs.forEach(input => {
+        input.addEventListener("focus", () => {
+          activeInput = input;
+          runFilterQuery(input, input.value.trim());
+        });
+        input.addEventListener("input", () => {
+          activeInput = input;
+          clearTimeout(optionsTimer);
+          const query = input.value.trim();
+          optionsTimer = setTimeout(() => runFilterQuery(input, query), 150);
+        });
+        input.addEventListener("keydown", event => {
+          if (activeInput !== input || box.hidden) return;
+          if (event.key === "ArrowDown" && optionRows.length) {
+            event.preventDefault();
+            activeOption = Math.min(activeOption + 1, optionRows.length - 1);
+            renderOptions();
+          } else if (event.key === "ArrowUp" && optionRows.length) {
+            event.preventDefault();
+            activeOption = Math.max(activeOption - 1, -1);
+            renderOptions();
+          } else if (event.key === "Enter" && activeOption >= 0) {
+            event.preventDefault();
+            selectOption(optionRows[activeOption]);
+          } else if (event.key === "Escape") {
+            closeOptions();
+          }
+        });
+      });
+
+      document.addEventListener("click", event => {
+        if (activeInput && !box.contains(event.target) && event.target !== activeInput) closeOptions();
+      });
+      addEventListener("scroll", () => { if (activeInput) positionOptions(activeInput); }, true);
+      addEventListener("resize", () => { if (activeInput) positionOptions(activeInput); });
+    }
+
     /* Theme preference: cycle system -> dark -> light (persisted) */
     const themeStorageKey = "hp-theme";
     const themeOrder = ["system", "dark", "light"];

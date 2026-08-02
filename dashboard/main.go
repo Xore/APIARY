@@ -192,6 +192,7 @@ func main() {
 	http.HandleFunc("/api/settings/audit", s.serveSettingsAudit)
 	http.HandleFunc("/api/map-points", s.serveMapPoints)
 	http.HandleFunc("/api/quick-search", s.serveQuickSearch)
+	http.HandleFunc("/api/filter-values", s.serveFilterValues)
 	http.HandleFunc("/api/stream", s.serveEventsSSE)
 	http.HandleFunc("/api/alerts", s.serveAlertsAPI)
 	http.HandleFunc("/api/ml/anomalies", s.serveMLAnomaliesAPI)

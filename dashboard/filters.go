@@ -218,13 +218,62 @@ func (f filter) filtered(evs []storedEvent) []storedEvent {
 	return out
 }
 
-// filterField is one text-input control for the shared filter-bar template
+// filterFieldOption is one <option> for a filterField whose Kind is
+// "select" (#303) -- Value is what's submitted, Label is what's shown.
+type filterFieldOption struct {
+	Value string
+	Label string
+}
+
+// filterSelectOptions classifies a shared filter-bar field as a small,
+// fully-known, fixed enum (#303) -- a real <select> is strictly better than
+// free text or a fetched autocomplete for these, since every possible value
+// is already known statically and there's no reason to ever guess wrong.
+// Keyed by the same query-param name buildFilterBar's callers already pass.
+//
+//   - event_type mirrors reports.html's own already-solved "type" field
+//     (any/login/command/alert/download) -- ml-anomalies had the identical
+//     concept as a plain text input until now.
+//   - severity is worker.py's SEVERITY_BANDS (low/medium/high/critical).
+//   - kind is exactly the 4 cluster kinds intelligence.go's clustersData
+//     ever produces (Fingerprint/Payload/Autonomous system/Provider class)
+//     -- confirmed by reading that switch directly, not assumed.
+var filterSelectOptions = map[string][]filterFieldOption{
+	"event_type": {
+		{"", "any"}, {"login", "login"}, {"command", "command"},
+		{"alert", "alert"}, {"download", "download"},
+	},
+	"severity": {
+		{"", "any"}, {"low", "low"}, {"medium", "medium"},
+		{"high", "high"}, {"critical", "critical"},
+	},
+	"kind": {
+		{"", "any"}, {"Fingerprint", "Fingerprint"}, {"Payload", "Payload"},
+		{"Autonomous system", "Autonomous system"}, {"Provider class", "Provider class"},
+	},
+}
+
+// filterAutocompleteFields marks which shared filter-bar fields are backed
+// by real, currently-existing values worth fetching from
+// /api/filter-values (#303) -- see that file's filterValueFields, which
+// this must stay in sync with (both keyed by the same field name).
+var filterAutocompleteFields = map[string]bool{
+	"sensor": true, "country": true, "asn": true, "ip": true, "port": true, "sig": true,
+}
+
+// filterField is one input control for the shared filter-bar template
 // partial (#280 Phase 4): a query-param name, a human label, and the
 // current value from the request, so the form round-trips pre-filled.
+// Kind/Options (#303) let buildFilterBar upgrade a field to a real <select>
+// (Kind == "select") or an autocomplete-enabled text input (Kind ==
+// "autocomplete") automatically, purely from its Name -- existing callers
+// never need to change to get this.
 type filterField struct {
-	Name  string
-	Label string
-	Value string
+	Name    string
+	Label   string
+	Value   string
+	Kind    string // "text" (default) | "select" | "autocomplete"
+	Options []filterFieldOption
 }
 
 // filterBar is embedded by every page that gets the shared filter-bar UI:
@@ -252,7 +301,14 @@ func buildFilterBar(r *http.Request, action string, specs ...[2]string) filterBa
 		if val != "" {
 			active = true
 		}
-		fields = append(fields, filterField{Name: s[0], Label: s[1], Value: val})
+		field := filterField{Name: s[0], Label: s[1], Value: val, Kind: "text"}
+		if opts, ok := filterSelectOptions[s[0]]; ok {
+			field.Kind = "select"
+			field.Options = opts
+		} else if filterAutocompleteFields[s[0]] {
+			field.Kind = "autocomplete"
+		}
+		fields = append(fields, field)
 		names = append(names, s[0])
 	}
 

@@ -136,13 +136,18 @@
                 <h2>Scope &amp; search criteria</h2>
                 <p class="note">Leave a field empty to place no restriction on it. The report covers exactly what these criteria match.</p>
                 <div class="hp-rp-grid">
-                  <div class="hp-rp-field"><label for="hp-rp-scope-ip">Source IP</label><input id="hp-rp-scope-ip" maxlength="64" placeholder="203.0.113.42"></div>
+                  {{/* #303: data-hp-filter-field wires the shared autocomplete widget
+                       (hp-app.js, backed by /api/filter-values) onto exactly the fields
+                       that have real, currently-existing values to prefill from --
+                       network/session/free-text stay plain, per that issue's own
+                       field-by-field classification. */}}
+                  <div class="hp-rp-field"><label for="hp-rp-scope-ip">Source IP</label><input id="hp-rp-scope-ip" maxlength="64" placeholder="203.0.113.42" autocomplete="off" data-hp-filter-field="ip"></div>
                   <div class="hp-rp-field"><label for="hp-rp-scope-network">Network (CIDR)</label><input id="hp-rp-scope-network" maxlength="64" placeholder="203.0.113.0/24"></div>
-                  <div class="hp-rp-field"><label for="hp-rp-scope-sensor">Sensor</label><input id="hp-rp-scope-sensor" maxlength="64" placeholder="cowrie"></div>
-                  <div class="hp-rp-field"><label for="hp-rp-scope-port">Destination port</label><input id="hp-rp-scope-port" maxlength="16" placeholder="22"></div>
-                  <div class="hp-rp-field"><label for="hp-rp-scope-signature">Signature contains</label><input id="hp-rp-scope-signature" maxlength="120" placeholder="ET SCAN"></div>
-                  <div class="hp-rp-field"><label for="hp-rp-scope-country">Country</label><input id="hp-rp-scope-country" maxlength="64" placeholder="Netherlands"></div>
-                  <div class="hp-rp-field"><label for="hp-rp-scope-asn">ASN</label><input id="hp-rp-scope-asn" maxlength="32" placeholder="AS64500"></div>
+                  <div class="hp-rp-field"><label for="hp-rp-scope-sensor">Sensor</label><input id="hp-rp-scope-sensor" maxlength="64" placeholder="cowrie" autocomplete="off" data-hp-filter-field="sensor"></div>
+                  <div class="hp-rp-field"><label for="hp-rp-scope-port">Destination port</label><input id="hp-rp-scope-port" maxlength="16" placeholder="22" autocomplete="off" data-hp-filter-field="port"></div>
+                  <div class="hp-rp-field"><label for="hp-rp-scope-signature">Signature contains</label><input id="hp-rp-scope-signature" maxlength="120" placeholder="ET SCAN" autocomplete="off" data-hp-filter-field="sig"></div>
+                  <div class="hp-rp-field"><label for="hp-rp-scope-country">Country</label><input id="hp-rp-scope-country" maxlength="64" placeholder="Netherlands" autocomplete="off" data-hp-filter-field="country"></div>
+                  <div class="hp-rp-field"><label for="hp-rp-scope-asn">ASN</label><input id="hp-rp-scope-asn" maxlength="32" placeholder="AS64500" autocomplete="off" data-hp-filter-field="asn"></div>
                   <div class="hp-rp-field"><label for="hp-rp-scope-type">Event type</label><select id="hp-rp-scope-type"><option value="">any</option><option value="login">login</option><option value="command">command</option><option value="alert">alert</option><option value="download">download</option></select></div>
                   <div class="hp-rp-field"><label for="hp-rp-scope-session">Session id</label><input id="hp-rp-scope-session" maxlength="128"></div>
                   <div class="hp-rp-field"><label for="hp-rp-scope-text">Free text</label><input id="hp-rp-scope-text" maxlength="200" placeholder="matches across all event fields"></div>
