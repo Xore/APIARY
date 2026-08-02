@@ -80,6 +80,14 @@ type binaryAnalysis struct {
 	// attribution.
 	Family     string
 	FamilyLink string
+	// Correlation is #354's "ask the backend if this hash is known" answer
+	// -- notably including Ghidra, which nothing else on this page surfaces
+	// today (SandboxRuns/GitHubAnalysis above are each queried ad hoc;
+	// Correlation is the first place all three, plus Elasticsearch sighting
+	// history, are checked together). Advisory only: never blocks anything,
+	// just tells the operator what already exists before they submit a new
+	// analysis run.
+	Correlation hashCorrelation
 }
 
 // payloadStaticAnalysis is the subset of binaryAnalysis that is a pure
@@ -229,6 +237,7 @@ func (s *store) analyzePayload(name string) (binaryAnalysis, error) {
 			a.OriginLink = "/sessions/" + url.PathEscape(origin.Session)
 		}
 	}
+	a.Correlation = s.correlateHash(a.SHA256)
 	if len(a.YARAMatches) > 0 {
 		boost := 25
 		for _, match := range a.YARAMatches {

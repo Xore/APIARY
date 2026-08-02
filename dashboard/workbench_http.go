@@ -18,6 +18,11 @@ type workbenchPageData struct {
 	Classification payloadClassification
 	Analyzers      []workbenchAnalyzer
 	ModelStatus    workbenchModelStatus
+	// Correlation is #354's "ask the backend if this hash is known" advisory
+	// -- shown before the operator picks analyzers and submits, since this
+	// is the actual decision point a redundant run gets queued from. Never
+	// disables or blocks analyzer selection either way.
+	Correlation hashCorrelation
 }
 
 type workbenchResultsCounts struct {
@@ -217,7 +222,11 @@ func (s *store) serveWorkbenchPage(w http.ResponseWriter, r *http.Request, tmpl 
 		return
 	}
 	classification := classifyPayload(head)
-	data := workbenchPageData{Generated: time.Now(), SHA256: hash, Classification: classification, Analyzers: workbenchRegistry(classification), ModelStatus: loadWorkbenchModelStatus()}
+	data := workbenchPageData{
+		Generated: time.Now(), SHA256: hash, Classification: classification,
+		Analyzers: workbenchRegistry(classification), ModelStatus: loadWorkbenchModelStatus(),
+		Correlation: s.correlateHash(hash),
+	}
 	renderPage(w, tmpl, "payload-workbench", &data)
 }
 
