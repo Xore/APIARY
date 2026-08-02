@@ -2,16 +2,36 @@
 
 [← back to README](../README.md)
 
-This section describes the active implementation in the root and VPS Compose
-files, plus two pieces that are real but live outside them: the Ghidra static
-analysis pipeline (`analysis/ghidra/`, its own Compose file plus a host
-systemd worker — genuinely deployed, see "Captured payload lifecycle and
-static analysis" below) and the Linux KVM sandbox (root-owned host worker
-described below). `sandbox/windows/` is still a plan, not yet deployed — see
-that directory's own `IMPLEMENTATION_PLAN.md` and #47 for status; until its
-golden image exists, Windows samples take the static-only/Wine-in-Linux-guest
-path the sandbox section below describes, not a native Windows 11 guest.
-TANNER containers are web-request emulators, not malware detonation sandboxes.
+This section describes the active implementation across the home server's
+Dockge stacks and the VPS Compose file, plus pieces that are real but live
+outside ordinary Compose services: the Ghidra static analysis pipeline
+(`analysis/ghidra/`, its own Dockge stack plus a host systemd worker —
+genuinely deployed, see "Captured payload lifecycle and static analysis"
+below) and the Linux KVM sandbox (root-owned host worker described below).
+
+`sandbox/windows/` is past the planning stage but not fully wired up: the
+golden image builds reliably and boots (Sysmon, PowerShell logging, FakeNet,
+Regshot, and the living-persona daemon all confirmed working against a live
+guest — see #47, #290, #358), and it can be driven manually via
+`kvm_manage.sh`/`orchestrate/run_sample.py`. What's still missing is the
+automated intake path: no host-side worker config or systemd units are
+installed yet, so the dashboard's Windows submission path has nothing to
+hand a request to, and #53's end-to-end smoke test (dashboard submit →
+Windows sandbox report) hasn't run. Until that's wired up, Windows samples
+still take the static-only/Wine-in-Linux-guest path the sandbox section below
+describes, not the native Windows 11 guest — see that directory's own
+`IMPLEMENTATION_PLAN.md` for current status. TANNER containers are
+web-request emulators, not malware detonation sandboxes.
+
+**The home side is not one deployment unit.** [#258](https://github.com/Xore/honeypot-stack/issues/258)
+split what used to be a single `docker-compose.yml` into 12 independently
+deployed Dockge stacks — each with its own compose file
+(`docker-compose.<name>.yml`) and its own start/stop/update lifecycle. The
+root `docker-compose.yml` is now a deliberate empty marker; nothing runs
+`docker compose up` against it any more. The diagrams below draw those stack
+boundaries explicitly rather than one "home server" box, because that
+boundary is where independent deployment, restart, and failure actually
+happen.
 
 ## Deployment and trust boundaries
 
@@ -31,11 +51,36 @@ flowchart LR
 
   wg["WireGuard tunnel"]
 
-  subgraph home["Home server / Dockge"]
+  subgraph home["Home server — 12 independent Dockge stacks (#258)"]
     direction TB
-    sensors["Honeypot sensor containers"]
-    analysis["Analysis containers<br/>Dashboard, Filebeat, Elasticsearch,<br/>Kibana, EveBox, Arkime, YARA"]
-    hostSandbox["Root-owned sandbox services<br/>systemd + libvirt/KVM"]
+    subgraph initStack["honeypot-init"]
+      initJobs["Bootstrap one-shot jobs"]
+    end
+    subgraph sensorStacks["Sensor stacks — one Dockge stack each, each its own isolated network (#235)"]
+      direction LR
+      cowrieStack["honeypot-cowrie"]
+      dionaeaStack["honeypot-dionaea<br/>+ tftp-relay"]
+      conpotStack["honeypot-conpot"]
+      dnp3Stack["honeypot-dnp3"]
+      httpStack["honeypot-http"]
+      multipotStack["honeypot-multipot"]
+    end
+    subgraph tannerStack["honeypot-tanner"]
+      tannerSvcs["SNARE + TANNER analyzer/API/web<br/>+ nested Docker + Redis"]
+    end
+    subgraph elkStack["honeypot-elk"]
+      elkSvcs["Filebeat, Elasticsearch,<br/>Kibana, EveBox, Arkime"]
+    end
+    subgraph dashboardStack["honeypot-dashboard"]
+      dashboardSvc["Dashboard + results-importer<br/>+ services-adapter"]
+    end
+    subgraph payloadStack["honeypot-payload-analysis"]
+      payloadSvcs["payload-dedupe + YARA"]
+    end
+    subgraph utilStack["honeypot-utilities"]
+      utilSvcs["autoheal + log-maintenance<br/>+ reporter"]
+    end
+    hostSandbox["Root-owned host services<br/>Linux + Windows sandbox, Ghidra —<br/>systemd + libvirt/KVM, not Dockge stacks"]
   end
 
   attacker -->|"all public traffic is observed"| suricata
@@ -47,12 +92,27 @@ flowchart LR
   portbridge --> connlog
   httpBridges --> wg
   portbridge --> wg
-  wg --> sensors
-  wg --> analysis
-  sensors -->|"logs and captured artifacts"| analysis
-  analysis -.->|"hash-only request spool"| hostSandbox
-  suricata -.->|"read-only SSHFS logs over WireGuard"| analysis
+  wg --> sensorStacks
+  wg --> tannerStack
+  wg --> elkStack
+  wg --> dashboardStack
+  sensorStacks -->|"logs + captured artifacts<br/>via shared host paths"| elkStack
+  sensorStacks -->|"logs + captured artifacts<br/>via shared host paths"| dashboardStack
+  tannerStack -->|"logs via shared host paths"| elkStack
+  tannerStack -->|"logs via shared host paths"| dashboardStack
+  payloadStack -.->|"hashes + results"| dashboardStack
+  dashboardStack -.->|"hash-only request spool"| hostSandbox
+  suricata -.->|"read-only SSHFS logs over WireGuard"| elkStack
+  suricata -.->|"read-only SSHFS logs over WireGuard"| dashboardStack
 ```
+
+Stacks are deployed independently, but not network- or filesystem-isolated
+from each other the way the VPS/home boundary is: most share the `honeynet`
+Docker network by name and the same host bind-mounted `logs/`/state
+directories, which is how a sensor stack's events reach `honeypot-elk` and
+`honeypot-dashboard` without a direct network call between them. Independent
+deployment means each stack can be updated, restarted, or fail without
+taking the others down — not that they can't see each other's data.
 
 The VPS is the only internet-facing layer. Suricata sees traffic before it
 enters WireGuard, so IDS records and PCAPs retain the original network view.
@@ -78,7 +138,7 @@ socket.
 
 ```mermaid
 flowchart TB
-  subgraph honeypotInit["honeypot-init — separate Compose project (#111)"]
+  subgraph honeypotInit["honeypot-init — separate Dockge stack (#111, #258)"]
     direction TB
     persona["persona-apply<br/>validate/apply personas"]
     loginit["log-init<br/>create host log paths"]
@@ -95,17 +155,30 @@ flowchart TB
   arkinit --> initMarkers
   snareclone --> initMarkers
 
-  subgraph sensorGroup["Sensors, each on its own isolated network (#235)"]
-    cowrie["Cowrie"]
-    multipot["multipot"]
-    http["HTTP + API honeypots"]
-    dionaea["Dionaea"]
-    conpot["Conpot personas"]
-    dnp3["DNP3"]
-    tftp["TFTP relay"]
+  subgraph sensorGroup["Sensor stacks — one Dockge stack each (#258), each its own isolated network (#235)"]
+    direction LR
+    subgraph cowrieStackG["honeypot-cowrie"]
+      cowrie["Cowrie"]
+    end
+    subgraph multipotStackG["honeypot-multipot"]
+      multipot["multipot"]
+    end
+    subgraph httpStackG["honeypot-http"]
+      http["HTTP + API honeypots"]
+    end
+    subgraph dionaeaStackG["honeypot-dionaea"]
+      dionaea["Dionaea"]
+      tftp["TFTP relay"]
+    end
+    subgraph conpotStackG["honeypot-conpot"]
+      conpot["Conpot personas"]
+    end
+    subgraph dnp3StackG["honeypot-dnp3"]
+      dnp3["DNP3"]
+    end
   end
 
-  subgraph tannerGroup["TANNER application-emulation boundary"]
+  subgraph tannerGroup["honeypot-tanner — TANNER application-emulation boundary"]
     snare["SNARE"]
     tanner["TANNER analyzer"]
     tannerapi["TANNER API"]
@@ -119,15 +192,24 @@ flowchart TB
   payloads[("Captured payload stores<br/>Cowrie + Dionaea + inline scripts")]
   dashboardState[("dashboard-state")]
   yaraResults[("yara-results")]
-  es[("Elasticsearch")]
-  maintenance["log-maintenance<br/>bounded text-log rotation"]
-  filebeat["Filebeat"]
-  dashboard["Live dashboard"]
-  kibana["Kibana"]
-  evebox["EveBox"]
-  pcapSync["PCAP sync"]
-  arkCapture["Arkime capture"]
-  arkViewer["Arkime viewer"]
+
+  subgraph elkStackG["honeypot-elk"]
+    es[("Elasticsearch")]
+    filebeat["Filebeat"]
+    kibana["Kibana"]
+    evebox["EveBox"]
+    pcapSync["PCAP sync"]
+    arkCapture["Arkime capture"]
+    arkViewer["Arkime viewer"]
+  end
+
+  subgraph dashboardStackG["honeypot-dashboard"]
+    dashboard["Live dashboard"]
+  end
+
+  subgraph utilStackG["honeypot-utilities"]
+    maintenance["log-maintenance<br/>bounded text-log rotation"]
+  end
 
   initMarkers -.->|"entrypoint polls log-init.done"| sensorGroup
   initMarkers -.->|"entrypoint polls log-init.done"| maintenance
@@ -186,19 +268,20 @@ Elasticsearch for historical search. These are complementary paths: the live
 dashboard can remain useful during an Elasticsearch interruption, and the
 Elasticsearch archive outlives the dashboard's bounded in-memory window.
 
-`honeypot-init` is a **separate Dockge stack**, deployed independently of
-`honeypot-stack` (see [`CGNAT-DEPLOYMENT.md`](CGNAT-DEPLOYMENT.md)) — it
-exists because Compose's `depends_on: condition: service_completed_successfully`
-cannot reach across a project boundary. Its one-shot jobs write a `<job>.done`
-marker file to a shared `state/init-markers/` directory on success; every
-dependent in `honeypot-stack` polls for that file at container entrypoint
-(`until [ -f /markers/<job>.done ]; do sleep 3; done`) instead of using a
-Compose-level dependency. `log-init` also prepares host log paths before
-sensors start, and `log-maintenance` — itself one of the marker-waiting
-services, not a bootstrap job — rotates only the human-readable logs that are
-safe to copy-truncate; structured streams tailed by Filebeat are preserved.
-`honeypot-kibana-setup` is the one job with no dependents anywhere: nothing
-waits on its marker because nothing needs to.
+`honeypot-init` runs first among the 12 stacks, and every other one depends
+on its output without a Compose-level dependency — Compose's
+`depends_on: condition: service_completed_successfully` can't reach across a
+stack boundary, [#258](https://github.com/Xore/honeypot-stack/issues/258)'s
+split notwithstanding. Its one-shot jobs write a `<job>.done` marker file to
+a shared `state/init-markers/` directory on success; every dependent
+container across every other stack polls for that file at container
+entrypoint (`until [ -f /markers/<job>.done ]; do sleep 3; done`) instead.
+`log-init` also prepares host log paths before sensors start, and
+`log-maintenance` (in `honeypot-utilities`, one of the marker-waiting
+services, not a bootstrap job itself) rotates only the human-readable logs
+that are safe to copy-truncate; structured streams tailed by Filebeat are
+preserved. `honeypot-kibana-setup` is the one job with no dependents
+anywhere: nothing waits on its marker because nothing needs to.
 
 ## Event ingestion and network analysis
 

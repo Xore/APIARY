@@ -8,23 +8,30 @@ raw-tunnelled with a port bridge.
 This is a public repository: copy the example environment files locally and
 never commit real addresses, credentials, captures, payloads, or sandbox images.
 
-```
-attacker ─▶ VPS public port
-              ├─ HTTP/HTTPS ─▶ Traefik (TLS, auth) ─┐
-              └─ raw TCP/UDP ─▶ portbridge ──────────┤ WireGuard tunnel
-                                                      ▼
-                                        home honeypot-stack @ 10.8.0.2
+```mermaid
+flowchart LR
+  attacker["attacker"] -->|"HTTP/HTTPS"| traefik["Traefik<br/>TLS, auth"]
+  attacker -->|"raw TCP/UDP"| portbridge["portbridge"]
+  traefik --> wg["WireGuard tunnel"]
+  portbridge --> wg
+  wg --> home["home honeypot stacks<br/>@ 10.8.0.2"]
 ```
 
 **All core sensors run without compose profiles.** The only profile is the
-optional on-demand `geoip-update` maintenance job. Three deployment pieces —
-two at home, one on the VPS (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-for why the home side is two separate Compose stacks):
+optional on-demand `geoip-update` maintenance job. 13 deployment pieces —
+12 independent Dockge stacks at home plus the VPS (see
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for why the home side split into
+12 separate Compose stacks):
 
 | Piece | Runs on | What |
 |---|---|---|
 | `honeypot-init` ([docker-compose.init.yml](docker-compose.init.yml)) | **home** | one-shot bootstrap jobs: log paths, Elasticsearch templates, Arkime schema, persona validation |
-| this repository ([home stack](.)) | **home** | every home sensor (Cowrie, multipot, Dionaea, Conpot, HTTP/API, SNARE/TANNER), dashboard, ELK, EveBox, and Arkime |
+| `honeypot-cowrie`, `honeypot-dionaea`, `honeypot-conpot`, `honeypot-dnp3`, `honeypot-http`, `honeypot-multipot` (this repository, one compose file each) | **home** | the sensors: Cowrie, Dionaea (+ TFTP relay), Conpot personas, DNP3, HTTP/API honeypots, multipot |
+| `honeypot-tanner` ([docker-compose.tanner.yml](docker-compose.tanner.yml)) | **home** | SNARE + TANNER application-emulation boundary |
+| `honeypot-elk` ([docker-compose.elk.yml](docker-compose.elk.yml)) | **home** | Filebeat, Elasticsearch, Kibana, EveBox, Arkime |
+| `honeypot-dashboard` ([docker-compose.dashboard.yml](docker-compose.dashboard.yml)) | **home** | the live investigation dashboard |
+| `honeypot-payload-analysis` ([docker-compose.payload-analysis.yml](docker-compose.payload-analysis.yml)) | **home** | payload dedup + YARA scanning |
+| `honeypot-utilities` ([docker-compose.utilities.yml](docker-compose.utilities.yml)) | **home** | autoheal, log rotation, reporting |
 | [`vps/`](vps/) | **VPS** | Traefik, portbridge raw tunnels, Suricata, and HTTP bridges (SSO via [Xore/auth-backend](https://github.com/Xore/auth-backend)) |
 
 ## Read next
