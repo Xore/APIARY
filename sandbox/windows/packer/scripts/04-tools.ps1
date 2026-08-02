@@ -58,6 +58,21 @@ Write-Host '[Phase 9] Installing Sysmon...'
 $sysmonPath = 'C:\Tools\SysinternalsSuite'
 if (-not (Test-Path "$sysmonPath\Sysmon64.exe")) {
     choco install sysinternals -y --no-progress
+    # The choco package extracts to its own lib tree, not $sysmonPath --
+    # confirmed live (2026-08-02): Sysmon installed successfully every time,
+    # but silently failed to run afterward with CommandNotFoundException,
+    # because C:\Tools\SysinternalsSuite\Sysmon64.exe never existed. Every
+    # tool this build or run_sample.py expects under $sysmonPath (Sysmon,
+    # Procmon, autorunsc) actually lands in one place:
+    # C:\ProgramData\chocolatey\lib\sysinternals\tools\ -- copy the whole
+    # tree once here rather than teaching each call site its own fallback
+    # search (which is what autorunsc's already did, and it would have
+    # silently found nothing either, for the same reason).
+    $chocoSysinternals = 'C:\ProgramData\chocolatey\lib\sysinternals\tools'
+    if ((Test-Path $chocoSysinternals) -and -not (Test-Path "$sysmonPath\Sysmon64.exe")) {
+        New-Item $sysmonPath -ItemType Directory -Force | Out-Null
+        Copy-Item "$chocoSysinternals\*" $sysmonPath -Force
+    }
 }
 # The config comes from a third-party branch at build time, so two things can
 # go wrong and neither should cost three hours. DownloadFile throws a
