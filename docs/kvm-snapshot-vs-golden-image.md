@@ -174,7 +174,16 @@ rm /var/lib/libvirt/snapshots/<vm-name>-ext-clean.qcow2
 virsh start <vm-name>
 ```
 
-This is the mechanism `kvm_manage.sh` uses; there is no separate helper script.
+`kvm_manage.sh` does **not** use this — despite an earlier version of this
+doc claiming it did, and an earlier version of the actual script trying
+`virsh snapshot-create-as --disk-only` + `snapshot-revert --running` (a
+variant of this §4 approach) instead of §7's documented §5 choice. That
+turned out to have a real, reproducible bug: a freshly spawned qemu process
+fails to open the base golden image on the resulting multi-layer backing
+chain, even though file permissions are provably fine (isolated in #358).
+`kvm_manage.sh` now actually does what §7 always said this stack chose —
+destroy + delete the overlay + recreate a fresh one from the golden image
+(§5's mechanism), no XML editing or snapshot subsystem involved.
 
 ---
 
@@ -320,9 +329,9 @@ golden images) is host-only procedure; it is summarised in
 [`honeypot-network-isolation.md`](honeypot-network-isolation.md) §4 rather than
 duplicated here.
 
-No golden image has been built yet —
-[#47](https://github.com/Xore/honeypot-stack/issues/47). The lifecycle around
-it (checksum on build output, scheduled rebuild) is
+The golden image has been built and the `win11-sandbox` domain boots
+reliably from it (2026-08-02) — [#47](https://github.com/Xore/honeypot-stack/issues/47).
+The lifecycle around it (checksum on build output, scheduled rebuild) is
 [#86](https://github.com/Xore/honeypot-stack/issues/86).
 
 ---

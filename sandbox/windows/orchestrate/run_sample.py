@@ -3,13 +3,13 @@
 run_sample.py — Windows 11 sandbox detonation orchestrator
 
 Drives the VM through libvirt and the guest through WinRM:
-1. Reverts the domain to the golden snapshot
+1. Resets the domain to a fresh clone of the golden image
 2. Copies sample to VM
 3. Starts telemetry (ProcMon, FakeNet-NG)
 4. Executes sample
 5. Waits observation window
 6. Collects all artifacts
-7. Reverts VM (cleanup)
+7. Resets VM (cleanup)
 
 Artifacts are written to the local results directory only. This orchestrator
 performs no outbound network access and never pushes anywhere: the analysis
@@ -27,7 +27,10 @@ Env vars:
   LIBVIRT_URI        libvirt connection URI (default: qemu:///system)
   VM_DOMAIN          libvirt domain name (default: win11-sandbox)
   VIRSH_PATH         Path to the virsh binary (default: /usr/bin/virsh)
-  GOLDEN_SNAPSHOT    Snapshot name (default: GOLDEN_READY)
+  GOLDEN_IMAGE       Path to the golden qcow2 (default:
+                     /var/dockge/sandbox/golden-images/win11-analysis.qcow2)
+  VM_DISK            Path to the per-run CoW clone (default:
+                     /var/dockge/sandbox/vms/$VM_DOMAIN.qcow2)
   OBSERVATION_SECS   Seconds to observe (default: 1800 -- #297, 15-60min
                      recommended per RESEARCH.md; a short window is
                      defeated by a sample doing nothing more than a long
@@ -55,11 +58,16 @@ log = logging.getLogger(__name__)
 
 VM_HOST         = os.environ.get('VM_HOST',          '10.10.10.2')
 VM_USER         = os.environ.get('VM_USER',          'analyst')
-VM_PASS         = os.environ.get('VM_PASS',          'malware')
+# Must match winrm_pass's actual default in packer/win11-analysis.pkr.hcl —
+# this drifted out of sync with it (was 'malware') until #358's cleanup.
+VM_PASS         = os.environ.get('VM_PASS',          'malware123!')
 VIRSH_PATH      = os.environ.get('VIRSH_PATH',       '/usr/bin/virsh')
 LIBVIRT_URI     = os.environ.get('LIBVIRT_URI',      'qemu:///system')
 VM_DOMAIN       = os.environ.get('VM_DOMAIN',        'win11-sandbox')
-GOLDEN_SNAP     = os.environ.get('GOLDEN_SNAPSHOT',  'GOLDEN_READY')
+GOLDEN_IMAGE    = Path(os.environ.get('GOLDEN_IMAGE',
+                        '/var/dockge/sandbox/golden-images/win11-analysis.qcow2'))
+VM_DISK         = Path(os.environ.get('VM_DISK',
+                        f'/var/dockge/sandbox/vms/{VM_DOMAIN}.qcow2'))
 OBS_SECS        = int(os.environ.get('OBSERVATION_SECS', '1800'))  # #297
 ARTIFACT_DIR    = Path(os.environ.get('WINDOWS_SANDBOX_RESULTS_DIR', 'reports/windows-sandbox'))
 SAMPLE_SHARE    = f'\\\\{VM_HOST}\\Samples'
@@ -86,17 +94,34 @@ def virsh(cmd: list, timeout: int = 120) -> str:
 
 
 def revert_to_golden():
-    """Restore the domain to the golden snapshot and leave it running.
+    """Reset the domain to a fresh clone of the golden image and boot it.
 
-    snapshot-revert --running restores the saved memory state, so the guest
-    resumes already booted rather than cold-starting; the caller still waits on
-    WinRM because the previous run's revert may have raced the guest's network
-    stack coming back. Every detonation starts from this exact state, which is
-    what makes the runs comparable and the guest disposable.
+    virsh snapshot-revert (memory-state or disk-only) is not usable here: the
+    domain's host-passthrough migratable='off' CPU config (deliberate, for
+    anti-VM-detection fidelity -- see win11-kvm.xml) blocks memory-state
+    snapshots outright, and disk-only snapshots hit a separate, reproducible
+    QEMU/libvirt bug where a freshly spawned process fails to open the base
+    golden image on the resulting multi-layer backing chain, even though file
+    permissions are provably fine (see #358's investigation).
+
+    The golden image is already never written to (nothing here ever opens it
+    read-write), so "revert to golden" just means: throw away the per-run CoW
+    clone and make a fresh one, then boot that. This is a cold boot every run
+    rather than a memory-state resume -- slower, but with no snapshot-machinery
+    failure mode. Every detonation still starts from the identical golden
+    state, which is what makes runs comparable and the guest disposable.
     """
-    log.info(f'Reverting {VM_DOMAIN} to snapshot: {GOLDEN_SNAP}')
-    virsh(['snapshot-revert', VM_DOMAIN, '--snapshotname', GOLDEN_SNAP, '--running'])
-    log.info('Domain reverted and running; waiting for WinRM')
+    log.info(f'Resetting {VM_DOMAIN} to a fresh clone of {GOLDEN_IMAGE}')
+    subprocess.run([VIRSH_PATH, '--connect', LIBVIRT_URI, 'destroy', VM_DOMAIN],
+                    capture_output=True, text=True)  # ignore: may already be stopped
+    if VM_DISK.exists():
+        VM_DISK.unlink()
+    subprocess.run(
+        ['qemu-img', 'create', '-f', 'qcow2', '-F', 'qcow2', '-b', str(GOLDEN_IMAGE), str(VM_DISK)],
+        check=True, capture_output=True, text=True,
+    )
+    virsh(['start', VM_DOMAIN])
+    log.info('Domain reset and running; waiting for WinRM')
 
 
 def winrm_run(ps_command: str, timeout: int = 60) -> dict:
@@ -396,9 +421,9 @@ def detonate(sample_path: Path, results_dir: Path = None):
     finally:
         # Always revert, including after a failed detonation: the guest has run
         # untrusted code and must never survive into the next sample.
-        log.info('Reverting VM to golden snapshot (cleanup)...')
+        log.info('Resetting VM to golden image (cleanup)...')
         try:
-            virsh(['snapshot-revert', VM_DOMAIN, '--snapshotname', GOLDEN_SNAP, '--running'])
+            revert_to_golden()
         except Exception as e:
             log.error(f'VM revert failed: {e}')
 

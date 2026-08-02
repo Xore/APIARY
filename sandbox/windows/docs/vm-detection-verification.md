@@ -10,8 +10,10 @@ still detectable in the built guest is to run real detection tools inside it:
 
 **Status: blocked on the golden image existing** (#47 and its sub-issues,
 same as most of Phases 1-3). `orchestrate/verify_vm_detection.py` is written
-and ready to run the moment a `win11-sandbox` domain with a `GOLDEN_READY`
-snapshot exists — nothing here is blocked beyond that.
+and ready to run the moment a `win11-sandbox` domain exists — nothing here
+is blocked beyond that. (There is no `GOLDEN_READY` snapshot to wait on —
+see #358 for why the revert mechanism is a fresh CoW clone, not a virsh
+snapshot.)
 
 ## Why this matters
 
@@ -38,7 +40,7 @@ everything currently hardened is applied:
 1. Obtain `pafish.exe` and `al-khaser.exe` on the analysis host (build from
    source or download a release — they never touch the internet from inside
    the guest; FakeNet/INetSim would just answer whatever they ask anyway).
-2. Boot the golden snapshot, or a thin clone of it, the same way
+2. Boot a fresh clone of the golden image, the same way
    `orchestrate/run_sample.py`'s `revert_to_golden()` does.
 3. Run:
    ```bash
@@ -60,12 +62,12 @@ and after any change to `win11-kvm.xml`, `packer/scripts/01-hardening.ps1`,
 or the QEMU/libvirt hardware identity — a later provisioner change or a host
 package upgrade can silently reintroduce a tell an earlier script fixed.
 
-## Ideally: fold into the `GOLDEN_READY` acceptance gate
+## Ideally: fold into the golden-image acceptance gate
 
 Per the issue this was scoped from, the long-term goal is to make this part
-of the same acceptance check that gates taking the `GOLDEN_READY` snapshot
-(`IMPLEMENTATION_PLAN.md` Phase 2), not a separate manual step someone has
-to remember to run. That wiring is left for whoever builds the image in #47
-— this doc and script are the verification half; the "must pass before
-`GOLDEN_READY` is taken" gate is a Phase 2 process decision, not a script
-that can be written against an image that doesn't exist yet.
+of the same acceptance check that gates trusting a freshly-built golden
+image (`IMPLEMENTATION_PLAN.md` Phase 2), not a separate manual step
+someone has to remember to run. That wiring is left for whoever builds the
+image in #47 — this doc and script are the verification half; the
+"must pass before the image is trusted" gate is a Phase 2 process decision,
+not a script that can be written against an image that doesn't exist yet.

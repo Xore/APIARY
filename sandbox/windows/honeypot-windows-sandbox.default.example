@@ -19,9 +19,11 @@ WINDOWS_SANDBOX_SAMPLES_DIR=/var/lib/honeypot-sandbox/inbox/samples
 # ── libvirt domain ───────────────────────────────────────────────────────
 LIBVIRT_URI=qemu:///system
 VM_DOMAIN=win11-sandbox
-# Every detonation starts by reverting to this snapshot, so the guest is
-# disposable and successive runs are comparable (Phase 2).
-GOLDEN_SNAPSHOT=GOLDEN_READY
+# Every detonation starts by resetting the domain to a fresh CoW clone of
+# this golden image, so the guest is disposable and successive runs are
+# comparable (Phase 2). Not a virsh snapshot -- see #358 for why.
+GOLDEN_IMAGE=/var/dockge/sandbox/golden-images/win11-analysis.qcow2
+VM_DISK=/var/dockge/sandbox/vms/win11-sandbox.qcow2
 
 # ── Guest access (WinRM over the isolated sandbox bridge) ────────────────
 # 10.10.10.0/24 has no route to the WAN; the host firewall drops forwarding.

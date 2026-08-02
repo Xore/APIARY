@@ -3,9 +3,10 @@
 > **Status**: In Progress — Phase 7's dashboard half is implemented, and the
 > host half now has its orchestrator, spool worker, and systemd units. What
 > remains is the golden image itself (Phases 1–3) and the gateway compose
-> (Phase 4); until a `win11-sandbox` domain with a `GOLDEN_READY` snapshot
-> exists, the worker will revert-fail on every request and preserve it as
-> `.request.failed`.  
+> (Phase 4); until a `win11-sandbox` domain exists, the worker will
+> revert-fail on every request and preserve it as `.request.failed`. There
+> is no `GOLDEN_READY` snapshot — see the revised Golden Image vs Snapshots
+> decision below and #358 for why.  
 > **Last updated**: 2026-07-30  
 > **Host platform**: KVM + QEMU + libvirt + docker-compose (NO VMware)  
 > **Phase 1 tracking**: [#47](https://github.com/Xore/honeypot-stack/issues/47)
@@ -64,7 +65,9 @@ KVM Host (Linux)
     │   the payload as Windows; everything else goes to the pre-existing
     │   Linux runner (sandbox/linux-runner.service, sandbox/worker.sh)
     │   watching the original SANDBOX_REQUEST_DIR
-    ├── virsh snapshot-revert → golden image
+    ├── destroy + fresh CoW clone from golden image + start (kvm_manage.sh
+    │   revert / run_sample.py revert_to_golden() — not a virsh snapshot,
+    │   see #358)
     ├── WinRM → copy sample, start tools, detonate
     ├── Wait observation window
     ├── Collect artifacts via SMB / virsh guest-agent
@@ -245,15 +248,24 @@ See full comparison:
 
 | | Golden Image (qcow2 base) | KVM Snapshot (internal) |
 |---|---|---|
-| **Reset time** | ~30-60s (clone from base qcow2) | ~5-10s (virsh snapshot-revert) |
+| **Reset time** | ~1-2min (fresh CoW clone + cold boot) | ~5-10s (virsh snapshot-revert) |
 | **Reproducibility** | 100% — always byte-identical | 99% — depends on snapshot age |
 | **Storage** | 1× full image + thin clones | 1 image + delta chains |
 | **Rebuild** | Packer re-runs from scratch | Manual or scripted |
-| **Our approach** | Packer builds base qcow2 | virsh snapshot on top for fast revert |
+| **Our approach** | Packer builds base qcow2, fresh clone every reset | Not usable here — see below |
 
-**Decision**: Use Packer to build a reproducible base `qcow2` (golden image),
-then take a `virsh` internal snapshot on first boot as the revert target.
-This gives both reproducibility (rebuild anytime) and fast revert (5-10s).
+**Decision, revised (#358)**: the original plan was `virsh` snapshot-revert
+on top of the Packer-built base for fast (5-10s) reverts. That turned out
+not to be usable on this host: this domain's `<cpu migratable='off'/>`
+(deliberate, for anti-VM-detection CPU fidelity) blocks memory-state
+snapshots outright, and disk-only snapshots hit a separate, reproducible
+QEMU/libvirt bug on the resulting multi-layer backing chain — a freshly
+spawned qemu process fails to open the golden image even though file
+permissions are provably fine. Actual approach: every reset destroys the
+domain, deletes the per-run CoW clone, and creates a fresh one from the
+golden image (`kvm_manage.sh revert` / `run_sample.py`'s
+`revert_to_golden()`). Cold boot every run (~1-2min) instead of a
+memory-state resume, but with no snapshot-machinery failure mode.
 
 ---
 
@@ -371,19 +383,22 @@ qemu-img create -f qcow2 -F qcow2 \
 # Define VM from template XML
 virsh define sandbox/windows/packer/win11-kvm.xml
 
-# First boot → take internal snapshot as revert point
+# First boot → verify it boots and WinRM answers
 virsh start win11-sandbox
 # ... wait for boot, WinRM ready ...
-virsh snapshot-create-as win11-sandbox GOLDEN_READY \
-    --description "FLARE-VM + logging + FakeNet ready" \
-    --atomic
 
-# Revert before each detonation run
-virsh snapshot-revert win11-sandbox GOLDEN_READY --running
-# Takes ~5-10 seconds
+# Reset before each detonation run: destroy + fresh CoW clone from the
+# golden image + start. Not a virsh snapshot revert -- this domain's
+# <cpu migratable='off'/> (deliberate, for anti-VM-detection fidelity)
+# blocks memory-state snapshots outright, and disk-only snapshots hit a
+# separate, reproducible QEMU/libvirt bug on the resulting multi-layer
+# backing chain (#358). The golden image is never written to, so there's
+# nothing to snapshot -- every reset just makes a fresh clone.
+sandbox/windows/setup/kvm_manage.sh revert
+# Cold boot, ~1-2 minutes
 ```
 
-Before trusting `GOLDEN_READY` as an acceptance point, run the pafish/
+Before trusting a freshly-reset guest as an acceptance point, run the pafish/
 al-khaser verification pass (#298) against the freshly-booted guest — see
 [`docs/vm-detection-verification.md`](docs/vm-detection-verification.md).
 Everything upstream of this (SMBIOS/CPUID spoofing, Defender/telemetry
@@ -500,22 +515,23 @@ suricata:   # IDS alerts, ET rules
 See: [`orchestrate/run_sample.py`](orchestrate/run_sample.py)
 
 The orchestrator is invoked by the **host-side systemd worker** (Phase 7),
-never directly by the dashboard. It uses `libvirt-python`:
+never directly by the dashboard. It shells out to `virsh` (see `virsh()` in
+`orchestrate/run_sample.py` — not `libvirt-python`):
 
 ```python
-import libvirt
-conn = libvirt.open('qemu:///system')
-dom  = conn.lookupByName('win11-sandbox')
-
-# Revert to golden snapshot
-snap = dom.snapshotLookupByName('GOLDEN_READY')
-dom.revertToSnapshot(snap, libvirt.VIR_DOMAIN_SNAPSHOT_REVERT_RUNNING)
+# Reset to golden: destroy, delete the per-run CoW clone, make a fresh one
+# from the golden image, start. Not a snapshot revert -- see #358 for why.
+subprocess.run([VIRSH_PATH, '--connect', LIBVIRT_URI, 'destroy', VM_DOMAIN], ...)
+VM_DISK.unlink()
+subprocess.run(['qemu-img', 'create', '-f', 'qcow2', '-F', 'qcow2',
+                 '-b', str(GOLDEN_IMAGE), str(VM_DISK)], check=True, ...)
+virsh(['start', VM_DOMAIN])
 ```
 
 ### Full Run Cycle
 ```
-1.  virsh snapshot-revert win11-sandbox GOLDEN_READY   (~5-10s)
-2.  Wait for WinRM on 10.10.10.2:5985                  (~45s boot)
+1.  kvm_manage.sh revert: destroy + fresh CoW clone + start (~5-10s to spawn)
+2.  Wait for WinRM on 10.10.10.2:5985                  (~1-2min cold boot)
 3.  docker compose -f docker-compose.sandbox.yml up -d  (start capture)
 4.  WinRM: Start-FakeNet, Start-ProcMon, Regshot snap1
 5.  WinRM: Copy sample → C:\Samples\<sha>.exe
@@ -529,7 +545,7 @@ dom.revertToSnapshot(snap, libvirt.VIR_DOMAIN_SNAPSHOT_REVERT_RUNNING)
 12. extract_iocs.py → ioc_extracted.json
 13. generate_report.py → report.pdf
 14. Write {hash}_sandbox.json → WINDOWS_SANDBOX_RESULTS_DIR   ← dashboard reads this
-15. virsh snapshot-revert GOLDEN_READY  (cleanup, always runs)
+15. kvm_manage.sh revert / revert_to_golden()  (cleanup, always runs)
     NO git push. NO outbound connection.
 ```
 
@@ -597,9 +613,11 @@ WINDOWS_SANDBOX_RESULTS_DIR/{sha256}_sandbox.json
 > `orchestrate/run_sample.py` was written against VMware — `vmrun`, a `.vmx`
 > path, and snapshot `SNAPSHOT_3_GOLDEN` — which contradicted this plan's own
 > "No VMware Workstation" constraint and would never have run on this host. It
-> now drives libvirt (`virsh --connect $LIBVIRT_URI snapshot-revert`), takes
-> `--results-dir`, and returns a non-zero exit on a failed detonation so the
-> worker can tell a real report from a broken run.
+> now drives libvirt via `virsh --connect $LIBVIRT_URI` (destroy + fresh CoW
+> clone + start, per #358 — not `snapshot-revert`, which turned out not to
+> be usable on this host's CPU config), takes `--results-dir`, and returns a
+> non-zero exit on a failed detonation so the worker can tell a real report
+> from a broken run.
 >
 > **Still ahead:** Phases 1–3 (Packer golden image, VM lifecycle, guest
 > hardening) and Phase 4 (gateway Compose). The Compose default leaves the
@@ -685,7 +703,8 @@ Environment=WINDOWS_SANDBOX_REQUEST_DIR=/windows-sandbox-requests
 Environment=WINDOWS_SANDBOX_RESULTS_DIR=/windows-sandbox-results
 Environment=LIBVIRT_URI=qemu:///system
 Environment=VM_DOMAIN=win11-sandbox
-Environment=GOLDEN_SNAPSHOT=GOLDEN_READY
+Environment=GOLDEN_IMAGE=/var/dockge/sandbox/golden-images/win11-analysis.qcow2
+Environment=VM_DISK=/var/dockge/sandbox/vms/win11-sandbox.qcow2
 Environment=VM_HOST=10.10.10.2
 Environment=VM_USER=analyst
 Environment=OBSERVATION_SECS=1800  # #297: 30min default, 15-60min recommended
@@ -731,7 +750,8 @@ SANDBOX_ALERT_RISK_SCORE=50
 WINDOWS_SANDBOX_REQUEST_DIR=/windows-sandbox-requests
 WINDOWS_SANDBOX_RESULTS_DIR=/windows-sandbox-results
 VM_DOMAIN=win11-sandbox
-GOLDEN_SNAPSHOT=GOLDEN_READY
+GOLDEN_IMAGE=/var/dockge/sandbox/golden-images/win11-analysis.qcow2
+VM_DISK=/var/dockge/sandbox/vms/win11-sandbox.qcow2
 VM_HOST=10.10.10.2
 VM_USER=analyst
 OBSERVATION_SECS=1800
