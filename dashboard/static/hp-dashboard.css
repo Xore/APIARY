@@ -438,6 +438,17 @@ button.copy:hover { color: var(--text-primary); background: var(--surface-2); }
 .hp-open-in-item > span { flex: 1; min-width: 0; line-height: 1.3; }
 .hp-open-in-item strong { display: block; font-size: 12px; font-weight: 600; color: var(--text-primary); }
 .hp-open-in-item small { display: block; font-size: 11px; color: var(--text-muted); }
+
+/* ── Shared multi-attribute filter bar (#280 Phase 4) ─────────────────────
+   {{template "filterbar" .}}, dashboard/ui/partials/dashboard.html.
+   Reuses .hp-open-in's floating-panel shell above; these rules cover only
+   the form-specific parts, shared across every page that includes it. */
+.hp-filterbar-menu { min-width: 260px; padding: 10px; }
+.hp-filterbar-field { display: block; margin-bottom: 8px; }
+.hp-filterbar-field span { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); margin-bottom: 4px; }
+.hp-filterbar-field input { width: 100%; background: var(--surface-0); border: 1px solid var(--border-subtle); border-radius: var(--radius-control); color: var(--text-primary); padding: 6px 10px; font-size: 12.5px; }
+.hp-filterbar-field input:focus { outline: none; border-color: var(--border-focus); }
+.hp-filterbar-actions { display: flex; gap: 8px; margin-top: 4px; }
 pre.code {
   white-space: pre-wrap; word-break: break-word;
   background: var(--sidebar-bg); border: 1px solid var(--border-subtle);
