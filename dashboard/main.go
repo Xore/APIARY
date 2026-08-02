@@ -351,7 +351,7 @@ func main() {
 		renderPage(w, tmpl, "clusters", &data)
 	})
 	http.HandleFunc("/campaigns", func(w http.ResponseWriter, r *http.Request) {
-		data := s.get()
+		data := s.campaignsData(r)
 		renderPage(w, tmpl, "campaigns", &data)
 	})
 	http.HandleFunc("/history", func(w http.ResponseWriter, r *http.Request) {
@@ -375,7 +375,7 @@ func main() {
 			http.NotFound(w, r)
 			return
 		}
-		data := s.mlAnomaliesData()
+		data := s.mlAnomaliesData(r)
 		renderPage(w, tmpl, "ml-anomalies", &data)
 	})
 	http.HandleFunc("/reports", func(w http.ResponseWriter, r *http.Request) {

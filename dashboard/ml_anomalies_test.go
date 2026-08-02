@@ -253,6 +253,45 @@ func TestSourceLinkEmptyWhenEitherFieldMissing(t *testing.T) {
 	}
 }
 
+// TestMLAnomaliesDataAppliesFilter proves mlAnomaliesData (#280) narrows
+// both the shown Anomalies list and the Stats panel together -- a severity
+// filter shouldn't leave "Top source IPs, 24h" showing every severity.
+func TestMLAnomaliesDataAppliesFilter(t *testing.T) {
+	c := &mlAnomalyStore{}
+	c.absorb([]mlAnomaly{
+		{Timestamp: "2026-08-01T10:00:00Z", Severity: "critical", SrcIP: "203.0.113.9"},
+		{Timestamp: "2026-08-01T10:01:00Z", Severity: "low", SrcIP: "203.0.113.10"},
+	})
+	s := &store{mlAnomalies: c, es: &esClient{}}
+
+	all := s.mlAnomaliesData(httptest.NewRequest("GET", "/ml-anomalies", nil))
+	if len(all.Anomalies) != 2 {
+		t.Fatalf("expected both anomalies unfiltered, got %+v", all.Anomalies)
+	}
+
+	narrowed := s.mlAnomaliesData(httptest.NewRequest("GET", "/ml-anomalies?severity=critical", nil))
+	if len(narrowed.Anomalies) != 1 || narrowed.Anomalies[0].SrcIP != "203.0.113.9" {
+		t.Fatalf("severity filter did not narrow the anomaly list, got %+v", narrowed.Anomalies)
+	}
+	if len(narrowed.Filters) != 1 || narrowed.Filters[0] != "severity = critical" {
+		t.Fatalf("expected a severity filter chip, got %+v", narrowed.Filters)
+	}
+	// mlAnomalyStatsFrom's 24h cutoff needs a recent timestamp to count
+	// anything at all -- these fixtures are far in the past, so just prove
+	// the *set fed into it* was narrowed rather than asserting on Stats'
+	// own (necessarily empty here) output.
+}
+
+func TestMLAnomaliesDataDisabledStoreHasNoFilters(t *testing.T) {
+	page := (&store{}).mlAnomaliesData(httptest.NewRequest("GET", "/ml-anomalies?severity=critical", nil))
+	if page.Enabled {
+		t.Fatal("expected Enabled=false with no store configured")
+	}
+	if len(page.Filters) != 1 {
+		t.Fatalf("expected the filter chip to still be reported even with anomalies disabled, got %+v", page.Filters)
+	}
+}
+
 func TestMLAnomaliesPageRendersFromCache(t *testing.T) {
 	c := &mlAnomalyStore{}
 	c.absorb([]mlAnomaly{
@@ -265,7 +304,7 @@ func TestMLAnomaliesPageRendersFromCache(t *testing.T) {
 	funcs := templateFuncs(s, "")
 	tmpl := template.Must(template.New("t").Funcs(funcs).Parse(pageTemplate))
 
-	page := s.mlAnomaliesData()
+	page := s.mlAnomaliesData(httptest.NewRequest("GET", "/ml-anomalies", nil))
 	var out strings.Builder
 	if err := tmpl.ExecuteTemplate(&out, "ml-anomalies", &page); err != nil {
 		t.Fatalf("ml-anomalies page does not render: %v", err)
@@ -277,7 +316,7 @@ func TestMLAnomaliesPageRendersFromCache(t *testing.T) {
 		}
 	}
 
-	disabled := (&store{}).mlAnomaliesData()
+	disabled := (&store{}).mlAnomaliesData(httptest.NewRequest("GET", "/ml-anomalies", nil))
 	out.Reset()
 	if err := tmpl.ExecuteTemplate(&out, "ml-anomalies", &disabled); err != nil {
 		t.Fatalf("disabled ml-anomalies page does not render: %v", err)

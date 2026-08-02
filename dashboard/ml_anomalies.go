@@ -15,6 +15,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
@@ -197,6 +198,29 @@ func (f mlAnomalyFilter) match(a mlAnomaly) bool {
 	return true
 }
 
+// describe renders the active filter fields as human-readable chips,
+// mirroring filter.describe() in filters.go.
+func (f mlAnomalyFilter) describe() []string {
+	var out []string
+	add := func(k, v string) {
+		if v != "" {
+			out = append(out, k+" = "+v)
+		}
+	}
+	add("severity", f.severity)
+	add("ip", f.srcIP)
+	add("country", f.srcCountry)
+	add("event type", f.eventType)
+	add("proto", f.proto)
+	if f.minScore > 0 {
+		out = append(out, fmt.Sprintf("min score = %.2f", f.minScore))
+	}
+	if f.since != "" {
+		out = append(out, "since = "+f.since)
+	}
+	return out
+}
+
 // serveMLAnomaliesAPI implements GET /api/ml/anomalies from
 // docs/ml-worker-plan.md §8: limit (default 50, capped at the cache size)
 // plus every mlAnomalyFilter field, over the cached, already-polled set --
@@ -291,16 +315,28 @@ type mlAnomaliesPage struct {
 	Enabled   bool
 	Anomalies []mlAnomaly
 	Stats     mlAnomalyStats
+	Filters   []string
 }
 
-func (s *store) mlAnomaliesData() mlAnomaliesPage {
-	page := mlAnomaliesPage{Generated: time.Now(), Enabled: s.es != nil}
+// mlAnomaliesData applies the same mlAnomalyFilter serveMLAnomaliesAPI uses
+// (#280) -- both the shown list and the 24h stats panel reflect it, so a
+// severity filter, for example, narrows "Top source IPs, 24h" too, not just
+// the table underneath it.
+func (s *store) mlAnomaliesData(r *http.Request) mlAnomaliesPage {
+	f := parseMLAnomalyFilter(r)
+	page := mlAnomaliesPage{Generated: time.Now(), Enabled: s.es != nil, Filters: f.describe()}
 	if s.mlAnomalies == nil {
 		return page
 	}
 	items := s.mlAnomalies.snapshot()
-	page.Stats = mlAnomalyStatsFrom(items, time.Now().UTC())
-	sort.Slice(items, func(i, j int) bool { return items[i].Timestamp > items[j].Timestamp })
-	page.Anomalies = items
+	filtered := make([]mlAnomaly, 0, len(items))
+	for _, item := range items {
+		if f.match(item) {
+			filtered = append(filtered, item)
+		}
+	}
+	page.Stats = mlAnomalyStatsFrom(filtered, time.Now().UTC())
+	sort.Slice(filtered, func(i, j int) bool { return filtered[i].Timestamp > filtered[j].Timestamp })
+	page.Anomalies = filtered
 	return page
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"net/netip"
 	"net/url"
 	"sort"
@@ -30,6 +31,34 @@ type campaignRow struct {
 	Last         string
 	Link         string
 	Explanation  string
+}
+
+// campaignsPage is /campaigns' page data. Previously the route reused the
+// whole periodic-snapshot `snapshot` struct (s.get()) just for its
+// .Campaigns field, which meant it could only ever show the cached,
+// unfiltered 7-day view computed on aggregate.go's own schedule. This gives
+// it a dedicated data function instead (#280) that recomputes live from the
+// current request's filter, same as ipsData/commandsData/clustersData.
+type campaignsPage struct {
+	pageMeta
+	Generated time.Time
+	Campaigns []campaignRow
+	Filters   []string
+}
+
+func (s *store) campaignsData(r *http.Request) campaignsPage {
+	f := parseFilter(r)
+	// Default matches aggregate.go's own periodic snapshot window; ?since=
+	// overrides it, same meaning "since" already has everywhere else.
+	since := time.Now().Add(-7 * 24 * time.Hour)
+	if !f.since.IsZero() {
+		since = f.since
+	}
+	return campaignsPage{
+		Generated: time.Now(),
+		Campaigns: correlateCampaigns(f.filtered(s.getEvents()), since),
+		Filters:   f.describe(),
+	}
 }
 
 // balancedRecent keeps global newest-first ordering while limiting how many
