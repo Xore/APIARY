@@ -79,7 +79,27 @@
 
         <form class="filters" id="github-analysis-filters" method="get" action="/github-analysis"><a class="chip" href="/payloads">&larr; captured payloads</a><input class="hp-input" name="q" value="{{.Query}}" placeholder="hash, family or exit status" aria-label="Search GitHub analyses"><button class="copy" type="submit">search</button>{{if .Query}}<a class="chip" href="/github-analysis">clear</a>{{end}}<span class="chip">{{len .Rows}} analyses</span>{{if .Status.UpdatedAt}}<span class="chip">status {{.Status.UpdatedAt}}</span>{{end}}</form>
 
-        <div class="card wide" id="github-analysis-results"><p class="note">Administrators queue publications with the <strong>Publish</strong> button on the payloads page. Publishing uploads the sample to the public Xore/honeypot repository and third-party scanner APIs and cannot be undone. Search matches hashes, exit status, and family.</p>{{if .Rows}}<table class="data-table"><thead><tr><th>completed</th><th>SHA-256</th><th>family</th><th>detections</th><th>risk</th><th>exit</th><th>details</th></tr></thead><tbody>{{range .Rows}}<tr><td>{{.CompletedAt}}</td><td class="v"><a href="/payload-analysis/{{.SHA256}}">{{.SHA256}}</a></td><td>{{if .Family}}{{.Family}}{{else}}&mdash;{{end}}</td><td class="n">{{if .Verdict}}{{.Verdict.Malicious}} / {{.Verdict.Total}}{{else}}&mdash;{{end}}</td><td>{{if .Verdict}}{{.Verdict.Level}}{{else}}&mdash;{{end}}</td><td class="n">{{if eq .ExitStatus "error"}}<span class="badge badge--muted tw:text-red">error</span>{{else}}{{.ExitStatus}}{{end}}</td><td><a class="lnk" href="/github-analysis/{{.SHA256}}">investigate &rarr;</a></td></tr>{{end}}</tbody></table>{{else}}<p class="empty">No GitHub analyses match this view.</p>{{end}}</div>
+        <div id="github-analysis-results">
+          <p class="note">Administrators queue publications with the <strong>Publish</strong> button on the payloads page. Publishing uploads the sample to the public Xore/honeypot repository and third-party scanner APIs and cannot be undone. Search matches hashes, exit status, and family.</p>
+          {{if .Rows}}
+          <div class="project-grid">
+            {{range .Rows}}
+            <a class="project-card" href="/github-analysis/{{.SHA256}}">
+              <div class="project-card__header">
+                <span class="project-card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
+                <span class="project-card__title mono">{{.SHA256}}</span>
+                <div class="project-card__badges">
+                  {{if eq .ExitStatus "error"}}<span class="badge badge--muted tw:text-red">error</span>{{else}}<span class="badge badge--muted">{{.ExitStatus}}</span>{{end}}
+                  {{if .Family}}<span class="badge badge--accent">{{.Family}}</span>{{end}}
+                </div>
+              </div>
+              <p class="project-card__desc">{{if .Verdict}}{{.Verdict.Malicious}} / {{.Verdict.Total}} detections &bull; {{.Verdict.Level}}{{else}}no verdict recorded{{end}}</p>
+              <div class="project-card__meta"><span>completed {{.CompletedAt}}</span></div>
+            </a>
+            {{end}}
+          </div>
+          {{else}}<p class="empty">No GitHub analyses match this view.</p>{{end}}
+        </div>
 
         {{end}}
 
