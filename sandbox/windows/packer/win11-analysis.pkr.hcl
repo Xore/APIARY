@@ -181,20 +181,33 @@ source "qemu" "win11" {
   headless    = true
 
   # "Press any key to boot from CD or DVD" has to be answered while it is on
-  # screen, and that window is narrow and late: OVMF spends roughly fifteen
-  # seconds initialising first, then the prompt lasts about five. A single
-  # keypress at boot_wait = 2s is delivered into the firmware long before the
-  # prompt exists, is discarded, and the guest falls through to
-  # "No bootable option or device was found" — which looks like broken media
-  # rather than a timing bug.
+  # screen, in a window that is both narrow and late (OVMF ~15s init, ~5s
+  # prompt). Per #288: a rebuilt ISO that removes the prompt entirely
+  # (swapping in efi/microsoft/boot/efisys_noprompt.bin) was tried and
+  # reverted -- it hung completely (30+ min, zero disk growth, black VNC
+  # screen throughout) instead of the original's occasional, at-least-
+  # terminal "Time out" in the boot device log. So this races the prompt,
+  # using spacebar rather than enter (the prompt accepts any key; other
+  # Windows deployment tooling's guidance for this exact prompt uses
+  # spacebar specifically). Extra presses after the installer has started
+  # are harmless; it is already reading autounattend.xml by then.
   #
-  # So keep boot_wait short and spam Enter across the whole window instead.
-  # Extra presses after the installer has started are harmless; it is already
-  # reading autounattend.xml by then.
+  # Not chasing an ever-wider window as the primary defense -- #288 showed
+  # missing the prompt occasionally is a real, accepted cost of this
+  # approach, and build-with-retry.sh's whole-build retry (already in
+  # place) is a better fit for an occasional miss than a longer spam window
+  # that still isn't guaranteed to cover a sufficiently unlucky delay.
+  #
+  # This specific fix (50d12e4 widen -> 89a516d revert boot_wait ->
+  # d14b1e0 noprompt-ISO detour -> 0ae41a2 revert+spacebar) was worked out
+  # in the same investigation as the FLARE-VM removal above, but committed
+  # onto the wrong branch (dashboard-280-filterbar-phase4, an unrelated
+  # dashboard feature branch someone had checked out) and never reached
+  # main until now. Ported the net result here rather than merging that
+  # branch, since its other commit is unrelated dashboard work.
   boot_wait = "5s"
   boot_command = [
-    "<enter><wait2><enter><wait2><enter><wait2><enter><wait2><enter>",
-    "<wait2><enter><wait2><enter><wait2><enter><wait2><enter><wait2><enter>",
+    "<spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar>",
   ]
 }
 
