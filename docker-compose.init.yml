@@ -241,6 +241,24 @@ services:
           "${ARKIME_ADMIN_PASSWORD:-change-me-arkime}" --admin --webauthonly --createOnly \
           || echo "admin user already exists (createOnly), nothing changed"
 
+        # #275: --createOnly above makes the *creation* idempotent, but it is
+        # also why a doc created by a pre-#134 version of this job (real
+        # passStore, headerAuthEnabled=false) can never be healed by it --
+        # addUser.js just logs "already exists" and leaves a stale doc alone
+        # forever, on every future deploy, even after this file's own fix
+        # landed. A partial ES _update (merge, not the full-document
+        # op_type=index PUT #134 removed) re-asserts the two auth-relevant
+        # fields on whatever admin doc exists right now, every run, without
+        # touching roles/settings/other admin-managed fields -- so it can't
+        # reintroduce #134's original bug while still guaranteeing a stale
+        # pre-fix doc gets corrected instead of silently surviving.
+
+        curl -sf -X POST "http://elasticsearch:9200/arkime_users/_update/admin" \
+          -H 'Content-Type: application/json' \
+          -d "{\"doc\":{\"headerAuthEnabled\":true,\"passStore\":\"$$(head -c32 /dev/urandom | sha256sum | cut -d' ' -f1)\"}}" \
+          > /dev/null \
+          || echo "warning: could not force headerAuthEnabled on the admin user (#275)"
+
         mkdir -p /markers && touch /markers/arkime-init.done
     volumes:
       - /opt/stacks/honeypot-stack/arkime/config.ini:/opt/arkime/etc/config.ini:ro
