@@ -61,7 +61,8 @@ func TestWorkbenchRegistryDerivesApplicabilityAndAvailability(t *testing.T) {
 	_, root := newWorkbenchFixture(t, []byte("MZ"+strings.Repeat("\x00", 200)))
 	ghidraRequests, ghidraResults := filepath.Join(root, "ghidra-requests"), filepath.Join(root, "ghidra-results")
 	windowsRequests, windowsResults := filepath.Join(root, "windows-requests"), filepath.Join(root, "windows-results")
-	for _, dir := range []string{ghidraRequests, ghidraResults, windowsRequests, windowsResults} {
+	revdeckRequests, revdeckResults := filepath.Join(root, "revdeck-requests"), filepath.Join(root, "revdeck-results")
+	for _, dir := range []string{ghidraRequests, ghidraResults, windowsRequests, windowsResults, revdeckRequests, revdeckResults} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -73,12 +74,31 @@ func TestWorkbenchRegistryDerivesApplicabilityAndAvailability(t *testing.T) {
 	t.Setenv("GHIDRA_RESULTS_DIR", ghidraResults)
 	t.Setenv("WINDOWS_SANDBOX_REQUEST_DIR", windowsRequests)
 	t.Setenv("WINDOWS_SANDBOX_RESULTS_DIR", windowsResults)
+	t.Setenv("REVDECK_REQUEST_DIR", revdeckRequests)
+	t.Setenv("REVDECK_RESULTS_DIR", revdeckResults)
 	registry := workbenchRegistry(classifyPayload([]byte("MZ" + strings.Repeat("\x00", 200))))
 	ghidra, _ := workbenchAnalyzerByID(registry, "ghidra")
 	windows, _ := workbenchAnalyzerByID(registry, "windows-sandbox")
 	linux, _ := workbenchAnalyzerByID(registry, "linux-sandbox")
+	revdeck, _ := workbenchAnalyzerByID(registry, "revdeck")
 	if !ghidra.Applicable || !ghidra.Available || !windows.Applicable || !windows.Available || linux.Applicable {
 		t.Fatalf("server-derived registry is wrong: ghidra=%+v windows=%+v linux=%+v", ghidra, windows, linux)
+	}
+	if !revdeck.Available || revdeck.ResultLinkShape != "/revdeck/{sha256}" {
+		t.Fatalf("revdeck should be available with the standalone spool configured: %+v", revdeck)
+	}
+}
+
+// Absent REVDECK_REQUEST_DIR/_RESULTS_DIR (the default) must leave the
+// standalone adapter unavailable, distinct from the "revdeck" field embedded
+// inside a "ghidra" analyzer result, which this Go process cannot see or
+// health-check at all (#78).
+func TestWorkbenchRegistryRevdeckUnconfiguredByDefault(t *testing.T) {
+	_, _ = newWorkbenchFixture(t, []byte("MZ"+strings.Repeat("\x00", 200)))
+	registry := workbenchRegistry(classifyPayload([]byte("MZ" + strings.Repeat("\x00", 200))))
+	revdeck, _ := workbenchAnalyzerByID(registry, "revdeck")
+	if revdeck.Available || revdeck.Availability != "unconfigured" {
+		t.Fatalf("revdeck should be unconfigured with no spool set: %+v", revdeck)
 	}
 }
 
@@ -129,6 +149,71 @@ func TestWorkbenchGhidraQueueCancelAndPartialFailure(t *testing.T) {
 	}
 	if reconciled.State != "partial" || reconciled.Children[0].State != "completed" || reconciled.Children[1].State != "failed" || !reconciled.Children[1].Retryable {
 		t.Fatalf("partial failure was not preserved: %+v", reconciled)
+	}
+}
+
+// The standalone revdeck adapter (#78) submits to its own spool, independent
+// of the "ghidra" analyzer above -- selecting only "revdeck" must not create
+// a Ghidra request marker at all.
+func TestWorkbenchRevdeckStandaloneQueueAndResult(t *testing.T) {
+	s, root := newWorkbenchFixture(t, []byte("MZ"+strings.Repeat("\x00", 200)))
+	ghidraRequests := filepath.Join(root, "ghidra-requests")
+	requests, results := filepath.Join(root, "revdeck-requests"), filepath.Join(root, "revdeck-results")
+	for _, dir := range []string{ghidraRequests, requests, results} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("GHIDRA_REQUEST_DIR", ghidraRequests)
+	t.Setenv("REVDECK_REQUEST_DIR", requests)
+	t.Setenv("REVDECK_RESULTS_DIR", results)
+	selections := append(deterministicSelection(), workbenchSelection{AnalyzerID: "revdeck", Options: defaultWorkbenchOptions("ghidra")})
+	run, _, err := s.createWorkbenchRun(workbenchRunRequest{PayloadSHA256: workbenchTestHash, Analyzers: selections}, "owner-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !markerExists(requests, workbenchTestHash, ".request") {
+		t.Fatal("Rev·Deck request marker missing")
+	}
+	if markerExists(ghidraRequests, workbenchTestHash, ".request") {
+		t.Fatal("selecting revdeck alone must not also queue a Ghidra request")
+	}
+
+	// A failed standalone run: RevDeck is nil and exit_status is "error" --
+	// the failure mode drain_revdeck() actually writes when REVDECK_API_BASE
+	// is unset or the answer comes back empty.
+	failResult := map[string]any{"version": 1, "sha256": workbenchTestHash, "requested_at": run.CreatedAt.Format(time.RFC3339Nano), "started_at": run.CreatedAt.Format(time.RFC3339Nano), "completed_at": run.CreatedAt.Add(time.Second).Format(time.RFC3339Nano), "exit_status": "error", "error": "REVDECK_API_BASE is not configured on this worker", "revdeck": nil}
+	body, _ := json.Marshal(failResult)
+	if err := os.WriteFile(filepath.Join(results, workbenchTestHash+"_revdeck.json"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reconciled, err := s.getWorkbenchRun(run.ID, "owner-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	revdeckChild := reconciled.Children[1]
+	if revdeckChild.State != "failed" || revdeckChild.Reason != "REVDECK_API_BASE is not configured on this worker" || revdeckChild.ResultURL != "/revdeck/"+workbenchTestHash || !revdeckChild.Retryable {
+		t.Fatalf("failed standalone revdeck result not reconciled: %+v", revdeckChild)
+	}
+
+	// A separate recipe revision, this time completing successfully.
+	selections[1].Options.TimeoutSeconds++
+	run, _, err = s.createWorkbenchRun(workbenchRunRequest{PayloadSHA256: workbenchTestHash, Analyzers: selections}, "owner-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	okResult := map[string]any{"version": 1, "sha256": workbenchTestHash, "requested_at": run.CreatedAt.Format(time.RFC3339Nano), "started_at": run.CreatedAt.Format(time.RFC3339Nano), "completed_at": run.CreatedAt.Add(time.Second).Format(time.RFC3339Nano), "exit_status": "ok", "revdeck": map[string]any{"workflow": "program_triage", "status": "complete", "answer": "looks benign", "tool_calls": 3}}
+	body, _ = json.Marshal(okResult)
+	if err := os.WriteFile(filepath.Join(results, workbenchTestHash+"_revdeck.json"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reconciled, err = s.getWorkbenchRun(run.ID, "owner-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	revdeckChild = reconciled.Children[1]
+	if revdeckChild.State != "completed" || !strings.Contains(revdeckChild.Summary, "program_triage") || !strings.Contains(revdeckChild.Summary, "3 tool call") {
+		t.Fatalf("completed standalone revdeck result not reconciled: %+v", revdeckChild)
 	}
 }
 

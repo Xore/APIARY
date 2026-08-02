@@ -15,11 +15,18 @@
 > [#192](https://github.com/Xore/honeypot-stack/issues/192) for a caveat
 > found along the way), and `report/generate_report.py` renders an HTML
 > report from every automated worker result, including capa and revdeck
-> sections. Still missing: a *standalone*, independently orchestrated
-> dashboard workbench adapter for Rev·Deck (its own submission path and
-> result link) — today it only runs embedded inside the `ghidra` analyzer's
-> own pipeline, which the `revdeck` workbench entry in
-> [`workbench_domain.go`](../../dashboard/workbench_domain.go) still notes.  
+> sections. **The standalone Rev·Deck workbench adapter is also built**
+> (2026-08-02, #78): a second, independent request/results spool
+> (`REVDECK_REQUEST_DIR`/`REVDECK_RESULTS_DIR`, `drain_revdeck()` in
+> `worker/ghidra-worker.py`) alongside the Ghidra one, so an operator can
+> select Rev·Deck on its own in the workbench UI without also paying for a
+> full, redundant Ghidra analysis — `revdeck_triage()` never actually needed
+> the Ghidra REST job's own artifacts, only the sample bytes, so nothing
+> about running it standalone duplicates work. Its own result page lives at
+> `/revdeck/{sha256}`, and the `revdeck` entry in
+> [`workbench_domain.go`](../../dashboard/workbench_domain.go) is now
+> `Available` whenever that spool is configured, closing out #78's last open
+> item.  
 > **Tracked in**: [#78](https://github.com/Xore/honeypot-stack/issues/78)
 > (phases 3–5), [#76](https://github.com/Xore/honeypot-stack/issues/76)
 > (dashboard spool and entry points),
@@ -97,13 +104,15 @@ Three corrections against the layout this section used to show:
   list, and as of 2026-08-01 (#78) the LLM automation *contract* on top of it
   is built too — `worker/ghidra-worker.py`'s `revdeck_triage()`, verified
   against a real clone of `biniamf/ai-reverse-engineering` (see
-  `revdeck/README.md`). What is still unbuilt is specifically the
-  *standalone* piece: the dashboard's `revdeck` workbench adapter
-  ([`workbench_domain.go`](../../dashboard/workbench_domain.go)) is a
+  `revdeck/README.md`). **The standalone piece is also built** (2026-08-02,
+  #78): the dashboard's `revdeck` workbench adapter
+  ([`workbench_domain.go`](../../dashboard/workbench_domain.go)) is now a
   separately orchestrated, independently selectable analyzer with its own
-  submission path and result link, which is a different thing from Rev·Deck
-  running automatically as an enrichment embedded in the `ghidra` analyzer's
-  own result — that part remains `Available: false`.
+  submission path (`REVDECK_REQUEST_DIR`, drained by `drain_revdeck()` in
+  `worker/ghidra-worker.py`, independent of the Ghidra spool) and its own
+  result link (`/revdeck/{sha256}`) — a different thing from Rev·Deck running
+  automatically as an enrichment embedded in the `ghidra` analyzer's own
+  result, and no longer `Available: false`.
 - `report/` has no `templates/` subdirectory. [`generate_report.py`](report/generate_report.py)
   follows [#56](https://github.com/Xore/honeypot-stack/issues/56)'s
   `sandbox/windows/orchestrate/generate_report.py`, which doesn't use one

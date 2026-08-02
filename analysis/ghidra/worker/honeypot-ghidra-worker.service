@@ -41,10 +41,11 @@ ProtectHome=true
 # unable to write anywhere, and the first symptom is a read-only filesystem
 # error on a spool the operator can see is perfectly writable.
 #
-# These must agree with GHIDRA_REQUEST_DIR and GHIDRA_RESULTS_DIR in
-# /etc/default/honeypot-ghidra. systemd cannot expand EnvironmentFile values
-# here, so pointing the worker at a different directory means editing both.
-ReadWritePaths=/var/lib/honeypot-ghidra/requests/pending /var/lib/honeypot-ghidra/results /run/lock
+# These must agree with GHIDRA_REQUEST_DIR/GHIDRA_RESULTS_DIR and
+# REVDECK_REQUEST_DIR/REVDECK_RESULTS_DIR in /etc/default/honeypot-ghidra.
+# systemd cannot expand EnvironmentFile values here, so pointing the worker
+# at a different directory means editing both.
+ReadWritePaths=/var/lib/honeypot-ghidra/requests/pending /var/lib/honeypot-ghidra/results /run/lock /var/lib/honeypot-revdeck/requests/pending /var/lib/honeypot-revdeck/results
 
 [Install]
 WantedBy=multi-user.target

@@ -233,6 +233,13 @@ fi
 install -d -m 0700 -o root -g root \
   /var/lib/honeypot-ghidra/requests/pending /var/lib/honeypot-ghidra/results
 
+# Standalone Rev·Deck spool (#78), same posture as above. Created
+# unconditionally, same as the Ghidra one -- REVDECK_API_BASE (empty by
+# default) is what actually gates whether a request submitted here can
+# succeed, not whether this directory exists.
+install -d -m 0700 -o root -g root \
+  /var/lib/honeypot-revdeck/requests/pending /var/lib/honeypot-revdeck/results
+
 for unit in honeypot-ghidra-worker.service honeypot-ghidra-worker.path; do
   install -m 0644 -o root -g root "$here/worker/$unit" "/etc/systemd/system/$unit"
 done
