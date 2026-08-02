@@ -22,6 +22,8 @@
     <button class="sidebar__item" type="button" data-hp-pane-nav="honeypot">Honeypot operations</button>
     <button class="sidebar__item" type="button" data-hp-pane-nav="users">Users</button>
     <button class="sidebar__item" type="button" data-hp-pane-nav="services">Services</button>
+    <button class="sidebar__item" type="button" data-hp-pane-nav="elasticsearch">Elasticsearch history</button>
+    <button class="sidebar__item" type="button" data-hp-pane-nav="dead-letters">Ingest dead letters</button>
     <button class="sidebar__item" type="button" data-hp-pane-nav="history">Configuration history</button>
     <button class="sidebar__item" type="button" data-hp-pane-nav="audit">Audit log</button>
     {{end}}
@@ -557,6 +559,42 @@
           </table></div>
           <button type="button" hidden data-hp-evidence="services-log" data-hp-services-log-trigger>View logs</button>
           <div hidden data-hp-evidence-body="services-log" data-hp-evidence-note="Most recent lines, newest at the bottom."><pre data-hp-services-log-pre></pre></div>
+        </section>
+      </section>
+
+      <!-- Elasticsearch history: raw query_string search across every indexed
+           honeypot/Suricata document. #257 moved this out of the primary
+           Evidence nav (ops tooling, not investigation evidence an analyst
+           browses) and into an admin-only pane, reusing the same /api/history
+           and /export/history.json endpoints the standalone /history page
+           used. -->
+      <section class="hp-settings-pane" data-hp-pane="elasticsearch" aria-label="Elasticsearch history" hidden>
+        <section class="card hp-field" data-hp-search="elasticsearch history query search documents indexed">
+          <div class="card__header">
+            <div><h3>Elasticsearch history</h3><p class="card__meta">Run a query_string search across every indexed honeypot and Suricata document.</p></div>
+            <div class="hp-head-actions">
+              <a class="btn btn-ghost btn-sm" id="hp-es-history-export" href="/export/history.json" title="Download the current result set as JSON">Export JSON</a>
+            </div>
+          </div>
+          <div class="filters"><input id="hp-es-history-q" class="search" placeholder="query_string, e.g. honeypot.sensor:cowrie AND honeypot.username:root" aria-label="Elasticsearch query"><button id="hp-es-history-run" class="copy" type="button">search</button></div>
+          <p id="hp-es-history-meta" class="card__meta">Enter an Elasticsearch query or leave blank for newest documents.</p>
+          <pre id="hp-es-history-results" class="code">waiting</pre>
+        </section>
+      </section>
+
+      <!-- Ingest dead letters: documents Elasticsearch rejected. Same move as
+           above, reusing /api/dead-letters (list + purge). -->
+      <section class="hp-settings-pane" data-hp-pane="dead-letters" aria-label="Ingest dead letters" hidden>
+        <section class="card hp-field" data-hp-search="dead letters rejected ingest documents purge">
+          <div class="card__header">
+            <div><h3>Ingest dead letters</h3><p class="card__meta">Documents Elasticsearch rejected, with their original error and field shape for remediation.</p></div>
+            <div class="hp-head-actions">
+              <button class="btn btn-danger btn-sm" type="button" id="hp-dead-letters-purge">Purge shown</button>
+            </div>
+          </div>
+          <div class="filters"><input id="hp-dead-letters-q" class="search" placeholder="optional Elasticsearch query" aria-label="Dead-letter query"><button id="hp-dead-letters-run" class="copy" type="button">search</button></div>
+          <p id="hp-dead-letters-meta" class="card__meta">Loading rejected documents&hellip;</p>
+          <div id="hp-dead-letters-rows" data-hp-lazy-list></div>
         </section>
       </section>
 

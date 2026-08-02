@@ -175,10 +175,12 @@
       honeypot:   { title: "Honeypot operations",    desc: "Staged operational thresholds. Saving never restarts anything — apply with an operator-run restart." },
       users:      { title: "Users",                  desc: "Read-only projection of dashboard activity. Accounts are managed in the auth service." },
       services:   { title: "Services",                desc: "Live container status for sensors, probes, and analysis workers, with start/stop/restart and logs." },
+      elasticsearch: { title: "Elasticsearch history", desc: "Raw query_string search across every indexed honeypot and Suricata document." },
+      "dead-letters": { title: "Ingest dead letters", desc: "Documents Elasticsearch rejected, with their original error and field shape." },
       history:    { title: "Configuration history",  desc: "Retained configuration revisions with rollback." },
       audit:      { title: "Audit log",              desc: "Settings changes with actor, fields, and result." }
     };
-    const ADMIN_PANES = ["branding", "behavior", "honeypot", "users", "services", "history", "audit"];
+    const ADMIN_PANES = ["branding", "behavior", "honeypot", "users", "services", "elasticsearch", "dead-letters", "history", "audit"];
     const isAdmin = navItems.some(nav => ADMIN_PANES.includes(nav.dataset.hpPaneNav));
 
     /* ---- state ----
@@ -295,6 +297,8 @@
         if (name === "branding" || name === "behavior" || name === "honeypot") loadConfig();
         else if (name === "users") loadUsers();
         else if (name === "services") loadServices();
+        else if (name === "elasticsearch") loadElasticsearchHistory();
+        else if (name === "dead-letters") loadDeadLetters();
         else if (name === "history") loadHistory();
         else if (name === "audit") loadAudit();
       }
@@ -971,6 +975,92 @@
 
     const servicesRefresh = q("[data-hp-services-refresh]");
     if (servicesRefresh) servicesRefresh.addEventListener("click", loadServices);
+
+    /* ---- Elasticsearch history (#257: moved out of the primary Evidence
+       nav into an admin-only pane; same /api/history + /export/history.json
+       endpoints the standalone /history page used) ---- */
+    async function loadElasticsearchHistory() {
+      const out = q("#hp-es-history-results"), meta = q("#hp-es-history-meta"), exportLink = q("#hp-es-history-export");
+      const input = q("#hp-es-history-q");
+      if (!out || !meta || !input) return;
+      const query = input.value.trim();
+      const suffix = query ? "&q=" + encodeURIComponent(query) : "";
+      if (exportLink) exportLink.href = "/export/history.json?limit=500" + suffix;
+      meta.textContent = "loading…";
+      try {
+        const { body } = await api("/api/history?limit=200" + suffix);
+        const hits = body.hits?.hits || [];
+        meta.textContent = hits.length + " documents shown";
+        out.textContent = hits.map(h => JSON.stringify(h._source, null, 2)).join("\n\n");
+      } catch (error) {
+        meta.textContent = "query failed";
+        out.textContent = error.message;
+      }
+    }
+    const esHistoryRun = q("#hp-es-history-run"), esHistoryQ = q("#hp-es-history-q");
+    if (esHistoryRun) esHistoryRun.addEventListener("click", loadElasticsearchHistory);
+    if (esHistoryQ) esHistoryQ.addEventListener("keydown", e => { if (e.key === "Enter") loadElasticsearchHistory(); });
+
+    /* ---- ingest dead letters (#257: same move, reusing /api/dead-letters
+       for both listing and the destructive purge) ---- */
+    let deadLettersShownCount = 0;
+    async function loadDeadLetters() {
+      const rows = q("#hp-dead-letters-rows"), meta = q("#hp-dead-letters-meta"), input = q("#hp-dead-letters-q");
+      if (!rows || !meta || !input) return;
+      const query = input.value.trim();
+      meta.textContent = "loading";
+      try {
+        const { body } = await api("/api/dead-letters?limit=200" + (query ? "&q=" + encodeURIComponent(query) : ""));
+        const hits = body.hits?.hits || [];
+        deadLettersShownCount = hits.length;
+        meta.textContent = hits.length + " rejected documents shown";
+        rows.textContent = "";
+        if (!hits.length) { rows.textContent = "No matching dead letters."; return; }
+        hits.forEach(hit => {
+          const detail = document.createElement("details");
+          detail.className = "tw:border-b tw:border-subtle tw:py-2";
+          const source = hit._source || {};
+          const stamp = source["@timestamp"] || "";
+          const errorText = source.error?.message || source.error?.type || "rejected document";
+          const summary = document.createElement("summary");
+          summary.className = "v";
+          summary.textContent = stamp + " - " + errorText;
+          const pre = document.createElement("pre");
+          pre.className = "code tw:mt-2";
+          pre.textContent = JSON.stringify(source, null, 2);
+          detail.append(summary, pre);
+          rows.appendChild(detail);
+        });
+      } catch (error) {
+        meta.textContent = "query failed";
+        rows.textContent = error.message;
+      }
+    }
+    const deadLettersRun = q("#hp-dead-letters-run"), deadLettersQ = q("#hp-dead-letters-q"), deadLettersPurge = q("#hp-dead-letters-purge");
+    if (deadLettersRun) deadLettersRun.addEventListener("click", loadDeadLetters);
+    if (deadLettersQ) deadLettersQ.addEventListener("keydown", e => { if (e.key === "Enter") loadDeadLetters(); });
+    if (deadLettersPurge) deadLettersPurge.addEventListener("click", () => {
+      const query = deadLettersQ ? deadLettersQ.value.trim() : "";
+      const scope = query ? `matching "${query}"` : "every retained dead letter (no query is set)";
+      openConfirm({
+        titleText: "Purge these dead letters?",
+        descText: `Permanently deletes ${scope} from Elasticsearch. This cannot be undone.`,
+        warningText: `${deadLettersShownCount} shown right now; the purge itself is not limited to what is shown and removes every retained document matching the same query.`,
+        actionLabel: "Purge dead letters",
+        danger: true,
+        initiator: deadLettersPurge,
+        onConfirm: async () => {
+          try {
+            const { body } = await api("/api/dead-letters" + (query ? "?q=" + encodeURIComponent(query) : ""), { method: "DELETE" });
+            const deleted = body.deleted || 0;
+            await loadDeadLetters();
+            setStatus(`${deleted} dead letter${deleted === 1 ? "" : "s"} purged.`, "ok");
+          } catch (error) {
+            setStatus("Purge failed: " + error.message.trim(), "error");
+          }
+        }
+      });
+    });
 
     /* ---- configuration history + rollback ---- */
     async function loadHistory() {
