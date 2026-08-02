@@ -528,11 +528,13 @@
     reNonce(source);
     if (options.preserveMap && refreshOverviewPreservingMap(source)) {
       initLazyViews(pageContent);
+      applyTimezone(prefState.prefs?.timezone);
       return;
     }
     pageContent.replaceChildren(...source.children);
     source.remove();
     initLazyViews(pageContent);
+    applyTimezone(prefState.prefs?.timezone);
   };
   window.replaceHoneypotPage = mountPage;
 
@@ -832,10 +834,39 @@
         return readPrefResponse(response);
       }).catch(() => {});
     };
+    /* Timezone display conversion (#282): every event timestamp is a fixed
+       UTC string baked in once by the server's shared, cross-viewer event
+       cache (rebuild() in aggregate.go), long before any per-viewer
+       preference is known -- alongside a machine-readable data-hp-utc twin.
+       Reformat client-side into whichever zone this viewer's own preference
+       resolves to: "browser" defers entirely to the browser's own locale/
+       zone (Intl's default when no timeZone option is given), "utc" is a
+       no-op (the server-rendered fallback already is UTC), anything else is
+       an explicit IANA zone name. formatToParts, not a locale's own
+       punctuation, keeps the "YYYY-MM-DD HH:MM:SS" shape consistent with
+       the server-rendered fallback regardless of the browser's locale. */
+    const applyTimezone = tz => {
+      if (!tz || tz === "utc") return;
+      const options = {year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false};
+      if (tz !== "browser") options.timeZone = tz;
+      let formatter;
+      try { formatter = new Intl.DateTimeFormat("en-CA", options); }
+      catch { return; } // an invalid IANA zone name: leave the UTC fallback showing
+      document.querySelectorAll("[data-hp-utc]").forEach(el => {
+        const parsed = new Date(el.dataset.hpUtc);
+        if (Number.isNaN(parsed.getTime())) return;
+        const parts = {};
+        formatter.formatToParts(parsed).forEach(p => { parts[p.type] = p.value; });
+        if (!parts.year) return;
+        el.textContent = `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+      });
+    };
     const applyEffectivePrefs = prefs => {
       if (!prefs) return;
       if (prefs.theme === "dark" || prefs.theme === "light" || prefs.theme === "system") applyTheme(prefs.theme);
       if (innerWidth > 520 && typeof prefs.collapsed_sidebar === "boolean") setSidebarCollapsed(prefs.collapsed_sidebar);
+      applyTimezone(prefs.timezone);
     };
     /* One-time migration of recognized localStorage preferences. The marker
        is set before the write so a failed migration never loops. */

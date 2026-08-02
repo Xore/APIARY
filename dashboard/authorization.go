@@ -105,7 +105,8 @@ func (s *store) serveWhoAmI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s != nil && s.settings != nil {
-		s.settings.users.Upsert(identity)
+		config, _ := s.settings.config.Get()
+		s.settings.users.Upsert(identity, config.Behavior.DefaultTimezone)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")

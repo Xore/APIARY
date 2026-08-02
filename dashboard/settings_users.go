@@ -100,7 +100,13 @@ func validateUsersDocument(doc usersDocument) error {
 // best-effort: callers invoke it after a successful introspection and ignore
 // the error, because a full disk must not break authentication. Writes are
 // throttled to projectionWriteInterval unless identity material changed.
-func (u *userStore) Upsert(identity authenticatedIdentity) {
+//
+// siteDefaultTimezone (#282) seeds a brand new subject's own Timezone
+// preference -- the operator's current behavior.default_timezone, not a
+// hardcoded "browser" literal every new subject used to get regardless of
+// the operator's own locale. Once set, a subject's own preference always
+// wins over this; it only matters the very first time a subject is seen.
+func (u *userStore) Upsert(identity authenticatedIdentity, siteDefaultTimezone string) {
 	if u == nil || !validSubject(identity.Subject) {
 		return
 	}
@@ -131,7 +137,7 @@ func (u *userStore) Upsert(identity authenticatedIdentity) {
 			FirstSeen:          now,
 			LastSeen:           now,
 			PreferencesVersion: settingsSchemaVersion,
-			Preferences:        defaultPreferences(),
+			Preferences:        defaultPreferencesWithSiteTimezone(siteDefaultTimezone),
 		})
 		if len(doc.Users) > maxProjectedUsers {
 			sort.SliceStable(doc.Users, func(i, j int) bool {
@@ -279,10 +285,12 @@ func (u *userStore) UpdatePreferences(actor authenticatedIdentity, ifMatch, requ
 	return newEtag, nil
 }
 
-// ResetPreferences restores compiled defaults for one subject.
-func (u *userStore) ResetPreferences(actor authenticatedIdentity, ifMatch, requestID, clientIP string) (string, error) {
+// ResetPreferences restores defaults for one subject -- the operator's
+// current site-wide default timezone (#282), same as a brand new subject
+// gets, not a hardcoded "browser" literal.
+func (u *userStore) ResetPreferences(actor authenticatedIdentity, ifMatch, requestID, clientIP, siteDefaultTimezone string) (string, error) {
 	return u.UpdatePreferences(actor, ifMatch, requestID, clientIP, func(p *userPreferences) error {
-		*p = defaultPreferences()
+		*p = defaultPreferencesWithSiteTimezone(siteDefaultTimezone)
 		return nil
 	})
 }

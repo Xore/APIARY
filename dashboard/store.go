@@ -124,8 +124,13 @@ type heatmapCell struct {
 // storedEvent is one fully-normalised event kept in memory so the /events
 // and /ips drill-down pages can filter without re-reading the logs.
 type storedEvent struct {
-	when          time.Time
-	Time          string
+	when time.Time
+	Time string
+	// UTC is the same instant as Time, machine-readable (RFC3339), for
+	// client-side timezone conversion (#282) -- Time itself stays a fixed
+	// UTC display string since it's computed once in rebuild()'s shared,
+	// cross-viewer cache, long before any per-viewer preference is known.
+	UTC           string
 	Sensor        string
 	Persona       string `json:",omitempty"`
 	Site          string `json:",omitempty"`

@@ -228,8 +228,13 @@ func (s *store) rebuild() {
 				}
 			}
 			evs = append(evs, storedEvent{
-				when:          ev.when,
-				Time:          ev.whenStr,
+				when: ev.when,
+				Time: ev.whenStr,
+				// Empty, not a zero-value RFC3339 string, when ev.when never
+				// parsed (when()'s "unknown format" branch) -- the client must
+				// not reformat "0001-01-01" into something that looks like a
+				// real, if wrong, date.
+				UTC:           utcOrEmpty(ev.when),
 				Sensor:        ev.sensor,
 				Persona:       ev.persona,
 				Site:          ev.site,

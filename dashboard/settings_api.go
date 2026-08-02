@@ -227,12 +227,13 @@ func (s *store) serveSettingsMe(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.settings.users.Upsert(identity)
+	siteConfig, _ := s.settings.config.Get()
+	s.settings.users.Upsert(identity, siteConfig.Behavior.DefaultTimezone)
 	preferences, etag, found := s.settings.users.Preferences(identity.Subject)
 	if !found {
 		// The store is read-only (degraded or full disk): serve compiled
 		// defaults rather than failing the page. Writes will report 503.
-		preferences = defaultPreferences()
+		preferences = defaultPreferencesWithSiteTimezone(siteConfig.Behavior.DefaultTimezone)
 		_, etag = s.settings.users.inner.Get()
 	}
 	writePreferences(w, preferences, etag)
@@ -292,7 +293,8 @@ func (s *store) servePreferencesReset(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	etag, err := s.settings.users.ResetPreferences(identity, r.Header.Get("If-Match"), requestID(r), clientIP(r))
+	siteConfig, _ := s.settings.config.Get()
+	etag, err := s.settings.users.ResetPreferences(identity, r.Header.Get("If-Match"), requestID(r), clientIP(r), siteConfig.Behavior.DefaultTimezone)
 	if err != nil {
 		s.settings.preferenceFailures.Add(1)
 		writePreferenceError(w, err)

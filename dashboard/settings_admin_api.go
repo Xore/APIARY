@@ -83,6 +83,7 @@ type behaviorPatch struct {
 	ShowMLPanels       *bool   `json:"show_ml_panels"`
 	MaintenanceMode    *bool   `json:"maintenance_mode"`
 	ReadOnly           *bool   `json:"read_only"`
+	DefaultTimezone    *string `json:"default_timezone"`
 }
 
 type honeypotPatch struct {
@@ -160,6 +161,10 @@ func (p configPatch) apply(c *dashboardConfig) []string {
 		if q.MapProvider != nil {
 			c.Behavior.MapProvider = *q.MapProvider
 			fields = append(fields, "behavior.map_provider")
+		}
+		if q.DefaultTimezone != nil {
+			c.Behavior.DefaultTimezone = *q.DefaultTimezone
+			fields = append(fields, "behavior.default_timezone")
 		}
 		if q.ShowMLPanels != nil {
 			c.Behavior.ShowMLPanels = *q.ShowMLPanels

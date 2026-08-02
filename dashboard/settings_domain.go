@@ -23,7 +23,7 @@ var errSettingsValidation = errors.New("settings validation failed")
 
 // settingsSchemaVersion is the current on-disk schema. The migration registry
 // below exists so future versions slot in without touching the store layer.
-const settingsSchemaVersion = 2
+const settingsSchemaVersion = 3
 
 // migrations upgrades a persisted payload from schema version N to N+1.
 // Unknown older versions fail loudly instead of being silently misread, and
@@ -31,6 +31,7 @@ const settingsSchemaVersion = 2
 // it does not understand.
 var migrations = map[int]func(json.RawMessage) (json.RawMessage, error){
 	1: migrateAddMLAlertThresholdDefault,
+	2: migrateAddDefaultTimezone,
 }
 
 // migrateAddMLAlertThresholdDefault backfills honeypot.ml_alert_threshold
@@ -70,6 +71,47 @@ func migrateAddMLAlertThresholdDefault(payload json.RawMessage) (json.RawMessage
 		return nil, err
 	}
 	doc["honeypot"] = newHoneypot
+	return json.Marshal(doc)
+}
+
+// migrateAddDefaultTimezone backfills behavior.default_timezone (#282) for
+// config documents persisted before that field existed -- same failure
+// shape migrateAddMLAlertThresholdDefault above already fixed once: a
+// required, validated field added without a migration decodes fine (missing
+// fields just zero-value) but then fails validTimezone("")'s check on the
+// resulting "", so validateConfig rejects the whole document and the store
+// falls back to serving compiled defaults, read-only, discarding every
+// other saved setting until an operator intervenes.
+//
+// Shared migration registry, so this must be a no-op for any payload shape
+// that isn't a dashboardConfig: no "behavior" object, or one that already
+// has the field.
+func migrateAddDefaultTimezone(payload json.RawMessage) (json.RawMessage, error) {
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &doc); err != nil {
+		return payload, nil
+	}
+	behaviorRaw, ok := doc["behavior"]
+	if !ok {
+		return payload, nil
+	}
+	var behavior map[string]json.RawMessage
+	if err := json.Unmarshal(behaviorRaw, &behavior); err != nil {
+		return payload, nil
+	}
+	if _, exists := behavior["default_timezone"]; exists {
+		return payload, nil
+	}
+	encoded, err := json.Marshal(defaultDashboardConfig().Behavior.DefaultTimezone)
+	if err != nil {
+		return nil, err
+	}
+	behavior["default_timezone"] = encoded
+	newBehavior, err := json.Marshal(behavior)
+	if err != nil {
+		return nil, err
+	}
+	doc["behavior"] = newBehavior
 	return json.Marshal(doc)
 }
 
@@ -124,6 +166,21 @@ func defaultPreferences() userPreferences {
 		NotifySeverity:     "high",
 		DefaultEventWindow: "24h",
 	}
+}
+
+// defaultPreferencesWithSiteTimezone is defaultPreferences with Timezone
+// overridden by the site-wide default (#282), for the two places a fresh
+// preferences document gets materialized for a subject: first contact
+// (userStore.Upsert) and an explicit reset (userStore.ResetPreferences).
+// siteDefault is the operator's own behavior.default_timezone -- validated
+// already by validateConfig, but checked again here since a config store
+// left in its pre-migration/degraded state could still hand back "".
+func defaultPreferencesWithSiteTimezone(siteDefault string) userPreferences {
+	prefs := defaultPreferences()
+	if validTimezone(siteDefault) {
+		prefs.Timezone = siteDefault
+	}
+	return prefs
 }
 
 // Bounded choice sets. Refresh intervals and page sizes are deliberately
@@ -247,6 +304,14 @@ type behaviorConfig struct {
 	ShowMLPanels       bool   `json:"show_ml_panels"`
 	MaintenanceMode    bool   `json:"maintenance_mode"`
 	ReadOnly           bool   `json:"read_only"`
+	// DefaultTimezone (#282) is what a brand new user's own Timezone
+	// preference starts as -- the "real site-wide default concept" that
+	// issue asked for, distinct from a hardcoded "browser" literal every
+	// new subject used to get regardless of the operator's own locale.
+	// Same accepted values as the per-user preference (validTimezone):
+	// "browser", "utc", or an IANA zone. A user's own preference, once set,
+	// always wins over this.
+	DefaultTimezone string `json:"default_timezone"`
 }
 
 // honeypotConfig holds the Tier 2 staged operational thresholds from the §12
@@ -288,6 +353,7 @@ func defaultDashboardConfig() dashboardConfig {
 			RefreshIntervals:   []int{15, 30, 60, 300},
 			SourceStaleMinutes: 10,
 			MapProvider:        "osm",
+			DefaultTimezone:    "utc",
 		},
 		Honeypot: honeypotConfig{
 			AlertCooldown:                "6h",
@@ -409,6 +475,9 @@ func validateConfig(c dashboardConfig) error {
 	}
 	if !oneOf(b.MapProvider, allowedMapProviders) {
 		problems = append(problems, "behavior.map_provider must be osm or offline")
+	}
+	if !validTimezone(b.DefaultTimezone) {
+		problems = append(problems, "behavior.default_timezone must be browser, utc or an IANA zone name")
 	}
 
 	h := c.Honeypot
