@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // hashName matches a dionaea capture filename: a bare md5/sha1/sha256 hex hash.
@@ -141,6 +142,26 @@ func shortHash(h string) string {
 		return h[:12]
 	}
 	return h
+}
+
+// familyDisplayCap bounds how much of a scanner-reported malware family label
+// (analysis/github/collect-results.py's family_for(), or a ?family= query
+// value echoed back in a filter chip) is ever rendered. This is external
+// pipeline text, not something validated at write time the way
+// settings_domain.go's presentationTextLimits are -- html/template already
+// escapes it, so this only keeps a pathological value from blowing out a
+// badge or table cell. See #149.
+const familyDisplayCap = 80
+
+// boundedFamily truncates a family label for display. Matching logic must
+// always compare the untruncated value -- truncating first would let two
+// different long names collide at the cut point.
+func boundedFamily(family string) string {
+	if utf8.RuneCountInString(family) <= familyDisplayCap {
+		return family
+	}
+	runes := []rune(family)
+	return string(runes[:familyDisplayCap]) + "…"
 }
 
 func numFloat(v any) float64 {

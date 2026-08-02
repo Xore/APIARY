@@ -376,15 +376,33 @@ distinguish "never deployed" from "the exporter stopped".
 
 ---
 
-## Phase 6 — IOC and family enrichment ⬜
+## Phase 6 — IOC and family enrichment ✅ 2026-08-02
 
-Once records accumulate, `iocs/families.csv` becomes a family-attribution source
-for captures. Add a `family` column to the payload inventory and let
-`/events?family=…` pivot from a family name to the sessions that delivered it.
+`githubAnalysisResult.Family` (populated by `family_for()`, backed by
+upstream's `iocs/families.csv`) is now surfaced beyond the single-record
+detail card:
 
-Deferred behind Phase 3 deliberately: attribution shown next to raw evidence
-needs the provenance UI to already exist, or an analyst cannot tell a scanner
-label from a local finding.
+- `/payloads`: a `Family` badge on `capturedFile` (`payloads_data.go`),
+  alongside the existing verdict badge, linking to the `/events?family=…`
+  pivot.
+- `/payload-analysis/{hash}`: the GitHub-analysis card's family row links to
+  the same pivot instead of being a bare, unbounded string.
+- `/events?family=…` (`filters.go`): resolves the family label to every
+  SHA-256 the pipeline attributed to it
+  (`githubAnalysisHashesForFamily`, case/whitespace-normalized so
+  differently-cased attribution of the same family doesn't fragment into two
+  dead-end filters), then matches events by exact `Shasum` membership in that
+  resolved set -- never a substring/pattern test against event fields, so
+  the filter cannot broaden beyond hashes the scanner pipeline itself named.
+
+Provenance stays deliberately narrow: this is GitHub-analysis's own scanner
+attribution only. Ghidra's separate, explicitly unverified AI-guessed
+`FamilyGuess` (`ghidra.go`) is never merged into it and stays on Ghidra's own
+page -- see #149.
+
+Family values are bounded for display (`boundedFamily`, `util.go`) and
+rendered through the existing `html/template` auto-escaping everywhere else
+on these pages already relies on.
 
 ---
 
@@ -429,7 +447,7 @@ GITHUB_ANALYSIS_MAX_WAIT=5400
 | 2 — submit button | 1 | Yes | — |
 | 3 — result views | 1, 2 | Yes | — |
 | 5 — alerting ✅ | 3 | Yes | — |
-| 6 — family enrichment | 3 | Yes | — |
+| 6 — family enrichment ✅ | 3 | Yes | — |
 | 7 — env/compose | 1, 2 | Yes | — |
 
 Phases 0 and 4 are the only ones that can proceed before `ROADMAP.md` Gate 0

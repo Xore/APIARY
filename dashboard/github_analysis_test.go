@@ -221,6 +221,79 @@ func TestGitHubAnalysisDataQuery(t *testing.T) {
 	}
 }
 
+// #149 acceptance: fixture tests cover missing, single, conflicting, and
+// updated attribution.
+func TestGitHubAnalysisHashesForFamily(t *testing.T) {
+	t.Run("missing: unconfigured host resolves nothing", func(t *testing.T) {
+		t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", "")
+		if hashes := githubAnalysisHashesForFamily("mirai"); len(hashes) != 0 {
+			t.Errorf("unconfigured host resolved hashes: %v", hashes)
+		}
+	})
+
+	t.Run("missing: no result carries this family", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", dir)
+		writeGitHubAnalysisResult(t, dir, shaA, map[string]any{"exit_status": "ok", "family": "qbot"})
+		if hashes := githubAnalysisHashesForFamily("mirai"); len(hashes) != 0 {
+			t.Errorf("unmatched family resolved hashes: %v", hashes)
+		}
+	})
+
+	t.Run("missing: empty family string resolves nothing, never every hash", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", dir)
+		writeGitHubAnalysisResult(t, dir, shaA, map[string]any{"exit_status": "ok", "family": "qbot"})
+		if hashes := githubAnalysisHashesForFamily("   "); len(hashes) != 0 {
+			t.Errorf("blank family must not match everything, got: %v", hashes)
+		}
+	})
+
+	t.Run("single: one hash, one family", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", dir)
+		writeGitHubAnalysisResult(t, dir, shaA, map[string]any{"exit_status": "ok", "family": "mirai"})
+		hashes := githubAnalysisHashesForFamily("mirai")
+		if len(hashes) != 1 || !hashes[shaA] {
+			t.Fatalf("single-hash resolution failed: %v", hashes)
+		}
+	})
+
+	// "Conflicting" attribution: two different samples carry the same family
+	// under different casing/whitespace. Matching must be normalized so they
+	// resolve to one family's hash set, not fragment into two dead ends that
+	// each silently miss half the real evidence.
+	t.Run("conflicting: casing and whitespace do not fragment the family", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", dir)
+		writeGitHubAnalysisResult(t, dir, shaA, map[string]any{"exit_status": "ok", "family": "Mirai"})
+		writeGitHubAnalysisResult(t, dir, shaB, map[string]any{"exit_status": "ok", "family": " mirai "})
+
+		for _, query := range []string{"mirai", "Mirai", " MIRAI "} {
+			hashes := githubAnalysisHashesForFamily(query)
+			if len(hashes) != 2 || !hashes[shaA] || !hashes[shaB] {
+				t.Errorf("query %q did not unify both casings: %v", query, hashes)
+			}
+		}
+	})
+
+	// "Updated" attribution: a result written after the first resolution must
+	// be picked up on the next call -- there is no stale cache to invalidate,
+	// since loadGitHubAnalysisResults() always reads fresh from disk.
+	t.Run("updated: a later result is picked up without any cache to bust", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", dir)
+		if hashes := githubAnalysisHashesForFamily("mirai"); len(hashes) != 0 {
+			t.Fatalf("expected no hashes before any result exists, got: %v", hashes)
+		}
+		writeGitHubAnalysisResult(t, dir, shaA, map[string]any{"exit_status": "ok", "family": "mirai"})
+		hashes := githubAnalysisHashesForFamily("mirai")
+		if len(hashes) != 1 || !hashes[shaA] {
+			t.Fatalf("newly written result was not picked up: %v", hashes)
+		}
+	})
+}
+
 func TestGitHubAnalysisDataDetailNotFound(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", dir)

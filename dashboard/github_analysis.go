@@ -200,6 +200,29 @@ func loadGitHubAnalysisResults() []githubAnalysisResult {
 	return rows
 }
 
+// githubAnalysisHashesForFamily resolves a family label to every SHA-256 the
+// upstream scanner pipeline (analysis/github/collect-results.py's
+// family_for()) attributed to it. Comparison is case- and whitespace-
+// insensitive, so "Mirai" and "mirai " behave as the same family instead of
+// silently fragmenting into two dead-end filters -- but always exact
+// equality against a value the pipeline itself already wrote, never a
+// substring or pattern test against event data: the /events?family= filter
+// can only ever select hashes the scanner pipeline actually named, never
+// broaden into arbitrary query syntax over event fields. See #149.
+func githubAnalysisHashesForFamily(family string) map[string]bool {
+	family = strings.ToLower(strings.TrimSpace(family))
+	if family == "" {
+		return nil
+	}
+	hashes := map[string]bool{}
+	for _, result := range loadGitHubAnalysisResults() {
+		if strings.ToLower(strings.TrimSpace(result.Family)) == family {
+			hashes[result.SHA256] = true
+		}
+	}
+	return hashes
+}
+
 // loadGitHubAnalysisStatus reports Handoff/HandoffOld on every return path,
 // including the unconfigured and never-run ones -- GITHUB_ANALYSIS_REQUEST_DIR
 // is its own independent setting, scanned regardless of how far the results
