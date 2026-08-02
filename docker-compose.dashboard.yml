@@ -1,0 +1,280 @@
+# honeypot-dashboard — #258: dashboard + services-adapter split into their
+# own Dockge-managed stack, deployed as /opt/stacks/honeypot-dashboard.
+#
+# Unlike the standalone honeypot personas already split out (conpot, cowrie,
+# multipot, http, dnp3 -- see docker-compose.conpot.yml's header for that
+# reasoning), this pair genuinely needs cross-stack access: dashboard talks
+# to elasticsearch/filebeat by service-name DNS over the shared `honeynet`
+# network, and reads/writes three named volumes the main stack also touches
+# -- dionaea-lib and yara-results (dionaea/yara-scanner write, this stack
+# only reads), and dashboard-state (genuinely shared both ways: payload-
+# dedupe and yara-scanner in the main stack read/write retained script
+# payloads under /payloads/scripts, the same subtree this stack's own
+# SCRIPT_PAYLOAD_DIR=/state/script-payloads writes). This is the "harder
+# case" #258 raised -- resolved the same way this repo already resolves it
+# for honeypot-init (see docker-compose.yml's own networks: comment and
+# docker-compose.init.yml's header): give the shared network/volumes an
+# explicit, non-external `name:` in every stack that touches them. Compose
+# creates a named resource if absent or transparently reuses it if a
+# same-named one already exists -- no `external: true` pre-creation dance
+# needed, and no --link/legacy networking either. Confirmed this already
+# works live in production before relying on it here: honeypot-init's
+# elasticsearch-setup job resolves `http://elasticsearch:9200` by bare
+# service name across the project boundary, over this exact same honeynet,
+# today.
+#
+# services-adapter moves together with dashboard, not out on its own: the
+# two communicate over services-adapter-socket, a volume genuinely nothing
+# else touches (confirmed -- grepped for it across every compose file), so
+# there is no reason to split them into separate projects. Left unnamed/
+# project-scoped here -- a fresh volume in the new project, not migrated
+# from the old one -- per explicit instruction that this split does not
+# need to preserve existing state across the cutover. dashboard-state gets
+# the opposite treatment (explicit shared name) precisely because, unlike
+# the socket, other services still depend on it.
+#
+# EXPECTED_SENSORS and every /logs-derived, host-bind-mounted path are
+# unaffected by this move: the dashboard reads sensor activity from log
+# files at their existing host paths regardless of which compose project
+# produced them, exactly as already proven by the five sensor splits before
+# this one.
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  dashboard:
+    <<: *runtime-defaults
+    build: /opt/stacks/honeypot-stack/dashboard
+    container_name: hp-dashboard
+    restart: unless-stopped
+    ports:
+      - ${HP_BIND:-10.8.0.2}:19090:8080
+    volumes:
+      # rslave propagation: /logs/portbridge and /logs/suricata are sshfs
+      # mounts from the VPS on the host. They must be established BEFORE this
+      # container starts (never x-systemd.automount — autofs triggers return
+      # EPERM to container processes), and rslave lets later host-side
+      # remounts propagate in without recreating the container.
+      - type: bind
+        source: /opt/stacks/honeypot-stack/logs
+        target: /logs
+        read_only: true
+        bind:
+          propagation: rslave
+      # Optional GeoIP: drop a "start_ip,end_ip,country" CSV as
+      # dashboard/geoip/country.csv (DB-IP lite export works as-is). Absent →
+      # geo stays off; cf-ipcountry still enriches tanner/http events.
+      - /opt/stacks/honeypot-stack/dashboard/geoip:/geoip:ro
+      - /opt/stacks/honeypot-stack/analysis/geoip:/geoip-mmdb:ro
+      # Unified read-only payload inventory: Dionaea binaries, Cowrie
+      # transfers, and dashboard-retained inline script artifacts are all
+      # listed, source-labelled, analysed, and downloadable from /payloads.
+      # dionaea-lib/yara-results are shared, explicitly-named volumes (see
+      # this file's header) -- dionaea and yara-scanner (main stack) write
+      # into them, this stack only ever reads.
+      - dionaea-lib:/dionaea-lib:ro
+      - /opt/stacks/honeypot-stack/logs/cowrie/downloads:/cowrie-downloads:ro
+      - dashboard-state:/state
+      - yara-results:/yara:ro
+      - /var/lib/honeypot-sandbox/export:/sandbox-results:ro
+      # Narrow intent channel for the Analyze button. The dashboard never
+      # receives access to libvirt, systemd, Docker, or sandbox samples.
+      - /var/lib/honeypot-sandbox/requests/pending:/sandbox-requests
+      # The Windows guest is a separate host worker with its own spool, so
+      # Windows-native samples never land in the Linux runner's queue. These
+      # mounts are inert until WINDOWS_SANDBOX_*_DIR are set in .env; the
+      # dashboard refuses Windows submissions until then.
+      - /var/lib/honeypot-windows-sandbox/export:/windows-sandbox-results:ro
+      - /var/lib/honeypot-windows-sandbox/requests/pending:/windows-sandbox-requests
+      # Ghidra static analysis: a third spool, same shape and same boundary.
+      # Bind mounts rather than named volumes because the consumer is a host
+      # systemd unit (analysis/ghidra/worker/), not a compose service — a named
+      # volume would be awkward for it to reach and would put the queue inside
+      # Docker's lifecycle. Results are read-only here: the dashboard displays
+      # them and must never be able to forge one.
+      - /var/lib/honeypot-ghidra/results:/ghidra-results:ro
+      - /var/lib/honeypot-ghidra/requests/pending:/ghidra-requests
+      # Standalone Rev·Deck spool (#78): a fourth, independent request/results
+      # pair alongside the Ghidra one above, same shape and same read-only
+      # results boundary. ghidra-worker.py's drain_revdeck() is the consumer.
+      - /var/lib/honeypot-revdeck/results:/revdeck-results:ro
+      - /var/lib/honeypot-revdeck/requests/pending:/revdeck-requests
+      # Privileged read-only adapter for #158's owner-only model-status file.
+      # The dashboard sees only an AF_UNIX HTTP socket and never mounts the
+      # 0600 host artifact or gains a model-management action.
+      - /run/honeypot-model-status:/model-status:ro
+      # #197: the Services pane's only path to hp-services-adapter -- an
+      # AF_UNIX socket, never docker.sock itself. Read-write (unlike the
+      # model-status mount above) because this channel carries start/stop/
+      # restart actions, not just a read-only status query. Private to this
+      # stack now -- both ends moved here together.
+      - services-adapter-socket:/run/services-adapter
+      # GitHub-analysis publishing: a fourth spool, same shape and same
+      # boundary as the three above. The dashboard writes {sha256}.request
+      # and never talks to git, GitHub, or holds GH_PAT -- that lives only in
+      # analysis/github/'s root-owned host publisher. See #74.
+      - /var/lib/honeypot-github/results:/github-analysis-results:ro
+      - /var/lib/honeypot-github/requests/pending:/github-analysis-requests
+    environment:
+      - LISTEN_ADDR=:8080
+      - LOG_DIR=/logs
+      - GEOIP_CSV=/geoip/country.csv
+      - GEOIP_CITY_MMDB=/geoip-mmdb/GeoLite2-City.mmdb
+      - GEOIP_ASN_MMDB=/geoip-mmdb/GeoLite2-ASN.mmdb
+      - THREAT_CIDRS_FILE=/geoip/threat-cidrs.csv
+      - MAP_TILE_URL=${HONEYPOT_MAP_TILE_URL:-https://tile.openstreetmap.org/{z}/{x}/{y}.png}
+      - MAP_ATTRIBUTION=${HONEYPOT_MAP_ATTRIBUTION:-© OpenStreetMap contributors}
+      # Resolved by service-name DNS over the shared honeynet network --
+      # see this file's header for why that works across the project
+      # boundary (already proven live by honeypot-init today).
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - FILEBEAT_URL=http://filebeat:5066
+      # Where the Open-in links on an event point. Set HONEYPOT_DOMAIN and the
+      # dashboard derives https://<tool>.<domain>; the three explicit URLs
+      # override it for path-routed deployments. All four are deliberately
+      # empty by default: these URLs carry the IP under investigation, so an
+      # unset variable must produce no link rather than a plausible-looking one
+      # aimed at a domain we do not own. See issue #97.
+      - HONEYPOT_DOMAIN=${HONEYPOT_DOMAIN:-}
+      - KIBANA_PUBLIC_URL=${KIBANA_PUBLIC_URL:-}
+      - EVEBOX_PUBLIC_URL=${EVEBOX_PUBLIC_URL:-}
+      - ARKIME_PUBLIC_URL=${ARKIME_PUBLIC_URL:-}
+      - ALERT_STATE_FILE=/state/alerts.json
+      - ALERT_COOLDOWN=${HONEYPOT_ALERT_COOLDOWN:-6h}
+      - PAYLOAD_DIRS=/dionaea-lib/binaries,/cowrie-downloads
+      - SCRIPT_PAYLOAD_DIR=/state/script-payloads
+      - YARA_RESULTS_FILE=/yara/results.json
+      - INTELLIGENCE_STATE_FILE=/state/intelligence.json
+      - SANDBOX_RESULTS_DIR=/sandbox-results
+      - SANDBOX_REQUEST_DIR=/sandbox-requests
+      # Empty until the Windows guest and its worker exist on the host; see
+      # .env.example. The mounts below are always present so enabling the
+      # backend is a .env change, not a Compose edit.
+      - WINDOWS_SANDBOX_RESULTS_DIR=${WINDOWS_SANDBOX_RESULTS_DIR:-}
+      - WINDOWS_SANDBOX_REQUEST_DIR=${WINDOWS_SANDBOX_REQUEST_DIR:-}
+      - SANDBOX_ALERT_RISK_SCORE=${SANDBOX_ALERT_RISK_SCORE:-50}
+      # Empty until the host-side Ghidra worker exists; see .env.example. The
+      # mounts above are always present so enabling it is a .env change, not a
+      # Compose edit — the same arrangement as the Windows backend.
+      - GHIDRA_RESULTS_DIR=${GHIDRA_RESULTS_DIR:-}
+      - GHIDRA_REQUEST_DIR=${GHIDRA_REQUEST_DIR:-}
+      - REVDECK_RESULTS_DIR=${REVDECK_RESULTS_DIR:-}
+      - REVDECK_REQUEST_DIR=${REVDECK_REQUEST_DIR:-}
+      - GHIDRA_ALERT_RISK_LEVELS=${GHIDRA_ALERT_RISK_LEVELS:-high,critical}
+      - GHIDRA_ALERT_ON_CRYPTO=${GHIDRA_ALERT_ON_CRYPTO:-false}
+      # Empty until analysis/github/install-github-publisher.sh has been run
+      # AND an operator has separately armed GITHUB_PUBLISH_ENABLED in
+      # /etc/honeypot-github.env -- see .env.example and #74. The mounts
+      # above are always present, same arrangement as Ghidra/Windows.
+      - GITHUB_ANALYSIS_REQUEST_DIR=${GITHUB_ANALYSIS_REQUEST_DIR:-}
+      - GITHUB_ANALYSIS_RESULTS_DIR=${GITHUB_ANALYSIS_RESULTS_DIR:-}
+      - GITHUB_ANALYSIS_ALERT_POSITIVES=${GITHUB_ANALYSIS_ALERT_POSITIVES:-10}
+      - ALERT_CAMPAIGN_SCORE=${HONEYPOT_ALERT_CAMPAIGN_SCORE:-80}
+      - DASHBOARD_REQUIRE_ADMIN=${DASHBOARD_REQUIRE_ADMIN:-true}
+      - ANALYSIS_WORKBENCH_DIR=/state/analysis-workbench
+      - MODEL_STATUS_SOCKET=/model-status/status.sock
+      - SERVICES_ADAPTER_SOCKET=/run/services-adapter/control.sock
+      - AUTH_INTROSPECTION_URL=${AUTH_INTROSPECTION_URL:-https://auth.honeypot.example/_auth/introspect}
+      - AUTH_INTROSPECTION_TOKEN=${AUTH_INTROSPECTION_TOKEN:-}
+      - AUTH_TARGET_HOST=${AUTH_TARGET_HOST:-honeypot.example}
+      - AUTH_SESSION_COOKIE_NAME=${AUTH_SESSION_COOKIE_NAME:-xore_sso}
+      - AUTH_ACCOUNT_URL=${AUTH_ACCOUNT_URL:-https://auth.honeypot.example/auth/app?pane=account}
+      - EXPECTED_SENSORS=cowrie,multipot,http,api-honeypot,dionaea,dnp3,conpot,conpot-s7-1200,conpot-s7-1500,conpot-iec104,conpot-guardian,conpot-kamstrup,tanner,suricata
+      - ALERT_WEBHOOK_URL=${HONEYPOT_ALERT_WEBHOOK_URL:-}
+      - TZ=Europe/Berlin
+    networks:
+      - honeynet
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/dashboard", "-healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    # Restarted by the autoheal sidecar (main stack) on unhealthy, not by
+    # restart: alone -- see #119. autoheal watches by Docker label via
+    # /var/run/docker.sock daemon-wide, unaffected by the stack split.
+    labels:
+      - autoheal=true
+    # #118: measured (2026-08-02). Runs as root by default (no USER in
+    # dashboard/Dockerfile) and reads read-only mounts owned by every
+    # sensor's own UID under /logs, plus dionaea-lib, cowrie-downloads,
+    # yara-results, sandbox/ghidra/github-analysis results -- the same
+    # "root, but needs the permission-bypass capability that comes with
+    # root, not just the UID" situation as filebeat. DAC_READ_SEARCH
+    # restored clean reads across all of them.
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_READ_SEARCH
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          # The dashboard reads the tail (tailCap=8M) of every
+          # JSON log each cycle. The Suricata eve.json mounted at /logs/suricata
+          # is ~1.25G, so its 8M tail parses into tens of thousands of event
+          # structs — 32M OOM-restarted the container in a loop (53x).
+          # 1G leaves GC headroom for correlation and payload inventory work.
+          memory: 1G
+
+  services-adapter:
+    <<: *runtime-defaults
+    build: /opt/stacks/honeypot-stack/services-adapter
+    container_name: hp-services-adapter
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - services-adapter-socket:/run/services-adapter
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    read_only: true
+    # Talks to the Docker daemon over docker.sock and to dashboard over the
+    # services-adapter-socket volume only (confirmed: no TCP/HTTP client
+    # anywhere in services-adapter.py) -- no network needed at all. Also
+    # sidesteps this host's address-pool exhaustion (many Compose projects
+    # already claim a bridge each; the implicit per-project default network
+    # this service would otherwise get failed to create with "all predefined
+    # address pools have been fully subnetted" the first time this stack was
+    # deployed).
+    network_mode: none
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
+
+networks:
+  # Shared with the main stack -- explicit fixed name, not project-prefixed,
+  # non-external. See this file's header.
+  honeynet:
+    name: honeynet
+    driver: bridge
+
+volumes:
+  # Shared with the main stack (dionaea/yara-scanner write, this stack only
+  # reads) -- explicit fixed name, matching docker-compose.yml's own
+  # declaration exactly, same mechanism as honeynet above.
+  dionaea-lib:
+    name: dionaea-lib
+  yara-results:
+    name: yara-results
+  # Also shared with the main stack, both ways -- payload-dedupe and
+  # yara-scanner there read/write retained script payloads under
+  # /payloads/scripts, the same volume this stack's own /state resolves to.
+  # See this file's header for why this one, unlike services-adapter-socket
+  # below, cannot be left project-scoped.
+  dashboard-state:
+    name: dashboard-state
+  # Private to this stack -- nothing else references it (grepped every
+  # compose file to confirm). A fresh volume in the new project, not
+  # migrated from the old one: per explicit instruction, this split does
+  # not need to preserve existing state across the cutover.
+  services-adapter-socket: null
