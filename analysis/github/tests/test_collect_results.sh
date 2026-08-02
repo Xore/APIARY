@@ -3,7 +3,7 @@
 # findings and links a real PDF, against fixtures shaped exactly like real
 # Xore/honeypot data (#255).
 #
-# Before the fix, this failed unconditionally: build_result() read a
+# Before the first fix, this failed unconditionally: build_result() read a
 # "scanners" key that does not exist in the real schema (the real data nests
 # per-scanner results under "results", keyed by scanner class name, with an
 # "_ok" flag, not "ok"), so every verdict computed malicious=0/level="clean"
@@ -11,6 +11,15 @@
 # (nested by bucket, no date, named after the zip's own {sha256}.zip) that
 # never matched the real file (flat, date-suffixed, named after the
 # *original* captured filename from inside the zip).
+#
+# A second fix corrected verdict.malicious itself: it was a count of how many
+# distinct scanners flagged the sample, not the summed raw positives the
+# dashboard displays it as ("X / Total", VirusTotal's own convention). The
+# fixture below uses a real sample's real numbers (VirusTotal 64/74,
+# MetaDefender 28/36) specifically because they differ enough for the two
+# readings to diverge (2 scanners vs. 92 positives) -- a fixture where every
+# flagging scanner happens to report exactly 1 positive would pass under
+# either reading and not actually prove which one the code uses.
 set -euo pipefail
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -21,26 +30,29 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 clone="$work/clone"
-sha256="0ba5c04325f7af25a2f6bf4c588dff798d481b0a799b10faac9d4daed7c09c5e"
+sha256="6b465dc7cc21ba92d848425f8eabae3dc9f72d873d92a7b18639fd79814c7b1b"
+original_name="92d7549c8cf73bc0f29cea5ba8991560"
 bucket="PE"
 
 install -d -m 0755 "$clone/reports/scanner" "$clone/reports/pdf/samples" "$clone/samples/$bucket"
 
-# A real committed Xore/honeypot scanner report (fifaconfig.exe, fetched
-# 2026-08-02): VirusTotal positives=1/75, MetaDefender positives=1/23,
-# MalwareBazaar and HybridAnalysis both "_ok": true with no positives/total
-# field at all -- exercises the "some scanners don't carry a count" case too.
+# A real committed Xore/honeypot scanner report, fetched 2026-08-02: a
+# Dionaea capture retaining its original MD5-looking filename (unrelated to
+# the zip's own {sha256}.zip name), VirusTotal positives=64/74, MetaDefender
+# positives=28/36, MalwareBazaar and HybridAnalysis both "_ok": true with no
+# positives/total field at all -- exercises the "some scanners don't carry a
+# count" case too.
 cat >"$clone/reports/scanner/$sha256.json" <<JSON
 {
-  "file": "samples/$bucket/fifaconfig.exe",
-  "filename": "fifaconfig.exe",
+  "file": "samples/$bucket/$original_name",
+  "filename": "$original_name",
   "sha256": "$sha256",
-  "scanned_at": "2026-07-29T18:30:43Z",
+  "scanned_at": "2026-08-02T00:07:19Z",
   "results": {
-    "VirusTotalScanner": {"source": "virustotal", "positives": 1, "total": 75, "suspicious": 0, "permalink": "https://www.virustotal.com/gui/file/$sha256", "_ok": true},
+    "VirusTotalScanner": {"source": "virustotal", "positives": 64, "total": 74, "suspicious": 0, "permalink": "https://www.virustotal.com/gui/file/$sha256", "_ok": true},
     "MalwareBazaarScanner": {"source": "malwarebazaar", "permalink": "https://bazaar.abuse.ch/sample/$sha256/", "_ok": true},
-    "HybridAnalysisScanner": {"source": "hybrid-analysis", "verdict": "suspicious", "threat_score": 35, "_ok": true},
-    "MetaDefenderScanner": {"source": "metadefender", "positives": 1, "total": 23, "_ok": true}
+    "HybridAnalysisScanner": {"source": "hybrid_analysis", "verdict": "malicious", "threat_score": 100, "_ok": true},
+    "MetaDefenderScanner": {"source": "metadefender", "positives": 28, "total": 36, "_ok": true}
   }
 }
 JSON
@@ -49,10 +61,10 @@ JSON
 # what the PDF path is derived from (that was the bug).
 : >"$clone/samples/$bucket/$sha256.zip"
 
-# The real PDF: named after the *original* filename (fifaconfig.exe) + the
-# scan date, flat under reports/pdf/samples/ -- not nested by bucket, not
-# named after the zip.
-: >"$clone/reports/pdf/samples/fifaconfig.exe-2026-07-29.pdf"
+# The real PDF: named after the *original* filename (the MD5-looking Dionaea
+# name, not the zip's {sha256}.zip) + the scan date, flat under
+# reports/pdf/samples/ -- not nested by bucket, not named after the zip.
+: >"$clone/reports/pdf/samples/$original_name-2026-08-02.pdf"
 
 result_json=$(GITHUB_CLONE="$clone" python3 <<PYEOF
 import importlib.util, json, sys
@@ -76,21 +88,25 @@ num_scanners=$(python3 -c "import json,sys; print(len(json.loads(sys.argv[1])['s
 commit=$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['commit'])" "$result_json")
 report_commit=$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['report_commit'])" "$result_json")
 
-[[ "$malicious" == "2" ]] || fail "verdict.malicious = $malicious, want 2 (VirusTotal + MetaDefender both flagged this real sample)"
-pass "verdict.malicious reflects the real VirusTotal + MetaDefender detections"
+# 64 (VirusTotal) + 28 (MetaDefender) -- NOT 2 (the count of scanners that
+# flagged it). A regression back to the scanner-count reading would still
+# pass a fixture where every flagging scanner reports exactly 1 positive;
+# this fixture's numbers are real specifically so that mistake shows up here.
+[[ "$malicious" == "92" ]] || fail "verdict.malicious = $malicious, want 92 (summed raw positives: 64 + 28, not a 2-scanner count)"
+pass "verdict.malicious sums raw positives (92), not a count of agreeing scanners"
 
-[[ "$level" == "low" ]] || fail "verdict.level = $level, want low"
-pass "verdict.level is low, not clean"
+[[ "$level" == "high" ]] || fail "verdict.level = $level, want high"
+pass "verdict.level is high, matching a 92-detection sample"
 
-[[ "$total" == "98" ]] || fail "verdict.total = $total, want 98 (75 + 23, scanners without a total field contribute 0)"
+[[ "$total" == "110" ]] || fail "verdict.total = $total, want 110 (74 + 36, scanners without a total field contribute 0)"
 pass "verdict.total sums correctly across heterogeneous scanner shapes"
 
 [[ "$num_scanners" == "4" ]] || fail "scanners list has $num_scanners entries, want 4"
 pass "all 4 scanners normalized, none silently dropped"
 
-[[ "$report_pdf" == "reports/pdf/samples/fifaconfig.exe-2026-07-29.pdf" ]] || \
-  fail "report_pdf = $report_pdf, want reports/pdf/samples/fifaconfig.exe-2026-07-29.pdf"
-pass "report_pdf resolves to the real per-sample PDF, not the zip's own name"
+[[ "$report_pdf" == "reports/pdf/samples/$original_name-2026-08-02.pdf" ]] || \
+  fail "report_pdf = $report_pdf, want reports/pdf/samples/$original_name-2026-08-02.pdf"
+pass "report_pdf resolves to the real per-sample PDF, named after the original filename not the zip"
 
 # commit stays the original push commit (audit trail: "where did I submit
 # this"); report_commit is the separate, later commit the PDF actually

@@ -244,6 +244,56 @@ func (s *store) payloadPath(name string) (string, error) {
 			return found, nil
 		}
 	}
+	// A 64-char request is shaped like a SHA-256. Dionaea keeps its own
+	// on-disk naming convention (MD5), unrelated to this pipeline, so a
+	// SHA-256 -- the hash every other source and GitHub-analysis's own
+	// report use -- never matches a Dionaea capture by filename alone
+	// (#255's 404 report). resolve-sample.sh (analysis/github/) already
+	// falls back to a full-content hash scan for exactly this case; only
+	// worth the cost here for a request long enough to actually be one,
+	// since a 32-char (MD5-length) request already matched above if it
+	// exists at all.
+	if len(name) == 64 {
+		if path, err := s.payloadPathBySHA256(strings.ToLower(name)); err == nil {
+			return path, nil
+		}
+	}
+	return "", os.ErrNotExist
+}
+
+func (s *store) payloadPathBySHA256(want string) (string, error) {
+	var found string
+	for _, dir := range s.payloadDirs {
+		filepath.WalkDir(dir, func(path string, entry os.DirEntry, walkErr error) error {
+			if found != "" {
+				return fs.SkipAll
+			}
+			if walkErr != nil || entry.IsDir() {
+				return nil
+			}
+			fi, err := entry.Info()
+			if err != nil || !fi.Mode().IsRegular() {
+				return nil
+			}
+			f, err := os.Open(path)
+			if err != nil {
+				return nil
+			}
+			defer f.Close()
+			h := sha256.New()
+			if _, err := io.Copy(h, f); err != nil {
+				return nil
+			}
+			if hex.EncodeToString(h.Sum(nil)) == want {
+				found = path
+				return fs.SkipAll
+			}
+			return nil
+		})
+		if found != "" {
+			return found, nil
+		}
+	}
 	return "", os.ErrNotExist
 }
 

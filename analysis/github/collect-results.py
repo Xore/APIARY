@@ -176,7 +176,15 @@ def build_result(pending: dict, run: dict, report_commit: str) -> dict:
 
     scanners = normalize_scanners(scanner.get("results", {}))
     total = sum(s["total"] for s in scanners if s["ok"]) or None
-    malicious = sum(1 for s in scanners if s["ok"] and s["positives"] > 0)
+    # The dashboard displays this as a VirusTotal-style "X / Total" detection
+    # ratio (dashboard/ui/github_analysis.html), so it has to be the summed
+    # raw positives across scanners, not a count of how many distinct
+    # scanners flagged it -- a real sample VirusTotal alone flagged 64/74 on
+    # showed "2 / 110" under the scanner-count reading (2 scanners agreed),
+    # understating it enormously. The level thresholds below (>=10/>=3/>=1)
+    # only make sense against this reading too: with at most ~4 scanners
+    # tracked, "malicious >= 10 distinct scanners" was unreachable dead code.
+    malicious = sum(s["positives"] for s in scanners if s["ok"])
     level = "clean"
     if malicious >= 10:
         level = "high"
