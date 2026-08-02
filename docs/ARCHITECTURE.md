@@ -63,8 +63,13 @@ client address in-band, while the connection log lets the dashboard recover
 source attribution for PROXY-unaware sensors.
 
 Home container ports bind to `HP_BIND` (normally the home WireGuard address),
-not to every host interface. The root Compose network `honeynet` is for
-container-to-container communication. TANNER additionally uses
+not to every host interface. The root Compose network `honeynet` carries the
+trusted analysis/management plane (Elasticsearch, Kibana, Filebeat, the
+dashboard, EveBox, Arkime) — not the honeypots themselves. Each honeypot has
+its own single-member network instead ([#235](https://github.com/Xore/honeypot-stack/issues/235)),
+so a compromise of one has no network path to another; `tftp-relay` shares
+`dionaea_net` with `dionaea` since it actually depends on and forwards
+traffic to it, the one real exception. TANNER additionally uses
 `tanner_local`, which contains its Redis, API, PHP emulator, and disposable
 nested Docker daemon. That daemon is deliberately not the homeserver Docker
 socket.
@@ -90,7 +95,7 @@ flowchart TB
   arkinit --> initMarkers
   snareclone --> initMarkers
 
-  subgraph sensorGroup["Sensors on honeynet (honeypot-stack)"]
+  subgraph sensorGroup["Sensors, each on its own isolated network (#235)"]
     cowrie["Cowrie"]
     multipot["multipot"]
     http["HTTP + API honeypots"]

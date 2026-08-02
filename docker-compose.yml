@@ -231,7 +231,7 @@ services:
     cap_drop:
       - ALL
     networks:
-      - honeynet
+      - cowrie_net
     deploy:
       resources:
         limits:
@@ -271,7 +271,7 @@ services:
     cap_drop:
       - ALL
     networks:
-      - honeynet
+      - multipot_net
     deploy:
       resources:
         limits:
@@ -313,7 +313,7 @@ services:
     cap_drop:
       - ALL
     networks:
-      - honeynet
+      - http_honeypot_net
     deploy:
       resources:
         limits:
@@ -351,7 +351,7 @@ services:
       - TZ=Europe/Berlin
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
-    networks: [honeynet]
+    networks: [api_honeypot_net]
     deploy:
       resources: { limits: { cpus: "0.5", memory: 128M } }
   # ===================== Live analysis dashboard =====================
@@ -614,7 +614,7 @@ services:
     security_opt:
       - no-new-privileges:true
     networks:
-      - honeynet
+      - dionaea_net
     deploy:
       resources:
         limits:
@@ -634,7 +634,7 @@ services:
     ports:
       - ${HP_BIND:-10.8.0.2}:1069:1069/udp
     networks:
-      - honeynet
+      - dionaea_net
     depends_on:
       dionaea:
         condition: service_started
@@ -722,7 +722,7 @@ services:
     security_opt:
       - no-new-privileges:true
     networks:
-      - honeynet
+      - conpot_net
     deploy:
       resources:
         limits:
@@ -791,7 +791,7 @@ services:
       start_period: 20s
     labels:
       - autoheal=true
-    networks: [honeynet]
+    networks: [conpot_s7_1200_net]
     deploy:
       resources: { limits: { cpus: "0.75", memory: 384M } }
 
@@ -844,7 +844,7 @@ services:
       start_period: 20s
     labels:
       - autoheal=true
-    networks: [honeynet]
+    networks: [conpot_s7_1500_net]
     deploy:
       resources: { limits: { cpus: "0.75", memory: 384M } }
 
@@ -898,7 +898,7 @@ services:
       start_period: 20s
     labels:
       - autoheal=true
-    networks: [honeynet]
+    networks: [conpot_iec104_net]
     deploy:
       resources: { limits: { cpus: "0.5", memory: 256M } }
 
@@ -958,7 +958,7 @@ services:
       start_period: 20s
     labels:
       - autoheal=true
-    networks: [honeynet]
+    networks: [conpot_guardian_net]
     deploy:
       resources: { limits: { cpus: "0.5", memory: 256M } }
 
@@ -1014,7 +1014,7 @@ services:
       start_period: 20s
     labels:
       - autoheal=true
-    networks: [honeynet]
+    networks: [conpot_kamstrup_net]
     deploy:
       resources: { limits: { cpus: "0.5", memory: 256M } }
 
@@ -1447,7 +1447,7 @@ services:
     volumes:
       - /opt/stacks/honeypot-stack/logs/dnp3:/var/log/honeypot
       - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
-    networks: [honeynet]
+    networks: [dnp3_net]
     healthcheck:
       test: ["CMD", "/dnp3-honeypot", "-healthcheck"]
       interval: 30s
@@ -1786,6 +1786,14 @@ services:
           cpus: "1.0"
           memory: 1G
 networks:
+  # honeynet is the trusted analysis/management plane now (Elasticsearch,
+  # Kibana, Filebeat, the dashboard, EveBox, Arkime) -- not the honeypots
+  # themselves. #235: it used to carry every honeypot daemon too, on one
+  # shared bridge with Docker's default inter-container communication, so a
+  # compromised honeypot could reach every other honeypot directly. None of
+  # them need to: they write to bind-mounted log files for Filebeat to tail,
+  # not to each other or to Elasticsearch over the network, and no honeypot
+  # has a depends_on relationship on another except the pair noted below.
   honeynet:
     name: honeynet
     driver: bridge
@@ -1796,6 +1804,35 @@ networks:
     driver: bridge
     internal: true
   tanner_local:
+    driver: bridge
+  # One honeypot per network (#235), each with no other honeypot as a peer --
+  # a compromised honeypot has no network path to another honeypot's daemon.
+  # tftp-relay is the one real exception: it has depends_on: dionaea and
+  # actually forwards TFTP traffic to it, so those two share dionaea_net
+  # instead of each getting their own.
+  dionaea_net:
+    driver: bridge
+  cowrie_net:
+    driver: bridge
+  multipot_net:
+    driver: bridge
+  http_honeypot_net:
+    driver: bridge
+  api_honeypot_net:
+    driver: bridge
+  conpot_net:
+    driver: bridge
+  conpot_s7_1200_net:
+    driver: bridge
+  conpot_s7_1500_net:
+    driver: bridge
+  conpot_iec104_net:
+    driver: bridge
+  conpot_guardian_net:
+    driver: bridge
+  conpot_kamstrup_net:
+    driver: bridge
+  dnp3_net:
     driver: bridge
 volumes:
   evebox-config: null
