@@ -22,7 +22,7 @@
    this rule silently breaking would show every hidden icon at once. */
 body [hidden] { display: none !important; }
 
-.mono, pre.code {
+.mono {
   font-family: var(--hp-mono);
   font-size: 12px;
 }
@@ -612,10 +612,6 @@ a.project-card { display: block; color: inherit; text-decoration: none; }
   max-height: 120px; padding: 0;
 }
 .command-palette__field textarea::placeholder { color: var(--text-muted); }
-.hp-sr-only {
-  position: absolute; width: 1px; height: 1px;
-  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
-}
 
 /* Shared modal contract integration. Visual panel/backdrop styling comes from
    theme.css; this layer only positions the live completion message. */
