@@ -17,6 +17,15 @@
 # Run from the stack root (same dir as docker-compose.yml/compose.yml).
 # Requires: docker, sudo (log dirs are owned by container UIDs).
 #
+# Elasticsearch cleanup reaches elasticsearch:9200 via a throwaway
+# container on the honeynet network (it has no host-published port), and
+# deletes by log.file.path rather than by index-per-sensor pattern:
+# honeypot-v2-* is one shared data stream for every sensor, not one index
+# each, and the old per-target `DELETE /honeypot-<target>-*` calls matched
+# zero real indices for anything but suricata -- confirmed live, this had
+# silently deleted nothing for cowrie/conpot/multipot/http/dionaea/dnp3/
+# tanner since the day those lines were written.
+#
 # #258: conpot, cowrie, multipot, http (http-honeypot+api-honeypot), and dnp3
 # each now deploy as their own Dockge stack (/opt/stacks/honeypot-<name>/
 # compose.yml), not inside honeypot-stack's own compose.yml. A bare
@@ -70,6 +79,16 @@ declare -A SPLIT_STACK_SERVICES=(
 PAYLOAD_ANALYSIS_DIR="/opt/stacks/honeypot-payload-analysis"
 PAYLOAD_ANALYSIS_SERVICES="payload-dedupe yara-scanner"
 
+# evebox (docker-compose.elk.yml, #258) is the only ELK service this script
+# ever stops/starts -- same reasoning as payload-dedupe/yara-scanner above,
+# no standalone CLI target of its own, only a side effect of `wants
+# suricata`. elasticsearch/kibana/filebeat/arkime-* hold no open handles
+# into logs/suricata (the directory wiped for this target) that would race
+# a concurrent wipe, so they were never stopped for this target either,
+# before or after this split.
+ELK_DIR="/opt/stacks/honeypot-elk"
+ELK_SURICATA_SERVICES="evebox"
+
 DRY=false
 declare -A TARGETS
 have_target=false
@@ -118,11 +137,50 @@ mkown() {
   run sudo chown -R "$uid" "$dir"
 }
 
-delete_es() {
-  local pattern="$1"
-  echo "  DELETE http://localhost:9200/${pattern}"
+# Elasticsearch has no host-published port (docker-compose.elk.yml -- "no
+# ports: mapping at all -- reached by name over honeynet/llm-data"), so
+# `curl http://localhost:9200` from this host-side script has never
+# actually reached it (connection refused, silently swallowed below).
+# A throwaway container joined to honeynet is the only way in from here.
+es_curl() {
+  docker run --rm --network honeynet curlimages/curl:latest "$@"
+}
+
+ES_URL="http://elasticsearch:9200"
+
+# honeypot-v2-* is a single shared data stream for every sensor
+# (analysis/elasticsearch-setup.sh), not one index per sensor -- a plain
+# `DELETE /honeypot-<target>-*` (the old approach) matches zero real
+# indices for any of cowrie/conpot/multipot/http/dionaea/dnp3/tanner and
+# has always silently deleted nothing. Filtering by event.sensor instead
+# of log.file.path was considered and rejected: confirmed live that
+# several sensors (cowrie at minimum) self-report a "sensor" field as
+# their own container's hostname -- effectively a random hex string that
+# changes every restart -- rather than a fixed name, so event.sensor
+# values for the same target are inconsistent across restarts.
+# log.file.path (the bind-mounted path Filebeat actually read the event
+# from) is stable and directly matches the same directories wipe_dir
+# already wipes on disk.
+delete_es_by_path() {
+  local path_glob="$1"
+  echo "  DELETE BY QUERY ${ES_URL}/honeypot-v2-* WHERE log.file.path LIKE ${path_glob}"
   $DRY && return
-  curl -sf -X DELETE "http://localhost:9200/${pattern}" -o /dev/null \
+  es_curl -sf -X POST "${ES_URL}/honeypot-v2-*/_delete_by_query?conflicts=proceed" \
+    -H 'Content-Type: application/json' \
+    -d "{\"query\":{\"wildcard\":{\"log.file.path.keyword\":\"${path_glob}\"}}}" \
+    -o /dev/null \
+    || echo "  (ES down or query failed — skipped)"
+}
+
+# Suricata is the one target where a plain index-pattern DELETE is correct:
+# Filebeat ships it into real per-day, per-event-type indices
+# (suricata-v2-<type>-YYYY.MM.DD, confirmed live via _cat/indices), not the
+# shared honeypot-v2-* data stream.
+delete_es_index() {
+  local pattern="$1"
+  echo "  DELETE ${ES_URL}/${pattern}"
+  $DRY && return
+  es_curl -sf -X DELETE "${ES_URL}/${pattern}" -o /dev/null \
     || echo "  (not found or ES down — skipped)"
 }
 
@@ -133,8 +191,9 @@ delete_es() {
 # deliberately excluded from SERVICES -- each lives in its own Dockge
 # stack/compose project now (SPLIT_STACK_DIR above) and is stopped/started
 # there separately, via split_stack_compose below, not through this array.
+# evebox is excluded the same way (docker-compose.elk.yml, #258) -- see
+# ELK_DIR/ELK_SURICATA_SERVICES/foreign_stack_compose below instead.
 SERVICES=()
-wants suricata && SERVICES+=(evebox)  # suricata itself is host-level; evebox reads its logs
 
 split_stack_compose() {
   # split_stack_compose <target> <docker compose args...> -- e.g.
@@ -155,21 +214,22 @@ split_stack_compose() {
   ( cd "$dir" && run docker compose "$@" "${services[@]}" )
 }
 
-payload_analysis_compose() {
-  # payload-dedupe/yara-scanner (docker-compose.payload-analysis.yml, #258)
-  # read cowrie's captured downloads as well as dionaea's, so this is called
-  # alongside cowrie's own split_stack_compose whenever `wants cowrie` --
-  # stopping them before wiping cowrie's log dir avoids a race between the
-  # wipe and their own hardlink/read pass over the same files, same
-  # reasoning as when they still lived in the main stack. Not itself a
-  # SPLIT_TARGETS entry: there's no standalone CLI target for it.
-  if [ ! -d "$PAYLOAD_ANALYSIS_DIR" ]; then
-    echo "  (skip payload-analysis: $PAYLOAD_ANALYSIS_DIR does not exist -- honeypot-payload-analysis not deployed here)"
+# Shared by payload-dedupe/yara-scanner (docker-compose.payload-analysis.yml)
+# and evebox (docker-compose.elk.yml) -- both #258 splits that get
+# stopped/started only as a *side effect* of another target (cowrie,
+# suricata respectively), never their own standalone CLI target, because
+# they hold reads/hardlinks/handles into a directory that target's wipe
+# would otherwise race.
+foreign_stack_compose() {
+  local label="$1" dir="$2"; shift 2
+  local services_str="$1"; shift
+  if [ ! -d "$dir" ]; then
+    echo "  (skip $label: $dir does not exist -- honeypot-$label not deployed here)"
     return 0
   fi
   # shellcheck disable=SC2206
-  local services=(${PAYLOAD_ANALYSIS_SERVICES})
-  ( cd "$PAYLOAD_ANALYSIS_DIR" && run docker compose "$@" "${services[@]}" )
+  local services=(${services_str})
+  ( cd "$dir" && run docker compose "$@" "${services[@]}" )
 }
 
 split_targets_wanted() {
@@ -181,10 +241,11 @@ split_targets_wanted() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-STEP "Stopping: ${SERVICES[*]} $(split_targets_wanted)$(wants cowrie && echo " $PAYLOAD_ANALYSIS_SERVICES")"
+STEP "Stopping: ${SERVICES[*]} $(split_targets_wanted)$(wants cowrie && echo " $PAYLOAD_ANALYSIS_SERVICES")$(wants suricata && echo " $ELK_SURICATA_SERVICES")"
 [[ ${#SERVICES[@]} -gt 0 ]] && run docker compose stop "${SERVICES[@]}"
 for t in "${SPLIT_TARGETS[@]}"; do wants "$t" && split_stack_compose "$t" stop; done
-wants cowrie && payload_analysis_compose stop
+wants cowrie   && foreign_stack_compose payload-analysis "$PAYLOAD_ANALYSIS_DIR" "$PAYLOAD_ANALYSIS_SERVICES" stop
+wants suricata && foreign_stack_compose elk "$ELK_DIR" "$ELK_SURICATA_SERVICES" stop
 
 # ─────────────────────────────────────────────────────────────────────────────
 STEP "Wiping log files"
@@ -238,8 +299,13 @@ if wants suricata; then
   # default since pcaps are also consumed by Arkime — uncomment lines below
   # to wipe pcaps too.
   wipe_dir "${LOGS_BASE}/suricata"
-  # Wipe EveBox SQLite state so alerts reset too
-  run docker volume rm --force honeypot-stack_evebox-data 2>/dev/null || true
+  # Wipe EveBox's own config.sqlite (saved filters/comments/escalations) so
+  # those reset too. Named evebox-data here historically but the volume
+  # EveBox actually declares is evebox-config (docker-compose.elk.yml) --
+  # private/unnamed there, so project-prefixed as honeypot-elk_evebox-config.
+  # Stop evebox first (foreign_stack_compose above) so Docker doesn't
+  # refuse the removal with "volume is in use."
+  run docker volume rm --force honeypot-elk_evebox-config 2>/dev/null || true
   CLEAR_FILEBEAT=true
 fi
 
@@ -281,7 +347,16 @@ fi
 
 if wants tanner; then
   mkown "${LOGS_BASE}/tanner" 65534:65534
-  mkown "${LOGS_BASE}/snare"  65534:65534
+  # NOT 65534:65534 -- confirmed live during the #258 full-stack reset:
+  # snare's own check_privileges() (mushorg/snare's snare_helpers.py) runs
+  # os.access(path, W_OK) on /opt/snare *before* its internal
+  # drop_privileges() call, so it still runs as uid 0 at that point. With
+  # cap_drop: [ALL] (no DAC_OVERRIDE), uid 0 here gets ordinary
+  # owner/group/other permission checks like any other UID -- it needs to
+  # literally own the directory, not just "be root", to pass W_OK. A
+  # 65534-owned /opt/snare crash-loops with "Failed to access path:
+  # /opt/snare" every restart cycle.
+  mkown "${LOGS_BASE}/snare" root:root
 fi
 
 if wants suricata; then
@@ -289,26 +364,28 @@ if wants suricata; then
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-STEP "Deleting Elasticsearch indices (non-fatal)"
+STEP "Deleting Elasticsearch documents (non-fatal)"
 
-wants cowrie   && delete_es "honeypot-cowrie-*"
-wants conpot   && delete_es "honeypot-conpot-*"
-wants multipot && delete_es "honeypot-multipot-*"
-wants http     && delete_es "honeypot-http-*"
-wants dionaea  && delete_es "honeypot-dionaea-*"
-wants dnp3     && delete_es "honeypot-dnp3-*"
-wants tanner   && delete_es "honeypot-tanner-*"
-wants suricata && delete_es "filebeat-*" && delete_es "honeypot-suricata-*"
+wants cowrie   && delete_es_by_path "/logs/cowrie/*"
+wants conpot   && delete_es_by_path "/logs/conpot*"
+wants multipot && delete_es_by_path "/logs/multipot/*"
+wants http     && delete_es_by_path "/logs/http-honeypot/*" && delete_es_by_path "/logs/api-honeypot/*"
+wants dionaea  && delete_es_by_path "/logs/dionaea/*"
+wants dnp3     && delete_es_by_path "/logs/dnp3/*"
+wants tanner   && delete_es_by_path "/logs/tanner/*"
+wants suricata && delete_es_index "suricata-*"
 
 # ─────────────────────────────────────────────────────────────────────────────
-STEP "Starting: ${SERVICES[*]} $(split_targets_wanted)$(wants cowrie && echo " $PAYLOAD_ANALYSIS_SERVICES")"
+STEP "Starting: ${SERVICES[*]} $(split_targets_wanted)$(wants cowrie && echo " $PAYLOAD_ANALYSIS_SERVICES")$(wants suricata && echo " $ELK_SURICATA_SERVICES")"
 [[ ${#SERVICES[@]} -gt 0 ]] && run docker compose up -d "${SERVICES[@]}"
 for t in "${SPLIT_TARGETS[@]}"; do wants "$t" && split_stack_compose "$t" up -d; done
-wants cowrie && payload_analysis_compose up -d
+wants cowrie   && foreign_stack_compose payload-analysis "$PAYLOAD_ANALYSIS_DIR" "$PAYLOAD_ANALYSIS_SERVICES" up -d
+wants suricata && foreign_stack_compose elk "$ELK_DIR" "$ELK_SURICATA_SERVICES" up -d
 
 STEP "Done"
 echo "Tail logs with:  docker compose logs -f ${SERVICES[*]}"
-wants cowrie && echo "  (cd $PAYLOAD_ANALYSIS_DIR && docker compose logs -f $PAYLOAD_ANALYSIS_SERVICES)"
+wants cowrie   && echo "  (cd $PAYLOAD_ANALYSIS_DIR && docker compose logs -f $PAYLOAD_ANALYSIS_SERVICES)"
+wants suricata && echo "  (cd $ELK_DIR && docker compose logs -f $ELK_SURICATA_SERVICES)"
 for t in "${SPLIT_TARGETS[@]}"; do
   wants "$t" && echo "  (cd ${SPLIT_STACK_DIR[$t]} && docker compose logs -f ${SPLIT_STACK_SERVICES[$t]})"
 done

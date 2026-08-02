@@ -103,10 +103,10 @@ not give the `production-home` environment to pull-request workflows.
 one-shot bootstrap jobs (log directory ownership, persona seeding,
 Elasticsearch/Kibana/Arkime first-run setup) that used to live in the main
 compose file; see that file's header for the full reasoning (#111). The same
-`home` job deploys it right *before* `honeypot-stack`, from the same
-checkout: `honeypot-stack`'s own dependents block on completion markers this
-stack writes, and deploying it second made the very first rollout of that
-split hang for 29 minutes waiting on markers that could not exist yet.
+`home` job deploys it first, from the same checkout: every split stack's
+dependents block on completion markers this stack writes, and deploying it
+second made the very first rollout of that split hang for 29 minutes
+waiting on markers that could not exist yet.
 
 Its `.env` is created once by hand on the homeserver and is never touched by
 this workflow — `ARKIME_ADMIN_PASSWORD` and `ARKIME_PASSWORD_SECRET` in it
@@ -130,8 +130,9 @@ needed for a standalone honeypot persona; `autoheal`, which watches by Docker
 label rather than by compose project, needs no changes at all).
 
 Log directories (`logs/conpot*`) and the `state/init-markers` mount are
-pre-existing host paths `honeypot-stack`'s own rsync step already preserves;
-this stack does not create or own them, and has no `.env` of its own.
+pre-existing host paths the "Synchronize Dockge source" rsync step already
+preserves; this stack does not create or own them, and has no `.env` of its
+own.
 
 ### honeypot-cowrie, honeypot-multipot, honeypot-http, honeypot-dnp3 (#258)
 
@@ -268,12 +269,53 @@ a `SPLIT_TARGETS` entry, same as `dionaea`; only `tanner`, `tanner_api`,
 before the split) -- `tanner_docker`/`tanner_redis`/`tanner_phpox` hold no
 open handles into the log directories this script wipes for this target.
 
-With this split, the only services still in `honeypot-stack`'s own
-`docker-compose.yml` are the ELK/analysis plane (`elasticsearch`, `kibana`,
-`filebeat`, `evebox`, `arkime-capture`, `arkime-viewer`, `pcap-sync`) --
-tracked as the next #258 split. Once that moves out too, this file has no
-services left of its own, and retiring its deploy step entirely (rather
-than leaving it as a no-op stack) is the last step of #258.
+### honeypot-elk (#258)
+
+`docker-compose.elk.yml` bundles the ELK/analysis plane (`elasticsearch`,
+`kibana`, `filebeat`, `evebox`, `arkime-capture`, `arkime-viewer`,
+`pcap-sync`) into one stack at `/opt/stacks/honeypot-elk` -- the last group
+that was still in the monolithic file. Kept together, not split further:
+all seven sit on the shared `honeynet` network and either read from or
+write to the one Elasticsearch instance, so splitting them apart would
+turn every one of those relationships into a cross-stack shared resource
+for services that only ever make sense running together.
+
+`honeynet` and `llm-data` get the usual explicit shared `name:` treatment.
+`es-data` does **not**, despite appearances: `honeypot-init`'s
+`elasticsearch-setup`/`arkime-init`/`honeypot-kibana-setup` jobs all talk
+to Elasticsearch purely over HTTP (`http://elasticsearch:9200` via
+`honeynet`), never touching the `es-data` volume directly (confirmed by
+grep -- no `es-data` reference anywhere in `docker-compose.init.yml`).
+`honeynet` is the actual shared resource; `es-data`, `evebox-config`, and
+`arkime-pcap` all stay private/unnamed. Per explicit instruction (same as
+`dashboard-state` in the dashboard split), this means a fresh, empty
+`es-data` volume on cutover -- every honeypot's indexed Elasticsearch
+history is not preserved across the split.
+
+This split also surfaced a real pre-existing ordering bug in
+`.github/workflows/deploy.yml`, dating back to the original
+`honeypot-conpot` proof of concept (#336): every split stack's `build:`
+points at an absolute path under `/opt/stacks/honeypot-stack` (e.g.
+`/opt/stacks/honeypot-stack/dionaea`), populated by the "Synchronize Dockge
+source" rsync step -- but that step used to run *after* every one of those
+builds, near the end of the job, in the slot where `honeypot-stack`'s own
+`docker compose up` used to live. Never a hard failure (the destination
+directory already existed from prior runs), just quietly building from
+whatever the *previous* deploy had rsynced -- one deploy stale rather than
+this run's checkout. Fixed by moving the rsync step to run immediately
+after `honeypot-init`, before any split stack's step.
+
+With this split, `honeypot-stack`'s own `docker-compose.yml` has no
+services of its own left at all (`services: {}`) -- see that file's header
+for what that means going forward. The rsync step still runs
+unconditionally, since every other stack's build context depends on the
+checkout landing there, but `docker compose up -d --build` against a
+zero-service file fails outright (`no service selected`, confirmed
+locally) rather than being a harmless no-op, so that call is gone from
+this one step -- `config --quiet` alone stays as a lightweight sanity
+check. Retiring this file and its deploy step entirely, once every build
+context instead points somewhere that doesn't need a `docker-compose.yml`
+to justify its existence, is tracked as the last step of #258.
 
 ## VPS deployment
 

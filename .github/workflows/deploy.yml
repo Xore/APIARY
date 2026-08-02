@@ -24,12 +24,12 @@ jobs:
     environment: production-home
     steps:
       - uses: actions/checkout@v7
-      # Runs before honeypot-stack, not after: honeypot-stack's init-wait-*
-      # services (docker-compose.yml) block their dependents on completion
-      # markers this stack writes, and `docker compose up` for honeypot-stack
-      # will not return until those dependents start. Deploying it second
-      # made the very first rollout of this split hang for 29 minutes waiting
-      # on markers that could not exist yet -- see #111.
+      # Runs first: every split stack below polls a completion marker this
+      # stack's jobs write (state/init-markers, e.g. log-init.done,
+      # elasticsearch-setup.done, arkime-init.done) before starting its own
+      # real work. Deploying it second made the very first rollout of the
+      # #258 split hang for 29 minutes waiting on markers that could not
+      # exist yet -- see #111.
       - name: Synchronize honeypot-init (one-shot bootstrap jobs stack)
         shell: bash
         run: |
@@ -64,6 +64,37 @@ jobs:
           docker compose -f compose.yml config --quiet
           docker compose -f compose.yml up -d
 
+      # #258: every split stack below builds from an absolute path under
+      # /opt/stacks/honeypot-stack (e.g. `build: /opt/stacks/honeypot-stack/
+      # dionaea`) -- this rsync is what actually populates that checkout, so
+      # it has to run before any of them. Confirmed as a real bug while
+      # working on the ELK split: this step used to run near the end of the
+      # job (where honeypot-stack's own `docker compose up` used to live,
+      # back when that file still had services), and every #258 step above
+      # it was silently building from whatever the *previous* deploy run
+      # had rsynced, one deploy stale, rather than this run's checkout --
+      # never a hard failure (the directory already existed from prior
+      # runs), just quietly wrong. docker-compose.yml itself has no
+      # services left (see its own header) and now the `up -d --build`
+      # call is gone -- `docker compose up -d --build` against a
+      # zero-service compose file fails outright ("no service selected",
+      # confirmed locally) rather than being a harmless no-op. `config
+      # --quiet` alone stays as a lightweight sanity check that the file is
+      # still valid YAML/Compose syntax.
+      - name: Synchronize Dockge source without runtime state
+        shell: bash
+        run: |
+          destination=/opt/stacks/honeypot-stack
+          rsync -a --delete-delay \
+            --exclude '.git/' --exclude '.github/' --exclude '.env' \
+            --exclude 'logs/' --exclude 'state/' --exclude 'dashboard-state/' \
+            --exclude 'analysis/geoip/*.mmdb' --exclude 'sandbox/results/' \
+            ./ "$destination/"
+          cp "$destination/docker-compose.yml" "$destination/compose.yml"
+          cd "$destination"
+          test ! -f .env || chmod 600 .env
+          docker compose -f compose.yml config --quiet
+
       # #258 proof of concept: the Conpot persona family split into its own
       # Dockge stack, same arrangement as honeypot-init above. No ordering
       # dependency on honeypot-init here the way honeypot-stack's own
@@ -71,10 +102,11 @@ jobs:
       # /markers/log-init.done itself (#127, a bind-mounted file, not a
       # compose depends_on chain), so `docker compose up -d` returns
       # immediately rather than blocking on the marker. Placed here anyway,
-      # ahead of honeypot-stack, purely for readability -- smaller/simpler
-      # stacks first. Log directories (logs/conpot*) and the init-markers
-      # mount are pre-existing host paths honeypot-stack's own rsync step
-      # already preserves; this stack does not create or own them.
+      # ahead of honeypot-utilities/honeypot-elk/honeypot-dashboard below,
+      # purely for readability -- smaller/simpler stacks first. Log
+      # directories (logs/conpot*) and the init-markers mount are
+      # pre-existing host paths the rsync step above already preserves;
+      # this stack does not create or own them.
       - name: Synchronize honeypot-conpot (#258 split proof of concept)
         shell: bash
         run: |
@@ -147,31 +179,37 @@ jobs:
           docker compose -f compose.yml config --quiet
           docker compose -f compose.yml up -d --build
 
-      - name: Synchronize Dockge source without runtime state
+      # #258: the ELK/analysis plane (elasticsearch, kibana, filebeat,
+      # evebox, arkime-capture, arkime-viewer, pcap-sync) split into its own
+      # Dockge stack. Its bind mounts (analysis/geoip, analysis/filebeat.yml,
+      # arkime/config.ini, arkime/geo) resolve against the checkout the
+      # rsync step above already populated. Placed before honeypot-dashboard
+      # below, which depends on elasticsearch/filebeat being reachable by
+      # service name over honeynet at runtime (Compose itself doesn't
+      # enforce this -- see the dashboard step's own comment).
+      - name: Synchronize honeypot-elk (#258 split)
         shell: bash
         run: |
-          destination=/opt/stacks/honeypot-stack
-          rsync -a --delete-delay \
-            --exclude '.git/' --exclude '.github/' --exclude '.env' \
-            --exclude 'logs/' --exclude 'state/' --exclude 'dashboard-state/' \
-            --exclude 'analysis/geoip/*.mmdb' --exclude 'sandbox/results/' \
-            ./ "$destination/"
-          cp "$destination/docker-compose.yml" "$destination/compose.yml"
+          destination=/opt/stacks/honeypot-elk
+          install -d -m 755 "$destination"
+          cp docker-compose.elk.yml "$destination/compose.yml"
           cd "$destination"
           test ! -f .env || chmod 600 .env
           docker compose -f compose.yml config --quiet
           docker compose -f compose.yml up -d --build
 
       # #258: dashboard + services-adapter split into their own Dockge stack,
-      # placed after honeypot-stack (unlike the standalone honeypots above)
-      # because it actually depends on that stack at runtime -- it resolves
-      # elasticsearch/filebeat by service name over the shared honeynet
-      # network, and reads dionaea-lib/yara-results/dashboard-state, three
-      # named volumes honeypot-stack's own services write. Compose itself
-      # doesn't enforce this order (none of those are `external: true`, so
-      # whichever project runs first would simply create them), but starting
-      # honeypot-stack first means the dashboard has something to show
-      # immediately rather than booting against empty indices.
+      # placed after honeypot-elk and honeypot-dionaea/honeypot-payload-
+      # analysis above (not honeypot-stack, which has no services of its
+      # own any more) because it actually depends on those stacks at
+      # runtime -- it resolves elasticsearch/filebeat by service name over
+      # the shared honeynet network, and reads dionaea-lib/yara-results/
+      # dashboard-state, three named volumes those stacks' own services
+      # write. Compose itself doesn't enforce this order (none of those are
+      # `external: true`, so whichever project runs first would simply
+      # create them), but starting the writers first means the dashboard
+      # has something to show immediately rather than booting against
+      # empty indices.
       - name: Synchronize honeypot-dashboard (#258 split)
         shell: bash
         run: |

@@ -1,0 +1,436 @@
+# honeypot-elk — #258: the ELK/analysis plane (elasticsearch, kibana,
+# filebeat, evebox, arkime-capture, arkime-viewer, pcap-sync) split into its
+# own Dockge stack. Bundled as one stack, not split further: all seven sit
+# on the shared honeynet network and either read from or write to the one
+# Elasticsearch instance -- splitting them apart would mean turning every
+# one of those relationships into a cross-stack shared resource for
+# services that only ever make sense running together.
+#
+# es-data itself is NOT shared outside this stack, despite appearances --
+# honeypot-init's elasticsearch-setup/arkime-init/honeypot-kibana-setup
+# jobs all talk to Elasticsearch purely over HTTP (http://elasticsearch:9200
+# via honeynet), never touching the es-data volume directly (confirmed by
+# grep: no es-data reference anywhere in docker-compose.init.yml). honeynet
+# is the actual shared resource here, same as it always was. es-data,
+# evebox-config, and arkime-pcap all stay private/unnamed -- a fresh
+# project-scoped volume on cutover, not migrated from
+# honeypot-stack_es-data. Per explicit instruction (same as dashboard-state
+# in the dashboard split), this split does not preserve existing
+# Elasticsearch data across the cutover -- every honeypot's indexed
+# event/alert history in the old volume is gone; Elasticsearch starts
+# empty and reindexes from whatever Filebeat ships going forward.
+#
+# honeynet and llm-data are shared exactly like every other #258 split:
+# explicit, non-project-prefixed `name:`, non-external. elasticsearch joins
+# both -- honeynet for every other service in this stack (and the
+# dashboard, in docker-compose.dashboard.yml), llm-data so the LLM worker
+# can reach it by the `elasticsearch` alias without a route to the wider
+# honeynet.
+#
+# With this split, honeypot-stack's own docker-compose.yml has no services
+# left of its own -- see that file's header for what that means for its
+# deploy step going forward.
+#
+# Deployed as /opt/stacks/honeypot-elk.
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  elasticsearch:
+    <<: *runtime-defaults
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    container_name: hp-elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      # 2g heap: the per-event-type index layout multiplies shard count, and
+      # geoip mmdb files + reindex jobs OOM-killed the node at 512m (exit 137).
+      - ES_JAVA_OPTS=-Xms6g -Xmx6g
+      # No internet egress on this host — the GeoLite2 auto-downloader can
+      # never succeed. Geo databases (db-ip lite) are provided locally via
+      # the ingest-geoip mount below and used by the geoip-honeypot pipeline.
+      - ingest.geoip.downloader.enabled=false
+      - path.repo=/snapshots
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+      - /opt/stacks/honeypot-stack/analysis/geoip:/usr/share/elasticsearch/config/ingest-geoip:ro
+      - /opt/stacks/honeypot-stack/state/elasticsearch-snapshots:/snapshots
+    networks:
+      honeynet:
+      llm-data:
+        aliases: [elasticsearch]
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -sf http://localhost:9200/_cluster/health || exit 1
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    # Restarted by the autoheal sidecar (docker-compose.utilities.yml, #258)
+    # on unhealthy, not by restart: alone -- see #119, the same gap #111
+    # found and fixed for conpot. autoheal watches Docker directly via
+    # docker.sock by label, daemon-wide, so it needs no changes for this
+    # split.
+    labels:
+      - autoheal=true
+    # #118: measured (2026-08-02) against this exact service, following the
+    # same methodology as #89's dionaea/conpot/snare/tanner pass. Baseline:
+    # already runs as 1000:0 (not root), only publishes an internal,
+    # unprivileged 9200 (no ports: mapping at all -- reached by name over
+    # honeynet/llm-data), no mlockall (bootstrap.memory_lock is not set
+    # above). cap_drop: ALL with no cap_add stayed healthy and served
+    # _cluster/health -- no capability the image's own default set granted
+    # was actually load-bearing here.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "6.0"
+          memory: 12G
+  kibana:
+    <<: *runtime-defaults
+    image: docker.elastic.co/kibana/kibana:8.13.4
+    container_name: hp-kibana
+    restart: unless-stopped
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - XPACK_SECURITY_ENABLED=false
+      - XPACK_FLEET_ENABLED=false
+      - TELEMETRY_ENABLED=false
+      - XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY=${KIBANA_ENCRYPTION_KEY:-CHANGE_ME_32_CHAR_MINIMUM_KEY_1234}
+    ports:
+      - ${HP_BIND:-10.8.0.2}:19601:5601
+    networks:
+      - honeynet
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    # #118: measured (2026-08-02). Already runs as UID 1000 (not root),
+    # publishes only the unprivileged 5601. cap_drop: ALL with no cap_add
+    # stayed up and served the login page.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+  filebeat:
+    <<: *runtime-defaults
+    image: docker.elastic.co/beats/filebeat:8.13.4
+    container_name: hp-filebeat
+    restart: unless-stopped
+    user: root
+    # #125: init-wait-elasticsearch-setup used to gate this via same-project
+    # depends_on: condition: service_completed_successfully. Waits on the
+    # marker directly instead -- filebeat's own image entrypoint still runs
+    # first and execs this command, same as before, just with the wait
+    # spliced in ahead of the real filebeat invocation.
+    command:
+      - sh
+      - -c
+      - >
+        until [ -f /markers/elasticsearch-setup.done ]; do sleep 3; done;
+        exec filebeat -e --strict.perms=false
+    volumes:
+      - /opt/stacks/honeypot-stack/analysis/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      # Persist the filestream registry so recreating Filebeat does not ingest
+      # the complete historical log corpus a second time.
+      - /opt/stacks/honeypot-stack/state/filebeat:/usr/share/filebeat/data
+      - /opt/stacks/honeypot-stack/logs:/logs:ro
+      - /opt/stacks/honeypot-stack/logs/suricata:/var/log/suricata:ro
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+    networks:
+      - honeynet
+    # #118: measured (2026-08-02). This one runs as root (user: root above,
+    # needed to read across every sensor UID under /logs) rather than a
+    # fixed non-root UID like the other four -- so unlike them, cap_drop:
+    # ALL alone was expected to be the risky case: root's usual ability to
+    # bypass file permission checks IS a capability, not something a bare
+    # UID of 0 gets for free once capabilities are dropped. First attempt
+    # (DAC_READ_SEARCH, read-only bypass, same as yara-scanner above) was
+    # not enough on its own: filebeat exited in a restart loop on "unable
+    # to try a lock of the data path: open
+    # /usr/share/filebeat/data/filebeat.lock: permission denied" --
+    # DAC_READ_SEARCH only bypasses read/search checks, and this directory
+    # (a host bind mount owned by a non-root host user) needs a WRITE
+    # bypass to create that lock file. DAC_OVERRIDE covers read, write, and
+    # execute checks together (capabilities(7)), so it supersedes
+    # DAC_READ_SEARCH here rather than stacking with it -- confirmed clean
+    # start and Elasticsearch still receiving fresh honeypot-v2-*/
+    # suricata-v2-* documents afterward.
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "3.0"
+          memory: 2G
+  # ===================== EveBox — Suricata EVE web GUI =====================
+  # EveBox queries Elasticsearch directly, where Filebeat already ships the
+  # Suricata history as suricata-v2-*. It keeps no database of its own.
+  #
+  # It previously ingested a local copy of eve.json into an embedded SQLite
+  # store, which meant the same events were stored twice and the console owned
+  # a file that grew without a usable bound: alert queries exceeded their
+  # 5-second timeout at 4.2 GB and the UI rendered blank. Reading the indices
+  # that already exist removes both the duplicate and the growth. Retention is
+  # now the suricata-7d ILM policy on the indices themselves.
+  #
+  # Dropping the SQLite input also retires the eve-relay sidecar, which existed
+  # only because SSHFS does not propagate remote inotify events to a file
+  # watcher. Nothing watches files any more.
+  #
+  # #121: every start logs "Failed to find template for index suricata-v2"
+  # followed by a 400 from a legacy `_template/suricata-v2` PUT -- confirmed
+  # cosmetic and expected, not a bug on our side. EveBox 0.27.0's own startup
+  # code (src/elastic/util.rs, check_and_set_field_limit) unconditionally
+  # GETs a legacy template named after --index to check its field limit, then
+  # unconditionally tries to PUT one raising it to 5000 if that GET 404s --
+  # there's no CLI flag to skip this (checked `evebox server --help`). The
+  # PUT collides because ES 8.x forbids creating a legacy template whose
+  # pattern overlaps an existing composable one, and our suricata-events
+  # template (analysis/elasticsearch-setup.sh) already matches `suricata-*`.
+  # Confirmed zero actual impact: that same template already sets
+  # `index.mapping.total_fields.limit: 5000` -- the exact value EveBox is
+  # trying to set -- so nothing is under-provisioned. EveBox also logs the
+  # 400 as "Successfully updated" regardless, because it never checks the
+  # response status; that's an upstream logging bug, not a sign anything
+  # failed twice. Do not try to pre-create a legacy suricata-v2 template to
+  # silence this -- it would hit the identical collision, since the
+  # overlap is with our composable template's pattern, not EveBox's.
+  evebox:
+    <<: *runtime-defaults
+    image: jasonish/evebox:latest
+    container_name: hp-evebox
+    restart: unless-stopped
+    command:
+      - evebox
+      - server
+      - --database
+      - elasticsearch
+      - --elasticsearch
+      - http://elasticsearch:9200
+      - --index
+      - suricata-v2
+      # Filebeat nests each EVE record under suricata.eve.* and the
+      # geoip-honeypot pipeline promotes the addresses into ECS
+      # source/destination fields. --ecs is how EveBox reads that layout.
+      - --ecs
+      - --host
+      - 0.0.0.0
+      - --port
+      - "5636"
+      - --no-tls
+      - --no-auth
+    ports:
+      - ${HP_BIND:-10.8.0.2}:19636:5636
+    volumes:
+      # The image declares VOLUME /var/lib/evebox, so a volume is created here
+      # either way; name it so it is visible rather than anonymous. It now
+      # holds only config.sqlite — saved filters, comments, and escalations,
+      # a few hundred kilobytes. The event store that used to live beside it
+      # is gone: events are read from Elasticsearch.
+      - evebox-config:/var/lib/evebox
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - honeynet
+    # #118: measured (2026-08-02). Publishes only the unprivileged 5636 and
+    # owns nothing but its own config.sqlite volume. cap_drop: ALL with no
+    # cap_add stayed up and served the UI.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          # A query proxy over Elasticsearch, not a database host.
+          cpus: "1.0"
+          memory: 512M
+  # ===================== Arkime — full PCAP search & analysis =====================
+  #
+  # Image: ghcr.io/arkime/arkime/arkime:v6-latest
+  #   NOTE: three path segments (arkime/arkime/arkime) — the two-segment path
+  #   ghcr.io/arkime/arkime is the repository namespace and returns 'denied'
+  #   without authentication. The correct pullable image is the three-segment form.
+  #
+  # Consumes PCAP files written by Suricata (pcap-log output) from:
+  #   /opt/stacks/honeypot-stack/logs/suricata/pcap/
+  # Suricata rotates files matching pcap/log.%n.%t.pcap - Arkime capture watches
+  # the directory and imports each file as it is closed/rotated.
+  #
+  # Arkime stores session metadata in the existing Elasticsearch instance
+  # (hp-elasticsearch). No separate OpenSearch is needed.
+  #
+  # First-run DB init (arkime-init) lives in docker-compose.init.yml (the
+  # honeypot-init stack) and runs once and exits there. It bootstraps the
+  # Elasticsearch indices and creates the admin user, locked to SSO via
+  # --webauthonly -- no local password exists to log in with (#122, #134);
+  # arkime-capture/arkime-viewer below wait on its completion marker
+  # directly (#126) rather than depends_on-ing a same-project shim.
+  #
+  # Web UI: http://${HP_BIND}:19080 (normally proxied by the VPS gateway).
+  # Auth: SSO only, via auth-backend (authMode=header in arkime/config.ini).
+  # =========================================================================
+  # ===================== PCAP sync (sshfs -> local disk) =================
+  # The Suricata pcap dir is an sshfs mount from the VPS. inotify never fires
+  # across sshfs, so arkime-capture --monitor cannot see new files there.
+  # This sidecar copies rotated (closed) pcaps to a local dir where inotify
+  # works. The newest file is skipped (Suricata is still writing it).
+  # Plain cp to the final name on purpose: Arkime's monitor reacts to
+  # IN_CLOSE_WRITE only, which fires when the copy finishes -- a rename
+  # (IN_MOVED_TO) would be invisible to it.
+  # Local copies older than 50 days are pruned (~50GB, matching the VPS
+  # ring of 50000 x 1mb; the viewer needs these files for packet payloads).
+  pcap-sync:
+    <<: *runtime-defaults
+    image: busybox:latest
+    container_name: hp-pcap-sync
+    restart: unless-stopped
+    # #127: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism).
+    command:
+      - sh
+      - -c
+      - |
+        until [ -f /markers/log-init.done ]; do sleep 3; done
+        while true; do
+          newest=$$(ls -t /src 2>/dev/null | head -1)
+          for f in /src/*.pcap.*; do
+            [ -e "$$f" ] || continue
+            n=$$(basename "$$f")
+            [ "$$n" = "$$newest" ] && continue
+            [ -e "/dst/$$n" ] && continue
+            cp -p "$$f" "/dst/$$n"
+          done
+          find /dst -type f -name 'log.pcap.*' -mtime +50 -delete
+          sleep 30
+        done
+    volumes:
+      - /opt/stacks/honeypot-stack/logs/suricata/pcap:/src:ro
+      - /opt/stacks/honeypot-stack/logs/arkime-raw:/dst
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+  arkime-capture:
+    <<: *runtime-defaults
+    image: ghcr.io/arkime/arkime/arkime:v6-latest
+    container_name: hp-arkime-capture
+    restart: unless-stopped
+    # Offline import mode: -R watches the locally synced pcap dir (see
+    # pcap-sync above), --monitor keeps watching for new files via inotify,
+    # --skip ignores files already indexed (safe across restarts).
+    # No --update-geo: it needs MaxMind credentials and only produces
+    # "AccountID required" noise without them.
+    #
+    # #126: waits on both markers directly instead of depends_on-ing
+    # init-wait-arkime-init/init-wait-log (same-project-only mechanism).
+    # The arkime image has no ENTRYPOINT of its own, only this CMD, so the
+    # wait is spliced straight into command: rather than needing a separate
+    # entrypoint: override.
+    command:
+      - sh
+      - -c
+      - >
+        until [ -f /markers/arkime-init.done ] && [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec /opt/arkime/bin/docker.sh capture --wait-for-db http://elasticsearch:9200
+        --db 'http://elasticsearch:9200 upgradenoprompt --ifneeded'
+        -- -R file:///opt/arkime/raw --monitor --skip --host honeypot-vps
+    volumes:
+      - /opt/stacks/honeypot-stack/arkime/config.ini:/opt/arkime/etc/config.ini:ro
+      - /opt/stacks/honeypot-stack/arkime/geo:/opt/arkime/geo:ro
+      - /opt/stacks/honeypot-stack/logs/arkime-raw:/opt/arkime/raw:ro
+      - arkime-pcap:/opt/arkime/pcap
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+    environment:
+      - TZ=Europe/Berlin
+      - ARKIME__elasticsearch=http://elasticsearch:9200
+      - ARKIME__passwordSecret=${ARKIME_PASSWORD_SECRET:-change-me-in-env}
+      - ARKIME__dropUser=nobody
+      - ARKIME__dropGroup=daemon
+    networks:
+      - honeynet
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 6G
+  arkime-viewer:
+    <<: *runtime-defaults
+    image: ghcr.io/arkime/arkime/arkime:v6-latest
+    container_name: hp-arkime-viewer
+    restart: unless-stopped
+    # #126: waits on the marker directly instead of depends_on-ing
+    # init-wait-arkime-init (same-project-only mechanism). No ENTRYPOINT on
+    # this image, only this CMD, so the wait goes straight into command:.
+    command:
+      - sh
+      - -c
+      - >
+        until [ -f /markers/arkime-init.done ]; do sleep 3; done;
+        exec /opt/arkime/bin/docker.sh viewer --wait-for-db http://elasticsearch:9200
+    ports:
+      - ${HP_BIND:-10.8.0.2}:19080:8005
+    volumes:
+      - /opt/stacks/honeypot-stack/arkime/config.ini:/opt/arkime/etc/config.ini:ro
+      - /opt/stacks/honeypot-stack/arkime/geo:/opt/arkime/geo:ro
+      - /opt/stacks/honeypot-stack/logs/arkime-raw:/opt/arkime/raw:ro
+      - arkime-pcap:/opt/arkime/pcap
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+    environment:
+      - TZ=Europe/Berlin
+      - ARKIME__elasticsearch=http://elasticsearch:9200
+      - ARKIME__pcapDir=/opt/arkime/raw
+      - ARKIME__passwordSecret=${ARKIME_PASSWORD_SECRET:-change-me-in-env}
+    networks:
+      - honeynet
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+networks:
+  # Shared with every other stack that touches it -- explicit fixed name,
+  # not project-prefixed, non-external. Same mechanism as
+  # docker-compose.dashboard.yml/docker-compose.tanner.yml/etc.
+  honeynet:
+    name: honeynet
+    driver: bridge
+  # Narrow #83 data plane. The LLM worker joins this internal network
+  # instead of honeynet, so captured text has no Docker route to the
+  # Internet. Explicit shared name, same as honeynet above.
+  llm-data:
+    name: honeypot-llm-data
+    driver: bridge
+    internal: true
+
+volumes:
+  # Private to this stack -- see this file's header for why es-data does
+  # NOT need the explicit shared-name treatment despite honeypot-init also
+  # depending on Elasticsearch being up.
+  es-data: null
+  evebox-config: null
+  arkime-pcap: null # Arkime-processed PCAP index files
