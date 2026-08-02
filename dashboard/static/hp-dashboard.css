@@ -727,7 +727,17 @@ button.sidebar__profile:disabled:hover { background: transparent; }
 .hp-account-note { color: var(--text-muted); cursor: default; }
 .hp-account-note:hover { background: transparent; }
 
-.hp-settings-modal { flex-direction: column; }
+/* Same clamped size as .hp-dash-settings (this dashboard's own settings
+   modal, hp-settings-modal.css) -- otherwise this falls back to the base
+   .modal's smaller 960x680, so the auth-backend account-settings modal
+   (loaded edge-to-edge into .hp-settings-frame below) renders visibly
+   smaller than this dashboard's own settings, despite both being reached
+   from the same account menu. */
+.hp-settings-modal {
+  flex-direction: column;
+  width: min(1120px, calc(100vw - 40px));
+  height: min(820px, calc(100dvh - 40px));
+}
 .hp-settings-head {
   display: flex;
   align-items: center;
