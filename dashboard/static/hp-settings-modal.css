@@ -19,6 +19,14 @@
 .hp-settings-status.is-error{color:var(--danger)}
 .hp-settings-status.is-ok{color:var(--success)}
 .hp-settings-pane[hidden],.hp-field[hidden]{display:none}
+/* hp-dashboard.css zeroes .card's margin-bottom for its own CSS-grid pages
+   (gap handles spacing there instead) -- that global rule leaks into this
+   modal, which just stacks <section class="card"> in normal block flow with
+   no grid/gap of its own, so every card butted against the next with no
+   visible seam at all. Restore theme.css's own margin-bottom here, scoped to
+   this modal only so the grid pages are untouched. */
+.hp-settings-pane .card{margin-bottom:14px}
+.hp-settings-pane .card:last-child{margin-bottom:0}
 .sidebar__item.is-dirty::after{content:"";width:6px;height:6px;margin-left:auto;border-radius:50%;background:var(--accent)}
 .hp-cap-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 .hp-cfg-source{margin:6px 0 0;font-size:11px;color:var(--text-muted)}
