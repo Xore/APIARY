@@ -61,20 +61,47 @@ log = logging.getLogger(__name__)
 
 VM_HOST     = os.environ.get('VM_HOST', '10.10.10.2')
 VM_USER     = os.environ.get('VM_USER', 'analyst')
-VM_PASS     = os.environ.get('VM_PASS', 'malware')
+# Must match winrm_pass's actual default in packer/win11-analysis.pkr.hcl --
+# same drift as run_sample.py's VM_PASS, fixed there in #358.
+VM_PASS     = os.environ.get('VM_PASS', 'malware123!')
 SAMPLE_SHARE = f'\\\\{VM_HOST}\\Samples'
 LOGS_SHARE   = f'\\\\{VM_HOST}\\Logs'
 RESULTS_DIR  = Path(__file__).resolve().parent.parent / 'docs' / 'vm-detection-results'
 
 
 def winrm_run(ps_command: str, timeout: int = 300) -> dict:
+    """Run a PowerShell command over WinRM, bounded by `timeout` wall-clock
+    seconds.
+
+    session.run_ps() alone does not bound this: WinRM's Receive operation is
+    a long-poll the client keeps re-issuing for as long as the remote shell
+    command hasn't exited, so a hung remote process (confirmed live: pafish
+    waits on a keypress at the end that WinRM never provides, and hung with
+    0% CPU for 20+ minutes) blocks here indefinitely no matter what
+    read_timeout_sec/operation_timeout_sec are set to -- those only bound a
+    single poll round-trip, not the overall loop. run_ps() itself has no
+    timeout parameter, so the only way to actually bound it is to run it in
+    a thread and give up waiting on that thread.
+    """
     if winrm is None:
         raise RuntimeError('pywinrm not installed. Run: pip install pywinrm')
     session = winrm.Session(
         VM_HOST, auth=(VM_USER, VM_PASS),
         transport='ntlm', server_cert_validation='ignore',
+        read_timeout_sec=30, operation_timeout_sec=20,
     )
-    result = session.run_ps(ps_command)
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(session.run_ps, ps_command)
+        try:
+            result = future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            raise TimeoutError(
+                f'WinRM command did not return within {timeout}s -- likely hung '
+                f'on the guest (e.g. waiting on stdin). The underlying thread is '
+                f'abandoned, not killed; the guest-side process may still be '
+                f'running and should be checked/killed separately.'
+            )
     return {
         'stdout': result.std_out.decode('utf-8', errors='replace'),
         'stderr': result.std_err.decode('utf-8', errors='replace'),
@@ -92,11 +119,37 @@ def push_tool(local_path: Path, remote_name: str):
 
 
 def run_tool(remote_name: str, log_name: str) -> dict:
+    """Run a tool on the guest and return its exit code plus captured output.
+
+    Uses Start-Process -PassThru -Wait rather than plain redirection so a
+    hard failure (e.g. STATUS_DLL_NOT_FOUND, confirmed live for al-khaser --
+    this golden image has no Visual C++ Redistributable installed) is
+    reported as a real, non-zero/negative exit code instead of silently
+    looking identical to "ran fine and printed nothing."
+
+    pafish (confirmed live) also waits on a keypress after finishing its
+    checks; WinRM gives a launched process no interactive stdin, so without
+    feeding it something it would finish its real work, write the log, and
+    then hang forever at 0% CPU waiting for input that will never come.
+    "echo." pipes a single blank line in via -RedirectStandardInput to
+    satisfy that read and let the process actually exit.
+    """
     log.info(f'Running C:\\Samples\\{remote_name} ...')
-    return winrm_run(
-        f'C:\\Samples\\{remote_name} > C:\\Logs\\{log_name} 2>&1; '
-        f'Get-Content C:\\Logs\\{log_name} -Raw'
+    stdin_path = f'C:\\Logs\\{log_name}.stdin'
+    out = winrm_run(
+        f'"`n" | Out-File -Encoding ascii -NoNewline {stdin_path}; '
+        f'$p = Start-Process -FilePath C:\\Samples\\{remote_name} -PassThru -Wait '
+        f'-WindowStyle Hidden -RedirectStandardInput {stdin_path} '
+        f'-RedirectStandardOutput C:\\Logs\\{log_name} '
+        f'-RedirectStandardError C:\\Logs\\{log_name}.stderr; '
+        f'$p.ExitCode'
     )
+    exit_code = out['stdout'].strip()
+    body = winrm_run(
+        f'Get-Content C:\\Logs\\{log_name} -Raw; "---STDERR---"; '
+        f'Get-Content C:\\Logs\\{log_name}.stderr -Raw'
+    )
+    return {'exit_code': exit_code, 'stdout': body['stdout']}
 
 
 def check_residual_tells() -> dict:
@@ -137,15 +190,27 @@ def main():
 
     sections = [f'# VM detection verification — {ts}\n']
 
+    def render_section(name: str, out: dict) -> str:
+        code = out['exit_code']
+        if code not in ('0', ''):
+            return (
+                f'## {name}\n\n**FAILED to run — exit code {code}.** Not a '
+                f'"no tells found" result; this tool did not actually execute. '
+                f'Check the exit code against Windows NTSTATUS values (e.g. '
+                f'-1073741515 / 0xC0000135 = STATUS_DLL_NOT_FOUND) before '
+                f'trusting anything else in this report.\n\n```\n{out["stdout"]}\n```\n'
+            )
+        return f'## {name}\n\n```\n{out["stdout"]}\n```\n'
+
     if args.pafish:
         push_tool(args.pafish, 'pafish.exe')
         out = run_tool('pafish.exe', 'pafish_out.txt')
-        sections.append('## pafish\n\n```\n' + out['stdout'] + '\n```\n')
+        sections.append(render_section('pafish', out))
 
     if args.al_khaser:
         push_tool(args.al_khaser, 'al-khaser.exe')
         out = run_tool('al-khaser.exe', 'al_khaser_out.txt')
-        sections.append('## al-khaser\n\n```\n' + out['stdout'] + '\n```\n')
+        sections.append(render_section('al-khaser', out))
 
     tells = check_residual_tells()
     sections.append(
