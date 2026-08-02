@@ -1,3 +1,0 @@
-# Optional local intelligence overlays. Format: CIDR,label
-# Populate from trusted Tor/scanner feeds; longest/first matching label is shown.
-# 192.0.2.0/24,scanner

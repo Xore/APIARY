@@ -12,6 +12,8 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/oschwald/maxminddb-golang"
 )
@@ -42,7 +44,15 @@ type geoDB struct {
 	ranges []geoRange
 	city   *maxminddb.Reader
 	asn    *maxminddb.Reader
-	intel  []intelPrefix
+
+	// intel is guarded separately from the rest of geoDB (which is immutable
+	// after construction): threatIntelReloadLoop swaps it in place whenever
+	// refresh-threat-cidrs.sh (#244) rewrites intelPath on disk, so a
+	// scheduled refresh takes effect without a dashboard restart.
+	intelMu   sync.RWMutex
+	intel     []intelPrefix
+	intelPath string
+	intelMod  time.Time
 }
 
 type cityRecord struct {
@@ -86,8 +96,53 @@ func loadGeoMMDB(cityPath, asnPath, intelPath string) (*geoDB, error) {
 	if g.city == nil && g.asn == nil {
 		return nil, errors.New("no MMDB path configured")
 	}
+	g.intelPath = intelPath
 	g.intel = loadIntelCIDRs(intelPath)
+	if intelPath != "" {
+		if info, err := os.Stat(intelPath); err == nil {
+			g.intelMod = info.ModTime()
+		}
+	}
 	return g, nil
+}
+
+// threatIntelReloadInterval is how often threatIntelReloadLoop polls
+// intelPath's mtime. refresh-threat-cidrs.sh (#244) runs at most daily, so
+// this only needs to be frequent enough that a fresh refresh reaches the
+// dashboard promptly, not frequent enough to race it.
+const threatIntelReloadInterval = 15 * time.Minute
+
+// threatIntelReloadLoop lets a scheduled refresh-threat-cidrs.sh run (#244)
+// take effect without a dashboard restart -- THREAT_CIDRS_FILE is otherwise
+// only ever read once, at startup. No-ops when intelPath is unset.
+func (g *geoDB) threatIntelReloadLoop() {
+	if g == nil || g.intelPath == "" {
+		return
+	}
+	ticker := time.NewTicker(threatIntelReloadInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		g.reloadIntelIfChanged()
+	}
+}
+
+// reloadIntelIfChanged re-reads intelPath only when its mtime has moved since
+// the last (re)load -- refresh-threat-cidrs.sh (#244) runs at most daily, so
+// this is cheap to call on every tick rather than worth a filesystem watcher.
+// A no-op when intelPath is unset (the plain CSV geoip.g backend never sets
+// it) or unreadable, so a bad refresh never blanks out a working intel set.
+func (g *geoDB) reloadIntelIfChanged() {
+	if g == nil || g.intelPath == "" {
+		return
+	}
+	info, err := os.Stat(g.intelPath)
+	if err != nil || !info.ModTime().After(g.intelMod) {
+		return
+	}
+	fresh := loadIntelCIDRs(g.intelPath)
+	g.intelMu.Lock()
+	g.intel, g.intelMod = fresh, info.ModTime()
+	g.intelMu.Unlock()
 }
 
 func loadGeoCSV(path string) (*geoDB, error) {
@@ -179,14 +234,41 @@ func (g *geoDB) lookup(ip string) geoInfo {
 	}
 	if addr, err := netip.ParseAddr(ip); err == nil {
 		addr = addr.Unmap()
+		bestRank, bestBits := -1, -1
+		g.intelMu.RLock()
 		for _, p := range g.intel {
-			if p.prefix.Contains(addr) {
-				out.Intel = p.label
-				break
+			if !p.prefix.Contains(addr) {
+				continue
+			}
+			rank := intelCategoryRank(p.label)
+			bits := p.prefix.Bits()
+			// Highest severity wins regardless of file order (#244); on a tie,
+			// the more specific (longer) prefix wins, matching ordinary CIDR
+			// routing semantics -- a /32 blocklist entry inside a /16 range
+			// from a broader feed should not be shadowed by the broader one.
+			if rank > bestRank || (rank == bestRank && bits > bestBits) {
+				out.Intel, bestRank, bestBits = p.label, rank, bits
 			}
 		}
+		g.intelMu.RUnlock()
 	}
 	return out
+}
+
+// intelCategoryRank orders threat-cidrs.csv labels by severity so an address
+// that falls inside more than one overlapping intel CIDR -- e.g. a Tor exit
+// range that also happens to be reputation-listed -- resolves to the more
+// severe label, not whichever entry happened to load first. See #244's
+// malicious/neutral/benign taxonomy.
+func intelCategoryRank(label string) int {
+	switch {
+	case strings.HasPrefix(label, "blocklist:"):
+		return 2
+	case label == "tor-exit":
+		return 1
+	default:
+		return 0
+	}
 }
 
 func providerType(org string) string {
@@ -210,6 +292,22 @@ func providerType(org string) string {
 		return "network"
 	}
 	return ""
+}
+
+// intelBadgeClass maps an Intel/Provider label to a CSS badge modifier for
+// events.html's origin badge (#244): a reputation-blocklist hit reads as a
+// warning, a Tor exit is a real-but-not-inherently-malicious signal, and
+// every other classification (cloud/scanner/hosting/network infrastructure)
+// stays the existing neutral/informational styling.
+func intelBadgeClass(label string) string {
+	switch {
+	case strings.HasPrefix(label, "blocklist:"):
+		return "badge--danger"
+	case label == "tor-exit":
+		return "badge--warning"
+	default:
+		return "badge--muted"
+	}
 }
 
 func ipToU32(s string) (uint32, bool) {

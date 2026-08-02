@@ -122,9 +122,10 @@ func templateFuncs(s *store, world template.HTML) template.FuncMap {
 			h.Write(b)
 			return strconv.FormatUint(h.Sum64(), 36)
 		},
-		"presentation": presentation,
-		"behavior":     behavior,
-		"brandHTML":    func() template.HTML { return brandHTML(presentation().AppName) },
-		"activeBanner": func() *bannerView { return activeBannerView(presentation(), behavior(), time.Now()) },
+		"presentation":    presentation,
+		"behavior":        behavior,
+		"brandHTML":       func() template.HTML { return brandHTML(presentation().AppName) },
+		"activeBanner":    func() *bannerView { return activeBannerView(presentation(), behavior(), time.Now()) },
+		"intelBadgeClass": intelBadgeClass,
 	}
 }
