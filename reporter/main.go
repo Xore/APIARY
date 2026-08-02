@@ -1,7 +1,8 @@
-// reporter — tails this stack's honeypot sensor logs and reports attacker
-// IPs to AbuseIPDB. Phase 1 of docs/ip-reporting-plan.md (#68): file
-// tailing, whitelist/CIDR filtering, SQLite dedup + cooldowns, structured
-// audit logs, dry-run by default.
+// reporter — tails this stack's honeypot sensor logs (and Suricata's
+// eve.json, #69) and reports attacker IPs to AbuseIPDB and Blocklist.de.
+// Phase 1 of docs/ip-reporting-plan.md (#68): file tailing, whitelist/CIDR
+// filtering, SQLite dedup + cooldowns, structured audit logs, dry-run by
+// default.
 //
 // Reporting is outbound and irreversible -- an abuse report cannot be
 // unsent, and it names a third party's address from this stack. Per
@@ -85,11 +86,19 @@ func main() {
 	if live && apiKey == "" {
 		log.Print("reporter: REPORTER_LIVE=1 but ABUSEIPDB_API_KEY is empty -- staying in dry-run")
 	}
-	log.Printf("reporter: live=%v (effective sender is live=%v)", live, live && apiKey != "")
+	log.Printf("reporter: live=%v (effective abuseipdb sender is live=%v)", live, live && apiKey != "")
+
+	bdEmail := os.Getenv("BLOCKLISTDE_SENDER")
+	bdAPIKey := os.Getenv("BLOCKLISTDE_API_KEY")
+	sendBD := newBlocklistDeSender(live, bdEmail, bdAPIKey, audit)
+	if live && (bdEmail == "" || bdAPIKey == "") {
+		log.Print("reporter: REPORTER_LIVE=1 but BLOCKLISTDE_SENDER/BLOCKLISTDE_API_KEY is incomplete -- staying in dry-run for blocklistde")
+	}
+	log.Printf("reporter: live=%v (effective blocklistde sender is live=%v)", live, live && bdEmail != "" && bdAPIKey != "")
 
 	cooldown := time.Duration(getenvInt("REPORTER_COOLDOWN_HOURS", 24)) * time.Hour
 	minHits := getenvInt("REPORTER_MIN_EVENTS", 3)
-	proc := newProcessor(wl, st, send, audit, cooldown, minHits)
+	proc := newProcessor(wl, st, send, sendBD, audit, cooldown, minHits)
 
 	tailer := newTailer(st)
 	interval := time.Duration(getenvInt("REPORTER_POLL_SECONDS", 30)) * time.Second

@@ -56,7 +56,12 @@ func TestDryRunIsTheDefaultAndNeverReachesTheNetwork(t *testing.T) {
 		t.Fatalf("newSender with live=false returned %T, want dryRunSender", send)
 	}
 
-	proc := newProcessor(wl, st, send, al, 24*time.Hour, 1)
+	sendBD := newBlocklistDeSender(false, "", "", al)
+	if _, ok := sendBD.(dryRunBlocklistDeSender); !ok {
+		t.Fatalf("newBlocklistDeSender with live=false returned %T, want dryRunBlocklistDeSender", sendBD)
+	}
+
+	proc := newProcessor(wl, st, send, sendBD, al, 24*time.Hour, 1)
 
 	// A real-shaped cowrie login attempt from a real-looking public IP --
 	// exactly the event that, if this reporter were live, would produce an
@@ -96,6 +101,36 @@ func TestLiveRequiresBothTheFlagAndAnAPIKey(t *testing.T) {
 			send := newSender(c.live, c.apiKey, al)
 			if _, ok := send.(dryRunSender); !ok {
 				t.Fatalf("newSender(live=%v, apiKey=%q) returned %T, want dryRunSender", c.live, c.apiKey, send)
+			}
+		})
+	}
+}
+
+// TestBlocklistDeLiveRequiresFlagEmailAndAPIKey mirrors
+// TestLiveRequiresBothTheFlagAndAnAPIKey for the second destination: live
+// mode needs REPORTER_LIVE *and* both a sender identity and an API key. Any
+// one of the three missing must still produce dryRunBlocklistDeSender.
+func TestBlocklistDeLiveRequiresFlagEmailAndAPIKey(t *testing.T) {
+	al := newAuditLog(&strings.Builder{})
+
+	cases := []struct {
+		name   string
+		live   bool
+		email  string
+		apiKey string
+	}{
+		{"nothing set", false, "", ""},
+		{"flag set, nothing else", true, "", ""},
+		{"flag and key set, no email", true, "", "fake-key-not-a-real-credential"},
+		{"flag and email set, no key", true, "sender@example.com", ""},
+		{"email and key set, flag not", false, "sender@example.com", "fake-key-not-a-real-credential"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			send := newBlocklistDeSender(c.live, c.email, c.apiKey, al)
+			if _, ok := send.(dryRunBlocklistDeSender); !ok {
+				t.Fatalf("newBlocklistDeSender(live=%v, email=%q, apiKey=%q) returned %T, want dryRunBlocklistDeSender",
+					c.live, c.email, c.apiKey, send)
 			}
 		})
 	}
