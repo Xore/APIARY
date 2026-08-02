@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="utf-8"?>
+<unattend xmlns="urn:schemas-microsoft-com:unattend">
+
+  <!-- ==================== windowsPE pass ==================== -->
+  <settings pass="windowsPE">
+    <component name="Microsoft-Windows-Setup" processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <!-- Bypass TPM 2.0 / Secure Boot / RAM checks for KVM -->
+      <RunSynchronous>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Path>reg add HKLM\SYSTEM\Setup\LabConfig /v BypassTPMCheck /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <Path>reg add HKLM\SYSTEM\Setup\LabConfig /v BypassSecureBootCheck /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>3</Order>
+          <Path>reg add HKLM\SYSTEM\Setup\LabConfig /v BypassRAMCheck /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+      </RunSynchronous>
+      <DiskConfiguration>
+        <Disk wcm:action="add">
+          <DiskID>0</DiskID>
+          <WillWipeDisk>true</WillWipeDisk>
+          <CreatePartitions>
+            <CreatePartition wcm:action="add">
+              <Order>1</Order><Type>EFI</Type><Size>300</Size>
+            </CreatePartition>
+            <CreatePartition wcm:action="add">
+              <Order>2</Order><Type>MSR</Type><Size>128</Size>
+            </CreatePartition>
+            <CreatePartition wcm:action="add">
+              <Order>3</Order><Type>Primary</Type><Extend>true</Extend>
+            </CreatePartition>
+          </CreatePartitions>
+          <ModifyPartitions>
+            <ModifyPartition wcm:action="add">
+              <Order>1</Order><PartitionID>1</PartitionID><Format>FAT32</Format><Label>System</Label>
+            </ModifyPartition>
+            <ModifyPartition wcm:action="add">
+              <Order>2</Order><PartitionID>3</PartitionID><Format>NTFS</Format><Label>Windows</Label><Letter>C</Letter>
+            </ModifyPartition>
+          </ModifyPartitions>
+        </Disk>
+      </DiskConfiguration>
+      <ImageInstall>
+        <OSImage>
+          <InstallFrom>
+            <MetaData wcm:action="add">
+              <Key>/IMAGE/NAME</Key>
+              <Value>Windows 11 Pro</Value>
+            </MetaData>
+          </InstallFrom>
+          <InstallTo>
+            <DiskID>0</DiskID>
+            <PartitionID>3</PartitionID>
+          </InstallTo>
+        </OSImage>
+      </ImageInstall>
+      <UserData>
+        <AcceptEula>true</AcceptEula>
+        <ProductKey>
+          <!-- Generic KMS client key for Win11 Pro (public, non-activating).
+               Replace with your real key or leave for KMS. -->
+          <Key>W269N-WFGWX-YVC9B-4J6C9-T83GX</Key>
+          <WillShowUI>Never</WillShowUI>
+        </ProductKey>
+      </UserData>
+    </component>
+    <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <SetupUILanguage><UILanguage>en-US</UILanguage></SetupUILanguage>
+      <InputLocale>en-US</InputLocale>
+      <SystemLocale>en-US</SystemLocale>
+      <UILanguage>en-US</UILanguage>
+      <UserLocale>en-US</UserLocale>
+    </component>
+  </settings>
+
+  <!-- ==================== specialize pass ==================== -->
+  <settings pass="specialize">
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <ComputerName>FIN-WS0147</ComputerName>
+      <RegisteredOwner>Michael Wilson</RegisteredOwner>
+      <RegisteredOrganization>Meridian Capital Group</RegisteredOrganization>
+      <TimeZone>Eastern Standard Time</TimeZone>
+    </component>
+    <!-- Workgroup named like a corporate domain -->
+    <component name="Microsoft-Windows-UnattendedJoin" processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <Identification>
+        <JoinWorkgroup>CORPNET</JoinWorkgroup>
+      </Identification>
+    </component>
+  </settings>
+
+  <!-- ==================== oobeSystem pass ==================== -->
+  <settings pass="oobeSystem">
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <OOBE>
+        <HideEULAPage>true</HideEULAPage>
+        <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
+        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+        <HideLocalAccountScreen>true</HideLocalAccountScreen>
+        <ProtectYourPC>3</ProtectYourPC>
+        <SkipMachineOOBE>true</SkipMachineOOBE>
+        <SkipUserOOBE>true</SkipUserOOBE>
+      </OOBE>
+      <!-- Password values below are base64("P@ssw0rd!Fin" + "Password") in UTF-16LE.
+           Regenerate your own:
+           [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes('YourPass'+'Password')) -->
+      <UserAccounts>
+        <LocalAccounts>
+          <LocalAccount wcm:action="add">
+            <Name>mwilson</Name>
+            <DisplayName>Michael Wilson</DisplayName>
+            <Group>Administrators</Group>
+            <Description>Senior Financial Analyst - FP&amp;A</Description>
+            <Password>
+              <Value>UABAAHMAcwB3ADAAcgBkACEARgBpAG4AUABhAHMAcwB3AG8AcgBkAA==</Value>
+              <PlainText>false</PlainText>
+            </Password>
+          </LocalAccount>
+        </LocalAccounts>
+      </UserAccounts>
+      <AutoLogon>
+        <Enabled>true</Enabled>
+        <Username>mwilson</Username>
+        <LogonCount>999</LogonCount>
+        <Password>
+          <Value>UABAAHMAcwB3ADAAcgBkACEARgBpAG4AUABhAHMAcwB3AG8AcgBkAA==</Value>
+          <PlainText>false</PlainText>
+        </Password>
+      </AutoLogon>
+      <FirstLogonCommands>
+        <!-- Enable WinRM (HTTP, basic auth) so Packer can take over -->
+        <SynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "Enable-PSRemoting -Force -SkipNetworkProfileCheck; winrm quickconfig -q; winrm set winrm/config/service/auth '@{Basic=&quot;true&quot;}'; winrm set winrm/config/service '@{AllowUnencrypted=&quot;true&quot;}'; Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private; netsh advfirewall set allprofiles state off"</CommandLine>
+          <Description>Enable WinRM for Packer</Description>
+        </SynchronousCommand>
+      </FirstLogonCommands>
+    </component>
+  </settings>
+</unattend>
