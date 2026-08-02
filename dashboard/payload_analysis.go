@@ -273,7 +273,34 @@ func (s *store) payloadPath(name string) (string, error) {
 	return "", os.ErrNotExist
 }
 
+// payloadPathBySHA256 is the fallback for payload sources (Dionaea) that
+// name captured files by MD5 rather than SHA-256, so a SHA-256-addressed
+// lookup can never match by filename alone (#255). Resolving one means
+// reading and hashing the full content of every file under every
+// s.payloadDirs entry until a match turns up -- unbounded by size or count,
+// and paid fresh on every uncached call. #364: for a Dionaea capture this
+// fallback is not a rare edge case, it is the ONLY path, so every request
+// for that payload (the workbench page, static analysis, ghidra/sandbox/
+// GitHub-analysis submission, ...) paid the full scan -- confirmed live as
+// a 45s+ hang for one real captured PE/DLL. Cache successful resolutions so
+// repeat requests for the same hash -- exactly the reported pattern,
+// clicking into the same result more than once -- are instant. A cache hit
+// is still verified with a cheap stat before being trusted, since the
+// underlying file can move or be pruned between requests.
 func (s *store) payloadPathBySHA256(want string) (string, error) {
+	if s != nil {
+		s.hashPathMu.Lock()
+		cached, ok := s.hashPathCache[want]
+		s.hashPathMu.Unlock()
+		if ok {
+			if fi, err := os.Stat(cached); err == nil && fi.Mode().IsRegular() {
+				return cached, nil
+			}
+			s.hashPathMu.Lock()
+			delete(s.hashPathCache, want)
+			s.hashPathMu.Unlock()
+		}
+	}
 	var found string
 	for _, dir := range s.payloadDirs {
 		filepath.WalkDir(dir, func(path string, entry os.DirEntry, walkErr error) error {
@@ -303,6 +330,14 @@ func (s *store) payloadPathBySHA256(want string) (string, error) {
 			return nil
 		})
 		if found != "" {
+			if s != nil {
+				s.hashPathMu.Lock()
+				if s.hashPathCache == nil {
+					s.hashPathCache = make(map[string]string)
+				}
+				s.hashPathCache[want] = found
+				s.hashPathMu.Unlock()
+			}
 			return found, nil
 		}
 	}

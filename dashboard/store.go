@@ -173,6 +173,8 @@ type store struct {
 	subsMu            sync.Mutex
 	payloadMu         sync.Mutex
 	ipsMu             sync.Mutex
+	hashPathMu        sync.Mutex
+	hashPathCache     map[string]string // sha256 -> resolved payload path (#364)
 	snap              snapshot
 	events            []storedEvent // newest first; replaced wholesale each rebuild
 	payloadCache      payloadsPage
