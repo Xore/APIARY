@@ -64,6 +64,28 @@ jobs:
           docker compose -f compose.yml config --quiet
           docker compose -f compose.yml up -d
 
+      # #258 proof of concept: the Conpot persona family split into its own
+      # Dockge stack, same arrangement as honeypot-init above. No ordering
+      # dependency on honeypot-init here the way honeypot-stack's own
+      # init-wait-* dependents have: each persona's command polls
+      # /markers/log-init.done itself (#127, a bind-mounted file, not a
+      # compose depends_on chain), so `docker compose up -d` returns
+      # immediately rather than blocking on the marker. Placed here anyway,
+      # ahead of honeypot-stack, purely for readability -- smaller/simpler
+      # stacks first. Log directories (logs/conpot*) and the init-markers
+      # mount are pre-existing host paths honeypot-stack's own rsync step
+      # already preserves; this stack does not create or own them.
+      - name: Synchronize honeypot-conpot (#258 split proof of concept)
+        shell: bash
+        run: |
+          destination=/opt/stacks/honeypot-conpot
+          install -d -m 755 "$destination"
+          cp docker-compose.conpot.yml "$destination/compose.yml"
+          cd "$destination"
+          test ! -f .env || chmod 600 .env
+          docker compose -f compose.yml config --quiet
+          docker compose -f compose.yml up -d --build
+
       - name: Synchronize Dockge source without runtime state
         shell: bash
         run: |
