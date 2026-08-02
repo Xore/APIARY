@@ -50,13 +50,24 @@ type viaEntry struct {
 // chronological list per port because an ephemeral port is reused over time —
 // possibly across different honeypot ports — so the lookup can pick the most
 // recent entry whose listen port matches the event (see viaLookup).
-func (s *store) buildViaMap() map[int][]viaEntry {
+//
+// It also returns a source-IP → p0f OS-guess map (#241). portbridge sits
+// ahead of everything else on the VPS and already sees every real attacker
+// IP, and p0f sniffs the same public interface — so rather than shipping and
+// correlating a second, independently-rotated p0f.json log by IP after the
+// fact, portbridge queries p0f directly per connection (vps/portbridge/p0f.go)
+// and folds the answer into the same JSON line this function already reads.
+// One file, one pass, two maps.
+func (s *store) buildViaMap() (map[int][]viaEntry, map[string]string) {
 	m := map[int][]viaEntry{}
+	osByIP := map[string]string{}
 	// The VPS rotator copytruncates the live log to portbridge.json.1, so the
 	// previous generation is read first — oldest entries first, because
 	// viaLookup takes the newest match. Reading only the live file means a
 	// rotation empties the map, and every tunnelled event whose connection was
-	// recorded before it goes unattributed until the file refills.
+	// recorded before it goes unattributed until the file refills. The same
+	// old-file-first order makes plain last-write-wins correct for osByIP too:
+	// the live file's entries are processed last, so they win.
 	for _, name := range []string{"portbridge.json.1", "portbridge.json"} {
 		data := readTail(filepath.Join(s.dir, "portbridge", name))
 		for _, line := range strings.Split(string(data), "\n") {
@@ -71,6 +82,11 @@ func (s *store) buildViaMap() map[int][]viaEntry {
 			if str(e["sensor"]) != "portbridge" {
 				continue
 			}
+			if ip := str(e["src_ip"]); ip != "" {
+				if os := str(e["os"]); os != "" {
+					osByIP[ip] = os
+				}
+			}
 			vp := int(numFloat(e["via_port"]))
 			if vp == 0 {
 				continue
@@ -78,7 +94,7 @@ func (s *store) buildViaMap() map[int][]viaEntry {
 			m[vp] = append(m[vp], viaEntry{ip: str(e["src_ip"]), port: num(e["port"])})
 		}
 	}
-	return m
+	return m, osByIP
 }
 
 // viaLookup returns the real attacker IP for a tunnel-peer connection: the most

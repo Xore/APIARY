@@ -82,11 +82,12 @@ func getenv(k, def string) string {
 // the real attacker IP to every port — including PROXY-unaware ones. nil / no
 // file means connection logging is disabled.
 type connLogger struct {
-	mu   sync.Mutex
-	f    *os.File
-	path string
-	size int64
-	max  int64
+	mu      sync.Mutex
+	f       *os.File
+	path    string
+	size    int64
+	max     int64
+	p0fSock string // #241: empty disables the p0f query entirely
 }
 
 func newConnLogger(path string) *connLogger {
@@ -98,7 +99,7 @@ func newConnLogger(path string) *connLogger {
 		fmt.Fprintf(os.Stderr, "portbridge: CONN_LOG %s: %v (connection logging off)\n", path, err)
 		return nil
 	}
-	c := &connLogger{f: f, path: path, max: getenvInt64("LOG_MAX_BYTES", 67108864)}
+	c := &connLogger{f: f, path: path, max: getenvInt64("LOG_MAX_BYTES", 67108864), p0fSock: os.Getenv("P0F_API_SOCK")}
 	if st, err := f.Stat(); err == nil {
 		c.size = st.Size()
 	}
@@ -161,6 +162,14 @@ func (c *connLogger) log(r rule, src net.Addr, via net.Addr) {
 		"src_ip":   host,
 		"src_port": port,
 		"target":   r.target,
+	}
+	// #241: p0f sniffs the same public interface ahead of everything else on
+	// the VPS, so host here is already the real attacker IP p0f fingerprinted
+	// -- no port/session correlation needed, just ask it about this IP.
+	// Best-effort: queryP0f never blocks noticeably or errors out to the
+	// caller, so a down/undeployed p0f only ever costs a missing "os" field.
+	if osGuess := queryP0f(c.p0fSock, host); osGuess != "" {
+		rec["os"] = osGuess
 	}
 	if via != nil {
 		if _, vp := splitHostPort(via); vp != 0 {

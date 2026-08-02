@@ -52,7 +52,7 @@ func (s *store) rebuild() {
 
 	// Recover real attacker IPs for cowrie (which only sees the tunnel peer)
 	// by joining on the tunnel ephemeral port recorded in the portbridge log.
-	viaMap := s.buildViaMap()
+	viaMap, p0fOS := s.buildViaMap()
 
 	for _, fn := range logFiles(s.dir) {
 		rel, _ := filepath.Rel(s.dir, fn)
@@ -106,6 +106,17 @@ func (s *store) rebuild() {
 				} else {
 					ev.ip = ""
 					lostSource = true
+				}
+			}
+			// #241: p0f OS guess, folded into the portbridge log at connection
+			// time (vps/portbridge/p0f.go) — a fallback fingerprint for
+			// connections that never produced a protocol-level one (HASSH/JA3/
+			// User-Agent all require the attacker to complete a handshake with
+			// a specific sensor; p0f only needs the initial SYN, so it covers
+			// scanners and sensors those never fire against).
+			if ev.fingerprint == "" && ev.ip != "" {
+				if os, ok := p0fOS[ev.ip]; ok {
+					ev.fingerprint, ev.fingerKind = os, "p0f OS"
 				}
 			}
 			if key := dedupeKey(ev); key != "" {

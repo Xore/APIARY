@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Install boot ordering and retry support for the read-only VPS log mounts.
-# The two sshfs entries themselves must already exist in /etc/fstab.
+# The sshfs entries themselves must already exist in /etc/fstab.
 
 if [[ ${EUID} -ne 0 ]]; then
   echo "Run this installer as root: sudo ./setup-suricata-logs-home.sh" >&2
@@ -38,17 +38,18 @@ TimeoutSec=30s
 EOF
 done
 
+units_block=$(printf "  '%s'\n" "${mount_units[@]}")
+paths_block=$(printf "  %s\n" "${mount_paths[@]}")
+
 cat >/usr/local/sbin/honeypot-log-mounts <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 
 units=(
-  '${mount_units[0]}'
-  '${mount_units[1]}'
+${units_block}
 )
 paths=(
-  ${mount_paths[0]}
-  ${mount_paths[1]}
+${paths_block}
 )
 
 systemctl reset-failed "\${units[@]}" || true
