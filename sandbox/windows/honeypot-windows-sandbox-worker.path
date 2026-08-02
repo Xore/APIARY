@@ -1,11 +1,17 @@
 [Unit]
 Description=Watch for honeypot Windows sandbox detonation requests
-Documentation=file:/opt/honeypot-sandbox/windows/IMPLEMENTATION_PLAN.md
+Documentation=file:/usr/local/libexec/honeypot-sandbox/windows/IMPLEMENTATION_PLAN.md
 After=libvirtd.service docker.service
 
 [Path]
-# The dashboard writes {sha256}.request here; it never touches libvirt itself.
-PathChanged=/windows-sandbox-requests
+# This unit runs on the bare host, not inside the dashboard container --
+# "/windows-sandbox-requests" (the container-side mount point) would never
+# exist here and this path would never fire. The real host path is the
+# dashboard container's bind-mount *source*
+# (docker-compose.dashboard.yml: /var/lib/honeypot-windows-sandbox/requests/pending
+# -> /windows-sandbox-requests), which must match
+# WINDOWS_SANDBOX_REQUEST_DIR in /etc/default/honeypot-windows-sandbox.
+PathChanged=/var/lib/honeypot-windows-sandbox/requests/pending
 Unit=honeypot-windows-sandbox-worker.service
 
 [Install]

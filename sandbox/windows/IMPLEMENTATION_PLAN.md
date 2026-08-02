@@ -698,7 +698,7 @@ After=libvirtd.service docker.service
 
 [Service]
 Type=oneshot
-ExecStart=/opt/honeypot-sandbox/windows/run_pending.sh
+ExecStart=/usr/local/libexec/honeypot-sandbox/windows/run_pending.sh
 Environment=WINDOWS_SANDBOX_REQUEST_DIR=/windows-sandbox-requests
 Environment=WINDOWS_SANDBOX_RESULTS_DIR=/windows-sandbox-results
 Environment=LIBVIRT_URI=qemu:///system
