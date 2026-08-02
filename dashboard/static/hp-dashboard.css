@@ -22,7 +22,7 @@
    this rule silently breaking would show every hidden icon at once. */
 body [hidden] { display: none !important; }
 
-.mono, pre.code {
+.mono {
   font-family: var(--hp-mono);
   font-size: 12px;
 }
