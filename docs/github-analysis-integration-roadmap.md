@@ -352,18 +352,27 @@ than at scan time.
 
 ---
 
-## Phase 5 — Queue health and alerting ⬜
+## Phase 5 — Queue health and alerting ✅ 2026-08-02
 
-Extend the existing block in `store.go` (~line 289, immediately after the
-sandbox checks) — same `s.alerts` sink, no new transport:
+Extends the existing block in `store.go` (immediately after `ghidraAlerts`) —
+same `s.alerts` sink, no new transport, via `githubAnalysisAlerts`
+(`github_analysis.go`):
 
-- `github-analysis:handoff` — requests waiting on the host publisher.
-- `github-analysis:worker` — publisher or collector stale/errored.
-- `github-analysis:verdict` — a returned record at or above
+- `github-analysis:handoff` — requests waiting on the host publisher
+  (`GITHUB_ANALYSIS_REQUEST_DIR`'s `*.request` markers older than 5 minutes).
+- `github-analysis:worker` — a stale `status.json` (collector stopped
+  refreshing it).
+- `github-analysis:failed` — the queue's failed count is non-zero.
+- `github-analysis:verdict:{sha256}` — a returned record at or above
   `GITHUB_ANALYSIS_ALERT_POSITIVES` (default 10 malicious engines).
 
-Extend `metrics.go` with `honeypot_github_analysis_queue{state=…}` alongside the
-existing `honeypot_sandbox_queue` gauges.
+An unconfigured host (`GITHUB_ANALYSIS_RESULTS_DIR` unset) alerts on none of
+these — see #148.
+
+`metrics.go` exposes `honeypot_github_analysis_queue{state=…}` (handoff,
+queued, running, failed) alongside the existing `honeypot_sandbox_queue`
+gauges, always present (zero when unconfigured) so a scrape never has to
+distinguish "never deployed" from "the exporter stopped".
 
 ---
 
@@ -419,7 +428,7 @@ GITHUB_ANALYSIS_MAX_WAIT=5400
 | 1 — host publisher | 0 | Yes — needs host access | — |
 | 2 — submit button | 1 | Yes | — |
 | 3 — result views | 1, 2 | Yes | — |
-| 5 — alerting | 3 | Yes | — |
+| 5 — alerting ✅ | 3 | Yes | — |
 | 6 — family enrichment | 3 | Yes | — |
 | 7 — env/compose | 1, 2 | Yes | — |
 

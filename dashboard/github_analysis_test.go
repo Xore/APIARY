@@ -150,6 +150,55 @@ func TestLoadGitHubAnalysisStatus(t *testing.T) {
 			t.Error("an old status.json should be reported stale")
 		}
 	})
+
+	// Handoff is scanned unconditionally -- it is GITHUB_ANALYSIS_REQUEST_DIR's
+	// own count, independent of whether the results side ever produced a
+	// status.json, the same way loadSandboxStatus scans its request dirs
+	// regardless of the merged results status.
+	t.Run("handoff pending but fresh", func(t *testing.T) {
+		t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", t.TempDir())
+		requestDir := t.TempDir()
+		t.Setenv("GITHUB_ANALYSIS_REQUEST_DIR", requestDir)
+		if err := os.WriteFile(filepath.Join(requestDir, shaA+".request"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		s := loadGitHubAnalysisStatus()
+		if s.Handoff != 1 {
+			t.Errorf("Handoff = %d, want 1", s.Handoff)
+		}
+		if s.HandoffOld {
+			t.Error("a freshly written request marker should not be handoff_stale")
+		}
+	})
+
+	t.Run("handoff stalled", func(t *testing.T) {
+		t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", t.TempDir())
+		requestDir := t.TempDir()
+		t.Setenv("GITHUB_ANALYSIS_REQUEST_DIR", requestDir)
+		path := filepath.Join(requestDir, shaA+".request")
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		old := time.Now().Add(-2 * githubAnalysisHandoffStaleAfter)
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+		if s := loadGitHubAnalysisStatus(); !s.HandoffOld {
+			t.Error("an old request marker should be reported handoff_stale")
+		}
+	})
+
+	t.Run("handoff ignores non-request files", func(t *testing.T) {
+		t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", t.TempDir())
+		requestDir := t.TempDir()
+		t.Setenv("GITHUB_ANALYSIS_REQUEST_DIR", requestDir)
+		if err := os.WriteFile(filepath.Join(requestDir, "status.json"), []byte("{}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if s := loadGitHubAnalysisStatus(); s.Handoff != 0 {
+			t.Errorf("Handoff = %d, want 0 for a non-.request file", s.Handoff)
+		}
+	})
 }
 
 func TestGitHubAnalysisDataQuery(t *testing.T) {
@@ -261,5 +310,197 @@ func TestGitHubAnalysisRequester(t *testing.T) {
 	bare := &store{}
 	if got := bare.githubAnalysisRequester(shaA); got != "" {
 		t.Errorf("nil settings should return empty, got %q", got)
+	}
+}
+
+// githubAnalysisAlertMessages mirrors ghidraAlertMessages: s.alerts == nil
+// means "no dedupe sink", so every check that fires emits unconditionally --
+// exactly what a unit test wants. hasAlert is defined in ghidra_test.go.
+func githubAnalysisAlertMessages(t *testing.T) []string {
+	t.Helper()
+	var messages []string
+	githubAnalysisAlerts(&store{}, &messages, false)
+	return messages
+}
+
+// An unconfigured host has not run install-github-publisher.sh; alerting
+// about a subsystem nobody deployed is pure noise. #148 acceptance: disabled.
+func TestGitHubAnalysisAlertsSilentWhenUnconfigured(t *testing.T) {
+	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", "")
+	t.Setenv("GITHUB_ANALYSIS_REQUEST_DIR", "")
+	if messages := githubAnalysisAlertMessages(t); len(messages) != 0 {
+		t.Fatalf("unconfigured host produced alerts: %v", messages)
+	}
+}
+
+// #148 acceptance: handoff state.
+func TestGitHubAnalysisAlertsOnHandoffStalled(t *testing.T) {
+	resultsDir, requestDir := t.TempDir(), t.TempDir()
+	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", resultsDir)
+	t.Setenv("GITHUB_ANALYSIS_REQUEST_DIR", requestDir)
+	if err := os.WriteFile(filepath.Join(resultsDir, "status.json"), []byte(`{"version":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	requestPath := filepath.Join(requestDir, shaA+".request")
+	if err := os.WriteFile(requestPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * githubAnalysisHandoffStaleAfter)
+	if err := os.Chtimes(requestPath, old, old); err != nil {
+		t.Fatal(err)
+	}
+	messages := githubAnalysisAlertMessages(t)
+	if !hasAlert(messages, "handoff stalled") {
+		t.Fatalf("no handoff alert: %v", messages)
+	}
+	if !hasAlert(messages, "1 request") {
+		t.Errorf("handoff alert omits the count: %v", messages)
+	}
+}
+
+// #148 acceptance: recovered. A request marker that is still within the
+// staleness window must not page -- that is normal, momentary queue depth,
+// not a stalled handoff.
+func TestGitHubAnalysisAlertsHandoffRecoversWhenFresh(t *testing.T) {
+	resultsDir, requestDir := t.TempDir(), t.TempDir()
+	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", resultsDir)
+	t.Setenv("GITHUB_ANALYSIS_REQUEST_DIR", requestDir)
+	if err := os.WriteFile(filepath.Join(resultsDir, "status.json"), []byte(`{"version":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(requestDir, shaA+".request"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if messages := githubAnalysisAlertMessages(t); hasAlert(messages, "handoff stalled") {
+		t.Errorf("a freshly queued request alerted before the staleness threshold: %v", messages)
+	}
+}
+
+// #148 acceptance: stale state (publisher or collector stopped refreshing
+// status.json).
+func TestGitHubAnalysisAlertsOnStaleWorker(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", dir)
+	t.Setenv("GITHUB_ANALYSIS_REQUEST_DIR", "")
+	path := filepath.Join(dir, "status.json")
+	if err := os.WriteFile(path, []byte(`{"version":1,"queued":3,"running":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * githubAnalysisStatusStaleAfter)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	messages := githubAnalysisAlertMessages(t)
+	if !hasAlert(messages, "worker unhealthy") {
+		t.Fatalf("no stale-worker alert: %v", messages)
+	}
+	// The queue depth belongs in the message so the reader knows whether
+	// anything is actually waiting behind the stopped collector.
+	if !hasAlert(messages, "queued=3") || !hasAlert(messages, "running=1") {
+		t.Errorf("stale-worker alert omits the queue depth: %v", messages)
+	}
+}
+
+// #148 acceptance: failed state.
+func TestGitHubAnalysisAlertsOnFailedQueue(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", dir)
+	t.Setenv("GITHUB_ANALYSIS_REQUEST_DIR", "")
+	if err := os.WriteFile(filepath.Join(dir, "status.json"), []byte(`{"version":1,"failed":2}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if messages := githubAnalysisAlertMessages(t); !hasAlert(messages, "2 failed request") {
+		t.Fatalf("no failed-queue alert: %v", messages)
+	}
+}
+
+// #148 acceptance: high-verdict state, and the configurable, bounded
+// threshold (GITHUB_ANALYSIS_ALERT_POSITIVES) required by the issue.
+func TestGitHubAnalysisAlertsOnHighVerdict(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", dir)
+	t.Setenv("GITHUB_ANALYSIS_REQUEST_DIR", "")
+	if err := os.WriteFile(filepath.Join(dir, "status.json"), []byte(`{"version":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeGitHubAnalysisResult(t, dir, shaA, map[string]any{
+		"exit_status": "ok", "family": "mirai",
+		"verdict": map[string]any{"malicious": 12, "suspicious": 3, "total": 20, "level": "malicious"},
+	})
+
+	messages := githubAnalysisAlertMessages(t)
+	if !hasAlert(messages, "high-verdict") || !hasAlert(messages, "malicious=12/20") || !hasAlert(messages, "family=mirai") {
+		t.Fatalf("no high-verdict alert: %v", messages)
+	}
+
+	// Raising the threshold above this sample's count must quiet it -- proves
+	// the env var is actually read, not just defaulted.
+	t.Setenv("GITHUB_ANALYSIS_ALERT_POSITIVES", "15")
+	if messages := githubAnalysisAlertMessages(t); hasAlert(messages, "high-verdict") {
+		t.Errorf("verdict below the configured threshold alerted: %v", messages)
+	}
+}
+
+// #148 acceptance: queued/disabled. The four bash-written exit statuses
+// (dry_run, denylist_blocked, quota_exceeded, error) never carry a Verdict,
+// and must not be treated as a quiet malicious=0 result worth alerting on.
+func TestGitHubAnalysisAlertsIgnoreResultsWithoutVerdict(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", dir)
+	t.Setenv("GITHUB_ANALYSIS_REQUEST_DIR", "")
+	if err := os.WriteFile(filepath.Join(dir, "status.json"), []byte(`{"version":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeGitHubAnalysisResult(t, dir, shaA, map[string]any{"exit_status": "dry_run"})
+	writeGitHubAnalysisResult(t, dir, shaB, map[string]any{"exit_status": "denylist_blocked", "reason": "path outside allowlist"})
+	if messages := githubAnalysisAlertMessages(t); len(messages) != 0 {
+		t.Fatalf("bash-written statuses without a verdict alerted: %v", messages)
+	}
+}
+
+// #148: honeypot_github_analysis_queue{state=...} alongside the existing
+// honeypot_sandbox_queue gauges (dashboard/metrics.go).
+func TestGitHubAnalysisMetricsExposed(t *testing.T) {
+	resultsDir, requestDir := t.TempDir(), t.TempDir()
+	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", resultsDir)
+	t.Setenv("GITHUB_ANALYSIS_REQUEST_DIR", requestDir)
+	if err := os.WriteFile(filepath.Join(resultsDir, "status.json"),
+		[]byte(`{"version":1,"queued":2,"running":1,"failed":3}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(requestDir, shaA+".request"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &store{}
+	recorder := httptest.NewRecorder()
+	s.serveMetrics(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := recorder.Body.String()
+
+	exact := []string{
+		`honeypot_github_analysis_queue{state="handoff"} 1`,
+		`honeypot_github_analysis_queue{state="queued"} 2`,
+		`honeypot_github_analysis_queue{state="running"} 1`,
+		`honeypot_github_analysis_queue{state="failed"} 3`,
+	}
+	for _, line := range exact {
+		if !strings.Contains(body, line+"\n") {
+			t.Errorf("metrics output missing %q, got:\n%s", line, body)
+		}
+	}
+}
+
+// An unconfigured host must still report the gauge at zero, not omit it --
+// scrapers alert on a metric disappearing, and "never deployed" is a
+// different state from "the exporter stopped".
+func TestGitHubAnalysisMetricsZeroWhenUnconfigured(t *testing.T) {
+	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", "")
+	t.Setenv("GITHUB_ANALYSIS_REQUEST_DIR", "")
+	s := &store{}
+	recorder := httptest.NewRecorder()
+	s.serveMetrics(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := recorder.Body.String()
+	if !strings.Contains(body, `honeypot_github_analysis_queue{state="handoff"} 0`+"\n") {
+		t.Errorf("unconfigured host should still expose a zero gauge, got:\n%s", body)
 	}
 }

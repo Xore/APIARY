@@ -41,6 +41,8 @@ func (s *store) serveMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Fprintf(w, "honeypot_sandbox_results %d\nhoneypot_sandbox_high_risk %d\nhoneypot_sandbox_packets %d\n", len(results), highRisk, packets)
 	fmt.Fprintf(w, "honeypot_sandbox_queue{state=\"handoff\"} %d\nhoneypot_sandbox_queue{state=\"queued\"} %d\nhoneypot_sandbox_queue{state=\"running\"} %d\nhoneypot_sandbox_queue{state=\"failed\"} %d\n", status.Handoff, status.Counts.Queued, status.Counts.Running, status.Counts.Failed)
+	githubStatus := loadGitHubAnalysisStatus()
+	fmt.Fprintf(w, "honeypot_github_analysis_queue{state=\"handoff\"} %d\nhoneypot_github_analysis_queue{state=\"queued\"} %d\nhoneypot_github_analysis_queue{state=\"running\"} %d\nhoneypot_github_analysis_queue{state=\"failed\"} %d\n", githubStatus.Handoff, githubStatus.Queued, githubStatus.Running, githubStatus.Failed)
 	runtime := currentRuntime()
 	fmt.Fprintf(w, "honeypot_dashboard_goroutines %d\n", runtime.Goroutines)
 	if value := cgroupBytes("/sys/fs/cgroup/memory.current"); value >= 0 {

@@ -22,12 +22,14 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -109,6 +111,16 @@ type githubAnalysisQueueStatus struct {
 	// host. The page uses it to explain the absence rather than showing a
 	// permanently empty queue.
 	Configured bool `json:"configured"`
+	// Handoff/HandoffOld mirror sandboxQueueStatus's fields of the same name
+	// (dashboard/sandbox.go): the count of *.request markers still sitting in
+	// GITHUB_ANALYSIS_REQUEST_DIR, and whether the oldest of them predates
+	// githubAnalysisHandoffStaleAfter. honeypot-github-publish.path drains this
+	// spool the moment it becomes non-empty (no polling interval to wait out),
+	// so a marker that is still there after the threshold means the .path unit
+	// or process-github-requests.sh itself has stopped, not that a run is
+	// merely in progress.
+	Handoff    int  `json:"handoff"`
+	HandoffOld bool `json:"handoff_stale"`
 }
 
 type githubAnalysisPageData struct {
@@ -127,6 +139,12 @@ func githubAnalysisResultsDir() string { return getenv("GITHUB_ANALYSIS_RESULTS_
 // scaled to this pipeline's much faster one-minute poll: half an hour
 // untouched means nothing is draining GITHUB_ANALYSIS_PENDING_DIR.
 const githubAnalysisStatusStaleAfter = 30 * time.Minute
+
+// githubAnalysisHandoffStaleAfter mirrors sandbox's inline 5-minute handoff
+// threshold (dashboard/sandbox.go loadSandboxStatus): the publish .path unit
+// reacts to a non-empty spool immediately, so five minutes already well
+// exceeds normal pickup latency.
+const githubAnalysisHandoffStaleAfter = 5 * time.Minute
 
 func loadGitHubAnalysisResults() []githubAnalysisResult {
 	dir := githubAnalysisResultsDir()
@@ -182,9 +200,15 @@ func loadGitHubAnalysisResults() []githubAnalysisResult {
 	return rows
 }
 
-func loadGitHubAnalysisStatus() githubAnalysisQueueStatus {
+// loadGitHubAnalysisStatus reports Handoff/HandoffOld on every return path,
+// including the unconfigured and never-run ones -- GITHUB_ANALYSIS_REQUEST_DIR
+// is its own independent setting, scanned regardless of how far the results
+// side of the pipeline got, the same way loadSandboxStatus scans its request
+// dirs unconditionally.
+func loadGitHubAnalysisStatus() (status githubAnalysisQueueStatus) {
 	dir := githubAnalysisResultsDir()
-	status := githubAnalysisQueueStatus{Configured: dir != ""}
+	status.Configured = dir != ""
+	defer func() { status.Handoff, status.HandoffOld = githubAnalysisHandoffCounts() }()
 	if dir == "" {
 		return status
 	}
@@ -208,6 +232,34 @@ func loadGitHubAnalysisStatus() githubAnalysisQueueStatus {
 		status.Stale = time.Since(info.ModTime()) > githubAnalysisStatusStaleAfter
 	}
 	return status
+}
+
+// githubAnalysisHandoffCounts scans GITHUB_ANALYSIS_REQUEST_DIR for *.request
+// markers the host publisher has not yet picked up, mirroring
+// loadSandboxStatus's identical scan of its own request spool(s). An unset or
+// unreadable directory yields (0, false) -- indistinguishable from a healthy,
+// empty spool, which is correct: an operator who never ran
+// install-github-publisher.sh should see "not configured", not "unhealthy".
+func githubAnalysisHandoffCounts() (count int, old bool) {
+	dir := githubAnalysisRequestDir()
+	if dir == "" {
+		return 0, false
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, false
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".request") ||
+			!hashName.MatchString(strings.TrimSuffix(entry.Name(), ".request")) {
+			continue
+		}
+		count++
+		if info, err := entry.Info(); err == nil && time.Since(info.ModTime()) > githubAnalysisHandoffStaleAfter {
+			old = true
+		}
+	}
+	return count, old
 }
 
 // githubAnalysisRequester scans the audit log for the newest accepted
@@ -372,4 +424,60 @@ func githubAnalysisPDFURL(row githubAnalysisResult) (string, bool) {
 		Path:   "/Xore/honeypot/" + commit + "/" + row.ReportPDF,
 	}
 	return u.String(), true
+}
+
+// githubAnalysisAlerts appends GitHub-analysis queue and verdict alerts,
+// riding the same s.alerts sink as the sandbox and Ghidra checks
+// (dashboard/store.go, dashboard/ghidra.go's ghidraAlerts) -- no new
+// transport. See #148 and docs/github-analysis-integration-roadmap.md Phase 5.
+func githubAnalysisAlerts(s *store, messages *[]string, markOnly bool) {
+	status := loadGitHubAnalysisStatus()
+	if !status.Configured {
+		// install-github-publisher.sh was never run on this host. Alerting
+		// about a subsystem the operator has not opted into is pure noise --
+		// same reasoning as ghidraAlerts's own Configured check.
+		return
+	}
+
+	emit := func(key, message, link string) {
+		if s.alerts == nil || s.alerts.observe(key, message, link, markOnly) {
+			if !markOnly {
+				*messages = append(*messages, message)
+			}
+		}
+	}
+
+	// One alert for a stalled handoff and a separate one for a stale/errored
+	// worker, mirroring sandbox's split (sandbox:handoff vs sandbox:worker):
+	// a pile of unpicked-up requests and a collector that stopped refreshing
+	// status.json are different faults with different fixes (restart the
+	// .path/.service unit vs. restart the collect timer), so folding them into
+	// one alert would hide which one to act on.
+	if status.HandoffOld {
+		emit("github-analysis:handoff", fmt.Sprintf(
+			"github-analysis handoff stalled: %d request(s) waiting for the host publisher", status.Handoff), "")
+	}
+	if status.Stale {
+		emit("github-analysis:worker", fmt.Sprintf(
+			"github-analysis worker unhealthy: status.json stale, queued=%d running=%d", status.Queued, status.Running), "")
+	}
+	if status.Failed > 0 {
+		emit("github-analysis:failed", fmt.Sprintf("github-analysis queue has %d failed request(s)", status.Failed), "")
+	}
+
+	// No upper clamp, unlike SANDBOX_ALERT_RISK_SCORE/100: this counts engines
+	// out of however many the upstream scanner pipeline runs, not a percentage.
+	threshold, _ := strconv.Atoi(getenv("GITHUB_ANALYSIS_ALERT_POSITIVES", "10"))
+	if threshold < 1 {
+		threshold = 10
+	}
+	for _, result := range loadGitHubAnalysisResults() {
+		if result.Verdict == nil || result.Verdict.Malicious < threshold {
+			continue
+		}
+		emit("github-analysis:verdict:"+result.SHA256, fmt.Sprintf(
+			"github-analysis high-verdict sample: sha256=%s malicious=%d/%d family=%s",
+			result.SHA256, result.Verdict.Malicious, result.Verdict.Total, result.Family),
+			"/github-analysis/"+result.SHA256)
+	}
 }
