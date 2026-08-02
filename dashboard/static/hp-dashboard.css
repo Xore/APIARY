@@ -86,9 +86,23 @@ body [hidden] { display: none !important; }
 .hp-toolbar-actions { display: flex; align-items: center; gap: 2px; }
 /* #208: was an inline style="" on the operator-configured maintenance/
    incident banner -- silently dropped by the CSP (a nonce covers a style
-   or link element, never a style attribute). Forces the banner onto its
-   own row, after the toolbar's other flex children. */
-.app-toolbar__banner { flex-basis: 100%; order: 5; margin: 8px 8px 0; }
+   or link element, never a style attribute).
+   #283: #208's own fix kept the banner as a flex child of .app-toolbar
+   (flex-basis: 100%, order: 5), which pushed it onto its own row *inside*
+   the toolbar's own flex flow -- growing the toolbar's height and shoving
+   its other children left/up rather than floating independently. Taken out
+   of flow entirely instead: fixed, centered, sitting just below the
+   toolbar, the same floating-overlay pattern .hp-modal-status already
+   uses for a similar top-of-viewport status message. */
+.app-toolbar__banner {
+  position: fixed;
+  top: calc(var(--toolbar-height) + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 300;
+  max-width: min(720px, calc(100vw - 32px));
+  margin: 0;
+}
 .hp-icon-btn {
   position: relative;
   display: grid; place-items: center;
