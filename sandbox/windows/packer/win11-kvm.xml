@@ -66,12 +66,16 @@
          secure='yes' on the loader requires <smm state='on'/> below;
          libvirt rejects the domain otherwise.
 
-         format='qcow2' on the nvram is not cosmetic. libvirt refuses an
-         internal snapshot of a pflash domain when the variable store is
-         raw — and an internal snapshot is exactly what GOLDEN_READY is. If
-         your libvirt is older than 8.1 and rejects it anyway, the fallback
-         is an external snapshot, which changes the revert command in
-         kvm_manage.sh and run_sample.py. -->
+         format='qcow2' on the nvram matches the other disk images here;
+         harmless either way in practice, since the revert mechanism
+         (kvm_manage.sh / run_sample.py) doesn't touch nvram at all — it
+         destroys and recreates only the VM_DISK overlay, never the domain
+         itself, so nvram persists unchanged across reverts. There is no
+         `virsh` internal or external snapshot in this pipeline at all:
+         `<cpu migratable='off'/>` below blocks memory-state snapshots
+         outright, and disk-only external snapshots hit a separate,
+         reproducible QEMU/libvirt bug on the resulting multi-layer backing
+         chain (see #358). -->
     <loader readonly='yes' secure='yes' type='pflash'>/usr/share/OVMF/OVMF_CODE_4M.secboot.fd</loader>
     <nvram template='/usr/share/OVMF/OVMF_VARS_4M.ms.fd' format='qcow2'>/var/lib/libvirt/qemu/nvram/win11-sandbox_VARS.qcow2</nvram>
     <boot dev='hd'/>

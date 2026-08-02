@@ -19,14 +19,15 @@ win11-kvm.xml is applied (per RESEARCH.md #1.2):
 
 BLOCKED on the golden image existing (#47 and its sub-issues, same as most
 of Phases 1-3) — there is nothing to boot and verify against yet. This
-script is ready to run the moment win11-sandbox / GOLDEN_READY exists; it
-is not itself blocked on anything else.
+script is ready to run the moment win11-sandbox exists; it is not itself
+blocked on anything else.
 
 Usage:
   1. Download pafish.exe and al-khaser.exe (or build them) on the analysis
      host — they never touch the internet from inside the guest.
-  2. Boot the golden snapshot (or a thin clone of it) with virsh, same as
-     run_sample.py's revert_to_golden().
+  2. Boot a fresh clone of the golden image with virsh, same as
+     run_sample.py's revert_to_golden() (see #358 for why this is a cold
+     boot from a fresh CoW clone rather than a snapshot resume).
   3. python3 verify_vm_detection.py --pafish /path/to/pafish.exe \
        --al-khaser /path/to/al-khaser.exe
 
@@ -39,7 +40,7 @@ issue) since a later provisioner change could silently reintroduce a tell
 one earlier script fixed.
 
 Env vars (shared with run_sample.py):
-  VM_HOST, VM_USER, VM_PASS, LIBVIRT_URI, VM_DOMAIN, GOLDEN_SNAPSHOT
+  VM_HOST, VM_USER, VM_PASS, LIBVIRT_URI, VM_DOMAIN, GOLDEN_IMAGE, VM_DISK
 """
 
 import os

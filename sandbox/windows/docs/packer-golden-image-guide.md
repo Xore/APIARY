@@ -55,10 +55,11 @@ KVM Host
   └── /var/dockge/sandbox/golden-images/win11-analysis.qcow2  (25-35 GB)
         │
         ├── qemu-img create (thin clone) → /vms/win11-sandbox.qcow2
-        ├── virsh define → VM defined in libvirt
-        └── virsh snapshot-create-as GOLDEN_READY
+        └── virsh define → VM defined in libvirt
               │
-              └── virsh snapshot-revert GOLDEN_READY  (before each run, 5-10s)
+              └── kvm_manage.sh revert: destroy + fresh CoW clone + start
+                    (before each run, cold boot ~1-2min — see #358 for why
+                    this isn't a virsh snapshot revert)
 ```
 
 ---
@@ -502,7 +503,7 @@ virt-install \
   --noautoconsole
 ```
 
-### Take the GOLDEN_READY snapshot
+### Verify the domain boots
 
 ```bash
 # Start VM once to verify it boots
@@ -515,39 +516,41 @@ import winrm, os
 s = winrm.Session('10.10.10.2', auth=('analyst', 'malware123!'), transport='ntlm')
 print(s.run_ps('Write-Output ready').std_out)
 "
-
-# Take snapshot while running
-virsh snapshot-create-as win11-sandbox GOLDEN_READY \
-    --description "FLARE-VM + Sysmon + FakeNet-NG + PS logging" \
-    --atomic
-
-# Verify
-virsh snapshot-list win11-sandbox
 ```
+
+There is no `virsh snapshot-create-as GOLDEN_READY` step. It looks like it
+should work here — the guest is running, WinRM is up — but this domain's
+`<cpu mode='host-passthrough' migratable='off'/>` (deliberate, for anti-VM-
+detection CPU fidelity) blocks memory-state snapshots outright, and
+disk-only snapshots hit a separate, reproducible QEMU/libvirt bug on the
+resulting multi-layer backing chain (see #358 for the full investigation —
+a freshly spawned qemu process fails to open the golden image even though
+file permissions are provably fine). The golden image is already never
+written to, so there's nothing to snapshot: every reset just throws away
+the per-run CoW clone and makes a fresh one.
 
 ---
 
-## Step 7: Snapshot Workflow for Analysis Runs
+## Step 7: Reset Workflow for Analysis Runs
 
 ### Before every detonation run
 
 ```bash
-# Revert to clean golden state (~5-10 seconds)
-virsh snapshot-revert win11-sandbox GOLDEN_READY --running
+# Reset to a fresh clone of the golden image (cold boot, ~1-2 min)
+sandbox/windows/setup/kvm_manage.sh revert
 
-# Wait for WinRM
-sleep 60
-
-# Run your sample
+# Wait for WinRM, then run your sample
 python3 sandbox/windows/orchestrate/run_sample.py --sample samples/PE/evil.exe
 ```
 
+`run_sample.py` calls the equivalent of this itself before and after every
+detonation (`revert_to_golden()`) — the above is for manual/ad-hoc runs.
+
 ### After every run (handled automatically by run_sample.py)
 
-```bash
-# Always revert regardless of success/failure
-virsh snapshot-revert win11-sandbox GOLDEN_READY --running
-```
+Same reset, always run in the `finally` block regardless of success/failure
+— the guest has run untrusted code and must never survive into the next
+sample.
 
 ---
 
@@ -556,18 +559,17 @@ virsh snapshot-revert win11-sandbox GOLDEN_READY --running
 ### Full rebuild (e.g. FLARE-VM update, quarterly refresh)
 
 ```bash
-# Remove old VM + snapshot first
+# Remove old VM first
 virsh destroy win11-sandbox 2>/dev/null || true
-virsh snapshot-delete win11-sandbox GOLDEN_READY 2>/dev/null || true
 virsh undefine win11-sandbox --nvram
 rm /vms/win11-sandbox.qcow2
 
 # Rebuild golden image from scratch
 packer build -force sandbox/windows/packer/win11-analysis.pkr.hcl
 
-# Recreate VM + snapshot
+# Recreate VM
 sandbox/windows/setup/kvm_manage.sh create
-sandbox/windows/setup/kvm_manage.sh snapshot
+sandbox/windows/setup/kvm_manage.sh start
 ```
 
 ### Quick config patch (no full rebuild needed)
@@ -586,10 +588,10 @@ virt-customize -a /golden-images/win11-analysis.qcow2 \
 virt-customize -a /golden-images/win11-analysis.qcow2 \
     --upload sandbox/windows/config/fakenet.ini:/Tools/FakeNet/configs/honeypot_fakenet.ini
 
-# After patching qcow2, recreate the thin-clone and snapshot
+# After patching qcow2, recreate the thin-clone
 rm /vms/win11-sandbox.qcow2
 sandbox/windows/setup/kvm_manage.sh create
-sandbox/windows/setup/kvm_manage.sh snapshot
+sandbox/windows/setup/kvm_manage.sh start
 ```
 
 ---
@@ -737,7 +739,7 @@ actually written.
 
 - The golden image is 25-35 GB (full install + FLARE-VM)
 - The thin-clone starts at ~200 KB and grows only with per-session changes
-- After `virsh snapshot-revert`, the clone disk is reset to its CoW baseline
+- Each `kvm_manage.sh revert` deletes the clone and recreates it fresh from the golden image
 - Multiple thin-clones can share one golden image for parallel runs
 
 ---
@@ -788,12 +790,11 @@ packer build -var "iso_path=$ISO" -var "iso_checksum=sha256:${SHA}" \
 # 6. Create VM from golden image
 sandbox/windows/setup/kvm_manage.sh create
 
-# 7. Take GOLDEN_READY snapshot
+# 7. Verify it boots
 sandbox/windows/setup/kvm_manage.sh start
 sleep 90   # wait for boot
-sandbox/windows/setup/kvm_manage.sh snapshot
 
-# 8. Test revert
+# 8. Test reset (destroy + fresh CoW clone + start)
 sandbox/windows/setup/kvm_manage.sh revert
 
 # Golden image pipeline is then operational.
