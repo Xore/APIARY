@@ -129,7 +129,8 @@
     <component name="Microsoft-Windows-Shell-Setup"
                processorArchitecture="amd64"
                publicKeyToken="31bf3856ad364e35"
-               language="neutral" versionScope="nonSxS">
+               language="neutral" versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
       <!-- #91: was DESKTOP-AN4LY5T. scripts/05-decoy-content.ps1 goes to
            real trouble building a decoy user environment — decoy
            documents, fake recent-file shortcuts — and then named the
@@ -143,6 +144,76 @@
       <TimeZone>Eastern Standard Time</TimeZone>
       <RegisteredOwner>Robert Tanaka</RegisteredOwner>
       <RegisteredOrganization>Ashford Capital Partners</RegisteredOrganization>
+
+      <!-- #91: 01-hardening.ps1's Set-MpPreference/DisableAntiSpyware
+           approach runs as a Packer WinRM provisioner, well after first
+           boot and OOBE — confirmed live (2026-08-02) that by then Defender
+           is fully armed (AMServiceEnabled/AntivirusEnabled/
+           RealTimeProtectionEnabled all True, IsTamperProtected True,
+           TamperProtection reg value 1) and those calls are silently
+           reverted. specialize runs as SYSTEM before first user logon,
+           before Defender's own service (let alone Tamper Protection, which
+           needs Defender fully initialized plus cloud/MAPS connectivity
+           first) has ever started — setting Start=4 here means WinDefend
+           never starts in the first place, rather than trying to stop
+           something already running and self-protecting. This is the
+           documented, supported mechanism for this (unlike the windowsPE
+           pass's LabConfig trick above, which only works for that specific,
+           Microsoft-special-cased path) — specialize writes to the real
+           installed-OS hive.
+
+           Also disables automatic BitLocker Device Encryption
+           (PreventDeviceEncryption) — confirmed live that without this,
+           Windows 11 silently fully-encrypts C: on qualifying hardware
+           (TPM 2.0 + Secure Boot, both present here) with no explicit
+           configuration or intent. Found because it broke offline
+           registry inspection of the built qcow2 (virt-win-reg can't read
+           an encrypted NTFS volume without the key) — but it's worth
+           preventing regardless of that specific tool, since an
+           unintentionally-encrypted "golden" image is a surprise nobody
+           asked for. -->
+      <RunSynchronous>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Path>reg add "HKLM\SYSTEM\CurrentControlSet\Services\WinDefend" /v Start /t REG_DWORD /d 4 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <Path>reg add "HKLM\SYSTEM\CurrentControlSet\Services\WdBoot" /v Start /t REG_DWORD /d 4 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>3</Order>
+          <Path>reg add "HKLM\SYSTEM\CurrentControlSet\Services\WdFilter" /v Start /t REG_DWORD /d 4 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>4</Order>
+          <Path>reg add "HKLM\SYSTEM\CurrentControlSet\Services\WdNisDrv" /v Start /t REG_DWORD /d 4 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>5</Order>
+          <Path>reg add "HKLM\SYSTEM\CurrentControlSet\Services\WdNisSvc" /v Start /t REG_DWORD /d 4 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>6</Order>
+          <Path>reg add "HKLM\SYSTEM\CurrentControlSet\Services\Sense" /v Start /t REG_DWORD /d 4 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>7</Order>
+          <Path>reg add "HKLM\SYSTEM\CurrentControlSet\Services\SecurityHealthService" /v Start /t REG_DWORD /d 4 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>8</Order>
+          <Path>reg add "HKLM\SYSTEM\CurrentControlSet\Services\wscsvc" /v Start /t REG_DWORD /d 4 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>9</Order>
+          <Path>reg add "HKLM\SOFTWARE\Microsoft\Windows Defender\Features" /v TamperProtection /t REG_DWORD /d 4 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>10</Order>
+          <Path>reg add "HKLM\SYSTEM\CurrentControlSet\Control\BitLocker" /v PreventDeviceEncryption /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+      </RunSynchronous>
     </component>
 
     <!-- Workgroup named like a corporate domain, matching the persona —
