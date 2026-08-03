@@ -1,0 +1,44 @@
+# Host-side configuration for the GHOSTS sandbox worker (#328).
+# Install to /etc/default/honeypot-ghosts-sandbox (mode 0600 — it holds the
+# guest password). Read by honeypot-ghosts-sandbox-worker.service and
+# honeypot-ghosts-sandbox-web-requests.service.
+#
+# This is the WAN-permitted detonation route (#331/#300/#325) — a
+# materially different risk profile from win11-sandbox. Read
+# sandbox/ghosts/README.md before changing anything here.
+
+# ── Spool the dashboard shares with this worker ──────────────────────────
+GHOSTS_SANDBOX_REQUEST_DIR=/var/lib/honeypot-ghosts-sandbox/requests/pending
+GHOSTS_SANDBOX_RESULTS_DIR=/var/lib/honeypot-ghosts-sandbox/export
+
+# Same shared inbox the Windows sandbox worker resolves samples into
+# (/var/lib/honeypot-sandbox/inbox/samples by default) -- both routes need
+# identical sample bytes for the same hash.
+GHOSTS_SANDBOX_SAMPLES_DIR=/var/lib/honeypot-sandbox/inbox/samples
+
+# ── libvirt domain ───────────────────────────────────────────────────────
+LIBVIRT_URI=qemu:///system
+VM_DOMAIN=win11-ghosts
+# win11-ghosts.qcow2 -- an independent copy of win11-analysis.qcow2, never
+# a backing-file relationship, never win11-analysis.qcow2 itself (#326).
+GOLDEN_IMAGE=/var/dockge/sandbox/golden-images/win11-ghosts.qcow2
+VM_DISK=/var/dockge/sandbox/vms/win11-ghosts.qcow2
+
+# ── Guest access (WinRM/SMB over virbr-ghosts, #325) ─────────────────────
+# No pinned DHCP reservation exists yet in the deployed sandbox/ghosts/
+# network.xml (tracked on #327's PR) -- check
+#   virsh net-dhcp-leases ghosts
+# and update this if the guest's lease has floated since this file was
+# written.
+VM_HOST=10.20.30.72
+VM_USER=analyst
+VM_PASS=changeme
+
+# ── GHOSTS API (#324/#325) ────────────────────────────────────────────────
+GHOSTS_API_ADDR=10.20.30.1:5000
+
+# ── Detonation window ────────────────────────────────────────────────────
+# Same default and same reasoning as win11-sandbox's own OBSERVATION_SECS
+# (#297): long enough that a sample sleeping past a short window doesn't
+# defeat this for free.
+OBSERVATION_SECS=1800

@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Install the GHOSTS sandbox worker (#328): scripts, systemd units, host
+# directories, and the environment file. Mirrors sandbox/windows/install-worker.sh
+# exactly -- same /usr/local/libexec/honeypot-sandbox base, same
+# requests/{pending,rejected} + export directory shape, and the same
+# two-stage chain (a path unit triggers hash-resolution, which then
+# explicitly starts the detonation worker once sample bytes actually exist).
+set -euo pipefail
+
+[[ ${EUID} -eq 0 ]] || { echo "Run as root" >&2; exit 1; }
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+target=/usr/local/libexec/honeypot-sandbox/ghosts
+
+python3 -m pip install --break-system-packages pywinrm
+
+install -d -m 0755 -o root -g root "$target" "$target/orchestrate"
+install -m 0755 -o root -g root "$script_dir/run_pending.sh" "$target/run_pending.sh"
+install -m 0755 -o root -g root "$script_dir/process-ghosts-web-requests.sh" "$target/process-ghosts-web-requests.sh"
+for file in "$script_dir"/orchestrate/*.py; do
+  install -m 0755 -o root -g root "$file" "$target/orchestrate/$(basename "$file")"
+done
+
+for unit in honeypot-ghosts-sandbox-worker.service honeypot-ghosts-sandbox-worker.path honeypot-ghosts-sandbox-web-requests.service; do
+  install -m 0644 -o root -g root "$script_dir/$unit" "/etc/systemd/system/$unit"
+done
+
+if [[ ! -e /etc/default/honeypot-ghosts-sandbox ]]; then
+  install -m 0600 -o root -g root \
+    "$script_dir/honeypot-ghosts-sandbox.default.example" \
+    /etc/default/honeypot-ghosts-sandbox
+  echo "Wrote /etc/default/honeypot-ghosts-sandbox from the example -- edit VM_PASS" \
+    "(and VM_HOST, if the guest's DHCP lease has floated) before real detonations run." >&2
+fi
+
+install -d -m 0700 -o root -g root /var/lib/honeypot-ghosts-sandbox/requests/{pending,rejected}
+install -d -m 0750 -o root -g xore /var/lib/honeypot-ghosts-sandbox/export
+
+systemctl daemon-reload
+systemctl reset-failed honeypot-ghosts-sandbox-worker.service honeypot-ghosts-sandbox-web-requests.service 2>/dev/null || true
+systemctl enable --now honeypot-ghosts-sandbox-worker.path
+
+echo "GHOSTS sandbox worker installed. Edit /etc/default/honeypot-ghosts-sandbox, then:"
+echo "  systemctl status honeypot-ghosts-sandbox-worker.path"
