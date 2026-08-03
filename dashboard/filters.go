@@ -261,6 +261,16 @@ var filterSelectOptions = map[string][]filterFieldOption{
 		{"", "any"}, {"login", "login"}, {"command", "command"},
 		{"alert", "alert"}, {"download", "download"},
 	},
+	// type is events.html's own filter-bar field name for the identical
+	// enum -- parseFilter's general filter struct reads it as f.typ (see
+	// this file's match()), distinct from ml_anomalies.go's separate
+	// event_type field/filter above. Same options, different query param,
+	// because they're two unrelated filter parsers over two unrelated
+	// datasets that happen to share a value set (#344).
+	"type": {
+		{"", "any"}, {"login", "login"}, {"command", "command"},
+		{"alert", "alert"}, {"download", "download"},
+	},
 	"severity": {
 		{"", "any"}, {"low", "low"}, {"medium", "medium"},
 		{"high", "high"}, {"critical", "critical"},

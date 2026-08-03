@@ -68,6 +68,7 @@
         <div class="filters" id="events-filters">
           {{range .Filters}}<span class="chip">{{.}}</span>{{end}}
           <span class="chip">{{.Total}} events</span>
+          {{template "filterbar" .}}
           {{if .FingerprintIPs}}
           <details class="hp-open-in">
             <summary title="Check or uncheck IPs to isolate one attacker among several sharing this fingerprint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg> Isolate IP&hellip;</summary>
