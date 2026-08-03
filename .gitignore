@@ -57,6 +57,7 @@ output/
 tmp/
 dashboard/dashboard
 dicompot/dicompot-honeypot
+dns-honeypot/dns-honeypot
 dnp3-honeypot/dnp3-honeypot
 http-honeypot/http-honeypot
 multipot/multipot

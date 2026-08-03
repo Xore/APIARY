@@ -10,6 +10,7 @@
 #   ./scripts/reset-logs.sh dionaea          # dionaea logs (not binaries)
 #   ./scripts/reset-logs.sh dnp3             # dnp3 honeypot
 #   ./scripts/reset-logs.sh dicompot         # dicompot (DICOM) honeypot
+#   ./scripts/reset-logs.sh dns              # dns-honeypot (UDP reflection bait)
 #   ./scripts/reset-logs.sh tanner           # tanner + snare
 #   ./scripts/reset-logs.sh suricata         # suricata EVE + pcap
 #   ./scripts/reset-logs.sh --dry-run        # preview, no changes
@@ -52,7 +53,7 @@ STATE_BASE="/opt/stacks/honeypot-stack/state"
 # (there's no standalone "payload-analysis" CLI target; those two are only
 # ever stopped/started as a side effect of `wants cowrie`, same reasoning
 # as when they still lived in the main stack).
-SPLIT_TARGETS=(conpot cowrie multipot http dnp3 dionaea tanner dicompot)
+SPLIT_TARGETS=(conpot cowrie multipot http dnp3 dionaea tanner dicompot dns)
 declare -A SPLIT_STACK_DIR=(
   [conpot]="/opt/stacks/honeypot-conpot"
   [cowrie]="/opt/stacks/honeypot-cowrie"
@@ -60,6 +61,7 @@ declare -A SPLIT_STACK_DIR=(
   [http]="/opt/stacks/honeypot-http"
   [dnp3]="/opt/stacks/honeypot-dnp3"
   [dicompot]="/opt/stacks/honeypot-dicompot"
+  [dns]="/opt/stacks/honeypot-dns-honeypot"
   [dionaea]="/opt/stacks/honeypot-dionaea"
   [tanner]="/opt/stacks/honeypot-tanner"
 )
@@ -70,6 +72,7 @@ declare -A SPLIT_STACK_SERVICES=(
   [http]="http-honeypot api-honeypot"
   [dnp3]="dnp3"
   [dicompot]="dicompot"
+  [dns]="dns-honeypot"
   [dionaea]="dionaea tftp-relay"
   # tanner_docker/tanner_redis/tanner_phpox are deliberately excluded here,
   # same as before this split: they hold no open handles into logs/tanner
@@ -99,7 +102,7 @@ have_target=false
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY=true ;;
-    cowrie|conpot|multipot|http|dionaea|dnp3|dicompot|tanner|suricata|all)
+    cowrie|conpot|multipot|http|dionaea|dnp3|dicompot|dns|tanner|suricata|all)
       TARGETS["$arg"]=1
       have_target=true ;;
     *) echo "Unknown argument: $arg" >&2; exit 1 ;;
@@ -296,6 +299,11 @@ if wants dicompot; then
   CLEAR_FILEBEAT=true
 fi
 
+if wants dns; then
+  wipe_dir "${LOGS_BASE}/dns-honeypot"
+  CLEAR_FILEBEAT=true
+fi
+
 if wants tanner; then
   wipe_dir "${LOGS_BASE}/tanner"
   wipe_dir "${LOGS_BASE}/snare"
@@ -357,6 +365,10 @@ if wants dicompot; then
   mkown "${LOGS_BASE}/dicompot" 65534:65534
 fi
 
+if wants dns; then
+  mkown "${LOGS_BASE}/dns-honeypot" 65534:65534
+fi
+
 if wants tanner; then
   mkown "${LOGS_BASE}/tanner" 65534:65534
   # NOT 65534:65534 -- confirmed live during the #258 full-stack reset:
@@ -385,6 +397,7 @@ wants http     && delete_es_by_path "/logs/http-honeypot/*" && delete_es_by_path
 wants dionaea  && delete_es_by_path "/logs/dionaea/*"
 wants dnp3     && delete_es_by_path "/logs/dnp3/*"
 wants dicompot && delete_es_by_path "/logs/dicompot/*"
+wants dns      && delete_es_by_path "/logs/dns-honeypot/*"
 wants tanner   && delete_es_by_path "/logs/tanner/*"
 wants suricata && delete_es_index "suricata-*"
 

@@ -18,6 +18,6 @@ for port in 21 22 23 25 102 110 135 143 445 502 1025 1080 1102 1433 1502 1723 18
     ufw allow "${port}/tcp" comment honeypot
 done
 
-for port in 69 161 623 1900 5060 47808; do
+for port in 53 69 161 623 1900 5060 47808; do
     ufw allow "${port}/udp" comment honeypot
 done
