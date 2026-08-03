@@ -9,19 +9,23 @@ import (
 )
 
 // esOverviewStub serves resp for the aggregation query (a POST with a JSON
-// body) and an empty hit list for a plain GET -- a store configured with
-// this stub as its ES client also runs the esOnlySensors GET-based read
-// path (events_es.go's loadSensorEventsES) on every rebuild, which isn't
-// what these tests are exercising and would otherwise be indistinguishable
-// from the aggregation query on this single-handler test server.
+// body) and a 500 for a plain GET -- a store configured with this stub as
+// its ES client also runs the ES-preferred per-sensor GET read path (#34,
+// events_es.go's loadSensorEventsES) on every rebuild for every sensor, not
+// just esOnlySensors. These tests aren't exercising that path, and an
+// empty-but-successful GET response would look like "ES has this sensor,
+// and it has zero events" -- silently suppressing whatever local file
+// fixtures a test seeded instead of falling back to them. A 500 correctly
+// signals "ES has no answer for this sensor" and exercises the same local
+// fallback these tests already relied on before #34.
 func esOverviewStub(t *testing.T, resp esOverviewAggResponse) http.HandlerFunc {
 	t.Helper()
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
 		if r.Method != http.MethodPost {
-			json.NewEncoder(w).Encode(map[string]any{"hits": map[string]any{"hits": []any{}}})
+			http.Error(w, "not stubbed", http.StatusInternalServerError)
 			return
 		}
+		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
 	}
 }

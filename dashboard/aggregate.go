@@ -210,6 +210,17 @@ func (s *store) rebuild() {
 		})
 	}
 
+	// #34/#403: group by dirSensor (not file) before deciding ES vs. local --
+	// a sensor's own log directory can hold several matching files at once
+	// (today's live file plus rotated foo.json.<date> generations), and the
+	// decision of which source to trust has to be made once per sensor, not
+	// once per file: querying ES once per sensor here and letting a later
+	// file for the same sensor fall through to a second, redundant ES query
+	// would waste a full aggregation-sized request per rotated file for no
+	// benefit (the dedup in processEntry via seen[] would mask the result
+	// being fetched twice, not prevent the wasted round trip).
+	filesBySensor := map[string][]string{}
+	var sensorOrder []string
 	for _, fn := range logFiles(s.dir) {
 		rel, _ := filepath.Rel(s.dir, fn)
 		parts := strings.Split(filepath.ToSlash(rel), "/")
@@ -217,15 +228,49 @@ func (s *store) rebuild() {
 		if len(parts) > 1 {
 			dirSensor = parts[0]
 		}
+		// "enriched" is ip-enrichment-worker's own output directory (#38) --
+		// Filebeat tails it so Elasticsearch gets an already-correct src_ip
+		// for cowrie/dionaea/every conpot persona/dns-honeypot/
+		// cisco-asa-honeypot, but it's the same underlying events those
+		// sensors' own directories already carry, not a sixth sensor in its
+		// own right. Reading it here too would just double the I/O this
+		// loop already does for those five sensors' real directories.
+		if dirSensor == "enriched" {
+			continue
+		}
 		if slices.Contains(esOnlySensors, dirSensor) {
 			continue
 		}
-		cached, state := s.classifiedEventsFor(fn, dirSensor, s.logCache[fn], tailCap)
-		if state != nil {
-			nextCache[fn] = state
+		filesBySensor[dirSensor] = append(filesBySensor[dirSensor], fn)
+		if len(filesBySensor[dirSensor]) == 1 {
+			sensorOrder = append(sensorOrder, dirSensor)
 		}
-		for _, entry := range cached {
-			processEntry(entry)
+	}
+	for _, dirSensor := range sensorOrder {
+		// ES-preferred (#34/#403): every sensor Filebeat already ships to
+		// honeypot-v2-* -- which by now is every sensor, esOnlySensors or
+		// not -- can be read from there instead of this dashboard's own
+		// local log mount. Local files stay as the fallback (not removed)
+		// for the same reason loadGhidraResults/loadSandboxResults/
+		// loadGitHubAnalysisResults already fall back to their own local
+		// copies: a dashboard instance should degrade gracefully on a
+		// transient ES outage, not go blank for that sensor.
+		if s.es != nil {
+			if cached, ok := s.loadSensorEventsES(s.es, dirSensor); ok {
+				for _, entry := range cached {
+					processEntry(entry)
+				}
+				continue
+			}
+		}
+		for _, fn := range filesBySensor[dirSensor] {
+			cached, state := s.classifiedEventsFor(fn, dirSensor, s.logCache[fn], tailCap)
+			if state != nil {
+				nextCache[fn] = state
+			}
+			for _, entry := range cached {
+				processEntry(entry)
+			}
 		}
 	}
 
