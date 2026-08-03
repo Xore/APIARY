@@ -43,6 +43,8 @@ jobs:
             context: multipot
           - image: portbridge
             context: portbridge
+          - image: rdp-honeypot
+            context: rdp-honeypot
           - image: tftp-relay
             context: tftp-relay
           - image: vps-portbridge

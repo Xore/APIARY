@@ -61,10 +61,16 @@ build/
 output/
 tmp/
 dashboard/dashboard
+cisco-asa-honeypot/cisco-asa-honeypot
+citrix-honeypot/citrix-honeypot
+dicompot/dicompot-honeypot
+dns-honeypot/dns-honeypot
 dnp3-honeypot/dnp3-honeypot
 http-honeypot/http-honeypot
 multipot/multipot
 portbridge/portbridge
+vps/portbridge/portbridge
+rdp-honeypot/rdp-honeypot
 tftp-relay/tftp-relay
 node_modules/
 playwright-report/

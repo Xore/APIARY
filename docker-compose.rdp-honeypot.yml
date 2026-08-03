@@ -1,0 +1,54 @@
+# honeypot-rdp — #238, #412: RDP (3389/tcp) decoy, Go port of
+# CommunityHoneyNetwork/rdphoney -- see rdp-honeypot/main.go's own doc
+# comment for why this reverses #238's original "vendor, don't port" call.
+# Same shape and reasoning as docker-compose.dnp3.yml -- no depends_on, its
+# own fully private network, only host bind mounts. Deployed as
+# /opt/stacks/honeypot-rdp.
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  rdp-honeypot:
+    <<: *runtime-defaults
+    build: /opt/stacks/honeypot-stack/rdp-honeypot
+    container_name: hp-rdp-honeypot
+    restart: unless-stopped
+    # #128: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). This image is FROM
+    # scratch with no shell -- the wait lives in the Go binary itself
+    # instead (main.go).
+    environment:
+      - LISTEN_ADDR=:3389
+      - LOG_FILE=/var/log/honeypot/rdp-honeypot.json
+      # Parse the PROXY header portbridge prepends (":pp" rule on 3389) so
+      # events carry the real attacker IP instead of tunnel peer 10.8.0.1.
+      - PROXY_PROTOCOL=1
+      - TZ=Europe/Berlin
+    ports:
+      - ${HP_BIND:-10.8.0.2}:3389:3389
+    volumes:
+      - /opt/stacks/honeypot-stack/logs/rdp-honeypot:/var/log/honeypot
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+    networks: [rdp_honeypot_net]
+    healthcheck:
+      test: ["CMD", "/rdp-honeypot", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    labels:
+      - autoheal=true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+
+networks:
+  rdp_honeypot_net:
+    driver: bridge

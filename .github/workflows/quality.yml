@@ -133,8 +133,22 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y shellcheck
-          find . -name '*.sh' -type f -print0 | xargs -0 -r -n1 bash -n
-          find . -name '*.sh' -type f -print0 | xargs -0 -r shellcheck --severity=error
+          # A couple of sandbox/windows/packer/pxe/*.sh files are actually
+          # Python (named .sh to match their sibling shell scripts' calling
+          # convention, e.g. `packer trigger-callback... .sh`) -- filter to
+          # files whose own shebang names a shell, rather than assuming
+          # every *.sh is one, so bash -n/shellcheck don't choke on them.
+          shell_scripts=()
+          while IFS= read -r -d '' f; do
+            read -r shebang < "$f" || true
+            case "$shebang" in
+              '#!'*/sh|'#!'*/bash|'#!'*env\ sh|'#!'*env\ bash) shell_scripts+=("$f") ;;
+            esac
+          done < <(find . -name '*.sh' -type f -print0)
+          if [ "${#shell_scripts[@]}" -gt 0 ]; then
+            printf '%s\0' "${shell_scripts[@]}" | xargs -0 -n1 bash -n
+            printf '%s\0' "${shell_scripts[@]}" | xargs -0 shellcheck --severity=error
+          fi
       - name: GitHub-analysis publisher stays dry-run by default
         shell: bash
         run: |
