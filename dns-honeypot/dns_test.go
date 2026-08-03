@@ -175,3 +175,28 @@ func TestIdealAnswerBranchIsReachable(t *testing.T) {
 		t.Fatalf("expected ancount=1 (an actual answer) for a realistic query, got %d -- ratioCap may be too tight", ancount)
 	}
 }
+
+func TestParseHeaderFlagsExtractsOpcodeAndRD(t *testing.T) {
+	req := buildQuery("example.com", qtypeA) // opcode 0, RD=1 per buildQuery's own doc comment
+	opcode, rd, ok := parseHeaderFlags(req)
+	if !ok {
+		t.Fatal("expected ok=true for a well-formed 12-byte-plus header")
+	}
+	if opcode != 0 {
+		t.Fatalf("opcode = %d, want 0 (QUERY)", opcode)
+	}
+	if !rd {
+		t.Fatal("expected rd=true (buildQuery sets RD=1)")
+	}
+
+	// IQUERY (opcode 1), RD=0.
+	req[2] = 0x08
+	opcode, rd, ok = parseHeaderFlags(req)
+	if !ok || opcode != 1 || rd {
+		t.Fatalf("opcode=%d rd=%v ok=%v, want opcode=1 rd=false ok=true", opcode, rd, ok)
+	}
+
+	if _, _, ok := parseHeaderFlags([]byte{1, 2, 3}); ok {
+		t.Fatal("expected ok=false for input shorter than a DNS header")
+	}
+}

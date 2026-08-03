@@ -24,6 +24,8 @@ type event struct {
 	Event     string `json:"event"`
 	Query     string `json:"query,omitempty"`
 	QType     int    `json:"qtype,omitempty"`
+	Opcode    int    `json:"opcode,omitempty"`
+	Recursion bool   `json:"rd,omitempty"`
 	ReqBytes  int    `json:"req_bytes,omitempty"`
 	RespBytes int    `json:"resp_bytes,omitempty"`
 }
@@ -94,6 +96,10 @@ func handlePacket(conn *net.UDPConn, addr *net.UDPAddr, req []byte, log *logger,
 		return
 	}
 	e := event{Port: port, SrcIP: addr.IP.String(), SrcPort: addr.Port, Event: "query", ReqBytes: len(req)}
+	if opcode, rd, ok := parseHeaderFlags(req); ok {
+		e.Opcode = int(opcode)
+		e.Recursion = rd
+	}
 	if q, ok := parseQuestion(req); ok {
 		e.Query = q.name
 		e.QType = int(q.qtype)

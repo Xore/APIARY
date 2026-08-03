@@ -301,6 +301,12 @@ func classify(e map[string]any, dirSensor string) event {
 				ev.detail += " (" + qt + ")"
 			}
 		}
+		// A non-zero opcode (IQUERY/STATUS/NOTIFY/UPDATE) is a non-standard
+		// probe worth flagging -- 0 (QUERY) is virtually all real traffic,
+		// so only surface it when it deviates from that default.
+		if op := opcodeName[int(numFloat(e["opcode"]))]; op != "" {
+			ev.detail += " [opcode " + op + "]"
+		}
 		return ev
 	}
 
@@ -612,6 +618,13 @@ func dnsQTypeName(qtype int) string {
 		16: "TXT", 28: "AAAA", 33: "SRV", 255: "ANY",
 	}
 	return names[qtype]
+}
+
+// opcodeName maps a DNS header OPCODE to its RFC name for dns-honeypot's
+// logged opcode. 0 (QUERY) is deliberately absent -- it's virtually all
+// real traffic and not worth flagging in the UI.
+var opcodeName = map[int]string{
+	1: "IQUERY", 2: "STATUS", 4: "NOTIFY", 5: "UPDATE",
 }
 
 func personaForSensor(sensor string) (persona, site, asset, org string) {

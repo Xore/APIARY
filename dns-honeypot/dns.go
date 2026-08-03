@@ -113,6 +113,18 @@ func parseQuestion(req []byte) (question, bool) {
 	return question{raw: req[12:end], qtype: qtype, name: string(nameBuilder)}, true
 }
 
+// parseHeaderFlags extracts OPCODE and RD from a request's 12-byte header.
+// Which opcode an attacker sends (0=QUERY is normal traffic; IQUERY/STATUS/
+// NOTIFY/UPDATE are non-standard probes worth telling apart in logs) was
+// previously computed inline inside buildCappedResponse purely to echo it
+// back, and never surfaced to the caller for logging.
+func parseHeaderFlags(req []byte) (opcode byte, rd bool, ok bool) {
+	if len(req) < 12 {
+		return 0, false, false
+	}
+	return (req[2] & 0x78) >> 3, req[2]&0x01 != 0, true
+}
+
 // buildCappedResponse constructs a reply to req, choosing the most
 // complete response that still fits within responseCap(len(req)). It never
 // returns a slice longer than that cap. Callers should treat a nil return
