@@ -165,7 +165,11 @@ func handleIKEPacket(conn *net.UDPConn, addr *net.UDPAddr, data []byte, log *log
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "-healthcheck" {
-		conn, err := tls.Dial("tcp", "127.0.0.1:8443", &tls.Config{InsecureSkipVerify: true})
+		// A plain TCP connect is enough to prove the WebVPN listener is up
+		// -- completing a full TLS handshake would need InsecureSkipVerify
+		// (correctly flagged as unsafe in general) for no real benefit,
+		// since this only ever dials itself on loopback.
+		conn, err := net.DialTimeout("tcp", "127.0.0.1:8443", 2*time.Second)
 		if err != nil {
 			os.Exit(1)
 		}

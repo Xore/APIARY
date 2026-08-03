@@ -63,6 +63,27 @@ func TestGETSMBConfScanReturnsSmbConf(t *testing.T) {
 	}
 }
 
+// TestCitrixForbiddenBodyEscapesReflectedPath guards against reflected XSS
+// (CodeQL caught this as a real finding during development): the value
+// substituted into the 403 page is fundamentally attacker-influenced (it's
+// derived from the request path), so it must be HTML-escaped rather than
+// substituted verbatim -- upstream's own Python does this substitution
+// unescaped, but that's not a behavior worth reproducing. Exercised
+// directly against the helper rather than through a full request: the
+// current caller only ever passes the fixed literal "/vpns" (the routing
+// above forces that), so no crafted HTTP request can reach this code path
+// with a different value today -- this test defends the escaping itself,
+// not current reachability, in case that constraint ever loosens.
+func TestCitrixForbiddenBodyEscapesReflectedPath(t *testing.T) {
+	body := citrixForbiddenBody(`/vpns/<script>alert(1)</script>`)
+	if strings.Contains(body, "<script>") {
+		t.Fatalf("unescaped script tag in body: %q", body)
+	}
+	if !strings.Contains(body, "&lt;script&gt;") {
+		t.Fatalf("expected the payload to be HTML-escaped, got: %q", body)
+	}
+}
+
 func TestGETUnhandledVpnsTraversalReturnsEmpty200(t *testing.T) {
 	req := httptest.NewRequest("GET", "/vpn/../vpns/something/else", nil)
 	w := httptest.NewRecorder()

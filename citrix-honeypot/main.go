@@ -15,6 +15,7 @@ package main
 import (
 	"crypto/tls"
 	"encoding/json"
+	"html"
 	"io"
 	"net"
 	"net/http"
@@ -142,8 +143,7 @@ func (h *handler) serveGET(w http.ResponseWriter, r *http.Request, reqPath strin
 			switch {
 			case len(collapsedParts) == 1:
 				h.log2(r, "cve_2019_19781_scan_type1", collapsed, "")
-				body := strings.ReplaceAll(citrix403Page, "{url}", collapsed)
-				writeApache(w, http.StatusForbidden, body)
+				writeApache(w, http.StatusForbidden, citrixForbiddenBody(collapsed))
 				return
 			case len(collapsedParts) >= 2 && collapsedParts[1] == "portal":
 				h.log2(r, "cve_2019_19781_completion", collapsed, "")
@@ -179,6 +179,18 @@ func (h *handler) servePOST(w http.ResponseWriter, r *http.Request, reqPath stri
 	writeApache(w, http.StatusOK, "")
 }
 
+// citrixForbiddenBody substitutes the requested path into the 403 page.
+// collapsed reaches here as exactly "/vpns" for every request the current
+// caller sends (the len==1 branch above only matches that literal value),
+// but it's still escaped defensively: the request path is fundamentally
+// attacker-controlled, and reflecting it unescaped into HTML (as
+// upstream's own Python does) would be a reflected-XSS vector against
+// whoever clicks a crafted link to this decoy if that constraint ever
+// loosens.
+func citrixForbiddenBody(collapsed string) string {
+	return strings.ReplaceAll(citrix403Page, "{url}", html.EscapeString(collapsed))
+}
+
 // splitNonEmpty mirrors Python's `filter(None, path.split('/'))`.
 func splitNonEmpty(p string) []string {
 	var out []string
@@ -203,7 +215,12 @@ func writeApache(w http.ResponseWriter, code int, body string) {
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "-healthcheck" {
-		conn, err := tls.Dial("tcp", "127.0.0.1:443", &tls.Config{InsecureSkipVerify: true})
+		// A plain TCP connect is enough to prove the listener is up --
+		// completing a full TLS handshake would need to either trust our
+		// own self-signed cert (InsecureSkipVerify, which static analysis
+		// correctly flags as unsafe in general) or pin its exact bytes for
+		// no real benefit, since this only ever dials itself on loopback.
+		conn, err := net.DialTimeout("tcp", "127.0.0.1:443", 2*time.Second)
 		if err != nil {
 			os.Exit(1)
 		}
