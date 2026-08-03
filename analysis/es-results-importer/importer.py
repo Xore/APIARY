@@ -82,6 +82,16 @@ SOURCES = [
         "skip": {"status.json"},
     },
     {
+        # #404: dashboard/revdeck.go's own standalone Rev·Deck submissions --
+        # distinct from the "revdeck" field ghidra-analysis-v1 already
+        # carries when Rev·Deck runs embedded inside a full Ghidra analysis.
+        "env": "REVDECK_RESULTS_DIR",
+        "label": "revdeck",
+        "index": "revdeck-analysis-v1",
+        "id_fields": ("sha256",),
+        "glob": "*_revdeck.json",
+    },
+    {
         # dashboard/main.go's own default -- ANALYSIS_WORKBENCH_DIR is the
         # workbench root, runs live under <root>/runs (workbench_domain.go's
         # runsDir()), not the root itself.

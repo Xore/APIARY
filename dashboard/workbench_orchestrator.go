@@ -206,11 +206,12 @@ func (s *store) reconcileWorkbenchRun(run workbenchRun) (workbenchRun, bool) {
 		return run, false
 	}
 	now := time.Now().UTC()
-	// #384: local disk, not loadGhidraResults/loadSandboxResults -- this loop
-	// polls for job completion to flip run state, and the ES mirror's import
-	// interval (5 minutes by default) would delay or miss that transition.
+	// #384/#404: local disk, not loadGhidraResults/loadRevdeckResults/
+	// loadSandboxResults -- this loop polls for job completion to flip run
+	// state, and the ES mirror's import interval (5 minutes by default)
+	// would delay or miss that transition.
 	ghidraResults := loadGhidraResultsLocal()
-	revdeckResults := loadRevdeckResults()
+	revdeckResults := loadRevdeckResultsLocal()
 	sandboxResults := loadSandboxResultsLocal()
 	sandboxStatus := loadSandboxStatus()
 	for index := range run.Children {
