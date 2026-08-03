@@ -38,6 +38,7 @@ var filterValueFields = map[string]func(storedEvent) (value, label string){
 	"country": func(e storedEvent) (string, string) { return e.Country, e.Country },
 	"ip":      func(e storedEvent) (string, string) { return e.SrcIP, e.SrcIP },
 	"port":    func(e storedEvent) (string, string) { return e.Port, e.Port },
+	"proto":   func(e storedEvent) (string, string) { return e.Proto, e.Proto },
 	"sig": func(e storedEvent) (string, string) {
 		if e.Alert == "" {
 			return "", ""

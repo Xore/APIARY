@@ -51,12 +51,12 @@
       <div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
         <header class="overview-header" id="payloads-header">
           <div>
-            <div class="eyebrow">Evidence</div>
+            <div class="label-section">Evidence</div>
             <h1>Captured payloads</h1>
             <p class="subtitle">Unified inventory of Dionaea captures, Cowrie uploads/downloads, and retained script artifacts.</p>
           </div>
           <div class="live-panel">
-            <span class="gen">unified payload inventory &bull; generated {{.Generated.Format "2006-01-02 15:04:05 MST"}}</span>
+            <span class="gen">unified payload inventory &bull; generated <span data-hp-utc="{{utcOrEmpty .Generated}}">{{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></span>
           </div>
         </header>
 
@@ -78,7 +78,7 @@
               only in an isolated analysis VM.
             </p>
             {{if not .Enabled}}<p class="empty">payload serving is disabled (set PAYLOAD_DIRS and/or SCRIPT_PAYLOAD_DIR)</p>
-            {{else if .Loading}}<p class="note" data-payload-warming><span class="live-dot" aria-hidden="true"></span> Preparing the payload inventory. This page will update automatically.</p><script nonce="{{.Nonce}}">setTimeout(()=>location.reload(),1500)</script>
+            {{else if .Loading}}<p class="note" data-payload-warming><span class="status-dot" aria-hidden="true"></span> Preparing the payload inventory. This page will update automatically.</p><script nonce="{{.Nonce}}">setTimeout(()=>location.reload(),1500)</script>
             {{else if .Files}}
             <div class="project-grid" id="payloads-results" data-hp-lazy-list data-hp-page-url="{{.RowsURL}}" data-hp-total="{{.ResultTotal}}">
             {{template "payloadrows" .}}
@@ -112,7 +112,7 @@
       <div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
         <header class="overview-header" id="analysis-header">
           <div>
-            <div class="eyebrow">Evidence</div>
+            <div class="label-section">Evidence</div>
             <h1>Payload analysis</h1>
             <p class="subtitle">Bounded static analysis — the sample is never executed.</p>
           </div>

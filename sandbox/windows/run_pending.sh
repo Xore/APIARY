@@ -16,7 +16,7 @@ set -euo pipefail
 request_dir=${WINDOWS_SANDBOX_REQUEST_DIR:-/windows-sandbox-requests}
 results_dir=${WINDOWS_SANDBOX_RESULTS_DIR:-/windows-sandbox-results}
 samples_dir=${WINDOWS_SANDBOX_SAMPLES_DIR:-/var/lib/honeypot-sandbox/inbox/samples}
-orchestrator=${WINDOWS_SANDBOX_ORCHESTRATOR:-/opt/honeypot-sandbox/windows/orchestrate/run_sample.py}
+orchestrator=${WINDOWS_SANDBOX_ORCHESTRATOR:-/usr/local/libexec/honeypot-sandbox/windows/orchestrate/run_sample.py}
 lock_file=${WINDOWS_SANDBOX_LOCK:-/run/lock/honeypot-windows-sandbox-worker.lock}
 
 # The path unit fires on every spool change, so several invocations can race

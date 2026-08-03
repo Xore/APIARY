@@ -7,12 +7,12 @@
 </head>
 <body><div class="app-shell">{{template "topbar" .}}{{template "sidebar" .}}
 <main class="app-main"><div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
-  <header class="overview-header"><div><div class="eyebrow">Unified analysis</div><h1>Payload workbench</h1><p class="subtitle">Choose captured evidence, then build a typed recipe and run every applicable local analyzer from one page.</p></div><div class="live-panel"><span class="gen">{{.UniqueTotal}} unique captures &bull; generated {{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></div></header>
+  <header class="overview-header"><div><div class="label-section">Unified analysis</div><h1>Payload workbench</h1><p class="subtitle">Choose captured evidence, then build a typed recipe and run every applicable local analyzer from one page.</p></div><div class="live-panel"><span class="gen">{{.UniqueTotal}} unique captures &bull; generated <span data-hp-utc="{{utcOrEmpty .Generated}}">{{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></span></div></header>
   <div class="filters"><a class="chip" href="/payloads">Captured payload inventory</a><a class="chip" href="/payload-workbench/results">Workbench results</a><span class="chip">Select one payload to begin</span></div>
   <section class="card wide" aria-labelledby="wb-select-title">
     <div class="section-heading"><div><h2 id="wb-select-title">Select a captured payload</h2><p>The workbench derives analyzer applicability from the selected artifact. Opening an artifact does not execute it.</p></div></div>
     {{if not .Enabled}}<p class="empty">Payload serving is disabled. Configure PAYLOAD_DIRS and/or SCRIPT_PAYLOAD_DIR.</p>
-    {{else if .Loading}}<p class="note" data-payload-warming><span class="live-dot" aria-hidden="true"></span> Preparing the payload inventory. This page will update automatically.</p><script nonce="{{.Nonce}}">setTimeout(()=>location.reload(),1500)</script>
+    {{else if .Loading}}<p class="note" data-payload-warming><span class="status-dot" aria-hidden="true"></span> Preparing the payload inventory. This page will update automatically.</p><script nonce="{{.Nonce}}">setTimeout(()=>location.reload(),1500)</script>
     {{else if .Files}}
     <div class="project-grid" id="wb-select-results">
       {{range .Files}}
@@ -42,7 +42,7 @@
 </head>
 <body><div class="app-shell">{{template "topbar" .}}{{template "sidebar" .}}
 <main class="app-main"><div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
-  <header class="overview-header"><div><div class="eyebrow">Unified analysis</div><h1>Workbench results</h1><p class="subtitle">Review correlated analyzer runs across captured payloads without losing successful child results when another backend fails.</p></div><div class="live-panel"><span class="gen">generated {{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></div></header>
+  <header class="overview-header"><div><div class="label-section">Unified analysis</div><h1>Workbench results</h1><p class="subtitle">Review correlated analyzer runs across captured payloads without losing successful child results when another backend fails.</p></div><div class="live-panel"><span class="gen">generated <span data-hp-utc="{{utcOrEmpty .Generated}}">{{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></span></div></header>
   <div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:xl:grid-cols-5 tw:gap-3 tw:mb-6">
     <div class="metric"><div class="metric__value">{{.Counts.Total}}</div><div class="metric__label">Matching runs</div></div><div class="metric"><div class="metric__value">{{.Counts.Active}}</div><div class="metric__label">Active</div></div><div class="metric"><div class="metric__value">{{.Counts.Completed}}</div><div class="metric__label">Completed</div></div><div class="metric"><div class="metric__value">{{.Counts.Partial}}</div><div class="metric__label">Partial</div></div><div class="metric"><div class="metric__value">{{.Counts.Failed}}</div><div class="metric__label">Failed / stopped</div></div>
   </div>
@@ -82,7 +82,7 @@
 </head>
 <body><div class="app-shell">{{template "topbar" .}}{{template "sidebar" .}}
 <main class="app-main"><div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content data-wb-root data-payload-sha256="{{.SHA256}}">
-  <header class="overview-header"><div><div class="eyebrow">Unified analysis</div><h1>Payload workbench</h1><p class="subtitle">Build a typed recipe, fan out through existing worker spools, and follow every result in one run.</p></div><div class="live-panel"><span class="gen">{{.Classification.Label}} &bull; generated {{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></div></header>
+  <header class="overview-header"><div><div class="label-section">Unified analysis</div><h1>Payload workbench</h1><p class="subtitle">Build a typed recipe, fan out through existing worker spools, and follow every result in one run.</p></div><div class="live-panel"><span class="gen">{{.Classification.Label}} &bull; generated <span data-hp-utc="{{utcOrEmpty .Generated}}">{{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></span></div></header>
   <div class="filters"><a class="chip" href="/payload-workbench/results">&larr; workbench results</a><a class="chip" href="/payload-analysis/{{.SHA256}}">static analysis</a><a class="chip" href="/events?shasum={{.SHA256}}">related events</a><span class="chip" title="Full SHA-256">{{.SHA256}}</span></div>
   <div class="tw:mb-5 tw:rounded-lg tw:border tw:border-orange tw:bg-orange-subtle tw:px-4 tw:py-4" role="note"><strong>Static checks and detonation are different trust decisions.</strong> Running every applicable analyzer does not make a payload safe. Dynamic backends remain isolated and cannot be pointed at the protected live VM or given Internet egress from this page.</div>
   {{if .Correlation.Known}}<div class="card wide tw:mb-5" role="note" id="wb-known-elsewhere"><div class="tw:flex tw:flex-wrap tw:items-center tw:gap-2"><strong class="tw:mr-auto">This payload was already analyzed elsewhere.</strong><span class="badge badge--green">advisory only</span></div>

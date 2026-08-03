@@ -72,11 +72,11 @@ variable "memory" {
 }
 
 variable "cpus" {
-  # 8 of the host's 16 threads. QEMU was pinning all four of the previous
-  # allocation (291% CPU) through the install, and FLARE-VM — the two-to-four
-  # hour phase — is the part that actually parallelises. Leaves 8 threads for
-  # the honeypot stack running alongside.
-  default = "8"
+  # 12 of the host's 16 threads, bumped from 8 to speed up install --
+  # Windows Setup's file-copy/component-install phases parallelize well.
+  # Leaves 4 threads for the honeypot stack running alongside; revisit if
+  # that starves under load.
+  default = "12"
 }
 
 variable "disk_size" {
@@ -130,11 +130,37 @@ source "qemu" "win11" {
   # host-passthrough: guest sees real CPU model, not QEMU default
   cpu_model = "host"
 
-  # UEFI + Secure Boot. Windows 11 setup refuses to install without both, and
-  # the .ms firmware pair is the one with Microsoft's keys already enrolled.
+  # UEFI, Secure Boot OFF for now -- TEMPORARY, see #288/#419. The
+  # cert-signed approach (pxe/prepare-pxe.sh: self-generated cert, sbsign,
+  # OVMF_VARS_4M.honeypot-pxe.fd with that cert + Microsoft's win11 certs
+  # both enrolled in db) is built and confirmed working standalone -- signed
+  # ipxe.efi boots clean under full Secure Boot enforcement, and a
+  # negative-control boot of the unsigned binary against the same vars file
+  # is correctly rejected. But the one real packer-driven build attempted
+  # under it failed differently than every non-secboot run tonight: PXE
+  # succeeded initially (confirmed via screenshot: wimboot/BCD/BOOT.SDI ok,
+  # boot.wim streaming), then the guest reset and fell through firmware's
+  # boot order to the CD-boot-prompt path (which has no boot_command
+  # anymore) and then to an empty disk, landing at "No bootable option or
+  # device was found" -- qcow2 never grew past its initial allocation.
+  # Not yet root-caused whether that's secure-boot-specific (bootmgfw doing
+  # its own additional validation once handed off from wimboot) or
+  # coincidental flakiness, since every prior run tonight (all non-secboot)
+  # reached this exact stage reliably. Reverting to non-secboot to get a
+  # working golden image first; re-enable once the reset is understood
+  # rather than guessing again under time pressure. The efi_firmware_* lines
+  # below and pxe/OVMF_VARS_4M.honeypot-pxe.fd are both ready to swap back
+  # in unchanged when that happens.
+  #
+  # This was the earlier install-time-only compromise: Windows 11 setup
+  # itself only needs UEFI (Secure Boot's *check* is bypassed via the
+  # LabConfig registry keys in autounattend.xml regardless), and the final
+  # win11-kvm.xml detonation domain is unaffected either way -- the
+  # installed Windows Boot Manager is itself Microsoft-signed and boots
+  # fine under Secure Boot even though it wasn't installed under it.
   efi_boot          = true
-  efi_firmware_code = "/usr/share/OVMF/OVMF_CODE_4M.secboot.fd"
-  efi_firmware_vars = "/usr/share/OVMF/OVMF_VARS_4M.ms.fd"
+  efi_firmware_code = "/usr/share/OVMF/OVMF_CODE_4M.fd"
+  efi_firmware_vars = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 
   # TPM 2.0 — the other hard Windows 11 requirement. Without it the installer
   # stops at "This PC can't run Windows 11" and the build hangs until
@@ -180,34 +206,89 @@ source "qemu" "win11" {
   accelerator = "kvm"
   headless    = true
 
-  # "Press any key to boot from CD or DVD" has to be answered while it is on
-  # screen, in a window that is both narrow and late (OVMF ~15s init, ~5s
-  # prompt). Per #288: a rebuilt ISO that removes the prompt entirely
-  # (swapping in efi/microsoft/boot/efisys_noprompt.bin) was tried and
-  # reverted -- it hung completely (30+ min, zero disk growth, black VNC
-  # screen throughout) instead of the original's occasional, at-least-
-  # terminal "Time out" in the boot device log. So this races the prompt,
-  # using spacebar rather than enter (the prompt accepts any key; other
-  # Windows deployment tooling's guidance for this exact prompt uses
-  # spacebar specifically). Extra presses after the installer has started
-  # are harmless; it is already reading autounattend.xml by then.
+  # Fixed VNC port (not packer's default auto-picked-from-a-range) so a
+  # relay/monitor script can point at one stable address across attempts
+  # instead of re-discovering the port every time.
+  vnc_port_min = 5999
+  vnc_port_max = 5999
+
+  # PXE boot instead of CD-ROM boot (#288, #406).
   #
-  # Not chasing an ever-wider window as the primary defense -- #288 showed
-  # missing the prompt occasionally is a real, accepted cost of this
-  # approach, and build-with-retry.sh's whole-build retry (already in
-  # place) is a better fit for an occasional miss than a longer spam window
-  # that still isn't guaranteed to cover a sufficiently unlucky delay.
+  # The old approach raced "Press any key to boot from CD or DVD" via VNC
+  # keystroke injection (spacebar spam, see git history for the full
+  # 50d12e4/89a516d/d14b1e0/0ae41a2 investigation this replaces). Confirmed
+  # live over a full night of builds: it missed far more often than it hit,
+  # repeatedly leaving the guest stuck at BdsDxe "No bootable option or
+  # device was found" with a qcow2 that never grows past its initial
+  # allocation. That is a structurally flaky mechanism -- a keystroke has
+  # to land inside a ~5s window that only starts after OVMF's own
+  # unpredictable init time -- not a tunable one.
   #
-  # This specific fix (50d12e4 widen -> 89a516d revert boot_wait ->
-  # d14b1e0 noprompt-ISO detour -> 0ae41a2 revert+spacebar) was worked out
-  # in the same investigation as the FLARE-VM removal above, but committed
-  # onto the wrong branch (dashboard-280-filterbar-phase4, an unrelated
-  # dashboard feature branch someone had checked out) and never reached
-  # main until now. Ported the net result here rather than merging that
-  # branch, since its other commit is unrelated dashboard work.
-  boot_wait = "5s"
-  boot_command = [
-    "<spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar>",
+  # PXE boot has no such prompt: the firmware loads a network boot program
+  # and goes. This second NIC exists solely to boot from; the WinRM
+  # communicator still uses packer's own auto-created NIC (net0/user.0,
+  # with its hostfwd) exactly as before, unaffected by this one being
+  # present. See pxe/prepare-pxe.sh for what's being served here and why
+  # (OVMF requires a real signed-shape PE32+ EFI executable as the PXE boot
+  # file, not a raw iPXE script, and a stock ipxe.efi's autoboot loops
+  # forever instead of ever reaching a fetched script -- both confirmed
+  # live -- so ipxe.efi is custom-built there with the wimboot chainload
+  # script embedded at compile time).
+  #
+  # autounattend.xml still applies exactly as before: Windows Setup scans
+  # all attached media for it regardless of how WinPE itself was booted,
+  # so cd_files above is unchanged.
+  #
+  # qemuargs REPLACES packer's own generated qemu args entirely rather than
+  # appending to them -- confirmed live: without explicitly re-adding
+  # user.0/hostfwd here, the WinRM communicator's NIC silently vanished
+  # from the qemu command line. So both NICs are listed explicitly: user.0
+  # is exactly what packer would have generated on its own (hostfwd to the
+  # communicator port, via the {{ .SSHHostPort }} template var packer
+  # exposes to qemuargs -- named for SSH historically, used for WinRM here
+  # same as everywhere else in this communicator), and pxenet0 is the
+  # PXE-only NIC.
+  #
+  # Two more bugs found chasing the boot-order fix, both confirmed live:
+  #
+  # 1. `-boot once=n,order=c` (tried as the "network once, disk afterward"
+  #    fix) turned out to be a no-op -- this OVMF build doesn't implement
+  #    the legacy `-boot` compatibility shim at all. The boot log with it
+  #    set showed the plain default NVRAM order (CD, CD, HARDDISK, PXE
+  #    last), not network-first. bootindex is the mechanism this OVMF
+  #    actually honors (confirmed repeatedly tonight), so that's back --
+  #    but bootindex alone re-triggers PXE on *every* guest-initiated
+  #    restart forever, which is the infinite-reinstall loop this was
+  #    meant to fix in the first place. Solved below by unplugging pxenet0
+  #    via QMP the moment the first guest reset happens, instead of trying
+  #    to make a boot-order flag do something it structurally can't (a
+  #    static boot order can't distinguish "first boot" from "the guest
+  #    reset itself" -- both are just "the VM is booting" to the firmware).
+  #
+  # 2. Two `-netdev user` instances default to the *same* internal subnet
+  #    (10.0.2.0/24) and silently collide -- confirmed live, BdsDxe's PXE
+  #    attempt landed on user.0 (MAC ...56, no tftp config at all) instead
+  #    of pxenet0 (MAC ...57) and failed DHCP with "No valid offer
+  #    received". Each needs its own `net=`/`dhcpstart=` range.
+  #
+  # QMP (unix socket, fixed path so pxe/unplug-pxe-on-reset.sh can find it
+  # without scraping qemu's own stdout) is what makes the reset-triggered
+  # unplug possible: it emits a RESET event the instant the guest asks for
+  # one, before firmware even starts re-enumerating boot options for that
+  # next boot.
+  qemuargs = [
+    ["-qmp", "unix:/tmp/win11-analysis-qmp.sock,server,nowait"],
+    # id=pxenet0dev on the *device* (not just the netdev backend) is
+    # required for device_del to find anything -- confirmed live, without
+    # it QEMU auto-generates an anonymous device id and
+    # `device_del pxenet0` fails with "Device 'pxenet0' not found" even
+    # though the netdev backend really is named pxenet0. device_del
+    # operates on the qdev/PCI device id, which is a separate namespace
+    # from netdev backend ids.
+    ["-device", "e1000e,netdev=pxenet0,bootindex=1,id=pxenet0dev"],
+    ["-netdev", "user,id=pxenet0,net=10.0.2.0/24,dhcpstart=10.0.2.15,tftp=pxe,bootfile=ipxe.efi"],
+    ["-device", "e1000e,netdev=user.0"],
+    ["-netdev", "user,id=user.0,net=10.0.3.0/24,dhcpstart=10.0.3.15,hostfwd=tcp::{{ .SSHHostPort }}-:5985"],
   ]
 }
 
@@ -341,6 +422,22 @@ build {
   # added here doing the same thing.
   provisioner "powershell" {
     inline = [
+      # DNS-to-INetSim (10.10.10.1): moved here from 04-tools.ps1's old
+      # Phase 13 (#432) -- that script assumed it was the last provisioner,
+      # which stopped being true once 06-chrome-history.ps1 was added after
+      # it and needed real internet for its own Chrome download. This step
+      # actually is guaranteed last regardless of what else gets added to
+      # the provisioner chain before it.
+      #
+      # Deliberately belt-and-braces: setup/sandbox-network.xml already
+      # hands out 10.10.10.1 via dhcp-option=6, and this survives a guest
+      # that somehow misses the DHCP option. The cost is that 10.10.10.1 is
+      # now written down in three places -- here, that file, and the
+      # inetsim ipv4_address in docker-compose.sandbox.yml. All three are
+      # pinned constants; change one and you must change all three, or the
+      # static entry here will silently win over DHCP and every lookup will
+      # go to a dead address.
+      "$adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Select-Object -First 1; Set-DnsClientServerAddress -InterfaceAlias $adapter.Name -ServerAddresses '10.10.10.1'",
       # Clear event logs (start fresh for analysis)
       "Get-EventLog -List | ForEach-Object { Clear-EventLog -LogName $_.Log -ErrorAction SilentlyContinue }",
       "wevtutil cl Microsoft-Windows-Sysmon/Operational 2>$null; $global:LASTEXITCODE = 0",

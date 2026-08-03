@@ -206,7 +206,14 @@
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const items = await response.text();
       if (!items.trim()) state.total = nextOffset;
-      else state.body.insertAdjacentHTML("beforeend", items);
+      else {
+        state.body.insertAdjacentHTML("beforeend", items);
+        // Rows fetched here carry the same data-hp-utc twins as the
+        // server-rendered first page (#346) -- the one-shot preference pass
+        // in the DOMContentLoaded block already ran long before this batch
+        // existed, so without this they'd sit in the UTC fallback forever.
+        reapplyTimezone();
+      }
       updateRemoteContainer(key);
     } catch (error) {
       state.counter.textContent = `Could not load more entries (${error.message})`;
@@ -454,6 +461,78 @@
   });
   window.initHoneypotMaps = initMaps;
 
+  /* ---------- overview heatmap sensor picker (#41 item 1) ----------
+     The default "all sensors" heatmap is server-rendered every page load
+     (aggregate.go's own top-N snapshot); selecting one sensor here instead
+     fetches /api/heatmap?sensor=X live so a quiet sensor that never makes
+     that top-N cut is still visible. Rebuilt as real DOM nodes (not spliced
+     HTML) so the nonce'd <style> carrying each cell's --v custom property
+     can have its nonce set via the .nonce IDL property before insertion --
+     the same fetch-and-splice nonce problem reNonce solves for full-page
+     live refresh (see the comment above it), just built fresh here since
+     this is server JSON, not a fetched HTML fragment. */
+  const renderHeatmapRows = (body, rows) => {
+    const heat = document.createElement("div");
+    heat.className = "heatmap";
+    heat.setAttribute("aria-label", "Hourly event activity per sensor, last 24 hours");
+    const styleRules = [];
+    rows.forEach((row, r) => {
+      const rowEl = document.createElement("div");
+      rowEl.className = "heatmap__row";
+      const label = document.createElement("span");
+      label.className = "heatmap__label";
+      label.textContent = row.Sensor;
+      const cells = document.createElement("div");
+      cells.className = "heatmap__cells";
+      (row.Cells || []).forEach((cell, c) => {
+        const span = document.createElement("span");
+        span.className = "heatmap__cell";
+        span.tabIndex = 0;
+        span.title = cell.Label + " — " + cell.Count + " events";
+        cells.appendChild(span);
+        styleRules.push(".heatmap__row:nth-child(" + (r + 1) + ") .heatmap__cells span:nth-child(" + (c + 1) + "){--v:" + cell.Pct + "}");
+      });
+      rowEl.append(label, cells);
+      heat.appendChild(rowEl);
+    });
+    const style = document.createElement("style");
+    style.nonce = pageNonce;
+    style.textContent = styleRules.join("\n") +
+      ".heatmap__legend .heatmap__cell:nth-of-type(1){--v:0}.heatmap__legend .heatmap__cell:nth-of-type(2){--v:25}.heatmap__legend .heatmap__cell:nth-of-type(3){--v:50}.heatmap__legend .heatmap__cell:nth-of-type(4){--v:75}.heatmap__legend .heatmap__cell:nth-of-type(5){--v:100}";
+    const legend = document.createElement("div");
+    legend.className = "heatmap__legend";
+    legend.innerHTML = "<span>Less</span><span class=\"heatmap__cell\"></span><span class=\"heatmap__cell\"></span><span class=\"heatmap__cell\"></span><span class=\"heatmap__cell\"></span><span class=\"heatmap__cell\"></span><span>More</span>";
+    const note = document.createElement("p");
+    note.className = "note";
+    note.textContent = rows.length === 1
+      ? "Hourly activity for this sensor over the last 24 hours. Hover or focus a cell for the exact count."
+      : "Sensors with the most events in the last 24 hours, hour by hour. Hover or focus a cell for the exact count.";
+    body.replaceChildren(heat, style, legend, note);
+  };
+  const renderHeatmapEmpty = body => {
+    body.replaceChildren(Object.assign(document.createElement("p"), {className: "empty", textContent: "No events in the last 24 hours."}));
+  };
+  const loadSensorHeatmap = async sensor => {
+    const body = document.querySelector("[data-heatmap-card] [data-heatmap-body]");
+    if (!body) return;
+    try {
+      const r = await fetch("/api/heatmap?sensor=" + encodeURIComponent(sensor), {cache: "no-store"});
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const data = await r.json();
+      const rows = (data.rows || []).filter(row => row.Cells && row.Cells.length);
+      if (!rows.length) renderHeatmapEmpty(body);
+      else renderHeatmapRows(body, rows);
+    } catch (e) {
+      body.replaceChildren(Object.assign(document.createElement("p"), {className: "empty", textContent: "Heatmap update failed: " + e.message}));
+    }
+  };
+  // Delegated on document, not bound per-element, so it keeps working after
+  // mountPage swaps in a fresh overview card on every live refresh.
+  document.addEventListener("change", e => {
+    const picker = e.target.closest?.("[data-heatmap-sensor-picker]");
+    if (picker) loadSensorHeatmap(picker.value);
+  });
+
   /* ---------- workspace tabs ----------
      Any page can group its cards: render .tabs buttons with
      data-dashboard-tab and matching [data-dashboard-panel] sections. The valid
@@ -523,13 +602,16 @@
     return true;
   };
 
-  // Re-applies the timezone display preference (#282) to whatever this call
-  // just mounted. window.HpPreferences is the cross-scope bridge the
-  // DOMContentLoaded preferences block below populates -- mountPage is
-  // defined here, outside that closure, and reused by SSE/interval refresh
-  // long after the page first loads, so it cannot close over that block's
-  // own locals directly.
-  const reapplyTimezone = () => window.HpPreferences?.applyTimezone?.(window.HpPreferences.prefs?.timezone);
+  // Re-applies the timezone/clock-format display preference (#282, #346) to
+  // whatever this call just mounted. window.HpPreferences is the cross-scope
+  // bridge the DOMContentLoaded preferences block below populates --
+  // mountPage is defined here, outside that closure, and reused by SSE/
+  // interval refresh long after the page first loads, so it cannot close
+  // over that block's own locals directly.
+  const reapplyTimezone = () => {
+    const prefs = window.HpPreferences?.prefs;
+    window.HpPreferences?.applyTimeDisplay?.(prefs?.timezone, prefs?.clock);
+  };
   const mountPage = (source, options = {}) => {
     if (!pageContent) { source.remove?.(); return; }
     reNonce(source);
@@ -789,7 +871,9 @@
     const filterAutocompleteInputs = [...document.querySelectorAll("[data-hp-filter-field]")];
     if (filterAutocompleteInputs.length) {
       const box = document.createElement("div");
-      box.className = "hp-filter-autocomplete";
+      // dropdown: theme.css's panel chrome (background/border/radius/
+      // shadow/padding); hp-filter-autocomplete: positioning/size only.
+      box.className = "dropdown hp-filter-autocomplete";
       box.setAttribute("role", "listbox");
       box.hidden = true;
       document.body.append(box);
@@ -967,22 +1051,35 @@
         return readPrefResponse(response);
       }).catch(() => {});
     };
-    /* Timezone display conversion (#282): every event timestamp is a fixed
-       UTC string baked in once by the server's shared, cross-viewer event
-       cache (rebuild() in aggregate.go), long before any per-viewer
-       preference is known -- alongside a machine-readable data-hp-utc twin.
-       Reformat client-side into whichever zone this viewer's own preference
-       resolves to: "browser" defers entirely to the browser's own locale/
-       zone (Intl's default when no timeZone option is given), "utc" is a
-       no-op (the server-rendered fallback already is UTC), anything else is
-       an explicit IANA zone name. formatToParts, not a locale's own
-       punctuation, keeps the "YYYY-MM-DD HH:MM:SS" shape consistent with
-       the server-rendered fallback regardless of the browser's locale. */
-    const applyTimezone = tz => {
-      if (!tz || tz === "utc") return;
+    /* Timezone + clock-format display conversion (#282, #346): every
+       timestamp is a fixed UTC string baked in once by the server -- either
+       the shared, cross-viewer event cache (rebuild() in aggregate.go) or a
+       page's own "generated"/"updated" header -- long before any per-viewer
+       preference is known, alongside a machine-readable data-hp-utc twin.
+       Reformat client-side into whichever zone/format this viewer's own
+       preferences resolve to: tz "browser" defers entirely to the browser's
+       own locale/zone (Intl's default when no timeZone option is given),
+       "utc" keeps the UTC zone (but the clock format below still applies);
+       anything else is an explicit IANA zone name. clock "h12" switches to a
+       12-hour `h:mm:ss AM/PM` display; anything else (including unset,
+       which is the "h24" default) keeps the zero-padded 24-hour display the
+       server-rendered fallback already uses. Always read the hour as 24h
+       from Intl (formatToParts, not a locale's own punctuation, keeps the
+       "YYYY-MM-DD HH:MM:SS" shape consistent with the server-rendered
+       fallback regardless of the browser's locale) and derive the 12-hour
+       form ourselves -- Intl's own hour12 output uses locale-specific
+       "AM"/"PM" spellings and hour-12-vs-0 edge cases that are one more
+       thing to get wrong for no benefit here. */
+    const applyTimeDisplay = (tz, clock) => {
+      const hour12 = clock === "h12";
+      if ((!tz || tz === "utc") && !hour12) return; // already the UTC 24h fallback
       const options = {year: "numeric", month: "2-digit", day: "2-digit",
         hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false};
-      if (tz !== "browser") options.timeZone = tz;
+      // "browser" leaves timeZone unset so Intl falls back to the host's own
+      // zone; anything else needs it explicit -- omitting it for "utc" would
+      // *also* fall back to the browser's zone (Intl's default is never UTC),
+      // silently reintroducing the very bug (#282) data-hp-utc exists to fix.
+      if (tz && tz !== "browser") options.timeZone = tz === "utc" ? "UTC" : tz;
       let formatter;
       try { formatter = new Intl.DateTimeFormat("en-CA", options); }
       catch { return; } // an invalid IANA zone name: leave the UTC fallback showing
@@ -992,18 +1089,25 @@
         const parts = {};
         formatter.formatToParts(parsed).forEach(p => { parts[p.type] = p.value; });
         if (!parts.year) return;
-        el.textContent = `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+        if (hour12) {
+          const h24 = parseInt(parts.hour, 10);
+          const period = h24 >= 12 ? "PM" : "AM";
+          const h12 = h24 % 12 || 12;
+          el.textContent = `${parts.year}-${parts.month}-${parts.day} ${h12}:${parts.minute}:${parts.second} ${period}`;
+        } else {
+          el.textContent = `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+        }
       });
     };
     // mountPage (outside this DOMContentLoaded closure, so it needs the
     // window.HpPreferences bridge already established above) re-applies this
     // on every live-refreshed page mount.
-    prefState.applyTimezone = applyTimezone;
+    prefState.applyTimeDisplay = applyTimeDisplay;
     const applyEffectivePrefs = prefs => {
       if (!prefs) return;
       if (prefs.theme === "dark" || prefs.theme === "light" || prefs.theme === "system") applyTheme(prefs.theme);
       if (innerWidth > 520 && typeof prefs.collapsed_sidebar === "boolean") setSidebarCollapsed(prefs.collapsed_sidebar);
-      applyTimezone(prefs.timezone);
+      applyTimeDisplay(prefs.timezone, prefs.clock);
     };
     /* One-time migration of recognized localStorage preferences. The marker
        is set before the write so a failed migration never loops. */

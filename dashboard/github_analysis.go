@@ -154,7 +154,54 @@ const githubAnalysisStatusStaleAfter = 30 * time.Minute
 // exceeds normal pickup latency.
 const githubAnalysisHandoffStaleAfter = 5 * time.Minute
 
+// loadGitHubAnalysisResults prefers #383's github-analysis-v1 ES mirror
+// (#384), falling back to the local JSON files exactly as loadGhidraResults
+// does -- see its doc comment in ghidra.go for the fallback conditions.
+// Unlike Ghidra/sandbox, every caller of this function is a browse/search/
+// filter surface (#384's audit found no write-adjacent reconciliation
+// caller for GitHub-analysis results), so there is no "Local"-only variant
+// here to preserve for a stricter freshness need.
 func loadGitHubAnalysisResults() []githubAnalysisResult {
+	if esResultsClient != nil {
+		if rows, ok := loadGitHubAnalysisResultsES(esResultsClient); ok {
+			return rows
+		}
+	}
+	return loadGitHubAnalysisResultsLocal()
+}
+
+func loadGitHubAnalysisResultsES(es *esClient) ([]githubAnalysisResult, bool) {
+	raws, err := es.searchNamespace("github-analysis-v1", "github_analysis", 10000)
+	if err != nil {
+		return nil, false
+	}
+	rows := make([]githubAnalysisResult, 0, len(raws))
+	for _, raw := range raws {
+		var row githubAnalysisResult
+		if json.Unmarshal(raw, &row) != nil || !hashName.MatchString(row.SHA256) {
+			continue
+		}
+		row.SHA256 = strings.ToLower(row.SHA256)
+		row.ExportURL = "/export/github-analysis/" + row.SHA256
+		if _, ok := githubAnalysisPDFURL(row); ok {
+			row.ViewURL = row.ExportURL + "/pdf"
+		}
+		rows = append(rows, row)
+	}
+	sortGitHubAnalysisResults(rows)
+	return rows, true
+}
+
+func sortGitHubAnalysisResults(rows []githubAnalysisResult) {
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].CompletedAt != rows[j].CompletedAt {
+			return rows[i].CompletedAt > rows[j].CompletedAt
+		}
+		return rows[i].SHA256 < rows[j].SHA256
+	})
+}
+
+func loadGitHubAnalysisResultsLocal() []githubAnalysisResult {
 	dir := githubAnalysisResultsDir()
 	if dir == "" {
 		return nil
@@ -202,12 +249,7 @@ func loadGitHubAnalysisResults() []githubAnalysisResult {
 	// scripts, which sorts correctly as text for a fixed offset; fall back to
 	// the hash so the order is stable rather than map-random when timestamps
 	// tie or are empty.
-	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].CompletedAt != rows[j].CompletedAt {
-			return rows[i].CompletedAt > rows[j].CompletedAt
-		}
-		return rows[i].SHA256 < rows[j].SHA256
-	})
+	sortGitHubAnalysisResults(rows)
 	return rows
 }
 

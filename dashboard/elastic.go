@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -96,6 +97,33 @@ func (c *esClient) requestMethod(method, path string) ([]byte, error) {
 	return b, nil
 }
 
+// searchBody POSTs a JSON request body to path (an Elasticsearch _search
+// endpoint with an aggregation query) and returns the raw response.
+// request/requestMethod are both bodyless; every other caller in this file
+// is a plain GET or a no-body mutation, so this stays its own method rather
+// than generalizing requestMethod to also carry a body every other caller
+// would have to pass nil for.
+func (c *esClient) searchBody(path string, body []byte) ([]byte, error) {
+	req, err := http.NewRequest(http.MethodPost, c.base+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	r, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Body.Close()
+	b, err := io.ReadAll(io.LimitReader(r.Body, 16<<20))
+	if err != nil {
+		return nil, err
+	}
+	if r.StatusCode/100 != 2 {
+		return nil, fmt.Errorf("Elasticsearch %s: %s", r.Status, strings.TrimSpace(string(b)))
+	}
+	return b, nil
+}
+
 func (c *esClient) count(index, query string) (int64, error) {
 	path := "/" + index + "/_count"
 	if query != "" {
@@ -161,6 +189,11 @@ func (c *esClient) refresh() {
 		{"conpot-s7-1200", "honeypot-v2-*", "event.sensor:conpot-s7-1200"}, {"conpot-s7-1500", "honeypot-v2-*", "event.sensor:conpot-s7-1500"},
 		{"conpot-iec104", "honeypot-v2-*", "event.sensor:conpot-iec104"}, {"conpot-guardian", "honeypot-v2-*", "event.sensor:conpot-guardian"},
 		{"conpot-kamstrup", "honeypot-v2-*", "event.sensor:conpot-kamstrup"}, {"tanner", "honeypot-v2-*", "log.file.path:*tanner*"},
+		{"dicompot", "honeypot-v2-*", "event.sensor:dicompot"},
+		{"dns-honeypot", "honeypot-v2-*", "event.sensor:dns-honeypot"},
+		{"citrix-honeypot", "honeypot-v2-*", "event.sensor:citrix-honeypot"},
+		{"cisco-asa-honeypot", "honeypot-v2-*", "event.sensor:cisco-asa-honeypot"},
+		{"rdp-honeypot", "honeypot-v2-*", "event.sensor:rdp-honeypot"},
 		{"suricata", "suricata-*", ""},
 	}
 	for _, q := range queries {
@@ -254,6 +287,46 @@ func (c *esClient) set(st esStatus) {
 	c.mu.Lock()
 	c.stat = st
 	c.mu.Unlock()
+}
+
+// searchNamespace runs a bounded _search against index and returns each
+// hit's `field` sub-document, still JSON-encoded. #384: the four
+// #383-mirrored result indices (ghidra/sandbox/github-analysis/workbench)
+// store the producer's original, unmodified result JSON under a
+// source-namespaced field (see analysis/es-results-importer/importer.py's
+// build_document) -- so a caller can unmarshal the returned bytes straight
+// into the same struct it already unmarshals the local JSON file into,
+// with no separate ES-specific schema to maintain.
+//
+// size is capped at Elasticsearch's default index.max_result_window
+// (10000): these are analysis-result indices, not the high-volume event
+// stream, so an unpaged single page comfortably covers realistic corpus
+// sizes today. Revisit with search_after/scroll if that stops being true.
+func (c *esClient) searchNamespace(index, field string, size int) ([]json.RawMessage, error) {
+	if size <= 0 || size > 10000 {
+		size = 10000
+	}
+	b, err := c.request(fmt.Sprintf("/%s/_search?size=%d", index, size))
+	if err != nil {
+		return nil, err
+	}
+	var v struct {
+		Hits struct {
+			Hits []struct {
+				Source map[string]json.RawMessage `json:"_source"`
+			} `json:"hits"`
+		} `json:"hits"`
+	}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return nil, err
+	}
+	out := make([]json.RawMessage, 0, len(v.Hits.Hits))
+	for _, h := range v.Hits.Hits {
+		if raw, ok := h.Source[field]; ok {
+			out = append(out, raw)
+		}
+	}
+	return out, nil
 }
 
 func (c *esClient) history(w http.ResponseWriter, r *http.Request, attachment bool) {

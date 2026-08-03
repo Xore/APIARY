@@ -126,6 +126,9 @@ func assetForProto(proto string) string {
 		"vnc": "ops-vnc-01", "elasticsearch": "es-logs-01", "docker": "build01",
 		"ftp": "legacy-files-01", "mysql": "mysql-legacy-01",
 		"mssql": "erp-sql-01", "mongodb": "catalog-doc-01",
+		// #238
+		"pop3": "mail01", "imap": "mail01", "socks5": "edge-proxy01",
+		"hl7": "his-interface-01", "adb": "android-build-node01",
 	}[proto]
 }
 
@@ -189,6 +192,16 @@ func services() []service {
 		{"mssql", 1433, handleGeneric},
 		{"mongodb", 27017, handleGeneric},
 		{"docker", 2375, handleDocker},
+		// #238: T-Pot protocol coverage gaps, ported into multipot rather
+		// than vendoring heralding (pop3/imap/socks5) or medpot (hl7) --
+		// see that issue's research comments for why each of these is
+		// multipot's exact shape (accept, read, pattern-match, canned
+		// response, log) rather than a real reimplementation project.
+		{"pop3", 110, handlePOP3},
+		{"imap", 143, handleIMAP},
+		{"socks5", 1080, handleSOCKS5},
+		{"hl7", 2575, handleHL7},
+		{"adb", 5555, handleADB},
 	}
 	disabled := map[string]bool{}
 	for _, p := range strings.Split(os.Getenv("MULTIPOT_DISABLE"), ",") {

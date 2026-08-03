@@ -54,17 +54,17 @@ invariants) in `Xore/theme`.
   file and reaches `pageTemplate`, then greps every non-test `.go` file in
   `dashboard/` and fails the build on any `{{define "` it finds. Putting markup
   back into a `page_*.go` breaks CI.
-- **Hand-written CSS on top of the vendored theme, no build step.**
-  `../static/hp-dashboard.css` is loaded as-is, the same way `theme.css`
-  itself is — #191 removed the Tailwind build entirely. KPI tiles, tabs, and
-  data tables are theme.css's own `.metric`, `.tabs`/`.tab`, and
-  `.data-table` primitives now; what's left in `hp-dashboard.css` is
-  genuinely dashboard-specific: `overview-header`, sensor `badge b-*` hues,
-  per-column table semantics (`td.n`/`td.v`/`td.ago`/`td.state`), Leaflet
-  overrides, command-palette internals, and a small number of one-off
-  spacing/layout rules (still named `tw:foo` — that's a leftover class name,
-  not a live dependency on Tailwind; nothing generates them anymore). Edit
-  `../static/hp-dashboard.css` directly; there is nothing to rebuild.
+- **No app-specific CSS, vendored theme only, no build step.** `#191`
+  removed the Tailwind build entirely, and the dashboard's own
+  `hp-dashboard.css`/`hp-settings-modal.css` have since been folded upstream
+  into `Xore/theme`'s `theme.css` and deleted — KPI tiles, tabs, data tables,
+  sensor `badge b-*` hues, per-column table semantics
+  (`td.n`/`td.v`/`td.ago`/`td.state`), Leaflet overrides, command-palette
+  internals, and the rest all live in `../static/theme.css` now, vendored
+  byte-identical from `Xore/theme` (see `../frontend/theme.lock` and
+  `scripts/sync-theme.sh`/`scripts/check-vendored-theme.sh` at the repo
+  root). To change dashboard styling, edit `theme.css` in the `Xore/theme`
+  repo and re-vendor; there is no local CSS to hand-edit.
 - **hp-api.js** — the typed API client (`src/api.ts`, esbuild bundle).
 - **hp-app.js** — hand-written, framework-free enhancement layer in
   `../static/` (not built here): SSE live updates, in-place overview refresh

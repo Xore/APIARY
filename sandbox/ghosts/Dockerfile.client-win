@@ -1,0 +1,26 @@
+# Dockerfile.client-win — builds Ghosts.Client.Universal as a self-contained
+# win-x64 executable (#326). Used by provision-golden-image.sh via a git
+# build context (`docker build ... https://github.com/cmu-sei/GHOSTS.git#v9.0.0:src`),
+# same pattern as sandbox/ghosts/compose.yml (#324).
+#
+# Universal, not the legacy .NET-Framework-4.6.1 Ghosts.Client.Windows #326
+# originally described: that project doesn't exist in the v9.0.0 tag this
+# repo's GHOSTS host stack is pinned to -- CMU SEI replaced it with
+# Universal, which lists win-x64 as a supported RuntimeIdentifier and cross-
+# compiles cleanly from this Linux build host (managed .NET code, no
+# Windows toolchain needed).
+FROM mcr.microsoft.com/dotnet/sdk:10.0.101 AS build
+COPY certs/*.crt /usr/local/share/ca-certificates/
+RUN update-ca-certificates
+COPY Ghosts.Client.Universal/. /app/Ghosts.Client.Universal
+COPY Ghosts.Domain/. /app/Ghosts.Domain
+WORKDIR /app/Ghosts.Client.Universal
+# NOT -p:PublishSingleFile=true -- verified live (#326): a single-file
+# publish leaves Assembly.Location empty at runtime (a documented .NET
+# single-file-deployment gotcha), and GHOSTS' own
+# ApplicationDetails.VersionFile getter calls
+# FileVersionInfo.GetVersionInfo() on that empty path to build its startup
+# banner, crashing immediately with "System.ArgumentException: The path is
+# empty" before the client ever reaches its first log line or API call.
+# Multi-file self-contained publish keeps Assembly.Location populated.
+RUN dotnet publish -c Release -r win-x64 --self-contained true -o /app/dist

@@ -65,6 +65,51 @@ const wpLogin = `<!DOCTYPE html>
 </html>
 `
 
+// #238: wp-login.php's page alone only lets classify() *label* a request as
+// "wordpress" after the fact -- it presents nothing an attacker can actually
+// try a WordPress-specific CVE against. wordpot's real value (checked
+// against its actual source, not assumed) is presenting a configurable,
+// plausibly-outdated version string in readme.html plus xmlrpc.php and a
+// couple of commonly-exploited plugin paths -- deepened here the same way,
+// reusing http-honeypot's existing persona-consistent response plumbing
+// rather than a separate Flask-shaped container.
+const wpReadme = `<!DOCTYPE html>
+<html lang="en-US">
+<head><meta charset="UTF-8"><title>WordPress &rsaquo; Readme</title></head>
+<body>
+<h1 id="logo"><a href="https://wordpress.org/">WordPress</a></h1>
+<h2>Semantic Personal Publishing Platform</h2>
+<p>WordPress is web software you can use to create a beautiful website, blog, or app. We like to say that WordPress is both free and priceless at the same time.</p>
+<p>Version 5.8.1</p>
+</body>
+</html>
+`
+
+const wpXMLRPCFault = `<?xml version="1.0" encoding="UTF-8"?>
+<methodResponse>
+<fault>
+<value>
+<struct>
+<member><name>faultCode</name><value><int>403</int></value></member>
+<member><name>faultString</name><value><string>Incorrect username or password.</string></value></member>
+</struct>
+</value>
+</fault>
+</methodResponse>
+`
+
+// wpPluginReadme fills in a plugin's own readme.txt -- the same
+// fingerprinting surface as WordPress core's own readme.html, but per-plugin
+// (scanners hitting these are looking for one specific plugin's known CVEs,
+// not a generic WordPress install).
+func wpPluginReadme(name, version string) string {
+	return "=== " + name + " ===\n" +
+		"Stable tag: " + version + "\n" +
+		"Requires at least: 5.0\n" +
+		"Tested up to: 6.4\n\n" +
+		"== Description ==\n\n" + name + " for WordPress.\n"
+}
+
 const phpMyAdmin = `<!DOCTYPE HTML>
 <html lang="en" dir="ltr">
 <head><meta charset="utf-8"><title>phpMyAdmin</title></head>

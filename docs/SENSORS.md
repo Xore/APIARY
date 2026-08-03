@@ -5,7 +5,7 @@
 | Sensor | Ports | Exposed via | Notes |
 |---|---|---|---|
 | **cowrie** | SSH 22, Telnet 23 | raw tunnel | seeded NexusAI Ubuntu GPU node ([cowrie/README-fs.md](../cowrie/README-fs.md)) |
-| **multipot** | SMTP 25, Postgres 5432, VNC 5900, Redis 6379, ES 9200, Docker 2375 | raw tunnel | light Go multi-protocol sensor |
+| **multipot** | SMTP 25, Postgres 5432, VNC 5900, Redis 6379, ES 9200, Docker 2375, POP3 110, IMAP 143, SOCKS5 1080, HL7/MLLP 2575, ADB 5555 | raw tunnel | light Go multi-protocol sensor — dashboard reads its events from Elasticsearch, not its log file (#403) |
 | **dionaea** | FTP 21, TFTP 69/udp, MSRPC 135, SMB 445, MSSQL 1433, PPTP 1723, MQTT 1883, UPnP 1900/udp, MySQL 3306, SIP 5060 tcp/udp, printer 9100, Memcached 11211, Mongo 27017 | raw tunnel | broad legacy/IoT attack surface + **malware capture** |
 | **conpot** | S7 102, Modbus 502, SNMP 161/udp, BACnet 47808/udp, IPMI 623/udp, ENIP 44818 | raw tunnel | **ICS/SCADA** (Siemens S7-200) |
 | **conpot-s7-1200** | S7 1102, Modbus 1502 | raw tunnel | S7-1215C water-treatment persona |
@@ -14,6 +14,11 @@
 | **conpot-guardian** | Guardian AST 10001 | raw tunnel | fuel and tank-monitor attack surface |
 | **conpot-kamstrup** | Kamstrup 1025, 50100 | raw tunnel | smart-meter data and management protocols |
 | **dnp3** | DNP3 20000 | raw tunnel | ElbeGrid substation RTU with frame/function telemetry |
+| **dicompot** | DICOM 11112 | raw tunnel + PROXY | vendored `nsmfoo/dicompot` medical-imaging decoy (C-ECHO/C-FIND/C-MOVE/C-GET/C-STORE) — ES-only from day one (#238, #413) |
+| **dns-honeypot** | DNS 53/udp | raw tunnel | from-scratch UDP reflection bait, response capped in code to at most 1.5x request size — never contacts a real resolver, so it cannot be abused as a DDoS amplification vector — ES-only from day one (#238, #415) |
+| **citrix-honeypot** | raw 4443 (→ container 443) | raw tunnel + PROXY | Citrix ADC/NetScaler Gateway decoy (CVE-2019-19781 path traversal), Go port of `t3chn0m4g3/CitrixHoneypot`, own self-signed TLS — ES-only from day one (#238, #414) |
+| **cisco-asa-honeypot** | WebVPN 8443, IKE 500/udp | raw tunnel + PROXY (8443) | Cisco ASA WebVPN + IKE decoy (CVE-2018-0101), Go port of `t3chn0m4g3/ciscoasa_honeypot` — the IKE side replies once per source with a real Diffie-Hellman/nonce exchange then goes silent, matching upstream's actual (not fully protocol-correct) behavior exactly — ES-only from day one (#238, #414) |
+| **rdp-honeypot** | RDP 3389 | raw tunnel + PROXY | RDP decoy, Go port of `CommunityHoneyNetwork/rdphoney` — reads the initial X.224 Connection Request, captures the `mstshash=` cookie username if present, no protocol negotiation — ES-only from day one (#238, #412) |
 | **http-honeypot** | `decoy.<domain>` (+ catch-all, + raw :8081) | Traefik | fake nginx / login pages |
 | **api-honeypot** | raw 8888 | raw tunnel + PROXY | cloud metadata, Kubernetes, registry, DevOps and LLM API probes |
 | **snare + tanner** | `www-portal.<domain>` | Traefik | fictional Meridian portal → payload analysis |
@@ -157,8 +162,9 @@ Web UI: `http://<HP_BIND>:19080` (`arkime.<domain>` via Traefik).
 >
 > - **PROXY protocol.** portbridge rules tagged `:pp` prepend a HAProxy PROXY v1
 >   header carrying the real client address. **multipot** and the
->   **http/api-honeypots** (`PROXY_PROTOCOL=1`), **dnp3** (`PROXY_PROTOCOL=1`)
->   and **all conpot sensors** (`CONPOT_PROXY_PROTOCOL=1`, gevent shim baked in
+>   **http/api-honeypots** (`PROXY_PROTOCOL=1`), **dnp3** (`PROXY_PROTOCOL=1`),
+>   **dicompot** (`PROXY_PROTOCOL=1`), **citrix-honeypot**,
+>   **cisco-asa-honeypot**'s WebVPN side and **rdp-honeypot** (`PROXY_PROTOCOL=1`) and **all conpot sensors** (`CONPOT_PROXY_PROTOCOL=1`, gevent shim baked in
 >   by `conpot/proxy_patch.py`) parse it, so those events log the true IP and
 >   port. The http listener sniffs the header, so Traefik-routed requests (no
 >   header) keep working too.
