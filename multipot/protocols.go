@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"time"
@@ -750,6 +751,121 @@ func handleSOCKS5(c net.Conn, log *logger, port int) {
 		Data: fmt.Sprintf("%s:%d", target, targetPort)})
 	// Reply code 5 = connection refused -- never actually proxy anything.
 	c.Write([]byte{0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+}
+
+/* ---------------- ADB (port 5555) ----------------
+   #238: ported from ADBHoney. The wire framing itself is simple (a fixed
+   24-byte header + payload, six command constants) -- the real breadth is
+   the CNXN handshake and OPEN/WRTE/CLSE stream lifecycle. Always completes
+   the handshake unauthenticated, matching exactly what ADB.miner/
+   Satori-style scanning targets: a device with debugging enabled and no
+   authorization required. Logs the client's identity banner and whatever
+   destination string / write payload it sends (that's where an attempted
+   command shows up, e.g. "shell:cat /proc/cpuinfo"), but never executes
+   anything -- there is no real shell behind this, only CLSE. */
+
+const (
+	adbCNXN = 0x4e584e43
+	adbOPEN = 0x4e45504f
+	adbOKAY = 0x59414b4f
+	adbCLSE = 0x45534c43
+	adbWRTE = 0x45545257
+)
+
+type adbMessage struct {
+	Command uint32
+	Arg0    uint32
+	Arg1    uint32
+	Data    []byte
+}
+
+func readADBMessage(r io.Reader) (adbMessage, error) {
+	header := make([]byte, 24)
+	if _, err := readFull(r, header); err != nil {
+		return adbMessage{}, err
+	}
+	m := adbMessage{
+		Command: binary.LittleEndian.Uint32(header[0:4]),
+		Arg0:    binary.LittleEndian.Uint32(header[4:8]),
+		Arg1:    binary.LittleEndian.Uint32(header[8:12]),
+	}
+	dataLen := binary.LittleEndian.Uint32(header[12:16])
+	// A real ADB payload is a short shell command or sync path, never
+	// anywhere close to this -- reject rather than allocate on a bogus or
+	// hostile length field.
+	if dataLen > 0 {
+		if dataLen > 64*1024 {
+			return adbMessage{}, fmt.Errorf("adb payload too large: %d", dataLen)
+		}
+		m.Data = make([]byte, dataLen)
+		if _, err := readFull(r, m.Data); err != nil {
+			return adbMessage{}, err
+		}
+	}
+	return m, nil
+}
+
+func adbChecksum(data []byte) uint32 {
+	var sum uint32
+	for _, b := range data {
+		sum += uint32(b)
+	}
+	return sum
+}
+
+func writeADBMessage(w io.Writer, command, arg0, arg1 uint32, data []byte) {
+	header := make([]byte, 24)
+	binary.LittleEndian.PutUint32(header[0:4], command)
+	binary.LittleEndian.PutUint32(header[4:8], arg0)
+	binary.LittleEndian.PutUint32(header[8:12], arg1)
+	binary.LittleEndian.PutUint32(header[12:16], uint32(len(data)))
+	binary.LittleEndian.PutUint32(header[16:20], adbChecksum(data))
+	binary.LittleEndian.PutUint32(header[20:24], command^0xffffffff)
+	w.Write(header)
+	if len(data) > 0 {
+		w.Write(data)
+	}
+}
+
+func handleADB(c net.Conn, log *logger, port int) {
+	ip := srcIP(c)
+	r := bufioReader(c)
+	bumpDeadline(c)
+
+	msg, err := readADBMessage(r)
+	if err != nil || msg.Command != adbCNXN {
+		return
+	}
+	identity := strings.TrimRight(string(msg.Data), "\x00")
+	log.emit(event{Proto: "adb", Port: port, SrcIP: ip, Event: "handshake", Client: identity})
+
+	banner := []byte("device::ro.product.name=generic;ro.product.model=SM-G960F;ro.product.device=starlte;")
+	writeADBMessage(c, adbCNXN, 0x01000000, 4096, banner)
+
+	for {
+		bumpDeadline(c)
+		msg, err = readADBMessage(r)
+		if err != nil {
+			return
+		}
+		switch msg.Command {
+		case adbOPEN:
+			dest := strings.TrimRight(string(msg.Data), "\x00")
+			log.emit(event{Proto: "adb", Port: port, SrcIP: ip, Event: "open", Command: dest})
+			// Accept, then close immediately -- there is no real shell
+			// behind this stream to write output from.
+			writeADBMessage(c, adbOKAY, 1, msg.Arg0, nil)
+			writeADBMessage(c, adbCLSE, 1, msg.Arg0, nil)
+		case adbWRTE:
+			log.emit(event{Proto: "adb", Port: port, SrcIP: ip, Event: "write", Data: string(msg.Data)})
+			writeADBMessage(c, adbOKAY, msg.Arg1, msg.Arg0, nil)
+		case adbCLSE:
+			return
+		}
+		// AUTH, SYNC, and anything else: neither logged in detail nor
+		// replied to -- CNXN/OPEN/WRTE are what carry attacker-controlled
+		// content worth capturing.
+	}
 }
 
 /* ---------------- HL7 / MLLP (port 2575) ----------------
