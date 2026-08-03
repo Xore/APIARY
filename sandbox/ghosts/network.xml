@@ -61,14 +61,16 @@
        so a routing mistake elsewhere can't silently overlap this one. -->
   <ip address='10.20.30.1' netmask='255.255.255.0'>
     <dhcp>
-      <!-- A range, not yet a single pinned host reservation: #327 (the VM
-           domain issue) hasn't chosen the GHOSTS guest's MAC yet. Once it
-           does, pin it here the same way sandbox-network.xml pins
-           win11-sandbox's: a second guest getting a lease on this bridge
-           should fail, not share the network, the same reasoning that
-           applies to every other single-guest sandbox network in this
-           repo. -->
+      <!-- #327 (the VM domain issue) has now chosen the GHOSTS guest's MAC
+           (win11-ghosts-kvm.xml) - pinned here the same way
+           sandbox-network.xml pins win11-sandbox's: a second guest getting
+           a lease on this bridge should fail, not share the network, the
+           same reasoning that applies to every other single-guest sandbox
+           network in this repo. The range stays too, wide enough to still
+           leave room for a throwaway test guest (verify-network-isolation.sh
+           boots one) without colliding with the pinned address. -->
       <range start='10.20.30.10' end='10.20.30.99'/>
+      <host mac='00:1a:a0:3c:4d:6f' name='win11-ghosts' ip='10.20.30.50'/>
     </dhcp>
   </ip>
   <domain name='ghosts.local'/>
