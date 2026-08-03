@@ -22,10 +22,8 @@
    this rule silently breaking would show every hidden icon at once. */
 body [hidden] { display: none !important; }
 
-.mono {
-  font-family: var(--hp-mono);
-  font-size: 12px;
-}
+/* .mono was a full duplicate of theme.css's own `.mono, code, kbd` rule --
+   deleted rather than kept in sync twice (Xore/theme is the reference). */
 
 /* ── App shell adaptations (theme.css owns .app-shell geometry) ─────────── */
 .app-shell { height: 100dvh; transition: grid-template-columns var(--transition); }
@@ -103,17 +101,14 @@ body [hidden] { display: none !important; }
   max-width: min(720px, calc(100vw - 32px));
   margin: 0;
 }
-.hp-icon-btn {
-  position: relative;
-  display: grid; place-items: center;
-  width: 26px; height: 26px;
-  border: none; border-radius: var(--radius-control);
-  background: transparent; color: var(--text-secondary);
-  cursor: pointer; text-decoration: none;
-  transition: background var(--transition-fast), color var(--transition-fast);
-}
-.hp-icon-btn:hover { background: var(--surface-2); color: var(--text-primary); }
-.hp-icon-btn svg { width: 15px; height: 15px; }
+/* .hp-icon-btn was a parallel reimplementation of theme.css's own
+   .btn.btn-icon.btn-ghost combination -- same transparent background,
+   text-secondary color, surface-2/text-primary hover, and even the same
+   15x15 svg sizing (theme's `.btn svg` rule). Replaced at every call site
+   instead of kept in sync twice (Xore/theme is the reference); only the
+   26px->32px size and the border reset->transparent-border swap differ,
+   both accepted as-is from theme. */
+.btn-icon:has(.hp-alert-badge) { position: relative; }
 .hp-alert-badge {
   position: absolute; top: -3px; right: -4px;
   min-width: 14px; height: 14px; padding: 0 3px;
@@ -136,18 +131,22 @@ body [hidden] { display: none !important; }
 }
 .hp-live-state:hover { border-color: color-mix(in srgb, currentColor 35%, transparent); background: var(--surface-2); }
 .hp-live-state--paused { color: var(--text-muted); }
-.hp-live-state--paused .live-dot { background: var(--text-muted); animation: none; }
 /* #210: the one live indicator now covers what a separate overview-only
    .live-pill used to (paused, and a stalled/reconnecting SSE connection) --
    consolidated here since this toolbar control is global and clickable,
    where the old pill was neither. */
 .hp-live-state--stalled { color: var(--warning); }
-.hp-live-state--stalled .live-dot { background: var(--warning); animation: none; }
-.live-dot {
-  width: 7px; height: 7px; border-radius: 50%;
-  background: var(--success);
-  animation: hp-live-pulse 2s ease-in-out infinite;
-}
+/* .live-dot was a duplicate of theme.css's own .status-dot (identical 7x7,
+   50% radius, currentColor) that additionally hardcoded --success as its
+   background -- redundant, since .hp-live-state and its --paused/--stalled
+   modifiers above already set `color` for exactly this purpose, and
+   .status-dot already reads currentColor. Renamed at every call site
+   (the toolbar live/pause toggle, and the two "preparing inventory,
+   reloading shortly" notes on payloads.html/payload_workbench.html); the
+   pulse animation is a real addition theme's plain status dot has no
+   concept of, so it's kept here as a default for every use in this app. */
+.status-dot { animation: hp-live-pulse 2s ease-in-out infinite; }
+.hp-live-state--paused .status-dot, .hp-live-state--stalled .status-dot { animation: none; }
 @keyframes hp-live-pulse {
   0%, 100% { box-shadow: 0 0 0 3px var(--success-soft); }
   50%      { box-shadow: 0 0 0 6px color-mix(in srgb, var(--success) 4%, transparent); }
@@ -218,11 +217,12 @@ a.metric:hover { border-color: var(--border-strong); background: var(--surface-2
   display: grid; grid-template-columns: minmax(0, 1fr) auto;
   align-items: end; gap: 16px; margin-bottom: 20px;
 }
-.eyebrow {
-  margin-bottom: 6px;
-  font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;
-  color: var(--accent);
-}
+/* .eyebrow was a near-duplicate of theme.css's .label-section (same size/
+   weight/letter-spacing/uppercase treatment) -- renamed to .label-section
+   at every call site instead of keeping a parallel definition (Xore/theme
+   is the reference). theme's own version has no margin-bottom since it
+   doesn't assume a heading always follows; every use here does. */
+.label-section { margin-bottom: 6px; }
 .overview-header h1 {
   margin: 0; font-size: clamp(1.5rem, 2.2vw, 2rem);
   font-family: var(--font-display); font-weight: 400; letter-spacing: -0.035em; line-height: 1.1;
@@ -416,13 +416,13 @@ button.copy:hover { color: var(--text-primary); background: var(--surface-2); }
    styling above for THAT case (summary.btn), so events.html's other
    .hp-open-in usage (a link-list menu, no .btn class) is unaffected. */
 .hp-open-in > summary.btn { border-bottom: none; }
+/* Panel chrome (background/border/radius/shadow/padding) now comes from
+   theme.css's own .dropdown, combined at every call site instead of
+   duplicated here (Xore/theme is the reference) -- this is only the
+   positioning and size .dropdown deliberately leaves to its consumer. */
 .hp-open-in-menu {
   position: absolute; z-index: 70; top: calc(100% + 6px); left: 0;
-  min-width: 240px; padding: 5px;
-  background: var(--surface-raised);
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  box-shadow: var(--shadow-raised);
+  min-width: 240px;
   animation: hp-panel-in 150ms ease-out;
 }
 .hp-open-in-heading {
@@ -462,14 +462,11 @@ button.copy:hover { color: var(--text-primary); background: var(--surface-2); }
    refilled by hp-app.js under whichever input is currently focused, rather
    than one per field. Same floating-panel shell language as
    .hp-open-in-menu above (surface-raised/border-strong/shadow-raised). */
+/* Panel chrome comes from theme.css's own .dropdown (combined in hp-app.js
+   where this box is created) instead of a duplicate copy here. */
 .hp-filter-autocomplete {
   position: absolute; z-index: 90;
   max-height: 260px; overflow-y: auto;
-  padding: 5px;
-  background: var(--surface-raised);
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  box-shadow: var(--shadow-raised);
 }
 .hp-filter-autocomplete__row {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -670,21 +667,22 @@ a.project-card { display: block; color: inherit; text-decoration: none; }
 }
 .command-palette__field textarea::placeholder { color: var(--text-muted); }
 
-/* Shared modal contract integration. Visual panel/backdrop styling comes from
-   theme.css; this layer only positions the live completion message. */
+/* Box chrome (padding/border/radius/background/shadow/color/font-size) is
+   theme.css's own .toast, combined on the element in dashboard.html
+   (class="toast hp-modal-status") instead of duplicated here -- this is
+   only the fixed-position placement and fade/slide transition .toast
+   deliberately leaves to its consumer (it's normally placed by a stack
+   container, which this single persistent status element isn't). */
 .hp-modal-status {
   position: fixed;
   z-index: 350;
   top: 44px;
   right: 16px;
   max-width: min(360px, calc(100vw - 32px));
-  padding: 10px 13px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-panel);
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-raised);
-  color: var(--text-primary);
-  font-size: 12px;
+  /* Cancels .toast's own one-shot entrance animation -- this element is a
+     single persistent status box toggled via .open repeatedly (not a toast
+     freshly inserted per message), driven by the plain transition below. */
+  animation: none;
   opacity: 0;
   pointer-events: none;
   transform: translateY(-6px);
