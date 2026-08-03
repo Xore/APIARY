@@ -597,3 +597,186 @@ func readFull(r interface{ Read([]byte) (int, error) }, buf []byte) (int, error)
 func bufioReader(c net.Conn) *bufio.Reader {
 	return bufio.NewReader(c)
 }
+
+/* ---------------- POP3 (port 110) ----------------
+   #238: ported from heralding's pop3.py -- a textbook line-based command
+   loop (USER/PASS/QUIT), structurally identical to handleFTP above. Always
+   rejects auth, logs the attempt. */
+
+func handlePOP3(c net.Conn, log *logger, port int) {
+	ip := srcIP(c)
+	r := bufio.NewReader(c)
+	fmt.Fprint(c, "+OK POP3 server ready\r\n")
+
+	var user string
+	for {
+		line, ok := readLine(r)
+		if line == "" && !ok {
+			return
+		}
+		bumpDeadline(c)
+		cmd, arg, _ := strings.Cut(line, " ")
+		switch strings.ToUpper(cmd) {
+		case "USER":
+			user = arg
+			fmt.Fprint(c, "+OK\r\n")
+		case "PASS":
+			log.emit(event{Proto: "pop3", Port: port, SrcIP: ip, Event: "login",
+				Username: user, Password: arg})
+			fmt.Fprint(c, "-ERR authentication failed\r\n")
+		case "QUIT":
+			fmt.Fprint(c, "+OK Goodbye\r\n")
+			return
+		case "":
+			return
+		default:
+			log.emit(event{Proto: "pop3", Port: port, SrcIP: ip, Event: "command", Command: line})
+			fmt.Fprint(c, "-ERR unknown command\r\n")
+		}
+	}
+}
+
+/* ---------------- IMAP (port 143) ----------------
+   #238: ported from heralding's imap.py -- same shape as POP3 above, but
+   IMAP's tagged-command convention means every response must echo back the
+   client's own tag rather than a fixed prefix. Always rejects LOGIN, logs
+   the attempt. */
+
+func handleIMAP(c net.Conn, log *logger, port int) {
+	ip := srcIP(c)
+	r := bufio.NewReader(c)
+	fmt.Fprint(c, "* OK IMAP4rev1 Service Ready\r\n")
+
+	for {
+		line, ok := readLine(r)
+		if line == "" && !ok {
+			return
+		}
+		bumpDeadline(c)
+		tag, rest, _ := strings.Cut(line, " ")
+		if tag == "" {
+			return
+		}
+		cmd, arg, _ := strings.Cut(rest, " ")
+		switch strings.ToUpper(cmd) {
+		case "CAPABILITY":
+			fmt.Fprint(c, "* CAPABILITY IMAP4rev1 AUTH=PLAIN\r\n")
+			fmt.Fprintf(c, "%s OK CAPABILITY completed\r\n", tag)
+		case "LOGIN":
+			// arg is `"user" "pass"` or `user pass`, quoted or not -- either
+			// way the two space-separated tokens are what's worth logging,
+			// not a fully RFC 3501 quoted-string parse.
+			user, pass, _ := strings.Cut(arg, " ")
+			log.emit(event{Proto: "imap", Port: port, SrcIP: ip, Event: "login",
+				Username: strings.Trim(user, `"`), Password: strings.Trim(pass, `"`)})
+			fmt.Fprintf(c, "%s NO LOGIN failed\r\n", tag)
+		case "LOGOUT":
+			fmt.Fprint(c, "* BYE IMAP4rev1 Server logging out\r\n")
+			fmt.Fprintf(c, "%s OK LOGOUT completed\r\n", tag)
+			return
+		case "":
+			fmt.Fprintf(c, "%s BAD command unrecognized\r\n", tag)
+		default:
+			log.emit(event{Proto: "imap", Port: port, SrcIP: ip, Event: "command", Command: line})
+			fmt.Fprintf(c, "%s BAD command unrecognized\r\n", tag)
+		}
+	}
+}
+
+/* ---------------- SOCKS5 (port 1080) ----------------
+   #238: ported from heralding's socks5.py -- RFC 1928's handshake (version +
+   method negotiation, always advertise "no auth required" to keep the
+   client talking) followed by the connect request, whose target
+   host:port is exactly what's worth logging (proxy-abuse scanning wants to
+   know what the attacker meant to reach through us). The connect always
+   fails: this is a sensor, never an actual proxy. */
+
+func handleSOCKS5(c net.Conn, log *logger, port int) {
+	ip := srcIP(c)
+	r := bufio.NewReader(c)
+	bumpDeadline(c)
+
+	header := make([]byte, 2)
+	if _, err := readFull(r, header); err != nil || header[0] != 0x05 {
+		return
+	}
+	nmethods := int(header[1])
+	methods := make([]byte, nmethods)
+	if _, err := readFull(r, methods); err != nil {
+		return
+	}
+	log.emit(event{Proto: "socks5", Port: port, SrcIP: ip, Event: "handshake",
+		Data: fmt.Sprintf("%d methods offered", nmethods)})
+	// Version 5, method 0x00 (no authentication required).
+	c.Write([]byte{0x05, 0x00})
+
+	req := make([]byte, 4)
+	if _, err := readFull(r, req); err != nil || req[0] != 0x05 || req[1] != 0x01 {
+		return
+	}
+	var target string
+	switch req[3] {
+	case 0x01: // IPv4
+		addr := make([]byte, 4)
+		if _, err := readFull(r, addr); err != nil {
+			return
+		}
+		target = net.IP(addr).String()
+	case 0x03: // domain name
+		lenByte := make([]byte, 1)
+		if _, err := readFull(r, lenByte); err != nil {
+			return
+		}
+		name := make([]byte, lenByte[0])
+		if _, err := readFull(r, name); err != nil {
+			return
+		}
+		target = string(name)
+	case 0x04: // IPv6
+		addr := make([]byte, 16)
+		if _, err := readFull(r, addr); err != nil {
+			return
+		}
+		target = net.IP(addr).String()
+	default:
+		return
+	}
+	portBytes := make([]byte, 2)
+	if _, err := readFull(r, portBytes); err != nil {
+		return
+	}
+	targetPort := int(portBytes[0])<<8 | int(portBytes[1])
+	log.emit(event{Proto: "socks5", Port: port, SrcIP: ip, Event: "connect_request",
+		Data: fmt.Sprintf("%s:%d", target, targetPort)})
+	// Reply code 5 = connection refused -- never actually proxy anything.
+	c.Write([]byte{0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+}
+
+/* ---------------- HL7 / MLLP (port 2575) ----------------
+   #238: ported from medpot -- its entire "HL7 protocol handling" is exactly
+   this substring check (strings.Contains(buf, "MSH") &&
+   strings.Index(buf,"MSH|")==0 in the original), no real MLLP framing or
+   segment parsing. Logs the message segment and answers with a minimal
+   MLLP-framed ACK (0x0B start, 0x1C 0x0D end) so a real HL7 client sees a
+   plausibly-shaped response rather than a naked disconnect. */
+
+func handleHL7(c net.Conn, log *logger, port int) {
+	ip := srcIP(c)
+	buf := make([]byte, 8192)
+	bumpDeadline(c)
+	n, err := c.Read(buf)
+	if err != nil || n == 0 {
+		return
+	}
+	msg := string(buf[:n])
+	// Strip MLLP framing bytes (0x0B start, 0x1C 0x0D end) if present --
+	// real HL7 clients wrap messages in them, but the segment check below
+	// only cares about the content between them.
+	msg = strings.Trim(msg, "\x0b\x1c\r\n")
+	if !strings.HasPrefix(msg, "MSH|") {
+		return
+	}
+	log.emit(event{Proto: "hl7", Port: port, SrcIP: ip, Event: "message", Data: msg})
+	ack := "MSH|^~\\&|MULTIPOT|NEXUSAI|||20260101000000||ACK||P|2.3\rMSA|AA\r"
+	fmt.Fprintf(c, "\x0b%s\x1c\r", ack)
+}
