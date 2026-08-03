@@ -1,0 +1,75 @@
+<!--
+  network.xml — the WAN-permitted libvirt network the GHOSTS guest lives on
+  (#325). Defined by `install-network.sh net-setup`.
+
+  ┌─ WHY THERE IS A <forward> ELEMENT, UNLIKE EVERY OTHER SANDBOX NETWORK ─┐
+  │ Every other detonation route in this repo (sandbox/windows's           │
+  │ sandbox-network.xml, sandbox/network.xml for the Linux runner) has no  │
+  │ <forward> — its absence is what makes them isolated. This network      │
+  │ inverts that on purpose: GHOSTS' realism (actual browsing, actual      │
+  │ document downloads) requires actual WAN egress, decided in #300 and    │
+  │ #331. Do not "fix" this network by removing the <forward> — that would │
+  │ break GHOSTS entirely, and does not belong here regardless: the        │
+  │ containment for this network is the iptables policy in                 │
+  │ network-filter.sh, not the absence of a route out.                     │
+  │                                                                        │
+  │ Scoped to the WAN-facing interface only (dev='ens9f0', the host's      │
+  │ lower-metric default route) rather than left to whichever interface    │
+  │ the kernel happens to route through, so the NAT/forwarding rules       │
+  │ libvirt generates are unambiguous about which physical link this       │
+  │ traffic leaves on.                                                     │
+  └────────────────────────────────────────────────────────────────────────┘
+
+  This element alone does not implement "WAN yes, LAN no" — a NAT'd libvirt
+  network forwards to anywhere the host can route to, LAN included.
+  network-filter.sh is what actually blocks RFC1918 destinations, with one
+  exception: this bridge's own gateway (10.20.30.1), which is also where
+  the GHOSTS API publishes its port (#324) — see network-filter.sh's header
+  for why it lives there and not on a docker-internal address. Re-apply it
+  after every `net-setup`, and verify with verify-network-isolation.sh
+  before this network ever carries a real (non-benign-test) sample:
+
+    virsh net-dumpxml ghosts | grep -c forward         # must print 1 (here)
+    iptables -S FORWARD | grep virbr-ghosts             # the DROP/ACCEPT pairs
+    sandbox/ghosts/verify-network-isolation.sh          # from inside a guest
+
+  DNS is real, deliberately: this guest needs to resolve actual hostnames,
+  unlike every other sandbox guest which gets INetSim/FakeNet's fake
+  answers. No dhcp-option=6 override here — the guest gets this bridge's
+  own address (10.20.30.1) as its resolver, which is libvirt's dnsmasq,
+  which forwards upstream using the host's own resolver. The RFC1918-block
+  rule in network-filter.sh is an IP-range policy, not a hostname policy, so
+  it holds regardless of what a lookup resolves to (including
+  DNS-rebinding attempts pointing a real hostname at a private address).
+-->
+<network xmlns:dnsmasq='http://libvirt.org/schemas/network/dnsmasq/1.0'>
+  <name>ghosts</name>
+  <bridge name='virbr-ghosts' stp='on' delay='0'/>
+  <forward mode='nat' dev='ens9f0'>
+    <nat>
+      <!-- Real HTTP/HTTPS/whatever-the-timeline-needs, not just port 80/443:
+           GHOSTS' browser/document handlers are not port-restricted, and
+           the RFC1918 block in network-filter.sh is what actually contains
+           this, not a port allowlist here. -->
+      <port start='1' end='65535'/>
+    </nat>
+  </forward>
+
+  <!-- 10.20.30.0/24: distinct from every other range already in use on
+       this host (10.8.0.0/24 wg0, 10.10.10.0/24 sandbox, 10.90.0.0/24
+       ghosts_net docker, 192.168.42.0/24 LAN, 198.18.0.0/24 virbr-hpsbx),
+       so a routing mistake elsewhere can't silently overlap this one. -->
+  <ip address='10.20.30.1' netmask='255.255.255.0'>
+    <dhcp>
+      <!-- A range, not yet a single pinned host reservation: #327 (the VM
+           domain issue) hasn't chosen the GHOSTS guest's MAC yet. Once it
+           does, pin it here the same way sandbox-network.xml pins
+           win11-sandbox's: a second guest getting a lease on this bridge
+           should fail, not share the network, the same reasoning that
+           applies to every other single-guest sandbox network in this
+           repo. -->
+      <range start='10.20.30.10' end='10.20.30.99'/>
+    </dhcp>
+  </ip>
+  <domain name='ghosts.local'/>
+</network>
