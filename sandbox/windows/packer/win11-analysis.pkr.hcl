@@ -130,11 +130,20 @@ source "qemu" "win11" {
   # host-passthrough: guest sees real CPU model, not QEMU default
   cpu_model = "host"
 
-  # UEFI + Secure Boot. Windows 11 setup refuses to install without both, and
-  # the .ms firmware pair is the one with Microsoft's keys already enrolled.
+  # UEFI, Secure Boot OFF for this install-time build only. Windows 11
+  # setup itself only needs UEFI (Secure Boot's *check* is bypassed via the
+  # LabConfig registry keys in autounattend.xml regardless). The reason
+  # Secure Boot is off here specifically is the PXE boot path below: the
+  # custom ipxe.efi it loads is not Microsoft-signed, and a real Secure
+  # Boot enforcement correctly refuses to execute it. The final win11-kvm.xml
+  # detonation domain is unaffected and keeps the .ms secure-boot firmware
+  # unchanged -- the installed Windows Boot Manager is itself
+  # Microsoft-signed and boots fine under Secure Boot even though it wasn't
+  # installed under it, so detonation-time anti-detection posture
+  # (Confirm-SecureBootUEFI etc.) does not regress from this.
   efi_boot          = true
-  efi_firmware_code = "/usr/share/OVMF/OVMF_CODE_4M.secboot.fd"
-  efi_firmware_vars = "/usr/share/OVMF/OVMF_VARS_4M.ms.fd"
+  efi_firmware_code = "/usr/share/OVMF/OVMF_CODE_4M.fd"
+  efi_firmware_vars = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 
   # TPM 2.0 — the other hard Windows 11 requirement. Without it the installer
   # stops at "This PC can't run Windows 11" and the build hangs until
@@ -180,34 +189,47 @@ source "qemu" "win11" {
   accelerator = "kvm"
   headless    = true
 
-  # "Press any key to boot from CD or DVD" has to be answered while it is on
-  # screen, in a window that is both narrow and late (OVMF ~15s init, ~5s
-  # prompt). Per #288: a rebuilt ISO that removes the prompt entirely
-  # (swapping in efi/microsoft/boot/efisys_noprompt.bin) was tried and
-  # reverted -- it hung completely (30+ min, zero disk growth, black VNC
-  # screen throughout) instead of the original's occasional, at-least-
-  # terminal "Time out" in the boot device log. So this races the prompt,
-  # using spacebar rather than enter (the prompt accepts any key; other
-  # Windows deployment tooling's guidance for this exact prompt uses
-  # spacebar specifically). Extra presses after the installer has started
-  # are harmless; it is already reading autounattend.xml by then.
+  # PXE boot instead of CD-ROM boot (#288, #406).
   #
-  # Not chasing an ever-wider window as the primary defense -- #288 showed
-  # missing the prompt occasionally is a real, accepted cost of this
-  # approach, and build-with-retry.sh's whole-build retry (already in
-  # place) is a better fit for an occasional miss than a longer spam window
-  # that still isn't guaranteed to cover a sufficiently unlucky delay.
+  # The old approach raced "Press any key to boot from CD or DVD" via VNC
+  # keystroke injection (spacebar spam, see git history for the full
+  # 50d12e4/89a516d/d14b1e0/0ae41a2 investigation this replaces). Confirmed
+  # live over a full night of builds: it missed far more often than it hit,
+  # repeatedly leaving the guest stuck at BdsDxe "No bootable option or
+  # device was found" with a qcow2 that never grows past its initial
+  # allocation. That is a structurally flaky mechanism -- a keystroke has
+  # to land inside a ~5s window that only starts after OVMF's own
+  # unpredictable init time -- not a tunable one.
   #
-  # This specific fix (50d12e4 widen -> 89a516d revert boot_wait ->
-  # d14b1e0 noprompt-ISO detour -> 0ae41a2 revert+spacebar) was worked out
-  # in the same investigation as the FLARE-VM removal above, but committed
-  # onto the wrong branch (dashboard-280-filterbar-phase4, an unrelated
-  # dashboard feature branch someone had checked out) and never reached
-  # main until now. Ported the net result here rather than merging that
-  # branch, since its other commit is unrelated dashboard work.
-  boot_wait = "5s"
-  boot_command = [
-    "<spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar><wait2><spacebar>",
+  # PXE boot has no such prompt: the firmware loads a network boot program
+  # and goes. This second NIC exists solely to boot from; the WinRM
+  # communicator still uses packer's own auto-created NIC (net0/user.0,
+  # with its hostfwd) exactly as before, unaffected by this one being
+  # present. See pxe/prepare-pxe.sh for what's being served here and why
+  # (OVMF requires a real signed-shape PE32+ EFI executable as the PXE boot
+  # file, not a raw iPXE script, and a stock ipxe.efi's autoboot loops
+  # forever instead of ever reaching a fetched script -- both confirmed
+  # live -- so ipxe.efi is custom-built there with the wimboot chainload
+  # script embedded at compile time).
+  #
+  # autounattend.xml still applies exactly as before: Windows Setup scans
+  # all attached media for it regardless of how WinPE itself was booted,
+  # so cd_files above is unchanged.
+  #
+  # qemuargs REPLACES packer's own generated qemu args entirely rather than
+  # appending to them -- confirmed live: without explicitly re-adding
+  # user.0/hostfwd here, the WinRM communicator's NIC silently vanished
+  # from the qemu command line. So both NICs are listed explicitly: user.0
+  # is exactly what packer would have generated on its own (hostfwd to the
+  # communicator port, via the {{ .SSHHostPort }} template var packer
+  # exposes to qemuargs -- named for SSH historically, used for WinRM here
+  # same as everywhere else in this communicator), and pxenet0 is the
+  # PXE-only NIC with the higher boot priority.
+  qemuargs = [
+    ["-device", "e1000e,netdev=user.0"],
+    ["-netdev", "user,id=user.0,hostfwd=tcp::{{ .SSHHostPort }}-:5985"],
+    ["-device", "e1000e,netdev=pxenet0,bootindex=1"],
+    ["-netdev", "user,id=pxenet0,tftp=pxe,bootfile=ipxe.efi"],
   ]
 }
 
