@@ -45,9 +45,9 @@ async function loadAlerts(){const rows=document.getElementById('alert-rows'),emp
 // #346: was new Date(...).toLocaleString(), which follows the browser's own
 // zone and ignores the operator's configured timezone preference entirely
 // -- the same data-hp-utc twin events.html uses so hp-app.js's shared
-// applyTimezone() (called below, once all rows exist) can reformat it.
+// applyTimeDisplay() (called below, once all rows exist) can reformat it.
 for(const iso of [r.LastSeen,r.LastNotified]){const td=document.createElement('td');td.className='v';const d=new Date(iso);if(!Number.isNaN(d.getTime())){const p=n=>String(n).padStart(2,'0');td.textContent=`${d.getUTCFullYear()}-${p(d.getUTCMonth()+1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;td.dataset.hpUtc=iso}tr.appendChild(td)}
-const td=document.createElement('td'),b=document.createElement('button');b.className='copy';b.type='button';b.textContent=r.Acknowledged?'reopen':'acknowledge';b.dataset.hpAlertAck=String(!r.Acknowledged);b.dataset.hpAlertKey=r.Key;b.dataset.hpAlertMessage=r.Message;td.appendChild(b);tr.appendChild(td);rows.appendChild(tr)}empty.textContent=a.length?'':(all.length?'no alerts match this filter':'no alerts recorded');window.HpPreferences?.applyTimezone?.(window.HpPreferences.prefs?.timezone)}catch(e){empty.textContent=String(e)}}document.getElementById('alerts-refresh').addEventListener('click',loadAlerts);loadAlerts();
+const td=document.createElement('td'),b=document.createElement('button');b.className='copy';b.type='button';b.textContent=r.Acknowledged?'reopen':'acknowledge';b.dataset.hpAlertAck=String(!r.Acknowledged);b.dataset.hpAlertKey=r.Key;b.dataset.hpAlertMessage=r.Message;td.appendChild(b);tr.appendChild(td);rows.appendChild(tr)}empty.textContent=a.length?'':(all.length?'no alerts match this filter':'no alerts recorded');window.HpPreferences?.applyTimeDisplay?.(window.HpPreferences.prefs?.timezone,window.HpPreferences.prefs?.clock)}catch(e){empty.textContent=String(e)}}document.getElementById('alerts-refresh').addEventListener('click',loadAlerts);loadAlerts();
 </script>
 </body>
 </html>

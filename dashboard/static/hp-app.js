@@ -530,13 +530,16 @@
     return true;
   };
 
-  // Re-applies the timezone display preference (#282) to whatever this call
-  // just mounted. window.HpPreferences is the cross-scope bridge the
-  // DOMContentLoaded preferences block below populates -- mountPage is
-  // defined here, outside that closure, and reused by SSE/interval refresh
-  // long after the page first loads, so it cannot close over that block's
-  // own locals directly.
-  const reapplyTimezone = () => window.HpPreferences?.applyTimezone?.(window.HpPreferences.prefs?.timezone);
+  // Re-applies the timezone/clock-format display preference (#282, #346) to
+  // whatever this call just mounted. window.HpPreferences is the cross-scope
+  // bridge the DOMContentLoaded preferences block below populates --
+  // mountPage is defined here, outside that closure, and reused by SSE/
+  // interval refresh long after the page first loads, so it cannot close
+  // over that block's own locals directly.
+  const reapplyTimezone = () => {
+    const prefs = window.HpPreferences?.prefs;
+    window.HpPreferences?.applyTimeDisplay?.(prefs?.timezone, prefs?.clock);
+  };
   const mountPage = (source, options = {}) => {
     if (!pageContent) { source.remove?.(); return; }
     reNonce(source);
@@ -976,22 +979,35 @@
         return readPrefResponse(response);
       }).catch(() => {});
     };
-    /* Timezone display conversion (#282): every event timestamp is a fixed
-       UTC string baked in once by the server's shared, cross-viewer event
-       cache (rebuild() in aggregate.go), long before any per-viewer
-       preference is known -- alongside a machine-readable data-hp-utc twin.
-       Reformat client-side into whichever zone this viewer's own preference
-       resolves to: "browser" defers entirely to the browser's own locale/
-       zone (Intl's default when no timeZone option is given), "utc" is a
-       no-op (the server-rendered fallback already is UTC), anything else is
-       an explicit IANA zone name. formatToParts, not a locale's own
-       punctuation, keeps the "YYYY-MM-DD HH:MM:SS" shape consistent with
-       the server-rendered fallback regardless of the browser's locale. */
-    const applyTimezone = tz => {
-      if (!tz || tz === "utc") return;
+    /* Timezone + clock-format display conversion (#282, #346): every
+       timestamp is a fixed UTC string baked in once by the server -- either
+       the shared, cross-viewer event cache (rebuild() in aggregate.go) or a
+       page's own "generated"/"updated" header -- long before any per-viewer
+       preference is known, alongside a machine-readable data-hp-utc twin.
+       Reformat client-side into whichever zone/format this viewer's own
+       preferences resolve to: tz "browser" defers entirely to the browser's
+       own locale/zone (Intl's default when no timeZone option is given),
+       "utc" keeps the UTC zone (but the clock format below still applies);
+       anything else is an explicit IANA zone name. clock "h12" switches to a
+       12-hour `h:mm:ss AM/PM` display; anything else (including unset,
+       which is the "h24" default) keeps the zero-padded 24-hour display the
+       server-rendered fallback already uses. Always read the hour as 24h
+       from Intl (formatToParts, not a locale's own punctuation, keeps the
+       "YYYY-MM-DD HH:MM:SS" shape consistent with the server-rendered
+       fallback regardless of the browser's locale) and derive the 12-hour
+       form ourselves -- Intl's own hour12 output uses locale-specific
+       "AM"/"PM" spellings and hour-12-vs-0 edge cases that are one more
+       thing to get wrong for no benefit here. */
+    const applyTimeDisplay = (tz, clock) => {
+      const hour12 = clock === "h12";
+      if ((!tz || tz === "utc") && !hour12) return; // already the UTC 24h fallback
       const options = {year: "numeric", month: "2-digit", day: "2-digit",
         hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false};
-      if (tz !== "browser") options.timeZone = tz;
+      // "browser" leaves timeZone unset so Intl falls back to the host's own
+      // zone; anything else needs it explicit -- omitting it for "utc" would
+      // *also* fall back to the browser's zone (Intl's default is never UTC),
+      // silently reintroducing the very bug (#282) data-hp-utc exists to fix.
+      if (tz && tz !== "browser") options.timeZone = tz === "utc" ? "UTC" : tz;
       let formatter;
       try { formatter = new Intl.DateTimeFormat("en-CA", options); }
       catch { return; } // an invalid IANA zone name: leave the UTC fallback showing
@@ -1001,18 +1017,25 @@
         const parts = {};
         formatter.formatToParts(parsed).forEach(p => { parts[p.type] = p.value; });
         if (!parts.year) return;
-        el.textContent = `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+        if (hour12) {
+          const h24 = parseInt(parts.hour, 10);
+          const period = h24 >= 12 ? "PM" : "AM";
+          const h12 = h24 % 12 || 12;
+          el.textContent = `${parts.year}-${parts.month}-${parts.day} ${h12}:${parts.minute}:${parts.second} ${period}`;
+        } else {
+          el.textContent = `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+        }
       });
     };
     // mountPage (outside this DOMContentLoaded closure, so it needs the
     // window.HpPreferences bridge already established above) re-applies this
     // on every live-refreshed page mount.
-    prefState.applyTimezone = applyTimezone;
+    prefState.applyTimeDisplay = applyTimeDisplay;
     const applyEffectivePrefs = prefs => {
       if (!prefs) return;
       if (prefs.theme === "dark" || prefs.theme === "light" || prefs.theme === "system") applyTheme(prefs.theme);
       if (innerWidth > 520 && typeof prefs.collapsed_sidebar === "boolean") setSidebarCollapsed(prefs.collapsed_sidebar);
-      applyTimezone(prefs.timezone);
+      applyTimeDisplay(prefs.timezone, prefs.clock);
     };
     /* One-time migration of recognized localStorage preferences. The marker
        is set before the write so a failed migration never loops. */
