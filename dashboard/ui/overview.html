@@ -41,13 +41,25 @@
 
         <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-live" role="tabpanel" data-dashboard-panel="live">
           <div class="section-heading"><div><h2>Current activity</h2><p>What is happening now, when traffic arrived, and where it originated.</p></div><a class="section-link" href="/events?since=24h">View last 24 hours &rarr;</a></div>
-          {{if .SensorHeatmap}}<div class="card wide chart-card">
-            <h2>Activity — last 24h</h2>
+          <div class="card wide chart-card" data-heatmap-card>
+            <div class="tw:flex tw:flex-wrap tw:items-center tw:justify-between tw:gap-2"><h2>Activity — last 24h</h2>
+              {{if .Sensors}}<label class="tw:flex tw:items-center tw:gap-2" for="heatmap-sensor-picker">Sensor
+                <select id="heatmap-sensor-picker" data-heatmap-sensor-picker>
+                  <option value="">All sensors</option>
+                  {{range .Sensors}}{{if ne .Name "suricata"}}{{if ne .Name "portbridge"}}<option value="{{.Name}}">{{.Name}}</option>{{end}}{{end}}{{end}}
+                </select>
+              </label>{{end}}
+            </div>
             {{/* .heatmap is Xore/theme's shared component (see
                  static/theme.css and github.com/Xore/theme's docs/CSP.md) --
                  same nonced-style-element requirement as its .mini-chart
                  sibling component, addressed by row then column instead of
-                 a single index. */}}
+                 a single index. data-heatmap-body is rewritten in place by
+                 hp-app.js when the picker above selects one sensor (#41
+                 item 1); the initial render below is the "all sensors" view
+                 aggregate.go already builds every rebuild cycle. */}}
+            <div data-heatmap-body>
+            {{if .SensorHeatmap}}
             <div class="heatmap" aria-label="Hourly event activity per sensor, last 24 hours">
               {{range .SensorHeatmap}}<div class="heatmap__row"><span class="heatmap__label">{{.Sensor}}</span><div class="heatmap__cells">{{range .Cells}}<span class="heatmap__cell" title="{{.Label}} — {{.Count}} events" tabindex="0"></span>{{end}}</div></div>
               {{end}}
@@ -56,10 +68,11 @@
 {{end}}{{end}}.heatmap__legend .heatmap__cell:nth-of-type(1){--v:0}.heatmap__legend .heatmap__cell:nth-of-type(2){--v:25}.heatmap__legend .heatmap__cell:nth-of-type(3){--v:50}.heatmap__legend .heatmap__cell:nth-of-type(4){--v:75}.heatmap__legend .heatmap__cell:nth-of-type(5){--v:100}</style>
             <div class="heatmap__legend"><span>Less</span><span class="heatmap__cell"></span><span class="heatmap__cell"></span><span class="heatmap__cell"></span><span class="heatmap__cell"></span><span class="heatmap__cell"></span><span>More</span></div>
             <p class="note">Sensors with the most events in the last 24 hours, hour by hour. Hover or focus a cell for the exact count.</p>
-          </div>{{else}}<div class="card wide chart-card">
-            <h2>Activity — last 24h</h2>
+            {{else}}
             <p class="empty">No events in the last 24 hours.</p>
-          </div>{{end}}
+            {{end}}
+            </div>
+          </div>
 
           {{if .MapPoints}}<div class="card wide map-card" data-attack-map-card><h2>Attack origins &mdash; live geographic view</h2>
             <div class="map-shell" data-map-shell><div id="attack-map" class="leaflet-map" data-tile-url="{{.MapTileURL}}" data-attribution="{{.MapAttribution}}" role="region" aria-label="interactive map of geolocated attack origins"></div><div class="map-status" data-map-status aria-live="polite">Loading attack origins…</div>

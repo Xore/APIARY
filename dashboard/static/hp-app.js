@@ -461,6 +461,78 @@
   });
   window.initHoneypotMaps = initMaps;
 
+  /* ---------- overview heatmap sensor picker (#41 item 1) ----------
+     The default "all sensors" heatmap is server-rendered every page load
+     (aggregate.go's own top-N snapshot); selecting one sensor here instead
+     fetches /api/heatmap?sensor=X live so a quiet sensor that never makes
+     that top-N cut is still visible. Rebuilt as real DOM nodes (not spliced
+     HTML) so the nonce'd <style> carrying each cell's --v custom property
+     can have its nonce set via the .nonce IDL property before insertion --
+     the same fetch-and-splice nonce problem reNonce solves for full-page
+     live refresh (see the comment above it), just built fresh here since
+     this is server JSON, not a fetched HTML fragment. */
+  const renderHeatmapRows = (body, rows) => {
+    const heat = document.createElement("div");
+    heat.className = "heatmap";
+    heat.setAttribute("aria-label", "Hourly event activity per sensor, last 24 hours");
+    const styleRules = [];
+    rows.forEach((row, r) => {
+      const rowEl = document.createElement("div");
+      rowEl.className = "heatmap__row";
+      const label = document.createElement("span");
+      label.className = "heatmap__label";
+      label.textContent = row.Sensor;
+      const cells = document.createElement("div");
+      cells.className = "heatmap__cells";
+      (row.Cells || []).forEach((cell, c) => {
+        const span = document.createElement("span");
+        span.className = "heatmap__cell";
+        span.tabIndex = 0;
+        span.title = cell.Label + " — " + cell.Count + " events";
+        cells.appendChild(span);
+        styleRules.push(".heatmap__row:nth-child(" + (r + 1) + ") .heatmap__cells span:nth-child(" + (c + 1) + "){--v:" + cell.Pct + "}");
+      });
+      rowEl.append(label, cells);
+      heat.appendChild(rowEl);
+    });
+    const style = document.createElement("style");
+    style.nonce = pageNonce;
+    style.textContent = styleRules.join("\n") +
+      ".heatmap__legend .heatmap__cell:nth-of-type(1){--v:0}.heatmap__legend .heatmap__cell:nth-of-type(2){--v:25}.heatmap__legend .heatmap__cell:nth-of-type(3){--v:50}.heatmap__legend .heatmap__cell:nth-of-type(4){--v:75}.heatmap__legend .heatmap__cell:nth-of-type(5){--v:100}";
+    const legend = document.createElement("div");
+    legend.className = "heatmap__legend";
+    legend.innerHTML = "<span>Less</span><span class=\"heatmap__cell\"></span><span class=\"heatmap__cell\"></span><span class=\"heatmap__cell\"></span><span class=\"heatmap__cell\"></span><span class=\"heatmap__cell\"></span><span>More</span>";
+    const note = document.createElement("p");
+    note.className = "note";
+    note.textContent = rows.length === 1
+      ? "Hourly activity for this sensor over the last 24 hours. Hover or focus a cell for the exact count."
+      : "Sensors with the most events in the last 24 hours, hour by hour. Hover or focus a cell for the exact count.";
+    body.replaceChildren(heat, style, legend, note);
+  };
+  const renderHeatmapEmpty = body => {
+    body.replaceChildren(Object.assign(document.createElement("p"), {className: "empty", textContent: "No events in the last 24 hours."}));
+  };
+  const loadSensorHeatmap = async sensor => {
+    const body = document.querySelector("[data-heatmap-card] [data-heatmap-body]");
+    if (!body) return;
+    try {
+      const r = await fetch("/api/heatmap?sensor=" + encodeURIComponent(sensor), {cache: "no-store"});
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const data = await r.json();
+      const rows = (data.rows || []).filter(row => row.Cells && row.Cells.length);
+      if (!rows.length) renderHeatmapEmpty(body);
+      else renderHeatmapRows(body, rows);
+    } catch (e) {
+      body.replaceChildren(Object.assign(document.createElement("p"), {className: "empty", textContent: "Heatmap update failed: " + e.message}));
+    }
+  };
+  // Delegated on document, not bound per-element, so it keeps working after
+  // mountPage swaps in a fresh overview card on every live refresh.
+  document.addEventListener("change", e => {
+    const picker = e.target.closest?.("[data-heatmap-sensor-picker]");
+    if (picker) loadSensorHeatmap(picker.value);
+  });
+
   /* ---------- workspace tabs ----------
      Any page can group its cards: render .tabs buttons with
      data-dashboard-tab and matching [data-dashboard-panel] sections. The valid

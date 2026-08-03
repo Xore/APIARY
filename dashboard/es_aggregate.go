@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"net/http"
 	"time"
 )
 
@@ -376,4 +377,114 @@ func quantizeHeatmap(rows []heatmapRow) {
 			rows[r].Cells[c].Pct = pct
 		}
 	}
+}
+
+// esSingleSensorHeatmapQuery is the request body for fetchSensorHeatmap,
+// built via json.Marshal (not string concatenation) since, unlike
+// esOverviewAggQuery, sensor here comes from a user-controlled query
+// parameter (the overview page's heatmap sensor picker, #41) -- this is the
+// same "never string-format attacker-controlled input into a query" rule
+// every other Elasticsearch call in this file already gets for free by
+// having no dynamic input at all.
+type esSingleSensorHeatmapQuery struct {
+	Size  int `json:"size"`
+	Query struct {
+		Bool struct {
+			Filter []map[string]any `json:"filter"`
+		} `json:"bool"`
+	} `json:"query"`
+	Aggs struct {
+		Hourly struct {
+			DateHistogram struct {
+				Field          string         `json:"field"`
+				FixedInterval  string         `json:"fixed_interval"`
+				MinDocCount    int            `json:"min_doc_count"`
+				ExtendedBounds map[string]any `json:"extended_bounds"`
+			} `json:"date_histogram"`
+		} `json:"hourly"`
+	} `json:"aggs"`
+}
+
+func buildSingleSensorHeatmapQuery(sensor string) []byte {
+	var q esSingleSensorHeatmapQuery
+	q.Size = 0
+	q.Query.Bool.Filter = []map[string]any{
+		{"range": map[string]any{"@timestamp": map[string]any{"gte": "now-24h"}}},
+		{"term": map[string]any{"event.sensor": sensor}},
+	}
+	q.Aggs.Hourly.DateHistogram.Field = "@timestamp"
+	q.Aggs.Hourly.DateHistogram.FixedInterval = "1h"
+	q.Aggs.Hourly.DateHistogram.MinDocCount = 0
+	q.Aggs.Hourly.DateHistogram.ExtendedBounds = map[string]any{"min": "now-23h/h", "max": "now/h"}
+	b, _ := json.Marshal(q)
+	return b
+}
+
+type esSingleSensorHeatmapResponse struct {
+	Aggregations struct {
+		Hourly struct {
+			Buckets []struct {
+				KeyAsString string `json:"key_as_string"`
+				DocCount    int    `json:"doc_count"`
+			} `json:"buckets"`
+		} `json:"hourly"`
+	} `json:"aggregations"`
+}
+
+// fetchSensorHeatmap (#41) is the single-sensor counterpart to
+// fetchESOverview's own heatmap sub-aggregation: that one caps results to
+// the busiest sensorHeatmapRows sensors so the default overview stays
+// readable, which is exactly what makes a specific, possibly-quiet
+// sensor's own full 24h activity invisible there. This queries one sensor
+// alone, with no top-N cap, quantized against its own max (quantizeHeatmap
+// naturally does this correctly for a single-row input).
+func (s *store) fetchSensorHeatmap(sensor string, now time.Time) ([]heatmapCell, bool) {
+	if s.es == nil || sensor == "" {
+		return nil, false
+	}
+	b, err := s.es.searchBody("/honeypot-v2-*/_search", buildSingleSensorHeatmapQuery(sensor))
+	if err != nil {
+		return nil, false
+	}
+	var resp esSingleSensorHeatmapResponse
+	if json.Unmarshal(b, &resp) != nil {
+		return nil, false
+	}
+	cells := make([]heatmapCell, 0, len(resp.Aggregations.Hourly.Buckets))
+	for _, hb := range resp.Aggregations.Hourly.Buckets {
+		t, _ := time.Parse(time.RFC3339, hb.KeyAsString)
+		cells = append(cells, heatmapCell{Label: t.Local().Format("15") + ":00", Count: hb.DocCount})
+	}
+	row := []heatmapRow{{Sensor: sensor, Cells: cells}}
+	quantizeHeatmap(row)
+	return row[0].Cells, true
+}
+
+// serveHeatmap backs the overview page's per-sensor picker (#41 item 1): the
+// default "all sensors" view stays the pre-existing top-N snapshot field
+// (fetchESOverview already caps and quantizes it once per rebuild), while a
+// specific sensor is fetched live via fetchSensorHeatmap so a quiet sensor
+// that never makes the top-N cut is still visible. suricata and portbridge
+// are rejected here for the same reason rebuild() skips them for the main
+// event read (#41): they ship to their own suricata-*/portbridge-v2-*
+// indices, not honeypot-v2-*, so a query for them here would always,
+// silently return zero -- indistinguishable from "quiet".
+func (s *store) serveHeatmap(w http.ResponseWriter, r *http.Request) {
+	sensor := r.URL.Query().Get("sensor")
+	w.Header().Set("Content-Type", "application/json")
+	if sensor == "" || sensor == "all" {
+		snap := s.get()
+		json.NewEncoder(w).Encode(map[string]any{"sensor": "", "rows": snap.SensorHeatmap})
+		return
+	}
+	if sensor == "suricata" || sensor == "portbridge" {
+		http.Error(w, "sensor not queryable via this endpoint", http.StatusBadRequest)
+		return
+	}
+	cells, ok := s.fetchSensorHeatmap(sensor, time.Now())
+	if !ok {
+		http.Error(w, "heatmap unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]any{"sensor": sensor, "rows": []heatmapRow{{Sensor: sensor, Cells: cells}}})
 }
