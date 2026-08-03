@@ -364,6 +364,18 @@ build {
     timeout           = "15m"
   }
 
+  # Step 3c: LOLDrivers BYOVD bait -- a curated set of known-vulnerable,
+  # signed kernel drivers dropped onto disk, plus disabling the Microsoft
+  # Vulnerable Driver Blocklist so a sample that tries to abuse one of them
+  # for privesc/EDR-kill actually can, and gets observed doing it. Analysis
+  # image only -- never win11-ghosts (see script header and #467).
+  provisioner "powershell" {
+    script            = "scripts/10-loldrivers.ps1"
+    elevated_user     = var.winrm_user
+    elevated_password = var.winrm_pass
+    timeout           = "10m"
+  }
+
   # Step 4: decoy realism -- sample documents and a local SMB share, so the
   # guest reads as a real workstation rather than a bare analysis box to
   # anyone who lands on it. Independent of the tooling above; safe to skip
