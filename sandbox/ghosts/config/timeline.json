@@ -1,4 +1,35 @@
 {
     "Status": "Run",
-    "TimeLineHandlers": []
+    "TimeLineHandlers": [
+        {
+            "HandlerType": "BrowserChrome",
+            "Initial": "https://www.bloomberg.com/",
+            "UtcTimeOn": "12:00:00",
+            "UtcTimeOff": "23:00:00",
+            "Loop": true,
+            "HandlerArgs": {
+                "stickiness": "60",
+                "stickiness-depth-min": "1",
+                "stickiness-depth-max": "3",
+                "delay-jitter": "30",
+                "isheadless": "false"
+            },
+            "TimeLineEvents": [
+                {
+                    "Command": "random",
+                    "CommandArgs": [
+                        "https://www.bloomberg.com/",
+                        "https://www.wsj.com/finance",
+                        "https://www.reuters.com/business/finance/",
+                        "https://finance.yahoo.com/quote/SPY/",
+                        "https://finance.yahoo.com/quote/EURUSD%3DX/",
+                        "https://www.linkedin.com/feed/",
+                        "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"
+                    ],
+                    "DelayAfter": 240000,
+                    "DelayBefore": 10000
+                }
+            ]
+        }
+    ]
 }
