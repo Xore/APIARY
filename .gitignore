@@ -28,6 +28,15 @@ pcap/
 *.pcapng
 *.qcow2
 *.img
+
+# PXE boot staging: extracted from the Windows ISO / built from iPXE source
+# by sandbox/windows/packer/pxe/prepare-pxe.sh -- regenerable, not source.
+sandbox/windows/packer/pxe/BCD
+sandbox/windows/packer/pxe/BOOT.SDI
+sandbox/windows/packer/pxe/boot.wim
+sandbox/windows/packer/pxe/ipxe.efi
+sandbox/windows/packer/pxe/wimboot
+sandbox/windows/packer/pxe/ipxe/
 analysis/geoip/*.mmdb
 analysis/geoip/*.tar.gz
 dashboard/geoip/country.csv

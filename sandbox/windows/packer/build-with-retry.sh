@@ -30,6 +30,15 @@ checksum="${1:?usage: build-with-retry.sh <iso_checksum> [max_attempts]}"
 max_attempts="${2:-3}"
 dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# packer resolves cd_files entries (autounattend.xml) relative to its own
+# working directory, not the .hcl file's location -- confirmed live:
+# running this script from anywhere other than $dir made every attempt fail
+# instantly with "Bad CD disk file 'autounattend.xml': stat: no such file or
+# directory" instead of a real build, which a naive retry-forever wrapper
+# read as "still trying" for hours. cd here so the script is invocation-
+# directory-independent instead of relying on every caller to cd first.
+cd "$dir"
+
 attempt=1
 while (( attempt <= max_attempts )); do
   echo "=== build-with-retry: attempt ${attempt}/${max_attempts} starting $(date -u +%FT%TZ) ==="
