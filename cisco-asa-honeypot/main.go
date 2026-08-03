@@ -57,6 +57,14 @@ func (l *logger) emit(e event) {
 	e.Site = "nexusai-eu-edge"
 	e.Asset = "asagw01"
 	e.Org = "NexusAI Research GmbH"
+	// This sensor covers two distinct protocols on two ports; every event
+	// kind is prefixed "ike_" for the UDP side, so that alone is enough to
+	// pick the right proto without threading it through every call site.
+	if strings.HasPrefix(e.Event, "ike_") {
+		e.Proto = "ike"
+	} else {
+		e.Proto = "https"
+	}
 	line, _ := json.Marshal(e)
 	l.mu.Lock()
 	defer l.mu.Unlock()
