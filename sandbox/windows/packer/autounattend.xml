@@ -144,34 +144,48 @@
       <TimeZone>Eastern Standard Time</TimeZone>
       <RegisteredOwner>Robert Tanaka</RegisteredOwner>
       <RegisteredOrganization>Ashford Capital Partners</RegisteredOrganization>
+    </component>
 
-      <!-- #91: 01-hardening.ps1's Set-MpPreference/DisableAntiSpyware
-           approach runs as a Packer WinRM provisioner, well after first
-           boot and OOBE — confirmed live (2026-08-02) that by then Defender
-           is fully armed (AMServiceEnabled/AntivirusEnabled/
-           RealTimeProtectionEnabled all True, IsTamperProtected True,
-           TamperProtection reg value 1) and those calls are silently
-           reverted. specialize runs as SYSTEM before first user logon,
-           before Defender's own service (let alone Tamper Protection, which
-           needs Defender fully initialized plus cloud/MAPS connectivity
-           first) has ever started — setting Start=4 here means WinDefend
-           never starts in the first place, rather than trying to stop
-           something already running and self-protecting. This is the
-           documented, supported mechanism for this (unlike the windowsPE
-           pass's LabConfig trick above, which only works for that specific,
-           Microsoft-special-cased path) — specialize writes to the real
-           installed-OS hive.
+    <!-- #91: 01-hardening.ps1's Set-MpPreference/DisableAntiSpyware
+         approach runs as a Packer WinRM provisioner, well after first
+         boot and OOBE — confirmed live (2026-08-02) that by then Defender
+         is fully armed (AMServiceEnabled/AntivirusEnabled/
+         RealTimeProtectionEnabled all True, IsTamperProtected True,
+         TamperProtection reg value 1) and those calls are silently
+         reverted. specialize runs as SYSTEM before first user logon,
+         before Defender's own service (let alone Tamper Protection, which
+         needs Defender fully initialized plus cloud/MAPS connectivity
+         first) has ever started — setting Start=4 here means WinDefend
+         never starts in the first place, rather than trying to stop
+         something already running and self-protecting. This is the
+         documented, supported mechanism for this (unlike the windowsPE
+         pass's LabConfig trick above, which only works for that specific,
+         Microsoft-special-cased path) — specialize writes to the real
+         installed-OS hive.
 
-           Also disables automatic BitLocker Device Encryption
-           (PreventDeviceEncryption) — confirmed live that without this,
-           Windows 11 silently fully-encrypts C: on qualifying hardware
-           (TPM 2.0 + Secure Boot, both present here) with no explicit
-           configuration or intent. Found because it broke offline
-           registry inspection of the built qcow2 (virt-win-reg can't read
-           an encrypted NTFS volume without the key) — but it's worth
-           preventing regardless of that specific tool, since an
-           unintentionally-encrypted "golden" image is a surprise nobody
-           asked for. -->
+         RunSynchronous/RunSynchronousCommand belongs under
+         Microsoft-Windows-Deployment, not Microsoft-Windows-Shell-Setup —
+         confirmed live (2026-08-03) the hard way: this block had ended up
+         nested inside Shell-Setup above, and Windows Setup rejected the
+         whole answer file for it every single time, crashing with "The
+         computer restarted unexpectedly or encountered an unexpected
+         error" partway through the file-copy phase (well after 1GB
+         written, so it looked nothing like an early rejection). Setup's
+         own C:\Windows\Panther\setuperr.log (pulled by mounting the
+         crashed build's qcow2 offline with qemu-nbd, since WinRM never
+         comes up this early) had the real reason the GUI dialog never
+         shows: "hrResult = 0x80220001 ... SMI data results dump: Source =
+         Name: Microsoft-Windows-Shell-Setup ... /settings/RunSynchronous
+         ... Description = Setting is not defined in this component." This
+         is that reasoning turned back into the correct component split
+         after finding it had regressed (see git history: commit 220ab17
+         originally had this right, as its own separate
+         Microsoft-Windows-Deployment component). -->
+    <component name="Microsoft-Windows-Deployment"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral" versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
       <RunSynchronous>
         <RunSynchronousCommand wcm:action="add">
           <Order>1</Order>
@@ -216,10 +230,7 @@
              cleanly and one that died with 0x8007000D (ERROR_INVALID_DATA)
              before writing a single gigabyte, Setup rejecting the answer
              file outright. That command was removed for exactly that
-             reason and must not be re-added here. Confirmed live, again,
-             that it had regressed back into this block and reproduced a
-             Setup crash, before this comment was added to make the
-             prohibition impossible to miss on a future edit. -->
+             reason and must not be re-added here. -->
       </RunSynchronous>
     </component>
 
