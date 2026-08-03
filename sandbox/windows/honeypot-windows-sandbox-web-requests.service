@@ -1,0 +1,16 @@
+[Unit]
+Description=Validate dashboard Windows sandbox-analysis requests
+After=docker.service libvirtd.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/honeypot-windows-sandbox
+ExecStart=/usr/local/libexec/honeypot-sandbox/windows/process-windows-web-requests.sh
+UMask=0077
+Nice=10
+TimeoutStartSec=2min
+
+# No [Install] section, deliberately -- matches
+# honeypot-windows-sandbox-worker.service and the Linux sandbox's
+# honeypot-sandbox-web-requests.service. Only ever started by
+# honeypot-windows-sandbox-worker.path's Unit= trigger.
