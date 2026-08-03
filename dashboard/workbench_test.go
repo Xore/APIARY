@@ -89,6 +89,54 @@ func TestWorkbenchRegistryDerivesApplicabilityAndAvailability(t *testing.T) {
 	}
 }
 
+// Absent GHOSTS_SANDBOX_REQUEST_DIR/_RESULTS_DIR (the default), the
+// WAN-permitted route must read as unavailable, same as windows-sandbox
+// before its own env vars are set -- not silently fall back to the
+// air-gapped spool, which would run a payload with real internet access
+// nobody asked for.
+func TestWorkbenchRegistryGhostsUnconfiguredByDefault(t *testing.T) {
+	registry := workbenchRegistry(classifyPayload([]byte("MZ" + strings.Repeat("\x00", 200))))
+	ghosts, ok := workbenchAnalyzerByID(registry, "windows-ghosts")
+	if !ok {
+		t.Fatal("windows-ghosts analyzer missing from registry")
+	}
+	if ghosts.Available {
+		t.Fatalf("windows-ghosts should be unavailable with no spool configured: %+v", ghosts)
+	}
+	if !ghosts.Applicable {
+		t.Fatalf("windows-ghosts should be applicable to a Windows-dynamic payload regardless of spool config: %+v", ghosts)
+	}
+}
+
+// Configured, it behaves like windows-sandbox but queues into its own,
+// separate spool -- confirms the two routes never share a request
+// directory, which would let a GHOSTS submission land on the air-gapped
+// guest or vice versa.
+func TestWorkbenchRegistryGhostsConfiguredUsesOwnSpool(t *testing.T) {
+	_, root := newWorkbenchFixture(t, []byte("MZ"+strings.Repeat("\x00", 200)))
+	windowsRequests := filepath.Join(root, "windows-requests")
+	windowsResults := filepath.Join(root, "windows-results")
+	ghostsRequests := filepath.Join(root, "ghosts-requests")
+	ghostsResults := filepath.Join(root, "ghosts-results")
+	for _, dir := range []string{windowsRequests, windowsResults, ghostsRequests, ghostsResults} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("WINDOWS_SANDBOX_REQUEST_DIR", windowsRequests)
+	t.Setenv("WINDOWS_SANDBOX_RESULTS_DIR", windowsResults)
+	t.Setenv("GHOSTS_SANDBOX_REQUEST_DIR", ghostsRequests)
+	t.Setenv("GHOSTS_SANDBOX_RESULTS_DIR", ghostsResults)
+	registry := workbenchRegistry(classifyPayload([]byte("MZ" + strings.Repeat("\x00", 200))))
+	ghosts, _ := workbenchAnalyzerByID(registry, "windows-ghosts")
+	if !ghosts.Available || !ghosts.Applicable {
+		t.Fatalf("windows-ghosts should be available once its own spool is configured: %+v", ghosts)
+	}
+	if sandboxRequestDir(targetGhosts) == sandboxRequestDir(targetWindows) {
+		t.Fatal("ghosts and windows request dirs must never be the same directory")
+	}
+}
+
 // Absent REVDECK_REQUEST_DIR/_RESULTS_DIR (the default) must leave the
 // standalone adapter unavailable, distinct from the "revdeck" field embedded
 // inside a "ghidra" analyzer result, which this Go process cannot see or
