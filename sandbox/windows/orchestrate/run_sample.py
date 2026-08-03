@@ -125,16 +125,56 @@ def revert_to_golden():
 
 
 def winrm_run(ps_command: str, timeout: int = 60) -> dict:
-    """Execute PowerShell command on the Windows VM via WinRM."""
+    """Execute PowerShell command on the Windows VM via WinRM, bounded by
+    `timeout` wall-clock seconds.
+
+    #438: the `timeout` parameter used to be accepted and never used --
+    session.run_ps() was called directly, completely unbounded. Confirmed
+    live: two separate real detonation attempts against this exact image
+    both failed at *exactly* their wait_for_winrm() deadline (120s, then
+    300s after that was raised) with no "WinRM ready" log in between,
+    while a plain external winrm.Session probe run by hand *during* that
+    same 300s window succeeded immediately. That is the signature of one
+    stuck session.run_ps() call eating the entire budget on its first
+    attempt, not a real shortage of wait time -- WinRM was actually
+    reachable well before the deadline, but wait_for_winrm()'s retry loop
+    never got a second attempt to notice.
+    session.run_ps() alone cannot be bounded by read_timeout_sec/
+    operation_timeout_sec -- those only bound a single poll round-trip of
+    WinRM's own long-poll Receive operation, not the overall call -- so
+    the only way to actually bound it is to run it in a thread and give up
+    waiting on that thread. Same pattern as verify_vm_detection.py's own
+    winrm_run(), which already documents and solves this exact problem;
+    ported here rather than re-derived.
+    """
     if winrm is None:
         raise RuntimeError('pywinrm not installed. Run: pip install pywinrm')
     session = winrm.Session(
         VM_HOST,
         auth=(VM_USER, VM_PASS),
         transport='ntlm',
-        server_cert_validation='ignore'
+        server_cert_validation='ignore',
+        read_timeout_sec=30, operation_timeout_sec=20,
     )
-    result = session.run_ps(ps_command)
+    import concurrent.futures
+    # Deliberately not `with ThreadPoolExecutor(...) as pool:` -- that
+    # form's __exit__ calls shutdown(wait=True), which blocks synchronously
+    # until the abandoned thread finishes before the TimeoutError below can
+    # even propagate, silently defeating the timeout this function exists
+    # to provide (verify_vm_detection.py confirmed this live). No
+    # shutdown() call at all is deliberate: the pool and its one thread are
+    # simply dropped on timeout, since there is no way to forcibly kill a
+    # thread blocked inside pywinrm's HTTP call anyway.
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = pool.submit(session.run_ps, ps_command)
+    try:
+        result = future.result(timeout=timeout)
+    except concurrent.futures.TimeoutError:
+        raise TimeoutError(
+            f'WinRM command did not return within {timeout}s -- likely hung '
+            f'on the guest or mid-connect. The underlying thread is '
+            f'abandoned, not killed.'
+        )
     return {
         'stdout': result.std_out.decode('utf-8', errors='replace'),
         'stderr': result.std_err.decode('utf-8', errors='replace'),
