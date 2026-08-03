@@ -47,3 +47,48 @@ func TestSyntheticSensorEventsReachTheOverviewHeatmap(t *testing.T) {
 		}
 	}
 }
+
+// TestChange24hSuppressedWithoutTwoFullBaselineWindows covers #469: a store
+// that has only been collecting for a few hours has an empty/artificially
+// low "previous 24h" window for reasons that have nothing to do with real
+// traffic, so the spike badge must not fire until EarliestSeen reaches back
+// past esOverviewWindowDuration.
+func TestChange24hSuppressedWithoutTwoFullBaselineWindows(t *testing.T) {
+	var resp esOverviewAggResponse
+	resp.Aggregations.Last24h.DocCount = 1000
+	resp.Aggregations.Previous24h.DocCount = 1
+	resp.Aggregations.Earliest.MinTS.ValueAsString = time.Now().UTC().Add(-3 * time.Hour).Format(time.RFC3339)
+
+	esSrv := httptest.NewServer(esOverviewStub(t, resp))
+	defer esSrv.Close()
+	s := &store{dir: t.TempDir(), es: newESClient(esSrv.URL, "")}
+	s.rebuild()
+
+	snap := s.get()
+	if snap.ActivityState == "spike" {
+		t.Fatalf("young store with no real baseline must not report a spike: %+v", snap)
+	}
+	if snap.ActivityState != "insufficient baseline" {
+		t.Fatalf("ActivityState = %q, want %q", snap.ActivityState, "insufficient baseline")
+	}
+}
+
+// TestChange24hReportsSpikeWithFullBaseline is the mirror case: once
+// EarliestSeen reaches back past the full 48h window, the existing
+// percentage-based spike/elevated/low classification applies as before.
+func TestChange24hReportsSpikeWithFullBaseline(t *testing.T) {
+	var resp esOverviewAggResponse
+	resp.Aggregations.Last24h.DocCount = 200
+	resp.Aggregations.Previous24h.DocCount = 50
+	resp.Aggregations.Earliest.MinTS.ValueAsString = time.Now().UTC().Add(-72 * time.Hour).Format(time.RFC3339)
+
+	esSrv := httptest.NewServer(esOverviewStub(t, resp))
+	defer esSrv.Close()
+	s := &store{dir: t.TempDir(), es: newESClient(esSrv.URL, "")}
+	s.rebuild()
+
+	snap := s.get()
+	if snap.ActivityState != "spike" {
+		t.Fatalf("ActivityState = %q, want %q for a store with full baseline history", snap.ActivityState, "spike")
+	}
+}

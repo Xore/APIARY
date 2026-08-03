@@ -37,6 +37,13 @@ import (
 // honest description of the same thing, not a narrower one.
 const esOverviewWindow = "now-48h"
 
+// esOverviewWindowDuration mirrors esOverviewWindow as a time.Duration for
+// Go-side comparisons (see #469's haveFullBaseline check in aggregate.go) --
+// kept as a separate constant rather than parsed from the string above so a
+// future change to the query's date-math literal doesn't silently desync
+// the two without a compile-time reminder to update both.
+const esOverviewWindowDuration = 48 * time.Hour
+
 // esOverviewAggQuery is a fixed JSON literal: every "now" reference is
 // resolved by Elasticsearch itself (date math in the query), so no
 // per-request templating is needed on the Go side. Validated directly
@@ -51,6 +58,7 @@ const esOverviewAggQuery = `{
     "previous24h": {"filter": {"range": {"@timestamp": {"gte": "` + esOverviewWindow + `", "lt": "now-24h"}}}},
     "unattributed": {"filter": {"term": {"source.ip": "10.8.0.1"}}},
     "unique_ips": {"cardinality": {"field": "source.ip"}},
+    "earliest": {"global": {}, "aggs": {"min_ts": {"min": {"field": "@timestamp"}}}},
     "sensors": {
       "terms": {"field": "event.sensor", "size": 50},
       "aggs": {"last_seen": {"max": {"field": "@timestamp"}}}
@@ -200,7 +208,12 @@ type esOverviewAggResponse struct {
 		Previous24h  esFilterAgg `json:"previous24h"`
 		Unattributed esFilterAgg `json:"unattributed"`
 		UniqueIPs    esValueAgg  `json:"unique_ips"`
-		Sensors      struct {
+		Earliest     struct {
+			MinTS struct {
+				ValueAsString string `json:"value_as_string"`
+			} `json:"min_ts"`
+		} `json:"earliest"`
+		Sensors struct {
 			Buckets []esSensorBucket `json:"buckets"`
 		} `json:"sensors"`
 		Protocols struct {
@@ -243,6 +256,7 @@ type esOverviewAggResponse struct {
 type esOverview struct {
 	Total, Last24h, Previous24h, Unattributed  int
 	UniqueIPs                                  int
+	EarliestSeen                               time.Time
 	SensorCounts                               map[string]int
 	SensorLastSeen                             map[string]time.Time
 	Protocols, Ports, Countries, TopIPs, Paths []kv
@@ -276,6 +290,9 @@ func (s *store) fetchESOverview(now time.Time) (*esOverview, bool) {
 		UniqueIPs:    int(agg.UniqueIPs.Value),
 	}
 	out.Total = out.Last24h + out.Previous24h
+	if t, err := time.Parse(time.RFC3339, agg.Earliest.MinTS.ValueAsString); err == nil {
+		out.EarliestSeen = t
+	}
 
 	out.SensorCounts = make(map[string]int, len(agg.Sensors.Buckets))
 	out.SensorLastSeen = make(map[string]time.Time, len(agg.Sensors.Buckets))
