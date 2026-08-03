@@ -128,7 +128,7 @@ func assetForProto(proto string) string {
 		"mssql": "erp-sql-01", "mongodb": "catalog-doc-01",
 		// #238
 		"pop3": "mail01", "imap": "mail01", "socks5": "edge-proxy01",
-		"hl7": "his-interface-01",
+		"hl7": "his-interface-01", "adb": "android-build-node01",
 	}[proto]
 }
 
@@ -201,6 +201,7 @@ func services() []service {
 		{"imap", 143, handleIMAP},
 		{"socks5", 1080, handleSOCKS5},
 		{"hl7", 2575, handleHL7},
+		{"adb", 5555, handleADB},
 	}
 	disabled := map[string]bool{}
 	for _, p := range strings.Split(os.Getenv("MULTIPOT_DISABLE"), ",") {
