@@ -51,7 +51,19 @@ func webvpnSrcIP(r *http.Request) (string, int) {
 
 func (h *webvpnHandler) log2(r *http.Request, kind, reqPath, data string) {
 	ip, port := webvpnSrcIP(r)
-	h.log.emit(event{Port: h.port, SrcIP: ip, SrcPort: port, Event: kind, Path: reqPath, Data: data})
+	h.log.emit(event{Port: h.port, SrcIP: ip, SrcPort: port, Event: kind, Path: reqPath, Data: data,
+		UserAgent: r.UserAgent(), Headers: webvpnHeaderMap(r)})
+}
+
+// webvpnHeaderMap flattens net/http's []string-per-key header representation
+// into one string per key -- which client hit this decoy, and with what
+// else, was previously available on every request and simply never read.
+func webvpnHeaderMap(r *http.Request) map[string]string {
+	m := make(map[string]string, len(r.Header))
+	for k, v := range r.Header {
+		m[k] = strings.Join(v, ", ")
+	}
+	return m
 }
 
 func (h *webvpnHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

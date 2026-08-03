@@ -845,6 +845,17 @@ func TestClassifyCitrixHoneypotSurfacesPathAndPayload(t *testing.T) {
 	}
 }
 
+func TestClassifyCitrixHoneypotSurfacesUserAgentFingerprint(t *testing.T) {
+	ev := classify(map[string]any{
+		"sensor": "citrix-honeypot", "event": "get", "port": float64(443),
+		"src_ip": "203.0.113.10", "path": "/vpn/", "user_agent": "curl/8.4.0",
+		"headers": map[string]any{"User-Agent": "curl/8.4.0"},
+	}, "citrix-honeypot")
+	if ev.fingerprint != "curl/8.4.0" || ev.fingerKind != "User-Agent" {
+		t.Fatalf("expected User-Agent fingerprint surfaced, got fingerprint=%q kind=%q", ev.fingerprint, ev.fingerKind)
+	}
+}
+
 func TestClassifyCiscoASAHoneypotSurfacesIKEAndHTTPEvents(t *testing.T) {
 	ike := classify(map[string]any{
 		"sensor": "cisco-asa-honeypot", "event": "ike_sa_init", "port": float64(500),
@@ -865,6 +876,24 @@ func TestClassifyCiscoASAHoneypotSurfacesIKEAndHTTPEvents(t *testing.T) {
 	}, "cisco-asa-honeypot")
 	if payload.command != "AAAA...overflow" {
 		t.Fatalf("command (captured payload) = %q", payload.command)
+	}
+
+	httpFingerprint := classify(map[string]any{
+		"sensor": "cisco-asa-honeypot", "event": "get", "port": float64(8443),
+		"src_ip": "203.0.113.10", "proto": "https", "path": "/",
+		"headers": map[string]any{"User-Agent": "nuclei"},
+	}, "cisco-asa-honeypot")
+	if httpFingerprint.fingerprint != "nuclei" || httpFingerprint.fingerKind != "User-Agent" {
+		t.Fatalf("expected User-Agent fingerprint surfaced, got fingerprint=%q kind=%q",
+			httpFingerprint.fingerprint, httpFingerprint.fingerKind)
+	}
+
+	unexpected := classify(map[string]any{
+		"sensor": "cisco-asa-honeypot", "event": "ike_unexpected_exchange", "port": float64(500),
+		"src_ip": "203.0.113.10", "proto": "ike", "data": "4",
+	}, "cisco-asa-honeypot")
+	if !strings.Contains(unexpected.detail, "type 4") {
+		t.Fatalf("detail missing surfaced exchange type: %q", unexpected.detail)
 	}
 }
 
