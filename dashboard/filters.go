@@ -290,6 +290,10 @@ var filterSelectOptions = map[string][]filterFieldOption{
 // this must stay in sync with (both keyed by the same field name).
 var filterAutocompleteFields = map[string]bool{
 	"sensor": true, "country": true, "asn": true, "ip": true, "port": true, "sig": true,
+	// proto ("attack path" in the Event Explorer's filter bar): every
+	// protocol an event ever carries (rdp, sip, pop3, hl7, ...), not just
+	// the handful with dedicated top-level filter fields already.
+	"proto": true,
 }
 
 // filterField is one input control for the shared filter-bar template

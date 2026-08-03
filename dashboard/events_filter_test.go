@@ -53,10 +53,51 @@ func TestEventsFilterBarPreFillsFromRequest(t *testing.T) {
 	if names["type"] != "login" || kinds["type"] != "select" {
 		t.Errorf("type field not pre-filled as a select: %+v", page.FilterFields)
 	}
-	for _, want := range []string{"sensor", "ip", "port", "country", "type", "since"} {
+	for _, want := range []string{"sensor", "proto", "ip", "port", "country", "type", "since"} {
 		if _, ok := names[want]; !ok {
 			t.Errorf("events filter bar missing expected field %q: %+v", want, page.FilterFields)
 		}
+	}
+}
+
+// The "attack path" field is proto under the hood -- rdp/sip/pop3/hl7/etc.,
+// not just the handful of protocols with their own dedicated filter field.
+// It must resolve to filterField's autocomplete Kind (not plain text) and
+// be pickable through the same /api/filter-values widget sensor/country/ip
+// already use.
+func TestEventsFilterBarAttackPathIsAutocomplete(t *testing.T) {
+	s := &store{}
+	r := httptest.NewRequest("GET", "/events?proto=rdp", nil)
+	page := s.eventsData(r)
+	for _, f := range page.FilterFields {
+		if f.Name != "proto" {
+			continue
+		}
+		if f.Kind != "autocomplete" {
+			t.Fatalf("proto field Kind = %q, want autocomplete", f.Kind)
+		}
+		if f.Value != "rdp" {
+			t.Fatalf("proto field not pre-filled: %+v", f)
+		}
+		return
+	}
+	t.Fatal("proto (attack path) field missing from the events filter bar")
+}
+
+func TestFilterValuesServesDistinctProtocols(t *testing.T) {
+	s := &store{events: []storedEvent{
+		{Sensor: "multipot", Proto: "rdp"},
+		{Sensor: "multipot", Proto: "rdp"},
+		{Sensor: "multipot", Proto: "sip"},
+		{Sensor: "cowrie", Proto: "ssh"},
+	}}
+	values := distinctFilterValues(s.getEvents(), nil, "proto", "", filterValuesLimit)
+	got := map[string]int{}
+	for _, v := range values {
+		got[v.Value] = v.Count
+	}
+	if got["rdp"] != 2 || got["sip"] != 1 || got["ssh"] != 1 {
+		t.Fatalf("unexpected proto value counts: %+v", got)
 	}
 }
 
