@@ -389,7 +389,23 @@ func (s *store) rebuild() {
 		snap.Total, snap.UniqueIPs, snap.Unattributed = esOverviewResult.Total, esOverviewResult.UniqueIPs, esOverviewResult.Unattributed
 		snap.Last24h, snap.Previous24h = esOverviewResult.Last24h, esOverviewResult.Previous24h
 		snap.Change24h, snap.ActivityState = "no prior baseline", "baseline unavailable"
-		if esOverviewResult.Previous24h > 0 {
+		// #469: the previous-24h window (now-48h..now-24h) only means
+		// something once the store/sensor has actually been collecting
+		// since before it started -- otherwise a young store's "previous"
+		// window is empty or partially empty for reasons that have nothing
+		// to do with traffic, and any real events in the last 24h read as
+		// an enormous, misleading spike. Require two full 24h windows of
+		// real history (data reaching back past esOverviewWindow) before
+		// the percentage badge is trusted at all.
+		haveFullBaseline := !esOverviewResult.EarliestSeen.IsZero() &&
+			esOverviewResult.EarliestSeen.Before(now.Add(-esOverviewWindowDuration))
+		if !haveFullBaseline {
+			snap.Change24h = "insufficient baseline"
+			snap.ActivityState = "insufficient baseline"
+			if !esOverviewResult.EarliestSeen.IsZero() {
+				snap.Change24h = fmt.Sprintf("insufficient baseline (collecting since %s)", ago(esOverviewResult.EarliestSeen))
+			}
+		} else if esOverviewResult.Previous24h > 0 {
 			pct := (esOverviewResult.Last24h - esOverviewResult.Previous24h) * 100 / esOverviewResult.Previous24h
 			snap.Change24h = fmt.Sprintf("%+d%% vs previous 24h", pct)
 			snap.ActivityState = "normal"

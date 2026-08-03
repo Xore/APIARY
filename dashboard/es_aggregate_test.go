@@ -57,6 +57,7 @@ func TestFetchESOverviewParsesCountsAndTerms(t *testing.T) {
 	}
 	resp.Aggregations.Ports.Buckets = []esBucket{{Key: json.RawMessage(`22`), DocCount: 30}}
 	resp.Aggregations.TopIPs.Buckets = []esBucket{{Key: json.RawMessage(`"203.0.113.9"`), DocCount: 10}}
+	resp.Aggregations.Earliest.MinTS.ValueAsString = "2026-06-01T00:00:00.000Z"
 
 	srv := httptest.NewServer(esOverviewStub(t, resp))
 	defer srv.Close()
@@ -87,6 +88,10 @@ func TestFetchESOverviewParsesCountsAndTerms(t *testing.T) {
 	}
 	if len(out.TopIPs) != 1 || out.TopIPs[0].Key != "203.0.113.9" || out.TopIPs[0].Count != 10 {
 		t.Fatalf("unexpected top IPs: %+v", out.TopIPs)
+	}
+	wantEarliest := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	if !out.EarliestSeen.Equal(wantEarliest) {
+		t.Fatalf("EarliestSeen = %v, want %v", out.EarliestSeen, wantEarliest)
 	}
 }
 
