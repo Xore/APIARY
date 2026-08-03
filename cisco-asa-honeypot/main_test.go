@@ -1,7 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"net"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -128,5 +132,38 @@ func TestParseIKEHeaderReturnsSameExchangeTypeItWasBuiltWith(t *testing.T) {
 	et, ok := parseIKEHeader(pkt)
 	if !ok || et != exchangeAuth {
 		t.Fatalf("exchangeType = %d ok=%v, want IKE_AUTH", et, ok)
+	}
+}
+
+// TestEmitSetsProtoByEventKind guards a real gap found after live deploy:
+// this sensor covers two distinct protocols on two ports, and proto was
+// never populated at all (always empty), breaking the dashboard's
+// attack-path filter for every event this sensor emits.
+func TestEmitSetsProtoByEventKind(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "out.json")
+	l := newLogger(path)
+	l.emit(event{Event: "ike_sa_init"})
+	l.emit(event{Event: "get"})
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("got %d lines, want 2", len(lines))
+	}
+	var ikeEvent, httpEvent event
+	if err := json.Unmarshal([]byte(lines[0]), &ikeEvent); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(lines[1]), &httpEvent); err != nil {
+		t.Fatal(err)
+	}
+	if ikeEvent.Proto != "ike" {
+		t.Fatalf("ike_sa_init proto = %q, want ike", ikeEvent.Proto)
+	}
+	if httpEvent.Proto != "https" {
+		t.Fatalf("get proto = %q, want https", httpEvent.Proto)
 	}
 }
