@@ -756,6 +756,26 @@ func handleIMAP(c net.Conn, log *logger, port int) {
    know what the attacker meant to reach through us). The connect always
    fails: this is a sensor, never an actual proxy. */
 
+// socks5MethodNames maps RFC 1928 SOCKS5 auth method codes to readable
+// names.
+var socks5MethodNames = map[byte]string{
+	0x00: "no-auth", 0x01: "GSSAPI", 0x02: "username-password", 0xff: "no-acceptable-methods",
+}
+
+// formatSOCKS5Methods renders the raw method-code list a client offered
+// during the SOCKS5 handshake as a readable, comma-joined string.
+func formatSOCKS5Methods(methods []byte) string {
+	names := make([]string, len(methods))
+	for i, m := range methods {
+		if name, ok := socks5MethodNames[m]; ok {
+			names[i] = name
+		} else {
+			names[i] = fmt.Sprintf("0x%02x", m)
+		}
+	}
+	return strings.Join(names, ",")
+}
+
 func handleSOCKS5(c net.Conn, log *logger, port int) {
 	ip := srcIP(c)
 	r := bufio.NewReader(c)
@@ -770,8 +790,11 @@ func handleSOCKS5(c net.Conn, log *logger, port int) {
 	if _, err := readFull(r, methods); err != nil {
 		return
 	}
+	// Which auth methods a client offers (00=no-auth, 02=username/password,
+	// 01=GSSAPI, ...) is a real fingerprint -- was read into methods and
+	// then discarded, only the count ever reached the logged event.
 	log.emit(event{Proto: "socks5", Port: port, SrcIP: ip, Event: "handshake",
-		Data: fmt.Sprintf("%d methods offered", nmethods)})
+		Data: fmt.Sprintf("methods offered: %s", formatSOCKS5Methods(methods))})
 	// Version 5, method 0x00 (no authentication required).
 	c.Write([]byte{0x05, 0x00})
 

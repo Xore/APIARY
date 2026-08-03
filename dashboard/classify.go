@@ -252,6 +252,25 @@ func classify(e map[string]any, dirSensor string) event {
 		default:
 			ev.detail = ev.proto + " " + kind
 		}
+		// Every other multipot handler's payload rides in "command"
+		// (e.g. ADB's OPEN destination) or "data" (SOCKS5's offered
+		// methods/connect target, Postgres's database param, HL7's
+		// message, Elasticsearch/Docker's HTTP body) -- neither ever
+		// reached the dashboard row for any event kind besides the
+		// literal "command" case above.
+		if kind != "command" {
+			if cmd := str(e["command"]); cmd != "" {
+				ev.command = cmd
+				ev.detail += ": " + cmd
+			}
+		}
+		if data := str(e["data"]); data != "" {
+			ev.detail += "  " + data
+		}
+		if client := str(e["client"]); client != "" {
+			ev.fingerprint, ev.fingerKind = client, "client banner"
+			ev.detail += "  client: " + client
+		}
 		return ev
 	}
 

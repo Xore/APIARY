@@ -114,6 +114,38 @@ func TestSOCKS5LogsConnectTargetAndRefuses(t *testing.T) {
 	}
 }
 
+func TestSOCKS5LogsOfferedAuthMethodsByName(t *testing.T) {
+	client, server := net.Pipe()
+	var output bytes.Buffer
+	done := make(chan struct{})
+	go func() { defer close(done); defer server.Close(); handleSOCKS5(server, &logger{out: &output}, 1080) }()
+
+	// Version 5, 2 methods: 0x00 (no-auth), 0x02 (username/password).
+	client.Write([]byte{0x05, 0x02, 0x00, 0x02})
+	r := bufio.NewReader(client)
+	methodResp := make([]byte, 2)
+	io.ReadFull(r, methodResp)
+	client.Close()
+	<-done
+
+	var ev event
+	for _, line := range strings.Split(strings.TrimSpace(output.String()), "\n") {
+		if err := json.Unmarshal([]byte(line), &ev); err == nil && ev.Event == "handshake" {
+			break
+		}
+	}
+	if ev.Proto != "socks5" || !strings.Contains(ev.Data, "no-auth") || !strings.Contains(ev.Data, "username-password") {
+		t.Fatalf("offered auth methods not captured by name: %+v", ev)
+	}
+}
+
+func TestFormatSOCKS5MethodsFallsBackToHexForUnknown(t *testing.T) {
+	got := formatSOCKS5Methods([]byte{0x00, 0x7f})
+	if got != "no-auth,0x7f" {
+		t.Fatalf("formatSOCKS5Methods = %q, want no-auth,0x7f", got)
+	}
+}
+
 func TestHL7LogsMessageAndSendsMLLPFramedACK(t *testing.T) {
 	client, server := net.Pipe()
 	var output bytes.Buffer
