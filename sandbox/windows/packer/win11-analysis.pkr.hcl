@@ -72,11 +72,11 @@ variable "memory" {
 }
 
 variable "cpus" {
-  # 8 of the host's 16 threads. QEMU was pinning all four of the previous
-  # allocation (291% CPU) through the install, and FLARE-VM — the two-to-four
-  # hour phase — is the part that actually parallelises. Leaves 8 threads for
-  # the honeypot stack running alongside.
-  default = "8"
+  # 12 of the host's 16 threads, bumped from 8 to speed up install --
+  # Windows Setup's file-copy/component-install phases parallelize well.
+  # Leaves 4 threads for the honeypot stack running alongside; revisit if
+  # that starves under load.
+  default = "12"
 }
 
 variable "disk_size" {
@@ -130,17 +130,34 @@ source "qemu" "win11" {
   # host-passthrough: guest sees real CPU model, not QEMU default
   cpu_model = "host"
 
-  # UEFI, Secure Boot OFF for this install-time build only. Windows 11
-  # setup itself only needs UEFI (Secure Boot's *check* is bypassed via the
-  # LabConfig registry keys in autounattend.xml regardless). The reason
-  # Secure Boot is off here specifically is the PXE boot path below: the
-  # custom ipxe.efi it loads is not Microsoft-signed, and a real Secure
-  # Boot enforcement correctly refuses to execute it. The final win11-kvm.xml
-  # detonation domain is unaffected and keeps the .ms secure-boot firmware
-  # unchanged -- the installed Windows Boot Manager is itself
-  # Microsoft-signed and boots fine under Secure Boot even though it wasn't
-  # installed under it, so detonation-time anti-detection posture
-  # (Confirm-SecureBootUEFI etc.) does not regress from this.
+  # UEFI, Secure Boot OFF for now -- TEMPORARY, see #288/#419. The
+  # cert-signed approach (pxe/prepare-pxe.sh: self-generated cert, sbsign,
+  # OVMF_VARS_4M.honeypot-pxe.fd with that cert + Microsoft's win11 certs
+  # both enrolled in db) is built and confirmed working standalone -- signed
+  # ipxe.efi boots clean under full Secure Boot enforcement, and a
+  # negative-control boot of the unsigned binary against the same vars file
+  # is correctly rejected. But the one real packer-driven build attempted
+  # under it failed differently than every non-secboot run tonight: PXE
+  # succeeded initially (confirmed via screenshot: wimboot/BCD/BOOT.SDI ok,
+  # boot.wim streaming), then the guest reset and fell through firmware's
+  # boot order to the CD-boot-prompt path (which has no boot_command
+  # anymore) and then to an empty disk, landing at "No bootable option or
+  # device was found" -- qcow2 never grew past its initial allocation.
+  # Not yet root-caused whether that's secure-boot-specific (bootmgfw doing
+  # its own additional validation once handed off from wimboot) or
+  # coincidental flakiness, since every prior run tonight (all non-secboot)
+  # reached this exact stage reliably. Reverting to non-secboot to get a
+  # working golden image first; re-enable once the reset is understood
+  # rather than guessing again under time pressure. The efi_firmware_* lines
+  # below and pxe/OVMF_VARS_4M.honeypot-pxe.fd are both ready to swap back
+  # in unchanged when that happens.
+  #
+  # This was the earlier install-time-only compromise: Windows 11 setup
+  # itself only needs UEFI (Secure Boot's *check* is bypassed via the
+  # LabConfig registry keys in autounattend.xml regardless), and the final
+  # win11-kvm.xml detonation domain is unaffected either way -- the
+  # installed Windows Boot Manager is itself Microsoft-signed and boots
+  # fine under Secure Boot even though it wasn't installed under it.
   efi_boot          = true
   efi_firmware_code = "/usr/share/OVMF/OVMF_CODE_4M.fd"
   efi_firmware_vars = "/usr/share/OVMF/OVMF_VARS_4M.fd"
@@ -189,6 +206,12 @@ source "qemu" "win11" {
   accelerator = "kvm"
   headless    = true
 
+  # Fixed VNC port (not packer's default auto-picked-from-a-range) so a
+  # relay/monitor script can point at one stable address across attempts
+  # instead of re-discovering the port every time.
+  vnc_port_min = 5999
+  vnc_port_max = 5999
+
   # PXE boot instead of CD-ROM boot (#288, #406).
   #
   # The old approach raced "Press any key to boot from CD or DVD" via VNC
@@ -224,12 +247,48 @@ source "qemu" "win11" {
   # communicator port, via the {{ .SSHHostPort }} template var packer
   # exposes to qemuargs -- named for SSH historically, used for WinRM here
   # same as everywhere else in this communicator), and pxenet0 is the
-  # PXE-only NIC with the higher boot priority.
+  # PXE-only NIC.
+  #
+  # Two more bugs found chasing the boot-order fix, both confirmed live:
+  #
+  # 1. `-boot once=n,order=c` (tried as the "network once, disk afterward"
+  #    fix) turned out to be a no-op -- this OVMF build doesn't implement
+  #    the legacy `-boot` compatibility shim at all. The boot log with it
+  #    set showed the plain default NVRAM order (CD, CD, HARDDISK, PXE
+  #    last), not network-first. bootindex is the mechanism this OVMF
+  #    actually honors (confirmed repeatedly tonight), so that's back --
+  #    but bootindex alone re-triggers PXE on *every* guest-initiated
+  #    restart forever, which is the infinite-reinstall loop this was
+  #    meant to fix in the first place. Solved below by unplugging pxenet0
+  #    via QMP the moment the first guest reset happens, instead of trying
+  #    to make a boot-order flag do something it structurally can't (a
+  #    static boot order can't distinguish "first boot" from "the guest
+  #    reset itself" -- both are just "the VM is booting" to the firmware).
+  #
+  # 2. Two `-netdev user` instances default to the *same* internal subnet
+  #    (10.0.2.0/24) and silently collide -- confirmed live, BdsDxe's PXE
+  #    attempt landed on user.0 (MAC ...56, no tftp config at all) instead
+  #    of pxenet0 (MAC ...57) and failed DHCP with "No valid offer
+  #    received". Each needs its own `net=`/`dhcpstart=` range.
+  #
+  # QMP (unix socket, fixed path so pxe/unplug-pxe-on-reset.sh can find it
+  # without scraping qemu's own stdout) is what makes the reset-triggered
+  # unplug possible: it emits a RESET event the instant the guest asks for
+  # one, before firmware even starts re-enumerating boot options for that
+  # next boot.
   qemuargs = [
+    ["-qmp", "unix:/tmp/win11-analysis-qmp.sock,server,nowait"],
+    # id=pxenet0dev on the *device* (not just the netdev backend) is
+    # required for device_del to find anything -- confirmed live, without
+    # it QEMU auto-generates an anonymous device id and
+    # `device_del pxenet0` fails with "Device 'pxenet0' not found" even
+    # though the netdev backend really is named pxenet0. device_del
+    # operates on the qdev/PCI device id, which is a separate namespace
+    # from netdev backend ids.
+    ["-device", "e1000e,netdev=pxenet0,bootindex=1,id=pxenet0dev"],
+    ["-netdev", "user,id=pxenet0,net=10.0.2.0/24,dhcpstart=10.0.2.15,tftp=pxe,bootfile=ipxe.efi"],
     ["-device", "e1000e,netdev=user.0"],
-    ["-netdev", "user,id=user.0,hostfwd=tcp::{{ .SSHHostPort }}-:5985"],
-    ["-device", "e1000e,netdev=pxenet0,bootindex=1"],
-    ["-netdev", "user,id=pxenet0,tftp=pxe,bootfile=ipxe.efi"],
+    ["-netdev", "user,id=user.0,net=10.0.3.0/24,dhcpstart=10.0.3.15,hostfwd=tcp::{{ .SSHHostPort }}-:5985"],
   ]
 }
 
