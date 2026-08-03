@@ -1,0 +1,183 @@
+<!--
+  win11-ghosts-kvm.xml — libvirt domain for the GHOSTS-enrolled Windows 11
+  guest (#327, part of the GHOSTS tracking issue #331).
+
+  ┌─ THIS IS THE WAN-PERMITTED ROUTE — NOT THE DETONATION SANDBOX ────────┐
+  │ Every other Windows/Linux guest in this repo (win11-kvm.xml,          │
+  │ sandbox/kvm-domain.xml) is deliberately air-gapped: no real route to  │
+  │ the internet, so a detonated sample's C2/second-stage/exfil all go to │
+  │ FakeNet/INetSim, never anywhere real. This domain inverts that on     │
+  │ purpose, for GHOSTS' realism (actual browsing, actual document        │
+  │ downloads) — see #300 and #331's decision. A sample run through THIS  │
+  │ guest can reach real infrastructure. It is a different, materially    │
+  │ riskier tool than win11-sandbox, not a variant of it. Do not point    │
+  │ this at a non-benign sample until sandbox/ghosts/network.xml's        │
+  │ isolation (RFC1918/LAN blocked, WAN open) has been verified with
+  │ sandbox/ghosts/verify-network-isolation.sh — see that file's header.  │
+  └──────────────────────────────────────────────────────────────────────┘
+
+  Same hardware profile as win11-kvm.xml (see that file's own "THE ONE
+  RULE" header — the disk/firmware/TPM values all have to match what
+  win11-analysis.pkr.hcl actually built the image with, because Windows
+  binds boot-critical drivers at install time). The only substantive
+  differences from win11-kvm.xml are called out below: which network this
+  guest lives on, and its own disk/nvram/MAC identity so the two guests
+  never collide.
+
+  ┌─ THE DISK THIS POINTS AT DOES NOT EXIST YET ───────────────────────────┐
+  │ #326 (provision the GHOSTS Windows client into the golden image) is    │
+  │ still open. This domain definition is prepared ahead of that landing,  │
+  │ per #331's own note that the network-isolation and golden-image/       │
+  │ domain work can proceed in parallel — but `virsh define` against this  │
+  │ file will fail (or, worse, silently boot the *unmodified* win11-analysis│
+  │ image with no GHOSTS client installed) until win11-ghosts.qcow2 is a   │
+  │ real, GHOSTS-provisioned build output. Do not point                    │
+  │ <disk><source file=.../> at win11-analysis.qcow2 "temporarily" to test │
+  │ this domain definition — that produces a guest that looks correctly    │
+  │ configured but was never enrolled against Ghosts.Api, and the mistake  │
+  │ is not obvious from outside the guest.                                 │
+  └──────────────────────────────────────────────────────────────────────┘
+-->
+<domain type='kvm'>
+  <name>win11-ghosts</name>
+
+  <!-- Same as win11-kvm.xml: memory = "16384"/"8192" current, cpus = "8" in
+       win11-analysis.pkr.hcl — this guest starts from the same golden
+       image build, just with the GHOSTS client provisioner added (#326),
+       so the hardware profile that image was built against is unchanged. -->
+  <memory unit='MiB'>16384</memory>
+  <currentMemory unit='MiB'>8192</currentMemory>
+  <vcpu placement='static'>8</vcpu>
+
+  <!-- Identical reasoning to win11-kvm.xml: QEMU's SMBIOS defaults
+       ("QEMU"/"Bochs") are a two-line WMI query away from giving this away
+       as a VM. Deliberately the *same* fictional OEM identity as
+       win11-kvm.xml - both guests are meant to read as ordinary
+       Ashford Capital Partners workstations, not as two different
+       equally-suspicious ones. -->
+  <sysinfo type='smbios'>
+    <bios>
+      <entry name='vendor'>American Megatrends Inc.</entry>
+      <entry name='version'>2.14.1</entry>
+      <entry name='date'>05/22/2023</entry>
+    </bios>
+    <system>
+      <entry name='manufacturer'>Dell Inc.</entry>
+      <entry name='product'>OptiPlex 7010</entry>
+      <entry name='version'>Not Specified</entry>
+      <entry name='serial'>7QK4JN3</entry>
+      <entry name='family'>OptiPlex</entry>
+    </system>
+    <baseBoard>
+      <entry name='manufacturer'>Dell Inc.</entry>
+      <entry name='product'>0KRC95</entry>
+      <entry name='version'>A01</entry>
+    </baseBoard>
+  </sysinfo>
+
+  <os>
+    <type arch='x86_64' machine='q35'>hvm</type>
+    <smbios mode='sysinfo'/>
+
+    <!-- Own nvram file (win11-ghosts_VARS.qcow2, not win11-sandbox_VARS.qcow2)
+         - two domains must never share one nvram backing file. Same
+         .secboot/.ms firmware pair as win11-kvm.xml otherwise: Secure Boot
+         satisfying the Windows 11 installer is unrelated to which network
+         the guest's NIC is plugged into. -->
+    <loader readonly='yes' secure='yes' type='pflash'>/usr/share/OVMF/OVMF_CODE_4M.secboot.fd</loader>
+    <nvram template='/usr/share/OVMF/OVMF_VARS_4M.ms.fd' format='qcow2'>/var/lib/libvirt/qemu/nvram/win11-ghosts_VARS.qcow2</nvram>
+    <boot dev='hd'/>
+  </os>
+
+  <features>
+    <acpi/>
+    <apic/>
+    <smm state='on'/>
+    <kvm>
+      <hidden state='on'/>
+    </kvm>
+    <vmport state='off'/>
+  </features>
+
+  <cpu mode='host-passthrough' check='none' migratable='off'/>
+
+  <clock offset='localtime'>
+    <timer name='rtc' tickpolicy='catchup'/>
+    <timer name='pit' tickpolicy='delay'/>
+    <timer name='hpet' present='no'/>
+  </clock>
+
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <!-- Same reasoning as win11-kvm.xml: a crash should leave the corpse for
+       the orchestrator, not silently reboot into a clean desktop. -->
+  <on_crash>preserve</on_crash>
+
+  <pm>
+    <suspend-to-mem enabled='no'/>
+    <suspend-to-disk enabled='no'/>
+  </pm>
+
+  <devices>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+
+    <!-- Own disk file (win11-ghosts.qcow2), a thin qcow2 clone of the
+         GHOSTS-provisioned build output, same pattern win11-kvm.xml's own
+         comment describes for kvm_manage.sh create - the golden image
+         itself must never be written to directly. Does not exist until
+         #326 lands; see this file's header. -->
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2' cache='none' io='native' discard='unmap'/>
+      <source file='/var/dockge/sandbox/vms/win11-ghosts.qcow2'/>
+      <target dev='sda' bus='sata'/>
+      <serial>WD-WX31A74K3594</serial>
+      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
+    </disk>
+
+    <disk type='file' device='cdrom'>
+      <driver name='qemu' type='raw'/>
+      <target dev='sdb' bus='sata'/>
+      <readonly/>
+      <address type='drive' controller='0' bus='0' target='0' unit='1'/>
+    </disk>
+
+    <controller type='sata' index='0'/>
+    <controller type='pci' index='0' model='pcie-root'/>
+    <controller type='pci' index='1' model='pcie-root-port'/>
+    <controller type='pci' index='2' model='pcie-root-port'/>
+    <controller type='pci' index='3' model='pcie-root-port'/>
+    <controller type='usb' index='0' model='qemu-xhci' ports='8'/>
+
+    <!-- The one line that actually makes this the WAN-permitted route:
+         source network='ghosts' (virbr-ghosts, #325), not 'sandbox'.
+         Own MAC, own OUI-consistent identity, distinct from win11-sandbox's
+         00:1a:a0:3c:4d:5e - and pinned in sandbox/ghosts/network.xml's
+         DHCP block the same way, since a second guest silently sharing a
+         lease is the wrong failure mode here same as it is on every other
+         single-guest sandbox network in this repo. -->
+    <interface type='network'>
+      <mac address='00:1a:a0:3c:4d:6f'/>
+      <source network='ghosts'/>
+      <model type='e1000e'/>
+    </interface>
+
+    <!-- No QEMU guest agent channel - same reasoning as win11-kvm.xml: a
+         documented sandbox indicator any guest process can enumerate.
+         Artifact collection for this guest is a #328 problem
+         (spool/worker integration), not solved here. -->
+
+    <graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'/>
+    <video>
+      <model type='vga' vram='16384' heads='1'/>
+    </video>
+
+    <input type='tablet' bus='usb'/>
+    <input type='keyboard' bus='ps2'/>
+
+    <tpm model='tpm-tis'>
+      <backend type='emulator' version='2.0'/>
+    </tpm>
+
+    <memballoon model='none'/>
+  </devices>
+</domain>
