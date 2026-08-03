@@ -930,6 +930,38 @@ func TestClassifyRDPHoneypotSkipsListening(t *testing.T) {
 	}
 }
 
+// TestClassifyMultipotSurfacesDataForNonCommandEvents is a regression test:
+// every multipot handler besides the literal "command" event kind rides its
+// payload in "data" (SOCKS5 handshake/connect target, HL7 message,
+// Elasticsearch/Docker HTTP body) or "command" under a different event kind
+// (ADB's OPEN destination) or "client" (ADB's identity banner) -- none of
+// these ever reached the dashboard row before, only kind=="command" did.
+func TestClassifyMultipotSurfacesDataForNonCommandEvents(t *testing.T) {
+	socks5 := classify(map[string]any{
+		"sensor": "multipot", "event": "connect_request", "proto": "socks5", "port": float64(1080),
+		"src_ip": "203.0.113.10", "data": "example.com:443",
+	}, "multipot")
+	if !strings.Contains(socks5.detail, "example.com:443") {
+		t.Fatalf("SOCKS5 connect target not surfaced: %q", socks5.detail)
+	}
+
+	adbOpen := classify(map[string]any{
+		"sensor": "multipot", "event": "open", "proto": "adb", "port": float64(5555),
+		"src_ip": "203.0.113.10", "command": "shell:cat /proc/cpuinfo",
+	}, "multipot")
+	if !strings.Contains(adbOpen.detail, "shell:cat /proc/cpuinfo") || adbOpen.command != "shell:cat /proc/cpuinfo" {
+		t.Fatalf("ADB OPEN destination not surfaced: %+v", adbOpen)
+	}
+
+	adbHandshake := classify(map[string]any{
+		"sensor": "multipot", "event": "handshake", "proto": "adb", "port": float64(5555),
+		"src_ip": "203.0.113.10", "client": "host::pixel_6",
+	}, "multipot")
+	if !strings.Contains(adbHandshake.detail, "host::pixel_6") || adbHandshake.fingerprint != "host::pixel_6" {
+		t.Fatalf("ADB identity banner not surfaced: %+v", adbHandshake)
+	}
+}
+
 // TestClassifyCowrieSessionClosedUsesDurationMs is a regression test for a
 // real bug found live: the code read e["duration"], but cowrie actually
 // emits duration_ms (confirmed against docs/OUTPUT.rst and a live document
