@@ -762,3 +762,111 @@ func TestRouteTemplatesRenderFromEmbeddedUI(t *testing.T) {
 		}
 	}
 }
+
+// TestClassifyDicompotSurfacesDIMSEOperation is a regression test: a prior
+// version of classify() had no branch for any of the five #238 ES-only
+// sensors added after multipot, so every one of them fell through to the
+// generic fallback and only ever showed the raw "event" field -- losing
+// exactly the detail (DICOM operation + SOP class, DNS query domain,
+// HTTP path, captured exploit payload, RDP username) that makes any of
+// these events worth looking at.
+func TestClassifyDicompotSurfacesDIMSEOperation(t *testing.T) {
+	ev := classify(map[string]any{
+		"sensor": "dicompot", "event": "c_store", "port": float64(11112),
+		"src_ip": "203.0.113.10", "data": "1.2.840.10008.5.1.4.1.1.7 1.2.3.4.5", "bytes": float64(4096),
+	}, "dicompot")
+	if ev.skip || ev.sensor != "dicompot" || ev.proto != "dicom" {
+		t.Fatalf("unexpected: %+v", ev)
+	}
+	if !strings.Contains(ev.detail, "C-STORE") || !strings.Contains(ev.detail, "4096 bytes") {
+		t.Fatalf("detail missing DIMSE operation/size: %q", ev.detail)
+	}
+}
+
+func TestClassifyDicompotSkipsListening(t *testing.T) {
+	ev := classify(map[string]any{"sensor": "dicompot", "event": "listening", "port": float64(11112)}, "dicompot")
+	if !ev.skip {
+		t.Fatal("dicompot's startup 'listening' event should be skipped, not shown as a dashboard row")
+	}
+}
+
+func TestClassifyDNSHoneypotSurfacesQueriedDomain(t *testing.T) {
+	ev := classify(map[string]any{
+		"sensor": "dns-honeypot", "event": "query", "port": float64(53),
+		"src_ip": "203.0.113.10", "query": "malicious.example.com", "qtype": float64(1),
+	}, "dns-honeypot")
+	if ev.skip || ev.sensor != "dns-honeypot" || ev.proto != "dns" {
+		t.Fatalf("unexpected: %+v", ev)
+	}
+	if ev.path != "malicious.example.com" {
+		t.Fatalf("path (queried domain) = %q, want malicious.example.com", ev.path)
+	}
+	if !strings.Contains(ev.detail, "malicious.example.com") || !strings.Contains(ev.detail, "A") {
+		t.Fatalf("detail missing domain/qtype: %q", ev.detail)
+	}
+}
+
+func TestClassifyCitrixHoneypotSurfacesPathAndPayload(t *testing.T) {
+	ev := classify(map[string]any{
+		"sensor": "citrix-honeypot", "event": "cve_2019_19781_payload", "port": float64(443),
+		"src_ip": "203.0.113.10", "path": "/vpns/portal/scripts/newbm.pl", "data": "id; cat /etc/passwd",
+	}, "citrix-honeypot")
+	if ev.skip || ev.sensor != "citrix-honeypot" {
+		t.Fatalf("unexpected: %+v", ev)
+	}
+	if ev.path != "/vpns/portal/scripts/newbm.pl" {
+		t.Fatalf("path = %q", ev.path)
+	}
+	if ev.command != "id; cat /etc/passwd" {
+		t.Fatalf("command (captured payload) = %q", ev.command)
+	}
+	if !strings.Contains(ev.detail, "id; cat /etc/passwd") {
+		t.Fatalf("detail missing captured payload: %q", ev.detail)
+	}
+}
+
+func TestClassifyCiscoASAHoneypotSurfacesIKEAndHTTPEvents(t *testing.T) {
+	ike := classify(map[string]any{
+		"sensor": "cisco-asa-honeypot", "event": "ike_sa_init", "port": float64(500),
+		"src_ip": "203.0.113.10", "proto": "ike",
+	}, "cisco-asa-honeypot")
+	if ike.skip || ike.proto != "ike" || !strings.Contains(ike.detail, "ike_sa_init") {
+		t.Fatalf("unexpected ike event: %+v", ike)
+	}
+
+	listening := classify(map[string]any{"sensor": "cisco-asa-honeypot", "event": "ike_listening", "port": float64(500)}, "cisco-asa-honeypot")
+	if !listening.skip {
+		t.Fatal("ike_listening startup event should be skipped")
+	}
+
+	payload := classify(map[string]any{
+		"sensor": "cisco-asa-honeypot", "event": "cve_2018_0101_payload", "port": float64(8443),
+		"src_ip": "203.0.113.10", "proto": "https", "data": "AAAA...overflow",
+	}, "cisco-asa-honeypot")
+	if payload.command != "AAAA...overflow" {
+		t.Fatalf("command (captured payload) = %q", payload.command)
+	}
+}
+
+func TestClassifyRDPHoneypotSurfacesMstshashUsername(t *testing.T) {
+	ev := classify(map[string]any{
+		"sensor": "rdp-honeypot", "event": "connect", "port": float64(3389),
+		"src_ip": "203.0.113.10", "username": "jdoe",
+	}, "rdp-honeypot")
+	if ev.skip || ev.sensor != "rdp-honeypot" || ev.proto != "rdp" {
+		t.Fatalf("unexpected: %+v", ev)
+	}
+	if !ev.isLogin || ev.user != "jdoe" {
+		t.Fatalf("expected isLogin with user=jdoe, got: %+v", ev)
+	}
+	if !strings.Contains(ev.detail, "jdoe") {
+		t.Fatalf("detail missing username: %q", ev.detail)
+	}
+}
+
+func TestClassifyRDPHoneypotSkipsListening(t *testing.T) {
+	ev := classify(map[string]any{"sensor": "rdp-honeypot", "event": "listening", "port": float64(3389)}, "rdp-honeypot")
+	if !ev.skip {
+		t.Fatal("rdp-honeypot's startup 'listening' event should be skipped")
+	}
+}
