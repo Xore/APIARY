@@ -18,6 +18,7 @@
 | **dns-honeypot** | DNS 53/udp | raw tunnel | from-scratch UDP reflection bait, response capped in code to at most 1.5x request size — never contacts a real resolver, so it cannot be abused as a DDoS amplification vector — ES-only from day one (#238, #415) |
 | **citrix-honeypot** | raw 4443 (→ container 443) | raw tunnel + PROXY | Citrix ADC/NetScaler Gateway decoy (CVE-2019-19781 path traversal), Go port of `t3chn0m4g3/CitrixHoneypot`, own self-signed TLS — ES-only from day one (#238, #414) |
 | **cisco-asa-honeypot** | WebVPN 8443, IKE 500/udp | raw tunnel + PROXY (8443) | Cisco ASA WebVPN + IKE decoy (CVE-2018-0101), Go port of `t3chn0m4g3/ciscoasa_honeypot` — the IKE side replies once per source with a real Diffie-Hellman/nonce exchange then goes silent, matching upstream's actual (not fully protocol-correct) behavior exactly — ES-only from day one (#238, #414) |
+| **rdp-honeypot** | RDP 3389 | raw tunnel + PROXY | RDP decoy, Go port of `CommunityHoneyNetwork/rdphoney` — reads the initial X.224 Connection Request, captures the `mstshash=` cookie username if present, no protocol negotiation — ES-only from day one (#238, #412) |
 | **http-honeypot** | `decoy.<domain>` (+ catch-all, + raw :8081) | Traefik | fake nginx / login pages |
 | **api-honeypot** | raw 8888 | raw tunnel + PROXY | cloud metadata, Kubernetes, registry, DevOps and LLM API probes |
 | **snare + tanner** | `www-portal.<domain>` | Traefik | fictional Meridian portal → payload analysis |
@@ -162,8 +163,8 @@ Web UI: `http://<HP_BIND>:19080` (`arkime.<domain>` via Traefik).
 > - **PROXY protocol.** portbridge rules tagged `:pp` prepend a HAProxy PROXY v1
 >   header carrying the real client address. **multipot** and the
 >   **http/api-honeypots** (`PROXY_PROTOCOL=1`), **dnp3** (`PROXY_PROTOCOL=1`),
->   **dicompot** (`PROXY_PROTOCOL=1`), **citrix-honeypot** and
->   **cisco-asa-honeypot**'s WebVPN side (`PROXY_PROTOCOL=1`) and **all conpot sensors** (`CONPOT_PROXY_PROTOCOL=1`, gevent shim baked in
+>   **dicompot** (`PROXY_PROTOCOL=1`), **citrix-honeypot**,
+>   **cisco-asa-honeypot**'s WebVPN side and **rdp-honeypot** (`PROXY_PROTOCOL=1`) and **all conpot sensors** (`CONPOT_PROXY_PROTOCOL=1`, gevent shim baked in
 >   by `conpot/proxy_patch.py`) parse it, so those events log the true IP and
 >   port. The http listener sniffs the header, so Traefik-routed requests (no
 >   header) keep working too.

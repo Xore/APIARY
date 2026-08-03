@@ -13,6 +13,7 @@
 #   ./scripts/reset-logs.sh dns              # dns-honeypot (UDP reflection bait)
 #   ./scripts/reset-logs.sh citrix           # citrix-honeypot (CVE-2019-19781)
 #   ./scripts/reset-logs.sh cisco-asa        # cisco-asa-honeypot (CVE-2018-0101)
+#   ./scripts/reset-logs.sh rdp              # rdp-honeypot
 #   ./scripts/reset-logs.sh tanner           # tanner + snare
 #   ./scripts/reset-logs.sh suricata         # suricata EVE + pcap
 #   ./scripts/reset-logs.sh --dry-run        # preview, no changes
@@ -55,7 +56,7 @@ STATE_BASE="/opt/stacks/honeypot-stack/state"
 # (there's no standalone "payload-analysis" CLI target; those two are only
 # ever stopped/started as a side effect of `wants cowrie`, same reasoning
 # as when they still lived in the main stack).
-SPLIT_TARGETS=(conpot cowrie multipot http dnp3 dionaea tanner dicompot dns citrix cisco-asa)
+SPLIT_TARGETS=(conpot cowrie multipot http dnp3 dionaea tanner dicompot dns citrix cisco-asa rdp)
 declare -A SPLIT_STACK_DIR=(
   [conpot]="/opt/stacks/honeypot-conpot"
   [cowrie]="/opt/stacks/honeypot-cowrie"
@@ -66,6 +67,7 @@ declare -A SPLIT_STACK_DIR=(
   [dns]="/opt/stacks/honeypot-dns-honeypot"
   [citrix]="/opt/stacks/honeypot-citrix-honeypot"
   [cisco-asa]="/opt/stacks/honeypot-cisco-asa-honeypot"
+  [rdp]="/opt/stacks/honeypot-rdp-honeypot"
   [dionaea]="/opt/stacks/honeypot-dionaea"
   [tanner]="/opt/stacks/honeypot-tanner"
 )
@@ -79,6 +81,7 @@ declare -A SPLIT_STACK_SERVICES=(
   [dns]="dns-honeypot"
   [citrix]="citrix-honeypot"
   [cisco-asa]="cisco-asa-honeypot"
+  [rdp]="rdp-honeypot"
   [dionaea]="dionaea tftp-relay"
   # tanner_docker/tanner_redis/tanner_phpox are deliberately excluded here,
   # same as before this split: they hold no open handles into logs/tanner
@@ -108,7 +111,7 @@ have_target=false
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY=true ;;
-    cowrie|conpot|multipot|http|dionaea|dnp3|dicompot|dns|citrix|cisco-asa|tanner|suricata|all)
+    cowrie|conpot|multipot|http|dionaea|dnp3|dicompot|dns|citrix|cisco-asa|rdp|tanner|suricata|all)
       TARGETS["$arg"]=1
       have_target=true ;;
     *) echo "Unknown argument: $arg" >&2; exit 1 ;;
@@ -320,6 +323,11 @@ if wants cisco-asa; then
   CLEAR_FILEBEAT=true
 fi
 
+if wants rdp; then
+  wipe_dir "${LOGS_BASE}/rdp-honeypot"
+  CLEAR_FILEBEAT=true
+fi
+
 if wants tanner; then
   wipe_dir "${LOGS_BASE}/tanner"
   wipe_dir "${LOGS_BASE}/snare"
@@ -393,6 +401,10 @@ if wants cisco-asa; then
   mkown "${LOGS_BASE}/cisco-asa-honeypot" 65534:65534
 fi
 
+if wants rdp; then
+  mkown "${LOGS_BASE}/rdp-honeypot" 65534:65534
+fi
+
 if wants tanner; then
   mkown "${LOGS_BASE}/tanner" 65534:65534
   # NOT 65534:65534 -- confirmed live during the #258 full-stack reset:
@@ -424,6 +436,7 @@ wants dicompot && delete_es_by_path "/logs/dicompot/*"
 wants dns        && delete_es_by_path "/logs/dns-honeypot/*"
 wants citrix     && delete_es_by_path "/logs/citrix-honeypot/*"
 wants cisco-asa  && delete_es_by_path "/logs/cisco-asa-honeypot/*"
+wants rdp        && delete_es_by_path "/logs/rdp-honeypot/*"
 wants tanner   && delete_es_by_path "/logs/tanner/*"
 wants suricata && delete_es_index "suricata-*"
 

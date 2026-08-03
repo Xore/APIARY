@@ -103,6 +103,7 @@ services:
                  /logs/conpot-guardian /logs/conpot-kamstrup /logs/api-honeypot /logs/dionaea \
                  /logs/multipot /logs/http-honeypot /logs/tanner /logs/snare /logs/dnp3 \
                  /logs/dicompot /logs/dns-honeypot /logs/citrix-honeypot /logs/cisco-asa-honeypot \
+                 /logs/rdp-honeypot \
                  /logs/suricata/pcap /logs/portbridge
         chown 2000:2000  /logs/cowrie /logs/conpot /logs/conpot-s7-1200 \
                          /logs/conpot-s7-1500 /logs/conpot-iec104 \
@@ -110,7 +111,7 @@ services:
 
         chown 1000:1000  /logs/dionaea
 
-        chown 65534:65534 /logs/multipot /logs/http-honeypot /logs/api-honeypot /logs/tanner /logs/dnp3 /logs/dicompot /logs/dns-honeypot /logs/citrix-honeypot /logs/cisco-asa-honeypot
+        chown 65534:65534 /logs/multipot /logs/http-honeypot /logs/api-honeypot /logs/tanner /logs/dnp3 /logs/dicompot /logs/dns-honeypot /logs/citrix-honeypot /logs/cisco-asa-honeypot /logs/rdp-honeypot
 
         # Arkime capture/viewer run as nobody (uid 65534) inside the official image
 
