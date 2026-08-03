@@ -207,6 +207,111 @@ func classify(e map[string]any, dirSensor string) event {
 		return ev
 	}
 
+	// ---- dicompot (#413) ---------------------------------------------------
+	if s, ok := e["sensor"].(string); ok && s == "dicompot" {
+		kind := str(e["event"])
+		if kind == "listening" {
+			ev.skip = true
+			return ev
+		}
+		ev.sensor = "dicompot"
+		ev.proto = "dicom"
+		ev.port = num(e["port"])
+		ev.detail = dicomEventLabels[kind]
+		if ev.detail == "" {
+			ev.detail = kind
+		}
+		if data := str(e["data"]); data != "" {
+			ev.detail += " " + data
+		}
+		if b := num(e["bytes"]); b != "" {
+			ev.detail += " (" + b + " bytes)"
+		}
+		return ev
+	}
+
+	// ---- dns-honeypot (#415) ------------------------------------------------
+	// query is the actual domain asked for -- deliberately not confused with
+	// the "event" field (also sometimes literally the string "query"): a
+	// prior version of this function fell through to the generic fallback
+	// below, which only ever surfaced e["event"] and made every query look
+	// identically blank regardless of what was actually asked.
+	if s, ok := e["sensor"].(string); ok && s == "dns-honeypot" {
+		kind := str(e["event"])
+		if kind == "listening" {
+			ev.skip = true
+			return ev
+		}
+		ev.sensor = "dns-honeypot"
+		ev.proto = "dns"
+		ev.port = num(e["port"])
+		ev.path = str(e["query"])
+		ev.detail = kind
+		if ev.path != "" {
+			ev.detail = "query " + ev.path
+			if qt := dnsQTypeName(int(numFloat(e["qtype"]))); qt != "" {
+				ev.detail += " (" + qt + ")"
+			}
+		}
+		return ev
+	}
+
+	// ---- citrix-honeypot (#414, CVE-2019-19781) ----------------------------
+	if s, ok := e["sensor"].(string); ok && s == "citrix-honeypot" {
+		kind := str(e["event"])
+		if kind == "listening" {
+			ev.skip = true
+			return ev
+		}
+		ev.sensor = "citrix-honeypot"
+		ev.proto = "https"
+		ev.port = num(e["port"])
+		ev.path = str(e["path"])
+		ev.detail = strings.TrimSpace(kind + " " + ev.path)
+		if kind == "cve_2019_19781_payload" {
+			ev.command = str(e["data"])
+			ev.detail += "  payload: " + ev.command
+		}
+		return ev
+	}
+
+	// ---- cisco-asa-honeypot (#414, CVE-2018-0101 + IKE) --------------------
+	if s, ok := e["sensor"].(string); ok && s == "cisco-asa-honeypot" {
+		kind := str(e["event"])
+		if kind == "https_listening" || kind == "ike_listening" {
+			ev.skip = true
+			return ev
+		}
+		ev.sensor = "cisco-asa-honeypot"
+		ev.proto = str(e["proto"])
+		ev.port = num(e["port"])
+		ev.path = str(e["path"])
+		ev.detail = strings.TrimSpace(kind + " " + ev.path)
+		if kind == "cve_2018_0101_payload" {
+			ev.command = str(e["data"])
+			ev.detail += "  payload: " + ev.command
+		}
+		return ev
+	}
+
+	// ---- rdp-honeypot (#412) -----------------------------------------------
+	if s, ok := e["sensor"].(string); ok && s == "rdp-honeypot" {
+		if str(e["event"]) == "listening" {
+			ev.skip = true
+			return ev
+		}
+		ev.sensor = "rdp-honeypot"
+		ev.proto = "rdp"
+		ev.port = num(e["port"])
+		ev.user = str(e["username"])
+		ev.isLogin = ev.user != ""
+		ev.detail = "connect"
+		if ev.user != "" {
+			ev.detail += "  mstshash: " + ev.user
+		}
+		return ev
+	}
+
 	// ---- dionaea incident handler ----------------------------------------
 	// log_incident records every lifecycle and payload incident as
 	// {origin:"dionaea.*", data:{connection:{...}, ...}}. Keep these richer
@@ -436,6 +541,29 @@ func classify(e map[string]any, dirSensor string) event {
 	}
 	ev.detail = firstNonEmpty(str(e["event"]), str(e["event_type"]), str(e["message"]), str(e["msg"]), "event")
 	return ev
+}
+
+// dicomEventLabels maps dicompot's raw DIMSE event names to a readable
+// label; see dicompot/main.go for the exact set it emits.
+var dicomEventLabels = map[string]string{
+	"connect": "connect",
+	"c_echo":  "C-ECHO",
+	"c_find":  "C-FIND",
+	"c_move":  "C-MOVE",
+	"c_get":   "C-GET",
+	"c_store": "C-STORE",
+}
+
+// dnsQTypeName maps the common DNS query type numbers to their record
+// name, for dns-honeypot's logged qtype. Falls back to "" (omitted) for
+// anything not in this short, deliberately incomplete list -- the raw
+// number is still visible in the stored ES document either way.
+func dnsQTypeName(qtype int) string {
+	names := map[int]string{
+		1: "A", 2: "NS", 5: "CNAME", 6: "SOA", 12: "PTR", 15: "MX",
+		16: "TXT", 28: "AAAA", 33: "SRV", 255: "ANY",
+	}
+	return names[qtype]
 }
 
 func personaForSensor(sensor string) (persona, site, asset, org string) {
