@@ -16,6 +16,14 @@ type sandboxTarget string
 const (
 	targetWindows sandboxTarget = "windows"
 	targetLinux   sandboxTarget = "linux"
+	// targetGhosts is never returned by determineSandboxTarget -- the
+	// WAN-permitted GHOSTS route (#327) is deliberately opt-in only,
+	// reachable through the Workbench's explicit "windows-ghosts" analyzer
+	// selection, never auto-routed to by payload classification the way
+	// targetWindows/targetLinux are. See workbench_domain.go's registry
+	// entry for why: a payload landing on real internet access has to be a
+	// decision someone makes, not a default.
+	targetGhosts sandboxTarget = "ghosts"
 )
 
 // determineSandboxTarget classifies the payload exactly the way the payloads
@@ -45,10 +53,14 @@ func determineSandboxTarget(data []byte) (sandboxTarget, bool) {
 // silently redirected into the Linux spool, where the Linux runner would try
 // to execute a PE file.
 func sandboxRequestDir(target sandboxTarget) string {
-	if target == targetWindows {
+	switch target {
+	case targetWindows:
 		return getenv("WINDOWS_SANDBOX_REQUEST_DIR", "")
+	case targetGhosts:
+		return getenv("GHOSTS_SANDBOX_REQUEST_DIR", "")
+	default:
+		return getenv("SANDBOX_REQUEST_DIR", "/sandbox-requests")
 	}
-	return getenv("SANDBOX_REQUEST_DIR", "/sandbox-requests")
 }
 
 // serveSandboxSubmit accepts only an existing capture hash. The dashboard

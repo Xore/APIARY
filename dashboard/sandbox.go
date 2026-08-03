@@ -129,6 +129,17 @@ type sandboxResult struct {
 	RiskScore       int                   `json:"risk_score"`
 	RiskLevel       string                `json:"risk_level"`
 	Network         string                `json:"network"`
+	// Route identifies which detonation backend actually ran this job --
+	// "windows", "linux", or "windows-ghosts" (#327). Older result files
+	// predate this field; normalizeSandboxResult backfills it from
+	// Platform for those, defaulting to the isolated route rather than the
+	// WAN-permitted one, since every backend before #327 was air-gapped.
+	// The result template's isolation description branches on this, not on
+	// Platform alone -- Platform is "Windows" for both the isolated
+	// win11-sandbox route and the WAN-permitted win11-ghosts route, and
+	// asserting "no forwarding, strict libvirt NIC filter" for a GHOSTS run
+	// would be actively wrong, not just imprecise.
+	Route           string                `json:"route"`
 	FileType        string                `json:"file_type"`
 	Platform        string                `json:"platform"`
 	AnalysisPath    string                `json:"analysis_path"`
@@ -207,15 +218,18 @@ func sandboxResultsDir() string { return getenv("SANDBOX_RESULTS_DIR", "/sandbox
 // deployed here, which is the normal state on a Linux-only host.
 func sandboxResultsDirs() []string {
 	dirs := []string{sandboxResultsDir()}
-	if windows := getenv("WINDOWS_SANDBOX_RESULTS_DIR", ""); windows != "" && windows != dirs[0] {
+	if windows := getenv("WINDOWS_SANDBOX_RESULTS_DIR", ""); windows != "" && !slices.Contains(dirs, windows) {
 		dirs = append(dirs, windows)
+	}
+	if ghosts := getenv("GHOSTS_SANDBOX_RESULTS_DIR", ""); ghosts != "" && !slices.Contains(dirs, ghosts) {
+		dirs = append(dirs, ghosts)
 	}
 	return dirs
 }
 
 func sandboxRequestDirs() []string {
 	dirs := []string{}
-	for _, dir := range []string{sandboxRequestDir(targetLinux), sandboxRequestDir(targetWindows)} {
+	for _, dir := range []string{sandboxRequestDir(targetLinux), sandboxRequestDir(targetWindows), sandboxRequestDir(targetGhosts)} {
 		if dir != "" && !slices.Contains(dirs, dir) {
 			dirs = append(dirs, dir)
 		}
@@ -292,6 +306,16 @@ func sandboxArtifactFile(name string) (string, os.FileInfo, bool) {
 func normalizeSandboxResult(row *sandboxResult) {
 	if row == nil {
 		return
+	}
+	if row.Route == "" {
+		// Every backend before #327 was air-gapped; default there rather
+		// than to the WAN-permitted route for a result file that predates
+		// this field entirely.
+		if row.Platform == "Windows" {
+			row.Route = "windows"
+		} else {
+			row.Route = "linux"
+		}
 	}
 	row.Incomplete = row.RunStatus == "failed" || row.TimeoutReason != "" ||
 		row.ExitStatus == "unknown" || row.ExitStatus == "guest-no-result" || row.ExitStatus == "host-timeout"

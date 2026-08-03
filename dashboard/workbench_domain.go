@@ -167,7 +167,7 @@ func validateWorkbenchSelections(selections []workbenchSelection) ([]workbenchSe
 	if len(selections) == 0 || len(selections) > 5 {
 		return nil, errors.New("select between one and five analyzers")
 	}
-	allowed := map[string]bool{"deterministic": true, "ghidra": true, "linux-sandbox": true, "windows-sandbox": true, "revdeck": true}
+	allowed := map[string]bool{"deterministic": true, "ghidra": true, "linux-sandbox": true, "windows-sandbox": true, "windows-ghosts": true, "revdeck": true}
 	seen := map[string]bool{}
 	out := make([]workbenchSelection, 0, len(selections))
 	for _, selection := range selections {
@@ -197,11 +197,30 @@ func workbenchRegistry(classification payloadClassification) []workbenchAnalyzer
 	windowsApplicable := classification.Dynamic && classification.Platform == "Windows"
 	linuxConfigured := directoryUsable(sandboxRequestDir(targetLinux), true) && directoryUsable(sandboxResultsDir(), false)
 	windowsConfigured := directoryUsable(sandboxRequestDir(targetWindows), true) && directoryUsable(getenv("WINDOWS_SANDBOX_RESULTS_DIR", ""), false)
+	// windowsApplicable, not its own ghostsApplicable: any payload the
+	// isolated Windows route accepts is also compatible with the
+	// WAN-permitted one -- the guests run the same golden-image base
+	// (#326). This is a deliberate second, opt-in route to the same
+	// payload class, not a payload-class distinction of its own, which is
+	// why it needs the loud warning below rather than a quieter
+	// "applicable" reason.
+	ghostsConfigured := directoryUsable(sandboxRequestDir(targetGhosts), true) && directoryUsable(getenv("GHOSTS_SANDBOX_RESULTS_DIR", ""), false)
 	items := []workbenchAnalyzer{
 		{ID: "deterministic", DisplayName: "Deterministic local analysis", Description: "Hashes, type, entropy, strings, IOC extraction, YARA and bounded structural checks. The sample is never executed.", AcceptedKinds: []string{"all"}, Availability: "configured", Available: true, Applicable: true, Reason: "available for every captured payload", ResultLinkShape: "/payload-analysis/{sha256}", RequiredRole: "admin", Confirmation: "none", Concurrency: "cpu", LocalOnly: true, DefaultOptions: defaultWorkbenchOptions("deterministic"), OptionSchema: localSchema},
 		{ID: "ghidra", DisplayName: "Ghidra headless", Description: "Disassembly plus deterministic statictools and the approved local advisory model slot.", AcceptedKinds: []string{"executable", "library", "binary"}, Availability: availabilityName(ghidraConfigured, ghidraHealthy), Available: ghidraHealthy, Applicable: codeLike, Reason: analyzerReason(codeLike, ghidraConfigured, ghidraHealthy, "payload does not contain a supported code image", "Ghidra spool is not configured", "Ghidra status is stale"), ResultLinkShape: "/ghidra/{sha256}", RequiredRole: "admin", Confirmation: "none", Concurrency: "shared-gpu", LocalOnly: true, GPU: true, DefaultOptions: defaultWorkbenchOptions("ghidra"), OptionSchema: optionSchema},
 		{ID: "linux-sandbox", DisplayName: "Linux sandbox", Description: "Dynamic detonation in the isolated Linux KVM runner with its fixed network policy.", AcceptedKinds: []string{"linux", "cross-platform"}, Availability: availabilityName(linuxConfigured, linuxConfigured), Available: linuxConfigured, Applicable: linuxApplicable, Reason: analyzerReason(linuxApplicable, linuxConfigured, linuxConfigured, "payload is not compatible with the Linux detonation route", "Linux sandbox spool is not configured", "Linux sandbox is unavailable"), ResultLinkShape: "/sandbox/{job}", RequiredRole: "admin", Confirmation: "detonation", Concurrency: "linux-kvm", LocalOnly: true, Detonates: true, DefaultOptions: defaultWorkbenchOptions("linux-sandbox"), OptionSchema: optionSchema},
 		{ID: "windows-sandbox", DisplayName: "Windows sandbox", Description: "Dynamic detonation in the isolated Windows KVM runner. The protected live VM cannot be selected here.", AcceptedKinds: []string{"windows"}, Availability: availabilityName(windowsConfigured, windowsConfigured), Available: windowsConfigured, Applicable: windowsApplicable, Reason: analyzerReason(windowsApplicable, windowsConfigured, windowsConfigured, "payload is not compatible with the Windows detonation route", "Windows sandbox spool is not configured", "Windows sandbox is unavailable"), ResultLinkShape: "/sandbox/{job}", RequiredRole: "admin", Confirmation: "detonation", Concurrency: "windows-kvm", LocalOnly: true, Detonates: true, DefaultOptions: defaultWorkbenchOptions("windows-sandbox"), OptionSchema: optionSchema},
+		// #331/#300/#325: the one detonation route in this Workbench where
+		// the payload gets REAL internet access. Every other route
+		// (linux-sandbox, windows-sandbox) is air-gapped -- FakeNet/INetSim
+		// answer everything, so C2 checkins and second-stage downloads go
+		// nowhere real. This guest inverts that on purpose (GHOSTS'
+		// realism), on its own dedicated network (virbr-ghosts) with a
+		// host firewall policy blocking RFC1918/LAN and nothing else --
+		// verified live in #325, not just configured. DisplayName and
+		// Description are deliberately loud about this rather than reading
+		// like just another sandbox option in the list, per #327.
+		{ID: "windows-ghosts", DisplayName: "Windows sandbox (WAN-permitted, GHOSTS)", Description: "⚠ Real internet access. Dynamic detonation on a separate, WAN-permitted Windows guest with a GHOSTS-driven NPC persona -- unlike every other route here, this guest can reach real infrastructure (C2 checkins, second-stage downloads, exfiltration all go somewhere real, not FakeNet/INetSim). The host's LAN/RFC1918 ranges are firewalled off, but the internet is not. Only choose this for samples where real network behavior is the point.", AcceptedKinds: []string{"windows"}, Availability: availabilityName(ghostsConfigured, ghostsConfigured), Available: ghostsConfigured, Applicable: windowsApplicable, Reason: analyzerReason(windowsApplicable, ghostsConfigured, ghostsConfigured, "payload is not compatible with the Windows detonation route", "GHOSTS sandbox spool is not configured", "GHOSTS sandbox is unavailable"), ResultLinkShape: "/sandbox/{job}", RequiredRole: "admin", Confirmation: "detonation", Concurrency: "windows-ghosts-kvm", LocalOnly: true, Detonates: true, DefaultOptions: defaultWorkbenchOptions("windows-sandbox"), OptionSchema: optionSchema},
 		// Standalone adapter (#78): its own submission path (drain_revdeck() in
 		// ghidra-worker.py drains REVDECK_REQUEST_DIR independently of the
 		// Ghidra spool) and its own result link (/revdeck/{sha256}), separate

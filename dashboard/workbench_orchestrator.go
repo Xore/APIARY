@@ -140,6 +140,15 @@ func (s *store) submitWorkbenchChild(hash string, classification payloadClassifi
 		}
 		child.State, child.Reason, child.Cancelable = "queued", "waiting for the Windows sandbox handoff", true
 		return nil
+	case "windows-ghosts":
+		if classification.Platform != "Windows" || !classification.Dynamic {
+			return errors.New("payload is not compatible with the Windows detonation route")
+		}
+		if err := createWorkbenchMarker(sandboxRequestDir(targetGhosts), hash); err != nil {
+			return fmt.Errorf("GHOSTS sandbox request spool unavailable: %w", err)
+		}
+		child.State, child.Reason, child.Cancelable = "queued", "waiting for the WAN-permitted GHOSTS sandbox handoff", true
+		return nil
 	case "revdeck":
 		if err := createWorkbenchMarker(revdeckRequestDir(), hash); err != nil {
 			return fmt.Errorf("Rev·Deck request spool unavailable: %w", err)
