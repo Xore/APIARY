@@ -183,7 +183,8 @@ func classify(path string) string {
 		strings.Contains(p, "credential"), strings.Contains(p, "secret"):
 		return "secret-hunt"
 	case strings.Contains(p, "wp-login"), strings.Contains(p, "wp-admin"),
-		strings.Contains(p, "xmlrpc"):
+		strings.Contains(p, "xmlrpc"), strings.Contains(p, "wp-content"),
+		strings.Contains(p, "/readme.html"):
 		return "wordpress"
 	case strings.Contains(p, "phpmyadmin"), strings.Contains(p, "pma"),
 		strings.Contains(p, "adminer"):
@@ -350,6 +351,45 @@ func (s *server) serve(w http.ResponseWriter, r *http.Request, e *event) {
 	case strings.Contains(p, "wp-login") || strings.Contains(p, "wp-admin"):
 		e.Status = http.StatusOK
 		writeHTML(w, http.StatusOK, wpLogin)
+
+	case strings.HasSuffix(p, "/readme.html") || p == "/readme.html":
+		e.Status = http.StatusOK
+		writeHTML(w, http.StatusOK, wpReadme)
+
+	case strings.Contains(p, "xmlrpc.php"):
+		if r.Method != http.MethodPost {
+			e.Status = http.StatusOK
+			writeText(w, http.StatusOK, "XML-RPC server accepts POST requests only.")
+			break
+		}
+		// The request body (already captured onto e.Body by ServeHTTP) is
+		// where a real system.multicall/pingback exploitation attempt shows
+		// up -- this only needs to look like a real XML-RPC endpoint that
+		// rejected the call, not actually parse or dispatch one.
+		e.Status = http.StatusOK
+		w.Header().Set("Content-Type", "text/xml; charset=UTF-8")
+		writeHTML(w, http.StatusOK, wpXMLRPCFault)
+
+	case strings.Contains(p, "/wp-content/plugins/duplicator/") && strings.HasSuffix(p, "readme.txt"):
+		// CVE-2020-11738 (Duplicator arbitrary file read/RCE via installer.php)
+		// -- a real mass-scanned plugin, version deliberately pre-fix.
+		e.Status = http.StatusOK
+		writeText(w, http.StatusOK, wpPluginReadme("Duplicator", "1.3.26"))
+
+	case strings.Contains(p, "/wp-content/plugins/wp-file-manager/") && strings.HasSuffix(p, "readme.txt"):
+		// CVE-2020-25213 (File Manager unauthenticated arbitrary file
+		// upload/RCE) -- another real mass-scanned plugin, version
+		// deliberately pre-fix.
+		e.Status = http.StatusOK
+		writeText(w, http.StatusOK, wpPluginReadme("WP File Manager", "6.0"))
+
+	case strings.HasPrefix(p, "/wp-content/"):
+		// Any other plugin/theme/upload path: a real WordPress install
+		// serves its own 404 here (Apache/nginx directory listing is
+		// normally disabled), not the generic landing 404 below -- kept
+		// distinct in case a future plugin gets its own case above.
+		e.Status = http.StatusNotFound
+		writeHTML(w, http.StatusNotFound, nginx404)
 
 	case strings.Contains(p, "phpmyadmin") || strings.Contains(p, "/pma") || strings.Contains(p, "adminer"):
 		e.Status = http.StatusOK
