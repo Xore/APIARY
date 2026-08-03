@@ -806,6 +806,26 @@ func TestClassifyDNSHoneypotSurfacesQueriedDomain(t *testing.T) {
 	}
 }
 
+func TestClassifyDNSHoneypotFlagsNonStandardOpcode(t *testing.T) {
+	ev := classify(map[string]any{
+		"sensor": "dns-honeypot", "event": "query", "port": float64(53),
+		"src_ip": "203.0.113.10", "query": "example.com", "qtype": float64(1), "opcode": float64(5),
+	}, "dns-honeypot")
+	if !strings.Contains(ev.detail, "UPDATE") {
+		t.Fatalf("detail missing non-standard opcode name: %q", ev.detail)
+	}
+
+	// opcode 0 (QUERY) is virtually all real traffic and must not clutter
+	// every single row.
+	standard := classify(map[string]any{
+		"sensor": "dns-honeypot", "event": "query", "port": float64(53),
+		"src_ip": "203.0.113.10", "query": "example.com", "qtype": float64(1), "opcode": float64(0),
+	}, "dns-honeypot")
+	if strings.Contains(standard.detail, "opcode") {
+		t.Fatalf("standard QUERY opcode should not be flagged in detail: %q", standard.detail)
+	}
+}
+
 func TestClassifyCitrixHoneypotSurfacesPathAndPayload(t *testing.T) {
 	ev := classify(map[string]any{
 		"sensor": "citrix-honeypot", "event": "cve_2019_19781_payload", "port": float64(443),
