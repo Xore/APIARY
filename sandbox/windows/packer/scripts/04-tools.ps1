@@ -293,23 +293,15 @@ New-SmbShare -Name 'Logs'    -Path 'C:\Logs'    -ReadAccess 'analyst' -ErrorActi
 # in win11-analysis.pkr.hcl -- separate from this script deliberately, since
 # it's cosmetic and nothing run_sample.py touches, unlike everything above.
 
-# ── Final DNS: set to INetSim (10.10.10.1) ────────────────────────────────
-# Safe here and only here — this is the last phase, so it cannot cost the
-# build its internet the way the old Phase 1 static IP did. Unlike an address
-# and a gateway, a resolver the guest cannot reach yet breaks nothing until
-# the guest is on the sandbox bridge.
-#
-# Deliberately belt-and-braces: setup/sandbox-network.xml already hands out
-# 10.10.10.1 via dhcp-option=6, and this survives a guest that somehow misses
-# the DHCP option. The cost is that 10.10.10.1 is now written down in three
-# places — here, that file, and the inetsim ipv4_address in
-# docker-compose.sandbox.yml. All three are pinned constants; change one and
-# you must change all three, or the static entry here will silently win over
-# DHCP and every lookup will go to a dead address.
-Write-Host '[Phase 13] Setting DNS to INetSim gateway (10.10.10.1)...'
-$adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Select-Object -First 1
-Set-DnsClientServerAddress -InterfaceAlias $adapter.Name -ServerAddresses '10.10.10.1'
-
+# DNS-to-INetSim used to be set here (Phase 13) on the theory that this was
+# the last phase, so it couldn't cost the build its own internet access.
+# That assumption broke (#432) once 06-chrome-history.ps1 was added to
+# win11-analysis.pkr.hcl after this script -- Chrome's download failed with
+# DNS resolution errors every time, since 10.10.10.1 isn't reachable from
+# the packer build's own network. Confirmed live (2026-08-03). Moved to
+# win11-analysis.pkr.hcl's own final inline cleanup provisioner instead,
+# which actually is guaranteed last regardless of what gets added to the
+# provisioner chain between this script and it.
 Write-Host '================================================================'
 Write-Host '[+] Setup complete. Packer will now shut down and export qcow2.'
 Write-Host '================================================================'

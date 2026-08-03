@@ -422,6 +422,22 @@ build {
   # added here doing the same thing.
   provisioner "powershell" {
     inline = [
+      # DNS-to-INetSim (10.10.10.1): moved here from 04-tools.ps1's old
+      # Phase 13 (#432) -- that script assumed it was the last provisioner,
+      # which stopped being true once 06-chrome-history.ps1 was added after
+      # it and needed real internet for its own Chrome download. This step
+      # actually is guaranteed last regardless of what else gets added to
+      # the provisioner chain before it.
+      #
+      # Deliberately belt-and-braces: setup/sandbox-network.xml already
+      # hands out 10.10.10.1 via dhcp-option=6, and this survives a guest
+      # that somehow misses the DHCP option. The cost is that 10.10.10.1 is
+      # now written down in three places -- here, that file, and the
+      # inetsim ipv4_address in docker-compose.sandbox.yml. All three are
+      # pinned constants; change one and you must change all three, or the
+      # static entry here will silently win over DHCP and every lookup will
+      # go to a dead address.
+      "$adapter = Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Select-Object -First 1; Set-DnsClientServerAddress -InterfaceAlias $adapter.Name -ServerAddresses '10.10.10.1'",
       # Clear event logs (start fresh for analysis)
       "Get-EventLog -List | ForEach-Object { Clear-EventLog -LogName $_.Log -ErrorAction SilentlyContinue }",
       "wevtutil cl Microsoft-Windows-Sysmon/Operational 2>$null; $global:LASTEXITCODE = 0",

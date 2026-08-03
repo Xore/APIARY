@@ -25,6 +25,29 @@ function Invoke-OptionalChoco {
     }
 }
 
+# Get-Command python is not enough to detect a real interpreter: Windows 11
+# ships a fake python.exe "app execution alias" stub in
+# %LOCALAPPDATA%\Microsoft\WindowsApps by default, present in PATH even with
+# no real Python installed at all. Get-Command finds it happily (it is a
+# real, executable file), so the old `-not (Get-Command python ...)` check
+# was always false and the real `choco install python3` step never ran.
+# Confirmed live (2026-08-03): the script proceeded past this point, `& $py
+# $seederPath ...` ran the stub instead of a real interpreter (it just
+# prints a Microsoft Store prompt message and exits), and the script still
+# reported "[+] Chrome history seeded" and wrote
+# 'chrome_history=seeded' to the provenance file -- a false success with an
+# empty/never-created History DB. The stub's giveaway is FileVersion
+# 0.0.0.0 (a real python.exe reports its actual version); check for that
+# instead of trusting Get-Command alone.
+function Get-RealPython {
+    $cmd = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $cmd) { return $null }
+    if ($cmd.Source -like "*\WindowsApps\python.exe") { return $null }
+    $ver = (Get-Item $cmd.Source).VersionInfo.FileVersion
+    if (-not $ver -or $ver -eq '0.0.0.0') { return $null }
+    return $cmd.Source
+}
+
 if (-not (Get-Command chrome -ErrorAction SilentlyContinue)) {
     $chromeCheck = "${env:ProgramFiles}\Google\Chrome\Application\chrome.exe"
     if (-not (Test-Path $chromeCheck)) {
@@ -32,13 +55,13 @@ if (-not (Get-Command chrome -ErrorAction SilentlyContinue)) {
         Invoke-OptionalChoco -Package 'googlechrome'
     }
 }
-if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+if (-not (Get-RealPython)) {
     Write-Host '[+] Installing Python'
     Invoke-OptionalChoco -Package 'python3'
     $env:Path = [System.Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [System.Environment]::GetEnvironmentVariable('Path', 'User')
 }
 
-$py = (Get-Command python -ErrorAction SilentlyContinue).Source
+$py = Get-RealPython
 $chrome = "${env:ProgramFiles}\Google\Chrome\Application\chrome.exe"
 if (-not (Test-Path $chrome)) { $chrome = "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe" }
 
@@ -48,12 +71,26 @@ if (-not $py -or -not (Test-Path $chrome)) {
     exit 0
 }
 
-$profileDir = "$env:LOCALAPPDATA\Google\Chrome\User Data\Default"
+$userDataDir = "$env:LOCALAPPDATA\Google\Chrome\User Data"
+$profileDir = "$userDataDir\Default"
 
 # Launch & close Chrome once so the profile skeleton (incl. the History
 # SQLite DB) exists before the seeder writes into it.
-& $chrome --no-first-run --no-default-browser-check --headless=new --disable-gpu about:blank 2>$null
-Start-Sleep -Seconds 5
+#
+# --user-data-dir is explicit rather than left to Chrome's own default
+# resolution: confirmed live (2026-08-03) that a headless launch over a
+# WinRM-provisioned session did not reliably create the profile at
+# $env:LOCALAPPDATA's expected path without it -- Start-Process -PassThru
+# reported real chrome.exe child processes running, but
+# %LOCALAPPDATA%\Google never appeared. Being explicit removes the
+# uncertainty instead of trusting Chrome's default profile-location logic
+# to agree with $profileDir below.
+Start-Process -FilePath $chrome -ArgumentList `
+    '--no-first-run', '--no-default-browser-check', '--headless=new', '--disable-gpu', `
+    "--user-data-dir=`"$userDataDir`"", 'about:blank' `
+    -RedirectStandardOutput "$env:TEMP\chrome-seed-stdout.log" `
+    -RedirectStandardError "$env:TEMP\chrome-seed-stderr.log"
+Start-Sleep -Seconds 8
 Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Seconds 2
 
