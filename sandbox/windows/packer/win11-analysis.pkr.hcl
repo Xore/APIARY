@@ -352,6 +352,18 @@ build {
     timeout           = "60m"
   }
 
+  # Step 3b: VC++ Redistributable (#368) -- without it, natively-compiled C++
+  # samples fail to launch at all (STATUS_DLL_NOT_FOUND), which reads in a
+  # detonation report as "did nothing interesting" rather than "couldn't
+  # start." Core to the sandbox's actual purpose, not cosmetic; placed right
+  # after the real tooling step for the same reason.
+  provisioner "powershell" {
+    script            = "scripts/09-vcredist.ps1"
+    elevated_user     = var.winrm_user
+    elevated_password = var.winrm_pass
+    timeout           = "15m"
+  }
+
   # Step 4: decoy realism -- sample documents and a local SMB share, so the
   # guest reads as a real workstation rather than a bare analysis box to
   # anyone who lands on it. Independent of the tooling above; safe to skip
