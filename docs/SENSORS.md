@@ -14,6 +14,7 @@
 | **conpot-guardian** | Guardian AST 10001 | raw tunnel | fuel and tank-monitor attack surface |
 | **conpot-kamstrup** | Kamstrup 1025, 50100 | raw tunnel | smart-meter data and management protocols |
 | **dnp3** | DNP3 20000 | raw tunnel | ElbeGrid substation RTU with frame/function telemetry |
+| **dicompot** | DICOM 11112 | raw tunnel + PROXY | vendored `nsmfoo/dicompot` medical-imaging decoy (C-ECHO/C-FIND/C-MOVE/C-GET/C-STORE) — ES-only from day one (#238, #413) |
 | **http-honeypot** | `decoy.<domain>` (+ catch-all, + raw :8081) | Traefik | fake nginx / login pages |
 | **api-honeypot** | raw 8888 | raw tunnel + PROXY | cloud metadata, Kubernetes, registry, DevOps and LLM API probes |
 | **snare + tanner** | `www-portal.<domain>` | Traefik | fictional Meridian portal → payload analysis |
@@ -157,8 +158,8 @@ Web UI: `http://<HP_BIND>:19080` (`arkime.<domain>` via Traefik).
 >
 > - **PROXY protocol.** portbridge rules tagged `:pp` prepend a HAProxy PROXY v1
 >   header carrying the real client address. **multipot** and the
->   **http/api-honeypots** (`PROXY_PROTOCOL=1`), **dnp3** (`PROXY_PROTOCOL=1`)
->   and **all conpot sensors** (`CONPOT_PROXY_PROTOCOL=1`, gevent shim baked in
+>   **http/api-honeypots** (`PROXY_PROTOCOL=1`), **dnp3** (`PROXY_PROTOCOL=1`),
+>   **dicompot** (`PROXY_PROTOCOL=1`) and **all conpot sensors** (`CONPOT_PROXY_PROTOCOL=1`, gevent shim baked in
 >   by `conpot/proxy_patch.py`) parse it, so those events log the true IP and
 >   port. The http listener sniffs the header, so Traefik-routed requests (no
 >   header) keep working too.

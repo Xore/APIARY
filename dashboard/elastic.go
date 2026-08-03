@@ -161,6 +161,7 @@ func (c *esClient) refresh() {
 		{"conpot-s7-1200", "honeypot-v2-*", "event.sensor:conpot-s7-1200"}, {"conpot-s7-1500", "honeypot-v2-*", "event.sensor:conpot-s7-1500"},
 		{"conpot-iec104", "honeypot-v2-*", "event.sensor:conpot-iec104"}, {"conpot-guardian", "honeypot-v2-*", "event.sensor:conpot-guardian"},
 		{"conpot-kamstrup", "honeypot-v2-*", "event.sensor:conpot-kamstrup"}, {"tanner", "honeypot-v2-*", "log.file.path:*tanner*"},
+		{"dicompot", "honeypot-v2-*", "event.sensor:dicompot"},
 		{"suricata", "suricata-*", ""},
 	}
 	for _, q := range queries {
