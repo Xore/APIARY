@@ -148,18 +148,35 @@ func classify(e map[string]any, dirSensor string) event {
 			ev.port = "23"
 		}
 		switch {
-		case strings.Contains(eid, "login"):
+		case eid == "cowrie.login.success", eid == "cowrie.login.failed":
 			ev.isLogin = true
 			ev.detail = eid[len("cowrie."):] + ": " + ev.user + " / " + ev.pass
-		case eid == "cowrie.command.input", eid == "cowrie.command.failed":
+			// Public-key auth attempts carry no password but do carry a key
+			// fingerprint (docs/OUTPUT.rst: fingerprint/key/type) -- surface
+			// it the same way client.kex's HASSH already is, rather than
+			// showing a login row with an empty-looking user/pass pair.
+			if fp := str(e["fingerprint"]); fp != "" {
+				ev.fingerprint, ev.fingerKind = fp, "SSH pubkey"
+				ev.detail += " (key " + shortHash(fp) + ")"
+			}
+		case eid == "cowrie.command.input", eid == "cowrie.command.failed",
+			eid == "cowrie.command.success", eid == "cowrie.session.input":
 			ev.command = str(e["input"])
 			ev.detail = "cmd: " + ev.command
+		case eid == "cowrie.command.chpasswd":
+			ev.detail = "chpasswd attempt: " + str(e["username"])
 		case eid == "cowrie.session.file_download", eid == "cowrie.session.file_upload":
 			ev.shasum = str(e["shasum"])
 			ev.download = firstNonEmpty(str(e["destfile"]), str(e["url"]), str(e["filename"]))
 			ev.detail = "payload " + shortHash(ev.shasum)
 			if ev.download != "" {
 				ev.detail += " -> " + ev.download
+			}
+		case eid == "cowrie.session.file_download.failed":
+			ev.download = str(e["url"])
+			ev.detail = "download failed: " + ev.download
+			if reason := str(e["error"]); reason != "" {
+				ev.detail += " (" + reason + ")"
 			}
 		case eid == "cowrie.client.version":
 			ev.clientVer = str(e["version"])
@@ -170,15 +187,46 @@ func classify(e map[string]any, dirSensor string) event {
 			ev.fingerprint = str(e["hassh"])
 			ev.fingerKind = "HASSH"
 			ev.detail = "SSH HASSH: " + ev.fingerprint
+		case eid == "cowrie.client.size":
+			ev.detail = "terminal " + num(e["width"]) + "x" + num(e["height"])
+		case eid == "cowrie.direct-tcpip.request":
+			// A port-forward request is the attacker trying to proxy
+			// traffic through the honeypot -- worth its own detail line,
+			// not just the bare eventid.
+			ev.detail = "port-forward request -> " + str(e["dst_ip"]) + ":" + num(e["dst_port"])
+		case eid == "cowrie.telnet.exploit_attempt":
+			ev.detail = "CVE " + str(e["cve"]) + " attempt: " + str(e["name"]) + "=" + str(e["value"])
+		case eid == "cowrie.telnet.exploit_success":
+			ev.isLogin = true
+			ev.user = str(e["username"])
+			ev.detail = "CVE " + str(e["cve"]) + " succeeded, logged in as " + ev.user
+		case eid == "cowrie.log.closed":
+			// A replayable TTY session recording -- arguably the single
+			// most useful artifact cowrie produces, and it was previously
+			// only ever shown as the bare word "closed" (the eventid
+			// suffix), with no indication a recording exists at all.
+			ev.download = str(e["ttylog"])
+			ev.shasum = str(e["shasum"])
+			ev.detail = "TTY session recorded"
+			if ev.download != "" {
+				ev.detail += ": " + ev.download
+			}
 		case eid == "cowrie.session.connect":
 			ev.detail = "connect"
 		case eid == "cowrie.session.closed":
 			ev.detail = "closed"
-			if d := num(e["duration"]); d != "" {
-				ev.detail = "closed after " + d + "s"
+			// duration_ms, not duration -- e["duration"] never matched any
+			// real cowrie field (confirmed live against the deployed
+			// cluster), so this line silently never fired.
+			if d := num(e["duration_ms"]); d != "" {
+				ev.detail = "closed after " + d + "ms"
 			}
 		default:
-			ev.detail = eid[len("cowrie."):]
+			// Every cowrie event carries a human-readable "message" per its
+			// own docs (confirmed live) -- falling back to the bare eventid
+			// suffix here discarded it for every eventid without its own
+			// case above (there are 30+; only a handful are cased).
+			ev.detail = firstNonEmpty(str(e["message"]), eid[len("cowrie."):])
 		}
 		return ev
 	}

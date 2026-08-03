@@ -870,3 +870,82 @@ func TestClassifyRDPHoneypotSkipsListening(t *testing.T) {
 		t.Fatal("rdp-honeypot's startup 'listening' event should be skipped")
 	}
 }
+
+// TestClassifyCowrieSessionClosedUsesDurationMs is a regression test for a
+// real bug found live: the code read e["duration"], but cowrie actually
+// emits duration_ms (confirmed against docs/OUTPUT.rst and a live document
+// pulled from the deployed cluster) -- so that branch's "closed after Ns"
+// text never fired for any real event, silently falling back to the bare
+// "closed" text instead.
+func TestClassifyCowrieSessionClosedUsesDurationMs(t *testing.T) {
+	ev := classify(map[string]any{
+		"eventid": "cowrie.session.closed", "session": "abc123",
+		"src_ip": "203.0.113.10", "protocol": "telnet", "duration_ms": float64(120003),
+	}, "cowrie")
+	if !strings.Contains(ev.detail, "120003ms") {
+		t.Fatalf("detail = %q, want it to include the real duration_ms value", ev.detail)
+	}
+}
+
+// TestClassifyCowrieDefaultFallsBackToMessage is a regression test: every
+// cowrie event carries a human-readable "message" field per its own docs
+// (confirmed live), but the default branch previously showed only the bare
+// eventid suffix, discarding it -- losing real content for any of cowrie's
+// 30+ eventids without their own explicit case.
+func TestClassifyCowrieDefaultFallsBackToMessage(t *testing.T) {
+	ev := classify(map[string]any{
+		"eventid": "cowrie.session.params", "session": "abc123",
+		"src_ip": "203.0.113.10", "protocol": "ssh",
+		"message": "Session parameters: arch=amd64",
+	}, "cowrie")
+	if ev.detail != "Session parameters: arch=amd64" {
+		t.Fatalf("detail = %q, want the real message text", ev.detail)
+	}
+}
+
+func TestClassifyCowrieTTYLogSurfacesReplayableSession(t *testing.T) {
+	ev := classify(map[string]any{
+		"eventid": "cowrie.log.closed", "session": "abc123",
+		"src_ip": "203.0.113.10", "protocol": "telnet",
+		"ttylog": "var/lib/cowrie/tty/deadbeef", "shasum": "deadbeef", "duration_ms": float64(1928),
+	}, "cowrie")
+	if ev.download != "var/lib/cowrie/tty/deadbeef" {
+		t.Fatalf("download (ttylog path) = %q", ev.download)
+	}
+	if !strings.Contains(ev.detail, "TTY session recorded") {
+		t.Fatalf("detail = %q, want it to flag a replayable TTY recording", ev.detail)
+	}
+}
+
+func TestClassifyCowrieLoginFailedSurfacesPubkeyFingerprint(t *testing.T) {
+	ev := classify(map[string]any{
+		"eventid": "cowrie.login.failed", "session": "abc123",
+		"src_ip": "203.0.113.10", "protocol": "ssh", "username": "root",
+		"fingerprint": "SHA256:abcdef1234567890", "type": "ssh-rsa",
+	}, "cowrie")
+	if !ev.isLogin || ev.fingerprint != "SHA256:abcdef1234567890" || ev.fingerKind != "SSH pubkey" {
+		t.Fatalf("unexpected: %+v", ev)
+	}
+}
+
+func TestClassifyCowrieDirectTCPIPRequestSurfacesTarget(t *testing.T) {
+	ev := classify(map[string]any{
+		"eventid": "cowrie.direct-tcpip.request", "session": "abc123",
+		"src_ip": "203.0.113.10", "protocol": "ssh",
+		"dst_ip": "10.0.0.5", "dst_port": float64(3306),
+	}, "cowrie")
+	if !strings.Contains(ev.detail, "10.0.0.5:3306") {
+		t.Fatalf("detail = %q, want the requested forward target", ev.detail)
+	}
+}
+
+func TestClassifyCowrieTelnetExploitAttemptSurfacesCVE(t *testing.T) {
+	ev := classify(map[string]any{
+		"eventid": "cowrie.telnet.exploit_attempt", "session": "abc123",
+		"src_ip": "203.0.113.10", "protocol": "telnet",
+		"cve": "CVE-2026-24061", "name": "USER", "value": "-froot",
+	}, "cowrie")
+	if !strings.Contains(ev.detail, "CVE-2026-24061") {
+		t.Fatalf("detail = %q, want the CVE id surfaced", ev.detail)
+	}
+}
