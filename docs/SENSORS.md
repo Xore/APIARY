@@ -15,6 +15,7 @@
 | **conpot-kamstrup** | Kamstrup 1025, 50100 | raw tunnel | smart-meter data and management protocols |
 | **dnp3** | DNP3 20000 | raw tunnel | ElbeGrid substation RTU with frame/function telemetry |
 | **dicompot** | DICOM 11112 | raw tunnel + PROXY | vendored `nsmfoo/dicompot` medical-imaging decoy (C-ECHO/C-FIND/C-MOVE/C-GET/C-STORE) — ES-only from day one (#238, #413) |
+| **dns-honeypot** | DNS 53/udp | raw tunnel | from-scratch UDP reflection bait, response capped in code to at most 1.5x request size — never contacts a real resolver, so it cannot be abused as a DDoS amplification vector — ES-only from day one (#238, #415) |
 | **http-honeypot** | `decoy.<domain>` (+ catch-all, + raw :8081) | Traefik | fake nginx / login pages |
 | **api-honeypot** | raw 8888 | raw tunnel + PROXY | cloud metadata, Kubernetes, registry, DevOps and LLM API probes |
 | **snare + tanner** | `www-portal.<domain>` | Traefik | fictional Meridian portal → payload analysis |

@@ -29,6 +29,8 @@ jobs:
             context: dionaea
           - image: dnp3-honeypot
             context: dnp3-honeypot
+          - image: dns-honeypot
+            context: dns-honeypot
           - image: http-honeypot
             context: http-honeypot
           - image: llm-worker
