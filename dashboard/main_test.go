@@ -1009,6 +1009,26 @@ func TestClassifyMultipotSurfacesDataForNonCommandEvents(t *testing.T) {
 	}
 }
 
+// TestClassifyMultipotHTTPRequestLineDoesNotPolluteTopCommands (#41): a live
+// production check found HTTP GET/POST requests (multipot's Elasticsearch/
+// Docker honeypots on 9200/2375) showing up in the Attacker Behavior tab's
+// Top Commands list. handleElastic/handleDocker's "command" field for an
+// "http_request" event is the raw request line, not an attacker-issued
+// shell command -- it belongs in the detail line, never in ev.command
+// (which feeds aggregate.go's commands[sensor+cmd]++ leaderboard).
+func TestClassifyMultipotHTTPRequestLineDoesNotPolluteTopCommands(t *testing.T) {
+	ev := classify(map[string]any{
+		"sensor": "multipot", "event": "http_request", "proto": "elasticsearch", "port": float64(9200),
+		"src_ip": "203.0.113.10", "command": "GET /_search HTTP/1.1",
+	}, "multipot")
+	if ev.command != "" {
+		t.Fatalf("HTTP request line must not populate ev.command (pollutes Top Commands), got %q", ev.command)
+	}
+	if !strings.Contains(ev.detail, "GET /_search HTTP/1.1") {
+		t.Fatalf("request line should still be visible in detail: %q", ev.detail)
+	}
+}
+
 // TestClassifyCowrieSessionClosedUsesDurationMs is a regression test for a
 // real bug found live: the code read e["duration"], but cowrie actually
 // emits duration_ms (confirmed against docs/OUTPUT.rst and a live document

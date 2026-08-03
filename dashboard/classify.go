@@ -258,9 +258,22 @@ func classify(e map[string]any, dirSensor string) event {
 		// message, Elasticsearch/Docker's HTTP body) -- neither ever
 		// reached the dashboard row for any event kind besides the
 		// literal "command" case above.
-		if kind != "command" {
+		//
+		// #41: "http_request" is excluded here -- its own "command" field
+		// (handleElastic/handleDocker's Command: reqLine) is an HTTP
+		// request line ("GET /_search HTTP/1.1"), not an attacker-issued
+		// command, and copying it into ev.command was polluting the
+		// Attacker Behavior tab's Top Commands leaderboard with GET/POST
+		// requests. It's still shown in ev.detail below either way --
+		// only the commands aggregate (aggregate.go's
+		// commands[sensor+cmd]++, keyed off ev.command) is affected.
+		if kind != "command" && kind != "http_request" {
 			if cmd := str(e["command"]); cmd != "" {
 				ev.command = cmd
+				ev.detail += ": " + cmd
+			}
+		} else if kind == "http_request" {
+			if cmd := str(e["command"]); cmd != "" {
 				ev.detail += ": " + cmd
 			}
 		}
