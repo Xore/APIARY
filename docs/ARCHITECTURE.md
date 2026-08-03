@@ -243,11 +243,12 @@ flowchart TB
   es --> kibana
   kibanainit -.->|"configures via API,<br/>no ordering dependency"| kibana
 
-  logs --> dashboard
+  logs -->|"every sensor except multipot"| dashboard
   payloads --> dashboard
   dashboardState --> dashboard
   yaraResults --> dashboard
   dashboard --> es
+  es -.->|"multipot events, ES-sourced (#403, #238)"| dashboard
   dashboard -.->|"health only"| filebeat
 
   es --> evebox
@@ -267,6 +268,20 @@ while Filebeat maintains durable offsets and ships the same evidence to
 Elasticsearch for historical search. These are complementary paths: the live
 dashboard can remain useful during an Elasticsearch interruption, and the
 Elasticsearch archive outlives the dashboard's bounded in-memory window.
+
+multipot is the one exception (#403): the dashboard never reads its log file
+directly, only Elasticsearch (`events_es.go`'s `loadSensorEventsES`, queried
+by `sensor` against `honeypot-v2-*` on every rebuild cycle, merged into the
+same `s.events` pipeline every file-based sensor's events go through). This
+was made a prerequisite for #238's new protocol handlers (POP3, IMAP, SOCKS5,
+HL7/MLLP, ADB — all added directly to multipot rather than vendoring five
+separate third-party images) so they show up in the normal Event Explorer
+without the dashboard reading their log file at all. multipot still writes
+its log file exactly as before, purely for Filebeat to pick up — the
+dashboard's own read path is what changed. Every other sensor, including
+http-honeypot's deepened WordPress bait (readme.html version fingerprinting,
+xmlrpc.php, vulnerable-plugin readme.txt endpoints — also #238), is unaffected
+and stays file-based.
 
 `honeypot-init` runs first among the 12 stacks, and every other one depends
 on its output without a Compose-level dependency — Compose's
@@ -294,7 +309,8 @@ flowchart LR
   portLog["VPS portbridge log"]
   sshfs["Read-only SSHFS mounts"]
   filebeat["Filebeat<br/>filestream registry"]
-  live["Dashboard parser<br/>bounded file tails"]
+  live["Dashboard parser<br/>bounded file tails<br/>(all sensors except multipot)"]
+  esRead["Dashboard ES read<br/>multipot only (#403)"]
   normalize["Normalization + GeoIP +<br/>source-IP correlation"]
   es[("Elasticsearch")]
   dlq[("dead-letter-honeypot")]
@@ -322,6 +338,8 @@ flowchart LR
   sensorEvents --> live
   sshfs --> live
   live --> normalize
+  es -->|"query by sensor"| esRead
+  esRead --> normalize
   portLog --> normalize
 
   es --> evebox
@@ -337,7 +355,8 @@ The analysis layers serve different purposes:
 
 | Layer | Input | Output | Primary use |
 |---|---|---|---|
-| Dashboard live parser | recent sensor/EVE/portbridge file tails | normalized in-memory snapshot, alerts, campaigns, exports | immediate operations and cross-sensor pivots |
+| Dashboard live parser | recent sensor/EVE/portbridge file tails (every sensor except multipot) | normalized in-memory snapshot, alerts, campaigns, exports | immediate operations and cross-sensor pivots |
+| Dashboard ES read (#403) | `honeypot-v2-*`, queried by sensor — multipot only | same normalized snapshot as the file parser, merged in | multipot events (POP3/IMAP/SOCKS5/HL7/ADB, #238) without a dashboard file read |
 | Filebeat | durable JSON filestreams | versioned Elasticsearch indices/data streams | complete historical indexing with restart-safe offsets |
 | Elasticsearch setup | templates and pipelines | flattened heterogeneous sensor fields, GeoIP, ILM, dead-letter fallback | mapping safety and retention |
 | Kibana | Elasticsearch | saved searches, visualizations, archive investigations | long-range analysis |
@@ -353,6 +372,56 @@ event it expects.
 
 EveBox needs no such sidecar. It queries the `suricata-v2-*` indices Filebeat
 already writes, so it holds no copy of the event data and nothing to outgrow.
+
+## Elasticsearch ingest pipeline
+
+`geoip-honeypot` (`analysis/elasticsearch-setup.sh`, set as `honeypot-v2-*`'s
+`index.default_pipeline`) is the one ingest pipeline every honeypot/Suricata/
+portbridge document passes through before it's indexed. It runs as an ordered
+list of processors — each one reads/writes `ctx` in place, and every
+processor is `ignore_failure: true` so one enrichment failing (a missing
+GeoIP database, a malformed field) never blocks indexing the underlying
+event.
+
+```mermaid
+flowchart TD
+  doc["Raw Filebeat document<br/>honeypot.* / suricata.eve.* / portbridge.*"]
+  main["1. Main enrichment script<br/>event.sensor, source/destination.ip+port,<br/>network.protocol, user.name, process.command_line,<br/>url.path, file.hash.sha256, event.category, ot.persona<br/>+ suricata/portbridge field promotion"]
+  geo1["2-3. GeoIP: suricata.eve.src_ip<br/>→ source.geo, source.as"]
+  geo2["4. GeoIP: suricata.eve.dest_ip<br/>→ destination.geo"]
+  geo3["5-6. GeoIP: honeypot.src_ip<br/>→ source.geo, source.as"]
+  geo4["7-8. GeoIP: portbridge.src_ip<br/>→ source.geo, source.as"]
+  dionaea["9. Dionaea incident hash extraction (#354)<br/>plain string scan for sha256/md5 in raw message<br/>(no regex -- disabled by default in Painless)"]
+  nettype["10. Network-type classification<br/>source.as.organization_name → scanner/cloud/hosting"]
+  log4shell["11. Log4Shell detection (#238, #416)<br/>deobfuscate Log4j lookup evasion, flag event.log4shell<br/>ported from Log4Pot's deobfuscator.py, depth/length-bounded"]
+  indexed[("honeypot-v2-*<br/>index.default_pipeline: geoip-honeypot")]
+
+  doc --> main
+  main --> geo1 --> geo2 --> geo3 --> geo4
+  geo4 --> dionaea
+  dionaea --> nettype
+  nettype --> log4shell
+  log4shell --> indexed
+```
+
+Each numbered step corresponds directly to one processor in
+`geoip-honeypot`'s `processors` array (same order, same file) — this diagram
+is not an approximation of the pipeline, it's a 1:1 map of it. Notably:
+
+- Steps 2-8 run unconditionally on every document; each is a no-op
+  (`ignore_missing: true`) when its source field isn't present, so a
+  Suricata document only ever gets steps 2-4 populated and a honeypot/
+  portbridge document only ever gets steps 5-8.
+- No processor here performs geoip lookups against `source.as`/`destination`
+  fields that don't apply to it (dead branches are `ignore_missing`, not
+  `ignore_failure`-masked errors).
+- Step 11 (Log4Shell) runs last and reads whichever `honeypot.*` fields step
+  1 already normalized in, not the raw pre-enrichment document — it doesn't
+  need its own copy of field-name knowledge per sensor, just the same
+  `honeypot.*` flattened map every sensor already writes into.
+- None of these processors make outbound network calls (the geoip ones read
+  local `GeoLite2-*.mmdb` files, not a lookup service) — enrichment happens
+  entirely on data already inside the document.
 
 ## Correlation and enrichment
 
