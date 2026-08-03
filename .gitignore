@@ -62,6 +62,7 @@ dnp3-honeypot/dnp3-honeypot
 http-honeypot/http-honeypot
 multipot/multipot
 portbridge/portbridge
+vps/portbridge/portbridge
 tftp-relay/tftp-relay
 node_modules/
 playwright-report/

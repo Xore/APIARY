@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -86,6 +88,104 @@ func TestUDPConnLogViaPortIsTheSourcePortTheHoneypotSees(t *testing.T) {
 	if got := rec["src_ip"]; got != "127.0.0.1" {
 		t.Fatalf("src_ip=%v, want the real client address", got)
 	}
+}
+
+// TestServeUDPBindsWildcardAlongsideExistingLoopbackListener is a regression
+// test for a real production failure (#238, #415 deploy): a wildcard
+// 0.0.0.0 bind conflicts with an existing more-specific bind on the same
+// port unless SO_REUSEADDR is set, even though nothing shows up bound to
+// 0.0.0.0 itself. Hit this live on the VPS -- systemd-resolved's stub
+// resolver already holds 127.0.0.53:53 and 127.0.0.54:53, and portbridge's
+// LISTEN_IP=0.0.0.0 rule for the new dns-honeypot (53/udp) failed with
+// EADDRINUSE despite `ss`/`lsof` showing no wildcard listener on that port
+// at all. Confirmed directly (a standalone bind reproduced it, and setting
+// SO_REUSEADDR resolved it) before fixing serveUDP's listener to set it.
+func TestServeUDPBindsWildcardAlongsideExistingLoopbackListener(t *testing.T) {
+	port := freeUDPPort(t)
+
+	// A plain net.ListenUDP here (no SO_REUSEADDR) reproduces a *stricter*
+	// case than systemd-resolved's real socket and still fails even with
+	// the fix below -- confirmed directly on the VPS that systemd-resolved's
+	// own stub-listener socket must itself carry SO_REUSEADDR (or
+	// SO_REUSEPORT), since a wildcard SO_REUSEADDR bind against a bare
+	// Python socket with no such option set still returns EADDRINUSE. This
+	// reuseAddrListenUDP helper matches the real, working condition.
+	//
+	// Bound to 127.0.0.2, not 127.0.0.1: the bind-conflict check is
+	// port-wide regardless of which specific address the competitor uses
+	// (matching production, where systemd-resolved's 127.0.0.53/54 collide
+	// with a 0.0.0.0 bind on the same port), but Linux's *packet delivery*
+	// prefers the most specific matching socket. Using the same address as
+	// the client's destination below would make this fake "systemd-resolved"
+	// silently steal every test datagram instead of portbridge's wildcard
+	// socket ever seeing it -- which is not what's being tested here, and
+	// is also not what happens for real attacker traffic against the VPS's
+	// public IP, which has no specific competitor at all.
+	loopbackHolder, err := reuseAddrListenUDP("127.0.0.2", port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer loopbackHolder.Close()
+
+	honeypot, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer honeypot.Close()
+
+	observed := make(chan struct{}, 1)
+	go func() {
+		buf := make([]byte, 512)
+		if _, _, err := honeypot.ReadFromUDP(buf); err == nil {
+			observed <- struct{}{}
+		}
+	}()
+
+	r := rule{proto: "udp", listenPort: strconv.Itoa(port), target: honeypot.LocalAddr().String()}
+	go serveUDP("0.0.0.0", r, newConnLogger(""), newBlackhole(""))
+
+	bridge, err := net.ResolveUDPAddr("udp4", net.JoinHostPort("127.0.0.1", r.listenPort))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	deadline := time.After(10 * time.Second)
+	for {
+		if _, err := client.WriteToUDP([]byte("probe"), bridge); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-observed:
+			return // wildcard bind succeeded and forwarded despite the loopback-bound competitor
+		case <-deadline:
+			t.Fatal("serveUDP never forwarded a datagram — wildcard bind alongside an existing loopback listener must have failed")
+		case <-time.After(25 * time.Millisecond):
+		}
+	}
+}
+
+// reuseAddrListenUDP binds ip:port with SO_REUSEADDR set, the way
+// systemd-managed sockets (e.g. systemd-resolved's real stub listener) do.
+func reuseAddrListenUDP(ip string, port int) (*net.UDPConn, error) {
+	lc := net.ListenConfig{Control: func(_, _ string, c syscall.RawConn) error {
+		var setErr error
+		if err := c.Control(func(fd uintptr) {
+			setErr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1)
+		}); err != nil {
+			return err
+		}
+		return setErr
+	}}
+	pc, err := lc.ListenPacket(context.Background(), "udp4", net.JoinHostPort(ip, strconv.Itoa(port)))
+	if err != nil {
+		return nil, err
+	}
+	return pc.(*net.UDPConn), nil
 }
 
 // freeUDPPort returns a port number nothing is bound to. serveUDP takes the
