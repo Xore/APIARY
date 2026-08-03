@@ -796,7 +796,9 @@
     const filterAutocompleteInputs = [...document.querySelectorAll("[data-hp-filter-field]")];
     if (filterAutocompleteInputs.length) {
       const box = document.createElement("div");
-      box.className = "hp-filter-autocomplete";
+      // dropdown: theme.css's panel chrome (background/border/radius/
+      // shadow/padding); hp-filter-autocomplete: positioning/size only.
+      box.className = "dropdown hp-filter-autocomplete";
       box.setAttribute("role", "listbox");
       box.hidden = true;
       document.body.append(box);
