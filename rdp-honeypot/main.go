@@ -17,6 +17,7 @@ package main
 
 import (
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"net"
 	"os"
@@ -41,19 +42,20 @@ var mstshashRe = regexp.MustCompile(`mstshash=([a-zA-Z0-9\-_@]+)`)
 const negFailure = "0x00000004 RDP_NEG_FAILURE"
 
 type event struct {
-	Time     string `json:"time"`
-	Sensor   string `json:"sensor"`
-	Persona  string `json:"persona_id"`
-	Site     string `json:"site_id"`
-	Asset    string `json:"asset_id"`
-	Org      string `json:"organization"`
-	Proto    string `json:"proto"`
-	Port     int    `json:"port"`
-	SrcIP    string `json:"src_ip"`
-	SrcPort  int    `json:"src_port"`
-	Event    string `json:"event"`
-	Username string `json:"username,omitempty"`
-	Data     string `json:"data,omitempty"`
+	Time      string `json:"time"`
+	Sensor    string `json:"sensor"`
+	Persona   string `json:"persona_id"`
+	Site      string `json:"site_id"`
+	Asset     string `json:"asset_id"`
+	Org       string `json:"organization"`
+	Proto     string `json:"proto"`
+	Port      int    `json:"port"`
+	SrcIP     string `json:"src_ip"`
+	SrcPort   int    `json:"src_port"`
+	Event     string `json:"event"`
+	Username  string `json:"username,omitempty"`
+	Data      string `json:"data,omitempty"`
+	Protocols string `json:"requested_protocols,omitempty"`
 }
 
 type logger struct {
@@ -116,6 +118,54 @@ func extractUsername(data []byte) string {
 	return string(m[1])
 }
 
+// requestedProtocolNames maps MS-RDPBCGR 2.2.1.1.1's RDP_NEG_REQ
+// requestedProtocols bitmask to readable names -- which security layer a
+// client offers (plain RDP vs. TLS vs. CredSSP/NLA) is a real client
+// fingerprint (e.g. legacy/scripted clients that never offer CredSSP) that
+// was present in the raw packet this file already logs verbatim as base64,
+// but never broken out into its own filterable field.
+var requestedProtocolNames = []struct {
+	bit  uint32
+	name string
+}{
+	{0x01, "TLS"},
+	{0x02, "CredSSP"},
+	{0x04, "RDSTLS"},
+	{0x08, "CredSSP-EarlyUserAuth"},
+}
+
+// extractNegotiationProtocols reads the RDP_NEG_REQ structure, which
+// MS-RDPBCGR fixes as exactly the last 8 bytes of the X.224 Connection
+// Request PDU when present: type(1)=0x01, flags(1), length(2)=8,
+// requestedProtocols(4), all little-endian.
+func extractNegotiationProtocols(data []byte) (string, bool) {
+	if len(data) < 8 {
+		return "", false
+	}
+	tail := data[len(data)-8:]
+	const typeRDPNegReq = 0x01
+	if tail[0] != typeRDPNegReq {
+		return "", false
+	}
+	if binary.LittleEndian.Uint16(tail[2:4]) != 8 {
+		return "", false
+	}
+	flags := binary.LittleEndian.Uint32(tail[4:8])
+	if flags == 0 {
+		return "RDP", true
+	}
+	var names []string
+	for _, p := range requestedProtocolNames {
+		if flags&p.bit != 0 {
+			names = append(names, p.name)
+		}
+	}
+	if len(names) == 0 {
+		return "RDP", true
+	}
+	return strings.Join(names, "+"), true
+}
+
 func serve(c net.Conn, log *logger, port int) {
 	defer c.Close()
 	host, portText, _ := net.SplitHostPort(c.RemoteAddr().String())
@@ -129,14 +179,18 @@ func serve(c net.Conn, log *logger, port int) {
 	}
 	data := buf[:n]
 
-	log.emit(event{
+	e := event{
 		Port:     port,
 		SrcIP:    host,
 		SrcPort:  srcPort,
 		Event:    "connect",
 		Username: extractUsername(data),
 		Data:     base64.StdEncoding.EncodeToString(data),
-	})
+	}
+	if protocols, ok := extractNegotiationProtocols(data); ok {
+		e.Protocols = protocols
+	}
+	log.emit(e)
 
 	c.Write([]byte(negFailure))
 }

@@ -32,6 +32,36 @@ func TestExtractUsernameOnlyMatchesAllowedCharacters(t *testing.T) {
 	}
 }
 
+func TestExtractNegotiationProtocolsDecodesRequestedBitmask(t *testing.T) {
+	// type=0x01 (TYPE_RDP_NEG_REQ), flags=0x00, length=8 (LE), protocols
+	// bitmask 0x00000003 (TLS | CredSSP) -- the whole 8-byte structure
+	// MS-RDPBCGR fixes as the tail of the X.224 Connection Request.
+	data := append([]byte("Cookie: mstshash=jdoe\r\n"), 0x01, 0x00, 0x08, 0x00, 0x03, 0x00, 0x00, 0x00)
+	got, ok := extractNegotiationProtocols(data)
+	if !ok {
+		t.Fatal("expected RDP_NEG_REQ to be recognized")
+	}
+	if got != "TLS+CredSSP" {
+		t.Fatalf("protocols = %q, want TLS+CredSSP", got)
+	}
+}
+
+func TestExtractNegotiationProtocolsZeroMeansPlainRDP(t *testing.T) {
+	data := append([]byte("Cookie: mstshash=jdoe\r\n"), 0x01, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00)
+	got, ok := extractNegotiationProtocols(data)
+	if !ok || got != "RDP" {
+		t.Fatalf("protocols = %q ok=%v, want RDP true", got, ok)
+	}
+}
+
+func TestExtractNegotiationProtocolsAbsentWhenNoNegReq(t *testing.T) {
+	// A bare cookie with no trailing RDP_NEG_REQ structure at all.
+	data := []byte("Cookie: mstshash=jdoe\r\n")
+	if _, ok := extractNegotiationProtocols(data); ok {
+		t.Fatal("expected no negotiation protocols to be recognized without a trailing RDP_NEG_REQ")
+	}
+}
+
 func TestServeLogsConnectionAndSendsNegFailure(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
