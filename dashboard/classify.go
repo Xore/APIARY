@@ -478,9 +478,16 @@ func classify(e map[string]any, dirSensor string) event {
 			ev.port = "2502"
 		}
 		req := firstNonEmpty(str(e["request"]), str(e["event_type"]))
+		ev.command = str(e["request"])
 		ev.detail = strings.TrimSpace(ev.proto + " " + req)
 		if ev.detail == "" {
 			ev.detail = "probe"
+		}
+		// response is the fake device's own reply bytes -- what was actually
+		// disclosed to the attacker (e.g. a Kamstrup meter's canned readout).
+		// request/event_type were already read above; response never was.
+		if resp := str(e["response"]); resp != "" {
+			ev.detail += "  -> " + resp
 		}
 		return ev
 	}
@@ -561,6 +568,14 @@ func classify(e map[string]any, dirSensor string) event {
 		if ev.user != "" || ev.pass != "" {
 			ev.isLogin = true
 			ev.detail += "  (" + ev.user + " / " + ev.pass + ")"
+		}
+		// tanner's own emulator classifies every request against a detection
+		// name ("index" for benign/unmatched traffic, or an attack signature
+		// like a known scanner/exploit pattern otherwise) -- present in the
+		// stored ES document but never read here at all.
+		if name := tannerDetectionName(e); name != "" && name != "index" {
+			ev.category = firstNonEmpty(ev.category, "tanner: "+name)
+			ev.detail += "  [" + name + "]"
 		}
 		return ev
 	}
@@ -747,6 +762,18 @@ func eventSrcPort(e map[string]any) int {
 		}
 	}
 	return 0
+}
+
+// tannerDetectionName digs response_msg.response.message.detection.name out
+// of a tanner_report.json record -- tanner's own emulator-side
+// classification of the request (a known scanner/exploit signature, or
+// "index" for unmatched/benign traffic).
+func tannerDetectionName(e map[string]any) string {
+	respMsg, _ := e["response_msg"].(map[string]any)
+	resp, _ := respMsg["response"].(map[string]any)
+	msg, _ := resp["message"].(map[string]any)
+	detection, _ := msg["detection"].(map[string]any)
+	return str(detection["name"])
 }
 
 // headerMap coerces a JSON headers object into a plain string map.

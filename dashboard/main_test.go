@@ -178,6 +178,53 @@ func TestConpotPersonaKeepsSensorIdentity(t *testing.T) {
 	}
 }
 
+// TestConpotSurfacesDeviceResponse is a regression test found via a live ES
+// document: conpot logs both "request" and "response" (the fake device's
+// own reply bytes -- what was actually disclosed to the attacker), but only
+// request ever reached the dashboard row.
+func TestConpotSurfacesDeviceResponse(t *testing.T) {
+	ev := classify(map[string]any{
+		"data_type": "kamstrup_protocol", "dst_port": float64(1025),
+		"request": "b'01000d'", "response": "b'403f10001bf202044402668be5e6e00d'",
+	}, "conpot-kamstrup")
+	if ev.command != "b'01000d'" {
+		t.Fatalf("request not captured as command: %+v", ev)
+	}
+	if !strings.Contains(ev.detail, "403f10001bf202044402668be5e6e00d") {
+		t.Fatalf("device response not surfaced in detail: %q", ev.detail)
+	}
+}
+
+// TestClassifyTannerSurfacesDetectionName is a regression test found via a
+// live ES document: tanner's own emulator classifies every request
+// (response_msg.response.message.detection.name), but this was never read
+// at all -- a real attack signature match was indistinguishable from benign
+// traffic in the dashboard.
+func TestClassifyTannerSurfacesDetectionName(t *testing.T) {
+	benign := classify(map[string]any{
+		"method": "GET", "path": "/", "sensor": "tanner",
+		"response_msg": map[string]any{"response": map[string]any{"message": map[string]any{
+			"detection": map[string]any{"name": "index"},
+		}}},
+	}, "tanner")
+	if strings.Contains(benign.detail, "[") {
+		t.Fatalf("benign 'index' detection should not clutter detail: %q", benign.detail)
+	}
+
+	attack := classify(map[string]any{
+		"method": "GET", "path": "/shell.php", "sensor": "tanner",
+		"response_msg": map[string]any{"response": map[string]any{"message": map[string]any{
+			"detection": map[string]any{"name": "php_code_injection"},
+		}}},
+	}, "tanner")
+	if !strings.Contains(attack.detail, "php_code_injection") {
+		t.Fatalf("attack detection name not surfaced: %q", attack.detail)
+	}
+	if attack.category != "tanner: php_code_injection" {
+		t.Fatalf("category = %q, want tanner: php_code_injection", attack.category)
+	}
+}
+
 func TestCampaignCorrelationByNetwork(t *testing.T) {
 	now := time.Now()
 	evs := []storedEvent{
