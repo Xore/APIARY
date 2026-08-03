@@ -132,10 +132,10 @@ jobs:
       # (snare-pages) is `external: true`, already created by
       # honeypot-init's snare-clone job, which this workflow deploys before
       # this step runs.
-      - name: Synchronize honeypot-cowrie/multipot/http/dnp3/dionaea/tanner (#258 split)
+      - name: Synchronize honeypot-cowrie/multipot/http/dnp3/dionaea/tanner/dicompot/dns-honeypot/citrix-honeypot/cisco-asa-honeypot (#258 split)
         shell: bash
         run: |
-          for stack in cowrie multipot http dnp3 dionaea tanner; do
+          for stack in cowrie multipot http dnp3 dionaea tanner dicompot dns-honeypot citrix-honeypot cisco-asa-honeypot; do
             destination="/opt/stacks/honeypot-$stack"
             install -d -m 755 "$destination"
             cp "docker-compose.$stack.yml" "$destination/compose.yml"

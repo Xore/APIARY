@@ -40,6 +40,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -48,6 +49,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -326,11 +328,28 @@ func serveUDP(ip string, r rule, cl *connLogger, bh *blackhole) {
 		fmt.Fprintf(os.Stderr, "portbridge: resolve udp: %v\n", err)
 		return
 	}
-	conn, err := net.ListenUDP(listenNetwork, laddr)
+	// SO_REUSEADDR: a wildcard 0.0.0.0 bind otherwise conflicts with any
+	// existing more-specific bind on the same port (e.g. systemd-resolved's
+	// stub listener on 127.0.0.53/127.0.0.54:53 -- confirmed live on the
+	// VPS: bind(0.0.0.0:53) failed with EADDRINUSE despite nothing showing
+	// up on 0.0.0.0:53 itself in `ss`, and setting this option is what
+	// actually fixed it, tested directly before applying here). Harmless
+	// for every other rule, which never had a competing bind to begin with.
+	lc := net.ListenConfig{Control: func(_, _ string, c syscall.RawConn) error {
+		var setErr error
+		if err := c.Control(func(fd uintptr) {
+			setErr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1)
+		}); err != nil {
+			return err
+		}
+		return setErr
+	}}
+	pc, err := lc.ListenPacket(context.Background(), listenNetwork, laddr.String())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "portbridge: listen udp %s: %v\n", laddr, err)
 		return
 	}
+	conn := pc.(*net.UDPConn)
 	target, err := net.ResolveUDPAddr("udp", r.target)
 	if err != nil {
 		return
