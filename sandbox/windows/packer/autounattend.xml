@@ -209,10 +209,17 @@
           <Order>9</Order>
           <Path>reg add "HKLM\SOFTWARE\Microsoft\Windows Defender\Features" /v TamperProtection /t REG_DWORD /d 4 /f</Path>
         </RunSynchronousCommand>
-        <RunSynchronousCommand wcm:action="add">
-          <Order>10</Order>
-          <Path>reg add "HKLM\SYSTEM\CurrentControlSet\Control\BitLocker" /v PreventDeviceEncryption /t REG_DWORD /d 1 /f</Path>
-        </RunSynchronousCommand>
+        <!-- No BitLocker command here on purpose: see the oobeSystem
+             FirstLogonCommands block below (Order 1) for why. A
+             specialize-pass RunSynchronousCommand writing this same key was
+             the only setup-time change between a build that installed
+             cleanly and one that died with 0x8007000D (ERROR_INVALID_DATA)
+             before writing a single gigabyte, Setup rejecting the answer
+             file outright. That command was removed for exactly that
+             reason and must not be re-added here. Confirmed live, again,
+             that it had regressed back into this block and reproduced a
+             Setup crash, before this comment was added to make the
+             prohibition impossible to miss on a future edit. -->
       </RunSynchronous>
     </component>
 
