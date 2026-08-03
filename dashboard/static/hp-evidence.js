@@ -96,6 +96,16 @@
     }
     filterBody("");
 
+    // The evidence viewer can be opened from inside another already-open
+    // modal (e.g. "View logs" in the settings modal) -- both share the
+    // same base .modal/.modal-backdrop z-index (theme.css is vendored
+    // byte-for-byte from Xore/theme, so that can't be overridden here),
+    // so which one paints on top otherwise depends on DOM order alone.
+    // Moving both nodes to the end of <body> on every open guarantees
+    // this modal always wins regardless of what else is currently open.
+    document.body.appendChild(backdrop);
+    document.body.appendChild(modal);
+
     backdrop.inert = false;
     backdrop.setAttribute("aria-hidden", "false");
     backdrop.classList.add("open");
