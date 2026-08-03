@@ -320,6 +320,15 @@ func classify(e map[string]any, dirSensor string) event {
 			ev.command = str(e["data"])
 			ev.detail += "  payload: " + ev.command
 		}
+		if hdr := headerMap(e["headers"]); len(hdr) > 0 {
+			if ev.fingerprint = headerVal(hdr, "x-ja4"); ev.fingerprint != "" {
+				ev.fingerKind = "JA4"
+			} else if ev.fingerprint = headerVal(hdr, "x-ja3"); ev.fingerprint != "" {
+				ev.fingerKind = "JA3"
+			} else if ev.fingerprint = headerVal(hdr, "user-agent"); ev.fingerprint != "" {
+				ev.fingerKind = "User-Agent"
+			}
+		}
 		return ev
 	}
 
@@ -338,6 +347,20 @@ func classify(e map[string]any, dirSensor string) event {
 		if kind == "cve_2018_0101_payload" {
 			ev.command = str(e["data"])
 			ev.detail += "  payload: " + ev.command
+		}
+		if kind == "ike_unexpected_exchange" {
+			if d := str(e["data"]); d != "" {
+				ev.detail += " (type " + d + ")"
+			}
+		}
+		if hdr := headerMap(e["headers"]); len(hdr) > 0 {
+			if ev.fingerprint = headerVal(hdr, "x-ja4"); ev.fingerprint != "" {
+				ev.fingerKind = "JA4"
+			} else if ev.fingerprint = headerVal(hdr, "x-ja3"); ev.fingerprint != "" {
+				ev.fingerKind = "JA3"
+			} else if ev.fingerprint = headerVal(hdr, "user-agent"); ev.fingerprint != "" {
+				ev.fingerKind = "User-Agent"
+			}
 		}
 		return ev
 	}

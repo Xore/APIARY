@@ -29,19 +29,21 @@ import (
 )
 
 type event struct {
-	Time    string `json:"time"`
-	Sensor  string `json:"sensor"`
-	Persona string `json:"persona_id"`
-	Site    string `json:"site_id"`
-	Asset   string `json:"asset_id"`
-	Org     string `json:"organization"`
-	Proto   string `json:"proto"`
-	Port    int    `json:"port"`
-	SrcIP   string `json:"src_ip"`
-	SrcPort int    `json:"src_port"`
-	Event   string `json:"event"`
-	Path    string `json:"path,omitempty"`
-	Data    string `json:"data,omitempty"`
+	Time      string            `json:"time"`
+	Sensor    string            `json:"sensor"`
+	Persona   string            `json:"persona_id"`
+	Site      string            `json:"site_id"`
+	Asset     string            `json:"asset_id"`
+	Org       string            `json:"organization"`
+	Proto     string            `json:"proto"`
+	Port      int               `json:"port"`
+	SrcIP     string            `json:"src_ip"`
+	SrcPort   int               `json:"src_port"`
+	Event     string            `json:"event"`
+	Path      string            `json:"path,omitempty"`
+	Data      string            `json:"data,omitempty"`
+	UserAgent string            `json:"user_agent,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
 }
 
 type logger struct {
@@ -105,7 +107,20 @@ type handler struct {
 
 func (h *handler) log2(r *http.Request, kind, reqPath, data string) {
 	ip, port := srcIP(r)
-	h.log.emit(event{Port: h.port, SrcIP: ip, SrcPort: port, Event: kind, Path: reqPath, Data: data})
+	h.log.emit(event{Port: h.port, SrcIP: ip, SrcPort: port, Event: kind, Path: reqPath, Data: data,
+		UserAgent: r.UserAgent(), Headers: headerMap(r)})
+}
+
+// headerMap flattens net/http's []string-per-key header representation
+// into one string per key -- which client (curl/nmap/nuclei/a hand-rolled
+// exploit script) hit this decoy, and with what else, was previously
+// available on every request and simply never read.
+func headerMap(r *http.Request) map[string]string {
+	m := make(map[string]string, len(r.Header))
+	for k, v := range r.Header {
+		m[k] = strings.Join(v, ", ")
+	}
+	return m
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

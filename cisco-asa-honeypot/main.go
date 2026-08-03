@@ -19,19 +19,21 @@ import (
 )
 
 type event struct {
-	Time    string `json:"time"`
-	Sensor  string `json:"sensor"`
-	Persona string `json:"persona_id"`
-	Site    string `json:"site_id"`
-	Asset   string `json:"asset_id"`
-	Org     string `json:"organization"`
-	Proto   string `json:"proto"`
-	Port    int    `json:"port"`
-	SrcIP   string `json:"src_ip"`
-	SrcPort int    `json:"src_port"`
-	Event   string `json:"event"`
-	Path    string `json:"path,omitempty"`
-	Data    string `json:"data,omitempty"`
+	Time      string            `json:"time"`
+	Sensor    string            `json:"sensor"`
+	Persona   string            `json:"persona_id"`
+	Site      string            `json:"site_id"`
+	Asset     string            `json:"asset_id"`
+	Org       string            `json:"organization"`
+	Proto     string            `json:"proto"`
+	Port      int               `json:"port"`
+	SrcIP     string            `json:"src_ip"`
+	SrcPort   int               `json:"src_port"`
+	Event     string            `json:"event"`
+	Path      string            `json:"path,omitempty"`
+	Data      string            `json:"data,omitempty"`
+	UserAgent string            `json:"user_agent,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
 }
 
 type logger struct {
@@ -167,7 +169,12 @@ func handleIKEPacket(conn *net.UDPConn, addr *net.UDPAddr, data []byte, log *log
 		log.emit(event{Port: port, SrcIP: addr.IP.String(), SrcPort: addr.Port, Event: "ike_no_further_reply"})
 
 	default:
-		log.emit(event{Port: port, SrcIP: addr.IP.String(), SrcPort: addr.Port, Event: "ike_unexpected_exchange"})
+		// Which exchange type an attacker sent out-of-sequence (e.g.
+		// AGGRESSIVE mode probing straight past SA_INIT) is real recon
+		// signal that was computed by parseIKEHeader and then dropped --
+		// only the fact that *something* unexpected happened reached ES.
+		log.emit(event{Port: port, SrcIP: addr.IP.String(), SrcPort: addr.Port, Event: "ike_unexpected_exchange",
+			Data: strconv.Itoa(int(exchangeType))})
 	}
 }
 
