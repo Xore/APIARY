@@ -31,6 +31,44 @@ func TestClustersDataAppliesFilter(t *testing.T) {
 	}
 }
 
+// TestClustersDataOrderIsDeterministicOnFullTie (#40): clustersData's sort
+// used to compare only Sources then Events, with no further tiebreaker --
+// two small clusters tying on both (routine: most clusters are small) left
+// their relative order to sort.Slice's lack of a stability guarantee and
+// Go's per-process randomized map iteration order (groups is a map), so two
+// dashboard instances reading byte-identical underlying events could render
+// /clusters in a different row order. Runs over many fresh stores (each
+// rebuilds its map from scratch) and requires every run to agree.
+func TestClustersDataOrderIsDeterministicOnFullTie(t *testing.T) {
+	events := []storedEvent{
+		{SrcIP: "8.8.8.8", Sensor: "cowrie", Fingerprint: "aaa-tied-hassh"},
+		{SrcIP: "8.8.4.4", Sensor: "cowrie", Fingerprint: "aaa-tied-hassh"},
+		{SrcIP: "9.9.9.9", Sensor: "cowrie", Fingerprint: "zzz-tied-hassh"},
+		{SrcIP: "9.9.9.8", Sensor: "cowrie", Fingerprint: "zzz-tied-hassh"},
+	}
+	var want []string
+	for i := 0; i < 20; i++ {
+		s := &store{events: append([]storedEvent(nil), events...)}
+		page := s.clustersData(filter{})
+		got := make([]string, len(page.Rows))
+		for j, r := range page.Rows {
+			got[j] = r.Value
+		}
+		if want == nil {
+			want = got
+			continue
+		}
+		if len(got) != len(want) {
+			t.Fatalf("run %d: row count changed: got %v, want %v", i, got, want)
+		}
+		for j := range got {
+			if got[j] != want[j] {
+				t.Fatalf("run %d: order is not deterministic across runs: got %v, want %v", i, got, want)
+			}
+		}
+	}
+}
+
 func TestClustersDataUnfilteredCallSiteStaysUnfiltered(t *testing.T) {
 	s := &store{events: []storedEvent{
 		{SrcIP: "8.8.8.8", Sensor: "cowrie", Fingerprint: "shared-hassh"},

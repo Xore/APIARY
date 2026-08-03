@@ -370,7 +370,18 @@ func (s *store) rebuild() {
 			p.Link = mapPointEventsURL(p.City, p.Country)
 			snap.MapPoints = append(snap.MapPoints, p)
 		}
-		sort.Slice(snap.MapPoints, func(i, j int) bool { return snap.MapPoints[i].Count > snap.MapPoints[j].Count })
+		sort.Slice(snap.MapPoints, func(i, j int) bool {
+			if snap.MapPoints[i].Count != snap.MapPoints[j].Count {
+				return snap.MapPoints[i].Count > snap.MapPoints[j].Count
+			}
+			// #40: City+Country ties are common (many single-event markers),
+			// and a Count-only comparator gives sort.Slice no way to settle
+			// them consistently across independently-running instances.
+			if snap.MapPoints[i].Country != snap.MapPoints[j].Country {
+				return snap.MapPoints[i].Country < snap.MapPoints[j].Country
+			}
+			return snap.MapPoints[i].City < snap.MapPoints[j].City
+		})
 		if len(snap.MapPoints) > 500 {
 			snap.MapPoints = snap.MapPoints[:500]
 		}
