@@ -122,6 +122,29 @@ services:
       - no-new-privileges:true
     networks:
       - dionaea_net
+    # #41: dionaea never had a healthcheck at all, so a real production
+    # stall (process alive, container "running", but the log_json handler
+    # silently stopped writing for hours) was invisible everywhere except a
+    # human noticing stale data on the dashboard -- "healthy" in the
+    # Services pane was really just Docker's own container-running state,
+    # not a checked signal. python3 is the only probe tool present in this
+    # image (measured: no nc/curl/wget); a plain TCP connect to 445 (SMB,
+    # one of the ports the capability measurement above already confirms is
+    # reliably bound) is the same "prove the listener is up" floor several
+    # of this repo's own Go sensors already use for their own healthchecks
+    # -- it won't catch every possible internal-stall mode (a wedged event
+    # loop can still hold an open listening socket), but it catches a
+    # crashed or never-bound process, which is strictly more than nothing.
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; socket.create_connection(('127.0.0.1', 445), 3).close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    # Restarted by the autoheal sidecar (main stack) on unhealthy -- same
+    # reasoning as dnp3/conpot/dns-honeypot, see #119.
+    labels:
+      - autoheal=true
     deploy:
       resources:
         limits:

@@ -109,6 +109,44 @@ func TestRebuildFallsBackToLocalFileWhenESUnavailable(t *testing.T) {
 	}
 }
 
+// TestRebuildNeverMasksSuricataOrPortbridgeWithAnEmptyESResult (#41): both
+// ship to their own index families (suricata-*, portbridge-v2-*), never
+// honeypot-v2-* under event.sensor:"suricata"/"portbridge" the way every
+// other sensor does -- loadSensorEventsES querying honeypot-v2-* for either
+// "successfully" returns zero hits every time (reproduced here the same
+// way: an ES stub with nothing registered for these two names, exactly what
+// a real cluster returns), which #34 was silently treating as "ES has this
+// sensor covered" and skipping the local read that actually has the data.
+// This is the exact regression a live production check found after #34/#39
+// shipped: no suricata alerts anywhere in the dashboard.
+func TestRebuildNeverMasksSuricataOrPortbridgeWithAnEmptyESResult(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	writeLog(t, root, "suricata/eve.json", map[string]any{
+		"timestamp": now, "event_type": "alert", "src_ip": "198.51.100.7", "dest_port": 22.0, "proto": "TCP",
+		"alert": map[string]any{"signature": "SYNTHETIC TEST ALERT", "category": "Test", "severity": 3.0},
+	})
+
+	// Registered for cowrie only, matching production where honeypot-v2-*
+	// genuinely has no event.sensor:"suricata"/"portbridge" documents at
+	// all -- the stub answers those with a valid, empty hit list, not an
+	// error, which is exactly what makes this bug silent.
+	esSrv := httptest.NewServer(esSensorAndOverviewStub(t, map[string][]map[string]any{}))
+	defer esSrv.Close()
+	s := &store{dir: root, es: newESClient(esSrv.URL, "")}
+	s.rebuild()
+
+	found := false
+	for _, ev := range s.getEvents() {
+		if ev.Alert == "SYNTHETIC TEST ALERT" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("suricata alert from the local file must not be masked by ES's empty (but valid) result: %+v", s.getEvents())
+	}
+}
+
 // TestRebuildSkipsTheEnrichedDirectoryAsItsOwnSensor (#38/#34):
 // ip-enrichment-worker's own output directory carries the exact same
 // underlying events as cowrie/dionaea/conpot/dns-honeypot/
