@@ -5,8 +5,12 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	dicom "github.com/grailbio/go-dicom"
+	"github.com/grailbio/go-dicom/dicomtag"
 )
 
 func TestGetenvFallsBackToDefault(t *testing.T) {
@@ -94,6 +98,33 @@ func TestDecodeProxyRewritesRemoteAddrFromV1Header(t *testing.T) {
 	wrapped := decodeProxy(conn, true)
 	if ip := srcIP(wrapped); ip != "203.0.113.9" {
 		t.Fatalf("srcIP after decodeProxy = %q, want 203.0.113.9", ip)
+	}
+}
+
+func TestFormatQueryFilterSurfacesPatientNameSearch(t *testing.T) {
+	elements := []*dicom.Element{
+		{Tag: dicomtag.PatientName, VR: "PN", Value: []interface{}{"DOE^JOHN"}},
+		{Tag: dicomtag.PatientID, VR: "LO", Value: []interface{}{"12345"}},
+		{Tag: dicomtag.Tag{Group: 0x0010, Element: 0x0020}, VR: "LO", Value: nil}, // empty value, must be skipped
+	}
+	got := formatQueryFilter(elements)
+	if !strings.Contains(got, "PatientName") || !strings.Contains(got, "DOE^JOHN") {
+		t.Fatalf("expected PatientName search term surfaced, got %q", got)
+	}
+	if !strings.Contains(got, "PatientID") || !strings.Contains(got, "12345") {
+		t.Fatalf("expected PatientID surfaced, got %q", got)
+	}
+}
+
+func TestJoinNonEmptySkipsMissingSide(t *testing.T) {
+	if got := joinNonEmpty("1.2.840", ""); got != "1.2.840" {
+		t.Fatalf("joinNonEmpty with empty filter = %q, want sopClassUID only", got)
+	}
+	if got := joinNonEmpty("", "PatientName=X"); got != "PatientName=X" {
+		t.Fatalf("joinNonEmpty with empty sopClassUID = %q, want filter only", got)
+	}
+	if got := joinNonEmpty("1.2.840", "PatientName=X"); got != "1.2.840 | PatientName=X" {
+		t.Fatalf("joinNonEmpty = %q, want both joined", got)
 	}
 }
 

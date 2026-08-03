@@ -28,13 +28,16 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	dicom "github.com/grailbio/go-dicom"
+	"github.com/grailbio/go-dicom/dicomtag"
 	"github.com/nsmfoo/dicompot"
 	"github.com/nsmfoo/dicompot/dimse"
 )
@@ -116,6 +119,38 @@ func srcIP(c net.Conn) string {
 	return host
 }
 
+// joinNonEmpty joins sopClassUID and filter with " | ", skipping either side
+// when empty rather than leaving a dangling separator.
+func joinNonEmpty(sopClassUID, filter string) string {
+	if filter == "" {
+		return sopClassUID
+	}
+	if sopClassUID == "" {
+		return filter
+	}
+	return sopClassUID + " | " + filter
+}
+
+// formatQueryFilter renders a C-FIND/C-MOVE/C-GET query dataset as a
+// printable "(tag)[Name]=value, ..." summary -- which PatientName/PatientID/
+// StudyDate an attacker searched for is real recon signal (probing for a
+// specific patient's imaging) that the elements slice previously carried
+// into these callbacks and then discarded entirely.
+func formatQueryFilter(elements []*dicom.Element) string {
+	parts := make([]string, 0, len(elements))
+	for _, el := range elements {
+		if el == nil || len(el.Value) == 0 {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s=%v", dicomtag.DebugString(el.Tag), el.Value))
+	}
+	s := strings.Join(parts, ", ")
+	if len(s) > 512 {
+		s = s[:512] + "(...)"
+	}
+	return s
+}
+
 // paramsFor builds a fresh ServiceProviderParams per connection so its
 // callbacks close over this connection's own ip -- see the package doc
 // comment above for why that's necessary (ConnectionState carries nothing).
@@ -127,19 +162,19 @@ func paramsFor(log *logger, aeTitle string, port int, ip string) dicompot.Servic
 			log.emit(event{Port: port, SrcIP: ip, Event: "c_echo"})
 			return dimse.Success
 		},
-		CFind: func(_ dicompot.ConnectionState, _ string, sopClassUID string, _ []*dicom.Element, _ string, ch chan dicompot.CFindResult) {
-			log.emit(event{Port: port, SrcIP: ip, Event: "c_find", Data: sopClassUID})
+		CFind: func(_ dicompot.ConnectionState, _ string, sopClassUID string, elements []*dicom.Element, _ string, ch chan dicompot.CFindResult) {
+			log.emit(event{Port: port, SrcIP: ip, Event: "c_find", Data: joinNonEmpty(sopClassUID, formatQueryFilter(elements))})
 			// No dataset behind this honeypot (#413): every C-FIND
 			// legitimately matches nothing. The attempt itself, not a
 			// realistic result set, is the signal worth capturing.
 			close(ch)
 		},
-		CMove: func(_ dicompot.ConnectionState, _ string, sopClassUID string, _ []*dicom.Element, _ string, ch chan dicompot.CMoveResult) {
-			log.emit(event{Port: port, SrcIP: ip, Event: "c_move", Data: sopClassUID})
+		CMove: func(_ dicompot.ConnectionState, _ string, sopClassUID string, elements []*dicom.Element, _ string, ch chan dicompot.CMoveResult) {
+			log.emit(event{Port: port, SrcIP: ip, Event: "c_move", Data: joinNonEmpty(sopClassUID, formatQueryFilter(elements))})
 			close(ch)
 		},
-		CGet: func(_ dicompot.ConnectionState, _ string, sopClassUID string, _ []*dicom.Element, _ string, ch chan dicompot.CMoveResult) {
-			log.emit(event{Port: port, SrcIP: ip, Event: "c_get", Data: sopClassUID})
+		CGet: func(_ dicompot.ConnectionState, _ string, sopClassUID string, elements []*dicom.Element, _ string, ch chan dicompot.CMoveResult) {
+			log.emit(event{Port: port, SrcIP: ip, Event: "c_get", Data: joinNonEmpty(sopClassUID, formatQueryFilter(elements))})
 			close(ch)
 		},
 		// CStore deliberately blocked-but-logged: rejecting with
