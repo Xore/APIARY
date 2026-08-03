@@ -258,11 +258,13 @@ func TestRebuildRejoinsCachedEventOnceViaMapCatchesUp(t *testing.T) {
 		}},
 	})
 
+	// #39: the aggregate Unattributed count is Elasticsearch's own job now
+	// (es_aggregate.go) -- what this test is actually about, the retry
+	// property itself, is fully covered below by checking each event's own
+	// SrcIP directly, unaffected by that migration since the local via_port
+	// join in aggregate.go's processEntry is unchanged.
 	s := &store{dir: root}
 	s.rebuild()
-	if s.get().Unattributed != 1 {
-		t.Fatalf("cycle 1: Unattributed=%d, want 1 (no portbridge record exists yet)", s.get().Unattributed)
-	}
 	for _, event := range s.getEvents() {
 		if event.SrcIP != "" {
 			t.Fatalf("cycle 1: event was attributed before any portbridge record existed: %+v", event)
@@ -277,9 +279,6 @@ func TestRebuildRejoinsCachedEventOnceViaMapCatchesUp(t *testing.T) {
 	})
 	s.rebuild()
 
-	if s.get().Unattributed != 0 {
-		t.Fatalf("cycle 2: Unattributed=%d, want 0 (the cached event must still get a chance to join)", s.get().Unattributed)
-	}
 	found := false
 	for _, event := range s.getEvents() {
 		if event.SrcIP == "203.0.113.9" {
