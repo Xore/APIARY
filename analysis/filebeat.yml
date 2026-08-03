@@ -12,23 +12,33 @@
 filebeat.inputs:
   # Honeypot sensor logs (cowrie / http / multipot / dionaea / conpot / tanner / dicompot / dns-honeypot / citrix-honeypot / cisco-asa-honeypot / rdp-honeypot).
   # Each sensor writes to its own subdirectory: /logs/<service>/<file>.json
+  #
+  # #37/#38: cowrie, dionaea, every conpot persona, dns-honeypot, and
+  # cisco-asa-honeypot aren't PROXY-protocol wrapped, so their own raw logs
+  # only ever carry the tunnel peer address (10.8.0.1), never the real
+  # attacker IP -- that used to be joined against portbridge's connection
+  # log at dashboard read time. ip-enrichment-worker now does that join at
+  # ingest time instead and writes an already-correct copy to
+  # /logs/enriched/*.json, which is what gets tailed for these five sensors
+  # -- their own raw paths are deliberately absent from this list so the
+  # event isn't shipped twice. Every other sensor already gets the real IP
+  # directly via PROXY protocol (or, for cisco-asa-honeypot's own WebVPN/
+  # HTTPS side, is passed through unchanged by the worker) and is tailed
+  # from its raw path as before. See ip-enrichment-worker/main.go's package
+  # doc comment for the full design.
   - type: filestream
     id: honeypot-json
     paths:
       - /logs/*.json
-      - /logs/cowrie/*.json
       - /logs/http-honeypot/*.json
       - /logs/api-honeypot/*.json
       - /logs/multipot/*.json
-      - /logs/dionaea/dionaea.json
-      - /logs/conpot*/*.json
       - /logs/tanner/*.json
       - /logs/dnp3/*.json
       - /logs/dicompot/*.json
-      - /logs/dns-honeypot/*.json
       - /logs/citrix-honeypot/*.json
-      - /logs/cisco-asa-honeypot/*.json
       - /logs/rdp-honeypot/*.json
+      - /logs/enriched/*.json
     # Keep an extra guard for a top-level Suricata mount. Explicit per-sensor
     # paths above ensure incidents and portbridge metadata cannot be decoded
     # into the shared honeypot namespace.
