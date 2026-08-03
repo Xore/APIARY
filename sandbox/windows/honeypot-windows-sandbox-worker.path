@@ -1,12 +1,35 @@
 [Unit]
-Description=Watch for honeypot Windows sandbox detonation requests
-Documentation=file:/opt/honeypot-sandbox/windows/IMPLEMENTATION_PLAN.md
+Description=Watch for dashboard Windows sandbox-analysis requests
+Documentation=file:/usr/local/libexec/honeypot-sandbox/windows/IMPLEMENTATION_PLAN.md
 After=libvirtd.service docker.service
 
 [Path]
-# The dashboard writes {sha256}.request here; it never touches libvirt itself.
-PathChanged=/windows-sandbox-requests
-Unit=honeypot-windows-sandbox-worker.service
+# This unit runs on the bare host, not inside the dashboard container --
+# "/windows-sandbox-requests" (the container-side mount point) would never
+# exist here and this path would never fire. The real host path is the
+# dashboard container's bind-mount *source*
+# (docker-compose.dashboard.yml: /var/lib/honeypot-windows-sandbox/requests/pending
+# -> /windows-sandbox-requests), which must match
+# WINDOWS_SANDBOX_REQUEST_DIR in /etc/default/honeypot-windows-sandbox.
+#
+# Triggers the hash-resolution/submission-handoff service, NOT the
+# detonation worker directly -- that used to point straight at
+# honeypot-windows-sandbox-worker.service, which meant a request the
+# dashboard writes (a bare {sha256}.request, no sample bytes -- see
+# sandbox_submit.go's own comment: "The dashboard writes no sample data")
+# got handed straight to run_pending.sh, which finds no sample at
+# $WINDOWS_SANDBOX_SAMPLES_DIR/$sha and drops the request every time. Mirrors
+# the Linux sandbox's own honeypot-sandbox-web-requests.path exactly: this
+# is the *only* installed path trigger for this spool, and
+# honeypot-windows-sandbox-web-requests.service is what explicitly starts
+# honeypot-windows-sandbox-worker.service afterward, once the sample bytes
+# actually exist. Two independent path units both watching this same
+# directory (the previous shape, briefly, while this fix was being written)
+# would race: systemd fires both roughly concurrently, and there is no
+# guarantee resolution finishes before run_pending.sh's own trigger goes
+# looking for a sample that is not there yet.
+PathChanged=/var/lib/honeypot-windows-sandbox/requests/pending
+Unit=honeypot-windows-sandbox-web-requests.service
 
 [Install]
 WantedBy=multi-user.target

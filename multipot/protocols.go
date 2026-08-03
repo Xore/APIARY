@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"time"
@@ -163,6 +164,10 @@ func handleRedis(c net.Conn, log *logger, port int) {
 				Username: user, Password: pass})
 			fmt.Fprint(c, "+OK\r\n")
 		case "PING":
+			// Not logged: a bare PING carries no reconnaissance signal of
+			// its own and would otherwise be the single highest-volume
+			// event this handler produces (many clients/scanners PING as
+			// a pure liveness probe before doing anything else).
 			fmt.Fprint(c, "+PONG\r\n")
 		case "INFO":
 			log.emit(event{Proto: "redis", Port: port, SrcIP: ip, Event: "command", Command: cmd})
@@ -172,20 +177,31 @@ func handleRedis(c net.Conn, log *logger, port int) {
 				"# Clients\r\nconnected_clients:12\r\n# Keyspace\r\ndb0:keys=18443,expires=15221,avg_ttl=1874032\r\n"
 			fmt.Fprintf(c, "$%d\r\n%s\r\n", len(body), body)
 		case "DBSIZE":
+			log.emit(event{Proto: "redis", Port: port, SrcIP: ip, Event: "command", Command: cmd})
 			fmt.Fprint(c, ":18443\r\n")
 		case "SELECT":
+			// Was answered but never logged at all -- a real recon step
+			// (which logical DB an attacker chose to poke at) went
+			// completely unrecorded, not merely unstructured.
+			log.emit(event{Proto: "redis", Port: port, SrcIP: ip, Event: "command", Command: full})
 			fmt.Fprint(c, "+OK\r\n")
 		case "KEYS":
+			log.emit(event{Proto: "redis", Port: port, SrcIP: ip, Event: "command", Command: full})
 			// Look like a portal cache holding sessions / rate-limit / order data.
 			writeRESPArray(c, []string{
 				"sess:9f2a7c4e1b8d6035", "sess:3b4f8e02d6c5a1b9",
 				"cache:orders:recent", "cache:catalog:v3",
 				"rate:ip:203.0.113.88", "queue:email:pending",
 			})
-		case "TYPE":
-			fmt.Fprint(c, "+string\r\n")
-		case "TTL":
-			fmt.Fprint(c, ":3600\r\n")
+		case "TYPE", "TTL":
+			// Which key an attacker probed after KEYS/GET is worth keeping,
+			// same reasoning as SELECT above.
+			log.emit(event{Proto: "redis", Port: port, SrcIP: ip, Event: "command", Command: full})
+			if cmd == "TYPE" {
+				fmt.Fprint(c, "+string\r\n")
+			} else {
+				fmt.Fprint(c, ":3600\r\n")
+			}
 		case "CONFIG":
 			// CONFIG GET <param> — answer plausibly; CONFIG SET falls to default.
 			if len(args) >= 3 && strings.EqualFold(args[1], "GET") {
@@ -200,6 +216,7 @@ func handleRedis(c net.Conn, log *logger, port int) {
 				fmt.Fprint(c, "+OK\r\n")
 			}
 		case "GET":
+			log.emit(event{Proto: "redis", Port: port, SrcIP: ip, Event: "command", Command: full})
 			fmt.Fprint(c, "$-1\r\n") // key miss — realistic and harmless
 		case "QUIT":
 			fmt.Fprint(c, "+OK\r\n")
@@ -356,6 +373,14 @@ func handlePostgres(c net.Conn, log *logger, port int) {
 	}
 	params := parsePGParams(body[4:]) // skip the 4-byte protocol version
 	user := params["user"]
+	// Which database an attacker targets is real recon signal (e.g. probing
+	// for "postgres" vs. an app-specific name) -- was parsed into params
+	// alongside "user" but never made it into the logged event.
+	database := params["database"]
+	dbDetail := ""
+	if database != "" {
+		dbDetail = "database=" + database
+	}
 
 	// AuthenticationCleartextPassword: 'R' Int32(8) Int32(3)
 	c.Write([]byte{'R', 0, 0, 0, 8, 0, 0, 0, 3})
@@ -370,11 +395,11 @@ func handlePostgres(c net.Conn, log *logger, port int) {
 				pw := make([]byte, n)
 				readFull(r, pw)
 				log.emit(event{Proto: "postgres", Port: port, SrcIP: ip, Event: "login",
-					Username: user, Password: strings.TrimRight(string(pw), "\x00")})
+					Username: user, Password: strings.TrimRight(string(pw), "\x00"), Data: dbDetail})
 			}
 		}
 	} else {
-		log.emit(event{Proto: "postgres", Port: port, SrcIP: ip, Event: "login", Username: user})
+		log.emit(event{Proto: "postgres", Port: port, SrcIP: ip, Event: "login", Username: user, Data: dbDetail})
 	}
 
 	// ErrorResponse
@@ -446,14 +471,16 @@ func handleElastic(c net.Conn, log *logger, port int) {
 	ip := srcIP(c)
 	r := bufioReader(c)
 	reqLine, _ := readLine(r)
-	// Drain headers.
-	for {
-		h, ok := readLine(r)
-		if h == "" || !ok {
-			break
-		}
+	// A request body here is the actual interesting payload -- a crafted
+	// _search query (e.g. a Painless scripting injection attempt), not
+	// just which path was hit. Previously the body was never read at all,
+	// only the headers drained and discarded.
+	contentLength := readHTTPHeaders(r)
+	e := event{Proto: "elasticsearch", Port: port, SrcIP: ip, Event: "http_request", Command: reqLine}
+	if body := readHTTPBody(r, contentLength); body != "" {
+		e.Data = body
 	}
-	log.emit(event{Proto: "elasticsearch", Port: port, SrcIP: ip, Event: "http_request", Command: reqLine})
+	log.emit(e)
 
 	body := `{
   "name" : "es-logs-01",
@@ -477,13 +504,15 @@ func handleDocker(c net.Conn, log *logger, port int) {
 	ip := srcIP(c)
 	r := bufioReader(c)
 	reqLine, _ := readLine(r)
-	for {
-		h, ok := readLine(r)
-		if h == "" || !ok {
-			break
-		}
+	// A container-create/exec POST body is the actual attack (e.g. a
+	// privileged container spec or a malicious image reference) -- was
+	// never read at all before, only the headers drained and discarded.
+	contentLength := readHTTPHeaders(r)
+	e := event{Proto: "docker", Port: port, SrcIP: ip, Event: "http_request", Command: reqLine}
+	if reqBody := readHTTPBody(r, contentLength); reqBody != "" {
+		e.Data = reqBody
 	}
-	log.emit(event{Proto: "docker", Port: port, SrcIP: ip, Event: "http_request", Command: reqLine})
+	log.emit(e)
 	parts := strings.Fields(reqLine)
 	path := "/"
 	if len(parts) > 1 {
@@ -503,6 +532,42 @@ func handleDocker(c net.Conn, log *logger, port int) {
 		body = `[{"Id":"4a6f9b2d71ce","Names":["/gitlab-runner"],"Image":"gitlab/gitlab-runner:alpine-v17.1.0","State":"running","Status":"Up 12 days"},{"Id":"92de51c71fa8","Names":["/registry-cache"],"Image":"registry:2.8.3","State":"running","Status":"Up 12 days"}]`
 	}
 	fmt.Fprintf(c, "HTTP/1.1 %s\r\nApi-Version: 1.44\r\nDocker-Experimental: false\r\nOstype: linux\r\nServer: Docker/25.0.5 (linux)\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", status, len(body), body)
+}
+
+// readHTTPHeaders drains a minimal HTTP header block, returning the parsed
+// Content-Length (0 if absent/unparseable) so the caller can read exactly
+// the request body a real HTTP server would, rather than either dropping
+// it or blocking on a body that was never sent.
+func readHTTPHeaders(r *bufio.Reader) int {
+	contentLength := 0
+	for {
+		h, ok := readLine(r)
+		if h == "" || !ok {
+			break
+		}
+		if name, value, found := strings.Cut(h, ":"); found && strings.EqualFold(strings.TrimSpace(name), "Content-Length") {
+			contentLength = atoiSafe(strings.TrimSpace(value))
+		}
+	}
+	return contentLength
+}
+
+// readHTTPBody reads up to contentLength bytes (capped, since this is a
+// honeypot reading attacker-controlled input, not a real HTTP server) and
+// returns a printable preview.
+func readHTTPBody(r *bufio.Reader, contentLength int) string {
+	if contentLength <= 0 {
+		return ""
+	}
+	if contentLength > 8192 {
+		contentLength = 8192
+	}
+	buf := make([]byte, contentLength)
+	n, _ := io.ReadFull(r, buf)
+	if n == 0 {
+		return ""
+	}
+	return printable(buf[:n])
 }
 
 /* ---------------- Generic (raw byte logger) ----------------
@@ -596,4 +661,325 @@ func readFull(r interface{ Read([]byte) (int, error) }, buf []byte) (int, error)
 // bufioReader wraps a conn once per call site; fine for our short handlers.
 func bufioReader(c net.Conn) *bufio.Reader {
 	return bufio.NewReader(c)
+}
+
+/* ---------------- POP3 (port 110) ----------------
+   #238: ported from heralding's pop3.py -- a textbook line-based command
+   loop (USER/PASS/QUIT), structurally identical to handleFTP above. Always
+   rejects auth, logs the attempt. */
+
+func handlePOP3(c net.Conn, log *logger, port int) {
+	ip := srcIP(c)
+	r := bufio.NewReader(c)
+	fmt.Fprint(c, "+OK POP3 server ready\r\n")
+
+	var user string
+	for {
+		line, ok := readLine(r)
+		if line == "" && !ok {
+			return
+		}
+		bumpDeadline(c)
+		cmd, arg, _ := strings.Cut(line, " ")
+		switch strings.ToUpper(cmd) {
+		case "USER":
+			user = arg
+			fmt.Fprint(c, "+OK\r\n")
+		case "PASS":
+			log.emit(event{Proto: "pop3", Port: port, SrcIP: ip, Event: "login",
+				Username: user, Password: arg})
+			fmt.Fprint(c, "-ERR authentication failed\r\n")
+		case "QUIT":
+			fmt.Fprint(c, "+OK Goodbye\r\n")
+			return
+		case "":
+			return
+		default:
+			log.emit(event{Proto: "pop3", Port: port, SrcIP: ip, Event: "command", Command: line})
+			fmt.Fprint(c, "-ERR unknown command\r\n")
+		}
+	}
+}
+
+/* ---------------- IMAP (port 143) ----------------
+   #238: ported from heralding's imap.py -- same shape as POP3 above, but
+   IMAP's tagged-command convention means every response must echo back the
+   client's own tag rather than a fixed prefix. Always rejects LOGIN, logs
+   the attempt. */
+
+func handleIMAP(c net.Conn, log *logger, port int) {
+	ip := srcIP(c)
+	r := bufio.NewReader(c)
+	fmt.Fprint(c, "* OK IMAP4rev1 Service Ready\r\n")
+
+	for {
+		line, ok := readLine(r)
+		if line == "" && !ok {
+			return
+		}
+		bumpDeadline(c)
+		tag, rest, _ := strings.Cut(line, " ")
+		if tag == "" {
+			return
+		}
+		cmd, arg, _ := strings.Cut(rest, " ")
+		switch strings.ToUpper(cmd) {
+		case "CAPABILITY":
+			fmt.Fprint(c, "* CAPABILITY IMAP4rev1 AUTH=PLAIN\r\n")
+			fmt.Fprintf(c, "%s OK CAPABILITY completed\r\n", tag)
+		case "LOGIN":
+			// arg is `"user" "pass"` or `user pass`, quoted or not -- either
+			// way the two space-separated tokens are what's worth logging,
+			// not a fully RFC 3501 quoted-string parse.
+			user, pass, _ := strings.Cut(arg, " ")
+			log.emit(event{Proto: "imap", Port: port, SrcIP: ip, Event: "login",
+				Username: strings.Trim(user, `"`), Password: strings.Trim(pass, `"`)})
+			fmt.Fprintf(c, "%s NO LOGIN failed\r\n", tag)
+		case "LOGOUT":
+			fmt.Fprint(c, "* BYE IMAP4rev1 Server logging out\r\n")
+			fmt.Fprintf(c, "%s OK LOGOUT completed\r\n", tag)
+			return
+		case "":
+			fmt.Fprintf(c, "%s BAD command unrecognized\r\n", tag)
+		default:
+			log.emit(event{Proto: "imap", Port: port, SrcIP: ip, Event: "command", Command: line})
+			fmt.Fprintf(c, "%s BAD command unrecognized\r\n", tag)
+		}
+	}
+}
+
+/* ---------------- SOCKS5 (port 1080) ----------------
+   #238: ported from heralding's socks5.py -- RFC 1928's handshake (version +
+   method negotiation, always advertise "no auth required" to keep the
+   client talking) followed by the connect request, whose target
+   host:port is exactly what's worth logging (proxy-abuse scanning wants to
+   know what the attacker meant to reach through us). The connect always
+   fails: this is a sensor, never an actual proxy. */
+
+// socks5MethodNames maps RFC 1928 SOCKS5 auth method codes to readable
+// names.
+var socks5MethodNames = map[byte]string{
+	0x00: "no-auth", 0x01: "GSSAPI", 0x02: "username-password", 0xff: "no-acceptable-methods",
+}
+
+// formatSOCKS5Methods renders the raw method-code list a client offered
+// during the SOCKS5 handshake as a readable, comma-joined string.
+func formatSOCKS5Methods(methods []byte) string {
+	names := make([]string, len(methods))
+	for i, m := range methods {
+		if name, ok := socks5MethodNames[m]; ok {
+			names[i] = name
+		} else {
+			names[i] = fmt.Sprintf("0x%02x", m)
+		}
+	}
+	return strings.Join(names, ",")
+}
+
+func handleSOCKS5(c net.Conn, log *logger, port int) {
+	ip := srcIP(c)
+	r := bufio.NewReader(c)
+	bumpDeadline(c)
+
+	header := make([]byte, 2)
+	if _, err := readFull(r, header); err != nil || header[0] != 0x05 {
+		return
+	}
+	nmethods := int(header[1])
+	methods := make([]byte, nmethods)
+	if _, err := readFull(r, methods); err != nil {
+		return
+	}
+	// Which auth methods a client offers (00=no-auth, 02=username/password,
+	// 01=GSSAPI, ...) is a real fingerprint -- was read into methods and
+	// then discarded, only the count ever reached the logged event.
+	log.emit(event{Proto: "socks5", Port: port, SrcIP: ip, Event: "handshake",
+		Data: fmt.Sprintf("methods offered: %s", formatSOCKS5Methods(methods))})
+	// Version 5, method 0x00 (no authentication required).
+	c.Write([]byte{0x05, 0x00})
+
+	req := make([]byte, 4)
+	if _, err := readFull(r, req); err != nil || req[0] != 0x05 || req[1] != 0x01 {
+		return
+	}
+	var target string
+	switch req[3] {
+	case 0x01: // IPv4
+		addr := make([]byte, 4)
+		if _, err := readFull(r, addr); err != nil {
+			return
+		}
+		target = net.IP(addr).String()
+	case 0x03: // domain name
+		lenByte := make([]byte, 1)
+		if _, err := readFull(r, lenByte); err != nil {
+			return
+		}
+		name := make([]byte, lenByte[0])
+		if _, err := readFull(r, name); err != nil {
+			return
+		}
+		target = string(name)
+	case 0x04: // IPv6
+		addr := make([]byte, 16)
+		if _, err := readFull(r, addr); err != nil {
+			return
+		}
+		target = net.IP(addr).String()
+	default:
+		return
+	}
+	portBytes := make([]byte, 2)
+	if _, err := readFull(r, portBytes); err != nil {
+		return
+	}
+	targetPort := int(portBytes[0])<<8 | int(portBytes[1])
+	log.emit(event{Proto: "socks5", Port: port, SrcIP: ip, Event: "connect_request",
+		Data: fmt.Sprintf("%s:%d", target, targetPort)})
+	// Reply code 5 = connection refused -- never actually proxy anything.
+	c.Write([]byte{0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+}
+
+/* ---------------- ADB (port 5555) ----------------
+   #238: ported from ADBHoney. The wire framing itself is simple (a fixed
+   24-byte header + payload, six command constants) -- the real breadth is
+   the CNXN handshake and OPEN/WRTE/CLSE stream lifecycle. Always completes
+   the handshake unauthenticated, matching exactly what ADB.miner/
+   Satori-style scanning targets: a device with debugging enabled and no
+   authorization required. Logs the client's identity banner and whatever
+   destination string / write payload it sends (that's where an attempted
+   command shows up, e.g. "shell:cat /proc/cpuinfo"), but never executes
+   anything -- there is no real shell behind this, only CLSE. */
+
+const (
+	adbCNXN = 0x4e584e43
+	adbOPEN = 0x4e45504f
+	adbOKAY = 0x59414b4f
+	adbCLSE = 0x45534c43
+	adbWRTE = 0x45545257
+)
+
+type adbMessage struct {
+	Command uint32
+	Arg0    uint32
+	Arg1    uint32
+	Data    []byte
+}
+
+func readADBMessage(r io.Reader) (adbMessage, error) {
+	header := make([]byte, 24)
+	if _, err := readFull(r, header); err != nil {
+		return adbMessage{}, err
+	}
+	m := adbMessage{
+		Command: binary.LittleEndian.Uint32(header[0:4]),
+		Arg0:    binary.LittleEndian.Uint32(header[4:8]),
+		Arg1:    binary.LittleEndian.Uint32(header[8:12]),
+	}
+	dataLen := binary.LittleEndian.Uint32(header[12:16])
+	// A real ADB payload is a short shell command or sync path, never
+	// anywhere close to this -- reject rather than allocate on a bogus or
+	// hostile length field.
+	if dataLen > 0 {
+		if dataLen > 64*1024 {
+			return adbMessage{}, fmt.Errorf("adb payload too large: %d", dataLen)
+		}
+		m.Data = make([]byte, dataLen)
+		if _, err := readFull(r, m.Data); err != nil {
+			return adbMessage{}, err
+		}
+	}
+	return m, nil
+}
+
+func adbChecksum(data []byte) uint32 {
+	var sum uint32
+	for _, b := range data {
+		sum += uint32(b)
+	}
+	return sum
+}
+
+func writeADBMessage(w io.Writer, command, arg0, arg1 uint32, data []byte) {
+	header := make([]byte, 24)
+	binary.LittleEndian.PutUint32(header[0:4], command)
+	binary.LittleEndian.PutUint32(header[4:8], arg0)
+	binary.LittleEndian.PutUint32(header[8:12], arg1)
+	binary.LittleEndian.PutUint32(header[12:16], uint32(len(data)))
+	binary.LittleEndian.PutUint32(header[16:20], adbChecksum(data))
+	binary.LittleEndian.PutUint32(header[20:24], command^0xffffffff)
+	w.Write(header)
+	if len(data) > 0 {
+		w.Write(data)
+	}
+}
+
+func handleADB(c net.Conn, log *logger, port int) {
+	ip := srcIP(c)
+	r := bufioReader(c)
+	bumpDeadline(c)
+
+	msg, err := readADBMessage(r)
+	if err != nil || msg.Command != adbCNXN {
+		return
+	}
+	identity := strings.TrimRight(string(msg.Data), "\x00")
+	log.emit(event{Proto: "adb", Port: port, SrcIP: ip, Event: "handshake", Client: identity})
+
+	banner := []byte("device::ro.product.name=generic;ro.product.model=SM-G960F;ro.product.device=starlte;")
+	writeADBMessage(c, adbCNXN, 0x01000000, 4096, banner)
+
+	for {
+		bumpDeadline(c)
+		msg, err = readADBMessage(r)
+		if err != nil {
+			return
+		}
+		switch msg.Command {
+		case adbOPEN:
+			dest := strings.TrimRight(string(msg.Data), "\x00")
+			log.emit(event{Proto: "adb", Port: port, SrcIP: ip, Event: "open", Command: dest})
+			// Accept, then close immediately -- there is no real shell
+			// behind this stream to write output from.
+			writeADBMessage(c, adbOKAY, 1, msg.Arg0, nil)
+			writeADBMessage(c, adbCLSE, 1, msg.Arg0, nil)
+		case adbWRTE:
+			log.emit(event{Proto: "adb", Port: port, SrcIP: ip, Event: "write", Data: string(msg.Data)})
+			writeADBMessage(c, adbOKAY, msg.Arg1, msg.Arg0, nil)
+		case adbCLSE:
+			return
+		}
+		// AUTH, SYNC, and anything else: neither logged in detail nor
+		// replied to -- CNXN/OPEN/WRTE are what carry attacker-controlled
+		// content worth capturing.
+	}
+}
+
+/* ---------------- HL7 / MLLP (port 2575) ----------------
+   #238: ported from medpot -- its entire "HL7 protocol handling" is exactly
+   this substring check (strings.Contains(buf, "MSH") &&
+   strings.Index(buf,"MSH|")==0 in the original), no real MLLP framing or
+   segment parsing. Logs the message segment and answers with a minimal
+   MLLP-framed ACK (0x0B start, 0x1C 0x0D end) so a real HL7 client sees a
+   plausibly-shaped response rather than a naked disconnect. */
+
+func handleHL7(c net.Conn, log *logger, port int) {
+	ip := srcIP(c)
+	buf := make([]byte, 8192)
+	bumpDeadline(c)
+	n, err := c.Read(buf)
+	if err != nil || n == 0 {
+		return
+	}
+	msg := string(buf[:n])
+	// Strip MLLP framing bytes (0x0B start, 0x1C 0x0D end) if present --
+	// real HL7 clients wrap messages in them, but the segment check below
+	// only cares about the content between them.
+	msg = strings.Trim(msg, "\x0b\x1c\r\n")
+	if !strings.HasPrefix(msg, "MSH|") {
+		return
+	}
+	log.emit(event{Proto: "hl7", Port: port, SrcIP: ip, Event: "message", Data: msg})
+	ack := "MSH|^~\\&|MULTIPOT|NEXUSAI|||20260101000000||ACK||P|2.3\rMSA|AA\r"
+	fmt.Fprintf(c, "\x0b%s\x1c\r", ack)
 }

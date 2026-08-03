@@ -128,5 +128,11 @@ func templateFuncs(s *store, world template.HTML) template.FuncMap {
 		"activeBanner":        func() *bannerView { return activeBannerView(presentation(), behavior(), time.Now()) },
 		"intelBadgeClass":     intelBadgeClass,
 		"workbenchRunSummary": workbenchRunSummary,
+		// utcOrEmpty gives the header "generated"/"updated" timestamp the
+		// same data-hp-utc twin events.html's rows carry, so hp-app.js's
+		// shared timezone/clock-format conversion (see hp-app.js's
+		// applyTimeDisplay) applies to it too instead of it being stuck in
+		// whatever zone/format the server process itself renders in.
+		"utcOrEmpty": utcOrEmpty,
 	}
 }

@@ -30,9 +30,13 @@
   as-is.
 - `theme.js` is intentionally **not** vendored: `dashboard/static/hp-app.js`
   owns theme preference, navigation, tabs, and keyboard shortcuts.
-- Load order in every page head (`page_style.go`, `{{define "style"}}`):
-  `theme.css` → `leaflet.css` → `hp-dashboard.css` (dashboard layer), then the
-  deferred scripts (`leaflet.js`, `hp-api.js`, `hp-app.js`). A pre-paint inline
+- Load order in every page head (`{{define "style"}}` in
+  `ui/partials/dashboard.html`): `theme.css` → `leaflet.css`, then the
+  deferred scripts (`leaflet.js`, `hp-api.js`, `hp-app.js`, …). All
+  dashboard-specific styling that used to live in `hp-dashboard.css` has
+  been folded upstream into `Xore/theme`'s `theme.css` and that file
+  deleted — there is no separate dashboard CSS layer any more. A pre-paint
+  inline
   script applies the saved theme preference (`localStorage hp-theme`:
   `light` / `dark` / absent = system) so there is no flash.
 
@@ -58,14 +62,15 @@
 - **Content widths**: overview/events/ips/payloads run full-width (map + large
   tables); list/status pages use `.app-content` (1120 px); investigation pages
   (attacker, session, payload-analysis) use `.app-content--wide` (1360 px).
-- **Dashboard layer** (`static/hp-dashboard.css`, hand-written, no build
-  step — #191 removed the Tailwind build entirely): keeps only
-  dashboard-specific components (KPI tiles, sensor badges, map/Leaflet
-  overrides, tabs, lazy-list hooks, toast stacking) plus a small number of
-  one-off spacing/layout rules that used to be Tailwind utility classes;
-  generic primitives (`.card`, `.btn`, `.badge`, `.form-input`,
-  `.data-table`, `.tabs`, `.metric`, `.app-shell`, `.toast`…) come from
-  `theme.css`.
+- **No dashboard-specific CSS layer.** `#191` removed the Tailwind build
+  entirely, and the formerly-separate `static/hp-dashboard.css`
+  (dashboard-specific components: KPI tiles, sensor badges, map/Leaflet
+  overrides, tabs, lazy-list hooks, toast stacking, one-off spacing/layout
+  rules) has since been folded upstream into `Xore/theme`'s `theme.css` and
+  deleted from this repo. Every primitive (`.card`, `.btn`, `.badge`,
+  `.form-input`, `.data-table`, `.tabs`, `.metric`, `.app-shell`, `.toast`,
+  KPI/sensor-badge/Leaflet/command-palette classes, …) now comes from the
+  single vendored `theme.css`.
 - **Behavior** (`dashboard/static/hp-app.js`): SSE live updates, overview
   refresh that preserves the Leaflet map (pan/zoom/selection), lazy 25-row
   table loading, command-bar investigation router, alert-bell polling,
@@ -86,9 +91,9 @@
   CI job enforces with `git diff --exit-code`. Pass `--check` to fail instead
   of only reporting when the committed output is stale. Commit the
   regenerated asset together with the source change, and never hand-edit it:
-  the minifier's property ordering cannot be reproduced by hand.
-  `static/hp-dashboard.css` is a separate, hand-written file with no build
-  step of its own — edit it directly.
+  the minifier's property ordering cannot be reproduced by hand. There is no
+  separate dashboard CSS file any more — styling changes go through
+  `Xore/theme`'s `theme.css`, then `scripts/sync-theme.sh` to re-vendor.
 
 ## 3. Invariants that must not regress
 
@@ -102,8 +107,8 @@ From the migration guide — keep these green in every future change:
 - `class="wrap"` and `data-hp-page-content` on the content container, the
   `data-hp-*` JS hooks, and the `{{template "sidebar" .}}` /
   `{{template "topbar" .}}` calls are load-bearing — do not remove them.
-- `theme.css` stays byte-identical to a recorded Xore/theme commit; dashboard
-  overrides live only in `hp-dashboard.css`.
+- `theme.css` stays byte-identical to a recorded Xore/theme commit; there is
+  no separate dashboard CSS file to drift from it.
 
 ## 4. Remaining work
 

@@ -38,7 +38,54 @@ type revdeckPageData struct {
 func revdeckRequestDir() string { return getenv("REVDECK_REQUEST_DIR", "") }
 func revdeckResultsDir() string { return getenv("REVDECK_RESULTS_DIR", "") }
 
+// loadRevdeckResults prefers the revdeck-analysis-v1 ES mirror (#404) and
+// falls back to the local JSON files exactly as loadGhidraResults does --
+// same reasoning: a dashboard instance with no local revdeck-results mount
+// at all should still be able to show Rev·Deck results from Elasticsearch
+// alone.
+//
+// reconcileWorkbenchRun deliberately calls loadRevdeckResultsLocal directly
+// instead of this: it polls for job completion to flip run state, and the
+// ES mirror's import interval (5 minutes by default) would delay or miss
+// that transition -- same reasoning workbench_orchestrator.go's own comment
+// gives for why it calls loadGhidraResultsLocal/loadSandboxResultsLocal
+// there too.
 func loadRevdeckResults() []revdeckStandaloneResult {
+	if esResultsClient != nil {
+		if rows, ok := loadRevdeckResultsES(esResultsClient); ok {
+			return rows
+		}
+	}
+	return loadRevdeckResultsLocal()
+}
+
+func loadRevdeckResultsES(es *esClient) ([]revdeckStandaloneResult, bool) {
+	raws, err := es.searchNamespace("revdeck-analysis-v1", "revdeck", 10000)
+	if err != nil {
+		return nil, false
+	}
+	rows := make([]revdeckStandaloneResult, 0, len(raws))
+	for _, raw := range raws {
+		var row revdeckStandaloneResult
+		if json.Unmarshal(raw, &row) != nil || !hashName.MatchString(row.SHA256) {
+			continue
+		}
+		rows = append(rows, row)
+	}
+	sortRevdeckResults(rows)
+	return rows, true
+}
+
+func sortRevdeckResults(rows []revdeckStandaloneResult) {
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].CompletedAt != rows[j].CompletedAt {
+			return rows[i].CompletedAt > rows[j].CompletedAt
+		}
+		return rows[i].SHA256 > rows[j].SHA256
+	})
+}
+
+func loadRevdeckResultsLocal() []revdeckStandaloneResult {
 	dir := revdeckResultsDir()
 	if dir == "" {
 		return nil
@@ -71,12 +118,7 @@ func loadRevdeckResults() []revdeckStandaloneResult {
 		}
 		rows = append(rows, row)
 	}
-	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].CompletedAt != rows[j].CompletedAt {
-			return rows[i].CompletedAt > rows[j].CompletedAt
-		}
-		return rows[i].SHA256 > rows[j].SHA256
-	})
+	sortRevdeckResults(rows)
 	return rows
 }
 

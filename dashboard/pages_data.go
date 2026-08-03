@@ -95,6 +95,7 @@ type eventsPage struct {
 	// ResetIPsURL clears the includeIPs narrowing (back to every IP for
 	// the current fingerprint); empty when no narrowing is active.
 	ResetIPsURL string
+	filterBar
 }
 
 // correlatedIP is one distinct source IP behind the current fingerprint (or,
@@ -376,9 +377,19 @@ func (s *store) eventsData(r *http.Request) eventsPage {
 			resetIPsURL += "?" + encoded
 		}
 	}
+	// #344: the Event Explorer had no interactive filter bar at all --
+	// every filter had to be hand-typed into the URL. Reuses the same
+	// shared filter-bar plumbing (buildFilterBar/{{template "filterbar"}})
+	// Reports and GitHub analysis already have, rather than building
+	// something page-specific.
+	bar := buildFilterBar(r, "/events",
+		[2]string{"sensor", "Sensor"}, [2]string{"proto", "Attack path"}, [2]string{"ip", "IP"},
+		[2]string{"port", "Port"}, [2]string{"country", "Country"}, [2]string{"type", "Type"},
+		[2]string{"since", "Since (e.g. 24h)"})
 	return eventsPage{
 		Generated:           time.Now(),
 		Filters:             f.describe(),
+		filterBar:           bar,
 		Total:               total,
 		Shown:               len(out),
 		Offset:              start,

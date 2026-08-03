@@ -19,22 +19,34 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - image: cisco-asa-honeypot
+            context: cisco-asa-honeypot
+          - image: citrix-honeypot
+            context: citrix-honeypot
           - image: conpot
             context: conpot
           - image: dashboard
             context: dashboard
+          - image: dicompot
+            context: dicompot
           - image: dionaea
             context: dionaea
           - image: dnp3-honeypot
             context: dnp3-honeypot
+          - image: dns-honeypot
+            context: dns-honeypot
           - image: http-honeypot
             context: http-honeypot
+          - image: ip-enrichment-worker
+            context: ip-enrichment-worker
           - image: llm-worker
             context: llm-worker
           - image: multipot
             context: multipot
           - image: portbridge
             context: portbridge
+          - image: rdp-honeypot
+            context: rdp-honeypot
           - image: tftp-relay
             context: tftp-relay
           - image: vps-portbridge

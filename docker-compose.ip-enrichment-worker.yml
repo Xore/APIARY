@@ -1,0 +1,50 @@
+# honeypot-ip-enrichment-worker — #37/#38: moves the portbridge via_port ->
+# real attacker IP join from dashboard read-time to ingest time (part of the
+# hot-swappable multi-instance dashboard design: every dashboard instance
+# should read an already-correct src_ip straight from Elasticsearch, with no
+# per-instance join of its own). Rewrites cowrie/dionaea/every conpot
+# persona/dns-honeypot/cisco-asa-honeypot's raw JSON logs into
+# logs/enriched/*.json, which Filebeat tails instead of the raw files for
+# these five sensors -- see analysis/filebeat.yml and
+# ip-enrichment-worker/main.go's own package doc comment for the full
+# design. Deployed as /opt/stacks/honeypot-ip-enrichment-worker.
+#
+# No network of any kind: this only ever reads/writes local files, the same
+# "no access beyond what's needed" boundary the dashboard's own Docker
+# socket exclusion follows.
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  ip-enrichment-worker:
+    <<: *runtime-defaults
+    build: /opt/stacks/honeypot-stack/ip-enrichment-worker
+    container_name: hp-ip-enrichment-worker
+    restart: unless-stopped
+    network_mode: none
+    environment:
+      - LOGS_DIR=/logs
+      - OUT_DIR=/logs/enriched
+      - STATE_DIR=/state/ip-enrichment-worker
+      - REFRESH_INTERVAL=2s
+      - PENDING_TIMEOUT=5s
+      - TZ=Europe/Berlin
+    volumes:
+      # Read-only for every sensor's raw log directory and portbridge's own
+      # connection log; a separate, more specific read-write mount for the
+      # one subdirectory this worker actually writes to (Docker resolves the
+      # more specific bind for overlapping paths -- same pattern as any
+      # read-only-parent/read-write-child bind-mount pair).
+      - /opt/stacks/honeypot-stack/logs:/logs:ro
+      - /opt/stacks/honeypot-stack/logs/enriched:/logs/enriched:rw
+      - /opt/stacks/honeypot-stack/state/ip-enrichment-worker:/state/ip-enrichment-worker:rw
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M

@@ -27,12 +27,12 @@
       <div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
         <header class="overview-header" id="ips-header">
           <div>
-            <div class="eyebrow">Attack sources</div>
+            <div class="label-section">Attack sources</div>
             <h1>Source IPs</h1>
             <p class="subtitle">Every source address observed by the sensors, with event volume, geolocation, and activity window.</p>
           </div>
           <div class="live-panel">
-            <span class="gen">generated {{.Generated.Format "2006-01-02 15:04:05 MST"}}</span>
+            <span class="gen">generated <span data-hp-utc="{{utcOrEmpty .Generated}}">{{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></span>
           </div>
         </header>
 
@@ -78,7 +78,7 @@
       <div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
         <header class="overview-header" id="attacker-header">
           <div>
-            <div class="eyebrow">Attacker profile</div>
+            <div class="label-section">Attacker profile</div>
             <h1>{{.IP}}</h1>
             <p class="subtitle">{{.Country}} {{if .ASN}}&bull; AS{{.ASN}}{{end}} {{.Org}} {{if .Provider}}&bull; {{.Provider}}{{end}}</p>
           </div>

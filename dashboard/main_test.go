@@ -178,6 +178,70 @@ func TestConpotPersonaKeepsSensorIdentity(t *testing.T) {
 	}
 }
 
+// TestConpotSurfacesDeviceResponse is a regression test found via a live ES
+// document: conpot logs both "request" and "response" (the fake device's
+// own reply bytes -- what was actually disclosed to the attacker), but only
+// request ever reached the dashboard row.
+func TestConpotSurfacesDeviceResponse(t *testing.T) {
+	ev := classify(map[string]any{
+		"data_type": "kamstrup_protocol", "dst_port": float64(1025),
+		"request": "b'01000d'", "response": "b'403f10001bf202044402668be5e6e00d'",
+	}, "conpot-kamstrup")
+	if !strings.Contains(ev.detail, "b'01000d'") {
+		t.Fatalf("request not surfaced in detail: %q", ev.detail)
+	}
+	if !strings.Contains(ev.detail, "403f10001bf202044402668be5e6e00d") {
+		t.Fatalf("device response not surfaced in detail: %q", ev.detail)
+	}
+}
+
+// TestConpotRequestDoesNotPolluteTopCommands (#41): a live production check
+// found raw industrial-protocol bytes -- and once, an entire raw HTTP
+// request plus a PROXY-protocol preamble a scanner happened to send to a
+// conpot port -- in the Attacker Behavior tab's Top Commands list. conpot's
+// "request" is never an attacker-issued shell command; it must not reach
+// ev.command (which feeds aggregate.go's commands[sensor+cmd]++
+// leaderboard), only ev.detail.
+func TestConpotRequestDoesNotPolluteTopCommands(t *testing.T) {
+	ev := classify(map[string]any{
+		"data_type": "modbus", "dst_port": float64(502),
+		"request": "PROXY TCP4 198.51.100.7 203.0.113.50 39572 50100\r\nGET /../../etc/passwd HTTP/1.1\r\n",
+	}, "conpot")
+	if ev.command != "" {
+		t.Fatalf("conpot request must not populate ev.command (pollutes Top Commands), got %q", ev.command)
+	}
+}
+
+// TestClassifyTannerSurfacesDetectionName is a regression test found via a
+// live ES document: tanner's own emulator classifies every request
+// (response_msg.response.message.detection.name), but this was never read
+// at all -- a real attack signature match was indistinguishable from benign
+// traffic in the dashboard.
+func TestClassifyTannerSurfacesDetectionName(t *testing.T) {
+	benign := classify(map[string]any{
+		"method": "GET", "path": "/", "sensor": "tanner",
+		"response_msg": map[string]any{"response": map[string]any{"message": map[string]any{
+			"detection": map[string]any{"name": "index"},
+		}}},
+	}, "tanner")
+	if strings.Contains(benign.detail, "[") {
+		t.Fatalf("benign 'index' detection should not clutter detail: %q", benign.detail)
+	}
+
+	attack := classify(map[string]any{
+		"method": "GET", "path": "/shell.php", "sensor": "tanner",
+		"response_msg": map[string]any{"response": map[string]any{"message": map[string]any{
+			"detection": map[string]any{"name": "php_code_injection"},
+		}}},
+	}, "tanner")
+	if !strings.Contains(attack.detail, "php_code_injection") {
+		t.Fatalf("attack detection name not surfaced: %q", attack.detail)
+	}
+	if attack.category != "tanner: php_code_injection" {
+		t.Fatalf("category = %q, want tanner: php_code_injection", attack.category)
+	}
+}
+
 func TestCampaignCorrelationByNetwork(t *testing.T) {
 	now := time.Now()
 	evs := []storedEvent{
@@ -548,7 +612,6 @@ func TestCompactTextKeepsShortValuesAndEllipsizesLongValues(t *testing.T) {
 
 func TestDashboardCSSAssetsAreEmbeddedAndReferenced(t *testing.T) {
 	assets := map[string]int{
-		"static/hp-dashboard.css":    10000,
 		"static/theme.css":           10000,
 		"static/hp-api.js":           500,
 		"static/hp-app.js":           8000,
@@ -568,7 +631,7 @@ func TestDashboardCSSAssetsAreEmbeddedAndReferenced(t *testing.T) {
 			t.Fatalf("dashboard asset %q is unexpectedly small: %d bytes", name, len(data))
 		}
 	}
-	for _, reference := range []string{"/static/hp-dashboard.css", "/static/theme.css", "/static/hp-api.js", "/static/hp-modals.js", "/static/hp-evidence.js", "/static/hp-app.js", "/static/leaflet.css", "/static/leaflet.js"} {
+	for _, reference := range []string{"/static/theme.css", "/static/hp-api.js", "/static/hp-modals.js", "/static/hp-evidence.js", "/static/hp-app.js", "/static/leaflet.css", "/static/leaflet.js"} {
 		if !strings.Contains(pageTemplate, reference) {
 			t.Fatalf("shared page template does not load %q", reference)
 		}
@@ -633,7 +696,7 @@ func TestSemanticShellIsServerRendered(t *testing.T) {
 	// off) -- it belongs in TestMLAnomaliesNavReflectsShowMLPanels below, not
 	// in this "always present" list.
 	for _, route := range []string{
-		"/", "/source-health", "/alerts", "/events", "/ips", "/campaigns",
+		"/", "/events", "/ips", "/campaigns",
 		"/clusters", "/commands", "/payloads", "/sandbox",
 		"/reports",
 	} {
@@ -646,7 +709,12 @@ func TestSemanticShellIsServerRendered(t *testing.T) {
 	// diagnostics, not analyst investigation evidence. The routes themselves
 	// still work (source-health and search link into them with specific
 	// queries/metrics), just no longer as standalone sidebar items.
-	for _, route := range []string{"/history", "/dead-letters"} {
+	// #344: source-health and alerts moved out of the sidebar the same way
+	// -- both already have topbar icon-button equivalents (pipeline-health
+	// icon, alerts bell with its unread badge), so the sidebar entries were
+	// a second, redundant way to reach the same two pages. The routes
+	// themselves are unaffected; only the sidebar <a data-hp-nav> is gone.
+	for _, route := range []string{"/history", "/dead-letters", "/source-health", "/alerts"} {
 		if strings.Contains(html, `data-hp-nav="`+route+`" href="`+route+`"`) {
 			t.Fatalf("rendered shell still carries the removed sidebar nav route %q", route)
 		}
@@ -756,5 +824,303 @@ func TestRouteTemplatesRenderFromEmbeddedUI(t *testing.T) {
 		if strings.Contains(string(body), `{{define "`) {
 			t.Fatalf("%s declares a template inline; route markup belongs in dashboard/ui/", source)
 		}
+	}
+}
+
+// TestClassifyDicompotSurfacesDIMSEOperation is a regression test: a prior
+// version of classify() had no branch for any of the five #238 ES-only
+// sensors added after multipot, so every one of them fell through to the
+// generic fallback and only ever showed the raw "event" field -- losing
+// exactly the detail (DICOM operation + SOP class, DNS query domain,
+// HTTP path, captured exploit payload, RDP username) that makes any of
+// these events worth looking at.
+func TestClassifyDicompotSurfacesDIMSEOperation(t *testing.T) {
+	ev := classify(map[string]any{
+		"sensor": "dicompot", "event": "c_store", "port": float64(11112),
+		"src_ip": "203.0.113.10", "data": "1.2.840.10008.5.1.4.1.1.7 1.2.3.4.5", "bytes": float64(4096),
+	}, "dicompot")
+	if ev.skip || ev.sensor != "dicompot" || ev.proto != "dicom" {
+		t.Fatalf("unexpected: %+v", ev)
+	}
+	if !strings.Contains(ev.detail, "C-STORE") || !strings.Contains(ev.detail, "4096 bytes") {
+		t.Fatalf("detail missing DIMSE operation/size: %q", ev.detail)
+	}
+}
+
+func TestClassifyDicompotSkipsListening(t *testing.T) {
+	ev := classify(map[string]any{"sensor": "dicompot", "event": "listening", "port": float64(11112)}, "dicompot")
+	if !ev.skip {
+		t.Fatal("dicompot's startup 'listening' event should be skipped, not shown as a dashboard row")
+	}
+}
+
+func TestClassifyDNSHoneypotSurfacesQueriedDomain(t *testing.T) {
+	ev := classify(map[string]any{
+		"sensor": "dns-honeypot", "event": "query", "port": float64(53),
+		"src_ip": "203.0.113.10", "query": "malicious.example.com", "qtype": float64(1),
+	}, "dns-honeypot")
+	if ev.skip || ev.sensor != "dns-honeypot" || ev.proto != "dns" {
+		t.Fatalf("unexpected: %+v", ev)
+	}
+	if ev.path != "malicious.example.com" {
+		t.Fatalf("path (queried domain) = %q, want malicious.example.com", ev.path)
+	}
+	if !strings.Contains(ev.detail, "malicious.example.com") || !strings.Contains(ev.detail, "A") {
+		t.Fatalf("detail missing domain/qtype: %q", ev.detail)
+	}
+}
+
+func TestClassifyDNSHoneypotFlagsNonStandardOpcode(t *testing.T) {
+	ev := classify(map[string]any{
+		"sensor": "dns-honeypot", "event": "query", "port": float64(53),
+		"src_ip": "203.0.113.10", "query": "example.com", "qtype": float64(1), "opcode": float64(5),
+	}, "dns-honeypot")
+	if !strings.Contains(ev.detail, "UPDATE") {
+		t.Fatalf("detail missing non-standard opcode name: %q", ev.detail)
+	}
+
+	// opcode 0 (QUERY) is virtually all real traffic and must not clutter
+	// every single row.
+	standard := classify(map[string]any{
+		"sensor": "dns-honeypot", "event": "query", "port": float64(53),
+		"src_ip": "203.0.113.10", "query": "example.com", "qtype": float64(1), "opcode": float64(0),
+	}, "dns-honeypot")
+	if strings.Contains(standard.detail, "opcode") {
+		t.Fatalf("standard QUERY opcode should not be flagged in detail: %q", standard.detail)
+	}
+}
+
+func TestClassifyCitrixHoneypotSurfacesPathAndPayload(t *testing.T) {
+	ev := classify(map[string]any{
+		"sensor": "citrix-honeypot", "event": "cve_2019_19781_payload", "port": float64(443),
+		"src_ip": "203.0.113.10", "path": "/vpns/portal/scripts/newbm.pl", "data": "id; cat /etc/passwd",
+	}, "citrix-honeypot")
+	if ev.skip || ev.sensor != "citrix-honeypot" {
+		t.Fatalf("unexpected: %+v", ev)
+	}
+	if ev.path != "/vpns/portal/scripts/newbm.pl" {
+		t.Fatalf("path = %q", ev.path)
+	}
+	if ev.command != "id; cat /etc/passwd" {
+		t.Fatalf("command (captured payload) = %q", ev.command)
+	}
+	if !strings.Contains(ev.detail, "id; cat /etc/passwd") {
+		t.Fatalf("detail missing captured payload: %q", ev.detail)
+	}
+}
+
+func TestClassifyCitrixHoneypotSurfacesUserAgentFingerprint(t *testing.T) {
+	ev := classify(map[string]any{
+		"sensor": "citrix-honeypot", "event": "get", "port": float64(443),
+		"src_ip": "203.0.113.10", "path": "/vpn/", "user_agent": "curl/8.4.0",
+		"headers": map[string]any{"User-Agent": "curl/8.4.0"},
+	}, "citrix-honeypot")
+	if ev.fingerprint != "curl/8.4.0" || ev.fingerKind != "User-Agent" {
+		t.Fatalf("expected User-Agent fingerprint surfaced, got fingerprint=%q kind=%q", ev.fingerprint, ev.fingerKind)
+	}
+}
+
+func TestClassifyCiscoASAHoneypotSurfacesIKEAndHTTPEvents(t *testing.T) {
+	ike := classify(map[string]any{
+		"sensor": "cisco-asa-honeypot", "event": "ike_sa_init", "port": float64(500),
+		"src_ip": "203.0.113.10", "proto": "ike",
+	}, "cisco-asa-honeypot")
+	if ike.skip || ike.proto != "ike" || !strings.Contains(ike.detail, "ike_sa_init") {
+		t.Fatalf("unexpected ike event: %+v", ike)
+	}
+
+	listening := classify(map[string]any{"sensor": "cisco-asa-honeypot", "event": "ike_listening", "port": float64(500)}, "cisco-asa-honeypot")
+	if !listening.skip {
+		t.Fatal("ike_listening startup event should be skipped")
+	}
+
+	payload := classify(map[string]any{
+		"sensor": "cisco-asa-honeypot", "event": "cve_2018_0101_payload", "port": float64(8443),
+		"src_ip": "203.0.113.10", "proto": "https", "data": "AAAA...overflow",
+	}, "cisco-asa-honeypot")
+	if payload.command != "AAAA...overflow" {
+		t.Fatalf("command (captured payload) = %q", payload.command)
+	}
+
+	httpFingerprint := classify(map[string]any{
+		"sensor": "cisco-asa-honeypot", "event": "get", "port": float64(8443),
+		"src_ip": "203.0.113.10", "proto": "https", "path": "/",
+		"headers": map[string]any{"User-Agent": "nuclei"},
+	}, "cisco-asa-honeypot")
+	if httpFingerprint.fingerprint != "nuclei" || httpFingerprint.fingerKind != "User-Agent" {
+		t.Fatalf("expected User-Agent fingerprint surfaced, got fingerprint=%q kind=%q",
+			httpFingerprint.fingerprint, httpFingerprint.fingerKind)
+	}
+
+	unexpected := classify(map[string]any{
+		"sensor": "cisco-asa-honeypot", "event": "ike_unexpected_exchange", "port": float64(500),
+		"src_ip": "203.0.113.10", "proto": "ike", "data": "4",
+	}, "cisco-asa-honeypot")
+	if !strings.Contains(unexpected.detail, "type 4") {
+		t.Fatalf("detail missing surfaced exchange type: %q", unexpected.detail)
+	}
+}
+
+func TestClassifyRDPHoneypotSurfacesMstshashUsername(t *testing.T) {
+	ev := classify(map[string]any{
+		"sensor": "rdp-honeypot", "event": "connect", "port": float64(3389),
+		"src_ip": "203.0.113.10", "username": "jdoe",
+	}, "rdp-honeypot")
+	if ev.skip || ev.sensor != "rdp-honeypot" || ev.proto != "rdp" {
+		t.Fatalf("unexpected: %+v", ev)
+	}
+	if !ev.isLogin || ev.user != "jdoe" {
+		t.Fatalf("expected isLogin with user=jdoe, got: %+v", ev)
+	}
+	if !strings.Contains(ev.detail, "jdoe") {
+		t.Fatalf("detail missing username: %q", ev.detail)
+	}
+}
+
+func TestClassifyRDPHoneypotSurfacesRequestedProtocols(t *testing.T) {
+	ev := classify(map[string]any{
+		"sensor": "rdp-honeypot", "event": "connect", "port": float64(3389),
+		"src_ip": "203.0.113.10", "requested_protocols": "TLS+CredSSP",
+	}, "rdp-honeypot")
+	if !strings.Contains(ev.detail, "TLS+CredSSP") {
+		t.Fatalf("detail missing requested protocols: %q", ev.detail)
+	}
+}
+
+func TestClassifyRDPHoneypotSkipsListening(t *testing.T) {
+	ev := classify(map[string]any{"sensor": "rdp-honeypot", "event": "listening", "port": float64(3389)}, "rdp-honeypot")
+	if !ev.skip {
+		t.Fatal("rdp-honeypot's startup 'listening' event should be skipped")
+	}
+}
+
+// TestClassifyMultipotSurfacesDataForNonCommandEvents is a regression test:
+// every multipot handler besides the literal "command" event kind rides its
+// payload in "data" (SOCKS5 handshake/connect target, HL7 message,
+// Elasticsearch/Docker HTTP body) or "command" under a different event kind
+// (ADB's OPEN destination) or "client" (ADB's identity banner) -- none of
+// these ever reached the dashboard row before, only kind=="command" did.
+func TestClassifyMultipotSurfacesDataForNonCommandEvents(t *testing.T) {
+	socks5 := classify(map[string]any{
+		"sensor": "multipot", "event": "connect_request", "proto": "socks5", "port": float64(1080),
+		"src_ip": "203.0.113.10", "data": "example.com:443",
+	}, "multipot")
+	if !strings.Contains(socks5.detail, "example.com:443") {
+		t.Fatalf("SOCKS5 connect target not surfaced: %q", socks5.detail)
+	}
+
+	adbOpen := classify(map[string]any{
+		"sensor": "multipot", "event": "open", "proto": "adb", "port": float64(5555),
+		"src_ip": "203.0.113.10", "command": "shell:cat /proc/cpuinfo",
+	}, "multipot")
+	if !strings.Contains(adbOpen.detail, "shell:cat /proc/cpuinfo") || adbOpen.command != "shell:cat /proc/cpuinfo" {
+		t.Fatalf("ADB OPEN destination not surfaced: %+v", adbOpen)
+	}
+
+	adbHandshake := classify(map[string]any{
+		"sensor": "multipot", "event": "handshake", "proto": "adb", "port": float64(5555),
+		"src_ip": "203.0.113.10", "client": "host::pixel_6",
+	}, "multipot")
+	if !strings.Contains(adbHandshake.detail, "host::pixel_6") || adbHandshake.fingerprint != "host::pixel_6" {
+		t.Fatalf("ADB identity banner not surfaced: %+v", adbHandshake)
+	}
+}
+
+// TestClassifyMultipotHTTPRequestLineDoesNotPolluteTopCommands (#41): a live
+// production check found HTTP GET/POST requests (multipot's Elasticsearch/
+// Docker honeypots on 9200/2375) showing up in the Attacker Behavior tab's
+// Top Commands list. handleElastic/handleDocker's "command" field for an
+// "http_request" event is the raw request line, not an attacker-issued
+// shell command -- it belongs in the detail line, never in ev.command
+// (which feeds aggregate.go's commands[sensor+cmd]++ leaderboard).
+func TestClassifyMultipotHTTPRequestLineDoesNotPolluteTopCommands(t *testing.T) {
+	ev := classify(map[string]any{
+		"sensor": "multipot", "event": "http_request", "proto": "elasticsearch", "port": float64(9200),
+		"src_ip": "203.0.113.10", "command": "GET /_search HTTP/1.1",
+	}, "multipot")
+	if ev.command != "" {
+		t.Fatalf("HTTP request line must not populate ev.command (pollutes Top Commands), got %q", ev.command)
+	}
+	if !strings.Contains(ev.detail, "GET /_search HTTP/1.1") {
+		t.Fatalf("request line should still be visible in detail: %q", ev.detail)
+	}
+}
+
+// TestClassifyCowrieSessionClosedUsesDurationMs is a regression test for a
+// real bug found live: the code read e["duration"], but cowrie actually
+// emits duration_ms (confirmed against docs/OUTPUT.rst and a live document
+// pulled from the deployed cluster) -- so that branch's "closed after Ns"
+// text never fired for any real event, silently falling back to the bare
+// "closed" text instead.
+func TestClassifyCowrieSessionClosedUsesDurationMs(t *testing.T) {
+	ev := classify(map[string]any{
+		"eventid": "cowrie.session.closed", "session": "abc123",
+		"src_ip": "203.0.113.10", "protocol": "telnet", "duration_ms": float64(120003),
+	}, "cowrie")
+	if !strings.Contains(ev.detail, "120003ms") {
+		t.Fatalf("detail = %q, want it to include the real duration_ms value", ev.detail)
+	}
+}
+
+// TestClassifyCowrieDefaultFallsBackToMessage is a regression test: every
+// cowrie event carries a human-readable "message" field per its own docs
+// (confirmed live), but the default branch previously showed only the bare
+// eventid suffix, discarding it -- losing real content for any of cowrie's
+// 30+ eventids without their own explicit case.
+func TestClassifyCowrieDefaultFallsBackToMessage(t *testing.T) {
+	ev := classify(map[string]any{
+		"eventid": "cowrie.session.params", "session": "abc123",
+		"src_ip": "203.0.113.10", "protocol": "ssh",
+		"message": "Session parameters: arch=amd64",
+	}, "cowrie")
+	if ev.detail != "Session parameters: arch=amd64" {
+		t.Fatalf("detail = %q, want the real message text", ev.detail)
+	}
+}
+
+func TestClassifyCowrieTTYLogSurfacesReplayableSession(t *testing.T) {
+	ev := classify(map[string]any{
+		"eventid": "cowrie.log.closed", "session": "abc123",
+		"src_ip": "203.0.113.10", "protocol": "telnet",
+		"ttylog": "var/lib/cowrie/tty/deadbeef", "shasum": "deadbeef", "duration_ms": float64(1928),
+	}, "cowrie")
+	if ev.download != "var/lib/cowrie/tty/deadbeef" {
+		t.Fatalf("download (ttylog path) = %q", ev.download)
+	}
+	if !strings.Contains(ev.detail, "TTY session recorded") {
+		t.Fatalf("detail = %q, want it to flag a replayable TTY recording", ev.detail)
+	}
+}
+
+func TestClassifyCowrieLoginFailedSurfacesPubkeyFingerprint(t *testing.T) {
+	ev := classify(map[string]any{
+		"eventid": "cowrie.login.failed", "session": "abc123",
+		"src_ip": "203.0.113.10", "protocol": "ssh", "username": "root",
+		"fingerprint": "SHA256:abcdef1234567890", "type": "ssh-rsa",
+	}, "cowrie")
+	if !ev.isLogin || ev.fingerprint != "SHA256:abcdef1234567890" || ev.fingerKind != "SSH pubkey" {
+		t.Fatalf("unexpected: %+v", ev)
+	}
+}
+
+func TestClassifyCowrieDirectTCPIPRequestSurfacesTarget(t *testing.T) {
+	ev := classify(map[string]any{
+		"eventid": "cowrie.direct-tcpip.request", "session": "abc123",
+		"src_ip": "203.0.113.10", "protocol": "ssh",
+		"dst_ip": "10.0.0.5", "dst_port": float64(3306),
+	}, "cowrie")
+	if !strings.Contains(ev.detail, "10.0.0.5:3306") {
+		t.Fatalf("detail = %q, want the requested forward target", ev.detail)
+	}
+}
+
+func TestClassifyCowrieTelnetExploitAttemptSurfacesCVE(t *testing.T) {
+	ev := classify(map[string]any{
+		"eventid": "cowrie.telnet.exploit_attempt", "session": "abc123",
+		"src_ip": "203.0.113.10", "protocol": "telnet",
+		"cve": "CVE-2026-24061", "name": "USER", "value": "-froot",
+	}, "cowrie")
+	if !strings.Contains(ev.detail, "CVE-2026-24061") {
+		t.Fatalf("detail = %q, want the CVE id surfaced", ev.detail)
 	}
 }

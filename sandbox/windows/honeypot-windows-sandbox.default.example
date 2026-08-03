@@ -7,10 +7,14 @@
 # the spool below (IMPLEMENTATION_PLAN.md §7.1).
 
 # ── Spool the dashboard shares with this worker ──────────────────────────
-# Must match WINDOWS_SANDBOX_REQUEST_DIR / WINDOWS_SANDBOX_RESULTS_DIR in the
-# dashboard's environment, or a submission is written where nothing reads it.
-WINDOWS_SANDBOX_REQUEST_DIR=/windows-sandbox-requests
-WINDOWS_SANDBOX_RESULTS_DIR=/windows-sandbox-results
+# This unit runs on the bare host, so these must be the real host paths --
+# not the container-side mount points (/windows-sandbox-requests etc.) the
+# dashboard sees. They must match the bind-mount *sources* in
+# docker-compose.dashboard.yml and the WINDOWS_SANDBOX_REQUEST_DIR /
+# WINDOWS_SANDBOX_RESULTS_DIR values in the dashboard's own .env, or a
+# submission is written where nothing reads it.
+WINDOWS_SANDBOX_REQUEST_DIR=/var/lib/honeypot-windows-sandbox/requests/pending
+WINDOWS_SANDBOX_RESULTS_DIR=/var/lib/honeypot-windows-sandbox/export
 
 # Where the captured samples themselves live. The request carries only a
 # SHA-256; the worker resolves it here and refuses a request it cannot match.
