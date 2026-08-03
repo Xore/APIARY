@@ -164,6 +164,10 @@ func handleRedis(c net.Conn, log *logger, port int) {
 				Username: user, Password: pass})
 			fmt.Fprint(c, "+OK\r\n")
 		case "PING":
+			// Not logged: a bare PING carries no reconnaissance signal of
+			// its own and would otherwise be the single highest-volume
+			// event this handler produces (many clients/scanners PING as
+			// a pure liveness probe before doing anything else).
 			fmt.Fprint(c, "+PONG\r\n")
 		case "INFO":
 			log.emit(event{Proto: "redis", Port: port, SrcIP: ip, Event: "command", Command: cmd})
@@ -173,20 +177,31 @@ func handleRedis(c net.Conn, log *logger, port int) {
 				"# Clients\r\nconnected_clients:12\r\n# Keyspace\r\ndb0:keys=18443,expires=15221,avg_ttl=1874032\r\n"
 			fmt.Fprintf(c, "$%d\r\n%s\r\n", len(body), body)
 		case "DBSIZE":
+			log.emit(event{Proto: "redis", Port: port, SrcIP: ip, Event: "command", Command: cmd})
 			fmt.Fprint(c, ":18443\r\n")
 		case "SELECT":
+			// Was answered but never logged at all -- a real recon step
+			// (which logical DB an attacker chose to poke at) went
+			// completely unrecorded, not merely unstructured.
+			log.emit(event{Proto: "redis", Port: port, SrcIP: ip, Event: "command", Command: full})
 			fmt.Fprint(c, "+OK\r\n")
 		case "KEYS":
+			log.emit(event{Proto: "redis", Port: port, SrcIP: ip, Event: "command", Command: full})
 			// Look like a portal cache holding sessions / rate-limit / order data.
 			writeRESPArray(c, []string{
 				"sess:9f2a7c4e1b8d6035", "sess:3b4f8e02d6c5a1b9",
 				"cache:orders:recent", "cache:catalog:v3",
 				"rate:ip:203.0.113.88", "queue:email:pending",
 			})
-		case "TYPE":
-			fmt.Fprint(c, "+string\r\n")
-		case "TTL":
-			fmt.Fprint(c, ":3600\r\n")
+		case "TYPE", "TTL":
+			// Which key an attacker probed after KEYS/GET is worth keeping,
+			// same reasoning as SELECT above.
+			log.emit(event{Proto: "redis", Port: port, SrcIP: ip, Event: "command", Command: full})
+			if cmd == "TYPE" {
+				fmt.Fprint(c, "+string\r\n")
+			} else {
+				fmt.Fprint(c, ":3600\r\n")
+			}
 		case "CONFIG":
 			// CONFIG GET <param> — answer plausibly; CONFIG SET falls to default.
 			if len(args) >= 3 && strings.EqualFold(args[1], "GET") {
@@ -201,6 +216,7 @@ func handleRedis(c net.Conn, log *logger, port int) {
 				fmt.Fprint(c, "+OK\r\n")
 			}
 		case "GET":
+			log.emit(event{Proto: "redis", Port: port, SrcIP: ip, Event: "command", Command: full})
 			fmt.Fprint(c, "$-1\r\n") // key miss — realistic and harmless
 		case "QUIT":
 			fmt.Fprint(c, "+OK\r\n")
@@ -357,6 +373,14 @@ func handlePostgres(c net.Conn, log *logger, port int) {
 	}
 	params := parsePGParams(body[4:]) // skip the 4-byte protocol version
 	user := params["user"]
+	// Which database an attacker targets is real recon signal (e.g. probing
+	// for "postgres" vs. an app-specific name) -- was parsed into params
+	// alongside "user" but never made it into the logged event.
+	database := params["database"]
+	dbDetail := ""
+	if database != "" {
+		dbDetail = "database=" + database
+	}
 
 	// AuthenticationCleartextPassword: 'R' Int32(8) Int32(3)
 	c.Write([]byte{'R', 0, 0, 0, 8, 0, 0, 0, 3})
@@ -371,11 +395,11 @@ func handlePostgres(c net.Conn, log *logger, port int) {
 				pw := make([]byte, n)
 				readFull(r, pw)
 				log.emit(event{Proto: "postgres", Port: port, SrcIP: ip, Event: "login",
-					Username: user, Password: strings.TrimRight(string(pw), "\x00")})
+					Username: user, Password: strings.TrimRight(string(pw), "\x00"), Data: dbDetail})
 			}
 		}
 	} else {
-		log.emit(event{Proto: "postgres", Port: port, SrcIP: ip, Event: "login", Username: user})
+		log.emit(event{Proto: "postgres", Port: port, SrcIP: ip, Event: "login", Username: user, Data: dbDetail})
 	}
 
 	// ErrorResponse
@@ -447,14 +471,16 @@ func handleElastic(c net.Conn, log *logger, port int) {
 	ip := srcIP(c)
 	r := bufioReader(c)
 	reqLine, _ := readLine(r)
-	// Drain headers.
-	for {
-		h, ok := readLine(r)
-		if h == "" || !ok {
-			break
-		}
+	// A request body here is the actual interesting payload -- a crafted
+	// _search query (e.g. a Painless scripting injection attempt), not
+	// just which path was hit. Previously the body was never read at all,
+	// only the headers drained and discarded.
+	contentLength := readHTTPHeaders(r)
+	e := event{Proto: "elasticsearch", Port: port, SrcIP: ip, Event: "http_request", Command: reqLine}
+	if body := readHTTPBody(r, contentLength); body != "" {
+		e.Data = body
 	}
-	log.emit(event{Proto: "elasticsearch", Port: port, SrcIP: ip, Event: "http_request", Command: reqLine})
+	log.emit(e)
 
 	body := `{
   "name" : "es-logs-01",
@@ -478,13 +504,15 @@ func handleDocker(c net.Conn, log *logger, port int) {
 	ip := srcIP(c)
 	r := bufioReader(c)
 	reqLine, _ := readLine(r)
-	for {
-		h, ok := readLine(r)
-		if h == "" || !ok {
-			break
-		}
+	// A container-create/exec POST body is the actual attack (e.g. a
+	// privileged container spec or a malicious image reference) -- was
+	// never read at all before, only the headers drained and discarded.
+	contentLength := readHTTPHeaders(r)
+	e := event{Proto: "docker", Port: port, SrcIP: ip, Event: "http_request", Command: reqLine}
+	if reqBody := readHTTPBody(r, contentLength); reqBody != "" {
+		e.Data = reqBody
 	}
-	log.emit(event{Proto: "docker", Port: port, SrcIP: ip, Event: "http_request", Command: reqLine})
+	log.emit(e)
 	parts := strings.Fields(reqLine)
 	path := "/"
 	if len(parts) > 1 {
@@ -504,6 +532,42 @@ func handleDocker(c net.Conn, log *logger, port int) {
 		body = `[{"Id":"4a6f9b2d71ce","Names":["/gitlab-runner"],"Image":"gitlab/gitlab-runner:alpine-v17.1.0","State":"running","Status":"Up 12 days"},{"Id":"92de51c71fa8","Names":["/registry-cache"],"Image":"registry:2.8.3","State":"running","Status":"Up 12 days"}]`
 	}
 	fmt.Fprintf(c, "HTTP/1.1 %s\r\nApi-Version: 1.44\r\nDocker-Experimental: false\r\nOstype: linux\r\nServer: Docker/25.0.5 (linux)\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", status, len(body), body)
+}
+
+// readHTTPHeaders drains a minimal HTTP header block, returning the parsed
+// Content-Length (0 if absent/unparseable) so the caller can read exactly
+// the request body a real HTTP server would, rather than either dropping
+// it or blocking on a body that was never sent.
+func readHTTPHeaders(r *bufio.Reader) int {
+	contentLength := 0
+	for {
+		h, ok := readLine(r)
+		if h == "" || !ok {
+			break
+		}
+		if name, value, found := strings.Cut(h, ":"); found && strings.EqualFold(strings.TrimSpace(name), "Content-Length") {
+			contentLength = atoiSafe(strings.TrimSpace(value))
+		}
+	}
+	return contentLength
+}
+
+// readHTTPBody reads up to contentLength bytes (capped, since this is a
+// honeypot reading attacker-controlled input, not a real HTTP server) and
+// returns a printable preview.
+func readHTTPBody(r *bufio.Reader, contentLength int) string {
+	if contentLength <= 0 {
+		return ""
+	}
+	if contentLength > 8192 {
+		contentLength = 8192
+	}
+	buf := make([]byte, contentLength)
+	n, _ := io.ReadFull(r, buf)
+	if n == 0 {
+		return ""
+	}
+	return printable(buf[:n])
 }
 
 /* ---------------- Generic (raw byte logger) ----------------
