@@ -386,6 +386,9 @@ func classify(e map[string]any, dirSensor string) event {
 		if ev.user != "" {
 			ev.detail += "  mstshash: " + ev.user
 		}
+		if p := str(e["requested_protocols"]); p != "" {
+			ev.detail += "  security: " + p
+		}
 		return ev
 	}
 

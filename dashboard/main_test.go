@@ -913,6 +913,16 @@ func TestClassifyRDPHoneypotSurfacesMstshashUsername(t *testing.T) {
 	}
 }
 
+func TestClassifyRDPHoneypotSurfacesRequestedProtocols(t *testing.T) {
+	ev := classify(map[string]any{
+		"sensor": "rdp-honeypot", "event": "connect", "port": float64(3389),
+		"src_ip": "203.0.113.10", "requested_protocols": "TLS+CredSSP",
+	}, "rdp-honeypot")
+	if !strings.Contains(ev.detail, "TLS+CredSSP") {
+		t.Fatalf("detail missing requested protocols: %q", ev.detail)
+	}
+}
+
 func TestClassifyRDPHoneypotSkipsListening(t *testing.T) {
 	ev := classify(map[string]any{"sensor": "rdp-honeypot", "event": "listening", "port": float64(3389)}, "rdp-honeypot")
 	if !ev.skip {
