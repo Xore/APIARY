@@ -254,7 +254,19 @@ func (s *store) clustersData(f filter) clustersPage {
 		if rows[i].Sources != rows[j].Sources {
 			return rows[i].Sources > rows[j].Sources
 		}
-		return rows[i].Events > rows[j].Events
+		if rows[i].Events != rows[j].Events {
+			return rows[i].Events > rows[j].Events
+		}
+		// #40: Sources and Events both tying is routine for the smaller
+		// clusters -- without a final unique tiebreaker, sort.Slice's lack
+		// of a stability guarantee plus Go's randomized map iteration order
+		// (groups above) means two dashboard instances reading identical
+		// underlying events could render this table in a different row
+		// order. Kind+Value is the original map key, so it's unique.
+		if rows[i].Kind != rows[j].Kind {
+			return rows[i].Kind < rows[j].Kind
+		}
+		return rows[i].Value < rows[j].Value
 	})
 	if len(rows) > 250 {
 		rows = rows[:250]

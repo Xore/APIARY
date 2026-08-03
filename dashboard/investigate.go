@@ -69,7 +69,21 @@ func (s *store) commandsData(r *http.Request) commandsPage {
 		if rows[i].Count != rows[j].Count {
 			return rows[i].Count > rows[j].Count
 		}
-		return rows[i].Last > rows[j].Last
+		// #40: Last is minute-granularity ("2006-01-02 15:04"), so a burst of
+		// commands landing in the same minute -- routine under real attack
+		// traffic -- ties here too. sort.Slice isn't stable and Go map
+		// iteration order (groups above) is randomized per process, so
+		// without a final tiebreaker two dashboard instances reading the
+		// identical underlying events could render /commands in a different
+		// row order. Sensor+Command is unique per row (it's the map key),
+		// making this a genuine total order.
+		if rows[i].Last != rows[j].Last {
+			return rows[i].Last > rows[j].Last
+		}
+		if rows[i].Sensor != rows[j].Sensor {
+			return rows[i].Sensor < rows[j].Sensor
+		}
+		return rows[i].Command < rows[j].Command
 	})
 	bar := buildFilterBar(r, "/commands",
 		[2]string{"sensor", "Sensor"}, [2]string{"q", "Command contains"}, [2]string{"since", "Since (e.g. 24h)"})
