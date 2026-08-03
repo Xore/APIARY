@@ -112,23 +112,23 @@ type sandboxDifference struct {
 }
 
 type sandboxResult struct {
-	Version         int                   `json:"version"`
-	Job             string                `json:"job"`
-	SHA256          string                `json:"sha256"`
-	CaptureName     string                `json:"capture_name"`
-	Source          string                `json:"source"`
-	RequestedAt     string                `json:"requested_at"`
-	StartedAt       string                `json:"started_at"`
-	CompletedAt     string                `json:"completed_at"`
-	Duration        float64               `json:"duration_seconds"`
-	ExitStatus      string                `json:"exit_status"`
-	RunStatus       string                `json:"run_status"`
-	GuestStarted    bool                  `json:"guest_started"`
-	FailureReason   string                `json:"failure_reason"`
-	TimeoutReason   string                `json:"timeout_reason"`
-	RiskScore       int                   `json:"risk_score"`
-	RiskLevel       string                `json:"risk_level"`
-	Network         string                `json:"network"`
+	Version       int     `json:"version"`
+	Job           string  `json:"job"`
+	SHA256        string  `json:"sha256"`
+	CaptureName   string  `json:"capture_name"`
+	Source        string  `json:"source"`
+	RequestedAt   string  `json:"requested_at"`
+	StartedAt     string  `json:"started_at"`
+	CompletedAt   string  `json:"completed_at"`
+	Duration      float64 `json:"duration_seconds"`
+	ExitStatus    string  `json:"exit_status"`
+	RunStatus     string  `json:"run_status"`
+	GuestStarted  bool    `json:"guest_started"`
+	FailureReason string  `json:"failure_reason"`
+	TimeoutReason string  `json:"timeout_reason"`
+	RiskScore     int     `json:"risk_score"`
+	RiskLevel     string  `json:"risk_level"`
+	Network       string  `json:"network"`
 	// Route identifies which detonation backend actually ran this job --
 	// "windows", "linux", or "windows-ghosts" (#327). Older result files
 	// predate this field; normalizeSandboxResult backfills it from
