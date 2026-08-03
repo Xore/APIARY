@@ -72,11 +72,11 @@ variable "memory" {
 }
 
 variable "cpus" {
-  # 8 of the host's 16 threads. QEMU was pinning all four of the previous
-  # allocation (291% CPU) through the install, and FLARE-VM — the two-to-four
-  # hour phase — is the part that actually parallelises. Leaves 8 threads for
-  # the honeypot stack running alongside.
-  default = "8"
+  # 12 of the host's 16 threads, bumped from 8 to speed up install --
+  # Windows Setup's file-copy/component-install phases parallelize well.
+  # Leaves 4 threads for the honeypot stack running alongside; revisit if
+  # that starves under load.
+  default = "12"
 }
 
 variable "disk_size" {
@@ -278,7 +278,14 @@ source "qemu" "win11" {
   # next boot.
   qemuargs = [
     ["-qmp", "unix:/tmp/win11-analysis-qmp.sock,server,nowait"],
-    ["-device", "e1000e,netdev=pxenet0,bootindex=1"],
+    # id=pxenet0dev on the *device* (not just the netdev backend) is
+    # required for device_del to find anything -- confirmed live, without
+    # it QEMU auto-generates an anonymous device id and
+    # `device_del pxenet0` fails with "Device 'pxenet0' not found" even
+    # though the netdev backend really is named pxenet0. device_del
+    # operates on the qdev/PCI device id, which is a separate namespace
+    # from netdev backend ids.
+    ["-device", "e1000e,netdev=pxenet0,bootindex=1,id=pxenet0dev"],
     ["-netdev", "user,id=pxenet0,net=10.0.2.0/24,dhcpstart=10.0.2.15,tftp=pxe,bootfile=ipxe.efi"],
     ["-device", "e1000e,netdev=user.0"],
     ["-netdev", "user,id=user.0,net=10.0.3.0/24,dhcpstart=10.0.3.15,hostfwd=tcp::{{ .SSHHostPort }}-:5985"],

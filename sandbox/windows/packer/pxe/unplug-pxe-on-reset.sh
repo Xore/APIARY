@@ -68,8 +68,16 @@ def main():
             continue
         print(f"QMP event: {event}", flush=True)
         if event == "RESET":
-            print("guest reset detected -- unplugging pxenet0", flush=True)
-            send(sock, {"execute": "device_del", "arguments": {"id": "pxenet0"}})
+            print("guest reset detected -- unplugging pxenet0dev", flush=True)
+            # The *device* id, not the netdev backend id -- confirmed live,
+            # device_del on the netdev id ("pxenet0") fails with
+            # "Device 'pxenet0' not found" even though that name is real
+            # (it's just the backend, not the qdev/PCI frontend). The
+            # frontend needs its own explicit id= on the -device line
+            # (win11-analysis.pkr.hcl sets id=pxenet0dev) since QEMU
+            # otherwise auto-generates an anonymous one device_del can't
+            # target by name at all.
+            send(sock, {"execute": "device_del", "arguments": {"id": "pxenet0dev"}})
             result = next(objs)
             print(f"device_del result: {result}", flush=True)
             if "error" in result:
