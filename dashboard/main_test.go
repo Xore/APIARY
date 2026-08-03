@@ -205,7 +205,7 @@ func TestConpotSurfacesDeviceResponse(t *testing.T) {
 func TestConpotRequestDoesNotPolluteTopCommands(t *testing.T) {
 	ev := classify(map[string]any{
 		"data_type": "modbus", "dst_port": float64(502),
-		"request": "PROXY TCP4 192.161.49.2 87.106.162.235 39572 50100\r\nGET /../../etc/passwd HTTP/1.1\r\n",
+		"request": "PROXY TCP4 198.51.100.7 203.0.113.50 39572 50100\r\nGET /../../etc/passwd HTTP/1.1\r\n",
 	}, "conpot")
 	if ev.command != "" {
 		t.Fatalf("conpot request must not populate ev.command (pollutes Top Commands), got %q", ev.command)
