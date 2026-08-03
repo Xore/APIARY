@@ -35,8 +35,13 @@ sandbox/windows/packer/pxe/BCD
 sandbox/windows/packer/pxe/BOOT.SDI
 sandbox/windows/packer/pxe/boot.wim
 sandbox/windows/packer/pxe/ipxe.efi
+sandbox/windows/packer/pxe/ipxe.efi.unsigned
 sandbox/windows/packer/pxe/wimboot
 sandbox/windows/packer/pxe/ipxe/
+sandbox/windows/packer/pxe/pxe-cert.pem
+sandbox/windows/packer/pxe/pxe-cert.key
+sandbox/windows/packer/pxe/pxe-cert-guid.txt
+sandbox/windows/packer/pxe/OVMF_VARS_4M.honeypot-pxe.fd
 analysis/geoip/*.mmdb
 analysis/geoip/*.tar.gz
 dashboard/geoip/country.csv

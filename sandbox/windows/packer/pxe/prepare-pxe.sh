@@ -36,17 +36,31 @@
 # the secondary autounattend CD stays attached in win11-analysis.pkr.hcl.
 #
 # Secure Boot: OVMF only executes signed binaries when Secure Boot is
-# enforced, and this custom ipxe.efi is not Microsoft-signed. Building a
-# signed chain (enrolling a cert into OVMF's db) is real extra work with an
-# actual security-relevant tradeoff (this template normally runs Secure
-# Boot on deliberately, as an anti-detection measure -- see
-# win11-analysis.pkr.hcl's firmware comment). The chosen approach: use the
-# non-secboot OVMF variant for the *install* phase only. The final
-# win11-kvm.xml detonation domain keeps the .ms secure-boot firmware
-# unchanged -- the installed Windows Boot Manager is itself Microsoft-signed
-# and boots fine under Secure Boot even though it wasn't installed under
-# it, so detonation-time anti-detection posture (Confirm-SecureBootUEFI
-# etc.) is unaffected by this.
+# enforced, and this custom ipxe.efi is not Microsoft-signed by default.
+# Rather than turning Secure Boot off for the install phase, this script
+# builds and enrolls its own trust chain, so Secure Boot stays on the whole
+# time (matching win11-kvm.xml's detonation-time firmware, which was always
+# secure-boot-enforcing -- no split between install-time and detonation-time
+# posture at all now):
+#
+#   1. Generate a self-signed cert+key (openssl) -- regenerated locally per
+#      host, not a shared secret. Its only job is authorizing our own
+#      ipxe.efi in a firmware trust store we also control; nothing about it
+#      needs to be confidential or reused across machines to work, which is
+#      exactly what makes this reproducible unattended on any host running
+#      this script from scratch.
+#   2. Sign ipxe.efi with it (sbsign, from sbsigntool).
+#   3. Build a custom OVMF_VARS file (virt-fw-vars, from
+#      python3-virt-firmware) with that cert enrolled into PK/KEK/db
+#      *alongside* Microsoft's official win11 db/KEK certs (--microsoft-db
+#      win11) -- our cert alone authorizes ipxe.efi, Microsoft's still
+#      authorizes the Windows Boot Manager inside boot.wim/the installed OS.
+#      Confirmed live both ways: the signed ipxe.efi boots clean under
+#      OVMF_CODE_4M.secboot.fd with this vars file, and a deliberate
+#      negative-control boot of the *unsigned* ipxe.efi against the same
+#      vars file is correctly rejected ("Access Denied -- rejected probably
+#      by Secure Boot"), proving enforcement is real and not silently
+#      bypassed.
 #
 # Usage: ./prepare-pxe.sh [path-to-Win11-iso]
 # Regenerate after ever replacing the pinned ISO (autounattend.xml's
@@ -74,15 +88,38 @@ if [[ ! -f "$dir/wimboot" ]]; then
   curl -sSL -o "$dir/wimboot" https://github.com/ipxe/wimboot/releases/latest/download/wimboot
 fi
 
-if [[ ! -f "$dir/ipxe.efi" ]]; then
+if [[ ! -f "$dir/ipxe.efi.unsigned" ]]; then
   echo "==> Building ipxe.efi with boot.ipxe embedded"
   if [[ ! -d "$dir/ipxe" ]]; then
     git clone --depth 1 https://github.com/ipxe/ipxe.git "$dir/ipxe"
   fi
   cp "$dir/boot.ipxe" "$dir/ipxe/src/embed.ipxe"
   make -C "$dir/ipxe/src" bin-x86_64-efi/ipxe.efi EMBED=embed.ipxe -j"$(nproc)"
-  cp "$dir/ipxe/src/bin-x86_64-efi/ipxe.efi" "$dir/ipxe.efi"
+  cp "$dir/ipxe/src/bin-x86_64-efi/ipxe.efi" "$dir/ipxe.efi.unsigned"
 fi
 
+if [[ ! -f "$dir/pxe-cert.pem" ]]; then
+  echo "==> Generating self-signed PXE signing cert (local to this host, not a shared secret)"
+  openssl req -x509 -newkey rsa:2048 -keyout "$dir/pxe-cert.key" -out "$dir/pxe-cert.pem" \
+    -days 3650 -nodes -subj "/CN=honeypot-stack PXE boot signer/" 2>/dev/null
+fi
+
+echo "==> Signing ipxe.efi"
+sbsign --key "$dir/pxe-cert.key" --cert "$dir/pxe-cert.pem" \
+  --output "$dir/ipxe.efi" "$dir/ipxe.efi.unsigned"
+sbverify --cert "$dir/pxe-cert.pem" "$dir/ipxe.efi" >/dev/null
+
+echo "==> Building OVMF vars: our cert + Microsoft's win11 db/KEK, Secure Boot on"
+if [[ ! -f "$dir/pxe-cert-guid.txt" ]]; then
+  uuidgen > "$dir/pxe-cert-guid.txt"
+fi
+guid="$(cat "$dir/pxe-cert-guid.txt")"
+cp /usr/share/OVMF/OVMF_VARS_4M.fd "$dir/OVMF_VARS_4M.honeypot-pxe.fd"
+virt-fw-vars --inplace "$dir/OVMF_VARS_4M.honeypot-pxe.fd" \
+  --enroll-cert "$dir/pxe-cert.pem" \
+  --microsoft-db win11 \
+  --add-db "$guid" "$dir/pxe-cert.pem" \
+  --sb
+
 echo "==> PXE staging ready in $dir"
-ls -la "$dir"/{BCD,BOOT.SDI,boot.wim,wimboot,ipxe.efi}
+ls -la "$dir"/{BCD,BOOT.SDI,boot.wim,wimboot,ipxe.efi,OVMF_VARS_4M.honeypot-pxe.fd}
