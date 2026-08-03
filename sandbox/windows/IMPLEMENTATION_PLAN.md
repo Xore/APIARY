@@ -818,9 +818,8 @@ sandbox/windows/
 │   ├── win11-kvm.xml             ← libvirt domain XML template
 │   ├── autounattend.xml          ← Windows unattended install answer file
 │   └── scripts/
-│       └── 01-hardening.ps1 … 04-tools.ps1  ← run inside VM during build
+│       └── 01-hardening.ps1 … 08-traffic-noise.ps1  ← run inside VM during build
 ├── setup/
-│   ├── prepare_vm.ps1            ← manual prep (if not using Packer)
 │   ├── enable_logging.ps1        ← Sysmon + PS logging
 │   ├── kvm_manage.sh             ← virsh helper: create/snapshot/revert
 │   └── sandbox-network.xml       ← the libvirt network; no <forward> is the point
