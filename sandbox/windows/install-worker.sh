@@ -22,6 +22,23 @@ set -euo pipefail
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 target=/usr/local/libexec/honeypot-sandbox/windows
 
+# #438: run_sample.py's own docstring has always said "pip install pywinrm
+# paramiko python-evtx", but nothing ever actually ran that for the user
+# the systemd units execute as (root) -- so a `pip install` done by hand as
+# a regular user (site-packages under that user's own home) was invisible
+# to the worker, and every WinRM attempt failed with "pywinrm not
+# installed" from inside wait_for_winrm()'s own except-and-retry loop.
+# Confirmed live: that exact failure produced no useful symptom on its own
+# -- wait_for_winrm() silently swallowed it and reported a generic
+# "WinRM not responsive after boot" timeout, which reads exactly like a
+# slow-boot problem instead of a missing-dependency one. (Also fixed
+# there, separately: that loop now logs the real per-attempt error instead
+# of discarding it.) Installing here, for root, as part of the same setup
+# step that installs everything else this worker needs, closes the gap at
+# its source instead of relying on whoever deploys this noticing a vague
+# timeout and guessing why.
+python3 -m pip install --break-system-packages pywinrm paramiko python-evtx
+
 install -d -m 0755 -o root -g root "$target" "$target/orchestrate"
 install -m 0755 -o root -g root "$script_dir/run_pending.sh" "$target/run_pending.sh"
 for file in "$script_dir"/orchestrate/*.py; do
