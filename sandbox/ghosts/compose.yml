@@ -14,13 +14,23 @@
 # own source via a git build context pinned to the v9.0.0 tag -- this file
 # alone is enough, `docker compose build` clones nothing to disk itself.
 #
-# ghosts-api has no host port publish at all. It gets a fixed static address
-# on the dedicated ghosts_net bridge (10.90.0.2:5000) instead: reachable from
-# this host directly (docker routes user-defined bridges without any -p) and,
-# once #325 adds the narrow routing exception, from the WAN-permitted GHOSTS
-# guest -- the same "one fixed, documented address" pattern as RevDeck's
-# REVDECK_API_BASE=http://10.8.0.2:19500. Don't change this address without
-# updating #325's firewall rule to match.
+# ghosts-api publishes port 5000 on 10.20.30.1 -- virbr-ghosts's own gateway
+# address (#325), not the docker-internal 10.90.0.2 an earlier version of
+# this file used. That first attempt didn't work: verified live (#325),
+# recent Docker versions add a `raw` table PREROUTING rule
+# (`ip daddr <container> iifname != <container's own bridge> drop`) that
+# blocks routing directly to a container's backend IP from any other
+# interface, regardless of what FORWARD/DOCKER-USER rules say -- Docker
+# expects cross-network reachability to go through a published port, not a
+# raw backend-IP route. Binding to virbr-ghosts's own gateway also means the
+# GHOSTS guest needs no separate FORWARD-chain exception at all: it's
+# already local traffic to its own default gateway, covered by network-filter.sh's
+# ordinary bridge-gateway ACCEPT. Requires the `ghosts` libvirt network
+# (network.xml) to exist before this container starts -- Docker fails to
+# bind a port to an address that isn't yet configured on the host. Don't
+# change this address without updating #325's network.xml/network-filter.sh
+# to match -- the same "one fixed, documented address" pattern as RevDeck's
+# REVDECK_API_BASE=http://10.8.0.2:19500.
 
 services:
   ghosts-postgres:
@@ -62,6 +72,8 @@ services:
     networks:
       ghosts_net:
         ipv4_address: 10.90.0.2
+    ports:
+      - "10.20.30.1:5000:5000"
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true

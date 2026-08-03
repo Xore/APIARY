@@ -8,10 +8,11 @@
 #   ghosts-api        CMU SEI's Ghosts.Api, built from source, pinned to v9.0.0
 #
 # Frontend/Grafana/n8n are deliberately not deployed -- see the header on
-# compose.yml. ghosts-api has no host port publish; it gets a fixed static
-# address on the ghosts_net bridge (10.90.0.2:5000), reachable from this host
-# without any port mapping and, once #325 exists, from the WAN-permitted
-# GHOSTS guest through one narrow routing exception.
+# compose.yml. ghosts-api publishes on 10.20.30.1:5000 -- virbr-ghosts's own
+# gateway address (#325), not a docker-internal IP; see compose.yml's header
+# for why direct docker-backend-IP routing doesn't work here. Requires the
+# `ghosts` libvirt network (sandbox/ghosts/network.xml) to already exist --
+# run sandbox/ghosts/install-network.sh net-setup first on a fresh host.
 #
 # On a host running Dockge the compose file is deployed into a stack
 # directory under /opt/stacks, same as every other stack this repo manages,
@@ -39,7 +40,7 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 compose_file="$here/compose.yml"
 env_file=/etc/default/honeypot-ghosts
-GHOSTS_API_ADDR=10.90.0.2:5000
+GHOSTS_API_ADDR=10.20.30.1:5000
 
 SKIP_ENROLL_TEST=0
 STACK_DIR="$([ -d /opt/stacks ] && echo /opt/stacks/ghosts || true)"
