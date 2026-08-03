@@ -142,8 +142,22 @@ def winrm_run(ps_command: str, timeout: int = 60) -> dict:
     }
 
 
-def wait_for_winrm(max_wait: int = 120):
-    """Wait until WinRM is responsive."""
+def wait_for_winrm(max_wait: int = 300):
+    """Wait until WinRM is responsive.
+
+    max_wait was 120 (#438): confirmed live against this exact image on
+    this host, that is not enough. A real detonation attempt (the first
+    one run through the newly-implemented hash-resolution handoff, #47)
+    hit the 120s deadline and raised TimeoutError with no sign WinRM was
+    ever close to answering -- not a near-miss, a real shortfall. This
+    domain boots secure boot + TPM (swtpm) + a full AutoLogon ->
+    FirstLogonCommands -> WinRM-enable chain on 16GB RAM, and
+    kvm_manage.sh's own revert command already documents "~1-2min
+    (cold boot)" for this -- 120s sits at the bottom edge of that range
+    with no margin, not comfortably inside it, and this run landed on the
+    wrong side of it. 300s gives real headroom above the documented
+    range instead of another unexamined guess at the boundary.
+    """
     deadline = time.time() + max_wait
     while time.time() < deadline:
         try:
