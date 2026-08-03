@@ -57,6 +57,20 @@ services:
       # the ingest-geoip mount below and used by the geoip-honeypot pipeline.
       - ingest.geoip.downloader.enabled=false
       - path.repo=/snapshots
+      # #240: lock the JVM heap in physical RAM so the kernel can never swap
+      # it under host memory pressure. A swapped heap causes GC pauses that
+      # can run into minutes instead of milliseconds -- Elasticsearch can
+      # look hung or start failing health checks for reasons that have
+      # nothing to do with query load. Requires the IPC_LOCK cap_add and
+      # unlimited memlock ulimit below to actually take effect -- verify
+      # with GET /_nodes?filter_path=**.mlockall after deploy, since a
+      # silently-failed lock (e.g. ulimit still too low) doesn't stop the
+      # container from starting or reporting healthy.
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
     volumes:
       - es-data:/usr/share/elasticsearch/data
       - /opt/stacks/honeypot-stack/analysis/geoip:/usr/share/elasticsearch/config/ingest-geoip:ro
@@ -88,8 +102,17 @@ services:
     # above). cap_drop: ALL with no cap_add stayed healthy and served
     # _cluster/health -- no capability the image's own default set granted
     # was actually load-bearing here.
+    #
+    # #240: IPC_LOCK is the one deliberate exception to that "needs nothing"
+    # result, added specifically for bootstrap.memory_lock above -- that
+    # setting was never turned on when #118 measured this service, so the
+    # absence of IPC_LOCK was never actually exercised against it. This is
+    # not a regression of #118's finding, it's a new requirement #118
+    # couldn't have tested.
     cap_drop:
       - ALL
+    cap_add:
+      - IPC_LOCK
     security_opt:
       - no-new-privileges:true
     deploy:

@@ -121,6 +121,30 @@ type workbenchAnalyzer struct {
 	OptionSchema    workbenchOptionSchema `json:"option_schema"`
 }
 
+// #405/#36 decision: workbench run/recipe state stays local-disk-only,
+// unlike ghidra/sandbox/github_analysis/revdeck's ES-mirror-with-
+// local-fallback pattern (#403/#404) -- deliberately, not by omission.
+//
+// Every one of those four is a read-only mirror of results an EXTERNAL
+// worker produces once and never revises; the dashboard only ever reads
+// them, so a few minutes of import lag just means a page is briefly stale,
+// never wrong. A workbench run is the opposite shape: this service is the
+// SOLE writer, mutates a run repeatedly over its lifecycle (queued ->
+// running -> completed/failed via persistRunLocked), and — critically —
+// findOrCreateRun's idempotency check (same owner + idempotency key returns
+// the existing run instead of submitting a duplicate analysis) depends on
+// seeing its own immediately-preceding write. An async ES mirror on a
+// multi-minute import interval cannot give two dashboard instances that
+// guarantee: both could miss each other's very-recent run and each submit
+// the same expensive Ghidra/sandbox job.
+//
+// Real multi-instance support for this specific state needs either a
+// shared filesystem for w.root (outside this service's control) or a
+// genuinely synchronous store (not an async mirror) as the primary copy —
+// both bigger, riskier changes than the read-only migrations, and neither
+// is warranted by anything reported against this stack so far. Revisit if
+// that changes; don't silently re-decide this by adding an ES read path
+// here later without re-reading this comment first.
 type workbenchService struct {
 	mu   sync.Mutex
 	root string

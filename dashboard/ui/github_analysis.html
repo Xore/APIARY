@@ -29,12 +29,12 @@
       <div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
         <header class="overview-header" id="github-analysis-header">
           <div>
-            <div class="eyebrow">External scanning</div>
+            <div class="label-section">External scanning</div>
             <h1>GitHub analysis</h1>
             <p class="subtitle">Multi-scanner verdicts from samples published to the public Xore/honeypot repository.</p>
           </div>
           <div class="live-panel">
-            <span class="gen">generated {{.Generated.Format "2006-01-02 15:04:05 MST"}}</span>
+            <span class="gen">generated <span data-hp-utc="{{utcOrEmpty .Generated}}">{{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></span>
           </div>
         </header>
 

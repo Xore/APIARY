@@ -46,6 +46,7 @@ honeypot-stack (this repo)          Xore/honeypot (sample archive + pipeline)
 | `dedupe-payloads.py` | Collapses duplicate captures by SHA-256 |
 | `yara/` | Networkless YARA scanner sidecar, local rules, and the vendored upstream corpus (`yara/sync-yara.sh`) |
 | `ghidra/` | Headless Ghidra reverse-engineering pipeline, local-model triage, and the analysis-host installer ([`ghidra/README.md`](ghidra/README.md)) |
+| `es-results-importer/` | Ships Ghidra/sandbox/GitHub-analysis/workbench-run results into Elasticsearch, read-only, alongside the raw event stream ([#378](https://github.com/Xore/honeypot-stack/issues/378)) |
 | `elasticsearch-setup.sh`, `honeypot-kibana-setup.sh`, `filebeat.yml`, `evebox.yaml` | Log pipeline and search UI provisioning |
 | `backup-honeypot.sh`, `verify-backup.sh`, `log-maintenance.sh`, `RECOVERY.md` | Retention and recovery |
 | `verify-stack.py` | Post-deploy health check |

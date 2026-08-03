@@ -6,7 +6,7 @@
 # `compatible-with=9`, which the 8.13.4 server rejects outright with
 # media_type_header_exception -- confirmed live against a disposable 8.13.4
 # container, not just read from a compatibility table. See #62.
-elasticsearch==8.19.3
+elasticsearch==9.4.1
 
 # ML core
 scikit-learn==1.9.0
@@ -18,7 +18,7 @@ joblib==1.5.3
 # here so the build is reproducible instead of riding pip's resolver.
 # Verified by a clean `pip install` of this exact file's versions together,
 # see #61/#62.
-numpy==2.4.6
+numpy==2.5.1
 pandas==3.0.5
 
 # Deep learning (CPU-only PyTorch)
@@ -32,7 +32,7 @@ numba==0.66.0
 llvmlite==0.48.0
 
 # Redis pub/sub
-redis==8.0.1
+redis==8.1.0
 
 # Utilities
 python-dateutil==2.9.0.post0

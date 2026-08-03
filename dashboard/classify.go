@@ -148,18 +148,35 @@ func classify(e map[string]any, dirSensor string) event {
 			ev.port = "23"
 		}
 		switch {
-		case strings.Contains(eid, "login"):
+		case eid == "cowrie.login.success", eid == "cowrie.login.failed":
 			ev.isLogin = true
 			ev.detail = eid[len("cowrie."):] + ": " + ev.user + " / " + ev.pass
-		case eid == "cowrie.command.input", eid == "cowrie.command.failed":
+			// Public-key auth attempts carry no password but do carry a key
+			// fingerprint (docs/OUTPUT.rst: fingerprint/key/type) -- surface
+			// it the same way client.kex's HASSH already is, rather than
+			// showing a login row with an empty-looking user/pass pair.
+			if fp := str(e["fingerprint"]); fp != "" {
+				ev.fingerprint, ev.fingerKind = fp, "SSH pubkey"
+				ev.detail += " (key " + shortHash(fp) + ")"
+			}
+		case eid == "cowrie.command.input", eid == "cowrie.command.failed",
+			eid == "cowrie.command.success", eid == "cowrie.session.input":
 			ev.command = str(e["input"])
 			ev.detail = "cmd: " + ev.command
+		case eid == "cowrie.command.chpasswd":
+			ev.detail = "chpasswd attempt: " + str(e["username"])
 		case eid == "cowrie.session.file_download", eid == "cowrie.session.file_upload":
 			ev.shasum = str(e["shasum"])
 			ev.download = firstNonEmpty(str(e["destfile"]), str(e["url"]), str(e["filename"]))
 			ev.detail = "payload " + shortHash(ev.shasum)
 			if ev.download != "" {
 				ev.detail += " -> " + ev.download
+			}
+		case eid == "cowrie.session.file_download.failed":
+			ev.download = str(e["url"])
+			ev.detail = "download failed: " + ev.download
+			if reason := str(e["error"]); reason != "" {
+				ev.detail += " (" + reason + ")"
 			}
 		case eid == "cowrie.client.version":
 			ev.clientVer = str(e["version"])
@@ -170,15 +187,46 @@ func classify(e map[string]any, dirSensor string) event {
 			ev.fingerprint = str(e["hassh"])
 			ev.fingerKind = "HASSH"
 			ev.detail = "SSH HASSH: " + ev.fingerprint
+		case eid == "cowrie.client.size":
+			ev.detail = "terminal " + num(e["width"]) + "x" + num(e["height"])
+		case eid == "cowrie.direct-tcpip.request":
+			// A port-forward request is the attacker trying to proxy
+			// traffic through the honeypot -- worth its own detail line,
+			// not just the bare eventid.
+			ev.detail = "port-forward request -> " + str(e["dst_ip"]) + ":" + num(e["dst_port"])
+		case eid == "cowrie.telnet.exploit_attempt":
+			ev.detail = "CVE " + str(e["cve"]) + " attempt: " + str(e["name"]) + "=" + str(e["value"])
+		case eid == "cowrie.telnet.exploit_success":
+			ev.isLogin = true
+			ev.user = str(e["username"])
+			ev.detail = "CVE " + str(e["cve"]) + " succeeded, logged in as " + ev.user
+		case eid == "cowrie.log.closed":
+			// A replayable TTY session recording -- arguably the single
+			// most useful artifact cowrie produces, and it was previously
+			// only ever shown as the bare word "closed" (the eventid
+			// suffix), with no indication a recording exists at all.
+			ev.download = str(e["ttylog"])
+			ev.shasum = str(e["shasum"])
+			ev.detail = "TTY session recorded"
+			if ev.download != "" {
+				ev.detail += ": " + ev.download
+			}
 		case eid == "cowrie.session.connect":
 			ev.detail = "connect"
 		case eid == "cowrie.session.closed":
 			ev.detail = "closed"
-			if d := num(e["duration"]); d != "" {
-				ev.detail = "closed after " + d + "s"
+			// duration_ms, not duration -- e["duration"] never matched any
+			// real cowrie field (confirmed live against the deployed
+			// cluster), so this line silently never fired.
+			if d := num(e["duration_ms"]); d != "" {
+				ev.detail = "closed after " + d + "ms"
 			}
 		default:
-			ev.detail = eid[len("cowrie."):]
+			// Every cowrie event carries a human-readable "message" per its
+			// own docs (confirmed live) -- falling back to the bare eventid
+			// suffix here discarded it for every eventid without its own
+			// case above (there are 30+; only a handful are cased).
+			ev.detail = firstNonEmpty(str(e["message"]), eid[len("cowrie."):])
 		}
 		return ev
 	}
@@ -203,6 +251,175 @@ func classify(e map[string]any, dirSensor string) event {
 			ev.detail = ev.proto + ": " + ev.command
 		default:
 			ev.detail = ev.proto + " " + kind
+		}
+		// Every other multipot handler's payload rides in "command"
+		// (e.g. ADB's OPEN destination) or "data" (SOCKS5's offered
+		// methods/connect target, Postgres's database param, HL7's
+		// message, Elasticsearch/Docker's HTTP body) -- neither ever
+		// reached the dashboard row for any event kind besides the
+		// literal "command" case above.
+		//
+		// #41: "http_request" is excluded here -- its own "command" field
+		// (handleElastic/handleDocker's Command: reqLine) is an HTTP
+		// request line ("GET /_search HTTP/1.1"), not an attacker-issued
+		// command, and copying it into ev.command was polluting the
+		// Attacker Behavior tab's Top Commands leaderboard with GET/POST
+		// requests. It's still shown in ev.detail below either way --
+		// only the commands aggregate (aggregate.go's
+		// commands[sensor+cmd]++, keyed off ev.command) is affected.
+		if kind != "command" && kind != "http_request" {
+			if cmd := str(e["command"]); cmd != "" {
+				ev.command = cmd
+				ev.detail += ": " + cmd
+			}
+		} else if kind == "http_request" {
+			if cmd := str(e["command"]); cmd != "" {
+				ev.detail += ": " + cmd
+			}
+		}
+		if data := str(e["data"]); data != "" {
+			ev.detail += "  " + data
+		}
+		if client := str(e["client"]); client != "" {
+			ev.fingerprint, ev.fingerKind = client, "client banner"
+			ev.detail += "  client: " + client
+		}
+		return ev
+	}
+
+	// ---- dicompot (#413) ---------------------------------------------------
+	if s, ok := e["sensor"].(string); ok && s == "dicompot" {
+		kind := str(e["event"])
+		if kind == "listening" {
+			ev.skip = true
+			return ev
+		}
+		ev.sensor = "dicompot"
+		ev.proto = "dicom"
+		ev.port = num(e["port"])
+		ev.detail = dicomEventLabels[kind]
+		if ev.detail == "" {
+			ev.detail = kind
+		}
+		if data := str(e["data"]); data != "" {
+			ev.detail += " " + data
+		}
+		if b := num(e["bytes"]); b != "" {
+			ev.detail += " (" + b + " bytes)"
+		}
+		return ev
+	}
+
+	// ---- dns-honeypot (#415) ------------------------------------------------
+	// query is the actual domain asked for -- deliberately not confused with
+	// the "event" field (also sometimes literally the string "query"): a
+	// prior version of this function fell through to the generic fallback
+	// below, which only ever surfaced e["event"] and made every query look
+	// identically blank regardless of what was actually asked.
+	if s, ok := e["sensor"].(string); ok && s == "dns-honeypot" {
+		kind := str(e["event"])
+		if kind == "listening" {
+			ev.skip = true
+			return ev
+		}
+		ev.sensor = "dns-honeypot"
+		ev.proto = "dns"
+		ev.port = num(e["port"])
+		ev.path = str(e["query"])
+		ev.detail = kind
+		if ev.path != "" {
+			ev.detail = "query " + ev.path
+			if qt := dnsQTypeName(int(numFloat(e["qtype"]))); qt != "" {
+				ev.detail += " (" + qt + ")"
+			}
+		}
+		// A non-zero opcode (IQUERY/STATUS/NOTIFY/UPDATE) is a non-standard
+		// probe worth flagging -- 0 (QUERY) is virtually all real traffic,
+		// so only surface it when it deviates from that default.
+		if op := opcodeName[int(numFloat(e["opcode"]))]; op != "" {
+			ev.detail += " [opcode " + op + "]"
+		}
+		return ev
+	}
+
+	// ---- citrix-honeypot (#414, CVE-2019-19781) ----------------------------
+	if s, ok := e["sensor"].(string); ok && s == "citrix-honeypot" {
+		kind := str(e["event"])
+		if kind == "listening" {
+			ev.skip = true
+			return ev
+		}
+		ev.sensor = "citrix-honeypot"
+		ev.proto = "https"
+		ev.port = num(e["port"])
+		ev.path = str(e["path"])
+		ev.detail = strings.TrimSpace(kind + " " + ev.path)
+		if kind == "cve_2019_19781_payload" {
+			ev.command = str(e["data"])
+			ev.detail += "  payload: " + ev.command
+		}
+		if hdr := headerMap(e["headers"]); len(hdr) > 0 {
+			if ev.fingerprint = headerVal(hdr, "x-ja4"); ev.fingerprint != "" {
+				ev.fingerKind = "JA4"
+			} else if ev.fingerprint = headerVal(hdr, "x-ja3"); ev.fingerprint != "" {
+				ev.fingerKind = "JA3"
+			} else if ev.fingerprint = headerVal(hdr, "user-agent"); ev.fingerprint != "" {
+				ev.fingerKind = "User-Agent"
+			}
+		}
+		return ev
+	}
+
+	// ---- cisco-asa-honeypot (#414, CVE-2018-0101 + IKE) --------------------
+	if s, ok := e["sensor"].(string); ok && s == "cisco-asa-honeypot" {
+		kind := str(e["event"])
+		if kind == "https_listening" || kind == "ike_listening" {
+			ev.skip = true
+			return ev
+		}
+		ev.sensor = "cisco-asa-honeypot"
+		ev.proto = str(e["proto"])
+		ev.port = num(e["port"])
+		ev.path = str(e["path"])
+		ev.detail = strings.TrimSpace(kind + " " + ev.path)
+		if kind == "cve_2018_0101_payload" {
+			ev.command = str(e["data"])
+			ev.detail += "  payload: " + ev.command
+		}
+		if kind == "ike_unexpected_exchange" {
+			if d := str(e["data"]); d != "" {
+				ev.detail += " (type " + d + ")"
+			}
+		}
+		if hdr := headerMap(e["headers"]); len(hdr) > 0 {
+			if ev.fingerprint = headerVal(hdr, "x-ja4"); ev.fingerprint != "" {
+				ev.fingerKind = "JA4"
+			} else if ev.fingerprint = headerVal(hdr, "x-ja3"); ev.fingerprint != "" {
+				ev.fingerKind = "JA3"
+			} else if ev.fingerprint = headerVal(hdr, "user-agent"); ev.fingerprint != "" {
+				ev.fingerKind = "User-Agent"
+			}
+		}
+		return ev
+	}
+
+	// ---- rdp-honeypot (#412) -----------------------------------------------
+	if s, ok := e["sensor"].(string); ok && s == "rdp-honeypot" {
+		if str(e["event"]) == "listening" {
+			ev.skip = true
+			return ev
+		}
+		ev.sensor = "rdp-honeypot"
+		ev.proto = "rdp"
+		ev.port = num(e["port"])
+		ev.user = str(e["username"])
+		ev.isLogin = ev.user != ""
+		ev.detail = "connect"
+		if ev.user != "" {
+			ev.detail += "  mstshash: " + ev.user
+		}
+		if p := str(e["requested_protocols"]); p != "" {
+			ev.detail += "  security: " + p
 		}
 		return ev
 	}
@@ -293,9 +510,23 @@ func classify(e map[string]any, dirSensor string) event {
 			ev.port = "2502"
 		}
 		req := firstNonEmpty(str(e["request"]), str(e["event_type"]))
+		// #41: ev.command deliberately NOT set here. "request" is raw
+		// industrial-protocol bytes (Modbus/S7comm/Kamstrup) or whatever
+		// arbitrary garbage a scanner sent to the wrong port -- not an
+		// attacker-issued command. Confirmed live: this was polluting the
+		// Attacker Behavior tab's Top Commands leaderboard with raw hex
+		// blobs and even a PROXY-protocol preamble + full HTTP request that
+		// happened to land on a conpot port. Still shown in detail below,
+		// same as before -- only the commands aggregate is affected.
 		ev.detail = strings.TrimSpace(ev.proto + " " + req)
 		if ev.detail == "" {
 			ev.detail = "probe"
+		}
+		// response is the fake device's own reply bytes -- what was actually
+		// disclosed to the attacker (e.g. a Kamstrup meter's canned readout).
+		// request/event_type were already read above; response never was.
+		if resp := str(e["response"]); resp != "" {
+			ev.detail += "  -> " + resp
 		}
 		return ev
 	}
@@ -377,6 +608,14 @@ func classify(e map[string]any, dirSensor string) event {
 			ev.isLogin = true
 			ev.detail += "  (" + ev.user + " / " + ev.pass + ")"
 		}
+		// tanner's own emulator classifies every request against a detection
+		// name ("index" for benign/unmatched traffic, or an attack signature
+		// like a known scanner/exploit pattern otherwise) -- present in the
+		// stored ES document but never read here at all.
+		if name := tannerDetectionName(e); name != "" && name != "index" {
+			ev.category = firstNonEmpty(ev.category, "tanner: "+name)
+			ev.detail += "  [" + name + "]"
+		}
 		return ev
 	}
 
@@ -436,6 +675,36 @@ func classify(e map[string]any, dirSensor string) event {
 	}
 	ev.detail = firstNonEmpty(str(e["event"]), str(e["event_type"]), str(e["message"]), str(e["msg"]), "event")
 	return ev
+}
+
+// dicomEventLabels maps dicompot's raw DIMSE event names to a readable
+// label; see dicompot/main.go for the exact set it emits.
+var dicomEventLabels = map[string]string{
+	"connect": "connect",
+	"c_echo":  "C-ECHO",
+	"c_find":  "C-FIND",
+	"c_move":  "C-MOVE",
+	"c_get":   "C-GET",
+	"c_store": "C-STORE",
+}
+
+// dnsQTypeName maps the common DNS query type numbers to their record
+// name, for dns-honeypot's logged qtype. Falls back to "" (omitted) for
+// anything not in this short, deliberately incomplete list -- the raw
+// number is still visible in the stored ES document either way.
+func dnsQTypeName(qtype int) string {
+	names := map[int]string{
+		1: "A", 2: "NS", 5: "CNAME", 6: "SOA", 12: "PTR", 15: "MX",
+		16: "TXT", 28: "AAAA", 33: "SRV", 255: "ANY",
+	}
+	return names[qtype]
+}
+
+// opcodeName maps a DNS header OPCODE to its RFC name for dns-honeypot's
+// logged opcode. 0 (QUERY) is deliberately absent -- it's virtually all
+// real traffic and not worth flagging in the UI.
+var opcodeName = map[int]string{
+	1: "IQUERY", 2: "STATUS", 4: "NOTIFY", 5: "UPDATE",
 }
 
 func personaForSensor(sensor string) (persona, site, asset, org string) {
@@ -532,6 +801,18 @@ func eventSrcPort(e map[string]any) int {
 		}
 	}
 	return 0
+}
+
+// tannerDetectionName digs response_msg.response.message.detection.name out
+// of a tanner_report.json record -- tanner's own emulator-side
+// classification of the request (a known scanner/exploit signature, or
+// "index" for unmatched/benign traffic).
+func tannerDetectionName(e map[string]any) string {
+	respMsg, _ := e["response_msg"].(map[string]any)
+	resp, _ := respMsg["response"].(map[string]any)
+	msg, _ := resp["message"].(map[string]any)
+	detection, _ := msg["detection"].(map[string]any)
+	return str(detection["name"])
 }
 
 // headerMap coerces a JSON headers object into a plain string map.

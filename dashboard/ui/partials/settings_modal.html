@@ -1,8 +1,8 @@
 {{define "settingsModal"}}
-<!-- Layout CSS for this fragment lives in /static/hp-settings-modal.css,
-     loaded once by the shared "style" partial on every full page -- see
-     that file's header comment for why an inline stylesheet here can't be
-     nonce'd correctly (#58). -->
+<!-- Layout CSS for this fragment lives in Xore/theme's theme.css (vendored
+     at /static/theme.css), loaded once by the shared "style" partial on
+     every full page -- an inline stylesheet here can't be nonce'd
+     correctly (#58). -->
 <div class="modal-backdrop" id="hp-dash-settings-backdrop" aria-hidden="true" inert></div>
 <section class="modal hp-dash-settings" id="hp-settings" role="dialog" aria-modal="true" aria-labelledby="hp-dash-settings-title" aria-hidden="true" inert>
   <button class="modal__close" type="button" data-hp-settings-close aria-label="Close settings">&#10005;</button>
@@ -204,8 +204,49 @@
           <div class="settings-grid">
             <div class="hp-field settings-field" data-hp-search="time timezone iana zone clock">
               <label class="form-label" for="hp-pref-timezone">Timezone</label>
-              <input class="form-input" id="hp-pref-timezone" data-pref="timezone" autocomplete="off" spellcheck="false" placeholder="browser">
-              <div class="settings-field__desc">"browser", "utc", or an IANA zone such as Europe/Berlin.</div>
+              <input class="form-input" id="hp-pref-timezone" data-pref="timezone" list="hp-tz-suggestions" autocomplete="off" spellcheck="false" placeholder="browser">
+              <!-- A native <datalist>, not a custom dropdown: the browser filters these
+                   suggestions against whatever the operator has typed so far and still
+                   lets them submit any IANA zone name that isn't in this list at all --
+                   this is a starting-point/recommendation set, not a closed enum
+                   (validTimezone in settings_domain.go accepts every real IANA zone,
+                   not just the ones listed here). The four explicitly requested
+                   countries (USA, Germany, China, England) come first; USA gets all
+                   four CONUS zones since "America/New_York" alone would silently pick
+                   Eastern for operators anywhere else in the country. The rest is a
+                   short list of other common zones so typing a partial city/region name
+                   ("Tok", "Syd", "Mumb"...) still surfaces something in the correct
+                   IANA format instead of leaving the operator to guess the exact
+                   Continent/City spelling. -->
+              <datalist id="hp-tz-suggestions">
+                <option value="America/New_York">USA — Eastern</option>
+                <option value="America/Chicago">USA — Central</option>
+                <option value="America/Denver">USA — Mountain</option>
+                <option value="America/Los_Angeles">USA — Pacific</option>
+                <option value="Europe/Berlin">Germany</option>
+                <option value="Asia/Shanghai">China</option>
+                <option value="Europe/London">England (UK)</option>
+                <option value="Europe/Paris">France</option>
+                <option value="Europe/Madrid">Spain</option>
+                <option value="Europe/Rome">Italy</option>
+                <option value="Europe/Amsterdam">Netherlands</option>
+                <option value="Europe/Moscow">Russia — Moscow</option>
+                <option value="Asia/Tokyo">Japan</option>
+                <option value="Asia/Seoul">South Korea</option>
+                <option value="Asia/Kolkata">India</option>
+                <option value="Asia/Singapore">Singapore</option>
+                <option value="Asia/Dubai">UAE</option>
+                <option value="Australia/Sydney">Australia — Sydney</option>
+                <option value="Australia/Perth">Australia — Perth</option>
+                <option value="Pacific/Auckland">New Zealand</option>
+                <option value="America/Sao_Paulo">Brazil</option>
+                <option value="America/Mexico_City">Mexico</option>
+                <option value="America/Toronto">Canada — Eastern</option>
+                <option value="Africa/Johannesburg">South Africa</option>
+                <option value="browser">browser — this device's own zone</option>
+                <option value="utc">utc</option>
+              </datalist>
+              <div class="settings-field__desc">"browser", "utc", or an IANA zone such as Europe/Berlin -- start typing to see suggestions.</div>
             </div>
           </div>
           <div class="hp-field settings-field" data-hp-search="time clock 24 12 hour format">

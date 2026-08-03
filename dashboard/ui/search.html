@@ -15,12 +15,12 @@
       <div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
         <header class="overview-header" id="search-header">
           <div>
-            <div class="eyebrow">Investigate</div>
+            <div class="label-section">Investigate</div>
             <h1>search results</h1>
             <p class="subtitle">Every source the dashboard holds, matched against <strong>{{.Query}}</strong>.</p>
           </div>
           <div class="live-panel">
-            <span class="gen">generated {{.Generated.Format "2006-01-02 15:04:05 MST"}}</span>
+            <span class="gen">generated <span data-hp-utc="{{utcOrEmpty .Generated}}">{{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></span>
           </div>
         </header>
 

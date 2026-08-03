@@ -14,7 +14,7 @@ curl -fsS -X PUT "$es_url/_snapshot/honeypot-fs" \
 # Bounded retention prevents a noisy internet-wide scan or IDS signature from
 # filling the homeserver disk. Daily Filebeat names already provide rollover;
 # ILM handles deletion of the old daily indices/backing indices.
-for spec in honeypot-30d:30d suricata-7d:7d dead-letter-60d:60d portbridge-30d:30d; do
+for spec in honeypot-30d:30d suricata-7d:7d dead-letter-60d:60d portbridge-30d:30d analysis-results-180d:180d; do
   name=${spec%%:*}
   age=${spec#*:}
   curl -fsS -X PUT "$es_url/_ilm/policy/$name" \
@@ -116,6 +116,14 @@ curl -fsS -X PUT "$es_url/_ingest/pipeline/geoip-honeypot" \
         "lang": "painless",
         "ignore_failure": true,
         "source": "if (ctx.source != null && ctx.source.as != null && ctx.source.as.organization_name != null) { String o = ctx.source.as.organization_name.toLowerCase(); String t = 'network'; if (o.contains('censys') || o.contains('shadowserver') || o.contains('binaryedge') || o.contains('securitytrails') || o.contains('shodan')) t = 'scanner'; else if (o.contains('amazon') || o.contains('google cloud') || o.contains('microsoft') || o.contains('azure') || o.contains('digitalocean') || o.contains('oracle cloud') || o.contains('linode') || o.contains('vultr') || o.contains('cloudflare')) t = 'cloud'; else if (o.contains('hosting') || o.contains('server') || o.contains('datacenter') || o.contains('hetzner') || o.contains('ovh') || o.contains('leaseweb')) t = 'hosting'; ctx.source.as.type = t; }"
+      }
+    },
+    {
+      "script": {
+        "lang": "painless",
+        "ignore_failure": true,
+        "description": "#238/#416: flags JNDI/Log4Shell injection attempts across every sensor's captured free-text fields (concatenates every string value under honeypot.*, so this covers path/body/user_agent/headers/command/etc. uniformly without hardcoding field names per sensor -- automatically covers future sensors too). Deobfuscates Log4j lookup-based evasion first (nested lookup tricks like lower:j + ndi splitting the word jndi across sub-expressions, which a naive substring check for the literal jndi prefix would miss) -- ported from Log4Pot's deobfuscator.py (detection only, not its payloader.py, which actively downloads the attacker's LDAP/RMI callback payload; that outbound fetch is a distinct, larger decision out of scope here). depth is a hard recursion cap (25) and blob length is capped at 8192 chars -- both defend against a crafted pathological input causing runaway recursion/allocation on the ingest node, which the original Python implementation does not bound.",
+        "source": "String deobfuscate(String expr, int depth) { if (depth > 25) { return expr; } if (expr.startsWith('${')) { int posEnd = expr.indexOf('}'); if (posEnd == -1) { return expr; } int posLookup = expr.indexOf('${', 2); if (posLookup != -1 && posLookup < posEnd) { return deobfuscate(expr.substring(0, posLookup) + deobfuscate(expr.substring(posLookup, posEnd + 1), depth + 1) + deobfuscate(expr.substring(posEnd + 1), depth + 1), depth + 1); } int posColon = expr.indexOf(':'); if (posColon == -1) { return expr; } String lookupType = expr.substring(2, posColon).toLowerCase(); int posValue = -1; int posValueRaw = expr.indexOf(':-'); if (posValueRaw != -1) { posValue = posValueRaw + 2; } if (lookupType.equals('jndi')) { return '${jndi' + expr.substring(6); } if (lookupType.equals('lower')) { return expr.substring(posColon + 1, posEnd).toLowerCase() + deobfuscate(expr.substring(posEnd + 1), depth + 1); } if (lookupType.equals('upper')) { return expr.substring(posColon + 1, posEnd).toUpperCase() + deobfuscate(expr.substring(posEnd + 1), depth + 1); } if (posValue != -1 && posValue < posEnd) { return expr.substring(posValue, posEnd) + deobfuscate(expr.substring(posEnd + 1), depth + 1); } return expr.substring(posColon + 1, posEnd) + deobfuscate(expr.substring(posEnd + 1), depth + 1); } int posExpr = expr.indexOf('${'); if (posExpr == -1) { return expr; } return expr.substring(0, posExpr) + deobfuscate(expr.substring(posExpr), depth + 1); } if (ctx.honeypot != null) { StringBuilder sb = new StringBuilder(); for (def v : ctx.honeypot.values()) { if (v instanceof String) { sb.append((String) v).append(' '); } } String blob = sb.toString(); if (blob.length() > 0 && blob.length() < 8192 && blob.indexOf('${') >= 0) { String result = deobfuscate(blob, 0); if (result.toLowerCase().indexOf('${jndi:') >= 0) { if (ctx.event == null) { ctx.event = new HashMap(); } ctx.event.log4shell = true; } } }"
       }
     }
   ]
@@ -255,6 +263,73 @@ curl -fsS -X PUT "$es_url/_index_template/portbridge-events" \
   }
 }
 JSON
+
+# #378: Ghidra/sandbox/GitHub-analysis/workbench-run results, ingested by
+# analysis/es-results-importer/importer.py (previously local-disk-only JSON
+# files, per the issue's gap analysis). Each result document is heterogeneous
+# and fairly deep (Ghidra alone has functions/capa/floss/lief/revdeck
+# sub-objects), so -- same call as honeypot-events-v2's `honeypot` field --
+# the full result is mapped `flattened` under a source-namespaced field
+# rather than hand-mapping every nested key, and only the handful of fields
+# actually needed for filtering/sorting/cross-index correlation are promoted
+# to real types. file.hash.sha256 uses the same ECS field
+# honeypot-events-v2 already populates from Dionaea's shasum, so a single
+# query across honeypot-v2-*,ghidra-analysis-v1,sandbox-analysis-v1,
+# github-analysis-v1 for one hash returns the raw capture event and every
+# analysis result for that sample in one pass. 180d retention (not 30d like
+# raw events): a completed analysis report is the valuable, expensive-to-
+# regenerate artifact, not high-volume raw telemetry. Plain single indices,
+# not data streams -- importer overwrites by deterministic _id (sha256, job
+# id, or run id) rather than appending, so there is nothing to roll over.
+#
+# ignore_above on the flattened field: found live (2026-08-02) importing real
+# sandbox results -- flattened stores each leaf value as a Lucene keyword
+# term, and sandbox.stdout/runner_log routinely carry multi-KB dmesg/boot
+# output past Lucene's 32766-byte term limit, which fails the *entire*
+# document, not just that one leaf, unlike honeypot-events-v2's `honeypot`
+# field (short per-sensor values only, never hit this). ignore_above makes
+# ES skip indexing (not storing) an overlong leaf instead -- still present
+# and returned in _source/the document view, just not term-searchable.
+for spec in \
+  "ghidra-analysis-v1:ghidra" \
+  "sandbox-analysis-v1:sandbox" \
+  "github-analysis-v1:github_analysis" \
+  "workbench-runs-v1:workbench"
+do
+  index_name=${spec%%:*}
+  ns=${spec#*:}
+  curl -fsS -X PUT "$es_url/_index_template/${index_name%-v1}" \
+    -H 'Content-Type: application/json' \
+    --data-binary "$(cat <<JSON
+{
+  "index_patterns": ["${index_name}"],
+  "priority": 460,
+  "template": {
+    "settings": {
+      "index.lifecycle.name": "analysis-results-180d",
+      "index.number_of_replicas": 0,
+      "index.mapping.total_fields.limit": 500,
+      "index.mapping.ignore_malformed": true,
+      "index.refresh_interval": "30s"
+    },
+    "mappings": {
+      "properties": {
+        "${ns}": { "type": "flattened", "ignore_above": 32000 },
+        "@timestamp": { "type": "date" },
+        "event": { "properties": { "category": { "type": "keyword" } } },
+        "file": { "properties": { "hash": { "properties": { "sha256": { "type": "keyword" } } } } },
+        "exit_status": { "type": "keyword" },
+        "risk_level": { "type": "keyword" },
+        "risk_score": { "type": "integer", "ignore_malformed": true },
+        "family": { "type": "keyword" },
+        "platform": { "type": "keyword" }
+      }
+    }
+  }
+}
+JSON
+)" >/dev/null
+done
 
 curl -fsS -X PUT "$es_url/_index_template/honeypot-dead-letter" \
   -H 'Content-Type: application/json' \

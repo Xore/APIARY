@@ -15,12 +15,12 @@
       <div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
         <header class="overview-header" id="clusters-header">
           <div>
-            <div class="eyebrow">Correlation</div>
+            <div class="label-section">Correlation</div>
             <h1>Infrastructure clusters</h1>
             <p class="subtitle">Shared fingerprints, payloads, autonomous systems, and provider classifications across multiple source IPs.</p>
           </div>
           <div class="live-panel">
-            <span class="gen">generated {{.Generated.Format "2006-01-02 15:04:05 MST"}}</span>
+            <span class="gen">generated <span data-hp-utc="{{utcOrEmpty .Generated}}">{{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></span>
           </div>
         </header>
         <div class="filters" id="clusters-filters"><a class="chip" href="/">&larr; dashboard</a><a class="chip" href="/campaigns">network campaigns</a><span class="chip">{{len .Rows}} shared pivots</span>{{template "filterbar" .}}</div>
@@ -50,12 +50,12 @@
       <div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
         <header class="overview-header" id="campaigns-header">
           <div>
-            <div class="eyebrow">Correlation</div>
+            <div class="label-section">Correlation</div>
             <h1>Correlated campaigns</h1>
             <p class="subtitle">Related source networks grouped across sensors over a rolling 7-day window.</p>
           </div>
           <div class="live-panel">
-            <span class="gen">rolling 7 days &bull; generated {{.Generated.Format "2006-01-02 15:04:05 MST"}}</span>
+            <span class="gen">rolling 7 days &bull; generated <span data-hp-utc="{{utcOrEmpty .Generated}}">{{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></span>
           </div>
         </header>
         <div class="filters" id="campaigns-filters">
@@ -112,12 +112,12 @@
       <div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
         <header class="overview-header" id="cidr-correlation-header">
           <div>
-            <div class="eyebrow">Correlation</div>
+            <div class="label-section">Correlation</div>
             <h1>{{.CIDR}}</h1>
             <p class="subtitle">#354: everything Elasticsearch has correlated for this network across honeypot, Suricata, and portbridge tunnel records.</p>
           </div>
           <div class="live-panel">
-            <span class="gen">generated {{.Generated.Format "2006-01-02 15:04:05 MST"}}</span>
+            <span class="gen">generated <span data-hp-utc="{{utcOrEmpty .Generated}}">{{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></span>
           </div>
         </header>
         <div class="filters">
@@ -163,12 +163,12 @@
       <div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
         <header class="overview-header" id="cluster-correlation-header">
           <div>
-            <div class="eyebrow">Correlation</div>
+            <div class="label-section">Correlation</div>
             <h1>{{.Kind}}: {{.Value}}</h1>
             <p class="subtitle">#354: everything Elasticsearch has correlated across this cluster's {{.IPCount}} member source IPs.</p>
           </div>
           <div class="live-panel">
-            <span class="gen">generated {{.Generated.Format "2006-01-02 15:04:05 MST"}}</span>
+            <span class="gen">generated <span data-hp-utc="{{utcOrEmpty .Generated}}">{{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></span>
           </div>
         </header>
         <div class="filters">
@@ -213,12 +213,12 @@
       <div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
         <header class="overview-header" id="commands-header">
           <div>
-            <div class="eyebrow">Attacker behavior</div>
+            <div class="label-section">Attacker behavior</div>
             <h1>Executed commands</h1>
             <p class="subtitle">Shell commands captured during interactive honeypot sessions, deduplicated across sources.</p>
           </div>
           <div class="live-panel">
-            <span class="gen">generated {{.Generated.Format "2006-01-02 15:04:05 MST"}}</span>
+            <span class="gen">generated <span data-hp-utc="{{utcOrEmpty .Generated}}">{{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></span>
           </div>
         </header>
         <div class="filters" id="commands-filters"><a class="chip" href="/">&larr; dashboard</a><a class="chip" href="/export/commands.csv">export CSV &darr;</a><span class="chip">{{len .Rows}} unique commands</span>{{template "filterbar" .}}</div>

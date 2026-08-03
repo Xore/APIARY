@@ -125,16 +125,56 @@ def revert_to_golden():
 
 
 def winrm_run(ps_command: str, timeout: int = 60) -> dict:
-    """Execute PowerShell command on the Windows VM via WinRM."""
+    """Execute PowerShell command on the Windows VM via WinRM, bounded by
+    `timeout` wall-clock seconds.
+
+    #438: the `timeout` parameter used to be accepted and never used --
+    session.run_ps() was called directly, completely unbounded. Confirmed
+    live: two separate real detonation attempts against this exact image
+    both failed at *exactly* their wait_for_winrm() deadline (120s, then
+    300s after that was raised) with no "WinRM ready" log in between,
+    while a plain external winrm.Session probe run by hand *during* that
+    same 300s window succeeded immediately. That is the signature of one
+    stuck session.run_ps() call eating the entire budget on its first
+    attempt, not a real shortage of wait time -- WinRM was actually
+    reachable well before the deadline, but wait_for_winrm()'s retry loop
+    never got a second attempt to notice.
+    session.run_ps() alone cannot be bounded by read_timeout_sec/
+    operation_timeout_sec -- those only bound a single poll round-trip of
+    WinRM's own long-poll Receive operation, not the overall call -- so
+    the only way to actually bound it is to run it in a thread and give up
+    waiting on that thread. Same pattern as verify_vm_detection.py's own
+    winrm_run(), which already documents and solves this exact problem;
+    ported here rather than re-derived.
+    """
     if winrm is None:
         raise RuntimeError('pywinrm not installed. Run: pip install pywinrm')
     session = winrm.Session(
         VM_HOST,
         auth=(VM_USER, VM_PASS),
         transport='ntlm',
-        server_cert_validation='ignore'
+        server_cert_validation='ignore',
+        read_timeout_sec=30, operation_timeout_sec=20,
     )
-    result = session.run_ps(ps_command)
+    import concurrent.futures
+    # Deliberately not `with ThreadPoolExecutor(...) as pool:` -- that
+    # form's __exit__ calls shutdown(wait=True), which blocks synchronously
+    # until the abandoned thread finishes before the TimeoutError below can
+    # even propagate, silently defeating the timeout this function exists
+    # to provide (verify_vm_detection.py confirmed this live). No
+    # shutdown() call at all is deliberate: the pool and its one thread are
+    # simply dropped on timeout, since there is no way to forcibly kill a
+    # thread blocked inside pywinrm's HTTP call anyway.
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = pool.submit(session.run_ps, ps_command)
+    try:
+        result = future.result(timeout=timeout)
+    except concurrent.futures.TimeoutError:
+        raise TimeoutError(
+            f'WinRM command did not return within {timeout}s -- likely hung '
+            f'on the guest or mid-connect. The underlying thread is '
+            f'abandoned, not killed.'
+        )
     return {
         'stdout': result.std_out.decode('utf-8', errors='replace'),
         'stderr': result.std_err.decode('utf-8', errors='replace'),
@@ -142,19 +182,49 @@ def winrm_run(ps_command: str, timeout: int = 60) -> dict:
     }
 
 
-def wait_for_winrm(max_wait: int = 120):
-    """Wait until WinRM is responsive."""
+def wait_for_winrm(max_wait: int = 300):
+    """Wait until WinRM is responsive.
+
+    max_wait was 120 (#438): confirmed live against this exact image on
+    this host, that is not enough. A real detonation attempt (the first
+    one run through the newly-implemented hash-resolution handoff, #47)
+    hit the 120s deadline and raised TimeoutError with no sign WinRM was
+    ever close to answering -- not a near-miss, a real shortfall. This
+    domain boots secure boot + TPM (swtpm) + a full AutoLogon ->
+    FirstLogonCommands -> WinRM-enable chain on 16GB RAM, and
+    kvm_manage.sh's own revert command already documents "~1-2min
+    (cold boot)" for this -- 120s sits at the bottom edge of that range
+    with no margin, not comfortably inside it, and this run landed on the
+    wrong side of it. 300s gives real headroom above the documented
+    range instead of another unexamined guess at the boundary.
+    """
     deadline = time.time() + max_wait
+    attempt = 0
+    last_error = None
     while time.time() < deadline:
+        attempt += 1
         try:
             result = winrm_run('Write-Output ready', timeout=10)
             if 'ready' in result['stdout']:
-                log.info('WinRM ready')
+                log.info('WinRM ready (attempt %d)', attempt)
                 return
-        except Exception:
-            pass
+            log.warning('WinRM attempt %d: connected but unexpected output: %r', attempt, result['stdout'])
+        except Exception as exc:
+            # #438: this used to be `except Exception: pass` -- every
+            # attempt's real failure reason was thrown away, so two
+            # separate real detonation failures (both dying at *exactly*
+            # their deadline, both with WinRM independently confirmed
+            # reachable during the same window via a manual probe) gave no
+            # way to tell whether attempts were hanging, erroring, or
+            # something else. Logging the exception is what makes the next
+            # failure diagnostic instead of another blind guess.
+            last_error = f'{type(exc).__name__}: {exc}'
+            log.warning('WinRM attempt %d failed: %s', attempt, last_error)
         time.sleep(5)
-    raise TimeoutError('WinRM not responsive after boot')
+    raise TimeoutError(
+        f'WinRM not responsive after boot ({attempt} attempts over {max_wait}s); '
+        f'last error: {last_error}'
+    )
 
 
 def copy_sample_to_vm(sample_path: Path, sha: str):

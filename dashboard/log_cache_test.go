@@ -258,11 +258,13 @@ func TestRebuildRejoinsCachedEventOnceViaMapCatchesUp(t *testing.T) {
 		}},
 	})
 
+	// #39: the aggregate Unattributed count is Elasticsearch's own job now
+	// (es_aggregate.go) -- what this test is actually about, the retry
+	// property itself, is fully covered below by checking each event's own
+	// SrcIP directly, unaffected by that migration since the local via_port
+	// join in aggregate.go's processEntry is unchanged.
 	s := &store{dir: root}
 	s.rebuild()
-	if s.get().Unattributed != 1 {
-		t.Fatalf("cycle 1: Unattributed=%d, want 1 (no portbridge record exists yet)", s.get().Unattributed)
-	}
 	for _, event := range s.getEvents() {
 		if event.SrcIP != "" {
 			t.Fatalf("cycle 1: event was attributed before any portbridge record existed: %+v", event)
@@ -277,9 +279,6 @@ func TestRebuildRejoinsCachedEventOnceViaMapCatchesUp(t *testing.T) {
 	})
 	s.rebuild()
 
-	if s.get().Unattributed != 0 {
-		t.Fatalf("cycle 2: Unattributed=%d, want 0 (the cached event must still get a chance to join)", s.get().Unattributed)
-	}
 	found := false
 	for _, event := range s.getEvents() {
 		if event.SrcIP == "203.0.113.9" {
@@ -297,14 +296,19 @@ func TestRebuildRejoinsCachedEventOnceViaMapCatchesUp(t *testing.T) {
 func TestRebuildPrunesLogCacheForRemovedFiles(t *testing.T) {
 	root := t.TempDir()
 	keep := filepath.Join(root, "cowrie", "cowrie.json")
-	gone := filepath.Join(root, "multipot", "multipot.json")
+	// dionaea, not multipot (#403): multipot moved to an ES-sourced sensor
+	// (events_es.go's esOnlySensors) as part of #238, so its directory is
+	// deliberately skipped by rebuild()'s file walk now and would never be
+	// cached -- this test needs a still-file-based sensor to exercise the
+	// prune behavior it's actually testing.
+	gone := filepath.Join(root, "dionaea", "dionaea.json")
 	writeFileLines(t, keep, cowrieLine("a", "2026-01-01T00:00:00Z"))
 	writeFileLines(t, gone, `{"eventid":"connect","timestamp":"2026-01-01T00:00:00Z","src_ip":"203.0.113.5"}`)
 
 	s := &store{dir: root}
 	s.rebuild()
 	if _, ok := s.logCache[gone]; !ok {
-		t.Fatal("expected the multipot file to be cached after its first rebuild")
+		t.Fatal("expected the dionaea file to be cached after its first rebuild")
 	}
 
 	if err := os.Remove(gone); err != nil {

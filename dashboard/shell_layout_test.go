@@ -7,7 +7,7 @@ import (
 )
 
 func TestModalRootDoesNotParticipateInAppShellGrid(t *testing.T) {
-	css, err := staticAssets.ReadFile("static/hp-dashboard.css")
+	css, err := staticAssets.ReadFile("static/theme.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestAccountMenuAndSettingsPopup(t *testing.T) {
 	if _, err := staticAssets.ReadFile("static/hp-account.js"); err != nil {
 		t.Fatal("static/hp-account.js must be embedded with the dashboard assets")
 	}
-	css, err := staticAssets.ReadFile("static/hp-dashboard.css")
+	css, err := staticAssets.ReadFile("static/theme.css")
 	if err != nil {
 		t.Fatal(err)
 	}

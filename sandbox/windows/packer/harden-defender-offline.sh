@@ -59,42 +59,50 @@ done
 
 echo "=== harden-defender-offline: $(date -u +%FT%TZ) -- image: $image ==="
 
-# CurrentControlSet, not ControlSet001: virt-win-reg resolves the symbolic
-# \Select\Current pointer to the real numbered ControlSet for both reads and
-# writes, the same way a live registry editor would -- confirmed against
-# virt-win-reg(1). Start=4 is SERVICE_DISABLED (services.h); services with
-# no Start value already present are created with one rather than silently
-# skipped, since New-Item/Set-ItemProperty from inside the guest already
-# established these keys exist under every install this image is built
-# from.
+# NOT CurrentControlSet: that symbolic alias resolves fine for virt-win-reg
+# reads (confirmed) but not for `--merge`/reg_import -- hit live against
+# win11-ghosts.qcow2, "cannot create \CurrentControlSet\Services\ since
+# parent \CurrentControlSet\Services\ does not exist", because reg_import
+# creates the literal path it's given rather than resolving the alias the
+# way a live registry editor would. Resolve \Select\Current to the real
+# ControlSetNNN ourselves and write that concrete path instead.
+current="$(virt-win-reg "$image" 'HKEY_LOCAL_MACHINE\SYSTEM\Select' 2>/dev/null | sed -n 's/^"Current"=dword:0*\([0-9a-fA-F]*\)$/\1/p')"
+[[ $current =~ ^[0-9a-fA-F]+$ ]] || { echo "harden-defender-offline: could not read SYSTEM\\Select\\Current from $image" >&2; exit 1; }
+control_set="ControlSet$(printf '%03d' "$((16#$current))")"
+echo "--- SYSTEM\\Select\\Current resolves to $control_set ---"
+
+# Start=4 is SERVICE_DISABLED (services.h); services with no Start value
+# already present are created with one rather than silently skipped, since
+# New-Item/Set-ItemProperty from inside the guest already established these
+# keys exist under every install this image is built from.
 regfile="$(mktemp --suffix=.reg)"
 trap 'rm -f "$regfile"' EXIT
 
-cat > "$regfile" <<'REGEOF'
+cat > "$regfile" <<REGEOF
 Windows Registry Editor Version 5.00
 
-[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\WinDefend]
+[HKEY_LOCAL_MACHINE\SYSTEM\\$control_set\Services\WinDefend]
 "Start"=dword:00000004
 
-[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\WdBoot]
+[HKEY_LOCAL_MACHINE\SYSTEM\\$control_set\Services\WdBoot]
 "Start"=dword:00000004
 
-[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\WdFilter]
+[HKEY_LOCAL_MACHINE\SYSTEM\\$control_set\Services\WdFilter]
 "Start"=dword:00000004
 
-[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\WdNisDrv]
+[HKEY_LOCAL_MACHINE\SYSTEM\\$control_set\Services\WdNisDrv]
 "Start"=dword:00000004
 
-[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\WdNisSvc]
+[HKEY_LOCAL_MACHINE\SYSTEM\\$control_set\Services\WdNisSvc]
 "Start"=dword:00000004
 
-[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\Sense]
+[HKEY_LOCAL_MACHINE\SYSTEM\\$control_set\Services\Sense]
 "Start"=dword:00000004
 
-[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\SecurityHealthService]
+[HKEY_LOCAL_MACHINE\SYSTEM\\$control_set\Services\SecurityHealthService]
 "Start"=dword:00000004
 
-[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\wscsvc]
+[HKEY_LOCAL_MACHINE\SYSTEM\\$control_set\Services\wscsvc]
 "Start"=dword:00000004
 
 [HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows Defender\Features]
@@ -107,7 +115,7 @@ virt-win-reg --merge "$image" "$regfile"
 echo "--- verifying (read back what was actually written) ---"
 verify_failed=0
 for svc in WinDefend WdBoot WdFilter WdNisDrv WdNisSvc Sense SecurityHealthService wscsvc; do
-  value="$(virt-win-reg "$image" "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\$svc" 2>/dev/null | grep -i '"Start"' || true)"
+  value="$(virt-win-reg "$image" "HKEY_LOCAL_MACHINE\\SYSTEM\\$control_set\\Services\\$svc" 2>/dev/null | grep -i '"Start"' || true)"
   echo "  $svc: ${value:-<no Start value read back>}"
   if ! printf '%s' "$value" | grep -qi 'dword:00000004'; then
     verify_failed=1

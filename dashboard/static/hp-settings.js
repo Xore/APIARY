@@ -463,6 +463,12 @@
         if (prefs.collapsed_sidebar) localStorage.setItem("hp-sidebar-collapsed", "1");
         else localStorage.removeItem("hp-sidebar-collapsed");
       } catch { /* storage may be unavailable */ }
+      // Timezone/clock format (#346): without this, a saved change to
+      // either only takes effect on the next full page load (whenever
+      // hp-app.js's own DOMContentLoaded syncPrefs() happens to run), same
+      // as theme/sidebar above already apply instantly rather than making
+      // the operator reload to see their own save take effect.
+      window.HpPreferences?.applyTimeDisplay?.(prefs.timezone, prefs.clock);
     }
 
     /* ---- save flow ---- */
