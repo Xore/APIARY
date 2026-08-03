@@ -130,17 +130,34 @@ source "qemu" "win11" {
   # host-passthrough: guest sees real CPU model, not QEMU default
   cpu_model = "host"
 
-  # UEFI, Secure Boot OFF for this install-time build only. Windows 11
-  # setup itself only needs UEFI (Secure Boot's *check* is bypassed via the
-  # LabConfig registry keys in autounattend.xml regardless). The reason
-  # Secure Boot is off here specifically is the PXE boot path below: the
-  # custom ipxe.efi it loads is not Microsoft-signed, and a real Secure
-  # Boot enforcement correctly refuses to execute it. The final win11-kvm.xml
-  # detonation domain is unaffected and keeps the .ms secure-boot firmware
-  # unchanged -- the installed Windows Boot Manager is itself
-  # Microsoft-signed and boots fine under Secure Boot even though it wasn't
-  # installed under it, so detonation-time anti-detection posture
-  # (Confirm-SecureBootUEFI etc.) does not regress from this.
+  # UEFI, Secure Boot OFF for now -- TEMPORARY, see #288/#419. The
+  # cert-signed approach (pxe/prepare-pxe.sh: self-generated cert, sbsign,
+  # OVMF_VARS_4M.honeypot-pxe.fd with that cert + Microsoft's win11 certs
+  # both enrolled in db) is built and confirmed working standalone -- signed
+  # ipxe.efi boots clean under full Secure Boot enforcement, and a
+  # negative-control boot of the unsigned binary against the same vars file
+  # is correctly rejected. But the one real packer-driven build attempted
+  # under it failed differently than every non-secboot run tonight: PXE
+  # succeeded initially (confirmed via screenshot: wimboot/BCD/BOOT.SDI ok,
+  # boot.wim streaming), then the guest reset and fell through firmware's
+  # boot order to the CD-boot-prompt path (which has no boot_command
+  # anymore) and then to an empty disk, landing at "No bootable option or
+  # device was found" -- qcow2 never grew past its initial allocation.
+  # Not yet root-caused whether that's secure-boot-specific (bootmgfw doing
+  # its own additional validation once handed off from wimboot) or
+  # coincidental flakiness, since every prior run tonight (all non-secboot)
+  # reached this exact stage reliably. Reverting to non-secboot to get a
+  # working golden image first; re-enable once the reset is understood
+  # rather than guessing again under time pressure. The efi_firmware_* lines
+  # below and pxe/OVMF_VARS_4M.honeypot-pxe.fd are both ready to swap back
+  # in unchanged when that happens.
+  #
+  # This was the earlier install-time-only compromise: Windows 11 setup
+  # itself only needs UEFI (Secure Boot's *check* is bypassed via the
+  # LabConfig registry keys in autounattend.xml regardless), and the final
+  # win11-kvm.xml detonation domain is unaffected either way -- the
+  # installed Windows Boot Manager is itself Microsoft-signed and boots
+  # fine under Secure Boot even though it wasn't installed under it.
   efi_boot          = true
   efi_firmware_code = "/usr/share/OVMF/OVMF_CODE_4M.fd"
   efi_firmware_vars = "/usr/share/OVMF/OVMF_VARS_4M.fd"
@@ -189,6 +206,12 @@ source "qemu" "win11" {
   accelerator = "kvm"
   headless    = true
 
+  # Fixed VNC port (not packer's default auto-picked-from-a-range) so a
+  # relay/monitor script can point at one stable address across attempts
+  # instead of re-discovering the port every time.
+  vnc_port_min = 5999
+  vnc_port_max = 5999
+
   # PXE boot instead of CD-ROM boot (#288, #406).
   #
   # The old approach raced "Press any key to boot from CD or DVD" via VNC
@@ -225,10 +248,27 @@ source "qemu" "win11" {
   # exposes to qemuargs -- named for SSH historically, used for WinRM here
   # same as everywhere else in this communicator), and pxenet0 is the
   # PXE-only NIC with the higher boot priority.
+  # Boot order: network once, then disk. Windows Setup restarts the guest
+  # itself multiple times mid-install (ACPI reset, not a new qemu process).
+  # bootindex=1 on pxenet0 was tried first and is wrong for this: bootindex
+  # is evaluated fresh on *every* boot including those guest-triggered
+  # restarts, so it kept re-choosing PXE forever -- confirmed live, the
+  # install re-ran WinPE from scratch in an infinite loop instead of ever
+  # continuing into the disk-resident install it had already started.
+  # `-boot once=n,order=c` is the right tool instead: "once" is honored only
+  # for this qemu process's very first boot, after which every subsequent
+  # boot (including guest resets) falls through to `order=c` (hard disk)
+  # regardless of what's plugged in -- exactly network-install-once,
+  # disk-afterward semantics, and a legacy BIOS-era mechanism OVMF
+  # specifically implements a compatibility shim for because this exact
+  # PXE-install pattern is common. Not combined with bootindex on the NICs:
+  # mixing the two boot-order mechanisms invites exactly the kind of
+  # ambiguity that caused the loop in the first place.
   qemuargs = [
+    ["-boot", "once=n,order=c"],
     ["-device", "e1000e,netdev=user.0"],
     ["-netdev", "user,id=user.0,hostfwd=tcp::{{ .SSHHostPort }}-:5985"],
-    ["-device", "e1000e,netdev=pxenet0,bootindex=1"],
+    ["-device", "e1000e,netdev=pxenet0"],
     ["-netdev", "user,id=pxenet0,tftp=pxe,bootfile=ipxe.efi"],
   ]
 }
