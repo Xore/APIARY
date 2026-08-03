@@ -1,0 +1,20 @@
+[Unit]
+Description=Watch for dashboard GHOSTS sandbox-analysis requests
+Documentation=file:/usr/local/libexec/honeypot-sandbox/ghosts/README.md
+After=libvirtd.service docker.service
+
+[Path]
+# Real host path, matching GHOSTS_SANDBOX_REQUEST_DIR in
+# /etc/default/honeypot-ghosts-sandbox and the bind-mount source in
+# docker-compose.dashboard.yml -- not the container-side mount point.
+#
+# Triggers the hash-resolution/submission-handoff service, not the
+# detonation worker directly -- same two-stage chain as
+# honeypot-windows-sandbox-worker.path, for the same reason: a bare
+# {sha256}.request has no sample bytes yet, and handing it straight to
+# run_pending.sh just produces a missing-sample drop every time.
+PathChanged=/var/lib/honeypot-ghosts-sandbox/requests/pending
+Unit=honeypot-ghosts-sandbox-web-requests.service
+
+[Install]
+WantedBy=multi-user.target

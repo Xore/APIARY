@@ -1,0 +1,20 @@
+[Unit]
+Description=Detonate queued honeypot payloads on the WAN-permitted GHOSTS guest
+Documentation=file:/usr/local/libexec/honeypot-sandbox/ghosts/README.md
+After=libvirtd.service virtnetworkd.socket docker.service
+Requires=libvirtd.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/honeypot-ghosts-sandbox
+ExecStart=/usr/local/libexec/honeypot-sandbox/ghosts/run_pending.sh
+UMask=0077
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+# Same reasoning as honeypot-windows-sandbox-worker.service: comfortably
+# above OBSERVATION_SECS (1800s default) for a queue of several.
+TimeoutStartSec=6h
+
+# No [Install] section, deliberately -- only ever started by the .path
+# unit's Unit= trigger or an explicit `systemctl start`.
