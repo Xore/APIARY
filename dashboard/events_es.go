@@ -23,13 +23,14 @@ import (
 // keep them apart -- the whole sensor moved to ES-sourced at once. Every
 // other sensor is unaffected and stays file-based.
 //
-// dicompot (#413) and dns-honeypot (#415) are ES-only from the day each was
-// added, per #238's broader data-flow requirement that every new sensor
-// added under that issue reads through Elasticsearch, never a local log
-// directory -- neither needed a migration the way multipot did, since
-// there was no pre-existing file-based dashboard code path to move away
-// from for either.
-var esOnlySensors = []string{"multipot", "dicompot", "dns-honeypot"}
+// dicompot (#413), dns-honeypot (#415), citrix-honeypot and
+// cisco-asa-honeypot (#414) are ES-only from the day each was added, per
+// #238's broader data-flow requirement that every new sensor added under
+// that issue reads through Elasticsearch, never a local log directory --
+// none needed a migration the way multipot did, since there was no
+// pre-existing file-based dashboard code path to move away from for any
+// of them.
+var esOnlySensors = []string{"multipot", "dicompot", "dns-honeypot", "citrix-honeypot", "cisco-asa-honeypot"}
 
 // loadSensorEventsES fetches dirSensor's events from the honeypot-v2-*
 // Filebeat index (see analysis/filebeat.yml, analysis/elasticsearch-setup.sh)

@@ -19,6 +19,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - image: cisco-asa-honeypot
+            context: cisco-asa-honeypot
+          - image: citrix-honeypot
+            context: citrix-honeypot
           - image: conpot
             context: conpot
           - image: dashboard
