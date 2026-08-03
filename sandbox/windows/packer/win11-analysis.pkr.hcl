@@ -247,29 +247,41 @@ source "qemu" "win11" {
   # communicator port, via the {{ .SSHHostPort }} template var packer
   # exposes to qemuargs -- named for SSH historically, used for WinRM here
   # same as everywhere else in this communicator), and pxenet0 is the
-  # PXE-only NIC with the higher boot priority.
-  # Boot order: network once, then disk. Windows Setup restarts the guest
-  # itself multiple times mid-install (ACPI reset, not a new qemu process).
-  # bootindex=1 on pxenet0 was tried first and is wrong for this: bootindex
-  # is evaluated fresh on *every* boot including those guest-triggered
-  # restarts, so it kept re-choosing PXE forever -- confirmed live, the
-  # install re-ran WinPE from scratch in an infinite loop instead of ever
-  # continuing into the disk-resident install it had already started.
-  # `-boot once=n,order=c` is the right tool instead: "once" is honored only
-  # for this qemu process's very first boot, after which every subsequent
-  # boot (including guest resets) falls through to `order=c` (hard disk)
-  # regardless of what's plugged in -- exactly network-install-once,
-  # disk-afterward semantics, and a legacy BIOS-era mechanism OVMF
-  # specifically implements a compatibility shim for because this exact
-  # PXE-install pattern is common. Not combined with bootindex on the NICs:
-  # mixing the two boot-order mechanisms invites exactly the kind of
-  # ambiguity that caused the loop in the first place.
+  # PXE-only NIC.
+  #
+  # Two more bugs found chasing the boot-order fix, both confirmed live:
+  #
+  # 1. `-boot once=n,order=c` (tried as the "network once, disk afterward"
+  #    fix) turned out to be a no-op -- this OVMF build doesn't implement
+  #    the legacy `-boot` compatibility shim at all. The boot log with it
+  #    set showed the plain default NVRAM order (CD, CD, HARDDISK, PXE
+  #    last), not network-first. bootindex is the mechanism this OVMF
+  #    actually honors (confirmed repeatedly tonight), so that's back --
+  #    but bootindex alone re-triggers PXE on *every* guest-initiated
+  #    restart forever, which is the infinite-reinstall loop this was
+  #    meant to fix in the first place. Solved below by unplugging pxenet0
+  #    via QMP the moment the first guest reset happens, instead of trying
+  #    to make a boot-order flag do something it structurally can't (a
+  #    static boot order can't distinguish "first boot" from "the guest
+  #    reset itself" -- both are just "the VM is booting" to the firmware).
+  #
+  # 2. Two `-netdev user` instances default to the *same* internal subnet
+  #    (10.0.2.0/24) and silently collide -- confirmed live, BdsDxe's PXE
+  #    attempt landed on user.0 (MAC ...56, no tftp config at all) instead
+  #    of pxenet0 (MAC ...57) and failed DHCP with "No valid offer
+  #    received". Each needs its own `net=`/`dhcpstart=` range.
+  #
+  # QMP (unix socket, fixed path so pxe/unplug-pxe-on-reset.sh can find it
+  # without scraping qemu's own stdout) is what makes the reset-triggered
+  # unplug possible: it emits a RESET event the instant the guest asks for
+  # one, before firmware even starts re-enumerating boot options for that
+  # next boot.
   qemuargs = [
-    ["-boot", "once=n,order=c"],
+    ["-qmp", "unix:/tmp/win11-analysis-qmp.sock,server,nowait"],
+    ["-device", "e1000e,netdev=pxenet0,bootindex=1"],
+    ["-netdev", "user,id=pxenet0,net=10.0.2.0/24,dhcpstart=10.0.2.15,tftp=pxe,bootfile=ipxe.efi"],
     ["-device", "e1000e,netdev=user.0"],
-    ["-netdev", "user,id=user.0,hostfwd=tcp::{{ .SSHHostPort }}-:5985"],
-    ["-device", "e1000e,netdev=pxenet0"],
-    ["-netdev", "user,id=pxenet0,tftp=pxe,bootfile=ipxe.efi"],
+    ["-netdev", "user,id=user.0,net=10.0.3.0/24,dhcpstart=10.0.3.15,hostfwd=tcp::{{ .SSHHostPort }}-:5985"],
   ]
 }
 
