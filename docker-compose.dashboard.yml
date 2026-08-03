@@ -254,6 +254,10 @@ services:
       - /var/lib/honeypot-sandbox/export:/sandbox-results:ro
       - /var/lib/honeypot-windows-sandbox/export:/windows-sandbox-results:ro
       - /var/lib/honeypot-github/results:/github-analysis-results:ro
+      # #404: same host path the dashboard service's own REVDECK_RESULTS_DIR
+      # mount above uses -- see that comment for the write-side boundary
+      # (ghidra-worker.py's drain_revdeck() is the sole producer).
+      - /var/lib/honeypot-revdeck/results:/revdeck-results:ro
       - dashboard-state:/state:ro
       - es-importer-state:/state-importer
     environment:
@@ -265,6 +269,7 @@ services:
       - SANDBOX_RESULTS_DIR=/sandbox-results
       - WINDOWS_SANDBOX_RESULTS_DIR=/windows-sandbox-results
       - GITHUB_ANALYSIS_RESULTS_DIR=/github-analysis-results
+      - REVDECK_RESULTS_DIR=/revdeck-results
       - ANALYSIS_WORKBENCH_DIR=/state/analysis-workbench
       - TZ=Europe/Berlin
     networks:
