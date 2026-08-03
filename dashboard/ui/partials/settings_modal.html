@@ -1,8 +1,8 @@
 {{define "settingsModal"}}
-<!-- Layout CSS for this fragment lives in /static/hp-settings-modal.css,
-     loaded once by the shared "style" partial on every full page -- see
-     that file's header comment for why an inline stylesheet here can't be
-     nonce'd correctly (#58). -->
+<!-- Layout CSS for this fragment lives in Xore/theme's theme.css (vendored
+     at /static/theme.css), loaded once by the shared "style" partial on
+     every full page -- an inline stylesheet here can't be nonce'd
+     correctly (#58). -->
 <div class="modal-backdrop" id="hp-dash-settings-backdrop" aria-hidden="true" inert></div>
 <section class="modal hp-dash-settings" id="hp-settings" role="dialog" aria-modal="true" aria-labelledby="hp-dash-settings-title" aria-hidden="true" inert>
   <button class="modal__close" type="button" data-hp-settings-close aria-label="Close settings">&#10005;</button>

@@ -2,9 +2,11 @@
 # build-dashboard-frontend.sh — regenerate the dashboard's compiled frontend
 # asset (dashboard/static/hp-api.js) from dashboard/frontend/src/.
 #
-# #191 removed the Tailwind CSS build entirely: dashboard/static/hp-dashboard.css
-# is hand-written and loaded as-is, same as theme.css, with no build step of
-# its own. Only hp-api.js (the TypeScript/esbuild bundle) is still generated.
+# #191 removed the Tailwind CSS build entirely, and the dashboard's
+# app-specific CSS has since been folded into Xore/theme's theme.css (vendored
+# at dashboard/static/theme.css, see scripts/sync-theme.sh) -- no CSS build
+# step of any kind. Only hp-api.js (the TypeScript/esbuild bundle) is still
+# generated.
 #
 # The "Dashboard frontend" CI job (.github/workflows/quality.yml) rebuilds
 # hp-api.js and fails when the committed output is stale, so run this after

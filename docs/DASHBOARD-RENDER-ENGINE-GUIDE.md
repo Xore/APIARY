@@ -273,10 +273,10 @@ All references pinned to `Xore/honeypot-stack@e3b6bc9`.
   [`dashboard/frontend/theme.lock`](https://github.com/Xore/honeypot-stack/blob/main/dashboard/frontend/theme.lock)
   and is enforced on every push by `scripts/check-vendored-theme.sh`
   (the `Vendored Xore/theme is in sync` job); re-vendor with
-  `scripts/sync-theme.sh`;
-  `hp-dashboard.css` is the hand-written dashboard layer (no build step,
-  loaded as-is like `theme.css` itself — #191 removed the Tailwind build
-  entirely); `hp-app.js` is the hand-written
+  `scripts/sync-theme.sh`. There is no separate dashboard CSS file —
+  `#191` removed the Tailwind build entirely and the dashboard's
+  app-specific styling has since been folded upstream into `theme.css`
+  itself; `hp-app.js` is the hand-written
   enhancement layer (SSE, lazy rows, live refresh, theme toggle, recents).
   Static assets are embedded via [`dashboard/assets.go`](https://github.com/Xore/honeypot-stack/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/assets.go)
   (`//go:embed static`) and served with long-cache headers at
@@ -630,8 +630,8 @@ open modal state.
 - `data-hp-*` hooks, `class="wrap"` + `data-hp-page-content`, and the
   `sidebar`/`topbar` template names stay load-bearing.
 - `theme.css` stays byte-identical to the recorded `Xore/theme` commit;
-  dashboard-specific CSS lives only in `hp-dashboard.css`;
-  page CSS uses only theme custom properties for color.
+  there is no separate dashboard CSS file — page CSS uses only theme custom
+  properties for color.
 - No CDN assets, no external fonts, no inline event handlers, no palette
   redefinition in Go strings.
 - Modal behavior follows `MODALS.md` exactly — visual styling alone is not a

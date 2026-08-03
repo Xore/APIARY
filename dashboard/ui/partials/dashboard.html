@@ -2,8 +2,6 @@
 <script nonce="{{.Nonce}}">(function(){try{var t=localStorage.getItem("hp-theme");if(t==="light"||t==="dark"){document.documentElement.dataset.theme=t;}else if(t){localStorage.removeItem("hp-theme");}}catch(e){}})();</script>
 <link rel="stylesheet" href="{{asset "/static/theme.css"}}">
 <link rel="stylesheet" href="{{asset "/static/leaflet.css"}}">
-<link rel="stylesheet" href="{{asset "/static/hp-dashboard.css"}}">
-<link rel="stylesheet" href="{{asset "/static/hp-settings-modal.css"}}">
 <script defer src="{{asset "/static/leaflet.js"}}"></script>
 <script defer src="{{asset "/static/hp-api.js"}}"></script>
 <script defer src="{{asset "/static/hp-modals.js"}}"></script>
@@ -137,7 +135,7 @@
   <div class="modal-backdrop" id="hp-settings-backdrop" data-hp-settings-backdrop aria-hidden="true" inert></div>
   <div id="hp-dash-settings-root"></div>
   <section class="modal hp-settings-modal" id="hp-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="hp-settings-title" aria-hidden="true" inert>
-    <div class="hp-settings-head">
+    <div class="hp-account-settings-head">
       <h2 id="hp-settings-title">Account settings</h2>
       <a class="hp-settings-external" data-hp-settings-external href="#" target="_blank" rel="noopener noreferrer">Open in new tab</a>
       <button class="modal__close" type="button" data-hp-settings-close aria-label="Close settings">&#10005;</button>
@@ -151,7 +149,7 @@
      with {{template "filterbar" .}} after embedding filterBar (filters.go)
      into its own page struct and populating it via buildFilterBar(r, ...)
      in its route handler / data function. Reuses the "Open in..." disclosure
-     shell (.hp-open-in, hp-dashboard.css) events.html already established --
+     shell (.hp-open-in, Xore/theme's theme.css) events.html already established --
      same trigger/panel shape, form contents instead of a link list. No
      JavaScript: a GET form whose hidden fields carry every other active
      query parameter forward, matching #278's includeIPs form. */}}
@@ -161,7 +159,7 @@
   {{/* #303: a real Xore/theme button (.btn/.btn-sm/.btn-secondary, same
        classes Apply/Reset already use below), not the plain dotted-link
        styling .hp-open-in > summary carries by default -- scoped to
-       "summary.btn" in hp-dashboard.css so events.html's OTHER reuse of
+       "summary.btn" in theme.css so events.html's OTHER reuse of
        this same .hp-open-in shell (a plain link-list menu, no .btn class)
        is untouched. */}}
   <summary class="btn btn-sm btn-secondary" title="Filter by one or more attributes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg> Filter&hellip;</summary>
