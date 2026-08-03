@@ -1,0 +1,13 @@
+[Unit]
+Description=Belt-and-braces LAN-block iptables policy for the GHOSTS guest network (virbr-ghosts)
+After=libvirtd.service virtqemud.socket network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/libexec/honeypot-ghosts/network-filter.sh apply
+ExecStop=/usr/local/libexec/honeypot-ghosts/network-filter.sh teardown
+
+[Install]
+WantedBy=multi-user.target
