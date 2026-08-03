@@ -632,7 +632,7 @@ func TestSemanticShellIsServerRendered(t *testing.T) {
 	// off) -- it belongs in TestMLAnomaliesNavReflectsShowMLPanels below, not
 	// in this "always present" list.
 	for _, route := range []string{
-		"/", "/source-health", "/alerts", "/events", "/ips", "/campaigns",
+		"/", "/events", "/ips", "/campaigns",
 		"/clusters", "/commands", "/payloads", "/sandbox",
 		"/reports",
 	} {
@@ -645,7 +645,12 @@ func TestSemanticShellIsServerRendered(t *testing.T) {
 	// diagnostics, not analyst investigation evidence. The routes themselves
 	// still work (source-health and search link into them with specific
 	// queries/metrics), just no longer as standalone sidebar items.
-	for _, route := range []string{"/history", "/dead-letters"} {
+	// #344: source-health and alerts moved out of the sidebar the same way
+	// -- both already have topbar icon-button equivalents (pipeline-health
+	// icon, alerts bell with its unread badge), so the sidebar entries were
+	// a second, redundant way to reach the same two pages. The routes
+	// themselves are unaffected; only the sidebar <a data-hp-nav> is gone.
+	for _, route := range []string{"/history", "/dead-letters", "/source-health", "/alerts"} {
 		if strings.Contains(html, `data-hp-nav="`+route+`" href="`+route+`"`) {
 			t.Fatalf("rendered shell still carries the removed sidebar nav route %q", route)
 		}
