@@ -22,7 +22,13 @@ import (
 // which would need a second log file and a second Filebeat input just to
 // keep them apart -- the whole sensor moved to ES-sourced at once. Every
 // other sensor is unaffected and stays file-based.
-var esOnlySensors = []string{"multipot"}
+//
+// dicompot (#413) is ES-only from the day it was added, per #238's broader
+// data-flow requirement that every new sensor added under that issue reads
+// through Elasticsearch, never a local log directory -- it never needed a
+// migration the way multipot did, since there was no pre-existing
+// file-based dashboard code path to move away from.
+var esOnlySensors = []string{"multipot", "dicompot"}
 
 // loadSensorEventsES fetches dirSensor's events from the honeypot-v2-*
 // Filebeat index (see analysis/filebeat.yml, analysis/elasticsearch-setup.sh)

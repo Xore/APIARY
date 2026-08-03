@@ -10,7 +10,7 @@
 # Elasticsearch 400s are almost always caused by merging all sources into root.
 
 filebeat.inputs:
-  # Honeypot sensor logs (cowrie / http / multipot / dionaea / conpot / tanner).
+  # Honeypot sensor logs (cowrie / http / multipot / dionaea / conpot / tanner / dicompot).
   # Each sensor writes to its own subdirectory: /logs/<service>/<file>.json
   - type: filestream
     id: honeypot-json
@@ -24,6 +24,7 @@ filebeat.inputs:
       - /logs/conpot*/*.json
       - /logs/tanner/*.json
       - /logs/dnp3/*.json
+      - /logs/dicompot/*.json
     # Keep an extra guard for a top-level Suricata mount. Explicit per-sensor
     # paths above ensure incidents and portbridge metadata cannot be decoded
     # into the shared honeypot namespace.

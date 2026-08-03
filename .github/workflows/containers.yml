@@ -23,6 +23,8 @@ jobs:
             context: conpot
           - image: dashboard
             context: dashboard
+          - image: dicompot
+            context: dicompot
           - image: dionaea
             context: dionaea
           - image: dnp3-honeypot

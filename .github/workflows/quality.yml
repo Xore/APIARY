@@ -31,8 +31,10 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          # Newest toolchain; all remaining modules are source-compatible with it.
-          go-version: "1.25.x"
+          # dicompot's vendored github.com/nsmfoo/dicompot (#413) declares go
+          # 1.26.2 in its own go.mod -- the module graph forces that as the
+          # floor for every module in this repo, not just dicompot's.
+          go-version: "1.26.x"
           cache-dependency-path: "**/go.sum"
       - name: Check formatting
         shell: bash
