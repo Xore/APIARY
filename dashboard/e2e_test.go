@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -28,15 +29,38 @@ func TestSyntheticSensorsReachDashboardSnapshot(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	s := &store{dir: root}
+	// #39: per-sensor counts on the snapshot are ES-native now (see
+	// es_aggregate.go) -- this fixture data still proves classify()/
+	// rebuild() correctly parse and route every one of these raw shapes
+	// into storedEvent (checked below via s.getEvents()); which sensors
+	// show up in the Sensors leaderboard is Elasticsearch's own job,
+	// covered by TestFetchESOverviewParsesCountsAndTerms.
+	var resp esOverviewAggResponse
+	for _, sensor := range []string{"cowrie", "dionaea", "conpot", "tanner", "suricata"} {
+		resp.Aggregations.Sensors.Buckets = append(resp.Aggregations.Sensors.Buckets, esSensorBucket{Key: sensor, DocCount: 1})
+	}
+	esSrv := httptest.NewServer(esOverviewStub(t, resp))
+	defer esSrv.Close()
+	s := &store{dir: root, es: newESClient(esSrv.URL, "")}
 	s.rebuild()
+
+	seenEvent := map[string]bool{}
+	for _, ev := range s.getEvents() {
+		seenEvent[ev.Sensor] = true
+	}
+	for _, sensor := range []string{"cowrie", "dionaea", "conpot", "tanner", "suricata"} {
+		if !seenEvent[sensor] {
+			t.Fatalf("synthetic %s event was not parsed into an event: %+v", sensor, s.getEvents())
+		}
+	}
+
 	seen := map[string]bool{}
 	for _, row := range s.get().Sensors {
 		seen[row.Name] = row.Count > 0
 	}
 	for _, sensor := range []string{"cowrie", "dionaea", "conpot", "tanner", "suricata"} {
 		if !seen[sensor] {
-			t.Fatalf("synthetic %s event did not reach the snapshot: %+v", sensor, s.get().Sensors)
+			t.Fatalf("ES-reported %s sensor did not reach the snapshot: %+v", sensor, s.get().Sensors)
 		}
 	}
 }
