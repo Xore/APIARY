@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -60,6 +61,209 @@ func (s *store) rebuild() {
 	// forward, which is the prune: no separate sweep needed.
 	nextCache := make(map[string]*logFileState, len(s.logCache))
 
+	processEntry := func(entry cachedEvent) {
+		ev := entry.ev
+		// cowrie / dionaea / conpot only see the tunnel peer (10.8.0.1)
+		// because their ports aren't PROXY-wrapped. Recover the real attacker
+		// IP by matching the connection's src_port to the via_port portbridge
+		// dialed from — every event in one connection shares that port, so
+		// the whole chain (and its geo lookup below) gets the real IP.
+		//
+		// When the join misses, the source is unknown, not 10.8.0.1: that
+		// address is our own VPS tunnel end and is never an attacker.
+		// Recording it as one puts our own infrastructure at the top of
+		// /ips, inflates UniqueIPs, and feeds it to the geo lookup, the map,
+		// campaign correlation, and eventually external abuse reporting.
+		// Clearing the IP instead keeps the event — it is a real attack —
+		// while every aggregate below, all of which already require a
+		// non-empty IP, correctly declines to attribute it. The recovery gap
+		// is reported as Unattributed rather than disguised as an attacker.
+		//
+		// What is left after issue #75 is the join window, not a missing
+		// recovery path: UDP now carries a via_port like TCP, and the map
+		// spans one log rotation. A miss means the connection that produced
+		// this event has aged out of the portbridge log the dashboard can
+		// still see. See issue #54 for why the peer is never substituted.
+		//
+		// #353: this join runs fresh every cycle even for an event whose
+		// classification came from the cache -- see log_cache.go's own
+		// header comment for why that matters (a line read before its
+		// matching portbridge record landed must still get a chance to
+		// join once that record shows up on a later cycle).
+		lostSource := false
+		if ev.ip == tunnelPeerIP {
+			if real := viaLookup(viaMap, entry.srcPort, ev.port); real != "" {
+				ev.ip = real
+			} else {
+				ev.ip = ""
+				lostSource = true
+			}
+		}
+		// #241: p0f OS guess, folded into the portbridge log at connection
+		// time (vps/portbridge/p0f.go) — a fallback fingerprint for
+		// connections that never produced a protocol-level one (HASSH/JA3/
+		// User-Agent all require the attacker to complete a handshake with
+		// a specific sensor; p0f only needs the initial SYN, so it covers
+		// scanners and sensors those never fire against).
+		if ev.fingerprint == "" && ev.ip != "" {
+			if os, ok := p0fOS[ev.ip]; ok {
+				ev.fingerprint, ev.fingerKind = os, "p0f OS"
+			}
+		}
+		if key := dedupeKey(ev); key != "" {
+			if seen[key] {
+				return
+			}
+			seen[key] = true
+		}
+		// Counted after the dedupe check so the figure matches the number of
+		// events actually shown, not the number of raw log lines read.
+		if lostSource {
+			unattributed++
+		}
+		geo := geoInfo{Country: ev.country}
+		if s.geo != nil && ev.ip != "" {
+			geo = s.geo.lookup(ev.ip)
+			if ev.country != "" {
+				geo.Country = ev.country
+			}
+		}
+		total++
+		sensors[ev.sensor]++
+		if ev.ip != "" {
+			srcIPs[ev.ip]++
+		}
+		if ev.proto != "" {
+			protos[ev.proto]++
+		}
+		if ev.isLogin {
+			logins++
+		}
+		if ev.isLogin && validCredentialPair(ev.user, ev.pass) {
+			creds[ev.user+" / "+ev.pass]++
+		}
+		if ev.command != "" {
+			// Keep the sensor in the aggregate key so the command drill-down
+			// can link to the exact source as well as the command text.
+			commands[ev.sensor+"\x00"+ev.command]++
+		}
+		if ev.port != "" {
+			ports[ev.port]++
+		}
+		// The HTTP OPTIONS asterisk-form is a request target, not a path.
+		if strings.HasPrefix(ev.path, "/") {
+			paths[ev.path]++
+		}
+		// Capture/decoder health warnings remain searchable in /events but
+		// should not be presented as attacker detections on the overview.
+		if ev.alert != "" && !isOperationalAlert(ev.alert) {
+			alerts[ev.alert]++
+		}
+		if ev.category != "" && ev.sensor == "suricata" && !isOperationalAlert(ev.alert) {
+			alertCats[ev.category]++
+		}
+		if ev.clientVer != "" {
+			clients[ev.clientVer]++
+		}
+		if ev.fingerprint != "" {
+			fingerprints[ev.fingerKind+"\x00"+ev.fingerprint]++
+		}
+		if geo.Country != "" {
+			countries[geo.Country]++
+		}
+		if geo.ASN != 0 {
+			asns[fmt.Sprintf("AS%d %s", geo.ASN, geo.Org)]++
+		}
+		provider := firstNonEmpty(geo.Intel, geo.Provider)
+		if provider != "" {
+			providers[provider]++
+		}
+		if geo.Lat != 0 || geo.Lon != 0 {
+			// City empty means the GeoIP data only resolved to
+			// country level; those IPs still cluster together onto one
+			// per-country point rather than falling back to one point
+			// per IP, consistent with how Country alone already reads
+			// as a single dot rather than a jitter of siblings.
+			key := geo.City + "\x00" + geo.Country
+			p := points[key]
+			if p == nil {
+				p = &mapPoint{Country: geo.Country, City: geo.City, Lat: geo.Lat, Lon: geo.Lon}
+				points[key] = p
+				pointIPs[key] = map[string]struct{}{}
+			}
+			p.Count++
+			pointIPs[key][ev.ip] = struct{}{}
+		}
+		if ev.shasum != "" {
+			downloads++
+			p := payloads[ev.shasum]
+			if p == nil {
+				p = &payloadRow{Shasum: ev.shasum, Download: ev.download}
+				payloads[ev.shasum] = p
+			}
+			p.Count++
+		}
+		if ev.when.After(lastSeen[ev.sensor]) {
+			lastSeen[ev.sensor] = ev.when
+		}
+		if !ev.when.IsZero() {
+			if age := now.Sub(ev.when); age >= 0 && age < 24*time.Hour {
+				hour := 23 - int(age.Hours())
+				last24++
+				if sensorHourly[ev.sensor] == nil {
+					sensorHourly[ev.sensor] = &[24]int{}
+				}
+				sensorHourly[ev.sensor][hour]++
+			} else if age >= 24*time.Hour && age < 48*time.Hour {
+				previous24++
+			}
+		}
+		evs = append(evs, storedEvent{
+			when: ev.when,
+			Time: ev.whenStr,
+			// Empty, not a zero-value RFC3339 string, when ev.when never
+			// parsed (when()'s "unknown format" branch) -- the client must
+			// not reformat "0001-01-01" into something that looks like a
+			// real, if wrong, date.
+			UTC:           utcOrEmpty(ev.when),
+			Sensor:        ev.sensor,
+			Persona:       ev.persona,
+			Site:          ev.site,
+			Asset:         ev.asset,
+			PersonaOrg:    ev.personaOrg,
+			SrcIP:         ev.ip,
+			Country:       geo.Country,
+			City:          geo.City,
+			Lat:           geo.Lat,
+			Lon:           geo.Lon,
+			ASN:           geo.ASN,
+			Org:           geo.Org,
+			Provider:      geo.Provider,
+			Intel:         geo.Intel,
+			Proto:         ev.proto,
+			Port:          ev.port,
+			User:          ev.user,
+			Pass:          ev.pass,
+			Command:       ev.command,
+			Path:          ev.path,
+			Alert:         ev.alert,
+			Session:       ev.session,
+			Shasum:        ev.shasum,
+			Download:      ev.download,
+			ClientVer:     ev.clientVer,
+			Fingerprint:   ev.fingerprint,
+			FingerKind:    ev.fingerKind,
+			Category:      ev.category,
+			Severity:      ev.severity,
+			Detail:        ev.detail,
+			IsLogin:       ev.isLogin,
+			HasCredential: ev.isLogin && validCredentialPair(ev.user, ev.pass),
+			Kibana:        investigationURL(investigationBase("kibana"), "kibana", ev.ip, ev.when),
+			EveBox:        investigationURL(investigationBase("evebox"), "evebox", ev.ip, ev.when),
+			Arkime:        investigationURL(investigationBase("arkime"), "arkime", ev.ip, ev.when),
+		})
+	}
+
 	for _, fn := range logFiles(s.dir) {
 		rel, _ := filepath.Rel(s.dir, fn)
 		parts := strings.Split(filepath.ToSlash(rel), "/")
@@ -67,211 +271,25 @@ func (s *store) rebuild() {
 		if len(parts) > 1 {
 			dirSensor = parts[0]
 		}
+		if slices.Contains(esOnlySensors, dirSensor) {
+			continue
+		}
 		cached, state := s.classifiedEventsFor(fn, dirSensor, s.logCache[fn], tailCap)
 		if state != nil {
 			nextCache[fn] = state
 		}
 		for _, entry := range cached {
-			ev := entry.ev
-			// cowrie / dionaea / conpot only see the tunnel peer (10.8.0.1)
-			// because their ports aren't PROXY-wrapped. Recover the real attacker
-			// IP by matching the connection's src_port to the via_port portbridge
-			// dialed from — every event in one connection shares that port, so
-			// the whole chain (and its geo lookup below) gets the real IP.
-			//
-			// When the join misses, the source is unknown, not 10.8.0.1: that
-			// address is our own VPS tunnel end and is never an attacker.
-			// Recording it as one puts our own infrastructure at the top of
-			// /ips, inflates UniqueIPs, and feeds it to the geo lookup, the map,
-			// campaign correlation, and eventually external abuse reporting.
-			// Clearing the IP instead keeps the event — it is a real attack —
-			// while every aggregate below, all of which already require a
-			// non-empty IP, correctly declines to attribute it. The recovery gap
-			// is reported as Unattributed rather than disguised as an attacker.
-			//
-			// What is left after issue #75 is the join window, not a missing
-			// recovery path: UDP now carries a via_port like TCP, and the map
-			// spans one log rotation. A miss means the connection that produced
-			// this event has aged out of the portbridge log the dashboard can
-			// still see. See issue #54 for why the peer is never substituted.
-			//
-			// #353: this join runs fresh every cycle even for an event whose
-			// classification came from the cache -- see log_cache.go's own
-			// header comment for why that matters (a line read before its
-			// matching portbridge record landed must still get a chance to
-			// join once that record shows up on a later cycle).
-			lostSource := false
-			if ev.ip == tunnelPeerIP {
-				if real := viaLookup(viaMap, entry.srcPort, ev.port); real != "" {
-					ev.ip = real
-				} else {
-					ev.ip = ""
-					lostSource = true
-				}
-			}
-			// #241: p0f OS guess, folded into the portbridge log at connection
-			// time (vps/portbridge/p0f.go) — a fallback fingerprint for
-			// connections that never produced a protocol-level one (HASSH/JA3/
-			// User-Agent all require the attacker to complete a handshake with
-			// a specific sensor; p0f only needs the initial SYN, so it covers
-			// scanners and sensors those never fire against).
-			if ev.fingerprint == "" && ev.ip != "" {
-				if os, ok := p0fOS[ev.ip]; ok {
-					ev.fingerprint, ev.fingerKind = os, "p0f OS"
-				}
-			}
-			if key := dedupeKey(ev); key != "" {
-				if seen[key] {
-					continue
-				}
-				seen[key] = true
-			}
-			// Counted after the dedupe check so the figure matches the number of
-			// events actually shown, not the number of raw log lines read.
-			if lostSource {
-				unattributed++
-			}
-			geo := geoInfo{Country: ev.country}
-			if s.geo != nil && ev.ip != "" {
-				geo = s.geo.lookup(ev.ip)
-				if ev.country != "" {
-					geo.Country = ev.country
-				}
-			}
-			total++
-			sensors[ev.sensor]++
-			if ev.ip != "" {
-				srcIPs[ev.ip]++
-			}
-			if ev.proto != "" {
-				protos[ev.proto]++
-			}
-			if ev.isLogin {
-				logins++
-			}
-			if ev.isLogin && validCredentialPair(ev.user, ev.pass) {
-				creds[ev.user+" / "+ev.pass]++
-			}
-			if ev.command != "" {
-				// Keep the sensor in the aggregate key so the command drill-down
-				// can link to the exact source as well as the command text.
-				commands[ev.sensor+"\x00"+ev.command]++
-			}
-			if ev.port != "" {
-				ports[ev.port]++
-			}
-			// The HTTP OPTIONS asterisk-form is a request target, not a path.
-			if strings.HasPrefix(ev.path, "/") {
-				paths[ev.path]++
-			}
-			// Capture/decoder health warnings remain searchable in /events but
-			// should not be presented as attacker detections on the overview.
-			if ev.alert != "" && !isOperationalAlert(ev.alert) {
-				alerts[ev.alert]++
-			}
-			if ev.category != "" && ev.sensor == "suricata" && !isOperationalAlert(ev.alert) {
-				alertCats[ev.category]++
-			}
-			if ev.clientVer != "" {
-				clients[ev.clientVer]++
-			}
-			if ev.fingerprint != "" {
-				fingerprints[ev.fingerKind+"\x00"+ev.fingerprint]++
-			}
-			if geo.Country != "" {
-				countries[geo.Country]++
-			}
-			if geo.ASN != 0 {
-				asns[fmt.Sprintf("AS%d %s", geo.ASN, geo.Org)]++
-			}
-			provider := firstNonEmpty(geo.Intel, geo.Provider)
-			if provider != "" {
-				providers[provider]++
-			}
-			if geo.Lat != 0 || geo.Lon != 0 {
-				// City empty means the GeoIP data only resolved to
-				// country level; those IPs still cluster together onto one
-				// per-country point rather than falling back to one point
-				// per IP, consistent with how Country alone already reads
-				// as a single dot rather than a jitter of siblings.
-				key := geo.City + "\x00" + geo.Country
-				p := points[key]
-				if p == nil {
-					p = &mapPoint{Country: geo.Country, City: geo.City, Lat: geo.Lat, Lon: geo.Lon}
-					points[key] = p
-					pointIPs[key] = map[string]struct{}{}
-				}
-				p.Count++
-				pointIPs[key][ev.ip] = struct{}{}
-			}
-			if ev.shasum != "" {
-				downloads++
-				p := payloads[ev.shasum]
-				if p == nil {
-					p = &payloadRow{Shasum: ev.shasum, Download: ev.download}
-					payloads[ev.shasum] = p
-				}
-				p.Count++
-			}
-			if ev.when.After(lastSeen[ev.sensor]) {
-				lastSeen[ev.sensor] = ev.when
-			}
-			if !ev.when.IsZero() {
-				if age := now.Sub(ev.when); age >= 0 && age < 24*time.Hour {
-					hour := 23 - int(age.Hours())
-					last24++
-					if sensorHourly[ev.sensor] == nil {
-						sensorHourly[ev.sensor] = &[24]int{}
-					}
-					sensorHourly[ev.sensor][hour]++
-				} else if age >= 24*time.Hour && age < 48*time.Hour {
-					previous24++
-				}
-			}
-			evs = append(evs, storedEvent{
-				when: ev.when,
-				Time: ev.whenStr,
-				// Empty, not a zero-value RFC3339 string, when ev.when never
-				// parsed (when()'s "unknown format" branch) -- the client must
-				// not reformat "0001-01-01" into something that looks like a
-				// real, if wrong, date.
-				UTC:           utcOrEmpty(ev.when),
-				Sensor:        ev.sensor,
-				Persona:       ev.persona,
-				Site:          ev.site,
-				Asset:         ev.asset,
-				PersonaOrg:    ev.personaOrg,
-				SrcIP:         ev.ip,
-				Country:       geo.Country,
-				City:          geo.City,
-				Lat:           geo.Lat,
-				Lon:           geo.Lon,
-				ASN:           geo.ASN,
-				Org:           geo.Org,
-				Provider:      geo.Provider,
-				Intel:         geo.Intel,
-				Proto:         ev.proto,
-				Port:          ev.port,
-				User:          ev.user,
-				Pass:          ev.pass,
-				Command:       ev.command,
-				Path:          ev.path,
-				Alert:         ev.alert,
-				Session:       ev.session,
-				Shasum:        ev.shasum,
-				Download:      ev.download,
-				ClientVer:     ev.clientVer,
-				Fingerprint:   ev.fingerprint,
-				FingerKind:    ev.fingerKind,
-				Category:      ev.category,
-				Severity:      ev.severity,
-				Detail:        ev.detail,
-				IsLogin:       ev.isLogin,
-				HasCredential: ev.isLogin && validCredentialPair(ev.user, ev.pass),
-				Kibana:        investigationURL(investigationBase("kibana"), "kibana", ev.ip, ev.when),
-				EveBox:        investigationURL(investigationBase("evebox"), "evebox", ev.ip, ev.when),
-				Arkime:        investigationURL(investigationBase("arkime"), "arkime", ev.ip, ev.when),
-			})
+			processEntry(entry)
+		}
+	}
+
+	for _, sensor := range esOnlySensors {
+		cached, ok := s.loadSensorEventsES(s.es, sensor)
+		if !ok {
+			continue
+		}
+		for _, entry := range cached {
+			processEntry(entry)
 		}
 	}
 

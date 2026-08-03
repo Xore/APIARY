@@ -5,7 +5,7 @@
 | Sensor | Ports | Exposed via | Notes |
 |---|---|---|---|
 | **cowrie** | SSH 22, Telnet 23 | raw tunnel | seeded NexusAI Ubuntu GPU node ([cowrie/README-fs.md](../cowrie/README-fs.md)) |
-| **multipot** | SMTP 25, Postgres 5432, VNC 5900, Redis 6379, ES 9200, Docker 2375 | raw tunnel | light Go multi-protocol sensor |
+| **multipot** | SMTP 25, Postgres 5432, VNC 5900, Redis 6379, ES 9200, Docker 2375 | raw tunnel | light Go multi-protocol sensor — dashboard reads its events from Elasticsearch, not its log file (#403) |
 | **dionaea** | FTP 21, TFTP 69/udp, MSRPC 135, SMB 445, MSSQL 1433, PPTP 1723, MQTT 1883, UPnP 1900/udp, MySQL 3306, SIP 5060 tcp/udp, printer 9100, Memcached 11211, Mongo 27017 | raw tunnel | broad legacy/IoT attack surface + **malware capture** |
 | **conpot** | S7 102, Modbus 502, SNMP 161/udp, BACnet 47808/udp, IPMI 623/udp, ENIP 44818 | raw tunnel | **ICS/SCADA** (Siemens S7-200) |
 | **conpot-s7-1200** | S7 1102, Modbus 1502 | raw tunnel | S7-1215C water-treatment persona |

@@ -297,14 +297,19 @@ func TestRebuildRejoinsCachedEventOnceViaMapCatchesUp(t *testing.T) {
 func TestRebuildPrunesLogCacheForRemovedFiles(t *testing.T) {
 	root := t.TempDir()
 	keep := filepath.Join(root, "cowrie", "cowrie.json")
-	gone := filepath.Join(root, "multipot", "multipot.json")
+	// dionaea, not multipot (#403): multipot moved to an ES-sourced sensor
+	// (events_es.go's esOnlySensors) as part of #238, so its directory is
+	// deliberately skipped by rebuild()'s file walk now and would never be
+	// cached -- this test needs a still-file-based sensor to exercise the
+	// prune behavior it's actually testing.
+	gone := filepath.Join(root, "dionaea", "dionaea.json")
 	writeFileLines(t, keep, cowrieLine("a", "2026-01-01T00:00:00Z"))
 	writeFileLines(t, gone, `{"eventid":"connect","timestamp":"2026-01-01T00:00:00Z","src_ip":"203.0.113.5"}`)
 
 	s := &store{dir: root}
 	s.rebuild()
 	if _, ok := s.logCache[gone]; !ok {
-		t.Fatal("expected the multipot file to be cached after its first rebuild")
+		t.Fatal("expected the dionaea file to be cached after its first rebuild")
 	}
 
 	if err := os.Remove(gone); err != nil {
