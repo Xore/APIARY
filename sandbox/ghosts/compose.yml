@@ -1,0 +1,92 @@
+# sandbox/ghosts/compose.yml — the GHOSTS host stack (#324), deliberately
+# isolated from this repo's own docker-compose*.yml stacks, same reasoning
+# as CAPE's host-stack issue (#314): GHOSTS is a full platform with its own
+# API and database, and folding it in would blur the trust boundary the rest
+# of this repo keeps narrow.
+#
+# ghosts-api + ghosts-postgres only. Frontend, Grafana and n8n are upstream's
+# optional operator tooling for GHOSTS' own primary use case (live cyber-range
+# exercise management) -- not required for NPC-simulation, and skipped here
+# per #324's scope decision. Add them later via a separate compose overlay if
+# a concrete need shows up; don't add them speculatively.
+#
+# Upstream ships no published images, so both services build from CMU SEI's
+# own source via a git build context pinned to the v9.0.0 tag -- this file
+# alone is enough, `docker compose build` clones nothing to disk itself.
+#
+# ghosts-api has no host port publish at all. It gets a fixed static address
+# on the dedicated ghosts_net bridge (10.90.0.2:5000) instead: reachable from
+# this host directly (docker routes user-defined bridges without any -p) and,
+# once #325 adds the narrow routing exception, from the WAN-permitted GHOSTS
+# guest -- the same "one fixed, documented address" pattern as RevDeck's
+# REVDECK_API_BASE=http://10.8.0.2:19500. Don't change this address without
+# updating #325's firewall rule to match.
+
+services:
+  ghosts-postgres:
+    image: postgres:16.8
+    environment:
+      POSTGRES_DB: ghosts
+      POSTGRES_USER: ghosts
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - ghosts-postgres-data:/var/lib/postgresql/data
+    networks:
+      # Static, not auto-assigned: without this, Docker hands ghosts-postgres
+      # 10.90.0.2 first (lowest free address after the .1 gateway) and then
+      # ghosts-api's explicit request for that same address fails to start
+      # ("Address already in use").
+      ghosts_net:
+        ipv4_address: 10.90.0.3
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ghosts"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  ghosts-api:
+    build:
+      context: https://github.com/cmu-sei/GHOSTS.git#v9.0.0:src
+      dockerfile: Dockerfile-api
+    depends_on:
+      ghosts-postgres:
+        condition: service_healthy
+    environment:
+      # Overrides appsettings.json's hardcoded default connection string
+      # (ASP.NET Core's double-underscore env-var config binding).
+      ConnectionStrings__DefaultConnection: >-
+        Host=ghosts-postgres;Port=5432;Database=ghosts;User Id=ghosts;Password=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env};
+    networks:
+      ghosts_net:
+        ipv4_address: 10.90.0.2
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  # Throwaway client used only by install-host.sh's enrollment smoke test
+  # (`docker compose --profile test run ghosts-client-test`). Never started
+  # by a plain `up`; its default config resolves the API via the service
+  # name "ghosts-api" on ghosts_net, so it needs no address override.
+  ghosts-client-test:
+    build:
+      context: https://github.com/cmu-sei/GHOSTS.git#v9.0.0:src
+      dockerfile: Dockerfile-client-universal
+    profiles: ["test"]
+    networks:
+      - ghosts_net
+    depends_on:
+      ghosts-api:
+        condition: service_started
+    restart: "no"
+
+networks:
+  ghosts_net:
+    ipam:
+      config:
+        - subnet: 10.90.0.0/24
+
+volumes:
+  ghosts-postgres-data:
