@@ -199,16 +199,32 @@ def wait_for_winrm(max_wait: int = 300):
     range instead of another unexamined guess at the boundary.
     """
     deadline = time.time() + max_wait
+    attempt = 0
+    last_error = None
     while time.time() < deadline:
+        attempt += 1
         try:
             result = winrm_run('Write-Output ready', timeout=10)
             if 'ready' in result['stdout']:
-                log.info('WinRM ready')
+                log.info('WinRM ready (attempt %d)', attempt)
                 return
-        except Exception:
-            pass
+            log.warning('WinRM attempt %d: connected but unexpected output: %r', attempt, result['stdout'])
+        except Exception as exc:
+            # #438: this used to be `except Exception: pass` -- every
+            # attempt's real failure reason was thrown away, so two
+            # separate real detonation failures (both dying at *exactly*
+            # their deadline, both with WinRM independently confirmed
+            # reachable during the same window via a manual probe) gave no
+            # way to tell whether attempts were hanging, erroring, or
+            # something else. Logging the exception is what makes the next
+            # failure diagnostic instead of another blind guess.
+            last_error = f'{type(exc).__name__}: {exc}'
+            log.warning('WinRM attempt %d failed: %s', attempt, last_error)
         time.sleep(5)
-    raise TimeoutError('WinRM not responsive after boot')
+    raise TimeoutError(
+        f'WinRM not responsive after boot ({attempt} attempts over {max_wait}s); '
+        f'last error: {last_error}'
+    )
 
 
 def copy_sample_to_vm(sample_path: Path, sha: str):
