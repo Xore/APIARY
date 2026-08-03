@@ -187,11 +187,28 @@ func TestConpotSurfacesDeviceResponse(t *testing.T) {
 		"data_type": "kamstrup_protocol", "dst_port": float64(1025),
 		"request": "b'01000d'", "response": "b'403f10001bf202044402668be5e6e00d'",
 	}, "conpot-kamstrup")
-	if ev.command != "b'01000d'" {
-		t.Fatalf("request not captured as command: %+v", ev)
+	if !strings.Contains(ev.detail, "b'01000d'") {
+		t.Fatalf("request not surfaced in detail: %q", ev.detail)
 	}
 	if !strings.Contains(ev.detail, "403f10001bf202044402668be5e6e00d") {
 		t.Fatalf("device response not surfaced in detail: %q", ev.detail)
+	}
+}
+
+// TestConpotRequestDoesNotPolluteTopCommands (#41): a live production check
+// found raw industrial-protocol bytes -- and once, an entire raw HTTP
+// request plus a PROXY-protocol preamble a scanner happened to send to a
+// conpot port -- in the Attacker Behavior tab's Top Commands list. conpot's
+// "request" is never an attacker-issued shell command; it must not reach
+// ev.command (which feeds aggregate.go's commands[sensor+cmd]++
+// leaderboard), only ev.detail.
+func TestConpotRequestDoesNotPolluteTopCommands(t *testing.T) {
+	ev := classify(map[string]any{
+		"data_type": "modbus", "dst_port": float64(502),
+		"request": "PROXY TCP4 198.51.100.7 203.0.113.50 39572 50100\r\nGET /../../etc/passwd HTTP/1.1\r\n",
+	}, "conpot")
+	if ev.command != "" {
+		t.Fatalf("conpot request must not populate ev.command (pollutes Top Commands), got %q", ev.command)
 	}
 }
 

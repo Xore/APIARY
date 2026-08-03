@@ -510,7 +510,14 @@ func classify(e map[string]any, dirSensor string) event {
 			ev.port = "2502"
 		}
 		req := firstNonEmpty(str(e["request"]), str(e["event_type"]))
-		ev.command = str(e["request"])
+		// #41: ev.command deliberately NOT set here. "request" is raw
+		// industrial-protocol bytes (Modbus/S7comm/Kamstrup) or whatever
+		// arbitrary garbage a scanner sent to the wrong port -- not an
+		// attacker-issued command. Confirmed live: this was polluting the
+		// Attacker Behavior tab's Top Commands leaderboard with raw hex
+		// blobs and even a PROXY-protocol preamble + full HTTP request that
+		// happened to land on a conpot port. Still shown in detail below,
+		// same as before -- only the commands aggregate is affected.
 		ev.detail = strings.TrimSpace(ev.proto + " " + req)
 		if ev.detail == "" {
 			ev.detail = "probe"
