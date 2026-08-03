@@ -56,7 +56,7 @@
             <p class="subtitle">Unified inventory of Dionaea captures, Cowrie uploads/downloads, and retained script artifacts.</p>
           </div>
           <div class="live-panel">
-            <span class="gen">unified payload inventory &bull; generated {{.Generated.Format "2006-01-02 15:04:05 MST"}}</span>
+            <span class="gen">unified payload inventory &bull; generated <span data-hp-utc="{{utcOrEmpty .Generated}}">{{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></span>
           </div>
         </header>
 

@@ -20,7 +20,7 @@
             <p class="subtitle">{{if presentation.DashboardSubtitle}}{{presentation.DashboardSubtitle}}{{else}}Live attack telemetry, captured evidence, correlated campaigns, and collection health in one operational view.{{end}}</p>
           </div>
           <div class="live-panel">
-            <span class="gen">updated {{.Generated.Format "2006-01-02 15:04:05 MST"}} &bull; refreshes automatically</span>
+            <span class="gen">updated <span data-hp-utc="{{utcOrEmpty .Generated}}">{{.Generated.Format "2006-01-02 15:04:05 MST"}}</span> &bull; refreshes automatically</span>
           </div>
         </header>
 

@@ -20,7 +20,7 @@
             <p class="subtitle">Bounded summaries exported from disposable, network-isolated KVM guests.</p>
           </div>
           <div class="live-panel">
-            <span class="gen">generated {{.Generated.Format "2006-01-02 15:04:05 MST"}}</span>
+            <span class="gen">generated <span data-hp-utc="{{utcOrEmpty .Generated}}">{{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></span>
           </div>
         </header>
 
