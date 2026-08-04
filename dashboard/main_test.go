@@ -724,6 +724,48 @@ func TestSemanticShellIsServerRendered(t *testing.T) {
 	}
 }
 
+// #478: the overview page's "Correlated campaigns" card used to reuse
+// /campaigns' own full 17-column table verbatim (score/network/events/ips/
+// sensors/ports/creds/files/alerts/ASNs/provider/fingerprints/sequence/why
+// correlated/first/last/ES-link) -- far more than a glance-view card can
+// show without every wide cell wrapping to several lines (confirmed live
+// against production data). This asserts the overview now renders a
+// 6-column summary (score/network/events/ips/sensors/last seen) with a link
+// to the full table, while /campaigns itself keeps every column unchanged.
+func TestOverviewCampaignsCardIsADeclutteredSummary(t *testing.T) {
+	s := newSettingsAPITestStore(t, "admin")
+	tmpl, err := template.New("t").Funcs(templateFuncs(s, "")).Parse(pageTemplate)
+	if err != nil {
+		t.Fatalf("dashboard template does not parse: %v", err)
+	}
+	snap := snapshot{Campaigns: []campaignRow{{
+		CIDR: "203.0.113.0/24", Score: 90, Events: 1200, UniqueIPs: 4, Sensors: "cowrie dionaea",
+		Ports: "22 23", Creds: 5, Payloads: 1, Alerts: 12, ASNs: "AS64500", Providers: "network",
+		Fingerprints: 3, Sequence: "cowrie -> dionaea", First: "2026-08-01 00:00", Last: "2026-08-04 12:00",
+		Link: "/investigate/cidr/203.0.113.0%2F24", Explanation: "cross-sensor activity",
+	}}}
+	var out strings.Builder
+	if err := tmpl.ExecuteTemplate(&out, "page", snap); err != nil {
+		t.Fatalf("overview page does not execute: %v", err)
+	}
+	html := out.String()
+
+	if !strings.Contains(html, `<thead><tr><th>score</th><th>network</th><th>events</th><th>ips</th><th>sensors</th><th>last seen</th></tr></thead>`) {
+		t.Fatal("overview campaigns card must render the 6-column summary header")
+	}
+	if !strings.Contains(html, `href="/campaigns"`) {
+		t.Fatal("overview campaigns card must link to the full /campaigns table")
+	}
+	for _, detailOnly := range []string{">ports<", ">creds<", ">files<", ">alerts<", ">ASNs<", ">provider<", ">fingerprints<", ">sequence<", "why correlated"} {
+		if strings.Contains(html, detailOnly) {
+			t.Fatalf("overview campaigns summary must not carry detail-only column %q", detailOnly)
+		}
+	}
+	if !strings.Contains(html, "203.0.113.0/24") || !strings.Contains(html, "2026-08-04 12:00") {
+		t.Fatalf("overview campaigns summary must still render the row's network and last-seen values: %s", html)
+	}
+}
+
 // #181: "Experimental ML/LLM panels" persisted correctly but nothing ever
 // read it, so /ml-anomalies stayed reachable (nav and direct URL) regardless
 // of the toggle. This asserts the nav link tracks the live setting, not just
