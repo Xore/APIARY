@@ -446,6 +446,45 @@ curl -fsS -X PUT "$es_url/_index_template/dashboard-payload-inventory" \
   }
 }' >/dev/null
 
+# Generated PDF reports (#475, reports_es.go): metadata plus the base64-
+# encoded PDF bytes itself, so any dashboard instance can serve a
+# previously generated report regardless of which instance produced it --
+# unlike the payload/static-analysis indices above, this one legitimately
+# stores a real binary artifact (a dashboard-generated document, not raw
+# captured malware), hence the larger per-document size expectation
+# (docIndexSized's own generatedReportMaxBytes cap, not the blanket 2MB
+# docIndexMaxBytes bookkeeping-record guard). No ILM: retention is enforced
+# by application-level pruning (reportStore.maxGenerated) instead of age,
+# since an operator may want to keep an old report much longer than a fixed
+# window suggests.
+curl -fsS -X PUT "$es_url/_index_template/dashboard-generated-reports" \
+  -H 'Content-Type: application/json' \
+  --data-binary '{
+  "index_patterns": ["dashboard-generated-reports-v1"],
+  "priority": 460,
+  "template": {
+    "settings": {
+      "index.number_of_replicas": 0,
+      "index.refresh_interval": "1s",
+      "index.mapping.total_fields.limit": 50
+    },
+    "mappings": {
+      "properties": {
+        "id": { "type": "keyword" },
+        "definition_id": { "type": "keyword" },
+        "name": { "type": "text" },
+        "template": { "type": "keyword" },
+        "theme": { "type": "keyword" },
+        "title": { "type": "text" },
+        "size_bytes": { "type": "long" },
+        "created_at": { "type": "date" },
+        "origin": { "type": "keyword" },
+        "pdf_base64": { "type": "binary" }
+      }
+    }
+  }
+}' >/dev/null
+
 curl -fsS -X PUT "$es_url/_index_template/honeypot-dead-letter" \
   -H 'Content-Type: application/json' \
   --data-binary '{"index_patterns":["dead-letter-honeypot*"],"priority":450,"template":{"settings":{"index.lifecycle.name":"dead-letter-60d","index.number_of_replicas":0}}}' >/dev/null

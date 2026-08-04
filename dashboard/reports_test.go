@@ -15,10 +15,16 @@ import (
 )
 
 // newReportTestStore builds a store with a reports studio and a settings
-// service backed by temporary state, for API-level tests.
+// service backed by temporary state, for API-level tests. Generated-report
+// storage (#475) is Elasticsearch-only, so this wires an in-memory ES
+// document-store stub (memESDocStore, alerts_test.go) rather than a local
+// directory.
 func newReportTestStore(t *testing.T) *store {
 	t.Helper()
 	dir := t.TempDir()
+	esStore := newMemESDocStore()
+	esSrv := httptest.NewServer(esStore.handler())
+	t.Cleanup(esSrv.Close)
 	return &store{
 		settings: newSettingsService(
 			filepath.Join(dir, "config.json"),
@@ -26,7 +32,7 @@ func newReportTestStore(t *testing.T) *store {
 			filepath.Join(dir, "audit.jsonl"),
 			filepath.Join(dir, "history.jsonl"),
 		),
-		reports: newReportStore(filepath.Join(dir, "reports.json"), filepath.Join(dir, "reports")),
+		reports: newReportStore(filepath.Join(dir, "reports.json"), newESClient(esSrv.URL, "")),
 	}
 }
 
@@ -143,7 +149,7 @@ func TestNormalizeReportElements(t *testing.T) {
 
 func TestReportStoreDefinitionCRUD(t *testing.T) {
 	dir := t.TempDir()
-	store := newReportStore(filepath.Join(dir, "reports.json"), filepath.Join(dir, "reports"))
+	store := newReportStore(filepath.Join(dir, "reports.json"), nil)
 
 	created, etag, err := store.putDefinition("", sampleDefinition("executive"))
 	if err != nil {
@@ -177,11 +183,15 @@ func TestReportStoreDefinitionCRUD(t *testing.T) {
 	}
 }
 
-// TestReportStoreGeneratedRetention proves generated PDFs land on disk, the
-// history prunes to the retention cap, and pruned files are removed.
+// TestReportStoreGeneratedRetention proves generated PDFs land in
+// Elasticsearch, the history prunes to the retention cap, and pruned
+// records are actually deleted there (#475).
 func TestReportStoreGeneratedRetention(t *testing.T) {
+	esStore := newMemESDocStore()
+	esSrv := httptest.NewServer(esStore.handler())
+	defer esSrv.Close()
 	dir := t.TempDir()
-	store := newReportStore(filepath.Join(dir, "reports.json"), filepath.Join(dir, "reports"))
+	store := newReportStore(filepath.Join(dir, "reports.json"), newESClient(esSrv.URL, ""))
 	store.maxGenerated = 3
 	pdf := []byte("%PDF-1.4\nfake\n%%EOF\n")
 
@@ -194,28 +204,35 @@ func TestReportStoreGeneratedRetention(t *testing.T) {
 			t.Fatalf("addGenerated %d: %v", i, err)
 		}
 		kept = append(kept, meta)
+		// Each addGenerated stamps CreatedAt from time.Now(); force distinct
+		// timestamps so pruneGenerated's oldest-first sort is deterministic
+		// even when the loop runs fast enough to land in the same instant.
+		time.Sleep(time.Millisecond)
 	}
-	doc, _ := store.document()
-	if len(doc.Generated) != 3 {
-		t.Fatalf("generated history = %d entries, want retention cap 3", len(doc.Generated))
+	all, err := store.listGenerated()
+	if err != nil {
+		t.Fatalf("listGenerated: %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("generated history = %d entries, want retention cap 3", len(all))
 	}
 	for _, meta := range kept[:2] {
-		if _, err := os.Stat(store.generatedPath(meta)); !os.IsNotExist(err) {
-			t.Fatalf("pruned file %s still on disk (err=%v)", meta.File, err)
+		if _, ok := store.generated(meta.ID); ok {
+			t.Fatalf("pruned record %s still present", meta.ID)
 		}
 	}
 	for _, meta := range kept[2:] {
-		if _, err := os.Stat(store.generatedPath(meta)); err != nil {
-			t.Fatalf("retained file %s missing: %v", meta.File, err)
+		if _, ok := store.generated(meta.ID); !ok {
+			t.Fatalf("retained record %s missing", meta.ID)
 		}
 	}
 
-	victim := doc.Generated[0]
-	if err := store.deleteGenerated("", victim.ID); err != nil {
+	victim := all[0]
+	if err := store.deleteGenerated(victim.ID); err != nil {
 		t.Fatalf("deleteGenerated: %v", err)
 	}
-	if _, err := os.Stat(store.generatedPath(victim)); !os.IsNotExist(err) {
-		t.Fatal("deleted generated file still on disk")
+	if _, ok := store.generated(victim.ID); ok {
+		t.Fatal("deleted generated record still present")
 	}
 }
 
@@ -440,7 +457,7 @@ func TestGenerateSandboxReportThroughPipeline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate sandbox report: %v", err)
 	}
-	body, err := os.ReadFile(s.reports.generatedPath(meta))
+	_, body, err := s.reports.generatedPDF(meta.ID)
 	if err != nil {
 		t.Fatalf("read generated sandbox pdf: %v", err)
 	}

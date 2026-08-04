@@ -43,7 +43,7 @@ func TestGeneratePayloadReportThroughPipeline(t *testing.T) {
 	if meta.Origin != "manual" {
 		t.Fatalf("Origin = %q, want manual", meta.Origin)
 	}
-	body, err := os.ReadFile(s.reports.generatedPath(meta))
+	_, body, err := s.reports.generatedPDF(meta.ID)
 	if err != nil {
 		t.Fatalf("read generated payload pdf: %v", err)
 	}
