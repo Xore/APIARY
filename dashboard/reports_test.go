@@ -88,6 +88,79 @@ func TestReportTemplateCatalogValid(t *testing.T) {
 	}
 }
 
+// #477: overrides replace only Name/Description, and an id absent from
+// (or no longer present in) the compiled catalog is silently ignored rather
+// than injected as a phantom entry or causing an error.
+func TestReportTemplateCatalogWithOverrides(t *testing.T) {
+	base := reportTemplateCatalog()
+	overridden := reportTemplateCatalogWithOverrides(map[string]reportPresetOverride{
+		"executive":  {Name: "Board summary", Description: "Custom copy"},
+		"unknown-id": {Name: "should be ignored"},
+	})
+	if len(overridden) != len(base) {
+		t.Fatalf("overridden catalog length = %d, want %d (no phantom entries)", len(overridden), len(base))
+	}
+	for i, template := range overridden {
+		if template.ID != base[i].ID || template.Theme != base[i].Theme || template.Window != base[i].Window {
+			t.Fatalf("structural fields must stay compiled for %q: got %#v, base %#v", template.ID, template, base[i])
+		}
+		if template.ID == "executive" {
+			if template.Name != "Board summary" || template.Description != "Custom copy" {
+				t.Fatalf("executive override not applied: %#v", template)
+			}
+			continue
+		}
+		if template.Name != base[i].Name || template.Description != base[i].Description {
+			t.Fatalf("non-overridden template %q must keep its compiled copy, got %#v", template.ID, template)
+		}
+	}
+
+	// A blank override field falls back to the compiled default rather than
+	// clearing the copy to empty text.
+	blankOverridden := reportTemplateCatalogWithOverrides(map[string]reportPresetOverride{
+		"executive": {Name: "", Description: "Only description changed"},
+	})
+	for _, template := range blankOverridden {
+		if template.ID != "executive" {
+			continue
+		}
+		if template.Name != base[0].Name {
+			t.Fatalf("blank name override must keep the compiled default, got %q", template.Name)
+		}
+		if template.Description != "Only description changed" {
+			t.Fatalf("non-blank description override must apply, got %q", template.Description)
+		}
+	}
+}
+
+func TestReportPresetRowsForCarriesDefaultsAndOverridesSeparately(t *testing.T) {
+	rows := reportPresetRowsFor(map[string]reportPresetOverride{
+		"executive": {Name: "Board summary"},
+	})
+	catalog := reportTemplateCatalog()
+	if len(rows) != len(catalog) {
+		t.Fatalf("rows = %d, want %d", len(rows), len(catalog))
+	}
+	for _, row := range rows {
+		template, ok := reportTemplateByID(row.ID)
+		if !ok {
+			t.Fatalf("row %q does not name a known template", row.ID)
+		}
+		if row.DefaultName != template.Name || row.DefaultDescription != template.Description {
+			t.Fatalf("row %q defaults must mirror the compiled catalog untouched: %#v", row.ID, row)
+		}
+		if row.ID == "executive" {
+			if row.OverrideName != "Board summary" || row.OverrideDescription != "" {
+				t.Fatalf("executive row override = %#v, want name set and description empty", row)
+			}
+			continue
+		}
+		if row.OverrideName != "" || row.OverrideDescription != "" {
+			t.Fatalf("row %q must have no override when none was given: %#v", row.ID, row)
+		}
+	}
+}
+
 func TestValidateDefinitionFields(t *testing.T) {
 	valid := sampleDefinition("custom")
 	cases := []struct {
