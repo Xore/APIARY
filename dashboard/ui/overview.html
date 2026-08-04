@@ -181,12 +181,22 @@
           </div>
 
           <div class="card wide">
-            <h2>Correlated campaigns — rolling 7 days</h2>
+            <div class="tw:flex tw:flex-wrap tw:items-center tw:justify-between tw:gap-2"><h2>Correlated campaigns — rolling 7 days</h2><a class="lnk" href="/campaigns">Every column, every network &rarr;</a></div>
+            {{/* #478: the overview page previously reused /campaigns' own
+                 full 17-column table (score/network/events/ips/sensors/
+                 ports/creds/files/alerts/ASNs/provider/fingerprints/
+                 sequence/why-correlated/first/last/ES-link) verbatim -- far
+                 more detail than a glance-view card can show without every
+                 wide cell wrapping to several lines. /campaigns itself is
+                 unchanged and still has the complete table; this is a
+                 summary with the same rows, scoped to what's actionable at
+                 a glance, one click from the full detail via the link
+                 above. */}}
             <p class="note">Groups related source networks across sensors. Score rises with volume, sensor/port spread, reused credentials, payloads, IDS alerts, and matching fingerprints.</p>
             {{if .Campaigns}}
             <table class="recent data-table">
-              <thead><tr><th>score</th><th>network</th><th>events</th><th>ips</th><th>sensors</th><th>ports</th><th>creds</th><th>files</th><th>alerts</th><th>ASNs</th><th>provider</th><th>fingerprints</th><th>sequence</th><th>first</th><th>last</th></tr></thead>
-              <tbody>{{template "campaignrows" .Campaigns}}</tbody>
+              <thead><tr><th>score</th><th>network</th><th>events</th><th>ips</th><th>sensors</th><th>last seen</th></tr></thead>
+              <tbody>{{template "campaignrows-summary" .Campaigns}}</tbody>
             </table>
             {{else}}<p class="empty">waiting for correlatable public source addresses</p>{{end}}
           </div>
