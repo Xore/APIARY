@@ -622,8 +622,9 @@ func extractUTF16LE(b []byte, minLen, limit int) []string {
 // otherwise-real string: quote/backtick padding a packer left adjacent to a
 // resource, and path-separator runs bordering a genuine path. Trimmed from
 // both ends -- never the middle, where these characters are real content
-// (a quoted argument, a Windows path) -- so `''''''''http://x` becomes the
-// clean URL instead of a garbled fusion of noise and signal.
+// (a quoted argument, a Windows path) -- so a URL glued to a run of leading
+// apostrophes becomes the clean URL instead of a garbled fusion of noise
+// and signal.
 const stringBoundaryNoise = "'\"`\\/|"
 
 // cleanExtractedString (#530) turns a raw byte-range match from
