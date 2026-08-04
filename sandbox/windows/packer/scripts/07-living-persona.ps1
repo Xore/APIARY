@@ -134,30 +134,55 @@ public class PersonaDaemon {
         }
     }
 
+    static void RunCycle(ref int idleStreak) {
+        // Office-hours weighting: less active 18:00-08:00 EST
+        int h = DateTime.Now.Hour;
+        bool workHours = h >= 8 && h < 18;
+        int act = rng.Next(100);
+
+        if (workHours ? act < 55 : act < 15) {
+            // Mouse burst: 3-9 waypoints across the screen
+            int burst = 3 + rng.Next(7);
+            for (int i = 0; i < burst; i++) {
+                HumanMove(rng.Next(200, 1700), rng.Next(150, 950));
+                Thread.Sleep(150 + rng.Next(900));
+            }
+            if (rng.NextDouble() < 0.35) Click();
+            if (rng.NextDouble() < 0.4) ScrollChurn();
+            idleStreak = 0;
+        } else {
+            idleStreak++;
+        }
+
+        if (workHours && rng.NextDouble() < 0.06) TypeSnippet();
+    }
+
     public static void Main() {
-        var sw = Stopwatch.StartNew();
+        // #368 (2026-08-04): even with the scheduled task's Principal set to
+        // -LogonType Interactive, AtLogOn fired this before explorer.exe/the
+        // desktop had finished initializing -- confirmed live, explorer's own
+        // process StartTime landed the same second as the task's LastRunTime,
+        // and the daemon crashed with the exact same CLR20r3 fault (thrown
+        // from System.dll, not from a call this code makes directly -- the
+        // exact throw site is inside CLR/framework startup plumbing for a
+        // WindowsApplication-subsystem exe without a ready desktop, not
+        // something a narrow catch around one P/Invoke call would reliably
+        // hit). LogonType fixes *which* session the task runs in; it does not
+        // wait for that session's desktop to actually be ready. Fixed two
+        // ways: the trigger itself now carries a startup Delay (see
+        // Register-ScheduledTask below), and this is a broad catch(Exception)
+        // around each cycle -- deliberately generic rather than typed, since
+        // this is best-effort decoy activity, not logic where swallowing the
+        // wrong exception type would hide a real bug worth seeing.
         int idleStreak = 0;
         while (true) {
-            // Office-hours weighting: less active 18:00-08:00 EST
-            int h = DateTime.Now.Hour;
-            bool workHours = h >= 8 && h < 18;
-            int act = rng.Next(100);
-
-            if (workHours ? act < 55 : act < 15) {
-                // Mouse burst: 3-9 waypoints across the screen
-                int burst = 3 + rng.Next(7);
-                for (int i = 0; i < burst; i++) {
-                    HumanMove(rng.Next(200, 1700), rng.Next(150, 950));
-                    Thread.Sleep(150 + rng.Next(900));
-                }
-                if (rng.NextDouble() < 0.35) Click();
-                if (rng.NextDouble() < 0.4) ScrollChurn();
-                idleStreak = 0;
-            } else {
-                idleStreak++;
+            try {
+                RunCycle(ref idleStreak);
+            } catch (Exception) {
+                // Desktop/window-station transiently unavailable (lock
+                // screen, session switch, or still-initializing at logon) --
+                // skip this cycle, don't crash the whole process.
             }
-
-            if (workHours && rng.NextDouble() < 0.06) TypeSnippet();
 
             // Base cadence: 4-14s between decisions (never periodic!)
             Thread.Sleep(4000 + (int)Math.Abs(Gauss() * 3500));
@@ -198,8 +223,22 @@ Write-Host '[+] PersonaDaemon compiled'
 # presence/movement/speed/click/double-click, dialog confirmation) --
 # there was no persona daemon actually warming anything up to re-verify
 # against, on any build before this one. -------------------------------
+#
+# #368 follow-up (same day): -Principal alone was NOT enough -- confirmed
+# live on an actual golden-image cold boot (not just re-triggering the task
+# mid-session, which is what the first fix was verified against) that the
+# task still fired the exact same 0xE0434352 crash. explorer.exe's own
+# StartTime landed in the same second as the task's LastRunTime: LogonType
+# Interactive picks the right session, but AtLogOn fires the instant that
+# session exists, not once its desktop/window station is actually usable.
+# $trigger.Delay (a TimeSpan string, not a Register-ScheduledTask param --
+# has to be set on the trigger object itself) gives explorer time to finish
+# initializing first. Paired with a startup retry loop and a per-cycle
+# try/catch inside PersonaDaemon's C# above, so an occasional remaining
+# race (session lock, etc.) skips a cycle instead of crashing the process.
 $action = New-ScheduledTaskAction -Execute "$personaDir\PersonaDaemon.exe"
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User 'analyst'
+$trigger.Delay = 'PT20S'
 $principal = New-ScheduledTaskPrincipal -UserId 'analyst' -LogonType Interactive -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
 Register-ScheduledTask -TaskName 'Windows Shell Experience Helper' `
