@@ -33,13 +33,19 @@ type snapshot struct {
 	// tunnel and could not be joined back to a real client IP. They are real
 	// attacks with an unknown source, deliberately not attributed to the tunnel
 	// peer; see aggregate.go and issue #54.
-	Unattributed   int
-	Logins         int
-	Last24h        int
-	Previous24h    int
-	Change24h      string
-	ActivityState  string
-	Downloads      int // captured malware payloads (cowrie file_download)
+	Unattributed  int
+	Logins        int
+	Last24h       int
+	Previous24h   int
+	Change24h     string
+	ActivityState string
+	Downloads     int // payload-observation events (file_download etc.) -- not deduplicated, feeds honeypot_payload_observations
+	// UniquePayloads is the same distinct-binary count /payloads shows
+	// (s.payloadCache.UniqueTotal, a disk scan across s.payloadDirs) --
+	// #470: Downloads counts per-event observations from the log tail
+	// window and is a wildly different, much smaller number, so the
+	// overview's "Captured payloads" card must not use it.
+	UniquePayloads int
 	GeoOn          bool
 	MapTileURL     string
 	MapAttribution string

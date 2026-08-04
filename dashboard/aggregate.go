@@ -422,6 +422,15 @@ func (s *store) rebuild() {
 	snap.Generated = now
 	snap.Logins = logins
 	snap.Downloads = downloads
+	// #470: read from the same disk-scan cache /payloads itself uses
+	// (payloads_data.go's scanPayloads/refreshPayloadCacheAsync), not
+	// Downloads above -- Downloads counts per-event observations in the log
+	// tail window, a much smaller and differently-scoped number than the
+	// distinct binaries /payloads reports.
+	s.refreshPayloadCacheAsync()
+	s.payloadMu.Lock()
+	snap.UniquePayloads = s.payloadCache.UniqueTotal
+	s.payloadMu.Unlock()
 	snap.GeoOn = s.geo != nil
 	snap.MapTileURL = getenv("MAP_TILE_URL", "https://tile.openstreetmap.org/{z}/{x}/{y}.png")
 	snap.MapAttribution = getenv("MAP_ATTRIBUTION", "© OpenStreetMap contributors")

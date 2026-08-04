@@ -29,7 +29,7 @@
           <a class="metric" href="/events?since=24h" title="Open events received during the last 24 hours"><div class="metric__value">{{.Last24h}}</div><div class="metric__label">Events in 24 hours</div><div class="metric__trend" title="Compared with the directly preceding 24-hour period">{{.Change24h}} &bull; {{.ActivityState}}</div></a>
           <a class="metric" href="/ips" title="Distinct attacker source addresses observed by the sensors"><div class="metric__value">{{.UniqueIPs}}</div><div class="metric__label">Attack sources</div></a>
           <a class="metric" href="/events?type=login" title="Authentication attempts captured by interactive honeypots"><div class="metric__value">{{.Logins}}</div><div class="metric__label">Login attempts</div></a>
-          <a class="metric" href="/events?type=download" title="Downloads, uploads, and high-confidence script artifacts captured safely"><div class="metric__value">{{.Downloads}}</div><div class="metric__label">Captured payloads</div></a>
+          <a class="metric" href="/payloads" title="Distinct payload binaries captured safely, same count as the Payloads page"><div class="metric__value">{{.UniquePayloads}}</div><div class="metric__label">Captured payloads</div></a>
         </div>
 
         <div class="tabs" role="tablist" aria-label="Dashboard views">
