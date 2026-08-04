@@ -24,9 +24,9 @@ Availability and applicability are computed on the server. An unavailable or inc
 
 ## Recipes and runs
 
-Recipes are stored under `/state/analysis-workbench/recipes.json`. Each edit appends a new immutable revision; an optimistic `base_revision` check rejects lost updates. A recipe is either private to its authenticated subject or shared. Submitted runs copy the selected revision into `recipe_snapshot`, so a later recipe edit cannot change the meaning of an existing result.
+Recipes are stored in Elasticsearch (`dashboard-workbench-recipes-v1`, one immutable document per `id:revision`). Each edit appends a new revision written with `op_type=create`, so a genuine race on the same revision number conflicts instead of silently overwriting; an optimistic `base_revision` check rejects lost updates at the API layer too. A recipe is either private to its authenticated subject or shared. Submitted runs copy the selected revision into `recipe_snapshot`, so a later recipe edit cannot change the meaning of an existing result.
 
-Parent runs live as bounded JSON documents under `/state/analysis-workbench/runs/`. The idempotency digest covers owner, captured hash, recipe ID/revision, and the normalized typed selection. Repeating the same request returns the existing run instead of queueing duplicate children; a deliberate rerun uses the bounded child retry action.
+Parent runs live as documents in `dashboard-workbench-runs-v1`. The idempotency digest covers owner, captured hash, recipe ID/revision, and the normalized typed selection, and is used directly as the run's own document ID (prefixed `run_`) -- a duplicate submission is detected by an atomic ES create conflict rather than a directory scan, which holds correctly across multiple dashboard instances. Repeating the same request returns the existing run instead of queueing duplicate children; a deliberate rerun uses the bounded child retry action. There is no local-disk fallback: every dashboard instance reads and writes the same ES indices (#405 follow-up).
 
 Child lifecycle states are `queued`, `claimed`, `running`, `completed`, `skipped`, `failed`, `timed_out`, and `cancelled`. Polling reconciles request markers, existing worker status files, and native result timestamps. One failed child produces a `partial` parent when another child completed, and every completed child links to its native escaped result.
 
@@ -57,13 +57,13 @@ Re-run `sudo analysis/ghidra/install-analysis-host.sh` to install or update the 
 
 ## Deployment, backup, and rollback
 
-The default `ANALYSIS_WORKBENCH_DIR=/state/analysis-workbench` is inside the existing `dashboard-state` volume. `scripts/backup-state.sh` already archives the complete volume, including recipes and runs.
+Recipes and runs live in Elasticsearch (`dashboard-workbench-recipes-v1`, `dashboard-workbench-runs-v1`), backed up by the ES snapshot process, not `scripts/backup-state.sh`. The workbench requires a configured `es *esClient`; without one it reports unconfigured rather than falling back to local storage.
 
 Deploy the dashboard normally after merging. Rollback is additive and safe:
 
 1. deploy the previous dashboard image;
 2. optionally disable `honeypot-model-status-adapter.service`;
-3. leave `analysis-workbench/` in the state volume (older dashboards ignore it), or restore the named dashboard-state backup while the dashboard is stopped.
+3. leave the workbench indices in Elasticsearch untouched (a rolled-back dashboard from before the #405 follow-up reads its own local `/state/analysis-workbench` copy instead and simply does not see runs created after the rollback).
 
 The old `/ghidra/submit` and `/sandbox/submit` routes remain compatible. No worker or native result schema is changed by the workbench.
 

@@ -485,6 +485,111 @@ curl -fsS -X PUT "$es_url/_index_template/dashboard-generated-reports" \
   }
 }' >/dev/null
 
+# Payload Workbench runs (#405 follow-up, workbench_es.go): the run's own
+# document ID IS its idempotency key (workbenchIdempotency's deterministic
+# hash of payload+recipe+analyzer selection, prefixed "run_"), so a duplicate
+# submission is detected by an ES op_type=create 409 rather than a directory
+# scan -- correct across multiple dashboard instances, unlike the single-
+# process mutex this replaced. Mutable after creation (children transition
+# queued -> running -> completed as async analyzers report back), so updates
+# go through docGet/docIndex with if_seq_no/if_primary_term CAS, not create-
+# only. No ILM: retention is enforced by workbenchMaxRuns at submission time,
+# not by age.
+curl -fsS -X PUT "$es_url/_index_template/dashboard-workbench-runs" \
+  -H 'Content-Type: application/json' \
+  --data-binary '{
+  "index_patterns": ["dashboard-workbench-runs-v1"],
+  "priority": 460,
+  "template": {
+    "settings": {
+      "index.number_of_replicas": 0,
+      "index.refresh_interval": "1s",
+      "index.mapping.total_fields.limit": 200
+    },
+    "mappings": {
+      "properties": {
+        "schema_version": { "type": "integer" },
+        "id": { "type": "keyword" },
+        "payload_sha256": { "type": "keyword" },
+        "payload_kind": { "type": "keyword" },
+        "owner": { "type": "keyword" },
+        "recipe_id": { "type": "keyword" },
+        "recipe_revision": { "type": "integer" },
+        "recipe_name": { "type": "keyword" },
+        "idempotency_key": { "type": "keyword" },
+        "state": { "type": "keyword" },
+        "created_at": { "type": "date" },
+        "updated_at": { "type": "date" },
+        "children": {
+          "properties": {
+            "analyzer_id": { "type": "keyword" },
+            "display_name": { "type": "keyword" },
+            "state": { "type": "keyword" },
+            "reason": { "type": "text" },
+            "summary": { "type": "text" },
+            "result_url": { "type": "keyword" },
+            "created_at": { "type": "date" },
+            "updated_at": { "type": "date" },
+            "deadline": { "type": "date" },
+            "queue_deadline": { "type": "date" },
+            "attempts": { "type": "integer" },
+            "retryable": { "type": "boolean" },
+            "cancelable": { "type": "boolean" },
+            "detonates": { "type": "boolean" },
+            "gpu_consuming": { "type": "boolean" },
+            "local_only": { "type": "boolean" },
+            "stale": { "type": "boolean" }
+          }
+        }
+      }
+    }
+  }
+}' >/dev/null
+
+# Payload Workbench recipes (#405 follow-up, workbench_es.go): each revision
+# is its own immutable ES document keyed "<id>:<revision>" and written with
+# op_type=create, so a genuine race on the same revision number conflicts
+# instead of silently overwriting -- revisions are append-only, never
+# mutated in place. No ILM: an operator's saved recipe should not silently
+# expire.
+curl -fsS -X PUT "$es_url/_index_template/dashboard-workbench-recipes" \
+  -H 'Content-Type: application/json' \
+  --data-binary '{
+  "index_patterns": ["dashboard-workbench-recipes-v1"],
+  "priority": 460,
+  "template": {
+    "settings": {
+      "index.number_of_replicas": 0,
+      "index.refresh_interval": "1s",
+      "index.mapping.total_fields.limit": 200
+    },
+    "mappings": {
+      "properties": {
+        "schema_version": { "type": "integer" },
+        "id": { "type": "keyword" },
+        "revision": { "type": "integer" },
+        "name": { "type": "keyword" },
+        "description": { "type": "text" },
+        "owner": { "type": "keyword" },
+        "scope": { "type": "keyword" },
+        "created_at": { "type": "date" },
+        "analyzers": {
+          "properties": {
+            "analyzer_id": { "type": "keyword" },
+            "options": {
+              "properties": {
+                "timeout_seconds": { "type": "integer" },
+                "max_queue_age_seconds": { "type": "integer" },
+                "retry_limit": { "type": "integer" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}' >/dev/null
+
 curl -fsS -X PUT "$es_url/_index_template/honeypot-dead-letter" \
   -H 'Content-Type: application/json' \
   --data-binary '{"index_patterns":["dead-letter-honeypot*"],"priority":450,"template":{"settings":{"index.lifecycle.name":"dead-letter-60d","index.number_of_replicas":0}}}' >/dev/null

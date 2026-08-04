@@ -2,6 +2,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
+import { startFakeElasticsearch } from "./fake-elasticsearch.mjs";
+
+// #405 follow-up: Payload Workbench (and alerts/reports/payload-inventory/
+// static-analysis before it) are Elasticsearch-only with no local-disk
+// fallback, so the e2e dashboard needs *some* ES to talk to -- a real
+// cluster is too heavy for this fixture, so this points it at an in-memory
+// stand-in that speaks just enough of the doc CRUD API to round-trip.
+const fakeES = await startFakeElasticsearch();
 
 const root = mkdtempSync(join(tmpdir(), "honeypot-dashboard-e2e-"));
 const logs = join(root, "logs");
@@ -34,16 +42,14 @@ const child = spawn("go", ["run", "."], {
     LOG_DIR: logs,
     SCRIPT_PAYLOAD_DIR: stateFile("script-payloads"),
     EXPECTED_SENSORS: "cowrie,dionaea,conpot,suricata",
-    ALERT_STATE_FILE: stateFile("alerts.json"),
     INTELLIGENCE_STATE_FILE: stateFile("intelligence.json"),
     DASHBOARD_CONFIG_FILE: stateFile("config.json"),
     DASHBOARD_USERS_FILE: stateFile("users.json"),
     DASHBOARD_AUDIT_FILE: stateFile("audit.jsonl"),
     DASHBOARD_CONFIG_HISTORY_FILE: stateFile("config-history.jsonl"),
     DASHBOARD_REPORTS_FILE: stateFile("reports.json"),
-    DASHBOARD_REPORTS_DIR: stateFile("reports"),
-    ANALYSIS_WORKBENCH_DIR: stateFile("analysis-workbench"),
     PAYLOAD_DIRS: payloads,
+    ELASTICSEARCH_URL: fakeES.url,
   },
   stdio: "inherit",
 });
@@ -53,12 +59,17 @@ const stop = () => {
   if (stopping) return;
   stopping = true;
   child.kill();
+  fakeES.close();
   rmSync(root, { recursive: true, force: true });
 };
 process.on("SIGINT", stop);
 process.on("SIGTERM", stop);
-process.on("exit", () => rmSync(root, { recursive: true, force: true }));
+process.on("exit", () => {
+  fakeES.close();
+  rmSync(root, { recursive: true, force: true });
+});
 child.on("exit", (code, signal) => {
+  fakeES.close();
   rmSync(root, { recursive: true, force: true });
   if (!stopping && code !== 0) {
     process.exitCode = code ?? (signal ? 1 : 0);

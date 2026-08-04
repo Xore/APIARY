@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-"""Ship Ghidra/sandbox/GitHub-analysis/workbench-run results into Elasticsearch.
+"""Ship Ghidra/sandbox/GitHub-analysis results into Elasticsearch.
 
-#378: these four result stores were local-disk-JSON-only -- the dashboard
-(dashboard/ghidra.go, sandbox.go, github_analysis.go, workbench_domain.go)
-reads them fresh off disk and they were never queryable alongside the raw
-honeypot-v2-*/portbridge-v2-* event stream. This worker is a read-only
-secondary indexer: local JSON stays the dashboard's source of truth (safer
-migration path per the issue's own writeup), this only mirrors it into ES.
+#378: these result stores were local-disk-JSON-only -- the dashboard
+(dashboard/ghidra.go, sandbox.go, github_analysis.go) reads them fresh off
+disk and they were never queryable alongside the raw honeypot-v2-*/
+portbridge-v2-* event stream. This worker is a read-only secondary indexer:
+local JSON stays the dashboard's source of truth (safer migration path per
+the issue's own writeup), this only mirrors it into ES.
+
+Payload Workbench runs used to be mirrored here too, but the #405 follow-up
+moved workbench storage to Elasticsearch directly (dashboard/workbench_es.go)
+-- the dashboard is the only writer now, so there is no local JSON left for
+this importer to mirror.
 
 Each source directory is polled on an interval. A file is only re-sent when
 its mtime advances past what a small local state file last recorded, so a
@@ -90,17 +95,6 @@ SOURCES = [
         "index": "revdeck-analysis-v1",
         "id_fields": ("sha256",),
         "glob": "*_revdeck.json",
-    },
-    {
-        # dashboard/main.go's own default -- ANALYSIS_WORKBENCH_DIR is the
-        # workbench root, runs live under <root>/runs (workbench_domain.go's
-        # runsDir()), not the root itself.
-        "env": "ANALYSIS_WORKBENCH_DIR",
-        "subdir": "runs",
-        "label": "workbench",
-        "index": "workbench-runs-v1",
-        "id_fields": ("id",),
-        "glob": "*.json",
     },
 ]
 
