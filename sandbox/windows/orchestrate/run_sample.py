@@ -38,6 +38,7 @@ Env vars:
 """
 
 import os
+import re
 import time
 import json
 import hashlib
@@ -264,12 +265,89 @@ def start_fakenet():
     time.sleep(5)
 
 
-def regshot_before():
-    winrm_run(
-        'Start-Process C:\\Tools\\Regshot\\Regshot-x64-Unicode.exe '
-        '-ArgumentList "/s1 /na" -Wait'
+def run_and_wait_via_cim(command_line: str, poll_timeout: int = 60):
+    """Launch `command_line` via Win32_Process.Create and poll until it
+    exits, instead of `Start-Process -Wait`.
+
+    #444: regshot_before() using `Start-Process ... -Wait` never returns
+    within winrm_run()'s 60s bound -- the same failure mode already
+    root-caused for the GHOSTS client launch (sandbox/ghosts/orchestrate):
+    `Start-Process -Wait` (with or without output redirection) does not
+    reliably signal completion back through this WinRM path, for reasons
+    never fully root-caused. `Win32_Process.Create` via `Invoke-CimMethod`
+    is the reliable launch mechanism instead -- it returns immediately with
+    a PID, so waiting for completion has to be done explicitly here by
+    polling `Get-Process`, rather than relying on the launch call itself to
+    block.
+    """
+    # command_line is embedded in a PowerShell double-quoted string below;
+    # any unescaped " in it closes that string early and corrupts the whole
+    # expression -- confirmed live: Win32_Process.Create silently returned
+    # nothing for a command_line containing raw quotes. PowerShell escapes
+    # an embedded " as "" inside a double-quoted string.
+    escaped_command_line = command_line.replace('"', '""')
+    result = winrm_run(
+        f'$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create '
+        f'-Arguments @{{CommandLine="{escaped_command_line}"}}; '
+        f'"PID:$($r.ProcessId) RC:$($r.ReturnValue)"'
     )
-    log.info('Regshot: first snapshot taken')
+    m = re.search(r'PID:(\d+) RC:(\d+)', result['stdout'])
+    if not m or m.group(2) != '0':
+        raise RuntimeError(f'Win32_Process.Create failed for {command_line!r}: {result["stdout"]!r}')
+    pid = m.group(1)
+
+    deadline = time.time() + poll_timeout
+    while time.time() < deadline:
+        check = winrm_run(
+            f'if (Get-Process -Id {pid} -ErrorAction SilentlyContinue) {{"RUNNING"}} else {{"EXITED"}}'
+        )
+        if 'EXITED' in check['stdout']:
+            return
+        time.sleep(2)
+    raise TimeoutError(f'PID {pid} ({command_line!r}) still running after {poll_timeout}s')
+
+
+# #444: Regshot-x64-Unicode.exe is a GUI-only tool -- its own upstream
+# ReadMe documents nothing but a click-through workflow (1st shot button,
+# run the sample, 2nd shot button, Compare button); the `/s1 /na` and
+# `/s2 /o ...` flags the original code passed were never a real, documented
+# automation interface. Confirmed live two ways: launched via
+# run_and_wait_via_cim (Session 0) the process never exits; launched via a
+# scheduled task with LogonType Interactive (Session 1, Responding=True,
+# matching the GHOSTS Session-0-launch fix) it *still* never exits after
+# taking shot 1 -- it's genuinely designed to stay open holding shot-1
+# state, not to run headless. `Start-Process ... -Wait` was never going to
+# return regardless of transport quirks.
+#
+# Replaced with native reg.exe export + fc.exe diff: both are compiled
+# console tools that actually exit on their own, so run_and_wait_via_cim's
+# poll-for-exit works correctly against them (unlike Regshot). Exports
+# HKLM\SOFTWARE and HKCU\Software in full -- no subtree filtering -- per
+# explicit direction that every changed/new value must be visible;
+# performance is not a constraint here. Measured live against this golden
+# image: ~295K keys / 1M+ lines / 120MB for HKLM\SOFTWARE alone, dominated
+# (>99.9%) by the Microsoft/Classes/WOW6432Node subtrees -- captured
+# anyway, not excluded; #480 tracks a golden-image-baseline-cache approach
+# to avoid recomputing/restoring that redundant bulk on every single run,
+# and #481 tracks a better dedup technique for the resulting near-duplicate
+# artifact files in general.
+def _reg_export(hive_path: str, out_file: str):
+    # No quotes around hive_path/out_file: run_and_wait_via_cim already
+    # wraps the whole command_line in its own double-quoted
+    # CommandLine="..." PowerShell string, and neither argument here ever
+    # contains a space -- adding inner quotes closes that outer string
+    # early at the first one, corrupting the PowerShell expression
+    # (confirmed live: Win32_Process.Create silently returned nothing).
+    run_and_wait_via_cim(
+        f'cmd.exe /c reg.exe export {hive_path} {out_file} /y',
+        poll_timeout=300,
+    )
+
+
+def regshot_before():
+    _reg_export('HKLM\\SOFTWARE', 'C:\\Logs\\reg_hklm_before.reg')
+    _reg_export('HKCU\\Software', 'C:\\Logs\\reg_hkcu_before.reg')
+    log.info('Registry snapshot: before state exported')
 
 
 # #295: Regshot's registry diff shows keys/values that changed, but doesn't
@@ -324,20 +402,29 @@ def execute_sample(vm_path: str):
 
 
 def regshot_after():
-    winrm_run(
-        'Start-Process C:\\Tools\\Regshot\\Regshot-x64-Unicode.exe '
-        '-ArgumentList "/s2 /o C:\\Logs\\regshot_diff.txt" -Wait'
+    _reg_export('HKLM\\SOFTWARE', 'C:\\Logs\\reg_hklm_after.reg')
+    _reg_export('HKCU\\Software', 'C:\\Logs\\reg_hkcu_after.reg')
+    # fc.exe /n: native, fast, line-numbered diff -- no PowerShell per-line
+    # pipeline overhead across files this large. .reg files are UTF-16LE;
+    # /u tells fc.exe to compare as Unicode text rather than binary.
+    run_and_wait_via_cim(
+        'cmd.exe /c "('
+        'echo === HKLM\\SOFTWARE === & '
+        'fc.exe /n /u C:\\Logs\\reg_hklm_before.reg C:\\Logs\\reg_hklm_after.reg & '
+        'echo === HKCU\\Software === & '
+        'fc.exe /n /u C:\\Logs\\reg_hkcu_before.reg C:\\Logs\\reg_hkcu_after.reg'
+        ') > C:\\Logs\\regshot_diff.txt"',
+        poll_timeout=300,
     )
-    log.info('Regshot: second snapshot + diff saved')
+    log.info('Registry snapshot: after state exported, diff saved')
 
 
 def stop_procmon():
     winrm_run('Stop-Process -Name Procmon64 -Force -ErrorAction SilentlyContinue')
     # Export to CSV
-    winrm_run(
-        'Start-Process C:\\Tools\\SysinternalsSuite\\Procmon64.exe '
-        '-ArgumentList "/OpenLog C:\\Logs\\procmon.pml '
-        '/SaveAs C:\\Logs\\procmon.csv /Quiet" -Wait'
+    run_and_wait_via_cim(
+        'C:\\Tools\\SysinternalsSuite\\Procmon64.exe '
+        '/OpenLog C:\\Logs\\procmon.pml /SaveAs C:\\Logs\\procmon.csv /Quiet'
     )
     log.info('ProcMon stopped + exported to CSV')
 
@@ -363,6 +450,13 @@ def collect_artifacts(sha: str, out_dir: Path):
         'sysmon.evtx',
         'powershell_scriptblock.evtx',
         'regshot_diff.txt',
+        # #480 tracks storing these efficiently (golden-image baseline
+        # cache + ES pipeline); for now they're pulled as plain artifact
+        # files like everything else here, full and unfiltered per #444.
+        'reg_hklm_before.reg',
+        'reg_hklm_after.reg',
+        'reg_hkcu_before.reg',
+        'reg_hkcu_after.reg',
         'fakenet_log.txt',
         # #295: persistence diff -- what the sample registered to run at
         # startup/logon, not just what Regshot's registry diff happened to
