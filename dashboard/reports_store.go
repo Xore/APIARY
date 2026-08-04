@@ -98,6 +98,11 @@ type reportTemplate struct {
 	Window      string   `json:"window,omitempty"`
 	Elements    []string `json:"elements,omitempty"`
 	Sandbox     bool     `json:"sandbox,omitempty"`
+	// Payload marks the #474 per-payload report: like Sandbox, this template
+	// renders from one referenced artifact (Scope.Hash) rather than a
+	// telemetry window, and is never exercised through the designer's saved-
+	// definition flow -- see generatePayloadReport in reports_api.go.
+	Payload bool `json:"payload,omitempty"`
 }
 
 // reportTemplateCatalog presets cover every PDF function the dashboard pages
@@ -146,6 +151,13 @@ func reportTemplateCatalog() []reportTemplate {
 			Title:       "Sandbox Dynamic Analysis Report",
 			Theme:       "dark",
 			Sandbox:     true,
+		},
+		{
+			ID: "payload", Name: "Payload analysis",
+			Description: "Static/dynamic analysis report for one captured payload: classification, IOCs, YARA, sandbox runs, and any GitHub-analysis verdict.",
+			Title:       "Payload Analysis Report",
+			Theme:       "dark",
+			Payload:     true,
 		},
 		{
 			ID: "custom", Name: "Custom report",
@@ -220,7 +232,8 @@ type reportScope struct {
 	Text      string `json:"text,omitempty"`
 	Type      string `json:"type,omitempty"`
 	Session   string `json:"session,omitempty"`
-	Job       string `json:"job,omitempty"`
+	Job       string `json:"job,omitempty"`  // sandbox template
+	Hash      string `json:"hash,omitempty"` // payload template (#474)
 }
 
 // filter converts the scope into the shared telemetry filter at generation
@@ -384,16 +397,33 @@ func validateDefinitionFields(def reportDefinition) error {
 	if def.Theme != "dark" && def.Theme != "light" {
 		return invalid("theme must be dark or light")
 	}
-	if template.Sandbox {
+	switch {
+	case template.Sandbox:
 		if strings.TrimSpace(def.Scope.Job) == "" {
 			return invalid("scope.job selects the sandbox analysis run for the sandbox template")
+		}
+		if def.Scope.Hash != "" {
+			return invalid("scope.hash is only valid for the payload template")
 		}
 		if len(def.Elements) != 0 {
 			return invalid("elements are fixed for the sandbox template; only theme and branding apply")
 		}
-	} else {
+	case template.Payload:
+		if !hashName.MatchString(def.Scope.Hash) {
+			return invalid("scope.hash selects the captured payload for the payload template")
+		}
 		if def.Scope.Job != "" {
 			return invalid("scope.job is only valid for the sandbox template")
+		}
+		if len(def.Elements) != 0 {
+			return invalid("elements are fixed for the payload template; only theme and branding apply")
+		}
+	default:
+		if def.Scope.Job != "" {
+			return invalid("scope.job is only valid for the sandbox template")
+		}
+		if def.Scope.Hash != "" {
+			return invalid("scope.hash is only valid for the payload template")
 		}
 		if len(def.Elements) == 0 || len(def.Elements) > len(reportElementCatalog) {
 			return invalid("elements must select between 1 and %d report elements", len(reportElementCatalog))

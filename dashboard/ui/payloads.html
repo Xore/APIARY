@@ -103,6 +103,18 @@
 <meta name="robots" content="noindex,nofollow">
 <title>xore//honeypot — payload analysis</title>
 {{template "style" .}}
+<style nonce="{{.Nonce}}">
+/* #474: PDF report viewer, an application-managed overlay per the shared
+   modal contract (Xore/theme docs/MODALS.md) -- same shape as
+   github_analysis.html's .hp-ga-viewer (one PDF at a time, not a grid of
+   many generated reports the way reports.html's own viewer handles). */
+.hp-pl-viewer { flex-direction: column; width: min(1000px, calc(100vw - 40px)); height: min(860px, calc(100dvh - 48px)); padding: 20px 20px 0; }
+.hp-pl-viewer #hp-pl-viewer-title { flex: none; margin: 0 40px 12px 0; font-size: var(--font-size-lg); }
+.hp-pl-viewer-frame { flex: 1; width: 100%; min-height: 0; border: 0; background: var(--surface-0); margin: 0 -20px; }
+@media (max-width: 720px) {
+  .hp-pl-viewer { width: 100vw; height: 100dvh; border-radius: 0; }
+}
+</style>
 </head>
 <body>
 <div class="app-shell">
@@ -128,6 +140,11 @@
           <a class="chip" href="/events?shasum={{.Hash}}">related events</a>
           <a class="chip" href="{{.VT}}" target="_blank" rel="noopener noreferrer">VirusTotal &rarr;</a>
           <a class="chip" href="/payload/{{.Hash}}">download isolated sample &darr;</a>
+          {{/* #474: a one-click PDF, not the Reports studio designer flow --
+               the button POSTs, stays on this page, and opens the result in
+               the same modal viewer github_analysis.html's report card
+               uses, rather than navigating to /reports. */}}
+          <button class="chip" type="button" data-hp-pl-generate-report data-hp-pl-hash="{{.Hash}}">Generate PDF report</button>
           <details class="action-menu">
             <summary aria-label="Payload actions" title="Payload actions">&#8942;</summary>
             <div class="action-menu__popover" role="menu">
@@ -193,6 +210,13 @@
       </div>
     </main>
 </div>
+<div class="modal-backdrop" id="hp-pl-viewer-backdrop" aria-hidden="true" inert></div>
+<section class="modal hp-pl-viewer" id="hp-pl-viewer" role="dialog" aria-modal="true" aria-labelledby="hp-pl-viewer-title" aria-hidden="true" inert>
+  <button class="modal__close" type="button" id="hp-pl-viewer-close" aria-label="Close report viewer">&#10005;</button>
+  <h2 id="hp-pl-viewer-title">Payload report</h2>
+  <iframe class="hp-pl-viewer-frame" id="hp-pl-viewer-frame" title="Payload PDF report preview"></iframe>
+</section>
+<script defer src="{{asset "/static/hp-payload-report.js"}}"></script>
 </body>
 </html>
 {{end}}
