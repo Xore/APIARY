@@ -719,8 +719,8 @@ func TestSemanticShellIsServerRendered(t *testing.T) {
 			t.Fatalf("rendered shell still carries the removed sidebar nav route %q", route)
 		}
 	}
-	if strings.Contains(html, `data-hp-nav="/ml-anomalies"`) {
-		t.Fatal("ML anomalies nav link must be absent when show_ml_panels is off (compiled default)")
+	if !strings.Contains(html, `data-hp-behavior-nav="show_ml_panels"`) || !strings.Contains(html, `data-hp-nav="/ml-anomalies" data-hp-behavior-nav="show_ml_panels" href="/ml-anomalies" hidden`) {
+		t.Fatal("ML anomalies nav link must render present-but-hidden when show_ml_panels is off (compiled default) -- #479 needs it in the DOM so a live config save can reveal it without a page reload")
 	}
 }
 
@@ -728,14 +728,22 @@ func TestSemanticShellIsServerRendered(t *testing.T) {
 // read it, so /ml-anomalies stayed reachable (nav and direct URL) regardless
 // of the toggle. This asserts the nav link tracks the live setting, not just
 // the compiled default asserted above.
+//
+// #479: the link itself is always rendered (data-hp-behavior-nav="show_ml_panels"
+// marks it for hp-settings.js's live side-effect patch) -- only its `hidden`
+// attribute tracks the setting now, so a config save can reveal/hide it
+// without the reload the old "omit the tag entirely" approach required.
 func TestMLAnomaliesNavReflectsShowMLPanels(t *testing.T) {
 	off := renderOverview(t, nil)
-	if strings.Contains(off, `data-hp-nav="/ml-anomalies"`) {
-		t.Fatal("nav link present while show_ml_panels is off")
+	if !strings.Contains(off, `data-hp-nav="/ml-anomalies" data-hp-behavior-nav="show_ml_panels" href="/ml-anomalies" hidden`) {
+		t.Fatal("nav link must be present-but-hidden while show_ml_panels is off")
 	}
 	on := renderOverview(t, func(c *dashboardConfig) { c.Behavior.ShowMLPanels = true })
-	if !strings.Contains(on, `data-hp-nav="/ml-anomalies" href="/ml-anomalies"`) {
-		t.Fatal("nav link absent while show_ml_panels is on")
+	if !strings.Contains(on, `data-hp-nav="/ml-anomalies" data-hp-behavior-nav="show_ml_panels" href="/ml-anomalies">`) {
+		t.Fatal("nav link must be visible (no hidden attribute) while show_ml_panels is on")
+	}
+	if strings.Contains(on, `data-hp-nav="/ml-anomalies" data-hp-behavior-nav="show_ml_panels" href="/ml-anomalies" hidden`) {
+		t.Fatal("nav link must not carry hidden while show_ml_panels is on")
 	}
 }
 
