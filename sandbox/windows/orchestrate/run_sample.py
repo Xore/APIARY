@@ -587,13 +587,15 @@ def capture_memory_dump(out_dir: Path):
 
 
 def post_process(out_dir: Path):
-    """Steps 12 and 13 of the run cycle: IOCs, then the readable report.
+    """Steps 12-14 of the run cycle: IOCs, the readable report, then the
+    dashboard-facing result JSON.
 
-    Both are derived products. The artifacts in out_dir are the evidence, and
-    they are already on disk by the time this runs — so a parser that chokes on
-    a malformed EVTX must not be allowed to fail the detonation and make the
-    worker retry a sample that already ran. Each step is logged and stepped
-    over; re-running either by hand against out_dir is safe and idempotent.
+    All three are derived products. The artifacts in out_dir are the
+    evidence, and they are already on disk by the time this runs — so a
+    parser that chokes on a malformed EVTX must not be allowed to fail the
+    detonation and make the worker retry a sample that already ran. Each
+    step is logged and stepped over; re-running any of them by hand against
+    out_dir is safe and idempotent.
     """
     try:
         from extract_iocs import extract_all
@@ -606,6 +608,19 @@ def post_process(out_dir: Path):
         build_report(out_dir)
     except Exception:
         log.error('Report generation failed; artifacts are unaffected', exc_info=True)
+
+    # #53: every artifact-collection step above can succeed while the
+    # dashboard still shows nothing at all -- it only reads
+    # {ARTIFACT_DIR}/windows-{job}.json (flat, not the per-sha256 out_dir
+    # these steps write into), and nothing wrote one until this. Found live
+    # when a fully successful run produced report.html and every raw
+    # artifact but never appeared on /sandbox.
+    try:
+        from export_result import write_result
+        written = write_result(out_dir, ARTIFACT_DIR)
+        log.info(f'Dashboard result written: {written}')
+    except Exception:
+        log.error('Dashboard result JSON export failed; other artifacts are unaffected', exc_info=True)
 
 
 def observe_with_early_stop(requested_secs: int) -> float:
