@@ -22,10 +22,24 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf16"
 )
 
 const analysisReadCap = 16 << 20
+
+// hashPathMissTTL (#516) bounds how long payloadPathBySHA256 trusts a
+// "scanned every payloadDir, found nothing" result before paying for another
+// full content-hash scan. Without this, a hash that will never resolve --
+// deleted, pruned, or (as in the bug report) a sandbox smoke-test sample
+// that was never captured to begin with -- re-triggers the full scan (#364:
+// confirmed live as a 45s+ hang for one real payload) on every single page
+// view that references it: the sandbox report page, static analysis, the
+// workbench, every submission route. Short enough that a payload captured
+// moments after a failed lookup becomes visible again within one browsing
+// session, long enough that repeatedly reloading the same still-missing
+// page (the exact reported pattern) stays fast.
+const hashPathMissTTL = 5 * time.Minute
 
 type decodedArtifact struct {
 	Kind    string
@@ -403,10 +417,19 @@ func (s *store) payloadPath(name string) (string, error) {
 // clicking into the same result more than once -- are instant. A cache hit
 // is still verified with a cheap stat before being trusted, since the
 // underlying file can move or be pruned between requests.
+//
+// #516: a hash that will *never* resolve -- deleted, pruned, or never
+// captured in the first place (e.g. a sandbox job seeded from a smoke-test
+// sample rather than a real capture) -- has no successful resolution to
+// cache, so every request paid the full scan again with no cache to ever
+// break the cycle. hashPathMiss records "scanned, found nothing" for
+// hashPathMissTTL so repeated requests for the same still-missing hash are
+// cheap too, not just repeated requests for a found one.
 func (s *store) payloadPathBySHA256(want string) (string, error) {
 	if s != nil {
 		s.hashPathMu.Lock()
 		cached, ok := s.hashPathCache[want]
+		missedAt, missed := s.hashPathMiss[want]
 		s.hashPathMu.Unlock()
 		if ok {
 			if fi, err := os.Stat(cached); err == nil && fi.Mode().IsRegular() {
@@ -415,6 +438,9 @@ func (s *store) payloadPathBySHA256(want string) (string, error) {
 			s.hashPathMu.Lock()
 			delete(s.hashPathCache, want)
 			s.hashPathMu.Unlock()
+		}
+		if missed && time.Since(missedAt) < hashPathMissTTL {
+			return "", os.ErrNotExist
 		}
 	}
 	var found string
@@ -452,10 +478,19 @@ func (s *store) payloadPathBySHA256(want string) (string, error) {
 					s.hashPathCache = make(map[string]string)
 				}
 				s.hashPathCache[want] = found
+				delete(s.hashPathMiss, want)
 				s.hashPathMu.Unlock()
 			}
 			return found, nil
 		}
+	}
+	if s != nil {
+		s.hashPathMu.Lock()
+		if s.hashPathMiss == nil {
+			s.hashPathMiss = make(map[string]time.Time)
+		}
+		s.hashPathMiss[want] = time.Now()
+		s.hashPathMu.Unlock()
 	}
 	return "", os.ErrNotExist
 }
