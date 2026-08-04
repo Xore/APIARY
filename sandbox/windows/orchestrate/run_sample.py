@@ -70,6 +70,12 @@ GOLDEN_IMAGE    = Path(os.environ.get('GOLDEN_IMAGE',
 VM_DISK         = Path(os.environ.get('VM_DISK',
                         f'/var/dockge/sandbox/vms/{VM_DOMAIN}.qcow2'))
 OBS_SECS        = int(os.environ.get('OBSERVATION_SECS', '1800'))  # #297
+# Touch this file during a run's observation window to cut it short without
+# failing the job -- see observe_with_early_stop(). Fixed path rather than
+# per-job: only one detonation runs at a time (single VM, single worker), so
+# there is never more than one observation window active to target.
+STOP_EARLY_SENTINEL = Path(os.environ.get('STOP_EARLY_SENTINEL',
+                        '/var/lib/honeypot-windows-sandbox/stop-early'))
 ARTIFACT_DIR    = Path(os.environ.get('WINDOWS_SANDBOX_RESULTS_DIR', 'reports/windows-sandbox'))
 SAMPLE_SHARE    = f'\\\\{VM_HOST}\\Samples'
 LOGS_SHARE      = f'\\\\{VM_HOST}\\Logs'
@@ -583,6 +589,50 @@ def post_process(out_dir: Path):
         log.error('Report generation failed; artifacts are unaffected', exc_info=True)
 
 
+def observe_with_early_stop(requested_secs: int) -> float:
+    """Wait up to `requested_secs`, but return early -- gracefully, not by
+    raising -- if STOP_EARLY_SENTINEL appears during the wait.
+
+    A plain `time.sleep(OBS_SECS)` (the previous implementation) can only be
+    cut short by killing the process, which skips straight to detonate()'s
+    cleanup revert and marks the whole run failed: regshot_after(),
+    autoruns_after(), stop_procmon(), collect_artifacts(), and
+    post_process() never run, so there is no report, just a
+    .request.failed. That is fine for a genuine failure, wrong for
+    deliberately shortening a run's observation time (e.g. while tuning
+    OBSERVATION_SECS, or reacting to a sample that's clearly done
+    interesting things already) -- exactly the "adjust the dynamic
+    runtime" case this exists for.
+
+    Polls in short increments instead of one blocking call, checking for
+    the sentinel each time; on finding it, logs the shortfall, removes the
+    sentinel (so it doesn't also cut short the *next* run), and returns
+    control to detonate() at the exact point a full-duration sleep would
+    have -- the rest of the sequence proceeds completely normally.
+
+    Returns the number of seconds actually waited, for the caller to record
+    in metadata.json alongside the requested duration.
+    """
+    poll_interval = 2
+    elapsed = 0
+    while elapsed < requested_secs:
+        if STOP_EARLY_SENTINEL.exists():
+            log.info(
+                f'Observation cut short by {STOP_EARLY_SENTINEL} after '
+                f'{elapsed}s (requested {requested_secs}s) -- proceeding '
+                f'to collection as normal, not failing the run.'
+            )
+            try:
+                STOP_EARLY_SENTINEL.unlink()
+            except FileNotFoundError:
+                pass
+            return elapsed
+        step = min(poll_interval, requested_secs - elapsed)
+        time.sleep(step)
+        elapsed += step
+    return elapsed
+
+
 def detonate(sample_path: Path, results_dir: Path = None):
     if not sample_path.exists() or sample_path.name == '.gitkeep':
         return
@@ -612,7 +662,12 @@ def detonate(sample_path: Path, results_dir: Path = None):
 
         execute_sample(vm_path)
         log.info(f'Observing for {OBS_SECS} seconds...')
-        time.sleep(OBS_SECS)
+        actual_secs = observe_with_early_stop(OBS_SECS)
+        if actual_secs != OBS_SECS:
+            meta = json.loads((out / 'metadata.json').read_text())
+            meta['observation_secs_actual'] = actual_secs
+            meta['observation_cut_short'] = True
+            (out / 'metadata.json').write_text(json.dumps(meta, indent=2))
 
         capture_memory_dump(out)
         regshot_after()
