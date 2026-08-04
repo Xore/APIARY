@@ -122,7 +122,10 @@ func main() {
 	if err != nil || cooldown < 5*time.Minute {
 		cooldown = 6 * time.Hour
 	}
-	s.alerts = newAlertManager(getenv("ALERT_STATE_FILE", "/state/alerts.json"), cooldown)
+	// #494: no local-file fallback -- newAlertManager returns nil when s.es
+	// is nil (Elasticsearch not configured), and every observe() call site
+	// already treats a nil alertManager as "alerting disabled".
+	s.alerts = newAlertManager(s.es, cooldown)
 	s.intelligence = &intelligenceStore{path: getenv("INTELLIGENCE_STATE_FILE", "/state/intelligence.json")}
 	s.settings = newSettingsService(
 		getenv("DASHBOARD_CONFIG_FILE", "/state/dashboard-config.json"),
