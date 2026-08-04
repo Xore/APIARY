@@ -23,7 +23,7 @@
           <div class="project-card__badges">{{range .Sources}}<span class="badge badge--muted">{{.}}</span>{{end}}</div>
         </div>
         <p class="project-card__desc"><strong>{{.Kind}}</strong> &bull; {{.Platform}} &bull; {{.MIME}} &bull; {{.SizeH}}</p>
-        <div class="project-card__meta"><span>captured {{.Mtime}}</span></div>
+        <div class="project-card__meta"><span>captured <span{{if .MtimeUTC}} data-hp-utc="{{.MtimeUTC}}"{{end}}>{{.Mtime}}</span></span></div>
       </a>
       {{end}}
     </div>

@@ -113,6 +113,7 @@ type sessionPage struct {
 	pageMeta
 	Generated                                time.Time
 	ID, IP, Country, First, Last             string
+	FirstUTC, LastUTC                        string
 	Total                                    int
 	Sensors, Commands, Credentials, Payloads []kv
 	Techniques                               []attackTechnique
@@ -133,9 +134,9 @@ func (s *store) sessionData(id string) (sessionPage, bool) {
 		p.Events = append(p.Events, event)
 		p.Total++
 		if p.Last == "" {
-			p.Last, p.IP, p.Country = event.Time, event.SrcIP, event.Country
+			p.Last, p.LastUTC, p.IP, p.Country = event.Time, event.UTC, event.SrcIP, event.Country
 		}
-		p.First = event.Time
+		p.First, p.FirstUTC = event.Time, event.UTC
 		sensors[event.Sensor]++
 		if event.Command != "" {
 			commands[event.Command]++

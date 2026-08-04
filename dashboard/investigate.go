@@ -16,7 +16,9 @@ type commandRow struct {
 	Sources  string
 	Sessions int
 	First    string
+	FirstUTC string
 	Last     string
+	LastUTC  string
 	Link     string
 }
 
@@ -61,7 +63,8 @@ func (s *store) commandsData(r *http.Request) commandsPage {
 	for _, a := range groups {
 		a.row.Sources = sortedSet(a.sources, 6)
 		a.row.Sessions = len(a.sessions)
-		a.row.First, a.row.Last = a.first.Format("2006-01-02 15:04"), a.last.Format("2006-01-02 15:04")
+		a.row.First, a.row.FirstUTC = a.first.Format("2006-01-02 15:04"), utcOrEmpty(a.first)
+		a.row.Last, a.row.LastUTC = a.last.Format("2006-01-02 15:04"), utcOrEmpty(a.last)
 		a.row.Link = eventsURL(url.Values{"sensor": {a.row.Sensor}, "cmd": {a.row.Command}})
 		rows = append(rows, a.row)
 	}

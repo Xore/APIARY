@@ -159,7 +159,9 @@ type attackerPage struct {
 	Org          string
 	Provider     string
 	First        string
+	FirstUTC     string
 	Last         string
+	LastUTC      string
 	Total        int
 	Sessions     int
 	PayloadCount int
@@ -197,10 +199,10 @@ func (s *store) attackerData(ip string) (attackerPage, bool) {
 		p.Events = append(p.Events, event)
 		p.Total++
 		if p.Last == "" {
-			p.Last, p.Country, p.ASN, p.Org = event.Time, event.Country, event.ASN, event.Org
+			p.Last, p.LastUTC, p.Country, p.ASN, p.Org = event.Time, event.UTC, event.Country, event.ASN, event.Org
 			p.Provider = firstNonEmpty(event.Intel, event.Provider)
 		}
-		p.First = event.Time
+		p.First, p.FirstUTC = event.Time, event.UTC
 		sensors[event.Sensor]++
 		if event.Session != "" {
 			sessions[event.Session] = true
@@ -263,7 +265,9 @@ type ipRow struct {
 	Sensors  string
 	Sessions int
 	First    string
+	FirstUTC string
 	Last     string
+	LastUTC  string
 }
 
 type ipsPage struct {
@@ -455,11 +459,12 @@ func (s *store) ipsData(r *http.Request) ipsPage {
 
 func (s *store) buildIPsData(f filter) ipsPage {
 	type agg struct {
-		count, logins int
-		country       string
-		sensors       map[string]bool
-		sessions      map[string]bool
-		first, last   string
+		count, logins     int
+		country           string
+		sensors           map[string]bool
+		sessions          map[string]bool
+		first, last       string
+		firstUTC, lastUTC string
 	}
 	m := map[string]*agg{}
 	// events are newest-first: the first time we see an IP is its most recent
@@ -486,9 +491,9 @@ func (s *store) buildIPsData(f filter) ipsPage {
 		}
 		if e.Time != "" {
 			if a.last == "" {
-				a.last = e.Time
+				a.last, a.lastUTC = e.Time, e.UTC
 			}
-			a.first = e.Time
+			a.first, a.firstUTC = e.Time, e.UTC
 		}
 	}
 	rows := make([]ipRow, 0, len(m))
@@ -501,7 +506,7 @@ func (s *store) buildIPsData(f filter) ipsPage {
 		rows = append(rows, ipRow{
 			IP: ip, Country: a.country, Count: a.count, Logins: a.logins,
 			Sensors: strings.Join(sensors, " "), Sessions: len(a.sessions),
-			First: a.first, Last: a.last,
+			First: a.first, FirstUTC: a.firstUTC, Last: a.last, LastUTC: a.lastUTC,
 		})
 	}
 	sort.Slice(rows, func(i, j int) bool {

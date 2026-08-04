@@ -89,7 +89,7 @@
   <td class="v"><a href="{{.Link}}" title="show campaign sensor activity">{{.Sensors}}</a></td><td class="v"><a href="{{.Link}}" title="show campaign targeted ports">{{.Ports}}</a></td>
   <td class="n"><a href="{{.Link}}" title="show campaign credentials">{{.Creds}}</a></td><td class="n"><a href="{{.Link}}" title="show campaign payloads">{{.Payloads}}</a></td><td class="n"><a href="{{.Link}}" title="show campaign alerts">{{.Alerts}}</a></td>
   <td class="v"><a href="{{.Link}}" title="show campaign events and ASN details">{{.ASNs}}</a></td><td class="v"><a href="{{.Link}}" title="show campaign events and provider details">{{.Providers}}</a></td><td class="n"><a href="{{.Link}}" title="show campaign events and fingerprints">{{.Fingerprints}}</a></td><td class="v">{{.Sequence}}</td>
-  <td class="v" title="why these events were grouped">{{.Explanation}}</td><td>{{.First}}</td><td>{{.Last}}</td>
+  <td class="v" title="why these events were grouped">{{.Explanation}}</td><td{{if .FirstUTC}} data-hp-utc="{{.FirstUTC}}"{{end}}>{{.First}}</td><td{{if .LastUTC}} data-hp-utc="{{.LastUTC}}"{{end}}>{{.Last}}</td>
   <td><a class="lnk" href="/investigate/cidr/{{.CIDR | urlquery}}" title="#354: everything Elasticsearch has correlated for this network, including portbridge tunnel connections">ES &rarr;</a></td>
 </tr>
 {{end}}
@@ -110,7 +110,7 @@
   <td class="n"><a href="{{.Link}}" title="show campaign events">{{.Events}}</a></td>
   <td class="n"><a href="{{.Link}}" title="show campaign source addresses">{{.UniqueIPs}}</a></td>
   <td class="v"><a href="{{.Link}}" title="show campaign sensor activity">{{.Sensors}}</a></td>
-  <td>{{.Last}}</td>
+  <td{{if .LastUTC}} data-hp-utc="{{.LastUTC}}"{{end}}>{{.Last}}</td>
 </tr>
 {{end}}
 {{end}}
@@ -244,7 +244,7 @@
         <div class="filters" id="commands-filters"><a class="chip" href="/">&larr; dashboard</a><a class="chip" href="/export/commands.csv">export CSV &darr;</a><span class="chip">{{len .Rows}} unique commands</span>{{template "filterbar" .}}</div>
         <div class="card wide" id="commands-table">{{if .Rows}}<table class="recent data-table"><thead><tr><th>seen</th><th>sensor</th><th>command</th><th>sources</th><th>sessions</th><th>first</th><th>last</th><th>chain</th></tr></thead><tbody>
         {{range .Rows}}<tr><td class="n">{{.Count}}</td><td><span class="badge b-{{.Sensor}}">{{.Sensor}}</span></td>
-        <td class="v"><code>{{.Command}}</code> <button class="copy" data-copy="{{.Command}}">copy</button></td><td class="v">{{.Sources}}</td><td class="n">{{.Sessions}}</td><td>{{.First}}</td><td>{{.Last}}</td><td><a class="lnk" href="{{.Link}}">events &rarr;</a></td></tr>{{end}}
+        <td class="v"><code>{{.Command}}</code> <button class="copy" data-copy="{{.Command}}">copy</button></td><td class="v">{{.Sources}}</td><td class="n">{{.Sessions}}</td><td{{if .FirstUTC}} data-hp-utc="{{.FirstUTC}}"{{end}}>{{.First}}</td><td{{if .LastUTC}} data-hp-utc="{{.LastUTC}}"{{end}}>{{.Last}}</td><td><a class="lnk" href="{{.Link}}">events &rarr;</a></td></tr>{{end}}
         </tbody></table>{{else}}<p class="empty">no commands captured yet</p>{{end}}</div>
         <footer id="commands-footer">xore//honeypot &bull; static investigation view</footer>
       </div>
