@@ -44,6 +44,7 @@ Env vars (shared with run_sample.py):
 """
 
 import os
+import re
 import sys
 import argparse
 import logging
@@ -155,19 +156,37 @@ def run_tool(remote_name: str, log_name: str, args: str = '', timeout: int = 300
     sleep-skipping actually accelerates every one of those APIs, not just
     the obvious one). The tool's own --help gives the fix: pass a shorter
     explicit `--sleep N`, matching its own documented example usage.
+
+    #368 (2026-08-04 re-verification): pafish's -ArgumentList was always
+    built as `-ArgumentList "{args}"` even when args=='' (pafish's own
+    default call site never passes any), which PowerShell's Start-Process
+    rejects outright -- "Cannot validate argument on parameter
+    'ArgumentList'. The argument is null or empty." $p was never assigned,
+    so the trailing `$p.ExitCode` silently evaluated against $null and
+    returned nothing. render_section() then treated that empty string as
+    "code not in ('0','') is False" i.e. success, so a report that actually
+    contained zero pafish output (Start-Process never ran, no log file ever
+    created) rendered as a clean, contentless "no tells found" section
+    instead of a failure -- every prior #368 run reporting pafish results
+    was reporting nothing at all, not a real check. Fixed by only appending
+    -ArgumentList when args is non-empty, and by treating an empty exit
+    code as a failure rather than success (a genuinely-successful
+    Start-Process -PassThru always yields a real $p.ExitCode, even 0).
     """
     log.info(f'Running C:\\Samples\\{remote_name} {args} ...')
     stdin_path = f'C:\\Logs\\{log_name}.stdin'
+    arg_clause = f'-ArgumentList "{args}" ' if args else ''
     out = winrm_run(
         f'"`n" | Out-File -Encoding ascii -NoNewline {stdin_path}; '
-        f'$p = Start-Process -FilePath C:\\Samples\\{remote_name} -ArgumentList "{args}" -PassThru -Wait '
+        f'$p = Start-Process -FilePath C:\\Samples\\{remote_name} {arg_clause}-PassThru -Wait '
         f'-WindowStyle Hidden -RedirectStandardInput {stdin_path} '
         f'-RedirectStandardOutput C:\\Logs\\{log_name} '
         f'-RedirectStandardError C:\\Logs\\{log_name}.stderr; '
-        f'$p.ExitCode',
+        f'"EXITCODE=$($p.ExitCode)"',
         timeout=timeout,
     )
-    exit_code = out['stdout'].strip()
+    m = re.search(r'EXITCODE=(-?\d*)', out['stdout'])
+    exit_code = m.group(1) if m and m.group(1) != '' else 'NONE'
     body = winrm_run(
         f'Get-Content C:\\Logs\\{log_name} -Raw; "---STDERR---"; '
         f'Get-Content C:\\Logs\\{log_name}.stderr -Raw'
