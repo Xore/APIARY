@@ -144,7 +144,6 @@ services:
       - KIBANA_PUBLIC_URL=${KIBANA_PUBLIC_URL:-}
       - EVEBOX_PUBLIC_URL=${EVEBOX_PUBLIC_URL:-}
       - ARKIME_PUBLIC_URL=${ARKIME_PUBLIC_URL:-}
-      - ALERT_STATE_FILE=/state/alerts.json
       - ALERT_COOLDOWN=${HONEYPOT_ALERT_COOLDOWN:-6h}
       - PAYLOAD_DIRS=/dionaea-lib/binaries,/cowrie-downloads
       - SCRIPT_PAYLOAD_DIR=/state/script-payloads

@@ -331,6 +331,42 @@ JSON
 )" >/dev/null
 done
 
+# #494: dashboard-owned operational alert-rule state (campaign detection,
+# stale sensor feeds, activity spikes, ES pipeline health, OT command
+# detection, YARA hits, sandbox failures -- ack/cooldown bookkeeping, not
+# sensor telemetry). Written directly by the dashboard itself via
+# doc-level PUT (dashboard/elastic.go's docGet/docIndex), not through the
+# Python importer's flattened-namespace pattern the analysis-results
+# indices above use -- the whole small, low-cardinality record is mapped at
+# the top level. No ILM policy: this is bookkeeping an operator's
+# acknowledgment should not silently expire out from under them, and the
+# record count is bounded by how many distinct alert keys the stack
+# produces (dozens, not millions), not by event volume.
+curl -fsS -X PUT "$es_url/_index_template/dashboard-alert-state" \
+  -H 'Content-Type: application/json' \
+  --data-binary '{
+  "index_patterns": ["dashboard-alert-state-v1"],
+  "priority": 460,
+  "template": {
+    "settings": {
+      "index.number_of_replicas": 0,
+      "index.refresh_interval": "1s"
+    },
+    "mappings": {
+      "properties": {
+        "Key": { "type": "keyword" },
+        "Message": { "type": "text" },
+        "Link": { "type": "keyword" },
+        "FirstSeen": { "type": "date" },
+        "LastSeen": { "type": "date" },
+        "LastNotified": { "type": "date" },
+        "Count": { "type": "integer" },
+        "Acknowledged": { "type": "boolean" }
+      }
+    }
+  }
+}' >/dev/null
+
 curl -fsS -X PUT "$es_url/_index_template/honeypot-dead-letter" \
   -H 'Content-Type: application/json' \
   --data-binary '{"index_patterns":["dead-letter-honeypot*"],"priority":450,"template":{"settings":{"index.lifecycle.name":"dead-letter-60d","index.number_of_replicas":0}}}' >/dev/null

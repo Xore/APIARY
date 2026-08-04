@@ -124,6 +124,142 @@ func (c *esClient) searchBody(path string, body []byte) ([]byte, error) {
 	return b, nil
 }
 
+// doRequest is the one place in this file that returns a raw status code
+// alongside the body -- every other helper here treats a non-2xx response as
+// a plain error, which is right for read-only queries but wrong for the
+// dashboard-owned write paths below (docGet/docIndex): a 404 on docGet is
+// "no record yet", not a failure, and a 409 on docIndex is a concurrent
+// writer to retry against, not a failure either. Callers that only need
+// "did this succeed" can still treat status/100 != 2 as an error themselves.
+func (c *esClient) doRequest(method, path string, body []byte) (status int, respBody []byte, err error) {
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequest(method, c.base+path, reader)
+	if err != nil {
+		return 0, nil, err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	r, err := c.http.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer r.Body.Close()
+	b, err := io.ReadAll(io.LimitReader(r.Body, 16<<20))
+	if err != nil {
+		return 0, nil, err
+	}
+	return r.StatusCode, b, nil
+}
+
+// esDocHit is one search hit carrying the concurrency-control fields
+// (SeqNo/PrimaryTerm) docIndex needs for a compare-and-swap update, alongside
+// the document ID and its raw _source.
+type esDocHit struct {
+	ID          string
+	Source      json.RawMessage
+	SeqNo       int64
+	PrimaryTerm int64
+}
+
+// docGet fetches one document by ID for a dashboard-owned index (state this
+// process itself writes, e.g. dashboard-alert-state-v1 -- not the sensor
+// telemetry indices every other method in this file only ever reads).
+// found=false, err=nil on a 404: "no record yet" is the expected first call
+// for a new key, not a failure.
+func (c *esClient) docGet(index, id string) (hit esDocHit, found bool, err error) {
+	status, body, err := c.doRequest(http.MethodGet, "/"+index+"/_doc/"+url.PathEscape(id), nil)
+	if err != nil {
+		return esDocHit{}, false, err
+	}
+	if status == http.StatusNotFound {
+		return esDocHit{}, false, nil
+	}
+	if status/100 != 2 {
+		return esDocHit{}, false, fmt.Errorf("Elasticsearch GET %s: status %d: %s", index, status, strings.TrimSpace(string(body)))
+	}
+	var v struct {
+		ID          string          `json:"_id"`
+		SeqNo       int64           `json:"_seq_no"`
+		PrimaryTerm int64           `json:"_primary_term"`
+		Source      json.RawMessage `json:"_source"`
+	}
+	if err := json.Unmarshal(body, &v); err != nil {
+		return esDocHit{}, false, err
+	}
+	return esDocHit{ID: v.ID, Source: v.Source, SeqNo: v.SeqNo, PrimaryTerm: v.PrimaryTerm}, true, nil
+}
+
+// errESConflict is returned by docIndex when the compare-and-swap lost a
+// race to a concurrent writer (Elasticsearch's 409 version_conflict_engine_
+// exception) -- the caller's own retry loop re-fetches and reapplies rather
+// than treating this as a hard failure.
+var errESConflict = fmt.Errorf("elasticsearch: concurrent write conflict")
+
+// docIndex writes doc as document id in a dashboard-owned index.
+// create=true uses Elasticsearch's op_type=create (fails if the ID already
+// exists -- for the first write of a brand new key, where there is no prior
+// seq_no/primary_term to condition on). create=false conditions the write on
+// seqNo/primaryTerm (from a prior docGet), returning errESConflict if
+// another writer updated the document in between -- the same optimistic-
+// concurrency shape Elasticsearch's own docs recommend for read-modify-write
+// without a distributed lock.
+func (c *esClient) docIndex(index, id string, doc []byte, create bool, seqNo, primaryTerm int64) error {
+	path := "/" + index + "/_doc/" + url.PathEscape(id)
+	if create {
+		path += "?op_type=create"
+	} else {
+		path += fmt.Sprintf("?if_seq_no=%d&if_primary_term=%d", seqNo, primaryTerm)
+	}
+	status, body, err := c.doRequest(http.MethodPut, path, doc)
+	if err != nil {
+		return err
+	}
+	if status == http.StatusConflict {
+		return errESConflict
+	}
+	if status/100 != 2 {
+		return fmt.Errorf("Elasticsearch PUT %s: status %d: %s", index, status, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+// docSearchAll returns every document in a dashboard-owned index (capped at
+// Elasticsearch's default index.max_result_window, same ceiling and
+// reasoning as searchNamespace: this is dashboard-generated bookkeeping, not
+// the high-volume event stream), each carrying the concurrency-control
+// fields a caller needs to condition its own docIndex update on.
+func (c *esClient) docSearchAll(index string, size int) ([]esDocHit, error) {
+	if size <= 0 || size > 10000 {
+		size = 10000
+	}
+	b, err := c.request(fmt.Sprintf("/%s/_search?size=%d", index, size))
+	if err != nil {
+		return nil, err
+	}
+	var v struct {
+		Hits struct {
+			Hits []struct {
+				ID          string          `json:"_id"`
+				SeqNo       int64           `json:"_seq_no"`
+				PrimaryTerm int64           `json:"_primary_term"`
+				Source      json.RawMessage `json:"_source"`
+			} `json:"hits"`
+		} `json:"hits"`
+	}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return nil, err
+	}
+	out := make([]esDocHit, 0, len(v.Hits.Hits))
+	for _, h := range v.Hits.Hits {
+		out = append(out, esDocHit{ID: h.ID, Source: h.Source, SeqNo: h.SeqNo, PrimaryTerm: h.PrimaryTerm})
+	}
+	return out, nil
+}
+
 func (c *esClient) count(index, query string) (int64, error) {
 	path := "/" + index + "/_count"
 	if query != "" {
