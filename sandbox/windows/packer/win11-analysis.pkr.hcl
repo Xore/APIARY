@@ -419,6 +419,21 @@ build {
     timeout           = "10m"
   }
 
+  # #490: in-guest detonation orchestrator. Registers a hidden AtLogOn
+  # scheduled task that, if C:\Analysis\job.json has been staged (offline,
+  # via virt-copy-in, before this domain was ever started -- see
+  # run_sample.py's detonate_inguest()), runs the entire detonation sequence
+  # locally and Stop-Computer's when done -- no live WinRM channel touches
+  # the guest while a sample is actually running. On any other boot (no job
+  # staged) this is a no-op. WinRM itself is untouched by this script and
+  # stays available for build/debug tooling exactly as before.
+  provisioner "powershell" {
+    script            = "scripts/11-detonation-orchestrator.ps1"
+    elevated_user     = var.winrm_user
+    elevated_password = var.winrm_pass
+    timeout           = "10m"
+  }
+
   # Step 7: final cleanup + sysprep-lite (do NOT full sysprep — breaks some tools)
   #
   # This step is best-effort housekeeping only -- nothing here should ever be
