@@ -5,8 +5,8 @@
   <td class="n"><a href="/events?ip={{.IP | urlquery}}&amp;type=login" title="login attempts from {{.IP}}">{{.Logins}}</a></td>
   <td class="n"><a href="/events?ip={{.IP | urlquery}}" title="attack chain and sessions for {{.IP}}">{{.Sessions}}</a></td>
   <td class="v"><a href="/events?ip={{.IP | urlquery}}" title="sensor activity for {{.IP}}">{{.Sensors}}</a></td>
-  <td>{{.First}}</td>
-  <td>{{.Last}}</td>
+  <td{{if .FirstUTC}} data-hp-utc="{{.FirstUTC}}"{{end}}>{{.First}}</td>
+  <td{{if .LastUTC}} data-hp-utc="{{.LastUTC}}"{{end}}>{{.Last}}</td>
 </tr>{{end}}
 {{define "iprows"}}{{range .Rows}}{{template "iprow" .}}{{end}}{{end}}
 
@@ -83,7 +83,7 @@
             <p class="subtitle">{{.Country}} {{if .ASN}}&bull; AS{{.ASN}}{{end}} {{.Org}} {{if .Provider}}&bull; {{.Provider}}{{end}}</p>
           </div>
           <div class="live-panel">
-            <span class="gen">{{.First}} — {{.Last}}</span>
+            <span class="gen"><span{{if .FirstUTC}} data-hp-utc="{{.FirstUTC}}"{{end}}>{{.First}}</span> — <span{{if .LastUTC}} data-hp-utc="{{.LastUTC}}"{{end}}>{{.Last}}</span></span>
           </div>
         </header>
 

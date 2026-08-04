@@ -315,6 +315,12 @@ func TestMLAnomaliesPageRendersFromCache(t *testing.T) {
 			t.Fatalf("rendered page is missing %q", want)
 		}
 	}
+	// #512: the timestamp cell must carry the same data-hp-utc twin
+	// events.html/alerts.html use, so hp-app.js's applyTimeDisplay() applies
+	// the viewer's timezone/clock-format preference here too.
+	if !strings.Contains(html, `data-hp-utc="2026-08-01T10:00:00Z"`) {
+		t.Fatal("ml-anomalies timestamp cell is missing its data-hp-utc twin")
+	}
 
 	disabled := (&store{}).mlAnomaliesData(httptest.NewRequest("GET", "/ml-anomalies", nil))
 	out.Reset()

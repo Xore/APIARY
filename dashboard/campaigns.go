@@ -28,7 +28,9 @@ type campaignRow struct {
 	Fingerprints int
 	Sequence     string
 	First        string
+	FirstUTC     string
 	Last         string
+	LastUTC      string
 	Link         string
 	Explanation  string
 }
@@ -249,7 +251,8 @@ func correlateCampaigns(evs []storedEvent, since time.Time) []campaignRow {
 			Creds: len(a.creds), Payloads: len(a.payloads), Alerts: a.alerts,
 			ASNs: sortedSet(a.asns, 4), Providers: sortedSet(a.providers, 4), Fingerprints: len(a.fingerprints),
 			Sequence: strings.Join(a.sequence, " ← "),
-			First:    a.first.Format("2006-01-02 15:04"), Last: a.last.Format("2006-01-02 15:04"),
+			First:    a.first.Format("2006-01-02 15:04"), FirstUTC: utcOrEmpty(a.first),
+			Last: a.last.Format("2006-01-02 15:04"), LastUTC: utcOrEmpty(a.last),
 			Link:        eventsURL(url.Values{"cidr": {cidr}, "since": {"168h"}}),
 			Explanation: strings.Join(why, "; "),
 		})

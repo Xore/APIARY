@@ -17,7 +17,7 @@
           <div>
             <div class="label-section">Session replay</div>
             <h1>{{.ID}}</h1>
-            <p class="subtitle">{{.IP}} {{if .Country}}&bull; {{.Country}}{{end}} &bull; {{.First}} &mdash; {{.Last}}</p>
+            <p class="subtitle">{{.IP}} {{if .Country}}&bull; {{.Country}}{{end}} &bull; <span{{if .FirstUTC}} data-hp-utc="{{.FirstUTC}}"{{end}}>{{.First}}</span> &mdash; <span{{if .LastUTC}} data-hp-utc="{{.LastUTC}}"{{end}}>{{.Last}}</span></p>
           </div>
           <div class="live-panel">
             <span class="gen">{{.Total}} normalized events</span>

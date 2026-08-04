@@ -20,6 +20,7 @@ type capturedFile struct {
 	Size         int64
 	SizeH        string
 	Mtime        string
+	MtimeUTC     string
 	MIME         string
 	Kind         string
 	KindCode     string
@@ -423,7 +424,7 @@ func (s *store) scanPayloads() payloadsPage {
 			if existing := files[hash]; existing != nil {
 				existing.Copies++
 				if modified := fi.ModTime().Format("2006-01-02 15:04"); modified > existing.Mtime {
-					existing.Mtime = modified
+					existing.Mtime, existing.MtimeUTC = modified, utcOrEmpty(fi.ModTime())
 				}
 				return nil
 			}
@@ -445,7 +446,7 @@ func (s *store) scanPayloads() payloadsPage {
 			}
 			files[hash] = &capturedFile{
 				Hash: hash, Size: fi.Size(), SizeH: humanBytes(fi.Size()),
-				Mtime: fi.ModTime().Format("2006-01-02 15:04"), MIME: mime,
+				Mtime: fi.ModTime().Format("2006-01-02 15:04"), MtimeUTC: utcOrEmpty(fi.ModTime()), MIME: mime,
 				Kind: classification.Label, KindCode: classification.Code,
 				Platform: classification.Platform, AnalysisPath: classification.AnalysisPath,
 				Dynamic: classification.Dynamic, Copies: 1,

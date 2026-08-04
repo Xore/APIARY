@@ -17,7 +17,7 @@
   </div>
   <p class="project-card__desc"><strong>{{.Kind}}</strong> &bull; {{.Platform}} &bull; {{.MIME}} &bull; {{.SizeH}}{{if gt .Copies 1}} &bull; {{.Copies}} copies{{end}} &bull; <span title="{{.AnalysisPath}}">{{if .Dynamic}}dynamic route ready{{else}}static-only route{{end}}</span></p>
   <div class="project-card__meta">
-    <span>{{.Mtime}}</span>
+    <span{{if .MtimeUTC}} data-hp-utc="{{.MtimeUTC}}"{{end}}>{{.Mtime}}</span>
     {{if .OriginLabel}}{{if .OriginLink}}<a class="lnk" href="{{.OriginLink}}" title="Open the session this payload was captured in">{{.OriginLabel}} &rarr;</a>{{else}}<span title="No session recorded for this capture">{{.OriginLabel}}</span>{{end}}{{else}}<span class="tw:text-muted">unknown origin</span>{{end}}
     <details class="action-menu">
       <summary aria-label="Payload actions" title="Payload actions">&#8942;</summary>
