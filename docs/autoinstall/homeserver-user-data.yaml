@@ -101,13 +101,23 @@ autoinstall:
         path: /
 
       # --- Disk 2: /var — whole-disk xfs, no partition table ---
-      # On the live box this is a ~1.7T AVAGO MR9440-8i RAID LUN. It is
+      # On the live box this is a ~1.92T AVAGO MR9440-8i RAID LUN. It is
       # the ONLY disk with no partition table (curtin formatted the raw
       # device directly) — reproduce that, don't add a GPT here.
+      #
+      # Matched by serial, not size: verified live against the actual box
+      # (lsblk -d -b) that sdb and sdc -- /var and /mnt-1 below -- are the
+      # same AVAGO MR9440-8i model and report the identical ~1.92T size
+      # (1919816826880 vs 1919313510400 bytes, indistinguishable by any
+      # size range), so a size-range match cannot tell them apart -- both
+      # would match the same rule, which is exactly the "will happily wipe
+      # the wrong disk" failure mode this file's own header warns about.
+      # Serial is unique per LUN (confirmed via `lsblk -o NAME,SERIAL` on
+      # the live box) and disambiguates correctly.
       - id: disk-var
         type: disk
         match:
-          size: "1700G-1750G"   # CHANGE ME: match your actual LUN size
+          serial: "00190cae35537ce231c03e9410b00506"   # CHANGE ME: your /var LUN's serial (lsblk -o NAME,SERIAL)
         wipe: superblock-recursive
         preserve: false
         grub_device: false
@@ -123,11 +133,13 @@ autoinstall:
         device: fmt-var
         path: /var
 
-      # --- Disk 3: /mnt-1 — GPT, single xfs partition (~1.7T) ---
+      # --- Disk 3: /mnt-1 — GPT, single xfs partition (~1.92T) ---
+      # Matched by serial for the same reason as disk-var above -- this LUN
+      # is size-identical to it, only the serial tells them apart.
       - id: disk-mnt1
         type: disk
         match:
-          size: "1900G-1950G"   # CHANGE ME: match your actual LUN size
+          serial: "00c2d5a75e6e7ce231c03e9410b00506"   # CHANGE ME: your /mnt-1 LUN's serial (lsblk -o NAME,SERIAL)
         ptable: gpt
         wipe: superblock-recursive
         preserve: false
