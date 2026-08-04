@@ -196,7 +196,7 @@ func TestPayloadsPageRendersFilterBarAndCarriesFilterIntoRowsURL(t *testing.T) {
 	hash := strings.Repeat("1", 64)
 	writeTestPayload(t, dir, hash, time.Now())
 
-	s := &store{payloadDirs: []string{dir}}
+	s := &store{payloadDirs: []string{dir}, es: newESClient("http://127.0.0.1:1", "")}
 	s.events = []storedEvent{{Shasum: hash, Sensor: "cowrie", when: time.Now()}}
 	s.payloadCache = s.scanPayloads()
 	s.payloadCacheAt = time.Now()

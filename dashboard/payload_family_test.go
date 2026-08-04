@@ -162,7 +162,7 @@ func TestPayloadsPageRendersFamilyBadge(t *testing.T) {
 	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", resultsDir)
 	writeGitHubAnalysisResult(t, resultsDir, hash, map[string]any{"exit_status": "ok", "family": "Mirai"})
 
-	s := &store{payloadDirs: []string{payloadDir}}
+	s := &store{payloadDirs: []string{payloadDir}, es: newESClient("http://127.0.0.1:1", "")}
 	s.payloadCache = s.scanPayloads()
 	s.payloadCacheAt = time.Now()
 

@@ -343,6 +343,9 @@ func TestWorkbenchMissingPayloadAndPathTraversal(t *testing.T) {
 
 func TestWorkbenchIndexProvidesPayloadSelection(t *testing.T) {
 	s, _ := newWorkbenchFixture(t, []byte("payload"))
+	// #483: payloadsData's Enabled flag now also requires a configured ES
+	// client; unreachable is fine since payloadCacheAt is seeded fresh here.
+	s.es = newESClient("http://127.0.0.1:1", "")
 	s.payloadCache = s.scanPayloads()
 	s.payloadCacheAt = time.Now()
 	tmpl := template.Must(template.New("t").Funcs(templateFuncs(s, "")).Parse(pageTemplate))
