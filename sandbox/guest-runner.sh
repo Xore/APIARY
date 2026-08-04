@@ -50,8 +50,13 @@ printf '%s\n' "$analysis_path" >"$result/analysis-path.txt"
 
 # Baseline static collection applies to every type, not only PE files.
 chmod 0400 "$sample"
-timeout 30s strings -a -n 5 "$sample" 2>/dev/null | head -n 4000 >"$result/strings-ascii.txt" || true
-timeout 30s strings -a -e l -n 5 "$sample" 2>/dev/null | head -n 4000 >"$result/strings-utf16le.txt" || true
+# #530: honeypot-clean-strings (guest-clean-strings.py) filters out
+# punctuation-only fragments GNU `strings -a` lets through -- see its own
+# header comment. -n 4 matches dashboard/payload_analysis.go's own minLen so
+# the two independently-run extractors stay in sync (was -n 5 here, -n 4
+# there).
+timeout 30s strings -a -n 4 "$sample" 2>/dev/null | honeypot-clean-strings | head -n 4000 >"$result/strings-ascii.txt" || true
+timeout 30s strings -a -e l -n 4 "$sample" 2>/dev/null | honeypot-clean-strings | head -n 4000 >"$result/strings-utf16le.txt" || true
 timeout 30s exiftool "$sample" >"$result/exiftool.txt" 2>&1 || true
 
 windows_mode=$(cat /etc/honeypot-sandbox-windows-mode 2>/dev/null || printf static)
