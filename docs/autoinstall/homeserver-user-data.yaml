@@ -1,18 +1,19 @@
 #cloud-config
-# Ubuntu autoinstall config reproducing the honeypot homeserver's disk
-# layout. See docs/HOMESERVER-DISK-LAYOUT.md for the full explanation.
+# Ubuntu autoinstall config for the honeypot homeserver. See
+# docs/HOMESERVER-DISK-LAYOUT.md for the disk layout this reproduces.
 #
 # This is a TEMPLATE, not a secret and not ready to run unattended as-is:
 #   - Fields marked "# CHANGE ME" are specific to the live `supermicro`
 #     box and must be edited for any other machine.
-#   - The `match` blocks under storage select disks by size, not by
-#     /dev/sdX name (device letters are not stable). Verify against
-#     `lsblk -d -o NAME,SIZE,TRAN` on the target hardware first — an
-#     autoinstall run with a wrong disk match will happily wipe the wrong
-#     disk.
+#   - Storage is deliberately NOT automated -- `interactive-sections:
+#     [storage]` below makes the installer prompt for manual partitioning
+#     instead. Two automated disk-match attempts (by size range, then by
+#     serial) both failed live against the real box's two identically-
+#     sized/modeled RAID LUNs -- see the comment at interactive-sections
+#     for what happened and what the by-hand layout should reproduce.
 #   - No RAID controller (AVAGO/LSI MR9440-8i) configuration is included.
 #     The controller's own LUNs must already exist and be presented to the
-#     OS as block devices before this file's storage section can apply.
+#     OS as block devices before manual partitioning can proceed.
 #   - Contains no credentials. SSH access is authorized-key only; set
 #     `ssh.authorized-keys` below before use.
 
@@ -52,152 +53,22 @@ autoinstall:
         dhcp4: true
         optional: true
 
-  storage:
-    version: 1
-    config:
-      # --- Disk 1: NVMe boot/OS disk (~238G on the live box) ---
-      - id: disk-os
-        type: disk
-        match:
-          size: smallest   # NVMe is the smallest of the four disks here
-        ptable: gpt
-        wipe: superblock-recursive
-        preserve: false
-        grub_device: true
-
-      - id: part-os-efi
-        type: partition
-        device: disk-os
-        size: 1127M
-        flag: boot
-        preserve: false
-
-      - id: fmt-os-efi
-        type: format
-        volume: part-os-efi
-        fstype: fat32
-        preserve: false
-
-      - id: part-os-root
-        type: partition
-        device: disk-os
-        size: -1   # remaining space
-        preserve: false
-
-      - id: fmt-os-root
-        type: format
-        volume: part-os-root
-        fstype: ext4
-        preserve: false
-
-      - id: mount-efi
-        type: mount
-        device: fmt-os-efi
-        path: /boot/efi
-
-      - id: mount-root
-        type: mount
-        device: fmt-os-root
-        path: /
-
-      # --- Disk 2: /var — whole-disk xfs, no partition table ---
-      # On the live box this is a ~1.92T AVAGO MR9440-8i RAID LUN. It is
-      # the ONLY disk with no partition table (curtin formatted the raw
-      # device directly) — reproduce that, don't add a GPT here.
-      #
-      # Matched by WWN, not size or serial: verified live against the
-      # actual box (lsblk -d -b) that sdb and sdc -- /var and /mnt-1 below
-      # -- are the same AVAGO MR9440-8i model and report the identical
-      # ~1.92T size (1919816826880 vs 1919313510400 bytes, indistinguishable
-      # by any size range), so a size-range match cannot tell them apart --
-      # both would match the same rule, which is exactly the "will happily
-      # wipe the wrong disk" failure mode this file's own header warns
-      # about. serial: was tried first and FAILED live in the actual
-      # installer environment ("disk 00190cae matched no disk") --
-      # curtin/subiquity's udev-derived serial view can differ from what
-      # `lsblk -o SERIAL` shows on the already-installed OS, especially for
-      # a RAID controller-presented LUN. WWN is the standard SCSI/SAS
-      # identifier and is not subject to that mismatch.
-      - id: disk-var
-        type: disk
-        match:
-          wwn: "0x600605b010943ec031e27c5335ae0c19"   # CHANGE ME: your /var LUN's WWN (lsblk -o NAME,WWN)
-        wipe: superblock-recursive
-        preserve: false
-        grub_device: false
-
-      - id: fmt-var
-        type: format
-        volume: disk-var
-        fstype: xfs
-        preserve: false
-
-      - id: mount-var
-        type: mount
-        device: fmt-var
-        path: /var
-
-      # --- Disk 3: /mnt-1 — GPT, single xfs partition (~1.92T) ---
-      # Matched by WWN for the same reason as disk-var above -- this LUN
-      # is size-identical to it, only the WWN reliably tells them apart.
-      - id: disk-mnt1
-        type: disk
-        match:
-          wwn: "0x600605b010943ec031e27c6e5ea7d5c2"   # CHANGE ME: your /mnt-1 LUN's WWN (lsblk -o NAME,WWN)
-        ptable: gpt
-        wipe: superblock-recursive
-        preserve: false
-        grub_device: false
-
-      - id: part-mnt1
-        type: partition
-        device: disk-mnt1
-        size: -1
-        preserve: false
-
-      - id: fmt-mnt1
-        type: format
-        volume: part-mnt1
-        fstype: xfs
-        preserve: false
-
-      - id: mount-mnt1
-        type: mount
-        device: fmt-mnt1
-        path: /mnt-1
-
-      # --- Disk 4: /mnt-2 — GPT, single xfs partition (~447G) ---
-      - id: disk-mnt2
-        type: disk
-        match:
-          size: "440G-500G"   # CHANGE ME: match your actual disk size
-        ptable: gpt
-        wipe: superblock-recursive
-        preserve: false
-        grub_device: false
-
-      - id: part-mnt2
-        type: partition
-        device: disk-mnt2
-        size: -1
-        preserve: false
-
-      - id: fmt-mnt2
-        type: format
-        volume: part-mnt2
-        fstype: xfs
-        preserve: false
-
-      - id: mount-mnt2
-        type: mount
-        device: fmt-mnt2
-        path: /mnt-2
-
-  # 8G swapfile on root, matching the live box (no dedicated swap
-  # partition).
-  swap:
-    size: 8589934592  # 8G, in bytes
-    filename: /swap.img
+  # Storage is intentionally NOT automated -- disk partitioning is done by
+  # hand at install time instead (two automated disk-match attempts against
+  # the live box's two identically-sized/modeled RAID LUNs both failed:
+  # first by size range -- both LUNs matched the same rule -- then by
+  # serial -- curtin/subiquity's installer-environment view of "serial"
+  # didn't match what the already-installed OS reported via `lsblk -o
+  # SERIAL`, even though WWN would likely have worked). `storage` in
+  # interactive-sections makes subiquity show its normal guided/manual
+  # partitioning screen instead of applying a storage: config -- everything
+  # else in this file (identity, ssh, packages) still applies unattended.
+  # See docs/HOMESERVER-DISK-LAYOUT.md for the target layout to reproduce
+  # by hand: NVMe boot/OS (gpt, 1127M EFI + ext4 root), /var (whole-disk
+  # xfs, no partition table), /mnt-1 (gpt, single xfs partition), /mnt-2
+  # (gpt, single xfs partition), 8G swapfile on root.
+  interactive-sections:
+    - storage
 
   packages:
     - xfsprogs
