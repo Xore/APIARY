@@ -471,6 +471,18 @@
       window.HpPreferences?.applyTimeDisplay?.(prefs.timezone, prefs.clock);
     }
 
+    /* #479: admin config side effects other pages' DOM depends on -- same
+       "apply instantly, don't make the operator reload to see their own
+       save take effect" rule applySideEffects above already applies to user
+       preferences. Currently only the ML/LLM nav link (#181's
+       behavior.show_ml_panels, the concrete example the issue reported) has
+       a known DOM effect; any future config field that gates a nav item the
+       same way can reuse the same data-hp-behavior-nav marker convention. */
+    function applyCfgSideEffects(config) {
+      const showMLPanels = Boolean(config?.behavior?.show_ml_panels);
+      qa('[data-hp-behavior-nav="show_ml_panels"]').forEach(el => { el.hidden = !showMLPanels; });
+    }
+
     /* ---- save flow ---- */
     function collectPatch(pane) {
       const patch = {};
@@ -710,6 +722,7 @@
         cfg.pinned = body.pinned_environment || {};
         cfg.loaded = true;
         applyCfgToControls();
+        applyCfgSideEffects(body.config);
         computeDirty();
       } catch (error) {
         setStatus("Configuration could not be loaded — " + error.message.trim(), "error");
@@ -765,6 +778,7 @@
               cfg.sources = saved.sources || {};
               cfg.pinned = saved.pinned_environment || {};
               applyCfgToControls();
+              applyCfgSideEffects(saved.config);
               computeDirty();
               setStatus(staged ? "Changes staged — they apply on the next service restart." : "Configuration saved.", "ok");
             } catch (error) {
@@ -1162,6 +1176,7 @@
             cfg.sources = body.sources || {};
             cfg.pinned = body.pinned_environment || {};
             applyCfgToControls();
+            applyCfgSideEffects(body.config);
             computeDirty();
             setStatus("Configuration rolled back to revision " + revision + ".", "ok");
             loadHistory();
