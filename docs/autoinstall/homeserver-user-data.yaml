@@ -1,40 +1,26 @@
 #cloud-config
-# Ubuntu autoinstall config reproducing the honeypot homeserver's disk
-# layout. See docs/HOMESERVER-DISK-LAYOUT.md for the full explanation.
+# Ubuntu autoinstall config for the honeypot homeserver. See
+# docs/HOMESERVER-DISK-LAYOUT.md for the disk layout this reproduces.
 #
 # This is a TEMPLATE, not a secret and not ready to run unattended as-is:
 #   - Fields marked "# CHANGE ME" are specific to the live `supermicro`
 #     box and must be edited for any other machine.
-#   - The `match` blocks under storage select disk-var/disk-mnt1 by WWN
-#     (not size or serial -- both were tried live and failed, see the
-#     comment at disk-var) and disk-mnt2 by size. Verify against
-#     `lsblk -d -o NAME,SIZE,WWN,TRAN` on the target hardware first — an
-#     autoinstall run with a wrong disk match will happily wipe the wrong
-#     disk.
-#   - CRITICAL, confirmed live: a `match: {wwn: ...}` that matches NO disk
-#     does not fail cleanly the way a bad `serial:` match does ("disk ...
-#     matched no disk"). Subiquity's own debug log shows it logging "using
-#     the first candidate from [...]" and silently picking an arbitrary
-#     disk from whatever's left in the candidate pool -- in one real run
-#     this picked the USB installer stick itself for disk-var. The
-#     mismatch only surfaced later as an unrelated-looking error
-#     ("autoinstall config did not create needed bootloader partition"),
-#     by which point curtin's conversion step had already built a storage
-#     plan against the wrong disk. Whenever ANY RAID VD is deleted and
-#     recreated (see below), its WWN changes -- the values here go stale
-#     immediately and this silent-wrong-disk failure mode is what happens
-#     next, not a clean error. Always re-verify match values against a
-#     fresh probe after any VD recreation, never assume they still apply.
+#   - Storage is deliberately NOT automated -- see the comment at
+#     interactive-sections for the full history of why. Short version:
+#     size-range matching was ambiguous (two identically-sized RAID LUNs),
+#     serial matching didn't match what the installer environment itself
+#     saw, and wwn matching -- even with values confirmed correct by a
+#     fresh probe -- still silently picked the wrong disk (the USB
+#     installer stick) both times it was tried. curtin's `match:` filter
+#     does not reliably work for this hardware in this installer version;
+#     manual partitioning is the only option that's actually been proven
+#     to not put data on the wrong disk.
 #   - No RAID controller (AVAGO/LSI MR9440-8i) configuration is included.
 #     The controller's own LUNs must already exist, be Optimal (not
-#     Foreign/degraded), and be genuinely writable before this file's
-#     storage section can apply -- see the comment at disk-var if curtin
-#     fails to wipe/format a MegaRAID-presented LUN. If you just deleted
-#     and recreated the VDs to fix that, the wwn: values below are now
-#     stale (see the CRITICAL note above) -- get fresh ones before
-#     retrying, e.g. from the installer's own probe log
-#     (log/installer/subiquity-server-debug.log.* on this stick's
-#     writable/install-logs-*/ after a run, search for "considering").
+#     Foreign/degraded), and be genuinely writable before manual
+#     partitioning can proceed -- see the comment at interactive-sections
+#     if curtin/the installer can't wipe/format a MegaRAID-presented LUN
+#     even by hand.
 #   - Contains no credentials. SSH access is authorized-key only; set
 #     `ssh.authorized-keys` below before use.
 
@@ -74,161 +60,31 @@ autoinstall:
         dhcp4: true
         optional: true
 
-  storage:
-    version: 1
-    config:
-      # --- Disk 1: NVMe boot/OS disk (~238G on the live box) ---
-      - id: disk-os
-        type: disk
-        match:
-          size: smallest   # NVMe is the smallest of the four disks here
-        ptable: gpt
-        wipe: superblock-recursive
-        preserve: false
-        grub_device: true
-
-      - id: part-os-efi
-        type: partition
-        device: disk-os
-        size: 1127M
-        flag: boot
-        preserve: false
-
-      - id: fmt-os-efi
-        type: format
-        volume: part-os-efi
-        fstype: fat32
-        preserve: false
-
-      - id: part-os-root
-        type: partition
-        device: disk-os
-        size: -1   # remaining space
-        preserve: false
-
-      - id: fmt-os-root
-        type: format
-        volume: part-os-root
-        fstype: ext4
-        preserve: false
-
-      - id: mount-efi
-        type: mount
-        device: fmt-os-efi
-        path: /boot/efi
-
-      - id: mount-root
-        type: mount
-        device: fmt-os-root
-        path: /
-
-      # --- Disk 2: /var — whole-disk xfs, no partition table ---
-      # On the live box this is a ~1.92T AVAGO MR9440-8i RAID LUN. It is
-      # the ONLY disk with no partition table (curtin formatted the raw
-      # device directly) — reproduce that, don't add a GPT here.
-      #
-      # Matched by WWN, not size or serial: verified live against the
-      # actual box (lsblk -d -b) that sdb and sdc -- /var and /mnt-1 below
-      # -- are the same AVAGO MR9440-8i model and report the identical
-      # ~1.92T size (1919816826880 vs 1919313510400 bytes, indistinguishable
-      # by any size range), so a size-range match cannot tell them apart --
-      # both would match the same rule, which is exactly the "will happily
-      # wipe the wrong disk" failure mode this file's own header warns
-      # about. serial: was tried first and FAILED live in the actual
-      # installer environment ("disk 00190cae matched no disk") --
-      # curtin/subiquity's udev-derived serial view can differ from what
-      # `lsblk -o SERIAL` shows on the already-installed OS, especially for
-      # a RAID controller-presented LUN. WWN is the standard SCSI/SAS
-      # identifier and is not subject to that mismatch -- confirmed live
-      # that WWN correctly identifies both LUNs.
-      #
-      # KNOWN ISSUE: curtin can fail to wipe/format a MegaRAID-presented
-      # LUN with an I/O or write error even once matched correctly -- the
-      # LUN itself needs to be genuinely writable at the controller level
-      # first. See docs/HOMESERVER-DISK-LAYOUT.md's MegaRAID section for
-      # the storcli/WebBIOS steps to check for and clear a Foreign
-      # Configuration state before relying on this file's storage section.
-      - id: disk-var
-        type: disk
-        match:
-          wwn: "0x600605b010943ec032051b88c3c3908d"   # CHANGE ME: your /var LUN's WWN (lsblk -o NAME,WWN)
-        wipe: superblock-recursive
-        preserve: false
-        grub_device: false
-
-      - id: fmt-var
-        type: format
-        volume: disk-var
-        fstype: xfs
-        preserve: false
-
-      - id: mount-var
-        type: mount
-        device: fmt-var
-        path: /var
-
-      # --- Disk 3: /mnt-1 — GPT, single xfs partition (~1.92T) ---
-      # Matched by WWN for the same reason as disk-var above -- this LUN
-      # is size-identical to it, only the WWN reliably tells them apart.
-      # Same MegaRAID writability caveat as disk-var above applies here too.
-      - id: disk-mnt1
-        type: disk
-        match:
-          wwn: "0x600605b010943ec032051baaf5fcc976"   # CHANGE ME: your /mnt-1 LUN's WWN (lsblk -o NAME,WWN)
-        ptable: gpt
-        wipe: superblock-recursive
-        preserve: false
-        grub_device: false
-
-      - id: part-mnt1
-        type: partition
-        device: disk-mnt1
-        size: -1
-        preserve: false
-
-      - id: fmt-mnt1
-        type: format
-        volume: part-mnt1
-        fstype: xfs
-        preserve: false
-
-      - id: mount-mnt1
-        type: mount
-        device: fmt-mnt1
-        path: /mnt-1
-
-      # --- Disk 4: /mnt-2 — GPT, single xfs partition (~447G) ---
-      - id: disk-mnt2
-        type: disk
-        match:
-          size: "440G-500G"   # CHANGE ME: match your actual disk size
-        ptable: gpt
-        wipe: superblock-recursive
-        preserve: false
-        grub_device: false
-
-      - id: part-mnt2
-        type: partition
-        device: disk-mnt2
-        size: -1
-        preserve: false
-
-      - id: fmt-mnt2
-        type: format
-        volume: part-mnt2
-        fstype: xfs
-        preserve: false
-
-      - id: mount-mnt2
-        type: mount
-        device: fmt-mnt2
-        path: /mnt-2
-
-  # 8G swapfile on root, matching the live box (no dedicated swap
-  # partition).
-  swap:
-    size: 8589934592  # 8G, in bytes
-    filename: /swap.img
+  # Storage is intentionally NOT automated -- disk partitioning is done by
+  # hand at install time instead. Confirmed live, twice: `match: {wwn: ...}`
+  # does not actually filter candidates in this subiquity build -- the
+  # second attempt used WWNs pulled directly from a fresh probe (verified
+  # correct: the target disk was genuinely present in the candidate pool
+  # with that exact WWN) and it STILL picked the wrong disk (the USB
+  # installer stick) every time. This isn't a stale-identifier problem,
+  # it's the match mechanism itself not working as documented for
+  # wwn/wwn-style matches in this environment -- size: and serial: were
+  # already ruled out earlier (ambiguous and installer-environment-
+  # mismatched, respectively). `storage` in interactive-sections makes
+  # subiquity show its normal guided/manual partitioning screen instead of
+  # applying a storage: config -- everything else in this file (identity,
+  # ssh, packages) still applies unattended.
+  #
+  # See docs/HOMESERVER-DISK-LAYOUT.md for the target layout to reproduce
+  # by hand: NVMe boot/OS (gpt, 1127M EFI + ext4 root), /var (whole-disk
+  # xfs, no partition table), /mnt-1 (gpt, single xfs partition), /mnt-2
+  # (gpt, single xfs partition), 8G swapfile on root. If the MegaRAID LUNs
+  # (/var, /mnt-1) still refuse to wipe/format even manually, their VDs
+  # likely need deleting and recreating at the controller's own config
+  # utility (UEFI Device Manager -> Avago MegaRAID Configuration Utility,
+  # or Ctrl+R at POST on legacy boot) BEFORE running the installer at all.
+  interactive-sections:
+    - storage
 
   packages:
     - xfsprogs
