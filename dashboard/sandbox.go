@@ -112,14 +112,20 @@ type sandboxDifference struct {
 }
 
 type sandboxResult struct {
-	Version       int     `json:"version"`
-	Job           string  `json:"job"`
-	SHA256        string  `json:"sha256"`
-	CaptureName   string  `json:"capture_name"`
-	Source        string  `json:"source"`
-	RequestedAt   string  `json:"requested_at"`
-	StartedAt     string  `json:"started_at"`
-	CompletedAt   string  `json:"completed_at"`
+	Version     int    `json:"version"`
+	Job         string `json:"job"`
+	SHA256      string `json:"sha256"`
+	CaptureName string `json:"capture_name"`
+	Source      string `json:"source"`
+	RequestedAt string `json:"requested_at"`
+	StartedAt   string `json:"started_at"`
+	CompletedAt string `json:"completed_at"`
+	// CompletedAgo (#514) is computed, never read from the result JSON --
+	// the queue list already gives an operator scanning for stale/stuck
+	// jobs this same relative-age context via Status.Handoff/HandoffOld;
+	// the completed-jobs grid had only the absolute timestamp, requiring
+	// the operator to do that math themselves.
+	CompletedAgo  string  `json:"-"`
 	Duration      float64 `json:"duration_seconds"`
 	ExitStatus    string  `json:"exit_status"`
 	RunStatus     string  `json:"run_status"`
@@ -354,6 +360,9 @@ func normalizeSandboxResult(row *sandboxResult) {
 		} else {
 			row.Route = "linux"
 		}
+	}
+	if completed, err := time.Parse(time.RFC3339, row.CompletedAt); err == nil {
+		row.CompletedAgo = ago(completed)
 	}
 	row.Incomplete = row.RunStatus == "failed" || row.TimeoutReason != "" ||
 		row.ExitStatus == "unknown" || row.ExitStatus == "guest-no-result" || row.ExitStatus == "host-timeout"

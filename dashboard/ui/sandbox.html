@@ -168,7 +168,7 @@
                 </div>
               </div>
               <p class="project-card__desc">risk {{.RiskScore}} / 100 &bull; {{.RiskLevel}} &bull; {{.Duration}}s &bull; {{.NetworkSummary.Packets}} packets</p>
-              <div class="project-card__meta"><span>completed <span{{if .CompletedAt}} data-hp-utc="{{.CompletedAt}}"{{end}}>{{.CompletedAt}}</span></span></div>
+              <div class="project-card__meta"><span>completed <span{{if .CompletedAt}} data-hp-utc="{{.CompletedAt}}"{{end}}>{{.CompletedAt}}</span>{{if .CompletedAgo}} <span class="tw:text-muted">({{.CompletedAgo}})</span>{{end}}</span></div>
             </a>
             {{end}}
           </div>
