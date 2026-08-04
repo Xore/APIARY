@@ -41,6 +41,16 @@ the only internet-facing component.
 
 ## Home deployment
 
+> **First-cut automation:** [`scripts/install-homeserver.sh`](../scripts/install-homeserver.sh)
+> scripts most of steps 1–7 below (Docker, GPU/NVIDIA, WireGuard, Dockge,
+> repo checkout, starting the stacks) against a manually-installed base
+> Ubuntu system — fill in
+> [`scripts/install-homeserver.conf.example`](../scripts/install-homeserver.conf.example)
+> first. It is new and only lightly verified (see
+> [#518](https://github.com/Xore/honeypot-stack/issues/518)); treat the
+> manual steps below as the source of truth if the two ever disagree, and
+> file a gap against #518 rather than silently working around it.
+
 1. Establish WireGuard and verify that the VPS can reach `10.8.0.2`.
 2. Copy this repository to `/opt/stacks/honeypot-stack/`.
 3. Copy `.env.example` to `.env` in `/opt/stacks/honeypot-stack/` and generate

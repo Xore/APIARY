@@ -1,0 +1,53 @@
+# Answer file for scripts/install-homeserver.sh — the Ubuntu-side
+# equivalent of a Windows autounattend.xml: fill this in once, then the
+# installer runs unattended and non-interactively from it.
+#
+# Copy this file, fill in every <PLACEHOLDER>, then run:
+#   sudo ./scripts/install-homeserver.sh --config /path/to/your-filled-in.conf
+#
+# Never commit your filled-in copy. It will contain real IPs and a real
+# git remote. Keep it next to the script but outside version control
+# (a `*.conf` gitignore rule covers this — only `*.conf.example` is tracked).
+
+# --- Identity -----------------------------------------------------------
+# Hostname this box should have. Leave empty to keep whatever's already set.
+INSTALL_HOSTNAME="<HOSTNAME>"
+
+# --- Repository -----------------------------------------------------------
+# Where to clone honeypot-stack from, and which ref to check out.
+GIT_REPO_URL="<GIT_REMOTE_URL>"          # e.g. git@github.com:<org>/honeypot-stack.git
+GIT_REF="main"
+
+# Where the repo checkout used by Dockge should live. Matches the layout
+# documented in docs/HOMESERVER-DISK-LAYOUT.md — this repo's own stack
+# expects to be findable at a fixed path.
+REPO_DIR="/var/dockge/stacks/honeypot-stack"
+
+# --- Networking (WireGuard tunnel to the VPS) ----------------------------
+# This box's address on the WireGuard tunnel. Honeypot sensors bind only
+# this address — see HP_BIND in the compose files. Never 0.0.0.0.
+HOME_WG_ADDRESS="<HOME_WG_ADDRESS>/24"   # e.g. 10.8.0.2/24
+
+# The VPS's WireGuard address and public endpoint (its real internet-facing
+# IP or hostname, plus the WireGuard UDP port it listens on).
+VPS_WG_ADDRESS="<VPS_WG_ADDRESS>"        # e.g. 10.8.0.1
+VPS_WG_ENDPOINT="<VPS_PUBLIC_IP_OR_HOST>:<VPS_WG_PORT>"
+
+# WireGuard keys. Generate with `wg genkey | tee privatekey | wg pubkey >
+# publickey` — never reuse an example value, never commit a real one.
+HOME_WG_PRIVATE_KEY="<HOME_WG_PRIVATE_KEY>"
+VPS_WG_PUBLIC_KEY="<VPS_WG_PUBLIC_KEY>"
+
+# --- VPS admin access (for the parts of setup that touch the VPS side) --
+VPS_SSH_HOST="<VPS_PUBLIC_IP_OR_HOST>"
+VPS_SSH_PORT="<VPS_SSH_PORT>"
+VPS_SSH_USER="<VPS_SSH_USER>"
+VPS_SSH_KEY="<PATH_TO_PRIVATE_KEY>"      # e.g. /home/<user>/.ssh/vps_key
+
+# --- GPU / LLM / ML worker ------------------------------------------------
+# Set to "false" on a box with no NVIDIA GPU to skip driver/toolkit/Ollama
+# setup entirely rather than fail partway through.
+ENABLE_GPU_STACK="true"
+
+# --- Timezone / locale ----------------------------------------------------
+INSTALL_TIMEZONE="<TIMEZONE>"            # e.g. Europe/Berlin

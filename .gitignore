@@ -14,6 +14,9 @@ wg0.conf
 wireguard/*.conf
 secrets/
 credentials/
+# scripts/install-homeserver.sh answer file -- real IPs/keys once filled in
+scripts/install-homeserver.conf
+!scripts/install-homeserver.conf.example
 
 # Runtime telemetry, captured payloads, and persistent state
 logs/
