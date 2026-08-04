@@ -526,11 +526,101 @@
       body.replaceChildren(Object.assign(document.createElement("p"), {className: "empty", textContent: "Heatmap update failed: " + e.message}));
     }
   };
+
+  /* ---------- per-sensor attack-vectors companion panel (#471) ----------
+     Which ports/services a specific sensor actually saw traffic on in the
+     last 24h -- new surface area alongside (not replacing) the heatmap's
+     event-volume-over-time view, shown only once a specific sensor is
+     picked above. */
+  // Mirrors ui/partials/dashboard.html's own "tbl" template's table body
+  // (n/v two-column data-table, Link-or-plain cell) so this reads like every
+  // other leaderboard on the page -- no bespoke list styling to invent or
+  // maintain (#219). Not wrapped in a .card: this already lives inside the
+  // heatmap card's own [data-attack-vectors] panel, and .card is a grid-child
+  // component, not meant to nest inside another .card.
+  const renderVectorRows = (title, rows) => {
+    const section = document.createElement("div");
+    const h = document.createElement("h3");
+    h.textContent = title;
+    section.append(h);
+    if (!rows.length) {
+      section.append(Object.assign(document.createElement("p"), {className: "empty", textContent: "(none)"}));
+      return section;
+    }
+    const table = document.createElement("table");
+    table.className = "data-table";
+    const tbody = document.createElement("tbody");
+    rows.forEach(row => {
+      const tr = document.createElement("tr");
+      const n = document.createElement("td");
+      n.className = "n";
+      const v = document.createElement("td");
+      v.className = "v";
+      if (row.Link) {
+        const nLink = document.createElement("a");
+        nLink.href = row.Link;
+        nLink.title = "show all " + row.Count + " related events";
+        nLink.textContent = row.Count;
+        n.append(nLink);
+        const vLink = document.createElement("a");
+        vLink.href = row.Link;
+        vLink.title = row.Title || "show all related events";
+        vLink.textContent = row.Key;
+        v.append(vLink);
+      } else {
+        n.textContent = row.Count;
+        v.textContent = row.Key;
+      }
+      tr.append(n, v);
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    section.appendChild(table);
+    return section;
+  };
+  const loadAttackVectors = async sensor => {
+    const panel = document.querySelector("[data-heatmap-card] [data-attack-vectors]");
+    if (!panel) return;
+    if (!sensor) { panel.hidden = true; panel.replaceChildren(); return; }
+    panel.hidden = false;
+    panel.replaceChildren(Object.assign(document.createElement("p"), {className: "note", textContent: "Loading attack vectors…"}));
+    try {
+      const r = await fetch("/api/attack-vectors?sensor=" + encodeURIComponent(sensor), {cache: "no-store"});
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const data = await r.json();
+      const wrap = document.createElement("div");
+      wrap.className = "tw:flex tw:flex-wrap tw:gap-4";
+      wrap.append(
+        renderVectorRows("Ports targeted — " + sensor, data.ports || []),
+        renderVectorRows("Protocols — " + sensor, data.protocols || []),
+      );
+      panel.replaceChildren(wrap);
+    } catch (e) {
+      panel.replaceChildren(Object.assign(document.createElement("p"), {className: "empty", textContent: "Attack vectors unavailable: " + e.message}));
+    }
+  };
+
+  const applyHeatmapSensor = sensor => {
+    loadSensorHeatmap(sensor);
+    loadAttackVectors(sensor);
+    const clearBtn = document.querySelector("[data-heatmap-sensor-clear]");
+    if (clearBtn) clearBtn.hidden = !sensor;
+  };
   // Delegated on document, not bound per-element, so it keeps working after
   // mountPage swaps in a fresh overview card on every live refresh.
   document.addEventListener("change", e => {
     const picker = e.target.closest?.("[data-heatmap-sensor-picker]");
-    if (picker) loadSensorHeatmap(picker.value);
+    if (picker) applyHeatmapSensor(picker.value.trim());
+  });
+  document.addEventListener("click", e => {
+    const clearBtn = e.target.closest?.("[data-heatmap-sensor-clear]");
+    if (!clearBtn) return;
+    const picker = document.querySelector("[data-heatmap-sensor-picker]");
+    if (!picker) return;
+    picker.value = "";
+    picker.dispatchEvent(new Event("input", {bubbles: true}));
+    picker.dispatchEvent(new Event("change", {bubbles: true}));
+    picker.focus();
   });
 
   /* ---------- workspace tabs ----------

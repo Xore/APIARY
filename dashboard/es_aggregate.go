@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -504,4 +505,109 @@ func (s *store) serveHeatmap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	json.NewEncoder(w).Encode(map[string]any{"sensor": sensor, "rows": []heatmapRow{{Sensor: sensor, Cells: cells}}})
+}
+
+// esSingleSensorVectorsQuery is the request body for fetchSensorAttackVectors
+// -- built via json.Marshal for the same reason esSingleSensorHeatmapQuery
+// is: sensor is a user-controlled query parameter (#471's per-sensor
+// "attack vectors" panel), so it must never be string-formatted into the
+// query body.
+type esSingleSensorVectorsQuery struct {
+	Size  int `json:"size"`
+	Query struct {
+		Bool struct {
+			Filter []map[string]any `json:"filter"`
+		} `json:"bool"`
+	} `json:"query"`
+	Aggs struct {
+		Ports struct {
+			Terms struct {
+				Field string `json:"field"`
+				Size  int    `json:"size"`
+			} `json:"terms"`
+		} `json:"ports"`
+		Protocols struct {
+			Terms struct {
+				Field string `json:"field"`
+				Size  int    `json:"size"`
+			} `json:"terms"`
+		} `json:"protocols"`
+	} `json:"aggs"`
+}
+
+func buildSingleSensorVectorsQuery(sensor string) []byte {
+	var q esSingleSensorVectorsQuery
+	q.Size = 0
+	q.Query.Bool.Filter = []map[string]any{
+		{"range": map[string]any{"@timestamp": map[string]any{"gte": "now-24h"}}},
+		{"term": map[string]any{"event.sensor": sensor}},
+	}
+	q.Aggs.Ports.Terms.Field = "destination.port"
+	q.Aggs.Ports.Terms.Size = 15
+	q.Aggs.Protocols.Terms.Field = "network.protocol"
+	q.Aggs.Protocols.Terms.Size = 15
+	b, _ := json.Marshal(q)
+	return b
+}
+
+type esSingleSensorVectorsResponse struct {
+	Aggregations struct {
+		Ports struct {
+			Buckets []esBucket `json:"buckets"`
+		} `json:"ports"`
+		Protocols struct {
+			Buckets []esBucket `json:"buckets"`
+		} `json:"protocols"`
+	} `json:"aggregations"`
+}
+
+// fetchSensorAttackVectors (#471) answers "which ports/services did this
+// sensor actually get hit on in the last 24h" -- new surface area beyond
+// fetchSensorHeatmap's event-volume-over-time view, queried the same way
+// (one sensor, no top-N cap since a single sensor's own port/protocol
+// spread is already small).
+func (s *store) fetchSensorAttackVectors(sensor string, now time.Time) (ports, protocols []kv, ok bool) {
+	if s.es == nil || sensor == "" {
+		return nil, nil, false
+	}
+	b, err := s.es.searchBody("/honeypot-v2-*/_search", buildSingleSensorVectorsQuery(sensor))
+	if err != nil {
+		return nil, nil, false
+	}
+	var resp esSingleSensorVectorsResponse
+	if json.Unmarshal(b, &resp) != nil {
+		return nil, nil, false
+	}
+	for _, bucket := range resp.Aggregations.Ports.Buckets {
+		ports = append(ports, kv{Key: bucketKeyString(bucket.Key), Count: bucket.DocCount, Link: eventsURL(url.Values{"sensor": {sensor}, "port": {bucketKeyString(bucket.Key)}})})
+	}
+	protoCounts := map[string]int{}
+	for _, bucket := range resp.Aggregations.Protocols.Buckets {
+		protoCounts[normalizeProtocol(bucketKeyString(bucket.Key))] += bucket.DocCount
+	}
+	for _, row := range topN(protoCounts, len(protoCounts)) {
+		protocols = append(protocols, kv{Key: row.Key, Count: row.Count, Link: eventsURL(url.Values{"sensor": {sensor}, "proto": {row.Key}})})
+	}
+	return ports, protocols, true
+}
+
+// serveAttackVectors backs the overview page's per-sensor "attack vectors"
+// companion panel (#471): which ports/services a specific sensor actually
+// saw traffic on in the last 24h, alongside (not instead of) the existing
+// hourly heatmap. suricata/portbridge are rejected for the same reason
+// serveHeatmap already rejects them -- they ship to their own indices, not
+// honeypot-v2-*, so a query here would always, silently return empty.
+func (s *store) serveAttackVectors(w http.ResponseWriter, r *http.Request) {
+	sensor := r.URL.Query().Get("sensor")
+	w.Header().Set("Content-Type", "application/json")
+	if sensor == "" || sensor == "suricata" || sensor == "portbridge" {
+		http.Error(w, "a specific sensor is required", http.StatusBadRequest)
+		return
+	}
+	ports, protocols, ok := s.fetchSensorAttackVectors(sensor, time.Now())
+	if !ok {
+		http.Error(w, "attack vectors unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]any{"sensor": sensor, "ports": ports, "protocols": protocols})
 }

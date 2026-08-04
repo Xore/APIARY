@@ -43,12 +43,20 @@
           <div class="section-heading"><div><h2>Current activity</h2><p>What is happening now, when traffic arrived, and where it originated.</p></div><a class="section-link" href="/events?since=24h">View last 24 hours &rarr;</a></div>
           <div class="card wide chart-card" data-heatmap-card>
             <div class="tw:flex tw:flex-wrap tw:items-center tw:justify-between tw:gap-2"><h2>Activity — last 24h</h2>
-              {{if .Sensors}}<label class="tw:flex tw:items-center tw:gap-2" for="heatmap-sensor-picker">Sensor
-                <select id="heatmap-sensor-picker" data-heatmap-sensor-picker>
-                  <option value="">All sensors</option>
-                  {{range .Sensors}}{{if ne .Name "suricata"}}{{if ne .Name "portbridge"}}<option value="{{.Name}}">{{.Name}}</option>{{end}}{{end}}{{end}}
-                </select>
-              </label>{{end}}
+              {{if .Sensors}}<div class="tw:flex tw:flex-wrap tw:items-center tw:gap-2">
+                <label class="tw:flex tw:items-center tw:gap-2" for="heatmap-sensor-picker">Sensor
+                  {{/* #471: an autocomplete text field over the FULL known
+                       sensor list, not a capped <select> -- built the same
+                       way as the Event Explorer's own filter-bar fields
+                       (hp-app.js's [data-hp-filter-field] widget, backed by
+                       /api/filter-values), so a low-volume sensor that never
+                       makes the heatmap card's own top-N cut is still
+                       reachable here. */}}
+                  <input type="text" id="heatmap-sensor-picker" data-heatmap-sensor-picker data-hp-filter-field="sensor"
+                         placeholder="All sensors" autocomplete="off" maxlength="64">
+                </label>
+                <button type="button" class="btn btn-sm btn-secondary" data-heatmap-sensor-clear hidden>All sensors</button>
+              </div>{{end}}
             </div>
             {{/* .heatmap is Xore/theme's shared component (see
                  static/theme.css and github.com/Xore/theme's docs/CSP.md) --
@@ -72,6 +80,11 @@
             <p class="empty">No events in the last 24 hours.</p>
             {{end}}
             </div>
+            {{/* #471: companion panel, not a replacement for the heatmap --
+                 populated live by hp-app.js's loadAttackVectors() once a
+                 specific sensor is picked above; empty/hidden for the
+                 default "all sensors" view. */}}
+            <div data-attack-vectors hidden></div>
           </div>
 
           {{if .MapPoints}}<div class="card wide map-card" data-attack-map-card><h2>Attack origins &mdash; live geographic view</h2>
