@@ -94,6 +94,50 @@ def virsh(cmd: list, timeout: int = 120) -> str:
     return result.stdout.strip()
 
 
+def verify_golden_checksum():
+    """Verify GOLDEN_IMAGE against its .sha256 before trusting it for a clone.
+
+    #86: the golden image is the root of trust for every detonation guest --
+    an unverified multi-GB file sitting on a shared spindle for months
+    between rebuilds is exactly the thing worth hashing. build-with-retry.sh
+    writes GOLDEN_IMAGE.sha256 once, right after a successful build.
+
+    A full sha256 of a 25-35 GB file takes real time, and revert_to_golden()
+    runs before every single detonation -- possibly several times an hour in
+    a busy queue. Re-hashing an unchanged file that often is wasted work, so
+    the result is cached against the image's mtime+size in a sentinel file;
+    corruption between two reverts with no intervening rebuild is only
+    caught on the next real re-verification, the accepted tradeoff for not
+    paying the full hash cost on every revert. Same caching scheme as
+    kvm_manage.sh's verify_golden_checksum() (shell, for manual/setup use);
+    this is the one that actually guards the live detonation path.
+    """
+    sums = GOLDEN_IMAGE.with_suffix(GOLDEN_IMAGE.suffix + '.sha256')
+    if not sums.exists():
+        log.warning(f'No {sums} found -- skipping integrity check (run build-with-retry.sh to generate one)')
+        return
+    stat = GOLDEN_IMAGE.stat()
+    current = f'{int(stat.st_mtime)}-{stat.st_size}'
+    stamp = sums.with_suffix(sums.suffix + '.verified')
+    if stamp.exists() and stamp.read_text().strip() == current:
+        return
+    log.info('Verifying golden image checksum (first use since last rebuild)...')
+    expected = sums.read_text().split()[0].strip().lower()
+    h = hashlib.sha256()
+    with GOLDEN_IMAGE.open('rb') as f:
+        for chunk in iter(lambda: f.read(1 << 20), b''):
+            h.update(chunk)
+    actual = h.hexdigest()
+    if actual != expected:
+        raise RuntimeError(
+            f'Golden image checksum mismatch: {GOLDEN_IMAGE} does not match {sums} '
+            f'(expected {expected}, got {actual}). Refusing to clone -- every '
+            f'detonation guest would inherit a corrupted or tampered image.'
+        )
+    stamp.write_text(current)
+    log.info('Golden image checksum verified.')
+
+
 def revert_to_golden():
     """Reset the domain to a fresh clone of the golden image and boot it.
 
@@ -113,6 +157,7 @@ def revert_to_golden():
     state, which is what makes runs comparable and the guest disposable.
     """
     log.info(f'Resetting {VM_DOMAIN} to a fresh clone of {GOLDEN_IMAGE}')
+    verify_golden_checksum()
     subprocess.run([VIRSH_PATH, '--connect', LIBVIRT_URI, 'destroy', VM_DOMAIN],
                     capture_output=True, text=True)  # ignore: may already be stopped
     if VM_DISK.exists():
