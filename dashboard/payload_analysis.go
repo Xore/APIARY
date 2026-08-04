@@ -9,6 +9,7 @@ import (
 	"debug/pe"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -121,9 +122,23 @@ type payloadStaticAnalysis struct {
 	StaticRiskLevel         string
 }
 
-type staticAnalysisCacheEntry struct {
-	fingerprint string
-	analysis    payloadStaticAnalysis
+// staticAnalysisIndex (#494-pattern, no local fallback) replaces the
+// previous per-process staticAnalysisCache map: two dashboard instances (or
+// one restarting) used to each recompute the same hashing/entropy/strings/
+// IOC work from scratch. Keyed by the payload's own hash (the filename
+// capture already enforces via hashName, not a freshly recomputed SHA256 --
+// see the comment on staticAnalysisFor below for why that matters for
+// cross-instance cache hits), not by filesystem path: two instances can
+// mount the same logical capture under different paths, and keying by path
+// would silently never hit across them. The document only ever holds the
+// bounded-size analysis summary (hex dump preview capped at 512 bytes,
+// capped string/IOC lists) -- never raw payload bytes, enforced structurally
+// by docIndex's own size guard.
+const staticAnalysisIndex = "dashboard-static-analysis-v1"
+
+type staticAnalysisCacheDoc struct {
+	Fingerprint string
+	Analysis    payloadStaticAnalysis
 }
 
 func fileFingerprint(fi os.FileInfo) string {
@@ -141,12 +156,24 @@ func (s *store) staticAnalysisFor(path string) (payloadStaticAnalysis, error) {
 		return payloadStaticAnalysis{}, errors.New("payload is not a regular file")
 	}
 	fingerprint := fileFingerprint(fi)
-	if s != nil {
-		s.staticAnalysisMu.Lock()
-		cached, ok := s.staticAnalysisCache[path]
-		s.staticAnalysisMu.Unlock()
-		if ok && cached.fingerprint == fingerprint {
-			return cached.analysis, nil
+	// The capture pipeline names every payload file by its own hash
+	// (hashName enforces this everywhere else that resolves a payload path,
+	// e.g. analyzePayload/payloadPath) -- using that name as the cache key
+	// means two dashboard instances with the same payload under different
+	// mount paths still share one cache entry, unlike a path-keyed cache.
+	hash := strings.ToLower(filepath.Base(path))
+	cacheable := s != nil && s.es != nil && hashName.MatchString(hash)
+	var seqNo, primaryTerm int64
+	var cacheFound bool
+	if cacheable {
+		if hit, found, err := s.es.docGet(staticAnalysisIndex, hash); err == nil {
+			cacheFound, seqNo, primaryTerm = found, hit.SeqNo, hit.PrimaryTerm
+			if found {
+				var cached staticAnalysisCacheDoc
+				if json.Unmarshal(hit.Source, &cached) == nil && cached.Fingerprint == fingerprint {
+					return cached.Analysis, nil
+				}
+			}
 		}
 	}
 	h1, h2, h3 := md5.New(), sha1.New(), sha256.New()
@@ -182,13 +209,15 @@ func (s *store) staticAnalysisFor(path string) (payloadStaticAnalysis, error) {
 	}
 	a.IOCs = extractIOCs(data)
 	a.Rules, a.StaticRiskScore, a.StaticRiskLevel = payloadRules(a, data)
-	if s != nil {
-		s.staticAnalysisMu.Lock()
-		if s.staticAnalysisCache == nil {
-			s.staticAnalysisCache = make(map[string]staticAnalysisCacheEntry)
+	if cacheable {
+		if body, err := json.Marshal(staticAnalysisCacheDoc{Fingerprint: fingerprint, Analysis: a}); err == nil {
+			// Best-effort: a lost race against a concurrent analysis of the
+			// same file (or a write that exceeds docIndexMaxBytes on some
+			// unusually artifact-heavy sample) just means the next call
+			// recomputes and tries again -- this is a disposable cache, not
+			// state anything else depends on being durable.
+			_ = s.es.docIndex(staticAnalysisIndex, hash, body, !cacheFound, seqNo, primaryTerm)
 		}
-		s.staticAnalysisCache[path] = staticAnalysisCacheEntry{fingerprint: fingerprint, analysis: a}
-		s.staticAnalysisMu.Unlock()
 	}
 	return a, nil
 }

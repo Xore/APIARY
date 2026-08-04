@@ -367,6 +367,47 @@ curl -fsS -X PUT "$es_url/_index_template/dashboard-alert-state" \
   }
 }' >/dev/null
 
+# Static-analysis cache (payload_analysis.go's staticAnalysisFor): the pure-
+# function-of-bytes half of a payload's analysis (hashes, entropy, extracted
+# strings/IOCs, static risk score) -- content-hash keyed and immutable once
+# written (the same bytes always produce the same analysis), unlike
+# dashboard-alert-state-v1's mutable ack/cooldown records above, so this
+# needs no seq_no/if_match update path, only get-or-create. Bounded by
+# docIndexMaxBytes (2MB, dashboard/elastic.go) at write time -- this holds a
+# capped preview/string-extraction summary, never raw payload bytes.
+curl -fsS -X PUT "$es_url/_index_template/dashboard-static-analysis" \
+  -H 'Content-Type: application/json' \
+  --data-binary '{
+  "index_patterns": ["dashboard-static-analysis-v1"],
+  "priority": 460,
+  "template": {
+    "settings": {
+      "index.number_of_replicas": 0,
+      "index.refresh_interval": "30s",
+      "index.mapping.total_fields.limit": 200
+    },
+    "mappings": {
+      "properties": {
+        "Fingerprint": { "type": "keyword" },
+        "Analysis": {
+          "properties": {
+            "SHA256": { "type": "keyword" },
+            "MD5": { "type": "keyword" },
+            "SHA1": { "type": "keyword" },
+            "MIME": { "type": "keyword" },
+            "ScriptType": { "type": "keyword" },
+            "StaticRiskLevel": { "type": "keyword" },
+            "StaticRiskScore": { "type": "integer" },
+            "EntropyValue": { "type": "float" },
+            "PackedLikely": { "type": "boolean" },
+            "Truncated": { "type": "boolean" }
+          }
+        }
+      }
+    }
+  }
+}' >/dev/null
+
 curl -fsS -X PUT "$es_url/_index_template/honeypot-dead-letter" \
   -H 'Content-Type: application/json' \
   --data-binary '{"index_patterns":["dead-letter-honeypot*"],"priority":450,"template":{"settings":{"index.lifecycle.name":"dead-letter-60d","index.number_of_replicas":0}}}' >/dev/null

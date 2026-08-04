@@ -175,16 +175,14 @@ type storedEvent struct {
 }
 
 type store struct {
-	mu                  sync.RWMutex
-	subsMu              sync.Mutex
-	payloadMu           sync.Mutex
-	ipsMu               sync.Mutex
-	hashPathMu          sync.Mutex
-	hashPathCache       map[string]string // sha256 -> resolved payload path (#364)
-	staticAnalysisMu    sync.Mutex
-	staticAnalysisCache map[string]staticAnalysisCacheEntry // path -> cached static analysis (#352)
-	snap                snapshot
-	events              []storedEvent // newest first; replaced wholesale each rebuild
+	mu            sync.RWMutex
+	subsMu        sync.Mutex
+	payloadMu     sync.Mutex
+	ipsMu         sync.Mutex
+	hashPathMu    sync.Mutex
+	hashPathCache map[string]string // sha256 -> resolved payload path (#364)
+	snap          snapshot
+	events        []storedEvent // newest first; replaced wholesale each rebuild
 	// logCache holds each log file's classified-but-not-yet-joined events
 	// between rebuild() cycles (#353). Only ever touched from inside
 	// rebuild(), whose own calls are already serialized (the periodic
