@@ -277,6 +277,7 @@ type ipsPage struct {
 	Total     int
 	Filters   []string
 	RowsURL   string
+	ExportURL string
 	filterBar
 }
 
@@ -439,8 +440,14 @@ func (s *store) ipsData(r *http.Request) ipsPage {
 	bar := buildFilterBar(r, "/ips",
 		[2]string{"ip", "IP"}, [2]string{"cidr", "CIDR"}, [2]string{"sensor", "Sensor"},
 		[2]string{"country", "Country"}, [2]string{"since", "Since (e.g. 24h)"})
+	// #513/#59: exports exactly the current filtered scope, never the
+	// unfiltered set -- same rule eventsData's own ExportURL already uses.
+	exportURL := "/export/ips.csv"
+	if encoded := r.URL.Query().Encode(); encoded != "" {
+		exportURL += "?" + encoded
+	}
 	finish := func(page ipsPage) ipsPage {
-		page.Filters, page.RowsURL = filters, rowsURL
+		page.Filters, page.RowsURL, page.ExportURL = filters, rowsURL, exportURL
 		page.filterBar = bar
 		return page
 	}

@@ -38,6 +38,7 @@
 
         <div class="filters">
           <a class="chip" href="/">&larr; dashboard</a>
+          <a class="chip" href="{{.ExportURL}}">export CSV &darr;</a>
           <span class="chip">{{.Total}} unique IPs</span>
           {{template "filterbar" .}}
         </div>
@@ -90,7 +91,7 @@
         <div class="filters">
           <a class="chip" href="/ips">&larr; attack sources</a>
           <a class="chip" href="/events?ip={{.IP | urlquery}}">all matching events</a>
-          
+          <a class="chip" href="/export/events.csv?ip={{.IP | urlquery}}">export CSV &darr;</a>
         </div>
 
         <div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:gap-3 tw:mb-6" id="attacker-kpis">

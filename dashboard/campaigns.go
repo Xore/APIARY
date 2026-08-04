@@ -46,6 +46,7 @@ type campaignsPage struct {
 	Generated time.Time
 	Campaigns []campaignRow
 	Filters   []string
+	ExportURL string
 	filterBar
 }
 
@@ -54,6 +55,12 @@ func (s *store) campaignsData(r *http.Request) campaignsPage {
 	bar := buildFilterBar(r, "/campaigns",
 		[2]string{"cidr", "Network (CIDR)"}, [2]string{"asn", "ASN"}, [2]string{"sensor", "Sensor"},
 		[2]string{"since", "Since (e.g. 24h)"})
+	// #513/#59: exports exactly the current filtered scope, never the
+	// unfiltered set.
+	exportURL := "/export/campaigns.csv"
+	if encoded := r.URL.Query().Encode(); encoded != "" {
+		exportURL += "?" + encoded
+	}
 
 	// #307: the plain, unfiltered page visit -- overwhelmingly the common
 	// case -- is answered from the already-fresh, already-paid-for
@@ -63,7 +70,7 @@ func (s *store) campaignsData(r *http.Request) campaignsPage {
 	// recompute, since the cached snapshot only ever holds the unfiltered
 	// defaultCorrelationWindow view.
 	if f.cidr == "" && f.asn == "" && f.sensor == "" && f.since.IsZero() {
-		return campaignsPage{Generated: time.Now(), Campaigns: s.get().Campaigns, Filters: f.describe(), filterBar: bar}
+		return campaignsPage{Generated: time.Now(), Campaigns: s.get().Campaigns, Filters: f.describe(), ExportURL: exportURL, filterBar: bar}
 	}
 
 	// Default matches aggregate.go's own periodic snapshot window; ?since=
@@ -76,6 +83,7 @@ func (s *store) campaignsData(r *http.Request) campaignsPage {
 		Generated: time.Now(),
 		Campaigns: correlateCampaigns(f.filtered(s.getEvents()), since),
 		Filters:   f.describe(),
+		ExportURL: exportURL,
 		filterBar: bar,
 	}
 }
