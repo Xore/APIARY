@@ -52,6 +52,30 @@ while true; do
             [[ $capture == guest-network.pcap ]] && suffix=guest
             install -m 0640 -o root -g xore "$result/$capture" "$root/export/$job.$suffix.pcap"
           done
+          # #87: index the host-side capture into Arkime, tagged with the
+          # sample's own hash so a result page and an Arkime session view
+          # can be reached from each other. Not guest-network.pcap -- it's
+          # loopback/resolver traffic from inside the guest, not the
+          # externally-observable evidence Arkime's session view is for
+          # (indexing both would double storage for marginal gain, per the
+          # issue's own framing). One-shot `docker exec` against the
+          # already-running monitor-mode container, not part of its own
+          # long-running `command:` -- this container already has
+          # /opt/arkime/sandbox-import mounted read-only over the same
+          # export/ directory this loop just wrote into.
+          # Best-effort: Arkime/ES being down must not fail an otherwise-
+          # complete detonation over a search-indexing nicety: the pcap
+          # itself is still downloadable from the result page either way.
+          if [[ -f $root/export/$job.host.pcap ]]; then
+            docker exec hp-arkime-capture /opt/arkime/bin/capture \
+              -c /opt/arkime/etc/config.ini \
+              -r "/opt/arkime/sandbox-import/$job.host.pcap" --copy \
+              -n honeypot-sandbox --host honeypot-sandbox \
+              -t "sandbox-$sha" \
+              --wait-for-db http://elasticsearch:9200 \
+              >/dev/null 2>&1 \
+              || echo "Arkime import failed for $job (continuing)" >&2
+          fi
           mv "$running" "$root/inbox/completed/$name"
           rm -f "$root/inbox/samples/$sha" "$log"
           "$status_export" --worker-state running
