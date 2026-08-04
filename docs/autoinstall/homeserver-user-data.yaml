@@ -105,19 +105,23 @@ autoinstall:
       # the ONLY disk with no partition table (curtin formatted the raw
       # device directly) — reproduce that, don't add a GPT here.
       #
-      # Matched by serial, not size: verified live against the actual box
-      # (lsblk -d -b) that sdb and sdc -- /var and /mnt-1 below -- are the
-      # same AVAGO MR9440-8i model and report the identical ~1.92T size
-      # (1919816826880 vs 1919313510400 bytes, indistinguishable by any
-      # size range), so a size-range match cannot tell them apart -- both
-      # would match the same rule, which is exactly the "will happily wipe
-      # the wrong disk" failure mode this file's own header warns about.
-      # Serial is unique per LUN (confirmed via `lsblk -o NAME,SERIAL` on
-      # the live box) and disambiguates correctly.
+      # Matched by WWN, not size or serial: verified live against the
+      # actual box (lsblk -d -b) that sdb and sdc -- /var and /mnt-1 below
+      # -- are the same AVAGO MR9440-8i model and report the identical
+      # ~1.92T size (1919816826880 vs 1919313510400 bytes, indistinguishable
+      # by any size range), so a size-range match cannot tell them apart --
+      # both would match the same rule, which is exactly the "will happily
+      # wipe the wrong disk" failure mode this file's own header warns
+      # about. serial: was tried first and FAILED live in the actual
+      # installer environment ("disk 00190cae matched no disk") --
+      # curtin/subiquity's udev-derived serial view can differ from what
+      # `lsblk -o SERIAL` shows on the already-installed OS, especially for
+      # a RAID controller-presented LUN. WWN is the standard SCSI/SAS
+      # identifier and is not subject to that mismatch.
       - id: disk-var
         type: disk
         match:
-          serial: "00190cae35537ce231c03e9410b00506"   # CHANGE ME: your /var LUN's serial (lsblk -o NAME,SERIAL)
+          wwn: "0x600605b010943ec031e27c5335ae0c19"   # CHANGE ME: your /var LUN's WWN (lsblk -o NAME,WWN)
         wipe: superblock-recursive
         preserve: false
         grub_device: false
@@ -134,12 +138,12 @@ autoinstall:
         path: /var
 
       # --- Disk 3: /mnt-1 — GPT, single xfs partition (~1.92T) ---
-      # Matched by serial for the same reason as disk-var above -- this LUN
-      # is size-identical to it, only the serial tells them apart.
+      # Matched by WWN for the same reason as disk-var above -- this LUN
+      # is size-identical to it, only the WWN reliably tells them apart.
       - id: disk-mnt1
         type: disk
         match:
-          serial: "00c2d5a75e6e7ce231c03e9410b00506"   # CHANGE ME: your /mnt-1 LUN's serial (lsblk -o NAME,SERIAL)
+          wwn: "0x600605b010943ec031e27c6e5ea7d5c2"   # CHANGE ME: your /mnt-1 LUN's WWN (lsblk -o NAME,WWN)
         ptable: gpt
         wipe: superblock-recursive
         preserve: false
