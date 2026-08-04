@@ -92,3 +92,22 @@ func TestChange24hReportsSpikeWithFullBaseline(t *testing.T) {
 		t.Fatalf("ActivityState = %q, want %q for a store with full baseline history", snap.ActivityState, "spike")
 	}
 }
+
+// TestRebuildUniquePayloadsMatchesPayloadCacheNotEventObservations covers
+// #470: the overview page's "Captured payloads" count must come from the
+// same disk-scan cache /payloads uses (distinct binaries), not from the
+// much smaller and differently-scoped per-event Downloads counter.
+func TestRebuildUniquePayloadsMatchesPayloadCacheNotEventObservations(t *testing.T) {
+	s := &store{dir: t.TempDir()}
+	s.payloadCache = payloadsPage{UniqueTotal: 313}
+	s.payloadCacheAt = time.Now()
+	s.rebuild()
+
+	snap := s.get()
+	if snap.UniquePayloads != 313 {
+		t.Fatalf("UniquePayloads = %d, want 313 (from the payload cache)", snap.UniquePayloads)
+	}
+	if snap.UniquePayloads == snap.Downloads && snap.Downloads != 313 {
+		t.Fatalf("UniquePayloads must not be confused with Downloads: %+v", snap)
+	}
+}
