@@ -110,7 +110,7 @@ YAML file into a general-purpose provisioner.
 
 ## VPS: no equivalent template
 
-The VPS (`87.106.162.235`) is a single 120G virtio disk (`vda`), plain GPT
+The VPS (`YOUR.VPS.IP.HERE`, matching vps/.env.example's SURICATA_HOME_NET convention) is a single 120G virtio disk (`vda`), plain GPT
 with root/boot/ESP partitions, no RAID, no extra mounts — it was
 provisioned from the hosting provider's stock image, not PXE/ISO
 autoinstall, so there's no autoinstall config to generate for it. If the

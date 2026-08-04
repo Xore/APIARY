@@ -1,7 +1,7 @@
 # Research: full-installation smoke test (#518)
 
 Live-system findings from the actual homeserver (`supermicro`) and VPS
-(`87.106.162.235`), gathered 2026-08-04 to inform the smoke-test plan and
+(`YOUR.VPS.IP.HERE`, matching vps/.env.example's SURICATA_HOME_NET convention), gathered 2026-08-04 to inform the smoke-test plan and
 the eventual single install script. This is a snapshot, not a design —
 treat it as ground truth to reconcile the design docs against, not as
 something to keep updating by hand.
@@ -78,7 +78,7 @@ autoinstall template to reproduce it are in the new
 
 ## 4. VPS — reachable, Traefik/portbridge/Suricata healthy, no Wireshark yet
 
-VPS admin access is `ssh -p 2222 root@87.106.162.235` (key-based). The
+VPS admin access is `ssh -p 2222 root@YOUR.VPS.IP.HERE` (key-based). The
 **port 22 host-key mismatch is expected, not an incident**: port 22 on the
 VPS public IP is bound by `portbridge` (`ss -tlnp` shows
 `*:22 users:(("portbridge",...))`), which tunnels it to the home Cowrie SSH
@@ -135,7 +135,7 @@ under the `xore` user (only `root`'s `/root/.ssh/strato_vps` key existed,
 readable via this box's passwordless-sudo group membership). Per explicit
 user instruction, that key was copied to `~/.ssh/vps_strato_key` under
 `xore` and an `ssh vps` config alias was added
-(`HostName 87.106.162.235`, `Port 2222`, `User root`), with the known-host
+(`HostName YOUR.VPS.IP.HERE`, `Port 2222`, `User root`), with the known-host
 fingerprint carried over from `root`'s already-trusted `[10.8.0.1]:2222`
 entry (not blindly accepted). **This duplicates a production-root key into
 a second location** — worth a deliberate decision during the smoke-test
