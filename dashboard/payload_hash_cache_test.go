@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // TestPayloadPathBySHA256CachesAndInvalidates (#364): payloadPathBySHA256 is
@@ -72,5 +73,60 @@ func TestPayloadPathBySHA256CachesAndInvalidates(t *testing.T) {
 	s.hashPathMu.Unlock()
 	if stillCached {
 		t.Fatal("cache entry for a deleted file must be evicted, not left dangling")
+	}
+}
+
+// TestPayloadPathBySHA256CachesNegativeMiss (#516): a hash that never
+// resolves -- deleted, pruned, or never captured (a sandbox job seeded from
+// a smoke-test sample, the reported case) -- has no successful resolution
+// for TestPayloadPathBySHA256CachesAndInvalidates's cache to ever hold, so
+// every request paid the full content-hash scan again with nothing to break
+// the cycle. Confirmed live as a 30s+ page load. A missed lookup must be
+// remembered for hashPathMissTTL so a repeat request for the same
+// still-missing hash is cheap too.
+func TestPayloadPathBySHA256CachesNegativeMiss(t *testing.T) {
+	dir := t.TempDir()
+	content := []byte("captured after the first miss")
+	sum := sha256.Sum256(content)
+	want := hex.EncodeToString(sum[:])
+
+	s := &store{payloadDirs: []string{dir}}
+
+	if _, err := s.payloadPathBySHA256(want); err == nil {
+		t.Fatal("empty payloadDirs must not resolve a hash that was never captured")
+	}
+	s.hashPathMu.Lock()
+	missedAt, missed := s.hashPathMiss[want]
+	s.hashPathMu.Unlock()
+	if !missed {
+		t.Fatal("a scan that finds nothing must record a miss")
+	}
+
+	// A file matching the hash now exists, but the miss is still within TTL
+	// -- this must return not-found from the cache, not rescan and find it.
+	// Proves the second call actually skipped the scan (which would have
+	// found this file) rather than coincidentally missing again.
+	mdNamed := filepath.Join(dir, "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4")
+	if err := os.WriteFile(mdNamed, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.payloadPathBySHA256(want); err == nil {
+		t.Fatal("a miss within hashPathMissTTL must not be re-scanned")
+	}
+
+	// Once the miss has aged past the TTL, the next call must rescan and
+	// find the now-present file rather than trusting the stale miss forever.
+	s.hashPathMu.Lock()
+	s.hashPathMiss[want] = missedAt.Add(-hashPathMissTTL - time.Second)
+	s.hashPathMu.Unlock()
+	path, err := s.payloadPathBySHA256(want)
+	if err != nil || path != mdNamed {
+		t.Fatalf("resolution after the miss TTL expired: path=%q err=%v, want %q", path, err, mdNamed)
+	}
+	s.hashPathMu.Lock()
+	_, stillMissed := s.hashPathMiss[want]
+	s.hashPathMu.Unlock()
+	if stillMissed {
+		t.Fatal("a successful resolution must clear the stale miss entry")
 	}
 }
