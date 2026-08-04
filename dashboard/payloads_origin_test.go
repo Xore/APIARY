@@ -83,7 +83,7 @@ func TestPayloadsPageRendersAsCardGrid(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s := &store{payloadDirs: []string{dir}}
+	s := &store{payloadDirs: []string{dir}, es: newESClient("http://127.0.0.1:1", "")}
 	s.payloadCache = s.scanPayloads()
 	s.payloadCacheAt = time.Now()
 
@@ -124,7 +124,7 @@ func TestPayloadsPageResultsUseGenericLazyListContract(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s := &store{payloadDirs: []string{dir}}
+	s := &store{payloadDirs: []string{dir}, es: newESClient("http://127.0.0.1:1", "")}
 	s.payloadCache = s.scanPayloads()
 	s.payloadCacheAt = time.Now()
 

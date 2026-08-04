@@ -408,6 +408,44 @@ curl -fsS -X PUT "$es_url/_index_template/dashboard-static-analysis" \
   }
 }' >/dev/null
 
+# Payload inventory (#483, payloads_data.go's scanPayloads/indexPayloadInventory):
+# Elasticsearch is now the sole source /payloads reads from -- no local
+# disk-scan fallback (see payloadInventoryIndex's own comment in
+# payloads_data.go). Documents are the same capturedFile shape scanPayloads
+# has always built, keyed by hash; Preview is a hex-dump of a capped 512-byte
+# head, never raw payload bytes, backstopped by docIndexMaxBytes at write
+# time. Every dashboard instance's own periodic disk scan indexes into this
+# same index, so mount-path differences between instances don't affect what
+# any instance serves.
+curl -fsS -X PUT "$es_url/_index_template/dashboard-payload-inventory" \
+  -H 'Content-Type: application/json' \
+  --data-binary '{
+  "index_patterns": ["dashboard-payload-inventory-v1"],
+  "priority": 460,
+  "template": {
+    "settings": {
+      "index.number_of_replicas": 0,
+      "index.refresh_interval": "30s",
+      "index.mapping.total_fields.limit": 200
+    },
+    "mappings": {
+      "properties": {
+        "Hash": { "type": "keyword" },
+        "Size": { "type": "long" },
+        "Mtime": { "type": "keyword" },
+        "MIME": { "type": "keyword" },
+        "Kind": { "type": "keyword" },
+        "KindCode": { "type": "keyword" },
+        "Platform": { "type": "keyword" },
+        "Dynamic": { "type": "boolean" },
+        "Sources": { "type": "keyword" },
+        "Copies": { "type": "integer" },
+        "PreviewTruncated": { "type": "boolean" }
+      }
+    }
+  }
+}' >/dev/null
+
 curl -fsS -X PUT "$es_url/_index_template/honeypot-dead-letter" \
   -H 'Content-Type: application/json' \
   --data-binary '{"index_patterns":["dead-letter-honeypot*"],"priority":450,"template":{"settings":{"index.lifecycle.name":"dead-letter-60d","index.number_of_replicas":0}}}' >/dev/null

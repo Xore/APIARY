@@ -30,7 +30,10 @@ func TestPayloadPreviewModalContract(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s := &store{payloadDirs: []string{dir}}
+	// #483: payloadsData's Enabled flag now also requires a configured ES
+	// client -- unreachable is fine here since payloadCacheAt is seeded
+	// fresh below, so refreshPayloadCacheAsync's own goroutine never fires.
+	s := &store{payloadDirs: []string{dir}, es: newESClient("http://127.0.0.1:1", "")}
 	s.payloadCache = s.scanPayloads()
 	s.payloadCacheAt = time.Now()
 

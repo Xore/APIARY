@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -198,7 +199,11 @@ func (s *store) payloadsData(f payloadsFilter) payloadsPage {
 	defer s.payloadMu.Unlock()
 	base := s.payloadCache
 	p := payloadsPage{
-		Generated: time.Now(), Enabled: len(s.payloadDirs) != 0,
+		// #483: Enabled also requires s.es != nil -- Elasticsearch is now
+		// mandatory stack infrastructure for this page, not an optional
+		// enhancement over a local disk scan (see payloadInventoryIndex's
+		// own comment for why there is deliberately no fallback).
+		Generated: time.Now(), Enabled: len(s.payloadDirs) != 0 && s.es != nil,
 		Loading: s.payloadCacheAt.IsZero() && s.payloadRefreshing,
 		Filter:  source, UniqueTotal: base.UniqueTotal,
 		Sources: append([]payloadSourceStat(nil), base.Sources...),
@@ -265,9 +270,92 @@ func (s *store) payloadsData(f payloadsFilter) payloadsPage {
 
 const payloadCacheTTL = 2 * time.Minute
 
-// refreshPayloadCacheAsync keeps slow volume walks off the HTTP request path.
-// Existing inventory remains available while a refresh is running.
+// payloadInventoryIndex (#483, #494-pattern -- no local fallback) is the
+// Elasticsearch index the dashboard's own payload-metadata indexer writes
+// to and every /payloads read now comes from, replacing the old
+// disk-scan-straight-into-an-in-process-cache design. Elasticsearch is now
+// mandatory stack infrastructure, not an optional enhancement: with no ES
+// client configured, payload listing is unavailable rather than falling
+// back to a direct disk scan (see refreshPayloadCacheAsync/payloadsData's
+// own Enabled check).
+//
+// Documents are the same capturedFile shape scanPayloads has always built,
+// keyed by hash -- deliberately reusing the type rather than inventing a
+// parallel one. Raw payload bytes never appear here (only the bounded
+// preview/classification summary scanPayloads already computed), and
+// docIndex's own docIndexMaxBytes guard backstops that structurally.
+const payloadInventoryIndex = "dashboard-payload-inventory-v1"
+
+// indexPayloadInventory upserts every freshly-scanned file into
+// payloadInventoryIndex, skipping any file whose stored document already
+// matches (the common case on a repeat scan of an unchanged capture
+// directory) to avoid a write on every single file every TTL tick. Best
+// effort throughout: a lost race against another instance's own scan of the
+// same file, or a write conflict, just means this cycle's write is skipped
+// and the next scan tries again -- this is a disk-backed metadata cache, not
+// state anything depends on being durable moment-to-moment.
+func indexPayloadInventory(es *esClient, files []capturedFile) {
+	for _, file := range files {
+		fresh, err := json.Marshal(file)
+		if err != nil {
+			continue
+		}
+		hit, found, err := es.docGet(payloadInventoryIndex, file.Hash)
+		if err != nil {
+			continue
+		}
+		if found && string(hit.Source) == string(fresh) {
+			continue
+		}
+		_ = es.docIndex(payloadInventoryIndex, file.Hash, fresh, !found, hit.SeqNo, hit.PrimaryTerm)
+	}
+}
+
+// readPayloadInventory rebuilds a payloadsPage entirely from
+// payloadInventoryIndex -- the per-source counts and unique/total sums are
+// recomputed here rather than trusted from any one instance's own scan, so
+// the served page reflects every document any instance has ever indexed,
+// not just what this instance's own disk walk just found.
+func readPayloadInventory(es *esClient) (payloadsPage, error) {
+	hits, err := es.docSearchAll(payloadInventoryIndex, 10000)
+	if err != nil {
+		return payloadsPage{}, err
+	}
+	p := payloadsPage{Generated: time.Now(), Enabled: true}
+	sourceCounts := map[string]int{}
+	var total int64
+	for _, hit := range hits {
+		var file capturedFile
+		if json.Unmarshal(hit.Source, &file) != nil {
+			continue
+		}
+		for _, source := range file.Sources {
+			sourceCounts[source]++
+		}
+		p.UniqueTotal++
+		total += file.Size
+		p.Files = append(p.Files, file)
+	}
+	for source, count := range sourceCounts {
+		p.Sources = append(p.Sources, payloadSourceStat{
+			Name: source, Count: count, Link: "/payloads?source=" + url.QueryEscape(source),
+		})
+	}
+	sort.Slice(p.Sources, func(i, j int) bool { return p.Sources[i].Name < p.Sources[j].Name })
+	sort.Slice(p.Files, func(i, j int) bool { return p.Files[i].Mtime > p.Files[j].Mtime })
+	p.TotalH = humanBytes(total)
+	return p, nil
+}
+
+// refreshPayloadCacheAsync keeps slow volume walks and Elasticsearch
+// round-trips off the HTTP request path. Existing inventory remains
+// available while a refresh is running. A no-op entirely when Elasticsearch
+// isn't configured -- see payloadInventoryIndex's own comment for why there
+// is deliberately no disk-scan fallback to fall back to.
 func (s *store) refreshPayloadCacheAsync() {
+	if s.es == nil {
+		return
+	}
 	s.payloadMu.Lock()
 	if s.payloadRefreshing || (!s.payloadCacheAt.IsZero() && time.Since(s.payloadCacheAt) < payloadCacheTTL) {
 		s.payloadMu.Unlock()
@@ -276,7 +364,19 @@ func (s *store) refreshPayloadCacheAsync() {
 	s.payloadRefreshing = true
 	s.payloadMu.Unlock()
 	go func() {
-		fresh := s.scanPayloads()
+		scanned := s.scanPayloads()
+		indexPayloadInventory(s.es, scanned.Files)
+		fresh, err := readPayloadInventory(s.es)
+		if err != nil {
+			// Elasticsearch is unreachable this cycle -- keep serving
+			// whatever the last successful read produced (the same
+			// graceful-degrade-by-omission fetchESOverview already uses for
+			// one bad cycle) rather than blanking the page.
+			s.payloadMu.Lock()
+			s.payloadRefreshing = false
+			s.payloadMu.Unlock()
+			return
+		}
 		s.payloadMu.Lock()
 		s.payloadCache = fresh
 		s.payloadCacheAt = time.Now()
