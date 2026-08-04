@@ -501,7 +501,7 @@ All gateway services run as Docker containers on the same host, connected
 to the `virbr-sandbox` bridge. No container has outbound internet access.
 
 ```yaml
-# Key services (all on sandbox-net, no WAN routing):
+# Key services (all on the "sandbox" macvlan network, no WAN routing):
 inetsim:    # fake DNS/HTTP/HTTPS/SMTP/FTP/IRC — responds to everything
 mitmproxy:  # SSL intercept of HTTP/S, logs full request/response + bodies
 zeek:       # protocol analysis (conn.log, dns.log, http.log, files.log)
