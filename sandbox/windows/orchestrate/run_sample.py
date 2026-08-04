@@ -472,12 +472,31 @@ def regshot_after():
 
 def stop_procmon():
     winrm_run('Stop-Process -Name Procmon64 -Force -ErrorAction SilentlyContinue')
-    # Export to CSV
-    run_and_wait_via_cim(
-        'C:\\Tools\\SysinternalsSuite\\Procmon64.exe '
-        '/OpenLog C:\\Logs\\procmon.pml /SaveAs C:\\Logs\\procmon.csv /Quiet'
-    )
-    log.info('ProcMon stopped + exported to CSV')
+    # Export to CSV. Originally assumed a too-short timeout (a real 30min
+    # capture didn't finish exporting within 60s) -- that theory is wrong.
+    # Confirmed live: a *tiny* (~20s) capture's export still hadn't finished
+    # after 300s, in both Session 0 (CIM launch) and Session 1 (scheduled
+    # task, LogonType Interactive) -- ruling out both "just needs more time
+    # for a big file" and the Session-0-vs-interactive pattern that explained
+    # Regshot's and the GHOSTS client's hangs. The process stays
+    # Responding=True with no visible window/dialog the whole time, so it
+    # isn't stuck on an un-dismissable prompt either. Root cause not found;
+    # tracked as a real bug rather than guessed at further live. Not fatal:
+    # a missing procmon.csv is far better than losing the entire report,
+    # same philosophy as Regshot's MISSING marker when that tool wasn't
+    # installed -- this is the one non-essential step in the whole sequence
+    # (Sysmon + registry snapshots + autoruns diff cover most of the same
+    # ground) and must not cost every other artifact a fully successful run
+    # already produced.
+    try:
+        run_and_wait_via_cim(
+            'C:\\Tools\\SysinternalsSuite\\Procmon64.exe '
+            '/OpenLog C:\\Logs\\procmon.pml /SaveAs C:\\Logs\\procmon.csv /Quiet',
+            poll_timeout=300,
+        )
+        log.info('ProcMon stopped + exported to CSV')
+    except Exception:
+        log.error('ProcMon CSV export failed or timed out -- continuing without it', exc_info=True)
 
 
 def collect_artifacts(sha: str, out_dir: Path):
