@@ -22,8 +22,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -340,6 +338,12 @@ type reportDefinition struct {
 // generatedReport is the metadata for one produced PDF. The definition
 // fields are snapshots, so a generated report stays meaningful after its
 // definition is changed or deleted.
+//
+// #475: metadata and PDF bytes both live in Elasticsearch
+// (generatedReportIndex), not this struct's own document -- generatedReport
+// itself is still the shape served over the API and rendered by the
+// designer's generated-history list; storedGeneratedReport (reports_es.go)
+// is the ES-side wrapper that adds the base64 PDF payload.
 type generatedReport struct {
 	ID           string    `json:"id"`
 	DefinitionID string    `json:"definition_id,omitempty"`
@@ -347,16 +351,16 @@ type generatedReport struct {
 	Template     string    `json:"template"`
 	Theme        string    `json:"theme"`
 	Title        string    `json:"title"`
-	File         string    `json:"file"`
 	SizeBytes    int64     `json:"size_bytes"`
 	CreatedAt    time.Time `json:"created_at"`
 	Origin       string    `json:"origin"` // manual | schedule
 }
 
-// reportsDocument is the persisted state of the Reports studio.
+// reportsDocument is the persisted state of the Reports studio's saved
+// definitions. Generated reports (#475) live in Elasticsearch instead, not
+// this document -- see generatedReportIndex.
 type reportsDocument struct {
 	Definitions []reportDefinition `json:"definitions"`
-	Generated   []generatedReport  `json:"generated"`
 }
 
 func newReportID(prefix string) string {
@@ -502,9 +506,6 @@ func validateReportsDocument(doc reportsDocument) error {
 	if len(doc.Definitions) > maxReportDefinitions {
 		return fmt.Errorf("too many report definitions (max %d)", maxReportDefinitions)
 	}
-	if len(doc.Generated) > maxGeneratedReportsDefault {
-		return fmt.Errorf("too many generated report records (max %d)", maxGeneratedReportsDefault)
-	}
 	ids := map[string]bool{}
 	for _, def := range doc.Definitions {
 		if !validReportID(def.ID, "rep_") || def.Created.IsZero() || def.Updated.IsZero() {
@@ -518,29 +519,23 @@ func validateReportsDocument(doc reportsDocument) error {
 			return err
 		}
 	}
-	for _, gen := range doc.Generated {
-		if !validReportID(gen.ID, "gen_") || gen.CreatedAt.IsZero() {
-			return errors.New("generated report has an invalid id or timestamp")
-		}
-		if gen.File != gen.ID+".pdf" || gen.SizeBytes < 0 {
-			return errors.New("generated report has an invalid file reference")
-		}
-		if gen.Origin != "manual" && gen.Origin != "schedule" {
-			return errors.New("generated report has an invalid origin")
-		}
-	}
 	return nil
 }
 
-// reportStore owns the definitions document and the generated PDF files.
+// reportStore owns the definitions document (local, unchanged) and generated
+// PDF reports (#475: Elasticsearch, via es -- see reports_es.go). es may be
+// nil (Elasticsearch not configured): definitions CRUD keeps working, but
+// every generated-report method returns errReportsStorageUnavailable rather
+// than falling back to local disk -- no local fallback, by design, the same
+// as #494's alert state.
 type reportStore struct {
 	inner        *atomicSettingsStore[reportsDocument]
-	dir          string
+	es           *esClient
 	maxGenerated int
 }
 
-func newReportStore(path, dir string) *reportStore {
-	store := &reportStore{dir: dir, maxGenerated: maxGeneratedReportsDefault}
+func newReportStore(path string, es *esClient) *reportStore {
+	store := &reportStore{es: es, maxGenerated: maxGeneratedReportsDefault}
 	store.inner = newAtomicSettingsStore(path, reportsDocument{}, validateReportsDocument)
 	if store.inner.Degraded() {
 		fmt.Printf("dashboard: reports store at %s unreadable — serving defaults read-only\n", path)
@@ -653,78 +648,6 @@ func (rs *reportStore) markScheduledRun(id string, ranAt time.Time, success bool
 	})
 }
 
-// addGenerated persists the PDF file first, then records its metadata and
-// prunes the generated history to the retention cap. Files pruned from the
-// document are removed from disk only after the metadata update succeeded.
-func (rs *reportStore) addGenerated(meta generatedReport, pdf []byte) (generatedReport, string, error) {
-	if len(pdf) == 0 {
-		return generatedReport{}, "", errors.New("refusing to record an empty report PDF")
-	}
-	meta.ID = newReportID("gen_")
-	meta.File = meta.ID + ".pdf"
-	meta.SizeBytes = int64(len(pdf))
-	meta.CreatedAt = time.Now().UTC()
-	if meta.Origin == "" {
-		meta.Origin = "manual"
-	}
-	if err := os.MkdirAll(rs.dir, 0o750); err != nil {
-		return generatedReport{}, "", fmt.Errorf("create reports directory: %w", err)
-	}
-	if err := atomicWriteFile(filepath.Join(rs.dir, meta.File), pdf); err != nil {
-		return generatedReport{}, "", fmt.Errorf("persist report PDF: %w", err)
-	}
-	var pruned []string
-	etag, _, err := rs.inner.Update("", func(doc *reportsDocument) error {
-		doc.Generated = append(doc.Generated, meta)
-		for len(doc.Generated) > rs.maxGenerated {
-			pruned = append(pruned, doc.Generated[0].File)
-			doc.Generated = doc.Generated[1:]
-		}
-		return nil
-	})
-	if err != nil {
-		_ = os.Remove(filepath.Join(rs.dir, meta.File))
-		return generatedReport{}, "", err
-	}
-	for _, file := range pruned {
-		_ = os.Remove(filepath.Join(rs.dir, file))
-	}
-	return meta, etag, nil
-}
-
-func (rs *reportStore) generated(id string) (generatedReport, bool) {
-	doc, _ := rs.inner.Get()
-	for _, gen := range doc.Generated {
-		if gen.ID == id {
-			return gen, true
-		}
-	}
-	return generatedReport{}, false
-}
-
-// generatedPath resolves the on-disk location of a generated report. The file
-// name is derived from the validated id pattern, so it cannot escape dir.
-func (rs *reportStore) generatedPath(meta generatedReport) string {
-	return filepath.Join(rs.dir, meta.ID+".pdf")
-}
-
-func (rs *reportStore) deleteGenerated(ifMatch, id string) error {
-	meta, ok := rs.generated(id)
-	if !ok {
-		return fmt.Errorf("%w: no generated report with this id", errUnknownRecord)
-	}
-	_, _, err := rs.inner.Update(ifMatch, func(doc *reportsDocument) error {
-		for index, existing := range doc.Generated {
-			if existing.ID == id {
-				doc.Generated = append(doc.Generated[:index], doc.Generated[index+1:]...)
-				return nil
-			}
-		}
-		return fmt.Errorf("%w: no generated report with this id", errUnknownRecord)
-	})
-	if err != nil {
-		return err
-	}
-	_ = os.Remove(rs.generatedPath(meta))
-	return nil
-}
+// Generated-report storage (metadata + PDF bytes) moved to Elasticsearch --
+// see reports_es.go for addGenerated/generated/generatedPDF/deleteGenerated/
+// listGenerated and the #475 design comment on generatedReportIndex.

@@ -98,8 +98,12 @@ func TestScheduledReportLifecycle(t *testing.T) {
 	s.runDueReports()
 
 	doc, _ := s.reports.document()
-	if len(doc.Generated) != 1 || doc.Generated[0].Origin != "schedule" || doc.Generated[0].DefinitionID != created.ID {
-		t.Fatalf("scheduled run artifacts = %+v, want one origin=schedule report", doc.Generated)
+	generated, err := s.reports.listGenerated()
+	if err != nil {
+		t.Fatalf("listGenerated: %v", err)
+	}
+	if len(generated) != 1 || generated[0].Origin != "schedule" || generated[0].DefinitionID != created.ID {
+		t.Fatalf("scheduled run artifacts = %+v, want one origin=schedule report", generated)
 	}
 	after := doc.Definitions[0].Schedule
 	if after.LastRunAt.IsZero() {
@@ -126,8 +130,12 @@ func TestScheduledReportLifecycle(t *testing.T) {
 	}
 	s.runDueReports()
 	doc, _ = s.reports.document()
-	if len(doc.Generated) != 1 {
-		t.Fatalf("failed run must not produce artifacts, have %+v", doc.Generated)
+	generated, err = s.reports.listGenerated()
+	if err != nil {
+		t.Fatalf("listGenerated: %v", err)
+	}
+	if len(generated) != 1 {
+		t.Fatalf("failed run must not produce artifacts, have %+v", generated)
 	}
 	failing := doc.Definitions[1].Schedule
 	if !failing.LastRunAt.IsZero() {

@@ -27,7 +27,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 )
@@ -74,6 +73,8 @@ func writeReportStoreError(w http.ResponseWriter, err error) {
 		http.Error(w, "no reports record yet; reload the page first", http.StatusNotFound)
 	case errors.Is(err, errStoreReadOnly):
 		http.Error(w, "reports store is read-only; contact an administrator", http.StatusServiceUnavailable)
+	case errors.Is(err, errReportsStorageUnavailable):
+		http.Error(w, "generated-report storage is unavailable; Elasticsearch is not configured", http.StatusServiceUnavailable)
 	default:
 		http.Error(w, "report definition could not be saved", http.StatusInternalServerError)
 	}
@@ -349,13 +350,17 @@ func (s *store) serveReportsGenerated(w http.ResponseWriter, r *http.Request) {
 	if !s.reportStudioGuard(w, r, false) {
 		return
 	}
-	doc, etag := s.reports.document()
-	// The document stores oldest first; the API serves newest first.
-	ordered := make([]generatedReport, 0, len(doc.Generated))
-	for index := len(doc.Generated) - 1; index >= 0; index-- {
-		ordered = append(ordered, doc.Generated[index])
+	all, err := s.reports.listGenerated()
+	if err != nil {
+		writeReportStoreError(w, err)
+		return
 	}
-	writeReportsJSON(w, etag, http.StatusOK, map[string]any{"generated": ordered})
+	// listGenerated returns oldest first; the API serves newest first.
+	ordered := make([]generatedReport, len(all))
+	for index, meta := range all {
+		ordered[len(all)-1-index] = meta
+	}
+	writeReportsJSON(w, "", http.StatusOK, map[string]any{"generated": ordered})
 }
 
 func (s *store) serveReportGeneratedByID(w http.ResponseWriter, r *http.Request) {
@@ -382,12 +387,11 @@ func (s *store) serveReportGeneratedByID(w http.ResponseWriter, r *http.Request)
 		if !s.reportStudioGuard(w, r, true) {
 			return
 		}
-		if err := s.reports.deleteGenerated(r.Header.Get("If-Match"), id); err != nil {
+		if err := s.reports.deleteGenerated(id); err != nil {
 			writeReportStoreError(w, err)
 			return
 		}
-		_, etag := s.reports.document()
-		writeReportsJSON(w, etag, http.StatusOK, map[string]any{"deleted": id})
+		writeReportsJSON(w, "", http.StatusOK, map[string]any{"deleted": id})
 	default:
 		http.NotFound(w, r)
 	}
@@ -397,14 +401,13 @@ func (s *store) serveGeneratedPDF(w http.ResponseWriter, r *http.Request, id str
 	if !s.reportStudioGuard(w, r, false) {
 		return
 	}
-	meta, ok := s.reports.generated(id)
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	body, err := os.ReadFile(s.reports.generatedPath(meta))
+	meta, body, err := s.reports.generatedPDF(id)
 	if err != nil {
-		http.Error(w, "generated report file is no longer available", http.StatusGone)
+		if errors.Is(err, errUnknownRecord) {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, "generated report is no longer available", http.StatusGone)
 		return
 	}
 	disposition := "inline"

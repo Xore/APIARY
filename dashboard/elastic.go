@@ -221,8 +221,18 @@ var errESConflict = fmt.Errorf("elasticsearch: concurrent write conflict")
 const docIndexMaxBytes = 2 << 20 // 2MB
 
 func (c *esClient) docIndex(index, id string, doc []byte, create bool, seqNo, primaryTerm int64) error {
-	if len(doc) > docIndexMaxBytes {
-		return fmt.Errorf("elasticsearch: document for %s/%s is %d bytes, over the %d-byte dashboard-index cap -- this index is for bookkeeping/cache records, not large blobs", index, id, len(doc), docIndexMaxBytes)
+	return c.docIndexSized(index, id, doc, docIndexMaxBytes, create, seqNo, primaryTerm)
+}
+
+// docIndexSized is docIndex with an explicit, caller-chosen size cap instead
+// of the default docIndexMaxBytes -- an opt-in escape hatch for the rare
+// dashboard-owned document that is legitimately larger than a bookkeeping
+// record (e.g. #475's generated PDF reports, base64-encoded), never a way to
+// silently bypass the guard: every caller still states its own ceiling
+// explicitly at the call site rather than passing no limit at all.
+func (c *esClient) docIndexSized(index, id string, doc []byte, maxBytes int, create bool, seqNo, primaryTerm int64) error {
+	if len(doc) > maxBytes {
+		return fmt.Errorf("elasticsearch: document for %s/%s is %d bytes, over the %d-byte cap for this index", index, id, len(doc), maxBytes)
 	}
 	path := "/" + index + "/_doc/" + url.PathEscape(id)
 	if create {
@@ -239,6 +249,23 @@ func (c *esClient) docIndex(index, id string, doc []byte, create bool, seqNo, pr
 	}
 	if status/100 != 2 {
 		return fmt.Errorf("Elasticsearch PUT %s: status %d: %s", index, status, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+// docDelete removes one document from a dashboard-owned index. A 404 (doc
+// doesn't exist) is treated as success -- deleting something already gone
+// is the desired end state, not a failure to report.
+func (c *esClient) docDelete(index, id string) error {
+	status, body, err := c.doRequest(http.MethodDelete, "/"+index+"/_doc/"+url.PathEscape(id), nil)
+	if err != nil {
+		return err
+	}
+	if status == http.StatusNotFound {
+		return nil
+	}
+	if status/100 != 2 {
+		return fmt.Errorf("Elasticsearch DELETE %s: status %d: %s", index, status, strings.TrimSpace(string(body)))
 	}
 	return nil
 }

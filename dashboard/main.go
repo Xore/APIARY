@@ -133,10 +133,10 @@ func main() {
 		getenv("DASHBOARD_AUDIT_FILE", "/state/dashboard-audit.jsonl"),
 		getenv("DASHBOARD_CONFIG_HISTORY_FILE", "/state/dashboard-config-history.jsonl"),
 	)
-	s.reports = newReportStore(
-		getenv("DASHBOARD_REPORTS_FILE", "/state/reports.json"),
-		getenv("DASHBOARD_REPORTS_DIR", "/state/reports"),
-	)
+	// #475: generated PDF reports are Elasticsearch-only, no local fallback
+	// -- s.es is nil (Elasticsearch not configured) leaves definitions CRUD
+	// working but generated-report methods return errReportsStorageUnavailable.
+	s.reports = newReportStore(getenv("DASHBOARD_REPORTS_FILE", "/state/reports.json"), s.es)
 	s.workbench = newWorkbenchService(getenv("ANALYSIS_WORKBENCH_DIR", "/state/analysis-workbench"))
 	// #353: rebuild() walks every log file under LOG_DIR and used to run
 	// synchronously here, before any route was even registered -- the

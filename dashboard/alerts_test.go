@@ -14,12 +14,13 @@ import (
 )
 
 // memESDocStore is a minimal in-memory stand-in for Elasticsearch's document
-// CRUD API (GET/_doc, PUT/_doc with op_type=create or if_seq_no/
-// if_primary_term, and a plain _search) -- just enough of the real
-// contract for alertManager's docGet/docIndex/docSearchAll calls to
-// round-trip against in a test, including the optimistic-concurrency
-// version_conflict_engine_exception (409) both a losing create and a losing
-// conditional update get in real Elasticsearch.
+// CRUD API (GET/PUT/DELETE on _doc, PUT with op_type=create or if_seq_no/
+// if_primary_term, and a plain _search) -- just enough of the real contract
+// for docGet/docIndex/docDelete/docSearchAll to round-trip against in a
+// test (used by alertManager, the static-analysis cache, payload inventory,
+// and #475's generated-report storage), including the optimistic-
+// concurrency version_conflict_engine_exception (409) both a losing create
+// and a losing conditional update get in real Elasticsearch.
 type memESDocStore struct {
 	mu   sync.Mutex
 	docs map[string]memESDoc // index+"/"+id -> doc
@@ -85,6 +86,14 @@ func (m *memESDocStore) handler() http.HandlerFunc {
 				}
 				m.docs[key] = memESDoc{seqNo: doc.seqNo + 1, primaryTerm: doc.primaryTerm, source: body}
 				fmt.Fprint(w, `{"result":"updated"}`)
+			case http.MethodDelete:
+				if _, exists := m.docs[key]; !exists {
+					w.WriteHeader(http.StatusNotFound)
+					fmt.Fprint(w, `{"result":"not_found"}`)
+					return
+				}
+				delete(m.docs, key)
+				fmt.Fprint(w, `{"result":"deleted"}`)
 			default:
 				http.Error(w, "unsupported method", http.StatusMethodNotAllowed)
 			}
