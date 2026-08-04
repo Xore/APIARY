@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -20,7 +21,6 @@ func newWorkbenchFixture(t *testing.T, sample []byte) (*store, string) {
 	t.Helper()
 	root := t.TempDir()
 	payloads := filepath.Join(root, "payloads")
-	workbench := filepath.Join(root, "workbench")
 	if err := os.MkdirAll(payloads, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +28,11 @@ func newWorkbenchFixture(t *testing.T, sample []byte) (*store, string) {
 		t.Fatal(err)
 	}
 	t.Setenv("DASHBOARD_REQUIRE_ADMIN", "false")
-	return &store{payloadDirs: []string{payloads}, workbench: newWorkbenchService(workbench)}, root
+	esStore := newMemESDocStore()
+	esSrv := httptest.NewServer(esStore.handler())
+	t.Cleanup(esSrv.Close)
+	es := newESClient(esSrv.URL, "")
+	return &store{payloadDirs: []string{payloads}, es: es, workbench: newWorkbenchService(es)}, root
 }
 
 func deterministicSelection() []workbenchSelection {
@@ -52,8 +56,44 @@ func TestWorkbenchDeterministicRunAndIdempotency(t *testing.T) {
 	if err != nil || !reused || again.ID != run.ID {
 		t.Fatalf("duplicate run = %#v reused=%v err=%v, want same id", again, reused, err)
 	}
-	if files, err := os.ReadDir(s.workbench.runsDir()); err != nil || len(files) != 1 {
-		t.Fatalf("duplicate submission created extra records: files=%d err=%v", len(files), err)
+	count, err := s.workbench.countRuns()
+	if err != nil || count != 1 {
+		t.Fatalf("duplicate submission created extra records: count=%d err=%v", count, err)
+	}
+}
+
+func TestWorkbenchConcurrentDuplicateSubmissionsDedupe(t *testing.T) {
+	s, _ := newWorkbenchFixture(t, []byte("#!/bin/sh\ncurl http://example.invalid/x\n"))
+	request := workbenchRunRequest{PayloadSHA256: workbenchTestHash, RecipeName: "Static first", Analyzers: deterministicSelection()}
+
+	const goroutines = 8
+	ids := make([]string, goroutines)
+	errs := make([]error, goroutines)
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func(i int) {
+			defer wg.Done()
+			run, _, err := s.createWorkbenchRun(request, "owner-a")
+			ids[i] = run.ID
+			errs[i] = err
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("goroutine %d: unexpected error: %v", i, err)
+		}
+	}
+	for i, id := range ids {
+		if id == "" || id != ids[0] {
+			t.Fatalf("goroutine %d produced id %q, want all equal to %q", i, id, ids[0])
+		}
+	}
+	count, err := s.workbench.countRuns()
+	if err != nil || count != 1 {
+		t.Fatalf("concurrent duplicate submissions created extra records: count=%d err=%v", count, err)
 	}
 }
 
@@ -322,8 +362,8 @@ func TestWorkbenchHTTPRequiresSameOriginAndClosedJSON(t *testing.T) {
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("unknown endpoint field = %d body=%s, want 400", response.Code, response.Body.String())
 	}
-	if _, err := os.Stat(s.workbench.runsDir()); !os.IsNotExist(err) {
-		t.Fatalf("unsafe request created run state: %v", err)
+	if count, err := s.workbench.countRuns(); err != nil || count != 0 {
+		t.Fatalf("unsafe request created run state: count=%d err=%v", count, err)
 	}
 }
 
@@ -403,20 +443,19 @@ func TestReconcileWorkbenchRunSkipsWorkOnceEveryChildIsTerminal(t *testing.T) {
 		t.Fatalf("reconcile of an all-terminal run reported changed=true, should be a no-op: %+v", reconciled)
 	}
 
-	runPath := filepath.Join(s.workbench.runsDir(), run.ID+".json")
-	before, err := os.Stat(runPath)
-	if err != nil {
-		t.Fatal(err)
+	before, found, err := s.es.docGet(workbenchRunsIndex, run.ID)
+	if err != nil || !found {
+		t.Fatalf("docGet before: found=%v err=%v", found, err)
 	}
 	if _, err := s.getWorkbenchRun(run.ID, "owner-a"); err != nil {
 		t.Fatal(err)
 	}
-	after, err := os.Stat(runPath)
-	if err != nil {
-		t.Fatal(err)
+	after, found, err := s.es.docGet(workbenchRunsIndex, run.ID)
+	if err != nil || !found {
+		t.Fatalf("docGet after: found=%v err=%v", found, err)
 	}
-	if !before.ModTime().Equal(after.ModTime()) {
-		t.Fatalf("getWorkbenchRun rewrote an unchanged all-terminal run to disk: mtime %v -> %v", before.ModTime(), after.ModTime())
+	if before.SeqNo != after.SeqNo {
+		t.Fatalf("getWorkbenchRun rewrote an unchanged all-terminal run: seq_no %d -> %d", before.SeqNo, after.SeqNo)
 	}
 }
 
@@ -442,10 +481,10 @@ func TestWorkbenchTimeoutAndOwnerIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	run.Children[0].QueueDeadline = time.Now().Add(-time.Second)
-	s.workbench.mu.Lock()
-	err = s.workbench.persistRunLocked(run)
-	s.workbench.mu.Unlock()
-	if err != nil {
+	if _, err := s.workbench.updateRun(run.ID, "owner-a", func(current *workbenchRun) (bool, error) {
+		*current = run
+		return true, nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 	timed, err := s.getWorkbenchRun(run.ID, "owner-a")

@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -121,40 +120,53 @@ type workbenchAnalyzer struct {
 	OptionSchema    workbenchOptionSchema `json:"option_schema"`
 }
 
-// #405/#36 decision: workbench run/recipe state stays local-disk-only,
-// unlike ghidra/sandbox/github_analysis/revdeck's ES-mirror-with-
-// local-fallback pattern (#403/#404) -- deliberately, not by omission.
-//
-// Every one of those four is a read-only mirror of results an EXTERNAL
-// worker produces once and never revises; the dashboard only ever reads
-// them, so a few minutes of import lag just means a page is briefly stale,
-// never wrong. A workbench run is the opposite shape: this service is the
-// SOLE writer, mutates a run repeatedly over its lifecycle (queued ->
-// running -> completed/failed via persistRunLocked), and — critically —
-// findOrCreateRun's idempotency check (same owner + idempotency key returns
-// the existing run instead of submitting a duplicate analysis) depends on
-// seeing its own immediately-preceding write. An async ES mirror on a
-// multi-minute import interval cannot give two dashboard instances that
-// guarantee: both could miss each other's very-recent run and each submit
+// #405/#36 decision, superseded: workbench run/recipe state used to stay
+// local-disk-only, unlike ghidra/sandbox/github_analysis/revdeck's
+// ES-mirror-with-local-fallback pattern (#403/#404) -- deliberately, not by
+// omission. The reason was findOrCreateRun's idempotency check (same owner
+// + idempotency key returns the existing run instead of submitting a
+// duplicate analysis) needing read-your-own-write consistency an async,
+// multi-minute-interval ES *mirror* could not give across dashboard
+// instances: both could miss each other's very-recent run and each submit
 // the same expensive Ghidra/sandbox job.
 //
-// Real multi-instance support for this specific state needs either a
-// shared filesystem for w.root (outside this service's control) or a
-// genuinely synchronous store (not an async mirror) as the primary copy —
-// both bigger, riskier changes than the read-only migrations, and neither
-// is warranted by anything reported against this stack so far. Revisit if
-// that changes; don't silently re-decide this by adding an ES read path
-// here later without re-reading this comment first.
+// That comment itself named the fix: "a genuinely synchronous store (not an
+// async mirror) as the primary copy." This is that store (#405 follow-up):
+// a run's own document ID *is* its idempotency key (workbenchIdempotency),
+// so creating a run is one atomic Elasticsearch op_type=create -- a
+// concurrent duplicate submission collides on the same ID and gets the
+// existing run back (errESConflict -> docGet -> reused=true), the same
+// guarantee the old in-process sync.Mutex gave, now enforced by
+// Elasticsearch itself and therefore correct across multiple dashboard
+// instances too, which the mutex-based version never was (confirmed by
+// reading the old code: correctness there rested entirely on a single
+// process's mutex around a directory scan, nothing made it safe across
+// instances sharing the same w.root). Recipes get the analogous treatment:
+// each revision is its own document (recipeID+":"+revision), also written
+// via op_type=create, so two racing saves can't both claim the same
+// revision number -- see reports_es.go for the general shape this follows.
 type workbenchService struct {
-	mu   sync.Mutex
-	root string
+	es *esClient
+	// createMu serializes createWorkbenchRun's own check-then-submit-then-
+	// persist sequence within one process -- ES's atomic op_type=create on
+	// the run document (see createOrReuseRun, workbench_es.go) is what makes
+	// idempotent dedup safe across *processes*, but submitWorkbenchChild's
+	// side effects (creating a host-worker .request marker file) happen
+	// BEFORE that create call, so two goroutines in this same process racing
+	// an identical duplicate submission could otherwise both decide "not
+	// found yet" and both submit child jobs before either persists. This
+	// mutex closes that single-process window (the same guarantee the old
+	// global w.mu gave, just narrowed to the one code path that actually
+	// needs it -- reads and in-place run updates use per-document
+	// compare-and-swap instead and no longer serialize behind each other).
+	createMu sync.Mutex
 }
 
-func newWorkbenchService(root string) *workbenchService {
-	return &workbenchService{root: strings.TrimSpace(root)}
+func newWorkbenchService(es *esClient) *workbenchService {
+	return &workbenchService{es: es}
 }
 
-func (w *workbenchService) configured() bool { return w != nil && w.root != "" }
+func (w *workbenchService) configured() bool { return w != nil && w.es != nil }
 
 func defaultWorkbenchOptions(id string) workbenchOptions {
 	switch id {
@@ -323,38 +335,9 @@ func workbenchIdempotency(hash, recipeID string, revision int, owner string, sel
 	return hex.EncodeToString(sum[:])
 }
 
-func (w *workbenchService) recipesPath() string { return filepath.Join(w.root, "recipes.json") }
-func (w *workbenchService) runsDir() string     { return filepath.Join(w.root, "runs") }
-
-func readBoundedJSON(path string, value any) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		return err
-	}
-	if !info.Mode().IsRegular() || info.Size() > 1<<20 {
-		return errors.New("workbench document is not a bounded regular file")
-	}
-	body, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(body, value)
-}
-
-func (w *workbenchService) loadRecipesLocked() []workbenchRecipe {
-	var recipes []workbenchRecipe
-	if !w.configured() || readBoundedJSON(w.recipesPath(), &recipes) != nil {
-		return nil
-	}
-	valid := recipes[:0]
-	for _, recipe := range recipes {
-		if recipe.SchemaVersion == workbenchSchemaVersion && validWorkbenchID(recipe.ID, "recipe_") && recipe.Revision > 0 && recipe.Owner != "" {
-			valid = append(valid, recipe)
-		}
-	}
-	return valid
-}
-
+// validWorkbenchID checks a random, non-deterministic id (recipe ids: a
+// fresh recipe still gets a random id via randomWorkbenchID -- only run ids
+// became deterministic, see validWorkbenchRunID below).
 func validWorkbenchID(id, prefix string) bool {
 	if !strings.HasPrefix(id, prefix) || len(id) != len(prefix)+32 {
 		return false
@@ -363,169 +346,24 @@ func validWorkbenchID(id, prefix string) bool {
 	return err == nil
 }
 
-func (w *workbenchService) listRecipes(owner string) []workbenchRecipe {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	all := w.loadRecipesLocked()
-	visible := make([]workbenchRecipe, 0, len(all))
-	for _, recipe := range all {
-		if recipe.Scope == "shared" || recipe.Owner == owner {
-			visible = append(visible, recipe)
-		}
+// validWorkbenchRunID checks the deterministic "run_"+idempotencyKey shape
+// (64 hex chars, a SHA-256 digest) -- see workbenchIdempotency and the
+// package comment on workbenchService for why a run's id is its own
+// idempotency key rather than a random value.
+func validWorkbenchRunID(id string) bool {
+	const prefix = "run_"
+	if !strings.HasPrefix(id, prefix) || len(id) != len(prefix)+64 {
+		return false
 	}
-	sort.Slice(visible, func(i, j int) bool {
-		if visible[i].CreatedAt.Equal(visible[j].CreatedAt) {
-			return visible[i].Revision > visible[j].Revision
-		}
-		return visible[i].CreatedAt.After(visible[j].CreatedAt)
-	})
-	return visible
+	_, err := hex.DecodeString(strings.TrimPrefix(id, prefix))
+	return err == nil
 }
 
-func (w *workbenchService) saveRecipe(input workbenchRecipe, owner string, baseRevision int) (workbenchRecipe, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if !w.configured() {
-		return workbenchRecipe{}, errors.New("workbench persistence is not configured")
-	}
-	input.Name = strings.TrimSpace(input.Name)
-	input.Description = strings.TrimSpace(input.Description)
-	if len(input.Name) < 2 || len(input.Name) > 80 || len(input.Description) > 400 {
-		return workbenchRecipe{}, errors.New("recipe name or description is outside the allowed length")
-	}
-	if input.Scope != "private" && input.Scope != "shared" {
-		return workbenchRecipe{}, errors.New("recipe scope must be private or shared")
-	}
-	selections, err := validateWorkbenchSelections(input.Analyzers)
-	if err != nil {
-		return workbenchRecipe{}, err
-	}
-	recipes := w.loadRecipesLocked()
-	if len(recipes) >= workbenchMaxRecipes {
-		return workbenchRecipe{}, errors.New("recipe limit reached")
-	}
-	if input.ID == "" {
-		input.ID, err = randomWorkbenchID("recipe")
-		input.Revision = 1
-	} else {
-		if !validWorkbenchID(input.ID, "recipe_") {
-			return workbenchRecipe{}, errors.New("invalid recipe id")
-		}
-		latest := 0
-		for _, recipe := range recipes {
-			if recipe.ID == input.ID {
-				if recipe.Owner != owner {
-					return workbenchRecipe{}, errWorkbenchNotFound
-				}
-				latest = max(latest, recipe.Revision)
-			}
-		}
-		if latest == 0 {
-			return workbenchRecipe{}, errWorkbenchNotFound
-		}
-		if baseRevision != latest {
-			return workbenchRecipe{}, errWorkbenchConflict
-		}
-		input.Revision = latest + 1
-	}
-	if err != nil {
-		return workbenchRecipe{}, err
-	}
-	input.SchemaVersion = workbenchSchemaVersion
-	input.Owner = owner
-	input.CreatedAt = time.Now().UTC()
-	input.Analyzers = selections
-	recipes = append(recipes, input)
-	body, err := json.MarshalIndent(recipes, "", "  ")
-	if err != nil {
-		return workbenchRecipe{}, err
-	}
-	if err := atomicWriteFile(w.recipesPath(), body); err != nil {
-		return workbenchRecipe{}, err
-	}
-	return input, nil
-}
-
-func (w *workbenchService) recipe(id string, revision int, owner string) (workbenchRecipe, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	for _, recipe := range w.loadRecipesLocked() {
-		if recipe.ID == id && recipe.Revision == revision && (recipe.Scope == "shared" || recipe.Owner == owner) {
-			return recipe, nil
-		}
-	}
-	return workbenchRecipe{}, errWorkbenchNotFound
-}
-
-func (w *workbenchService) loadRunsLocked() []workbenchRun {
-	entries, err := os.ReadDir(w.runsDir())
-	if err != nil {
-		return nil
-	}
-	runs := make([]workbenchRun, 0, min(len(entries), workbenchMaxRuns))
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") || len(runs) >= workbenchMaxRuns {
-			continue
-		}
-		var run workbenchRun
-		if readBoundedJSON(filepath.Join(w.runsDir(), entry.Name()), &run) == nil && run.SchemaVersion == workbenchSchemaVersion && validWorkbenchID(run.ID, "run_") {
-			runs = append(runs, run)
-		}
-	}
-	sort.Slice(runs, func(i, j int) bool { return runs[i].CreatedAt.After(runs[j].CreatedAt) })
-	return runs
-}
-
-func (w *workbenchService) persistRunLocked(run workbenchRun) error {
-	body, err := json.MarshalIndent(run, "", "  ")
-	if err != nil {
-		return err
-	}
-	return atomicWriteFile(filepath.Join(w.runsDir(), run.ID+".json"), body)
-}
-
-func (w *workbenchService) findRun(id, owner string) (workbenchRun, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.loadRunLocked(id, owner)
-}
-
-func (w *workbenchService) loadRunLocked(id, owner string) (workbenchRun, error) {
-	if !validWorkbenchID(id, "run_") {
-		return workbenchRun{}, errWorkbenchNotFound
-	}
-	var run workbenchRun
-	if readBoundedJSON(filepath.Join(w.runsDir(), id+".json"), &run) != nil || run.ID != id || run.Owner != owner {
-		return workbenchRun{}, errWorkbenchNotFound
-	}
-	return run, nil
-}
-
-func (w *workbenchService) listRuns(hash, owner string) []workbenchRun {
-	return w.listRunsForOwnerAndHash(owner, hash, 25)
-}
-
-func (w *workbenchService) listRunsForOwner(owner string, limit int) []workbenchRun {
-	return w.listRunsForOwnerAndHash(owner, "", limit)
-}
-
-func (w *workbenchService) listRunsForOwnerAndHash(owner, hash string, limit int) []workbenchRun {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if limit <= 0 || limit > workbenchMaxRuns {
-		limit = workbenchMaxRuns
-	}
-	var visible []workbenchRun
-	for _, run := range w.loadRunsLocked() {
-		if run.Owner == owner && (hash == "" || run.PayloadSHA256 == hash) {
-			visible = append(visible, run)
-			if len(visible) == limit {
-				break
-			}
-		}
-	}
-	return visible
-}
+// Storage (recipes and runs, both Elasticsearch-backed) lives in
+// workbench_es.go: listRecipes, saveRecipe, recipe, findRun,
+// listRunsForOwnerAndHash/listRuns/listRunsForOwner, and the create/update
+// primitives createOrReuseRunLocked-equivalent used by
+// workbench_orchestrator.go.
 
 func terminalWorkbenchState(state string) bool {
 	switch state {

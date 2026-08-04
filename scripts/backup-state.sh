@@ -3,9 +3,11 @@
 #
 # The dashboard-state named volume holds every settings-owned file —
 # dashboard-config.json, dashboard-users.json, dashboard-audit.jsonl,
-# dashboard-config-history.jsonl, analysis-workbench recipes/runs — plus the
-# sandbox payload scripts that share the volume. This script snapshots the
-# whole volume into a timestamped
+# dashboard-config-history.jsonl — plus the sandbox payload scripts that
+# share the volume. Payload Workbench recipes/runs now live in Elasticsearch
+# (dashboard/workbench_es.go, #405 follow-up), not this volume — they are
+# backed up by the ES snapshot process, not this script. This script
+# snapshots the whole volume into a timestamped
 # tarball alongside the other host-level state backups and prunes old ones.
 #
 # Usage:   scripts/backup-state.sh [volume-name]

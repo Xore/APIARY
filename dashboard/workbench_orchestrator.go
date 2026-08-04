@@ -53,21 +53,27 @@ func (s *store) createWorkbenchRun(request workbenchRunRequest, owner string) (w
 		return workbenchRun{}, false, err
 	}
 	idempotency := workbenchIdempotency(hash, recipeID, recipeRevision, owner, selections)
+	runID := "run_" + idempotency
 
-	s.workbench.mu.Lock()
-	defer s.workbench.mu.Unlock()
-	existingRuns := s.workbench.loadRunsLocked()
-	for _, existing := range existingRuns {
-		if existing.Owner == owner && existing.IdempotencyKey == idempotency {
-			return existing, true, nil
-		}
+	// createMu serializes this whole check-then-submit-then-persist sequence
+	// within this process (see its own doc comment on workbenchService) --
+	// submitWorkbenchChild below has real side effects (host-worker request
+	// marker files) that must not run twice for a genuinely simultaneous
+	// duplicate submission, even though createOrReuseRun's own atomic
+	// Elasticsearch create is what makes the *persisted* dedup safe across
+	// processes.
+	s.workbench.createMu.Lock()
+	defer s.workbench.createMu.Unlock()
+
+	if existing, err := s.workbench.findRun(runID, owner); err == nil {
+		return existing, true, nil
 	}
-	if len(existingRuns) >= workbenchMaxRuns {
-		return workbenchRun{}, false, errors.New("analysis run retention limit reached; archive old dashboard state before creating more runs")
-	}
-	runID, err := randomWorkbenchID("run")
+	count, err := s.workbench.countRuns()
 	if err != nil {
 		return workbenchRun{}, false, err
+	}
+	if count >= workbenchMaxRuns {
+		return workbenchRun{}, false, errors.New("analysis run retention limit reached; archive old dashboard state before creating more runs")
 	}
 	now := time.Now().UTC()
 	run := workbenchRun{
@@ -96,10 +102,11 @@ func (s *store) createWorkbenchRun(request workbenchRunRequest, owner string) (w
 		run.Children = append(run.Children, child)
 	}
 	updateWorkbenchRunState(&run)
-	if err := s.workbench.persistRunLocked(run); err != nil {
+	result, reused, err := s.workbench.createOrReuseRun(run)
+	if err != nil {
 		return workbenchRun{}, false, err
 	}
-	return run, false, nil
+	return result, reused, nil
 }
 
 func (s *store) submitWorkbenchChild(hash string, classification payloadClassification, child *workbenchChild) error {
@@ -384,82 +391,70 @@ func workbenchMarkerDir(analyzerID string) string {
 }
 
 func (s *store) getWorkbenchRun(id, owner string) (workbenchRun, error) {
-	s.workbench.mu.Lock()
-	defer s.workbench.mu.Unlock()
-	run, err := s.workbench.loadRunLocked(id, owner)
-	if err != nil {
-		return workbenchRun{}, err
-	}
-	reconciled, changed := s.reconcileWorkbenchRun(run)
-	if !changed {
-		return reconciled, nil
-	}
-	err = s.workbench.persistRunLocked(reconciled)
-	return reconciled, err
+	return s.workbench.updateRun(id, owner, func(run *workbenchRun) (bool, error) {
+		reconciled, changed := s.reconcileWorkbenchRun(*run)
+		*run = reconciled
+		return changed, nil
+	})
 }
 
 func (s *store) workbenchChildAction(runID, analyzerID, action, owner string) (workbenchRun, error) {
-	s.workbench.mu.Lock()
-	defer s.workbench.mu.Unlock()
-	run, err := s.workbench.loadRunLocked(runID, owner)
-	if err != nil {
-		return workbenchRun{}, err
-	}
-	run, _ = s.reconcileWorkbenchRun(run)
-	index := -1
-	for i := range run.Children {
-		if run.Children[i].AnalyzerID == analyzerID {
-			index = i
-			break
-		}
-	}
-	if index < 0 {
-		return workbenchRun{}, errWorkbenchNotFound
-	}
-	child := &run.Children[index]
-	switch action {
-	case "cancel":
-		if !child.Cancelable || child.State != "queued" {
-			return workbenchRun{}, errors.New("only a queued child can be cancelled")
-		}
-		dir := workbenchMarkerDir(analyzerID)
-		marker := filepath.Join(dir, run.PayloadSHA256+".request")
-		if dir == "" || filepath.Base(marker) != run.PayloadSHA256+".request" {
-			return workbenchRun{}, errors.New("analyzer does not support cancellation")
-		}
-		if err := os.Remove(marker); err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				return workbenchRun{}, errors.New("request was already claimed and cannot be cancelled")
+	return s.workbench.updateRun(runID, owner, func(run *workbenchRun) (bool, error) {
+		*run, _ = s.reconcileWorkbenchRun(*run)
+		index := -1
+		for i := range run.Children {
+			if run.Children[i].AnalyzerID == analyzerID {
+				index = i
+				break
 			}
-			return workbenchRun{}, err
 		}
-		child.State, child.Reason, child.Cancelable, child.Retryable = "cancelled", "queued request cancelled", false, child.Attempts <= child.Options.RetryLimit
-	case "retry":
-		if !child.Retryable || child.Attempts > child.Options.RetryLimit {
-			return workbenchRun{}, errors.New("retry limit reached or child is not retryable")
+		if index < 0 {
+			return false, errWorkbenchNotFound
 		}
-		path, pathErr := s.payloadPath(run.PayloadSHA256)
-		if pathErr != nil {
-			return workbenchRun{}, errWorkbenchNotFound
+		child := &run.Children[index]
+		switch action {
+		case "cancel":
+			if !child.Cancelable || child.State != "queued" {
+				return false, errors.New("only a queued child can be cancelled")
+			}
+			dir := workbenchMarkerDir(analyzerID)
+			marker := filepath.Join(dir, run.PayloadSHA256+".request")
+			if dir == "" || filepath.Base(marker) != run.PayloadSHA256+".request" {
+				return false, errors.New("analyzer does not support cancellation")
+			}
+			if err := os.Remove(marker); err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					return false, errors.New("request was already claimed and cannot be cancelled")
+				}
+				return false, err
+			}
+			child.State, child.Reason, child.Cancelable, child.Retryable = "cancelled", "queued request cancelled", false, child.Attempts <= child.Options.RetryLimit
+		case "retry":
+			if !child.Retryable || child.Attempts > child.Options.RetryLimit {
+				return false, errors.New("retry limit reached or child is not retryable")
+			}
+			path, pathErr := s.payloadPath(run.PayloadSHA256)
+			if pathErr != nil {
+				return false, errWorkbenchNotFound
+			}
+			head, readErr := readPayloadHead(path)
+			if readErr != nil {
+				return false, readErr
+			}
+			child.Attempts++
+			child.CreatedAt = time.Now().UTC()
+			child.Deadline = child.CreatedAt.Add(time.Duration(child.Options.TimeoutSeconds) * time.Second)
+			child.QueueDeadline = child.CreatedAt.Add(time.Duration(child.Options.MaxQueueAgeSeconds) * time.Second)
+			child.Reason, child.Summary, child.ResultURL, child.Stale = "", "", "", false
+			child.Retryable, child.Cancelable = false, false
+			if err := s.submitWorkbenchChild(run.PayloadSHA256, classifyPayload(head), child); err != nil {
+				child.State, child.Reason = "failed", err.Error()
+				child.Retryable = child.Attempts <= child.Options.RetryLimit
+			}
+		default:
+			return false, errors.New("unknown child action")
 		}
-		head, readErr := readPayloadHead(path)
-		if readErr != nil {
-			return workbenchRun{}, readErr
-		}
-		child.Attempts++
-		child.CreatedAt = time.Now().UTC()
-		child.Deadline = child.CreatedAt.Add(time.Duration(child.Options.TimeoutSeconds) * time.Second)
-		child.QueueDeadline = child.CreatedAt.Add(time.Duration(child.Options.MaxQueueAgeSeconds) * time.Second)
-		child.Reason, child.Summary, child.ResultURL, child.Stale = "", "", "", false
-		child.Retryable, child.Cancelable = false, false
-		if err := s.submitWorkbenchChild(run.PayloadSHA256, classifyPayload(head), child); err != nil {
-			child.State, child.Reason = "failed", err.Error()
-			child.Retryable = child.Attempts <= child.Options.RetryLimit
-		}
-	default:
-		return workbenchRun{}, errors.New("unknown child action")
-	}
-	updateWorkbenchRunState(&run)
-	err = s.workbench.persistRunLocked(run)
-	return run, err
+		updateWorkbenchRunState(run)
+		return true, nil
+	})
 }

@@ -175,7 +175,6 @@ services:
       - GITHUB_ANALYSIS_ALERT_POSITIVES=${GITHUB_ANALYSIS_ALERT_POSITIVES:-10}
       - ALERT_CAMPAIGN_SCORE=${HONEYPOT_ALERT_CAMPAIGN_SCORE:-80}
       - DASHBOARD_REQUIRE_ADMIN=${DASHBOARD_REQUIRE_ADMIN:-true}
-      - ANALYSIS_WORKBENCH_DIR=/state/analysis-workbench
       - MODEL_STATUS_SOCKET=/model-status/status.sock
       - SERVICES_ADAPTER_SOCKET=/run/services-adapter/control.sock
       - AUTH_INTROSPECTION_URL=${AUTH_INTROSPECTION_URL:-https://auth.honeypot.example/_auth/introspect}
@@ -269,7 +268,6 @@ services:
       - WINDOWS_SANDBOX_RESULTS_DIR=/windows-sandbox-results
       - GITHUB_ANALYSIS_RESULTS_DIR=/github-analysis-results
       - REVDECK_RESULTS_DIR=/revdeck-results
-      - ANALYSIS_WORKBENCH_DIR=/state/analysis-workbench
       - TZ=Europe/Berlin
     networks:
       - honeynet

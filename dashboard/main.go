@@ -137,7 +137,12 @@ func main() {
 	// -- s.es is nil (Elasticsearch not configured) leaves definitions CRUD
 	// working but generated-report methods return errReportsStorageUnavailable.
 	s.reports = newReportStore(getenv("DASHBOARD_REPORTS_FILE", "/state/reports.json"), s.es)
-	s.workbench = newWorkbenchService(getenv("ANALYSIS_WORKBENCH_DIR", "/state/analysis-workbench"))
+	// #405 follow-up: run/recipe orchestration state is Elasticsearch-only,
+	// no local fallback -- see workbench_domain.go's package comment on
+	// workbenchService for why a run's document id being its own
+	// idempotency key makes this safe to do (and safer than the old
+	// local-disk mutex, which was never multi-instance-safe to begin with).
+	s.workbench = newWorkbenchService(s.es)
 	// #353: rebuild() walks every log file under LOG_DIR and used to run
 	// synchronously here, before any route was even registered -- the
 	// process refused every connection, including /healthz, until that
