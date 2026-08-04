@@ -177,12 +177,33 @@ Write-Host '[+] PersonaDaemon compiled'
 # ---------------- Auto-start at logon (interactive session required for
 # mouse_event/SendInput to hit the real desktop). Runs under the same
 # account run_sample.py's autologon flow uses, not the kimi prototype's
-# hardcoded 'mwilson'. ----------------
+# hardcoded 'mwilson'.
+#
+# #368: found live via #298's reverse-turing re-verification that this
+# daemon had never actually run successfully since #290 shipped it --
+# Get-ScheduledTaskInfo showed LastTaskResult 3762504530 (0xE0434352, the
+# CLR unhandled-managed-exception marker) on every single boot, and
+# Windows Error Reporting's Application-log entries pinned it exactly:
+# System.InvalidOperationException thrown from System.dll (WinForms/GDI
+# calls like Cursor.Position need a window handle, which throws this
+# specific exception when the process has no window station/desktop
+# attached). Registering without an explicit -Principal left the task's
+# logon type unspecified rather than guaranteed Interactive -- even with
+# 'analyst' genuinely logged into the interactive console session the
+# whole time, the task's own execution context wasn't reliably attached
+# to it. Exact same failure shape as the GHOSTS client's Session-0 launch
+# bug and the scheduled-task fix pattern already proven there; the
+# -Principal below is that same fix. This silently explains every one of
+# #368's failed pafish "generic reverse turing test" results (mouse
+# presence/movement/speed/click/double-click, dialog confirmation) --
+# there was no persona daemon actually warming anything up to re-verify
+# against, on any build before this one. -------------------------------
 $action = New-ScheduledTaskAction -Execute "$personaDir\PersonaDaemon.exe"
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User 'analyst'
+$principal = New-ScheduledTaskPrincipal -UserId 'analyst' -LogonType Interactive -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
 Register-ScheduledTask -TaskName 'Windows Shell Experience Helper' `
-  -Action $action -Trigger $trigger -Settings $settings -RunLevel Highest -Force | Out-Null
+  -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
 
 # Benign-looking name in Task Scheduler is intentional camouflage.
 'living_persona=installed' | Add-Content 'C:\golden_image_provenance.txt'
