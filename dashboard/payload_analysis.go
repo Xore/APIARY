@@ -616,12 +616,53 @@ func extractUTF16LE(b []byte, minLen, limit int) []string {
 	return uniqueStrings(out, limit)
 }
 
+// stringBoundaryNoise (#530) is the set of characters extractASCII/
+// extractUTF16LE's byte-range scan (any printable ASCII 0x20-0x7e, no
+// character-class filtering) commonly glues onto the start or end of an
+// otherwise-real string: quote/backtick padding a packer left adjacent to a
+// resource, and path-separator runs bordering a genuine path. Trimmed from
+// both ends -- never the middle, where these characters are real content
+// (a quoted argument, a Windows path) -- so a URL glued to a run of leading
+// apostrophes becomes the clean URL instead of a garbled fusion of noise
+// and signal.
+const stringBoundaryNoise = "'\"`\\/|"
+
+// cleanExtractedString (#530) turns a raw byte-range match from
+// extractASCII/extractUTF16LE/extractIOCs into either a usable string or a
+// signal to drop it. Two defects reported live: pure separator/punctuation
+// runs (`//////`, `--------`) emitted as their own "strings" with zero
+// information content, and real strings arriving glued to boundary noise.
+// Trimming handles the second; requiring at least one letter or digit
+// anywhere in what remains handles the first -- narrow enough that
+// legitimate low-alphanumeric content (format strings like "%s: %s (%d)",
+// which still contain letters) survives, unlike a punctuation-density
+// threshold would risk.
+func cleanExtractedString(s string) (string, bool) {
+	s = strings.TrimSpace(s)
+	s = strings.Trim(s, stringBoundaryNoise)
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", false
+	}
+	hasAlnum := false
+	for _, r := range s {
+		if r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' {
+			hasAlnum = true
+			break
+		}
+	}
+	if !hasAlnum {
+		return "", false
+	}
+	return s, true
+}
+
 func uniqueStrings(in []string, limit int) []string {
 	seen := map[string]bool{}
 	var out []string
-	for _, s := range in {
-		s = strings.TrimSpace(s)
-		if s == "" || seen[s] {
+	for _, raw := range in {
+		s, ok := cleanExtractedString(raw)
+		if !ok || seen[s] {
 			continue
 		}
 		seen[s] = true

@@ -83,11 +83,13 @@ virt-customize -a "$overlay" \
   --copy-in "$script_dir/guest-runner.sh:/usr/local/sbin" \
   --copy-in "$script_dir/guest-pe-forensics.py:/usr/local/sbin" \
   --copy-in "$script_dir/guest-payload-classifier.py:/usr/local/sbin" \
+  --copy-in "$script_dir/guest-clean-strings.py:/usr/local/sbin" \
   --copy-in "$script_dir/linux-runner.service:/etc/systemd/system" \
   --run-command "mv '/opt/honeypot/input/$(basename "$sample")' /opt/honeypot/input/sample" \
   --run-command 'chmod 0700 /usr/local/sbin/guest-runner.sh && mv /usr/local/sbin/guest-runner.sh /usr/local/sbin/honeypot-guest-runner' \
   --run-command 'chmod 0500 /usr/local/sbin/guest-pe-forensics.py && mv /usr/local/sbin/guest-pe-forensics.py /usr/local/sbin/honeypot-pe-forensics' \
   --run-command 'chmod 0500 /usr/local/sbin/guest-payload-classifier.py && mv /usr/local/sbin/guest-payload-classifier.py /usr/local/sbin/honeypot-payload-classifier' \
+  --run-command 'chmod 0500 /usr/local/sbin/guest-clean-strings.py && mv /usr/local/sbin/guest-clean-strings.py /usr/local/sbin/honeypot-clean-strings' \
   --write "/etc/honeypot-sandbox-windows-mode:$windows_mode" \
   --write "/etc/honeypot-sandbox-network-mode:$network_mode" \
   --run-command 'ln -sf /etc/systemd/system/linux-runner.service /etc/systemd/system/multi-user.target.wants/linux-runner.service' \

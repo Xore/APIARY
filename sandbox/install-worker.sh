@@ -7,7 +7,7 @@ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 bash "$script_dir/extract-linux-boot.sh"
 target=/usr/local/libexec/honeypot-sandbox
 install -d -m 0755 -o root -g root "$target"
-for file in run-linux-sample.sh guest-runner.sh guest-pe-forensics.py guest-payload-classifier.py linux-runner.service worker.sh process-web-requests.sh export-result.py status-export.py cleanup.sh; do
+for file in run-linux-sample.sh guest-runner.sh guest-pe-forensics.py guest-payload-classifier.py guest-clean-strings.py linux-runner.service worker.sh process-web-requests.sh export-result.py status-export.py cleanup.sh; do
   install -m 0755 -o root -g root "$script_dir/$file" "$target/$file"
 done
 bash "$script_dir/apply-network-filter.sh"
