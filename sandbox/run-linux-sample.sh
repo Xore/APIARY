@@ -139,6 +139,27 @@ if [[ -f /var/log/libvirt/qemu/$vm.log ]]; then
   tail -c 65536 "/var/log/libvirt/qemu/$vm.log" >"$result/qemu.log" 2>/dev/null || true
 fi
 
+# #87: the Windows sandbox gets Zeek's conn/dns/http/ssl/files logs (albeit
+# live, on the bridge, via docker-compose.sandbox.yml -- see #510 for why
+# that path is currently unwired); the Linux/Wine sandbox produced pcap and
+# nothing else, so the two sandboxes gave different evidence for the same
+# sample class. Offline zeek on the finished network.pcap fits this script's
+# own "nothing touches the job while it runs" design better than a live
+# sniffer container would, and needs no extra NET_ADMIN/NET_RAW grant.
+# JSON logging (not Zeek's tab-separated default) matches what this
+# repo's other Zeek consumer (generate_report.py's read_jsonl()) already
+# expects, so a future dashboard-side reader doesn't have to special-case
+# format per sandbox. Best-effort: a missing docker daemon or a corrupt
+# pcap must not fail an otherwise-complete detonation over one derived
+# artifact -- report.json below has nothing that depends on this.
+mkdir -p "$result/zeek_logs"
+if command -v docker >/dev/null 2>&1 && [[ -s $result/network.pcap ]]; then
+  docker run --rm -v "$result:/data" zeek/zeek:latest \
+    zeek -r /data/network.pcap \
+    -e 'redef Log::default_logdir = "/data/zeek_logs"; redef LogAscii::use_json = T;' \
+    local >"$result/zeek.log" 2>&1 || echo "zeek offline processing failed" >&2
+fi
+
 virt-copy-out -a "$overlay" /var/lib/honeypot-result "$result"
 mv "$result/honeypot-result"/* "$result"/ 2>/dev/null || true
 rmdir "$result/honeypot-result" 2>/dev/null || true

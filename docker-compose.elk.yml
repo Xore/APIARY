@@ -387,6 +387,12 @@ services:
       - /opt/stacks/honeypot-stack/logs/arkime-raw:/opt/arkime/raw:ro
       - arkime-pcap:/opt/arkime/pcap
       - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+      # #87: sandbox/worker.sh `docker exec`s a one-shot offline import
+      # (`capture -r ... --copy`, not part of the long-running command:
+      # above) against each completed Linux-sandbox detonation's pcap,
+      # read-only -- worker.sh already caps what lands in export/ at 64MiB
+      # per pcap before this container ever sees it.
+      - /var/lib/honeypot-sandbox/export:/opt/arkime/sandbox-import:ro
     environment:
       - TZ=Europe/Berlin
       - ARKIME__elasticsearch=http://elasticsearch:9200

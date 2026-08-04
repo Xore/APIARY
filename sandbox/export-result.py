@@ -23,6 +23,13 @@ BUNDLE_FILES = (
     "exiftool.txt", "pe-objdump.txt", "authenticode.txt",
     "strings-ascii.txt", "strings-utf16le.txt", "console.log", "qemu.log",
     "domain-state.txt", "qemu-status.txt", "tcpdump.log", "guest-tcpdump.log",
+    # #87: run-linux-sample.sh's offline zeek pass over network.pcap. Local
+    # site policy's default log set -- not every one exists for every
+    # sample (e.g. no ssl.log without any TLS traffic), Path.is_file()
+    # below already skips whichever ones a given run didn't produce.
+    "zeek_logs/conn.log", "zeek_logs/dns.log", "zeek_logs/http.log",
+    "zeek_logs/ssl.log", "zeek_logs/files.log", "zeek_logs/weird.log",
+    "zeek_logs/notice.log",
 )
 
 
