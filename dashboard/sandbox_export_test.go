@@ -262,3 +262,20 @@ func TestSandboxResultComputesProcessAndSocketDifferences(t *testing.T) {
 		t.Fatalf("unexpected socket difference: %#v", row.SocketDiff)
 	}
 }
+
+// #514: the sandbox results grid showed only the absolute "completed"
+// timestamp, unlike the queue list one card up which already gives an
+// operator this same relative-age context via Status.Handoff/HandoffOld.
+func TestNormalizeSandboxResultComputesCompletedAgo(t *testing.T) {
+	row := sandboxResult{CompletedAt: time.Now().Add(-90 * time.Minute).UTC().Format(time.RFC3339)}
+	normalizeSandboxResult(&row)
+	if row.CompletedAgo != "1h ago" {
+		t.Fatalf("CompletedAgo = %q, want %q", row.CompletedAgo, "1h ago")
+	}
+
+	unparseable := sandboxResult{CompletedAt: "not-a-timestamp"}
+	normalizeSandboxResult(&unparseable)
+	if unparseable.CompletedAgo != "" {
+		t.Fatalf("an unparseable CompletedAt must leave CompletedAgo empty, got %q", unparseable.CompletedAgo)
+	}
+}

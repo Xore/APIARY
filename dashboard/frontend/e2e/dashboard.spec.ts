@@ -199,6 +199,55 @@ test.describe("dashboard browser behaviour", () => {
     await expect(page.locator("#hp-rp-generate")).toBeEnabled();
   });
 
+  test("event explorer's IP-isolation panel shows a live checked count and bulk select", async ({ page }) => {
+    // #514: real correlated-fingerprint fixture data (2+ IPs sharing one
+    // fingerprint) isn't part of the e2e cowrie log fixture, so this
+    // intercepts the real /events response and injects the same markup
+    // fingerprintIPCorrelation would produce -- exercising the actual
+    // client-side JS (hp-app.js's initIPFilterMenus), not a hand-rolled
+    // substitute for it.
+    await page.route("**/events", async (route) => {
+      const response = await route.fetch();
+      let body = await response.text();
+      const panel = `<details class="hp-open-in"><summary>Isolate IP&hellip;</summary>
+        <div class="dropdown hp-open-in-menu hp-ip-filter-menu">
+          <div class="hp-open-in-heading">IPs behind this fingerprint <span class="hp-ip-filter-summary" data-hp-ip-filter-summary></span></div>
+          <form method="get" action="/events">
+            <div class="hp-ip-filter-bulk">
+              <button class="btn btn-sm btn-secondary" type="button" data-hp-ip-filter-all>All</button>
+              <button class="btn btn-sm btn-secondary" type="button" data-hp-ip-filter-none>None</button>
+            </div>
+            <div class="hp-ip-filter-list" data-hp-ip-filter-list>
+              <label class="hp-ip-filter-row"><input type="checkbox" name="ips" value="203.0.113.1" checked><span>203.0.113.1</span></label>
+              <label class="hp-ip-filter-row"><input type="checkbox" name="ips" value="203.0.113.2"><span>203.0.113.2</span></label>
+              <label class="hp-ip-filter-row"><input type="checkbox" name="ips" value="203.0.113.3" checked><span>203.0.113.3</span></label>
+            </div>
+          </form>
+        </div></details>`;
+      body = body.replace("</main>", panel + "</main>");
+      await route.fulfill({ response, body });
+    });
+    await page.goto("/events");
+    await page.locator(".hp-open-in > summary", { hasText: "Isolate IP" }).click();
+    const summary = page.locator("[data-hp-ip-filter-summary]");
+    await expect(summary).toHaveText("(2 of 3 checked)");
+
+    await page.locator("[data-hp-ip-filter-all]").click();
+    await expect(summary).toHaveText("(3 of 3 checked)");
+    for (const box of await page.locator(".hp-ip-filter-list input[type=checkbox]").all()) {
+      await expect(box).toBeChecked();
+    }
+
+    await page.locator("[data-hp-ip-filter-none]").click();
+    await expect(summary).toHaveText("(0 of 3 checked)");
+    for (const box of await page.locator(".hp-ip-filter-list input[type=checkbox]").all()) {
+      await expect(box).not.toBeChecked();
+    }
+
+    await page.locator('.hp-ip-filter-list input[value="203.0.113.2"]').check();
+    await expect(summary).toHaveText("(1 of 3 checked)");
+  });
+
   test("payload workbench runs applicable analyzers and keeps external publication separate", async ({ page }) => {
     await page.goto("/payload-workbench/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
     await expect(page.getByRole("heading", { name: "Payload workbench" })).toBeVisible();

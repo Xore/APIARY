@@ -73,10 +73,14 @@
           <details class="hp-open-in">
             <summary title="Check or uncheck IPs to isolate one attacker among several sharing this fingerprint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg> Isolate IP&hellip;</summary>
             <div class="dropdown hp-open-in-menu hp-ip-filter-menu">
-              <div class="hp-open-in-heading">IPs behind this fingerprint</div>
+              <div class="hp-open-in-heading">IPs behind this fingerprint <span class="hp-ip-filter-summary" data-hp-ip-filter-summary></span></div>
               <form method="get" action="/events">
                 {{range .FingerprintIPsQuery}}<input type="hidden" name="{{.Key}}" value="{{.Value}}">{{end}}
-                <div class="hp-ip-filter-list">
+                <div class="hp-ip-filter-bulk">
+                  <button class="btn btn-sm btn-secondary" type="button" data-hp-ip-filter-all>All</button>
+                  <button class="btn btn-sm btn-secondary" type="button" data-hp-ip-filter-none>None</button>
+                </div>
+                <div class="hp-ip-filter-list" data-hp-ip-filter-list>
                   {{range .FingerprintIPs}}<label class="hp-ip-filter-row"><input type="checkbox" name="ips" value="{{.IP}}"{{if .Checked}} checked{{end}}><span class="hp-ip-filter-ip">{{.IP}}</span><span class="hp-ip-filter-count">{{.Count}}</span></label>{{end}}
                 </div>
                 <input type="text" name="ips" class="hp-ip-filter-add" placeholder="Add another IP&hellip;" autocomplete="off" spellcheck="false">

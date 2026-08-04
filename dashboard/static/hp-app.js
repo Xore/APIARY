@@ -717,11 +717,42 @@
   };
   window.replaceHoneypotPage = mountPage;
 
+  /* #514: events.html's "Isolate IP" panel (a fingerprint shared by many
+     IPs) had per-row checkboxes and a free-text add box, but no visible
+     count of how many are currently checked and no bulk select -- unwieldy
+     once a fingerprint is behind more than a handful of sources. Purely a
+     display/convenience layer over the existing checkboxes; the form still
+     submits them exactly the same way. */
+  const initIPFilterMenus = root => {
+    root.querySelectorAll("[data-hp-ip-filter-list]").forEach(list => {
+      const menu = list.closest(".hp-ip-filter-menu");
+      const summary = menu?.querySelector("[data-hp-ip-filter-summary]");
+      const boxes = () => [...list.querySelectorAll('input[type="checkbox"]')];
+      const updateSummary = () => {
+        if (!summary) return;
+        const all = boxes();
+        const checked = all.filter(b => b.checked).length;
+        summary.textContent = `(${checked} of ${all.length} checked)`;
+      };
+      list.addEventListener("change", e => { if (e.target.matches('input[type="checkbox"]')) updateSummary(); });
+      menu?.querySelector("[data-hp-ip-filter-all]")?.addEventListener("click", () => {
+        boxes().forEach(b => { b.checked = true; });
+        updateSummary();
+      });
+      menu?.querySelector("[data-hp-ip-filter-none]")?.addEventListener("click", () => {
+        boxes().forEach(b => { b.checked = false; });
+        updateSummary();
+      });
+      updateSummary();
+    });
+  };
+
   /* ---------- shell wiring ---------- */
   addEventListener("DOMContentLoaded", () => {
     initMaps();
     window.initDashboardTabs();
     initLazyViews(document);
+    initIPFilterMenus(document);
     document.addEventListener("click", e => {
       const b = e.target.closest("[data-dashboard-tab]");
       if (!b) return;
