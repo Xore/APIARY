@@ -44,7 +44,7 @@ flowchart LR
     suricata["Suricata<br/>IDS + EVE + rotating PCAP"]
     traefik["Traefik<br/>TLS routing"]
     auth["Xore/auth-backend<br/>forward-auth SSO"]
-    httpBridges["socat HTTP bridges<br/>dashboard, Kibana, EveBox,<br/>Arkime, TANNER, web honeypots"]
+    httpBridges["socat HTTP bridges<br/>dashboard, Kibana, EveBox,<br/>Arkime, TANNER, Rev·Deck,<br/>web honeypots"]
     portbridge["portbridge<br/>raw TCP/UDP forwarding<br/>optional PROXY v1"]
     connlog[("portbridge connection log")]
   end
@@ -121,6 +121,13 @@ UIs to the separately deployed `Xore/auth-backend`. Raw protocols pass through
 `portbridge`; targets that understand HAProxy PROXY v1 receive the original
 client address in-band, while the connection log lets the dashboard recover
 source attribution for PROXY-unaware sensors.
+
+The `httpBridges` box above collapses six otherwise-identical
+Cloudflare → Traefik → forward-auth → `socat-hp-*` → WireGuard chains into
+one node — see
+["The forward-auth bridge, generically"](CGNAT-DEPLOYMENT.md#the-forward-auth-bridge-generically)
+in the deployment guide for the per-request sequence every investigation UI
+(dashboard, Kibana, TANNER, EveBox, Arkime, Rev·Deck) shares.
 
 Home container ports bind to `HP_BIND` (normally the home WireGuard address),
 not to every host interface. The root Compose network `honeynet` carries the
@@ -580,7 +587,9 @@ flowchart TB
   dedupe["payload-dedupe<br/>SHA-256 + same-filesystem hard links"]
   yara["YARA sidecar<br/>networkless, read-only, non-executing"]
   yaraOut[("yara-results/results.json")]
-  inventory["Dashboard payload inventory<br/>hash merge + source labels"]
+  invIndex[("Elasticsearch<br/>dashboard-payload-inventory-v1")]
+  inventory["Dashboard payload inventory<br/>hash merge + source labels<br/>(read from ES, no local fallback -- #483)"]
+  staticCache[("Elasticsearch<br/>dashboard-static-analysis-v1<br/>content-hash keyed, immutable")]
   staticRules["Built-in static classification<br/>MIME, type, platform, strings,<br/>entropy and deterministic rules"]
   analyst["Authenticated analyst"]
   sandboxRequest["Admin-only sandbox request"]
@@ -604,11 +613,13 @@ flowchart TB
   scriptStore --> yara
   yara --> yaraOut
 
-  cowrieStore --> inventory
-  dionaeaStore --> inventory
-  scriptStore --> inventory
-  yaraOut --> inventory
+  cowrieStore -->|"periodic scan"| invIndex
+  dionaeaStore -->|"periodic scan"| invIndex
+  scriptStore -->|"periodic scan"| invIndex
+  yaraOut --> invIndex
+  invIndex --> inventory
   inventory --> staticRules
+  staticRules -.->|"cache get/put,<br/>content-hash keyed"| staticCache
   staticRules --> analyst
   analyst -->|"optional explicit action"| sandboxRequest
   analyst -->|"optional explicit action"| ghidraRequest
@@ -619,10 +630,15 @@ flowchart TB
 
 Captured samples are content, never configuration. Cowrie stores uploaded and
 downloaded files, Dionaea stores malware captures, and the dashboard turns
-recognized inline scripts into inert SHA-256-named artifacts. The dashboard
-walks all configured stores, accepts only hash-shaped regular filenames, and
-merges identical hashes into one inventory row while retaining every source
-label.
+recognized inline scripts into inert SHA-256-named artifacts. The dashboard's
+own periodic disk scan walks all configured stores, accepts only hash-shaped
+regular filenames, and indexes identical hashes into one inventory document
+per hash in Elasticsearch (`dashboard-payload-inventory-v1`) while retaining
+every source label — every dashboard instance's own scan feeds the same
+index, so mount-path differences between instances don't affect what any
+instance serves. `/payloads` itself reads only from that index, never
+directly from the disk scan (#483) — Elasticsearch unreachable means the page
+reports unavailable, not a stale or partial local view.
 
 `payload-dedupe` hashes payloads and replaces duplicate files on the same
 filesystem with hard links. It preserves all existing paths and does not merge
@@ -630,7 +646,10 @@ across devices. The YARA container has read-only payload mounts, no network,
 and no execution path; it writes a bounded JSON result file that the dashboard
 joins by hash. Static dashboard analysis adds file classification, platform and
 execution-policy hints, strings/IOC observations, deterministic rules, and
-YARA matches. These are triage signals, not proof of behavior or attribution.
+YARA matches, cached in Elasticsearch (`dashboard-static-analysis-v1`) keyed
+by content hash — content-addressed and immutable, so a cache hit never needs
+invalidating, only a get-or-create write on first computation. These are
+triage signals, not proof of behavior or attribution.
 
 A Ghidra request is the same idempotent hash-only handoff as a sandbox
 request — no sample bytes, path, or command crosses the dashboard/host

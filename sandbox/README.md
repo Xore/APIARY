@@ -25,6 +25,50 @@ shutdown using `virt-copy-out`. The overlay is then destroyed. This avoids a
 host-to-guest management service and prevents a compromised guest from pushing
 data back to the host.
 
+```mermaid
+flowchart TB
+  subgraph host["host (root-owned)"]
+    golden[("golden image<br/>read-only qcow2")]
+    overlay[("per-job overlay<br/>fresh qcow2, writable")]
+    inbox[("inbox / results<br/>hypervisor account: no access")]
+    golden -.->|"backing file, never written"| overlay
+  end
+
+  subgraph bridge["virbr-hpsbx (layer-2 only, no &lt;forward&gt;)"]
+    direction TB
+    note["no DHCP, no NAT,<br/>no physical uplink"]
+  end
+
+  subgraph vm["transient sandbox VM"]
+    direction TB
+    sample["sample<br/>fixed per-job MAC,<br/>honeypot-sandbox-strict filter"]
+  end
+
+  subgraph egress["optional controlled forensic egress<br/>(SANDBOX_NETWORK_MODE=controlled only)"]
+    direction TB
+    nft["early nftables chain<br/>rejects everything else"]
+    dns["logged DNS resolver"]
+    proxy["Squid @ 198.18.0.1<br/>allowlisted domains only"]
+    nft --> dns
+    nft --> proxy
+  end
+
+  overlay -->|"virt-copy-in while powered off"| vm
+  vm -->|"forced shutdown, then<br/>virt-copy-out"| overlay
+  overlay -->|"exported once, then destroyed"| inbox
+
+  vm <--> bridge
+  bridge -.->|"isolated: dead end<br/>controlled: routed through"| egress
+  egress -.->|"never: LAN, WireGuard,<br/>Docker bridges, direct Internet"| blocked["blocked"]
+
+  style blocked fill:#000,color:#fff
+```
+
+Isolated mode (the default) never routes past the bridge at all — the egress
+subgraph above doesn't exist on the wire until an operator explicitly runs
+`install-forensic-egress.sh` and switches to controlled mode, and even then
+the nftables chain accepts only DNS and the allowlisted proxy, nothing else.
+
 ## Provisioning sequence
 
 1. Run `sudo ./install-host.sh` interactively. This installs KVM, libvirt,

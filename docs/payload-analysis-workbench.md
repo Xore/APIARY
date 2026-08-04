@@ -1,6 +1,6 @@
 # Payload analysis workbench
 
-The dashboard's `/payload-workbench` route selects captured evidence and `/payload-workbench/{sha256}` is the unified, local-first orchestration surface for issue #155. It is a separate page rather than an extension of `/ghidra`: recipes and parent runs span deterministic analysis, Ghidra, and two sandbox backends, while `/ghidra/{sha256}`, `/sandbox/{job}` and `/payload-analysis/{sha256}` remain the canonical native result renderers.
+The dashboard's `/payload-workbench` route selects captured evidence and `/payload-workbench/{sha256}` is the unified orchestration surface for issue #155. It is a separate page rather than an extension of `/ghidra`: recipes and parent runs span deterministic analysis, Ghidra, and two sandbox backends, while `/ghidra/{sha256}`, `/sandbox/{job}` and `/payload-analysis/{sha256}` remain the canonical native result renderers.
 
 ## Trust boundary
 
@@ -31,6 +31,42 @@ Parent runs live as documents in `dashboard-workbench-runs-v1`. The idempotency 
 Child lifecycle states are `queued`, `claimed`, `running`, `completed`, `skipped`, `failed`, `timed_out`, and `cancelled`. Polling reconciles request markers, existing worker status files, and native result timestamps. One failed child produces a `partial` parent when another child completed, and every completed child links to its native escaped result.
 
 `/payload-workbench/results` is the owner-isolated cross-payload review surface. It reconciles retained runs before rendering, summarizes active/completed/partial/failed states, supports bounded server-side search by hash, recipe, analyzer, or state, and links every child to its canonical native report when one exists. Retry and cancellation remain on the selected payload's workbench page so operational mutations stay contextual.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant Op as authenticated operator
+  participant DB as dashboard
+  participant ES as Elasticsearch<br/>dashboard-workbench-runs-v1
+  participant Spool as existing analyzer spools<br/>(Ghidra / sandbox / Rev·Deck)
+
+  Op->>DB: submit recipe or typed selection for {sha256}
+  DB->>DB: compute idempotency digest<br/>(owner + hash + recipe rev + selection)
+  DB->>ES: PUT run_{digest} with op_type=create
+  alt digest already exists
+    ES-->>DB: 409 conflict
+    DB-->>Op: return the existing run, no new children queued
+  else first submission
+    ES-->>DB: created
+    loop each applicable, available analyzer
+      DB->>Spool: write {sha256}.request marker (same spool the legacy submit routes use)
+    end
+    DB-->>Op: new run, children in queued/skipped state
+  end
+
+  Note over Op,DB: later, on any page view of this run
+  Op->>DB: GET run
+  DB->>Spool: reconcile request markers,<br/>worker status files, native result timestamps
+  DB->>ES: CAS update (seq_no/primary_term) if any child state changed
+  DB-->>Op: current run + child states
+```
+
+An unavailable or incompatible analyzer never reaches the spool step — it's
+recorded `skipped` with a reason at submission time, so the run always
+explains what did not execute rather than silently omitting it. There is no
+local-disk fallback for the run/recipe documents themselves: Elasticsearch
+unreachable means workbench submission/reconciliation is unavailable, not
+degraded to a stale local copy (#405 follow-up).
 
 ## HTTP contracts
 

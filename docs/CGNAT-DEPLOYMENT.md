@@ -176,14 +176,53 @@ honeypots on the `proxy` network for Traefik. The reusable Traefik router
 template is in [`vps/traefik/dynamic.yml`](../vps/traefik/dynamic.yml):
 `honeypot-http` (`decoy.<domain>`) + `honeypot-web` (catch-all) → fake nginx,
 `honeypot-snare` (`www-portal.<domain>` and `snare.<domain>`) → SNARE, and
-five forward-auth-protected investigation routes for the dashboard, Kibana,
-TANNER, EveBox, and Arkime. Each has a matching `socat-hp-*` bridge in
-[`vps/docker-compose.yml`](../vps/docker-compose.yml).
+six forward-auth-protected investigation routes for the dashboard, Kibana,
+TANNER, EveBox, Arkime, and Rev·Deck. Each has a matching `socat-hp-*` bridge
+in [`vps/docker-compose.yml`](../vps/docker-compose.yml).
 
 Traefik is an HTTP(S) reverse proxy — it adds TLS, per-subdomain routing and
 auth to the web honeypots and dashboards. The other protocols (SSH, SMB,
 MySQL, Modbus, …) aren't HTTP, so Traefik can't route them; `portbridge`
 forwards them raw. Both paths terminate on the VPS public IP.
+
+### The forward-auth bridge, generically
+
+Every investigation UI (dashboard, Kibana, TANNER, EveBox, Arkime, Rev·Deck)
+reaches home through the identical chain — one pattern, six routers in
+`vps/traefik/dynamic.yml`, six `socat-hp-*` bridges, not six different
+mechanisms:
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor Op as operator's browser
+  participant CF as Cloudflare<br/>(proxied DNS)
+  participant TR as Traefik<br/>(TLS termination + routing)
+  participant AUTH as Xore/auth-backend<br/>(forward-auth)
+  participant SOC as socat-hp-*<br/>(VPS container)
+  participant WG as WireGuard tunnel
+  participant APP as home app<br/>(HP_BIND:port)
+
+  Op->>CF: HTTPS request, e.g. dashboard.<domain>
+  CF->>TR: proxied, real client IP in X-Forwarded-For
+  TR->>AUTH: forward-auth check (strip-auth-identity first)
+  alt no valid session
+    AUTH-->>TR: reject
+    TR-->>Op: redirect to SSO login
+  else valid session
+    AUTH-->>TR: identity headers
+    TR->>SOC: request, security-headers applied
+    SOC->>WG: raw TCP, VPS listen port → 10.8.0.2:home-exposed-port
+    WG->>APP: delivered to the app's own internal port
+    APP-->>Op: response, relayed back through the same chain
+  end
+```
+
+The socat hop is a dumb TCP relay — all the routing/auth decisions happen in
+Traefik before it, which is why adding a new investigation UI (Rev·Deck was
+the most recent) means one new router + one new `socat-hp-*` container, never
+a change to this flow itself. `vps/traefik/dynamic.yml`'s own comment table
+lists every current listen-port → home-port → app-internal-port mapping.
 
 > **Source IP:** the HTTP honeypots recover the real client IP from
 > `X-Forwarded-For` (Traefik/Cloudflare). Some raw sensor logs initially
