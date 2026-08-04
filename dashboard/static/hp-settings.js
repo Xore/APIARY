@@ -180,7 +180,7 @@
       history:    { title: "Configuration history",  desc: "Retained configuration revisions with rollback." },
       audit:      { title: "Audit log",              desc: "Settings changes with actor, fields, and result." }
     };
-    const ADMIN_PANES = ["branding", "behavior", "honeypot", "users", "services", "elasticsearch", "dead-letters", "history", "audit"];
+    const ADMIN_PANES = ["branding", "report-presets", "behavior", "honeypot", "users", "services", "elasticsearch", "dead-letters", "history", "audit"];
     const isAdmin = navItems.some(nav => ADMIN_PANES.includes(nav.dataset.hpPaneNav));
 
     /* ---- state ----
@@ -807,6 +807,66 @@
           requestCfgSave(pane, el);
         });
       }
+    });
+
+    /* #477: Report Studio preset name/description overrides. A nested map
+       keyed by a dynamic set of template ids doesn't fit collectCfgPatch's
+       flat one-level-per-namespace assumption (see the pane's own comment
+       in settings_modal.html), so this pane has its own small save path
+       instead of going through the generic data-cfg controls above -- same
+       PATCH endpoint and etag, just a hand-built patch body. */
+    const reportPresetCards = isAdmin ? qa("[data-hp-report-preset]") : [];
+    const reportPresetSaveButton = q("[data-hp-report-preset-save]");
+    reportPresetCards.forEach(card => {
+      const nameEl = card.querySelector("[data-hp-report-preset-name]");
+      const descEl = card.querySelector("[data-hp-report-preset-description]");
+      // defaultValue/the textarea's initial textContent are the browser's
+      // own unmodified-since-page-load baseline -- exactly the server-
+      // rendered override this pane should treat as "not dirty" against,
+      // with no extra state to keep in sync.
+      const dirty = () => nameEl.value !== nameEl.defaultValue || descEl.value !== descEl.defaultValue;
+      const onInput = () => { if (reportPresetSaveButton) reportPresetSaveButton.disabled = !reportPresetCards.some(dirty); };
+      nameEl.addEventListener("input", onInput);
+      descEl.addEventListener("input", onInput);
+    });
+    reportPresetSaveButton?.addEventListener("click", () => {
+      const overrides = {};
+      reportPresetCards.forEach(card => {
+        const id = card.dataset.hpReportPreset;
+        const name = card.querySelector("[data-hp-report-preset-name]").value.trim();
+        const description = card.querySelector("[data-hp-report-preset-description]").value.trim();
+        if (name || description) overrides[id] = { name, description };
+      });
+      openConfirm({
+        titleText: "Save Report Studio preset text?",
+        descText: "Apply the edited name/description overrides. Presets left blank keep their compiled default.",
+        actionLabel: "Save changes",
+        initiator: reportPresetSaveButton,
+        onConfirm: async () => {
+          try {
+            const { body: saved, etag } = await api("/api/settings/config", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json", "If-Match": cfg.etag },
+              body: JSON.stringify({ presentation: { report_presets: overrides } })
+            });
+            cfg.etag = etag;
+            const savedOverrides = saved.config?.presentation?.report_presets || {};
+            reportPresetCards.forEach(card => {
+              const id = card.dataset.hpReportPreset;
+              const nameEl = card.querySelector("[data-hp-report-preset-name]");
+              const descEl = card.querySelector("[data-hp-report-preset-description]");
+              const override = savedOverrides[id] || { name: "", description: "" };
+              nameEl.value = nameEl.defaultValue = override.name || "";
+              descEl.value = descEl.defaultValue = override.description || "";
+            });
+            reportPresetSaveButton.disabled = true;
+            setStatus("Report Studio preset text saved.", "ok");
+          } catch (error) {
+            if (error.status === 409) setStatus("Configuration changed in another session — reopen settings and retry.", "error");
+            else setStatus("Not saved: " + error.message.trim(), "error");
+          }
+        }
+      });
     });
 
     /* ---- users (read-only projection) ---- */

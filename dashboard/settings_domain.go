@@ -291,6 +291,25 @@ type presentationConfig struct {
 	FooterText        string `json:"footer_text"`
 	AIDisclaimer      string `json:"ai_disclaimer"`
 	PrivacyNotice     string `json:"privacy_notice"`
+	// ReportPresets (#477) overrides a Report Studio preset's displayed name
+	// and/or description without touching its structural definition (theme,
+	// window, elements) -- those stay compiled, since they're report logic,
+	// not chrome. Keyed by reportTemplate.ID; an absent key or an empty
+	// override field means "use the compiled default". A key that no longer
+	// names a known template (a preset renamed/removed in a later release)
+	// is simply never applied by reportTemplateCatalogWithOverrides -- see
+	// its own comment -- rather than rejected, so a stale override left over
+	// from an old catalog can't turn an unrelated config save into an error.
+	ReportPresets map[string]reportPresetOverride `json:"report_presets,omitempty"`
+}
+
+// reportPresetOverride is one admin-edited Name/Description pair for a
+// Report Studio preset (#477). Both fields are optional independently of
+// each other -- an operator can rename a preset without also rewriting its
+// description.
+type reportPresetOverride struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 type behaviorConfig struct {
@@ -411,6 +430,13 @@ var presentationTextLimits = map[string]int{
 	"privacy_notice":     300,
 }
 
+// reportPresetNameLimit/reportPresetDescriptionLimit (#477) match the
+// compiled catalog's own copy length in reports_store.go's
+// reportTemplateCatalog -- an override should never be able to produce
+// wildly longer text than the built-in presets already use.
+const reportPresetNameLimit = 80
+const reportPresetDescriptionLimit = 300
+
 var allowedBannerSeverities = []string{"", "info", "success", "warning", "danger"}
 var allowedMapProviders = []string{"osm", "offline"}
 
@@ -451,6 +477,26 @@ func validateConfig(c dashboardConfig) error {
 	if p.BannerExpires != "" {
 		if _, err := time.Parse(time.RFC3339, p.BannerExpires); err != nil {
 			problems = append(problems, "presentation.banner_expires must be RFC 3339 or empty")
+		}
+	}
+	knownPresets := map[string]bool{}
+	for _, template := range reportTemplateCatalog() {
+		knownPresets[template.ID] = true
+	}
+	controlChar := func(r rune) bool { return r < 0x20 && r != '\n' || r == 0x7f }
+	for id, override := range p.ReportPresets {
+		if !knownPresets[id] {
+			problems = append(problems, fmt.Sprintf("presentation.report_presets has an unknown template id %q", id))
+			continue
+		}
+		if utf8.RuneCountInString(override.Name) > reportPresetNameLimit {
+			problems = append(problems, fmt.Sprintf("presentation.report_presets.%s.name must be at most %d characters", id, reportPresetNameLimit))
+		}
+		if utf8.RuneCountInString(override.Description) > reportPresetDescriptionLimit {
+			problems = append(problems, fmt.Sprintf("presentation.report_presets.%s.description must be at most %d characters", id, reportPresetDescriptionLimit))
+		}
+		if strings.IndexFunc(override.Name, controlChar) >= 0 || strings.IndexFunc(override.Description, controlChar) >= 0 {
+			problems = append(problems, fmt.Sprintf("presentation.report_presets.%s must not contain control characters", id))
 		}
 	}
 
