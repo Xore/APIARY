@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -126,6 +127,94 @@ func TestPatchConfigAppliesRotatesETagAndAudits(t *testing.T) {
 	}
 	if history[1].Revision != 0 || history[1].Action != "seed" {
 		t.Fatalf("history must retain the seeded initial revision: %#v", history)
+	}
+}
+
+// #477: an admin-edited Report Studio preset name/description round-trips
+// through PATCH and is reflected by /api/reports/templates, while the
+// structural catalog fields (theme, window, elements) stay compiled.
+func TestPatchConfigAppliesReportPresetOverrides(t *testing.T) {
+	s := newSettingsAPITestStore(t, "admin")
+	esStore := newMemESDocStore()
+	esSrv := httptest.NewServer(esStore.handler())
+	t.Cleanup(esSrv.Close)
+	s.reports = newReportStore(filepath.Join(t.TempDir(), "reports.json"), newESClient(esSrv.URL, ""))
+	_, etag := getConfig(t, s)
+	request := settingsRequest(t, http.MethodPatch, "/api/settings/config", true,
+		`{"presentation":{"report_presets":{"executive":{"name":"Board summary","description":"Custom copy"}}}}`)
+	request.Header.Set("If-Match", etag)
+	response := httptest.NewRecorder()
+	s.serveSettingsConfig(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("PATCH status = %d, body = %s", response.Code, response.Body.String())
+	}
+	updated, _ := getConfig(t, s)
+	override, ok := updated.Config.Presentation.ReportPresets["executive"]
+	if !ok || override.Name != "Board summary" || override.Description != "Custom copy" {
+		t.Fatalf("report preset override not persisted: %#v", updated.Config.Presentation.ReportPresets)
+	}
+	events := s.settings.audit.read(10)
+	if len(events) == 0 || !containsString(events[0].Fields, "presentation.report_presets") {
+		t.Fatalf("audit must name the changed field: %#v", events)
+	}
+
+	templatesResponse := httptest.NewRecorder()
+	s.serveReportTemplates(templatesResponse, settingsRequest(t, http.MethodGet, "/api/reports/templates", false, ""))
+	if templatesResponse.Code != http.StatusOK {
+		t.Fatalf("GET templates status = %d", templatesResponse.Code)
+	}
+	var body struct {
+		Templates []reportTemplate `json:"templates"`
+	}
+	if err := json.NewDecoder(templatesResponse.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	var executive reportTemplate
+	found := false
+	for _, tmpl := range body.Templates {
+		if tmpl.ID == "executive" {
+			executive, found = tmpl, true
+		}
+	}
+	if !found {
+		t.Fatal("executive template missing from catalog")
+	}
+	if executive.Name != "Board summary" || executive.Description != "Custom copy" {
+		t.Fatalf("overridden template = %#v, want overridden name/description", executive)
+	}
+	if executive.Theme != "dark" || executive.Window != "24h" || len(executive.Elements) == 0 {
+		t.Fatalf("structural fields must stay compiled, got %#v", executive)
+	}
+}
+
+func TestValidateConfigRejectsUnknownOrOversizedReportPresetOverride(t *testing.T) {
+	base := defaultDashboardConfig()
+	base.Presentation.ReportPresets = map[string]reportPresetOverride{
+		"not-a-real-template": {Name: "x"},
+	}
+	if err := validateConfig(base); err == nil {
+		t.Fatal("unknown report preset id must be rejected")
+	}
+
+	base.Presentation.ReportPresets = map[string]reportPresetOverride{
+		"executive": {Name: strings.Repeat("x", reportPresetNameLimit+1)},
+	}
+	if err := validateConfig(base); err == nil {
+		t.Fatal("oversized report preset name must be rejected")
+	}
+
+	base.Presentation.ReportPresets = map[string]reportPresetOverride{
+		"executive": {Description: strings.Repeat("x", reportPresetDescriptionLimit+1)},
+	}
+	if err := validateConfig(base); err == nil {
+		t.Fatal("oversized report preset description must be rejected")
+	}
+
+	base.Presentation.ReportPresets = map[string]reportPresetOverride{
+		"executive": {Name: "Fine name", Description: "Fine description"},
+	}
+	if err := validateConfig(base); err != nil {
+		t.Fatalf("valid report preset override must be accepted: %v", err)
 	}
 }
 

@@ -124,6 +124,7 @@ func templateFuncs(s *store, world template.HTML) template.FuncMap {
 		},
 		"presentation":        presentation,
 		"behavior":            behavior,
+		"reportPresetRows":    func() []reportPresetRow { return reportPresetRowsFor(presentation().ReportPresets) },
 		"brandHTML":           func() template.HTML { return brandHTML(presentation().AppName) },
 		"activeBanner":        func() *bannerView { return activeBannerView(presentation(), behavior(), time.Now()) },
 		"intelBadgeClass":     intelBadgeClass,

@@ -180,7 +180,8 @@ type store struct {
 	payloadMu     sync.Mutex
 	ipsMu         sync.Mutex
 	hashPathMu    sync.Mutex
-	hashPathCache map[string]string // sha256 -> resolved payload path (#364)
+	hashPathCache map[string]string    // sha256 -> resolved payload path (#364)
+	hashPathMiss  map[string]time.Time // sha256 -> when the full content-hash scan last found nothing (#516)
 	snap          snapshot
 	events        []storedEvent // newest first; replaced wholesale each rebuild
 	// logCache holds each log file's classified-but-not-yet-joined events

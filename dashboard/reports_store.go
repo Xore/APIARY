@@ -167,6 +167,62 @@ func reportTemplateCatalog() []reportTemplate {
 	}
 }
 
+// reportTemplateCatalogWithOverrides (#477) applies an administrator's
+// Name/Description overrides on top of the compiled catalog for display --
+// the structural fields (theme, window, elements, Sandbox/Payload) always
+// stay compiled, since those are report logic, not editable chrome. An
+// override for an id that no longer exists in the compiled catalog (a
+// preset renamed/removed in a later release) is silently ignored here
+// rather than erroring: the config that produced it was valid when saved,
+// and a stale leftover key should never break the templates listing.
+func reportTemplateCatalogWithOverrides(overrides map[string]reportPresetOverride) []reportTemplate {
+	catalog := reportTemplateCatalog()
+	if len(overrides) == 0 {
+		return catalog
+	}
+	for i := range catalog {
+		override, ok := overrides[catalog[i].ID]
+		if !ok {
+			continue
+		}
+		if override.Name != "" {
+			catalog[i].Name = override.Name
+		}
+		if override.Description != "" {
+			catalog[i].Description = override.Description
+		}
+	}
+	return catalog
+}
+
+// reportPresetRow (#477) is one row of the settings modal's "Report Studio
+// presets" pane: a template's fixed id and compiled-default copy (shown as
+// placeholder text -- the operator sees exactly what an empty override
+// falls back to) alongside its current override, if any.
+type reportPresetRow struct {
+	ID                  string
+	DefaultName         string
+	DefaultDescription  string
+	OverrideName        string
+	OverrideDescription string
+}
+
+func reportPresetRowsFor(overrides map[string]reportPresetOverride) []reportPresetRow {
+	catalog := reportTemplateCatalog()
+	rows := make([]reportPresetRow, 0, len(catalog))
+	for _, template := range catalog {
+		override := overrides[template.ID]
+		rows = append(rows, reportPresetRow{
+			ID:                  template.ID,
+			DefaultName:         template.Name,
+			DefaultDescription:  template.Description,
+			OverrideName:        override.Name,
+			OverrideDescription: override.Description,
+		})
+	}
+	return rows
+}
+
 func reportTemplateByID(id string) (reportTemplate, bool) {
 	for _, template := range reportTemplateCatalog() {
 		if template.ID == id {

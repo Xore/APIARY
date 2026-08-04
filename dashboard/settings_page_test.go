@@ -182,12 +182,14 @@ func TestSettingsControllerContract(t *testing.T) {
 func TestSettingsAdminPanesAreServerGated(t *testing.T) {
 	admin := renderSettings(t, true)
 	for _, want := range []string{
-		`data-hp-pane-nav="branding"`, `data-hp-pane-nav="behavior"`, `data-hp-pane-nav="honeypot"`,
+		`data-hp-pane-nav="branding"`, `data-hp-pane-nav="report-presets"`, `data-hp-pane-nav="behavior"`, `data-hp-pane-nav="honeypot"`,
 		`data-hp-pane-nav="users"`, `data-hp-pane-nav="services"`, `data-hp-pane-nav="history"`, `data-hp-pane-nav="audit"`,
 		`data-hp-pane-nav="elasticsearch"`, `data-hp-pane-nav="dead-letters"`,
-		`data-hp-pane="branding"`, `data-hp-pane="behavior"`, `data-hp-pane="honeypot"`,
+		`data-hp-pane="branding"`, `data-hp-pane="report-presets"`, `data-hp-pane="behavior"`, `data-hp-pane="honeypot"`,
 		`data-hp-pane="users"`, `data-hp-pane="services"`, `data-hp-pane="history"`, `data-hp-pane="audit"`,
 		`data-hp-pane="elasticsearch"`, `data-hp-pane="dead-letters"`,
+		`data-hp-report-preset="executive"`, `data-hp-report-preset-name`, `data-hp-report-preset-description`,
+		`data-hp-report-preset-save`,
 		`hp-es-history-results`, `hp-es-history-run`, `hp-es-history-export`,
 		`hp-dead-letters-rows`, `hp-dead-letters-run`, `hp-dead-letters-purge`,
 		`data-cfg="presentation.app_name"`, `data-cfg="presentation.help_link_url"`,
@@ -210,6 +212,7 @@ func TestSettingsAdminPanesAreServerGated(t *testing.T) {
 	user := renderSettings(t, false)
 	for _, absent := range []string{
 		`data-hp-pane-nav="branding"`, `data-hp-pane="branding"`, `data-cfg=`,
+		`data-hp-pane-nav="report-presets"`, `data-hp-pane="report-presets"`, `data-hp-report-preset=`,
 		`data-hp-users-list`, `data-hp-history-list`, `data-hp-audit-list`,
 		`data-hp-services-list`,
 		`data-hp-pane-nav="elasticsearch"`, `data-hp-pane="elasticsearch"`,

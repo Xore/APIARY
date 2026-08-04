@@ -70,6 +70,12 @@ type presentationPatch struct {
 	FooterText        *string `json:"footer_text"`
 	AIDisclaimer      *string `json:"ai_disclaimer"`
 	PrivacyNotice     *string `json:"privacy_notice"`
+	// ReportPresets (#477): present-and-non-nil replaces the whole map, the
+	// same whole-value-replace semantics RowsPerPageOptions/RefreshIntervals
+	// below already use for their slices -- the settings UI always submits
+	// every known preset's current override state together, so there is no
+	// per-key merge to get right.
+	ReportPresets *map[string]reportPresetOverride `json:"report_presets"`
 }
 
 type behaviorPatch struct {
@@ -132,6 +138,14 @@ func (p configPatch) apply(c *dashboardConfig) []string {
 		set("footer_text", &c.Presentation.FooterText, q.FooterText)
 		set("ai_disclaimer", &c.Presentation.AIDisclaimer, q.AIDisclaimer)
 		set("privacy_notice", &c.Presentation.PrivacyNotice, q.PrivacyNotice)
+		if q.ReportPresets != nil {
+			overrides := make(map[string]reportPresetOverride, len(*q.ReportPresets))
+			for id, override := range *q.ReportPresets {
+				overrides[id] = override
+			}
+			c.Presentation.ReportPresets = overrides
+			fields = append(fields, "presentation.report_presets")
+		}
 	}
 	if q := p.Behavior; q != nil {
 		if q.DefaultLanding != nil {

@@ -18,6 +18,7 @@
     {{if .Admin}}
     <div class="sidebar__section-label">Administration</div>
     <button class="sidebar__item" type="button" data-hp-pane-nav="branding">Branding &amp; text</button>
+    <button class="sidebar__item" type="button" data-hp-pane-nav="report-presets">Report Studio presets</button>
     <button class="sidebar__item" type="button" data-hp-pane-nav="behavior">Dashboard behavior</button>
     <button class="sidebar__item" type="button" data-hp-pane-nav="honeypot">Honeypot operations</button>
     <button class="sidebar__item" type="button" data-hp-pane-nav="users">Users</button>
@@ -436,6 +437,35 @@
         </section>
         <div class="settings-actions">
           <button class="btn btn-primary" type="button" data-hp-cfg-save="branding" disabled>Save changes</button>
+        </div>
+      </section>
+
+      <!-- Report Studio presets (#477): renamed/re-described copy for the
+           compiled preset catalog, in its own pane rather than crammed into
+           Branding & text above (#478's "spread across focused sub-sections"
+           rule) -- structural fields (theme/window/elements) are not exposed
+           here, since those are report logic, not editable chrome. Each
+           preset's id is fixed (data-hp-report-preset), so this pane's own
+           custom save handler builds the patch directly rather than going
+           through the generic dotted-key data-cfg mechanism every other pane
+           uses -- a nested map keyed by a dynamic set of ids doesn't fit that
+           mechanism's flat one-level-per-namespace assumption. -->
+      <section class="hp-settings-pane" data-hp-pane="report-presets" aria-label="Report Studio presets" hidden>
+        {{range reportPresetRows}}
+        <section class="card" data-hp-report-preset="{{.ID}}">
+          <div class="card__header"><div><h3>{{.DefaultName}}</h3><p class="card__meta">Leave a field empty to use the compiled default shown as its placeholder.</p></div></div>
+          <div class="hp-field settings-field" data-hp-search="report studio preset {{.DefaultName}} name">
+            <label class="form-label" for="hp-cfg-preset-{{.ID}}-name">Name</label>
+            <input class="form-input" id="hp-cfg-preset-{{.ID}}-name" data-hp-report-preset-name value="{{.OverrideName}}" placeholder="{{.DefaultName}}" maxlength="80" autocomplete="off">
+          </div>
+          <div class="hp-field settings-field" data-hp-search="report studio preset {{.DefaultName}} description">
+            <label class="form-label" for="hp-cfg-preset-{{.ID}}-desc">Description</label>
+            <textarea class="form-input" id="hp-cfg-preset-{{.ID}}-desc" data-hp-report-preset-description rows="2" maxlength="300" placeholder="{{.DefaultDescription}}">{{.OverrideDescription}}</textarea>
+          </div>
+        </section>
+        {{end}}
+        <div class="settings-actions">
+          <button class="btn btn-primary" type="button" data-hp-report-preset-save disabled>Save changes</button>
         </div>
       </section>
 

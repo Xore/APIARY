@@ -89,8 +89,13 @@ func (s *store) serveReportTemplates(w http.ResponseWriter, r *http.Request) {
 	if !s.reportStudioGuard(w, r, false) {
 		return
 	}
+	var overrides map[string]reportPresetOverride
+	if s.settings != nil {
+		cfg, _ := s.settings.config.Get()
+		overrides = cfg.Presentation.ReportPresets
+	}
 	writeReportsJSON(w, "", http.StatusOK, map[string]any{
-		"templates": reportTemplateCatalog(),
+		"templates": reportTemplateCatalogWithOverrides(overrides),
 		"elements":  reportElementCatalog,
 		"windows":   []string{"1h", "6h", "24h", "7d", "30d"},
 		"themes":    []string{"dark", "light"},
