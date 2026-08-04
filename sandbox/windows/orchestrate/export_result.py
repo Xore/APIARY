@@ -29,12 +29,48 @@ Known gaps, deliberately not solved here (see #53's PR/issue thread):
 """
 
 import json
-import re
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 MAX_TEXT = 32768
 MAX_LINES = 200
+# #480: dashboard/sandbox.go serves *.diagnostics.zip up to 16MiB
+# (serveSandboxExport's maxSize for artifactKind=="diagnostics") -- these
+# stay comfortably under that rather than sitting at the platform ceiling.
+MAX_BUNDLE_FILE = 2 * 1024 * 1024
+MAX_BUNDLE_TOTAL = 15 * 1024 * 1024
+# #480: the full registry export/diff/autoruns/services artifacts have
+# never been downloadable through the dashboard at all -- only the 200-line
+# changed_files summary reached the JSON. sandbox/export-result.py's
+# Linux-side write_diagnostics_bundle() already solves exactly this for the
+# Linux sandbox (dashboard/sandbox.go's *.diagnostics.zip serving is
+# backend-agnostic, keyed only on the file's existence); this mirrors it.
+BUNDLE_FILES = (
+    'reg_hklm_before.reg', 'reg_hklm_after.reg',
+    'reg_hkcu_before.reg', 'reg_hkcu_after.reg',
+    'regshot_diff.txt', 'autoruns_before.csv', 'autoruns_after.csv',
+    'autoruns_diff.txt', 'services_before.csv', 'services_after.csv',
+    'services_diff.txt', 'orchestrator.log',
+)
+
+
+def write_diagnostics_bundle(out_dir: Path, output: Path):
+    total = 0
+    with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+        for name in BUNDLE_FILES:
+            path = out_dir / name
+            try:
+                if path.is_symlink() or not path.is_file():
+                    continue
+                data = path.read_bytes()[:MAX_BUNDLE_FILE]
+            except OSError:
+                continue
+            if total + len(data) > MAX_BUNDLE_TOTAL:
+                break
+            archive.writestr(name, data)
+            total += len(data)
+    output.chmod(0o640)
 
 
 def text(path: Path, limit=MAX_TEXT, encoding='utf-8'):
@@ -94,14 +130,19 @@ def build_result(out_dir: Path) -> dict:
     autoruns_diff = ps_lines(out_dir / 'autoruns_diff.txt')
     services_diff = ps_lines(out_dir / 'services_diff.txt')
     regshot_diff = lines(out_dir / 'regshot_diff.txt', 500)
-    # regshot_diff.txt's fc.exe output is a line-numbered before/after dump,
-    # not a clean added/removed list -- lines starting with a digit and a
-    # colon are the actual differing content, "*****"/"Comparing files"
-    # lines are fc.exe's own framing. Rough but good enough as a
-    # changed-registry-entries signal for risk scoring and the changed_files
-    # field, which nothing here treats as authoritative forensic detail
-    # (regshot_diff.txt itself, pulled as an artifact, is that).
-    regshot_changed = [ln for ln in regshot_diff if re.match(r'^\d+:', ln.strip())]
+    # #480: regshot_diff.txt is now a host-side Python difflib.unified_diff()
+    # of this run's single "after" export against the cached golden-image
+    # baseline (run_sample.py's diff_registry_against_baseline()), not
+    # fc.exe's line-numbered dump against an in-guest "before" export --
+    # the in-guest "before" step was removed entirely (#480 also killed one
+    # of the two ~8.5-minute reg.exe exports every run used to pay for).
+    # Unified diff's own convention: '+'/'-' prefixed lines are the actual
+    # additions/removals, '+++'/'---' are the fromfile/tofile headers this
+    # excludes explicitly rather than matching '^[+-]' too loosely.
+    regshot_changed = [
+        ln for ln in regshot_diff
+        if ln.startswith(('+', '-')) and not ln.startswith(('+++', '---'))
+    ]
 
     techniques = []
     technique_ids = set()
@@ -238,6 +279,10 @@ def write_result(out_dir: Path, results_dir: Path) -> Path:
     results_dir.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, indent=2) + '\n', encoding='utf-8')
     output.chmod(0o640)
+    try:
+        write_diagnostics_bundle(out_dir, results_dir / f'{payload["job"]}.diagnostics.zip')
+    except OSError:
+        pass  # best-effort -- the JSON result above is what matters
     return output
 
 

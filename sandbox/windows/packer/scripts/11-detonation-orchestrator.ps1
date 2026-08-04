@@ -112,14 +112,17 @@ TryStep "procmon_start" {
     Start-Sleep -Seconds 3
 }
 
-# ---------------- Registry + autoruns "before" snapshot ----------------
-# reg.exe/fc.exe, not Regshot -- #444 found Regshot is GUI-only and never
-# exits headless, in any session. reg.exe/fc.exe are compiled console tools
-# that actually return.
-TryStep "regshot_before" {
-    cmd.exe /c "reg.exe export HKLM\SOFTWARE $analysisDir\Logs\reg_hklm_before.reg /y"
-    cmd.exe /c "reg.exe export HKCU\Software $analysisDir\Logs\reg_hkcu_before.reg /y"
-}
+# ---------------- Autoruns "before" snapshot ----------------
+# No registry "before" export here -- #480: every run starts from an
+# identical fresh clone of the same golden image, so the "before" registry
+# state never actually varies run to run. The host caches ONE golden-image
+# baseline (run_sample.py's regenerate_registry_baseline(), regenerated
+# only when the golden image itself changes) and diffs it against this
+# run's single "after" export host-side, instead of every single run
+# re-capturing an ~8.5-minute, ~230MB "before" state that would just
+# re-derive the same golden-image baseline over and over. Autoruns' own
+# before/after CSVs stay per-run (cheap, and boot-time scheduled-task
+# churn is worth capturing per-run rather than assumed identical).
 $autorunsc = @('C:\Tools\SysinternalsSuite\autorunsc64.exe', 'C:\Tools\SysinternalsSuite\autorunsc.exe') |
     Where-Object { Test-Path $_ } | Select-Object -First 1
 TryStep "autoruns_before" {
@@ -140,11 +143,15 @@ Step "observing for ${obsSecs}s"
 Start-Sleep -Seconds $obsSecs
 Step "observation_done"
 
-# ---------------- "After" snapshot + diffs ----------------
+# ---------------- "After" registry snapshot ----------------
+# reg.exe, not Regshot -- #444 found Regshot is GUI-only and never exits
+# headless, in any session. The diff against the #480 golden-image
+# baseline happens host-side (run_sample.py's
+# diff_registry_against_baseline(), after virt-copy-out) -- no fc.exe
+# call here, no in-guest "before" export to diff against.
 TryStep "regshot_after" {
     cmd.exe /c "reg.exe export HKLM\SOFTWARE $analysisDir\Logs\reg_hklm_after.reg /y"
     cmd.exe /c "reg.exe export HKCU\Software $analysisDir\Logs\reg_hkcu_after.reg /y"
-    cmd.exe /c "(echo === HKLM\SOFTWARE === & fc.exe /n /u $analysisDir\Logs\reg_hklm_before.reg $analysisDir\Logs\reg_hklm_after.reg & echo === HKCU\Software === & fc.exe /n /u $analysisDir\Logs\reg_hkcu_before.reg $analysisDir\Logs\reg_hkcu_after.reg) > $analysisDir\Logs\regshot_diff.txt"
 }
 TryStep "autoruns_after" {
     & $autorunsc -a * -c -accepteula > "$analysisDir\Logs\autoruns_after.csv"

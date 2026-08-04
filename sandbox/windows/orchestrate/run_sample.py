@@ -253,6 +253,196 @@ def ntfsfix_disk(disk_path: Path):
     )  # best-effort: a clean-shutdown disk has nothing to fix, ntfsfix errors are not fatal here
 
 
+# #480: HKLM\SOFTWARE + HKCU\Software are ~295K keys / 1M+ lines / ~230MB
+# (reg.exe's real UTF-16LE output -- confirmed live) EVERY detonation
+# re-captures as its "before" state, even though every run starts from an
+# identical fresh clone of the same golden image -- that "before" state is
+# always the same modulo boot-time churn. Caching it once per golden image
+# and diffing each run's single "after" export against the cache instead
+# removes one of the two ~8.5-minute reg.exe exports from every single
+# detonation (measured live this session), at the cost of a one-time
+# rebuild after each golden image change.
+#
+# The issue's own original suggestion -- hivexregedit directly against the
+# golden image's own hive files, fully offline, no VM boot needed -- was
+# tried first and confirmed NOT viable: hivexregedit's export format does
+# not match reg.exe's closely enough to diff cleanly, even with
+# --unsafe-printable-strings (confirmed live: hivexregedit wraps decoded
+# strings as `str(1):"value"`, reg.exe emits bare `"value"`; reg.exe's
+# real output also line-wraps long values in ways hivexregedit's single-
+# line-per-value output doesn't -- 1.07M lines from hivexregedit vs 1.94M
+# from the same hive's real reg.exe export, not just an encoding
+# difference). A line-by-line diff between the two formats would flag
+# nearly every value as "changed" even when nothing actually changed.
+# The only reliable fix is generating the baseline with the SAME tool
+# that generates the per-run "after" export: reg.exe, in-guest, booting
+# the golden image directly (same pattern already used this session for
+# baking fixes into it) rather than the disposable per-run overlay.
+REGISTRY_BASELINE_DIR = GOLDEN_IMAGE.with_suffix(GOLDEN_IMAGE.suffix + '.registry-baseline')
+KVM_XML_TEMPLATE = Path(__file__).resolve().parent.parent / 'packer' / 'win11-kvm.xml'
+
+
+def _registry_baseline_stamp() -> str:
+    stat = GOLDEN_IMAGE.stat()
+    return f'{int(stat.st_mtime)}-{stat.st_size}'
+
+
+def registry_baseline_stale() -> bool:
+    stamp_file = REGISTRY_BASELINE_DIR / 'stamp.txt'
+    hklm = REGISTRY_BASELINE_DIR / 'reg_hklm_baseline.reg'
+    hkcu = REGISTRY_BASELINE_DIR / 'reg_hkcu_baseline.reg'
+    if not (stamp_file.exists() and hklm.exists() and hkcu.exists()):
+        return True
+    return stamp_file.read_text().strip() != _registry_baseline_stamp()
+
+
+def regenerate_registry_baseline():
+    """Boot a throwaway CoW clone of the golden image (NOT the golden
+    image itself), capture HKLM\\SOFTWARE + HKCU\\Software with the exact
+    reg.exe command the in-guest orchestrator uses for its own "after"
+    snapshot, cache the result, then shut the temporary domain down,
+    undefine it, and discard the clone. Only runs when
+    registry_baseline_stale() says the cache doesn't match the golden
+    image's current mtime+size -- i.e. once per golden image rebuild, not
+    once per detonation.
+
+    Found live: an earlier version of this function booted the golden
+    image directly, matching the boot-edit-shutdown pattern used
+    elsewhere this session to deliberately bake fixes into it -- but this
+    function does NOT intend to modify the golden image, and Windows
+    writes real disk state on every boot regardless of guest-side intent
+    (event log entries, service/scheduler bookkeeping, etc.), which
+    silently changed the golden image's own checksum and broke
+    verify_golden_checksum() on the very next detonation. A CoW clone
+    absorbs all of that boot churn in its own disposable overlay layer;
+    the golden image underneath is never opened read-write at all, same
+    guarantee revert_to_golden() already depends on for every real
+    detonation.
+
+    This is the one place in the #490 in-guest flow that still touches
+    WinRM: it boots a throwaway domain solely for this maintenance
+    capture, never the domain a sample runs in, and never overlaps with a
+    real detonation (revert_to_golden() always destroys VM_DOMAIN first).
+    """
+    if winrm is None:
+        raise RuntimeError('pywinrm not installed. Run: pip install pywinrm')
+    log.info('Registry baseline stale or missing -- regenerating from golden image (one-time per rebuild)')
+    REGISTRY_BASELINE_DIR.mkdir(parents=True, exist_ok=True)
+
+    edit_domain = f'{VM_DOMAIN}-baseline-regen'
+    nvram_src = Path(f'/var/lib/libvirt/qemu/nvram/{VM_DOMAIN}_VARS.qcow2')
+    nvram_dst = Path(f'/var/lib/libvirt/qemu/nvram/{edit_domain}_VARS.qcow2')
+    xml_tmp = Path(f'/tmp/{edit_domain}.xml')
+    clone_disk = VM_DISK.with_name(f'{edit_domain}.qcow2')
+
+    verify_golden_checksum()
+    clone_disk.unlink(missing_ok=True)
+    subprocess.run(
+        ['qemu-img', 'create', '-f', 'qcow2', '-F', 'qcow2', '-b', str(GOLDEN_IMAGE), str(clone_disk)],
+        check=True, capture_output=True, text=True,
+    )
+
+    xml = KVM_XML_TEMPLATE.read_text()
+    xml = xml.replace(f'<name>{VM_DOMAIN}</name>', f'<name>{edit_domain}</name>')
+    xml = xml.replace(str(VM_DISK), str(clone_disk))
+    xml = xml.replace(f'{VM_DOMAIN}_VARS.qcow2', f'{edit_domain}_VARS.qcow2')
+    xml_tmp.write_text(xml)
+
+    subprocess.run(['cp', str(nvram_src), str(nvram_dst)], check=True)
+    subprocess.run(['chown', 'libvirt-qemu:kvm', str(nvram_dst)], check=True)
+
+    try:
+        virsh(['define', str(xml_tmp)])
+        virsh(['start', edit_domain])
+        log.info(f'{edit_domain} booted for registry baseline capture; waiting for WinRM')
+
+        deadline = time.time() + 300
+        while time.time() < deadline:
+            try:
+                session = winrm.Session(VM_HOST, auth=(VM_USER, VM_PASS), transport='ntlm',
+                                         server_cert_validation='ignore', operation_timeout_sec=10)
+                if 'ready' in session.run_ps('Write-Output ready').std_out.decode():
+                    break
+            except Exception:
+                pass
+            time.sleep(5)
+        else:
+            raise TimeoutError('WinRM never came up on the baseline-capture boot')
+
+        session = winrm.Session(VM_HOST, auth=(VM_USER, VM_PASS), transport='ntlm',
+                                 server_cert_validation='ignore',
+                                 read_timeout_sec=60, operation_timeout_sec=50)
+        # C:\Logs, not C:\Windows\Temp -- the WinRM session writes it locally
+        # via ordinary NTFS permissions regardless of the Logs SMB share's
+        # own ReadAccess-only grant (that only governs remote SMB clients,
+        # like the smbclient pull below), and C:\Logs is already the
+        # account's normal working directory for every other artifact this
+        # pipeline writes.
+        session.run_ps('reg.exe export HKLM\\SOFTWARE C:\\Logs\\baseline_hklm.reg /y')
+        session.run_ps('reg.exe export HKCU\\Software C:\\Logs\\baseline_hkcu.reg /y')
+
+        for remote, local in (
+            ('baseline_hklm.reg', REGISTRY_BASELINE_DIR / 'reg_hklm_baseline.reg'),
+            ('baseline_hkcu.reg', REGISTRY_BASELINE_DIR / 'reg_hkcu_baseline.reg'),
+        ):
+            subprocess.run(
+                ['smbclient', f'\\\\{VM_HOST}\\Logs',
+                 '-U', f'{VM_USER}%{VM_PASS}', '-c', f'get {remote} {local}'],
+                check=True, capture_output=True, timeout=60,
+            )
+
+        session.run_ps('Stop-Computer -Force')
+        shutoff_deadline = time.time() + 120
+        while time.time() < shutoff_deadline:
+            if 'shut off' in virsh(['domstate', edit_domain]):
+                break
+            time.sleep(5)
+        else:
+            subprocess.run([VIRSH_PATH, '--connect', LIBVIRT_URI, 'destroy', edit_domain],
+                            capture_output=True, text=True)
+    finally:
+        subprocess.run([VIRSH_PATH, '--connect', LIBVIRT_URI, 'undefine', edit_domain, '--nvram'],
+                        capture_output=True, text=True)
+        nvram_dst.unlink(missing_ok=True)
+        xml_tmp.unlink(missing_ok=True)
+        clone_disk.unlink(missing_ok=True)
+
+    (REGISTRY_BASELINE_DIR / 'stamp.txt').write_text(_registry_baseline_stamp())
+    log.info(f'Registry baseline regenerated: {REGISTRY_BASELINE_DIR}')
+
+
+def diff_registry_against_baseline(out_dir: Path):
+    """Diff each run's single "after" registry export (from the in-guest
+    orchestrator's regshot_after step) against the cached golden-image
+    baseline, host-side, writing regshot_diff.txt into out_dir.
+
+    Both files are reg.exe's own UTF-16LE output -- the whole point of
+    generating the baseline with reg.exe rather than hivexregedit -- so a
+    plain line-level diff is meaningful without any format normalization.
+    Uses Python's difflib rather than shelling out to `diff`/`fc.exe`: no
+    encoding/quoting concerns, and the output format (unified diff,
+    `+`/`-` prefixed lines) is what export_result.py's parser expects.
+    """
+    import difflib
+    if registry_baseline_stale():
+        regenerate_registry_baseline()
+
+    lines_out = []
+    for hive, label in (('hklm', 'HKLM\\SOFTWARE'), ('hkcu', 'HKCU\\Software')):
+        baseline_path = REGISTRY_BASELINE_DIR / f'reg_{hive}_baseline.reg'
+        after_path = out_dir / f'reg_{hive}_after.reg'
+        if not after_path.exists():
+            continue
+        baseline_text = baseline_path.read_bytes().decode('utf-16', errors='replace').splitlines()
+        after_text = after_path.read_bytes().decode('utf-16', errors='replace').splitlines()
+        lines_out.append(f'=== {label} ===')
+        lines_out.extend(difflib.unified_diff(
+            baseline_text, after_text,
+            fromfile=f'{hive}_baseline', tofile=f'{hive}_after', lineterm='',
+        ))
+    (out_dir / 'regshot_diff.txt').write_text('\n'.join(lines_out), encoding='utf-8')
+
+
 def winrm_run(ps_command: str, timeout: int = 60) -> dict:
     """Execute PowerShell command on the Windows VM via WinRM, bounded by
     `timeout` wall-clock seconds.
@@ -852,7 +1042,11 @@ _CURRENT_OUT_DIR = [None]
 
 def detonate_inguest(sample_path: Path, sha: str, out: Path):
     """#490's default detonation path: stage offline, boot, watch libvirt
-    for self-shutdown, collect offline. No WinRM call anywhere in here."""
+    for self-shutdown, collect offline. The only WinRM use anywhere in
+    this path is indirect and rare: diff_registry_against_baseline() below
+    regenerates the #480 registry baseline against a throwaway maintenance
+    boot when the cache is stale, never against VM_DOMAIN itself and never
+    while a sample is actually running."""
     _CURRENT_OUT_DIR[0] = out
     sample_filename = f'{sha[:16]}.exe'
 
@@ -870,6 +1064,10 @@ def detonate_inguest(sample_path: Path, sha: str, out: Path):
     # don't care about the dirty bit -- confirmed live), so no fix-up call
     # here, only before the next run's staging writes.
     collect_artifacts_offline(out)
+    try:
+        diff_registry_against_baseline(out)
+    except Exception:
+        log.error('Registry baseline diff failed; continuing without it', exc_info=True)
     post_process(out)
 
     if not completed:
