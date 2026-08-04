@@ -40,11 +40,45 @@ NET_XML="$(dirname "$0")/sandbox-network.xml"
 log()  { echo "[$(date '+%H:%M:%S')] $*"; }
 die()  { echo "[ERROR] $*" >&2; exit 1; }
 
+verify_golden_checksum() {
+    # #86: the golden image is the root of trust for every detonation guest
+    # cloned from it -- an unverified multi-GB file sitting on a shared
+    # spindle for months between rebuilds (build-with-retry.sh writes the
+    # .sha256 once, right after a successful build) is exactly the thing
+    # worth hashing before trusting it. Failing the clone on mismatch is the
+    # point, not a warning to skim past.
+    #
+    # A full sha256sum of a 25-35 GB file takes real time (well over a
+    # minute), and revert happens before every single detonation -- possibly
+    # several times an hour in a busy queue. Re-hashing an unchanged file
+    # that often is wasted work, so the result is cached against the golden
+    # image's mtime+size in a sentinel file next to the checksum; corruption
+    # between two reverts with no intervening rebuild would only be caught
+    # on the next actual re-verification, which is the accepted tradeoff for
+    # not paying the full hash cost on every revert.
+    local sums="$GOLDEN_IMAGE.sha256"
+    [[ -f "$sums" ]] || { log "No $sums found -- skipping integrity check (run build-with-retry.sh to generate one)."; return 0; }
+
+    local stamp="$GOLDEN_IMAGE.sha256.verified"
+    local current
+    current="$(stat -c '%Y-%s' "$GOLDEN_IMAGE")"
+    if [[ -f "$stamp" ]] && [[ "$(cat "$stamp")" == "$current" ]]; then
+        return 0
+    fi
+
+    log "Verifying golden image checksum (first use since last rebuild)..."
+    ( cd "$(dirname "$GOLDEN_IMAGE")" && sha256sum -c "$(basename "$sums")" ) \
+        || die "Golden image checksum mismatch: $GOLDEN_IMAGE does not match $sums. Refusing to clone -- every detonation guest would inherit a corrupted or tampered image."
+    echo "$current" > "$stamp"
+    log "Golden image checksum verified."
+}
+
 clone_disk() {
     # A backing-file clone, not a copy: the golden image is never written to,
     # so a sample cannot contaminate future runs and this is cheap to redo.
     [[ -f "$GOLDEN_IMAGE" ]] || die "Golden image not found: $GOLDEN_IMAGE. Run packer build first."
     [[ -e "$VM_DISK" ]] && die "$VM_DISK already exists. Remove it deliberately — it may hold a detonated guest."
+    verify_golden_checksum
     mkdir -p "$(dirname "$VM_DISK")"
     qemu-img create -f qcow2 -F qcow2 -b "$GOLDEN_IMAGE" "$VM_DISK"
     log "Disk created: $VM_DISK (thin clone, CoW)"

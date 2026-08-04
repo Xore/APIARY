@@ -30,6 +30,18 @@ checksum="${1:?usage: build-with-retry.sh <iso_checksum> [max_attempts]}"
 max_attempts="${2:-3}"
 dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# #86: packer-golden-image-guide.md has described win11-analysis.qcow2.sha256
+# as part of the storage layout since before any golden image existed to
+# checksum. Nothing ever wrote it. The golden image is the root of trust for
+# every detonation guest -- every sample run inherits whatever is in it -- so
+# an unverified multi-GB file sitting on a shared spindle for months between
+# rebuilds is exactly the thing worth hashing. Written here, right after a
+# successful build, rather than as a separate manual step someone has to
+# remember to run.
+output_dir="/var/dockge/sandbox/golden-images"
+vm_name="win11-analysis"
+qcow2_path="$output_dir/$vm_name.qcow2"
+
 # packer resolves cd_files entries (autounattend.xml) relative to its own
 # working directory, not the .hcl file's location -- confirmed live:
 # running this script from anywhere other than $dir made every attempt fail
@@ -44,6 +56,12 @@ while (( attempt <= max_attempts )); do
   echo "=== build-with-retry: attempt ${attempt}/${max_attempts} starting $(date -u +%FT%TZ) ==="
   if packer build -var "iso_checksum=${checksum}" "$dir/win11-analysis.pkr.hcl"; then
     echo "=== build-with-retry: attempt ${attempt} succeeded $(date -u +%FT%TZ) ==="
+    if [[ -f "$qcow2_path" ]]; then
+      echo "=== build-with-retry: writing $qcow2_path.sha256 ==="
+      ( cd "$output_dir" && sha256sum "$vm_name.qcow2" > "$vm_name.qcow2.sha256" )
+    else
+      echo "=== build-with-retry: WARNING: packer reported success but $qcow2_path is missing, no checksum written ===" >&2
+    fi
     exit 0
   fi
   echo "=== build-with-retry: attempt ${attempt} failed $(date -u +%FT%TZ), $(( max_attempts - attempt )) attempt(s) left ==="
