@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -35,7 +36,10 @@ func TestAnalyzePayloadCachesStaticWorkButRefreshesDynamicData(t *testing.T) {
 		"exit_status": "ok", "family": "Qbot",
 	})
 
-	s := &store{payloadDirs: []string{payloadDir}}
+	esStore := newMemESDocStore()
+	esSrv := httptest.NewServer(esStore.handler())
+	defer esSrv.Close()
+	s := &store{payloadDirs: []string{payloadDir}, es: newESClient(esSrv.URL, "")}
 	first, err := s.analyzePayload(sha256hex)
 	if err != nil {
 		t.Fatal(err)
@@ -44,11 +48,8 @@ func TestAnalyzePayloadCachesStaticWorkButRefreshesDynamicData(t *testing.T) {
 		t.Fatalf("first analysis = %+v, want SHA256=%q Family=Qbot", first, sha256hex)
 	}
 
-	s.staticAnalysisMu.Lock()
-	_, cached := s.staticAnalysisCache[path]
-	s.staticAnalysisMu.Unlock()
-	if !cached {
-		t.Fatal("static analysis was not cached after the first call")
+	if _, found, err := s.es.docGet(staticAnalysisIndex, sha256hex); err != nil || !found {
+		t.Fatalf("static analysis was not cached in Elasticsearch after the first call: found=%v err=%v", found, err)
 	}
 
 	// Overwrite the GitHub-analysis result (dynamic data) without touching

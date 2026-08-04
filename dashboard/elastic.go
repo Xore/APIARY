@@ -207,7 +207,23 @@ var errESConflict = fmt.Errorf("elasticsearch: concurrent write conflict")
 // another writer updated the document in between -- the same optimistic-
 // concurrency shape Elasticsearch's own docs recommend for read-modify-write
 // without a distributed lock.
+// docIndexMaxBytes guards every dashboard-owned write in this file against
+// ever accidentally embedding a large blob (a raw payload sample, a full PDF
+// report) in a normal Elasticsearch document: dashboard-owned indices are
+// small bookkeeping/cache records (alert state, static-analysis summaries),
+// never a store for the multi-hundred-megabyte binaries this stack captures.
+// Elasticsearch's own default HTTP body ceiling is ~100MB, and a document
+// anywhere near that is already a known anti-pattern (bloats the index,
+// costs heap on merge/reindex) well before hitting it -- this stays well
+// under both, and any caller that would exceed it needs a different storage
+// design (a capped/truncated summary, or a real blob store), not a bigger
+// limit here.
+const docIndexMaxBytes = 2 << 20 // 2MB
+
 func (c *esClient) docIndex(index, id string, doc []byte, create bool, seqNo, primaryTerm int64) error {
+	if len(doc) > docIndexMaxBytes {
+		return fmt.Errorf("elasticsearch: document for %s/%s is %d bytes, over the %d-byte dashboard-index cap -- this index is for bookkeeping/cache records, not large blobs", index, id, len(doc), docIndexMaxBytes)
+	}
 	path := "/" + index + "/_doc/" + url.PathEscape(id)
 	if create {
 		path += "?op_type=create"
