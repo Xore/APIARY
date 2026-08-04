@@ -9,6 +9,7 @@ package main
 //	PATCH  /api/reports/definitions/{id}           full-field replace
 //	DELETE /api/reports/definitions/{id}
 //	POST   /api/reports/definitions/{id}/generate  render now and store the PDF
+//	POST   /api/reports/payloads/{hash}/generate   #474: one-click payload PDF, no saved definition
 //	GET    /api/reports/generated                  generated history (newest first)
 //	GET    /api/reports/generated/{id}/pdf         inline view; ?download=1 attachment
 //	DELETE /api/reports/generated/{id}
@@ -236,31 +237,41 @@ func (s *store) generateReport(w http.ResponseWriter, r *http.Request, id, origi
 	writeReportsJSON(w, etag, http.StatusCreated, map[string]any{"generated": meta})
 }
 
+// serveGeneratePayloadReport backs #474's payload-page "Generate PDF"
+// button: POST /api/reports/payloads/{hash}/generate. Synchronous, like
+// generateReport above -- report_pdf.go's writer is an in-process, hand-
+// rolled PDF emitter (no external process to poll), so there is no
+// background job to report progress on; the caller's own fetch await is the
+// only "progress indicator" needed.
+func (s *store) serveGeneratePayloadReport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "POST required", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.reportStudioGuard(w, r, true) {
+		return
+	}
+	hash := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/reports/payloads/"), "/generate")
+	meta, etag, err := s.generatePayloadReport(hash, "manual")
+	if err != nil {
+		writeReportStoreError(w, err)
+		return
+	}
+	writeReportsJSON(w, etag, http.StatusCreated, map[string]any{"generated": meta})
+}
+
 // renderDefinitionToStored is the generation pipeline shared by the manual
 // API and the scheduler: resolve the definition, render the PDF from live
-// telemetry (or the referenced sandbox run), and persist it.
+// telemetry (or the referenced sandbox/payload artifact), and persist it.
 func (s *store) renderDefinitionToStored(id, origin string) (generatedReport, string, error) {
 	def, ok := s.reports.definition(id)
 	if !ok {
 		return generatedReport{}, "", fmt.Errorf("%w: no report definition with this id", errUnknownRecord)
 	}
-	template, _ := reportTemplateByID(def.Template)
-	title := strings.TrimSpace(def.Branding.Title)
-	if title == "" {
-		title = template.Title
-	}
-	now := time.Now()
-	var pdf []byte
-	if template.Sandbox {
-		data, err := sandboxData(def.Scope.Job, "")
-		if err != nil || data.Detail == nil {
-			return generatedReport{}, "", fmt.Errorf("%w: scope.job does not resolve to a completed sandbox result", errSettingsValidation)
-		}
-		pdf = renderThemedSandboxReportPDF(*data.Detail, now, pdfThemeNamed(def.Theme), def.Branding.pdf())
-	} else {
-		data := s.reportDataFor(def.Scope.filter(now))
-		data.Title = title
-		pdf = renderDefinitionPDF(data, def)
+	pdf, title, err := s.renderDefinitionPDFBytes(def)
+	if err != nil {
+		return generatedReport{}, "", err
 	}
 	return s.reports.addGenerated(generatedReport{
 		DefinitionID: def.ID,
@@ -269,6 +280,63 @@ func (s *store) renderDefinitionToStored(id, origin string) (generatedReport, st
 		Theme:        def.Theme,
 		Title:        title,
 		Origin:       origin,
+	}, pdf)
+}
+
+// renderDefinitionPDFBytes is renderDefinitionToStored's rendering step,
+// pulled out on its own so #474's payload report can share it against an
+// ephemeral, never-persisted definition (generatePayloadReport below)
+// instead of requiring a saved definition id like the designer flow does.
+func (s *store) renderDefinitionPDFBytes(def reportDefinition) ([]byte, string, error) {
+	template, _ := reportTemplateByID(def.Template)
+	title := strings.TrimSpace(def.Branding.Title)
+	if title == "" {
+		title = template.Title
+	}
+	now := time.Now()
+	switch {
+	case template.Sandbox:
+		data, err := sandboxData(def.Scope.Job, "")
+		if err != nil || data.Detail == nil {
+			return nil, "", fmt.Errorf("%w: scope.job does not resolve to a completed sandbox result", errSettingsValidation)
+		}
+		return renderThemedSandboxReportPDF(*data.Detail, now, pdfThemeNamed(def.Theme), def.Branding.pdf()), title, nil
+	case template.Payload:
+		analysis, err := s.analyzePayload(def.Scope.Hash)
+		if err != nil {
+			return nil, "", fmt.Errorf("%w: scope.hash does not resolve to a captured payload", errSettingsValidation)
+		}
+		return renderThemedPayloadReportPDF(analysis, now, pdfThemeNamed(def.Theme), def.Branding.pdf()), title, nil
+	default:
+		data := s.reportDataFor(def.Scope.filter(now))
+		data.Title = title
+		return renderDefinitionPDF(data, def), title, nil
+	}
+}
+
+// generatePayloadReport is #474's one-click "Generate PDF" trigger on the
+// payload detail page: unlike the designer flow, it never requires the
+// operator to first create and save a named report definition. It builds an
+// ephemeral, never-persisted definition scoped to this one hash and reuses
+// the exact same rendering/storage/serving pipeline every other Reports
+// studio PDF goes through -- the generated record and its file land in the
+// same reports document and are viewable/deletable from Reports studio like
+// any other, they just have no DefinitionID (nothing to look back up).
+func (s *store) generatePayloadReport(hash, origin string) (generatedReport, string, error) {
+	if !hashName.MatchString(hash) {
+		return generatedReport{}, "", fmt.Errorf("%w: invalid payload id", errSettingsValidation)
+	}
+	def := reportDefinition{Template: "payload", Theme: "dark", Scope: reportScope{Hash: hash}}
+	pdf, title, err := s.renderDefinitionPDFBytes(def)
+	if err != nil {
+		return generatedReport{}, "", err
+	}
+	return s.reports.addGenerated(generatedReport{
+		Name:     "Payload " + hash,
+		Template: def.Template,
+		Theme:    def.Theme,
+		Title:    title,
+		Origin:   origin,
 	}, pdf)
 }
 

@@ -317,6 +317,7 @@ func main() {
 	http.HandleFunc("/api/reports/templates", s.serveReportTemplates)
 	http.HandleFunc("/api/reports/definitions", s.serveReportDefinitions)
 	http.HandleFunc("/api/reports/definitions/", s.serveReportDefinitionByID)
+	http.HandleFunc("/api/reports/payloads/", s.serveGeneratePayloadReport)
 	http.HandleFunc("/api/reports/generated", s.serveReportsGenerated)
 	http.HandleFunc("/api/reports/generated/", s.serveReportGeneratedByID)
 	// Settings modal fragment: the shell fetches this once per session and
