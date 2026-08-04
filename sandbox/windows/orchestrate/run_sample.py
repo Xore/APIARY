@@ -2,14 +2,37 @@
 """
 run_sample.py — Windows 11 sandbox detonation orchestrator
 
-Drives the VM through libvirt and the guest through WinRM:
-1. Resets the domain to a fresh clone of the golden image
-2. Copies sample to VM
-3. Starts telemetry (ProcMon, FakeNet-NG)
-4. Executes sample
-5. Waits observation window
-6. Collects all artifacts
-7. Resets VM (cleanup)
+#490: default mode is in-guest orchestration, no live channel to the guest
+while a sample is actually running:
+1. Build a fresh CoW clone from the golden image (domain NOT started)
+2. virt-copy-in the sample + a job.json into that clone's C:\\Analysis --
+   offline, via libguestfs, while nothing has the disk open
+3. Start the domain. Its own AtLogOn-triggered scheduled task (installed by
+   packer/scripts/11-detonation-orchestrator.ps1) finds job.json and runs
+   the entire sequence locally: telemetry start, registry/autoruns
+   snapshots, execute sample, observe, snapshot again, telemetry stop,
+   EVTX export -- then Stop-Computer's itself.
+4. The host has no channel to ask "are you done" -- it polls `virsh
+   domstate` (libvirt itself, not a guest-authenticated call) and treats a
+   clean self-shutdown within a generous deadline as success. Past the
+   deadline with the domain still running, it force-kills it (virsh
+   destroy) and flags the result as a watchdog timeout instead of silently
+   producing nothing.
+5. Either way, once the domain is off: virt-copy-out C:\\Analysis\\Logs back
+   to the host -- offline again.
+6. Revert (throw away the used clone), same as always.
+
+A sample that achieves SYSTEM during its run finds no listening service, no
+credentials, and no share to reach the host with -- there is nothing live to
+attack. See #94 (found the original live-WinRM-channel exposure) and #490
+(this rearchitect).
+
+Legacy WinRM-driven mode (copy sample over SMB, drive every step over a live
+authenticated WinRM channel while the sample runs, pull results back over
+SMB) is preserved behind WINDOWS_SANDBOX_LEGACY_WINRM=1 for one release as a
+rollback path, not because it's still the intended way to run this. It has
+the exposure #490 exists to remove -- use it only to compare a suspicious
+result against, or if the in-guest path is broken and needs bypassing.
 
 Artifacts are written to the local results directory only. This orchestrator
 performs no outbound network access and never pushes anywhere: the analysis
@@ -17,16 +40,20 @@ host has no route off the sandbox bridge, and the dashboard reads results from
 the spool. See IMPLEMENTATION_PLAN.md "Host Constraints".
 
 Requires:
-  pip install pywinrm paramiko python-evtx
+  pip install pywinrm paramiko python-evtx   # legacy mode + verify_vm_detection.py only
+  libguestfs-tools (virt-copy-in/out, guestfish) -- the default in-guest mode
   libvirt with the golden domain defined (see IMPLEMENTATION_PLAN.md Phase 2)
 
 Env vars:
-  VM_HOST            IP of Windows VM (for WinRM)
-  VM_USER            Windows username
-  VM_PASS            Windows password
+  WINDOWS_SANDBOX_LEGACY_WINRM  Set to 1 to use the old live-WinRM path
+                     instead of the default in-guest orchestration (#490)
+  VM_HOST            IP of Windows VM (legacy WinRM mode / debug tooling only)
+  VM_USER            Windows username (legacy mode only)
+  VM_PASS            Windows password (legacy mode only)
   LIBVIRT_URI        libvirt connection URI (default: qemu:///system)
   VM_DOMAIN          libvirt domain name (default: win11-sandbox)
   VIRSH_PATH         Path to the virsh binary (default: /usr/bin/virsh)
+  GUESTFISH_PATH     Path to the guestfish binary (default: /usr/bin/guestfish)
   GOLDEN_IMAGE       Path to the golden qcow2 (default:
                      /var/dockge/sandbox/golden-images/win11-analysis.qcow2)
   VM_DISK            Path to the per-run CoW clone (default:
@@ -35,6 +62,14 @@ Env vars:
                      recommended per RESEARCH.md; a short window is
                      defeated by a sample doing nothing more than a long
                      sleep before its real payload)
+  WATCHDOG_BUFFER_SECS  Extra seconds beyond OBSERVATION_SECS the host waits
+                     for the guest's own self-shutdown before concluding the
+                     run is hung and force-killing it (default: 2700 -- #490
+                     live-tested: the guest's own unfiltered registry export
+                     alone took ~8.5min each for the before/after snapshot,
+                     ~17min total, before autoruns/telemetry-stop/EVTX-export
+                     overhead on top of that; 45min gives real headroom
+                     rather than sitting at the measured floor)
 """
 
 import os
@@ -46,6 +81,7 @@ import argparse
 import logging
 import subprocess
 import shutil
+import tempfile
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -63,6 +99,9 @@ VM_USER         = os.environ.get('VM_USER',          'analyst')
 # this drifted out of sync with it (was 'malware') until #358's cleanup.
 VM_PASS         = os.environ.get('VM_PASS',          'malware123!')
 VIRSH_PATH      = os.environ.get('VIRSH_PATH',       '/usr/bin/virsh')
+GUESTFISH_PATH  = os.environ.get('GUESTFISH_PATH',   '/usr/bin/guestfish')
+VIRT_COPY_IN_PATH  = os.environ.get('VIRT_COPY_IN_PATH',  '/usr/bin/virt-copy-in')
+VIRT_COPY_OUT_PATH = os.environ.get('VIRT_COPY_OUT_PATH', '/usr/bin/virt-copy-out')
 LIBVIRT_URI     = os.environ.get('LIBVIRT_URI',      'qemu:///system')
 VM_DOMAIN       = os.environ.get('VM_DOMAIN',        'win11-sandbox')
 GOLDEN_IMAGE    = Path(os.environ.get('GOLDEN_IMAGE',
@@ -70,6 +109,8 @@ GOLDEN_IMAGE    = Path(os.environ.get('GOLDEN_IMAGE',
 VM_DISK         = Path(os.environ.get('VM_DISK',
                         f'/var/dockge/sandbox/vms/{VM_DOMAIN}.qcow2'))
 OBS_SECS        = int(os.environ.get('OBSERVATION_SECS', '1800'))  # #297
+WATCHDOG_BUFFER_SECS = int(os.environ.get('WATCHDOG_BUFFER_SECS', '2700'))  # #490
+LEGACY_WINRM_MODE = os.environ.get('WINDOWS_SANDBOX_LEGACY_WINRM', '') == '1'
 # Touch this file during a run's observation window to cut it short without
 # failing the job -- see observe_with_early_stop(). Fixed path rather than
 # per-job: only one detonation runs at a time (single VM, single worker), so
@@ -144,8 +185,9 @@ def verify_golden_checksum():
     log.info('Golden image checksum verified.')
 
 
-def revert_to_golden():
-    """Reset the domain to a fresh clone of the golden image and boot it.
+def revert_to_golden(start: bool = True):
+    """Reset the domain to a fresh clone of the golden image, and boot it
+    unless `start` is False.
 
     virsh snapshot-revert (memory-state or disk-only) is not usable here: the
     domain's host-passthrough migratable='off' CPU config (deliberate, for
@@ -161,6 +203,14 @@ def revert_to_golden():
     rather than a memory-state resume -- slower, but with no snapshot-machinery
     failure mode. Every detonation still starts from the identical golden
     state, which is what makes runs comparable and the guest disposable.
+
+    start=False is for detonate_inguest() (#490): the whole point of staging
+    the sample via virt-copy-in is that it happens BEFORE the domain (and
+    therefore qemu) ever opens the disk -- libguestfs and a running qemu
+    process cannot both hold the same qcow2 open (confirmed live earlier
+    this session installing LOLDrivers into the golden image: a libguestfs
+    appliance crash resulted from exactly this). The caller is responsible
+    for calling virsh(['start', VM_DOMAIN]) itself once staging is done.
     """
     log.info(f'Resetting {VM_DOMAIN} to a fresh clone of {GOLDEN_IMAGE}')
     verify_golden_checksum()
@@ -172,8 +222,35 @@ def revert_to_golden():
         ['qemu-img', 'create', '-f', 'qcow2', '-F', 'qcow2', '-b', str(GOLDEN_IMAGE), str(VM_DISK)],
         check=True, capture_output=True, text=True,
     )
-    virsh(['start', VM_DOMAIN])
-    log.info('Domain reset and running; waiting for WinRM')
+    if start:
+        virsh(['start', VM_DOMAIN])
+        log.info('Domain reset and running')
+    else:
+        log.info('Fresh clone created; domain left stopped for offline staging')
+
+
+def ntfsfix_disk(disk_path: Path):
+    """Clear NTFS's "dirty" bit on `disk_path` so libguestfs can write to it.
+
+    #490, found live: a domain that was ever hard-killed (`virsh destroy`,
+    exactly what the watchdog path below does on a timeout) leaves its NTFS
+    volume flagged dirty -- Windows' own crash-consistency marker, same as
+    what a real power-cut leaves behind. libguestfs's ntfs-3g refuses to
+    mount a dirty volume read-write and virt-copy-in fails outright with
+    "Read-only file system", even though the disk is provably writable at
+    the block-device level. A CLEAN Stop-Computer shutdown does not set this
+    bit -- confirmed live the same way: virt-copy-in only ever failed after
+    a forced kill. ntfsfix (libguestfs's, not a real Windows chkdsk) clears
+    the marker without repairing anything else, and is safe to run
+    unconditionally before every stage-for-next-run virt-copy-in regardless
+    of how the previous run ended, since it's a no-op on an already-clean
+    volume. Read-only operations (virt-cat, virt-ls, virt-copy-out) never
+    need this -- only writes do.
+    """
+    subprocess.run(
+        [GUESTFISH_PATH, '-a', str(disk_path), 'run', ':', 'ntfsfix', '/dev/sda3'],
+        capture_output=True, text=True, timeout=120,
+    )  # best-effort: a clean-shutdown disk has nothing to fix, ntfsfix errors are not fatal here
 
 
 def winrm_run(ps_command: str, timeout: int = 60) -> dict:
@@ -667,13 +744,180 @@ def observe_with_early_stop(requested_secs: int) -> float:
     return elapsed
 
 
+def stage_job_offline(sample_path: Path, sha: str, obs_secs: int, sample_filename: str):
+    """virt-copy-in the sample plus a job.json describing it into VM_DISK,
+    while the domain is stopped and nothing else has the disk open.
+
+    #490: this offline staging step, not a live SMB `put`, is what removes
+    sample injection from the set of things a live authenticated channel
+    does during a run. C:\\Analysis\\Logs and C:\\Analysis\\Samples already
+    exist in the golden image itself (created by
+    packer/scripts/11-detonation-orchestrator.ps1), so every fresh CoW
+    clone inherits them -- no mkdir step needed here.
+    """
+    job = {'sha256': sha, 'sample_filename': sample_filename, 'observation_secs': obs_secs}
+    with tempfile.TemporaryDirectory() as tmp:
+        job_path = Path(tmp) / 'job.json'
+        job_path.write_text(json.dumps(job))
+        staged_sample = Path(tmp) / sample_filename
+        shutil.copyfile(sample_path, staged_sample)
+
+        ntfsfix_disk(VM_DISK)
+        subprocess.run(
+            [VIRT_COPY_IN_PATH, '-a', str(VM_DISK), str(job_path), '/Analysis'],
+            check=True, capture_output=True, text=True, timeout=120,
+        )
+        subprocess.run(
+            [VIRT_COPY_IN_PATH, '-a', str(VM_DISK), str(staged_sample), '/Analysis/Samples'],
+            check=True, capture_output=True, text=True, timeout=120,
+        )
+    log.info(f'Staged job.json + {sample_filename} into {VM_DISK} (offline)')
+
+
+def wait_for_domain_shutoff(obs_secs: int, buffer_secs: int) -> bool:
+    """Poll `virsh domstate` (libvirt itself -- not a call into the guest)
+    until the domain shuts itself off, up to `obs_secs + buffer_secs`.
+
+    This is the watchdog #490's own issue text flags as the open problem:
+    with no live channel to ask the guest anything, a clean self-initiated
+    Stop-Computer within the deadline is the ONLY signal "the run genuinely
+    completed" -- anything else (still running past the deadline) gets
+    force-killed and is flagged as a timeout rather than silently producing
+    an empty-looking result. Along the way, at approximately the point the
+    guest's own observation window should have elapsed, take a best-effort
+    memory dump -- the same virsh-level capture capture_memory_dump()
+    always did, still available with no live channel since it's virsh, not
+    WinRM.
+
+    Returns True if the domain shut itself down cleanly, False if it had to
+    be force-killed.
+    """
+    deadline = time.time() + obs_secs + buffer_secs
+    dumped = False
+    dump_at = time.time() + obs_secs
+    poll_interval = 5
+    while time.time() < deadline:
+        state = virsh(['domstate', VM_DOMAIN])
+        if 'shut off' in state:
+            log.info('Domain self-shutdown -- run completed')
+            return True
+        if not dumped and time.time() >= dump_at:
+            dumped = True
+            capture_memory_dump(_CURRENT_OUT_DIR[0])
+        time.sleep(poll_interval)
+
+    log.error(
+        f'Domain still running {obs_secs + buffer_secs}s after boot -- '
+        f'treating as hung and force-killing (watchdog timeout)'
+    )
+    subprocess.run([VIRSH_PATH, '--connect', LIBVIRT_URI, 'destroy', VM_DOMAIN],
+                    capture_output=True, text=True)
+    return False
+
+
+def collect_artifacts_offline(out_dir: Path):
+    """virt-copy-out C:\\Analysis\\Logs back to the host, offline, once the
+    domain is off (cleanly or via the watchdog).
+
+    Whole-directory copy rather than an explicit per-file allowlist (the
+    legacy collect_artifacts()'s approach, one smbclient `get` per file):
+    the in-guest orchestrator already writes everything worth having under
+    Logs\\, including orchestrator.log itself -- valuable specifically on a
+    watchdog-timeout result, where it shows exactly which step the guest
+    was on when it got force-killed. An allowlist would silently drop that
+    diagnostic file along with anything else not anticipated in advance.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        subprocess.run(
+            [VIRT_COPY_OUT_PATH, '-a', str(VM_DISK), '/Analysis/Logs', tmp],
+            check=True, capture_output=True, text=True, timeout=300,
+        )
+        copied = Path(tmp) / 'Logs'
+        if copied.exists():
+            for item in copied.iterdir():
+                dest = out_dir / item.name
+                if item.is_dir():
+                    shutil.copytree(item, dest, dirs_exist_ok=True)
+                else:
+                    shutil.copyfile(item, dest)
+    log.info(f'Artifacts collected (offline) to {out_dir}')
+
+
+# Set once per detonate_inguest() call so wait_for_domain_shutoff()'s
+# best-effort mid-run memory dump can reach the current run's out_dir
+# without threading it through every function on the call stack for a
+# single optional step.
+_CURRENT_OUT_DIR = [None]
+
+
+def detonate_inguest(sample_path: Path, sha: str, out: Path):
+    """#490's default detonation path: stage offline, boot, watch libvirt
+    for self-shutdown, collect offline. No WinRM call anywhere in here."""
+    _CURRENT_OUT_DIR[0] = out
+    sample_filename = f'{sha[:16]}.exe'
+
+    revert_to_golden(start=False)
+    stage_job_offline(sample_path, sha, OBS_SECS, sample_filename)
+    virsh(['start', VM_DOMAIN])
+    log.info(f'Domain booted with job staged; observing for up to {OBS_SECS + WATCHDOG_BUFFER_SECS}s')
+
+    completed = wait_for_domain_shutoff(OBS_SECS, WATCHDOG_BUFFER_SECS)
+    meta = json.loads((out / 'metadata.json').read_text())
+    meta['run_status'] = 'completed' if completed else 'watchdog_timeout'
+    (out / 'metadata.json').write_text(json.dumps(meta, indent=2))
+
+    # ntfsfix before reading is never required (read-only ntfs-3g mounts
+    # don't care about the dirty bit -- confirmed live), so no fix-up call
+    # here, only before the next run's staging writes.
+    collect_artifacts_offline(out)
+    post_process(out)
+
+    if not completed:
+        raise RuntimeError(
+            f'Watchdog timeout: domain did not self-shutdown within '
+            f'{OBS_SECS + WATCHDOG_BUFFER_SECS}s. Partial artifacts (if any) '
+            f'were still collected from {out}.'
+        )
+
+
+def detonate_legacy_winrm(sample_path: Path, sha: str, out: Path):
+    """Pre-#490 path: drive the whole sequence over a live WinRM channel to
+    the running guest, sample injected/results pulled over SMB. Preserved
+    behind WINDOWS_SANDBOX_LEGACY_WINRM=1 as a rollback path -- see this
+    module's docstring."""
+    revert_to_golden()
+    wait_for_winrm()
+    vm_path = copy_sample_to_vm(sample_path, sha)
+    start_fakenet()
+    start_procmon()
+    regshot_before()
+    autoruns_before()
+
+    execute_sample(vm_path)
+    log.info(f'Observing for {OBS_SECS} seconds...')
+    actual_secs = observe_with_early_stop(OBS_SECS)
+    if actual_secs != OBS_SECS:
+        meta = json.loads((out / 'metadata.json').read_text())
+        meta['observation_secs_actual'] = actual_secs
+        meta['observation_cut_short'] = True
+        (out / 'metadata.json').write_text(json.dumps(meta, indent=2))
+
+    capture_memory_dump(out)
+    regshot_after()
+    autoruns_after()
+    stop_procmon()
+    collect_artifacts(sha, out)
+    post_process(out)
+
+
 def detonate(sample_path: Path, results_dir: Path = None):
     if not sample_path.exists() or sample_path.name == '.gitkeep':
         return
     sha   = sha256_of(sample_path)
     out   = (results_dir or ARTIFACT_DIR) / sha
 
-    log.info(f'=== Detonating: {sample_path} ({sha[:16]}...) ===')
+    mode = 'legacy WinRM' if LEGACY_WINRM_MODE else 'in-guest (#490)'
+    log.info(f'=== Detonating: {sample_path} ({sha[:16]}...) [{mode}] ===')
 
     # Write metadata
     out.mkdir(parents=True, exist_ok=True)
@@ -686,29 +930,10 @@ def detonate(sample_path: Path, results_dir: Path = None):
 
     failed = None
     try:
-        revert_to_golden()
-        wait_for_winrm()
-        vm_path = copy_sample_to_vm(sample_path, sha)
-        start_fakenet()
-        start_procmon()
-        regshot_before()
-        autoruns_before()
-
-        execute_sample(vm_path)
-        log.info(f'Observing for {OBS_SECS} seconds...')
-        actual_secs = observe_with_early_stop(OBS_SECS)
-        if actual_secs != OBS_SECS:
-            meta = json.loads((out / 'metadata.json').read_text())
-            meta['observation_secs_actual'] = actual_secs
-            meta['observation_cut_short'] = True
-            (out / 'metadata.json').write_text(json.dumps(meta, indent=2))
-
-        capture_memory_dump(out)
-        regshot_after()
-        autoruns_after()
-        stop_procmon()
-        collect_artifacts(sha, out)
-        post_process(out)
+        if LEGACY_WINRM_MODE:
+            detonate_legacy_winrm(sample_path, sha, out)
+        else:
+            detonate_inguest(sample_path, sha, out)
 
     except Exception as e:
         # Recorded, then re-raised once the guest is safely back at the golden

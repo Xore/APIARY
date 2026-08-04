@@ -144,6 +144,24 @@ def build_result(out_dir: Path) -> dict:
         datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')
     job = f'windows-{stamp}-{sha256[:12]}'
 
+    # #490: the in-guest orchestration path calls post_process() (and
+    # therefore this) even on a watchdog force-kill -- deliberately, to
+    # salvage whatever partial artifacts virt-copy-out could still pull off
+    # the guest, rather than the old assumption here that reaching this
+    # function at all meant success (true only for the pre-#490 WinRM path,
+    # where a failed run raised before ever getting here). Map
+    # detonate_inguest()'s own metadata.json run_status onto the vocabulary
+    # dashboard/sandbox.go's normalizeSandboxResult() already understands --
+    # RunStatus == "failed" or a non-empty TimeoutReason both set
+    # Incomplete, which is what actually drives Workbench's pass/fail
+    # decision (workbench_orchestrator.go's reconcileWorkbenchRun).
+    watchdog_timeout = meta.get('run_status') == 'watchdog_timeout'
+    run_status = 'failed' if watchdog_timeout else 'completed'
+    timeout_reason = (
+        'watchdog timeout: guest did not self-shutdown within the deadline (#490)'
+        if watchdog_timeout else ''
+    )
+
     return {
         'version': 2,
         'job': job,
@@ -155,14 +173,10 @@ def build_result(out_dir: Path) -> dict:
         'completed_at': completed_at,
         'duration_seconds': duration,
         'exit_status': '0',
-        # post_process() only runs from detonate()'s success path (a failed
-        # run raises before ever reaching here, and run_pending.sh handles
-        # that as .request.failed entirely outside this script) -- so by
-        # construction, every result this writes really did complete.
-        'run_status': 'completed',
+        'run_status': run_status,
         'guest_started': True,
         'failure_reason': '',
-        'timeout_reason': '',
+        'timeout_reason': timeout_reason,
         'risk_score': risk_score,
         'risk_level': risk_level,
         'network': 'isolated',
