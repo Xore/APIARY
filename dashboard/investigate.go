@@ -114,3 +114,59 @@ func (s *store) exportCommandsCSV(w http.ResponseWriter, r *http.Request) {
 		_ = c.Write([]string{row.Sensor, row.Command, strconv.Itoa(row.Count), row.Sources, strconv.Itoa(row.Sessions), row.First, row.Last})
 	}
 }
+
+// exportIPsCSV mirrors exportEventsCSV/exportCommandsCSV's own shape (#513):
+// the same filtered scope the /ips page itself would show, never the
+// unfiltered set (#59) -- and unlike the page's own rendering, never capped
+// to the top 25 rows either, since an export exists precisely for the rows
+// that don't fit on screen.
+func (s *store) exportIPsCSV(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="honeypot-attack-sources.csv"`)
+	c := csv.NewWriter(w)
+	defer c.Flush()
+	_ = c.Write([]string{"ip", "country", "count", "logins", "sensors", "sessions", "first", "last"})
+	for _, row := range s.buildIPsData(parseFilter(r)).Rows {
+		_ = c.Write([]string{row.IP, row.Country, strconv.Itoa(row.Count), strconv.Itoa(row.Logins), row.Sensors, strconv.Itoa(row.Sessions), row.First, row.Last})
+	}
+}
+
+// exportCampaignsCSV exports the same rows /campaigns' own full table
+// renders (score/network/... every column campaignrows has, not the
+// overview's decluttered summary from #478 -- this is the detail page's own
+// export, scoped by whatever filter the request carries, same #59 rule as
+// every other export here).
+func (s *store) exportCampaignsCSV(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="honeypot-campaigns.csv"`)
+	c := csv.NewWriter(w)
+	defer c.Flush()
+	_ = c.Write([]string{"score", "network", "events", "ips", "sensors", "ports", "creds", "payloads", "alerts", "asns", "providers", "fingerprints", "sequence", "why_correlated", "first", "last"})
+	for _, row := range s.campaignsData(r).Campaigns {
+		_ = c.Write([]string{
+			strconv.Itoa(row.Score), row.CIDR, strconv.Itoa(row.Events), strconv.Itoa(row.UniqueIPs),
+			row.Sensors, row.Ports, strconv.Itoa(row.Creds), strconv.Itoa(row.Payloads), strconv.Itoa(row.Alerts),
+			row.ASNs, row.Providers, strconv.Itoa(row.Fingerprints), row.Sequence, row.Explanation, row.First, row.Last,
+		})
+	}
+}
+
+// exportClustersCSV exports /clusters' own rows, same shape and filter
+// scoping as the page -- including the post-aggregation ?kind= narrowing
+// main.go's /clusters handler applies, since Kind only exists after
+// clustersData's own aggregation and isn't part of the shared filter type
+// clustersRequestFilter builds.
+func (s *store) exportClustersCSV(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="honeypot-clusters.csv"`)
+	c := csv.NewWriter(w)
+	defer c.Flush()
+	_ = c.Write([]string{"kind", "value", "source_ips", "events", "coverage"})
+	kind := r.URL.Query().Get("kind")
+	for _, row := range s.clustersData(clustersRequestFilter(r)).Rows {
+		if kind != "" && row.Kind != kind {
+			continue
+		}
+		_ = c.Write([]string{row.Kind, row.Value, strconv.Itoa(row.Sources), strconv.Itoa(row.Events), row.Summary})
+	}
+}

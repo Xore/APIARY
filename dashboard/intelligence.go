@@ -169,6 +169,7 @@ type clustersPage struct {
 	Generated time.Time
 	Rows      []clusterRow
 	Filters   []string
+	ExportURL string
 	filterBar
 }
 

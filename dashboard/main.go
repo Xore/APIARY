@@ -438,6 +438,12 @@ func main() {
 		}
 		data.filterBar = buildFilterBar(r, "/clusters",
 			[2]string{"sensor", "Sensor"}, [2]string{"kind", "Kind"}, [2]string{"since", "Since (e.g. 24h)"})
+		// #513/#59: exports exactly the current filtered scope (including the
+		// post-aggregation kind= narrowing above), never the unfiltered set.
+		data.ExportURL = "/export/clusters.csv"
+		if encoded := r.URL.Query().Encode(); encoded != "" {
+			data.ExportURL += "?" + encoded
+		}
 		renderPage(w, tmpl, "clusters", &data)
 	})
 	http.HandleFunc("/campaigns", func(w http.ResponseWriter, r *http.Request) {
@@ -611,6 +617,9 @@ func main() {
 	})
 	http.HandleFunc("/export/events.csv", s.exportEventsCSV)
 	http.HandleFunc("/export/commands.csv", s.exportCommandsCSV)
+	http.HandleFunc("/export/ips.csv", s.exportIPsCSV)
+	http.HandleFunc("/export/campaigns.csv", s.exportCampaignsCSV)
+	http.HandleFunc("/export/clusters.csv", s.exportClustersCSV)
 	http.HandleFunc("/payload/", s.servePayload)
 	staticHandler := http.FileServer(http.FS(staticAssets))
 	http.Handle("/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

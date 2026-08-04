@@ -23,7 +23,7 @@
             <span class="gen">generated <span data-hp-utc="{{utcOrEmpty .Generated}}">{{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></span>
           </div>
         </header>
-        <div class="filters" id="clusters-filters"><a class="chip" href="/">&larr; dashboard</a><a class="chip" href="/campaigns">network campaigns</a><span class="chip">{{len .Rows}} shared pivots</span>{{template "filterbar" .}}</div>
+        <div class="filters" id="clusters-filters"><a class="chip" href="/">&larr; dashboard</a><a class="chip" href="/campaigns">network campaigns</a><a class="chip" href="{{.ExportURL}}">export CSV &darr;</a><span class="chip">{{len .Rows}} shared pivots</span>{{template "filterbar" .}}</div>
         <div class="card wide" id="clusters-table">{{if .Rows}}<table class="data-table"><thead><tr><th>cluster type</th><th>shared value</th><th>source IPs</th><th>events</th><th>coverage</th><th></th><th></th></tr></thead><tbody>{{range .Rows}}<tr><td><span class="badge badge--muted">{{.Kind}}</span></td><td class="v"><a href="{{.Link}}">{{.Value}}</a></td><td class="n"><a href="{{.Link}}">{{.Sources}}</a></td><td class="n"><a href="{{.Link}}">{{.Events}}</a></td><td class="v">{{.Summary}}</td><td><a class="lnk" href="{{.Link}}">investigate &rarr;</a></td><td><a class="lnk" href="/investigate/cluster/{{printf "%s\x00%s" .Kind .Value | urlquery}}" title="#354: everything Elasticsearch has correlated for this cluster's member IPs">ES &rarr;</a></td></tr>{{end}}</tbody></table>{{else}}<p class="empty">No multi-source pivots are present in the current in-memory window.</p>{{end}}</div>
         <footer id="clusters-footer">xore//honeypot &bull; correlation pivots</footer>
       </div>
@@ -60,6 +60,7 @@
         </header>
         <div class="filters" id="campaigns-filters">
           <a class="chip" href="/">&larr; dashboard</a>
+          <a class="chip" href="{{.ExportURL}}">export CSV &darr;</a>
           <span class="chip">{{len .Campaigns}} active networks</span>
           {{template "filterbar" .}}
         </div>
