@@ -48,7 +48,7 @@ everything currently hardened is applied:
      --pafish /path/to/pafish.exe --al-khaser /path/to/al-khaser.exe
    ```
 4. The script pushes each tool to `C:\Samples`, runs it over WinRM, and
-   writes a timestamped Markdown report to `docs/vm-detection-results/`
+   writes a timestamped Markdown report to `docs/sandbox/windows/vm-detection-results/`
    containing both tools' full output plus the three residual-tell checks
    above. **Commit the report** — this is the durable, checked-in record
    that verification actually happened, matching the pattern

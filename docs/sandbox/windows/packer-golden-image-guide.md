@@ -190,7 +190,7 @@ sha256sum /isos/Win11_Eval_x64.iso
 
 ## Step 2: Understand the Packer Build File
 
-File: [`sandbox/windows/packer/win11-analysis.pkr.hcl`](../packer/win11-analysis.pkr.hcl)
+File: [`sandbox/windows/packer/win11-analysis.pkr.hcl`](../../../sandbox/windows/packer/win11-analysis.pkr.hcl)
 
 ### Key sections explained
 
@@ -276,7 +276,7 @@ strings in its driver and is easily detected by sandbox-aware malware.
 
 ## Step 3: Understand the autounattend.xml
 
-File: [`sandbox/windows/packer/autounattend.xml`](../packer/autounattend.xml)
+File: [`sandbox/windows/packer/autounattend.xml`](../../../sandbox/windows/packer/autounattend.xml)
 
 This XML file is the Windows unattended installation answer file. Packer
 passes it on a secondary CD labelled `cidata`; Windows Setup scans removable
@@ -363,7 +363,7 @@ and WinRM still did not come up. Mount the qcow2 (or take a screenshot with
 
 ## Step 4: The Provisioner Script
 
-File: [`sandbox/windows/packer/scripts/`](../packer/scripts/) (01-hardening, 02-flarevm-start, 03-flarevm-wait, 04-tools)
+File: [`sandbox/windows/packer/scripts/`](../../../sandbox/windows/packer/scripts/) (01-hardening, 02-flarevm-start, 03-flarevm-wait, 04-tools)
 
 This runs inside the Windows VM via WinRM during the Packer build.
 It has 14 sequential phases, numbered in the script's own `[Phase n]` output:
