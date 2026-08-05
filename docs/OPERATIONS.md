@@ -186,6 +186,15 @@ commands/credentials, payloads, enriched IDS alerts, and ingest failures.
 - **Backups** — run `sudo analysis/backup-honeypot.sh`; Elasticsearch uses its
   snapshot API and other named volumes are archived separately. Test and restore
   procedures are in [`analysis/RECOVERY.md`](../analysis/RECOVERY.md).
+- **Kibana saved objects** (dashboards, visualizations, data views you build
+  by hand) live only in Elasticsearch's `.kibana` index — an ES reset,
+  migration, or upgrade loses them with no recovery path unless you've
+  exported first. Run `analysis/kibana-export.sh` before any ES-affecting
+  change (matching `KIBANA_URL` to how you reach Kibana — defaults to
+  `http://kibana:5601`, the in-cluster address); restore with
+  `analysis/kibana-import.sh`. **Export first, the same way you'd back up
+  anything else you'd be upset to lose** — `backup-honeypot.sh` above
+  doesn't cover these, only the raw Elasticsearch data.
 - **Hard-isolated sandbox** — the optional [`sandbox/`](../sandbox/) host setup
   installs KVM/libvirt beside Docker, defines a non-forwarding network, disables
   libvirt's default NAT network, and uses disposable qcow2 overlays. It never
