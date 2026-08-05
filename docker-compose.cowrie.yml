@@ -90,5 +90,14 @@ services:
           memory: 512M
 
 networks:
+  # #269: outbound is allowed by default, matching this repo's previous de
+  # facto behavior (no honeypot's network has ever set internal: true) and
+  # T-Pot's own explicitly-named design choice for the same reason -- Cowrie
+  # only captures the attacker's actual malware, not just the download
+  # attempt, if its fake shell's wget/curl/tftp can really reach the
+  # internet to fetch it. Set COWRIE_AIR_GAPPED=true (.env) for a stricter,
+  # fully air-gapped deployment that trades that capability away; see
+  # docs/persona-design.md for the full tradeoff.
   cowrie_net:
     driver: bridge
+    internal: ${COWRIE_AIR_GAPPED:-false}
