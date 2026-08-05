@@ -12,6 +12,8 @@
 # socat-hp-http           :8081   →  10.8.0.2:19081 (http-honeypot :8080)
 # socat-hp-snare          :8082   →  10.8.0.2:19082 (snare :8080)
 # socat-hp-dashboard      :8090   →  10.8.0.2:19090 (dashboard :8080)
+# socat-hp-dashboard-b    :8092   →  10.8.0.2:19092 (dashboard-b :8080,
+#                                     #266 rolling-update replica)
 # socat-hp-kibana         :5601   →  10.8.0.2:19601 (kibana :5601)
 # socat-hp-tanner         :8091   →  10.8.0.2:19091 (tanner_web :8091)
 # socat-hp-evebox         :5636   →  10.8.0.2:19636 (evebox :5636)
@@ -362,10 +364,25 @@ http:
           - url: "http://socat-hp-snare:8082"
         passHostHeader: true
 
+    # #266: two servers for zero-downtime rolling updates -- see
+    # docker-compose.dashboard.yml's dashboard/dashboard-b services and
+    # scripts/deploy-dashboard-rolling.sh. healthCheck is what makes this
+    # actually zero-downtime: Traefik polls /healthz on each backend
+    # directly (bypassing the router/middleware chain entirely, including
+    # forward-auth above -- health checks are server-to-server, never
+    # routed through a router) and stops sending it live traffic the
+    # moment it fails, before the rolling-update script even restarts that
+    # replica's container. Without this, both servers would need to be
+    # healthy 100% of the time for a redeploy to be actually gap-free.
     honeypot-dashboard:
       loadBalancer:
         servers:
           - url: "http://socat-hp-dashboard:8090"
+          - url: "http://socat-hp-dashboard-b:8092"
+        healthCheck:
+          path: /healthz
+          interval: "5s"
+          timeout: "3s"
         passHostHeader: true
 
     honeypot-kibana:

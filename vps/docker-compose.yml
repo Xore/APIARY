@@ -318,6 +318,18 @@ services:
     command: TCP4-LISTEN:8090,fork,reuseaddr TCP4:10.8.0.2:19090
     networks: [proxy]
 
+  # #266: second dashboard replica's bridge, for zero-downtime rolling
+  # updates -- see docker-compose.dashboard.yml's own header comment and
+  # vps/traefik/dynamic.yml's honeypot-dashboard service (now two
+  # loadBalancer servers + a healthCheck) for the full mechanism. Own
+  # listen port (8092, not 8090) since two socat containers can't share one.
+  socat-hp-dashboard-b:
+    image: alpine/socat:latest
+    container_name: socat-hp-dashboard-b
+    restart: unless-stopped
+    command: TCP4-LISTEN:8092,fork,reuseaddr TCP4:10.8.0.2:19092
+    networks: [proxy]
+
   socat-hp-kibana:
     image: alpine/socat:latest
     container_name: socat-hp-kibana

@@ -32,3 +32,25 @@ func TestIdleSinceGrowsWithoutFurtherActivity(t *testing.T) {
 		t.Fatalf("idleSince() = %v, want >= rebuildIdleThreshold (%v) for a 5m-old touch", got, rebuildIdleThreshold)
 	}
 }
+
+// #266: DASHBOARD_BACKGROUND_LOOPS=false opts a secondary rolling-update
+// replica out of notifyLoop/reportScheduleLoop so exactly one replica ever
+// fires webhook alerts or generates scheduled reports -- unset (the default,
+// every existing single-instance deployment) must keep running them.
+func TestBackgroundLoopsEnabledDefaultsTrue(t *testing.T) {
+	t.Setenv("DASHBOARD_BACKGROUND_LOOPS", "")
+	if !backgroundLoopsEnabled() {
+		t.Fatal("background loops must run by default (unset env var)")
+	}
+}
+
+func TestBackgroundLoopsDisabledOnlyByExactlyFalse(t *testing.T) {
+	t.Setenv("DASHBOARD_BACKGROUND_LOOPS", "false")
+	if backgroundLoopsEnabled() {
+		t.Fatal("DASHBOARD_BACKGROUND_LOOPS=false must disable the background loops")
+	}
+	t.Setenv("DASHBOARD_BACKGROUND_LOOPS", "0")
+	if !backgroundLoopsEnabled() {
+		t.Fatal(`only the exact value "false" should disable background loops, not "0"`)
+	}
+}
