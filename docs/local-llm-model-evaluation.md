@@ -6,6 +6,10 @@ This is a task-specific decision record for the three independent local-model
 slots in this repository. It does not assume that a model named in an earlier
 plan is suitable, or that one model should serve all three jobs.
 
+This evaluation assumes Ollama as the serving layer throughout — see
+[`llm-inference-backend-comparison.md`](llm-inference-backend-comparison.md)
+(#598) for whether that assumption itself still holds against llama.cpp/vLLM.
+
 ## Decision scope
 
 | Slot | Input | Required output | Main failure modes |
