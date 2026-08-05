@@ -140,5 +140,5 @@ Two standing rules that are not work items and so stay here:
   [`docs/TOKENS.md`](https://github.com/Xore/theme/blob/main/docs/TOKENS.md) (Xore/theme)
 - Modal contract:
   [`docs/MODALS.md`](https://github.com/Xore/theme/blob/main/docs/MODALS.md) (Xore/theme)
-- Frontend build details: `dashboard/frontend/README.md`
+- Frontend build details: `docs/dashboard/frontend/README.md`
 - Root README dashboard section: `README.md` → “Analyse the data”
