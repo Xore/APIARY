@@ -89,8 +89,21 @@ mv "$work/EndpointAgent" "$work/pf/Contoso/EndpointAgent"
 # Idempotent re-run: virt-copy-in errors if the destination already exists,
 # so a re-provision (picking up a Dockerfile.client-win fix, a config
 # change) needs the old copy gone first.
-virt-rm -a "$GOLDEN_IMAGE" -rf "/Program Files/Contoso/EndpointAgent" 2>/dev/null || true
-virt-mkdir -a "$GOLDEN_IMAGE" -p "/Program Files/Contoso" 2>/dev/null || true
+#
+# guestfish, not virt-rm/virt-mkdir: found live against a fresh
+# win11-analysis.qcow2 clone (#597) that this host's guestfs-tools package
+# (1.54.0-2ubuntu1, Ubuntu "resolute") ships virt-copy-in/virt-ls but never
+# installs virt-rm or virt-mkdir at all -- not a PATH issue, the binaries
+# genuinely don't exist (`dpkg -L guestfs-tools`/`libguestfs-tools`/
+# `guestfish` confirms it). The `|| true` on both lines silently swallowed
+# "command not found" as if it meant "already gone"/"already exists", so
+# this only ever worked before because the target win11-ghosts.qcow2
+# already had "/Program Files/Contoso" from an earlier, differently-tooled
+# run -- virt-copy-in then failed for real, further down, on the first
+# truly fresh image. guestfish's mkdir-p/rm-rf give the same idempotent
+# behaviour directly, from a package (guestfish) already confirmed present.
+guestfish -a "$GOLDEN_IMAGE" -i rm-rf "/Program Files/Contoso/EndpointAgent" 2>/dev/null || true
+guestfish -a "$GOLDEN_IMAGE" -i mkdir-p "/Program Files/Contoso"
 virt-copy-in -a "$GOLDEN_IMAGE" "$work/pf/Contoso/EndpointAgent" "/Program Files/Contoso/"
 
 echo "== done"
