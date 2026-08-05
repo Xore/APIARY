@@ -6,15 +6,16 @@ its `threshold.config` into `suricata` (as `/etc/suricata/threshold.config`).
 applies `disable.conf`; the running Suricata reads the merged
 `/var/lib/suricata/rules/suricata.rules` plus the global thresholds.
 
-```
-suricata/
-├── rules/
-│   ├── honeypot-ics.rules    # S7comm, Modbus and DNP3 ICS attack detection
-│   ├── honeypot-web.rules    # web brute-force / default-cred / web-attack
-│   └── honeypot-scan.rules   # per-service interaction + port-sweep telemetry
-├── disable.conf              # noisy upstream SIDs/groups to silence
-├── threshold.config          # global suppress / rate_filter / threshold
-└── README.md
+```mermaid
+flowchart TD
+    Root["vps/suricata/"] --> Rules["rules/"]
+    Rules --> ICS["honeypot-ics.rules<br/>S7comm, Modbus and DNP3 ICS attack detection"]
+    Rules --> Web["honeypot-web.rules<br/>web brute-force / default-cred / web-attack"]
+    Rules --> Scan["honeypot-scan.rules<br/>per-service interaction + port-sweep telemetry"]
+    Root --> Disable["disable.conf<br/>noisy upstream SIDs/groups to silence"]
+    Root --> Threshold["threshold.config<br/>global suppress / rate_filter / threshold"]
+
+    DocsRoot["docs/vps/suricata/"] --> ReadmeMd["README.md<br/>this file"]
 ```
 
 ## What the rules detect
