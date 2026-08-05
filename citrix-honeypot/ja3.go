@@ -58,10 +58,10 @@ func isGREASE(v uint16) bool {
 
 // ja3Listener peeks each connection's ClientHello at Accept() time --
 // same blocking-at-accept precedent proxyproto.go's proxyListener already
-// established for the PROXY header -- and computes its JA3 fingerprint
-// before the real TLS handshake (tls.NewListener wraps this listener) ever
-// runs. A short read deadline bounds how long a slow/absent ClientHello
-// can hold up the shared accept loop.
+// established for the PROXY header -- and computes its JA3 and JA4 (#759)
+// fingerprints before the real TLS handshake (tls.NewListener wraps this
+// listener) ever runs. A short read deadline bounds how long a slow/absent
+// ClientHello can hold up the shared accept loop.
 type ja3Listener struct{ net.Listener }
 
 func (l *ja3Listener) Accept() (net.Conn, error) {
@@ -71,18 +71,23 @@ func (l *ja3Listener) Accept() (net.Conn, error) {
 	}
 	c.SetReadDeadline(time.Now().Add(5 * time.Second))
 	r := bufio.NewReaderSize(c, maxClientHelloBytes)
-	fp := peekJA3(r)
+	// Both peek (never consume) the same buffered reader -- Peek doesn't
+	// advance the read position, so calling both here costs one extra
+	// small-buffer reparse, not a second byte read off the wire.
+	fp3 := peekJA3(r)
+	fp4 := peekJA4(r)
 	c.SetReadDeadline(time.Time{}) // clear; the real TLS handshake sets its own
-	return &ja3Conn{Conn: c, r: r, fp: fp}, nil
+	return &ja3Conn{Conn: c, r: r, fp: fp3, fp4: fp4}, nil
 }
 
-// ja3Conn replays the bytes peekJA3 already read (via r) to the real TLS
-// handshake, and carries the computed fingerprint for ConnContext to pick
-// up (see main.go) once the handshake calls Read.
+// ja3Conn replays the bytes peekJA3/peekJA4 already read (via r) to the
+// real TLS handshake, and carries the computed fingerprints for
+// ConnContext to pick up (see main.go) once the handshake calls Read.
 type ja3Conn struct {
 	net.Conn
-	r  *bufio.Reader
-	fp string
+	r   *bufio.Reader
+	fp  string
+	fp4 string
 }
 
 func (j *ja3Conn) Read(b []byte) (int, error) { return j.r.Read(b) }
@@ -92,50 +97,74 @@ func (j *ja3Conn) Read(b []byte) (int, error) { return j.r.Read(b) }
 // handshake).
 func (j *ja3Conn) JA3() string { return j.fp }
 
-// peekJA3 parses a TLS record + Handshake ClientHello from r without
-// consuming it (net/http's tls.Conn still needs every byte for the real
-// handshake) and returns "hash|ja3_string" for logging, or "" if the
-// prefix isn't a well-formed ClientHello.
-func peekJA3(r *bufio.Reader) string {
+// JA4 returns the JA4 fingerprint (#759) computed from this connection's
+// ClientHello, or "" if none was found -- same conditions as JA3 above.
+func (j *ja3Conn) JA4() string { return j.fp4 }
+
+// peekClientHelloBody peeks (never consumes -- the real TLS handshake still
+// needs every byte) a single TLS record off r and returns the Handshake
+// ClientHello body (past the 4-byte handshake header), or ok=false if the
+// prefix isn't a well-formed, unfragmented ClientHello. Shared by peekJA3
+// and peekJA4 (ja4.go) so both fingerprints parse the exact same bytes the
+// exact same way.
+func peekClientHelloBody(r *bufio.Reader) (body []byte, ok bool) {
 	head, err := r.Peek(5)
 	if err != nil || head[0] != tlsRecordHandshake {
-		return ""
+		return nil, false
 	}
 	recLen := int(binary.BigEndian.Uint16(head[3:5]))
 	if recLen <= 0 || recLen > maxClientHelloBytes-5 {
-		return ""
+		return nil, false
 	}
 	buf, err := r.Peek(5 + recLen)
 	if err != nil {
-		return ""
+		return nil, false
 	}
-	body := buf[5:]
+	body = buf[5:]
 	if len(body) < 4 || body[0] != tlsHandshakeClient {
-		return ""
+		return nil, false
 	}
 	msgLen := int(body[1])<<16 | int(body[2])<<8 | int(body[3])
 	body = body[4:]
 	if len(body) < msgLen {
-		return "" // fragmented across multiple records -- not handled
+		return nil, false // fragmented across multiple records -- not handled
 	}
-	body = body[:msgLen]
+	return body[:msgLen], true
+}
+
+// negotiatedVersion applies the #002b supported_versions override (TLS 1.3
+// signals its real version there; the legacy client_version field stays
+// pinned to 0x0303 for middlebox compatibility) -- same rule JA3 and JA4
+// both use to pick the version they report.
+func negotiatedVersion(legacy uint16, body []byte) uint16 {
+	sv, present := extData(body, 0x002b)
+	if !present || len(sv) < 3 {
+		return legacy
+	}
+	// data = 1-byte list-len + N*2-byte versions; take the highest.
+	best := legacy
+	for i := 1; i+1 < len(sv); i += 2 {
+		if v := binary.BigEndian.Uint16(sv[i : i+2]); !isGREASE(v) && v > best {
+			best = v
+		}
+	}
+	return best
+}
+
+// peekJA3 parses a TLS record + Handshake ClientHello from r without
+// consuming it and returns the JA3 md5 hash for logging, or "" if the
+// prefix isn't a well-formed ClientHello.
+func peekJA3(r *bufio.Reader) string {
+	body, ok := peekClientHelloBody(r)
+	if !ok {
+		return ""
+	}
 
 	ver, ciphers, exts, groups, points, ok := parseClientHello(body)
 	if !ok {
 		return ""
 	}
-	// #002b supported_versions overrides the legacy client_version field
-	// on TLS 1.3, same rule JA4 uses, and the value JA3 tools report.
-	if sv, present := extData(body, 0x002b); present && len(sv) >= 3 {
-		// data = 1-byte list-len + N*2-byte versions; take the highest.
-		best := ver
-		for i := 1; i+1 < len(sv); i += 2 {
-			if v := binary.BigEndian.Uint16(sv[i : i+2]); !isGREASE(v) && v > best {
-				best = v
-			}
-		}
-		ver = best
-	}
+	ver = negotiatedVersion(ver, body)
 
 	ja3 := strings.Join([]string{
 		strconv.Itoa(int(ver)),
