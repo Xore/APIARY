@@ -57,23 +57,31 @@ JoeSandbox reports.
 
 ## Architecture
 
-```
-honeypot-stack/
-└── analysis/
-    └── ghidra/
-        ├── IMPLEMENTATION_PLAN.md   ← this file
-        ├── docker-compose.ghidra.yml   ← also defines revdeck, profile-gated
-        ├── scripts/                 ← vestigial, see below (#141)
-        │   └── export_imports.py
-        ├── revdeck/                 ← biniamf/ai-reverse-engineering integration
-        │   └── README.md
-        ├── ghidrassist/             ← symgraph/GhidrAssist plugin config
-        │   └── README.md
-        └── report/
-            └── generate_report.py   ← {sha256}_ghidra.json → HTML report
+```mermaid
+flowchart TD
+    Root["honeypot-stack/"] --> Docs["docs/analysis/ghidra/"]
+    Root --> AG["analysis/ghidra/"]
+
+    Docs --> IP["IMPLEMENTATION_PLAN.md<br/>this file"]
+
+    AG --> DC["docker-compose.ghidra.yml<br/>also defines revdeck, profile-gated"]
+    AG --> Scripts["scripts/<br/>vestigial, see below (#141)"]
+    Scripts --> EI["export_imports.py"]
+    AG --> Bench["benchmarks/<br/>model qualification benchmark + GPU capability tooling"]
+    AG --> Models["models/<br/>model governance, approved-models.json, drift monitoring"]
+    AG --> Static["statictools/<br/>ssdeep/tlsh/lief/capa/floss sidecar"]
+    AG --> Worker["worker/"]
+    Worker --> GW["ghidra-worker.py<br/>watches GHIDRA_REQUEST_DIR, drives the REST API,<br/>Rev·Deck, and the GPU queue"]
+    AG --> Report["report/"]
+    Report --> GR["generate_report.py<br/>{sha256}_ghidra.json → HTML report"]
 ```
 
-This is the *target* layout. Every entry now exists.
+This is the *target* layout. Every entry now exists. `revdeck/` and
+`ghidrassist/` no longer have their own directories under
+`analysis/ghidra/` — each only ever held a `README.md`, both since moved
+to `docs/analysis/ghidra/{revdeck,ghidrassist}/` (#670); their code
+(Rev·Deck's client, the GhidrAssist plugin config) lives with the
+consumers documented in those READMEs, not as standalone trees here.
 
 **`scripts/` is vestigial, not part of the live pipeline** ([#141](https://github.com/Xore/honeypot-stack/issues/141)):
 these were written as `analyzeHeadless ... -postScript <file>` Jython scripts
@@ -379,21 +387,20 @@ JoeSandbox, and CAPA data. That data doesn't exist in this pipeline — there is
 no Phase 0 VT/JoeSandbox stage — so the report actually built is scoped to
 what `worker/ghidra-worker.py` produces today:
 
-```
-{ghidra-results}/{sha256}_ghidra_report.html
-  ├── Sample metadata (hash, exit status, timing, analyzer/schema versions,
-  │     service_sha256 integrity check)
-  ├── Functions (address, name, signature, size)
-  ├── Strings
-  ├── Imports (library!name)
-  ├── Cryptographic constants (from scan_crypto())
-  ├── Call graph (inlined SVG, if build_call_graph() produced one)
-  ├── Structural info (lief: format, architecture, entry point, sections)
-  ├── Fuzzy hashes (ssdeep/tlsh)
-  ├── Capabilities (capa: ATT&CK/MBC tags, added 2026-08-01 #78)
-  ├── AI triage (the worker's own local-model output, if configured, #103)
-  └── Rev·Deck automated triage (a second, independent AI aid, if configured,
-        added 2026-08-01 #78)
+```mermaid
+flowchart TD
+    Report["{ghidra-results}/{sha256}_ghidra_report.html"]
+    Report --> Meta["Sample metadata<br/>hash, exit status, timing, analyzer/schema versions,<br/>service_sha256 integrity check"]
+    Report --> Funcs["Functions<br/>address, name, signature, size"]
+    Report --> Strings["Strings"]
+    Report --> Imports["Imports (library!name)"]
+    Report --> Crypto["Cryptographic constants<br/>from scan_crypto()"]
+    Report --> CallGraph["Call graph<br/>inlined SVG, if build_call_graph() produced one"]
+    Report --> Struct["Structural info<br/>lief: format, architecture, entry point, sections"]
+    Report --> Fuzzy["Fuzzy hashes (ssdeep/tlsh)"]
+    Report --> Capa["Capabilities<br/>capa: ATT&CK/MBC tags, added 2026-08-01 #78"]
+    Report --> AITriage["AI triage<br/>the worker's own local-model output, if configured, #103"]
+    Report --> Revdeck["Rev·Deck automated triage<br/>a second, independent AI aid, if configured, added 2026-08-01 #78"]
 ```
 
 A PDF is optional, not the default: `generate_report.py --pdf` renders one via
