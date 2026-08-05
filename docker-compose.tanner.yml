@@ -51,6 +51,7 @@ services:
     # split.
     labels:
       - autoheal=true
+    read_only: true
     networks:
       - tanner_local
     deploy:
@@ -83,6 +84,7 @@ services:
     # see #119, the same gap #111 found and fixed for conpot.
     labels:
       - autoheal=true
+    read_only: true
     networks:
       - tanner_local
     deploy:
@@ -102,6 +104,14 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    read_only: true
+    # #589: `php -S` runs as SAPI "cli-server", not "cli" -- opcache.enable_cli
+    # doesn't gate it, so opcache.enable=On (this image's default) applies and
+    # OPcache tries to create a coordination lock file under /tmp on startup.
+    # Confirmed live: without this tmpfs, every request crashed the process
+    # with "Fatal Error Unable to create lock file: Read-only file system".
+    tmpfs:
+      - /tmp
     restart: unless-stopped
     networks:
       - tanner_local
@@ -132,6 +142,7 @@ services:
     depends_on:
       tanner_redis:
         condition: service_healthy
+    read_only: true
     networks:
       - tanner_local
     deploy:
@@ -163,6 +174,7 @@ services:
     depends_on:
       tanner_redis:
         condition: service_healthy
+    read_only: true
     networks:
       - tanner_local
     deploy:
@@ -213,6 +225,7 @@ services:
         condition: service_started
       tanner_docker:
         condition: service_healthy
+    read_only: true
     networks:
       - tanner_local
     deploy:
@@ -264,6 +277,7 @@ services:
     depends_on:
       tanner:
         condition: service_started
+    read_only: true
     networks:
       - tanner_local
     deploy:
