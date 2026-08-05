@@ -32,7 +32,7 @@ Usage:
        --al-khaser /path/to/al-khaser.exe
 
 Writes a timestamped Markdown report to
-sandbox/windows/docs/vm-detection-results/, matching the pattern
+docs/sandbox/windows/vm-detection-results/, matching the pattern
 04-tools.ps1 already uses for C:\\golden_image_provenance.txt: a durable,
 checked-in record of what was verified and when, not just a claim in a
 comment. Re-run after every golden-image rebuild (#86's scheduled-rebuild
@@ -67,7 +67,7 @@ VM_USER     = os.environ.get('VM_USER', 'analyst')
 VM_PASS     = os.environ.get('VM_PASS', 'malware123!')
 SAMPLE_SHARE = f'\\\\{VM_HOST}\\Samples'
 LOGS_SHARE   = f'\\\\{VM_HOST}\\Logs'
-RESULTS_DIR  = Path(__file__).resolve().parent.parent / 'docs' / 'vm-detection-results'
+RESULTS_DIR  = Path(__file__).resolve().parents[3] / 'docs' / 'sandbox' / 'windows' / 'vm-detection-results'
 
 
 def winrm_run(ps_command: str, timeout: int = 300) -> dict:

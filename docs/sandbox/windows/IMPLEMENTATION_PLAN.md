@@ -409,7 +409,7 @@ sandbox/windows/setup/kvm_manage.sh revert
 
 Before trusting a freshly-reset guest as an acceptance point, run the pafish/
 al-khaser verification pass (#298) against the freshly-booted guest — see
-[`docs/vm-detection-verification.md`](../../../sandbox/windows/docs/vm-detection-verification.md).
+[`docs/vm-detection-verification.md`](vm-detection-verification.md).
 Everything upstream of this (SMBIOS/CPUID spoofing, Defender/telemetry
 disables) is reasoned-through hardening against *known* checks; this is the
 only step that empirically confirms it holds up in a real booted guest.
