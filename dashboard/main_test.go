@@ -156,6 +156,29 @@ func TestNonTarpittedHTTPRequestHasNoTarpitDetail(t *testing.T) {
 	}
 }
 
+func TestEndlesshDisconnectSurfacesHeldDurationAndLineCount(t *testing.T) {
+	ev := classify(map[string]any{
+		"sensor":  "endlessh",
+		"event":   "disconnect",
+		"port":    float64(2222),
+		"held_ms": float64(45231),
+		"lines":   float64(4),
+	}, "endlessh")
+	if ev.sensor != "endlessh" || ev.proto != "ssh" {
+		t.Fatalf("sensor/proto = %q/%q, want endlessh/ssh", ev.sensor, ev.proto)
+	}
+	if !strings.Contains(ev.detail, "45231ms") || !strings.Contains(ev.detail, "4 banner lines") {
+		t.Fatalf("detail must include held duration and line count, got %q", ev.detail)
+	}
+}
+
+func TestEndlesshListeningEventIsSkipped(t *testing.T) {
+	ev := classify(map[string]any{"sensor": "endlessh", "event": "listening"}, "endlessh")
+	if !ev.skip {
+		t.Fatal("a bare startup-announcement event must be skipped, not shown as attacker activity")
+	}
+}
+
 func TestBalancedRecentLimitsNoisySensor(t *testing.T) {
 	evs := []storedEvent{
 		{Sensor: "cowrie", Detail: "c1"},

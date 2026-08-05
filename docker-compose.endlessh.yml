@@ -1,0 +1,68 @@
+# honeypot-endlessh — #246: SSH pre-auth tarpit (skeeto/endlessh's core
+# trick, ported to Go), split into its own Dockge-managed stack. Same shape
+# as docker-compose.dnp3.yml -- no depends_on, its own fully private
+# network, only host bind mounts. Deployed as /opt/stacks/honeypot-endlessh.
+#
+# Deliberately its OWN port, not cowrie's (19022/2222): diverting an
+# attacker into an endless pre-auth stall instead of cowrie's real
+# fake-shell interaction would trade capture depth for a cheap time-waste
+# on exactly the traffic cowrie most wants to see. Which external port (if
+# any) an operator points at this is a portbridge/firewall decision made
+# separately -- not wired into vps/portbridge's RULES or the VPS firewall
+# by this file; do that as an explicit follow-up once a port is chosen.
+#
+# autoheal (main stack) restarts this on unhealthy the same way it does
+# dnp3/conpot -- watches by Docker label via /var/run/docker.sock
+# daemon-wide, not scoped to a compose project.
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  endlessh:
+    <<: *runtime-defaults
+    build: /opt/stacks/honeypot-stack/endlessh-honeypot
+    container_name: hp-endlessh
+    restart: unless-stopped
+    # #128: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). This image is FROM
+    # scratch with no shell -- an entrypoint: sh -c wrapper can't run here,
+    # same reasoning as dnp3-honeypot/rdp-honeypot. The wait lives in the
+    # Go binary itself instead (main.go).
+    environment:
+      - LISTEN_ADDR=:2222
+      - LOG_PATH=/var/log/honeypot/endlessh.json
+      # Parse the PROXY header portbridge prepends (":pp" rule, once a port
+      # is chosen) so events carry the real attacker IP instead of tunnel
+      # peer 10.8.0.1.
+      - PROXY_PROTOCOL=1
+      - DELAY_MS=10000
+      - MAX_CLIENTS=4096
+      - TZ=Europe/Berlin
+    ports:
+      - ${HP_BIND:-10.8.0.2}:19024:2222
+    volumes:
+      - /opt/stacks/honeypot-stack/logs/endlessh:/var/log/honeypot
+      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+    networks: [endlessh_net]
+    healthcheck:
+      test: ["CMD", "/endlessh-honeypot", "-healthcheck"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    labels:
+      - autoheal=true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+
+networks:
+  endlessh_net:
+    driver: bridge

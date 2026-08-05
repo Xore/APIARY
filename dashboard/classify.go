@@ -425,6 +425,35 @@ func classify(e map[string]any, dirSensor string) event {
 		return ev
 	}
 
+	// ---- endlessh (#246) ---------------------------------------------------
+	// A "connect" and a later "disconnect" are logged per held connection;
+	// the disconnect carries the actual investigative value (how long/how
+	// much this tarpit cost the requester), so it drives the detail line --
+	// surfacing it here rather than leaving the pair to fall through to the
+	// generic "anything else under /logs" bucket, which would only ever
+	// show the bare event name (the exact gap #550's dnp3-honeypot audit
+	// found for a different sensor this same session).
+	if s, ok := e["sensor"].(string); ok && s == "endlessh" {
+		if str(e["event"]) == "listening" {
+			ev.skip = true
+			return ev
+		}
+		ev.sensor = "endlessh"
+		ev.proto = "ssh"
+		ev.port = num(e["port"])
+		switch str(e["event"]) {
+		case "connect":
+			ev.detail = "tarpit connect"
+		case "disconnect":
+			ms := int(numFloat(e["held_ms"]))
+			lines := int(numFloat(e["lines"]))
+			ev.detail = fmt.Sprintf("tarpit held %dms, %d banner lines sent", ms, lines)
+		default:
+			ev.detail = str(e["event"])
+		}
+		return ev
+	}
+
 	// ---- dionaea incident handler ----------------------------------------
 	// log_incident records every lifecycle and payload incident as
 	// {origin:"dionaea.*", data:{connection:{...}, ...}}. Keep these richer

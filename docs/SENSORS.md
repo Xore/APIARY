@@ -22,6 +22,7 @@
 | **http-honeypot** | `decoy.<domain>` (+ catch-all, + raw :8081) | Traefik | fake nginx / login pages — unrecognized scan/rce-probe paths get a HellPot-style Markov-garbage tarpit instead of a fast reply by default (`HTTP_TARPIT=0` to disable, #246) |
 | **api-honeypot** | raw 8888 | raw tunnel + PROXY | cloud metadata, Kubernetes, registry, DevOps and LLM API probes — same binary as http-honeypot, same tarpit behavior |
 | **snare + tanner** | `www-portal.<domain>` | Traefik | fictional Meridian portal → payload analysis |
+| **endlessh** | SSH 2222 (own port, not cowrie's) | raw tunnel + PROXY (once wired) | SSH pre-auth tarpit, Go port of `skeeto/endlessh`'s core trick — sends random non-"SSH-" banner lines forever, real handshake never begins. Own port deliberately, not cowrie's: diverting an attacker here instead of cowrie's real fake-shell capture would trade depth for a cheap time-waste (#246) |
 | **suricata** | (sniffs all traffic, runs on the **VPS**) | — | IDS over every honeypot packet → eve.json → ELK, pcap → Arkime |
 
 multipot cedes FTP/MySQL/MSSQL/Mongo to Dionaea automatically
