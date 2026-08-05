@@ -121,6 +121,18 @@ ARTIFACT_DIR    = Path(os.environ.get('WINDOWS_SANDBOX_RESULTS_DIR', 'reports/wi
 SAMPLE_SHARE    = f'\\\\{VM_HOST}\\Samples'
 LOGS_SHARE      = f'\\\\{VM_HOST}\\Logs'
 
+# #510: docker-compose.sandbox.yml's Zeek/Suricata/tcpdump sniff the libvirt
+# bridge from the host side -- the only vantage point that sees traffic the
+# guest sends to an address nothing answers on. Nothing ever actually
+# started or stopped them per detonation; INetSim (also in that compose
+# file) is deliberately left out of GATEWAY_SERVICES because in-guest
+# FakeNet-NG (started by the orchestrator inside the guest itself) already
+# supersedes its job -- see docker-compose.sandbox.yml's own header comment.
+GATEWAY_COMPOSE  = Path(os.environ.get('SANDBOX_GATEWAY_COMPOSE',
+                        str(Path(__file__).resolve().parents[3] / 'docker-compose.sandbox.yml')))
+GATEWAY_SERVICES = ['zeek', 'suricata', 'tcpdump']
+GATEWAY_ENABLED  = os.environ.get('SANDBOX_GATEWAY_DISABLED', '') != '1'
+
 
 def sha256_of(path: Path) -> str:
     h = hashlib.sha256()
@@ -1033,6 +1045,53 @@ def collect_artifacts_offline(out_dir: Path):
     log.info(f'Artifacts collected (offline) to {out_dir}')
 
 
+def start_gateway_services(out_dir: Path):
+    """#510: bring up the host-side bridge sniffers (Zeek/Suricata/tcpdump)
+    pointed at this run's own out_dir, so their logs/pcap land directly
+    where generate_report.py and export_result.py already expect to find
+    them (run_dir/zeek_logs/, run_dir/network.pcap, run_dir/suricata_alerts.json)
+    instead of colliding in docker-compose.sandbox.yml's static default.
+
+    Best-effort: a sniffer failing to start must not abort a detonation --
+    the guest still runs and in-guest FakeNet-NG/Sysmon still capture
+    plenty. Logged loudly instead, since a silent gap here is exactly what
+    made this issue (#510) invisible for as long as it was.
+    """
+    if not GATEWAY_ENABLED:
+        log.info('Gateway sniffers disabled (SANDBOX_GATEWAY_DISABLED=1), skipping')
+        return
+    if not GATEWAY_COMPOSE.exists():
+        log.error(f'Gateway compose file not found: {GATEWAY_COMPOSE}, skipping sniffers')
+        return
+    env = os.environ.copy()
+    env['SANDBOX_RESULTS_DIR'] = str(out_dir)
+    result = subprocess.run(
+        ['docker', 'compose', '-f', str(GATEWAY_COMPOSE), 'up', '-d', *GATEWAY_SERVICES],
+        capture_output=True, text=True, timeout=120, env=env,
+    )
+    if result.returncode != 0:
+        log.error(f'Gateway sniffers failed to start: {result.stderr.strip()} -- '
+                   f'continuing without host-side network capture for this run')
+    else:
+        log.info(f'Gateway sniffers ({", ".join(GATEWAY_SERVICES)}) up, capturing into {out_dir}')
+
+
+def stop_gateway_services(out_dir: Path):
+    """Stop and remove the sniffer containers so their pcap/log files are
+    flushed and complete before post_process() reads them, and so the next
+    run's `up -d` doesn't collide with a still-running or stopped-but-
+    present container of the same name."""
+    if not GATEWAY_ENABLED or not GATEWAY_COMPOSE.exists():
+        return
+    env = os.environ.copy()
+    env['SANDBOX_RESULTS_DIR'] = str(out_dir)
+    subprocess.run(
+        ['docker', 'compose', '-f', str(GATEWAY_COMPOSE), 'rm', '-f', '-s', *GATEWAY_SERVICES],
+        capture_output=True, text=True, timeout=60, env=env,
+    )
+    log.info('Gateway sniffers stopped')
+
+
 # Set once per detonate_inguest() call so wait_for_domain_shutoff()'s
 # best-effort mid-run memory dump can reach the current run's out_dir
 # without threading it through every function on the call stack for a
@@ -1052,10 +1111,17 @@ def detonate_inguest(sample_path: Path, sha: str, out: Path):
 
     revert_to_golden(start=False)
     stage_job_offline(sample_path, sha, OBS_SECS, sample_filename)
-    virsh(['start', VM_DOMAIN])
-    log.info(f'Domain booted with job staged; observing for up to {OBS_SECS + WATCHDOG_BUFFER_SECS}s')
+    start_gateway_services(out)
+    try:
+        virsh(['start', VM_DOMAIN])
+        log.info(f'Domain booted with job staged; observing for up to {OBS_SECS + WATCHDOG_BUFFER_SECS}s')
 
-    completed = wait_for_domain_shutoff(OBS_SECS, WATCHDOG_BUFFER_SECS)
+        completed = wait_for_domain_shutoff(OBS_SECS, WATCHDOG_BUFFER_SECS)
+    finally:
+        # Stop before collecting artifacts: the pcap/zeek/suricata files
+        # written straight into `out` must be flushed and complete before
+        # post_process() (via generate_report.py) reads them.
+        stop_gateway_services(out)
     meta = json.loads((out / 'metadata.json').read_text())
     meta['run_status'] = 'completed' if completed else 'watchdog_timeout'
     (out / 'metadata.json').write_text(json.dumps(meta, indent=2))

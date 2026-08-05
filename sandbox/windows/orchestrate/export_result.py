@@ -15,10 +15,13 @@ Known gaps, deliberately not solved here (see #53's PR/issue thread):
   - No PE-forensics step exists in this pipeline (unlike the Linux runner's
     pe-forensics.json), so windows_forensics.detected stays False. Sections,
     imports, imphash, etc. are all unavailable until that's added.
-  - No raw network pcap is captured for the Windows sandbox the way the
-    Linux runner captures network.pcap/guest-network.pcap, so network_summary
-    is built from Sysmon's own DNS/connection events (already parsed by
-    extract_iocs.py) rather than a packet-level summary.
+  - #510 wired up host-side pcap capture (run_dir/network.pcap,
+    zeek_logs/, suricata_alerts.json -- generate_report.py already reads
+    all three), but this exporter's network_summary still doesn't: it is
+    still built from Sysmon's own DNS/connection events (already parsed by
+    extract_iocs.py) rather than the packet-level record now available
+    alongside it. Left as-is here since #510's own scope was making the
+    capture exist at all, not consuming it from every downstream reader.
   - ioc_extracted.json's DNS/IP data includes this image's own decoy traffic
     (the living-persona daemon and traffic-noise generator, #290/#291 --
     e.g. *.acp-persona.net) alongside anything the sample actually did.
