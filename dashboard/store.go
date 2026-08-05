@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -210,6 +211,28 @@ type store struct {
 	expected          []string // configured feeds shown even before their first event
 	subs              map[chan struct{}]struct{}
 	authAccountURL    string // validated once at startup; see validatedAuthAccountURL
+	// lastActivity (#486) is a unix-second timestamp of the most recent
+	// dashboard request, touched by touchActivity (main.go's request
+	// middleware) and read by the periodic rebuild loop to skip its ES/log
+	// round-trip while no one is looking. atomic, not mu-guarded: it is
+	// written on every request, far hotter than rebuild's own 15s tick, and
+	// a torn read only ever costs one extra or one skipped rebuild.
+	lastActivity atomic.Int64
+}
+
+// touchActivity records that a real dashboard request just arrived.
+func (s *store) touchActivity() { s.lastActivity.Store(time.Now().Unix()) }
+
+// idleSince reports how long it has been since the last recorded request.
+// Before the first request (or if touchActivity was never called), it
+// reports zero duration -- treated as "not idle" by callers, since a
+// freshly booted dashboard should not skip its first ticks.
+func (s *store) idleSince() time.Duration {
+	last := s.lastActivity.Load()
+	if last == 0 {
+		return 0
+	}
+	return time.Since(time.Unix(last, 0))
 }
 
 // rebuild re-reads every log file and recomputes the snapshot.

@@ -21,6 +21,13 @@ import (
 	"time"
 )
 
+// rebuildIdleThreshold (#486) is how long the dashboard must see no requests
+// before its periodic rebuild loop starts skipping ticks. A few multiples of
+// the 15s tick itself, so one slow page load or a brief gap between an
+// operator's clicks never trips it -- it only kicks in once nobody has been
+// looking for a real stretch of time.
+const rebuildIdleThreshold = 2 * time.Minute
+
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "-healthcheck" {
 		addr := getenv("LISTEN_ADDR", ":8080")
@@ -164,6 +171,15 @@ func main() {
 		go s.notifyLoop(os.Getenv("ALERT_WEBHOOK_URL"))
 		go s.reportScheduleLoop()
 		for range time.Tick(15 * time.Second) {
+			// #486: skip this tick's log walk / ES round-trip once nobody has
+			// hit the dashboard in a while -- touchActivity (below, wrapping
+			// every request except /healthz) resets the idle clock, so the
+			// very next tick after a request arrives rebuilds again. Bounded
+			// staleness (at most one missed 15s tick) in exchange for not
+			// paying rebuild's cost on an idle dashboard around the clock.
+			if s.idleSince() > rebuildIdleThreshold {
+				continue
+			}
 			s.rebuild()
 		}
 	}()
@@ -636,9 +652,24 @@ func main() {
 		renderPage(w, tmpl, "page", &data)
 	})
 
+	// #486: touchActivity is the idle-rebuild loop's only signal that a real
+	// viewer is present. /healthz is excluded deliberately -- Docker's own
+	// healthcheck (and any external uptime monitor) hits it on a fixed
+	// interval regardless of whether an operator is looking, which would
+	// defeat idle detection entirely by keeping the dashboard "active"
+	// forever on an unattended host.
+	mux := http.DefaultServeMux
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			s.touchActivity()
+		}
+		mux.ServeHTTP(w, r)
+	})
+
 	srv := &http.Server{
 		Addr:              getenv("LISTEN_ADDR", ":8080"),
 		ReadHeaderTimeout: 5 * time.Second,
+		Handler:           handler,
 	}
 	srv.ListenAndServe()
 }
