@@ -311,6 +311,51 @@ func TestClassifySuricataSurfacesPrintablePayload(t *testing.T) {
 	}
 }
 
+// TestClassifySuricataSurfacesSeverityAndMITRE uses the exact alert.metadata
+// shape confirmed live against real eve.json on the VPS (#615): severity is
+// carried into ev.severity/storedEvent but was never rendered anywhere, and
+// mitre_tactic_id/mitre_technique_id (present on most ET/OISF rules that
+// map to ATT&CK) were never read at all.
+func TestClassifySuricataSurfacesSeverityAndMITRE(t *testing.T) {
+	ev := classify(map[string]any{
+		"event_type": "alert", "proto": "TCP", "dest_port": float64(445),
+		"alert": map[string]any{
+			"signature": "ET USER_AGENTS WinRM User Agent Detected - Possible Lateral Movement",
+			"category":  "Potentially Bad Traffic",
+			"severity":  float64(2),
+			"metadata": map[string]any{
+				"mitre_tactic_id":      []any{"TA0008"},
+				"mitre_tactic_name":    []any{"Lateral_Movement"},
+				"mitre_technique_id":   []any{"T1021"},
+				"mitre_technique_name": []any{"Remote_Services"},
+			},
+		},
+	}, "suricata")
+	if ev.severity != 2 {
+		t.Fatalf("severity = %d, want 2", ev.severity)
+	}
+	if !strings.Contains(ev.detail, "severity 2") {
+		t.Fatalf("severity label missing from detail: %q", ev.detail)
+	}
+	if !strings.Contains(ev.detail, "TA0008") || !strings.Contains(ev.detail, "Lateral_Movement") ||
+		!strings.Contains(ev.detail, "T1021") || !strings.Contains(ev.detail, "Remote_Services") {
+		t.Fatalf("MITRE ATT&CK context missing from detail: %q", ev.detail)
+	}
+}
+
+// TestClassifySuricataMITRESuffixAbsentWithoutMetadata confirms alerts with
+// no metadata block (most rules don't carry MITRE mappings) don't get a
+// stray "ATT&CK:" suffix or panic on the missing field.
+func TestClassifySuricataMITRESuffixAbsentWithoutMetadata(t *testing.T) {
+	ev := classify(map[string]any{
+		"event_type": "alert", "proto": "TCP", "dest_port": float64(22),
+		"alert": map[string]any{"signature": "ET SCAN SSH Scan", "category": "scan", "severity": float64(3)},
+	}, "suricata")
+	if strings.Contains(ev.detail, "ATT&CK") {
+		t.Fatalf("unexpected ATT&CK suffix with no metadata: %q", ev.detail)
+	}
+}
+
 // TestClassifyDNP3SurfacesLinkFunctionAndAddresses is a regression test for
 // #570: dnp3-honeypot emits function/dnp3_source/dnp3_destination on every
 // real frame, but classify.go had no dedicated dnp3 case at all -- every
