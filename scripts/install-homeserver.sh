@@ -891,7 +891,7 @@ step_llm_worker_selftest() {
   # is CPU-only by design (Ollama holds the GPU reservation, see
   # docs/gpu-llm-analysis-worker.md's Architecture Overview) -- no --gpus
   # needed. The actual selftest invocation is documented in
-  # llm-worker/README.md's Quick Start: bring the container up, then exec
+  # docs/llm-worker/README.md's Quick Start: bring the container up, then exec
   # into it. My first attempt here (docker run <image> --selftest as a
   # one-shot) was wrong on both counts -- confirmed live (#518 test run):
   # it failed with "exec: --selftest: executable file not found in $PATH"
