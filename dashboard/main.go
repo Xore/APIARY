@@ -143,7 +143,7 @@ func main() {
 	// is nil (Elasticsearch not configured), and every observe() call site
 	// already treats a nil alertManager as "alerting disabled".
 	s.alerts = newAlertManager(s.es, cooldown)
-	s.intelligence = &intelligenceStore{path: getenv("INTELLIGENCE_STATE_FILE", "/state/intelligence.json")}
+	s.intelligence = &intelligenceStore{path: getenv("INTELLIGENCE_STATE_FILE", "/state/intelligence.json"), es: s.es}
 	s.settings = newSettingsService(
 		getenv("DASHBOARD_CONFIG_FILE", "/state/dashboard-config.json"),
 		getenv("DASHBOARD_USERS_FILE", "/state/dashboard-users.json"),
