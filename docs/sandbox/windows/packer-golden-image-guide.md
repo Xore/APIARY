@@ -39,27 +39,24 @@ which gives near-native performance via hardware virtualisation.
 
 ## Architecture: How Packer Builds the Image
 
-```
-KVM Host
-  │
-  ├── packer build win11-analysis.pkr.hcl
-  │     │
-  │     ├── 1. QEMU boots Windows 11 ISO with KVM acceleration
-  │     ├── 2. autounattend.xml on secondary CD → fully unattended install
-  │     ├── 3. WinRM auto-enabled via FirstLogonCommands
-  │     ├── 4. Packer connects via WinRM → runs PowerShell provisioners
-  │     ├── 5. 01-hardening → 02-flarevm-start → 03-wait ×12 → 04-tools:
-  │     │                        PS logging → FakeNet-NG → hardening
-  │     └── 6. Shutdown → export win11-analysis.qcow2
-  │
-  └── /var/dockge/sandbox/golden-images/win11-analysis.qcow2  (25-35 GB)
-        │
-        ├── qemu-img create (thin clone) → /vms/win11-sandbox.qcow2
-        └── virsh define → VM defined in libvirt
-              │
-              └── kvm_manage.sh revert: destroy + fresh CoW clone + start
-                    (before each run, cold boot ~1-2min — see #358 for why
-                    this isn't a virsh snapshot revert)
+```mermaid
+flowchart TD
+    Host["KVM Host"] --> Build["packer build win11-analysis.pkr.hcl"]
+
+    Build --> S1["1. QEMU boots Windows 11 ISO with KVM acceleration"]
+    S1 --> S2["2. autounattend.xml on secondary CD → fully unattended install"]
+    S2 --> S3["3. WinRM auto-enabled via FirstLogonCommands"]
+    S3 --> S4["4. Packer connects via WinRM → runs PowerShell provisioners"]
+    S4 --> S5["5. 01-hardening → 02-flarevm-start → 03-wait ×12 → 04-tools:<br/>PS logging → FakeNet-NG → hardening"]
+    S5 --> S6["6. Shutdown → export win11-analysis.qcow2"]
+
+    Host --> Image["/var/dockge/sandbox/golden-images/win11-analysis.qcow2 (25-35 GB)"]
+    S6 --> Image
+
+    Image --> Clone["qemu-img create (thin clone) → /vms/win11-sandbox.qcow2"]
+    Image --> Define["virsh define → VM defined in libvirt"]
+
+    Define --> Revert["kvm_manage.sh revert: destroy + fresh CoW clone + start<br/>(before each run, cold boot ~1-2min — see #358 for why<br/>this isn't a virsh snapshot revert)"]
 ```
 
 ---
