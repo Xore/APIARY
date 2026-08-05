@@ -91,51 +91,33 @@ All indices share a common `@timestamp` field used for temporal ordering.
 
 ## 3. Architecture Overview
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  Honeypot Stack (existing)                                      │
-│  Cowrie · Dionaea · Conpot · Zeek/Suricata · HTTP-honeypot      │
-│                        │                                        │
-│                  Elasticsearch                                  │
-│              (indices: cowrie-*, dionaea-*, ...)                │
-└────────────────────────┬────────────────────────────────────────┘
-                         │  poll every N seconds (scroll API)
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  ML Worker (ml-worker/)                                         │
-│                                                                 │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────┐  │
-│  │ Ingestor         │  │ Feature Engineer │  │ Model Engine │  │
-│  │ (ES scroll poll) │→ │ (per-source      │→ │              │  │
-│  │                  │  │  normalisation)  │  │ IsoForest    │  │
-│  └──────────────────┘  └──────────────────┘  │ LSTM-AE      │  │
-│                                               │ HBOS         │  │
-│  ┌──────────────────┐                         └──────┬───────┘  │
-│  │ Model Store      │◄────────── periodic retrain ───┘          │
-│  │ (joblib / .pt)   │                                │           │
-│  └──────────────────┘                         ┌──────▼───────┐  │
-│                                               │ Scorer       │  │
-│                                               │ anomaly_score│  │
-│                                               │ + explanation│  │
-│                                               └──────┬───────┘  │
-└──────────────────────────────────────────────────────┼──────────┘
-                                                       │ write findings
-                                                       ▼
-                                           ┌─────────────────────┐
-                                           │ ES index:           │
-                                           │ ml-anomalies        │
-                                           └──────────┬──────────┘
-                                                      │
-                                           ┌──────────▼──────────┐
-                                           │ Dashboard (Go)      │
-                                           │ GET /api/ml/anomalies│
-                                           │ SSE stream push     │
-                                           └──────────┬──────────┘
-                                                      │
-                                           ┌──────────▼──────────┐
-                                           │ Dashboard UI        │
-                                           │ ML Anomalies panel  │
-                                           └─────────────────────┘
+```mermaid
+flowchart TD
+    subgraph Stack["Honeypot Stack (existing)"]
+        Sensors["Cowrie · Dionaea · Conpot · Zeek/Suricata · HTTP-honeypot"]
+        ES["Elasticsearch<br/>indices: cowrie-*, dionaea-*, ..."]
+        Sensors --> ES
+    end
+
+    subgraph Worker["ML Worker (ml-worker/)"]
+        Ingestor["Ingestor<br/>(ES scroll poll)"]
+        FeatureEng["Feature Engineer<br/>(per-source normalisation)"]
+        ModelEngine["Model Engine<br/>IsoForest<br/>LSTM-AE<br/>HBOS"]
+        ModelStore["Model Store<br/>(joblib / .pt)"]
+        Scorer["Scorer<br/>anomaly_score + explanation"]
+
+        Ingestor --> FeatureEng --> ModelEngine
+        ModelEngine -->|periodic retrain| ModelStore
+        ModelEngine --> Scorer
+    end
+
+    MLIndex["ES index: ml-anomalies"]
+    DashboardGo["Dashboard (Go)<br/>GET /api/ml/anomalies<br/>SSE stream push"]
+    DashboardUI["Dashboard UI<br/>ML Anomalies panel"]
+
+    ES -->|"poll every N seconds (scroll API)"| Ingestor
+    Scorer -->|write findings| MLIndex
+    MLIndex --> DashboardGo --> DashboardUI
 ```
 
 ---
@@ -492,16 +474,15 @@ The KPI-tile-plus-table layout below replaces the original sparkline/emoji
 mockup -- the 24h trend sparkline was cosmetic and out of scope for "deliver
 scores to the dashboard":
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  ML anomaly detection                    generated <timestamp>  │
-├──────────┬──────────┬──────────┬──────────────────────────────-┤
-│ 24h: 12  │ critical:2│ high:5  │ medium:5                       │
-├──────────┴──────────┴──────────┴──────────────────────────────-┤
-│ time │ severity │ score │ source ip │ model scores │ explanation│
-│ ...  │ critical │ 0.96  │ 45.33.x.x │ iso .9 lstm .95 hbos .8 │…│
-└─────────────────────────────────────────────────────────────────┘
-```
+**ML anomaly detection** — generated `<timestamp>`
+
+| 24h | critical | high | medium |
+|---|---|---|---|
+| 12 | 2 | 5 | 5 |
+
+| time | severity | score | source ip | model scores | explanation |
+|---|---|---|---|---|---|
+| ... | critical | 0.96 | 45.33.x.x | iso .9 lstm .95 hbos .8 | … |
 
 ---
 
