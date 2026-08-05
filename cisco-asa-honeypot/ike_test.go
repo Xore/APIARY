@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"math/big"
+	"strings"
 	"testing"
 )
 
@@ -207,6 +209,63 @@ func TestBuildBogusInitReplyIsWellFormed(t *testing.T) {
 	// rSPI must be zero: upstream's init_send() never sets it.
 	if rSPI := binary.BigEndian.Uint64(packet[8:16]); rSPI != 0 {
 		t.Fatalf("rSPI = %x, want 0", rSPI)
+	}
+}
+
+// TestParseIKESAInitBodyRoundTripsBuildBogusInitReply is a regression test
+// for #619: parseIKESAInitBody must correctly walk the exact wire format
+// this file's own encoders produce. buildBogusInitReply's packet is a
+// genuine SA(->KE)->KE(->Nonce)->Nonce(->None) payload chain -- the same
+// shape an attacker's real IKE_SA_INIT has -- so round-tripping it through
+// the parser is a real correctness check, not a tautology: a bug in either
+// the offset math or the SA/transform substructure walk would show up as
+// a wrong group/length/transform list here.
+func TestParseIKESAInitBodyRoundTripsBuildBogusInitReply(t *testing.T) {
+	packet, kp, err := buildBogusInitReply()
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary := parseIKESAInitBody(packet)
+
+	wantPubKeyLen := len(toBytes(kp.public))
+	if !bytes.Contains([]byte(summary), []byte(fmt.Sprintf("group=%d pubkey=%dB", dhGroup14ID, wantPubKeyLen))) {
+		t.Fatalf("KE summary missing/wrong: %q (want group=%d pubkey=%dB)", summary, dhGroup14ID, wantPubKeyLen)
+	}
+	if !strings.Contains(summary, "Nonce: 32B") {
+		t.Fatalf("nonce summary missing/wrong: %q", summary)
+	}
+	// Both proposals (IKE + ESP) and their transforms, matching
+	// defaultSAPayload's own hard-coded choices exactly.
+	for _, want := range []string{
+		"IKE[", "ESP[",
+		"ENCR=Camellia-CBC", "PRF=HMAC-SHA2-256", "AUTH=HMAC-SHA2-256-128", "DH=2048-bit MODP", "ESN=ESN",
+	} {
+		if !strings.Contains(summary, want) {
+			t.Fatalf("SA summary missing %q: %q", want, summary)
+		}
+	}
+}
+
+func TestParseIKESAInitBodyHandlesTruncatedPayload(t *testing.T) {
+	packet, _, err := buildBogusInitReply()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Truncate mid-payload-chain: must not panic, and should stop cleanly
+	// rather than fabricate data past what's actually there.
+	truncated := packet[:ikeHeaderSize+6]
+	summary := parseIKESAInitBody(truncated)
+	if strings.Contains(summary, "Nonce") {
+		t.Fatalf("truncated packet should not report a nonce it never had: %q", summary)
+	}
+}
+
+func TestIKETransformNameFallsBackToRawIDForUnknownValues(t *testing.T) {
+	if got := ikeTransformName(transformTypeENCR, 9999); got != "ENCR=9999" {
+		t.Fatalf("unknown transform ID = %q, want raw-ID fallback", got)
+	}
+	if got := ikeTransformName(99, 1); got != "type99=1" {
+		t.Fatalf("unknown transform type = %q, want raw-type fallback", got)
 	}
 }
 

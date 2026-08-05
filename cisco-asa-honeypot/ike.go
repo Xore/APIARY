@@ -34,7 +34,9 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
+	"fmt"
 	"math/big"
+	"strings"
 )
 
 // dhGroup14Prime is the RFC 3526 2048-bit MODP group used by upstream's
@@ -337,4 +339,114 @@ func parseIKEHeader(data []byte) (exchangeType byte, ok bool) {
 		return 0, false
 	}
 	return data[18], true
+}
+
+// ikeTransformName maps the handful of transform IDs real-world IKE
+// clients/scanners commonly propose to a short human name, per type (RFC
+// 7296 3.3.2/3.3.5 registries) -- deliberately not an exhaustive IANA
+// table, just enough for the common case; anything unrecognized still
+// shows its raw numeric ID rather than being dropped.
+func ikeTransformName(transformType byte, id uint16) string {
+	names := map[byte]map[uint16]string{
+		transformTypeENCR: {2: "DES-CBC", 3: "3DES-CBC", 12: "AES-CBC", 13: "AES-CTR", 20: "AES-GCM-16", 23: "Camellia-CBC"},
+		transformTypePRF:  {1: "HMAC-MD5", 2: "HMAC-SHA1", 5: "HMAC-SHA2-256", 6: "HMAC-SHA2-384", 7: "HMAC-SHA2-512"},
+		transformTypeAUTH: {0: "NONE", 1: "HMAC-MD5-96", 2: "HMAC-SHA1-96", 12: "HMAC-SHA2-256-128", 13: "HMAC-SHA2-384-192", 14: "HMAC-SHA2-512-256"},
+		transformTypeDH:   {1: "768-bit MODP", 2: "1024-bit MODP", 5: "1536-bit MODP", 14: "2048-bit MODP", 19: "256-bit ECP", 20: "384-bit ECP", 21: "521-bit ECP"},
+		transformTypeESN:  {0: "No-ESN", 1: "ESN"},
+	}
+	typeName := map[byte]string{
+		transformTypeENCR: "ENCR", transformTypePRF: "PRF", transformTypeAUTH: "AUTH",
+		transformTypeDH: "DH", transformTypeESN: "ESN",
+	}[transformType]
+	if typeName == "" {
+		typeName = fmt.Sprintf("type%d", transformType)
+	}
+	if name, ok := names[transformType][id]; ok {
+		return typeName + "=" + name
+	}
+	return fmt.Sprintf("%s=%d", typeName, id)
+}
+
+// parseIKEProposals walks an SA payload's body (RFC 7296 3.3.1/3.3.2) --
+// the exact reverse of proposal()/transform() above -- and renders each
+// proposal's protocol + transform list as a short summary. Malformed
+// substructures stop parsing at that point rather than erroring: this is
+// attacker-controlled input from a datagram that already passed the outer
+// payload-length check, best-effort is the right failure mode here.
+func parseIKEProposals(body []byte) string {
+	var proposals []string
+	off := 0
+	for off+8 <= len(body) {
+		length := int(binary.BigEndian.Uint16(body[off+2 : off+4]))
+		if length < 8 || off+length > len(body) {
+			break
+		}
+		protocolID := body[off+5]
+		spiLen := int(body[off+6])
+		numTransforms := int(body[off+7])
+		proto := fmt.Sprintf("protocol%d", protocolID)
+		switch protocolID {
+		case protocolIKE:
+			proto = "IKE"
+		case protocolESP:
+			proto = "ESP"
+		}
+
+		tOff := off + 8 + spiLen
+		var transforms []string
+		for i := 0; i < numTransforms && tOff+8 <= off+length; i++ {
+			tLen := int(binary.BigEndian.Uint16(body[tOff+2 : tOff+4]))
+			if tLen < 8 || tOff+tLen > off+length {
+				break
+			}
+			transforms = append(transforms, ikeTransformName(body[tOff+4], binary.BigEndian.Uint16(body[tOff+6:tOff+8])))
+			tOff += tLen
+		}
+		proposals = append(proposals, proto+"["+strings.Join(transforms, ",")+"]")
+		off += length
+	}
+	return strings.Join(proposals, " ")
+}
+
+// parseIKESAInitBody walks the payload chain of an attacker's own
+// IKE_SA_INIT (RFC 7296 3.2: generic 4-byte payload header, next-payload
+// type for the first payload comes from the fixed header's own byte 16)
+// and summarizes the real SA proposal, KE group/public-key length, and
+// nonce length the attacker sent -- real recon/fingerprint signal
+// (Cymmetria/ike vs. Scapy vs. a custom scanner often differ in exactly
+// what they propose here) that upstream's own reply-building code parses
+// this same wire format to construct but this sensor's logging never
+// read. Read-only: this must never influence what buildBogusInitReply
+// sends, only what gets logged alongside it.
+func parseIKESAInitBody(data []byte) string {
+	if len(data) < ikeHeaderSize {
+		return ""
+	}
+	var parts []string
+	payloadType := data[16]
+	off := ikeHeaderSize
+	for payloadType != payloadNone && off+payloadHeaderLen <= len(data) {
+		next := data[off]
+		length := int(binary.BigEndian.Uint16(data[off+2 : off+4]))
+		if length < payloadHeaderLen || off+length > len(data) {
+			break
+		}
+		body := data[off+payloadHeaderLen : off+length]
+		switch payloadType {
+		case payloadSA:
+			if sa := parseIKEProposals(body); sa != "" {
+				parts = append(parts, "SA: "+sa)
+			}
+		case payloadKE:
+			if len(body) >= 4 {
+				group := binary.BigEndian.Uint16(body[0:2])
+				parts = append(parts, fmt.Sprintf("KE: group=%d pubkey=%dB", group, len(body)-4))
+			}
+		case payloadNonce:
+			parts = append(parts, fmt.Sprintf("Nonce: %dB", len(body)))
+		}
+		payloadType = next
+		off += length
+	}
+	return strings.Join(parts, "  ")
 }

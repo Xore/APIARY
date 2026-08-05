@@ -159,7 +159,12 @@ func handleIKEPacket(conn *net.UDPConn, addr *net.UDPAddr, data []byte, log *log
 	mu.Unlock()
 
 	if !ok {
-		log.emit(event{Port: port, SrcIP: addr.IP.String(), SrcPort: addr.Port, Event: "ike_malformed"})
+		// #619: length of what actually arrived is real signal too --
+		// packets this short (<28 bytes) could be a probe/scanner testing
+		// whether anything answers on 500/udp at all, not necessarily a
+		// truncated real IKE datagram.
+		log.emit(event{Port: port, SrcIP: addr.IP.String(), SrcPort: addr.Port, Event: "ike_malformed",
+			Data: strconv.Itoa(len(data))})
 		return
 	}
 
@@ -174,7 +179,13 @@ func handleIKEPacket(conn *net.UDPConn, addr *net.UDPAddr, data []byte, log *log
 		mu.Lock()
 		sessions[key] = ikeReplied
 		mu.Unlock()
-		log.emit(event{Port: port, SrcIP: addr.IP.String(), SrcPort: addr.Port, Event: "ike_sa_init"})
+		// #619: the attacker's real SA proposal/KE group/nonce length in
+		// their own IKE_SA_INIT is computed by parseIKESAInitBody using the
+		// same wire format buildBogusInitReply's own encoders produce, but
+		// was previously discarded entirely -- read-only, does not
+		// influence the bogus reply already sent above.
+		log.emit(event{Port: port, SrcIP: addr.IP.String(), SrcPort: addr.Port, Event: "ike_sa_init",
+			Data: parseIKESAInitBody(data)})
 
 	case state == ikeReplied:
 		// Matches upstream's real deployed behavior for anything past the
