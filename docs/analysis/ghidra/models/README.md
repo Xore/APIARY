@@ -51,7 +51,7 @@ python3 analysis/ghidra/models/model-governance.py promote \
   --candidate-manifest /secure/operator/candidate.json \
   --report "$HOME/model-qualification/issue-158-v2.json" \
   --manifest analysis/ghidra/models/approved-models.json \
-  --record analysis/ghidra/models/approval-record.md \
+  --record docs/analysis/ghidra/models/approval-record.md \
   --backup-dir "$HOME/model-qualification/backups" \
   --approval-date 2026-08-01 \
   --decision-record 'GitHub issue #158 comment and PR review' \
@@ -65,7 +65,7 @@ Rollback selects a specific backup ID—never "latest"—validates its manifest,
 ```sh
 python3 analysis/ghidra/models/model-governance.py rollback \
   --manifest analysis/ghidra/models/approved-models.json \
-  --record analysis/ghidra/models/approval-record.md \
+  --record docs/analysis/ghidra/models/approval-record.md \
   --backup-dir "$HOME/model-qualification/backups" \
   --backup-id 20260801T120000Z \
   --approve ROLLBACK
