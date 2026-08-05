@@ -3,6 +3,7 @@ package main
 // reports_api.go — the administrator endpoints of the Reports studio (R2):
 //
 //	GET    /api/reports/templates                  template and element catalog
+//	GET    /api/reports/payload-options            #653: payload picker search results
 //	GET    /api/reports/definitions                saved definitions (+ ETag)
 //	POST   /api/reports/definitions                create (server-assigned id)
 //	GET    /api/reports/definitions/{id}           one definition
@@ -100,6 +101,70 @@ func (s *store) serveReportTemplates(w http.ResponseWriter, r *http.Request) {
 		"windows":   []string{"1h", "6h", "24h", "7d", "30d"},
 		"themes":    []string{"dark", "light"},
 	})
+}
+
+// reportPayloadOptionsLimit bounds /api/reports/payload-options the same way
+// every other bounded list on this dashboard is capped (25-30 rows) -- a
+// picker narrows a search, it does not browse the full inventory.
+const reportPayloadOptionsLimit = 30
+
+// reportPayloadOption is one row of Report Studio's payload picker (#653):
+// enough to identify a captured payload plus, per the issue's explicit ask,
+// which analysis sources already exist for it (correlateHash, the same
+// cross-source check payload-workbench already uses), so an operator can
+// tell at a glance which payloads have enough analysis depth to make a
+// meaningful report before picking one.
+type reportPayloadOption struct {
+	Hash     string `json:"hash"`
+	Kind     string `json:"kind"`
+	SizeH    string `json:"size_h"`
+	MtimeUTC string `json:"mtime_utc"`
+	Sandbox  bool   `json:"sandbox"`
+	Ghidra   bool   `json:"ghidra"`
+	GitHub   bool   `json:"github"`
+}
+
+// serveReportPayloadOptions backs the payload template's picker in the
+// designer (#653) -- the payload template requires scope.hash
+// (reports_store.go's validateDefinition), and until this endpoint existed
+// there was no way to search captured payloads and see what to set it to
+// from inside Report Studio at all; the only working path was the separate
+// /api/reports/payloads/{hash}/generate shortcut reached from an individual
+// payload's own analysis page, which bypasses the designer entirely.
+func (s *store) serveReportPayloadOptions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "GET required", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.reportStudioGuard(w, r, false) {
+		return
+	}
+	// payloadsData, not a direct disk scan: this dashboard reads payload
+	// inventory through Elasticsearch only (the same rule #403 established
+	// for sensor/event data) -- scanPayloads() itself is the disk-walking
+	// half of that pipeline, but it belongs to the async cache-refresh path
+	// (refreshPayloadCacheAsync indexes it into ES, then reads it back),
+	// never called directly from a request handler.
+	data := s.payloadsData(payloadsFilter{Hash: r.URL.Query().Get("q")})
+	files := data.Files
+	if len(files) > reportPayloadOptionsLimit {
+		files = files[:reportPayloadOptionsLimit]
+	}
+	options := make([]reportPayloadOption, 0, len(files))
+	for _, file := range files {
+		correlation := s.correlateHash(file.Hash, "")
+		options = append(options, reportPayloadOption{
+			Hash:     file.Hash,
+			Kind:     file.Kind,
+			SizeH:    file.SizeH,
+			MtimeUTC: file.MtimeUTC,
+			Sandbox:  len(correlation.Sandbox) > 0,
+			Ghidra:   correlation.Ghidra != nil,
+			GitHub:   correlation.GitHub != nil,
+		})
+	}
+	writeReportsJSON(w, "", http.StatusOK, map[string]any{"payloads": options})
 }
 
 func (s *store) serveReportDefinitions(w http.ResponseWriter, r *http.Request) {
