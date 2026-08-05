@@ -29,6 +29,7 @@ services:
     volumes:
       - /opt/stacks/honeypot-stack/logs/citrix-honeypot:/var/log/honeypot
       - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+    read_only: true
     networks: [citrix_honeypot_net]
     healthcheck:
       test: ["CMD", "/citrix-honeypot", "-healthcheck"]

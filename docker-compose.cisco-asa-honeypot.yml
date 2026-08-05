@@ -37,6 +37,7 @@ services:
     volumes:
       - /opt/stacks/honeypot-stack/logs/cisco-asa-honeypot:/var/log/honeypot
       - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+    read_only: true
     networks: [cisco_asa_honeypot_net]
     healthcheck:
       test: ["CMD", "/cisco-asa-honeypot", "-healthcheck"]

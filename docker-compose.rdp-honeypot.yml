@@ -34,6 +34,7 @@ services:
     volumes:
       - /opt/stacks/honeypot-stack/logs/rdp-honeypot:/var/log/honeypot
       - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+    read_only: true
     networks: [rdp_honeypot_net]
     healthcheck:
       test: ["CMD", "/rdp-honeypot", "-healthcheck"]

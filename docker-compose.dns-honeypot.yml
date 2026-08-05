@@ -33,6 +33,7 @@ services:
     volumes:
       - /opt/stacks/honeypot-stack/logs/dns-honeypot:/var/log/honeypot
       - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+    read_only: true
     networks: [dns_honeypot_net]
     healthcheck:
       test: ["CMD", "/dns-honeypot", "-healthcheck"]
