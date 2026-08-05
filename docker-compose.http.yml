@@ -48,6 +48,7 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    read_only: true
     networks:
       - http_honeypot_net
     deploy:
@@ -87,6 +88,7 @@ services:
       - TZ=Europe/Berlin
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
+    read_only: true
     networks: [api_honeypot_net]
     deploy:
       resources: { limits: { cpus: "0.5", memory: 128M } }
