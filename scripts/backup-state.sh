@@ -21,7 +21,7 @@
 
 set -euo pipefail
 
-VOLUME="${1:-honeypot-stack_dashboard-state}"
+VOLUME="${1:-dashboard-state}"
 BACKUP_DIR="${BACKUP_DIR:-/opt/stacks/honeypot-stack/state/backups}"
 KEEP="${KEEP:-14}"
 
