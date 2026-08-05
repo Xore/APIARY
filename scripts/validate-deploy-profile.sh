@@ -2,7 +2,7 @@
 # validate-deploy-profile.sh — check a deploy-profiles/*.txt selection for
 # real cross-stack consistency before it's used to deploy anything.
 #
-# #265 (rescoped to the post-#258 topology, see deploy-profiles/README.md):
+# #265 (rescoped to the post-#258 topology, see docs/deploy-profiles/README.md):
 # T-Pot's compose/customizer.py walks an operator through a per-service
 # choice and fails fast on an invalid combination rather than failing
 # silently at runtime. This is the equivalent for this repo's current
