@@ -461,6 +461,14 @@ build {
   # added here doing the same thing.
   provisioner "powershell" {
     inline = [
+      # #493: a real machine has prefetch data building up over time from
+      # normal use; a golden image where this key was never explicitly set
+      # (left at whatever the install default happens to be) is one more
+      # thing distinguishing it from a real long-lived workstation. Adopted
+      # from sandbox/windows_kimi/provision/90-cleanup.ps1, the reference
+      # implementation's version of this same step. Value 3 = prefetch both
+      # application launches and boot.
+      "Set-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management\\PrefetchParameters' -Name EnablePrefetcher -Value 3 -Type DWord -Force -ErrorAction SilentlyContinue",
       # DNS-to-INetSim (10.10.10.1): moved here from 04-tools.ps1's old
       # Phase 13 (#432) -- that script assumed it was the last provisioner,
       # which stopped being true once 06-chrome-history.ps1 was added after
