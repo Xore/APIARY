@@ -126,6 +126,19 @@ def build_result(out_dir: Path) -> dict:
     dns_domains = ioc_summary.get('unique_dns_domains', [])
     download_urls = ioc_summary.get('unique_download_urls', [])
     download_cradles = ioc_summary.get('ps_download_cradles', [])
+    # #482: static (binary-embedded) IOCs and the static-only ("dormant",
+    # never triggered by this run's observation window) subset. Previously
+    # remote_ips/download_urls/download_cradles above were computed only to
+    # feed techniques/risk_score below and then discarded -- neither they
+    # nor these new static fields were ever placed in the exported result,
+    # so nothing downstream (dashboard, ES) could see them at all.
+    static_remote_ips = ioc_summary.get('static_remote_ips', [])
+    static_dns_domains = ioc_summary.get('static_dns_domains', [])
+    static_download_urls = ioc_summary.get('static_download_urls', [])
+    static_unc_paths = ioc_summary.get('static_unc_paths', [])
+    static_only_remote_ips = ioc_summary.get('static_only_remote_ips', [])
+    static_only_dns_domains = ioc_summary.get('static_only_dns_domains', [])
+    static_only_download_urls = ioc_summary.get('static_only_download_urls', [])
 
     autoruns_diff = ps_lines(out_dir / 'autoruns_diff.txt')
     services_diff = ps_lines(out_dir / 'services_diff.txt')
@@ -254,6 +267,24 @@ def build_result(out_dir: Path) -> dict:
             'guest_events': [],
             'dns_queries': dns_domains[:500],
             'dns_events': [],
+            'remote_ips': remote_ips[:500],
+        },
+        # #482: dynamic download IOCs (previously computed, never exported)
+        # alongside static (binary-embedded) IOCs and the static-only
+        # ("dormant") subset -- present in this sample but never observed
+        # at runtime, either because nothing in this run's window triggered
+        # the code path that uses it, or because it never would (a backup
+        # C2 domain, an alternate exfil share).
+        'iocs': {
+            'download_urls': download_urls[:500],
+            'download_cradle_count': len(download_cradles),
+            'static_remote_ips': static_remote_ips[:500],
+            'static_dns_domains': static_dns_domains[:500],
+            'static_download_urls': static_download_urls[:500],
+            'static_unc_paths': static_unc_paths[:500],
+            'static_only_remote_ips': static_only_remote_ips[:500],
+            'static_only_dns_domains': static_only_dns_domains[:500],
+            'static_only_download_urls': static_only_download_urls[:500],
         },
         # No PE-forensics step in this pipeline yet -- see module docstring.
         'windows_forensics': {'detected': False},

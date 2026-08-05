@@ -131,6 +131,9 @@ jobs:
       - name: Sandbox guest string-cleaning filter (#530)
         shell: bash
         run: python3 sandbox/test_guest_clean_strings.py -v
+      - name: Windows sandbox static/dynamic IOC extraction (#482)
+        shell: bash
+        run: python3 sandbox/windows/orchestrate/test_extract_iocs.py -v
       - name: Shell syntax and high-severity ShellCheck
         shell: bash
         run: |

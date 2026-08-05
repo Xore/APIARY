@@ -853,7 +853,7 @@ def capture_memory_dump(out_dir: Path):
         log.error('Memory dump failed; continuing without it', exc_info=True)
 
 
-def post_process(out_dir: Path):
+def post_process(out_dir: Path, sample_path: Path = None):
     """Steps 12-14 of the run cycle: IOCs, the readable report, then the
     dashboard-facing result JSON.
 
@@ -863,10 +863,16 @@ def post_process(out_dir: Path):
     detonation and make the worker retry a sample that already ran. Each
     step is logged and stepped over; re-running any of them by hand against
     out_dir is safe and idempotent.
+
+    sample_path (#482): the original sample never gets copied into out_dir
+    by collect_artifacts()/collect_artifacts_offline() (only the artifacts
+    it produced running do), so it has to be threaded through from
+    detonate() for extract_iocs.py's static-string IOC pass to have
+    anything to read.
     """
     try:
         from extract_iocs import extract_all
-        extract_all(out_dir)
+        extract_all(out_dir, sample_path)
     except Exception:
         log.error('IOC extraction failed; artifacts are unaffected', exc_info=True)
 
@@ -1068,7 +1074,7 @@ def detonate_inguest(sample_path: Path, sha: str, out: Path):
         diff_registry_against_baseline(out)
     except Exception:
         log.error('Registry baseline diff failed; continuing without it', exc_info=True)
-    post_process(out)
+    post_process(out, sample_path)
 
     if not completed:
         raise RuntimeError(
@@ -1105,7 +1111,7 @@ def detonate_legacy_winrm(sample_path: Path, sha: str, out: Path):
     autoruns_after()
     stop_procmon()
     collect_artifacts(sha, out)
-    post_process(out)
+    post_process(out, sample_path)
 
 
 def detonate(sample_path: Path, results_dir: Path = None):

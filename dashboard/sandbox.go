@@ -35,6 +35,30 @@ type sandboxNetwork struct {
 	GuestEvents    []string       `json:"guest_events"`
 	DNSQueries     []string       `json:"dns_queries"`
 	DNSEvents      []string       `json:"dns_events"`
+	// RemoteIPs (#482) was extracted by the Windows sandbox pipeline's
+	// extract_iocs.py all along but silently discarded before export -- see
+	// sandboxIOCs's doc comment for the rest of that gap.
+	RemoteIPs []string `json:"remote_ips"`
+}
+
+// sandboxIOCs (#482) carries the Windows sandbox pipeline's static
+// (binary-embedded, via extract_iocs.py's printable-string scan) and
+// static-only ("dormant": present in the sample but never observed at
+// runtime -- either an untriggered code path or a backup C2/exfil address
+// this run's observation window never exercised) IOCs, alongside dynamic
+// download IOCs that were previously computed and then discarded before
+// ever reaching the exported result. Windows-only for now: the Linux
+// runner's export-result.py has no equivalent static extraction pass yet.
+type sandboxIOCs struct {
+	DownloadURLs           []string `json:"download_urls"`
+	DownloadCradleCount    int      `json:"download_cradle_count"`
+	StaticRemoteIPs        []string `json:"static_remote_ips"`
+	StaticDNSDomains       []string `json:"static_dns_domains"`
+	StaticDownloadURLs     []string `json:"static_download_urls"`
+	StaticUNCPaths         []string `json:"static_unc_paths"`
+	StaticOnlyRemoteIPs    []string `json:"static_only_remote_ips"`
+	StaticOnlyDNSDomains   []string `json:"static_only_dns_domains"`
+	StaticOnlyDownloadURLs []string `json:"static_only_download_urls"`
 }
 
 type sandboxClassification struct {
@@ -160,6 +184,7 @@ type sandboxResult struct {
 	SocketsAfter    []string              `json:"sockets_after"`
 	TopSyscalls     []sandboxCount        `json:"top_syscalls"`
 	NetworkSummary  sandboxNetwork        `json:"network_summary"`
+	IOCs            sandboxIOCs           `json:"iocs"`
 	Windows         sandboxWindows        `json:"windows_forensics"`
 	Artifacts       sandboxArtifacts      `json:"artifacts"`
 	Techniques      []sandboxTechnique    `json:"techniques"`
