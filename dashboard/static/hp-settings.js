@@ -298,7 +298,7 @@
         if (name === "branding" || name === "behavior" || name === "honeypot") loadConfig();
         else if (name === "users") loadUsers();
         else if (name === "services") loadServices();
-        else if (name === "elasticsearch") loadElasticsearchHistory();
+        else if (name === "elasticsearch") { loadEsStorageStats(); loadElasticsearchHistory(); }
         else if (name === "dead-letters") loadDeadLetters();
         else if (name === "history") loadHistory();
         else if (name === "audit") loadAudit();
@@ -1093,6 +1093,44 @@
 
     const servicesRefresh = q("[data-hp-services-refresh]");
     if (servicesRefresh) servicesRefresh.addEventListener("click", loadServices);
+
+    /* ---- Elasticsearch storage stats (#647): a brief cluster/storage
+       glance above the history search below. ---- */
+    function formatEsStorageBytes(bytes) {
+      if (!bytes) return "0 B";
+      const units = ["B", "KB", "MB", "GB", "TB"];
+      let value = bytes, i = 0;
+      while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
+      return (i === 0 ? String(value) : value.toFixed(1)) + " " + units[i];
+    }
+    async function loadEsStorageStats() {
+      const summary = q("[data-hp-es-storage-summary]");
+      const errorEl = q("[data-hp-es-storage-error]");
+      if (!summary || !errorEl) return;
+      errorEl.hidden = true;
+      try {
+        const { body } = await api("/api/settings/es-storage-stats");
+        if (!body.available) {
+          summary.hidden = true;
+          errorEl.hidden = false;
+          errorEl.textContent = "Storage stats unavailable" + (body.reason ? " — " + body.reason : "") + ".";
+          return;
+        }
+        const stats = body.stats;
+        summary.hidden = false;
+        q('[data-hp-es-storage-metric="status"]').textContent = stats.cluster_status || "—";
+        const statusTrend = q('[data-hp-es-storage-metric-trend="status"]');
+        statusTrend.textContent = stats.data_nodes + (stats.data_nodes === 1 ? " node" : " nodes");
+        statusTrend.className = "metric__trend " + (stats.cluster_status === "green" ? "text-secondary" : (stats.cluster_status === "yellow" ? "text-warning" : "text-danger"));
+        q('[data-hp-es-storage-metric="indices"]').textContent = String(stats.index_count);
+        q('[data-hp-es-storage-metric="docs"]').textContent = stats.doc_count.toLocaleString();
+        q('[data-hp-es-storage-metric="size"]').textContent = formatEsStorageBytes(stats.store_size_bytes);
+      } catch (error) {
+        summary.hidden = true;
+        errorEl.hidden = false;
+        errorEl.textContent = "Storage stats could not be loaded — " + error.message.trim();
+      }
+    }
 
     /* ---- Elasticsearch history (#257: moved out of the primary Evidence
        nav into an admin-only pane; same /api/history + /export/history.json
