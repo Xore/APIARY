@@ -6,7 +6,7 @@
 # the whole point of the sync is that a corpus is compiled before it is
 # adopted, and a stubbed compiler would test the stub.
 #
-# Usage: analysis/yara/test_sync_yara.sh
+# Usage: analysis/yara/tests/test_sync_yara.sh
 set -euo pipefail
 
 if ! command -v yara >/dev/null 2>&1 && ! command -v yarac >/dev/null 2>&1; then
@@ -14,7 +14,7 @@ if ! command -v yara >/dev/null 2>&1 && ! command -v yarac >/dev/null 2>&1; then
   exit 0
 fi
 
-src_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+src_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 

@@ -117,11 +117,11 @@ jobs:
           # from a live malware sample, and the triage half will not send
           # sample-derived text to a non-local model endpoint — a rule that is
           # only worth anything if something checks it on every change.
-          python analysis/ghidra/worker/test_ghidra_worker.py
+          python analysis/ghidra/worker/tests/test_ghidra_worker.py
           # Governance tests use synthetic snapshots/reports only. CI never
           # pulls or loads multi-GB model weights.
-          python analysis/ghidra/models/test_model_governance.py
-          python analysis/ghidra/models/test_model_status_adapter.py
+          python analysis/ghidra/models/tests/test_model_governance.py
+          python analysis/ghidra/models/tests/test_model_status_adapter.py
       - name: Guarded LLM worker contracts
         shell: bash
         run: |
@@ -169,7 +169,7 @@ jobs:
           done
       - name: Threat-intel CIDR refresh script (#244)
         shell: bash
-        run: dashboard/geoip/test_refresh_threat_cidrs.sh
+        run: dashboard/geoip/tests/test_refresh_threat_cidrs.sh
       - name: honeypot-30d ILM policy rolls over and deletes (#585)
         shell: bash
         run: analysis/tests/test_honeypot_ilm_rollover.sh
@@ -191,7 +191,7 @@ jobs:
             yara --version
             scripts/check-yara-corpus.sh
             yara -w analysis/yara/rules/index.yar /dev/null
-            analysis/yara/test_sync_yara.sh
+            analysis/yara/tests/test_sync_yara.sh
           '
       - name: Rev-eng benchmark corpus is reproducible and safe (#159)
         shell: bash

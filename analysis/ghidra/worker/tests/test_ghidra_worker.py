@@ -7,13 +7,13 @@ of the two pure functions that decide whether triage runs at all and what its
 answer is allowed to say — those are where a mistake is silent rather than
 loud, so they are tested without a server in the way.
 
-Usage: analysis/ghidra/worker/test_ghidra_worker.py
+Usage: analysis/ghidra/worker/tests/test_ghidra_worker.py
 """
 import importlib.util, json, os, subprocess, sys, tempfile, threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
-WORKER = str(Path(__file__).resolve().parent / "ghidra-worker.py")
+WORKER = str(Path(__file__).resolve().parent.parent / "ghidra-worker.py")
 
 # Real field names, captured from the live service. Functions use "addr" (not
 # "address"); strings are objects with the text under "s"; imports are objects
@@ -828,7 +828,7 @@ def test_revdeck_standalone(revdeck):
 
 def test_approved_contract():
     """The qualified benchmark prompt must be the prompt used in production."""
-    root = Path(__file__).resolve().parents[3]
+    root = Path(__file__).resolve().parents[4]
     worker_spec = importlib.util.spec_from_file_location("contract_worker", WORKER)
     worker = importlib.util.module_from_spec(worker_spec)
     sys.modules["contract_worker"] = worker

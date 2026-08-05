@@ -436,7 +436,7 @@ Two ways to get that automation, both gated by `REVDECK_API_BASE`:
 ## Tests
 
 ```bash
-python3 analysis/ghidra/worker/test_ghidra_worker.py
+python3 analysis/ghidra/worker/tests/test_ghidra_worker.py
 ```
 
 Stdlib only, both sides stubbed, runs in seconds, and runs in CI on every

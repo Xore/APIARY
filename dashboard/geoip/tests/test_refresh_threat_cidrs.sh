@@ -6,7 +6,7 @@
 # network or the real threat-cidrs.csv. Needs curl and jq -- the same tools
 # the script itself requires.
 #
-# Usage: dashboard/geoip/test_refresh_threat_cidrs.sh
+# Usage: dashboard/geoip/tests/test_refresh_threat_cidrs.sh
 set -euo pipefail
 
 for tool in curl jq; do
@@ -16,7 +16,7 @@ for tool in curl jq; do
   fi
 done
 
-src_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+src_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
