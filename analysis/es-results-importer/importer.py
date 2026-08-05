@@ -29,11 +29,23 @@ trailing "-N" of $HOSTNAME (what `docker compose up --scale ... =N` assigns
 containers without an explicit container_name), so scaling out only
 requires setting SHARD_COUNT to match the replica count -- see the compose
 file comment next to this service.
+
+#638/#612: cowrie's TTY session recordings are a genuine binary artifact
+(not a JSON result), and the dashboard must never read them off disk
+directly -- so unlike every JSON source above, this one (`binary: True`)
+skips json.loads entirely and base64-encodes the raw file straight into its
+own ES document. The file is already content-addressed by cowrie itself
+(renamed to its own sha256 on session close, see cowrie/core/ttylog.py's
+ttylog_inputhash -- identical sessions share one file, same dedup cowrie
+already applies to its downloads/ directory), so the filename alone is a
+stable, globally-unique document ID -- no doc_id()/id_fields lookup needed.
 """
+import base64
 import hashlib
 import json
 import os
 import re
+from datetime import datetime, timezone
 import time
 from pathlib import Path
 
@@ -96,7 +108,23 @@ SOURCES = [
         "id_fields": ("sha256",),
         "glob": "*_revdeck.json",
     },
+    {
+        "env": "COWRIE_TTYLOG_DIR",
+        "label": "cowrie_ttylog",
+        "index": "cowrie-ttylog-v1",
+        "glob": "*",
+        "binary": True,
+    },
 ]
+
+# A cowrie session left connected for hours (an attacker idling, or a stuck
+# shell) can produce a ttylog well beyond a normal few-KB/MB session. Rather
+# than let one pathological session bloat a bulk() batch or approach
+# Elasticsearch's own ~100MB HTTP body ceiling, cap what this importer will
+# ever base64-encode into a single document and skip (not crash on) anything
+# larger -- the file stays on disk either way (#611), so nothing is lost,
+# just not mirrored into ES until this cap is deliberately raised.
+MAX_TTYLOG_BYTES = int(os.getenv("MAX_TTYLOG_BYTES", str(20 * 1024 * 1024)))
 
 
 def load_state() -> dict:
@@ -163,6 +191,7 @@ def scan_source(source: dict, root: Path, state: dict) -> list:
     """
     pending = []
     skip = source.get("skip", set())
+    binary = source.get("binary", False)
     for path in sorted(root.glob(source["glob"])):
         if not path.is_file() or path.name in skip:
             continue
@@ -172,6 +201,31 @@ def scan_source(source: dict, root: Path, state: dict) -> list:
         mtime = path.stat().st_mtime
         if state.get(key) == mtime:
             continue
+
+        if binary:
+            size = path.stat().st_size
+            if size > MAX_TTYLOG_BYTES:
+                logger.warning(f"{source['label']}: skipping {path} ({size} bytes, over the {MAX_TTYLOG_BYTES}-byte cap)")
+                continue
+            try:
+                raw = path.read_bytes()
+            except OSError as exc:
+                logger.warning(f"{source['label']}: skipping unreadable {path}: {exc}")
+                continue
+            action = {
+                "_op_type": "index",
+                "_index": source["index"],
+                "_id": path.name,
+                "_source": {
+                    "shasum": path.name,
+                    "size_bytes": len(raw),
+                    "imported_at": datetime.now(timezone.utc).isoformat(),
+                    "ttylog_base64": base64.b64encode(raw).decode("ascii"),
+                },
+            }
+            pending.append((key, mtime, action))
+            continue
+
         try:
             payload = json.loads(path.read_text())
         except (OSError, json.JSONDecodeError) as exc:

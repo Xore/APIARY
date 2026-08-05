@@ -196,6 +196,7 @@ func (s *store) rebuild() {
 			Session:       ev.session,
 			Shasum:        ev.shasum,
 			Download:      ev.download,
+			TTYReplay:     ev.ttyReplay,
 			ClientVer:     ev.clientVer,
 			Fingerprint:   ev.fingerprint,
 			FingerKind:    ev.fingerKind,

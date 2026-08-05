@@ -667,6 +667,7 @@ func main() {
 	http.HandleFunc("/export/campaigns.csv", s.exportCampaignsCSV)
 	http.HandleFunc("/export/clusters.csv", s.exportClustersCSV)
 	http.HandleFunc("/payload/", s.servePayload)
+	http.HandleFunc("/tty/", func(w http.ResponseWriter, r *http.Request) { s.serveTTYReplay(w, r, tmpl) })
 	staticHandler := http.FileServer(http.FS(staticAssets))
 	http.Handle("/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "public, max-age=604800, immutable")

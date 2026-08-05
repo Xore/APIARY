@@ -1,0 +1,50 @@
+{{define "tty-replay"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>xore//honeypot &mdash; TTY recording {{.Shasum}}</title>
+{{template "style" .}}
+<style nonce="{{.Nonce}}">
+.hp-tty-term { background: #16181d; color: #e6e6e6; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; line-height: 1.35; padding: 14px 16px; border-radius: var(--radius-panel); overflow-x: auto; white-space: pre; min-height: 420px; border: 1px solid var(--border-subtle); }
+.hp-tty-controls { display: flex; align-items: center; gap: 10px; margin: 12px 0; flex-wrap: wrap; }
+.hp-tty-controls input[type="range"] { flex: 1 1 260px; min-width: 160px; }
+.hp-tty-status { font-size: 12px; color: var(--text-muted); }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  {{template "topbar" .}}
+  {{template "sidebar" .}}
+  <main class="app-main">
+      <div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
+        <header class="overview-header">
+          <div>
+            <div class="label-section">Cowrie TTY session recording</div>
+            <h1>{{.Shasum}}</h1>
+            <p class="subtitle">Replayed from the session's Elasticsearch mirror, not read off disk (#638) &mdash; a small VT100 subset, not a full terminal emulator. For exact fidelity use the .cast download with the real <code>asciinema</code> tool.</p>
+          </div>
+        </header>
+
+        <div class="filters"><a class="chip" href="/events">&larr; event explorer</a><a class="chip" href="/tty/{{.Shasum}}.cast">download .cast &darr;</a><a class="chip" href="/tty/{{.Shasum}}.raw">download raw &darr;</a></div>
+
+        <div class="card wide" id="tty-viewer" data-shasum="{{.Shasum}}">
+          <div class="hp-tty-controls">
+            <button class="btn btn-sm btn-primary" type="button" id="tty-play" disabled>Play</button>
+            <button class="btn btn-sm btn-secondary" type="button" id="tty-restart" disabled>Restart</button>
+            <input type="range" id="tty-seek" min="0" max="0" value="0" disabled>
+            <label>speed <select id="tty-speed"><option value="1">1&times;</option><option value="2">2&times;</option><option value="4">4&times;</option><option value="0.5">0.5&times;</option></select></label>
+          </div>
+          <div class="hp-tty-status" id="tty-status">Loading&hellip;</div>
+          <pre class="hp-tty-term" id="tty-screen" aria-live="polite"></pre>
+        </div>
+
+        <footer>xore//honeypot &bull; TTY session recording</footer>
+      </div>
+    </main>
+</div>
+<script defer src="{{asset "/static/hp-tty-replay.js"}}"></script>
+</body>
+</html>
+{{end}}
