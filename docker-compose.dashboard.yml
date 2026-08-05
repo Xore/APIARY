@@ -213,6 +213,10 @@ services:
       - REVDECK_REQUEST_DIR=${REVDECK_REQUEST_DIR:-}
       - GHIDRA_ALERT_RISK_LEVELS=${GHIDRA_ALERT_RISK_LEVELS:-high,critical}
       - GHIDRA_ALERT_ON_CRYPTO=${GHIDRA_ALERT_ON_CRYPTO:-false}
+      # #154 item 9 follow-up: same allowlist pattern as
+      # GHIDRA_ALERT_RISK_LEVELS above -- llm-worker's own severity judgment
+      # for a session/payload analysis, not a deterministic signal.
+      - LLM_ANALYSIS_ALERT_SEVERITIES=${LLM_ANALYSIS_ALERT_SEVERITIES:-high,critical}
       # Empty until analysis/github/install-github-publisher.sh has been run
       # AND an operator has separately armed GITHUB_PUBLISH_ENABLED in
       # /etc/honeypot-github.env -- see .env.example and #74. The mounts

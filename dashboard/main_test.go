@@ -778,6 +778,12 @@ func TestSemanticShellIsServerRendered(t *testing.T) {
 	if !strings.Contains(html, `data-hp-behavior-nav="show_ml_panels"`) || !strings.Contains(html, `data-hp-nav="/ml-anomalies" data-hp-behavior-nav="show_ml_panels" href="/ml-anomalies" hidden`) {
 		t.Fatal("ML anomalies nav link must render present-but-hidden when show_ml_panels is off (compiled default) -- #479 needs it in the DOM so a live config save can reveal it without a page reload")
 	}
+	// #150: /llm-analysis reuses show_ml_panels (see dashboard.html's own
+	// comment on that link) -- same present-but-hidden contract as
+	// /ml-anomalies above.
+	if !strings.Contains(html, `data-hp-nav="/llm-analysis" data-hp-behavior-nav="show_ml_panels" href="/llm-analysis" hidden`) {
+		t.Fatal("LLM analysis nav link must render present-but-hidden when show_ml_panels is off (compiled default)")
+	}
 }
 
 // #478: the overview page's "Correlated campaigns" card used to reuse
@@ -842,6 +848,13 @@ func TestMLAnomaliesNavReflectsShowMLPanels(t *testing.T) {
 	}
 	if strings.Contains(on, `data-hp-nav="/ml-anomalies" data-hp-behavior-nav="show_ml_panels" href="/ml-anomalies" hidden`) {
 		t.Fatal("nav link must not carry hidden while show_ml_panels is on")
+	}
+	// #150: /llm-analysis tracks the same setting.
+	if !strings.Contains(on, `data-hp-nav="/llm-analysis" data-hp-behavior-nav="show_ml_panels" href="/llm-analysis">`) {
+		t.Fatal("LLM analysis nav link must be visible (no hidden attribute) while show_ml_panels is on")
+	}
+	if strings.Contains(on, `data-hp-nav="/llm-analysis" data-hp-behavior-nav="show_ml_panels" href="/llm-analysis" hidden`) {
+		t.Fatal("LLM analysis nav link must not carry hidden while show_ml_panels is on")
 	}
 }
 

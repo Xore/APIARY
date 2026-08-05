@@ -418,18 +418,24 @@ Retention: ILM 90 days is sufficient — derived data, recreatable from raw.
 
 ## 10. Dashboard Integration (Phase 2)
 
-Mirror the pattern planned for `ml-anomalies` in
-[`ml-worker-plan.md` §8–9](ml-worker-plan.md):
+Mirrors the pattern `ml-anomalies` already established
+([`ml-worker-plan.md` §8–9](ml-worker-plan.md)):
 
-- `GET /api/llm/analysis?doc_type=&severity=&since=&limit=` → documents from
-  `llm-analysis`, newest first.
-- `GET /api/llm/analysis/stream` → SSE, fed by redis channel
-  `llm-analysis-events` through the existing `stream.go` infrastructure.
-- Panel: latest session summaries + payload triage, with a visible
-  "AI-generated analysis" label on every rendered item (§13, G5).
-- Optional later: semantic search over sessions using `nomic-embed-text`
+- **Delivered (#150):** `GET /api/llm/analysis?doc_type=&severity=&since=&limit=`
+  → documents from `llm-analysis`, newest first, polled on the dashboard's
+  existing 1-minute ES ticker (same transport decision as `ml-anomalies`,
+  no new broker). `/llm-analysis` page: session summaries and payload
+  triage in one filterable table, every row labelled "AI-generated" and
+  showing severity/confidence, with an evidence link back to the
+  originating session or payload where one exists (`dashboard/llm_analysis.go`).
+- **Deferred:** `GET /api/llm/analysis/stream` (SSE via redis channel
+  `llm-analysis-events`) -- optional per this section's original scope
+  ("any SSE/Redis wake-up path remains optional and non-authoritative");
+  polling has not been shown insufficient yet.
+- **Deferred:** semantic search over sessions using `nomic-embed-text`
   embeddings stored as a `dense_vector` (384-dim) field on `llm-analysis`
-  docs, queried with ES kNN search. Defer until U1–U3 are stable.
+  docs, queried with ES kNN search. Still waiting on U1–U3 being stable,
+  per this section's original scope.
 
 ---
 

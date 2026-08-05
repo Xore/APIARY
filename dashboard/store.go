@@ -201,7 +201,8 @@ type store struct {
 	scriptDir         string   // writable directory for safely retained inline scripts
 	geo               *geoDB   // nil if no GeoIP database configured
 	es                *esClient
-	mlAnomalies       *mlAnomalyStore // ml-worker's scored anomalies, polled via es (#64); nil until initialised in main()
+	mlAnomalies       *mlAnomalyStore   // ml-worker's scored anomalies, polled via es (#64); nil until initialised in main()
+	llmAnalysis       *llmAnalysisStore // llm-worker's guarded model output, polled via es (#150); nil until initialised in main()
 	alerts            *alertManager
 	intelligence      *intelligenceStore
 	settings          *settingsService  // typed settings stores; nil only in partial test fixtures
@@ -379,6 +380,7 @@ func (s *store) notifyLoop(endpoint string) {
 		}
 		ghidraAlerts(s, &messages, markOnly)
 		githubAnalysisAlerts(s, &messages, markOnly)
+		llmAnalysisAlerts(s, &messages, markOnly)
 		sandboxRiskThreshold, _ := strconv.Atoi(getenv("SANDBOX_ALERT_RISK_SCORE", "50"))
 		if sandboxRiskThreshold < 1 || sandboxRiskThreshold > 100 {
 			sandboxRiskThreshold = 50
