@@ -552,6 +552,19 @@
           consuming services pick them up on their next restart. Apply with
           <code data-hp-apply-command>docker compose up -d</code> on the affected services.
         </div>
+        <!-- #666: reporter's own send counters -- a metric-grid glance, same
+             shape as the Elasticsearch pane's storage summary, reading
+             reporter-metrics-v1 (mirrored by es-results-importer from
+             reporter/metrics.go's metrics.json). Never a direct mount of
+             the reporter's own volume into this service, per #638. -->
+        <div class="metric-grid" data-hp-reporter-stats-summary hidden>
+          <div class="metric"><div class="metric__label">Attempted</div><div class="metric__value" data-hp-reporter-stats-metric="attempted">—</div><div class="metric__trend text-secondary">Total send attempts</div></div>
+          <div class="metric"><div class="metric__label">Sent</div><div class="metric__value" data-hp-reporter-stats-metric="sent">—</div><div class="metric__trend text-secondary" data-hp-reporter-stats-metric-trend="sent"></div></div>
+          <div class="metric"><div class="metric__label">Suppressed</div><div class="metric__value" data-hp-reporter-stats-metric="suppressed">—</div><div class="metric__trend text-secondary" data-hp-reporter-stats-metric-trend="suppressed">Cooldown + GreyNoise</div></div>
+          <div class="metric"><div class="metric__label">Dry run</div><div class="metric__value" data-hp-reporter-stats-metric="dry_run">—</div><div class="metric__trend text-secondary">Would-send, not sent</div></div>
+          <div class="metric"><div class="metric__label">Failed</div><div class="metric__value" data-hp-reporter-stats-metric="failed">—</div><div class="metric__trend text-danger" data-hp-reporter-stats-metric-trend="failed"></div></div>
+        </div>
+        <p class="card__meta" data-hp-reporter-stats-error hidden></p>
         <section class="card">
           <div class="card__header"><div><h3>Alerting</h3><p class="card__meta">Staged operational thresholds.</p></div></div>
           <div class="hp-field settings-field" data-hp-search="honeypot alert cooldown duration">

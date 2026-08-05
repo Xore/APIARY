@@ -262,6 +262,7 @@ func main() {
 	http.HandleFunc("/api/settings/config/history", s.serveSettingsConfigHistory)
 	http.HandleFunc("/api/settings/users", s.serveSettingsUsers)
 	http.HandleFunc("/api/settings/es-storage-stats", s.serveSettingsESStorageStats)
+	http.HandleFunc("/api/settings/reporter-stats", s.serveSettingsReporterStats)
 	http.HandleFunc("/api/settings/services", s.serveSettingsServices)
 	http.HandleFunc("/api/settings/services/", s.serveSettingsServiceItem)
 	http.HandleFunc("/api/settings/audit", s.serveSettingsAudit)

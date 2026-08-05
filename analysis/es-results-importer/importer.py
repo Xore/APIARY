@@ -126,6 +126,20 @@ SOURCES = [
         "glob": "*",
         "binary": True,
     },
+    {
+        # #666: reporter/metrics.go overwrites this one file in place on
+        # every send attempt (no per-event id to key off of), so id_fields
+        # is empty -- doc_id() falls back to path.stem ("metrics"), giving
+        # one stable, always-overwritten document rather than a growing
+        # history. Per #638, this is the dashboard's only path to these
+        # counters -- never mount the reporter's own volume into the
+        # dashboard service directly.
+        "env": "REPORTER_METRICS_DIR",
+        "label": "reporter_metrics",
+        "index": "reporter-metrics-v1",
+        "id_fields": (),
+        "glob": "metrics.json",
+    },
 ]
 
 # A cowrie session left connected for hours (an attacker idling, or a stuck
