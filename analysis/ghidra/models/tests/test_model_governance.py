@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parent.parent
 SPEC = importlib.util.spec_from_file_location("model_governance", HERE / "model-governance.py")
 governance = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None

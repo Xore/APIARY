@@ -8,7 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parent.parent
 SPEC = importlib.util.spec_from_file_location("model_status_adapter", HERE / "model-status-adapter.py")
 adapter = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader

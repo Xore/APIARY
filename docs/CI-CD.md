@@ -18,6 +18,29 @@ Every push to `main` and every pull request runs:
 Container images are built for pull requests. A push to `main` or a version tag
 publishes the custom images to the repository's GitHub Container Registry.
 
+## Testing conventions
+
+Python and shell tests live in a sibling `tests/` directory next to the code
+they test (e.g. `ml-worker/tests/`, `analysis/ghidra/worker/tests/`,
+`analysis/yara/tests/`), not flat alongside it. When adding a new Python or
+shell test, put it under the nearest `tests/` directory for its component,
+creating one if none exists yet.
+
+Go tests stay co-located with the package they test (`foo.go` +
+`foo_test.go` in the same directory), following standard Go convention
+rather than the `tests/`-directory pattern above. A meaningful fraction of
+this repo's Go tests are white-box: they construct unexported types
+directly and call unexported methods (e.g. dashboard tests routinely build
+`&store{}` by hand). A `*_test.go` file only gets that access when it
+declares the same package as the code under test, which requires it living
+in the same directory — moving Go tests to a separate top-level directory
+would force every one of them into an external `package foo_test`, losing
+that access or requiring the production code to newly export internals
+just for tests to reach them. `go test` never ships in a built binary, so
+`_test.go`'s own suffix already keeps tests out of production artifacts
+without a directory move. Go stays co-located; only Python and shell use
+`tests/`.
+
 ## Dependabot
 
 Dependabot checks GitHub Actions, Go modules, npm dependencies, and Docker base

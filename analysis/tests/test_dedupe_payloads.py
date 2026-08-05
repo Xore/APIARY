@@ -4,7 +4,7 @@ import unittest
 from datetime import date
 from pathlib import Path
 
-MODULE_PATH = Path(__file__).with_name("dedupe-payloads.py")
+MODULE_PATH = Path(__file__).resolve().parent.parent / "dedupe-payloads.py"
 SPEC = importlib.util.spec_from_file_location("dedupe_payloads", MODULE_PATH)
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)

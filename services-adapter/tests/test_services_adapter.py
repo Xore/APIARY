@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-HERE = Path(__file__).resolve().parent
+HERE = Path(__file__).resolve().parent.parent
 SPEC = importlib.util.spec_from_file_location("services_adapter", HERE / "services-adapter.py")
 adapter = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader
