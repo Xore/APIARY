@@ -33,18 +33,26 @@ def _recv(sock, minimum=1):
 
 
 def probe_modbus(port):
-    # MBAP header (arbitrary transaction id, protocol id 0, length 6, unit 1)
-    # + function 0x03 (Read Holding Registers), address 0, quantity 1.
-    req = struct.pack(">HHHB", 0x4842, 0x0000, 6, 0x01) + bytes(
-        [0x03, 0x00, 0x00, 0x00, 0x01]
+    # MBAP header (arbitrary transaction id, protocol id 0, length 6, unit 2)
+    # + function 0x03 (Read Holding Registers), address 40001, quantity 1.
+    #
+    # #725: unit 1 (this stack's s7_200/s7_1200/s7_1500 templates all define
+    # the same layout) has no HOLDING_REGISTERS block at all, so a read
+    # there always came back as Modbus exception 0x02 (illegal data
+    # address) -- a well-formed, correctly-answered request, but conpot's
+    # own slave.py logs every such exception at ERROR, indistinguishable
+    # from a real attacker probing an invalid address. Unit 2, address
+    # 40001 is the one block these templates actually populate (confirmed
+    # live against hp-conpot/-s7-1200/-s7-1500), so this probe now gets a
+    # real 0x03 success reply and produces zero exception-path log noise.
+    req = struct.pack(">HHHB", 0x4842, 0x0000, 6, 0x02) + bytes(
+        [0x03, 0x9C, 0x41, 0x00, 0x01]
     )
     with socket.create_connection(("127.0.0.1", port), timeout=TIMEOUT) as s:
         s.sendall(req)
         resp = _recv(s, minimum=8)
-    # Either a real reply (function 0x03) or a Modbus exception (0x83) proves
-    # the request was parsed and answered -- that is all liveness needs.
-    if resp[7] not in (0x03, 0x83):
-        raise ValueError(f"unexpected modbus function code: {resp!r}")
+    if resp[7] != 0x03:
+        raise ValueError(f"unexpected modbus response: {resp!r}")
 
 
 def probe_iec104(port):

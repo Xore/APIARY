@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"html"
 	"io"
+	stdlog "log"
 	"net"
 	"net/http"
 	"net/url"
@@ -27,6 +28,24 @@ import (
 	"sync"
 	"time"
 )
+
+// healthcheckNoiseFilter drops the one specific log line the -healthcheck
+// flag's raw connect-and-close self-probe generates every cycle (#725):
+// net/http logs "http: TLS handshake error from 127.0.0.1:<port>: EOF" for
+// any TLS listener whose peer closes before sending ClientHello, which is
+// exactly what the loopback healthcheck does. That's 100% self-inflicted --
+// never a real client -- but at the log-message level it's indistinguishable
+// from a genuine malformed-TLS-client attempt, permanently drowning real
+// errors in this stream. Everything else still reaches stderr unfiltered.
+type healthcheckNoiseFilter struct{}
+
+func (healthcheckNoiseFilter) Write(p []byte) (int, error) {
+	msg := strings.TrimRight(string(p), "\n")
+	if strings.Contains(msg, "TLS handshake error from 127.0.0.1:") && strings.HasSuffix(msg, "EOF") {
+		return len(p), nil
+	}
+	return os.Stderr.Write(p)
+}
 
 type event struct {
 	Time      string            `json:"time"`
@@ -271,7 +290,10 @@ func main() {
 	}
 	tlsLn := tls.NewListener(ln, &tls.Config{Certificates: []tls.Certificate{cert}})
 
-	srv := &http.Server{Handler: &handler{log: log, port: port}}
+	srv := &http.Server{
+		Handler:  &handler{log: log, port: port},
+		ErrorLog: stdlog.New(healthcheckNoiseFilter{}, "", 0),
+	}
 	log.emit(event{Port: port, Event: "listening"})
 	if err := srv.Serve(tlsLn); err != nil {
 		panic(err)
