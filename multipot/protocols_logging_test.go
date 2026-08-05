@@ -40,7 +40,11 @@ func TestRedisLogsPreviouslySilentCommands(t *testing.T) {
 	client, server := net.Pipe()
 	var output bytes.Buffer
 	done := make(chan struct{})
-	go func() { defer close(done); defer server.Close(); handleRedis(server, &logger{out: &output}, 6379) }()
+	go func() {
+		defer close(done)
+		defer server.Close()
+		handleRedis(server, &sessionLogger{logger: &logger{out: &output}}, 6379)
+	}()
 
 	r := bufio.NewReader(client)
 	for _, cmd := range []string{"DBSIZE", "SELECT 1", "KEYS *", "TYPE foo", "TTL foo", "GET foo", "PING"} {
@@ -79,7 +83,11 @@ func TestPostgresLogsDatabaseParam(t *testing.T) {
 	client, server := net.Pipe()
 	var output bytes.Buffer
 	done := make(chan struct{})
-	go func() { defer close(done); defer server.Close(); handlePostgres(server, &logger{out: &output}, 5432) }()
+	go func() {
+		defer close(done)
+		defer server.Close()
+		handlePostgres(server, &sessionLogger{logger: &logger{out: &output}}, 5432)
+	}()
 
 	params := "user\x00attacker\x00database\x00accounting\x00\x00"
 	body := make([]byte, 4+len(params))
@@ -121,7 +129,11 @@ func TestElasticLogsRequestBody(t *testing.T) {
 	client, server := net.Pipe()
 	var output bytes.Buffer
 	done := make(chan struct{})
-	go func() { defer close(done); defer server.Close(); handleElastic(server, &logger{out: &output}, 9200) }()
+	go func() {
+		defer close(done)
+		defer server.Close()
+		handleElastic(server, &sessionLogger{logger: &logger{out: &output}}, 9200)
+	}()
 
 	payload := `{"query":{"script":{"source":"malicious"}}}`
 	req := fmt.Sprintf("POST /_search HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n%s", len(payload), payload)
@@ -144,7 +156,11 @@ func TestDockerLogsRequestBody(t *testing.T) {
 	client, server := net.Pipe()
 	var output bytes.Buffer
 	done := make(chan struct{})
-	go func() { defer close(done); defer server.Close(); handleDocker(server, &logger{out: &output}, 2375) }()
+	go func() {
+		defer close(done)
+		defer server.Close()
+		handleDocker(server, &sessionLogger{logger: &logger{out: &output}}, 2375)
+	}()
 
 	payload := `{"Image":"evil/backdoor:latest","Privileged":true}`
 	req := fmt.Sprintf("POST /containers/create HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n%s", len(payload), payload)

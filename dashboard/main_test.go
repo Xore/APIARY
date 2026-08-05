@@ -1132,6 +1132,22 @@ func TestClassifyMultipotSurfacesDataForNonCommandEvents(t *testing.T) {
 	}
 }
 
+// TestClassifyMultipotSurfacesSessionID is a regression test for #608:
+// multipot's new per-connection "session" field must reach ev.session the
+// same way cowrie's own "session" field already does, so filters.go/
+// investigate.go/intelligence.go/search.go can group a multi-step
+// interaction over one connection.
+func TestClassifyMultipotSurfacesSessionID(t *testing.T) {
+	ev := classify(map[string]any{
+		"sensor": "multipot", "event": "login", "proto": "ftp", "port": float64(21),
+		"src_ip": "203.0.113.10", "username": "root", "password": "toor",
+		"session": "a1b2c3d4e5f6",
+	}, "multipot")
+	if ev.session != "a1b2c3d4e5f6" {
+		t.Fatalf("ev.session = %q, want %q", ev.session, "a1b2c3d4e5f6")
+	}
+}
+
 // TestClassifyMultipotHTTPRequestLineDoesNotPolluteTopCommands (#41): a live
 // production check found HTTP GET/POST requests (multipot's Elasticsearch/
 // Docker honeypots on 9200/2375) showing up in the Attacker Behavior tab's
