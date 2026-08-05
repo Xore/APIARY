@@ -362,6 +362,7 @@ func main() {
 	// produces PDFs. The legacy /export/report.pdf endpoint and the per-page
 	// PDF buttons were removed; dashboard pages link here instead.
 	http.HandleFunc("/api/reports/templates", s.serveReportTemplates)
+	http.HandleFunc("/api/reports/payload-options", s.serveReportPayloadOptions)
 	http.HandleFunc("/api/reports/definitions", s.serveReportDefinitions)
 	http.HandleFunc("/api/reports/definitions/", s.serveReportDefinitionByID)
 	http.HandleFunc("/api/reports/payloads/", s.serveGeneratePayloadReport)

@@ -32,6 +32,10 @@
     scopeSection: $("hp-rp-scope-section"),
     sandboxSection: $("hp-rp-sandbox-section"),
     sandboxJob: $("hp-rp-sandbox-job"),
+    payloadSection: $("hp-rp-payload-section"),
+    payloadSearch: $("hp-rp-payload-search"),
+    payloadResults: $("hp-rp-payload-results"),
+    payloadSelected: $("hp-rp-payload-selected"),
     brandTitle: $("hp-rp-brand-title"),
     brandAuthor: $("hp-rp-brand-author"),
     brandHeaderLeft: $("hp-rp-brand-header-left"),
@@ -83,6 +87,13 @@
     busy: false,
     viewerOpen: false,
     viewerRestoreFocus: null,
+    // #653: the payload template's picker selection -- {hash, kind, size_h,
+    // mtime_utc, sandbox, ghidra, github} from /api/reports/payload-options,
+    // or null when nothing is picked yet. Kept as the object (not just the
+    // hash) so the "selected" status line can show the same source badges
+    // the results list does, without a second lookup.
+    selectedPayload: null,
+    payloadSearchTimer: null,
   };
 
   function setStatus(message, kind) {
@@ -179,13 +190,17 @@
     state.template = template;
     renderTemplates();
     const sandbox = !!template.sandbox;
+    const payload = !!template.payload;
     els.sandboxSection.hidden = !sandbox;
-    els.elementsSection.hidden = sandbox;
-    els.scopeSection.hidden = sandbox;
-    // A sandbox report is scoped by its analysis job, so the Scope step does
-    // not apply: hide the tab too, or it would open an empty panel.
-    setStepAvailable("scope", !sandbox);
+    els.payloadSection.hidden = !payload;
+    els.elementsSection.hidden = sandbox || payload;
+    els.scopeSection.hidden = sandbox || payload;
+    // A sandbox or payload report is scoped by its referenced artifact, so
+    // the Scope step does not apply: hide the tab too, or it would open an
+    // empty panel.
+    setStepAvailable("scope", !sandbox && !payload);
     if (sandbox) loadSandboxJobs();
+    if (payload && applyPreset) { resetPayloadPicker(); searchPayloads(""); }
     if (applyPreset) {
       state.editing = null;
       els.save.textContent = "Save definition";
@@ -246,6 +261,9 @@
     if (template.sandbox) {
       scope.job = els.sandboxJob.value;
       if (!scope.job) throw new Error("select a sandbox analysis job");
+    } else if (template.payload) {
+      scope.hash = state.selectedPayload && state.selectedPayload.hash;
+      if (!scope.hash) throw new Error("select a payload");
     } else {
       definition.elements = Array.from(els.elements.querySelectorAll("input[type=checkbox]:checked")).map((box) => box.value);
       if (definition.elements.length === 0) throw new Error("select at least one report element");
@@ -314,8 +332,86 @@
     if (scope.job) {
       loadSandboxJobs().then(() => { els.sandboxJob.value = scope.job; });
     }
+    if (scope.hash) {
+      resetPayloadPicker();
+      loadPayloadByHash(scope.hash);
+    }
     setStatus(`Editing “${definition.name}” — save to update, or generate a fresh PDF.`);
   }
+
+  // -------------------------------------------------------------------------
+  // Payload picker (#653)
+  // -------------------------------------------------------------------------
+
+  function resetPayloadPicker() {
+    state.selectedPayload = null;
+    els.payloadSearch.value = "";
+    els.payloadResults.innerHTML = "";
+    els.payloadSelected.textContent = "";
+  }
+
+  function payloadBadges(row) {
+    const badges = [];
+    if (row.sandbox) badges.push(`<span class="hp-rp-tag hp-rp-tag--light">sandbox</span>`);
+    if (row.ghidra) badges.push(`<span class="hp-rp-tag hp-rp-tag--light">ghidra</span>`);
+    if (row.github) badges.push(`<span class="hp-rp-tag hp-rp-tag--light">github</span>`);
+    return badges.length ? badges.join("") : `<span class="hp-rp-tag">no analysis yet</span>`;
+  }
+
+  function selectPayload(row) {
+    state.selectedPayload = row;
+    els.payloadResults.querySelectorAll("[data-payload-hash]").forEach((button) => {
+      button.setAttribute("aria-pressed", String(button.dataset.payloadHash === row.hash));
+    });
+    els.payloadSelected.innerHTML = `Selected: <code>${escapeHTML(row.hash)}</code> (${escapeHTML(row.kind || "unknown")}, ${escapeHTML(row.size_h || "")}) ${payloadBadges(row)}`;
+  }
+
+  function renderPayloadResults(rows) {
+    if (!rows.length) {
+      els.payloadResults.innerHTML = `<p class="note">no captured payloads match that search</p>`;
+      return;
+    }
+    els.payloadResults.innerHTML = rows.map((row) => `
+      <button type="button" class="hp-rp-payload-row" data-payload-hash="${escapeHTML(row.hash)}" aria-pressed="${state.selectedPayload && state.selectedPayload.hash === row.hash}">
+        <code>${escapeHTML(row.hash.slice(0, 16))}…</code>
+        <span>${escapeHTML(row.kind || "unknown")} · ${escapeHTML(row.size_h || "")}</span>
+        <span class="hp-rp-payload-badges">${payloadBadges(row)}</span>
+      </button>`).join("");
+    els.payloadResults.querySelectorAll("[data-payload-hash]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const row = rows.find((candidate) => candidate.hash === button.dataset.payloadHash);
+        if (row) selectPayload(row);
+      });
+    });
+  }
+
+  async function searchPayloads(query) {
+    try {
+      const payload = await apiJSON(`/api/reports/payload-options?q=${encodeURIComponent(query)}`);
+      renderPayloadResults(payload.payloads || []);
+    } catch (err) {
+      els.payloadResults.innerHTML = `<p class="note">payload search unavailable: ${escapeHTML(err.message)}</p>`;
+    }
+  }
+
+  // Prefills the picker when editing a saved payload-template definition:
+  // an exact-hash search against the same endpoint the picker itself uses,
+  // so the "selected" line shows real source badges rather than a bare hash.
+  async function loadPayloadByHash(hash) {
+    try {
+      const payload = await apiJSON(`/api/reports/payload-options?q=${encodeURIComponent(hash)}`);
+      const row = (payload.payloads || []).find((candidate) => candidate.hash === hash) || { hash, kind: "", size_h: "" };
+      selectPayload(row);
+    } catch {
+      selectPayload({ hash, kind: "", size_h: "" });
+    }
+  }
+
+  els.payloadSearch.addEventListener("input", () => {
+    window.clearTimeout(state.payloadSearchTimer);
+    const query = els.payloadSearch.value.trim();
+    state.payloadSearchTimer = window.setTimeout(() => searchPayloads(query), 250);
+  });
 
   async function loadSandboxJobs() {
     if (els.sandboxJob.dataset.loaded === "true") return;
