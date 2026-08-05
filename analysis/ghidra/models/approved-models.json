@@ -11,7 +11,7 @@
   "manifest_version": 1,
   "runtime": {
     "environment": {
-      "OLLAMA_CONTEXT_LENGTH": "16384",
+      "OLLAMA_CONTEXT_LENGTH": "32768",
       "OLLAMA_KEEP_ALIVE": "30m",
       "OLLAMA_MAX_LOADED_MODELS": "1",
       "OLLAMA_NUM_PARALLEL": "1"
@@ -25,7 +25,7 @@
     "ghidra": {
       "approval": {
         "date": "2026-08-05",
-        "decision_record": "GitHub issue #568, context-length requalification at 32768 tokens for the ghidra slot following the real 20GB VRAM figure from #518 and probe-gpu-capabilities.py context-sweep evidence",
+        "decision_record": "GitHub issue #636, correcting runtime.environment.OLLAMA_CONTEXT_LENGTH to match the already-deployed 32768 value (missed in the original #568 promotion; caught live by honeypot-model-drift.timer after install-analysis-host.sh was actually run end to end for the first time)",
         "report_sha256": "70c394e808ba4a2e4a187432e25f19457d941a7f2963667cdcf7bd016cef0b2d"
       },
       "artifact": {
@@ -84,7 +84,7 @@
     "revdeck": {
       "approval": {
         "date": "2026-08-05",
-        "decision_record": "GitHub issue #568, context-length requalification at 32768 tokens for the ghidra slot following the real 20GB VRAM figure from #518 and probe-gpu-capabilities.py context-sweep evidence",
+        "decision_record": "GitHub issue #636, correcting runtime.environment.OLLAMA_CONTEXT_LENGTH to match the already-deployed 32768 value (missed in the original #568 promotion; caught live by honeypot-model-drift.timer after install-analysis-host.sh was actually run end to end for the first time)",
         "report_sha256": "70c394e808ba4a2e4a187432e25f19457d941a7f2963667cdcf7bd016cef0b2d"
       },
       "artifact": {
@@ -139,7 +139,7 @@
     "sessions": {
       "approval": {
         "date": "2026-08-05",
-        "decision_record": "GitHub issue #568, context-length requalification at 32768 tokens for the ghidra slot following the real 20GB VRAM figure from #518 and probe-gpu-capabilities.py context-sweep evidence",
+        "decision_record": "GitHub issue #636, correcting runtime.environment.OLLAMA_CONTEXT_LENGTH to match the already-deployed 32768 value (missed in the original #568 promotion; caught live by honeypot-model-drift.timer after install-analysis-host.sh was actually run end to end for the first time)",
         "report_sha256": "70c394e808ba4a2e4a187432e25f19457d941a7f2963667cdcf7bd016cef0b2d"
       },
       "artifact": {
