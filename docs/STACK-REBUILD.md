@@ -10,6 +10,14 @@ archive onto a *replacement* host — this is for the *same* hosts, on purpose,
 usually after a schema/volume-layout change or when historical data is no
 longer worth keeping.
 
+[`../factory-reset.sh`](../factory-reset.sh) (see [`RECOVERY.md`](RECOVERY.md))
+automates the homeserver-side steps below (stop, back up via
+`analysis/backup-honeypot.sh`, optionally wipe, restart) as one command. This
+doc remains the source of truth for *why* each step exists and the ordering
+traps hit on the first live run — read it before trusting the script blind,
+and definitely before doing any of this by hand on the VPS side, which the
+script doesn't touch.
+
 Since #258 split the stack into ~13 independent Dockge projects
 (`honeypot-init`, `honeypot-conpot`, `honeypot-cowrie`, `honeypot-multipot`,
 `honeypot-http`, `honeypot-dnp3`, `honeypot-dionaea`,
