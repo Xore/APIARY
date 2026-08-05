@@ -145,6 +145,28 @@ jobs:
               docker compose -f compose.yml up -d --build )
           done
 
+      # #560: docker-compose.ip-enrichment-worker.yml, scripts/install-
+      # homeserver.sh's COMPOSE_ORDER, and .github/workflows/containers.yml
+      # (which builds this image) all treat this stack as real and deployed
+      # -- but this deploy job never actually synced or started it, so any
+      # push touching ip-enrichment-worker/ never reached production.
+      # network_mode: none and no shared volume/network with anything else
+      # (see the compose file's own header), so -- like the standalone
+      # honeypots above -- it has no ordering requirement either way; placed
+      # here to mirror install-homeserver.sh's own COMPOSE_ORDER position
+      # (after the sensor stacks, before payload-analysis/dashboard), purely
+      # for readability.
+      - name: Synchronize honeypot-ip-enrichment-worker (#560)
+        shell: bash
+        run: |
+          destination=/opt/stacks/honeypot-ip-enrichment-worker
+          install -d -m 755 "$destination"
+          cp docker-compose.ip-enrichment-worker.yml "$destination/compose.yml"
+          cd "$destination"
+          test ! -f .env || chmod 600 .env
+          docker compose -f compose.yml config --quiet
+          docker compose -f compose.yml up -d --build
+
       # #258: payload-dedupe and yara-scanner split out separately from
       # dionaea/tftp-relay above, per explicit instruction. Placed right
       # after that step (not in its loop) purely for readability -- the
