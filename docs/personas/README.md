@@ -1,6 +1,6 @@
 # Honeypot personas
 
-[`personas.json`](personas.json) is the canonical inventory for the fictional
+[`personas.json`](../../personas/personas.json) is the canonical inventory for the fictional
 organizations, sites, and assets exposed by this stack. Each event should carry
 `persona_id`, `site_id`, `asset_id`, and `organization`; Filebeat adds those
 fields for upstream formats that cannot emit them. The live dashboard exposes
