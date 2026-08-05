@@ -436,7 +436,7 @@ completed Ghidra analyses, zero `cowrie.session.file_download` events, real
 captured session command text currently 0–80 characters). It reinforces
 rather than overturns the synthetic-benchmark ranking, and is exactly the
 kind of check `probe-gpu-capabilities.py` (see
-[`analysis/ghidra/benchmarks/README.md`](../analysis/ghidra/benchmarks/README.md))
+[`analysis/ghidra/benchmarks/README.md`](analysis/ghidra/benchmarks/README.md))
 is meant to make a recurring practice once more real captures accumulate,
 not a one-time substitute for the synthetic gates.
 
