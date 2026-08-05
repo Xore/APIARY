@@ -879,7 +879,28 @@ step_ml_worker_start() {
   rm -rf /var/dockge/stacks/ml-worker
   ln -sfn "$src" /var/dockge/stacks/ml-worker
   ln -sf "$src/docker-compose.yml" "$src/compose.yml"
-  (cd "$src" && with_retry 3 15 docker compose -f compose.yml up -d --wait)
+  (cd "$src" && with_retry 3 15 docker compose -f compose.yml up -d --wait) || return 1
+
+  # #593: `--wait` above only waits for the container to reach "running" --
+  # ml-worker has no Docker HEALTHCHECK defined, so this step reported OK on
+  # every run even while the container was stuck in its own internal
+  # 5-minute Elasticsearch-connect retry loop (a real requirements.txt
+  # regression, #599) or had built against a broken dependency set
+  # entirely. Neither failure mode makes the container exit or crash-loop
+  # at the Docker level, so `--wait` alone can never catch either one.
+  # Poll the container's own log for the exact line worker.py emits once
+  # it's genuinely ready, instead of trusting compose's exit code.
+  local waited=0 max_wait=90
+  while (( waited < max_wait )); do
+    if docker logs hp-ml-worker 2>&1 | grep -q 'Worker ready\.'; then
+      echo "ml-worker confirmed ready (found 'Worker ready.' in logs)"
+      return 0
+    fi
+    sleep 5
+    waited=$(( waited + 5 ))
+  done
+  echo "ml-worker container is running but never logged 'Worker ready.' within ${max_wait}s -- likely stuck retrying a dependency (see #593)" >&2
+  return 1
 }
 
 step_llm_worker_selftest() {
