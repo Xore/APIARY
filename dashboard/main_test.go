@@ -641,6 +641,42 @@ func TestCowrieHASSHFingerprint(t *testing.T) {
 	}
 }
 
+func TestCowrieJA4FingerprintOnTunneledTLS(t *testing.T) {
+	ev := classify(map[string]any{
+		"eventid": "cowrie.direct-tcpip.ja4", "session": "63742cd576fd",
+		"ja4": "t13d1516h2_8daaf6152771_e5627efa2ab1", "dst_ip": "203.0.113.9", "dst_port": 443.0,
+	}, "cowrie")
+	if ev.fingerprint != "t13d1516h2_8daaf6152771_e5627efa2ab1" || ev.fingerKind != "JA4" {
+		t.Fatalf("JA4 was not surfaced: %+v", ev)
+	}
+	if !strings.Contains(ev.detail, "203.0.113.9:443") {
+		t.Fatalf("detail missing tunnel destination: %q", ev.detail)
+	}
+}
+
+func TestCowrieJA4HFingerprintOnTunneledHTTP(t *testing.T) {
+	ev := classify(map[string]any{
+		"eventid": "cowrie.direct-tcpip.ja4h", "session": "63742cd576fd",
+		"ja4h": "ge11nn020000_1a2b3c4d5e6f", "dst_ip": "203.0.113.9", "dst_port": 80.0,
+	}, "cowrie")
+	if ev.fingerprint != "ge11nn020000_1a2b3c4d5e6f" || ev.fingerKind != "JA4H" {
+		t.Fatalf("JA4H was not surfaced: %+v", ev)
+	}
+}
+
+func TestCowrieClientFingerprintSurfacesPubkeyOffer(t *testing.T) {
+	ev := classify(map[string]any{
+		"eventid": "cowrie.client.fingerprint", "session": "63742cd576fd",
+		"username": "root", "type": "ssh-ed25519", "fingerprint": "aa:bb:cc:dd:ee:ff",
+	}, "cowrie")
+	if ev.fingerprint != "aa:bb:cc:dd:ee:ff" || ev.fingerKind != "SSH pubkey" {
+		t.Fatalf("pubkey fingerprint was not surfaced: %+v", ev)
+	}
+	if ev.user != "root" {
+		t.Fatalf("username not surfaced: %+v", ev)
+	}
+}
+
 func TestFingerprintAndEnrichmentFilters(t *testing.T) {
 	e := storedEvent{Fingerprint: "abc123", ASN: 64500, Org: "Example Networks", Provider: "hosting"}
 	if !((filter{fingerprint: "abc123", asn: "AS64500", org: "Example Networks", provider: "hosting"}).match(e)) {

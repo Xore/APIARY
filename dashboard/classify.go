@@ -197,6 +197,27 @@ func classify(e map[string]any, dirSensor string) event {
 			// traffic through the honeypot -- worth its own detail line,
 			// not just the bare eventid.
 			ev.detail = "port-forward request -> " + str(e["dst_ip"]) + ":" + num(e["dst_port"])
+		case eid == "cowrie.direct-tcpip.ja4":
+			// JA4 fingerprint of TLS traffic the attacker tunneled through
+			// a port-forward (cowrie's own ssh/forwarding.py computes this
+			// from the ClientHello it observes) -- reached ES fine but had
+			// no case here, so it only ever showed as free text in message.
+			ev.fingerprint = str(e["ja4"])
+			ev.fingerKind = "JA4"
+			ev.detail = "JA4 (tunneled TLS to " + str(e["dst_ip"]) + ":" + num(e["dst_port"]) + "): " + ev.fingerprint
+		case eid == "cowrie.direct-tcpip.ja4h":
+			ev.fingerprint = str(e["ja4h"])
+			ev.fingerKind = "JA4H"
+			ev.detail = "JA4H (tunneled HTTP to " + str(e["dst_ip"]) + ":" + num(e["dst_port"]) + "): " + ev.fingerprint
+		case eid == "cowrie.client.fingerprint":
+			// Logged the moment a pubkey auth attempt is offered,
+			// independent of whether it's ultimately accepted -- distinct
+			// from cowrie.login.{success,failed}'s own fingerprint field,
+			// which only fires for the auth outcome, not every offer.
+			ev.user = str(e["username"])
+			ev.fingerprint = str(e["fingerprint"])
+			ev.fingerKind = "SSH pubkey"
+			ev.detail = "pubkey offered (" + str(e["type"]) + "): " + shortHash(ev.fingerprint)
 		case eid == "cowrie.telnet.exploit_attempt":
 			ev.detail = "CVE " + str(e["cve"]) + " attempt: " + str(e["name"]) + "=" + str(e["value"])
 		case eid == "cowrie.telnet.exploit_success":
