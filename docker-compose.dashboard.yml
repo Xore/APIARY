@@ -95,6 +95,14 @@ x-dashboard-volumes: &dashboard-volumes
   # dashboard refuses Windows submissions until then.
   - /var/lib/honeypot-windows-sandbox/export:/windows-sandbox-results:ro
   - /var/lib/honeypot-windows-sandbox/requests/pending:/windows-sandbox-requests
+  # #498: GHOSTS-sandbox (WAN-permitted route, #327/#331) is a separate host
+  # worker with its own spool, same shape as the Windows mounts above -- was
+  # missing entirely, which meant the Workbench's "windows-ghosts" analyzer
+  # always evaluated ghostsConfigured=false and every GHOSTS child was
+  # silently recorded skipped, exactly the kind of "looks wired up, never
+  # actually run" gap #53 found for Windows one step earlier in this chain.
+  - /var/lib/honeypot-ghosts-sandbox/export:/ghosts-sandbox-results:ro
+  - /var/lib/honeypot-ghosts-sandbox/requests/pending:/ghosts-sandbox-requests
   # Ghidra static analysis: a third spool, same shape and same boundary.
   # Bind mounts rather than named volumes because the consumer is a host
   # systemd unit (analysis/ghidra/worker/), not a compose service — a named
@@ -203,6 +211,8 @@ services:
       # backend is a .env change, not a Compose edit.
       - WINDOWS_SANDBOX_RESULTS_DIR=${WINDOWS_SANDBOX_RESULTS_DIR:-}
       - WINDOWS_SANDBOX_REQUEST_DIR=${WINDOWS_SANDBOX_REQUEST_DIR:-}
+      - GHOSTS_SANDBOX_RESULTS_DIR=${GHOSTS_SANDBOX_RESULTS_DIR:-}
+      - GHOSTS_SANDBOX_REQUEST_DIR=${GHOSTS_SANDBOX_REQUEST_DIR:-}
       - SANDBOX_ALERT_RISK_SCORE=${SANDBOX_ALERT_RISK_SCORE:-50}
       # Empty until the host-side Ghidra worker exists; see .env.example. The
       # mounts above are always present so enabling it is a .env change, not a
@@ -317,6 +327,8 @@ services:
       - SANDBOX_REQUEST_DIR=/sandbox-requests
       - WINDOWS_SANDBOX_RESULTS_DIR=${WINDOWS_SANDBOX_RESULTS_DIR:-}
       - WINDOWS_SANDBOX_REQUEST_DIR=${WINDOWS_SANDBOX_REQUEST_DIR:-}
+      - GHOSTS_SANDBOX_RESULTS_DIR=${GHOSTS_SANDBOX_RESULTS_DIR:-}
+      - GHOSTS_SANDBOX_REQUEST_DIR=${GHOSTS_SANDBOX_REQUEST_DIR:-}
       - SANDBOX_ALERT_RISK_SCORE=${SANDBOX_ALERT_RISK_SCORE:-50}
       - GHIDRA_RESULTS_DIR=${GHIDRA_RESULTS_DIR:-}
       - GHIDRA_REQUEST_DIR=${GHIDRA_REQUEST_DIR:-}
@@ -387,6 +399,9 @@ services:
       - /var/lib/honeypot-ghidra/results:/ghidra-results:ro
       - /var/lib/honeypot-sandbox/export:/sandbox-results:ro
       - /var/lib/honeypot-windows-sandbox/export:/windows-sandbox-results:ro
+      # #498: same "sandbox" ES label/index as the two mounts above --
+      # importer.py's SOURCES list merges all three into sandbox-analysis-v1.
+      - /var/lib/honeypot-ghosts-sandbox/export:/ghosts-sandbox-results:ro
       - /var/lib/honeypot-github/results:/github-analysis-results:ro
       # #404: same host path the dashboard service's own REVDECK_RESULTS_DIR
       # mount above uses -- see that comment for the write-side boundary
@@ -407,6 +422,7 @@ services:
       - GHIDRA_RESULTS_DIR=/ghidra-results
       - SANDBOX_RESULTS_DIR=/sandbox-results
       - WINDOWS_SANDBOX_RESULTS_DIR=/windows-sandbox-results
+      - GHOSTS_SANDBOX_RESULTS_DIR=/ghosts-sandbox-results
       - GITHUB_ANALYSIS_RESULTS_DIR=/github-analysis-results
       - REVDECK_RESULTS_DIR=/revdeck-results
       - COWRIE_TTYLOG_DIR=/cowrie-tty

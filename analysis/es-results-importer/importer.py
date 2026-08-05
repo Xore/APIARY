@@ -91,6 +91,17 @@ SOURCES = [
         "skip": {"status.json"},
     },
     {
+        # #498: GHOSTS-sandbox's own export dir (sandbox/ghosts/run_pending.sh
+        # writes windows-ghosts-<job>.json here) -- same label/index as the
+        # two sandbox sources above, so all three merge into one ES mirror.
+        "env": "GHOSTS_SANDBOX_RESULTS_DIR",
+        "label": "sandbox",
+        "index": "sandbox-analysis-v1",
+        "id_fields": ("job", "sha256"),
+        "glob": "*.json",
+        "skip": {"status.json"},
+    },
+    {
         "env": "GITHUB_ANALYSIS_RESULTS_DIR",
         "label": "github_analysis",
         "index": "github-analysis-v1",
