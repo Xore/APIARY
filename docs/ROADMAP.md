@@ -56,13 +56,14 @@ audit; #671 is the live source of truth if this drifts.
 **End-to-end / smoke tests**
 - [#498](https://github.com/Xore/honeypot-stack/issues/498) — dashboard:
   end-to-end smoke test every submission path. Linux/Wine sandbox and
-  GitHub-analysis publishing verified live; Ghidra/Rev·Deck, GHOSTS-sandbox,
-  and Payload Workbench fan-out remain.
+  GitHub-analysis publishing verified live; GHOSTS-sandbox wiring fixed and
+  the guest itself verified (network isolation, client enrollment) via
+  #597. Ghidra/Rev·Deck and Payload Workbench fan-out remain.
 - [#593](https://github.com/Xore/honeypot-stack/issues/593) — verify the
   ml-worker anomaly pipeline actually runs and reaches the dashboard
 - [#594](https://github.com/Xore/honeypot-stack/issues/594) — functionally
   test every sensor sends real, well-formed events to Elasticsearch
-- [#597](https://github.com/Xore/honeypot-stack/issues/597) — end-to-end
+- ✅ [#597](https://github.com/Xore/honeypot-stack/issues/597) — end-to-end
   test: golden image creation for both win11-analysis and win11-ghosts
 
 **In progress, not gates but relevant:** #150 (LLM analysis results to
