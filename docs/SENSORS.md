@@ -83,7 +83,7 @@ at 25 MiB with three files, independently from sensor event files under
 | TANNER web-attack analysis | `tanner.<domain>` | `tanner_web` :8091 |
 | EveBox (Suricata events) | `evebox.<domain>` | `evebox` :5636 |
 | Arkime (packet sessions) | `arkime.<domain>` | `arkime-viewer` :8005 |
-| Rev·Deck (Ghidra AI chat) | `rev.<domain>` | `revdeck` :5000 (separate `analysis/ghidra/` stack, `revdeck` profile — see [analysis/ghidra/revdeck/README.md](../analysis/ghidra/revdeck/README.md)) |
+| Rev·Deck (Ghidra AI chat) | `rev.<domain>` | `revdeck` :5000 (separate `analysis/ghidra/` stack, `revdeck` profile — see [analysis/ghidra/revdeck/README.md](analysis/ghidra/revdeck/README.md)) |
 
 Each is bridged to the VPS by its own `socat-hp-*` service (one socat per
 service, the reliable/consistent way) and routed by

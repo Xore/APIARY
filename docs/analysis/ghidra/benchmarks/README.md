@@ -4,7 +4,7 @@ This directory contains the task-specific acceptance benchmark used by
 [issue #144](https://github.com/Xore/honeypot-stack/issues/144) and governed by
 [issue #158](https://github.com/Xore/honeypot-stack/issues/158). The decision
 record, literature review, measurements, and recommendations live in
-[`docs/local-llm-model-evaluation.md`](../../../docs/local-llm-model-evaluation.md).
+[`docs/local-llm-model-evaluation.md`](../../../local-llm-model-evaluation.md).
 
 ## Safety properties
 
@@ -112,7 +112,7 @@ promote` workflow in [`../models/README.md`](../models/README.md). They
 only tell you whether running that workflow is worth it, and give real
 measured numbers instead of arithmetic assumptions for the context-length
 and concurrent-loading parts of that decision. See
-[`docs/local-llm-model-evaluation.md`](../../../docs/local-llm-model-evaluation.md)'s
+[`docs/local-llm-model-evaluation.md`](../../../local-llm-model-evaluation.md)'s
 "Issue #568 re-evaluation" section for the context-sweep table this script
 produced against the promoted `qwen3:14b`, including the ~5 GB of headroom
 that motivated raising `OLLAMA_CONTEXT_LENGTH`.

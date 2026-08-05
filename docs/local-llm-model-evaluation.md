@@ -339,7 +339,7 @@ and remains in the mode-0700 operator archive on the analysis host. It is not
 committed because it contains full model replies. The reviewed manifest,
 generated approval record, gate thresholds, drift workflow, promotion, and
 rollback instructions live in
-[`analysis/ghidra/models/`](../analysis/ghidra/models/README.md). That manifest,
+[`analysis/ghidra/models/`](analysis/ghidra/models/README.md). That manifest,
 not a mutable tag or this prose table, is the runtime source of truth.
 
 ## Issue #568 re-evaluation (real 20GB card)
@@ -436,7 +436,7 @@ completed Ghidra analyses, zero `cowrie.session.file_download` events, real
 captured session command text currently 0–80 characters). It reinforces
 rather than overturns the synthetic-benchmark ranking, and is exactly the
 kind of check `probe-gpu-capabilities.py` (see
-[`analysis/ghidra/benchmarks/README.md`](../analysis/ghidra/benchmarks/README.md))
+[`analysis/ghidra/benchmarks/README.md`](analysis/ghidra/benchmarks/README.md))
 is meant to make a recurring practice once more real captures accumulate,
 not a one-time substitute for the synthetic gates.
 
@@ -492,7 +492,7 @@ revdeck), replacing `qwen3:8b`, `qwen3.5:9b`, and
 model swap, then the `context_tokens: 32768` requalification. Both are
 `eligible: true` with zero gate failures against the exact production
 contract. See
-[`analysis/ghidra/models/approval-record.md`](../analysis/ghidra/models/README.md)
+[`analysis/ghidra/models/approval-record.md`](analysis/ghidra/models/README.md)
 for the current approved state; that file, not this prose, is authoritative.
 
 Unifying all three slots to one model tag was not a goal going in — #144's

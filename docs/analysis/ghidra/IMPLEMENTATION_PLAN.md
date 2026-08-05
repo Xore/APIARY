@@ -219,7 +219,7 @@ real trigger — a host-side spool, not GitHub Actions.
 > other candidate, swappable via `REVDECK_WORKFLOW`, not run alongside it).
 > `attack_surface_triage` and `vulnerability_hypothesis` still are not run —
 > both require an analyst-selected function address, so they remain
-> interactive-only. See [`revdeck/README.md`](../../../analysis/ghidra/revdeck/README.md#automated-triage-78)
+> interactive-only. See [`revdeck/README.md`](revdeck/README.md#automated-triage-78)
 > for the full contract and rationale.
 
 ### Source
@@ -282,7 +282,7 @@ only). Same as Rev·Deck, it is:
 
 ### Install
 
-[`ghidrassist/README.md`](../../../analysis/ghidra/ghidrassist/README.md) has the full procedure.
+[`ghidrassist/README.md`](ghidrassist/README.md) has the full procedure.
 **Updated 2026-08-01 (#225)**: building from a pinned source commit
 (`gradle buildExtension` against `2.2.0`, commit
 `c436fcb55d2b43f4341c7aa76c90d9be8c147da1`) is now the recommended path, not

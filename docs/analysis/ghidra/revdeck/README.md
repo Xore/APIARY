@@ -91,7 +91,7 @@ the disproven Ghidra REST contract
 [#101](https://github.com/Xore/honeypot-stack/issues/101) under
 [#107](https://github.com/Xore/honeypot-stack/issues/107) without ever having
 run against a live container. See the comment block above `REVDECK_API_BASE`
-in [`worker/ghidra-worker.py`](../worker/ghidra-worker.py) for the full
+in [`worker/ghidra-worker.py`](../../../../analysis/ghidra/worker/ghidra-worker.py) for the full
 contract, including why `analyze_as_raw=true` is always sent.
 
 **Off by default.** Set `REVDECK_API_BASE` (e.g.
@@ -135,7 +135,7 @@ for `attack_surface_triage`, `vulnerability_hypothesis`, or any deeper dive a
 particular sample warrants.
 
 The local default comes from the task-specific
-[model evaluation](../../../docs/local-llm-model-evaluation.md): it tied for
+[model evaluation](../../../local-llm-model-evaluation.md): it tied for
 the highest Rev·Deck score, passed the x86 intent case, and does not depend on
 the thinking-control field that the current upstream Rev·Deck client does not
 send.
