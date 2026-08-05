@@ -381,6 +381,16 @@ func classify(e map[string]any, dirSensor string) event {
 		if op := opcodeName[int(numFloat(e["opcode"]))]; op != "" {
 			ev.detail += " [opcode " + op + "]"
 		}
+		// #571: dns-honeypot's own anti-amplification cap (dns.go's
+		// ratioCap, at most 1.5x the request's byte size) can suppress a
+		// response entirely when even a bare header would exceed it -- it
+		// appends "_dropped" to the logged event ("query_dropped",
+		// "malformed_query_dropped") when that happens. Previously
+		// invisible here: a capped/suppressed response looked identical to
+		// a normally-answered one.
+		if strings.HasSuffix(kind, "_dropped") {
+			ev.detail += " [response suppressed, amplification cap]"
+		}
 		return ev
 	}
 
