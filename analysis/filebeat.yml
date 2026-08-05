@@ -164,38 +164,56 @@ processors:
   # Attach stable defender-side identity to formats that cannot emit persona
   # metadata themselves. Conditions use the mounted source path, never
   # attacker-controlled content.
+  #
+  # #746: cowrie/dionaea/every conpot persona route through ip-enrichment-worker
+  # (#37/#38), which rewrites their raw /logs/<service>/ logs into
+  # /logs/enriched/<name>.json before Filebeat ever sees them -- so
+  # log.file.path for these events is always under /logs/enriched/, never the
+  # raw per-service directory these when.contains conditions were originally
+  # written against. Confirmed live: zero honeypot.persona_id documents existed
+  # anywhere for cowrie or conpot before this fix. Matching against the
+  # enriched filename instead (ip-enrichment-worker/main.go's discoverSources
+  # names each output "<persona>.json") fixes all of them in one pass.
+  # dionaea's own dionaea_incident.json is NOT rewritten by ip-enrichment-worker
+  # (a separate filestream input below tails it from its real raw path) --
+  # that block stays as-is and this adds a second one for dionaea's normal,
+  # enriched connection-log events.
   - add_fields:
       target: honeypot
       fields: {persona_id: nexusai-gpu01, site_id: nexusai-berlin-ml, asset_id: gpu01, organization: NexusAI Research GmbH}
-      when.contains: {log.file.path: "/logs/cowrie/"}
+      when.contains: {log.file.path: "enriched/cowrie.json"}
   - add_fields:
       target: honeypot
       fields: {persona_id: meridian-legacy, site_id: meridian-hamburg-dc1, asset_id: legacy-svc-02, organization: Meridian Retail Systems Ltd.}
       when.contains: {log.file.path: "/logs/dionaea/"}
   - add_fields:
       target: honeypot
+      fields: {persona_id: meridian-legacy, site_id: meridian-hamburg-dc1, asset_id: legacy-svc-02, organization: Meridian Retail Systems Ltd.}
+      when.contains: {log.file.path: "enriched/dionaea.json"}
+  - add_fields:
+      target: honeypot
       fields: {persona_id: rheinwerk-water-s7-1200, site_id: rheinwerk-treatment, asset_id: plc-filter-02, organization: Rheinwerk Municipal Water}
-      when.contains: {log.file.path: "/logs/conpot-s7-1200/"}
+      when.contains: {log.file.path: "enriched/conpot-s7-1200.json"}
   - add_fields:
       target: honeypot
       fields: {persona_id: nordchem-s7-1500, site_id: nordchem-reactor-4, asset_id: plc-reactor-04, organization: NordChem Process Industries}
-      when.contains: {log.file.path: "/logs/conpot-s7-1500/"}
+      when.contains: {log.file.path: "enriched/conpot-s7-1500.json"}
   - add_fields:
       target: honeypot
       fields: {persona_id: elbegrid-iec104, site_id: elbegrid-substation-17, asset_id: rtu-sub17-a, organization: ElbeGrid Distribution}
-      when.contains: {log.file.path: "/logs/conpot-iec104/"}
+      when.contains: {log.file.path: "enriched/conpot-iec104.json"}
   - add_fields:
       target: honeypot
       fields: {persona_id: northfuel-guardian, site_id: northfuel-station-042, asset_id: tankmon-042, organization: NorthFuel Service GmbH}
-      when.contains: {log.file.path: "/logs/conpot-guardian/"}
+      when.contains: {log.file.path: "enriched/conpot-guardian.json"}
   - add_fields:
       target: honeypot
       fields: {persona_id: stadtwaerme-kamstrup, site_id: stadtwaerme-loop-west, asset_id: heatmeter-west-0382, organization: Stadtwaerme Nord}
-      when.contains: {log.file.path: "/logs/conpot-kamstrup/"}
+      when.contains: {log.file.path: "enriched/conpot-kamstrup.json"}
   - add_fields:
       target: honeypot
       fields: {persona_id: rheinwerk-water-s7-200, site_id: rheinwerk-intake, asset_id: plc-intake-01, organization: Rheinwerk Municipal Water}
-      when.contains: {log.file.path: "/logs/conpot/"}
+      when.contains: {log.file.path: "enriched/conpot.json"}
   - add_fields:
       target: honeypot
       fields: {persona_id: meridian-customer-portal, site_id: meridian-public-web, asset_id: customer-portal-02, organization: Meridian Retail Systems Ltd.}
