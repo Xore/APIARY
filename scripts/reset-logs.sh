@@ -359,6 +359,7 @@ STEP "Re-creating log directories with correct ownership"
 
 if wants cowrie; then
   mkown "${LOGS_BASE}/cowrie/downloads" 2000:2000
+  mkown "${LOGS_BASE}/cowrie/tty" 2000:2000
 fi
 
 if wants conpot; then
