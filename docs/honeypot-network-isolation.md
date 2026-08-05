@@ -102,7 +102,8 @@ TANNER and its dependencies keep their own separate `tanner_local`, unchanged.
 These are host-only procedures. They are real and worth doing, but they
 configure a machine rather than ship as code — which is why there is nothing
 here to implement and no issue to open. Verified by
-[#88](https://github.com/Xore/honeypot-stack/issues/88) once that exists.
+`scripts/isolation-audit.sh` (#88), run as part of the
+`.github/workflows/diagnostics.yml` `home` job.
 
 - **sshd** bound to the management address only, never the honeypot-facing one.
   `ss -tlnp | grep :22` is the check.

@@ -131,6 +131,20 @@ jobs:
           docker logs --tail 20 hp-filebeat 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || report "no Filebeat container"
           report '```'
 
+      - name: Isolation invariants (#88)
+        shell: bash
+        run: |
+          set -uo pipefail
+          printf '\n## Isolation audit\n\n```\n' >> "$GITHUB_STEP_SUMMARY"
+          # Runs the deployed stack's own copy, same as every other step in
+          # this job -- this workflow has no actions/checkout, by design
+          # (see this job's header comment): it inspects the stack as
+          # actually deployed, not whatever ref triggered the run.
+          /opt/stacks/honeypot-stack/scripts/isolation-audit.sh 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          status=${PIPESTATUS[0]}
+          printf '```\n' >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
   vps:
     if: inputs.target == 'vps' || inputs.target == 'both'
     runs-on: ubuntu-latest
