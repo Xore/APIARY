@@ -216,6 +216,18 @@ html {
   min-height: 100%;
   background: var(--app-bg);
   font-size: 14px;
+  /* Reserves the scrollbar's track width up front instead of letting it
+     appear/disappear as content settles during load (webfont metrics,
+     late-loading iframe content, a table that only grows past viewport
+     height once its rows render). Without this, any width computed from
+     100vw -- .modal's width: min(1280px, calc(100vw - 40px)) and
+     .auth-split's siblings among them -- visibly jumps by the scrollbar's
+     width the moment it appears or disappears, which reads as a brief
+     resize flash. Falls back to nothing (no gutter reserved, the old
+     behavior) on a browser that doesn't support the property; it is not
+     polyfillable and there is no worse-than-before regression in not
+     having it. */
+  scrollbar-gutter: stable;
 }
 
 body {
@@ -1716,6 +1728,15 @@ a.metric:hover { border-color: var(--border-strong); background: var(--surface-2
    added -- header and note above stay put; only the table body scrolls. */
 .sensor-card__scroll { max-height: 340px; overflow-y: auto; }
 .card.wide table { min-width: 720px; }
+/* A card whose list/table content can grow without bound (every row of a
+   config-driven list, not a fixed top-N) needs its own bounded, scrollable
+   region instead of relying on .card:has(table)'s overflow:auto, which only
+   engages once something ELSE already constrains the card's height -- with
+   no such constraint the card just grows forever and the page scrolls
+   instead. Wrap the growing part (table, list, ...) in this rather than the
+   whole card, so a heading/note/toolbar above it stays pinned in view while
+   only the content below scrolls. */
+.card__scroll { max-height: 340px; overflow-y: auto; }
 /* The payloads list row ends in a kebab menu (#205) whose popover is
    position:absolute and must escape the row -- overflow:auto on an
    ancestor clips it regardless of scroll position, popover open or not
