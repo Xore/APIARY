@@ -305,6 +305,49 @@ curl -fsS -X PUT "$es_url/_index_template/portbridge-events" \
 }
 JSON
 
+# #565: dionaea's log_incident ihandler (dionaea_incident.json) -- every
+# exploit/download/credential/lifecycle incident dionaea's core emits,
+# across every enabled service (SMB/SIP/UPnP/TFTP/etc). Confirmed directly
+# against upstream dionaea/lib/dionaea/python/dionaea/log_incident.py's
+# handle_incident(): every record is exactly {timestamp, name, origin,
+# data} -- the first three consistent across every incident, `data` not
+# (different origins reuse the same keys with incompatible value types,
+# the reason analysis/filebeat.yml previously left this whole stream as an
+# opaque `message` string). Same flattened-for-heterogeneous-keys approach
+# honeypot-events-v2's own `honeypot` field already uses, so `data` becomes
+# queryable/aggregatable (data.url:*, data.shasum, ...) without a mapping
+# explosion. Own index (not folded into honeypot-v2-*): a different record
+# shape entirely (top-level origin/data, not the honeypot.* envelope every
+# other sensor writes), and dashboard/classify.go's own dionaea-incident
+# handler (~line 427) reads this file directly off disk, unaffected either
+# way -- this is purely an additive ES-only path. Plain daily indices, not
+# a data stream, same reasoning as portbridge-events above.
+curl -fsS -X PUT "$es_url/_index_template/dionaea-incidents" \
+  -H 'Content-Type: application/json' \
+  --data-binary @- <<'JSON'
+{
+  "index_patterns": ["dionaea-incidents-v1-*"],
+  "priority": 465,
+  "template": {
+    "settings": {
+      "index.lifecycle.name": "honeypot-30d",
+      "index.number_of_replicas": 0,
+      "index.mapping.total_fields.limit": 200,
+      "index.mapping.ignore_malformed": true,
+      "index.refresh_interval": "5s"
+    },
+    "mappings": {
+      "properties": {
+        "timestamp": { "type": "date" },
+        "name": { "type": "keyword" },
+        "origin": { "type": "keyword" },
+        "data": { "type": "flattened" }
+      }
+    }
+  }
+}
+JSON
+
 # #378: Ghidra/sandbox/GitHub-analysis/workbench-run results, ingested by
 # analysis/es-results-importer/importer.py (previously local-disk-only JSON
 # files, per the issue's gap analysis). Each result document is heterogeneous

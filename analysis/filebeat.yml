@@ -53,17 +53,28 @@ filebeat.inputs:
       logset: sensors
     fields_under_root: true
 
-  # Dionaea incidents intentionally stay as raw JSON in `message`. Different
-  # incident origins reuse the same data keys with incompatible value types;
-  # dynamically expanding them would cause Elasticsearch mapping rejections.
-  # The complete record remains searchable and the dashboard parses the file
-  # directly into normalized fields.
+  # #565: dionaea_incident.json is dionaea's own log_incident ihandler --
+  # every record is {timestamp, name, origin, data}, confirmed directly
+  # against upstream dionaea/lib/dionaea/python/dionaea/log_incident.py's
+  # handle_incident(). timestamp/name/origin are consistent across every
+  # incident; data is not -- different origins (SMB/SIP/UPnP/TFTP/exploit/
+  # download incidents) reuse the same keys with incompatible value types,
+  # so it lands in its own dionaea-incidents-v1-* index/template (typed
+  # timestamp/name/origin, data: flattened -- same flattened-for-heterogeneous-
+  # keys approach honeypot-v2-*'s own honeypot field already uses) rather
+  # than the shared honeypot-v2-* stream. dashboard/classify.go's own
+  # dionaea-incident handler (~line 427) reads this file directly off disk,
+  # unaffected by this -- purely additive for any ES-only consumer.
   - type: filestream
     id: dionaea-incidents-raw-v1
     paths:
       - /logs/dionaea/dionaea_incident.json
+    parsers:
+      - ndjson:
+          overwrite_keys: true
+          add_error_key: true
     fields:
-      logset: sensors
+      logset: dionaea-incidents
       sensor: dionaea
       event_format: incident-json
     fields_under_root: true
@@ -218,6 +229,9 @@ output.elasticsearch:
     - index: "portbridge-v2-%{+yyyy.MM.dd}"
       when.equals:
         logset: "portbridge"
+    - index: "dionaea-incidents-v1-%{+yyyy.MM.dd}"
+      when.equals:
+        logset: "dionaea-incidents"
 
   # Preserve the original event if Elasticsearch ever rejects it despite the
   # flattened mapping. This prevents silent data loss and records the cause.
