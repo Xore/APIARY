@@ -2,7 +2,7 @@
 """
 verify_vm_detection.py — post-build pafish/al-khaser verification pass (#298)
 
-sandbox/windows_kimi/RESEARCH.md #1.2 makes the point that everything
+docs/sandbox/windows_kimi/RESEARCH.md #1.2 makes the point that everything
 win11-kvm.xml and packer/scripts/01-hardening.ps1 do (SMBIOS/CPUID/disk-serial/
 NIC spoofing, Defender/telemetry/UAC disables) is reasoned-through hardening
 against *known* checks. The only way to find out what's actually still
