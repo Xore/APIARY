@@ -99,22 +99,48 @@ if (-not (Test-Path "$sysmonPath\Sysmon64.exe")) {
         Copy-Item "$chocoSysinternals\*" $sysmonPath -Force
     }
 }
-# The config comes from a third-party branch at build time, so two things can
-# go wrong and neither should cost three hours. DownloadFile throws a
-# terminating error, which would abort the whole provisioner at Phase 9 over a
-# momentary blip on a host we do not control.
+# The config comes from a third party at build time, so several things can go
+# wrong and none should cost three hours. DownloadFile throws a terminating
+# error, which would abort the whole provisioner at Phase 9 over a momentary
+# blip on a host we do not control.
 #
-# Sysmon without a config still logs process creation, network connections and
-# image loads — a thinner record than SwiftOnSecurity's, but the detonation is
-# still observed. Losing that is much better than losing the build.
-$configUrl = 'https://raw.githubusercontent.com/SwiftOnSecurity/sysmon-config/master/sysmonconfig-export.xml'
+# #86: pinned to a commit, not `master` -- an unpinned branch tip means two
+# builds a month apart can silently observe different things (different
+# event filtering, different exclusions), and the golden image records no
+# trace of which. The commit below is the exact one $sysmonConfigSha256
+# was computed from (`curl -fsSL .../<sha>/sysmonconfig-export.xml |
+# sha256sum`, verified 2026-08-05 to still match the live `master` tip's own
+# bytes at the time of pinning). Re-pin deliberately -- bump both the SHA and
+# the hash together, never just the hash -- rather than letting this drift
+# quietly the way the unpinned URL did.
+$sysmonConfigCommit = '1836897f12fbd6a0a473665ef6abc34a6b497e31'
+$sysmonConfigSha256 = '055febc600e6d7448cdf3812307275912927a62b1f94d0d933b64b294bc87162'
+$configUrl = "https://raw.githubusercontent.com/SwiftOnSecurity/sysmon-config/$sysmonConfigCommit/sysmonconfig-export.xml"
 $configPath = 'C:\Windows\sysmon_config.xml'
 $sysmonConfigured = $false
 try {
     (New-Object Net.WebClient).DownloadFile($configUrl, $configPath)
+    # Pinning the commit stops the config from silently changing underneath
+    # the build, but not a compromised/MITM'd raw.githubusercontent.com
+    # response for that exact byte range -- verify what was actually
+    # downloaded against the hash recorded above before trusting it, the
+    # same "pin the commit, hash the bytes" shape as dashboard/frontend/
+    # theme.lock's vendored-stylesheet check.
+    # Get-FileHash's .Hash is uppercase hex; -eq is case-insensitive by
+    # default in PowerShell so this would still compare correctly against
+    # the lowercase pin above, but lowering both sides makes that explicit
+    # rather than relying on a reader already knowing PowerShell's string
+    # comparison defaults.
+    $actualSha256 = (Get-FileHash -Path $configPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualSha256 -ne $sysmonConfigSha256) {
+        throw "downloaded sysmon-config hash $actualSha256 does not match pinned $sysmonConfigSha256 (commit $sysmonConfigCommit)"
+    }
     # A 404 or a captive-portal page downloads happily and is not XML. Sysmon
     # would reject it with a message no one reads until a report comes back
-    # empty, so check here instead.
+    # empty, so check here instead -- redundant with the hash check above for
+    # a byte-for-byte match, but still catches the case where the pin itself
+    # is stale (upstream history rewritten) and $configPath is whatever a
+    # 404/portal page's own bytes happened to hash to.
     [xml](Get-Content $configPath) | Out-Null
     & "$sysmonPath\Sysmon64.exe" -accepteula -i $configPath
     $sysmonConfigured = $true
@@ -123,10 +149,15 @@ try {
     Write-Warning "[!] Sysmon config unusable ($($_.Exception.Message)) - falling back to defaults"
     & "$sysmonPath\Sysmon64.exe" -accepteula -i
 }
-# Record which of the two ran. A report that looks thin should be traceable to
-# this without guessing.
+# Record which of the two ran, and the exact pin a "sysmon-config" build used
+# -- a thin-looking report should be traceable to this without guessing, and
+# so should "which upstream commit shaped what this image observed."
 "sysmon_config=$(if ($sysmonConfigured) { 'sysmon-config' } else { 'defaults' })" |
     Add-Content 'C:\golden_image_provenance.txt'
+if ($sysmonConfigured) {
+    "sysmon_config_commit=$sysmonConfigCommit" | Add-Content 'C:\golden_image_provenance.txt'
+    "sysmon_config_sha256=$sysmonConfigSha256" | Add-Content 'C:\golden_image_provenance.txt'
+}
 Write-Host '[+] Sysmon installed'
 
 # ── PowerShell Logging ────────────────────────────────────────────────────
