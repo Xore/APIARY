@@ -49,7 +49,7 @@ optional on-demand `geoip-update` maintenance job. 13 deployment pieces —
 | [docs/persona-design.md](docs/persona-design.md) | Outbound network policy per honeypot, and host-naming/banner/placement guidance |
 | [analysis/ghidra/README.md](analysis/ghidra/README.md) | Static analysis pipeline: headless Ghidra, local AI triage, fuzzy hashing/structural parsing |
 | [docs/payload-analysis-workbench.md](docs/payload-analysis-workbench.md) | Unified payload workbench: typed analyzer registry, immutable recipes, fan-out, status, security, deployment and rollback |
-| [sandbox/README.md](sandbox/README.md) | The Linux KVM/libvirt detonation sandbox |
+| [docs/sandbox/README.md](docs/sandbox/README.md) | The Linux KVM/libvirt detonation sandbox |
 | [docs/CI-CD.md](docs/CI-CD.md) | Repository automation, deployment environments, runner setup |
 | [docs/STACK-REBUILD.md](docs/STACK-REBUILD.md) | Runbook for a full deliberate reset — stop order, what's preserved vs wiped, and the ordering/permission pitfalls to avoid |
 | [deploy-profiles/](deploy-profiles/) | Named deployment shapes (full / ICS-only / web-only) — which of the 17 split home stacks run for a given deployment, plus a validator catching cross-stack drift before deploy |

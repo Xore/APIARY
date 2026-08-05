@@ -731,7 +731,7 @@ Ubuntu base, injects a fixed runner and sample while the guest is offline, and
 boots a transient VM on the `honeypot-sandbox` libvirt network. A strict
 libvirt network filter is applied. The normal mode is isolated; the optional
 controlled-egress mode uses the separately installed DNS and allowlist proxy
-described in [`../sandbox/README.md`](../sandbox/README.md). Host `tcpdump`
+described in [`sandbox/README.md`](sandbox/README.md). Host `tcpdump`
 captures traffic for the job without granting packet-capture privileges to
 the guest.
 
