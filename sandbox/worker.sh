@@ -67,12 +67,19 @@ while true; do
           # complete detonation over a search-indexing nicety: the pcap
           # itself is still downloadable from the result page either way.
           if [[ -f $root/export/$job.host.pcap ]]; then
+            # #498: --wait-for-db is not a real arkime-capture option (6.6.0's
+            # own --help has no such flag, ES connection info comes from
+            # config.ini, not a CLI arg) -- confirmed live that this made
+            # every single import fail outright with "option parsing failed",
+            # never actually reaching the point of talking to Elasticsearch
+            # at all. The best-effort framing above was written assuming
+            # ES/Arkime *availability* was the risk; the real failure mode
+            # this whole time was a flag that never worked, on any run.
             docker exec hp-arkime-capture /opt/arkime/bin/capture \
               -c /opt/arkime/etc/config.ini \
               -r "/opt/arkime/sandbox-import/$job.host.pcap" --copy \
               -n honeypot-sandbox --host honeypot-sandbox \
               -t "sandbox-$sha" \
-              --wait-for-db http://elasticsearch:9200 \
               >/dev/null 2>&1 \
               || echo "Arkime import failed for $job (continuing)" >&2
           fi
