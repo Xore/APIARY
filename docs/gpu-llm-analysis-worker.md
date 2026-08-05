@@ -144,20 +144,25 @@ The implementation uses deliberately different network states:
 The diagram below describes the later captured-data state, not the #66 safe
 default.
 
+```mermaid
+flowchart TD
+    subgraph honeynet["honeynet (not an egress boundary)"]
+        Sensors["sensors / filebeat"]
+        ES["Elasticsearch"]
+        Sensors --> ES
+    end
+    subgraph datanet["honeypot-llm-data (internal)"]
+        Worker["llm-worker"]
+    end
+    subgraph llmnet["honeypot-llm (internal)"]
+        Ollama["Ollama / qwen3.5:9b / RTX 4000"]
+    end
+
+    ES --> Worker
+    Worker -->|"HTTP :11434"| Ollama
 ```
-honeynet (not an egress boundary)
-  sensors / filebeat ───────────────▶ Elasticsearch
-                                           │
-honeypot-llm-data (internal)                │
-  llm-worker ◀─────────────────────────────┘
-       │
-       │ HTTP :11434
-       ▼
-honeypot-llm (internal)
-  Ollama / qwen3.5:9b / RTX 4000
 
 The worker joins only the two internal networks in captured-data mode.
-```
 
 Design decisions:
 
