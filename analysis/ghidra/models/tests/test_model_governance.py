@@ -14,6 +14,7 @@ from pathlib import Path
 
 
 HERE = Path(__file__).resolve().parent.parent
+DOCS_HERE = HERE.parents[2] / "docs" / "analysis" / "ghidra" / "models"
 SPEC = importlib.util.spec_from_file_location("model_governance", HERE / "model-governance.py")
 governance = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -92,7 +93,7 @@ class GovernanceTests(unittest.TestCase):
         self.assertTrue(status["advisory_only"])
         self.assertEqual(
             governance.approval_record(self.manifest),
-            (HERE / "approval-record.md").read_text(encoding="utf-8"),
+            (DOCS_HERE / "approval-record.md").read_text(encoding="utf-8"),
         )
 
     def test_digest_and_host_drift_are_independently_visible(self):
