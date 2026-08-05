@@ -320,10 +320,13 @@ networks:
     driver: bridge
 
 volumes:
-  # Private to this stack -- nothing else references reporter-data
-  # (confirmed by grep across every compose file). Unnamed/project-scoped,
-  # same as it was in the monolithic compose file.
-  reporter-data: null
+  # #666: fixed external name so docker-compose.dashboard.yml's
+  # es-results-importer can mount this read-only across stacks -- same
+  # mechanism as dionaea-lib below. Was unnamed/project-scoped until now
+  # (nothing else referenced it, per the monolithic compose file's original
+  # shape); the reporter service here still owns writes.
+  reporter-data:
+    name: reporter-data
   # Shared with docker-compose.dionaea.yml/docker-compose.payload-analysis.yml
   # -- read-only here, same mechanism as honeynet/es-data.
   dionaea-lib:

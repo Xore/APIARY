@@ -296,6 +296,7 @@
       clearSearch();
       if (isAdmin) {
         if (name === "branding" || name === "behavior" || name === "honeypot") loadConfig();
+        if (name === "honeypot") loadReporterStats();
         else if (name === "users") loadUsers();
         else if (name === "services") loadServices();
         else if (name === "elasticsearch") { loadEsStorageStats(); loadElasticsearchHistory(); }
@@ -1129,6 +1130,40 @@
         summary.hidden = true;
         errorEl.hidden = false;
         errorEl.textContent = "Storage stats could not be loaded — " + error.message.trim();
+      }
+    }
+
+    /* ---- Reporter send counters (#666): a brief glance in the Honeypot
+       operations pane, reading reporter-metrics-v1 only -- see
+       settings_reporter_stats_api.go for why (#638: ES-only, no direct
+       mount of the reporter's own volume into this service). ---- */
+    async function loadReporterStats() {
+      const summary = q("[data-hp-reporter-stats-summary]");
+      const errorEl = q("[data-hp-reporter-stats-error]");
+      if (!summary || !errorEl) return;
+      errorEl.hidden = true;
+      try {
+        const { body } = await api("/api/settings/reporter-stats");
+        if (!body.available) {
+          summary.hidden = true;
+          errorEl.hidden = false;
+          errorEl.textContent = "Reporter stats unavailable" + (body.reason ? " — " + body.reason : "") + ".";
+          return;
+        }
+        const stats = body.stats;
+        summary.hidden = false;
+        q('[data-hp-reporter-stats-metric="attempted"]').textContent = stats.attempted.toLocaleString();
+        q('[data-hp-reporter-stats-metric="sent"]').textContent = stats.sent.toLocaleString();
+        const suppressed = stats.suppressed_cooldown + stats.suppressed_greynoise;
+        q('[data-hp-reporter-stats-metric="suppressed"]').textContent = suppressed.toLocaleString();
+        q('[data-hp-reporter-stats-metric="dry_run"]').textContent = stats.dry_run.toLocaleString();
+        q('[data-hp-reporter-stats-metric="failed"]').textContent = stats.failed.toLocaleString();
+        const failedTrend = q('[data-hp-reporter-stats-metric-trend="failed"]');
+        if (failedTrend) failedTrend.textContent = stats.failed > 0 ? "Check reporter logs" : "None";
+      } catch (error) {
+        summary.hidden = true;
+        errorEl.hidden = false;
+        errorEl.textContent = "Reporter stats could not be loaded — " + error.message.trim();
       }
     }
 

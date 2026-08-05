@@ -414,6 +414,12 @@ services:
       # writes into, mirrored into ES so the dashboard never has to open
       # this file directly.
       - /opt/stacks/honeypot-stack/logs/cowrie/tty:/cowrie-tty:ro
+      # #666: reporter's own metrics.json (attempted/suppressed/dry_run/
+      # sent/failed counters) -- read-only, same cross-stack shared-name
+      # mechanism as dionaea-lib above. Per #638, this is the ONLY path
+      # into the dashboard: mirrored into ES here, never mounted into the
+      # dashboard service itself.
+      - reporter-data:/reporter-data:ro
     environment:
       - ES_HOST=http://elasticsearch:9200
       - IMPORT_INTERVAL=${ES_IMPORTER_INTERVAL:-300}
@@ -426,6 +432,7 @@ services:
       - GITHUB_ANALYSIS_RESULTS_DIR=/github-analysis-results
       - REVDECK_RESULTS_DIR=/revdeck-results
       - COWRIE_TTYLOG_DIR=/cowrie-tty
+      - REPORTER_METRICS_DIR=/reporter-data
       - TZ=Europe/Berlin
     networks:
       - honeynet
@@ -487,6 +494,10 @@ volumes:
     name: dionaea-lib
   yara-results:
     name: yara-results
+  # #666: shared with docker-compose.utilities.yml -- reporter writes,
+  # es-results-importer here only reads. Same mechanism as dionaea-lib.
+  reporter-data:
+    name: reporter-data
   # Also shared with the main stack, both ways -- payload-dedupe and
   # yara-scanner there read/write retained script payloads under
   # /payloads/scripts, the same volume this stack's own /state resolves to.
