@@ -181,8 +181,24 @@ networks:
   # actually forwards TFTP traffic to it, so those two share this network
   # instead of each getting their own. Private to this stack -- nothing
   # outside it ever referenced dionaea_net.
+  #
+  # #540: outbound is allowed by default, matching this stack's previous de
+  # facto behavior. Confirmed live (dinotools/dionaea:latest, the image
+  # dionaea/Dockerfile builds from): ihandlers-enabled/emuprofile.yaml
+  # (libemu shellcode emulation -- detects and drives download-and-execute
+  # patterns like URLDownloadToFileA in SMB/MSRPC exploit shellcode) and
+  # ihandlers-enabled/tftp_download.yaml (fetches TFTP-referenced payloads)
+  # both ship enabled by default, so Dionaea already captures the
+  # attacker's actual malware sample this way, not just the exploit
+  # attempt -- same tradeoff as Cowrie (#269/#538), same reasoning. Set
+  # DIONAEA_AIR_GAPPED=true (.env) for a stricter, fully air-gapped Dionaea
+  # that trades that capture capability away. internal: true still permits
+  # tftp-relay's inbound forwarding on this same network (no outbound
+  # route to the internet, not a block on local/inbound bridge traffic).
+  # See docs/persona-design.md.
   dionaea_net:
     driver: bridge
+    internal: ${DIONAEA_AIR_GAPPED:-false}
 
 volumes:
   # Shared with docker-compose.payload-analysis.yml (#258) -- explicit fixed
