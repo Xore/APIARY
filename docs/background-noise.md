@@ -51,24 +51,16 @@ The goal is to eliminate all of these tells.
 
 ## 2. Architecture Overview (KVM Context)
 
-```
- KVM Host (bare metal)
- ┌──────────────────────────────────────────────────────────┐
- │ ┌─────────────┐ ┌──────────────────────────────────┐ │
- │ │ virbr0 │◄──────────────►│ Honeypot Docker Network │ │
- │ │ 10.0.1.1/24 │ │ (cowrie, dionaea, conpot, etc.) │ │
- │ └──────┬──────┘ └──────────────────────────────────┘ │
- │ │ │
- │ ▼ │
- │ ┌──────────────────────┐ │
- │ │ noise-injector │ │
- │ │ (this guide) │ │
- │ │ - INetSim container │ │
- │ │ - tcpreplay daemon │ │
- │ │ - Scapy noise.py │ │
- │ │ - cron jobs │ │
- │ └──────────────────────┘ │
- └──────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph Host["KVM Host (bare metal)"]
+        virbr0["virbr0<br/>10.0.1.1/24"]
+        Docker["Honeypot Docker Network<br/>(cowrie, dionaea, conpot, etc.)"]
+        Injector["noise-injector (this guide)<br/>- INetSim container<br/>- tcpreplay daemon<br/>- Scapy noise.py<br/>- cron jobs"]
+
+        virbr0 <--> Docker
+        virbr0 --> Injector
+    end
 ```
 
 The **noise-injector** runs on the KVM host itself (or a dedicated sidecar container bridged to `virbr0`) and emits packets directly onto the same L2 segment as the honeypot containers. Attacker traffic arriving from outside passes through the same bridge and is captured by Arkime/Zeek without modification.
