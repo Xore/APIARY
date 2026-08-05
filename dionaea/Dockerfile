@@ -7,7 +7,9 @@ FROM dinotools/dionaea:latest
 COPY tftp_patch.py /tmp/tftp_patch.py
 COPY printer_patch.py /tmp/printer_patch.py
 COPY ftp_patch.py /tmp/ftp_patch.py
+COPY smb_exploit_patch.py /tmp/smb_exploit_patch.py
 RUN python3 /tmp/tftp_patch.py \
     && python3 /tmp/printer_patch.py \
     && python3 /tmp/ftp_patch.py \
-    && rm /tmp/tftp_patch.py /tmp/printer_patch.py /tmp/ftp_patch.py
+    && python3 /tmp/smb_exploit_patch.py \
+    && rm /tmp/tftp_patch.py /tmp/printer_patch.py /tmp/ftp_patch.py /tmp/smb_exploit_patch.py
