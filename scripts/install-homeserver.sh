@@ -916,6 +916,23 @@ step_libvirt_install() {
     qemu-system-x86 libvirt-daemon-system libvirt-clients bridge-utils \
     virtinst libguestfs-tools ovmf
   systemctl enable --now libvirtd
+
+  # libvirt-daemon-config-nwfilter's postinst only copies the built-in
+  # filter templates (clean-traffic, no-mac-spoofing, etc.) from
+  # /usr/share/libvirt/nwfilter into /etc/libvirt/nwfilter when the package
+  # goes from "never configured" to configured. If the package was already
+  # marked configured at a prior version -- e.g. /etc/libvirt was wiped by
+  # hand without a full `apt purge` first, which is exactly what happened
+  # during #518's teardown-and-reinstall verification -- the postinst takes
+  # its "regular upgrade, don't touch anything" branch and silently leaves
+  # /etc/libvirt/nwfilter without the defaults. win11-ghosts-kvm.xml,
+  # win11-sandbox-kvm.xml and the Linux sandbox network all reference these
+  # by name (no-mac-spoofing among them), so a VM define fails outright
+  # with "referenced filter '...' is missing" the first time a sandbox step
+  # runs -- confirmed live, see #518. Restore them unconditionally here so
+  # apt's install-vs-upgrade heuristic can't leave the sandbox chain broken.
+  cp -n /usr/share/libvirt/nwfilter/*.xml /etc/libvirt/nwfilter/
+  systemctl restart libvirtd
 }
 
 step_sandbox_backup_restore() {
