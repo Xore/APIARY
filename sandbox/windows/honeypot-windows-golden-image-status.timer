@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodically report win11-analysis.qcow2 golden image staleness (#86)
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+RandomizedDelaySec=2min
+Persistent=true
+Unit=honeypot-windows-golden-image-status.service
+
+[Install]
+WantedBy=timers.target

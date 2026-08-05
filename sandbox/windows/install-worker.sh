@@ -36,11 +36,13 @@ python3 -m pip install --break-system-packages pywinrm paramiko python-evtx
 install -d -m 0755 -o root -g root "$target" "$target/orchestrate"
 install -m 0755 -o root -g root "$script_dir/run_pending.sh" "$target/run_pending.sh"
 install -m 0755 -o root -g root "$script_dir/process-windows-web-requests.sh" "$target/process-windows-web-requests.sh"
+install -m 0755 -o root -g root "$script_dir/golden-image-status.sh" "$target/golden-image-status.sh"
 for file in "$script_dir"/orchestrate/*.py; do
   install -m 0755 -o root -g root "$file" "$target/orchestrate/$(basename "$file")"
 done
 
-for unit in honeypot-windows-sandbox-worker.service honeypot-windows-sandbox-worker.path honeypot-windows-sandbox-web-requests.service; do
+for unit in honeypot-windows-sandbox-worker.service honeypot-windows-sandbox-worker.path honeypot-windows-sandbox-web-requests.service \
+    honeypot-windows-golden-image-status.service honeypot-windows-golden-image-status.timer; do
   install -m 0644 -o root -g root "$script_dir/$unit" "/etc/systemd/system/$unit"
 done
 
@@ -58,6 +60,8 @@ install -d -m 0750 -o root -g xore /var/lib/honeypot-windows-sandbox/export
 systemctl daemon-reload
 systemctl reset-failed honeypot-windows-sandbox-worker.service honeypot-windows-sandbox-web-requests.service 2>/dev/null || true
 systemctl enable --now honeypot-windows-sandbox-worker.path
+systemctl enable --now honeypot-windows-golden-image-status.timer
+systemctl start honeypot-windows-golden-image-status.service || true
 
 echo "Windows sandbox worker installed. The .path unit is enabled and watching"
 echo "/var/lib/honeypot-windows-sandbox/requests/pending, and now triggers the"
