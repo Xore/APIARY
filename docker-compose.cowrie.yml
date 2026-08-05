@@ -47,6 +47,19 @@ services:
       - /opt/stacks/honeypot-stack/cowrie/cowrie.cfg:/cowrie/cowrie-git/etc/cowrie.cfg:ro
       - /opt/stacks/honeypot-stack/cowrie/userdb.txt:/cowrie/cowrie-git/etc/userdb.txt:ro
       - /opt/stacks/honeypot-stack/logs/cowrie:/cowrie/cowrie-git/var/log/cowrie
+      # #239: cowrie writes its SSH host keys (ssh_host_{rsa,ecdsa,ed25519}_key
+      # (.pub)), its own uuid file, and auth_random.json directly into
+      # var/lib/cowrie -- not a subdirectory, so the more specific
+      # downloads/tty mounts below layer on top of this one rather than
+      # replacing it. Found live via a real read_only:true test run
+      # (getRSAKeys() failed outright with a read-only-filesystem error
+      # against the pre-#239 mount set): without this, host keys regenerate
+      # on every container recreate, which is a real deception problem
+      # independent of read_only -- a returning attacker (or an
+      # intrusion-detection tool fingerprinting by host key) sees the
+      # honeypot's identity change on every redeploy. Bind-mounted for the
+      # same persistence reason as downloads/tty below, not tmpfs.
+      - /opt/stacks/honeypot-stack/logs/cowrie/lib-cowrie:/cowrie/cowrie-git/var/lib/cowrie
       # Cowrie saves every uploaded/downloaded file by SHA-256, including shell,
       # PowerShell, VBS, Python and JavaScript payloads.
       - /opt/stacks/honeypot-stack/logs/cowrie/downloads:/cowrie/cowrie-git/var/lib/cowrie/downloads
@@ -81,6 +94,16 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # #239: measured via a real read_only:true run against the actual
+    # compose service definition, not assumed. Every other write cowrie
+    # makes lands in one of the bind mounts above; the one remaining path,
+    # bin/gen-dynamic-txtcmds.py's per-boot regenerated free/df/dd/ss/proc/*
+    # output (txtcmds/), is deliberately ephemeral -- fresh values every
+    # container start is the whole point (see that script's own header) --
+    # so tmpfs, not a persistent mount.
+    read_only: true
+    tmpfs:
+      - /cowrie/cowrie-git/txtcmds:uid=2000,gid=2000
     networks:
       - cowrie_net
     deploy:
