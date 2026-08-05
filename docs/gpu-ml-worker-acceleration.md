@@ -186,28 +186,40 @@ by §5, not by `mem_limit`.
 
 ## 5. GPU Sharing Contract with the LLM Worker
 
-One RTX 4000 (20475 MiB / ~20 GB, corrected from an earlier 8192 MiB
-figure — see #518) is shared between `ollama` (LLM guide) and `ml-worker`.
-Both guides must be deployed with these numbers or not at all.
+One RTX 4000 Ada Generation (20475 MiB / ~20 GB, corrected from an earlier
+8192 MiB / Quadro RTX 4000 figure — see #518) is shared between `ollama`
+(LLM guide) and `ml-worker`. Both guides must be deployed with these numbers
+or not at all.
 
 | Consumer | Typical VRAM | When active |
 |---|---|---|
-| ollama (`qwen3.5:9b`) | ~6.1 GiB at the measured 16k probe (production caps at 8k) | On LLM requests; unloads 10 min after last use (`OLLAMA_KEEP_ALIVE=10m`) |
+| ollama (`qwen3:14b`, promoted for all 3 slots under #568) | ~10.2 GiB at production's 8k context; up to ~14.1 GiB at the ghidra slot's 32k context (both live-measured, see `docs/local-llm-model-evaluation.md`'s #568 section) | On LLM requests; unloads 10 min after last use (`OLLAMA_KEEP_ALIVE=10m`) |
 | ml-worker inference (LSTM-AE + embedder) | ~0.5–1 GiB | Every poll cycle (30 s), briefly |
 | ml-worker retrain | ~1–2 GiB | Every 6 h, minutes |
 
-Rules:
+Rules (resolved under #569, using #568's real post-promotion numbers, not
+the original 6.1 GiB `qwen3.5:9b` estimate):
 
-- **Do not overlap GPU retraining with a loaded chat model.** The #158 accuracy
-  winner (~6.1 GiB) plus a 1–2 GiB retrain fits comfortably within the actual
-  20475 MiB card (this rule was written against an incorrect 8192 MiB figure
-  that made the overlap look tight — see #518; re-evaluate whether this
-  restriction is still needed at the real card size, tracked there). Until
-  that's decided, keep unloading Ollama or using the documented CPU fallback
-  before retraining; also avoid collisions by scheduling: set
-  `RETRAIN_INTERVAL` so retrains land at least 1 h away from the LLM daily
-  report (`DAILY_REPORT_HOUR`), e.g. retrain at 00:00/06:00/12:00/18:00
-  UTC with the report at 06:00 → shift retrain to 01:00/07:00/13:00/19:00.
+- **The blanket "never overlap" rule is lifted; a scheduling gap is kept as a
+  smaller safety margin instead of full separation.** Worst case — the
+  ghidra slot's model loaded at its 32k context (~14.1 GiB) plus a retrain
+  (~2 GiB) plus the embedder's own inference (~1 GiB) — totals ~17.1 GiB
+  against the real 20475 MiB budget: about 3.3 GiB of headroom, not the
+  "comfortable" double-digit margin a naive 6.1 GiB-chat-model estimate
+  would suggest. That is enough to not require full separation, but not
+  enough to treat as a non-issue either. Keep the `RETRAIN_INTERVAL` /
+  `DAILY_REPORT_HOUR` scheduling offset (retrain landing at least 1 h away
+  from the LLM daily report — e.g. retrain at 01:00/07:00/13:00/19:00 UTC
+  against a 06:00 report) as a cheap way to avoid the worst-case overlap in
+  the common case, rather than removing it outright. The CUDA-OOM → CPU
+  fallback below is what actually protects the rare case the schedule
+  doesn't catch — treat it as the real safety net, the schedule as
+  best-effort headroom management.
+- If a future model re-evaluation (#568's process, re-run) picks something
+  materially larger than `qwen3:14b` for the ghidra slot, re-check this
+  margin before assuming it still holds — the 3.3 GiB headroom above was
+  computed for this specific model at its current context ceiling, not as a
+  permanent property of the 20 GB card.
 - **On CUDA OOM, do not crash:** wrap train/infer calls, catch
   `torch.cuda.OutOfMemoryError`, log WARN, fall back to CPU for that cycle
   (`get_device()` override), and continue. Anomaly detection must degrade,

@@ -1,6 +1,6 @@
 # Local LLM model evaluation
 
-Status: completed for [issue #144](https://github.com/Xore/honeypot-stack/issues/144) and requalified under [issue #158](https://github.com/Xore/honeypot-stack/issues/158), 2026-08-01.
+Status: completed for [issue #144](https://github.com/Xore/honeypot-stack/issues/144) and requalified under [issue #158](https://github.com/Xore/honeypot-stack/issues/158), 2026-08-01. Re-evaluated and re-approved under [issue #568](https://github.com/Xore/honeypot-stack/issues/568), 2026-08-05 — see [§ Issue #568 re-evaluation](#issue-568-re-evaluation-real-20gb-card) below; that section is now the current approved state, superseding the v2 table immediately above it.
 
 This is a task-specific decision record for the three independent local-model
 slots in this repository. It does not assume that a model named in an earlier
@@ -341,3 +341,164 @@ generated approval record, gate thresholds, drift workflow, promotion, and
 rollback instructions live in
 [`analysis/ghidra/models/`](../analysis/ghidra/models/README.md). That manifest,
 not a mutable tag or this prose table, is the runtime source of truth.
+
+## Issue #568 re-evaluation (real 20GB card)
+
+The #144/#158 matrix above was run on a Quadro RTX 4000 (8192 MiB, compute
+capability 7.5). During the [#518](https://github.com/Xore/honeypot-stack/issues/518)
+full-installation smoke test, live `nvidia-smi` revealed the actual analysis
+host card is an **RTX 4000 Ada Generation, 20475 MiB, compute capability
+8.9** — not merely a wrong VRAM figure for the same card, but a different
+card entirely (Turing → Ada Lovelace). Every model-selection decision above
+was bounded by a budget, and a candidate pool, that never fit the real
+hardware. [Issue #568](https://github.com/Xore/honeypot-stack/issues/568)
+scoped whether that was worth re-running; this section is the result.
+
+### Checking the #144/#158 rejection notes for stale VRAM reasoning
+
+None of the ten #144 candidates were rejected *because* they didn't fit in
+8 GiB — every rejection in that matrix was accuracy- or safety-based (missed
+injection resistance, wrong category, under-called severity), not size-based.
+The real effect of the 8 GiB budget was on the **candidate pool itself**: it
+only ever included 7–9B models. Nothing in the 13B+ range was ever
+benchmarked, because nothing that size was expected to fit. That is the gap
+#568 asked about, and it is a real one — answered by testing that pool below,
+not by re-reading old rejection notes for a disqualification that never
+happened.
+
+### New candidate pool
+
+Six candidates in the 14–27B range, quantized Q4_K_M except where noted,
+chosen to actually use the new headroom rather than nibble at its edges:
+`qwen3:14b`, `qwen2.5-coder:14b-instruct-q4_K_M`, `qwen2.5:14b-instruct-q4_K_M`,
+`deepseek-coder-v2:16b-lite-instruct-q4_K_M`, `phi4:14b`, `gemma2:27b` (the
+deliberate stress test of the pool — largest model that still fits with
+headroom). Run alongside the three existing approved models
+(`qwen3:8b`, `qwen3.5:9b`, `qwen2.5-coder:7b-instruct-q4_K_M`) through the
+same three task suites, generic JSON mode (`evaluate-models.py`'s legacy
+positional-args path, matching the original #144 matrix's rigor — not yet
+the production-contract manifest mode #158 used).
+
+| Candidate | Ghidra | Sessions | Rev·Deck | All 3 injection gates | 16k probe | tok/s (g/s/r) | VRAM MiB |
+|---|---:|---:|---:|:---:|:---:|---:|---:|
+| `qwen3:14b` | 97.5% | 97.0% | 87.5% | **pass** | pass | 34.2/33.4/34.1 | 10,198 |
+| `qwen2.5-coder:14b-instruct-q4_K_M` | 97.5% | 97.0% | 81.2% | **pass** | pass | 32.0/31.3/31.7 | 10,128 |
+| `deepseek-coder-v2:16b-lite-instruct-q4_K_M` | 100.0% | 82.1% | 87.5% | fail (sessions) | pass | 79.0/82.0/94.7 | 12,794 |
+| `phi4:14b` | 100.0% | 94.0% | 87.5% | fail (sessions) | pass | 33.1/32.2/32.8 | 10,422 |
+| `qwen2.5:14b-instruct-q4_K_M` | 92.5% | 97.0% | 87.5% | fail (sessions) | pass | 32.5/31.1/32.0 | 10,128 |
+| `gemma2:27b` | 90.0% | 98.5% | 87.5% | fail (sessions) | **fail** | 18.6/17.5/17.8 | 17,660 |
+| `qwen3:8b` (baseline) | 95.0% | 92.5% | 81.2% | fail (sessions) | pass | 57.4/56.2/58.6 | 6,216 |
+| `qwen3.5:9b` (baseline) | 90.0% | 98.5% | 87.5% | fail (ghidra) | **fail** | 43.6/39.9/43.3 | 6,830 |
+| `qwen2.5-coder:7b-instruct-q4_K_M` (baseline) | 80.0% | 92.5% | 93.8% | fail (sessions) | pass | 57.4/51.4/55.2 | 5,098 |
+
+`qwen3:14b` is the only candidate — new or existing — that passes every
+injection-resistance and critical-severity gate across all three slots
+simultaneously in this broad screen. Both current production baselines each
+fail one. Raw percentage is shown after the gate columns on purpose: several
+higher-scoring rows (`gemma2:27b` 98.5% sessions, `deepseek-coder-v2` 100%
+ghidra) still fail a gate and are disqualified regardless, the same standard
+#158 already established (`qwen2.5:7b-instruct` was rejected there despite a
+good aggregate score for obeying an attacker's instruction to lower
+severity).
+
+### Real-data qualitative check
+
+Per-case synthetic scoring is necessarily narrow. As a second, independent
+check, `qwen3:14b` and its two closest broad-screen competitors were run
+against **real reconnaissance traffic pulled live from this honeypot's own
+Elasticsearch store** (seven genuine hits: Censys internet-wide scanning, a
+`/.git/config` secret-hunt probe, an RDWeb Gateway path probe, and a
+`POST /bin/sh` hit from a UA string associated with RCE-scanning tools),
+judged qualitatively — is each claim grounded in the actual data, not
+exact-wording matched:
+
+- `qwen3:14b`: correctly classified reconnaissance intent, correctly
+  distinguished the legitimate Censys scanner from the more suspicious
+  `libredtail-http` UA, recovered all 5 real source IPs as IOCs with zero
+  fabrication, reasonable low/medium severity/confidence call. One real flaw:
+  cited MITRE ATT&CK `T1043`, a **retired technique ID** (folded into T1571
+  in ATT&CK v7) — ungrounded, not just imprecise.
+- `deepseek-coder-v2:16b-lite-instruct-q4_K_M`: similarly well-grounded
+  content and a cleaner MITRE mapping (just `T1595`, correct), but wrapped
+  its JSON in markdown fences despite the system prompt explicitly
+  forbidding that — a real instruction-following failure a production
+  parser would have to work around.
+- `phi4:14b`: same markdown-fence violation, a weaker MITRE mapping (`T1049`
+  doesn't fit external recon — that technique is for a compromised host
+  enumerating its own connections), and a `medium`-severity /
+  `high`-confidence call that overstates what seven recon hits with zero
+  successful exploitation actually support.
+
+This is a small, real (not synthetic), but currently thin sample — this
+homeserver is ~2 days past a full reinstall (#518) and has not yet
+accumulated a large corpus of complex real attacker interaction (zero
+completed Ghidra analyses, zero `cowrie.session.file_download` events, real
+captured session command text currently 0–80 characters). It reinforces
+rather than overturns the synthetic-benchmark ranking, and is exactly the
+kind of check `probe-gpu-capabilities.py` (see
+[`analysis/ghidra/benchmarks/README.md`](../analysis/ghidra/benchmarks/README.md))
+is meant to make a recurring practice once more real captures accumulate,
+not a one-time substitute for the synthetic gates.
+
+### Context-length ceiling
+
+Measured live with `probe-gpu-capabilities.py`'s context sweep against
+`qwen3:14b` on the real card:
+
+| `num_ctx` | Sentinel probe | Total VRAM |
+|---:|:---:|---:|
+| 4,096 | fail (evidence overflowed the window — expected control) | 9.4 GB |
+| 8,192 | pass | 10.2 GB |
+| 16,384 | pass | 11.5 GB |
+| 32,768 | pass | 14.1 GB |
+| 65,536 | pass (native ceiling 40,960 applies; Ollama clamps silently) | 15.2 GB |
+
+Even at the model's full native context, VRAM use stays under 15.3 GB —
+over 5 GB of headroom remains on the 20,475 MiB card. Separately, real
+captured content was queried directly from this honeypot's own
+Elasticsearch store (last 7 days, 592 real cowrie sessions): **none**
+exceed the current `MAX_CONTENT_CHARS=12000` production cap; the real
+distribution is 0–80 characters per session, driven by the fact that most
+captured connections are automated scanners that never issue a command.
+The context ceiling was never actually the bottleneck for real traffic —
+but there was also no VRAM reason left not to raise it for future growth.
+
+Ghidra's slot was requalified (not just VRAM-swept) at `context_tokens:
+32768` under the exact production manifest gates — identical scores to the
+16,384 run (97.5% ghidra, 97.0% sessions, 87.5% revdeck), zero gate
+regressions. `OLLAMA_CONTEXT_LENGTH` raised from 16384 to 32768 in
+`analysis/ghidra/docker-compose.ghidra.yml` on that evidence, not on the
+VRAM sweep alone. `LLM_CONTEXT_LENGTH`'s production clamp
+(`llm-worker/worker.py`, hard-bounded to exactly 8192) is left as-is: real
+session data doesn't need more, and raising a *code-level* clamp without a
+concrete driver is scope the real data doesn't justify yet.
+
+### `OLLAMA_MAX_LOADED_MODELS` decision
+
+Kept at `1`. The original rationale (avoid evicting one multi-gigabyte model
+to load a different one for the next slot) is now moot in the common case,
+since all three slots share the same promoted model — but `1` is still the
+correct bound if a future re-evaluation picks different models per slot
+again, and there is no reload-latency cost today since there is nothing to
+evict. Raising it would only matter for genuinely concurrent multi-model
+serving, which none of the three slots currently need.
+
+### Decision
+
+Promoted `qwen3:14b@bdbd181c33f2…` to all three slots (ghidra, sessions,
+revdeck), replacing `qwen3:8b`, `qwen3.5:9b`, and
+`qwen2.5-coder:7b-instruct-q4_K_M` respectively, via the documented
+`model-governance.py promote` workflow — two promotions on record: the
+model swap, then the `context_tokens: 32768` requalification. Both are
+`eligible: true` with zero gate failures against the exact production
+contract. See
+[`analysis/ghidra/models/approval-record.md`](../analysis/ghidra/models/README.md)
+for the current approved state; that file, not this prose, is authoritative.
+
+Unifying all three slots to one model tag was not a goal going in — #144's
+original per-task specialization was a deliberate design choice — but it
+fell out of the data: `qwen3:14b` simply won every slot under the same
+accuracy-first, injection-resistance-first standard already governing this
+evaluation. It is not being kept as an architectural commitment to "one
+shared model forever"; a future re-evaluation is free to re-split the slots
+if a different model wins one of them next time.

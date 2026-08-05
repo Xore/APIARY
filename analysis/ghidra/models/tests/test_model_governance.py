@@ -25,20 +25,29 @@ class GovernanceTests(unittest.TestCase):
         self.manifest = governance.read_json(HERE / "approved-models.json")
 
     def snapshot(self):
+        # One entry per unique tag, not per slot: this mirrors real `ollama
+        # list` output, which has exactly one row for a given installed
+        # model regardless of how many manifest slots point at it. Slots
+        # can share a tag (e.g. issue #568's promotion put qwen3:14b in all
+        # three slots) -- building one fabricated "installed copy" per slot
+        # here would silently diverge from what a live snapshot ever looks
+        # like, and masked real drift-detection bugs behind an
+        # unrealistic 1:1 slot:model assumption when that test was written.
+        by_tag: dict[str, dict] = {}
+        for slot in self.manifest["slots"].values():
+            artifact = slot["artifact"]
+            by_tag[artifact["tag"]] = {
+                "name": artifact["tag"],
+                "digest": artifact["digest"],
+                "size": artifact["size_bytes"],
+                "details": {
+                    "family": artifact["family"],
+                    "parameter_size": artifact["parameter_size"],
+                    "quantization_level": artifact["quantization"],
+                },
+            }
         return {
-            "models": [
-                {
-                    "name": slot["artifact"]["tag"],
-                    "digest": slot["artifact"]["digest"],
-                    "size": slot["artifact"]["size_bytes"],
-                    "details": {
-                        "family": slot["artifact"]["family"],
-                        "parameter_size": slot["artifact"]["parameter_size"],
-                        "quantization_level": slot["artifact"]["quantization"],
-                    },
-                }
-                for slot in self.manifest["slots"].values()
-            ],
+            "models": list(by_tag.values()),
             "runtime": {
                 "ollama_version": self.manifest["runtime"]["ollama_version"],
                 "image_reference": self.manifest["runtime"]["ollama_image"],
@@ -87,20 +96,36 @@ class GovernanceTests(unittest.TestCase):
         )
 
     def test_digest_and_host_drift_are_independently_visible(self):
+        ghidra_tag = self.manifest["slots"]["ghidra"]["artifact"]["tag"]
+        # Every slot sharing this tag is really the same installed artifact
+        # (see snapshot()'s comment) -- corrupting it must show drift on
+        # every one of those slots, not just "ghidra".
+        affected_slots = [
+            name for name, slot in self.manifest["slots"].items()
+            if slot["artifact"]["tag"] == ghidra_tag
+        ]
         snapshot = self.snapshot()
-        snapshot["models"][0]["digest"] = "0" * 64
+        entry = next(m for m in snapshot["models"] if m["name"] == ghidra_tag)
+        entry["digest"] = "0" * 64
         snapshot["host"]["driver"] = "changed"
         status = governance.evaluate_drift(self.manifest, snapshot)
         self.assertEqual(status["overall"], "drift")
-        self.assertIn("model_digest_changed", status["slots"]["ghidra"]["codes"])
+        for slot_name in affected_slots:
+            self.assertIn("model_digest_changed", status["slots"][slot_name]["codes"])
         self.assertIn("host_driver_changed", status["host"]["codes"])
 
     def test_missing_model_is_drift_not_an_install_action(self):
+        ghidra_tag = self.manifest["slots"]["ghidra"]["artifact"]["tag"]
+        affected_slots = [
+            name for name, slot in self.manifest["slots"].items()
+            if slot["artifact"]["tag"] == ghidra_tag
+        ]
         snapshot = self.snapshot()
-        snapshot["models"] = snapshot["models"][1:]
+        snapshot["models"] = [m for m in snapshot["models"] if m["name"] != ghidra_tag]
         status = governance.evaluate_drift(self.manifest, snapshot)
         self.assertEqual(status["overall"], "drift")
-        self.assertEqual(status["slots"]["ghidra"]["codes"], ["model_missing"])
+        for slot_name in affected_slots:
+            self.assertEqual(status["slots"][slot_name]["codes"], ["model_missing"])
         self.assertTrue(status["advisory_only"])
 
     @unittest.skipIf(os.name == "nt", "Windows does not implement POSIX chmod bits")

@@ -30,7 +30,7 @@
 #   --containers-only  Bring up/refresh the containers and stop. Needs docker
 #                      but not root, which is the half an operator in the
 #                      docker group can run.
-#   --model NAME       Model to pull (default qwen3:8b, or GHIDRA_TRIAGE_MODEL
+#   --model NAME       Model to pull (default qwen3:14b, or GHIDRA_TRIAGE_MODEL
 #                      from /etc/default/honeypot-ghidra if that file exists).
 #   --no-gpu           Run the model on CPU even if an NVIDIA runtime is present.
 #   --skip-pull        Do not pull the model. For a host that already has it.
@@ -75,7 +75,7 @@ say() { printf '\n== %s\n' "$*"; }
 die() { echo "error: $*" >&2; exit 1; }
 
 # The model name defaults to whatever the worker is already configured to use.
-# A script that pulls qwen3:8b onto a host configured for something else leaves
+# A script that pulls qwen3:14b onto a host configured for something else leaves
 # several GB on disk and triage still not working.
 # Read it only if the file is there: under `set -e` with pipefail, sed's exit 2
 # on a missing file kills the script inside the assignment, and 2>/dev/null
@@ -85,7 +85,7 @@ if [ -z "$MODEL" ] && [ -r "$env_file" ]; then
   MODEL="$(sed -n 's/^GHIDRA_TRIAGE_MODEL=//p' "$env_file" | tail -n1)"
   MODEL="${MODEL%\"}"; MODEL="${MODEL#\"}"   # tolerate a quoted value
 fi
-MODEL="${MODEL:-qwen3:8b}"
+MODEL="${MODEL:-qwen3:14b}"
 
 # ── Preflight ────────────────────────────────────────────────────────────────
 command -v docker >/dev/null 2>&1 || die "docker is required"

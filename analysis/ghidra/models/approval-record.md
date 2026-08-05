@@ -4,8 +4,8 @@ This file is generated with the reviewed manifest. Model promotion is explicit; 
 
 | Slot | Exact model | Approval date | Archived report SHA-256 | Decision record |
 |---|---|---|---|---|
-| ghidra | `qwen3:8b@sha256:500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41` | 2026-08-01 | `023555be9584540720df0dc51f0824a8279b73befae79fbc5fb6714b0ca18884` | issue-158-and-pr-review |
-| revdeck | `qwen2.5-coder:7b-instruct-q4_K_M@sha256:dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364` | 2026-08-01 | `023555be9584540720df0dc51f0824a8279b73befae79fbc5fb6714b0ca18884` | issue-158-and-pr-review |
-| sessions | `qwen3.5:9b@sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7` | 2026-08-01 | `023555be9584540720df0dc51f0824a8279b73befae79fbc5fb6714b0ca18884` | issue-158-and-pr-review |
+| ghidra | `qwen3:14b@sha256:bdbd181c33f2ed1b31c972991882db3cf4d192569092138a7d29e973cd9debe8` | 2026-08-05 | `70c394e808ba4a2e4a187432e25f19457d941a7f2963667cdcf7bd016cef0b2d` | GitHub issue #568, context-length requalification at 32768 tokens for the ghidra slot following the real 20GB VRAM figure from #518 and probe-gpu-capabilities.py context-sweep evidence |
+| revdeck | `qwen3:14b@sha256:bdbd181c33f2ed1b31c972991882db3cf4d192569092138a7d29e973cd9debe8` | 2026-08-05 | `70c394e808ba4a2e4a187432e25f19457d941a7f2963667cdcf7bd016cef0b2d` | GitHub issue #568, context-length requalification at 32768 tokens for the ghidra slot following the real 20GB VRAM figure from #518 and probe-gpu-capabilities.py context-sweep evidence |
+| sessions | `qwen3:14b@sha256:bdbd181c33f2ed1b31c972991882db3cf4d192569092138a7d29e973cd9debe8` | 2026-08-05 | `70c394e808ba4a2e4a187432e25f19457d941a7f2963667cdcf7bd016cef0b2d` | GitHub issue #568, context-length requalification at 32768 tokens for the ghidra slot following the real 20GB VRAM figure from #518 and probe-gpu-capabilities.py context-sweep evidence |
 
 Rollback restores a specifically named backup; no latest/automatic selection is allowed.
