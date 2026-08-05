@@ -517,6 +517,15 @@ zeek:       # protocol analysis (conn.log, dns.log, http.log, files.log)
 suricata:   # IDS alerts, ET rules
 ```
 
+**#510**: only `zeek`/`suricata`/`tcpdump` are actually started per detonation
+(`start_gateway_services`/`stop_gateway_services` in `orchestrate/run_sample.py`,
+called from `detonate_inguest()`), pointed at that sample's own result
+directory via `SANDBOX_RESULTS_DIR` so pcap/logs land where
+`generate_report.py` already reads them instead of colliding in the compose
+file's static `./sandbox/results/current` default. `inetsim` is not started
+automatically — in-guest FakeNet-NG already supersedes its job — and
+`mitmproxy` stays manual/opt-in (`--profile mitm`) as before.
+
 ---
 
 ## Phase 5 — Orchestration (KVM / libvirt)

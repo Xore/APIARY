@@ -6,10 +6,23 @@
 # │ them alongside it. They exist to answer live malware on an isolated   │
 # │ bridge and are started and stopped around a single detonation:        │
 # │                                                                       │
-# │   docker compose -f docker-compose.sandbox.yml up -d    (step 3)      │
-# │   docker compose -f docker-compose.sandbox.yml stop     (step 11)     │
+# │   docker compose -f docker-compose.sandbox.yml up -d zeek suricata \  │
+# │     tcpdump                                    (start_gateway_services)│
+# │   docker compose -f docker-compose.sandbox.yml rm -f -s zeek \        │
+# │     suricata tcpdump                            (stop_gateway_services)│
 # │                                                                       │
-# │ run_sample.py drives both, per sample.                                │
+# │ orchestrate/run_sample.py's detonate_inguest() drives both, per       │
+# │ sample, with SANDBOX_RESULTS_DIR set to that sample's own out_dir --  │
+# │ not the ./sandbox/results/current default below, which only applies  │
+# │ to a manual `docker compose up` run outside the orchestrator (#510).  │
+# │                                                                       │
+# │ INetSim and mitmproxy are NOT started automatically: in-guest         │
+# │ FakeNet-NG (started by the orchestrator inside the guest itself)      │
+# │ already supersedes INetSim's fake-internet job, and mitmproxy stays   │
+# │ opt-in (`--profile mitm`) as documented below. Only Zeek/Suricata/    │
+# │ tcpdump have no in-guest equivalent -- they see the host-side bridge, │
+# │ the only vantage point for traffic the guest sends to an address      │
+# │ nothing answers on.                                                  │
 # └───────────────────────────────────────────────────────────────────────┘
 #
 # Address plan on 10.10.10.0/24 (sandbox/windows/setup/sandbox-network.xml):
