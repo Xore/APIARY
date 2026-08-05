@@ -31,34 +31,90 @@ func extractSrcPort(e map[string]any) int {
 	return 0
 }
 
+// conpotPortRemap corrects "dst_port" for the two Siemens S7 personas whose
+// host-published Modbus/S7comm ports differ from the container-internal
+// port conpot itself binds and logs -- see docker-compose.conpot.yml's own
+// "${HP_BIND:-10.8.0.2}:1502:502" / ":1102:102" (and :2502/:2102 for
+// s7-1500) style remaps. Conpot has no visibility into the Docker NAT
+// remap, so its own log always carries the container-internal port; #745
+// found this collapses all three Siemens personas (the base conpot
+// service, which really is published on 502/102, plus these two) into the
+// same destination.port once ECS-mapped, making three deliberately
+// "separately fingerprintable" PLCs (docker-compose.conpot.yml's own words)
+// indistinguishable by port.
+var conpotPortRemap = map[string]map[float64]float64{
+	"conpot-s7-1200": {502: 1502, 102: 1102},
+	"conpot-s7-1500": {502: 2502, 102: 2102},
+}
+
+// fixConpotDestPort rewrites e["dst_port"] in place per conpotPortRemap when
+// persona is one of the remapped S7 personas and dst_port is still the
+// container-internal value. Returns whether it changed anything.
+func fixConpotDestPort(e map[string]any, persona string) bool {
+	remap, ok := conpotPortRemap[persona]
+	if !ok {
+		return false
+	}
+	p, ok := e["dst_port"].(float64)
+	if !ok {
+		return false
+	}
+	real, ok := remap[p]
+	if !ok {
+		return false
+	}
+	e["dst_port"] = real
+	return true
+}
+
 // enrichLine rewrites line's "src_ip" field to the real attacker IP when it
 // currently reads the tunnel peer address and a matching portbridge via_port
-// entry is found. Returns the original bytes unchanged (never mutates,
-// never drops) whenever nothing applies: line isn't valid JSON, doesn't
-// carry the tunnel peer IP, has no recoverable src_port, or the join
-// misses. A miss is the caller's signal to retry later, not a permanent
-// answer -- see pending.go.
-func enrichLine(line []byte, vm viaMap) (out []byte, resolved bool) {
+// entry is found, and (for the s7-1200/s7-1500 conpot personas) corrects
+// "dst_port" per fixConpotDestPort above. Returns the original bytes
+// unchanged (never mutates, never drops) whenever nothing applies: line
+// isn't valid JSON, doesn't carry the tunnel peer IP, has no recoverable
+// src_port, or the join misses. A src_ip miss is the caller's signal to
+// retry later, not a permanent answer -- see pending.go; a dst_port fix
+// never affects that decision, since it's independent of the src_ip join.
+func enrichLine(line []byte, vm viaMap, persona string) (out []byte, resolved bool) {
 	var e map[string]any
 	if err := json.Unmarshal(line, &e); err != nil {
 		return line, true // unparseable: nothing to retry, pass through as-is
 	}
+	portFixed := fixConpotDestPort(e, persona)
+
 	ip, _ := e["src_ip"].(string)
 	if ip != tunnelPeerIP {
-		return line, true // already correct (or genuinely unknown) -- not ours to touch
+		return marshalIfChanged(line, e, portFixed), true // already correct (or genuinely unknown) -- not ours to touch further
 	}
 	port := extractSrcPort(e)
 	if port == 0 {
-		return line, true // no src_port to join on -- nothing further to try
+		return marshalIfChanged(line, e, portFixed), true // no src_port to join on -- nothing further to try
 	}
 	real, ok := vm[port]
 	if !ok {
-		return line, false // may resolve once a later portbridge entry lands
+		// Still returns the dst_port fix (if any) even though src_ip isn't
+		// resolved yet: pendingQueue.drain calls enrichLine again on every
+		// retry (cheap, re-derives fresh from the original stored line each
+		// time -- see pending.go) and writes *this* return value once the
+		// line either resolves or times out, so the port fix must not be
+		// silently dropped on a miss.
+		return marshalIfChanged(line, e, portFixed), false
 	}
 	e["src_ip"] = real
+	return marshalIfChanged(line, e, true), true
+}
+
+// marshalIfChanged returns line unchanged when nothing was modified
+// (preserving the original bytes exactly, including key order/formatting),
+// or e re-marshalled when it was.
+func marshalIfChanged(line []byte, e map[string]any, changed bool) []byte {
+	if !changed {
+		return line
+	}
 	rewritten, err := json.Marshal(e)
 	if err != nil {
-		return line, true // shouldn't happen; fall back to the original line
+		return line // shouldn't happen; fall back to the original line
 	}
-	return rewritten, true
+	return rewritten
 }

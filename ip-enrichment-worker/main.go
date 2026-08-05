@@ -172,14 +172,14 @@ func runSource(s *source, vm *atomic.Pointer[viaMap], refresh, pendingTimeout ti
 		now := time.Now()
 		var ready [][]byte
 		for _, line := range lines {
-			enriched, resolved := enrichLine(line, *vm.Load())
+			enriched, resolved := enrichLine(line, *vm.Load(), s.name)
 			if resolved {
 				ready = append(ready, enriched)
 			} else {
 				s.queue.add(line, pendingTimeout, now)
 			}
 		}
-		ready = append(ready, s.queue.drain(*vm.Load(), now)...)
+		ready = append(ready, s.queue.drain(*vm.Load(), now, s.name)...)
 		write(ready)
 		if newOffset != offset {
 			saveOffset(s.statePath, newOffset)

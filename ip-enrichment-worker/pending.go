@@ -36,14 +36,14 @@ func (q *pendingQueue) add(line []byte, timeout time.Duration, now time.Time) {
 // order) every line that either resolved or timed out -- ready to write
 // now, enriched or not. Lines still within their window and still
 // unresolved stay queued for the next call.
-func (q *pendingQueue) drain(vm viaMap, now time.Time) [][]byte {
+func (q *pendingQueue) drain(vm viaMap, now time.Time, persona string) [][]byte {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
 	var ready [][]byte
 	remaining := q.items[:0]
 	for _, p := range q.items {
-		out, resolved := enrichLine(p.line, vm)
+		out, resolved := enrichLine(p.line, vm, persona)
 		if resolved || now.After(p.deadline) {
 			ready = append(ready, out)
 			continue
