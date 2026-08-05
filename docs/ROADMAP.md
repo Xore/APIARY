@@ -77,11 +77,6 @@ audit; #671 is the live source of truth if this drifts.
   severity bands/composite weights are assumed, not calibrated. Decision:
   calibrate against live honeypot ES data once #593 lands, not an external
   labeled dataset.
-- [#195](https://github.com/Xore/honeypot-stack/issues/195) — capa has no
-  MIPS/ARM32 backend coverage for IoT samples. Decision: make the gap
-  visible (label results "unsupported architecture" instead of silently
-  showing not-observed) rather than building full backend coverage before
-  0.1.0.
 
 **In progress, not gates but relevant:** #150 (LLM analysis results to
 dashboard), #154 (agent-intrusion research), #167 (ml-worker prod deploy +
@@ -124,7 +119,9 @@ storage stats, #666 reporter metrics.json, #672 mobile/viewport testing,
 
 **Analysis pipeline** — #528 content-defined chunking dedup, #606 dicompot
 AE title capture, #619 cisco-asa IKE payload logging, #623 ip-enrichment
-real attacker IP gap, #639 Kibana saved-search audit, #245 Ghidra/REST-backend
+real attacker IP gap, #639 Kibana saved-search audit, #195 capa MIPS/ARM32
+backend coverage (the visible-gap fix already shipped via #237; the real
+backend is blocked on #245), #245 Ghidra/REST-backend
 version tracking, #680 correlate Ghidra/floss static findings against
 Windows-sandbox dynamic IOCs, #696 pafish/Session-0 validation gap
 
