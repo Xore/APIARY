@@ -1710,6 +1710,11 @@ a.metric:hover { border-color: var(--border-strong); background: var(--surface-2
 }
 .card:has(table) { overflow: auto; }
 .card table { min-width: 0; }
+/* #539: the sensor-feeds card shows every configured/observed sensor (no
+   longer capped at 30), so it needs its own bounded, scrollable region
+   instead of letting the table grow the whole card/page as sensors are
+   added -- header and note above stay put; only the table body scrolls. */
+.sensor-card__scroll { max-height: 340px; overflow-y: auto; }
 .card.wide table { min-width: 720px; }
 /* The payloads list row ends in a kebab menu (#205) whose popover is
    position:absolute and must escape the row -- overflow:auto on an

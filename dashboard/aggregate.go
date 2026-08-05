@@ -343,7 +343,14 @@ func (s *store) rebuild() {
 				esOverviewResult.SensorCounts[name] = 0
 			}
 		}
-		for _, sensor := range topN(esOverviewResult.SensorCounts, 30) {
+		// #539: every configured (s.expected, zero-filled above) and every
+		// ES-observed sensor, not a top-30 cut -- a low-volume or newly added
+		// sensor was previously only reachable through the heatmap's sensor
+		// filter (backed by /api/filter-values, which ranks the full set
+		// before applying its own cap), never visible on this card at all.
+		// The card itself scrolls (theme.css's .sensor-card) instead of
+		// growing the page, so there's no longer a size reason to cap it.
+		for _, sensor := range topN(esOverviewResult.SensorCounts, len(esOverviewResult.SensorCounts)) {
 			snap.Sensors = append(snap.Sensors, sensorRow{
 				Name: sensor.Key, Count: sensor.Count,
 				Ago:   ago(esOverviewResult.SensorLastSeen[sensor.Key]),
