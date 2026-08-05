@@ -1,6 +1,6 @@
 # Working Agreement
 
-**Work is tracked in [GitHub issues](https://github.com/Xore/apiary/issues), not in this file.**
+**Work is tracked in [GitHub issues](https://github.com/Xore/APIARY/issues), not in this file.**
 
 This file used to carry a table of open work items. That table is gone: every
 row was migrated to an issue on 2026-07-30, and the issues are now the single

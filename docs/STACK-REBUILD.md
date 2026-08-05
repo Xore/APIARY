@@ -41,7 +41,7 @@ live run of this sequence (2026-08-02) hit three of them.
   it, not something a reset needs to force
 - Unrelated services sharing the same hosts (VPS: `auth-portal`, other
   tenants' `socat-*` forwarders, other Compose projects entirely — a
-  full-reset instruction scopes to the honeypot stack, never to everything
+  full-reset instruction scopes to APIARY, never to everything
   running on the box)
 
 **Wiped:** every honeypot-owned Docker volume (`es-data`, `dionaea-lib`,

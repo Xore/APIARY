@@ -88,8 +88,8 @@ project's `webui/app.py`, `ghidra_assistant.py`, `workflows.py`,
 document. It replaces the old, never-run `/api/upload`/`/api/chat` shape a
 prior version of `ghidra_analyze.py` guessed at, which was deleted alongside
 the disproven Ghidra REST contract
-[#101](https://github.com/Xore/apiary/issues/101) under
-[#107](https://github.com/Xore/apiary/issues/107) without ever having
+[#101](https://github.com/Xore/APIARY/issues/101) under
+[#107](https://github.com/Xore/APIARY/issues/107) without ever having
 run against a live container. See the comment block above `REVDECK_API_BASE`
 in [`worker/ghidra-worker.py`](../../../../analysis/ghidra/worker/ghidra-worker.py) for the full
 contract, including why `analyze_as_raw=true` is always sent.

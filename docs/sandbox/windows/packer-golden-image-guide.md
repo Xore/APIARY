@@ -10,11 +10,11 @@
 > this host yet. The steps below are the procedure, not a record of a completed
 > run — treat every duration and size as an estimate until a build confirms
 > them. Execution is tracked in
-> [#49](https://github.com/Xore/apiary/issues/49) (obtain the ISO — operator action),
-> [#51](https://github.com/Xore/apiary/issues/51) (run the build),
-> [#52](https://github.com/Xore/apiary/issues/52) (define the domain, take `GOLDEN_READY`),
-> under [#47](https://github.com/Xore/apiary/issues/47). Lifecycle gaps are
-> [#86](https://github.com/Xore/apiary/issues/86).
+> [#49](https://github.com/Xore/APIARY/issues/49) (obtain the ISO — operator action),
+> [#51](https://github.com/Xore/APIARY/issues/51) (run the build),
+> [#52](https://github.com/Xore/APIARY/issues/52) (define the domain, take `GOLDEN_READY`),
+> under [#47](https://github.com/Xore/APIARY/issues/47). Lifecycle gaps are
+> [#86](https://github.com/Xore/APIARY/issues/86).
 
 ---
 
@@ -751,7 +751,7 @@ actually written.
 | **On Windows Eval expiry (90d)** | Download new ISO, full rebuild |
 | **On FLARE-VM major release** | Full rebuild |
 
-This cadence is currently manual. Automating it is **[#86](https://github.com/Xore/apiary/issues/86)**, which is
+This cadence is currently manual. Automating it is **[#86](https://github.com/Xore/APIARY/issues/86)**, which is
 not the one-line cron entry it looks like: a 3-5 hour build cannot share
 `/dev/kvm` with a detonation run, `-force` would destroy the working image
 before the replacement is known good, and a rebuild against an expired

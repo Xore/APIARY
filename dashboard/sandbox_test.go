@@ -47,7 +47,7 @@ func TestSandboxResultsAreBoundedAndValidated(t *testing.T) {
 }
 
 // sandboxArtifactFile is the choke point for two CodeQL go/path-injection
-// alerts (#4, #21): https://github.com/Xore/apiary/issues/80. The
+// alerts (#4, #21): https://github.com/Xore/APIARY/issues/80. The
 // property has to hold at the join itself, not be argued from the callers
 // three frames away.
 func TestSandboxArtifactFileRejectsTraversal(t *testing.T) {

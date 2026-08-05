@@ -168,7 +168,7 @@ func submitReturnURL(raw, hash string, target sandboxTarget) string {
 //
 // A leading "/" is deliberately not sufficient on its own — "//evil.example"
 // also starts with "/" and is a protocol-relative URL to another host. See
-// https://github.com/Xore/apiary/issues/80. The allowlist is the
+// https://github.com/Xore/APIARY/issues/80. The allowlist is the
 // primary control; the scheme, host, and "//" checks close the ways a value
 // can look like a dashboard path without being one.
 func safeReturnPath(raw string, allowed []string) (*url.URL, bool) {

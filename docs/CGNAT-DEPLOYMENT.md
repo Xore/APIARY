@@ -9,7 +9,7 @@ flowchart TD
     Internet --> Portbridge["VPS portbridge<br/>TCP/UDP"]
     Traefik --> HTTPBridge["WireGuard HTTP bridge"]
     Portbridge --> Tunnel["WireGuard tunnel"]
-    HTTPBridge --> Home["home server 10.8.0.2<br/>Dockge honeypot stack"]
+    HTTPBridge --> Home["home server 10.8.0.2<br/>Dockge APIARY stack"]
     Tunnel --> Home
 ```
 
@@ -65,7 +65,7 @@ the only internet-facing component.
 > [`scripts/install-homeserver.conf.example`](../scripts/install-homeserver.conf.example)
 > first. Run multiple times end-to-end (including a from-genuinely-fresh
 > install and a full idempotent re-run) under
-> [#518](https://github.com/Xore/apiary/issues/518), with real bugs
+> [#518](https://github.com/Xore/APIARY/issues/518), with real bugs
 > found and fixed each pass — it's the current source of truth for the
 > real deployment order, not the numbered steps below, which describe the
 > pre-#258 two-stack model and haven't been re-verified against the current

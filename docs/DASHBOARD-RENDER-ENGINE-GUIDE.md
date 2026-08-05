@@ -8,11 +8,11 @@
 > protects alert acknowledgement and sandbox submission.
 >
 > What is left is tracked in issues, not in the phase list below: the CSP
-> cutover is [#58](https://github.com/Xore/apiary/issues/58), the
+> cutover is [#58](https://github.com/Xore/APIARY/issues/58), the
 > remaining modal inventory is
-> [#59](https://github.com/Xore/apiary/issues/59), and tests plus the
+> [#59](https://github.com/Xore/APIARY/issues/59), and tests plus the
 > visual acceptance matrix are
-> [#60](https://github.com/Xore/apiary/issues/60). The phases below
+> [#60](https://github.com/Xore/APIARY/issues/60). The phases below
 > remain as the design record for how the migration was structured.
 
 ## Objective
@@ -36,7 +36,7 @@ with line numbers**. The pins are:
 |---|---|
 | `Xore/auth-backend` | [`a789089`](https://github.com/Xore/auth-backend/tree/a789089fd85397c2ded300c6ac2a91f386b25fc6) |
 | `Xore/theme` | [`7612eb5`](https://github.com/Xore/theme/tree/7612eb5f16589621744a1e734a57b27060c2ed91) |
-| `Xore/apiary` | [`e3b6bc9`](https://github.com/Xore/apiary/tree/e3b6bc92c5149492fcaddb7526c3934d51dd3513) |
+| `Xore/APIARY` | [`e3b6bc9`](https://github.com/Xore/APIARY/tree/e3b6bc92c5149492fcaddb7526c3934d51dd3513) |
 
 When you implement, re-fetch the referenced files at `main` and treat the line
 numbers as locators, not gospel — the surrounding identifiers (function names,
@@ -251,26 +251,26 @@ From `ui/app.html`, implementing
 
 ## 2. Dashboard baseline (what exists today)
 
-All references pinned to `Xore/apiary@e3b6bc9`.
+All references pinned to `Xore/APIARY@e3b6bc9`.
 
 - Pages are Go templates assembled as one `pageTemplate` const
-  ([`dashboard/page.go#L12`](https://github.com/Xore/apiary/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/page.go#L12)
+  ([`dashboard/page.go#L12`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/page.go#L12)
   = `pageStyle + pageOverview + pageEvents + pageIPs + pageSession +
   pageIntel + pagePayloads + pageSandbox + pageOps`), parsed once in
-  [`main.go#L118-L133`](https://github.com/Xore/apiary/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L118-L133)
+  [`main.go#L118-L133`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L118-L133)
   with a `FuncMap` (`worldMap`, `json`, `dict`) and executed per route with
   typed data structs (`s.get()`, `s.eventsData(r)`, `s.attackerData(ip)`, …).
 - The semantic shell is already server-rendered in `ui/partials/dashboard.html`:
-  `{{define "style"}}` ([L1-L13](https://github.com/Xore/apiary/blob/main/dashboard/ui/partials/dashboard.html#L1-L13)),
-  `{{define "sidebar"}}` ([L15-L74](https://github.com/Xore/apiary/blob/main/dashboard/ui/partials/dashboard.html#L15-L74)),
+  `{{define "style"}}` ([L1-L13](https://github.com/Xore/APIARY/blob/main/dashboard/ui/partials/dashboard.html#L1-L13)),
+  `{{define "sidebar"}}` ([L15-L74](https://github.com/Xore/APIARY/blob/main/dashboard/ui/partials/dashboard.html#L15-L74)),
   `{{define "topbar"}}` incl. the `.command-bar` investigation dock
-  ([L76-L126](https://github.com/Xore/apiary/blob/main/dashboard/ui/partials/dashboard.html#L76-L126)),
+  ([L76-L126](https://github.com/Xore/APIARY/blob/main/dashboard/ui/partials/dashboard.html#L76-L126)),
   and the shared `tbl`/`techniques` blocks
-  ([L128-L141](https://github.com/Xore/apiary/blob/main/dashboard/ui/partials/dashboard.html#L128-L141)).
+  ([L128-L141](https://github.com/Xore/APIARY/blob/main/dashboard/ui/partials/dashboard.html#L128-L141)).
   No client-side DOM reconstruction.
 - `dashboard/static/theme.css` is vendored byte-identical to
   `Xore/theme@7612eb5`. The pin lives in
-  [`dashboard/frontend/theme.lock`](https://github.com/Xore/apiary/blob/main/dashboard/frontend/theme.lock)
+  [`dashboard/frontend/theme.lock`](https://github.com/Xore/APIARY/blob/main/dashboard/frontend/theme.lock)
   and is enforced on every push by `scripts/check-vendored-theme.sh`
   (the `Vendored Xore/theme is in sync` job); re-vendor with
   `scripts/sync-theme.sh`. There is no separate dashboard CSS file —
@@ -278,16 +278,16 @@ All references pinned to `Xore/apiary@e3b6bc9`.
   app-specific styling has since been folded upstream into `theme.css`
   itself; `hp-app.js` is the hand-written
   enhancement layer (SSE, lazy rows, live refresh, theme toggle, recents).
-  Static assets are embedded via [`dashboard/assets.go`](https://github.com/Xore/apiary/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/assets.go)
+  Static assets are embedded via [`dashboard/assets.go`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/assets.go)
   (`//go:embed static`) and served with long-cache headers at
-  [`main.go#L360-L365`](https://github.com/Xore/apiary/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L360-L365).
+  [`main.go#L360-L365`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L360-L365).
 - Row-fragment endpoints return server-rendered HTML for lazy loading:
   `/api/event-rows` and `/api/ip-rows`
-  ([`main.go#L165-L198`](https://github.com/Xore/apiary/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L165-L198)),
+  ([`main.go#L165-L198`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L165-L198)),
   `/api/payload-rows`
-  ([`main.go#L306-L320`](https://github.com/Xore/apiary/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L306-L320)).
+  ([`main.go#L306-L320`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L306-L320)).
 - HTML routes are registered at
-  [`main.go#L231-L372`](https://github.com/Xore/apiary/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L231-L372)
+  [`main.go#L231-L372`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L231-L372)
   (`/`, `/events`, `/ips`, `/investigate/ip/`, `/sessions/`, `/clusters`,
   `/campaigns`, `/history`, `/dead-letters`, `/source-health`, `/alerts`,
   `/payloads`, `/sandbox`, `/commands`, `/payload-analysis/`, exports).
@@ -331,7 +331,7 @@ dashboard/
 
 Keep `page_*.go` during the transition: move each `{{define}}` block into its
 `ui/*.html` file one route at a time, and shrink
-[`page.go#L12`](https://github.com/Xore/apiary/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/page.go#L12)
+[`page.go#L12`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/page.go#L12)
 until it concatenates nothing. Delete each Go const only after its file
 template renders the route byte-comparably (allowing for whitespace).
 
@@ -382,7 +382,7 @@ func (s *server) renderEvents(w http.ResponseWriter, r *http.Request) {
 ### 3.3 Shared head and shell partial
 
 `partials/head.html` reproduces the current `{{define "style"}}`
-([`ui/partials/dashboard.html#L1-L13`](https://github.com/Xore/apiary/blob/main/dashboard/ui/partials/dashboard.html#L1-L13))
+([`ui/partials/dashboard.html#L1-L13`](https://github.com/Xore/APIARY/blob/main/dashboard/ui/partials/dashboard.html#L1-L13))
 but with the pre-paint theme script nonce'd, like auth-backend's `pageHead`
 ([`page.go#L230-L240`](https://github.com/Xore/auth-backend/blob/a789089fd85397c2ded300c6ac2a91f386b25fc6/forward-auth/page.go#L230-L240)):
 
@@ -404,8 +404,8 @@ after. Bump the `?v=` buster whenever a static asset changes.
 ### 3.4 Row fragments
 
 `/api/event-rows`, `/api/ip-rows`, `/api/payload-rows`
-([`main.go#L165-L198`](https://github.com/Xore/apiary/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L165-L198),
-[`L306-L320`](https://github.com/Xore/apiary/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L306-L320))
+([`main.go#L165-L198`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L165-L198),
+[`L306-L320`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L306-L320))
 stay HTML-fragment endpoints. Their `eventrows` / `iprows` / `payloadrows`
 templates move into the corresponding `ui/*.html` files unchanged, so the
 lazy-list contract (25 rows per fetch, sentinel-driven) is untouched.
@@ -433,7 +433,7 @@ in templates to carry `nonce="{{.Nonce}}"`.
 
 Organize by the operator's workflow: **detect → triage → investigate →
 preserve evidence**. The existing three sidebar groups
-([`ui/partials/dashboard.html#L15-L74`](https://github.com/Xore/apiary/blob/main/dashboard/ui/partials/dashboard.html#L15-L74))
+([`ui/partials/dashboard.html#L15-L74`](https://github.com/Xore/APIARY/blob/main/dashboard/ui/partials/dashboard.html#L15-L74))
 already encode this — keep them, and make every page answer exactly one
 question. All primitives cited below exist in `theme.css` (`.metric-grid`/
 `.metric` at [L444-L458](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/theme.css#L444-L458),
@@ -445,7 +445,7 @@ question. All primitives cited below exist in `theme.css` (`.metric-grid`/
 
 | Route | Question answered | Layout |
 |---|---|---|
-| `/` overview | What is the current threat picture? | Full width. `.metric-grid` KPI row (events 24h, unique sources, payloads, open alerts — neutral tiles, severity only in badges). Attack-origin map (Leaflet, state preserved across refresh). Activity feed + top-N `tbl` cards (top IPs, usernames, passwords, commands, paths — the shared block at [`ui/partials/dashboard.html#L128-L137`](https://github.com/Xore/apiary/blob/main/dashboard/ui/partials/dashboard.html#L128-L137)). Source-health strip. |
+| `/` overview | What is the current threat picture? | Full width. `.metric-grid` KPI row (events 24h, unique sources, payloads, open alerts — neutral tiles, severity only in badges). Attack-origin map (Leaflet, state preserved across refresh). Activity feed + top-N `tbl` cards (top IPs, usernames, passwords, commands, paths — the shared block at [`ui/partials/dashboard.html#L128-L137`](https://github.com/Xore/APIARY/blob/main/dashboard/ui/partials/dashboard.html#L128-L137)). Source-health strip. |
 | `/source-health` | Are all sensors and the pipeline alive? | `.app-content` (1120px). Status grid: one card per expected sensor with last-seen, event rate, and a `.badge` state (green/red). Elasticsearch/filebeat status rows. |
 | `/alerts` | What needs acknowledgement? | `.app-content`. Alert table (rule, severity badge, first/last fired, count) with per-row **Acknowledge** action → confirmation modal (§5). |
 
@@ -455,7 +455,7 @@ question. All primitives cited below exist in `theme.css` (`.metric-grid`/
 |---|---|---|
 | `/events` | Which raw events match my filter? | Full width. Sticky filter bar (time range, sensor, IP, free text) → lazy 25-row `.data-table` in `.table-scroll`, expandable normalized JSON per row, "load more" sentinel, CSV export. Row click opens the **event detail modal** (§5) instead of navigating away when only reading. |
 | `/ips` | Which sources attack us? | Full width lazy table: IP, country/ASN (GeoIP), first/last seen, sensor spread, event count. Row → `/investigate/ip/{ip}`. |
-| `/investigate/ip/{ip}` | What did this one source do, in order? | `.app-content--wide` (1360px). Header card: IP, geo/ASN, totals, MITRE `techniques` block (shared template at [`ui/partials/dashboard.html#L139-L141`](https://github.com/Xore/apiary/blob/main/dashboard/ui/partials/dashboard.html#L139-L141)). Below: chronological **attack-chain timeline** (vertical, timestamped events, session boundaries), linked sessions and payload references. |
+| `/investigate/ip/{ip}` | What did this one source do, in order? | `.app-content--wide` (1360px). Header card: IP, geo/ASN, totals, MITRE `techniques` block (shared template at [`ui/partials/dashboard.html#L139-L141`](https://github.com/Xore/APIARY/blob/main/dashboard/ui/partials/dashboard.html#L139-L141)). Below: chronological **attack-chain timeline** (vertical, timestamped events, session boundaries), linked sessions and payload references. |
 | `/sessions/{id}` | What happened inside this session? | `.app-content--wide`. Session header (src, duration, credentials tried) + replay timeline of commands with mono font, linked payload hashes. |
 | `/campaigns` | Which activity is coordinated? | `.app-content`. Campaign cards: shared fingerprint, member IPs, time span, event volume. |
 | `/clusters` | Which infrastructure is shared? | `.app-content`. Cluster table (ASN/prefix, members, first/last seen). |
@@ -487,12 +487,12 @@ question. All primitives cited below exist in `theme.css` (`.metric-grid`/
   list/status pages, 1360px `.app-content--wide` for investigations
   (geometry tokens in [TOKENS.md §Geometry](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/docs/TOKENS.md#L44-L52)).
 - The `.command-bar` investigation dock
-  ([`ui/partials/dashboard.html#L93-L101`](https://github.com/Xore/apiary/blob/main/dashboard/ui/partials/dashboard.html#L93-L101),
+  ([`ui/partials/dashboard.html#L93-L101`](https://github.com/Xore/APIARY/blob/main/dashboard/ui/partials/dashboard.html#L93-L101),
   themed at [`theme.css#L953-L967`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/theme.css#L953-L967))
   stays the global entry point (`/` shortcut) — it is a command bar, not a
   modal; do not convert it.
 - Live behavior is non-negotiable: SSE toasts
-  ([`/api/stream`, `main.go#L159`](https://github.com/Xore/apiary/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L159)),
+  ([`/api/stream`, `main.go#L159`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L159)),
   15s in-place overview refresh preserving map pan/zoom/selection,
   alert-bell polling (all in `hp-app.js`).
 
@@ -516,11 +516,11 @@ the behavior contract comes from auth-backend (§1.5).
 
 | Modal | Trigger | Role | Notes |
 |---|---|---|---|
-| Event detail | Row click in `/events` | `dialog` | Full normalized JSON (pretty-printed with the existing `json` template func, [`main.go#L120-L123`](https://github.com/Xore/apiary/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L120-L123)), sensor, geo, links to attacker profile/session. Read-only. |
+| Event detail | Row click in `/events` | `dialog` | Full normalized JSON (pretty-printed with the existing `json` template func, [`main.go#L120-L123`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L120-L123)), sensor, geo, links to attacker profile/session. Read-only. |
 | Payload preview | "Preview" in `/payloads` | `dialog` | Safe text/hex rendering only — server must sanitize/escape; never inject raw payload bytes as HTML. Size-capped. |
 | Alert acknowledgement | "Acknowledge" in `/alerts` | `alertdialog` | Confirmation contract: names rule + consequence (silences for the cooldown window), confirm runs once. Copy pattern: [`confirmAct`](https://github.com/Xore/auth-backend/blob/a789089fd85397c2ded300c6ac2a91f386b25fc6/forward-auth/ui/app.html#L252-L303). |
-| Sandbox submit / resubmit | "Submit to sandbox" | `alertdialog` | Confirms detonation of a specific hash; result links to job (`/sandbox/submit` exists at [`main.go#L322`](https://github.com/Xore/apiary/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L322)). |
-| Report / export options | Export buttons (PDF report, CSV) | `dialog` | Time-range and section selection, then navigates to the export URL ([`/export/report.pdf`, `main.go#L230`](https://github.com/Xore/apiary/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L230); CSV at [`L357-L358`](https://github.com/Xore/apiary/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L357-L358)). |
+| Sandbox submit / resubmit | "Submit to sandbox" | `alertdialog` | Confirms detonation of a specific hash; result links to job (`/sandbox/submit` exists at [`main.go#L322`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L322)). |
+| Report / export options | Export buttons (PDF report, CSV) | `dialog` | Time-range and section selection, then navigates to the export URL ([`/export/report.pdf`, `main.go#L230`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L230); CSV at [`L357-L358`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L357-L358)). |
 | Destructive ops (dead-letter purge, payload delete if added) | Row action menus | `alertdialog` | Same copy pattern as auth-backend `confirmAct`: title = question, desc = consequences, warning box lists immediate effects. |
 
 ### 5.2 DOM skeleton (in `partials/shell.html`)
@@ -581,7 +581,7 @@ jsdom or browser test):
    No route changes yet.
 2. **Partials**: extract `{{define "style"/"sidebar"/"topbar"/"tbl"/
    "techniques"}}` from
-   [`ui/partials/dashboard.html`](https://github.com/Xore/apiary/blob/main/dashboard/ui/partials/dashboard.html)
+   [`ui/partials/dashboard.html`](https://github.com/Xore/APIARY/blob/main/dashboard/ui/partials/dashboard.html)
    into `ui/partials/*.html` with the nonce'd head. Wire parsing; verify
    every route still renders.
 3. **Page migration**: move one route's template per commit, easiest first:
@@ -709,20 +709,20 @@ open modal state.
 | App-shell primitives (`.app-shell` → `.command-bar`) | [`theme.css#L892-L967`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/theme.css#L892-L967) |
 | `.modal-backdrop` / `.modal` | [`theme.css#L969-L1002`](https://github.com/Xore/theme/blob/7612eb5f16589621744a1e734a57b27060c2ed91/theme.css#L969-L1002) |
 
-### Xore/apiary @ `e3b6bc9` — the baseline being migrated
+### Xore/APIARY @ `e3b6bc9` — the baseline being migrated
 
 | Construct | Location |
 |---|---|
-| `pageTemplate` const concatenation | [`dashboard/page.go#L12`](https://github.com/Xore/apiary/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/page.go#L12) |
-| `{{define "style"}}` (asset links, pre-paint theme script) | [`dashboard/ui/partials/dashboard.html#L1-L13`](https://github.com/Xore/apiary/blob/main/dashboard/ui/partials/dashboard.html#L1-L13) |
-| `{{define "sidebar"}}` (nav groups, recents, profile) | [`dashboard/ui/partials/dashboard.html#L15-L74`](https://github.com/Xore/apiary/blob/main/dashboard/ui/partials/dashboard.html#L15-L74) |
-| `{{define "topbar"}}` + investigation command dock | [`dashboard/ui/partials/dashboard.html#L76-L126`](https://github.com/Xore/apiary/blob/main/dashboard/ui/partials/dashboard.html#L76-L126) |
-| Shared `tbl` / `techniques` blocks | [`dashboard/ui/partials/dashboard.html#L128-L141`](https://github.com/Xore/apiary/blob/main/dashboard/ui/partials/dashboard.html#L128-L141) |
-| Template `FuncMap` + one-time parse | [`dashboard/main.go#L118-L133`](https://github.com/Xore/apiary/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L118-L133) |
-| `/api/whoami` (forward-auth identity) | [`dashboard/main.go#L150-L157`](https://github.com/Xore/apiary/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L150-L157) |
-| SSE stream | [`dashboard/main.go#L159`](https://github.com/Xore/apiary/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L159) |
-| Lazy row-fragment endpoints | [`dashboard/main.go#L165-L198`](https://github.com/Xore/apiary/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L165-L198), [`L306-L320`](https://github.com/Xore/apiary/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L306-L320) |
-| Exports (PDF report, CSV, history) | [`dashboard/main.go#L223-L230`](https://github.com/Xore/apiary/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L223-L230), [`L357-L358`](https://github.com/Xore/apiary/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L357-L358) |
-| HTML route registrations | [`dashboard/main.go#L231-L372`](https://github.com/Xore/apiary/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L231-L372) |
-| Embedded static assets + cache headers | [`dashboard/assets.go`](https://github.com/Xore/apiary/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/assets.go), [`dashboard/main.go#L360-L365`](https://github.com/Xore/apiary/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L360-L365) |
-| Frontend architecture + theme sync | [`dashboard/frontend/README.md`](https://github.com/Xore/apiary/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/frontend/README.md) |
+| `pageTemplate` const concatenation | [`dashboard/page.go#L12`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/page.go#L12) |
+| `{{define "style"}}` (asset links, pre-paint theme script) | [`dashboard/ui/partials/dashboard.html#L1-L13`](https://github.com/Xore/APIARY/blob/main/dashboard/ui/partials/dashboard.html#L1-L13) |
+| `{{define "sidebar"}}` (nav groups, recents, profile) | [`dashboard/ui/partials/dashboard.html#L15-L74`](https://github.com/Xore/APIARY/blob/main/dashboard/ui/partials/dashboard.html#L15-L74) |
+| `{{define "topbar"}}` + investigation command dock | [`dashboard/ui/partials/dashboard.html#L76-L126`](https://github.com/Xore/APIARY/blob/main/dashboard/ui/partials/dashboard.html#L76-L126) |
+| Shared `tbl` / `techniques` blocks | [`dashboard/ui/partials/dashboard.html#L128-L141`](https://github.com/Xore/APIARY/blob/main/dashboard/ui/partials/dashboard.html#L128-L141) |
+| Template `FuncMap` + one-time parse | [`dashboard/main.go#L118-L133`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L118-L133) |
+| `/api/whoami` (forward-auth identity) | [`dashboard/main.go#L150-L157`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L150-L157) |
+| SSE stream | [`dashboard/main.go#L159`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L159) |
+| Lazy row-fragment endpoints | [`dashboard/main.go#L165-L198`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L165-L198), [`L306-L320`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L306-L320) |
+| Exports (PDF report, CSV, history) | [`dashboard/main.go#L223-L230`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L223-L230), [`L357-L358`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L357-L358) |
+| HTML route registrations | [`dashboard/main.go#L231-L372`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L231-L372) |
+| Embedded static assets + cache headers | [`dashboard/assets.go`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/assets.go), [`dashboard/main.go#L360-L365`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L360-L365) |
+| Frontend architecture + theme sync | [`dashboard/frontend/README.md`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/frontend/README.md) |

@@ -1,7 +1,7 @@
 # Runtime compatibility record
 
 Status: verified on the live homeserver on 2026-08-01 for
-[#82](https://github.com/Xore/apiary/issues/82).
+[#82](https://github.com/Xore/APIARY/issues/82).
 
 This is a compatibility record, not an event sample. Elasticsearch commands
 used only cluster/index metadata, field capabilities, and a `size: 0`

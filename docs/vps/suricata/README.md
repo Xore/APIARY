@@ -92,7 +92,7 @@ via `-c`). Notable settings:
   **Unbounded**: `filetype: regular` with no rotation, so `eve.json` grows
   until the disk fills — 4.4 GB and climbing as of the last check. Payloads and
   HTTP bodies are the reason it grows as fast as it does. Tracked in
-  [#79](https://github.com/Xore/apiary/issues/79); do not assume the
+  [#79](https://github.com/Xore/APIARY/issues/79); do not assume the
   ring that bounds `pcap-log` covers this file too.
 - The `threshold.config` here is wired via `threshold-file:`.
 - `af-packet` carries `bpf-filter: "not udp port 51820"`. Without it Suricata

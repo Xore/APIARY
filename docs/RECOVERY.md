@@ -12,7 +12,7 @@ This repo already has the individual pieces T-Pot's single documented
 --hard`, reinstall) covers -- [`analysis/backup-honeypot.sh`](../analysis/backup-honeypot.sh)
 for the backup, [`docs/STACK-REBUILD.md`](STACK-REBUILD.md)'s live-verified
 runbook for the stop/wipe/restart sequence across the ~13 independent
-Dockge stacks [#258](https://github.com/Xore/apiary/issues/258)
+Dockge stacks [#258](https://github.com/Xore/APIARY/issues/258)
 split this into -- but nothing tied them into one entry point.
 [`factory-reset.sh`](../factory-reset.sh), at the repo root next to
 `setup-home-network.sh`/`setup-suricata-logs-home.sh`, is that entry point.

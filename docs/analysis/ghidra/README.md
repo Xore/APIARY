@@ -158,7 +158,7 @@ proceeds.
 ## Install
 
 ```bash
-git clone https://github.com/Xore/apiary.git
+git clone https://github.com/Xore/APIARY.git
 sudo APIARY/analysis/ghidra/install-analysis-host.sh
 ```
 
@@ -319,8 +319,8 @@ docstrings before (#142):
 |---|---|---|---|
 | `fuzzy_hashes` | statictools unreachable or switched off | *(no unsupported state — ssdeep/tlsh each report their own `_error` instead)* | `{ssdeep, ssdeep_error, tlsh, tlsh_error}`, each hash independently nullable |
 | `lief` | statictools unreachable/off, **or** lief did not recognise the format | *(collapses to `null` — lief has no distinct decline signal, unlike capa/floss below)* | structural metadata: format, entrypoint, sections, libraries, ... |
-| `capa` | statictools unreachable/off | capa's default (vivisect) backend can't handle this architecture/format/OS — a real decline, not an outage ([#195](https://github.com/Xore/apiary/issues/195)) | capability/ATT&CK/MBC tags |
-| `floss` | statictools unreachable/off | floss's decoding/stack-string analysis only covers PE/raw shellcode — this honeypot's dominant ELF catch lands here on every run ([#207](https://github.com/Xore/apiary/issues/207)) | decoded/stack/tight/static strings |
+| `capa` | statictools unreachable/off | capa's default (vivisect) backend can't handle this architecture/format/OS — a real decline, not an outage ([#195](https://github.com/Xore/APIARY/issues/195)) | capability/ATT&CK/MBC tags |
+| `floss` | statictools unreachable/off | floss's decoding/stack-string analysis only covers PE/raw shellcode — this honeypot's dominant ELF catch lands here on every run ([#207](https://github.com/Xore/APIARY/issues/207)) | decoded/stack/tight/static strings |
 | `revdeck` | `REVDECK_API_BASE` unset, endpoint refused/unreachable, or no usable answer | *(no unsupported state)* | workflow/status/answer/tool_calls/citations |
 | `ai_triage` | no endpoint configured, refused, unreachable, model error, unparseable answer, or the prompt was truncated | *(no unsupported state)* | family_guess/risk_level/behaviors/model/evidence_shown — see [`AI_TRIAGE.md`](AI_TRIAGE.md) |
 

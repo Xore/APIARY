@@ -7,7 +7,7 @@
 >
 > The settings pane is a bare iframe onto the auth origin, which this document
 > originally ruled out except behind explicit preconditions:
-> [#93](https://github.com/Xore/apiary/issues/93). Three of the four
+> [#93](https://github.com/Xore/APIARY/issues/93). Three of the four
 > are done: `frame-ancestors` is enforced on the auth origin (auth-backend's
 > `APP_FRAME_ANCESTORS`, verified live), `AUTH_ACCOUNT_URL` is validated at
 > dashboard startup against the configured auth origin
@@ -17,7 +17,7 @@
 > the parent — has not shipped yet; until it does, the frame's own expiry or a
 > logout inside it will not close the modal. The remaining deployment
 > verification for the settings stack is
-> [#81](https://github.com/Xore/apiary/issues/81).
+> [#81](https://github.com/Xore/APIARY/issues/81).
 
 ---
 
@@ -58,7 +58,7 @@ dashboard cannot leak what it never handles.
 What it does not get for free is everything the preconditions covered:
 `frame-ancestors` on the auth origin, validation of the configured URL, and a
 close/expiry signal from the frame. Tracked in
-[#93](https://github.com/Xore/apiary/issues/93), **do not replace the
+[#93](https://github.com/Xore/APIARY/issues/93), **do not replace the
 modal to close them** — the gaps are additive.
 
 - **`frame-ancestors`** — done. auth-backend serves the settings app with

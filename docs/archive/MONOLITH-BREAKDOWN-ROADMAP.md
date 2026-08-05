@@ -13,7 +13,7 @@
 > `classify.go` and `report_pdf.go` are single concerns, and the four Python
 > scripts had no seam. That reasoning is the part still worth reading; do not
 > re-litigate those files without it. Verified under
-> [#72](https://github.com/Xore/apiary/issues/72).
+> [#72](https://github.com/Xore/APIARY/issues/72).
 
 > Goal: make the larger Go and Python applications in this repository easier to
 > maintain by splitting monolithic files into focused modules. **Behavior must
@@ -31,7 +31,7 @@
 | `sandbox/export-result.py` | 310 | Light touch |
 | `ml-worker/worker.py` | 261 | Light touch |
 | `analysis/analyze.py` | 260 | Light touch |
-| `analysis/ghidra/ghidra_analyze.py` | 223 | Fine as-is (file later deleted entirely under [#107](https://github.com/Xore/apiary/issues/107) — unrelated to this roadmap's split-vs-keep question) |
+| `analysis/ghidra/ghidra_analyze.py` | 223 | Fine as-is (file later deleted entirely under [#107](https://github.com/Xore/APIARY/issues/107) — unrelated to this roadmap's split-vs-keep question) |
 | Other Python (`conpot/persona_patch.py`, `sandbox/guest-*.py`, …) | <210 | Fine as-is |
 
 Note: `dashboard/page.go` was already split into nine per-page template files

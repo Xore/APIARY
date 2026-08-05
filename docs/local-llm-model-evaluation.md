@@ -1,6 +1,6 @@
 # Local LLM model evaluation
 
-Status: completed for [issue #144](https://github.com/Xore/apiary/issues/144) and requalified under [issue #158](https://github.com/Xore/apiary/issues/158), 2026-08-01. Re-evaluated and re-approved under [issue #568](https://github.com/Xore/apiary/issues/568), 2026-08-05 — see [§ Issue #568 re-evaluation](#issue-568-re-evaluation-real-20gb-card) below; that section is now the current approved state, superseding the v2 table immediately above it.
+Status: completed for [issue #144](https://github.com/Xore/APIARY/issues/144) and requalified under [issue #158](https://github.com/Xore/APIARY/issues/158), 2026-08-01. Re-evaluated and re-approved under [issue #568](https://github.com/Xore/APIARY/issues/568), 2026-08-05 — see [§ Issue #568 re-evaluation](#issue-568-re-evaluation-real-20gb-card) below; that section is now the current approved state, superseding the v2 table immediately above it.
 
 This is a task-specific decision record for the three independent local-model
 slots in this repository. It does not assume that a model named in an earlier
@@ -185,7 +185,7 @@ inside every input class and scores the model's consequential fields, not just
 whether the forbidden phrase was repeated while rejecting it.
 
 The Hugging Face incident adds two operational lessons relevant to #66 and
-tracked more broadly in [issue #154](https://github.com/Xore/apiary/issues/154):
+tracked more broadly in [issue #154](https://github.com/Xore/APIARY/issues/154):
 
 1. encoded/chunked content must be decoded with bounded deterministic code and
    provenance before an LLM summarizes it; and
@@ -345,13 +345,13 @@ not a mutable tag or this prose table, is the runtime source of truth.
 ## Issue #568 re-evaluation (real 20GB card)
 
 The #144/#158 matrix above was run on a Quadro RTX 4000 (8192 MiB, compute
-capability 7.5). During the [#518](https://github.com/Xore/apiary/issues/518)
+capability 7.5). During the [#518](https://github.com/Xore/APIARY/issues/518)
 full-installation smoke test, live `nvidia-smi` revealed the actual analysis
 host card is an **RTX 4000 Ada Generation, 20475 MiB, compute capability
 8.9** — not merely a wrong VRAM figure for the same card, but a different
 card entirely (Turing → Ada Lovelace). Every model-selection decision above
 was bounded by a budget, and a candidate pool, that never fit the real
-hardware. [Issue #568](https://github.com/Xore/apiary/issues/568)
+hardware. [Issue #568](https://github.com/Xore/APIARY/issues/568)
 scoped whether that was worth re-running; this section is the result.
 
 ### Checking the #144/#158 rejection notes for stale VRAM reasoning

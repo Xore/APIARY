@@ -1,7 +1,7 @@
 # Guarded local LLM worker
 
 This is the offline-first implementation of
-[#66](https://github.com/Xore/apiary/issues/66). It produces advisory,
+[#66](https://github.com/Xore/APIARY/issues/66). It produces advisory,
 schema-validated session, text-payload, and daily-report documents for the
 `llm-analysis` Elasticsearch index. It never executes captured content,
 generates live honeypot responses, blocks traffic, or calls a hosted model.
@@ -52,7 +52,7 @@ settings, host/runtime record, and per-case gates are controlled by
 
 ## Captured-data canary
 
-Issue [#83](https://github.com/Xore/apiary/issues/83) uses a narrower
+Issue [#83](https://github.com/Xore/APIARY/issues/83) uses a narrower
 one-shot override for its authorized production U1 acceptance. It permits
 Elasticsearch and Ollama access, mounts no captured-payload directory, forces
 U2 and reports off, writes at most one session result, and exits:
@@ -110,9 +110,9 @@ itself instead of trusting a filename.
   remains unaffected.
 
 The cross-sensor decoder/correlation expansion remains tracked by
-[#154](https://github.com/Xore/apiary/issues/154). Dashboard delivery
+[#154](https://github.com/Xore/APIARY/issues/154). Dashboard delivery
 is #150, and the customizable analyzer workbench is explicitly tracked by
-[#155](https://github.com/Xore/apiary/issues/155).
+[#155](https://github.com/Xore/APIARY/issues/155).
 
 ## Tests
 

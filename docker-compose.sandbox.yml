@@ -1,7 +1,7 @@
 # docker-compose.sandbox.yml — Phase 4 gateway services for the Windows
 # detonation guest. See docs/sandbox/windows/IMPLEMENTATION_PLAN.md §Phase 4.
 #
-# ┌─ THIS IS NOT PART OF THE HONEYPOT STACK ──────────────────────────────┐
+# ┌─ THIS IS NOT PART OF APIARY ───────────────────────────────────────────┐
 # │ Do not merge these services into docker-compose.yml and do not start  │
 # │ them alongside it. They exist to answer live malware on an isolated   │
 # │ bridge and are started and stopped around a single detonation:        │

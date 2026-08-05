@@ -14,7 +14,7 @@ auto-renaming, protocol detection, and YARA rule generation.
 
 ## Install — build from source (recommended)
 
-Follow-up to [#192](https://github.com/Xore/apiary/issues/192):
+Follow-up to [#192](https://github.com/Xore/APIARY/issues/192):
 that issue's own release-zip-plus-strip fix works, but treats a symptom.
 The leaked directories (`ghidrassist_chat_artifacts/`, `lucene/`,
 `.claude/settings.local.json` — real data from the maintainer's own
@@ -87,7 +87,7 @@ this exact commit to build against anything older than 12.0.
 ## Install — pinned release zip (alternative, faster, needs the strip step)
 
 Still viable if a local `gradle` build isn't worth setting up — same pinned
-version, same [#192](https://github.com/Xore/apiary/issues/192)
+version, same [#192](https://github.com/Xore/APIARY/issues/192)
 digest-checking convention, but needs the leaked-path strip step below
 every time, and only exists for whichever Ghidra versions upstream chose
 to publish a prebuilt asset for (`12.0`/`12.1` for `2.2.0`, checked above).
@@ -114,7 +114,7 @@ echo "${GHIDRASSIST_SHA256}  ${GHIDRASSIST_ZIP}" | sha256sum -c -
 > in the tracked source tree (`.gitignore`'d, or just never committed), so
 > this is release-packaging leakage, not intentional content — but it's real
 > data from another user's machine, not fixtures. See
-> [#192](https://github.com/Xore/apiary/issues/192) for tracking.
+> [#192](https://github.com/Xore/APIARY/issues/192) for tracking.
 > Strip it before installing:
 >
 > ```bash

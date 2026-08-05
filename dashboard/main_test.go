@@ -1030,7 +1030,7 @@ func TestDashboardCSSAssetsAreEmbeddedAndReferenced(t *testing.T) {
 }
 
 // TestSemanticShellIsServerRendered executes the overview page template with
-// an empty snapshot and asserts the Xore theme shell primitives, every
+// an empty snapshot and asserts the XORE theme shell primitives, every
 // navigation route, and the command palette are present in the initial HTML.
 func TestSemanticShellIsServerRendered(t *testing.T) {
 	funcs := templateFuncs(nil, "")

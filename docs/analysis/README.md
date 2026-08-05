@@ -7,9 +7,9 @@ scripts that run on the sensor host.
 
 > The integration between this repository's dashboard and that pipeline is
 > designed in [`docs/github-analysis-integration-roadmap.md`](../github-analysis-integration-roadmap.md)
-> and tracked in [#73](https://github.com/Xore/apiary/issues/73)
+> and tracked in [#73](https://github.com/Xore/APIARY/issues/73)
 > (upstream YARA corpus sync — built, see [`yara/`](../../analysis/yara/)) and
-> [#74](https://github.com/Xore/apiary/issues/74) (the manual
+> [#74](https://github.com/Xore/APIARY/issues/74) (the manual
 > publisher, not built yet).
 > Publication is **not** automatic — see "Publication is manual" below.
 
@@ -48,7 +48,7 @@ flowchart LR
 | `dedupe-payloads.py` | Collapses duplicate captures by SHA-256 |
 | `yara/` | Networkless YARA scanner sidecar, local rules, and the vendored upstream corpus (`yara/sync-yara.sh`) |
 | `ghidra/` | Headless Ghidra reverse-engineering pipeline, local-model triage, and the analysis-host installer ([`ghidra/README.md`](ghidra/README.md)) |
-| `es-results-importer/` | Ships Ghidra/sandbox/GitHub-analysis/workbench-run results into Elasticsearch, read-only, alongside the raw event stream ([#378](https://github.com/Xore/apiary/issues/378)) |
+| `es-results-importer/` | Ships Ghidra/sandbox/GitHub-analysis/workbench-run results into Elasticsearch, read-only, alongside the raw event stream ([#378](https://github.com/Xore/APIARY/issues/378)) |
 | `elasticsearch-setup.sh`, `honeypot-kibana-setup.sh`, `filebeat.yml`, `evebox.yaml` | Log pipeline and search UI provisioning |
 | `backup-honeypot.sh`, `verify-backup.sh`, `log-maintenance.sh`, `RECOVERY.md` | Retention and recovery |
 | `verify-stack.py` | Post-deploy health check |

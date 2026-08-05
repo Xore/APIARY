@@ -1,6 +1,6 @@
 # LLM inference backend comparison: Ollama vs. llama.cpp vs. vLLM
 
-Status: research for [issue #598](https://github.com/Xore/apiary/issues/598), 2026-08-05.
+Status: research for [issue #598](https://github.com/Xore/APIARY/issues/598), 2026-08-05.
 
 This is a task-specific decision record, matching
 [`local-llm-model-evaluation.md`](local-llm-model-evaluation.md)'s format for
