@@ -140,7 +140,12 @@ def main():
     # on every deployment shape. See #112.
     bistreams_root_env = os.environ.get("BISTREAMS_ROOT", "")
     bistreams_root = Path(bistreams_root_env) if bistreams_root_env else None
-    bistreams_retention_days = int(os.environ.get("BISTREAMS_RETENTION_DAYS", "30"))
+    # #261: default derives from the shared HONEYPOT_RETENTION_DAYS knob at
+    # a 1:1 ratio, matching this repo's previous independent 30-day default.
+    # BISTREAMS_RETENTION_DAYS still overrides directly.
+    bistreams_retention_days = int(os.environ.get(
+        "BISTREAMS_RETENTION_DAYS", os.environ.get("HONEYPOT_RETENTION_DAYS", "30")
+    ))
     while True:
         if bistreams_root is not None:
             # Prune before dedupe, not after: this bounds what dedupe has to

@@ -58,7 +58,9 @@ services:
       - CHECK_INTERVAL=300
       - ROTATIONS=4
       - START_DELAY=120
-      - JSON_RETENTION_MINUTES=4320
+      # #261: JSON_RETENTION_MINUTES derives from this by default; set
+      # JSON_RETENTION_MINUTES directly to override just this service.
+      - HONEYPOT_RETENTION_DAYS=${HONEYPOT_RETENTION_DAYS:-30}
     volumes:
       - /opt/stacks/honeypot-stack/analysis/log-maintenance.sh:/usr/local/bin/log-maintenance.sh:ro
       - /opt/stacks/honeypot-stack/logs:/logs

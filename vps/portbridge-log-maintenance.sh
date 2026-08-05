@@ -17,7 +17,9 @@ set -eu
 # most one rotation-threshold old), so -mmin naturally protects it -- no
 # separate exclusion needed.
 
-retention_min="${RETENTION_MINUTES:-4320}"   # 3 days, matches suricata-log-maintenance.sh
+# #261: default derives from the shared HONEYPOT_RETENTION_DAYS knob, same
+# ratio and reasoning as suricata-log-maintenance.sh next to it.
+retention_min="${RETENTION_MINUTES:-$(( ${HONEYPOT_RETENTION_DAYS:-30} * 1440 / 10 ))}"
 interval="${CHECK_INTERVAL:-3600}"
 start_delay="${START_DELAY:-60}"
 log_dir="${LOG_DIR:-/logs/portbridge}"

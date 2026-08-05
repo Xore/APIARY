@@ -510,7 +510,9 @@ services:
     restart: unless-stopped
     command: ["sh", "/usr/local/bin/suricata-log-maintenance.sh"]
     environment:
-      - RETENTION_MINUTES=4320
+      # #261: RETENTION_MINUTES derives from this by default; set
+      # RETENTION_MINUTES directly to override just this service.
+      - HONEYPOT_RETENTION_DAYS=${HONEYPOT_RETENTION_DAYS:-30}
       - CHECK_INTERVAL=3600
       - START_DELAY=60
     volumes:
@@ -584,7 +586,9 @@ services:
     restart: unless-stopped
     command: ["sh", "/usr/local/bin/portbridge-log-maintenance.sh"]
     environment:
-      - RETENTION_MINUTES=4320
+      # #261: RETENTION_MINUTES derives from this by default; set
+      # RETENTION_MINUTES directly to override just this service.
+      - HONEYPOT_RETENTION_DAYS=${HONEYPOT_RETENTION_DAYS:-30}
       - CHECK_INTERVAL=3600
       - START_DELAY=60
     volumes:

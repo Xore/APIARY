@@ -16,7 +16,28 @@ curl -fsS -X PUT "$es_url/_snapshot/honeypot-fs" \
 # for suricata/portbridge/dead-letter/analysis-results (a fresh, plain
 # date-named index each day -- see analysis/filebeat.yml's output.elasticsearch
 # indices routing); ILM only has to delete the old ones once they age out.
-for spec in suricata-7d:7d dead-letter-60d:60d portbridge-30d:30d analysis-results-180d:180d; do
+# honeypot-30d is deliberately NOT in this loop -- see the #585 block below
+# for why it needs a real rollover action instead of this delete-only shape.
+#
+# #261: every retention window in this stack (these ILM policies, the
+# on-disk JSON retention in log-maintenance.sh/suricata-log-maintenance.sh/
+# portbridge-log-maintenance.sh, and BISTREAMS_RETENTION_DAYS in
+# dedupe-payloads.py) derives its default from this one operator-facing
+# knob, T-Pot-style, instead of each hardcoding its own number. Ratios below
+# match this stack's previous independent defaults (7d/30d, 60d/30d,
+# 180d/30d) so a plain default deploy behaves exactly as before; an operator
+# who sets HONEYPOT_RETENTION_DAYS scales every window at once.
+#
+# Policy *names* stay fixed (suricata-7d etc.) even though the actual
+# min_age they enforce is now dynamic -- they are stable ILM policy
+# identifiers referenced by index templates elsewhere in this file, not a
+# literal claim about the configured duration.
+retention_days="${HONEYPOT_RETENTION_DAYS:-30}"
+suricata_days=$(( retention_days * 7 / 30 ))
+[ "$suricata_days" -ge 1 ] || suricata_days=1
+for spec in "suricata-7d:${suricata_days}d" \
+            "dead-letter-60d:$(( retention_days * 2 ))d" "portbridge-30d:${retention_days}d" \
+            "analysis-results-180d:$(( retention_days * 6 ))d"; do
   name=${spec%%:*}
   age=${spec#*:}
   curl -fsS -X PUT "$es_url/_ilm/policy/$name" \
@@ -40,7 +61,7 @@ done
 # rather than growing one shard past a healthy size.
 curl -fsS -X PUT "$es_url/_ilm/policy/honeypot-30d" \
   -H 'Content-Type: application/json' \
-  --data-binary '{"policy":{"phases":{"hot":{"actions":{"rollover":{"max_age":"1d","max_primary_shard_size":"25gb"}}},"delete":{"min_age":"30d","actions":{"delete":{}}}}}}' >/dev/null
+  --data-binary "{\"policy\":{\"phases\":{\"hot\":{\"actions\":{\"rollover\":{\"max_age\":\"1d\",\"max_primary_shard_size\":\"25gb\"}}},\"delete\":{\"min_age\":\"${retention_days}d\",\"actions\":{\"delete\":{}}}}}}" >/dev/null
 
 # Geo enrichment is best-effort. Listener/startup events legitimately contain
 # an empty source IP and must still be indexed rather than rejected.
