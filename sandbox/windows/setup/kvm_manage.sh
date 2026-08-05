@@ -121,6 +121,15 @@ status_vm() {
 net_setup() {
     log "Creating sandbox network: $NET_NAME"
     [[ -f "$NET_XML" ]] || die "Network XML not found: $NET_XML"
+    # Always destroy+undefine first, not just define-if-missing: `virsh
+    # net-define` on an already-existing network fails outright ("network
+    # 'sandbox' already exists"), and even if it didn't, updating the
+    # persistent XML without a destroy first wouldn't reach the live dnsmasq
+    # config either. Same fix sandbox/ghosts/install-network.sh already
+    # applies for the GHOSTS network (see its own comment) -- confirmed live
+    # (#518) that this one needed the identical fix for a clean re-run.
+    virsh net-destroy "$NET_NAME" >/dev/null 2>&1 || true
+    virsh net-undefine "$NET_NAME" >/dev/null 2>&1 || true
     virsh net-define "$NET_XML"
     virsh net-start "$NET_NAME"
     virsh net-autostart "$NET_NAME"

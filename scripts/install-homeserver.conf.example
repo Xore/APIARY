@@ -70,3 +70,13 @@ BACKUP_HOST_PATH="<PATH_ON_BACKUP_HOST>" # e.g. /home/<user>/honeypot-backups/<d
 # one you want pihole actually serving, not whichever the default route
 # happens to prefer.
 PIHOLE_LAN_IP="<HOME_LAN_IP>"            # e.g. 192.168.1.10
+
+# --- Sandbox VM restore (GHOSTS + Windows detonation) ----------------------
+# Optional and gated separately from everything above: this is a 170G+
+# transfer (golden images, ISOs, VM disks) and a genuinely separate
+# subsystem (KVM/libvirt, not Docker). Set to "false" to skip it entirely.
+ENABLE_SANDBOX_RESTORE="false"
+# Only needed if ENABLE_SANDBOX_RESTORE=true. Same backup host as
+# BACKUP_HOST above, different subdirectory -- the one holding golden-images/,
+# isos/, vms/, etc. (e.g. <path>/home-sandbox).
+BACKUP_HOST_SANDBOX_PATH="<PATH_ON_BACKUP_HOST>"

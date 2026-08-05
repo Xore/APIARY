@@ -173,7 +173,7 @@ for var in INSTALL_HOSTNAME GIT_REPO_URL REPO_DIR HOME_WG_ADDRESS \
            VPS_WG_ADDRESS VPS_WG_ENDPOINT VPS_WG_PUBLIC_KEY \
            VPS_SSH_HOST VPS_SSH_PORT VPS_SSH_USER VPS_SSH_KEY ENABLE_GPU_STACK \
            INSTALL_TIMEZONE BACKUP_HOST BACKUP_HOST_USER BACKUP_HOST_KEY BACKUP_HOST_PATH \
-           PIHOLE_LAN_IP; do
+           PIHOLE_LAN_IP ENABLE_SANDBOX_RESTORE; do
   if [[ -z "${!var:-}" || "${!var}" == *'<'*'>'* ]]; then
     echo "Config value $var is unset or still a <PLACEHOLDER> in $CONFIG_FILE." >&2
     echo "Fill in every field before running unattended." >&2
@@ -185,6 +185,15 @@ done
 # by the .env-only backup pass, see #518 comment history), step_wireguard_config
 # generates a fresh keypair and step_wireguard_sync_vps_peer pushes the new
 # public key to the VPS side automatically.
+
+# BACKUP_HOST_SANDBOX_PATH is only needed when ENABLE_SANDBOX_RESTORE=true --
+# don't force every user to fill it in just to skip a 170G+ optional restore.
+if [[ "$ENABLE_SANDBOX_RESTORE" == "true" ]]; then
+  if [[ -z "${BACKUP_HOST_SANDBOX_PATH:-}" || "${BACKUP_HOST_SANDBOX_PATH}" == *'<'*'>'* ]]; then
+    echo "ENABLE_SANDBOX_RESTORE=true but BACKUP_HOST_SANDBOX_PATH is unset or still a <PLACEHOLDER>." >&2
+    exit 1
+  fi
+fi
 
 mkdir -p "$LOG_DIR" "$MARKER_DIR"
 RUN_LOG="$LOG_DIR/install-$(date +%Y%m%dT%H%M%SZ).log"
@@ -785,6 +794,108 @@ step_verify_elasticsearch_events() {
 }
 
 # ---------------------------------------------------------------------------
+# Phase 11 — sandbox VM restore (GHOSTS + Windows detonation), gated behind
+# ENABLE_SANDBOX_RESTORE since it's a 170G+ transfer and a genuinely separate
+# subsystem (KVM/libvirt, not Docker) from everything above.
+# ---------------------------------------------------------------------------
+step_libvirt_install() {
+  with_retry 3 15 env DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    qemu-system-x86 libvirt-daemon-system libvirt-clients bridge-utils \
+    virtinst libguestfs-tools ovmf
+  systemctl enable --now libvirtd
+}
+
+step_sandbox_backup_restore() {
+  # /var/dockge/sandbox is a hardcoded absolute path baked into multiple
+  # files (win11-ghosts-kvm.xml's <source file=.../>, kvm_manage.sh's
+  # SANDBOX_ROOT default, provision-golden-image.sh's default arg) -- it
+  # must land exactly there, not somewhere symlinked or renamed.
+  mkdir -p /var/dockge/sandbox
+  with_retry 2 30 rsync -a -e "ssh -i $BACKUP_HOST_KEY -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10" \
+    "${BACKUP_HOST_USER}@${BACKUP_HOST}:${BACKUP_HOST_SANDBOX_PATH}/" /var/dockge/sandbox/
+}
+
+step_sandbox_checksum_verify() {
+  # Golden images are the root of trust for every detonation guest cloned
+  # from them (see kvm_manage.sh's own comment on this) -- verify every
+  # .sha256 the backup carried rather than trusting the transfer blindly.
+  local sums failures=0
+  while IFS= read -r -d '' sums; do
+    ( cd "$(dirname "$sums")" && sha256sum -c "$(basename "$sums")" ) || failures=$((failures + 1))
+  done < <(find /var/dockge/sandbox -name "*.sha256" -print0)
+  [[ $failures -eq 0 ]]
+}
+
+# Both win11-ghosts and win11-sandbox declare <nvram template='.../OVMF_VARS_4M.ms.fd'
+# format='qcow2'> -- the template itself is raw, and this box's libvirt
+# (12.0.0) refuses to do the raw->qcow2 conversion on first boot: "Operation
+# not supported: conversion of the nvram template to another target format
+# is not supported". Confirmed live (#518). Pre-creating the target file
+# with the right format makes libvirt find it already there and skip the
+# conversion path entirely, rather than working around it after the fact
+# every time.
+ensure_nvram_vars() {
+  local target="$1"
+  [[ -f "$target" ]] && return 0
+  qemu-img convert -f raw -O qcow2 /usr/share/OVMF/OVMF_VARS_4M.ms.fd "$target"
+  chown libvirt-qemu:kvm "$target"
+}
+
+step_ghosts_network_setup() {
+  bash "$REPO_DIR/sandbox/ghosts/install-network.sh" net-setup
+}
+
+step_ghosts_host_install() {
+  # --skip-enroll-test: the full test (build Ghosts.Client.Universal from
+  # source, run it once, poll the API for enrollment) is the real
+  # confirmation bar per sandbox/ghosts/README.md, but it's slow and this
+  # step already follows a `dotnet publish`-from-source container build --
+  # run the enrollment test manually after a restore, not on every
+  # unattended run.
+  bash "$REPO_DIR/sandbox/ghosts/install-host.sh" --skip-enroll-test
+}
+
+step_ghosts_vm_start() {
+  ensure_nvram_vars /var/lib/libvirt/qemu/nvram/win11-ghosts_VARS.qcow2
+  virsh list --all --name | grep -qx win11-ghosts \
+    || virsh define "$REPO_DIR/sandbox/ghosts/win11-ghosts-kvm.xml"
+  virsh domstate win11-ghosts | grep -q running || virsh start win11-ghosts
+}
+
+step_windows_sandbox_network_setup() {
+  bash "$REPO_DIR/sandbox/windows/setup/kvm_manage.sh" net-setup
+}
+
+step_windows_sandbox_vm_create() {
+  ensure_nvram_vars /var/lib/libvirt/qemu/nvram/win11-sandbox_VARS.qcow2
+  if virsh list --all --name | grep -qx win11-sandbox; then
+    echo "win11-sandbox already defined -- skipping create (use kvm_manage.sh revert to reset to golden)"
+    return 0
+  fi
+  # kvm_manage.sh create refuses to run if $VM_DISK already exists (it may
+  # hold a detonated guest, see its own comment) -- a restore can leave a
+  # pre-existing thin-clone from before the backup that isn't a live
+  # detonation. Confirmed live (#518): safe to clear before a first-time
+  # restore create, since the domain isn't defined yet at that point.
+  rm -f /var/dockge/sandbox/vms/win11-sandbox.qcow2
+  bash "$REPO_DIR/sandbox/windows/setup/kvm_manage.sh" create
+}
+
+step_windows_sandbox_vm_start() {
+  virsh domstate win11-sandbox | grep -q running || virsh start win11-sandbox
+}
+
+step_sandbox_verify_running() {
+  local dom rc=0
+  for dom in win11-ghosts win11-sandbox; do
+    local state; state=$(virsh domstate "$dom" 2>&1)
+    echo "$dom: $state"
+    [[ "$state" == "running" ]] || rc=1
+  done
+  return $rc
+}
+
+# ---------------------------------------------------------------------------
 # Run
 # ---------------------------------------------------------------------------
 log "install-homeserver.sh starting — log: $RUN_LOG"
@@ -847,6 +958,30 @@ fi
 run_step verify-containers     "Check for unhealthy containers"     step_verify_containers_healthy
 run_step verify-exited         "Check for non-zero-exit containers" step_verify_exited
 run_step verify-es-events      "Check Elasticsearch is reachable"   step_verify_elasticsearch_events
+
+if [[ "$ENABLE_SANDBOX_RESTORE" == "true" ]]; then
+  run_step libvirt-install        "Install libvirt/KVM/QEMU"              step_libvirt_install
+  run_step sandbox-restore        "Pull sandbox backup from LAN host"     step_sandbox_backup_restore
+  run_step sandbox-checksum       "Verify golden-image checksums"         step_sandbox_checksum_verify
+  run_step ghosts-network         "Set up GHOSTS isolated libvirt network" step_ghosts_network_setup
+  run_step ghosts-host            "Deploy ghosts-api/ghosts-postgres"      step_ghosts_host_install
+  run_step ghosts-vm              "Define + start win11-ghosts VM"         step_ghosts_vm_start
+  run_step windows-sandbox-network "Set up Windows sandbox libvirt network" step_windows_sandbox_network_setup
+  run_step windows-sandbox-create "Create win11-sandbox thin-clone VM"     step_windows_sandbox_vm_create
+  run_step windows-sandbox-start  "Start win11-sandbox VM"                 step_windows_sandbox_vm_start
+  run_step sandbox-verify         "Verify both sandbox VMs running"        step_sandbox_verify_running
+else
+  skip_step libvirt-install "Install libvirt/KVM/QEMU" "ENABLE_SANDBOX_RESTORE=false"
+  skip_step sandbox-restore "Pull sandbox backup from LAN host" "ENABLE_SANDBOX_RESTORE=false"
+  skip_step sandbox-checksum "Verify golden-image checksums" "ENABLE_SANDBOX_RESTORE=false"
+  skip_step ghosts-network "Set up GHOSTS isolated libvirt network" "ENABLE_SANDBOX_RESTORE=false"
+  skip_step ghosts-host "Deploy ghosts-api/ghosts-postgres" "ENABLE_SANDBOX_RESTORE=false"
+  skip_step ghosts-vm "Define + start win11-ghosts VM" "ENABLE_SANDBOX_RESTORE=false"
+  skip_step windows-sandbox-network "Set up Windows sandbox libvirt network" "ENABLE_SANDBOX_RESTORE=false"
+  skip_step windows-sandbox-create "Create win11-sandbox thin-clone VM" "ENABLE_SANDBOX_RESTORE=false"
+  skip_step windows-sandbox-start "Start win11-sandbox VM" "ENABLE_SANDBOX_RESTORE=false"
+  skip_step sandbox-verify "Verify both sandbox VMs running" "ENABLE_SANDBOX_RESTORE=false"
+fi
 
 print_summary
 exit $?
