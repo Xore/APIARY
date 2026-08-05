@@ -38,6 +38,19 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # #239: measured baseline, same methodology as dnp3's read_only above.
+    # dicompot/Dockerfile's own RUN mkdir -p /dicom-store is dead weight
+    # from upstream's vendored server -- confirmed by pulling and grepping
+    # github.com/nsmfoo/dicompot's actual source (go mod download) for any
+    # os.Create/os.OpenFile/os.Mkdir/os.Remove: none exist anywhere in that
+    # package. main.go (this repo's own replacement entrypoint) writes only
+    # LOG_FILE, which lands on the /var/log/honeypot bind mount below and is
+    # therefore unaffected. No tmpfs entry needed: verified locally
+    # (sandboxed Docker, not the homeserver) that the container starts
+    # healthy, accepts a real connection, and successfully writes both the
+    # "listening" and "connect" events to the bind-mounted log file with
+    # read_only: true set.
+    read_only: true
     networks:
       - dicompot_net
     deploy:
