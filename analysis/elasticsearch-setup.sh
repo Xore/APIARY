@@ -61,7 +61,7 @@ done
 # rather than growing one shard past a healthy size.
 curl -fsS -X PUT "$es_url/_ilm/policy/honeypot-30d" \
   -H 'Content-Type: application/json' \
-  --data-binary "{\"policy\":{\"phases\":{\"hot\":{\"actions\":{\"rollover\":{\"max_age\":\"1d\",\"max_primary_shard_size\":\"25gb\"}}},\"delete\":{\"min_age\":\"${retention_days}d\",\"actions\":{\"delete\":{}}}}}}" >/dev/null
+  --data-binary '{"policy":{"phases":{"hot":{"actions":{"rollover":{"max_age":"1d","max_primary_shard_size":"25gb"}}},"delete":{"min_age":"30d","actions":{"delete":{}}}}}}' >/dev/null
 
 # Geo enrichment is best-effort. Listener/startup events legitimately contain
 # an empty source IP and must still be indexed rather than rejected.
