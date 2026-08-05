@@ -228,14 +228,31 @@ type sandboxQueueStatus struct {
 	Jobs        []sandboxQueueJob  `json:"jobs"`
 }
 
+// goldenImageStatus is #86's staleness report for win11-analysis.qcow2 --
+// written on a host-side timer (golden-image-status.sh) into
+// WINDOWS_SANDBOX_RESULTS_DIR, the same directory already bind-mounted
+// read-only into the dashboard for per-job results, so no new mount/env var
+// is needed to read it back out here.
+type goldenImageStatus struct {
+	BuiltAt          string `json:"built_at"`
+	AgeDays          int    `json:"age_days"`
+	ChecksumWritten  bool   `json:"checksum_written"`
+	ChecksumVerified bool   `json:"checksum_verified"`
+	StaleMonthly     bool   `json:"stale_monthly"`
+	StaleISOEval     bool   `json:"stale_iso_eval"`
+	CheckedAt        string `json:"checked_at"`
+	Error            string `json:"error"`
+}
+
 type sandboxPageData struct {
 	pageMeta
-	Generated  time.Time
-	Rows       []sandboxResult
-	Detail     *sandboxResult
-	Status     sandboxQueueStatus
-	Query      string
-	StaticYARA []string
+	Generated   time.Time
+	Rows        []sandboxResult
+	Detail      *sandboxResult
+	Status      sandboxQueueStatus
+	GoldenImage *goldenImageStatus
+	Query       string
+	StaticYARA  []string
 	// Analysis carries the ?analysis= marker set by the submit redirect so the
 	// detail page can confirm a queued re-analysis in place.
 	Analysis string
@@ -559,8 +576,27 @@ func readSandboxQueueFile(dir string) (sandboxQueueStatus, bool) {
 	return status, true
 }
 
+// loadGoldenImageStatus reads golden-image-status.sh's output. Missing or
+// unreadable is not an error: the timer may not have run yet on a fresh
+// install, and this is an informational staleness badge, not a health gate.
+func loadGoldenImageStatus() *goldenImageStatus {
+	windows := getenv("WINDOWS_SANDBOX_RESULTS_DIR", "")
+	if windows == "" {
+		return nil
+	}
+	body, err := os.ReadFile(filepath.Join(windows, "golden-image-status.json"))
+	if err != nil || len(body) > 16*1024 {
+		return nil
+	}
+	var status goldenImageStatus
+	if json.Unmarshal(body, &status) != nil {
+		return nil
+	}
+	return &status
+}
+
 func sandboxData(job, query string) (sandboxPageData, error) {
-	data := sandboxPageData{Generated: time.Now(), Rows: loadSandboxResults(), Status: loadSandboxStatus(), Query: strings.TrimSpace(query)}
+	data := sandboxPageData{Generated: time.Now(), Rows: loadSandboxResults(), Status: loadSandboxStatus(), GoldenImage: loadGoldenImageStatus(), Query: strings.TrimSpace(query)}
 	if data.Query != "" {
 		needle := strings.ToLower(data.Query)
 		filtered := data.Rows[:0]
