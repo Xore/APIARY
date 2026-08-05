@@ -75,7 +75,7 @@ worker milestones.
 | Fact | Value | Verify with |
 |---|---|---|
 | GPU | NVIDIA Quadro RTX 4000 | `nvidia-smi -L` |
-| VRAM | 8192 MiB total | `nvidia-smi --query-gpu=memory.total --format=csv` |
+| VRAM | 20475 MiB (~20 GB) total | `nvidia-smi --query-gpu=memory.total --format=csv` |
 | Compute capability | 7.5 (Turing) | `nvidia-smi --query-gpu=compute_cap --format=csv` |
 | Driver / CUDA | 580.173.02 / CUDA 13.0 | `nvidia-smi` |
 | Container GPU passthrough | nvidia-container-toolkit 1.19.1, `nvidia` runtime registered | `docker info \| grep -i runtime` |
@@ -87,8 +87,13 @@ worker milestones.
 
 **Implications:**
 
-- 8 GB VRAM fits **one** 7–8B-class quantized model (Q4_K_M ≈ 4.7–5.2 GB
-  weights + ~1 GB KV cache) with headroom. Do not load two chat models.
+- ~20 GB VRAM (confirmed live via `nvidia-smi`, corrected from an earlier
+  8192 MiB figure that didn't match the actual card — see #518) has
+  headroom well beyond a single 7–8B-class quantized model (Q4_K_M ≈
+  4.7–5.2 GB weights + ~1 GB KV cache). `OLLAMA_MAX_LOADED_MODELS=1` below
+  is still the deployed default (serialization for predictability, not a
+  VRAM necessity) — whether the extra headroom is worth using (larger
+  model, multiple loaded models) is a re-evaluation, not assumed here.
 - Turing (sm_75) has no bf16 support; use quantized GGUF via Ollama/llama.cpp,
   not raw fp16 transformers inference.
 - GPU occupancy is dynamic. Never infer availability from the historical idle
@@ -161,10 +166,12 @@ Design decisions:
 
 ## 5. Model Selection & VRAM Budget
 
-GPU: 8192 MiB. Reserve ~500 MiB for driver/context overhead, so target
-≤ 7.3 GiB GPU-resident at once. Larger total allocations may offload to system
-RAM; that is supported on this host. Accuracy outranks residency and latency,
-but only one chat model may be loaded at a time.
+GPU: 20475 MiB (~20 GB, corrected from an earlier 8192 MiB figure — see
+#518). Reserve ~500 MiB for driver/context overhead, so target ≤ 19.5 GiB
+GPU-resident at once. Larger total allocations may offload to system RAM;
+that is supported on this host. Accuracy outranks residency and latency,
+but only one chat model may be loaded at a time (current deployed default,
+not a hard VRAM constraint at this card size).
 
 | Role | Model | Approx. VRAM | Why |
 |---|---|---|---|

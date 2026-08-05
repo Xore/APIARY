@@ -18,6 +18,15 @@ credentials/
 scripts/install-homeserver.conf
 !scripts/install-homeserver.conf.example
 
+# scripts/install-homeserver.sh symlinks compose.yml -> the real
+# docker-compose.*.yml next to it so relative build contexts resolve
+# correctly once /var/dockge/stacks/<name> is itself a directory symlink
+# back into this checkout (see step_ghidra_stack_provision /
+# step_ml_worker_start) -- runtime-generated, not source.
+analysis/ghidra/compose.yml
+analysis/ghidra/compose.gpu.yml
+ml-worker/compose.yml
+
 # Runtime telemetry, captured payloads, and persistent state
 logs/
 state/

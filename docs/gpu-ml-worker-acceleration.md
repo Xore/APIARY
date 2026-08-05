@@ -69,7 +69,9 @@ Observed on the homeserver on 2026-07-28 (same machine as the LLM guide) and
 not re-checked since. [#82](https://github.com/Xore/honeypot-stack/issues/82)
 produces the record that replaces this list; re-verify before pinning anything.
 
-- GPU: Quadro RTX 4000, 8192 MiB, **compute capability 7.5 (Turing)**.
+- GPU: Quadro RTX 4000, 20475 MiB (~20 GB, corrected from an earlier 8192 MiB
+  figure that didn't match the live card — see #518), **compute capability
+  7.5 (Turing)**.
 - Driver 580.173.02 (CUDA 13.0) — backward-compatible with CUDA 12.x
   runtime wheels.
 - nvidia-container-toolkit 1.19.1 present; `docker run --rm --gpus all
@@ -180,8 +182,9 @@ by §5, not by `mem_limit`.
 
 ## 5. GPU Sharing Contract with the LLM Worker
 
-One RTX 4000 (8192 MiB) is shared between `ollama` (LLM guide) and
-`ml-worker`. Both guides must be deployed with these numbers or not at all.
+One RTX 4000 (20475 MiB / ~20 GB, corrected from an earlier 8192 MiB
+figure — see #518) is shared between `ollama` (LLM guide) and `ml-worker`.
+Both guides must be deployed with these numbers or not at all.
 
 | Consumer | Typical VRAM | When active |
 |---|---|---|
@@ -192,8 +195,12 @@ One RTX 4000 (8192 MiB) is shared between `ollama` (LLM guide) and
 Rules:
 
 - **Do not overlap GPU retraining with a loaded chat model.** The #158 accuracy
-  winner plus a 1–2 GiB retrain can exceed the 8192 MiB card. Unload Ollama or
-  use the documented CPU fallback before retraining; also avoid collisions by scheduling: set
+  winner (~6.1 GiB) plus a 1–2 GiB retrain fits comfortably within the actual
+  20475 MiB card (this rule was written against an incorrect 8192 MiB figure
+  that made the overlap look tight — see #518; re-evaluate whether this
+  restriction is still needed at the real card size, tracked there). Until
+  that's decided, keep unloading Ollama or using the documented CPU fallback
+  before retraining; also avoid collisions by scheduling: set
   `RETRAIN_INTERVAL` so retrains land at least 1 h away from the LLM daily
   report (`DAILY_REPORT_HOUR`), e.g. retrain at 00:00/06:00/12:00/18:00
   UTC with the report at 06:00 → shift retrain to 01:00/07:00/13:00/19:00.

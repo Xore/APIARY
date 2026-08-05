@@ -51,3 +51,22 @@ ENABLE_GPU_STACK="true"
 
 # --- Timezone / locale ----------------------------------------------------
 INSTALL_TIMEZONE="<TIMEZONE>"            # e.g. Europe/Berlin
+
+# --- Secret restore (LAN backup host) --------------------------------------
+# Where the pre-rebuild .env backup lives (see #518's backup-blocker pass).
+# BACKUP_HOST_PATH is the directory containing one subfolder per Dockge
+# stack, each holding that stack's .env (e.g. <path>/honeypot-cowrie/.env).
+BACKUP_HOST="<BACKUP_HOST_IP_OR_HOST>"
+BACKUP_HOST_USER="<BACKUP_HOST_SSH_USER>"
+BACKUP_HOST_KEY="<PATH_TO_PRIVATE_KEY>"  # e.g. /home/<user>/.ssh/backup_host_key
+BACKUP_HOST_PATH="<PATH_ON_BACKUP_HOST>" # e.g. /home/<user>/honeypot-backups/<date>/home-env
+
+# --- Pihole (reconstructed; not part of this repo) -------------------------
+# Pihole is real home-LAN DNS infra, not a honeypot component -- it must NOT
+# bind 0.0.0.0 or the honeypot sensors' WireGuard IP (HOME_WG_ADDRESS above),
+# since hp-dns-honeypot already owns port 53/udp there and a wildcard bind
+# collides with it (confirmed live, #518). Pick the actual home-LAN-facing
+# interface IP on this box -- if it has more than one LAN interface, use the
+# one you want pihole actually serving, not whichever the default route
+# happens to prefer.
+PIHOLE_LAN_IP="<HOME_LAN_IP>"            # e.g. 192.168.1.10
