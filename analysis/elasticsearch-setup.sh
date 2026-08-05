@@ -569,6 +569,40 @@ curl -fsS -X PUT "$es_url/_index_template/dashboard-generated-reports" \
   }
 }' >/dev/null
 
+# Cowrie TTY session recordings (#638/#612, es-results-importer's
+# cowrie_ttylog source): the dashboard must not read these off the
+# `/logs/cowrie/tty` bind mount (#611) directly either, so the importer
+# base64-encodes each file straight into its own document here, keyed by
+# the filename cowrie itself already renames the file to on session close
+# (its own sha256 content hash, ttylog.py's ttylog_inputhash) -- naturally
+# idempotent, a re-import of the same file overwrites the same doc rather
+# than duplicating it, and no id_fields lookup is needed the way the
+# JSON-payload indices above need one. No ILM: these are content-addressed,
+# immutable once written, and operator-significant evidence -- the same
+# "keep, don't age out" treatment #611 gave the raw file (no retention
+# handling in log-maintenance.sh, matching cowrie's own downloads/ dir).
+curl -fsS -X PUT "$es_url/_index_template/cowrie-ttylog" \
+  -H 'Content-Type: application/json' \
+  --data-binary '{
+  "index_patterns": ["cowrie-ttylog-v1"],
+  "priority": 460,
+  "template": {
+    "settings": {
+      "index.number_of_replicas": 0,
+      "index.refresh_interval": "30s",
+      "index.mapping.total_fields.limit": 50
+    },
+    "mappings": {
+      "properties": {
+        "shasum": { "type": "keyword" },
+        "size_bytes": { "type": "long" },
+        "imported_at": { "type": "date" },
+        "ttylog_base64": { "type": "binary" }
+      }
+    }
+  }
+}' >/dev/null
+
 # Payload Workbench runs (#405 follow-up, workbench_es.go): the run's own
 # document ID IS its idempotency key (workbenchIdempotency's deterministic
 # hash of payload+recipe+analyzer selection, prefixed "run_"), so a duplicate

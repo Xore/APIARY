@@ -28,6 +28,7 @@ type event struct {
 	session     string // cowrie session id — correlates every event in one login
 	shasum      string // sha-256 of a captured payload (cowrie downloads)
 	download    string // where the attacker tried to write the payload
+	ttyReplay   string // /tty/<shasum> download+replay link (cowrie.log.closed only, #612/#638)
 	clientVer   string // ssh/telnet client banner (cowrie) — cheap fingerprint
 	fingerprint string // user-agent/client identity reused across sensors
 	fingerKind  string // HASSH / JA3 / JA4 / User-Agent / client banner
@@ -212,6 +213,14 @@ func classify(e map[string]any, dirSensor string) event {
 			ev.detail = "TTY session recorded"
 			if ev.download != "" {
 				ev.detail += ": " + ev.download
+			}
+			// #638: the raw ev.download path above is container-internal and
+			// was never reachable from the dashboard -- ev.ttyReplay is the
+			// real, dashboard-served link (once es-results-importer's
+			// cowrie_ttylog source has mirrored the file into ES), keyed by
+			// the same shasum the file gets renamed to on session close.
+			if ev.shasum != "" {
+				ev.ttyReplay = "/tty/" + ev.shasum
 			}
 		case eid == "cowrie.session.connect":
 			ev.detail = "connect"

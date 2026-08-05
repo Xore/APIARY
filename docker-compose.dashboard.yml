@@ -394,6 +394,11 @@ services:
       - /var/lib/honeypot-revdeck/results:/revdeck-results:ro
       - dashboard-state:/state:ro
       - es-importer-state:/state-importer
+      # #638/#612: cowrie's persisted TTY session recordings (#611) --
+      # read-only, same bind-mount source path the cowrie service itself
+      # writes into, mirrored into ES so the dashboard never has to open
+      # this file directly.
+      - /opt/stacks/honeypot-stack/logs/cowrie/tty:/cowrie-tty:ro
     environment:
       - ES_HOST=http://elasticsearch:9200
       - IMPORT_INTERVAL=${ES_IMPORTER_INTERVAL:-300}
@@ -404,6 +409,7 @@ services:
       - WINDOWS_SANDBOX_RESULTS_DIR=/windows-sandbox-results
       - GITHUB_ANALYSIS_RESULTS_DIR=/github-analysis-results
       - REVDECK_RESULTS_DIR=/revdeck-results
+      - COWRIE_TTYLOG_DIR=/cowrie-tty
       - TZ=Europe/Berlin
     networks:
       - honeynet

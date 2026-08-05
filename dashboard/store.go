@@ -162,6 +162,7 @@ type storedEvent struct {
 	Session       string  `json:",omitempty"`
 	Shasum        string  `json:",omitempty"`
 	Download      string  `json:",omitempty"`
+	TTYReplay     string  `json:",omitempty"`
 	ClientVer     string  `json:",omitempty"`
 	Fingerprint   string  `json:",omitempty"`
 	FingerKind    string  `json:",omitempty"`
