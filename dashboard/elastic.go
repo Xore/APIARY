@@ -525,6 +525,62 @@ func (c *esClient) searchNamespace(index, field string, size int) ([]json.RawMes
 	return out, nil
 }
 
+// esStorageStats is the brief cluster/storage summary the admin settings
+// modal's Elasticsearch pane shows (#647): a metric-grid glance, not a
+// dashboard of its own -- deep exploration already exists via the
+// Elasticsearch history pane and Kibana. Read-only, same as history/
+// deadLetters above.
+type esStorageStats struct {
+	ClusterStatus  string `json:"cluster_status"`
+	DataNodes      int    `json:"data_nodes"`
+	IndexCount     int    `json:"index_count"`
+	DocCount       int64  `json:"doc_count"`
+	StoreSizeBytes int64  `json:"store_size_bytes"`
+}
+
+func (c *esClient) storageStats() (esStorageStats, error) {
+	var out esStorageStats
+
+	health, err := c.request("/_cluster/health")
+	if err != nil {
+		return out, err
+	}
+	var h struct {
+		Status          string `json:"status"`
+		NumberDataNodes int    `json:"number_of_data_nodes"`
+	}
+	if err := json.Unmarshal(health, &h); err != nil {
+		return out, fmt.Errorf("parse cluster health: %w", err)
+	}
+	out.ClusterStatus = h.Status
+	out.DataNodes = h.NumberDataNodes
+
+	stats, err := c.request("/_stats/store,docs")
+	if err != nil {
+		return out, err
+	}
+	var s struct {
+		Indices map[string]json.RawMessage `json:"indices"`
+		All     struct {
+			Total struct {
+				Docs struct {
+					Count int64 `json:"count"`
+				} `json:"docs"`
+				Store struct {
+					SizeInBytes int64 `json:"size_in_bytes"`
+				} `json:"store"`
+			} `json:"total"`
+		} `json:"_all"`
+	}
+	if err := json.Unmarshal(stats, &s); err != nil {
+		return out, fmt.Errorf("parse index stats: %w", err)
+	}
+	out.IndexCount = len(s.Indices)
+	out.DocCount = s.All.Total.Docs.Count
+	out.StoreSizeBytes = s.All.Total.Store.SizeInBytes
+	return out, nil
+}
+
 func (c *esClient) history(w http.ResponseWriter, r *http.Request, attachment bool) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))

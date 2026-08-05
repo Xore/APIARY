@@ -655,6 +655,16 @@
            and /export/history.json endpoints the standalone /history page
            used. -->
       <section class="hp-settings-pane" data-hp-pane="elasticsearch" aria-label="Elasticsearch history" hidden>
+        <!-- #647: a brief storage glance above the query tool below -- a
+             metric-grid summary, same shape as the Services pane's own
+             summary, not a second Kibana. -->
+        <div class="metric-grid" data-hp-es-storage-summary hidden>
+          <div class="metric"><div class="metric__label">Cluster</div><div class="metric__value" data-hp-es-storage-metric="status">—</div><div class="metric__trend" data-hp-es-storage-metric-trend="status"></div></div>
+          <div class="metric"><div class="metric__label">Indices</div><div class="metric__value" data-hp-es-storage-metric="indices">—</div><div class="metric__trend text-secondary">Tracked indices</div></div>
+          <div class="metric"><div class="metric__label">Documents</div><div class="metric__value" data-hp-es-storage-metric="docs">—</div><div class="metric__trend text-secondary">Across every index</div></div>
+          <div class="metric"><div class="metric__label">Storage</div><div class="metric__value" data-hp-es-storage-metric="size">—</div><div class="metric__trend text-secondary">Primary + replica shards</div></div>
+        </div>
+        <p class="card__meta" data-hp-es-storage-error hidden></p>
         <section class="card hp-field" data-hp-search="elasticsearch history query search documents indexed">
           <div class="card__header">
             <div><h3>Elasticsearch history</h3><p class="card__meta">Run a query_string search across every indexed honeypot and Suricata document.</p></div>
