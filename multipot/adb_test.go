@@ -38,7 +38,11 @@ func TestADBHandshakeLogsIdentityAndRepliesCNXN(t *testing.T) {
 	client, server := net.Pipe()
 	var output bytes.Buffer
 	done := make(chan struct{})
-	go func() { defer close(done); defer server.Close(); handleADB(server, &logger{out: &output}, 5555) }()
+	go func() {
+		defer close(done)
+		defer server.Close()
+		handleADB(server, &sessionLogger{logger: &logger{out: &output}}, 5555)
+	}()
 
 	identity := []byte("host::pixel_6:features=cmd,shell_v2")
 	client.Write(encodeADB(adbCNXN, 0x01000000, 4096, identity))
@@ -66,7 +70,11 @@ func TestADBOpenLogsDestinationAndClosesTheStream(t *testing.T) {
 	client, server := net.Pipe()
 	var output bytes.Buffer
 	done := make(chan struct{})
-	go func() { defer close(done); defer server.Close(); handleADB(server, &logger{out: &output}, 5555) }()
+	go func() {
+		defer close(done)
+		defer server.Close()
+		handleADB(server, &sessionLogger{logger: &logger{out: &output}}, 5555)
+	}()
 
 	client.Write(encodeADB(adbCNXN, 0x01000000, 4096, []byte("host::")))
 	r := bufio.NewReader(client)
@@ -101,7 +109,11 @@ func TestADBRejectsOversizedPayload(t *testing.T) {
 	client, server := net.Pipe()
 	var output bytes.Buffer
 	done := make(chan struct{})
-	go func() { defer close(done); defer server.Close(); handleADB(server, &logger{out: &output}, 5555) }()
+	go func() {
+		defer close(done)
+		defer server.Close()
+		handleADB(server, &sessionLogger{logger: &logger{out: &output}}, 5555)
+	}()
 
 	header := make([]byte, 24)
 	binary.LittleEndian.PutUint32(header[0:4], adbCNXN)

@@ -29,7 +29,7 @@ func readLine(r *bufio.Reader) (string, bool) {
 /* ---------------- FTP (port 21) ----------------
    vsFTPd-style banner; capture USER/PASS, always "530 Login incorrect". */
 
-func handleFTP(c net.Conn, log *logger, port int) {
+func handleFTP(c net.Conn, log *sessionLogger, port int) {
 	ip := srcIP(c)
 	r := bufio.NewReader(c)
 	fmt.Fprint(c, "220 (vsFTPd 3.0.5)\r\n")
@@ -67,7 +67,7 @@ func handleFTP(c net.Conn, log *logger, port int) {
 /* ---------------- SMTP (port 25) ----------------
    Postfix-style banner; capture AUTH LOGIN / AUTH PLAIN credentials. */
 
-func handleSMTP(c net.Conn, log *logger, port int) {
+func handleSMTP(c net.Conn, log *sessionLogger, port int) {
 	ip := srcIP(c)
 	r := bufio.NewReader(c)
 	fmt.Fprint(c, "220 mail01.nexusai.local ESMTP Postfix (Ubuntu)\r\n")
@@ -137,7 +137,7 @@ func decodeAuthPlain(payload string) (user, pass string) {
    Speaks enough RESP to capture AUTH passwords and the cron/SLAVEOF/MODULE
    payloads that Redis attacks drop. Answers +OK/+PONG to keep them talking. */
 
-func handleRedis(c net.Conn, log *logger, port int) {
+func handleRedis(c net.Conn, log *sessionLogger, port int) {
 	ip := srcIP(c)
 	r := bufio.NewReader(c)
 	for {
@@ -291,7 +291,7 @@ func readRESP(r *bufio.Reader) ([]string, bool) {
    Send a v10 server greeting, read the login packet, capture the username,
    answer with "Access denied". Password arrives hashed, so it is not logged. */
 
-func handleMySQL(c net.Conn, log *logger, port int) {
+func handleMySQL(c net.Conn, log *sessionLogger, port int) {
 	ip := srcIP(c)
 	c.Write(buildMySQLGreeting())
 
@@ -354,7 +354,7 @@ func mysqlHeader(n, seq int) []byte {
    Read the startup message (captures the user), request a cleartext password,
    capture it, then return an auth-failed error. */
 
-func handlePostgres(c net.Conn, log *logger, port int) {
+func handlePostgres(c net.Conn, log *sessionLogger, port int) {
 	ip := srcIP(c)
 	r := bufioReader(c)
 
@@ -431,7 +431,7 @@ func writePGError(c net.Conn, user, ip string) {
 /* ---------------- VNC (port 5900) ----------------
    Exchange RFB versions, offer VNC auth, capture the challenge response. */
 
-func handleVNC(c net.Conn, log *logger, port int) {
+func handleVNC(c net.Conn, log *sessionLogger, port int) {
 	ip := srcIP(c)
 	r := bufioReader(c)
 	c.Write([]byte("RFB 003.008\n"))
@@ -467,7 +467,7 @@ func handleVNC(c net.Conn, log *logger, port int) {
 /* ---------------- Elasticsearch (port 9200) ----------------
    Minimal HTTP: log the request line, return a believable ES root document. */
 
-func handleElastic(c net.Conn, log *logger, port int) {
+func handleElastic(c net.Conn, log *sessionLogger, port int) {
 	ip := srcIP(c)
 	r := bufioReader(c)
 	reqLine, _ := readLine(r)
@@ -500,7 +500,7 @@ func handleElastic(c net.Conn, log *logger, port int) {
    A deliberately unauthenticated build node. It exposes plausible read-only
    inventory and records mutation attempts without ever executing them. */
 
-func handleDocker(c net.Conn, log *logger, port int) {
+func handleDocker(c net.Conn, log *sessionLogger, port int) {
 	ip := srcIP(c)
 	r := bufioReader(c)
 	reqLine, _ := readLine(r)
@@ -574,7 +574,7 @@ func readHTTPBody(r *bufio.Reader, contentLength int) string {
    For protocols we don't emulate (MSSQL/TDS, MongoDB wire, Docker API): read
    what the client sends and log a printable + hex preview. */
 
-func handleGeneric(c net.Conn, log *logger, port int) {
+func handleGeneric(c net.Conn, log *sessionLogger, port int) {
 	ip := srcIP(c)
 	buf := make([]byte, 2048)
 	c.SetReadDeadline(time.Now().Add(10 * time.Second))
@@ -668,7 +668,7 @@ func bufioReader(c net.Conn) *bufio.Reader {
    loop (USER/PASS/QUIT), structurally identical to handleFTP above. Always
    rejects auth, logs the attempt. */
 
-func handlePOP3(c net.Conn, log *logger, port int) {
+func handlePOP3(c net.Conn, log *sessionLogger, port int) {
 	ip := srcIP(c)
 	r := bufio.NewReader(c)
 	fmt.Fprint(c, "+OK POP3 server ready\r\n")
@@ -707,7 +707,7 @@ func handlePOP3(c net.Conn, log *logger, port int) {
    client's own tag rather than a fixed prefix. Always rejects LOGIN, logs
    the attempt. */
 
-func handleIMAP(c net.Conn, log *logger, port int) {
+func handleIMAP(c net.Conn, log *sessionLogger, port int) {
 	ip := srcIP(c)
 	r := bufio.NewReader(c)
 	fmt.Fprint(c, "* OK IMAP4rev1 Service Ready\r\n")
@@ -776,7 +776,7 @@ func formatSOCKS5Methods(methods []byte) string {
 	return strings.Join(names, ",")
 }
 
-func handleSOCKS5(c net.Conn, log *logger, port int) {
+func handleSOCKS5(c net.Conn, log *sessionLogger, port int) {
 	ip := srcIP(c)
 	r := bufio.NewReader(c)
 	bumpDeadline(c)
@@ -914,7 +914,7 @@ func writeADBMessage(w io.Writer, command, arg0, arg1 uint32, data []byte) {
 	}
 }
 
-func handleADB(c net.Conn, log *logger, port int) {
+func handleADB(c net.Conn, log *sessionLogger, port int) {
 	ip := srcIP(c)
 	r := bufioReader(c)
 	bumpDeadline(c)
@@ -963,7 +963,7 @@ func handleADB(c net.Conn, log *logger, port int) {
    MLLP-framed ACK (0x0B start, 0x1C 0x0D end) so a real HL7 client sees a
    plausibly-shaped response rather than a naked disconnect. */
 
-func handleHL7(c net.Conn, log *logger, port int) {
+func handleHL7(c net.Conn, log *sessionLogger, port int) {
 	ip := srcIP(c)
 	buf := make([]byte, 8192)
 	bumpDeadline(c)

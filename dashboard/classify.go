@@ -242,6 +242,12 @@ func classify(e map[string]any, dirSensor string) event {
 		ev.sensor = "multipot"
 		ev.proto = str(e["proto"])
 		ev.port = num(e["port"])
+		// #608: ties every event from one TCP connection together, same
+		// role as cowrie's own "session" field -- lets filters.go/
+		// investigate.go/intelligence.go/search.go group a multi-step
+		// interaction (e.g. FTP USER -> PASS -> command loop) with no
+		// further plumbing needed here.
+		ev.session = str(e["session"])
 		ev.user, ev.pass = str(e["username"]), str(e["password"])
 		switch kind {
 		case "login":

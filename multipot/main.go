@@ -9,6 +9,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net"
@@ -38,6 +40,7 @@ type event struct {
 	Data     string `json:"data,omitempty"`
 	Client   string `json:"client,omitempty"`
 	Bytes    int    `json:"bytes,omitempty"`
+	Session  string `json:"session,omitempty"`
 }
 
 type logger struct {
@@ -120,6 +123,35 @@ func (l *logger) emit(e event) {
 	}
 }
 
+// sessionLogger scopes every emitted event to one connection, mirroring
+// cowrie's "session" field (#608) -- every one of the eleven protocol
+// handlers already calls log.emit(event{...}) by field name, so shadowing
+// emit here (Go resolves it statically, not virtually) stamps the session
+// id on every call site with zero changes to protocols.go itself.
+type sessionLogger struct {
+	*logger
+	id string
+}
+
+func (s *sessionLogger) emit(e event) {
+	e.Session = s.id
+	s.logger.emit(e)
+}
+
+// newSessionID returns a random 12-hex-char id, the same shape as cowrie's
+// own transport id, so both sensors' session values look interchangeable in
+// the dashboard/ES.
+func newSessionID() string {
+	b := make([]byte, 6)
+	if _, err := rand.Read(b); err != nil {
+		// crypto/rand failing is effectively unrecoverable on any real
+		// platform; a timestamp-derived fallback still uniquely tags this
+		// connection's events even in that case.
+		return strconv.FormatInt(time.Now().UnixNano(), 16)
+	}
+	return hex.EncodeToString(b)
+}
+
 func assetForProto(proto string) string {
 	return map[string]string{
 		"smtp": "mail01", "postgres": "pg-db-02", "redis": "cache01",
@@ -170,7 +202,7 @@ func srcIP(c net.Conn) string {
 type service struct {
 	proto   string
 	port    int
-	handler func(net.Conn, *logger, int)
+	handler func(net.Conn, *sessionLogger, int)
 }
 
 // The default fleet. Ports are the container-internal ports; docker-compose
@@ -237,8 +269,9 @@ func serve(s service, log *logger, proxy bool) {
 			defer conn.Close()
 			// Hard cap on how long any single attacker can hold a connection.
 			conn.SetDeadline(time.Now().Add(45 * time.Second))
-			log.emit(event{Proto: s.proto, Port: s.port, SrcIP: srcIP(conn), Event: "connect"})
-			s.handler(conn, log, s.port)
+			sl := &sessionLogger{logger: log, id: newSessionID()}
+			sl.emit(event{Proto: s.proto, Port: s.port, SrcIP: srcIP(conn), Event: "connect"})
+			s.handler(conn, sl, s.port)
 		}()
 	}
 }

@@ -72,7 +72,7 @@ func TestLoggerRotatesAtMaxBytesWithoutLosingLines(t *testing.T) {
 
 func TestPersonaMetadataAndProtocolAssets(t *testing.T) {
 	var output bytes.Buffer
-	log := &logger{out: &output}
+	log := &sessionLogger{logger: &logger{out: &output}}
 	log.emit(event{Proto: "redis", Event: "connect"})
 	var got event
 	if err := json.Unmarshal(bytes.TrimSpace(output.Bytes()), &got); err != nil {
@@ -87,7 +87,11 @@ func TestDockerPersonaResponse(t *testing.T) {
 	client, server := net.Pipe()
 	var output bytes.Buffer
 	done := make(chan struct{})
-	go func() { defer close(done); defer server.Close(); handleDocker(server, &logger{out: &output}, 2375) }()
+	go func() {
+		defer close(done)
+		defer server.Close()
+		handleDocker(server, &sessionLogger{logger: &logger{out: &output}}, 2375)
+	}()
 	if _, err := io.WriteString(client, "GET /version HTTP/1.1\r\nHost: build01\r\n\r\n"); err != nil {
 		t.Fatal(err)
 	}

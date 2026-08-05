@@ -19,7 +19,11 @@ func TestPOP3CapturesCredentialsAndAlwaysFails(t *testing.T) {
 	client, server := net.Pipe()
 	var output bytes.Buffer
 	done := make(chan struct{})
-	go func() { defer close(done); defer server.Close(); handlePOP3(server, &logger{out: &output}, 110) }()
+	go func() {
+		defer close(done)
+		defer server.Close()
+		handlePOP3(server, &sessionLogger{logger: &logger{out: &output}}, 110)
+	}()
 
 	r := bufio.NewReader(client)
 	greeting, _ := r.ReadString('\n')
@@ -52,7 +56,11 @@ func TestIMAPLoginFailsAndEchoesTag(t *testing.T) {
 	client, server := net.Pipe()
 	var output bytes.Buffer
 	done := make(chan struct{})
-	go func() { defer close(done); defer server.Close(); handleIMAP(server, &logger{out: &output}, 143) }()
+	go func() {
+		defer close(done)
+		defer server.Close()
+		handleIMAP(server, &sessionLogger{logger: &logger{out: &output}}, 143)
+	}()
 
 	r := bufio.NewReader(client)
 	r.ReadString('\n') // greeting
@@ -80,7 +88,11 @@ func TestSOCKS5LogsConnectTargetAndRefuses(t *testing.T) {
 	client, server := net.Pipe()
 	var output bytes.Buffer
 	done := make(chan struct{})
-	go func() { defer close(done); defer server.Close(); handleSOCKS5(server, &logger{out: &output}, 1080) }()
+	go func() {
+		defer close(done)
+		defer server.Close()
+		handleSOCKS5(server, &sessionLogger{logger: &logger{out: &output}}, 1080)
+	}()
 
 	// Version 5, 1 method, method 0x00 (no auth).
 	client.Write([]byte{0x05, 0x01, 0x00})
@@ -118,7 +130,11 @@ func TestSOCKS5LogsOfferedAuthMethodsByName(t *testing.T) {
 	client, server := net.Pipe()
 	var output bytes.Buffer
 	done := make(chan struct{})
-	go func() { defer close(done); defer server.Close(); handleSOCKS5(server, &logger{out: &output}, 1080) }()
+	go func() {
+		defer close(done)
+		defer server.Close()
+		handleSOCKS5(server, &sessionLogger{logger: &logger{out: &output}}, 1080)
+	}()
 
 	// Version 5, 2 methods: 0x00 (no-auth), 0x02 (username/password).
 	client.Write([]byte{0x05, 0x02, 0x00, 0x02})
@@ -150,7 +166,11 @@ func TestHL7LogsMessageAndSendsMLLPFramedACK(t *testing.T) {
 	client, server := net.Pipe()
 	var output bytes.Buffer
 	done := make(chan struct{})
-	go func() { defer close(done); defer server.Close(); handleHL7(server, &logger{out: &output}, 2575) }()
+	go func() {
+		defer close(done)
+		defer server.Close()
+		handleHL7(server, &sessionLogger{logger: &logger{out: &output}}, 2575)
+	}()
 
 	msg := "\x0bMSH|^~\\&|SENDER|FAC|RECV|FAC|20260101000000||ADT^A01|1|P|2.3\x1c\r"
 	io.WriteString(client, msg)
@@ -171,7 +191,11 @@ func TestHL7IgnoresNonHL7Traffic(t *testing.T) {
 	client, server := net.Pipe()
 	var output bytes.Buffer
 	done := make(chan struct{})
-	go func() { defer close(done); defer server.Close(); handleHL7(server, &logger{out: &output}, 2575) }()
+	go func() {
+		defer close(done)
+		defer server.Close()
+		handleHL7(server, &sessionLogger{logger: &logger{out: &output}}, 2575)
+	}()
 
 	io.WriteString(client, "GET / HTTP/1.1\r\n\r\n")
 	client.Close()
