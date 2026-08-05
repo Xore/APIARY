@@ -211,3 +211,80 @@ func TestExtractSrcPortPrefersTopLevel(t *testing.T) {
 		t.Fatalf("extractSrcPort = %d, want top-level 111", got)
 	}
 }
+
+// TestEnrichDionaeaIncidentLineRewritesRealShape uses the exact
+// dionaea_incident.json shape confirmed live against the homeserver
+// (dionaea.modules.python.smb.exploit's DoublePulsar incident) -- no
+// top-level src_ip at all, the tunnel peer buried under data.connection.
+func TestEnrichDionaeaIncidentLineRewritesRealShape(t *testing.T) {
+	vm := viaMap{26878: "203.0.113.9"}
+	line := []byte(`{"timestamp":"2026-08-05T22:52:47.367326","name":"dionaea","origin":"dionaea.modules.python.smb.exploit","data":{"cve":"CVE-2017-0144..CVE-2017-0148","name":"DoublePulsar connection attempt","connection":{"protocol":"smbd","transport":"tcp","local_ip":"172.16.7.2","local_port":445,"remote_hostname":"","remote_ip":"10.8.0.1","remote_port":26878,"id":"29a4ff749258c8c3d7c99fd665808355f5a0b0d10a095b9610019779cdffd6a3"}}}`)
+
+	out, resolved := enrichDionaeaIncidentLine(line, vm, viaMap{}, "dionaea-incident")
+	if !resolved {
+		t.Fatal("expected resolved")
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("output not valid JSON: %v", err)
+	}
+	conn := got["data"].(map[string]any)["connection"].(map[string]any)
+	if conn["remote_ip"] != "203.0.113.9" {
+		t.Fatalf("remote_ip = %v, want rewritten to 203.0.113.9", conn["remote_ip"])
+	}
+	if conn["remote_port"].(float64) != 26878 {
+		t.Fatalf("remote_port was disturbed: %v", conn["remote_port"])
+	}
+}
+
+// TestEnrichDionaeaIncidentLineRewritesBothChildAndParent uses the real
+// dionaea.connection.link shape, which nests two separate connection-shape
+// objects (child + parent) rather than one under "connection".
+func TestEnrichDionaeaIncidentLineRewritesBothChildAndParent(t *testing.T) {
+	vm := viaMap{57611: "203.0.113.9", 59378: "203.0.113.10"}
+	line := []byte(`{"origin":"dionaea.connection.link","data":{"child":{"protocol":"SipCall","remote_ip":"10.8.0.1","remote_port":57611},"parent":{"protocol":"SipSession","remote_ip":"10.8.0.1","remote_port":59378}}}`)
+
+	out, resolved := enrichDionaeaIncidentLine(line, vm, viaMap{}, "dionaea-incident")
+	if !resolved {
+		t.Fatal("expected resolved")
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("output not valid JSON: %v", err)
+	}
+	data := got["data"].(map[string]any)
+	if data["child"].(map[string]any)["remote_ip"] != "203.0.113.9" {
+		t.Fatalf("child.remote_ip not rewritten: %+v", data["child"])
+	}
+	if data["parent"].(map[string]any)["remote_ip"] != "203.0.113.10" {
+		t.Fatalf("parent.remote_ip not rewritten: %+v", data["parent"])
+	}
+}
+
+func TestEnrichDionaeaIncidentLineHoldsForRetryWhenPortMissing(t *testing.T) {
+	line := []byte(`{"origin":"dionaea.modules.python.ftp.command","data":{"connection":{"remote_ip":"10.8.0.1","remote_port":30966}}}`)
+	out, resolved := enrichDionaeaIncidentLine(line, viaMap{}, viaMap{}, "dionaea-incident")
+	if resolved {
+		t.Fatal("expected unresolved: port not yet in the via map")
+	}
+	if string(out) != string(line) {
+		t.Fatalf("unresolved line must be returned unchanged, got %s", out)
+	}
+}
+
+func TestEnrichDionaeaIncidentLineLeavesAlreadyRealIPsUntouched(t *testing.T) {
+	vm := viaMap{44576: "should-not-be-used"}
+	line := []byte(`{"origin":"dionaea.connection.tcp.accept","data":{"connection":{"remote_ip":"198.51.100.7","remote_port":44576}}}`)
+	out, resolved := enrichDionaeaIncidentLine(line, vm, viaMap{}, "dionaea-incident")
+	if !resolved || string(out) != string(line) {
+		t.Fatalf("a non-tunnel-peer remote_ip must pass through unchanged, got resolved=%v out=%s", resolved, out)
+	}
+}
+
+func TestEnrichDionaeaIncidentLinePassesThroughUnparseableInput(t *testing.T) {
+	line := []byte(`not json`)
+	out, resolved := enrichDionaeaIncidentLine(line, viaMap{}, viaMap{}, "")
+	if !resolved || string(out) != string(line) {
+		t.Fatalf("unparseable line must pass through unchanged and resolved, got resolved=%v out=%s", resolved, out)
+	}
+}

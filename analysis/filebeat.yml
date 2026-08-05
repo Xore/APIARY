@@ -65,10 +65,20 @@ filebeat.inputs:
   # than the shared honeypot-v2-* stream. dashboard/classify.go's own
   # dionaea-incident handler (~line 427) reads this file directly off disk,
   # unaffected by this -- purely additive for any ES-only consumer.
+  #
+  # #623: incident records carry no top-level src_ip -- the tunnel peer
+  # address is buried in data (under a key that varies by incident origin,
+  # e.g. data.connection.remote_ip, or data.child/data.parent for
+  # dionaea.connection.link), so it was out of ip-enrichment-worker's
+  # original flat-src_ip-field scope entirely. ip-enrichment-worker now
+  # walks the whole record for that shape and writes an already-correct
+  # copy to /logs/enriched/dionaea-incident.json -- tailed here instead of
+  # the raw path, the same "enriched supersedes raw" pattern the honeypot-json
+  # input above already uses for its five sensors.
   - type: filestream
     id: dionaea-incidents-raw-v1
     paths:
-      - /logs/dionaea/dionaea_incident.json
+      - /logs/enriched/dionaea-incident.json
     parsers:
       - ndjson:
           overwrite_keys: true

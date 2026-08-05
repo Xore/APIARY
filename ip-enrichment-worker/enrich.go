@@ -113,6 +113,77 @@ func enrichLine(line []byte, vm viaMap, tftpVM viaMap, persona string) (out []by
 	return marshalIfChanged(line, e, true), true
 }
 
+// rewriteDionaeaConnections recursively walks v (typically a
+// dionaea_incident.json record's "data" field) looking for every embedded
+// connection-shape object -- any map carrying both "remote_ip" and
+// "remote_port" -- and rewrites remote_ip in place wherever it's
+// currently the tunnel peer and the port resolves against vm. Confirmed
+// live against every incident origin currently observed on the
+// homeserver (smb.exploit, connection.tcp.accept/udp.connect/free/link,
+// download.complete*, smb.dcerpc.request/bind, sip.command, ftp.command/
+// login, mssql/mysql/mqtt/pptp): every one nests this exact {remote_ip,
+// remote_port, ...} shape somewhere in data, under a key that varies by
+// origin ("connection" for most, but "child"+"parent" -- two separate
+// connection objects in one record -- for dionaea.connection.link).
+// Matching on the shape itself rather than a fixed key name handles all
+// of these, including any future origin, without per-origin cases.
+//
+// Returns how many objects were rewritten, and whether every tunnel-peer
+// object encountered either got rewritten or had no port to join on
+// (nothing further to try) -- allResolved=false means at least one
+// tunnel-peer object's port simply isn't in vm yet, the same "retry
+// later" signal enrichLine's port-miss case gives.
+func rewriteDionaeaConnections(v any, vm viaMap) (changed int, allResolved bool) {
+	allResolved = true
+	switch node := v.(type) {
+	case map[string]any:
+		if ip, ok := node["remote_ip"].(string); ok && ip == tunnelPeerIP {
+			if portF, ok := node["remote_port"].(float64); ok {
+				if real, ok := vm[int(portF)]; ok {
+					node["remote_ip"] = real
+					changed++
+				} else {
+					allResolved = false
+				}
+			}
+		}
+		for _, child := range node {
+			c, r := rewriteDionaeaConnections(child, vm)
+			changed += c
+			allResolved = allResolved && r
+		}
+	case []any:
+		for _, child := range node {
+			c, r := rewriteDionaeaConnections(child, vm)
+			changed += c
+			allResolved = allResolved && r
+		}
+	}
+	return
+}
+
+// enrichDionaeaIncidentLine is dionaea_incident.json's own enrichLine:
+// unlike the five flat-log sensors, an incident record carries no
+// top-level src_ip at all -- the real signal is buried in "data" (see
+// rewriteDionaeaConnections). tftpVM/persona are accepted only to match
+// enrichFunc's shared signature (see pending.go) and are unused here --
+// no TFTP-relay incident origin has been observed to need that join.
+func enrichDionaeaIncidentLine(line []byte, vm viaMap, _ viaMap, _ string) (out []byte, resolved bool) {
+	var e map[string]any
+	if err := json.Unmarshal(line, &e); err != nil {
+		return line, true // unparseable: nothing to retry, pass through as-is
+	}
+	changed, allResolved := rewriteDionaeaConnections(e["data"], vm)
+	if changed == 0 {
+		return line, allResolved
+	}
+	rewritten, err := json.Marshal(e)
+	if err != nil {
+		return line, allResolved // shouldn't happen; fall back to the original line
+	}
+	return rewritten, allResolved
+}
+
 // marshalIfChanged returns line unchanged when nothing was modified
 // (preserving the original bytes exactly, including key order/formatting),
 // or e re-marshalled when it was.
