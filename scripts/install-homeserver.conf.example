@@ -35,7 +35,27 @@ VPS_WG_ENDPOINT="<VPS_PUBLIC_IP_OR_HOST>:<VPS_WG_PORT>"
 
 # WireGuard keys. Generate with `wg genkey | tee privatekey | wg pubkey >
 # publickey` — never reuse an example value, never commit a real one.
+# HOME_WG_PRIVATE_KEY and HOME_WG_PRESHARED_KEY may both be left empty --
+# the script generates fresh ones and pushes them to the VPS automatically.
+# Leave them empty on a first-ever run; once the tunnel is up, fill in the
+# real values from the resulting /etc/wireguard/wg0.conf so future re-runs
+# reuse the same identity instead of rotating it every time (harmless but
+# unnecessary churn on the VPS's peer config).
+#
+# #518 incident: an earlier version of this script only handled the private
+# key, not the preshared key. The VPS's peer required a PSK (predating this
+# script). Every run produced a wg0.conf that looked fine (`wg show`
+# displayed the interface) but never completed a handshake -- 0 bytes
+# received, forever, completely silently, because the verify step only
+# checked the interface existed. Real attacker traffic never reached the
+# honeypot sensors for the rest of that session. Both the missing PSK
+# handling and the weak verify check are fixed now, but this is exactly the
+# kind of failure that looks like success at a glance -- if you ever see
+# "wireguard-verify OK" followed by no honeypot traffic, check
+# `wg show wg0` for `latest handshake` and `transfer ... received`, not
+# just that the interface exists.
 HOME_WG_PRIVATE_KEY="<HOME_WG_PRIVATE_KEY>"
+HOME_WG_PRESHARED_KEY="<HOME_WG_PRESHARED_KEY>"
 VPS_WG_PUBLIC_KEY="<VPS_WG_PUBLIC_KEY>"
 
 # --- VPS admin access (for the parts of setup that touch the VPS side) --

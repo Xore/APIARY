@@ -343,18 +343,39 @@ step_wireguard_config() {
   install -d -m 0700 /etc/wireguard
   umask 077
 
-  # The home side's WireGuard private key was never part of the .env-only
-  # backup (it's system config, not a Dockge stack secret) -- see #518
-  # comment history. If the config didn't supply one, generate a fresh
-  # keypair here and let step_wireguard_sync_vps_peer push the new public
-  # key to the VPS's peer config, rather than silently failing to bring the
-  # tunnel up with a key nobody has the other half of.
+  # The home side's WireGuard private key AND preshared key were never part
+  # of the .env-only backup (system config, not a Dockge stack secret) --
+  # see #518 comment history. If the config didn't supply a private key,
+  # generate a fresh keypair (and always generate a fresh PSK alongside it,
+  # since a stale/mismatched PSK is exactly as fatal to the handshake as a
+  # stale pubkey -- see the incident below). step_wireguard_sync_vps_peer
+  # pushes both to the VPS's peer config, rather than silently failing to
+  # bring the tunnel up with keys the other end doesn't have.
+  #
+  # #518 incident: an earlier version of this script only generated/synced
+  # the keypair, not a PSK. The VPS's peer config required one (predating
+  # this script entirely). Every run silently produced a wg0.conf that
+  # associated cleanly (`wg show` displayed the interface fine) but never
+  # completed a handshake -- 0 bytes received, forever, no error anywhere.
+  # `step_wireguard_verify` below only checked the interface existed, not
+  # that a handshake had actually happened, so this went undetected for the
+  # entire rest of that session: real attacker traffic never reached the
+  # honeypot sensors the whole time, silently. Both gaps are fixed here.
+  # step_wireguard_sync_vps_peer always re-derives the current pubkey/PSK
+  # from the wg0.conf written below and pushes them unconditionally -- no
+  # need to track "was this freshly generated" separately (that tracking
+  # via .new marker files was itself the source of the SSH-argument bug
+  # documented on that function).
   local priv="${HOME_WG_PRIVATE_KEY:-}"
+  local psk="${HOME_WG_PRESHARED_KEY:-}"
   if [[ -z "$priv" ]]; then
     priv="$(wg genkey)"
-    echo "$priv" | wg pubkey > /etc/wireguard/wg0.pub.new
-    echo "Generated a fresh WireGuard keypair (no HOME_WG_PRIVATE_KEY in config)."
-    echo "New home public key: $(cat /etc/wireguard/wg0.pub.new)"
+    echo "Generated a fresh WireGuard private key (no HOME_WG_PRIVATE_KEY in config)."
+    echo "New home public key: $(echo "$priv" | wg pubkey)"
+  fi
+  if [[ -z "$psk" ]]; then
+    psk="$(wg genpsk)"
+    echo "Generated a fresh WireGuard preshared key (no HOME_WG_PRESHARED_KEY in config)."
   fi
 
   cat >/etc/wireguard/wg0.conf <<EOF
@@ -365,6 +386,7 @@ ListenPort = 51820
 
 [Peer]
 PublicKey = ${VPS_WG_PUBLIC_KEY}
+PresharedKey = ${psk}
 Endpoint = ${VPS_WG_ENDPOINT}
 AllowedIPs = ${VPS_WG_ADDRESS}/32
 PersistentKeepalive = 25
@@ -374,34 +396,57 @@ EOF
   systemctl restart wg-quick@wg0
 }
 
-# If step_wireguard_config generated a fresh keypair, the VPS's wg0 peer
-# entry still has the OLD home public key and the tunnel will not establish
-# a handshake. Push the new public key to the VPS side and restart its
-# tunnel too. No-ops (and is safe to re-run) if no new key was generated.
+# Always push home's CURRENT effective pubkey+PSK (from the just-written
+# local wg0.conf), not just "whatever was freshly generated this run" --
+# confirmed live (#518), two separate bugs with the old "only sync if a
+# .new marker file exists" approach:
+#  1. A stale .new marker from an earlier run lingered forever (nothing
+#     ever cleaned it up), so a run that used already-persisted config
+#     values still thought a fresh key had been generated and tried to
+#     resync unnecessarily.
+#  2. Worse: SSH does not preserve individual argv separation to the
+#     remote command the way a local exec does -- per ssh(1), the command
+#     and its arguments are concatenated into a SINGLE space-joined string
+#     before being sent, then re-split by the remote shell. An empty-string
+#     argument (e.g. "no new PSK this run") contributes nothing but a
+#     space, which collapses away in that re-split -- every argument after
+#     it silently shifts down one position. `peer_ip="$3"` on the remote
+#     end became unbound because $psk had been empty, not because
+#     anything was wrong with $VPS_WG_ADDRESS itself. Always deriving and
+#     sending real, non-empty values sidesteps the whole class of bug --
+#     the remote side becomes an unconditional idempotent replace instead
+#     of a conditional one.
 step_wireguard_sync_vps_peer() {
-  local newpub="/etc/wireguard/wg0.pub.new"
-  [[ -f "$newpub" ]] || { echo "No new keypair generated this run — nothing to sync."; return 0; }
-  local pubkey; pubkey="$(cat "$newpub")"
+  rm -f /etc/wireguard/wg0.pub.new /etc/wireguard/wg0.psk.new
+  local pubkey psk
+  pubkey="$(grep '^PrivateKey' /etc/wireguard/wg0.conf | awk '{print $3}' | wg pubkey)"
+  psk="$(grep '^PresharedKey' /etc/wireguard/wg0.conf | awk '{print $3}')"
+  [[ -n "$pubkey" && -n "$psk" ]] || { echo "could not read local wg0.conf pubkey/PSK"; return 1; }
 
   ssh -i "$VPS_SSH_KEY" -p "$VPS_SSH_PORT" -o StrictHostKeyChecking=accept-new \
-    -o ConnectTimeout=10 "${VPS_SSH_USER}@${VPS_SSH_HOST}" bash -s -- "$pubkey" "$VPS_WG_ADDRESS" <<'REMOTE'
+    -o ConnectTimeout=10 "${VPS_SSH_USER}@${VPS_SSH_HOST}" bash -s -- "$pubkey" "$psk" "$VPS_WG_ADDRESS" <<'REMOTE'
 set -euo pipefail
 new_pub="$1"
-peer_ip="$2"
+new_psk="$2"
+peer_ip="$3"
 conf="/etc/wireguard/wg0.conf"
 [[ -f "$conf" ]] || { echo "no $conf on VPS" >&2; exit 1; }
 cp -p "$conf" "$conf.bak.$(date +%s)"
-# Replace the PublicKey line inside the [Peer] block matching this home
-# peer's AllowedIPs, not any other peer that might exist.
-python3 - "$conf" "$new_pub" "$peer_ip" <<'PY'
+# Replace the PublicKey/PresharedKey lines inside the [Peer] block matching
+# this home peer's AllowedIPs, not any other peer that might exist.
+python3 - "$conf" "$new_pub" "$new_psk" "$peer_ip" <<'PY'
 import re, sys
-conf, new_pub, peer_ip = sys.argv[1:4]
+conf, new_pub, new_psk, peer_ip = sys.argv[1:5]
 text = open(conf).read()
 blocks = re.split(r'(?=\[Peer\])', text)
 out = []
 for b in blocks:
     if b.startswith('[Peer]') and f"{peer_ip}/32" in b:
         b = re.sub(r'PublicKey\s*=\s*\S+', f'PublicKey = {new_pub}', b)
+        if re.search(r'^PresharedKey\s*=', b, re.MULTILINE):
+            b = re.sub(r'PresharedKey\s*=\s*\S+', f'PresharedKey = {new_psk}', b)
+        else:
+            b = re.sub(r'(PublicKey\s*=\s*\S+\n)', rf'\1PresharedKey = {new_psk}\n', b)
     out.append(b)
 open(conf, 'w').write(''.join(out))
 PY
@@ -410,7 +455,29 @@ REMOTE
 }
 
 step_wireguard_verify() {
+  # Confirmed live (#518): `wg show wg0` succeeding only proves the
+  # interface exists, not that a handshake ever completed -- a stale/missing
+  # PSK produces exactly this false-positive (interface up, 0 bytes
+  # received, forever). Actually check for a completed handshake, with a
+  # short retry window since one can take a few seconds after a fresh
+  # restart.
   wg show wg0 >/dev/null
+
+  local waited=0
+  while (( waited < 30 )); do
+    local hs
+    hs=$(wg show wg0 latest-handshakes 2>/dev/null | awk '{print $2}')
+    if [[ -n "$hs" && "$hs" != "0" ]]; then
+      echo "WireGuard handshake confirmed ($(date -d "@$hs" -Iseconds 2>/dev/null || echo "$hs"))."
+      return 0
+    fi
+    sleep 3
+    waited=$(( waited + 3 ))
+  done
+  echo "No WireGuard handshake after ${waited}s -- tunnel interface is up but not" >&2
+  echo "actually passing traffic. Check the peer's PublicKey/PresharedKey match on" >&2
+  echo "both ends (this is exactly the #518 incident this check was added for)." >&2
+  return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -616,6 +683,52 @@ step_start_remaining_stacks() {
     fi
   done
   [[ $failures -eq 0 ]]
+}
+
+# ---------------------------------------------------------------------------
+# Phase 8a2 — read-only sshfs mounts of the VPS's Suricata/portbridge logs
+# (and, since #518, the pcap/ subdirectory Suricata's pcap-log writes into
+# once its output-directory ownership is fixed VPS-side -- see the earlier
+# #518 issue comment on that bug). Filebeat and pcap-sync/Arkime both depend
+# on these; must run after start-remaining, since honeypot-init's log-init
+# job is what creates the mount-point directories in the first place.
+# ---------------------------------------------------------------------------
+step_sshfs_install() {
+  with_retry 3 10 env DEBIAN_FRONTEND=noninteractive apt-get install -y sshfs
+  mkdir -p /root/.ssh
+  install -m 600 "$VPS_SSH_KEY" /root/.ssh/strato_vps
+}
+
+step_sshfs_mounts() {
+  local suricata_dir portbridge_dir
+  suricata_dir=$(readlink -f "$REPO_DIR/logs/suricata")
+  portbridge_dir=$(readlink -f "$REPO_DIR/logs/portbridge")
+  [[ -d "$suricata_dir" && -d "$portbridge_dir" ]] || {
+    echo "logs/suricata or logs/portbridge doesn't exist yet -- honeypot-init's log-init job should have created these."
+    return 1
+  }
+
+  local opts="_netdev,ro,reconnect,ServerAliveInterval=15,ServerAliveCountMax=3,IdentityFile=/root/.ssh/strato_vps,port=2222,allow_other,default_permissions,StrictHostKeyChecking=accept-new"
+  grep -q "$suricata_dir" /etc/fstab || cat >>/etc/fstab <<EOF
+
+# #518: read-only VPS log mounts for Suricata (eve.json + pcap/) and
+# portbridge, pulled over the WireGuard tunnel. See docs/SENSORS.md.
+root@${VPS_WG_ADDRESS}:/opt/stacks/honeypot-stack/logs/suricata $suricata_dir fuse.sshfs $opts 0 0
+root@${VPS_WG_ADDRESS}:/opt/stacks/honeypot-stack/logs/portbridge $portbridge_dir fuse.sshfs $opts 0 0
+EOF
+
+  mountpoint -q "$suricata_dir" || mount "$suricata_dir"
+  mountpoint -q "$portbridge_dir" || mount "$portbridge_dir"
+  mountpoint -q "$suricata_dir" && mountpoint -q "$portbridge_dir"
+}
+
+step_sshfs_boot_ordering() {
+  # Installs WireGuard-aware systemd mount ordering/retry (the raw fstab
+  # _netdev/reconnect options alone don't guarantee the WG interface is up
+  # before the mount is attempted at boot) and restarts filebeat/evebox so
+  # they pick up newly-available mounts rather than waiting for their own
+  # retry logic.
+  bash "$REPO_DIR/setup-suricata-logs-home.sh"
 }
 
 # ---------------------------------------------------------------------------
@@ -895,6 +1008,30 @@ step_sandbox_verify_running() {
   return $rc
 }
 
+step_sandbox_host_foundation() {
+  # sandbox/install-host.sh: the honeypot-sandbox libvirt network + nftables
+  # filter + /var/lib/honeypot-sandbox dir tree, shared foundation for the
+  # Linux KVM sample-analysis path (separate from the GHOSTS/Windows
+  # networks set up above). Also disables/destroys libvirt's default NAT
+  # network as unnecessary and dangerous for malware VMs -- confirmed safe
+  # to run after win11-ghosts/win11-sandbox already exist, since it only
+  # touches the `default` and `honeypot-sandbox` networks, not theirs.
+  bash "$REPO_DIR/sandbox/install-host.sh"
+}
+
+step_linux_sandbox_base() {
+  # Downloads and GPG-verifies a fresh Ubuntu cloud image rather than
+  # restoring one -- unlike the Windows golden images (custom Packer builds,
+  # days of hardening work, must be preserved), the Linux base is
+  # reproducible on demand and was never part of the sandbox backup.
+  [[ -f /var/lib/honeypot-sandbox/base/ubuntu-noble.qcow2 ]] && { echo "base image already present"; return 0; }
+  bash "$REPO_DIR/sandbox/prepare-linux-base.sh"
+}
+
+step_linux_sandbox_verify() {
+  bash "$REPO_DIR/sandbox/verify-linux-sandbox.sh"
+}
+
 # ---------------------------------------------------------------------------
 # Run
 # ---------------------------------------------------------------------------
@@ -923,7 +1060,7 @@ fi
 
 run_step wireguard-install     "Install WireGuard"                  step_wireguard_install
 run_step wireguard-config      "Write wg0.conf and enable tunnel"   step_wireguard_config
-run_step wireguard-sync-vps    "Sync new pubkey to VPS if generated" step_wireguard_sync_vps_peer
+run_step wireguard-sync-vps    "Sync home pubkey+PSK to VPS peer config" step_wireguard_sync_vps_peer
 run_step wireguard-verify      "Verify tunnel is up"                step_wireguard_verify
 
 run_step clone-repo            "Clone/update honeypot-stack to $REPO_DIR" step_clone_repo
@@ -937,6 +1074,10 @@ run_step shared-resources      "Create honeynet + placeholder volumes" step_crea
 run_step start-elasticsearch   "Start honeypot-elk, wait healthy"   step_start_elasticsearch_first
 run_step start-init            "Start honeypot-init, wait for one-shots" step_start_init
 run_step start-remaining       "Start remaining sensor/dashboard stacks" step_start_remaining_stacks
+
+run_step sshfs-install         "Install sshfs, place VPS key"        step_sshfs_install
+run_step sshfs-mounts          "Mount VPS Suricata/portbridge logs"  step_sshfs_mounts
+run_step sshfs-boot-ordering   "Install WireGuard-aware mount ordering" step_sshfs_boot_ordering
 
 run_step pihole-provision      "Reconstruct pihole compose.yml"     step_pihole_provision
 run_step pihole-start          "Start pihole"                       step_pihole_start
@@ -970,6 +1111,9 @@ if [[ "$ENABLE_SANDBOX_RESTORE" == "true" ]]; then
   run_step windows-sandbox-create "Create win11-sandbox thin-clone VM"     step_windows_sandbox_vm_create
   run_step windows-sandbox-start  "Start win11-sandbox VM"                 step_windows_sandbox_vm_start
   run_step sandbox-verify         "Verify both sandbox VMs running"        step_sandbox_verify_running
+  run_step sandbox-host-foundation "Set up Linux sandbox network + dirs"   step_sandbox_host_foundation
+  run_step linux-sandbox-base     "Download + verify Linux base image"    step_linux_sandbox_base
+  run_step linux-sandbox-verify   "Run Linux sandbox smoke test"          step_linux_sandbox_verify
 else
   skip_step libvirt-install "Install libvirt/KVM/QEMU" "ENABLE_SANDBOX_RESTORE=false"
   skip_step sandbox-restore "Pull sandbox backup from LAN host" "ENABLE_SANDBOX_RESTORE=false"
@@ -981,6 +1125,9 @@ else
   skip_step windows-sandbox-create "Create win11-sandbox thin-clone VM" "ENABLE_SANDBOX_RESTORE=false"
   skip_step windows-sandbox-start "Start win11-sandbox VM" "ENABLE_SANDBOX_RESTORE=false"
   skip_step sandbox-verify "Verify both sandbox VMs running" "ENABLE_SANDBOX_RESTORE=false"
+  skip_step sandbox-host-foundation "Set up Linux sandbox network + dirs" "ENABLE_SANDBOX_RESTORE=false"
+  skip_step linux-sandbox-base "Download + verify Linux base image" "ENABLE_SANDBOX_RESTORE=false"
+  skip_step linux-sandbox-verify "Run Linux sandbox smoke test" "ENABLE_SANDBOX_RESTORE=false"
 fi
 
 print_summary

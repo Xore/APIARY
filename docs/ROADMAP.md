@@ -21,21 +21,26 @@ Last audited: 2026-07-31
   templates live in `dashboard/ui/`, and a test fails the build if markup moves
   back into Go. The CSP cutover has not happened and the modal inventory is
   still partial.
-- `ml-worker/` exists as a scaffold, is not a Compose service, and has no
-  verified live acceptance evidence. `llm-worker/` and `reporter/` do not
-  exist.
+- `ml-worker/` is a real Compose service (`hp-ml-worker`, GPU-attached) and
+  running. `llm-worker/` exists as a safety-gated one-shot process (per
+  #66/#83, not an always-on container by design) with a working
+  `--selftest`. `reporter/` exists and runs as part of `honeypot-utilities`.
+  All three confirmed live via a full clean `install-homeserver.sh` run
+  during [#518](https://github.com/Xore/honeypot-stack/issues/518) — this
+  bullet was stale (said the opposite of all three) before that pass.
 - The sandbox and analysis trees contain substantial implemented KVM, Windows,
-  YARA, PCAP, and export tooling. Their long-form guides have drifted from it
-  and need reconciliation before more parallel implementation.
+  YARA, PCAP, and export tooling. GHOSTS (NPC persona host) and the Windows
+  detonation sandbox were restored and verified booting under #518; the Linux
+  KVM sample-analysis path and CAPEv2 (#314-322) remain unverified/unbuilt.
+  The long-form guides still need reconciliation against this.
 
 ## Gate 0 — Restore a trustworthy runtime
 
-**[#57](https://github.com/Xore/honeypot-stack/issues/57)**
-
-Nothing ingestion-dependent can be accepted until this gate is green. The
-runner, the VPS secrets, and the Diagnostics workflow are done; what remains is
-authorized management access to the homeserver, which is not automatable and is
-not something the Diagnostics workflow should ever be widened to cover.
+**[#57](https://github.com/Xore/honeypot-stack/issues/57) — closed.** Authorized
+management access to the homeserver was restored and the home Compose stack
+recovered (confirmed via a full clean rebuild + `install-homeserver.sh` run
+under [#518](https://github.com/Xore/honeypot-stack/issues/518)). This gate
+is green.
 
 ## Release 1 — Finish the dashboard platform
 
