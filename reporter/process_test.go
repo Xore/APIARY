@@ -23,7 +23,7 @@ func newTestProcessor(t *testing.T, minHits int) (*processor, *strings.Builder) 
 	al := newAuditLog(&audit)
 	send := dryRunSender{audit: al}
 	sendBD := dryRunBlocklistDeSender{audit: al}
-	return newProcessor(wl, st, send, sendBD, al, 24*time.Hour, minHits), &audit
+	return newProcessor(wl, nil, st, send, sendBD, al, 24*time.Hour, minHits), &audit
 }
 
 func lastAuditEntry(t *testing.T, audit *strings.Builder) auditEntry {

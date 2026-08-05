@@ -15,6 +15,7 @@ import "time"
 // reported, not to gate one destination differently from the other.
 type processor struct {
 	wl       *whitelist
+	gn       *greynoiseChecker // nil disables the check entirely -- see newGreynoiseChecker's callers in main.go
 	st       *store
 	send     sender
 	sendBD   blocklistDeSender
@@ -24,11 +25,11 @@ type processor struct {
 	hits     map[string]int // in-memory count of events seen this run, keyed by ip -- resets on restart, which is fine: the threshold exists to smooth out a single stray probe, not to survive restarts
 }
 
-func newProcessor(wl *whitelist, st *store, send sender, sendBD blocklistDeSender, audit *auditLog, cooldown time.Duration, minHits int) *processor {
+func newProcessor(wl *whitelist, gn *greynoiseChecker, st *store, send sender, sendBD blocklistDeSender, audit *auditLog, cooldown time.Duration, minHits int) *processor {
 	if minHits < 1 {
 		minHits = 1
 	}
-	return &processor{wl: wl, st: st, send: send, sendBD: sendBD, audit: audit, cooldown: cooldown, minHits: minHits, hits: map[string]int{}}
+	return &processor{wl: wl, gn: gn, st: st, send: send, sendBD: sendBD, audit: audit, cooldown: cooldown, minHits: minHits, hits: map[string]int{}}
 }
 
 func (p *processor) handle(sensor string, line []byte) {
@@ -40,6 +41,19 @@ func (p *processor) handle(sensor string, line []byte) {
 	if blocked, reason := p.wl.blocked(ev.IP); blocked {
 		p.audit.log(auditEntry{Action: "skipped", IP: ev.IP, Sensor: sensor, Reason: reason, At: ev.When})
 		return
+	}
+
+	// GreyNoise RIOT check runs after the whitelist (cheap, offline, no
+	// reason to make a network-backed lookup do the whitelist's job) but
+	// before categorization/threshold -- a known-benign address should
+	// never even count toward the min-hits threshold, the same way a
+	// whitelisted one doesn't.
+	if p.gn != nil {
+		if skip, reason := p.gn.benign(ev.IP); skip {
+			m.suppressedGreynoise.Add(1)
+			p.audit.log(auditEntry{Action: "skipped", IP: ev.IP, Sensor: sensor, Kind: ev.Kind, Reason: reason, At: ev.When})
+			return
+		}
 	}
 
 	cats := categories(sensor, ev.Kind)
@@ -64,20 +78,29 @@ func (p *processor) handle(sensor string, line []byte) {
 }
 
 func (p *processor) reportAbuseIPDB(ev event, sensor string, cats []int) {
+	m.attempted.Add(1)
 	recent, err := p.st.recentlyReported(ev.IP, "abuseipdb", p.cooldown)
 	if err != nil {
 		p.audit.log(auditEntry{Action: "skipped", Service: "abuseipdb", IP: ev.IP, Sensor: sensor, Reason: "dedup lookup failed: " + err.Error(), At: ev.When})
 		return
 	}
 	if recent {
+		m.suppressedCooldown.Add(1)
 		p.audit.log(auditEntry{Action: "skipped", Service: "abuseipdb", IP: ev.IP, Sensor: sensor, Kind: ev.Kind, Reason: "within cooldown window", At: ev.When})
 		return
 	}
 
 	r := report{IP: ev.IP, Categories: cats, Sensor: sensor, Kind: ev.Kind, At: ev.When,
 		Comment: "Honeypot detection: " + sensor + " " + ev.Kind}
-	if _, err := p.send.send(r); err != nil {
+	dryRun, err := p.send.send(r)
+	if err != nil {
+		m.failed.Add(1)
 		return // liveSender already audited the error itself
+	}
+	if dryRun {
+		m.dryRun.Add(1)
+	} else {
+		m.sent.Add(1)
 	}
 	// Cooldown bookkeeping uses wall-clock now, not ev.When. recentlyReported
 	// answers "did *this reporter* act on this IP within the window" -- a
@@ -100,19 +123,28 @@ func (p *processor) reportAbuseIPDB(ev event, sensor string, cats []int) {
 // AbuseIPDB cooldown can still be reported to Blocklist.de (and vice versa),
 // since they're independent services with independent rate limits.
 func (p *processor) reportBlocklistDe(ev event, sensor, service string, rawLine []byte) {
+	m.attempted.Add(1)
 	recent, err := p.st.recentlyReported(ev.IP, "blocklistde", p.cooldown)
 	if err != nil {
 		p.audit.log(auditEntry{Action: "skipped", Service: "blocklistde", IP: ev.IP, Sensor: sensor, Reason: "dedup lookup failed: " + err.Error(), At: ev.When})
 		return
 	}
 	if recent {
+		m.suppressedCooldown.Add(1)
 		p.audit.log(auditEntry{Action: "skipped", Service: "blocklistde", IP: ev.IP, Sensor: sensor, Kind: ev.Kind, Reason: "within cooldown window", At: ev.When})
 		return
 	}
 
 	r := blocklistDeReport{IP: ev.IP, Service: service, Sensor: sensor, Kind: ev.Kind, Logs: string(rawLine), At: ev.When}
-	if _, err := p.sendBD.send(r); err != nil {
+	dryRun, err := p.sendBD.send(r)
+	if err != nil {
+		m.failed.Add(1)
 		return // liveBlocklistDeSender already audited the error itself
+	}
+	if dryRun {
+		m.dryRun.Add(1)
+	} else {
+		m.sent.Add(1)
 	}
 	if err := p.st.markReported(ev.IP, "blocklistde", ev.Kind, time.Now().UTC()); err != nil {
 		p.audit.log(auditEntry{Action: "skipped", Service: "blocklistde", IP: ev.IP, Sensor: sensor, Reason: "failed to record dedup state: " + err.Error(), At: ev.When})
