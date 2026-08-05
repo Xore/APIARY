@@ -68,15 +68,17 @@ func fixConpotDestPort(e map[string]any, persona string) bool {
 }
 
 // enrichLine rewrites line's "src_ip" field to the real attacker IP when it
-// currently reads the tunnel peer address and a matching portbridge via_port
-// entry is found, and (for the s7-1200/s7-1500 conpot personas) corrects
-// "dst_port" per fixConpotDestPort above. Returns the original bytes
+// currently reads the tunnel peer address (joined against portbridge's
+// via_port map) or is one of dionaea's TFTP events relayed through
+// tftp-relay (#747, joined against tftpVM instead -- see
+// isTftpRelayRecord). Also corrects "dst_port" for the s7-1200/s7-1500
+// conpot personas per fixConpotDestPort above. Returns the original bytes
 // unchanged (never mutates, never drops) whenever nothing applies: line
-// isn't valid JSON, doesn't carry the tunnel peer IP, has no recoverable
+// isn't valid JSON, doesn't match either src_ip trigger, has no recoverable
 // src_port, or the join misses. A src_ip miss is the caller's signal to
 // retry later, not a permanent answer -- see pending.go; a dst_port fix
-// never affects that decision, since it's independent of the src_ip join.
-func enrichLine(line []byte, vm viaMap, persona string) (out []byte, resolved bool) {
+// never affects that decision, since it's independent of both src_ip joins.
+func enrichLine(line []byte, vm viaMap, tftpVM viaMap, persona string) (out []byte, resolved bool) {
 	var e map[string]any
 	if err := json.Unmarshal(line, &e); err != nil {
 		return line, true // unparseable: nothing to retry, pass through as-is
@@ -84,14 +86,20 @@ func enrichLine(line []byte, vm viaMap, persona string) (out []byte, resolved bo
 	portFixed := fixConpotDestPort(e, persona)
 
 	ip, _ := e["src_ip"].(string)
-	if ip != tunnelPeerIP {
+	lookup := vm
+	switch {
+	case ip == tunnelPeerIP:
+		lookup = vm
+	case isTftpRelayRecord(e, persona):
+		lookup = tftpVM
+	default:
 		return marshalIfChanged(line, e, portFixed), true // already correct (or genuinely unknown) -- not ours to touch further
 	}
 	port := extractSrcPort(e)
 	if port == 0 {
 		return marshalIfChanged(line, e, portFixed), true // no src_port to join on -- nothing further to try
 	}
-	real, ok := vm[port]
+	real, ok := lookup[port]
 	if !ok {
 		// Still returns the dst_port fix (if any) even though src_ip isn't
 		// resolved yet: pendingQueue.drain calls enrichLine again on every

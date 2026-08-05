@@ -103,7 +103,7 @@ services:
                  /logs/conpot-guardian /logs/conpot-kamstrup /logs/api-honeypot /logs/dionaea \
                  /logs/multipot /logs/http-honeypot /logs/tanner /logs/snare /logs/dnp3 \
                  /logs/dicompot /logs/dns-honeypot /logs/citrix-honeypot /logs/cisco-asa-honeypot \
-                 /logs/rdp-honeypot \
+                 /logs/rdp-honeypot /logs/tftp-relay \
                  /logs/suricata/pcap /logs/portbridge
         # -R on /logs/cowrie specifically: mkdir -p above just created
         # downloads/ and tty/ as this container's own root user, and a
@@ -121,7 +121,7 @@ services:
 
         chown 1000:1000  /logs/dionaea
 
-        chown 65534:65534 /logs/multipot /logs/http-honeypot /logs/api-honeypot /logs/tanner /logs/dnp3 /logs/dicompot /logs/dns-honeypot /logs/citrix-honeypot /logs/cisco-asa-honeypot /logs/rdp-honeypot
+        chown 65534:65534 /logs/multipot /logs/http-honeypot /logs/api-honeypot /logs/tanner /logs/dnp3 /logs/dicompot /logs/dns-honeypot /logs/citrix-honeypot /logs/cisco-asa-honeypot /logs/rdp-honeypot /logs/tftp-relay
 
         # Arkime capture/viewer run as nobody (uid 65534) inside the official image
 
