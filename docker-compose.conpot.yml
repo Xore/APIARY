@@ -132,6 +132,7 @@ services:
       - NET_BIND_SERVICE
     security_opt:
       - no-new-privileges:true
+    read_only: true
     networks:
       - conpot_net
     deploy:
@@ -202,6 +203,7 @@ services:
       start_period: 20s
     labels:
       - autoheal=true
+    read_only: true
     networks: [conpot_s7_1200_net]
     deploy:
       resources: { limits: { cpus: "0.75", memory: 384M } }
@@ -255,6 +257,7 @@ services:
       start_period: 20s
     labels:
       - autoheal=true
+    read_only: true
     networks: [conpot_s7_1500_net]
     deploy:
       resources: { limits: { cpus: "0.75", memory: 384M } }
@@ -309,6 +312,7 @@ services:
       start_period: 20s
     labels:
       - autoheal=true
+    read_only: true
     networks: [conpot_iec104_net]
     deploy:
       resources: { limits: { cpus: "0.5", memory: 256M } }
@@ -369,6 +373,7 @@ services:
       start_period: 20s
     labels:
       - autoheal=true
+    read_only: true
     networks: [conpot_guardian_net]
     deploy:
       resources: { limits: { cpus: "0.5", memory: 256M } }
@@ -425,6 +430,7 @@ services:
       start_period: 20s
     labels:
       - autoheal=true
+    read_only: true
     networks: [conpot_kamstrup_net]
     deploy:
       resources: { limits: { cpus: "0.5", memory: 256M } }
