@@ -48,7 +48,7 @@ The current session default is the #158-qualified
 `qwen3.5:9b@6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7`.
 Its tag, digest, generated-schema hash, `session-v5` prompt hash, request
 settings, host/runtime record, and per-case gates are controlled by
-[`../analysis/ghidra/models/approved-models.json`](../analysis/ghidra/models/approved-models.json).
+[`../analysis/ghidra/models/approved-models.json`](../../analysis/ghidra/models/approved-models.json).
 
 ## Captured-data canary
 
@@ -66,7 +66,7 @@ docker compose \
 
 The override uses a 30-second keep-alive so idle unload is observable during
 acceptance. The production record is
-[`../docs/llm-production-canary-record.md`](../docs/llm-production-canary-record.md).
+[`docs/llm-production-canary-record.md`](../llm-production-canary-record.md).
 The broader captured-data override remains a separately reviewed grant for
 later U2 work:
 
