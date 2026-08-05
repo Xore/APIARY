@@ -74,62 +74,61 @@ Two constraints specific to this chain:
 
 ## Architecture Overview
 
-```
-Home server (KVM/libvirt host)
-│
-├── libvirt network: ghosts (virbr-ghosts, 10.20.30.0/24)         [#325]
-│   <forward mode='nat' dev='ens9f0'> — REAL WAN egress, the one guest
-│   network in this repo with this element present on purpose.
-│   network-filter.sh: RFC1918 + 198.18.0.0/24 (IANA benchmarking space,
-│   the Linux sandbox's forensic-egress net) DROPped on FORWARD; a
-│   GHOSTS-IN chain on INPUT closing off every other host-owned address
-│   (a multi-homed host otherwise answers for its own addresses
-│   regardless of ingress interface — verified live, see below); one
-│   narrow exception for the GHOSTS API's *post-DNAT backend* address
-│   (Docker's port-publish DNAT rewrites the destination before FORWARD
-│   runs) plus a DOCKER-USER rule for the return leg.
-│
-├── win11-ghosts guest (10.20.30.x, floating — no DHCP pin deployed yet,
-│   see "Known gaps" below)                                   [#326/#327]
-│   ├── Ghosts.Client.Universal (C:\ghosts\), not autostarted — the
-│   │   detonation worker starts it per run
-│   ├── #290's living-persona daemon (PersonaDaemon.exe, scheduled task
-│   │   disguised as "Windows Shell Experience Helper") — disabled at
-│   │   detonation time by the worker, not removed from the image
-│   ├── Windows Defender: enabled (explicit operator direction)
-│   ├── Same hardware/anti-detection profile as win11-kvm.xml (SMBIOS,
-│   │   hidden KVM CPUID leaf, real disk serial) — none of that is
-│   │   specific to the network-isolation model
-│   └── WinRM (5985) + SMB (Samples/Logs, analyst-only #91) — host-
-│       initiated only; verified live that this doesn't reopen the
-│       guest's own outbound restrictions (#325's policy only restricts
-│       guest-*originated* traffic)
-│
-├── Docker: ghosts-api + ghosts-postgres (ghosts_net, 10.90.0.0/24)  [#324]
-│   Frontend/Grafana/n8n deliberately not deployed. ghosts-api published
-│   on 10.20.30.1:5000 — virbr-ghosts's own gateway address, not a
-│   docker-internal one (verified live in #325 that Docker's own `raw`
-│   table blocks direct routing to a container backend IP from any
-│   interface but its own bridge, regardless of FORWARD/DOCKER-USER
-│   rules — the published-port path is what actually works)
-│
-└── Host-side GHOSTS sandbox worker (systemd path unit)              [#328]
-    ├── Watches GHOSTS_SANDBOX_REQUEST_DIR for {hash}.request files
-    │   written by dashboard/workbench_orchestrator.go's "windows-ghosts"
-    │   analyzer — a deliberately opt-in-only Workbench selection, never
-    │   auto-routed to by payload classification
-    ├── process-ghosts-web-requests.sh resolves the hash against the same
-    │   shared sample inbox sandbox/windows's own resolution step uses
-    ├── orchestrate/run_sample.py: revert win11-ghosts.qcow2 → WinRM/SMB
-    │   deliver sample → disable persona daemon → launch GHOSTS client →
-    │   execute sample → Sysmon EVTX snapshot → pull GHOSTS' own activity
-    │   log from Ghosts.Api's database → revert again, unconditionally
-    └── Writes windows-ghosts-<job>.json → GHOSTS_SANDBOX_RESULTS_DIR,
-        dashboard/sandbox.go's sandboxResult shape, "route": "windows-ghosts"
-        so the result page's isolation description (#327) renders
-        correctly instead of the default (wrong, for this route) claim of
-        "no forwarding, strict libvirt NIC filter"
-```
+**Home server (KVM/libvirt host)**
+
+- **libvirt network: `ghosts`** (`virbr-ghosts`, `10.20.30.0/24`) — [#325]
+  `<forward mode='nat' dev='ens9f0'>` — REAL WAN egress, the one guest
+  network in this repo with this element present on purpose.
+  `network-filter.sh`: RFC1918 + `198.18.0.0/24` (IANA benchmarking space,
+  the Linux sandbox's forensic-egress net) DROPped on FORWARD; a
+  GHOSTS-IN chain on INPUT closing off every other host-owned address
+  (a multi-homed host otherwise answers for its own addresses
+  regardless of ingress interface — verified live, see below); one
+  narrow exception for the GHOSTS API's *post-DNAT backend* address
+  (Docker's port-publish DNAT rewrites the destination before FORWARD
+  runs) plus a DOCKER-USER rule for the return leg.
+
+- **`win11-ghosts` guest** (`10.20.30.x`, floating — no DHCP pin deployed
+  yet, see "Known gaps" below) — [#326/#327]
+  - `Ghosts.Client.Universal` (`C:\ghosts\`), not autostarted — the
+    detonation worker starts it per run
+  - #290's living-persona daemon (`PersonaDaemon.exe`, scheduled task
+    disguised as "Windows Shell Experience Helper") — disabled at
+    detonation time by the worker, not removed from the image
+  - Windows Defender: enabled (explicit operator direction)
+  - Same hardware/anti-detection profile as `win11-kvm.xml` (SMBIOS,
+    hidden KVM CPUID leaf, real disk serial) — none of that is
+    specific to the network-isolation model
+  - WinRM (5985) + SMB (Samples/Logs, analyst-only #91) — host-
+    initiated only; verified live that this doesn't reopen the
+    guest's own outbound restrictions (#325's policy only restricts
+    guest-*originated* traffic)
+
+- **Docker: `ghosts-api` + `ghosts-postgres`** (`ghosts_net`,
+  `10.90.0.0/24`) — [#324]
+  Frontend/Grafana/n8n deliberately not deployed. `ghosts-api` published
+  on `10.20.30.1:5000` — `virbr-ghosts`'s own gateway address, not a
+  docker-internal one (verified live in #325 that Docker's own `raw`
+  table blocks direct routing to a container backend IP from any
+  interface but its own bridge, regardless of FORWARD/DOCKER-USER
+  rules — the published-port path is what actually works)
+
+- **Host-side GHOSTS sandbox worker** (systemd path unit) — [#328]
+  - Watches `GHOSTS_SANDBOX_REQUEST_DIR` for `{hash}.request` files
+    written by `dashboard/workbench_orchestrator.go`'s "windows-ghosts"
+    analyzer — a deliberately opt-in-only Workbench selection, never
+    auto-routed to by payload classification
+  - `process-ghosts-web-requests.sh` resolves the hash against the same
+    shared sample inbox `sandbox/windows`'s own resolution step uses
+  - `orchestrate/run_sample.py`: revert `win11-ghosts.qcow2` → WinRM/SMB
+    deliver sample → disable persona daemon → launch GHOSTS client →
+    execute sample → Sysmon EVTX snapshot → pull GHOSTS' own activity
+    log from `Ghosts.Api`'s database → revert again, unconditionally
+  - Writes `windows-ghosts-<job>.json` → `GHOSTS_SANDBOX_RESULTS_DIR`,
+    `dashboard/sandbox.go`'s `sandboxResult` shape, `"route":
+    "windows-ghosts"` so the result page's isolation description (#327)
+    renders correctly instead of the default (wrong, for this route)
+    claim of "no forwarding, strict libvirt NIC filter"
 
 ---
 
