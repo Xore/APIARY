@@ -207,6 +207,11 @@ fi
 say "installing the worker into $target"
 install -d -m 0755 -o root -g root "$target" "$target/worker" "$target/models"
 install -m 0755 -o root -g root "$here/worker/ghidra-worker.py" "$target/worker/ghidra-worker.py"
+# gpu_queue.py is vendored (not shared by import across containers/hosts --
+# see its own module docstring) into both ghidra-worker.py's deployment
+# target here and llm-worker's container image separately.
+install -m 0755 -o root -g root "$here/worker/gpu_queue.py" "$target/worker/gpu_queue.py"
+install -m 0755 -o root -g root "$here/worker/gpu-queue-drain.py" "$target/worker/gpu-queue-drain.py"
 install -m 0755 -o root -g root "$here/models/model-governance.py" "$target/models/model-governance.py"
 install -m 0755 -o root -g root "$here/models/model-status-adapter.py" "$target/models/model-status-adapter.py"
 install -m 0644 -o root -g root \
@@ -240,15 +245,17 @@ install -d -m 0700 -o root -g root \
 install -d -m 0700 -o root -g root \
   /var/lib/honeypot-revdeck/requests/pending /var/lib/honeypot-revdeck/results
 
-for unit in honeypot-ghidra-worker.service honeypot-ghidra-worker.path; do
+for unit in honeypot-ghidra-worker.service honeypot-ghidra-worker.path \
+            honeypot-gpu-queue-drain.service honeypot-gpu-queue-drain.timer; do
   install -m 0644 -o root -g root "$here/worker/$unit" "/etc/systemd/system/$unit"
 done
 for unit in honeypot-model-drift.service honeypot-model-drift.timer honeypot-model-status-adapter.service; do
   install -m 0644 -o root -g root "$here/models/$unit" "/etc/systemd/system/$unit"
 done
 systemctl daemon-reload
-systemctl reset-failed honeypot-ghidra-worker.service 2>/dev/null || true
+systemctl reset-failed honeypot-ghidra-worker.service honeypot-gpu-queue-drain.service 2>/dev/null || true
 systemctl enable --now honeypot-ghidra-worker.path
+systemctl enable --now honeypot-gpu-queue-drain.timer
 systemctl enable --now honeypot-model-drift.timer
 systemctl enable --now honeypot-model-status-adapter.service
 

@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodically retry the shared GPU job queue
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+RandomizedDelaySec=15s
+Persistent=true
+Unit=honeypot-gpu-queue-drain.service
+
+[Install]
+WantedBy=timers.target

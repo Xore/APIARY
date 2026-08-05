@@ -120,6 +120,29 @@
           <div class="metric"><div class="metric__value {{if .Status.Failed}}tw:text-red{{end}}">{{.Status.Failed}}</div><div class="metric__label">Failed</div></div>
         </div>
 
+        {{if .GPUQueue}}
+        <div class="card wide tw:mb-6" id="gpu-queue">
+          <h2>GPU queue</h2>
+          <p class="note">Jobs deferred because there wasn't enough free GPU headroom when they were submitted. A queued job's AI triage runs automatically once the card frees up; the rest of that analysis (Ghidra decompilation, imports, strings, fuzzy hashes) already completed and is not affected. Aborting only has an effect while a job is still <strong>queued</strong> &mdash; once it starts running, the model call is already committed.</p>
+          <table class="data-table">
+            <thead><tr><th>type</th><th>ref</th><th>status</th><th>model</th><th>requested</th><th>attempts</th><th></th></tr></thead>
+            <tbody>
+              {{range .GPUQueue}}
+              <tr>
+                <td class="v">{{.JobType}}</td>
+                <td class="v"><a href="/ghidra/{{.Ref}}" title="{{.Ref}}">{{slice .Ref 0 12}}&hellip;</a></td>
+                <td class="state s-{{.Status}}">{{.Status}}{{if .AbortRequested}} (abort requested){{end}}</td>
+                <td class="v">{{.Model}}</td>
+                <td class="ago">{{.RequestedAt}}</td>
+                <td class="n">{{.Attempts}}</td>
+                <td>{{if eq .Status "queued"}}<form method="post" action="/gpu-queue/abort" data-hp-confirm-title="Abort this queued job?" data-hp-confirm-description="The deferred AI triage for this analysis will not run. The rest of the analysis already completed and is not affected." data-hp-confirm-label="Abort"><input type="hidden" name="job_id" value="{{.ID}}"><input type="hidden" name="return" value="/ghidra"><button class="btn btn-sm btn-secondary" type="submit" title="Abort this queued job">Abort</button></form>{{end}}</td>
+              </tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+        {{end}}
+
         <form class="filters" id="ghidra-filters" method="get" action="/ghidra"><a class="chip" href="/payloads">&larr; captured payloads</a><input class="hp-input" name="q" value="{{.Query}}" placeholder="hash, imported symbol or family" aria-label="Search Ghidra results"><button class="copy" type="submit">search</button>{{if .Query}}<a class="chip" href="/ghidra">clear</a>{{end}}<span class="chip">{{len .Rows}} analyses</span>{{if .Status.UpdatedAt}}<span class="chip">status {{.Status.UpdatedAt}}</span>{{end}}</form>
 
         <div id="ghidra-results">

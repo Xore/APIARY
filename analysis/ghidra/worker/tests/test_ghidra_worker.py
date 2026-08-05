@@ -461,7 +461,13 @@ def triage_run(tmp, name, ghidra, extra):
            "GHIDRA_LOCK": str(tmp / f"lock-{name}"),
            # Off here too: this helper is for triage tests, and the sidecar
            # has its own dedicated test function below.
-           "STATICTOOLS_API_BASE": ""}
+           "STATICTOOLS_API_BASE": "",
+           # Off by default: this helper tests triage's own behavior against
+           # ModelStub, not GPU-queue deferral, and a real host's actual free
+           # VRAM at test time would otherwise make these tests flaky --
+           # test_triage_gpu_queue_defers_when_no_headroom below turns it
+           # back on deliberately.
+           "GPU_QUEUE_ENABLED": "false"}
     env.update(extra)
     r = run(env)
     result = res / f"{sha}_ghidra.json"
@@ -555,6 +561,38 @@ def statictools_run(tmp, name, ghidra, extra, data=b"MZ\x90\x00fake pe"):
     r = run(env)
     result = res / f"{sha}_ghidra.json"
     return r, (json.loads(result.read_text()) if result.is_file() else None)
+
+
+def test_triage_gpu_queue_falls_back_when_enqueue_fails(ghidra, model):
+    """The GPU queue is a best-effort optimization layered on triage's
+    existing fail-soft contract, never a new way for triage to fail worse
+    than before it existed. Force the "no headroom" branch (an impossibly
+    high VRAM estimate, deterministic regardless of the real host's actual
+    free VRAM at test time) with an unreachable queue endpoint (an
+    RFC 2606 .invalid host, guaranteed to fail DNS resolution in any
+    environment, in or out of a container) -- triage must still fall
+    through to calling the model directly rather than losing the analysis
+    over an infra problem unrelated to whether the model itself works.
+    """
+    tmp = Path(tempfile.mkdtemp())
+
+    r, d = triage_run(tmp, "fallback", ghidra, {
+        "GHIDRA_TRIAGE_API_BASE": f"{model}/v1",
+        "GHIDRA_TRIAGE_MODEL": "stub-model",
+        "GPU_QUEUE_ENABLED": "true",
+        "GHIDRA_TRIAGE_ESTIMATED_VRAM_MIB": "999999999",
+        "GPU_QUEUE_ES_HOST": "http://gpu-queue-test-host.invalid:9200",
+    })
+    check(r.returncode == 0, "exit 0 when the GPU queue itself is unreachable")
+    check(d is not None and d["exit_status"] == "ok",
+          "the deterministic analysis still completes")
+    check(d is not None and d["ai_triage"] is not None,
+          f"triage still ran despite the queue being unreachable (got {d and d['ai_triage']!r})")
+    # Exactly how the queue is unreachable varies by environment (DNS
+    # failure, no docker/honeynet network in a CI sandbox, permission
+    # denied, ...) -- the behavioral contract above is what matters and is
+    # already verified; don't also pin the exact exception text/path,
+    # which is what actually varied between this box and CI here.
 
 
 def test_statictools(ghidra, statictools):
@@ -853,6 +891,19 @@ def test_approved_contract():
           "Ghidra seed matches the approved runtime request")
 
 
+def test_gpu_queue_vendored_copy_matches_canonical():
+    """gpu_queue.py is vendored (not imported across containers) into every
+    consumer -- see its own module docstring for why. A vendored copy that
+    drifts from the canonical one is exactly the kind of thing that's easy
+    to miss in review; catch it in CI instead.
+    """
+    root = Path(__file__).resolve().parents[4]
+    canonical = (root / "analysis/gpu-queue/gpu_queue.py").read_text()
+    vendored = (root / "analysis/ghidra/worker/gpu_queue.py").read_text()
+    check(canonical == vendored,
+          "analysis/ghidra/worker/gpu_queue.py matches analysis/gpu-queue/gpu_queue.py byte-for-byte")
+
+
 def main():
     ghidra = serve(Stub)
     model = serve(ModelStub)
@@ -862,10 +913,12 @@ def main():
     test_unit()
     test_spool(ghidra)
     test_triage(ghidra, model, truncating)
+    test_triage_gpu_queue_falls_back_when_enqueue_fails(ghidra, model)
     test_statictools(ghidra, statictools)
     test_revdeck(ghidra, revdeck)
     test_revdeck_standalone(revdeck)
     test_approved_contract()
+    test_gpu_queue_vendored_copy_matches_canonical()
     print(f"\n{len(fails)} failure(s)")
     for f in fails:
         print(f"  - {f}")
