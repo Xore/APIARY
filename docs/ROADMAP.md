@@ -8,196 +8,127 @@ in, and why. The work itself lives in
 Every deliverable below links to its issue. If something is described here with
 no issue behind it, that is a gap: open one.
 
-Last audited: 2026-07-31
+Last audited: 2026-08-05
 
 ## Current baseline
 
 - The VPS edge, WireGuard peer, Suricata, and portbridge are producing fresh
-  data.
-- CI credentials are in place: the `production-home` runner is online and the
-  VPS deployment secrets are set. Deployment is no longer credential-blocked,
-  and a read-only Diagnostics workflow can inspect both stacks on demand.
-- The dashboard render-engine migration is finished — all fourteen route
-  templates live in `dashboard/ui/`, and a test fails the build if markup moves
-  back into Go. The CSP cutover has not happened and the modal inventory is
-  still partial.
-- `ml-worker/` is a real Compose service (`hp-ml-worker`, GPU-attached) and
-  running. `llm-worker/` exists as a safety-gated one-shot process (per
-  #66/#83, not an always-on container by design) with a working
-  `--selftest`. `reporter/` exists and runs as part of `honeypot-utilities`.
-  All three confirmed live via a full clean `install-homeserver.sh` run
-  during [#518](https://github.com/Xore/honeypot-stack/issues/518) — this
-  bullet was stale (said the opposite of all three) before that pass.
-- The sandbox and analysis trees contain substantial implemented KVM, Windows,
-  YARA, PCAP, and export tooling. GHOSTS (NPC persona host) and the Windows
-  detonation sandbox were restored and verified booting under #518; the Linux
-  KVM sample-analysis path and CAPEv2 (#314-322) remain unverified/unbuilt.
-  The long-form guides still need reconciliation against this.
+  data. CI credentials are in place: the `production-home` runner is online
+  and VPS deployment secrets are set.
+- The dashboard platform (render engine, CSP cutover, modal inventory,
+  profile/settings/logout, regression tests) is finished — this was
+  "Release 1" in the previous version of this document, and every deliverable
+  in it is closed.
+- `ml-worker/` is deployed and producing scored output; the ML detection
+  pipeline through v1.0 (temporal/composite scoring, dashboard delivery,
+  retraining/versioning/drift/rollback) is built. `llm-worker/` exists as a
+  safety-gated one-shot process with a working `--selftest`, guarded GPU LLM
+  analysis is built, and the Ollama canary is live. `reporter/` (IP
+  reporting, Suricata/Blocklist.de validation) runs as part of
+  `honeypot-utilities`. This was "Release 2" and "Release 3" — both fully
+  closed.
+- The Windows detonation sandbox and GHOSTS (NPC persona host) are live and
+  booting; the end-to-end submit-to-report path is verified for the
+  Linux/Wine sandbox and GitHub-analysis publishing. The Windows-11 golden
+  image epic ([#47](https://github.com/Xore/honeypot-stack/issues/47)) is
+  still open — see the Windows sandbox section below. CAPEv2 (#314-322)
+  remains unbuilt and is post-0.1.0 backlog.
+- Documentation has been consolidated: every doc that used to be scattered
+  next to its source now lives under `docs/`, mirroring the source tree
+  ([#670](https://github.com/Xore/honeypot-stack/issues/670), closed
+  2026-08-05).
 
-## Gate 0 — Restore a trustworthy runtime
+Everything that was tracked here as "Gate 0" and "Release 1" through
+"Release 3" and "Release 5" in prior versions of this document is now closed.
+What remains before a 0.1.0 cut is the gate list below, tracked live in
+[#671](https://github.com/Xore/honeypot-stack/issues/671).
 
-**[#57](https://github.com/Xore/honeypot-stack/issues/57) — closed.** Authorized
-management access to the homeserver was restored and the home Compose stack
-recovered (confirmed via a full clean rebuild + `install-homeserver.sh` run
-under [#518](https://github.com/Xore/honeypot-stack/issues/518)). This gate
-is green.
+## Pre-0.1.0 gates
 
-## Release 1 — Finish the dashboard platform
+These are the items a 0.1.0 cut should not ship without. Status as of this
+audit; #671 is the live source of truth if this drifts.
 
-Source documents:
-[`DASHBOARD-RENDER-ENGINE-GUIDE.md`](DASHBOARD-RENDER-ENGINE-GUIDE.md),
-[`DASHBOARD-UI-REDESIGN-GUIDE.md`](DASHBOARD-UI-REDESIGN-GUIDE.md),
-[`settings-user-configuration-roadmap.md`](settings-user-configuration-roadmap.md),
-[`settings-operations.md`](settings-operations.md),
-[`dashboard-profile-actions-roadmap.md`](dashboard-profile-actions-roadmap.md)
+**Documentation**
+- ✅ [#670](https://github.com/Xore/honeypot-stack/issues/670) — consolidate
+  scattered docs into `docs/`
+- This rewrite — [#719](https://github.com/Xore/honeypot-stack/issues/719)
 
-| Deliverable | Issue |
-|---|---|
-| Shared partials and all fourteen route templates in embedded `dashboard/ui/` | ✅ 2026-07-30 |
-| CSP cutover with a per-request nonce | [#58](https://github.com/Xore/honeypot-stack/issues/58) |
-| Event detail, payload preview, export and destructive-action modals | [#59](https://github.com/Xore/honeypot-stack/issues/59) |
-| Behavioural tests and the visual acceptance matrix | [#60](https://github.com/Xore/honeypot-stack/issues/60) |
-| Profile action menu, route/administrator settings, logout | ✅ [#77](https://github.com/Xore/honeypot-stack/issues/77) |
-| Settings subsystem: introspection token rollout and the 72-hour soak | [#81](https://github.com/Xore/honeypot-stack/issues/81) |
+**End-to-end / smoke tests**
+- [#498](https://github.com/Xore/honeypot-stack/issues/498) — dashboard:
+  end-to-end smoke test every submission path. Linux/Wine sandbox and
+  GitHub-analysis publishing verified live; Ghidra/Rev·Deck, GHOSTS-sandbox,
+  and Payload Workbench fan-out remain.
+- [#593](https://github.com/Xore/honeypot-stack/issues/593) — verify the
+  ml-worker anomaly pipeline actually runs and reaches the dashboard
+- [#594](https://github.com/Xore/honeypot-stack/issues/594) — functionally
+  test every sensor sends real, well-formed events to Elasticsearch
+- [#597](https://github.com/Xore/honeypot-stack/issues/597) — end-to-end
+  test: golden image creation for both win11-analysis and win11-ghosts
+- [#662](https://github.com/Xore/honeypot-stack/issues/662) — 72-hour
+  multi-user soak of the settings/introspection subsystem (split from
+  closed #81)
+- [#84](https://github.com/Xore/honeypot-stack/issues/84) — shared-GPU slot
+  scheduling, collision drills, 72-hour soak. Depends on
+  [#67](https://github.com/Xore/honeypot-stack/issues/67) (CUDA selection,
+  GPU-sharing budget), which is still open.
 
-The CSP header goes on **last**, after every inline handler is gone. Shipping it
-early means either a broken dashboard or a policy quietly written loose enough
-to be meaningless.
+**Currently blocked — need the blocker resolved or an explicit descope**
+- [#174](https://github.com/Xore/honeypot-stack/issues/174) — ml-worker
+  severity bands/composite weights are assumed, not calibrated. Decision:
+  calibrate against live honeypot ES data once #593 lands, not an external
+  labeled dataset.
+- [#195](https://github.com/Xore/honeypot-stack/issues/195) — capa has no
+  MIPS/ARM32 backend coverage for IoT samples. Decision: make the gap
+  visible (label results "unsupported architecture" instead of silently
+  showing not-observed) rather than building full backend coverage before
+  0.1.0.
 
-## Release 2 — Safe enrichment foundations
+**In progress, not gates but relevant:** #150 (LLM analysis results to
+dashboard), #154 (agent-intrusion research), #167 (ml-worker prod deploy +
+CPU baseline), #239 (read-only rootfs hardening), #598 (llama.cpp/vLLM vs
+Ollama research).
 
-### 2A. ML worker v0.1–v0.2
+**Explicitly deferred, not part of the 0.1.0 pass:** #602 (GPU topology),
+#603 (model benchmarking) — on hold per operator decision.
 
-Source: [`ml-worker-plan.md`](ml-worker-plan.md). Coordinated execution order
-across ML, LLM, dashboard delivery and shared GPU:
-[`ml-gpu-coordinated-roadmap.md`](ml-gpu-coordinated-roadmap.md).
-
-| Deliverable | Issue |
-|---|---|
-| Runtime compatibility record: GPU, drivers and every ML/LLM pin verified live | [#82](https://github.com/Xore/honeypot-stack/issues/82) |
-| Audit the scaffold against claimed v0.1 behaviour; fixtures and unit tests | [#61](https://github.com/Xore/honeypot-stack/issues/61) |
-| Feature engineering and HBOS fast filtering | [#62](https://github.com/Xore/honeypot-stack/issues/62) |
-
-#82 gates both the ML and LLM tracks. Everything below it assumes host facts
-that nobody has verified since they were written down.
-
-Compose integration comes only after resource, checkpoint and failure behaviour
-are explicit. Do not begin GPU acceleration here — prove a CPU baseline and
-output quality first.
-
-### 2B. IP reporter Phase 1
-
-Source: [`ip-reporting-plan.md`](ip-reporting-plan.md)
-
-| Deliverable | Issue |
-|---|---|
-| File tailing, whitelist/CIDR, SQLite dedup, cooldowns, rate limits, dry-run | [#68](https://github.com/Xore/honeypot-stack/issues/68) |
-| Suricata and Blocklist.de validation with metrics | [#69](https://github.com/Xore/honeypot-stack/issues/69) |
-
-Production reporting requires separate explicit authorization after sampled
-false-positive review. Auto-banning is out of scope.
-
-## Release 3 — Analysis intelligence
-
-| Deliverable | Issue |
-|---|---|
-| 3A — ML temporal/composite detection (v0.3–v0.4), explainable output | [#63](https://github.com/Xore/honeypot-stack/issues/63) |
-| 3B — ML dashboard delivery (v0.5–v0.7) | [#64](https://github.com/Xore/honeypot-stack/issues/64) |
-| 3C — Upstream YARA corpus sync | [#73](https://github.com/Xore/honeypot-stack/issues/73) |
-| 3C — Manual, admin-only GitHub-analysis publisher and dashboard button | [#74](https://github.com/Xore/honeypot-stack/issues/74) |
-| 3D — Guarded LLM analysis worker, offline and dry-run | [#66](https://github.com/Xore/honeypot-stack/issues/66) |
-| 3D — Local Ollama canary with a real model, synthetic first | [#83](https://github.com/Xore/honeypot-stack/issues/83) |
-
-Source documents:
-[`github-analysis-integration-roadmap.md`](github-analysis-integration-roadmap.md),
-[`gpu-llm-analysis-worker.md`](gpu-llm-analysis-worker.md).
-
-The YARA corpus sync is the only Release 3 item that does not require Gate 0.
-
-Publication is **manual and button-triggered**, never scheduled; the
-cron-driven `collect.sh` path is retired rather than replaced. The dashboard
-holds no token and runs no `git`.
-
-## Release 4 — Acceleration and lifecycle
-
-| Deliverable | Issue |
-|---|---|
-| CUDA selection, GPU-sharing budget, embedding clustering | [#67](https://github.com/Xore/honeypot-stack/issues/67) |
-| Shared-GPU slot scheduling, collision drills, 72-hour soak | [#84](https://github.com/Xore/honeypot-stack/issues/84) |
-| Retraining, versioning, drift detection, rollback, thresholds (v0.8–v1.0) | [#65](https://github.com/Xore/honeypot-stack/issues/65) |
-
-Sources: [`gpu-ml-worker-acceleration.md`](gpu-ml-worker-acceleration.md),
-[`ml-worker-plan.md`](ml-worker-plan.md) v0.8–v1.0. Requires measured CPU
-baselines from Release 2 and stable output contracts from Release 3.
-
-## Release 5 — Capture fidelity and deception
-
-| Deliverable | Issue |
-|---|---|
-| Reconcile the KVM/network-analysis guides against the implemented tooling | ✅ [#70](https://github.com/Xore/honeypot-stack/issues/70) |
-| Background-noise design that cannot contaminate evidence | [#71](https://github.com/Xore/honeypot-stack/issues/71) |
-
-Sources: [`kvm-network-traffic-analysis.md`](kvm-network-traffic-analysis.md),
-[`honeypot-network-isolation.md`](honeypot-network-isolation.md),
-[`background-noise.md`](background-noise.md),
-[`windows11-malware-lab-hardening.md`](windows11-malware-lab-hardening.md),
-[`kvm-snapshot-vs-golden-image.md`](kvm-snapshot-vs-golden-image.md).
-
-Reconciliation first. `e443499` is the argument for that ordering: it found
-three files the documentation referenced and that had never been written, plus
-paths in `kvm_manage.sh` that disagreed with what Packer actually produces.
-
-## Windows sandbox and static analysis
+## Windows sandbox (post-0.1.0, tracked separately)
 
 Tracked as its own issue set rather than a release, because it runs on the
-analysis host and does not gate anything in the main stack.
+analysis host and does not gate the main stack.
 
 | Deliverable | Issue |
 |---|---|
 | Phase 1 golden image (epic) | [#47](https://github.com/Xore/honeypot-stack/issues/47) |
-| Windows 11 evaluation ISO — operator action | [#49](https://github.com/Xore/honeypot-stack/issues/49) |
-| Packer build | [#51](https://github.com/Xore/honeypot-stack/issues/51) |
-| libvirt domain and the `GOLDEN_READY` snapshot | [#52](https://github.com/Xore/honeypot-stack/issues/52) |
-| End-to-end smoke test, dashboard submit to report | [#53](https://github.com/Xore/honeypot-stack/issues/53) |
-| Ghidra request spool and payload-page entry points | [#76](https://github.com/Xore/honeypot-stack/issues/76) |
-| Ghidra pipeline phases 3–5 | [#78](https://github.com/Xore/honeypot-stack/issues/78) |
+| Golden-image lifecycle: checksum + scheduled rebuild | [#86](https://github.com/Xore/honeypot-stack/issues/86) |
+| VM-detection tells (pafish/al-khaser) | [#368](https://github.com/Xore/honeypot-stack/issues/368) |
+| windows_kimi realism gaps | [#493](https://github.com/Xore/honeypot-stack/issues/493) |
+| ProcMon CLI export hang | [#502](https://github.com/Xore/honeypot-stack/issues/502) |
+| CAPEv2 debugger-class-evasion sandbox (9 issues) | [#314-322](https://github.com/Xore/honeypot-stack/issues/314) |
 
-## Operational hygiene
+## Post-0.1.0 backlog, by area
 
-| Deliverable | Issue |
-|---|---|
-| Bound the Suricata `eve.json` growth on the VPS without breaking Filebeat | [#79](https://github.com/Xore/honeypot-stack/issues/79) |
+Grouped for planning, not in priority order. Full detail is in each issue.
 
-Not urgent and not blocked, but it is a disk-exhaustion path whose first
-symptom would be missing events rather than a disk alert.
+**GPU / ML / LLM** — #67 CUDA selection + sharing budget (also a 0.1.0 gate
+via #84's dependency), #661 Hugging Face model search + eval round
 
-## Attribution
+**GHOSTS sandbox** — #463 persona realism, #467 per-VM risk-feature
+granularity
 
-| Deliverable | Issue |
-|---|---|
-| Stop attributing tunnelled traffic to the WireGuard peer | ✅ [#54](https://github.com/Xore/honeypot-stack/issues/54) |
-| Close the VPS-side source-recovery gap | ✅ [#75](https://github.com/Xore/honeypot-stack/issues/75) |
+**Dashboard** — #609/#613 JA3/JA4 fingerprinting, #615/#616 Suricata
+severity/MITRE + anomaly events, #618 TANNER emulator results, #620
+cisco-asa WebVPN POST bodies, #624 dionaea SMB DCERPC uuid/opnum, #638
+binary artifacts into ES, #646/#652 CSP inline-style violations, #647 ES
+storage stats, #666 reporter metrics.json, #672 mobile/viewport testing,
+#673 action-menu button sizing, #678 container/Kibana/ES log audit
 
-## Documentation disposition
+**Analysis pipeline** — #528 content-defined chunking dedup, #606 dicompot
+AE title capture, #619 cisco-asa IKE payload logging, #623 ip-enrichment
+real attacker IP gap, #639 Kibana saved-search audit, #245 Ghidra/REST-backend
+version tracking, #680 correlate Ghidra/floss static findings against
+Windows-sandbox dynamic IOCs, #696 pafish/Session-0 validation gap
 
-Verification, link repair and archiving are tracked in
-[#72](https://github.com/Xore/honeypot-stack/issues/72). Nothing moves before
-its status is verified and inbound links are repaired.
-
-Active implementation plans: `DASHBOARD-RENDER-ENGINE-GUIDE.md`,
-`DASHBOARD-UI-REDESIGN-GUIDE.md`, `settings-user-configuration-roadmap.md`,
-`ml-gpu-coordinated-roadmap.md`, `ml-worker-plan.md`,
-`gpu-ml-worker-acceleration.md`, `gpu-llm-analysis-worker.md`,
-`ip-reporting-plan.md`, `github-analysis-integration-roadmap.md`.
-
-Operational runbooks: `CGNAT-DEPLOYMENT.md`, `CI-CD.md`,
-`honeypot-network-isolation.md`, `kvm-network-traffic-analysis.md`,
-`windows11-malware-lab-hardening.md`, `kvm-snapshot-vs-golden-image.md`.
-
-Research/reference: `background-noise.md`.
-
-Already archived: [`archive/SANDBOX_APIS.md`](archive/SANDBOX_APIS.md) —
-superseded by `Xore/honeypot/docs/SCANNERS.md`.
+**Ops** — #537 multi-node vs single-node ES research
 
 ## Priority rule
 
