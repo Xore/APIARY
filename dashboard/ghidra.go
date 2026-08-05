@@ -233,6 +233,13 @@ type ghidraPageData struct {
 	Status    ghidraQueueStatus
 	Query     string
 	Analysis  string
+	// GPUQueue is the shared GPU job queue (#637 follow-up): jobs deferred
+	// by insufficient GPU headroom, not this page's own file-spool queue
+	// above (Status/ghidraLiveSpoolCounts). Ghidra's AI triage is the only
+	// consumer today; the field lives here rather than on its own page
+	// because there's nowhere else on the dashboard an operator would look
+	// for it yet.
+	GPUQueue []gpuQueueJob
 }
 
 func ghidraResultsDir() string { return getenv("GHIDRA_RESULTS_DIR", "") }
@@ -466,6 +473,7 @@ func ghidraData(sha256, query string) (ghidraPageData, error) {
 		Rows:      loadGhidraResults(),
 		Status:    loadGhidraStatus(),
 		Query:     strings.TrimSpace(query),
+		GPUQueue:  loadGPUQueue(),
 	}
 	if data.Query != "" {
 		needle := strings.ToLower(data.Query)

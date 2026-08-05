@@ -128,6 +128,26 @@ TRIAGE_MODEL = os.environ.get("GHIDRA_TRIAGE_MODEL", "qwen3:14b")
 TRIAGE_TIMEOUT = int(os.environ.get("GHIDRA_TRIAGE_TIMEOUT", "300"))
 TRIAGE_OUTPUT_TOKENS = int(os.environ.get("GHIDRA_TRIAGE_OUTPUT_TOKENS", "512"))
 TRIAGE_SEED = int(os.environ.get("GHIDRA_TRIAGE_SEED", "144"))
+
+# GPU job queue (#637 follow-up): a queue drain (retry-triage.py) or another
+# GPU-bound consumer may already have the card's headroom claimed when a
+# request lands here. Checking first and enqueueing instead of just calling
+# Ollama and letting it queue/OOM internally means a slow triage never blocks
+# the drain loop, and the dashboard can show *why* a sample has no AI triage
+# yet instead of it looking silently skipped. Set GPU_QUEUE_ENABLED=false to
+# go back to calling Ollama unconditionally (Ollama still queues internally
+# in that case, just invisibly).
+GPU_QUEUE_ENABLED = os.environ.get("GPU_QUEUE_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+GPU_QUEUE_ES_HOST = os.environ.get("GPU_QUEUE_ES_HOST", "http://elasticsearch:9200")
+# Measured live for qwen3:14b at the ghidra slot's context (32768): ~14.1 GiB
+# (see docs/local-llm-model-evaluation.md's #568 section). Rounded up for
+# safety margin; a wrong estimate only ever affects queueing decisions, never
+# correctness -- Ollama enforces the real limit regardless.
+GHIDRA_TRIAGE_ESTIMATED_VRAM_MIB = int(os.environ.get("GHIDRA_TRIAGE_ESTIMATED_VRAM_MIB", "14500"))
+
+if GPU_QUEUE_ENABLED:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import gpu_queue  # noqa: E402
 TRIAGE_PROMPT_VERSION = "ghidra-triage-v1"
 
 # Prompt budget. A real binary has thousands of strings and functions and will
@@ -1225,7 +1245,7 @@ def _ask_model(workflow: str, evidence: str) -> dict | None:
     return parsed if isinstance(parsed, dict) else None
 
 
-def triage(parts: dict) -> dict | None:
+def triage(parts: dict, sha: str) -> dict | None:
     """Run the triage workflows against the local model. None if unavailable.
 
     Fail-soft is the whole contract here: triage is an aid, and throwing away a
@@ -1235,13 +1255,13 @@ def triage(parts: dict) -> dict | None:
     not worth the analysis it would destroy.
     """
     try:
-        return _triage(parts)
+        return _triage(parts, sha)
     except Exception as e:  # noqa: BLE001
         log(f"  [!] triage failed unexpectedly: {e!r}")
         return None
 
 
-def _triage(parts: dict) -> dict | None:
+def _triage(parts: dict, sha: str) -> dict | None:
     if not TRIAGE_API_BASE:
         return None
     if not endpoint_is_local(TRIAGE_API_BASE):
@@ -1250,6 +1270,38 @@ def _triage(parts: dict) -> dict | None:
         return None
 
     evidence, note = _evidence(parts)
+
+    if GPU_QUEUE_ENABLED and not gpu_queue.has_headroom(GHIDRA_TRIAGE_ESTIMATED_VRAM_MIB):
+        # The queue is a best-effort optimization layered on top of triage's
+        # existing fail-soft contract, never a new way for triage to fail
+        # worse than it did before this existed. If the queue itself is
+        # unavailable (ES down, network hiccup), fall through to calling
+        # Ollama directly rather than losing triage over an infra problem
+        # unrelated to whether the model itself is reachable.
+        try:
+            job_id = gpu_queue.enqueue(
+                GPU_QUEUE_ES_HOST, "ghidra-triage", sha, TRIAGE_MODEL,
+                GHIDRA_TRIAGE_ESTIMATED_VRAM_MIB,
+                payload={"evidence": evidence, "note": note},
+            )
+            log(f"  [i] triage: not enough free VRAM right now, queued as {job_id} "
+                f"(gpu-queue-drain.py will retry when the card frees up)")
+            return None
+        except Exception as e:  # noqa: BLE001
+            log(f"  [!] triage: GPU queue enqueue failed ({e!r}), calling the "
+                f"model directly instead of queueing")
+
+    return run_triage_workflows(evidence, note)
+
+
+def run_triage_workflows(evidence: str, note: str) -> dict | None:
+    """Ask the model both workflows and assemble the ai_triage result.
+
+    Split out from _triage so gpu-queue-drain.py (a separate process,
+    imports this module rather than duplicating this logic) can produce the
+    exact same result shape for a deferred job as a live run would have --
+    single source of truth for what "the assessment" actually looks like.
+    """
     results: dict = {}
     ran: list[str] = []
     for workflow in ("program_triage", "suspicious_behavior"):
@@ -1421,6 +1473,29 @@ def write_result(sha: str, payload: dict) -> None:
     final.chmod(0o600)
 
 
+def patch_result_triage(sha: str, ai_triage: dict) -> bool:
+    """Fill in ai_triage on an already-written result -- gpu-queue-drain.py's
+    counterpart to write_result: the deterministic analysis (Ghidra,
+    statictools, revdeck) already ran and was written at request time; only
+    the AI triage portion was deferred, so this patches just that field
+    rather than re-running (and re-writing over) everything else. Same
+    atomic write pattern as write_result. Returns False if the result was
+    deleted or never existed -- an operator can clear old results
+    independently of the queue, and a job for one that's gone is simply
+    nothing left to patch, not an error.
+    """
+    final = RESULTS_DIR / f"{sha}_ghidra.json"
+    if not final.is_file():
+        return False
+    payload = json.loads(final.read_text())
+    payload["ai_triage"] = ai_triage
+    tmp = RESULTS_DIR / f".{sha}_ghidra.json.tmp"
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True))
+    os.replace(tmp, final)
+    final.chmod(0o600)
+    return True
+
+
 def write_status() -> None:
     """Queue counts, shaped for loadGhidraStatus() to read."""
     def count(pattern: str) -> int:
@@ -1566,7 +1641,7 @@ def analyse_one(client: GhidraClient, sha: str, sample: Path,
 
     # After collection, from the collected artifacts only: the model never sees
     # the sample itself, and it runs last so nothing above depends on it.
-    ai_triage = triage(parts)
+    ai_triage = triage(parts, sha)
     if ai_triage:
         log(f"  [+] triage ({ai_triage['workflow']}): "
             f"risk={ai_triage['risk_level'] or 'unrated'} "

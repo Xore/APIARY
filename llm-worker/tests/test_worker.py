@@ -253,6 +253,20 @@ class ProductionCanaryTests(unittest.TestCase):
         self.assertEqual(result["reports"], 0)
 
 
+class GPUQueueVendoringTests(unittest.TestCase):
+    def test_vendored_copy_matches_canonical(self):
+        # gpu_queue.py is vendored (not imported across containers) into
+        # every consumer -- see its own module docstring for why. A
+        # vendored copy that drifts from the canonical one is exactly the
+        # kind of thing that's easy to miss in review; catch it in CI
+        # instead, same pattern as ghidra-worker.py's TRIAGE_SYSTEM
+        # contract test.
+        root = Path(__file__).resolve().parents[2]
+        canonical = (root / "analysis/gpu-queue/gpu_queue.py").read_text()
+        vendored = (root / "llm-worker/gpu_queue.py").read_text()
+        self.assertEqual(canonical, vendored)
+
+
 class OllamaContractTests(unittest.TestCase):
     def test_default_model_matches_approved_session_slot(self):
         manifest = json.loads(

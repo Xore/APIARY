@@ -566,6 +566,7 @@ func main() {
 	})
 	http.HandleFunc("/sandbox/submit", s.serveSandboxSubmit)
 	http.HandleFunc("/ghidra/submit", s.serveGhidraSubmit)
+	http.HandleFunc("/gpu-queue/abort", serveGPUQueueAbort)
 	http.HandleFunc("/github-analysis/submit", s.serveGitHubAnalysisSubmit)
 	http.HandleFunc("/payload-workbench", func(w http.ResponseWriter, r *http.Request) {
 		s.serveWorkbenchIndex(w, r, tmpl)

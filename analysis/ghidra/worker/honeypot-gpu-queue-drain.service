@@ -1,0 +1,27 @@
+[Unit]
+Description=Drain one job from the shared GPU job queue if headroom allows
+Documentation=file:/opt/honeypot-ghidra/DASHBOARD_INTEGRATION_PLAN.md
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Host-specific values (GHIDRA_TRIAGE_API_BASE, the spool paths, GPU_QUEUE_ES_HOST
+# if it differs from the default) live outside the repository, same file
+# honeypot-ghidra-worker.service reads.
+EnvironmentFile=-/etc/default/honeypot-ghidra
+ExecStart=/usr/bin/python3 /opt/honeypot-ghidra/worker/gpu-queue-drain.py
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# The queue itself lives in Elasticsearch, reached via a throwaway
+# `docker run --network honeynet curlimages/curl` (see gpu_queue.py's module
+# docstring for why this host-side process can't resolve `elasticsearch`
+# directly) -- no User=/Group= override, matching
+# honeypot-model-drift.service's own docker-socket access pattern.
+ReadWritePaths=/var/lib/honeypot-ghidra/results
+
+[Install]
+WantedBy=multi-user.target
