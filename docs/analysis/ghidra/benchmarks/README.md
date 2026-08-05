@@ -39,7 +39,7 @@ Only short progress and the report hash are printed. Preserve the raw report
 outside the repository with bounded retention; put the scored measurements and
 reproducibility metadata in the decision record. Do not adjust expected answers
 after seeing a preferred model's output. Promotion and rollback are documented
-in [`../models/README.md`](../../../../analysis/ghidra/models/README.md).
+in [`../models/README.md`](../models/README.md).
 
 ## GPU/model capability playbook
 
@@ -108,7 +108,7 @@ python3 probe-gpu-capabilities.py \
 
 None of these pick a model or write to `approved-models.json` — that
 remains `evaluate-models.py` plus the documented `model-governance.py
-promote` workflow in [`../models/README.md`](../../../../analysis/ghidra/models/README.md). They
+promote` workflow in [`../models/README.md`](../models/README.md). They
 only tell you whether running that workflow is worth it, and give real
 measured numbers instead of arithmetic assumptions for the context-length
 and concurrent-loading parts of that decision. See

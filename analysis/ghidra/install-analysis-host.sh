@@ -219,11 +219,11 @@ install -m 0644 -o root -g root \
 install -m 0644 -o root -g root \
   "$here/models/session-schema.json" "$target/models/session-schema.json"
 install -m 0644 -o root -g root \
-  "$here/models/approval-record.md" "$target/models/approval-record.md"
-install -m 0644 -o root -g root "$here/models/README.md" "$target/models/README.md"
+  "$here/../../docs/analysis/ghidra/models/approval-record.md" "$target/models/approval-record.md"
+install -m 0644 -o root -g root "$here/../../docs/analysis/ghidra/models/README.md" "$target/models/README.md"
 # The unit files point Documentation= at this, and it is the only description
 # of the result format an operator on the host can read.
-install -m 0644 -o root -g root "$here/DASHBOARD_INTEGRATION_PLAN.md" "$target/DASHBOARD_INTEGRATION_PLAN.md"
+install -m 0644 -o root -g root "$here/../../docs/analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md" "$target/DASHBOARD_INTEGRATION_PLAN.md"
 
 if [ ! -e "$env_file" ]; then
   install -m 0644 -o root -g root "$here/worker/honeypot-ghidra.default.example" "$env_file"
