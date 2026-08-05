@@ -617,6 +617,42 @@
     picker.focus();
   });
 
+  /* ---------- action menus (.action-menu, native <details>/<summary>) ----------
+     This dashboard vendors Xore/theme's theme.css but not theme.js, so
+     .action-menu's own close-on-outside-click/close-on-item-click behavior
+     (theme.js provides both, for free, to anything vendoring it) never
+     existed here -- every .action-menu (the payloads row kebab menu, #205;
+     events.html's per-event "actions" menu and fingerprint IP-filter menu;
+     the filter-bar's own .hp-open-in.action-menu) only ever toggled via its
+     own <summary>, with no way to dismiss it except clicking that same
+     trigger again. Delegated on document (not per-element) so it keeps
+     working after mountPage swaps in fresh markup on every live refresh --
+     same reasoning as the heatmap listeners above.
+
+     A real action link/button inside the menu (.action-menu__item or
+     .hp-open-in-item -- the two per-item classes different menus use) closes
+     it on click; a checkbox/select/input inside a menu (the IP-filter list,
+     the filter-bar's own form fields) is NOT either of those classes, so
+     interacting with one leaves the menu open, matching the whole point of
+     a multi-select filter panel. */
+  document.addEventListener("click", e => {
+    if (!e.target.closest?.(".action-menu")) {
+      document.querySelectorAll(".action-menu[open]").forEach(menu => menu.removeAttribute("open"));
+      return;
+    }
+    const item = e.target.closest(".action-menu__item, .hp-open-in-item");
+    if (item) item.closest(".action-menu")?.removeAttribute("open");
+  });
+  // Only one action menu open at a time: a second one opening (native
+  // <details> "toggle" event, capture phase so it fires before the browser
+  // finishes rendering the new state) closes any sibling still open.
+  document.addEventListener("toggle", e => {
+    if (!e.target.matches?.(".action-menu[open]")) return;
+    document.querySelectorAll(".action-menu[open]").forEach(menu => {
+      if (menu !== e.target) menu.removeAttribute("open");
+    });
+  }, true);
+
   /* ---------- workspace tabs ----------
      Any page can group its cards: render .tabs buttons with
      data-dashboard-tab and matching [data-dashboard-panel] sections. The valid
