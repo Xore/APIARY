@@ -7,6 +7,10 @@
 > **Companion guide:** [`gpu-llm-analysis-worker.md`](gpu-llm-analysis-worker.md)
 > — the GPU is shared between both workloads; §5 here is the coordination
 > contract.
+> **Setting up GPU passthrough itself?** See
+> [`gpu-docker-passthrough.md`](gpu-docker-passthrough.md) — driver
+> install, nvidia-container-toolkit, and the compose/`docker run` syntax
+> for handing a container the GPU. This guide assumes that's already done.
 
 ---
 

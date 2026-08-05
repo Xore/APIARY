@@ -15,6 +15,10 @@
 > [`llm-inference-backend-comparison.md`](llm-inference-backend-comparison.md)
 > (#598) for why that assumption was kept for now, and what would need to
 > change if it didn't.
+> **Setting up GPU passthrough itself?** See
+> [`gpu-docker-passthrough.md`](gpu-docker-passthrough.md) — driver
+> install, nvidia-container-toolkit, and the compose/`docker run` syntax
+> for handing a container the GPU. This guide assumes that's already done.
 
 ---
 
