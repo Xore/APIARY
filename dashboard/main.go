@@ -116,12 +116,15 @@ func main() {
 		// all existing tests).
 		esResultsClient = s.es
 		s.mlAnomalies = &mlAnomalyStore{}
+		s.llmAnalysis = &llmAnalysisStore{}
 		s.es.refresh()
 		s.refreshMLAnomalies()
+		s.refreshLLMAnalysis()
 		go func() {
 			for range time.Tick(time.Minute) {
 				s.es.refresh()
 				s.refreshMLAnomalies()
+				s.refreshLLMAnalysis()
 			}
 		}()
 	}
@@ -248,6 +251,7 @@ func main() {
 	http.HandleFunc("/api/alerts", s.serveAlertsAPI)
 	http.HandleFunc("/api/ml/anomalies", s.serveMLAnomaliesAPI)
 	http.HandleFunc("/api/ml/stats", s.serveMLStatsAPI)
+	http.HandleFunc("/api/llm/analysis", s.serveLLMAnalysisAPI)
 	http.HandleFunc("/api/events", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(s.eventsData(r))
@@ -492,6 +496,10 @@ func main() {
 		}
 		data := s.mlAnomaliesData(r)
 		renderPage(w, tmpl, "ml-anomalies", &data)
+	})
+	http.HandleFunc("/llm-analysis", func(w http.ResponseWriter, r *http.Request) {
+		data := s.llmAnalysisData(r)
+		renderPage(w, tmpl, "llm-analysis", &data)
 	})
 	http.HandleFunc("/reports", func(w http.ResponseWriter, r *http.Request) {
 		data := s.get()

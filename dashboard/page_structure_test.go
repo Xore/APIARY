@@ -154,6 +154,10 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 		{"clusters", clustersPage{Generated: now}},
 		{"campaigns", campaignsPage{Generated: now}},
 		{"ml-anomalies", mlAnomaliesPage{Generated: now, Enabled: true}},
+		{"llm-analysis", llmAnalysisPage{Generated: now, Enabled: true, Docs: []llmAnalysisDoc{
+			{Timestamp: now.Format(time.RFC3339), DocType: "session", Severity: "high", Confidence: "medium", Summary: "brute-forced ssh then ran whoami", SessionID: "sess-1"},
+			{Timestamp: now.Format(time.RFC3339), DocType: "error", ErrorCode: "model_timeout", Error: "ollama request timed out"},
+		}}},
 		{"alerts", alertsPageData{snapshot: snapshot{}}},
 	}
 	for _, page := range pages {
