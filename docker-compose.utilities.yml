@@ -71,15 +71,59 @@ services:
           cpus: "0.25"
           memory: 128M
 
-  # This is the one service in this stack with the real host
-  # /var/run/docker.sock, and that is deliberate, not casual: tanner_docker
-  # (docker-compose.tanner.yml) looks similar but is not the same trust
-  # boundary -- it runs its own disposable nested Docker daemon and never
-  # touches the host socket. To keep this exception as narrow as
-  # tanner_docker's, autoheal only acts on containers explicitly labeled
-  # autoheal=true (the image's default behavior; AUTOHEAL_CONTAINER_LABEL is
-  # set below anyway so that scope is visible here rather than relying on an
-  # unstated default).
+  # docker-socket-proxy is the one service in this stack that still holds
+  # the real host /var/run/docker.sock -- narrowing what autoheal below can
+  # do with it, per the finding in docs/agent-intrusion-threat-model.md
+  # item 5: a raw bind mount of docker.sock is root-equivalent (arbitrary
+  # container create/exec/volume/network/image access), a far bigger grant
+  # than "restart the containers labeled autoheal=true" actually needs.
+  #
+  # CONTAINERS=1 + POST=1 is the narrowest working grant, confirmed against
+  # this proxy's real haproxy ACL rules (not assumed from the env var
+  # names): a per-action flag like ALLOW_RESTARTS exists, but the proxy's
+  # broader `^/containers` rule (gated by CONTAINERS alone) matches every
+  # /containers/* path first, including restart/stop/kill -- so
+  # ALLOW_RESTARTS adds nothing CONTAINERS doesn't already cover, and
+  # CONTAINERS is unavoidable anyway: autoheal's own polling loop calls
+  # `GET /containers/json?filters={"health":["unhealthy"],...}` to find
+  # what to restart, and no narrower flag covers that specific query.
+  # CONTAINERS=1 does grant the full /containers/* CRUD surface (create,
+  # delete, rename, prune -- not just restart), but critically excludes
+  # every other API category: IMAGES, EXEC, VOLUMES, NETWORKS, INFO,
+  # SYSTEM, SWARM, SECRETS, CONFIGS, BUILD, COMMIT, NODES, SERVICES, TASKS,
+  # PLUGINS all stay unset (denied). Verified directly, not assumed: ran a
+  # real docker-socket-proxy + a real unhealthy labeled container locally
+  # and confirmed (a) autoheal restarts it through the proxy, and (b)
+  # /images/json, /info, /volumes, and POST /exec/{id}/start (actually
+  # running a command inside a container, as opposed to the harmless
+  # /containers/{id}/exec create-only call CONTAINERS's broad match also
+  # permits) all still 403.
+  docker-socket-proxy:
+    <<: *runtime-defaults
+    image: tecnativa/docker-socket-proxy:v0.5.0
+    container_name: hp-docker-socket-proxy
+    restart: unless-stopped
+    environment:
+      - CONTAINERS=1
+      - POST=1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    security_opt:
+      - no-new-privileges:true
+    # Private to this pair -- nothing else in the stack talks to the proxy,
+    # and the proxy has no reason to reach honeynet or the internet.
+    networks:
+      - docker-socket-proxy_net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
+
+  # tanner_docker (docker-compose.tanner.yml) looks similar to the old
+  # direct-socket-mount arrangement here but is not the same trust boundary
+  # -- it runs its own disposable nested Docker daemon and never touches
+  # the host socket at all, narrow or otherwise.
   #
   # A healthcheck alone does not restart anything: Docker's restart policy
   # reacts to the container process exiting, not to health status, so an
@@ -89,26 +133,33 @@ services:
   # restarts. This is the actual missing piece.
   autoheal:
     <<: *runtime-defaults
-    image: willfarrell/autoheal:1.2.0
+    # Bumped past the 1.2.0 this repo previously pinned: that version's
+    # entrypoint hardcodes HTTPS + client-cert paths for any tcp:// DOCKER_SOCK
+    # value (no plain-HTTP option at all), which can't reach
+    # docker-socket-proxy's plain-HTTP frontend. Pinned by digest, not
+    # `:latest` -- there is no numbered release tag ahead of 1.2.0 yet
+    # upstream, so a digest is the only reproducible way to pin the fixed
+    # version. Confirmed directly: pulled and ran this exact digest against
+    # a real docker-socket-proxy and a real unhealthy container locally
+    # (see the proxy service's own comment above) -- it detects and
+    # restarts correctly.
+    image: willfarrell/autoheal@sha256:3cb356f1dd297d24cdfbb910a9c142cdf735c39d550ff2d9b8ed818d63d23282
     container_name: hp-autoheal
     restart: unless-stopped
     environment:
+      - DOCKER_SOCK=tcp://docker-socket-proxy:2375
       - AUTOHEAL_CONTAINER_LABEL=autoheal
       - AUTOHEAL_INTERVAL=30
       - AUTOHEAL_START_PERIOD=60
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
     security_opt:
       - no-new-privileges:true
-    # Talks to the Docker daemon over docker.sock only -- confirmed no other
-    # network need (its job is entirely "watch container health via the
-    # socket, restart the labeled ones"). Also sidesteps this host's
-    # address-pool exhaustion the same way services-adapter's network_mode:
-    # none did in docker-compose.dashboard.yml: both default pools (16
-    # /16 chunks in 172.16.0.0/12, 16 /20 chunks in 192.168.0.0/16) were
-    # down to their last free chunk by the time this stack was split out,
-    # each new project's implicit default network eating one more.
-    network_mode: none
+    # No docker.sock bind mount at all any more -- every Docker API call
+    # goes through docker-socket-proxy instead. Joins the proxy's private
+    # network only, same "no other network need" reasoning the old
+    # network_mode: none comment gave, just satisfied a different way now
+    # that there's a real peer to reach instead of none.
+    networks:
+      - docker-socket-proxy_net
     deploy:
       resources:
         limits:
@@ -169,6 +220,10 @@ networks:
   # as a side effect of this split).
   honeynet:
     name: honeynet
+    driver: bridge
+  # Private to the docker-socket-proxy/autoheal pair only -- nothing else in
+  # this stack has any reason to reach either of them.
+  docker-socket-proxy_net:
     driver: bridge
 
 volumes:
