@@ -48,6 +48,11 @@ services:
     volumes:
       - /opt/stacks/honeypot-stack/logs/endlessh:/var/log/honeypot
       - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+    # #239: measured via a real read_only:true build+run against this exact
+    # service definition -- main.go's only file write is LOG_PATH, already
+    # the bind mount above; no tmpfs needed (confirmed against source: the
+    # only os.OpenFile/os.Create/os.Mkdir call in this binary is the logger).
+    read_only: true
     networks: [endlessh_net]
     healthcheck:
       test: ["CMD", "/endlessh-honeypot", "-healthcheck"]
