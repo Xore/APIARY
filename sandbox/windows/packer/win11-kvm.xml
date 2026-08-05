@@ -201,8 +201,17 @@
       <!-- Not QXL: it enumerates in Device Manager as a Red Hat QXL
            controller, which is as loud a VM tell as a virtio disk. Plain VGA
            is unremarkable and still gives a usable VNC console for
-           diagnostics. -->
-      <model type='vga' vram='16384' heads='1'/>
+           diagnostics.
+
+           #368: without an explicit resolution hint, the framebuffer came
+           up at 1280x800 (confirmed via virsh screenshot and
+           Win32_VideoController), a residual sandbox tell RESEARCH.md
+           #1.2 called out. libvirt passes this straight to QEMU's stdvga
+           boot-time mode; verified live it takes effect at the OVMF boot
+           screen already and holds once Windows finishes loading. -->
+      <model type='vga' vram='16384' heads='1'>
+        <resolution x='1920' y='1080'/>
+      </model>
     </video>
 
     <input type='tablet' bus='usb'/>
