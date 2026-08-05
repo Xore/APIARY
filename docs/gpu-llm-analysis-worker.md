@@ -11,6 +11,10 @@
 > **Prerequisite reading:** [`ml-worker-plan.md`](ml-worker-plan.md) (data
 > sources, ES layout, dashboard SSE pattern),
 > [`honeypot-network-isolation.md`](honeypot-network-isolation.md) (zone model).
+> **Backend choice:** this guide assumes Ollama throughout (§4, §6). See
+> [`llm-inference-backend-comparison.md`](llm-inference-backend-comparison.md)
+> (#598) for why that assumption was kept for now, and what would need to
+> change if it didn't.
 
 ---
 
