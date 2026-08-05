@@ -15,6 +15,7 @@ middle, where it is real content, e.g. a quoted argument or a Windows path
 
 Reads lines on stdin, writes the cleaned, non-empty ones to stdout.
 """
+import os
 import sys
 
 NOISE = "'\"`\\/|"
@@ -35,10 +36,24 @@ def clean(line: str) -> str:
 
 
 def main() -> None:
-    for raw in sys.stdin:
-        s = clean(raw)
-        if s:
-            print(s)
+    # guest-runner.sh always pipes this through `| head -n 4000` -- head
+    # exiting once it has its 4000 lines closes our stdout out from under us,
+    # and Python's default SIGPIPE handling turns that into an unhandled
+    # BrokenPipeError traceback (confirmed live, #498's smoke test run:
+    # landed in runner_log even though strings-ascii.txt/strings-utf16le.txt
+    # were both written correctly -- head already had everything it needed).
+    # Standard fix per Python's own devguide: swallow the error, redirect
+    # stdout to /dev/null so the interpreter's own shutdown-time flush
+    # doesn't raise a second one, then exit non-zero.
+    try:
+        for raw in sys.stdin:
+            s = clean(raw)
+            if s:
+                print(s)
+    except BrokenPipeError:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        sys.exit(1)
 
 
 if __name__ == "__main__":
