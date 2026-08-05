@@ -12,7 +12,7 @@ Every sensor belongs to a stable fictional organization/site/asset identity in
 fields in JSON; Filebeat enriches upstream logs that cannot. The dashboard makes
 persona, site, and asset labels clickable so investigations can span protocols
 without confusing defender-side identity with the attacker's ASN organization.
-See [personas/README.md](../personas/README.md) for the complete matrix and validator.
+See [personas/README.md](personas/README.md) for the complete matrix and validator.
 
 ## Seeded filesystem (cowrie)
 

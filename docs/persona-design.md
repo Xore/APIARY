@@ -10,7 +10,7 @@ own README calls both out by name (`README.md` line 296 for outbound; the
 deep, source-verified realism work for Windows personas
 ([#91](https://github.com/Xore/honeypot-stack/issues/91)/[#94](https://github.com/Xore/honeypot-stack/issues/94)/[#96](https://github.com/Xore/honeypot-stack/issues/96))
 and has a full fictional-organization inventory
-([`personas/README.md`](../personas/README.md)) — this doc is the short
+([`personas/README.md`](personas/README.md)) — this doc is the short
 practical guide those didn't cover.
 
 ## 1. Outbound network policy
@@ -71,7 +71,7 @@ What's still genuinely per-sensor, and worth being deliberate about:
 **Host naming and banners.** Every persona in
 [`personas/personas.json`](../personas/personas.json) already carries a
 fictional `organization`/`site_id`/`asset_id`/hostname — see
-[`personas/README.md`](../personas/README.md)'s table for the full
+[`personas/README.md`](personas/README.md)'s table for the full
 inventory (NexusAI Research GmbH's GPU inference node, Meridian Retail
 Systems' legacy integration server, Rheinwerk Municipal Water's PLCs, and
 so on). Keep new personas consistent with that pattern rather than
