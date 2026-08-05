@@ -13,6 +13,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"html"
@@ -124,10 +125,21 @@ type handler struct {
 	port int
 }
 
+// ja3ContextKey looks up this connection's ja3Conn in a request's context
+// (see main()'s ConnContext); an unexported empty struct avoids collisions
+// with any other package's context keys.
+type ja3ContextKey struct{}
+
 func (h *handler) log2(r *http.Request, kind, reqPath, data string) {
 	ip, port := srcIP(r)
+	hdr := headerMap(r)
+	if jc, ok := r.Context().Value(ja3ContextKey{}).(*ja3Conn); ok {
+		if fp := jc.JA3(); fp != "" {
+			hdr["x-ja3"] = fp
+		}
+	}
 	h.log.emit(event{Port: h.port, SrcIP: ip, SrcPort: port, Event: kind, Path: reqPath, Data: data,
-		UserAgent: r.UserAgent(), Headers: headerMap(r)})
+		UserAgent: r.UserAgent(), Headers: hdr})
 }
 
 // headerMap flattens net/http's []string-per-key header representation
@@ -288,11 +300,23 @@ func main() {
 	if getenv("PROXY_PROTOCOL", "") == "1" {
 		ln = &proxyListener{ln}
 	}
+	ln = &ja3Listener{ln}
 	tlsLn := tls.NewListener(ln, &tls.Config{Certificates: []tls.Certificate{cert}})
 
 	srv := &http.Server{
 		Handler:  &handler{log: log, port: port},
 		ErrorLog: stdlog.New(healthcheckNoiseFilter{}, "", 0),
+		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
+			// c is the *tls.Conn tlsLn.Accept() produced; NetConn() unwraps
+			// back to the ja3Conn ja3Listener.Accept() returned it from, so
+			// log2 can read the JA3 this connection's ClientHello produced.
+			if tc, ok := c.(*tls.Conn); ok {
+				if jc, ok := tc.NetConn().(*ja3Conn); ok {
+					return context.WithValue(ctx, ja3ContextKey{}, jc)
+				}
+			}
+			return ctx
+		},
 	}
 	log.emit(event{Port: port, Event: "listening"})
 	if err := srv.Serve(tlsLn); err != nil {
