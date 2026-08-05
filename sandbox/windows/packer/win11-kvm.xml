@@ -214,6 +214,25 @@
       </model>
     </video>
 
+    <!-- #502: without an explicit <watchdog> element, libvirt/QEMU on this
+         host auto-injects a default model='itco' action='reset' device for
+         this machine type. Windows has no built-in driver to service an
+         Intel TCO watchdog, so nothing ever resets its countdown: it fires
+         on its own timeout and hard-resets the whole guest, independent of
+         anything actually happening inside it. Confirmed live: with the
+         implicit default in place the guest rebooted unprompted roughly
+         every 90-120s (reproduced twice); with this explicit action='none'
+         override, it stayed up and stable for 15+ minutes of continuous
+         monitoring, including through a real ProcMon start/stop/export
+         cycle. A silent, periodic whole-VM reset happening mid-operation
+         looks exactly like a hung remote command from the orchestrator's
+         side (the WinRM connection just dies), which was very likely a
+         real contributor to #502's reported "hangs indefinitely" symptom,
+         though not the whole story (see that issue for what's still open:
+         the export itself is slow, multiple minutes for a tiny capture,
+         independent of this fix). -->
+    <watchdog model='itco' action='none'/>
+
     <input type='tablet' bus='usb'/>
     <input type='keyboard' bus='ps2'/>
 
