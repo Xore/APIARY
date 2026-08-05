@@ -182,6 +182,17 @@ func classify(path string) string {
 		strings.Contains(p, ".aws"), strings.Contains(p, "config"),
 		strings.Contains(p, "credential"), strings.Contains(p, "secret"):
 		return "secret-hunt"
+	// #573: the two named-CVE plugin baits below (mirrored from serve()'s own
+	// switch, same ordering: specific plugin+CVE cases before the generic
+	// wp-content fallback) get their own category instead of falling into
+	// the generic "wordpress" bucket -- a hit on one of these exact readme.txt
+	// paths is a scanner actively probing for a specific known RCE, much
+	// stronger signal than a bare wp-login scan, and worth being able to
+	// filter/aggregate on separately.
+	case strings.Contains(p, "/wp-content/plugins/duplicator/") && strings.HasSuffix(p, "readme.txt"):
+		return "wordpress-cve-2020-11738"
+	case strings.Contains(p, "/wp-content/plugins/wp-file-manager/") && strings.HasSuffix(p, "readme.txt"):
+		return "wordpress-cve-2020-25213"
 	case strings.Contains(p, "wp-login"), strings.Contains(p, "wp-admin"),
 		strings.Contains(p, "xmlrpc"), strings.Contains(p, "wp-content"),
 		strings.Contains(p, "/readme.html"):

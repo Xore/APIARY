@@ -81,9 +81,37 @@ func TestUnknownWPContentPathIs404(t *testing.T) {
 }
 
 func TestWordPressPathsClassifiedAsWordPress(t *testing.T) {
-	for _, p := range []string{"/readme.html", "/xmlrpc.php", "/wp-content/plugins/duplicator/readme.txt"} {
+	// #573: the two named-CVE plugin readmes get their own category now
+	// (see TestNamedCVEBaitPathsGetTheirOwnCategory) -- no longer part of
+	// this generic-bucket list.
+	for _, p := range []string{"/readme.html", "/xmlrpc.php", "/wp-login.php", "/wp-admin/"} {
 		if got := classify(p); got != "wordpress" {
 			t.Errorf("classify(%q) = %q, want \"wordpress\"", p, got)
+		}
+	}
+}
+
+// TestNamedCVEBaitPathsGetTheirOwnCategory is a regression test for #573:
+// serve()'s own switch implements two specific, real, mass-scanned CVE
+// lures (CVE-2020-11738 Duplicator, CVE-2020-25213 WP File Manager), but
+// classify() bucketed both into the same generic "wordpress" category as a
+// bare wp-login scan -- much weaker signal than "a scanner is actively
+// probing for this specific known RCE."
+func TestNamedCVEBaitPathsGetTheirOwnCategory(t *testing.T) {
+	cases := []struct {
+		path string
+		want string
+	}{
+		{"/wp-content/plugins/duplicator/readme.txt", "wordpress-cve-2020-11738"},
+		{"/wp-content/plugins/wp-file-manager/readme.txt", "wordpress-cve-2020-25213"},
+		// A generic wp-login/wp-admin hit must still fall into the generic
+		// bucket, unchanged.
+		{"/wp-login.php", "wordpress"},
+		{"/wp-admin/", "wordpress"},
+	}
+	for _, tc := range cases {
+		if got := classify(tc.path); got != tc.want {
+			t.Errorf("classify(%q) = %q, want %q", tc.path, got, tc.want)
 		}
 	}
 }
