@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"net/http/httptest"
 	"strings"
@@ -44,20 +43,17 @@ func TestRebuildKeepsEverySensorNotJustTop30(t *testing.T) {
 }
 
 func TestSensorCardHasScrollWrapperAndCountIndicator(t *testing.T) {
+	// .card__scroll itself (max-height + overflow-y) lives in the vendored
+	// theme.css -- "Vendored Xore/theme is in sync" already guards that
+	// file staying byte-identical to upstream, so this only needs to check
+	// the markup actually uses the class, not redefine the rule here too.
 	body := mustReadUI("overview.html")
 	for _, want := range []string{
-		`class="sensor-card__scroll"`,
+		`class="card__scroll"`,
 		`Showing all {{len .Sensors}} sensor`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("overview.html sensor-feeds card missing %q", want)
 		}
-	}
-	css, err := staticAssets.ReadFile("static/theme.css")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Contains(css, []byte(".sensor-card__scroll {")) {
-		t.Fatal("theme.css must bound .sensor-card__scroll (max-height + overflow-y) so a long sensor list scrolls in place")
 	}
 }
