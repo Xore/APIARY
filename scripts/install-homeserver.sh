@@ -1009,7 +1009,7 @@ step_ghosts_network_setup() {
 step_ghosts_host_install() {
   # --skip-enroll-test: the full test (build Ghosts.Client.Universal from
   # source, run it once, poll the API for enrollment) is the real
-  # confirmation bar per sandbox/ghosts/README.md, but it's slow and this
+  # confirmation bar per docs/sandbox/ghosts/README.md, but it's slow and this
   # step already follows a `dotnet publish`-from-source container build --
   # run the enrollment test manually after a restore, not on every
   # unattended run.
