@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestWhenNormalizesDisplayToUTC (#198): different sensors' timestamp
 // formats parse into different time.Location values -- a Z-suffixed string
@@ -42,5 +45,67 @@ func TestWhenAgeMathIsLocationIndependent(t *testing.T) {
 	offset, _ := when(map[string]any{"timestamp": "2026-08-01T15:52:10+0200"})
 	if !utc.Equal(offset) {
 		t.Fatalf("the same real instant in two formats must compare equal: %v vs %v", utc, offset)
+	}
+}
+
+// TestDionaeaDCERPCRequestSurfacesUUIDAndOpnum (#624): log_incident's
+// generic handler already stores uuid/opnum/transfersyntax for every
+// smb.dcerpc.bind/request incident -- this dashboard branch just never read
+// them, so an operator saw only "smb.dcerpc.request" with no indication of
+// which RPC interface or operation was actually targeted.
+func TestDionaeaDCERPCRequestSurfacesUUIDAndOpnum(t *testing.T) {
+	ev := classify(map[string]any{
+		"origin": "dionaea.modules.python.smb.dcerpc.request",
+		"data": map[string]any{
+			"con":   map[string]any{"local_host": "203.0.113.5"},
+			"uuid":  "4b324fc8-1670-01d3-1278-5a47bf6ee188",
+			"opnum": float64(9),
+		},
+	}, "dionaea")
+	if !strings.Contains(ev.detail, "uuid=4b324fc8-1670-01d3-1278-5a47bf6ee188") {
+		t.Fatalf("detail must include the RPC interface uuid, got %q", ev.detail)
+	}
+	if !strings.Contains(ev.detail, "opnum=9") {
+		t.Fatalf("detail must include the operation number, got %q", ev.detail)
+	}
+}
+
+// TestDionaeaDCERPCBindSurfacesTransferSyntax covers the bind side of #624
+// (transfersyntax, no opnum -- a bind negotiates the interface, it doesn't
+// invoke an operation on it).
+func TestDionaeaDCERPCBindSurfacesTransferSyntax(t *testing.T) {
+	ev := classify(map[string]any{
+		"origin": "dionaea.modules.python.smb.dcerpc.bind",
+		"data": map[string]any{
+			"con":            map[string]any{"local_host": "203.0.113.5"},
+			"uuid":           "4b324fc8-1670-01d3-1278-5a47bf6ee188",
+			"transfersyntax": "8a885d04-1ceb-11c9-9fe8-08002b104860",
+		},
+	}, "dionaea")
+	if !strings.Contains(ev.detail, "uuid=4b324fc8-1670-01d3-1278-5a47bf6ee188") {
+		t.Fatalf("detail must include the RPC interface uuid, got %q", ev.detail)
+	}
+	if !strings.Contains(ev.detail, "transfersyntax=8a885d04-1ceb-11c9-9fe8-08002b104860") {
+		t.Fatalf("detail must include the transfer syntax, got %q", ev.detail)
+	}
+	if strings.Contains(ev.detail, "opnum=") {
+		t.Fatalf("a bind has no opnum, must not fabricate one: %q", ev.detail)
+	}
+}
+
+// TestDionaeaIncidentWithoutDCERPCFieldsIsUnaffected proves the #624 change
+// is additive: an incident with no uuid (every non-dcerpc origin -- login
+// attempts, downloads, etc.) must not gain a stray "uuid=" in its detail.
+func TestDionaeaIncidentWithoutDCERPCFieldsIsUnaffected(t *testing.T) {
+	ev := classify(map[string]any{
+		"origin": "dionaea.modules.python.ftp.login",
+		"data": map[string]any{
+			"con":      map[string]any{"local_host": "203.0.113.5"},
+			"username": "anonymous",
+			"password": "guest@example.com",
+		},
+	}, "dionaea")
+	if strings.Contains(ev.detail, "uuid=") {
+		t.Fatalf("a non-dcerpc incident must not gain a uuid field: %q", ev.detail)
 	}
 }
