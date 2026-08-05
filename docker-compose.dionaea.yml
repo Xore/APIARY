@@ -120,6 +120,15 @@ services:
       - DAC_OVERRIDE
     security_opt:
       - no-new-privileges:true
+    read_only: true
+    # /opt/dionaea/etc doesn't exist in the base image at all -- the
+    # entrypoint's own `cp -van template/etc .` creates it fresh from
+    # scratch on every container start (etc/ has no bind mount or named
+    # volume of its own, unlike var/lib+var/log), then the entrypoint
+    # writes ihandlers-enabled/*.yaml and sed -i's dionaea.cfg in place --
+    # all real writes to what would otherwise be read-only rootfs.
+    tmpfs:
+      - /opt/dionaea/etc
     networks:
       - dionaea_net
     # #41: dionaea never had a healthcheck at all, so a real production
