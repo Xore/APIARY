@@ -110,42 +110,46 @@
     }
   };
 
-  function styleAttr(style) {
-    if (!style) return "";
-    var css = [];
-    if (style.fg) css.push("color:" + style.fg);
-    if (style.bg) css.push("background:" + style.bg);
-    if (style.bold) css.push("font-weight:bold");
-    return css.length ? ' style="' + css.join(";") + '"' : "";
-  }
-
-  function esc(s) {
-    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  }
-
   function blankCell(c) { return c.ch === " " && !(c.style && c.style.bg); }
 
+  // Builds DOM nodes directly and sets colours/weight via individual
+  // .style.* property assignment rather than a literal style="..." HTML
+  // attribute -- CSP's style-src has no nonce/hash mechanism for inline
+  // style attributes (a session's fg/bg/bold combinations are arbitrary,
+  // not a small enumerable set a hash could cover), so building markup
+  // with `style="..."` and injecting via innerHTML was silently blocked
+  // by the dashboard's CSP (#646/#652). Per-property assignment on an
+  // element's CSSStyleDeclaration is not subject to that restriction.
   function render(screen, el) {
     var lastRow = screen.rows.length - 1;
     while (lastRow > 0 && screen.rows[lastRow].every(blankCell)) lastRow--;
-    var html = [];
+    var frag = document.createDocumentFragment();
     for (var r = 0; r <= lastRow; r++) {
       var row = screen.rows[r];
       var lastCol = COLS - 1;
       while (lastCol > 0 && blankCell(row[lastCol])) lastCol--;
-      var line = [];
       var i = 0;
       while (i <= lastCol) {
         var style = row[i].style;
         var j = i;
         var text = "";
         while (j <= lastCol && sameStyle(row[j].style, style)) { text += row[j].ch; j++; }
-        line.push(style ? "<span" + styleAttr(style) + ">" + esc(text) + "</span>" : esc(text));
+        if (style) {
+          var span = document.createElement("span");
+          if (style.fg) span.style.color = style.fg;
+          if (style.bg) span.style.background = style.bg;
+          if (style.bold) span.style.fontWeight = "bold";
+          span.textContent = text;
+          frag.appendChild(span);
+        } else {
+          frag.appendChild(document.createTextNode(text));
+        }
         i = j;
       }
-      html.push(line.join(""));
+      if (r < lastRow) frag.appendChild(document.createTextNode("\n"));
     }
-    el.innerHTML = html.join("\n");
+    el.textContent = "";
+    el.appendChild(frag);
   }
 
   function sameStyle(a, b) {
