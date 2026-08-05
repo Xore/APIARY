@@ -1,7 +1,7 @@
 # Backup and recovery
 
 For a *deliberate* full reset on the same hosts (not disaster recovery), see
-[`docs/STACK-REBUILD.md`](../docs/STACK-REBUILD.md) instead — this doc is
+[`docs/STACK-REBUILD.md`](../STACK-REBUILD.md) instead — this doc is
 about restoring a backup archive onto a replacement host after data loss.
 
 Run `sudo analysis/backup-honeypot.sh` from the deployed stack. It creates a

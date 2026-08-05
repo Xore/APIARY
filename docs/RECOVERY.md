@@ -65,7 +65,7 @@ by hand.
 ## What this doesn't replace
 
 - **Restoring a backup onto a *replacement* host** after real data loss --
-  see [`analysis/RECOVERY.md`](../analysis/RECOVERY.md) instead. This
+  see [`docs/analysis/RECOVERY.md`](analysis/RECOVERY.md) instead. This
   script's `--wipe` is for getting the *same* host back to a known-good
   state on purpose (a schema/volume-layout change, or historical data no
   longer worth keeping) -- it doesn't restore anything after wiping, only

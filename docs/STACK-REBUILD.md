@@ -5,7 +5,7 @@
 A runbook for a **deliberate full reset**: every Dockge stack (home) and the
 plain-Compose VPS stack stopped, every honeypot-owned volume and log wiped,
 everything brought back up cold. Different from
-[`analysis/RECOVERY.md`](../analysis/RECOVERY.md), which restores a backup
+[`docs/analysis/RECOVERY.md`](analysis/RECOVERY.md), which restores a backup
 archive onto a *replacement* host — this is for the *same* hosts, on purpose,
 usually after a schema/volume-layout change or when historical data is no
 longer worth keeping.
