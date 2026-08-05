@@ -158,7 +158,7 @@ for a run the worker does not know about.
   `logs/suricata/pcap/`, mounted over WireGuard. It does *not* currently index
   sandbox captures — [#87](https://github.com/Xore/honeypot-stack/issues/87).
 - **EveBox** and **Kibana** read the VPS `eve.json`. See
-  [`../vps/suricata/README.md`](../vps/suricata/README.md), including the
+  [`vps/suricata/README.md`](vps/suricata/README.md), including the
   `HOME_NET` trap and the fact that `eve.json` is unrotated
   ([#79](https://github.com/Xore/honeypot-stack/issues/79)).
 - **The dashboard** reads the sanitized export directory read-only and shows

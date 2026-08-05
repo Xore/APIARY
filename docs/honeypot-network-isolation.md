@@ -35,7 +35,7 @@ analysis stack are not on the same hardware.
 
 The consequence worth remembering: the sensor that sees the true source address
 is the one on the VPS. See
-[`../vps/suricata/README.md`](../vps/suricata/README.md) for the `HOME_NET`
+[`vps/suricata/README.md`](vps/suricata/README.md) for the `HOME_NET`
 trap that follows from it, and note that traffic arriving over the tunnel must
 not be attributed to the WireGuard peer.
 
@@ -133,7 +133,7 @@ here to implement and no issue to open. Verified by
   trust boundaries; cites this document's isolation zones directly (#154)
 - [`kvm-network-traffic-analysis.md`](kvm-network-traffic-analysis.md) — the
   sandbox capture and isolation model in full
-- [`../vps/suricata/README.md`](../vps/suricata/README.md) — VPS sensor,
+- [`vps/suricata/README.md`](vps/suricata/README.md) — VPS sensor,
   `HOME_NET`, and log retention
 - [`../sandbox/README.md`](../sandbox/README.md) — the Linux runner
 - [libvirt nwfilter](https://libvirt.org/formatnwfilter.html)
