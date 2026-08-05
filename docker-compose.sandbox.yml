@@ -155,6 +155,35 @@ services:
       - NET_ADMIN
       - NET_RAW
       - SYS_NICE
+      # jasonish/suricata's own docker-entrypoint.sh (fix_perms(), gated on
+      # having sys_nice+net_admin -- both granted above) chowns
+      # /etc/suricata, /var/lib/suricata, etc to the suricata user, then
+      # execs suricata itself with --user suricata --group suricata.
+      # Without cap_drop: ALL none of this needed spelling out; with it,
+      # every one of these five is independently required and the failure
+      # mode for each is a different, unrelated-looking error -- confirmed
+      # live 2026-08-05, the first time this compose file was ever actually
+      # invoked (#510):
+      #   - CHOWN: fix_perms()'s chown fails ("Operation not permitted"),
+      #     and the entrypoint's `set -e` kills the container immediately.
+      #   - DAC_OVERRIDE: even after a successful chown, cap_drop: ALL also
+      #     strips root's normal DAC bypass -- "root" in this container is
+      #     not exempt from file permission checks without this, so the
+      #     entrypoint (or suricata itself, pre-drop) fails to open
+      #     /etc/suricata/suricata.yaml ("Permission denied") regardless of
+      #     which user actually owns it.
+      #   - SETUID/SETGID: suricata's own internal privilege drop (from
+      #     --user/--group) needs these directly -- without them it fails
+      #     at startup with "capng_change_id for main thread failed".
+      #   - SETPCAP: also required by that same capng_change_id() call, to
+      #     manage which capabilities (net_admin/net_raw/sys_nice) survive
+      #     the uid switch so packet capture still works as the
+      #     unprivileged suricata user afterward.
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+      - SETPCAP
     security_opt:
       - no-new-privileges:true
     command: >
