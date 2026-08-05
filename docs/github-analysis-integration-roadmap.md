@@ -48,7 +48,7 @@ action**, with a dry-run default.
 
 **No.** Verified against `Xore/honeypot@main` (pushed 2026-07-29) on 2026-07-30.
 
-| Claim in `analysis/README.md` | Upstream reality |
+| Claim in `docs/analysis/README.md` | Upstream reality |
 |---|---|
 | "submits to **VirusTotal** and **JoeSandbox**" | Eight scanners: VT, MalwareBazaar, Hybrid-Analysis, Malshare, JoeSandbox, MetaDefender, CAPE, Any.run |
 | `analysis/pipeline.py` is a component | **The file does not exist.** Never has, in this tree |
@@ -150,11 +150,11 @@ analyst clicks "Send for scanner analysis" (confirm modal)
 
 ## Phase 0 — Reconcile the documentation and retire the cron path ✅ 2026-07-30
 
-**Why first:** every later phase was described against `analysis/README.md`, and
+**Why first:** every later phase was described against `docs/analysis/README.md`, and
 that file documented a pipeline that does not exist. Nothing here touched
 running code.
 
-1. ✅ Rewrote `analysis/README.md` against the eight-scanner reality: correct
+1. ✅ Rewrote `docs/analysis/README.md` against the eight-scanner reality: correct
    scanner table, correct `reports/` layout, correct secret list, the
    `--diff-filter=AR` scan rule, the four triggers, and the failure contract.
 2. ✅ Dropped the `analysis/pipeline.py` row — the file does not exist.
@@ -165,7 +165,7 @@ running code.
    cron-driven bulk publication is replaced by the dashboard button and that the
    script is kept only for a one-time backfill run by hand.
 
-**Exit met:** `analysis/README.md` describes only files that exist and behaviour
+**Exit met:** `docs/analysis/README.md` describes only files that exist and behaviour
 that upstream actually implements.
 
 ---

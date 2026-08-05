@@ -185,7 +185,7 @@ commands/credentials, payloads, enriched IDS alerts, and ingest failures.
   enrich `/payloads`, static-analysis reports, risk scores, alerts, and health.
 - **Backups** — run `sudo analysis/backup-honeypot.sh`; Elasticsearch uses its
   snapshot API and other named volumes are archived separately. Test and restore
-  procedures are in [`analysis/RECOVERY.md`](../analysis/RECOVERY.md).
+  procedures are in [`docs/analysis/RECOVERY.md`](analysis/RECOVERY.md).
 - **Kibana saved objects** (dashboards, visualizations, data views you build
   by hand) live only in Elasticsearch's `.kibana` index — an ES reset,
   migration, or upgrade loses them with no recovery path unless you've
