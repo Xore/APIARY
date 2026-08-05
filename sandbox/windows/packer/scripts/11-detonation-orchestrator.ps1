@@ -168,11 +168,24 @@ TryStep "autoruns_after" {
 TryStep "procmon_stop_and_export" {
     Stop-Process -Name Procmon64 -Force -ErrorAction SilentlyContinue
     # #502: this export hangs unpredictably for reasons never fully
-    # root-caused, in every session type tried. Not fatal -- a missing
-    # procmon.csv is far better than losing the whole report.
-    Start-Process C:\Tools\SysinternalsSuite\Procmon64.exe `
+    # root-caused, in every session type tried (Responding=True, no visible
+    # window/dialog the whole time). Not fatal -- a missing procmon.csv is
+    # far better than losing the whole report -- but TryStep's try/catch
+    # alone does NOT bound this: Start-Process -Wait never throws on its
+    # own, it just blocks forever, unlike run_sample.py's WinRM-path
+    # equivalent (stop_procmon(), which already bounds the same export at
+    # 300s via run_and_wait_via_cim's poll_timeout). Without an explicit
+    # bound here, every later step in this script (Sysmon/PowerShell EVTX
+    # export, PS transcript copy, fakenet stop) silently never ran whenever
+    # this hung, and the only thing that eventually noticed was the host's
+    # 45-minute watchdog force-killing the whole domain.
+    $exportProc = Start-Process C:\Tools\SysinternalsSuite\Procmon64.exe `
         -ArgumentList "/OpenLog $analysisDir\Logs\procmon.pml /SaveAs $analysisDir\Logs\procmon.csv /Quiet" `
-        -Wait -WindowStyle Hidden
+        -WindowStyle Hidden -PassThru
+    if (-not $exportProc.WaitForExit(90000)) {
+        Step "procmon_stop_and_export : export still running after 90s, force-killing so later steps still run"
+        Stop-Process -Id $exportProc.Id -Force -ErrorAction SilentlyContinue
+    }
 }
 TryStep "sysmon_evtx_export" {
     wevtutil epl Microsoft-Windows-Sysmon/Operational "$analysisDir\Logs\sysmon.evtx"
