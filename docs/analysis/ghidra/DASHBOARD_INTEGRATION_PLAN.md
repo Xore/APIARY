@@ -103,23 +103,23 @@ infrastructure) doesn't change, it just gets a second spool.
 
 ## Architecture
 
-```
-honeypot-stack/
-├── analysis/ghidra/
-│   ├── IMPLEMENTATION_PLAN.md         ← Ghidra/Rev·Deck/GhidrAssist analysis pipeline
-│   ├── DASHBOARD_INTEGRATION_PLAN.md  ← this file
-│   ├── docker-compose.ghidra.yml      ← biniamfd/ghidra-headless-rest (REST API :9090)
-│   └── worker/                        ← NEW: host-side spool consumer
-│       ├── ghidra-worker.py           ← watches GHIDRA_REQUEST_DIR, calls the REST API,
-│       │                                writes GHIDRA_RESULTS_DIR/{sha256}_ghidra.json
-│       ├── honeypot-ghidra-worker.path
-│       └── honeypot-ghidra-worker.service
-└── dashboard/
-    ├── ghidra.go            ← NEW: mirrors sandbox.go — loadGhidraResults(),
-    │                            loadGhidraStatus(), ghidraData(), serveGhidraAPI(),
-    │                            serveGhidraExport()
-    ├── ghidra_submit.go     ← NEW: mirrors sandbox_submit.go — serveGhidraSubmit()
-    └── ui/ghidra.html       ← NEW: template file, alongside ui/sandbox.html
+```mermaid
+flowchart TD
+    Root["honeypot-stack/"] --> AG["analysis/ghidra/"]
+    Root --> DB["dashboard/"]
+
+    AG --> IP["IMPLEMENTATION_PLAN.md<br/>Ghidra/Rev·Deck/GhidrAssist analysis pipeline"]
+    AG --> DIP["DASHBOARD_INTEGRATION_PLAN.md<br/>this file"]
+    AG --> DC["docker-compose.ghidra.yml<br/>biniamfd/ghidra-headless-rest (REST API :9090)"]
+    AG --> W["worker/<br/>NEW: host-side spool consumer"]
+
+    W --> GW["ghidra-worker.py<br/>watches GHIDRA_REQUEST_DIR, calls the REST API,<br/>writes GHIDRA_RESULTS_DIR/{sha256}_ghidra.json"]
+    W --> WP["honeypot-ghidra-worker.path"]
+    W --> WS["honeypot-ghidra-worker.service"]
+
+    DB --> GG["ghidra.go<br/>NEW: mirrors sandbox.go — loadGhidraResults(),<br/>loadGhidraStatus(), ghidraData(), serveGhidraAPI(),<br/>serveGhidraExport()"]
+    DB --> GS["ghidra_submit.go<br/>NEW: mirrors sandbox_submit.go — serveGhidraSubmit()"]
+    DB --> UI["ui/ghidra.html<br/>NEW: template file, alongside ui/sandbox.html"]
 ```
 
 Templates are files under `dashboard/ui/`, not `{{define}}` blocks in
