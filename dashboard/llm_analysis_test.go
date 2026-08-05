@@ -236,3 +236,81 @@ func TestLLMAnalysisDataNilStoreReturnsEmptyPage(t *testing.T) {
 		t.Fatalf("expected no docs, got %+v", page.Docs)
 	}
 }
+
+// llmAnalysisAlertMessages mirrors ghidraAlertMessages (ghidra_test.go):
+// s.alerts nil means "no dedupe sink configured", so every qualifying check
+// emits -- exactly what a unit test wants.
+func llmAnalysisAlertMessages(t *testing.T, docs []llmAnalysisDoc) []string {
+	t.Helper()
+	s := &store{llmAnalysis: &llmAnalysisStore{}}
+	s.llmAnalysis.absorb(docs)
+	var messages []string
+	llmAnalysisAlerts(s, &messages, false)
+	return messages
+}
+
+// TestLLMAnalysisAlertsSilentWhenUnconfigured (#154 item 9 follow-up):
+// llm-worker's dashboard support (#150) may be deployed ahead of #66's
+// worker, or Elasticsearch may not be configured at all -- alerting about a
+// subsystem nobody has wired up yet is pure noise, same reasoning as
+// ghidraAlerts'/githubAnalysisAlerts' own Configured checks.
+func TestLLMAnalysisAlertsSilentWhenUnconfigured(t *testing.T) {
+	var messages []string
+	llmAnalysisAlerts(&store{}, &messages, false)
+	if len(messages) != 0 {
+		t.Fatalf("unconfigured store produced alerts: %v", messages)
+	}
+}
+
+// TestLLMAnalysisAlertsOnAnalysisError mirrors TestGhidraAlertsOnFailedResult:
+// a doc_type=error document (the worker's own analysis failure) alerts with
+// its reason, unconditionally -- not gated by severity, since it has none.
+func TestLLMAnalysisAlertsOnAnalysisError(t *testing.T) {
+	messages := llmAnalysisAlertMessages(t, []llmAnalysisDoc{
+		{AnalysisID: "err-1", DocType: "error", ErrorCode: "model_timeout", Error: "ollama request timed out"},
+	})
+	if !hasAlert(messages, "llm-analysis failed") || !hasAlert(messages, "ollama request timed out") {
+		t.Fatalf("error doc did not alert with its reason: %v", messages)
+	}
+}
+
+// TestLLMAnalysisAlertsOnHighSeverity mirrors TestGhidraAlertsOnHighAIRisk:
+// a session/payload doc scored high/critical by the model alerts, the
+// message says it's an unverified model guess (not a fact the reader should
+// trust without checking), and a severity outside the configured set stays
+// quiet -- same env-var-driven allowlist pattern as GHIDRA_ALERT_RISK_LEVELS.
+// The evidence link itself (passed to s.alerts.observe, not part of the
+// messages slice this helper returns) is covered directly by
+// TestLLMAnalysisDocEvidenceLink.
+func TestLLMAnalysisAlertsOnHighSeverity(t *testing.T) {
+	docs := []llmAnalysisDoc{
+		{AnalysisID: "sess-1", DocType: "session", SessionID: "sess-1", Severity: "high", Model: "qwen3.5:9b", Intent: "recon-then-download"},
+	}
+	messages := llmAnalysisAlertMessages(t, docs)
+	if !hasAlert(messages, "llm-analysis flagged session") {
+		t.Fatalf("high severity did not alert: %v", messages)
+	}
+	if !hasAlert(messages, "UNVERIFIED") {
+		t.Errorf("severity alert does not mark itself unverified: %v", messages)
+	}
+
+	t.Setenv("LLM_ANALYSIS_ALERT_SEVERITIES", "critical")
+	if messages := llmAnalysisAlertMessages(t, docs); hasAlert(messages, "flagged") {
+		t.Fatalf("a severity outside the configured set alerted: %v", messages)
+	}
+}
+
+// TestLLMAnalysisAlertsSkipsLowSeverityAndReports proves the two things
+// deliberately excluded from alerting: a low/medium severity doc (below the
+// default high/critical threshold) and a "report" doc_type (an aggregate
+// over many sessions, not evidence of one actor's behavior -- the same
+// reasoning EvidenceLink() already applies).
+func TestLLMAnalysisAlertsSkipsLowSeverityAndReports(t *testing.T) {
+	messages := llmAnalysisAlertMessages(t, []llmAnalysisDoc{
+		{AnalysisID: "sess-2", DocType: "session", Severity: "low"},
+		{AnalysisID: "report-2026-08-05", DocType: "report", Severity: "critical"},
+	})
+	if len(messages) != 0 {
+		t.Fatalf("low severity and report doc_type must not alert: %v", messages)
+	}
+}

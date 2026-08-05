@@ -23,6 +23,7 @@ package main
 // dependent on the other holding.
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
@@ -287,4 +288,69 @@ func (s *store) llmAnalysisData(r *http.Request) llmAnalysisPage {
 	sort.Slice(filtered, func(i, j int) bool { return filtered[i].Timestamp > filtered[j].Timestamp })
 	page.Docs = filtered
 	return page
+}
+
+// llmAnalysisAlerts appends alerts for llm-worker's own analysis failures
+// and for session/payload analyses the model itself scored high/critical,
+// riding the same s.alerts sink as ghidraAlerts/githubAnalysisAlerts
+// (dashboard/store.go) -- no new transport. Threat model research (#154,
+// docs/agent-intrusion-threat-model.md item 9) found llm-analysis severity
+// was reachable only by browsing /llm-analysis, never wired into the alert
+// sink at all; this closes that gap.
+//
+// Severity here is a model judgment, not a deterministic signal -- the same
+// posture ghidraAlerts already takes toward Ghidra's own AI triage risk
+// level, and the same reasoning docs/gpu-llm-analysis-worker.md §10 already
+// states for phase 2 ("treat model output as advisory; deterministic rules
+// own... critical alert gates"): this alert surfaces the model's judgment
+// for a human to review, it does not act on it, and the message itself says
+// so, the same way ghidraAlerts' own comment explains why hiding that would
+// be worse than not alerting at all.
+//
+// "report" doc_type is deliberately excluded -- an aggregate over many
+// sessions/payloads, not evidence of a single actor's behavior, and
+// EvidenceLink() already treats it the same way (no single source document).
+func llmAnalysisAlerts(s *store, messages *[]string, markOnly bool) {
+	if s.llmAnalysis == nil {
+		// Elasticsearch not configured, or llm-worker's dashboard support
+		// (#150) deployed ahead of #66's worker -- alerting about a subsystem
+		// that was never wired up is pure noise, same reasoning as
+		// ghidraAlerts'/githubAnalysisAlerts' own Configured checks.
+		return
+	}
+
+	emit := func(key, message, link string) {
+		if s.alerts == nil || s.alerts.observe(key, message, link, markOnly) {
+			if !markOnly {
+				*messages = append(*messages, message)
+			}
+		}
+	}
+
+	alertSeverities := map[string]bool{}
+	for _, level := range strings.Split(getenv("LLM_ANALYSIS_ALERT_SEVERITIES", "high,critical"), ",") {
+		if level = strings.ToLower(strings.TrimSpace(level)); level != "" {
+			alertSeverities[level] = true
+		}
+	}
+
+	for _, doc := range s.llmAnalysis.snapshot() {
+		if doc.AnalysisID == "" {
+			continue
+		}
+		if doc.DocType == "error" {
+			emit("llm-analysis:error:"+doc.AnalysisID, fmt.Sprintf(
+				"llm-analysis failed: analysis_id=%s code=%s error=%s", doc.AnalysisID, doc.ErrorCode, doc.Error), "")
+			continue
+		}
+		if doc.DocType != "session" && doc.DocType != "payload" {
+			continue
+		}
+		if !alertSeverities[strings.ToLower(strings.TrimSpace(doc.Severity))] {
+			continue
+		}
+		emit("llm-analysis:flagged:"+doc.AnalysisID, fmt.Sprintf(
+			"llm-analysis flagged %s: analysis_id=%s AI-guessed severity=%s (UNVERIFIED, model=%s) intent=%s",
+			doc.DocType, doc.AnalysisID, doc.Severity, doc.Model, doc.Intent), doc.EvidenceLink())
+	}
 }

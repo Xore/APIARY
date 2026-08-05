@@ -380,6 +380,7 @@ func (s *store) notifyLoop(endpoint string) {
 		}
 		ghidraAlerts(s, &messages, markOnly)
 		githubAnalysisAlerts(s, &messages, markOnly)
+		llmAnalysisAlerts(s, &messages, markOnly)
 		sandboxRiskThreshold, _ := strconv.Atoi(getenv("SANDBOX_ALERT_RISK_SCORE", "50"))
 		if sandboxRiskThreshold < 1 || sandboxRiskThreshold > 100 {
 			sandboxRiskThreshold = 50
