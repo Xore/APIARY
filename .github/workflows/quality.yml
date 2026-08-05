@@ -173,6 +173,9 @@ jobs:
       - name: honeypot-30d ILM policy rolls over and deletes (#585)
         shell: bash
         run: analysis/tests/test_honeypot_ilm_rollover.sh
+      - name: geoip-honeypot ingest pipeline (#563)
+        shell: bash
+        run: analysis/tests/test_geoip_pipeline.sh
       - name: Vendored YARA corpus is intact and loadable
         shell: bash
         run: |
