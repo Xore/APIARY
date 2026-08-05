@@ -15,7 +15,7 @@ x-runtime-defaults: &runtime-defaults
 services:
   rdp-honeypot:
     <<: *runtime-defaults
-    build: /opt/stacks/honeypot-stack/rdp-honeypot
+    build: /opt/stacks/apiary/rdp-honeypot
     container_name: hp-rdp-honeypot
     restart: unless-stopped
     # #128: waits on the marker directly instead of depends_on-ing
@@ -32,8 +32,8 @@ services:
     ports:
       - ${HP_BIND:-10.8.0.2}:3389:3389
     volumes:
-      - /opt/stacks/honeypot-stack/logs/rdp-honeypot:/var/log/honeypot
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+      - /opt/stacks/apiary/logs/rdp-honeypot:/var/log/honeypot
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
     read_only: true
     networks: [rdp_honeypot_net]
     healthcheck:

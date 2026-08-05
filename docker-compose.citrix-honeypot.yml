@@ -14,7 +14,7 @@ x-runtime-defaults: &runtime-defaults
 services:
   citrix-honeypot:
     <<: *runtime-defaults
-    build: /opt/stacks/honeypot-stack/citrix-honeypot
+    build: /opt/stacks/apiary/citrix-honeypot
     container_name: hp-citrix-honeypot
     restart: unless-stopped
     environment:
@@ -27,8 +27,8 @@ services:
     ports:
       - ${HP_BIND:-10.8.0.2}:443:443
     volumes:
-      - /opt/stacks/honeypot-stack/logs/citrix-honeypot:/var/log/honeypot
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+      - /opt/stacks/apiary/logs/citrix-honeypot:/var/log/honeypot
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
     read_only: true
     networks: [citrix_honeypot_net]
     healthcheck:

@@ -25,7 +25,7 @@ x-runtime-defaults: &runtime-defaults
 services:
   dionaea:
     <<: *runtime-defaults
-    build: /opt/stacks/honeypot-stack/dionaea
+    build: /opt/stacks/apiary/dionaea
     container_name: hp-dionaea
     restart: unless-stopped
     # #127: waits on the marker directly instead of depends_on-ing
@@ -82,16 +82,16 @@ services:
       - ${HP_BIND:-10.8.0.2}:69:69/udp
       - ${HP_BIND:-10.8.0.2}:1900:1900/udp
     volumes:
-      - /opt/stacks/honeypot-stack/logs/dionaea:/opt/dionaea/var/log/dionaea
+      - /opt/stacks/apiary/logs/dionaea:/opt/dionaea/var/log/dionaea
       - dionaea-lib:/opt/dionaea/var/lib/dionaea
-      - /opt/stacks/honeypot-stack/dionaea/persona:/persona:ro
-      - /opt/stacks/honeypot-stack/dionaea/services/ftp.yaml:/opt/dionaea/etc/dionaea/services-enabled/ftp.yaml:ro
-      - /opt/stacks/honeypot-stack/dionaea/services/smb.yaml:/opt/dionaea/etc/dionaea/services-enabled/smb.yaml:ro
-      - /opt/stacks/honeypot-stack/dionaea/services/sip.yaml:/opt/dionaea/etc/dionaea/services-enabled/sip.yaml:ro
-      - /opt/stacks/honeypot-stack/dionaea/services/printer.yaml:/opt/dionaea/etc/dionaea/services-enabled/printer.yaml:ro
-      - /opt/stacks/honeypot-stack/dionaea/services/tftp.yaml:/opt/dionaea/etc/dionaea/services-enabled/tftp.yaml:ro
-      - /opt/stacks/honeypot-stack/dionaea/services/upnp.yaml:/opt/dionaea/etc/dionaea/services-enabled/upnp.yaml:ro
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+      - /opt/stacks/apiary/dionaea/persona:/persona:ro
+      - /opt/stacks/apiary/dionaea/services/ftp.yaml:/opt/dionaea/etc/dionaea/services-enabled/ftp.yaml:ro
+      - /opt/stacks/apiary/dionaea/services/smb.yaml:/opt/dionaea/etc/dionaea/services-enabled/smb.yaml:ro
+      - /opt/stacks/apiary/dionaea/services/sip.yaml:/opt/dionaea/etc/dionaea/services-enabled/sip.yaml:ro
+      - /opt/stacks/apiary/dionaea/services/printer.yaml:/opt/dionaea/etc/dionaea/services-enabled/printer.yaml:ro
+      - /opt/stacks/apiary/dionaea/services/tftp.yaml:/opt/dionaea/etc/dionaea/services-enabled/tftp.yaml:ro
+      - /opt/stacks/apiary/dionaea/services/upnp.yaml:/opt/dionaea/etc/dionaea/services-enabled/upnp.yaml:ro
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
     environment:
       - TZ=Europe/Berlin
     # Capabilities measured, not guessed (2026-07-31). Baseline was run first —
@@ -165,7 +165,7 @@ services:
   # one stable UDP port while Dionaea remains the actual sensor and logger.
   tftp-relay:
     <<: *runtime-defaults
-    build: /opt/stacks/honeypot-stack/tftp-relay
+    build: /opt/stacks/apiary/tftp-relay
     container_name: hp-tftp-relay
     restart: unless-stopped
     environment:
@@ -178,7 +178,7 @@ services:
     # correct dionaea's TFTP events -- dionaea only ever sees this relay's
     # own internal address, never the real attacker.
     volumes:
-      - /opt/stacks/honeypot-stack/logs/tftp-relay:/logs
+      - /opt/stacks/apiary/logs/tftp-relay:/logs
     depends_on:
       dionaea:
         condition: service_started

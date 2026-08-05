@@ -27,7 +27,7 @@ x-runtime-defaults: &runtime-defaults
 services:
   cowrie:
     <<: *runtime-defaults
-    build: /opt/stacks/honeypot-stack/cowrie
+    build: /opt/stacks/apiary/cowrie
     container_name: hp-cowrie
     restart: unless-stopped
     # #128: waits on the marker directly instead of depends_on-ing
@@ -44,9 +44,9 @@ services:
       - ${HP_BIND:-10.8.0.2}:19022:2222
       - ${HP_BIND:-10.8.0.2}:19023:2223
     volumes:
-      - /opt/stacks/honeypot-stack/cowrie/cowrie.cfg:/cowrie/cowrie-git/etc/cowrie.cfg:ro
-      - /opt/stacks/honeypot-stack/cowrie/userdb.txt:/cowrie/cowrie-git/etc/userdb.txt:ro
-      - /opt/stacks/honeypot-stack/logs/cowrie:/cowrie/cowrie-git/var/log/cowrie
+      - /opt/stacks/apiary/cowrie/cowrie.cfg:/cowrie/cowrie-git/etc/cowrie.cfg:ro
+      - /opt/stacks/apiary/cowrie/userdb.txt:/cowrie/cowrie-git/etc/userdb.txt:ro
+      - /opt/stacks/apiary/logs/cowrie:/cowrie/cowrie-git/var/log/cowrie
       # #239: cowrie writes its SSH host keys (ssh_host_{rsa,ecdsa,ed25519}_key
       # (.pub)), its own uuid file, and auth_random.json directly into
       # var/lib/cowrie -- not a subdirectory, so the more specific
@@ -59,20 +59,20 @@ services:
       # intrusion-detection tool fingerprinting by host key) sees the
       # honeypot's identity change on every redeploy. Bind-mounted for the
       # same persistence reason as downloads/tty below, not tmpfs.
-      - /opt/stacks/honeypot-stack/logs/cowrie/lib-cowrie:/cowrie/cowrie-git/var/lib/cowrie
+      - /opt/stacks/apiary/logs/cowrie/lib-cowrie:/cowrie/cowrie-git/var/lib/cowrie
       # Cowrie saves every uploaded/downloaded file by SHA-256, including shell,
       # PowerShell, VBS, Python and JavaScript payloads.
-      - /opt/stacks/honeypot-stack/logs/cowrie/downloads:/cowrie/cowrie-git/var/lib/cowrie/downloads
+      - /opt/stacks/apiary/logs/cowrie/downloads:/cowrie/cowrie-git/var/lib/cowrie/downloads
       # #611: TTY session recordings (cowrie.log.closed's ttylog field) --
       # previously only in the container's writable layer, lost on every
       # recreate/redeploy. Same reasoning as the downloads mount above.
-      - /opt/stacks/honeypot-stack/logs/cowrie/tty:/cowrie/cowrie-git/var/lib/cowrie/tty
+      - /opt/stacks/apiary/logs/cowrie/tty:/cowrie/cowrie-git/var/lib/cowrie/tty
       # Hardware identity overrides for sysfs DMI nodes — these are outside
       # /proc so runc proc-safety does not apply.
-      - /opt/stacks/honeypot-stack/cowrie/fakefs/sys/class/dmi/id/product_name:/sys/class/dmi/id/product_name:ro
-      - /opt/stacks/honeypot-stack/cowrie/fakefs/sys/class/dmi/id/sys_vendor:/sys/class/dmi/id/sys_vendor:ro
-      - /opt/stacks/honeypot-stack/cowrie/fakefs/sys/class/dmi/id/board_name:/sys/class/dmi/id/board_name:ro
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+      - /opt/stacks/apiary/cowrie/fakefs/sys/class/dmi/id/product_name:/sys/class/dmi/id/product_name:ro
+      - /opt/stacks/apiary/cowrie/fakefs/sys/class/dmi/id/sys_vendor:/sys/class/dmi/id/sys_vendor:ro
+      - /opt/stacks/apiary/cowrie/fakefs/sys/class/dmi/id/board_name:/sys/class/dmi/id/board_name:ro
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
     environment:
       # #185: cowrie's own twisted/plugins/cowrie_plugin.py reads
       # [honeypot] timezone from cowrie.cfg (unset here, so it falls back

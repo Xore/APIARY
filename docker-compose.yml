@@ -6,9 +6,9 @@
 # .elk.yml, .dashboard.yml, .utilities.yml -- each deployed the same way
 # this file always was, via .github/workflows/deploy.yml). This file has no
 # services of its own left, deliberately kept as a thin marker rather than
-# deleted outright: /opt/stacks/honeypot-stack is still the checkout every
+# deleted outright: /opt/stacks/apiary is still the checkout every
 # other stack's `build:` points at with an absolute path (e.g.
-# `/opt/stacks/honeypot-stack/dionaea`), so the repo still needs to land
+# `/opt/stacks/apiary/dionaea`), so the repo still needs to land
 # there even though nothing here runs `docker compose up` against it any
 # more. Retiring this file (and the deploy step that syncs it) once every
 # build context instead points at a location that doesn't need a
@@ -19,6 +19,6 @@
 #   attacker -> VPS public port -> [Traefik (HTTP) | portbridge socat (raw TCP/UDP)]
 #            -> WireGuard tunnel -> home server (10.8.0.2)
 # Every sensor binds on HP_BIND (default 10.8.0.2) — never the home LAN.
-# Logs: /opt/stacks/honeypot-stack/logs/<service>/
+# Logs: /opt/stacks/apiary/logs/<service>/
 
 services: {}

@@ -40,7 +40,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          stack=/opt/stacks/honeypot-stack
+          stack=/opt/stacks/apiary
           report() { printf '%s\n' "$*" >> "$GITHUB_STEP_SUMMARY"; printf '%s\n' "$*"; }
           section() { report ''; report "## $*"; report ''; }
 
@@ -144,7 +144,7 @@ jobs:
           # this job -- this workflow has no actions/checkout, by design
           # (see this job's header comment): it inspects the stack as
           # actually deployed, not whatever ref triggered the run.
-          /opt/stacks/honeypot-stack/scripts/isolation-audit.sh 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          /opt/stacks/apiary/scripts/isolation-audit.sh 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
           status=${PIPESTATUS[0]}
           printf '```\n' >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
@@ -177,7 +177,7 @@ jobs:
           # #79: the eve.json path here pointed at /root/vps/logs/suricata,
           # which does not exist on the VPS — the real log volume is the
           # absolute host path vps/docker-compose.yml actually mounts,
-          # /opt/stacks/honeypot-stack/logs/suricata. This block was
+          # /opt/stacks/apiary/logs/suricata. This block was
           # silently checking a nonexistent file. eve.json also now rotates
           # hourly into eve-<timestamp>.json (see suricata.yaml), so this
           # reports the freshest rotated file plus the retained total and
@@ -186,7 +186,7 @@ jobs:
             'cd /root/vps && docker compose -f docker-compose.yml ps -a
              echo
              echo "--- suricata eve-*.json ---"
-             dir=/opt/stacks/honeypot-stack/logs/suricata
+             dir=/opt/stacks/apiary/logs/suricata
              latest=$(ls -t "$dir"/eve-*.json 2>/dev/null | head -1)
              if [ -n "$latest" ]; then
                stat -c "%n: %s bytes, modified %y" "$latest"

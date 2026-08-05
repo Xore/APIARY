@@ -25,7 +25,7 @@ x-runtime-defaults: &runtime-defaults
 services:
   endlessh:
     <<: *runtime-defaults
-    build: /opt/stacks/honeypot-stack/endlessh-honeypot
+    build: /opt/stacks/apiary/endlessh-honeypot
     container_name: hp-endlessh
     restart: unless-stopped
     # #128: waits on the marker directly instead of depends_on-ing
@@ -46,8 +46,8 @@ services:
     ports:
       - ${HP_BIND:-10.8.0.2}:19024:2222
     volumes:
-      - /opt/stacks/honeypot-stack/logs/endlessh:/var/log/honeypot
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+      - /opt/stacks/apiary/logs/endlessh:/var/log/honeypot
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
     # #239: measured via a real read_only:true build+run against this exact
     # service definition -- main.go's only file write is LOG_PATH, already
     # the bind mount above; no tmpfs needed (confirmed against source: the

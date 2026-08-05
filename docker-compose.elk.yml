@@ -73,8 +73,8 @@ services:
         hard: -1
     volumes:
       - es-data:/usr/share/elasticsearch/data
-      - /opt/stacks/honeypot-stack/analysis/geoip:/usr/share/elasticsearch/config/ingest-geoip:ro
-      - /opt/stacks/honeypot-stack/state/elasticsearch-snapshots:/snapshots
+      - /opt/stacks/apiary/analysis/geoip:/usr/share/elasticsearch/config/ingest-geoip:ro
+      - /opt/stacks/apiary/state/elasticsearch-snapshots:/snapshots
     networks:
       honeynet:
       llm-data:
@@ -168,13 +168,13 @@ services:
         until [ -f /markers/elasticsearch-setup.done ]; do sleep 3; done;
         exec filebeat -e --strict.perms=false
     volumes:
-      - /opt/stacks/honeypot-stack/analysis/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - /opt/stacks/apiary/analysis/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
       # Persist the filestream registry so recreating Filebeat does not ingest
       # the complete historical log corpus a second time.
-      - /opt/stacks/honeypot-stack/state/filebeat:/usr/share/filebeat/data
-      - /opt/stacks/honeypot-stack/logs:/logs:ro
-      - /opt/stacks/honeypot-stack/logs/suricata:/var/log/suricata:ro
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+      - /opt/stacks/apiary/state/filebeat:/usr/share/filebeat/data
+      - /opt/stacks/apiary/logs:/logs:ro
+      - /opt/stacks/apiary/logs/suricata:/var/log/suricata:ro
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
     networks:
       - honeynet
     # #118: measured (2026-08-02). This one runs as root (user: root above,
@@ -297,7 +297,7 @@ services:
   #   without authentication. The correct pullable image is the three-segment form.
   #
   # Consumes PCAP files written by Suricata (pcap-log output) from:
-  #   /opt/stacks/honeypot-stack/logs/suricata/pcap/
+  #   /opt/stacks/apiary/logs/suricata/pcap/
   # Suricata rotates files matching pcap/log.%n.%t.pcap - Arkime capture watches
   # the directory and imports each file as it is closed/rotated.
   #
@@ -349,9 +349,9 @@ services:
           sleep 30
         done
     volumes:
-      - /opt/stacks/honeypot-stack/logs/suricata/pcap:/src:ro
-      - /opt/stacks/honeypot-stack/logs/arkime-raw:/dst
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+      - /opt/stacks/apiary/logs/suricata/pcap:/src:ro
+      - /opt/stacks/apiary/logs/arkime-raw:/dst
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
     deploy:
       resources:
         limits:
@@ -382,11 +382,11 @@ services:
         --db 'http://elasticsearch:9200 upgradenoprompt --ifneeded'
         -- -R file:///opt/arkime/raw --monitor --skip --host honeypot-vps
     volumes:
-      - /opt/stacks/honeypot-stack/arkime/config.ini:/opt/arkime/etc/config.ini:ro
-      - /opt/stacks/honeypot-stack/arkime/geo:/opt/arkime/geo:ro
-      - /opt/stacks/honeypot-stack/logs/arkime-raw:/opt/arkime/raw:ro
+      - /opt/stacks/apiary/arkime/config.ini:/opt/arkime/etc/config.ini:ro
+      - /opt/stacks/apiary/arkime/geo:/opt/arkime/geo:ro
+      - /opt/stacks/apiary/logs/arkime-raw:/opt/arkime/raw:ro
       - arkime-pcap:/opt/arkime/pcap
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
       # #87: sandbox/worker.sh `docker exec`s a one-shot offline import
       # (`capture -r ... --copy`, not part of the long-running command:
       # above) against each completed Linux-sandbox detonation's pcap,
@@ -423,11 +423,11 @@ services:
     ports:
       - ${HP_BIND:-10.8.0.2}:19080:8005
     volumes:
-      - /opt/stacks/honeypot-stack/arkime/config.ini:/opt/arkime/etc/config.ini:ro
-      - /opt/stacks/honeypot-stack/arkime/geo:/opt/arkime/geo:ro
-      - /opt/stacks/honeypot-stack/logs/arkime-raw:/opt/arkime/raw:ro
+      - /opt/stacks/apiary/arkime/config.ini:/opt/arkime/etc/config.ini:ro
+      - /opt/stacks/apiary/arkime/geo:/opt/arkime/geo:ro
+      - /opt/stacks/apiary/logs/arkime-raw:/opt/arkime/raw:ro
       - arkime-pcap:/opt/arkime/pcap
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
     environment:
       - TZ=Europe/Berlin
       - ARKIME__elasticsearch=http://elasticsearch:9200
