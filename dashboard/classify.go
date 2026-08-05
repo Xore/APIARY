@@ -318,6 +318,12 @@ func classify(e map[string]any, dirSensor string) event {
 		if ev.detail == "" {
 			ev.detail = kind
 		}
+		if calledAE := str(e["called_ae"]); calledAE != "" {
+			ev.detail += " called=" + calledAE
+		}
+		if callingAE := str(e["calling_ae"]); callingAE != "" {
+			ev.detail += " calling=" + callingAE
+		}
 		if data := str(e["data"]); data != "" {
 			ev.detail += " " + data
 		}
@@ -825,12 +831,13 @@ func classify(e map[string]any, dirSensor string) event {
 // dicomEventLabels maps dicompot's raw DIMSE event names to a readable
 // label; see dicompot/main.go for the exact set it emits.
 var dicomEventLabels = map[string]string{
-	"connect": "connect",
-	"c_echo":  "C-ECHO",
-	"c_find":  "C-FIND",
-	"c_move":  "C-MOVE",
-	"c_get":   "C-GET",
-	"c_store": "C-STORE",
+	"connect":   "connect",
+	"associate": "A-ASSOCIATE",
+	"c_echo":    "C-ECHO",
+	"c_find":    "C-FIND",
+	"c_move":    "C-MOVE",
+	"c_get":     "C-GET",
+	"c_store":   "C-STORE",
 }
 
 // dnsQTypeName maps the common DNS query type numbers to their record
