@@ -14,6 +14,15 @@ target=/usr/local/libexec/honeypot-sandbox/ghosts
 
 python3 -m pip install --break-system-packages pywinrm
 
+# orchestrate/run_sample.py shells out to smbclient to push the sample into
+# the guest and pull results back out (SAMPLE_SHARE/LOGS_SHARE) -- found
+# missing live (#498): the worker started, the guest booted fine, and the
+# detonation still failed outright with "[Errno 2] No such file or
+# directory: 'smbclient'" because nothing here ever installed it.
+if ! command -v smbclient >/dev/null 2>&1; then
+  apt-get update && apt-get install -y smbclient
+fi
+
 install -d -m 0755 -o root -g root "$target" "$target/orchestrate"
 install -m 0755 -o root -g root "$script_dir/run_pending.sh" "$target/run_pending.sh"
 install -m 0755 -o root -g root "$script_dir/process-ghosts-web-requests.sh" "$target/process-ghosts-web-requests.sh"
