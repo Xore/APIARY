@@ -327,8 +327,21 @@ func newestGhidraResult(hash string, results []ghidraResult, after time.Time) (g
 func newestSandboxResult(analyzerID, hash string, results []sandboxResult, after time.Time) (sandboxResult, bool) {
 	for _, result := range results {
 		wantedPrefix := "linux-"
-		if analyzerID == "windows-sandbox" {
+		switch analyzerID {
+		case "windows-sandbox":
 			wantedPrefix = "windows-"
+		case "windows-ghosts":
+			// #498: sandbox/ghosts/run_pending.sh names its result file
+			// windows-ghosts-<job>.json, not windows-<job>.json -- a plain
+			// "windows-" prefix would also match, but distinct prefixes
+			// keep a windows-ghosts child from ever matching a windows-sandbox
+			// result (or vice versa) if both ever complete for the same hash.
+			wantedPrefix = "windows-ghosts-"
+		}
+		// "windows-ghosts-" and "windows-" overlap (both name a Windows job),
+		// so a windows-sandbox child must not accept a windows-ghosts result.
+		if analyzerID == "windows-sandbox" && strings.HasPrefix(result.Job, "windows-ghosts-") {
+			continue
 		}
 		if result.SHA256 == hash && strings.HasPrefix(result.Job, wantedPrefix) && (workbenchResultAfter(result.RequestedAt, after) || workbenchResultAfter(result.CompletedAt, after)) {
 			return result, true
@@ -381,6 +394,8 @@ func workbenchMarkerDir(analyzerID string) string {
 		return ghidraRequestDir()
 	case "windows-sandbox":
 		return sandboxRequestDir(targetWindows)
+	case "windows-ghosts":
+		return sandboxRequestDir(targetGhosts)
 	case "linux-sandbox":
 		return sandboxRequestDir(targetLinux)
 	case "revdeck":
