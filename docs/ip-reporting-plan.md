@@ -3,18 +3,25 @@
 Report attacker IPs observed by the honeypot stack to public threat-intel
 blocklists via their APIs.
 
-> **Status (2026-07-31):** design only. There is no `reporter` service in
-> `docker-compose.yml` and no `reporter/` directory; an earlier revision of this
-> section said the sidecar was "already wired into the existing event bus",
-> which it never was. Phase 1 is
-> [#68](https://github.com/Xore/honeypot-stack/issues/68), Phase 2 is
-> [#69](https://github.com/Xore/honeypot-stack/issues/69).
+> **Status:** built. `reporter/` (Go, not the Python layout sketched below --
+> that part of this plan is superseded) is a real service in
+> `docker-compose.utilities.yml`. Phase 1
+> ([#68](https://github.com/Xore/honeypot-stack/issues/68)) and Phase 2
+> ([#69](https://github.com/Xore/honeypot-stack/issues/69)) are both closed.
+> Phase 3-4 (reputation validation, operator observability) is
+> [#153](https://github.com/Xore/honeypot-stack/issues/153), still open.
 >
 > **Reporting is outbound and irreversible.** An abuse report cannot be
 > unsent, and it names a third party's address from this stack. The reporter
-> ships dry-run by default and stays that way until live reporting is
-> separately approved — that is a standing constraint on this feature, not a
-> Phase 1 convenience.
+> ships dry-run by default (`REPORTER_LIVE`/`ABUSEIPDB_API_KEY` both unset)
+> and stays that way until live reporting is separately approved — a
+> standing constraint on this feature, not a Phase 1 convenience.
+>
+> This is *defensive* reporting (get an attacker's IP blocked elsewhere) --
+> deliberately kept separate from *offensive/research* community threat-intel
+> sharing (contributing this stack's observations to a shared corpus other
+> researchers draw from), which was evaluated and declined; see
+> [`community-threat-intel-sharing.md`](community-threat-intel-sharing.md).
 
 ---
 
