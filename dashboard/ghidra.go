@@ -201,6 +201,12 @@ type ghidraResult struct {
 	// the file actually exists.
 	ExportURL    string `json:"export_url,omitempty"`
 	CallGraphURL string `json:"call_graph_url,omitempty"`
+
+	// IOCCorrelation (#680) cross-references Floss above against any
+	// Windows-sandbox run of the same SHA-256 -- set by the dashboard at
+	// read time in ghidraData(), nil when no sandbox run exists for this
+	// sample at all.
+	IOCCorrelation *iocCorrelation `json:"ioc_correlation,omitempty"`
 }
 
 // ghidraQueueStatus matches the status.json the worker writes. Flat, unlike
@@ -497,6 +503,7 @@ func ghidraData(sha256, query string) (ghidraPageData, error) {
 	for i := range data.Rows {
 		if data.Rows[i].SHA256 == sha256 {
 			data.Detail = &data.Rows[i]
+			data.Detail.IOCCorrelation = correlateFlossSandboxIOCs(data.Detail.Floss, matchingSandboxRuns(sha256))
 			return data, nil
 		}
 	}
