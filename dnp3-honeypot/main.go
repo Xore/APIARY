@@ -14,7 +14,7 @@ import (
 
 type event struct {
 	Time, Sensor, Persona, Site, Asset, Organization string
-	SrcIP, Event, FrameHex, Function                 string
+	SrcIP, Event, FrameHex, Function, AppFunction    string
 	SrcPort, Port, DNP3Source, DNP3Destination       int
 }
 
@@ -32,10 +32,11 @@ func (e event) MarshalJSON() ([]byte, error) {
 		Event           string `json:"event"`
 		Frame           string `json:"frame_hex,omitempty"`
 		Function        string `json:"function,omitempty"`
+		AppFunction     string `json:"app_function,omitempty"`
 		DNP3Source      int    `json:"dnp3_source,omitempty"`
 		DNP3Destination int    `json:"dnp3_destination,omitempty"`
 	}
-	return json.Marshal(record{e.Time, e.Sensor, e.Persona, e.Site, e.Asset, e.Organization, e.SrcIP, e.SrcPort, e.Port, e.Event, e.FrameHex, e.Function, e.DNP3Source, e.DNP3Destination})
+	return json.Marshal(record{e.Time, e.Sensor, e.Persona, e.Site, e.Asset, e.Organization, e.SrcIP, e.SrcPort, e.Port, e.Event, e.FrameHex, e.Function, e.AppFunction, e.DNP3Source, e.DNP3Destination})
 }
 
 type logger struct {
@@ -90,6 +91,48 @@ func linkFunction(control byte) string {
 	return map[byte]string{0: "reset_link_states", 1: "reset_user_process", 2: "test_link_states", 3: "confirmed_user_data", 4: "unconfirmed_user_data", 9: "request_link_status"}[control&0x0f]
 }
 
+// applicationFunctionCodes maps DNP3 application-layer function codes
+// (IEEE 1815 Table 4-1) to names -- the request codes an operator most
+// wants surfaced (READ/WRITE/SELECT/OPERATE/DIRECT_OPERATE and the restart
+// family) alongside the two response codes, so a reply frame this honeypot
+// never actually sends still decodes sensibly if ever fed one in a test.
+var applicationFunctionCodes = map[byte]string{
+	0x00: "confirm", 0x01: "read", 0x02: "write", 0x03: "select", 0x04: "operate",
+	0x05: "direct_operate", 0x06: "direct_operate_no_ack",
+	0x07: "immed_freeze", 0x08: "immed_freeze_no_ack",
+	0x09: "freeze_clear", 0x0a: "freeze_clear_no_ack",
+	0x0b: "freeze_at_time", 0x0c: "freeze_at_time_no_ack",
+	0x0d: "cold_restart", 0x0e: "warm_restart",
+	0x0f: "initialize_data", 0x10: "initialize_application",
+	0x11: "start_application", 0x12: "stop_application",
+	0x13: "save_configuration",
+	0x14: "enable_unsolicited", 0x15: "disable_unsolicited",
+	0x16: "assign_class", 0x17: "delay_measure", 0x18: "record_current_time",
+	0x19: "open_file", 0x1a: "close_file", 0x1b: "delete_file",
+	0x1c: "get_file_info", 0x1d: "authenticate_file", 0x1e: "abort_file",
+	0x1f: "activate_config",
+	0x20: "authenticate_req", 0x21: "authenticate_req_no_ack",
+	0x81: "response", 0x82: "unsolicited_response", 0x83: "authenticate_resp",
+}
+
+// appFunctionCode extracts the application-layer function code from a DNP3
+// frame, if present. Beyond the 10-byte link header (start bytes, length,
+// control, destination, source, CRC) comes a 1-byte transport header then
+// a 2-byte application control header, then the 1-byte function code --
+// offset 12. Frames without a full transport+app segment (link-layer-only
+// traffic, which is most of what this low-interaction honeypot's static
+// reply provokes -- see #610) simply have nothing to decode here.
+func appFunctionCode(data []byte) (string, bool) {
+	if len(data) <= 12 {
+		return "", false
+	}
+	code := data[12]
+	if name, ok := applicationFunctionCodes[code]; ok {
+		return name, true
+	}
+	return fmt.Sprintf("app_function_%d", code), true
+}
+
 func serve(c net.Conn, log *logger) {
 	defer c.Close()
 	host, portText, _ := net.SplitHostPort(c.RemoteAddr().String())
@@ -116,6 +159,9 @@ func serve(c net.Conn, log *logger) {
 		e.Function = linkFunction(data[3])
 		if e.Function == "" {
 			e.Function = fmt.Sprintf("link_function_%d", data[3]&0x0f)
+		}
+		if app, ok := appFunctionCode(data); ok {
+			e.AppFunction = app
 		}
 		c.Write(statusResponse(src, dst))
 	} else {

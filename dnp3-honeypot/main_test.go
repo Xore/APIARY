@@ -14,3 +14,55 @@ func TestStatusResponseSwapsAddresses(t *testing.T) {
 		t.Fatalf("bad response: %x", r)
 	}
 }
+
+// #610: link-layer-only frames (the majority of what this low-interaction
+// honeypot's static reply actually provokes) have nothing past the 10-byte
+// header to decode -- appFunctionCode must say so rather than reading past
+// the slice or guessing.
+func TestAppFunctionCodeAbsentOnLinkLayerOnlyFrame(t *testing.T) {
+	linkOnly := []byte{0x05, 0x64, 0x05, 0xc0, 0x01, 0x00, 0x00, 0x04, 0x00, 0x00}
+	if name, ok := appFunctionCode(linkOnly); ok {
+		t.Fatalf("expected no app function on a link-layer-only frame, got %q", name)
+	}
+}
+
+// A frame with transport header + app control + a known function code
+// (READ = 0x01) at offset 12 must decode by name.
+func TestAppFunctionCodeDecodesKnownRequestCode(t *testing.T) {
+	frame := []byte{
+		0x05, 0x64, 0x0c, 0xc0, 0x01, 0x00, 0x00, 0x04, 0x00, 0x00, // link header (CRC bytes unchecked here)
+		0xc1, // transport header (FIR/FIN/SEQ)
+		0xc0, // application control
+		0x01, // function code: READ
+	}
+	name, ok := appFunctionCode(frame)
+	if !ok || name != "read" {
+		t.Fatalf("appFunctionCode = %q, %v, want \"read\", true", name, ok)
+	}
+}
+
+// OPERATE (0x04) is the function code an operator most needs to see --
+// it's an attempted control-point write, not passive recon.
+func TestAppFunctionCodeDecodesOperate(t *testing.T) {
+	frame := []byte{
+		0x05, 0x64, 0x0c, 0xc0, 0x01, 0x00, 0x00, 0x04, 0x00, 0x00,
+		0xc1, 0xc0, 0x04,
+	}
+	name, ok := appFunctionCode(frame)
+	if !ok || name != "operate" {
+		t.Fatalf("appFunctionCode = %q, %v, want \"operate\", true", name, ok)
+	}
+}
+
+// An unrecognized function code still surfaces the raw value rather than
+// being silently dropped -- same fallback shape as link_function_N.
+func TestAppFunctionCodeFallsBackForUnknownCode(t *testing.T) {
+	frame := []byte{
+		0x05, 0x64, 0x0c, 0xc0, 0x01, 0x00, 0x00, 0x04, 0x00, 0x00,
+		0xc1, 0xc0, 0xfe,
+	}
+	name, ok := appFunctionCode(frame)
+	if !ok || name != "app_function_254" {
+		t.Fatalf("appFunctionCode = %q, %v, want \"app_function_254\", true", name, ok)
+	}
+}
