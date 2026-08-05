@@ -747,6 +747,18 @@ func classify(e map[string]any, dirSensor string) event {
 					sort.Strings(parts)
 					ev.detail += "  cookies: " + strings.Join(parts, "; ")
 				}
+				// #618: detection.payload.value is the actual emulator
+				// execution result -- cmd_exec's real shell stdout, lfi's
+				// real file-read content, the PHP-sandbox stdout for
+				// php_code_injection/php_object_injection/xxe_injection, the
+				// downloaded-and-executed RFI file's output. Reaches ES
+				// unmodified (honeypot.response_msg.response.message.
+				// detection.payload.value) but was never read here at all --
+				// literally the richest field tanner produces, previously
+				// invisible.
+				if payload := tannerDetectionPayload(e); payload != "" {
+					ev.detail += "  result: " + payload
+				}
 			}
 		}
 		return ev
@@ -965,6 +977,28 @@ func tannerDetectionName(e map[string]any) string {
 	msg, _ := resp["message"].(map[string]any)
 	detection, _ := msg["detection"].(map[string]any)
 	return str(detection["name"])
+}
+
+// tannerDetectionPayload digs response_msg.response.message.detection.
+// payload.value out of a tanner event -- set by BaseHandler.
+// get_emulation_result() (tanner/emulators/base.py) only when one of
+// tanner's emulators actually matched and ran (confirmed live against
+// cmd_exec.py: `dict(value=execute_result, page=True)`), so it's absent
+// for benign/"index" traffic -- not an error, just nothing to show.
+// Truncated for display; the full value is still in the ES _source
+// regardless (subject to that field's own ignore_above:32000 for search,
+// a separate ES-side property this doesn't need to fix).
+func tannerDetectionPayload(e map[string]any) string {
+	respMsg, _ := e["response_msg"].(map[string]any)
+	resp, _ := respMsg["response"].(map[string]any)
+	msg, _ := resp["message"].(map[string]any)
+	detection, _ := msg["detection"].(map[string]any)
+	payload, _ := detection["payload"].(map[string]any)
+	v := str(payload["value"])
+	if len(v) > 1000 {
+		v = v[:1000] + "(...)"
+	}
+	return v
 }
 
 // headerMap coerces a JSON headers object into a plain string map.

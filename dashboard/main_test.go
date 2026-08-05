@@ -469,6 +469,42 @@ func TestClassifyTannerSurfacesPostDataAndCookies(t *testing.T) {
 	}
 }
 
+// TestClassifyTannerSurfacesEmulationResult is a regression test for #618:
+// detection.payload.value -- the actual emulator execution result
+// (cmd_exec's real shell stdout, lfi's real file-read content, etc.) --
+// reached ES unmodified but was never read here at all, the richest field
+// tanner produces.
+func TestClassifyTannerSurfacesEmulationResult(t *testing.T) {
+	attack := classify(map[string]any{
+		"method": "GET", "path": "/cgi-bin/test.cgi", "sensor": "tanner",
+		"response_msg": map[string]any{"response": map[string]any{"message": map[string]any{
+			"detection": map[string]any{
+				"name": "cmd_exec",
+				"payload": map[string]any{
+					"value": "uid=0(root) gid=0(root) groups=0(root)\n",
+					"page":  true,
+				},
+			},
+		}}},
+	}, "tanner")
+	if !strings.Contains(attack.detail, "result:") || !strings.Contains(attack.detail, "uid=0(root)") {
+		t.Fatalf("emulation result not surfaced in detail: %q", attack.detail)
+	}
+
+	// Benign/"index" traffic, and any classified attack whose emulator
+	// didn't run (no "payload" key at all), must not show a stray "result:"
+	// label with nothing behind it.
+	noPayload := classify(map[string]any{
+		"method": "GET", "path": "/", "sensor": "tanner",
+		"response_msg": map[string]any{"response": map[string]any{"message": map[string]any{
+			"detection": map[string]any{"name": "xss"},
+		}}},
+	}, "tanner")
+	if strings.Contains(noPayload.detail, "result:") {
+		t.Fatalf("unexpected 'result:' label with no payload: %q", noPayload.detail)
+	}
+}
+
 func TestCampaignCorrelationByNetwork(t *testing.T) {
 	now := time.Now()
 	evs := []storedEvent{
