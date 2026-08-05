@@ -5,7 +5,7 @@
 # geoip.go's loadIntelCIDRs reads this file, and threatIntelReloadLoop picks
 # up a refresh within threatIntelReloadInterval without a dashboard restart.
 # threat-cidrs.csv is gitignored (generated/refreshed content, same reasoning
-# as country.csv -- see .gitignore and dashboard/geoip/README.md); this
+# as country.csv -- see .gitignore and docs/dashboard/geoip/README.md); this
 # script creates it on first run, seeded from the tracked
 # threat-cidrs.csv.example if present. Auto-fetched entries live inside a
 # marker block; any manually-added lines above that block are left untouched
