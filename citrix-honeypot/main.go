@@ -134,6 +134,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		h.servePOST(w, r, reqPath)
 	default:
+		h.log2(r, "method_"+strings.ToLower(r.Method), reqPath, "")
 		w.Header().Set("Server", "Apache")
 		w.WriteHeader(http.StatusOK)
 	}
