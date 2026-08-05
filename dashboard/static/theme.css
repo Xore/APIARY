@@ -216,6 +216,18 @@ html {
   min-height: 100%;
   background: var(--app-bg);
   font-size: 14px;
+  /* Reserves the scrollbar's track width up front instead of letting it
+     appear/disappear as content settles during load (webfont metrics,
+     late-loading iframe content, a table that only grows past viewport
+     height once its rows render). Without this, any width computed from
+     100vw -- .modal's width: min(1280px, calc(100vw - 40px)) and
+     .auth-split's siblings among them -- visibly jumps by the scrollbar's
+     width the moment it appears or disappears, which reads as a brief
+     resize flash. Falls back to nothing (no gutter reserved, the old
+     behavior) on a browser that doesn't support the property; it is not
+     polyfillable and there is no worse-than-before regression in not
+     having it. */
+  scrollbar-gutter: stable;
 }
 
 body {
