@@ -17,22 +17,24 @@ scripts that run on the sensor host.
 
 ## Architecture
 
-```
-honeypot-stack (this repo)          Xore/honeypot (sample archive + pipeline)
-┌────────────────────────────┐      ┌────────────────────────────────────┐
-│ Cowrie / Dionaea / Conpot  │      │ samples/{ELF,PE,Scripts,Docs,…}/    │
-│   ↓ capture payloads       │ ──►  │   ↓ push triggers analyze.yml       │
-│ dashboard → button →       │      │ reports/scanner/<sha256>.json       │
-│   host publisher (planned) │      │ reports/pdf/, reports/yara/         │
-└────────────────────────────┘      │ iocs/hashes.csv, iocs/families.csv  │
-                                    │ yara-rules/ + yara-rules/auto/      │
-        ▲                           └────────────────────────────────────┘
-        │  results read back                     │
-        └────────────────────────────────────────┘
-                                                 │
-                                    8 scanner APIs (VT, MalwareBazaar,
-                                    Hybrid-Analysis, Malshare, JoeSandbox,
-                                    MetaDefender, CAPE, Any.run)
+```mermaid
+flowchart LR
+    subgraph HS["honeypot-stack (this repo)"]
+        Sensors["Cowrie / Dionaea / Conpot<br/>capture payloads"]
+        Pub["dashboard → button →<br/>host publisher (planned)"]
+        Sensors --> Pub
+    end
+
+    subgraph XH["Xore/honeypot (sample archive + pipeline)"]
+        Samples["samples/{ELF,PE,Scripts,Docs,…}/<br/>push triggers analyze.yml"]
+        Outputs["reports/scanner/&lt;sha256&gt;.json<br/>reports/pdf/, reports/yara/<br/>iocs/hashes.csv, iocs/families.csv<br/>yara-rules/ + yara-rules/auto/"]
+        Scanners["8 scanner APIs<br/>VT, MalwareBazaar, Hybrid-Analysis,<br/>Malshare, JoeSandbox, MetaDefender,<br/>CAPE, Any.run"]
+        Samples --> Outputs
+        Scanners --> Outputs
+    end
+
+    Pub -->|push| Samples
+    Outputs -->|results read back| Pub
 ```
 
 ---
