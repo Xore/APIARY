@@ -33,5 +33,5 @@ networks:
 
 volumes:
   dashboard-state:
-    name: honeypot-stack_dashboard-state
+    name: dashboard-state
     external: true

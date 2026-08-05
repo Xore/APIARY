@@ -23,7 +23,7 @@ hash=${hash,,}
 
 roots=("${COWRIE_DOWNLOADS_DIR:-/opt/stacks/honeypot-stack/logs/cowrie/downloads}")
 dionaea_root="$(docker volume inspect dionaea-lib --format '{{.Mountpoint}}' 2>/dev/null || true)/binaries"
-scripts_root="$(docker volume inspect honeypot-stack_dashboard-state --format '{{.Mountpoint}}' 2>/dev/null || true)/script-payloads"
+scripts_root="$(docker volume inspect dashboard-state --format '{{.Mountpoint}}' 2>/dev/null || true)/script-payloads"
 [[ $dionaea_root == /* && -d $dionaea_root ]] && roots+=("$dionaea_root")
 [[ $scripts_root == /* && -d $scripts_root ]] && roots+=("$scripts_root")
 

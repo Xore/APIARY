@@ -58,7 +58,7 @@ retained. Wire it into the same schedule as the existing host state copies
 
 1. Stop the dashboard: `docker compose stop dashboard`.
 2. Untar the chosen archive into the volume:
-   `docker run --rm -v honeypot-stack_dashboard-state:/state -v <backup-dir>:/backup alpine:3 tar xzf /backup/dashboard-state-<ts>.tar.gz -C /state`
+   `docker run --rm -v dashboard-state:/state -v <backup-dir>:/backup alpine:3 tar xzf /backup/dashboard-state-<ts>.tar.gz -C /state`
 3. Start the dashboard: `docker compose start dashboard`.
 
 Every settings store validates its file on load: a well-formed file loads
