@@ -13,11 +13,13 @@
 // cisco-asa-honeypot's own WebVPN/HTTPS side, rdp-honeypot) already gets
 // the real IP directly via PROXY protocol and needs no rewriting here.
 //
-// NOT in this version's scope, deliberately: dionaea_incident.json (raw,
-// unparsed message text per filebeat.yml's own comment on why -- rewriting
-// an IP buried in free-text JSON would need real parsing, not a
-// map[string]any field swap, and is a reasonable follow-up rather than
-// something to rush into this pass).
+// dionaea_incident.json (#623) is also enriched, but differently: it
+// carries no top-level src_ip at all, so enrichDionaeaIncidentLine walks
+// the whole record looking for any embedded {remote_ip, remote_port, ...}
+// object -- confirmed live that every incident origin nests this exact
+// shape somewhere in "data", under a key that varies by origin ("connection"
+// for most, "child"/"parent" for dionaea.connection.link) -- and rewrites
+// each one independently rather than a single flat field.
 //
 // Design: tails each affected sensor's raw log file, and for any line whose
 // src_ip is the tunnel peer address, looks up the real IP by that
@@ -69,6 +71,7 @@ type source struct {
 	output    string
 	statePath string
 	queue     pendingQueue
+	enrich    enrichFunc
 }
 
 // discoverSources finds every input file this worker is responsible for.
@@ -78,24 +81,33 @@ type source struct {
 // discovered by glob and namespaced by subdirectory in the output.
 func discoverSources(logsDir, outDir, stateDir string) []*source {
 	var out []*source
-	add := func(name, input string) {
+	add := func(name, input string, enrich enrichFunc) {
 		out = append(out, &source{
 			name:      name,
 			input:     input,
 			output:    filepath.Join(outDir, name+".json"),
 			statePath: filepath.Join(stateDir, name+".offset"),
+			enrich:    enrich,
 		})
 	}
 
-	add("cowrie", filepath.Join(logsDir, "cowrie", "cowrie.json"))
-	add("dionaea", filepath.Join(logsDir, "dionaea", "dionaea.json"))
-	add("dns-honeypot", filepath.Join(logsDir, "dns-honeypot", "dns-honeypot.json"))
-	add("cisco-asa-honeypot", filepath.Join(logsDir, "cisco-asa-honeypot", "cisco-asa-honeypot.json"))
+	add("cowrie", filepath.Join(logsDir, "cowrie", "cowrie.json"), enrichLine)
+	add("dionaea", filepath.Join(logsDir, "dionaea", "dionaea.json"), enrichLine)
+	add("dns-honeypot", filepath.Join(logsDir, "dns-honeypot", "dns-honeypot.json"), enrichLine)
+	add("cisco-asa-honeypot", filepath.Join(logsDir, "cisco-asa-honeypot", "cisco-asa-honeypot.json"), enrichLine)
+	// #623: dionaea_incident.json carries no top-level src_ip at all (the
+	// real signal is buried in "data", under a key that varies by incident
+	// origin) -- this needed its own enrich function (enrichDionaeaIncidentLine),
+	// not enrichLine's flat single-field rewrite. See analysis/filebeat.yml's
+	// dionaea-incidents-raw-v1 input, which now tails this enriched output
+	// instead of the raw file, the same "enriched supersedes raw" pattern
+	// the other five sources already established.
+	add("dionaea-incident", filepath.Join(logsDir, "dionaea", "dionaea_incident.json"), enrichDionaeaIncidentLine)
 
 	conpotFiles, _ := filepath.Glob(filepath.Join(logsDir, "conpot*", "conpot.json"))
 	for _, f := range conpotFiles {
 		persona := filepath.Base(filepath.Dir(f)) // "conpot", "conpot-s7-1200", ...
-		add(persona, f)
+		add(persona, f, enrichLine)
 	}
 
 	return out
@@ -178,14 +190,14 @@ func runSource(s *source, vm, tftpVM *atomic.Pointer[viaMap], refresh, pendingTi
 		now := time.Now()
 		var ready [][]byte
 		for _, line := range lines {
-			enriched, resolved := enrichLine(line, *vm.Load(), *tftpVM.Load(), s.name)
+			enriched, resolved := s.enrich(line, *vm.Load(), *tftpVM.Load(), s.name)
 			if resolved {
 				ready = append(ready, enriched)
 			} else {
 				s.queue.add(line, pendingTimeout, now)
 			}
 		}
-		ready = append(ready, s.queue.drain(*vm.Load(), *tftpVM.Load(), now, s.name)...)
+		ready = append(ready, s.queue.drain(*vm.Load(), *tftpVM.Load(), now, s.name, s.enrich)...)
 		write(ready)
 		if newOffset != offset {
 			saveOffset(s.statePath, newOffset)

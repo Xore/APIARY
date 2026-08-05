@@ -11,12 +11,12 @@ func TestPendingQueueResolvesOnceViaMapCatchesUp(t *testing.T) {
 	q.add([]byte(`{"src_ip":"10.8.0.1","src_port":1}`), 5*time.Second, now)
 
 	// Still empty: the portbridge entry hasn't landed yet.
-	ready := q.drain(viaMap{}, viaMap{}, now.Add(1*time.Second), "")
+	ready := q.drain(viaMap{}, viaMap{}, now.Add(1*time.Second), "", enrichLine)
 	if len(ready) != 0 {
 		t.Fatalf("expected nothing ready before resolution or timeout, got %d", len(ready))
 	}
 
-	ready = q.drain(viaMap{1: "203.0.113.9"}, viaMap{}, now.Add(2*time.Second), "")
+	ready = q.drain(viaMap{1: "203.0.113.9"}, viaMap{}, now.Add(2*time.Second), "", enrichLine)
 	if len(ready) != 1 {
 		t.Fatalf("expected the line to resolve and flush, got %d", len(ready))
 	}
@@ -31,7 +31,7 @@ func TestPendingQueueFlushesUnenrichedAfterTimeout(t *testing.T) {
 	line := []byte(`{"src_ip":"10.8.0.1","src_port":1}`)
 	q.add(line, 5*time.Second, now)
 
-	ready := q.drain(viaMap{}, viaMap{}, now.Add(6*time.Second), "")
+	ready := q.drain(viaMap{}, viaMap{}, now.Add(6*time.Second), "", enrichLine)
 	if len(ready) != 1 {
 		t.Fatalf("expected the line to flush unenriched after its deadline, got %d", len(ready))
 	}
@@ -40,7 +40,7 @@ func TestPendingQueueFlushesUnenrichedAfterTimeout(t *testing.T) {
 	}
 
 	// It must not be retried again after flushing.
-	again := q.drain(viaMap{1: "203.0.113.9"}, viaMap{}, now.Add(7*time.Second), "")
+	again := q.drain(viaMap{1: "203.0.113.9"}, viaMap{}, now.Add(7*time.Second), "", enrichLine)
 	if len(again) != 0 {
 		t.Fatalf("expected an already-flushed line not to reappear, got %d", len(again))
 	}

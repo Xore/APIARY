@@ -32,18 +32,23 @@ func (q *pendingQueue) add(line []byte, timeout time.Duration, now time.Time) {
 	q.items = append(q.items, pendingLine{line: line, deadline: now.Add(timeout)})
 }
 
-// drain retries every pending line against vm, returning (in original
-// order) every line that either resolved or timed out -- ready to write
-// now, enriched or not. Lines still within their window and still
-// unresolved stay queued for the next call.
-func (q *pendingQueue) drain(vm, tftpVM viaMap, now time.Time, persona string) [][]byte {
+// enrichFunc is the shape both enrichLine and enrichDionaeaIncidentLine
+// share, so pendingQueue.drain (and runSource) can retry either kind of
+// source through the same code path without knowing which one it's got.
+type enrichFunc func(line []byte, vm, tftpVM viaMap, persona string) (out []byte, resolved bool)
+
+// drain retries every pending line against vm via enrich, returning (in
+// original order) every line that either resolved or timed out -- ready
+// to write now, enriched or not. Lines still within their window and
+// still unresolved stay queued for the next call.
+func (q *pendingQueue) drain(vm, tftpVM viaMap, now time.Time, persona string, enrich enrichFunc) [][]byte {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
 	var ready [][]byte
 	remaining := q.items[:0]
 	for _, p := range q.items {
-		out, resolved := enrichLine(p.line, vm, tftpVM, persona)
+		out, resolved := enrich(p.line, vm, tftpVM, persona)
 		if resolved || now.After(p.deadline) {
 			ready = append(ready, out)
 			continue
