@@ -586,6 +586,21 @@ func classify(e map[string]any, dirSensor string) event {
 		if ev.shasum != "" && !strings.Contains(ev.detail, ev.shasum) {
 			ev.detail += " [" + shortHash(ev.shasum) + "]"
 		}
+		// #624: smb.dcerpc.bind/request incidents carry which RPC service
+		// interface (uuid) and, for a request, which operation (opnum) the
+		// attacker targeted -- log_incident's generic handler already
+		// stores both in `data`, this dashboard branch just never read
+		// them before, so an operator had to open the raw ES document by
+		// hand to see which interface/operation was actually probed.
+		if uuid := str(data["uuid"]); uuid != "" {
+			ev.detail += " uuid=" + uuid
+			if opnum := num(data["opnum"]); opnum != "" {
+				ev.detail += " opnum=" + opnum
+			}
+			if ts := str(data["transfersyntax"]); ts != "" {
+				ev.detail += " transfersyntax=" + ts
+			}
+		}
 		return ev
 	}
 
