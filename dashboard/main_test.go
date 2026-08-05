@@ -1383,6 +1383,34 @@ func TestClassifyCiscoASAHoneypotSurfacesIKEAndHTTPEvents(t *testing.T) {
 		t.Fatalf("command (captured payload) = %q", payload.command)
 	}
 
+	// #620: a plain POST that isn't the CVE-2018-0101 shape (e.g. a crafted
+	// submission against the fake login page) must still surface its body,
+	// just under "body:" instead of "payload:" so the two stay
+	// distinguishable at a glance.
+	genericPost := classify(map[string]any{
+		"sensor": "cisco-asa-honeypot", "event": "post", "port": float64(8443),
+		"src_ip": "203.0.113.10", "proto": "https", "path": "/+CSCOE+/logon.html",
+		"data": "username=admin&password=admin123",
+	}, "cisco-asa-honeypot")
+	if genericPost.command != "username=admin&password=admin123" {
+		t.Fatalf("generic POST body not surfaced in ev.command: %q", genericPost.command)
+	}
+	if !strings.Contains(genericPost.detail, "body: username=admin&password=admin123") {
+		t.Fatalf("generic POST body missing 'body:' framing in detail: %q", genericPost.detail)
+	}
+	if strings.Contains(genericPost.detail, "payload:") {
+		t.Fatalf("generic POST must use 'body:' framing, not 'payload:' (CVE-specific): %q", genericPost.detail)
+	}
+
+	// An empty POST body must not add a stray "body:" label.
+	emptyPost := classify(map[string]any{
+		"sensor": "cisco-asa-honeypot", "event": "post", "port": float64(8443),
+		"src_ip": "203.0.113.10", "proto": "https", "path": "/+CSCOE+/logon.html",
+	}, "cisco-asa-honeypot")
+	if emptyPost.command != "" || strings.Contains(emptyPost.detail, "body:") {
+		t.Fatalf("empty POST body should not surface a stray 'body:' label: %+v", emptyPost)
+	}
+
 	httpFingerprint := classify(map[string]any{
 		"sensor": "cisco-asa-honeypot", "event": "get", "port": float64(8443),
 		"src_ip": "203.0.113.10", "proto": "https", "path": "/",
