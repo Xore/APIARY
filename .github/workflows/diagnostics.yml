@@ -132,6 +132,10 @@ jobs:
           report '```'
 
       - name: Isolation invariants (#88)
+        # Independent of the previous step: this reads no Compose state and
+        # must still run (and be visible as its own pass/fail) even if that
+        # step's own unrelated problem recurs.
+        if: always()
         shell: bash
         run: |
           set -uo pipefail
