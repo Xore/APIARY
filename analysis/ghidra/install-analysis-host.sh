@@ -205,13 +205,20 @@ fi
 [ "$(id -u)" -eq 0 ] || die "installing the worker needs root; re-run with sudo, or pass --containers-only"
 
 say "installing the worker into $target"
-install -d -m 0755 -o root -g root "$target" "$target/worker" "$target/models"
+install -d -m 0755 -o root -g root "$target" "$target/worker" "$target/models" "$target/report"
 install -m 0755 -o root -g root "$here/worker/ghidra-worker.py" "$target/worker/ghidra-worker.py"
 # gpu_queue.py is vendored (not shared by import across containers/hosts --
 # see its own module docstring) into both ghidra-worker.py's deployment
 # target here and llm-worker's container image separately.
 install -m 0755 -o root -g root "$here/worker/gpu_queue.py" "$target/worker/gpu_queue.py"
 install -m 0755 -o root -g root "$here/worker/gpu-queue-drain.py" "$target/worker/gpu-queue-drain.py"
+# ghidra-worker.py's generate_report() imports this as a local sibling
+# (report_dir = .../worker/../report), never a pip dependency -- found
+# missing entirely on a live host (#498): every analysis completed with
+# report_pdf: null and "ModuleNotFoundError: No module named
+# 'generate_report'" in the worker log, because this install step never
+# copied the report/ directory at all.
+install -m 0755 -o root -g root "$here/report/generate_report.py" "$target/report/generate_report.py"
 install -m 0755 -o root -g root "$here/models/model-governance.py" "$target/models/model-governance.py"
 install -m 0755 -o root -g root "$here/models/model-status-adapter.py" "$target/models/model-status-adapter.py"
 install -m 0644 -o root -g root \
