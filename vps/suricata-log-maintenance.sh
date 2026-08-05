@@ -32,7 +32,9 @@ set -eu
 # tracking to protect, because nothing downstream reads these two files
 # at all.
 
-retention_min="${RETENTION_MINUTES:-4320}"   # 3 days
+# #261: default derives from the shared HONEYPOT_RETENTION_DAYS knob, same
+# ratio and reasoning as analysis/log-maintenance.sh's json_retention_min.
+retention_min="${RETENTION_MINUTES:-$(( ${HONEYPOT_RETENTION_DAYS:-30} * 1440 / 10 ))}"
 interval="${CHECK_INTERVAL:-3600}"
 start_delay="${START_DELAY:-60}"
 log_dir="${LOG_DIR:-/logs/suricata}"

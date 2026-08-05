@@ -14,7 +14,13 @@ max_bytes="${MAX_LOG_BYTES:-268435456}"
 interval="${CHECK_INTERVAL:-300}"
 rotations="${ROTATIONS:-4}"
 start_delay="${START_DELAY:-60}"
-json_retention_min="${JSON_RETENTION_MINUTES:-4320}"   # 3 days, matches vps/suricata-log-maintenance.sh
+# #261: default derives from the shared HONEYPOT_RETENTION_DAYS knob at the
+# same 1/10 ratio this repo's previous independent default already used
+# (4320min = 3d against a 30d default) -- deliberately far shorter than
+# elasticsearch-setup.sh's ILM retention, since this is only raw on-disk
+# JSON that needs to outlive Filebeat's ingest lag, not the searchable
+# history ES/Kibana hold. JSON_RETENTION_MINUTES still overrides directly.
+json_retention_min="${JSON_RETENTION_MINUTES:-$(( ${HONEYPOT_RETENTION_DAYS:-30} * 1440 / 10 ))}"
 
 size_of() {
   stat -c %s "$1" 2>/dev/null || wc -c < "$1"

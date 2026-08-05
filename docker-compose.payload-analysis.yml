@@ -52,7 +52,9 @@ services:
       # and otherwise unbounded; pruned by age before dedup runs each pass,
       # which also keeps what dedup has to hash from growing forever. See #112.
       - BISTREAMS_ROOT=/payloads/dionaea/bistreams
-      - BISTREAMS_RETENTION_DAYS=${BISTREAMS_RETENTION_DAYS:-30}
+      # #261: falls back to the shared HONEYPOT_RETENTION_DAYS knob if
+      # BISTREAMS_RETENTION_DAYS itself isn't set.
+      - BISTREAMS_RETENTION_DAYS=${BISTREAMS_RETENTION_DAYS:-${HONEYPOT_RETENTION_DAYS:-30}}
     volumes:
       - /opt/stacks/honeypot-stack/analysis/dedupe-payloads.py:/app/dedupe-payloads.py:ro
       - /opt/stacks/honeypot-stack/logs/cowrie/downloads:/payloads/cowrie

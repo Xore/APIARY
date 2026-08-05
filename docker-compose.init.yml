@@ -153,6 +153,8 @@ services:
         mkdir -p /markers && touch /markers/elasticsearch-setup.done
     environment:
       - ELASTICSEARCH_URL=http://elasticsearch:9200
+      # #261: single knob every ILM min_age below scales from.
+      - HONEYPOT_RETENTION_DAYS=${HONEYPOT_RETENTION_DAYS:-30}
     volumes:
       - /opt/stacks/honeypot-stack/analysis/elasticsearch-setup.sh:/usr/local/bin/elasticsearch-setup.sh:ro
       - /opt/stacks/honeypot-stack/state/init-markers:/markers
