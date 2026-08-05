@@ -51,21 +51,16 @@ Primary target: **AbuseIPDB** — widely used, has a public confidence score, an
 
 ## Architecture
 
-```
-Cowrie / Dionaea / Conpot / HTTP-honeypot / DNP3
-        │  (JSON event logs on the shared Docker volumes, tailed —
-        │   not Redis pub-sub; see "Resolved design decisions")
-        ▼
-  ┌─────────────┐
-  │  reporter   │  new Docker Compose service
-  │  (Python)   │
-  └──────┬──────┘
-         │  POST /api/v2/reports
-         ▼
-     AbuseIPDB
-         │  (optional)
-         ▼
-    Blocklist.de
+```mermaid
+flowchart TD
+    Sensors["Cowrie / Dionaea / Conpot / HTTP-honeypot / DNP3"]
+    Reporter["reporter (Python)<br/>new Docker Compose service"]
+    AbuseIPDB["AbuseIPDB"]
+    Blocklist["Blocklist.de"]
+
+    Sensors -->|"JSON event logs on the shared Docker volumes, tailed —<br/>not Redis pub-sub; see 'Resolved design decisions'"| Reporter
+    Reporter -->|"POST /api/v2/reports"| AbuseIPDB
+    AbuseIPDB -->|optional| Blocklist
 ```
 
 The `reporter` container:
@@ -223,18 +218,18 @@ The reporter will track a daily counter and pause with exponential back-off on `
 
 ## Files To Create
 
-```
-reporter/
-├── Dockerfile
-├── requirements.txt
-├── reporter.py          # main loop
-├── sources.py           # per-sensor log parsers
-├── apis.py              # AbuseIPDB + Blocklist.de clients
-├── dedup.py             # SQLite-backed deduplication
-├── whitelist.txt        # safe IPs/CIDRs to never report
-└── metrics.py           # Prometheus exporter
-docs/
-└── ip-reporting-plan.md # this file
+```mermaid
+flowchart TD
+    ReporterDir["reporter/"] --> Dockerfile["Dockerfile"]
+    ReporterDir --> Requirements["requirements.txt"]
+    ReporterDir --> ReporterPy["reporter.py<br/>main loop"]
+    ReporterDir --> SourcesPy["sources.py<br/>per-sensor log parsers"]
+    ReporterDir --> ApisPy["apis.py<br/>AbuseIPDB + Blocklist.de clients"]
+    ReporterDir --> DedupPy["dedup.py<br/>SQLite-backed deduplication"]
+    ReporterDir --> WhitelistTxt["whitelist.txt<br/>safe IPs/CIDRs to never report"]
+    ReporterDir --> MetricsPy["metrics.py<br/>Prometheus exporter"]
+
+    DocsDir["docs/"] --> PlanMd["ip-reporting-plan.md<br/>this file"]
 ```
 
 ---
