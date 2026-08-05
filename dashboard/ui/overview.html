@@ -102,16 +102,16 @@
           <div class="section-heading"><div><h2>Collection status</h2><p>Sensor activity and the protocols currently attracting traffic.</p></div><a class="section-link" href="/source-health">Open pipeline health &rarr;</a></div>
           <div class="card half sensor-card">
             <h2>Sensor feeds</h2>
-            <p class="note">Active = recent traffic, quiet = online with no recent event, stale = its log has stopped updating. A quiet honeypot is not necessarily offline.</p>
+            <p class="note">Showing all {{len .Sensors}} sensor{{if ne (len .Sensors) 1}}s{{end}}. Active = recent traffic, quiet = online with no recent event, stale = its log has stopped updating. A quiet honeypot is not necessarily offline.</p>
             {{if .Sensors}}
-            <table class="data-table"><tbody>
+            <div class="card__scroll"><table class="data-table"><tbody>
               {{range .Sensors}}
               <tr><td class="n">{{.Count}}</td>
                   <td><a class="badge b-{{.Name}}" href="{{.Link}}">{{.Name}}</a></td>
                   <td class="state s-{{.State}}">{{.State}}</td>
                   <td class="ago">{{.Ago}}</td></tr>
               {{end}}
-            </tbody></table>
+            </tbody></table></div>
             {{else}}<p class="empty">no sensor logs found under /logs</p>{{end}}
           </div>
 
