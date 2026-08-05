@@ -171,6 +171,14 @@
       <model type='vga' vram='16384' heads='1'/>
     </video>
 
+    <!-- #722: without an explicit watchdog element, libvirt/QEMU on this
+         host auto-injects a default model='itco' action='reset' device,
+         which Windows has no driver to service, causing an unprompted
+         whole-VM reset every ~90-120s (confirmed live against
+         win11-sandbox, same missing declaration, same host). Explicit
+         no-op override. -->
+    <watchdog model='itco' action='none'/>
+
     <input type='tablet' bus='usb'/>
     <input type='keyboard' bus='ps2'/>
 
