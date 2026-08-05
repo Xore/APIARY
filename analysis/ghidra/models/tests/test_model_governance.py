@@ -14,6 +14,14 @@ from pathlib import Path
 
 
 HERE = Path(__file__).resolve().parent.parent
+# #670 moved approval-record.md into docs/ alongside every other README/plan
+# doc, but left this drift-detection test reading it from the code
+# directory it used to live in -- confirmed live via CI (#720): every PR's
+# "Scripts and Compose" check now fails with FileNotFoundError regardless
+# of what it actually touches, since this test runs unconditionally.
+# install-analysis-host.sh already deploys from the new docs/ path, so this
+# test was the one file the reorg missed, not the other way around.
+DOCS_DIR = HERE.parents[2] / "docs" / "analysis" / "ghidra" / "models"
 SPEC = importlib.util.spec_from_file_location("model_governance", HERE / "model-governance.py")
 governance = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
@@ -92,7 +100,7 @@ class GovernanceTests(unittest.TestCase):
         self.assertTrue(status["advisory_only"])
         self.assertEqual(
             governance.approval_record(self.manifest),
-            (HERE / "approval-record.md").read_text(encoding="utf-8"),
+            (DOCS_DIR / "approval-record.md").read_text(encoding="utf-8"),
         )
 
     def test_digest_and_host_drift_are_independently_visible(self):
