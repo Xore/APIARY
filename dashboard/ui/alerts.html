@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>xore//honeypot — alerts</title>
+<title>{{brandText}} — alerts</title>
 {{template "style" .}}
 </head>
 <body>
@@ -25,7 +25,7 @@
         </header>
         <div class="filters" id="alerts-filters"><a class="chip" href="/">&larr; dashboard</a><button class="copy" id="alerts-refresh" type="button">refresh</button><button class="copy" id="alerts-ack-all" type="button" data-hp-alert-ack-all hidden>acknowledge all</button>{{template "filterbar" .}}</div>
         <div class="card wide" id="alerts-card"><table class="recent data-table"><thead><tr><th>state</th><th>key</th><th>message</th><th>observed</th><th>last seen</th><th>last notified</th><th>action</th></tr></thead><tbody id="alert-rows"></tbody></table><p id="alert-empty" class="empty">loading</p></div>
-        <footer id="alerts-footer">xore//honeypot &bull; acknowledged alerts stay suppressed until reopened</footer>
+        <footer id="alerts-footer">{{brandText}} &bull; acknowledged alerts stay suppressed until reopened</footer>
       </div>
     </main>
 </div>

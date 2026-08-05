@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>xore//honeypot — Reports studio</title>
+<title>{{brandText}} — Reports studio</title>
 {{template "style" .}}
 <style nonce="{{.Nonce}}">
 .hp-rp-templates { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; margin: 4px 0 18px; }
@@ -197,9 +197,9 @@
                 <div class="hp-rp-grid">
                   <div class="hp-rp-field"><label for="hp-rp-brand-title">Report title</label><input id="hp-rp-brand-title" maxlength="80" placeholder="defaults to the template title"></div>
                   <div class="hp-rp-field"><label for="hp-rp-brand-author">Author</label><input id="hp-rp-brand-author" maxlength="60" placeholder="SOC team"></div>
-                  <div class="hp-rp-field"><label for="hp-rp-brand-header-left">Header left</label><input id="hp-rp-brand-header-left" maxlength="60" placeholder="XORE//HONEYPOT"></div>
+                  <div class="hp-rp-field"><label for="hp-rp-brand-header-left">Header left</label><input id="hp-rp-brand-header-left" maxlength="60" placeholder="XORE//APIARY"></div>
                   <div class="hp-rp-field"><label for="hp-rp-brand-header-right">Header right</label><input id="hp-rp-brand-header-right" maxlength="60" placeholder="DEFENSIVE SECURITY OPERATIONS"></div>
-                  <div class="hp-rp-field"><label for="hp-rp-brand-footer">Footer text</label><input id="hp-rp-brand-footer" maxlength="80" placeholder="PRIVATE - XORE//HONEYPOT"></div>
+                  <div class="hp-rp-field"><label for="hp-rp-brand-footer">Footer text</label><input id="hp-rp-brand-footer" maxlength="80" placeholder="PRIVATE - XORE//APIARY"></div>
                   <div class="hp-rp-field"><label for="hp-rp-brand-classification">Classification line</label><input id="hp-rp-brand-classification" maxlength="120" placeholder="PRIVATE - contains hostile-source telemetry"></div>
                 </div>
               </div>
@@ -235,7 +235,7 @@
 
           <p class="note" id="hp-rp-admin-note" hidden>Designing and generating reports requires the administrator role &mdash; sign in with an admin account to use the studio.</p>
         </div>
-        <footer id="reports-footer">xore//honeypot &bull; reports studio</footer>
+        <footer id="reports-footer">{{brandText}} &bull; reports studio</footer>
       </div>
     </main>
   <!-- Report viewer: application-managed centered overlay, same shape and

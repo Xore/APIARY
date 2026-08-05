@@ -323,7 +323,7 @@ func TestConfigRollbackRestoresRetainedRevision(t *testing.T) {
 		t.Fatalf("rollback to defaults: status = %d, body = %s", response.Code, response.Body.String())
 	}
 	restored, _ := getConfig(t, s)
-	if restored.Config.Presentation.AppName != "XORE//HP" {
+	if restored.Config.Presentation.AppName != "APIARY" {
 		t.Fatalf("rollback must restore the revision 0 payload, got %q", restored.Config.Presentation.AppName)
 	}
 	if restored.Revision != 3 {

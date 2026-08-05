@@ -56,6 +56,7 @@ func configFieldImpact(field string) string {
 // presentationPatch / behaviorPatch / honeypotPatch mirror the configuration
 // schema with pointer fields, so a PATCH distinguishes "absent" from "zero".
 type presentationPatch struct {
+	BrandPrefix       *string `json:"brand_prefix"`
 	AppName           *string `json:"app_name"`
 	ProductLabel      *string `json:"product_label"`
 	DashboardTitle    *string `json:"dashboard_title"`
@@ -124,6 +125,7 @@ func (p configPatch) apply(c *dashboardConfig) []string {
 				fields = append(fields, "presentation."+name)
 			}
 		}
+		set("brand_prefix", &c.Presentation.BrandPrefix, q.BrandPrefix)
 		set("app_name", &c.Presentation.AppName, q.AppName)
 		set("product_label", &c.Presentation.ProductLabel, q.ProductLabel)
 		set("dashboard_title", &c.Presentation.DashboardTitle, q.DashboardTitle)

@@ -58,6 +58,7 @@ func TestMLPanelsEnabledTracksLiveConfig(t *testing.T) {
 
 func TestShellRendersConfiguredPresentation(t *testing.T) {
 	html := renderOverview(t, func(c *dashboardConfig) {
+		c.Presentation.BrandPrefix = ""
 		c.Presentation.AppName = "SOCOPS//NOC"
 		c.Presentation.ProductLabel = "Blue team"
 		c.Presentation.DashboardTitle = "Operations bridge"
@@ -84,7 +85,7 @@ func TestShellRendersConfiguredPresentation(t *testing.T) {
 func TestShellDefaultsRenderUnchangedCopy(t *testing.T) {
 	html := renderOverview(t, nil)
 	for _, want := range []string{
-		"XORE<span class=\"hp-brand-accent\">//</span>HP",
+		"XORE<span class=\"hp-brand-accent\">//</span>APIARY",
 		"<small>Defensive operations</small>",
 		"<h1>Honeypot command center</h1>",
 		"Live attack telemetry, captured evidence",

@@ -16,7 +16,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>xore//honeypot — source IPs</title>
+<title>{{brandText}} — source IPs</title>
 {{template "style" .}}
 </head>
 <body>
@@ -54,7 +54,7 @@
           {{else}}<p class="empty">no source IPs recorded yet</p>{{end}}
         </div>
 
-        <footer id="ips-footer">xore//honeypot &bull; defensive sensor &bull; do not expose without auth</footer>
+        <footer id="ips-footer">{{brandText}} &bull; defensive sensor &bull; do not expose without auth</footer>
       </div>
     </main>
 </div>
@@ -68,7 +68,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
-<title>xore//honeypot — attacker {{.IP}}</title>
+<title>{{brandText}} — attacker {{.IP}}</title>
 {{template "style" .}}
 </head>
 <body>
@@ -123,7 +123,7 @@
           <div class="card wide"><h2>Attack progression</h2><p class="note">Chronological, oldest to newest; capped to the latest 250 matching records.</p><table class="recent data-table"><thead><tr><th>time</th><th>sensor</th><th>source</th><th>port</th><th>detail</th></tr></thead><tbody>{{range .Events}}{{template "everow" .}}{{end}}</tbody></table></div>
         </div>
 
-        <footer id="attacker-footer">xore//honeypot &bull; attacker investigation</footer>
+        <footer id="attacker-footer">{{brandText}} &bull; attacker investigation</footer>
       </div>
     </main>
 </div>

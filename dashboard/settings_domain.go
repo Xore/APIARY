@@ -23,7 +23,7 @@ var errSettingsValidation = errors.New("settings validation failed")
 
 // settingsSchemaVersion is the current on-disk schema. The migration registry
 // below exists so future versions slot in without touching the store layer.
-const settingsSchemaVersion = 3
+const settingsSchemaVersion = 4
 
 // migrations upgrades a persisted payload from schema version N to N+1.
 // Unknown older versions fail loudly instead of being silently misread, and
@@ -32,6 +32,7 @@ const settingsSchemaVersion = 3
 var migrations = map[int]func(json.RawMessage) (json.RawMessage, error){
 	1: migrateAddMLAlertThresholdDefault,
 	2: migrateAddDefaultTimezone,
+	3: migrateAddBrandPrefix,
 }
 
 // migrateAddMLAlertThresholdDefault backfills honeypot.ml_alert_threshold
@@ -112,6 +113,57 @@ func migrateAddDefaultTimezone(payload json.RawMessage) (json.RawMessage, error)
 		return nil, err
 	}
 	doc["behavior"] = newBehavior
+	return json.Marshal(doc)
+}
+
+// migrateAddBrandPrefix backfills presentation.brand_prefix (#776) for
+// payloads persisted before the accent prefix was split out of app_name.
+// If the existing app_name already starts with the compiled default prefix
+// ("XORE//"), the prefix is peeled off into its own field so the composed
+// brand renders identically to before. Otherwise the operator's app_name is
+// left untouched and brand_prefix defaults to empty -- a custom name that
+// never had "XORE//" in it shouldn't suddenly grow one.
+func migrateAddBrandPrefix(payload json.RawMessage) (json.RawMessage, error) {
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &doc); err != nil {
+		return payload, nil
+	}
+	presentationRaw, ok := doc["presentation"]
+	if !ok {
+		return payload, nil
+	}
+	var presentation map[string]json.RawMessage
+	if err := json.Unmarshal(presentationRaw, &presentation); err != nil {
+		return payload, nil
+	}
+	if _, exists := presentation["brand_prefix"]; exists {
+		return payload, nil
+	}
+	var appName string
+	if raw, exists := presentation["app_name"]; exists {
+		_ = json.Unmarshal(raw, &appName)
+	}
+	defaultPrefix := defaultDashboardConfig().Presentation.BrandPrefix
+	prefix := ""
+	if strings.HasPrefix(appName, defaultPrefix) {
+		prefix = defaultPrefix
+		appName = strings.TrimPrefix(appName, defaultPrefix)
+	}
+	encodedPrefix, err := json.Marshal(prefix)
+	if err != nil {
+		return nil, err
+	}
+	encodedName, err := json.Marshal(appName)
+	if err != nil {
+		return nil, err
+	}
+	presentation["brand_prefix"] = encodedPrefix
+	presentation["app_name"] = encodedName
+	newPresentation, err := json.Marshal(presentation)
+	if err != nil {
+		return nil, err
+	}
+	doc["presentation"] = newPresentation
 	return json.Marshal(doc)
 }
 
@@ -277,6 +329,11 @@ func validTimezone(tz string) bool {
 // ---------------------------------------------------------------------------
 
 type presentationConfig struct {
+	// BrandPrefix (#776) is the accent-styled lead-in rendered before AppName
+	// (default "XORE//") -- split out so an operator can rebrand the product
+	// name without losing the prefix, or drop the prefix entirely for a
+	// white-label deployment, independently of AppName.
+	BrandPrefix       string `json:"brand_prefix"`
 	AppName           string `json:"app_name"`
 	ProductLabel      string `json:"product_label"`
 	DashboardTitle    string `json:"dashboard_title"`
@@ -359,7 +416,8 @@ type dashboardConfig struct {
 func defaultDashboardConfig() dashboardConfig {
 	return dashboardConfig{
 		Presentation: presentationConfig{
-			AppName:        "XORE//HP",
+			BrandPrefix:    "XORE//",
+			AppName:        "APIARY",
 			ProductLabel:   "Defensive operations",
 			DashboardTitle: "Honeypot command center",
 			AIDisclaimer:   "AI-generated analysis may be wrong; verify against raw evidence.",
@@ -417,6 +475,7 @@ func pinnedHoneypotFields(lookup func(string) string) map[string]string {
 // text bounds per field; configurable copy is plain single-purpose text, not
 // documents. Control characters are always rejected (no HTML, no markup).
 var presentationTextLimits = map[string]int{
+	"brand_prefix":       20,
 	"app_name":           60,
 	"product_label":      30,
 	"dashboard_title":    80,
@@ -444,6 +503,7 @@ func validateConfig(c dashboardConfig) error {
 	var problems []string
 	p := c.Presentation
 	texts := map[string]string{
+		"brand_prefix":       p.BrandPrefix,
 		"app_name":           p.AppName,
 		"product_label":      p.ProductLabel,
 		"dashboard_title":    p.DashboardTitle,

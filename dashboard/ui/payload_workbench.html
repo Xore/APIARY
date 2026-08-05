@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
-<title>xore//honeypot &mdash; payload workbench</title>
+<title>{{brandText}} &mdash; payload workbench</title>
 {{template "style" .}}
 </head>
 <body><div class="app-shell">{{template "topbar" .}}{{template "sidebar" .}}
@@ -30,14 +30,14 @@
     {{if gt .ResultTotal 50}}<p class="note">Showing the 50 most recent captures. Open the full inventory to find older evidence.</p>{{end}}
     {{else}}<p class="empty">No payloads captured yet.</p>{{end}}
   </section>
-  <footer>xore//honeypot &bull; select evidence before orchestration &bull; captured files remain inert</footer>
+  <footer>{{brandText}} &bull; select evidence before orchestration &bull; captured files remain inert</footer>
 </div></main></div></body></html>{{end}}
 
 {{define "workbench-results"}}<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
-<title>xore//honeypot &mdash; workbench results</title>
+<title>{{brandText}} &mdash; workbench results</title>
 {{template "style" .}}
 </head>
 <body><div class="app-shell">{{template "topbar" .}}{{template "sidebar" .}}
@@ -70,14 +70,14 @@
     {{else}}<div class="card wide"><p class="empty">No workbench runs match this view.</p></div>{{end}}
     </div>
   </section>
-  <footer>xore//honeypot &bull; owner-isolated correlated results &bull; native analyzer reports remain canonical</footer>
+  <footer>{{brandText}} &bull; owner-isolated correlated results &bull; native analyzer reports remain canonical</footer>
 </div></main></div></body></html>{{end}}
 
 {{define "payload-workbench"}}<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
-<title>xore//honeypot &mdash; payload workbench</title>
+<title>{{brandText}} &mdash; payload workbench</title>
 {{template "style" .}}<script defer src="{{asset "/static/hp-workbench.js"}}"></script>
 </head>
 <body><div class="app-shell">{{template "topbar" .}}{{template "sidebar" .}}
@@ -128,5 +128,5 @@
 
   <section class="tw:mt-5" aria-labelledby="wb-runs-title"><div class="section-heading"><div><h2 id="wb-runs-title">Correlated runs</h2><p>Partial results remain available when another backend fails or times out.</p></div></div><div data-wb-runs aria-live="polite"><div class="card wide"><p class="empty">Loading analysis runs&hellip;</p></div></div></section>
   <section class="card wide tw:mt-5" aria-labelledby="wb-external-title"><div class="tw:flex tw:flex-wrap tw:items-center tw:gap-2"><h2 id="wb-external-title" class="tw:mr-auto">External publication</h2><span class="badge badge--red">leaves local trust boundary</span><span class="badge badge--muted">never in Run all</span></div><p>GitHub analysis uploads captured material externally. It remains a separate administrator-only workflow with the existing confirmation phrase, dry-run guard, and audit trail.</p><a class="lnk" href="/github-analysis">Open the separately gated GitHub publisher &rarr;</a></section>
-  <footer>xore//honeypot &bull; immutable recipe snapshots &bull; bounded local orchestration</footer>
+  <footer>{{brandText}} &bull; immutable recipe snapshots &bull; bounded local orchestration</footer>
 </div></main></div></body></html>{{end}}

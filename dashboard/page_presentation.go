@@ -48,13 +48,20 @@ func activeBannerView(p presentationConfig, b behaviorConfig, now time.Time) *ba
 	return nil
 }
 
-// brandHTML renders the configured application name with the // accent span
-// the brand mark uses. The name is escaped first; the accent replacement then
-// only ever wraps the literal "//" separator, never configured content.
+// brandHTML renders the configured brand (BrandPrefix + AppName, #776) with
+// the // accent span the brand mark uses. The combined text is escaped first;
+// the accent replacement then only ever wraps the literal "//" separator,
+// never configured content.
 func brandHTML(name string) template.HTML {
 	escaped := template.HTMLEscapeString(strings.TrimSpace(name))
 	escaped = strings.Replace(escaped, "//", `<span class="hp-brand-accent">//</span>`, 1)
 	return template.HTML(escaped) //nolint:gosec // escaped above; only the accent span is added
+}
+
+// brandText renders the same configured brand as brandHTML but as plain
+// text, for contexts like <title> that can't hold the accent-span markup.
+func brandText(prefix, name string) string {
+	return strings.TrimSpace(prefix) + strings.TrimSpace(name)
 }
 
 // mlPanelsEnabled reports the live behavior.show_ml_panels setting (#181):
@@ -125,7 +132,8 @@ func templateFuncs(s *store, world template.HTML) template.FuncMap {
 		"presentation":        presentation,
 		"behavior":            behavior,
 		"reportPresetRows":    func() []reportPresetRow { return reportPresetRowsFor(presentation().ReportPresets) },
-		"brandHTML":           func() template.HTML { return brandHTML(presentation().AppName) },
+		"brandHTML":           func() template.HTML { return brandHTML(presentation().BrandPrefix + presentation().AppName) },
+		"brandText":           func() string { return brandText(presentation().BrandPrefix, presentation().AppName) },
 		"activeBanner":        func() *bannerView { return activeBannerView(presentation(), behavior(), time.Now()) },
 		"intelBadgeClass":     intelBadgeClass,
 		"workbenchRunSummary": workbenchRunSummary,
