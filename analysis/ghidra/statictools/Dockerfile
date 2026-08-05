@@ -43,14 +43,31 @@ RUN curl -fsSL -o /tmp/capa-rules.tar.gz \
     && tar -xzf /tmp/capa-rules.tar.gz -C /app/capa-rules --strip-components=1 \
     && rm /tmp/capa-rules.tar.gz
 
+# capa's own library-function signatures (.sig files, used to recognise
+# statically-linked library code so it isn't misidentified as sample logic)
+# -- separate from capa-rules above, and NOT bundled into the flare-capa pip
+# package the way capa's own CLI docs imply ("use embedded signatures by
+# default"). Found live (#498): every capa call failed with "Using default
+# signature path, but it doesn't exist" because nothing had ever fetched
+# them. They live in the main capa repo (not capa-rules), same
+# version-pinned-by-tag-and-digest convention as the rules above.
+ARG CAPA_SIGS_VERSION=v9.4.0
+ARG CAPA_SIGS_SHA256=562edd9617b23286e74d06f0115d99217a4df178e43925375af0c35d5cae8d66
+RUN curl -fsSL -o /tmp/capa.tar.gz \
+      "https://github.com/mandiant/capa/archive/refs/tags/${CAPA_SIGS_VERSION}.tar.gz" \
+    && echo "${CAPA_SIGS_SHA256}  /tmp/capa.tar.gz" | sha256sum -c - \
+    && mkdir -p /app/capa-sigs \
+    && tar -xzf /tmp/capa.tar.gz -C /app/capa-sigs --strip-components=2 "capa-${CAPA_SIGS_VERSION#v}/sigs" \
+    && rm /tmp/capa.tar.gz
+
 COPY server.py /app/server.py
 
 # Non-root. capa needs the sample on disk (it has no stdin mode), so this
 # service writes one file per request under $TMPDIR -- /tmp is world-writable
 # by default, so 65534 can do that without owning anything else. It reads
-# capa-rules and its own code, and reads sample bytes into memory otherwise;
-# it has no reason to write anywhere outside of that.
-RUN chown -R 65534:65534 /app/capa-rules
+# capa-rules/capa-sigs and its own code, and reads sample bytes into memory
+# otherwise; it has no reason to write anywhere outside of that.
+RUN chown -R 65534:65534 /app/capa-rules /app/capa-sigs
 USER 65534:65534
 EXPOSE 9091
 
