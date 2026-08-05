@@ -134,21 +134,27 @@ func main() {
 	initial := buildViaMap(filepath.Join(logsDir, "portbridge"))
 	vm.Store(&initial)
 
+	var tftpVM atomic.Pointer[viaMap]
+	initialTftp := buildTftpSessionMap(logsDir)
+	tftpVM.Store(&initialTftp)
+
 	go func() {
 		for range time.Tick(refresh) {
 			m := buildViaMap(filepath.Join(logsDir, "portbridge"))
 			vm.Store(&m)
+			t := buildTftpSessionMap(logsDir)
+			tftpVM.Store(&t)
 		}
 	}()
 
 	done := make(chan struct{})
 	for _, s := range sources {
-		go runSource(s, &vm, refresh, pendingTimeout)
+		go runSource(s, &vm, &tftpVM, refresh, pendingTimeout)
 	}
 	<-done // runs forever; process supervision (docker restart policy) handles crashes
 }
 
-func runSource(s *source, vm *atomic.Pointer[viaMap], refresh, pendingTimeout time.Duration) {
+func runSource(s *source, vm, tftpVM *atomic.Pointer[viaMap], refresh, pendingTimeout time.Duration) {
 	out, err := os.OpenFile(s.output, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
 	if err != nil {
 		log.Printf("ip-enrichment-worker: %s: open output %s: %v", s.name, s.output, err)
@@ -172,14 +178,14 @@ func runSource(s *source, vm *atomic.Pointer[viaMap], refresh, pendingTimeout ti
 		now := time.Now()
 		var ready [][]byte
 		for _, line := range lines {
-			enriched, resolved := enrichLine(line, *vm.Load(), s.name)
+			enriched, resolved := enrichLine(line, *vm.Load(), *tftpVM.Load(), s.name)
 			if resolved {
 				ready = append(ready, enriched)
 			} else {
 				s.queue.add(line, pendingTimeout, now)
 			}
 		}
-		ready = append(ready, s.queue.drain(*vm.Load(), now, s.name)...)
+		ready = append(ready, s.queue.drain(*vm.Load(), *tftpVM.Load(), now, s.name)...)
 		write(ready)
 		if newOffset != offset {
 			saveOffset(s.statePath, newOffset)
