@@ -285,13 +285,22 @@ https://apt.releases.hashicorp.com $(lsb_release -cs) main" \
 apt update && apt install -y packer
 packer plugins install github.com/hashicorp/qemu
 
+# PXE boot staging (packer/pxe/prepare-pxe.sh, #288/#406) -- builds and
+# signs the custom ipxe.efi this template's install-time boot depends on.
+# Confirmed missing on a from-scratch host during the 2026-08-05 rebuild:
+# packer/pxe/prepare-pxe.sh fails partway through without these.
+apt install -y p7zip-full python3-virt-firmware sbsigntool
+
 # Python deps for orchestrator
 pip install libvirt-python pywinrm python-evtx lxml requests smbprotocol
 
 # Docker Compose (for gateway services)
 apt install -y docker-compose-plugin
 
-# User permissions
+# User permissions -- kvm specifically is required to run `packer build`
+# (or any direct qemu-system-x86_64 invocation) as a non-root user; its
+# absence fails late and unhelpfully ("qemu-system-x86_64: Could not access
+# KVM kernel module: Permission denied"), confirmed live 2026-08-05.
 usermod -aG kvm,libvirt,docker $USER
 ```
 

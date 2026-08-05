@@ -934,6 +934,13 @@ step_verify_elasticsearch_events() {
 # Phase 11 — sandbox VM restore (GHOSTS + Windows detonation), gated behind
 # ENABLE_SANDBOX_RESTORE since it's a 170G+ transfer and a genuinely separate
 # subsystem (KVM/libvirt, not Docker) from everything above.
+#
+# This phase only restores golden images from backup -- it deliberately does
+# NOT install Packer or the PXE build prerequisites (p7zip-full,
+# python3-virt-firmware, sbsigntool) or add a build user to the kvm group.
+# A from-scratch win11-analysis.qcow2 rebuild is a separate, manual,
+# multi-hour production action (see sandbox/windows/IMPLEMENTATION_PLAN.md
+# Phase 0) that this unattended install flow should not silently trigger.
 # ---------------------------------------------------------------------------
 step_libvirt_install() {
   with_retry 3 15 env DEBIAN_FRONTEND=noninteractive apt-get install -y \
