@@ -115,6 +115,27 @@
 @media (max-width: 720px) {
   .hp-pl-viewer { width: 100vw; height: 100dvh; border-radius: 0; }
 }
+/* #673: origin/hash info consolidated into action-menu popovers instead of
+   a bare chip (origin) or three always-visible table rows (secondary
+   hashes) -- the default .action-menu__popover width (200px) is too
+   narrow for a 40-char MD5/SHA-1 without ugly wrapping, so this scoped,
+   wider variant applies only where this page opts in. */
+.hp-pl-info-popover { width: 300px; }
+.hp-pl-info-row { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; font-size: 12px; }
+.hp-pl-info-row .k { color: var(--text-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; }
+.hp-pl-info-row .v { color: var(--text-primary); font-family: var(--hp-mono); word-break: break-all; }
+/* .action-menu > summary is sized/fonted for a single icon glyph (32x32px,
+   20px font, the "..." kebab trigger) -- fine for that, broken for a text
+   label like "Origin"/"More hashes" (the label overflows the fixed box).
+   Both new text-label triggers opt out of that sizing and take .chip's own
+   pill shape instead, so they read as siblings of the chips/heading they
+   sit next to rather than an oversized, clipped icon button. */
+.hp-pl-label-trigger.action-menu > summary {
+  width: auto; height: auto; min-height: 32px;
+  padding: 6px 14px; font-size: 12.5px; border-radius: var(--radius-pill);
+}
+#panel-identity h2 .hp-pl-label-trigger { margin-left: 8px; vertical-align: middle; }
+#panel-identity h2 .hp-pl-label-trigger > summary { min-height: 24px; padding: 3px 10px; font-size: 11px; }
 </style>
 </head>
 <body>
@@ -137,7 +158,17 @@
         <div class="filters" id="analysis-filters">
           <a class="chip" href="/payloads">&larr; payloads</a>
           <a class="chip" href="/payload-workbench/{{.Hash}}">analysis workbench</a>
-          {{if .OriginLabel}}{{if .OriginLink}}<a class="chip" href="{{.OriginLink}}" title="Open the session this payload was captured in">origin: {{.OriginLabel}} &rarr;</a>{{else}}<span class="chip" title="No session recorded for this capture">origin: {{.OriginLabel}}</span>{{end}}{{end}}
+          {{/* #673: was a plain chip printing "origin: <label>" -- now a
+               popover matching the action-menu pattern the page's own
+               "..." button (below) already uses, so origin detail reads
+               as a labeled disclosure rather than a fixed-text pill. */}}
+          {{if .OriginLabel}}<details class="action-menu hp-pl-label-trigger">
+            <summary aria-label="Origin" title="Where this payload was captured">Origin</summary>
+            <div class="action-menu__popover hp-pl-info-popover" role="menu">
+              <div class="hp-pl-info-row"><span class="k">captured by</span><span class="v">{{.OriginLabel}}</span></div>
+              {{if .OriginLink}}<a class="action-menu__item" role="menuitem" href="{{.OriginLink}}">Open capturing session &rarr;</a>{{else}}<div class="hp-pl-info-row"><span class="k">session</span><span class="v">none recorded for this capture</span></div>{{end}}
+            </div>
+          </details>{{end}}
           <a class="chip" href="/events?shasum={{.Hash}}">related events</a>
           <a class="chip" href="{{.VT}}" target="_blank" rel="noopener noreferrer">VirusTotal &rarr;</a>
           <a class="chip" href="/payload/{{.Hash}}">download isolated sample &darr;</a>
@@ -169,7 +200,12 @@
 
         <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-identity" role="tabpanel" data-dashboard-panel="identity">
           <div class="section-heading"><div><h2>What this file is</h2><p>Type, hashes, and whether it has been detonated in the isolated sandbox.</p></div></div>
-          <div class="card wide"><h2>Identity and selected analysis path</h2><table class="data-table"><tbody><tr><td>identified type</td><td class="v"><strong>{{.Classification.Label}}</strong> <span class="badge badge--muted">{{.Classification.Code}}</span></td></tr><tr><td>platform / category</td><td class="v">{{.Classification.Platform}} / {{.Classification.Category}}</td></tr><tr><td>sandbox route</td><td class="v">{{.Classification.AnalysisPath}}</td></tr><tr><td>dynamic execution</td><td class="v">{{if .Classification.Dynamic}}supported for this type{{else}}not automatic; static analysis only{{end}}</td></tr><tr><td>magic</td><td class="v">{{.Magic}}</td></tr><tr><td>MIME</td><td class="v">{{.MIME}}</td></tr><tr><td>size</td><td class="v">{{.Size}}</td></tr><tr><td>entropy</td><td class="v">{{.Entropy}}</td></tr><tr><td>MD5</td><td class="v">{{.MD5}}</td></tr><tr><td>SHA-1</td><td class="v">{{.SHA1}}</td></tr><tr><td>SHA-256</td><td class="v">{{.SHA256}}</td></tr></tbody></table>{{if .Truncated}}<p class="note">deep inspection capped at 16 MiB; hashes cover the complete file</p>{{end}}</div>
+          {{/* #673: MD5/SHA-1 moved out of the always-visible table into a
+               popover -- SHA-256 stays in the table since it is this
+               page's own primary identifier (the URL, download link, and
+               every cross-reference on this page already key off it), but
+               the other two are secondary lookups most visits never need. */}}
+          <div class="card wide"><h2>Identity and selected analysis path<details class="action-menu hp-pl-label-trigger"><summary aria-label="More hashes" title="MD5 and SHA-1">More hashes</summary><div class="action-menu__popover hp-pl-info-popover" role="menu"><div class="hp-pl-info-row"><span class="k">MD5</span><span class="v">{{.MD5}}</span></div><div class="hp-pl-info-row"><span class="k">SHA-1</span><span class="v">{{.SHA1}}</span></div></div></details></h2><table class="data-table"><tbody><tr><td>identified type</td><td class="v"><strong>{{.Classification.Label}}</strong> <span class="badge badge--muted">{{.Classification.Code}}</span></td></tr><tr><td>platform / category</td><td class="v">{{.Classification.Platform}} / {{.Classification.Category}}</td></tr><tr><td>sandbox route</td><td class="v">{{.Classification.AnalysisPath}}</td></tr><tr><td>dynamic execution</td><td class="v">{{if .Classification.Dynamic}}supported for this type{{else}}not automatic; static analysis only{{end}}</td></tr><tr><td>magic</td><td class="v">{{.Magic}}</td></tr><tr><td>MIME</td><td class="v">{{.MIME}}</td></tr><tr><td>size</td><td class="v">{{.Size}}</td></tr><tr><td>entropy</td><td class="v">{{.Entropy}}</td></tr><tr><td>SHA-256</td><td class="v">{{.SHA256}}</td></tr></tbody></table>{{if .Truncated}}<p class="note">deep inspection capped at 16 MiB; hashes cover the complete file</p>{{end}}</div>
           {{if or .ScriptType .Indicators}}<div class="card half"><h2>Script classification</h2><table class="data-table"><tbody>{{if .ScriptType}}<tr><td>language/type</td><td class="v">{{.ScriptType}}</td></tr>{{end}}{{if .Indicators}}<tr><td>behavior indicators</td><td class="v">{{range .Indicators}}<span class="chip">{{.}}</span> {{end}}</td></tr>{{end}}</tbody></table><p class="note">Heuristic static findings only. Captured content is never interpreted or executed.</p></div>{{end}}
           <div class="card {{if or .ScriptType .Indicators}}half{{else}}wide{{end}}"><h2>Isolated dynamic analysis</h2>{{if .SandboxRuns}}<table class="data-table"><thead><tr><th>completed</th><th>exit</th><th>changed paths</th><th>details</th></tr></thead><tbody>{{range .SandboxRuns}}<tr><td>{{.CompletedAt}}</td><td class="n">{{.ExitStatus}}</td><td class="n">{{len .ChangedFiles}}</td><td><a class="lnk" href="/sandbox/{{.Job | urlquery}}">sandbox report &rarr;</a></td></tr>{{end}}</tbody></table>{{else}}<p class="empty">No completed KVM sandbox run for this payload. Queue one from the <a class="lnk" href="/payload-workbench/{{.Hash}}">analysis workbench</a>.</p>{{end}}</div>
           <div class="card half"><h2>GitHub analysis</h2>{{if .GitHubAnalysis}}<table class="data-table"><tbody><tr><td>exit status</td><td class="v">{{.GitHubAnalysis.ExitStatus}}</td></tr>{{if .GitHubAnalysis.Verdict}}<tr><td>detections</td><td class="v">{{.GitHubAnalysis.Verdict.Malicious}} / {{.GitHubAnalysis.Verdict.Total}} &bull; {{.GitHubAnalysis.Verdict.Level}}</td></tr>{{end}}{{if .Family}}<tr><td>family</td><td class="v"><a class="lnk" href="{{.FamilyLink}}" title="Other sessions that delivered this family">{{.Family}}</a></td></tr>{{end}}</tbody></table><a class="lnk" href="/github-analysis/{{.GitHubAnalysis.SHA256}}">full result &rarr;</a>{{else}}<p class="empty">Not published to Xore/honeypot. Use <strong>Publish to Xore/honeypot</strong> from the payload actions menu above to queue one.</p>{{end}}</div>
