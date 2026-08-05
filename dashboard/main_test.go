@@ -356,6 +356,40 @@ func TestClassifySuricataMITRESuffixAbsentWithoutMetadata(t *testing.T) {
 	}
 }
 
+// TestClassifySuricataSurfacesAnomalyEvent is a regression test for #616:
+// et != "alert" dropped anomaly events (protocol-conformance violations,
+// potentially IDS evasion) along with the genuinely high-volume flow/dns/
+// netflow types, even though anomaly is low-volume and security-relevant.
+// Uses the exact anomaly shape confirmed live against real eve.json on the
+// VPS.
+func TestClassifySuricataSurfacesAnomalyEvent(t *testing.T) {
+	ev := classify(map[string]any{
+		"event_type": "anomaly", "proto": "TCP", "dest_port": float64(54078),
+		"anomaly": map[string]any{
+			"app_proto": "http", "type": "applayer",
+			"event": "REQUEST_HEADER_REPETITION", "layer": "proto_parser",
+		},
+	}, "suricata")
+	if ev.skip {
+		t.Fatal("anomaly event was skipped, want it surfaced")
+	}
+	if !strings.Contains(ev.detail, "REQUEST_HEADER_REPETITION") || !strings.Contains(ev.detail, "http") ||
+		!strings.Contains(ev.detail, "proto_parser") {
+		t.Fatalf("anomaly detail incomplete: %q", ev.detail)
+	}
+}
+
+// TestClassifySuricataDropsHighVolumeNonAlertTypes confirms flow/dns/
+// netflow are still filtered -- #616 only exempts anomaly, not every type.
+func TestClassifySuricataDropsHighVolumeNonAlertTypes(t *testing.T) {
+	for _, et := range []string{"flow", "dns", "netflow", "stats"} {
+		ev := classify(map[string]any{"event_type": et}, "suricata")
+		if !ev.skip {
+			t.Errorf("event_type %q was not skipped, want skip", et)
+		}
+	}
+}
+
 // TestClassifyDNP3SurfacesLinkFunctionAndAddresses is a regression test for
 // #570: dnp3-honeypot emits function/dnp3_source/dnp3_destination on every
 // real frame, but classify.go had no dedicated dnp3 case at all -- every

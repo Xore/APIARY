@@ -775,7 +775,13 @@ func classify(e map[string]any, dirSensor string) event {
 
 	// ---- suricata eve.json (VPS logs mounted at /logs/suricata) -----------
 	if et := str(e["event_type"]); et != "" && dirSensor == "suricata" {
-		if et != "alert" {
+		// #616: anomaly (protocol-conformance violations/malformed traffic,
+		// potentially IDS evasion) is a fundamentally different signal from
+		// flow/dns/netflow/stats -- confirmed live it's genuinely low-volume
+		// (50 anomaly events vs. 5700+ netflow in the same hour on the VPS),
+		// so it doesn't "swamp the counts" the way those do and is worth
+		// keeping alongside alert rather than filtered out with them.
+		if et != "alert" && et != "anomaly" {
 			ev.skip = true // flow/dns/netflow/stats records would swamp the counts
 			return ev
 		}
@@ -820,6 +826,17 @@ func classify(e map[string]any, dirSensor string) event {
 				if mitre := mitreSuffix(am); mitre != "" {
 					ev.detail += "  " + mitre
 				}
+			}
+		}
+		if an, ok := e["anomaly"].(map[string]any); ok {
+			// e.g. "REQUEST_HEADER_REPETITION [http] (layer: proto_parser)"
+			ev.category = "anomaly"
+			ev.detail = str(an["event"])
+			if appProto := str(an["app_proto"]); appProto != "" {
+				ev.detail += "  [" + appProto + "]"
+			}
+			if layer := str(an["layer"]); layer != "" {
+				ev.detail += "  (layer: " + layer + ")"
 			}
 		}
 		if ev.detail == "" {
