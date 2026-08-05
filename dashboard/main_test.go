@@ -212,6 +212,49 @@ func TestConpotRequestDoesNotPolluteTopCommands(t *testing.T) {
 	}
 }
 
+// TestClassifySuricataSurfacesPrintablePayload is a regression test for
+// #576: vps/suricata/suricata.yaml enables payload-printable/http-body-
+// printable (safe, already-sanitized capture of the bytes that triggered a
+// signature match), which reaches Elasticsearch intact but was never read
+// here -- an operator saw which signature matched, not what matched it.
+func TestClassifySuricataSurfacesPrintablePayload(t *testing.T) {
+	withPayload := classify(map[string]any{
+		"event_type": "alert", "proto": "TCP", "dest_port": float64(445),
+		"alert":             map[string]any{"signature": "ET SCAN Suspicious", "category": "scan", "severity": float64(2)},
+		"payload_printable": "GET /../../etc/passwd HTTP/1.1",
+	}, "suricata")
+	if !strings.Contains(withPayload.detail, "GET /../../etc/passwd HTTP/1.1") {
+		t.Fatalf("payload_printable not surfaced in detail: %q", withPayload.detail)
+	}
+	// #41's reasoning applies here too: arbitrary matched network content is
+	// not an attacker-issued command and must not pollute Top Commands.
+	if withPayload.command != "" {
+		t.Fatalf("suricata payload must not populate ev.command (pollutes Top Commands), got %q", withPayload.command)
+	}
+
+	withBody := classify(map[string]any{
+		"event_type": "alert", "proto": "TCP", "dest_port": float64(80),
+		"alert": map[string]any{"signature": "ET WEB_SERVER Exploit", "category": "web-application-attack", "severity": float64(1)},
+		"http":  map[string]any{"http_body_printable": "<script>alert(1)</script>"},
+	}, "suricata")
+	if !strings.Contains(withBody.detail, "<script>alert(1)</script>") {
+		t.Fatalf("http_body_printable not surfaced in detail: %q", withBody.detail)
+	}
+
+	// Most alerts won't carry either field -- must not break existing
+	// signature/category/severity handling.
+	plain := classify(map[string]any{
+		"event_type": "alert", "proto": "TCP", "dest_port": float64(22),
+		"alert": map[string]any{"signature": "ET SCAN SSH Scan", "category": "scan", "severity": float64(3)},
+	}, "suricata")
+	if plain.alert != "ET SCAN SSH Scan" || plain.category != "scan" || plain.severity != 3 {
+		t.Fatalf("existing alert fields regressed: %+v", plain)
+	}
+	if !strings.Contains(plain.detail, "ET SCAN SSH Scan") || strings.Contains(plain.detail, "payload:") || strings.Contains(plain.detail, "body:") {
+		t.Fatalf("plain alert detail unexpectedly changed: %q", plain.detail)
+	}
+}
+
 // TestClassifyTannerSurfacesDetectionName is a regression test found via a
 // live ES document: tanner's own emulator classifies every request
 // (response_msg.response.message.detection.name), but this was never read
