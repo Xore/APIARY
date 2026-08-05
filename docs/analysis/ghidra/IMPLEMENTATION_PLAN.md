@@ -24,7 +24,7 @@
 > the Ghidra REST job's own artifacts, only the sample bytes, so nothing
 > about running it standalone duplicates work. Its own result page lives at
 > `/revdeck/{sha256}`, and the `revdeck` entry in
-> [`workbench_domain.go`](../../dashboard/workbench_domain.go) is now
+> [`workbench_domain.go`](../../../dashboard/workbench_domain.go) is now
 > `Available` whenever that spool is configured, closing out #78's last open
 > item.  
 > **Tracked in**: [#78](https://github.com/Xore/honeypot-stack/issues/78)
@@ -106,14 +106,14 @@ Three corrections against the layout this section used to show:
   against a real clone of `biniamf/ai-reverse-engineering` (see
   `revdeck/README.md`). **The standalone piece is also built** (2026-08-02,
   #78): the dashboard's `revdeck` workbench adapter
-  ([`workbench_domain.go`](../../dashboard/workbench_domain.go)) is now a
+  ([`workbench_domain.go`](../../../dashboard/workbench_domain.go)) is now a
   separately orchestrated, independently selectable analyzer with its own
   submission path (`REVDECK_REQUEST_DIR`, drained by `drain_revdeck()` in
   `worker/ghidra-worker.py`, independent of the Ghidra spool) and its own
   result link (`/revdeck/{sha256}`) — a different thing from Rev·Deck running
   automatically as an enrichment embedded in the `ghidra` analyzer's own
   result, and no longer `Available: false`.
-- `report/` has no `templates/` subdirectory. [`generate_report.py`](report/generate_report.py)
+- `report/` has no `templates/` subdirectory. [`generate_report.py`](../../../analysis/ghidra/report/generate_report.py)
   follows [#56](https://github.com/Xore/honeypot-stack/issues/56)'s
   `sandbox/windows/orchestrate/generate_report.py`, which doesn't use one
   either — one Python file covering both HTML and inlined CSS isn't enough
@@ -219,7 +219,7 @@ real trigger — a host-side spool, not GitHub Actions.
 > other candidate, swappable via `REVDECK_WORKFLOW`, not run alongside it).
 > `attack_surface_triage` and `vulnerability_hypothesis` still are not run —
 > both require an analyst-selected function address, so they remain
-> interactive-only. See [`revdeck/README.md`](revdeck/README.md#automated-triage-78)
+> interactive-only. See [`revdeck/README.md`](../../../analysis/ghidra/revdeck/README.md#automated-triage-78)
 > for the full contract and rationale.
 
 ### Source
@@ -282,7 +282,7 @@ only). Same as Rev·Deck, it is:
 
 ### Install
 
-[`ghidrassist/README.md`](ghidrassist/README.md) has the full procedure.
+[`ghidrassist/README.md`](../../../analysis/ghidra/ghidrassist/README.md) has the full procedure.
 **Updated 2026-08-01 (#225)**: building from a pinned source commit
 (`gradle buildExtension` against `2.2.0`, commit
 `c436fcb55d2b43f4341c7aa76c90d9be8c147da1`) is now the recommended path, not
@@ -362,8 +362,8 @@ of the nine survives: `capa`.
 
 ## Phase 5 — Report Generation ✅ Built (2026-08-01, #78)
 
-Built as [`report/generate_report.py`](report/generate_report.py), reusing the
-shape of [`sandbox/windows/orchestrate/generate_report.py`](../../sandbox/windows/orchestrate/generate_report.py)
+Built as [`report/generate_report.py`](../../../analysis/ghidra/report/generate_report.py), reusing the
+shape of [`sandbox/windows/orchestrate/generate_report.py`](../../../sandbox/windows/orchestrate/generate_report.py)
 (#56) rather than inventing a second reporting style: offline, one escaping
 chokepoint (`esc()`), missing artifacts degrade to "not observed" instead of
 raising. `worker/ghidra-worker.py`'s `generate_report()` wrapper calls it
@@ -415,7 +415,7 @@ contract that issue #101 disproved against the real
 The actual, deployed architecture is a host-based spool, not CI: the
 dashboard (unprivileged, no credentials, no outbound calls) writes a
 `.request` marker file into `GHIDRA_REQUEST_DIR`, and
-[`worker/ghidra-worker.py`](worker/ghidra-worker.py) — running under the
+[`worker/ghidra-worker.py`](../../../analysis/ghidra/worker/ghidra-worker.py) — running under the
 `honeypot-ghidra-worker.path`/`.service` systemd units on the homeserver —
 drains the spool and talks to the real Ghidra REST service. See
 `DASHBOARD_INTEGRATION_PLAN.md` for the dashboard side and

@@ -129,7 +129,7 @@ Templates are files under `dashboard/ui/`, not `{{define}}` blocks in
 
 ## Phase 1 — Host-side Ghidra worker (spool consumer) ✅ Built
 
-Implemented as [`worker/ghidra-worker.py`](worker/ghidra-worker.py) plus
+Implemented as [`worker/ghidra-worker.py`](../../../analysis/ghidra/worker/ghidra-worker.py) plus
 `honeypot-ghidra-worker.{path,service}`, mirroring the sandbox workers: a
 non-blocking `flock` so overlapping path-unit triggers collapse into one
 drain, requests claimed (`.request.running`) before work starts so a crash
@@ -176,7 +176,7 @@ that:
    automation is a separate, later addition — `revdeck_triage()` — that runs
    exactly *one* of its own autonomous workflows per analysis (default
    `program_triage`), writing a distinct `revdeck` field. See
-   [`revdeck/README.md`](revdeck/README.md#automated-triage-78).
+   [`revdeck/README.md`](../../../analysis/ghidra/revdeck/README.md#automated-triage-78).
 5. Writes one normalized `{sha256}_ghidra.json` to `GHIDRA_RESULTS_DIR`
    (default `/ghidra-results`), matching the `sandboxResult` struct's shape
    and conventions (`version`, `requested_at`/`started_at`/`completed_at`,
@@ -234,7 +234,7 @@ was refused as non-local or unreachable, or the run produced no usable
 answer. `status: "max_turns"` is not a failure — it means the step budget ran
 out before the model reached its own conclusion, and the partial answer is
 kept rather than discarded. See
-[`revdeck/README.md`](revdeck/README.md#automated-triage-78) for the full
+[`revdeck/README.md`](../../../analysis/ghidra/revdeck/README.md#automated-triage-78) for the full
 contract.
 
 ---

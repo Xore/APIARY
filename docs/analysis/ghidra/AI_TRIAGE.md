@@ -13,7 +13,7 @@ After collection the worker runs two workflows against the model —
 `ai_triage` on the result.
 
 The default, context, and explicit non-thinking request mode come from the
-[task-specific live-host evaluation](../../docs/local-llm-model-evaluation.md),
+[task-specific live-host evaluation](../../local-llm-model-evaluation.md),
 not a general model leaderboard.
 
 The endpoint is OpenAI-compatible (`/v1/chat/completions`), the dialect that
@@ -26,7 +26,7 @@ The prompts carry strings, imports and function names lifted straight out of a
 captured sample. Sending that to a hosted API is not a smaller version of this
 feature; it is a data-exfiltration path out of the analysis environment. So the
 rule is enforced in code — `endpoint_is_local()` in
-[`worker/ghidra-worker.py`](worker/ghidra-worker.py) — and **there is no
+[`worker/ghidra-worker.py`](../../../analysis/ghidra/worker/ghidra-worker.py) — and **there is no
 override flag**:
 
 - IP literals must be loopback, RFC1918/ULA, or link-local.

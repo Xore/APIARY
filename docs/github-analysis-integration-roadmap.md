@@ -3,7 +3,7 @@
 > **Status**: Design document — nothing here is built yet
 > **Last updated**: 2026-07-30
 > **Upstream pipeline**: [`Xore/honeypot`](https://github.com/Xore/honeypot) — `.github/workflows/analyze.yml`
-> **Precedent**: [`analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md`](../analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md)
+> **Precedent**: [`docs/analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md`](analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md)
 > **Tracked in**: [#73](https://github.com/Xore/honeypot-stack/issues/73) (YARA corpus sync) and [#74](https://github.com/Xore/honeypot-stack/issues/74) (publisher and dashboard button)
 
 ---

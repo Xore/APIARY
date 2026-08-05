@@ -136,7 +136,7 @@ fails the analysis (see [Reading the result](#reading-the-result)).
 ## The statictools sidecar contract
 
 `analysis/ghidra/statictools/` is the worker's only path to ssdeep/tlsh/lief/
-capa/floss — see [`server.py`](statictools/server.py)'s own module docstring
+capa/floss — see [`server.py`](../../../analysis/ghidra/statictools/server.py)'s own module docstring
 for why they're a sidecar and not a host `pip install`. One caller (the
 worker), so raw bytes in, JSON out — no multipart:
 
@@ -262,7 +262,7 @@ onto them. Without both, the dashboard hides the Ghidra queue entirely.
 ## Configuration
 
 Everything lives in `/etc/default/honeypot-ghidra`, installed from
-[`worker/honeypot-ghidra.default.example`](worker/honeypot-ghidra.default.example),
+[`worker/honeypot-ghidra.default.example`](../../../analysis/ghidra/worker/honeypot-ghidra.default.example),
 which documents each setting inline. The ones worth knowing:
 
 | Variable | Default | Notes |
@@ -413,7 +413,7 @@ worker automates it too — `revdeck_triage()` drives a verified
 upload/poll/chat contract, writing a `revdeck` field distinct from the
 worker's own `ai_triage`, a second and independent AI aid rather than a
 replacement for it. Off by default. See
-[`revdeck/README.md`](revdeck/README.md).
+[`revdeck/README.md`](../../../analysis/ghidra/revdeck/README.md).
 
 Two ways to get that automation, both gated by `REVDECK_API_BASE`:
 

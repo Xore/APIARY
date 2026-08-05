@@ -80,7 +80,7 @@ KVM Host (Linux)
 ## Wiring Pattern — mirrors Ghidra dashboard integration
 
 The sandbox follows the **exact same spool-file pattern** as the Ghidra
-integration (`analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md`):
+integration (`docs/analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md`):
 
 | Concern | Sandbox (this plan) | Ghidra (reference) |
 |---|---|---|
@@ -170,7 +170,7 @@ func determineSandboxTarget(data []byte) (target sandboxTarget, dynamic bool) {
    watches this directory; no changes needed on that side at all).
 6. If the submit form's new **Ghidra** field (below) was checked, also
    write `{hash}.request` (well, `{sha256}.request`) to `GHIDRA_REQUEST_DIR`
-   per `analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md` — independent of
+   per `docs/analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md` — independent of
    which VM was chosen, since Ghidra is static analysis and applies to any
    binary/DLL regardless of which detonation backend runs it.
 7. Redirect to `/payloads?analysis=queued&hash=…&target={target}` so the
@@ -191,7 +191,7 @@ analysis only, no VM at all" case:
    static libraries — Ghidra is often the *only* applicable analysis).
 
 This is the same standalone button described in
-`analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md` Phase 3 — shown here
+`docs/analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md` Phase 3 — shown here
 alongside the sandbox form so the two entry points are visibly distinct
 on the page rather than one being buried inside the other:
 
@@ -217,7 +217,7 @@ on the page rather than one being buried inside the other:
 Both paths converge on the same spool and worker — there is exactly one
 way Ghidra analysis gets queued under the hood
 (`GHIDRA_REQUEST_DIR`/`serveGhidraSubmit` from
-`analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md` Phase 2), just two UI
+`docs/analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md` Phase 2), just two UI
 entry points into it:
 
 - `serveSandboxSubmit` reads `r.FormValue("ghidra") == "1"` and, if set,
@@ -613,7 +613,7 @@ WINDOWS_SANDBOX_RESULTS_DIR/{sha256}_sandbox.json
 > **Deliberately not implemented — step 6 and the Ghidra field below.**
 > `serveGhidraSubmit`, the `/ghidra/submit` route, and `GHIDRA_REQUEST_DIR`
 > do not exist in the dashboard; they are Phase 2 of
-> `analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md`, tracked in
+> `docs/analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md`, tracked in
 > [#76](https://github.com/Xore/honeypot-stack/issues/76). Adding the checkbox
 > and the second form now would ship a button that 404s and a spool write with
 > no reader. Do #76 first, then come back for step 6 — it is two lines in
@@ -643,7 +643,7 @@ WINDOWS_SANDBOX_RESULTS_DIR/{sha256}_sandbox.json
 
 The sandbox is triggered **from the dashboard payloads page** — the same
 one-click pattern used by Ghidra
-(`analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md`). There is no CI/CD
+(`docs/analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md`). There is no CI/CD
 involvement and no outbound network connection.
 
 ### 7.1 Trigger flow
@@ -662,7 +662,7 @@ Analyst checks (optionally) "Also run Ghidra static analysis" and clicks
               SANDBOX_REQUEST_DIR  (unchanged, pre-existing Linux runner)
       if ghidra=1 on the form: also writes {hash}.request to
         GHIDRA_REQUEST_DIR (independent of target, see
-        analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md)
+        docs/analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md)
       redirects to /payloads?analysis=queued&hash=…&target={target}
 
 Windows path:
