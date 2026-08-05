@@ -170,6 +170,9 @@ jobs:
       - name: Threat-intel CIDR refresh script (#244)
         shell: bash
         run: dashboard/geoip/test_refresh_threat_cidrs.sh
+      - name: honeypot-30d ILM policy rolls over and deletes (#585)
+        shell: bash
+        run: analysis/tests/test_honeypot_ilm_rollover.sh
       - name: Vendored YARA corpus is intact and loadable
         shell: bash
         run: |
