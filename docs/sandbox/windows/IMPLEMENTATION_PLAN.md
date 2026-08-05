@@ -242,7 +242,7 @@ point) is entirely independent of the Windows/Linux determination above.
 ## Research: Golden Image vs Snapshots
 
 See full comparison:
-[`docs/kvm-snapshot-vs-golden-image.md`](../../docs/kvm-snapshot-vs-golden-image.md)
+[`docs/kvm-snapshot-vs-golden-image.md`](../../kvm-snapshot-vs-golden-image.md)
 
 ### TL;DR for this project
 
@@ -306,7 +306,7 @@ usermod -aG kvm,libvirt,docker $USER
 
 ### Isolated libvirt Network
 
-The network is defined by [`setup/sandbox-network.xml`](setup/sandbox-network.xml)
+The network is defined by [`setup/sandbox-network.xml`](../../../sandbox/windows/setup/sandbox-network.xml)
 — read it there rather than from a copy here. The sketch this section used to
 carry had neither the DHCP reservation nor the DNS option, and a network
 defined from it would come up without the pinned `10.10.10.2` lease that
@@ -334,7 +334,7 @@ iptables -I FORWARD -i eth0 -o virbr-sandbox -j DROP
 
 ## Phase 1 — Automated Golden Image with Packer + QEMU
 
-See: [`packer/win11-analysis.pkr.hcl`](packer/win11-analysis.pkr.hcl)
+See: [`packer/win11-analysis.pkr.hcl`](../../../sandbox/windows/packer/win11-analysis.pkr.hcl)
 
 Packer automates the full Windows 11 install + FLARE-VM + logging config
 into a single reproducible `qcow2` image.
@@ -381,7 +381,7 @@ virt-customize -a /golden-images/win11-analysis.qcow2 \
 
 ## Phase 2 — VM Lifecycle with virsh
 
-See: [`setup/kvm_manage.sh`](setup/kvm_manage.sh)
+See: [`setup/kvm_manage.sh`](../../../sandbox/windows/setup/kvm_manage.sh)
 
 ```bash
 # Import golden image as a new VM (thin clone — fast, uses CoW)
@@ -409,7 +409,7 @@ sandbox/windows/setup/kvm_manage.sh revert
 
 Before trusting a freshly-reset guest as an acceptance point, run the pafish/
 al-khaser verification pass (#298) against the freshly-booted guest — see
-[`docs/vm-detection-verification.md`](docs/vm-detection-verification.md).
+[`docs/vm-detection-verification.md`](../../../sandbox/windows/docs/vm-detection-verification.md).
 Everything upstream of this (SMBIOS/CPUID spoofing, Defender/telemetry
 disables) is reasoned-through hardening against *known* checks; this is the
 only step that empirically confirms it holds up in a real booted guest.
@@ -419,7 +419,7 @@ only step that empirically confirms it holds up in a real booted guest.
 ## Phase 3 — Windows 11 Hardening for Malware Analysis
 
 Implemented in
-[`packer/scripts/`](packer/scripts/) — four provisioner scripts, the
+[`packer/scripts/`](../../../sandbox/windows/packer/scripts/) — four provisioner scripts, the
 hardening and anti-evasion phases run at image-build time, not as a separate
 script. (Earlier revisions of this plan named a `setup/harden_analysis_vm.ps1`
 that was never written.)
@@ -504,7 +504,7 @@ that was never written.)
 
 ## Phase 4 — Docker Compose Gateway Services
 
-See: [`docker-compose.sandbox.yml`](../../docker-compose.sandbox.yml)
+See: [`docker-compose.sandbox.yml`](../../../docker-compose.sandbox.yml)
 
 All gateway services run as Docker containers on the same host, connected
 to the `virbr-sandbox` bridge. No container has outbound internet access.
@@ -530,7 +530,7 @@ automatically — in-guest FakeNet-NG already supersedes its job — and
 
 ## Phase 5 — Orchestration (KVM / libvirt)
 
-See: [`orchestrate/run_sample.py`](orchestrate/run_sample.py)
+See: [`orchestrate/run_sample.py`](../../../sandbox/windows/orchestrate/run_sample.py)
 
 The orchestrator is invoked by the **host-side systemd worker** (Phase 7),
 never directly by the dashboard. It shells out to `virsh` (see `virsh()` in

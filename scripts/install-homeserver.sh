@@ -939,7 +939,7 @@ step_verify_elasticsearch_events() {
 # NOT install Packer or the PXE build prerequisites (p7zip-full,
 # python3-virt-firmware, sbsigntool) or add a build user to the kvm group.
 # A from-scratch win11-analysis.qcow2 rebuild is a separate, manual,
-# multi-hour production action (see sandbox/windows/IMPLEMENTATION_PLAN.md
+# multi-hour production action (see docs/sandbox/windows/IMPLEMENTATION_PLAN.md
 # Phase 0) that this unattended install flow should not silently trigger.
 # ---------------------------------------------------------------------------
 step_libvirt_install() {

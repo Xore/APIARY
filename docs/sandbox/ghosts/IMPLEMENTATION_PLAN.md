@@ -49,7 +49,7 @@ safe to run anything through.
 
 ## Host Constraints
 
-Same as `sandbox/windows/IMPLEMENTATION_PLAN.md`:
+Same as `docs/sandbox/windows/IMPLEMENTATION_PLAN.md`:
 - KVM/QEMU/libvirt + docker-compose only — no VMware, no Hyper-V
 - No CI-triggered detonation — the dashboard's Workbench is the only
   trigger (`workbench_orchestrator.go` → spool file → host-side systemd
