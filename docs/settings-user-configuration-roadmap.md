@@ -9,7 +9,7 @@
 > configuration with rollback, retention, and `honeypot_settings_*` metrics.
 > What remains is not code — deployment verification of the shared
 > introspection token and the 72-hour multi-user soak, tracked in
-> [#81](https://github.com/Xore/honeypot-stack/issues/81). Earlier revisions of
+> [#81](https://github.com/Xore/APIARY/issues/81). Earlier revisions of
 > this header said "stores and UI remain proposed" long after both existed.
 >
 > **Identity authority:** [`Xore/auth-backend`](https://github.com/Xore/auth-backend)
@@ -17,17 +17,17 @@
 > **UI reference:** [`Xore/theme`](https://github.com/Xore/theme)
 >
 > **Gate A review baseline:** `theme@efcc979`, `auth-backend@adaec4e`,
-> `honeypot-stack@bca2d3e`
+> `APIARY@bca2d3e`
 
 This roadmap adds a full-viewport settings surface to the honeypot dashboard,
-using the shared Xore theme and the user system already provided by
+using the shared XORE theme and the user system already provided by
 `auth-backend`. It also introduces persisted per-user preferences and safe,
 administrator-managed page configuration.
 
 ## 1. Architectural decision
 
 Do **not** build a second login, password, passkey, TOTP, session, recovery, or
-role database in honeypot-stack.
+role database in APIARY.
 
 `auth-backend` remains authoritative for:
 
@@ -292,7 +292,7 @@ and configuration revision. Sensitive values are never logged.
 
 ## 7. Settings page design
 
-Implement `/settings` as the Xore theme's permanent full-viewport settings
+Implement `/settings` as the XORE theme's permanent full-viewport settings
 dialog. It owns scrolling and cannot close on Escape. Nested confirmations are
 descendants of the permanent dialog, following the theme modal contract.
 
@@ -466,7 +466,7 @@ settings page into a remote administration or code-execution surface.
 ## 11. AI agent implementation prompt
 
 Copy the prompt below into an AI coding agent with access to both
-`Xore/honeypot-stack` and `Xore/auth-backend`:
+`Xore/APIARY` and `Xore/auth-backend`:
 
 ```text
 Implement the user settings and dashboard configuration system described in
@@ -475,7 +475,7 @@ docs/settings-user-configuration-roadmap.md.
 Repositories and authorities:
 - Xore/auth-backend is the sole authority for identity, passwords, passkeys,
   TOTP, recovery, sessions, trusted devices, roles, and account administration.
-- Xore/honeypot-stack owns only the dashboard user projection, per-user
+- Xore/APIARY owns only the dashboard user projection, per-user
   dashboard preferences, global dashboard configuration, revision history,
   and dashboard audit events.
 - Xore/theme is the UI and modal-behavior reference. Follow its permanent
@@ -568,7 +568,7 @@ rotate credentials unless separately and explicitly authorized.
 ## 12. Addendum — honeypot system configuration tiers (2026-07-29)
 
 This addendum extends the global configuration model (§4) and the
-administrator panes (§7) with operational settings for the honeypot stack
+administrator panes (§7) with operational settings for APIARY
 itself. It changes no authority boundaries: everything below lives in the
 dashboard-owned configuration store, never in auth-backend's Administration →
 Configuration pane and never in deployment secrets.

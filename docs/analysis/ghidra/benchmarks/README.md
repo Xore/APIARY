@@ -1,8 +1,8 @@
 # Local model benchmark
 
 This directory contains the task-specific acceptance benchmark used by
-[issue #144](https://github.com/Xore/honeypot-stack/issues/144) and governed by
-[issue #158](https://github.com/Xore/honeypot-stack/issues/158). The decision
+[issue #144](https://github.com/Xore/APIARY/issues/144) and governed by
+[issue #158](https://github.com/Xore/APIARY/issues/158). The decision
 record, literature review, measurements, and recommendations live in
 [`docs/local-llm-model-evaluation.md`](../../../local-llm-model-evaluation.md).
 
@@ -48,11 +48,11 @@ this task" — a fixed, narrow question, always run against a specific
 candidate. The tools below answer a different question: "did something
 about the hardware, runtime, or available real data change in a way that
 makes running that benchmark again worth it." Added under
-[issue #568](https://github.com/Xore/honeypot-stack/issues/568)/[#569](https://github.com/Xore/honeypot-stack/issues/569)
+[issue #568](https://github.com/Xore/APIARY/issues/568)/[#569](https://github.com/Xore/APIARY/issues/569)
 after that exact gap — an 8GB→20GB, Turing→Ada Lovelace card swap that sat
 undetected for months — bounded every model-selection decision in this
 directory on a stale assumption. Formalized as a standing playbook under
-[#637](https://github.com/Xore/honeypot-stack/issues/637).
+[#637](https://github.com/Xore/APIARY/issues/637).
 
 ### Continuous: host-drift monitoring already runs, no new schedule needed
 
@@ -63,7 +63,7 @@ check that would have caught the #568 card swap immediately. It's driven
 by `honeypot-model-drift.timer`, which runs it every 5 minutes once
 `install-analysis-host.sh` has installed and enabled it (this used to
 never happen — `install-homeserver.sh` never called that installer; fixed
-under [#636](https://github.com/Xore/honeypot-stack/issues/636)). **The
+under [#636](https://github.com/Xore/APIARY/issues/636)). **The
 actual #568 root cause was a missing deployment, not missing
 drift-detection code** — don't build a second timer for this.
 

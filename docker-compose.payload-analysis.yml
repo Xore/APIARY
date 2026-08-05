@@ -128,7 +128,7 @@ services:
 volumes:
   # Shared with docker-compose.dionaea.yml -- dionaea writes here, both
   # services in this stack only read. Explicit fixed name, same mechanism
-  # as honeynet/es-data between honeypot-stack and honeypot-init.
+  # as honeynet/es-data between APIARY and honeypot-init.
   dionaea-lib:
     name: dionaea-lib
   # Shared with docker-compose.dashboard.yml -- both directions: dashboard's

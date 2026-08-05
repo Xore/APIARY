@@ -4,7 +4,7 @@
 > the addresses below exist.** This is kept as a technique reference — the
 > fingerprints in §1 and §9 are the durable part, and they are what any future
 > attempt has to answer. Tracked as
-> [#71](https://github.com/Xore/honeypot-stack/issues/71), which is not
+> [#71](https://github.com/Xore/APIARY/issues/71), which is not
 > scheduled: the observer this design is written against has to be identified
 > before any of it is worth building.
 >
@@ -73,7 +73,7 @@ The **noise-injector** runs on the KVM host itself (or a dedicated sidecar conta
 > `virbr-sandbox`, which sees exactly one neighbour (INetSim) and no ambient
 > traffic at all. Note also that `honeypot-sandbox-strict` blocks source-MAC
 > spoofing by design, so the §5 injector cannot run on a sandbox guest's own
-> segment as written. See [#71](https://github.com/Xore/honeypot-stack/issues/71).
+> segment as written. See [#71](https://github.com/Xore/APIARY/issues/71).
 
 ---
 
@@ -543,7 +543,7 @@ An attacker attempting to fingerprint your honeypot will check for these artefac
 
 ## 11. Attribution, Filtering, and Capture Labeling — required before any prototype
 
-[#71](https://github.com/Xore/honeypot-stack/issues/71) requires three
+[#71](https://github.com/Xore/APIARY/issues/71) requires three
 properties specified and proven *before* any packet generator is written:
 attribution (identified at the source, not inferred later), filtering
 (every consumer excludes it, default is *exclude*), and capture labeling
@@ -662,7 +662,7 @@ real capture and a real Elasticsearch/dashboard pass, not asserted from
 this design alone. Two additional preconditions, given what else this
 repo already has in flight:
 
-- [#88](https://github.com/Xore/honeypot-stack/issues/88) (automated
+- [#88](https://github.com/Xore/APIARY/issues/88) (automated
   isolation-invariant check) should land first. Adding any new
   traffic-generating component to a security-sensitive path is exactly
   the kind of change that check exists to catch drift on -- prototyping

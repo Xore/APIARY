@@ -9,16 +9,16 @@
 > decision below and #358 for why.  
 > **Last updated**: 2026-07-30  
 > **Host platform**: KVM + QEMU + libvirt + docker-compose (NO VMware)  
-> **Phase 1 tracking**: [#47](https://github.com/Xore/honeypot-stack/issues/47)
+> **Phase 1 tracking**: [#47](https://github.com/Xore/APIARY/issues/47)
 > — one issue per remaining step, each with its own verification and failure
 > modes. Start there rather than from this document if you are picking the
 > work up cold.
 >
-> **Decide [#94](https://github.com/Xore/honeypot-stack/issues/94) before
+> **Decide [#94](https://github.com/Xore/APIARY/issues/94) before
 > building the image.** Every WinRM and SMB step below assumes a credentialed
 > management channel into a running infected guest, and the credentials and the
 > share are baked into the golden image — which makes this cheap to settle now
-> and expensive to settle later. [#91](https://github.com/Xore/honeypot-stack/issues/91)
+> and expensive to settle later. [#91](https://github.com/Xore/APIARY/issues/91)
 > covers the image-side defects the same channel depends on.
 
 ---
@@ -607,7 +607,7 @@ Plus the top-level result summary the dashboard reads:
 > `serveGhidraSubmit`, the `/ghidra/submit` route, and `GHIDRA_REQUEST_DIR`
 > do not exist in the dashboard; they are Phase 2 of
 > `docs/analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md`, tracked in
-> [#76](https://github.com/Xore/honeypot-stack/issues/76). Adding the checkbox
+> [#76](https://github.com/Xore/APIARY/issues/76). Adding the checkbox
 > and the second form now would ship a button that 404s and a spool write with
 > no reader. Do #76 first, then come back for step 6 — it is two lines in
 > `serveSandboxSubmit` once the spool exists.

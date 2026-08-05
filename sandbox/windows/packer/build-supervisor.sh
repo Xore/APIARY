@@ -14,7 +14,7 @@
 #   batch 1.
 set -uo pipefail
 
-DIR="/mnt-1/github/honeypot-stack/sandbox/windows/packer"
+DIR="/mnt-1/github/APIARY/sandbox/windows/packer"
 CHECKSUM="sha256:87383f0bb589d2e6f4975354835f0903b4b88ead1b1c71979bf4adc1dbfeabdf"
 STOPFILE="/var/dockge/sandbox/STOP_BUILD_SUPERVISOR"
 SHOTDIR="/var/dockge/sandbox/build-screenshots"

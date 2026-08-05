@@ -1,7 +1,7 @@
 # GHOSTS host stack (#324)
 
-Part of the GHOSTS tracking issue [#331](https://github.com/Xore/honeypot-stack/issues/331)
-(path decided on [#300](https://github.com/Xore/honeypot-stack/issues/300)).
+Part of the GHOSTS tracking issue [#331](https://github.com/Xore/APIARY/issues/331)
+(path decided on [#300](https://github.com/Xore/APIARY/issues/300)).
 This is step one of that chain: get `Ghosts.Api` and its database running,
 isolated from everything else this repo deploys. It does not touch the
 network-isolation, golden-image, VM domain, spool, or timeline work — those

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Unattended homeserver provisioning for honeypot-stack — the Ubuntu-side
+# Unattended homeserver provisioning for APIARY — the Ubuntu-side
 # equivalent of a Windows autounattend.xml. This is the single entry point
 # described in issue #518; it covers everything smoke-test-verified so far
 # (see docs/research/518-smoke-test-research.md) and is expected to grow.
 #
 # Scope: this script provisions a MANUALLY installed base Ubuntu Server
-# system into a running honeypot-stack homeserver (Docker, NVIDIA/GPU
+# system into a running APIARY homeserver (Docker, NVIDIA/GPU
 # stack, Dockge, WireGuard, the repo checkout, secret restore, and starting
 # the Compose stacks in dependency order). It does NOT partition disks or
 # install the OS itself — that's docs/autoinstall/homeserver-user-data.yaml,
@@ -1132,7 +1132,7 @@ run_step wireguard-config      "Write wg0.conf and enable tunnel"   step_wiregua
 run_step wireguard-sync-vps    "Sync home pubkey+PSK to VPS peer config" step_wireguard_sync_vps_peer
 run_step wireguard-verify      "Verify tunnel is up"                step_wireguard_verify
 
-run_step clone-repo            "Clone/update honeypot-stack to $REPO_DIR" step_clone_repo
+run_step clone-repo            "Clone/update APIARY to $REPO_DIR" step_clone_repo
 run_step dockge-install        "Install Dockge"                     step_dockge_install
 
 run_step restore-env-files     "Restore .env files from LAN backup" step_restore_env_files

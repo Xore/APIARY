@@ -7,7 +7,7 @@ not required at runtime. Run `npm ci`, `npm run typecheck`, and
 
 ## Vendored theme
 
-`../static/theme.css` is a byte-identical copy of the shared Xore theme
+`../static/theme.css` is a byte-identical copy of the shared XORE theme
 (https://github.com/Xore/theme). The pinned commit and its SHA-256 live in
 [`theme.lock`](../../../dashboard/frontend/theme.lock) — that file is the single source of truth, and
 `scripts/check-vendored-theme.sh` enforces it in CI. It owns the

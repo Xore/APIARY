@@ -101,7 +101,7 @@ fi
 if [[ ! -f "$dir/pxe-cert.pem" ]]; then
   echo "==> Generating self-signed PXE signing cert (local to this host, not a shared secret)"
   openssl req -x509 -newkey rsa:2048 -keyout "$dir/pxe-cert.key" -out "$dir/pxe-cert.pem" \
-    -days 3650 -nodes -subj "/CN=honeypot-stack PXE boot signer/" 2>/dev/null
+    -days 3650 -nodes -subj "/CN=APIARY PXE boot signer/" 2>/dev/null
 fi
 
 echo "==> Signing ipxe.efi"

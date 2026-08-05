@@ -29,7 +29,7 @@ docker exec hp-elasticsearch curl -fsS -X PUT "http://localhost:9200/_snapshot/h
 
 # Back up non-Elasticsearch named volumes. Archives are inert data; restoring is
 # intentionally a separate, stopped-stack procedure documented in RECOVERY.md.
-docker volume ls -q --filter label=com.docker.compose.project=honeypot-stack | while IFS= read -r volume; do
+docker volume ls -q --filter label=com.docker.compose.project=APIARY | while IFS= read -r volume; do
   [ -n "$volume" ] || continue
   case "$volume" in *es-data*) continue ;; esac
   safe=$(printf '%s' "$volume" | tr -c 'A-Za-z0-9._-' '_')

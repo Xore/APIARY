@@ -11,7 +11,7 @@
 # #258, split out separately per explicit instruction rather than bundled
 # in here) read from it, same as docker-compose.dashboard.yml already does.
 # Given the explicit shared `name:` treatment honeynet/es-data already use
-# between honeypot-stack and honeypot-init.
+# between APIARY and honeypot-init.
 #
 # Deployed as /opt/stacks/honeypot-dionaea.
 
@@ -217,7 +217,7 @@ networks:
 volumes:
   # Shared with docker-compose.payload-analysis.yml (#258) -- explicit fixed
   # name, matching docker-compose.yml's own historical declaration and the
-  # same mechanism honeynet/es-data already use between honeypot-stack and
+  # same mechanism honeynet/es-data already use between APIARY and
   # honeypot-init. dionaea writes captured binaries/bistreams here;
   # payload-dedupe/yara-scanner (that other stack) only read.
   dionaea-lib:

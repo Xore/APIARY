@@ -21,14 +21,14 @@
 #     stack -- nothing outside it, and nothing inside it, ever needs to reach
 #     another compose project's network. This is NOT true for the
 #     ELK/dashboard plane (honeynet, es-data are genuinely shared across
-#     honeypot-stack and honeypot-init today) -- that split, if attempted,
+#     APIARY and honeypot-init today) -- that split, if attempted,
 #     will need the external: true treatment #258 anticipated. Standalone
 #     honeypot personas do not.
 #   - Cross-project ordering: NOT a hard requirement. Each persona's command
 #     polls for /markers/log-init.done itself (a bind-mounted file, #127) --
 #     that is not a compose depends_on chain, so `docker compose up -d` for
 #     this stack returns immediately; it does not block waiting for the
-#     marker the way honeypot-stack's own init-wait-* dependents used to (see
+#     marker the way APIARY's own init-wait-* dependents used to (see
 #     docker-compose.init.yml and #111). honeypot-init still needs to exist
 #     and run at some point before these personas' healthchecks can pass, but
 #     the deploy job does not need to serialize on it.
@@ -41,7 +41,7 @@
 #     docs/CI-CD.md, added alongside this file.
 #
 # Deployed as /opt/stacks/honeypot-conpot, a separate Dockge stack from
-# honeypot-stack -- same arrangement as docker-compose.init.yml's
+# APIARY -- same arrangement as docker-compose.init.yml's
 # honeypot-init. Log paths are unchanged (still
 # /opt/stacks/honeypot-stack/logs/conpot*), so Filebeat and the dashboard's
 # EXPECTED_SENSORS list need no changes at all.

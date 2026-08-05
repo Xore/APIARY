@@ -33,11 +33,11 @@ jobs:
       - name: Synchronize honeypot-init (one-shot bootstrap jobs stack)
         shell: bash
         run: |
-          # A separate Dockge stack, not a subdirectory of honeypot-stack --
+          # A separate Dockge stack, not a subdirectory of APIARY --
           # see docker-compose.init.yml's header for why. Its own .env is
-          # never touched here, same reasoning as honeypot-stack's .env
+          # never touched here, same reasoning as APIARY's .env
           # below: ARKIME_ADMIN_PASSWORD/ARKIME_PASSWORD_SECRET in it must
-          # keep matching honeypot-stack's real values, which an automated
+          # keep matching APIARY's real values, which an automated
           # sync has no safe way to verify.
           destination=/opt/stacks/honeypot-init
           install -d -m 755 "$destination"
@@ -69,7 +69,7 @@ jobs:
       # dionaea`) -- this rsync is what actually populates that checkout, so
       # it has to run before any of them. Confirmed as a real bug while
       # working on the ELK split: this step used to run near the end of the
-      # job (where honeypot-stack's own `docker compose up` used to live,
+      # job (where APIARY's own `docker compose up` used to live,
       # back when that file still had services), and every #258 step above
       # it was silently building from whatever the *previous* deploy run
       # had rsynced, one deploy stale, rather than this run's checkout --
@@ -97,7 +97,7 @@ jobs:
 
       # #258 proof of concept: the Conpot persona family split into its own
       # Dockge stack, same arrangement as honeypot-init above. No ordering
-      # dependency on honeypot-init here the way honeypot-stack's own
+      # dependency on honeypot-init here the way APIARY's own
       # init-wait-* dependents have: each persona's command polls
       # /markers/log-init.done itself (#127, a bind-mounted file, not a
       # compose depends_on chain), so `docker compose up -d` returns
@@ -189,7 +189,7 @@ jobs:
       # Dockge stack -- host-wide utilities rather than one honeypot family.
       # None of the three share a named volume/network with anything else,
       # so (like the standalone honeypots above) this can deploy ahead of
-      # honeypot-stack with no ordering requirement.
+      # APIARY with no ordering requirement.
       - name: Synchronize honeypot-utilities (#258 split)
         shell: bash
         run: |
@@ -222,7 +222,7 @@ jobs:
 
       # #258: dashboard + services-adapter split into their own Dockge stack,
       # placed after honeypot-elk and honeypot-dionaea/honeypot-payload-
-      # analysis above (not honeypot-stack, which has no services of its
+      # analysis above (not APIARY, which has no services of its
       # own any more) because it actually depends on those stacks at
       # runtime -- it resolves elasticsearch/filebeat by service name over
       # the shared honeynet network, and reads dionaea-lib/yara-results/

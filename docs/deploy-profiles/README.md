@@ -9,7 +9,7 @@ hand-editing which stacks you happen to run, so an operator running a
 narrower deployment (fewer sensors, no VPS) has a named, checkable choice
 instead of an implicit one nobody wrote down.
 
-Different axis from [#258](https://github.com/Xore/honeypot-stack/issues/258)
+Different axis from [#258](https://github.com/Xore/APIARY/issues/258)
 itself, which is about *topology* (one compose file per stack vs a
 monolith) -- this is about *persona declaration*: which honeypots/dashboards
 run for a given deployment, independent of how the compose files are
@@ -40,7 +40,7 @@ validator only warns if either is missing from a non-empty profile.
 Not covered here: the VPS side (`vps/`, always deployed the same way
 regardless of home profile -- see `docs/CGNAT-DEPLOYMENT.md`) and
 `ip-enrichment-worker` (currently has no `deploy.yml` sync step at all --
-see [#560](https://github.com/Xore/honeypot-stack/issues/560), a separate,
+see [#560](https://github.com/Xore/APIARY/issues/560), a separate,
 already-broken gap this doc doesn't paper over).
 
 ## Validating a profile

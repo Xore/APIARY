@@ -129,7 +129,7 @@ not give the `production-home` environment to pull-request workflows.
 ### honeypot-init
 
 `docker-compose.init.yml` runs as a second, separate Dockge stack at
-`/opt/stacks/honeypot-init`, not as part of `honeypot-stack`. It holds the
+`/opt/stacks/honeypot-init`, not as part of `APIARY`. It holds the
 one-shot bootstrap jobs (log directory ownership, persona seeding,
 Elasticsearch/Kibana/Arkime first-run setup) that used to live in the main
 compose file; see that file's header for the full reasoning (#111). The same
@@ -140,7 +140,7 @@ waiting on markers that could not exist yet.
 
 Its `.env` is created once by hand on the homeserver and is never touched by
 this workflow — `ARKIME_ADMIN_PASSWORD` and `ARKIME_PASSWORD_SECRET` in it
-must be kept identical to the same two values in `honeypot-stack`'s `.env`,
+must be kept identical to the same two values in `APIARY`'s `.env`,
 and an automated sync has no safe way to verify that a value it did not set
 is still correct.
 
@@ -149,9 +149,9 @@ is still correct.
 `docker-compose.conpot.yml` runs as a third, separate Dockge stack at
 `/opt/stacks/honeypot-conpot`: the six Conpot personas (base S7-200,
 S7-1200, S7-1500, IEC104, Guardian AST, Kamstrup) split out of
-`honeypot-stack`'s monolithic compose file, as a proof of concept for #258.
+`APIARY`'s monolithic compose file, as a proof of concept for #258.
 The same `home` job deploys it alongside `honeypot-init`, before
-`honeypot-stack`, though (unlike `honeypot-init`) it has no hard ordering
+`APIARY`, though (unlike `honeypot-init`) it has no hard ordering
 requirement -- each persona polls its own marker file rather than using a
 compose `depends_on` chain, so its `docker compose up -d` returns
 immediately either way. See `docker-compose.conpot.yml`'s own header for
@@ -196,12 +196,12 @@ subtree this stack's own `SCRIPT_PAYLOAD_DIR=/state/script-payloads`
 writes). All four resources are declared with an explicit shared `name:` in
 every compose file that touches them, the same mechanism
 `honeynet`/`es-data`/`evebox-config` already use to stay shared between
-`honeypot-stack` and `honeypot-init`.
+`APIARY` and `honeypot-init`.
 
-The `home` job deploys this stack *after* `honeypot-stack`, not before like
+The `home` job deploys this stack *after* `APIARY`, not before like
 the standalone honeypots above -- Compose itself doesn't require the
 ordering (none of the shared resources are `external: true`, so whichever
-project runs first just creates them), but starting `honeypot-stack` first
+project runs first just creates them), but starting `APIARY` first
 means the dashboard has real data to show immediately instead of booting
 against empty indices. `services-adapter-socket` stays private/unnamed to
 this stack; grepped every compose file to confirm nothing else references
@@ -215,7 +215,7 @@ Everything else that was still monolithic as of the earlier revision of
 this section (`dionaea`, `payload-dedupe`, `yara-scanner`, and the Tanner
 group) has since split out too -- see the `honeypot-dionaea` and
 `honeypot-payload-analysis` section below; only the Tanner group remains in
-`honeypot-stack`, as part of its own internal `depends_on` chain not yet
+`APIARY`, as part of its own internal `depends_on` chain not yet
 worth splitting.
 
 #### Zero-downtime dashboard rolling updates (#266)
@@ -275,7 +275,7 @@ report attacker IPs to AbuseIPDB.
 
 None of the three share a named volume or network with anything outside
 this stack, so -- like the standalone honeypots -- it deploys ahead of
-`honeypot-stack` with no ordering requirement.
+`APIARY` with no ordering requirement.
 
 ### honeypot-dionaea and honeypot-payload-analysis (#258)
 
@@ -370,14 +370,14 @@ This split also surfaced a real pre-existing ordering bug in
 points at an absolute path under `/opt/stacks/honeypot-stack` (e.g.
 `/opt/stacks/honeypot-stack/dionaea`), populated by the "Synchronize Dockge
 source" rsync step -- but that step used to run *after* every one of those
-builds, near the end of the job, in the slot where `honeypot-stack`'s own
+builds, near the end of the job, in the slot where `APIARY`'s own
 `docker compose up` used to live. Never a hard failure (the destination
 directory already existed from prior runs), just quietly building from
 whatever the *previous* deploy had rsynced -- one deploy stale rather than
 this run's checkout. Fixed by moving the rsync step to run immediately
 after `honeypot-init`, before any split stack's step.
 
-With this split, `honeypot-stack`'s own `docker-compose.yml` has no
+With this split, `APIARY`'s own `docker-compose.yml` has no
 services of its own left at all (`services: {}`) -- see that file's header
 for what that means going forward. The rsync step still runs
 unconditionally, since every other stack's build context depends on the

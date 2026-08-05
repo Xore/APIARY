@@ -54,7 +54,7 @@ service here meant to be reachable remotely (see below).
 ### Reaching it remotely (Traefik + forward-auth SSO)
 
 Set `HP_BIND` in this directory's `.env` (copy from `.env.example`) to the
-same WireGuard address `honeypot-stack`'s own `HP_BIND` uses, then redeploy
+same WireGuard address `APIARY`'s own `HP_BIND` uses, then redeploy
 this stack — `revdeck`'s port publish reads it, everything else in this file
 stays loopback-only regardless. The VPS side (`socat-hp-revdeck` in
 `vps/docker-compose.yml`, the `honeypot-revdeck` router in
@@ -88,8 +88,8 @@ project's `webui/app.py`, `ghidra_assistant.py`, `workflows.py`,
 document. It replaces the old, never-run `/api/upload`/`/api/chat` shape a
 prior version of `ghidra_analyze.py` guessed at, which was deleted alongside
 the disproven Ghidra REST contract
-[#101](https://github.com/Xore/honeypot-stack/issues/101) under
-[#107](https://github.com/Xore/honeypot-stack/issues/107) without ever having
+[#101](https://github.com/Xore/APIARY/issues/101) under
+[#107](https://github.com/Xore/APIARY/issues/107) without ever having
 run against a live container. See the comment block above `REVDECK_API_BASE`
 in [`worker/ghidra-worker.py`](../../../../analysis/ghidra/worker/ghidra-worker.py) for the full
 contract, including why `analyze_as_raw=true` is always sent.

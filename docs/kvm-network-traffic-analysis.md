@@ -7,7 +7,7 @@
 > given. Nearly everything it proposed to build now exists, built differently
 > and better. What follows is where each piece lives and why it is shaped the
 > way it is. Remaining gaps are
-> [#87](https://github.com/Xore/honeypot-stack/issues/87).
+> [#87](https://github.com/Xore/APIARY/issues/87).
 >
 > The superseded version is in git history if the original reasoning is ever
 > wanted; do not restore it.
@@ -127,7 +127,7 @@ the sample and stopped after it, from outside its control, which offline
 injection alone cannot do. The cost is equally real: a credentialed service
 listening inside a guest that is deliberately running malware.
 
-That is [#94](https://github.com/Xore/honeypot-stack/issues/94) — a decision to
+That is [#94](https://github.com/Xore/APIARY/issues/94) — a decision to
 make before the golden image is built, since the credentials and the share are
 baked into it. Until it is made, treat the Windows sandbox's isolation as
 resting on the *network* barriers in §2 alone, not on the absence of a
@@ -156,11 +156,11 @@ for a run the worker does not know about.
 
 - **Arkime** is deployed and indexes the **VPS** sensor's pcap ring from
   `logs/suricata/pcap/`, mounted over WireGuard. It does *not* currently index
-  sandbox captures — [#87](https://github.com/Xore/honeypot-stack/issues/87).
+  sandbox captures — [#87](https://github.com/Xore/APIARY/issues/87).
 - **EveBox** and **Kibana** read the VPS `eve.json`. See
   [`vps/suricata/README.md`](vps/suricata/README.md), including the
   `HOME_NET` trap and the fact that `eve.json` is unrotated
-  ([#79](https://github.com/Xore/honeypot-stack/issues/79)).
+  ([#79](https://github.com/Xore/APIARY/issues/79)).
 - **The dashboard** reads the sanitized export directory read-only and shows
   worker state, dynamic risk, static YARA versus observed behaviour, ATT&CK
   mappings, syscalls, file changes, DNS names and bounded packet summaries.
@@ -168,7 +168,7 @@ for a run the worker does not know about.
   raw result directories stay root-only.
 - **`generate_report.py`** folds `zeek_logs/http.log` into the Windows report.
   The Linux sandbox has no Zeek equivalent — also
-  [#87](https://github.com/Xore/honeypot-stack/issues/87).
+  [#87](https://github.com/Xore/APIARY/issues/87).
 
 ## 5. Retention
 

@@ -1,9 +1,9 @@
-# honeypot-init — one-shot bootstrap jobs for honeypot-stack, run as a
+# honeypot-init — one-shot bootstrap jobs for APIARY, run as a
 # separate Dockge stack so the main stack's compose file only holds services
 # that run continuously. Moved out of docker-compose.yml while fixing #111.
 #
 # Deploy this stack once (or re-run it whenever a bootstrap step needs to run
-# again -- every job here is idempotent) before or alongside honeypot-stack.
+# again -- every job here is idempotent) before or alongside APIARY.
 # `docker compose up` runs every job below to completion and exits, with one
 # exception: geoipupdate (#123) is long-running by design (it loops on its
 # own update schedule) and was moved here only because it's optional and
@@ -14,7 +14,7 @@
 #   Completion markers. log-init, elasticsearch-setup, and arkime-init write
 #   a "<job>.done" file to state/init-markers/ on success, and remove it
 #   first, so a reader never sees a stale marker from a previous run while
-#   this run is still in progress. honeypot-stack's init-wait-* services
+#   this run is still in progress. APIARY's init-wait-* services
 #   poll for these files instead of depends_on: condition:
 #   service_completed_successfully, because that condition cannot cross a
 #   Compose project boundary -- it only resolves against a service defined
@@ -31,7 +31,7 @@
 #
 #   honeynet. elasticsearch-setup, honeypot-kibana-setup, and arkime-init
 #   reach elasticsearch/kibana in the main stack over this network, which
-#   honeypot-stack creates with a fixed name (not project-prefixed)
+#   APIARY creates with a fixed name (not project-prefixed)
 #   specifically so a second stack can attach to it.
 #
 #   dionaea-lib / yara-results. Named the same way, for the same reason:
@@ -42,11 +42,11 @@
 #
 #   /opt/stacks/honeypot-stack absolute paths. This stack has no checkout of
 #   its own -- it reads the scripts, config, and persona manifest it needs
-#   straight out of the honeypot-stack checkout by absolute path, since a
+#   straight out of the APIARY checkout by absolute path, since a
 #   Dockge stack directory otherwise holds only its own compose.yml and .env.
 #
 #   ARKIME_PASSWORD_SECRET in this stack's .env MUST match the same value in
-#   honeypot-stack's .env exactly -- arkime-init sets the secret that
+#   APIARY's .env exactly -- arkime-init sets the secret that
 #   arkime-capture/arkime-viewer (main stack) use for session auth. Dockge
 #   gives each stack its own .env, so this is a manual sync, not automatic.
 #   ARKIME_ADMIN_PASSWORD does not need to match anything: --webauthonly
@@ -296,7 +296,7 @@ services:
           cpus: "2.0"
           memory: 1G
 
-  # #124: moved from honeypot-stack -- hp-snare depended on this completing
+  # #124: moved from APIARY -- hp-snare depended on this completing
   # via condition: service_completed_successfully, which cannot cross a
   # Compose project boundary (same reason log-init/elasticsearch-setup/
   # arkime-init write markers instead of being depended on directly). Writes
@@ -332,7 +332,7 @@ services:
   # internally on GEOIPUPDATE_FREQUENCY) and nothing depends on it
   # completing. Moved here anyway because it's optional (profiles:
   # [geoip-update], off unless MAXMIND_ACCOUNT_ID/LICENSE_KEY are set) and
-  # its only reason to exist in honeypot-stack was proximity to the other
+  # its only reason to exist in APIARY was proximity to the other
   # GeoIP-adjacent setup, which already lives here. See docker-compose.yml
   # for why one-shot jobs live in this stack at all -- this one just
   # doesn't need the depends_on/marker machinery that motivates the rest.
@@ -400,10 +400,10 @@ networks:
     external: true
 
 volumes:
-  # Created by honeypot-stack (name: overrides there too); referenced here
-  # the same way honeynet is, since honeypot-stack is the primary owner --
+  # Created by APIARY (name: overrides there too); referenced here
+  # the same way honeynet is, since APIARY is the primary owner --
   # dionaea, yara-scanner, payload-dedupe, and the dashboard all read these
-  # too, and only honeypot-stack ever runs continuously.
+  # too, and only APIARY ever runs continuously.
   dionaea-lib:
     name: dionaea-lib
     external: true
@@ -411,9 +411,9 @@ volumes:
     name: yara-results
     external: true
   # #124: opposite direction from the two above -- snare-clone (this stack)
-  # writes it, hp-snare (honeypot-stack) reads it. Owned here (no
+  # writes it, hp-snare (APIARY) reads it. Owned here (no
   # external: true) because honeypot-init deploys first: docker-compose.yml
   # references this one as external, which would fail on a first-ever
-  # deploy if honeypot-stack tried to own it instead.
+  # deploy if APIARY tried to own it instead.
   snare-pages:
     name: snare-pages

@@ -10,7 +10,7 @@
 > INetSim `apt`-installed on the host, `sandbox/reset-vm.sh` as the runner).
 > They were replaced by §7, which records what this stack actually chose and
 > points at the implementation. The `reset-vm.sh` references are
-> [#90](https://github.com/Xore/honeypot-stack/issues/90).
+> [#90](https://github.com/Xore/APIARY/issues/90).
 
 ---
 
@@ -189,7 +189,7 @@ destroy + delete the overlay + recreate a fresh one from the golden image
 
 ## 5. Golden Images with qcow2 Backing Files
 
-This is the **recommended approach** for the honeypot-stack when running
+This is the **recommended approach** for the APIARY when running
 multiple concurrent analysis VMs or automated sample ingestion pipelines.
 
 ### 5.1 Create the Golden Image
@@ -330,9 +330,9 @@ golden images) is host-only procedure; it is summarised in
 duplicated here.
 
 The golden image has been built and the `win11-sandbox` domain boots
-reliably from it (2026-08-02) — [#47](https://github.com/Xore/honeypot-stack/issues/47).
+reliably from it (2026-08-02) — [#47](https://github.com/Xore/APIARY/issues/47).
 The lifecycle around it (checksum on build output, scheduled rebuild) is
-[#86](https://github.com/Xore/honeypot-stack/issues/86).
+[#86](https://github.com/Xore/APIARY/issues/86).
 
 ---
 

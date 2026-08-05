@@ -17,14 +17,14 @@ why. The work is claimed and reviewed in issues:
 
 | Gate / Milestone | Issue |
 |---|---|
-| A — runtime and hardware truth | [#82](https://github.com/Xore/honeypot-stack/issues/82) |
-| B, C — ML foundation and reliable ES pipeline | [#61](https://github.com/Xore/honeypot-stack/issues/61), [#62](https://github.com/Xore/honeypot-stack/issues/62) |
-| D — temporal/composite quality and lifecycle | [#63](https://github.com/Xore/honeypot-stack/issues/63), [#65](https://github.com/Xore/honeypot-stack/issues/65) |
-| E — dashboard ML delivery | [#64](https://github.com/Xore/honeypot-stack/issues/64) |
-| F — guarded LLM worker, dry-run only | [#66](https://github.com/Xore/honeypot-stack/issues/66) |
-| G — local Ollama canary | [#83](https://github.com/Xore/honeypot-stack/issues/83) |
-| H — ML GPU acceleration | [#67](https://github.com/Xore/honeypot-stack/issues/67) |
-| I — shared GPU operations and rollout | [#84](https://github.com/Xore/honeypot-stack/issues/84) |
+| A — runtime and hardware truth | [#82](https://github.com/Xore/APIARY/issues/82) |
+| B, C — ML foundation and reliable ES pipeline | [#61](https://github.com/Xore/APIARY/issues/61), [#62](https://github.com/Xore/APIARY/issues/62) |
+| D — temporal/composite quality and lifecycle | [#63](https://github.com/Xore/APIARY/issues/63), [#65](https://github.com/Xore/APIARY/issues/65) |
+| E — dashboard ML delivery | [#64](https://github.com/Xore/APIARY/issues/64) |
+| F — guarded LLM worker, dry-run only | [#66](https://github.com/Xore/APIARY/issues/66) |
+| G — local Ollama canary | [#83](https://github.com/Xore/APIARY/issues/83) |
+| H — ML GPU acceleration | [#67](https://github.com/Xore/APIARY/issues/67) |
+| I — shared GPU operations and rollout | [#84](https://github.com/Xore/APIARY/issues/84) |
 
 If a deliverable here has no issue, that is the gap: open one. Do not track
 progress by editing this file.

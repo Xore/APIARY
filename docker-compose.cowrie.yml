@@ -10,7 +10,7 @@
 # The config-file mounts below (cowrie.cfg, userdb.txt, the fakefs DMI nodes)
 # used relative ./cowrie/... paths when this lived in docker-compose.yml --
 # relative to *that* file's own directory. Moved to absolute paths into the
-# honeypot-stack checkout, matching docker-compose.init.yml's snare-clone
+# APIARY checkout, matching docker-compose.init.yml's snare-clone
 # build-context precedent and docker-compose.conpot.yml's own build: path.
 #
 # cowrie-downloads (the captured-payload directory under logs/cowrie) is

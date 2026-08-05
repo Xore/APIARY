@@ -33,7 +33,7 @@
 #
 # #258: conpot, cowrie, multipot, http (http-honeypot+api-honeypot), and dnp3
 # each now deploy as their own Dockge stack (/opt/stacks/honeypot-<name>/
-# compose.yml), not inside honeypot-stack's own compose.yml. A bare
+# compose.yml), not inside APIARY's own compose.yml. A bare
 # `docker compose stop/up` run from this directory resolves against *this*
 # directory's compose.yml (Compose's default file-discovery prefers
 # compose.yml over docker-compose.yml, which is why this already worked

@@ -4,7 +4,7 @@
 > **Last updated**: 2026-07-30
 > **Upstream pipeline**: [`Xore/honeypot`](https://github.com/Xore/honeypot) — `.github/workflows/analyze.yml`
 > **Precedent**: [`docs/analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md`](analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md)
-> **Tracked in**: [#73](https://github.com/Xore/honeypot-stack/issues/73) (YARA corpus sync) and [#74](https://github.com/Xore/honeypot-stack/issues/74) (publisher and dashboard button)
+> **Tracked in**: [#73](https://github.com/Xore/APIARY/issues/73) (YARA corpus sync) and [#74](https://github.com/Xore/APIARY/issues/74) (publisher and dashboard button)
 
 ---
 
@@ -105,7 +105,7 @@ create a zero-byte marker file — nothing else.
 
 ```mermaid
 flowchart TD
-    Root["honeypot-stack/"] --> AG["analysis/github/<br/>NEW: host-side publisher"]
+    Root["APIARY/"] --> AG["analysis/github/<br/>NEW: host-side publisher"]
     Root --> DB["dashboard/"]
 
     AG --> Process["process-github-requests.sh<br/>validates + de-duplicates the spool"]
@@ -484,4 +484,4 @@ contain no real indicators, per the `WORK-LEDGER.md` review checklist.
 Retention denylist, archive convention, and submission quota. All three are
 Phase 1 blockers and all three are decisions rather than implementation, so
 they are being made in the issue rather than in this document:
-[#74](https://github.com/Xore/honeypot-stack/issues/74).
+[#74](https://github.com/Xore/APIARY/issues/74).
