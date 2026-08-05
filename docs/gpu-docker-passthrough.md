@@ -43,22 +43,14 @@ Three independent layers all have to work before a container can see the
 GPU. Each has its own failure mode, and the error you see rarely tells you
 which layer is actually broken:
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Container process calls nvidia-smi / CUDA                    │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 3: nvidia-container-toolkit                             │
-│  (registers a Docker OCI runtime hook that injects the driver  │
-│   libraries + device nodes into the container at start time)   │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 2: Docker daemon                                        │
-│  (/etc/docker/daemon.json knows about the "nvidia" runtime;     │
-│   compose/run passes --gpus or deploy.resources.reservations)  │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 1: NVIDIA kernel driver (host)                          │
-│  (nvidia.ko loaded, /dev/nvidia* device nodes exist,            │
-│   `nvidia-smi` works directly on the host, outside Docker)     │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Call["Container process calls nvidia-smi / CUDA"]
+    L3["Layer 3: nvidia-container-toolkit<br/>registers a Docker OCI runtime hook that injects the driver<br/>libraries + device nodes into the container at start time"]
+    L2["Layer 2: Docker daemon<br/>/etc/docker/daemon.json knows about the 'nvidia' runtime;<br/>compose/run passes --gpus or deploy.resources.reservations"]
+    L1["Layer 1: NVIDIA kernel driver (host)<br/>nvidia.ko loaded, /dev/nvidia* device nodes exist,<br/>nvidia-smi works directly on the host, outside Docker"]
+
+    Call --> L3 --> L2 --> L1
 ```
 
 If `nvidia-smi` fails on the bare host, nothing above it can possibly work
