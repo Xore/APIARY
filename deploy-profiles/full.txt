@@ -1,0 +1,20 @@
+# Standard deployment: every home stack .github/workflows/deploy.yml
+# currently syncs. See deploy-profiles/README.md.
+
+init
+elk
+dashboard
+utilities
+payload-analysis
+conpot
+cowrie
+multipot
+http
+dnp3
+dionaea
+tanner
+dicompot
+dns-honeypot
+citrix-honeypot
+cisco-asa-honeypot
+rdp-honeypot
