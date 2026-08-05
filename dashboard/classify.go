@@ -701,6 +701,24 @@ func classify(e map[string]any, dirSensor string) event {
 		if ev.detail == "" {
 			ev.detail = "alert"
 		}
+		// #576: vps/suricata/suricata.yaml enables payload-printable/
+		// http-body-printable -- safe, already-sanitized (printable-only)
+		// capture of the actual bytes that triggered the signature match.
+		// Reaches Elasticsearch intact but was never read here: an operator
+		// saw which signature matched, not what actually matched it.
+		//
+		// ev.command deliberately NOT used, same reasoning as #41's conpot
+		// fix above: this is arbitrary matched network content, not an
+		// attacker-issued shell command, and would pollute the Attacker
+		// Behavior tab's Top Commands leaderboard the same way conpot's raw
+		// request bytes once did.
+		if pp := str(e["payload_printable"]); pp != "" {
+			ev.detail += "  payload: " + pp
+		} else if httpData, ok := e["http"].(map[string]any); ok {
+			if body := str(httpData["http_body_printable"]); body != "" {
+				ev.detail += "  body: " + body
+			}
+		}
 		return ev
 	}
 
