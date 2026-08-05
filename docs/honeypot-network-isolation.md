@@ -135,6 +135,6 @@ here to implement and no issue to open. Verified by
   sandbox capture and isolation model in full
 - [`../vps/suricata/README.md`](../vps/suricata/README.md) — VPS sensor,
   `HOME_NET`, and log retention
-- [`../sandbox/README.md`](../sandbox/README.md) — the Linux runner
+- [`sandbox/README.md`](sandbox/README.md) — the Linux runner
 - [libvirt nwfilter](https://libvirt.org/formatnwfilter.html)
 - [Docker network drivers](https://docs.docker.com/network/)

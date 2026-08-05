@@ -102,7 +102,7 @@ XSS, command execution, PHP code/object injection, XXE, CRLF and template
 injection) and stores sessions in Redis. TANNER's emulation containers are
 isolated from the homeserver Docker socket and are not a malware detonation
 environment. Suspicious payload detonation belongs in the separate KVM/libvirt
-sandbox described in [`sandbox/README.md`](../sandbox/README.md). Containers: `tanner_redis`,
+sandbox described in [`sandbox/README.md`](sandbox/README.md). Containers: `tanner_redis`,
 `tanner_phpox`, `tanner_api`, `tanner` (analyzer, `:8090`), `tanner_web`
 (dashboard, `:8091`), `snare_clone` (one-shot deterministic persona installer),
 `snare` (`:8080`). The page source lives under [snare/persona](../snare/persona)

@@ -202,5 +202,5 @@ The VPS side is not equivalent: `pcap-log` is a bounded ~50 GB ring, but
 - [Arkime documentation](https://arkime.com/documentation)
 - [INetSim manual](https://www.inetsim.org/documentation.html)
 - [`docs/kvm-snapshot-vs-golden-image.md`](kvm-snapshot-vs-golden-image.md)
-- [`sandbox/README.md`](../sandbox/README.md) — the Linux runner, in detail
+- [`sandbox/README.md`](sandbox/README.md) — the Linux runner, in detail
 - [`sandbox/windows/IMPLEMENTATION_PLAN.md`](../sandbox/windows/IMPLEMENTATION_PLAN.md) — the Windows phases
