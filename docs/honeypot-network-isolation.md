@@ -127,6 +127,9 @@ here to implement and no issue to open. Verified by
 
 ## References
 
+- [`agent-intrusion-threat-model.md`](agent-intrusion-threat-model.md) — maps
+  a real machine-speed autonomous-agent intrusion campaign to this stack's
+  trust boundaries; cites this document's isolation zones directly (#154)
 - [`kvm-network-traffic-analysis.md`](kvm-network-traffic-analysis.md) — the
   sandbox capture and isolation model in full
 - [`../vps/suricata/README.md`](../vps/suricata/README.md) — VPS sensor,
