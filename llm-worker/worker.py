@@ -192,7 +192,7 @@ class Config:
             daily_report_enabled=env_bool("LLM_DAILY_REPORT_ENABLED", False),
             es_host=os.getenv("ES_HOST", "http://elasticsearch:9200").rstrip("/"),
             ollama_url=os.getenv("OLLAMA_URL", "http://ollama:11434").rstrip("/"),
-            model=os.getenv("LLM_MODEL", "qwen3.5:9b").strip(),
+            model=os.getenv("LLM_MODEL", "qwen3:14b").strip(),
             expected_model_digest=os.getenv("LLM_EXPECTED_MODEL_DIGEST", "").strip().lower(),
             poll_interval=env_int("POLL_INTERVAL", 60, 5, 3600),
             max_content_chars=env_int("MAX_CONTENT_CHARS", 12000, 1000, 24000),
