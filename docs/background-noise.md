@@ -28,6 +28,7 @@
 8. [Isolating Noise from Attacker Captures](#8-isolating-noise-from-attacker-captures)
 9. [Detection Evasion Checklist](#9-detection-evasion-checklist)
 10. [Tool Reference](#10-tool-reference)
+11. [Attribution, Filtering, and Capture Labeling — required before any prototype](#11-attribution-filtering-and-capture-labeling--required-before-any-prototype)
 
 ---
 
@@ -545,3 +546,138 @@ An attacker attempting to fingerprint your honeypot will check for these artefac
 ---
 
 *Last updated: 2026-07-26 — KVM host deployment, Docker honeypot stack.*
+
+---
+
+## 11. Attribution, Filtering, and Capture Labeling — required before any prototype
+
+[#71](https://github.com/Xore/honeypot-stack/issues/71) requires three
+properties specified and proven *before* any packet generator is written:
+attribution (identified at the source, not inferred later), filtering
+(every consumer excludes it, default is *exclude*), and capture labeling
+(survives export). This section specifies them -- design only, nothing
+here is implemented, matching this whole document's status.
+
+### 11.1 The observer question, re-scoped for this stack's real topology
+
+§2-§8 above describe a KVM lab where attacker traffic and noise traffic
+share one virtual bridge (`virbr0`) an attacker can passively observe.
+That premise doesn't hold for this stack: honeypots run as Docker
+containers on `honeynet`/`<sensor>_net`, reachable only through the VPS's
+public listeners over the WireGuard tunnel (see
+[`docs/honeypot-network-isolation.md`](honeypot-network-isolation.md)).
+An attacker never has a passive tap on any segment this stack's containers
+share -- they only ever see what a listener chooses to send back. "Ambient
+LAN traffic to fool a passive observer" (§1's ARP/NTP/DNS checklist) is
+built for a topology this stack doesn't have.
+
+Two categories *do* apply here, and they're a different threat model than
+§1-§9 describe:
+
+1. **In-shell/in-guest process visibility.** An attacker who gets a shell
+   (Cowrie's fake filesystem today, a future Windows sandbox persona) can
+   run `ps`, `netstat`, check `/proc`, or query the ARP cache *from inside
+   that shell* -- an empty process table or a silent network stack reads
+   as staged the same way an empty KVM bridge would. This is what
+   `cowrie/README-fs.md`'s seeded filesystem already partially answers;
+   background noise in this category means synthetic *process activity*
+   a fake shell reports, not packets on a wire.
+2. **This stack's own real outbound fetches.** `COWRIE_AIR_GAPPED` /
+   `DIONAEA_AIR_GAPPED` / `TANNER_AIR_GAPPED` (default `false` -- see
+   `docs/persona-design.md`) mean Cowrie, Dionaea, and TANNER genuinely
+   reach the internet outbound today, attacker-triggered, to capture real
+   payloads. This traffic is real and attacker-caused, not synthetic --
+   but it's the traffic most likely to be *mistaken* for ambient noise (or
+   vice versa) if a noise generator is ever added to the same containers
+   or networks, which is exactly the contamination #71 is worried about.
+   Any future noise design must keep these two categories distinguishable
+   from each other as rigorously as from real attacker traffic.
+
+If a future observer-identification pass (per this doc's own status note)
+concludes on-the-wire ambient noise is still worth building for some other
+reason (VPS-side traffic shape, e.g.), re-derive attribution/filtering
+against *that* concrete topology rather than assuming §2's KVM bridge
+model applies -- it doesn't, for this stack.
+
+### 11.2 Attribution -- identified at the source
+
+For either applicable category above, the marker is set by the generator
+itself at creation time, never inferred downstream by pattern-matching:
+
+- **In-shell process noise**: every synthetic process/log line a fake
+  shell reports carries a fixed, internal-only marker field (e.g.
+  `synthetic: true` in whatever structured record Cowrie's plugin
+  framework would emit for it) -- present in the record from the moment
+  it's generated, not something a consumer decides later by guessing
+  "this looks fake."
+- **Any future wire-level generator** (if #11.1's re-scoped observer
+  question ever justifies one): runs as its own dedicated container on
+  its own dedicated Docker network -- never `honeynet`, never any
+  `<sensor>_net` -- with a reserved, documented source IP range that no
+  real sensor container is ever assigned. Source-IP/network-identity
+  attribution, not a packet-content marker: simpler to enforce correctly
+  (a Docker network boundary Suricata/Filebeat can match on directly) and
+  it can't be stripped by anything downstream the way a spoofable
+  in-payload tag could be.
+
+### 11.3 Filtering -- every consumer excludes by default
+
+Every existing consumer of sensor data must exclude the attribution marker
+explicitly, and the exclusion must be the kind that fails safe for a
+*new* consumer that has never heard of noise:
+
+| Consumer | Where the exclusion lives | Precedent already in this repo |
+|---|---|---|
+| Suricata | `bpf-filter` on the sniffing interface | `vps/suricata/suricata.yaml:192`, `bpf-filter: "not udp port 51820"` already excludes the WireGuard tunnel the same way -- exact mechanism to extend for a reserved noise-source IP range |
+| Filebeat | A `drop_event` processor keyed on the marker field, in `analysis/filebeat.yml`'s `processors:` list | Same file already has conditional `drop_fields`/`add_fields` processors (see the `honeypot.src_ip == ""` drop) -- same pattern, new condition |
+| Elasticsearch | The `geoip-honeypot` ingest pipeline (`analysis/elasticsearch-setup.sh`) either routes marked events to a separate, clearly-named index (`honeypot-synthetic-v2-*`) or drops them outright -- never the shared `honeypot-v2-*` stream real events land in | New pipeline branch, not a retrofit of the existing one |
+| Dashboard | `dashboard/classify.go` / `dashboard/events_es.go` refuse to render anything carrying the marker, full stop -- not filtered by a toggle a user could leave on | Matches this repo's existing default-safe posture elsewhere (e.g. the reporter's dry-run default, WORK-LEDGER.md rule 7) |
+| Arkime | `bpf` exclusion in `arkime/config.ini`, same shape as §8.1's example | Not yet present in this repo's `arkime/config.ini` -- would be new |
+
+The "default is exclude" requirement means: the marker field name and its
+semantics get documented once, prominently, and every consumer above
+implements its own independent exclusion rather than relying on an
+upstream filter to have already stripped noise out. A consumer added
+later that doesn't know about noise is safe by construction only if it's
+also expected to check for and drop the marker itself -- document that
+expectation next to `EXPECTED_SENSORS` in `docker-compose.dashboard.yml`
+and in this file, not only here.
+
+### 11.4 Capture labeling -- survives export
+
+A field on an Elasticsearch document is not enough -- it doesn't survive
+a raw pcap export, a `tcpdump -w`, or a fresh ES cluster re-ingesting
+Filebeat's raw JSON without this stack's own ingest pipeline in front of
+it. The label has to live in the artifact itself:
+
+- **pcap**: the reserved source-IP/MAC range from §11.2 *is* the label --
+  recognizable from the raw packet bytes alone by anyone who has this
+  doc, no metadata sidecar required. Never rely on an out-of-band
+  "here's the noise IP list" file shipped separately from the capture.
+- **JSON logs**: the `synthetic: true` field from §11.2 ships in the
+  literal log line Filebeat tails, not added later by an ES ingest
+  processor -- so a raw `.json` log file handed to someone without this
+  stack's ELK pipeline still carries it.
+- **Both must independently survive** a pcap-only export (no JSON) and a
+  JSON-only export (no pcap) -- test both directions before calling
+  labeling "proven," not just the common case where both travel together.
+
+### 11.5 Before prototyping
+
+Per #71's own text: prototype only after attribution, filtering, and
+capture labeling are proven -- meaning demonstrated end-to-end against a
+real capture and a real Elasticsearch/dashboard pass, not asserted from
+this design alone. Two additional preconditions, given what else this
+repo already has in flight:
+
+- [#88](https://github.com/Xore/honeypot-stack/issues/88) (automated
+  isolation-invariant check) should land first. Adding any new
+  traffic-generating component to a security-sensitive path is exactly
+  the kind of change that check exists to catch drift on -- prototyping
+  noise generation before it exists means the one thing that would notice
+  a misconfigured noise source leaking somewhere isn't there yet.
+- Re-run §11.1's observer question against a concretely identified
+  observer before writing code, per this document's own standing status
+  note -- an unidentified observer means there's no way to know which of
+  §11.1's two categories (or a third, not yet identified) is actually
+  worth building.
