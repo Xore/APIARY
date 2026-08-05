@@ -354,7 +354,7 @@ services:
   # dashboard/geoip/threat-cidrs.csv current from free, zero-auth
   # threat-intel sources (Spamhaus DROP, the Tor bulk exit list, AWS/GCP
   # published ranges) -- see refresh-threat-cidrs.sh for the fetch/merge
-  # logic and dashboard/geoip/README.md for the file's shape.
+  # logic and docs/dashboard/geoip/README.md for the file's shape.
   #
   # profiles: [threat-intel], off by default like geoip-update above: unlike
   # geoipupdate this needs no credentials, but it does add new outbound
