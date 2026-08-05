@@ -1,6 +1,6 @@
 # Deployment profiles
 
-[← back to README](../README.md)
+[← back to README](../../README.md)
 
 Which of the split home stacks (#258 -- `.github/workflows/deploy.yml`
 currently syncs 17 of them, the authoritative list, not any doc's snapshot
@@ -26,9 +26,9 @@ comments and blank lines ignored.
 
 | Profile | Backbone | Sensors | Shape |
 |---|---|---|---|
-| [`full.txt`](full.txt) | init, elk, dashboard, utilities, payload-analysis | every sensor stack `deploy.yml` currently syncs | the standard deployment -- everything this repo ships |
-| [`ics-focused.txt`](ics-focused.txt) | init, elk, dashboard, utilities | conpot, dnp3 | OT/ICS-only exposure -- skip the general-purpose/web/SSH/legacy-protocol sensors entirely |
-| [`minimal-web.txt`](minimal-web.txt) | init, elk, dashboard, utilities | http, tanner | web-attack-focused -- HTTP/API honeypot + SNARE/TANNER, skip ICS/SSH/legacy-protocol sensors |
+| [`full.txt`](../../deploy-profiles/full.txt) | init, elk, dashboard, utilities, payload-analysis | every sensor stack `deploy.yml` currently syncs | the standard deployment -- everything this repo ships |
+| [`ics-focused.txt`](../../deploy-profiles/ics-focused.txt) | init, elk, dashboard, utilities | conpot, dnp3 | OT/ICS-only exposure -- skip the general-purpose/web/SSH/legacy-protocol sensors entirely |
+| [`minimal-web.txt`](../../deploy-profiles/minimal-web.txt) | init, elk, dashboard, utilities | http, tanner | web-attack-focused -- HTTP/API honeypot + SNARE/TANNER, skip ICS/SSH/legacy-protocol sensors |
 
 `init`, `elk`, and `dashboard` are structural dependencies for any profile
 that includes at least one sensor -- `validate-profile.sh` (below) enforces
