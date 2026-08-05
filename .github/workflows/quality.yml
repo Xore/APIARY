@@ -176,6 +176,9 @@ jobs:
       - name: geoip-honeypot ingest pipeline (#563)
         shell: bash
         run: analysis/tests/test_geoip_pipeline.sh
+      - name: dionaea-incidents index template (#565)
+        shell: bash
+        run: analysis/tests/test_dionaea_incidents_index.sh
       - name: Vendored YARA corpus is intact and loadable
         shell: bash
         run: |
