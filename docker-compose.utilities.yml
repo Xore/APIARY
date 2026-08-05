@@ -239,6 +239,14 @@ services:
       - REPORTER_COOLDOWN_HOURS=${REPORTER_COOLDOWN_HOURS:-24}
       - REPORTER_MIN_EVENTS=${REPORTER_MIN_EVENTS:-3}
       - REPORTER_POLL_SECONDS=30
+      # #153 Phase 3: optional GreyNoise RIOT reputation guard, skips
+      # known-benign infrastructure (DNS resolvers, CDN edges, SaaS
+      # scanners) before it ever reaches a reporting decision. Disabled by
+      # default -- GREYNOISE_API_KEY alone does nothing until this is set.
+      - GREYNOISE_ENABLED=${GREYNOISE_ENABLED:-0}
+      - GREYNOISE_API_KEY=${GREYNOISE_API_KEY:-}
+      - GREYNOISE_FAIL_MODE=${GREYNOISE_FAIL_MODE:-open}
+      - GREYNOISE_CACHE_HOURS=${GREYNOISE_CACHE_HOURS:-24}
     volumes:
       - /opt/stacks/honeypot-stack/logs:/logs:ro
       - reporter-data:/data

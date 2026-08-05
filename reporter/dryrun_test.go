@@ -61,7 +61,7 @@ func TestDryRunIsTheDefaultAndNeverReachesTheNetwork(t *testing.T) {
 		t.Fatalf("newBlocklistDeSender with live=false returned %T, want dryRunBlocklistDeSender", sendBD)
 	}
 
-	proc := newProcessor(wl, st, send, sendBD, al, 24*time.Hour, 1)
+	proc := newProcessor(wl, nil, st, send, sendBD, al, 24*time.Hour, 1)
 
 	// A real-shaped cowrie login attempt from a real-looking public IP --
 	// exactly the event that, if this reporter were live, would produce an

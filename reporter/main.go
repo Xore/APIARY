@@ -98,7 +98,26 @@ func main() {
 
 	cooldown := time.Duration(getenvInt("REPORTER_COOLDOWN_HOURS", 24)) * time.Hour
 	minHits := getenvInt("REPORTER_MIN_EVENTS", 3)
-	proc := newProcessor(wl, st, send, sendBD, audit, cooldown, minHits)
+
+	// GreyNoise RIOT reputation guard (#153, Phase 3) -- optional. Unset
+	// GREYNOISE_ENABLED (or leaving it at its default "0") disables the
+	// check entirely rather than running it half-configured: a checker
+	// with no API key still works against RIOT's community tier, but an
+	// operator who hasn't thought about it yet gets the old Phase 1/2
+	// behavior, not a silently-degraded new one.
+	var gn *greynoiseChecker
+	if getenvBool("GREYNOISE_ENABLED") {
+		failOpen := getenv("GREYNOISE_FAIL_MODE", "open") != "closed"
+		cacheTTL := time.Duration(getenvInt("GREYNOISE_CACHE_HOURS", 24)) * time.Hour
+		minCallGap := time.Duration(getenvInt("GREYNOISE_MIN_CALL_MS", 200)) * time.Millisecond
+		cacheMax := getenvInt("GREYNOISE_CACHE_MAX", 50_000)
+		gn = newGreynoiseChecker(st, getenv("GREYNOISE_BASE_URL", ""), os.Getenv("GREYNOISE_API_KEY"), failOpen, cacheTTL, minCallGap, cacheMax)
+		log.Printf("reporter: GreyNoise RIOT check enabled (fail_open=%v, cache_ttl=%s)", failOpen, cacheTTL)
+	}
+
+	proc := newProcessor(wl, gn, st, send, sendBD, audit, cooldown, minHits)
+
+	go writeMetricsLoop(dataDir, time.Duration(getenvInt("REPORTER_METRICS_SECONDS", 60))*time.Second)
 
 	tailer := newTailer(st)
 	interval := time.Duration(getenvInt("REPORTER_POLL_SECONDS", 30)) * time.Second

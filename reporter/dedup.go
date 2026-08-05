@@ -46,7 +46,12 @@ func openStore(path string) (*store, error) {
 		db.Close()
 		return nil, err
 	}
-	return &store{db: db}, nil
+	s := &store{db: db}
+	if err := s.ensureGreynoiseTable(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return s, nil
 }
 
 func (s *store) Close() error { return s.db.Close() }
