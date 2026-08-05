@@ -354,6 +354,41 @@ func TestClassifyDNP3SurfacesLinkFunctionAndAddresses(t *testing.T) {
 	}
 }
 
+// TestClassifyDNSHoneypotSurfacesDroppedResponse is a regression test for
+// #571: dns-honeypot's own anti-amplification cap (dns.go's ratioCap) can
+// suppress a response entirely and marks that by appending "_dropped" to
+// the logged event ("query_dropped") -- a real, already-in-ES signal that
+// classify.go never surfaced, making a capped response indistinguishable
+// from a normally-answered one.
+func TestClassifyDNSHoneypotSurfacesDroppedResponse(t *testing.T) {
+	answered := classify(map[string]any{
+		"sensor": "dns-honeypot", "event": "query", "query": "example.com.", "qtype": float64(1),
+	}, "dns-honeypot")
+	if strings.Contains(answered.detail, "suppressed") {
+		t.Fatalf("a normally-answered query must not be marked suppressed: %q", answered.detail)
+	}
+
+	dropped := classify(map[string]any{
+		"sensor": "dns-honeypot", "event": "query_dropped", "query": "example.com.", "qtype": float64(1),
+	}, "dns-honeypot")
+	if !strings.Contains(dropped.detail, "suppressed") {
+		t.Fatalf("a dropped response was not marked distinctly: %q", dropped.detail)
+	}
+	if dropped.detail == answered.detail {
+		t.Fatalf("dropped and answered queries produced identical detail")
+	}
+
+	// The suffix check must also catch malformed_query_dropped, not just
+	// query_dropped -- dns-honeypot appends "_dropped" to whatever event
+	// value it already had (main.go's e.Event += "_dropped").
+	malformedDropped := classify(map[string]any{
+		"sensor": "dns-honeypot", "event": "malformed_query_dropped",
+	}, "dns-honeypot")
+	if !strings.Contains(malformedDropped.detail, "suppressed") {
+		t.Fatalf("a dropped malformed query was not marked distinctly: %q", malformedDropped.detail)
+	}
+}
+
 // TestClassifyTannerSurfacesDetectionName is a regression test found via a
 // live ES document: tanner's own emulator classifies every request
 // (response_msg.response.message.detection.name), but this was never read
