@@ -128,8 +128,17 @@ LOGS_SHARE      = f'\\\\{VM_HOST}\\Logs'
 # file) is deliberately left out of GATEWAY_SERVICES because in-guest
 # FakeNet-NG (started by the orchestrator inside the guest itself) already
 # supersedes its job -- see docker-compose.sandbox.yml's own header comment.
+# Deliberately NOT derived from __file__: install-worker.sh installs this
+# script to /usr/local/libexec/honeypot-sandbox/windows/orchestrate/, a
+# directory tree completely unrelated to the repo checkout that actually
+# holds docker-compose.sandbox.yml (/var/dockge/stacks/honeypot-stack/ by
+# convention -- see scripts/install-homeserver.conf.example's REPO_DIR).
+# A path derived from the installed location would never exist, and did
+# not on this host -- confirmed live 2026-08-05 relative to the same
+# GOLDEN_IMAGE/VM_DISK convention above, absolute and hardcoded rather than
+# computed from where this file happens to run from.
 GATEWAY_COMPOSE  = Path(os.environ.get('SANDBOX_GATEWAY_COMPOSE',
-                        str(Path(__file__).resolve().parents[3] / 'docker-compose.sandbox.yml')))
+                        '/var/dockge/stacks/honeypot-stack/docker-compose.sandbox.yml'))
 GATEWAY_SERVICES = ['zeek', 'suricata', 'tcpdump']
 GATEWAY_ENABLED  = os.environ.get('SANDBOX_GATEWAY_DISABLED', '') != '1'
 

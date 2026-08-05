@@ -29,6 +29,12 @@ VM_DOMAIN=win11-sandbox
 GOLDEN_IMAGE=/var/dockge/sandbox/golden-images/win11-analysis.qcow2
 VM_DISK=/var/dockge/sandbox/vms/win11-sandbox.qcow2
 
+# #510: Zeek/Suricata/tcpdump gateway sniffers, started/stopped per
+# detonation. Not derived from this script's own installed location
+# (/usr/local/libexec/...) -- only the repo checkout below actually has
+# docker-compose.sandbox.yml. Override if your checkout lives elsewhere.
+SANDBOX_GATEWAY_COMPOSE=/var/dockge/stacks/honeypot-stack/docker-compose.sandbox.yml
+
 # ── Guest access (WinRM over the isolated sandbox bridge) ────────────────
 # 10.10.10.0/24 has no route to the WAN; the host firewall drops forwarding.
 VM_HOST=10.10.10.2
