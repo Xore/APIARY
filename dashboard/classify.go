@@ -473,6 +473,18 @@ func classify(e map[string]any, dirSensor string) event {
 		if kind == "cve_2018_0101_payload" {
 			ev.command = str(e["data"])
 			ev.detail += "  payload: " + ev.command
+		} else if kind == "post" {
+			// #620: every POST body reaches ES fine (webvpn.go's servePOST
+			// logs it unconditionally), but only the CVE-2018-0101-shaped
+			// payload above ever populated ev.command -- a crafted
+			// submission against the fake /+CSCOE+/logon.html login page
+			// that isn't that specific CVE shape was captured end-to-end
+			// and simply invisible in the dashboard. "body:" instead of
+			// "payload:" keeps the two visually distinct at a glance.
+			if body := str(e["data"]); body != "" {
+				ev.command = body
+				ev.detail += "  body: " + body
+			}
 		}
 		if kind == "ike_unexpected_exchange" {
 			if d := str(e["data"]); d != "" {
