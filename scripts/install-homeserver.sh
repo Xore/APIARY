@@ -841,6 +841,30 @@ step_ollama_model_pull() {
   docker exec ghidra-ollama-1 ollama pull "$model"
 }
 
+step_ghidra_worker_install() {
+  # #636: the two steps above only bring up the Docker containers (ghidra
+  # REST API, ollama, statictools) -- confirmed live that this alone leaves
+  # automated triage completely non-functional. Nothing actually reads
+  # captured binaries and submits them; that's ghidra-worker.py, a
+  # host-level systemd service install-analysis-host.sh installs and this
+  # script never called. Zero completed analyses and no systemd unit at all
+  # were found on a "healthy" fresh install before this step existed.
+  #
+  # --stack-dir "": tells install-analysis-host.sh to reconcile the compose
+  # stack in place from this checkout instead of deploying a second copy to
+  # /opt/stacks/ghidra. That path resolves to the exact same already-running
+  # Dockge stack step_ghidra_stack_provision set up (both share the "ghidra"
+  # compose project name, derived from the directory holding the compose
+  # file) -- a second deploy path would just be a second file to keep in
+  # sync with this one. `docker compose up -d` against an already-matching
+  # project is a safe no-op reconciliation here, not a duplicate deployment.
+  #
+  # --skip-pull: step_ollama_model_pull above already pulled the pinned
+  # model; re-pulling here would just be a redundant round trip to verify a
+  # manifest that's already known current.
+  "$REPO_DIR/analysis/ghidra/install-analysis-host.sh" --stack-dir "" --skip-pull
+}
+
 step_ml_worker_start() {
   # Same relative-build-context issue as ghidra (docker-compose.yml here has
   # `build: context: .`) -- symlink the whole directory, not just the
@@ -1103,12 +1127,14 @@ if [[ "$ENABLE_GPU_STACK" == "true" ]]; then
   run_step ghidra-provision      "Link ghidra compose.yml"            step_ghidra_stack_provision
   run_step ghidra-start          "Start ghidra/ollama stack"          step_ghidra_stack_start
   run_step ollama-model-pull     "Pull pinned Ollama model"           step_ollama_model_pull
+  run_step ghidra-worker-install "Install ghidra-worker.py systemd service" step_ghidra_worker_install
   run_step ml-worker-start       "Start ml-worker"                    step_ml_worker_start
   run_step llm-worker-selftest   "Run llm-worker --selftest"          step_llm_worker_selftest
 else
   skip_step ghidra-provision "Link ghidra compose.yml" "ENABLE_GPU_STACK=false"
   skip_step ghidra-start "Start ghidra/ollama stack" "ENABLE_GPU_STACK=false"
   skip_step ollama-model-pull "Pull pinned Ollama model" "ENABLE_GPU_STACK=false"
+  skip_step ghidra-worker-install "Install ghidra-worker.py systemd service" "ENABLE_GPU_STACK=false"
   skip_step ml-worker-start "Start ml-worker" "ENABLE_GPU_STACK=false"
   skip_step llm-worker-selftest "Run llm-worker --selftest" "ENABLE_GPU_STACK=false"
 fi
