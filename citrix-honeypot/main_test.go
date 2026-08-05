@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"io"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -21,6 +24,34 @@ func TestGETRootServesLoginPage(t *testing.T) {
 		if got := w.Header().Get("Server"); got != "Apache" {
 			t.Fatalf("path %q: Server header = %q, want Apache", p, got)
 		}
+	}
+}
+
+func TestUnhandledMethodIsLoggedAndReturnsEmpty200(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	defer func() { os.Stdout = orig }()
+
+	req := httptest.NewRequest("OPTIONS", "/foo", nil)
+	rec := httptest.NewRecorder()
+	newTestHandler().ServeHTTP(rec, req)
+
+	w.Close()
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+
+	if rec.Code != 200 || rec.Body.Len() != 0 {
+		t.Fatalf("got %d %q, want empty 200", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Server"); got != "Apache" {
+		t.Fatalf("Server header = %q, want Apache", got)
+	}
+	if !strings.Contains(buf.String(), `"event":"method_options"`) {
+		t.Fatalf("expected method_options event logged, got %q", buf.String())
 	}
 }
 
