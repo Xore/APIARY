@@ -659,7 +659,7 @@ host-owned worker drains the request spool, talks to a headless Ghidra REST
 service and a local-only fuzzy-hashing/structural-parsing sidecar
 (`analysis/ghidra/statictools/`), and optionally an on-host language model for
 a first-pass triage opinion — never a hosted one, and never given anything but
-what Ghidra already extracted. See [`../analysis/ghidra/README.md`](../analysis/ghidra/README.md)
+what Ghidra already extracted. See [`analysis/ghidra/README.md`](analysis/ghidra/README.md)
 for the full pipeline.
 
 ## Sandbox submission, detonation, and result return
