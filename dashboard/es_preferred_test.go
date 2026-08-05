@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,25 +12,29 @@ import (
 )
 
 // esSensorAndOverviewStub answers both request shapes a rebuild() cycle
-// makes once s.es is configured: the ES-preferred per-sensor GET (matched
-// on event.sensor:<name> in the query string, honeypotSearchStub's own
-// convention) and the #39 overview aggregation POST (an empty response is
-// fine -- these tests aren't about the aggregate fields).
+// makes once s.es is configured: loadSensorEventsES's per-sensor POST
+// (#583: a term-query-on-event.sensor body, same as honeypotSearchStub's
+// convention in events_es_test.go) and the #39 overview aggregation POST
+// (an empty response is fine -- these tests aren't about the aggregate
+// fields). Both now POST to the same /honeypot-v2-*/_search path, so the
+// body's shape -- not the path or method -- is what distinguishes them.
 func esSensorAndOverviewStub(t *testing.T, docsBySensor map[string][]map[string]any) http.HandlerFunc {
 	t.Helper()
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodPost {
+		body, _ := io.ReadAll(r.Body)
+		var req struct {
+			Query struct {
+				Term map[string]string `json:"term"`
+			} `json:"query"`
+		}
+		json.Unmarshal(body, &req)
+		sensor, isSensorQuery := req.Query.Term["event.sensor"]
+		if !isSensorQuery {
 			json.NewEncoder(w).Encode(esOverviewAggResponse{})
 			return
 		}
-		q := r.URL.Query().Get("q")
-		var docs []map[string]any
-		for sensor, d := range docsBySensor {
-			if q == `event.sensor:"`+sensor+`"` {
-				docs = d
-			}
-		}
+		docs := docsBySensor[sensor]
 		type hit struct {
 			Source struct {
 				Honeypot map[string]any `json:"honeypot"`

@@ -2,8 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
-	"net/url"
 )
 
 // esOnlySensors lists dirSensor values (the same names logFiles()'s
@@ -54,41 +52,98 @@ var esOnlySensors = []string{"multipot", "dicompot", "dns-honeypot", "citrix-hon
 // classifyLines (log_cache.go) parses out of a log line -- Filebeat's ndjson
 // parser nests it there unmodified (target: "honeypot" in filebeat.yml) --
 // so it feeds classify() identically regardless of source.
+// esEventsPageSize is Elasticsearch's own default index.max_result_window
+// ceiling for a single _search request -- not an arbitrary app-level choice,
+// the actual limit a plain query can return without search_after/scroll/PIT.
+const esEventsPageSize = 10000
+
+// esEventsMaxPages bounds loadSensorEventsES's search_after loop (#583): a
+// hard cap on how many pages one rebuild cycle will fetch per sensor, so a
+// pathological burst can't make a single rebuild run unboundedly long. 10
+// pages * esEventsPageSize is 100,000 events for one sensor in one rebuild
+// cycle -- far beyond any real burst this stack has seen live; if that cap
+// is ever actually hit, the remaining events are picked up on the *next*
+// rebuild cycle exactly as the pre-#583 code silently did for everything
+// past 10,000, just an order of magnitude later.
+const esEventsMaxPages = 10
+
 func (s *store) loadSensorEventsES(es *esClient, dirSensor string) ([]cachedEvent, bool) {
 	if es == nil {
 		return nil, false
 	}
-	q := url.QueryEscape(fmt.Sprintf(`event.sensor:%q`, dirSensor))
-	path := fmt.Sprintf("/honeypot-v2-*/_search?size=10000&sort=%%40timestamp%%3Adesc&q=%s", q)
-	b, err := es.request(path)
-	if err != nil {
-		return nil, false
-	}
-	var v struct {
-		Hits struct {
-			Hits []struct {
-				Source struct {
-					Honeypot map[string]any `json:"honeypot"`
-				} `json:"_source"`
+
+	var events []cachedEvent
+	var searchAfter []any
+	for page := 0; page < esEventsMaxPages; page++ {
+		// #583: a plain size=10000 GET query silently dropped every event
+		// past the first 10,000 in one rebuild cycle during a burst --
+		// Elasticsearch's own max_result_window ceiling for a single
+		// request, not something raising `size` further can fix. Paginates
+		// via search_after instead, which needs a real query body (not the
+		// simple ?q= query-string form) and a fully stable sort:
+		// @timestamp alone can collide at this volume, so _id is added as
+		// a tie-breaker -- without one, search_after can silently skip or
+		// duplicate hits that share a timestamp across page boundaries.
+		body := map[string]any{
+			"size": esEventsPageSize,
+			"sort": []map[string]any{
+				{"@timestamp": "desc"},
+				{"_id": "desc"},
+			},
+			"query": map[string]any{
+				"term": map[string]any{"event.sensor": dirSensor},
+			},
+		}
+		if searchAfter != nil {
+			body["search_after"] = searchAfter
+		}
+		reqBody, err := json.Marshal(body)
+		if err != nil {
+			return nil, false
+		}
+		b, err := es.searchBody("/honeypot-v2-*/_search", reqBody)
+		if err != nil {
+			if page == 0 {
+				return nil, false
+			}
+			break // later page failed -- keep what earlier pages already returned
+		}
+		var v struct {
+			Hits struct {
+				Hits []struct {
+					Sort   []any `json:"sort"`
+					Source struct {
+						Honeypot map[string]any `json:"honeypot"`
+					} `json:"_source"`
+				} `json:"hits"`
 			} `json:"hits"`
-		} `json:"hits"`
-	}
-	if json.Unmarshal(b, &v) != nil {
-		return nil, false
-	}
-	events := make([]cachedEvent, 0, len(v.Hits.Hits))
-	for _, h := range v.Hits.Hits {
-		e := h.Source.Honeypot
-		if e == nil {
-			continue
 		}
-		ev := classify(e, dirSensor)
-		if ev.skip {
-			continue
+		if json.Unmarshal(b, &v) != nil {
+			if page == 0 {
+				return nil, false
+			}
+			break
 		}
-		ev.proto = normalizeProtocol(ev.proto)
-		s.captureScriptPayload(&ev)
-		events = append(events, cachedEvent{ev: ev, srcPort: eventSrcPort(e)})
+		if len(v.Hits.Hits) == 0 {
+			break
+		}
+		for _, h := range v.Hits.Hits {
+			e := h.Source.Honeypot
+			if e == nil {
+				continue
+			}
+			ev := classify(e, dirSensor)
+			if ev.skip {
+				continue
+			}
+			ev.proto = normalizeProtocol(ev.proto)
+			s.captureScriptPayload(&ev)
+			events = append(events, cachedEvent{ev: ev, srcPort: eventSrcPort(e)})
+		}
+		if len(v.Hits.Hits) < esEventsPageSize {
+			break // last page
+		}
+		searchAfter = v.Hits.Hits[len(v.Hits.Hits)-1].Sort
 	}
 	return events, true
 }
