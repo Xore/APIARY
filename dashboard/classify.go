@@ -318,6 +318,40 @@ func classify(e map[string]any, dirSensor string) event {
 		return ev
 	}
 
+	// ---- dnp3-honeypot (#570) -----------------------------------------------
+	// dnp3-honeypot/main.go emits function (link-layer function name),
+	// frame_hex, and dnp3_source/dnp3_destination (link-layer addresses) on
+	// every real protocol interaction, but had no dedicated case here --
+	// every event fell through to the generic fallback below, which only
+	// ever showed the bare event field ("frame"/"connect"/"malformed_frame")
+	// with no indication of which link function was invoked or which RTU
+	// address was targeted.
+	if s, ok := e["sensor"].(string); ok && s == "dnp3" {
+		ev.sensor = "dnp3"
+		ev.proto = "dnp3"
+		ev.port = num(e["port"])
+		kind := str(e["event"])
+		switch kind {
+		case "frame":
+			ev.detail = "link " + str(e["function"])
+			// #610: app_function is only present when the frame carries a
+			// full transport+application-layer segment past the link
+			// header -- most scanners never send one, so this is absent
+			// far more often than not.
+			if app := str(e["app_function"]); app != "" {
+				ev.detail += ", app " + app
+			}
+			if src, dst := num(e["dnp3_source"]), num(e["dnp3_destination"]); src != "" || dst != "" {
+				ev.detail += fmt.Sprintf(" (src %s -> dst %s)", src, dst)
+			}
+		case "malformed_frame":
+			ev.detail = "malformed frame"
+		default:
+			ev.detail = kind
+		}
+		return ev
+	}
+
 	// ---- dns-honeypot (#415) ------------------------------------------------
 	// query is the actual domain asked for -- deliberately not confused with
 	// the "event" field (also sometimes literally the string "query"): a
