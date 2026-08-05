@@ -23,7 +23,7 @@ x-runtime-defaults: &runtime-defaults
 services:
   ip-enrichment-worker:
     <<: *runtime-defaults
-    build: /opt/stacks/honeypot-stack/ip-enrichment-worker
+    build: /opt/stacks/apiary/ip-enrichment-worker
     container_name: hp-ip-enrichment-worker
     restart: unless-stopped
     network_mode: none
@@ -40,9 +40,9 @@ services:
       # one subdirectory this worker actually writes to (Docker resolves the
       # more specific bind for overlapping paths -- same pattern as any
       # read-only-parent/read-write-child bind-mount pair).
-      - /opt/stacks/honeypot-stack/logs:/logs:ro
-      - /opt/stacks/honeypot-stack/logs/enriched:/logs/enriched:rw
-      - /opt/stacks/honeypot-stack/state/ip-enrichment-worker:/state/ip-enrichment-worker:rw
+      - /opt/stacks/apiary/logs:/logs:ro
+      - /opt/stacks/apiary/logs/enriched:/logs/enriched:rw
+      - /opt/stacks/apiary/state/ip-enrichment-worker:/state/ip-enrichment-worker:rw
     deploy:
       resources:
         limits:

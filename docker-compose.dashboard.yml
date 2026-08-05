@@ -65,7 +65,7 @@ x-dashboard-volumes: &dashboard-volumes
   # EPERM to container processes), and rslave lets later host-side
   # remounts propagate in without recreating the container.
   - type: bind
-    source: /opt/stacks/honeypot-stack/logs
+    source: /opt/stacks/apiary/logs
     target: /logs
     read_only: true
     bind:
@@ -73,8 +73,8 @@ x-dashboard-volumes: &dashboard-volumes
   # Optional GeoIP: drop a "start_ip,end_ip,country" CSV as
   # dashboard/geoip/country.csv (DB-IP lite export works as-is). Absent →
   # geo stays off; cf-ipcountry still enriches tanner/http events.
-  - /opt/stacks/honeypot-stack/dashboard/geoip:/geoip:ro
-  - /opt/stacks/honeypot-stack/analysis/geoip:/geoip-mmdb:ro
+  - /opt/stacks/apiary/dashboard/geoip:/geoip:ro
+  - /opt/stacks/apiary/analysis/geoip:/geoip-mmdb:ro
   # Unified read-only payload inventory: Dionaea binaries, Cowrie
   # transfers, and dashboard-retained inline script artifacts are all
   # listed, source-labelled, analysed, and downloadable from /payloads.
@@ -82,7 +82,7 @@ x-dashboard-volumes: &dashboard-volumes
   # this file's header) -- dionaea and yara-scanner (main stack) write
   # into them, this stack only ever reads.
   - dionaea-lib:/dionaea-lib:ro
-  - /opt/stacks/honeypot-stack/logs/cowrie/downloads:/cowrie-downloads:ro
+  - /opt/stacks/apiary/logs/cowrie/downloads:/cowrie-downloads:ro
   - dashboard-state:/state
   - yara-results:/yara:ro
   - /var/lib/honeypot-sandbox/export:/sandbox-results:ro
@@ -162,7 +162,7 @@ services:
   # duplication there is harmless, unlike a webhook POST or a generated PDF.
   dashboard:
     <<: *runtime-defaults
-    build: /opt/stacks/honeypot-stack/dashboard
+    build: /opt/stacks/apiary/dashboard
     # Explicit shared tag: without it Compose auto-names each service's
     # image after <project>_<service> (dashboard vs. dashboard-b would
     # build and tag the identical Dockerfile twice). One shared tag means
@@ -296,7 +296,7 @@ services:
   # added DASHBOARD_BACKGROUND_LOOPS=false. Keep the two in sync by hand.
   dashboard-b:
     <<: *runtime-defaults
-    build: /opt/stacks/honeypot-stack/dashboard
+    build: /opt/stacks/apiary/dashboard
     image: honeypot-dashboard:latest
     container_name: hp-dashboard-b
     restart: unless-stopped
@@ -392,7 +392,7 @@ services:
   # replica count, then `docker compose up -d --scale es-results-importer=N`.
   es-results-importer:
     <<: *runtime-defaults
-    build: /opt/stacks/honeypot-stack/analysis/es-results-importer
+    build: /opt/stacks/apiary/analysis/es-results-importer
     container_name: hp-es-results-importer
     restart: unless-stopped
     volumes:
@@ -413,7 +413,7 @@ services:
       # read-only, same bind-mount source path the cowrie service itself
       # writes into, mirrored into ES so the dashboard never has to open
       # this file directly.
-      - /opt/stacks/honeypot-stack/logs/cowrie/tty:/cowrie-tty:ro
+      - /opt/stacks/apiary/logs/cowrie/tty:/cowrie-tty:ro
       # #666: reporter's own metrics.json (attempted/suppressed/dry_run/
       # sent/failed counters) -- read-only, same cross-stack shared-name
       # mechanism as dionaea-lib above. Per #638, this is the ONLY path
@@ -454,7 +454,7 @@ services:
 
   services-adapter:
     <<: *runtime-defaults
-    build: /opt/stacks/honeypot-stack/services-adapter
+    build: /opt/stacks/apiary/services-adapter
     container_name: hp-services-adapter
     restart: unless-stopped
     volumes:

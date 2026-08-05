@@ -17,7 +17,7 @@ x-runtime-defaults: &runtime-defaults
 services:
   dnp3:
     <<: *runtime-defaults
-    build: /opt/stacks/honeypot-stack/dnp3-honeypot
+    build: /opt/stacks/apiary/dnp3-honeypot
     container_name: hp-dnp3
     restart: unless-stopped
     # #128: waits on the marker directly instead of depends_on-ing
@@ -36,8 +36,8 @@ services:
     ports:
       - ${HP_BIND:-10.8.0.2}:20000:20000
     volumes:
-      - /opt/stacks/honeypot-stack/logs/dnp3:/var/log/honeypot
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+      - /opt/stacks/apiary/logs/dnp3:/var/log/honeypot
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
     # #239: measured baseline, same "run it, then reduce" methodology as
     # #89/#118's cap_drop passes. This image is FROM scratch (no shell, no
     # package manager) and its only runtime write anywhere -- confirmed by

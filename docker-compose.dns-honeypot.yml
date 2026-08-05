@@ -15,7 +15,7 @@ x-runtime-defaults: &runtime-defaults
 services:
   dns-honeypot:
     <<: *runtime-defaults
-    build: /opt/stacks/honeypot-stack/dns-honeypot
+    build: /opt/stacks/apiary/dns-honeypot
     container_name: hp-dns-honeypot
     restart: unless-stopped
     # #128: waits on the marker directly instead of depends_on-ing
@@ -31,8 +31,8 @@ services:
     ports:
       - ${HP_BIND:-10.8.0.2}:53:53/udp
     volumes:
-      - /opt/stacks/honeypot-stack/logs/dns-honeypot:/var/log/honeypot
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+      - /opt/stacks/apiary/logs/dns-honeypot:/var/log/honeypot
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
     read_only: true
     networks: [dns_honeypot_net]
     healthcheck:

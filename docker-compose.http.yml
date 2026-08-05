@@ -16,7 +16,7 @@ x-runtime-defaults: &runtime-defaults
 services:
   http-honeypot:
     <<: *runtime-defaults
-    build: /opt/stacks/honeypot-stack/http-honeypot
+    build: /opt/stacks/apiary/http-honeypot
     container_name: hp-http
     restart: unless-stopped
     # #128: waits on the marker directly instead of depends_on-ing
@@ -28,8 +28,8 @@ services:
     ports:
       - ${HP_BIND:-10.8.0.2}:19081:8080
     volumes:
-      - /opt/stacks/honeypot-stack/logs/http-honeypot:/var/log/honeypot
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+      - /opt/stacks/apiary/logs/http-honeypot:/var/log/honeypot
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
     environment:
       - LISTEN_ADDR=:8080
       - SERVER_HEADER=nginx/1.24.0 (Ubuntu)
@@ -61,7 +61,7 @@ services:
   # DevOps admin panels and OpenAI-compatible bearer-token probes.
   api-honeypot:
     <<: *runtime-defaults
-    build: /opt/stacks/honeypot-stack/http-honeypot
+    build: /opt/stacks/apiary/http-honeypot
     container_name: hp-api-honeypot
     restart: unless-stopped
     # #128: waits on the marker directly instead of depends_on-ing
@@ -73,8 +73,8 @@ services:
     ports:
       - ${HP_BIND:-10.8.0.2}:18083:8080
     volumes:
-      - /opt/stacks/honeypot-stack/logs/api-honeypot:/var/log/honeypot
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+      - /opt/stacks/apiary/logs/api-honeypot:/var/log/honeypot
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
     environment:
       - LISTEN_ADDR=:8080
       - SERVER_HEADER=envoy

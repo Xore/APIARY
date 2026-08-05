@@ -62,9 +62,9 @@ services:
       # JSON_RETENTION_MINUTES directly to override just this service.
       - HONEYPOT_RETENTION_DAYS=${HONEYPOT_RETENTION_DAYS:-30}
     volumes:
-      - /opt/stacks/honeypot-stack/analysis/log-maintenance.sh:/usr/local/bin/log-maintenance.sh:ro
-      - /opt/stacks/honeypot-stack/logs:/logs
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+      - /opt/stacks/apiary/analysis/log-maintenance.sh:/usr/local/bin/log-maintenance.sh:ro
+      - /opt/stacks/apiary/logs:/logs
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
     networks:
       - honeynet
     deploy:
@@ -168,9 +168,9 @@ services:
       - ELASTICSEARCH_URL=http://elasticsearch:9200
       - DISK_CHECK_PATHS=honeypot-logs=/logs:honeypot-state=/state:dionaea-payloads=/dionaea-lib
     volumes:
-      - /opt/stacks/honeypot-stack/analysis/disk-space-check.sh:/usr/local/bin/disk-space-check.sh:ro
-      - /opt/stacks/honeypot-stack/logs:/logs
-      - /opt/stacks/honeypot-stack/state:/state:ro
+      - /opt/stacks/apiary/analysis/disk-space-check.sh:/usr/local/bin/disk-space-check.sh:ro
+      - /opt/stacks/apiary/logs:/logs
+      - /opt/stacks/apiary/state:/state:ro
       - dionaea-lib:/dionaea-lib:ro
     networks:
       - honeynet
@@ -239,7 +239,7 @@ services:
       - HYGIENE_INTERVAL=604800
       - HYGIENE_IMAGE_MAX_AGE_HOURS=168
     volumes:
-      - /opt/stacks/honeypot-stack/analysis/docker-hygiene.sh:/usr/local/bin/docker-hygiene.sh:ro
+      - /opt/stacks/apiary/analysis/docker-hygiene.sh:/usr/local/bin/docker-hygiene.sh:ro
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -261,7 +261,7 @@ services:
   # that state, not just configured not to.
   reporter:
     <<: *runtime-defaults
-    build: /opt/stacks/honeypot-stack/reporter
+    build: /opt/stacks/apiary/reporter
     container_name: hp-reporter
     restart: unless-stopped
     # Root, same reasoning as filebeat (docker-compose.elk.yml): every
@@ -287,9 +287,9 @@ services:
       - GREYNOISE_FAIL_MODE=${GREYNOISE_FAIL_MODE:-open}
       - GREYNOISE_CACHE_HOURS=${GREYNOISE_CACHE_HOURS:-24}
     volumes:
-      - /opt/stacks/honeypot-stack/logs:/logs:ro
+      - /opt/stacks/apiary/logs:/logs:ro
       - reporter-data:/data
-      - /opt/stacks/honeypot-stack/reporter/whitelist.txt:/config/whitelist.txt:ro
+      - /opt/stacks/apiary/reporter/whitelist.txt:/config/whitelist.txt:ro
     # Deliberately not on honeynet: this container has no legitimate reason
     # to reach any other container on that network, only to read log files
     # (bind mount, not network) and -- once live -- reach AbuseIPDB over the

@@ -13,7 +13,7 @@ x-runtime-defaults: &runtime-defaults
 services:
   multipot:
     <<: *runtime-defaults
-    build: /opt/stacks/honeypot-stack/multipot
+    build: /opt/stacks/apiary/multipot
     container_name: hp-multipot
     restart: unless-stopped
     # #128: waits on the marker directly instead of depends_on-ing
@@ -36,8 +36,8 @@ services:
       - ${HP_BIND:-10.8.0.2}:2575:2575
       - ${HP_BIND:-10.8.0.2}:5555:5555
     volumes:
-      - /opt/stacks/honeypot-stack/logs/multipot:/var/log/honeypot
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+      - /opt/stacks/apiary/logs/multipot:/var/log/honeypot
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
     environment:
       - LOG_FILE=/var/log/honeypot/multipot.json
       - MULTIPOT_DISABLE=ftp,mysql,mssql,mongodb

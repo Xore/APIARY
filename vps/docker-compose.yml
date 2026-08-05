@@ -13,10 +13,10 @@
 # Each port here must match the port the app binds to on the home server.
 #
 # Suricata runs here on the VPS and sniffs the public interface.
-# Logs are written to /opt/stacks/honeypot-stack/logs/suricata/ on the VPS.
+# Logs are written to /opt/stacks/apiary/logs/suricata/ on the VPS.
 # EveBox on the home server reads them via sshfs/NFS mount over WireGuard:
-#   sshfs root@10.8.0.1:/opt/stacks/honeypot-stack/logs/suricata \
-#         /opt/stacks/honeypot-stack/logs/suricata -o ro,allow_other
+#   sshfs root@10.8.0.1:/opt/stacks/apiary/logs/suricata \
+#         /opt/stacks/apiary/logs/suricata -o ro,allow_other
 
 services:
 
@@ -227,8 +227,8 @@ services:
       - "RULES=tcp:22:10.8.0.2:19022 tcp:23:10.8.0.2:19023 tcp:25:10.8.0.2:19025:pp tcp:5432:10.8.0.2:5432:pp tcp:5900:10.8.0.2:5900:pp tcp:6379:10.8.0.2:6379:pp tcp:9200:10.8.0.2:9200:pp tcp:2375:10.8.0.2:2375:pp tcp:110:10.8.0.2:110:pp tcp:143:10.8.0.2:143:pp tcp:1080:10.8.0.2:1080:pp tcp:2575:10.8.0.2:2575:pp tcp:5555:10.8.0.2:5555:pp tcp:11112:10.8.0.2:11112:pp tcp:4443:10.8.0.2:443:pp tcp:8443:10.8.0.2:8443:pp tcp:3389:10.8.0.2:3389:pp tcp:8888:10.8.0.2:18083:pp tcp:8081:10.8.0.2:19081:pp tcp:21:10.8.0.2:21 tcp:135:10.8.0.2:135 tcp:445:10.8.0.2:445 tcp:1433:10.8.0.2:1433 tcp:3306:10.8.0.2:3306 tcp:27017:10.8.0.2:27017 tcp:1723:10.8.0.2:1723 tcp:1883:10.8.0.2:1883 tcp:5060:10.8.0.2:5060 tcp:9100:10.8.0.2:9100 tcp:11211:10.8.0.2:11211 tcp:20000:10.8.0.2:20000:pp tcp:102:10.8.0.2:102:pp tcp:1102:10.8.0.2:1102:pp tcp:2102:10.8.0.2:2102:pp tcp:502:10.8.0.2:502:pp tcp:1502:10.8.0.2:1502:pp tcp:2502:10.8.0.2:2502:pp tcp:2404:10.8.0.2:2404:pp tcp:10001:10.8.0.2:10001:pp tcp:1025:10.8.0.2:1025:pp tcp:50100:10.8.0.2:50100:pp tcp:44818:10.8.0.2:44818:pp udp:69:10.8.0.2:1069 udp:161:10.8.0.2:19161 udp:1900:10.8.0.2:1900 udp:47808:10.8.0.2:47808 udp:623:10.8.0.2:623 udp:5060:10.8.0.2:5060 udp:53:10.8.0.2:53 udp:500:10.8.0.2:500"
     volumes:
       # portbridge connection log — ship this dir to the home stack's
-      # /opt/stacks/honeypot-stack/logs/portbridge so the dashboard ingests it.
-      - /opt/stacks/honeypot-stack/logs/portbridge:/logs/portbridge
+      # /opt/stacks/apiary/logs/portbridge so the dashboard ingests it.
+      - /opt/stacks/apiary/logs/portbridge:/logs/portbridge
       # p0f query socket (see the p0f service below and p0f/p0f.go). :ro --
       # connecting to an existing socket doesn't write through the mount, it
       # only needs the socket file's own permission bits, which the kernel
@@ -290,7 +290,7 @@ services:
           sleep 60
         done
     volumes:
-      - /opt/stacks/honeypot-stack/logs/portbridge:/logs/portbridge
+      - /opt/stacks/apiary/logs/portbridge:/logs/portbridge
     deploy:
       resources:
         limits:
@@ -448,7 +448,7 @@ services:
       # suricata.yaml's af-packet section -- see comment there. A positional
       # BPF arg here is silently ignored in this setup.
     volumes:
-      - /opt/stacks/honeypot-stack/logs/suricata:/var/log/suricata
+      - /opt/stacks/apiary/logs/suricata:/var/log/suricata
       - suricata-rules:/var/lib/suricata
       # No :ro — the jasonish/suricata entrypoint chowns these files before
       # launching Suricata. :ro causes chown to fail and the container to
@@ -517,7 +517,7 @@ services:
       - START_DELAY=60
     volumes:
       - ./suricata-log-maintenance.sh:/usr/local/bin/suricata-log-maintenance.sh:ro
-      - /opt/stacks/honeypot-stack/logs/suricata:/logs/suricata
+      - /opt/stacks/apiary/logs/suricata:/logs/suricata
     deploy:
       resources: { limits: { cpus: "0.1", memory: 32M } }
 
@@ -593,7 +593,7 @@ services:
       - START_DELAY=60
     volumes:
       - ./portbridge-log-maintenance.sh:/usr/local/bin/portbridge-log-maintenance.sh:ro
-      - /opt/stacks/honeypot-stack/logs/portbridge:/logs/portbridge
+      - /opt/stacks/apiary/logs/portbridge:/logs/portbridge
     deploy:
       resources: { limits: { cpus: "0.1", memory: 32M } }
 

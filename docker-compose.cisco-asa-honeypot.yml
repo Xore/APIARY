@@ -17,7 +17,7 @@ x-runtime-defaults: &runtime-defaults
 services:
   cisco-asa-honeypot:
     <<: *runtime-defaults
-    build: /opt/stacks/honeypot-stack/cisco-asa-honeypot
+    build: /opt/stacks/apiary/cisco-asa-honeypot
     container_name: hp-cisco-asa-honeypot
     restart: unless-stopped
     environment:
@@ -35,8 +35,8 @@ services:
       - ${HP_BIND:-10.8.0.2}:8443:8443
       - ${HP_BIND:-10.8.0.2}:500:500/udp
     volumes:
-      - /opt/stacks/honeypot-stack/logs/cisco-asa-honeypot:/var/log/honeypot
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+      - /opt/stacks/apiary/logs/cisco-asa-honeypot:/var/log/honeypot
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
     read_only: true
     networks: [cisco_asa_honeypot_net]
     healthcheck:

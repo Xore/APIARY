@@ -12,7 +12,7 @@
 #
 # pcap subdir: Suricata will NOT create pcap/ automatically.
 # Run once on the host before starting the container:
-#   mkdir -p /opt/stacks/honeypot-stack/logs/suricata/pcap
+#   mkdir -p /opt/stacks/apiary/logs/suricata/pcap
 
 # ── Host mode ────────────────────────────────────────────────────────────────
 # router: VPS sees both inbound and outbound traffic on the public interface.

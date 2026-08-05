@@ -17,7 +17,7 @@ services:
     volumes:
       # Cowrie saves uploaded/downloaded files by SHA-256. Text-only scanning
       # is additionally enforced in worker.py; nothing here is executed.
-      - /opt/stacks/honeypot-stack/logs/cowrie/downloads:/payloads/cowrie:ro
+      - /opt/stacks/apiary/logs/cowrie/downloads:/payloads/cowrie:ro
       # Dashboard-retained inline scripts. The live canary must verify that
       # the unprivileged worker can read the intended files without widening
       # the volume's permissions globally.

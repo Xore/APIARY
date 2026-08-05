@@ -56,12 +56,12 @@ services:
       # BISTREAMS_RETENTION_DAYS itself isn't set.
       - BISTREAMS_RETENTION_DAYS=${BISTREAMS_RETENTION_DAYS:-${HONEYPOT_RETENTION_DAYS:-30}}
     volumes:
-      - /opt/stacks/honeypot-stack/analysis/dedupe-payloads.py:/app/dedupe-payloads.py:ro
-      - /opt/stacks/honeypot-stack/logs/cowrie/downloads:/payloads/cowrie
+      - /opt/stacks/apiary/analysis/dedupe-payloads.py:/app/dedupe-payloads.py:ro
+      - /opt/stacks/apiary/logs/cowrie/downloads:/payloads/cowrie
       - dionaea-lib:/payloads/dionaea
       - dashboard-state:/payloads/scripts
-      - /opt/stacks/honeypot-stack/state/dedupe:/state
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+      - /opt/stacks/apiary/state/dedupe:/state
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
     # Pure local file processing (content hashing, hard-linking duplicates)
     # -- confirmed no socket/requests/urllib use anywhere in
     # dedupe-payloads.py. Never had an explicit networks: entry even before
@@ -86,7 +86,7 @@ services:
   # samples stay read-only and are never interpreted or executed.
   yara-scanner:
     <<: *runtime-defaults
-    build: /opt/stacks/honeypot-stack/analysis/yara
+    build: /opt/stacks/apiary/analysis/yara
     container_name: hp-yara-scanner
     restart: unless-stopped
     network_mode: none
@@ -115,10 +115,10 @@ services:
       - YARA_RESULTS=/results/results.json
     volumes:
       - dionaea-lib:/payloads/dionaea:ro
-      - /opt/stacks/honeypot-stack/logs/cowrie/downloads:/payloads/cowrie:ro
+      - /opt/stacks/apiary/logs/cowrie/downloads:/payloads/cowrie:ro
       - dashboard-state:/payloads/scripts:ro
       - yara-results:/results
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
     deploy:
       resources:
         limits:

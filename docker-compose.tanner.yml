@@ -29,7 +29,7 @@ services:
   # it with a bind mount of the homeserver's /var/run/docker.sock.
   tanner_docker:
     <<: *runtime-defaults
-    build: /opt/stacks/honeypot-stack/tanner/sandbox
+    build: /opt/stacks/apiary/tanner/sandbox
     container_name: hp-tanner-docker
     restart: unless-stopped
     privileged: true
@@ -61,7 +61,7 @@ services:
           memory: 3G
   tanner_redis:
     <<: *runtime-defaults
-    build: /opt/stacks/honeypot-stack/tanner/redis
+    build: /opt/stacks/apiary/tanner/redis
     container_name: hp-tanner-redis
     # Measured against the live baseline (2026-07-31): this service binds only
     # unprivileged ports and needs no capability at all, so nothing is added
@@ -94,7 +94,7 @@ services:
           memory: 256M
   tanner_phpox:
     <<: *runtime-defaults
-    build: /opt/stacks/honeypot-stack/tanner/phpox
+    build: /opt/stacks/apiary/tanner/phpox
     container_name: hp-tanner-phpox
     # Measured against the live baseline (2026-07-31): this service binds only
     # unprivileged ports and needs no capability at all, so nothing is added
@@ -122,7 +122,7 @@ services:
           memory: 512M
   tanner_api:
     <<: *runtime-defaults
-    build: /opt/stacks/honeypot-stack/tanner/tanner
+    build: /opt/stacks/apiary/tanner/tanner
     container_name: hp-tanner-api
     # Measured against the live baseline (2026-07-31): this service binds only
     # unprivileged ports and needs no capability at all, so nothing is added
@@ -138,7 +138,7 @@ services:
       - /tmp/tanner:uid=65534,gid=65534
       - /var/log/tanner:uid=65534,gid=65534
     volumes:
-      - /opt/stacks/honeypot-stack/tanner/tanner/config.yaml:/opt/tanner/data/config.yaml:ro
+      - /opt/stacks/apiary/tanner/tanner/config.yaml:/opt/tanner/data/config.yaml:ro
     depends_on:
       tanner_redis:
         condition: service_healthy
@@ -152,7 +152,7 @@ services:
           memory: 1G
   tanner_web:
     <<: *runtime-defaults
-    build: /opt/stacks/honeypot-stack/tanner/tanner
+    build: /opt/stacks/apiary/tanner/tanner
     container_name: hp-tanner-web
     # Measured against the live baseline (2026-07-31): this service binds only
     # unprivileged ports and needs no capability at all, so nothing is added
@@ -168,7 +168,7 @@ services:
       - /tmp/tanner:uid=65534,gid=65534
       - /var/log/tanner:uid=65534,gid=65534
     volumes:
-      - /opt/stacks/honeypot-stack/tanner/tanner/config.yaml:/opt/tanner/data/config.yaml:ro
+      - /opt/stacks/apiary/tanner/tanner/config.yaml:/opt/tanner/data/config.yaml:ro
     ports:
       - ${HP_BIND:-10.8.0.2}:19091:8091
     depends_on:
@@ -184,7 +184,7 @@ services:
           memory: 1G
   tanner:
     <<: *runtime-defaults
-    build: /opt/stacks/honeypot-stack/tanner/tanner
+    build: /opt/stacks/apiary/tanner/tanner
     container_name: hp-tanner
     # Measured against the live baseline (2026-07-31): this service binds only
     # unprivileged ports and needs no capability at all, so nothing is added
@@ -211,9 +211,9 @@ services:
       - /tmp/tanner:uid=65534,gid=65534
       - /opt/tanner/files:uid=65534,gid=65534
     volumes:
-      - /opt/stacks/honeypot-stack/tanner/tanner/config.yaml:/opt/tanner/data/config.yaml:ro
-      - /opt/stacks/honeypot-stack/logs/tanner:/var/log/tanner
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+      - /opt/stacks/apiary/tanner/tanner/config.yaml:/opt/tanner/data/config.yaml:ro
+      - /opt/stacks/apiary/logs/tanner:/var/log/tanner
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
     depends_on:
       tanner_redis:
         condition: service_healthy
@@ -236,7 +236,7 @@ services:
   snare:
     <<: *runtime-defaults
     build:
-      context: /opt/stacks/honeypot-stack/snare
+      context: /opt/stacks/apiary/snare
       args:
         PAGE_URL: portal.meridian.example
         TANNER: tanner
@@ -271,9 +271,9 @@ services:
     ports:
       - ${HP_BIND:-10.8.0.2}:19082:8080
     volumes:
-      - /opt/stacks/honeypot-stack/logs/snare:/opt/snare
+      - /opt/stacks/apiary/logs/snare:/opt/snare
       - snare-pages:/opt/snare/pages
-      - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
     depends_on:
       tanner:
         condition: service_started
