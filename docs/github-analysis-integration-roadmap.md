@@ -103,24 +103,26 @@ create a zero-byte marker file — nothing else.
 
 ## 4. Architecture
 
-```
-honeypot-stack/
-├── analysis/github/                       ← NEW: host-side publisher
-│   ├── process-github-requests.sh         ← validates + de-duplicates the spool
-│   ├── publish-sample.sh                  ← classify → copy → commit → push
-│   ├── collect-results.py                 ← poll Actions run, pull reports back
-│   ├── sync-yara.sh                       ← pull yara-rules/auto/ to the scanner
-│   ├── honeypot-github-publish.path
-│   ├── honeypot-github-publish.service
-│   ├── honeypot-github-collect.timer      ← result polling only, not publication
-│   ├── honeypot-github-collect.service
-│   └── github.env.example
-└── dashboard/
-    ├── github_analysis.go                 ← NEW: mirrors sandbox.go
-    ├── github_analysis_submit.go          ← NEW: mirrors sandbox_submit.go
-    ├── page_github_analysis.go            ← NEW: list + detail page data, mirrors page_sandbox.go
-    ├── ui/github_analysis.html            ← NEW: the markup, alongside ui/sandbox.html
-    └── page_payloads.go                   ← adds the per-row button
+```mermaid
+flowchart TD
+    Root["honeypot-stack/"] --> AG["analysis/github/<br/>NEW: host-side publisher"]
+    Root --> DB["dashboard/"]
+
+    AG --> Process["process-github-requests.sh<br/>validates + de-duplicates the spool"]
+    AG --> Publish["publish-sample.sh<br/>classify → copy → commit → push"]
+    AG --> Collect["collect-results.py<br/>poll Actions run, pull reports back"]
+    AG --> Sync["sync-yara.sh<br/>pull yara-rules/auto/ to the scanner"]
+    AG --> PublishPath["honeypot-github-publish.path"]
+    AG --> PublishService["honeypot-github-publish.service"]
+    AG --> CollectTimer["honeypot-github-collect.timer<br/>result polling only, not publication"]
+    AG --> CollectService["honeypot-github-collect.service"]
+    AG --> EnvExample["github.env.example"]
+
+    DB --> GA["github_analysis.go<br/>NEW: mirrors sandbox.go"]
+    DB --> GAS["github_analysis_submit.go<br/>NEW: mirrors sandbox_submit.go"]
+    DB --> PGA["page_github_analysis.go<br/>NEW: list + detail page data, mirrors page_sandbox.go"]
+    DB --> UI["ui/github_analysis.html<br/>NEW: the markup, alongside ui/sandbox.html"]
+    DB --> PP["page_payloads.go<br/>adds the per-row button"]
 ```
 
 The `page_*.go` files hold page **data**; the markup is a file under
