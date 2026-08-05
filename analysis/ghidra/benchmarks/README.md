@@ -41,49 +41,130 @@ reproducibility metadata in the decision record. Do not adjust expected answers
 after seeing a preferred model's output. Promotion and rollback are documented
 in [`../models/README.md`](../models/README.md).
 
-## GPU/model capability probe (`probe-gpu-capabilities.py`)
+## GPU/model capability playbook
 
-`evaluate-models.py` (above) answers "is this model accurate enough for this
-task" — a fixed, narrow question, always run against a specific candidate.
-`probe-gpu-capabilities.py` answers a different, recurring one: "did the
-*hardware or runtime* change in a way that makes re-running the accuracy
-benchmark worth it at all." Added under
-[issue #568](https://github.com/Xore/honeypot-stack/issues/568) after that
-exact gap — an 8GB→20GB card swap that sat undetected for a while because
-nothing checked host facts against the manifest's recorded ones — caused a
-stale VRAM assumption to bound every model-selection decision in this
-directory for months.
+`evaluate-models.py` (above) answers "is this model accurate enough for
+this task" — a fixed, narrow question, always run against a specific
+candidate. The tools below answer a different question: "did something
+about the hardware, runtime, or available real data change in a way that
+makes running that benchmark again worth it." Added under
+[issue #568](https://github.com/Xore/honeypot-stack/issues/568)/[#569](https://github.com/Xore/honeypot-stack/issues/569)
+after that exact gap — an 8GB→20GB, Turing→Ada Lovelace card swap that sat
+undetected for months — bounded every model-selection decision in this
+directory on a stale assumption. Formalized as a standing playbook under
+[#637](https://github.com/Xore/honeypot-stack/issues/637).
 
-Two independent, read-only checks against the live Ollama server (no model
-pulled, no container touched, each probed model unloaded afterward the same
-way `evaluate-models.py` does):
+### Continuous: host-drift monitoring already runs, no new schedule needed
+
+`analysis/ghidra/models/model-governance.py`'s `check-runtime` command
+already queries `nvidia-smi` (GPU name/VRAM/driver/compute-capability) and
+diffs it against the manifest's `approved_host` on every run — the exact
+check that would have caught the #568 card swap immediately. It's driven
+by `honeypot-model-drift.timer`, which runs it every 5 minutes once
+`install-analysis-host.sh` has installed and enabled it (this used to
+never happen — `install-homeserver.sh` never called that installer; fixed
+under [#636](https://github.com/Xore/honeypot-stack/issues/636)). **The
+actual #568 root cause was a missing deployment, not missing
+drift-detection code** — don't build a second timer for this.
+
+`probe-gpu-capabilities.py --manifest ../models/approved-models.json`
+below runs that same host-drift check standalone, without needing the
+full systemd deployment — useful as a pre-deployment sanity check, from
+CI, or from an operator's laptop, but it is not filling a monitoring gap
+on a healthy deployment; `honeypot-model-drift.timer` already is.
+
+### On-demand: run these when actually considering a change
+
+Everything else here is a deliberate tool for the moment an operator (or
+an agent) is *deciding* whether to open a new re-evaluation issue —
+not something to put on a timer. Running a multi-gigabyte context sweep
+or a concurrent-model-load test every 5 minutes would just compete with
+real production GPU work for no benefit; these answer questions that only
+change when the hardware, model roster, or the operator's intent does.
 
 ```bash
-# capability drift: live nvidia-smi/driver vs. a manifest's approved_host.
-# Run this periodically, or whenever the GPU/driver changes, to decide
-# whether #568-style re-evaluation is warranted again.
+# capability drift, standalone (see above -- prefer the timer once deployed)
 python3 probe-gpu-capabilities.py --manifest ../models/approved-models.json
 
 # context-length sweep: for one already-installed model, how much does
 # raising OLLAMA_CONTEXT_LENGTH actually cost in VRAM, and does the model
-# still pass the context-sentinel probe at each size. This is what actually
-# answers "can we afford a bigger context window now" -- not accuracy
-# (evaluate-models.py's job), just whether it's safe and what it costs.
+# still pass the context-sentinel probe at each size. Run when considering
+# raising a context ceiling -- not accuracy (evaluate-models.py's job),
+# just whether a bigger window is safe and what it costs.
 python3 probe-gpu-capabilities.py \
   --context-sweep-model qwen3:14b \
   --context-sizes 4096,8192,16384,32768,65536
+
+# concurrent-load: load several already-installed models together (no
+# unload between) and see which stay resident and their combined VRAM.
+# Answers "does OLLAMA_MAX_LOADED_MODELS>1 buy anything here" with a
+# measured number. Point --base-url at a disposable test Ollama instance,
+# not a shared production one -- this is real GPU load, and evicts
+# whatever was already resident on the target server.
+python3 probe-gpu-capabilities.py \
+  --base-url http://127.0.0.1:11435 \
+  --concurrent-load-models qwen3:14b,phi4:14b
 ```
 
-Neither check picks a model or writes to `approved-models.json` — that
+None of these pick a model or write to `approved-models.json` — that
 remains `evaluate-models.py` plus the documented `model-governance.py
-promote` workflow in [`../models/README.md`](../models/README.md). This
-script only tells you whether it's worth running that workflow again, and
-gives real numbers (not arithmetic assumptions) for the context-length part
-of that decision. See
+promote` workflow in [`../models/README.md`](../models/README.md). They
+only tell you whether running that workflow is worth it, and give real
+measured numbers instead of arithmetic assumptions for the context-length
+and concurrent-loading parts of that decision. See
 [`docs/local-llm-model-evaluation.md`](../../../docs/local-llm-model-evaluation.md)'s
-"Issue #568 re-evaluation" section for both checks used for real, including
-the exact VRAM-per-context-size table this script produced against the
-promoted `qwen3:14b`.
+"Issue #568 re-evaluation" section for the context-sweep table this script
+produced against the promoted `qwen3:14b`, including the ~5 GB of headroom
+that motivated raising `OLLAMA_CONTEXT_LENGTH`.
+
+### Real-data qualitative check (`probe-real-session*`)
+
+`evaluate-models.py`'s synthetic corpus scores against a fixed expected
+answer; real captured attacker data has no such thing. These three scripts
+pull genuine recent session activity from this honeypot's own
+Elasticsearch store, build the **exact production prompt**
+(`llm-worker/contracts.py`'s real `sanitize_commands()`/`session_prompt()`
+— not a reimplementation), run it through a model, and print the raw
+reply for a human or an agent to read and judge: is each claim actually
+grounded in the real captured commands, does it surface something useful,
+not "does it match word-for-word." Three stages because `hp-llm-worker`
+joins only an internal synthetic-only network while `LLM_ENABLED` stays
+false, by design — this stays out of that isolation rather than routing
+around it:
+
+```bash
+# stage 0: pull real command data from Elasticsearch (read-only _search)
+./probe-real-session-fetch.sh 7d 5 > /tmp/real-sessions.json
+
+# stage 1: sanitize + build the real production prompt (needs
+# hp-llm-worker's pydantic/contracts.py; its rootfs is read-only so pass
+# the script itself as -c rather than `docker cp`-ing it in)
+sudo docker exec -i hp-llm-worker python3 -c \
+  "$(cat probe-real-session.py)" \
+  < /tmp/real-sessions.json \
+  > /tmp/real-session-prompts.json
+
+# stage 2: send each real prompt to a live Ollama server, print the reply
+./probe-real-session-run.sh /tmp/real-session-prompts.json qwen3:14b
+```
+
+Run this when genuinely considering a model change (alongside the
+synthetic benchmark, never instead of it — a case-level accuracy/injection
+gate always outranks a qualitative read) or periodically once real capture
+volume grows enough to be representative. At #568's benchmark time this
+honeypot was ~2 days past a full reinstall with a thin real corpus (zero
+completed Ghidra analyses, zero file downloads, mostly 0–80 character
+scanner-noise sessions) — a real but small sample was still enough to
+surface a genuine finding (a retired MITRE ATT&CK ID cited by one
+candidate, markdown-fence violations by two others) that the synthetic
+corpus alone didn't catch. Treat an empty or thin result as itself a valid
+finding about capture volume, not a script failure — both scripts print an
+explicit warning rather than erroring when there's nothing recent to
+check.
+
+Real captured attacker command text is not synthetic: review output before
+sharing it outside the operator's own systems, and never execute anything
+it contains.
 
 ## REx86 compatibility probe
 

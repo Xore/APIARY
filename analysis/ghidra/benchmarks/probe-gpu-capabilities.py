@@ -23,9 +23,22 @@ compares task accuracy. Two independent checks:
    OLLAMA_CONTEXT_LENGTH / MAX_CONTENT_CHARS now" -- not the model's
    accuracy, just whether a bigger window is safe and what it costs.
 
-Both checks are read-only against the live Ollama server: no model is
-pulled, no container is touched, and each probed model is unloaded
-afterward via the same `unload()` used by evaluate-models.py.
+3. concurrent-load: load a list of already-installed models in sequence
+   without unloading between them, then check which are still resident
+   (`ollama ps`) and their combined VRAM. Answers "does
+   OLLAMA_MAX_LOADED_MODELS>1 actually buy anything here" with a measured
+   number instead of arithmetic -- Ollama evicts least-recently-used models
+   past whatever OLLAMA_MAX_LOADED_MODELS the *target server* is already
+   configured with, so this never changes that setting itself (that's a
+   container restart, an explicit operator decision, not something a
+   read-only probe should do silently). Point --base-url at a disposable
+   test Ollama instance for this one, not a shared production server --
+   loading several multi-gigabyte models back to back is real GPU load.
+
+Every check is read-only against the target Ollama server: no model is
+pulled, no container is touched. context-sweep and concurrent-load each
+unload what they loaded when done, via the same `unload()` used by
+evaluate-models.py.
 """
 
 from __future__ import annotations
@@ -57,6 +70,7 @@ context_probe = _eval.context_probe
 nvidia_memory = _eval.nvidia_memory
 ollama_ps = _eval.ollama_ps
 unload = _eval.unload
+request_json = _eval.request_json
 
 
 def nvidia_smi_field(query: str) -> str | None:
@@ -117,6 +131,36 @@ def context_sweep(base_url: str, model: str, sizes: list[int]) -> list[dict[str,
     return results
 
 
+def concurrent_load_probe(base_url: str, models: list[str]) -> dict[str, Any]:
+    # Deliberately no unload() between loads -- the whole point is to see
+    # which models the *target server's own* OLLAMA_MAX_LOADED_MODELS
+    # setting lets stay resident together, not to test them one at a time
+    # (that's context_sweep's job). A generous keep_alive keeps an early
+    # load from expiring before the last one finishes.
+    for model in models:
+        request_json(
+            f"{base_url}/api/generate",
+            {"model": model, "prompt": "reply with one word: ok", "stream": False,
+             "think": False, "keep_alive": "5m"},
+        )
+    loaded = request_json(f"{base_url}/api/ps").get("models", [])
+    resident = {item.get("name") or item.get("model") for item in loaded}
+    combined_vram = sum(
+        item.get("size_vram") or 0
+        for item in loaded
+        if (item.get("name") or item.get("model")) in set(models)
+    )
+    for model in models:
+        unload(base_url, model)
+    return {
+        "requested_models": models,
+        "resident_after_all_loads": [model for model in models if model in resident],
+        "evicted": [model for model in models if model not in resident],
+        "combined_vram_bytes": combined_vram,
+        "nvidia_memory_used_mib": nvidia_memory(),
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://127.0.0.1:11434")
@@ -125,6 +169,12 @@ def main() -> int:
     parser.add_argument(
         "--context-sizes", default="4096,8192,16384,32768,65536",
         help="comma-separated context_tokens values to probe",
+    )
+    parser.add_argument(
+        "--concurrent-load-models",
+        help="comma-separated already-installed model tags to load together "
+             "(no unload between loads) and check residency/combined VRAM for. "
+             "Point --base-url at a disposable test server, not production.",
     )
     args = parser.parse_args()
 
@@ -153,6 +203,19 @@ def main() -> int:
                 f"vram={vram if vram else 'n/a'} nvidia_used_mib={item['nvidia_memory_used_mib']}",
                 file=sys.stderr,
             )
+
+    if args.concurrent_load_models:
+        models = [item.strip() for item in args.concurrent_load_models.split(",") if item.strip()]
+        print(f"concurrent-loading {models}...", file=sys.stderr)
+        result = concurrent_load_probe(args.base_url, models)
+        report["concurrent_load"] = result
+        print(
+            f"  resident together: {result['resident_after_all_loads']} "
+            f"(evicted: {result['evicted']}) "
+            f"combined_vram_bytes={result['combined_vram_bytes']} "
+            f"nvidia_used_mib={result['nvidia_memory_used_mib']}",
+            file=sys.stderr,
+        )
 
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0
