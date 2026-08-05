@@ -31,7 +31,7 @@ optional on-demand `geoip-update` maintenance job. 13 deployment pieces —
 | `honeypot-elk` ([docker-compose.elk.yml](docker-compose.elk.yml)) | **home** | Filebeat, Elasticsearch, Kibana, EveBox, Arkime |
 | `honeypot-dashboard` ([docker-compose.dashboard.yml](docker-compose.dashboard.yml)) | **home** | the live investigation dashboard |
 | `honeypot-payload-analysis` ([docker-compose.payload-analysis.yml](docker-compose.payload-analysis.yml)) | **home** | payload dedup + YARA scanning |
-| `honeypot-utilities` ([docker-compose.utilities.yml](docker-compose.utilities.yml)) | **home** | autoheal, log rotation, reporting |
+| `honeypot-utilities` ([docker-compose.utilities.yml](docker-compose.utilities.yml)) | **home** | autoheal, log rotation, disk-space monitoring, reporting |
 | [`vps/`](vps/) | **VPS** | Traefik, portbridge raw tunnels, Suricata, and HTTP bridges (SSO via [Xore/auth-backend](https://github.com/Xore/auth-backend)) |
 
 ## Read next
