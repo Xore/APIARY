@@ -278,8 +278,26 @@ networks:
   # Unnamed/project-scoped, same as it was in the monolithic compose file
   # (just under a new project prefix now: honeypot-tanner_tanner_local
   # instead of honeypot-stack_tanner_local).
+  #
+  # #540: outbound is allowed by default, matching this stack's previous de
+  # facto behavior. Confirmed live (built the pinned tanner/tanner/Dockerfile
+  # image and read the actual cloned source): tanner/emulators/rfi.py's
+  # RfiEmulator.download_file() performs a real outbound fetch of an
+  # attacker-supplied URL (aiohttp for HTTP(S), ftplib for ftp://) and
+  # executes the downloaded PHP via PHPSandboxHelper -- this repo's own
+  # tanner/tanner/config.yaml has EMULATOR_ENABLED.rfi: True ("Every TANNER
+  # emulator is enabled"), so this is active, not hypothetical. Same
+  # tradeoff as Cowrie (#269/#538) and Dionaea (#541): captures the
+  # attacker's actual payload instead of just the RFI attempt. Set
+  # TANNER_AIR_GAPPED=true (.env) for a stricter, fully air-gapped Tanner
+  # group that trades that capture away -- note this also breaks the
+  # template_injection emulator's own REMOTE_DOCKERFILE fetch
+  # (raw.githubusercontent.com, config.yaml), a self-maintenance fetch
+  # unrelated to attacker-supplied content that also needs outbound. See
+  # docs/persona-design.md.
   tanner_local:
     driver: bridge
+    internal: ${TANNER_AIR_GAPPED:-false}
 
 volumes:
   # #124: opposite direction from dionaea-lib/yara-results in the other
