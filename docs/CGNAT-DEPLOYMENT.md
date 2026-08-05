@@ -3,14 +3,14 @@
 The deployment is deliberately split between a public VPS and a home server
 behind CGNAT.
 
-```text
-Internet
-  │
-  ├─ HTTPS → VPS Traefik → WireGuard HTTP bridge ─┐
-  └─ TCP/UDP → VPS portbridge → WireGuard tunnel ─┤
-                                                  ▼
-                                 home server 10.8.0.2
-                                 Dockge honeypot stack
+```mermaid
+flowchart TD
+    Internet --> Traefik["VPS Traefik<br/>HTTPS"]
+    Internet --> Portbridge["VPS portbridge<br/>TCP/UDP"]
+    Traefik --> HTTPBridge["WireGuard HTTP bridge"]
+    Portbridge --> Tunnel["WireGuard tunnel"]
+    HTTPBridge --> Home["home server 10.8.0.2<br/>Dockge honeypot stack"]
+    Tunnel --> Home
 ```
 
 ## Authoritative deployment paths
