@@ -1,4 +1,9 @@
-# honeypot-stack — big multi-service honeypot (Dockge, home → VPS)
+# Apiary — big multi-service honeypot (Dockge, home → VPS)
+
+*(Formerly "honeypot-stack" — the repo, deploy paths, and CI still use that
+name until the live-infrastructure rename tracked in [#779](https://github.com/Xore/honeypot-stack/issues/779) happens; this is
+just the product's own brand name, matching the dashboard's new default of
+`XORE//APIARY`.)*
 
 A full honeypot deployment that follows this repo's CGNAT pattern: the sensors
 run at **home under Dockge**, publish only on the WireGuard interface, and are
