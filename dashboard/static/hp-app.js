@@ -428,9 +428,7 @@
     map.addControl(new Home());
     const update = async () => {
       try {
-        const r = await fetch("/api/map-points", {cache: "no-store"});
-        if (!r.ok) throw new Error("HTTP " + r.status);
-        const data = await r.json();
+        const data = await window.HoneypotCache.cachedJSON("/api/map-points");
         origins.clearLayers();
         L.geoJSON(data, {
           pointToLayer: (feature, latlng) => L.circleMarker(latlng, {radius: attackMarkerRadius, color: "#fecaca", weight: 1.2, opacity: 0.92, fillColor: "#f87171", fillOpacity: 0.58}),
@@ -516,9 +514,7 @@
     const body = document.querySelector("[data-heatmap-card] [data-heatmap-body]");
     if (!body) return;
     try {
-      const r = await fetch("/api/heatmap?sensor=" + encodeURIComponent(sensor), {cache: "no-store"});
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      const data = await r.json();
+      const data = await window.HoneypotCache.cachedJSON("/api/heatmap?sensor=" + encodeURIComponent(sensor));
       const rows = (data.rows || []).filter(row => row.Cells && row.Cells.length);
       if (!rows.length) renderHeatmapEmpty(body);
       else renderHeatmapRows(body, rows);
@@ -585,9 +581,7 @@
     panel.hidden = false;
     panel.replaceChildren(Object.assign(document.createElement("p"), {className: "note", textContent: "Loading attack vectors…"}));
     try {
-      const r = await fetch("/api/attack-vectors?sensor=" + encodeURIComponent(sensor), {cache: "no-store"});
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      const data = await r.json();
+      const data = await window.HoneypotCache.cachedJSON("/api/attack-vectors?sensor=" + encodeURIComponent(sensor));
       const wrap = document.createElement("div");
       wrap.className = "tw:flex tw:flex-wrap tw:gap-4";
       wrap.append(
