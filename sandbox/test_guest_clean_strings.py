@@ -1,5 +1,7 @@
 import importlib.util
 import io
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -53,6 +55,33 @@ class MainTest(unittest.TestCase):
         finally:
             MODULE.sys.stdin, MODULE.sys.stdout = real_stdin, real_stdout
         self.assertEqual(stdout.getvalue(), "C:\\Windows\\System32\\svchost.exe\n")
+
+    # #498: guest-runner.sh always pipes this through `| head -n N`. A
+    # StringIO swap (like the test above) can't reproduce a real closed-fd
+    # SIGPIPE, so this runs the actual script as a subprocess -- confirmed
+    # live during a #498 smoke-test sandbox run that an unhandled
+    # BrokenPipeError traceback was landing in runner_log even though the
+    # truncated output file itself was still complete and correct.
+    def test_broken_pipe_from_downstream_head_is_silent(self):
+        producer = subprocess.Popen(
+            [sys.executable, "-c", "for i in range(200_000): print('hello world', i)"],
+            stdout=subprocess.PIPE,
+        )
+        cleaner = subprocess.Popen(
+            [sys.executable, str(MODULE_PATH)],
+            stdin=producer.stdout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        producer.stdout.close()
+        head_out = subprocess.run(["head", "-n", "5"], stdin=cleaner.stdout, capture_output=True, text=True)
+        cleaner.stdout.close()
+        _, cleaner_err = cleaner.communicate(timeout=10)
+        producer.wait(timeout=10)
+
+        self.assertEqual(len(head_out.stdout.splitlines()), 5)
+        self.assertNotIn(b"Traceback", cleaner_err)
+        self.assertNotIn(b"BrokenPipeError", cleaner_err)
 
 
 if __name__ == "__main__":
