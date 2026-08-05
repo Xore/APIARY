@@ -64,13 +64,6 @@ audit; #671 is the live source of truth if this drifts.
   test every sensor sends real, well-formed events to Elasticsearch
 - [#597](https://github.com/Xore/honeypot-stack/issues/597) — end-to-end
   test: golden image creation for both win11-analysis and win11-ghosts
-- [#662](https://github.com/Xore/honeypot-stack/issues/662) — 72-hour
-  multi-user soak of the settings/introspection subsystem (split from
-  closed #81)
-- [#84](https://github.com/Xore/honeypot-stack/issues/84) — shared-GPU slot
-  scheduling, collision drills, 72-hour soak. Depends on
-  [#67](https://github.com/Xore/honeypot-stack/issues/67) (CUDA selection,
-  GPU-sharing budget), which is still open.
 
 **Currently blocked — need the blocker resolved or an explicit descope**
 - [#174](https://github.com/Xore/honeypot-stack/issues/174) — ml-worker
@@ -100,12 +93,28 @@ analysis host and does not gate the main stack.
 | ProcMon CLI export hang | [#502](https://github.com/Xore/honeypot-stack/issues/502) |
 | CAPEv2 debugger-class-evasion sandbox (9 issues) | [#314-322](https://github.com/Xore/honeypot-stack/issues/314) |
 
+## Post-release soaks
+
+72-hour soaks can't gate a release cut on a multi-day wait, so both of these
+run **after** 0.1.0 ships, as verification passes against the released build
+rather than pre-release gates. Operator decision.
+
+- [#662](https://github.com/Xore/honeypot-stack/issues/662) — 72-hour
+  multi-user soak of the settings/introspection subsystem (split from
+  closed #81)
+- [#84](https://github.com/Xore/honeypot-stack/issues/84) — shared-GPU slot
+  scheduling, collision drills, 72-hour soak. Depends on
+  [#67](https://github.com/Xore/honeypot-stack/issues/67) (CUDA selection,
+  GPU-sharing budget) — moved to post-0.1.0 backlog along with it, since #67
+  was only in the gate list as #84's dependency.
+
 ## Post-0.1.0 backlog, by area
 
 Grouped for planning, not in priority order. Full detail is in each issue.
 
-**GPU / ML / LLM** — #67 CUDA selection + sharing budget (also a 0.1.0 gate
-via #84's dependency), #661 Hugging Face model search + eval round
+**GPU / ML / LLM** — #67 CUDA selection + sharing budget, #84 shared-GPU
+slot scheduling (see Post-release soaks above), #661 Hugging Face model
+search + eval round
 
 **GHOSTS sandbox** — #463 persona realism, #467 per-VM risk-feature
 granularity
