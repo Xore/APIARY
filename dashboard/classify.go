@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -615,6 +616,33 @@ func classify(e map[string]any, dirSensor string) event {
 		if name := tannerDetectionName(e); name != "" && name != "index" {
 			ev.category = firstNonEmpty(ev.category, "tanner: "+name)
 			ev.detail += "  [" + name + "]"
+			// #575: for a classified attack, the actual payload (post_data --
+			// exactly where a SQLi/XSS/cmd_exec/php_object_injection/etc.
+			// payload one of tanner's 10 enabled emulators matched against
+			// lands) and cookies (session-hijacking/injection payloads can
+			// ride here too) were captured by tanner and stored in ES, but
+			// never read here. http-honeypot's own POST handling already
+			// captures its body separately via e["body"], so this is scoped
+			// to tanner only.
+			if ev.sensor == "tanner" {
+				if postData, ok := e["post_data"].(map[string]any); ok && len(postData) > 0 {
+					parts := make([]string, 0, len(postData))
+					for k, v := range postData {
+						parts = append(parts, k+"="+str(v))
+					}
+					sort.Strings(parts) // deterministic detail-line order
+					ev.command = strings.Join(parts, "&")
+					ev.detail += "  payload: " + ev.command
+				}
+				if cookies := stringMap(e["cookies"]); len(cookies) > 0 {
+					parts := make([]string, 0, len(cookies))
+					for k, v := range cookies {
+						parts = append(parts, k+"="+v)
+					}
+					sort.Strings(parts)
+					ev.detail += "  cookies: " + strings.Join(parts, "; ")
+				}
+			}
 		}
 		return ev
 	}
@@ -828,6 +856,20 @@ func headerMap(v any) map[string]string {
 
 // headerVal reads a header case-insensitively (keys are already lowercased).
 func headerVal(m map[string]string, key string) string { return m[strings.ToLower(key)] }
+
+// stringMap coerces a JSON object into a plain string map, preserving key
+// case -- unlike headerMap, which lowercases for HTTP headers' own
+// case-insensitivity. Cookie names are case-sensitive, so #575's tanner
+// cookie surfacing uses this instead of headerMap.
+func stringMap(v any) map[string]string {
+	m := map[string]string{}
+	if raw, ok := v.(map[string]any); ok {
+		for k, val := range raw {
+			m[k] = str(val)
+		}
+	}
+	return m
+}
 
 // hasForwardedIP reports whether a record carries a trusted forwarded client IP
 // (Cloudflare / reverse-proxy headers) — used to avoid dropping a real request

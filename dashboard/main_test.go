@@ -242,6 +242,56 @@ func TestClassifyTannerSurfacesDetectionName(t *testing.T) {
 	}
 }
 
+// TestClassifyTannerSurfacesPostDataAndCookies is a regression test for
+// #575: tanner's session log carries the actual payload (post_data) and
+// cookies for a classified attack -- exactly where a SQLi/XSS/cmd_exec/
+// php_object_injection/etc. payload lands once one of tanner's emulators
+// matches -- but classify.go never read either, so an operator saw the
+// detection name with no evidence of what triggered it.
+func TestClassifyTannerSurfacesPostDataAndCookies(t *testing.T) {
+	attack := classify(map[string]any{
+		"method": "POST", "path": "/login", "sensor": "tanner",
+		"post_data": map[string]any{"username": "admin' OR '1'='1", "password": "x"},
+		"cookies":   map[string]any{"PHPSESSID": "' UNION SELECT NULL--"},
+		"response_msg": map[string]any{"response": map[string]any{"message": map[string]any{
+			"detection": map[string]any{"name": "sqli"},
+		}}},
+	}, "tanner")
+	if !strings.Contains(attack.command, "username=admin' OR '1'='1") {
+		t.Fatalf("post_data payload not surfaced in ev.command: %q", attack.command)
+	}
+	if !strings.Contains(attack.detail, "payload:") {
+		t.Fatalf("detail should carry the payload label: %q", attack.detail)
+	}
+	if !strings.Contains(attack.detail, "PHPSESSID=' UNION SELECT NULL--") {
+		t.Fatalf("cookies not surfaced in detail: %q", attack.detail)
+	}
+
+	// A benign ("index") request must not surface post_data/cookies -- only
+	// a classified attack should, matching the existing detection-name gate.
+	benign := classify(map[string]any{
+		"method": "POST", "path": "/", "sensor": "tanner",
+		"post_data": map[string]any{"q": "search term"},
+		"response_msg": map[string]any{"response": map[string]any{"message": map[string]any{
+			"detection": map[string]any{"name": "index"},
+		}}},
+	}, "tanner")
+	if benign.command != "" || strings.Contains(benign.detail, "payload:") {
+		t.Fatalf("benign 'index' detection should not surface post_data, got command=%q detail=%q", benign.command, benign.detail)
+	}
+
+	// http-honeypot's own POST handling captures its body separately via
+	// e["body"] -- post_data/cookies must stay scoped to tanner only, even
+	// if a future http-honeypot record happened to carry a same-shaped key.
+	httpEvent := classify(map[string]any{
+		"method": "POST", "path": "/wp-login.php", "sensor": "http-honeypot",
+		"post_data": map[string]any{"user": "admin"},
+	}, "http-honeypot")
+	if httpEvent.command != "" {
+		t.Fatalf("http-honeypot must not read post_data (tanner-only), got command=%q", httpEvent.command)
+	}
+}
+
 func TestCampaignCorrelationByNetwork(t *testing.T) {
 	now := time.Now()
 	evs := []storedEvent{
