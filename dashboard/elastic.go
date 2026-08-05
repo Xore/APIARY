@@ -275,14 +275,31 @@ func (c *esClient) docDelete(index, id string) error {
 // reasoning as searchNamespace: this is dashboard-generated bookkeeping, not
 // the high-volume event stream), each carrying the concurrency-control
 // fields a caller needs to condition its own docIndex update on.
+//
+// #498: a dashboard-owned index is created lazily on first write (via its
+// matching index template, auto_create_index), so "no run/recipe has ever
+// been created yet" is a completely normal state in which the index simply
+// doesn't exist -- confirmed live: the Workbench's very first run submission
+// failed outright with "index_not_found_exception" from countRuns' own call
+// here, before createOrReuseRun's own docIndex ever got a chance to create
+// it. A missing index and an empty index mean the same thing to every caller
+// of this function (countRuns, listRuns*), so treat 404 the same way docGet
+// already treats a missing single document: zero hits, not an error.
 func (c *esClient) docSearchAll(index string, size int) ([]esDocHit, error) {
 	if size <= 0 || size > 10000 {
 		size = 10000
 	}
-	b, err := c.request(fmt.Sprintf("/%s/_search?size=%d", index, size))
+	status, body, err := c.doRequest(http.MethodGet, fmt.Sprintf("/%s/_search?size=%d", index, size), nil)
 	if err != nil {
 		return nil, err
 	}
+	if status == http.StatusNotFound {
+		return nil, nil
+	}
+	if status/100 != 2 {
+		return nil, fmt.Errorf("Elasticsearch GET %s: status %d: %s", index, status, strings.TrimSpace(string(body)))
+	}
+	b := body
 	var v struct {
 		Hits struct {
 			Hits []struct {
