@@ -46,6 +46,13 @@ state, synchronizes the repository, writes Dockge's authoritative
 Require a manual reviewer on `production-home`; never accept pull-request code
 on this production runner.
 
+Run [`../safe-update.sh`](../safe-update.sh) (`STACK_DIR=/opt/stacks/honeypot-stack`)
+before a manual deploy to snapshot the current git commit SHA, any
+uncommitted config drift, and every `.env` file -- a lightweight, read-only
+"about to deploy, keep a snapshot in case this is bad" step, distinct from
+[`../factory-reset.sh`](../factory-reset.sh) (docs/RECOVERY.md), which is
+for an already-broken stack and can stop/wipe state.
+
 Each #258 split adds at least one new Docker bridge network (a project's
 implicit default network, or an explicit private one like `dionaea_net`).
 The homeserver's own Docker daemon exhausted its built-in default address
@@ -329,6 +336,9 @@ these environment secrets:
 | `VPS_USER` | deployment user, normally `root` |
 | `VPS_PORT` | SSH port, normally `2222` |
 | `DOMAIN` | the real production domain (e.g. `example.com`), substituted into `traefik/dynamic.yml`'s committed `*.honeypot.example` placeholders at deploy time -- see below |
+
+Run [`../safe-update.sh`](../safe-update.sh) with `STACK_DIR=/root/vps` before
+a manual VPS deploy, same reasoning as the home-side snapshot above.
 
 The workflow preserves `/root/vps/.env`, synchronizes `vps/`, validates
 `docker-compose.yml`, and recreates changed services with plain Docker Compose.
