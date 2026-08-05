@@ -171,6 +171,7 @@
       time:       { title: "Time & live data",       desc: "Timezone, clock formats, refresh cadence, and notifications." },
       map:        { title: "Map & investigation",    desc: "Basemap, clustering, and drill-down defaults for investigations." },
       branding:   { title: "Branding & text",        desc: "Product labels, help links, notices, and footer copy. Plain text; https links only." },
+      "report-presets": { title: "Report Studio presets", desc: "Names and descriptions shown for each report template. Structural fields (theme, window, elements) are report logic, not editable here." },
       behavior:   { title: "Dashboard behavior",     desc: "Safe bounded defaults and feature visibility for every user." },
       honeypot:   { title: "Honeypot operations",    desc: "Staged operational thresholds. Saving never restarts anything — apply with an operator-run restart." },
       users:      { title: "Users",                  desc: "Read-only projection of dashboard activity. Accounts are managed in the auth service." },
