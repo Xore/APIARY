@@ -413,7 +413,7 @@ worker automates it too — `revdeck_triage()` drives a verified
 upload/poll/chat contract, writing a `revdeck` field distinct from the
 worker's own `ai_triage`, a second and independent AI aid rather than a
 replacement for it. Off by default. See
-[`revdeck/README.md`](../../../analysis/ghidra/revdeck/README.md).
+[`revdeck/README.md`](revdeck/README.md).
 
 Two ways to get that automation, both gated by `REVDECK_API_BASE`:
 

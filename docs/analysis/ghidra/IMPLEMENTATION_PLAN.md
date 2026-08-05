@@ -219,7 +219,7 @@ real trigger — a host-side spool, not GitHub Actions.
 > other candidate, swappable via `REVDECK_WORKFLOW`, not run alongside it).
 > `attack_surface_triage` and `vulnerability_hypothesis` still are not run —
 > both require an analyst-selected function address, so they remain
-> interactive-only. See [`revdeck/README.md`](../../../analysis/ghidra/revdeck/README.md#automated-triage-78)
+> interactive-only. See [`revdeck/README.md`](revdeck/README.md#automated-triage-78)
 > for the full contract and rationale.
 
 ### Source

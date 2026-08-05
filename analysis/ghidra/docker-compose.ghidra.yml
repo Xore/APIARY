@@ -164,7 +164,7 @@ services:
     #
     # Behind a profile, and not started by default, for two reasons. Its build
     # context is not vendored: ./revdeck/ai-reverse-engineering must be cloned
-    # by hand (see revdeck/README.md), and while it is missing an unprofiled
+    # by hand (see docs/analysis/ghidra/revdeck/README.md), and while it is missing an unprofiled
     # service here would fail `docker compose up` for the whole file including
     # the two services that do exist. And triage does not go through it — the
     # worker calls the model directly, so that #103's local-only rule is

@@ -162,7 +162,7 @@ TRIAGE_STRING_CHARS = int(os.environ.get("GHIDRA_TRIAGE_STRING_CHARS", "200"))
 # ── Rev·Deck automated triage (#78) ─────────────────────────────────────────
 #
 # biniamf/ai-reverse-engineering, vendored by an operator into
-# analysis/ghidra/revdeck/ai-reverse-engineering (see revdeck/README.md) and
+# analysis/ghidra/revdeck/ai-reverse-engineering (see docs/analysis/ghidra/revdeck/README.md) and
 # run behind docker-compose.ghidra.yml's `revdeck` profile. A second,
 # independent aid alongside triage() above, not a replacement: that function
 # asks the local model one narrow JSON-extraction question over a bounded
@@ -193,7 +193,7 @@ TRIAGE_STRING_CHARS = int(os.environ.get("GHIDRA_TRIAGE_STRING_CHARS", "200"))
 #
 # Set REVDECK_API_BASE empty to switch this off entirely, same convention as
 # STATICTOOLS_API_BASE/GHIDRA_TRIAGE_API_BASE. Unlike those two, empty is the
-# *default*: revdeck is profile-gated and, per revdeck/README.md, has never
+# *default*: revdeck is profile-gated and, per docs/analysis/ghidra/revdeck/README.md, has never
 # shipped running — an operator opts in once it actually is.
 REVDECK_API_BASE = os.environ.get("REVDECK_API_BASE", "").rstrip("/")
 # program_triage has no requires_address and most directly parallels what
