@@ -35,6 +35,8 @@ jobs:
             context: dnp3-honeypot
           - image: dns-honeypot
             context: dns-honeypot
+          - image: endlessh-honeypot
+            context: endlessh-honeypot
           - image: http-honeypot
             context: http-honeypot
           - image: ip-enrichment-worker

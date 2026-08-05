@@ -182,7 +182,7 @@ services:
       - AUTH_TARGET_HOST=${AUTH_TARGET_HOST:-honeypot.example}
       - AUTH_SESSION_COOKIE_NAME=${AUTH_SESSION_COOKIE_NAME:-xore_sso}
       - AUTH_ACCOUNT_URL=${AUTH_ACCOUNT_URL:-https://auth.honeypot.example/auth/app?pane=account}
-      - EXPECTED_SENSORS=cowrie,multipot,http,api-honeypot,dionaea,dnp3,dicompot,dns-honeypot,citrix-honeypot,cisco-asa-honeypot,rdp-honeypot,conpot,conpot-s7-1200,conpot-s7-1500,conpot-iec104,conpot-guardian,conpot-kamstrup,tanner,suricata
+      - EXPECTED_SENSORS=cowrie,multipot,http,api-honeypot,dionaea,dnp3,dicompot,dns-honeypot,citrix-honeypot,cisco-asa-honeypot,rdp-honeypot,conpot,conpot-s7-1200,conpot-s7-1500,conpot-iec104,conpot-guardian,conpot-kamstrup,tanner,suricata,endlessh
       - ALERT_WEBHOOK_URL=${HONEYPOT_ALERT_WEBHOOK_URL:-}
       - TZ=Europe/Berlin
     networks:

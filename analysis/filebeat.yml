@@ -38,6 +38,7 @@ filebeat.inputs:
       - /logs/dicompot/*.json
       - /logs/citrix-honeypot/*.json
       - /logs/rdp-honeypot/*.json
+      - /logs/endlessh/*.json
       - /logs/enriched/*.json
     # Keep an extra guard for a top-level Suricata mount. Explicit per-sensor
     # paths above ensure incidents and portbridge metadata cannot be decoded

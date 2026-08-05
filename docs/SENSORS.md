@@ -19,9 +19,10 @@
 | **citrix-honeypot** | raw 4443 (→ container 443) | raw tunnel + PROXY | Citrix ADC/NetScaler Gateway decoy (CVE-2019-19781 path traversal), Go port of `t3chn0m4g3/CitrixHoneypot`, own self-signed TLS — ES-only from day one (#238, #414) |
 | **cisco-asa-honeypot** | WebVPN 8443, IKE 500/udp | raw tunnel + PROXY (8443) | Cisco ASA WebVPN + IKE decoy (CVE-2018-0101), Go port of `t3chn0m4g3/ciscoasa_honeypot` — the IKE side replies once per source with a real Diffie-Hellman/nonce exchange then goes silent, matching upstream's actual (not fully protocol-correct) behavior exactly — ES-only from day one (#238, #414) |
 | **rdp-honeypot** | RDP 3389 | raw tunnel + PROXY | RDP decoy, Go port of `CommunityHoneyNetwork/rdphoney` — reads the initial X.224 Connection Request, captures the `mstshash=` cookie username if present, no protocol negotiation — ES-only from day one (#238, #412) |
-| **http-honeypot** | `decoy.<domain>` (+ catch-all, + raw :8081) | Traefik | fake nginx / login pages |
-| **api-honeypot** | raw 8888 | raw tunnel + PROXY | cloud metadata, Kubernetes, registry, DevOps and LLM API probes |
+| **http-honeypot** | `decoy.<domain>` (+ catch-all, + raw :8081) | Traefik | fake nginx / login pages — unrecognized scan/rce-probe paths get a HellPot-style Markov-garbage tarpit instead of a fast reply by default (`HTTP_TARPIT=0` to disable, #246) |
+| **api-honeypot** | raw 8888 | raw tunnel + PROXY | cloud metadata, Kubernetes, registry, DevOps and LLM API probes — same binary as http-honeypot, same tarpit behavior |
 | **snare + tanner** | `www-portal.<domain>` | Traefik | fictional Meridian portal → payload analysis |
+| **endlessh** | SSH 2222 (own port, not cowrie's) | raw tunnel + PROXY (once wired) | SSH pre-auth tarpit, Go port of `skeeto/endlessh`'s core trick — sends random non-"SSH-" banner lines forever, real handshake never begins. Own port deliberately, not cowrie's: diverting an attacker here instead of cowrie's real fake-shell capture would trade depth for a cheap time-waste (#246) |
 | **suricata** | (sniffs all traffic, runs on the **VPS**) | — | IDS over every honeypot packet → eve.json → ELK, pcap → Arkime |
 
 multipot cedes FTP/MySQL/MSSQL/Mongo to Dionaea automatically
