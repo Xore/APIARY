@@ -14,7 +14,8 @@
                 "delay-jitter": "30",
                 "isheadless": "false",
                 "command-line-args": [
-                    "--disable-blink-features=AutomationControlled"
+                    "--disable-blink-features=AutomationControlled",
+                    "--user-data-dir=%USERPROFILE%\\ChromeProfile"
                 ]
             },
             "TimeLineEvents": [
@@ -31,6 +32,97 @@
                     ],
                     "DelayAfter": 240000,
                     "DelayBefore": 10000
+                }
+            ]
+        },
+        {
+            "HandlerType": "Clicks",
+            "UtcTimeOn": "12:00:00",
+            "UtcTimeOff": "23:00:00",
+            "Loop": true,
+            "TimeLineEvents": [
+                {
+                    "Command": "click",
+                    "CommandArgs": [45000, -25000, 25000],
+                    "DelayAfter": 0,
+                    "DelayBefore": 5000
+                }
+            ]
+        },
+        {
+            "HandlerType": "Command",
+            "UtcTimeOn": "13:00:00",
+            "UtcTimeOff": "22:00:00",
+            "Loop": true,
+            "HandlerArgs": {
+                "execution-probability": "35",
+                "delay-jitter": "40"
+            },
+            "TimeLineEvents": [
+                {
+                    "Command": "random",
+                    "CommandArgs": [
+                        "dir %USERPROFILE%\\Documents",
+                        "dir %USERPROFILE%\\Downloads",
+                        "whoami",
+                        "ipconfig /all",
+                        "tasklist",
+                        "systeminfo"
+                    ],
+                    "DelayAfter": 900000,
+                    "DelayBefore": 30000
+                }
+            ]
+        },
+        {
+            "HandlerType": "Notepad",
+            "UtcTimeOn": "13:00:00",
+            "UtcTimeOff": "22:00:00",
+            "Loop": true,
+            "HandlerArgs": {
+                "execution-probability": "60",
+                "creation-probability": "35",
+                "modification-probability": "30",
+                "deletion-probability": "10",
+                "view-probability": "25",
+                "output-directory": "%USERPROFILE%\\Documents",
+                "input-directory": "%USERPROFILE%\\Documents",
+                "delay-jitter": "50"
+            },
+            "TimeLineEvents": [
+                {
+                    "Command": "cycle",
+                    "CommandArgs": [],
+                    "DelayAfter": 600000,
+                    "DelayBefore": 60000
+                }
+            ]
+        },
+        {
+            "HandlerType": "LightWord",
+            "UtcTimeOn": "14:00:00",
+            "UtcTimeOff": "21:00:00",
+            "Loop": true,
+            "TimeLineEvents": [
+                {
+                    "Command": "create",
+                    "CommandArgs": ["%USERPROFILE%\\Documents"],
+                    "DelayAfter": 5400000,
+                    "DelayBefore": 120000
+                }
+            ]
+        },
+        {
+            "HandlerType": "LightExcel",
+            "UtcTimeOn": "14:00:00",
+            "UtcTimeOff": "21:00:00",
+            "Loop": true,
+            "TimeLineEvents": [
+                {
+                    "Command": "create",
+                    "CommandArgs": ["%USERPROFILE%\\Documents"],
+                    "DelayAfter": 7200000,
+                    "DelayBefore": 180000
                 }
             ]
         }
