@@ -47,6 +47,12 @@ type event struct {
 	AuthType  string            `json:"auth_type,omitempty"`
 	Status    int               `json:"status"`
 	Category  string            `json:"category"`
+	// Tarpitted (#246) marks a request that got the slow Markov-drip
+	// response (tarpit.go) instead of a normal reply. TarpitBytes/
+	// TarpitMS are only meaningful when this is true.
+	Tarpitted   bool  `json:"tarpitted,omitempty"`
+	TarpitBytes int   `json:"tarpit_bytes,omitempty"`
+	TarpitMS    int64 `json:"tarpit_ms,omitempty"`
 }
 
 type logger struct {
@@ -223,6 +229,10 @@ type server struct {
 	site      string
 	asset     string
 	org       string
+	// tarpitEnabled (#246): stream a slow Markov-drip response (tarpit.go)
+	// for requests classify() buckets as unrecognized scanning/exploit
+	// noise, instead of the normal fast reply. See HTTP_TARPIT in main().
+	tarpitEnabled bool
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -274,7 +284,15 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	s.serve(w, r, &e)
+	if s.tarpitEnabled && tarpitCategory(e.Category) {
+		e.Status = http.StatusOK
+		e.Tarpitted = true
+		n, held := tarpit(r.Context(), w)
+		e.TarpitBytes = n
+		e.TarpitMS = held.Milliseconds()
+	} else {
+		s.serve(w, r, &e)
+	}
 	s.log.log(e)
 }
 
@@ -517,6 +535,13 @@ func main() {
 		site:      getenv("SITE_ID", "nexusai-eu-edge"),
 		asset:     getenv("ASSET_ID", "web-edge-01"),
 		org:       getenv("ORGANIZATION", "NexusAI Research GmbH"),
+		// #246: on by default -- a HellPot-style tarpit for unrecognized
+		// scan/rce-probe noise costs the requester bandwidth/time for
+		// zero GPU/API cost on our side, unlike the LLM-honeypot half of
+		// #246 (blocked on #84's shared-GPU budget). Opt out per-instance
+		// with HTTP_TARPIT=0 if a deployment wants the old fast-404
+		// behavior instead.
+		tarpitEnabled: getenv("HTTP_TARPIT", "1") != "0",
 	}
 
 	addr := getenv("LISTEN_ADDR", ":8080")

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
@@ -607,6 +608,16 @@ func classify(e map[string]any, dirSensor string) event {
 		if ev.user != "" || ev.pass != "" {
 			ev.isLogin = true
 			ev.detail += "  (" + ev.user + " / " + ev.pass + ")"
+		}
+		// #246: http-honeypot/api-honeypot tarpit unrecognized scan/rce-probe
+		// requests with a slow Markov-garbage stream instead of a fast reply
+		// -- surface how long/how much, not just that it happened, since
+		// that's the actual point of the technique (cost the requester real
+		// time/bandwidth).
+		if tarpitted, ok := e["tarpitted"].(bool); ok && tarpitted {
+			ms := int(numFloat(e["tarpit_ms"]))
+			kb := numFloat(e["tarpit_bytes"]) / 1024
+			ev.detail += fmt.Sprintf("  [tarpitted %dms, %.1fKB]", ms, kb)
 		}
 		// tanner's own emulator classifies every request against a detection
 		// name ("index" for benign/unmatched traffic, or an attack signature

@@ -123,6 +123,39 @@ func TestPortbridgeIsCorrelationOnly(t *testing.T) {
 	}
 }
 
+// TestTarpittedHTTPRequestSurfacesDurationAndBytes covers #246: http-honeypot/
+// api-honeypot's tarpit response is only worth anything if an operator can
+// see it happened, not just that a "scan" request was logged normally.
+func TestTarpittedHTTPRequestSurfacesDurationAndBytes(t *testing.T) {
+	ev := classify(map[string]any{
+		"sensor":       "http-honeypot",
+		"method":       "GET",
+		"path":         "/this-matches-nothing",
+		"category":     "scan",
+		"tarpitted":    true,
+		"tarpit_ms":    float64(4200),
+		"tarpit_bytes": float64(6144),
+	}, "http-honeypot")
+	if !strings.Contains(ev.detail, "tarpitted") {
+		t.Fatalf("detail must mention the tarpit outcome, got %q", ev.detail)
+	}
+	if !strings.Contains(ev.detail, "4200ms") || !strings.Contains(ev.detail, "6.0KB") {
+		t.Fatalf("detail must include duration and size, got %q", ev.detail)
+	}
+}
+
+func TestNonTarpittedHTTPRequestHasNoTarpitDetail(t *testing.T) {
+	ev := classify(map[string]any{
+		"sensor":   "http-honeypot",
+		"method":   "GET",
+		"path":     "/wp-login.php",
+		"category": "wordpress",
+	}, "http-honeypot")
+	if strings.Contains(ev.detail, "tarpit") {
+		t.Fatalf("a normally-answered request must not mention tarpitting, got %q", ev.detail)
+	}
+}
+
 func TestBalancedRecentLimitsNoisySensor(t *testing.T) {
 	evs := []storedEvent{
 		{Sensor: "cowrie", Detail: "c1"},
