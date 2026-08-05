@@ -2,26 +2,41 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 )
 
-// esOverviewStub serves resp for the aggregation query (a POST with a JSON
-// body) and a 500 for a plain GET -- a store configured with this stub as
-// its ES client also runs the ES-preferred per-sensor GET read path (#34,
-// events_es.go's loadSensorEventsES) on every rebuild for every sensor, not
-// just esOnlySensors. These tests aren't exercising that path, and an
-// empty-but-successful GET response would look like "ES has this sensor,
-// and it has zero events" -- silently suppressing whatever local file
-// fixtures a test seeded instead of falling back to them. A 500 correctly
-// signals "ES has no answer for this sensor" and exercises the same local
-// fallback these tests already relied on before #34.
+// esOverviewStub serves resp for the aggregation query and a 500 for a
+// per-sensor events query -- a store configured with this stub as its ES
+// client also runs the ES-preferred per-sensor read path (#34, events_es.go's
+// loadSensorEventsES) on every rebuild for every sensor, not just
+// esOnlySensors. These tests aren't exercising that path, and an
+// empty-but-successful response would look like "ES has this sensor, and it
+// has zero events" -- silently suppressing whatever local file fixtures a
+// test seeded instead of falling back to them. A 500 correctly signals "ES
+// has no answer for this sensor" and exercises the same local fallback
+// these tests already relied on before #34.
+//
+// #583 moved loadSensorEventsES from a GET to a POST (search_after
+// pagination needs a real query body), so the aggregation query and the
+// per-sensor query are no longer distinguishable by HTTP method -- both are
+// now POSTs to the same /honeypot-v2-*/_search path. Distinguish by body
+// shape instead: a per-sensor query's body has a term query on
+// event.sensor (see events_es.go), the aggregation query's does not.
 func esOverviewStub(t *testing.T, resp esOverviewAggResponse) http.HandlerFunc {
 	t.Helper()
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
+		body, _ := io.ReadAll(r.Body)
+		var req struct {
+			Query struct {
+				Term map[string]string `json:"term"`
+			} `json:"query"`
+		}
+		json.Unmarshal(body, &req)
+		if _, isSensorQuery := req.Query.Term["event.sensor"]; isSensorQuery {
 			http.Error(w, "not stubbed", http.StatusInternalServerError)
 			return
 		}
