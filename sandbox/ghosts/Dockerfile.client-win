@@ -50,6 +50,29 @@ WORKDIR /app/Ghosts.Client.Universal
 # concerned. Setting AssemblyName in the project file itself means restore,
 # build, AND the apphost patching step all agree on the name from the
 # start, with no separate rename step needed at all.
+#
+# #463: also renames the Cmd class to Command. RunHandler in
+# TimelineManager/Orchestrator.cs resolves a timeline handler by reflection
+# against the literal string form of its HandlerType enum value --
+# `Type.GetType($"Ghosts.Client.Universal.Handlers.{type}")` -- and
+# HandlerType.Command (the enum member, spelled "Command") has no matching
+# class: the actual class implementing it is named Cmd, not Command. Every
+# timeline.json entry with "HandlerType": "Command" throws
+# NotSupportedException at dispatch time as a result -- confirmed by
+# reading both the enum (Ghosts.Domain/Messages/Timeline.cs) and this
+# reflection call directly; this is why #329 dropped its own Command
+# handler from the committed timeline rather than shipping something that
+# throws. Renaming the class is a one-line, zero-ripple fix (grepped: no
+# other file references `Cmd` by name) and needs no changes on the
+# timeline.json side at all -- "HandlerType": "Command" was already
+# correct, only the compiled class was wrong.
+#
+# Handlers/Cmd.cs is CRLF (confirmed via `file`, unlike the other patched
+# files here which are plain LF) -- the s/// pattern below deliberately has
+# no ^/$ anchors, since sed's $ anchors before \n but not before the \r
+# CRLF leaves at the end of the matched line, and an anchored version of
+# this same substitution silently failed to match for exactly that reason
+# when first tried.
 RUN sed -i \
     -e '/var options = new ChromeOptions();/a\            options.AddExcludedArgument("enable-automation");\n            options.AddAdditionalOption("useAutomationExtension", false);' \
     -e 's/^                driver = new ChromeDriver(options);$/                var chromeDriverService = ChromeDriverService.CreateDefaultService();\n                chromeDriverService.HideCommandPromptWindow = true;\n                driver = new ChromeDriver(chromeDriverService, options);/' \
@@ -59,7 +82,11 @@ RUN sed -i \
  && sed -i \
     -e '/<RootNamespace>Ghosts.Client.Universal<\/RootNamespace>/a\    <AssemblyName>EndpointAgent<\/AssemblyName>' \
     Ghosts.Client.Universal.csproj \
- && grep -qF '<AssemblyName>EndpointAgent</AssemblyName>' Ghosts.Client.Universal.csproj
+ && grep -qF '<AssemblyName>EndpointAgent</AssemblyName>' Ghosts.Client.Universal.csproj \
+ && sed -i \
+    -e 's/public class Cmd(Timeline entireTimeline, TimelineHandler timelineHandler, CancellationToken cancellationToken)/public class Command(Timeline entireTimeline, TimelineHandler timelineHandler, CancellationToken cancellationToken)/' \
+    Handlers/Cmd.cs \
+ && grep -qF 'public class Command(Timeline entireTimeline, TimelineHandler timelineHandler, CancellationToken cancellationToken)' Handlers/Cmd.cs
 
 # NOT -p:PublishSingleFile=true -- verified live (#326): a single-file
 # publish leaves Assembly.Location empty at runtime (a documented .NET

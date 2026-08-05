@@ -228,12 +228,43 @@ explicitly disabled first.
   (`orchestrate/run_sample.py`'s `collect_artifacts` best-effort `get`
   calls). The GHOSTS-activity artifact — the priority one — worked both
   times; Sysmon collection wasn't investigated further given time.
-- **Persona timeline content (#329)** is real but narrow as of this
-  writing: `BrowserChrome` (Bloomberg/WSJ/Reuters/Yahoo
-  Finance/LinkedIn/FOMC, matching `06-chrome-history.ps1`'s seeded
-  history) plus sparse `Cmd`. **No `Word`/`Excel`/`PowerPoint` handlers**
-  — verified live that Office is not installed on this golden image
-  (`HKLM:\SOFTWARE\Classes\{Word,Excel,PowerPoint}.Application` all
-  absent), and those handlers use real COM automation with no fallback;
-  using them would crash, not degrade. `Outlook` excluded per #300's
-  Redemption-licensing finding, unrelated to the Office-install gap.
+- **Persona timeline content (#329/#463)**: expanded from a single
+  `BrowserChrome` handler to `BrowserChrome` + `Clicks` (idle mouse
+  jitter) + `Command` + `Notepad` (weighted create/modify/delete/view
+  file churn) + `LightWord`/`LightExcel` (real .docx/.xlsx files via
+  OpenXML, no COM automation). Staggered `UtcTimeOn`/`UtcTimeOff`
+  windows per handler (browsing widest at 12:00-23:00 UTC, document
+  work narrowest at 14:00-21:00) give the day a shape instead of one
+  flat activity window, without needing any custom scheduling logic —
+  all native GHOSTS features (time windows, `execution-probability`,
+  `delay-jitter`).
+  - **`Command` was broken, not just sparse** — #463 traced the root
+    cause: `TimelineManager/Orchestrator.cs`'s `RunHandler` resolves a
+    handler by reflection against the literal string of its
+    `HandlerType` enum value (`Type.GetType("Ghosts.Client.Universal.
+    Handlers." + type)`), and `HandlerType.Command` has no matching
+    class — the class implementing it is named `Cmd`. Every
+    `"HandlerType": "Command"` timeline entry threw
+    `NotSupportedException` at dispatch, which is why #329 dropped it
+    from the committed timeline rather than ship something that always
+    fails. Fixed in `Dockerfile.client-win` (renames the class via the
+    same build-time sed-patch mechanism #462 uses for `BrowserChrome.cs`)
+    rather than in `timeline.json` — the JSON side was already correct.
+  - **Still no `Word`/`Excel`/`PowerPoint`/`Outlook` handlers** (the
+    real-COM-automation ones, distinct from `LightWord`/`LightExcel`
+    above) — confirmed live that Office is not installed on this golden
+    image (`HKLM:\SOFTWARE\Classes\{Word,Excel,PowerPoint}.Application`
+    all absent), and those handlers have no fallback; using them would
+    crash, not degrade. `Outlook` also excluded per #300's
+    Redemption-licensing finding, unrelated to the Office-install gap.
+  - **`BrowserChrome` now uses a persistent profile path**
+    (`--user-data-dir=%USERPROFILE%\ChromeProfile` via
+    `command-line-args`) instead of Chrome's own throwaway
+    `C:\WINDOWS\SystemTemp\scoped_dir...` profile (cross-referenced
+    from #462: a temp `scoped_dir` path is itself a tell). This is a
+    structural fix only — the profile still starts empty on every fresh
+    golden-image clone, since each detonation is a disposable CoW
+    overlay. Actually pre-seeding History/cookies the way
+    `06-chrome-history.ps1` does for win11-analysis would need an
+    equivalent GHOSTS-side provisioner step; not built here, left as
+    explicitly deferred future work rather than attempted partially.
