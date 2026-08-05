@@ -9,7 +9,7 @@
 > configuration with rollback, retention, and `honeypot_settings_*` metrics.
 > What remains is not code — deployment verification of the shared
 > introspection token and the 72-hour multi-user soak, tracked in
-> [#81](https://github.com/Xore/honeypot-stack/issues/81). Earlier revisions of
+> [#81](https://github.com/Xore/apiary/issues/81). Earlier revisions of
 > this header said "stores and UI remain proposed" long after both existed.
 >
 > **Identity authority:** [`Xore/auth-backend`](https://github.com/Xore/auth-backend)
@@ -17,7 +17,7 @@
 > **UI reference:** [`Xore/theme`](https://github.com/Xore/theme)
 >
 > **Gate A review baseline:** `theme@efcc979`, `auth-backend@adaec4e`,
-> `honeypot-stack@bca2d3e`
+> `APIARY@bca2d3e`
 
 This roadmap adds a full-viewport settings surface to the honeypot dashboard,
 using the shared Xore theme and the user system already provided by
@@ -27,7 +27,7 @@ administrator-managed page configuration.
 ## 1. Architectural decision
 
 Do **not** build a second login, password, passkey, TOTP, session, recovery, or
-role database in honeypot-stack.
+role database in APIARY.
 
 `auth-backend` remains authoritative for:
 
@@ -466,7 +466,7 @@ settings page into a remote administration or code-execution surface.
 ## 11. AI agent implementation prompt
 
 Copy the prompt below into an AI coding agent with access to both
-`Xore/honeypot-stack` and `Xore/auth-backend`:
+`Xore/apiary` and `Xore/auth-backend`:
 
 ```text
 Implement the user settings and dashboard configuration system described in
@@ -475,7 +475,7 @@ docs/settings-user-configuration-roadmap.md.
 Repositories and authorities:
 - Xore/auth-backend is the sole authority for identity, passwords, passkeys,
   TOTP, recovery, sessions, trusted devices, roles, and account administration.
-- Xore/honeypot-stack owns only the dashboard user projection, per-user
+- Xore/apiary owns only the dashboard user projection, per-user
   dashboard preferences, global dashboard configuration, revision history,
   and dashboard audit events.
 - Xore/theme is the UI and modal-behavior reference. Follow its permanent

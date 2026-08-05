@@ -47,7 +47,7 @@
 > **Status**: Built — see the block at the top of this file. This line said
 > "nothing here is built yet" until 2026-07-31, six phases after it stopped
 > being true, and it was still being read as current.
-> **Tracked in**: [#76](https://github.com/Xore/honeypot-stack/issues/76)
+> **Tracked in**: [#76](https://github.com/Xore/apiary/issues/76)
 > **Last updated**: 2026-07-31
 >
 > **Re-anchored 2026-07-31.** The dashboard was restructured after this plan
@@ -56,7 +56,7 @@
 > references below were all stale, and Phase 3 in particular would have told an
 > implementer to put markup back into `page.go` — which a test now fails the
 > build for.
-> **Author**: honeypot-stack automated planning
+> **Author**: APIARY automated planning
 > **Depends on**: [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) (Ghidra headless + Rev·Deck + GhidrAssist)
 
 ---
@@ -105,7 +105,7 @@ infrastructure) doesn't change, it just gets a second spool.
 
 ```mermaid
 flowchart TD
-    Root["honeypot-stack/"] --> AG["analysis/ghidra/"]
+    Root["APIARY/"] --> AG["analysis/ghidra/"]
     Root --> DB["dashboard/"]
 
     AG --> IP["IMPLEMENTATION_PLAN.md<br/>Ghidra/Rev·Deck/GhidrAssist analysis pipeline"]
@@ -256,7 +256,7 @@ Two deviations from the sketch below, both deliberate:
   analysis is the *only* thing available.
 * **`submitReturnURL`'s open-redirect guard was extracted, not copied**, into
   `safeReturnPath(raw, allowed)` in `sandbox_submit.go`, and both submit
-  handlers now share it. Per [#80](https://github.com/Xore/honeypot-stack/issues/80)
+  handlers now share it. Per [#80](https://github.com/Xore/apiary/issues/80)
   a bare `strings.HasPrefix(raw, "/")` lets `//evil.example` through; a guard
   that exists in two copies is one that gets fixed in one copy.
 
@@ -288,7 +288,7 @@ table.
   `submitReturnURL` in `sandbox_submit.go` already implements, extended with
   "Ghidra analysis requested for …". Reuse that function's **allowlist** of
   permitted redirect prefixes rather than writing a fresh prefix check; see
-  [#80](https://github.com/Xore/honeypot-stack/issues/80) for why
+  [#80](https://github.com/Xore/apiary/issues/80) for why
   `strings.HasPrefix(raw, "/")` is not sufficient on its own.
 
 ### `ghidra.go` (mirrors `sandbox.go`)

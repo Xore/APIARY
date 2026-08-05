@@ -1,7 +1,7 @@
 # Agent-Speed Intrusion Chain: Threat Model & Applicability Matrix
 
 > **Status:** Research (#154), phase 1 of 5. This document is the "map the
-> published campaign to honeypot-stack's actual trust boundaries" deliverable;
+> published campaign to APIARY's actual trust boundaries" deliverable;
 > it does not implement anything. Phases 2-5 (synthetic replay corpus,
 > decode/correlate pipeline, deterministic criticality rules, preventive
 > control gaps, operator evidence UI) are scoped as follow-up work — see
@@ -16,7 +16,7 @@
 
 ## Method
 
-For each of the nine areas #154 asked to cover, this maps to honeypot-stack's
+For each of the nine areas #154 asked to cover, this maps to APIARY's
 **actual** current architecture — verified against the real compose files,
 Go/Python source, and docs in this tree, not assumed from what a "typical"
 honeypot stack might do. Each entry records: what exists today, whether the

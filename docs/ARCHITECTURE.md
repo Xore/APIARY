@@ -23,7 +23,7 @@ describes, not the native Windows 11 guest — see that directory's own
 `IMPLEMENTATION_PLAN.md` for current status. TANNER containers are
 web-request emulators, not malware detonation sandboxes.
 
-**The home side is not one deployment unit.** [#258](https://github.com/Xore/honeypot-stack/issues/258)
+**The home side is not one deployment unit.** [#258](https://github.com/Xore/apiary/issues/258)
 split what used to be a single `docker-compose.yml` into 12 independently
 deployed Dockge stacks — each with its own compose file
 (`docker-compose.<name>.yml`) and its own start/stop/update lifecycle. The
@@ -133,7 +133,7 @@ Home container ports bind to `HP_BIND` (normally the home WireGuard address),
 not to every host interface. The root Compose network `honeynet` carries the
 trusted analysis/management plane (Elasticsearch, Kibana, Filebeat, the
 dashboard, EveBox, Arkime) — not the honeypots themselves. Each honeypot has
-its own single-member network instead ([#235](https://github.com/Xore/honeypot-stack/issues/235)),
+its own single-member network instead ([#235](https://github.com/Xore/apiary/issues/235)),
 so a compromise of one has no network path to another; `tftp-relay` shares
 `dionaea_net` with `dionaea` since it actually depends on and forwards
 traffic to it, the one real exception. TANNER additionally uses
@@ -293,7 +293,7 @@ and stays file-based.
 `honeypot-init` runs first among the 12 stacks, and every other one depends
 on its output without a Compose-level dependency — Compose's
 `depends_on: condition: service_completed_successfully` can't reach across a
-stack boundary, [#258](https://github.com/Xore/honeypot-stack/issues/258)'s
+stack boundary, [#258](https://github.com/Xore/apiary/issues/258)'s
 split notwithstanding. Its one-shot jobs write a `<job>.done` marker file to
 a shared `state/init-markers/` directory on success; every dependent
 container across every other stack polls for that file at container

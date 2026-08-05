@@ -6,10 +6,10 @@ blocklists via their APIs.
 > **Status:** built. `reporter/` (Go, not the Python layout sketched below --
 > that part of this plan is superseded) is a real service in
 > `docker-compose.utilities.yml`. Phase 1
-> ([#68](https://github.com/Xore/honeypot-stack/issues/68)) and Phase 2
-> ([#69](https://github.com/Xore/honeypot-stack/issues/69)) are both closed.
+> ([#68](https://github.com/Xore/apiary/issues/68)) and Phase 2
+> ([#69](https://github.com/Xore/apiary/issues/69)) are both closed.
 > Phase 3-4 (reputation validation, operator observability) is
-> [#153](https://github.com/Xore/honeypot-stack/issues/153), still open.
+> [#153](https://github.com/Xore/apiary/issues/153), still open.
 >
 > **Reporting is outbound and irreversible.** An abuse report cannot be
 > unsent, and it names a third party's address from this stack. The reporter
@@ -238,15 +238,15 @@ flowchart TD
 
 These were open when the plan was written. They are settled; the implementation
 work they govern is tracked in
-[#68](https://github.com/Xore/honeypot-stack/issues/68) and
-[#69](https://github.com/Xore/honeypot-stack/issues/69).
+[#68](https://github.com/Xore/apiary/issues/68) and
+[#69](https://github.com/Xore/apiary/issues/69).
 
 - **Ingest via file tailing, not a message bus.** A Redis pub-sub channel has
   lower latency but adds a service to Compose for a reporter whose cooldown
   windows are measured in hours. Tail the logs; revisit only if `ml-worker`
   brings pubsub in for its own reasons.
 - **Suricata IDS alerts are in scope**, alongside honeypot hits, from Phase 2
-  ([#69](https://github.com/Xore/honeypot-stack/issues/69)).
+  ([#69](https://github.com/Xore/apiary/issues/69)).
 - **No auto-banning.** The reporter stays stateless and reporting-only.
   Firewall enforcement is a different trust boundary and a different failure
   mode: a false positive that costs an abuse report is recoverable, one that

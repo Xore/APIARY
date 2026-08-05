@@ -10,7 +10,7 @@
 > — e.g. adding GPU access to a container this repo doesn't already wire
 > up, or diagnosing why an existing one lost access to the card.
 > **Verified live** on the actual homeserver (`supermicro`, NVIDIA RTX 4000
-> Ada Generation, 20475 MiB VRAM) during the [#518](https://github.com/Xore/honeypot-stack/issues/518)
+> Ada Generation, 20475 MiB VRAM) during the [#518](https://github.com/Xore/apiary/issues/518)
 > true from-scratch reinstall, including a real fresh driver install and
 > reboot cycle. Every command and error message below was seen live, not
 > copied from NVIDIA's docs.

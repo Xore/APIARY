@@ -1,4 +1,4 @@
-# honeypot-stack — multi-service honeypot (HOME side, runs under Dockge).
+# APIARY — multi-service honeypot (HOME side, runs under Dockge).
 #
 # #258: every service that used to live in this file has split into its
 # own Dockge stack (docker-compose.conpot.yml, .cowrie.yml, .multipot.yml,

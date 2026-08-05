@@ -1,8 +1,8 @@
 # Code scanning
 
 Open CodeQL alerts are tracked in
-[#80](https://github.com/Xore/honeypot-stack/issues/80) and in the
-[Security tab](https://github.com/Xore/honeypot-stack/security/code-scanning),
+[#80](https://github.com/Xore/apiary/issues/80) and in the
+[Security tab](https://github.com/Xore/apiary/security/code-scanning),
 which is authoritative. This file is not a list of alerts — a snapshot of
 scanner output goes stale the moment anyone commits.
 

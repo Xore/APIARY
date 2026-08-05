@@ -162,7 +162,7 @@ deploy_latest_main() {
   fi
 
   if ! git clone --quiet --depth 1 --branch main \
-    https://github.com/Xore/honeypot-stack.git "$deploy_dir"; then
+    https://github.com/Xore/apiary.git "$deploy_dir"; then
     rm -rf -- "$deploy_dir"
     return 1
   fi

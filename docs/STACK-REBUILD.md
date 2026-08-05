@@ -23,7 +23,7 @@ Since #258 split the stack into ~13 independent Dockge projects
 `honeypot-http`, `honeypot-dnp3`, `honeypot-dionaea`,
 `honeypot-payload-analysis`, `honeypot-tanner`, `honeypot-elk`,
 `honeypot-dashboard`, `honeypot-utilities`, plus the now-empty
-`honeypot-stack`), a full reset is no longer "stop the stack, `docker compose
+`APIARY`), a full reset is no longer "stop the stack, `docker compose
 down -v`, start it again" — it's an ordered sequence across projects with a
 couple of real circular-dependency traps. This doc exists because the first
 live run of this sequence (2026-08-02) hit three of them.
@@ -47,7 +47,7 @@ live run of this sequence (2026-08-02) hit three of them.
 **Wiped:** every honeypot-owned Docker volume (`es-data`, `dionaea-lib`,
 `dashboard-state`, `yara-results`, `evebox-config`, `arkime-pcap`,
 `snare-pages`, `reporter-data`, and any orphaned pre-split leftovers still
-named `honeypot-stack_*`), every log directory under
+named `APIARY_*`), every log directory under
 `logs/`, `state/filebeat` (Filebeat's read-offset registry),
 `state/dedupe` (payload-dedupe's hash cache), `state/init-markers` (forces
 every one-shot bootstrap job in `honeypot-init` to rerun), and on the VPS,

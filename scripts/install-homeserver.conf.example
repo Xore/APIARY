@@ -14,8 +14,8 @@
 INSTALL_HOSTNAME="<HOSTNAME>"
 
 # --- Repository -----------------------------------------------------------
-# Where to clone honeypot-stack from, and which ref to check out.
-GIT_REPO_URL="<GIT_REMOTE_URL>"          # e.g. git@github.com:<org>/honeypot-stack.git
+# Where to clone APIARY from, and which ref to check out.
+GIT_REPO_URL="<GIT_REMOTE_URL>"          # e.g. git@github.com:<org>/apiary.git
 GIT_REF="main"
 
 # Where the repo checkout used by Dockge should live. Matches the layout

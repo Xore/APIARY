@@ -536,7 +536,7 @@ services:
   # sshfs, correlate by IP, or rotate on this side.
   p0f:
     build: ./p0f
-    image: honeypot-stack-p0f:latest
+    image: APIARY-p0f:latest
     container_name: hp-p0f
     restart: unless-stopped
     network_mode: host

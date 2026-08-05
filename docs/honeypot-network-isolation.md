@@ -9,13 +9,13 @@
 > `zone-crossing-alert.sh`, `isolation-audit.sh`) that were never written.
 >
 > The `analysis-net` name in it is where
-> [#61](https://github.com/Xore/honeypot-stack/issues/61) came from: an override
+> [#61](https://github.com/Xore/apiary/issues/61) came from: an override
 > file was written against this document instead of against the compose file,
 > and attached the ML worker to a network that does not exist.
 >
 > Gaps found during the rewrite:
-> [#88](https://github.com/Xore/honeypot-stack/issues/88) (no automated
-> isolation audit), [#89](https://github.com/Xore/honeypot-stack/issues/89)
+> [#88](https://github.com/Xore/apiary/issues/88) (no automated
+> isolation audit), [#89](https://github.com/Xore/apiary/issues/89)
 > (container hardening covers five services).
 
 ---
@@ -67,7 +67,7 @@ from inside the guest.
 
 `docker-compose.yml` gives each honeypot its own single-member Docker network
 (`cowrie_net`, `dionaea_net`, `conpot_net`, `conpot_s7_1200_net`, and so on) —
-[#235](https://github.com/Xore/honeypot-stack/issues/235): the stack used to
+[#235](https://github.com/Xore/apiary/issues/235): the stack used to
 put every honeypot on one shared `honeynet` bridge with Docker's default
 inter-container communication, so a compromise of one honeypot had a direct
 network path to every other honeypot. None of them need it — each writes to
@@ -90,7 +90,7 @@ TANNER and its dependencies keep their own separate `tanner_local`, unchanged.
 - `cap_drop: [ALL]` and `no-new-privileges` are on every honeypot now
   (`cowrie`, `multipot`, `http-honeypot`, `api-honeypot`, `dionaea`, `conpot`
   and its personas, `snare`, `tanner` and its dependencies, `yara-scanner`) —
-  [#89](https://github.com/Xore/honeypot-stack/issues/89) (SNARE/TANNER) and
+  [#89](https://github.com/Xore/apiary/issues/89) (SNARE/TANNER) and
   the per-service measurement passes referenced next to `dionaea`'s and
   `conpot`'s own `cap_add` lists closed the gap this section used to describe.
 - `NET_ADMIN`/`NET_RAW` exist only on the three sandbox sniffers in

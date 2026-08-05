@@ -45,7 +45,7 @@ STUB
 chmod +x "$bin/publish-sample.sh"
 export STUB_CALLED_MARKER="$work/PUBLISH_SAMPLE_WAS_CALLED"
 
-sample_content="honeypot-stack github-analysis dry-run fixture, not a real sample"
+sample_content="APIARY github-analysis dry-run fixture, not a real sample"
 sample_path="$COWRIE_DOWNLOADS_DIR/fixture"
 printf '%s' "$sample_content" >"$sample_path"
 hash=$(sha256sum "$sample_path" | cut -d' ' -f1)

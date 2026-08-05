@@ -12,7 +12,7 @@
 > `REVDECK_API_BASE`, writing a `revdeck` field distinct from the worker's own
 > `ai_triage` — GhidrAssist has a verified pinned-artifact install procedure
 > (`ghidrassist/README.md`, see
-> [#192](https://github.com/Xore/honeypot-stack/issues/192) for a caveat
+> [#192](https://github.com/Xore/apiary/issues/192) for a caveat
 > found along the way), and `report/generate_report.py` renders an HTML
 > report from every automated worker result, including capa and revdeck
 > sections. **The standalone Rev·Deck workbench adapter is also built**
@@ -27,13 +27,13 @@
 > [`workbench_domain.go`](../../../dashboard/workbench_domain.go) is now
 > `Available` whenever that spool is configured, closing out #78's last open
 > item.  
-> **Tracked in**: [#78](https://github.com/Xore/honeypot-stack/issues/78)
-> (phases 3–5), [#76](https://github.com/Xore/honeypot-stack/issues/76)
+> **Tracked in**: [#78](https://github.com/Xore/apiary/issues/78)
+> (phases 3–5), [#76](https://github.com/Xore/apiary/issues/76)
 > (dashboard spool and entry points),
-> [#85](https://github.com/Xore/honeypot-stack/issues/85) (non-Ghidra static
+> [#85](https://github.com/Xore/apiary/issues/85) (non-Ghidra static
 > tooling)  
 > **Last updated**: 2026-08-01  
-> **Author**: honeypot-stack automated planning
+> **Author**: APIARY automated planning
 
 ---
 
@@ -59,7 +59,7 @@ JoeSandbox reports.
 
 ```mermaid
 flowchart TD
-    Root["honeypot-stack/"] --> Docs["docs/analysis/ghidra/"]
+    Root["APIARY/"] --> Docs["docs/analysis/ghidra/"]
     Root --> AG["analysis/ghidra/"]
 
     Docs --> IP["IMPLEMENTATION_PLAN.md<br/>this file"]
@@ -83,7 +83,7 @@ to `docs/analysis/ghidra/{revdeck,ghidrassist}/` (#670); their code
 (Rev·Deck's client, the GhidrAssist plugin config) lives with the
 consumers documented in those READMEs, not as standalone trees here.
 
-**`scripts/` is vestigial, not part of the live pipeline** ([#141](https://github.com/Xore/honeypot-stack/issues/141)):
+**`scripts/` is vestigial, not part of the live pipeline** ([#141](https://github.com/Xore/apiary/issues/141)):
 these were written as `analyzeHeadless ... -postScript <file>` Jython scripts
 for the headless-mode design this document originally described, superseded
 by the REST-API-driven host worker below. `export_functions.py`,
@@ -92,7 +92,7 @@ by the REST-API-driven host worker below. `export_functions.py`,
 `/results/{job}/...` REST calls and walks its own call graph via
 `/v1/results/{job}/graph/{addr}`, never invoking `analyzeHeadless` or a
 postScript at all; `findcrypt.py` was already deleted earlier for the same
-reason ([#136](https://github.com/Xore/honeypot-stack/issues/136),
+reason ([#136](https://github.com/Xore/apiary/issues/136),
 superseded by `scan_crypto()` in the worker). `export_imports.py` is the one
 survivor, added to match its four siblings' shape but not wired into
 anything either — kept for now rather than folded into this cleanup.
@@ -100,7 +100,7 @@ anything either — kept for now rather than folded into this cleanup.
 Three corrections against the layout this section used to show:
 
 - `headless_analyze.sh` is gone — deleted alongside `ghidra_analyze.py` under
-  [#107](https://github.com/Xore/honeypot-stack/issues/107); see
+  [#107](https://github.com/Xore/apiary/issues/107); see
   [Dashboard/Worker Integration](#dashboardworker-integration) below.
 - `revdeck/docker-compose.revdeck.yml` was never built as a standalone file.
   The `revdeck` service was instead folded into `docker-compose.ghidra.yml`
@@ -122,7 +122,7 @@ Three corrections against the layout this section used to show:
   automatically as an enrichment embedded in the `ghidra` analyzer's own
   result, and no longer `Available: false`.
 - `report/` has no `templates/` subdirectory. [`generate_report.py`](../../../analysis/ghidra/report/generate_report.py)
-  follows [#56](https://github.com/Xore/honeypot-stack/issues/56)'s
+  follows [#56](https://github.com/Xore/apiary/issues/56)'s
   `sandbox/windows/orchestrate/generate_report.py`, which doesn't use one
   either — one Python file covering both HTML and inlined CSS isn't enough
   code to be worth splitting.
@@ -138,7 +138,7 @@ None of that exists. What actually runs is `biniamfd/ghidra-headless-rest`
 (below) behind a REST client (`worker/ghidra-worker.py`'s `GhidraClient`),
 triggered by a host-side spool — see
 [Dashboard/Worker Integration](#dashboardworker-integration) for the real
-trigger, and [#141](https://github.com/Xore/honeypot-stack/issues/141) for
+trigger, and [#141](https://github.com/Xore/apiary/issues/141) for
 the `scripts/` postScripts this superseded. The **Docker Image** and
 **REST API Endpoints Used** sections immediately below are accurate and
 current — verified against the running service, not left over from the
@@ -320,7 +320,7 @@ implicit assumption unverified.
 runtime state — real RE chat-session transcripts, a stale Lucene search
 index, and a `.claude/settings.local.json` leaking their home directory path
 — none of which are in GhidrAssist's tracked source tree. Tracked as
-[#192](https://github.com/Xore/honeypot-stack/issues/192); the README's
+[#192](https://github.com/Xore/apiary/issues/192); the README's
 install steps strip the three leaked paths from the extracted zip before
 pointing Ghidra's extension installer at it. The from-source build above
 does not need this step at all — the leak only exists in the packaged
@@ -334,7 +334,7 @@ release asset, never in the source tree it's built from.
 [AllsafeCyberSecurity/awesome-ghidra](https://github.com/AllsafeCyberSecurity/awesome-ghidra)
 
 Nine candidates were originally listed here with no decision behind any of
-them, same problem [#85](https://github.com/Xore/honeypot-stack/issues/85)
+them, same problem [#85](https://github.com/Xore/apiary/issues/85)
 found in the "Additional Static Analysis Tooling" list below. Applying the
 same standard — burden of proof on inclusion, since each addition is
 third-party code pinned/updated/trusted on the analysis host — exactly one
@@ -344,14 +344,14 @@ of the nine survives: `capa`.
 
 | Plugin | Purpose | Why |
 |--------|---------|-----|
-| `capa` | MITRE ATT&CK/MBC behavior tagging | Built as a `/v1/capa` endpoint on the existing `statictools` sidecar (`analysis/ghidra/statictools/`), **not** via `CapaExplorer`/Ghidra annotations — capa's own CLI runs against the raw sample directly, independent of and parallel to ssdeep/tlsh/lief. `worker/ghidra-worker.py`'s `capa_scan()` calls it fail-soft; `report/generate_report.py` and the dashboard's `ghidraCapa` card both render the result. **Known gap**: capa's default (vivisect) backend covers only x86/amd64/arm64 — no MIPS or ARM32, both common in this honeypot's IoT catch — so a real share of samples will show "not observed" for a reason unrelated to whether they have taggable behavior at all. Tracked in [#195](https://github.com/Xore/honeypot-stack/issues/195). |
+| `capa` | MITRE ATT&CK/MBC behavior tagging | Built as a `/v1/capa` endpoint on the existing `statictools` sidecar (`analysis/ghidra/statictools/`), **not** via `CapaExplorer`/Ghidra annotations — capa's own CLI runs against the raw sample directly, independent of and parallel to ssdeep/tlsh/lief. `worker/ghidra-worker.py`'s `capa_scan()` calls it fail-soft; `report/generate_report.py` and the dashboard's `ghidraCapa` card both render the result. **Known gap**: capa's default (vivisect) backend covers only x86/amd64/arm64 — no MIPS or ARM32, both common in this honeypot's IoT catch — so a real share of samples will show "not observed" for a reason unrelated to whether they have taggable behavior at all. Tracked in [#195](https://github.com/Xore/apiary/issues/195). |
 
 ### Decided out — each duplicates something already in the pipeline, is out of scope, or needs an analyst that isn't in this automated pipeline
 
 | Plugin | Would have added | Why it's out |
 |--------|-------------------|---------------|
 | `CapaExplorer` | Import capa results into Ghidra as annotations | Superseded by the direct integration above: capa runs standalone against the raw sample in the statictools sidecar and its output reaches the analyst through the report/dashboard, not a Ghidra GUI session. Nothing needs importing back into Ghidra when no analyst is sitting in one. |
-| `py-findcrypt-ghidra` | Crypto constant detection | Already replaced before Phase 4 was ever scoped: `findcrypt.py` was deleted in [#136](https://github.com/Xore/honeypot-stack/issues/136), superseded by `scan_crypto()` in `worker/ghidra-worker.py`. Re-adding it here would reintroduce the three bugs that deletion's commit message records. |
+| `py-findcrypt-ghidra` | Crypto constant detection | Already replaced before Phase 4 was ever scoped: `findcrypt.py` was deleted in [#136](https://github.com/Xore/apiary/issues/136), superseded by `scan_crypto()` in `worker/ghidra-worker.py`. Re-adding it here would reintroduce the three bugs that deletion's commit message records. |
 | `ghidra_scripts` (Allsafe) | Malware-specific scripts (MIPS, ARM, packing detection) | No capability named here beyond "malware scripts" — capa's behavior tags (packing detection is a capa rule category) and `scan_crypto()` already cover the concrete overlap. Nothing distinct enough to justify a third-party headless script bundle with no test coverage. |
 | `ghidra_scripts` (0x6d696368) | RC4 decrypter, YARA search, stack string decoder | The YARA search here duplicates the dedicated, hardened YARA pipeline (`analysis/yara/`) for the same reason #85 decided `yara-python` out. RC4 decryption and stack strings are real capabilities, but narrow enough to belong with `floss` (#85, still pending its own sandboxing decision) rather than a second, less-maintained script bundle. |
 | `ghidra_scripts` (0xdea) | Vuln research: memcpy pattern, format string, ROP gadgets | Out of scope, not just low priority: this pipeline triages what a sample *does*, not whether it has exploitable bugs. |
@@ -412,7 +412,7 @@ those at all.
 
 ## Dashboard/Worker Integration
 
-Superseded by [#107](https://github.com/Xore/honeypot-stack/issues/107): this
+Superseded by [#107](https://github.com/Xore/apiary/issues/107): this
 section used to describe extending a `.github/workflows/analyze.yml` in a
 different repo (`Xore/Honeypot`) to invoke `ghidra_analyze.py` against a REST
 contract that issue #101 disproved against the real
@@ -440,8 +440,8 @@ table is deployed.
 |------|------|------|-------|
 | `biniamfd/ghidra-headless-rest` | Ghidra REST backend | Automated (Docker) | 1 |
 | `biniamf/ai-reverse-engineering` (Rev·Deck) | AI triage | Automated + Interactive | 2 |
-| `symgraph/GhidrAssist` | In-GUI AI chat | Interactive only | 3 — [#78](https://github.com/Xore/honeypot-stack/issues/78) |
-| `capa` | Behavior tagging (MITRE ATT&CK/MBC) | Automated (statictools sidecar) | 4 — ✅ built, [#78](https://github.com/Xore/honeypot-stack/issues/78) |
+| `symgraph/GhidrAssist` | In-GUI AI chat | Interactive only | 3 — [#78](https://github.com/Xore/apiary/issues/78) |
+| `capa` | Behavior tagging (MITRE ATT&CK/MBC) | Automated (statictools sidecar) | 4 — ✅ built, [#78](https://github.com/Xore/apiary/issues/78) |
 | `AllsafeCyberSecurity/ghidra_scripts` | Malware scripts | Headless | 4 — decided out, 2026-08-01 |
 | `py-findcrypt-ghidra` | Crypto detection | Headless | 4 — decided out, 2026-08-01 (superseded by `scan_crypto()`) |
 | `0x6d696368/ghidra_scripts` | RC4/YARA/stack strings | Headless | 4 — decided out, 2026-08-01 |
@@ -459,7 +459,7 @@ See Phase 4 above for the reasoning behind each decision.
 ## Additional Static Analysis Tooling
 
 > **`ssdeep`/`tlsh`, `lief` and `capa` are built** (`capa` 2026-08-01, #78; the
-> other two 2026-08-01, [#138](https://github.com/Xore/honeypot-stack/issues/138)):
+> other two 2026-08-01, [#138](https://github.com/Xore/apiary/issues/138)):
 > the same loopback-only sidecar, `analysis/ghidra/statictools/`, run alongside
 > `ghidra`/`ollama` by `docker-compose.ghidra.yml`. The worker calls it after
 > collection via `fuzzy_hash()`/`lief_parse()`/`capa_scan()` and writes
@@ -468,7 +468,7 @@ See Phase 4 above for the reasoning behind each decision.
 > sandboxing decision, tracked separately in #138.
 
 Beyond Ghidra, nine tools were once listed as *considered* for the pipeline,
-with no decision behind any of them. [#85](https://github.com/Xore/honeypot-stack/issues/85)
+with no decision behind any of them. [#85](https://github.com/Xore/apiary/issues/85)
 asked for a short list with reasons instead of a wish list; this is that
 decision, made 2026-08-01. Each one added is third-party code that runs
 against live malware on the analysis host and has to be pinned, updated and
@@ -478,7 +478,7 @@ trusted, so the burden of proof was on inclusion, not exclusion.
 
 | Tool | Purpose | Why |
 |------|---------|-----|
-| `capa` | Behavior tagging (MITRE ATT&CK) | Strongest case: the tag vocabulary is what the LLM worker ([#66](https://github.com/Xore/honeypot-stack/issues/66)) and the dashboard already speak. Built 2026-08-01 as part of [#78](https://github.com/Xore/honeypot-stack/issues/78) phase 4 — see that section for the integration shape and the arch-coverage gap it left open. |
+| `capa` | Behavior tagging (MITRE ATT&CK) | Strongest case: the tag vocabulary is what the LLM worker ([#66](https://github.com/Xore/apiary/issues/66)) and the dashboard already speak. Built 2026-08-01 as part of [#78](https://github.com/Xore/apiary/issues/78) phase 4 — see that section for the integration shape and the arch-coverage gap it left open. |
 | `ssdeep` / `tlsh` | Fuzzy hashing for family clustering | Cheap, offline, never executes the sample. Gives family clustering exact SHA-256 dedup cannot — a real capability, not a duplicate of anything else in the pipeline. |
 | `lief` | ELF/PE/Mach-O parsing | One library covers every format `pefile` would have been added for, so it replaces that entry rather than sitting beside it. |
 | `floss` | Obfuscated string extraction | Genuinely useful on packed/obfuscated binaries, but it *emulates* code to unpack strings — a different risk class from the three above. Needs the sandbox boundary decided as part of integrating it, not a plain `pip install`. Replaces the `strings2` line below outright: `strings2` is the tool `floss` superseded, not a second option. |
@@ -487,7 +487,7 @@ trusted, so the burden of proof was on inclusion, not exclusion.
 
 | Tool | Would have added | Why it's out |
 |------|-------------------|---------------|
-| `yara-python` | YARA rule matching | The stack already runs a dedicated, hardened YARA pipeline: `analysis/yara/` + `dashboard/yara.go` + the `hp-yara-scanner` service, vendored/pinned corpus ([#73](https://github.com/Xore/honeypot-stack/issues/73)/[#106](https://github.com/Xore/honeypot-stack/issues/106)), `network_mode: none`, `read_only: true`, rules baked in at build. Wrapping `yara-python` inside a Ghidra script would be a second, less-hardened YARA execution path with no scanning capability the existing one lacks. Not merely redundant with Ghidra — redundant with a more hardened system that already ships. |
+| `yara-python` | YARA rule matching | The stack already runs a dedicated, hardened YARA pipeline: `analysis/yara/` + `dashboard/yara.go` + the `hp-yara-scanner` service, vendored/pinned corpus ([#73](https://github.com/Xore/apiary/issues/73)/[#106](https://github.com/Xore/apiary/issues/106)), `network_mode: none`, `read_only: true`, rules baked in at build. Wrapping `yara-python` inside a Ghidra script would be a second, less-hardened YARA execution path with no scanning capability the existing one lacks. Not merely redundant with Ghidra — redundant with a more hardened system that already ships. |
 | `pefile` | PE parsing | Fully subsumed by `lief` above; two PE parsers to pin and trust is worse than one. |
 | `binwalk` | Firmware/packed binary unpacking | Ghidra's own loaders plus `lief` already cover the formats this pipeline is in scope for; no sample so far has needed firmware unpacking. |
 | `radare2` | Cross-check disassembly, scripting | Duplicates the disassembler this whole pipeline is built on. A second disassembler to pin and trust, with no capability Ghidra lacks. |
@@ -499,8 +499,8 @@ implementations integrating these." There are none. That directory now holds
 only `export_imports.py`, unused by anything (see the "Architecture" section
 above); the other four postScripts it once held (`call_graph.py`,
 `export_functions.py`, `export_strings.py`, `yara_scan.py`) were deleted in
-[#141](https://github.com/Xore/honeypot-stack/issues/141), same reasoning as
+[#141](https://github.com/Xore/apiary/issues/141), same reasoning as
 `findcrypt.py`'s deletion in
-[#136](https://github.com/Xore/honeypot-stack/issues/136): superseded by
+[#136](https://github.com/Xore/apiary/issues/136): superseded by
 `scan_crypto()` in `worker/ghidra-worker.py`, whose comment records the
 three bugs the old script had.

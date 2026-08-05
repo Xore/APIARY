@@ -25,7 +25,7 @@ flowchart TD
   (`docker-compose.cisco-asa-honeypot.yml`, `.citrix-honeypot.yml`,
   `.rdp-honeypot.yml`, `.dicompot.yml`, `.dns-honeypot.yml`) and
   `docker-compose.ip-enrichment-worker.yml`, each its own stack. The
-  top-level `docker-compose.yml` (project `honeypot-stack`) is now a
+  top-level `docker-compose.yml` (project `APIARY`) is now a
   deliberately empty marker (`services: {}`) kept only because
   `/opt/stacks/honeypot-stack` is still the fixed path every other stack's
   `build:` context points at as an absolute string — see that file's own
@@ -65,7 +65,7 @@ the only internet-facing component.
 > [`scripts/install-homeserver.conf.example`](../scripts/install-homeserver.conf.example)
 > first. Run multiple times end-to-end (including a from-genuinely-fresh
 > install and a full idempotent re-run) under
-> [#518](https://github.com/Xore/honeypot-stack/issues/518), with real bugs
+> [#518](https://github.com/Xore/apiary/issues/518), with real bugs
 > found and fixed each pass — it's the current source of truth for the
 > real deployment order, not the numbered steps below, which describe the
 > pre-#258 two-stack model and haven't been re-verified against the current
@@ -80,7 +80,7 @@ the only internet-facing component.
    the repo into it as `compose.yml`, and copy the repo's
    `honeypot-init.env.example` to `.env` there (set
    `ARKIME_ADMIN_PASSWORD`/`ARKIME_PASSWORD_SECRET` — the latter must match
-   the value in `honeypot-stack`'s `.env` exactly).
+   the value in `APIARY`'s `.env` exactly).
 5. Before first deploying `honeypot-init`:
    `install -d -m 777 /opt/stacks/honeypot-stack/state/init-markers` — its
    jobs run as several different container UIDs, and a root-owned 755
@@ -88,10 +88,10 @@ the only internet-facing component.
 6. Ensure the repository `docker-compose.yml` is also present as
    `/opt/stacks/honeypot-stack/compose.yml`.
 7. In Dockge, validate and deploy **`honeypot-init` first**, then
-   `honeypot-stack`. `honeypot-stack`'s sensors wait on `honeypot-init`'s
+   `APIARY`. `APIARY`'s sensors wait on `honeypot-init`'s
    completion markers at their own entrypoint rather than a Compose-level
    dependency (they can't cross a Compose project boundary) — deploying
-   `honeypot-stack` first won't fail, but nothing finishes initialising
+   `APIARY` first won't fail, but nothing finishes initialising
    (log paths, Elasticsearch templates, Arkime schema) until `honeypot-init`
    has run at least once. See the root `README.md`'s "Home container
    interaction map" for why these are two stacks.
@@ -101,7 +101,7 @@ Each stack is a folder under your Dockge stacks dir (default `/opt/stacks/`).
 Upload the whole home folder via SFTP — compose **and** the build
 sub-folders (`cowrie/`, `multipot/`, `http-honeypot/`, `dashboard/`, …) —
 since Dockge's own editor only edits the compose file. After editing Go
-source or honeyfs content, rebuild from the `honeypot-stack` stack's Dockge
+source or honeyfs content, rebuild from the `APIARY` stack's Dockge
 **terminal**: `docker compose -f compose.yml up -d --build`.
 
 ### Boot-safe home networking and VPS log mounts

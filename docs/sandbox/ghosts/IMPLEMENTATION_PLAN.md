@@ -9,15 +9,15 @@
 > **Last updated**: 2026-08-03
 > **Host platform**: KVM + QEMU + libvirt + docker-compose, same as
 > `sandbox/windows` — no VMware, no Hyper-V, no CI-triggered detonation.
-> **Tracking**: [#331](https://github.com/Xore/honeypot-stack/issues/331)
+> **Tracking**: [#331](https://github.com/Xore/apiary/issues/331)
 > (this chain), decided in
-> [#300](https://github.com/Xore/honeypot-stack/issues/300).
+> [#300](https://github.com/Xore/apiary/issues/300).
 
 ---
 
 ## Why this exists, and why it is different from `sandbox/windows`
 
-[#300](https://github.com/Xore/honeypot-stack/issues/300)'s research found
+[#300](https://github.com/Xore/apiary/issues/300)'s research found
 that GHOSTS' actual value — real external-site browsing, real document
 downloads, real second-stage payload fetches — conflicts fundamentally with
 `win11-sandbox`'s permanent no-WAN isolation. A sample detonated there can

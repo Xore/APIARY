@@ -8,7 +8,7 @@ and how to name/place a honeypot host so it doesn't look staged. T-Pot's
 own README calls both out by name (`README.md` line 296 for outbound; the
 "where to place a honeypot" guidance for siting). This repo already does
 deep, source-verified realism work for Windows personas
-([#91](https://github.com/Xore/honeypot-stack/issues/91)/[#94](https://github.com/Xore/honeypot-stack/issues/94)/[#96](https://github.com/Xore/honeypot-stack/issues/96))
+([#91](https://github.com/Xore/apiary/issues/91)/[#94](https://github.com/Xore/apiary/issues/94)/[#96](https://github.com/Xore/apiary/issues/96))
 and has a full fictional-organization inventory
 ([`personas/README.md`](personas/README.md)) — this doc is the short
 practical guide those didn't cover.
@@ -107,5 +107,5 @@ you're deciding where a new persona belongs.
 **Background noise.** Ambient traffic (DNS lookups, NTP syncs, low-rate
 outbound chatter) makes a host look occupied rather than dead-silent — see
 [`docs/background-noise.md`](background-noise.md), currently research/not
-implemented ([#71](https://github.com/Xore/honeypot-stack/issues/71)), for
+implemented ([#71](https://github.com/Xore/apiary/issues/71)), for
 the technique reference and why it isn't built yet.

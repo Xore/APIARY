@@ -14,7 +14,7 @@
 # is the actual shared resource here, same as it always was. es-data,
 # evebox-config, and arkime-pcap all stay private/unnamed -- a fresh
 # project-scoped volume on cutover, not migrated from
-# honeypot-stack_es-data. Per explicit instruction (same as dashboard-state
+# APIARY_es-data. Per explicit instruction (same as dashboard-state
 # in the dashboard split), this split does not preserve existing
 # Elasticsearch data across the cutover -- every honeypot's indexed
 # event/alert history in the old volume is gone; Elasticsearch starts
@@ -27,7 +27,7 @@
 # can reach it by the `elasticsearch` alias without a route to the wider
 # honeynet.
 #
-# With this split, honeypot-stack's own docker-compose.yml has no services
+# With this split, APIARY's own docker-compose.yml has no services
 # left of its own -- see that file's header for what that means for its
 # deploy step going forward.
 #

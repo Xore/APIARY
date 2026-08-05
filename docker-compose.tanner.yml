@@ -291,7 +291,7 @@ networks:
   # file that nothing outside the Tanner group ever referenced tanner_local.
   # Unnamed/project-scoped, same as it was in the monolithic compose file
   # (just under a new project prefix now: honeypot-tanner_tanner_local
-  # instead of honeypot-stack_tanner_local).
+  # instead of APIARY_tanner_local).
   #
   # #540: outbound is allowed by default, matching this stack's previous de
   # facto behavior. Confirmed live (built the pinned tanner/tanner/Dockerfile

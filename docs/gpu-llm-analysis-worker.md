@@ -1,11 +1,11 @@
 # GPU LLM Analysis Worker — Implementation Guide
 
-> **Status:** [#66](https://github.com/Xore/honeypot-stack/issues/66) provides
-> the guarded worker and [#82](https://github.com/Xore/honeypot-stack/issues/82)
-> records the verified runtime. [#83](https://github.com/Xore/honeypot-stack/issues/83)
+> **Status:** [#66](https://github.com/Xore/apiary/issues/66) provides
+> the guarded worker and [#82](https://github.com/Xore/apiary/issues/82)
+> records the verified runtime. [#83](https://github.com/Xore/apiary/issues/83)
 > has passed both its synthetic real-model phase and its authorized, bounded
 > production U1 canary. U2 and daily reports remain disabled. Build order
-> continues with [#84](https://github.com/Xore/honeypot-stack/issues/84),
+> continues with [#84](https://github.com/Xore/apiary/issues/84),
 > which shares the GPU with the ML worker.
 > **Audience:** A human operator or an AI coding agent implementing this feature.
 > **Prerequisite reading:** [`ml-worker-plan.md`](ml-worker-plan.md) (data
@@ -74,7 +74,7 @@ hosted API (see [Guardrails §13](#13-guardrails-read-before-implementing)).
 ## 2. Hardware Contract
 
 Re-verified on the live homeserver during
-[#144](https://github.com/Xore/honeypot-stack/issues/144) on 2026-08-01.
+[#144](https://github.com/Xore/apiary/issues/144) on 2026-08-01.
 Exact measurements, model IDs, scoring, and the CPU/offload trade-offs are in
 [`local-llm-model-evaluation.md`](local-llm-model-evaluation.md). Issue #82
 still owns the broader reproducible host-capability record used by later GPU
@@ -565,10 +565,10 @@ bodies of the issues, so there is one place to see what is done:
 
 | Step | Issue |
 |---|---|
-| Record the broader reproducible host contract used by all later GPU milestones | [#82](https://github.com/Xore/honeypot-stack/issues/82) |
-| Create `llm-worker/` (§6), implement `worker.py` (§7), the §8 guardrails, and validate its isolated dry-run | [#66](https://github.com/Xore/honeypot-stack/issues/66) |
-| Pull the model, bring the services up, run acceptance tests T1–T7 (§11) | [#83](https://github.com/Xore/honeypot-stack/issues/83) |
-| Coordinate GPU windows with ML retraining (§5, G6) | [#84](https://github.com/Xore/honeypot-stack/issues/84) |
+| Record the broader reproducible host contract used by all later GPU milestones | [#82](https://github.com/Xore/apiary/issues/82) |
+| Create `llm-worker/` (§6), implement `worker.py` (§7), the §8 guardrails, and validate its isolated dry-run | [#66](https://github.com/Xore/apiary/issues/66) |
+| Pull the model, bring the services up, run acceptance tests T1–T7 (§11) | [#83](https://github.com/Xore/apiary/issues/83) |
+| Coordinate GPU windows with ML retraining (§5, G6) | [#84](https://github.com/Xore/apiary/issues/84) |
 
 Two of those steps are worth calling out because they are easy to defer and
 expensive to defer:

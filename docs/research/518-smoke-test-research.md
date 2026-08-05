@@ -150,7 +150,7 @@ per the issue. No database backup needed (explicitly out of scope).
 
 **Home (`supermicro`):**
 - `.env` files — 23 found under `/var/dockge/stacks/*/.env`, plus
-  `honeypot-init.env` and the top-level `.env` in the `honeypot-stack`
+  `honeypot-init.env` and the top-level `.env` in the `APIARY`
   Dockge checkout. (List is in the research; don't paste contents into any
   doc/issue — treat the list itself as sensitive.)
 - Windows sandbox state: nothing under `sandbox/` in the repo checkout is

@@ -34,7 +34,7 @@ export GITHUB_CLONE="$clone"
 export GITHUB_ANALYSIS_PENDING_DIR="$work/pending"
 
 sample="$work/sample"
-printf 'honeypot-stack github-analysis publish fixture, not a real sample\n' >"$sample"
+printf 'APIARY github-analysis publish fixture, not a real sample\n' >"$sample"
 mkdir -p "$work/cowrie-downloads"
 sha256=$(sha256sum "$sample" | cut -d' ' -f1)
 cp "$sample" "$work/cowrie-downloads/$sha256"

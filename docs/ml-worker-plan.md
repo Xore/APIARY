@@ -11,7 +11,7 @@
 > rollback, drift detection, and operator threshold controls are #65 —
 > see §11.
 > **Worker location:** [`ml-worker/`](../ml-worker/)  
-> **Tracked in:** [#61](https://github.com/Xore/honeypot-stack/issues/61)–[#65](https://github.com/Xore/honeypot-stack/issues/65)
+> **Tracked in:** [#61](https://github.com/Xore/apiary/issues/61)–[#65](https://github.com/Xore/apiary/issues/65)
 > — see the roadmap table in §12.
 >
 > **v0.1 audit verdict (#61, 2026-07-31): not runnable, evidenced.**
@@ -28,7 +28,7 @@
 > aren't uniform across sensors (§5.3). Six more defects (three already
 > flagged in `ml-gpu-coordinated-roadmap.md` §1, three new) are proven
 > executably in `ml-worker/tests/test_worker_audit.py`. Full writeup:
-> [issue #61](https://github.com/Xore/honeypot-stack/issues/61). This is a
+> [issue #61](https://github.com/Xore/apiary/issues/61). This is a
 > Milestone B rewrite, not a v0.1 polish pass.
 
 ---
@@ -274,7 +274,7 @@ The Dionaea and Conpot `event.sensor` gaps are ingest-pipeline issues, not
 `extract_features()` bugs — `extract_features()` can't fix them, but does
 need to read `honeypot.*` directly for these two sources rather than relying
 on `event.sensor` filtering to even find them. Filed separately as
-[#132](https://github.com/Xore/honeypot-stack/issues/132).
+[#132](https://github.com/Xore/apiary/issues/132).
 
 ---
 
@@ -492,7 +492,7 @@ scores to the dashboard":
 service folded into the root `docker-compose.yml`, and the file this section
 used to show (`ml-worker/docker-compose.override.yml`, built against a
 network named `analysis-net` that never existed anywhere in this
-repository — [#61](https://github.com/Xore/honeypot-stack/issues/61)) has
+repository — [#61](https://github.com/Xore/apiary/issues/61)) has
 been deleted, not patched. The real files:
 
 - [`ml-worker/docker-compose.yml`](../ml-worker/docker-compose.yml) — the
@@ -508,7 +508,7 @@ been deleted, not patched. The real files:
   `analysis/ghidra/docker-compose.ghidra.gpu.yml` (device reservation only).
   Isolation Forest and HBOS stay CPU-only regardless; nothing in the
   worker's code path uses CUDA until Milestone H
-  ([#67](https://github.com/Xore/honeypot-stack/issues/67)), which itself
+  ([#67](https://github.com/Xore/apiary/issues/67)), which itself
   requires a measured CPU baseline from this milestone first. Whether that
   phase shares the ghidra stack's `ollama` instance for embeddings or gets
   its own is #67's decision, not assumed here.
@@ -516,7 +516,7 @@ been deleted, not patched. The real files:
 No Redis in the base stack. `ml-gpu-coordinated-roadmap.md` §1 decision 1:
 Elasticsearch is the initial dashboard transport, and Redis/SSE is added only
 if polling cost and latency are measured and shown to be insufficient — see
-[#64](https://github.com/Xore/honeypot-stack/issues/64). Do not copy a
+[#64](https://github.com/Xore/apiary/issues/64). Do not copy a
 network name or a Redis dependency out of this document into a compose file;
 read the actual files above.
 
@@ -662,13 +662,13 @@ it is the same one it already has for six other fields.
 
 | Phase | Milestone | Issue |
 |-------|-----------|-------|
-| **v0.1** | Scaffold: Dockerfile, worker.py, IsoForest, ES write | [#61](https://github.com/Xore/honeypot-stack/issues/61) |
-| **v0.2** | HBOS fast filter + feature engineering for all 5 sources | [#62](https://github.com/Xore/honeypot-stack/issues/62) |
-| **v0.3** | LSTM-AE temporal model + sequence windowing | [#63](https://github.com/Xore/honeypot-stack/issues/63) |
-| **v0.4** | Composite scoring + explanation generation | [#63](https://github.com/Xore/honeypot-stack/issues/63) |
-| **v0.5–v0.7** | Elasticsearch-polled delivery to the dashboard: `dashboard/ml_anomalies.go`, `/api/ml/anomalies`+`/api/ml/stats`, and the `/ml-anomalies` page — no Redis, per #64's own rule | Done ([#64](https://github.com/Xore/honeypot-stack/issues/64), closed) |
-| **v0.8** | Retraining scheduler + model versioning | [#65](https://github.com/Xore/honeypot-stack/issues/65) |
-| **v1.0** | Drift detection + alert threshold tuning UI | [#65](https://github.com/Xore/honeypot-stack/issues/65) |
+| **v0.1** | Scaffold: Dockerfile, worker.py, IsoForest, ES write | [#61](https://github.com/Xore/apiary/issues/61) |
+| **v0.2** | HBOS fast filter + feature engineering for all 5 sources | [#62](https://github.com/Xore/apiary/issues/62) |
+| **v0.3** | LSTM-AE temporal model + sequence windowing | [#63](https://github.com/Xore/apiary/issues/63) |
+| **v0.4** | Composite scoring + explanation generation | [#63](https://github.com/Xore/apiary/issues/63) |
+| **v0.5–v0.7** | Elasticsearch-polled delivery to the dashboard: `dashboard/ml_anomalies.go`, `/api/ml/anomalies`+`/api/ml/stats`, and the `/ml-anomalies` page — no Redis, per #64's own rule | Done ([#64](https://github.com/Xore/apiary/issues/64), closed) |
+| **v0.8** | Retraining scheduler + model versioning | [#65](https://github.com/Xore/apiary/issues/65) |
+| **v1.0** | Drift detection + alert threshold tuning UI | [#65](https://github.com/Xore/apiary/issues/65) |
 
 v0.1 is listed as an issue rather than as done on purpose. `ml-worker/` holds a
 Dockerfile, `worker.py`, and a `docker-compose.override.yml`, but it is not a
@@ -693,8 +693,8 @@ starting any of these. It supersedes this plan's sequencing and records
 corrections to the design below — that timestamp-only checkpoints are not
 safe is now fixed (#168, §7 above); clipped model scores must still not be
 treated as probabilities, and the `0.75` threshold in §4.4 is still an
-assumption rather than a measurement ([#174](https://github.com/Xore/honeypot-stack/issues/174),
-open, blocked on live data from [#167](https://github.com/Xore/honeypot-stack/issues/167)).
+assumption rather than a measurement ([#174](https://github.com/Xore/apiary/issues/174),
+open, blocked on live data from [#167](https://github.com/Xore/apiary/issues/167)).
 
 ---
 
