@@ -12,15 +12,35 @@ curl -fsS -X PUT "$es_url/_snapshot/honeypot-fs" \
   --data-binary '{"type":"fs","settings":{"location":"/snapshots","compress":true}}' >/dev/null
 
 # Bounded retention prevents a noisy internet-wide scan or IDS signature from
-# filling the homeserver disk. Daily Filebeat names already provide rollover;
-# ILM handles deletion of the old daily indices/backing indices.
-for spec in honeypot-30d:30d suricata-7d:7d dead-letter-60d:60d portbridge-30d:30d analysis-results-180d:180d; do
+# filling the homeserver disk. Daily Filebeat names already provide rollover
+# for suricata/portbridge/dead-letter/analysis-results (a fresh, plain
+# date-named index each day -- see analysis/filebeat.yml's output.elasticsearch
+# indices routing); ILM only has to delete the old ones once they age out.
+for spec in suricata-7d:7d dead-letter-60d:60d portbridge-30d:30d analysis-results-180d:180d; do
   name=${spec%%:*}
   age=${spec#*:}
   curl -fsS -X PUT "$es_url/_ilm/policy/$name" \
     -H 'Content-Type: application/json' \
     --data-binary "{\"policy\":{\"phases\":{\"hot\":{\"actions\":{}},\"delete\":{\"min_age\":\"$age\",\"actions\":{\"delete\":{}}}}}}" >/dev/null
 done
+
+# #585: honeypot-30d is the one policy attached to a real ILM-managed data
+# stream (honeypot-events-v2's own template below, "data_stream": {}) rather
+# than a plain Filebeat date-named index -- confirmed live against a real
+# Elasticsearch instance that without an explicit rollover action in the hot
+# phase, ILM will not (structurally cannot) delete a data stream's write
+# index, since a write index can only be removed after it has rolled over.
+# With hot.actions empty (this policy's shape before this fix), the delete
+# phase gets permanently stuck at "wait-for-shard-history-leases" and the
+# single backing index grows unbounded forever -- the 30-day retention this
+# policy is supposed to enforce did nothing at all. Daily rollover matches
+# suricata-7d/portbridge-30d's own per-day cadence above (they get a new
+# index each day from Filebeat's date-named pattern instead); 25gb is a
+# secondary safety trigger so an unusually heavy single day still rolls
+# rather than growing one shard past a healthy size.
+curl -fsS -X PUT "$es_url/_ilm/policy/honeypot-30d" \
+  -H 'Content-Type: application/json' \
+  --data-binary '{"policy":{"phases":{"hot":{"actions":{"rollover":{"max_age":"1d","max_primary_shard_size":"25gb"}}},"delete":{"min_age":"30d","actions":{"delete":{}}}}}}' >/dev/null
 
 # Geo enrichment is best-effort. Listener/startup events legitimately contain
 # an empty source IP and must still be indexed rather than rejected.
