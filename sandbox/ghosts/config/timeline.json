@@ -12,7 +12,10 @@
                 "stickiness-depth-min": "1",
                 "stickiness-depth-max": "3",
                 "delay-jitter": "30",
-                "isheadless": "false"
+                "isheadless": "false",
+                "command-line-args": [
+                    "--disable-blink-features=AutomationControlled"
+                ]
             },
             "TimeLineEvents": [
                 {

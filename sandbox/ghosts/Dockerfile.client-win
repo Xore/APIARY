@@ -15,6 +15,52 @@ RUN update-ca-certificates
 COPY Ghosts.Client.Universal/. /app/Ghosts.Client.Universal
 COPY Ghosts.Domain/. /app/Ghosts.Domain
 WORKDIR /app/Ghosts.Client.Universal
+
+# #462: the stock build self-identifies to anyone who reaches the desktop --
+# an "enable-automation" Chrome flag and default ChromeDriverService both
+# fingerprint every browser session as automated (navigator.webdriver=true,
+# the "Chrome is being controlled by automated test software" infobar, and a
+# visible chromedriver.exe console window), on top of the compiled PE's own
+# CMU/GHOSTS version-resource strings (Company/Product/Description below --
+# visible via a plain right-click -> Properties -> Details in Explorer).
+# Patched in-place rather than maintaining a source fork: this Dockerfile
+# builds straight from a `docker build`-time git context
+# (cmu-sei/GHOSTS.git#v9.0.0:src, see provision-golden-image.sh), so there is
+# no local checkout of GHOSTS' own source to hand-edit -- sed against the
+# exact upstream lines is the whole patch mechanism, and it's a build
+# failure (not a silent no-op) if a future GHOSTS_TAG bump ever moves these
+# lines: sed with `-e` and no `g`/`p` flag doesn't error on a missed match,
+# but options.AddExcludedArgument("enable-automation") appears verbatim in
+# the fingerprint check right after, so a mismatch here still fails loudly
+# just one line later instead of a fully silent skip.
+# #462: also sets <AssemblyName> in the .csproj itself (inserted right
+# after <RootNamespace>, the one other line this file's own PropertyGroup
+# guarantees is unique) -- NOT a -p:AssemblyName=EndpointAgent CLI override
+# on the publish command below. Confirmed live: that CLI-override form
+# fails outright with "error : Ambiguous project name 'EndpointAgent'"
+# (NuGet.targets(196,5), a restore-cache-key collision between the
+# overridden assembly identity and the project's own .csproj-derived name).
+# A plain post-publish file rename was tried and rejected too -- also
+# confirmed live: the published apphost .exe embeds a literal
+# "Ghosts.Client.Universal.dll" string as the managed assembly it loads at
+# startup, baked in by the SDK's apphost-patching step at publish time, so
+# renaming the files on disk afterward leaves the exe looking for a .dll
+# that no longer exists under that name -- it would fail to launch,
+# silently as far as this Dockerfile's own build success/failure signal is
+# concerned. Setting AssemblyName in the project file itself means restore,
+# build, AND the apphost patching step all agree on the name from the
+# start, with no separate rename step needed at all.
+RUN sed -i \
+    -e '/var options = new ChromeOptions();/a\            options.AddExcludedArgument("enable-automation");\n            options.AddAdditionalOption("useAutomationExtension", false);' \
+    -e 's/^                driver = new ChromeDriver(options);$/                var chromeDriverService = ChromeDriverService.CreateDefaultService();\n                chromeDriverService.HideCommandPromptWindow = true;\n                driver = new ChromeDriver(chromeDriverService, options);/' \
+    Handlers/BrowserChrome.cs \
+ && grep -qF 'options.AddExcludedArgument("enable-automation");' Handlers/BrowserChrome.cs \
+ && grep -qF 'new ChromeDriver(chromeDriverService, options);' Handlers/BrowserChrome.cs \
+ && sed -i \
+    -e '/<RootNamespace>Ghosts.Client.Universal<\/RootNamespace>/a\    <AssemblyName>EndpointAgent<\/AssemblyName>' \
+    Ghosts.Client.Universal.csproj \
+ && grep -qF '<AssemblyName>EndpointAgent</AssemblyName>' Ghosts.Client.Universal.csproj
+
 # NOT -p:PublishSingleFile=true -- verified live (#326): a single-file
 # publish leaves Assembly.Location empty at runtime (a documented .NET
 # single-file-deployment gotcha), and GHOSTS' own
@@ -23,4 +69,20 @@ WORKDIR /app/Ghosts.Client.Universal
 # banner, crashing immediately with "System.ArgumentException: The path is
 # empty" before the client ever reaches its first log line or API call.
 # Multi-file self-contained publish keeps Assembly.Location populated.
-RUN dotnet publish -c Release -r win-x64 --self-contained true -o /app/dist
+#
+# #462: MSBuild property overrides rewrite the PE version resource's
+# Company/Product/Description/Copyright away from "Carnegie Mellon
+# University" / "GHOSTS NPC Orchestration Platform" / ddupdyke[at]sei.cmu.edu
+# -- all three otherwise visible unauthenticated to anyone who reaches the
+# desktop, no admin rights or debugger needed. These, unlike AssemblyName
+# above, are plain version-resource strings with no restore-identity
+# entanglement, so a CLI override works fine for them.
+RUN dotnet publish Ghosts.Client.Universal.csproj -c Release -r win-x64 --self-contained true -o /app/dist \
+    -p:Company="Contoso IT Solutions" \
+    -p:Product="Contoso Endpoint Agent" \
+    -p:Authors="Contoso IT Solutions" \
+    -p:Description="Endpoint monitoring and telemetry agent" \
+    -p:Copyright="Copyright (c) Contoso IT Solutions" \
+ && test -f /app/dist/EndpointAgent.exe \
+ && test -f /app/dist/EndpointAgent.dll \
+ && test ! -e /app/dist/Ghosts.Client.Universal.exe

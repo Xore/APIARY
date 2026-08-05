@@ -66,22 +66,33 @@ echo "== overlaying this repo's application.json/timeline.json"
 install -m 0644 "$here/config/application.json" "$work/ghosts-client/config/application.json"
 install -m 0644 "$here/config/timeline.json" "$work/ghosts-client/config/timeline.json"
 
-echo "== injecting into $GOLDEN_IMAGE at C:\\ghosts"
+echo "== injecting into $GOLDEN_IMAGE at C:\\Program Files\\Contoso\\EndpointAgent"
+# #462: install path and binary name deliberately don't say "ghosts"
+# anywhere -- C:\ghosts\Ghosts.Client.Universal.exe is a dead giveaway to
+# anyone who reaches the desktop. Blends in under Program Files with the
+# same "Contoso" cover identity Dockerfile.client-win bakes into the
+# binary's own PE version resource (Company/Product strings), so a
+# right-click -> Properties and a directory listing tell the same
+# consistent, plausible story.
+#
 # virt-copy-in lands a copy of the source directory, named after its own
 # basename, inside the given remote directory -- it can't rename on the
 # way in, and --run-command can't help either (host is Linux, guest is
 # Windows; virt-customize refuses to run guest commands cross-platform,
 # only --firstboot scripts, which need an actual boot). Renaming the local
-# directory before copying lands it at exactly "C:\ghosts" without needing
-# a boot just to move a directory -- the plain, documented path #327/#328's
-# future domain/worker pieces will assume.
-mv "$work/ghosts-client" "$work/ghosts"
+# directory before copying, and pre-creating the Contoso parent under
+# Program Files, lands it at exactly the target path without needing a
+# boot just to move a directory.
+mv "$work/ghosts-client" "$work/EndpointAgent"
+mkdir -p "$work/pf/Contoso"
+mv "$work/EndpointAgent" "$work/pf/Contoso/EndpointAgent"
 # Idempotent re-run: virt-copy-in errors if the destination already exists,
 # so a re-provision (picking up a Dockerfile.client-win fix, a config
 # change) needs the old copy gone first.
-virt-rm -a "$GOLDEN_IMAGE" -rf "/ghosts" 2>/dev/null || true
-virt-copy-in -a "$GOLDEN_IMAGE" "$work/ghosts" "/"
+virt-rm -a "$GOLDEN_IMAGE" -rf "/Program Files/Contoso/EndpointAgent" 2>/dev/null || true
+virt-mkdir -a "$GOLDEN_IMAGE" -p "/Program Files/Contoso" 2>/dev/null || true
+virt-copy-in -a "$GOLDEN_IMAGE" "$work/pf/Contoso/EndpointAgent" "/Program Files/Contoso/"
 
 echo "== done"
-echo "C:\\ghosts\\Ghosts.Client.Universal.exe is now in $GOLDEN_IMAGE, not autostarted."
+echo "C:\\Program Files\\Contoso\\EndpointAgent\\EndpointAgent.exe is now in $GOLDEN_IMAGE, not autostarted."
 echo "Verify enrollment with: sandbox/ghosts/verify-client-enrollment.sh"

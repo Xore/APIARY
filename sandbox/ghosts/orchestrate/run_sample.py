@@ -177,21 +177,54 @@ def copy_sample_to_vm(sample_path: Path, sha: str) -> str:
     return f'C:\\Samples\\{dest_name}'
 
 
+GHOSTS_CLIENT_DIR  = r'C:\Program Files\Contoso\EndpointAgent'
+GHOSTS_CLIENT_EXE  = GHOSTS_CLIENT_DIR + r'\EndpointAgent.exe'
+GHOSTS_TASK_NAME   = 'Contoso Endpoint Agent Sync'
+
+
 def start_ghosts_client():
-    """Launch via WMI Win32_Process.Create, not Start-Process -- verified
-    live in #326 that Start-Process (with or without output redirection)
-    hangs indefinitely over this guest's WinRM path for reasons never
-    root-caused; WMI Create is the reliable launch mechanism found there.
-    Runs the persona's baked-in timeline (config/timeline.json, #326/#329)
-    in the background for the rest of this run, same as a human using this
-    workstation while the sample also runs."""
+    """Launch via a one-shot scheduled task with an Interactive-logon
+    Principal, not WMI's Win32_Process.Create -- verified live in #326 that
+    Start-Process (with or without output redirection) hangs indefinitely
+    over this guest's WinRM path for reasons never root-caused, and
+    Win32_Process.Create was adopted as the reliable alternative found
+    there. #462 (found later, live-testing #329's persona timeline):
+    WMI-launched processes always spawn in Session 0, invisible on the
+    interactive console/VNC/RDP session an attacker who reaches this box
+    would actually be looking at -- confirmed via `Get-Process | Select
+    SessionId` showing 0 for a WMI-launched client while the real desktop
+    session is 1. Session 0 also means the client's own Selenium/Chrome
+    automation can never touch the interactive desktop's window station at
+    all, which is a functional bug on top of the stealth one.
+
+    Same fix shape as packer/scripts/07-living-persona.ps1's
+    PersonaDaemon task (-Principal ... -LogonType Interactive) and
+    packer/scripts/11-detonation-orchestrator.ps1's AtLogOn task -- a
+    scheduled task with an explicit Interactive principal is this repo's
+    proven way to get code running in the real session over WinRM, which
+    itself always executes in Session 0. Registered and started
+    immediately (Register-ScheduledTask + Start-ScheduledTask) rather than
+    an AtLogOn trigger, since the guest is already logged in by the time
+    detonation starts -- there is no future logon event to wait for.
+
+    Task name and binary path are deliberately generic (#462) -- see
+    Dockerfile.client-win and provision-golden-image.sh for the matching
+    PE-metadata and install-path changes. Runs the persona's baked-in
+    timeline (config/timeline.json, #326/#329) in the background for the
+    rest of this run, same as a human using this workstation while the
+    sample also runs."""
     ps = (
-        'Invoke-CimMethod -ClassName Win32_Process -MethodName Create '
-        '-Arguments @{ CommandLine = "C:\\ghosts\\Ghosts.Client.Universal.exe"; '
-        'CurrentDirectory = "C:\\ghosts" }'
+        f'$action = New-ScheduledTaskAction -Execute "{GHOSTS_CLIENT_EXE}" '
+        f'-WorkingDirectory "{GHOSTS_CLIENT_DIR}"; '
+        '$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date); '
+        '$principal = New-ScheduledTaskPrincipal -UserId "analyst" -LogonType Interactive -RunLevel Highest; '
+        '$settings = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero); '
+        f'Register-ScheduledTask -TaskName "{GHOSTS_TASK_NAME}" '
+        '-Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null; '
+        f'Start-ScheduledTask -TaskName "{GHOSTS_TASK_NAME}"'
     )
     result = winrm_run(ps, timeout=30)
-    log.info(f'GHOSTS client launch: {result["stdout"].strip()}')
+    log.info(f'GHOSTS client launch: {result["stdout"].strip()} {result["stderr"].strip()}')
 
 
 def stop_persona_daemon():

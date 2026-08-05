@@ -114,19 +114,25 @@ done
 [ -n "$guest_ip" ] || { echo "error: WinRM never came up on $vm" >&2; exit 1; }
 echo "  guest is at $guest_ip"
 
-echo "== launching the client (WMI Create, not Start-Process: verified live (#326) that"
-echo "   Start-Process -RedirectStandardOutput hangs indefinitely over this WinRM path)"
+echo "== launching the client (scheduled task, Interactive principal -- #462: not WMI Create,"
+echo "   which always spawns in Session 0, invisible on the real desktop session an attacker"
+echo "   would actually see; not Start-Process either, verified live (#326) that"
+echo "   -RedirectStandardOutput hangs indefinitely over this WinRM path)"
 python3 - "$guest_ip" "$WINRM_USER" "$WINRM_PASS" <<'PYEOF'
 import sys, winrm
 ip, user, pw = sys.argv[1:4]
 s = winrm.Session(ip, auth=(user, pw), transport='ntlm', operation_timeout_sec=25, read_timeout_sec=30)
 ps = r'''
-$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
-  CommandLine = "C:\ghosts\Ghosts.Client.Universal.exe"
-  CurrentDirectory = "C:\ghosts"
-}
-if ($r.ReturnValue -ne 0) { throw "Win32_Process.Create failed: $($r.ReturnValue)" }
-$r.ProcessId
+$exe = "C:\Program Files\Contoso\EndpointAgent\EndpointAgent.exe"
+$dir = "C:\Program Files\Contoso\EndpointAgent"
+$action = New-ScheduledTaskAction -Execute $exe -WorkingDirectory $dir
+$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date)
+$principal = New-ScheduledTaskPrincipal -UserId "analyst" -LogonType Interactive -RunLevel Highest
+$settings = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
+Register-ScheduledTask -TaskName "Contoso Endpoint Agent Sync" -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+Start-ScheduledTask -TaskName "Contoso Endpoint Agent Sync"
+Start-Sleep -Seconds 3
+(Get-Process EndpointAgent -ErrorAction SilentlyContinue).Id
 '''
 r = s.run_ps(ps)
 if r.status_code != 0:
