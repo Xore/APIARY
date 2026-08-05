@@ -311,6 +311,49 @@ func TestClassifySuricataSurfacesPrintablePayload(t *testing.T) {
 	}
 }
 
+// TestClassifyDNP3SurfacesLinkFunctionAndAddresses is a regression test for
+// #570: dnp3-honeypot emits function/dnp3_source/dnp3_destination on every
+// real frame, but classify.go had no dedicated dnp3 case at all -- every
+// event fell through to the generic fallback, which only ever showed the
+// bare event field ("frame") with no link function or RTU address.
+func TestClassifyDNP3SurfacesLinkFunctionAndAddresses(t *testing.T) {
+	frame := classify(map[string]any{
+		"sensor": "dnp3", "event": "frame", "port": float64(20000),
+		"function":    "confirmed_user_data",
+		"dnp3_source": float64(4), "dnp3_destination": float64(1),
+	}, "dnp3")
+	if frame.sensor != "dnp3" || frame.proto != "dnp3" || frame.port != "20000" {
+		t.Fatalf("unexpected dnp3 frame classification: %+v", frame)
+	}
+	if !strings.Contains(frame.detail, "confirmed_user_data") {
+		t.Fatalf("link function not surfaced: %q", frame.detail)
+	}
+	if !strings.Contains(frame.detail, "src 4") || !strings.Contains(frame.detail, "dst 1") {
+		t.Fatalf("dnp3 source/destination addresses not surfaced: %q", frame.detail)
+	}
+
+	// #610: app_function (application-layer function code, only present on
+	// frames carrying a full transport+app-layer segment) must surface too.
+	withApp := classify(map[string]any{
+		"sensor": "dnp3", "event": "frame", "port": float64(20000),
+		"function": "unconfirmed_user_data", "app_function": "operate",
+		"dnp3_source": float64(4), "dnp3_destination": float64(1),
+	}, "dnp3")
+	if !strings.Contains(withApp.detail, "app operate") {
+		t.Fatalf("app_function not surfaced: %q", withApp.detail)
+	}
+
+	malformed := classify(map[string]any{
+		"sensor": "dnp3", "event": "malformed_frame", "port": float64(20000),
+	}, "dnp3")
+	if malformed.detail != "malformed frame" {
+		t.Fatalf("malformed frame not labeled distinctly: %q", malformed.detail)
+	}
+	if malformed.detail == frame.detail {
+		t.Fatalf("malformed frame and normal frame produced identical detail")
+	}
+}
+
 // TestClassifyTannerSurfacesDetectionName is a regression test found via a
 // live ES document: tanner's own emulator classifies every request
 // (response_msg.response.message.detection.name), but this was never read
