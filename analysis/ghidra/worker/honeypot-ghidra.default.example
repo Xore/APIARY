@@ -36,7 +36,7 @@ GHIDRA_ANALYSIS_TIMEOUT=4200
 # Set this empty to switch triage off; results then carry "ai_triage": null and
 # everything else is unaffected.
 GHIDRA_TRIAGE_API_BASE=http://127.0.0.1:11434/v1
-GHIDRA_TRIAGE_MODEL=qwen3:8b
+GHIDRA_TRIAGE_MODEL=qwen3:14b
 
 # Seconds for one workflow call. Two calls run per sample.
 GHIDRA_TRIAGE_TIMEOUT=300

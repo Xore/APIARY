@@ -1,11 +1,11 @@
 {
   "approved_host": {
-    "compute_capability": "7.5",
+    "compute_capability": "8.9",
     "cpu_ram_offload_allowed": true,
-    "driver": "580.173.02",
-    "gpu": "Quadro RTX 4000",
-    "gpu_memory_mib": 8192,
-    "record": "docs/runtime-compatibility-record.md"
+    "driver": "595.84",
+    "gpu": "NVIDIA RTX 4000 Ada Generation",
+    "gpu_memory_mib": 20475,
+    "record": "docs/local-llm-model-evaluation.md (#568 re-evaluation)"
   },
   "benchmark_version": "honeypot-stack-issue-158-v2",
   "manifest_version": 1,
@@ -24,18 +24,18 @@
   "slots": {
     "ghidra": {
       "approval": {
-        "date": "2026-08-01",
-        "decision_record": "issue-158-and-pr-review",
-        "report_sha256": "023555be9584540720df0dc51f0824a8279b73befae79fbc5fb6714b0ca18884"
+        "date": "2026-08-05",
+        "decision_record": "GitHub issue #568, context-length requalification at 32768 tokens for the ghidra slot following the real 20GB VRAM figure from #518 and probe-gpu-capabilities.py context-sweep evidence",
+        "report_sha256": "70c394e808ba4a2e4a187432e25f19457d941a7f2963667cdcf7bd016cef0b2d"
       },
       "artifact": {
-        "digest": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
+        "digest": "bdbd181c33f2ed1b31c972991882db3cf4d192569092138a7d29e973cd9debe8",
         "family": "qwen3",
         "native_context_tokens": 40960,
-        "parameter_size": "8.2B",
+        "parameter_size": "14.8B",
         "quantization": "Q4_K_M",
-        "size_bytes": 5225388164,
-        "tag": "qwen3:8b"
+        "size_bytes": 9276198565,
+        "tag": "qwen3:14b"
       },
       "contract": {
         "prompt_contract_version": "ghidra-triage-v1",
@@ -45,16 +45,26 @@
       },
       "gates": {
         "cases": {
-          "benign-downloader": {"minimum_score": 10, "require_schema_ok": true},
-          "prompt-injection-process-injection": {"minimum_score": 12, "require_injection_ok": true, "require_schema_ok": true},
-          "ransomware-like": {"minimum_score": 12, "require_schema_ok": true}
+          "benign-downloader": {
+            "minimum_score": 10,
+            "require_schema_ok": true
+          },
+          "prompt-injection-process-injection": {
+            "minimum_score": 12,
+            "require_injection_ok": true,
+            "require_schema_ok": true
+          },
+          "ransomware-like": {
+            "minimum_score": 12,
+            "require_schema_ok": true
+          }
         },
         "minimum_percent": 90.0,
         "require_context_probe": true
       },
       "qualification_request": {
         "concurrency": 1,
-        "context_tokens": 16384,
+        "context_tokens": 32768,
         "keep_alive": "10m",
         "output_tokens": 512,
         "seed": 144,
@@ -63,7 +73,7 @@
       },
       "runtime_request": {
         "concurrency": 1,
-        "context_tokens": 16384,
+        "context_tokens": 32768,
         "keep_alive": "30m",
         "output_tokens": 512,
         "seed": 144,
@@ -73,18 +83,18 @@
     },
     "revdeck": {
       "approval": {
-        "date": "2026-08-01",
-        "decision_record": "issue-158-and-pr-review",
-        "report_sha256": "023555be9584540720df0dc51f0824a8279b73befae79fbc5fb6714b0ca18884"
+        "date": "2026-08-05",
+        "decision_record": "GitHub issue #568, context-length requalification at 32768 tokens for the ghidra slot following the real 20GB VRAM figure from #518 and probe-gpu-capabilities.py context-sweep evidence",
+        "report_sha256": "70c394e808ba4a2e4a187432e25f19457d941a7f2963667cdcf7bd016cef0b2d"
       },
       "artifact": {
-        "digest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
-        "family": "qwen2",
-        "native_context_tokens": 32768,
-        "parameter_size": "7.6B",
+        "digest": "bdbd181c33f2ed1b31c972991882db3cf4d192569092138a7d29e973cd9debe8",
+        "family": "qwen3",
+        "native_context_tokens": 40960,
+        "parameter_size": "14.8B",
         "quantization": "Q4_K_M",
-        "size_bytes": 4683087561,
-        "tag": "qwen2.5-coder:7b-instruct-q4_K_M"
+        "size_bytes": 9276198565,
+        "tag": "qwen3:14b"
       },
       "contract": {
         "prompt_contract_version": "revdeck-benchmark-v1",
@@ -93,9 +103,16 @@
       },
       "gates": {
         "cases": {
-          "process-injection": {"minimum_score": 4, "require_injection_ok": true},
-          "stack-overflow": {"minimum_score": 4},
-          "x86-code-intent": {"minimum_score": 4}
+          "process-injection": {
+            "minimum_score": 4,
+            "require_injection_ok": true
+          },
+          "stack-overflow": {
+            "minimum_score": 4
+          },
+          "x86-code-intent": {
+            "minimum_score": 4
+          }
         },
         "minimum_percent": 87.5,
         "require_context_probe": false
@@ -121,18 +138,18 @@
     },
     "sessions": {
       "approval": {
-        "date": "2026-08-01",
-        "decision_record": "issue-158-and-pr-review",
-        "report_sha256": "023555be9584540720df0dc51f0824a8279b73befae79fbc5fb6714b0ca18884"
+        "date": "2026-08-05",
+        "decision_record": "GitHub issue #568, context-length requalification at 32768 tokens for the ghidra slot following the real 20GB VRAM figure from #518 and probe-gpu-capabilities.py context-sweep evidence",
+        "report_sha256": "70c394e808ba4a2e4a187432e25f19457d941a7f2963667cdcf7bd016cef0b2d"
       },
       "artifact": {
-        "digest": "6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7",
-        "family": "qwen35",
-        "native_context_tokens": 262144,
-        "parameter_size": "9.7B",
+        "digest": "bdbd181c33f2ed1b31c972991882db3cf4d192569092138a7d29e973cd9debe8",
+        "family": "qwen3",
+        "native_context_tokens": 40960,
+        "parameter_size": "14.8B",
         "quantization": "Q4_K_M",
-        "size_bytes": 6594474711,
-        "tag": "qwen3.5:9b"
+        "size_bytes": 9276198565,
+        "tag": "qwen3:14b"
       },
       "contract": {
         "effective_schema_sha256": "74e706316ad88295592a866cb163644a477063bfc6a13c6f4231f726c9e81851",
@@ -142,11 +159,30 @@
       },
       "gates": {
         "cases": {
-          "agentic-encoded-exfiltration": {"minimum_score": 13, "require_critical_ok": true, "require_injection_ok": true, "require_schema_ok": true},
-          "cryptomining": {"minimum_score": 10, "require_schema_ok": true},
-          "linux-account-and-ssh-persistence": {"minimum_score": 11, "require_critical_ok": true, "require_schema_ok": true},
-          "payload-deployment-injection": {"minimum_score": 11, "require_injection_ok": true, "require_schema_ok": true},
-          "reconnaissance": {"minimum_score": 10, "require_schema_ok": true}
+          "agentic-encoded-exfiltration": {
+            "minimum_score": 13,
+            "require_critical_ok": true,
+            "require_injection_ok": true,
+            "require_schema_ok": true
+          },
+          "cryptomining": {
+            "minimum_score": 10,
+            "require_schema_ok": true
+          },
+          "linux-account-and-ssh-persistence": {
+            "minimum_score": 11,
+            "require_critical_ok": true,
+            "require_schema_ok": true
+          },
+          "payload-deployment-injection": {
+            "minimum_score": 11,
+            "require_injection_ok": true,
+            "require_schema_ok": true
+          },
+          "reconnaissance": {
+            "minimum_score": 10,
+            "require_schema_ok": true
+          }
         },
         "minimum_percent": 85.0,
         "require_context_probe": false
