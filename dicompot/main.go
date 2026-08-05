@@ -43,18 +43,20 @@ import (
 )
 
 type event struct {
-	Time    string `json:"time"`
-	Sensor  string `json:"sensor"`
-	Persona string `json:"persona_id"`
-	Site    string `json:"site_id"`
-	Asset   string `json:"asset_id"`
-	Org     string `json:"organization"`
-	Proto   string `json:"proto"`
-	Port    int    `json:"port"`
-	SrcIP   string `json:"src_ip"`
-	Event   string `json:"event"`
-	Data    string `json:"data,omitempty"`
-	Bytes   int    `json:"bytes,omitempty"`
+	Time      string `json:"time"`
+	Sensor    string `json:"sensor"`
+	Persona   string `json:"persona_id"`
+	Site      string `json:"site_id"`
+	Asset     string `json:"asset_id"`
+	Org       string `json:"organization"`
+	Proto     string `json:"proto"`
+	Port      int    `json:"port"`
+	SrcIP     string `json:"src_ip"`
+	Event     string `json:"event"`
+	Data      string `json:"data,omitempty"`
+	Bytes     int    `json:"bytes,omitempty"`
+	CalledAE  string `json:"called_ae,omitempty"`
+	CallingAE string `json:"calling_ae,omitempty"`
 }
 
 type logger struct {
@@ -222,6 +224,10 @@ func main() {
 			defer conn.Close()
 			ip := srcIP(conn)
 			log.emit(event{Port: port, SrcIP: ip, Event: "connect"})
+			conn, calledAE, callingAE := peekAETitles(conn)
+			if calledAE != "" || callingAE != "" {
+				log.emit(event{Port: port, SrcIP: ip, Event: "associate", CalledAE: calledAE, CallingAE: callingAE})
+			}
 			dicompot.RunProviderForConn(conn, paramsFor(log, aeTitle, port, ip))
 		}()
 	}
