@@ -50,6 +50,10 @@ services:
       # Cowrie saves every uploaded/downloaded file by SHA-256, including shell,
       # PowerShell, VBS, Python and JavaScript payloads.
       - /opt/stacks/honeypot-stack/logs/cowrie/downloads:/cowrie/cowrie-git/var/lib/cowrie/downloads
+      # #611: TTY session recordings (cowrie.log.closed's ttylog field) --
+      # previously only in the container's writable layer, lost on every
+      # recreate/redeploy. Same reasoning as the downloads mount above.
+      - /opt/stacks/honeypot-stack/logs/cowrie/tty:/cowrie/cowrie-git/var/lib/cowrie/tty
       # Hardware identity overrides for sysfs DMI nodes — these are outside
       # /proc so runc proc-safety does not apply.
       - /opt/stacks/honeypot-stack/cowrie/fakefs/sys/class/dmi/id/product_name:/sys/class/dmi/id/product_name:ro
