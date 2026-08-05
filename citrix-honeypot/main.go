@@ -137,6 +137,9 @@ func (h *handler) log2(r *http.Request, kind, reqPath, data string) {
 		if fp := jc.JA3(); fp != "" {
 			hdr["x-ja3"] = fp
 		}
+		if fp := jc.JA4(); fp != "" {
+			hdr["x-ja4"] = fp
+		}
 	}
 	h.log.emit(event{Port: h.port, SrcIP: ip, SrcPort: port, Event: kind, Path: reqPath, Data: data,
 		UserAgent: r.UserAgent(), Headers: hdr})
