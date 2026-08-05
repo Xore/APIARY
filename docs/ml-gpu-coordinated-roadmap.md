@@ -240,13 +240,13 @@ rollback drills pass.
 
 ## 5. Dependencies and parallel work
 
-```text
-Gate A ───────────────┬──────────────────────────────┐
-                     v                              v
-                 B → C → D → E                 F → G
-                         └──────────────┬────────────┘
-                                        v
-                                        H → I
+```mermaid
+flowchart TD
+    GateA["Gate A"] --> B --> C --> D --> E
+    GateA --> F --> G
+    E --> H
+    G --> H
+    H --> I
 ```
 
 - B precedes production ML work.
