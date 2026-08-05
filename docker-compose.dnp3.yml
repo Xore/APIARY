@@ -38,6 +38,16 @@ services:
     volumes:
       - /opt/stacks/honeypot-stack/logs/dnp3:/var/log/honeypot
       - /opt/stacks/honeypot-stack/state/init-markers:/markers:ro
+    # #239: measured baseline, same "run it, then reduce" methodology as
+    # #89/#118's cap_drop passes. This image is FROM scratch (no shell, no
+    # package manager) and its only runtime write anywhere -- confirmed by
+    # reading main.go and grepping for os.Create/os.OpenFile/os.Mkdir -- is
+    # LOG_PATH, which lands on the /var/log/honeypot bind mount above and is
+    # therefore unaffected by read_only. No tmpfs entry needed: verified
+    # locally (sandboxed Docker, not the homeserver) that the container
+    # starts healthy, accepts a real DNP3 frame, and successfully writes it
+    # to the bind-mounted log file with read_only: true set.
+    read_only: true
     networks: [dnp3_net]
     healthcheck:
       test: ["CMD", "/dnp3-honeypot", "-healthcheck"]
