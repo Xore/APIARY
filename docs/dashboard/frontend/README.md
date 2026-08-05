@@ -9,7 +9,7 @@ not required at runtime. Run `npm ci`, `npm run typecheck`, and
 
 `../static/theme.css` is a byte-identical copy of the shared Xore theme
 (https://github.com/Xore/theme). The pinned commit and its SHA-256 live in
-[`theme.lock`](./theme.lock) — that file is the single source of truth, and
+[`theme.lock`](../../../dashboard/frontend/theme.lock) — that file is the single source of truth, and
 `scripts/check-vendored-theme.sh` enforces it in CI. It owns the
 design tokens (dark, light, and system modes, plus the `--space-*` and
 `--font-size-*` scales), the app-shell primitives
