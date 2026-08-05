@@ -113,9 +113,9 @@ type pdfBranding struct {
 
 func defaultPDFBranding() pdfBranding {
 	return pdfBranding{
-		HeaderLeft:     "XORE//HONEYPOT",
+		HeaderLeft:     "XORE//APIARY",
 		HeaderRight:    "DEFENSIVE SECURITY OPERATIONS",
-		FooterLeft:     "PRIVATE - XORE//HONEYPOT",
+		FooterLeft:     "PRIVATE - XORE//APIARY",
 		Classification: "PRIVATE - contains hostile-source telemetry and forensic indicators",
 	}
 }

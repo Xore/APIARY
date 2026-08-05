@@ -31,7 +31,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>xore//honeypot — {{if .Chain}}attack chain {{.IP}}{{else}}events{{end}}</title>
+<title>{{brandText}} — {{if .Chain}}attack chain {{.IP}}{{else}}events{{end}}</title>
 {{template "style" .}}
 <style nonce="{{.Nonce}}">
 /* #278: check/uncheck-to-filter menu isolating specific IPs behind a shared
@@ -118,7 +118,7 @@
           <a class="btn btn-sm btn-secondary{{if not .NextURL}} disabled{{end}}" href="{{if .NextURL}}{{.NextURL}}{{else}}#{{end}}">Next</a>
         </nav>{{end}}
 
-        <footer id="events-footer">xore//honeypot &bull; defensive sensor &bull; do not expose without auth</footer>
+        <footer id="events-footer">{{brandText}} &bull; defensive sensor &bull; do not expose without auth</footer>
       </div>
     </main>
 </div>

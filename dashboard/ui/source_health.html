@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>xore//honeypot — source health</title>
+<title>{{brandText}} — source health</title>
 {{template "style" .}}
 </head>
 <body>
@@ -41,7 +41,7 @@
           <div class="card"><h2>Dashboard runtime</h2><table class="data-table"><tbody><tr><td>uptime</td><td class="v">{{.Runtime.Uptime}}</td></tr><tr><td>Go heap</td><td class="v">{{.Runtime.Heap}}</td></tr><tr><td>reserved memory</td><td class="v">{{.Runtime.Reserved}}</td></tr><tr><td>container memory</td><td class="v">{{.Runtime.ContainerUsage}} / {{.Runtime.ContainerLimit}}</td></tr><tr><td>goroutines</td><td class="v">{{.Runtime.Goroutines}}</td></tr></tbody></table><p class="note">Container values come from cgroup v2 when available; the Go heap is the live application allocation. <a href="/metrics">Prometheus metrics</a></p></div>
           <div class="card wide" id="pipeline-status"><h2>Pipeline status</h2><table class="data-table"><tbody><tr><td>Elasticsearch cluster</td><td class="v">{{.ES.State}}</td></tr><tr><td>last indexed</td><td class="v">{{.ES.LastIngest}}</td></tr><tr><td>dead letters</td><td class="v">{{.ES.DeadLetters}}</td></tr><tr><td>Filebeat</td><td class="v">{{.ES.FilebeatState}}</td></tr><tr><td>Filebeat acknowledged</td><td class="v">{{.ES.FilebeatAcked}}</td></tr><tr><td>Filebeat failed / dropped / active</td><td class="v">{{.ES.FilebeatFailed}} / {{.ES.FilebeatDropped}} / {{.ES.FilebeatActive}}</td></tr><tr><td>last checked</td><td class="v">{{.ES.Checked}}</td></tr>{{if .ES.Error}}<tr><td>error</td><td class="v">{{.ES.Error}}</td></tr>{{end}}</tbody></table><p class="note">A quiet dashboard feed with a stable Elasticsearch total means no recent attacks. A growing log with a static ES total indicates Filebeat lag. Dead-letter growth or Filebeat failed/dropped counters indicate a pipeline error.</p></div>
         </div>
-        <footer id="health-footer">xore//honeypot &bull; source diagnostics</footer>
+        <footer id="health-footer">{{brandText}} &bull; source diagnostics</footer>
       </div>
     </main>
 </div>

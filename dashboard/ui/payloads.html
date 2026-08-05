@@ -41,7 +41,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>xore//honeypot — captured payloads</title>
+<title>{{brandText}} — captured payloads</title>
 {{template "style" .}}
 </head>
 <body>
@@ -88,7 +88,7 @@
           </div>
         </div>
 
-        <footer id="payloads-footer">xore//honeypot &bull; defensive sensor &bull; do not expose without auth</footer>
+        <footer id="payloads-footer">{{brandText}} &bull; defensive sensor &bull; do not expose without auth</footer>
       </div>
     </main>
 </div>
@@ -102,7 +102,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
-<title>xore//honeypot — payload analysis</title>
+<title>{{brandText}} — payload analysis</title>
 {{template "style" .}}
 <style nonce="{{.Nonce}}">
 /* #474: PDF report viewer, an application-managed overlay per the shared
@@ -243,7 +243,7 @@
           <div data-hp-evidence-body="pl-decoded" data-hp-evidence-title="Decoded / deobfuscated candidates" data-hp-evidence-note="Bounded decodes of encoded content found in the sample. Never executed.">{{range .Decoded}}<p class="note">{{.Kind}} from <code>{{.Source}}</code></p><pre class="code">{{.Preview}}</pre>{{end}}</div>
         </div>
 
-        <footer id="analysis-footer">xore//honeypot &bull; static analysis only &bull; never execute captured samples</footer>
+        <footer id="analysis-footer">{{brandText}} &bull; static analysis only &bull; never execute captured samples</footer>
       </div>
     </main>
 </div>

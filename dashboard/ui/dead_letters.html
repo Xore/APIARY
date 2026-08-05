@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>xore//honeypot &mdash; ingest dead letters</title>
+<title>{{brandText}} &mdash; ingest dead letters</title>
 {{template "style" .}}
 </head>
 <body>
@@ -25,7 +25,7 @@
         </header>
         <div class="filters" id="dead-filters"><a class="chip" href="/source-health">&larr; source health</a><input id="dead-q" class="search" placeholder="optional Elasticsearch query" aria-label="Dead-letter query"><button id="dead-run" class="copy">search</button><button id="dead-purge" class="btn btn-sm btn-danger" type="button">purge shown</button></div>
         <div class="card wide" id="dead-card"><p id="dead-meta" class="note">Loading rejected documents&hellip;</p><div id="dead-rows" data-hp-lazy-list></div></div>
-        <footer id="dead-footer">xore//honeypot &bull; ingestion failure diagnostics</footer>
+        <footer id="dead-footer">{{brandText}} &bull; ingestion failure diagnostics</footer>
       </div>
     </main>
 </div>
