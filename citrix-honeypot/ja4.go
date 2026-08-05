@@ -47,7 +47,7 @@ import (
 )
 
 const (
-	extALPN               = 0x0010
+	extALPN                = 0x0010
 	extSignatureAlgorithms = 0x000d
 )
 
