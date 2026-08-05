@@ -15,19 +15,34 @@ Internet
 
 ## Authoritative deployment paths
 
-- Home server: Dockge manages **two** stacks —
-  `/opt/stacks/honeypot-init/compose.yml` (one-shot bootstrap jobs: log paths,
-  Elasticsearch templates, Arkime schema, persona validation) and
-  `/opt/stacks/honeypot-stack/compose.yml` (the sensors and everything else
-  that runs continuously). They're separate Compose projects because a
-  same-project `depends_on: condition: service_completed_successfully` can't
-  reach across one — `honeypot-stack`'s services wait on completion markers
-  `honeypot-init` writes instead. See the root `README.md`'s "Home container
-  interaction map" for the full picture.
+- Home server: **#258 split what used to be two stacks into one Dockge
+  project per compose file** — `honeypot-init` (one-shot bootstrap: log
+  paths, Elasticsearch templates, Arkime schema, persona validation),
+  `honeypot-elk`, `honeypot-cowrie`, `honeypot-dionaea`, `honeypot-conpot`,
+  `honeypot-dnp3`, `honeypot-http`, `honeypot-multipot`,
+  `honeypot-payload-analysis`, `honeypot-tanner`, `honeypot-dashboard`,
+  `honeypot-utilities`, plus the standalone honeypots
+  (`docker-compose.cisco-asa-honeypot.yml`, `.citrix-honeypot.yml`,
+  `.rdp-honeypot.yml`, `.dicompot.yml`, `.dns-honeypot.yml`) and
+  `docker-compose.ip-enrichment-worker.yml`, each its own stack. The
+  top-level `docker-compose.yml` (project `honeypot-stack`) is now a
+  deliberately empty marker (`services: {}`) kept only because
+  `/opt/stacks/honeypot-stack` is still the fixed path every other stack's
+  `build:` context points at as an absolute string — see that file's own
+  header comment. `honeypot-init` still deploys first; every sensor stack
+  waits on its completion markers at its own entrypoint rather than a
+  Compose-level dependency, same reasoning as before, just across more
+  projects now. See `docs/STACK-REBUILD.md` for the full current list and
+  the ordering traps (Elasticsearch must be healthy before `honeypot-init`
+  runs, not the other way around).
 - VPS: plain Docker Compose manages `/root/vps/docker-compose.yml`.
-- The repository home Compose sources are `docker-compose.yml`
-  (`honeypot-stack`) and `docker-compose.init.yml` (`honeypot-init`); copy
-  each to its Dockge stack directory as `compose.yml`.
+- The repository home Compose sources are the top-level `docker-compose.*.yml`
+  files, one per stack listed above; each gets symlinked or copied to its
+  Dockge stack directory as `compose.yml`. `scripts/install-homeserver.sh`
+  does this automatically (see below) — the per-stack directory layout
+  matches what `docs/HOMESERVER-DISK-LAYOUT.md` documents as the box's
+  actual live state (`/var/dockge/stacks/<name>/`, with `/opt/stacks`
+  symlinked to it).
 - The public gateway source is under `vps/`.
 
 Dockge is used only on the home server. The VPS uses `docker compose` directly.
@@ -41,15 +56,21 @@ the only internet-facing component.
 
 ## Home deployment
 
-> **First-cut automation:** [`scripts/install-homeserver.sh`](../scripts/install-homeserver.sh)
-> scripts most of steps 1–7 below (Docker, GPU/NVIDIA, WireGuard, Dockge,
-> repo checkout, starting the stacks) against a manually-installed base
-> Ubuntu system — fill in
+> **Prefer the script.** [`scripts/install-homeserver.sh`](../scripts/install-homeserver.sh)
+> automates Docker, GPU/NVIDIA, WireGuard, Dockge, the repo checkout,
+> per-stack provisioning, secret restore, and starting every stack in the
+> correct order (plus the GPU/LLM/ML worker chain and, optionally, the
+> KVM/libvirt sandbox VMs) against a manually-installed base Ubuntu system
+> — fill in
 > [`scripts/install-homeserver.conf.example`](../scripts/install-homeserver.conf.example)
-> first. It is new and only lightly verified (see
-> [#518](https://github.com/Xore/honeypot-stack/issues/518)); treat the
-> manual steps below as the source of truth if the two ever disagree, and
-> file a gap against #518 rather than silently working around it.
+> first. Run multiple times end-to-end (including a from-genuinely-fresh
+> install and a full idempotent re-run) under
+> [#518](https://github.com/Xore/honeypot-stack/issues/518), with real bugs
+> found and fixed each pass — it's the current source of truth for the
+> real deployment order, not the numbered steps below, which describe the
+> pre-#258 two-stack model and haven't been re-verified against the current
+> per-stack split. File a gap against #518 if the script and reality ever
+> disagree.
 
 1. Establish WireGuard and verify that the VPS can reach `10.8.0.2`.
 2. Copy this repository to `/opt/stacks/honeypot-stack/`.
