@@ -126,7 +126,52 @@ services:
   # direct-socket-mount arrangement here but is not the same trust boundary
   # -- it runs its own disposable nested Docker daemon and never touches
   # the host socket at all, narrow or otherwise.
+
+  # #263: nothing previously checked or alerted on actual free disk space --
+  # a bounded retention policy bounds the *rate* of growth but doesn't
+  # catch it if something else fills the disk (a stuck container's logs, a
+  # runaway payload capture, the ES snapshot repo). Purely "notice and
+  # surface": writes a warning line under /logs/diagnostics for Filebeat to
+  # ship once free space on a checked path drops below the threshold; takes
+  # no destructive action itself.
   #
+  # es-data (docker-compose.elk.yml) is deliberately never bind-mounted
+  # cross-stack, so Elasticsearch's own disk usage is queried over HTTP via
+  # honeynet instead -- same pattern elasticsearch-setup.sh already uses.
+  # dionaea-lib is the same explicit shared-name volume
+  # docker-compose.payload-analysis.yml already reads from, mounted
+  # read-only here for the same reason.
+  disk-space-monitor:
+    <<: *runtime-defaults
+    image: curlimages/curl:8.10.1
+    container_name: hp-disk-space-monitor
+    restart: unless-stopped
+    entrypoint: ["sh", "/usr/local/bin/disk-space-check.sh"]
+    # curlimages/curl defaults to a non-root curl_user, unlike log-maintenance's
+    # busybox image (root by default). df only needs to stat mount points, but
+    # /logs/diagnostics is written here and every checked path is otherwise
+    # owned by its own sensor's UID (0640, no "other" bit) -- same reasoning
+    # as reporter/filebeat's own "user: 0:0" overrides elsewhere in this repo.
+    user: "0:0"
+    environment:
+      - CHECK_INTERVAL=300
+      - START_DELAY=120
+      - DISK_WARN_PERCENT_FREE=15
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - DISK_CHECK_PATHS=honeypot-logs=/logs:honeypot-state=/state:dionaea-payloads=/dionaea-lib
+    volumes:
+      - /opt/stacks/honeypot-stack/analysis/disk-space-check.sh:/usr/local/bin/disk-space-check.sh:ro
+      - /opt/stacks/honeypot-stack/logs:/logs
+      - /opt/stacks/honeypot-stack/state:/state:ro
+      - dionaea-lib:/dionaea-lib:ro
+    networks:
+      - honeynet
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 32M
+
   # A healthcheck alone does not restart anything: Docker's restart policy
   # reacts to the container process exiting, not to health status, so an
   # unhealthy-but-still-running container just sits there marked unhealthy
@@ -216,10 +261,9 @@ services:
 
 networks:
   # Shared with the main stack -- explicit fixed name, not project-prefixed,
-  # non-external. log-maintenance is the only service here that touches it
-  # (it doesn't actually reach any peer over it, but preserves the
-  # pre-split behavior unchanged rather than dropping a network membership
-  # as a side effect of this split).
+  # non-external. log-maintenance doesn't actually reach any peer over it
+  # (preserves pre-split behavior unchanged); disk-space-monitor uses it to
+  # reach elasticsearch's _cat/allocation endpoint.
   honeynet:
     name: honeynet
     driver: bridge
@@ -233,3 +277,7 @@ volumes:
   # (confirmed by grep across every compose file). Unnamed/project-scoped,
   # same as it was in the monolithic compose file.
   reporter-data: null
+  # Shared with docker-compose.dionaea.yml/docker-compose.payload-analysis.yml
+  # -- read-only here, same mechanism as honeynet/es-data.
+  dionaea-lib:
+    name: dionaea-lib

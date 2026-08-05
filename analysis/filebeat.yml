@@ -121,6 +121,26 @@ filebeat.inputs:
       logset: suricata
     fields_under_root: true
 
+  # #263: disk-space-check.sh's own alert lines. Already-structured JSON at
+  # ECS-ish top level (disk.*, event.module, level) rather than nested under
+  # a source namespace like the sensor logs above -- there's exactly one
+  # producer, so no field-collision risk to guard against. Routed into the
+  # same honeypot-v2-* index/ILM policy as the sensor logsets rather than a
+  # dedicated index: low, bursty volume that doesn't warrant its own
+  # template/ILM policy to manage. Filter on event.module:disk-space-check
+  # to alert on it specifically.
+  - type: filestream
+    id: disk-space-diagnostics
+    paths:
+      - /logs/diagnostics/disk-space.json
+    parsers:
+      - ndjson:
+          overwrite_keys: true
+          add_error_key: true
+    fields:
+      logset: sensors
+    fields_under_root: true
+
 processors:
   # Lifecycle records use an empty src_ip. Remove that field before the
   # Elasticsearch IP mapping/GeoIP processor sees it; the record remains
