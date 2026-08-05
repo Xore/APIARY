@@ -38,41 +38,33 @@ The analysis host runs **KVM/QEMU/libvirt** and **docker-compose** only.
 
 ## Architecture Overview
 
-```
-KVM Host (Linux)
-│
-├── libvirt isolated network: virbr-sandbox (10.10.10.0/24)
-│   NO internet routing — host firewall drops all forward to WAN
-│
-├── Windows 11 KVM Guest (10.10.10.2)
-│   ├── FLARE-VM tools
-│   ├── Sysmon (SwiftOnSecurity config)
-│   ├── FakeNet-NG (intercepts all outbound traffic on the guest)
-│   ├── PowerShell ScriptBlock logging (Event 4104)
-│   ├── ETW / ProcMon / Regshot
-│   └── WinRM (port 5985) — remote orchestration from host (see #94)
-│
-├── Docker network: `sandbox` (macvlan, internal: true, 10.10.10.0/24)
-│   ├── inetsim      (10.10.10.1)  — fake DNS/HTTP/SMTP/FTP/IRC
-│   ├── mitmproxy    (10.10.10.1:8080) — SSL intercept, HTTP/S MITM
-│   ├── zeek         — reads tap/mirror of virbr-sandbox
-│   └── suricata     — IDS on virbr-sandbox
-│
-└── Host-side sandbox worker (systemd path unit)
-    ├── Watches WINDOWS_SANDBOX_REQUEST_DIR for {hash}.request files
-    │   written by the dashboard (sandbox_submit.go) — routed here only
-    │   after the dashboard's determination path (see below) classifies
-    │   the payload as Windows; everything else goes to the pre-existing
-    │   Linux runner (sandbox/linux-runner.service, sandbox/worker.sh)
-    │   watching the original SANDBOX_REQUEST_DIR
-    ├── destroy + fresh CoW clone from golden image + start (kvm_manage.sh
-    │   revert / run_sample.py revert_to_golden() — not a virsh snapshot,
-    │   see #358)
-    ├── WinRM → copy sample, start tools, detonate
-    ├── Wait observation window
-    ├── Collect artifacts via SMB / virsh guest-agent
-    └── Write {hash}_sandbox.json → WINDOWS_SANDBOX_RESULTS_DIR
-        (dashboard reads this; no git push, no outbound connection)
+```mermaid
+flowchart TD
+    Host["KVM Host (Linux)"]
+
+    Host --> Net["libvirt isolated network: virbr-sandbox (10.10.10.0/24)<br/>NO internet routing — host firewall drops all forward to WAN"]
+
+    Host --> Guest["Windows 11 KVM Guest (10.10.10.2)"]
+    Guest --> Flare["FLARE-VM tools"]
+    Guest --> Sysmon["Sysmon (SwiftOnSecurity config)"]
+    Guest --> FakeNet["FakeNet-NG (intercepts all outbound traffic on the guest)"]
+    Guest --> PSLog["PowerShell ScriptBlock logging (Event 4104)"]
+    Guest --> ETW["ETW / ProcMon / Regshot"]
+    Guest --> WinRM["WinRM (port 5985) — remote orchestration from host (see #94)"]
+
+    Host --> DockerNet["Docker network: `sandbox` (macvlan, internal: true, 10.10.10.0/24)"]
+    DockerNet --> Inetsim["inetsim (10.10.10.1) — fake DNS/HTTP/SMTP/FTP/IRC"]
+    DockerNet --> Mitmproxy["mitmproxy (10.10.10.1:8080) — SSL intercept, HTTP/S MITM"]
+    DockerNet --> Zeek["zeek — reads tap/mirror of virbr-sandbox"]
+    DockerNet --> Suricata["suricata — IDS on virbr-sandbox"]
+
+    Host --> Worker["Host-side sandbox worker (systemd path unit)"]
+    Worker --> Watch["Watches WINDOWS_SANDBOX_REQUEST_DIR for {hash}.request files<br/>written by the dashboard (sandbox_submit.go) — routed here only<br/>after the dashboard's determination path (see below) classifies<br/>the payload as Windows; everything else goes to the pre-existing<br/>Linux runner (sandbox/linux-runner.service, sandbox/worker.sh)<br/>watching the original SANDBOX_REQUEST_DIR"]
+    Worker --> Revert["destroy + fresh CoW clone from golden image + start<br/>(kvm_manage.sh revert / run_sample.py revert_to_golden() —<br/>not a virsh snapshot, see #358)"]
+    Worker --> Detonate["WinRM → copy sample, start tools, detonate"]
+    Worker --> Wait["Wait observation window"]
+    Worker --> Collect["Collect artifacts via SMB / virsh guest-agent"]
+    Worker --> Write["Write {hash}_sandbox.json → WINDOWS_SANDBOX_RESULTS_DIR<br/>(dashboard reads this; no git push, no outbound connection)"]
 ```
 
 ---
@@ -571,29 +563,30 @@ virsh(['start', VM_DOMAIN])
 
 ## Phase 6 — Artifact Collection
 
+```mermaid
+flowchart TD
+    Root["WINDOWS_SANDBOX_RESULTS_DIR/{sha256}/"]
+    Root --> Metadata["metadata.json"]
+    Root --> Sysmon["sysmon.evtx + sysmon.json"]
+    Root --> PSLog["powershell_4104.evtx"]
+    Root --> PSTranscripts["powershell_transcripts/"]
+    Root --> Procmon["procmon.csv"]
+    Root --> Regshot["regshot_diff.txt"]
+    Root --> FakeNetLogs["fakenet_logs/"]
+    FakeNetLogs --> DNSQ["dns_queries.txt"]
+    FakeNetLogs --> HTTPReq["http_requests.log"]
+    FakeNetLogs --> Downloads["downloads/<br/>second-stage payloads caught by FakeNet"]
+    Root --> Pcap["network.pcap<br/>from Zeek/tcpdump on host bridge"]
+    Root --> ZeekLogs["zeek_logs/"]
+    Root --> SuricataAlerts["suricata_alerts.json"]
+    Root --> MitmFlows["mitmproxy_flows.bin"]
+    Root --> FileDrops["file_drops/"]
+    Root --> IOCs["ioc_extracted.json"]
+    Root --> ReportPdf["report.pdf"]
 ```
-WINDOWS_SANDBOX_RESULTS_DIR/{sha256}/
-├── metadata.json
-├── sysmon.evtx + sysmon.json
-├── powershell_4104.evtx
-├── powershell_transcripts/
-├── procmon.csv
-├── regshot_diff.txt
-├── fakenet_logs/
-│   ├── dns_queries.txt
-│   ├── http_requests.log
-│   └── downloads/          ← second-stage payloads caught by FakeNet
-├── network.pcap             ← from Zeek/tcpdump on host bridge
-├── zeek_logs/
-├── suricata_alerts.json
-├── mitmproxy_flows.bin
-├── file_drops/
-├── ioc_extracted.json
-└── report.pdf
 
-# Plus the top-level result summary the dashboard reads:
-WINDOWS_SANDBOX_RESULTS_DIR/{sha256}_sandbox.json
-```
+Plus the top-level result summary the dashboard reads:
+`WINDOWS_SANDBOX_RESULTS_DIR/{sha256}_sandbox.json`
 
 ---
 
@@ -648,44 +641,36 @@ involvement and no outbound network connection.
 
 ### 7.1 Trigger flow
 
-```
-Analyst checks (optionally) "Also run Ghidra static analysis" and clicks
-"Submit to sandbox" on /payloads
-  → POST /sandbox/submit  (dashboard: sandbox_submit.go)
-      validates hash, confirms payload exists via s.payloadPath(hash)
-      reads payload, calls determineSandboxTarget(data)   ← see
-        "Determination Path" above
-        ├── dynamic == false → 400, no VM submission possible
-        ├── target == windows → writes {hash}.request to
-        │     WINDOWS_SANDBOX_REQUEST_DIR  (O_CREATE|O_EXCL)
-        └── target == linux   → writes {hash}.request to
-              SANDBOX_REQUEST_DIR  (unchanged, pre-existing Linux runner)
-      if ghidra=1 on the form: also writes {hash}.request to
-        GHIDRA_REQUEST_DIR (independent of target, see
-        docs/analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md)
-      redirects to /payloads?analysis=queued&hash=…&target={target}
+```mermaid
+flowchart TD
+    Analyst["Analyst checks (optionally) 'Also run Ghidra static analysis'<br/>and clicks 'Submit to sandbox' on /payloads"]
+    Submit["POST /sandbox/submit (dashboard: sandbox_submit.go)<br/>validates hash, confirms payload exists via s.payloadPath(hash)"]
+    Determine["reads payload, calls determineSandboxTarget(data)<br/>— see 'Determination Path' above"]
 
-Windows path:
-  systemd path unit (honeypot-windows-sandbox-worker.path) detects new
-  .request in WINDOWS_SANDBOX_REQUEST_DIR
-    → honeypot-windows-sandbox-worker.service fires
-        runs orchestrate/run_sample.py (this plan)
-        writes {hash}_sandbox.json (Platform: "Windows") →
-          WINDOWS_SANDBOX_RESULTS_DIR
-        deletes {hash}.request
-        updates status.json (queued/running/done counts)
+    Analyst --> Submit --> Determine
 
-Linux path (pre-existing, unchanged):
-  sandbox/linux-runner.service / sandbox/worker.sh detects new .request
-  in SANDBOX_REQUEST_DIR, runs sandbox/run-linux-sample.sh, writes
-  {hash}_sandbox.json (Platform: "Linux") → SANDBOX_RESULTS_DIR
+    Determine -->|"dynamic == false"| Reject["400, no VM submission possible"]
+    Determine -->|"target == windows"| WriteWindows["writes {hash}.request to<br/>WINDOWS_SANDBOX_REQUEST_DIR (O_CREATE|O_EXCL)"]
+    Determine -->|"target == linux"| WriteLinux["writes {hash}.request to<br/>SANDBOX_REQUEST_DIR (unchanged, pre-existing Linux runner)"]
 
-Dashboard reads results from BOTH result directories, merged by
-loadSandboxResults() into one list (Platform field distinguishes them)
-  → GET /sandbox          → loadSandboxResults() → {{define "sandbox"}}
-  → GET /sandbox/{job}    → loadSandboxResult(hash)
-  → GET /api/sandbox      → serveSandboxAPI()
-  → GET /export/sandbox/{job} → stream report.pdf or artifact zip
+    WriteWindows --> Ghidra
+    WriteLinux --> Ghidra
+    Ghidra["if ghidra=1 on the form: also writes {hash}.request to<br/>GHIDRA_REQUEST_DIR (independent of target, see<br/>docs/analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md)"]
+    Ghidra --> Redirect["redirects to /payloads?analysis=queued&amp;hash=…&amp;target={target}"]
+
+    WriteWindows --> WinPath["Windows path:<br/>systemd path unit (honeypot-windows-sandbox-worker.path) detects new<br/>.request in WINDOWS_SANDBOX_REQUEST_DIR"]
+    WinPath --> WinService["honeypot-windows-sandbox-worker.service fires<br/>runs orchestrate/run_sample.py (this plan)"]
+    WinService --> WinResult["writes {hash}_sandbox.json (Platform: 'Windows') →<br/>WINDOWS_SANDBOX_RESULTS_DIR<br/>deletes {hash}.request<br/>updates status.json (queued/running/done counts)"]
+
+    WriteLinux --> LinuxPath["Linux path (pre-existing, unchanged):<br/>sandbox/linux-runner.service / sandbox/worker.sh detects new .request<br/>in SANDBOX_REQUEST_DIR, runs sandbox/run-linux-sample.sh, writes<br/>{hash}_sandbox.json (Platform: 'Linux') → SANDBOX_RESULTS_DIR"]
+
+    WinResult --> Merge["Dashboard reads results from BOTH result directories, merged by<br/>loadSandboxResults() into one list (Platform field distinguishes them)"]
+    LinuxPath --> Merge
+
+    Merge --> R1["GET /sandbox → loadSandboxResults() → {{define 'sandbox'}}"]
+    Merge --> R2["GET /sandbox/{job} → loadSandboxResult(hash)"]
+    Merge --> R3["GET /api/sandbox → serveSandboxAPI()"]
+    Merge --> R4["GET /export/sandbox/{job} → stream report.pdf or artifact zip"]
 ```
 
 ### 7.2 Systemd worker units
@@ -828,36 +813,44 @@ for _, result := range loadSandboxResults() {
 
 ## File Structure
 
-```
-sandbox/windows/
-├── IMPLEMENTATION_PLAN.md         ← this file
-├── packer/
-│   ├── win11-analysis.pkr.hcl    ← Packer build definition
-│   ├── win11-kvm.xml             ← libvirt domain XML template
-│   ├── autounattend.xml          ← Windows unattended install answer file
-│   └── scripts/
-│       └── 01-hardening.ps1 … 08-traffic-noise.ps1  ← run inside VM during build
-├── setup/
-│   ├── enable_logging.ps1        ← Sysmon + PS logging
-│   ├── kvm_manage.sh             ← virsh helper: create/snapshot/revert
-│   └── sandbox-network.xml       ← the libvirt network; no <forward> is the point
-├── config/
-│   ├── fakenet.ini               ← FakeNet-NG config
-│   └── inetsim.conf              ← INetSim config (used by the gateway service)
-├── gateway/inetsim/              ← gateway container build context
-├── orchestrate/
-│   ├── run_sample.py             ← KVM detonation orchestrator
-│   ├── extract_iocs.py           ← IOC extraction from EVTX + logs
-│   └── generate_report.py        ← PDF report generator
-├── runner/README.md              ← host-side runner notes
-├── run_pending.sh                            ← called by systemd, drains the spool under flock
-├── honeypot-windows-sandbox-worker.path      ← systemd path unit
-├── honeypot-windows-sandbox-worker.service   ← systemd oneshot service
-├── honeypot-windows-sandbox.default.example  ← /etc/default template
-└── docs/
-    └── packer-golden-image-guide.md
+```mermaid
+flowchart TD
+    DocsRoot["docs/sandbox/windows/"] --> PlanMd["IMPLEMENTATION_PLAN.md<br/>this file"]
+    DocsRoot --> RunnerReadme["runner/README.md<br/>host-side runner notes"]
+    DocsRoot --> GuideMd["packer-golden-image-guide.md"]
+
+    Root["sandbox/windows/"] --> Packer["packer/"]
+    Packer --> PkrHcl["win11-analysis.pkr.hcl<br/>Packer build definition"]
+    Packer --> KvmXml["win11-kvm.xml<br/>libvirt domain XML template"]
+    Packer --> Autounattend["autounattend.xml<br/>Windows unattended install answer file"]
+    Packer --> PackerScripts["scripts/"]
+    PackerScripts --> Hardening["01-hardening.ps1 … 08-traffic-noise.ps1<br/>run inside VM during build"]
+
+    Root --> Setup["setup/"]
+    Setup --> EnableLogging["enable_logging.ps1<br/>Sysmon + PS logging"]
+    Setup --> KvmManage["kvm_manage.sh<br/>virsh helper: create/snapshot/revert"]
+    Setup --> SandboxNetwork["sandbox-network.xml<br/>the libvirt network; no &lt;forward&gt; is the point"]
+
+    Root --> Config["config/"]
+    Config --> FakenetIni["fakenet.ini<br/>FakeNet-NG config"]
+    Config --> InetsimConf["inetsim.conf<br/>INetSim config (used by the gateway service)"]
+
+    Root --> Gateway["gateway/inetsim/<br/>gateway container build context"]
+
+    Root --> Orchestrate["orchestrate/"]
+    Orchestrate --> RunSample["run_sample.py<br/>KVM detonation orchestrator"]
+    Orchestrate --> ExtractIocs["extract_iocs.py<br/>IOC extraction from EVTX + logs"]
+    Orchestrate --> GenerateReport["generate_report.py<br/>PDF report generator"]
+
+    Root --> RunPending["run_pending.sh<br/>called by systemd, drains the spool under flock"]
+    Root --> WorkerPath["honeypot-windows-sandbox-worker.path<br/>systemd path unit"]
+    Root --> WorkerService["honeypot-windows-sandbox-worker.service<br/>systemd oneshot service"]
+    Root --> DefaultExample["honeypot-windows-sandbox.default.example<br/>/etc/default template"]
 ```
 
 The worker files are at the top of `sandbox/windows/`, not under a `worker/`
 subdirectory — the systemd units reference the real paths. `sysmon_config.xml`
 is not vendored; it is fetched from SwiftOnSecurity during the Packer build.
+The documentation for this tree (this file, `runner/README.md`, and
+`packer-golden-image-guide.md`) lives separately under `docs/sandbox/windows/`
+(#670), not co-located with the code it describes.
