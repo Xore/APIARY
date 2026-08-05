@@ -196,6 +196,13 @@ def lief_parse(data: bytes) -> dict | None:
 
 
 CAPA_RULES_DIR = os.environ.get("CAPA_RULES_DIR", "/app/capa-rules")
+# capa's library-function signatures (.sig files) -- separate from the rules
+# above, and not passed explicitly before #498 found every capa call failing
+# with "Using default signature path, but it doesn't exist": capa's "use
+# embedded signatures by default" only holds for its own installed CLI
+# distribution, not the flare-capa pip package this image installs. See the
+# Dockerfile's CAPA_SIGS_VERSION for where this directory comes from.
+CAPA_SIGS_DIR = os.environ.get("CAPA_SIGS_DIR", "/app/capa-sigs")
 # capa's own rule matching is the slowest thing this service does -- ssdeep/
 # tlsh/lief are all sub-second, capa can run minutes on a large binary. Kept
 # comfortably under worker/ghidra-worker.py's STATICTOOLS_TIMEOUT (300s, the
@@ -280,7 +287,7 @@ def capa_scan(data: bytes) -> dict:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
         proc = subprocess.run(
-            ["capa", "-j", "-q", "-r", CAPA_RULES_DIR, tmp_path],
+            ["capa", "-j", "-q", "-r", CAPA_RULES_DIR, "-s", CAPA_SIGS_DIR, tmp_path],
             capture_output=True, timeout=CAPA_TIMEOUT, text=True,
         )
     finally:
