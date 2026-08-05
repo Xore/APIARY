@@ -746,13 +746,13 @@ step_pihole_provision() {
   # Docker's port allocator refuses the bind. Confirmed live (#518 test run):
   # deterministic "address already in use" on every attempt, not a race.
   # Pihole is real home-LAN infra, not a honeypot component, so it belongs on
-  # the actual LAN-facing IP instead. This box has two LAN interfaces
-  # (eno2/192.168.42.249, ens9f0/192.168.42.250, see
-  # docs/research/518-smoke-test-research.md's NIC inventory) -- which one
-  # pihole should actually serve is an operator choice, not something to
-  # auto-detect via the default route (that picked the wrong one of the two
-  # on this box's first pass), hence PIHOLE_LAN_IP is an explicit config
-  # value, not inferred.
+  # the actual LAN-facing IP instead. A box with more than one LAN interface
+  # (see docs/research/518-smoke-test-research.md's NIC inventory for this
+  # deployment's specifics) may have more than one candidate address --
+  # which one pihole should actually serve is an operator choice, not
+  # something to auto-detect via the default route (that picked the wrong
+  # one of two on this box's first pass, confirmed live #518), hence
+  # PIHOLE_LAN_IP is an explicit config value, not inferred.
   local lan_ip="$PIHOLE_LAN_IP"
 
   cat > "$dir/compose.yml" <<'EOF'
