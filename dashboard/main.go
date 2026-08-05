@@ -28,6 +28,13 @@ import (
 // looking for a real stretch of time.
 const rebuildIdleThreshold = 2 * time.Minute
 
+// backgroundLoopsEnabled (#266) reports whether this instance should run
+// the singleton alert/report loops -- see the call site's own comment for
+// why exactly one dashboard replica, not every replica, must run them.
+func backgroundLoopsEnabled() bool {
+	return os.Getenv("DASHBOARD_BACKGROUND_LOOPS") != "false"
+}
+
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "-healthcheck" {
 		addr := getenv("LISTEN_ADDR", ":8080")
@@ -168,8 +175,23 @@ func main() {
 	// independently backgrounded.
 	go func() {
 		s.rebuild()
-		go s.notifyLoop(os.Getenv("ALERT_WEBHOOK_URL"))
-		go s.reportScheduleLoop()
+		// #266: with two dashboard replicas behind Traefik for zero-downtime
+		// rolling updates, both would otherwise run these two loops
+		// independently -- notifyLoop firing the same webhook alert twice
+		// (once per replica) and reportScheduleLoop generating the same
+		// scheduled PDF twice are real, user-visible duplicates, unlike
+		// rebuild() above (each replica just recomputes its own in-memory
+		// snapshot; no shared side effect to duplicate). DASHBOARD_BACKGROUND_LOOPS=false
+		// on the secondary replica (docker-compose.dashboard.yml's
+		// dashboard-b) opts it out of both, so exactly one replica ever
+		// runs them -- not a general leader-election system, just enough to
+		// avoid duplicate outbound side effects with a fixed two-replica
+		// topology. Every replica still serves HTTP and runs rebuild()
+		// regardless of this flag.
+		if backgroundLoopsEnabled() {
+			go s.notifyLoop(os.Getenv("ALERT_WEBHOOK_URL"))
+			go s.reportScheduleLoop()
+		}
 		for range time.Tick(15 * time.Second) {
 			// #486: skip this tick's log walk / ES round-trip once nobody has
 			// hit the dashboard in a while -- touchActivity (below, wrapping

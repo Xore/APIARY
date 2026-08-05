@@ -219,7 +219,16 @@ jobs:
           cd "$destination"
           test ! -f .env || chmod 600 .env
           docker compose -f compose.yml config --quiet
-          docker compose -f compose.yml up -d --build
+          # #266: dashboard now runs two replicas (dashboard/dashboard-b)
+          # behind Traefik's health-gated load balancer specifically so a
+          # redeploy never has a real gap in availability -- a blind
+          # `up -d --build` here would recreate both simultaneously and
+          # throw that away for every automated deploy. es-results-importer
+          # and services-adapter aren't replicated and still want a normal
+          # reconcile, so run that first, then the rolling script for the
+          # dashboard pair only (it builds the shared image itself).
+          docker compose -f compose.yml up -d --build es-results-importer services-adapter
+          COMPOSE_FILE=compose.yml /opt/stacks/honeypot-stack/scripts/deploy-dashboard-rolling.sh
 
   vps:
     if: inputs.target == 'vps' || inputs.target == 'both'

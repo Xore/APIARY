@@ -46,80 +46,127 @@ x-runtime-defaults: &runtime-defaults
       max-size: "25m"
       max-file: "3"
 
+# #266: shared between dashboard and dashboard-b (the zero-downtime
+# rolling-update replica pair, see that service's own header comment) so
+# the one thing that must never drift between two containers reading the
+# same host paths -- which paths those are -- lives in exactly one place.
+# environment/healthcheck/etc. below are NOT anchored the same way and are
+# duplicated verbatim between the two services instead: Compose/YAML merge
+# keys replace a list wholesale rather than appending to it, so sharing an
+# anchor there would mean dashboard-b's one real difference
+# (DASHBOARD_BACKGROUND_LOOPS=false) could only be expressed by re-stating
+# the entire environment list anyway. Keep the two services' environment
+# blocks in sync by hand when either changes -- diff them before merging
+# any PR that touches one.
+x-dashboard-volumes: &dashboard-volumes
+  # rslave propagation: /logs/portbridge and /logs/suricata are sshfs
+  # mounts from the VPS on the host. They must be established BEFORE this
+  # container starts (never x-systemd.automount — autofs triggers return
+  # EPERM to container processes), and rslave lets later host-side
+  # remounts propagate in without recreating the container.
+  - type: bind
+    source: /opt/stacks/honeypot-stack/logs
+    target: /logs
+    read_only: true
+    bind:
+      propagation: rslave
+  # Optional GeoIP: drop a "start_ip,end_ip,country" CSV as
+  # dashboard/geoip/country.csv (DB-IP lite export works as-is). Absent →
+  # geo stays off; cf-ipcountry still enriches tanner/http events.
+  - /opt/stacks/honeypot-stack/dashboard/geoip:/geoip:ro
+  - /opt/stacks/honeypot-stack/analysis/geoip:/geoip-mmdb:ro
+  # Unified read-only payload inventory: Dionaea binaries, Cowrie
+  # transfers, and dashboard-retained inline script artifacts are all
+  # listed, source-labelled, analysed, and downloadable from /payloads.
+  # dionaea-lib/yara-results are shared, explicitly-named volumes (see
+  # this file's header) -- dionaea and yara-scanner (main stack) write
+  # into them, this stack only ever reads.
+  - dionaea-lib:/dionaea-lib:ro
+  - /opt/stacks/honeypot-stack/logs/cowrie/downloads:/cowrie-downloads:ro
+  - dashboard-state:/state
+  - yara-results:/yara:ro
+  - /var/lib/honeypot-sandbox/export:/sandbox-results:ro
+  # Narrow intent channel for the Analyze button. The dashboard never
+  # receives access to libvirt, systemd, Docker, or sandbox samples.
+  - /var/lib/honeypot-sandbox/requests/pending:/sandbox-requests
+  # The Windows guest is a separate host worker with its own spool, so
+  # Windows-native samples never land in the Linux runner's queue. These
+  # mounts are inert until WINDOWS_SANDBOX_*_DIR are set in .env; the
+  # dashboard refuses Windows submissions until then.
+  - /var/lib/honeypot-windows-sandbox/export:/windows-sandbox-results:ro
+  - /var/lib/honeypot-windows-sandbox/requests/pending:/windows-sandbox-requests
+  # Ghidra static analysis: a third spool, same shape and same boundary.
+  # Bind mounts rather than named volumes because the consumer is a host
+  # systemd unit (analysis/ghidra/worker/), not a compose service — a named
+  # volume would be awkward for it to reach and would put the queue inside
+  # Docker's lifecycle. Results are read-only here: the dashboard displays
+  # them and must never be able to forge one.
+  - /var/lib/honeypot-ghidra/results:/ghidra-results:ro
+  - /var/lib/honeypot-ghidra/requests/pending:/ghidra-requests
+  # Standalone Rev·Deck spool (#78): a fourth, independent request/results
+  # pair alongside the Ghidra one above, same shape and same read-only
+  # results boundary. ghidra-worker.py's drain_revdeck() is the consumer.
+  - /var/lib/honeypot-revdeck/results:/revdeck-results:ro
+  - /var/lib/honeypot-revdeck/requests/pending:/revdeck-requests
+  # Privileged read-only adapter for #158's owner-only model-status file.
+  # The dashboard sees only an AF_UNIX HTTP socket and never mounts the
+  # 0600 host artifact or gains a model-management action.
+  - /run/honeypot-model-status:/model-status:ro
+  # #197: the Services pane's only path to hp-services-adapter -- an
+  # AF_UNIX socket, never docker.sock itself. Read-write (unlike the
+  # model-status mount above) because this channel carries start/stop/
+  # restart actions, not just a read-only status query. Private to this
+  # stack now -- both ends moved here together.
+  - services-adapter-socket:/run/services-adapter
+  # GitHub-analysis publishing: a fourth spool, same shape and same
+  # boundary as the three above. The dashboard writes {sha256}.request
+  # and never talks to git, GitHub, or holds GH_PAT -- that lives only in
+  # analysis/github/'s root-owned host publisher. See #74.
+  - /var/lib/honeypot-github/results:/github-analysis-results:ro
+  - /var/lib/honeypot-github/requests/pending:/github-analysis-requests
+
 services:
+  # #266: zero-downtime rolling updates. dashboard and dashboard-b are two
+  # identical replicas (same image, same volumes via *dashboard-volumes,
+  # same everything except container_name/host port and one env var) behind
+  # vps/traefik/dynamic.yml's honeypot-dashboard service, which lists both
+  # backends with an active healthCheck. Traefik stops routing to whichever
+  # replica is currently failing its healthcheck automatically -- a redeploy
+  # restarts one replica at a time (scripts/deploy-dashboard-rolling.sh),
+  # so the other keeps answering requests the whole time. Previously
+  # `docker compose up -d dashboard` did a blind Recreate with a real
+  # listener-down window every redeploy (#212 only masked GETs with a
+  # client-side retry, never fixed the underlying gap; writes were never
+  # retried at all).
+  #
+  # DASHBOARD_BACKGROUND_LOOPS=false on dashboard-b: see main.go's
+  # backgroundLoopsEnabled() -- exactly one replica may run notifyLoop
+  # (webhook alerts) and reportScheduleLoop (scheduled PDFs), or both would
+  # fire/generate every one of those twice. This is a fixed two-replica
+  # pick, not real leader election: during dashboard's own restart (the
+  # replica that runs both loops), they pause for that window. Accepted
+  # tradeoff over either permanently duplicating alerts/reports or building
+  # full leader election for a two-replica topology.
+  #
+  # rebuild()/es.refresh()/the retention sweep are NOT gated the same way
+  # and run on both replicas unconditionally -- each just recomputes its
+  # own in-memory snapshot or idempotently deletes already-expired rows, so
+  # duplication there is harmless, unlike a webhook POST or a generated PDF.
   dashboard:
     <<: *runtime-defaults
     build: /opt/stacks/honeypot-stack/dashboard
+    # Explicit shared tag: without it Compose auto-names each service's
+    # image after <project>_<service> (dashboard vs. dashboard-b would
+    # build and tag the identical Dockerfile twice). One shared tag means
+    # `docker compose build dashboard` (or scripts/deploy-dashboard-rolling.sh,
+    # which does exactly that) builds once and both services' next
+    # recreate picks it up.
+    image: honeypot-dashboard:latest
     container_name: hp-dashboard
     restart: unless-stopped
     ports:
       - ${HP_BIND:-10.8.0.2}:19090:8080
-    volumes:
-      # rslave propagation: /logs/portbridge and /logs/suricata are sshfs
-      # mounts from the VPS on the host. They must be established BEFORE this
-      # container starts (never x-systemd.automount — autofs triggers return
-      # EPERM to container processes), and rslave lets later host-side
-      # remounts propagate in without recreating the container.
-      - type: bind
-        source: /opt/stacks/honeypot-stack/logs
-        target: /logs
-        read_only: true
-        bind:
-          propagation: rslave
-      # Optional GeoIP: drop a "start_ip,end_ip,country" CSV as
-      # dashboard/geoip/country.csv (DB-IP lite export works as-is). Absent →
-      # geo stays off; cf-ipcountry still enriches tanner/http events.
-      - /opt/stacks/honeypot-stack/dashboard/geoip:/geoip:ro
-      - /opt/stacks/honeypot-stack/analysis/geoip:/geoip-mmdb:ro
-      # Unified read-only payload inventory: Dionaea binaries, Cowrie
-      # transfers, and dashboard-retained inline script artifacts are all
-      # listed, source-labelled, analysed, and downloadable from /payloads.
-      # dionaea-lib/yara-results are shared, explicitly-named volumes (see
-      # this file's header) -- dionaea and yara-scanner (main stack) write
-      # into them, this stack only ever reads.
-      - dionaea-lib:/dionaea-lib:ro
-      - /opt/stacks/honeypot-stack/logs/cowrie/downloads:/cowrie-downloads:ro
-      - dashboard-state:/state
-      - yara-results:/yara:ro
-      - /var/lib/honeypot-sandbox/export:/sandbox-results:ro
-      # Narrow intent channel for the Analyze button. The dashboard never
-      # receives access to libvirt, systemd, Docker, or sandbox samples.
-      - /var/lib/honeypot-sandbox/requests/pending:/sandbox-requests
-      # The Windows guest is a separate host worker with its own spool, so
-      # Windows-native samples never land in the Linux runner's queue. These
-      # mounts are inert until WINDOWS_SANDBOX_*_DIR are set in .env; the
-      # dashboard refuses Windows submissions until then.
-      - /var/lib/honeypot-windows-sandbox/export:/windows-sandbox-results:ro
-      - /var/lib/honeypot-windows-sandbox/requests/pending:/windows-sandbox-requests
-      # Ghidra static analysis: a third spool, same shape and same boundary.
-      # Bind mounts rather than named volumes because the consumer is a host
-      # systemd unit (analysis/ghidra/worker/), not a compose service — a named
-      # volume would be awkward for it to reach and would put the queue inside
-      # Docker's lifecycle. Results are read-only here: the dashboard displays
-      # them and must never be able to forge one.
-      - /var/lib/honeypot-ghidra/results:/ghidra-results:ro
-      - /var/lib/honeypot-ghidra/requests/pending:/ghidra-requests
-      # Standalone Rev·Deck spool (#78): a fourth, independent request/results
-      # pair alongside the Ghidra one above, same shape and same read-only
-      # results boundary. ghidra-worker.py's drain_revdeck() is the consumer.
-      - /var/lib/honeypot-revdeck/results:/revdeck-results:ro
-      - /var/lib/honeypot-revdeck/requests/pending:/revdeck-requests
-      # Privileged read-only adapter for #158's owner-only model-status file.
-      # The dashboard sees only an AF_UNIX HTTP socket and never mounts the
-      # 0600 host artifact or gains a model-management action.
-      - /run/honeypot-model-status:/model-status:ro
-      # #197: the Services pane's only path to hp-services-adapter -- an
-      # AF_UNIX socket, never docker.sock itself. Read-write (unlike the
-      # model-status mount above) because this channel carries start/stop/
-      # restart actions, not just a read-only status query. Private to this
-      # stack now -- both ends moved here together.
-      - services-adapter-socket:/run/services-adapter
-      # GitHub-analysis publishing: a fourth spool, same shape and same
-      # boundary as the three above. The dashboard writes {sha256}.request
-      # and never talks to git, GitHub, or holds GH_PAT -- that lives only in
-      # analysis/github/'s root-owned host publisher. See #74.
-      - /var/lib/honeypot-github/results:/github-analysis-results:ro
-      - /var/lib/honeypot-github/requests/pending:/github-analysis-requests
+    volumes: *dashboard-volumes
     environment:
       - LISTEN_ADDR=:8080
       - LOG_DIR=/logs
@@ -226,6 +273,91 @@ services:
           # broader fix (an ES-backed cache instead of re-parsing every log
           # file's tail from scratch on every cycle), this bump just buys
           # headroom until that lands.
+          memory: 2G
+
+  # Second replica of the exact same image -- see the dashboard service's
+  # own header comment above for the full rolling-update rationale. Every
+  # line below is identical to dashboard's except container_name, the host
+  # port (19092, not 19090 -- both can't bind the same host port), and the
+  # added DASHBOARD_BACKGROUND_LOOPS=false. Keep the two in sync by hand.
+  dashboard-b:
+    <<: *runtime-defaults
+    build: /opt/stacks/honeypot-stack/dashboard
+    image: honeypot-dashboard:latest
+    container_name: hp-dashboard-b
+    restart: unless-stopped
+    ports:
+      - ${HP_BIND:-10.8.0.2}:19092:8080
+    volumes: *dashboard-volumes
+    environment:
+      - LISTEN_ADDR=:8080
+      - LOG_DIR=/logs
+      - GEOIP_CSV=/geoip/country.csv
+      - GEOIP_CITY_MMDB=/geoip-mmdb/GeoLite2-City.mmdb
+      - GEOIP_ASN_MMDB=/geoip-mmdb/GeoLite2-ASN.mmdb
+      - THREAT_CIDRS_FILE=/geoip/threat-cidrs.csv
+      - MAP_TILE_URL=${HONEYPOT_MAP_TILE_URL:-https://tile.openstreetmap.org/{z}/{x}/{y}.png}
+      - MAP_ATTRIBUTION=${HONEYPOT_MAP_ATTRIBUTION:-© OpenStreetMap contributors}
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - FILEBEAT_URL=http://filebeat:5066
+      - HONEYPOT_DOMAIN=${HONEYPOT_DOMAIN:-}
+      - KIBANA_PUBLIC_URL=${KIBANA_PUBLIC_URL:-}
+      - EVEBOX_PUBLIC_URL=${EVEBOX_PUBLIC_URL:-}
+      - ARKIME_PUBLIC_URL=${ARKIME_PUBLIC_URL:-}
+      - ALERT_COOLDOWN=${HONEYPOT_ALERT_COOLDOWN:-6h}
+      - PAYLOAD_DIRS=/dionaea-lib/binaries,/cowrie-downloads
+      - SCRIPT_PAYLOAD_DIR=/state/script-payloads
+      - YARA_RESULTS_FILE=/yara/results.json
+      - INTELLIGENCE_STATE_FILE=/state/intelligence.json
+      - SANDBOX_RESULTS_DIR=/sandbox-results
+      - SANDBOX_REQUEST_DIR=/sandbox-requests
+      - WINDOWS_SANDBOX_RESULTS_DIR=${WINDOWS_SANDBOX_RESULTS_DIR:-}
+      - WINDOWS_SANDBOX_REQUEST_DIR=${WINDOWS_SANDBOX_REQUEST_DIR:-}
+      - SANDBOX_ALERT_RISK_SCORE=${SANDBOX_ALERT_RISK_SCORE:-50}
+      - GHIDRA_RESULTS_DIR=${GHIDRA_RESULTS_DIR:-}
+      - GHIDRA_REQUEST_DIR=${GHIDRA_REQUEST_DIR:-}
+      - REVDECK_RESULTS_DIR=${REVDECK_RESULTS_DIR:-}
+      - REVDECK_REQUEST_DIR=${REVDECK_REQUEST_DIR:-}
+      - GHIDRA_ALERT_RISK_LEVELS=${GHIDRA_ALERT_RISK_LEVELS:-high,critical}
+      - GHIDRA_ALERT_ON_CRYPTO=${GHIDRA_ALERT_ON_CRYPTO:-false}
+      - GITHUB_ANALYSIS_REQUEST_DIR=${GITHUB_ANALYSIS_REQUEST_DIR:-}
+      - GITHUB_ANALYSIS_RESULTS_DIR=${GITHUB_ANALYSIS_RESULTS_DIR:-}
+      - GITHUB_ANALYSIS_ALERT_POSITIVES=${GITHUB_ANALYSIS_ALERT_POSITIVES:-10}
+      - ALERT_CAMPAIGN_SCORE=${HONEYPOT_ALERT_CAMPAIGN_SCORE:-80}
+      - DASHBOARD_REQUIRE_ADMIN=${DASHBOARD_REQUIRE_ADMIN:-true}
+      - MODEL_STATUS_SOCKET=/model-status/status.sock
+      - SERVICES_ADAPTER_SOCKET=/run/services-adapter/control.sock
+      - AUTH_INTROSPECTION_URL=${AUTH_INTROSPECTION_URL:-https://auth.honeypot.example/_auth/introspect}
+      - AUTH_INTROSPECTION_TOKEN=${AUTH_INTROSPECTION_TOKEN:-}
+      - AUTH_TARGET_HOST=${AUTH_TARGET_HOST:-honeypot.example}
+      - AUTH_SESSION_COOKIE_NAME=${AUTH_SESSION_COOKIE_NAME:-xore_sso}
+      - AUTH_ACCOUNT_URL=${AUTH_ACCOUNT_URL:-https://auth.honeypot.example/auth/app?pane=account}
+      - EXPECTED_SENSORS=cowrie,multipot,http,api-honeypot,dionaea,dnp3,dicompot,dns-honeypot,citrix-honeypot,cisco-asa-honeypot,rdp-honeypot,conpot,conpot-s7-1200,conpot-s7-1500,conpot-iec104,conpot-guardian,conpot-kamstrup,tanner,suricata,endlessh
+      - ALERT_WEBHOOK_URL=${HONEYPOT_ALERT_WEBHOOK_URL:-}
+      - TZ=Europe/Berlin
+      # The one real difference from dashboard above -- see main.go's
+      # backgroundLoopsEnabled() and this file's header comment.
+      - DASHBOARD_BACKGROUND_LOOPS=false
+    networks:
+      - honeynet
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/dashboard", "-healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    labels:
+      - autoheal=true
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_READ_SEARCH
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
           memory: 2G
 
   # #378: ships Ghidra/sandbox/GitHub-analysis/workbench-run results into

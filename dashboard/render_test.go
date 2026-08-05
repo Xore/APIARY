@@ -312,8 +312,25 @@ func TestFirstRebuildDoesNotBlockServerStartup(t *testing.T) {
 			"this blocks the server from accepting any connection, including /healthz, " +
 			"until the first full log-directory walk completes")
 	}
-	if !strings.Contains(src, "go func() {\n\t\ts.rebuild()\n\t\tgo s.notifyLoop") {
-		t.Fatal("the first rebuild() call must be backgrounded (inside a goroutine) so " +
-			"route registration and ListenAndServe are never blocked by it")
+	// The first rebuild() call must be backgrounded (inside a goroutine) so
+	// route registration and ListenAndServe are never blocked by it. Checks
+	// the structural shape (rebuild() as the first statement of a
+	// `go func() { ... }()` block, with notifyLoop reachable somewhere
+	// after it in that same literal function body) rather than pinning the
+	// exact adjacent line -- #266 inserted a background-loops env-gate
+	// comment block between the two, which a stricter adjacency check would
+	// have broken without the underlying invariant actually regressing.
+	start := strings.Index(src, "go func() {\n\t\ts.rebuild()\n")
+	if start == -1 {
+		t.Fatal("the first rebuild() call must be the opening statement of a backgrounded goroutine " +
+			"(go func() { s.rebuild() ... }()) so route registration and ListenAndServe are never blocked by it")
+	}
+	end := strings.Index(src[start:], "\n\t}()")
+	if end == -1 {
+		t.Fatal("could not find the closing of the goroutine that backgrounds the first rebuild() call")
+	}
+	body2 := src[start : start+end]
+	if !strings.Contains(body2, "s.notifyLoop") {
+		t.Fatal("notifyLoop must still be started from inside the same backgrounded goroutine as the first rebuild() call")
 	}
 }
