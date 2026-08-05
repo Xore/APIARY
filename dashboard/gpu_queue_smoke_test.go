@@ -20,19 +20,19 @@ func TestGhidraPageRendersWithPopulatedGPUQueue(t *testing.T) {
 		GPUQueue: []gpuQueueJob{
 			{
 				ID: "job-abc123", JobType: "ghidra-triage",
-				Ref: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+				Ref:   "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
 				Model: "qwen3:14b", EstimatedVRAMib: 14500, Status: "queued",
 				RequestedAt: "2026-08-05T15:00:00Z", Attempts: 0,
 			},
 			{
 				ID: "job-def456", JobType: "ghidra-triage",
-				Ref: "cafebabecafebabecafebabecafebabecafebabecafebabecafebabecafebabe"[:64],
+				Ref:   "cafebabecafebabecafebabecafebabecafebabecafebabecafebabecafebabe"[:64],
 				Model: "qwen3:14b", EstimatedVRAMib: 14500, Status: "running",
 				RequestedAt: "2026-08-05T14:55:00Z", Attempts: 1,
 			},
 			{
 				ID: "job-ghi789", JobType: "ghidra-triage",
-				Ref: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"[:64],
+				Ref:   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"[:64],
 				Model: "qwen3:14b", EstimatedVRAMib: 14500, Status: "failed",
 				RequestedAt: "2026-08-05T14:50:00Z", Attempts: 3, Error: "model produced no usable answer",
 				AbortRequested: true,
