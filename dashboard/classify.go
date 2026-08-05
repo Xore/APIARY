@@ -805,6 +805,22 @@ func classify(e map[string]any, dirSensor string) event {
 			if ev.category != "" {
 				ev.detail += "  [" + ev.category + "]"
 			}
+			if ev.severity > 0 {
+				ev.detail += "  " + severityLabel(ev.severity)
+			}
+			// #615: alert.metadata.mitre_tactic_id/technique_id (present on
+			// most ET/OISF rules that map to ATT&CK) reaches Elasticsearch
+			// fine but was never read here -- confirmed live against
+			// eve.json on the VPS, e.g. mitre_tactic_id ["TA0008"] +
+			// mitre_tactic_name ["Lateral_Movement"]. Detail-line only, per
+			// this issue's own scope note: not wired into Top
+			// Commands/aggregate leaderboards, just extra context on the
+			// alert an operator is already looking at.
+			if am, ok := a["metadata"].(map[string]any); ok {
+				if mitre := mitreSuffix(am); mitre != "" {
+					ev.detail += "  " + mitre
+				}
+			}
 		}
 		if ev.detail == "" {
 			ev.detail = "alert"
@@ -859,6 +875,58 @@ var dicomEventLabels = map[string]string{
 	"c_move":    "C-MOVE",
 	"c_get":     "C-GET",
 	"c_store":   "C-STORE",
+}
+
+// severityLabel renders suricata's numeric alert.severity (1 = most severe,
+// per its own eve.json convention) as a short bracketed label -- distinct
+// from ml_anomalies' unrelated low/medium/high/critical string band, which
+// scores a different signal entirely.
+func severityLabel(sev int) string {
+	switch sev {
+	case 1:
+		return "[severity 1/critical]"
+	case 2:
+		return "[severity 2/major]"
+	case 3:
+		return "[severity 3/minor]"
+	default:
+		return fmt.Sprintf("[severity %d]", sev)
+	}
+}
+
+// mitreSuffix renders alert.metadata's MITRE ATT&CK fields (present on most
+// ET/OISF rules that map to ATT&CK -- confirmed live against eve.json,
+// e.g. mitre_tactic_id ["TA0008"] + mitre_tactic_name ["Lateral_Movement"])
+// as a short "ATT&CK: TA0008 Lateral_Movement / T1021 Remote_Services"
+// suffix. Every metadata value in eve.json is a []any of strings even when
+// only one is present, so this only ever reads the first.
+func mitreSuffix(metadata map[string]any) string {
+	tacticID := metaFirst(metadata, "mitre_tactic_id")
+	tacticName := metaFirst(metadata, "mitre_tactic_name")
+	techID := metaFirst(metadata, "mitre_technique_id")
+	techName := metaFirst(metadata, "mitre_technique_name")
+	if tacticID == "" && techID == "" {
+		return ""
+	}
+	parts := []string{}
+	if tacticID != "" {
+		parts = append(parts, strings.TrimSpace(tacticID+" "+tacticName))
+	}
+	if techID != "" {
+		parts = append(parts, strings.TrimSpace(techID+" "+techName))
+	}
+	return "ATT&CK: " + strings.Join(parts, " / ")
+}
+
+// metaFirst reads the first string out of an eve.json alert.metadata field,
+// which suricata always encodes as a JSON array even for single values.
+func metaFirst(metadata map[string]any, key string) string {
+	vs, ok := metadata[key].([]any)
+	if !ok || len(vs) == 0 {
+		return ""
+	}
+	s, _ := vs[0].(string)
+	return s
 }
 
 // dnsQTypeName maps the common DNS query type numbers to their record
