@@ -260,18 +260,24 @@
        "QEMU    HARDDISK        2.5+" in
        HKLM\HARDWARE\DEVICEMAP\Scsi\...\Identifier — pafish's QEMU-section
        SCSI/ATA identifier check flags exactly this. -global (not a
-       per-device override keyed by id/alias) applies to every ide-hd
-       instance QEMU creates from this domain — there is only one (the
-       optical drive is a separate ide-cd device, unaffected). Confirmed
-       live (2026-08-06) that QEMU applies this correctly at the device
-       level (verified via `info qtree` over QMP) but Windows populates
-       this DEVICEMAP registry value once, from the disk's very first
-       enumeration, and never re-reads it on a later boot or `rescan` —
-       so this only takes effect on a genuinely fresh install (a real
-       golden-image rebuild), never retroactively against an
-       already-installed image no matter how many times it's rebooted. -->
+       per-device override keyed by id/alias) applies to every instance of
+       the named driver QEMU creates from this domain. The optical drive
+       is a separate ide-cd device (confirmed live (2026-08-06) it has the
+       identical tell: "QEMU    QEMU DVD-ROM    2.5+" in its own
+       DEVICEMAP entry, Scsi Bus 1), so it needs its own -global line —
+       ide-hd and ide-cd are different driver names even though both back
+       onto the same sata bus. Confirmed live (2026-08-06) that QEMU
+       applies both overrides correctly at the device level (verified via
+       `info qtree` over QMP) but Windows populates this DEVICEMAP
+       registry value once, from each disk's very first enumeration, and
+       never re-reads it on a later boot or `rescan` — so this only takes
+       effect on a genuinely fresh install (a real golden-image rebuild),
+       never retroactively against an already-installed image no matter
+       how many times it's rebooted. -->
   <qemu:commandline>
     <qemu:arg value='-global'/>
     <qemu:arg value='driver=ide-hd,property=model,value=WDC WD10JPVX-75J'/>
+    <qemu:arg value='-global'/>
+    <qemu:arg value='driver=ide-cd,property=model,value=DVDR   TS-H653F'/>
   </qemu:commandline>
 </domain>
