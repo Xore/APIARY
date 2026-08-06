@@ -52,7 +52,7 @@ from contracts import (
 )
 
 
-WORKER_VERSION = "0.3.0"
+WORKER_VERSION = "0.4.0"
 ANALYSIS_INDEX = "llm-analysis"
 STATE_INDEX = "llm-worker-state"
 STATUS_PATH = Path(
@@ -62,6 +62,15 @@ MODEL_RESPONSE_CAP = 64 * 1024
 HASH_NAME_RE = re.compile(r"(?i)^[0-9a-f]{32,64}$")
 MODEL_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 KEEP_ALIVE_RE = re.compile(r"^(?:0|[1-9][0-9]*[smh])$")
+# #151: nomic-embed-text's real, native output -- confirmed live against the
+# actual model (`ollama pull nomic-embed-text && POST /api/embed`), not
+# assumed from docs/gpu-llm-analysis-worker.md's "384-dimensional" text,
+# which predates ever running the model for real. Using the model's true
+# full-precision output rather than a truncated Matryoshka prefix: no
+# accuracy loss, no extra truncation/renormalization logic to maintain, and
+# the dense_vector mapping below must match this exactly or every embedded
+# write fails outright.
+EMBEDDING_DIMS = 768
 COWRIE_SESSION_EVENT_IDS = (
     "cowrie.command.input",
     "cowrie.command.failed",
@@ -158,6 +167,9 @@ class Config:
     ollama_url: str
     model: str
     expected_model_digest: str
+    embedding_enabled: bool
+    embedding_model: str
+    embedding_expected_digest: str
     poll_interval: int
     max_content_chars: int
     max_payload_bytes: int
@@ -194,6 +206,22 @@ class Config:
             ollama_url=os.getenv("OLLAMA_URL", "http://ollama:11434").rstrip("/"),
             model=os.getenv("LLM_MODEL", "qwen3:14b").strip(),
             expected_model_digest=os.getenv("LLM_EXPECTED_MODEL_DIGEST", "").strip().lower(),
+            # #151: its own explicit gate, same shape as every other
+            # captured-data-touching capability here (session_enabled,
+            # payload_enabled, ...) -- off by default, and validate_mode()
+            # requires a pinned digest before it can run against real data,
+            # same as the main analysis model.
+            embedding_enabled=env_bool("LLM_EMBEDDING_ENABLED", False),
+            # #151: explicit :latest tag, not a bare name -- confirmed live
+            # that Ollama's /api/tags always reports both `name` and
+            # `model` with the tag attached (e.g. "nomic-embed-text:latest"),
+            # even though a bare name resolves fine for /api/embed itself.
+            # A bare-name default would make embedding_digest()'s exact-match
+            # lookup fail with "not installed" against a model that
+            # genuinely is -- same convention LLM_MODEL's own default
+            # ("qwen3:14b") already follows for exactly this reason.
+            embedding_model=os.getenv("LLM_EMBEDDING_MODEL", "nomic-embed-text:latest").strip(),
+            embedding_expected_digest=os.getenv("LLM_EMBEDDING_EXPECTED_DIGEST", "").strip().lower(),
             poll_interval=env_int("POLL_INTERVAL", 60, 5, 3600),
             max_content_chars=env_int("MAX_CONTENT_CHARS", 12000, 1000, 24000),
             max_payload_bytes=env_int("MAX_PAYLOAD_BYTES", 1 << 20, 1024, 4 << 20),
@@ -217,9 +245,15 @@ class Config:
             raise ValueError("LLM_MODEL must be a non-empty bounded tag")
         if self.expected_model_digest and not MODEL_DIGEST_RE.fullmatch(self.expected_model_digest):
             raise ValueError("LLM_EXPECTED_MODEL_DIGEST must be an exact lowercase SHA-256")
+        if not self.embedding_model or len(self.embedding_model) > 160:
+            raise ValueError("LLM_EMBEDDING_MODEL must be a non-empty bounded tag")
+        if self.embedding_expected_digest and not MODEL_DIGEST_RE.fullmatch(self.embedding_expected_digest):
+            raise ValueError("LLM_EMBEDDING_EXPECTED_DIGEST must be an exact lowercase SHA-256")
         keep_alive_seconds(self.keep_alive)
         if self.dry_run:
             return
+        if self.embedding_enabled and not self.embedding_expected_digest:
+            raise ValueError("LLM_EMBEDDING_ENABLED requires LLM_EMBEDDING_EXPECTED_DIGEST")
         if not self.enabled or not self.allow_captured_data:
             raise ValueError(
                 "non-dry-run mode requires both LLM_ENABLED=true and "
@@ -273,6 +307,8 @@ class OllamaClient:
         self.base_url = config.ollama_url
         self.model = config.model
         self.configured_digest = config.expected_model_digest
+        self.embedding_model = config.embedding_model
+        self.configured_embedding_digest = config.embedding_expected_digest
         self.context_length = config.context_length
         self.output_tokens = config.output_tokens
         self.keep_alive = config.keep_alive
@@ -281,26 +317,75 @@ class OllamaClient:
         # operator or container proxy configuration.
         self.http.trust_env = False
         self._digest: str | None = None
+        self._embedding_digest: str | None = None
 
-    def model_digest(self) -> str:
-        if self._digest is not None:
-            return self._digest
+    def _tag_digest(self, model: str, configured_digest: str, error_label: str) -> str:
         try:
             response = self.http.get(f"{self.base_url}/api/tags", timeout=10, allow_redirects=False)
             if response.is_redirect or response.is_permanent_redirect:
                 raise ModelRequestError("Ollama metadata endpoint redirected")
             response.raise_for_status()
             for item in response.json().get("models", []):
-                if item.get("name") == self.model or item.get("model") == self.model:
-                    self._digest = str(item.get("digest") or "")[:128]
-                    if not MODEL_DIGEST_RE.fullmatch(self._digest):
-                        raise ModelRequestError("Ollama returned an invalid model digest")
-                    if self.configured_digest and self._digest != self.configured_digest:
-                        raise ModelRequestError("configured model digest does not match the installed model")
-                    return self._digest
+                if item.get("name") == model or item.get("model") == model:
+                    digest = str(item.get("digest") or "")[:128]
+                    if not MODEL_DIGEST_RE.fullmatch(digest):
+                        raise ModelRequestError(f"Ollama returned an invalid {error_label} digest")
+                    if configured_digest and digest != configured_digest:
+                        raise ModelRequestError(f"configured {error_label} digest does not match the installed model")
+                    return digest
         except (requests.RequestException, ValueError, TypeError) as exc:
-            raise ModelRequestError("Ollama model metadata unavailable") from exc
-        raise ModelRequestError("configured model is not installed")
+            raise ModelRequestError(f"Ollama {error_label} metadata unavailable") from exc
+        raise ModelRequestError(f"configured {error_label} is not installed")
+
+    def model_digest(self) -> str:
+        if self._digest is not None:
+            return self._digest
+        self._digest = self._tag_digest(self.model, self.configured_digest, "model")
+        return self._digest
+
+    def embedding_digest(self) -> str:
+        if self._embedding_digest is not None:
+            return self._embedding_digest
+        self._embedding_digest = self._tag_digest(
+            self.embedding_model, self.configured_embedding_digest, "embedding model"
+        )
+        return self._embedding_digest
+
+    def embed(self, text: str) -> list[float]:
+        """#151: returns a dense embedding vector for `text` via the
+        configured embedding model, or raises ModelRequestError/
+        ModelResponseError. Bounded and best-effort by design -- every
+        caller must treat a failure here as "no embedding this cycle," the
+        same degrade-without-stopping contract analyze() already gives
+        session/payload analysis, never a reason to fail the surrounding
+        analysis or block ingestion.
+        """
+        try:
+            response = self.http.post(
+                f"{self.base_url}/api/embed",
+                json={"model": self.embedding_model, "input": text, "keep_alive": self.keep_alive},
+                timeout=30,
+                allow_redirects=False,
+            )
+            if response.is_redirect or response.is_permanent_redirect:
+                raise ModelRequestError("Ollama embed endpoint redirected")
+            response.raise_for_status()
+            payload = response.json()
+            embeddings = payload.get("embeddings")
+            if not isinstance(embeddings, list) or len(embeddings) != 1:
+                raise ModelResponseError("Ollama embed response did not carry exactly one vector")
+            vector = embeddings[0]
+            if (
+                not isinstance(vector, list)
+                or len(vector) != EMBEDDING_DIMS
+                or not all(isinstance(value, (int, float)) for value in vector)
+            ):
+                raise ModelResponseError(
+                    f"Ollama embed response was not a {EMBEDDING_DIMS}-dimensional numeric vector"
+                )
+            return [float(value) for value in vector]
+        except (requests.RequestException, ValueError, TypeError) as exc:
+            raise ModelRequestError("Ollama embed request failed") from exc
 
     def analyze(self, prompt: str, annotation_type: type[AnnotationT]) -> tuple[AnnotationT, dict[str, Any]]:
         last_error: Exception | None = None
@@ -542,6 +627,17 @@ def analysis_mapping() -> dict[str, Any]:
                 "error_code": {"type": "keyword"},
                 "error": {"type": "text"},
                 "attempt": {"type": "integer"},
+                # #151: deliberately absent from most docs, not just
+                # empty-valued -- dynamic:strict rejects unknown fields but
+                # never requires a mapped one to be present, so a doc
+                # written with LLM_EMBEDDING_ENABLED=false, or one whose
+                # embed() call failed (best-effort, must never fail the
+                # surrounding analysis), simply carries no embedding field
+                # at all rather than a zero vector that would silently
+                # corrupt kNN search results.
+                "embedding": {"type": "dense_vector", "dims": EMBEDDING_DIMS, "index": True, "similarity": "cosine"},
+                "embedding_model": {"type": "keyword"},
+                "embedding_model_digest": {"type": "keyword"},
             },
         }
     }
@@ -853,6 +949,23 @@ class LLMWorker:
                         "deterministic_flags": flags,
                     }
                 )
+                if self.config.embedding_enabled and annotation.summary:
+                    try:
+                        document.update(
+                            {
+                                "embedding": self.model.embed(annotation.summary),
+                                "embedding_model": self.config.embedding_model,
+                                "embedding_model_digest": self.model.embedding_digest(),
+                            }
+                        )
+                    except (ModelRequestError, ModelResponseError) as exc:
+                        # #151: never fails the surrounding session analysis
+                        # -- the document is still indexed below, just
+                        # without an embedding this cycle. A future
+                        # re-embed pass (keyed on embedding_model_digest
+                        # not matching the currently configured digest, or
+                        # the field being absent entirely) can backfill it.
+                        LOG.warning("embedding failed for session analysis (%s); continuing without it", type(exc).__name__)
                 self.es.index(index=ANALYSIS_INDEX, id=f"session-{analysis_id}", document=document)
                 accumulator.finalized = True
                 completed += 1
