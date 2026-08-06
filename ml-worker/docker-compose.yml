@@ -37,8 +37,15 @@ services:
     environment:
       ES_HOST: http://elasticsearch:9200
       POLL_INTERVAL: "30"
-      RETRAIN_INTERVAL: "21600"
       ML_ALERT_THRESHOLD: "0.75"
+      # #172: worker.py reads RETRAIN_SLOTS_UTC (fixed daily HH:MM slots),
+      # not RETRAIN_INTERVAL -- that was this variable's old name/shape
+      # before #172's rearchitect and was never actually wired here since.
+      # Defaults to the exact value worker.py itself defaults to, so
+      # leaving it unset in .env changes nothing; exists so an operator can
+      # override it (e.g. to force a near-term retrain for verification)
+      # without editing this file, same reasoning as ML_HOME_NET below.
+      RETRAIN_SLOTS_UTC: "${RETRAIN_SLOTS_UTC:-03:00,09:00,15:00,21:00}"
       # #174: our own address(es), comma-separated CIDRs, same convention
       # as vps/.env.example's SURICATA_HOME_NET -- lets models/
       # isolation_forest.py's _get_ip()/_get_port() tell Suricata netflow's
