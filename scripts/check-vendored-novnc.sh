@@ -7,10 +7,15 @@
 # Computed from paths relative to the vendored dir itself (cd into it
 # first) -- sha256sum's own output line includes the path, so an absolute
 # path would make this hash depend on where the repo happens to be checked
-# out, which defeats the whole point of a reproducible pin.
+# out, which defeats the whole point of a reproducible pin. LC_ALL=C forces
+# a fixed byte-order sort -- found live: the default locale's collation
+# order sorted these filenames differently between a dev machine
+# (en_US.UTF-8) and the CI runner, producing two different "correct"
+# hashes for the identical file tree.
 #
 # Usage: scripts/check-vendored-novnc.sh
 set -euo pipefail
+export LC_ALL=C
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 lock="$root/dashboard/frontend/novnc.lock"

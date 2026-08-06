@@ -12,6 +12,7 @@
 #   every other third-party artifact fetch in this repo (capa-rules,
 #   capa-sigs, GhidrAssist).
 set -euo pipefail
+export LC_ALL=C
 
 tag="${1:?usage: scripts/sync-novnc.sh <tag> <expected-tarball-sha256>}"
 expected_sha256="${2:?usage: scripts/sync-novnc.sh <tag> <expected-tarball-sha256>}"
