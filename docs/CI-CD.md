@@ -389,6 +389,66 @@ check. Retiring this file and its deploy step entirely, once every build
 context instead points somewhere that doesn't need a `docker-compose.yml`
 to justify its existence, is tracked as the last step of #258.
 
+## GitHub CI runner
+
+A second, separate self-hosted runner from the deployment one above --
+different labels, different systemd service, different (much narrower)
+host access -- dedicated purely to running the priciest checks in
+[Quality](#checks) faster than a GitHub-hosted runner, for pushes to `main`
+an operator has already made. It is **not** a faster path to green on a
+pull request: `quality.yml`'s own GitHub-hosted jobs remain the only checks
+any PR depends on, unchanged by any of this.
+
+```text
+self-hosted, linux, x64, honeypot-ci
+```
+
+### Why this can never see pull_request
+
+A public repository's pull requests can come from forks -- attacker-
+controlled input a maintainer has not reviewed yet. A GitHub-hosted runner
+is a disposable, sandboxed VM torn down after the job; a self-hosted
+runner's job runs as a real process on real home-network infrastructure.
+Wiring an untrusted `pull_request` trigger to it would mean a malicious
+test file (`os.system(...)`, a crafted Go `TestMain`, anything) gets to
+execute wherever that runner happens to have access -- exactly the
+scenario GitHub's own self-hosted-runner security guidance warns against,
+and the same reasoning the deployment runner above already applies
+("never accept pull-request code" on `production-home`).
+
+[`quality-homeserver.yml`](../.github/workflows/quality-homeserver.yml)
+only triggers on `push: branches: [main]` and `workflow_dispatch` -- never
+`pull_request`, regardless of whether the PR is same-repo or fork-origin.
+Defense in depth: even a same-repo branch is one compromised contributor
+account away from being untrusted, so the trigger boundary is push-to-
+main (already merged), not "not a fork."
+
+### Install
+
+```bash
+sudo scripts/github-ci-runner/install-ci-runner.sh --repo Xore/APIARY
+```
+
+Registers a dedicated `github-ci-runner` system user (no `docker` group,
+no access to `/var/lib/honeypot-*`, `/opt/stacks`, or any sensor state --
+a workflow here only ever needs a language toolchain), downloads and
+checksum-verifies the pinned `actions/runner` release, registers it with
+the given repository using a registration token (fetched automatically via
+`gh api` if `--token` is not passed and `gh auth login` has already been
+done for an account with admin on the repo), and installs it as a systemd
+service via the runner's own `svc.sh`.
+
+Re-running the script is safe: it skips the download if already extracted
+and skips re-registration if `$RUNNER_HOME/.runner` already exists (remove
+that file first to re-register, e.g. after moving the runner to a new
+host).
+
+`actions/setup-go`/`actions/setup-node` cache their toolchain downloads in
+the runner's own persistent tool cache -- unlike an ephemeral GitHub-hosted
+runner, that cache survives between job runs on this same machine, so the
+second and every later run skips the download entirely. This is most of
+where the actual speed win comes from, not raw CPU.
+
 ## VPS deployment
 
 Create a protected `production-vps` environment with a required reviewer and
