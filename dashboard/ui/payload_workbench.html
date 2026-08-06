@@ -88,7 +88,7 @@
   {{if .Correlation.Known}}<div class="card wide tw:mb-5" role="note" id="wb-known-elsewhere"><div class="tw:flex tw:flex-wrap tw:items-center tw:gap-2"><strong class="tw:mr-auto">This payload was already analyzed elsewhere.</strong><span class="badge badge--green">advisory only</span></div>
     <p class="note">Queueing a fresh run below is still available if you want one &mdash; this never blocks anything.</p>
     <div class="tw:flex tw:flex-wrap tw:gap-2">
-      {{if .Correlation.Ghidra}}<span class="chip">Ghidra: {{.Correlation.Ghidra.ExitStatus}} ({{.Correlation.Ghidra.CompletedAt}})</span>{{end}}
+      {{if .Correlation.Ghidra}}<a class="chip" href="/ghidra/{{.SHA256}}" title="Open the full Ghidra result">Ghidra: {{.Correlation.Ghidra.ExitStatus}} ({{.Correlation.Ghidra.CompletedAt}})</a>{{end}}
       {{if .Correlation.Sandbox}}<span class="chip">Sandbox: {{len .Correlation.Sandbox}} run(s)</span>{{end}}
       {{if .Correlation.GitHub}}<span class="chip">GitHub analysis: {{.Correlation.GitHub.ExitStatus}}</span>{{end}}
       {{if .Correlation.ESAvailable}}{{if .Correlation.ESSightings}}<span class="chip">Elasticsearch: {{.Correlation.ESSightings}} sighting(s)</span>{{end}}{{end}}
