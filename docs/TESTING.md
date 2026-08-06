@@ -69,17 +69,26 @@ fixed back into this document and the install scripts themselves.
 
 #### Procedure
 
-1. **Preserve what can't be regenerated, before wiping anything:**
-   - Every stack's `.env` file (the same restore mechanism
-     `install-homeserver.sh`'s `step_restore_env_files` already automates
-     for a fresh box).
+1. **Confirm the backup is current, before wiping anything.** This
+   doesn't need a new backup mechanism — `install-homeserver.sh` already
+   restores from `BACKUP_HOST_PATH`/`BACKUP_HOST_SANDBOX_PATH` on a fresh
+   box (`step_restore_env_files` for every stack's `.env`, and a separate
+   phase for the sandbox golden images). The wipe is only safe once
+   that backup actually reflects the current state:
+   - Every stack's `.env` file — restored automatically by
+     `step_restore_env_files`, but only as current as the last time it
+     was pushed to `BACKUP_HOST_PATH`.
    - Windows sandbox golden images (`win11-analysis.qcow2`,
-     `win11-ghosts.qcow2`) — hours to rebuild.
-   - The Windows 11 evaluation ISO (#49) — time-limited to obtain, expires
-     at 90 days.
+     `win11-ghosts.qcow2`) at `BACKUP_HOST_SANDBOX_PATH` — hours to
+     rebuild if the backup is stale or missing.
+   - The Windows 11 evaluation ISO (#49) — time-limited to obtain,
+     expires at 90 days; confirm it's actually part of what gets restored,
+     not assumed.
    - Anything else not reproducible from the git checkout alone (audit
-     before wiping, don't assume the list above is exhaustive for a given
-     run).
+     before wiping — don't assume the list above, or
+     `install-homeserver.sh`'s own restore steps, are exhaustive for a
+     given run; this is exactly the kind of gap this pass exists to
+     catch).
 2. **Wipe both hosts** — every Dockge stack, container, volume, and piece
    of state on the homeserver and the VPS.
 3. **Reinstall from the real path** — `scripts/install-homeserver.sh` (or
