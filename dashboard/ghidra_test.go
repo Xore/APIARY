@@ -112,6 +112,50 @@ func TestLoadGhidraResults(t *testing.T) {
 	}
 }
 
+// TestLoadGhidraResultsDecodesRevDeckCitations guards against a real
+// production bug found live (2026-08-06): Rev·Deck's own "citations" SSE
+// event (relayed verbatim by ghidra-worker.py's _revdeck_chat()) carries
+// rich objects ({"kind":"import","raw":"[import:CreateFileA]",
+// "valid":false,"value":"CreateFileA"}), not plain strings -- confirmed
+// against a real production ghidra-analysis-v1 document. The previous
+// []string typing on ghidraRevDeckCitations made json.Unmarshal fail
+// outright for any result with a real citation in either list, which
+// silently vanished the *entire document* from loadGhidraResultsES (it
+// skips a row on any unmarshal error) -- both of this host's real
+// documents were affected at the time, so /ghidra showed a completely
+// empty table despite two successful analyses existing in Elasticsearch.
+func TestLoadGhidraResultsDecodesRevDeckCitations(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GHIDRA_RESULTS_DIR", dir)
+
+	writeGhidraResult(t, dir, shaA, map[string]any{
+		"version": 1, "exit_status": "ok", "completed_at": "2026-08-06T00:00:00+00:00",
+		"revdeck": map[string]any{
+			"workflow": "program_triage", "status": "complete", "answer": "ok",
+			"citations": map[string]any{
+				"valid": []map[string]any{
+					{"kind": "import", "raw": "[import:WriteFile]", "value": "WriteFile", "valid": true},
+				},
+				"invalid": []map[string]any{
+					{"kind": "import", "raw": "[import:CreateFileA]", "value": "CreateFileA", "valid": false},
+				},
+			},
+		},
+	})
+
+	rows := loadGhidraResults()
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1 -- a citations decode failure must not vanish the whole document", len(rows))
+	}
+	citations := rows[0].RevDeck.Citations
+	if len(citations.Valid) != 1 || citations.Valid[0].Raw != "[import:WriteFile]" || !citations.Valid[0].Valid {
+		t.Errorf("valid citation not decoded correctly: %+v", citations.Valid)
+	}
+	if len(citations.Invalid) != 1 || citations.Invalid[0].Raw != "[import:CreateFileA]" || citations.Invalid[0].Valid {
+		t.Errorf("invalid citation not decoded correctly: %+v", citations.Invalid)
+	}
+}
+
 // The worker's statictools/server.py omits format-specific lief keys
 // entirely rather than emitting them as null (is_dll/compile_timestamp do
 // not exist for an ELF binary) — this decodes that real shape, not a
@@ -338,7 +382,7 @@ func TestLoadGhidraResultsDecodesRevDeck(t *testing.T) {
 		"version": 4, "exit_status": "ok", "completed_at": "2026-08-01T10:00:00+00:00",
 		"revdeck": {"workflow": "program_triage", "status": "max_turns",
 		            "answer": "This binary looks benign.", "steps": 4, "tool_calls": 3,
-		            "citations": {"valid": ["func@0x401000"], "invalid": ["func@0xdead"]},
+		            "citations": {"valid": [{"kind":"function","raw":"[function:0x401000]","value":"0x401000","valid":true}], "invalid": [{"kind":"function","raw":"[function:0xdead]","value":"0xdead","valid":false}]},
 		            "warnings": ["capped tool budget"]}
 	}`
 	if err := os.WriteFile(filepath.Join(dir, shaA+"_ghidra.json"), []byte(raw), 0o600); err != nil {
@@ -362,7 +406,8 @@ func TestLoadGhidraResultsDecodesRevDeck(t *testing.T) {
 		t.Fatalf("revdeck tool_calls did not decode: %+v", row.RevDeck.ToolCalls)
 	}
 	if row.RevDeck.Citations == nil || len(row.RevDeck.Citations.Valid) != 1 ||
-		row.RevDeck.Citations.Valid[0] != "func@0x401000" || len(row.RevDeck.Citations.Invalid) != 1 {
+		row.RevDeck.Citations.Valid[0].Raw != "[function:0x401000]" || !row.RevDeck.Citations.Valid[0].Valid ||
+		len(row.RevDeck.Citations.Invalid) != 1 {
 		t.Fatalf("revdeck citations did not decode: %+v", row.RevDeck.Citations)
 	}
 	if len(row.RevDeck.Warnings) != 1 || row.RevDeck.Warnings[0] != "capped tool budget" {
