@@ -118,6 +118,10 @@ jobs:
           # sample-derived text to a non-local model endpoint — a rule that is
           # only worth anything if something checks it on every change.
           python analysis/ghidra/worker/tests/test_ghidra_worker.py
+          # Replacement Ghidra REST service (#245): fake analyzeHeadless, no
+          # real Ghidra/JVM in CI -- verifies server.py's HTTP/queue layer
+          # only, same "stub both sides" reasoning as the worker test above.
+          python analysis/ghidra/service/tests/test_server.py
           # Governance tests use synthetic snapshots/reports only. CI never
           # pulls or loads multi-GB model weights.
           python analysis/ghidra/models/tests/test_model_governance.py

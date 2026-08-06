@@ -11,7 +11,16 @@
 
 services:
   ghidra:
-    image: biniamfd/ghidra-headless-rest:1.2.1@sha256:971591a3a8448d8ed969079b452306e806f36079c3ddd298f4a618d6e2f1442d
+    # #245: replaces the third-party biniamfd/ghidra-headless-rest image --
+    # an unofficial, single-maintainer packaging with no public source repo
+    # to check bus-factor on, stuck on Ghidra 11.3.2 with no newer tag in
+    # over a year. This build fetches Ghidra directly from its own official
+    # GitHub releases (checksum-verified, see service/Dockerfile) and pairs
+    # it with a small from-scratch HTTP/queue wrapper covering exactly the 5
+    # routes worker/ghidra-worker.py's GhidraClient actually calls --
+    # verified live against a real sample (functions/strings/imports all
+    # matched the expected shape) before this swap.
+    build: ./service
     restart: unless-stopped
     ports:
       - '127.0.0.1:9090:9090'
