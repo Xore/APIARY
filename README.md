@@ -58,6 +58,14 @@ optional on-demand `geoip-update` maintenance job. 13 deployment pieces —
 | [docs/ROADMAP.md](docs/ROADMAP.md) / [docs/WORK-LEDGER.md](docs/WORK-LEDGER.md) | What order work happens in, and how issues are claimed/reviewed |
 | [docs/ml-worker-plan.md](docs/ml-worker-plan.md), [docs/gpu-llm-analysis-worker.md](docs/gpu-llm-analysis-worker.md), [docs/gpu-ml-worker-acceleration.md](docs/gpu-ml-worker-acceleration.md) | The homeserver's NVIDIA GPU running local LLM log/payload analysis and CUDA-accelerated anomaly detection — no data leaves the machine |
 
+## Screenshots
+
+The live production dashboard, real captured attack telemetry, not fixture
+data. Full gallery (desktop/UHQ/4K and iPhone) in
+[docs/screenshots/README.md](docs/screenshots/README.md).
+
+![Honeypot command center overview](docs/screenshots/uhq/overview.png)
+
 Work is tracked in [GitHub issues](https://github.com/Xore/APIARY/issues).
 
 ## Containment & safety — read this
