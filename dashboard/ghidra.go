@@ -128,11 +128,28 @@ type ghidraFloss struct {
 	Unsupported         string   `json:"unsupported,omitempty"`
 }
 
+// ghidraRevDeckCitation is one entry of Rev·Deck's own "citations" SSE
+// event, relayed verbatim by ghidra-worker.py's _revdeck_chat(). Confirmed
+// live (2026-08-06) against a real production document: this is a rich
+// object ({"kind":"import","raw":"[import:CreateFileA]","valid":false,
+// "value":"CreateFileA"}), not a plain string -- the previous []string
+// typing made json.Unmarshal fail outright for any document with a real
+// citation in either list, which silently vanished the whole document from
+// the ES-backed /ghidra list (loadGhidraResultsES skips a row on any
+// unmarshal error). Both of this host's real ghidra-analysis-v1 documents
+// were affected, so /ghidra showed a completely empty table.
+type ghidraRevDeckCitation struct {
+	Kind  string `json:"kind"`
+	Raw   string `json:"raw"`
+	Value string `json:"value"`
+	Valid bool   `json:"valid"`
+}
+
 // ghidraRevDeckCitations mirrors the "citations" object _revdeck_chat() in
 // ghidra-worker.py builds from Rev·Deck's own "citations" SSE event.
 type ghidraRevDeckCitations struct {
-	Valid   []string `json:"valid"`
-	Invalid []string `json:"invalid"`
+	Valid   []ghidraRevDeckCitation `json:"valid"`
+	Invalid []ghidraRevDeckCitation `json:"invalid"`
 }
 
 // ghidraRevDeck mirrors the dict _revdeck_chat() in ghidra-worker.py returns

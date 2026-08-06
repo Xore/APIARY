@@ -100,8 +100,11 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 		RevDeck: &ghidraRevDeck{
 			Workflow: "program_triage", Status: "max_turns", Answer: "This binary looks benign.",
 			Steps: &revdeckSteps, ToolCalls: 3,
-			Citations: &ghidraRevDeckCitations{Valid: []string{"func@0x401000"}, Invalid: []string{"func@0xdead"}},
-			Warnings:  []string{"capped tool budget"},
+			Citations: &ghidraRevDeckCitations{
+				Valid:   []ghidraRevDeckCitation{{Kind: "function", Raw: "[function:0x401000]", Value: "0x401000", Valid: true}},
+				Invalid: []ghidraRevDeckCitation{{Kind: "function", Raw: "[function:0xdead]", Value: "0xdead", Valid: false}},
+			},
+			Warnings: []string{"capped tool budget"},
 		},
 	}
 	// Populated rather than zero-valued, same reasoning as ghidraDetail:
