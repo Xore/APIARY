@@ -78,10 +78,16 @@ def call_llama_cpp(base_url, prompt, n_predict, repeat_penalty, seed):
         return json.load(r)["content"]
 
 
-def call_vllm(base_url, model, prompt, n_predict, seed):
-    body = json.dumps({
-        "model": model, "prompt": prompt, "max_tokens": n_predict, "temperature": 0, "seed": seed,
-    }).encode()
+def call_vllm(base_url, model, prompt, n_predict, seed, top_k=None, repetition_penalty=None):
+    # #832: see corpus_eval.py's call_vllm for why these matter -- omitted
+    # by default vLLM falls back to no repeat penalty and unset top_k,
+    # which is NOT equivalent to llama.cpp/Ollama's settings used here.
+    payload = {"model": model, "prompt": prompt, "max_tokens": n_predict, "temperature": 0, "seed": seed}
+    if top_k is not None:
+        payload["top_k"] = top_k
+    if repetition_penalty is not None:
+        payload["repetition_penalty"] = repetition_penalty
+    body = json.dumps(payload).encode()
     req = urllib.request.Request(f"{base_url}/v1/completions", data=body, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=180) as r:
         return json.load(r)["choices"][0]["text"]
@@ -97,6 +103,8 @@ def main():
     p.add_argument("--n-predict", type=int, default=180)
     p.add_argument("--repeat-penalty", type=float, default=1.1)
     p.add_argument("--seed", type=int, default=66)
+    p.add_argument("--vllm-top-k", type=int, default=None, help="vLLM only. See corpus_eval.py's flag of the same name.")
+    p.add_argument("--vllm-repetition-penalty", type=float, default=None, help="vLLM only. See corpus_eval.py's flag of the same name.")
     args = p.parse_args()
 
     if args.engine in ("ollama", "vllm") and not args.model:
@@ -118,7 +126,8 @@ def main():
             elif args.engine == "llama_cpp":
                 text = call_llama_cpp(args.base_url, prompt, args.n_predict, args.repeat_penalty, args.seed)
             else:
-                text = call_vllm(args.base_url, args.model, prompt, args.n_predict, args.seed)
+                text = call_vllm(args.base_url, args.model, prompt, args.n_predict, args.seed,
+                                  top_k=args.vllm_top_k, repetition_penalty=args.vllm_repetition_penalty)
         except Exception as e:
             print(f"  [{i+1}/{len(files)}] {sample_id}: ERROR {e}", file=sys.stderr)
             continue
