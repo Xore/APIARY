@@ -189,6 +189,11 @@ services:
       # boundary (already proven live by honeypot-init today).
       - ELASTICSEARCH_URL=http://elasticsearch:9200
       - FILEBEAT_URL=http://filebeat:5066
+      # #151: query-time embedding for /llm-analysis semantic search.
+      # Shared with analysis/ghidra/docker-compose.ghidra.yml's own ollama
+      # service, over the honeypot-llm network below -- same service name
+      # ("ollama") that network's own internal DNS already resolves.
+      - OLLAMA_URL=http://ollama:11434
       # Where the Open-in links on an event point. Set HONEYPOT_DOMAIN and the
       # dashboard derives https://<tool>.<domain>; the three explicit URLs
       # override it for path-routed deployments. All four are deliberately
@@ -248,6 +253,7 @@ services:
       - TZ=Europe/Berlin
     networks:
       - honeynet
+      - honeypot-llm
     healthcheck:
       test: ["CMD", "/usr/local/bin/dashboard", "-healthcheck"]
       interval: 15s
@@ -314,6 +320,11 @@ services:
       - MAP_ATTRIBUTION=${HONEYPOT_MAP_ATTRIBUTION:-© OpenStreetMap contributors}
       - ELASTICSEARCH_URL=http://elasticsearch:9200
       - FILEBEAT_URL=http://filebeat:5066
+      # #151: query-time embedding for /llm-analysis semantic search.
+      # Shared with analysis/ghidra/docker-compose.ghidra.yml's own ollama
+      # service, over the honeypot-llm network below -- same service name
+      # ("ollama") that network's own internal DNS already resolves.
+      - OLLAMA_URL=http://ollama:11434
       - HONEYPOT_DOMAIN=${HONEYPOT_DOMAIN:-}
       - KIBANA_PUBLIC_URL=${KIBANA_PUBLIC_URL:-}
       - EVEBOX_PUBLIC_URL=${EVEBOX_PUBLIC_URL:-}
@@ -356,6 +367,7 @@ services:
       - DASHBOARD_BACKGROUND_LOOPS=false
     networks:
       - honeynet
+      - honeypot-llm
     healthcheck:
       test: ["CMD", "/usr/local/bin/dashboard", "-healthcheck"]
       interval: 15s
@@ -485,6 +497,14 @@ networks:
   honeynet:
     name: honeynet
     driver: bridge
+  # #151: shared with analysis/ghidra/docker-compose.ghidra.yml, which owns
+  # this network (internal: true there -- no internet egress for the LLM
+  # containers on it). Same fixed-name mechanism as honeynet above; the
+  # dashboard only ever reaches Ollama's own /api/embed endpoint on it, for
+  # semantic search's query-time embedding call.
+  honeypot-llm:
+    name: honeypot-llm
+    external: true
 
 volumes:
   # Shared with the main stack (dionaea/yara-scanner write, this stack only

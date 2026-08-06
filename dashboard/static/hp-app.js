@@ -777,12 +777,84 @@
     });
   };
 
+  /* #151: /llm-analysis's semantic search box -- a no-op everywhere else,
+     since it only wires up if the page actually has these elements. */
+  const initLLMSemanticSearch = () => {
+    const input = document.getElementById("hp-llm-search-q");
+    const button = document.getElementById("hp-llm-search-run");
+    const meta = document.getElementById("hp-llm-search-meta");
+    const results = document.getElementById("hp-llm-search-results");
+    const rows = document.getElementById("hp-llm-search-rows");
+    if (!input || !button || !meta || !results || !rows) return;
+
+    // Search hits carry the model's own free-form summary/error text --
+    // attacker-influenced (llm-worker/worker.py's sanitize_text() bounds
+    // and neutralizes control characters before the model ever sees the
+    // session, but the model's own output is unconstrained prose) and
+    // rendered here via innerHTML, unlike the server-rendered table above
+    // (Go's html/template auto-escapes). Every dynamic value must go
+    // through this before insertion.
+    const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+    const severityBadge = severity => {
+      if (!severity) return '<span class="tw:text-muted">&mdash;</span>';
+      const cls = severity === "critical" ? "badge--danger" : severity === "high" ? "badge--warning" : severity === "medium" ? "badge--info" : "badge--muted";
+      // severity still passes through escapeHTML even though the CSS class
+      // above is chosen from a known set -- worker.py's severity field
+      // itself is free-text advisory output, not a validated enum.
+      return `<span class="badge ${cls}">${escapeHTML(severity)}</span>`;
+    };
+
+    const run = async () => {
+      const q = input.value.trim();
+      if (!q) {
+        results.hidden = true;
+        meta.hidden = false;
+        meta.textContent = "Enter a description to search.";
+        return;
+      }
+      meta.hidden = false;
+      meta.textContent = "Searching…";
+      results.hidden = true;
+      try {
+        const response = await fetch(`/api/llm/analysis/search?q=${encodeURIComponent(q)}`);
+        const body = await response.json();
+        if (!body.available) {
+          meta.textContent = "Semantic search unavailable" + (body.reason ? " — " + body.reason : "") + ".";
+          return;
+        }
+        const hits = body.hits || [];
+        if (hits.length === 0) {
+          meta.textContent = "No similar sessions found.";
+          return;
+        }
+        meta.hidden = true;
+        results.hidden = false;
+        rows.innerHTML = hits.map(hit => {
+          const evidence = hit.session_id
+            ? `<a href="/history?q=${encodeURIComponent('honeypot.session:"' + hit.session_id + '"')}">view source</a>`
+            : '<span class="tw:text-muted">&mdash;</span>';
+          const summary = hit.summary ? escapeHTML(hit.summary)
+            : hit.error ? `<span class="tw:text-muted">error: ${escapeHTML(hit.error)}</span>`
+            : '<span class="tw:text-muted">&mdash;</span>';
+          const ts = escapeHTML(hit["@timestamp"] || "");
+          return `<tr><td class="v">${hit.score.toFixed(3)}</td><td${ts ? ` data-hp-utc="${ts}"` : ""}>${ts}</td><td>${severityBadge(hit.severity)}</td><td class="v">${summary}</td><td class="v">${evidence}</td></tr>`;
+        }).join("");
+      } catch (error) {
+        meta.textContent = "Semantic search failed — " + error.message.trim();
+      }
+    };
+    button.addEventListener("click", run);
+    input.addEventListener("keydown", e => { if (e.key === "Enter") run(); });
+  };
+
   /* ---------- shell wiring ---------- */
   addEventListener("DOMContentLoaded", () => {
     initMaps();
     window.initDashboardTabs();
     initLazyViews(document);
     initIPFilterMenus(document);
+    initLLMSemanticSearch();
     document.addEventListener("click", e => {
       const b = e.target.closest("[data-dashboard-tab]");
       if (!b) return;
