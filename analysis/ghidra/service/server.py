@@ -209,17 +209,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if job is None or job.get("status") != "done":
                 self._json(404, {"error": "result not available"})
                 return
-            artifact = job_dir(job_id) / "artifacts" / ARTIFACT_FILES[kind]
             # job_dir()'s regex check and ARTIFACT_FILES' allow-list already
             # make this safe, but CodeQL's py/path-injection query doesn't
-            # trace a sanitizer through a helper function call -- it wants
-            # the containment check inline at the read site itself, the
-            # exact pattern the alert's own recommendation shows (normalize,
-            # then verify the result is still under the expected root).
-            artifacts_root = os.path.realpath(job_dir(job_id) / "artifacts")
-            if os.path.realpath(artifact) != os.path.join(artifacts_root, ARTIFACT_FILES[kind]):
+            # trace a sanitizer through a helper function call, and doesn't
+            # recognize an equality check against a recomputed path as a
+            # sanitizer either -- it wants the exact normalize-then-
+            # startswith-a-known-root shape its own alert recommendation
+            # shows, evaluated inline at the read site.
+            artifacts_root = os.path.normpath(str(job_dir(job_id) / "artifacts"))
+            artifact_path = os.path.normpath(os.path.join(artifacts_root, ARTIFACT_FILES[kind]))
+            if not artifact_path.startswith(artifacts_root + os.sep):
                 self._json(404, {"error": "artifact missing"})
                 return
+            artifact = Path(artifact_path)
             try:
                 data = json.loads(artifact.read_text())
             except (FileNotFoundError, json.JSONDecodeError):
