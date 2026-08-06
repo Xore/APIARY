@@ -77,7 +77,7 @@ const esOverviewAggQuery = `{
       "filter": {"range": {"@timestamp": {"gte": "now-24h"}}},
       "aggs": {
         "sensors": {
-          "terms": {"field": "event.sensor", "size": 6, "order": {"_count": "desc"}},
+          "terms": {"field": "event.sensor", "size": 50, "order": {"_count": "desc"}},
           "aggs": {
             "hourly": {
               "date_histogram": {

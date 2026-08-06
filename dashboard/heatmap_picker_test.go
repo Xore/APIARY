@@ -55,7 +55,7 @@ func TestFetchSensorHeatmapParsesBuckets(t *testing.T) {
 // TestServeHeatmapAllSensorsReturnsSnapshot (#41 item 1): the default,
 // no-sensor request must reflect the same SensorHeatmap the overview page
 // itself was rendered with -- not re-query Elasticsearch, since that field
-// is already the deliberately top-N-capped, once-per-rebuild value.
+// is already the once-per-rebuild value covering every sensor (#791).
 func TestServeHeatmapAllSensorsReturnsSnapshot(t *testing.T) {
 	s := &store{}
 	s.snap.SensorHeatmap = []heatmapRow{{Sensor: "cowrie", Cells: []heatmapCell{{Label: "00:00", Count: 3, Pct: 100}}}}
@@ -97,8 +97,8 @@ func TestServeHeatmapRejectsSuricataAndPortbridge(t *testing.T) {
 }
 
 // TestServeHeatmapSingleSensorQueriesES (#41 item 1): selecting one sensor
-// must fetch it live via fetchSensorHeatmap, not read the capped snapshot
-// field, so a quiet sensor that never made the top-N cut is still visible.
+// must fetch it live via fetchSensorHeatmap rather than reading the
+// snapshot field, so its data is never more than a request old.
 func TestServeHeatmapSingleSensorQueriesES(t *testing.T) {
 	srv := httptest.NewServer(singleSensorHeatmapStub(t))
 	defer srv.Close()

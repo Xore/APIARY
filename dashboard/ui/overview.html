@@ -49,9 +49,13 @@
                        sensor list, not a capped <select> -- built the same
                        way as the Event Explorer's own filter-bar fields
                        (hp-app.js's [data-hp-filter-field] widget, backed by
-                       /api/filter-values), so a low-volume sensor that never
-                       makes the heatmap card's own top-N cut is still
-                       reachable here. */}}
+                       /api/filter-values). #791: every sensor now gets its
+                       own row below regardless of volume (the ES
+                       aggregation's terms size was raised from 6 to 50,
+                       comfortably above this project's real sensor count),
+                       so this picker's role is a live single-sensor hourly
+                       drill-down (loadAttackVectors' companion panel below),
+                       not sensor discovery. */}}
                   <input type="text" id="heatmap-sensor-picker" data-heatmap-sensor-picker data-hp-filter-field="sensor"
                          placeholder="All sensors" autocomplete="off" maxlength="64">
                 </label>
@@ -68,14 +72,20 @@
                  aggregate.go already builds every rebuild cycle. */}}
             <div data-heatmap-body>
             {{if .SensorHeatmap}}
+            {{/* #791: card__scroll (the same pattern source_health.html's
+                 #sensor-feeds table uses) so a dozen-plus sensor rows scroll
+                 within a fixed card height instead of pushing the rest of
+                 the overview page down every time a new sensor is added. */}}
+            <div class="card__scroll">
             <div class="heatmap" aria-label="Hourly event activity per sensor, last 24 hours">
               {{range .SensorHeatmap}}<div class="heatmap__row"><span class="heatmap__label">{{.Sensor}}</span><div class="heatmap__cells">{{range .Cells}}<span class="heatmap__cell" title="{{.Label}} — {{.Count}} events" tabindex="0"></span>{{end}}</div></div>
               {{end}}
             </div>
             <style nonce="{{.Nonce}}">{{range $r, $row := .SensorHeatmap}}{{range $c, $cell := $row.Cells}}.heatmap__row:nth-child({{inc $r}}) .heatmap__cells span:nth-child({{inc $c}}){--v:{{$cell.Pct}}}
 {{end}}{{end}}.heatmap__legend .heatmap__cell:nth-of-type(1){--v:0}.heatmap__legend .heatmap__cell:nth-of-type(2){--v:25}.heatmap__legend .heatmap__cell:nth-of-type(3){--v:50}.heatmap__legend .heatmap__cell:nth-of-type(4){--v:75}.heatmap__legend .heatmap__cell:nth-of-type(5){--v:100}</style>
+            </div>
             <div class="heatmap__legend"><span>Less</span><span class="heatmap__cell"></span><span class="heatmap__cell"></span><span class="heatmap__cell"></span><span class="heatmap__cell"></span><span class="heatmap__cell"></span><span>More</span></div>
-            <p class="note">Sensors with the most events in the last 24 hours, hour by hour. Hover or focus a cell for the exact count.</p>
+            <p class="note">Every sensor's activity in the last 24 hours, hour by hour. Hover or focus a cell for the exact count.</p>
             {{else}}
             <p class="empty">No events in the last 24 hours.</p>
             {{end}}
