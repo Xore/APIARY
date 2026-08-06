@@ -185,6 +185,11 @@ jobs:
       - name: conpot persona extraction in geoip-honeypot pipeline (#567)
         shell: bash
         run: analysis/tests/test_conpot_persona_pipeline.sh
+      - name: Sensor event-kind coverage audit (#789)
+        shell: bash
+        run: |
+          python3 scripts/tests/test_audit_sensor_event_coverage.py
+          python3 scripts/audit-sensor-event-coverage.py
       - name: Vendored YARA corpus is intact and loadable
         shell: bash
         run: |
