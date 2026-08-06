@@ -39,6 +39,14 @@ services:
       POLL_INTERVAL: "30"
       RETRAIN_INTERVAL: "21600"
       ML_ALERT_THRESHOLD: "0.75"
+      # #174: our own address(es), comma-separated CIDRs, same convention
+      # as vps/.env.example's SURICATA_HOME_NET -- lets models/
+      # isolation_forest.py's _get_ip()/_get_port() tell Suricata netflow's
+      # "reflected" direction (source.ip == us) apart from a real remote
+      # scanner. Set the real value in this stack's own .env (not checked
+      # in, same reasoning as SURICATA_HOME_NET staying out of the repo).
+      # Empty/unset is a safe no-op, not a startup failure.
+      ML_HOME_NET: "${ML_HOME_NET:-}"
       MODEL_DIR: /models
       LOG_LEVEL: INFO
     volumes:
