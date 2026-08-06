@@ -78,17 +78,38 @@ func setAuthFrameOrigin(accountURL string) {
 	authFrameOrigin = u.Scheme + "://" + u.Host
 }
 
+// vncBridgeOrigin (#805) is the read-only VNC bridge's own origin
+// (ws://host:port or wss://host), added to connect-src so the sandbox-vnc
+// page's browser-side WebSocket connection is not blocked by the same CSP
+// that protects every other page here -- same "opt in the one origin this
+// one page needs" shape as authFrameOrigin above, resolved once at startup
+// from SANDBOX_VNC_BRIDGE_WS (main.go), empty (no relaxation at all) when
+// that env var is unset.
+var vncBridgeOrigin string
+
+func setVNCBridgeOrigin(bridgeWS string) {
+	u, err := url.Parse(bridgeWS)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return
+	}
+	vncBridgeOrigin = u.Scheme + "://" + u.Host
+}
+
 func secHeaders(w http.ResponseWriter, nonceValue string) {
 	frameSrc := "frame-src 'self'"
 	if authFrameOrigin != "" {
 		frameSrc += " " + authFrameOrigin
+	}
+	connectSrc := "connect-src 'self' https://tile.openstreetmap.org"
+	if vncBridgeOrigin != "" {
+		connectSrc += " " + vncBridgeOrigin
 	}
 	w.Header().Set("Content-Security-Policy",
 		"default-src 'self'; "+
 			"script-src 'self' 'nonce-"+nonceValue+"'; "+
 			"style-src 'self' 'nonce-"+nonceValue+"'; "+
 			"img-src 'self' data: https://tile.openstreetmap.org; "+
-			"connect-src 'self' https://tile.openstreetmap.org; "+
+			connectSrc+"; "+
 			frameSrc+"; "+
 			"font-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
 	w.Header().Set("Referrer-Policy", "no-referrer")

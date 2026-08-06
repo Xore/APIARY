@@ -253,6 +253,15 @@ type sandboxPageData struct {
 	GoldenImage *goldenImageStatus
 	Query       string
 	StaticYARA  []string
+	// WindowsLiveSHA256 and VNCViewerEnabled (#805) drive the "watch this
+	// detonation live" banner: WindowsLiveSHA256 is set only while a
+	// windows-sandbox job is actually mid-run (see windowsSandboxLiveJob),
+	// VNCViewerEnabled only when the host operator has actually configured
+	// the read-only VNC bridge (empty SANDBOX_VNC_BRIDGE_WS means the
+	// bridge was never turned on, same off-by-default convention as
+	// REVDECK_API_BASE/STATICTOOLS_API_BASE).
+	WindowsLiveSHA256 string
+	VNCViewerEnabled  bool
 	// Analysis carries the ?analysis= marker set by the submit redirect so the
 	// detail page can confirm a queued re-analysis in place.
 	Analysis string
@@ -596,7 +605,11 @@ func loadGoldenImageStatus() *goldenImageStatus {
 }
 
 func sandboxData(job, query string) (sandboxPageData, error) {
-	data := sandboxPageData{Generated: time.Now(), Rows: loadSandboxResults(), Status: loadSandboxStatus(), GoldenImage: loadGoldenImageStatus(), Query: strings.TrimSpace(query)}
+	data := sandboxPageData{
+		Generated: time.Now(), Rows: loadSandboxResults(), Status: loadSandboxStatus(),
+		GoldenImage: loadGoldenImageStatus(), Query: strings.TrimSpace(query),
+		WindowsLiveSHA256: windowsSandboxLiveJob(), VNCViewerEnabled: getenv("SANDBOX_VNC_BRIDGE_WS", "") != "",
+	}
 	if data.Query != "" {
 		needle := strings.ToLower(data.Query)
 		filtered := data.Rows[:0]

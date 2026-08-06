@@ -136,6 +136,7 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 		{"sandbox", sandboxPageData{Generated: now, Detail: sandboxDetail}},
 		{"sandbox-windows", sandboxPageData{Generated: now, Detail: windowsDetail}},
 		{"sandbox-list", sandboxPageData{Generated: now}},
+		{"sandbox-vnc", sandboxVNCPageData{SHA256: strings.Repeat("f", 64), BridgeWS: "wss://sandbox-vnc.example.invalid/vnc"}},
 		{"ghidra", ghidraPageData{Generated: now, Detail: ghidraDetail}},
 		{"ghidra-list", ghidraPageData{Generated: now}},
 		{"github-analysis", githubAnalysisPageData{Generated: now, Detail: githubAnalysisDetail}},

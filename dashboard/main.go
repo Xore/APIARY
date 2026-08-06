@@ -50,6 +50,7 @@ func main() {
 
 	authAccountURL := validatedAuthAccountURL()
 	setAuthFrameOrigin(authAccountURL)
+	setVNCBridgeOrigin(getenv("SANDBOX_VNC_BRIDGE_WS", ""))
 	s := &store{
 		dir:            getenv("LOG_DIR", "/logs"),
 		yaraFile:       os.Getenv("YARA_RESULTS_FILE"),
@@ -649,6 +650,13 @@ func main() {
 	http.HandleFunc("/sandbox", func(w http.ResponseWriter, r *http.Request) {
 		data, _ := sandboxData("", r.URL.Query().Get("q"))
 		renderPage(w, tmpl, "sandbox", &data)
+	})
+	// #805: registered ahead of the "/sandbox/{job}" prefix route below --
+	// Go's ServeMux resolves the longest matching pattern regardless of
+	// registration order, so this exact match always wins over "vnc" being
+	// parsed as a (nonexistent) job name there.
+	http.HandleFunc("/sandbox/vnc", func(w http.ResponseWriter, r *http.Request) {
+		s.serveSandboxVNC(w, r, tmpl)
 	})
 	http.HandleFunc("/sandbox/", func(w http.ResponseWriter, r *http.Request) {
 		job, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/sandbox/"))

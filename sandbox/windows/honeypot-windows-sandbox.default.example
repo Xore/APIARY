@@ -43,6 +43,16 @@ VM_USER=analyst
 # reaches a guest that is reverted after every run.
 VM_PASS=changeme
 
+# ── Read-only live-view bridge (#805) ────────────────────────────────────
+# honeypot-windows-vnc-bridge.service: a read-only WebSocket bridge to
+# VM_DOMAIN's own VNC console (already enabled in packer/win11-kvm.xml).
+# 127.0.0.1 by default, same posture as the Ghidra/statictools containers.
+# Set to this host's WireGuard address (matching REVDECK_API_BASE's own
+# "reaching it remotely" pattern -- see docs/analysis/ghidra/revdeck/
+# README.md) to let the dashboard's own live-view page reach it.
+VNC_BRIDGE_BIND=127.0.0.1
+VNC_BRIDGE_PORT=6090
+
 # ── Detonation window ────────────────────────────────────────────────────
 # Seconds to observe after execution. TimeoutStartSec in the service unit must
 # stay comfortably above this multiplied by a plausible queue depth.
