@@ -204,6 +204,15 @@ fi
 # ── Host-side worker ─────────────────────────────────────────────────────────
 [ "$(id -u)" -eq 0 ] || die "installing the worker needs root; re-run with sudo, or pass --containers-only"
 
+# #796: the worker's build_call_graph() shells out to `dot` (graphviz) to
+# render the call graph SVG the dashboard's Ghidra detail page shows -- this
+# step never existed anywhere in this script, so every install silently left
+# the dashboard showing "no call graph was rendered" forever, with only the
+# raw .dot file ever written. graphviz is a small, common package; installing
+# it unconditionally here is cheaper than making it a flag.
+say "installing graphviz (call-graph rendering)"
+apt-get install -y graphviz
+
 say "installing the worker into $target"
 install -d -m 0755 -o root -g root "$target" "$target/worker" "$target/models" "$target/report"
 install -m 0755 -o root -g root "$here/worker/ghidra-worker.py" "$target/worker/ghidra-worker.py"
