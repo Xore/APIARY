@@ -17,7 +17,7 @@
   /var spindle, not the root NVMe. Override with the env vars in
   kvm_manage.sh if your host differs — but change them in both places.
 -->
-<domain type='kvm'>
+<domain type='kvm' xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'>
   <name>win11-sandbox</name>
 
   <!-- memory = "8192", cpus = "4" in win11-analysis.pkr.hcl. Also the floor
@@ -138,9 +138,12 @@
          boot-critical virtio driver bound, and a virtio controller is a
          loud VM tell on top of that.
 
-         The serial is what a guest reads back as the physical drive
-         identifier. A WD-style string reads as a real disk; the QEMU
-         default ("QM00001") does not.
+         The serial is what a guest reads back as the drive's serial
+         number. A WD-style string reads as a real disk; the QEMU default
+         ("QM00001") does not. This is a *separate* field from the ATA
+         IDENTIFY model string below (#368) — both live in the same
+         HKLM\HARDWARE\DEVICEMAP\Scsi\...\Identifier vs SerialNumber
+         registry values, and setting one does nothing to the other.
 
          cache='none' + io='native' keep host page cache out of the picture
          so a revert really does discard everything the sample wrote. -->
@@ -250,4 +253,25 @@
 
     <memballoon model='none'/>
   </devices>
+
+  <!-- #368: the sata0-0-0 disk's <serial> above only spoofs SerialNumber;
+       the separate ATA IDENTIFY model string QEMU's ide-hd device reports
+       is left at its own default and reads back as
+       "QEMU    HARDDISK        2.5+" in
+       HKLM\HARDWARE\DEVICEMAP\Scsi\...\Identifier — pafish's QEMU-section
+       SCSI/ATA identifier check flags exactly this. -global (not a
+       per-device override keyed by id/alias) applies to every ide-hd
+       instance QEMU creates from this domain — there is only one (the
+       optical drive is a separate ide-cd device, unaffected). Confirmed
+       live (2026-08-06) that QEMU applies this correctly at the device
+       level (verified via `info qtree` over QMP) but Windows populates
+       this DEVICEMAP registry value once, from the disk's very first
+       enumeration, and never re-reads it on a later boot or `rescan` —
+       so this only takes effect on a genuinely fresh install (a real
+       golden-image rebuild), never retroactively against an
+       already-installed image no matter how many times it's rebooted. -->
+  <qemu:commandline>
+    <qemu:arg value='-global'/>
+    <qemu:arg value='driver=ide-hd,property=model,value=WDC WD10JPVX-75J'/>
+  </qemu:commandline>
 </domain>
