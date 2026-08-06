@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/assets/apiary-logo.png" alt="APIARY" width="220"></p>
+
 # APIARY — big multi-service honeypot (Dockge, home → VPS)
 
 A full honeypot deployment that follows this repo's CGNAT pattern: the sensors

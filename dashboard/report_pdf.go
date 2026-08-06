@@ -465,6 +465,11 @@ func (w *pdfReportWriter) newPage() {
 	w.doc.pages = append(w.doc.pages, w.page)
 	w.y = pdfPageHeight - 68
 	w.rect(0, 0, pdfPageWidth, pdfPageHeight, t.Page)
+	// Drawn immediately after the solid background and before anything
+	// else -- content streams paint in the order they're written, so
+	// everything below (header band, headings, tables, paragraphs) ends
+	// up visually on top of this, never the reverse.
+	w.drawWatermark()
 	w.rect(0, pdfPageHeight-48, pdfPageWidth, 48, t.HeaderBand)
 	w.line(0, pdfPageHeight-48, pdfPageWidth, pdfPageHeight-48, t.HeaderRule)
 	w.text(32, pdfPageHeight-29, 12, true, t.BrandText, w.branding.HeaderLeft)
@@ -778,23 +783,33 @@ func (d *pdfDocument) bytes() []byte {
 	if footerLeft == "" {
 		footerLeft = defaultPDFBranding().FooterLeft
 	}
-	objects := make([][]byte, 5+len(d.pages)*2)
+	// Objects 1-5 are the catalog/pages/fonts every build has always had;
+	// 6-7 are the watermark's shared Image XObject and ExtGState (added
+	// alongside drawWatermark -- see report_pdf_watermark.go's own object
+	// number constants, which this layout must keep in sync with). Every
+	// page object below references both by that fixed number, so pages
+	// start at object 8, not 6.
+	objects := make([][]byte, 7+len(d.pages)*2)
 	objects[0] = []byte("<< /Type /Catalog /Pages 2 0 R >>")
 	var kids strings.Builder
 	for index := range d.pages {
-		fmt.Fprintf(&kids, "%d 0 R ", 6+index*2)
+		fmt.Fprintf(&kids, "%d 0 R ", 8+index*2)
 	}
 	objects[1] = []byte(fmt.Sprintf("<< /Type /Pages /Count %d /Kids [%s] >>", len(d.pages), kids.String()))
 	objects[2] = []byte("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>")
 	objects[3] = []byte("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>")
 	objects[4] = []byte("<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman /Encoding /WinAnsiEncoding >>")
+	objects[pdfWatermarkObjectNumber-1] = append(pdfWatermarkImageObject(), append(watermarkGrayData, []byte("\nendstream")...)...)
+	objects[pdfWatermarkGStateObjectNumber-1] = pdfWatermarkGStateObject()
 	for index, page := range d.pages {
-		pageNumber := 6 + index*2
+		pageNumber := 8 + index*2
 		contentNumber := pageNumber + 1
 		footer := fmt.Sprintf("BT /F1 7.5 Tf %.3f %.3f %.3f rg 32 27 Td (%s) Tj ET\nBT /F1 7.5 Tf %.3f %.3f %.3f rg 516 27 Td (Page %d of %d) Tj ET\n",
 			muted.r, muted.g, muted.b, escapePDFText(footerLeft), muted.r, muted.g, muted.b, index+1, len(d.pages))
 		stream := append(append([]byte(nil), page.content.Bytes()...), []byte(footer)...)
-		objects[pageNumber-1] = []byte(fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %.0f %.0f] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> >> /Contents %d 0 R >>", pdfPageWidth, pdfPageHeight, contentNumber))
+		objects[pageNumber-1] = []byte(fmt.Sprintf(
+			"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %.0f %.0f] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> /XObject << /Wm %d 0 R >> /ExtGState << /GS1 %d 0 R >> >> /Contents %d 0 R >>",
+			pdfPageWidth, pdfPageHeight, pdfWatermarkObjectNumber, pdfWatermarkGStateObjectNumber, contentNumber))
 		objects[contentNumber-1] = append([]byte(fmt.Sprintf("<< /Length %d >>\nstream\n", len(stream))), append(stream, []byte("endstream")...)...)
 	}
 
