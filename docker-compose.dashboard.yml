@@ -219,6 +219,11 @@ services:
       - GHOSTS_SANDBOX_RESULTS_DIR=${GHOSTS_SANDBOX_RESULTS_DIR:-}
       - GHOSTS_SANDBOX_REQUEST_DIR=${GHOSTS_SANDBOX_REQUEST_DIR:-}
       - SANDBOX_ALERT_RISK_SCORE=${SANDBOX_ALERT_RISK_SCORE:-50}
+      # #805: empty disables the "Watch live" link/route entirely, same
+      # off-by-default convention as REVDECK_API_BASE below -- the bridge
+      # itself (sandbox/windows/vnc-bridge/) is a separate host service,
+      # not something this compose file starts.
+      - SANDBOX_VNC_BRIDGE_WS=${SANDBOX_VNC_BRIDGE_WS:-}
       # Empty until the host-side Ghidra worker exists; see .env.example. The
       # mounts above are always present so enabling it is a .env change, not a
       # Compose edit — the same arrangement as the Windows backend.
@@ -341,6 +346,11 @@ services:
       - GHOSTS_SANDBOX_RESULTS_DIR=${GHOSTS_SANDBOX_RESULTS_DIR:-}
       - GHOSTS_SANDBOX_REQUEST_DIR=${GHOSTS_SANDBOX_REQUEST_DIR:-}
       - SANDBOX_ALERT_RISK_SCORE=${SANDBOX_ALERT_RISK_SCORE:-50}
+      # #805: empty disables the "Watch live" link/route entirely, same
+      # off-by-default convention as REVDECK_API_BASE below -- the bridge
+      # itself (sandbox/windows/vnc-bridge/) is a separate host service,
+      # not something this compose file starts.
+      - SANDBOX_VNC_BRIDGE_WS=${SANDBOX_VNC_BRIDGE_WS:-}
       - GHIDRA_RESULTS_DIR=${GHIDRA_RESULTS_DIR:-}
       - GHIDRA_REQUEST_DIR=${GHIDRA_REQUEST_DIR:-}
       - REVDECK_RESULTS_DIR=${REVDECK_RESULTS_DIR:-}
