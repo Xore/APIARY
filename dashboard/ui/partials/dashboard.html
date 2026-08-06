@@ -1,5 +1,16 @@
 {{define "style"}}
 <script nonce="{{.Nonce}}">(function(){try{var t=localStorage.getItem("hp-theme");if(t==="light"||t==="dark"){document.documentElement.dataset.theme=t;}else if(t){localStorage.removeItem("hp-theme");}}catch(e){}})();</script>
+<link rel="icon" href="{{asset "/static/favicon.ico"}}" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="{{asset "/static/favicon-32x32.png"}}">
+<link rel="icon" type="image/png" sizes="16x16" href="{{asset "/static/favicon-16x16.png"}}">
+<link rel="apple-touch-icon" href="{{asset "/static/apple-touch-icon.png"}}">
+{{/* App-specific override, not a theme.css change: this app's brand mark is
+     an image logo, not the generic SVG icon Xore/theme's own .hp-brand-mark
+     is written around, so it needs its own fit/crop rule. Kept local per
+     docs/ADOPTION.md's own "Application-specific CSS" guidance -- the
+     semantic contract here (image logo -> object-fit: cover) isn't
+     reusable enough to belong in the shared theme. */}}
+<style nonce="{{.Nonce}}">.hp-brand-mark img{width:100%;height:100%;object-fit:cover;border-radius:inherit}</style>
 <link rel="stylesheet" href="{{asset "/static/theme.css"}}">
 <link rel="stylesheet" href="{{asset "/static/leaflet.css"}}">
 <script defer src="{{asset "/static/leaflet.js"}}"></script>
@@ -16,7 +27,7 @@
 {{define "sidebar"}}
 <aside class="app-sidebar" aria-label="Primary navigation">
   <a href="/" class="hp-brand">
-    <span class="hp-brand-mark"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
+    <span class="hp-brand-mark"><img src="{{asset "/static/brand-mark.png"}}" srcset="{{asset "/static/brand-mark.png"}} 1x, {{asset "/static/brand-mark@2x.png"}} 2x" width="28" height="28" alt="" aria-hidden="true"></span>
     <span class="hp-brand-text"><strong>{{brandHTML}}</strong><small>{{presentation.ProductLabel}}</small></span>
   </a>
   <nav class="app-sidebar__body" aria-label="Dashboard sections">
