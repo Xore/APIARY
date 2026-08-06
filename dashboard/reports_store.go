@@ -101,6 +101,18 @@ type reportTemplate struct {
 	// telemetry window, and is never exercised through the designer's saved-
 	// definition flow -- see generatePayloadReport in reports_api.go.
 	Payload bool `json:"payload,omitempty"`
+	// Ghidra marks the #814 per-sample static-analysis report: same
+	// Scope.Hash-referenced-artifact shape as Payload (the picker UI is
+	// shared with it client-side, see hp-reports.js), rendered by
+	// ghidra_pdf.go instead of payload_pdf.go. This is deliberately a
+	// second first-class Reports-studio template rather than folding
+	// Ghidra detail into the payload report's existing "any GitHub-analysis
+	// verdict" summary section -- a payload's Ghidra result (functions,
+	// strings, imports, capa capabilities, floss deobfuscation, fuzzy
+	// hashes) is its own substantial evidence set an operator may want
+	// themed/branded/scheduled on its own, the same way a sandbox run gets
+	// its own template instead of being a payload-report subsection.
+	Ghidra bool `json:"ghidra,omitempty"`
 }
 
 // reportTemplateCatalog presets cover every PDF function the dashboard pages
@@ -156,6 +168,13 @@ func reportTemplateCatalog() []reportTemplate {
 			Title:       "Payload Analysis Report",
 			Theme:       "dark",
 			Payload:     true,
+		},
+		{
+			ID: "ghidra", Name: "Ghidra static analysis",
+			Description: "Headless-decompilation report for one captured payload: functions, strings, imports, capa capabilities, FLOSS-deobfuscated strings, fuzzy hashes, and structural (lief) info.",
+			Title:       "Ghidra Static Analysis Report",
+			Theme:       "dark",
+			Ghidra:      true,
 		},
 		{
 			ID: "custom", Name: "Custom report",
@@ -463,27 +482,27 @@ func validateDefinitionFields(def reportDefinition) error {
 			return invalid("scope.job selects the sandbox analysis run for the sandbox template")
 		}
 		if def.Scope.Hash != "" {
-			return invalid("scope.hash is only valid for the payload template")
+			return invalid("scope.hash is only valid for the payload and ghidra templates")
 		}
 		if len(def.Elements) != 0 {
 			return invalid("elements are fixed for the sandbox template; only theme and branding apply")
 		}
-	case template.Payload:
+	case template.Payload, template.Ghidra:
 		if !hashName.MatchString(def.Scope.Hash) {
-			return invalid("scope.hash selects the captured payload for the payload template")
+			return invalid("scope.hash selects the captured payload for the payload and ghidra templates")
 		}
 		if def.Scope.Job != "" {
 			return invalid("scope.job is only valid for the sandbox template")
 		}
 		if len(def.Elements) != 0 {
-			return invalid("elements are fixed for the payload template; only theme and branding apply")
+			return invalid("elements are fixed for the payload and ghidra templates; only theme and branding apply")
 		}
 	default:
 		if def.Scope.Job != "" {
 			return invalid("scope.job is only valid for the sandbox template")
 		}
 		if def.Scope.Hash != "" {
-			return invalid("scope.hash is only valid for the payload template")
+			return invalid("scope.hash is only valid for the payload and ghidra templates")
 		}
 		if len(def.Elements) == 0 || len(def.Elements) > len(reportElementCatalog) {
 			return invalid("elements must select between 1 and %d report elements", len(reportElementCatalog))

@@ -190,7 +190,12 @@
     state.template = template;
     renderTemplates();
     const sandbox = !!template.sandbox;
-    const payload = !!template.payload;
+    // #814: the ghidra template shares the payload template's hash-picker
+    // section wholesale -- both are scoped by Scope.Hash referencing one
+    // captured payload, just rendered by a different server-side PDF
+    // writer. Not worth a second, near-identical picker section for one
+    // field's worth of difference.
+    const payload = !!template.payload || !!template.ghidra;
     els.sandboxSection.hidden = !sandbox;
     els.payloadSection.hidden = !payload;
     els.elementsSection.hidden = sandbox || payload;
@@ -261,7 +266,7 @@
     if (template.sandbox) {
       scope.job = els.sandboxJob.value;
       if (!scope.job) throw new Error("select a sandbox analysis job");
-    } else if (template.payload) {
+    } else if (template.payload || template.ghidra) {
       scope.hash = state.selectedPayload && state.selectedPayload.hash;
       if (!scope.hash) throw new Error("select a payload");
     } else {
