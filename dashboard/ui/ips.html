@@ -1,12 +1,12 @@
 {{define "iprow"}}<tr>
-  <td class="n"><a href="/investigate/ip/{{.IP | urlquery}}" title="attacker profile for {{.IP}}">{{.Count}}</a></td>
-  <td class="v"><a href="/investigate/ip/{{.IP | urlquery}}" title="attacker profile for {{.IP}}">{{.IP}}</a></td>
-  <td class="v">{{if .Country}}<a class="cc" href="/events?country={{.Country | urlquery}}">{{.Country}}</a>{{end}}</td>
-  <td class="n"><a href="/events?ip={{.IP | urlquery}}&amp;type=login" title="login attempts from {{.IP}}">{{.Logins}}</a></td>
-  <td class="n"><a href="/events?ip={{.IP | urlquery}}" title="attack chain and sessions for {{.IP}}">{{.Sessions}}</a></td>
-  <td class="v"><a href="/events?ip={{.IP | urlquery}}" title="sensor activity for {{.IP}}">{{.Sensors}}</a></td>
-  <td{{if .FirstUTC}} data-hp-utc="{{.FirstUTC}}"{{end}}>{{.First}}</td>
-  <td{{if .LastUTC}} data-hp-utc="{{.LastUTC}}"{{end}}>{{.Last}}</td>
+  <td class="n" data-label="events"><a href="/investigate/ip/{{.IP | urlquery}}" title="attacker profile for {{.IP}}">{{.Count}}</a></td>
+  <td class="v" data-label="source ip"><a href="/investigate/ip/{{.IP | urlquery}}" title="attacker profile for {{.IP}}">{{.IP}}</a></td>
+  <td class="v" data-label="cc">{{if .Country}}<a class="badge badge--info" href="/events?country={{.Country | urlquery}}">{{.Country}}</a>{{end}}</td>
+  <td class="n" data-label="logins"><a href="/events?ip={{.IP | urlquery}}&amp;type=login" title="login attempts from {{.IP}}">{{.Logins}}</a></td>
+  <td class="n" data-label="sessions"><a href="/events?ip={{.IP | urlquery}}" title="attack chain and sessions for {{.IP}}">{{.Sessions}}</a></td>
+  <td class="v" data-label="sensors hit"><a href="/events?ip={{.IP | urlquery}}" title="sensor activity for {{.IP}}">{{.Sensors}}</a></td>
+  <td data-label="first seen"{{if .FirstUTC}} data-hp-utc="{{.FirstUTC}}"{{end}}>{{.First}}</td>
+  <td data-label="last seen"{{if .LastUTC}} data-hp-utc="{{.LastUTC}}"{{end}}>{{.Last}}</td>
 </tr>{{end}}
 {{define "iprows"}}{{range .Rows}}{{template "iprow" .}}{{end}}{{end}}
 
@@ -45,7 +45,7 @@
 
         <div class="card wide" id="ips-table">
           {{if .Rows}}
-          <table class="recent data-table">
+          <table class="recent data-table data-table--responsive">
             <thead><tr><th>events</th><th>source ip</th><th>cc</th><th>logins</th><th>sessions</th><th>sensors hit</th><th>first seen</th><th>last seen</th></tr></thead>
             <tbody data-hp-page-url="{{.RowsURL}}" data-hp-total="{{.Total}}" data-hp-offset="0">
             {{template "iprows" .}}
@@ -120,7 +120,7 @@
             </tbody></table>
           </div>
           {{end}}
-          <div class="card wide"><h2>Attack progression</h2><p class="note">Chronological, oldest to newest; capped to the latest 250 matching records.</p><table class="recent data-table"><thead><tr><th>time</th><th>sensor</th><th>source</th><th>port</th><th>detail</th></tr></thead><tbody>{{range .Events}}{{template "everow" .}}{{end}}</tbody></table></div>
+          <div class="card wide"><h2>Attack progression</h2><p class="note">Chronological, oldest to newest; capped to the latest 250 matching records.</p><table class="recent data-table data-table--responsive"><thead><tr><th>time</th><th>sensor</th><th>source ip</th><th>port</th><th>detail</th></tr></thead><tbody>{{range .Events}}{{template "everow" .}}{{end}}</tbody></table></div>
         </div>
 
         <footer id="attacker-footer">{{brandText}} &bull; attacker investigation</footer>
