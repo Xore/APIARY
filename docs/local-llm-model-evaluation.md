@@ -502,3 +502,58 @@ accuracy-first, injection-resistance-first standard already governing this
 evaluation. It is not being kept as an architectural commitment to "one
 shared model forever"; a future re-evaluation is free to re-split the slots
 if a different model wins one of them next time.
+
+## Issue #661: Hugging Face search, beyond Ollama's library
+
+Every prior pass (#144, #158, #568/#635) sourced candidates from Ollama's
+own library. This widened the search to Hugging Face directly, prioritizing
+security/reverse-engineering-specific fine-tunes over generic leaderboard
+performance, per #661's own scope.
+
+### Shortlist found
+
+| Model | Size | GGUF? | License | Relevant to | Status |
+|---|---|---|---|---|---|
+| `AlicanKiraz0/Cybersecurity-BaronLLM_Offensive_Security_LLM_Q6_K_GGUF` | 8B, 6.6GB | Yes | MIT | Offensive-security reasoning, exploit write-ups | **Gated repo** — requires HF account authentication this environment doesn't have. Not evaluated. |
+| `AlicanKiraz0/Seneca-Cybersecurity-LLM-Q4_K_M-GGUF` | 8B (Llama-3.1 base), 4.9GB | Yes | MIT | Incident response, RE, malware analysis | Evaluated — see below |
+| `AlicanKiraz0/Seneca-Cybersecurity-LLM-x-QwQ-32B-Q4_Medium-Version` | 32B (QwQ-32B base), 19.9GB | Yes | MIT | Same, larger/reasoning-capable base | Evaluated — see below |
+| `RavichandranJ/Dolphin3-Cyber-8B-GGUF` | 8B, 4.9GB (Q4_K_M) | Yes | llama3.1 | Cybersecurity (OWASP/MITRE/CVE-tuned) | **Not evaluated** — fine-tuned from `Dolphin3.0-Llama3.1-8B-abliterated`, an explicitly safety-guardrail-removed base. Flagging rather than silently adopting: for this stack's defensive-analysis use case an uncensored base isn't automatically disqualifying (the job is describing real malware, not refusing to), but it's a real property worth a deliberate decision, not an accident of picking whatever GGUF was available. |
+| `QuantFactory/SecurityLLM-GGUF` (ZySec-7B) | 7B, 2.7–7.7GB (multiple quants) | Yes | Apache 2.0 | Compliance/policy-focused security chat | **Not evaluated** — older Zephyr-family base, lower relevance to this stack's RE/triage task shapes (compliance-framework Q&A, not binary analysis), deprioritized given time budget. |
+
+### Eval round (against the current `qwen3:14b` baseline, all approved slots)
+
+Run with `evaluate-models.py`'s legacy positional-args mode, same standard as
+every prior pass (accuracy-first, injection-resistance-first, a higher raw
+score never overrides a failed gate):
+
+| Model | ghidra | revdeck | sessions | tok/s | Notes |
+|---|---|---|---|---|---|
+| `qwen3:14b` (baseline) | 97.5% | 87.5% | 97.0% | ~34 | context probe: pass |
+| `seneca-cyber-8b` | 62.5% (25/40) | 87.5% | 80.6% | ~55 | **context probe: FAIL** — real reliability red flag, not just a lower score |
+| `seneca-qwq-32b` | 70.0% (28/40) | 56.2% (9/16) | 76.1% (51/67) | ~8 | Loads at 18.98GB/20.48GB VRAM (~1.5GB headroom) — fits, barely. ~4x slower than baseline. |
+
+Neither AlicanKiraz0 cybersecurity fine-tune beats the current baseline on
+any slot, despite being marketed specifically for this stack's task shapes.
+`seneca-cyber-8b`'s outright context-probe failure is disqualifying on its
+own regardless of raw score. `seneca-qwq-32b` (32B, QwQ-reasoning base) is
+worse across all three slots than the 14B baseline *and* far slower — the
+extra parameters and reasoning capability didn't translate into better
+triage/RE output under this evaluation's standard, and the near-zero VRAM
+headroom (1.5GB) makes it a poor fit for this hardware regardless of
+quality. No promotion.
+
+Side finding from the same eval run, not itself part of this issue's scope
+but recorded since it surfaced in the same pass: `phi4:14b` (already in
+Ollama's library, no HF import needed) scored 100%/87.5%/94.0% against the
+baseline's 97.5%/87.5%/97.0% — competitive, arguably a wash rather than a
+decisive win, worth a look under #603's Ollama-library benchmarking scope
+rather than acted on here.
+
+### Decision
+
+No promotion. `qwen3:14b` remains approved in all three slots. The two
+evaluated HF candidates underperform it; the two not evaluated (BaronLLM —
+gated; SecurityLLM/ZySec-7B — lower relevance) are recorded for a future
+pass if the gating/relevance situation changes. Dolphin3-Cyber-8B's
+abliterated-base property needs an explicit decision before evaluation, not
+an assumption either way.
