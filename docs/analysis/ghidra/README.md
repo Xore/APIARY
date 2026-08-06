@@ -286,6 +286,21 @@ Alerting is configured on the **dashboard** side, not here:
 `GHIDRA_ALERT_RISK_LEVELS` (default `high,critical`) and
 `GHIDRA_ALERT_ON_CRYPTO` (default `false`).
 
+Rather than hand-editing `/etc/default/honeypot-ghidra` from the table above,
+[`full_capabilities.py`](../../../analysis/ghidra/full_capabilities.py) (#800)
+inventories every env var this pipeline actually reads straight from source,
+reports which optional features are currently on/off, and can apply a
+preset:
+
+```bash
+analysis/ghidra/full_capabilities.py                     # show current state
+analysis/ghidra/full_capabilities.py --preset all-on      # turn on every optional feature
+analysis/ghidra/full_capabilities.py --preset minimal     # turn every optional feature off
+analysis/ghidra/full_capabilities.py --set REVDECK_API_BASE=http://127.0.0.1:19500
+```
+
+Restart `honeypot-ghidra-worker.service` after any change for it to take effect.
+
 ---
 
 ## AI triage
