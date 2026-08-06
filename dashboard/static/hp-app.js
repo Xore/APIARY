@@ -460,16 +460,19 @@
   window.initHoneypotMaps = initMaps;
 
   /* ---------- overview heatmap sensor picker (#41 item 1) ----------
-     The default "all sensors" heatmap is server-rendered every page load
-     (aggregate.go's own top-N snapshot); selecting one sensor here instead
-     fetches /api/heatmap?sensor=X live so a quiet sensor that never makes
-     that top-N cut is still visible. Rebuilt as real DOM nodes (not spliced
-     HTML) so the nonce'd <style> carrying each cell's --v custom property
-     can have its nonce set via the .nonce IDL property before insertion --
-     the same fetch-and-splice nonce problem reNonce solves for full-page
-     live refresh (see the comment above it), just built fresh here since
-     this is server JSON, not a fetched HTML fragment. */
+     The default "every sensor" heatmap is server-rendered every page load
+     (aggregate.go's own snapshot, #791); selecting one sensor here instead
+     fetches /api/heatmap?sensor=X live for that sensor's own single-row
+     drill-down (paired with the attack-vectors companion panel below).
+     Rebuilt as real DOM nodes (not spliced HTML) so the nonce'd <style>
+     carrying each cell's --v custom property can have its nonce set via the
+     .nonce IDL property before insertion -- the same fetch-and-splice nonce
+     problem reNonce solves for full-page live refresh (see the comment
+     above it), just built fresh here since this is server JSON, not a
+     fetched HTML fragment. */
   const renderHeatmapRows = (body, rows) => {
+    const scroll = document.createElement("div");
+    scroll.className = "card__scroll";
     const heat = document.createElement("div");
     heat.className = "heatmap";
     heat.setAttribute("aria-label", "Hourly event activity per sensor, last 24 hours");
@@ -504,8 +507,9 @@
     note.className = "note";
     note.textContent = rows.length === 1
       ? "Hourly activity for this sensor over the last 24 hours. Hover or focus a cell for the exact count."
-      : "Sensors with the most events in the last 24 hours, hour by hour. Hover or focus a cell for the exact count.";
-    body.replaceChildren(heat, style, legend, note);
+      : "Every sensor's activity in the last 24 hours, hour by hour. Hover or focus a cell for the exact count.";
+    scroll.append(heat, style);
+    body.replaceChildren(scroll, legend, note);
   };
   const renderHeatmapEmpty = body => {
     body.replaceChildren(Object.assign(document.createElement("p"), {className: "empty", textContent: "No events in the last 24 hours."}));
