@@ -25,7 +25,6 @@ import json
 import os
 import queue
 import re
-import shutil
 import subprocess
 import threading
 import time
@@ -40,12 +39,27 @@ PORT = int(os.environ.get("PORT", "9090"))
 
 REQUIRED_ARTIFACTS = ("functions.json", "strings.json", "imports.json")
 
+# The 3 real artifact files a route can ever be asked to read, keyed by the
+# same literal alternation the /results/{job}/{kind} route regex matches --
+# an explicit allow-list dict, not an f-string built from the request path,
+# so "kind" can never become an arbitrary filename regardless of what a
+# future route change might accidentally let through.
+ARTIFACT_FILES = {"functions": "functions.json", "strings": "strings.json", "imports": "imports.json"}
+
+_JOB_ID_RE = re.compile(r"^[a-f0-9]{32}$")
+
 _lock = threading.RLock()
 _jobs: dict[str, dict] = {}
 _queue: "queue.Queue[str]" = queue.Queue()
 
 
 def job_dir(job_id: str) -> Path:
+    # Re-validated here, not just at the route regex that produced job_id --
+    # this is the actual trust boundary before the value touches a
+    # filesystem path, and every caller (including internal ones from the
+    # worker thread) goes through this one function.
+    if not _JOB_ID_RE.match(job_id):
+        raise ValueError(f"invalid job_id: {job_id!r}")
     return DATA_DIR / job_id
 
 
@@ -125,9 +139,30 @@ def parse_multipart_file(body: bytes, content_type: str) -> tuple[str, bytes] | 
         content = part[header_end + 4:]
         if content.endswith(b"\r\n"):
             content = content[:-2]
-        fname_match = re.search(r'name="file"[^\r\n]*filename="([^"]*)"', headers)
-        if fname_match:
-            return fname_match.group(1) or "sample.bin", content
+        filename = _extract_file_filename(headers)
+        if filename is not None:
+            return filename or "sample.bin", content
+    return None
+
+
+def _extract_file_filename(headers: str) -> str | None:
+    """Pull filename="..." out of the "file" field's Content-Disposition
+    line, via plain string search rather than a regex -- headers is
+    attacker-controlled (part of the request body), and a backtracking
+    regex over it is exactly the shape a polynomial ReDoS needs.
+    """
+    for line in headers.split("\r\n"):
+        if 'name="file"' not in line:
+            continue
+        marker = 'filename="'
+        start = line.find(marker)
+        if start == -1:
+            return None
+        start += len(marker)
+        end = line.find('"', start)
+        if end == -1:
+            return None
+        return line[start:end]
     return None
 
 
@@ -174,7 +209,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if job is None or job.get("status") != "done":
                 self._json(404, {"error": "result not available"})
                 return
-            artifact = job_dir(job_id) / "artifacts" / f"{kind}.json"
+            artifact = job_dir(job_id) / "artifacts" / ARTIFACT_FILES[kind]
             try:
                 data = json.loads(artifact.read_text())
             except (FileNotFoundError, json.JSONDecodeError):

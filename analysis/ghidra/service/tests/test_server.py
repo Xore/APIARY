@@ -179,7 +179,31 @@ def test_unknown_job_404s():
             proc.wait(timeout=5)
 
 
+def test_extract_file_filename():
+    sys.path.insert(0, str(SERVICE_DIR))
+    from server import _extract_file_filename  # noqa: E402 - test-local import
+
+    headers = (
+        'Content-Disposition: form-data; name="file"; filename="sample.bin"\r\n'
+        "Content-Type: application/octet-stream"
+    )
+    check(_extract_file_filename(headers) == "sample.bin", "extracts filename from a normal part")
+    check(_extract_file_filename('Content-Disposition: form-data; name="other"') is None,
+          "returns None for a non-file field")
+    # CodeQL flagged the old backtracking-regex version as a polynomial
+    # ReDoS on pathological input (many repeated 'name="file"' substrings) --
+    # this is exactly that input, run through the string-based replacement,
+    # confirming it's both correct and not a regex at all.
+    pathological = 'name="file"' * 5000 + ' filename="evil.bin"\r\nX-Other: y'
+    start = time.monotonic()
+    result = _extract_file_filename(pathological)
+    elapsed = time.monotonic() - start
+    check(result == "evil.bin", "still correct on pathological repeated input")
+    check(elapsed < 1.0, f"pathological input stays fast ({elapsed:.3f}s), no backtracking blowup")
+
+
 if __name__ == "__main__":
+    test_extract_file_filename()
     test_success_path()
     test_failure_path()
     test_unknown_job_404s()
