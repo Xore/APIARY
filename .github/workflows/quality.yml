@@ -5,6 +5,21 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      use_self_hosted_runner:
+        description: >-
+          Route the no-sudo/no-Docker jobs to the self-hosted homeserver
+          runner (scripts/github-ci-runner) instead of GitHub-hosted, for
+          faster turnaround on already-reviewed/trusted code -- e.g. while
+          GitHub-hosted runner capacity is degraded. Manual opt-in only:
+          push/pull_request runs always use ubuntu-latest regardless of
+          this default, since github.event_name != 'workflow_dispatch'
+          there. See scripts/github-ci-runner/install-ci-runner.sh's own
+          header for why pull_request must never route here (fork PRs are
+          attacker-controlled input; a self-hosted runner is real code
+          execution on the home network, not a sandboxed ephemeral VM).
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -14,9 +29,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # runs-on below: 'self-hosted' only on a workflow_dispatch run with the
+  # opt-in box checked; every push/pull_request run leaves
+  # inputs.use_self_hosted_runner unset (workflow_dispatch-only input), so
+  # the `||` fallback always resolves to ubuntu-latest for them -- the
+  # default, automatic path is completely unchanged. Only jobs needing
+  # nothing beyond a language toolchain (no sudo, no Docker) get this --
+  # the self-hosted runner's dedicated system user deliberately has
+  # neither (see install-ci-runner.sh), so scripts-and-compose and
+  # dashboard-browser (apt-get/docker) always stay on ubuntu-latest.
   public-safety:
     name: Public repository safety
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.use_self_hosted_runner) && 'self-hosted' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -26,7 +50,7 @@ jobs:
 
   go:
     name: Go formatting and tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.use_self_hosted_runner) && 'self-hosted' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -52,7 +76,7 @@ jobs:
 
   frontend:
     name: Dashboard frontend
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.use_self_hosted_runner) && 'self-hosted' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -92,7 +116,7 @@ jobs:
 
   vendored-theme:
     name: Vendored Xore/theme is in sync
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.use_self_hosted_runner) && 'self-hosted' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
       - name: theme.css matches the pinned commit
@@ -100,7 +124,7 @@ jobs:
 
   vendored-novnc:
     name: Vendored noVNC is in sync
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.use_self_hosted_runner) && 'self-hosted' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
       - name: dashboard/static/vendor/novnc matches novnc.lock

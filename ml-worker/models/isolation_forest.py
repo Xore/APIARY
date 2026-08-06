@@ -10,6 +10,7 @@ Feature engineering is designed for events from:
 
 See docs/ml-worker-plan.md §4 and §5 for full feature list.
 """
+import ipaddress
 import os
 import math
 import time
@@ -19,6 +20,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
+from loguru import logger
 from sklearn.ensemble import IsolationForest
 from pyod.models.hbos import HBOS
 
@@ -140,8 +142,72 @@ def _is_known_scanner(ip: Optional[str]) -> int:
 # pipeline gap rather than something readable from here at all).
 # ------------------------------------------------------------------
 
+def _parse_home_net(raw: str) -> list:
+    nets = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            nets.append(ipaddress.ip_network(part, strict=False))
+        except ValueError:
+            logger.warning(f"ML_HOME_NET: ignoring unparseable entry {part!r}")
+    return nets
+
+
+# #174: our own address(es), so _resolve_flow_sides() below can tell "the
+# honeypot itself" apart from "the actual remote party" on ECS source/
+# destination fields. Same CIDR-list convention as vps/.env.example's
+# SURICATA_HOME_NET. Empty by default -- unset means every _get_ip()/
+# _get_port() call keeps its pre-#174 behaviour (source=remote,
+# destination=local), which is still correct for every sensor except
+# Suricata netflow (see below).
+HOME_NET = _parse_home_net(os.getenv("ML_HOME_NET", ""))
+
+
+def _in_home_net(ip: str) -> bool:
+    if not ip or not HOME_NET:
+        return False
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return any(addr in net for net in HOME_NET)
+
+
+def _resolve_flow_sides(src: dict) -> tuple:
+    """Returns (remote, local) ECS source/destination dicts -- 'remote' is
+    the non-us side of a flow, 'local' is our own side.
+
+    Found live (#174): Suricata's netflow event type logs BOTH directions
+    of a flow as separate records, and ECS source/destination reflect
+    literal packet direction, not attacker/victim -- so for roughly half
+    of all netflow records, `source.ip` is the honeypot's OWN address, not
+    the remote scanner's. Since _get_ip()/_get_port() previously trusted
+    source/destination positionally, session_features.py's per-IP rolling
+    window (unique_ports_1h, #277) was bucketing every distinct external
+    scanner that touched this host under one shared key (our own IP) for
+    that half of events -- confirmed live: unique_ports_1h readings in the
+    thousands within a single retrain batch, the actual driver of
+    isolation_forest_hbos's holdout-anomaly-rate gate rejecting every
+    retrain (#65's acceptance bar) rather than a sign the model itself was
+    bad. Also fed a wrong src_ip straight into worker.py's anomaly
+    metadata, which is operator-facing (the dashboard's alert table).
+
+    Falls back to (source, destination) -- i.e. no swap -- when
+    ML_HOME_NET is unset or neither/both sides match it: every non-netflow
+    sensor's normal case, where source genuinely is the remote party.
+    """
+    source = src.get("source") or {}
+    dest = src.get("destination") or {}
+    if _in_home_net(source.get("ip") or "") and not _in_home_net(dest.get("ip") or ""):
+        return dest, source
+    return source, dest
+
+
 def _get_ip(src: dict) -> str:
-    ip = (src.get("source") or {}).get("ip")
+    remote, _ = _resolve_flow_sides(src)
+    ip = remote.get("ip")
     if ip:
         return ip
     hp = src.get("honeypot") or {}
@@ -152,9 +218,9 @@ def _get_ip(src: dict) -> str:
 
 
 def _get_port(src: dict) -> int:
-    dest = src.get("destination") or {}
-    if dest.get("port") is not None:
-        return int(dest["port"])
+    _, local = _resolve_flow_sides(src)
+    if local.get("port") is not None:
+        return int(local["port"])
     hp = src.get("honeypot") or {}
     if hp.get("dst_port") is not None:
         return int(hp["dst_port"])

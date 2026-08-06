@@ -16,7 +16,7 @@
 # dropped.
 set -euo pipefail
 
-env_file=/etc/honeypot-github.env
+env_file=${GITHUB_ANALYSIS_ENV_FILE:-/etc/honeypot-github.env}
 # shellcheck disable=SC1090
 [[ -f $env_file ]] && source "$env_file"
 

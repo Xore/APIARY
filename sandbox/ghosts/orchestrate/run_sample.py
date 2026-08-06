@@ -262,20 +262,48 @@ def execute_sample(vm_path: str):
     )
 
 
-def fetch_ghosts_activity(machine_hint: str) -> dict:
+def get_guest_hostname() -> str:
+    """The golden image bakes in a fixed persona hostname (e.g.
+    acp-fin0142) -- ask the guest directly rather than hardcoding it, so
+    this keeps working if the persona baked into the image ever changes."""
+    result = winrm_run('$env:COMPUTERNAME', timeout=15)
+    return result['stdout'].strip()
+
+
+def fetch_ghosts_activity(hostname: str) -> dict:
     """GHOSTS' own record of what the NPC actually did during this run --
     pulled from Ghosts.Api, not the guest (the guest is untrusted the
     moment the sample runs; the API's database is not). Best-effort: a
     reachability problem here must not fail the whole detonation over one
     optional artifact, same principle as run_sample.py's memory-dump step.
-    """
+
+    Matched by hostname, not hostIp (#806). Ghosts.Api's own
+    ApplicationSettings.MatchMachinesBy is "name" -- confirmed live that a
+    machine record's `hostIp` is set once at creation and never refreshed
+    on later check-ins/heartbeats, even though `lastReportedUtc` updates
+    correctly every time: a real, fresh heartbeat from this exact guest
+    still showed `hostIp` frozen at a different address from over a day
+    earlier, because DHCP (no pinned reservation, see this file's own
+    VM_HOST docstring) handed out a new lease in between. Querying by
+    hostIp was therefore only ever going to match by coincidence -- this
+    is why #806 found the real detonated machine "never appears in this
+    list at all, under any IP": it was there all along, under its
+    hostname, with a stale hostIp. Case-insensitive since Ghosts.Api
+    lowercases `name` (confirmed live: $env:COMPUTERNAME returns
+    "ACP-FIN0142", the API stores "acp-fin0142")."""
     try:
         with urllib.request.urlopen(
             f'http://{GHOSTS_API_ADDR}/api/machines?q=', timeout=10
         ) as resp:
             machines = json.loads(resp.read())
-        match = next((m for m in machines if m.get('hostIp') == machine_hint), None)
-        return match or {'error': f'no machine found with hostIp {machine_hint}'}
+        hostname_lower = hostname.lower()
+        match = next(
+            (m for m in machines
+             if (m.get('name') or '').lower() == hostname_lower
+             or (m.get('host') or '').lower() == hostname_lower),
+            None,
+        )
+        return match or {'error': f'no machine found with name {hostname}'}
     except Exception as e:
         log.error(f'GHOSTS activity fetch failed: {e}', exc_info=True)
         return {'error': str(e)}
@@ -290,7 +318,12 @@ def collect_artifacts(sha: str, out_dir: Path) -> dict:
              '-c', f'get {fname} {out_dir}/{fname}'],
             capture_output=True, timeout=60,
         )
-    ghosts_activity = fetch_ghosts_activity(VM_HOST)
+    try:
+        hostname = get_guest_hostname()
+    except Exception as e:
+        log.error(f'Could not read guest hostname for GHOSTS lookup: {e}')
+        hostname = ''
+    ghosts_activity = fetch_ghosts_activity(hostname) if hostname else {'error': 'could not determine guest hostname'}
     (out_dir / 'ghosts_activity.json').write_text(json.dumps(ghosts_activity, indent=2))
     log.info(f'Artifacts collected to {out_dir}')
     return ghosts_activity

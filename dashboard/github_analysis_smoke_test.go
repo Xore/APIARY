@@ -100,6 +100,18 @@ func TestGitHubAnalysisSmokeEndToEnd(t *testing.T) {
 		"GITHUB_ANALYSIS_LOCK="+filepath.Join(t.TempDir(), "publish.lock"),
 		"COWRIE_DOWNLOADS_DIR="+cowrieDownloads,
 		"GITHUB_ANALYSIS_DAILY_CAP=20",
+		// Point the script at a guaranteed-nonexistent path instead of its
+		// default /etc/honeypot-github.env -- on any host that's also a
+		// real deployment target (including this repo's own self-hosted CI
+		// runner, which shares the physical homeserver), that path is a
+		// real production secrets file the test has no business touching,
+		// readable or not. Every other stateful path above is already
+		// isolated the same way; this one was missed, and only surfaced
+		// once this test ran somewhere the file actually existed with
+		// permissions denying the CI user (harmless "permission denied",
+		// but for the wrong reason -- this test isn't supposed to know
+		// that file exists at all).
+		"GITHUB_ANALYSIS_ENV_FILE="+filepath.Join(t.TempDir(), "unused.env"),
 		// GITHUB_PUBLISH_ENABLED deliberately absent: this test proves the
 		// request round-trips correctly, not that a real publish works --
 		// that would need a live GH_PAT and network access, which no

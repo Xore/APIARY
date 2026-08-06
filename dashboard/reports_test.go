@@ -48,7 +48,7 @@ func sampleDefinition(template string) reportDefinition {
 	if preset.Sandbox {
 		def.Scope.Job = "linux-20260729T164848Z-cbe0b83cb4a0"
 	}
-	if preset.Payload {
+	if preset.Payload || preset.Ghidra {
 		def.Scope.Hash = strings.Repeat("a", 64)
 	}
 	return def

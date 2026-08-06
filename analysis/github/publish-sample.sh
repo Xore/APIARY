@@ -11,7 +11,7 @@ set -euo pipefail
 sha256=${1:?usage: publish-sample.sh <sha256> <sample-path>}
 sample=${2:?}
 
-env_file=/etc/honeypot-github.env
+env_file=${GITHUB_ANALYSIS_ENV_FILE:-/etc/honeypot-github.env}
 # shellcheck disable=SC1090
 [[ -f $env_file ]] && source "$env_file"
 

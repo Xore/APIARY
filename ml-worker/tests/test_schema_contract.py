@@ -11,6 +11,7 @@ emits at all, e.g. Conpot's transport or HTTP-honeypot's own port).
 
 Run: python3 -m pytest ml-worker/tests/test_schema_contract.py -v
 """
+import ipaddress
 import sys
 from pathlib import Path
 
@@ -18,6 +19,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import models.isolation_forest as iso_mod  # noqa: E402
 from models.isolation_forest import IsoForestModel, _get_ip, _get_port, _get_transport_proto  # noqa: E402
 import fixtures  # noqa: E402
 
@@ -171,3 +173,63 @@ class TestMalformedEventsDoNotCrashFeatureExtraction:
         src = fixtures.MALFORMED_MISSING_TIMESTAMP["_source"]
         features = model.extract_features(src)
         assert features.shape == (1, 15)
+
+
+class TestNetflowReflectedDirectionResolvesToTheRealRemoteParty:
+    """#174: Suricata netflow logs both directions of a flow as separate
+    records, so ECS source/destination reflect literal packet direction,
+    not attacker/victim. Confirmed live against real production netflow
+    docs: for the "reflected" record, source.ip is the honeypot's own
+    public IP. ML_HOME_NET (parsed once into the module-level HOME_NET
+    list) is how _get_ip()/_get_port() tell the two apart -- monkeypatched
+    directly here since it's read at import time, not per-call."""
+
+    # RFC 5737 documentation ranges, same convention vps/.env.example's own
+    # SURICATA_HOME_NET example uses -- not this deployment's real address.
+    HOME_IP = "203.0.113.10"
+    ATTACKER_IP = "198.51.100.23"
+
+    def _forward_doc(self):
+        # Attacker -> us: the normal case, no swap needed.
+        return {
+            "source": {"ip": self.ATTACKER_IP, "port": 63000},
+            "destination": {"ip": self.HOME_IP, "port": 445},
+            "suricata": {"eve": {"event_type": "netflow"}},
+        }
+
+    def _reflected_doc(self):
+        # Us -> attacker: same flow, other direction. Naive source/
+        # destination reading would misattribute this to ourselves.
+        return {
+            "source": {"ip": self.HOME_IP, "port": 445},
+            "destination": {"ip": self.ATTACKER_IP, "port": 63000},
+            "suricata": {"eve": {"event_type": "netflow"}},
+        }
+
+    def test_without_home_net_configured_reflected_direction_is_trusted_as_is(self):
+        # Documents the pre-fix/unconfigured behaviour: no ML_HOME_NET
+        # means no way to know which side is "us", so the naive (wrong for
+        # this one direction) reading is what callers get -- a safe no-op
+        # default, not a crash or a guess.
+        assert _get_ip(self._reflected_doc()) == self.HOME_IP
+        assert _get_port(self._reflected_doc()) == 63000
+
+    def test_forward_direction_unaffected_by_home_net(self, monkeypatch):
+        monkeypatch.setattr(iso_mod, "HOME_NET", [ipaddress.ip_network(f"{self.HOME_IP}/32")])
+        assert _get_ip(self._forward_doc()) == self.ATTACKER_IP
+        assert _get_port(self._forward_doc()) == 445
+
+    def test_reflected_direction_resolves_to_the_attacker_not_ourselves(self, monkeypatch):
+        monkeypatch.setattr(iso_mod, "HOME_NET", [ipaddress.ip_network(f"{self.HOME_IP}/32")])
+        assert _get_ip(self._reflected_doc()) == self.ATTACKER_IP
+        # The port actually touched on OUR side is what matters for
+        # unique_ports_1h -- that's source.port here (445), not
+        # destination.port (63000, the attacker's own ephemeral port).
+        assert _get_port(self._reflected_doc()) == 445
+
+    def test_neither_side_matching_home_net_is_unaffected(self, monkeypatch):
+        # Two external parties (shouldn't normally happen, but must not
+        # misfire) -- no swap since source.ip isn't ours.
+        monkeypatch.setattr(iso_mod, "HOME_NET", [ipaddress.ip_network("10.0.0.0/8")])
+        assert _get_ip(self._forward_doc()) == self.ATTACKER_IP
+        assert _get_port(self._forward_doc()) == 445

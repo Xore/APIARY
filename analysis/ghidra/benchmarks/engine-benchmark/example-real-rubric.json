@@ -1,0 +1,21 @@
+{
+  "note": "Example rubric from a real run against this homeserver's own Dionaea captures (2026-08-06). Every sample happened to share one import signature -- FindResourceA/LoadResource/LockResource/SizeofResource to pull an embedded resource, CreateFileA/WriteFile to drop it to disk, CreateProcessA to run it -- the classic PE resource-dropper shape. This rubric is derived directly from that mechanically-extracted import list, not from any assumption about the samples' family or intent. It will NOT fit a different capture's import shape as-is -- write a fresh rubric from whatever imports/behavior extract_evidence.py actually finds on your own deployment. Keep the same principle: derive required_groups from evidence you can point at, not from a guess.",
+  "required_groups": [
+    {
+      "label": "process creation",
+      "terms": ["create process", "createprocess", "spawn", "launch", "execute", "run a new", "starts a new process"]
+    },
+    {
+      "label": "file write / drop",
+      "terms": ["write file", "writefile", "drop", "extract to disk", "save to disk", "create a file", "createfilea", "writes"]
+    },
+    {
+      "label": "embedded resource extraction",
+      "terms": ["resource", "embedded", "unpack", "extracted payload", "findresource", "loadresource"]
+    },
+    {
+      "label": "recognizes it is a DLL/library",
+      "terms": ["dll", "library", "module"]
+    }
+  ]
+}
