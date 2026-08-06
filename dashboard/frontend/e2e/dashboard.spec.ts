@@ -24,6 +24,15 @@ const viewports = {
   desktop: { width: 1440, height: 900 },
   tablet: { width: 820, height: 1180 },
   mobile: { width: 390, height: 844 },
+  // #672: iPhone 14 Pro's CSS viewport (Playwright's own `devices["iPhone
+  // 14 Pro"]` preset -- 393x852 -- not a guessed size). deviceScaleFactor
+  // doesn't affect CSS layout/overflow, only screenshot pixel density, so
+  // this matrix (which only asserts on layout, not pixels) doesn't need
+  // the full device descriptor -- that's used separately for the actual
+  // showcase screenshots below.
+  iphone: { width: 393, height: 852 },
+  uhq: { width: 1920, height: 1080 },
+  "4k": { width: 3840, height: 2160 },
 } as const;
 
 async function isolateReadOnlyBrowserState(page: Page) {
