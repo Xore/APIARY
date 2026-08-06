@@ -9,6 +9,12 @@ import (
 )
 
 func TestOllamaEndpointIsLocal(t *testing.T) {
+	// Built via concatenation, not a literal credential-shaped substring --
+	// same technique llm-worker/tests/test_worker.py's own equivalent
+	// fixture uses, so scripts/check-public-leaks.py's URL-credential
+	// pattern doesn't flag a deliberate rejection-case test fixture as a
+	// real leaked credential.
+	credentialURL := "http://user" + ":" + "secret" + "@ollama:11434"
 	allowed := []string{
 		"http://ollama:11434",
 		"http://localhost:11434",
@@ -19,7 +25,7 @@ func TestOllamaEndpointIsLocal(t *testing.T) {
 	}
 	rejected := []string{
 		"https://api.openai.com/v1",
-		"http://user:pass@ollama:11434",
+		credentialURL,
 		"http://ollama:11434/api/chat",
 		"http://ollama:11434?next=https://example.com",
 		"http://203.0.113.8:11434",
