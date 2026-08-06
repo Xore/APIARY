@@ -226,6 +226,17 @@ type store struct {
 	// written on every request, far hotter than rebuild's own 15s tick, and
 	// a torn read only ever costs one extra or one skipped rebuild.
 	lastActivity atomic.Int64
+	// ready (#828) is set true once, after the very first rebuild() call at
+	// startup completes -- /healthz reads it so Docker's healthcheck can
+	// tell "the HTTP server is listening" (true almost instantly) apart
+	// from "there is real ES-derived data to serve" (found live: takes
+	// 60-120s against this host's real event volume). Before this, a
+	// redeploy's rolling healthcheck passed within seconds of container
+	// start, well before the first rebuild finished, so a request landing
+	// in that window saw an all-zero, 0001-01-01-timestamped dashboard
+	// that looked broken but wasn't -- see docker-compose.dashboard.yml's
+	// matching start_period bump.
+	ready atomic.Bool
 }
 
 // touchActivity records that a real dashboard request just arrived.
