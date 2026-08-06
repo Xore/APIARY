@@ -25,6 +25,12 @@ services:
       LLM_DAILY_REPORT_ENABLED: '${LLM_DAILY_REPORT_ENABLED:-false}'
       LLM_MODEL: '${LLM_MODEL:-qwen3:14b}'
       LLM_EXPECTED_MODEL_DIGEST: '${LLM_EXPECTED_MODEL_DIGEST:-}'
+      # #151: off by default, same shape as every other captured-data gate
+      # above -- validate_mode() also requires LLM_EMBEDDING_EXPECTED_DIGEST
+      # once this is turned on outside dry-run.
+      LLM_EMBEDDING_ENABLED: '${LLM_EMBEDDING_ENABLED:-false}'
+      LLM_EMBEDDING_MODEL: '${LLM_EMBEDDING_MODEL:-nomic-embed-text:latest}'
+      LLM_EMBEDDING_EXPECTED_DIGEST: '${LLM_EMBEDDING_EXPECTED_DIGEST:-}'
       LLM_CONTEXT_LENGTH: '${LLM_CONTEXT_LENGTH:-8192}'
       LLM_OUTPUT_TOKENS: '${LLM_OUTPUT_TOKENS:-512}'
       LLM_KEEP_ALIVE: '${LLM_KEEP_ALIVE:-10m}'

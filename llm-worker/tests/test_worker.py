@@ -28,6 +28,9 @@ def config(**changes):
         ollama_url="http://ollama:11434",
         model="qwen3.5:4b",
         expected_model_digest="a" * 64,
+        embedding_enabled=False,
+        embedding_model="nomic-embed-text",
+        embedding_expected_digest="b" * 64,
         poll_interval=60,
         max_content_chars=12000,
         max_payload_bytes=1 << 20,
@@ -336,6 +339,125 @@ class OllamaContractTests(unittest.TestCase):
         self.assertEqual(annotation.intent, "reconnaissance")
         self.assertEqual(telemetry["prompt_tokens"], 100)
         self.assertFalse(fake_session.trust_env)
+
+    def test_embed_returns_the_configured_dimensionality(self):
+        fake_response = MagicMock()
+        fake_response.is_redirect = False
+        fake_response.is_permanent_redirect = False
+        fake_response.raise_for_status.return_value = None
+        fake_response.json.return_value = {"embeddings": [[0.1] * worker.EMBEDDING_DIMS]}
+        fake_session = MagicMock()
+        fake_session.post.return_value = fake_response
+        with patch.object(worker.requests, "Session", return_value=fake_session):
+            client = worker.OllamaClient(config())
+            vector = client.embed("session summary text")
+        self.assertEqual(len(vector), worker.EMBEDDING_DIMS)
+        self.assertTrue(all(isinstance(value, float) for value in vector))
+        request = fake_session.post.call_args
+        self.assertEqual(request.args[0], "http://ollama:11434/api/embed")
+        self.assertEqual(request.kwargs["json"]["model"], "nomic-embed-text")
+        self.assertEqual(request.kwargs["json"]["input"], "session summary text")
+        self.assertFalse(request.kwargs["allow_redirects"])
+
+    def test_embed_rejects_a_response_with_the_wrong_dimensionality(self):
+        # #151: nomic-embed-text's real native output is 768-dim (confirmed
+        # live, contradicting docs/gpu-llm-analysis-worker.md's stale
+        # "384-dimensional" text) -- a response shaped for a different
+        # embedding model must be rejected outright, not silently indexed
+        # as if it matched EMBEDDING_DIMS, which would corrupt every future
+        # kNN query against this index.
+        fake_response = MagicMock()
+        fake_response.is_redirect = False
+        fake_response.is_permanent_redirect = False
+        fake_response.raise_for_status.return_value = None
+        fake_response.json.return_value = {"embeddings": [[0.1] * 384]}
+        fake_session = MagicMock()
+        fake_session.post.return_value = fake_response
+        with patch.object(worker.requests, "Session", return_value=fake_session):
+            client = worker.OllamaClient(config())
+            with self.assertRaisesRegex(worker.ModelResponseError, "768-dimensional"):
+                client.embed("session summary text")
+
+    def test_embedding_digest_must_match_the_configured_pin(self):
+        fake_response = MagicMock()
+        fake_response.is_redirect = False
+        fake_response.is_permanent_redirect = False
+        fake_response.raise_for_status.return_value = None
+        fake_response.json.return_value = {
+            "models": [{"name": "nomic-embed-text", "digest": "c" * 64}]
+        }
+        fake_session = MagicMock()
+        fake_session.get.return_value = fake_response
+        with patch.object(worker.requests, "Session", return_value=fake_session):
+            client = worker.OllamaClient(config())
+            with self.assertRaisesRegex(worker.ModelRequestError, "does not match"):
+                client.embedding_digest()
+
+    def test_embedding_enabled_outside_dry_run_requires_a_pinned_digest(self):
+        with self.assertRaisesRegex(ValueError, "LLM_EMBEDDING_EXPECTED_DIGEST"):
+            config(
+                dry_run=False,
+                enabled=True,
+                allow_captured_data=True,
+                session_enabled=True,
+                embedding_enabled=True,
+                embedding_expected_digest="",
+            ).validate_mode()
+
+    def test_session_analysis_attaches_an_embedding_when_enabled(self):
+        analysis = SessionAnalysis(
+            summary="Reconnaissance commands were observed.",
+            intent="reconnaissance",
+            mitre_attack=["T1087"],
+            iocs=[],
+            severity="medium",
+            confidence="high",
+        )
+        fake_client = MagicMock()
+        fake_client.model_digest.return_value = "a" * 64
+        fake_client.analyze.return_value = (analysis, {"prompt_tokens": 10, "output_tokens": 5})
+        fake_client.embed.return_value = [0.2] * worker.EMBEDDING_DIMS
+        fake_client.embedding_digest.return_value = "c" * 64
+        fake_es = MagicMock()
+        llm_worker = worker.LLMWorker(config(embedding_enabled=True), es=fake_es, model=fake_client)
+        accumulator = worker.SessionAccumulator(
+            session_id="sess-1", source_index="honeypot-v2-cowrie",
+        )
+        accumulator.commands = ["whoami"]
+        accumulator.command_count = 1
+        with patch.object(worker.LLMWorker, "ready_sessions", return_value=[("state-1", accumulator)]):
+            completed = llm_worker.analyze_ready_sessions()
+        self.assertEqual(completed, 1)
+        indexed = fake_es.index.call_args_list[0].kwargs["document"]
+        self.assertEqual(indexed["embedding"], [0.2] * worker.EMBEDDING_DIMS)
+        self.assertEqual(indexed["embedding_model"], "nomic-embed-text")
+        self.assertEqual(indexed["embedding_model_digest"], "c" * 64)
+
+    def test_session_analysis_degrades_without_an_embedding_on_failure(self):
+        analysis = SessionAnalysis(
+            summary="Reconnaissance commands were observed.",
+            intent="reconnaissance",
+            mitre_attack=["T1087"],
+            iocs=[],
+            severity="medium",
+            confidence="high",
+        )
+        fake_client = MagicMock()
+        fake_client.model_digest.return_value = "a" * 64
+        fake_client.analyze.return_value = (analysis, {"prompt_tokens": 10, "output_tokens": 5})
+        fake_client.embed.side_effect = worker.ModelRequestError("embedding endpoint unreachable")
+        fake_es = MagicMock()
+        llm_worker = worker.LLMWorker(config(embedding_enabled=True), es=fake_es, model=fake_client)
+        accumulator = worker.SessionAccumulator(
+            session_id="sess-2", source_index="honeypot-v2-cowrie",
+        )
+        accumulator.commands = ["whoami"]
+        accumulator.command_count = 1
+        with patch.object(worker.LLMWorker, "ready_sessions", return_value=[("state-2", accumulator)]):
+            completed = llm_worker.analyze_ready_sessions()
+        self.assertEqual(completed, 1, "an embedding failure must not fail the surrounding session analysis")
+        indexed = fake_es.index.call_args_list[0].kwargs["document"]
+        self.assertNotIn("embedding", indexed)
 
     def test_synthetic_canary_uses_only_synthetic_cases_and_checks_unload(self):
         responses = [
