@@ -1,0 +1,75 @@
+name: Quality (homeserver runner)
+
+# Fast, local re-run of the priciest checks in Quality (quality.yml) on the
+# homeserver's own self-hosted runner (docs/CI-CD.md's "GitHub CI runner"
+# section) -- supplementary, not a replacement for quality.yml's
+# GitHub-hosted jobs, which remain the only checks pull requests depend on.
+#
+# Deliberately NOT triggered on pull_request, unlike quality.yml. A fork PR
+# is attacker-controlled input; running it here would be real code
+# execution on home network infrastructure, not a disposable GitHub-hosted
+# VM. push (to main, already reviewed/merged) and workflow_dispatch (an
+# operator's own choice) are the only trigger types wired to this runner --
+# see install-ci-runner.sh's own header for the full reasoning.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-homeserver-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go formatting and tests
+    runs-on: [self-hosted, linux, x64, honeypot-ci]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.x"
+          cache-dependency-path: "**/go.sum"
+      - name: Check formatting
+        shell: bash
+        run: |
+          files="$(find . -path '*/vendor' -prune -o -name '*.go' -type f -print)"
+          test -z "$(gofmt -l $files)" || { gofmt -l $files; exit 1; }
+      - name: Test every Go module
+        shell: bash
+        run: |
+          while IFS= read -r module; do
+            echo "::group::${module%/go.mod}"
+            (cd "${module%/go.mod}" && go test ./...)
+            echo "::endgroup::"
+          done < <(find . -path '*/vendor' -prune -o -name go.mod -type f -print | sort)
+
+  scripts-and-compose:
+    name: Scripts and Compose
+    runs-on: [self-hosted, linux, x64, honeypot-ci]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Python syntax
+        shell: bash
+        run: find . -path '*/vendor' -prune -o -name '*.py' -type f -print0 | xargs -0 -r python -m py_compile
+      - name: Shell syntax and high-severity ShellCheck
+        shell: bash
+        run: |
+          command -v shellcheck >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y shellcheck; }
+          shell_scripts=()
+          while IFS= read -r -d '' f; do
+            read -r shebang < "$f" || true
+            case "$shebang" in
+              '#!'*/sh|'#!'*/bash|'#!'*env\ sh|'#!'*env\ bash) shell_scripts+=("$f") ;;
+            esac
+          done < <(find . -name '*.sh' -type f -print0)
+          if [ "${#shell_scripts[@]}" -gt 0 ]; then
+            printf '%s\0' "${shell_scripts[@]}" | xargs -0 -n1 bash -n
+            printf '%s\0' "${shell_scripts[@]}" | xargs -0 shellcheck --severity=error
+          fi
