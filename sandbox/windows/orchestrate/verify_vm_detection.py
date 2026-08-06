@@ -43,9 +43,11 @@ Env vars (shared with run_sample.py):
   VM_HOST, VM_USER, VM_PASS, LIBVIRT_URI, VM_DOMAIN, GOLDEN_IMAGE, VM_DISK
 """
 
+import base64
 import os
 import re
 import sys
+import time
 import argparse
 import logging
 import subprocess
@@ -194,6 +196,118 @@ def run_tool(remote_name: str, log_name: str, args: str = '', timeout: int = 300
     return {'exit_code': exit_code, 'stdout': body['stdout']}
 
 
+def run_tool_insession(remote_name: str, log_name: str, args: str = '', timeout: int = 300, poll_interval: int = 3) -> dict:
+    """Same shape as run_tool() above, but launches the tool via a one-shot
+    Interactive-logon scheduled task instead of directly over WinRM (#696).
+
+    WinRM-invoked processes land in Session 0, never the interactive desktop
+    (Session 1) where the autologon'd analyst session and the living-persona
+    daemon (#290) actually run. pafish's "generic reverse turing test"
+    checks call session-scoped APIs like GetLastInputInfo() -- from Session
+    0 those always read as "traced!" regardless of what is really happening
+    on the real desktop, confirmed live during #368's re-verification (see
+    that issue's own writeup: two `virsh screenshot` captures 25s apart
+    showed a taskbar tooltip that only renders on genuine cursor hover,
+    proving Session 1's real input state, while GetLastInputInfo() over
+    WinRM in the same window showed idle time tracking wall-clock elapsed
+    time almost exactly).
+
+    Same -LogonType Interactive / -RunLevel Highest scheduled-task
+    mechanism packer/scripts/07-living-persona.ps1 already validated works
+    for exactly this reason: LogonType Interactive runs the task inside the
+    named user's *existing* interactive session rather than starting a new
+    one, which is what actually lands it in Session 1 here (autologon keeps
+    `analyst` perpetually logged into that session -- see run_sample.py's
+    own autologon flow).
+
+    The task's own action wraps a small PowerShell script file (written via
+    a base64-encoded WriteAllText call, not embedded inline -- avoiding the
+    nested-quoting problem of putting Start-Process's own quoted
+    -RedirectStandard* arguments inside a scheduled task's single
+    -Argument string) rather than the tool binary directly, so the same
+    stdin-feed/output-redirection trick run_tool() uses still applies --
+    Register-ScheduledTaskAction has no I/O redirection of its own.
+    """
+    log.info(f'Running C:\\Samples\\{remote_name} {args} in-session (scheduled task) ...')
+    # A per-invocation-unique name, not just per-tool -- confirmed live
+    # (2026-08-06 full-pipeline run) that reusing a fixed name across two
+    # invocations in quick succession can silently no-op the second
+    # Start-ScheduledTask call: Task Scheduler's default MultipleInstances
+    # policy (IgnoreNew) is keyed by task path, and a rapid
+    # unregister-then-reregister-then-start sequence against the same path
+    # raced the scheduler service's own bookkeeping of the first task's
+    # "instance running" state -- the second run's wrapper script and
+    # exitcode file were never written at all, with no error surfaced
+    # anywhere (render_section()'s "FAILED to run -- exit code NONE" is
+    # what actually caught it). A fresh name per call sidesteps whatever
+    # the exact internal mechanism is, rather than relying on
+    # Unregister-ScheduledTask having fully settled before the next call.
+    task_name = f'verify-insession-{log_name.replace(".", "-")}-{int(time.time() * 1000)}'
+    script_path = f'C:\\Logs\\{task_name}.ps1'
+    stdin_path = f'C:\\Logs\\{log_name}.stdin'
+    exit_path = f'C:\\Logs\\{log_name}.exitcode'
+    arg_clause = f"-ArgumentList '{args}' " if args else ''
+    script_body = (
+        f"'`n' | Out-File -Encoding ascii -NoNewline '{stdin_path}'\n"
+        f"$p = Start-Process -FilePath 'C:\\Samples\\{remote_name}' {arg_clause}-PassThru -Wait "
+        f"-WindowStyle Hidden -RedirectStandardInput '{stdin_path}' "
+        f"-RedirectStandardOutput 'C:\\Logs\\{log_name}' "
+        f"-RedirectStandardError 'C:\\Logs\\{log_name}.stderr'\n"
+        f"\"$($p.ExitCode)\" | Out-File -Encoding ascii -NoNewline '{exit_path}'\n"
+    )
+    b64 = base64.b64encode(script_body.encode('utf-8')).decode('ascii')
+    winrm_run(
+        f"[IO.File]::WriteAllText('{script_path}', "
+        f"[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{b64}')))"
+    )
+
+    register_cmd = (
+        f"$action = New-ScheduledTaskAction -Execute 'powershell.exe' "
+        f"-Argument '-NoProfile -ExecutionPolicy Bypass -File \"{script_path}\"'; "
+        f"$principal = New-ScheduledTaskPrincipal -UserId 'analyst' -LogonType Interactive -RunLevel Highest; "
+        f"$settings = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries "
+        f"-DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::FromSeconds({timeout})); "
+        f"Register-ScheduledTask -TaskName '{task_name}' -Action $action -Principal $principal "
+        f"-Settings $settings -Force | Out-Null; "
+        f"Start-ScheduledTask -TaskName '{task_name}'"
+    )
+    winrm_run(register_cmd, timeout=60)
+
+    deadline = time.time() + timeout
+    state = 'Running'
+    try:
+        while time.time() < deadline:
+            st = winrm_run(f"(Get-ScheduledTask -TaskName '{task_name}').State", timeout=30)
+            state = st['stdout'].strip()
+            if state != 'Running':
+                break
+            time.sleep(poll_interval)
+    finally:
+        # Best-effort cleanup regardless of outcome -- a leftover task from
+        # a timed-out run must not confuse the next run_tool_insession call
+        # (or a human) using the same task_name.
+        try:
+            winrm_run(f"Unregister-ScheduledTask -TaskName '{task_name}' -Confirm:$false", timeout=30)
+        except Exception:
+            pass
+
+    if state == 'Running':
+        raise TimeoutError(
+            f'{remote_name} did not finish within {timeout}s running in-session '
+            f'(scheduled task {task_name} still Running) -- likely hung on the '
+            f'guest. The task was unregistered but the guest-side process may '
+            f'still be running and should be checked/killed separately.'
+        )
+
+    exit_out = winrm_run(f"Get-Content '{exit_path}' -ErrorAction SilentlyContinue")
+    exit_code = exit_out['stdout'].strip() or 'NONE'
+    body = winrm_run(
+        f"Get-Content 'C:\\Logs\\{log_name}' -Raw; \"---STDERR---\"; "
+        f"Get-Content 'C:\\Logs\\{log_name}.stderr' -Raw"
+    )
+    return {'exit_code': exit_code, 'stdout': body['stdout']}
+
+
 def check_residual_tells() -> dict:
     """The specific checks RESEARCH.md #1.2 calls out beyond what pafish/
     al-khaser cover generically: screen resolution and system uptime."""
@@ -246,7 +360,10 @@ def main():
 
     if args.pafish:
         push_tool(args.pafish, 'pafish.exe')
-        out = run_tool('pafish.exe', 'pafish_out.txt')
+        # #696: pafish's reverse-turing checks are session-scoped and can
+        # never pass from WinRM's Session 0 -- run in-session instead so
+        # this report reflects the real desktop's (Session 1) input state.
+        out = run_tool_insession('pafish.exe', 'pafish_out.txt')
         sections.append(render_section('pafish', out))
 
     if args.al_khaser:
