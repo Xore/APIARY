@@ -1,0 +1,59 @@
+# Dashboard screenshots
+
+Captured live against the production dashboard (real captured attack
+telemetry — event counts, alerts, sandbox results — not fixture data), at
+three resolutions per [#672](https://github.com/Xore/APIARY/issues/672):
+
+- **uhq/** — 1920x1080 desktop
+- **4k/** — 3840x2160 desktop
+- **iphone/** — 393x852 (Playwright's own "iPhone 14 Pro" device preset)
+
+Each folder has the same eight pages: `overview`, `events`, `alerts`, `ips`,
+`sandbox`, `ghidra`, `payload-workbench`, `reports`.
+
+Real IPs/hashes/YARA matches visible in these images are attacker-supplied
+data captured by the honeypot — the whole point of the tool — not operator
+secrets. See the root README's "public repository" note for what's actually
+off-limits (real infrastructure addresses/credentials/raw captures), none of
+which appear in a dashboard-UI screenshot.
+
+## Desktop (UHQ, 1920x1080)
+
+| | |
+|---|---|
+| ![Overview](uhq/overview.png) Overview | ![Events](uhq/events.png) Events |
+| ![Alerts](uhq/alerts.png) Alerts | ![Attack sources](uhq/ips.png) Attack sources |
+| ![Sandbox](uhq/sandbox.png) Sandbox | ![Ghidra](uhq/ghidra.png) Ghidra |
+| ![Payload workbench](uhq/payload-workbench.png) Payload workbench | ![Reports](uhq/reports.png) Reports |
+
+## Desktop (4K, 3840x2160)
+
+| | |
+|---|---|
+| ![Overview](4k/overview.png) Overview | ![Events](4k/events.png) Events |
+| ![Alerts](4k/alerts.png) Alerts | ![Attack sources](4k/ips.png) Attack sources |
+| ![Sandbox](4k/sandbox.png) Sandbox | ![Ghidra](4k/ghidra.png) Ghidra |
+| ![Payload workbench](4k/payload-workbench.png) Payload workbench | ![Reports](4k/reports.png) Reports |
+
+## Mobile (iPhone 14 Pro, 393x852)
+
+| | | |
+|---|---|---|
+| ![Overview](iphone/overview.png) | ![Events](iphone/events.png) | ![Alerts](iphone/alerts.png) |
+| Overview | Events | Alerts |
+| ![Attack sources](iphone/ips.png) | ![Sandbox](iphone/sandbox.png) | ![Ghidra](iphone/ghidra.png) |
+| Attack sources | Sandbox | Ghidra |
+| ![Payload workbench](iphone/payload-workbench.png) | ![Reports](iphone/reports.png) | |
+| Payload workbench | Reports | |
+
+## Regenerating
+
+Same layout-check viewports the Playwright acceptance matrix uses
+(`dashboard/frontend/e2e/dashboard.spec.ts`), captured against a real
+authenticated session rather than the isolated/mocked identity the e2e suite
+uses. Needs a valid `xore_sso` session cookie for an account with at least
+viewer access — the dashboard's page routes don't themselves require one
+(auth is enforced by Traefik's `forward-auth` middleware on the real public
+router, `vps/traefik/dynamic.yml`; the dashboard's own listener is
+WireGuard-only, see #822), but a real session is what makes the account
+menu show a logged-in identity instead of the signed-out state.
