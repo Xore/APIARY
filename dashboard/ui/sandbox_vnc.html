@@ -1,0 +1,43 @@
+{{define "sandbox-vnc"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>{{brandText}} &mdash; live sandbox view</title>
+{{template "style" .}}
+<style nonce="{{.Nonce}}">
+.hp-vnc-canvas-wrap { background: #000; border-radius: var(--radius-panel); overflow: hidden; border: 1px solid var(--border-subtle); }
+.hp-vnc-canvas-wrap canvas { display: block; width: 100%; height: auto; }
+.hp-vnc-status { font-size: 12px; color: var(--text-muted); margin: 10px 0; }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  {{template "topbar" .}}
+  {{template "sidebar" .}}
+  <main class="app-main">
+      <div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
+        <header class="overview-header">
+          <div>
+            <div class="label-section">Live detonation</div>
+            <h1>Sandbox view &mdash; view only</h1>
+            <p class="subtitle">A live, read-only view of the isolated Windows guest while sample {{.SHA256}} detonates. Nothing here can send keyboard, mouse, or clipboard input to the VM &mdash; enforced by the bridge itself, not by this page.</p>
+          </div>
+        </header>
+
+        <div class="filters"><a class="chip" href="/sandbox">&larr; sandbox results</a><a class="chip" href="/payload-analysis/{{.SHA256}}">static analysis</a></div>
+
+        <div class="card wide" id="vnc-viewer" data-vnc-root data-vnc-url="{{.BridgeWS}}">
+          <div class="hp-vnc-status" data-vnc-status>Connecting&hellip;</div>
+          <div class="hp-vnc-canvas-wrap"><div data-vnc-target></div></div>
+        </div>
+
+        <footer>{{brandText}} &bull; read-only live view, enforced at the bridge</footer>
+      </div>
+    </main>
+</div>
+<script type="module" src="{{asset "/static/hp-sandbox-vnc.js"}}"></script>
+</body>
+</html>
+{{end}}

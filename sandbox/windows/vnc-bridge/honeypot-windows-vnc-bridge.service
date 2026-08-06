@@ -1,0 +1,24 @@
+[Unit]
+Description=Read-only WebSocket bridge to the Windows sandbox's live VNC console
+Documentation=file:/usr/local/libexec/honeypot-sandbox/windows/vnc-bridge/server.py
+After=libvirtd.service
+Requires=libvirtd.service
+
+[Service]
+Type=simple
+# Host-specific values (VNC_BRIDGE_BIND, VM_DOMAIN, LIBVIRT_URI, ...) share
+# the same env file as the detonation worker -- one host config file per
+# component, not per script, matching every other host-side service in
+# this repo (honeypot-ghidra, honeypot-windows-sandbox).
+EnvironmentFile=-/etc/default/honeypot-windows-sandbox
+ExecStart=/usr/bin/python3 /usr/local/libexec/honeypot-sandbox/windows/vnc-bridge/server.py
+Restart=on-failure
+RestartSec=5
+UMask=0077
+# Read-only by construction (server.py's negotiate_and_filter), but still
+# only needs the same host trust boundary the detonation worker itself
+# runs at -- no reason for this to be more privileged than that.
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

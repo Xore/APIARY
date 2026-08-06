@@ -98,6 +98,14 @@ jobs:
       - name: theme.css matches the pinned commit
         run: scripts/check-vendored-theme.sh
 
+  vendored-novnc:
+    name: Vendored noVNC is in sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: dashboard/static/vendor/novnc matches novnc.lock
+        run: scripts/check-vendored-novnc.sh
+
   scripts-and-compose:
     name: Scripts and Compose
     runs-on: ubuntu-latest
@@ -198,6 +206,9 @@ jobs:
         run: |
           python3 scripts/tests/test_audit_sensor_event_coverage.py
           python3 scripts/audit-sensor-event-coverage.py
+      - name: Sandbox VNC bridge read-only enforcement (#805)
+        shell: bash
+        run: python3 sandbox/windows/vnc-bridge/tests/test_server.py
       - name: Vendored YARA corpus is intact and loadable
         shell: bash
         run: |

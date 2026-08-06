@@ -33,7 +33,7 @@ target=/usr/local/libexec/honeypot-sandbox/windows
 # timeout and guessing why.
 python3 -m pip install --break-system-packages pywinrm paramiko python-evtx
 
-install -d -m 0755 -o root -g root "$target" "$target/orchestrate" "$target/packer"
+install -d -m 0755 -o root -g root "$target" "$target/orchestrate" "$target/packer" "$target/vnc-bridge"
 install -m 0755 -o root -g root "$script_dir/run_pending.sh" "$target/run_pending.sh"
 install -m 0755 -o root -g root "$script_dir/process-windows-web-requests.sh" "$target/process-windows-web-requests.sh"
 install -m 0755 -o root -g root "$script_dir/golden-image-status.sh" "$target/golden-image-status.sh"
@@ -49,10 +49,18 @@ done
 # Confirmed live 2026-08-05 during #47/#53's end-to-end verification.
 install -m 0644 -o root -g root "$script_dir/packer/win11-kvm.xml" "$target/packer/win11-kvm.xml"
 
+# #805: read-only viewer bridge for the live detonation VM's own VNC console
+# (already enabled in win11-kvm.xml above -- this just exposes it to the
+# dashboard). stdlib-only, same reasoning as every other host-side script
+# here: it holds libvirt access, so it does not get a pip dependency tree.
+install -m 0755 -o root -g root "$script_dir/vnc-bridge/server.py" "$target/vnc-bridge/server.py"
+
 for unit in honeypot-windows-sandbox-worker.service honeypot-windows-sandbox-worker.path honeypot-windows-sandbox-web-requests.service \
     honeypot-windows-golden-image-status.service honeypot-windows-golden-image-status.timer; do
   install -m 0644 -o root -g root "$script_dir/$unit" "/etc/systemd/system/$unit"
 done
+install -m 0644 -o root -g root "$script_dir/vnc-bridge/honeypot-windows-vnc-bridge.service" \
+  "/etc/systemd/system/honeypot-windows-vnc-bridge.service"
 
 if [[ ! -e /etc/default/honeypot-windows-sandbox ]]; then
   install -m 0600 -o root -g root \
@@ -70,6 +78,7 @@ systemctl reset-failed honeypot-windows-sandbox-worker.service honeypot-windows-
 systemctl enable --now honeypot-windows-sandbox-worker.path
 systemctl enable --now honeypot-windows-golden-image-status.timer
 systemctl start honeypot-windows-golden-image-status.service || true
+systemctl enable --now honeypot-windows-vnc-bridge.service
 
 echo "Windows sandbox worker installed. The .path unit is enabled and watching"
 echo "/var/lib/honeypot-windows-sandbox/requests/pending, and now triggers the"
