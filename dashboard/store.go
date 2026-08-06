@@ -204,15 +204,21 @@ type store struct {
 	es                *esClient
 	mlAnomalies       *mlAnomalyStore   // ml-worker's scored anomalies, polled via es (#64); nil until initialised in main()
 	llmAnalysis       *llmAnalysisStore // llm-worker's guarded model output, polled via es (#150); nil until initialised in main()
-	alerts            *alertManager
-	intelligence      *intelligenceStore
-	settings          *settingsService  // typed settings stores; nil only in partial test fixtures
-	reports           *reportStore      // Reports studio definitions + generated PDFs; nil only in test fixtures
-	workbench         *workbenchService // immutable recipes + correlated analyzer runs (#155)
-	yaraFile          string
-	expected          []string // configured feeds shown even before their first event
-	subs              map[chan struct{}]struct{}
-	authAccountURL    string // validated once at startup; see validatedAuthAccountURL
+	// ollamaURL/embeddingModel (#151) back serveLLMAnalysisSearch's
+	// query-time embedding call. ollamaURL empty means semantic search is
+	// unconfigured/rejected -- the same "feature quietly off" posture geo
+	// and es above take, not a startup failure.
+	ollamaURL      string
+	embeddingModel string
+	alerts         *alertManager
+	intelligence   *intelligenceStore
+	settings       *settingsService  // typed settings stores; nil only in partial test fixtures
+	reports        *reportStore      // Reports studio definitions + generated PDFs; nil only in test fixtures
+	workbench      *workbenchService // immutable recipes + correlated analyzer runs (#155)
+	yaraFile       string
+	expected       []string // configured feeds shown even before their first event
+	subs           map[chan struct{}]struct{}
+	authAccountURL string // validated once at startup; see validatedAuthAccountURL
 	// lastActivity (#486) is a unix-second timestamp of the most recent
 	// dashboard request, touched by touchActivity (main.go's request
 	// middleware) and read by the periodic rebuild loop to skip its ES/log

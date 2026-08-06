@@ -135,6 +135,20 @@ func main() {
 			}
 		}()
 	}
+	// #151: query-time embedding for llm-analysis semantic search. Off
+	// (ollamaURL left empty) unless OLLAMA_URL is both set and passes the
+	// same local-only-endpoint check llm-worker's own config enforces --
+	// serveLLMAnalysisSearch treats an empty ollamaURL as "unconfigured",
+	// not a startup failure, same posture as GEOIP_CSV/ELASTICSEARCH_URL
+	// above.
+	if ollamaURL := os.Getenv("OLLAMA_URL"); ollamaURL != "" {
+		if ollamaEndpointIsLocal(ollamaURL) {
+			s.ollamaURL = ollamaURL
+			s.embeddingModel = getenv("LLM_EMBEDDING_MODEL", "nomic-embed-text:latest")
+		} else {
+			fmt.Fprintf(os.Stderr, "dashboard: OLLAMA_URL %s rejected (must be a local/internal endpoint), semantic search disabled\n", ollamaURL)
+		}
+	}
 	cooldown, err := time.ParseDuration(getenv("ALERT_COOLDOWN", "6h"))
 	if err != nil || cooldown < 5*time.Minute {
 		cooldown = 6 * time.Hour
@@ -276,6 +290,7 @@ func main() {
 	http.HandleFunc("/api/ml/anomalies", s.serveMLAnomaliesAPI)
 	http.HandleFunc("/api/ml/stats", s.serveMLStatsAPI)
 	http.HandleFunc("/api/llm/analysis", s.serveLLMAnalysisAPI)
+	http.HandleFunc("/api/llm/analysis/search", s.serveLLMAnalysisSearch)
 	http.HandleFunc("/api/events", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(s.eventsData(r))

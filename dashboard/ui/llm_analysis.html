@@ -27,6 +27,25 @@
         <p class="empty">Elasticsearch integration is disabled, so llm-worker analysis cannot be polled. Set ELASTICSEARCH_URL to enable this page.</p>
         {{else}}
         <div class="filters" id="llm-filters"><a class="chip" href="/">&larr; dashboard</a>{{template "filterbar" .}}</div>
+        <!-- #151: semantic search over session summaries -- the dashboard
+             embeds the query via a local Ollama call at request time
+             (/api/llm/analysis/search), then runs an Elasticsearch kNN
+             search against llm-worker's own embedding field. Deliberately
+             separate from the filter bar above: this is a similarity
+             search over free text, not an exact-match filter, and its own
+             "unavailable" state (Ollama unreachable/unconfigured) is
+             independent of whether the rest of the page loaded fine. -->
+        <section class="card hp-field" data-hp-search="semantic search llm session similarity embedding">
+          <div class="card__header">
+            <div><h3>Semantic search</h3><p class="card__meta">Finds session summaries by meaning, not exact keywords &mdash; e.g. "credential exfiltration over an encoded channel". Results are ranked by similarity, not recency, and are the same AI-generated output as the table below.</p></div>
+          </div>
+          <div class="filters"><input id="hp-llm-search-q" class="search" placeholder="Describe what you're looking for&hellip;" aria-label="Semantic search query"><button id="hp-llm-search-run" class="copy" type="button">search</button></div>
+          <p id="hp-llm-search-meta" class="card__meta" hidden></p>
+          <div class="table-scroll" id="hp-llm-search-results" hidden><table class="data-table">
+            <thead><tr><th>score</th><th>time</th><th>severity</th><th>summary</th><th>evidence</th></tr></thead>
+            <tbody id="hp-llm-search-rows"></tbody>
+          </table></div>
+        </section>
         <div class="tw:grid tw:grid-cols-12 tw:gap-3.5" id="llm-grid">
           <div class="card wide">
             {{if .Docs}}
