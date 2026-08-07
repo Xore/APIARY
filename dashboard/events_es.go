@@ -84,6 +84,15 @@ func (s *store) loadSensorEventsES(es *esClient, dirSensor string) ([]cachedEven
 		// @timestamp alone can collide at this volume, so _id is added as
 		// a tie-breaker -- without one, search_after can silently skip or
 		// duplicate hits that share a timestamp across page boundaries.
+		//
+		// #880: this query had no time bound at all, so a sensor with more
+		// than esEventsPageSize sightings within the 30-day honeypot-30d ILM
+		// retention window re-fetched its *entire* retained history on every
+		// single 15s rebuild tick, forever, with cost scaling with attacker
+		// traffic volume. esOverviewWindow (es_aggregate.go) is already the
+		// documented, deliberate bound for what "Total" honestly means for
+		// an ES-backed sensor -- reusing it here instead of inventing a
+		// second window keeps that meaning consistent across the dashboard.
 		body := map[string]any{
 			"size": esEventsPageSize,
 			"sort": []map[string]any{
@@ -91,7 +100,12 @@ func (s *store) loadSensorEventsES(es *esClient, dirSensor string) ([]cachedEven
 				{"_id": "desc"},
 			},
 			"query": map[string]any{
-				"term": map[string]any{"event.sensor": dirSensor},
+				"bool": map[string]any{
+					"filter": []map[string]any{
+						{"term": map[string]any{"event.sensor": dirSensor}},
+						{"range": map[string]any{"@timestamp": map[string]any{"gte": esOverviewWindow}}},
+					},
+				},
 			},
 		}
 		if searchAfter != nil {

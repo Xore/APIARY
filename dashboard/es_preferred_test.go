@@ -23,13 +23,7 @@ func esSensorAndOverviewStub(t *testing.T, docsBySensor map[string][]map[string]
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		body, _ := io.ReadAll(r.Body)
-		var req struct {
-			Query struct {
-				Term map[string]string `json:"term"`
-			} `json:"query"`
-		}
-		json.Unmarshal(body, &req)
-		sensor, isSensorQuery := req.Query.Term["event.sensor"]
+		sensor, isSensorQuery := sensorFromSearchBody(body)
 		if !isSensorQuery {
 			json.NewEncoder(w).Encode(esOverviewAggResponse{})
 			return

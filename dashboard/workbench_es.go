@@ -89,10 +89,25 @@ func (w *workbenchService) saveRecipe(input workbenchRecipe, owner string, baseR
 	if err != nil {
 		return workbenchRecipe{}, err
 	}
-	if len(hits) >= workbenchMaxRecipes {
-		return workbenchRecipe{}, errors.New("recipe limit reached")
-	}
 	if input.ID == "" {
+		// #883: workbenchMaxRecipes bounds how many distinct recipes exist,
+		// not how many revision documents they've accumulated -- every save
+		// (including an edit to an already-existing recipe) writes a new
+		// workbenchRecipeDocID(id, revision) document that's never pruned,
+		// so counting raw hits here let ordinary editing activity alone
+		// permanently exhaust the cap. Only a genuinely new recipe ID needs
+		// to check it; an edit of an existing recipe is handled below.
+		ids := make(map[string]bool, len(hits))
+		for _, hit := range hits {
+			var recipe workbenchRecipe
+			if json.Unmarshal(hit.Source, &recipe) != nil {
+				continue
+			}
+			ids[recipe.ID] = true
+		}
+		if len(ids) >= workbenchMaxRecipes {
+			return workbenchRecipe{}, errors.New("recipe limit reached")
+		}
 		input.ID, err = randomWorkbenchID("recipe")
 		if err != nil {
 			return workbenchRecipe{}, err
