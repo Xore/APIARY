@@ -3,10 +3,14 @@
 > **Status**: Implemented and live-verified end to end. Host stack (#324),
 > network policy (#325), client provisioning (#326), Workbench/dashboard
 > integration (#327), and spool/worker integration (#328) are all shipped.
-> Persona timeline content (#329) is in progress. See "What's verified"
-> below for exactly what was tested, live, and how — not just what was
-> configured.
-> **Last updated**: 2026-08-03
+> Persona timeline content (#329/#463) is designed and built -- richer
+> handler mix, staggered timing windows, the broken `Command` handler
+> fixed -- but not yet re-verified live against a freshly re-provisioned
+> golden image (#463's own PR flagged this as its one remaining item;
+> same rebuild-gated posture as #368/#787 elsewhere in this repo). See
+> "What's verified" below for exactly what was tested, live, and how —
+> not just what was configured.
+> **Last updated**: 2026-08-07
 > **Host platform**: KVM + QEMU + libvirt + docker-compose, same as
 > `sandbox/windows` — no VMware, no Hyper-V, no CI-triggered detonation.
 > **Tracking**: [#331](https://github.com/Xore/APIARY/issues/331)
