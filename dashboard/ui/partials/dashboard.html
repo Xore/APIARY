@@ -208,9 +208,20 @@
 <div class="card {{.class}}">
   <h2>{{.t}}</h2>
   {{if .rows}}
-  <table class="data-table"><tbody>
+  {{/* #790: card__scroll (the same pattern overview.html's Sensor feeds and
+       Activity heatmap cards, and source_health.html's sensor-feeds table,
+       already use) -- this one template backs 23 call sites across
+       overview.html, ips.html, intel.html, and session.html, so every
+       "Top X" list on the dashboard was growing the page underneath it
+       instead of scrolling in place whenever a host had enough distinct
+       values to fill it (confirmed live: /'s "Top credentials" and "Top
+       commands" cards, top-15 lists, rendered at 652px). Bounded lists
+       (a fixed top-N) never actually need to scroll in the common case --
+       this only engages once real content exceeds the cap, so a short
+       list looks and behaves exactly as before. */}}
+  <div class="card__scroll"><table class="data-table"><tbody>
     {{range .rows}}<tr><td class="n">{{if .Link}}<a href="{{.Link}}" title="show all {{.Count}} related events">{{.Count}}</a>{{else}}{{.Count}}{{end}}</td><td class="v">{{if .Link}}<a href="{{.Link}}" title="{{if .Title}}{{.Title}}{{else}}show all related events{{end}}">{{.Key}}</a>{{else}}{{.Key}}{{end}}</td></tr>{{end}}
-  </tbody></table>
+  </tbody></table></div>
   {{else}}<p class="empty">{{if .hint}}{{.hint}}{{else}}(none){{end}}</p>{{end}}
 </div>
 {{end}}

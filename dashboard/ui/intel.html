@@ -243,10 +243,22 @@
           </div>
         </header>
         <div class="filters" id="commands-filters"><a class="chip" href="/">&larr; dashboard</a><a class="chip" href="/export/commands.csv">export CSV &darr;</a><span class="chip">{{len .Rows}} unique commands</span>{{template "filterbar" .}}</div>
-        <div class="card wide" id="commands-table">{{if .Rows}}<table class="recent data-table"><thead><tr><th>seen</th><th>sensor</th><th>command</th><th>sources</th><th>sessions</th><th>first</th><th>last</th><th>chain</th></tr></thead><tbody>
+        {{/* #790: card__scroll -- unlike /events and /ips (both driven by
+             hp-app.js's IntersectionObserver-based lazy loader, which needs
+             its sentinel to reach the real window viewport to auto-trigger;
+             confining that inside an inner overflow:auto region would
+             replace "loads more as you scroll the page" with "loads more
+             only once you've separately scrolled the small inner box", a
+             real behavior regression for the dashboard's two primary
+             investigative table views -- deliberately left alone here),
+             /commands renders every matching row up front with no
+             pagination JS to interact with (no data-hp-page-url et al.),
+             so wrapping it is a pure win: was rendering at 1011px for just
+             20 rows, unbounded as more commands are captured. */}}
+        <div class="card wide" id="commands-table">{{if .Rows}}<div class="card__scroll"><table class="recent data-table"><thead><tr><th>seen</th><th>sensor</th><th>command</th><th>sources</th><th>sessions</th><th>first</th><th>last</th><th>chain</th></tr></thead><tbody>
         {{range .Rows}}<tr><td class="n">{{.Count}}</td><td><span class="badge b-{{.Sensor}}">{{.Sensor}}</span></td>
         <td class="v"><code>{{.Command}}</code> <button class="copy" data-copy="{{.Command}}">copy</button></td><td class="v">{{.Sources}}</td><td class="n">{{.Sessions}}</td><td{{if .FirstUTC}} data-hp-utc="{{.FirstUTC}}"{{end}}>{{.First}}</td><td{{if .LastUTC}} data-hp-utc="{{.LastUTC}}"{{end}}>{{.Last}}</td><td><a class="lnk" href="{{.Link}}">events &rarr;</a></td></tr>{{end}}
-        </tbody></table>{{else}}<p class="empty">no commands captured yet</p>{{end}}</div>
+        </tbody></table></div>{{else}}<p class="empty">no commands captured yet</p>{{end}}</div>
         <footer id="commands-footer">{{brandText}} &bull; static investigation view</footer>
       </div>
     </main>
