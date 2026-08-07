@@ -27,6 +27,7 @@ import (
 	"bufio"
 	"net"
 	"strings"
+	"time"
 )
 
 const pduTypeAAssociateRq = 1
@@ -51,7 +52,15 @@ func peekAETitles(conn net.Conn) (net.Conn, string, string) {
 	r := bufio.NewReaderSize(conn, 4096)
 	wrapped := &peekConn{Conn: conn, r: r}
 
+	// #888: without a deadline here, a connection that never sends 42 bytes
+	// (and never closes) parks this goroutine and its socket/fd in r.Peek
+	// forever -- decodeProxy's own "handlers set their own deadlines"
+	// comment (proxyproto.go) promises exactly this guard, which was never
+	// actually added. Cleared afterward so RunProviderForConn's own DIMSE
+	// handling isn't bound by a stale short deadline.
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	head, err := r.Peek(42)
+	conn.SetReadDeadline(time.Time{})
 	if err != nil || head[0] != pduTypeAAssociateRq {
 		return wrapped, "", ""
 	}

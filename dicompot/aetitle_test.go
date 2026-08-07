@@ -4,6 +4,7 @@ import (
 	"io"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/nsmfoo/dicompot/pdu"
 )
@@ -84,6 +85,28 @@ func TestPeekAETitlesIgnoresNonAssociatePDU(t *testing.T) {
 	_, calledAE, callingAE := peekAETitles(server)
 	if calledAE != "" || callingAE != "" {
 		t.Errorf("got called=%q calling=%q for a non-associate PDU, want both empty", calledAE, callingAE)
+	}
+}
+
+// TestPeekAETitlesHasAReadDeadline (#888): a connection that never sends
+// anything (and never closes) must not block peekAETitles -- and the
+// goroutine/fd behind it -- forever. Proven by requiring it to return well
+// within twice the function's own 5s deadline; before the fix this test
+// would hang until forcibly killed.
+func TestPeekAETitlesHasAReadDeadline(t *testing.T) {
+	server, client := net.Pipe()
+	defer client.Close()
+
+	done := make(chan struct{})
+	go func() {
+		peekAETitles(server)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(8 * time.Second):
+		t.Fatal("peekAETitles did not return within 8s of a connection that never sent data -- missing read deadline")
 	}
 }
 
