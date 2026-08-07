@@ -226,6 +226,56 @@ test.describe("UHQ tier at real 2x device-pixel-ratio", () => {
   }
 });
 
+// #672: "modals and toasts fully within the viewport" is explicitly named
+// in the issue -- and unlike every check above, nothing exercises this at
+// all, at any tier, before now. The existing single modal test
+// ("confirmation modal owns focus...") only ever runs at this project's
+// one default viewport. Both modals tested here (command palette,
+// confirm dialog) are shell-level markup in partials/dashboard.html --
+// present identically on every route, not per-page -- so testing them
+// once per viewport tier here is the right scope, not testing them
+// again on all 24 routes (that would just be re-proving the shell
+// partial renders the same everywhere, which the matrix above already
+// covers structurally).
+test.describe("modals stay within the viewport at every tier", () => {
+  for (const [viewportName, viewport] of Object.entries(viewports)) {
+    test(`command palette at ${viewportName}`, async ({ page }) => {
+      await isolateReadOnlyBrowserState(page);
+      await page.setViewportSize(viewport);
+      await page.goto("/");
+      await page.keyboard.press("/");
+      const palette = page.locator("#hp-command-palette");
+      await expect(palette).toHaveAttribute("aria-hidden", "false");
+      // aria-hidden flips synchronously in JS, well before the CSS
+      // dialog-in transition (theme.css's --transition, 160ms) actually
+      // finishes settling the modal into its resting position -- confirmed
+      // live this test caught a real-looking but entirely transient
+      // mid-animation geometry without this wait (a top: -210px reading
+      // that was gone by 600ms, correct at rest).
+      await page.waitForTimeout(300);
+      const rect = await palette.evaluate((el) => el.getBoundingClientRect());
+      expect(rect.left, `command palette left edge clipped at ${viewportName}`).toBeGreaterThanOrEqual(0);
+      expect(rect.top, `command palette top edge clipped at ${viewportName}`).toBeGreaterThanOrEqual(0);
+      expect(rect.right, `command palette right edge overflows at ${viewportName}`).toBeLessThanOrEqual(viewport.width + 1);
+      expect(rect.bottom, `command palette bottom edge overflows at ${viewportName}`).toBeLessThanOrEqual(viewport.height + 1);
+    });
+
+    test(`confirm dialog at ${viewportName}`, async ({ page }) => {
+      await isolateReadOnlyBrowserState(page);
+      await page.setViewportSize(viewport);
+      await page.goto("/events");
+      await page.getByRole("button", { name: /export CSV/i }).click();
+      const dialog = page.locator("#hp-confirm-backdrop .edit-dialog");
+      await expect(page.locator("#hp-confirm-backdrop")).toHaveClass(/open/);
+      const rect = await dialog.evaluate((el) => el.getBoundingClientRect());
+      expect(rect.left, `confirm dialog left edge clipped at ${viewportName}`).toBeGreaterThanOrEqual(0);
+      expect(rect.top, `confirm dialog top edge clipped at ${viewportName}`).toBeGreaterThanOrEqual(0);
+      expect(rect.right, `confirm dialog right edge overflows at ${viewportName}`).toBeLessThanOrEqual(viewport.width + 1);
+      expect(rect.bottom, `confirm dialog bottom edge overflows at ${viewportName}`).toBeLessThanOrEqual(viewport.height + 1);
+    });
+  }
+});
+
 test.describe("dashboard browser behaviour", () => {
   test.beforeEach(async ({ page }) => {
     await isolateReadOnlyBrowserState(page);
