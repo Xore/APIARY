@@ -1,0 +1,92 @@
+{{define "agent-campaigns"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>{{brandText}} &mdash; Agent-intrusion campaigns</title>
+{{template "style" .}}
+</head>
+<body>
+<div class="app-shell">
+  {{template "topbar" .}}
+  {{template "sidebar" .}}
+  <main class="app-main">
+      <div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
+        <header class="overview-header" id="campaigns-header">
+          <div>
+            <div class="label-section">Detection</div>
+            <h1>Agent-intrusion campaigns</h1>
+            <p class="subtitle">Correlated, deterministically-scored campaigns from agent-intrusion-worker &mdash; every entry here crossed a named trust boundary via a rule in criticality_rules.py, not a model's own judgment call.</p>
+          </div>
+          <div class="live-panel">
+            <span class="gen">generated <span data-hp-utc="{{utcOrEmpty .Generated}}">{{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></span>
+          </div>
+        </header>
+        {{if not .Enabled}}
+        <p class="empty">Elasticsearch integration is disabled, so agent-intrusion-worker's campaign verdicts cannot be polled. Set ELASTICSEARCH_URL to enable this page.</p>
+        {{else}}
+        <div class="filters" id="campaigns-filters"><a class="chip" href="/">&larr; dashboard</a>{{template "filterbar" .}}</div>
+        {{if .CountByCat}}
+        <div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-4 tw:gap-3 tw:mb-6" id="campaigns-kpis">
+          {{range .CountByCat}}<div class="metric"><a href="{{.Link}}"><div class="metric__value">{{.Count}}</div><div class="metric__label">{{.Key}}</div></a></div>{{end}}
+        </div>
+        {{end}}
+        {{if .Campaigns}}
+        <div class="tw:flex tw:flex-col tw:gap-3.5" id="campaigns-list">
+          {{range .Campaigns}}
+          <div class="card wide">
+            <div class="tw:flex tw:flex-wrap tw:items-center tw:justify-between tw:gap-2">
+              <div>
+                <span class="badge {{if eq .Severity "critical"}}badge--danger{{else if eq .Severity "high"}}badge--warning{{else}}badge--info{{end}}">{{.Severity}}</span>
+                <strong class="tw:ml-2">{{.EventCount}} event{{if ne .EventCount 1}}s{{end}}</strong>
+                <span class="tw:text-muted tw:ml-2" data-hp-utc="{{.Start}}">{{.Start}}</span>
+                <span class="tw:text-muted">&rarr;</span>
+                <span class="tw:text-muted" data-hp-utc="{{.End}}">{{.End}}</span>
+              </div>
+              <div class="tw:text-muted"><small>campaign {{.CampaignID}}</small></div>
+            </div>
+            <div class="tw:flex tw:flex-wrap tw:gap-1.5 tw:my-2">
+              {{range .MatchedCategories}}<span class="badge badge--muted">{{.}}</span>{{end}}
+              {{range .IdentifierLinks}}{{if .Link}}<a class="chip" href="{{.Link}}">{{.Key}}</a>{{else}}<span class="chip">{{.Key}}</span>{{end}}{{end}}
+            </div>
+            <details>
+              <summary>Evidence timeline ({{len .Events}} event{{if ne (len .Events) 1}}s{{end}})</summary>
+              <table class="recent data-table tw:mt-2">
+                <thead><tr><th>time</th><th>rule</th><th>trust boundary crossed</th><th>reason</th><th>decoded artifact</th><th>source event</th></tr></thead>
+                <tbody>
+                  {{range $event := .Events}}
+                    {{if $event.MatchedRules}}
+                      {{range $rule := $event.MatchedRules}}
+                      <tr>
+                        <td{{if $event.Timestamp}} data-hp-utc="{{$event.Timestamp}}"{{end}}>{{$event.Timestamp}}</td>
+                        <td class="v">{{$rule.Rule}}</td>
+                        <td class="v">{{$rule.TrustBoundary}}</td>
+                        <td class="v">{{$rule.Reason}}</td>
+                        <td class="v">{{if $rule.DecodeChain}}<small>{{$rule.TransformPath}} <span class="tw:text-muted">sha256:{{$rule.FinalArtifactHash}}</span></small>{{else}}<span class="tw:text-muted">&mdash;</span>{{end}}</td>
+                        <td class="v">{{if $event.SourceLink}}<a href="{{$event.SourceLink}}">view source</a>{{else}}<span class="tw:text-muted">&mdash;</span>{{end}}</td>
+                      </tr>
+                      {{end}}
+                    {{else}}
+                      <tr>
+                        <td{{if $event.Timestamp}} data-hp-utc="{{$event.Timestamp}}"{{end}}>{{$event.Timestamp}}</td>
+                        <td class="v" colspan="4"><span class="tw:text-muted">correlated into this campaign, no rule matched on its own</span></td>
+                        <td class="v">{{if $event.SourceLink}}<a href="{{$event.SourceLink}}">view source</a>{{else}}<span class="tw:text-muted">&mdash;</span>{{end}}</td>
+                      </tr>
+                    {{end}}
+                  {{end}}
+                </tbody>
+              </table>
+            </details>
+          </div>
+          {{end}}
+        </div>
+        {{else}}<p class="empty">No campaign has crossed a criticality-rule threshold yet.</p>{{end}}
+        {{end}}
+        <footer id="campaigns-footer">{{brandText}} &bull; deterministic rule matches, reviewed by an operator before action</footer>
+      </div>
+    </main>
+</div>
+</body>
+</html>
+{{end}}

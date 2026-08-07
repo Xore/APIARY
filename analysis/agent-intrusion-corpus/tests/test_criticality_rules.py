@@ -58,6 +58,33 @@ class TestIndividualRules(unittest.TestCase):
         raw = {"eventid": "cowrie.command.input", "input": "exec('id')"}
         self.assertIsNone(cr.rule_encoded_execution(raw))
 
+    def test_encoded_execution_populates_decode_chain(self):
+        # #154 phase 5's own "decoded-artifact hashes" requirement -- a
+        # verified decode must leave a real, checkable hash chain behind,
+        # not just the human-readable reason string.
+        import base64
+        import gzip
+        blob = base64.b64encode(gzip.compress(b"id")).decode()
+        raw = {"eventid": "cowrie.command.input", "input": f"python3 -c \"exec(gzip.decompress(base64.b64decode('{blob}')))\""}
+        match = cr.rule_encoded_execution(raw)
+        self.assertTrue(match.decode_chain)
+        self.assertEqual(match.decode_chain[0].transform, "base64")
+        # bounded_decode keeps peeling as long as something peels off (its
+        # own documented behavior, see decode_correlate.py) -- b"id" itself
+        # happens to be valid base64, so the chain runs past the gzip step
+        # rather than stopping there. Assert the gzip step is present
+        # somewhere, not that it's necessarily last.
+        self.assertIn("gzip", [step.transform for step in match.decode_chain])
+        self.assertEqual(len(match.decode_chain[-1].output_sha256), 64)
+
+    def test_encoded_egress_external_populates_decode_chain(self):
+        raw = {"src_ip": "10.0.0.5", "dest_ip": "8.8.8.8", "payload_printable": "GET /x?data=aGVsbG93b3JsZA== HTTP/1.1"}
+        match = cr.rule_encoded_egress_external(raw)
+        self.assertIsNotNone(match)
+        self.assertEqual(len(match.decode_chain), 1)
+        self.assertEqual(match.decode_chain[0].transform, "raw")
+        self.assertEqual(len(match.decode_chain[0].output_sha256), 64)
+
     def test_metadata_service_probe_matches_link_local_address(self):
         raw = {"dest_ip": "169.254.169.254"}
         self.assertIsNotNone(cr.rule_metadata_service_probe(raw))

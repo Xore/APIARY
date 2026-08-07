@@ -138,6 +138,27 @@ class TestBuildCampaignVerdict(unittest.TestCase):
         matched = verdict["events"][0]["matched_rules"][0]
         self.assertEqual(matched["rule"], "sensitive-path-read")
         self.assertTrue(matched["trust_boundary"])  # non-empty -- phase 5's own required field
+        self.assertEqual(matched["decode_chain"], [])  # this rule never decodes anything
+
+    def test_encoded_execution_verdict_surfaces_decode_chain_hashes(self):
+        # #154 phase 5's own "decoded-artifact hashes" requirement, proven
+        # through the worker's own real call sequence (RuleMatch ->
+        # dataclasses.asdict), not just against criticality_rules.py directly.
+        import base64
+        import gzip
+        blob = base64.b64encode(gzip.compress(b"id")).decode()
+        events_by_id = {
+            "e1": {"event_id": "e1", "timestamp": "2026-02-09T00:00:00Z", "source_index": "honeypot-v2-x",
+                   "raw": {"eventid": "cowrie.command.input",
+                           "input": f"python3 -c \"exec(gzip.decompress(base64.b64decode('{blob}')))\"", "session": "s1"}},
+        }
+        campaign = worker.corr.Campaign(event_ids=["e1"], identifiers={"session:s1"}, start="2026-02-09T00:00:00Z", end="2026-02-09T00:00:00Z")
+        verdict = worker.build_campaign_verdict(campaign, events_by_id)
+        chain = verdict["events"][0]["matched_rules"][0]["decode_chain"]
+        self.assertTrue(chain)
+        self.assertEqual(chain[0]["transform"], "base64")
+        self.assertIn("gzip", [step["transform"] for step in chain])
+        self.assertEqual(len(chain[-1]["output_sha256"]), 64)
 
     def test_campaign_id_is_deterministic(self):
         events_by_id = {

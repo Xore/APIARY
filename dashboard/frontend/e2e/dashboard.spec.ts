@@ -43,6 +43,10 @@ const routes = [
   // out" for every test in this matrix, so there's no way to toggle it
   // on from here -- confirmed live, this route 404s exactly as designed
   // for a signed-out/default-config viewer, not a bug.
+  // /agent-campaigns (#154 phase 5) is the same story as /ml-anomalies
+  // immediately above -- also gated behind mlPanelsEnabled() server-side
+  // (main.go), also 404s for this matrix's signed-out/default-config
+  // viewer for the identical reason. Deliberately not added here either.
   "/github-analysis",
   // bare /search (no ?q=) 303-redirects to /events -- confirmed in
   // search.go's own serveSearch(), not a bug -- which page.goto() follows

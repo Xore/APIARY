@@ -202,8 +202,9 @@ type store struct {
 	scriptDir         string   // writable directory for safely retained inline scripts
 	geo               *geoDB   // nil if no GeoIP database configured
 	es                *esClient
-	mlAnomalies       *mlAnomalyStore   // ml-worker's scored anomalies, polled via es (#64); nil until initialised in main()
-	llmAnalysis       *llmAnalysisStore // llm-worker's guarded model output, polled via es (#150); nil until initialised in main()
+	mlAnomalies       *mlAnomalyStore     // ml-worker's scored anomalies, polled via es (#64); nil until initialised in main()
+	llmAnalysis       *llmAnalysisStore   // llm-worker's guarded model output, polled via es (#150); nil until initialised in main()
+	agentCampaigns    *agentCampaignStore // agent-intrusion-worker's correlated campaign verdicts, polled via es (#154 phase 5); nil until initialised in main()
 	// ollamaURL/embeddingModel (#151) back serveLLMAnalysisSearch's
 	// query-time embedding call. ollamaURL empty means semantic search is
 	// unconfigured/rejected -- the same "feature quietly off" posture geo
