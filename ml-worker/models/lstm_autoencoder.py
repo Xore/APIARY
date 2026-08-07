@@ -337,7 +337,45 @@ class LSTMAEModel:
                 train_losses.append(nn.functional.mse_loss(recon, batch).item())
         candidate_threshold = float(np.mean(train_losses)) * 2.0 if train_losses else original_threshold
 
-        candidate_rate = _anomaly_rate(self.net, candidate_threshold, X_holdout)
+        # #174: evaluate the candidate against original_threshold (the
+        # OUTGOING model's own fixed bar) whenever a real one exists, not
+        # candidate_threshold. Scoring against candidate_threshold was
+        # self-referential -- that value is 2x THIS SAME cycle's own mean
+        # training loss, so _anomaly_rate's internal *2 compounded it to 4x
+        # mean, a bar candidate_threshold's own fine-tune had (by
+        # construction) just been optimized to sit comfortably under.
+        # Confirmed live against 24h of real production traffic:
+        # anomaly_rate_new read exactly 0.0 on every retrain cycle observed,
+        # both before and after #815, because not even the single most
+        # extreme sequence in a 26k-sequence batch reached 4x that batch's
+        # own mean loss. previous_rate never had this problem --
+        # self.threshold there is a bar fixed BEFORE this cycle's fine-tune,
+        # so it isn't self-referential -- which is exactly why the fix here
+        # is to hold the candidate to that identical fixed bar too: "does
+        # the new model's holdout reconstruction cross the SAME line the
+        # outgoing model is being judged against" is what the acceptance
+        # gate's own intent (RetrainResult docstring, docs/ml-worker-plan.md
+        # §11.1: reject a candidate that regresses vs. the outgoing model)
+        # actually calls for.
+        #
+        # Bootstrap exception: on the very first-ever retrain (self._trained
+        # was False before this call), original_threshold is just __init__'s
+        # arbitrary uncalibrated 0.05 default, not a real previously-fit
+        # baseline -- confirmed live, holding a genuine fine-tuned candidate
+        # to that arbitrary constant rejected literally every holdout
+        # sequence (anomaly_rate_new pinned at 1.0, not a real
+        # discriminating signal either, just a different broken constant).
+        # There is no real prior baseline to compare against yet in this
+        # one case, so this falls back to the original self-referential
+        # formula deliberately -- the same posture _accept_decision already
+        # takes for its own reference_rate when previous_rate is None.
+        #
+        # candidate_threshold itself is untouched either way -- it's still
+        # exactly what gets promoted to self.threshold (and therefore what
+        # score()'s own online boundary uses) if accepted; only the
+        # ACCEPTANCE DECISION's own reference bar changes here.
+        acceptance_reference = original_threshold if self._trained else candidate_threshold
+        candidate_rate = _anomaly_rate(self.net, acceptance_reference, X_holdout)
         accept, reason = _accept_decision(candidate_rate, previous_rate)
         result = RetrainResult(
             accepted=accept, reason=reason,
