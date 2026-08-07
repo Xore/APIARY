@@ -142,6 +142,48 @@ func TestCorrelateHashRejectsMalformedAltID(t *testing.T) {
 	}
 }
 
+// TestCorrelateHashFlagsTruncationWhenSightingsExceedReturnedRecords (#887):
+// correlate() caps how many records it actually returns (200) but reports
+// Elasticsearch's true total hit count separately -- when a hash has more
+// sightings than fit in that cap, the oldest record in the returned,
+// newest-first page is NOT the hash's true first sighting, and callers must
+// be told that rather than silently trusting it.
+func TestCorrelateHashFlagsTruncationWhenSightingsExceedReturnedRecords(t *testing.T) {
+	es := httptest.NewServer(correlationSearchStub(t, new(string), `{
+	  "hits": {
+	    "total": {"value": 5000},
+	    "hits": [
+	      {"_index": "honeypot-v2-2026.08.02", "_source": {"@timestamp": "2026-08-02T12:00:00Z", "event": {"sensor": "cowrie"}}},
+	      {"_index": "honeypot-v2-2026.08.01", "_source": {"@timestamp": "2026-08-01T09:00:00Z", "event": {"sensor": "dionaea"}}}
+	    ]
+	  }
+	}`))
+	defer es.Close()
+
+	s := &store{es: newESClient(es.URL, "")}
+	result := s.correlateHash(shaA, "")
+	if !result.ESTruncated {
+		t.Fatalf("expected ESTruncated=true when total (5000) exceeds returned records (2), got %+v", result)
+	}
+	if result.ESSightings != 5000 {
+		t.Fatalf("expected the true total sightings to still be reported, got %d", result.ESSightings)
+	}
+}
+
+// TestCorrelateHashDoesNotFlagTruncationWhenAllSightingsAreReturned (#887):
+// the common case -- total fits within the record cap -- must not be
+// flagged as truncated.
+func TestCorrelateHashDoesNotFlagTruncationWhenAllSightingsAreReturned(t *testing.T) {
+	es := httptest.NewServer(correlationSearchStub(t, new(string), hashCorrelationSample))
+	defer es.Close()
+
+	s := &store{es: newESClient(es.URL, "")}
+	result := s.correlateHash(shaA, "")
+	if result.ESTruncated {
+		t.Fatalf("did not expect ESTruncated when total (2) matches returned records, got %+v", result)
+	}
+}
+
 // TestPayloadAnalysisPageRendersKnownElsewhereCard (#354): the advisory card
 // must show Ghidra and Elasticsearch sighting summary when known, and a
 // clear "not seen elsewhere" state when not -- never blocking anything

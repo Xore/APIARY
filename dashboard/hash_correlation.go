@@ -35,6 +35,11 @@ type hashCorrelation struct {
 	ESSensors   []kv
 	ESFirstSeen string
 	ESLastSeen  string
+	// ESTruncated is true when ESSightings exceeds the number of records
+	// actually fetched (see correlate's cap below) -- ESFirstSeen is then
+	// only the oldest record within that capped, newest-first page, not the
+	// hash's true first sighting, which may be considerably earlier (#887).
+	ESTruncated bool
 }
 
 // correlateHash answers #354's "is this hash known" question by checking
@@ -93,6 +98,12 @@ func (s *store) correlateHash(primary, altID string) hashCorrelation {
 		if records, total, err := s.es.correlate(hashQuery(ids...), 200); err == nil {
 			result.ESAvailable = true
 			result.ESSightings = total
+			// #887: records is sorted newest-first (esClient.correlate's own
+			// doc comment) and capped at 200 -- for a hash with more than
+			// 200 sightings, the oldest record in this page is NOT the
+			// hash's true first sighting, just the oldest one that fit.
+			// ESTruncated flags that so callers don't present it as fact.
+			result.ESTruncated = total > len(records)
 			sensors := map[string]int{}
 			for i, record := range records {
 				sensors[record.Sensor]++

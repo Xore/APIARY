@@ -90,3 +90,21 @@ func TestCampaignsDataFilteredIgnoresTheCachedSnapshot(t *testing.T) {
 		t.Fatalf("a filtered request must recompute live, not read the stale cached snapshot, got %+v", got.Campaigns)
 	}
 }
+
+// #886: the fast-path guard used to allowlist only cidr/asn/sensor/since,
+// so a filter field outside that list (e.g. country) silently took the
+// fast path anyway and served the stale cached snapshot as if the request
+// were unfiltered.
+func TestCampaignsDataFilteredByNonAllowlistedFieldIgnoresTheCachedSnapshot(t *testing.T) {
+	now := time.Now()
+	s := &store{events: []storedEvent{
+		{when: now, SrcIP: "8.8.8.8", Sensor: "cowrie", Port: "22", Country: "US"},
+		{when: now, SrcIP: "8.8.8.9", Sensor: "dionaea", Port: "445", Country: "CN"},
+	}}
+	s.snap.Campaigns = []campaignRow{{CIDR: "203.0.113.0/24", Events: 999, UniqueIPs: 42}}
+
+	got := s.campaignsData(httptest.NewRequest("GET", "/campaigns?country=CN", nil))
+	if len(got.Campaigns) != 1 || got.Campaigns[0].Events != 1 {
+		t.Fatalf("a country-filtered request must recompute live, not read the stale cached snapshot, got %+v", got.Campaigns)
+	}
+}
