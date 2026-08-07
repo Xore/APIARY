@@ -75,9 +75,20 @@
          `<cpu migratable='off'/>` below blocks memory-state snapshots
          outright, and disk-only external snapshots hit a separate,
          reproducible QEMU/libvirt bug on the resulting multi-layer backing
-         chain (see #358). -->
+         chain (see #358).
+
+         templateFormat='raw' is required, not decorative: the template
+         file itself (OVMF_VARS_4M.ms.fd) is a raw image, and without this
+         attribute a fresh `virsh define` + `virsh start` on this host's
+         libvirt fails outright ("conversion of the nvram template to
+         another target format is not supported") instead of silently
+         defaulting to it — found live (2026-08-07) defining win11-cape's
+         sibling domain from a clean state. This domain's own already-live
+         XML carries this attribute despite this on-disk file never having
+         had it, meaning some earlier libvirt version here auto-added it
+         on define and this file just never caught up. -->
     <loader readonly='yes' secure='yes' type='pflash'>/usr/share/OVMF/OVMF_CODE_4M.secboot.fd</loader>
-    <nvram template='/usr/share/OVMF/OVMF_VARS_4M.ms.fd' format='qcow2'>/var/lib/libvirt/qemu/nvram/win11-sandbox_VARS.qcow2</nvram>
+    <nvram template='/usr/share/OVMF/OVMF_VARS_4M.ms.fd' templateFormat='raw' format='qcow2'>/var/lib/libvirt/qemu/nvram/win11-sandbox_VARS.qcow2</nvram>
     <boot dev='hd'/>
   </os>
 
