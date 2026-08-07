@@ -41,6 +41,22 @@ this decode/correlate output is meant to feed.
   the recovered plaintext actually matches what each event's own
   `expected_findings.decoded_summary` claims — cashing in the corpus's own
   "ground truth" contract for real, not just trusting the prose.
+- **`campaign_correlator.py`** — phase 2's other half ("Correlate events
+  across sensors into one campaign timeline using stable IDs and time
+  windows"). Distinct from `decode_correlate.py`'s `ChunkCorrelator`,
+  which reassembles fragments of *one message*; this correlates separate,
+  already-complete *events* into one campaign, union-find style over
+  shared session/source-IP/C2-channel identifiers within a time window.
+  No ML, no fuzzy matching — deterministic, same posture as
+  `bounded_decode`.
+- **`tests/test_campaign_correlator.py`** — unit tests plus an end-to-end
+  proof against the real corpus of the actual motivating case #154 opens
+  with: a C2 channel ID reused across a "stage" and an "exfil" message
+  bridges two events sharing *no* session or IP of their own into one
+  8-event campaign. Also asserts two real, deliberate scope limits this
+  identifier-only approach doesn't solve (fleet siblings on different
+  hosts; an actor's IP changing across a mesh/NAT pivot) rather than
+  leaving them as silent gaps.
 
 ## Design
 
@@ -155,13 +171,18 @@ note here, not silently reinterpret old corpus rows under a new meaning.
 
 ## What this directory does *not* do
 
-`decode_correlate.py` decodes and reassembles; it does not score or
-escalate anything — no criticality rules, no severity, no alerting. That's
-phase 3's job, which this directory's decoded output is meant to feed once
-built. `matched_rule` in every corpus event is still either `null` or a
-descriptive placeholder string, not a real rule identifier, since phase
-3's rule set doesn't exist yet. `decode_correlate.py` is also standalone
-Python, not yet wired into the dashboard/analysis-worker pipeline
-production code would actually run against live sensor data -- that
-integration is separate follow-up work once phase 3 defines what a
-decoded+correlated event should trigger.
+`decode_correlate.py` and `campaign_correlator.py` decode, reassemble, and
+group; neither scores or escalates anything — no criticality rules, no
+severity, no alerting. That's phase 3's job, which this directory's
+decoded+correlated output is meant to feed once built. `matched_rule` in
+every corpus event is still either `null` or a descriptive placeholder
+string, not a real rule identifier, since phase 3's rule set doesn't exist
+yet. Both modules are also standalone Python, not yet wired into the
+dashboard/analysis-worker pipeline production code would actually run
+against live sensor data — that integration is separate follow-up work
+once phase 3 defines what a decoded+correlated campaign should trigger.
+`campaign_correlator.py` itself has two deliberate, tested scope limits
+(see `tests/test_campaign_correlator.py`'s own "documented gap" tests):
+it correlates on shared *identifiers*, not repeated-technique similarity
+across different infrastructure, and it has no way to link an actor's
+identity across a NAT/mesh boundary where its own address changes.
