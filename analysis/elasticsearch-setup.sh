@@ -486,6 +486,45 @@ curl -fsS -X PUT "$es_url/_index_template/ghidra-report-artifacts" \
   }
 }' >/dev/null
 
+# #638/#764: sandbox export artifacts (guest/host PCAP, diagnostics ZIP),
+# mirrored by es-results-importer's own chunked binary sources -- the
+# artifacts dashboard/sandbox.go used to os.Open straight off
+# sandboxResultsDirs(). Chunked because a single document (even base64'd
+# generously the way the smaller ghidra-report-artifacts-v1 above does)
+# can't hold a 64MB PCAP -- one document per chunk instead, doc _id
+# "<job>:<kind>:<chunk_index>". Same 180d ILM as sandbox-analysis-v1 (its
+# own template a few dozen lines up) for the same reasoning as
+# ghidra-report-artifacts-v1's own comment above: these are derived
+# attachments to that result, meaningless once it's aged out, not
+# standalone evidence.
+curl -fsS -X PUT "$es_url/_index_template/sandbox-export-artifacts" \
+  -H 'Content-Type: application/json' \
+  --data-binary '{
+  "index_patterns": ["sandbox-export-artifacts-v1"],
+  "priority": 460,
+  "template": {
+    "settings": {
+      "index.lifecycle.name": "analysis-results-180d",
+      "index.number_of_replicas": 0,
+      "index.refresh_interval": "30s",
+      "index.mapping.total_fields.limit": 50
+    },
+    "mappings": {
+      "properties": {
+        "job": { "type": "keyword" },
+        "kind": { "type": "keyword" },
+        "filename": { "type": "keyword" },
+        "content_type": { "type": "keyword" },
+        "chunk_index": { "type": "integer" },
+        "total_chunks": { "type": "integer" },
+        "size_bytes": { "type": "long" },
+        "imported_at": { "type": "date" },
+        "data_base64": { "type": "binary" }
+      }
+    }
+  }
+}' >/dev/null
+
 # #494: dashboard-owned operational alert-rule state (campaign detection,
 # stale sensor feeds, activity spikes, ES pipeline health, OT command
 # detection, YARA hits, sandbox failures -- ack/cooldown bookkeeping, not

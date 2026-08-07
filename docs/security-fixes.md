@@ -33,12 +33,19 @@ a live system's state into a markdown file.** Link to the system.
 
 ## A defect can be real without being exploitable
 
-`sandboxArtifactFile` in `dashboard/sandbox.go` is the working example. Its
-`filepath.Join` is reached only after the handler has checked that the request
-path exactly equals a server-derived URL, so there is no live traversal. It is
-still worth fixing, because the property that makes it safe is enforced three
-frames away, is partly an accident of `ServeMux`, and is asserted by no test.
-The next caller added to that function inherits none of it.
+`sandboxArtifactFile` in `dashboard/sandbox.go` was the working example (removed
+by #764, see below). Its `filepath.Join` was reached only after the handler had
+checked that the request path exactly equalled a server-derived URL, so there
+was no live traversal. It was still worth fixing, because the property that
+made it safe was enforced three frames away, was partly an accident of
+`ServeMux`, and was asserted by no test. The next caller added to that
+function would have inherited none of it.
 
 Fix the join, not the handler. Safety that has to be argued from context is
 safety that will be lost during a refactor nobody thinks is risky.
+
+`ghidra.go`'s equivalent (`ReportPDF`/`CallGraphSVG` re-validated as bare
+filenames before a `filepath.Join`) went further still: #638/#763/#764 moved
+every one of these disk-backed artifact routes onto Elasticsearch, so there is
+no join left to defend in any of them — the safest fix for "the join's safety
+depends on context three frames away" is often removing the join.

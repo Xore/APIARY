@@ -187,6 +187,41 @@ SOURCES = [
     },
 ]
 
+# #638/#764: sandbox export artifacts (guest/host PCAP, diagnostics ZIP).
+# Unlike every binary source above, a single document -- even chunked
+# generously -- isn't the right primitive here at all: a 64MB PCAP is
+# ~85MB base64'd, well past what a normal ES document should hold even
+# with the larger caps the Ghidra artifacts above use. scan_source's own
+# "chunked" branch splits the file across CHUNK_BYTES-sized documents
+# instead (see its own comment for the doc-id/manifest shape).
+#
+# Generated rather than hand-repeated 9 times (3 artifact kinds x 3
+# sandbox backends -- the same fan-out the JSON "sandbox" sources above
+# already repeat by hand 3 times over): the shape is identical across
+# every combination, only the env var and kind/suffix differ, and
+# hand-repeating a real behavior difference (see ghidra_report_html/
+# ghidra_callgraph_svg above, which stayed as two explicit dicts
+# specifically because they *aren't* interchangeable copies of each
+# other) would just be noise here.
+_SANDBOX_RESULT_ENV_VARS = ("SANDBOX_RESULTS_DIR", "WINDOWS_SANDBOX_RESULTS_DIR", "GHOSTS_SANDBOX_RESULTS_DIR")
+_SANDBOX_EXPORT_KINDS = (
+    (".host.pcap", "host_pcap", "application/vnd.tcpdump.pcap"),
+    (".guest.pcap", "guest_pcap", "application/vnd.tcpdump.pcap"),
+    (".diagnostics.zip", "diagnostics", "application/zip"),
+)
+for _env in _SANDBOX_RESULT_ENV_VARS:
+    for _suffix, _kind, _content_type in _SANDBOX_EXPORT_KINDS:
+        SOURCES.append({
+            "env": _env,
+            "label": f"sandbox_export_{_kind}",
+            "index": "sandbox-export-artifacts-v1",
+            "glob": f"*{_suffix}",
+            "chunked": True,
+            "id_suffix": _suffix,
+            "artifact_kind": _kind,
+            "content_type": _content_type,
+        })
+
 # A cowrie session left connected for hours (an attacker idling, or a stuck
 # shell) can produce a ttylog well beyond a normal few-KB/MB session. Rather
 # than let one pathological session bloat a bulk() batch or approach
@@ -195,6 +230,20 @@ SOURCES = [
 # larger -- the file stays on disk either way (#611), so nothing is lost,
 # just not mirrored into ES until this cap is deliberately raised.
 MAX_TTYLOG_BYTES = int(os.getenv("MAX_TTYLOG_BYTES", str(20 * 1024 * 1024)))
+
+# #638/#764: chunked sources (sandbox export artifacts) split a file across
+# CHUNK_BYTES-sized documents instead of capping/skipping it -- there's no
+# upper artifact size this can't eventually index given enough chunks, so
+# MAX_CHUNKED_ARTIFACT_BYTES exists only as a sanity ceiling against a
+# genuinely pathological file (a corrupted or runaway capture) turning into
+# an absurd number of tiny documents, not as a real limit anyone should
+# expect to hit -- 64MB guest PCAPs are the documented normal case
+# (dashboard/sandbox.go's own attachSandboxDownloads history) and comfortably
+# clear this by 4x. 8MB raw per chunk (~11MB base64'd) stays well under
+# Elasticsearch's own ~100MB HTTP body ceiling with real headroom for bulk()
+# batching several chunks in one request.
+CHUNK_BYTES = int(os.getenv("SANDBOX_ARTIFACT_CHUNK_BYTES", str(8 * 1024 * 1024)))
+MAX_CHUNKED_ARTIFACT_BYTES = int(os.getenv("MAX_CHUNKED_ARTIFACT_BYTES", str(256 * 1024 * 1024)))
 
 
 def load_state() -> dict:
@@ -262,6 +311,7 @@ def scan_source(source: dict, root: Path, state: dict) -> list:
     pending = []
     skip = source.get("skip", set())
     binary = source.get("binary", False)
+    chunked = source.get("chunked", False)
     for path in sorted(root.glob(source["glob"])):
         if not path.is_file() or path.name in skip:
             continue
@@ -270,6 +320,57 @@ def scan_source(source: dict, root: Path, state: dict) -> list:
         key = str(path)
         mtime = path.stat().st_mtime
         if state.get(key) == mtime:
+            continue
+
+        if chunked:
+            # #638/#764: sandbox export artifacts -- split across multiple
+            # documents instead of one large (or capped/skipped) one. Doc
+            # _id is "<job>:<kind>:<chunk_index>"; chunk 0 doubles as the
+            # artifact's own manifest (it carries filename/content_type/
+            # total_chunks/size_bytes alongside its own data), so a reader
+            # that only needs to know "does this exist, how big is it"
+            # (dashboard/sandbox.go's attachSandboxDownloads) never has to
+            # fetch more than one document.
+            size = path.stat().st_size
+            if size == 0:
+                continue
+            if size > MAX_CHUNKED_ARTIFACT_BYTES:
+                logger.warning(f"{source['label']}: skipping {path} ({size} bytes, over the {MAX_CHUNKED_ARTIFACT_BYTES}-byte sanity cap)")
+                continue
+            try:
+                data = path.read_bytes()
+            except OSError as exc:
+                logger.warning(f"{source['label']}: skipping unreadable {path}: {exc}")
+                continue
+            job = path.name[: -len(source["id_suffix"])]
+            kind = source["artifact_kind"]
+            total_chunks = (len(data) + CHUNK_BYTES - 1) // CHUNK_BYTES
+            now = datetime.now(timezone.utc).isoformat()
+            for index in range(total_chunks):
+                chunk = data[index * CHUNK_BYTES: (index + 1) * CHUNK_BYTES]
+                action = {
+                    "_op_type": "index",
+                    "_index": source["index"],
+                    "_id": f"{job}:{kind}:{index}",
+                    "_source": {
+                        "job": job,
+                        "kind": kind,
+                        "filename": path.name,
+                        "content_type": source["content_type"],
+                        "chunk_index": index,
+                        "total_chunks": total_chunks,
+                        "size_bytes": len(data),
+                        "imported_at": now,
+                        "data_base64": base64.b64encode(chunk).decode("ascii"),
+                    },
+                }
+                # Every chunk shares this file's (key, mtime) -- run_pass's
+                # own state-advancement logic only marks `key` imported once
+                # NONE of its actions failed, so a partial write (chunk 3 of
+                # 8 fails, the rest succeed) still gets retried next pass
+                # instead of silently leaving a hole a stale mtime would
+                # never revisit.
+                pending.append((key, mtime, action))
             continue
 
         if binary:
@@ -337,6 +438,26 @@ def scan_source(source: dict, root: Path, state: dict) -> list:
     return pending
 
 
+def advance_state_after_bulk(pending: list, failed_ids: set, state: dict) -> None:
+    """Given `pending` (key, mtime, action) triples and the doc _ids
+    bulk() reported as failed, advance state[key] only for keys whose
+    EVERY action succeeded.
+
+    #638/#764: a chunked artifact's pending entries all share one key
+    (see scan_source's own comment on this) -- advancing state[key] the
+    moment *any* one action for it succeeds, the way a naive per-tuple
+    loop would, risks marking the whole file "imported" while an earlier
+    chunk in the same batch actually failed (its mtime would then never
+    trigger a retry again, silently and permanently orphaning that
+    chunk). Pulled out of run_pass() so this correctness-critical logic
+    is directly unit-testable without a real Elasticsearch connection.
+    """
+    failed_keys = {key for key, _, action in pending if action["_id"] in failed_ids}
+    for key, mtime, action in pending:
+        if key not in failed_keys:
+            state[key] = mtime
+
+
 def run_pass(es: Elasticsearch, state: dict) -> int:
     total = 0
     for source in SOURCES:
@@ -356,9 +477,7 @@ def run_pass(es: Elasticsearch, state: dict) -> int:
         failed_ids = {e.get("index", {}).get("_id") for e in errors}
         if failed_ids:
             logger.warning(f"{source['label']}: {len(failed_ids)} document(s) failed to index, will retry next pass")
-        for key, mtime, action in pending:
-            if action["_id"] not in failed_ids:
-                state[key] = mtime
+        advance_state_after_bulk(pending, failed_ids, state)
         total += ok
         logger.info(f"{source['label']}: indexed {ok} document(s)")
     return total

@@ -26,9 +26,11 @@ func TestSandboxPCAPExportRequiresAdminAndServesRegularCapture(t *testing.T) {
 	}
 	pcap := make([]byte, 24)
 	copy(pcap, []byte{0xd4, 0xc3, 0xb2, 0xa1})
-	if err := os.WriteFile(filepath.Join(dir, job+".host.pcap"), pcap, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	// #638/#764: the artifact itself comes from sandbox-export-artifacts-v1
+	// now, not disk.
+	esSrv := httptest.NewServer(sandboxArtifactStub(t, chunkDocs(job, "host_pcap", "application/vnd.tcpdump.pcap", job+".host.pcap", pcap, 1<<20)))
+	defer esSrv.Close()
+	withESResultsClient(t, esSrv.URL)
 	path := "/export/sandbox/" + job + ".host.pcap"
 
 	denied := httptest.NewRecorder()
@@ -61,9 +63,9 @@ func TestSandboxDiagnosticsExportRequiresAdmin(t *testing.T) {
 		t.Fatal(err)
 	}
 	bundle := []byte("PK\x05\x06" + strings.Repeat("\x00", 18))
-	if err := os.WriteFile(filepath.Join(dir, job+".diagnostics.zip"), bundle, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	esSrv := httptest.NewServer(sandboxArtifactStub(t, chunkDocs(job, "diagnostics", "application/zip", job+".diagnostics.zip", bundle, 1<<20)))
+	defer esSrv.Close()
+	withESResultsClient(t, esSrv.URL)
 	path := "/export/sandbox/" + job + ".diagnostics.zip"
 
 	denied := httptest.NewRecorder()
