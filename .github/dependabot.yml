@@ -112,7 +112,6 @@ updates:
     # from what added agent-intrusion-corpus's own requirements.txt (#154).
     directories:
       - /analysis/agent-intrusion-corpus
-      - /ml-worker
     schedule:
       interval: weekly
       day: monday
@@ -122,4 +121,39 @@ updates:
       python-compatible:
         patterns: ["*"]
         update-types: [minor, patch]
+    labels: [dependencies, python]
+
+  # #174: split out of the shared pip entry above specifically so the
+  # ignore rules below apply only to ml-worker's own requirements.txt, not
+  # agent-intrusion-corpus's separate one (which also pins elasticsearch,
+  # untouched here -- not confirmed broken the same way, not this issue's
+  # scope to investigate).
+  #
+  # numpy/elasticsearch here have both been silently re-bumped back to a
+  # version their own in-file comments already document as broken, twice
+  # each (#593 first found and reverted both; #174 found them re-broken a
+  # second time -- PR #850 for numpy, PR #851 for elasticsearch, both
+  # "python-compatible" grouped minor/patch bumps that fit right through
+  # the update-types filter with nothing to stop them). A code comment
+  # documenting a compatibility constraint is invisible to Dependabot,
+  # which only reads version ranges -- it will keep proposing the exact
+  # same disproven bump indefinitely otherwise. Ignored entirely rather
+  # than range-limited: both need a real compatibility re-verification
+  # (numpy jointly with numba/llvmlite; elasticsearch client against
+  # whatever server version is actually deployed), not just "a slightly
+  # newer version might work this time."
+  - package-ecosystem: pip
+    directory: /ml-worker
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Berlin
+    groups:
+      python-compatible:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: numpy
+      - dependency-name: elasticsearch
     labels: [dependencies, python]

@@ -12,7 +12,18 @@
 # Reproduced live: es.ping() -> HEAD / returns HTTP 400 against the actual
 # running 8.13.4 server, exactly the media_type_header_exception this
 # comment already describes. Reverted to 8.19.3.
-elasticsearch==9.4.1
+#
+# #174: happened a second time -- PR #851 ("bump elasticsearch from 8.19.3
+# to 9.4.1 in /ml-worker") re-bumped this right back to 9.4.1, same
+# contradiction, same break. Found live while deploying an unrelated
+# ml-worker fix: `docker compose up -d --build` failed outright (this
+# time on the numpy/numba conflict below, which had *also* regressed --
+# never got far enough to re-hit the ES 400 this pin causes, but reverting
+# it here regardless since it's the exact same disproven change repeating).
+# Reverted to 8.19.3 again. See .github/dependabot.yml's ignore rule for
+# this directory -- added alongside this revert so Dependabot stops
+# proposing it a third time instead of just fixing it again by hand later.
+elasticsearch==8.19.3
 
 # ML core
 scikit-learn==1.9.0
@@ -31,7 +42,17 @@ joblib==1.5.3
 # numpy<2.5 and >=1.22`, ResolutionImpossible. Reverted back to 2.4.6.
 # If numpy needs bumping again, the numba/llvmlite pins below need to move
 # in lockstep (verify a clean joint install first), not numpy alone.
-numpy==2.5.1
+#
+# #174: happened a second time -- PR #850 ("bump the python-compatible
+# group across 1 directory with 2 updates") re-bumped this to 2.5.1 again,
+# same contradiction, same break. Found live: `docker compose up -d
+# --build` for an unrelated ml-worker fix failed outright with the exact
+# ResolutionImpossible this comment already describes (numba 0.66.0 still
+# pinned below, never independently bumped -- only numpy drifted).
+# Reverted to 2.4.6 again. See .github/dependabot.yml's ignore rule for
+# this directory -- added alongside this revert so Dependabot stops
+# proposing it a third time instead of just fixing it again by hand later.
+numpy==2.4.6
 pandas==3.0.5
 
 # Deep learning (CPU-only PyTorch)
