@@ -181,7 +181,7 @@ def bounded_decode(data: bytes, max_depth: int = MAX_DEPTH, max_output: int = MA
         step.transform in verified_transforms or step.transform.split("+", 1)[-1] in verified_transforms
         for step in chain
     )
-    if not has_verified_step and not _looks_like_text(current):
+    if not has_verified_step and not looks_like_text(current):
         return DecodeResult(
             False, b"", chain, truncated,
             "decoded through base64 only, and the result doesn't look like real text -- "
@@ -190,7 +190,7 @@ def bounded_decode(data: bytes, max_depth: int = MAX_DEPTH, max_output: int = MA
     return DecodeResult(True, current, chain, truncated)
 
 
-def _looks_like_text(data: bytes) -> bool:
+def looks_like_text(data: bytes) -> bool:
     """True if data decodes as UTF-8 with no control characters other than
     common whitespace -- real compressed-but-undecompressed binary data
     essentially never satisfies this over any non-trivial length, since
