@@ -25,6 +25,7 @@ from __future__ import annotations
 import base64
 import binascii
 import dataclasses
+import hashlib
 import ipaddress
 import re
 
@@ -49,6 +50,15 @@ METADATA_SERVICE_IP = "169.254.169.254"
 class RuleMatch:
     rule: str
     reason: str
+    # #154 phase 5's own required field ("decoded-artifact hashes") -- only
+    # populated by rules that actually perform a decode (encoded-execution,
+    # encoded-egress-external); every other rule leaves this empty, since
+    # attaching a hash chain to, say, a privileged-container-create match
+    # would be fabricating provenance for something that was never decoded.
+    # dc.DecodeStep entries, not a re-derived shape -- worker.py serializes
+    # these straight through (dataclasses.asdict) rather than this module
+    # inventing its own parallel hash-record format.
+    decode_chain: tuple = ()
 
 
 def _cowrie_input(raw: dict) -> str:
@@ -98,7 +108,7 @@ def rule_encoded_execution(raw: dict) -> RuleMatch | None:
         return None
     result = dc.bounded_decode(blob.encode())
     if result.ok:
-        return RuleMatch("encoded-execution", f"verified decode: {result.output[:60]!r}")
+        return RuleMatch("encoded-execution", f"verified decode: {result.output[:60]!r}", tuple(result.chain))
     return None
 
 
@@ -157,13 +167,24 @@ def rule_encoded_egress_external(raw: dict) -> RuleMatch | None:
         # base64 as its first layer, so a label needs that translation
         # first. Padded to a multiple of 8 the same way
         # tests/test_decode_correlate.py's own corpus-018 check does.
-        for decoder in (lambda b: b.encode(), lambda b: base64.b32decode(b.upper() + "=" * ((8 - len(b) % 8) % 8))):
+        # transform label is provenance shown directly to an operator (#154
+        # phase 5) -- "raw" for the HTTP-payload candidate is deliberate,
+        # not a placeholder: that branch checks the extracted blob as
+        # already-plaintext bytes (no decode actually applied), matching
+        # this rule's own "interchangeable exfil transports" framing above
+        # -- calling it "base64" here would misrepresent what happened to
+        # anyone reading the evidence trail.
+        for transform, decoder in (
+            ("raw", lambda b: b.encode()),
+            ("base32", lambda b: base64.b32decode(b.upper() + "=" * ((8 - len(b) % 8) % 8))),
+        ):
             try:
                 data = decoder(blob)
             except (UnicodeEncodeError, binascii.Error, ValueError):
                 continue
             if data and dc.looks_like_text(data):
-                return RuleMatch("encoded-egress-external", f"decodable payload toward external {dest}")
+                step = dc.DecodeStep(transform, hashlib.sha256(blob.encode()).hexdigest(), hashlib.sha256(data).hexdigest(), len(data))
+                return RuleMatch("encoded-egress-external", f"decodable payload toward external {dest}", (step,))
     return None
 
 

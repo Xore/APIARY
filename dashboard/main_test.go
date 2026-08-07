@@ -1178,6 +1178,16 @@ func TestMLAnomaliesNavReflectsShowMLPanels(t *testing.T) {
 	if strings.Contains(on, `data-hp-nav="/llm-analysis" data-hp-behavior-nav="show_ml_panels" href="/llm-analysis" hidden`) {
 		t.Fatal("LLM analysis nav link must not carry hidden while show_ml_panels is on")
 	}
+	// #154 phase 5: /agent-campaigns tracks the same setting.
+	if !strings.Contains(off, `data-hp-nav="/agent-campaigns" data-hp-behavior-nav="show_ml_panels" href="/agent-campaigns" hidden`) {
+		t.Fatal("agent campaigns nav link must be present-but-hidden while show_ml_panels is off")
+	}
+	if !strings.Contains(on, `data-hp-nav="/agent-campaigns" data-hp-behavior-nav="show_ml_panels" href="/agent-campaigns">`) {
+		t.Fatal("agent campaigns nav link must be visible (no hidden attribute) while show_ml_panels is on")
+	}
+	if strings.Contains(on, `data-hp-nav="/agent-campaigns" data-hp-behavior-nav="show_ml_panels" href="/agent-campaigns" hidden`) {
+		t.Fatal("agent campaigns nav link must not carry hidden while show_ml_panels is on")
+	}
 }
 
 func TestRenderEngineSecurityPrimitives(t *testing.T) {

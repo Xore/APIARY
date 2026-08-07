@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""#154 phase 5 (first half): wires decode_correlate.py, campaign_correlator.py,
-and criticality_rules.py -- proven only against the synthetic corpus until
+"""#154 phase 5: wires decode_correlate.py, campaign_correlator.py, and
+criticality_rules.py -- proven only against the synthetic corpus until
 now -- against real Elasticsearch data, writing provenance-rich campaign
-verdicts to a new `agent-intrusion-campaigns` index for a future dashboard
-page to read.
+verdicts to a new `agent-intrusion-campaigns` index that
+dashboard/agent_campaigns.go (route `/agent-campaigns`) reads.
 
 Structurally follows ml-worker/worker.py's own established pattern
 (source indices, ES client, poll loop) rather than inventing a new one --
@@ -24,6 +24,7 @@ the same {event_id, timestamp, raw} shape those modules already consume
 """
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import os
 import time
@@ -142,7 +143,18 @@ def build_campaign_verdict(campaign: corr.Campaign, events_by_id: dict) -> dict 
             "source_index": event.get("source_index", ""),
             "timestamp": event["timestamp"],
             "matched_rules": [
-                {"rule": m.rule, "reason": m.reason, "trust_boundary": rules.TRUST_BOUNDARIES.get(m.rule, "")}
+                {
+                    "rule": m.rule,
+                    "reason": m.reason,
+                    "trust_boundary": rules.TRUST_BOUNDARIES.get(m.rule, ""),
+                    # #154 phase 5's own "decoded-artifact hashes" field --
+                    # empty for the great majority of rules that never
+                    # decode anything (see RuleMatch.decode_chain's own
+                    # comment); asdict, not a hand-built dict, so a future
+                    # DecodeStep field change can't silently drift out of
+                    # sync with what actually gets written here.
+                    "decode_chain": [dataclasses.asdict(step) for step in m.decode_chain],
+                }
                 for m in matches
             ],
         })

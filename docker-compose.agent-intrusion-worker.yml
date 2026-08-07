@@ -1,8 +1,8 @@
 # agent-intrusion-worker — #154 phase 5: reads real sensor events from
 # Elasticsearch, correlates them into campaigns, scores each campaign
 # against the deterministic criticality rules, and writes provenance-rich
-# verdicts to the agent-intrusion-campaigns index for a future dashboard
-# page to read.
+# verdicts to the agent-intrusion-campaigns index that dashboard/agent_campaigns.go
+# (route /agent-campaigns) reads.
 #
 # Own stack, same reasoning as ml-worker/docker-compose.yml's own header:
 # this has to read Elasticsearch continuously, so it joins honeynet as an

@@ -6,17 +6,19 @@ APIARY's own sensor/event vocabulary (phase 1: "Sanitized replay corpus"),
 the bounded, non-executing decoder and two correlators phase 2 asks for
 ("Decode and correlate before LLM analysis"), the deterministic
 criticality rules phase 3 asks for ("Escalate independently of an LLM
-when combinations cross trust boundaries"), and (phase 5, first half) a
-worker that wires all of the above against real Elasticsearch data — all
-proven against that one corpus rather than hand-built fixtures alone. The
-prerequisite research (mapping the campaign to APIARY's actual trust
-boundaries) is
+when combinations cross trust boundaries"), and (phase 5) a worker that
+wires all of the above against real Elasticsearch data plus the dashboard
+page (`dashboard/agent_campaigns.go`, route `/agent-campaigns`) that
+renders its output — all proven against that one corpus rather than
+hand-built fixtures alone. The prerequisite research (mapping the
+campaign to APIARY's actual trust boundaries) is
 [`docs/agent-intrusion-threat-model.md`](../../docs/agent-intrusion-threat-model.md);
 phase 4's preventive-control audits (Dockerfile digest pinning, an
 assessed ARKIME secret-delivery finding) are documented there, not here,
-since they touch the wider repo rather than this directory. Phase 5's
-second half — an actual dashboard page rendering `agent-intrusion-campaigns`
-verdicts — is the one remaining piece.
+since they touch the wider repo rather than this directory. Phases 1-5
+are now all done; the one remaining decision is whether/how to wire
+`docker-compose.agent-intrusion-worker.yml` into `deploy.yml` (see that
+file's own header and "What this directory does not do" below).
 
 ## What's here
 
@@ -83,23 +85,43 @@ verdicts — is the one remaining piece.
   landing on a same-/24 check instead), the full-corpus proof that all 27
   events match their own independently-established ground truth, and the
   capstone: the merged 8-event campaign (see above) scores "critical".
-- **`worker.py`** (phase 5, first half) — polls the real
-  `honeypot-v2-*`/`suricata-v2-*` Elasticsearch indices (the same two
-  `ml-worker/worker.py` itself already polls), maps each document into the
-  `{event_id, timestamp, raw}` shape the corpus already uses, and runs the
-  exact same `correlate_campaigns` → `evaluate_event` → `campaign_severity`
-  call sequence proven above — against real data this time, not the
-  corpus. Writes one provenance-rich verdict document per `high`/`critical`
-  campaign to a new `agent-intrusion-campaigns` index (`campaign_id`
-  deterministic from the sorted event-ID set, so re-processing the same
-  campaign on a later poll is an idempotent upsert). `low`-severity
-  campaigns (nothing matched) are deliberately never written — that's the
-  isolated/benign case this whole pipeline exists not to separately alarm
-  on. Bounded rolling re-fetch each cycle (`FETCH_WINDOW_DAYS`, default 10),
-  not an incremental checkpoint like `ml-worker`'s own — a deliberate
-  tradeoff (some repeated ES query cost) for a lot less state-management
+- **`worker.py`** — polls the real `honeypot-v2-*`/`suricata-v2-*`
+  Elasticsearch indices (the same two `ml-worker/worker.py` itself already
+  polls), maps each document into the `{event_id, timestamp, raw}` shape
+  the corpus already uses, and runs the exact same `correlate_campaigns` →
+  `evaluate_event` → `campaign_severity` call sequence proven above —
+  against real data this time, not the corpus. Writes one provenance-rich
+  verdict document per `high`/`critical` campaign to a new
+  `agent-intrusion-campaigns` index (`campaign_id` deterministic from the
+  sorted event-ID set, so re-processing the same campaign on a later poll
+  is an idempotent upsert), each matched rule carrying its own
+  `trust_boundary` (`criticality_rules.TRUST_BOUNDARIES`) and — for the two
+  rules that actually decode anything (`encoded-execution`,
+  `encoded-egress-external`) — a `decode_chain` of the real
+  `decode_correlate.DecodeStep` hashes, #154 phase 5's own
+  "decoded-artifact hashes" requirement. `low`-severity campaigns (nothing
+  matched) are deliberately never written — that's the isolated/benign
+  case this whole pipeline exists not to separately alarm on. Bounded
+  rolling re-fetch each cycle (`FETCH_WINDOW_DAYS`, default 10), not an
+  incremental checkpoint like `ml-worker`'s own — a deliberate tradeoff
+  (some repeated ES query cost) for a lot less state-management
   complexity, since campaign correlation needs to see the *whole* window
   at once regardless of what's new since the last poll.
+- **`dashboard/agent_campaigns.go`** (route `/agent-campaigns`, repo root
+  `dashboard/`) — the operator-facing half of phase 5: polls
+  `agent-intrusion-campaigns` on the dashboard's existing 1-minute ES
+  ticker (matching `ml_anomalies.go`'s own transport decision), caches
+  in-memory keyed by `campaign_id` (a still-active campaign gets its ES
+  document *replaced*, not duplicated, on every re-poll — unlike
+  `mlAnomalyStore`'s append-only shape), and renders, per campaign, every
+  member event's matched rule, its trust boundary, its decode-chain hashes,
+  and a link straight back to the raw source document via `/history`.
+  Gated behind the same `show_ml_panels` setting `/ml-anomalies` and
+  `/llm-analysis` already use (an operator may not have this worker
+  deployed either). No model-generated narrative text is ever rendered on
+  this page — every field traces to a deterministic rule match, so there's
+  no untrusted free-text output to guard against here the way
+  `llm_analysis.go` has to.
 - **`Dockerfile`** / **`docker-compose.agent-intrusion-worker.yml`**
   (repo root) — builds and runs `worker.py` as its own Dockge stack,
   modelled directly on `ml-worker/docker-compose.yml`'s own shape (joins
@@ -234,11 +256,9 @@ note here, not silently reinterpret old corpus rows under a new meaning.
 ## What this directory does *not* do
 
 `worker.py` closes the "not wired into production" gap for reading real
-sensor data and writing real verdicts -- but nothing reads those verdicts
-back out yet. `agent-intrusion-campaigns` is written, not rendered: phase
-5's second half (an actual dashboard page) doesn't exist, so a real
-`critical` campaign today is only visible via a direct Elasticsearch query
-against that index, not through the dashboard UI. `matched_rule` in every
+sensor data and writing real verdicts, and `dashboard/agent_campaigns.go`
+closes the read side -- a real `critical` campaign is now visible on
+`/agent-campaigns`, not just via a direct Elasticsearch query. `matched_rule` in every
 *corpus* event (a separate thing from the real index above) is still
 either `null` or a descriptive placeholder string, not cross-referenced
 back into the corpus fixture itself -- `criticality_rules.py`'s own

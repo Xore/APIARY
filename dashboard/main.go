@@ -144,14 +144,17 @@ func main() {
 		esResultsClient = s.es
 		s.mlAnomalies = &mlAnomalyStore{}
 		s.llmAnalysis = &llmAnalysisStore{}
+		s.agentCampaigns = &agentCampaignStore{}
 		s.es.refresh()
 		s.refreshMLAnomalies()
 		s.refreshLLMAnalysis()
+		s.refreshAgentCampaigns()
 		go func() {
 			for range time.Tick(time.Minute) {
 				s.es.refresh()
 				s.refreshMLAnomalies()
 				s.refreshLLMAnalysis()
+				s.refreshAgentCampaigns()
 			}
 		}()
 	}
@@ -324,6 +327,7 @@ func main() {
 	http.HandleFunc("/api/ml/stats", s.serveMLStatsAPI)
 	http.HandleFunc("/api/llm/analysis", s.serveLLMAnalysisAPI)
 	http.HandleFunc("/api/llm/analysis/search", s.serveLLMAnalysisSearch)
+	http.HandleFunc("/api/agent-campaigns", s.serveAgentCampaignsAPI)
 	http.HandleFunc("/api/events", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(s.eventsData(r))
@@ -573,6 +577,14 @@ func main() {
 	http.HandleFunc("/llm-analysis", func(w http.ResponseWriter, r *http.Request) {
 		data := s.llmAnalysisData(r)
 		renderPage(w, tmpl, "llm-analysis", &data)
+	})
+	http.HandleFunc("/agent-campaigns", func(w http.ResponseWriter, r *http.Request) {
+		if !s.mlPanelsEnabled() {
+			http.NotFound(w, r)
+			return
+		}
+		data := s.agentCampaignsData(r)
+		renderPage(w, tmpl, "agent-campaigns", &data)
 	})
 	http.HandleFunc("/reports", func(w http.ResponseWriter, r *http.Request) {
 		data := s.get()
