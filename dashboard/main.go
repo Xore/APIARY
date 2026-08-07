@@ -35,6 +35,25 @@ func backgroundLoopsEnabled() bool {
 	return os.Getenv("DASHBOARD_BACKGROUND_LOOPS") != "false"
 }
 
+// healthzHandler (#828) always answers -- never refuses the connection,
+// matching #353's own reasoning (see that fix's comment in main() below) --
+// but reports 503 until the first rebuild() has real ES-derived data
+// loaded, instead of an unconditional 200 the instant the listener starts.
+// See the s.ready.Store(true) call site's comment for why this can't
+// reintroduce #353's connection-refused/autoheal-restart-loop failure mode.
+// A named function (not an inline closure registered in main()) so it's
+// unit-testable on its own.
+func healthzHandler(s *store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.ready.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte("starting"))
+			return
+		}
+		w.Write([]byte("ok"))
+	}
+}
+
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "-healthcheck" {
 		addr := getenv("LISTEN_ADDR", ":8080")
@@ -193,6 +212,21 @@ func main() {
 	// independently backgrounded.
 	go func() {
 		s.rebuild()
+		// #828: distinct from #353's fix above -- that made the HTTP
+		// listener itself start before rebuild() finishes, so a request
+		// never gets refused outright. This marks the moment the first
+		// rebuild's real ES-derived data is actually in s.snap, so
+		// /healthz can tell "listening" apart from "has real data" (found
+		// live: those were 60-120s apart on this host's real event
+		// volume, during which a request saw an all-zero,
+		// 0001-01-01-timestamped dashboard indistinguishable from
+		// actually broken). /healthz still always answers immediately --
+		// only its status code changes -- so this cannot reintroduce
+		// #353's connection-refused/autoheal-restart-loop failure mode;
+		// docker-compose.dashboard.yml's start_period is sized well above
+		// the observed warm-up time specifically so a slow-but-normal
+		// warm-up never counts as a real healthcheck failure either.
+		s.ready.Store(true)
 		// #266: with two dashboard replicas behind Traefik for zero-downtime
 		// rolling updates, both would otherwise run these two loops
 		// independently -- notifyLoop firing the same webhook alert twice
@@ -254,9 +288,7 @@ func main() {
 	html := func(w http.ResponseWriter) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	}
-	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("ok"))
-	})
+	http.HandleFunc("/healthz", healthzHandler(s))
 	http.HandleFunc("/api/stats", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(s.get())

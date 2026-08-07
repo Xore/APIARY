@@ -264,7 +264,16 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      # #828: bumped from 10s -- /healthz now reports 503 until the first
+      # rebuild() has real ES-derived data (dashboard/main.go), which
+      # takes 60-120s against this host's real event volume, confirmed
+      # live. A failure during start_period never counts toward retries,
+      # so this margin is what actually keeps a normal warm-up from ever
+      # reaching "unhealthy" -- 10s was already borderline before this
+      # fix (10s start_period + 5 retries * 15s interval = 85s total
+      # tolerance, close to the observed worst case) and would have been
+      # a real regression (spurious autoheal restarts) without this bump.
+      start_period: 180s
     # Restarted by the autoheal sidecar (main stack) on unhealthy, not by
     # restart: alone -- see #119. autoheal watches by Docker label via
     # /var/run/docker.sock daemon-wide, unaffected by the stack split.
@@ -383,7 +392,16 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      # #828: bumped from 10s -- /healthz now reports 503 until the first
+      # rebuild() has real ES-derived data (dashboard/main.go), which
+      # takes 60-120s against this host's real event volume, confirmed
+      # live. A failure during start_period never counts toward retries,
+      # so this margin is what actually keeps a normal warm-up from ever
+      # reaching "unhealthy" -- 10s was already borderline before this
+      # fix (10s start_period + 5 retries * 15s interval = 85s total
+      # tolerance, close to the observed worst case) and would have been
+      # a real regression (spurious autoheal restarts) without this bump.
+      start_period: 180s
     labels:
       - autoheal=true
     cap_drop:
