@@ -230,6 +230,18 @@ jobs:
         run: |
           python3 scripts/tests/test_audit_sensor_event_coverage.py
           python3 scripts/audit-sensor-event-coverage.py
+      - name: Payload/artifact dedupe (#481/#528)
+        shell: bash
+        run: |
+          # test_dedupe_payloads.py and test_cdc_dedup_prototype.py had
+          # zero CI coverage before this -- no workflow referenced either
+          # by name. Closing that gap alongside #528's own new modules
+          # rather than leaving it, since it's the same area of the tree
+          # and cheap to fix now that it's been noticed.
+          python3 analysis/tests/test_dedupe_payloads.py -v
+          python3 analysis/tests/test_cdc_dedup_prototype.py -v
+          python3 analysis/tests/test_procmon_cdc_store.py -v
+          python3 analysis/tests/test_archive_diagnostics.py -v
       - name: Agent-intrusion synthetic replay corpus (#154 phase 1)
         shell: bash
         run: |

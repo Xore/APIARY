@@ -1,0 +1,15 @@
+[Unit]
+Description=Periodically archive old sandbox diagnostics.zip procmon.csv members (#528)
+
+[Timer]
+# Daily is plenty -- this only ever touches zips already past
+# RESULTS_ARCHIVE_AFTER_DAYS (default 30 days) old, so there's no benefit
+# to checking more often than that age window moves.
+OnBootSec=15min
+OnUnitActiveSec=1d
+RandomizedDelaySec=30min
+Persistent=true
+Unit=archive-diagnostics.service
+
+[Install]
+WantedBy=timers.target

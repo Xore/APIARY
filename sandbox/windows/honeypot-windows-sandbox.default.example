@@ -53,6 +53,15 @@ VM_PASS=changeme
 VNC_BRIDGE_BIND=127.0.0.1
 VNC_BRIDGE_PORT=6090
 
+# ── Diagnostics archival (#528) ───────────────────────────────────────────
+# archive-diagnostics.timer runs daily, moving procmon.csv out of
+# diagnostics.zip files older than RESULTS_ARCHIVE_AFTER_DAYS into a
+# row-aware dedup store (recovers ~90% of the redundant bytes between
+# unrelated runs on the same golden image -- see analysis/procmon_cdc_store.py).
+# Uncomment to override the defaults baked into archive-diagnostics.sh.
+# RESULTS_ARCHIVE_AFTER_DAYS=30
+# CDC_STORE_DIR=/var/lib/honeypot-windows-sandbox/procmon-cdc-store
+
 # ── Detonation window ────────────────────────────────────────────────────
 # Seconds to observe after execution. TimeoutStartSec in the service unit must
 # stay comfortably above this multiplied by a plausible queue depth.
