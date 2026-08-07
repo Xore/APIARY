@@ -378,26 +378,6 @@ func loadSandboxResultsLocal() []sandboxResult {
 	return rows
 }
 
-// sandboxArtifactFile locates a downloadable artifact across every backend's
-// result directory. name is expected to be a job-derived basename, but
-// serveSandboxExport's caller derives it from the request path, so it is
-// re-validated here rather than trusted: rejecting anything that is not its
-// own filepath.Base, or that contains "..", makes escaping the join
-// impossible at the choke point instead of a property argued from the
-// handler three frames away. Mirrors the ReportPDF check in ghidra.go.
-func sandboxArtifactFile(name string) (string, os.FileInfo, bool) {
-	if name == "" || name != filepath.Base(name) || strings.Contains(name, "..") {
-		return "", nil, false
-	}
-	for _, dir := range sandboxResultsDirs() {
-		path := filepath.Join(dir, name)
-		if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() {
-			return path, info, true
-		}
-	}
-	return "", nil, false
-}
-
 func normalizeSandboxResult(row *sandboxResult) {
 	if row == nil {
 		return
@@ -634,27 +614,34 @@ func sandboxData(job, query string) (sandboxPageData, error) {
 	return data, errors.New("sandbox result not found")
 }
 
+// attachSandboxDownloads exposes a download link only for an artifact that
+// actually exists in sandbox-export-artifacts-v1 (#638/#764) -- never from
+// disk. minSize is a light sanity floor (an empty/near-empty artifact
+// almost certainly means a broken capture, not a legitimate tiny one --
+// same values the old disk-backed check used), kept even though the
+// upper bound the old check also had is gone: chunking removes the
+// reason for one (a legitimately large PCAP is exactly what this design
+// exists to support, not something to filter out).
 func attachSandboxDownloads(result *sandboxResult) {
 	if result == nil {
 		return
 	}
 	for _, item := range []struct {
-		name    string
+		kind    string
 		minSize int64
-		maxSize int64
 		url     *string
 		size    *int64
 	}{
-		{result.Job + ".host.pcap", 24, 64 << 20, &result.HostPCAPURL, &result.HostPCAPSize},
-		{result.Job + ".guest.pcap", 24, 64 << 20, &result.GuestPCAPURL, &result.GuestPCAPSize},
-		{result.Job + ".diagnostics.zip", 22, 16 << 20, &result.DiagnosticsURL, &result.DiagnosticsSize},
+		{"host_pcap", 24, &result.HostPCAPURL, &result.HostPCAPSize},
+		{"guest_pcap", 24, &result.GuestPCAPURL, &result.GuestPCAPSize},
+		{"diagnostics", 22, &result.DiagnosticsURL, &result.DiagnosticsSize},
 	} {
-		_, info, ok := sandboxArtifactFile(item.name)
-		if !ok || info.Size() < item.minSize || info.Size() > item.maxSize {
+		manifest, ok := sandboxArtifactManifest(esResultsClient, result.Job, item.kind)
+		if !ok || manifest.SizeBytes < item.minSize {
 			continue
 		}
-		*item.url = "/export/sandbox/" + item.name
-		*item.size = info.Size()
+		*item.url = "/export/sandbox/" + manifest.Filename
+		*item.size = manifest.SizeBytes
 	}
 }
 
@@ -687,10 +674,10 @@ func serveSandboxExport(w http.ResponseWriter, r *http.Request) {
 	job := strings.TrimSuffix(name, ".json")
 	if strings.HasSuffix(name, ".host.pcap") {
 		job = strings.TrimSuffix(name, ".host.pcap")
-		artifactKind = "host"
+		artifactKind = "host_pcap"
 	} else if strings.HasSuffix(name, ".guest.pcap") {
 		job = strings.TrimSuffix(name, ".guest.pcap")
-		artifactKind = "guest"
+		artifactKind = "guest_pcap"
 	} else if strings.HasSuffix(name, ".diagnostics.zip") {
 		job = strings.TrimSuffix(name, ".diagnostics.zip")
 		artifactKind = "diagnostics"
@@ -705,36 +692,29 @@ func serveSandboxExport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		expectedURL := data.Detail.HostPCAPURL
-		maxSize := int64(64 << 20)
-		minSize := int64(24)
-		contentType := "application/vnd.tcpdump.pcap"
-		if artifactKind == "guest" {
+		if artifactKind == "guest_pcap" {
 			expectedURL = data.Detail.GuestPCAPURL
 		} else if artifactKind == "diagnostics" {
 			expectedURL = data.Detail.DiagnosticsURL
-			maxSize = 16 << 20
-			minSize = 22
-			contentType = "application/zip"
 		}
 		if expectedURL == "" || expectedURL != r.URL.Path {
 			http.NotFound(w, r)
 			return
 		}
-		path, info, ok := sandboxArtifactFile(name)
-		if !ok || info.Size() < minSize || info.Size() > maxSize {
-			http.NotFound(w, r)
+		// #638/#764: from sandbox-export-artifacts-v1, never disk.
+		// errSandboxArtifactStorageUnavailable is the one failure mode
+		// that happens before any header/byte is written (the manifest
+		// fetch itself, at the top of serveSandboxArtifact) -- still a
+		// clean 404. Any other error means a later chunk failed after
+		// the response was already committed; serveSandboxArtifact's own
+		// doc comment covers why that can only truncate the download,
+		// not report a clean error, at that point.
+		if err := serveSandboxArtifact(w, esResultsClient, job, artifactKind); err != nil {
+			if errors.Is(err, errSandboxArtifactStorageUnavailable) {
+				http.NotFound(w, r)
+			}
 			return
 		}
-		f, err := os.Open(path)
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		defer f.Close()
-		w.Header().Set("Content-Type", contentType)
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
-		http.ServeContent(w, r, name, info.ModTime(), f)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

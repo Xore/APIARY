@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/base64"
 	"html/template"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,42 +48,14 @@ func TestSandboxResultsAreBoundedAndValidated(t *testing.T) {
 	}
 }
 
-// sandboxArtifactFile is the choke point for two CodeQL go/path-injection
-// alerts (#4, #21): https://github.com/Xore/APIARY/issues/80. The
-// property has to hold at the join itself, not be argued from the callers
-// three frames away.
-func TestSandboxArtifactFileRejectsTraversal(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("SANDBOX_RESULTS_DIR", dir)
-	outside := t.TempDir()
-	secret := filepath.Join(outside, "secret.pcap")
-	if err := os.WriteFile(secret, []byte("do-not-serve"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	rel, err := filepath.Rel(dir, secret)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{
-		"../" + filepath.Base(outside) + "/secret.pcap",
-		rel,
-		"..",
-		"sub/../../escape",
-		"/" + secret,
-	} {
-		if _, _, ok := sandboxArtifactFile(name); ok {
-			t.Fatalf("sandboxArtifactFile(%q) resolved outside the results directory", name)
-		}
-	}
-
-	legit := filepath.Join(dir, "linux-test.host.pcap")
-	if err := os.WriteFile(legit, []byte("pcap"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, ok := sandboxArtifactFile("linux-test.host.pcap"); !ok {
-		t.Fatal("sandboxArtifactFile rejected a legitimate basename")
-	}
-}
+// #638/#764: attachSandboxDownloads/serveSandboxExport no longer read
+// GHIDRA_RESULTS_DIR-style disk paths at all -- the CodeQL path-injection
+// concern sandboxArtifactFile existed to close (issue #80, alerts #4/#21)
+// no longer applies, since there is no disk read left in this path to
+// inject a traversal into. See sandbox_artifacts_es_test.go for this
+// area's replacement coverage (fetching by job+kind from Elasticsearch,
+// never a client- or worker-supplied filename turned into a filesystem
+// path).
 
 func TestSandboxStatusAndTemplate(t *testing.T) {
 	dir := t.TempDir()
@@ -175,7 +149,9 @@ func TestSandboxMergesBothBackends(t *testing.T) {
 }
 
 // Exports resolve per artifact rather than from a single directory, or every
-// Windows run's PCAP and diagnostics bundle would 404.
+// Windows run's PCAP and diagnostics bundle would 404. #638/#764: the
+// artifact itself now comes from sandbox-export-artifacts-v1, not disk --
+// see sandbox_artifacts_es_test.go for the ES stub this uses.
 func TestSandboxExportsResolveAcrossBackends(t *testing.T) {
 	linuxResults, windowsResults := t.TempDir(), t.TempDir()
 	t.Setenv("SANDBOX_RESULTS_DIR", linuxResults)
@@ -185,15 +161,22 @@ func TestSandboxExportsResolveAcrossBackends(t *testing.T) {
 		t.Fatal(err)
 	}
 	pcap := append([]byte{0xd4, 0xc3, 0xb2, 0xa1}, make([]byte, 64)...)
-	if err := os.WriteFile(filepath.Join(windowsResults, "windows-c.host.pcap"), pcap, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	srv := httptest.NewServer(sandboxArtifactStub(t, map[string]sandboxArtifactChunkDoc{
+		sandboxArtifactChunkID("windows-c", "host_pcap", 0): {
+			Job: "windows-c", Kind: "host_pcap", Filename: "windows-c.host.pcap",
+			ContentType: "application/vnd.tcpdump.pcap", ChunkIndex: 0, TotalChunks: 1,
+			SizeBytes: int64(len(pcap)), DataBase64: base64.StdEncoding.EncodeToString(pcap),
+		},
+	}))
+	defer srv.Close()
+	withESResultsClient(t, srv.URL)
+
 	data, err := sandboxData("windows-c", "")
 	if err != nil || data.Detail == nil {
 		t.Fatalf("detail lookup failed: %v", err)
 	}
 	if data.Detail.HostPCAPURL != "/export/sandbox/windows-c.host.pcap" || data.Detail.HostPCAPSize != int64(len(pcap)) {
-		t.Fatalf("host PCAP was not found in the Windows results directory: %#v", data.Detail)
+		t.Fatalf("host PCAP was not found via the ES artifact store: %#v", data.Detail)
 	}
 }
 
