@@ -50,11 +50,36 @@ attempt=1
 while (( attempt <= max_attempts )); do
   echo "=== build-with-retry (cape): attempt ${attempt}/${max_attempts} starting $(date -u +%FT%TZ) ==="
 
+  # Real bug found live (2026-08-07): unplug-pxe-on-reset.sh has no
+  # connect-retry of its own (single blocking `sock.connect()`, see its own
+  # source) and this socket path isn't touched between attempts -- so on
+  # attempt 2+ the watcher connected INSTANTLY to attempt 1's now-dead
+  # stale socket file and crashed with ConnectionResetError before ever
+  # reaching the actual watch loop. Every subsequent guest-initiated reboot
+  # then re-triggered PXE with nothing unplugging it, and Windows Setup
+  # correctly reported "install over an existing installation" -- the
+  # exact failure mode this script exists to prevent, just silently
+  # disarmed. Fixed here, not in the shared script: remove the stale
+  # socket first so a fresh `-S` check can't be fooled by a leftover file,
+  # then wait for THIS attempt's qemu to actually create it before ever
+  # calling connect().
+  rm -f "$qmp_sock"
+
   unplug_pid=""
   if [[ -f "$unplug_script" ]]; then
-    python3 "$unplug_script" "$qmp_sock" &
+    (
+      for _ in $(seq 1 120); do
+        [[ -S "$qmp_sock" ]] && break
+        sleep 1
+      done
+      if [[ -S "$qmp_sock" ]]; then
+        python3 "$unplug_script" "$qmp_sock"
+      else
+        echo "=== unplug-pxe-on-reset.sh: ${qmp_sock} never appeared within 120s -- not starting the watcher, PXE NIC will not be auto-unplugged this attempt ===" >&2
+      fi
+    ) &
     unplug_pid=$!
-    echo "=== unplug-pxe-on-reset.sh watching ${qmp_sock} (pid ${unplug_pid}) ==="
+    echo "=== unplug-pxe-on-reset.sh: waiting for ${qmp_sock} then watching (wrapper pid ${unplug_pid}) ==="
   else
     echo "=== WARNING: ${unplug_script} not found -- PXE NIC will not be" \
          "auto-unplugged on guest-initiated restarts; build may loop ===" >&2
