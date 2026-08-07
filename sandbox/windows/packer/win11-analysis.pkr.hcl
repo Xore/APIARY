@@ -285,7 +285,24 @@ source "qemu" "win11" {
     # though the netdev backend really is named pxenet0. device_del
     # operates on the qdev/PCI device id, which is a separate namespace
     # from netdev backend ids.
-    ["-device", "e1000e,netdev=pxenet0,bootindex=1,id=pxenet0dev"],
+    #
+    # bus=pxe-port (explicit pcie-root-port, added below): a bare -device
+    # with no bus= lands on the implicit pcie.0 root bus, which does not
+    # support hotplugging -- confirmed live building sandbox/cape's own
+    # win11-cape.pkr.hcl (2026-08-07), copied from this exact block:
+    # unplug-pxe-on-reset.sh's reset-detection fired correctly on the
+    # guest's first Setup-triggered reboot, but the device_del itself then
+    # failed with "Bus 'pcie.0' does not support hotplugging", and the
+    # script gives up after one attempt regardless of error class -- so
+    # every reboot after the first re-triggers PXE unchecked, eventually
+    # surfacing as Windows Setup asking to "install over an existing
+    # installation". This template's own builds apparently never actually
+    # hit the failure window this exposes (win11-analysis.qcow2 already
+    # exists and works), which is exactly why it went unnoticed here until
+    # a second build using the identical pattern hit it live. Fixing
+    # proactively rather than waiting for a rebuild to reproduce it.
+    ["-device", "pcie-root-port,id=pxe-port,bus=pcie.0"],
+    ["-device", "e1000e,netdev=pxenet0,bootindex=1,id=pxenet0dev,bus=pxe-port"],
     ["-netdev", "user,id=pxenet0,net=10.0.2.0/24,dhcpstart=10.0.2.15,tftp=pxe,bootfile=ipxe.efi"],
     ["-device", "e1000e,netdev=user.0"],
     ["-netdev", "user,id=user.0,net=10.0.3.0/24,dhcpstart=10.0.3.15,hostfwd=tcp::{{ .SSHHostPort }}-:5985"],
