@@ -505,7 +505,22 @@ select.form-input { cursor: pointer; }
 .switch input:checked + span { background: var(--switch-on); }
 .switch input:checked + span::after { transform: translateX(14px); background: var(--control-knob); }
 
+/* #24: display:flex/flex-direction:column so a .card__footer can pin
+   itself to the card's bottom edge via margin-top:auto regardless of how
+   much (or little) .card__content holds -- this is what actually fixes
+   "cards look like the same kind of thing but their footers land at
+   different heights" (confirmed live against Xore/honeypot-stack's
+   dashboard: 5 same-class cards on one page measured 458-2850px tall).
+   Safe for every existing .card usage that doesn't opt into the new
+   title/content/footer structure: a flex column still stacks plain block
+   children top-to-bottom exactly like normal flow, the only behavioral
+   change is that adjacent margins stop collapsing between them, which
+   isn't visible for this file's existing card content (titles/rows/tables
+   that already carry their own explicit spacing, not relying on margin
+   collapse). */
 .card {
+  display: flex;
+  flex-direction: column;
   margin-bottom: 14px;
   padding: 18px 20px;
   border: 1px solid var(--border-subtle);
@@ -515,6 +530,29 @@ select.form-input { cursor: pointer; }
 .card--raised { background: var(--surface-raised); box-shadow: var(--shadow-raised); }
 .card__title { margin-bottom: 4px; color: var(--text-primary); font-size: var(--font-size-body); font-weight: 600; }
 .card__desc { margin-bottom: 14px; color: var(--text-secondary); font-size: var(--font-size-caption); }
+/* #24: the only region that flexes. min-height:0 overrides flex's own
+   default (min-height:auto on a column-flex child refuses to shrink below
+   its content's intrinsic size), which is what actually lets a nested
+   .card__scroll's max-height/overflow-y:auto engage -- without it the
+   content pushes the card taller instead of scrolling internally, the
+   exact bug this issue exists to fix. Content-shape variants (a plain
+   list of rows for a short/bounded set, .card__scroll for a long/
+   unbounded one, .metric-grid for key/value summaries, a chart/sparkline
+   sized to this box) all nest inside unchanged -- this class only owns
+   the flex sizing, not what's displayed inside it. */
+.card__content { flex: 1 1 auto; min-height: 0; }
+/* #24: fixed height (sized to its own content -- a line of text/links/
+   counts, never meant to hold something that grows), pinned to the
+   card's bottom edge via margin-top:auto regardless of how tall
+   .card__content ends up. A card with no .card__footer is unaffected --
+   there's nothing here to push anywhere. */
+.card__footer {
+  flex: 0 0 auto;
+  margin-top: auto;
+  padding-top: 12px;
+  color: var(--text-secondary);
+  font-size: var(--font-size-caption);
+}
 .card__row {
   display: flex;
   min-height: 50px;
