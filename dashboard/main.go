@@ -651,7 +651,7 @@ func main() {
 			http.NotFound(w, r)
 			return
 		}
-		data, err := ghidraData(sha, "")
+		data, err := ghidraData(strings.ToLower(sha), "")
 		if err != nil {
 			http.NotFound(w, r)
 			return

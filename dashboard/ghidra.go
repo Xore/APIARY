@@ -551,7 +551,10 @@ func serveGhidraAPI(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	data, err := ghidraData(sha, r.URL.Query().Get("q"))
+	// #876: stored SHA256 values are always lowercase (worker output); a
+	// request for an upper/mixed-case hash must still resolve, matching
+	// serveGitHubAnalysisAPI's strings.ToLower(sha) convention.
+	data, err := ghidraData(strings.ToLower(sha), r.URL.Query().Get("q"))
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -573,7 +576,9 @@ func serveGhidraAPI(w http.ResponseWriter, r *http.Request) {
 // 3-5, which do not exist yet. A zip containing one JSON file would be a
 // worse download than the JSON the API already serves.
 func serveGhidraExport(w http.ResponseWriter, r *http.Request) {
-	sha := strings.TrimPrefix(r.URL.Path, "/export/ghidra/")
+	// #876: stored artifacts are keyed by the lowercase SHA256 the worker
+	// wrote them under; an upper/mixed-case request must still resolve.
+	sha := strings.ToLower(strings.TrimPrefix(r.URL.Path, "/export/ghidra/"))
 	if rest, ok := strings.CutSuffix(sha, "/callgraph.svg"); ok {
 		serveGhidraCallGraph(w, r, rest)
 		return
