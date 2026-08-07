@@ -258,6 +258,15 @@ func main() {
 	srv := &http.Server{
 		Handler:  &webvpnHandler{log: log, port: httpsPort},
 		ErrorLog: stdlog.New(healthcheckNoiseFilter{}, "", 0),
+		// #878: unset (zero-value) timeouts left every phase of a connection
+		// unbounded -- a slow-dripped request line/headers/body, or an idle
+		// keep-alive connection, pinned a goroutine and file descriptor
+		// indefinitely. Nothing here holds a response open on purpose (no
+		// tarpit, unlike http-honeypot), so all four can be bounded tightly.
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 	log.emit(event{Port: httpsPort, Event: "https_listening"})
 	if err := srv.Serve(tlsLn); err != nil {

@@ -559,6 +559,18 @@ func main() {
 	srv := &http.Server{
 		Handler:           s,
 		ReadHeaderTimeout: 5 * time.Second,
+		// #881: ReadHeaderTimeout alone only bounds the header phase --
+		// once headers arrive, a slow-dripped body (still size-capped at
+		// 64KB via io.LimitReader, but not time-bounded) or an idle
+		// keep-alive connection could hold a goroutine/socket open
+		// indefinitely (IdleTimeout doesn't fall back to ReadHeaderTimeout,
+		// only to ReadTimeout, which was also unset). WriteTimeout is set
+		// well above tarpitMaxDuration (tarpit.go, 90s) so it never cuts a
+		// legitimate tarpit response short -- it's a backstop against some
+		// other write-side hang, not a bound on the tarpit itself.
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 120 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
