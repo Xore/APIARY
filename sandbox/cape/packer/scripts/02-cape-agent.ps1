@@ -32,19 +32,18 @@
 # only adds the two noisy-network-service disables network.rst separately
 # calls out (Teredo, LLMNR) that 01-hardening.ps1 has no equivalent for.
 #
-# ┌─ NO STATIC IP HERE — same trap 01-hardening.ps1's own header warns    ─┐
-# │ about for itself. This script runs over the network Packer's own      │
-# │ QEMU user-mode NAT provides during the build (10.0.2.x/10.0.3.x), not │
-# │ over virbr-cape (10.40.50.0/24) — that bridge does not exist from     │
-# │ this guest's perspective until it is deployed as a real detonation    │
-# │ domain (win11-cape-kvm.xml) after the build finishes. The guest gets  │
-# │ its real, permanent address the same way win11-sandbox's own guest    │
-# │ does: left on DHCP, with sandbox/cape/network.xml's MAC-pinned        │
-# │ single-address reservation making that address effectively static     │
-# │ across every future boot — see that file's own header for why a      │
-# │ pinned DHCP lease already satisfies CAPE's "no DHCP" requirement      │
-# │ (a fixed, predictable address) without touching guest networking here.│
-# └─────────────────────────────────────────────────────────────────────┘
+# -- NO STATIC IP HERE -- same trap 01-hardening.ps1's own header warns
+# about for itself. This script runs over the network Packer's own
+# QEMU user-mode NAT provides during the build (10.0.2.x/10.0.3.x), not
+# over virbr-cape (10.40.50.0/24) -- that bridge does not exist from
+# this guest's perspective until it is deployed as a real detonation
+# domain (win11-cape-kvm.xml) after the build finishes. The guest gets
+# its real, permanent address the same way win11-sandbox's own guest
+# does: left on DHCP, with sandbox/cape/network.xml's MAC-pinned
+# single-address reservation making that address effectively static
+# across every future boot -- see that file's own header for why a
+# pinned DHCP lease already satisfies CAPE's "no DHCP" requirement
+# (a fixed, predictable address) without touching guest networking here.
 
 $ErrorActionPreference = 'Continue'
 

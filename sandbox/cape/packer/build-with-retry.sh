@@ -6,9 +6,9 @@
 # reasoning applies unchanged: packer's WinRM communicator treats some
 # transport-level errors as fatal on the first occurrence despite logging
 # them with the same "Retryable error:" prefix used for errors it does
-# retry). Two differences from that file:
+# retry). Differences from that file:
 #
-#   * starts pxe/unplug-pxe-on-reset.sh (shared, see win11-cape.pkr.hcl's
+#   * starts pxe/unplug-pxe-after-delay.sh (shared, see win11-cape.pkr.hcl's
 #     own pxe_dir comment for why it's not duplicated) pointed at THIS
 #     build's own QMP socket before each attempt, and kills it after --
 #     win11-analysis.pkr.hcl's own build never needed this script to start
@@ -22,6 +22,14 @@
 #     shared_dir already holds win11-analysis.qcow2/win11-ghosts.qcow2.
 #     win11-analysis.pkr.hcl never needed this because it always was the
 #     first build into an empty shared_dir.
+#
+# NOT pxe/unplug-pxe-on-reset.sh (tried first, 2026-08-07): its own
+# device_del approach needs QEMU hotplug support, which q35's implicit
+# pcie.0 root bus does not provide -- confirmed live, "Bus 'pcie.0' does
+# not support hotplugging", exactly the failure unplug-pxe-after-delay.sh's
+# own header already documents discovering and designing around (set_link
+# + eject, neither of which needs hotplug at all). Direct instruction: use
+# the fixed-delay script, 120s.
 #
 # Usage: build-with-retry.sh <iso_checksum> [max_attempts]
 set -euo pipefail
@@ -39,7 +47,14 @@ qmp_sock="/tmp/win11-cape-qmp.sock"
 # Shared PXE staging script -- see win11-cape.pkr.hcl's pxe_dir variable
 # comment for why this points at win11-analysis's own prepared directory
 # rather than a second copy.
-unplug_script="/var/dockge/stacks/apiary/sandbox/windows/packer/pxe/unplug-pxe-on-reset.sh"
+unplug_script="/var/dockge/stacks/apiary/sandbox/windows/packer/pxe/unplug-pxe-after-delay.sh"
+unplug_delay=120
+# ide1-cd0: confirmed against this build's own actual qemu command line
+# (ide0-hd0 the disk, ide1-cd0 the Windows ISO, ide2-cd0 the autounattend
+# CD) -- same drive ordering unplug-pxe-after-delay.sh's own header
+# documents verifying for win11-analysis.pkr.hcl, since both templates
+# attach drives in the same iso_url + cd_files order.
+unplug_iso_device="ide1-cd0"
 
 # packer resolves cd_files entries (autounattend.xml) relative to its own
 # working directory, not the .hcl file's location -- same gotcha
@@ -50,19 +65,11 @@ attempt=1
 while (( attempt <= max_attempts )); do
   echo "=== build-with-retry (cape): attempt ${attempt}/${max_attempts} starting $(date -u +%FT%TZ) ==="
 
-  # Real bug found live (2026-08-07): unplug-pxe-on-reset.sh has no
-  # connect-retry of its own (single blocking `sock.connect()`, see its own
-  # source) and this socket path isn't touched between attempts -- so on
-  # attempt 2+ the watcher connected INSTANTLY to attempt 1's now-dead
-  # stale socket file and crashed with ConnectionResetError before ever
-  # reaching the actual watch loop. Every subsequent guest-initiated reboot
-  # then re-triggered PXE with nothing unplugging it, and Windows Setup
-  # correctly reported "install over an existing installation" -- the
-  # exact failure mode this script exists to prevent, just silently
-  # disarmed. Fixed here, not in the shared script: remove the stale
-  # socket first so a fresh `-S` check can't be fooled by a leftover file,
-  # then wait for THIS attempt's qemu to actually create it before ever
-  # calling connect().
+  # Same socket-path staleness concern applies here as it did for the
+  # event-driven script this replaced: the path isn't touched between
+  # attempts, so a leftover file from a killed prior attempt could
+  # otherwise be mistaken for a live one. Remove it first, then wait for
+  # THIS attempt's qemu to actually create it before connecting.
   rm -f "$qmp_sock"
 
   unplug_pid=""
@@ -73,16 +80,16 @@ while (( attempt <= max_attempts )); do
         sleep 1
       done
       if [[ -S "$qmp_sock" ]]; then
-        python3 "$unplug_script" "$qmp_sock"
+        python3 "$unplug_script" "$qmp_sock" "$unplug_delay" "$unplug_iso_device"
       else
-        echo "=== unplug-pxe-on-reset.sh: ${qmp_sock} never appeared within 120s -- not starting the watcher, PXE NIC will not be auto-unplugged this attempt ===" >&2
+        echo "=== unplug-pxe-after-delay.sh: ${qmp_sock} never appeared within 120s -- not starting it, PXE NIC/ISO will not be disabled this attempt ===" >&2
       fi
     ) &
     unplug_pid=$!
-    echo "=== unplug-pxe-on-reset.sh: waiting for ${qmp_sock} then watching (wrapper pid ${unplug_pid}) ==="
+    echo "=== unplug-pxe-after-delay.sh: waiting for ${qmp_sock}, then disabling pxenet0 + ejecting ${unplug_iso_device} after ${unplug_delay}s (wrapper pid ${unplug_pid}) ==="
   else
     echo "=== WARNING: ${unplug_script} not found -- PXE NIC will not be" \
-         "auto-unplugged on guest-initiated restarts; build may loop ===" >&2
+         "disabled after boot; build may loop back into PXE on Setup's own restarts ===" >&2
   fi
 
   # Guaranteed-empty per Packer's own requirement -- rm -rf only ever
