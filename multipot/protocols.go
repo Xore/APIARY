@@ -18,12 +18,32 @@ func bumpDeadline(c net.Conn) {
 	c.SetDeadline(time.Now().Add(45 * time.Second))
 }
 
+// maxLineLength bounds readLine's accumulation buffer (#889): well past any
+// real FTP/SMTP/POP3/IMAP command or AUTH-continuation line, but far short
+// of unbounded -- an attacker withholding the newline no longer buffers
+// data in this goroutine for the whole 45s connection deadline, only until
+// this cap is hit.
+const maxLineLength = 8192
+
 func readLine(r *bufio.Reader) (string, bool) {
-	line, err := r.ReadString('\n')
-	if line == "" && err != nil {
-		return "", false
+	var buf []byte
+	for {
+		chunk, err := r.ReadSlice('\n')
+		buf = append(buf, chunk...)
+		if err == bufio.ErrBufferFull {
+			if len(buf) > maxLineLength {
+				return "", false
+			}
+			continue
+		}
+		if err != nil {
+			if len(buf) == 0 {
+				return "", false
+			}
+			return strings.TrimRight(string(buf), "\r\n"), false
+		}
+		return strings.TrimRight(string(buf), "\r\n"), true
 	}
-	return strings.TrimRight(line, "\r\n"), err == nil
 }
 
 /* ---------------- FTP (port 21) ----------------
