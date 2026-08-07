@@ -1,0 +1,97 @@
+# Scoped from CAPEv2's own systemd/cape-rooter.service, which runs as full
+# root (User=root, Group=root) unexamined. Checked what rooter.py (#314)
+# actually invokes rather than assuming, and whether it could run as a
+# lower-privilege user instead of full root:
+#
+#   * Commands: `iptables`/`iptables-save`/`iptables-restore`, `ip`
+#     (link/tuntap/addr), `sysctl -w net.ipv4.ip_forward=1` -- real network
+#     administration, in principle coverable by CAP_NET_ADMIN + CAP_NET_RAW
+#     alone, not a full root identity.
+#   * BUT: rooter.py hard-checks `os.getuid() == 0` at startup and exits
+#     ("This utility is supposed to be ran as root.") if not -- this checks
+#     the REAL uid, not effective capabilities, so systemd's
+#     AmbientCapabilities (which grants capabilities to a non-root User=
+#     without changing the real uid) does NOT satisfy this check. rooter.py
+#     also never drops privileges after its root-only setup (socket
+#     bind+chown, sysctl) -- it runs the whole rest of its lifetime as root
+#     by explicit upstream design, not an oversight.
+#   * Patching that check in vendored upstream code was considered and
+#     rejected: it would need re-applying across every future CAPEv2
+#     update, for a component that already runs isolated (own systemd
+#     unit, own socket) and only reachable by `cape.service`/`cape-web.service`
+#     (both User=cape) via the group-scoped unix socket below.
+#
+# What IS scoped down here, without touching CAPE's own source: root stays
+# root, but CapabilityBoundingSet strips most of root's other capabilities
+# (CAP_SYS_ADMIN, CAP_SYS_MODULE, etc. are unavailable even though the
+# process's uid is 0). NoNewPrivileges is deliberately left off `true`
+# (unlike the other three units) -- iptables' own binary sometimes needs to
+# exec helper tools that expect to gain capabilities via file caps, which
+# NoNewPrivileges=true would block; ProtectSystem is left unset for the
+# same reason (this process legitimately needs to write outside /opt/CAPEv2,
+# to /tmp's socket and to the kernel's own /proc/sys network namespace).
+#
+# CAP_DAC_OVERRIDE IS included, found live (2026-08-07) to be a real,
+# non-optional requirement, not the over-broad grant it looks like at a
+# glance: rooter.py's own AF_UNIX SOCK_DGRAM protocol replies to each
+# request via `server.sendto(response, addr)`, where `addr` is the
+# CLIENT's (cape.service, User=cape) own bound socket path -- writing a
+# reply there is a permission check against a path this process doesn't
+# own, exactly what CAP_DAC_OVERRIDE governs. Without it, every single
+# rooter call (even the completely harmless startup-time
+# `inetsim_disable` cleanup call machinery_manager.py fires for every
+# configured machine) raised an uncaught `PermissionError` on the reply
+# send, which is unhandled at rooter.py's own module level and kills the
+# entire process -- crash-looping cape-rooter and, because that same
+# startup call blocks inside cape.service's own initialize_machinery()
+# waiting for a reply that a crashed process can never send, hanging
+# cape.service itself indefinitely before it ever reaches its own
+# "Waiting for analysis tasks" state. Confirmed by omission first (this
+# exact hang, reproduced) then by addition (hang gone, task 1 picked up
+# normally) -- not assumed from reading the code alone.
+#
+# Group=cape (not its own private group): rooter.py's own os.chmod() on
+# the unix socket it creates only grants S_IWGRP, not group-read, and
+# cape.service (User=cape, Group=cape) is the client that connects to it
+# -- sharing the `cape` group via `-g cape` is what makes that connection
+# work without widening the socket to world-writable.
+#
+# ExecStart calls the `cape` user's own already-built poetry venv's
+# python3 directly, not `poetry run` -- found live (2026-08-07) that
+# `poetry run` as root tries to create ITS OWN fresh venv (poetry venvs
+# are per-user, stored under each user's own home cache dir -- see
+# IMPLEMENTATION_PLAN.md's "per-user-venv trap"), using root's own default
+# system Python (3.14, the exact version this whole install already had to
+# route around via a pyenv-built 3.12.8 for the `cape` user -- see Host
+# Constraints), and failing outright on `/opt/CAPEv2` not being writable
+# under this unit's own deliberately-narrow CapabilityBoundingSet (no
+# CAP_DAC_OVERRIDE). Invoking the interpreter path directly sidesteps all
+# of that: same interpreter cape.service/cape-web.service/
+# cape-processor.service already use, no capability widening needed.
+#
+# CAVEAT: the venv path below includes poetry's own content-hash suffix
+# (`-t2x27zRb-`), which is NOT stable across a fresh `poetry install` --
+# a from-scratch reinstall (e.g. this dev server's own planned
+# wipe-and-redeploy for production) WILL need this path re-verified via
+# `sudo -u cape /etc/poetry/venv/bin/poetry -C /opt/CAPEv2 env info --path`
+# and this line updated to match, same as the other three units don't need
+# to (they invoke `poetry run` as the `cape` user itself, which resolves
+# its own venv automatically).
+[Unit]
+Description=CAPE rooter
+Documentation=https://github.com/kevoreilly/CAPEv2
+Wants=network-online.target
+After=syslog.target network.target
+
+[Service]
+WorkingDirectory=/opt/CAPEv2/utils/
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/cape/.cache/pypoetry/virtualenvs/capev2-t2x27zRb-py3.12/bin/python3 rooter.py -g cape
+User=root
+Group=root
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE
+Restart=always
+RestartSec=5m
+
+[Install]
+WantedBy=multi-user.target

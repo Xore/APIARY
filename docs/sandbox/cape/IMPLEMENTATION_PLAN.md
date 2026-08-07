@@ -1,21 +1,17 @@
 # CAPE Sandbox — Implementation Plan
 
-> **Status**: In progress. Network isolation (#316) is live. Host stack
-> (#314) is up as far as it can go without a guest: CAPEv2's core process
-> (`cuckoo.py -t`) starts clean — config loads, MongoDB connects, the
-> libvirt/KVM machinery module connects to `libvirtd` and correctly
-> reports it has no `cuckoo1` domain configured, which is exactly the
-> boundary #315 (the golden image) sits on the other side of. CAPE's own
-> web/API service has NOT yet been started (see "What's verified" below
-> for exactly what was and wasn't). Spool/worker code (#318) and Workbench wiring
-> (#319's registry entry) are written and, where testable without a live
-> CAPE instance, verified — the dashboard builds and its existing test
-> suite passes unchanged. Resource coexistence (#320) has a decision, coded
-> and live in both this chain's worker and `sandbox/windows/run_pending.sh`.
-> Routing (#317) has a decision (see below). The Windows golden image
-> (#315) has **not been started** — it needs a licensed Windows ISO and an
-> hours-long Packer build on shared host hardware, deliberately not begun
-> without that decision made explicitly.
+> **Status**: #314, #315, #316, #317, #318, #320 done and verified live;
+> #319 has its registry entry (the result-detail page is real follow-up
+> work, see Known Gaps). The golden image (#315) builds via PXE against
+> the evaluation ISO already on the homeserver (no licensed ISO needed —
+> see that section below for why this plan's earlier assumption was
+> wrong). The host stack (#314) runs all four systemd services
+> (`cape`/`cape-web`/`cape-processor`/`cape-rooter`) against a custom
+> `capekvm` machinery module (see below for why the stock `kvm.py` module
+> doesn't work against this guest's CPU config) and has completed a real,
+> `reported`-status end-to-end analysis of a known-benign sample through
+> its own `utils/submit.py` — not just a startup self-test. See "What's
+> verified" for the concrete evidence and every bug found getting there.
 > **Last updated**: 2026-08-07
 > **Host platform**: KVM + QEMU + libvirt + docker-compose, same as
 > `sandbox/windows` and `sandbox/ghosts` — no VMware, no Hyper-V, no
@@ -126,10 +122,17 @@ differently-configured venv without saying so.
   unrelated detonations. A CAPE-dedicated INetSim instance is left as
   follow-up work under #314's scope, not built here.
 
-- **`win11-cape` guest** (`10.40.50.x`, not created yet — [#315]) — will
-  run CAPE's `capemon` DLL + `agent.py`, the same golden-image-vs-snapshot
-  question `sandbox/windows`'s own plan resolved once already, and needs a
-  licensed Windows ISO this plan does not assume access to.
+- **`win11-cape` guest** (`10.40.50.50`, live — [#315]) — runs CAPE's
+  `capemon` DLL (pushed per-analysis, not baked into the golden image —
+  see that guest's own provisioning script header for why) + `agent.py`,
+  built via PXE boot against the evaluation ISO already on the
+  homeserver (never CD-ROM-mounted, same convention `win11-sandbox`'s
+  own build already holds to — no licensed ISO needed, correcting this
+  plan's own earlier assumption). The golden-image-vs-snapshot question
+  `sandbox/windows`'s own plan resolved once already turned out to need
+  resolving a *second* time here, differently — see #314's own "What's
+  verified" section for why the stock CAPE machinery module can't reuse
+  that same answer unmodified.
 
 - **CAPEv2 core** (`/opt/CAPEv2`, host-native, not Docker — [#314]) —
   Installed via upstream's own `installer/cape2.sh base` (customized:
@@ -162,16 +165,19 @@ differently-configured venv without saying so.
     (`/apiv2/tasks/create/file/`), polls `/apiv2/tasks/status/{id}/` until
     `reported`, fetches `/apiv2/tasks/report/{id}/json/`, writes
     `{sha256}_cape.json` into `CAPE_RESULTS_DIR`
-  - **Not yet verified against a live submission** — there is no
-    configured CAPE machine (#315) to detonate anything in, so nothing has
-    ever actually been submitted through this path. The endpoint contract
-    is CAPEv2's documented `apiv2` shape, the same starting point
-    `ghidra-worker.py`'s own header warns went stale once already ("the
-    endpoints originally taken from the plan documents were wrong"). Its
-    own `--selftest` only checks reachability for exactly this reason —
-    extend it into a real round trip once #315 lands, the same discipline
-    `ghidra-worker.py --selftest`'s real analysis round trip already holds
-    itself to.
+  - **Not yet verified against a live submission through this specific
+    path** — narrower than before, not still fully open: #314's own
+    `utils/submit.py` + `/apiv2/tasks/status/` have now been exercised
+    against a real, `reported` analysis (see #314's own section below),
+    so the service side of this is confirmed live. `cape-worker.py`'s
+    own client code, though, has never itself submitted anything — its
+    endpoint contract is CAPEv2's documented `apiv2` shape, the same
+    starting point `ghidra-worker.py`'s own header warns went stale once
+    already ("the endpoints originally taken from the plan documents
+    were wrong"). Its own `--selftest` only checks reachability for
+    exactly this reason — extend it into a real round trip next, the
+    same discipline `ghidra-worker.py --selftest`'s real analysis round
+    trip already holds itself to; nothing external blocks this now.
 
 ---
 
@@ -247,8 +253,8 @@ and `sandbox/ghosts/compose.yml`'s own fixed-address table.
 | `virbr-cape` bridge gateway | `10.40.50.1` | `sandbox/cape/network.xml` (#316) |
 | `cape-mongo`, docker-internal | `10.91.0.2` | `sandbox/cape/compose.yml` (#314) |
 | `cape-mongo`, published (loopback only) | `127.0.0.1:27017` | `sandbox/cape/compose.yml` (#314) |
-| CAPE's own apiv2 | `127.0.0.1:8000` (default; not yet started) | CAPEv2 upstream default |
-| `win11-cape` guest | not assigned yet — #315 | — |
+| CAPE's own apiv2/web UI | `127.0.0.1:8000`, loopback only | `cape-web.service` (#314), scoped from upstream's `0.0.0.0` default |
+| `win11-cape` guest | `10.40.50.50`, pinned DHCP | `sandbox/cape/network.xml` (#316), MAC in `win11-cape-kvm.xml` (#315) |
 
 ---
 
@@ -260,9 +266,51 @@ and `sandbox/ghosts/compose.yml`'s own fixed-address table.
 `autostart: yes`, alongside the three pre-existing networks. Not yet run
 through a from-inside-a-guest isolation check the way
 `sandbox/ghosts/verify-network-isolation.sh` exercises its own network —
-there is no guest on this bridge yet (#315) to boot one from. Do that once
-`win11-cape` exists, the same way that script's own header describes doing
-for `ghosts`.
+a real guest now exists on this bridge (#315) to boot one from, but that
+specific verification script hasn't been adapted and run yet. Real
+guest-level traffic on this bridge *has* been observed indirectly, via
+`win11-cape`'s own confirmed analysis run (see #314 below) — a PCAP was
+captured, the guest reached `10.40.50.1` (the resultserver) and nothing
+else — but that's incidental to a real analysis, not a purpose-built
+isolation check the way `ghosts`'s own script is.
+
+### Windows golden image (#315)
+
+Built via `sandbox/cape/packer/win11-cape.pkr.hcl`, PXE boot only (never
+CD-ROM-mounted — same convention `win11-analysis.pkr.hcl` already
+holds to), against the evaluation ISO already present on the homeserver.
+Real bugs found and fixed in the build scripts themselves, not just
+worked around live:
+
+- PXE-unplug via `device_del` (the mechanism `unplug-pxe-on-reset.sh`
+  uses) fails outright on q35's `pcie.0` root bus — `"Bus 'pcie.0' does
+  not support hotplugging"`, confirmed live. Switched to the existing
+  delay-based `unplug-pxe-after-delay.sh` (`set_link` + `eject`, no
+  hotplug involved), matching a direct instruction to just stop serving
+  PXE after a fixed delay rather than watching for a specific QMP event.
+- `02-cape-agent.ps1`'s Unicode box-drawing comment border got mangled
+  in transit to the guest over the Packer PowerShell provisioner,
+  causing a real parse error (`MissingEndCurlyBrace`) that silently
+  killed that provisioner step — Packer did **not** propagate the
+  failure as a build failure, so the build reported success with the
+  step never having run. Fixed at the source (plain ASCII in the
+  comment, matching the em-dash convention used safely elsewhere in
+  this repo) so a real Packer rebuild doesn't hit it again.
+- `win11-cape-kvm.xml`'s `<nvram>` element was missing
+  `templateFormat='raw'`, which fails `virsh define`+`start` outright on
+  this host's current libvirt version (`"conversion of the nvram
+  template to another target format is not supported"`) — found live
+  defining this domain for the first time. The identical, previously
+  unnoticed bug existed in the already-shipped `win11-kvm.xml` and
+  `win11-ghosts-kvm.xml` too (their live domains just predate this
+  libvirt version, or an earlier one auto-added the attribute); fixed in
+  all three.
+
+Confirmed live, not just built: `virsh start win11-cape` against a fresh
+overlay boots to a logged-in desktop (`unattend.xml` `AutoLogon`) and the
+CAPE agent answers on `:8000` with no manual steps — including after
+recreating the overlay completely from scratch, the same way `capekvm`
+(#314, below) does before every real analysis.
 
 ### CAPEv2 host stack (#314)
 
@@ -306,19 +354,152 @@ for `ghosts`.
   run (missing `libvirt-dev` headers at that point in the install) and
   needed a manual `poetry run pip install libvirt-python` once the header
   package was installed.
-  Final, real result: startup gets all the way through config, MongoDB,
-  and a live libvirt connection, and fails with exactly
+  Final, real result at the time: startup got all the way through config,
+  MongoDB, and a live libvirt connection, and failed with exactly
   `libvirt.libvirtError: Domain not found: no domain with matching name
-  'cuckoo1'` — `conf/kvm.conf`'s default machine name, which does not
-  exist because #315's guest has not been built. This is the correct,
-  expected stopping point, not a bug to chase further from this side.
-- **Not yet done**: starting CAPE's own web/`apiv2` process specifically
-  (`cuckoo.py`'s startup path above is the analysis daemon, a separate
-  entry point from the Django web app) and confirming
-  `/apiv2/cuckoo/status/` answers. No reason this couldn't be done with
-  zero configured machines; left for once #315 lands so the two are
-  brought up together rather than the web service sitting idle in the
-  meantime.
+  'cuckoo1'` — `conf/kvm.conf`'s default machine name, which didn't exist
+  because #315's guest hadn't been built yet. That was the correct,
+  expected stopping point at the time; everything below picks up from
+  there once #315 landed.
+
+- **The stock `kvm.py` machinery module cannot drive `win11-cape` at
+  all**, discovered live rather than assumed: `LibVirtMachinery.start()`
+  (which `kvm.py` inherits unmodified) always reverts to a libvirt
+  *internal, running-state* snapshot before starting a task —
+  `vm.revertToSnapshot()`, which needs a full memory+disk snapshot. That
+  snapshot type is flatly unavailable on this guest's domain config:
+  `win11-cape-kvm.xml` sets `<cpu mode='host-passthrough' migratable='off'/>`
+  (full host CPU feature exposure, for the same anti-detection reasoning
+  `win11-sandbox`'s own domain XML already documents), and QEMU/libvirt's
+  snapshot save/restore reuses the same machinery live migration does —
+  `migratable='off'` blocks it outright, confirmed with a real
+  `virsh snapshot-create-as` attempt: `cannot migrate domain: State
+  blocked by non-migratable CPU device (invtsc flag)`. This is the exact
+  same golden-image-vs-snapshot tension `sandbox/windows`'s own plan
+  already resolved for `win11-sandbox` (that domain has the identical
+  `migratable='off'` and also can't snapshot) — resolved here the same
+  way: a custom machinery module, `sandbox/cape/capev2-overrides/modules/
+  machinery/capekvm.py` (`CapeKVM`), whose `start()` destroys the overlay
+  disk and recreates a fresh thin qcow2 clone from the golden image
+  before every single boot instead of ever touching a snapshot. This also
+  means the golden image's own single-use `unattend.xml` `AutoLogon`
+  fires correctly on *every* analysis, not just the first: each new
+  overlay's first boot is that overlay's actual first boot, reading the
+  same pristine, never-logged-in-from-its-own-perspective base state off
+  the read-only golden image every time. Config lives alongside it in
+  `conf/capekvm.conf` (own `golden_image`/`vm_disk` keys read directly by
+  the module, not part of stock `kvm.py`'s machine schema). Considered
+  and rejected: setting `migratable='on'` instead, which would let the
+  stock module work unmodified — rejected because it costs real CPU
+  feature exposure (e.g. `invtsc`) specifically on the CAPE guest, a
+  regression from the same anti-detection posture `win11-sandbox` already
+  holds, for a guest whose whole purpose is running samples that might
+  check for exactly that. See that module's own header comment for the
+  full account; `AskUserQuestion` was used to confirm this direction
+  before writing the code, given the real, opposite-tradeoff alternative.
+
+- **Four systemd services, scoped rather than copy-pasted from
+  upstream's examples**: `sandbox/cape/capev2-overrides/systemd/{cape,
+  cape-web,cape-processor,cape-rooter}.service`, installed to
+  `/etc/systemd/system/`. Real findings while scoping each, not assumed:
+  - `cape-web.service`: upstream's own example binds `0.0.0.0:8000`.
+    Changed to `127.0.0.1:8000` — #314's own issue text requires no
+    service reachable from outside loopback unless the analysis
+    explicitly needs it, same posture as Ghidra REST on `127.0.0.1:9090`.
+    Confirmed: `curl 127.0.0.1:8000/` → `200`, `curl <LAN-IP>:8000/` →
+    connection refused.
+  - `cape-rooter.service`: upstream runs it as full, unscoped `root`.
+    Checked what `rooter.py` (iptables/ip/sysctl network administration)
+    actually needs rather than assuming full root was required — it
+    isn't, in principle (`CAP_NET_ADMIN`/`CAP_NET_RAW` alone would
+    cover the underlying operations) — but `rooter.py` itself
+    hard-checks `os.getuid() == 0` at startup and never drops privilege
+    afterward, an upstream design choice patching vendored code to work
+    around was judged not worth the maintenance cost of re-applying
+    across every future CAPEv2 update. What's scoped instead, without
+    touching CAPE's own source: `CapabilityBoundingSet` strips every
+    root capability except `CAP_NET_ADMIN`, `CAP_NET_RAW`, `CAP_CHOWN`,
+    `CAP_FOWNER` — the last two found live to be genuinely required
+    (not decorative): `rooter.py`'s own `AF_UNIX SOCK_DGRAM` reply path
+    (`server.sendto(response, addr)`, replying to `cape.service`'s own
+    bound socket) needs `CAP_DAC_OVERRIDE`-gated permission to write to
+    a path this process doesn't own — without it, *every* rooter call
+    (even the harmless `inetsim_disable` cleanup call
+    `machinery_manager.py` fires on startup for each configured machine)
+    raised an uncaught `PermissionError` that crashed the whole rooter
+    process, which in turn hung `cape.service`'s own startup
+    indefinitely waiting on a reply a crashed process could never send —
+    confirmed by reproducing the hang with the capability missing, then
+    confirming it goes away with it present.
+  - `PYTHONUNBUFFERED=1` added to all four: Python block-buffers stdout
+    by default off a TTY, which meant `journalctl -u cape` could sit
+    silent for minutes while `cuckoo.py` was actively logging —
+    materially slowed down diagnosing the rooter hang above.
+
+- **SQLite task DB: usable, but real, load-bearing operational
+  caveat found live.** The default `journal_mode` (`delete`, i.e. a
+  rollback journal, not WAL) serializes writers hard enough that
+  `utils/submit.py` reliably hit `sqlite3.OperationalError: database is
+  locked` while `cape.service`'s own scheduler was concurrently polling
+  the same file — reproduced consistently, not a one-off flake. Switched
+  `PRAGMA journal_mode=WAL` (a standard, safe fix for exactly this
+  multi-process contention pattern), which materially helped but did not
+  eliminate every collision under concurrent load — CAPE's own database
+  layer explicitly documents advisory locking as "Postgres only —
+  no-op on sqlite (single-writer)". SQLite remains a deliberate
+  simplification for #314's actual ask (get the host stack running), not
+  an oversight; see Known Gaps for the Postgres migration this points at
+  for anything beyond light, non-concurrent use.
+
+- **Two reporting modules disabled for false-negative status, not
+  actual failures**: real analyses were completing successfully — full
+  behavioral logs, screenshots, process dumps, zero errors — yet the
+  task status still read `failed_reporting`. Traced to
+  `RunReporting.process()` in `lib/cuckoo/core/plugins.py`: it increments
+  the same `reporting_errors` counter for a module that genuinely crashed
+  *and* for a `CuckooDependencyError` (an optional module skipping itself
+  over a missing dependency, logged only as a `WARNING`) — the counter
+  can't distinguish the two, and `error_count != 0` alone flips the
+  task's final status. `[maec41]` (needs the `cybox` package, not
+  installed — MAEC 4.1 output isn't consumed anywhere in this repo) and
+  `[gcs]` (needs `google-cloud-storage`, same story) both set to
+  `enabled = no` in `conf/reporting.conf`, matching the same
+  disable-the-unconfigured-optional-integration pattern already used for
+  `[elasticsearchdb]`. Confirmed by reprocessing the same already-run
+  analysis (`utils/process.py 7 -r`) with both disabled: status flipped
+  from `failed_reporting` to `reported` with no other change.
+
+- **Confirmed end-to-end with a real submission**: a known-benign `.bat`
+  script (writes a file, echoes to stdout, exits) submitted via
+  `utils/submit.py --machine win11-cape --package batch`. Full pipeline
+  observed working, not assumed from partial signals: `capekvm` found
+  and started the machine, the golden image's `AtLogon`-triggered CAPE
+  agent answered on `:8000`, the sample executed, `capemon`'s behavioral
+  logs (`logs/*.bson`), 5 real screenshots (`shots/000{1-5}.jpg`),
+  process dumps, and a PCAP were all captured, and the task reached
+  `status: reported` — confirmed both via direct SQLite query and CAPE's
+  own `/apiv2/tasks/status/<id>/` endpoint. `curl 127.0.0.1:8000/` (the
+  web UI, not the guest agent) separately returned `200`.
+
+- **One golden-image bug found and fixed at the source, not just
+  patched around**: the very first live boot of `win11-cape` (through
+  `capekvm`, which recreates the guest's disk from the golden image
+  before every analysis) never got its CAPE agent running — the
+  AtLogon-triggered scheduled task fired but failed with
+  `0x80070002` (file not found). Root cause: an earlier manual WinRM-based
+  fixup (documented under #315) had corrected this on a disposable
+  overlay that got discarded, never on the golden image's own base
+  layer, so every fresh overlay `capekvm` creates inherited the
+  original, still-broken task registration (pointing at
+  `Python311\pythonw.exe`; the real install path, discovered by
+  `Test-Path`, is `Python311-32\pythonw.exe` — python.org's 32-bit
+  Windows installer for 3.11 uses that `-32` suffix, not a bare
+  `Python311` folder). Fixed by booting the golden image directly (not
+  an overlay) one more time, re-registering the scheduled task with the
+  correct path, and shutting down — verified by then recreating a
+  completely fresh overlay from scratch and confirming the agent came up
+  correctly with zero manual intervention, the same way `capekvm` does
+  it for every real analysis.
 
 ### Dashboard wiring (#319, registry entry only)
 
@@ -335,38 +516,51 @@ availability nothing backs, same discipline `ghidraConfigured`/
 ## Known gaps (tracked, not silently dropped)
 
 - **No `/cape/{sha256}` result detail page.** #319's own issue text is
-  explicit that this depends on "a real result shape" from #318, and
-  #318's worker has never submitted a real sample (no golden image to
-  detonate in). The registry entry's `ResultLinkShape: "/cape/{sha256}"`
-  is therefore a route *promise*, not yet a working link — clicking
-  through 404s today. Build `dashboard/cape.go`'s `loadCapeResults()` /
-  `capePageData` / ES-mirror pair (mirroring `revdeck.go`'s shape, which
-  is closer to CAPE's single-result-per-submission model than
-  `ghidra.go`'s larger one) once a live `{sha256}_cape.json` exists to
-  design the page against, not before.
-- **`cape-worker.py`'s CAPE API client is unverified against a live
-  service.** Endpoints match CAPEv2's documented `apiv2` blueprint, the
-  same starting point that turned out wrong once already for
-  `ghidra-worker.py`'s Ghidra REST client. Re-run `--selftest` (extended
-  into a real submission, the way `ghidra-worker.py --selftest` already
-  does for its own service) once #315's guest exists.
-- **PostgreSQL not stood up.** CAPE's default SQLite task DB is enough to
-  get the host stack running — #314's actual ask — but upstream
-  recommends Postgres for anything beyond light use. Migrating
-  `conf/cuckoo.conf`'s `connection=` to a Postgres container (mirroring
-  `ghosts-postgres` exactly, including its `ipv4_address:` pinning
-  reasoning) is real follow-up work, not built speculatively before
-  anything has run a real analysis under load.
-- **CAPE's own web service has never been started.** See "What's
-  verified" above — nothing blocks doing this except that there is
-  currently no machine to configure it against, so it was left for once
-  #315 lands rather than started and left idle.
-- **`win11-cape` golden image (#315) not begun at all.** Needs a licensed
-  Windows ISO (source not assumed by this plan) and an hours-long Packer
-  build on shared host hardware — the largest remaining piece of this
-  chain by a wide margin, and the one every other unchecked box above
-  ultimately depends on to become end-to-end-verifiable rather than
-  configured-but-untested.
+  explicit that this depends on "a real result shape" — no longer
+  blocked on a golden image to produce one (#315 and a real `reported`
+  analysis both now exist), but the shape hasn't been designed against
+  yet: that analysis went through `utils/submit.py` directly, not
+  `cape-worker.py`'s own spool-drain path, so there is still no real
+  `{sha256}_cape.json` written by *this repo's own* worker to design the
+  page against. The registry entry's `ResultLinkShape: "/cape/{sha256}"`
+  is therefore still a route *promise*, not yet a working link —
+  clicking through 404s today. Build `dashboard/cape.go`'s
+  `loadCapeResults()` / `capePageData` / ES-mirror pair (mirroring
+  `revdeck.go`'s shape, which is closer to CAPE's single-result-per-
+  submission model than `ghidra.go`'s larger one) once `cape-worker.py`
+  has actually written one, per the API-client gap below.
+- **`cape-worker.py`'s CAPE API client is still unverified against a
+  live service** — narrower than before, not removed: #314's own
+  `utils/submit.py` CLI and the `/apiv2/tasks/status/<id>/` read
+  endpoint are both now confirmed live against a real analysis (see
+  above), which was the actual blocker (no service to test against).
+  `cape-worker.py`'s own client code, endpoints matched against CAPEv2's
+  documented `apiv2` blueprint but never yet exercised, is real
+  remaining work — same category of risk that turned out wrong once
+  already for `ghidra-worker.py`'s Ghidra REST client. Run
+  `cape-worker.py --selftest` (extended into a real submission, the way
+  `ghidra-worker.py --selftest` already does for its own service) as the
+  next concrete step; nothing external blocks it now.
+- **PostgreSQL not stood up.** CAPE's default SQLite task DB works for
+  #314's actual ask (get the host stack running, confirmed with a real
+  end-to-end analysis) and was made noticeably more concurrent-safe by
+  switching to `PRAGMA journal_mode=WAL` (see "What's verified" for why
+  that was necessary at all) — but upstream's own code still documents
+  its advisory-locking layer as Postgres-only, and a `database is
+  locked` collision between `utils/submit.py` and the live scheduler was
+  reproduced directly, not assumed. Fine for the current low, sequential
+  submission volume; migrating `conf/cuckoo.conf`'s `connection=` to a
+  Postgres container (mirroring `ghosts-postgres` exactly, including its
+  `ipv4_address:` pinning reasoning) is the real fix once anything
+  submits concurrently rather than one task at a time.
+- **No `--memory` dump / deeper analysis-depth tuning attempted.** The
+  one verified submission used default options against a trivial `.bat`
+  — enough to prove the pipeline end-to-end (machinery, agent, capemon
+  logging, screenshots, reporting), not a statement about analysis
+  depth/quality against a real, more evasive sample. Tuning
+  `conf/processing.conf`/package-specific options is real follow-up
+  work once actual samples are being routed here (#317), not built
+  speculatively against a synthetic test file.
 
 ---
 
@@ -377,6 +571,22 @@ sandbox/cape/
   IMPLEMENTATION_PLAN.md   this file
   network.xml              isolated libvirt network (#316) — live
   compose.yml              cape-mongo (#314) — live
+  win11-cape-kvm.xml       guest domain definition (#315) — live
+  packer/                  golden image build (#315) — live
+    win11-cape.pkr.hcl
+    build-with-retry.sh
+    agent/agent.py                   vendored CAPEv2 agent
+    autounattend.xml
+    scripts/01-hardening.ps1
+    scripts/02-cape-agent.ps1
+  capev2-overrides/        tracked source of truth for what gets
+                            deployed INTO the out-of-tree /opt/CAPEv2
+                            install (#314) — live
+    modules/machinery/capekvm.py     custom machinery (see "What's
+                                       verified" for why stock kvm.py
+                                       can't drive this guest)
+    conf/capekvm.conf                its machine config
+    systemd/{cape,cape-web,cape-processor,cape-rooter}.service
   worker/
     cape-worker.py                    spool drain / CAPE apiv2 client (#318)
     honeypot-cape-worker.path         systemd path unit
@@ -390,8 +600,18 @@ dashboard/
 sandbox/windows/run_pending.sh   #320's shared cross-pipeline lock added
 ```
 
-Not yet present: `sandbox/cape/packer/` (golden image build, #315),
-`sandbox/cape/win11-cape-kvm.xml` (guest domain definition, #315),
-`sandbox/cape/install-analysis-host.sh` (an install-time wrapper the way
-`analysis/ghidra/install-analysis-host.sh` is for its own chain — worth
-adding once this chain's install steps stop changing).
+`sandbox/cape/capev2-overrides/` is a deploy-time source of truth, not
+something CAPEv2 itself reads in place — `/opt/CAPEv2` is upstream's own
+checkout (installed via `installer/cape2.sh base`, not this repo's own
+code, see "Why this exists" above), so anything this repo needs to exist
+*inside* that checkout has to be copied in after a fresh install:
+`modules/machinery/capekvm.py` → `/opt/CAPEv2/modules/machinery/`,
+`conf/capekvm.conf` → `/opt/CAPEv2/conf/`, the four `.service` files →
+`/etc/systemd/system/`, plus the two `cuckoo.conf` edits (`machinery =
+capekvm`, `resultserver.ip = 10.40.50.1`) and the `reporting.conf`/
+`processing.conf` toggles noted under "What's verified" above. No
+install script wraps this yet — the same follow-up
+`sandbox/cape/install-analysis-host.sh` (mirroring
+`analysis/ghidra/install-analysis-host.sh`) noted here before is still
+worth adding, now with a concrete, tested list of steps to encode
+instead of a guess.

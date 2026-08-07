@@ -1,0 +1,30 @@
+# Unmodified from CAPEv2's own systemd/cape-processor.service -- User=cape
+# already least-privilege (report post-processing needs no elevated
+# access, just read/write under /opt/CAPEv2/storage).
+[Unit]
+Description=CAPE report processor
+Documentation=https://github.com/kevoreilly/CAPEv2
+Wants=cape.service
+After=cape-rooter.service
+
+[Service]
+Type=exec
+WorkingDirectory=/opt/CAPEv2
+Environment=CAPE_PROCESSING_TIMEOUT=900
+Environment=CAPE_PARALLEL=7
+Environment=CAPE_MAXTASKSPERCHILD=7
+Environment=CAPE_ID=auto
+Environment=PYTHONUNBUFFERED=1
+
+EnvironmentFile=-/opt/CAPEv2/conf/default/cape-processor.env
+EnvironmentFile=-/opt/CAPEv2/conf/cape-processor.env
+
+ExecStart=/etc/poetry/bin/poetry run python utils/process.py
+User=cape
+Group=cape
+Restart=always
+RestartSec=10
+LimitNOFILE=100000
+
+[Install]
+WantedBy=multi-user.target

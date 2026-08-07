@@ -1,0 +1,24 @@
+# Scoped from CAPEv2's own systemd/cape-web.service: the one change is the
+# bind address. Upstream's example binds 0.0.0.0:8000 (reachable from any
+# interface); this repo's posture is no service reachable from outside
+# loopback unless the analysis explicitly needs it (#314's own issue text
+# -- same pattern as Ghidra REST on 127.0.0.1:9090). CAPE's web UI/API is
+# consumed locally only at this stage (no dashboard integration yet, see
+# IMPLEMENTATION_PLAN.md's Known Gaps), so loopback-only costs nothing.
+[Unit]
+Description=CAPE WSGI app
+Documentation=https://github.com/kevoreilly/CAPEv2
+Wants=cape-rooter.service
+After=cape-rooter.service
+
+[Service]
+WorkingDirectory=/opt/CAPEv2/web
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/etc/poetry/bin/poetry run python manage.py runserver_plus 127.0.0.1:8000 --traceback --keep-meta-shutdown
+User=cape
+Group=cape
+Restart=always
+RestartSec=5m
+
+[Install]
+WantedBy=multi-user.target

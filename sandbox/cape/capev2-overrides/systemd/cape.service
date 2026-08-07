@@ -1,0 +1,32 @@
+# Scoped down from CAPEv2's own systemd/cape.service (User=cape unchanged --
+# already correctly least-privilege upstream; cape's own group membership
+# in libvirt+kvm, set up separately, is what actually lets this process
+# talk to qemu:///system and manage win11-cape). No changes needed here
+# beyond documenting why upstream's defaults were kept as-is.
+#
+# PYTHONUNBUFFERED=1: found live (2026-08-07) that Python block-buffers
+# stdout by default when it isn't a TTY (true for every process systemd
+# launches), so `journalctl -u cape` could sit with no new lines for
+# minutes even while cuckoo.py was actively logging -- made diagnosing a
+# real startup hang (see capekvm.py / cape-rooter.service's own headers
+# for what it actually was) much harder than it needed to be. Applied to
+# all four units, not just this one.
+[Unit]
+Description=CAPE
+Documentation=https://github.com/kevoreilly/CAPEv2
+Wants=cape-rooter.service
+After=cape-rooter.service
+
+[Service]
+WorkingDirectory=/opt/CAPEv2/
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/etc/poetry/bin/poetry run python cuckoo.py
+User=cape
+Group=cape
+Restart=always
+RestartSec=5m
+TimeoutStopSec=4m
+LimitNOFILE=100000
+
+[Install]
+WantedBy=multi-user.target
