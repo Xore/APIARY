@@ -1687,6 +1687,17 @@ def analyse_one(client: GhidraClient, sha: str, sample: Path,
         # this dict built first. Emitted as null here rather than omitted so
         # the dashboard reads one stable shape even if report generation
         # fails and leaves it unset.
+        #
+        # #763: despite the name, this is always an HTML filename --
+        # generate_report() below calls build_report() directly, which
+        # never takes the --pdf/WeasyPrint path (that only exists on
+        # generate_report.py's own CLI entry point). Left unrenamed here to
+        # avoid a compatibility ripple through already-ES-mirrored
+        # historical documents and dashboard/ghidra.go's own JSON tag --
+        # es-results-importer/importer.py's ghidra_report_html source
+        # records the real content_type ("text/html") in
+        # ghidra-report-artifacts-v1 regardless of this field's name, which
+        # is what dashboard/ghidra.go actually serves from now.
         "report_pdf": None,
     }
     result["report_pdf"] = generate_report(result)

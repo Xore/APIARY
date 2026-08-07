@@ -320,6 +320,46 @@ func (c *esClient) docSearchAll(index string, size int) ([]esDocHit, error) {
 	return out, nil
 }
 
+// docListIDs returns just the _id of every document in index, with
+// "_source": false so this stays cheap regardless of how large individual
+// stored documents are -- unlike docSearchAll, which always pulls full
+// document bodies over the wire. Built for #638/#763: ghidra-report-
+// artifacts-v1 stores base64-encoded HTML reports and SVG call graphs with
+// no retention cap bounding how many accumulate, so checking "does an
+// artifact exist for this sha256" for every row of a results table must
+// not mean fetching every stored artifact's full payload just to answer a
+// yes/no question.
+func (c *esClient) docListIDs(index string, size int) ([]string, error) {
+	if size <= 0 || size > 10000 {
+		size = 10000
+	}
+	status, body, err := c.doRequest(http.MethodPost, fmt.Sprintf("/%s/_search?size=%d", index, size), []byte(`{"_source":false}`))
+	if err != nil {
+		return nil, err
+	}
+	if status == http.StatusNotFound {
+		return nil, nil
+	}
+	if status/100 != 2 {
+		return nil, fmt.Errorf("Elasticsearch POST %s: status %d: %s", index, status, strings.TrimSpace(string(body)))
+	}
+	var v struct {
+		Hits struct {
+			Hits []struct {
+				ID string `json:"_id"`
+			} `json:"hits"`
+		} `json:"hits"`
+	}
+	if err := json.Unmarshal(body, &v); err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(v.Hits.Hits))
+	for _, h := range v.Hits.Hits {
+		ids = append(ids, h.ID)
+	}
+	return ids, nil
+}
+
 func (c *esClient) count(index, query string) (int64, error) {
 	path := "/" + index + "/_count"
 	if query != "" {

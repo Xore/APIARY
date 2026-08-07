@@ -39,6 +39,18 @@ own ES document. The file is already content-addressed by cowrie itself
 ttylog_inputhash -- identical sessions share one file, same dedup cowrie
 already applies to its downloads/ directory), so the filename alone is a
 stable, globally-unique document ID -- no doc_id()/id_fields lookup needed.
+
+#638/#763: dashboard/ghidra.go's per-sample report/callgraph downloads are
+the second binary-artifact case, added the same way but with one real
+difference from ttylog's shape -- the filename is NOT already a unique
+content hash on its own (it's "{sha256}_ghidra_report.html" /
+"{sha256}_callgraph.svg", a fixed suffix on the sample's own hash, not a
+hash of the artifact bytes themselves), and there are two distinct
+artifact kinds sharing one index. `binary` sources carrying `id_suffix`/
+`artifact_kind` (scan_source's own binary branch) derive doc _id as
+"<sha256>:<kind>" instead of reusing the bare filename, so the report and
+callgraph for one sample coexist in ghidra-report-artifacts-v1 without
+colliding.
 """
 import base64
 import hashlib
@@ -73,6 +85,39 @@ SOURCES = [
         "index": "ghidra-analysis-v1",
         "id_fields": ("sha256",),
         "glob": "*_ghidra.json",
+    },
+    {
+        # #638/#763: dashboard/ghidra.go's own report-download route used to
+        # os.Open this file straight off GHIDRA_RESULTS_DIR -- now it only
+        # ever reads ghidra-report-artifacts-v1. id_suffix/artifact_kind
+        # (see scan_source's binary branch) derive the doc _id
+        # ("<sha256>:report") from the filename itself, the same way
+        # generate_report.py's build_report() names it
+        # ({sha256}_ghidra_report.html -- genuinely HTML, despite the
+        # ReportPDF/report_pdf field naming throughout dashboard/ghidra.go;
+        # the worker's automatic call never passes --pdf).
+        "env": "GHIDRA_RESULTS_DIR",
+        "label": "ghidra_report_html",
+        "index": "ghidra-report-artifacts-v1",
+        "glob": "*_ghidra_report.html",
+        "binary": True,
+        "id_suffix": "_ghidra_report.html",
+        "artifact_kind": "report",
+        "content_type": "text/html",
+    },
+    {
+        # Same index, the other artifact kind -- doc _id "<sha256>:callgraph".
+        # ghidra-worker.py only writes this file when graphviz is installed
+        # on the host, so a host without it simply never produces anything
+        # for this glob to match -- no special-casing needed here for that.
+        "env": "GHIDRA_RESULTS_DIR",
+        "label": "ghidra_callgraph_svg",
+        "index": "ghidra-report-artifacts-v1",
+        "glob": "*_callgraph.svg",
+        "binary": True,
+        "id_suffix": "_callgraph.svg",
+        "artifact_kind": "callgraph",
+        "content_type": "image/svg+xml",
     },
     {
         "env": "SANDBOX_RESULTS_DIR",
@@ -237,17 +282,43 @@ def scan_source(source: dict, root: Path, state: dict) -> list:
             except OSError as exc:
                 logger.warning(f"{source['label']}: skipping unreadable {path}: {exc}")
                 continue
-            action = {
-                "_op_type": "index",
-                "_index": source["index"],
-                "_id": path.name,
-                "_source": {
-                    "shasum": path.name,
-                    "size_bytes": len(raw),
-                    "imported_at": datetime.now(timezone.utc).isoformat(),
-                    "ttylog_base64": base64.b64encode(raw).decode("ascii"),
-                },
-            }
+            if "id_suffix" in source:
+                # #638/#763: Ghidra report/callgraph artifacts. The sha256 is
+                # the filename with its known suffix stripped (build_report()/
+                # ghidra-worker.py's own naming convention), and doc _id is
+                # "sha256:kind" so the two artifact kinds for one sample share
+                # this index without colliding.
+                sha256 = path.name[: -len(source["id_suffix"])]
+                doc_id = f"{sha256}:{source['artifact_kind']}"
+                action = {
+                    "_op_type": "index",
+                    "_index": source["index"],
+                    "_id": doc_id,
+                    "_source": {
+                        "sha256": sha256,
+                        "kind": source["artifact_kind"],
+                        "filename": path.name,
+                        "content_type": source["content_type"],
+                        "size_bytes": len(raw),
+                        "imported_at": datetime.now(timezone.utc).isoformat(),
+                        "data_base64": base64.b64encode(raw).decode("ascii"),
+                    },
+                }
+            else:
+                # cowrie_ttylog's original shape -- the filename IS the
+                # content hash already (cowrie renames on session close),
+                # so it alone is a stable, globally-unique document id.
+                action = {
+                    "_op_type": "index",
+                    "_index": source["index"],
+                    "_id": path.name,
+                    "_source": {
+                        "shasum": path.name,
+                        "size_bytes": len(raw),
+                        "imported_at": datetime.now(timezone.utc).isoformat(),
+                        "ttylog_base64": base64.b64encode(raw).decode("ascii"),
+                    },
+                }
             pending.append((key, mtime, action))
             continue
 
