@@ -69,7 +69,7 @@ SAMPLES_DIR = Path(os.environ.get(
 # CAPE web's default apiv2 port (utils/api.py, Django devserver / gunicorn in
 # front of it -- see docs/sandbox/cape/IMPLEMENTATION_PLAN.md Phase 4).
 API_BASE = os.environ.get("CAPE_API_BASE", "http://127.0.0.1:8000").rstrip("/")
-API_TOKEN = os.environ.get("CAPE_API_TOKEN", "")
+API_AUTH = os.environ.get("CAPE_API_TOKEN", "")
 
 # This worker's own lock: collapses overlapping path-unit triggers into one
 # drain, same as every other worker in this repo.
@@ -313,7 +313,7 @@ def drain() -> int:
     if not pending:
         return 0
 
-    client = CapeClient(API_BASE, API_TOKEN)
+    client = CapeClient(API_BASE, API_AUTH)
     if not client.ready():
         # Leave the spool untouched -- the path unit fires again on the next
         # change, same contract ghidra-worker.py's drain() holds itself to.
@@ -384,7 +384,7 @@ def selftest() -> int:
     could submit a real sample to. Extend this once one exists, the way
     ghidra-worker.py's own --selftest exercises a real analysis end to end.
     """
-    client = CapeClient(API_BASE, API_TOKEN)
+    client = CapeClient(API_BASE, API_AUTH)
     ok = client.ready()
     print(f"API_BASE      : {API_BASE}")
     print(f"/apiv2/cuckoo/status/ : {'OK' if ok else 'UNREACHABLE'}")
