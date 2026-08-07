@@ -59,11 +59,12 @@ for _ in $(seq 1 40); do
 done
 [ "$ready" -eq 1 ] || fail "Elasticsearch did not become reachable at $es_url"
 
-start_line=$(grep -n '_ingest/pipeline/geoip-honeypot' "$src_root/analysis/elasticsearch-setup.sh" | head -1 | cut -d: -f1)
-body_start=$((start_line + 3))
+start_line=$(grep -n '^geoip_pipeline_body=' "$src_root/analysis/elasticsearch-setup.sh" | head -1 | cut -d: -f1)
+body_start=$((start_line + 1))
 end_line=$(tail -n "+$body_start" "$src_root/analysis/elasticsearch-setup.sh" | grep -n '^JSON$' | head -1 | cut -d: -f1)
 body_end=$((body_start + end_line - 2))
-sed -n "${body_start},${body_end}p" "$src_root/analysis/elasticsearch-setup.sh" > "$tmp/pipeline.json"
+sed -n "${body_start},${body_end}p" "$src_root/analysis/elasticsearch-setup.sh" |
+  sed 's#__ES_HOME_NET_JSON__#[]#' > "$tmp/pipeline.json"
 
 python3 -c "import json; json.load(open('$tmp/pipeline.json'))" ||
   fail "extracted pipeline body is not valid JSON -- extraction line range needs updating"
