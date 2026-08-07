@@ -1,0 +1,163 @@
+<!--
+  win11-cape-kvm.xml — libvirt domain for the CAPE detonation guest (#315).
+
+  Adapted directly from sandbox/windows/packer/win11-kvm.xml: same
+  anti-detection posture (hidden KVM CPUID leaf, no vmport, real-looking
+  SMBIOS, spoofed disk/optical serials, host-passthrough CPU, watchdog
+  disabled per #502's own finding). Differences from that file, and only
+  these:
+
+    * name/disk paths: win11-cape, not win11-sandbox
+    * network: 'cape' (virbr-cape, #316), not 'sandbox': CAPE's guest
+      never shares a bridge with win11-sandbox's own guest, see
+      sandbox/cape/network.xml's header for why
+    * MAC 00:1a:a0:3c:4d:71 (next unused address in this repo's own Intel-OUI
+      sequence: ...5e is win11-sandbox, ...6f is win11-ghosts), pinned in
+      sandbox/cape/network.xml to 10.40.50.50, matching kvm.conf's
+      [cuckoo1] ip= setting on the CAPE host
+    * SMBIOS serial/BIOS date varied slightly from win11-kvm.xml's own
+      values: cheap insurance against a sample that has previously seen
+      this repo's OTHER golden image and would otherwise fingerprint an
+      exact duplicate across two "different" detonation routes
+
+  ┌─ THE ONE RULE (same as win11-kvm.xml's own) ──────────────────────────┐
+  │ The hardware here must match what win11-cape.pkr.hcl built the image  │
+  │ with. Windows binds its boot-critical storage driver at install time  │
+  │ and will not boot if the disk moves to another bus; changing the      │
+  │ firmware pair invalidates the UEFI boot entry; removing the TPM makes │
+  │ the Windows 11 requirement checks fail.                               │
+  └─────────────────────────────────────────────────────────────────────┘
+
+  Not yet defined on the host: sandbox/cape/packer/win11-cape.pkr.hcl has
+  to finish building /var/dockge/sandbox/golden-images/win11-cape.qcow2
+  first (#315, in progress). `virsh define win11-cape-kvm.xml` once a thin
+  overlay clone exists at the disk path below (same convention
+  kvm_manage.sh already uses for win11-sandbox: not duplicated here yet;
+  add a CAPE equivalent once this domain has actually been defined and
+  booted once, so it is written against real, not guessed, behavior).
+-->
+<domain type='kvm' xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'>
+  <name>win11-cape</name>
+
+  <memory unit='MiB'>16384</memory>
+  <currentMemory unit='MiB'>8192</currentMemory>
+  <vcpu placement='static'>8</vcpu>
+
+  <sysinfo type='smbios'>
+    <bios>
+      <entry name='vendor'>American Megatrends Inc.</entry>
+      <entry name='version'>2.14.1</entry>
+      <entry name='date'>11/08/2023</entry>
+    </bios>
+    <system>
+      <entry name='manufacturer'>Dell Inc.</entry>
+      <entry name='product'>OptiPlex 7010</entry>
+      <entry name='version'>Not Specified</entry>
+      <entry name='serial'>9WM2LR3</entry>
+      <entry name='family'>OptiPlex</entry>
+    </system>
+    <baseBoard>
+      <entry name='manufacturer'>Dell Inc.</entry>
+      <entry name='product'>0KRC95</entry>
+      <entry name='version'>A01</entry>
+    </baseBoard>
+  </sysinfo>
+
+  <os>
+    <type arch='x86_64' machine='q35'>hvm</type>
+    <smbios mode='sysinfo'/>
+    <loader readonly='yes' secure='yes' type='pflash'>/usr/share/OVMF/OVMF_CODE_4M.secboot.fd</loader>
+    <nvram template='/usr/share/OVMF/OVMF_VARS_4M.ms.fd' format='qcow2'>/var/lib/libvirt/qemu/nvram/win11-cape_VARS.qcow2</nvram>
+    <boot dev='hd'/>
+  </os>
+
+  <features>
+    <acpi/>
+    <apic/>
+    <smm state='on'/>
+    <kvm>
+      <hidden state='on'/>
+    </kvm>
+    <vmport state='off'/>
+  </features>
+
+  <cpu mode='host-passthrough' check='none' migratable='off'/>
+
+  <clock offset='localtime'>
+    <timer name='rtc' tickpolicy='catchup'/>
+    <timer name='pit' tickpolicy='delay'/>
+    <timer name='hpet' present='no'/>
+  </clock>
+
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>preserve</on_crash>
+
+  <pm>
+    <suspend-to-mem enabled='no'/>
+    <suspend-to-disk enabled='no'/>
+  </pm>
+
+  <devices>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2' cache='none' io='native' discard='unmap'/>
+      <source file='/var/dockge/sandbox/vms/win11-cape.qcow2'/>
+      <target dev='sda' bus='sata'/>
+      <serial>WD-WX61B85K7214</serial>
+      <address type='drive' controller='0' bus='0' target='0' unit='0'/>
+    </disk>
+
+    <disk type='file' device='cdrom'>
+      <driver name='qemu' type='raw'/>
+      <target dev='sdb' bus='sata'/>
+      <readonly/>
+      <address type='drive' controller='0' bus='0' target='0' unit='1'/>
+    </disk>
+
+    <controller type='sata' index='0'/>
+    <controller type='pci' index='0' model='pcie-root'/>
+    <controller type='pci' index='1' model='pcie-root-port'/>
+    <controller type='pci' index='2' model='pcie-root-port'/>
+    <controller type='pci' index='3' model='pcie-root-port'/>
+    <controller type='usb' index='0' model='qemu-xhci' ports='8'/>
+
+    <!-- MAC pinned in sandbox/cape/network.xml to 10.40.50.50, matching
+         CAPE's own conf/kvm.conf [cuckoo1] ip= setting: CAPE's machinery
+         module reaches this address directly (agent.pyw listens on
+         :8000), and the result server on the CAPE host side reaches back
+         to it too (conf/cuckoo.conf [resultserver] ip=10.40.50.1, this
+         bridge's own gateway). -->
+    <interface type='network'>
+      <mac address='00:1a:a0:3c:4d:71'/>
+      <source network='cape'/>
+      <model type='e1000e'/>
+    </interface>
+
+    <graphics type='vnc' port='-1' autoport='yes' listen='127.0.0.1'/>
+    <video>
+      <model type='vga' vram='16384' heads='1'>
+        <resolution x='1920' y='1080'/>
+      </model>
+    </video>
+
+    <watchdog model='itco' action='none'/>
+
+    <input type='tablet' bus='usb'/>
+    <input type='keyboard' bus='ps2'/>
+
+    <tpm model='tpm-tis'>
+      <backend type='emulator' version='2.0'/>
+    </tpm>
+
+    <memballoon model='none'/>
+  </devices>
+
+  <qemu:commandline>
+    <qemu:arg value='-global'/>
+    <qemu:arg value='driver=ide-hd,property=model,value=WDC WD10JPVX-75J'/>
+    <qemu:arg value='-global'/>
+    <qemu:arg value='driver=ide-cd,property=model,value=DVDR   TS-H653F'/>
+  </qemu:commandline>
+</domain>

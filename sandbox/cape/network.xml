@@ -31,16 +31,23 @@
   10.90.0.0/24 ghosts_net docker, 192.168.42.0/24 LAN, 198.18.0.0/24
   virbr-hpsbx), so a routing mistake elsewhere can't silently overlap
   this one.
+
+  win11-cape's MAC (win11-cape-kvm.xml, #315) pinned to a single-address
+  DHCP reservation — same convention sandbox/network.xml uses for
+  win11-sandbox's own 10.10.10.2, not a manually-configured static IP
+  inside Windows. CAPE's own docs warn "CAPE doesn't support DHCP," but
+  what that actually requires is an address that never changes between
+  boots, which a MAC-pinned reservation already guarantees — this pin
+  must keep matching conf/kvm.conf's [cuckoo1] ip=10.40.50.50 on the CAPE
+  host.
 -->
 <network>
   <name>cape</name>
   <bridge name='virbr-cape' stp='on' delay='0'/>
   <ip address='10.40.50.1' netmask='255.255.255.0'>
-    <!-- No <dhcp><host> pin yet: #315's golden image (and its guest's
-         MAC address) doesn't exist yet. Pin it here the same way
-         sandbox/ghosts/network.xml pins win11-ghosts's, once #315 lands. -->
     <dhcp>
       <range start='10.40.50.10' end='10.40.50.99'/>
+      <host mac='00:1a:a0:3c:4d:71' name='win11-cape' ip='10.40.50.50'/>
     </dhcp>
   </ip>
 </network>
