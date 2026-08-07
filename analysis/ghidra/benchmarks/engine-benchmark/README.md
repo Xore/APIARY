@@ -166,6 +166,74 @@ findings (no digest/registry system, `model-governance.py`'s pipeline being
 Ollama-shaped), and the real-payload divergence above is a new, separate
 reason for caution.
 
+## Settings tuning (issue #832): does configuration close the vLLM gap?
+
+Before treating the real-payload divergence above as a verdict against
+vLLM, its settings were checked for parity with llama.cpp/Ollama, then
+pushed further. Tested one variable at a time against the same 5-sample
+real-payload corpus (baseline: vLLM 6/20, llama.cpp/Ollama 15/20 each):
+
+| Variant | Change | Real-payload score |
+|---|---|---|
+| Baseline | `temperature=0, seed=66` only | 6/20 (30%) |
+| A | + `top_k=1, repetition_penalty=1.1` (matching llama.cpp/Ollama exactly) | 11/20 (55%) |
+| B | + `--enforce-eager` (disables CUDA-graph capture/torch.compile) | 12/20 (60%) |
+| C | + `--enable-chunked-prefill=False` | 12/20 (60%) |
+| Control | + `--max-num-seqs 1` (forces effectively no batching) | 12/20 (60%), same output as C |
+
+**Settings parity (variant A) closed about half the gap on its own** — the
+original comparison genuinely wasn't apples-to-apples: `repetition_penalty`
+defaulted to vLLM's `1.0` (no penalty) while llama.cpp/Ollama both used
+`1.1`, and `top_k` was never set for vLLM despite a
+[known vLLM bug class](https://github.com/vllm-project/vllm/issues/5404)
+where `temperature=0` and `top_k=1` don't reliably produce identical output.
+Variants B/C added a little more, then plateaued at 12/20.
+
+**The `--max-num-seqs 1` control test is the important result**: forcing
+effectively no batching produced the *identical* score and near-identical
+output to variant C. This directly rules out vLLM's continuous-batching
+architecture (floating-point non-associativity across batches, a real and
+[well-documented](https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/)
+source of non-determinism in vLLM generally) as the cause here — if it were
+batching, forcing batch-size-1 would have changed the result. It didn't.
+The remaining ~3-point/15% gap (12/20 vs 15/20) is a stable, deterministic
+difference between vLLM's inference implementation and llama.cpp/Ollama's,
+not a batching artifact or a settings gap. `thinking-machines-lab/batch-invariant-ops`
+(1.6-2.1x slower, targets exactly the batching non-determinism this control
+test ruled out) was not pursued further given this evidence.
+
+**Confirmed against the synthetic corpus too**: the tuned config (variant
+C's settings) scored **102/156 (65.4%)** on the 32-case synthetic corpus —
+better than the untuned vLLM baseline (84/156) *and* better than
+llama.cpp/Ollama's 88/156. So tuning is a clear net positive to adopt for
+vLLM regardless of the real-payload plateau; it just doesn't fully close
+that specific gap.
+
+**Recommended vLLM config, if used**: `--enforce-eager
+--enable-chunked-prefill=False`, plus explicit `top_k=1,
+repetition_penalty=1.1` per request to match llama.cpp/Ollama's defaults.
+
+### Ollama and llama.cpp tuning
+
+Checked for completeness, not because either showed a gap to close (both
+already matched exactly in the original run):
+
+- **Ollama, `OLLAMA_FLASH_ATTENTION=1`**: byte-identical output, 15/20,
+  no change. Flash attention is a performance optimization here, not a
+  numerics change, as expected.
+- **llama.cpp, `-fa on`** (explicit flash-attn, same default as `auto`):
+  byte-identical output, 15/20, no change.
+- **llama.cpp, quantized KV cache (`-ctk q8_0 -ctv q8_0`)**: **real finding
+  — this degrades quality**, 15/20 → 13/20, and reproduces the exact same
+  "Microsoft Security Center" hallucination seen in the vLLM divergence on
+  one specific sample. This shows that hallucination isn't a vLLM-specific
+  bug: it's a fragile decision boundary in the model's own interpretation
+  of that sample, and *any* precision-reducing path — a different engine's
+  numerics, or a quantized KV cache on the same engine — can tip it the
+  wrong way. Recommend keeping the default f16 KV cache for llama.cpp/Ollama
+  in production; the VRAM savings aren't worth the quality risk on this
+  evidence.
+
 ## Reproducing this run
 
 ```bash
