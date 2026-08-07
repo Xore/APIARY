@@ -241,6 +241,15 @@ jobs:
           # today's corpus happens to pass).
           python3 analysis/agent-intrusion-corpus/validate_corpus.py
           python3 analysis/agent-intrusion-corpus/tests/test_corpus.py -v
+      - name: Agent-intrusion decode/correlate pipeline (#154 phase 2)
+        shell: bash
+        run: |
+          # Bounded, non-executing base64/gzip/zlib/xor decoder plus
+          # multi-part message-chunk reassembly, proven against the real
+          # corpus above -- not just hand-built fixtures -- per that
+          # corpus's own README ("expected_findings is ground truth for
+          # phase 2's decoder").
+          python3 analysis/agent-intrusion-corpus/tests/test_decode_correlate.py -v
       - name: Sandbox VNC bridge read-only enforcement (#805)
         shell: bash
         run: python3 sandbox/windows/vnc-bridge/tests/test_server.py

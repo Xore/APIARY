@@ -1,13 +1,15 @@
-# Agent-intrusion synthetic replay corpus (#154 phase 1)
+# Agent-intrusion synthetic replay corpus + decode/correlate pipeline (#154 phases 1-2)
 
 A versioned, fully synthetic corpus of ordered events representing the
 July 2026 agent-intrusion campaign's own phase structure, replayed in
-APIARY's own sensor/event vocabulary. This is the "Sanitized replay
-corpus" implementation phase #154 asks for — the prerequisite research
+APIARY's own sensor/event vocabulary (phase 1: "Sanitized replay corpus"),
+plus the bounded, non-executing decoder and chunk correlator phase 2 asks
+for ("Decode and correlate before LLM analysis"), proven against that
+corpus rather than hand-built fixtures alone. The prerequisite research
 (mapping the campaign to APIARY's actual trust boundaries) is
 [`docs/agent-intrusion-threat-model.md`](../../docs/agent-intrusion-threat-model.md),
-already done; this corpus is what phases 2 (decode/correlate) and 3
-(deterministic criticality rules) will be built and tested against.
+already done. Phase 3 (deterministic criticality rules) is the next piece
+this decode/correlate output is meant to feed.
 
 ## What's here
 
@@ -26,6 +28,19 @@ already done; this corpus is what phases 2 (decode/correlate) and 3
   Proves the corpus validates clean *and* that the validator actually
   catches deliberately-broken input, not just that today's corpus happens
   to pass.
+- **`decode_correlate.py`** — phase 2's decoder (`bounded_decode`: bounded,
+  non-executing base64/gzip/zlib decode, with a single-byte-XOR brute-force
+  fallback, full provenance chain, depth/size caps) and chunk correlator
+  (`ChunkCorrelator`: reassembles the campaign's own type/channel/sequence/
+  checksum message protocol before a multi-part payload is even decodable).
+  No third-party dependencies, same reasoning as `validate_corpus.py`.
+- **`tests/test_decode_correlate.py`** — unit tests against hand-built
+  fixtures (including the decoder's own bounds: depth cap, size cap,
+  malformed/adversarial input never raising) *and* end-to-end tests that
+  run the real corpus's encoded events through the pipeline and confirm
+  the recovered plaintext actually matches what each event's own
+  `expected_findings.decoded_summary` claims — cashing in the corpus's own
+  "ground truth" contract for real, not just trusting the prose.
 
 ## Design
 
@@ -138,10 +153,15 @@ A future breaking change to `schema.json` (a required field added/removed,
 an enum value changed) should bump `schema.json`'s own `$id` and add a
 note here, not silently reinterpret old corpus rows under a new meaning.
 
-## What this corpus does *not* do
+## What this directory does *not* do
 
-It is a fixture, not an implementation. Nothing in this directory decodes,
-correlates, or scores anything yet — that's phases 2 and 3's job, which
-this corpus exists to be tested against once built. `matched_rule` in
-every event is either `null` or a descriptive placeholder string, not a
-real rule identifier, since phase 3's rule set doesn't exist yet.
+`decode_correlate.py` decodes and reassembles; it does not score or
+escalate anything — no criticality rules, no severity, no alerting. That's
+phase 3's job, which this directory's decoded output is meant to feed once
+built. `matched_rule` in every corpus event is still either `null` or a
+descriptive placeholder string, not a real rule identifier, since phase
+3's rule set doesn't exist yet. `decode_correlate.py` is also standalone
+Python, not yet wired into the dashboard/analysis-worker pipeline
+production code would actually run against live sensor data -- that
+integration is separate follow-up work once phase 3 defines what a
+decoded+correlated event should trigger.
