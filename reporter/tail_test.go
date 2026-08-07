@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -140,6 +141,58 @@ func TestTailerPollGlobHandlesRotatingFilenames(t *testing.T) {
 	}
 	if len(got) != 1 || got[0] != "second-file-line" {
 		t.Fatalf("after rotation to a new filename: got %v, want [second-file-line]", got)
+	}
+}
+
+// TestTailerSkipsAnOversizedLineInsteadOfStallingForever (#890): before this
+// fix, a scan error (bufio.ErrTooLong for a line over the 1MB buffer) left
+// offset unmoved with no further handling, so a second poll re-opened the
+// file, seeked to the identical byte, and hit the same oversized line again
+// -- deterministically forever, silently dropping every later line in that
+// file.
+func TestTailerSkipsAnOversizedLineInsteadOfStallingForever(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cowrie.json")
+	st, err := openStore(filepath.Join(dir, "reported.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	tl := newTailer(st)
+
+	huge := strings.Repeat("A", 2<<20) // 2MB, over the 1MB scanner cap
+	content := "before\n" + huge + "\nafter\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var got []int // lengths only -- never print the 2MB line itself
+	record := func(l []byte) { got = append(got, len(l)) }
+
+	if err := tl.poll(path, record); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != len("before") {
+		t.Fatalf("first poll: got %d line(s) with lengths %v (want just \"before\")", len(got), got)
+	}
+
+	// The oversized line is now fully on disk (it ends in \n), so the very
+	// next poll must skip past it and pick up "after" -- not stall.
+	got = nil
+	if err := tl.poll(path, record); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != len("after") {
+		t.Fatalf("second poll: got %d line(s) with lengths %v, want [after] (len %d) -- tailer is stuck re-reading the oversized line", len(got), got, len("after"))
+	}
+
+	// A third poll must not re-deliver anything: offset has caught up to EOF.
+	got = nil
+	if err := tl.poll(path, record); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("third poll: got %d line(s) with lengths %v, want none", len(got), got)
 	}
 }
 
