@@ -33,7 +33,7 @@ target=/usr/local/libexec/honeypot-sandbox/windows
 # timeout and guessing why.
 python3 -m pip install --break-system-packages pywinrm paramiko python-evtx
 
-install -d -m 0755 -o root -g root "$target" "$target/orchestrate" "$target/packer" "$target/vnc-bridge"
+install -d -m 0755 -o root -g root "$target" "$target/orchestrate" "$target/packer" "$target/vnc-bridge" "$target/analysis"
 install -m 0755 -o root -g root "$script_dir/run_pending.sh" "$target/run_pending.sh"
 install -m 0755 -o root -g root "$script_dir/process-windows-web-requests.sh" "$target/process-windows-web-requests.sh"
 install -m 0755 -o root -g root "$script_dir/golden-image-status.sh" "$target/golden-image-status.sh"
@@ -55,8 +55,22 @@ install -m 0644 -o root -g root "$script_dir/packer/win11-kvm.xml" "$target/pack
 # here: it holds libvirt access, so it does not get a pip dependency tree.
 install -m 0755 -o root -g root "$script_dir/vnc-bridge/server.py" "$target/vnc-bridge/server.py"
 
+# #528: row-aware CDC dedup store for procmon.csv, and the timer-triggered
+# job that archives old diagnostics.zip files into it. Both stdlib-only
+# (sqlite3, zipfile, hashlib) -- no pip dependency tree, same reasoning as
+# everything else installed here. Lives in analysis/ (shared with the
+# containerized payload-dedupe/yara-scanner stack) rather than
+# sandbox/windows/orchestrate/ since it's not part of the detonation
+# pipeline itself, but this worker's own libexec tree is where it actually
+# needs to run from -- diagnostics.zip only ever exists on this host, not
+# in any container that mounts it.
+install -m 0644 -o root -g root "$script_dir/../../analysis/procmon_cdc_store.py" "$target/analysis/procmon_cdc_store.py"
+install -m 0644 -o root -g root "$script_dir/../../analysis/archive_diagnostics.py" "$target/analysis/archive_diagnostics.py"
+install -m 0755 -o root -g root "$script_dir/archive-diagnostics.sh" "$target/archive-diagnostics.sh"
+
 for unit in honeypot-windows-sandbox-worker.service honeypot-windows-sandbox-worker.path honeypot-windows-sandbox-web-requests.service \
-    honeypot-windows-golden-image-status.service honeypot-windows-golden-image-status.timer; do
+    honeypot-windows-golden-image-status.service honeypot-windows-golden-image-status.timer \
+    archive-diagnostics.service archive-diagnostics.timer; do
   install -m 0644 -o root -g root "$script_dir/$unit" "/etc/systemd/system/$unit"
 done
 install -m 0644 -o root -g root "$script_dir/vnc-bridge/honeypot-windows-vnc-bridge.service" \
@@ -72,6 +86,9 @@ fi
 
 install -d -m 0700 -o root -g root /var/lib/honeypot-windows-sandbox/requests/{pending,rejected}
 install -d -m 0750 -o root -g xore /var/lib/honeypot-windows-sandbox/export
+# #528: root-owned like export/ above -- archive-diagnostics.service (root,
+# no User= override) is the only writer, same posture as the requests dirs.
+install -d -m 0750 -o root -g xore /var/lib/honeypot-windows-sandbox/procmon-cdc-store
 
 systemctl daemon-reload
 systemctl reset-failed honeypot-windows-sandbox-worker.service honeypot-windows-sandbox-web-requests.service 2>/dev/null || true
@@ -79,6 +96,7 @@ systemctl enable --now honeypot-windows-sandbox-worker.path
 systemctl enable --now honeypot-windows-golden-image-status.timer
 systemctl start honeypot-windows-golden-image-status.service || true
 systemctl enable --now honeypot-windows-vnc-bridge.service
+systemctl enable --now archive-diagnostics.timer
 
 echo "Windows sandbox worker installed. The .path unit is enabled and watching"
 echo "/var/lib/honeypot-windows-sandbox/requests/pending, and now triggers the"

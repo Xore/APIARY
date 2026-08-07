@@ -1,0 +1,21 @@
+[Unit]
+Description=Archive old sandbox diagnostics.zip procmon.csv members into the row-aware chunk store (#528)
+Documentation=file:/usr/local/libexec/honeypot-sandbox/windows/IMPLEMENTATION_PLAN.md
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/honeypot-windows-sandbox
+# WINDOWS_SANDBOX_RESULTS_DIR is the same variable
+# honeypot-windows-sandbox-worker.service's own EnvironmentFile already
+# defines (/var/lib/honeypot-windows-sandbox/export) -- reused rather than
+# inventing a second name for the same directory. RESULTS_ARCHIVE_AFTER_DAYS
+# and CDC_STORE_DIR are optional overrides, defaulted in the wrapper script
+# below (systemd's own ExecStart= line has no bash-style ${VAR:-default}
+# expansion, only plain substitution -- see archive-diagnostics.sh's own
+# header comment).
+ExecStart=/usr/local/libexec/honeypot-sandbox/windows/archive-diagnostics.sh
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/honeypot-windows-sandbox
