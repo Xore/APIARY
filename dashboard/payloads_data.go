@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -367,6 +368,7 @@ func (s *store) refreshPayloadCacheAsync() {
 	go func() {
 		scanned := s.scanPayloads()
 		indexPayloadInventory(s.es, scanned.Files)
+		s.mirrorPayloadBytes(scanned.Files)
 		fresh, err := readPayloadInventory(s.es)
 		if err != nil {
 			// Elasticsearch is unreachable this cycle -- keep serving
@@ -476,14 +478,13 @@ func (s *store) scanPayloads() payloadsPage {
 	return p
 }
 
-// servePayload streams one captured binary as a download. The hash is validated
-// against hashName so the path can never escape binDir.
+// servePayload streams one captured binary as a download. The hash is
+// validated against hashName. #762: served from payloadBytesIndex in
+// Elasticsearch, not the host disk -- any dashboard instance can serve any
+// payload any instance's scan has mirrored, regardless of which instance
+// (or which of s.payloadDirs) originally captured it.
 func (s *store) servePayload(w http.ResponseWriter, r *http.Request) {
 	if !requireAdmin(w, r) {
-		return
-	}
-	if len(s.payloadDirs) == 0 {
-		http.NotFound(w, r)
 		return
 	}
 	name := strings.TrimPrefix(r.URL.Path, "/payload/")
@@ -491,27 +492,24 @@ func (s *store) servePayload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid payload id", http.StatusBadRequest)
 		return
 	}
-	path, err := s.payloadPath(name)
+	data, tooLarge, found, err := s.fetchPayloadBytes(name)
 	if err != nil {
+		http.Error(w, "payload storage unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if !found {
 		http.NotFound(w, r)
 		return
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil || fi.IsDir() {
-		http.NotFound(w, r)
+	if tooLarge {
+		http.Error(w, fmt.Sprintf("payload exceeds the %d-byte size cap for dashboard download", payloadBytesRawCap), http.StatusRequestEntityTooLarge)
 		return
 	}
 	// Force a download of an inert blob — never let a browser sniff/run it.
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`.malware.bin"`)
-	http.ServeContent(w, r, name, fi.ModTime(), f)
+	http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(data))
 }
 
 func humanBytes(n int64) string {
