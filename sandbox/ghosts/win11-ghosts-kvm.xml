@@ -83,9 +83,11 @@
          - two domains must never share one nvram backing file. Same
          .secboot/.ms firmware pair as win11-kvm.xml otherwise: Secure Boot
          satisfying the Windows 11 installer is unrelated to which network
-         the guest's NIC is plugged into. -->
+         the guest's NIC is plugged into. templateFormat='raw': see
+         win11-kvm.xml's own nvram comment - without it, a fresh
+         `virsh define` fails outright on this host's libvirt. -->
     <loader readonly='yes' secure='yes' type='pflash'>/usr/share/OVMF/OVMF_CODE_4M.secboot.fd</loader>
-    <nvram template='/usr/share/OVMF/OVMF_VARS_4M.ms.fd' format='qcow2'>/var/lib/libvirt/qemu/nvram/win11-ghosts_VARS.qcow2</nvram>
+    <nvram template='/usr/share/OVMF/OVMF_VARS_4M.ms.fd' templateFormat='raw' format='qcow2'>/var/lib/libvirt/qemu/nvram/win11-ghosts_VARS.qcow2</nvram>
     <boot dev='hd'/>
   </os>
 
