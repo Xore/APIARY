@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -29,7 +30,14 @@ func main() {
 	if sessionLog != nil {
 		defer sessionLog.Close()
 	}
-	log.Printf("tftp relay %s -> %s", listen, target)
+	// #882: UDP has no handshake, so a source (client) address on an
+	// incoming datagram is trivially spoofable, and every not-yet-seen one
+	// opened a brand new outbound socket + goroutine with no admission
+	// control -- a burst of single-packet requests with spoofed sources
+	// could exhaust the process's file-descriptor limit well before the
+	// existing 2-minute idle sweep in relayReplies ever ran.
+	maxSessions := getenvInt("TFTP_MAX_SESSIONS", 1024)
+	log.Printf("tftp relay %s -> %s (max %d concurrent sessions)", listen, target, maxSessions)
 	var lock sync.Mutex
 	sessions := map[string]*session{}
 	buf := make([]byte, 65535)
@@ -42,6 +50,14 @@ func main() {
 		lock.Lock()
 		current := sessions[key]
 		if current == nil {
+			if len(sessions) >= maxSessions {
+				// At the cap: drop rather than open another upstream
+				// socket/goroutine. A real client just retries (TFTP is
+				// itself a retry-on-timeout protocol); an attacker's
+				// spoofed-source flood gets no further sockets to burn.
+				lock.Unlock()
+				continue
+			}
 			upstream, listenErr := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero})
 			if listenErr != nil {
 				lock.Unlock()
@@ -92,6 +108,15 @@ func relayReplies(server *net.UDPConn, client *net.UDPAddr, key string, current 
 func getenv(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
+	}
+	return fallback
+}
+
+func getenvInt(key string, fallback int) int {
+	if value := os.Getenv(key); value != "" {
+		if n, err := strconv.Atoi(value); err == nil && n > 0 {
+			return n
+		}
 	}
 	return fallback
 }

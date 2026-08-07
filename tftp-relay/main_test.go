@@ -8,6 +8,23 @@ import (
 	"testing"
 )
 
+// TestGetenvIntFallsBackOnMissingOrInvalidOrNonPositive (#882): the
+// TFTP_MAX_SESSIONS cap is only meaningful if a blank, malformed, zero, or
+// negative override can never disable it outright.
+func TestGetenvIntFallsBackOnMissingOrInvalidOrNonPositive(t *testing.T) {
+	const key = "TFTP_RELAY_TEST_GETENVINT"
+	for _, v := range []string{"", "not-a-number", "0", "-5"} {
+		t.Setenv(key, v)
+		if got := getenvInt(key, 1024); got != 1024 {
+			t.Errorf("getenvInt(%q=%q, 1024) = %d, want fallback 1024", key, v, got)
+		}
+	}
+	t.Setenv(key, "42")
+	if got := getenvInt(key, 1024); got != 42 {
+		t.Errorf("getenvInt(%q=42, 1024) = %d, want 42", key, got)
+	}
+}
+
 func TestLogSessionWritesRelayPortAndClientIP(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
 	f := openSessionLog(path)
