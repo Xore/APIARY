@@ -295,9 +295,14 @@ p { color: var(--text-secondary); }
   to { opacity: 1; }
 }
 
+/* #672 (APIARY): dropped the X component (was translate(-50%, ...)) --
+   .modal's horizontal centering no longer uses a transform at all (see
+   its own comment), only the vertical translateY(-50%) still does. The
+   Y motion itself (starts 8px lower, settles up into place while
+   scaling in) is unchanged. */
 @keyframes dialog-in {
-  from { opacity: 0; transform: translate(-50%, calc(-50% + 8px)) scale(0.99); }
-  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  from { opacity: 0; transform: translateY(calc(-50% + 8px)) scale(0.99); }
+  to { opacity: 1; transform: translateY(-50%) scale(1); }
 }
 
 /* ── Entrance/attention motion utilities ─────────────────────────────────
@@ -1336,7 +1341,32 @@ pre {
   position: fixed;
   z-index: 101;
   top: 50%;
-  left: 50%;
+  /* #672 (APIARY): horizontal centering was left: 50% + a matching
+     -50% in the transform below, the same percentage-offset trick the
+     vertical axis still uses (kept -- see why below). It has a real bug
+     with this codebase's own scrollbar-gutter: stable (html rule, this
+     file): confirmed live, at a 390px viewport with a modal at width:
+     100vw (the <=720px breakpoint further down), `left: 50%` resolved
+     to 187.5px instead of 195px -- a 7.5px discrepancy, exactly half
+     the reserved scrollbar gutter, reproducing even with no scrollbar
+     actually visible. left: 0 + right: 0 + margin-inline: auto centers
+     a box with an explicit width identically, but never computes a
+     percentage-of-viewport value at all, so it can't inherit that
+     interaction -- confirmed live, the same 390px case now lands flush
+     at both edges, zero overflow.
+     Vertical (top: 50% + translateY(-50%)) is deliberately NOT changed
+     the same way: scrollbar-gutter reserves horizontal space for a
+     vertical scrollbar, so the vertical axis was never actually
+     affected by this bug in the first place -- and unlike the
+     horizontal fix, an inset-based vertical equivalent (top: 0;
+     bottom: 0; margin-block: auto) has its own real cost: it only
+     centers when height is an explicit value. .modal--promo's
+     height: auto (content-sized) would stop being centered at all
+     under that scheme -- confirmed live before settling on this mixed
+     approach instead of applying the same fix to both axes uniformly. */
+  left: 0;
+  right: 0;
+  margin-inline: auto;
   display: none;
   /* Caps were fixed at 960x680 regardless of viewport, so a modal (PDF
      viewer, settings, log viewer) stayed small on a large/4K display even
@@ -1345,10 +1375,10 @@ pre {
      ultrawide) uses that space without the modal ever exceeding it. */
   width: min(1280px, calc(100vw - 40px));
   height: min(840px, calc(100dvh - 40px));
-  margin: 0;
+  margin-block: 0;
   padding: 0;
   overflow: hidden;
-  transform: translate(-50%, -50%);
+  transform: translateY(-50%);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-dialog);
   background: var(--surface-0);
@@ -1517,10 +1547,17 @@ pre {
    a palette with only a field and no results list is a complete, valid
    instance of this component. */
 .modal--palette {
+  /* Anchored near the top, not vertically centered like the base
+     .modal -- top: 14dvh is meant literally, so the base's
+     translateY(-50%) has to be cancelled (transform: none) or it would
+     shift this well above its intended position. Horizontal centering
+     needs no override at all: the base's left: 0; right: 0;
+     margin-inline: auto (not a transform) already centers any width,
+     including this variant's own narrower one. */
   top: 14dvh;
+  transform: none;
   height: auto;
   max-height: min(72dvh, 560px);
-  transform: translateX(-50%);
   flex-direction: column;
   width: min(680px, calc(100vw - 40px));
 }
