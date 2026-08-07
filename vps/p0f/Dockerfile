@@ -11,7 +11,7 @@
 # after the fact (#241). jansson/jansson-dev stay in the package list purely
 # because build.sh links -ljansson unconditionally (Makefile), even though
 # -j is never passed at runtime here.
-FROM alpine:3.23
+FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
 
 COPY . /opt/p0f
 

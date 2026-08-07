@@ -7,7 +7,7 @@
 # Python <= 3.10's PyCode_New API (14-arg form). Python 3.11 changed
 # PyCode_New to 16 args (added co_qualname + co_exceptiontable), so
 # gcc rejects the old generated C code at build time.
-FROM python:3.10-slim
+FROM python:3.10-slim@sha256:63669fd2563fa90b0442fa7b568e66e3667755636cda086d7bcaaa895f66fe39
 
 LABEL maintainer="honeypot-stack"
 

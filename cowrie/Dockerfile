@@ -10,7 +10,7 @@
 # exists from the upstream git clone -- to avoid the custom /cowrie/bin/
 # directory that caused 'exec: no such file or directory' on multi-stage builds.
 
-FROM debian:bookworm-slim AS builder
+FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -63,7 +63,7 @@ RUN chmod +x \
 RUN chown -R cowrie:cowrie /cowrie
 
 # ---- Stage 2: lean runtime ----
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
