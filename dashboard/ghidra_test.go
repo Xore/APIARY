@@ -620,6 +620,22 @@ func TestServeGhidraAPI(t *testing.T) {
 		}
 	})
 
+	// #876: stored SHA256 values are always lowercase (worker output), but
+	// nothing upstream of ghidraData enforced that a request's own hash was
+	// lowercase too -- an upper/mixed-case request for a hash that genuinely
+	// has a completed analysis used to 404.
+	t.Run("detail with uppercase hash still resolves", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		serveGhidraAPI(w, httptest.NewRequest(http.MethodGet, "/api/ghidra/"+strings.ToUpper(shaA), nil))
+		var row ghidraResult
+		if err := json.NewDecoder(w.Body).Decode(&row); err != nil {
+			t.Fatal(err)
+		}
+		if row.SHA256 != shaA {
+			t.Fatalf("uppercase-hash lookup did not resolve: %+v", row)
+		}
+	})
+
 	t.Run("unknown hash is 404", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		serveGhidraAPI(w, httptest.NewRequest(http.MethodGet, "/api/ghidra/"+shaB, nil))
