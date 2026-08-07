@@ -231,5 +231,8 @@
 {{end}}
 
 {{define "techniques"}}
-{{if .}}<div class="card wide"><h2>MITRE ATT&amp;CK behavior mapping</h2><p class="note">Evidence-based behavioral context only; this does not identify or attribute an actor.</p><table class="data-table"><thead><tr><th>domain</th><th>technique</th><th>observations</th><th>evidence</th></tr></thead><tbody>{{range .}}<tr><td><span class="badge badge--muted">{{.Domain}}</span></td><td class="v"><a href="{{.URL}}" target="_blank" rel="noopener noreferrer">{{.ID}} &mdash; {{.Name}}</a></td><td class="n">{{.Count}}</td><td class="v">{{.Evidence}}</td></tr>{{end}}</tbody></table></div>{{end}}
+{{/* #790 chunk 2: card__scroll -- one row per distinct technique actually
+     observed, no cap, so a source IP (or session) that matches a lot of
+     ATT&CK behavior can produce well past 340px worth of rows. */}}
+{{if .}}<div class="card wide"><h2>MITRE ATT&amp;CK behavior mapping</h2><p class="note">Evidence-based behavioral context only; this does not identify or attribute an actor.</p><div class="card__scroll"><table class="data-table"><thead><tr><th>domain</th><th>technique</th><th>observations</th><th>evidence</th></tr></thead><tbody>{{range .}}<tr><td><span class="badge badge--muted">{{.Domain}}</span></td><td class="v"><a href="{{.URL}}" target="_blank" rel="noopener noreferrer">{{.ID}} &mdash; {{.Name}}</a></td><td class="n">{{.Count}}</td><td class="v">{{.Evidence}}</td></tr>{{end}}</tbody></table></div></div>{{end}}
 {{end}}
