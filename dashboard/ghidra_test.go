@@ -551,22 +551,14 @@ func TestLoadGhidraStatus(t *testing.T) {
 	})
 }
 
-// The worker writes report_pdf, but it lands in a filesystem path, so it is
-// re-validated as a bare filename regardless of who produced it.
-func TestAttachGhidraDownloadRejectsTraversal(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("GHIDRA_RESULTS_DIR", dir)
-	if err := os.WriteFile(filepath.Join(dir, "secret"), []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for _, bad := range []string{"../secret", "../../etc/passwd", "sub/dir.pdf"} {
-		row := ghidraResult{SHA256: shaA, ReportPDF: bad}
-		attachGhidraDownload(&row)
-		if row.ExportURL != "" {
-			t.Errorf("traversal %q produced an export URL", bad)
-		}
-	}
-}
+// #763: attachGhidraDownload no longer builds a filesystem path out of
+// worker-supplied strings at all (the artifact key is "<sha256>:report",
+// and SHA256 is already hash-validated) -- so the traversal class this test
+// used to guard against no longer applies. Its replacement,
+// TestAttachGhidraDownloadGatesOnArtifactSet (ghidra_artifacts_es_test.go),
+// covers the analogous "fail closed" property for the new design: no link
+// unless the artifact is actually confirmed present in
+// ghidra-report-artifacts-v1.
 
 func TestServeGhidraExportRejectsBadHash(t *testing.T) {
 	t.Setenv("GHIDRA_RESULTS_DIR", t.TempDir())
@@ -801,66 +793,14 @@ func TestGhidraAlertsOnHighAIRisk(t *testing.T) {
 	}
 }
 
-// The call-graph SVG carries function names recovered from the sample, so the
-// filename is re-validated even though the worker produced it.
-func TestAttachGhidraCallGraphRejectsBadNames(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("GHIDRA_RESULTS_DIR", dir)
-	if err := os.WriteFile(filepath.Join(dir, "secret.svg"), []byte("<svg/>"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for _, bad := range []string{"../secret.svg", "sub/x.svg", "notsvg.txt", "../../etc/passwd"} {
-		row := ghidraResult{SHA256: shaA, CallGraphSVG: bad}
-		attachGhidraCallGraph(&row)
-		if row.CallGraphURL != "" {
-			t.Errorf("%q produced a call-graph URL", bad)
-		}
-	}
-}
-
-func TestServeGhidraCallGraph(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("GHIDRA_RESULTS_DIR", dir)
-	svg := `<svg xmlns="http://www.w3.org/2000/svg"><text>f</text></svg>`
-	if err := os.WriteFile(filepath.Join(dir, shaA+"_callgraph.svg"), []byte(svg), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	w := httptest.NewRecorder()
-	serveGhidraExport(w, httptest.NewRequest(http.MethodGet,
-		"/export/ghidra/"+shaA+"/callgraph.svg", nil))
-	if w.Code != http.StatusOK {
-		t.Fatalf("got %d, want 200", w.Code)
-	}
-	if ct := w.Header().Get("Content-Type"); ct != "image/svg+xml" {
-		t.Errorf("Content-Type = %q", ct)
-	}
-	// Attacker-influenced content rendered as a document: the CSP and nosniff
-	// headers are the reason navigating straight to this URL is not a script
-	// execution path.
-	if csp := w.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'none'") {
-		t.Errorf("missing restrictive CSP, got %q", csp)
-	}
-	if w.Header().Get("X-Content-Type-Options") != "nosniff" {
-		t.Error("missing nosniff")
-	}
-
-	// A hash with no rendered graph must 404, not serve someone else's file.
-	w = httptest.NewRecorder()
-	serveGhidraExport(w, httptest.NewRequest(http.MethodGet,
-		"/export/ghidra/"+shaB+"/callgraph.svg", nil))
-	if w.Code != http.StatusNotFound {
-		t.Errorf("missing graph: got %d, want 404", w.Code)
-	}
-
-	// Traversal in the hash position must not escape the results directory.
-	w = httptest.NewRecorder()
-	serveGhidraExport(w, httptest.NewRequest(http.MethodGet,
-		"/export/ghidra/../../etc/passwd/callgraph.svg", nil))
-	if w.Code != http.StatusNotFound {
-		t.Errorf("traversal: got %d, want 404", w.Code)
-	}
-}
+// #763: attachGhidraCallGraph/serveGhidraCallGraph no longer read
+// GHIDRA_RESULTS_DIR or build a filesystem path from a worker-supplied
+// filename at all -- see ghidra_artifacts_es_test.go for this behavior's
+// replacements: TestAttachGhidraDownloadGatesOnArtifactSet (fail-closed
+// gating), TestServeGhidraCallGraphServesStoredSVG (serves from ES with
+// the CSP/nosniff headers preserved), and
+// TestServeGhidraExportRejectsBadHashStillWorksWithoutES (bad-hash/missing
+// still 404).
 
 // The Ghidra results list renders as a .project-grid/.project-card grid
 // (#213 phase 4), not the old <table>. Each card links to the Ghidra

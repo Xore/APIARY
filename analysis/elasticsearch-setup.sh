@@ -449,6 +449,43 @@ JSON
 )" >/dev/null
 done
 
+# #638/#763: Ghidra per-sample report HTML + call-graph SVG, mirrored by
+# es-results-importer's own binary sources (ghidra_report_html/
+# ghidra_callgraph_svg, importer.py) -- the two binary artifacts
+# dashboard/ghidra.go used to os.Open straight off GHIDRA_RESULTS_DIR.
+# Shares ghidra-analysis-v1's own 180d ILM policy (analysis-results-180d)
+# rather than cowrie-ttylog-v1's "no ILM, keep forever" posture just below:
+# unlike a TTY recording (operator-significant evidence in its own right),
+# a report/callgraph is purely a derived attachment to its ghidra-
+# analysis-v1 result and is meaningless on its own once that result has
+# aged out, so it should expire on the same schedule as the result it
+# belongs to, not outlive it.
+curl -fsS -X PUT "$es_url/_index_template/ghidra-report-artifacts" \
+  -H 'Content-Type: application/json' \
+  --data-binary '{
+  "index_patterns": ["ghidra-report-artifacts-v1"],
+  "priority": 460,
+  "template": {
+    "settings": {
+      "index.lifecycle.name": "analysis-results-180d",
+      "index.number_of_replicas": 0,
+      "index.refresh_interval": "30s",
+      "index.mapping.total_fields.limit": 50
+    },
+    "mappings": {
+      "properties": {
+        "sha256": { "type": "keyword" },
+        "kind": { "type": "keyword" },
+        "filename": { "type": "keyword" },
+        "content_type": { "type": "keyword" },
+        "size_bytes": { "type": "long" },
+        "imported_at": { "type": "date" },
+        "data_base64": { "type": "binary" }
+      }
+    }
+  }
+}' >/dev/null
+
 # #494: dashboard-owned operational alert-rule state (campaign detection,
 # stale sensor feeds, activity spikes, ES pipeline health, OT command
 # detection, YARA hits, sandbox failures -- ack/cooldown bookkeeping, not

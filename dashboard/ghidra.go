@@ -300,13 +300,14 @@ func loadGhidraResultsES(es *esClient) ([]ghidraResult, bool) {
 	if err != nil {
 		return nil, false
 	}
+	artifacts := ghidraArtifactSet(es)
 	rows := make([]ghidraResult, 0, len(raws))
 	for _, raw := range raws {
 		var row ghidraResult
 		if json.Unmarshal(raw, &row) != nil || !hashName.MatchString(row.SHA256) {
 			continue
 		}
-		attachGhidraDownload(&row)
+		attachGhidraDownload(&row, artifacts)
 		rows = append(rows, row)
 	}
 	sortGhidraResults(rows)
@@ -331,6 +332,17 @@ func loadGhidraResultsLocal() []ghidraResult {
 	if err != nil {
 		return nil
 	}
+	// Metadata falls back to disk here (pre-dates and is outside #638's own
+	// scope: that issue is specifically about the dashboard's binary-
+	// artifact *serving* routes, not this existing ES-preferred/local-
+	// fallback pattern for JSON result listings, used the same way by
+	// loadSandboxResults() and others). The two binary artifacts
+	// themselves never fall back to disk regardless of which path
+	// produced this row -- ghidraArtifactSet still only ever asks ES,
+	// same as loadGhidraResultsES's own call, and correctly yields no
+	// links at all when esResultsClient is nil or unreachable rather than
+	// reading GHIDRA_RESULTS_DIR for them.
+	artifacts := ghidraArtifactSet(esResultsClient)
 	var rows []ghidraResult
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_ghidra.json") {
@@ -354,7 +366,7 @@ func loadGhidraResultsLocal() []ghidraResult {
 		if !hashName.MatchString(row.SHA256) {
 			continue
 		}
-		attachGhidraDownload(&row)
+		attachGhidraDownload(&row, artifacts)
 		rows = append(rows, row)
 	}
 	// Newest first. CompletedAt is an RFC3339 string from the worker, which
@@ -443,48 +455,39 @@ func ghidraLiveSpoolCounts() (queued, running int, ok bool) {
 	return queued, running, true
 }
 
-// attachGhidraDownload exposes a download route only for a report that exists.
-// The worker leaves ReportPDF empty until IMPLEMENTATION_PLAN.md phase 5 is
-// built, so today this normally does nothing — which is the point: no link is
-// offered for a file that is not there.
-func attachGhidraDownload(row *ghidraResult) {
+// attachGhidraDownload exposes a download route only for an artifact that
+// actually exists in ghidra-report-artifacts-v1 -- no link is offered for
+// one that is not there. `artifacts` is the set ghidraArtifactSet() built
+// once for the whole page load (see #638/#763, dashboard/ghidra_artifacts_es.go);
+// nil means "could not confirm anything exists" (ES unreachable/unconfigured),
+// which is deliberately treated the same as "nothing exists" rather than
+// falling back to a disk read -- the dashboard's own serving route must
+// never read GHIDRA_RESULTS_DIR directly, only the disk-reading worker and
+// its ES-mirroring importer may.
+//
+// Before #763 this validated ReportPDF/CallGraphSVG as bare filenames and
+// os.Stat'd them under GHIDRA_RESULTS_DIR -- no longer needed now that the
+// artifact key is derived purely from the already-hash-validated SHA256,
+// never from a worker-supplied string.
+func attachGhidraDownload(row *ghidraResult, artifacts map[string]bool) {
 	if row == nil {
 		return
 	}
-	attachGhidraCallGraph(row)
-	if row.ReportPDF == "" {
-		return
-	}
-	// The worker controls this value, but it lands in a filesystem path, so
-	// treat it as untrusted anyway: only a bare filename, never a traversal.
-	if row.ReportPDF != filepath.Base(row.ReportPDF) || strings.Contains(row.ReportPDF, "..") {
-		row.ReportPDF = ""
-		return
-	}
-	info, err := os.Stat(filepath.Join(ghidraResultsDir(), row.ReportPDF))
-	if err != nil || info.IsDir() || info.Size() == 0 {
+	attachGhidraCallGraph(row, artifacts)
+	if row.ReportPDF == "" || !artifacts[row.SHA256+":report"] {
 		return
 	}
 	row.ExportURL = "/export/ghidra/" + row.SHA256
 }
 
 // attachGhidraCallGraph exposes the rendered call graph, if one exists. The
-// worker writes {sha}_callgraph.svg only when graphviz is installed on the
-// host, so on a host without it this correctly offers nothing rather than a
-// broken image.
-func attachGhidraCallGraph(row *ghidraResult) {
-	if row.CallGraphSVG == "" {
-		return
-	}
-	// Worker-controlled, but it becomes a filesystem path: bare filename only.
-	if row.CallGraphSVG != filepath.Base(row.CallGraphSVG) ||
-		strings.Contains(row.CallGraphSVG, "..") ||
-		!strings.HasSuffix(row.CallGraphSVG, ".svg") {
-		row.CallGraphSVG = ""
-		return
-	}
-	info, err := os.Stat(filepath.Join(ghidraResultsDir(), row.CallGraphSVG))
-	if err != nil || info.IsDir() || info.Size() == 0 {
+// worker writes a callgraph SVG only when graphviz is installed on the host
+// (row.CallGraphSVG != "" reflects that), and separately the importer must
+// have actually mirrored it into ES yet (artifacts[...]) -- both need to be
+// true, or a host without graphviz / a mirror that hasn't caught up yet
+// would otherwise offer a broken link.
+func attachGhidraCallGraph(row *ghidraResult, artifacts map[string]bool) {
+	if row.CallGraphSVG == "" || !artifacts[row.SHA256+":callgraph"] {
 		return
 	}
 	row.CallGraphURL = "/export/ghidra/" + row.SHA256 + "/callgraph.svg"
@@ -561,7 +564,8 @@ func serveGhidraAPI(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(data.Rows)
 }
 
-// serveGhidraExport streams the PDF report for one result.
+// serveGhidraExport streams the analysis report for one result, from
+// ghidra-report-artifacts-v1 (#638/#763) -- never from GHIDRA_RESULTS_DIR.
 //
 // The plan also describes falling back to a zip of raw artifacts. That is not
 // built here because the artifacts it would bundle — the call-graph SVG and
@@ -578,44 +582,22 @@ func serveGhidraExport(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	dir := ghidraResultsDir()
-	if dir == "" {
-		http.NotFound(w, r)
-		return
-	}
-	raw, err := os.ReadFile(filepath.Join(dir, sha+"_ghidra.json"))
+	doc, data, err := fetchGhidraArtifact(esResultsClient, sha, "report")
 	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	var row ghidraResult
-	if err := json.Unmarshal(raw, &row); err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	row.SHA256 = sha
-	attachGhidraDownload(&row)
-	if row.ReportPDF == "" || row.ExportURL == "" {
 		http.Error(w, "no report has been generated for this analysis yet", http.StatusNotFound)
 		return
 	}
-	// ReportPDF is re-validated as a bare filename by attachGhidraDownload
-	// above, so this join cannot escape the results directory.
-	path := filepath.Join(dir, row.ReportPDF)
-	f, err := os.Open(path)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	w.Header().Set("Content-Type", "application/pdf")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+sha+`_ghidra.pdf"`)
-	http.ServeContent(w, r, row.ReportPDF, info.ModTime(), f)
+	// #763: this is genuinely an HTML report (build_report()'s own docstring
+	// says so -- ghidra-worker.py's automatic call never passes --pdf, so a
+	// real PDF is never produced despite the ReportPDF/report_pdf field
+	// naming throughout this file). Serving it as "application/pdf" with a
+	// .pdf filename -- what this handler did before -- handed the browser a
+	// file that fails to open in any real PDF viewer. Content-Type/filename
+	// now come from what the stored artifact actually is.
+	w.Header().Set("Content-Type", doc.ContentType)
+	w.Header().Set("Content-Disposition", `attachment; filename="`+doc.Filename+`"`)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Write(data)
 }
 
 // ghidraAlerts appends Ghidra queue and finding alerts, riding the same
@@ -711,26 +693,14 @@ func serveGhidraCallGraph(w http.ResponseWriter, r *http.Request, sha string) {
 		http.NotFound(w, r)
 		return
 	}
-	dir := ghidraResultsDir()
-	if dir == "" {
-		http.NotFound(w, r)
-		return
-	}
-	// Built from the validated hash, never from a client-supplied filename.
-	path := filepath.Join(dir, sha+"_callgraph.svg")
-	f, err := os.Open(path)
+	// #638/#763: from ghidra-report-artifacts-v1, never GHIDRA_RESULTS_DIR.
+	_, data, err := fetchGhidraArtifact(esResultsClient, sha, "callgraph")
 	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil || info.IsDir() {
 		http.NotFound(w, r)
 		return
 	}
 	w.Header().Set("Content-Type", "image/svg+xml")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	http.ServeContent(w, r, "callgraph.svg", info.ModTime(), f)
+	w.Write(data)
 }
