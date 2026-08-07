@@ -9,7 +9,7 @@
 # Universal, which lists win-x64 as a supported RuntimeIdentifier and cross-
 # compiles cleanly from this Linux build host (managed .NET code, no
 # Windows toolchain needed).
-FROM mcr.microsoft.com/dotnet/sdk:10.0.101 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0.101@sha256:5504edd1267dd4deab3443f960cfab219249c8bd935fbcc358f1c24aeae23fe0 AS build
 COPY certs/*.crt /usr/local/share/ca-certificates/
 RUN update-ca-certificates
 COPY Ghosts.Client.Universal/. /app/Ghosts.Client.Universal

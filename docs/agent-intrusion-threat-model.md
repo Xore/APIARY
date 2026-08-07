@@ -443,26 +443,50 @@ route to:
     `dashboard/llm_analysis.go`'s `llmAnalysisAlerts`, wired into
     `store.go`'s alert refresh and covered by dedicated tests
     (`llm_analysis_test.go`).
-  - Extend `secretFromEnvironment`'s file-based delivery pattern to the
-    other plain-env secrets (item 3). **Still open, and more involved than
-    it first looked**: `ARKIME_PASSWORD_SECRET`/`ARKIME_ADMIN_PASSWORD`
-    (`docker-compose.elk.yml`, `docker-compose.init.yml`) are consumed
-    directly by Arkime's own third-party `docker.sh` entrypoint via its
-    `ARKIME__*` env-var-to-config.ini convention — `secretFromEnvironment`
-    is dashboard Go code and has no reach into a different container's
-    entrypoint. Fixing this for real means either patching how the Arkime
-    containers start (a wrapper that reads a file and exports the var right
-    before exec, or writing the secret directly into the already
-    host-mounted `config.ini` instead of passing it as an env var at all)
-    — a real, scoped implementation task, not a one-line pattern reuse.
-    `GH_PAT` is a host-side `.env` file consumed by a root-owned host
-    script, not a container-namespace env var — the `/proc/*/environ`
-    exposure shape this item is about doesn't actually apply to it the same
-    way; worth leaving as-is rather than force-fitting the same fix.
-  - Pin this repo's own built container images by digest, not just `build:`
-    context (item 8). **Still open** — needs a decision on mechanism
-    (digest-pin in `deploy.yml`'s pull step vs. Dependabot/Renovate-managed
-    digest tracking) before implementation, not just a mechanical change.
+  - ~~Extend `secretFromEnvironment`'s file-based delivery pattern to the
+    other plain-env secrets (item 3).~~ **Assessed, closed as acceptable
+    residual risk — no code change.** `ARKIME_PASSWORD_SECRET` (the one
+    genuinely reachable case; see below) is consumed directly by Arkime's
+    own third-party `docker.sh` entrypoint via its `ARKIME__*`
+    env-var-to-config.ini convention, and `arkime/config.ini`'s own
+    checked-in comment already explains why it isn't set there directly:
+    "Ini files do not expand ${...} — keep secrets in .env, not here." A
+    real fix (a wrapper entrypoint reading `ARKIME_PASSWORD_SECRET_FILE`
+    and exporting the value just before exec'ing Arkime's real entrypoint)
+    was scoped in full, then deliberately not built: it still ends up as a
+    process environment variable inside the Arkime container either way —
+    Arkime itself has no file-based config option for this value — so the
+    `/proc/*/environ` exposure this item is actually about is completely
+    unchanged by it. The only real gain would be keeping the value out of
+    `docker inspect`/the rendered compose config at rest, a narrower
+    benefit than the wrapper's own added complexity justifies given the
+    surrounding mitigations already in place: `config.ini`'s own
+    `authMode=header` block documents that Arkime's real access boundary
+    is network isolation (WireGuard-tunnel-only bind, no public port) plus
+    auth-backend's SSO injecting a trusted identity header — `passwordSecret`
+    here signs Arkime's own session cookies, it is not a login credential,
+    and a leak of it alone has a narrow blast radius already contained by
+    that isolation. `GH_PAT` (this item's other named case) is a host-side
+    `.env` file consumed by a root-owned host script, not a
+    container-namespace env var at all — the `/proc/*/environ` exposure
+    shape doesn't apply to it either.
+  - ~~Pin this repo's own built container images by digest, not just
+    `build:` context (item 8).~~ **Re-scoped and done, same PR as this update.**
+    The original finding pointed at the wrong layer: this repo's own
+    images pushed to `ghcr.io` by `containers.yml` are never pulled or
+    deployed anywhere — confirmed directly against `deploy.yml`, which
+    runs `docker compose up -d --build` against the freshly-checked-out
+    git commit on every real deployment, not a pulled image at all. The
+    real, present gap was every Dockerfile's own `FROM` line (~20+ of
+    them), pinned by mutable tag only (`golang:1.26-alpine`,
+    `python:3.12-slim`, one bare `kalilinux/kali-rolling:latest`) — a
+    genuine supply-chain exposure if an upstream tag is ever repointed,
+    silently picked up on the next build with no review signal at all.
+    This same change pins every `FROM` line by digest (resolved for real, not
+    assumed) and extends `dependabot.yml`'s `docker` ecosystem entry to
+    cover the ~13 directories it was missing, so Dependabot's own
+    tag-bump PRs going forward show a real digest diff to review instead
+    of just a version-string change.
 - **Phases 2-5 of #154 itself** (synthetic replay corpus, decode/correlate
   pipeline, deterministic criticality rules, operator evidence UI) remain
   open, larger implementation work — items 2, 7, and 9's "no correlation/

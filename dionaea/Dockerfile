@@ -1,4 +1,4 @@
-FROM dinotools/dionaea:latest
+FROM dinotools/dionaea:latest@sha256:6f06d0a6035c865cb60ef51bd96ff3b1f25ee4bfcd852dad3f551bc2d93464ca
 
 # No USER directive: the base image already runs as root by default
 # (confirmed via `docker inspect --format '{{.Config.User}}'`, empty) so

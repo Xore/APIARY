@@ -47,14 +47,49 @@ updates:
         update-types: [minor, patch]
     labels: [dependencies, frontend]
 
+  # #154 phase 4: was only these 7 (a leftover of gomod's own directory
+  # list above, never extended past it) -- every other Dockerfile in this
+  # tree got zero automated base-image update coverage at all. Now every
+  # directory with a real `FROM <image>:<tag>` this tree has (`FROM
+  # scratch` stages need nothing). /sandbox/ghosts is included for
+  # completeness but its Dockerfile is non-standard-named
+  # (Dockerfile.client-win, not Dockerfile) -- left in since including it
+  # costs nothing if Dependabot's docker ecosystem doesn't discover that
+  # filename, but pulled out here rather than silently assumed to work.
   - package-ecosystem: docker
     directories:
+      - /analysis/es-results-importer
+      - /analysis/ghidra/service
+      - /analysis/ghidra/statictools
+      - /analysis/yara
+      - /cisco-asa-honeypot
+      - /citrix-honeypot
+      - /conpot
+      - /cowrie
       - /dashboard
+      - /dicompot
+      - /dionaea
       - /dnp3-honeypot
+      - /dns-honeypot
+      - /endlessh-honeypot
       - /http-honeypot
+      - /ip-enrichment-worker
+      - /llm-worker
+      - /ml-worker
       - /multipot
       - /portbridge
+      - /rdp-honeypot
+      - /reporter
+      - /sandbox/ghosts
+      - /sandbox/windows/gateway/inetsim
+      - /services-adapter
+      - /snare
+      - /tanner/phpox
+      - /tanner/redis
+      - /tanner/sandbox
+      - /tanner/tanner
       - /tftp-relay
+      - /vps/p0f
       - /vps/portbridge
     schedule:
       interval: weekly

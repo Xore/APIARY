@@ -8,7 +8,7 @@
 # length -- a UDP reflector that never returns more bytes than it received
 # cannot be an amplification vector, by definition, independent of any
 # particular request/response shape.
-FROM golang:1.26-alpine AS build
+FROM golang:1.26-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2 AS build
 WORKDIR /src
 COPY go.mod .
 COPY *.go ./

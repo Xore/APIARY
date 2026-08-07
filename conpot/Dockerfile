@@ -1,4 +1,4 @@
-FROM dtagdevsec/conpot:24.04
+FROM dtagdevsec/conpot:24.04@sha256:717f0bdf79ad267e7402ff09fcc2f4ce413e9165843dd58c18f340acdd49ea7e
 
 USER root
 COPY persona_patch.py /tmp/persona_patch.py
