@@ -9,6 +9,35 @@ import (
 	"time"
 )
 
+// sensorFromSearchBody extracts the event.sensor value a loadSensorEventsES
+// query is filtering on, distinguishing it from the #39 overview aggregation
+// query, which carries no such term. #880 wrapped the term filter in a
+// bool/filter alongside a time-range clause (see events_es.go), so the term
+// can appear either at the top level (pre-#880 shape, kept for safety) or
+// nested under query.bool.filter[] (current shape).
+func sensorFromSearchBody(body []byte) (sensor string, isSensorQuery bool) {
+	var req struct {
+		Query struct {
+			Term map[string]string `json:"term"`
+			Bool struct {
+				Filter []struct {
+					Term map[string]string `json:"term"`
+				} `json:"filter"`
+			} `json:"bool"`
+		} `json:"query"`
+	}
+	json.Unmarshal(body, &req)
+	if v, ok := req.Query.Term["event.sensor"]; ok {
+		return v, true
+	}
+	for _, f := range req.Query.Bool.Filter {
+		if v, ok := f.Term["event.sensor"]; ok {
+			return v, true
+		}
+	}
+	return "", false
+}
+
 // esOverviewStub serves resp for the aggregation query and a 500 for a
 // per-sensor events query -- a store configured with this stub as its ES
 // client also runs the ES-preferred per-sensor read path (#34, events_es.go's
@@ -30,13 +59,7 @@ func esOverviewStub(t *testing.T, resp esOverviewAggResponse) http.HandlerFunc {
 	t.Helper()
 	return func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		var req struct {
-			Query struct {
-				Term map[string]string `json:"term"`
-			} `json:"query"`
-		}
-		json.Unmarshal(body, &req)
-		if _, isSensorQuery := req.Query.Term["event.sensor"]; isSensorQuery {
+		if _, isSensorQuery := sensorFromSearchBody(body); isSensorQuery {
 			http.Error(w, "not stubbed", http.StatusInternalServerError)
 			return
 		}
