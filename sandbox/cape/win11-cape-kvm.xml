@@ -67,7 +67,7 @@
     <type arch='x86_64' machine='q35'>hvm</type>
     <smbios mode='sysinfo'/>
     <loader readonly='yes' secure='yes' type='pflash'>/usr/share/OVMF/OVMF_CODE_4M.secboot.fd</loader>
-    <nvram template='/usr/share/OVMF/OVMF_VARS_4M.ms.fd' format='qcow2'>/var/lib/libvirt/qemu/nvram/win11-cape_VARS.qcow2</nvram>
+    <nvram template='/usr/share/OVMF/OVMF_VARS_4M.ms.fd' templateFormat='raw' format='qcow2'>/var/lib/libvirt/qemu/nvram/win11-cape_VARS.qcow2</nvram>
     <boot dev='hd'/>
   </os>
 
