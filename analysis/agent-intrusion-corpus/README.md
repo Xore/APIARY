@@ -1,15 +1,17 @@
-# Agent-intrusion synthetic replay corpus + decode/correlate pipeline (#154 phases 1-2)
+# Agent-intrusion synthetic replay corpus, decode/correlate pipeline, and criticality rules (#154 phases 1-3)
 
 A versioned, fully synthetic corpus of ordered events representing the
 July 2026 agent-intrusion campaign's own phase structure, replayed in
 APIARY's own sensor/event vocabulary (phase 1: "Sanitized replay corpus"),
-plus the bounded, non-executing decoder and chunk correlator phase 2 asks
-for ("Decode and correlate before LLM analysis"), proven against that
+the bounded, non-executing decoder and two correlators phase 2 asks for
+("Decode and correlate before LLM analysis"), and the deterministic
+criticality rules phase 3 asks for ("Escalate independently of an LLM
+when combinations cross trust boundaries") — all proven against that one
 corpus rather than hand-built fixtures alone. The prerequisite research
 (mapping the campaign to APIARY's actual trust boundaries) is
 [`docs/agent-intrusion-threat-model.md`](../../docs/agent-intrusion-threat-model.md),
-already done. Phase 3 (deterministic criticality rules) is the next piece
-this decode/correlate output is meant to feed.
+already done. Phase 4 (preventive-control audits) and phase 5 (an operator
+evidence UI) are the remaining, larger pieces.
 
 ## What's here
 
@@ -57,6 +59,25 @@ this decode/correlate output is meant to feed.
   identifier-only approach doesn't solve (fleet siblings on different
   hosts; an actor's IP changing across a mesh/NAT pivot) rather than
   leaving them as silent gaps.
+- **`criticality_rules.py`** — phase 3's deterministic escalation rules
+  (11 of them: sensitive-path reads, the campaign's own chunked-C2
+  protocol shape, verified encoded-execution, encoded egress to a
+  different network segment, the cloud metadata address, privileged
+  container creation, broad-scope identity tokens, covert mesh
+  enrollment, internal-connector enumeration, source-control writes from
+  an unnamed actor, and staged-payload references), plus
+  `campaign_severity()`, which scores a whole campaign by the *distinct*
+  rule categories it trips (not raw match count) — 3+ distinct categories
+  reaches "critical". Every rule inspects raw event structure only, never
+  the corpus's own `phase`/`should_escalate` labels (see the module's own
+  docstring for why getting that backwards would make it a no-op).
+- **`tests/test_criticality_rules.py`** — unit tests per rule, a dedicated
+  regression test for a real bug (`ipaddress.is_private()` conflates RFC
+  1918 with RFC 5737 TEST-NET, which broke "internal vs. external"
+  classification in both directions against a TEST-NET-only corpus before
+  landing on a same-/24 check instead), the full-corpus proof that all 27
+  events match their own independently-established ground truth, and the
+  capstone: the merged 8-event campaign (see above) scores "critical".
 
 ## Design
 
@@ -171,18 +192,25 @@ note here, not silently reinterpret old corpus rows under a new meaning.
 
 ## What this directory does *not* do
 
-`decode_correlate.py` and `campaign_correlator.py` decode, reassemble, and
-group; neither scores or escalates anything — no criticality rules, no
-severity, no alerting. That's phase 3's job, which this directory's
-decoded+correlated output is meant to feed once built. `matched_rule` in
-every corpus event is still either `null` or a descriptive placeholder
-string, not a real rule identifier, since phase 3's rule set doesn't exist
-yet. Both modules are also standalone Python, not yet wired into the
+All four modules here are standalone Python, not yet wired into the
 dashboard/analysis-worker pipeline production code would actually run
-against live sensor data — that integration is separate follow-up work
-once phase 3 defines what a decoded+correlated campaign should trigger.
-`campaign_correlator.py` itself has two deliberate, tested scope limits
-(see `tests/test_campaign_correlator.py`'s own "documented gap" tests):
-it correlates on shared *identifiers*, not repeated-technique similarity
+against live sensor data — that integration is separate follow-up work,
+now that phase 3 defines what a decoded+correlated campaign should
+trigger (`criticality_rules.py`'s `campaign_severity()`). `matched_rule`
+in every corpus event is still either `null` or a descriptive placeholder
+string, not a real production rule identifier — `criticality_rules.py`'s
+own `RuleMatch.rule` names (`sensitive-path-read`, `metadata-service-probe`,
+etc.) are the real identifiers now, just not yet cross-referenced back
+into the corpus itself.
+
+`campaign_correlator.py` has two deliberate, tested scope limits (see
+`tests/test_campaign_correlator.py`'s own "documented gap" tests): it
+correlates on shared *identifiers*, not repeated-technique similarity
 across different infrastructure, and it has no way to link an actor's
 identity across a NAT/mesh boundary where its own address changes.
+
+`criticality_rules.py` has no phase 5 (operator evidence UI) to render
+its verdicts into yet, and phase 4's preventive-control audits (ARKIME
+secret delivery, image digest pinning — see
+`docs/agent-intrusion-threat-model.md`'s own "Follow-up scope") are
+unrelated, separate work this directory's rules don't touch.

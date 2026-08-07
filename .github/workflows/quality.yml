@@ -259,6 +259,16 @@ jobs:
           # the real corpus's own multi-hop case (a C2 channel ID bridging
           # two otherwise-unconnected actor identities into one campaign).
           python3 analysis/agent-intrusion-corpus/tests/test_campaign_correlator.py -v
+      - name: Agent-intrusion criticality rules (#154 phase 3)
+        shell: bash
+        run: |
+          # Deterministic, structural rules (never reads the corpus's own
+          # phase/should_escalate labels -- see criticality_rules.py's own
+          # module docstring) proven against every one of the 27 real
+          # corpus events matching its own independently-established
+          # ground truth, plus the campaign-level severity scoring proven
+          # against the real merged 8-event campaign reaching "critical".
+          python3 analysis/agent-intrusion-corpus/tests/test_criticality_rules.py -v
       - name: Sandbox VNC bridge read-only enforcement (#805)
         shell: bash
         run: python3 sandbox/windows/vnc-bridge/tests/test_server.py
