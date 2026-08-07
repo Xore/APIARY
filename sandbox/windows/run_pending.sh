@@ -18,6 +18,15 @@ results_dir=${WINDOWS_SANDBOX_RESULTS_DIR:-/windows-sandbox-results}
 samples_dir=${WINDOWS_SANDBOX_SAMPLES_DIR:-/var/lib/honeypot-sandbox/inbox/samples}
 orchestrator=${WINDOWS_SANDBOX_ORCHESTRATOR:-/usr/local/libexec/honeypot-sandbox/windows/orchestrate/run_sample.py}
 lock_file=${WINDOWS_SANDBOX_LOCK:-/run/lock/honeypot-windows-sandbox-worker.lock}
+# #320: cross-pipeline lock shared with sandbox/cape/worker/cape-worker.py.
+# CAPE's guest and win11-sandbox both run as KVM/QEMU domains on this host
+# (16 logical CPUs total, win11-sandbox alone already configured for 8
+# vCPU -- see docs/sandbox/cape/IMPLEMENTATION_PLAN.md's Host Constraints).
+# Decision: one host-wide lock, only one KVM-backed detonation at a time
+# across BOTH pipelines, not just within this one. Held only around the
+# actual detonation call below, not the whole drain loop, so an idle worker
+# never blocks the other pipeline. Empty disables it.
+kvm_lock_file=${WINDOWS_SANDBOX_KVM_SHARED_LOCK:-/run/lock/honeypot-kvm-detonation.lock}
 
 # The path unit fires on every spool change, so several invocations can race
 # during a burst. Only one may talk to the guest: a second concurrent
@@ -57,7 +66,20 @@ for request in "$request_dir"/*.request; do
   mv -f "$request" "$claimed"
 
   echo "detonating $sha in ${VM_DOMAIN:-win11-sandbox}"
-  if python3 "$orchestrator" --sample "$sample" --results-dir "$results_dir"; then
+  # #320's shared lock: block here, not skip -- a queued sample should
+  # detonate once CAPE's current job finishes, not bail out and leave the
+  # request stuck the way this worker's own non-blocking lock_file does.
+  detonation_ok=1
+  if [[ -n $kvm_lock_file ]]; then
+    mkdir -p "$(dirname "$kvm_lock_file")"
+    exec 8>"$kvm_lock_file"
+    flock 8
+    python3 "$orchestrator" --sample "$sample" --results-dir "$results_dir" || detonation_ok=0
+    exec 8>&-
+  else
+    python3 "$orchestrator" --sample "$sample" --results-dir "$results_dir" || detonation_ok=0
+  fi
+  if [[ $detonation_ok -eq 1 ]]; then
     rm -f "$claimed"
     processed=$((processed + 1))
   else

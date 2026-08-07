@@ -1,0 +1,46 @@
+<!--
+  network.xml — the isolated libvirt network the CAPE guest lives on (#316).
+  Defined directly via `virsh net-define` / `virsh net-start` (no separate
+  install-network.sh wrapper yet — add one if this chain grows the same
+  amount of network-lifecycle logic sandbox/ghosts's did).
+
+  Deliberately a fourth, distinct bridge — NOT a reuse of `virbr-sandbox`
+  (win11-sandbox's own network). Two independent Windows sandbox guests
+  sharing one bridge would let a CAPE detonation see win11-sandbox's guest
+  (and vice versa) on the same L2 segment; #316 rejected that outright, the
+  same reasoning `sandbox/ghosts/network.xml` already documents for why
+  GHOSTS got its own bridge instead of reusing this one too.
+
+  No <forward> element, same as `sandbox/network.xml` (Linux runner) and
+  `sandbox/windows`'s own sandbox-network.xml — this network has no route
+  out. Routing-mode decision (#316): CAPE supports per-analysis
+  drop/inetsim/internet/VPN, but internet/VPN are ruled out immediately by
+  this repo's blanket no-outbound-network posture (same posture that
+  keeps win11-sandbox and the Linux runner both routeless). Default mode
+  is `drop` (matches every other detonation route's default). `inetsim`
+  is supported by CAPE itself but deliberately NOT wired to the existing
+  docker-compose.sandbox.yml INetSim instance shared by the Linux/Windows
+  runners — two independent guests hitting one INetSim process risks
+  session/state cross-contamination between unrelated detonations. A
+  CAPE-dedicated INetSim instance, on this bridge's own gateway address,
+  is left as follow-up work (tracked in #314's host-stack scope, not
+  built here) rather than shipped half-isolated.
+
+  10.40.50.0/24: distinct from every other range already in use on this
+  host (10.8.0.0/24 wg0, 10.10.10.0/24 sandbox, 10.20.30.0/24 ghosts,
+  10.90.0.0/24 ghosts_net docker, 192.168.42.0/24 LAN, 198.18.0.0/24
+  virbr-hpsbx), so a routing mistake elsewhere can't silently overlap
+  this one.
+-->
+<network>
+  <name>cape</name>
+  <bridge name='virbr-cape' stp='on' delay='0'/>
+  <ip address='10.40.50.1' netmask='255.255.255.0'>
+    <!-- No <dhcp><host> pin yet: #315's golden image (and its guest's
+         MAC address) doesn't exist yet. Pin it here the same way
+         sandbox/ghosts/network.xml pins win11-ghosts's, once #315 lands. -->
+    <dhcp>
+      <range start='10.40.50.10' end='10.40.50.99'/>
+    </dhcp>
+  </ip>
+</network>
