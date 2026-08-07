@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -84,10 +85,48 @@ func (t *tailer) poll(path string, fn func(line []byte)) error {
 		}
 		fn(line)
 	}
-	// A scan error (e.g. a line longer than the buffer) still leaves offset
-	// at the last successfully consumed line -- save progress rather than
-	// losing it, and let the next poll retry from there.
+	// #890: a scan error (in practice always bufio.ErrTooLong -- a line over
+	// the 1MB buffer cap) used to leave offset at the last successfully
+	// consumed line with no further handling. Since nothing about that
+	// offset or the file on disk changes before the next poll, re-opening
+	// and re-scanning from the same byte hit the exact same oversized line
+	// again -- not a retry, a permanent stall silently dropping every event
+	// in this file from that point on, on every sensor this reporter tails.
+	if err := sc.Err(); err != nil {
+		skipped, serr := skipOversizedLine(f, offset)
+		if serr != nil {
+			return serr
+		}
+		if skipped == 0 {
+			// The line hasn't finished being written yet (no terminating
+			// newline seen at EOF) -- do not claim bytes for a boundary we
+			// haven't actually observed. The next poll re-attempts the skip
+			// from this same offset once more of the line has landed.
+			return t.st.saveTailOffset(path, inode, offset)
+		}
+		log.Printf("reporter: %s: skipped an oversized log line (%d bytes) at offset %d that exceeded the scanner buffer", path, skipped, offset)
+		offset += skipped
+	}
 	return t.st.saveTailOffset(path, inode, offset)
+}
+
+// skipOversizedLine seeks f to offset and reads raw, uncapped bytes up to
+// and including the next newline, reporting how many bytes were consumed --
+// used to step past a line bufio.Scanner refused to buffer. Returns 0 (not
+// an error) if no newline is found before EOF, since the line may simply
+// still be in flight.
+func skipOversizedLine(f *os.File, offset int64) (int64, error) {
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return 0, err
+	}
+	chunk, err := bufio.NewReader(f).ReadBytes('\n')
+	if err == nil {
+		return int64(len(chunk)), nil
+	}
+	if err == io.EOF {
+		return 0, nil
+	}
+	return 0, err
 }
 
 // pollGlob is poll's counterpart for a sensor whose log rotates by creating
