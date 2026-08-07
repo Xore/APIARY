@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Xore/APIARY/analysis/agent-intrusion-corpus/schema.json",
+  "title": "Agent-intrusion synthetic replay corpus event (#154 phase 1)",
+  "description": "One ordered event in the synthetic replay corpus. See README.md for the full design rationale and safety constraints -- this schema only enforces shape, not the safety rules (no real indicators, TEST-NET-only addresses, etc.), which validate_corpus.py checks separately since JSON Schema can't express 'this string must not look like a real secret.'",
+  "type": "object",
+  "required": [
+    "event_id", "timestamp", "phase", "trust_boundary", "sensor",
+    "encoding_layer", "is_benign", "raw", "expected_findings", "notes"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "pattern": "^corpus-[0-9]{3}$",
+      "description": "Stable identifier, also this event's ordering key within a phase-tie -- corpus.jsonl's own row order is the authoritative timeline order, this ID is for cross-referencing in docs/tests only."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC. Ordered ascending across the whole corpus, matching the campaign's own day-by-day structure -- validate_corpus.py checks strict monotonicity."
+    },
+    "phase": {
+      "type": "string",
+      "enum": [
+        "recon",
+        "secret_discovery",
+        "encoded_dropper_c2",
+        "exfiltration",
+        "persistence_self_migration",
+        "cloud_k8s_identity_probe",
+        "internal_network_pivot",
+        "source_control_ci_probe",
+        "benign"
+      ],
+      "description": "The 8 phases #154 required, plus 'benign' for near-neighbor control events that are not part of the attack chain at all (is_benign is true for these; is_benign can also be true within a non-benign phase for an event that merely resembles that phase's technique -- see README.md)."
+    },
+    "trust_boundary": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The boundary this event's technique crosses, in APIARY's own terms (e.g. 'honeypot-session -> local-filesystem-recon'), not a generic label -- matches docs/agent-intrusion-threat-model.md's own per-area boundary language."
+    },
+    "sensor": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Which real APIARY sensor/source this event's 'raw' field is shaped like (cowrie, suricata, dashboard-audit, ci-workflow, etc.) -- phase 2's decoder is expected to consume raw sensor-shaped JSON, so this corpus provides realistic input, not an abstract description."
+    },
+    "encoding_layer": {
+      "type": "string",
+      "enum": ["none", "base64", "gzip+base64", "chunked+xor+gzip+base64", "jinja2-template"],
+      "description": "What phase 2's decoder needs to peel back before the payload is human/rule readable. 'none' for events with no encoding at all (most recon/discovery events -- encoding is concentrated in the c2/exfil phases, matching the real campaign's own reported shape)."
+    },
+    "is_benign": {
+      "type": "boolean",
+      "description": "True for near-neighbor control events: same sensor, similar surface shape, but not part of the attack chain (or, within an attack-chain phase, a technique that merely resembles it) -- these exist to measure false positives per #154's own corpus requirement ('include benign near-neighbors to measure false positives'). expected_findings.should_escalate must be false whenever this is true."
+    },
+    "raw": {
+      "type": "object",
+      "description": "A realistic, sensor-shaped JSON blob -- what phase 2's decoder would actually receive from that sensor in production. Entirely synthetic: TEST-NET addresses only (RFC 5737: 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24), obviously-fake credential/token strings, no real hostnames or copied campaign IOCs."
+    },
+    "expected_findings": {
+      "type": "object",
+      "required": ["should_escalate", "decoded_summary", "matched_rule"],
+      "additionalProperties": false,
+      "properties": {
+        "should_escalate": {
+          "type": "boolean",
+          "description": "Ground truth for phase 3's criticality rules: should this event (in the context of the events before it in this corpus) contribute to a raised campaign severity? Individual early-phase events are frequently false here even in the non-benign phases -- matching #154's own framing that isolated low-signal events are the point, not any single event being independently alarming."
+        },
+        "decoded_summary": {
+          "type": "string",
+          "description": "Ground truth for phase 2's decoder: a human-readable summary of what should come out the other end after decoding 'raw' (empty string if encoding_layer is 'none' and no decoding step applies)."
+        },
+        "matched_rule": {
+          "type": ["string", "null"],
+          "description": "Ground truth for phase 3: the deterministic criticality-rule identifier (once phase 3 defines them) this event is expected to match, or null if none. Left as free text/null in this phase-1 corpus since phase 3's rule set doesn't exist yet -- validate_corpus.py only checks the field is present and typed correctly, not that it names a real rule."
+        }
+      }
+    },
+    "notes": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What real campaign step (if any) this event is a synthetic analog of, and why it's shaped the way it is. Required on every event -- this corpus is a reviewable artifact, not just machine input."
+    }
+  }
+}

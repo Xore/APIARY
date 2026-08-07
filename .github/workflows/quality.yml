@@ -230,6 +230,17 @@ jobs:
         run: |
           python3 scripts/tests/test_audit_sensor_event_coverage.py
           python3 scripts/audit-sensor-event-coverage.py
+      - name: Agent-intrusion synthetic replay corpus (#154 phase 1)
+        shell: bash
+        run: |
+          # #154's own acceptance criteria: "CI verifies schemas, safe
+          # fixtures, and replay expectations." Runs both the standalone
+          # validator (the same one a human runs by hand when editing the
+          # corpus) and its test suite (which additionally proves the
+          # validator catches deliberately-broken input, not just that
+          # today's corpus happens to pass).
+          python3 analysis/agent-intrusion-corpus/validate_corpus.py
+          python3 analysis/agent-intrusion-corpus/tests/test_corpus.py -v
       - name: Sandbox VNC bridge read-only enforcement (#805)
         shell: bash
         run: python3 sandbox/windows/vnc-bridge/tests/test_server.py
