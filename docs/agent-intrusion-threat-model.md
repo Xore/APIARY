@@ -12,7 +12,16 @@
 > speed across evaluation sandboxes, data-processing workers, Kubernetes,
 > cloud identity, mesh networking, and source control. ~17,600 actions;
 > isolated low-signal events were detected individually but never escalated
-> with the right criticality.
+> with the right criticality. A corroborating source,
+> [openai.com's own incident writeup](https://openai.com/index/hugging-face-model-evaluation-security-incident/),
+> confirmed the initial foothold and added two checks folded in below (§1a).
+>
+> **Updated** since first landing (#591): §1a added (permitted cache/proxy
+> trust boundaries, reference-artifact reachability); [Follow-up
+> scope](#follow-up-scope) corrected to reflect that two of the four named
+> follow-ups have since shipped (#592, and `llm_analysis.go`'s alert
+> wiring) — checked against real repo state before starting phase 1
+> (synthetic replay corpus) work, not assumed from this doc's original text.
 
 ## Method
 
@@ -60,6 +69,45 @@ artifact" shape mostly does not (this repo has no evaluation-harness
 component the campaign's original context assumed). The real open gap is
 #88 (no automated proof the isolation invariants still hold) and #510 (the
 network capture containers' lifecycle isn't tied to detonation lifecycle).
+
+### 1a. Follow-up: permitted cache/registry proxies as a trust boundary
+
+Per the corroborating primary source
+([openai.com's incident writeup](https://openai.com/index/hugging-face-model-evaluation-security-incident/),
+added to issue #154 after this doc's first pass): the campaign's own initial
+foothold was a zero-day in a *package-registry cache proxy* — a component
+everyone assumes is a passive mirror, not a trust boundary in its own right.
+Two explicit checks that source asked to add here:
+
+- **Do any package/module cache proxies exist in this repo's own build
+  path, and if so, could a compromise of one become general egress?**
+  Checked directly: no self-hosted package/module registry cache or proxy
+  exists anywhere in this tree (grepped every Dockerfile and CI workflow for
+  `GOPROXY`, a pip/npm registry-mirror config, an apt-cache-ng-style proxy,
+  etc. — none found). Every build (`go build`, `npm install`, `pip install`)
+  talks directly to the public upstream registry from GitHub Actions' own
+  runner, not through an intermediary this repo operates. **Does not apply
+  — by absence, not by a control**, the same "doesn't exist here" shape as
+  item 4's cloud-metadata-service finding below. Worth stating explicitly so
+  a future self-hosted proxy/mirror (e.g. for the self-hosted CI runner
+  option `quality.yml` added) gets threat-modeled *as* a trust boundary from
+  day one rather than assumed-safe by default.
+- **Are evaluation answers/reference artifacts unreachable from the
+  evaluated agent even after a sandbox or proxy compromise** (not just
+  "not forgeable," which §1's own read-only-mount finding above already
+  covers)? This is the sharper, distinct question: could a compromised
+  sandbox guest, *during* its own detonation, read back any prior
+  analysis/result data that would let it detect it's being evaluated and
+  adapt? Checked directly against `docs/kvm-network-traffic-analysis.md`
+  and `docker-compose.sandbox.yml`: the Ghidra/sandbox/GitHub-analysis
+  result spools are host-side directories, written by the analysis pipeline
+  **after** a detonation completes and the guest is torn down — nothing
+  mounts them into the guest's own filesystem, and the guest's isolated
+  network (§1 above: no `<forward>` element, INetSim answers every
+  connection attempt itself) has no route to reach the host paths even if
+  it tried. A compromised guest cannot read the results of its own or any
+  prior run. **Applies as a check, and the existing isolation design already
+  satisfies it** — this is a confirmation, not a newly found gap.
 
 ---
 
@@ -382,16 +430,39 @@ route to:
   gap is already this issue's scope; no new issue needed.
 - **#538** (existing, open) — outbound network egress policy. Items 4 and 6's
   gaps are already this issue's scope; no new issue needed.
-- **New, scoped follow-ups worth filing separately** (not filed in this pass
-  — this research doc's job is to identify them, not to fan out five more
-  issues in one round):
+- **New, scoped follow-ups named here** (not all filed as separate issues at
+  once — this research doc's job was to identify them, not to fan out five
+  new issues in one round). Status as of this update, not when first
+  written:
+  - ~~Audit/narrow `hp-autoheal`'s standing `docker.sock` grant (item 5).~~
+    **Done** — #592, merged: replaced the raw bind mount with
+    docker-socket-proxy scoped to `CONTAINERS`+`IMAGES`+`POST` only,
+    verified end-to-end against a real unhealthy container.
+  - ~~Wire `llm-analysis` severity into the existing dashboard alert sink
+    (item 9's smallest, most immediate piece).~~ **Done** —
+    `dashboard/llm_analysis.go`'s `llmAnalysisAlerts`, wired into
+    `store.go`'s alert refresh and covered by dedicated tests
+    (`llm_analysis_test.go`).
   - Extend `secretFromEnvironment`'s file-based delivery pattern to the
-    other plain-env secrets (item 3).
-  - Audit/narrow `hp-autoheal`'s standing `docker.sock` grant (item 5).
+    other plain-env secrets (item 3). **Still open, and more involved than
+    it first looked**: `ARKIME_PASSWORD_SECRET`/`ARKIME_ADMIN_PASSWORD`
+    (`docker-compose.elk.yml`, `docker-compose.init.yml`) are consumed
+    directly by Arkime's own third-party `docker.sh` entrypoint via its
+    `ARKIME__*` env-var-to-config.ini convention — `secretFromEnvironment`
+    is dashboard Go code and has no reach into a different container's
+    entrypoint. Fixing this for real means either patching how the Arkime
+    containers start (a wrapper that reads a file and exports the var right
+    before exec, or writing the secret directly into the already
+    host-mounted `config.ini` instead of passing it as an env var at all)
+    — a real, scoped implementation task, not a one-line pattern reuse.
+    `GH_PAT` is a host-side `.env` file consumed by a root-owned host
+    script, not a container-namespace env var — the `/proc/*/environ`
+    exposure shape this item is about doesn't actually apply to it the same
+    way; worth leaving as-is rather than force-fitting the same fix.
   - Pin this repo's own built container images by digest, not just `build:`
-    context (item 8).
-  - Wire `llm-analysis` severity into the existing dashboard alert sink
-    (item 9's smallest, most immediate piece).
+    context (item 8). **Still open** — needs a decision on mechanism
+    (digest-pin in `deploy.yml`'s pull step vs. Dependabot/Renovate-managed
+    digest tracking) before implementation, not just a mechanical change.
 - **Phases 2-5 of #154 itself** (synthetic replay corpus, decode/correlate
   pipeline, deterministic criticality rules, operator evidence UI) remain
   open, larger implementation work — items 2, 7, and 9's "no correlation/
