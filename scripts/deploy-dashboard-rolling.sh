@@ -31,7 +31,18 @@ set -euo pipefail
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.dashboard.yml}"
 REPLICAS=(dashboard dashboard-b)
 CONTAINER_NAMES=(hp-dashboard hp-dashboard-b)
-HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-60}"
+
+# 180s, not an arbitrary shorter number: docker-compose.dashboard.yml's own
+# healthcheck already declares start_period: 180s for both replicas --
+# this script's own wait budget was simply never kept in sync with that
+# when either was last tuned. Confirmed live (#174's redeploy): a real
+# dashboard replica took ~65-70s past a fresh Recreate before its first
+# passing healthcheck, comfortably inside the compose file's own 180s
+# tolerance but outside the 60s this script used to wait -- a false
+# "FATAL: did not become healthy" that aborted a genuinely fine rolling
+# deploy (the other replica was never at risk either time: this script
+# never touches it until the one it's waiting on reports healthy).
+HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-180}"
 
 log() { printf '[deploy-dashboard-rolling] %s\n' "$*" >&2; }
 
