@@ -13,8 +13,14 @@
 # has real WAN egress (#325/#331); a sample that actually exploits one of
 # these for kernel-level code execution there is a genuine host compromise
 # vector, not a contained, observed technique like it is here on the fully
-# air-gapped analysis guest. See #467 for whether/how ghosts could ever
-# safely get anything in this vein.
+# air-gapped analysis guest.
+#
+# #467's answer: win11-ghosts CAN get this set, but only behind an explicit,
+# admin-gated, opt-in tool -- never unconditionally like this provisioner.
+# That tool is sandbox/ghosts/provision-loldrivers.sh, which keeps its own
+# copy of the driver list below rather than sharing this file (see that
+# script's own comment on why). If the driver list here ever changes,
+# update that copy too.
 #
 # Sourced from the LOLDrivers project (https://www.loldrivers.io /
 # github.com/magicsword-io/LOLDrivers), pinned by hash and fetched from

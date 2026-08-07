@@ -73,6 +73,16 @@ Two constraints specific to this chain:
   `win11-analysis.qcow2` (disabled offline, #91), this guest keeps
   Defender on — explicit operator direction, not an oversight to fix
   later.
+- **LOLDrivers BYOVD bait is opt-in only, never baked into a build.**
+  `win11-analysis.qcow2` gets the curated driver set unconditionally
+  (`10-loldrivers.ps1`, a Packer provisioner). `win11-ghosts.qcow2` has
+  real WAN egress, so the same set there is a genuine host/network
+  compromise vector, not a contained one (#467) — it is only ever added
+  by a human running `sandbox/ghosts/provision-loldrivers.sh
+  --i-accept-the-real-wan-risk` directly against an existing image, never
+  by any pipeline, worker, or dashboard action. Validating this end to
+  end against a real detonation run (with-set vs without, gate-on vs
+  gate-off) is deliberately deferred — see #467's own last comment.
 
 ---
 
