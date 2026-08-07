@@ -78,109 +78,151 @@ async function isolateReadOnlyBrowserState(page: Page) {
   await page.route("https://tile.openstreetmap.org/**", (route) => route.abort());
 }
 
+// runLayoutChecks is the full per-page assertion set shared by both the
+// dark/light x every-tier matrix below and the dedicated real-2x-DPR pass
+// further down -- extracted so DPR gets the exact same checks the 1x
+// matrix already has, not a second, drifting copy of them.
+async function runLayoutChecks(
+  page: Page,
+  route: string,
+  viewportName: string,
+  viewport: { width: number; height: number },
+  theme: "dark" | "light",
+) {
+  await isolateReadOnlyBrowserState(page);
+  await page.setViewportSize(viewport);
+  await page.addInitScript((selectedTheme) => {
+    localStorage.setItem("hp-theme", selectedTheme);
+    localStorage.setItem("hp-prefs-migrated", "1");
+  }, theme);
+
+  const response = await page.goto(route, { waitUntil: "domcontentloaded" });
+  expect(response?.status(), `${route} must remain an HTML route`).toBe(200);
+  await expect(page.locator(".app-shell")).toBeVisible();
+  await expect(page.locator(".app-toolbar")).toBeVisible();
+  await expect(page.locator(".app-main")).toBeVisible();
+  await expect(page.locator("[data-hp-page-content]")).toBeVisible();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+
+  const layout = await page.evaluate(() => {
+    const main = document.querySelector(".app-main")?.getBoundingClientRect();
+    const toolbar = document.querySelector(".app-toolbar")?.getBoundingClientRect();
+    const heading = document.querySelector("[data-hp-page-content] h1")?.getBoundingClientRect();
+    const bodyStyle = getComputedStyle(document.body);
+    return {
+      overflow: document.documentElement.scrollWidth - innerWidth,
+      mainWidth: main?.width || 0,
+      mainTop: main?.top || 0,
+      toolbarBottom: toolbar?.bottom || 0,
+      headingWidth: heading?.width || 0,
+      background: bodyStyle.backgroundColor,
+      color: bodyStyle.color,
+    };
+  });
+
+  expect(layout.overflow, `${route} must not overflow the ${viewportName} viewport`).toBeLessThanOrEqual(1);
+  expect(layout.mainWidth).toBeGreaterThan(viewport.width * 0.55);
+  expect(layout.mainTop).toBeGreaterThanOrEqual(layout.toolbarBottom - 1);
+  expect(layout.headingWidth).toBeGreaterThan(0);
+  expect(layout.background).not.toBe("rgba(0, 0, 0, 0)");
+  expect(layout.color).not.toBe("rgba(0, 0, 0, 0)");
+
+  // #672: the checks above only ever caught whole-page overflow -- real
+  // defects found on this issue (mobile table clutter, a clipped country
+  // badge, #668/#669's settings-modal/alert-badge bugs) are all *this*
+  // shape: one element with real content collapsed to zero size, not the
+  // page as a whole overflowing. Flags any element carrying its own
+  // direct text (not just inherited from children -- that would flag
+  // every container) that renders at zero width or height while not
+  // deliberately hidden.
+  //
+  // Scoped to [data-hp-page-content] only, not body * -- confirmed live
+  // (first draft of this check) that the toolbar/header region has real,
+  // deliberately-collapsed-until-opened UI (closed dropdown menu items,
+  // unopened modals sitting in the DOM with height:0/clip rather than
+  // display:none, .sr-only accessibility text) that isn't
+  // display:none/visibility:hidden and isn't a layout bug either -- every
+  // one of those lives outside the actual page content this issue is
+  // about. Page content can still open its own modals/toasts (evidence
+  // viewer, confirm dialogs), so this stays scoped rather than trying to
+  // enumerate every legitimate closed-by-default class name, which would
+  // just be the same false-positive problem with extra steps.
+  //
+  // Two more false-positive classes found live, both excluded below:
+  // (1) <option> elements always report a zero rect in headless Chromium
+  // regardless of real visibility -- native <select> internals aren't
+  // laid out by the normal box model, a well-known browser-testing
+  // quirk, not a page bug; (2) an element can have display != none *on
+  // itself* while a display:none *ancestor* (e.g. events.html's per-row
+  // detail block, collapsed until expanded) still means it renders
+  // nothing -- getComputedStyle(el).display never reflects an ancestor's
+  // display, only offsetParent reliably does (null for both a
+  // display:none element and any of its descendants).
+  const clipped = await page.evaluate(() => {
+    const problems: string[] = [];
+    const root = document.querySelector("[data-hp-page-content]");
+    if (!root) return problems;
+    for (const el of root.querySelectorAll<HTMLElement>("*")) {
+      if (el.tagName === "OPTION") continue;
+      const style = getComputedStyle(el);
+      if (style.display === "none" || style.visibility === "hidden") continue;
+      if (el.offsetParent === null && style.position !== "fixed") continue;
+      const hasOwnText = Array.from(el.childNodes).some(
+        (n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? "").trim().length > 0,
+      );
+      if (!hasOwnText) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) {
+        const cls = el.className ? `.${String(el.className).split(" ").join(".")}` : "";
+        problems.push(`${el.tagName.toLowerCase()}${cls}: "${(el.textContent ?? "").trim().slice(0, 60)}"`);
+      }
+    }
+    return problems;
+  });
+  expect(clipped, `${route} at ${viewportName}/${theme} has zero-size element(s) with real text content in the page content area`).toEqual([]);
+}
+
 test.describe("dark/light responsive acceptance matrix", () => {
   for (const [viewportName, viewport] of Object.entries(viewports)) {
     for (const theme of ["dark", "light"] as const) {
       for (const route of routes) {
         test(`${theme} ${viewportName} ${route}`, async ({ page }) => {
-          await isolateReadOnlyBrowserState(page);
-          await page.setViewportSize(viewport);
-          await page.addInitScript((selectedTheme) => {
-            localStorage.setItem("hp-theme", selectedTheme);
-            localStorage.setItem("hp-prefs-migrated", "1");
-          }, theme);
-
-          const response = await page.goto(route, { waitUntil: "domcontentloaded" });
-          expect(response?.status(), `${route} must remain an HTML route`).toBe(200);
-          await expect(page.locator(".app-shell")).toBeVisible();
-          await expect(page.locator(".app-toolbar")).toBeVisible();
-          await expect(page.locator(".app-main")).toBeVisible();
-          await expect(page.locator("[data-hp-page-content]")).toBeVisible();
-          await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
-
-          const layout = await page.evaluate(() => {
-            const main = document.querySelector(".app-main")?.getBoundingClientRect();
-            const toolbar = document.querySelector(".app-toolbar")?.getBoundingClientRect();
-            const heading = document.querySelector("[data-hp-page-content] h1")?.getBoundingClientRect();
-            const bodyStyle = getComputedStyle(document.body);
-            return {
-              overflow: document.documentElement.scrollWidth - innerWidth,
-              mainWidth: main?.width || 0,
-              mainTop: main?.top || 0,
-              toolbarBottom: toolbar?.bottom || 0,
-              headingWidth: heading?.width || 0,
-              background: bodyStyle.backgroundColor,
-              color: bodyStyle.color,
-            };
-          });
-
-          expect(layout.overflow, `${route} must not overflow the ${viewportName} viewport`).toBeLessThanOrEqual(1);
-          expect(layout.mainWidth).toBeGreaterThan(viewport.width * 0.55);
-          expect(layout.mainTop).toBeGreaterThanOrEqual(layout.toolbarBottom - 1);
-          expect(layout.headingWidth).toBeGreaterThan(0);
-          expect(layout.background).not.toBe("rgba(0, 0, 0, 0)");
-          expect(layout.color).not.toBe("rgba(0, 0, 0, 0)");
-
-          // #672: the checks above only ever caught whole-page overflow --
-          // real defects found on this issue (mobile table clutter, a
-          // clipped country badge, #668/#669's settings-modal/alert-badge
-          // bugs) are all *this* shape: one element with real content
-          // collapsed to zero size, not the page as a whole overflowing.
-          // Flags any element carrying its own direct text (not just
-          // inherited from children -- that would flag every container)
-          // that renders at zero width or height while not deliberately
-          // hidden.
-          //
-          // Scoped to [data-hp-page-content] only, not body * -- confirmed
-          // live (first draft of this check) that the toolbar/header
-          // region has real, deliberately-collapsed-until-opened UI
-          // (closed dropdown menu items, unopened modals sitting in the
-          // DOM with height:0/clip rather than display:none, .sr-only
-          // accessibility text) that isn't display:none/visibility:hidden
-          // and isn't a layout bug either -- every one of those lives
-          // outside the actual page content this issue is about. Page
-          // content can still open its own modals/toasts (evidence
-          // viewer, confirm dialogs), so this stays scoped rather than
-          // trying to enumerate every legitimate closed-by-default class
-          // name, which would just be the same false-positive problem
-          // with extra steps.
-          //
-          // Two more false-positive classes found live, both excluded
-          // below: (1) <option> elements always report a zero rect in
-          // headless Chromium regardless of real visibility -- native
-          // <select> internals aren't laid out by the normal box model,
-          // a well-known browser-testing quirk, not a page bug; (2) an
-          // element can have display != none *on itself* while a
-          // display:none *ancestor* (e.g. events.html's per-row detail
-          // block, collapsed until expanded) still means it renders
-          // nothing -- getComputedStyle(el).display never reflects an
-          // ancestor's display, only offsetParent reliably does (null
-          // for both a display:none element and any of its descendants).
-          const clipped = await page.evaluate(() => {
-            const problems: string[] = [];
-            const root = document.querySelector("[data-hp-page-content]");
-            if (!root) return problems;
-            for (const el of root.querySelectorAll<HTMLElement>("*")) {
-              if (el.tagName === "OPTION") continue;
-              const style = getComputedStyle(el);
-              if (style.display === "none" || style.visibility === "hidden") continue;
-              if (el.offsetParent === null && style.position !== "fixed") continue;
-              const hasOwnText = Array.from(el.childNodes).some(
-                (n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? "").trim().length > 0,
-              );
-              if (!hasOwnText) continue;
-              const rect = el.getBoundingClientRect();
-              if (rect.width === 0 || rect.height === 0) {
-                const cls = el.className ? `.${String(el.className).split(" ").join(".")}` : "";
-                problems.push(`${el.tagName.toLowerCase()}${cls}: "${(el.textContent ?? "").trim().slice(0, 60)}"`);
-              }
-            }
-            return problems;
-          });
-          expect(clipped, `${route} at ${viewportName}/${theme} has zero-size element(s) with real text content in the page content area`).toEqual([]);
+          await runLayoutChecks(page, route, viewportName, viewport, theme);
         });
       }
     }
+  }
+});
+
+// #672: "UHQ / high-DPI" per the issue's own wording means a real 2x
+// device-pixel-ratio panel, not just a bigger 1x viewport -- the "uhq"
+// entry in the matrix above is 1920x1080 at whatever DPR this project's
+// default device profile uses (Desktop Chrome's own default, 1), so it
+// was never actually testing the "high-DPI" half of that tier's own
+// name. deviceScaleFactor can only be set at browser-context creation,
+// not via page.setViewportSize() after the fact (confirmed against
+// Playwright's own API -- setViewportSize only ever changes CSS
+// viewport dimensions) -- test.use() at describe scope is the real
+// mechanism, hence this being a separate block rather than a 7th entry
+// squeezed into the shared viewports object above.
+//
+// One theme (dark) rather than both: CSS layout geometry essentially
+// never depends on device-pixel-ratio by itself (the exceptions are
+// image-resolution/image-set() and rare @media (min-resolution) rules,
+// none of which this codebase's vendored theme.css uses -- confirmed by
+// grep before deciding this), so a real dark+light x 24-route x-2 pass
+// here would mostly duplicate the 1x matrix's own coverage for double
+// the runtime. Still real DPR, still worth running -- catches the class
+// of bug the issue actually named ("assumes 1x"), just without doubling
+// this specific block's cost for a dimension unlikely to interact with
+// theme choice.
+test.describe("UHQ tier at real 2x device-pixel-ratio", () => {
+  test.use({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 2 });
+
+  for (const route of routes) {
+    test(`dark uhq-2x ${route}`, async ({ page }) => {
+      await runLayoutChecks(page, route, "uhq-2x", { width: 1920, height: 1080 }, "dark");
+    });
   }
 });
 
