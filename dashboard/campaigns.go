@@ -69,7 +69,13 @@ func (s *store) campaignsData(r *http.Request) campaignsPage {
 	// again on every single request. Any active filter still needs a live
 	// recompute, since the cached snapshot only ever holds the unfiltered
 	// defaultCorrelationWindow view.
-	if f.cidr == "" && f.asn == "" && f.sensor == "" && f.since.IsZero() {
+	//
+	// #886: this used to allowlist only cidr/asn/sensor/since, so setting
+	// any of the ~20 other filter fields (country, cred, cmd, ...) silently
+	// took the fast path anyway and served the cached, globally-unfiltered
+	// snapshot. isEmpty() treats the filter as opaque instead, matching how
+	// every other filter.match() consumer in the dashboard already does.
+	if f.isEmpty() {
 		return campaignsPage{Generated: time.Now(), Campaigns: s.get().Campaigns, Filters: f.describe(), ExportURL: exportURL, filterBar: bar}
 	}
 

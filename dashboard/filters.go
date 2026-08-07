@@ -67,6 +67,22 @@ func parseFilter(r *http.Request) filter {
 	return f
 }
 
+// isEmpty reports whether every field parseFilter can set is still at its
+// zero value -- i.e. the request carried no filter criteria at all. #886:
+// a cache-fast-path guard that instead allowlists a handful of specific
+// fields silently ignores every other one, serving cached/unfiltered data
+// for a request that set e.g. ?country= or ?cred= with no indication to
+// the caller that its filter had no effect.
+func (f filter) isEmpty() bool {
+	return f.ip == "" && f.cidr == "" && f.port == "" && f.sensor == "" && f.proto == "" && f.path == "" &&
+		f.persona == "" && f.site == "" && f.asset == "" &&
+		f.cred == "" && f.cmd == "" && f.session == "" && f.shasum == "" &&
+		f.cat == "" && f.country == "" && f.city == "" && f.client == "" &&
+		f.fingerprint == "" && f.provider == "" && f.org == "" && f.asn == "" &&
+		f.sig == "" && f.q == "" && f.typ == "" &&
+		len(f.includeIPs) == 0 && f.since.IsZero() && f.family == ""
+}
+
 func containsFold(haystack, needle string) bool {
 	return strings.Contains(strings.ToLower(haystack), strings.ToLower(needle))
 }
