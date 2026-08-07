@@ -167,6 +167,28 @@ jobs:
           docker compose -f compose.yml config --quiet
           docker compose -f compose.yml up -d --build
 
+      # #154 phase 5: agent-intrusion-worker reads real sensor events,
+      # correlates them into campaigns, scores each against the
+      # deterministic criticality rules, and writes provenance-rich
+      # verdicts to agent-intrusion-campaigns for dashboard/agent_campaigns.go
+      # (route /agent-campaigns) to render. Same #560 placement reasoning as
+      # honeypot-ip-enrichment-worker immediately above: it joins honeynet
+      # to reach elasticsearch (docker-compose.agent-intrusion-worker.yml's
+      # own header), but worker.py never crashes on an unreachable ES --
+      # it logs and retries next poll cycle (run_cycle's own "never raises"
+      # discipline) -- so there is no hard ordering requirement forcing this
+      # step after honeypot-elk below.
+      - name: Synchronize honeypot-agent-intrusion-worker (#154)
+        shell: bash
+        run: |
+          destination=/opt/stacks/honeypot-agent-intrusion-worker
+          install -d -m 755 "$destination"
+          cp docker-compose.agent-intrusion-worker.yml "$destination/compose.yml"
+          cd "$destination"
+          test ! -f .env || chmod 600 .env
+          docker compose -f compose.yml config --quiet
+          docker compose -f compose.yml up -d --build
+
       # #258: payload-dedupe and yara-scanner split out separately from
       # dionaea/tftp-relay above, per explicit instruction. Placed right
       # after that step (not in its loop) purely for readability -- the

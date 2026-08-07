@@ -58,6 +58,7 @@ updates:
   # filename, but pulled out here rather than silently assumed to work.
   - package-ecosystem: docker
     directories:
+      - /analysis/agent-intrusion-corpus
       - /analysis/es-results-importer
       - /analysis/ghidra/service
       - /analysis/ghidra/statictools
@@ -104,7 +105,13 @@ updates:
     labels: [dependencies, containers]
 
   - package-ecosystem: pip
+    # es-results-importer and llm-worker also carry their own
+    # requirements.txt with no pip coverage here -- a pre-existing gap,
+    # not introduced by this list; flagged rather than silently fixed here
+    # since auditing every pip-based directory is a separate piece of work
+    # from what added agent-intrusion-corpus's own requirements.txt (#154).
     directories:
+      - /analysis/agent-intrusion-corpus
       - /ml-worker
     schedule:
       interval: weekly

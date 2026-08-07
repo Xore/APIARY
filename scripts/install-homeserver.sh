@@ -574,17 +574,19 @@ STACK_DEFS=(
   "honeypot-dicompot|docker-compose.dicompot.yml"
   "honeypot-dns-honeypot|docker-compose.dns-honeypot.yml"
   "honeypot-ip-enrichment-worker|docker-compose.ip-enrichment-worker.yml"
+  "honeypot-agent-intrusion-worker|docker-compose.agent-intrusion-worker.yml"
   "honeypot-payload-analysis|docker-compose.payload-analysis.yml"
   "honeypot-dashboard|docker-compose.dashboard.yml"
   "honeypot-utilities|docker-compose.utilities.yml"
 )
-# NOTE: cisco-asa/citrix/rdp/dicompot/dns-honeypot/ip-enrichment-worker are
-# NOT in STACK-REBUILD.md's documented 12-stack reset list even though they
-# have their own container_name and top-level compose file in this repo --
-# that doc appears to predate these being split into their own stacks. They
-# have no env_file/${VAR} substitution in their compose files (confirmed by
-# grep), so no .env restore is needed for them either. Flagged as a
-# docs-vs-reality gap in the #518 issue rather than silently guessed away.
+# NOTE: cisco-asa/citrix/rdp/dicompot/dns-honeypot/ip-enrichment-worker/
+# agent-intrusion-worker are NOT in STACK-REBUILD.md's documented 12-stack
+# reset list even though they have their own container_name and top-level
+# compose file in this repo -- that doc appears to predate these being
+# split into their own stacks. They have no env_file/${VAR} substitution in
+# their compose files (confirmed by grep), so no .env restore is needed for
+# them either. Flagged as a docs-vs-reality gap in the #518 issue rather
+# than silently guessed away.
 
 step_provision_stack_dirs() {
   local name compose_file

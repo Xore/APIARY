@@ -19,6 +19,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - image: agent-intrusion-worker
+            context: analysis/agent-intrusion-corpus
           - image: cisco-asa-honeypot
             context: cisco-asa-honeypot
           - image: citrix-honeypot
