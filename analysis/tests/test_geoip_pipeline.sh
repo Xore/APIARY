@@ -58,15 +58,26 @@ for _ in $(seq 1 40); do
 done
 [ "$ready" -eq 1 ] || fail "Elasticsearch did not become reachable at $es_url"
 
-# Extract exactly the geoip-honeypot pipeline's JSON body (between the PUT
-# command's heredoc markers) rather than the whole file, so this stays in
+# Extract exactly the geoip-honeypot pipeline's JSON body (the
+# geoip_pipeline_body heredoc) rather than the whole file, so this stays in
 # sync with elasticsearch-setup.sh automatically -- no copy of the pipeline
-# definition to fall out of date here.
-start_line=$(grep -n '_ingest/pipeline/geoip-honeypot' "$src_root/analysis/elasticsearch-setup.sh" | head -1 | cut -d: -f1)
-body_start=$((start_line + 3))
+# definition to fall out of date here. Located by the heredoc's own open/
+# close markers, not the PUT command -- #827 moved the actual curl call to
+# after the heredoc (the body needs a placeholder substituted first, see
+# below), so it's no longer adjacent to "<<'JSON'" the way earlier versions
+# of this pipeline's install code had it.
+start_line=$(grep -n "cat <<'JSON'" "$src_root/analysis/elasticsearch-setup.sh" | head -1 | cut -d: -f1)
+body_start=$((start_line + 1))
 end_line=$(tail -n "+$body_start" "$src_root/analysis/elasticsearch-setup.sh" | grep -n '^JSON$' | head -1 | cut -d: -f1)
 body_end=$((body_start + end_line - 2))
-sed -n "${body_start},${body_end}p" "$src_root/analysis/elasticsearch-setup.sh" > "$tmp/pipeline.json"
+sed -n "${body_start},${body_end}p" "$src_root/analysis/elasticsearch-setup.sh" > "$tmp/pipeline.json.tmpl"
+
+# #827: the extracted body still has the literal __ES_HOME_NET_JSON__
+# placeholder elasticsearch-setup.sh's own sed substitutes at install time --
+# same real TEST-NET-2 convention as the rest of this file's fixtures below,
+# not a real address, so this test's own "home_net" IS the address the
+# simulate fixtures below deliberately trigger the swap against.
+sed 's#__ES_HOME_NET_JSON__#["198.51.100.1"]#' "$tmp/pipeline.json.tmpl" > "$tmp/pipeline.json"
 
 python3 -c "import json; json.load(open('$tmp/pipeline.json'))" ||
   fail "extracted pipeline body is not valid JSON -- extraction line range needs updating"
@@ -112,6 +123,63 @@ result="$(simulate "$tmp/both_path_and_url.json")"
 [ "$result" = "/uploads/x.exe" ] ||
   fail "path did not take precedence over url when a document sets both (got: '$result')"
 pass "path takes precedence over url when a document sets both"
+
+# #827: Suricata netflow logs both directions of one flow as separate
+# records, source/destination reflecting literal packet direction not
+# attacker/victim -- for the "reflected" direction (our own service
+# answering back), source.ip is this host's own address, not the remote
+# attacker's. This pipeline is installed above with home_net=198.51.100.1
+# (this test's own fixture-only address, matching the TEST-NET-2 convention
+# every other fixture here already uses).
+simulate_flow() {
+  # simulate_flow <fixture-file> -> prints "source.ip destination.ip destination.port"
+  curl -fsS -X POST "$es_url/_ingest/pipeline/geoip-honeypot/_simulate" \
+    -H 'Content-Type: application/json' \
+    --data-binary "@$1" |
+    python3 -c "
+import json, sys
+doc = json.load(sys.stdin)['docs'][0]['doc']['_source']
+src = doc.get('source', {}).get('ip', '')
+dst = doc.get('destination', {})
+print(f\"{src} {dst.get('ip', '')} {dst.get('port', '')}\")
+"
+}
+
+# Normal direction: a real remote attacker (198.51.100.77) hitting our VNC
+# honeypot (port 5900) -- source is already the remote party, nothing to
+# swap. Confirms the fix doesn't disturb the overwhelming majority case.
+cat > "$tmp/netflow_normal.json" <<'EOF'
+{"docs":[{"_source":{"suricata":{"eve":{"event_type":"netflow","src_ip":"198.51.100.77","src_port":51234,"dest_ip":"198.51.100.1","dest_port":5900,"proto":"TCP"}}}}]}
+EOF
+result="$(simulate_flow "$tmp/netflow_normal.json")"
+[ "$result" = "198.51.100.77 198.51.100.1 5900" ] ||
+  fail "normal-direction netflow regressed (got: '$result')"
+pass "normal-direction netflow (remote -> us) is unaffected"
+
+# Reflected direction: the same conversation's return leg, as Suricata
+# actually logs it -- src_ip/src_port are OUR OWN service (5900), dest_ip/
+# dest_port are the real remote attacker's ephemeral port. Without the
+# #827 fix, source.ip would be our own address here -- exactly what showed
+# up as the #1 "attack source" in the real dashboard before this fix.
+cat > "$tmp/netflow_reflected.json" <<'EOF'
+{"docs":[{"_source":{"suricata":{"eve":{"event_type":"netflow","src_ip":"198.51.100.1","src_port":5900,"dest_ip":"198.51.100.77","dest_port":51234,"proto":"TCP"}}}}]}
+EOF
+result="$(simulate_flow "$tmp/netflow_reflected.json")"
+[ "$result" = "198.51.100.77 198.51.100.1 5900" ] ||
+  fail "reflected-direction netflow was not corrected (got: '$result', want the same real-attacker/our-own-service pair as the normal-direction case above)"
+pass "reflected-direction netflow (us -> remote) is corrected to the real remote party"
+
+# Neither side is home_net -- e.g. Suricata observing unrelated third-party
+# traffic, or the swap condition genuinely doesn't apply. Falls back to
+# positional (source, destination), same as every event type without this
+# fix -- no false-positive swap.
+cat > "$tmp/netflow_neither_homenet.json" <<'EOF'
+{"docs":[{"_source":{"suricata":{"eve":{"event_type":"netflow","src_ip":"203.0.113.5","src_port":443,"dest_ip":"198.51.100.77","dest_port":51234,"proto":"TCP"}}}}]}
+EOF
+result="$(simulate_flow "$tmp/netflow_neither_homenet.json")"
+[ "$result" = "203.0.113.5 198.51.100.77 51234" ] ||
+  fail "a flow with neither side in home_net was swapped when it shouldn't be (got: '$result')"
+pass "a flow with neither side in home_net falls back to positional (no false-positive swap)"
 
 echo
 echo "all geoip-honeypot pipeline tests passed"

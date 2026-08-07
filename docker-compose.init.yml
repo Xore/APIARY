@@ -168,6 +168,10 @@ services:
       - ELASTICSEARCH_URL=http://elasticsearch:9200
       # #261: single knob every ILM min_age below scales from.
       - HONEYPOT_RETENTION_DAYS=${HONEYPOT_RETENTION_DAYS:-30}
+      # #827: see elasticsearch-setup.sh's own comment above the
+      # geoip-honeypot pipeline definition -- bare IPs, exact match, not
+      # CIDR. Empty/unset is a safe no-op, not a startup failure.
+      - ES_HOME_NET=${ES_HOME_NET:-}
     volumes:
       - /opt/stacks/apiary/analysis/elasticsearch-setup.sh:/usr/local/bin/elasticsearch-setup.sh:ro
       - /opt/stacks/apiary/state/init-markers:/markers

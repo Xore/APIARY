@@ -63,11 +63,40 @@ curl -fsS -X PUT "$es_url/_ilm/policy/honeypot-30d" \
   -H 'Content-Type: application/json' \
   --data-binary '{"policy":{"phases":{"hot":{"actions":{"rollover":{"max_age":"1d","max_primary_shard_size":"25gb"}}},"delete":{"min_age":"30d","actions":{"delete":{}}}}}}' >/dev/null
 
+# #827: this stack's own address(es), so the Suricata block below can tell
+# "the honeypot itself" apart from the actual remote party -- same real
+# value(s) as vps/.env's SURICATA_HOME_NET and ml-worker/.env's ML_HOME_NET
+# (each entered separately since this runs on a different host than
+# either). NOT the same CIDR-list convention those two use, deliberately:
+# bare comma-separated IPs, exact string match, no /32 or subnet syntax --
+# the Painless script below checks List.contains(), and Painless has no
+# convenient CIDR-containment primitive the way Python's ipaddress module
+# does. Exact match is enough here: this stack's real home-net is always
+# one or two fixed host addresses, never a range. Empty by default --
+# unset means the swap below never triggers, which is the pre-#827
+# behaviour (source/destination trusted positionally), still correct for
+# every event type except Suricata netflow (see the pipeline comment).
+#
+# Builds a JSON array literal for the ingest script's "params" field --
+# this whole pipeline body is a single-quoted heredoc (no shell expansion),
+# so this is assembled separately and substituted in below rather than
+# interpolated inline, keeping the giant Painless string free of shell
+# quoting hazards.
+es_home_net_json="[]"
+if [ -n "${ES_HOME_NET:-}" ]; then
+  es_home_net_json=$(printf '%s' "$ES_HOME_NET" | tr ',' '\n' | sed 's/^ *//; s/ *$//' | grep -v '^$' | sed 's/.*/"&"/' | paste -sd, -)
+  es_home_net_json="[$es_home_net_json]"
+fi
+
 # Geo enrichment is best-effort. Listener/startup events legitimately contain
 # an empty source IP and must still be indexed rather than rejected.
-curl -fsS -X PUT "$es_url/_ingest/pipeline/geoip-honeypot" \
-  -H 'Content-Type: application/json' \
-  --data-binary @- <<'JSON'
+# The pipeline body below is a single-quoted heredoc (no shell expansion --
+# it contains its own literal ${...} sequences, e.g. the Log4Shell
+# deobfuscation script further down, that an unquoted heredoc would mangle
+# trying to expand as shell parameters). __ES_HOME_NET_JSON__ is a plain
+# text placeholder substituted via sed afterward instead, so the dynamic
+# home_net value never has to survive shell parameter expansion.
+geoip_pipeline_body="$(cat <<'JSON'
 {
   "description": "Geo + ASN enrichment for Suricata and honeypot events (local GeoLite2 files)",
   "processors": [
@@ -75,7 +104,8 @@ curl -fsS -X PUT "$es_url/_ingest/pipeline/geoip-honeypot" \
       "script": {
         "lang": "painless",
         "ignore_failure": true,
-        "source": "if (ctx.event == null) ctx.event = new HashMap(); if (ctx.source == null) ctx.source = new HashMap(); if (ctx.destination == null) ctx.destination = new HashMap(); if (ctx.network == null) ctx.network = new HashMap(); if (ctx.honeypot != null) { def h = ctx.honeypot; if (h.sensor != null) ctx.event.sensor = h.sensor; else if (h.eventid != null && h.eventid.toString().startsWith('cowrie.')) ctx.event.sensor = 'cowrie'; if (h.src_ip != null && h.src_ip != '') ctx.source.ip = h.src_ip; if (h.dst_ip != null && h.dst_ip != '') ctx.destination.ip = h.dst_ip; if (h.dst_port != null) ctx.destination.port = h.dst_port; else if (h.port != null) ctx.destination.port = h.port; if (h.proto != null) ctx.network.protocol = h.proto; else if (h.protocol != null) ctx.network.protocol = h.protocol; else if (h.data_type != null) ctx.network.protocol = h.data_type; if (h.username != null) { if (ctx.user == null) ctx.user = new HashMap(); ctx.user.name = h.username; } if (h.command != null || h.input != null) { if (ctx.process == null) ctx.process = new HashMap(); ctx.process.command_line = h.command != null ? h.command : h.input; } if (h.path != null) { if (ctx.url == null) ctx.url = new HashMap(); ctx.url.path = h.path; } else if (h.url != null) { if (ctx.url == null) ctx.url = new HashMap(); ctx.url.path = h.url; } if (h.shasum != null) { if (ctx.file == null) ctx.file = new HashMap(); if (ctx.file.hash == null) ctx.file.hash = new HashMap(); ctx.file.hash.sha256 = h.shasum; } if (h.category != null) ctx.event.category = h.category; } if (ctx.log != null && ctx.log.file != null && ctx.log.file.path != null) { String p = ctx.log.file.path; if (ctx.event.sensor == null && p.contains('/conpot')) { int a = p.indexOf('/conpot') + 1; int b = p.indexOf('/', a); if (b > a) { ctx.event.sensor = p.substring(a, b); } else { String base = p.substring(a); ctx.event.sensor = base.endsWith('.json') ? base.substring(0, base.length() - 5) : base; } } if (ctx.event.sensor == null && p.contains('/dionaea')) { ctx.event.sensor = 'dionaea'; } if (ctx.event.sensor != null && ctx.event.sensor.toString().startsWith('conpot')) { if (ctx.ot == null) ctx.ot = new HashMap(); ctx.ot.persona = ctx.event.sensor; } } if (ctx.suricata != null && ctx.suricata.eve != null) { def s = ctx.suricata.eve; ctx.event.sensor = 'suricata'; if (s.event_type != null) ctx.event.category = s.event_type; if (s.src_ip != null) ctx.source.ip = s.src_ip; if (s.dest_ip != null) ctx.destination.ip = s.dest_ip; if (s.dest_port != null) ctx.destination.port = s.dest_port; if (s.proto != null) ctx.network.transport = s.proto.toString().toLowerCase(); } if (ctx.portbridge != null) { def pb = ctx.portbridge; ctx.event.sensor = 'portbridge'; ctx.event.category = pb.event != null ? pb.event.toString() : 'connect'; if (pb.src_ip != null && pb.src_ip != '') ctx.source.ip = pb.src_ip; if (pb.port != null) ctx.destination.port = pb.port; if (pb.proto != null) ctx.network.transport = pb.proto; }"
+        "params": {"home_net": __ES_HOME_NET_JSON__},
+        "source": "if (ctx.event == null) ctx.event = new HashMap(); if (ctx.source == null) ctx.source = new HashMap(); if (ctx.destination == null) ctx.destination = new HashMap(); if (ctx.network == null) ctx.network = new HashMap(); if (ctx.honeypot != null) { def h = ctx.honeypot; if (h.sensor != null) ctx.event.sensor = h.sensor; else if (h.eventid != null && h.eventid.toString().startsWith('cowrie.')) ctx.event.sensor = 'cowrie'; if (h.src_ip != null && h.src_ip != '') ctx.source.ip = h.src_ip; if (h.dst_ip != null && h.dst_ip != '') ctx.destination.ip = h.dst_ip; if (h.dst_port != null) ctx.destination.port = h.dst_port; else if (h.port != null) ctx.destination.port = h.port; if (h.proto != null) ctx.network.protocol = h.proto; else if (h.protocol != null) ctx.network.protocol = h.protocol; else if (h.data_type != null) ctx.network.protocol = h.data_type; if (h.username != null) { if (ctx.user == null) ctx.user = new HashMap(); ctx.user.name = h.username; } if (h.command != null || h.input != null) { if (ctx.process == null) ctx.process = new HashMap(); ctx.process.command_line = h.command != null ? h.command : h.input; } if (h.path != null) { if (ctx.url == null) ctx.url = new HashMap(); ctx.url.path = h.path; } else if (h.url != null) { if (ctx.url == null) ctx.url = new HashMap(); ctx.url.path = h.url; } if (h.shasum != null) { if (ctx.file == null) ctx.file = new HashMap(); if (ctx.file.hash == null) ctx.file.hash = new HashMap(); ctx.file.hash.sha256 = h.shasum; } if (h.category != null) ctx.event.category = h.category; } if (ctx.log != null && ctx.log.file != null && ctx.log.file.path != null) { String p = ctx.log.file.path; if (ctx.event.sensor == null && p.contains('/conpot')) { int a = p.indexOf('/conpot') + 1; int b = p.indexOf('/', a); if (b > a) { ctx.event.sensor = p.substring(a, b); } else { String base = p.substring(a); ctx.event.sensor = base.endsWith('.json') ? base.substring(0, base.length() - 5) : base; } } if (ctx.event.sensor == null && p.contains('/dionaea')) { ctx.event.sensor = 'dionaea'; } if (ctx.event.sensor != null && ctx.event.sensor.toString().startsWith('conpot')) { if (ctx.ot == null) ctx.ot = new HashMap(); ctx.ot.persona = ctx.event.sensor; } } if (ctx.suricata != null && ctx.suricata.eve != null) { def s = ctx.suricata.eve; ctx.event.sensor = 'suricata'; if (s.event_type != null) ctx.event.category = s.event_type; String sip = s.src_ip; String dip = s.dest_ip; def dport = s.dest_port; if (sip != null && params.home_net.contains(sip) && dip != null && !params.home_net.contains(dip)) { String tmp = sip; sip = dip; dip = tmp; dport = s.src_port; } if (sip != null) ctx.source.ip = sip; if (dip != null) ctx.destination.ip = dip; if (dport != null) ctx.destination.port = dport; if (s.proto != null) ctx.network.transport = s.proto.toString().toLowerCase(); } if (ctx.portbridge != null) { def pb = ctx.portbridge; ctx.event.sensor = 'portbridge'; ctx.event.category = pb.event != null ? pb.event.toString() : 'connect'; if (pb.src_ip != null && pb.src_ip != '') ctx.source.ip = pb.src_ip; if (pb.port != null) ctx.destination.port = pb.port; if (pb.proto != null) ctx.network.transport = pb.proto; }"
       }
     },
     {
@@ -170,6 +200,10 @@ curl -fsS -X PUT "$es_url/_ingest/pipeline/geoip-honeypot" \
   ]
 }
 JSON
+)"
+curl -fsS -X PUT "$es_url/_ingest/pipeline/geoip-honeypot" \
+  -H 'Content-Type: application/json' \
+  --data-binary "$(printf '%s' "$geoip_pipeline_body" | sed "s#__ES_HOME_NET_JSON__#$es_home_net_json#")" >/dev/null
 
 echo
 
