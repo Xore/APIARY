@@ -31,7 +31,7 @@ joblib==1.5.3
 # numpy<2.5 and >=1.22`, ResolutionImpossible. Reverted back to 2.4.6.
 # If numpy needs bumping again, the numba/llvmlite pins below need to move
 # in lockstep (verify a clean joint install first), not numpy alone.
-numpy==2.4.6
+numpy==2.5.1
 pandas==3.0.5
 
 # Deep learning (CPU-only PyTorch)
@@ -40,7 +40,7 @@ torch==2.13.0+cpu
 
 # Outlier detection (HBOS). Pulls in numba+llvmlite -- see the numpy pin
 # above; this is the version pair actually verified to install together.
-pyod==3.6.2
+pyod==3.6.4
 numba==0.66.0
 llvmlite==0.48.0
 
