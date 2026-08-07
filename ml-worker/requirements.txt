@@ -12,7 +12,7 @@
 # Reproduced live: es.ping() -> HEAD / returns HTTP 400 against the actual
 # running 8.13.4 server, exactly the media_type_header_exception this
 # comment already describes. Reverted to 8.19.3.
-elasticsearch==8.19.3
+elasticsearch==9.4.1
 
 # ML core
 scikit-learn==1.9.0
