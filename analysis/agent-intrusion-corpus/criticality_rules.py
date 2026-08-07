@@ -290,6 +290,26 @@ def evaluate_event(raw: dict) -> list[RuleMatch]:
     return [m for rule in ALL_RULES if (m := rule(raw)) is not None]
 
 
+# #154 phase 5's own required field ("the trust boundary crossed"). Kept as
+# a lookup table rather than folded into each RuleMatch directly, since the
+# boundary crossed is a property of *which rule* matched, not of any one
+# event's own data -- matches this module's own per-category framing
+# (campaign_severity groups by rule name for the identical reason).
+TRUST_BOUNDARIES = {
+    "sensitive-path-read": "process/container -> host secret material",
+    "chunked-c2-protocol": "honeypot session -> external C2 channel",
+    "encoded-execution": "honeypot session -> local code execution",
+    "encoded-egress-external": "internal workload -> external network segment",
+    "metadata-service-probe": "workload -> cloud identity/metadata service",
+    "privileged-container-create": "workload -> host (root-equivalent)",
+    "broad-scope-identity-token": "workload -> orchestrator identity",
+    "covert-mesh-enrollment": "workload -> internal mesh/VPN",
+    "internal-connector-enumeration": "mesh identity -> internal service catalog",
+    "scm-write-unexpected-actor": "workload/mesh identity -> source control",
+    "staged-payload-reference": "honeypot session -> local filesystem (staged artifacts)",
+}
+
+
 def campaign_severity(matched_rules_per_event: dict) -> tuple[str, set]:
     """Given {event_id: [RuleMatch, ...]} for one campaign, counts the
     *distinct* rule categories that fired anywhere in it (not the raw

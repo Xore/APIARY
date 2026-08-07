@@ -1,0 +1,46 @@
+# agent-intrusion-worker — #154 phase 5: reads real sensor events from
+# Elasticsearch, correlates them into campaigns, scores each campaign
+# against the deterministic criticality rules, and writes provenance-rich
+# verdicts to the agent-intrusion-campaigns index for a future dashboard
+# page to read.
+#
+# Own stack, same reasoning as ml-worker/docker-compose.yml's own header:
+# this has to read Elasticsearch continuously, so it joins honeynet as an
+# external network -- docker-compose.init.yml's own established pattern
+# for reaching elasticsearch from a separate stack (#111).
+#
+# Deploy: copy this file to /opt/stacks/agent-intrusion-worker/compose.yml
+# (Dockge's naming convention).
+
+services:
+  agent-intrusion-worker:
+    build:
+      context: analysis/agent-intrusion-corpus
+      dockerfile: Dockerfile
+    container_name: hp-agent-intrusion-worker
+    restart: unless-stopped
+    networks:
+      - honeynet
+    environment:
+      ES_HOST: http://elasticsearch:9200
+      POLL_INTERVAL: "300"
+      FETCH_WINDOW_DAYS: "10"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          # Pure correlation/rule logic over a bounded rolling window, no
+          # ML training -- a fraction of ml-worker's own 2g allotment
+          # covers this comfortably.
+          cpus: "0.5"
+          memory: 256M
+
+networks:
+  honeynet:
+    name: honeynet
+    external: true
