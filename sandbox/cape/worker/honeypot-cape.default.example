@@ -1,0 +1,44 @@
+# /etc/default/honeypot-cape — host-specific settings for the CAPE worker.
+# Not installed automatically yet (no install-analysis-host.sh equivalent
+# for this chain exists -- add one if #314 grows the same amount of
+# install-time logic analysis/ghidra's own does). Copy by hand for now.
+#
+# Read by honeypot-cape-worker.service. Nothing here is a secret, but the
+# spool paths must agree with ReadWritePaths= in that unit: systemd cannot
+# expand these values, so moving a spool means editing both files.
+
+# ── Spools ───────────────────────────────────────────────────────────────────
+# The dashboard writes {sha256}.request into the request directory and reads
+# {sha256}_cape.json back out of the results directory. docker-compose.yml
+# will mount both into the dashboard container as /cape-requests and
+# /cape-results once #319 lands; these are the host paths, which is what the
+# worker needs.
+CAPE_REQUEST_DIR=/var/lib/honeypot-cape/requests/pending
+CAPE_RESULTS_DIR=/var/lib/honeypot-cape/results
+
+# Where the payload store keeps captured samples, named by hash. Shared with
+# every other worker, read-only as far as this worker is concerned.
+CAPE_SAMPLES_DIR=/var/lib/honeypot-sandbox/inbox/samples
+
+# ── CAPE web/API service ─────────────────────────────────────────────────────
+# CAPE's own apiv2, loopback-only by default (docs/sandbox/cape/
+# IMPLEMENTATION_PLAN.md Phase 4). Set CAPE_API_TOKEN if CAPE's own API auth
+# is enabled (config/web.conf [api] ...); empty means no Authorization
+# header is sent.
+CAPE_API_BASE=http://127.0.0.1:8000
+CAPE_API_TOKEN=
+
+# Per-sample budget, in seconds.
+CAPE_ANALYSIS_TIMEOUT=1200
+
+# Routing-mode decision (#316): drop (default) or inetsim. internet/VPN are
+# not offered here -- ruled out outright by this repo's blanket
+# no-outbound-network posture.
+CAPE_ROUTE=drop
+
+# ── Resource coexistence (#320) ─────────────────────────────────────────────
+# Cross-pipeline lock shared with sandbox/windows/run_pending.sh -- only one
+# KVM-backed detonation runs at a time on this host. Leave as-is on a
+# single-host deployment; set empty only if CAPE's guest ever moves to its
+# own separate hardware.
+CAPE_KVM_SHARED_LOCK=/run/lock/honeypot-kvm-detonation.lock

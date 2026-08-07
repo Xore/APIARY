@@ -203,7 +203,7 @@ func validateWorkbenchSelections(selections []workbenchSelection) ([]workbenchSe
 	if len(selections) == 0 || len(selections) > 5 {
 		return nil, errors.New("select between one and five analyzers")
 	}
-	allowed := map[string]bool{"deterministic": true, "ghidra": true, "linux-sandbox": true, "windows-sandbox": true, "windows-ghosts": true, "revdeck": true}
+	allowed := map[string]bool{"deterministic": true, "ghidra": true, "linux-sandbox": true, "windows-sandbox": true, "windows-ghosts": true, "revdeck": true, "cape": true}
 	seen := map[string]bool{}
 	out := make([]workbenchSelection, 0, len(selections))
 	for _, selection := range selections {
@@ -229,6 +229,7 @@ func workbenchRegistry(classification payloadClassification) []workbenchAnalyzer
 	ghidraConfigured := directoryUsable(ghidraRequestDir(), true) && directoryUsable(ghidraResultsDir(), false)
 	ghidraHealthy := ghidraConfigured && !loadGhidraStatus().Stale
 	revdeckConfigured := directoryUsable(revdeckRequestDir(), true) && directoryUsable(revdeckResultsDir(), false)
+	capeConfigured := directoryUsable(capeRequestDir(), true) && directoryUsable(capeResultsDir(), false)
 	linuxApplicable := classification.Dynamic && classification.Platform != "Windows"
 	windowsApplicable := classification.Dynamic && classification.Platform == "Windows"
 	linuxConfigured := directoryUsable(sandboxRequestDir(targetLinux), true) && directoryUsable(sandboxResultsDir(), false)
@@ -271,6 +272,18 @@ func workbenchRegistry(classification payloadClassification) []workbenchAnalyzer
 		// here -- same gap ghidraConfigured/ghidraHealthy already accepts for
 		// GHIDRA_API_BASE.
 		{ID: "revdeck", DisplayName: "Rev\u00b7Deck / GhidrAssist", Description: "Rev\u00b7Deck's own bounded, autonomous tool-calling loop against the Ghidra REST service, run standalone rather than embedded inside a full Ghidra analysis.", AcceptedKinds: []string{"executable", "library"}, Availability: availabilityName(revdeckConfigured, revdeckConfigured), Available: revdeckConfigured, Applicable: codeLike, Reason: analyzerReason(codeLike, revdeckConfigured, revdeckConfigured, "payload does not contain a supported code image", "Rev\u00b7Deck spool is not configured", "Rev\u00b7Deck spool is not configured"), ResultLinkShape: "/revdeck/{sha256}", RequiredRole: "admin", Confirmation: "none", Concurrency: "shared-gpu", LocalOnly: true, GPU: true, DefaultOptions: defaultWorkbenchOptions("ghidra"), OptionSchema: optionSchema},
+		// #314-322 (path 1 from #299): a second, independent Windows
+		// detonation route alongside windows-sandbox, purpose-built for
+		// debugger-class evasion (long sleeps, timestamp-gated logic
+		// bombs, rdtsc timing checks) that no amount of persona/environment
+		// realism defeats -- only patching the guest's notion of time does,
+		// which is what CAPE's own YARA-programmable debugger does.
+		// Same "unconfigured" story every other route tells until its own
+		// chain lands: #315's golden image doesn't exist yet, so this is
+		// permanently "spool is not configured" (capeConfigured false)
+		// until that ships, same as ghidraConfigured/revdeckConfigured
+		// report honestly rather than claiming availability nothing backs.
+		{ID: "cape", DisplayName: "CAPE sandbox", Description: "Dynamic detonation in a dedicated CAPE-managed Windows guest, isolated from win11-sandbox on its own network and golden image. Purpose-built for debugger-class time evasion (long sleeps, rdtsc checks) that persona realism alone cannot defeat.", AcceptedKinds: []string{"windows"}, Availability: availabilityName(capeConfigured, capeConfigured), Available: capeConfigured, Applicable: windowsApplicable, Reason: analyzerReason(windowsApplicable, capeConfigured, capeConfigured, "payload is not compatible with the Windows detonation route", "CAPE spool is not configured", "CAPE spool is not configured"), ResultLinkShape: "/cape/{sha256}", RequiredRole: "admin", Confirmation: "detonation", Concurrency: "cape-kvm", LocalOnly: true, Detonates: true, DefaultOptions: defaultWorkbenchOptions("windows-sandbox"), OptionSchema: optionSchema},
 	}
 	return items
 }

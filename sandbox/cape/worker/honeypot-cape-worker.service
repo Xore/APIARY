@@ -1,0 +1,44 @@
+[Unit]
+Description=Submit queued honeypot payloads to CAPE and collect the report
+Documentation=file:/opt/CAPEv2/docs/sandbox/cape/IMPLEMENTATION_PLAN.md
+After=docker.service
+# Wants, not Requires: if CAPE's web/API service is down the worker exits
+# without consuming the queue, which is a better outcome than refusing to
+# start and leaving the operator to work out why nothing drained -- same
+# reasoning honeypot-ghidra-worker.service documents for its own Wants=.
+Wants=docker.service
+
+[Service]
+Type=oneshot
+# Host-specific values (spool paths, CAPE_API_BASE, the samples directory)
+# live outside the repository. The leading - keeps the unit usable before an
+# operator has written the file.
+EnvironmentFile=-/etc/default/honeypot-cape
+ExecStart=/usr/bin/python3 /opt/honeypot-cape/worker/cape-worker.py
+UMask=0077
+# A detonation can block for the better part of CAPE_ANALYSIS_TIMEOUT
+# waiting on the guest, not CPU-hungry itself the way Ghidra's decompile
+# pass is -- Nice/IOScheduling still applied for consistency with every
+# other worker in this repo.
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+# CAPE_ANALYSIS_TIMEOUT default is 1200s per sample; this covers a queue of
+# several plus polling overhead, same margin honeypot-ghidra-worker.service
+# gives itself over GHIDRA_ANALYSIS_TIMEOUT.
+TimeoutStartSec=4h
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# HOST paths, not the container ones docker-compose.yml mounts into the
+# dashboard container -- this unit runs on the host, where those container
+# paths do not exist. Must agree with CAPE_REQUEST_DIR/CAPE_RESULTS_DIR in
+# /etc/default/honeypot-cape; systemd cannot expand EnvironmentFile values
+# here, so moving a spool means editing both files (same caveat
+# honeypot-ghidra-worker.service's own ReadWritePaths= comment gives).
+ReadWritePaths=/var/lib/honeypot-cape/requests/pending /var/lib/honeypot-cape/results /run/lock
+
+[Install]
+WantedBy=multi-user.target

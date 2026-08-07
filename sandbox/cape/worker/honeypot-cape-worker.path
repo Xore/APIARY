@@ -1,0 +1,14 @@
+[Unit]
+Description=Watch for honeypot CAPE sandbox requests
+Documentation=file:/opt/CAPEv2/docs/sandbox/cape/IMPLEMENTATION_PLAN.md
+After=docker.service
+
+[Path]
+# The dashboard writes {sha256}.request here; it never calls CAPE's own
+# web/API service itself. Same trust boundary as the Ghidra and sandbox
+# spools.
+PathChanged=/var/lib/honeypot-cape/requests/pending
+Unit=honeypot-cape-worker.service
+
+[Install]
+WantedBy=multi-user.target

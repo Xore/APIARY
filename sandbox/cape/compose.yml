@@ -1,0 +1,60 @@
+# sandbox/cape/compose.yml — CAPE's MongoDB, deliberately isolated from this
+# repo's own docker-compose*.yml stacks, same reasoning sandbox/ghosts/
+# compose.yml's header gives for its own postgres: CAPE is a full platform
+# with its own database, and folding it into the main stack would blur the
+# trust boundary the rest of this repo keeps narrow.
+#
+# CAPE's actual application (cuckoo.py / web / apiv2) is NOT here. It runs on
+# the host directly, same as sandbox/windows's own orchestrator -- CAPE talks
+# to libvirt/KVM directly for VM lifecycle, which means it needs to run
+# where libvirt actually is, not inside a container reaching across a
+# socket. installer/cape2.sh's own `systemd` target installs it that way
+# upstream; see docs/sandbox/cape/IMPLEMENTATION_PLAN.md Phase 4/5.
+#
+# Only MongoDB lives in Docker: no apt package exists for this host's OS
+# release (mongodb-org's apt repo doesn't publish for it -- see
+# IMPLEMENTATION_PLAN.md's Host Constraints for the concrete error), and
+# CAPE's own extended-report storage/search (conf/reporting.conf [mongodb])
+# is the one piece of "a database" from #314 that isn't already covered by
+# CAPE's default SQLite task DB. Published on loopback only: CAPE itself
+# runs on the host and reaches it at 127.0.0.1, nothing else needs to.
+#
+# PostgreSQL is deliberately NOT stood up here. CAPE's default SQLite task
+# DB (conf/cuckoo.conf [database], connection = unset) is enough to get the
+# host stack running and isolated -- #314's actual ask -- and upstream's own
+# docs flag Postgres as a production/scale recommendation, not a
+# functional requirement. Migrating conf/cuckoo.conf's connection= to a
+# Postgres container here (mirroring ghosts-postgres exactly) is flagged as
+# a known gap in the plan doc rather than built speculatively before
+# anything has actually run a real analysis under load.
+
+services:
+  cape-mongo:
+    image: mongo:7.0
+    volumes:
+      - cape-mongo-data:/data/db
+    networks:
+      cape_net:
+        ipv4_address: 10.91.0.2
+    ports:
+      # Loopback only -- CAPE itself runs on the host (not in this compose
+      # file, see header), so this is the one consumer that needs to reach
+      # it, and it does so via 127.0.0.1.
+      - "127.0.0.1:27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  cape_net:
+    ipam:
+      config:
+        - subnet: 10.91.0.0/24
+
+volumes:
+  cape-mongo-data:
