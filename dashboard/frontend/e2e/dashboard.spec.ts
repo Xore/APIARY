@@ -18,6 +18,38 @@ const routes = [
   "/history",
   "/dead-letters",
   "/reports",
+  // #672: this matrix's own route list was missing 4 real, statically
+  // routed pages (confirmed against dashboard/main.go's actual
+  // http.HandleFunc registrations, not guessed from dashboard/ui/*.html
+  // filenames -- intel.html has no standalone route, it renders embedded
+  // elsewhere, so it's correctly absent).
+  //
+  // /revdeck/{hash} deliberately NOT added here despite being a real
+  // route: unlike /payload-workbench/{hash} above (which renders a real
+  // 200 "not found" page for an unknown hash, so a placeholder like that
+  // one's works fine), /revdeck/{hash}'s handler genuinely
+  // http.NotFound()s when revdeckData() can't resolve the hash -- a
+  // placeholder here would just assert 404 == 200 and fail on every run,
+  // not exercise any layout. Needs a real seeded Rev·Deck job in the fake
+  // ES this harness runs against to test properly; out of scope for this
+  // matrix's fixture data as it stands.
+  "/llm-analysis",
+  // /ml-anomalies deliberately NOT added despite being a real route:
+  // gated behind Behavior.ShowMLPanels, an admin-only setting that
+  // defaults to false (dashboard/settings_domain.go's
+  // defaultDashboardConfig() -- ShowMLPanels is absent from that struct
+  // literal, so it's Go's bool zero-value). isolateReadOnlyBrowserState
+  // above deliberately mocks every /api/settings/** call as 401 "signed
+  // out" for every test in this matrix, so there's no way to toggle it
+  // on from here -- confirmed live, this route 404s exactly as designed
+  // for a signed-out/default-config viewer, not a bug.
+  "/github-analysis",
+  // bare /search (no ?q=) 303-redirects to /events -- confirmed in
+  // search.go's own serveSearch(), not a bug -- which page.goto() follows
+  // transparently, so a bare route here would just silently re-test
+  // /events a second time under a different test name. A real query
+  // actually exercises search's own results-list template.
+  "/search?q=203.0.113.1",
 ] as const;
 
 const viewports = {
@@ -88,6 +120,64 @@ test.describe("dark/light responsive acceptance matrix", () => {
           expect(layout.headingWidth).toBeGreaterThan(0);
           expect(layout.background).not.toBe("rgba(0, 0, 0, 0)");
           expect(layout.color).not.toBe("rgba(0, 0, 0, 0)");
+
+          // #672: the checks above only ever caught whole-page overflow --
+          // real defects found on this issue (mobile table clutter, a
+          // clipped country badge, #668/#669's settings-modal/alert-badge
+          // bugs) are all *this* shape: one element with real content
+          // collapsed to zero size, not the page as a whole overflowing.
+          // Flags any element carrying its own direct text (not just
+          // inherited from children -- that would flag every container)
+          // that renders at zero width or height while not deliberately
+          // hidden.
+          //
+          // Scoped to [data-hp-page-content] only, not body * -- confirmed
+          // live (first draft of this check) that the toolbar/header
+          // region has real, deliberately-collapsed-until-opened UI
+          // (closed dropdown menu items, unopened modals sitting in the
+          // DOM with height:0/clip rather than display:none, .sr-only
+          // accessibility text) that isn't display:none/visibility:hidden
+          // and isn't a layout bug either -- every one of those lives
+          // outside the actual page content this issue is about. Page
+          // content can still open its own modals/toasts (evidence
+          // viewer, confirm dialogs), so this stays scoped rather than
+          // trying to enumerate every legitimate closed-by-default class
+          // name, which would just be the same false-positive problem
+          // with extra steps.
+          //
+          // Two more false-positive classes found live, both excluded
+          // below: (1) <option> elements always report a zero rect in
+          // headless Chromium regardless of real visibility -- native
+          // <select> internals aren't laid out by the normal box model,
+          // a well-known browser-testing quirk, not a page bug; (2) an
+          // element can have display != none *on itself* while a
+          // display:none *ancestor* (e.g. events.html's per-row detail
+          // block, collapsed until expanded) still means it renders
+          // nothing -- getComputedStyle(el).display never reflects an
+          // ancestor's display, only offsetParent reliably does (null
+          // for both a display:none element and any of its descendants).
+          const clipped = await page.evaluate(() => {
+            const problems: string[] = [];
+            const root = document.querySelector("[data-hp-page-content]");
+            if (!root) return problems;
+            for (const el of root.querySelectorAll<HTMLElement>("*")) {
+              if (el.tagName === "OPTION") continue;
+              const style = getComputedStyle(el);
+              if (style.display === "none" || style.visibility === "hidden") continue;
+              if (el.offsetParent === null && style.position !== "fixed") continue;
+              const hasOwnText = Array.from(el.childNodes).some(
+                (n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? "").trim().length > 0,
+              );
+              if (!hasOwnText) continue;
+              const rect = el.getBoundingClientRect();
+              if (rect.width === 0 || rect.height === 0) {
+                const cls = el.className ? `.${String(el.className).split(" ").join(".")}` : "";
+                problems.push(`${el.tagName.toLowerCase()}${cls}: "${(el.textContent ?? "").trim().slice(0, 60)}"`);
+              }
+            }
+            return problems;
+          });
+          expect(clipped, `${route} at ${viewportName}/${theme} has zero-size element(s) with real text content in the page content area`).toEqual([]);
         });
       }
     }
