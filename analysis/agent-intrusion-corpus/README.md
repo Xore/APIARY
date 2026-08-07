@@ -16,9 +16,9 @@ campaign to APIARY's actual trust boundaries) is
 phase 4's preventive-control audits (Dockerfile digest pinning, an
 assessed ARKIME secret-delivery finding) are documented there, not here,
 since they touch the wider repo rather than this directory. Phases 1-5
-are now all done; the one remaining decision is whether/how to wire
-`docker-compose.agent-intrusion-worker.yml` into `deploy.yml` (see that
-file's own header and "What this directory does not do" below).
+are now all done, including deployment: `agent-intrusion-worker` is a
+real, running production service (deploy.yml's own "Synchronize
+honeypot-agent-intrusion-worker" step), not just built-and-tested.
 
 ## What's here
 
@@ -126,11 +126,15 @@ file's own header and "What this directory does not do" below).
   (repo root) — builds and runs `worker.py` as its own Dockge stack,
   modelled directly on `ml-worker/docker-compose.yml`'s own shape (joins
   `honeynet` as an external network, same hardening: `no-new-privileges`,
-  `cap_drop: [ALL]`, `read_only`). **Not yet wired into `deploy.yml`** —
-  unlike every other worker's compose file, which becomes an out-of-scope
-  question for this directory to answer where a new always-on service that
-  reads real production Elasticsearch continuously should be a
-  deliberate, separate step, not a side effect of this PR.
+  `cap_drop: [ALL]`, `read_only`). Deployed by `deploy.yml`'s own
+  "Synchronize honeypot-agent-intrusion-worker" step, the same #560
+  (`ip-enrichment-worker`) pattern: `build:` uses an absolute
+  `/opt/stacks/apiary/...` path, not a relative one, since deploy.yml
+  copies this compose file into its own stack directory
+  (`/opt/stacks/honeypot-agent-intrusion-worker/`), not the checkout
+  itself — a relative context would resolve against the wrong directory.
+  Also built/scanned in `containers.yml` and provisioned by
+  `scripts/install-homeserver.sh`'s `STACK_DEFS` for a fresh install.
 - **`tests/test_worker.py`** — a hand-rolled fake Elasticsearch client (no
   network, no real ES needed), unit tests for the ES-hit-to-event mapping
   and timestamp normalization (real `@timestamp` values are full ISO 8601
@@ -273,10 +277,11 @@ identity across a NAT/mesh boundary where its own address changes. Both
 limits carry through to `worker.py` unchanged -- it's the same function,
 called against real events instead of corpus ones.
 
-`docker-compose.agent-intrusion-worker.yml` is not wired into
-`deploy.yml` -- deliberately left as a separate decision (see its own
-entry in "What's here" above), not silently started against real
-production Elasticsearch as a side effect of this work.
+`docker-compose.agent-intrusion-worker.yml` is now wired into
+`deploy.yml` (deployed with explicit operator go-ahead, not silently as a
+side effect of an earlier PR -- see its own entry in "What's here" above)
+-- `agent-intrusion-campaigns` gets real production verdicts, not just
+whatever this repo's own tests write to a fake ES client.
 
 Phase 4's preventive-control audits (ARKIME secret delivery, image digest
 pinning — see `docs/agent-intrusion-threat-model.md`'s own "Follow-up
