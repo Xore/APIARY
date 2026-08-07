@@ -269,6 +269,17 @@ jobs:
           # ground truth, plus the campaign-level severity scoring proven
           # against the real merged 8-event campaign reaching "critical".
           python3 analysis/agent-intrusion-corpus/tests/test_criticality_rules.py -v
+      - name: Agent-intrusion campaign worker (#154 phase 5)
+        shell: bash
+        run: |
+          # Wires decode_correlate/campaign_correlator/criticality_rules
+          # against Elasticsearch-shaped data for real (a hand-rolled fake
+          # ES client, no network) -- including an end-to-end run of the
+          # real corpus through the worker's own correlate-then-score call
+          # sequence, proving the pipeline wiring itself is correct, not
+          # just each module independently.
+          python3 -m pip install -r analysis/agent-intrusion-corpus/requirements.txt
+          python3 analysis/agent-intrusion-corpus/tests/test_worker.py -v
       - name: Sandbox VNC bridge read-only enforcement (#805)
         shell: bash
         run: python3 sandbox/windows/vnc-bridge/tests/test_server.py
