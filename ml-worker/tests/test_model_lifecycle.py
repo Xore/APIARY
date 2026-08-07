@@ -35,6 +35,25 @@ def _lstm_sources(n=140):
     return [fixtures._cowrie_command_at(i * 2.0, f"cmd-{i}")["_source"] for i in range(n)]
 
 
+def _lstm_sources_with_shifted_tail(n_normal=150, n_shift=70):
+    """#174: n_normal tightly-spaced events (2.0s apart, same shape
+    _lstm_sources uses) followed by n_shift events on the same IP with
+    wildly larger, irregular gaps (minutes instead of seconds) -- a real
+    distribution shift in the one feature dimension this fixture varies
+    cleanly (inter_arrival_log, featurise_temporal's own 5th component),
+    landing squarely in the newest/holdout slice retrain() carves off. Used
+    to prove the acceptance gate has genuine discriminating power against
+    real (unmocked) _anomaly_rate output, not just that the reject/rollback
+    *mechanism* works once told to reject (see the monkeypatched tests
+    above, which already cover that separately)."""
+    events = [fixtures._cowrie_command_at(i * 2.0, f"cmd-{i}") for i in range(n_normal)]
+    last_offset = (n_normal - 1) * 2.0
+    for i in range(n_shift):
+        last_offset += 20_000 + i * 500  # minutes-to-hours gaps, not seconds
+        events.append(fixtures._cowrie_command_at(last_offset, f"cmd-shift-{i}"))
+    return [e["_source"] for e in events]
+
+
 class TestAcceptDecisionPolicy:
     """The acceptance policy in isolation from any real model fit -- pure
     function of two floats, so these are exact and deterministic rather
@@ -383,6 +402,35 @@ class TestLSTMRetrainAcceptanceGate:
     fine-tunes in place (optimiser.step() mutates self.net's weights
     directly) rather than fitting a separate candidate object -- these
     prove a rejected fine-tune is actually rolled back, not just ignored."""
+
+    def test_candidate_rate_has_real_discriminating_power_against_a_shifted_holdout(self, tmp_path):
+        """#174: proves _anomaly_rate's real (unmocked) output, not just the
+        reject/rollback mechanism the monkeypatched tests below already
+        cover. Before this fix, candidate_rate was scored against
+        candidate_threshold -- a value derived from THIS SAME cycle's own
+        just-fine-tuned training loss, so it was structurally ~always 0
+        regardless of holdout quality (confirmed live: every real production
+        retrain cycle read anomaly_rate_new=0.0, #174). Establish a clean
+        baseline model on normal data first, then retrain again on a batch
+        whose *holdout* slice is a real, meaningfully out-of-distribution
+        shift (see _lstm_sources_with_shifted_tail) -- the fixed gate must
+        now actually notice."""
+        # BiLSTMAE() has no internal seeding, and FINETUNE_EPOCHS=5 at
+        # LR_FINETUNE=1e-5 is a shallow nudge from a random init -- the
+        # discriminating-power *magnitude* is too init-dependent to assert
+        # on reliably unseeded (confirmed via a 20-seed sweep: only seeds
+        # 12 and 16 of 0-19 produced a nonzero rate at all). Seed 12 gives
+        # the strongest, most reliable signal (rate~=0.96 across repeats).
+        torch.manual_seed(12)
+        model = LSTMAEModel(model_dir=str(tmp_path))
+        baseline = model.retrain(_lstm_sources(n=150))
+        assert baseline.accepted is True
+
+        shifted = model.retrain(_lstm_sources_with_shifted_tail())
+        assert shifted.anomaly_rate_new > 0.0, (
+            "candidate_rate stayed exactly 0.0 against a genuinely shifted holdout -- "
+            "the self-referential-threshold bug (#174) has regressed"
+        )
 
     def test_first_ever_retrain_is_accepted_and_saves(self, tmp_path):
         model = LSTMAEModel(model_dir=str(tmp_path))
