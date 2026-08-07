@@ -7,12 +7,37 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
 	pdfPageWidth  = 595.0
 	pdfPageHeight = 842.0
 )
+
+// eventAppendixDetailCap (#885) bounds how much of a single event's
+// Alert/Detail/Command/Path field eventAppendix renders. No sensor capture
+// path in this repo caps captured text uniformly -- http-honeypot and
+// cisco-asa-honeypot cap their own request bodies, but e.g. cowrie's
+// interactive command capture does not -- so without a defensive cap here,
+// a single oversized captured field turns into a proportionally large
+// number of wrapped PDF lines/pages, in-process and synchronous, including
+// on reports_scheduler.go's unattended 30s tick.
+const eventAppendixDetailCap = 2000
+
+// truncateUTF8 cuts s to at most max bytes without splitting a multi-byte
+// rune in half (a naive s[:max] can, and escapePDFText's byte-range loop
+// would then render the split rune's trailing bytes as stray '?' glyphs).
+func truncateUTF8(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	s = s[:max]
+	for len(s) > 0 && !utf8.ValidString(s) {
+		s = s[:len(s)-1]
+	}
+	return s
+}
 
 type pdfPage struct {
 	content bytes.Buffer
@@ -682,6 +707,9 @@ func (w *pdfReportWriter) eventAppendix(events []storedEvent, appendixLimit int)
 	w.paragraph(fmt.Sprintf("Showing the newest %d of %d matching records. Use the dashboard Event Explorer or Elasticsearch export for the complete machine-readable dataset.", limit, len(events)))
 	for index, event := range events[:limit] {
 		detail := firstNonEmpty(event.Alert, event.Detail, event.Command, event.Path, "event")
+		if len(detail) > eventAppendixDetailCap {
+			detail = truncateUTF8(detail, eventAppendixDetailCap) + " …(truncated)"
+		}
 		head := strings.Join([]string{event.Time, event.Sensor, event.SrcIP, event.Port}, "  |  ")
 		lines := wrapPDFText(detail, 88)
 		height := 25 + float64(len(lines))*10

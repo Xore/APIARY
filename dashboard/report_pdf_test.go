@@ -56,6 +56,36 @@ func TestRenderSecurityReportPDF(t *testing.T) {
 	}
 }
 
+// TestEventAppendixTruncatesOversizedField (#885): a single event field with
+// no upstream size cap (e.g. cowrie's free-text command capture) must not be
+// allowed to inflate the appendix into a proportionally huge number of PDF
+// lines/pages -- eventAppendixDetailCap bounds it defensively regardless of
+// what any given sensor's own capture path lets through.
+func TestEventAppendixTruncatesOversizedField(t *testing.T) {
+	now := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
+	data := sampleReportData(now)
+	oversized := strings.Repeat("A", eventAppendixDetailCap*5)
+	data.Events = []storedEvent{{
+		when: now, Time: now.Format(time.RFC3339), Sensor: "cowrie", SrcIP: "203.0.113.42", Port: "22",
+		Command: oversized,
+	}}
+	data.Summary.Events = 1
+
+	body := renderSecurityReportPDF(data)
+	// PDF string literals escape "(" and ")" with a backslash (escapePDFText),
+	// so the marker survives as \(truncated\) in the raw stream -- search
+	// without the parens to match either form.
+	if !bytes.Contains(body, []byte("truncated")) {
+		t.Fatal("expected the oversized field to be marked as truncated in the rendered PDF")
+	}
+	// Loosely bounds the page count: untruncated, a 5x-cap field wraps into
+	// roughly 5x as many appendix lines/pages as a capped one -- this just
+	// needs to prove the cap actually limited growth, not pin an exact count.
+	if pages := strings.Count(string(body), "/Type /Page "); pages > 10 {
+		t.Fatalf("expected the truncation cap to keep this to a small page count, got %d pages", pages)
+	}
+}
+
 // TestRenderThemedReportPDF proves the theme palettes and the configurable
 // branding flow into the rendered document: the light theme paints its page
 // background from the canonical Xore/theme light tokens, custom header /
