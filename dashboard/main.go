@@ -180,6 +180,10 @@ func main() {
 	// is nil (Elasticsearch not configured), and every observe() call site
 	// already treats a nil alertManager as "alerting disabled".
 	s.alerts = newAlertManager(s.es, cooldown)
+	// #914: same nil-when-unconfigured posture as s.alerts above -- every
+	// call site (serveIPBlockAction, serveManualBlackholeExport) already
+	// treats a nil ipBlocks as "manual blocking disabled".
+	s.ipBlocks = newIPBlockManager(s.es)
 	s.intelligence = &intelligenceStore{path: getenv("INTELLIGENCE_STATE_FILE", "/state/intelligence.json"), es: s.es}
 	s.settings = newSettingsService(
 		getenv("DASHBOARD_CONFIG_FILE", "/state/dashboard-config.json"),
@@ -400,6 +404,8 @@ func main() {
 	http.HandleFunc("/api/github-analysis", s.serveGitHubAnalysisAPI)
 	http.HandleFunc("/api/github-analysis/", s.serveGitHubAnalysisAPI)
 	http.HandleFunc("/export/github-analysis/", s.serveGitHubAnalysisExport)
+	http.HandleFunc("/export/portbridge-manual-blackhole.txt", s.serveManualBlackholeExport)
+	http.HandleFunc("/investigate/ip/block", s.serveIPBlockAction)
 	http.HandleFunc("/api/payload-workbench/registry/", s.serveWorkbenchRegistry)
 	http.HandleFunc("/api/payload-workbench/recipes", s.serveWorkbenchRecipes)
 	http.HandleFunc("/api/payload-workbench/runs", s.serveWorkbenchRuns)

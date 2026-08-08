@@ -188,3 +188,34 @@ func correlateFlossSandboxIOCs(floss *ghidraFloss, sandboxRuns []sandboxResult) 
 	c.UNCPaths = correlateIOCSet(flossUNCs, sandboxStaticUNCs, nil)
 	return c
 }
+
+// confirmedMaliciousIPs (#914) scans every Ghidra result with a real
+// Windows-sandbox run and returns the union of every ConfirmedAtRuntime IP
+// across all of them -- the same per-sample floss/sandbox correlation
+// ghidraData() already computes for a single Detail row, run over the whole
+// result set instead. Purely informational context on /investigate/ip/{ip}
+// (docs/dashboard-manual-ip-block-design.md decision 1: the manual block
+// action itself is not gated on this, an operator's own judgment is), not
+// hot-path code, so it is computed fresh on every call rather than cached --
+// same reasoning correlateFlossSandboxIOCs' own doc comment already gives.
+func confirmedMaliciousIPs() map[string]bool {
+	out := map[string]bool{}
+	for _, res := range loadGhidraResults() {
+		runs := matchingSandboxRuns(res.SHA256)
+		if len(runs) == 0 {
+			continue
+		}
+		c := correlateFlossSandboxIOCs(res.Floss, runs)
+		if c == nil {
+			continue
+		}
+		for _, ip := range c.IPs.ConfirmedAtRuntime {
+			out[ip] = true
+		}
+	}
+	return out
+}
+
+func ipIsConfirmedMalicious(ip string) bool {
+	return confirmedMaliciousIPs()[ip]
+}

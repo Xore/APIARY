@@ -36,6 +36,12 @@
 // the list itself over the network — that's portbridge-blackhole-refresh.sh's
 // job, gated behind the "blackhole" compose profile.
 //
+// BLACKHOLE_MANUAL_LIST (#914), if set, names a second such file for
+// operator-triggered blocks made from the dashboard, unioned with
+// BLACKHOLE_LIST above. Kept fresh by a separate sidecar,
+// portbridge-manual-blackhole-refresh.sh — see blackhole.go's own doc
+// comment for why this is two files, not one.
+//
 // Stdlib only; compiles to a tiny static binary.
 package main
 
@@ -218,7 +224,7 @@ func main() {
 		os.Exit(1)
 	}
 	cl := newConnLogger(os.Getenv("CONN_LOG"))
-	bh := newBlackhole(os.Getenv("BLACKHOLE_LIST"))
+	bh := newBlackhole(os.Getenv("BLACKHOLE_LIST"), os.Getenv("BLACKHOLE_MANUAL_LIST"))
 
 	var wg sync.WaitGroup
 	for _, r := range rules {

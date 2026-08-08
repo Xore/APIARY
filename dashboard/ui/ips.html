@@ -92,6 +92,19 @@
           <a class="chip" href="/ips">&larr; attack sources</a>
           <a class="chip" href="/events?ip={{.IP | urlquery}}">all matching events</a>
           <a class="chip" href="/export/events.csv?ip={{.IP | urlquery}}">export CSV &darr;</a>
+          {{if .ConfirmedMalicious}}<span class="chip badge badge--danger" title="A Windows sandbox run made a network connection to this IP -- floss/sandbox IOC correlation, #680">confirmed malicious (sandbox)</span>{{end}}
+        </div>
+
+        {{/* #914: manual IP block -- any IP on this page, not gated on
+             ConfirmedMalicious above (that badge is context only). See
+             docs/dashboard-manual-ip-block-design.md. */}}
+        <div class="filters" id="attacker-block-actions">
+          {{if .Block.Active}}
+          <span class="chip badge badge--danger">blocked{{if .Block.BlockedBy}} by {{.Block.BlockedBy}}{{end}}{{if not .Block.ExpiresAt.IsZero}}, expires <span data-hp-utc="{{.Block.ExpiresAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.Block.ExpiresAt.Format "2006-01-02 15:04"}}</span>{{end}}</span>
+          <form method="post" action="/investigate/ip/block"><input type="hidden" name="ip" value="{{.IP}}"><input type="hidden" name="blocked" value="false"><input type="hidden" name="return" value="/investigate/ip/{{.IP}}"><button class="btn btn-sm btn-secondary" type="submit">unblock</button></form>
+          {{else}}
+          <form method="post" action="/investigate/ip/block" class="inline-form"><input type="hidden" name="ip" value="{{.IP}}"><input type="hidden" name="blocked" value="true"><input type="hidden" name="return" value="/investigate/ip/{{.IP}}"><label for="attacker-block-expires">expire after</label> <input type="number" id="attacker-block-expires" name="expires_days" min="1" placeholder="never" class="hp-input" style="width:6em"> <span>day(s)</span> <button class="btn btn-sm btn-danger" type="submit" title="Drop this IP's connections at portbridge going forward (#268); does not retroactively affect anything already logged">block</button></form>
+          {{end}}
         </div>
 
         <div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:gap-3 tw:mb-6" id="attacker-kpis">
