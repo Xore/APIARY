@@ -83,6 +83,19 @@ http:
         options: modern
       middlewares: [security-headers, rate-limit-auth]
 
+    # Keycloak's admin SPA embeds this narrowly scoped compatibility endpoint
+    # from the public issuer hostname. The general DENY header would block that
+    # cross-subdomain frame, so this more-specific router removes XFO and uses
+    # CSP to allow only Keycloak itself and the protected admin hostname.
+    keycloak-3p-cookies:
+      rule: "Host(`auth.honeypot.example`) && PathPrefix(`/realms/apiary/protocol/openid-connect/3p-cookies/`)"
+      priority: 120
+      entryPoints: [websecure]
+      service: keycloak-candidate
+      tls:
+        options: modern
+      middlewares: [security-headers-keycloak-frame, rate-limit-auth]
+
     keycloak-admin:
       rule: "Host(`keycloak-admin.honeypot.example`)"
       entryPoints: [websecure]
@@ -552,6 +565,19 @@ http:
         stsIncludeSubdomains: true
         stsPreload: true
         customResponseHeaders:
+          X-Powered-By: ""
+          Server: ""
+
+    security-headers-keycloak-frame:
+      headers:
+        contentTypeNosniff: true
+        referrerPolicy: "strict-origin-when-cross-origin"
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        contentSecurityPolicy: "frame-ancestors 'self' https://keycloak-admin.honeypot.example; object-src 'none'"
+        customResponseHeaders:
+          X-Frame-Options: ""
           X-Powered-By: ""
           Server: ""
 
