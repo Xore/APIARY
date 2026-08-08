@@ -584,7 +584,7 @@ services:
       OAUTH2_PROXY_CLIENT_ID: apiary-dashboard
       OAUTH2_PROXY_CLIENT_SECRET_FILE: /run/oidc-secrets/client-secret
       OAUTH2_PROXY_COOKIE_SECRET_FILE: /run/oidc-secrets/cookie-secret
-      OAUTH2_PROXY_REDIRECT_URL: https://dashboard.${OIDC_PUBLIC_DOMAIN:?set OIDC_PUBLIC_DOMAIN}/oauth2/callback
+      OAUTH2_PROXY_REDIRECT_URL: https://honeypot.${OIDC_PUBLIC_DOMAIN:?set OIDC_PUBLIC_DOMAIN}/oauth2/callback
       OAUTH2_PROXY_ALLOWED_ROLES: apiary-dashboard:access
       OAUTH2_PROXY_COOKIE_NAME: __Host-apiary-dashboard
       OAUTH2_PROXY_UPSTREAMS: http://traefik:8082

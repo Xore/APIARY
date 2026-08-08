@@ -27,7 +27,7 @@ jq -e '
     .attributes["pkce.code.challenge.method"] == "S256" and
     (if .clientId == "apiary-dashboard" then (.redirectUris | length == 2) else (.redirectUris | length == 1) end) and
     (all(.redirectUris[]; startswith("https://") and (contains("*") | not))) and
-    (if .clientId == "apiary-dashboard" then (.webOrigins | length == 2) else (.webOrigins | length == 1) end) and
+    (.webOrigins | length == 1) and
     (all(.webOrigins[]; startswith("https://") and (contains("*") | not)))
   )) and
   (has("users") | not) and

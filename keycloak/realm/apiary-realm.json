@@ -180,19 +180,18 @@
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
       "frontchannelLogout": true,
-      "rootUrl": "https://dashboard.example.invalid",
-      "baseUrl": "https://dashboard.example.invalid/",
+      "rootUrl": "https://honeypot.example.invalid",
+      "baseUrl": "https://honeypot.example.invalid/",
       "redirectUris": [
-        "https://dashboard.example.invalid/oauth2/callback",
+        "https://honeypot.example.invalid/oauth2/callback",
         "https://honeypot.example.invalid/auth/callback"
       ],
       "webOrigins": [
-        "https://dashboard.example.invalid",
         "https://honeypot.example.invalid"
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "https://dashboard.example.invalid/*##https://honeypot.example.invalid/*"
+        "post.logout.redirect.uris": "https://honeypot.example.invalid/*"
       },
       "defaultClientScopes": ["web-origins", "acr", "roles", "profile", "email"],
       "optionalClientScopes": []
