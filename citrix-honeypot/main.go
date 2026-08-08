@@ -309,6 +309,17 @@ func main() {
 	srv := &http.Server{
 		Handler:  &handler{log: log, port: port},
 		ErrorLog: stdlog.New(healthcheckNoiseFilter{}, "", 0),
+		// #879: unset (zero-value) timeouts left every phase of a connection
+		// unbounded -- a slow-dripped request line/headers/body, or an idle
+		// keep-alive connection, pinned a goroutine and file descriptor
+		// indefinitely. The request body is already size-capped
+		// (io.LimitReader, see handler.ServeHTTP) but that bounds bytes, not
+		// time; nothing here holds a response open on purpose, so all four
+		// timeouts can be bounded tightly.
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
 		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
 			// c is the *tls.Conn tlsLn.Accept() produced; NetConn() unwraps
 			// back to the ja3Conn ja3Listener.Accept() returned it from, so
