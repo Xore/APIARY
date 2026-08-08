@@ -828,7 +828,7 @@ func (d *pdfDocument) bytes() []byte {
 	objects[3] = []byte("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>")
 	// Portable sans display fallback for APIARY's Space Grotesk heading role.
 	objects[4] = []byte("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>")
-	objects[pdfWatermarkObjectNumber-1] = append(pdfWatermarkImageObject(), append(watermarkGrayData, []byte("\nendstream")...)...)
+	objects[pdfWatermarkObjectNumber-1] = append(pdfWatermarkImageObject(), append(watermarkMaskData, []byte("\nendstream")...)...)
 	objects[pdfWatermarkGStateObjectNumber-1] = pdfWatermarkGStateObject()
 	objects[pdfHeaderMarkObjectNumber-1] = append(pdfHeaderMarkImageObject(), append(pdfHeaderMarkData, []byte("\nendstream")...)...)
 	for index, page := range d.pages {

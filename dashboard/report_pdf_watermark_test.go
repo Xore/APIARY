@@ -26,7 +26,7 @@ func TestReportPDFWatermarkPresent(t *testing.T) {
 		body := renderThemedReportPDF(data, theme.pdf, defaultPDFBranding())
 		text := string(body)
 
-		if !strings.Contains(text, "/Subtype /Image") || !strings.Contains(text, "/ColorSpace /DeviceGray") {
+		if !strings.Contains(text, "/Subtype /Image") || !strings.Contains(text, "/ImageMask true") {
 			t.Fatalf("%s: watermark Image XObject not found", theme.name)
 		}
 		if !strings.Contains(text, "/Type /ExtGState") {
@@ -89,23 +89,23 @@ func TestReportPDFHeaderMarkPresent(t *testing.T) {
 	}
 }
 
-// TestWatermarkGrayDataDecompresses proves the embedded asset is valid
+// TestWatermarkMaskDataDecompresses proves the embedded asset is valid
 // zlib/FlateDecode data of exactly the declared dimensions -- a corrupt or
 // mis-sized embed would still compile (it's just a []byte), but would
 // produce a PDF no viewer can actually decode the image from.
-func TestWatermarkGrayDataDecompresses(t *testing.T) {
-	r, err := zlib.NewReader(bytes.NewReader(watermarkGrayData))
+func TestWatermarkMaskDataDecompresses(t *testing.T) {
+	r, err := zlib.NewReader(bytes.NewReader(watermarkMaskData))
 	if err != nil {
-		t.Fatalf("watermarkGrayData is not valid zlib data: %v", err)
+		t.Fatalf("watermarkMaskData is not valid zlib data: %v", err)
 	}
 	defer r.Close()
 	raw, err := io.ReadAll(r)
 	if err != nil {
-		t.Fatalf("failed to decompress watermarkGrayData: %v", err)
+		t.Fatalf("failed to decompress watermarkMaskData: %v", err)
 	}
-	want := watermarkImageWidth * watermarkImageHeight
+	want := watermarkImageWidth * watermarkImageHeight / 8
 	if len(raw) != want {
-		t.Fatalf("decompressed watermark is %d bytes, want %d (%dx%d 8-bit grayscale)",
+		t.Fatalf("decompressed watermark is %d bytes, want %d (%dx%d 1-bit mask)",
 			len(raw), want, watermarkImageWidth, watermarkImageHeight)
 	}
 }

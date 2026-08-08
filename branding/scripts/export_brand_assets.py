@@ -106,20 +106,31 @@ def compact_mark(source: Image.Image, color: tuple[int, int, int], size: int = 6
     return result
 
 
-def export_pdf_header_mark(mark: Image.Image) -> None:
-    """Write a compact 1-bit PDF stencil mask derived from the approved mark."""
-    alpha = mark.getchannel("A")
+def export_pdf_mask(image: Image.Image, path: Path, threshold: int = 64) -> None:
+    """Write transparent alpha geometry as a compressed one-bit PDF stencil."""
+    alpha = image.getchannel("A")
     packed = bytearray()
     for y in range(alpha.height):
         for x0 in range(0, alpha.width, 8):
             value = 0
             for bit in range(8):
                 x = x0 + bit
-                if x < alpha.width and alpha.getpixel((x, y)) >= 64:
+                if x < alpha.width and alpha.getpixel((x, y)) >= threshold:
                     value |= 1 << (7 - bit)
             packed.append(value)
     PDF_ASSETS.mkdir(parents=True, exist_ok=True)
-    (PDF_ASSETS / "apiary-header-mark.maskdata").write_bytes(zlib.compress(bytes(packed), level=9))
+    path.write_bytes(zlib.compress(bytes(packed), level=9))
+
+
+def export_pdf_header_mark(mark: Image.Image) -> None:
+    """Write the compact 64px PDF header stencil."""
+    export_pdf_mask(mark, PDF_ASSETS / "apiary-header-mark.maskdata")
+
+
+def export_pdf_watermark(mark: Image.Image) -> None:
+    """Write the detailed emblem without the rectangular raster background."""
+    fitted = contain(mark, (360, 360), 18)
+    export_pdf_mask(fitted, PDF_ASSETS / "watermark.maskdata", threshold=32)
 
 
 def export_logos() -> dict[str, Image.Image]:
@@ -232,6 +243,7 @@ def main() -> None:
     ensure_dirs()
     assets = export_logos()
     export_favicons()
+    export_pdf_watermark(assets["mark_dark"])
     export_social(assets)
     print("Exported APIARY brand assets to", BRAND / "assets")
 
