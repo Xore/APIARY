@@ -12,13 +12,50 @@ GitHub publication is deliberately absent from `Run all`. The workbench links to
 
 ## Analyzer registry
 
-| ID | Applicability | Adapter | Concurrency |
-|---|---|---|---|
-| `deterministic` | every captured payload | immediate bounded local analysis | CPU |
-| `ghidra` | executable, library, or unknown binary | existing Ghidra request spool | shared GPU |
-| `linux-sandbox` | dynamically supported non-Windows payload | existing Linux web-request spool | Linux KVM |
-| `windows-sandbox` | dynamically supported Windows payload | existing Windows web-request spool | Windows KVM |
-| `revdeck` | code artifacts | independent spool (`REVDECK_REQUEST_DIR`/`REVDECK_RESULTS_DIR`), drained by `drain_revdeck()` -- no dependency on the Ghidra REST job (#78/#276) | shared GPU |
+Seven analyzer IDs, one server-computed `workbenchAnalyzer` registry
+(`dashboard/workbench_domain.go`). A run selects 1-5 of them; the server
+rejects zero selections, more than 5, an unknown ID, or a duplicate.
+
+| ID | Applicability | Adapter | Result link | Concurrency class |
+|---|---|---|---|---|
+| `deterministic` | every captured payload | immediate bounded local analysis | `/payload-analysis/{sha256}` | CPU |
+| `ghidra` | executable, library, or unknown binary | existing Ghidra request spool | `/ghidra/{sha256}` | shared GPU |
+| `linux-sandbox` | dynamically supported non-Windows payload | existing Linux web-request spool | `/sandbox/{job}` | Linux KVM |
+| `windows-sandbox` | dynamically supported Windows payload | existing **isolated** Windows web-request spool | `/sandbox/{job}` | Windows KVM |
+| `windows-ghosts` | dynamically supported Windows payload | separate, **WAN-permitted** GHOSTS-driven Windows spool | `/sandbox/{job}` | Windows/GHOSTS KVM |
+| `revdeck` | code artifacts | independent spool (`REVDECK_REQUEST_DIR`/`REVDECK_RESULTS_DIR`), drained by `drain_revdeck()` -- no dependency on the Ghidra REST job (#78/#276) | `/revdeck/{sha256}` | shared GPU |
+| `cape` | dynamically supported Windows payload | independent CAPE-managed spool, its own guest/bridge/API worker and golden image | `/cape/{sha256}` | CAPE KVM |
+
+**`windows-ghosts` is loud on purpose, not just another sandbox row.**
+Every other dynamic route (`linux-sandbox`, `windows-sandbox`, `cape`) is
+air-gapped — FakeNet/INetSim or an equivalent answers everything, so C2
+checkins and second-stage downloads go nowhere real. `windows-ghosts`
+inverts that deliberately: its guest reaches the real internet (only
+LAN/RFC1918 is firewalled off), for the cases where GHOSTS' persona
+realism against real infrastructure is the actual point of the run. The
+registry's own `DisplayName`/`Description` for this one carry an explicit
+⚠ warning rather than reading like an interchangeable sandbox option, and
+it's the one route this document calls out by name rather than folding
+into "the sandbox routes" — see ["Sandbox submission, detonation, and
+result return"](ARCHITECTURE.md#sandbox-submission-detonation-and-result-return)
+in the architecture doc for how every dynamic route's network posture
+compares side by side.
+
+`cape` is a second, independent Windows detonation route alongside
+`windows-sandbox` and `windows-ghosts` — its own guest, network, and golden
+image, purpose-built for debugger-class time evasion (long sleeps, `rdtsc`
+checks) that persona realism alone cannot defeat. As of this writing its
+golden image doesn't exist yet, so it always reports "spool is not
+configured" — an honest unavailable, not a bug, the same story
+`ghidraConfigured`/`revdeckConfigured` already tell until their own
+backends land.
+
+The registry's declared `Concurrency` class is per-run metadata attached to
+each child record, not (today) a semaphore this Go process itself enforces
+— actual mutual exclusion for the KVM-backed routes lives at the host
+worker/libvirt level. Every current analyzer is local-only (`LocalOnly:
+true` on all seven) — nothing in this registry calls out to a third-party
+service.
 
 Availability and applicability are computed on the server. An unavailable or incompatible child is retained as `skipped` with a reason, so a parent run explains what did not execute. Model drift is advisory and never changes this decision: deterministic analysis and ingestion continue when the model-status adapter is unavailable or reports drift.
 
@@ -38,7 +75,7 @@ sequenceDiagram
   participant Op as authenticated operator
   participant DB as dashboard
   participant ES as Elasticsearch<br/>dashboard-workbench-runs-v1
-  participant Spool as existing analyzer spools<br/>(Ghidra / sandbox / Rev·Deck)
+  participant Spool as existing analyzer spools<br/>(Ghidra / Linux+Windows+GHOSTS sandbox /<br/>Rev·Deck / CAPE) -- each its own,<br/>separate spool and trust class
 
   Op->>DB: submit recipe or typed selection for {sha256}
   DB->>DB: compute idempotency digest<br/>(owner + hash + recipe rev + selection)
