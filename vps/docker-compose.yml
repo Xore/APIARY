@@ -64,12 +64,6 @@ services:
       - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
       - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
       - ./traefik/certs:/etc/traefik/certs:ro
-      - type: bind
-        source: ${KEYCLOAK_ADMIN_HTPASSWD_FILE:-./secrets/keycloak-admin.htpasswd}
-        target: /run/traefik-secrets/keycloak-admin.htpasswd
-        read_only: true
-        bind:
-          create_host_path: false
     networks:
       - proxy
       - oidc-kibana

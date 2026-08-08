@@ -7,8 +7,8 @@ Status: accepted Phase 0 decision record for #976 and epic #986.
 Keycloak and PostgreSQL run in the Dockge-managed `honeypot-keycloak` stack on
 the homeserver. Public TLS terminates at VPS Traefik, which reaches Keycloak and
 protected applications only over WireGuard bridges. `auth.example.invalid` is the
-OIDC issuer. `keycloak-admin.example.invalid` is the administrator console and has
-an additional file-backed bcrypt BasicAuth gate at Traefik.
+OIDC issuer. `keycloak-admin.example.invalid` is the administrator console;
+Keycloak's realm-admin login and mandatory MFA protect it.
 
 The dashboard is a confidential native OIDC client. Every application without
 acceptable native OIDC gets its own isolated `oauth2-proxy` instance and its
@@ -35,7 +35,7 @@ pinned Keycloak runtime does not provide a recovery-code required-action factory
 | `traefik.*` | Traefik read-only dashboard | Isolated gateway | `traefik-dashboard` | `admin` | Gateway fronts `api@internal`; callback is excluded from recursive auth. |
 | `dockge.*` | Dockge administrator UI | Isolated gateway | `dockge` | `admin` | Gateway-only route; WebSockets must pass. Dockge's own authorization remains enabled when supported. |
 | `auth.example.invalid` | OIDC login, discovery, JWKS, account console | Direct Keycloak | n/a | public protocol endpoints; authenticated account actions | Rate-limited edge route to the Keycloak WireGuard bridge. |
-| `keycloak-admin.example.invalid` | Keycloak administration | Direct Keycloak plus Traefik BasicAuth | n/a | Keycloak administrator + MFA | Entire hostname is protected by the outer BasicAuth middleware before Keycloak. |
+| `keycloak-admin.example.invalid` | Keycloak administration | Direct Keycloak | n/a | Keycloak administrator + MFA | Keycloak owns authentication; HTTP Basic would conflict with the SPA's Bearer API calls. |
 | decoy/static/API/status/file/blog hosts currently lacking `forward-auth` | Public honeypot or explicitly application-owned auth | Public / unchanged | none | none | Never attach operator SSO merely because the hostname exists. Public collection must remain independent of IdP availability. |
 
 The deployment validator must fail when a protected router has neither native

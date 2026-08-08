@@ -38,11 +38,9 @@ The VPS route must target the WireGuard endpoint, preserve the original host,
 set reviewed `X-Forwarded-*` headers, and never expose port 9000.
 
 The administrator console uses `https://keycloak-admin.example.invalid`, not the
-public issuer hostname. VPS Traefik applies file-backed bcrypt BasicAuth and a
-tighter rate limit to the entire admin hostname before forwarding to Keycloak.
-Keycloak then independently requires an administrator account and MFA. Create
-the outer credential interactively on the VPS as documented in
-`vps/.env.example`; never commit the htpasswd file or reuse a Keycloak password.
+public issuer hostname. VPS Traefik applies a tighter rate limit, while Keycloak
+requires a realm-administrator account and MFA. Do not add HTTP Basic in front
+of the console: its SPA uses the `Authorization` header for Bearer API calls.
 
 ## Backup and restore
 

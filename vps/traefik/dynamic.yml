@@ -102,9 +102,9 @@ http:
       service: keycloak-candidate
       tls:
         options: modern
-      # BasicAuth is an outer public-edge gate. Keycloak's own administrator
-      # authentication and mandatory MFA remain the authorization boundary.
-      middlewares: [security-headers, keycloak-admin-basic-auth, rate-limit-keycloak-admin]
+      # Keycloak's realm-admin login and mandatory MFA are the authorization
+      # boundary. HTTP Basic cannot coexist with the SPA's Bearer API calls.
+      middlewares: [security-headers, rate-limit-keycloak-admin]
 
     static-site:
       rule: "Host(`www.honeypot.example`) || Host(`honeypot.example`) || Host(`static.honeypot.example`)"
@@ -620,19 +620,12 @@ http:
     rate-limit-keycloak-admin:
       rateLimit:
         # The React admin console fetches several dozen modules, fonts, and
-        # localization resources concurrently during bootstrap. BasicAuth is
-        # evaluated first, so this allowance applies only after the outer gate.
+        # localization resources concurrently during bootstrap.
         average: 20
         burst: 100
         period: 1s
         sourceCriterion:
           requestHeaderName: CF-Connecting-IP
-
-    keycloak-admin-basic-auth:
-      basicAuth:
-        usersFile: /run/traefik-secrets/keycloak-admin.htpasswd
-        realm: "APIARY Keycloak administration"
-        removeHeader: true
 
 tcp:
   routers:
