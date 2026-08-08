@@ -35,7 +35,7 @@
           <div class="card wide">
             {{if .Anomalies}}
             <table class="recent data-table">
-              <thead><tr><th>time</th><th>severity</th><th>score</th><th>source ip</th><th>model scores</th><th>explanation</th><th>source event</th></tr></thead>
+              <thead><tr><th>time</th><th>severity</th><th>score</th><th>source ip</th><th>model scores</th><th>explanation</th><th>source event</th><th>status</th><th>action</th></tr></thead>
               <tbody>
                 {{range .Anomalies}}<tr>
                   <td{{if .Timestamp}} data-hp-utc="{{.Timestamp}}"{{end}}>{{.Timestamp}}</td>
@@ -45,6 +45,8 @@
                   <td class="v"><small>iso {{printf "%.2f" (index .ModelScores "isolation_forest")}} &bull; lstm {{printf "%.2f" (index .ModelScores "lstm_ae")}} &bull; hbos {{printf "%.2f" (index .ModelScores "hbos")}}</small></td>
                   <td class="v">{{.Explanation}}</td>
                   <td class="v">{{if .SourceLink}}<a href="{{.SourceLink}}">view source</a>{{else}}<span class="tw:text-muted">&mdash;</span>{{end}}</td>
+                  <td class="v">{{if .Acknowledged}}<span class="badge badge--muted">acknowledged{{if .AckedBy}} by {{.AckedBy}}{{end}}</span>{{else}}<span class="badge badge--warning">open</span>{{end}}</td>
+                  <td class="v">{{if .AnomalyID}}<form method="post" action="/ml-anomalies/ack"><input type="hidden" name="key" value="{{.AnomalyID}}"><input type="hidden" name="ack" value="{{if .Acknowledged}}false{{else}}true{{end}}"><input type="hidden" name="return" value="/ml-anomalies"><button class="btn btn-sm btn-secondary" type="submit">{{if .Acknowledged}}reopen{{else}}acknowledge{{end}}</button></form>{{else}}<span class="tw:text-muted">&mdash;</span>{{end}}</td>
                 </tr>{{end}}
               </tbody>
             </table>

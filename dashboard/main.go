@@ -180,6 +180,10 @@ func main() {
 	// is nil (Elasticsearch not configured), and every observe() call site
 	// already treats a nil alertManager as "alerting disabled".
 	s.alerts = newAlertManager(s.es, cooldown)
+	// #913: same nil-when-unconfigured posture as s.alerts above -- every
+	// call site (applyMLAnomalyAcks, serveMLAnomalyAck) already treats a nil
+	// mlAnomalyAcks as "acknowledgment disabled".
+	s.mlAnomalyAcks = newMLAnomalyAckManager(s.es)
 	s.intelligence = &intelligenceStore{path: getenv("INTELLIGENCE_STATE_FILE", "/state/intelligence.json"), es: s.es}
 	s.settings = newSettingsService(
 		getenv("DASHBOARD_CONFIG_FILE", "/state/dashboard-config.json"),
@@ -631,6 +635,7 @@ func main() {
 	http.HandleFunc("/ghidra/submit", s.serveGhidraSubmit)
 	http.HandleFunc("/gpu-queue/abort", serveGPUQueueAbort)
 	http.HandleFunc("/github-analysis/submit", s.serveGitHubAnalysisSubmit)
+	http.HandleFunc("/ml-anomalies/ack", s.serveMLAnomalyAck)
 	http.HandleFunc("/payload-workbench", func(w http.ResponseWriter, r *http.Request) {
 		s.serveWorkbenchIndex(w, r, tmpl)
 	})
