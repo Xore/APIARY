@@ -18,9 +18,11 @@ traps hit on the first live run — read it before trusting the script blind,
 and definitely before doing any of this by hand on the VPS side, which the
 script doesn't touch.
 
-Since #258 split the stack into ~13 independent Dockge projects
+Since #258 split the stack into ~19 independent Dockge projects
 (`honeypot-init`, `honeypot-conpot`, `honeypot-cowrie`, `honeypot-multipot`,
-`honeypot-http`, `honeypot-dnp3`, `honeypot-dionaea`,
+`honeypot-http`, `honeypot-dnp3`, `honeypot-dionaea`, `honeypot-dicompot`,
+`honeypot-dns-honeypot`, `honeypot-citrix`, `honeypot-cisco-asa`,
+`honeypot-rdp`, `honeypot-endlessh`,
 `honeypot-payload-analysis`, `honeypot-tanner`, `honeypot-elk`,
 `honeypot-dashboard`, `honeypot-utilities`, plus the now-empty
 `APIARY`), a full reset is no longer "stop the stack, `docker compose
@@ -79,7 +81,9 @@ ssh homeserver
 for s in honeypot-elk honeypot-dashboard honeypot-utilities \
          honeypot-payload-analysis honeypot-dionaea honeypot-tanner \
          honeypot-dnp3 honeypot-http honeypot-multipot honeypot-cowrie \
-         honeypot-conpot honeypot-init; do
+         honeypot-conpot honeypot-dicompot honeypot-dns-honeypot \
+         honeypot-citrix honeypot-cisco-asa honeypot-rdp \
+         honeypot-endlessh honeypot-init; do
   (cd /opt/stacks/$s && docker compose -f compose.yml down)
 done
 ```
@@ -147,6 +151,8 @@ it's up).
 ```bash
 for s in honeypot-conpot honeypot-cowrie honeypot-multipot honeypot-http \
          honeypot-dnp3 honeypot-dionaea honeypot-tanner \
+         honeypot-dicompot honeypot-dns-honeypot honeypot-citrix \
+         honeypot-cisco-asa honeypot-rdp honeypot-endlessh \
          honeypot-payload-analysis honeypot-utilities honeypot-dashboard; do
   (cd /opt/stacks/$s && docker compose -f compose.yml up -d)
 done

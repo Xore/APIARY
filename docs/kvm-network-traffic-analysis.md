@@ -48,11 +48,12 @@ part of `docker-compose.yml` and must never be merged into it.
   early and tells you nothing, so answering everything is what puts the whole
   C2 conversation into the logs. Anything the sample downloads lands in
   `fakenet_logs/`.
-- **Zeek** and **Suricata** sniff the bridge from the *host* side with
-  `network_mode: host` and `NET_ADMIN`/`NET_RAW`. That vantage point is the
-  only one that sees traffic addressed to something nothing answers on. It is
-  also a genuine privilege grant, which is why only these two sniffers have it
-  — INetSim and mitmproxy run with all capabilities dropped.
+- **Zeek**, **Suricata**, and **tcpdump** sniff the bridge from the *host*
+  side with `network_mode: host` and `NET_ADMIN`/`NET_RAW`. That vantage
+  point is the only one that sees traffic addressed to something nothing
+  answers on. It is also a genuine privilege grant, which is why only these
+  three sniffers have it — INetSim and mitmproxy run with all capabilities
+  dropped.
 - **tcpdump** writes `network.pcap`. Zeek's logs are derived evidence; the pcap
   is the primary record and the one thing you cannot reconstruct if a parser
   turns out to have been wrong about a protocol.
@@ -159,7 +160,9 @@ for a run the worker does not know about.
   sandbox captures — [#87](https://github.com/Xore/APIARY/issues/87).
 - **EveBox** and **Kibana** read the VPS `eve.json`. See
   [`vps/suricata/README.md`](vps/suricata/README.md), including the
-  `HOME_NET` trap and the fact that `eve.json` is unrotated
+  `HOME_NET` trap. `eve.json` is rotated hourly
+  (`vps/suricata/suricata.yaml`'s `rotate-interval: hour`), with old
+  rotated files pruned by `vps/suricata-log-maintenance.sh`
   ([#79](https://github.com/Xore/APIARY/issues/79)).
 - **The dashboard** reads the sanitized export directory read-only and shows
   worker state, dynamic risk, static YARA versus observed behaviour, ATT&CK
@@ -177,8 +180,9 @@ Already automated. `/etc/default/honeypot-sandbox` sets raw-result retention to
 `honeypot-sandbox-cleanup.timer` applies it daily. Failed requests stay
 root-only for 30 days and orphaned staged samples expire after seven.
 
-The VPS side is not equivalent: `pcap-log` is a bounded ~50 GB ring, but
-`eve.json` has no rotation at all (#79).
+The VPS side is not equivalent, but is bounded on both sides: `pcap-log` is a
+bounded ~50 GB ring, and `eve.json` rotates hourly with old files pruned by
+`vps/suricata-log-maintenance.sh` (#79).
 
 ---
 

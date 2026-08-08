@@ -16,18 +16,22 @@
 
 ## 1. Vendored theme (Phase 1 — done)
 
-- `dashboard/static/theme.css` is a **byte-identical** copy of
-  `Xore/theme@31ea47f` (`31ea47ff9e272b032d85b2019feb1e6e59e72954`).
+- `dashboard/static/theme.css` is a **byte-identical** copy of `Xore/theme`
+  at whatever commit `dashboard/frontend/theme.lock` currently pins — that
+  file, not this doc, is the source of truth for the vendored commit, and
+  `scripts/check-vendored-theme.sh` enforces the pin matches the vendored
+  file (see `docs/DASHBOARD-RENDER-ENGINE-GUIDE.md`).
 - Sync command (run from the repo root, with a local clone of Xore/theme at
   `../theme`):
 
   ```bash
-  cp ../theme/theme.css dashboard/static/theme.css
+  scripts/sync-theme.sh ../theme
   ```
 
-  After syncing, bump the `?v=` cache-buster on the `theme.css` link in
-  `dashboard/page_style.go` and rebuild nothing else — the file is embedded
-  as-is.
+  This re-vendors `dashboard/static/theme.css` and rewrites `theme.lock`
+  with the new commit and hash. After syncing, bump the `?v=` cache-buster
+  on the `theme.css` link in `dashboard/page_style.go` and rebuild nothing
+  else — the file is embedded as-is.
 - `theme.js` is intentionally **not** vendored: `dashboard/static/hp-app.js`
   owns theme preference, navigation, tabs, and keyboard shortcuts.
 - Load order in every page head (`{{define "style"}}` in
@@ -47,7 +51,7 @@
   `.app-main`, with the investigation command dock rendered as `.command-bar`.
   No post-load DOM reconstruction; the toolbar exists in the initial HTML.
 - **Sidebar**: brand, "New investigation" (`/` shortcut), nav groups
-  Monitor / Investigate / Evidence covering all 12 routes, recent
+  Monitor / Investigate / Evidence covering the dashboard's routes, recent
   investigations (route/label/timestamp only — never event bodies), and a
   bottom `.sidebar__profile` row. Username/role come from live auth-backend
   session introspection via `GET /api/whoami`; unsigned `X-Auth-*` request

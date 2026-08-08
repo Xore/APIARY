@@ -155,7 +155,7 @@ flowchart TD
         Worker["llm-worker"]
     end
     subgraph llmnet["honeypot-llm (internal)"]
-        Ollama["Ollama / qwen3.5:9b / RTX 4000"]
+        Ollama["Ollama / qwen3:14b / RTX 4000"]
     end
 
     ES --> Worker
@@ -188,7 +188,7 @@ not a hard VRAM constraint at this card size).
 
 | Role | Model | Approx. VRAM | Why |
 |---|---|---|---|
-| Chat / analysis | `qwen3.5:9b` | ~6.1 GiB at the measured 16k probe; production is capped at 8k | #158 production-schema winner (98.5%); all independent injection, criticality, persistence, and schema gates pass |
+| Chat / analysis | `qwen3:14b` | ~10.2 GiB at production's 8k context; up to ~14.1 GiB at the ghidra slot's 32k context | Promoted to all three slots (ghidra, revdeck, sessions) under #568 once GPU VRAM was confirmed ~20GB, not 8GB, superseding #158's `qwen3.5:9b` pick — see `docs/local-llm-model-evaluation.md`'s #568 section |
 | Rejected lower-memory candidate | `qwen3.5:4b` | ~3.4-3.7 GiB (8k-16k ctx) | Failed both adversarial field-value gates under the exact production schema; aggregate score cannot override that |
 | Embeddings (optional, §10) | `nomic-embed-text` | ~0.3 GiB | Only loaded when embedding endpoints are used |
 
@@ -461,9 +461,9 @@ docker compose -f analysis/ghidra/docker-compose.ghidra.yml exec ollama nvidia-s
 # expect: GPU 0: Quadro RTX 4000 ...
 
 # T2 model present and loadable
-docker compose -f analysis/ghidra/docker-compose.ghidra.yml exec ollama ollama list | grep qwen3.5
+docker compose -f analysis/ghidra/docker-compose.ghidra.yml exec ollama ollama list | grep qwen3
 docker compose -f analysis/ghidra/docker-compose.ghidra.yml exec ollama \
-  ollama run qwen3.5:9b --think=false --verbose \
+  ollama run qwen3:14b --think=false --verbose \
   "Reply with the single word: ok" 2>&1 | grep -i ok
 
 # T3 inference uses the GPU (VRAM > 3 GiB while a request runs)

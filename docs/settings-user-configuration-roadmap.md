@@ -7,9 +7,11 @@
 > grants nothing. Milestones B through G have shipped: typed stores with
 > revisions and audit log, `/api/settings/me`, the settings dialog, admin
 > configuration with rollback, retention, and `honeypot_settings_*` metrics.
-> What remains is not code — deployment verification of the shared
-> introspection token and the 72-hour multi-user soak, tracked in
-> [#81](https://github.com/Xore/APIARY/issues/81). Earlier revisions of
+> Deployment verification of the shared introspection token is done:
+> [#81](https://github.com/Xore/APIARY/issues/81) (closed) confirmed both
+> role-change and disable take effect immediately, no restart, live against
+> production. What remains is the 72-hour multi-user soak, split out to
+> [#662](https://github.com/Xore/APIARY/issues/662). Earlier revisions of
 > this header said "stores and UI remain proposed" long after both existed.
 >
 > **Identity authority:** [`Xore/auth-backend`](https://github.com/Xore/auth-backend)

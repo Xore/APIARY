@@ -9,7 +9,11 @@ blocklists via their APIs.
 > ([#68](https://github.com/Xore/APIARY/issues/68)) and Phase 2
 > ([#69](https://github.com/Xore/APIARY/issues/69)) are both closed.
 > Phase 3-4 (reputation validation, operator observability) is
-> [#153](https://github.com/Xore/APIARY/issues/153), still open.
+> [#153](https://github.com/Xore/APIARY/issues/153), closed and implemented:
+> `reporter/greynoise.go` implements the Phase 3 GreyNoise validation, and
+> `reporter/metrics.go` implements Phase 4's observability counters
+> (attempted/suppressed/dryRun/sent/failed) as a JSON snapshot — a
+> deliberate deviation from the Prometheus sketch originally proposed below.
 >
 > **Reporting is outbound and irreversible.** An abuse report cannot be
 > unsent, and it names a third party's address from this stack. The reporter

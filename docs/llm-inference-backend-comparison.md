@@ -171,13 +171,11 @@ $ llama-bench -m qwen2.5-0.5b-instruct-q4_k_m.gguf -p 128 -n 128 -t 8
 
 This confirms the tool works and produces standard, directly-comparable
 prompt-processing (`pp`) and text-generation (`tg`) tokens/sec numbers.
-**Follow-up, when homeserver access resumes**: run `llama-bench` against the
-actual currently-approved models (`qwen3:8b`,
-`qwen2.5-coder:7b-instruct-q4_K_M`, `qwen3.5:9b`) on the real GPU, and
-compare against Ollama's own measured throughput for the same models
-(`docs/local-llm-model-evaluation.md` already has some of these numbers).
-Depends on #568/#569's VRAM-figure question being settled first, since the
-real card's identity changes what's even worth benchmarking.
+**Follow-up**: run `llama-bench` against the actual currently-approved model
+(`qwen3:14b`, promoted to all three slots under #568/#569 now that VRAM is
+confirmed ~20GB) on the real GPU, and compare against Ollama's own measured
+throughput for the same model (`docs/local-llm-model-evaluation.md` already
+has some of these numbers).
 
 ## 7. Operational surface
 
@@ -269,11 +267,13 @@ exceeded Ollama, and its image is over 6x smaller. The reasons to hold:
    latency) — that hasn't been demonstrated yet, only that llama.cpp doesn't
    *lose* on the functional axes. A migration without a measured performance
    win is pure cost for no proven benefit.
-3. **#568/#569 (the actual VRAM figure) is still unresolved.** Model
-   selection, GPU-sharing math, and any performance comparison all depend on
-   knowing whether the real card is 8GB or ~20-28GB — re-doing this
-   migration's cost/benefit analysis after that's settled is cheaper than
-   guessing now.
+3. **#568/#569 (the actual VRAM figure) is now resolved: ~20GB, not 8GB.**
+   Model selection, GPU-sharing math, and any performance comparison all
+   depended on this — `qwen3:14b` has since been promoted to all three
+   slots (ghidra, revdeck, sessions) on that basis. This migration's
+   cost/benefit analysis in §6 above was written before that resolution and
+   should be re-run against `qwen3:14b` rather than the smaller candidates
+   this doc originally benchmarked against.
 
 **vLLM is not a fit for this stack today**, independent of performance —
 §7's finding that the standard image refuses to start without a GPU present
@@ -287,10 +287,9 @@ serving — not the current shared, bursty, multi-workload shape.
 
 ## Follow-ups (not implemented here, per #598's own scope)
 
-- Once #568/#569 settle the real VRAM figure and homeserver access resumes:
-  run `llama-bench` against the currently-approved models on the real card,
-  side-by-side with Ollama's own numbers, to get the actual performance data
-  this research couldn't gather.
+- Run `llama-bench` against the currently-approved model (`qwen3:14b`,
+  promoted under #568/#569) on the real card, side-by-side with Ollama's own
+  numbers, to get the actual performance data this research couldn't gather.
 - Resolve the 768-vs-384 embedding-dimension discrepancy (§7) before #151's
   `dense_vector` ES mapping work begins, regardless of backend choice.
 - If a future re-evaluation is triggered (e.g. `model-governance.py` gets a
