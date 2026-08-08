@@ -45,6 +45,7 @@ dashboard/worldmap_generated.go linguist-generated
 *.mmdb binary
 *.pcap binary
 *.pcapng binary
+*.pdf binary
 *.qcow2 binary
 *.gz binary
 *.zip binary

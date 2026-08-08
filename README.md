@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="docs/assets/apiary-readme.png" alt="APIARY — Automated Payload Intelligence &amp; Attacker Response" width="900">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="branding/assets/logo/apiary-lockup-for-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="branding/assets/logo/apiary-lockup-for-light.png">
+    <img src="branding/assets/logo/apiary-lockup-for-light.png" alt="APIARY — Automated Payload Intelligence &amp; Attacker Response" width="900">
+  </picture>
 </p>
 
 # A multi-service honeypot and automated malware-analysis stack
@@ -43,6 +47,7 @@ optional on-demand `geoip-update` maintenance job. 19 deployment pieces —
 
 | Guide | Covers |
 |---|---|
+| [branding/](branding/) / [live specimen](https://xore.github.io/APIARY/) | Canonical logos, favicons, social assets, web theme starter, design tokens, and printable brand guide |
 | [docs/CGNAT-DEPLOYMENT.md](docs/CGNAT-DEPLOYMENT.md) | **Start here to deploy.** Home + VPS setup, Dockge, firewall, DNS, boot-safe networking |
 | [docs/HOMESERVER-DISK-LAYOUT.md](docs/HOMESERVER-DISK-LAYOUT.md) | Physical disk layout of the homeserver and an Ubuntu autoinstall template to reproduce it |
 | [scripts/install-homeserver.sh](scripts/install-homeserver.sh) | Unattended provisioning script (Docker, GPU/NVIDIA, WireGuard, Dockge, the stacks themselves) for a manually-installed base Ubuntu system — fill in [scripts/install-homeserver.conf.example](scripts/install-homeserver.conf.example) first, same idea as a Windows `autounattend.xml` answer file. First cut, see [#518](https://github.com/Xore/APIARY/issues/518) |

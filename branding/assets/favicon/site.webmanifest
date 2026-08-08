@@ -1,0 +1,20 @@
+{
+  "name": "APIARY",
+  "short_name": "APIARY",
+  "description": "Automated Payload Intelligence & Attacker Response",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "theme_color": "#20201f",
+  "background_color": "#20201f",
+  "display": "standalone"
+}
