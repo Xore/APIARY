@@ -39,6 +39,11 @@ http:
       service: api@internal
       middlewares: [local-only]
 
+    traefik-api-oidc-upstream:
+      rule: "PathPrefix(`/`)"
+      entryPoints: [traefik-oidc]
+      service: api@internal
+
     # Same api@internal service as traefik-api above, on the public entrypoint
     # instead of loopback-only traefik-local. No socat bridge needed — unlike
     # every other honeypot-revdeck-style router, this points at a service that
@@ -60,10 +65,10 @@ http:
     traefik-dashboard:
       rule: "Host(`traefik.honeypot.example`)"
       entryPoints: [websecure]
-      service: api@internal
+      service: oidc-traefik
       tls:
         options: modern
-      middlewares: [security-headers, strip-auth-identity, forward-auth, traefik-dashboard-redirect]
+      middlewares: [security-headers, traefik-dashboard-redirect]
 
     auth-portal:
       rule: "Host(`auth.honeypot.example`)"
@@ -232,10 +237,10 @@ http:
     honeypot-tanner:
       rule: "Host(`tanner.honeypot.example`)"
       entryPoints: [websecure]
-      service: honeypot-tanner
+      service: oidc-tanner
       tls:
         options: modern
-      middlewares: [security-headers, strip-auth-identity, forward-auth]
+      middlewares: [security-headers]
 
     honeypot-evebox:
       rule: "Host(`evebox.honeypot.example`)"
@@ -256,18 +261,18 @@ http:
     honeypot-revdeck:
       rule: "Host(`rev.honeypot.example`)"
       entryPoints: [websecure]
-      service: honeypot-revdeck
+      service: oidc-revdeck
       tls:
         options: modern
-      middlewares: [security-headers, strip-auth-identity, forward-auth]
+      middlewares: [security-headers]
 
     honeypot-dockge:
       rule: "Host(`dockge.honeypot.example`)"
       entryPoints: [websecure]
-      service: honeypot-dockge
+      service: oidc-dockge
       tls:
         options: modern
-      middlewares: [security-headers, strip-auth-identity, forward-auth]
+      middlewares: [security-headers]
 
     svelte-blog:
       rule: "Host(`svelte.honeypot.example`)"
@@ -323,6 +328,26 @@ http:
     oidc-arkime:
       loadBalancer:
         servers: [{url: "http://oidc-arkime:4180"}]
+        passHostHeader: true
+
+    oidc-tanner:
+      loadBalancer:
+        servers: [{url: "http://oidc-tanner:4180"}]
+        passHostHeader: true
+
+    oidc-revdeck:
+      loadBalancer:
+        servers: [{url: "http://oidc-revdeck:4180"}]
+        passHostHeader: true
+
+    oidc-dockge:
+      loadBalancer:
+        servers: [{url: "http://oidc-dockge:4180"}]
+        passHostHeader: true
+
+    oidc-traefik:
+      loadBalancer:
+        servers: [{url: "http://oidc-traefik:4180"}]
         passHostHeader: true
 
 

@@ -79,6 +79,10 @@ services:
       - oidc-kibana
       - oidc-evebox
       - oidc-arkime
+      - oidc-tanner
+      - oidc-revdeck
+      - oidc-dockge
+      - oidc-traefik
     # #117: `traefik healthcheck` does a full binary re-exec (new Go runtime
     # init, config parse) rather than a lightweight HTTP call. Measured
     # 6-9s per invocation under this container's 0.5 CPU limit, so it never
@@ -430,7 +434,7 @@ services:
       OAUTH2_PROXY_CLIENT_ID: kibana
       OAUTH2_PROXY_CLIENT_SECRET_FILE: /run/oidc-secrets/client-secret
       OAUTH2_PROXY_COOKIE_SECRET_FILE: /run/oidc-secrets/cookie-secret
-      OAUTH2_PROXY_REDIRECT_URL: https://kibana.honeypot.example/oauth2/callback
+      OAUTH2_PROXY_REDIRECT_URL: https://kibana.${OIDC_PUBLIC_DOMAIN:?set OIDC_PUBLIC_DOMAIN}/oauth2/callback
       OAUTH2_PROXY_ALLOWED_ROLES: kibana:access
       OAUTH2_PROXY_COOKIE_NAME: __Host-apiary-kibana
       OAUTH2_PROXY_UPSTREAMS: http://socat-hp-kibana:5601
@@ -443,7 +447,23 @@ services:
     container_name: socat-hp-tanner
     restart: unless-stopped
     command: TCP4-LISTEN:8091,fork,reuseaddr TCP4:10.8.0.2:19091
-    networks: [proxy]
+    networks: [oidc-tanner]
+
+  oidc-tanner:
+    <<: *oidc-gateway
+    container_name: oidc-tanner
+    environment:
+      <<: *oidc-gateway-environment
+      OAUTH2_PROXY_CLIENT_ID: tanner
+      OAUTH2_PROXY_CLIENT_SECRET_FILE: /run/oidc-secrets/client-secret
+      OAUTH2_PROXY_COOKIE_SECRET_FILE: /run/oidc-secrets/cookie-secret
+      OAUTH2_PROXY_REDIRECT_URL: https://tanner.${OIDC_PUBLIC_DOMAIN:?set OIDC_PUBLIC_DOMAIN}/oauth2/callback
+      OAUTH2_PROXY_ALLOWED_ROLES: tanner:access
+      OAUTH2_PROXY_COOKIE_NAME: __Host-apiary-tanner
+      OAUTH2_PROXY_UPSTREAMS: http://socat-hp-tanner:8091
+    volumes:
+      - ${OIDC_SECRETS_DIR:?set OIDC_SECRETS_DIR}/tanner:/run/oidc-secrets:ro
+    networks: [oidc-tanner]
 
   socat-hp-evebox:
     image: alpine/socat:latest
@@ -460,7 +480,7 @@ services:
       OAUTH2_PROXY_CLIENT_ID: evebox
       OAUTH2_PROXY_CLIENT_SECRET_FILE: /run/oidc-secrets/client-secret
       OAUTH2_PROXY_COOKIE_SECRET_FILE: /run/oidc-secrets/cookie-secret
-      OAUTH2_PROXY_REDIRECT_URL: https://evebox.honeypot.example/oauth2/callback
+      OAUTH2_PROXY_REDIRECT_URL: https://evebox.${OIDC_PUBLIC_DOMAIN:?set OIDC_PUBLIC_DOMAIN}/oauth2/callback
       OAUTH2_PROXY_ALLOWED_ROLES: evebox:access
       OAUTH2_PROXY_COOKIE_NAME: __Host-apiary-evebox
       OAUTH2_PROXY_UPSTREAMS: http://socat-hp-evebox:5636
@@ -483,7 +503,7 @@ services:
       OAUTH2_PROXY_CLIENT_ID: arkime
       OAUTH2_PROXY_CLIENT_SECRET_FILE: /run/oidc-secrets/client-secret
       OAUTH2_PROXY_COOKIE_SECRET_FILE: /run/oidc-secrets/cookie-secret
-      OAUTH2_PROXY_REDIRECT_URL: https://arkime.honeypot.example/oauth2/callback
+      OAUTH2_PROXY_REDIRECT_URL: https://arkime.${OIDC_PUBLIC_DOMAIN:?set OIDC_PUBLIC_DOMAIN}/oauth2/callback
       OAUTH2_PROXY_ALLOWED_ROLES: arkime:access
       OAUTH2_PROXY_COOKIE_NAME: __Host-apiary-arkime
       OAUTH2_PROXY_UPSTREAMS: http://socat-hp-arkime:8005
@@ -499,7 +519,23 @@ services:
     container_name: socat-hp-revdeck
     restart: unless-stopped
     command: TCP4-LISTEN:5000,fork,reuseaddr TCP4:10.8.0.2:19500
-    networks: [proxy]
+    networks: [oidc-revdeck]
+
+  oidc-revdeck:
+    <<: *oidc-gateway
+    container_name: oidc-revdeck
+    environment:
+      <<: *oidc-gateway-environment
+      OAUTH2_PROXY_CLIENT_ID: revdeck
+      OAUTH2_PROXY_CLIENT_SECRET_FILE: /run/oidc-secrets/client-secret
+      OAUTH2_PROXY_COOKIE_SECRET_FILE: /run/oidc-secrets/cookie-secret
+      OAUTH2_PROXY_REDIRECT_URL: https://rev.${OIDC_PUBLIC_DOMAIN:?set OIDC_PUBLIC_DOMAIN}/oauth2/callback
+      OAUTH2_PROXY_ALLOWED_ROLES: revdeck:access
+      OAUTH2_PROXY_COOKIE_NAME: __Host-apiary-revdeck
+      OAUTH2_PROXY_UPSTREAMS: http://socat-hp-revdeck:5000
+    volumes:
+      - ${OIDC_SECRETS_DIR:?set OIDC_SECRETS_DIR}/revdeck:/run/oidc-secrets:ro
+    networks: [oidc-revdeck]
 
   # Dockge itself (host-level infra, /var/dockge/compose.yaml on the home
   # server -- not part of this repo, unlike everything else bridged here).
@@ -513,7 +549,39 @@ services:
     container_name: socat-hp-dockge
     restart: unless-stopped
     command: TCP4-LISTEN:5001,fork,reuseaddr TCP4:10.8.0.2:5001
-    networks: [proxy]
+    networks: [oidc-dockge]
+
+  oidc-dockge:
+    <<: *oidc-gateway
+    container_name: oidc-dockge
+    environment:
+      <<: *oidc-gateway-environment
+      OAUTH2_PROXY_CLIENT_ID: dockge
+      OAUTH2_PROXY_CLIENT_SECRET_FILE: /run/oidc-secrets/client-secret
+      OAUTH2_PROXY_COOKIE_SECRET_FILE: /run/oidc-secrets/cookie-secret
+      OAUTH2_PROXY_REDIRECT_URL: https://dockge.${OIDC_PUBLIC_DOMAIN:?set OIDC_PUBLIC_DOMAIN}/oauth2/callback
+      OAUTH2_PROXY_ALLOWED_ROLES: dockge:access
+      OAUTH2_PROXY_COOKIE_NAME: __Host-apiary-dockge
+      OAUTH2_PROXY_UPSTREAMS: http://socat-hp-dockge:5001
+    volumes:
+      - ${OIDC_SECRETS_DIR:?set OIDC_SECRETS_DIR}/dockge:/run/oidc-secrets:ro
+    networks: [oidc-dockge]
+
+  oidc-traefik:
+    <<: *oidc-gateway
+    container_name: oidc-traefik
+    environment:
+      <<: *oidc-gateway-environment
+      OAUTH2_PROXY_CLIENT_ID: traefik-dashboard
+      OAUTH2_PROXY_CLIENT_SECRET_FILE: /run/oidc-secrets/client-secret
+      OAUTH2_PROXY_COOKIE_SECRET_FILE: /run/oidc-secrets/cookie-secret
+      OAUTH2_PROXY_REDIRECT_URL: https://traefik.${OIDC_PUBLIC_DOMAIN:?set OIDC_PUBLIC_DOMAIN}/oauth2/callback
+      OAUTH2_PROXY_ALLOWED_ROLES: traefik-dashboard:access
+      OAUTH2_PROXY_COOKIE_NAME: __Host-apiary-traefik
+      OAUTH2_PROXY_UPSTREAMS: http://traefik:8081
+    volumes:
+      - ${OIDC_SECRETS_DIR:?set OIDC_SECRETS_DIR}/traefik-dashboard:/run/oidc-secrets:ro
+    networks: [oidc-traefik]
 
   # =====================================================================
   # SURICATA IDS
@@ -739,6 +807,14 @@ networks:
   oidc-evebox:
     driver: bridge
   oidc-arkime:
+    driver: bridge
+  oidc-tanner:
+    driver: bridge
+  oidc-revdeck:
+    driver: bridge
+  oidc-dockge:
+    driver: bridge
+  oidc-traefik:
     driver: bridge
 
 volumes:
