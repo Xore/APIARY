@@ -78,7 +78,16 @@
 
         <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-artifacts" role="tabpanel" data-dashboard-panel="artifacts" hidden>
           <div class="section-heading"><div><h2>What the pipeline produced</h2><p>Auto-generated detection content and the downloadable report.</p></div></div>
-          <div class="card wide"><h2>Auto-generated YARA rules</h2>{{if .Detail.YARAAutoRules}}<p class="note">{{len .Detail.YARAAutoRules}} rule file{{if ne (len .Detail.YARAAutoRules) 1}}s{{end}} in the upstream repository reference this sample's hash.</p><ul class="tw:list-disc tw:pl-5">{{range .Detail.YARAAutoRules}}<li><code>{{.}}</code></li>{{end}}</ul>{{else}}<p class="empty">No auto-generated YARA rules reference this sample.</p>{{end}}</div>
+          {{/* #790 chunk 8: card__scroll -- unbounded, and card__scroll's
+               max-height/overflow-y isn't table-specific (theme.css's own
+               comment on the class: "a plain list of rows... .card__scroll
+               for a long/unbounded one"). "Scanner results" above and
+               "Publication record" below are NOT converted: the former is
+               a small closed set of static scanners (2 in practice, not
+               realistically unbounded), the latter has the same
+               SHA-256/Commit/SamplePath/RunURL long-value risk this
+               issue's other chunks have already deferred. */}}
+          <div class="card wide"><h2>Auto-generated YARA rules</h2>{{if .Detail.YARAAutoRules}}<p class="note">{{len .Detail.YARAAutoRules}} rule file{{if ne (len .Detail.YARAAutoRules) 1}}s{{end}} in the upstream repository reference this sample's hash.</p><div class="card__scroll"><ul class="tw:list-disc tw:pl-5">{{range .Detail.YARAAutoRules}}<li><code>{{.}}</code></li>{{end}}</ul></div>{{else}}<p class="empty">No auto-generated YARA rules reference this sample.</p>{{end}}</div>
           <div class="card wide"><h2>Report</h2>{{if .Detail.ViewURL}}<div class="project-grid"><article class="project-card" data-hp-ga-view-report="{{.Detail.ViewURL}}" role="button" tabindex="0" aria-label="View PDF report">
             <div class="project-card__header">
               <span class="project-card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>

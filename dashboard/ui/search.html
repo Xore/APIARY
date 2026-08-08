@@ -33,17 +33,21 @@
         {{if .Groups}}
         <div class="tw:grid tw:grid-cols-12 tw:gap-3.5" id="search-results">
           {{range .Groups}}
+          {{/* #790 chunk 8: card__scroll -- each group is already capped
+               at searchGroupLimit (8) with its own "N more" overflow link,
+               same top-N-list treatment as chunk 1's shared "tbl"
+               template. */}}
           <div class="card half">
             <h2>{{.Title}}</h2>
             <p class="note">{{.Hint}}</p>
-            <table class="data-table"><tbody>
+            <div class="card__scroll"><table class="data-table"><tbody>
               {{range .Hits}}
               <tr>
                 <td class="n">{{if .Count}}{{.Count}}{{end}}</td>
                 <td class="v"><a href="{{.URL}}">{{.Label}}</a>{{if .Detail}}<div class="searchhit__detail">{{.Detail}}</div>{{end}}</td>
               </tr>
               {{end}}
-            </tbody></table>
+            </tbody></table></div>
             {{if .More}}<p class="note tw:mt-2"><a class="lnk" href="{{.MoreURL}}">{{.More}} more &rarr;</a></p>{{end}}
           </div>
           {{end}}
