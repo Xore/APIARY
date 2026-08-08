@@ -153,6 +153,38 @@ class TestSessionFeatureTrackerLivePath:
         result = restarted.observe(fixtures.COWRIE_SAME_IP_SEQUENCE[0]["_source"])
         assert result["cmd_count"] == 1
 
+    # #884: MAX_PERSISTED_IPS/MAX_PERSISTED_SESSIONS used to bound only what
+    # save() wrote to disk -- the live _ip_last_seen/_session_last_seen (and
+    # the _WindowState dicts they key) grew for every distinct src_ip/session
+    # ever observed, unbounded, for the whole process lifetime. Proven here
+    # with no save()/restart involved at all.
+    def test_live_state_is_bounded_during_a_run_not_only_at_persist_time(self, tmp_path, monkeypatch):
+        import models.session_features as sf_mod
+        monkeypatch.setattr(sf_mod, "MAX_PERSISTED_IPS", 2)
+        monkeypatch.setattr(sf_mod, "MAX_PERSISTED_SESSIONS", 2)
+
+        tracker = SessionFeatureTracker(model_dir=str(tmp_path))
+        for i in range(3):
+            doc = dict(fixtures.COWRIE_SAME_IP_SEQUENCE[0]["_source"])
+            doc["honeypot"] = dict(doc["honeypot"])
+            doc["honeypot"]["src_ip"] = f"203.0.113.{i + 1}"
+            doc["honeypot"]["session"] = f"session-{i + 1}"
+            # _get_ip (models.isolation_forest) prefers the ECS-promoted
+            # source.ip over honeypot.src_ip -- both must move together.
+            doc["source"] = {"ip": f"203.0.113.{i + 1}"}
+            doc["@timestamp"] = f"2026-07-31T19:14:{12 + i:02d}.000Z"
+            tracker.observe(doc)
+
+        assert len(tracker._ip_last_seen) == 2, "live _ip_last_seen must stay bounded during a run"
+        assert len(tracker._session_last_seen) == 2, "live _session_last_seen must stay bounded during a run"
+        assert "203.0.113.1" not in tracker._ip_last_seen, \
+            "the least-recently-active IP must be the one evicted"
+        assert "session-1" not in tracker._session_last_seen, \
+            "the least-recently-active session must be the one evicted"
+        assert "203.0.113.1" not in tracker._state.ip_ports
+        assert "203.0.113.1" not in tracker._state.ip_failed_logins
+        assert "session-1" not in tracker._state.session_counts
+
 
 class TestExtractFeaturesUsesRealValues:
     """IsoForestModel.extract_features() (#277): cmd_count/failed_logins_1h/

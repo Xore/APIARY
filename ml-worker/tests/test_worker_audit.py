@@ -180,6 +180,61 @@ class TestBufferStateNotPersisted:
             "the least-recently-active IP must be the one dropped when bounding"
         assert "203.0.113.2" in restarted._last_seen and "203.0.113.3" in restarted._last_seen
 
+    # #884: MAX_PERSISTED_IPS used to bound only what save_buffers() wrote to
+    # disk -- the live _buffers/_last_seen dicts grew for every distinct IP
+    # ever scored, unbounded, for the whole process lifetime. Proven here
+    # with no save_buffers()/restart involved at all: the cap must already
+    # hold against the live, in-process state.
+    def test_live_state_is_bounded_during_a_run_not_only_at_persist_time(self, tmp_path, monkeypatch):
+        from models import lstm_autoencoder as lstm_mod
+        monkeypatch.setattr(lstm_mod, "MAX_PERSISTED_IPS", 2)
+
+        model = LSTMAEModel(model_dir=str(tmp_path))
+        src = dict(REAL_SHAPED_DOCUMENT["_source"])
+        for i, ip in enumerate(["203.0.113.1", "203.0.113.2", "203.0.113.3"]):
+            src = dict(src)
+            src["source"] = {"ip": ip}
+            src["@timestamp"] = f"2026-07-31T19:14:{12 + i:02d}.000Z"  # strictly increasing
+            model.score(src)
+
+        assert len(model._last_seen) == 2, "live _last_seen must stay bounded during a run"
+        assert "203.0.113.1" not in model._last_seen, \
+            "the least-recently-active IP must be the one evicted"
+        assert "203.0.113.1" not in model._buffers, \
+            "the evicted IP's sliding-window buffer must be dropped too, not just its last-seen entry"
+        assert "203.0.113.2" in model._last_seen and "203.0.113.3" in model._last_seen
+
+    def test_re_scoring_an_already_tracked_ip_does_not_evict_it(self, tmp_path, monkeypatch):
+        # A key already present must be relinked to "most recent", not
+        # treated as a fresh insertion that could itself get evicted by the
+        # very update meant to keep it alive.
+        from models import lstm_autoencoder as lstm_mod
+        monkeypatch.setattr(lstm_mod, "MAX_PERSISTED_IPS", 2)
+
+        model = LSTMAEModel(model_dir=str(tmp_path))
+        src = dict(REAL_SHAPED_DOCUMENT["_source"])
+        for i, ip in enumerate(["203.0.113.1", "203.0.113.2"]):
+            src = dict(src)
+            src["source"] = {"ip": ip}
+            src["@timestamp"] = f"2026-07-31T19:14:{12 + i:02d}.000Z"
+            model.score(src)
+
+        # Re-touch .1 so it's now the most-recently-active of the two.
+        src = dict(src)
+        src["source"] = {"ip": "203.0.113.1"}
+        src["@timestamp"] = "2026-07-31T19:14:20.000Z"
+        model.score(src)
+
+        # A brand new third IP must now evict .2 (least-recently-active), not .1.
+        src = dict(src)
+        src["source"] = {"ip": "203.0.113.3"}
+        src["@timestamp"] = "2026-07-31T19:14:21.000Z"
+        model.score(src)
+
+        assert "203.0.113.1" in model._last_seen
+        assert "203.0.113.2" not in model._last_seen
+        assert "203.0.113.3" in model._last_seen
+
 
 class TestUnhandledEventErrorsCrashTheBatch:
     """Finding #8, fixed in #171 (roadmap: 'malformed payloads ... are not

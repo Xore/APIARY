@@ -181,7 +181,16 @@ class LSTMAEModel:
             lambda: collections.deque(maxlen=SEQ_LEN)
         )
         # Per-IP last-seen event epoch, for real inter-arrival computation.
-        self._last_seen: dict = {}
+        # OrderedDict, not dict: score() relinks a touched IP to the end on
+        # every visit, so iteration order is always least- to
+        # most-recently-active -- what _evict_oldest_ip needs to find and
+        # remove the right entry in O(1). #884: each IP's own window was
+        # already bounded (deque(maxlen=SEQ_LEN)), but the NUMBER of
+        # distinct IPs in _buffers/_last_seen was not -- both grew for
+        # every distinct src_ip ever observed, unbounded, for the whole
+        # process lifetime (MAX_PERSISTED_IPS bounded save_buffers()'s
+        # persisted snapshot only, never this live state).
+        self._last_seen: collections.OrderedDict = collections.OrderedDict()
         # True once a real fit (loaded from disk or accepted by retrain())
         # exists -- distinct from "self.net exists", since BiLSTMAE() is
         # always constructed with random weights at __init__. Without this,
@@ -219,7 +228,11 @@ class LSTMAEModel:
         last = self._last_seen.get(ip)
         inter_arrival = (now - last) if (now is not None and last is not None and now >= last) else 60.0
         if now is not None:
+            self._last_seen.pop(ip, None)  # re-insert at the end: marks it most-recently-active
             self._last_seen[ip] = now
+            if len(self._last_seen) > MAX_PERSISTED_IPS:
+                oldest, _ = self._last_seen.popitem(last=False)
+                self._buffers.pop(oldest, None)
 
         vec = featurise_temporal(src, inter_arrival, cmd_count=cmd_count)
         self._buffers[ip].append(vec)
