@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"regexp"
@@ -123,6 +124,29 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 		ReportPDF:     "reports/" + strings.Repeat("d", 64) + ".pdf",
 		ExportURL:     "/export/github-analysis/" + strings.Repeat("d", 64),
 	}
+	// Populated with a real report shape (#318/#319): the "report" field is
+	// raw JSON, matching what cape-worker.py actually writes -- these
+	// nested keys are the ones capeData()'s own parseCapeReportSummary()
+	// reads, confirmed live against task 9 in #318's own verification run.
+	capeScore := 42.0
+	capeTaskID := 9
+	capeDetail := &capeResult{
+		SHA256: strings.Repeat("c", 64), ExitStatus: "ok",
+		RequestedAt: "2026-08-08T17:11:00Z", StartedAt: "2026-08-08T17:11:05Z", CompletedAt: "2026-08-08T17:16:22Z",
+		TaskID: &capeTaskID, CapeStatus: "reported", Route: "drop",
+		Score: &capeScore, Category: "file",
+		Signatures: []capeSignature{{Name: "network_http", Description: "Performs some HTTP requests", Severity: 2}},
+		Report: json.RawMessage(`{
+			"info": {"machine": {"label": "win11-cape"}, "package": "generic", "route": "drop", "timeout": false, "duration": 317},
+			"malscore": 42.0, "malstatus": "malicious",
+			"behavior": {
+				"summary": {"files": ["C:\\Windows\\Temp\\x.dat"], "keys": ["HKLM\\Software\\x"]},
+				"processes": [{"process_id": 1000, "process_name": "sample.exe", "parent_id": 500, "module_path": "C:\\Users\\analyst\\sample.exe", "first_seen": "2026-08-08 17:11:06", "calls": [{"api": "NtOpenKey"}]}]
+			},
+			"CAPE": {"payloads": [], "configs": []},
+			"debug": {"log": "2026-08-08 17:11:06 [root] INFO: analysis running", "errors": []}
+		}`),
+	}
 
 	pages := []struct {
 		name string
@@ -141,6 +165,8 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 		{"ghidra-list", ghidraPageData{Generated: now}},
 		{"github-analysis", githubAnalysisPageData{Generated: now, Detail: githubAnalysisDetail}},
 		{"github-analysis-list", githubAnalysisPageData{Generated: now}},
+		{"cape", capePageData{Generated: now, Detail: capeDetail, Summary: parseCapeReportSummary(capeDetail.Report)}},
+		{"cape-list", capePageData{Generated: now}},
 		{"payload-analysis", binaryAnalysis{}},
 		{"payload-workbench-index", payloadsPage{Generated: now, Enabled: true, Files: []capturedFile{{Hash: strings.Repeat("e", 64), Kind: "Binary", Platform: "Linux", MIME: "application/octet-stream", SizeH: "1 KiB", Sources: []string{"dionaea"}}}}},
 		{"workbench-results", workbenchResultsPageData{
@@ -178,6 +204,9 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 		}
 		if name == "github-analysis-list" {
 			name = "github-analysis"
+		}
+		if name == "cape-list" {
+			name = "cape"
 		}
 		var buf bytes.Buffer
 		if err := tmpl.ExecuteTemplate(&buf, name, page.data); err != nil {
