@@ -107,7 +107,7 @@ jobs:
         run: |
           destination=/var/dockge/stacks/honeypot-keycloak
           install -d -m 755 "$destination"
-          install -d -m 700 "$destination/secrets"
+          install -d -m 750 "$destination/secrets"
           cp docker-compose.keycloak.yml "$destination/compose.yml"
           cp -r keycloak "$destination/"
           install -d -m 755 "$destination/theme"

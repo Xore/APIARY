@@ -17,7 +17,7 @@ services:
     volumes:
       - keycloak-postgres:/var/lib/postgresql
       - ${KEYCLOAK_SECRETS_DIR:-/var/dockge/stacks/honeypot-keycloak/secrets}:/run/keycloak-secrets:ro
-    networks: [keycloak-data, keycloak-egress]
+    networks: [keycloak-data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
       interval: 10s
@@ -78,7 +78,7 @@ services:
       - ${KEYCLOAK_SECRETS_DIR:-/var/dockge/stacks/honeypot-keycloak/secrets}:/run/keycloak-secrets:ro
       - ${KEYCLOAK_THEME_DIR:-/var/dockge/stacks/honeypot-keycloak/theme/apiary}:/opt/keycloak/themes/apiary:ro
       - ./keycloak/realm:/opt/keycloak/realm-template:ro
-    networks: [keycloak-data]
+    networks: [keycloak-data, keycloak-egress]
     healthcheck:
       test:
         - CMD-SHELL
@@ -91,7 +91,9 @@ services:
       retries: 12
       start_period: 60s
     stop_grace_period: 60s
-    read_only: true
+    # The pinned upstream image performs Quarkus augmentation on startup.
+    # Keeping the root filesystem read-only would require a custom image build,
+    # which this Dockge baseline deliberately avoids.
     tmpfs:
       - /tmp:size=64m,mode=1777
       - /opt/keycloak/data/import:size=4m,mode=0755,uid=1000,gid=0
