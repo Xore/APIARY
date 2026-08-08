@@ -77,8 +77,8 @@ func TestIPBlockCreateReopenAndReblockWithNewExpiry(t *testing.T) {
 
 func TestIPBlockedIPsExcludesExpired(t *testing.T) {
 	m := newTestIPBlockManager(t)
-	m.block("203.0.113.1", true, "alice", time.Time{})           // permanent
-	m.block("203.0.113.2", true, "alice", time.Now().Add(time.Hour)) // future expiry, still active
+	m.block("203.0.113.1", true, "alice", time.Time{})                // permanent
+	m.block("203.0.113.2", true, "alice", time.Now().Add(time.Hour))  // future expiry, still active
 	m.block("203.0.113.3", true, "alice", time.Now().Add(-time.Hour)) // already expired
 
 	got := m.blockedIPs()
