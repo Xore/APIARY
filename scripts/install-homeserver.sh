@@ -523,7 +523,7 @@ step_dockge_install() {
 # compose file was ever backed up for it -- see step_pihole_provision, which
 # reconstructs a minimal one since it isn't part of this git repo).
 ENV_RESTORE_STACKS=(
-  honeypot-init honeypot-cowrie honeypot-dionaea honeypot-conpot honeypot-dnp3
+  honeypot-keycloak honeypot-init honeypot-cowrie honeypot-dionaea honeypot-conpot honeypot-dnp3
   honeypot-http honeypot-multipot honeypot-dashboard honeypot-payload-analysis
   honeypot-tanner honeypot-elk honeypot-utilities honeypot-stack ghidra ghosts
   pihole
@@ -559,6 +559,7 @@ step_restore_env_files() {
 # requirement (shared volumes are non-external and get created empty by
 # whichever stack starts first).
 STACK_DEFS=(
+  "honeypot-keycloak|docker-compose.keycloak.yml"
   "honeypot-elk|docker-compose.elk.yml"
   "honeypot-init|docker-compose.init.yml"
   "honeypot-tanner|docker-compose.tanner.yml"
@@ -594,6 +595,9 @@ step_provision_stack_dirs() {
     IFS='|' read -r name compose_file <<<"$entry"
     local dir="/var/dockge/stacks/$name"
     mkdir -p "$dir"
+    if [[ "$name" == "honeypot-keycloak" || "$name" == "honeypot-dashboard" ]]; then
+      install -d -m 700 "$dir/secrets"
+    fi
     if [[ ! -f "$REPO_DIR/$compose_file" ]]; then
       echo "MISSING compose source in repo: $compose_file (stack $name)"
       continue
@@ -617,6 +621,7 @@ step_bootstrap_missing_envs() {
     local example=""
     case "$name" in
       honeypot-init) example="$REPO_DIR/honeypot-init.env.example" ;;
+      honeypot-keycloak) example="$REPO_DIR/keycloak.env.example" ;;
       *) example="$REPO_DIR/.env.example" ;;
     esac
     if [[ -f "$example" ]]; then

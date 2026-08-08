@@ -57,22 +57,12 @@ func TestRetentionSweepExpiresOrphanedPreferences(t *testing.T) {
 	}
 }
 
-// TestRejectedIntrospectionLosesAccessImmediately is the Milestone F exit
-// criterion: the moment auth-backend rejects a session (account disabled or
-// deleted), every dashboard settings API fails closed on the very next
-// request — no cached identity, no grace window.
-func TestRejectedIntrospectionLosesAccessImmediately(t *testing.T) {
-	token := strings.Repeat("t", 32)
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// The auth backend rejects the session, as it does for a disabled or
-		// deleted account.
-		http.Error(w, "account disabled", http.StatusUnauthorized)
-	}))
-	t.Cleanup(backend.Close)
-	t.Setenv("AUTH_INTROSPECTION_URL", backend.URL)
-	t.Setenv("AUTH_INTROSPECTION_TOKEN", token)
-	t.Setenv("AUTH_TARGET_HOST", "honeypot.example")
-	t.Setenv("AUTH_SESSION_COOKIE_NAME", "xore_sso")
+// TestRevokedOIDCSessionLosesAccessImmediately proves that deleting the
+// server-side Keycloak session projection denies every settings API.
+func TestRevokedOIDCSessionLosesAccessImmediately(t *testing.T) {
+	previous := dashboardOIDC
+	dashboardOIDC = &oidcAuth{sessions: &memorySessionStore{values: make(map[string][]byte)}, now: time.Now}
+	t.Cleanup(func() { dashboardOIDC = previous })
 
 	s := newSettingsAPITestStoreWithoutIdentity(t)
 	for _, tc := range []struct{ method, target string }{

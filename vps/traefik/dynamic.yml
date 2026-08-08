@@ -19,6 +19,7 @@
 # socat-hp-evebox         :5636   →  10.8.0.2:19636 (evebox :5636)
 # socat-hp-arkime         :8005   →  10.8.0.2:19080 (arkime viewer :8005)
 # socat-hp-revdeck        :5000   →  10.8.0.2:19500 (revdeck :5000, ghidra stack)
+# socat-hp-keycloak       :8080   →  10.8.0.2:18080 (Keycloak :8080)
 # socat-hp-dockge         :5001   →  10.8.0.2:5001  (dockge :5001, host infra
 #                                     with root-equivalent /var/run/docker.sock
 #                                     access -- not a scoped UI like the rest)
@@ -71,6 +72,16 @@ http:
       tls:
         options: modern
       middlewares: [security-headers, rate-limit-auth]
+
+    keycloak-admin:
+      rule: "Host(`keycloak-admin.example.invalid`)"
+      entryPoints: [websecure]
+      service: keycloak-candidate
+      tls:
+        options: modern
+      # BasicAuth is an outer public-edge gate. Keycloak's own administrator
+      # authentication and mandatory MFA remain the authorization boundary.
+      middlewares: [security-headers, rate-limit-keycloak-admin, keycloak-admin-basic-auth]
 
     static-site:
       rule: "Host(`www.honeypot.example`) || Host(`honeypot.example`) || Host(`static.honeypot.example`)"
@@ -181,7 +192,7 @@ http:
       service: honeypot-dashboard
       tls:
         options: modern
-      middlewares: [security-headers-dashboard-pdf, strip-auth-identity, forward-auth]
+      middlewares: [security-headers-dashboard-pdf]
 
     # Same relaxation as honeypot-dashboard-pdf above, for the GitHub-analysis
     # Report card's own inline PDF viewer (#309). serveGitHubAnalysisPDFProxy
@@ -198,7 +209,7 @@ http:
       service: honeypot-dashboard
       tls:
         options: modern
-      middlewares: [security-headers-dashboard-pdf, strip-auth-identity, forward-auth]
+      middlewares: [security-headers-dashboard-pdf]
 
     honeypot-dashboard:
       rule: "Host(`dashboard.honeypot.example`) || Host(`honeypot.honeypot.example`)"
@@ -206,7 +217,9 @@ http:
       service: honeypot-dashboard
       tls:
         options: modern
-      middlewares: [security-headers, strip-auth-identity, forward-auth]
+      # Authentication and authorization are native to the dashboard. An edge
+      # authentication middleware here would recursively intercept its callback.
+      middlewares: [security-headers]
 
     honeypot-kibana:
       rule: "Host(`kibana.honeypot.example`)"
@@ -350,6 +363,16 @@ http:
       loadBalancer:
         servers:
           - url: "http://auth-portal:4181"
+        passHostHeader: true
+
+    # Pre-cutover service target. The auth-portal router intentionally does
+    # not reference this until the Keycloak realm/theme and every consumer
+    # pass the hard-cutover gates; it is reachable inside the proxy network
+    # for production-shaped validation with the canonical Host header.
+    keycloak-candidate:
+      loadBalancer:
+        servers:
+          - url: "http://socat-hp-keycloak:8080"
         passHostHeader: true
 
     honeypot-web:
@@ -526,6 +549,20 @@ http:
         period: 10s
         sourceCriterion:
           requestHeaderName: CF-Connecting-IP
+
+    rate-limit-keycloak-admin:
+      rateLimit:
+        average: 3
+        burst: 6
+        period: 10s
+        sourceCriterion:
+          requestHeaderName: CF-Connecting-IP
+
+    keycloak-admin-basic-auth:
+      basicAuth:
+        usersFile: /run/traefik-secrets/keycloak-admin.htpasswd
+        realm: "APIARY Keycloak administration"
+        removeHeader: true
 
     # Remove identity hints supplied by the browser before forward-auth runs.
     # Protected backends must use live introspection for authorization.

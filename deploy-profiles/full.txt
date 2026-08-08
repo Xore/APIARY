@@ -1,6 +1,7 @@
 # Standard deployment: every home stack .github/workflows/deploy.yml
 # currently syncs. See deploy-profiles/README.md.
 
+keycloak
 init
 elk
 dashboard

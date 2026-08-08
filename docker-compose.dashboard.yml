@@ -75,6 +75,7 @@ x-dashboard-volumes: &dashboard-volumes
   # geo stays off; cf-ipcountry still enriches tanner/http events.
   - /opt/stacks/apiary/dashboard/geoip:/geoip:ro
   - /opt/stacks/apiary/analysis/geoip:/geoip-mmdb:ro
+  - ${DASHBOARD_SECRETS_DIR:-/var/dockge/stacks/honeypot-dashboard/secrets}:/run/dashboard-secrets:ro
   # Unified read-only payload inventory: Dionaea binaries, Cowrie
   # transfers, and dashboard-retained inline script artifacts are all
   # listed, source-labelled, analysed, and downloadable from /payloads.
@@ -134,6 +135,26 @@ x-dashboard-volumes: &dashboard-volumes
   - /var/lib/honeypot-github/requests/pending:/github-analysis-requests
 
 services:
+  oidc-sessions:
+    <<: *runtime-defaults
+    image: valkey/valkey:9.1.1-alpine3.24@sha256:ee91f7a174ac4d6a6b0685b3a60e321f0a9dbbb691f9b0e285be2ba1d1be8328
+    container_name: hp-dashboard-oidc-sessions
+    restart: unless-stopped
+    command: ["valkey-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction"]
+    networks: [oidc-session]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    read_only: true
+    tmpfs: [/data:size=16m,mode=0700]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    deploy:
+      resources:
+        limits: {cpus: "0.25", memory: 160M}
+
   # #266: zero-downtime rolling updates. dashboard and dashboard-b are two
   # identical replicas (same image, same volumes via *dashboard-volumes,
   # same everything except container_name/host port and one env var) behind
@@ -172,6 +193,9 @@ services:
     image: honeypot-dashboard:latest
     container_name: hp-dashboard
     restart: unless-stopped
+    depends_on:
+      oidc-sessions:
+        condition: service_healthy
     ports:
       - ${HP_BIND:-10.8.0.2}:19090:8080
     volumes: *dashboard-volumes
@@ -248,17 +272,18 @@ services:
       - DASHBOARD_REQUIRE_ADMIN=${DASHBOARD_REQUIRE_ADMIN:-true}
       - MODEL_STATUS_SOCKET=/model-status/status.sock
       - SERVICES_ADAPTER_SOCKET=/run/services-adapter/control.sock
-      - AUTH_INTROSPECTION_URL=${AUTH_INTROSPECTION_URL:-https://auth.honeypot.example/_auth/introspect}
-      - AUTH_INTROSPECTION_TOKEN=${AUTH_INTROSPECTION_TOKEN:-}
-      - AUTH_TARGET_HOST=${AUTH_TARGET_HOST:-honeypot.example}
-      - AUTH_SESSION_COOKIE_NAME=${AUTH_SESSION_COOKIE_NAME:-xore_sso}
-      - AUTH_ACCOUNT_URL=${AUTH_ACCOUNT_URL:-https://auth.honeypot.example/auth/app?pane=account}
+      - OIDC_ISSUER_URL=${OIDC_ISSUER_URL:-https://auth.example.invalid/realms/apiary}
+      - OIDC_EXTERNAL_URL=${OIDC_EXTERNAL_URL:-https://honeypot.example.invalid}
+      - OIDC_CLIENT_SECRET_FILE=/run/dashboard-secrets/oidc-client-secret
+      - OIDC_SESSION_REDIS_URL=redis://oidc-sessions:6379/0
+      - AUTH_ACCOUNT_URL=${AUTH_ACCOUNT_URL:-https://auth.example.invalid/realms/apiary/account/}
       - EXPECTED_SENSORS=cowrie,multipot,http,api-honeypot,dionaea,dnp3,dicompot,dns-honeypot,citrix-honeypot,cisco-asa-honeypot,rdp-honeypot,conpot,conpot-s7-1200,conpot-s7-1500,conpot-iec104,conpot-guardian,conpot-kamstrup,tanner,suricata,endlessh
       - ALERT_WEBHOOK_URL=${HONEYPOT_ALERT_WEBHOOK_URL:-}
       - TZ=Europe/Berlin
     networks:
       - honeynet
       - honeypot-llm
+      - oidc-session
     healthcheck:
       test: ["CMD", "/usr/local/bin/dashboard", "-healthcheck"]
       interval: 15s
@@ -320,6 +345,9 @@ services:
     image: honeypot-dashboard:latest
     container_name: hp-dashboard-b
     restart: unless-stopped
+    depends_on:
+      oidc-sessions:
+        condition: service_healthy
     ports:
       - ${HP_BIND:-10.8.0.2}:19092:8080
     volumes: *dashboard-volumes
@@ -373,11 +401,11 @@ services:
       - DASHBOARD_REQUIRE_ADMIN=${DASHBOARD_REQUIRE_ADMIN:-true}
       - MODEL_STATUS_SOCKET=/model-status/status.sock
       - SERVICES_ADAPTER_SOCKET=/run/services-adapter/control.sock
-      - AUTH_INTROSPECTION_URL=${AUTH_INTROSPECTION_URL:-https://auth.honeypot.example/_auth/introspect}
-      - AUTH_INTROSPECTION_TOKEN=${AUTH_INTROSPECTION_TOKEN:-}
-      - AUTH_TARGET_HOST=${AUTH_TARGET_HOST:-honeypot.example}
-      - AUTH_SESSION_COOKIE_NAME=${AUTH_SESSION_COOKIE_NAME:-xore_sso}
-      - AUTH_ACCOUNT_URL=${AUTH_ACCOUNT_URL:-https://auth.honeypot.example/auth/app?pane=account}
+      - OIDC_ISSUER_URL=${OIDC_ISSUER_URL:-https://auth.example.invalid/realms/apiary}
+      - OIDC_EXTERNAL_URL=${OIDC_EXTERNAL_URL:-https://honeypot.example.invalid}
+      - OIDC_CLIENT_SECRET_FILE=/run/dashboard-secrets/oidc-client-secret
+      - OIDC_SESSION_REDIS_URL=redis://oidc-sessions:6379/0
+      - AUTH_ACCOUNT_URL=${AUTH_ACCOUNT_URL:-https://auth.example.invalid/realms/apiary/account/}
       - EXPECTED_SENSORS=cowrie,multipot,http,api-honeypot,dionaea,dnp3,dicompot,dns-honeypot,citrix-honeypot,cisco-asa-honeypot,rdp-honeypot,conpot,conpot-s7-1200,conpot-s7-1500,conpot-iec104,conpot-guardian,conpot-kamstrup,tanner,suricata,endlessh
       - ALERT_WEBHOOK_URL=${HONEYPOT_ALERT_WEBHOOK_URL:-}
       - TZ=Europe/Berlin
@@ -387,6 +415,7 @@ services:
     networks:
       - honeynet
       - honeypot-llm
+      - oidc-session
     healthcheck:
       test: ["CMD", "/usr/local/bin/dashboard", "-healthcheck"]
       interval: 15s
@@ -520,6 +549,8 @@ services:
           memory: 64M
 
 networks:
+  oidc-session:
+    internal: true
   # Shared with the main stack -- explicit fixed name, not project-prefixed,
   # non-external. See this file's header.
   honeynet:

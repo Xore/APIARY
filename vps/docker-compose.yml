@@ -36,6 +36,12 @@ services:
       - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
       - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
       - ./traefik/certs:/etc/traefik/certs:ro
+      - type: bind
+        source: ${KEYCLOAK_ADMIN_HTPASSWD_FILE:-./secrets/keycloak-admin.htpasswd}
+        target: /run/traefik-secrets/keycloak-admin.htpasswd
+        read_only: true
+        bind:
+          create_host_path: false
     networks:
       - proxy
     # #117: `traefik healthcheck` does a full binary re-exec (new Go runtime
@@ -362,6 +368,16 @@ services:
     container_name: socat-hp-dashboard-b
     restart: unless-stopped
     command: TCP4-LISTEN:8092,fork,reuseaddr TCP4:10.8.0.2:19092
+    networks: [proxy]
+
+  # Candidate Keycloak path. The public auth router remains on the legacy
+  # service until realm/theme/consumer validation passes the hard-cutover
+  # gate; this bridge makes the Dockge stack reachable for that validation.
+  socat-hp-keycloak:
+    image: alpine/socat:latest
+    container_name: socat-hp-keycloak
+    restart: unless-stopped
+    command: TCP4-LISTEN:8080,fork,reuseaddr TCP4:10.8.0.2:18080
     networks: [proxy]
 
   socat-hp-kibana:
