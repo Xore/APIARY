@@ -121,13 +121,13 @@ func TestRenderThemedReportPDF(t *testing.T) {
 	if !strings.Contains(text, dangerColor) {
 		t.Fatalf("critical risk rating must use the theme danger color %q", dangerColor)
 	}
-	if strings.Contains(text, "XORE//APIARY") {
+	if strings.Contains(text, "PRIVATE - APIARY") {
 		t.Fatal("custom branding must fully replace the default header and footer")
 	}
 
-	// The dark default keeps the historical identity and palette.
+	// The dark default keeps the canonical APIARY identity and palette.
 	dark := string(renderSecurityReportPDF(data))
-	if !strings.Contains(dark, "XORE//APIARY") || !strings.Contains(dark, "PRIVATE - XORE//APIARY") {
+	if !strings.Contains(dark, "APIARY") || !strings.Contains(dark, "PRIVATE - APIARY") {
 		t.Fatal("default report must keep the deployment header and footer")
 	}
 	darkPage := pdfThemeDark().Page

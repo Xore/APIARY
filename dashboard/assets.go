@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
+	"net/http"
 	"strings"
 	"sync"
 )
@@ -16,6 +17,18 @@ import (
 var staticAssets embed.FS
 
 var assetQueries sync.Map
+
+func staticAssetHandler() http.Handler {
+	files := http.FileServer(http.FS(staticAssets))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=604800, immutable")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		if strings.HasSuffix(r.URL.Path, ".webmanifest") {
+			w.Header().Set("Content-Type", "application/manifest+json")
+		}
+		files.ServeHTTP(w, r)
+	})
+}
 
 // assetURL appends a content hash to a /static reference so a browser fetches
 // the file again exactly when it has changed.

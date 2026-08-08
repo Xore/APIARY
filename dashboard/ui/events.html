@@ -33,21 +33,6 @@
 <meta name="robots" content="noindex, nofollow">
 <title>{{brandText}} — {{if .Chain}}attack chain {{.IP}}{{else}}events{{end}}</title>
 {{template "style" .}}
-<style nonce="{{.Nonce}}">
-/* #278: check/uncheck-to-filter menu isolating specific IPs behind a shared
-   fingerprint. Reuses .hp-open-in's floating-panel shell (event row "Open
-   in…" menu, same file); these rules cover the form-specific parts only. */
-.hp-ip-filter-menu { min-width: 260px; }
-.hp-ip-filter-list { max-height: 260px; overflow-y: auto; margin-bottom: 8px; }
-.hp-ip-filter-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: var(--radius-control); font-size: 12.5px; }
-.hp-ip-filter-row:hover { background: var(--surface-2); }
-.hp-ip-filter-row input[type="checkbox"] { accent-color: var(--accent); flex: none; }
-.hp-ip-filter-ip { flex: 1; min-width: 0; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hp-ip-filter-count { flex: none; color: var(--text-muted); font-size: 11px; }
-.hp-ip-filter-add { width: 100%; background: var(--surface-0); border: 1px solid var(--border-subtle); border-radius: var(--radius-control); color: var(--text-primary); padding: 6px 10px; font-size: 12.5px; margin: 4px 0 8px; }
-.hp-ip-filter-add:focus { outline: none; border-color: var(--border-focus); }
-.hp-ip-filter-actions { display: flex; gap: 8px; padding: 0 4px; }
-</style>
 </head>
 <body>
 <div class="app-shell">
@@ -125,4 +110,3 @@
 </body>
 </html>
 {{end}}
-

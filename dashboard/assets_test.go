@@ -1,10 +1,24 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
 )
+
+func TestWebManifestUsesStandardContentType(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/static/site.webmanifest", nil)
+	response := httptest.NewRecorder()
+	staticAssetHandler().ServeHTTP(response, req)
+	if response.Code != http.StatusOK {
+		t.Fatalf("manifest status = %d, want 200", response.Code)
+	}
+	if got := response.Header().Get("Content-Type"); got != "application/manifest+json" {
+		t.Fatalf("manifest Content-Type = %q, want application/manifest+json", got)
+	}
+}
 
 // Static assets are served immutable for a week, so the query string is the
 // only thing that can ever make a browser fetch a changed script. It used to

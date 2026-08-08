@@ -13,6 +13,11 @@ the approved bee-and-honeycomb preset into web, repository, social, favicon,
 and print-ready forms while matching the production dashboard's established
 dark and light palettes.
 
+`Xore/theme` remains the implementation authority for dashboard CSS. The
+portable tokens and website starter in this folder mirror that contract, but
+dashboard selectors must be added upstream and re-vendored; APIARY carries no
+custom dashboard stylesheet.
+
 **Live specimen:** <https://xore.github.io/APIARY/>
 
 ## Quick asset selection
@@ -22,6 +27,7 @@ dark and light palettes.
 | Dark website, README, or slide | `assets/logo/apiary-lockup-for-dark.png` |
 | Light website, document, or print | `assets/logo/apiary-lockup-for-light.png` |
 | App navigation, avatar, or square placement | `assets/logo/apiary-mark-for-dark.png` or `apiary-mark-for-light.png` |
+| Navigation below 64 px | `assets/logo/apiary-compact-mark-for-dark.png` or `apiary-compact-mark-for-light.png` |
 | Small horizontal placement | `assets/logo/apiary-wordmark-for-dark.png` or `apiary-wordmark-for-light.png` |
 | Fixed dark/light raster | `assets/logo/apiary-lockup-on-charcoal.png` or `apiary-lockup-on-ivory.png` |
 | Browser and installed-app icons | `assets/favicon/` |
@@ -60,7 +66,7 @@ Rules:
 | Raised surface | `#383835` | table heads and emphasized panels |
 | Primary text | `#e9e6df` | headings and body copy |
 | Secondary text | `#a8a49c` | descriptions |
-| Muted text | `#8c8f8d` | metadata |
+| Muted text | `#a5a9a6` | metadata |
 | Copper | `#d97757` | brand accent and primary actions |
 
 ### Light interface
@@ -69,24 +75,24 @@ Rules:
 |---|---:|---|
 | Background | `#f7f6f2` | page and print canvas |
 | Sidebar | `#f0efeb` | navigation and header bands |
-| Surface | `#fbfaf7` | cards and controls |
-| Raised surface | `#ebe9e3` | table heads and emphasized panels |
+| Surface | `#f4f2ed` | cards and controls |
+| Raised surface | `#fffefa` | emphasized panels and dialogs |
 | Primary text | `#2f2b27` | headings and body copy |
 | Secondary text | `#68615a` | descriptions |
-| Muted text | `#918a82` | metadata |
-| Copper | `#b9583c` | brand accent and primary actions |
+| Muted text | `#66615b` | metadata |
+| Copper | `#c76548` | brand accent and primary actions |
 
-Semantic colors are evidence states, not decoration: blue `#6da7ec` for links
-and information, green `#79c99e` for clean/success, amber `#deb36a` for warning,
-and red `#dc7774` for detected/high risk. Use their darker production values in
-light mode as defined in `tokens.json` and `apiary-theme.css`.
+Semantic colors are evidence states, not decoration. Dark mode uses link blue
+`#6da7ec`, information blue `#78a9d4`, green `#79c99e`, amber `#deb36a`, and
+red `#dc7774`; light-mode values live beside them in `tokens.json`.
 
 ## Typography and voice
 
-Use the native UI sans stack for prose and headings. Use the native monospace
-stack for evidence IDs, timestamps, hashes, protocol labels, and compact
-eyebrows. Large headings are tight and direct; operational copy is calm,
-specific, and free of hype.
+Use Fira Sans for prose, Space Grotesk for headings, and Fira Code for evidence
+IDs, timestamps, hashes, protocol labels, and compact eyebrows. The published
+stacks include platform-native fallbacks for offline or blocked font requests.
+Large headings are tight and direct; operational copy is calm, specific, and
+free of hype.
 
 Preferred voice examples:
 

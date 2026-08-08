@@ -5,15 +5,12 @@ import (
 	"fmt"
 )
 
-// watermarkGrayData is a 360x360 8-bit DeviceGray bitmap of the APIARY
-// emblem (docs/assets/apiary-logo.png, recolored to Xore/theme's palette),
-// zlib-compressed (compress/zlib-compatible /FlateDecode) so it can be
-// embedded directly as a PDF Image XObject stream without re-encoding at
-// request time. Regenerate via the same luminance-to-grayscale step
-// documented in the logo's own source, not by hand-editing this file.
+// watermarkMaskData is the detailed APIARY emblem encoded as a transparent
+// 360x360 one-bit image mask. Its color comes from the active report theme,
+// while the ExtGState below keeps it quiet behind the report content.
 //
-//go:embed assets_pdf/watermark.graydata
-var watermarkGrayData []byte
+//go:embed assets_pdf/watermark.maskdata
+var watermarkMaskData []byte
 
 const (
 	watermarkImageWidth  = 360
@@ -37,8 +34,8 @@ const pdfWatermarkGStateObjectNumber = 7
 
 func pdfWatermarkImageObject() []byte {
 	return []byte(fmt.Sprintf(
-		"<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode /Length %d >>\nstream\n",
-		watermarkImageWidth, watermarkImageHeight, len(watermarkGrayData)))
+		"<< /Type /XObject /Subtype /Image /Width %d /Height %d /ImageMask true /BitsPerComponent 1 /Decode [1 0] /Filter /FlateDecode /Length %d >>\nstream\n",
+		watermarkImageWidth, watermarkImageHeight, len(watermarkMaskData)))
 }
 
 func pdfWatermarkGStateObject() []byte {
@@ -54,6 +51,7 @@ func pdfWatermarkGStateObject() []byte {
 func (w *pdfReportWriter) drawWatermark() {
 	x := (pdfPageWidth - watermarkSize) / 2
 	y := (pdfPageHeight - watermarkSize) / 2
-	fmt.Fprintf(&w.page.content, "q /GS1 gs %.2f 0 0 %.2f %.2f %.2f cm /Wm Do Q\n",
-		watermarkSize, watermarkSize, x, y)
+	t := w.theme()
+	fmt.Fprintf(&w.page.content, "q /GS1 gs %.3f %.3f %.3f rg %.2f 0 0 %.2f %.2f %.2f cm /Wm Do Q\n",
+		t.Accent.r, t.Accent.g, t.Accent.b, watermarkSize, watermarkSize, x, y)
 }

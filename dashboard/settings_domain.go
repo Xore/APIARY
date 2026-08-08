@@ -118,11 +118,10 @@ func migrateAddDefaultTimezone(payload json.RawMessage) (json.RawMessage, error)
 
 // migrateAddBrandPrefix backfills presentation.brand_prefix (#776) for
 // payloads persisted before the accent prefix was split out of app_name.
-// If the existing app_name already starts with the compiled default prefix
-// ("XORE//"), the prefix is peeled off into its own field so the composed
-// brand renders identically to before. Otherwise the operator's app_name is
-// left untouched and brand_prefix defaults to empty -- a custom name that
-// never had "XORE//" in it shouldn't suddenly grow one.
+// If the existing app_name already starts with a non-empty compiled default
+// prefix, the prefix is peeled off into its own field so the composed brand
+// renders identically to before. Otherwise the operator's app_name is left
+// untouched and brand_prefix defaults to empty.
 func migrateAddBrandPrefix(payload json.RawMessage) (json.RawMessage, error) {
 	var doc map[string]json.RawMessage
 	if err := json.Unmarshal(payload, &doc); err != nil {
@@ -145,7 +144,7 @@ func migrateAddBrandPrefix(payload json.RawMessage) (json.RawMessage, error) {
 	}
 	defaultPrefix := defaultDashboardConfig().Presentation.BrandPrefix
 	prefix := ""
-	if strings.HasPrefix(appName, defaultPrefix) {
+	if defaultPrefix != "" && strings.HasPrefix(appName, defaultPrefix) {
 		prefix = defaultPrefix
 		appName = strings.TrimPrefix(appName, defaultPrefix)
 	}
@@ -330,7 +329,7 @@ func validTimezone(tz string) bool {
 
 type presentationConfig struct {
 	// BrandPrefix (#776) is the accent-styled lead-in rendered before AppName
-	// (default "XORE//") -- split out so an operator can rebrand the product
+	// (empty by default) -- split out so an operator can rebrand the product
 	// name without losing the prefix, or drop the prefix entirely for a
 	// white-label deployment, independently of AppName.
 	BrandPrefix       string `json:"brand_prefix"`
@@ -416,7 +415,7 @@ type dashboardConfig struct {
 func defaultDashboardConfig() dashboardConfig {
 	return dashboardConfig{
 		Presentation: presentationConfig{
-			BrandPrefix:    "XORE//",
+			BrandPrefix:    "",
 			AppName:        "APIARY",
 			ProductLabel:   "Defensive operations",
 			DashboardTitle: "Honeypot command center",

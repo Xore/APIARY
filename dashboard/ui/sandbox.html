@@ -6,24 +6,6 @@
 <meta name="robots" content="noindex, nofollow">
 <title>{{brandText}} &mdash; sandbox results</title>
 {{template "style" .}}
-<style nonce="{{.Nonce}}">
-/* #673: secondary hashes (MD5/SHA-1) consolidated into an action-menu
-   popover instead of two always-visible table rows -- same pattern
-   payload-analysis's Identity card already uses, duplicated here rather
-   than shared via theme.css since every other page-specific component
-   class in this dashboard (.hp-rp-*, .hp-pl-*) already follows that
-   per-page-scoped convention. SHA-256 stays in the table: it's this run's
-   own primary identifier, not a secondary lookup. */
-.hp-sb-info-popover { width: 300px; }
-.hp-sb-info-row { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; font-size: 12px; }
-.hp-sb-info-row .k { color: var(--text-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; }
-.hp-sb-info-row .v { color: var(--text-primary); font-family: var(--hp-mono); word-break: break-all; }
-.hp-sb-label-trigger.action-menu { margin-left: 8px; vertical-align: middle; }
-.hp-sb-label-trigger.action-menu > summary {
-  width: auto; height: auto; min-height: 24px;
-  padding: 3px 10px; font-size: 11px; border-radius: var(--radius-pill);
-}
-</style>
 </head>
 <body>
 <div class="app-shell">
@@ -237,4 +219,3 @@
 </body>
 </html>
 {{end}}
-

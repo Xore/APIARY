@@ -1,4 +1,6 @@
-/* APIARY brand theme - reusable, dependency-free, dark-first website foundation. */
+/* APIARY brand theme - reusable, dark-first website foundation aligned to Xore/theme. */
+@import url("https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap");
+
 :root {
   color-scheme: dark;
   --apiary-bg: #20201f;
@@ -9,7 +11,7 @@
   --apiary-border-strong: rgba(255, 255, 255, 0.16);
   --apiary-text: #e9e6df;
   --apiary-text-secondary: #a8a49c;
-  --apiary-text-muted: #8c8f8d;
+  --apiary-text-muted: #a5a9a6;
   --apiary-copper: #d97757;
   --apiary-copper-hover: #e18768;
   --apiary-copper-pressed: #c9684b;
@@ -23,24 +25,25 @@
   --apiary-radius-lg: 18px;
   --apiary-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 18px 56px rgba(0, 0, 0, 0.3);
   --apiary-content: 1180px;
-  --apiary-font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --apiary-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --apiary-font: "Fira Sans", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --apiary-display: "Space Grotesk", "Fira Sans", "Segoe UI", system-ui, sans-serif;
+  --apiary-mono: "Fira Code", "SFMono-Regular", "Cascadia Code", "Roboto Mono", ui-monospace, monospace;
 }
 
 [data-theme="light"] {
   color-scheme: light;
   --apiary-bg: #f7f6f2;
   --apiary-sidebar: #f0efeb;
-  --apiary-surface: #fbfaf7;
-  --apiary-surface-raised: #ebe9e3;
+  --apiary-surface: #f4f2ed;
+  --apiary-surface-raised: #fffefa;
   --apiary-border: rgba(34, 31, 28, 0.10);
   --apiary-border-strong: rgba(34, 31, 28, 0.19);
   --apiary-text: #2f2b27;
   --apiary-text-secondary: #68615a;
-  --apiary-text-muted: #918a82;
-  --apiary-copper: #b9583c;
-  --apiary-copper-hover: #a74b33;
-  --apiary-copper-pressed: #8f3f2e;
+  --apiary-text-muted: #66615b;
+  --apiary-copper: #c76548;
+  --apiary-copper-hover: #b9583c;
+  --apiary-copper-pressed: #a74b33;
   --apiary-copper-soft: rgba(199, 101, 72, 0.12);
   --apiary-link: #2a78d6;
   --apiary-success: #3f8764;
@@ -60,6 +63,8 @@ body {
   font: 15px/1.6 var(--apiary-font);
   text-rendering: optimizeLegibility;
 }
+
+h1, h2, h3, h4 { font-family: var(--apiary-display); }
 
 a { color: inherit; }
 button, input { font: inherit; }

@@ -104,39 +104,6 @@
 <meta name="robots" content="noindex,nofollow">
 <title>{{brandText}} — payload analysis</title>
 {{template "style" .}}
-<style nonce="{{.Nonce}}">
-/* #474: PDF report viewer, an application-managed overlay per the shared
-   modal contract (Xore/theme docs/MODALS.md) -- same shape as
-   github_analysis.html's .hp-ga-viewer (one PDF at a time, not a grid of
-   many generated reports the way reports.html's own viewer handles). */
-.hp-pl-viewer { flex-direction: column; width: min(1000px, calc(100vw - 40px)); height: min(860px, calc(100dvh - 48px)); padding: 20px 20px 0; }
-.hp-pl-viewer #hp-pl-viewer-title { flex: none; margin: 0 40px 12px 0; font-size: var(--font-size-lg); }
-.hp-pl-viewer-frame { flex: 1; width: 100%; min-height: 0; border: 0; background: var(--surface-0); margin: 0 -20px; }
-@media (max-width: 720px) {
-  .hp-pl-viewer { width: 100vw; height: 100dvh; border-radius: 0; }
-}
-/* #673: origin/hash info consolidated into action-menu popovers instead of
-   a bare chip (origin) or three always-visible table rows (secondary
-   hashes) -- the default .action-menu__popover width (200px) is too
-   narrow for a 40-char MD5/SHA-1 without ugly wrapping, so this scoped,
-   wider variant applies only where this page opts in. */
-.hp-pl-info-popover { width: 300px; }
-.hp-pl-info-row { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; font-size: 12px; }
-.hp-pl-info-row .k { color: var(--text-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; }
-.hp-pl-info-row .v { color: var(--text-primary); font-family: var(--hp-mono); word-break: break-all; }
-/* .action-menu > summary is sized/fonted for a single icon glyph (32x32px,
-   20px font, the "..." kebab trigger) -- fine for that, broken for a text
-   label like "Origin"/"More hashes" (the label overflows the fixed box).
-   Both new text-label triggers opt out of that sizing and take .chip's own
-   pill shape instead, so they read as siblings of the chips/heading they
-   sit next to rather than an oversized, clipped icon button. */
-.hp-pl-label-trigger.action-menu > summary {
-  width: auto; height: auto; min-height: 32px;
-  padding: 6px 14px; font-size: 12.5px; border-radius: var(--radius-pill);
-}
-#panel-identity h2 .hp-pl-label-trigger { margin-left: 8px; vertical-align: middle; }
-#panel-identity h2 .hp-pl-label-trigger > summary { min-height: 24px; padding: 3px 10px; font-size: 11px; }
-</style>
 </head>
 <body>
 <div class="app-shell">
@@ -263,10 +230,10 @@
     </main>
 </div>
 <div class="modal-backdrop" id="hp-pl-viewer-backdrop" aria-hidden="true" inert></div>
-<section class="modal hp-pl-viewer" id="hp-pl-viewer" role="dialog" aria-modal="true" aria-labelledby="hp-pl-viewer-title" aria-hidden="true" inert>
+<section class="modal pdf-viewer-modal" id="hp-pl-viewer" role="dialog" aria-modal="true" aria-labelledby="hp-pl-viewer-title" aria-hidden="true" inert>
   <button class="modal__close" type="button" id="hp-pl-viewer-close" aria-label="Close report viewer">&#10005;</button>
-  <h2 id="hp-pl-viewer-title">Payload report</h2>
-  <iframe class="hp-pl-viewer-frame" id="hp-pl-viewer-frame" title="Payload PDF report preview"></iframe>
+  <h2 class="pdf-viewer-title" id="hp-pl-viewer-title">Payload report</h2>
+  <iframe class="pdf-viewer-frame" id="hp-pl-viewer-frame" title="Payload PDF report preview"></iframe>
 </section>
 <script defer src="{{asset "/static/hp-payload-report.js"}}"></script>
 </body>

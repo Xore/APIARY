@@ -85,7 +85,7 @@ func TestShellRendersConfiguredPresentation(t *testing.T) {
 func TestShellDefaultsRenderUnchangedCopy(t *testing.T) {
 	html := renderOverview(t, nil)
 	for _, want := range []string{
-		"XORE<span class=\"hp-brand-accent\">//</span>APIARY",
+		">APIARY</strong>",
 		"<small>Defensive operations</small>",
 		"<h1>Honeypot command center</h1>",
 		"Live attack telemetry, captured evidence",

@@ -121,6 +121,8 @@ jobs:
       - uses: actions/checkout@v7
       - name: theme.css matches the pinned commit
         run: scripts/check-vendored-theme.sh
+      - name: Portable APIARY tokens match Xore/theme
+        run: python branding/scripts/check_theme_sync.py
 
   vendored-novnc:
     name: Vendored noVNC is in sync

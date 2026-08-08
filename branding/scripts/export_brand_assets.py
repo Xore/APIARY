@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import zlib
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -16,6 +17,8 @@ SOURCE = BRAND / "source"
 LOGO = BRAND / "assets" / "logo"
 FAVICON = BRAND / "assets" / "favicon"
 SOCIAL = BRAND / "assets" / "social"
+DASHBOARD_STATIC = ROOT / "dashboard" / "static"
+PDF_ASSETS = ROOT / "dashboard" / "assets_pdf"
 
 CHARCOAL = (32, 32, 31)
 IVORY = (247, 246, 242)
@@ -23,6 +26,8 @@ COPPER_DARK_TOP = (225, 135, 104)
 COPPER_DARK_BOTTOM = (201, 104, 75)
 COPPER_LIGHT_TOP = (185, 88, 60)
 COPPER_LIGHT_BOTTOM = (143, 63, 46)
+COPPER_DARK = (217, 119, 87)
+COPPER_LIGHT = (199, 101, 72)
 
 
 def ensure_dirs() -> None:
@@ -85,6 +90,49 @@ def save_png(image: Image.Image, path: Path) -> None:
     image.save(path, "PNG", optimize=True)
 
 
+def compact_mark(source: Image.Image, color: tuple[int, int, int], size: int = 64) -> Image.Image:
+    """Recover the optically simplified favicon geometry on transparent copper."""
+    source = source.convert("RGB")
+    alpha = Image.new("L", source.size)
+    alpha.putdata([
+        min(255, max(0, pixel[0] - max(pixel[1], pixel[2]) - 14) * 12)
+        for y in range(source.height)
+        for x in range(source.width)
+        for pixel in (source.getpixel((x, y)),)
+    ])
+    alpha = alpha.resize((size, size), Image.Resampling.LANCZOS)
+    result = Image.new("RGBA", (size, size), (*color, 255))
+    result.putalpha(alpha)
+    return result
+
+
+def export_pdf_mask(image: Image.Image, path: Path, threshold: int = 64) -> None:
+    """Write transparent alpha geometry as a compressed one-bit PDF stencil."""
+    alpha = image.getchannel("A")
+    packed = bytearray()
+    for y in range(alpha.height):
+        for x0 in range(0, alpha.width, 8):
+            value = 0
+            for bit in range(8):
+                x = x0 + bit
+                if x < alpha.width and alpha.getpixel((x, y)) >= threshold:
+                    value |= 1 << (7 - bit)
+            packed.append(value)
+    PDF_ASSETS.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(zlib.compress(bytes(packed), level=9))
+
+
+def export_pdf_header_mark(mark: Image.Image) -> None:
+    """Write the compact 64px PDF header stencil."""
+    export_pdf_mask(mark, PDF_ASSETS / "apiary-header-mark.maskdata")
+
+
+def export_pdf_watermark(mark: Image.Image) -> None:
+    """Write the detailed emblem without the rectangular raster background."""
+    fitted = contain(mark, (360, 360), 18)
+    export_pdf_mask(fitted, PDF_ASSETS / "watermark.maskdata", threshold=32)
+
+
 def export_logos() -> dict[str, Image.Image]:
     lockup_mask = Image.open(SOURCE / "apiary-lockup-alpha-mask.png").convert("RGBA")
     mark_mask = Image.open(SOURCE / "apiary-mark-alpha-mask.png").convert("RGBA")
@@ -138,9 +186,9 @@ def export_favicons() -> None:
         "icon-512.png": "icon-512.png",
     }
     for source_name, target_name in mapping.items():
-        shutil.copy2(ROOT / "dashboard" / "static" / source_name, FAVICON / target_name)
+        shutil.copy2(DASHBOARD_STATIC / source_name, FAVICON / target_name)
 
-    favicon_48 = Image.open(ROOT / "dashboard" / "static" / "brand-mark@2x.png").convert("RGBA")
+    favicon_48 = Image.open(DASHBOARD_STATIC / "brand-mark@2x.png").convert("RGBA")
     favicon_48 = favicon_48.resize((48, 48), Image.Resampling.LANCZOS)
     save_png(favicon_48, FAVICON / "favicon-48x48.png")
 
@@ -148,6 +196,9 @@ def export_favicons() -> None:
         "name": "APIARY",
         "short_name": "APIARY",
         "description": "Automated Payload Intelligence & Attacker Response",
+        "id": "/",
+        "start_url": "/",
+        "scope": "/",
         "icons": [
             {"src": "icon-192.png", "sizes": "192x192", "type": "image/png"},
             {"src": "icon-512.png", "sizes": "512x512", "type": "image/png"},
@@ -156,7 +207,21 @@ def export_favicons() -> None:
         "background_color": "#20201f",
         "display": "standalone",
     }
-    (FAVICON / "site.webmanifest").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    manifest_text = json.dumps(manifest, indent=2) + "\n"
+    (FAVICON / "site.webmanifest").write_text(manifest_text, encoding="utf-8")
+    (DASHBOARD_STATIC / "site.webmanifest").write_text(manifest_text, encoding="utf-8")
+
+    source = Image.open(DASHBOARD_STATIC / "favicon-32x32.png")
+    compact_assets: dict[str, Image.Image] = {}
+    for name, color in (
+        ("apiary-compact-mark-for-dark.png", COPPER_DARK),
+        ("apiary-compact-mark-for-light.png", COPPER_LIGHT),
+    ):
+        mark = compact_mark(source, color)
+        compact_assets[name] = mark
+        save_png(mark, LOGO / name)
+        save_png(mark, DASHBOARD_STATIC / name)
+    export_pdf_header_mark(compact_assets["apiary-compact-mark-for-dark.png"])
 
 
 def export_social(assets: dict[str, Image.Image]) -> None:
@@ -178,6 +243,7 @@ def main() -> None:
     ensure_dirs()
     assets = export_logos()
     export_favicons()
+    export_pdf_watermark(assets["mark_dark"])
     export_social(assets)
     print("Exported APIARY brand assets to", BRAND / "assets")
 
