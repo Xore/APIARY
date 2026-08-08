@@ -877,10 +877,7 @@ flowchart TB
   staticCache[("Elasticsearch<br/>dashboard-static-analysis-v1<br/>content-hash keyed, immutable")]
   staticRules["Built-in static classification<br/>MIME, type, platform, strings,<br/>entropy and deterministic rules"]
   analyst["Authenticated analyst"]
-  sandboxRequest["Admin-only sandbox request"]
-  ghidraRequest["Admin-only Ghidra request"]
-  ghidraWorker["Host-owned worker<br/>(analysis/ghidra/worker/ghidra-worker.py)"]
-  ghidraResult[("{sha256}_ghidra.json")]
+  workbench["Payload workbench —<br/>/payload-workbench/{sha256}<br/>up to 5 analyzers per run,<br/>fixed 7-analyzer registry"]
 
   attacker --> cowrie
   attacker --> dionaea
@@ -906,11 +903,8 @@ flowchart TB
   inventory --> staticRules
   staticRules -.->|"cache get/put,<br/>content-hash keyed"| staticCache
   staticRules --> analyst
-  analyst -->|"optional explicit action"| sandboxRequest
-  analyst -->|"optional explicit action"| ghidraRequest
-  ghidraRequest -.->|"hash-only .request marker,<br/>same spool pattern as the sandbox"| ghidraWorker
-  ghidraWorker --> ghidraResult
-  ghidraResult --> analyst
+  analyst -->|"optional explicit action"| workbench
+  workbench -.->|"hash-only .request marker per<br/>selected analyzer, same spool<br/>pattern every native route uses"| analyst
 ```
 
 Captured samples are content, never configuration. Cowrie stores uploaded and
@@ -936,16 +930,25 @@ by content hash — content-addressed and immutable, so a cache hit never needs
 invalidating, only a get-or-create write on first computation. These are
 triage signals, not proof of behavior or attribution.
 
-A Ghidra request is the same idempotent hash-only handoff as a sandbox
-request — no sample bytes, path, or command crosses the dashboard/host
-boundary — but it runs unconditionally on anything with code in it, including
-the PE DLLs and documents the sandbox correctly refuses to detonate. The
-host-owned worker drains the request spool, talks to a headless Ghidra REST
-service and a local-only fuzzy-hashing/structural-parsing sidecar
-(`analysis/ghidra/statictools/`), and optionally an on-host language model for
-a first-pass triage opinion — never a hosted one, and never given anything but
-what Ghidra already extracted. See [`analysis/ghidra/README.md`](analysis/ghidra/README.md)
-for the full pipeline.
+**The analyst's dispatch point is the payload workbench, not two standalone
+"sandbox request"/"Ghidra request" buttons.** `/payload-workbench/{sha256}`
+selects up to 5 analyzers per run from a fixed, server-computed registry of
+7: deterministic local analysis, Ghidra, the Linux sandbox, the isolated
+Windows sandbox, the WAN-permitted Windows/GHOSTS sandbox, Rev·Deck, and
+CAPE — see [`docs/payload-analysis-workbench.md`](payload-analysis-workbench.md)
+for the full registry table, orchestration sequence, and idempotency model.
+Every analyzer still resolves to the same hash-only `.request` marker
+handoff — no sample bytes, path, or command ever crosses — a Ghidra request
+in particular runs unconditionally on anything with code in it, including
+the PE DLLs and documents the sandbox routes correctly refuse to detonate.
+The host-owned Ghidra worker drains its request spool, talks to a headless
+Ghidra REST service and a local-only fuzzy-hashing/structural-parsing
+sidecar (`analysis/ghidra/statictools/`), and optionally an on-host
+language model for a first-pass triage opinion — never a hosted one, and
+never given anything but what Ghidra already extracted. See
+[`analysis/ghidra/README.md`](analysis/ghidra/README.md) for the full Ghidra
+pipeline, and ["Sandbox submission, detonation, and result return"](#sandbox-submission-detonation-and-result-return)
+below for the dynamic-detonation routes.
 
 ## Sandbox submission, detonation, and result return
 
