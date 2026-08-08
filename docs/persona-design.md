@@ -39,17 +39,19 @@ The tradeoff is real in both directions:
 | Honeypot | Outbound | Why |
 |---|---|---|
 | Cowrie | Allowed (flag: `COWRIE_AIR_GAPPED`, default `false`) | The one sensor in this stack designed around capturing attacker-fetched malware — its whole SSH/Telnet fake-shell premise is attackers running `wget`/`curl`/`tftp` against real URLs. See `docker-compose.cowrie.yml`'s `cowrie_net`. |
-| Dionaea | Allowed (no flag yet) | Captures shellcode/binaries pushed *to* it over SMB/FTP/TFTP/etc — doesn't itself fetch anything outbound today, but its network has never been air-gapped either; no incident or design doc has required tightening it. |
-| Everything else (Conpot personas, DNP3, HTTP/API honeypot, multipot, dicompot, dns-honeypot, citrix-honeypot, cisco-asa-honeypot, rdp-honeypot, Tanner/Snare) | Allowed, no design reason either way | None of these protocols involve the honeypot fetching attacker-supplied URLs — outbound access is unused in the intended interaction, just never explicitly closed off. An operator who wants maximum containment can set `internal: true` directly on that sensor's network in its compose file without losing anything these honeypots actually rely on. |
+| Dionaea | Allowed (flag: `DIONAEA_AIR_GAPPED`, default `false`) | Same tradeoff as Cowrie (#269/#538): captures shellcode/binaries pushed *to* it over SMB/FTP/TFTP/etc, which both ship enabled by default — this is the attacker's actual malware sample, not just the exploit attempt. See `docker-compose.dionaea.yml`'s `dionaea_net` (#541). `internal: true` still permits `tftp-relay`'s inbound forwarding on the same network — it only removes the outbound route. |
+| Tanner/Snare | Allowed (flag: `TANNER_AIR_GAPPED`, default `false`) | Same tradeoff as Cowrie and Dionaea: the `template_injection` emulator fetches real RFI payloads when enabled, capturing the attacker's actual payload instead of just the RFI attempt. See `docker-compose.tanner.yml`'s `tanner_local`. Setting the flag also breaks the emulator's own `REMOTE_DOCKERFILE` self-maintenance fetch (`raw.githubusercontent.com`) — a real cost, not just a capture-vs-safety tradeoff. |
+| Everything else (Conpot personas, DNP3, HTTP/API honeypot, multipot, dicompot, dns-honeypot, citrix-honeypot, cisco-asa-honeypot, rdp-honeypot) | Allowed, no design reason either way | None of these protocols involve the honeypot fetching attacker-supplied URLs — outbound access is unused in the intended interaction, just never explicitly closed off. An operator who wants maximum containment can set `internal: true` directly on that sensor's network in its compose file without losing anything these honeypots actually rely on. |
 | `yara-scanner` (not a honeypot — offline payload analysis) | Blocked (`network_mode: none`) | Already air-gapped; scans captured files at rest, never needs network access at all. The one existing precedent this decision extends. |
 
 `COWRIE_AIR_GAPPED=true` (`.env`) sets `internal: true` on `cowrie_net`,
 fully removing its outbound route — Docker enforces this at the network
 level, not by Cowrie's own config, so it holds even if `cowrie.cfg` changes.
-No other honeypot has this flag yet; add one the same way
-(`internal: ${<SENSOR>_AIR_GAPPED:-false}` on that sensor's own network) if
-a future sensor grows a real design reason to fetch attacker-supplied
-content the way Cowrie does.
+`DIONAEA_AIR_GAPPED` and `TANNER_AIR_GAPPED` follow the identical pattern
+(#541, #269/#538) on `dionaea_net` and `tanner_local` respectively. Add one
+the same way (`internal: ${<SENSOR>_AIR_GAPPED:-false}` on that sensor's
+own network) if a future sensor grows a real design reason to fetch
+attacker-supplied content the way these three do.
 
 ## 2. Host naming, banners, and network placement
 

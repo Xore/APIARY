@@ -65,8 +65,11 @@ from inside the guest.
 
 ## 3. Container isolation
 
-`docker-compose.yml` gives each honeypot its own single-member Docker network
-(`cowrie_net`, `dionaea_net`, `conpot_net`, `conpot_s7_1200_net`, and so on) —
+Each honeypot's own compose file (`docker-compose.cowrie.yml`,
+`docker-compose.dionaea.yml`, `docker-compose.conpot.yml`, etc. — split out
+of `docker-compose.yml` under #258, which is now an empty stub) gives it its
+own single-member Docker network (`cowrie_net`, `dionaea_net`, `conpot_net`,
+`conpot_s7_1200_net`, and so on) —
 [#235](https://github.com/Xore/APIARY/issues/235): the stack used to
 put every honeypot on one shared `honeynet` bridge with Docker's default
 inter-container communication, so a compromise of one honeypot had a direct

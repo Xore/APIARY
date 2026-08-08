@@ -80,10 +80,11 @@ produces the record that replaces this list; re-verify before pinning anything.
   runtime wheels.
 - nvidia-container-toolkit 1.19.1 present; `docker run --rm --gpus all
   nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi -L` succeeds.
-- Stack network is `honeynet`; the `analysis-net` referenced in
-  `ml-worker/docker-compose.override.yml` does not exist yet — either
-  create it or use `honeynet` consistently (decide once, apply to both
-  override files).
+- Stack network is `honeynet`. The old `ml-worker/docker-compose.override.yml`
+  targeted a network, `analysis-net`, that never existed anywhere in this
+  repository; that file has been replaced by `ml-worker/docker-compose.yml`
+  (its own Dockge stack), which joins `honeynet` as an external network —
+  resolved under #61.
 
 **Wheel compatibility rule for Turing (sm_75):** PyTorch CUDA wheels
 (`+cu126`) ship sm_75 kernels; they work. Flash-attention and
@@ -162,7 +163,7 @@ Rules:
 - Training (6 h retrain) uses fp32, batch size 128, and
   `torch.cuda.empty_cache()` after each retrain.
 
-### 4.4 `ml-worker/docker-compose.override.yml`
+### 4.4 `ml-worker/docker-compose.yml`
 
 ```diff
    ml-worker:
@@ -338,8 +339,8 @@ docker port hp-ml-worker   # expect: empty
 
 ```bash
 git checkout -- ml-worker/requirements.txt ml-worker/Dockerfile \
-                ml-worker/docker-compose.override.yml
-docker compose -f docker-compose.yml -f ml-worker/docker-compose.override.yml \
+                ml-worker/docker-compose.yml
+docker compose -f ml-worker/docker-compose.yml \
   up -d --build ml-worker
 # optional: drop derived data
 curl -XDELETE "http://<WG_IP>:9200/ml-embeddings"
@@ -388,7 +389,7 @@ The CPU-only image builds from the reverted files with no further changes
 | Step | Issue |
 |---|---|
 | Re-verify §3 — GPU, toolkit, network name — and confirm the pinned `+cu126` wheel on the real card | [#82](https://github.com/Xore/APIARY/issues/82) |
-| Resolve `analysis-net` vs `honeynet` across both override files | [#61](https://github.com/Xore/APIARY/issues/61) |
+| `analysis-net` vs `honeynet` — resolved: `ml-worker/docker-compose.yml` joins `honeynet` | [#61](https://github.com/Xore/APIARY/issues/61) (closed) |
 | The §4 diffs, `get_device()`, the OOM→CPU wrapper, `models/embedder.py` and the `ml-embeddings` index, acceptance tests T1–T7 | [#67](https://github.com/Xore/APIARY/issues/67) |
 | Retrain windows offset from the LLM report hour (§5) | [#84](https://github.com/Xore/APIARY/issues/84) |
 

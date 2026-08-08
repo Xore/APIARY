@@ -451,10 +451,13 @@ documented as present):
 ## 9. Dashboard UI Integration
 
 **Implemented (#64)** as its own route, `/ml-anomalies` (sidebar: Monitor
-group, next to Alerts), not an overview-page panel -- alerts have their own
-acknowledge/reopen workflow that doesn't apply to anomaly scores, and
-mixing the two on one page risked implying scores could be acted on the
-same way. Follows the existing read-only diagnostics pages (`/source-health`,
+group, next to Alerts), not an overview-page panel -- at the time, alerts had
+their own acknowledge/reopen workflow that didn't apply to anomaly scores,
+and mixing the two on one page risked implying scores could be acted on the
+same way. That gap has since been closed: `dashboard/ml_anomaly_ack.go`
+(#918, closing #913) adds an acknowledge/dismiss workflow for ml-anomalies
+too, backed by a `dashboard-ml-anomaly-ack-v1` ES index, modeled directly on
+`alertManager`'s pattern. Follows the existing read-only diagnostics pages (`/source-health`,
 `/dead-letters`): server-rendered from the in-memory cache on each request,
 refreshed on page load, no client-side polling and no changes to
 `stream.go`'s SSE contract.

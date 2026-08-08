@@ -18,9 +18,9 @@ This evaluation assumes Ollama as the serving layer throughout — see
 | Honeypot session analysis (#66) | Attacker-controlled commands and event text | Exact JSON summary, intent, MITRE techniques, IOCs, severity, and confidence | Prompt injection, missed IOCs, unsafe overconfidence, failure to recognize encoded/chunked activity |
 | Rev·Deck interactive analysis | Assembly, decompiler output, imports, strings, and analyst questions | Useful evidence-bounded explanation and next checks | Confusing fact and inference, shallow code understanding, cyber-analysis refusal, obeying strings/comments as instructions |
 
-These stay separately configurable as `GHIDRA_TRIAGE_MODEL`, the future
-worker's `LLM_MODEL`, and `REVDECK_MODEL`. Sharing one Ollama server does not
-make their quality requirements interchangeable.
+These stay separately configurable as `GHIDRA_TRIAGE_MODEL`, the #66 session-
+analysis worker's `LLM_MODEL`, and `REVDECK_MODEL`. Sharing one Ollama server
+does not make their quality requirements interchangeable.
 
 ## Test system
 
@@ -268,7 +268,7 @@ An initial control run left Ollama's default thinking enabled. It produced:
 The Qwen3.5 models spent the bounded generation on a hidden trace and returned
 no usable content in most cases. Explicit non-thinking mode is required for
 these bounded tasks. The Ghidra worker now sends `reasoning_effort: "none"`;
-the future #66 worker must send the equivalent. Rev·Deck's current upstream
+the #66 worker sends the equivalent. Rev·Deck's current upstream
 client does not expose that control, which matters when choosing its default.
 
 ## Decisions

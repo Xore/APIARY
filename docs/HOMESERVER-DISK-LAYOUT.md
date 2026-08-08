@@ -54,9 +54,17 @@ this scale (91G RAM, swap is a safety margin not a working set).
 
 The autoinstall config in
 [`docs/autoinstall/homeserver-user-data.yaml`](autoinstall/homeserver-user-data.yaml)
-reproduces the disk layout above using `curtin`'s storage config directly
-(the same declarative format subiquity itself generates — more precise
-and reviewable than driving the TUI). Boot an Ubuntu Server 24.04+ ISO with
+automates identity, SSH, network, and package setup, but **storage is
+intentionally left manual** — `interactive-sections: [storage]` makes
+subiquity stop and show its normal guided/manual partitioning screen
+instead of applying a `curtin` storage config. This isn't an oversight:
+`match:` filtering by size, serial, and wwn was each tried and either
+ambiguous (two identically-sized RAID LUNs) or actively wrong (wwn
+matching, even with values confirmed correct by a fresh probe, twice
+picked the USB installer stick instead of the target disk). `match:`
+does not reliably work for this hardware in this installer version, so
+manual partitioning at install time is the only approach proven not to
+put data on the wrong disk. Boot an Ubuntu Server 24.04+ ISO with
 `autoinstall` on the kernel command line (or bake it into a custom ISO)
 pointing at this file, e.g. served over HTTP:
 
@@ -69,18 +77,7 @@ with `homeserver-user-data.yaml` renamed to `user-data` alongside an empty
 `meta-data` file at that URL path, per Ubuntu's
 [autoinstall quick-start](https://canonical-subiquity.readthedocs-hosted.com/en/latest/tutorial/providing-autoinstall.html).
 
-**What the template captures:**
-- 4-disk layout above, matched by disk size range rather than
-  `/dev/sdX` device names (device letters aren't stable across boots or
-  hardware swaps — matching by size is more portable than hardcoding
-  `/dev/nvme0n1` etc., though you should still confirm the `match` blocks
-  against `lsblk -d -o NAME,SIZE,TRAN` on the target hardware before
-  trusting an unattended run).
-- GPT + EFI on the boot disk, ext4 root, no LVM (matches what's installed
-  today — this box does not use LVM).
-- `/var` as its own whole-disk xfs filesystem, `/mnt-1` and `/mnt-2` as
-  GPT+xfs single-partition disks.
-- 8G swapfile instead of a swap partition.
+**What the template automates:**
 - Static hostname `supermicro`, `Europe/Berlin` timezone, matching the
   live box — **change both** for a second/different build server; don't
   copy this file byte-for-byte onto new hardware without editing the
@@ -91,12 +88,23 @@ with `homeserver-user-data.yaml` renamed to `user-data` alongside an empty
   to this box's NICs and the WireGuard-uplink setup documented in
   `docs/CGNAT-DEPLOYMENT.md`, and shouldn't be blindly reproduced on
   different hardware).
-- Does **not** attempt to reproduce the AVAGO RAID controller's own LUN
-  configuration — that has to happen before the OS installer ever sees a
-  block device, via the controller's own boot-time utility or `storcli`.
-  Document that separately if/when a bare-metal rebuild is actually
-  planned (out of scope for this pass — see open question in
-  [`docs/research/518-smoke-test-research.md`](research/518-smoke-test-research.md)).
+- SSH (key-only, no password auth) and the `xfsprogs`/`nvme-cli` packages
+  the manual partitioning step below needs.
+
+**What has to be done by hand, at the storage screen, using the physical
+layout table above as the target:** 4-disk layout (NVMe boot/OS: GPT,
+EFI + ext4 root; `/var`: whole-disk xfs, no partition table; `/mnt-1` and
+`/mnt-2`: GPT + single xfs partition each), no LVM, 8G swapfile instead
+of a swap partition. The template does **not** attempt to reproduce the
+AVAGO RAID controller's own LUN configuration either — that has to
+happen before the OS installer ever sees a block device, via the
+controller's own boot-time utility or `storcli`, and if the MegaRAID
+LUNs (`/var`, `/mnt-1`) refuse to wipe/format even manually, their VDs
+likely need deleting and recreating at the controller's own config
+utility first. Document the RAID config separately if/when a bare-metal
+rebuild is actually planned (out of scope for this pass — see open
+question in
+[`docs/research/518-smoke-test-research.md`](research/518-smoke-test-research.md)).
 
 **What's intentionally not templated:** GPU driver install, Docker/
 Dockge install, NVIDIA container toolkit, WireGuard, and all the honeypot

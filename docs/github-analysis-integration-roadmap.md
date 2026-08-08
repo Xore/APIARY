@@ -1,7 +1,7 @@
 # GitHub Analysis Integration — Implementation Roadmap
 
-> **Status**: Design document — nothing here is built yet
-> **Last updated**: 2026-07-30
+> **Status**: Phases 0, 2, 3, 4, 5, 6 built (2026-08-02); Phase 1 (host publisher) built but not installed — needs host access; Phase 7 (env/compose wiring) not started
+> **Last updated**: 2026-08-08
 > **Upstream pipeline**: [`Xore/honeypot`](https://github.com/Xore/honeypot) — `.github/workflows/analyze.yml`
 > **Precedent**: [`docs/analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md`](analysis/ghidra/DASHBOARD_INTEGRATION_PLAN.md)
 > **Tracked in**: [#73](https://github.com/Xore/APIARY/issues/73) (YARA corpus sync) and [#74](https://github.com/Xore/APIARY/issues/74) (publisher and dashboard button)
@@ -265,7 +265,7 @@ throwaway fork, it produces a real `ok` record.
 
 ---
 
-## Phase 2 — Dashboard: trigger ⬜
+## Phase 2 — Dashboard: trigger ✅ 2026-08-02
 
 ### `github_analysis_submit.go`
 
@@ -298,7 +298,7 @@ idempotent double submit, and the redirect notice.
 
 ---
 
-## Phase 3 — Dashboard: read ⬜
+## Phase 3 — Dashboard: read ✅ 2026-08-02
 
 `github_analysis.go` mirrors `sandbox.go`:
 
@@ -330,7 +330,7 @@ Cross-links, both directions:
 
 ---
 
-## Phase 4 — Pull the auto-generated YARA corpus back ⬜
+## Phase 4 — Pull the auto-generated YARA corpus back ✅ 2026-08-02
 
 Independent of the button, and the highest-value item that does not require
 publishing anything.
@@ -444,10 +444,10 @@ GITHUB_ANALYSIS_MAX_WAIT=5400
 | Phase | Depends on | Blocked by Gate 0? | Value if run alone |
 |---|---|---|---|
 | 0 — docs reconciliation ✅ | — | No | Removes actively wrong documentation |
-| 4 — YARA corpus sync | 0 | No (read-only, outbound HTTPS) | 18 upstream rules reach the scanner |
+| 4 — YARA corpus sync ✅ | 0 | No (read-only, outbound HTTPS) | 18 upstream rules reach the scanner |
 | 1 — host publisher | 0 | Yes — needs host access | — |
-| 2 — submit button | 1 | Yes | — |
-| 3 — result views | 1, 2 | Yes | — |
+| 2 — submit button ✅ | 1 | Yes | — |
+| 3 — result views ✅ | 1, 2 | Yes | — |
 | 5 — alerting ✅ | 3 | Yes | — |
 | 6 — family enrichment ✅ | 3 | Yes | — |
 | 7 — env/compose | 1, 2 | Yes | — |

@@ -12,8 +12,10 @@ This roadmap reconciles the three source plans with the repository as it
 exists on 2026-07-29. It establishes a correct CPU ML pipeline and stable data
 contracts before adding dashboard, LLM, or GPU complexity.
 
-**Nothing below is built.** This document is the sequencing — what order, and
-why. The work is claimed and reviewed in issues:
+**Nothing below was built as of this document's original writing (2026-07-29).**
+This document is the sequencing — what order, and why. See individual
+milestone status callouts below for what's since shipped. The work is
+claimed and reviewed in issues:
 
 | Gate / Milestone | Issue |
 |---|---|

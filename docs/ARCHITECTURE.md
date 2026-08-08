@@ -51,7 +51,7 @@ flowchart LR
 
   wg["WireGuard tunnel"]
 
-  subgraph home["Home server — 12 independent Dockge stacks (#258)"]
+  subgraph home["Home server — 18 independent Dockge stacks (#258)"]
     direction TB
     subgraph initStack["honeypot-init"]
       initJobs["Bootstrap one-shot jobs"]
@@ -64,6 +64,12 @@ flowchart LR
       dnp3Stack["honeypot-dnp3"]
       httpStack["honeypot-http"]
       multipotStack["honeypot-multipot"]
+      dicompotStack["honeypot-dicompot"]
+      dnsHoneypotStack["honeypot-dns-honeypot"]
+      citrixStack["honeypot-citrix"]
+      ciscoAsaStack["honeypot-cisco-asa"]
+      rdpStack["honeypot-rdp"]
+      endlesshStack["honeypot-endlessh"]
     end
     subgraph tannerStack["honeypot-tanner"]
       tannerSvcs["SNARE + TANNER analyzer/API/web<br/>+ nested Docker + Redis"]
@@ -290,7 +296,7 @@ http-honeypot's deepened WordPress bait (readme.html version fingerprinting,
 xmlrpc.php, vulnerable-plugin readme.txt endpoints — also #238), is unaffected
 and stays file-based.
 
-`honeypot-init` runs first among the 12 stacks, and every other one depends
+`honeypot-init` runs first among the 18 stacks, and every other one depends
 on its output without a Compose-level dependency — Compose's
 `depends_on: condition: service_completed_successfully` can't reach across a
 stack boundary, [#258](https://github.com/Xore/APIARY/issues/258)'s
