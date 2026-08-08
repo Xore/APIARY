@@ -51,11 +51,15 @@ WINDOW_SECONDS = 3600
 # memory to whatever the busiest attacker happens to send.
 MAX_WINDOW_ENTRIES_PER_IP = 5_000
 
-# Bounded PERSISTENCE only (not in-memory growth during a run) -- same
-# parity as LSTMAEModel's MAX_PERSISTED_IPS (models/lstm_autoencoder.py):
-# real IP/session cardinality over a long-running process is a memory
-# question in its own right, but persisting only the most-recently-active
-# entries is what actually matters across a short restart.
+# Bounds both what SessionFeatureTracker keeps live in memory for the life
+# of the process AND what save() persists across a restart -- same parity as
+# LSTMAEModel's MAX_PERSISTED_IPS (models/lstm_autoencoder.py). #884: this
+# used to bound persistence only; the live dicts (_ip_last_seen,
+# _session_last_seen, and the _WindowState dicts they key) grew for every
+# distinct src_ip/session ever observed, unbounded, for the whole process
+# lifetime. observe() now evicts the least-recently-active entry once a cap
+# is exceeded, the same "most-recently-active wins" policy save() already
+# used for persistence.
 MAX_PERSISTED_IPS = 2_000
 MAX_PERSISTED_SESSIONS = 2_000
 
@@ -170,9 +174,28 @@ class SessionFeatureTracker:
     def __init__(self, model_dir: str = "/models") -> None:
         self.model_dir = model_dir
         self._state = _WindowState()
-        self._ip_last_seen: dict = {}
-        self._session_last_seen: dict = {}
+        # OrderedDict, not dict: observe() relinks a touched key to the end
+        # on every visit (see _touch below), so iteration order is always
+        # least- to most-recently-active -- exactly what _evict_oldest needs
+        # to find and remove the right entry in O(1), and what save()'s own
+        # recency sort already assumed the underlying data represented.
+        self._ip_last_seen: collections.OrderedDict = collections.OrderedDict()
+        self._session_last_seen: collections.OrderedDict = collections.OrderedDict()
         self._load()
+
+    @staticmethod
+    def _touch(last_seen: collections.OrderedDict, key: str, now_ts: float, cap: int, *keyed_dicts) -> None:
+        """Record key as just-active (moving it to the most-recent end of
+        last_seen) and evict the least-recently-active key -- from
+        last_seen and every dict in keyed_dicts -- once len(last_seen)
+        exceeds cap. Keeps live memory bounded by active-entry count rather
+        than by total-ever-seen count, for the life of the process."""
+        last_seen.pop(key, None)
+        last_seen[key] = now_ts
+        if len(last_seen) > cap:
+            oldest, _ = last_seen.popitem(last=False)
+            for d in keyed_dicts:
+                d.pop(oldest, None)
 
     def observe(self, src: dict) -> dict:
         now_ts = _event_epoch(src)
@@ -181,9 +204,11 @@ class SessionFeatureTracker:
         ip = _get_ip(src) or ""
         session = _get_session_id(src)
         if ip:
-            self._ip_last_seen[ip] = now_ts
+            self._touch(self._ip_last_seen, ip, now_ts, MAX_PERSISTED_IPS,
+                        self._state.ip_ports, self._state.ip_failed_logins)
         if session:
-            self._session_last_seen[session] = now_ts
+            self._touch(self._session_last_seen, session, now_ts, MAX_PERSISTED_SESSIONS,
+                        self._state.session_counts)
         return _step(self._state, src, now_ts)
 
     # ------------------------------------------------------------------
