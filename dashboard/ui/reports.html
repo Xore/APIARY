@@ -215,13 +215,17 @@
 
           <div class="dashboard-panel" id="panel-library" role="tabpanel" data-dashboard-panel="library" hidden>
 
+          {{/* #790 chunk 9: card__scroll -- unbounded (every saved report
+               design a user has ever created), JS-populated. hp-reports.js
+               looks up the tbody by ID (#hp-rp-definitions), unaffected by
+               the extra wrapper div. */}}
           <div class="card wide" id="hp-rp-definitions-card">
             <h2>Saved definitions</h2>
             <p class="note">Saved designs you can re-generate, refine, or schedule.</p>
-            <table class="data-table" id="hp-rp-definitions-table">
+            <div class="card__scroll"><table class="data-table" id="hp-rp-definitions-table">
               <thead><tr><th>Name</th><th>Template</th><th>Theme</th><th>Window</th><th>Schedule</th><th>Updated</th><th>Actions</th></tr></thead>
               <tbody id="hp-rp-definitions"></tbody>
-            </table>
+            </table></div>
             <p class="empty" id="hp-rp-definitions-empty" hidden>No saved definitions yet &mdash; design one above and save it.</p>
           </div>
 
