@@ -44,6 +44,11 @@ http:
       entryPoints: [traefik-oidc]
       service: api@internal
 
+    dashboard-oidc-upstream:
+      rule: "PathPrefix(`/`)"
+      entryPoints: [dashboard-oidc]
+      service: honeypot-dashboard
+
     # Same api@internal service as traefik-api above, on the public entrypoint
     # instead of loopback-only traefik-local. No socat bridge needed — unlike
     # every other honeypot-revdeck-style router, this points at a service that
@@ -52,7 +57,7 @@ http:
     # Traefik's dashboard API has no write/mutate endpoints — it only reads
     # back the routing config this file already defines — but that config
     # (backend URLs, service/middleware names) is still information a random
-    # visitor shouldn't get, hence forward-auth rather than leaving this open.
+    # visitor shouldn't get, hence OIDC rather than leaving this open.
     # Matches the whole host, not just /api and /dashboard like the
     # loopback-only traefik-api router above — a visitor going straight to
     # https://traefik.<domain>/ (the obvious thing to type) hit a bare
@@ -70,16 +75,16 @@ http:
         options: modern
       middlewares: [security-headers, traefik-dashboard-redirect]
 
-    auth-portal:
+    keycloak:
       rule: "Host(`auth.honeypot.example`)"
       entryPoints: [websecure]
-      service: auth-portal
+      service: keycloak-candidate
       tls:
         options: modern
       middlewares: [security-headers, rate-limit-auth]
 
     keycloak-admin:
-      rule: "Host(`keycloak-admin.example.invalid`)"
+      rule: "Host(`keycloak-admin.honeypot.example`)"
       entryPoints: [websecure]
       service: keycloak-candidate
       tls:
@@ -194,7 +199,7 @@ http:
     honeypot-dashboard-pdf:
       rule: "(Host(`dashboard.honeypot.example`) || Host(`honeypot.honeypot.example`)) && PathRegexp(`^/api/reports/generated/[^/]+/pdf$`)"
       entryPoints: [websecure]
-      service: honeypot-dashboard
+      service: oidc-dashboard
       tls:
         options: modern
       middlewares: [security-headers-dashboard-pdf]
@@ -211,7 +216,7 @@ http:
     honeypot-dashboard-github-analysis-pdf:
       rule: "(Host(`dashboard.honeypot.example`) || Host(`honeypot.honeypot.example`)) && PathRegexp(`^/export/github-analysis/[^/]+/pdf$`)"
       entryPoints: [websecure]
-      service: honeypot-dashboard
+      service: oidc-dashboard
       tls:
         options: modern
       middlewares: [security-headers-dashboard-pdf]
@@ -219,11 +224,12 @@ http:
     honeypot-dashboard:
       rule: "Host(`dashboard.honeypot.example`) || Host(`honeypot.honeypot.example`)"
       entryPoints: [websecure]
-      service: honeypot-dashboard
+      service: oidc-dashboard
       tls:
         options: modern
-      # Authentication and authorization are native to the dashboard. An edge
-      # authentication middleware here would recursively intercept its callback.
+      # The compatibility OIDC gateway protects deployments that predate the
+      # dashboard's native OIDC runtime. Its callback terminates in the gateway,
+      # outside this router's middleware chain.
       middlewares: [security-headers]
 
     honeypot-kibana:
@@ -350,6 +356,11 @@ http:
         servers: [{url: "http://oidc-traefik:4180"}]
         passHostHeader: true
 
+    oidc-dashboard:
+      loadBalancer:
+        servers: [{url: "http://oidc-dashboard:4180"}]
+        passHostHeader: true
+
 
     static-site:
       loadBalancer:
@@ -399,16 +410,7 @@ http:
           - url: "http://socat-vui-blog-auth:3000"
         passHostHeader: true
 
-    auth-portal:
-      loadBalancer:
-        servers:
-          - url: "http://auth-portal:4181"
-        passHostHeader: true
-
-    # Pre-cutover service target. The auth-portal router intentionally does
-    # not reference this until the Keycloak realm/theme and every consumer
-    # pass the hard-cutover gates; it is reachable inside the proxy network
-    # for production-shaped validation with the canonical Host header.
+    # Keycloak is reachable only through its WireGuard bridge.
     keycloak-candidate:
       loadBalancer:
         servers:
@@ -432,7 +434,7 @@ http:
     # scripts/deploy-dashboard-rolling.sh. healthCheck is what makes this
     # actually zero-downtime: Traefik polls /healthz on each backend
     # directly (bypassing the router/middleware chain entirely, including
-    # forward-auth above -- health checks are server-to-server, never
+    # OIDC above -- health checks are server-to-server, never
     # routed through a router) and stops sending it live traffic the
     # moment it fails, before the rolling-update script even restarts that
     # replica's container. Without this, both servers would need to be
@@ -565,9 +567,8 @@ http:
         burst: 60
         period: 1s
 
-    # Only attached to the traefik-dashboard router, after forward-auth in
-    # that router's middleware chain so this never fires for an unauthenticated
-    # visitor (they hit the login redirect first, same as everywhere else).
+    # Only attached to the Traefik dashboard router. oauth2-proxy handles
+    # authentication before forwarding a request that can reach this redirect.
     # Catches the bare root (/ or nothing) and /dashboard with no trailing
     # slash -- Traefik's dashboard 404s without the slash (verified live:
     # /dashboard -> 404, /dashboard/ -> the real UI; true even for the
@@ -603,25 +604,6 @@ http:
         usersFile: /run/traefik-secrets/keycloak-admin.htpasswd
         realm: "APIARY Keycloak administration"
         removeHeader: true
-
-    # Remove identity hints supplied by the browser before forward-auth runs.
-    # Protected backends must use live introspection for authorization.
-    strip-auth-identity:
-      headers:
-        customRequestHeaders:
-          X-Auth-Subject: ""
-          X-Auth-User: ""
-          X-Auth-Display-Name: ""
-          X-Auth-Role: ""
-          X-Auth-Generation: ""
-
-    forward-auth:
-      forwardAuth:
-        address: "http://auth-portal:4181/_auth/verify"
-        trustForwardHeader: true
-        maxResponseBodySize: 65536
-        authResponseHeaders:
-          - X-Auth-User
 
 tcp:
   routers:
