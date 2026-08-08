@@ -69,9 +69,12 @@ log "supervisor started (pid $$)"
 if [[ -n "$ATTACH_PID" && -n "$ATTACH_LOG" ]] && kill -0 "$ATTACH_PID" 2>/dev/null; then
   log "attaching to already-running build (pid=${ATTACH_PID}, log=${ATTACH_LOG}) as batch ${BATCH}"
   watch_attempts "$ATTACH_LOG" "$BATCH" "$ATTACH_PID"
-  wait "$ATTACH_PID" 2>/dev/null
-  rc=$?
-  if [[ $rc -eq 0 ]]; then
+  # ATTACH_PID is not a child of this shell (it was started by a separate,
+  # earlier invocation), so `wait` on it always returns 127 regardless of
+  # its real exit status -- bash's wait only works on actual children.
+  # build-with-retry.sh's own log is the only reliable signal here: it
+  # prints "attempt N succeeded" immediately before its one and only exit 0.
+  if [[ -f "$ATTACH_LOG" ]] && grep -qP 'attempt \d+ succeeded' "$ATTACH_LOG"; then
     log "batch ${BATCH} SUCCEEDED (attached run). Build complete. Supervisor exiting."
     exit 0
   fi

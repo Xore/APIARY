@@ -110,6 +110,16 @@ Windows Registry Editor Version 5.00
 REGEOF
 
 echo "--- writing ---"
+# Re-checked immediately before the write, not just once at the top of the
+# script: several read-only virt-win-reg calls and mktemp happened in
+# between, long enough for another qemu-system process (a new build, or
+# someone reverting a domain to this image) to have opened it in the
+# meantime. Writing against an image a live qemu process also has open is
+# exactly the corruption this script's header warns about.
+if pgrep -af qemu-system | grep -qF -- "$image"; then
+  echo "harden-defender-offline: refusing to write $image -- a qemu-system process has it open now (it did not when this script started)." >&2
+  exit 1
+fi
 virt-win-reg --merge "$image" "$regfile"
 
 echo "--- verifying (read back what was actually written) ---"

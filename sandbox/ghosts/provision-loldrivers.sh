@@ -178,7 +178,11 @@ control_set="ControlSet$(printf '%03d' "$((16#$current))")"
 echo "--- SYSTEM\\Select\\Current resolves to $control_set ---"
 
 regfile="$(mktemp --suffix=.reg)"
-trap 'rm -f "$regfile"' EXIT
+# A second `trap ... EXIT` would silently replace the first (rm -rf -- "$work"
+# above), not add to it -- bash only keeps one handler per signal. Combine
+# both cleanups in one trap so the downloaded/hash-verified driver files
+# under $work don't get left behind on every run.
+trap 'rm -rf -- "$work"; rm -f "$regfile"' EXIT
 
 cat > "$regfile" <<REGEOF
 Windows Registry Editor Version 5.00

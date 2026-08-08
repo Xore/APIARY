@@ -116,10 +116,17 @@ while true; do
     # sandbox/submit-capture.sh already does for the same reason.
     sha=$(sha256sum "$sample" | cut -d' ' -f1)
 
+    # A dry-run result isn't terminal: once GITHUB_PUBLISH_ENABLED flips to 1,
+    # a request for a hash that was only ever seen while disabled must still
+    # go through the real denylist/quota/publish chain below, not be treated
+    # as already handled forever.
     if [[ -f $results/$sha.json ]]; then
-      rm -f "$request"
-      logger -t honeypot-github "already resolved, skipping: $sha"
-      continue
+      prior_status=$(jq -r '.exit_status // empty' "$results/$sha.json" 2>/dev/null || true)
+      if [[ $prior_status != dry_run ]]; then
+        rm -f "$request"
+        logger -t honeypot-github "already resolved, skipping: $sha"
+        continue
+      fi
     fi
 
     if [[ $GITHUB_PUBLISH_ENABLED != 1 ]]; then

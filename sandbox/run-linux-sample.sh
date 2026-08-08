@@ -44,10 +44,18 @@ virsh net-info honeypot-sandbox >/dev/null
 
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 hash=$(sha256sum "$sample" | awk '{print $1}')
-classification=$(python3 "$script_dir/guest-payload-classifier.py" "$sample")
-kind=$(jq -r '.code' <<<"$classification")
-platform=$(jq -r '.platform | ascii_downcase' <<<"$classification")
-[[ $platform == windows ]] || platform=linux
+# Only used for job/overlay/result directory naming below -- the real,
+# authoritative classification runs inside the guest (guest-runner.sh calls
+# this same guest-payload-classifier.py once the sample is already isolated
+# in the VM). Deliberately NOT calling that classifier here: it reads the
+# entire file and does struct-level PE/ELF parsing, and running that on
+# attacker-controlled bytes as root on the bare host -- before any
+# sandboxing has happened -- is exactly the isolation boundary the rest of
+# this pipeline exists to enforce. A bounded 2-byte magic check is all a
+# naming prefix needs.
+magic=$(head -c 2 -- "$sample" 2>/dev/null || true)
+platform=linux
+[[ $magic == MZ ]] && platform=windows
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 job="${platform}-${stamp}-${hash:0:12}"
 overlay="$root_dir/overlays/$job.qcow2"
