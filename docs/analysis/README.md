@@ -9,32 +9,57 @@ scripts that run on the sensor host.
 > designed in [`docs/github-analysis-integration-roadmap.md`](../github-analysis-integration-roadmap.md)
 > and tracked in [#73](https://github.com/Xore/APIARY/issues/73)
 > (upstream YARA corpus sync — built, see [`yara/`](../../analysis/yara/)) and
-> [#74](https://github.com/Xore/APIARY/issues/74) (the manual
-> publisher, not built yet).
-> Publication is **not** automatic — see "Publication is manual" below.
+> [#74](https://github.com/Xore/APIARY/issues/74) (the manual publisher).
+> Per the roadmap's own status line: **built** — dashboard trigger/read
+> (Phases 2-3), the host publisher itself (Phase 1), queue health/alerting
+> (Phase 5), and IOC/family enrichment (Phase 6); the host publisher is
+> **built but not installed** on a given deployment until an operator runs
+> `analysis/github/install-github-publisher.sh` there; environment/Compose
+> wiring (Phase 7) has **not started**. Publication is **not** automatic
+> even where installed — see "Publication is manual" below.
 
 ---
 
 ## Architecture
 
 ```mermaid
-flowchart LR
-    subgraph HS["APIARY (this repo)"]
-        Sensors["Cowrie / Dionaea / Conpot<br/>capture payloads"]
-        Pub["dashboard → button →<br/>host publisher (planned)"]
-        Sensors --> Pub
+flowchart TB
+    subgraph HS["APIARY (this repo) -- dashboard/github_analysis_submit.go"]
+        direction TB
+        analyst["Admin analyst,<br/>same-origin request"]
+        submit["POST /github-analysis/submit<br/>hash + confirm=publish required --<br/>the one submission route in this repo<br/>that needs an explicit consent field,<br/>not just admin + same-origin"]
+        reqSpool[("GITHUB_ANALYSIS_REQUEST_DIR<br/>{sha256}.request marker only --<br/>no GH_PAT, no git, no GitHub API<br/>call ever made by the dashboard")]
+        audit[("audit log --<br/>every submission, accepted<br/>or refused")]
+        resultsDir[("GITHUB_ANALYSIS_RESULTS_DIR<br/>{sha256}.json, read-only")]
+        analyst --> submit
+        submit --> reqSpool
+        submit --> audit
+        resultsDir --> submit
     end
 
-    subgraph XH["Xore/honeypot (sample archive + pipeline)"]
-        Samples["samples/{ELF,PE,Scripts,Docs,…}/<br/>push triggers analyze.yml"]
-        Outputs["reports/scanner/&lt;sha256&gt;.json<br/>reports/pdf/, reports/yara/<br/>iocs/hashes.csv, iocs/families.csv<br/>yara-rules/ + yara-rules/auto/"]
-        Scanners["8 scanner APIs<br/>VT, MalwareBazaar, Hybrid-Analysis,<br/>Malshare, JoeSandbox, MetaDefender,<br/>CAPE, Any.run"]
-        Samples --> Outputs
-        Scanners --> Outputs
+    subgraph HostPub["Root-owned host publisher (Phase 1 -- built, install-github-publisher.sh)"]
+        direction TB
+        process["process-github-requests.sh<br/>drains the spool"]
+        denylist["check-denylist.sh"]
+        quota["daily quota check"]
+        gate{"GITHUB_PUBLISH_ENABLED<br/>(host .env, default 0) --<br/>independent of the dashboard's<br/>own confirm=publish click"}
+        dryrun(["dry_run exit_status --<br/>the default posture:<br/>everything up to here runs,<br/>nothing is pushed"])
+        collect["collect-results.py<br/>(timer-driven)"]
+        process --> denylist --> quota --> gate
+        gate -->|"0 (default)"| dryrun
     end
 
-    Pub -->|push| Samples
-    Outputs -->|results read back| Pub
+    subgraph XH["Xore/honeypot (public sample archive + pipeline)"]
+        direction TB
+        samples["samples/{ELF,PE,Scripts,Docs,…}/<br/>push triggers analyze.yml"]
+        actions["GitHub Actions run --<br/>8 scanner APIs: VT, MalwareBazaar,<br/>Hybrid-Analysis, Malshare, JoeSandbox,<br/>MetaDefender, CAPE, Any.run"]
+        outputs["reports/scanner/&lt;sha256&gt;.json<br/>reports/pdf/, reports/yara/<br/>iocs/hashes.csv, iocs/families.csv<br/>yara-rules/ + yara-rules/auto/ (#73, built)"]
+        samples --> actions --> outputs
+    end
+
+    reqSpool --> process
+    gate -->|"1 -- irreversible,<br/>public, third-party"| samples
+    outputs --> collect --> resultsDir
 ```
 
 ---
@@ -66,9 +91,16 @@ Pushing a capture to `Xore/honeypot` publishes it to a **public repository** and
 to up to eight third-party scanner APIs. That is an irreversible external
 disclosure, so it is never triggered by a timer or a directory watcher.
 
-The intended path is a per-sample, admin-only, confirm-gated button in the
-dashboard, backed by a root-owned host publisher — the same spool-file pattern
-the KVM sandbox already uses. `collect.sh` predates that design and should not
+The path is a per-sample, admin-only, confirm-gated button in the dashboard
+(`POST /github-analysis/submit`, requiring `confirm=publish` in addition to
+the admin+same-origin check every other submission route already has),
+backed by a root-owned host publisher (`analysis/github/`) — the same
+spool-file pattern the KVM sandbox and Ghidra submissions already use. Two
+independent gates stand between a confirmed dashboard click and an actual
+public push: the dashboard's own confirmation, and the host publisher's own
+`GITHUB_PUBLISH_ENABLED` (default `0` — a request resolves as far as
+`dry_run` and stops there until an operator explicitly arms it in
+`/etc/honeypot-github.env`). `collect.sh` predates this design and should not
 be installed on a cron.
 
 ---
