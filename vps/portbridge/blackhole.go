@@ -22,6 +22,16 @@
 // "blackhole" profile so it is opt-in per deployment, not a silent default)
 // — portbridge itself only reads it, on a timer, and never fetches anything
 // over the network.
+//
+// BLACKHOLE_MANUAL_LIST (#914) names a second, independently-refreshed file
+// in the same format, holding operator-triggered blocks from the dashboard
+// (see docs/dashboard-manual-ip-block-design.md) — kept fresh by
+// vps/portbridge-manual-blackhole-refresh.sh, a separate sidecar from the
+// maltrail one above. The two lists are deliberately two files, not one:
+// each is independently owned and independently refreshed (maltrail on a
+// ~24h cadence from GitHub, manual blocks on demand from the dashboard), so
+// neither refresh can ever silently wipe the other's entries by overwriting
+// a shared file.
 package main
 
 import (
@@ -36,23 +46,37 @@ import (
 
 const blackholeReloadInterval = 15 * time.Minute
 
-// blackhole holds the current blocklist behind an atomic pointer so the
-// per-connection hot path (blocked) never takes a lock against the
-// background reload goroutine.
-type blackhole struct {
+// blackholeSource tracks one on-disk list's own mtime, independently of any
+// other source sharing the same blackhole.
+type blackholeSource struct {
 	path    string
-	ips     atomic.Pointer[map[string]struct{}]
 	modTime time.Time
+	ips     map[string]struct{}
 }
 
-// newBlackhole starts a blackhole watcher. path == "" returns a non-nil
+// blackhole holds the current union of every configured list's addresses
+// behind an atomic pointer so the per-connection hot path (blocked) never
+// takes a lock against the background reload goroutine.
+type blackhole struct {
+	sources []*blackholeSource
+	ips     atomic.Pointer[map[string]struct{}]
+}
+
+// newBlackhole starts a blackhole watcher over one or more list files (empty
+// path strings are skipped). No configured paths at all returns a non-nil
 // blackhole whose blocked() always reports false, so call sites never need a
 // nil check — same pattern connLogger's callers already rely on for CONN_LOG.
-func newBlackhole(path string) *blackhole {
-	b := &blackhole{path: path}
+func newBlackhole(paths ...string) *blackhole {
+	b := &blackhole{}
 	empty := map[string]struct{}{}
 	b.ips.Store(&empty)
-	if path == "" {
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		b.sources = append(b.sources, &blackholeSource{path: p})
+	}
+	if len(b.sources) == 0 {
 		return b
 	}
 	b.reload()
@@ -64,23 +88,45 @@ func newBlackhole(path string) *blackhole {
 	return b
 }
 
-// reload re-reads the blocklist file if its mtime changed since the last
-// read. A missing file (the refresh sidecar hasn't run yet, or the
-// "blackhole" compose profile isn't active) is not an error: it just means
-// blocked() reports false until the file shows up, exactly like an unset
-// BLACKHOLE_LIST.
+// reload re-reads every source file whose mtime changed since the last read,
+// then republishes the union. A missing file (the refresh sidecar for that
+// particular source hasn't run yet, or its compose profile isn't active) is
+// not an error for that source: it just contributes nothing to the union
+// until the file shows up, exactly like an unset path.
 func (b *blackhole) reload() {
-	st, err := os.Stat(b.path)
-	if err != nil {
+	changed := false
+	for _, src := range b.sources {
+		if src.readOne() {
+			changed = true
+		}
+	}
+	if !changed {
 		return
 	}
-	if !st.ModTime().After(b.modTime) {
-		return
+	union := map[string]struct{}{}
+	for _, src := range b.sources {
+		for ip := range src.ips {
+			union[ip] = struct{}{}
+		}
 	}
-	f, err := os.Open(b.path)
+	b.ips.Store(&union)
+	fmt.Fprintf(os.Stderr, "portbridge: blackhole reloaded, %d addresses across %d source(s)\n", len(union), len(b.sources))
+}
+
+// readOne re-reads src's own file if its mtime moved, reporting whether it
+// changed anything.
+func (src *blackholeSource) readOne() bool {
+	st, err := os.Stat(src.path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "portbridge: blackhole list %s: %v\n", b.path, err)
-		return
+		return false
+	}
+	if !st.ModTime().After(src.modTime) {
+		return false
+	}
+	f, err := os.Open(src.path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "portbridge: blackhole list %s: %v\n", src.path, err)
+		return false
 	}
 	defer f.Close()
 
@@ -101,17 +147,18 @@ func (b *blackhole) reload() {
 		}
 	}
 	if err := sc.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "portbridge: blackhole list %s: read error: %v\n", b.path, err)
-		return
+		fmt.Fprintf(os.Stderr, "portbridge: blackhole list %s: read error: %v\n", src.path, err)
+		return false
 	}
 
-	b.ips.Store(&set)
-	b.modTime = st.ModTime()
-	fmt.Fprintf(os.Stderr, "portbridge: blackhole list reloaded, %d addresses (%s)\n", len(set), b.path)
+	src.ips = set
+	src.modTime = st.ModTime()
+	return true
 }
 
 // blocked reports whether ip (a bare address, no port — callers already have
-// this from net.SplitHostPort/splitHostPort) is a known mass scanner.
+// this from net.SplitHostPort/splitHostPort) is a known mass scanner or a
+// manually-blocked address, across every configured source.
 func (b *blackhole) blocked(ip string) bool {
 	set := b.ips.Load()
 	if set == nil {

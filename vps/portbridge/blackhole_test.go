@@ -85,6 +85,60 @@ func TestBlackholeReloadPicksUpChanges(t *testing.T) {
 	}
 }
 
+// #914: the maltrail feed and the manual-block list are two independent
+// files unioned together, specifically so a refresh of one can never wipe
+// entries from the other -- exercised here by refreshing only one of the
+// two sources and confirming the other's entries survive untouched.
+func TestBlackholeUnionsTwoIndependentSources(t *testing.T) {
+	maltrailPath := filepath.Join(t.TempDir(), "mass_scanner.txt")
+	manualPath := filepath.Join(t.TempDir(), "manual.txt")
+	if err := os.WriteFile(maltrailPath, []byte("1.1.1.1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manualPath, []byte("2.2.2.2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	b := newBlackhole(maltrailPath, manualPath)
+	for _, ip := range []string{"1.1.1.1", "2.2.2.2"} {
+		if !b.blocked(ip) {
+			t.Errorf("blocked(%q) = false, want true (union of both sources)", ip)
+		}
+	}
+
+	// Refreshing the maltrail feed alone (a wholesale-replace, same as the
+	// real refresh sidecar's atomic rename) must not lose the manual
+	// source's own entry.
+	time.Sleep(1100 * time.Millisecond)
+	if err := os.WriteFile(maltrailPath, []byte("3.3.3.3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b.reload()
+	if b.blocked("1.1.1.1") {
+		t.Error("blocked(1.1.1.1) = true after the maltrail feed dropped it -- stale union entry")
+	}
+	if !b.blocked("3.3.3.3") {
+		t.Error("blocked(3.3.3.3) = false after the maltrail feed refresh should have picked it up")
+	}
+	if !b.blocked("2.2.2.2") {
+		t.Fatal("blocked(2.2.2.2) = false after an unrelated maltrail refresh -- manual source was wiped")
+	}
+}
+
+func TestBlackholeVariadicSkipsEmptyPaths(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "manual.txt")
+	if err := os.WriteFile(path, []byte("9.9.9.9\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// BLACKHOLE_LIST unset (empty string) alongside a configured
+	// BLACKHOLE_MANUAL_LIST -- the empty path must be skipped, not treated
+	// as a real (always-missing) source.
+	b := newBlackhole("", path)
+	if !b.blocked("9.9.9.9") {
+		t.Error("blocked(9.9.9.9) = false with an empty first path and a real second path")
+	}
+}
+
 // TestServeTCPDropsBlackholedSourceBeforeUpstream is the actual point of
 // #268: a blackholed source must never reach the honeypot listener. Since
 // tests dial from 127.0.0.1, the blackhole list here names 127.0.0.1 itself
