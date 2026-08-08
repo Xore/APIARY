@@ -94,15 +94,6 @@
       "defaultAction": false,
       "priority": 60,
       "config": {}
-    },
-    {
-      "alias": "recovery-authn-codes-config",
-      "name": "Recovery Authentication Codes",
-      "providerId": "recovery-authn-codes-config",
-      "enabled": true,
-      "defaultAction": true,
-      "priority": 70,
-      "config": {}
     }
   ],
   "otpPolicyType": "totp",

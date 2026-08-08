@@ -17,9 +17,10 @@ secrets, cookies, or upstream networks. A proxy may inject identity headers
 only when its upstream has no path reachable from the browser, another stack,
 or the honeynet that bypasses that proxy.
 
-Humans are created by administrators only. Every human must configure TOTP and
-recovery codes. Automation uses narrowly scoped service accounts and is not
-treated as a human MFA exception.
+Humans are created by administrators only. Every human must configure TOTP.
+Automation uses narrowly scoped service accounts and is not treated as a human
+MFA exception. Recovery is an administrator-driven credential reset because the
+pinned Keycloak runtime does not provide a recovery-code required-action factory.
 
 ## Route and consumer matrix
 

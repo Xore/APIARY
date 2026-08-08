@@ -17,7 +17,6 @@ jq -e '
   .ssoSessionIdleTimeout == 3600 and
   .ssoSessionMaxLifespan == 43200 and
   ([.requiredActions[] | select(.alias == "CONFIGURE_TOTP" and .enabled and .defaultAction)] | length == 1) and
-  ([.requiredActions[] | select(.alias == "recovery-authn-codes-config" and .enabled and .defaultAction)] | length == 1) and
   ([.clients[].clientId] | sort == ["apiary-dashboard", "arkime", "dockge", "evebox", "kibana", "revdeck", "tanner", "traefik-dashboard"]) and
   (all(.clients[];
     .publicClient == false and
