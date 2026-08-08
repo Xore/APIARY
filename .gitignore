@@ -29,6 +29,8 @@ ml-worker/compose.yml
 
 # Runtime telemetry, captured payloads, and persistent state
 logs/
+!dashboard/vendor/github.com/redis/go-redis/v9/internal/maintnotifications/logs/
+!dashboard/vendor/github.com/redis/go-redis/v9/internal/maintnotifications/logs/*.go
 state/
 dashboard-state/
 data/
