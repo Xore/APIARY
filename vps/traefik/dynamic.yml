@@ -224,10 +224,10 @@ http:
     honeypot-kibana:
       rule: "Host(`kibana.honeypot.example`)"
       entryPoints: [websecure]
-      service: honeypot-kibana
+      service: oidc-kibana
       tls:
         options: modern
-      middlewares: [security-headers, strip-auth-identity, forward-auth]
+      middlewares: [security-headers]
 
     honeypot-tanner:
       rule: "Host(`tanner.honeypot.example`)"
@@ -240,18 +240,18 @@ http:
     honeypot-evebox:
       rule: "Host(`evebox.honeypot.example`)"
       entryPoints: [websecure]
-      service: honeypot-evebox
+      service: oidc-evebox
       tls:
         options: modern
-      middlewares: [security-headers, strip-auth-identity, forward-auth]
+      middlewares: [security-headers]
 
     honeypot-arkime:
       rule: "Host(`arkime.honeypot.example`)"
       entryPoints: [websecure]
-      service: honeypot-arkime
+      service: oidc-arkime
       tls:
         options: modern
-      middlewares: [security-headers, strip-auth-identity, forward-auth]
+      middlewares: [security-headers]
 
     honeypot-revdeck:
       rule: "Host(`rev.honeypot.example`)"
@@ -310,6 +310,21 @@ http:
       middlewares: [security-headers, rate-limit]
 
   services:
+    oidc-kibana:
+      loadBalancer:
+        servers: [{url: "http://oidc-kibana:4180"}]
+        passHostHeader: true
+
+    oidc-evebox:
+      loadBalancer:
+        servers: [{url: "http://oidc-evebox:4180"}]
+        passHostHeader: true
+
+    oidc-arkime:
+      loadBalancer:
+        servers: [{url: "http://oidc-arkime:4180"}]
+        passHostHeader: true
+
 
     static-site:
       loadBalancer:

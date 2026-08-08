@@ -18,6 +18,38 @@
 #   sshfs root@10.8.0.1:/opt/stacks/apiary/logs/suricata \
 #         /opt/stacks/apiary/logs/suricata -o ro,allow_other
 
+x-oidc-gateway: &oidc-gateway
+  image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.3@sha256:10a1165743a192e1940b4708fb9647027185ce11a681a1c5519b442ff7f1f561
+  restart: unless-stopped
+  read_only: true
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  environment: &oidc-gateway-environment
+    OAUTH2_PROXY_PROVIDER: keycloak-oidc
+    OAUTH2_PROXY_OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:?set OIDC_ISSUER_URL in the VPS environment}
+    OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:4180
+    OAUTH2_PROXY_EMAIL_DOMAINS: "*"
+    OAUTH2_PROXY_CODE_CHALLENGE_METHOD: S256
+    OAUTH2_PROXY_COOKIE_SECURE: "true"
+    OAUTH2_PROXY_COOKIE_HTTPONLY: "true"
+    OAUTH2_PROXY_COOKIE_SAMESITE: lax
+    OAUTH2_PROXY_COOKIE_EXPIRE: 12h
+    OAUTH2_PROXY_COOKIE_REFRESH: 30m
+    OAUTH2_PROXY_COOKIE_CSRF_PER_REQUEST: "true"
+    OAUTH2_PROXY_COOKIE_CSRF_PER_REQUEST_LIMIT: "8"
+    OAUTH2_PROXY_REVERSE_PROXY: "true"
+    OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
+    OAUTH2_PROXY_PASS_ACCESS_TOKEN: "false"
+    OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER: "false"
+  healthcheck:
+    test: ["CMD", "/bin/oauth2-proxy", "--version"]
+    interval: 30s
+    timeout: 5s
+    retries: 3
+  deploy:
+    resources:
+      limits: {cpus: "0.25", memory: 128M}
+
 services:
 
   # ===== TRAEFIK =====
@@ -44,6 +76,9 @@ services:
           create_host_path: false
     networks:
       - proxy
+      - oidc-kibana
+      - oidc-evebox
+      - oidc-arkime
     # #117: `traefik healthcheck` does a full binary re-exec (new Go runtime
     # init, config parse) rather than a lightweight HTTP call. Measured
     # 6-9s per invocation under this container's 0.5 CPU limit, so it never
@@ -385,7 +420,23 @@ services:
     container_name: socat-hp-kibana
     restart: unless-stopped
     command: TCP4-LISTEN:5601,fork,reuseaddr TCP4:10.8.0.2:19601
-    networks: [proxy]
+    networks: [oidc-kibana]
+
+  oidc-kibana:
+    <<: *oidc-gateway
+    container_name: oidc-kibana
+    environment:
+      <<: *oidc-gateway-environment
+      OAUTH2_PROXY_CLIENT_ID: kibana
+      OAUTH2_PROXY_CLIENT_SECRET_FILE: /run/oidc-secrets/client-secret
+      OAUTH2_PROXY_COOKIE_SECRET_FILE: /run/oidc-secrets/cookie-secret
+      OAUTH2_PROXY_REDIRECT_URL: https://kibana.honeypot.example/oauth2/callback
+      OAUTH2_PROXY_ALLOWED_ROLES: kibana:access
+      OAUTH2_PROXY_COOKIE_NAME: __Host-apiary-kibana
+      OAUTH2_PROXY_UPSTREAMS: http://socat-hp-kibana:5601
+    volumes:
+      - ${OIDC_SECRETS_DIR:?set OIDC_SECRETS_DIR}/kibana:/run/oidc-secrets:ro
+    networks: [oidc-kibana]
 
   socat-hp-tanner:
     image: alpine/socat:latest
@@ -399,14 +450,46 @@ services:
     container_name: socat-hp-evebox
     restart: unless-stopped
     command: TCP4-LISTEN:5636,fork,reuseaddr TCP4:10.8.0.2:19636
-    networks: [proxy]
+    networks: [oidc-evebox]
+
+  oidc-evebox:
+    <<: *oidc-gateway
+    container_name: oidc-evebox
+    environment:
+      <<: *oidc-gateway-environment
+      OAUTH2_PROXY_CLIENT_ID: evebox
+      OAUTH2_PROXY_CLIENT_SECRET_FILE: /run/oidc-secrets/client-secret
+      OAUTH2_PROXY_COOKIE_SECRET_FILE: /run/oidc-secrets/cookie-secret
+      OAUTH2_PROXY_REDIRECT_URL: https://evebox.honeypot.example/oauth2/callback
+      OAUTH2_PROXY_ALLOWED_ROLES: evebox:access
+      OAUTH2_PROXY_COOKIE_NAME: __Host-apiary-evebox
+      OAUTH2_PROXY_UPSTREAMS: http://socat-hp-evebox:5636
+    volumes:
+      - ${OIDC_SECRETS_DIR:?set OIDC_SECRETS_DIR}/evebox:/run/oidc-secrets:ro
+    networks: [oidc-evebox]
 
   socat-hp-arkime:
     image: alpine/socat:latest
     container_name: socat-hp-arkime
     restart: unless-stopped
     command: TCP4-LISTEN:8005,fork,reuseaddr TCP4:10.8.0.2:19080
-    networks: [proxy]
+    networks: [oidc-arkime]
+
+  oidc-arkime:
+    <<: *oidc-gateway
+    container_name: oidc-arkime
+    environment:
+      <<: *oidc-gateway-environment
+      OAUTH2_PROXY_CLIENT_ID: arkime
+      OAUTH2_PROXY_CLIENT_SECRET_FILE: /run/oidc-secrets/client-secret
+      OAUTH2_PROXY_COOKIE_SECRET_FILE: /run/oidc-secrets/cookie-secret
+      OAUTH2_PROXY_REDIRECT_URL: https://arkime.honeypot.example/oauth2/callback
+      OAUTH2_PROXY_ALLOWED_ROLES: arkime:access
+      OAUTH2_PROXY_COOKIE_NAME: __Host-apiary-arkime
+      OAUTH2_PROXY_UPSTREAMS: http://socat-hp-arkime:8005
+    volumes:
+      - ${OIDC_SECRETS_DIR:?set OIDC_SECRETS_DIR}/arkime:/run/oidc-secrets:ro
+    networks: [oidc-arkime]
 
   # Rev·Deck (analysis/ghidra/docker-compose.ghidra.yml, profile: revdeck) --
   # not part of this stack's home-side compose file, but reachable the same
@@ -650,6 +733,12 @@ services:
 networks:
   proxy:
     name: proxy
+    driver: bridge
+  oidc-kibana:
+    driver: bridge
+  oidc-evebox:
+    driver: bridge
+  oidc-arkime:
     driver: bridge
 
 volumes:
