@@ -132,10 +132,20 @@ jobs:
       # (snare-pages) is `external: true`, already created by
       # honeypot-init's snare-clone job, which this workflow deploys before
       # this step runs.
-      - name: Synchronize honeypot-cowrie/multipot/http/dnp3/dionaea/tanner/dicompot/dns-honeypot/citrix-honeypot/cisco-asa-honeypot/rdp-honeypot (#258 split)
+      #
+      # #891: endlessh joins the loop too -- docker-compose.endlessh.yml's
+      # own header comment already described it as belonging here ("Same
+      # shape as docker-compose.dnp3.yml -- no depends_on, its own fully
+      # private network") and asserted it was "Deployed as
+      # /opt/stacks/honeypot-endlessh", but it was never actually added to
+      # this loop, deploy-profiles/full.txt, or EXPECTED_SENSORS's owning
+      # stack in scripts/validate-deploy-profile.sh -- a correctly-performed
+      # standard deployment left EXPECTED_SENSORS naming a sensor nothing
+      # ever provisioned.
+      - name: Synchronize honeypot-cowrie/multipot/http/dnp3/dionaea/tanner/dicompot/dns-honeypot/citrix-honeypot/cisco-asa-honeypot/rdp-honeypot/endlessh (#258 split)
         shell: bash
         run: |
-          for stack in cowrie multipot http dnp3 dionaea tanner dicompot dns-honeypot citrix-honeypot cisco-asa-honeypot rdp-honeypot; do
+          for stack in cowrie multipot http dnp3 dionaea tanner dicompot dns-honeypot citrix-honeypot cisco-asa-honeypot rdp-honeypot endlessh; do
             destination="/opt/stacks/honeypot-$stack"
             install -d -m 755 "$destination"
             cp "docker-compose.$stack.yml" "$destination/compose.yml"
