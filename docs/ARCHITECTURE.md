@@ -9,19 +9,35 @@ outside ordinary Compose services: the Ghidra static analysis pipeline
 genuinely deployed, see "Captured payload lifecycle and static analysis"
 below) and the Linux KVM sandbox (root-owned host worker described below).
 
-`sandbox/windows/` is past the planning stage but not fully wired up: the
-golden image builds reliably and boots (Sysmon, PowerShell logging, FakeNet,
-Regshot, and the living-persona daemon all confirmed working against a live
-guest — see #47, #290, #358), and it can be driven manually via
-`kvm_manage.sh`/`orchestrate/run_sample.py`. What's still missing is the
-automated intake path: no host-side worker config or systemd units are
-installed yet, so the dashboard's Windows submission path has nothing to
-hand a request to, and #53's end-to-end smoke test (dashboard submit →
-Windows sandbox report) hasn't run. Until that's wired up, Windows samples
-still take the static-only/Wine-in-Linux-guest path the sandbox section below
-describes, not the native Windows 11 guest — see that directory's own
-`IMPLEMENTATION_PLAN.md` for current status. TANNER containers are
-web-request emulators, not malware detonation sandboxes.
+`sandbox/windows/` now has both halves of its automated intake path built:
+per `IMPLEMENTATION_PLAN.md`'s own dated Phase 7 status note (2026-07-30),
+the dashboard side (`determineSandboxTarget`, per-target spool writes,
+`WINDOWS_SANDBOX_REQUEST_DIR`/`WINDOWS_SANDBOX_RESULTS_DIR`) and the host
+side (`run_pending.sh`, `honeypot-windows-sandbox-worker.{path,service}`,
+`orchestrate/run_sample.py` driving real libvirt via `virsh`, not the VMware
+commands it was originally written against) both landed — this is what the
+workbench's `windows-sandbox` analyzer route (see "Payload analysis
+workbench" and `dashboard/workbench_domain.go`) dispatches into. Whether the
+backend is actually *switched on* for a given deployment depends on
+`WINDOWS_SANDBOX_REQUEST_DIR`/`WINDOWS_SANDBOX_RESULTS_DIR` being set at
+all — both are empty by default, and an unset pair means Windows submissions
+are refused with a message naming the missing backend, not silently
+misrouted into the Linux spool.
+
+**A real inconsistency worth flagging rather than silently resolving one
+way:** that same Phase 7 status note also says "Still ahead: Phases 1-3
+(Packer golden image, VM lifecycle, guest hardening) and Phase 4 (gateway
+Compose)" as of its own 2026-07-30 date, while this document elsewhere
+(and #47/#290/#358) describes the golden image building and booting
+successfully with Sysmon, PowerShell logging, FakeNet, Regshot, and the
+living-persona daemon all confirmed against a live guest. Both can't be
+current at once — resolving exactly which phases are actually done on a
+given deployment needs someone with live host state, not a repo-only
+audit; see `IMPLEMENTATION_PLAN.md` for the phase-by-phase detail either
+way. See ["Sandbox submission, detonation, and result return"](#sandbox-submission-detonation-and-result-return)
+below for how this route compares to the Linux, WAN-permitted GHOSTS, and
+CAPE routes side by side. TANNER containers are web-request emulators, not
+malware detonation sandboxes.
 
 **The home side is not one deployment unit.** [#258](https://github.com/Xore/APIARY/issues/258)
 split what used to be a single `docker-compose.yml` into independently
@@ -810,6 +826,16 @@ what Ghidra already extracted. See [`analysis/ghidra/README.md`](analysis/ghidra
 for the full pipeline.
 
 ## Sandbox submission, detonation, and result return
+
+Four dynamic-detonation routes exist today, each its own guest, network, and
+spool — not four variations on one sandbox. The workbench (see "Payload
+analysis workbench") is what an analyst actually picks a route from; this
+section is what each route does once picked. See
+[`docs/sandbox/README.md`](sandbox/README.md#route-selection-and-evidence-return-across-four-dynamic-detonation-routes)
+for the canonical side-by-side diagram covering all four routes'
+network posture, spool paths, and shared-lock behavior; what follows below
+is the Linux route's own detailed submission-through-result sequence, kept
+here because it's the oldest and most heavily cross-referenced of the four.
 
 ```mermaid
 sequenceDiagram
