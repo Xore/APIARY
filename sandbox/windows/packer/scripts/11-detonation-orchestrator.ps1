@@ -53,10 +53,14 @@ Write-Host '================================================================'
 Write-Host ' Honeypot-Stack: Windows 11 Analysis VM - detonation orchestrator'
 Write-Host '================================================================'
 
+# #956: 'Samples' -> 'Inbox' below -- pafish's gensandbox_path() (real
+# source) flags any running module's path containing "\SAMPLE" as a
+# sandbox tell, and this is where run_sample.py's stage_job_offline()
+# virt-copy-in's the sample the job actually detonates.
 $analysisDir = 'C:\Analysis'
 New-Item -ItemType Directory -Force -Path $analysisDir | Out-Null
 New-Item -ItemType Directory -Force -Path "$analysisDir\Logs" | Out-Null
-New-Item -ItemType Directory -Force -Path "$analysisDir\Samples" | Out-Null
+New-Item -ItemType Directory -Force -Path "$analysisDir\Inbox" | Out-Null
 
 # ---------------- The in-guest orchestrator itself --------------------
 # Ported from run_sample.py's detonate() sequence. Kept as one flat script
@@ -95,7 +99,7 @@ function TryStep($name, [scriptblock]$body) {
 
 Step "START"
 $job = Get-Content $jobPath -Raw | ConvertFrom-Json
-$samplePath = "$analysisDir\Samples\$($job.sample_filename)"
+$samplePath = "$analysisDir\Inbox\$($job.sample_filename)"
 $obsSecs = [int]$job.observation_secs
 
 # ---------------- Telemetry start (best-effort) ----------------

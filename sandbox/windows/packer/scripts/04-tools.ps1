@@ -313,11 +313,22 @@ Start-Service QEMU-GA -ErrorAction SilentlyContinue
 # needs -- narrowing to the analyst account changes nothing for it and
 # closes the share to every other process on the box, detonated sample
 # included.
-@('C:\Samples','C:\Logs','C:\Drops','C:\Captures') | ForEach-Object {
+#
+# #956: 'Samples' -> 'Inbox', for the exact "lab-shaped share name" reason
+# #91 already called out above, just never acted on for the name itself --
+# pafish's gensandbox_path() (real source, not guessed) flags any running
+# module's path containing "\SAMPLE" as a sandbox tell, and every real
+# detonation drops the sample at this exact path (run_sample.py's
+# push_sample_to_guest()). Confirmed live: pafish's "Checking file path"
+# read traced! against C:\Samples\pafish.exe. 'Inbox' avoids that
+# substring (and "virus"/"malware"/"sandbox", the other strings
+# gensandbox_path() checks for) while keeping the same terse, mundane
+# naming style as the sibling Drops/Captures/Logs shares below.
+@('C:\Inbox','C:\Logs','C:\Drops','C:\Captures') | ForEach-Object {
     New-Item $_ -ItemType Directory -Force | Out-Null
 }
-New-SmbShare -Name 'Samples' -Path 'C:\Samples' -FullAccess 'analyst' -ErrorAction SilentlyContinue
-New-SmbShare -Name 'Logs'    -Path 'C:\Logs'    -ReadAccess 'analyst' -ErrorAction SilentlyContinue
+New-SmbShare -Name 'Inbox' -Path 'C:\Inbox' -FullAccess 'analyst' -ErrorAction SilentlyContinue
+New-SmbShare -Name 'Logs'  -Path 'C:\Logs'  -ReadAccess 'analyst' -ErrorAction SilentlyContinue
 
 # Decoy user environment (fake documents, a decoy SMB share, realistic
 # recent-files) lives in scripts/05-decoy-content.ps1, the next provisioner

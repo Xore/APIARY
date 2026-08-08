@@ -350,7 +350,7 @@
         </SynchronousCommand>
         <SynchronousCommand wcm:action="add">
           <Order>2</Order>
-          <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "foreach ($p in @('C:\Windows\Temp','C:\Tools','C:\ProgramData\chocolatey','C:\Users\analyst','C:\Samples','C:\Logs')) { try { Add-MpPreference -ExclusionPath $p -ErrorAction SilentlyContinue } catch {} }; try { Add-MpPreference -ExclusionExtension 'ps1','exe','dll' -ErrorAction SilentlyContinue } catch {}; try { Add-MpPreference -ExclusionProcess 'powershell.exe' -ErrorAction SilentlyContinue } catch {}; try { Set-MpPreference -MAPSReporting Disabled -SubmitSamplesConsent NeverSend -ErrorAction SilentlyContinue } catch {}; ((Get-MpPreference).ExclusionPath -join ', ') | Set-Content C:\defender-exclusions.txt"</CommandLine>
+          <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "foreach ($p in @('C:\Windows\Temp','C:\Tools','C:\ProgramData\chocolatey','C:\Users\analyst','C:\Inbox','C:\Logs')) { try { Add-MpPreference -ExclusionPath $p -ErrorAction SilentlyContinue } catch {} }; try { Add-MpPreference -ExclusionExtension 'ps1','exe','dll' -ErrorAction SilentlyContinue } catch {}; try { Add-MpPreference -ExclusionProcess 'powershell.exe' -ErrorAction SilentlyContinue } catch {}; try { Set-MpPreference -MAPSReporting Disabled -SubmitSamplesConsent NeverSend -ErrorAction SilentlyContinue } catch {}; ((Get-MpPreference).ExclusionPath -join ', ') | Set-Content C:\defender-exclusions.txt"</CommandLine>
           <RequiresUserInput>false</RequiresUserInput>
         </SynchronousCommand>
         <SynchronousCommand wcm:action="add">

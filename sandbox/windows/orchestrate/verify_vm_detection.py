@@ -67,7 +67,11 @@ VM_USER     = os.environ.get('VM_USER', 'analyst')
 # Must match winrm_pass's actual default in packer/win11-analysis.pkr.hcl --
 # same drift as run_sample.py's VM_PASS, fixed there in #358.
 VM_PASS     = os.environ.get('VM_PASS', 'malware123!')
-SAMPLE_SHARE = f'\\\\{VM_HOST}\\Samples'
+# #956: 'Samples' -> 'Inbox' -- see run_sample.py's own SAMPLE_SHARE
+# comment for the full reasoning (pafish's gensandbox_path() flags any
+# module path containing "\SAMPLE"; confirmed live in this exact script's
+# own pafish run, C:\Samples\pafish.exe read traced!).
+SAMPLE_SHARE = f'\\\\{VM_HOST}\\Inbox'
 LOGS_SHARE   = f'\\\\{VM_HOST}\\Logs'
 RESULTS_DIR  = Path(__file__).resolve().parents[3] / 'docs' / 'sandbox' / 'windows' / 'vm-detection-results'
 
@@ -126,7 +130,7 @@ def push_tool(local_path: Path, remote_name: str):
          '-c', f'put {local_path} {remote_name}'],
         check=True, capture_output=True, timeout=60,
     )
-    log.info(f'Pushed {local_path} -> C:\\Samples\\{remote_name}')
+    log.info(f'Pushed {local_path} -> C:\\Inbox\\{remote_name}')
 
 
 def run_tool(remote_name: str, log_name: str, args: str = '', timeout: int = 300) -> dict:
@@ -175,12 +179,12 @@ def run_tool(remote_name: str, log_name: str, args: str = '', timeout: int = 300
     code as a failure rather than success (a genuinely-successful
     Start-Process -PassThru always yields a real $p.ExitCode, even 0).
     """
-    log.info(f'Running C:\\Samples\\{remote_name} {args} ...')
+    log.info(f'Running C:\\Inbox\\{remote_name} {args} ...')
     stdin_path = f'C:\\Logs\\{log_name}.stdin'
     arg_clause = f'-ArgumentList "{args}" ' if args else ''
     out = winrm_run(
         f'"`n" | Out-File -Encoding ascii -NoNewline {stdin_path}; '
-        f'$p = Start-Process -FilePath C:\\Samples\\{remote_name} {arg_clause}-PassThru -Wait '
+        f'$p = Start-Process -FilePath C:\\Inbox\\{remote_name} {arg_clause}-PassThru -Wait '
         f'-WindowStyle Hidden -RedirectStandardInput {stdin_path} '
         f'-RedirectStandardOutput C:\\Logs\\{log_name} '
         f'-RedirectStandardError C:\\Logs\\{log_name}.stderr; '
@@ -228,7 +232,7 @@ def run_tool_insession(remote_name: str, log_name: str, args: str = '', timeout:
     stdin-feed/output-redirection trick run_tool() uses still applies --
     Register-ScheduledTaskAction has no I/O redirection of its own.
     """
-    log.info(f'Running C:\\Samples\\{remote_name} {args} in-session (scheduled task) ...')
+    log.info(f'Running C:\\Inbox\\{remote_name} {args} in-session (scheduled task) ...')
     # A per-invocation-unique name, not just per-tool -- confirmed live
     # (2026-08-06 full-pipeline run) that reusing a fixed name across two
     # invocations in quick succession can silently no-op the second
@@ -249,7 +253,7 @@ def run_tool_insession(remote_name: str, log_name: str, args: str = '', timeout:
     arg_clause = f"-ArgumentList '{args}' " if args else ''
     script_body = (
         f"'`n' | Out-File -Encoding ascii -NoNewline '{stdin_path}'\n"
-        f"$p = Start-Process -FilePath 'C:\\Samples\\{remote_name}' {arg_clause}-PassThru -Wait "
+        f"$p = Start-Process -FilePath 'C:\\Inbox\\{remote_name}' {arg_clause}-PassThru -Wait "
         f"-WindowStyle Hidden -RedirectStandardInput '{stdin_path}' "
         f"-RedirectStandardOutput 'C:\\Logs\\{log_name}' "
         f"-RedirectStandardError 'C:\\Logs\\{log_name}.stderr'\n"
@@ -310,7 +314,7 @@ def run_tool_insession(remote_name: str, log_name: str, args: str = '', timeout:
 
 def run_snippet_insession(ps_snippet: str, log_name: str, timeout: int = 60, poll_interval: int = 2) -> str:
     """Same in-session scheduled-task mechanism as run_tool_insession() (#696),
-    for a raw PowerShell snippet instead of a C:\\Samples\\ binary (#368).
+    for a raw PowerShell snippet instead of a C:\\Inbox\\ binary (#368).
 
     check_residual_tells()'s screen-resolution read was still going through
     plain winrm_run() -- Session 0, never the interactive desktop (Session 1)
