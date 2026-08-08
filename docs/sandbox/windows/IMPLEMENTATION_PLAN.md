@@ -544,8 +544,8 @@ virsh(['start', VM_DOMAIN])
 2.  Wait for WinRM on 10.10.10.2:5985                  (~1-2min cold boot)
 3.  docker compose -f docker-compose.sandbox.yml up -d  (start capture)
 4.  WinRM: Start-FakeNet, Start-ProcMon, Regshot snap1
-5.  WinRM: Copy sample → C:\Samples\<sha>.exe
-6.  WinRM: Start-Process C:\Samples\<sha>.exe
+5.  WinRM: Copy sample → C:\Inbox\<sha>.exe
+6.  WinRM: Start-Process C:\Inbox\<sha>.exe
 7.  Sleep observation window (default: 300s)
 8.  WinRM: Stop-ProcMon, export CSV; Regshot snap2+diff
 9.  WinRM: wevtutil export Sysmon + PowerShell EVTX

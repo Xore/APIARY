@@ -118,7 +118,13 @@ LEGACY_WINRM_MODE = os.environ.get('WINDOWS_SANDBOX_LEGACY_WINRM', '') == '1'
 STOP_EARLY_SENTINEL = Path(os.environ.get('STOP_EARLY_SENTINEL',
                         '/var/lib/honeypot-windows-sandbox/stop-early'))
 ARTIFACT_DIR    = Path(os.environ.get('WINDOWS_SANDBOX_RESULTS_DIR', 'reports/windows-sandbox'))
-SAMPLE_SHARE    = f'\\\\{VM_HOST}\\Samples'
+# #956: 'Samples' -> 'Inbox' -- pafish's gensandbox_path() (real source)
+# flags any running module's path containing "\SAMPLE" as a sandbox tell,
+# and every detonation ran the sample from this exact share. Confirmed
+# live: pafish's "Checking file path" read traced! against C:\Samples\
+# pafish.exe. 'Inbox' avoids that substring (and "virus"/"malware"/
+# "sandbox", the other strings gensandbox_path() checks for).
+SAMPLE_SHARE    = f'\\\\{VM_HOST}\\Inbox'
 LOGS_SHARE      = f'\\\\{VM_HOST}\\Logs'
 
 # #510: docker-compose.sandbox.yml's Zeek/Suricata/tcpdump sniff the libvirt
@@ -568,7 +574,7 @@ def wait_for_winrm(max_wait: int = 300):
 
 
 def copy_sample_to_vm(sample_path: Path, sha: str):
-    """Copy sample to C:\\Samples\\ via SMB."""
+    """Copy sample to C:\\Inbox\\ via SMB (#956 -- was C:\\Samples\\)."""
     dest_name = f'{sha[:16]}.exe'
     # Mount SMB share and copy
     subprocess.run(
@@ -577,7 +583,7 @@ def copy_sample_to_vm(sample_path: Path, sha: str):
         capture_output=True, timeout=60
     )
     log.info(f'Sample copied to VM as {dest_name}')
-    return f'C:\\Samples\\{dest_name}'
+    return f'C:\\Inbox\\{dest_name}'
 
 
 def start_procmon():
@@ -967,8 +973,9 @@ def stage_job_offline(sample_path: Path, sha: str, obs_secs: int, sample_filenam
 
     #490: this offline staging step, not a live SMB `put`, is what removes
     sample injection from the set of things a live authenticated channel
-    does during a run. C:\\Analysis\\Logs and C:\\Analysis\\Samples already
-    exist in the golden image itself (created by
+    does during a run. C:\\Analysis\\Logs and C:\\Analysis\\Inbox (#956 --
+    was C:\\Analysis\\Samples, same "\\SAMPLE" tell #956 fixed for the SMB
+    share below) already exist in the golden image itself (created by
     packer/scripts/11-detonation-orchestrator.ps1), so every fresh CoW
     clone inherits them -- no mkdir step needed here.
     """
@@ -985,7 +992,7 @@ def stage_job_offline(sample_path: Path, sha: str, obs_secs: int, sample_filenam
             check=True, capture_output=True, text=True, timeout=120,
         )
         subprocess.run(
-            [VIRT_COPY_IN_PATH, '-a', str(VM_DISK), str(staged_sample), '/Analysis/Samples'],
+            [VIRT_COPY_IN_PATH, '-a', str(VM_DISK), str(staged_sample), '/Analysis/Inbox'],
             check=True, capture_output=True, text=True, timeout=120,
         )
     log.info(f'Staged job.json + {sample_filename} into {VM_DISK} (offline)')

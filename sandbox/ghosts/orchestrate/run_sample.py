@@ -84,7 +84,12 @@ NVRAM           = Path(os.environ.get('VM_NVRAM',
 OBS_SECS        = int(os.environ.get('OBSERVATION_SECS', '1800'))
 GHOSTS_API_ADDR = os.environ.get('GHOSTS_API_ADDR', '10.20.30.1:5000')
 ARTIFACT_DIR    = Path(os.environ.get('GHOSTS_SANDBOX_RESULTS_DIR', 'reports/windows-ghosts'))
-SAMPLE_SHARE    = f'\\\\{VM_HOST}\\Samples'
+# #956: 'Samples' -> 'Inbox' -- see windows/orchestrate/run_sample.py's own
+# SAMPLE_SHARE comment for the full reasoning (win11-ghosts.qcow2 is
+# forked from win11-analysis.qcow2, packer/scripts/04-tools.ps1's rename
+# there is what actually creates 'Inbox' instead of 'Samples' on this
+# image too).
+SAMPLE_SHARE    = f'\\\\{VM_HOST}\\Inbox'
 LOGS_SHARE      = f'\\\\{VM_HOST}\\Logs'
 
 
@@ -174,7 +179,7 @@ def copy_sample_to_vm(sample_path: Path, sha: str) -> str:
         capture_output=True, timeout=60,
     )
     log.info(f'Sample copied to VM as {dest_name}')
-    return f'C:\\Samples\\{dest_name}'
+    return f'C:\\Inbox\\{dest_name}'
 
 
 GHOSTS_CLIENT_DIR  = r'C:\Program Files\Contoso\EndpointAgent'
