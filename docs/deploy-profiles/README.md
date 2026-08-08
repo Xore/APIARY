@@ -3,7 +3,7 @@
 [← back to README](../../README.md)
 
 Which of the split home stacks (#258 -- `.github/workflows/deploy.yml`
-currently syncs 17 of them, the authoritative list, not any doc's snapshot
+currently syncs 18 of them, the authoritative list, not any doc's snapshot
 of it) are active for a given deployment shape. Declared here instead of by
 hand-editing which stacks you happen to run, so an operator running a
 narrower deployment (fewer sensors, no VPS) has a named, checkable choice
@@ -39,9 +39,9 @@ validator only warns if either is missing from a non-empty profile.
 
 Not covered here: the VPS side (`vps/`, always deployed the same way
 regardless of home profile -- see `docs/CGNAT-DEPLOYMENT.md`) and
-`ip-enrichment-worker` (currently has no `deploy.yml` sync step at all --
-see [#560](https://github.com/Xore/APIARY/issues/560), a separate,
-already-broken gap this doc doesn't paper over).
+`ip-enrichment-worker`/`agent-intrusion-worker` (each has its own
+unconditional `deploy.yml` sync step, not gated by any profile choice here
+-- `ip-enrichment-worker`'s own sync gap, #560, was fixed separately).
 
 ## Validating a profile
 

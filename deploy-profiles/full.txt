@@ -18,3 +18,4 @@ dns-honeypot
 citrix-honeypot
 cisco-asa-honeypot
 rdp-honeypot
+endlessh

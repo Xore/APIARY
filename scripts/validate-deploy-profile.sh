@@ -58,6 +58,7 @@ declare -A STACK_TO_SENSORS=(
   [rdp-honeypot]="rdp-honeypot"
   [tanner]="tanner"
   [conpot]="conpot conpot-s7-1200 conpot-s7-1500 conpot-iec104 conpot-guardian conpot-kamstrup"
+  [endlessh]="endlessh"
 )
 # suricata runs on the VPS, unconditionally, regardless of which home
 # sensor stacks are enabled -- not tied to any profile entry.
