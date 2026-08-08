@@ -95,14 +95,23 @@ jobs:
           test ! -f .env || chmod 600 .env
           docker compose -f compose.yml config --quiet
 
+      - name: Check out the presentation-only Keycloak theme
+        uses: actions/checkout@v7
+        with:
+          repository: Xore/auth-backend
+          path: auth-theme-source
+          persist-credentials: false
+
       - name: Synchronize honeypot-keycloak identity stack
         shell: bash
         run: |
-          destination=/opt/stacks/honeypot-keycloak
+          destination=/var/dockge/stacks/honeypot-keycloak
           install -d -m 755 "$destination"
           install -d -m 700 "$destination/secrets"
           cp docker-compose.keycloak.yml "$destination/compose.yml"
           cp -r keycloak "$destination/"
+          install -d -m 755 "$destination/theme"
+          rsync -a --delete auth-theme-source/themes/apiary/ "$destination/theme/apiary/"
           cd "$destination"
           test ! -f .env || chmod 600 .env
           docker compose -f compose.yml config --quiet

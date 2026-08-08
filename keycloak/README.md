@@ -16,11 +16,13 @@ belong here in APIARY.
 Before the first Dockge start:
 
 1. Review the stack `.env`, initially copied from `keycloak.env.example`.
+   Set `KEYCLOAK_PUBLIC_DOMAIN` to the private deployment value; the container
+   renders the secret-free realm template locally before its first import.
 2. Create `KEYCLOAK_SECRETS_DIR` with mode `0700`.
 3. Create `postgres-password`, `bootstrap-admin-password`, and
    `restic-password` with independent random values and mode `0600`.
-4. Set `KEYCLOAK_THEME_DIR` to the reviewed auth-backend
-   `themes/apiary` directory.
+4. Confirm `KEYCLOAK_THEME_DIR` points at the stack-local theme synchronized
+   from the reviewed `Xore/auth-backend` repository by the home deploy job.
 5. Start in Dockge, then create and test a named MFA-enabled administrator.
 6. Delete `bootstrap-admin-password` and restart in Dockge. Bootstrap
    credentials are read only while that file exists.

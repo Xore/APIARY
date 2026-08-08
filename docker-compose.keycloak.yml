@@ -49,7 +49,13 @@ services:
           export KC_BOOTSTRAP_ADMIN_USERNAME="$${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-bootstrap-admin}"
           export KC_BOOTSTRAP_ADMIN_PASSWORD="$$(< /run/keycloak-secrets/bootstrap-admin-password)"
         fi
-        exec /opt/keycloak/bin/kc.sh start
+        case "$${KEYCLOAK_PUBLIC_DOMAIN}" in
+          ""|*[!A-Za-z0-9.-]*) echo "invalid KEYCLOAK_PUBLIC_DOMAIN" >&2; exit 1 ;;
+        esac
+        sed "s/example\.invalid/$${KEYCLOAK_PUBLIC_DOMAIN}/g" \
+          /opt/keycloak/realm-template/apiary-realm.json \
+          > /opt/keycloak/data/import/apiary-realm.json
+        exec /opt/keycloak/bin/kc.sh start --import-realm
     environment:
       KC_DB: postgres
       KC_DB_URL_HOST: postgres
@@ -58,6 +64,7 @@ services:
       KC_DB_USERNAME: keycloak
       KC_HOSTNAME: ${KEYCLOAK_URL:-https://auth.example.invalid}
       KC_HOSTNAME_ADMIN: ${KEYCLOAK_ADMIN_URL:-https://keycloak-admin.example.invalid}
+      KEYCLOAK_PUBLIC_DOMAIN: ${KEYCLOAK_PUBLIC_DOMAIN:-example.invalid}
       KC_HTTP_ENABLED: "true"
       KC_PROXY_HEADERS: xforwarded
       KC_HEALTH_ENABLED: "true"
@@ -69,7 +76,8 @@ services:
       - ${HP_BIND:-10.8.0.2}:${KEYCLOAK_PORT:-18080}:8080
     volumes:
       - ${KEYCLOAK_SECRETS_DIR:-/var/dockge/stacks/honeypot-keycloak/secrets}:/run/keycloak-secrets:ro
-      - ${KEYCLOAK_THEME_DIR:-/opt/stacks/auth-backend/themes/apiary}:/opt/keycloak/themes/apiary:ro
+      - ${KEYCLOAK_THEME_DIR:-/var/dockge/stacks/honeypot-keycloak/theme/apiary}:/opt/keycloak/themes/apiary:ro
+      - ./keycloak/realm:/opt/keycloak/realm-template:ro
     networks: [keycloak-data]
     healthcheck:
       test:
@@ -84,7 +92,9 @@ services:
       start_period: 60s
     stop_grace_period: 60s
     read_only: true
-    tmpfs: [/tmp:size=64m,mode=1777]
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /opt/keycloak/data/import:size=4m,mode=0755,uid=1000,gid=0
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     deploy:
