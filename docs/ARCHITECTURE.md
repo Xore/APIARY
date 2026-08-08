@@ -311,6 +311,144 @@ that are safe to copy-truncate; structured streams tailed by Filebeat are
 preserved. `honeypot-kibana-setup` is the one job with no dependents
 anywhere: nothing waits on its marker because nothing needs to.
 
+## Dashboard request, state, import, and control flows
+
+[#266](https://github.com/Xore/APIARY/issues/266): `honeypot-dashboard` runs
+two identical replicas, `dashboard` and `dashboard-b`, not one collapsed
+"live dashboard" node. Same image, same volumes, same Elasticsearch — a
+redeploy restarts one replica at a time while the other keeps serving every
+request, instead of the earlier blind `Recreate` that left a real
+listener-down window on every push.
+
+```mermaid
+flowchart TB
+  analyst["Analyst browser"]
+
+  subgraph vps["VPS"]
+    traefik["Traefik<br/>Host() rule"]
+    auth["forward-auth<br/>Xore/auth-backend"]
+    lb["loadBalancer —<br/>2 servers, active healthCheck<br/>GET /healthz every 5s"]
+  end
+
+  wg["WireGuard tunnel"]
+
+  subgraph dashStack["honeypot-dashboard stack"]
+    direction TB
+    subgraph primary["dashboard (primary replica)<br/>:19090"]
+      primaryReq["stateless request handling"]
+      primaryLoops["notifyLoop (webhook alerts) +<br/>reportScheduleLoop (scheduled PDFs) —<br/>DASHBOARD_BACKGROUND_LOOPS unset"]
+      primaryRebuild["rebuild() / es.refresh() /<br/>retention sweep — every cycle,<br/>unconditionally"]
+    end
+    subgraph secondary["dashboard-b (secondary replica)<br/>:19092"]
+      secondaryReq["stateless request handling"]
+      secondaryLoops(["notifyLoop / reportScheduleLoop —<br/>never run here.<br/>DASHBOARD_BACKGROUND_LOOPS=false"])
+      secondaryRebuild["rebuild() / es.refresh() /<br/>retention sweep — same as primary,<br/>harmless if duplicated"]
+    end
+    importer["es-results-importer<br/>read-only mirror, SHARD_COUNT-<br/>partitionable, own state file"]
+    adapter["services-adapter<br/>network_mode: none,<br/>read_only rootfs, cap_drop ALL"]
+  end
+
+  subgraph shared["Shared state — Elasticsearch + named volumes"]
+    es[("Elasticsearch<br/>honeynet — both replicas<br/>read + write")]
+    dashState[("dashboard-state volume —<br/>genuinely shared both ways with<br/>the main stack's payload-dedupe<br/>+ yara-scanner")]
+  end
+
+  resultDirs["Ghidra / sandbox / Windows-sandbox /<br/>GHOSTS-sandbox / GitHub-analysis /<br/>Rev·Deck result spools<br/>+ cowrie TTY + reporter metrics<br/>(root-owned host paths, read-only)"]
+
+  dockerSock[("/var/run/docker.sock<br/>host Docker daemon")]
+
+  analyst -->|"HTTPS"| traefik
+  traefik -->|"forward-auth check"| auth
+  auth -->|"identity headers or reject"| traefik
+  traefik --> lb
+  lb -->|"socat bridge, VPS side"| wg
+  wg -->|"traffic only to whichever<br/>replica is passing healthCheck"| primaryReq
+  wg --> secondaryReq
+
+  primaryReq <-.-> es
+  secondaryReq <-.-> es
+  primaryReq <-.-> dashState
+  secondaryReq <-.-> dashState
+
+  resultDirs --> importer --> es
+
+  primaryReq -.->|"start/stop/restart requests,<br/>the Services pane's only path"| adapter
+  secondaryReq -.-> adapter
+  adapter -->|"Unix socket only —<br/>never docker.sock itself"| dockerSock
+```
+
+**Both replicas answer requests identically; only one runs the loops that
+must never double-fire.** `main.go`'s `backgroundLoopsEnabled()` is a fixed
+two-replica pick (`DASHBOARD_BACKGROUND_LOOPS != "false"`), not real leader
+election — `notifyLoop` and `reportScheduleLoop` pause during the primary's
+own restart window rather than failing over to the secondary. `rebuild()`,
+`es.refresh()`, and the retention sweep are deliberately **not** gated the
+same way: each replica just recomputes its own in-memory snapshot or
+idempotently deletes already-expired rows, so running both unconditionally
+is harmless where the webhook/PDF loops would not be.
+
+**`services-adapter` is the Services pane's only path to the Docker
+daemon, and the dashboard never touches `docker.sock` directly.**
+`services-adapter` mounts `docker.sock` itself and exposes only a private
+Unix-socket volume (`services-adapter-socket`) for the dashboard to send
+start/stop/restart requests over — no TCP/HTTP listener, no network at all
+(`network_mode: none`), read-only root filesystem, every Linux capability
+dropped. The dashboard's own `cap_add: [DAC_READ_SEARCH]` (needed to read
+root-owned result directories written by other UIDs) is unrelated and
+carries no Docker access of its own.
+
+**`es-results-importer` is a one-way mirror, not a live read path.**
+Ghidra, sandbox (Linux/Windows/GHOSTS), GitHub-analysis, and Rev·Deck each
+write results to their own root-owned host spool; `es-results-importer`
+reads those read-only, ships them into
+`ghidra-analysis-v1`/`sandbox-analysis-v1`/`github-analysis-v1`/
+`workbench-runs-v1`, and never writes back — local JSON on disk stays
+authoritative. It scales horizontally by `sha256(path)` file sharding
+(`SHARD_COUNT`/`SHARD_INDEX`), independent of the two dashboard replicas.
+
+### Rolling update sequence
+
+```mermaid
+sequenceDiagram
+  participant Op as scripts/deploy-dashboard-rolling.sh
+  participant D as dashboard
+  participant DB as dashboard-b
+  participant T as Traefik healthCheck
+
+  Op->>Op: docker compose build dashboard<br/>(one shared image tag, both replicas)
+  Op->>T: is dashboard-b already healthy?
+  T-->>Op: yes — proceed
+  Op->>D: docker compose up -d --no-deps dashboard
+  Note over D: Recreate — real listener-down<br/>window for THIS replica only
+  loop poll docker inspect .State.Health.Status
+    D-->>Op: starting (up to 180s budget,<br/>matching the compose healthcheck's<br/>own start_period)
+  end
+  D-->>Op: healthy
+  Note over DB: dashboard-b served 100% of<br/>traffic for this whole window
+  Op->>T: is dashboard now healthy?
+  T-->>Op: yes — proceed
+  Op->>DB: docker compose up -d --no-deps dashboard-b
+  Note over DB: Recreate — real listener-down<br/>window for THIS replica only
+  loop poll docker inspect .State.Health.Status
+    DB-->>Op: starting
+  end
+  DB-->>Op: healthy
+  Note over D,DB: both replicas healthy on the<br/>new image — deploy complete
+```
+
+The 180s wait budget is not arbitrary: `docker-compose.dashboard.yml`'s own
+healthcheck already declares `start_period: 180s`, because `/healthz`
+reports 503 until the first `rebuild()` has real ES-derived data — measured
+at 60-120s against this host's actual event volume. If a replica fails its
+post-restart healthcheck, the script stops immediately rather than touching
+the other one: the still-healthy replica keeps serving all traffic while an
+operator investigates, exactly the same "never take down the one thing
+serving live traffic" posture as every step before it. Separately, the
+`autoheal` sidecar (main stack) restarts either replica on an unhealthy
+Docker label independent of this script entirely — it watches
+`/var/run/docker.sock` daemon-wide and isn't affected by the dashboard's
+own stack split.
+
 ## Event ingestion and network analysis
 
 ```mermaid
