@@ -405,6 +405,7 @@ func main() {
 	http.HandleFunc("/api/ghidra/", serveGhidraAPI)
 	http.HandleFunc("/export/ghidra/", serveGhidraExport)
 	http.HandleFunc("/api/revdeck/", serveRevdeckAPI)
+	http.HandleFunc("/api/cape/", serveCapeAPI)
 	http.HandleFunc("/api/github-analysis", s.serveGitHubAnalysisAPI)
 	http.HandleFunc("/api/github-analysis/", s.serveGitHubAnalysisAPI)
 	http.HandleFunc("/export/github-analysis/", s.serveGitHubAnalysisExport)
@@ -682,6 +683,19 @@ func main() {
 			return
 		}
 		renderPage(w, tmpl, "revdeck", &data)
+	})
+	http.HandleFunc("/cape/", func(w http.ResponseWriter, r *http.Request) {
+		sha, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/cape/"))
+		if err != nil || !hashName.MatchString(sha) {
+			http.NotFound(w, r)
+			return
+		}
+		data, err := capeData(sha)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		renderPage(w, tmpl, "cape", &data)
 	})
 	http.HandleFunc("/github-analysis", func(w http.ResponseWriter, r *http.Request) {
 		data, _ := s.githubAnalysisData("", r.URL.Query().Get("q"))

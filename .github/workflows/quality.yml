@@ -162,6 +162,10 @@ jobs:
           # the real pipeline source, so its own test runs against the real
           # tree rather than fixtures -- proving that stays true.
           python analysis/ghidra/tests/test_full_capabilities.py
+          # CAPE worker's status.json discipline (#319 follow-up). No live
+          # CAPE involved -- see the test file's own docstring for why that
+          # stays with --selftest --round-trip (#318) instead.
+          python sandbox/cape/worker/tests/test_cape_worker.py
       - name: Guarded LLM worker contracts
         shell: bash
         run: |

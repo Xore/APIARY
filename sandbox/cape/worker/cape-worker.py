@@ -338,6 +338,29 @@ def write_result(sha: str, result: dict) -> None:
     tmp.rename(final)
 
 
+def write_status() -> None:
+    """Queue counts, shaped for a future loadCapeStatus() to read (#319
+    follow-up) -- identical field names and glob conventions to
+    ghidra-worker.py's own write_status(), so the dashboard side can reuse
+    loadGhidraStatus()'s staleness/live-recheck logic almost verbatim rather
+    than inventing a second shape for one more worker.
+    """
+    def count(pattern: str) -> int:
+        return len(list(REQUEST_DIR.glob(pattern)))
+
+    status = {
+        "version": RESULT_VERSION,
+        "updated_at": now(),
+        "queued": count("*.request"),
+        "running": count("*.request.running"),
+        "failed": count("*.request.failed"),
+        "done": len(list(RESULTS_DIR.glob("*_cape.json"))),
+    }
+    tmp = RESULTS_DIR / ".status.json.tmp"
+    tmp.write_text(json.dumps(status, indent=2, sort_keys=True))
+    os.replace(tmp, RESULTS_DIR / "status.json")
+
+
 def drain() -> int:
     REQUEST_DIR.mkdir(parents=True, exist_ok=True)
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -346,6 +369,10 @@ def drain() -> int:
 
     pending = sorted(REQUEST_DIR.glob("*.request"))
     if not pending:
+        # Matches ghidra-worker.py's own reasoning: an empty queue doesn't
+        # need CAPE reachable at all, and status.json still needs writing so
+        # a quiet honeypot doesn't read as a dead worker (#319 follow-up).
+        write_status()
         return 0
 
     client = CapeClient(API_BASE, API_AUTH)
@@ -353,6 +380,7 @@ def drain() -> int:
         # Leave the spool untouched -- the path unit fires again on the next
         # change, same contract ghidra-worker.py's drain() holds itself to.
         log(f"CAPE API at {API_BASE} is not ready; leaving queue intact")
+        write_status()
         return 1
 
     processed = 0
@@ -381,6 +409,7 @@ def drain() -> int:
         # sample back on the next boot.
         claimed = request.with_suffix(".request.running")
         request.rename(claimed)
+        write_status()
 
         try:
             result = analyse_one(client, sha, sample, requested_at)
@@ -407,7 +436,10 @@ def drain() -> int:
                 "report": {},
             })
             claimed.rename(claimed.with_suffix(".failed"))
+        finally:
+            write_status()
 
+    write_status()
     log(f"drained {processed} request(s)")
     return 0
 

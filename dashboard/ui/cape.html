@@ -1,0 +1,91 @@
+{{define "cape"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>{{brandText}} &mdash; CAPE analysis</title>
+{{template "style" .}}
+</head>
+<body>
+<div class="app-shell">
+  {{template "topbar" .}}
+  {{template "sidebar" .}}
+  <main class="app-main">
+      <div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
+        <header class="overview-header" id="cape-header">
+          <div>
+            <div class="label-section">Dynamic analysis</div>
+            <h1>CAPE sandbox</h1>
+            <p class="subtitle">Detonation in an isolated, debugger-instrumented Windows guest -- CAPE's own second sandbox route (#322), separate from win11-sandbox, purpose-built for debugger-class time evasion (long sleeps, rdtsc checks) that persona realism alone cannot defeat.</p>
+          </div>
+          <div class="live-panel">
+            <span class="gen">generated <span data-hp-utc="{{utcOrEmpty .Generated}}">{{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></span>
+          </div>
+        </header>
+
+        {{if .Detail}}
+        <div class="filters"><a class="chip" href="/payload-workbench/{{.Detail.SHA256}}">Open unified analysis workbench &rarr;</a></div>
+        <div class="filters" id="cape-detail-actions"><a class="chip" href="/payload-analysis/{{.Detail.SHA256}}">static analysis</a><a class="chip" href="/events?shasum={{.Detail.SHA256}}">related events</a><a class="chip" href="/api/cape/{{.Detail.SHA256}}">raw report (JSON) &darr;</a></div>
+
+        {{if eq .Detail.ExitStatus "error"}}<div class="tw:mb-6 tw:rounded-lg tw:border tw:border-red tw:bg-red-subtle tw:px-4 tw:py-4 tw:text-red" role="alert"><strong>This run did not complete.</strong> {{if .Detail.Error}}{{.Detail.Error}}{{else}}The worker reported a failure with no detail.{{end}}</div>{{end}}
+
+        <div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-4 tw:gap-3 tw:mb-6" id="cape-detail-stats">
+          <div class="metric"><div class="metric__value{{if .Detail.ScoreIsRisky}} tw:text-red{{end}}">{{.Detail.ScoreDisplay}}</div><div class="metric__label">Malscore</div></div>
+          <div class="metric"><div class="metric__value">{{.Detail.CapeStatus}}</div><div class="metric__label">Task status</div></div>
+          <div class="metric"><div class="metric__value">{{len .Detail.Signatures}}</div><div class="metric__label">Signatures</div></div>
+          <div class="metric"><div class="metric__value">{{if .Summary}}{{len .Summary.Processes}}{{else}}0{{end}}</div><div class="metric__label">Processes traced</div></div>
+        </div>
+
+        <div class="section-heading"><div><h2>Run identity</h2><p>What was submitted, to which guest, and how the task itself went.</p></div></div>
+        {{/* #319: same long-value deferral this dashboard's other detail
+             pages already document -- SHA-256 stays on <table> markup
+             rather than card__row, consistent with ghidra.html/
+             sandbox.html/payloads.html's own Identity cards before their
+             #790 chunk 10 conversion (this page is new, so there's no
+             prior chunk to reference, but the reasoning -- SHA-256
+             overflowing card__row's flex layout -- is identical). */}}
+        <div class="card wide"><h2>Task identity</h2><table class="data-table"><tbody><tr><td>SHA-256</td><td class="v">{{.Detail.SHA256}}</td></tr><tr><td>task ID</td><td class="v">{{if .Detail.TaskID}}{{.Detail.TaskID}}{{else}}&mdash;{{end}}</td></tr><tr><td>requested</td><td class="v">{{.Detail.RequestedAt}}</td></tr><tr><td>started</td><td class="v">{{.Detail.StartedAt}}</td></tr><tr><td>completed</td><td class="v">{{.Detail.CompletedAt}}</td></tr><tr><td>exit status</td><td class="v">{{.Detail.ExitStatus}}</td></tr><tr><td>CAPE task status</td><td class="v">{{.Detail.CapeStatus}}</td></tr><tr><td>route</td><td class="v">{{.Detail.Route}}</td></tr>{{if .Summary}}<tr><td>machine</td><td class="v">{{.Summary.Machine}}</td></tr><tr><td>package</td><td class="v">{{.Summary.Package}}</td></tr><tr><td>duration</td><td class="v">{{.Summary.Duration}} seconds{{if .Summary.Timeout}} (hit its own analysis timeout){{end}}</td></tr>{{end}}</tbody></table></div>
+
+        {{if .Detail.Signatures}}
+        <div class="card wide"><h2>Signatures</h2><p class="note">CAPE's own behavioral signature matches -- a signature firing means code matching a known pattern ran, not necessarily that the sample is malicious.</p><div class="card__scroll"><table class="data-table"><thead><tr><th>severity</th><th>name</th><th>description</th></tr></thead><tbody>{{range .Detail.Signatures}}<tr><td><span class="badge badge--muted">{{.Severity}}</span></td><td class="v">{{.Name}}</td><td class="v">{{.Description}}</td></tr>{{end}}</tbody></table></div></div>
+        {{end}}
+
+        {{if .Summary}}
+        <div class="section-heading"><div><h2>What ran</h2><p>Every traced process, and the API calls CAPE's debugger instrumentation recorded for each.</p></div></div>
+        {{if .Summary.Processes}}
+        <div class="card wide"><h2>Process activity</h2><p class="note">API call counts, not the calls themselves -- CAPE recorded {{.Summary.TotalCalls}} calls across these processes combined, far too many to render on one page. The full trace is in the raw report (link above).</p><div class="card__scroll"><table class="data-table"><thead><tr><th>PID</th><th>process</th><th>parent PID</th><th>first seen</th><th>API calls</th></tr></thead><tbody>{{range .Summary.Processes}}<tr><td class="n">{{.ProcessID}}</td><td class="v">{{.ProcessName}}</td><td class="n">{{.ParentID}}</td><td class="ago">{{.FirstSeen}}</td><td class="n">{{.CallCount}}</td></tr>{{end}}</tbody></table></div></div>
+        {{else}}
+        <div class="card wide"><h2>Process activity</h2><p class="empty">No process trace was recorded for this run.</p></div>
+        {{end}}
+
+        {{if .Summary.SummaryKeys}}
+        <div class="card wide"><h2>Behavior summary</h2><p class="note">Deduplicated files, registry keys, mutexes and similar CAPE observed across every traced process. Large categories (registry keys especially) are common and not by themselves a finding.</p>{{range .Summary.SummaryKeys}}{{$items := index $.Summary.Summary .}}{{if $items}}
+          <div class="card__row"><span class="card__label">{{.}}</span><span class="card__value card__value--mono">{{len $items}}</span></div>
+          {{end}}{{end}}</div>
+        {{end}}
+
+        {{if or .Summary.Payloads .Summary.Configs}}
+        <div class="card wide"><h2>Dumped payloads &amp; extracted configuration</h2><p class="note">Files CAPE's own debugger-driven unpacking dumped mid-execution, and any malware configuration it extracted from them -- CAPE's own YARA-triggered dynamic bypass mechanism at work, not static analysis.</p>{{if .Summary.Payloads}}<p class="note">{{len .Summary.Payloads}} payload(s) dumped.</p>{{end}}{{if .Summary.Configs}}<p class="note">{{len .Summary.Configs}} configuration(s) extracted.</p>{{end}}</div>
+        {{else}}
+        <div class="card wide"><h2>Dumped payloads &amp; extracted configuration</h2><p class="empty">CAPE's debugger did not dump any payloads or extract any malware configuration during this run.</p></div>
+        {{end}}
+
+        <div class="card wide"><h2>Analyzer log</h2><p class="note">The in-guest analyzer's own operational log, not a per-instruction trace -- see Process activity above for that.</p>{{if .Summary.DebugErrors}}<p class="note tw:text-red">{{len .Summary.DebugErrors}} analyzer error(s) were logged.</p>{{end}}{{if .Summary.DebugLog}}<button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="cape-debug-log">Open the analyzer log</button>{{else}}<p class="empty">No analyzer log was recorded.</p>{{end}}</div>
+        {{end}}
+
+        {{if and .Summary .Summary.DebugLog}}
+        <div hidden data-hp-evidence-body="cape-debug-log" data-hp-evidence-title="Analyzer log" data-hp-evidence-note="The in-guest analyzer's own operational log. Untrusted guest output, HTML-escaped and size-bounded."><pre class="code">{{.Summary.DebugLog}}</pre></div>
+        {{end}}
+
+        {{else}}
+        <p class="empty">No CAPE result found for this hash. Submit one from the <a href="/payload-workbench">analysis workbench</a> -- a Windows sample only, CAPE's guest is Windows-only.</p>
+        {{end}}
+
+        <footer id="cape-footer">{{brandText}} &bull; CAPE sandbox &bull; isolated debugger-class detonation</footer>
+      </div>
+    </main>
+</div>
+</body>
+</html>
+{{end}}
