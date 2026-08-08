@@ -222,7 +222,30 @@ flowchart TB
     subgraph dnp3StackG["honeypot-dnp3"]
       dnp3["DNP3"]
     end
+    subgraph dicompotStackG["honeypot-dicompot"]
+      dicompot["DICOMpot"]
+    end
+    subgraph dnsHoneypotStackG["honeypot-dns-honeypot"]
+      dnsHoneypot["DNS honeypot"]
+    end
+    subgraph citrixStackG["honeypot-citrix"]
+      citrix["Citrix honeypot"]
+    end
+    subgraph ciscoAsaStackG["honeypot-cisco-asa"]
+      ciscoAsa["Cisco ASA honeypot"]
+    end
+    subgraph rdpStackG["honeypot-rdp"]
+      rdp["RDP honeypot"]
+    end
+    subgraph endlesshStackG["honeypot-endlessh"]
+      endlessh["Endlessh"]
+    end
   end
+
+  subgraph ipEnrichStackG["honeypot-ip-enrichment-worker —<br/>networkless, no isolated-sensor-network<br/>membership at all (#37/#38)"]
+    ipEnrich["via_port -> real attacker IP,<br/>ingest time not read time.<br/>Only for sensors not PROXY-wrapped:<br/>Cowrie, Dionaea, every Conpot persona,<br/>DNS honeypot, Cisco ASA (non-WebVPN side)"]
+  end
+  enrichedLogs[("logs/enriched/*.json")]
 
   subgraph tannerGroup["honeypot-tanner — TANNER application-emulation boundary"]
     snare["SNARE"]
@@ -269,6 +292,12 @@ flowchart TB
   conpot --> logs
   dnp3 --> logs
   tanner --> logs
+  dicompot --> logs
+  dnsHoneypot --> logs
+  citrix --> logs
+  ciscoAsa --> logs
+  rdp --> logs
+  endlessh --> logs
 
   cowrie --> payloads
   dionaea --> payloads
@@ -283,18 +312,21 @@ flowchart TB
   tannerweb --> tannerapi
   tannerapi --> redis
 
-  logs --> filebeat
+  logs -->|"raw JSON -- cowrie, dionaea,<br/>every conpot persona, DNS honeypot,<br/>Cisco ASA (non-WebVPN side)"| ipEnrichStackG
+  ipEnrichStackG --> enrichedLogs
+  enrichedLogs -->|"tailed instead of the raw<br/>path for these five -- not<br/>shipped twice"| filebeat
+  logs -->|"raw path for every other<br/>sensor + TANNER (already<br/>PROXY-protocol-aware,<br/>no join needed)"| filebeat
   initMarkers -.->|"entrypoint polls elasticsearch-setup.done"| filebeat
   filebeat --> es
   es --> kibana
   kibanainit -.->|"configures via API,<br/>no ordering dependency"| kibana
 
-  logs -->|"every sensor except multipot"| dashboard
+  logs -->|"local-file tail, ES-preferred<br/>with this as fallback --<br/>every sensor except the six<br/>ES-only ones below"| dashboard
   payloads --> dashboard
   dashboardState --> dashboard
   yaraResults --> dashboard
   dashboard --> es
-  es -.->|"multipot events, ES-sourced (#403, #238)"| dashboard
+  es -.->|"ES-only, no local-file path at<br/>all: multipot, dicompot,<br/>DNS honeypot, Citrix, Cisco ASA,<br/>RDP (events_es.go esOnlySensors)"| dashboard
   dashboard -.->|"health only"| filebeat
 
   es --> evebox
@@ -315,19 +347,35 @@ Elasticsearch for historical search. These are complementary paths: the live
 dashboard can remain useful during an Elasticsearch interruption, and the
 Elasticsearch archive outlives the dashboard's bounded in-memory window.
 
-multipot is the one exception (#403): the dashboard never reads its log file
-directly, only Elasticsearch (`events_es.go`'s `loadSensorEventsES`, queried
-by `sensor` against `honeypot-v2-*` on every rebuild cycle, merged into the
-same `s.events` pipeline every file-based sensor's events go through). This
-was made a prerequisite for #238's new protocol handlers (POP3, IMAP, SOCKS5,
-HL7/MLLP, ADB — all added directly to multipot rather than vendoring five
-separate third-party images) so they show up in the normal Event Explorer
-without the dashboard reading their log file at all. multipot still writes
-its log file exactly as before, purely for Filebeat to pick up — the
-dashboard's own read path is what changed. Every other sensor, including
-http-honeypot's deepened WordPress bait (readme.html version fingerprinting,
-xmlrpc.php, vulnerable-plugin readme.txt endpoints — also #238), is unaffected
-and stays file-based.
+multipot was the original exception (#403): the dashboard never reads its
+log file directly, only Elasticsearch (`events_es.go`'s
+`loadSensorEventsES`, queried by `sensor` against `honeypot-v2-*` on every
+rebuild cycle, merged into the same `s.events` pipeline every file-based
+sensor's events go through). This was made a prerequisite for #238's new
+protocol handlers (POP3, IMAP, SOCKS5, HL7/MLLP, ADB — all added directly
+to multipot rather than vendoring five separate third-party images) so they
+show up in the normal Event Explorer without the dashboard reading their
+log file at all. As the sensor inventory grew, five more sensors landed the
+same way and joined the same `esOnlySensors` list (`events_es.go`):
+DICOMpot, DNS honeypot, Citrix, Cisco ASA, and RDP — six total today, all
+ES-only reads with no local-file fallback in the dashboard at all. Every
+one of these six still writes its log file exactly as before, purely for
+Filebeat to pick up — only the dashboard's own read path differs from the
+other six sensors (Cowrie, Dionaea, Conpot, DNP3, HTTP, Endlessh, plus
+TANNER), which stay file-based with Elasticsearch preferred and the local
+tail as fallback on an ES outage. http-honeypot's deepened WordPress bait
+(readme.html version fingerprinting, xmlrpc.php, vulnerable-plugin
+readme.txt endpoints — also #238) is one of the file-based six and
+unaffected by any of this.
+
+**Two consumers not drawn above read every sensor's events uniformly, once
+they reach Elasticsearch, regardless of raw-vs-enriched routing or
+ES-only-vs-file-based dashboard reads:** `honeypot-agent-intrusion-worker`
+and the ML worker both poll `honeypot-v2-*`/`suricata-v2-*` directly and
+don't distinguish sensors the way the dashboard's own read path does — see
+"Agent-intrusion campaign detection" later in this document and
+`docs/ml-worker-plan.md` for their own dedicated diagrams rather than
+duplicating that detail here.
 
 `honeypot-init` runs first among the 20 stacks, and every other one depends
 on its output without a Compose-level dependency — Compose's
