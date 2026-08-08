@@ -1,6 +1,8 @@
-<p align="center"><img src="docs/assets/apiary-logo.png" alt="APIARY" width="220"></p>
+<p align="center">
+  <img src="docs/assets/apiary-readme.png" alt="APIARY — Automated Payload Intelligence &amp; Attacker Response" width="900">
+</p>
 
-# APIARY — big multi-service honeypot (Dockge, home → VPS)
+# A multi-service honeypot and automated malware-analysis stack
 
 A full honeypot deployment that follows this repo's CGNAT pattern: the sensors
 run at **home under Dockge**, publish only on the WireGuard interface, and are
