@@ -18,6 +18,40 @@ Every push to `main` and every pull request runs:
 Container images are built for pull requests. A push to `main` or a version tag
 publishes the custom images to the repository's GitHub Container Registry.
 
+### Trigger, runner, and trust boundary
+
+```mermaid
+flowchart TB
+  prPush["Pull request<br/>(possibly fork-origin,<br/>unreviewed code)"]
+  mainPush["Push to main<br/>(already merged,<br/>reviewed code)"]
+
+  subgraph ghHosted["GitHub-hosted runners — disposable, torn down after the job"]
+    direction TB
+    quality["quality.yml —<br/>the only checks any PR<br/>ever depends on"]
+    containerBuild["Container build<br/>(PR: build only,<br/>main/tag: build + publish to GHCR)"]
+  end
+
+  subgraph ciSelfHosted["honeypot-ci — self-hosted, narrow host access,<br/>NEVER wired to pull_request"]
+    qualityHome["quality-homeserver.yml —<br/>push:main + workflow_dispatch only.<br/>Faster than GitHub-hosted for the<br/>priciest checks; not a faster path<br/>to green on a PR, doesn't gate one"]
+  end
+
+  prPush --> quality
+  prPush -->|"PR: build only,<br/>never published"| containerBuild
+  mainPush --> quality
+  mainPush --> containerBuild
+  mainPush -.->|"push:main only —<br/>never pull_request, even<br/>same-repo (one compromised<br/>contributor account away<br/>from untrusted)"| qualityHome
+```
+
+**`honeypot-ci` can never see `pull_request`, by design.** A GitHub-hosted
+runner is a disposable, sandboxed VM torn down after the job; a self-hosted
+runner's job runs as a real process on real home-network infrastructure. A
+malicious test file in an unreviewed PR (`os.system(...)`, a crafted Go
+`TestMain`) would execute wherever that runner has access — the same
+reasoning `production-home`'s own deployment runner (below) already
+applies. `quality-homeserver.yml` triggers on `push: branches: [main]` and
+`workflow_dispatch` only, defense-in-depth against a compromised same-repo
+contributor account, not just fork-origin PRs.
+
 ## Testing conventions
 
 Python and shell tests live in a sibling `tests/` directory next to the code
@@ -89,6 +123,42 @@ applied with `systemctl restart docker`. Not something this repository's
 CI can apply -- if a fresh homeserver ever exhausts its own default pools
 again, the fix is the same `daemon.json` edit plus a daemon restart, not a
 per-stack workaround.
+
+### Protected homeserver deployment and split-stack order
+
+```mermaid
+flowchart TB
+  approve["Operator approves<br/>production-home environment"]
+  runner["Self-hosted honeypot-home runner<br/>polls GitHub, pulls the job"]
+  sync["Local rsync into<br/>/opt/stacks/honeypot-stack<br/>(--delete-delay, .env/logs/state<br/>preserved -- see table below)"]
+  init["honeypot-init<br/>(one-shot bootstrap jobs)"]
+  marker["apiary marker sync<br/>(root docker-compose.yml,<br/>zero-service, not a real stack)"]
+  conpot["honeypot-conpot<br/>(#258 split proof of concept,<br/>its own job)"]
+  sensorLoop["Looped stacks (#258 split, identical<br/>treatment): cowrie, multipot, http, dnp3,<br/>dionaea, tanner, dicompot, dns-honeypot,<br/>citrix-honeypot, cisco-asa-honeypot,<br/>rdp-honeypot, endlessh"]
+  workers["ip-enrichment-worker,<br/>then agent-intrusion-worker"]
+  payload["payload-analysis"]
+  util["utilities"]
+  elk["elk"]
+  dashboard["dashboard —<br/>scripts/deploy-dashboard-rolling.sh,<br/>not a blind recreate (see below)"]
+
+  approve --> runner --> sync
+  sync --> init --> marker --> conpot --> sensorLoop --> workers --> payload --> util --> elk --> dashboard
+```
+
+Every step after `sync` is `docker compose -f compose.yml config --quiet`
+(validate) then `up -d --build` (or `deploy-dashboard-rolling.sh` for the
+last step only) against that one stack's own compose file — a failure on
+any step is visible in that step's own job log without the whole workflow
+stopping later stacks from at least attempting to reconcile. `honeypot-init`
+runs first because every other stack polls its `state/init-markers/*.done`
+files at container entrypoint rather than a Compose-level `depends_on`,
+which can't reach across a stack boundary — see "Home container
+interaction map" in `ARCHITECTURE.md` for why. The sensor loop, both
+workers, and utilities/payload-analysis/elk have no ordering dependency on
+each other; they're sequenced in the workflow file for log readability, not
+because stack N+1 needs stack N up first. See
+["Dashboard request, state, import, and control flows"](ARCHITECTURE.md#dashboard-request-state-import-and-control-flows)
+for the dashboard step's own rolling-update sequence diagram in full.
 
 ### How files reach the homeserver
 
@@ -219,6 +289,13 @@ group) has since split out too -- see the `honeypot-dionaea` and
 worth splitting.
 
 #### Zero-downtime dashboard rolling updates (#266)
+
+See ["Dashboard request, state, import, and control flows" in
+`ARCHITECTURE.md`](ARCHITECTURE.md#dashboard-request-state-import-and-control-flows)
+for a dedicated sequence diagram of `deploy-dashboard-rolling.sh`'s actual
+build → verify-other-healthy → recreate → wait-healthy → repeat sequence
+and its 180s health-wait budget. The summary below stays focused on why
+this exists and what it doesn't fix.
 
 `dashboard` is the one user-facing, frequently-redeployed service behind
 Cloudflare/Traefik, so unlike every other stack here it runs as **two
@@ -470,6 +547,32 @@ The workflow preserves `/root/vps/.env`, synchronizes `vps/`, validates
 Use a dedicated key restricted to the deployment host and rotate it if workflow
 logs or repository access are ever compromised.
 
+### Backup, sync, validate, start, and config substitution
+
+```mermaid
+flowchart TB
+  approve["Operator approves<br/>production-vps environment"]
+  ghRunner["Short-lived GitHub-hosted runner"]
+  checkout["actions/checkout"]
+  key["VPS_SSH_KEY written to a<br/>temp file, mode 0600"]
+  backup[("Snapshot: /root/vps-backups/<br/>pre-deploy-&lt;timestamp&gt;.tar.gz,<br/>10 most recent kept")]
+  rsync["rsync vps/ -> /root/vps/<br/>over SSH, excluding .env,<br/>traefik/certs/, traefik/dynamic.yml<br/>(VPS-owned, see table below)"]
+  validate["SSH: docker compose config<br/>validates /root/vps/docker-compose.yml"]
+  up["SSH: docker compose up -d --build"]
+  dynGen["Separate step: substitute DOMAIN<br/>into the committed *.honeypot.example<br/>placeholders, validate as YAML,<br/>no leftover placeholders --<br/>all BEFORE touching the VPS"]
+  dynWrite["Copy to a temp path on the VPS,<br/>then write in place with cat --<br/>never copy-then-rename (see below:<br/>Traefik's bind mount tracks the<br/>inode, not the path)"]
+  verify["Verify step: fail the job if certs<br/>or dynamic.yml are missing, empty,<br/>unparseable, or still placeholder"]
+  destroy["GitHub destroys the runner<br/>+ its temp key file"]
+
+  approve --> ghRunner --> checkout --> key --> backup --> rsync --> validate --> up
+  up --> dynGen --> dynWrite --> verify --> destroy
+```
+
+The certificates were lost once, in a single `target: both` run before the
+`traefik/certs/` exclusion existed: Traefik fell back to self-signed and
+every router silently stopped matching. See below for why `dynamic.yml`'s
+own deploy step specifically avoids a copy-then-rename.
+
 ### How files reach the VPS
 
 The VPS job runs on a short-lived GitHub-hosted Ubuntu runner:
@@ -566,6 +669,41 @@ environment approval.
 The workflow reads `HP_BIND` and deliberately never prints it: it is an
 internal WireGuard address, and the job's output is visible to anyone who can
 read the Actions log.
+
+### Diagnostics vs. mutating deploy
+
+```mermaid
+flowchart LR
+  operator["Operator"]
+
+  subgraph diag["diagnostics.yml — workflow_dispatch only, read-only"]
+    diagHome["home job —<br/>same runner as deploy.yml's<br/>home job"]
+    diagVPS["VPS job —<br/>same SSH key as deploy.yml's<br/>VPS job"]
+    diagReport["container state, recent logs,<br/>disk/volume usage --<br/>never a restart, prune, or write"]
+    diagHome --> diagReport
+    diagVPS --> diagReport
+  end
+
+  subgraph mutate["deploy.yml — protected environment approval required"]
+    deployHome["home job"]
+    deployVPS["VPS job"]
+    deployChange["writes compose.yml, runs<br/>docker compose up --<br/>real, approved changes"]
+    deployHome --> deployChange
+    deployVPS --> deployChange
+  end
+
+  operator -->|"answer a question"| diag
+  operator -->|"a finding calls for action"| mutate
+```
+
+Same runners, same credentials, same deployment topology — `diagnostics.yml`
+mirrors `deploy.yml`'s shape deliberately, so an operator never needs an
+interactive shell on production just to answer "is this healthy," which is
+exactly how a diagnosis turns into an accidental change. The only
+difference that matters is that `diagnostics.yml` has no step capable of
+mutating anything; a finding that calls for real action still goes through
+`deploy.yml` and its environment approval, never a follow-up edit to the
+diagnostics workflow itself.
 
 ## Delivery paths at a glance
 
