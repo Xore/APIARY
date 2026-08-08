@@ -19,17 +19,32 @@ a worker that needs pip install before it can drain a queue is a worker that
 will be broken after the next OS upgrade -- same reasoning ghidra-worker.py
 gives for its own stdlib-only rule.
 
-API CONTRACT -- NOT yet verified against a live CAPE instance. Endpoints
-below are CAPEv2's documented apiv2 shape (web/apiv2/views.py upstream), the
-same starting point ghidra-worker.py's own header warns went stale once
-before ("the endpoints originally taken from the plan documents were
-wrong"). This cannot be verified end-to-end until #315's golden image and a
-configured CAPE machine exist -- there is currently no guest for CAPE to
-detonate anything in, so no real submission has ever been made. Re-run
---selftest against a live `cuckoo`/`cape` service once #314's Python
-environment and #315's guest both exist, and correct this docstring (and the
-CAPEClient methods below) against what the running service actually does,
-the way ghidra-worker.py's header records having to do once already.
+API CONTRACT -- #318: verified live, 2026-08-08, against a real win11-cape
+detonation (`--selftest --round-trip`, tasks 8 and 9, both reached
+"reported" and a fetchable report). Same lesson ghidra-worker.py's own
+header already recorded once ("the endpoints originally taken from the
+plan documents were wrong") -- two of the endpoints assumed from CAPEv2's
+documented apiv2 shape (web/apiv2/views.py upstream) needed a real
+correction before this actually worked:
+
+- `CapeClient.ready()` treated `/apiv2/cuckoo/status/` reporting itself
+  disabled (`{"error": true, "error_value": "Cuckoo Status API is
+  disabled"}` -- this host's api.conf has [cuckoostatus] off, an
+  unrelated per-endpoint opt-in flag) as CAPE being unreachable. It is not:
+  a disabled-endpoint response is still proof of a live, correctly routing
+  service. See ready()'s own docstring for what actually gates the three
+  endpoints this worker's real path depends on.
+- `CapeClient.report()`'s URL was wrong: the real route is
+  `/apiv2/tasks/get/report/<id>/json/` (an extra `get/` segment), not
+  `/apiv2/tasks/report/<id>/json/`. Caught by a live 404 against a task
+  that had already reached "reported" -- submit() and wait() needed no
+  correction, only this one.
+
+The round-trip probe file took two more live corrections to land on (see
+ROUND_TRIP_PROBE's own comment below): a real /bin/true submission was
+rejected as unsupported (this host has no Linux CAPE guest, only
+win11-cape), and a plain .txt was rejected by CAPE's own filename-based
+junk-file filter before it ever reached platform detection.
 
 RESOURCE COEXISTENCE (#320): CAPE's guest and win11-sandbox both run as
 KVM/QEMU domains on this host. 16 logical CPUs total; win11-sandbox alone is
@@ -120,10 +135,13 @@ class CapeError(RuntimeError):
 class CapeClient:
     """Every call to CAPE's own REST API lives here.
 
-    NOT yet verified against a live instance -- see this file's module
-    docstring. Endpoints match CAPEv2's documented apiv2 blueprint
-    (`/apiv2/tasks/create/file/`, `/apiv2/tasks/view/<id>/`,
-    `/apiv2/tasks/report/<id>/json/`), token auth via `Authorization: Token
+    Verified live against a real win11-cape detonation, 2026-08-08 -- see
+    this file's module docstring for the result. `/apiv2/tasks/create/file/`
+    and `/apiv2/tasks/status/<id>/` matched the originally-assumed
+    documented shape exactly; `/apiv2/tasks/report/<id>/json/` did not --
+    the real route has an extra `get/` segment
+    (`/apiv2/tasks/get/report/<id>/json/`, per apiv2/urls.py), corrected
+    below after a live 404 caught it. Token auth via `Authorization: Token
     <key>` (CAPE_API_TOKEN, empty for a loopback-only deployment where the
     web service has no auth configured).
     """
@@ -155,10 +173,27 @@ class CapeClient:
             raise CapeError(f"{method} {path} -> {e}") from e
 
     def ready(self) -> bool:
-        """/apiv2/cuckoo/status/. False on any failure, not just a clean 200."""
+        """/apiv2/cuckoo/status/. False on any failure, not just a clean 200.
+
+        #318, confirmed live: this endpoint is one of several apiv2 routes
+        CAPE gates behind its own per-endpoint enable flag
+        (api.conf's [cuckoostatus] section, off by default) -- unrelated to
+        whether the service itself is up. A disabled response is still a
+        well-formed JSON reply from a live, correctly routing Django app
+        ({"error": true, "error_value": "Cuckoo Status API is disabled"}),
+        the same proof of reachability a populated "data" key would be. Only
+        a connection failure, timeout, or non-JSON/5xx response (all raised
+        as CapeError by _request) means the service is actually unreachable.
+        The three endpoints this worker's real submit/wait/report path
+        depends on ([filecreate]/[taskstatus]/[taskreport]) are enabled by
+        default on this deployment -- confirmed against the live
+        /opt/CAPEv2/conf/api.conf, not assumed -- so this check only needs
+        to prove the API is answering at all, not that this specific
+        optional status endpoint is turned on.
+        """
         try:
             resp = self._request("GET", "/apiv2/cuckoo/status/", timeout=10)
-            return isinstance(resp, dict) and bool(resp.get("data"))
+            return isinstance(resp, dict) and "error" in resp
         except CapeError:
             return False
 
@@ -219,7 +254,7 @@ class CapeClient:
 
     def report(self, task_id: int) -> dict:
         """Fetch the full JSON report for a reported task."""
-        resp = self._request("GET", f"/apiv2/tasks/report/{task_id}/json/",
+        resp = self._request("GET", f"/apiv2/tasks/get/report/{task_id}/json/",
                               timeout=ANALYSIS_TIMEOUT)
         if isinstance(resp, dict):
             return resp
@@ -377,12 +412,71 @@ def drain() -> int:
     return 0
 
 
-def selftest() -> int:
-    """Check reachability. NOT a contract round-trip (see module docstring):
+# #318: NOT /bin/true, unlike ghidra-worker.py's own --selftest probe.
+# Confirmed live, in order: (1) CAPE's platform autodetection
+# (File.get_platform() in lib/cuckoo/common/objects.py) classifies an ELF
+# as "linux", and this host has Linux binaries analysis disabled (no Linux
+# CAPE guest exists, only win11-cape) -- a real /bin/true submission was
+# rejected outright with "Linux binaries analysis isn't enabled". (2) a
+# plain .txt fixture was rejected too, by demux.py's filename-based
+# JUNK_EXTENSIONS anti-noise filter (.txt/.md/.yml/.yaml/.yar/.yara), before
+# submission ever reached platform detection. .dat with the same plain
+# content clears both -- see the fixture file's own header for the full
+# reasoning.
+ROUND_TRIP_PROBE = Path(__file__).resolve().parent / "fixtures" / "selftest-probe.dat"
 
-    there is no configured CAPE machine yet (#315), so there is nothing this
-    could submit a real sample to. Extend this once one exists, the way
-    ghidra-worker.py's own --selftest exercises a real analysis end to end.
+
+def selftest_round_trip(client: CapeClient) -> int:
+    """#318: exercise submit -> wait -> report against a live CAPE machine.
+
+    Not run by default even when reachability checks pass (see selftest()
+    below) -- this is a real VM detonation on shared infrastructure
+    (ANALYSIS_TIMEOUT-bounded, up to 20 minutes; contends with win11-sandbox
+    for the #320 shared KVM lock), not a cheap contract probe like
+    ghidra-worker.py's own /bin/true check against a stateless container.
+    Confirmed live (2026-08-08) against this host's actual api.conf: the
+    three endpoints this depends on -- [filecreate]/[taskstatus]/
+    [taskreport] -- are enabled by default, unlike [cuckoostatus] (see
+    CapeClient.ready()'s own docstring).
+    """
+    if not ROUND_TRIP_PROBE.is_file():
+        print(f"\n{ROUND_TRIP_PROBE} not present - skipping the round trip")
+        return 0
+    print(f"\nround trip on {ROUND_TRIP_PROBE} (route={ROUTE}) ...")
+    print(f"  budget: up to {ANALYSIS_TIMEOUT}s, polling every {POLL_INTERVAL}s")
+    try:
+        task_id = client.submit(ROUND_TRIP_PROBE)
+        print(f"  task_id        : {task_id}")
+        state = client.wait(task_id)
+        print(f"  final state    : {state}")
+        report = client.report(task_id)
+    except CapeError as e:
+        print(f"  FAILED: {e}")
+        print("  The endpoint contract has probably changed, or the "
+              "win11-cape machine is not correctly registered. Compare "
+              "against /opt/CAPEv2/web/apiv2/views.py, which is the "
+              "authority on this host.")
+        return 1
+    info = report.get("info") if isinstance(report, dict) else None
+    target = report.get("target") if isinstance(report, dict) else None
+    signatures = report.get("signatures") if isinstance(report, dict) else None
+    print(f"  score          : {(info or {}).get('score') if isinstance(info, dict) else None}")
+    print(f"  category       : {(target or {}).get('category') if isinstance(target, dict) else None}")
+    print(f"  signatures     : {len(signatures) if isinstance(signatures, list) else 0}")
+    if not isinstance(report, dict) or not report:
+        print("  FAILED: report was empty - the contract is broken")
+        return 1
+    print("\nround trip OK")
+    return 0
+
+
+def selftest() -> int:
+    """Check reachability, then offer the #318 round trip.
+
+    The round trip itself is gated behind --round-trip (see
+    selftest_round_trip()'s own docstring for why) -- plain --selftest stays
+    a cheap, always-safe check, same contract every other worker's
+    --selftest in this repo holds itself to.
     """
     client = CapeClient(API_BASE, API_AUTH)
     ok = client.ready()
@@ -397,9 +491,13 @@ def selftest() -> int:
         print("\nCAPE is not reachable. Bring up the host stack first -- see "
               "docs/sandbox/cape/IMPLEMENTATION_PLAN.md.")
         return 1
-    print("\nreachability OK. No end-to-end round trip yet -- #315's guest "
-          "does not exist, so CAPE has no machine to detonate anything in.")
-    return 0
+    if "--round-trip" not in sys.argv:
+        print("\nreachability OK. Pass --selftest --round-trip for a real "
+              "submit/wait/report cycle against a live win11-cape "
+              "detonation (takes real minutes, see selftest_round_trip()'s "
+              "own docstring).")
+        return 0
+    return selftest_round_trip(client)
 
 
 def main() -> int:

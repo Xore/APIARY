@@ -1,0 +1,20 @@
+cape-worker.py --selftest --round-trip probe file.
+
+Deliberately a plain-text .dat, not /bin/true and not a .txt: CAPE's own
+platform autodetection (lib/cuckoo/common/objects.py's File.get_platform())
+classifies an ELF as "linux" and this host has Linux binaries analysis
+disabled (lib/cuckoo/common/web_utils.py, no Linux CAPE guest exists --
+only win11-cape) -- confirmed live, /bin/true was rejected outright with
+"Linux binaries analysis isn't enabled" before this file replaced it.
+get_platform() defaults to "windows" for anything not identified as Linux
+or Darwin, so a plain-content file routes to win11-cape correctly.
+
+.txt was also tried and rejected: lib/cuckoo/common/demux.py's own
+JUNK_EXTENSIONS set (an anti-noise filter, not a bug) filters .txt/.md/
+.yml/.yaml/.yar/.yara out by filename before submission ever reaches
+platform detection. The filter is filename-only, not content-based, so
+.dat (not in that set) with the same plain-text content passes it.
+
+The point of this probe is exercising the submit/wait/report API contract,
+not analysing anything -- this file has no code, does nothing if opened,
+and carries nothing CAPE's win11-cape guest could act on.
