@@ -25,12 +25,10 @@ jq -e '
     .directAccessGrantsEnabled == false and
     .serviceAccountsEnabled == false and
     .attributes["pkce.code.challenge.method"] == "S256" and
-    (.redirectUris | length == 1) and
-    (.redirectUris[0] | startswith("https://")) and
-    (.redirectUris[0] | contains("*") | not) and
-    (.webOrigins | length == 1) and
-    (.webOrigins[0] | startswith("https://")) and
-    (.webOrigins[0] | contains("*") | not)
+    (if .clientId == "apiary-dashboard" then (.redirectUris | length == 2) else (.redirectUris | length == 1) end) and
+    (all(.redirectUris[]; startswith("https://") and (contains("*") | not))) and
+    (if .clientId == "apiary-dashboard" then (.webOrigins | length == 2) else (.webOrigins | length == 1) end) and
+    (all(.webOrigins[]; startswith("https://") and (contains("*") | not)))
   )) and
   (has("users") | not) and
   ([paths | .[-1] | tostring | ascii_downcase |

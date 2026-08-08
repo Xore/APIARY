@@ -47,6 +47,7 @@ jobs:
         with:
           python-version: "3.13"
       - run: python scripts/check-public-leaks.py
+      - run: python scripts/validate-oidc-redirects.py
 
   go:
     name: Go formatting and tests

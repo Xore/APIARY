@@ -2,6 +2,9 @@
 
 Status: accepted Phase 0 decision record for #976 and epic #986.
 
+Implementation and operations are documented in
+[`KEYCLOAK-OPERATIONS.md`](KEYCLOAK-OPERATIONS.md).
+
 ## Fixed architecture
 
 Keycloak and PostgreSQL run in the Dockge-managed `honeypot-keycloak` stack on
