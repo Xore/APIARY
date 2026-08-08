@@ -642,6 +642,84 @@ investigation effort, not to be the verdict itself — see "Analysis result
 interpretation" below for how this stack keeps that distinction explicit
 throughout.
 
+## Agent-intrusion campaign detection
+
+[#154](https://github.com/Xore/APIARY/issues/154) phase 5: a deployed,
+standalone `honeypot-agent-intrusion-worker` stack that groups isolated,
+individually-low-signal events into campaigns and escalates the ones that
+actually cross a trust boundary — the gap #154 opens with is that nothing
+grouped related events together in the first place, so real campaigns
+stayed under any single-event alert threshold.
+
+```mermaid
+flowchart TB
+  subgraph sourceES["Elasticsearch"]
+    srcIdx[("honeypot-v2-*, suricata-v2-*")]
+  end
+
+  subgraph worker["honeypot-agent-intrusion-worker — poll loop, 300s default"]
+    fetch["fetch_window_events()<br/>bounded rolling fetch —<br/>FETCH_WINDOW_DAYS (10d default)"]
+    normalizeTs["normalize timestamps to UTC,<br/>sort"]
+    campaignCorr["campaign_correlator.correlate_campaigns()<br/>union-find over shared session/IP/<br/>C2-channel identifiers,<br/>72h correlation window"]
+    critRules["criticality_rules.evaluate_event()<br/>per event, per campaign member —<br/>deterministic, structural,<br/>never reads model/LLM output"]
+    boundedDecode(("decode_correlate.bounded_decode()<br/>per-rule, single-event —<br/>base64/gzip/zlib/single-byte-XOR,<br/>depth+size capped, never executes"))
+    severity["campaign_severity() —<br/>aggregates matched rule categories<br/>across the whole campaign"]
+    gate{"severity in<br/>{high, critical}?"}
+    verdict["build_campaign_verdict() —<br/>deterministic campaign_id (sha256),<br/>idempotent upsert"]
+    drop(["severity low/medium:<br/>not written — the isolated/benign<br/>case this pipeline exists not to alarm on"])
+  end
+
+  campaignIdx[("agent-intrusion-campaigns index")]
+  dashRoute["dashboard/agent_campaigns.go<br/>ES poll on the existing 1-min ticker,<br/>in-memory cache keyed by campaign_id<br/>(upsert, not append) — no SSE/Redis"]
+  page["/agent-campaigns,<br/>/api/agent-campaigns"]
+  disabled(["ES unavailable: page reports<br/>Enabled=false, no local-file<br/>fallback — same posture as<br/>ml-anomalies (#968)"])
+
+  srcIdx --> fetch --> normalizeTs --> campaignCorr
+  campaignCorr --> critRules
+  critRules -.->|"per matched rule, only when<br/>that rule inspects a blob"| boundedDecode
+  critRules --> severity --> gate
+  gate -->|"yes"| verdict
+  gate -->|"no"| drop
+  verdict --> campaignIdx
+  campaignIdx --> dashRoute --> page
+  dashRoute -.-> disabled
+```
+
+**Fragment reassembly (`decode_correlate.ChunkCorrelator`) is a real,
+tested module — but it is not wired into this live pipeline.** Its own
+docstring is explicit about the distinction: `ChunkCorrelator` reassembles
+one multi-part *message* (several sensor events that are fragments of a
+single payload, keyed by channel/sequence) before it's even decodable;
+`campaign_correlator.py` above correlates separate, already-complete
+events into one *campaign*. `worker.py`'s live `run_cycle()` only calls
+`campaign_correlator.correlate_campaigns()` — `ChunkCorrelator` is
+exercised by `tests/test_decode_correlate.py` and referenced in
+`criticality_rules.py`'s own comments as a documented boundary, not
+invoked from anywhere in the deployed worker. What *is* live and running
+per matched rule is `bounded_decode()` — a single-blob decoder (not a
+multi-event reassembler) that a criticality rule calls when it needs to
+inspect what a suspicious base64/compressed/XOR-obfuscated field actually
+contains, still never executing or evaluating the decoded content itself.
+
+**Deterministic rules, not the LLM, own escalation.** `criticality_rules.py`
+inspects each event's raw sensor-shaped structure directly — command text,
+alert fields, audit-event shape — and is proven against `corpus.jsonl`'s
+`expected_findings.should_escalate` only as a *test oracle*, never as a
+live input. Nothing in this pipeline reads model/LLM output as a
+precondition for escalation; that keeps the critical-alert gate immune to
+the class of problem "treat model output as advisory" exists to prevent
+(see "Analysis result interpretation" below for the same distinction
+applied dashboard-wide). A campaign's `matched_categories` — the set of
+*distinct* rule categories it tripped, not just whether escalation
+happened — is itself part of the signal `campaign_severity()` scores on.
+
+**Idempotent by construction.** Because every poll cycle re-fetches a
+rolling `FETCH_WINDOW_DAYS` window rather than tracking an incremental
+checkpoint, the same still-active campaign reappears on every cycle —
+`build_campaign_verdict()`'s deterministic `campaign_id` (a sha256 of the
+sorted member event-ID list) makes that an upsert of the same document,
+not a growing pile of duplicates.
+
 ## Captured payload lifecycle and static analysis
 
 ```mermaid
