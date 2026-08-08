@@ -75,17 +75,29 @@ ground-truth labels. [web:275][web:283]
 
 ## 2. Data Sources
 
-The worker ingests from all existing Elasticsearch indices:
+> The five per-sensor index patterns this section originally named
+> (`cowrie-*`, `dionaea-*`, `honeypot-network-*`, `conpot-*`,
+> `http-honeypot-*`) never matched anything on the live homeserver — see
+> the "v0.1 audit verdict" callout above. `worker.py`'s real,
+> currently-deployed `SOURCE_INDICES` are the two rows below.
+
+The worker ingests from two unified, versioned index patterns
+(`ml-worker/worker.py`'s `SOURCE_INDICES`):
 
 | Index pattern | Source | Key fields |
 |---------------|--------|------------|
-| `cowrie-*` | Cowrie SSH/Telnet honeypot | `src_ip`, `username`, `password`, `command`, `timestamp`, `session` |
-| `dionaea-*` | Dionaea multi-protocol honeypot | `src_ip`, `dst_port`, `proto`, `payload_hex`, `timestamp` |
-| `honeypot-network-*` | Zeek + Suricata (Filebeat) | `conn.*`, `dns.*`, `http.*`, `tls.*`, `alert.signature` |
-| `conpot-*` | Conpot ICS honeypot | `src_ip`, `proto`, `request`, `timestamp` |
-| `http-honeypot-*` | HTTP honeypot | `src_ip`, `method`, `uri`, `user_agent`, `timestamp` |
+| `honeypot-v2-*` | every honeypot sensor (Cowrie, Dionaea, Conpot, HTTP-honeypot, and every other sensor stack — disambiguated by `event.sensor`, not a separate index per sensor) | `event.sensor`, `source.ip`, `honeypot.*` (per-sensor nested fields, not uniform across sensors — see §5.3) |
+| `suricata-v2-*` | Suricata network/IDS events (Filebeat) | `suricata.eve.*`, `network.*`, `alert.signature` |
 
-All indices share a common `@timestamp` field used for temporal ordering.
+Both index patterns share a common `@timestamp` field used for temporal
+ordering. A third index, `ml-worker-state`, is not a data source — it's the
+worker's own per-index-pattern checkpoint store (`load_checkpoint`/
+`save_checkpoint` in `worker.py`): a `last_timestamp` plus the set of
+already-seen event IDs at that exact timestamp, so a restart resumes
+without re-scoring or skipping events at a checkpoint boundary (#168).
+Fetches are paginated (`page_size` default 500) and checkpoint
+incrementally across pages, not only at the end of a full scroll, so a
+crash mid-backlog loses at most one page of progress, not the whole run.
 
 ---
 
@@ -94,31 +106,44 @@ All indices share a common `@timestamp` field used for temporal ordering.
 ```mermaid
 flowchart TD
     subgraph Stack["APIARY (existing)"]
-        Sensors["Cowrie · Dionaea · Conpot · Zeek/Suricata · HTTP-honeypot"]
-        ES["Elasticsearch<br/>indices: cowrie-*, dionaea-*, ..."]
+        Sensors["every honeypot sensor stack<br/>(disambiguated by event.sensor,<br/>not a separate index each)"]
+        Suricata["Suricata / network IDS"]
+        ES["Elasticsearch<br/>honeypot-v2-*, suricata-v2-*"]
         Sensors --> ES
+        Suricata --> ES
     end
 
     subgraph Worker["ML Worker (ml-worker/)"]
-        Ingestor["Ingestor<br/>(ES scroll poll)"]
+        Ingestor["Ingestor<br/>(ES poll, page_size=500,<br/>POLL_INTERVAL=30s default)"]
+        Checkpoint[("ml-worker-state index —<br/>per-index-pattern checkpoint,<br/>last_timestamp + seen_ids,<br/>incremental across pages (#168)")]
         FeatureEng["Feature Engineer<br/>(per-source normalisation)"]
         ModelEngine["Model Engine<br/>IsoForest<br/>LSTM-AE<br/>HBOS"]
         ModelStore["Model Store<br/>(joblib / .pt)"]
         Scorer["Scorer<br/>anomaly_score + explanation"]
 
+        Ingestor <--> Checkpoint
         Ingestor --> FeatureEng --> ModelEngine
         ModelEngine -->|periodic retrain| ModelStore
         ModelEngine --> Scorer
     end
 
-    MLIndex["ES index: ml-anomalies"]
-    DashboardGo["Dashboard (Go)<br/>GET /api/ml/anomalies<br/>SSE stream push"]
+    MLIndex[("ES index: ml-anomalies")]
+    DashboardGo["Dashboard (Go) —<br/>ml_anomalies.go: ES poll on the<br/>existing 1-min ticker (main.go),<br/>same cadence esClient.refresh()<br/>already runs. No Redis, no SSE —<br/>a broker is only justified once<br/>polling is measured insufficient,<br/>which hasn't happened (§10)"]
+    DashboardCache[("in-memory cache,<br/>capped at mlAnomalyCacheCap —<br/>same pattern as payloadCache/ipsCache")]
+    DashboardAPI["GET /api/ml/anomalies,<br/>/api/ml/stats"]
     DashboardUI["Dashboard UI<br/>ML Anomalies panel"]
 
-    ES -->|"poll every N seconds (scroll API)"| Ingestor
+    ES -->|"poll every POLL_INTERVAL"| Ingestor
     Scorer -->|write findings| MLIndex
-    MLIndex --> DashboardGo --> DashboardUI
+    MLIndex --> DashboardGo --> DashboardCache --> DashboardAPI --> DashboardUI
 ```
+
+`worker.py` does still `import redis` and can publish a best-effort
+notification if `REDIS_URL` is explicitly set — but the base
+`ml-worker/docker-compose.yml` no longer runs a Redis service at all
+(#62), `REDIS_URL` is empty by default, and the dashboard has no
+subscriber for it anywhere. Elasticsearch polling is not a fallback path
+here; it's the only transport the dashboard actually implements.
 
 ---
 
