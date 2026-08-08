@@ -563,8 +563,22 @@ select.form-input { cursor: pointer; }
   border-bottom: 1px solid var(--border-subtle);
 }
 .card__row:last-child { border-bottom: 0; }
-.card__label { color: var(--text-primary); font-size: var(--font-size-footnote); }
-.card__value { color: var(--text-secondary); font-size: var(--font-size-caption); }
+.card__label { color: var(--text-primary); font-size: var(--font-size-footnote); flex: 0 0 auto; }
+/* min-width:0 for the same reason .card__content needs it above: a flex
+   item's default min-width is auto, which means it refuses to shrink
+   below its content's intrinsic width no matter what word-break says --
+   word-break only has anything to do once the box is actually allowed to
+   get narrower than an unbroken run of text. word-break:break-all itself
+   mirrors this dashboard's own td.v (a long SHA-256/hash value already
+   wraps correctly in a <table> cell; .card__value had no equivalent,
+   which is why several long-value tables stayed on <table> markup
+   instead of converting to this component -- see honeypot-stack#790). */
+.card__value {
+  color: var(--text-secondary);
+  font-size: var(--font-size-caption);
+  min-width: 0;
+  word-break: break-all;
+}
 .card__value--mono {
   padding: 3px 7px;
   border-radius: var(--radius-xs);
