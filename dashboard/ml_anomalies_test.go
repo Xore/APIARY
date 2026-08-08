@@ -331,3 +331,41 @@ func TestMLAnomaliesPageRendersFromCache(t *testing.T) {
 		t.Fatal("disabled state did not render a clear explanation")
 	}
 }
+
+// #913: the page must offer an acknowledge/reopen action per row, wired to
+// the real ack state via applyMLAnomalyAcks -- not just a static column.
+func TestMLAnomaliesPageRendersAcknowledgeAction(t *testing.T) {
+	c := &mlAnomalyStore{}
+	c.absorb([]mlAnomaly{
+		{Timestamp: "2026-08-01T10:00:00Z", Severity: "high", SrcIP: "203.0.113.9", CompositeScore: 0.9,
+			ModelScores: map[string]float64{"isolation_forest": 0.9, "lstm_ae": 0.9, "hbos": 0.9},
+			AnomalyID:   "open-anomaly"},
+		{Timestamp: "2026-08-01T11:00:00Z", Severity: "high", SrcIP: "198.51.100.1", CompositeScore: 0.9,
+			ModelScores: map[string]float64{"isolation_forest": 0.9, "lstm_ae": 0.9, "hbos": 0.9},
+			AnomalyID:   "acked-anomaly"},
+	})
+	acks := newTestMLAnomalyAckManager(t)
+	acks.acknowledge("acked-anomaly", true, "alice")
+	s := &store{mlAnomalies: c, es: &esClient{}, mlAnomalyAcks: acks}
+	funcs := templateFuncs(s, "")
+	tmpl := template.Must(template.New("t").Funcs(funcs).Parse(pageTemplate))
+
+	page := s.mlAnomaliesData(httptest.NewRequest("GET", "/ml-anomalies", nil))
+	var out strings.Builder
+	if err := tmpl.ExecuteTemplate(&out, "ml-anomalies", &page); err != nil {
+		t.Fatalf("ml-anomalies page does not render: %v", err)
+	}
+	html := out.String()
+	if !strings.Contains(html, `value="open-anomaly"`) || !strings.Contains(html, `name="ack" value="true"`) {
+		t.Fatalf("open anomaly is missing its acknowledge form: %s", html)
+	}
+	if !strings.Contains(html, `value="acked-anomaly"`) || !strings.Contains(html, `name="ack" value="false"`) {
+		t.Fatalf("acked anomaly is missing its reopen form: %s", html)
+	}
+	if !strings.Contains(html, "acknowledged by alice") {
+		t.Fatalf("acked anomaly does not show who acknowledged it: %s", html)
+	}
+	if !strings.Contains(html, `action="/ml-anomalies/ack"`) {
+		t.Fatal("acknowledge/reopen forms do not post to /ml-anomalies/ack")
+	}
+}
