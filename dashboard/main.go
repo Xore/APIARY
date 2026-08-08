@@ -764,12 +764,7 @@ func main() {
 	http.HandleFunc("/export/clusters.csv", s.exportClustersCSV)
 	http.HandleFunc("/payload/", s.servePayload)
 	http.HandleFunc("/tty/", func(w http.ResponseWriter, r *http.Request) { s.serveTTYReplay(w, r, tmpl) })
-	staticHandler := http.FileServer(http.FS(staticAssets))
-	http.Handle("/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "public, max-age=604800, immutable")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		staticHandler.ServeHTTP(w, r)
-	}))
+	http.Handle("/static/", staticAssetHandler())
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)

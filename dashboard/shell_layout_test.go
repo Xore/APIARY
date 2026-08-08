@@ -2,9 +2,32 @@ package main
 
 import (
 	"bytes"
+	"io/fs"
 	"strings"
 	"testing"
 )
+
+func TestStaticDashboardStylesLiveInVendoredTheme(t *testing.T) {
+	err := fs.WalkDir(uiFS, "ui", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".html") {
+			return err
+		}
+		body, err := uiFS.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if !bytes.Contains(body, []byte("<style")) {
+			return nil
+		}
+		if path != "ui/overview.html" || !bytes.Contains(body, []byte(`<style nonce="{{.Nonce}}">`)) {
+			t.Errorf("%s contains static page CSS; dashboard styling belongs in vendored Xore/theme", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestModalRootDoesNotParticipateInAppShellGrid(t *testing.T) {
 	css, err := staticAssets.ReadFile("static/theme.css")

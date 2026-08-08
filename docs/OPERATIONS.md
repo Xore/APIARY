@@ -93,10 +93,10 @@ commands/credentials, payloads, enriched IDS alerts, and ingest failures.
   design system (migration guide:
   [MIGRATE-HONEYPOT-STACK.md](https://github.com/Xore/theme/blob/main/docs/MIGRATE-HONEYPOT-STACK.md)):
   a semantic, server-rendered application shell (toolbar, sidebar, main
-  canvas, command bar) styled by the vendored `theme.css` plus a small
-  compiled Tailwind utility layer. It is fully self-contained: the theme,
-  the dashboard-specific layer, and Leaflet are served from the dashboard
-  binary rather than a CDN.
+  canvas, command bar) styled only by the byte-identical vendored `theme.css`.
+  APIARY does not carry a custom dashboard stylesheet; new selectors are
+  implemented in `Xore/theme` and re-vendored. The theme and Leaflet are
+  served from the dashboard binary rather than a JavaScript CDN.
   The fixed desktop sidebar becomes a compact rail and then an off-canvas
   navigation panel on narrow screens, while the 32px application toolbar keeps
   activity, health, and theme controls (dark, light, system) available across

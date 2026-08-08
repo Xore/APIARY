@@ -1,8 +1,10 @@
 /*
  * Xore Theme
  * A quiet, warm desktop-productivity interface for self-hosted applications.
- * Framework-free, dependency-free, and safe to copy into another repository.
+ * Framework-free and safe to copy into another repository.
  */
+
+@import url("https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap");
 
 :root {
   color-scheme: dark;
@@ -19,11 +21,11 @@
 
   --border-subtle: rgba(255, 255, 255, 0.075);
   --border-strong: rgba(255, 255, 255, 0.14);
-  --border-focus: rgba(109, 167, 236, 0.62);
+  --border-focus: rgba(109, 167, 236, 0.75);
 
   --text-primary: #e9e6df;
   --text-secondary: #a8a49c;
-  --text-muted: #8c8f8d;
+  --text-muted: #a5a9a6;
   --text-disabled: #68635e;
   --text-on-accent: #211a17;
   --text-link: #6da7ec;
@@ -43,15 +45,21 @@
   --accent-soft: rgba(217, 119, 87, 0.14);
 
   --success: #79c99e;
-  --success-soft: rgba(121, 201, 158, 0.13);
+  --success-soft: rgba(121, 201, 158, 0.20);
   --info: #78a9d4;
-  --info-soft: rgba(120, 169, 212, 0.13);
+  --info-soft: rgba(120, 169, 212, 0.20);
   --warning: #deb36a;
-  --warning-soft: rgba(222, 179, 106, 0.14);
+  --warning-soft: rgba(222, 179, 106, 0.21);
   --danger: #dc7774;
-  --danger-soft: rgba(220, 119, 116, 0.14);
+  --danger-soft: rgba(220, 119, 116, 0.21);
   --critical: #ff5c5c;
   --critical-soft: rgba(255, 92, 92, 0.16);
+  --accent-text-on-soft: #e38f74;
+  --success-text-on-soft: #77cb9e;
+  --info-text-on-soft: #8bb7dd;
+  --warning-text-on-soft: #e1b467;
+  --danger-text-on-soft: #e89b99;
+  --critical-text-on-soft: #ff8080;
 
   --radius-xs: 6px;
   --radius-control: 9px;
@@ -61,7 +69,11 @@
 
   --shadow-raised: 0 1px 2px rgba(0, 0, 0, 0.18), 0 8px 26px rgba(0, 0, 0, 0.24);
   --shadow-dialog: 0 2px 6px rgba(0, 0, 0, 0.3), 0 24px 80px rgba(0, 0, 0, 0.52);
-  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+  /* Xore typography is web-loaded above, with platform-native fallbacks for
+     offline or blocked requests. */
+  --font-sans: "Fira Sans", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-display: "Space Grotesk", "Fira Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Fira Code", "SFMono-Regular", "Cascadia Code", "Roboto Mono", ui-monospace, monospace;
   /* A standard ease-out curve (fast start, gentle settle) rather than the
      linear-ish default `ease` keyword -- every hover/focus/panel transition
      in the theme reads slightly more deliberate with the same durations.
@@ -129,13 +141,13 @@
   --border-strong: rgba(34, 31, 28, 0.18);
   --text-primary: #2f2b27;
   --text-secondary: #68615a;
-  --text-muted: #918a82;
+  --text-muted: #66615b;
   --text-disabled: #aaa49d;
   --text-on-accent: #fffaf5;
   --text-link: #2a78d6;
   --text-link-hover: #2566d0;
   --switch-on: #2566d0;
-  --border-focus: rgba(42, 120, 214, 0.55);
+  --border-focus: #1f5fae;
   --btn-inverted-bg: #262421;
   --btn-inverted-bg-hover: #151412;
   --btn-inverted-text: #f5f4ef;
@@ -148,16 +160,22 @@
   --accent-pressed: #a74b33;
   --accent-soft: rgba(199, 101, 72, 0.12);
   --success: #3f8764;
-  --success-soft: rgba(63, 135, 100, 0.11);
+  --success-soft: rgba(63, 135, 100, 0.18);
   --info: #487eaa;
-  --info-soft: rgba(72, 126, 170, 0.11);
+  --info-soft: rgba(72, 126, 170, 0.18);
   --warning: #9b6b25;
-  --warning-soft: rgba(155, 107, 37, 0.11);
+  --warning-soft: rgba(155, 107, 37, 0.19);
   --danger: #b34f4c;
-  --danger-soft: rgba(179, 79, 76, 0.11);
+  --danger-soft: rgba(179, 79, 76, 0.20);
   --critical: #c53030;
   --critical-soft: rgba(197, 48, 48, 0.13);
-  --shadow-raised: 0 1px 2px rgba(48, 42, 36, 0.06), 0 8px 26px rgba(48, 42, 36, 0.09);
+  --accent-text-on-soft: #a2472b;
+  --success-text-on-soft: #317152;
+  --info-text-on-soft: #396991;
+  --warning-text-on-soft: #885c1c;
+  --danger-text-on-soft: #a64441;
+  --critical-text-on-soft: #b82929;
+  --shadow-raised: 0 1px 2px rgba(48, 42, 36, 0.11), 0 8px 26px rgba(48, 42, 36, 0.16);
   --shadow-dialog: 0 2px 6px rgba(48, 42, 36, 0.12), 0 24px 70px rgba(48, 42, 36, 0.19);
 }
 
@@ -177,13 +195,13 @@
     --border-strong: rgba(34, 31, 28, 0.18);
     --text-primary: #2f2b27;
     --text-secondary: #68615a;
-    --text-muted: #918a82;
+    --text-muted: #66615b;
     --text-disabled: #aaa49d;
     --text-on-accent: #fffaf5;
     --text-link: #2a78d6;
     --text-link-hover: #2566d0;
     --switch-on: #2566d0;
-    --border-focus: rgba(42, 120, 214, 0.55);
+    --border-focus: #1f5fae;
     --btn-inverted-bg: #262421;
     --btn-inverted-bg-hover: #151412;
     --btn-inverted-text: #f5f4ef;
@@ -196,16 +214,22 @@
     --accent-pressed: #a74b33;
     --accent-soft: rgba(199, 101, 72, 0.12);
     --success: #3f8764;
-    --success-soft: rgba(63, 135, 100, 0.11);
+    --success-soft: rgba(63, 135, 100, 0.18);
     --info: #487eaa;
-    --info-soft: rgba(72, 126, 170, 0.11);
+    --info-soft: rgba(72, 126, 170, 0.18);
     --warning: #9b6b25;
-    --warning-soft: rgba(155, 107, 37, 0.11);
+    --warning-soft: rgba(155, 107, 37, 0.19);
     --danger: #b34f4c;
-    --danger-soft: rgba(179, 79, 76, 0.11);
+    --danger-soft: rgba(179, 79, 76, 0.20);
     --critical: #c53030;
     --critical-soft: rgba(197, 48, 48, 0.13);
-    --shadow-raised: 0 1px 2px rgba(48, 42, 36, 0.06), 0 8px 26px rgba(48, 42, 36, 0.09);
+    --accent-text-on-soft: #a2472b;
+    --success-text-on-soft: #317152;
+    --info-text-on-soft: #396991;
+    --warning-text-on-soft: #885c1c;
+    --danger-text-on-soft: #a64441;
+    --critical-text-on-soft: #b82929;
+    --shadow-raised: 0 1px 2px rgba(48, 42, 36, 0.11), 0 8px 26px rgba(48, 42, 36, 0.16);
     --shadow-dialog: 0 2px 6px rgba(48, 42, 36, 0.12), 0 24px 70px rgba(48, 42, 36, 0.19);
   }
 }
@@ -235,7 +259,7 @@ body {
   margin: 0;
   background: var(--app-bg);
   color: var(--text-primary);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--font-sans);
   font-size: var(--font-size-body);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
@@ -249,10 +273,10 @@ a:hover { color: var(--text-link-hover); }
 img, svg { display: block; }
 
 h1, h2, h3, h4, p { margin-top: 0; }
-h1, h2, h3, h4 { color: var(--text-primary); font-weight: 600; line-height: 1.2; }
+h1, h2, h3, h4 { color: var(--text-primary); font-family: var(--font-display); font-weight: 600; line-height: 1.2; }
 h1 { font-size: clamp(1.65rem, 2.4vw, 2.2rem); letter-spacing: -0.025em; }
 h2 { font-size: 1.25rem; letter-spacing: -0.012em; }
-h3 { font-size: 1rem; }
+h3 { font-size: var(--font-size-lg); }
 p { color: var(--text-secondary); }
 
 .heading-serif {
@@ -262,7 +286,7 @@ p { color: var(--text-secondary); }
 }
 
 .mono, code, kbd {
-  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+  font-family: var(--font-mono);
 }
 
 .text-muted { color: var(--text-muted); }
@@ -353,6 +377,36 @@ p { color: var(--text-secondary); }
   to { box-shadow: 0 0 #0000, 0 0 #0000; }
 }
 .flash { animation: flash-ring 900ms var(--ease-out); }
+
+/* A shaped placeholder for content still loading -- a card, table row, or
+   map rectangle rendered as its own layout shape instead of a plain text
+   line. No per-element dynamic value and no JS: static markup a consumer
+   renders instead of (or before replacing with) real content. The sweep
+   animation is already neutralized by the prefers-reduced-motion catch-all
+   above (animation-duration: 0.01ms !important on *, *::before, *::after). */
+.skeleton, .skeleton-line {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface-2);
+  border-radius: var(--radius-control);
+}
+.skeleton::after, .skeleton-line::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--surface-3) 60%, transparent), transparent);
+  animation: skeleton-sweep 1.4s ease-in-out infinite;
+}
+@keyframes skeleton-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+/* .skeleton-line is a standalone shimmering bar (its own background+sweep,
+   same as .skeleton above) sized for text-line placeholders -- stack
+   several directly, no wrapping .skeleton parent needed. .skeleton itself
+   is for a single rectangular block (a map, an image, a whole card). */
+.skeleton-line { height: 12px; margin-bottom: 8px; border-radius: var(--radius-xs); }
+.skeleton-line:last-child { margin-bottom: 0; }
 
 /* A timeline/session-replay entry settling into place -- a touch more
    pronounced than .stagger-in's plain fade+lift, since a timeline reads
@@ -522,12 +576,12 @@ select.form-input { cursor: pointer; }
   display: flex;
   flex-direction: column;
   margin-bottom: 14px;
-  padding: 18px 20px;
+  padding: var(--space-lg) var(--space-xl);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-panel);
   background: var(--surface-1);
 }
-.card--raised { background: var(--surface-raised); box-shadow: var(--shadow-raised); }
+.card--raised { background: var(--surface-raised); border-color: var(--border-strong); box-shadow: var(--shadow-raised); }
 .card__title { margin-bottom: 4px; color: var(--text-primary); font-size: var(--font-size-body); font-weight: 600; }
 .card__desc { margin-bottom: 14px; color: var(--text-secondary); font-size: var(--font-size-caption); }
 /* #24: the only region that flexes. min-height:0 overrides flex's own
@@ -583,7 +637,7 @@ select.form-input { cursor: pointer; }
   padding: 3px 7px;
   border-radius: var(--radius-xs);
   background: var(--surface-2);
-  font-family: "SFMono-Regular", "Cascadia Code", monospace;
+  font-family: var(--font-mono);
   font-size: var(--font-size-xs);
 }
 
@@ -594,7 +648,7 @@ select.form-input { cursor: pointer; }
 }
 .metric {
   min-width: 0;
-  padding: 14px 15px;
+  padding: var(--space-md) var(--space-lg);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-panel);
   background: var(--surface-1);
@@ -602,6 +656,15 @@ select.form-input { cursor: pointer; }
 .metric__label { color: var(--text-muted); font-size: var(--font-size-xs); }
 .metric__value { margin-top: 6px; color: var(--text-primary); font-size: 24px; font-weight: 600; letter-spacing: -0.03em; }
 .metric__trend { margin-top: 4px; color: var(--text-secondary); font-size: var(--font-size-xs); }
+/* Discrete, server-chosen modifiers (not a per-element continuous value),
+   so unlike .mini-chart/.heatmap below this needs no CSP.md nonce pattern.
+   Mapping: positive/spike-like states -> --up, negative/low states ->
+   --down, neutral/baseline-unavailable states -> no modifier (plain
+   .metric__trend, today's look). */
+.metric__trend--up { color: var(--success); }
+.metric__trend--down { color: var(--danger); }
+.metric__trend--up::before { content: "\2191 "; }
+.metric__trend--down::before { content: "\2193 "; }
 
 /* Each bar's height comes from --v (0-100), not an inline height/width.
    Read docs/CSP.md before setting --v: under a strict style-src (a nonce
@@ -667,6 +730,40 @@ select.form-input { cursor: pointer; }
 .heatmap__legend { display: flex; align-items: center; gap: 4px; color: var(--text-muted); font-size: var(--font-size-xs); }
 .heatmap__legend .heatmap__cell { flex: none; width: 10px; height: 10px; }
 
+/* CSS-only tooltip, reading its text straight from the DOM attribute via
+   attr() inside this stylesheet rule rather than a computed inline style
+   value -- unlike .mini-chart/.heatmap above, it needs no nonce and no
+   per-page <style> block at all, since attr() here is a static rule, not
+   a per-request dynamic one. :focus-visible makes it keyboard-reachable
+   only on elements that are already focusable (links, buttons); a bare
+   element (e.g. a <span> label) needs tabindex="0" added to pick up
+   keyboard/focus access, this primitive doesn't grant that by itself.
+   white-space:nowrap suits short strings; pair a max-width + white-space:
+   normal modifier alongside it for longer copy. */
+[data-tip] { position: relative; }
+[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  padding: 5px 9px;
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+  box-shadow: var(--shadow-raised);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+  z-index: 40;
+}
+[data-tip]:hover::after, [data-tip]:focus-visible::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
@@ -686,32 +783,32 @@ select.form-input { cursor: pointer; }
      underlined hyperlink. No effect on the common <span> case. */
   text-decoration: none;
 }
-.badge--accent { background: var(--accent-soft); color: var(--accent); }
-.badge--green, .badge--success { background: var(--success-soft); color: var(--success); }
-.badge--blue, .badge--info { background: var(--info-soft); color: var(--info); }
-.badge--orange, .badge--warning { background: var(--warning-soft); color: var(--warning); }
-.badge--red, .badge--danger { background: var(--danger-soft); color: var(--danger); }
-.badge--critical { border: 1px solid color-mix(in srgb, var(--critical) 45%, transparent); background: var(--critical-soft); color: var(--critical); }
+.badge--accent { background: var(--accent-soft); color: var(--accent-text-on-soft); }
+.badge--green, .badge--success { background: var(--success-soft); color: var(--success-text-on-soft); }
+.badge--blue, .badge--info { background: var(--info-soft); color: var(--info-text-on-soft); }
+.badge--orange, .badge--warning { background: var(--warning-soft); color: var(--warning-text-on-soft); }
+.badge--red, .badge--danger { background: var(--danger-soft); color: var(--danger-text-on-soft); }
+.badge--critical { border: 1px solid color-mix(in srgb, var(--critical) 45%, transparent); background: var(--critical-soft); color: var(--critical-text-on-soft); }
 .badge--muted { border: 1px solid var(--border-subtle); }
-.badge--current { background: var(--info-soft); color: var(--info); }
+.badge--current { background: var(--info-soft); color: var(--info-text-on-soft); }
 .badge--solid { border: 0; background: var(--switch-on); color: var(--text-on-status); }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 
 .alert {
   display: flex;
   gap: 10px;
-  padding: 11px 13px;
+  padding: var(--space-sm) var(--space-md);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-control);
   background: var(--surface-1);
   color: var(--text-secondary);
   font-size: var(--font-size-caption);
 }
-.alert--info { border-color: color-mix(in srgb, var(--info) 28%, transparent); background: var(--info-soft); }
-.alert--success { border-color: color-mix(in srgb, var(--success) 28%, transparent); background: var(--success-soft); }
-.alert--warning { border-color: color-mix(in srgb, var(--warning) 28%, transparent); background: var(--warning-soft); }
+.alert--info { border-color: color-mix(in srgb, var(--info) 28%, transparent); background: var(--info-soft); color: var(--info-text-on-soft); }
+.alert--success { border-color: color-mix(in srgb, var(--success) 28%, transparent); background: var(--success-soft); color: var(--success-text-on-soft); }
+.alert--warning { border-color: color-mix(in srgb, var(--warning) 28%, transparent); background: var(--warning-soft); color: var(--warning-text-on-soft); }
 .alert--danger { border-color: color-mix(in srgb, var(--danger) 28%, transparent); background: var(--danger-soft); }
-.alert--critical { border-color: color-mix(in srgb, var(--critical) 40%, transparent); background: var(--critical-soft); color: var(--critical); }
+.alert--critical { border-color: color-mix(in srgb, var(--critical) 40%, transparent); background: var(--critical-soft); color: var(--critical-text-on-soft); }
 
 .tabs {
   display: inline-flex;
@@ -860,7 +957,10 @@ select.form-input { cursor: pointer; }
   border-radius: var(--radius-pill);
   background: var(--surface-3);
 }
-.progress > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+/* --v (0-100) drives the fill width, the same nonced-<style> pattern as
+   .mini-chart/.heatmap above: see docs/CSP.md. Defaults to 0 so an unset
+   fill renders empty, not an invalid width. */
+.progress > span { display: block; width: calc(var(--v) * 1%); height: 100%; border-radius: inherit; background: var(--accent); --v: 0; }
 
 .breadcrumb {
   display: flex;
@@ -879,7 +979,7 @@ select.form-input { cursor: pointer; }
   display: grid;
   min-height: 220px;
   place-items: center;
-  padding: 34px;
+  padding: var(--space-2xl);
   text-align: center;
 }
 .empty-state__icon {
@@ -892,7 +992,7 @@ select.form-input { cursor: pointer; }
   background: var(--surface-2);
   color: var(--text-muted);
 }
-.empty-state h3 { margin-bottom: 5px; font-family: var(--font-display); font-weight: 400; }
+.empty-state h3 { margin-bottom: 5px; font-family: var(--font-display); font-weight: 400; font-size: var(--font-size-xl); }
 .empty-state p { max-width: 380px; margin-bottom: 16px; font-size: var(--font-size-caption); }
 
 .avatar {
@@ -937,6 +1037,16 @@ select.form-input { cursor: pointer; }
 .dropdown__chevron { margin-left: auto; color: var(--text-muted); }
 
 .action-menu { position: relative; display: inline-block; }
+/* Generic floating panel for non-menu content -- a details/summary
+   disclosure that isn't a role="menu" (a hash-disclosure list, an
+   account/settings popup body, anything that isn't a set of
+   role="menuitem" actions). Built on the same native <details> mechanism
+   as .action-menu, so it inherits outside-click-close and
+   close-siblings-on-toggle for free via theme.js's :is(.action-menu,
+   .popover) selectors. Panel chrome is shared with .action-menu__popover
+   below (same surface-raised/border-strong/shadow-raised trio); only the
+   menu-specific summary button styling stays exclusive to .action-menu. */
+.popover { position: relative; display: inline-block; --popover-width: 200px; }
 .action-menu > summary {
   display: flex;
   width: 32px;
@@ -955,12 +1065,16 @@ select.form-input { cursor: pointer; }
 .action-menu > summary::-webkit-details-marker { display: none; }
 .action-menu > summary:hover,
 .action-menu[open] > summary { background: var(--surface-2); color: var(--text-primary); }
-.action-menu__popover {
+.action-menu__popover,
+.popover__panel {
   position: absolute;
   z-index: 30;
   top: calc(100% + 6px);
   right: 0;
-  width: 200px;
+  /* Per-instance width is a nonced <style> rule setting --popover-width
+     (docs/CSP.md's existing --v-style pattern), not a page-local class --
+     see docs/CSP.md for the pattern this follows. */
+  width: var(--popover-width, 200px);
   padding: 6px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-panel);
@@ -1500,7 +1614,7 @@ pre {
 .settings-field .form-label { display: flex; justify-content: space-between; gap: 8px; }
 .settings-field__meta {
   color: var(--text-muted);
-  font-family: "SF Mono", "Cascadia Code", monospace;
+  font-family: var(--font-mono);
   font-size: var(--font-size-xs);
 }
 .settings-field__desc { margin-top: 5px; color: var(--text-muted); font-size: var(--font-size-xs); line-height: 1.4; }
@@ -1518,7 +1632,7 @@ pre {
 .passkey-row:last-child { border-bottom: 0; }
 .passkey-row__name {
   color: var(--text-primary);
-  font-family: "SF Mono", "Cascadia Code", monospace;
+  font-family: var(--font-mono);
   font-size: var(--font-size-footnote);
   font-weight: 600;
 }
@@ -1757,8 +1871,8 @@ pre {
    see the "one-off utilities" section at the end. */
 
 :root {
-  --hp-font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-  --hp-mono: "SF Mono", "Fira Code", "Cascadia Code", ui-monospace, monospace;
+  --hp-font: var(--font-sans);
+  --hp-mono: var(--font-mono);
 }
 
 /* theme.css sets `svg { display: block }`, which would defeat the hidden
@@ -1790,6 +1904,33 @@ body [hidden] { display: none !important; }
     border-right: 1px solid var(--border-subtle);
     box-shadow: var(--shadow-dialog);
   }
+  /* Scrim behind the off-canvas drawer, same dim/blur treatment as
+     .modal-backdrop, z-index just under the sidebar's 60 so it sits
+     between .app-main and the open drawer. Always present in the DOM;
+     theme.js toggles visibility via .hp-nav-open on the shell, same as
+     the sidebar rule above. */
+  .app-shell__nav-scrim {
+    position: fixed; z-index: 50; inset: 0;
+    visibility: hidden; opacity: 0; pointer-events: none;
+    background: var(--overlay-bg);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    transition: opacity var(--transition), visibility var(--transition);
+  }
+  .app-shell.hp-nav-open .app-shell__nav-scrim {
+    visibility: visible; opacity: 1; pointer-events: auto;
+  }
+  /* The <=720px compact-rail rule below (icons only, text hidden) still
+     matches at this narrower width too -- override it back to labeled
+     items while the full-width off-canvas drawer is open, since there's
+     room for text here and the rail's icon-only affordance assumes a
+     76px-wide strip, not a 224px drawer. */
+  .app-shell.hp-nav-open .app-sidebar .sidebar__item span { display: inline; }
+  .app-shell.hp-nav-open .app-sidebar .sidebar__section-label,
+  .app-shell.hp-nav-open .app-sidebar .sidebar__profile > div {
+    display: block;
+  }
+  .app-shell.hp-nav-open .app-sidebar .sidebar__item { justify-content: flex-start; }
   /* #210/#215: the live indicator is now the single global one (was
      previously a page-local pill with room to say "Reconnecting…" on the
      overview page only). In the compact toolbar that text is the widest
@@ -1813,6 +1954,20 @@ body [hidden] { display: none !important; }
   border-radius: var(--radius-control);
   background: var(--accent-soft); color: var(--accent);
 }
+.hp-brand-mark picture,
+.hp-brand-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.hp-brand-mark img { object-fit: contain; border-radius: inherit; }
+.theme-art--light { display: none; }
+[data-theme="light"] .theme-art--dark { display: none; }
+[data-theme="light"] .theme-art--light { display: block; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) .theme-art--dark { display: none; }
+  :root:not([data-theme]) .theme-art--light { display: block; }
+}
 .hp-brand-text { line-height: 1.25; }
 .hp-brand-text strong { display: block; font-size: 13px; font-weight: 700; letter-spacing: 0.04em; }
 .hp-brand-accent { color: var(--accent); }
@@ -1828,6 +1983,19 @@ body [hidden] { display: none !important; }
 
 /* ── Toolbar ────────────────────────────────────────────────────────────── */
 .hp-toolbar-actions { display: flex; align-items: center; gap: 2px; }
+.app-toolbar__brand {
+  display: none;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  place-items: center;
+  border-radius: var(--radius-xs);
+  background: var(--accent-soft);
+}
+.app-toolbar__brand img { width: 100%; height: 100%; object-fit: contain; }
+@media (max-width: 520px) {
+  .app-toolbar__brand { display: grid; }
+}
 /* #208: was an inline style="" on the operator-configured maintenance/
    incident banner -- silently dropped by the CSP (a nonce covers a style
    or link element, never a style attribute).
@@ -2106,6 +2274,15 @@ button.copy {
 }
 button.copy:hover { color: var(--text-primary); background: var(--surface-2); }
 
+/* Clipboard-copy primitive: any [data-copy] element toggles .is-copied via
+   theme.js's click delegate -- a plain class toggle, not a per-element
+   dynamic value, so no CSP nonce is needed here (contrast .mini-chart/
+   .heatmap above). .copy-field is a suggested wrapper for a value+copy
+   affordance pairing; [data-copy] itself is what theme.js listens for and
+   works on any element, with or without this class. */
+.copy-field { display: inline-flex; align-items: center; gap: 6px; }
+[data-copy].is-copied::after { content: "copied"; margin-left: 6px; color: var(--success); font-size: var(--font-size-xs); }
+
 /* ── Legacy content hooks ───────────────────────────────────────────────── */
 .note { font-size: 12px; color: var(--text-muted); margin: 0 0 12px; }
 .card .note { margin: -4px 0 12px; }
@@ -2271,6 +2448,14 @@ pre.code {
   font: 12px/1.5 var(--hp-mono);
   max-height: 520px; overflow: auto;
 }
+/* Add/remove line coloring for a diff/comparison view inside pre.code --
+   a static per-line class the template already knows to emit (choosing
+   between an Added-range and a Removed-range, not a computed value), so
+   no CSP nonce pattern is needed. Reuses the same --success/--danger
+   state-color tokens .badge--success/--danger already establish. */
+.diff-line { display: block; padding: 0 6px; border-radius: 2px; }
+.diff-line--add { background: var(--success-soft); color: var(--success); }
+.diff-line--del { background: var(--danger-soft); color: var(--danger); }
 footer {
   margin-top: 24px; padding-top: 8px;
   font: 10px var(--hp-mono); letter-spacing: 0.08em; text-transform: uppercase;
@@ -2663,6 +2848,12 @@ button.sidebar__profile:disabled:hover { background: transparent; }
    fragment response -- a mismatch that silently drops the rule under CSP.
    Living in the single shared stylesheet, loaded once, sidesteps that
    entirely. */
+/* APIARY vendors this stylesheet byte-for-byte and ships no app-specific CSS. */
+.hp-ip-filter-menu{min-width:260px}.hp-ip-filter-list{max-height:260px;overflow-y:auto;margin-bottom:8px}.hp-ip-filter-row{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:var(--radius-control);font-size:12.5px}.hp-ip-filter-row:hover{background:var(--surface-2)}.hp-ip-filter-row input[type="checkbox"]{accent-color:var(--accent);flex:none}.hp-ip-filter-ip{flex:1;min-width:0;overflow:hidden;color:var(--text-primary);text-overflow:ellipsis;white-space:nowrap}.hp-ip-filter-count{flex:none;color:var(--text-muted);font-size:var(--font-size-xs)}.hp-ip-filter-add{width:100%;margin:4px 0 8px;padding:6px 10px;border:1px solid var(--border-subtle);border-radius:var(--radius-control);background:var(--surface-0);color:var(--text-primary);font-size:12.5px}.hp-ip-filter-add:focus{outline:none;border-color:var(--border-focus)}.hp-ip-filter-actions{display:flex;gap:8px;padding:0 4px}
+.hp-rp-templates{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;margin:4px 0 18px}.hp-rp-template{padding:12px 14px;border:1px solid var(--border-subtle);border-radius:var(--radius-panel);background:var(--surface-1);color:var(--text-primary);text-align:left;cursor:pointer;transition:border-color var(--transition-fast),background var(--transition-fast)}.hp-rp-template:hover{border-color:var(--border-strong);background:var(--surface-hover)}.hp-rp-template[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}.hp-rp-template strong{display:block;margin-bottom:4px;font-size:var(--font-size-footnote)}.hp-rp-template span{display:block;color:var(--text-muted);font-size:11.5px;line-height:1.45}.hp-rp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px 16px}.hp-rp-field label{display:block;margin-bottom:5px;color:var(--text-muted);font-size:var(--font-size-xs);letter-spacing:.06em;text-transform:uppercase}.hp-rp-field input,.hp-rp-field select{width:100%;padding:8px 10px;border:1px solid var(--border-subtle);border-radius:var(--radius-control);background:var(--surface-0);color:var(--text-primary);font-size:var(--font-size-footnote)}.hp-rp-field input:focus,.hp-rp-field select:focus{outline:none;border-color:var(--border-focus)}.hp-rp-elements{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:6px 16px}.hp-rp-elements label{display:flex;align-items:baseline;gap:8px;padding:5px 0;color:var(--text-secondary);font-size:12.5px;cursor:pointer}.hp-rp-elements input{margin-top:2px;accent-color:var(--accent)}.hp-rp-elements small{display:block;color:var(--text-muted);font-size:var(--font-size-xs)}.hp-rp-theme{display:flex;gap:10px}.hp-rp-theme button{display:flex;max-width:220px;flex:1;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border-subtle);border-radius:var(--radius-panel);background:var(--surface-1);color:var(--text-primary);font-size:var(--font-size-footnote);cursor:pointer}.hp-rp-theme button[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}.hp-rp-swatch{width:30px;height:22px;flex:none;border:1px solid var(--border-strong);border-radius:var(--radius-xs)}.hp-rp-swatch--dark{background:#20201f;box-shadow:inset 0 -7px 0 #d97757}.hp-rp-swatch--light{background:#f7f6f2;box-shadow:inset 0 -7px 0 #c76548}.hp-rp-section{margin-top:0}.hp-rp-section[hidden]{display:none}.hp-rp-actions{position:sticky;z-index:5;bottom:0;display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:14px;padding:12px 14px;border:1px solid var(--border-subtle);border-radius:var(--radius-panel);background:var(--surface-raised);box-shadow:var(--shadow-raised)}[data-hp-reports]:has([data-dashboard-panel="library"]:not([hidden])) .hp-rp-actions{display:none}.dashboard-panel>.card+.card{margin-top:14px}.hp-rp-status{color:var(--text-muted);font-size:var(--font-size-caption)}.hp-rp-status[data-state="error"]{color:var(--danger)}.hp-rp-status[data-state="ok"]{color:var(--success)}.hp-rp-tag{display:inline-block;padding:2px 8px;border-radius:var(--radius-pill);background:var(--surface-2);color:var(--text-secondary);font-size:var(--font-size-xs)}.hp-rp-payload-results{display:flex;max-height:280px;flex-direction:column;gap:4px;overflow-y:auto;margin:10px 0}.hp-rp-payload-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border-subtle);border-radius:var(--radius-control);background:var(--surface-1);color:var(--text-primary);font-size:12.5px;text-align:left;cursor:pointer}.hp-rp-payload-row:hover{border-color:var(--border-strong);background:var(--surface-hover)}.hp-rp-payload-row[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}.hp-rp-payload-row code{flex:none;color:var(--text-secondary);font-size:11.5px}.hp-rp-payload-row>span:nth-child(2){flex:1;color:var(--text-muted)}.hp-rp-payload-badges{display:flex;flex:none;gap:4px}.hp-rp-toggle-row{display:flex;align-items:center;gap:8px;color:var(--text-secondary);font-size:var(--font-size-footnote);letter-spacing:0;text-transform:none}.hp-rp-toggle-row input[type="checkbox"]{accent-color:var(--accent)}.hp-rp-tag--light{background:var(--info-soft);color:var(--info-text-on-soft,var(--info))}.hp-rp-row-actions{display:flex;flex-wrap:wrap;gap:6px}
+.pdf-viewer-modal{flex-direction:column;width:min(1000px,calc(100vw - 40px));height:min(860px,calc(100dvh - 48px));padding:20px 20px 0}.pdf-viewer-title{flex:none;margin:0 40px 12px 0;font-size:var(--font-size-lg)}.pdf-viewer-frame{flex:1;width:100%;min-height:0;margin:0 -20px;border:0;background:var(--surface-0)}@media(max-width:720px){.pdf-viewer-modal{width:100vw;height:100dvh;border-radius:0}}
+.hp-pl-info-popover,.hp-sb-info-popover{width:300px}.hp-pl-info-row,.hp-sb-info-row{display:flex;flex-direction:column;gap:2px;padding:6px 10px;font-size:var(--font-size-caption)}.hp-pl-info-row .k,.hp-sb-info-row .k{color:var(--text-muted);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase}.hp-pl-info-row .v,.hp-sb-info-row .v{color:var(--text-primary);font-family:var(--hp-mono);word-break:break-all}.hp-pl-label-trigger.action-menu>summary{width:auto;height:auto;min-height:32px;padding:6px 14px;border-radius:var(--radius-pill);font-size:12.5px}#panel-identity h2 .hp-pl-label-trigger,.hp-sb-label-trigger.action-menu{margin-left:8px;vertical-align:middle}#panel-identity h2 .hp-pl-label-trigger>summary,.hp-sb-label-trigger.action-menu>summary{width:auto;height:auto;min-height:24px;padding:3px 10px;border-radius:var(--radius-pill);font-size:var(--font-size-xs)}
+.hp-vnc-canvas-wrap{overflow:hidden;border:1px solid var(--border-subtle);border-radius:var(--radius-panel);background:#000}.hp-vnc-canvas-wrap canvas{display:block;width:100%;height:auto}.hp-vnc-status{margin:10px 0;color:var(--text-muted);font-size:var(--font-size-caption)}.hp-tty-term{min-height:420px;overflow-x:auto;padding:14px 16px;border:1px solid var(--border-subtle);border-radius:var(--radius-panel);background:#16181d;color:#e6e6e6;font-family:var(--font-mono);font-size:var(--font-size-footnote);line-height:1.35;white-space:pre}.hp-tty-controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:12px 0}.hp-tty-controls input[type="range"]{min-width:160px;flex:1 1 260px}.hp-tty-status{color:var(--text-muted);font-size:var(--font-size-caption)}
 .hp-dash-settings > .settings-layout{width:100%;height:100%;min-height:0}
 .hp-dash-settings .settings-layout__sidebar{overflow-y:auto}
 .hp-dash-settings .settings-layout__content{height:100%;overflow-y:auto}
@@ -2751,7 +2942,7 @@ button.sidebar__profile:disabled:hover { background: transparent; }
 }
 .user-edit-perm {
   display: flex; align-items: center; gap: 6px;
-  font-size: 12px; font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 12px; font-family: var(--font-mono);
   white-space: nowrap;
 }
 .user-edit-perm input { margin: 0; }
@@ -2766,7 +2957,7 @@ button.sidebar__profile:disabled:hover { background: transparent; }
 }
 #flash.err { border-color: var(--red); }
 #flash b { color: var(--green); }
-.cell-mono { font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace; font-size: 11px; }
+.cell-mono { font-family: var(--font-mono); font-size: 11px; }
 .cell-agent { font-size: 11px; color: var(--text-muted); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .empty-row { color: var(--text-muted); font-size: 12px; }
 .audit-table { table-layout: fixed; min-width: 900px; }

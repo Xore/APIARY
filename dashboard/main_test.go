@@ -990,15 +990,18 @@ func TestCompactTextKeepsShortValuesAndEllipsizesLongValues(t *testing.T) {
 
 func TestDashboardCSSAssetsAreEmbeddedAndReferenced(t *testing.T) {
 	assets := map[string]int{
-		"static/theme.css":           10000,
-		"static/hp-api.js":           500,
-		"static/hp-app.js":           8000,
-		"static/hp-modals.js":        5000,
-		"static/hp-evidence.js":      4000,
-		"static/hp-settings.js":      8000,
-		"static/leaflet.css":         10000,
-		"static/leaflet.js":          100000,
-		"static/LEAFLET-LICENSE.txt": 1000,
+		"static/theme.css":                         10000,
+		"static/hp-api.js":                         500,
+		"static/hp-app.js":                         8000,
+		"static/hp-modals.js":                      5000,
+		"static/hp-evidence.js":                    4000,
+		"static/hp-settings.js":                    8000,
+		"static/leaflet.css":                       10000,
+		"static/leaflet.js":                        100000,
+		"static/LEAFLET-LICENSE.txt":               1000,
+		"static/site.webmanifest":                  300,
+		"static/apiary-compact-mark-for-dark.png":  1000,
+		"static/apiary-compact-mark-for-light.png": 1000,
 	}
 	for name, minimum := range assets {
 		data, err := staticAssets.ReadFile(name)
@@ -1009,9 +1012,18 @@ func TestDashboardCSSAssetsAreEmbeddedAndReferenced(t *testing.T) {
 			t.Fatalf("dashboard asset %q is unexpectedly small: %d bytes", name, len(data))
 		}
 	}
-	for _, reference := range []string{"/static/theme.css", "/static/hp-api.js", "/static/hp-modals.js", "/static/hp-evidence.js", "/static/hp-app.js", "/static/leaflet.css", "/static/leaflet.js"} {
+	for _, reference := range []string{"/static/theme.css", "/static/hp-api.js", "/static/hp-modals.js", "/static/hp-evidence.js", "/static/hp-app.js", "/static/leaflet.css", "/static/leaflet.js", "/static/site.webmanifest", "/static/apiary-compact-mark-for-dark.png", "/static/apiary-compact-mark-for-light.png"} {
 		if !strings.Contains(pageTemplate, reference) {
 			t.Fatalf("shared page template does not load %q", reference)
+		}
+	}
+	manifest, err := staticAssets.ReadFile("static/site.webmanifest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, reference := range []string{`"name": "APIARY"`, `"start_url": "/"`, `"scope": "/"`, `"src": "icon-192.png"`, `"src": "icon-512.png"`} {
+		if !strings.Contains(string(manifest), reference) {
+			t.Fatalf("dashboard web manifest is missing %q", reference)
 		}
 	}
 	adapter, err := staticAssets.ReadFile("static/hp-app.js")

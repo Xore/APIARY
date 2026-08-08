@@ -24,14 +24,14 @@ C = {
     "surface": HexColor("#2c2c2a"),
     "raised": HexColor("#383835"),
     "ivory": HexColor("#f7f6f2"),
-    "light_surface": HexColor("#fbfaf7"),
+    "light_surface": HexColor("#f4f2ed"),
     "text_dark": HexColor("#2f2b27"),
     "text_light": HexColor("#e9e6df"),
-    "muted_dark": HexColor("#918a82"),
-    "muted_light": HexColor("#a8a49c"),
+    "muted_dark": HexColor("#66615b"),
+    "muted_light": HexColor("#a5a9a6"),
     "copper": HexColor("#d97757"),
-    "copper_print": HexColor("#b9583c"),
-    "blue": HexColor("#6da7ec"),
+    "copper_print": HexColor("#c76548"),
+    "blue": HexColor("#78a9d4"),
     "green": HexColor("#79c99e"),
     "amber": HexColor("#deb36a"),
     "red": HexColor("#dc7774"),
@@ -190,13 +190,13 @@ def draw_color_page(c: canvas.Canvas) -> None:
         swatch(c, 42 + i * 148, 352, 132, name, value, fill, C["text_light"] if i < 4 else C["text_dark"])
 
     label(c, "Light interface", 42, 320)
-    lights = [("Background", "#f7f6f2", C["ivory"]), ("Surface", "#fbfaf7", C["light_surface"]), ("Primary", "#2f2b27", C["text_dark"]), ("Muted", "#918a82", C["muted_dark"]), ("Copper", "#b9583c", C["copper_print"])]
+    lights = [("Background", "#f7f6f2", C["ivory"]), ("Surface", "#f4f2ed", C["light_surface"]), ("Primary", "#2f2b27", C["text_dark"]), ("Muted", "#66615b", C["muted_dark"]), ("Copper", "#c76548", C["copper_print"])]
     for i, (name, value, fill) in enumerate(lights):
         text = C["text_light"] if i >= 2 else C["text_dark"]
         swatch(c, 42 + i * 148, 247, 132, name, value, fill, text)
 
     label(c, "Evidence semantics", 42, 215)
-    semantic = [("Information", "#6da7ec", C["blue"]), ("Clean / success", "#79c99e", C["green"]), ("Warning", "#deb36a", C["amber"]), ("Detected / high risk", "#dc7774", C["red"])]
+    semantic = [("Information", "#78a9d4", C["blue"]), ("Clean / success", "#79c99e", C["green"]), ("Warning", "#deb36a", C["amber"]), ("Detected / high risk", "#dc7774", C["red"])]
     for i, (name, value, fill) in enumerate(semantic):
         swatch(c, 42 + i * 185, 142, 169, name, value, fill, C["text_dark"])
     paragraph(c, "Accessibility: verify foreground/background combinations at implementation time. Do not communicate severity by color alone; pair state color with text, iconography, or a status label.", 42, 105, 720, 9.5, 13, C["muted_dark"])
@@ -205,9 +205,9 @@ def draw_color_page(c: canvas.Canvas) -> None:
 
 def draw_type_page(c: canvas.Canvas) -> None:
     page_base(c, 4, "Typography and interface voice", "03 / Digital")
-    paragraph(c, "The system uses native fonts for speed and predictable rendering. Sans-serif carries hierarchy and prose. Monospace identifies machine evidence, timestamps, hashes, protocols, and compact labels.", 42, H - 110, 720)
+    paragraph(c, "Space Grotesk carries display hierarchy, Fira Sans carries interface prose, and Fira Code identifies machine evidence, timestamps, hashes, protocols, and compact labels. Native fallbacks keep offline rendering predictable.", 42, H - 110, 720)
     rounded_panel(c, 42, 250, 350, 200, C["light_surface"])
-    label(c, "UI sans", 62, 422)
+    label(c, "Fira Sans / Space Grotesk", 62, 422)
     c.setFillColor(C["text_dark"])
     c.setFont("Helvetica-Bold", 36)
     c.drawString(62, 370, "Know the payload.")
@@ -215,7 +215,7 @@ def draw_type_page(c: canvas.Canvas) -> None:
     c.drawString(62, 328, "Understand the attacker.")
     c.setFont("Helvetica", 10)
     c.setFillColor(C["muted_dark"])
-    c.drawString(62, 295, "System UI / 15 px body / 1.6 line height")
+    c.drawString(62, 295, "Fira Sans / 15 px body / 1.6 line height")
     c.drawString(62, 276, "Tight headings, calm prose, direct sentence case")
 
     rounded_panel(c, 414, 250, W - 456, 200, C["dark"], C["dark"])
@@ -228,7 +228,7 @@ def draw_type_page(c: canvas.Canvas) -> None:
     c.drawString(434, 346, "21:44:12  sha256:8f4a...  cowrie.ssh")
     c.setFillColor(C["muted_light"])
     c.drawString(434, 314, "CASE/AP-2481  ANALYSIS.QUEUED  CONTAINED")
-    c.drawString(434, 282, "SFMono-Regular / Consolas / Liberation Mono")
+    c.drawString(434, 282, "Fira Code / Cascadia Code / SFMono-Regular")
 
     label(c, "Voice principles", 42, 210)
     principles = [

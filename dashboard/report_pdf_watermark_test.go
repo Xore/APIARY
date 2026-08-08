@@ -32,7 +32,7 @@ func TestReportPDFWatermarkPresent(t *testing.T) {
 		if !strings.Contains(text, "/Type /ExtGState") {
 			t.Fatalf("%s: watermark ExtGState not found", theme.name)
 		}
-		if got := strings.Count(text, "/XObject << /Wm 6 0 R >>"); got == 0 {
+		if got := strings.Count(text, "/XObject << /Wm 6 0 R /HMark 8 0 R >>"); got == 0 {
 			t.Fatalf("%s: no page /Resources references the watermark XObject", theme.name)
 		}
 		if got := strings.Count(text, "/Wm Do"); got == 0 {
@@ -51,6 +51,41 @@ func TestReportPDFWatermarkPresent(t *testing.T) {
 				t.Fatalf("%s: found page content where the header band was filled before the watermark was painted", theme.name)
 			}
 		}
+	}
+}
+
+func TestReportPDFHeaderMarkPresent(t *testing.T) {
+	body := renderThemedReportPDF(sampleReportData(time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)), pdfThemeLight(), defaultPDFBranding())
+	text := string(body)
+	for _, want := range []string{
+		"/ImageMask true",
+		"/Decode [1 0]",
+		"/F3 5 0 R",
+		"/BaseFont /Helvetica-Bold",
+		"/Width 64 /Height 64",
+		"/HMark 8 0 R",
+		"/HMark Do",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("PDF header mark missing %q", want)
+		}
+	}
+	if strings.Contains(text, "/BaseFont /Times-Roman") {
+		t.Fatal("PDF still uses the pre-brand serif display font")
+	}
+
+	r, err := zlib.NewReader(bytes.NewReader(pdfHeaderMarkData))
+	if err != nil {
+		t.Fatalf("pdfHeaderMarkData is not valid zlib data: %v", err)
+	}
+	defer r.Close()
+	raw, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("failed to decompress pdfHeaderMarkData: %v", err)
+	}
+	wantBytes := pdfHeaderMarkWidth * pdfHeaderMarkHeight / 8
+	if len(raw) != wantBytes {
+		t.Fatalf("decompressed header mark is %d bytes, want %d", len(raw), wantBytes)
 	}
 }
 

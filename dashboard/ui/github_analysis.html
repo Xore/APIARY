@@ -6,20 +6,6 @@
 <meta name="robots" content="noindex, nofollow">
 <title>{{brandText}} &mdash; GitHub analysis</title>
 {{template "style" .}}
-<style nonce="{{.Nonce}}">
-/* #309: Report viewer, an application-managed overlay per the shared modal
-   contract (Xore/theme docs/MODALS.md) -- same shape as reports.html's own
-   generated-report viewer (.hp-rp-viewer). The trigger itself is a plain
-   .project-card (theme.css), same as reports studio's generated-report
-   cards -- just the one card here, since this page has at most one PDF per
-   analysis, not a grid of many. */
-.hp-ga-viewer { flex-direction: column; width: min(1000px, calc(100vw - 40px)); height: min(860px, calc(100dvh - 48px)); padding: 20px 20px 0; }
-.hp-ga-viewer #hp-ga-viewer-title { flex: none; margin: 0 40px 12px 0; font-size: var(--font-size-lg); }
-.hp-ga-viewer-frame { flex: 1; width: 100%; min-height: 0; border: 0; background: var(--surface-0); margin: 0 -20px; }
-@media (max-width: 720px) {
-  .hp-ga-viewer { width: 100vw; height: 100dvh; border-radius: 0; }
-}
-</style>
 </head>
 <body>
 <div class="app-shell">
@@ -141,10 +127,10 @@
        report viewer -- one PDF per analysis, so no grid, just this one
        modal, opened by the Report card's "view report" button above. -->
   <div class="modal-backdrop" id="hp-ga-viewer-backdrop" aria-hidden="true" inert></div>
-  <section class="modal hp-ga-viewer" id="hp-ga-viewer" role="dialog" aria-modal="true" aria-labelledby="hp-ga-viewer-title" aria-hidden="true" inert>
+  <section class="modal pdf-viewer-modal" id="hp-ga-viewer" role="dialog" aria-modal="true" aria-labelledby="hp-ga-viewer-title" aria-hidden="true" inert>
     <button class="modal__close" type="button" id="hp-ga-viewer-close" aria-label="Close report viewer">&#10005;</button>
-    <h2 id="hp-ga-viewer-title">Report</h2>
-    <iframe class="hp-ga-viewer-frame" id="hp-ga-viewer-frame" title="GitHub analysis report preview"></iframe>
+    <h2 class="pdf-viewer-title" id="hp-ga-viewer-title">Report</h2>
+    <iframe class="pdf-viewer-frame" id="hp-ga-viewer-frame" title="GitHub analysis report preview"></iframe>
   </section>
 </div>
 <script defer src="{{asset "/static/hp-github-analysis.js"}}"></script>
