@@ -381,6 +381,21 @@ build {
     timeout           = "15m"
   }
 
+  # Step 3b-2: desktop resolution (#368 item 2). win11-kvm.xml's <video>
+  # <resolution> hint already gets QEMU's own framebuffer to 1920x1080, but
+  # Windows' own GDI-level desktop size is a separate, registry-persisted
+  # setting that does not automatically follow it -- see the script's own
+  # header for the full live-confirmed root cause. CDS_UPDATEREGISTRY
+  # persists this for every future session (including the real autologon
+  # session run_sample.py's detonation flow uses), so it does not need to
+  # run interactively -- packer's own WinRM-elevated provisioner is enough.
+  provisioner "powershell" {
+    script            = "scripts/12-display-resolution.ps1"
+    elevated_user     = var.winrm_user
+    elevated_password = var.winrm_pass
+    timeout           = "5m"
+  }
+
   # Step 3c: LOLDrivers BYOVD bait -- a curated set of known-vulnerable,
   # signed kernel drivers dropped onto disk, plus disabling the Microsoft
   # Vulnerable Driver Blocklist so a sample that tries to abuse one of them
