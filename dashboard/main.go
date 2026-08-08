@@ -184,6 +184,10 @@ func main() {
 	// call site (serveIPBlockAction, serveManualBlackholeExport) already
 	// treats a nil ipBlocks as "manual blocking disabled".
 	s.ipBlocks = newIPBlockManager(s.es)
+	// #913: same nil-when-unconfigured posture as s.alerts above -- every
+	// call site (applyMLAnomalyAcks, serveMLAnomalyAck) already treats a nil
+	// mlAnomalyAcks as "acknowledgment disabled".
+	s.mlAnomalyAcks = newMLAnomalyAckManager(s.es)
 	s.intelligence = &intelligenceStore{path: getenv("INTELLIGENCE_STATE_FILE", "/state/intelligence.json"), es: s.es}
 	s.settings = newSettingsService(
 		getenv("DASHBOARD_CONFIG_FILE", "/state/dashboard-config.json"),
@@ -637,6 +641,7 @@ func main() {
 	http.HandleFunc("/ghidra/submit", s.serveGhidraSubmit)
 	http.HandleFunc("/gpu-queue/abort", serveGPUQueueAbort)
 	http.HandleFunc("/github-analysis/submit", s.serveGitHubAnalysisSubmit)
+	http.HandleFunc("/ml-anomalies/ack", s.serveMLAnomalyAck)
 	http.HandleFunc("/payload-workbench", func(w http.ResponseWriter, r *http.Request) {
 		s.serveWorkbenchIndex(w, r, tmpl)
 	})

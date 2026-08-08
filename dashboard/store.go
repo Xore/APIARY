@@ -212,7 +212,8 @@ type store struct {
 	ollamaURL      string
 	embeddingModel string
 	alerts         *alertManager
-	ipBlocks       *ipBlockManager // #914: manual IP block state; nil until initialised in main()
+	ipBlocks       *ipBlockManager      // #914: manual IP block state; nil until initialised in main()
+	mlAnomalyAcks  *mlAnomalyAckManager // #913: ack/dismiss state for ml-anomalies, mirrors alerts' own shape; nil until initialised in main()
 	intelligence   *intelligenceStore
 	settings       *settingsService  // typed settings stores; nil only in partial test fixtures
 	reports        *reportStore      // Reports studio definitions + generated PDFs; nil only in test fixtures

@@ -329,6 +329,58 @@ func TestWorkbenchRecipeRevisionsAreImmutable(t *testing.T) {
 	}
 }
 
+// #920: saveRecipe's own "latest revision" scan (docSearchAll) is only
+// eventually consistent -- a save that doesn't wait for its write to refresh
+// before returning could let a very-next save to the same recipe compute a
+// stale "latest" and spuriously reject a non-conflicting baseRevision. The
+// fix is Elasticsearch's own refresh=wait_for write parameter
+// (docIndexWaitForRefresh); this test asserts saveRecipe's PUT actually
+// requests it, not just that saveRecipe still returns the right values
+// (TestWorkbenchRecipeRevisionsAreImmutable already covers that, but the
+// mock ES store here is fully synchronous and so cannot itself reproduce
+// the timing race -- this test only proves the fix is wired to the real
+// Elasticsearch write path, which is what closes the race against a real
+// cluster).
+func TestSaveRecipeAndCreateRunRequestWaitForRefresh(t *testing.T) {
+	root := t.TempDir()
+	payloads := filepath.Join(root, "payloads")
+	if err := os.MkdirAll(payloads, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(payloads, workbenchTestHash), []byte("payload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DASHBOARD_REQUIRE_ADMIN", "false")
+
+	esStore := newMemESDocStore()
+	var lastPUTQuery string
+	esSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			lastPUTQuery = r.URL.RawQuery
+		}
+		esStore.handler().ServeHTTP(w, r)
+	}))
+	t.Cleanup(esSrv.Close)
+	es := newESClient(esSrv.URL, "")
+	s := &store{payloadDirs: []string{payloads}, es: es, workbench: newWorkbenchService(es)}
+
+	if _, err := s.workbench.saveRecipe(workbenchRecipe{Name: "Accuracy first", Scope: "private", Analyzers: deterministicSelection()}, "owner-a", 0); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(lastPUTQuery, "refresh=wait_for") {
+		t.Fatalf("saveRecipe's write did not request refresh=wait_for: %q", lastPUTQuery)
+	}
+
+	lastPUTQuery = ""
+	request := workbenchRunRequest{PayloadSHA256: workbenchTestHash, RecipeName: "Static first", Analyzers: deterministicSelection()}
+	if _, _, err := s.createWorkbenchRun(request, "owner-a"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(lastPUTQuery, "refresh=wait_for") {
+		t.Fatalf("createOrReuseRun's write did not request refresh=wait_for: %q", lastPUTQuery)
+	}
+}
+
 func TestWorkbenchRejectsUnsafeAndUnboundedOptions(t *testing.T) {
 	bad := []workbenchSelection{{AnalyzerID: "ghidra", Options: workbenchOptions{TimeoutSeconds: 1, MaxQueueAgeSeconds: 60}}}
 	if _, err := validateWorkbenchSelections(bad); err == nil {

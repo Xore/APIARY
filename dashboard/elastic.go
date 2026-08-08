@@ -231,6 +231,26 @@ func (c *esClient) docIndex(index, id string, doc []byte, create bool, seqNo, pr
 // silently bypass the guard: every caller still states its own ceiling
 // explicitly at the call site rather than passing no limit at all.
 func (c *esClient) docIndexSized(index, id string, doc []byte, maxBytes int, create bool, seqNo, primaryTerm int64) error {
+	return c.docIndexSizedRefreshed(index, id, doc, maxBytes, create, seqNo, primaryTerm, false)
+}
+
+// docIndexWaitForRefresh is docIndex with Elasticsearch's own refresh=
+// wait_for write parameter (#920): the call does not return until the write
+// is visible to a subsequent _search against the same index, at the cost of
+// extra per-write latency (bounded by the index's own refresh_interval,
+// default ~1s). Opt-in per call site for the specific writes whose very next
+// read -- in the same request, or an immediate same-session follow-up --
+// must see them (workbench_es.go's saveRecipe/createOrReuseRun, #920's
+// audit found both could otherwise read stale state through docSearchAll
+// and, in saveRecipe's case, spuriously reject a non-conflicting save).
+// Not the default on docIndex: most dashboard-owned writes here are
+// fire-and-forget with no such requirement, and paying wait_for's latency on
+// every one of them would be wasteful.
+func (c *esClient) docIndexWaitForRefresh(index, id string, doc []byte, create bool, seqNo, primaryTerm int64) error {
+	return c.docIndexSizedRefreshed(index, id, doc, docIndexMaxBytes, create, seqNo, primaryTerm, true)
+}
+
+func (c *esClient) docIndexSizedRefreshed(index, id string, doc []byte, maxBytes int, create bool, seqNo, primaryTerm int64, waitForRefresh bool) error {
 	if len(doc) > maxBytes {
 		return fmt.Errorf("elasticsearch: document for %s/%s is %d bytes, over the %d-byte cap for this index", index, id, len(doc), maxBytes)
 	}
@@ -239,6 +259,9 @@ func (c *esClient) docIndexSized(index, id string, doc []byte, maxBytes int, cre
 		path += "?op_type=create"
 	} else {
 		path += fmt.Sprintf("?if_seq_no=%d&if_primary_term=%d", seqNo, primaryTerm)
+	}
+	if waitForRefresh {
+		path += "&refresh=wait_for"
 	}
 	status, body, err := c.doRequest(http.MethodPut, path, doc)
 	if err != nil {
