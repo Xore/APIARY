@@ -228,6 +228,41 @@
       </model>
     </video>
 
+    <!-- #368 GPU passthrough: a real AMD Radeon PRO WX 2100 (17:00.0 plus
+         its 17:00.1 HDMI audio function), VFIO-passed-through rather than
+         emulated. Confirmed live: IOMMU group 8 contains only these two
+         functions, so no ACS override is needed and nothing else gets
+         pulled in. Not primary: the plain-VGA <video> above stays primary
+         so VNC console access (screenshots, diagnostics) keeps working
+         exactly as before; this card has no monitor attached and Windows
+         will just install its real driver against it as a second, idle
+         adapter.
+
+         Point of this: "Microsoft Basic Display Adapter" reporting
+         AdapterRAM=0 (Win32_VideoController) is itself a synthetic-hardware
+         tell some malware checks for, distinct from and beyond the plain
+         screen-resolution issue #368 already tracks. A real GPU with a real
+         vendor driver and real VRAM has nothing to spoof there. Two visible
+         adapters (an idle discrete GPU alongside the primary display) is
+         also simply normal on a lot of real desktops/workstations, not a
+         tell by itself.
+
+         managed='yes': libvirt itself detaches these from the host driver
+         (vfio-pci, already bound at boot via
+         /etc/modprobe.d/vfio-gpu-passthrough.conf) when this domain starts,
+         and reattaches them to the host when it stops, so no manual
+         unbind/rebind is needed around each detonation. -->
+    <hostdev mode='subsystem' type='pci' managed='yes'>
+      <source>
+        <address domain='0x0000' bus='0x17' slot='0x00' function='0x0'/>
+      </source>
+    </hostdev>
+    <hostdev mode='subsystem' type='pci' managed='yes'>
+      <source>
+        <address domain='0x0000' bus='0x17' slot='0x00' function='0x1'/>
+      </source>
+    </hostdev>
+
     <!-- #502: without an explicit <watchdog> element, libvirt/QEMU on this
          host auto-injects a default model='itco' action='reset' device for
          this machine type. Windows has no built-in driver to service an

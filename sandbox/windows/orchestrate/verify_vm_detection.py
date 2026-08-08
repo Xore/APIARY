@@ -308,13 +308,92 @@ def run_tool_insession(remote_name: str, log_name: str, args: str = '', timeout:
     return {'exit_code': exit_code, 'stdout': body['stdout']}
 
 
+def run_snippet_insession(ps_snippet: str, log_name: str, timeout: int = 60, poll_interval: int = 2) -> str:
+    """Same in-session scheduled-task mechanism as run_tool_insession() (#696),
+    for a raw PowerShell snippet instead of a C:\\Samples\\ binary (#368).
+
+    check_residual_tells()'s screen-resolution read was still going through
+    plain winrm_run() -- Session 0, never the interactive desktop (Session 1)
+    -- exactly the bug #696/#788 already root-caused and fixed for pafish
+    itself, just never carried over to this check. Confirmed live during
+    #368's re-verification: a `virsh screenshot` of the actual running
+    console showed a full 1920x1080 desktop (matching win11-kvm.xml's
+    <video><resolution> hint, itself already verified live to hold from the
+    OVMF boot screen onward), while [System.Windows.Forms.Screen]::
+    PrimaryScreen.Bounds over plain WinRM reported 1024x768 in the same
+    window -- a session-scoped API read from the wrong session, the same
+    failure mode GetLastInputInfo() had, not a real residual tell.
+    """
+    task_name = f'verify-snippet-{log_name.replace(".", "-")}-{int(time.time() * 1000)}'
+    script_path = f'C:\\Logs\\{task_name}.ps1'
+    out_path = f'C:\\Logs\\{log_name}'
+    # $(...) (the subexpression operator), not bare (...) -- confirmed live:
+    # PowerShell's plain grouping operator only accepts a single pipeline
+    # expression, not a semicolon-separated statement list. Wrapping
+    # ps_snippet's Add-Type/$s=.../"..." three-statement sequence in bare
+    # parens threw "Missing closing ')' in expression" and silently left
+    # out_path never written (Get-Content -ErrorAction SilentlyContinue then
+    # returns nothing), which is exactly what happened the first time this
+    # ran -- an empty screen_resolution result, not a real one.
+    script_body = f"$({ps_snippet}) | Out-File -Encoding utf8 -NoNewline '{out_path}'\n"
+    b64 = base64.b64encode(script_body.encode('utf-8')).decode('ascii')
+    winrm_run(
+        f"[IO.File]::WriteAllText('{script_path}', "
+        f"[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{b64}')))"
+    )
+
+    register_cmd = (
+        f"$action = New-ScheduledTaskAction -Execute 'powershell.exe' "
+        f"-Argument '-NoProfile -ExecutionPolicy Bypass -File \"{script_path}\"'; "
+        f"$principal = New-ScheduledTaskPrincipal -UserId 'analyst' -LogonType Interactive -RunLevel Highest; "
+        f"$settings = New-ScheduledTaskSettingsSet -Hidden -AllowStartIfOnBatteries "
+        f"-DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::FromSeconds({timeout})); "
+        f"Register-ScheduledTask -TaskName '{task_name}' -Action $action -Principal $principal "
+        f"-Settings $settings -Force | Out-Null; "
+        f"Start-ScheduledTask -TaskName '{task_name}'"
+    )
+    winrm_run(register_cmd, timeout=60)
+
+    deadline = time.time() + timeout
+    state = 'Running'
+    try:
+        while time.time() < deadline:
+            st = winrm_run(f"(Get-ScheduledTask -TaskName '{task_name}').State", timeout=30)
+            state = st['stdout'].strip()
+            if state != 'Running':
+                break
+            time.sleep(poll_interval)
+    finally:
+        try:
+            winrm_run(f"Unregister-ScheduledTask -TaskName '{task_name}' -Confirm:$false", timeout=30)
+        except Exception:
+            pass
+
+    if state == 'Running':
+        raise TimeoutError(
+            f'in-session snippet ({log_name}) did not finish within {timeout}s '
+            f'(scheduled task {task_name} still Running).'
+        )
+
+    body = winrm_run(f"Get-Content '{out_path}' -Raw -ErrorAction SilentlyContinue")
+    return body['stdout'].strip()
+
+
 def check_residual_tells() -> dict:
     """The specific checks RESEARCH.md #1.2 calls out beyond what pafish/
-    al-khaser cover generically: screen resolution and system uptime."""
-    res = winrm_run(
+    al-khaser cover generically: screen resolution and system uptime.
+
+    Screen resolution is read in-session (see run_snippet_insession's own
+    docstring for why plain WinRM gave a false reading here). Uptime and the
+    virtio-device scan are not session-scoped APIs -- LastBootUpTime and PnP
+    device enumeration reflect real machine-wide state regardless of which
+    session queries them -- so those stay on plain winrm_run().
+    """
+    resolution = run_snippet_insession(
         "Add-Type -AssemblyName System.Windows.Forms; "
         "$s = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; "
-        "\"$($s.Width)x$($s.Height)\""
+        "\"$($s.Width)x$($s.Height)\"",
+        'screen_resolution.txt',
     )
     uptime = winrm_run(
         "(Get-Date) - (gcim Win32_OperatingSystem).LastBootUpTime "
@@ -325,7 +404,7 @@ def check_residual_tells() -> dict:
         "| Select-Object -ExpandProperty Name"
     )
     return {
-        'screen_resolution': res['stdout'].strip(),
+        'screen_resolution': resolution,
         'uptime_minutes': uptime['stdout'].strip(),
         'virtio_devices': virtio['stdout'].strip() or '(none found)',
     }
