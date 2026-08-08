@@ -4,6 +4,94 @@ The homeserver supports this design: Intel VT-x is enabled, `/dev/kvm` is
 available, KVM is loaded, and the host exposes 84 IOMMU groups. The foundation
 installer provisions system libvirt and the dedicated isolated network.
 
+## Route selection and evidence return across four dynamic-detonation routes
+
+The workbench's registry (`dashboard/workbench_domain.go`) offers four
+routes to dynamic detonation, not one sandbox with options. Each is its own
+guest, network, spool, and result format — this section is the canonical
+side-by-side comparison; each route's own internal detail lives in its own
+section below (Linux) or its own directory (`sandbox/windows/`,
+`sandbox/ghosts/`, `sandbox/cape/`).
+
+```mermaid
+flowchart TB
+  workbench["Payload workbench —<br/>analyst selects a route<br/>(dashboard/workbench_domain.go)"]
+
+  subgraph linuxRoute["linux-sandbox"]
+    direction TB
+    linuxNet["virbr-hpsbx — layer-2 only,<br/>isolated by default, no WAN"]
+    linuxGuest["disposable Linux guest,<br/>own lock: honeypot-sandbox-<br/>worker.lock"]
+  end
+
+  subgraph winRoute["windows-sandbox — isolated"]
+    direction TB
+    winNet["sandbox-network.xml —<br/>10.10.10.0/24, INetSim +<br/>optional mitmproxy, no WAN"]
+    winGuest["Windows 11 guest,<br/>docker-compose.sandbox.yml<br/>gateway (Zeek/Suricata/tcpdump),<br/>started/stopped per detonation"]
+  end
+
+  subgraph ghostsRoute["windows-ghosts — ⚠ WAN-permitted"]
+    direction TB
+    ghostsNet["virbr-ghosts — only<br/>LAN/RFC1918 firewalled,<br/>real internet reachable"]
+    ghostsGuest["Windows 11 guest,<br/>GHOSTS NPC persona,<br/>own ghosts-api + ghosts-postgres,<br/>own lock only"]
+  end
+
+  subgraph capeRoute["cape"]
+    direction TB
+    capeNet["cape's own network<br/>(10.91.0.x), own golden image"]
+    capeGuest["Windows guest under CAPE's<br/>own cuckoo.py orchestration<br/>(runs on the host directly,<br/>not in Docker) + cape-mongo"]
+  end
+
+  sharedLock{{"honeypot-kvm-detonation.lock —<br/>shared ONLY between windows-sandbox<br/>and cape (#320): 16 logical CPUs total,<br/>win11-sandbox alone already 8 vCPU.<br/>Held only around the actual detonation<br/>call, not the whole drain loop.<br/>linux-sandbox and windows-ghosts are<br/>NOT part of this lock — independent,<br/>can run concurrently with anything."}}
+
+  workbench -->|"hash-only request,<br/>SANDBOX_REQUEST_DIR"| linuxRoute
+  workbench -->|"hash-only request,<br/>WINDOWS_SANDBOX_REQUEST_DIR"| winRoute
+  workbench -->|"hash-only request,<br/>GHOSTS_SANDBOX_REQUEST_DIR"| ghostsRoute
+  workbench -->|"hash-only request,<br/>CAPE_REQUEST_DIR"| capeRoute
+
+  winRoute -.-> sharedLock
+  capeRoute -.-> sharedLock
+
+  linuxRoute -->|"read-only result,<br/>/sandbox/{job}"| workbench
+  winRoute -->|"read-only result,<br/>/sandbox/{job}"| workbench
+  ghostsRoute -->|"read-only result,<br/>/sandbox/{job}"| workbench
+  capeRoute -->|"read-only result,<br/>/cape/{sha256}"| workbench
+```
+
+**The dashboard never calls libvirt, Docker, CAPE, or systemd directly for
+any of the four routes.** Every route follows the same shared trust
+boundary the workbench's own trust-boundary section describes: the browser
+supplies a captured SHA-256 and an analyzer ID, the server writes an empty
+`{sha256}.request` marker into that route's own spool directory, and a
+separate host-owned worker (a systemd path-unit-triggered script for
+Linux/Windows-isolated/GHOSTS, CAPE's own host-resident `cuckoo.py` process
+for CAPE) claims the marker, drives the actual hypervisor, and writes a
+read-only result back. No sample bytes, path, command, VM definition, or
+credential ever crosses the dashboard/host boundary for any of the four.
+
+**Only `windows-sandbox` and `cape` ever wait on each other; the other two
+never wait on anything.** `sandbox/windows/run_pending.sh` and
+`sandbox/cape/worker/cape-worker.py` share one host-wide
+`honeypot-kvm-detonation.lock` (#320) — a real capacity constraint, not a
+correctness one: both are KVM/QEMU domains on the same 16-logical-CPU host,
+and `windows-sandbox`'s own guest is already configured for 8 vCPU. The
+lock is held only around the actual detonation call, never the whole drain
+loop, so an idle worker on either side never blocks the other. `linux-sandbox`
+and `windows-ghosts` each hold only their own independent per-worker lock
+(collapsing overlapping systemd path-unit triggers into one drain) and are
+not part of the shared lock at all — either can run fully concurrently with
+any of the other three.
+
+**`windows-ghosts` is the one route that deliberately does not air-gap the
+guest.** Every other route's guest reaches only a fake internet (INetSim,
+or nothing at all in the fully isolated Linux/Windows default) — a sample's
+C2 checkins and second-stage downloads go nowhere real. `windows-ghosts`'s
+`virbr-ghosts` network firewalls off only LAN/RFC1918 ranges and leaves the
+real internet reachable, specifically so a GHOSTS-driven persona's
+real-infrastructure interactions are observable. This is a deliberate,
+loud exception — see `docs/payload-analysis-workbench.md`'s own registry
+table entry for the analyst-facing ⚠ warning this route carries — not an
+isolation gap in the other three routes.
+
 ## Isolation boundary
 
 Use KVM/QEMU virtual machines, never Docker containers, for dynamic execution.
