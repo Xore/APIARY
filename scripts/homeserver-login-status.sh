@@ -167,16 +167,20 @@ deploy_latest_main() {
     return 1
   fi
 
-  rsync -a --delete-delay \
+  if ! rsync -a --delete-delay \
     --exclude '.git/' --exclude '.github/' --exclude '.env' \
     --exclude 'logs/' --exclude 'state/' --exclude 'dashboard-state/' \
     --exclude 'analysis/geoip/*.mmdb' --exclude 'sandbox/results/' \
-    "$deploy_dir/" /opt/stacks/honeypot-stack/
-  cp /opt/stacks/honeypot-stack/docker-compose.yml \
-    /opt/stacks/honeypot-stack/compose.yml
+    "$deploy_dir/" /opt/stacks/honeypot-stack/; then
+    printf '%srsync failed, not touching compose.yml or recreating containers%s\n' "$red" "$reset" >&2
+    rm -rf -- "$deploy_dir"
+    return 1
+  fi
   rm -rf -- "$deploy_dir"
 
-  compose_stack config --quiet
+  cp /opt/stacks/honeypot-stack/docker-compose.yml \
+    /opt/stacks/honeypot-stack/compose.yml &&
+  compose_stack config --quiet &&
   compose_stack up --detach --build --remove-orphans
 }
 

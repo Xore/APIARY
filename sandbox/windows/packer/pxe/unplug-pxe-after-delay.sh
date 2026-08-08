@@ -29,10 +29,19 @@ Why a fixed delay instead of reacting to the guest's first RESET event
 device_del failed structurally, not from a naming bug -- confirmed live,
 "Bus 'pcie.0' does not support hotplugging". q35's PCIe root complex does
 not support hot-unplugging a device attached directly to it; only devices
-on an explicit pcie-root-port bus with hotplug=on do, which the qemuargs
-in win11-analysis.pkr.hcl don't set up. set_link and eject both sidestep
-that: neither needs hotplug support, since the device/drive stays
-present -- only its link state or its media does not.
+on an explicit pcie-root-port bus with hotplug=on do. set_link and eject
+both sidestep that: neither needs hotplug support, since the device/drive
+stays present -- only its link state or its media does not.
+
+This script is actually invoked by sandbox/cape/packer/build-with-retry.sh
+against win11-cape.pkr.hcl (see that file's own header), whose qemuargs
+still attach pxenet0's device directly to the implicit pcie.0 root bus with
+no pcie-root-port -- the gap above is still live there. win11-analysis.pkr.hcl
+got an explicit pcie-root-port bus for pxenet0 under #858 (so
+unplug-pxe-on-reset.sh's device_del would work against that template now),
+but win11-analysis's own build-with-retry.sh does not invoke either unplug
+script at all -- that's a separate, so-far-unaddressed gap, not something
+this script's own approach needs to account for.
 
 120s is a fixed budget, not a detected event: confirmed live across
 tonight's runs, the initial PXE boot (iPXE -> wimboot -> boot.wim -> WinPE

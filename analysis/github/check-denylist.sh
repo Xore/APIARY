@@ -34,7 +34,7 @@ fi
 #    SHA-256, so try both.
 if [[ -n $cidrs_csv ]]; then
   md5=$(md5sum "$sample" 2>/dev/null | cut -d' ' -f1 || true)
-  logs_root=${HONEYPOT_LOGS_DIR:-/opt/stacks/honeypot-stack/logs}
+  logs_root=${HONEYPOT_LOGS_DIR:-/opt/stacks/apiary/logs}
   source_ip=""
   for hash in "$sha256" "$md5"; do
     [[ -n $hash ]] || continue

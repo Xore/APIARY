@@ -21,7 +21,7 @@ hash=${1:?usage: resolve-sample.sh <hash>}
 hash=${hash,,}
 [[ $hash =~ ^[0-9a-f]{32,64}$ ]] || { echo "invalid hash" >&2; exit 2; }
 
-roots=("${COWRIE_DOWNLOADS_DIR:-/opt/stacks/honeypot-stack/logs/cowrie/downloads}")
+roots=("${COWRIE_DOWNLOADS_DIR:-/opt/stacks/apiary/logs/cowrie/downloads}")
 dionaea_root="$(docker volume inspect dionaea-lib --format '{{.Mountpoint}}' 2>/dev/null || true)/binaries"
 scripts_root="$(docker volume inspect dashboard-state --format '{{.Mountpoint}}' 2>/dev/null || true)/script-payloads"
 [[ $dionaea_root == /* && -d $dionaea_root ]] && roots+=("$dionaea_root")

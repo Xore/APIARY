@@ -111,7 +111,14 @@ while (( attempt <= max_attempts )); do
       # -n: refuses to clobber an existing win11-cape.qcow2 rather than
       # silently overwriting a previously-built golden image on a rebuild
       # -- move the old one aside by hand first if that's really wanted.
-      mv -n "$staged_qcow2_path" "$qcow2_path"
+      # Checked explicitly (not just relying on set -e) so this exits with a
+      # clear message instead of an unexplained crash, and so the freshly
+      # built qcow2 is not left in $staging_dir to be silently deleted by
+      # the next invocation's own top-of-loop cleanup.
+      if ! mv -n "$staged_qcow2_path" "$qcow2_path"; then
+        echo "=== build-with-retry (cape): $qcow2_path already exists -- move it aside by hand first if you want to replace it. The freshly built image is left at $staged_qcow2_path, not deleted. ===" >&2
+        exit 1
+      fi
       rm -rf "$staging_dir"
       echo "=== build-with-retry (cape): writing $qcow2_path.sha256 ==="
       ( cd "$shared_dir" && sha256sum "$vm_name.qcow2" > "$vm_name.qcow2.sha256" )

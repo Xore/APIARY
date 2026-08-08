@@ -15,7 +15,8 @@
 #   ./scripts/reset-logs.sh cisco-asa        # cisco-asa-honeypot (CVE-2018-0101)
 #   ./scripts/reset-logs.sh rdp              # rdp-honeypot
 #   ./scripts/reset-logs.sh tanner           # tanner + snare
-#   ./scripts/reset-logs.sh suricata         # suricata EVE + pcap
+#   ./scripts/reset-logs.sh suricata         # suricata EVE only (pcap preserved)
+#   ./scripts/reset-logs.sh suricata --wipe-suricata-pcap  # suricata EVE + pcap
 #   ./scripts/reset-logs.sh --dry-run        # preview, no changes
 #   ./scripts/reset-logs.sh cowrie conpot    # multiple targets
 #
@@ -105,12 +106,14 @@ ELK_DIR="/opt/stacks/honeypot-elk"
 ELK_SURICATA_SERVICES="evebox"
 
 DRY=false
+WIPE_SURICATA_PCAP=false
 declare -A TARGETS
 have_target=false
 
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY=true ;;
+    --wipe-suricata-pcap) WIPE_SURICATA_PCAP=true ;;
     cowrie|conpot|multipot|http|dionaea|dnp3|dicompot|dns|citrix|cisco-asa|rdp|tanner|suricata|all)
       TARGETS["$arg"]=1
       have_target=true ;;
@@ -137,10 +140,15 @@ run() {
 STEP() { echo; echo "===> $*"; }
 
 wipe_dir() {
-  local dir="$1"
+  local dir="$1" exclude="${2:-}"
   if [ -d "$dir" ]; then
-    echo "  wipe: $dir"
-    run sudo find "$dir" -mindepth 1 -delete
+    if [ -n "$exclude" ]; then
+      echo "  wipe: $dir (preserving $exclude/)"
+      run sudo find "$dir" -mindepth 1 -path "$dir/$exclude" -prune -o -delete
+    else
+      echo "  wipe: $dir"
+      run sudo find "$dir" -mindepth 1 -delete
+    fi
   else
     echo "  (skip, not found: $dir)"
   fi
@@ -336,9 +344,13 @@ fi
 
 if wants suricata; then
   # Wipe EVE JSON (dashboard/Kibana source). Preserve the pcap sub-dir by
-  # default since pcaps are also consumed by Arkime — uncomment lines below
+  # default since pcaps are also consumed by Arkime -- pass --wipe-suricata-pcap
   # to wipe pcaps too.
-  wipe_dir "${LOGS_BASE}/suricata"
+  if $WIPE_SURICATA_PCAP; then
+    wipe_dir "${LOGS_BASE}/suricata"
+  else
+    wipe_dir "${LOGS_BASE}/suricata" pcap
+  fi
   # Wipe EveBox's own config.sqlite (saved filters/comments/escalations) so
   # those reset too. Named evebox-data here historically but the volume
   # EveBox actually declares is evebox-config (docker-compose.elk.yml) --

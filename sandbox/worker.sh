@@ -26,7 +26,12 @@ while true; do
     name=$(basename "$queued")
     running="$root/inbox/running/$name"
     mv "$queued" "$running"
-    sha=$(jq -r '.sha256 // empty' "$running")
+    # jq exits non-zero on unparseable JSON (e.g. a truncated write from a
+    # disk-full condition); guarded so that falls through to the existing
+    # invalid-request handling below instead of crashing the whole worker
+    # via set -e before this job (or any other job still queued this batch)
+    # gets routed through the normal .error/failed handling.
+    sha=$(jq -r '.sha256 // empty' "$running" 2>/dev/null) || sha=""
     if [[ ! $sha =~ ^[0-9a-f]{64}$ || $name != "$sha.json" || ! -f $root/inbox/samples/$sha ]]; then
       printf 'invalid request\n' >"$root/inbox/failed/$name.error"
       mv "$running" "$root/inbox/failed/$name"

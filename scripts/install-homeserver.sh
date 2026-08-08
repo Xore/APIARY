@@ -169,7 +169,7 @@ fi
 # shellcheck disable=SC1090
 source "$CONFIG_FILE"
 
-for var in INSTALL_HOSTNAME GIT_REPO_URL REPO_DIR HOME_WG_ADDRESS \
+for var in INSTALL_HOSTNAME GIT_REPO_URL GIT_REF REPO_DIR HOME_WG_ADDRESS \
            VPS_WG_ADDRESS VPS_WG_ENDPOINT VPS_WG_PUBLIC_KEY \
            VPS_SSH_HOST VPS_SSH_PORT VPS_SSH_USER VPS_SSH_KEY ENABLE_GPU_STACK \
            INSTALL_TIMEZONE BACKUP_HOST BACKUP_HOST_USER BACKUP_HOST_KEY BACKUP_HOST_PATH \
@@ -654,7 +654,10 @@ step_start_elasticsearch_first() {
 }
 
 step_start_init() {
-  (cd /var/dockge/stacks/honeypot-init && with_retry 3 15 docker compose -f compose.yml up -d)
+  if ! (cd /var/dockge/stacks/honeypot-init && with_retry 3 15 docker compose -f compose.yml up -d); then
+    echo "honeypot-init: docker compose up -d failed" >&2
+    return 1
+  fi
   # honeypot-init's jobs are one-shots; give them a bounded window to exit 0
   # rather than racing straight into the sensor stacks that assume its log
   # paths/ES templates/persona state already exist.

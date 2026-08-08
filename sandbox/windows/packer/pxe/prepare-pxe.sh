@@ -83,15 +83,36 @@ mv "$tmpdir/boot/bcd" "$dir/BCD"
 mv "$tmpdir/boot/boot.sdi" "$dir/BOOT.SDI"
 mv "$tmpdir/sources/boot.wim" "$dir/boot.wim"
 
+# Pinned to a specific release + checksum, not `releases/latest`: this
+# binary chainloads into the signed boot chain built below (Secure Boot
+# only re-verifies our own signature over whatever bytes were here at sign
+# time, not wimboot's own provenance) -- a floating "latest" tag plus plain
+# curl gives a compromised/rolled-back release or a MITM nothing to trip
+# over. Bump both when deliberately upgrading wimboot.
+WIMBOOT_VERSION=v2.9.0
+WIMBOOT_SHA256=5f067ccdc4d084d5bf77b6c853bd0f8402dfc2b4cd1b103d358993ae97fae8e3
 if [[ ! -f "$dir/wimboot" ]]; then
-  echo "==> Downloading wimboot"
-  curl -sSL -o "$dir/wimboot" https://github.com/ipxe/wimboot/releases/latest/download/wimboot
+  echo "==> Downloading wimboot $WIMBOOT_VERSION"
+  curl -sSL -o "$dir/wimboot" "https://github.com/ipxe/wimboot/releases/download/${WIMBOOT_VERSION}/wimboot"
+  actual_sha256=$(sha256sum "$dir/wimboot" | cut -d' ' -f1)
+  if [[ $actual_sha256 != "$WIMBOOT_SHA256" ]]; then
+    rm -f "$dir/wimboot"
+    echo "wimboot checksum mismatch: expected $WIMBOOT_SHA256, got $actual_sha256 -- refusing to use it" >&2
+    exit 1
+  fi
 fi
 
 if [[ ! -f "$dir/ipxe.efi.unsigned" ]]; then
   echo "==> Building ipxe.efi with boot.ipxe embedded"
+  # Pinned to a specific commit (confirmed to build bin-x86_64-efi/ipxe.efi
+  # cleanly) rather than a floating clone of master, for the same reason as
+  # wimboot above -- this becomes part of the signed boot chain. Bump when
+  # deliberately picking up upstream iPXE changes.
+  IPXE_COMMIT=257e8faf109c7aecb2f18472927b680f77028eca
   if [[ ! -d "$dir/ipxe" ]]; then
-    git clone --depth 1 https://github.com/ipxe/ipxe.git "$dir/ipxe"
+    git init -q "$dir/ipxe"
+    git -C "$dir/ipxe" fetch --depth 1 https://github.com/ipxe/ipxe.git "$IPXE_COMMIT"
+    git -C "$dir/ipxe" checkout -q FETCH_HEAD
   fi
   cp "$dir/boot.ipxe" "$dir/ipxe/src/embed.ipxe"
   make -C "$dir/ipxe/src" bin-x86_64-efi/ipxe.efi EMBED=embed.ipxe -j"$(nproc)"
