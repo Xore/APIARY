@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#20201f">
+  <meta name="description" content="APIARY turns hostile traffic into structured evidence through deception, capture, enrichment, and automated analysis.">
+  <meta property="og:title" content="APIARY — Automated Payload Intelligence &amp; Attacker Response">
+  <meta property="og:description" content="Know the payload. Understand the attacker.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://xore.github.io/APIARY/">
+  <meta property="og:image" content="https://xore.github.io/APIARY/assets/social/apiary-open-graph-1200x630.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="canonical" href="https://xore.github.io/APIARY/">
+  <title>APIARY - Brand web specimen</title>
+  <link rel="icon" href="../../assets/favicon/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="../../assets/favicon/favicon-32x32.png">
+  <link rel="apple-touch-icon" href="../../assets/favicon/apple-touch-icon.png">
+  <link rel="manifest" href="../../assets/favicon/site.webmanifest">
+  <link rel="stylesheet" href="apiary-theme.css">
+</head>
+<body>
+  <nav class="apiary-nav" aria-label="Primary navigation">
+    <div class="apiary-container apiary-nav__inner">
+      <a class="apiary-nav__brand" href="#top" aria-label="APIARY home">
+        <img id="apiary-nav-logo" src="../../assets/logo/apiary-wordmark-for-dark.png" alt="APIARY" width="210">
+      </a>
+      <div class="apiary-nav__links">
+        <a href="#capabilities">Capabilities</a>
+        <a href="#workflow">Workflow</a>
+        <a href="../../README.md">Brand guide</a>
+        <a href="../../pdf/APIARY-brand-guide.pdf">PDF</a>
+      </div>
+      <button class="apiary-theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle color theme">◐</button>
+    </div>
+  </nav>
+
+  <main id="top">
+    <header class="apiary-hero">
+      <div class="apiary-container apiary-hero__content">
+        <span class="apiary-eyebrow">Defensive intelligence platform</span>
+        <h1>Know the payload.<br>Understand the attacker.</h1>
+        <p>APIARY turns hostile traffic into structured evidence through deception, capture, enrichment, and automated analysis.</p>
+        <div class="apiary-actions">
+          <a class="apiary-button apiary-button--primary" href="#workflow">Explore the workflow</a>
+          <a class="apiary-button" href="../../../docs/CGNAT-DEPLOYMENT.md">Read deployment guide</a>
+        </div>
+      </div>
+    </header>
+
+    <section class="apiary-section" id="capabilities">
+      <div class="apiary-container">
+        <div class="apiary-section__header">
+          <span class="apiary-eyebrow">One evidence chain</span>
+          <h2>From first touch to analyst-ready context.</h2>
+          <p>Use restrained surfaces, compact technical labels, and copper accents to make dense security information feel calm and navigable.</p>
+        </div>
+        <div class="apiary-grid">
+          <article class="apiary-card"><span class="apiary-card__index">01 / ATTRACT</span><h3>Purpose-built deception</h3><p>Protocol-aware sensors expose believable services while keeping hostile activity contained.</p></article>
+          <article class="apiary-card"><span class="apiary-card__index">02 / ANALYZE</span><h3>Automated payload triage</h3><p>Deduplication, YARA, static analysis, and sandbox workflows turn captures into evidence.</p></article>
+          <article class="apiary-card"><span class="apiary-card__index">03 / RESPOND</span><h3>Operational intelligence</h3><p>Correlated sessions, infrastructure context, and reports help operators act with confidence.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="apiary-section apiary-section--tinted" id="workflow">
+      <div class="apiary-container">
+        <div class="apiary-panel">
+          <div class="apiary-panel__copy">
+            <span class="apiary-eyebrow">Live evidence</span>
+            <h2>A technical interface with a quiet pulse.</h2>
+            <p>The UI language favors evidence over decoration: strong hierarchy, warm neutral surfaces, monospace metadata, and semantic colors reserved for state.</p>
+            <div class="apiary-statuses"><span class="apiary-status apiary-status--live">pipeline healthy</span><span class="apiary-status">18 sensors</span><span class="apiary-status">contained</span></div>
+          </div>
+          <div class="apiary-terminal" aria-label="Example event stream">
+            <div class="apiary-terminal__bar"><i></i><i></i><i></i></div>
+            <div><span class="muted">21:44:08</span> session.open <code>cowrie.ssh</code></div>
+            <div><span class="muted">21:44:11</span> payload.capture sha256:8f4a…</div>
+            <div><span class="muted">21:44:12</span> yara.match <code>Mirai_Downloader</code></div>
+            <div><span class="muted">21:44:15</span> analysis.queued ghidra/static</div>
+            <div><span class="muted">21:44:17</span> evidence.sealed <code>case/AP-2481</code></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="apiary-footer"><div class="apiary-container apiary-footer__inner"><span>APIARY</span><span>Automated Payload Intelligence &amp; Attacker Response</span></div></footer>
+  <script>
+    const root = document.documentElement;
+    const button = document.querySelector('.apiary-theme-toggle');
+    const brand = document.querySelector('#apiary-nav-logo');
+    button.addEventListener('click', () => {
+      root.dataset.theme = root.dataset.theme === 'light' ? 'dark' : 'light';
+      brand.src = root.dataset.theme === 'light'
+        ? '../../assets/logo/apiary-wordmark-for-light.png'
+        : '../../assets/logo/apiary-wordmark-for-dark.png';
+    });
+  </script>
+</body>
+</html>

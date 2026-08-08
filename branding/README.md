@@ -1,0 +1,158 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/apiary-lockup-for-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="assets/logo/apiary-lockup-for-light.png">
+    <img src="assets/logo/apiary-lockup-for-light.png" alt="APIARY — Automated Payload Intelligence &amp; Attacker Response" width="820">
+  </picture>
+</p>
+
+# APIARY brand system
+
+This folder is the canonical, reusable visual system for APIARY. It packages
+the approved bee-and-honeycomb preset into web, repository, social, favicon,
+and print-ready forms while matching the production dashboard's established
+dark and light palettes.
+
+**Live specimen:** <https://xore.github.io/APIARY/>
+
+## Quick asset selection
+
+| Need | Use |
+|---|---|
+| Dark website, README, or slide | `assets/logo/apiary-lockup-for-dark.png` |
+| Light website, document, or print | `assets/logo/apiary-lockup-for-light.png` |
+| App navigation, avatar, or square placement | `assets/logo/apiary-mark-for-dark.png` or `apiary-mark-for-light.png` |
+| Small horizontal placement | `assets/logo/apiary-wordmark-for-dark.png` or `apiary-wordmark-for-light.png` |
+| Fixed dark/light raster | `assets/logo/apiary-lockup-on-charcoal.png` or `apiary-lockup-on-ivory.png` |
+| Browser and installed-app icons | `assets/favicon/` |
+| Link previews | `assets/social/apiary-open-graph-1200x630.png` |
+| Social avatar | `assets/social/apiary-avatar-1024.png` |
+| Website hero or PDF cover texture | `assets/backgrounds/apiary-hero-background.webp` |
+| Web implementation reference | `templates/web/index.html` and `apiary-theme.css` |
+| Portable design tokens | `tokens.json` |
+| Printable reference | `pdf/APIARY-brand-guide.pdf` |
+
+## Logo system
+
+The horizontal lockup is primary. Use the emblem alone only when the available
+space cannot carry the full wordmark and tagline. The themed transparent PNGs
+discard the RGB data from the chroma-key pass and rebuild the artwork from its
+alpha geometry in approved copper values; this prevents green edge spill.
+
+Rules:
+
+- Keep clear space equal to the height of one `A` stem around the lockup.
+- Do not show the horizontal lockup below 420 px wide. Switch to the emblem.
+- Do not show the full emblem below 64 px. Use the optically simplified favicon.
+- Never stretch, rotate, outline, recolor, glow, or place the mark on a busy image.
+- Use the `for-dark` asset on charcoal/dark photography and `for-light` on ivory/white.
+- Preserve the tagline exactly: **Automated Payload Intelligence & Attacker Response**.
+
+## Color
+
+### Dark interface
+
+| Token | Hex | Role |
+|---|---:|---|
+| Background | `#20201f` | page and PDF canvas |
+| Sidebar | `#1e1e1c` | navigation and header bands |
+| Surface | `#2c2c2a` | cards and controls |
+| Raised surface | `#383835` | table heads and emphasized panels |
+| Primary text | `#e9e6df` | headings and body copy |
+| Secondary text | `#a8a49c` | descriptions |
+| Muted text | `#8c8f8d` | metadata |
+| Copper | `#d97757` | brand accent and primary actions |
+
+### Light interface
+
+| Token | Hex | Role |
+|---|---:|---|
+| Background | `#f7f6f2` | page and print canvas |
+| Sidebar | `#f0efeb` | navigation and header bands |
+| Surface | `#fbfaf7` | cards and controls |
+| Raised surface | `#ebe9e3` | table heads and emphasized panels |
+| Primary text | `#2f2b27` | headings and body copy |
+| Secondary text | `#68615a` | descriptions |
+| Muted text | `#918a82` | metadata |
+| Copper | `#b9583c` | brand accent and primary actions |
+
+Semantic colors are evidence states, not decoration: blue `#6da7ec` for links
+and information, green `#79c99e` for clean/success, amber `#deb36a` for warning,
+and red `#dc7774` for detected/high risk. Use their darker production values in
+light mode as defined in `tokens.json` and `apiary-theme.css`.
+
+## Typography and voice
+
+Use the native UI sans stack for prose and headings. Use the native monospace
+stack for evidence IDs, timestamps, hashes, protocol labels, and compact
+eyebrows. Large headings are tight and direct; operational copy is calm,
+specific, and free of hype.
+
+Preferred voice examples:
+
+- “Know the payload. Understand the attacker.”
+- “From first touch to analyst-ready context.”
+- “Evidence sealed. Analysis queued.”
+
+## Website implementation
+
+Copy `templates/web/apiary-theme.css`, then reuse the assets rather than
+embedding them as base64. A minimal responsive header uses theme-aware images:
+
+```html
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="apiary-lockup-for-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="apiary-lockup-for-light.png">
+  <img src="apiary-lockup-for-light.png" alt="APIARY" width="900">
+</picture>
+```
+
+Install the favicon family with:
+
+```html
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="site.webmanifest">
+```
+
+## PDF and document branding
+
+Use the light palette for printable reports and the dark palette for
+screen-first analyst reports. Keep the mark in a 16-22 mm header zone, copper
+section rules at 0.75-1 pt, 18-24 mm page margins, and semantic colors limited
+to findings or state. The PDF in `pdf/` demonstrates cover, logo use, palette,
+typography, components, and do/don't guidance.
+
+## Repository structure
+
+```text
+branding/
+├── assets/
+│   ├── backgrounds/    # PNG and WebP atmosphere artwork
+│   ├── favicon/        # ICO, PNG app icons, manifest
+│   ├── logo/           # transparent and fixed-background lockups
+│   └── social/         # Open Graph and avatar exports
+├── pdf/                # rendered brand guide
+├── scripts/            # deterministic export/build tooling
+├── source/             # approved preset and alpha geometry masters
+├── templates/web/      # reusable HTML/CSS implementation
+├── README.md
+└── tokens.json
+```
+
+Regenerate derived raster assets with:
+
+```powershell
+python branding/scripts/export_brand_assets.py
+```
+
+Assemble the exact GitHub Pages artifact locally with:
+
+```powershell
+python branding/scripts/build_pages_site.py --output tmp/pages-site
+```
+
+The source preset and alpha masks are archival production inputs. Do not use
+the masks directly in a UI.
