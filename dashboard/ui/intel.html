@@ -155,9 +155,13 @@
           <div class="card wide">
             <h2>Correlated records</h2>
             <p class="note">{{if .Correlation.Truncated}}Showing the {{len .Correlation.Records}} most recent of {{.Correlation.Total}} total matches.{{else}}Newest first.{{end}}{{if .Correlation.TunnelOSGuesses}} p0f OS guesses seen over this network's tunnel connections: {{range $i, $os := .Correlation.TunnelOSGuesses}}{{if $i}}, {{end}}{{$os}}{{end}}.{{end}}</p>
-            <table class="recent data-table"><thead><tr><th>time</th><th>sensor</th><th>summary</th></tr></thead><tbody>
+            {{/* #790 chunk 7: card__scroll -- capped at correlationRecordCap
+                 (500) server-side, same over-340px reasoning as the other
+                 bounded-but-still-too-tall lists this issue has already
+                 wrapped (overview.html's Recent events, chunk 2). */}}
+            <div class="card__scroll"><table class="recent data-table"><thead><tr><th>time</th><th>sensor</th><th>summary</th></tr></thead><tbody>
               {{range .Correlation.Records}}<tr><td>{{.Time.Format "2006-01-02 15:04:05"}}</td><td>{{.Sensor}}</td><td>{{.Summary}}</td></tr>{{end}}
-            </tbody></table>
+            </tbody></table></div>
           </div>
         </div>
         <footer id="cidr-correlation-footer">{{brandText}} &bull; Elasticsearch-backed network correlation</footer>
@@ -205,9 +209,9 @@
           <div class="card wide">
             <h2>Correlated records</h2>
             <p class="note">{{if .Correlation.Truncated}}Showing the {{len .Correlation.Records}} most recent of {{.Correlation.Total}} total matches.{{else}}Newest first.{{end}}{{if .Correlation.TunnelOSGuesses}} p0f OS guesses seen across this cluster's tunnel connections: {{range $i, $os := .Correlation.TunnelOSGuesses}}{{if $i}}, {{end}}{{$os}}{{end}}.{{end}}</p>
-            <table class="recent data-table"><thead><tr><th>time</th><th>sensor</th><th>summary</th></tr></thead><tbody>
+            <div class="card__scroll"><table class="recent data-table"><thead><tr><th>time</th><th>sensor</th><th>summary</th></tr></thead><tbody>
               {{range .Correlation.Records}}<tr><td>{{.Time.Format "2006-01-02 15:04:05"}}</td><td>{{.Sensor}}</td><td>{{.Summary}}</td></tr>{{end}}
-            </tbody></table>
+            </tbody></table></div>
           </div>
         </div>
         <footer id="cluster-correlation-footer">{{brandText}} &bull; Elasticsearch-backed cluster correlation</footer>

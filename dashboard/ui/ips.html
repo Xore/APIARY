@@ -111,16 +111,20 @@
           {{template "tbl" (dict "t" "Fingerprints" "rows" .Fingerprints "class" "half" "hint" "none")}}
           {{template "techniques" .Techniques}}
           {{if .Correlation.Available}}
+          {{/* #790 chunk 7: card__scroll on this card and "Attack
+               progression" below -- same correlationRecordCap (500) /
+               explicit 250-record cap reasoning as intel.html's own
+               Correlated records cards. */}}
           <div class="card wide" id="attacker-correlation">
             <h2>Elasticsearch correlation</h2>
             <p class="note">#354: everything the backend has seen for this IP across honeypot, Suricata, and portbridge tunnel records &mdash; not limited to the in-memory window the tables above draw from.{{if .Correlation.Truncated}} Showing the {{len .Correlation.Records}} most recent of {{.Correlation.Total}} total matches.{{end}}</p>
             {{if .Correlation.TunnelOSGuesses}}<p><strong>p0f OS guesses seen over this tunnel:</strong> {{range $i, $os := .Correlation.TunnelOSGuesses}}{{if $i}}, {{end}}{{$os}}{{end}}</p>{{end}}
-            <table class="recent data-table"><thead><tr><th>time</th><th>sensor</th><th>summary</th></tr></thead><tbody>
+            <div class="card__scroll"><table class="recent data-table"><thead><tr><th>time</th><th>sensor</th><th>summary</th></tr></thead><tbody>
               {{range .Correlation.Records}}<tr><td>{{.Time.Format "2006-01-02 15:04:05"}}</td><td>{{.Sensor}}</td><td>{{.Summary}}</td></tr>{{end}}
-            </tbody></table>
+            </tbody></table></div>
           </div>
           {{end}}
-          <div class="card wide"><h2>Attack progression</h2><p class="note">Chronological, oldest to newest; capped to the latest 250 matching records.</p><table class="recent data-table data-table--responsive"><thead><tr><th>time</th><th>sensor</th><th>source ip</th><th>port</th><th>detail</th></tr></thead><tbody>{{range .Events}}{{template "everow" .}}{{end}}</tbody></table></div>
+          <div class="card wide"><h2>Attack progression</h2><p class="note">Chronological, oldest to newest; capped to the latest 250 matching records.</p><div class="card__scroll"><table class="recent data-table data-table--responsive"><thead><tr><th>time</th><th>sensor</th><th>source ip</th><th>port</th><th>detail</th></tr></thead><tbody>{{range .Events}}{{template "everow" .}}{{end}}</tbody></table></div></div>
         </div>
 
         <footer id="attacker-footer">{{brandText}} &bull; attacker investigation</footer>
