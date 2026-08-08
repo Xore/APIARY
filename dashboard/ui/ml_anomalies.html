@@ -53,7 +53,12 @@
             {{else}}<p class="empty">No anomalies scored above the alert threshold yet.</p>{{end}}
           </div>
           {{if .Stats.TopSrcIPs}}
-          <div class="card wide"><h2>Top source IPs, 24h</h2><table class="data-table"><thead><tr><th>source ip</th><th>anomalies</th></tr></thead><tbody>{{range .Stats.TopSrcIPs}}<tr><td class="v"><a href="{{.Link}}">{{.Key}}</a></td><td class="n">{{.Count}}</td></tr>{{end}}</tbody></table></div>
+          {{/* #790 chunk 8: card__scroll -- same top-N-list treatment as
+               the shared "tbl" template chunk 1 already converged
+               (partials/dashboard.html), for visual consistency with
+               every other top-N card on the dashboard even though this
+               one's own cap (10) is small. */}}
+          <div class="card wide"><h2>Top source IPs, 24h</h2><div class="card__scroll"><table class="data-table"><thead><tr><th>source ip</th><th>anomalies</th></tr></thead><tbody>{{range .Stats.TopSrcIPs}}<tr><td class="v"><a href="{{.Link}}">{{.Key}}</a></td><td class="n">{{.Count}}</td></tr>{{end}}</tbody></table></div></div>
           {{end}}
         </div>
         {{end}}
