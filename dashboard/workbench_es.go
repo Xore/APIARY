@@ -147,7 +147,15 @@ func (w *workbenchService) saveRecipe(input workbenchRecipe, owner string, baseR
 	// create=true: this exact revision number is written exactly once --
 	// two racing saves both computing "latest+1" from the same read collide
 	// here instead of one silently clobbering the other.
-	if err := w.es.docIndex(workbenchRecipesIndex, workbenchRecipeDocID(input.ID, input.Revision), body, true, 0, 0); err != nil {
+	//
+	// docIndexWaitForRefresh, not docIndex (#920): the "latest revision" scan
+	// a few lines up this same function reads via docSearchAll, which is only
+	// eventually consistent -- without waiting for refresh here, a second
+	// save to this same recipe arriving shortly after this one returns could
+	// still see the pre-write revision as "latest" and spuriously fail its
+	// own baseRevision check with errWorkbenchConflict, even though nothing
+	// actually conflicted.
+	if err := w.es.docIndexWaitForRefresh(workbenchRecipesIndex, workbenchRecipeDocID(input.ID, input.Revision), body, true, 0, 0); err != nil {
 		if errors.Is(err, errESConflict) {
 			return workbenchRecipe{}, errWorkbenchConflict
 		}
@@ -264,7 +272,14 @@ func (w *workbenchService) createOrReuseRun(run workbenchRun) (workbenchRun, boo
 	if err != nil {
 		return workbenchRun{}, false, err
 	}
-	err = w.es.docIndex(workbenchRunsIndex, run.ID, body, true, 0, 0)
+	// docIndexWaitForRefresh, not docIndex (#920): countRuns' own retention
+	// check (called just before this, in the orchestrator) and the frontend's
+	// own loadRuns() reload right after a successful submission both go
+	// through docSearchAll -- waiting for refresh here means a run this
+	// call just created is guaranteed visible to both of those, rather than
+	// possibly missing from a countRuns() call moments later (undercounting
+	// against workbenchMaxRuns) or from the UI's own post-submit list reload.
+	err = w.es.docIndexWaitForRefresh(workbenchRunsIndex, run.ID, body, true, 0, 0)
 	if err == nil {
 		return run, false, nil
 	}
