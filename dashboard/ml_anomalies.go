@@ -42,6 +42,18 @@ type mlAnomaly struct {
 	EventType      string             `json:"event_type"`
 	DstPort        int                `json:"dst_port"`
 	Proto          string             `json:"proto"`
+
+	// AnomalyID/Acknowledged/AckedBy/AckedAt (#913) are never part of
+	// ml-anomalies' own _source -- worker.py writes nothing about ack state.
+	// AnomalyID is populated by refreshMLAnomalies from the search hit's own
+	// _id (worker.py's deterministic anomaly_doc_id, see ml_anomaly_ack.go);
+	// the other three are joined in afterward by applyMLAnomalyAcks. All four
+	// are excluded from JSON (un/marshaling this struct only ever happens
+	// against ml-anomalies' real document shape, which has none of them).
+	AnomalyID    string    `json:"-"`
+	Acknowledged bool      `json:"-"`
+	AckedBy      string    `json:"-"`
+	AckedAt      time.Time `json:"-"`
 }
 
 // SourceLink pivots from an anomaly back to the exact honeypot event that
@@ -128,6 +140,7 @@ func (s *store) refreshMLAnomalies() {
 	var resp struct {
 		Hits struct {
 			Hits []struct {
+				ID     string    `json:"_id"`
 				Source mlAnomaly `json:"_source"`
 			} `json:"hits"`
 		} `json:"hits"`
@@ -138,6 +151,7 @@ func (s *store) refreshMLAnomalies() {
 	items := make([]mlAnomaly, len(resp.Hits.Hits))
 	for i, h := range resp.Hits.Hits {
 		items[i] = h.Source
+		items[i].AnomalyID = h.ID
 	}
 	s.mlAnomalies.absorb(items)
 }
@@ -233,6 +247,7 @@ func (s *store) serveMLAnomaliesAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items := s.mlAnomalies.snapshot()
+	s.applyMLAnomalyAcks(items)
 	f := parseMLAnomalyFilter(r)
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit <= 0 || limit > mlAnomalyCacheCap {
@@ -333,6 +348,7 @@ func (s *store) mlAnomaliesData(r *http.Request) mlAnomaliesPage {
 		return page
 	}
 	items := s.mlAnomalies.snapshot()
+	s.applyMLAnomalyAcks(items)
 	filtered := make([]mlAnomaly, 0, len(items))
 	for _, item := range items {
 		if f.match(item) {
