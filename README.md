@@ -26,10 +26,10 @@ flowchart LR
 ```
 
 **All core sensors run without compose profiles.** The only profile is the
-optional on-demand `geoip-update` maintenance job. 19 deployment pieces —
-18 independent Dockge stacks at home plus the VPS (see
+optional on-demand `geoip-update` maintenance job. 21 deployment pieces —
+20 independent Dockge stacks at home plus the VPS (see
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for why the home side split into
-18 separate Compose stacks):
+20 separate Compose stacks):
 
 | Piece | Runs on | What |
 |---|---|---|
@@ -38,10 +38,22 @@ optional on-demand `geoip-update` maintenance job. 19 deployment pieces —
 | `honeypot-dicompot`, `honeypot-dns-honeypot`, `honeypot-citrix`, `honeypot-cisco-asa`, `honeypot-rdp`, `honeypot-endlessh` (this repository, one compose file each) | **home** | more sensors: DICOM medical-imaging decoy, DNS UDP reflection bait (response-capped, never a real amplification vector), Citrix ADC/NetScaler Gateway decoy (CVE-2019-19781), Cisco ASA WebVPN+IKE decoy (CVE-2018-0101), RDP decoy, SSH pre-auth tarpit |
 | `honeypot-tanner` ([docker-compose.tanner.yml](docker-compose.tanner.yml)) | **home** | SNARE + TANNER application-emulation boundary |
 | `honeypot-elk` ([docker-compose.elk.yml](docker-compose.elk.yml)) | **home** | Filebeat, Elasticsearch, Kibana, EveBox, Arkime |
+| `honeypot-ip-enrichment-worker` ([docker-compose.ip-enrichment-worker.yml](docker-compose.ip-enrichment-worker.yml)) | **home** | networkless worker that moves the portbridge `via_port` → real attacker IP join from dashboard read-time to ingest-time, writing `logs/enriched/*.json` for Filebeat |
+| `honeypot-agent-intrusion-worker` ([docker-compose.agent-intrusion-worker.yml](docker-compose.agent-intrusion-worker.yml)) | **home** | correlates sensor/Suricata events into campaigns, scores them against deterministic criticality rules, writes the `agent-intrusion-campaigns` index the dashboard's `/agent-campaigns` route reads |
 | `honeypot-dashboard` ([docker-compose.dashboard.yml](docker-compose.dashboard.yml)) | **home** | the live investigation dashboard |
 | `honeypot-payload-analysis` ([docker-compose.payload-analysis.yml](docker-compose.payload-analysis.yml)) | **home** | payload dedup + YARA scanning |
 | `honeypot-utilities` ([docker-compose.utilities.yml](docker-compose.utilities.yml)) | **home** | autoheal, log rotation, disk-space monitoring, reporting |
 | [`vps/`](vps/) | **VPS** | Traefik, portbridge raw tunnels, Suricata, and HTTP bridges (SSO via [Xore/auth-backend](https://github.com/Xore/auth-backend)) |
+
+The root [`docker-compose.yml`](docker-compose.yml) is an empty marker kept
+only so `docker compose config` has something to validate against in this
+directory — it is not itself a Dockge stack and isn't counted above.
+[`docker-compose.sandbox.yml`](docker-compose.sandbox.yml) is a
+per-detonation Windows gateway/capture Compose file the sandbox brings up
+and tears down around a single run; it's likewise not a standing stack.
+Ghidra, ML, LLM, the Windows sandbox, GHOSTS, and CAPE run their own
+independently managed services outside this count — see
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for where those fit.
 
 ## Read next
 
@@ -63,7 +75,7 @@ optional on-demand `geoip-update` maintenance job. 19 deployment pieces —
 | [docs/CI-CD.md](docs/CI-CD.md) | Repository automation, deployment environments, runner setup |
 | [docs/TESTING.md](docs/TESTING.md) | The three testing tiers -- CI, live feature smoke tests, and the full clean-reinstall release gate -- and how to repeat each one |
 | [docs/STACK-REBUILD.md](docs/STACK-REBUILD.md) | Runbook for a full deliberate reset — stop order, what's preserved vs wiped, and the ordering/permission pitfalls to avoid |
-| [deploy-profiles/](deploy-profiles/) | Named deployment shapes (full / ICS-only / web-only) — which of the 18 split home stacks run for a given deployment, plus a validator catching cross-stack drift before deploy |
+| [deploy-profiles/](deploy-profiles/) | Named deployment shapes (full / ICS-only / web-only) — which of the 20 split home stacks run for a given deployment, plus a validator catching cross-stack drift before deploy |
 | [docs/RECOVERY.md](docs/RECOVERY.md) | `factory-reset.sh` — one entry point for "back up, optionally wipe/reset, restart" on the same host |
 | [docs/ROADMAP.md](docs/ROADMAP.md) / [docs/WORK-LEDGER.md](docs/WORK-LEDGER.md) | What order work happens in, and how issues are claimed/reviewed |
 | [docs/ml-worker-plan.md](docs/ml-worker-plan.md), [docs/gpu-llm-analysis-worker.md](docs/gpu-llm-analysis-worker.md), [docs/gpu-ml-worker-acceleration.md](docs/gpu-ml-worker-acceleration.md) | The homeserver's NVIDIA GPU running local LLM log/payload analysis and CUDA-accelerated anomaly detection — no data leaves the machine |

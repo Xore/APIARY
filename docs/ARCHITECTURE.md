@@ -24,14 +24,22 @@ describes, not the native Windows 11 guest — see that directory's own
 web-request emulators, not malware detonation sandboxes.
 
 **The home side is not one deployment unit.** [#258](https://github.com/Xore/APIARY/issues/258)
-split what used to be a single `docker-compose.yml` into 12 independently
+split what used to be a single `docker-compose.yml` into independently
 deployed Dockge stacks — each with its own compose file
-(`docker-compose.<name>.yml`) and its own start/stop/update lifecycle. The
-root `docker-compose.yml` is now a deliberate empty marker; nothing runs
-`docker compose up` against it any more. The diagrams below draw those stack
-boundaries explicitly rather than one "home server" box, because that
-boundary is where independent deployment, restart, and failure actually
-happen.
+(`docker-compose.<name>.yml`) and its own start/stop/update lifecycle. That
+first split produced 12 stacks; new sensors and workers have each landed as
+their own stack since, and the home side now runs **20** — see
+`.github/workflows/deploy.yml`'s deploy jobs for the authoritative list. The
+root `docker-compose.yml` is a deliberate empty marker; nothing runs
+`docker compose up` against it any more, and it is not counted among the 20.
+`docker-compose.sandbox.yml` is a per-detonation gateway/capture Compose file
+the Windows sandbox brings up and tears down around a single run — also not
+a standing stack. Host-owned systemd/libvirt services (Ghidra's worker, the
+Linux/Windows KVM sandboxes) and optional GPU/analysis stacks (ML worker,
+LLM worker, CAPE, GHOSTS) run outside Dockge entirely and outside this count
+as well. The diagrams below draw the 20 stack boundaries explicitly rather
+than one "home server" box, because that boundary is where independent
+deployment, restart, and failure actually happen.
 
 ## Deployment and trust boundaries
 
@@ -51,7 +59,7 @@ flowchart LR
 
   wg["WireGuard tunnel"]
 
-  subgraph home["Home server — 18 independent Dockge stacks (#258)"]
+  subgraph home["Home server — 20 independent Dockge stacks (#258)"]
     direction TB
     subgraph initStack["honeypot-init"]
       initJobs["Bootstrap one-shot jobs"]
@@ -74,8 +82,14 @@ flowchart LR
     subgraph tannerStack["honeypot-tanner"]
       tannerSvcs["SNARE + TANNER analyzer/API/web<br/>+ nested Docker + Redis"]
     end
+    subgraph ipEnrichStack["honeypot-ip-enrichment-worker<br/>no network of any kind"]
+      ipEnrichSvc["ip-enrichment-worker<br/>via_port → real attacker IP,<br/>ingest-time not read-time"]
+    end
     subgraph elkStack["honeypot-elk"]
       elkSvcs["Filebeat, Elasticsearch,<br/>Kibana, EveBox, Arkime"]
+    end
+    subgraph agentIntrusionStack["honeypot-agent-intrusion-worker"]
+      agentIntrusionSvc["agent-intrusion-worker<br/>campaign correlation +<br/>deterministic criticality scoring"]
     end
     subgraph dashboardStack["honeypot-dashboard"]
       dashboardSvc["Dashboard + results-importer<br/>+ services-adapter"]
@@ -104,8 +118,11 @@ flowchart LR
   wg --> dashboardStack
   sensorStacks -->|"logs + captured artifacts<br/>via shared host paths"| elkStack
   sensorStacks -->|"logs + captured artifacts<br/>via shared host paths"| dashboardStack
+  sensorStacks -->|"raw logs + portbridge connlog<br/>via shared host paths"| ipEnrichStack
+  ipEnrichStack -->|"logs/enriched/*.json<br/>via shared host paths"| elkStack
   tannerStack -->|"logs via shared host paths"| elkStack
   tannerStack -->|"logs via shared host paths"| dashboardStack
+  elkStack <-.->|"honeynet: reads sensor indices,<br/>writes agent-intrusion-campaigns"| agentIntrusionStack
   payloadStack -.->|"hashes + results"| dashboardStack
   dashboardStack -.->|"hash-only request spool"| hostSandbox
   suricata -.->|"read-only SSHFS logs over WireGuard"| elkStack
@@ -296,7 +313,7 @@ http-honeypot's deepened WordPress bait (readme.html version fingerprinting,
 xmlrpc.php, vulnerable-plugin readme.txt endpoints — also #238), is unaffected
 and stays file-based.
 
-`honeypot-init` runs first among the 18 stacks, and every other one depends
+`honeypot-init` runs first among the 20 stacks, and every other one depends
 on its output without a Compose-level dependency — Compose's
 `depends_on: condition: service_completed_successfully` can't reach across a
 stack boundary, [#258](https://github.com/Xore/APIARY/issues/258)'s
