@@ -324,6 +324,17 @@ func (a *oidcAuth) identityFromRequest(r *http.Request) (authenticatedIdentity, 
 	changed := false
 	if now.Add(time.Minute).After(session.TokenExpiry) {
 		if err := a.refreshSession(r.Context(), &session); err != nil {
+			if isTransientOAuthError(err) {
+				// Keycloak unreachable/overloaded right as this session's
+				// token needed refreshing -- the same "fail closed, but
+				// don't destroy a session over a transient outage" contract
+				// introspect() already gives the 30s re-check path. Without
+				// this, a Keycloak blip landing in this exact one-minute
+				// window would silently and permanently log the user out
+				// even though nothing about their own session was actually
+				// invalid.
+				return authenticatedIdentity{}, errIdentityUnavailable
+			}
 			_ = a.sessions.Delete(r.Context(), "oidc:session:"+cookie.Value)
 			return authenticatedIdentity{}, errIdentityUnauthorized
 		}
@@ -408,6 +419,24 @@ func (a *oidcAuth) refreshSession(ctx context.Context, session *oidcSession) err
 	session.IDToken = rawIDToken
 	session.TokenExpiry = idToken.Expiry
 	return nil
+}
+
+// isTransientOAuthError reports whether a refresh-token exchange failure
+// reflects Keycloak being unreachable or overloaded (retry later, keep the
+// session) rather than the refresh token itself being genuinely invalid or
+// revoked (a real logout). A request that never got an HTTP response at
+// all -- dial failure, timeout -- never populates *oauth2.RetrieveError;
+// that's unambiguously transient. A RetrieveError with a 5xx status means
+// Keycloak itself responded but couldn't process the request (mid-restart,
+// its own DB unreachable, etc.), also transient. Anything else -- a 4xx
+// like invalid_grant for a refresh token that's actually been revoked or
+// expired -- is a real rejection.
+func isTransientOAuthError(err error) bool {
+	var retrieveErr *oauth2.RetrieveError
+	if !errors.As(err, &retrieveErr) {
+		return true
+	}
+	return retrieveErr.Response != nil && retrieveErr.Response.StatusCode >= 500
 }
 
 func (a *oidcAuth) introspect(ctx context.Context, accessToken, subject string) error {

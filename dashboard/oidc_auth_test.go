@@ -14,6 +14,7 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	jose "github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
+	"golang.org/x/oauth2"
 )
 
 func TestSafeReturnToRejectsExternalAndProtocolRelativeURLs(t *testing.T) {
@@ -268,6 +269,80 @@ func TestIdentityFromRequestSessionLifecycle(t *testing.T) {
 		request.AddCookie(&http.Cookie{Name: oidcSessionCookie, Value: "outage-session"})
 		if _, err := auth.identityFromRequest(request); err != errIdentityUnavailable {
 			t.Fatalf("err = %v, want errIdentityUnavailable (fail closed on identity-provider outage)", err)
+		}
+	})
+
+	// Found live via a real chaos test (scripts/test-dashboard-oidc-chaos.sh):
+	// a Keycloak outage landing in the one-minute window before a session's
+	// access token expiry routes through refreshSession(), not introspect().
+	// Unlike introspect()'s already-tested outage handling above, every
+	// refreshSession() failure -- transient or not -- used to be treated as
+	// a genuine rejection and delete the session outright, permanently
+	// logging the user out over what was really just Keycloak being
+	// mid-restart.
+	t.Run("session survives a transient refresh failure by denying, not destroying the session", func(t *testing.T) {
+		tokenEndpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "keycloak still starting", http.StatusServiceUnavailable)
+		}))
+		defer tokenEndpoint.Close()
+
+		store := newStore()
+		created := time.Now().UTC()
+		nowFn := func() time.Time { return created.Add(time.Hour) }
+		auth := &oidcAuth{
+			sessions: store, now: nowFn, httpClient: tokenEndpoint.Client(),
+			oauth2: oauth2.Config{ClientID: oidcClientID, Endpoint: oauth2.Endpoint{TokenURL: tokenEndpoint.URL}},
+		}
+		session := oidcSession{
+			Identity: authenticatedIdentity{Subject: subject, Username: "analyst", Role: "admin"},
+			// Already past expiry -- forces the refresh path on this request
+			// rather than waiting a further 30s for introspection to matter.
+			TokenExpiry: created.Add(-time.Hour), CreatedAt: created, LastValidated: created,
+			AccessToken: subject, RefreshToken: "refresh-token-still-valid",
+		}
+		if err := auth.putJSON(context.Background(), "oidc:session:refresh-outage-session", session, time.Hour); err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		request.AddCookie(&http.Cookie{Name: oidcSessionCookie, Value: "refresh-outage-session"})
+		if _, err := auth.identityFromRequest(request); err != errIdentityUnavailable {
+			t.Fatalf("err = %v, want errIdentityUnavailable (fail closed, not logged out, on a transient refresh failure)", err)
+		}
+		if _, getErr := store.Get(context.Background(), "oidc:session:refresh-outage-session"); getErr != nil {
+			t.Fatalf("session was deleted over a transient refresh failure: %v", getErr)
+		}
+	})
+
+	t.Run("session with a genuinely revoked refresh token is rejected and deleted", func(t *testing.T) {
+		tokenEndpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"invalid_grant","error_description":"Refresh token expired"}`))
+		}))
+		defer tokenEndpoint.Close()
+
+		store := newStore()
+		created := time.Now().UTC()
+		nowFn := func() time.Time { return created.Add(time.Hour) }
+		auth := &oidcAuth{
+			sessions: store, now: nowFn, httpClient: tokenEndpoint.Client(),
+			oauth2: oauth2.Config{ClientID: oidcClientID, Endpoint: oauth2.Endpoint{TokenURL: tokenEndpoint.URL}},
+		}
+		session := oidcSession{
+			Identity:    authenticatedIdentity{Subject: subject, Username: "analyst", Role: "admin"},
+			TokenExpiry: created.Add(-time.Hour), CreatedAt: created, LastValidated: created,
+			AccessToken: subject, RefreshToken: "refresh-token-actually-revoked",
+		}
+		if err := auth.putJSON(context.Background(), "oidc:session:revoked-refresh-session", session, time.Hour); err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		request.AddCookie(&http.Cookie{Name: oidcSessionCookie, Value: "revoked-refresh-session"})
+		if _, err := auth.identityFromRequest(request); err != errIdentityUnauthorized {
+			t.Fatalf("err = %v, want errIdentityUnauthorized (refresh token was genuinely revoked)", err)
+		}
+		if _, getErr := store.Get(context.Background(), "oidc:session:revoked-refresh-session"); getErr != errSessionNotFound {
+			t.Fatalf("session with a genuinely revoked refresh token was not deleted: %v", getErr)
 		}
 	})
 }
