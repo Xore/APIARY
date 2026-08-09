@@ -60,6 +60,19 @@ x-oidc-gateway: &oidc-gateway
     OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
     OAUTH2_PROXY_PASS_ACCESS_TOKEN: "false"
     OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER: "false"
+    # Both already oauth2-proxy's own defaults -- pinned explicitly rather
+    # than left implicit because Arkime's #979 header-trust auth
+    # (arkime/config.ini's authMode=header+digest) specifically depends on
+    # this pair: PASS_USER_HEADERS is what injects the verified
+    # X-Forwarded-User/X-Forwarded-Email Arkime trusts, and
+    # SKIP_AUTH_STRIP_HEADERS is what strips any client-supplied copy of
+    # those exact header names before injecting oauth2-proxy's own. A
+    # silent upstream default change here would be a real, easy-to-miss
+    # security regression for the one gateway that actually reads these
+    # headers -- every other gateway ignores them, so this is a harmless
+    # no-op for the rest.
+    OAUTH2_PROXY_PASS_USER_HEADERS: "true"
+    OAUTH2_PROXY_SKIP_AUTH_STRIP_HEADERS: "true"
     # Without this, /oauth2/sign_out only clears this gateway's own cookie --
     # the user's Keycloak SSO session (KEYCLOAK_SESSION cookie on the auth
     # host) stays alive, and the very next visit to this or any other
