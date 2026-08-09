@@ -83,7 +83,7 @@ StartLimitIntervalSec=0
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/honeypot-log-mounts
-ExecStartPost=/bin/sh -c 'for container in hp-evebox hp-filebeat; do docker inspect "\$container" >/dev/null 2>&1 && docker restart "\$container" >/dev/null || true; done'
+ExecStartPost=/bin/sh -c 'for container in hp-evebox hp-filebeat hp-pcap-sync; do docker inspect "\$container" >/dev/null 2>&1 && docker restart "\$container" >/dev/null || true; done'
 RemainAfterExit=yes
 Restart=on-failure
 RestartSec=15s
