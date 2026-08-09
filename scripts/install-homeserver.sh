@@ -767,6 +767,21 @@ step_create_shared_resources() {
   # containers will fail to even create rather than run and fail --
   # STACK-REBUILD.md documents this exact trap.
   docker network inspect honeynet >/dev/null 2>&1 || docker network create honeynet
+
+  # docker-compose.dashboard.yml also declares honeypot-llm as external:true
+  # (its query-time embedding call to Ollama), but unlike honeynet it has a
+  # real owner: analysis/ghidra/docker-compose.ghidra.yml defines it for
+  # real (internal:true, no external:true) and only creates it when
+  # ghidra-start runs -- much later than start-remaining, which is what
+  # actually starts honeypot-dashboard. Found live during #787's homeserver
+  # reinstall (2026-08-09), only visible now that with_retry propagates
+  # failure correctly (#1078): "network honeypot-llm declared as external,
+  # but could not be found", honeypot-dashboard never came up. --internal
+  # matches ghidra's own definition exactly, so when ghidra-start's compose
+  # run later reconciles this same network name it finds a config it
+  # already agrees with rather than a conflicting one.
+  docker network inspect honeypot-llm >/dev/null 2>&1 || docker network create honeypot-llm --internal
+
   docker volume inspect dionaea-lib >/dev/null 2>&1 || docker volume create dionaea-lib
   docker volume inspect yara-results >/dev/null 2>&1 || docker volume create yara-results
 
@@ -837,6 +852,25 @@ step_provision_events_poller_secrets() {
   KEYCLOAK_ADMIN_USERNAME="${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-admin}" \
   KEYCLOAK_ADMIN_PASSWORD="$(< "$secrets_dir/bootstrap-admin-password")" \
     "$REPO_DIR/keycloak/provision-events-poller.sh"
+}
+
+step_provision_dashboard_oidc_secret() {
+  # honeypot-dashboard is one of the generic STACK_DEFS stacks
+  # step_start_remaining_stacks already started (and it has no secret yet
+  # at that point, so it crash-loops on first boot) -- this step runs
+  # after that, once Keycloak is actually up, same as
+  # step_provision_events_poller_secrets right above. No need to also
+  # restart dashboard/dashboard-b here: both have restart: unless-stopped,
+  # so their own crash-restart loop picks up the freshly written secret
+  # within seconds.
+  local secrets_dir="/var/dockge/stacks/honeypot-keycloak/secrets"
+  [[ -f "$secrets_dir/bootstrap-admin-password" ]] || {
+    echo "no bootstrap-admin-password at $secrets_dir -- was provision-keycloak-secrets skipped?" >&2
+    return 1
+  }
+  KEYCLOAK_ADMIN_USERNAME="${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-admin}" \
+  KEYCLOAK_ADMIN_PASSWORD="$(< "$secrets_dir/bootstrap-admin-password")" \
+    "$REPO_DIR/keycloak/provision-dashboard-oidc-secret.sh"
 }
 
 step_auth_events_worker_start() {
@@ -1367,6 +1401,7 @@ run_step start-init            "Start honeypot-init, wait for one-shots" step_st
 run_step start-remaining       "Start remaining sensor/dashboard stacks" step_start_remaining_stacks
 
 run_step provision-events-poller-secrets "Grant auth-events-poller view-events + write its secret" step_provision_events_poller_secrets
+run_step provision-dashboard-oidc-secret "Write dashboard's OIDC client secret from Keycloak" step_provision_dashboard_oidc_secret
 run_step auth-events-worker-start "Start auth-events-worker" step_auth_events_worker_start
 
 run_step sshfs-install         "Install sshfs, place VPS key"        step_sshfs_install
