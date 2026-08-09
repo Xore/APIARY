@@ -2167,7 +2167,18 @@ a.metric:hover { border-color: var(--border-strong); background: var(--surface-2
 /* ── Overview header ────────────────────────────────────────────────────── */
 .overview-header {
   grid-column: 1 / -1;
-  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  /* The right column used to be a bare `auto` track. Grid sizes `auto`
+     tracks to their max-content (full unwrapped width) before handing
+     whatever's left to the `1fr` sibling -- so a long, wrappable
+     .live-panel string (.gen's text, white-space: normal) still claimed
+     its entire unwrapped width first, squeezing the left column to its
+     minmax(0, ...) floor of literally 0px in the gap between the 800px
+     stacking breakpoint and wherever both sides' natural widths actually
+     fit (confirmed live: getComputedStyle().gridTemplateColumns was
+     "0px 477px" at 820px). Capping the right column forces its own text
+     to wrap instead of stealing the left column's space.
+  */
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 40%);
   align-items: end; gap: 16px; margin-bottom: 20px;
 }
 /* .eyebrow was a near-duplicate of theme.css's .label-section (same size/

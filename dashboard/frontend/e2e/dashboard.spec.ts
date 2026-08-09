@@ -208,15 +208,6 @@ test.describe("dark/light responsive acceptance matrix", () => {
     for (const theme of ["dark", "light"] as const) {
       for (const route of routes) {
         test(`${theme} ${viewportName} ${route}`, async ({ page }) => {
-          // #1038: /reports' h1 collapses to zero width at exactly the
-          // tablet tier (820x1180) in both themes -- reproduces on real
-          // Xore/theme CSS (.overview-header's minmax(0, 1fr) column vs.
-          // .live-panel's unwrapped .gen text, in the gap between the
-          // 800px stacking breakpoint and where both columns' natural
-          // widths actually fit). The fix belongs in Xore/theme, not a
-          // local override of the vendored stylesheet -- tracked there,
-          // not fixed here.
-          test.fixme(viewportName === "tablet" && route === "/reports", "https://github.com/Xore/APIARY/issues/1038");
           await runLayoutChecks(page, route, viewportName, viewport, theme);
         });
       }
