@@ -127,14 +127,32 @@
   "webAuthnPolicyPasswordlessExtraOrigins": [],
   "roles": {
     "realm": [
-      {"name": "apiary-user", "description": "May sign in to APIARY"},
+      {
+        "name": "apiary-user",
+        "description": "May sign in to APIARY",
+        "composite": true,
+        "composites": {
+          "client": {
+            "apiary-dashboard": ["access"],
+            "kibana": ["access"],
+            "evebox": ["access"],
+            "arkime": ["access"],
+            "tanner": ["access"],
+            "revdeck": ["access"]
+          }
+        }
+      },
       {
         "name": "apiary-admin",
         "description": "May administer APIARY",
         "composite": true,
         "composites": {
+          "realm": ["apiary-user"],
           "client": {
-            "realm-management": ["manage-users", "view-users", "query-users"]
+            "realm-management": ["manage-users", "view-users", "query-users"],
+            "apiary-dashboard": ["admin"],
+            "dockge": ["admin"],
+            "traefik-dashboard": ["admin"]
           }
         }
       }
