@@ -200,16 +200,21 @@ func main() {
 	// mlAnomalyAcks as "acknowledgment disabled".
 	s.mlAnomalyAcks = newMLAnomalyAckManager(s.es)
 	s.intelligence = &intelligenceStore{path: getenv("INTELLIGENCE_STATE_FILE", "/state/intelligence.json"), es: s.es}
+	// #787: config/users are Elasticsearch-backed singleton documents (see
+	// settings_store_es.go) -- s.es nil (Elasticsearch not configured)
+	// leaves both permanently degraded/read-only, serving compiled
+	// defaults, the same "always usable" posture the old file-backed store
+	// had for a missing/corrupt file.
 	s.settings = newSettingsService(
-		getenv("DASHBOARD_CONFIG_FILE", "/state/dashboard-config.json"),
-		getenv("DASHBOARD_USERS_FILE", "/state/dashboard-users.json"),
+		s.es,
 		getenv("DASHBOARD_AUDIT_FILE", "/state/dashboard-audit.jsonl"),
 		getenv("DASHBOARD_CONFIG_HISTORY_FILE", "/state/dashboard-config-history.jsonl"),
 	)
-	// #475: generated PDF reports are Elasticsearch-only, no local fallback
-	// -- s.es is nil (Elasticsearch not configured) leaves definitions CRUD
-	// working but generated-report methods return errReportsStorageUnavailable.
-	s.reports = newReportStore(getenv("DASHBOARD_REPORTS_FILE", "/state/reports.json"), s.es)
+	// #475/#787: report definitions and generated PDF reports are both
+	// Elasticsearch-only now, no local fallback -- s.es nil leaves
+	// definitions CRUD degraded/read-only (serving compiled defaults) and
+	// generated-report methods return errReportsStorageUnavailable.
+	s.reports = newReportStore(s.es)
 	// #405 follow-up: run/recipe orchestration state is Elasticsearch-only,
 	// no local fallback -- see workbench_domain.go's package comment on
 	// workbenchService for why a run's document id being its own

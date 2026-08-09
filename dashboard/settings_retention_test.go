@@ -140,13 +140,16 @@ func TestAccountPaneRendersDeepLinks(t *testing.T) {
 }
 
 // newSettingsAPITestStoreWithoutIdentity builds a settings store against the
-// currently configured (rejecting) introspection backend.
+// currently configured (rejecting) introspection backend. Every caller of
+// this helper only exercises auth-rejection paths (requests denied before
+// ever reaching the settings store itself), so a nil Elasticsearch client
+// is sufficient -- unlike newSettingsAPITestStore, which needs a real
+// backing store for actual CRUD.
 func newSettingsAPITestStoreWithoutIdentity(t *testing.T) *store {
 	t.Helper()
 	dir := t.TempDir()
 	return &store{settings: newSettingsService(
-		filepath.Join(dir, "config.json"),
-		filepath.Join(dir, "users.json"),
+		nil,
 		filepath.Join(dir, "audit.jsonl"),
 		filepath.Join(dir, "history.jsonl"),
 	)}

@@ -90,8 +90,14 @@ func TestServeSettingsESStorageStatsReturnsSummary(t *testing.T) {
 
 func TestServeSettingsESStorageStatsHandlesDisabledES(t *testing.T) {
 	s := newSettingsAPITestStore(t, "admin")
-	// s.es stays nil -- Elasticsearch integration disabled, same convention
-	// serveSettingsServices' "adapter unavailable" branch uses.
+	// #787: newSettingsAPITestStore now always wires a real (test-server-
+	// backed) s.es, since config/users are themselves Elasticsearch-backed.
+	// That's a separate field from settings.config/settings.users' own
+	// independently captured client references, so nil-ing it back out here
+	// still correctly simulates "Elasticsearch integration disabled" for
+	// this handler specifically, same convention serveSettingsServices'
+	// "adapter unavailable" branch uses -- without breaking settings CRUD.
+	s.es = nil
 	response := httptest.NewRecorder()
 	s.serveSettingsESStorageStats(response, settingsRequest(t, http.MethodGet, "/api/settings/es-storage-stats", false, ""))
 	if response.Code != http.StatusServiceUnavailable {

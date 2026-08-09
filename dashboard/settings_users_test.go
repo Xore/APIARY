@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"net/http/httptest"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -20,7 +21,10 @@ func newTestUserStore(t *testing.T) *userStore {
 	t.Helper()
 	dir := t.TempDir()
 	audit := newAuditLogger(filepath.Join(dir, "audit.jsonl"))
-	return newUserStore(filepath.Join(dir, "users.json"), audit)
+	esStore := newMemESDocStore()
+	esSrv := httptest.NewServer(esStore.handler())
+	t.Cleanup(esSrv.Close)
+	return newUserStore(newESClient(esSrv.URL, ""), audit)
 }
 
 // TestUpsertSeedsSiteDefaultTimezone (#282): a brand new subject's own
@@ -131,8 +135,11 @@ func TestPreferencesRoundTripAndIsolation(t *testing.T) {
 		t.Fatalf("alice's write leaked into bob's preferences: %+v", bobPrefs)
 	}
 
-	// Persistence across a store reload.
-	reloaded := newUserStore(users.inner.path, users.audit)
+	// Persistence across a store reload -- a second, independent store
+	// against the same Elasticsearch backend, standing in for the
+	// dashboard's second replica (#787): the write must be visible there
+	// too, not just in this store's own in-memory cache.
+	reloaded := newUserStore(users.inner.es, users.audit)
 	reloadedPrefs, _, ok := reloaded.Preferences(alice.Subject)
 	if !ok || reloadedPrefs.Theme != "dark" {
 		t.Fatal("preferences did not survive a restart")

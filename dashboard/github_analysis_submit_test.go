@@ -275,8 +275,7 @@ func TestGitHubAnalysisSubmitAudits(t *testing.T) {
 	s := &store{
 		payloadDirs: []string{payloads},
 		settings: newSettingsService(
-			filepath.Join(dir, "config.json"),
-			filepath.Join(dir, "users.json"),
+			nil, // no Elasticsearch needed -- this test only exercises audit logging
 			filepath.Join(dir, "audit.jsonl"),
 			filepath.Join(dir, "history.jsonl"),
 		),

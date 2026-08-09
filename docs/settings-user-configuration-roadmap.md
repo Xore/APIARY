@@ -204,6 +204,22 @@ Those stay in protected environment/configuration files and deployment review.
 
 ## 5. Persistence and concurrency
 
+**Update (#787):** dashboard replicas were introduced (`dashboard`,
+`dashboard-b`), and the local-JSON-store design below turned out to have a
+real multi-replica gap the file-sharing itself didn't prevent: each
+replica's in-memory cache loaded its file once at startup and never
+reloaded it, so a write via one replica was invisible on the other until it
+restarted — confirmed live, this 404'd `/agent-campaigns` on every other
+request once an admin toggled a feature flag. Rather than migrate to SQLite
+as originally planned below, config and users moved to Elasticsearch — the
+one backend both replicas already treat as shared source of truth (see
+`docs/settings-operations.md` and `dashboard/settings_store_es.go`).
+Audit/history stayed local files (they already did a fresh disk read per
+request against the shared volume, so they never had this bug). The
+schema-version/strict-decode/revision/ETag/optimistic-concurrency
+properties listed below are all preserved by the Elasticsearch-backed
+replacement; only the physical storage and the reload behavior changed.
+
 Use two atomic JSON stores on the existing `/state` volume for the first
 release:
 
@@ -213,7 +229,7 @@ release:
 /state/dashboard-audit.jsonl
 ```
 
-This matches the current single-instance deployment and existing atomic
+This matched the original single-instance deployment and existing atomic
 write/rename patterns. Each store has:
 
 - a schema version;
@@ -226,9 +242,9 @@ write/rename patterns. Each store has:
 - optimistic concurrency through `If-Match`;
 - startup validation and last-known-good recovery.
 
-If dashboard replicas are introduced, migrate these stores to SQLite or a
-transactional service before scaling. Do not pretend a shared JSON volume is a
-multi-writer database.
+(As of #787, this describes the original design for `dashboard-users.json`/
+`dashboard-config.json` specifically; `dashboard-audit.jsonl` is still built
+this way today. See the update note above for what replaced the other two.)
 
 Configuration layers resolve in this order:
 
@@ -461,7 +477,8 @@ operational follow-up run on the deployed stack, not a code artifact.
 - live Docker/Compose/environment mutation;
 - arbitrary map tile URLs;
 - automatic service restarts after saving;
-- multi-replica JSON persistence.
+- ~~multi-replica JSON persistence~~ (resolved by #787: config/users moved to
+  Elasticsearch instead of staying JSON files, see section 5's update note).
 
 These exclusions keep the first release useful without turning a presentation
 settings page into a remote administration or code-execution surface.

@@ -62,16 +62,16 @@ type usersDocument struct {
 	Users []userProjection `json:"users"`
 }
 
-// userStore wraps the generic atomic store with projection- and
-// preference-specific semantics.
+// userStore wraps the generic Elasticsearch-backed store with projection-
+// and preference-specific semantics.
 type userStore struct {
-	inner *atomicSettingsStore[usersDocument]
+	inner *esSettingsStore[usersDocument]
 	audit *auditLogger
 }
 
-func newUserStore(path string, audit *auditLogger) *userStore {
+func newUserStore(es *esClient, audit *auditLogger) *userStore {
 	return &userStore{
-		inner: newAtomicSettingsStore(path, usersDocument{}, validateUsersDocument),
+		inner: newESSettingsStore(es, dashboardUsersIndex, dashboardUsersDocID, usersDocument{}, validateUsersDocument),
 		audit: audit,
 	}
 }
@@ -231,7 +231,7 @@ func (u *userStore) Projections() []userProjection {
 //
 // #156: the conflict check happens here, against this subject's own
 // preferences revision, rather than being delegated to the generic
-// atomicSettingsStore's whole-document ifMatch check (so ifMatch="" is
+// esSettingsStore's whole-document ifMatch check (so ifMatch="" is
 // passed through below). The whole document holds every subject's
 // projection; gating on its ETag meant any other subject's write -- or this
 // subject's own Upsert-driven last_seen_at bump on a later, unrelated
@@ -302,8 +302,19 @@ func (u *userStore) ResetPreferences(actor authenticatedIdentity, ifMatch, reque
 // settingsService bundles the three stores owned by the dashboard. It is
 // created once at startup; routes for the settings APIs attach to it in
 // Milestones C and E.
+// dashboardConfigIndex/dashboardConfigDocID and dashboardUsersIndex/
+// dashboardUsersDocID name the singleton Elasticsearch documents these two
+// stores persist to -- one fixed id per index, not a natural per-entity
+// key, since each store holds exactly one shared document.
+const (
+	dashboardConfigIndex = "dashboard-config-v1"
+	dashboardConfigDocID = "config"
+	dashboardUsersIndex  = "dashboard-users-v1"
+	dashboardUsersDocID  = "users"
+)
+
 type settingsService struct {
-	config  *atomicSettingsStore[dashboardConfig]
+	config  *esSettingsStore[dashboardConfig]
 	users   *userStore
 	audit   *auditLogger
 	history *configHistory
@@ -315,24 +326,20 @@ type settingsService struct {
 	retentionRemoved   atomic.Uint64
 }
 
-func newSettingsService(configPath, usersPath, auditPath, historyPath string) *settingsService {
+func newSettingsService(es *esClient, auditPath, historyPath string) *settingsService {
 	audit := newAuditLogger(auditPath)
 	service := &settingsService{
-		config:  newAtomicSettingsStore(configPath, defaultDashboardConfig(), validateConfig),
-		users:   newUserStore(usersPath, audit),
+		config:  newESSettingsStore(es, dashboardConfigIndex, dashboardConfigDocID, defaultDashboardConfig(), validateConfig),
+		users:   newUserStore(es, audit),
 		audit:   audit,
 		history: newConfigHistory(historyPath),
 		writes:  newWriteLimiter(),
 	}
 	if service.config.Degraded() {
-		fmt.Printf("dashboard: settings config store at %s unreadable — serving defaults read-only\n", configPath)
-	} else if service.config.Recovered() {
-		fmt.Printf("dashboard: settings config store recovered from backup generation at %s\n", configPath)
+		fmt.Printf("dashboard: settings config store (%s/%s) unreachable — serving defaults read-only\n", dashboardConfigIndex, dashboardConfigDocID)
 	}
 	if service.users.inner.Degraded() {
-		fmt.Printf("dashboard: settings users store at %s unreadable — serving defaults read-only\n", usersPath)
-	} else if service.users.inner.Recovered() {
-		fmt.Printf("dashboard: settings users store recovered from backup generation at %s\n", usersPath)
+		fmt.Printf("dashboard: settings users store (%s/%s) unreachable — serving defaults read-only\n", dashboardUsersIndex, dashboardUsersDocID)
 	}
 	// Seed the configuration history with the loaded revision so the initial
 	// state stays rollback-able even before the first administrator write.

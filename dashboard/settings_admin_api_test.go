@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -138,7 +137,7 @@ func TestPatchConfigAppliesReportPresetOverrides(t *testing.T) {
 	esStore := newMemESDocStore()
 	esSrv := httptest.NewServer(esStore.handler())
 	t.Cleanup(esSrv.Close)
-	s.reports = newReportStore(filepath.Join(t.TempDir(), "reports.json"), newESClient(esSrv.URL, ""))
+	s.reports = newReportStore(newESClient(esSrv.URL, ""))
 	_, etag := getConfig(t, s)
 	request := settingsRequest(t, http.MethodPatch, "/api/settings/config", true,
 		`{"presentation":{"report_presets":{"executive":{"name":"Board summary","description":"Custom copy"}}}}`)
