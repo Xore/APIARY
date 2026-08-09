@@ -75,11 +75,16 @@ func secHeaders(w http.ResponseWriter, nonceValue string) {
 	w.Header().Set("Content-Security-Policy",
 		"default-src 'self'; "+
 			"script-src 'self' 'nonce-"+nonceValue+"'; "+
-			"style-src 'self' 'nonce-"+nonceValue+"'; "+
+			// #1020: the vendored Xore/theme's theme.css @imports Google
+			// Fonts (Fira Sans/Space Grotesk/Fira Code); its own docs/CSP.md
+			// documents fonts.googleapis.com (style-src, for the @import
+			// itself) and fonts.gstatic.com (font-src, for the actual font
+			// files) as required for any consumer.
+			"style-src 'self' 'nonce-"+nonceValue+"' https://fonts.googleapis.com; "+
 			"img-src 'self' data: https://tile.openstreetmap.org; "+
 			connectSrc+"; "+
 			frameSrc+"; "+
-			"font-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+			"font-src 'self' https://fonts.gstatic.com; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")

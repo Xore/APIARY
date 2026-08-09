@@ -252,12 +252,3 @@ func TestDashboardTraefikRouteUsesNativeOIDCWithoutForwardAuth(t *testing.T) {
 		t.Fatalf("dashboard router does not delegate identity exclusively to native OIDC:\n%s", router)
 	}
 }
-
-func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
-}

@@ -460,3 +460,12 @@ func clearCookie(w http.ResponseWriter, name string) {
 	cookie.MaxAge = -1
 	http.SetCookie(w, cookie)
 }
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
