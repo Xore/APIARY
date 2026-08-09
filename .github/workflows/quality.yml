@@ -186,6 +186,31 @@ jobs:
           python -m pip install -r llm-worker/requirements.txt
           python -m unittest discover -s llm-worker/tests -v
           python llm-worker/worker.py --selftest
+      # ml-worker/, analysis/es-results-importer/, personas/, and
+      # services-adapter/ are all deployed by deploy.yml but had zero test
+      # coverage wired into any workflow -- 189 tests across 11 files
+      # (found while auditing #982's own CI gap; this is the same class of
+      # issue, just for four whole modules instead of two scripts).
+      # ml-worker's suite uses pytest specifically (parametrized fixtures),
+      # unlike every other Python test dir in this workflow, which is
+      # plain unittest -- pytest isn't a production dependency so it's
+      # installed here rather than added to ml-worker/requirements.txt.
+      - name: ml-worker anomaly pipeline contracts
+        shell: bash
+        run: |
+          python -m pip install -r ml-worker/requirements.txt pytest
+          python -m pytest ml-worker/tests/ -v
+      - name: es-results-importer chunked-upload and dedup contracts
+        shell: bash
+        run: |
+          python -m pip install -r analysis/es-results-importer/requirements.txt
+          python -m unittest discover -s analysis/es-results-importer/tests -v
+      - name: Persona application is idempotent
+        shell: bash
+        run: python -m unittest discover -s personas/tests -v
+      - name: services-adapter allowlist enforcement
+        shell: bash
+        run: python -m unittest discover -s services-adapter/tests -v
       - name: Sandbox guest string-cleaning filter (#530)
         shell: bash
         run: python3 sandbox/test_guest_clean_strings.py -v
