@@ -218,6 +218,15 @@ jobs:
       - name: Keycloak realm imports cleanly into a real Postgres
         shell: bash
         run: ./scripts/test-keycloak-realm-import.sh
+      # #977: proves the isolated oauth2-proxy gateway pattern every
+      # protected app (Kibana/EveBox/Arkime/TANNER/RevDeck/Dockge/Traefik)
+      # uses against a real disposable Keycloak + real oauth2-proxy --
+      # unauthenticated redirect target, forged-callback rejection, role
+      # enforcement, upstream network isolation, and gateway-outage
+      # fail-closed behavior.
+      - name: oauth2-proxy gateway pattern is resilient
+        shell: bash
+        run: ./scripts/test-oauth2-proxy-gateway-resilience.sh
       - name: GitHub-analysis publisher stays dry-run by default
         shell: bash
         run: |
