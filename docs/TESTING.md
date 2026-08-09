@@ -131,6 +131,37 @@ fixed back into this document and the install scripts themselves.
      third-party dependency being swapped out (#245) or a features
      migration (#638's ES-artifact-storage series) can leave lying
      around if the old path isn't deleted in the same pass.
+   - **Keycloak (#1036, mandatory — makes #787 impossible to close until
+     this passes, not an optional extra check):** a fresh install must
+     stage the reviewed realm and theme, provision new host-local
+     secrets, and bring up healthy Keycloak/PostgreSQL/every oauth2-proxy
+     gateway with no undocumented manual fix. Then, against that fresh
+     install:
+     - First-login password replacement and mandatory TOTP enrollment for
+       a fresh administrator account and a fresh normal-user account.
+     - Native dashboard OIDC: login, token refresh, account/settings
+       access, admin-role enforcement, logout, a disabled/revoked
+       session losing access, and fail-closed behavior when the identity
+       provider is unreachable.
+     - Every gateway-fronted application (Kibana, EveBox, Arkime, TANNER,
+       RevDeck, Dockge, the Traefik dashboard): authorized access reaches
+       real content, wrong-role denial, logout, callback/deep-link
+       behavior, and direct-upstream bypass denial (confirm the
+       isolated `oidc-<app>` Docker network still has no other member).
+     - The Keycloak admin console itself requires Keycloak
+       authentication and MFA; frame/header exceptions stay restricted
+       to the exact compatibility endpoints that need them
+       (`keycloak-embedded-frames`/`security-headers-keycloak-frame` in
+       `vps/traefik/dynamic.yml`), not widened generally.
+     - No legacy auth runtime, route, middleware, identity-header trust,
+       secret, or fallback survives the install: grep the fresh
+       deployment for `AUTH_INTROSPECTION_*`, `forward-auth`,
+       `strip-auth-identity`, `xore_sso`, and `X-Auth-Role` and confirm
+       zero hits (this repo's own working tree already has zero --
+       verified 2026-08-09 -- the check here is that a *deployed*, fresh
+       install matches).
+     - Retain redacted evidence (pass/fail results plus browser
+       traces/screenshots/logs where applicable) and link it from #787.
 5. **Fix forward, and track it:** any gap found (a missing install step,
    an undocumented manual fix, a firewall hole) gets fixed in the actual
    install scripts/compose files/docs during the same pass where it's
@@ -142,7 +173,9 @@ fixed back into this document and the install scripts themselves.
    inline needs somewhere to live until it is.
 
 **Pass criterion:** every item in step 4 confirmed against the fresh
-install, with no unresolved gap left over from step 5.
+install, with no unresolved gap left over from step 5 — including the
+Keycloak checklist above, which is not optional (#1036): #787 cannot
+close, and 0.1.0 cannot cut, until it passes.
 
 ## Adding a new test
 
