@@ -42,6 +42,38 @@ func TestRebuildKeepsEverySensorNotJustTop30(t *testing.T) {
 	}
 }
 
+// #1100 follow-up: classify.go's shared "tanner_report.json + http-honeypot"
+// block deliberately renames every http-honeypot event's own .sensor to
+// "http" (matching EXPECTED_SENSORS' own naming), but the raw Elasticsearch
+// event.sensor field -- what the Sensors card's bucket key actually is --
+// still says "http-honeypot". A card link built straight from that bucket
+// key filtered against a name no event ever carries, always finding zero.
+// Confirmed live (2026-08-09) before this fix.
+func TestSensorCardLinksHTTPHoneypotToItsClassifiedName(t *testing.T) {
+	var resp esOverviewAggResponse
+	resp.Aggregations.Sensors.Buckets = []esSensorBucket{
+		{Key: "http-honeypot", DocCount: 30},
+		{Key: "cowrie", DocCount: 5},
+	}
+
+	esSrv := httptest.NewServer(esOverviewStub(t, resp))
+	defer esSrv.Close()
+	s := &store{dir: t.TempDir(), es: newESClient(esSrv.URL, "")}
+	s.rebuild()
+
+	snap := s.get()
+	for _, row := range snap.Sensors {
+		if row.Name != "http-honeypot" {
+			continue
+		}
+		if row.Link != "/events?sensor=http" {
+			t.Fatalf("http-honeypot sensor row links to %q, want /events?sensor=http (its actual classify() name)", row.Link)
+		}
+		return
+	}
+	t.Fatalf("http-honeypot row missing from snap.Sensors: %+v", snap.Sensors)
+}
+
 func TestSensorCardHasScrollWrapperAndCountIndicator(t *testing.T) {
 	// .card__scroll itself (max-height + overflow-y) lives in the vendored
 	// theme.css -- "Vendored Xore/theme is in sync" already guards that

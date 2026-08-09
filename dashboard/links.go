@@ -9,6 +9,22 @@ import (
 
 func eventsURL(v url.Values) string { return "/events?" + v.Encode() }
 
+// eventsSensorName maps a raw Elasticsearch event.sensor value to the name
+// classify() actually assigns the resulting event's own .sensor field to --
+// the two differ for http-honeypot specifically (classify.go's shared
+// "tanner_report.json + http-honeypot" block folds it into "http", matching
+// EXPECTED_SENSORS' own naming), so a link built straight from an ES bucket
+// key must go through this or /events?sensor=<raw ES name> filters against a
+// name no event ever actually carries. Confirmed live (2026-08-09): the raw
+// "http-honeypot" bucket always filtered to zero events; "http" found the
+// real ones.
+func eventsSensorName(esSensor string) string {
+	if esSensor == "http-honeypot" {
+		return "http"
+	}
+	return esSensor
+}
+
 // investigationBase resolves where one external investigation tool lives.
 //
 // The explicit per-tool variable wins, so a path-routed deployment

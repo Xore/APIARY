@@ -356,7 +356,19 @@ func (s *store) rebuild() {
 				Name: sensor.Key, Count: sensor.Count,
 				Ago:   ago(esOverviewResult.SensorLastSeen[sensor.Key]),
 				State: feedState(esOverviewResult.SensorLastSeen[sensor.Key], now),
-				Link:  eventsURL(url.Values{"sensor": {sensor.Key}}),
+				// classify() (below, the "tanner_report.json + http-honeypot"
+				// block) deliberately renames every http-honeypot event's own
+				// .sensor to "http" -- EXPECTED_SENSORS agrees ("http", not
+				// "http-honeypot"). event.sensor in Elasticsearch carries the
+				// raw, un-renamed value from the ingest pipeline though, so a
+				// card built straight from ES buckets links to the name
+				// classify() never actually produces -- confirmed live
+				// (2026-08-09): filtering by the literal ES bucket key
+				// "http-honeypot" always found zero events, filtering by
+				// "http" found the real ones. Match the link to what
+				// classify() actually names these events, not the raw
+				// ingest-side field.
+				Link: eventsURL(url.Values{"sensor": {eventsSensorName(sensor.Key)}}),
 			})
 		}
 		snap.Protocols = linkRows(esOverviewResult.Protocols, "proto")
