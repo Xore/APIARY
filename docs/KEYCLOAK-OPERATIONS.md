@@ -255,11 +255,21 @@ upgrade:
 6. A wrong-role user is denied.
 7. The admin console loads without HTTP Basic and requires Keycloak login.
 8. First login requires a password replacement and TOTP.
-9. `login-status-iframe.html/init` returns `204` and `X-Frame-Options:
-   SAMEORIGIN` (not `DENY`).
+9. `/realms/apiary/protocol/openid-connect/login-status-iframe.html/init`
+   **and** `/realms/master/...` (any realm, not just `apiary`) both return
+   `204` and `X-Frame-Options: SAMEORIGIN` (not `DENY`) -- #1028 found the
+   `master`-realm case broken (bootstrap-admin session) after only testing
+   `apiary`.
 10. Ordinary login/account pages still return X-Frame-Options `DENY`.
-11. Each oauth2-proxy container is healthy and has no configuration error.
-12. Direct access to each protected upstream is unreachable from other public
+11. Log into the admin console fully (not just the initial page load) and
+    confirm no `429` in the browser console -- specifically load a page with
+    many asset chunks (e.g. Clients or a Dashboard widget) and open the
+    Account Console's Device Activity tab. #1028 found both
+    `/resources/<fingerprint>/admin/...` assets and `/realms/<realm>/
+    account/...` API calls independently falling through to the tighter
+    login/token rate limit.
+12. Each oauth2-proxy container is healthy and has no configuration error.
+13. Direct access to each protected upstream is unreachable from other public
     routers and Docker networks.
 
 Useful checks:
@@ -312,8 +322,9 @@ sudo KEYCLOAK_RESTORE_CONFIRM=restore-keycloak-database \
 
 | Symptom | Cause | Resolution |
 |---|---|---|
-| Admin assets return `429` | Admin burst limit is too small | Keep BasicAuth absent and use the reviewed browser-sized admin limiter. |
-| Browser reports X-Frame-Options `DENY` for the issuer | A Keycloak compatibility frame missed its path-specific router | Check both embedded-frame paths and their CSP; do not weaken other routes. |
+| Admin console assets return `429` while the console shell itself loads | The admin theme's JS bundle loads from `/resources/<build-fingerprint>/admin/keycloak.v2/assets/...`, not `/admin` itself -- `/admin` is only the SPA shell. A rate-limit router scoped to `PathPrefix(/admin)` alone misses it and it falls through to the tighter login/token limit. Caught live (#1028). | `keycloak-admin-console`'s rule must also match `PathRegexp(^/resources/[^/]+/admin/)`, not just `/admin`. |
+| Account Console (Device Activity, Sessions, etc.) returns `429` | `/realms/<realm>/account/...` REST calls are authenticated interactive SPA traffic, same as the admin console, but aren't covered by the admin-only rate-limit router. Caught live (#1028). | Route `PathRegexp(^/realms/[^/]+/account)` through the same looser rate limit (`keycloak-account-console` router). |
+| Browser reports X-Frame-Options `DENY` (or "Timeout when waiting for 3rd party check iframe message") anywhere in Keycloak's own UI | `keycloak-embedded-frames`'s path rule is scoped to a single realm | Match `/realms/[^/]+/protocol/openid-connect/...` (any realm) via `PathRegexp`, not a hardcoded realm name -- the admin console's 3rd-party cookie check runs against whichever realm the current session is in, including `master` while still on the bootstrap-admin login (before a named realm admin exists). Caught live (#1028): the original rule only matched the `apiary` realm and never covered `master`. |
 | Endless HTTP password prompts | BasicAuth conflicts with Keycloak Bearer calls | Remove BasicAuth and its htpasswd mount; use Keycloak login + MFA. |
 | Password update returns internal error | Unsupported recovery-code required action was imported | Rebuild from the validated realm without that action; do not patch database state. |
 | All gateways restart with secret read errors | UID 65532 cannot traverse/read host secret paths | Use `root:65532`, directory `0750`, files `0440`. |
