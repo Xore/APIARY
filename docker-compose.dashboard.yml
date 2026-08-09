@@ -154,7 +154,14 @@ services:
     # making Docker reject "mode=0700" as a non-absolute mount path.
     tmpfs: ["/data:size=16m,mode=0700"]
     security_opt: [no-new-privileges:true]
+    # #1026: the official image's entrypoint starts as root, chowns /data to
+    # its own unprivileged user, then execs the server as that user --
+    # cap_drop: [ALL] alone made the chown itself fail ("Operation not
+    # permitted") and the container crash-looped before ever reaching
+    # valkey-server. CHOWN/SETUID/SETGID restore exactly what that one-time
+    # startup dance needs; valkey-server itself never uses them once running.
     cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID]
     deploy:
       resources:
         limits: {cpus: "0.25", memory: 160M}
