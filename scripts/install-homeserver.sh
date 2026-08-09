@@ -169,7 +169,7 @@ fi
 # shellcheck disable=SC1090
 source "$CONFIG_FILE"
 
-for var in INSTALL_HOSTNAME GIT_REPO_URL GIT_REF REPO_DIR HOME_WG_ADDRESS \
+for var in GIT_REPO_URL GIT_REF REPO_DIR HOME_WG_ADDRESS \
            VPS_WG_ADDRESS VPS_WG_ENDPOINT VPS_WG_PUBLIC_KEY \
            VPS_SSH_HOST VPS_SSH_PORT VPS_SSH_USER VPS_SSH_KEY ENABLE_GPU_STACK \
            INSTALL_TIMEZONE BACKUP_HOST BACKUP_HOST_USER BACKUP_HOST_KEY BACKUP_HOST_PATH \
@@ -180,6 +180,17 @@ for var in INSTALL_HOSTNAME GIT_REPO_URL GIT_REF REPO_DIR HOME_WG_ADDRESS \
     exit 1
   fi
 done
+# INSTALL_HOSTNAME is intentionally excluded from the loop above and
+# allowed to be genuinely empty -- this file's own header comment (and
+# install-homeserver.conf.example's) already documented "leave empty to
+# keep whatever's already set" as supported, but nothing actually was:
+# the validation loop rejected an empty value outright, and even past
+# that, step_set_hostname unconditionally called `hostnamectl
+# set-hostname ""`, which errors rather than leaving the hostname alone.
+# Caught live (#787's actual homeserver reinstall, 2026-08-09) -- worked
+# around at the time by filling in the box's real current hostname
+# explicitly, but the documented empty-value behavior is real and worth
+# actually supporting, not just documenting.
 # HOME_WG_PRIVATE_KEY is intentionally allowed to be empty/absent — if the
 # original tunnel private key wasn't part of the backup (it wasn't captured
 # by the .env-only backup pass, see #518 comment history), step_wireguard_config
@@ -218,7 +229,7 @@ step_preflight_disks() {
 }
 
 step_set_hostname() {
-  hostnamectl set-hostname "$INSTALL_HOSTNAME"
+  [[ -n "${INSTALL_HOSTNAME:-}" ]] && hostnamectl set-hostname "$INSTALL_HOSTNAME"
   timedatectl set-timezone "$INSTALL_TIMEZONE"
 }
 
