@@ -37,6 +37,13 @@ x-oidc-gateway: &oidc-gateway
     OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
     OAUTH2_PROXY_PASS_ACCESS_TOKEN: "false"
     OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER: "false"
+    # Without this, /oauth2/sign_out only clears this gateway's own cookie --
+    # the user's Keycloak SSO session (KEYCLOAK_SESSION cookie on the auth
+    # host) stays alive, and the very next visit to this or any other
+    # gateway-fronted app silently re-authenticates via SSO with no
+    # login/MFA prompt. {id_token} is oauth2-proxy's own placeholder,
+    # substituted with the session's real ID token at logout time.
+    OAUTH2_PROXY_BACKEND_LOGOUT_URL: "${OIDC_ISSUER_URL:?set OIDC_ISSUER_URL in the VPS environment}/protocol/openid-connect/logout?id_token_hint={id_token}"
   healthcheck:
     test: ["CMD", "/bin/oauth2-proxy", "--version"]
     interval: 30s
