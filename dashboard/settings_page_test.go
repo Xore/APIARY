@@ -128,13 +128,13 @@ func TestSettingsControllerContract(t *testing.T) {
 		"/api/settings/me",             // load endpoint
 		"/api/settings/me/preferences", // save endpoint
 		"/api/settings/me/preferences/reset",
-		`"If-Match"`,                   // optimistic concurrency
-		"status === 409",               // conflict: reload latest
-		"status === 422",               // validation: field-named message
-		"status === 429",               // throttled
-		"/api/whoami",                  // read-only identity
-		"/_auth/logout",                // logout stays on the auth origin
-		"state.confirmCallback = null", // confirm executes exactly once
+		`"If-Match"`,                       // optimistic concurrency
+		"status === 409",                   // conflict: reload latest
+		"status === 422",                   // validation: field-named message
+		"status === 429",                   // throttled
+		"/api/whoami",                      // read-only identity
+		`actions.logout || "/auth/logout"`, // native RP-initiated logout
+		"state.confirmCallback = null",     // confirm executes exactly once
 		// Administration (Milestone E): validate → confirm → PATCH, env pins,
 		// staged honeypot thresholds, history/rollback, users, and audit.
 		"/api/settings/config",

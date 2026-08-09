@@ -179,18 +179,13 @@ func TestValidatedAuthAccountURLRejectsWithoutIntrospectionURL(t *testing.T) {
 	}
 }
 
-// TestWhoAmIExposesAuthAccountURLForUserAndAdmin proves the embedded settings
-// pane is offered identically to both roles: nothing in the whoami wiring or
-// validatedAuthAccountURL gates the account URL on role, so a plain user
-// cannot be left with a Settings item that silently 404s while an
-// administrator's works (issue #93).
-func TestWhoAmIExposesAuthAccountURLForUserAndAdmin(t *testing.T) {
+func TestWhoAmIExposesKeycloakActionsWithoutFraming(t *testing.T) {
 	for _, role := range []string{"user", "admin"} {
 		t.Run(role, func(t *testing.T) {
 			configureIdentityTestBackend(t, role)
 			t.Setenv("OIDC_ISSUER_URL", "https://auth.honeypot.example/realms/apiary")
 			t.Setenv("AUTH_ACCOUNT_URL", "https://auth.honeypot.example/realms/apiary/account/")
-			s := &store{authAccountURL: validatedAuthAccountURL()}
+			s := &store{authAccountURL: validatedAuthAccountURL(), authAdminURL: "https://keycloak-admin.honeypot.example/admin/apiary/console/"}
 			if s.authAccountURL == "" {
 				t.Fatal("validatedAuthAccountURL rejected a well-formed, matching-origin URL")
 			}
@@ -209,36 +204,30 @@ func TestWhoAmIExposesAuthAccountURLForUserAndAdmin(t *testing.T) {
 			if identity.Role != role {
 				t.Fatalf("role = %q, want %q", identity.Role, role)
 			}
-			if identity.AuthAccountURL == "" {
-				t.Fatalf("whoami omitted auth_account_url for role %q", role)
+			if identity.AccountActions.ManageAccount == "" || identity.AccountActions.Logout != "/auth/logout" {
+				t.Fatalf("whoami omitted Keycloak account actions for role %q: %#v", role, identity.AccountActions)
+			}
+			if (role == "admin") != (identity.AccountActions.ManageUsers != "") {
+				t.Fatalf("manage_users role exposure mismatch for %q: %#v", role, identity.AccountActions)
 			}
 		})
 	}
 }
 
-// TestAccountMenuPostMessageContract pins the postMessage wire contract
-// hp-account.js relies on to learn a frame closed or expired (issue #93): it
-// must check both the message source window and its origin against the
-// configured account URL, and never key off event.data alone, before acting
-// on {source:"xore-auth-app", type:"close"|"expired"}.
-func TestAccountMenuPostMessageContract(t *testing.T) {
+func TestAccountMenuUsesTopLevelKeycloakActions(t *testing.T) {
 	data, err := staticAssets.ReadFile("static/hp-account.js")
 	if err != nil {
 		t.Fatal("static/hp-account.js must be embedded with the dashboard assets")
 	}
 	js := string(data)
-	for _, want := range []string{
-		`window.addEventListener("message"`,
-		"event.source !== frame.contentWindow",
-		"event.origin !== frameOrigin",
-		`"xore-auth-app"`,
-		`"close"`,
-		`"expired"`,
-		"closeSettings()",
-		"refreshIdentity()",
-	} {
+	for _, want := range []string{"/api/whoami", "identity.account_actions", "actions.manage_account", `actions.logout || "/auth/logout"`} {
 		if !strings.Contains(js, want) {
 			t.Fatalf("hp-account.js missing postMessage contract behavior %q", want)
+		}
+	}
+	for _, forbidden := range []string{"iframe", "xore-auth-app", "/_auth/logout", `addEventListener("message"`} {
+		if strings.Contains(js, forbidden) {
+			t.Fatalf("hp-account.js retains legacy embedded-auth contract %q", forbidden)
 		}
 	}
 }

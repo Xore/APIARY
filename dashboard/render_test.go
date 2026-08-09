@@ -62,17 +62,7 @@ func TestRenderPageSendsCSPAndPerRequestNonce(t *testing.T) {
 	}
 }
 
-// TestSecHeadersFrameSrcMatchesAuthAccountOrigin (#196 follow-up): the
-// dashboard's own CSP had no frame-src directive at all, so it fell back to
-// default-src 'self' -- which silently blocked the settings iframe from
-// ever framing auth-backend, no matter how permissive auth-backend's own
-// frame-ancestors was (a relaxed frame-ancestors is the *embedded* page's
-// opt-in for who may frame it; frame-src is the *embedding* page's own
-// opt-in for what it may frame -- only the dashboard can grant itself that).
-func TestSecHeadersFrameSrcMatchesAuthAccountOrigin(t *testing.T) {
-	defer func(prev string) { authFrameOrigin = prev }(authFrameOrigin)
-
-	authFrameOrigin = ""
+func TestSecHeadersNeverAllowKeycloakAccountFraming(t *testing.T) {
 	w := httptest.NewRecorder()
 	secHeaders(w, nonce())
 	csp := w.Header().Get("Content-Security-Policy")
@@ -80,33 +70,7 @@ func TestSecHeadersFrameSrcMatchesAuthAccountOrigin(t *testing.T) {
 		t.Fatalf("CSP must always send an explicit frame-src, got: %q", csp)
 	}
 	if strings.Contains(csp, "frame-src 'self' http") {
-		t.Fatalf("frame-src must not name an origin when AUTH_ACCOUNT_URL is unset: %q", csp)
-	}
-
-	setAuthFrameOrigin("https://auth.example.test/auth/app?pane=account")
-	w2 := httptest.NewRecorder()
-	secHeaders(w2, nonce())
-	csp2 := w2.Header().Get("Content-Security-Policy")
-	if !strings.Contains(csp2, "frame-src 'self' https://auth.example.test") {
-		t.Fatalf("frame-src must include the auth account origin (path/query stripped), got: %q", csp2)
-	}
-	if strings.Contains(csp2, "/auth/app") {
-		t.Fatalf("frame-src must be an origin, not the full account URL with its path: %q", csp2)
-	}
-}
-
-// TestSetAuthFrameOriginRejectsUnusableInput ensures a malformed value
-// (which validatedAuthAccountURL should already have filtered, but this
-// function has no way to know that from a bare string) leaves the CSP at
-// its safe default rather than emitting a broken frame-src directive.
-func TestSetAuthFrameOriginRejectsUnusableInput(t *testing.T) {
-	defer func(prev string) { authFrameOrigin = prev }(authFrameOrigin)
-	for _, bad := range []string{"", "not a url", "/relative/path", "https://"} {
-		authFrameOrigin = "sentinel"
-		setAuthFrameOrigin(bad)
-		if authFrameOrigin != "sentinel" {
-			t.Fatalf("setAuthFrameOrigin(%q) must leave authFrameOrigin untouched, got %q", bad, authFrameOrigin)
-		}
+		t.Fatalf("dashboard must not allow a cross-origin account iframe: %q", csp)
 	}
 }
 

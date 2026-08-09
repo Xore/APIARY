@@ -76,12 +76,12 @@ func main() {
 	}
 
 	authAccountURL := validatedAuthAccountURL()
-	setAuthFrameOrigin(authAccountURL)
 	setVNCBridgeOrigin(getenv("SANDBOX_VNC_BRIDGE_WS", ""))
 	s := &store{
 		dir:            getenv("LOG_DIR", "/logs"),
 		yaraFile:       os.Getenv("YARA_RESULTS_FILE"),
 		authAccountURL: authAccountURL,
+		authAdminURL:   validatedExternalURL("AUTH_ADMIN_URL"),
 	}
 	for _, name := range strings.Split(os.Getenv("EXPECTED_SENSORS"), ",") {
 		if name = strings.TrimSpace(name); name != "" && name != "portbridge" {
@@ -278,7 +278,7 @@ func main() {
 	}()
 
 	// Orphan-preference retention (Milestone F): accounts deleted or disabled
-	// in auth-backend stop producing activity immediately — live introspection
+	// in Keycloak stop producing activity immediately — token introspection
 	// already revokes their access on the very next request — and this sweep
 	// expires their stored dashboard preferences after the retention window.
 	retentionDays := 90

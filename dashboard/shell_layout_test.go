@@ -43,23 +43,23 @@ func TestModalRootDoesNotParticipateInAppShellGrid(t *testing.T) {
 	}
 }
 
-func TestAccountMenuAndSettingsPopup(t *testing.T) {
+func TestAccountMenuUsesTopLevelKeycloakAccount(t *testing.T) {
 	partial := mustReadUI("partials/dashboard.html")
 	for _, marker := range []string{
 		`data-hp-account-trigger`,
 		`data-hp-account-menu`,
 		`data-hp-account-settings`,
 		`data-hp-account-logout`,
-		`id="hp-settings-dialog"`,
-		`data-hp-settings-frame`,
 		`/static/hp-account.js`,
 	} {
 		if !strings.Contains(partial, marker) {
 			t.Fatalf("dashboard shell missing account-menu marker %q", marker)
 		}
 	}
-	if strings.Contains(partial, "dashboard operator") {
-		t.Fatal("sidebar profile must render only the auth-backend provided name, not a fabricated placeholder")
+	for _, forbidden := range []string{"dashboard operator", `data-hp-settings-frame`, `id="hp-settings-dialog"`} {
+		if strings.Contains(partial, forbidden) {
+			t.Fatalf("sidebar retains removed embedded-account marker %q", forbidden)
+		}
 	}
 	if _, err := staticAssets.ReadFile("static/hp-account.js"); err != nil {
 		t.Fatal("static/hp-account.js must be embedded with the dashboard assets")
@@ -68,7 +68,7 @@ func TestAccountMenuAndSettingsPopup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, marker := range []string{"button.sidebar__profile", ".hp-account-menu", ".hp-settings-frame"} {
+	for _, marker := range []string{"button.sidebar__profile", ".hp-account-menu"} {
 		if !bytes.Contains(css, []byte(marker)) {
 			t.Fatalf("dashboard CSS missing %s", marker)
 		}

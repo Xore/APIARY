@@ -40,12 +40,12 @@
       </header>
       <p class="hp-settings-status" role="status" aria-live="polite" data-hp-settings-status></p>
 
-      <!-- Account: read-only identity plus links into auth-backend. Credential
+      <!-- Account: read-only identity plus links into Keycloak. Credential
            mutation never happens on the dashboard origin (roadmap §6). -->
       <section class="hp-settings-pane" data-hp-pane="account" aria-label="Account">
         <section class="card hp-field" data-hp-search="account identity role capabilities profile">
           <div class="card__title">Profile</div>
-          <div class="card__desc">Resolved live from the auth backend on every request.</div>
+          <div class="card__desc">Resolved from the current, server-validated Keycloak session.</div>
           <div class="card__row">
             <div>
               <div class="card__label" data-hp-acct-name>&hellip;</div>
@@ -57,7 +57,7 @@
         </section>
         <section class="card hp-field" data-hp-search="account security password passkeys sessions two-factor authentication logout">
           <div class="card__title">Account &amp; security</div>
-          <div class="card__desc">Password, passkeys, two-factor authentication, sessions, and recovery email are managed on the auth origin — never through this dashboard. Each link opens the matching auth-backend pane in a new tab.</div>
+          <div class="card__desc">Password, passkeys, two-factor authentication, and sessions are managed by Keycloak. These protected pages open in a new tab and are never embedded.</div>
           <div class="card__row">
             <div><div class="card__label">Profile &amp; password</div><div class="card__value">Account details, password change, and recovery email.</div></div>
             <a class="btn btn-secondary btn-sm" href="#" target="_blank" rel="noopener noreferrer" hidden data-hp-acct-deep="account">Open</a>
@@ -67,7 +67,7 @@
             <a class="btn btn-secondary btn-sm" href="#" target="_blank" rel="noopener noreferrer" hidden data-hp-acct-deep="passkeys">Open</a>
           </div>
           <div class="card__row">
-            <div><div class="card__label">Privacy &amp; two-factor</div><div class="card__value">TOTP enrollment, backup codes, and privacy options.</div></div>
+            <div><div class="card__label">Two-factor authentication</div><div class="card__value">Manage authenticator and WebAuthn credentials.</div></div>
             <a class="btn btn-secondary btn-sm" href="#" target="_blank" rel="noopener noreferrer" hidden data-hp-acct-deep="privacy">Open</a>
           </div>
           <div class="card__row">
@@ -75,7 +75,7 @@
             <a class="btn btn-secondary btn-sm" href="#" target="_blank" rel="noopener noreferrer" hidden data-hp-acct-deep="sessions">Open</a>
           </div>
           <div class="card__row">
-            <div><div class="card__label">Security settings</div><div class="card__value">Opens the auth-backend account app landing pane in a new tab.</div></div>
+            <div><div class="card__label">Security settings</div><div class="card__value">Open the Keycloak Account Console in a new tab.</div></div>
             <a class="btn btn-secondary btn-sm" href="#" target="_blank" rel="noopener noreferrer" data-hp-acct-link>Manage account</a>
           </div>
           <div class="card__row">
@@ -612,14 +612,13 @@
       </section>
 
       <!-- Users: read-only projection of dashboard activity. Account
-           management stays in auth-backend; this pane never edits anyone. -->
+           management stays in Keycloak; this pane never edits anyone. -->
       <section class="hp-settings-pane" data-hp-pane="users" aria-label="Users" hidden>
         <section class="card hp-field" data-hp-search="users accounts activity role last seen">
           <div class="card__header">
             <div><h3>Projected dashboard users</h3><p class="card__meta">Diagnostic projection of who used the dashboard. Account management lives in the auth service.</p></div>
             <div class="hp-head-actions">
               <a class="btn btn-secondary btn-sm" href="#" target="_blank" rel="noopener noreferrer" data-hp-users-admin-link hidden>Manage users</a>
-              <a class="btn btn-ghost btn-sm" href="#" target="_blank" rel="noopener noreferrer" data-hp-users-audit-link hidden>Auth audit log</a>
             </div>
           </div>
           <div class="table-scroll"><table class="data-table">

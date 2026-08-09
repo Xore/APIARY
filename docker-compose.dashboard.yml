@@ -277,6 +277,7 @@ services:
       - OIDC_CLIENT_SECRET_FILE=/run/dashboard-secrets/oidc-client-secret
       - OIDC_SESSION_REDIS_URL=redis://oidc-sessions:6379/0
       - AUTH_ACCOUNT_URL=${AUTH_ACCOUNT_URL:-https://auth.example.invalid/realms/apiary/account/}
+      - AUTH_ADMIN_URL=${AUTH_ADMIN_URL:-https://keycloak-admin.example.invalid/admin/apiary/console/}
       - EXPECTED_SENSORS=cowrie,multipot,http,api-honeypot,dionaea,dnp3,dicompot,dns-honeypot,citrix-honeypot,cisco-asa-honeypot,rdp-honeypot,conpot,conpot-s7-1200,conpot-s7-1500,conpot-iec104,conpot-guardian,conpot-kamstrup,tanner,suricata,endlessh
       - ALERT_WEBHOOK_URL=${HONEYPOT_ALERT_WEBHOOK_URL:-}
       - TZ=Europe/Berlin
@@ -406,6 +407,7 @@ services:
       - OIDC_CLIENT_SECRET_FILE=/run/dashboard-secrets/oidc-client-secret
       - OIDC_SESSION_REDIS_URL=redis://oidc-sessions:6379/0
       - AUTH_ACCOUNT_URL=${AUTH_ACCOUNT_URL:-https://auth.example.invalid/realms/apiary/account/}
+      - AUTH_ADMIN_URL=${AUTH_ADMIN_URL:-https://keycloak-admin.example.invalid/admin/apiary/console/}
       - EXPECTED_SENSORS=cowrie,multipot,http,api-honeypot,dionaea,dnp3,dicompot,dns-honeypot,citrix-honeypot,cisco-asa-honeypot,rdp-honeypot,conpot,conpot-s7-1200,conpot-s7-1500,conpot-iec104,conpot-guardian,conpot-kamstrup,tanner,suricata,endlessh
       - ALERT_WEBHOOK_URL=${HONEYPOT_ALERT_WEBHOOK_URL:-}
       - TZ=Europe/Berlin

@@ -30,8 +30,17 @@ type authenticatedIdentity struct {
 
 type whoAmIResponse struct {
 	authenticatedIdentity
-	Capabilities   []string `json:"capabilities"`
-	AuthAccountURL string   `json:"auth_account_url,omitempty"`
+	Capabilities   []string       `json:"capabilities"`
+	AccountActions accountActions `json:"account_actions"`
+}
+
+type accountActions struct {
+	ManageAccount string `json:"manage_account,omitempty"`
+	Profile       string `json:"profile,omitempty"`
+	Security      string `json:"security,omitempty"`
+	Sessions      string `json:"sessions,omitempty"`
+	Logout        string `json:"logout"`
+	ManageUsers   string `json:"manage_users,omitempty"`
 }
 
 func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
@@ -94,8 +103,36 @@ func (s *store) serveWhoAmI(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(whoAmIResponse{
 		authenticatedIdentity: identity,
 		Capabilities:          capabilitiesFor(identity.Role),
-		AuthAccountURL:        s.authAccountURL,
+		AccountActions:        keycloakAccountActions(s.authAccountURL, identity.Role, s.authAdminURL),
 	})
+}
+
+func keycloakAccountActions(accountURL, role, adminURL string) accountActions {
+	actions := accountActions{Logout: "/auth/logout"}
+	if accountURL == "" {
+		return actions
+	}
+	base := strings.TrimSuffix(accountURL, "/") + "/"
+	actions.ManageAccount = base
+	actions.Profile = base + "#/personal-info"
+	actions.Security = base + "#/security/signingin"
+	actions.Sessions = base + "#/security/device-activity"
+	if role == "admin" && adminURL != "" {
+		actions.ManageUsers = strings.TrimSuffix(adminURL, "/") + "/#/apiary/users"
+	}
+	return actions
+}
+
+func validatedExternalURL(name string) string {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return ""
+	}
+	if err := validateHTTPSURL(raw); err != nil {
+		fmt.Fprintf(os.Stderr, "dashboard: %s is not a valid HTTPS URL; the related account action will stay hidden\n", name)
+		return ""
+	}
+	return raw
 }
 
 func validatedAuthAccountURL() string {

@@ -92,11 +92,8 @@ func TestRevokedOIDCSessionLosesAccessImmediately(t *testing.T) {
 	}
 }
 
-// TestDashboardNeverProxiesCredentialActions pins the Milestone F credential
-// boundary: the dashboard's settings surface links to the auth origin but
-// never calls its credential-mutation endpoints. The only /_auth/ reference
-// allowed anywhere in the dashboard's client code and shell is the logout
-// link.
+// TestDashboardNeverProxiesCredentialActions pins the Keycloak credential
+// boundary: the dashboard links out and never embeds or proxies credentials.
 func TestDashboardNeverProxiesCredentialActions(t *testing.T) {
 	sources := map[string]string{
 		"static/hp-settings.js":   mustReadStatic(t, "static/hp-settings.js"),
@@ -104,24 +101,16 @@ func TestDashboardNeverProxiesCredentialActions(t *testing.T) {
 		"partials/dashboard.html": mustReadUI("partials/dashboard.html"),
 	}
 	for name, src := range sources {
-		parts := strings.Split(src, "/_auth/")
-		for _, ref := range parts[1:] { // parts[0] precedes the first reference
-			endpoint, _, _ := strings.Cut(ref, `"`)
-			endpoint, _, _ = strings.Cut(endpoint, `'`)
-			endpoint, _, _ = strings.Cut(endpoint, " ")
-			if endpoint != "logout" {
-				t.Fatalf("%s references /_auth/%s — credential actions must never traverse the dashboard", name, endpoint)
+		for _, forbidden := range []string{"/_auth/", "xore-auth-app", "data-hp-settings-frame"} {
+			if strings.Contains(src, forbidden) {
+				t.Fatalf("%s retains legacy credential integration %q", name, forbidden)
 			}
 		}
 	}
-	// Deep links are built through the auth app's pane contract only.
 	js := sources["static/hp-settings.js"]
-	if !strings.Contains(js, `searchParams.set("pane"`) {
-		t.Fatal("deep links must target the auth app pane contract")
-	}
-	for _, pane := range []string{`"admin-users"`, `"admin-logs"`} {
-		if !strings.Contains(js, pane) {
-			t.Fatalf("admin deep link pane %s missing from hp-settings.js", pane)
+	for _, action := range []string{"actions.profile", "actions.security", "actions.sessions", "account_actions?.manage_users"} {
+		if !strings.Contains(js, action) {
+			t.Fatalf("Keycloak account action %s missing", action)
 		}
 	}
 }
@@ -135,9 +124,8 @@ func mustReadStatic(t *testing.T, name string) string {
 	return string(data)
 }
 
-// TestAccountPaneRendersDeepLinks asserts the account pane carries the stable
-// deep links into the auth app (Milestone F step 1), hidden until identity
-// resolves the account URL.
+// TestAccountPaneRendersDeepLinks asserts the account pane carries server-
+// supplied Keycloak action slots, hidden until identity resolves them.
 func TestAccountPaneRendersDeepLinks(t *testing.T) {
 	html := renderSettings(t, false)
 	for _, pane := range []string{"account", "passkeys", "privacy", "sessions"} {
@@ -146,8 +134,8 @@ func TestAccountPaneRendersDeepLinks(t *testing.T) {
 		}
 	}
 	admin := renderSettings(t, true)
-	if !strings.Contains(admin, `data-hp-users-audit-link`) {
-		t.Fatal("admin users pane must deep-link to the auth audit log")
+	if !strings.Contains(admin, `data-hp-users-admin-link`) {
+		t.Fatal("admin users pane must expose the server-supplied Keycloak users link")
 	}
 }
 
