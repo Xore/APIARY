@@ -3,7 +3,13 @@
 Status: accepted Phase 0 decision record for #976 and epic #986.
 
 Implementation and operations are documented in
-[`KEYCLOAK-OPERATIONS.md`](KEYCLOAK-OPERATIONS.md).
+[`KEYCLOAK-OPERATIONS.md`](KEYCLOAK-OPERATIONS.md). `Xore/auth-backend` owns
+exactly the presentation-only `themes/apiary` Keycloak theme, checked out
+read-only into the APIARY deployment at build/install time -- see
+[`Xore/auth-backend#96`](https://github.com/Xore/auth-backend/issues/96) (that
+repo's own epic) and [`Xore/auth-backend#91`](https://github.com/Xore/auth-backend/issues/91)
+(the theme build itself). APIARY owns every other row in the matrix below,
+including Keycloak's own deployment, realm, and routing.
 
 ## Fixed architecture
 

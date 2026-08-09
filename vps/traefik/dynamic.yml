@@ -302,8 +302,10 @@ http:
       # #1026: routes directly to the dashboard's own native OIDC runtime.
       # No proxy identity headers -- the dashboard validates tokens and owns
       # its session itself (docs/KEYCLOAK-CUTOVER.md's route matrix). The
-      # oidc-dashboard compatibility gateway this used to route through is
-      # no longer referenced by any router; still running, not yet retired.
+      # oidc-dashboard compatibility gateway this used to route through was
+      # retired outright (no router has referenced it since #1026); only the
+      # oidc-dashboard network remains, for socat-hp-dashboard/-b and
+      # Traefik itself to reach the dashboard replicas directly.
       middlewares: [security-headers]
 
     honeypot-dashboard-canonical-redirect:
