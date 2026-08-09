@@ -25,6 +25,20 @@ x-oidc-gateway: &oidc-gateway
     OAUTH2_PROXY_OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:?set OIDC_ISSUER_URL in the VPS environment}
     OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:4180
     OAUTH2_PROXY_EMAIL_DOMAINS: "*"
+    # The realm has no self-registration or email-verification flow at all --
+    # "Administrators create every human account" (docs/KEYCLOAK-CUTOVER.md)
+    # directly via kcadm/the admin console, not through a verify-your-email
+    # signup. oauth2-proxy's default behavior rejects any ID token whose
+    # email_verified claim isn't true, which every one of those admin-created
+    # accounts fails by default -- caught live: "Error redeeming code during
+    # OAuth2 callback: email in id_token () isn't verified", a full login
+    # failure on every gateway-fronted app, not just one. Verified email
+    # isn't a meaningful signal in this trust model (Keycloak login + the
+    # realm's own account provisioning is the actual authorization boundary,
+    # not whether an operator clicked a confirmation link that was never
+    # sent), so this check is disabled rather than making emailVerified=true
+    # a manual step every future admin has to remember when creating a user.
+    OAUTH2_PROXY_INSECURE_OIDC_ALLOW_UNVERIFIED_EMAIL: "true"
     OAUTH2_PROXY_CODE_CHALLENGE_METHOD: S256
     OAUTH2_PROXY_COOKIE_SECURE: "true"
     OAUTH2_PROXY_COOKIE_HTTPONLY: "true"
