@@ -196,10 +196,12 @@ over WireGuard to `10.8.0.2`; the `socat-hp-*` services put the HTTP
 honeypots on the `proxy` network for Traefik. The reusable Traefik router
 template is in [`vps/traefik/dynamic.yml`](../vps/traefik/dynamic.yml):
 `honeypot-http` (`decoy.<domain>`) + `honeypot-web` (catch-all) → fake nginx,
-`honeypot-snare` (`www-portal.<domain>` and `snare.<domain>`) → SNARE, and
-six forward-auth-protected investigation routes for the dashboard, Kibana,
-TANNER, EveBox, Arkime, and Rev·Deck. Each has a matching `socat-hp-*` bridge
-in [`vps/docker-compose.yml`](../vps/docker-compose.yml).
+`honeypot-snare` (`www-portal.<domain>` and `snare.<domain>`) → SNARE, one
+native-OIDC route for the dashboard (no gateway, since #1026), and seven
+forward-auth-protected investigation routes sitting behind their own
+Keycloak-backed `oauth2-proxy` gateway: Kibana, TANNER, EveBox, Arkime,
+Rev·Deck, Dockge, and the Traefik dashboard itself. Each has a matching
+`socat-hp-*` bridge in [`vps/docker-compose.yml`](../vps/docker-compose.yml).
 
 Traefik is an HTTP(S) reverse proxy — it adds TLS, per-subdomain routing and
 auth to the web honeypots and dashboards. The other protocols (SSH, SMB,
@@ -208,10 +210,12 @@ forwards them raw. Both paths terminate on the VPS public IP.
 
 ### The forward-auth bridge, generically
 
-Every investigation UI (dashboard, Kibana, TANNER, EveBox, Arkime, Rev·Deck)
-reaches home through the identical chain — one pattern, six routers in
-`vps/traefik/dynamic.yml`, six `socat-hp-*` bridges, not six different
-mechanisms:
+Seven investigation UIs (Kibana, TANNER, EveBox, Arkime, Rev·Deck, Dockge,
+the Traefik dashboard) reach home through the identical chain — one pattern,
+seven routers in `vps/traefik/dynamic.yml`, seven `socat-hp-*` bridges, each
+fronted by its own Keycloak-backed `oauth2-proxy` gateway container, not
+seven different mechanisms. The honeypot dashboard is the one exception —
+see the note below.
 
 ```mermaid
 sequenceDiagram
@@ -219,31 +223,42 @@ sequenceDiagram
   actor Op as operator's browser
   participant CF as Cloudflare<br/>(proxied DNS)
   participant TR as Traefik<br/>(TLS termination + routing)
-  participant AUTH as Xore/auth-backend<br/>(forward-auth)
+  participant OA as oauth2-proxy<br/>(forward-auth, one per service)
+  participant KC as Keycloak<br/>(honeypot-keycloak, at home)
   participant SOC as socat-hp-*<br/>(VPS container)
   participant WG as WireGuard tunnel
   participant APP as home app<br/>(HP_BIND:port)
 
-  Op->>CF: HTTPS request, e.g. dashboard.<domain>
+  Op->>CF: HTTPS request, e.g. kibana.<domain>
   CF->>TR: proxied, real client IP in X-Forwarded-For
-  TR->>AUTH: forward-auth check (strip-auth-identity first)
+  TR->>OA: forward-auth check
   alt no valid session
-    AUTH-->>TR: reject
-    TR-->>Op: redirect to SSO login
-  else valid session
-    AUTH-->>TR: identity headers
-    TR->>SOC: request, security-headers applied
-    SOC->>WG: raw TCP, VPS listen port → 10.8.0.2:home-exposed-port
-    WG->>APP: delivered to the app's own internal port
-    APP-->>Op: response, relayed back through the same chain
+    OA-->>Op: redirect to Keycloak login (auth.<domain>)
+    Op->>KC: authenticate (password + mandatory TOTP)
+    KC-->>OA: OIDC callback, session established
   end
+  OA-->>TR: identity headers
+  TR->>SOC: request, security-headers applied
+  SOC->>WG: raw TCP, VPS listen port → 10.8.0.2:home-exposed-port
+  WG->>APP: delivered to the app's own internal port
+  APP-->>Op: response, relayed back through the same chain
 ```
 
 The socat hop is a dumb TCP relay — all the routing/auth decisions happen in
-Traefik before it, which is why adding a new investigation UI (Rev·Deck was
-the most recent) means one new router + one new `socat-hp-*` container, never
-a change to this flow itself. `vps/traefik/dynamic.yml`'s own comment table
-lists every current listen-port → home-port → app-internal-port mapping.
+Traefik and `oauth2-proxy` before it, which is why adding a new
+gateway-fronted UI means one new router + one new `oauth2-proxy` container +
+one new `socat-hp-*` container, never a change to this flow itself.
+`vps/traefik/dynamic.yml`'s own comment table lists every current listen-port
+→ home-port → app-internal-port mapping.
+
+> **The honeypot dashboard doesn't use this chain.** Since #1026 it speaks
+> OIDC to Keycloak natively (its own Go client, PKCE S256) instead of sitting
+> behind an `oauth2-proxy` gateway. Traefik routes its traffic straight to
+> `socat-hp-dashboard` with no forward-auth hop at all; the actual OIDC token
+> exchange happens homeserver-local, directly between `honeypot-dashboard`
+> and `honeypot-keycloak`, and never crosses the VPS. `Xore/auth-backend` is
+> retired as a runtime service across every app now — it supplies only the
+> read-only Keycloak login theme (`themes/apiary`).
 
 > **Source IP:** the HTTP honeypots recover the real client IP from
 > `X-Forwarded-For` (Traefik/Cloudflare). Some raw sensor logs initially

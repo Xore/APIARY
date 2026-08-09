@@ -67,7 +67,7 @@ flowchart LR
     direction TB
     suricata["Suricata<br/>IDS + EVE + rotating PCAP"]
     traefik["Traefik<br/>TLS routing"]
-    auth["Legacy Xore/auth-backend<br/>retired at Keycloak cutover"]
+    oauth2Proxy["oauth2-proxy gateways ×7<br/>Keycloak-backed, one per service:<br/>Kibana, EveBox, Arkime, TANNER,<br/>Rev·Deck, Dockge, Traefik dashboard"]
     httpBridges["socat HTTP bridges<br/>dashboard, Kibana, EveBox,<br/>Arkime, TANNER, Rev·Deck,<br/>web honeypots"]
     portbridge["portbridge<br/>raw TCP/UDP forwarding<br/>optional PROXY v1"]
     connlog[("portbridge connection log")]
@@ -124,10 +124,12 @@ flowchart LR
 
   attacker -->|"all public traffic is observed"| suricata
   attacker -->|"HTTPS"| traefik
-  traefik -->|"forward-auth check"| auth
-  auth -->|"identity headers or reject"| traefik
-  traefik -->|"OIDC over WireGuard<br/>target migration path"| keycloakStack
+  traefik -->|"forward-auth check<br/>(7 gateway-fronted services)"| oauth2Proxy
+  oauth2Proxy -->|"identity headers or reject"| traefik
+  oauth2Proxy -->|"OIDC"| keycloakStack
+  traefik -->|"native OIDC, no gateway<br/>(dashboard only, #1026)"| httpBridges
   traefik -->|"decoy HTTP and protected UIs"| httpBridges
+  dashboardStack <-->|"OIDC, homeserver-local<br/>(dashboard's own OIDC client)"| keycloakStack
   attacker -->|"raw sensor ports"| portbridge
   portbridge --> connlog
   httpBridges --> wg
@@ -159,18 +161,27 @@ taking the others down — not that they can't see each other's data.
 
 The VPS is the only internet-facing layer. Suricata sees traffic before it
 enters WireGuard, so IDS records and PCAPs retain the original network view.
-Traefik handles HTTPS routes and delegates authentication for investigation
-UIs to the separately deployed `Xore/auth-backend`. Raw protocols pass through
-`portbridge`; targets that understand HAProxy PROXY v1 receive the original
-client address in-band, while the connection log lets the dashboard recover
-source attribution for PROXY-unaware sensors.
+Traefik handles HTTPS routes and delegates authentication for seven
+investigation UIs to per-service `oauth2-proxy` gateways, all backed by the
+same Keycloak realm running at home (`honeypot-keycloak`). `Xore/auth-backend`
+is retired as a runtime service; it now supplies only the read-only Keycloak
+login theme (`themes/apiary`), not a forward-auth check. The dashboard is the
+one exception: since #1026 it speaks OIDC to Keycloak directly (its own Go
+client, PKCE S256), so Traefik passes its traffic straight through with no
+gateway hop, and that OIDC exchange happens homeserver-local between
+`honeypot-dashboard` and `honeypot-keycloak` -- it never crosses the VPS.
+Raw protocols pass through `portbridge`; targets that understand HAProxy
+PROXY v1 receive the original client address in-band, while the connection
+log lets the dashboard recover source attribution for PROXY-unaware sensors.
 
-The `httpBridges` box above collapses six otherwise-identical
-Cloudflare → Traefik → forward-auth → `socat-hp-*` → WireGuard chains into
-one node — see
+The `httpBridges` box above collapses seven otherwise-identical
+Cloudflare → Traefik → forward-auth (`oauth2-proxy`) → `socat-hp-*` →
+WireGuard chains, plus the dashboard's own gateway-free native-OIDC chain,
+into one node — see
 ["The forward-auth bridge, generically"](CGNAT-DEPLOYMENT.md#the-forward-auth-bridge-generically)
-in the deployment guide for the per-request sequence every investigation UI
-(dashboard, Kibana, TANNER, EveBox, Arkime, Rev·Deck) shares.
+in the deployment guide for the per-request sequence the seven gateway-fronted
+services (Kibana, TANNER, EveBox, Arkime, Rev·Deck, Dockge, Traefik dashboard)
+share, and how the honeypot dashboard's own request differs.
 
 Home container ports bind to `HP_BIND` (normally the home WireGuard address),
 not to every host interface. The root Compose network `honeynet` carries the
