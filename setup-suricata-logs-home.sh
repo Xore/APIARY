@@ -10,9 +10,17 @@ if [[ ${EUID} -ne 0 ]]; then
 fi
 
 wireguard_unit=${WIREGUARD_UNIT:-wg-quick@wg0.service}
+# /opt/stacks/apiary, not the pre-#783-rebrand honeypot-stack -- this must
+# match install-homeserver.sh's step_sshfs_mounts fstab entries exactly, or
+# findmnt below never finds them. Found live during #787's homeserver
+# reinstall (2026-08-09) right after fixing that fstab path in #1087:
+# this script still had the old one, so sshfs-boot-ordering started
+# failing on "Missing /etc/fstab entry" even though the mounts themselves
+# were up. See #1088 for the ~20 other files still carrying this same
+# stale path.
 mount_paths=(
-  /opt/stacks/honeypot-stack/logs/suricata
-  /opt/stacks/honeypot-stack/logs/portbridge
+  /opt/stacks/apiary/logs/suricata
+  /opt/stacks/apiary/logs/portbridge
 )
 mount_units=()
 
