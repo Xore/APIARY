@@ -224,9 +224,19 @@ processors:
       target: honeypot
       fields: {persona_id: rheinwerk-water-s7-200, site_id: rheinwerk-intake, asset_id: plc-intake-01, organization: Rheinwerk Municipal Water}
       when.contains: {log.file.path: "enriched/conpot.json"}
+  # #1099: tanner_report.json has no "sensor" field of its own (unlike the
+  # Go-based sensors, which self-report one) -- geoip-honeypot's ingest
+  # pipeline only ever promotes event.sensor from honeypot.sensor (or a
+  # couple of hardcoded /conpot, /dionaea path fallbacks tanner isn't part
+  # of), so every tanner event landed unclassified: present in
+  # honeypot-v2-*, but invisible to any event.sensor-scoped view (the
+  # Sensors card, Event Explorer's sensor filter, EXPECTED_SENSORS
+  # freshness tracking). Confirmed live (2026-08-09). Fixed at the source
+  # here rather than adding a third hardcoded path fallback to the ingest
+  # pipeline's already-accumulating special cases.
   - add_fields:
       target: honeypot
-      fields: {persona_id: meridian-customer-portal, site_id: meridian-public-web, asset_id: customer-portal-02, organization: Meridian Retail Systems Ltd.}
+      fields: {sensor: tanner, persona_id: meridian-customer-portal, site_id: meridian-public-web, asset_id: customer-portal-02, organization: Meridian Retail Systems Ltd.}
       when.contains: {log.file.path: "/logs/tanner/"}
   # NOTE on stats events: they carry ~600 engine-internal counter fields and
   # once exhausted the shared daily index's field limit (2026-07-19 outage).
