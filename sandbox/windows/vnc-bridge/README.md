@@ -42,7 +42,7 @@ To turn it on:
    restart `honeypot-windows-vnc-bridge.service`.
 2. Set `SANDBOX_VNC_BRIDGE_WS` in the dashboard's own `.env` to
    `ws://<that-address>:6090/vnc` (or `wss://...` if fronted by Traefik +
-   forward-auth the same way Rev·Deck is) and restart the dashboard.
+   Keycloak/oauth2-proxy the same way Rev·Deck is) and restart the dashboard.
 
 The dashboard adds this one origin to its own Content-Security-Policy
 `connect-src` (`setVNCBridgeOrigin`, `dashboard/render.go`) — no other page

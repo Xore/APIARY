@@ -74,8 +74,9 @@ Suricata, and dead-letter data views plus the **XORE Honeypot — enriched
 investigation** dashboard. Panels cover recent attacks, OT personas,
 commands/credentials, payloads, enriched IDS alerts, and ingest failures.
 
-- **Dashboard** (built in) → `https://honeypot.<domain>` behind the shared
-  forward-auth portal. Live
+- **Dashboard** (built in) → `https://honeypot.<domain>`, authenticated via
+  its own native OIDC session against Keycloak directly (no gateway hop,
+  unlike the investigation UIs below -- #1026). Live
   KPIs, feed-freshness states, per-sensor/protocol counts, top IPs/creds/commands,
   payload downloads, attack chains, and 7-day `/24`/`/64` campaign correlation
   scored across sensors, credentials, ports, IDS alerts, and payload hashes.
@@ -154,7 +155,7 @@ commands/credentials, payloads, enriched IDS alerts, and ingest failures.
   fingerprint, and time window. Reports contain an executive risk summary,
   ranked sources and indicators, operational alert state, recommendations, and
   a bounded representative-evidence appendix. Report downloads require the
-  forward-auth `admin` role because they contain hostile-source telemetry.
+  dashboard's own Keycloak-derived `admin` role because they contain hostile-source telemetry.
   The overview also ranks fingerprints, ASNs, and provider classes with the
   same one-click pivots.
   ASN/provider pivots,
@@ -179,7 +180,7 @@ commands/credentials, payloads, enriched IDS alerts, and ingest failures.
   `/dead-letters` investigates rejected Elasticsearch documents and
   `/api/intelligence/archive` exposes durable campaign/cluster snapshots.
   Alert acknowledgements and captured-malware downloads require the
-  forward-auth `admin` role.
+  dashboard's own Keycloak-derived `admin` role.
 - **Safe payload triage** — `yara-scanner` inventories all mounted Dionaea,
   Cowrie, and script captures without network access or execution. Its results
   enrich `/payloads`, static-analysis reports, risk scores, alerts, and health.
@@ -220,7 +221,7 @@ commands/credentials, payloads, enriched IDS alerts, and ingest failures.
   ```bash
   python3 analysis/analyze.py /opt/stacks/honeypot-stack/logs --top 20
   ```
-- **Kibana** → `https://kibana.<domain>` (forward-auth). Data views already exist:
+- **Kibana** → `https://kibana.<domain>` (Keycloak via the oauth2-proxy gateway). Data views already exist:
   `honeypot-*` and `suricata-*` (time field `@timestamp`) plus **Arkime
   Sessions** (`arkime_sessions3-*`, time field `lastPacket`). All suricata and
   honeypot events carry `source.geo` / `source.as` — build maps on
@@ -228,6 +229,6 @@ commands/credentials, payloads, enriched IDS alerts, and ingest failures.
   country database has no coordinates).
 - **Arkime** → `http://<HP_BIND>:19080` — full-packet session search over
   everything Suricata captured on the VPS.
-- **TANNER dashboard** → `https://tanner.<domain>` (forward-auth) — web-attack analysis.
+- **TANNER dashboard** → `https://tanner.<domain>` (Keycloak via the oauth2-proxy gateway) — web-attack analysis.
 - Dionaea/Conpot write their own JSON into the shared volume for jq/ELK; the
   live dashboard ingests them alongside Cowrie, multipot, HTTP, and Suricata.

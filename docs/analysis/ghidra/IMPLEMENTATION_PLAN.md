@@ -107,7 +107,8 @@ Three corrections against the layout this section used to show:
   itself, gated behind the `revdeck` profile (commits `9244b87`, `8e828f0`,
   2026-08-01) — hardened (`read_only`, `cap_drop: ALL`, no-new-privileges),
   reachable over the WireGuard `HP_BIND` address through the same Traefik +
-  forward-auth SSO path as every other investigation UI. `revdeck/` now holds
+  Keycloak/oauth2-proxy SSO gateway as every other gateway-fronted
+  investigation UI. `revdeck/` now holds
   only its `README.md`. That closes the compose gap this document used to
   list, and as of 2026-08-01 (#78) the LLM automation *contract* on top of it
   is built too — `worker/ghidra-worker.py`'s `revdeck_triage()`, verified

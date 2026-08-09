@@ -198,9 +198,11 @@ services:
     ports:
       # HP_BIND (the WireGuard address), not 127.0.0.1: this is the one
       # service in this file meant to be reached off-host, via the same
-      # Traefik + forward-auth SSO path every other investigation UI
-      # (dashboard, Kibana, Arkime, ...) already uses — see
-      # vps/docker-compose.yml's socat-hp-revdeck and vps/traefik/dynamic.yml.
+      # Traefik + Keycloak/oauth2-proxy SSO gateway every other investigation
+      # UI (dashboard, Kibana, Arkime, ...) already uses -- the old
+      # forward-auth middleware this comment used to name is retired (hard
+      # cutover, docs/KEYCLOAK-CUTOVER.md) -- see vps/docker-compose.yml's
+      # socat-hp-revdeck and vps/traefik/dynamic.yml.
       # ghidra/ollama/statictools above stay loopback-only; nothing about
       # exposing the analyst UI changes how triage reaches the model
       # (still worker -> Ollama directly, enforced in code per #103).

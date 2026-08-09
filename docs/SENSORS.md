@@ -74,7 +74,7 @@ remaining lightweight sensors receive 128-512 MiB. Docker console logs rotate
 at 25 MiB with three files, independently from sensor event files under
 `./logs`.
 
-## HTTPS investigation UIs (each its own subdomain, all forward-auth protected)
+## HTTPS investigation UIs (each its own subdomain, all Keycloak-gated)
 
 | Dashboard | Subdomain | Container |
 |---|---|---|
@@ -87,12 +87,18 @@ at 25 MiB with three files, independently from sensor event files under
 
 Each is bridged to the VPS by its own `socat-hp-*` service (one socat per
 service, the reliable/consistent way) and routed by
-[Traefik](../vps/traefik/) with the shared `forward-auth` middleware. The auth portal is NOT part
-of this stack anymore — deploy the standalone
-[Xore/auth-backend](https://github.com/Xore/auth-backend) stack onto the VPS's
-`proxy` network (it provides the `auth-portal` container the middleware
-resolves by name), then point proxied Cloudflare records at the VPS for each
-subdomain.
+[Traefik](../vps/traefik/) through a per-service `oauth2-proxy` gateway
+(ForwardAuth middleware), all backed by the same Keycloak realm running at
+home (`honeypot-keycloak`, `docker-compose.keycloak.yml`). There is no
+separate "auth portal" stack or container to deploy anymore — that was the
+retired `Xore/auth-backend` runtime (hard cutover, see
+[KEYCLOAK-CUTOVER.md](KEYCLOAK-CUTOVER.md)); `Xore/auth-backend` now only
+supplies the Keycloak login/account/email theme
+(`Xore/auth-backend`'s `themes/apiary`), not a running service. To stand
+this up: deploy the Keycloak stack (`docker-compose.keycloak.yml`, Dockge-managed,
+see [KEYCLOAK-OPERATIONS.md](KEYCLOAK-OPERATIONS.md)), configure each
+investigation UI's `oauth2-proxy` client in `vps/docker-compose.yml`, then
+point proxied Cloudflare records at the VPS for each subdomain.
 
 ## SNARE + TANNER
 

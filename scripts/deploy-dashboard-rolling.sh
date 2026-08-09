@@ -13,7 +13,9 @@
 # service lists both as loadBalancer servers with an active healthCheck,
 # so Traefik stops sending a replica live traffic the moment it starts
 # failing (checked directly against the backend, not through the
-# forward-auth-gated router), well before this script even restarts it.
+# Keycloak/oauth2-proxy-gated router -- the old forward-auth middleware
+# this comment used to name is retired, hard cutover, see
+# docs/KEYCLOAK-CUTOVER.md), well before this script even restarts it.
 # The other replica, still healthy, serves every request in the meantime.
 #
 # Usage:

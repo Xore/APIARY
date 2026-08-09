@@ -63,12 +63,13 @@ public screenshot regardless of why it ended up in the table.
 Same layout-check viewports the Playwright acceptance matrix uses
 (`dashboard/frontend/e2e/dashboard.spec.ts`), captured against a real
 authenticated session rather than the isolated/mocked identity the e2e suite
-uses. Needs a valid `xore_sso` session cookie for an account with at least
-viewer access — the dashboard's page routes don't themselves require one
-(auth is enforced by Traefik's `forward-auth` middleware on the real public
-router, `vps/traefik/dynamic.yml`; the dashboard's own listener is
-WireGuard-only, see #822), but a real session is what makes the account menu
-show a logged-in identity instead of the signed-out state.
+uses. Needs a valid `__Host-apiary_session` cookie (`dashboard/oidc_auth.go`'s
+`oidcSessionCookie`) for an account with at least viewer access — the
+dashboard's page routes don't themselves require one (the dashboard uses
+native OIDC directly, not the Traefik ForwardAuth + oauth2-proxy gateway
+every other investigation UI sits behind, #1026; the dashboard's own
+listener is WireGuard-only, see #822), but a real session is what makes the
+account menu show a logged-in identity instead of the signed-out state.
 
 If capturing right after a dashboard redeploy, wait for real data before
 shooting: the container reports `healthy` well before its ES-derived state
