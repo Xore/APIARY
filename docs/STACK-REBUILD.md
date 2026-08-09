@@ -30,6 +30,13 @@ down -v`, start it again" — it's an ordered sequence across projects with a
 couple of real circular-dependency traps. This doc exists because the first
 live run of this sequence (2026-08-02) hit three of them.
 
+`honeypot-keycloak` (the identity stack, `docs/KEYCLOAK-OPERATIONS.md`)
+is intentionally handled separately below rather than folded into the
+`honeypot-*` list above: it deploys to `/var/dockge/stacks/honeypot-keycloak`,
+not `/opt/stacks/$s` like every other split stack, and its Postgres volume
+holds identity data (accounts, sessions) that a routine full reset should
+not touch by default.
+
 ## What survives, what doesn't
 
 **Preserved, never touched:**
@@ -41,10 +48,16 @@ live run of this sequence (2026-08-02) hit three of them.
   state, not event data
 - `state/personas/applied.json` — persona-apply is idempotent and re-verifies
   it, not something a reset needs to force
-- Unrelated services sharing the same hosts (VPS: `auth-portal`, other
-  tenants' `socat-*` forwarders, other Compose projects entirely — a
-  full-reset instruction scopes to APIARY, never to everything
-  running on the box)
+- `honeypot-keycloak`'s Postgres volume (identity data: accounts, sessions,
+  realm state) — a routine full reset of the honeypot/sensor stack has no
+  reason to also destroy every operator's account and force re-bootstrapping
+  Keycloak from scratch. If identity data genuinely needs wiping too, that's
+  a separate, deliberate decision -- follow
+  `docs/KEYCLOAK-OPERATIONS.md`'s own "Upgrade and rebuild procedure" (§7)
+  clean-rebuild steps instead of folding it into this reset.
+- Unrelated services sharing the same hosts (other tenants' `socat-*`
+  forwarders, other Compose projects entirely — a full-reset instruction
+  scopes to APIARY, never to everything running on the box)
 
 **Wiped:** every honeypot-owned Docker volume (`es-data`, `dionaea-lib`,
 `dashboard-state`, `yara-results`, `evebox-config`, `arkime-pcap`,
@@ -87,6 +100,12 @@ for s in honeypot-elk honeypot-dashboard honeypot-utilities \
   (cd /opt/stacks/$s && docker compose -f compose.yml down)
 done
 ```
+
+Do **not** include `honeypot-keycloak` in the loop above -- it lives at
+`/var/dockge/stacks/honeypot-keycloak`, not `/opt/stacks/`, and unlike every
+other stack here its Postgres volume holds identity data a routine reset
+should preserve (see "What survives" above). Leave it running through the
+whole reset; nothing else in this doc's sequence needs it stopped.
 
 Then remove every honeypot-owned volume (list above), and wipe every log
 directory under `/opt/stacks/honeypot-stack/logs/` **except** `suricata/` and

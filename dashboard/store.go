@@ -222,6 +222,7 @@ type store struct {
 	expected       []string // configured feeds shown even before their first event
 	subs           map[chan struct{}]struct{}
 	authAccountURL string // validated once at startup; see validatedAuthAccountURL
+	authAdminURL   string // validated Keycloak admin-console URL; exposed only to dashboard admins
 	// lastActivity (#486) is a unix-second timestamp of the most recent
 	// dashboard request, touched by touchActivity (main.go's request
 	// middleware) and read by the periodic rebuild loop to skip its ES/log

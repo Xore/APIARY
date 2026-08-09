@@ -19,6 +19,7 @@
 # socat-hp-evebox         :5636   →  10.8.0.2:19636 (evebox :5636)
 # socat-hp-arkime         :8005   →  10.8.0.2:19080 (arkime viewer :8005)
 # socat-hp-revdeck        :5000   →  10.8.0.2:19500 (revdeck :5000, ghidra stack)
+# socat-hp-keycloak       :8080   →  10.8.0.2:18080 (Keycloak :8080)
 # socat-hp-dockge         :5001   →  10.8.0.2:5001  (dockge :5001, host infra
 #                                     with root-equivalent /var/run/docker.sock
 #                                     access -- not a scoped UI like the rest)
@@ -38,6 +39,16 @@ http:
       service: api@internal
       middlewares: [local-only]
 
+    traefik-api-oidc-upstream:
+      rule: "PathPrefix(`/`)"
+      entryPoints: [traefik-oidc]
+      service: api@internal
+
+    dashboard-oidc-upstream:
+      rule: "PathPrefix(`/`)"
+      entryPoints: [dashboard-oidc]
+      service: honeypot-dashboard
+
     # Same api@internal service as traefik-api above, on the public entrypoint
     # instead of loopback-only traefik-local. No socat bridge needed — unlike
     # every other honeypot-revdeck-style router, this points at a service that
@@ -46,7 +57,7 @@ http:
     # Traefik's dashboard API has no write/mutate endpoints — it only reads
     # back the routing config this file already defines — but that config
     # (backend URLs, service/middleware names) is still information a random
-    # visitor shouldn't get, hence forward-auth rather than leaving this open.
+    # visitor shouldn't get, hence OIDC rather than leaving this open.
     # Matches the whole host, not just /api and /dashboard like the
     # loopback-only traefik-api router above — a visitor going straight to
     # https://traefik.<domain>/ (the obvious thing to type) hit a bare
@@ -59,18 +70,87 @@ http:
     traefik-dashboard:
       rule: "Host(`traefik.honeypot.example`)"
       entryPoints: [websecure]
-      service: api@internal
+      service: oidc-traefik
       tls:
         options: modern
-      middlewares: [security-headers, strip-auth-identity, forward-auth, traefik-dashboard-redirect]
+      middlewares: [security-headers, traefik-dashboard-redirect]
 
-    auth-portal:
+    keycloak:
       rule: "Host(`auth.honeypot.example`)"
       entryPoints: [websecure]
-      service: auth-portal
+      service: keycloak-candidate
       tls:
         options: modern
       middlewares: [security-headers, rate-limit-auth]
+
+    # Keycloak's admin SPA embeds these narrowly scoped session/cookie-check
+    # endpoints from itself. The general DENY header blocks framing outright
+    # (even same-origin), so this more-specific router allows just these two
+    # paths to be framed. #1028: admin and issuer are the same origin now
+    # (auth.honeypot.example), so this is a same-origin exception only --
+    # no cross-host CSP allowlist needed any more.
+    #
+    # Realm-agnostic (`[^/]+`, not a hardcoded `apiary`): the admin console
+    # runs this same cookie check against whichever realm the current admin
+    # session is in, including the built-in `master` realm (e.g. while still
+    # on the bootstrap-admin login, before a named apiary-realm admin exists
+    # -- see KEYCLOAK-OPERATIONS.md's step 2). The original apiary-only rule
+    # never matched `/realms/master/...`, so master-realm admin sessions hit
+    # the general DENY header and got "Timeout when waiting for 3rd party
+    # check iframe message" -- caught live, was already broken before #1028,
+    # not something #1028 introduced.
+    keycloak-embedded-frames:
+      rule: "Host(`auth.honeypot.example`) && PathRegexp(`^/realms/[^/]+/protocol/openid-connect/(3p-cookies/|login-status-iframe\\.html)`)"
+      priority: 120
+      entryPoints: [websecure]
+      service: keycloak-candidate
+      tls:
+        options: modern
+      middlewares: [security-headers-keycloak-frame, rate-limit-auth]
+
+    # #1028: admin console now serves from the same host as the issuer
+    # (KC_HOSTNAME_ADMIN is unset, so Keycloak defaults it under /admin on
+    # KC_HOSTNAME) instead of a separate keycloak-admin.* host. This
+    # PathPrefix-scoped router exists only to give the admin SPA's bootstrap
+    # burst (dozens of modules/fonts/localization files loaded concurrently)
+    # the larger rate-limit-keycloak-admin budget; every other path on this
+    # host -- login, token, realm discovery -- keeps the tighter
+    # brute-force-resistant rate-limit-auth via the plain `keycloak` router
+    # below. Keycloak's realm-admin login and mandatory MFA remain the actual
+    # authorization boundary, same as when this had its own hostname.
+    #
+    # /admin alone only covers the SPA shell -- caught live: its actual JS
+    # bundle loads from /resources/<build-fingerprint>/admin/keycloak.v2/
+    # assets/..., which fell through to the tighter rate-limit-auth and hit
+    # 429s loading two dozen chunks at once. The fingerprint segment is
+    # opaque/build-specific, hence the regex rather than a literal path.
+    # Scoped to the admin theme specifically (.../admin/...), not all of
+    # /resources, so login/account theme assets keep the tighter budget.
+    keycloak-admin-console:
+      rule: "Host(`auth.honeypot.example`) && (PathPrefix(`/admin`) || PathRegexp(`^/resources/[^/]+/admin/`))"
+      priority: 110
+      entryPoints: [websecure]
+      service: keycloak-candidate
+      tls:
+        options: modern
+      middlewares: [security-headers, rate-limit-keycloak-admin]
+
+    # #1028: same problem, different console -- the self-service Account
+    # Console (/realms/<realm>/account/...) makes its own REST calls (e.g.
+    # .../account/sessions/devices for the Device Activity tab) that also
+    # aren't login/token brute-force targets, since they require an already-
+    # authenticated session. Caught live hitting rate-limit-auth's 429 the
+    # same way the admin assets did. Reuses rate-limit-keycloak-admin's
+    # budget rather than inventing a third tier for what's functionally the
+    # same "authenticated interactive SPA, not a login attempt" case.
+    keycloak-account-console:
+      rule: "Host(`auth.honeypot.example`) && PathRegexp(`^/realms/[^/]+/account`)"
+      priority: 110
+      entryPoints: [websecure]
+      service: keycloak-candidate
+      tls:
+        options: modern
+      middlewares: [security-headers, rate-limit-keycloak-admin]
 
     static-site:
       rule: "Host(`www.honeypot.example`) || Host(`honeypot.example`) || Host(`static.honeypot.example`)"
@@ -181,7 +261,7 @@ http:
       service: honeypot-dashboard
       tls:
         options: modern
-      middlewares: [security-headers-dashboard-pdf, strip-auth-identity, forward-auth]
+      middlewares: [security-headers-dashboard-pdf]
 
     # Same relaxation as honeypot-dashboard-pdf above, for the GitHub-analysis
     # Report card's own inline PDF viewer (#309). serveGitHubAnalysisPDFProxy
@@ -198,63 +278,89 @@ http:
       service: honeypot-dashboard
       tls:
         options: modern
-      middlewares: [security-headers-dashboard-pdf, strip-auth-identity, forward-auth]
+      middlewares: [security-headers-dashboard-pdf]
 
+    # dashboard.honeypot.example redirects here rather than sharing this
+    # router: the dashboard's own native OIDC runtime (#1026) has
+    # OIDC_EXTERNAL_URL hardcoded to a single host (honeypot.honeypot.example)
+    # -- that's the only redirect_uri registered with the Keycloak client, and
+    # the only host its own session cookie is scoped to. A login started on
+    # dashboard.* would bounce through Keycloak back to a callback on
+    # honeypot.* (the only registered redirect_uri) with no valid session
+    # state for that host. Redirecting dashboard.* to the canonical host
+    # before the dashboard's own OIDC flow ever starts keeps the whole round
+    # trip on one host. Historically the same constraint existed one layer
+    # down, in oidc-dashboard's own OAUTH2_PROXY_REDIRECT_URL/CSRF-cookie
+    # scoping (e8bba20) -- the compatibility gateway this router used before
+    # #1026's cutover.
     honeypot-dashboard:
-      rule: "Host(`dashboard.honeypot.example`) || Host(`honeypot.honeypot.example`)"
+      rule: "Host(`honeypot.honeypot.example`)"
       entryPoints: [websecure]
       service: honeypot-dashboard
       tls:
         options: modern
-      middlewares: [security-headers, strip-auth-identity, forward-auth]
+      # #1026: routes directly to the dashboard's own native OIDC runtime.
+      # No proxy identity headers -- the dashboard validates tokens and owns
+      # its session itself (docs/KEYCLOAK-CUTOVER.md's route matrix). The
+      # oidc-dashboard compatibility gateway this used to route through is
+      # no longer referenced by any router; still running, not yet retired.
+      middlewares: [security-headers]
+
+    honeypot-dashboard-canonical-redirect:
+      rule: "Host(`dashboard.honeypot.example`)"
+      entryPoints: [websecure]
+      service: honeypot-dashboard
+      tls:
+        options: modern
+      middlewares: [security-headers, dashboard-canonical-redirect]
 
     honeypot-kibana:
       rule: "Host(`kibana.honeypot.example`)"
       entryPoints: [websecure]
-      service: honeypot-kibana
+      service: oidc-kibana
       tls:
         options: modern
-      middlewares: [security-headers, strip-auth-identity, forward-auth]
+      middlewares: [security-headers]
 
     honeypot-tanner:
       rule: "Host(`tanner.honeypot.example`)"
       entryPoints: [websecure]
-      service: honeypot-tanner
+      service: oidc-tanner
       tls:
         options: modern
-      middlewares: [security-headers, strip-auth-identity, forward-auth]
+      middlewares: [security-headers]
 
     honeypot-evebox:
       rule: "Host(`evebox.honeypot.example`)"
       entryPoints: [websecure]
-      service: honeypot-evebox
+      service: oidc-evebox
       tls:
         options: modern
-      middlewares: [security-headers, strip-auth-identity, forward-auth]
+      middlewares: [security-headers]
 
     honeypot-arkime:
       rule: "Host(`arkime.honeypot.example`)"
       entryPoints: [websecure]
-      service: honeypot-arkime
+      service: oidc-arkime
       tls:
         options: modern
-      middlewares: [security-headers, strip-auth-identity, forward-auth]
+      middlewares: [security-headers]
 
     honeypot-revdeck:
       rule: "Host(`rev.honeypot.example`)"
       entryPoints: [websecure]
-      service: honeypot-revdeck
+      service: oidc-revdeck
       tls:
         options: modern
-      middlewares: [security-headers, strip-auth-identity, forward-auth]
+      middlewares: [security-headers]
 
     honeypot-dockge:
       rule: "Host(`dockge.honeypot.example`)"
       entryPoints: [websecure]
-      service: honeypot-dockge
+      service: oidc-dockge
       tls:
         options: modern
-      middlewares: [security-headers, strip-auth-identity, forward-auth]
+      middlewares: [security-headers]
 
     svelte-blog:
       rule: "Host(`svelte.honeypot.example`)"
@@ -297,6 +403,46 @@ http:
       middlewares: [security-headers, rate-limit]
 
   services:
+    oidc-kibana:
+      loadBalancer:
+        servers: [{url: "http://oidc-kibana:4180"}]
+        passHostHeader: true
+
+    oidc-evebox:
+      loadBalancer:
+        servers: [{url: "http://oidc-evebox:4180"}]
+        passHostHeader: true
+
+    oidc-arkime:
+      loadBalancer:
+        servers: [{url: "http://oidc-arkime:4180"}]
+        passHostHeader: true
+
+    oidc-tanner:
+      loadBalancer:
+        servers: [{url: "http://oidc-tanner:4180"}]
+        passHostHeader: true
+
+    oidc-revdeck:
+      loadBalancer:
+        servers: [{url: "http://oidc-revdeck:4180"}]
+        passHostHeader: true
+
+    oidc-dockge:
+      loadBalancer:
+        servers: [{url: "http://oidc-dockge:4180"}]
+        passHostHeader: true
+
+    oidc-traefik:
+      loadBalancer:
+        servers: [{url: "http://oidc-traefik:4180"}]
+        passHostHeader: true
+
+    oidc-dashboard:
+      loadBalancer:
+        servers: [{url: "http://oidc-dashboard:4180"}]
+        passHostHeader: true
+
 
     static-site:
       loadBalancer:
@@ -346,10 +492,11 @@ http:
           - url: "http://socat-vui-blog-auth:3000"
         passHostHeader: true
 
-    auth-portal:
+    # Keycloak is reachable only through its WireGuard bridge.
+    keycloak-candidate:
       loadBalancer:
         servers:
-          - url: "http://auth-portal:4181"
+          - url: "http://socat-hp-keycloak:8080"
         passHostHeader: true
 
     honeypot-web:
@@ -369,7 +516,7 @@ http:
     # scripts/deploy-dashboard-rolling.sh. healthCheck is what makes this
     # actually zero-downtime: Traefik polls /healthz on each backend
     # directly (bypassing the router/middleware chain entirely, including
-    # forward-auth above -- health checks are server-to-server, never
+    # OIDC above -- health checks are server-to-server, never
     # routed through a router) and stops sending it live traffic the
     # moment it fails, before the rolling-update script even restarts that
     # replica's container. Without this, both servers would need to be
@@ -490,6 +637,24 @@ http:
           X-Powered-By: ""
           Server: ""
 
+    # #1028: SAMEORIGIN (not a blanked-out header relying on CSP alone) now
+    # that the admin SPA and the issuer paths it frames are the same origin
+    # -- matches this file's own security-headers-dashboard-pdf pattern.
+    # frame-ancestors 'self' is the CSP-level equivalent, kept for browsers
+    # that honor CSP frame-ancestors preferentially.
+    security-headers-keycloak-frame:
+      headers:
+        customFrameOptionsValue: "SAMEORIGIN"
+        contentTypeNosniff: true
+        referrerPolicy: "strict-origin-when-cross-origin"
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        contentSecurityPolicy: "frame-ancestors 'self'; object-src 'none'"
+        customResponseHeaders:
+          X-Powered-By: ""
+          Server: ""
+
     rate-limit:
       rateLimit:
         average: 100
@@ -502,9 +667,8 @@ http:
         burst: 60
         period: 1s
 
-    # Only attached to the traefik-dashboard router, after forward-auth in
-    # that router's middleware chain so this never fires for an unauthenticated
-    # visitor (they hit the login redirect first, same as everywhere else).
+    # Only attached to the Traefik dashboard router. oauth2-proxy handles
+    # authentication before forwarding a request that can reach this redirect.
     # Catches the bare root (/ or nothing) and /dashboard with no trailing
     # slash -- Traefik's dashboard 404s without the slash (verified live:
     # /dashboard -> 404, /dashboard/ -> the real UI; true even for the
@@ -519,6 +683,20 @@ http:
         replacement: "https://${1}/dashboard/"
         permanent: false
 
+    # See honeypot-dashboard-canonical-redirect's router comment above.
+    # Dots deliberately unescaped (not "\." for a strict literal match): the
+    # router's own Host() rule above already exact-matched the hostname
+    # before any request reaches this middleware, and keeping the domain as
+    # one plain contiguous string here is what lets deploy.yml's
+    # `sed s/honeypot\.example/$DOMAIN/g` substitution find and replace it
+    # -- an escaped "honeypot\.example" would not match that sed pattern's
+    # literal text and would deploy with the placeholder domain still in it.
+    dashboard-canonical-redirect:
+      redirectRegex:
+        regex: "^https://dashboard.honeypot.example(/.*)?$"
+        replacement: "https://honeypot.honeypot.example${1}"
+        permanent: true
+
     rate-limit-auth:
       rateLimit:
         average: 8
@@ -527,24 +705,15 @@ http:
         sourceCriterion:
           requestHeaderName: CF-Connecting-IP
 
-    # Remove identity hints supplied by the browser before forward-auth runs.
-    # Protected backends must use live introspection for authorization.
-    strip-auth-identity:
-      headers:
-        customRequestHeaders:
-          X-Auth-Subject: ""
-          X-Auth-User: ""
-          X-Auth-Display-Name: ""
-          X-Auth-Role: ""
-          X-Auth-Generation: ""
-
-    forward-auth:
-      forwardAuth:
-        address: "http://auth-portal:4181/_auth/verify"
-        trustForwardHeader: true
-        maxResponseBodySize: 65536
-        authResponseHeaders:
-          - X-Auth-User
+    rate-limit-keycloak-admin:
+      rateLimit:
+        # The React admin console fetches several dozen modules, fonts, and
+        # localization resources concurrently during bootstrap.
+        average: 20
+        burst: 100
+        period: 1s
+        sourceCriterion:
+          requestHeaderName: CF-Connecting-IP
 
 tcp:
   routers:

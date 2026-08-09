@@ -47,6 +47,7 @@ jobs:
         with:
           python-version: "3.13"
       - run: python scripts/check-public-leaks.py
+      - run: python scripts/validate-oidc-redirects.py
 
   go:
     name: Go formatting and tests
@@ -201,6 +202,9 @@ jobs:
             printf '%s\0' "${shell_scripts[@]}" | xargs -0 -n1 bash -n
             printf '%s\0' "${shell_scripts[@]}" | xargs -0 shellcheck --severity=error
           fi
+      - name: Validate Keycloak realm policy
+        shell: bash
+        run: ./keycloak/realm/validate.sh
       - name: GitHub-analysis publisher stays dry-run by default
         shell: bash
         run: |

@@ -2,12 +2,8 @@
 # Every socat service must be on the 'proxy' network so Traefik can reach it.
 # The socat command forwards from the proxy network into the WireGuard tunnel (10.8.0.2).
 #
-# SSO/forward-auth for this stack's admin surfaces lives in the standalone
-# repository https://github.com/Xore/auth-backend (deploy it separately, e.g.
-# at /root/auth-backend). It runs an `auth-portal` container attached to this
-# stack's `proxy` network; the `forward-auth` middleware and the `auth-portal`
-# router/service in traefik/dynamic.yml resolve that container by name. This
-# compose file deliberately does NOT build or run forward-auth anymore.
+# Identity is provided by the homeserver Keycloak stack. Protected upstreams
+# use native OIDC or one isolated oauth2-proxy gateway per application.
 #
 # Home server WireGuard IP: 10.8.0.2
 # Each port here must match the port the app binds to on the home server.
@@ -17,6 +13,68 @@
 # EveBox on the home server reads them via sshfs/NFS mount over WireGuard:
 #   sshfs root@10.8.0.1:/opt/stacks/apiary/logs/suricata \
 #         /opt/stacks/apiary/logs/suricata -o ro,allow_other
+
+x-oidc-gateway: &oidc-gateway
+  image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.3@sha256:10a1165743a192e1940b4708fb9647027185ce11a681a1c5519b442ff7f1f561
+  restart: unless-stopped
+  read_only: true
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  environment: &oidc-gateway-environment
+    OAUTH2_PROXY_PROVIDER: keycloak-oidc
+    OAUTH2_PROXY_OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:?set OIDC_ISSUER_URL in the VPS environment}
+    OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:4180
+    OAUTH2_PROXY_EMAIL_DOMAINS: "*"
+    # The realm has no self-registration or email-verification flow at all --
+    # "Administrators create every human account" (docs/KEYCLOAK-CUTOVER.md)
+    # directly via kcadm/the admin console, not through a verify-your-email
+    # signup. oauth2-proxy's default behavior rejects any ID token whose
+    # email_verified claim isn't true, which every one of those admin-created
+    # accounts fails by default -- caught live: "Error redeeming code during
+    # OAuth2 callback: email in id_token () isn't verified", a full login
+    # failure on every gateway-fronted app, not just one. Verified email
+    # isn't a meaningful signal in this trust model (Keycloak login + the
+    # realm's own account provisioning is the actual authorization boundary,
+    # not whether an operator clicked a confirmation link that was never
+    # sent), so this check is disabled rather than making emailVerified=true
+    # a manual step every future admin has to remember when creating a user.
+    OAUTH2_PROXY_INSECURE_OIDC_ALLOW_UNVERIFIED_EMAIL: "true"
+    # Same root cause, one layer deeper: admin-created accounts in this
+    # realm aren't required to have an email at all, so the ID token has no
+    # email claim to even be unverified -- caught live right after the
+    # above fix: "could not enrich oidc session: neither the id_token nor
+    # the profileURL set an email". oauth2-proxy needs *some* claim as its
+    # user-identity key; preferred_username is what Keycloak always sets
+    # for every account regardless of whether an email was ever configured,
+    # unlike email which is optional here.
+    OAUTH2_PROXY_OIDC_EMAIL_CLAIM: preferred_username
+    OAUTH2_PROXY_CODE_CHALLENGE_METHOD: S256
+    OAUTH2_PROXY_COOKIE_SECURE: "true"
+    OAUTH2_PROXY_COOKIE_HTTPONLY: "true"
+    OAUTH2_PROXY_COOKIE_SAMESITE: lax
+    OAUTH2_PROXY_COOKIE_EXPIRE: 12h
+    OAUTH2_PROXY_COOKIE_REFRESH: 30m
+    OAUTH2_PROXY_COOKIE_CSRF_PER_REQUEST: "true"
+    OAUTH2_PROXY_COOKIE_CSRF_PER_REQUEST_LIMIT: "8"
+    OAUTH2_PROXY_REVERSE_PROXY: "true"
+    OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
+    OAUTH2_PROXY_PASS_ACCESS_TOKEN: "false"
+    OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER: "false"
+    # Without this, /oauth2/sign_out only clears this gateway's own cookie --
+    # the user's Keycloak SSO session (KEYCLOAK_SESSION cookie on the auth
+    # host) stays alive, and the very next visit to this or any other
+    # gateway-fronted app silently re-authenticates via SSO with no
+    # login/MFA prompt. {id_token} is oauth2-proxy's own placeholder,
+    # substituted with the session's real ID token at logout time.
+    OAUTH2_PROXY_BACKEND_LOGOUT_URL: "${OIDC_ISSUER_URL:?set OIDC_ISSUER_URL in the VPS environment}/protocol/openid-connect/logout?id_token_hint={id_token}"
+  healthcheck:
+    test: ["CMD", "/bin/oauth2-proxy", "--version"]
+    interval: 30s
+    timeout: 5s
+    retries: 3
+  deploy:
+    resources:
+      limits: {cpus: "0.25", memory: 128M}
 
 services:
 
@@ -38,6 +96,14 @@ services:
       - ./traefik/certs:/etc/traefik/certs:ro
     networks:
       - proxy
+      - oidc-kibana
+      - oidc-evebox
+      - oidc-arkime
+      - oidc-tanner
+      - oidc-revdeck
+      - oidc-dockge
+      - oidc-traefik
+      - oidc-dashboard
     # #117: `traefik healthcheck` does a full binary re-exec (new Go runtime
     # init, config parse) rather than a lightweight HTTP call. Measured
     # 6-9s per invocation under this container's 0.5 CPU limit, so it never
@@ -345,12 +411,16 @@ services:
     command: TCP4-LISTEN:8082,fork,reuseaddr TCP4:10.8.0.2:19082
     networks: [proxy]
 
+  # Isolated on oidc-dashboard (not the shared proxy network) like every
+  # other protected upstream's socat bridge -- Traefik is already a member
+  # of oidc-dashboard to route to it. Reachable only from Traefik and the
+  # oidc-dashboard gateway, not from the ~20 unrelated containers on proxy.
   socat-hp-dashboard:
     image: alpine/socat:latest
     container_name: socat-hp-dashboard
     restart: unless-stopped
     command: TCP4-LISTEN:8090,fork,reuseaddr TCP4:10.8.0.2:19090
-    networks: [proxy]
+    networks: [oidc-dashboard]
 
   # #266: second dashboard replica's bridge, for zero-downtime rolling
   # updates -- see docker-compose.dashboard.yml's own header comment and
@@ -362,6 +432,17 @@ services:
     container_name: socat-hp-dashboard-b
     restart: unless-stopped
     command: TCP4-LISTEN:8092,fork,reuseaddr TCP4:10.8.0.2:19092
+    networks: [oidc-dashboard]
+
+  # Bridges the homeserver's Keycloak (Dockge-managed honeypot-keycloak
+  # stack) to the public auth.* router (see the `keycloak` router in
+  # vps/traefik/dynamic.yml), which is the live issuer/admin path -- no
+  # legacy auth-backend service exists any more.
+  socat-hp-keycloak:
+    image: alpine/socat:latest
+    container_name: socat-hp-keycloak
+    restart: unless-stopped
+    command: TCP4-LISTEN:8080,fork,reuseaddr TCP4:10.8.0.2:18080
     networks: [proxy]
 
   socat-hp-kibana:
@@ -369,28 +450,92 @@ services:
     container_name: socat-hp-kibana
     restart: unless-stopped
     command: TCP4-LISTEN:5601,fork,reuseaddr TCP4:10.8.0.2:19601
-    networks: [proxy]
+    networks: [oidc-kibana]
+
+  oidc-kibana:
+    <<: *oidc-gateway
+    container_name: oidc-kibana
+    environment:
+      <<: *oidc-gateway-environment
+      OAUTH2_PROXY_CLIENT_ID: kibana
+      OAUTH2_PROXY_CLIENT_SECRET_FILE: /run/oidc-secrets/client-secret
+      OAUTH2_PROXY_COOKIE_SECRET_FILE: /run/oidc-secrets/cookie-secret
+      OAUTH2_PROXY_REDIRECT_URL: https://kibana.${OIDC_PUBLIC_DOMAIN:?set OIDC_PUBLIC_DOMAIN}/oauth2/callback
+      OAUTH2_PROXY_ALLOWED_ROLES: kibana:access
+      OAUTH2_PROXY_COOKIE_NAME: __Host-apiary-kibana
+      OAUTH2_PROXY_UPSTREAMS: http://socat-hp-kibana:5601
+    volumes:
+      - ${OIDC_SECRETS_DIR:?set OIDC_SECRETS_DIR}/kibana:/run/oidc-secrets:ro
+    networks: [oidc-kibana]
 
   socat-hp-tanner:
     image: alpine/socat:latest
     container_name: socat-hp-tanner
     restart: unless-stopped
     command: TCP4-LISTEN:8091,fork,reuseaddr TCP4:10.8.0.2:19091
-    networks: [proxy]
+    networks: [oidc-tanner]
+
+  oidc-tanner:
+    <<: *oidc-gateway
+    container_name: oidc-tanner
+    environment:
+      <<: *oidc-gateway-environment
+      OAUTH2_PROXY_CLIENT_ID: tanner
+      OAUTH2_PROXY_CLIENT_SECRET_FILE: /run/oidc-secrets/client-secret
+      OAUTH2_PROXY_COOKIE_SECRET_FILE: /run/oidc-secrets/cookie-secret
+      OAUTH2_PROXY_REDIRECT_URL: https://tanner.${OIDC_PUBLIC_DOMAIN:?set OIDC_PUBLIC_DOMAIN}/oauth2/callback
+      OAUTH2_PROXY_ALLOWED_ROLES: tanner:access
+      OAUTH2_PROXY_COOKIE_NAME: __Host-apiary-tanner
+      OAUTH2_PROXY_UPSTREAMS: http://socat-hp-tanner:8091
+    volumes:
+      - ${OIDC_SECRETS_DIR:?set OIDC_SECRETS_DIR}/tanner:/run/oidc-secrets:ro
+    networks: [oidc-tanner]
 
   socat-hp-evebox:
     image: alpine/socat:latest
     container_name: socat-hp-evebox
     restart: unless-stopped
     command: TCP4-LISTEN:5636,fork,reuseaddr TCP4:10.8.0.2:19636
-    networks: [proxy]
+    networks: [oidc-evebox]
+
+  oidc-evebox:
+    <<: *oidc-gateway
+    container_name: oidc-evebox
+    environment:
+      <<: *oidc-gateway-environment
+      OAUTH2_PROXY_CLIENT_ID: evebox
+      OAUTH2_PROXY_CLIENT_SECRET_FILE: /run/oidc-secrets/client-secret
+      OAUTH2_PROXY_COOKIE_SECRET_FILE: /run/oidc-secrets/cookie-secret
+      OAUTH2_PROXY_REDIRECT_URL: https://evebox.${OIDC_PUBLIC_DOMAIN:?set OIDC_PUBLIC_DOMAIN}/oauth2/callback
+      OAUTH2_PROXY_ALLOWED_ROLES: evebox:access
+      OAUTH2_PROXY_COOKIE_NAME: __Host-apiary-evebox
+      OAUTH2_PROXY_UPSTREAMS: http://socat-hp-evebox:5636
+    volumes:
+      - ${OIDC_SECRETS_DIR:?set OIDC_SECRETS_DIR}/evebox:/run/oidc-secrets:ro
+    networks: [oidc-evebox]
 
   socat-hp-arkime:
     image: alpine/socat:latest
     container_name: socat-hp-arkime
     restart: unless-stopped
     command: TCP4-LISTEN:8005,fork,reuseaddr TCP4:10.8.0.2:19080
-    networks: [proxy]
+    networks: [oidc-arkime]
+
+  oidc-arkime:
+    <<: *oidc-gateway
+    container_name: oidc-arkime
+    environment:
+      <<: *oidc-gateway-environment
+      OAUTH2_PROXY_CLIENT_ID: arkime
+      OAUTH2_PROXY_CLIENT_SECRET_FILE: /run/oidc-secrets/client-secret
+      OAUTH2_PROXY_COOKIE_SECRET_FILE: /run/oidc-secrets/cookie-secret
+      OAUTH2_PROXY_REDIRECT_URL: https://arkime.${OIDC_PUBLIC_DOMAIN:?set OIDC_PUBLIC_DOMAIN}/oauth2/callback
+      OAUTH2_PROXY_ALLOWED_ROLES: arkime:access
+      OAUTH2_PROXY_COOKIE_NAME: __Host-apiary-arkime
+      OAUTH2_PROXY_UPSTREAMS: http://socat-hp-arkime:8005
+    volumes:
+      - ${OIDC_SECRETS_DIR:?set OIDC_SECRETS_DIR}/arkime:/run/oidc-secrets:ro
+    networks: [oidc-arkime]
 
   # Rev·Deck (analysis/ghidra/docker-compose.ghidra.yml, profile: revdeck) --
   # not part of this stack's home-side compose file, but reachable the same
@@ -400,21 +545,95 @@ services:
     container_name: socat-hp-revdeck
     restart: unless-stopped
     command: TCP4-LISTEN:5000,fork,reuseaddr TCP4:10.8.0.2:19500
-    networks: [proxy]
+    networks: [oidc-revdeck]
+
+  oidc-revdeck:
+    <<: *oidc-gateway
+    container_name: oidc-revdeck
+    environment:
+      <<: *oidc-gateway-environment
+      OAUTH2_PROXY_CLIENT_ID: revdeck
+      OAUTH2_PROXY_CLIENT_SECRET_FILE: /run/oidc-secrets/client-secret
+      OAUTH2_PROXY_COOKIE_SECRET_FILE: /run/oidc-secrets/cookie-secret
+      OAUTH2_PROXY_REDIRECT_URL: https://rev.${OIDC_PUBLIC_DOMAIN:?set OIDC_PUBLIC_DOMAIN}/oauth2/callback
+      OAUTH2_PROXY_ALLOWED_ROLES: revdeck:access
+      OAUTH2_PROXY_COOKIE_NAME: __Host-apiary-revdeck
+      OAUTH2_PROXY_UPSTREAMS: http://socat-hp-revdeck:5000
+    volumes:
+      - ${OIDC_SECRETS_DIR:?set OIDC_SECRETS_DIR}/revdeck:/run/oidc-secrets:ro
+    networks: [oidc-revdeck]
 
   # Dockge itself (host-level infra, /var/dockge/compose.yaml on the home
   # server -- not part of this repo, unlike everything else bridged here).
   # Has /var/run/docker.sock mounted read-write: root-equivalent control
   # over the whole homeserver, not a scoped investigation UI. Exposed behind
-  # the same forward-auth SSO as everything else, on the operator's explicit
-  # ask and with that risk spelled out and accepted -- see the commit that
-  # added this.
+  # a dedicated OIDC gateway, on the operator's explicit ask and with that
+  # risk spelled out and accepted -- see the commit that added this.
   socat-hp-dockge:
     image: alpine/socat:latest
     container_name: socat-hp-dockge
     restart: unless-stopped
     command: TCP4-LISTEN:5001,fork,reuseaddr TCP4:10.8.0.2:5001
-    networks: [proxy]
+    networks: [oidc-dockge]
+
+  oidc-dockge:
+    <<: *oidc-gateway
+    container_name: oidc-dockge
+    environment:
+      <<: *oidc-gateway-environment
+      OAUTH2_PROXY_CLIENT_ID: dockge
+      OAUTH2_PROXY_CLIENT_SECRET_FILE: /run/oidc-secrets/client-secret
+      OAUTH2_PROXY_COOKIE_SECRET_FILE: /run/oidc-secrets/cookie-secret
+      OAUTH2_PROXY_REDIRECT_URL: https://dockge.${OIDC_PUBLIC_DOMAIN:?set OIDC_PUBLIC_DOMAIN}/oauth2/callback
+      # #1014: 'admin', not 'access' -- Dockge has /var/run/docker.sock
+      # mounted read-write (root-equivalent control of the homeserver), and
+      # must never share a role name with the ordinary low-privilege
+      # 'access' role every other app's gateway checks.
+      OAUTH2_PROXY_ALLOWED_ROLES: dockge:admin
+      OAUTH2_PROXY_COOKIE_NAME: __Host-apiary-dockge
+      OAUTH2_PROXY_UPSTREAMS: http://socat-hp-dockge:5001
+    volumes:
+      - ${OIDC_SECRETS_DIR:?set OIDC_SECRETS_DIR}/dockge:/run/oidc-secrets:ro
+    networks: [oidc-dockge]
+
+  oidc-traefik:
+    <<: *oidc-gateway
+    container_name: oidc-traefik
+    environment:
+      <<: *oidc-gateway-environment
+      OAUTH2_PROXY_CLIENT_ID: traefik-dashboard
+      OAUTH2_PROXY_CLIENT_SECRET_FILE: /run/oidc-secrets/client-secret
+      OAUTH2_PROXY_COOKIE_SECRET_FILE: /run/oidc-secrets/cookie-secret
+      OAUTH2_PROXY_REDIRECT_URL: https://traefik.${OIDC_PUBLIC_DOMAIN:?set OIDC_PUBLIC_DOMAIN}/oauth2/callback
+      # #1014: 'admin', not 'access' -- reverse-proxy control is
+      # root-equivalent, and must never share a role name with the
+      # ordinary low-privilege 'access' role every other app's gateway
+      # checks.
+      OAUTH2_PROXY_ALLOWED_ROLES: traefik-dashboard:admin
+      OAUTH2_PROXY_COOKIE_NAME: __Host-apiary-traefik
+      OAUTH2_PROXY_UPSTREAMS: http://traefik:8081
+    volumes:
+      - ${OIDC_SECRETS_DIR:?set OIDC_SECRETS_DIR}/traefik-dashboard:/run/oidc-secrets:ro
+    networks: [oidc-traefik]
+
+  # Temporary compatibility gateway for dashboard deployments that predate
+  # its native OIDC runtime. It can be retired only after every live dashboard
+  # replica is verified on the native implementation.
+  oidc-dashboard:
+    <<: *oidc-gateway
+    container_name: oidc-dashboard
+    environment:
+      <<: *oidc-gateway-environment
+      OAUTH2_PROXY_CLIENT_ID: apiary-dashboard
+      OAUTH2_PROXY_CLIENT_SECRET_FILE: /run/oidc-secrets/client-secret
+      OAUTH2_PROXY_COOKIE_SECRET_FILE: /run/oidc-secrets/cookie-secret
+      OAUTH2_PROXY_REDIRECT_URL: https://honeypot.${OIDC_PUBLIC_DOMAIN:?set OIDC_PUBLIC_DOMAIN}/oauth2/callback
+      OAUTH2_PROXY_ALLOWED_ROLES: apiary-dashboard:access
+      OAUTH2_PROXY_COOKIE_NAME: __Host-apiary-dashboard
+      OAUTH2_PROXY_UPSTREAMS: http://traefik:8082
+    volumes:
+      - ${OIDC_SECRETS_DIR:?set OIDC_SECRETS_DIR}/apiary-dashboard:/run/oidc-secrets:ro
+    networks: [oidc-dashboard]
 
   # =====================================================================
   # SURICATA IDS
@@ -570,7 +789,7 @@ services:
   # sshfs, correlate by IP, or rotate on this side.
   p0f:
     build: ./p0f
-    image: APIARY-p0f:latest
+    image: apiary-p0f:latest
     container_name: hp-p0f
     restart: unless-stopped
     network_mode: host
@@ -634,6 +853,22 @@ services:
 networks:
   proxy:
     name: proxy
+    driver: bridge
+  oidc-kibana:
+    driver: bridge
+  oidc-evebox:
+    driver: bridge
+  oidc-arkime:
+    driver: bridge
+  oidc-tanner:
+    driver: bridge
+  oidc-revdeck:
+    driver: bridge
+  oidc-dockge:
+    driver: bridge
+  oidc-traefik:
+    driver: bridge
+  oidc-dashboard:
     driver: bridge
 
 volumes:

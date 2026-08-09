@@ -2,6 +2,7 @@
 # general-purpose/web/SSH/legacy-protocol honeypot. See
 # deploy-profiles/README.md.
 
+keycloak
 init
 elk
 dashboard

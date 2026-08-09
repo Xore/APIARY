@@ -157,7 +157,7 @@ type workbenchRecipeRequest struct {
 
 func workbenchIdentity(w http.ResponseWriter, r *http.Request) (authenticatedIdentity, bool) {
 	if !strings.EqualFold(strings.TrimSpace(os.Getenv("DASHBOARD_REQUIRE_ADMIN")), "true") {
-		return authenticatedIdentity{Subject: "local-dashboard-admin", Username: "local-admin", Role: "admin", Generation: 1}, true
+		return authenticatedIdentity{Subject: "local-dashboard-admin", Username: "local-admin", Role: "admin"}, true
 	}
 	identity, err := resolveIdentity(r)
 	if err != nil {

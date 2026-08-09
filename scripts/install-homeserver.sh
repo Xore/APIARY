@@ -173,7 +173,7 @@ for var in INSTALL_HOSTNAME GIT_REPO_URL GIT_REF REPO_DIR HOME_WG_ADDRESS \
            VPS_WG_ADDRESS VPS_WG_ENDPOINT VPS_WG_PUBLIC_KEY \
            VPS_SSH_HOST VPS_SSH_PORT VPS_SSH_USER VPS_SSH_KEY ENABLE_GPU_STACK \
            INSTALL_TIMEZONE BACKUP_HOST BACKUP_HOST_USER BACKUP_HOST_KEY BACKUP_HOST_PATH \
-           PIHOLE_LAN_IP ENABLE_SANDBOX_RESTORE; do
+           PIHOLE_LAN_IP ENABLE_SANDBOX_RESTORE AUTH_THEME_REPO_URL; do
   if [[ -z "${!var:-}" || "${!var}" == *'<'*'>'* ]]; then
     echo "Config value $var is unset or still a <PLACEHOLDER> in $CONFIG_FILE." >&2
     echo "Fill in every field before running unattended." >&2
@@ -523,7 +523,7 @@ step_dockge_install() {
 # compose file was ever backed up for it -- see step_pihole_provision, which
 # reconstructs a minimal one since it isn't part of this git repo).
 ENV_RESTORE_STACKS=(
-  honeypot-init honeypot-cowrie honeypot-dionaea honeypot-conpot honeypot-dnp3
+  honeypot-keycloak honeypot-init honeypot-cowrie honeypot-dionaea honeypot-conpot honeypot-dnp3
   honeypot-http honeypot-multipot honeypot-dashboard honeypot-payload-analysis
   honeypot-tanner honeypot-elk honeypot-utilities honeypot-stack ghidra ghosts
   pihole
@@ -559,6 +559,7 @@ step_restore_env_files() {
 # requirement (shared volumes are non-external and get created empty by
 # whichever stack starts first).
 STACK_DEFS=(
+  "honeypot-keycloak|docker-compose.keycloak.yml"
   "honeypot-elk|docker-compose.elk.yml"
   "honeypot-init|docker-compose.init.yml"
   "honeypot-tanner|docker-compose.tanner.yml"
@@ -594,12 +595,39 @@ step_provision_stack_dirs() {
     IFS='|' read -r name compose_file <<<"$entry"
     local dir="/var/dockge/stacks/$name"
     mkdir -p "$dir"
+    if [[ "$name" == "honeypot-keycloak" || "$name" == "honeypot-dashboard" ]]; then
+      install -d -m 700 "$dir/secrets"
+    fi
     if [[ ! -f "$REPO_DIR/$compose_file" ]]; then
       echo "MISSING compose source in repo: $compose_file (stack $name)"
       continue
     fi
     ln -sf "$REPO_DIR/$compose_file" "$dir/compose.yml"
   done
+}
+
+# #1019: docker-compose.keycloak.yml's realm-template mount was fixed to an
+# absolute /opt/stacks/apiary path, but the login theme
+# (KEYCLOAK_THEME_DIR, default /var/dockge/stacks/honeypot-keycloak/theme/
+# apiary) isn't part of this repo at all -- it's Xore/auth-backend's
+# themes/apiary, presentation-only, checked out separately.
+# .github/workflows/deploy.yml's CI path already does this (a dedicated
+# `actions/checkout` of Xore/auth-backend, then `rsync --delete` into
+# theme/apiary); this step is install-homeserver.sh's equivalent for a
+# from-scratch homeserver rebuild, which has no CI runner to do it.
+step_stage_keycloak_theme() {
+  local theme_repo_dir="$(dirname "$REPO_DIR")/auth-backend"
+  if [[ -d "$theme_repo_dir/.git" ]]; then
+    with_retry 3 10 git -C "$theme_repo_dir" fetch origin
+    git -C "$theme_repo_dir" checkout main
+    with_retry 3 10 git -C "$theme_repo_dir" pull --ff-only origin main
+  else
+    mkdir -p "$(dirname "$theme_repo_dir")"
+    with_retry 3 10 git clone --branch main "$AUTH_THEME_REPO_URL" "$theme_repo_dir"
+  fi
+  local destination="/var/dockge/stacks/honeypot-keycloak/theme"
+  install -d -m 755 "$destination"
+  rsync -a --delete "$theme_repo_dir/themes/apiary/" "$destination/apiary/"
 }
 
 step_bootstrap_missing_envs() {
@@ -617,6 +645,7 @@ step_bootstrap_missing_envs() {
     local example=""
     case "$name" in
       honeypot-init) example="$REPO_DIR/honeypot-init.env.example" ;;
+      honeypot-keycloak) example="$REPO_DIR/keycloak.env.example" ;;
       *) example="$REPO_DIR/.env.example" ;;
     esac
     if [[ -f "$example" ]]; then
@@ -1142,6 +1171,7 @@ run_step dockge-install        "Install Dockge"                     step_dockge_
 
 run_step restore-env-files     "Restore .env files from LAN backup" step_restore_env_files
 run_step provision-stack-dirs  "Link compose.yml into each stack dir" step_provision_stack_dirs
+run_step stage-keycloak-theme  "Check out and sync the Keycloak login theme" step_stage_keycloak_theme
 run_step bootstrap-missing-envs "Bootstrap any still-missing .env from .example" step_bootstrap_missing_envs
 
 run_step shared-resources      "Create honeynet + placeholder volumes" step_create_shared_resources

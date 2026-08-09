@@ -49,42 +49,12 @@ func nonce() string {
 	return base64.RawURLEncoding.EncodeToString(raw[:])
 }
 
-// authFrameOrigin is the auth-backend origin the settings iframe embeds
-// (scheme://host, no path), resolved once at startup -- see
-// setAuthFrameOrigin. Empty when settings embedding is disabled (unset or
-// invalid AUTH_ACCOUNT_URL; validatedAuthAccountURL already logs why and
-// hides the settings menu item in that case, so this stays silent).
-var authFrameOrigin string
-
-// setAuthFrameOrigin derives authFrameOrigin from validatedAuthAccountURL's
-// already-verified value, called once at startup (main.go) with the exact
-// same string used for AuthAccountURL in the /api/whoami response, so
-// there's one source of truth instead of parsing AUTH_ACCOUNT_URL twice.
-//
-// Without this, secHeaders' CSP had no frame-src directive at all, so it
-// fell back to default-src 'self' -- which blocks framing any other origin,
-// including auth-backend's own settings page. The browser's own console
-// error names the exact mechanism: "Framing '...' violates ... directive:
-// default-src 'self' ... Note that 'frame-src' was not explicitly set". A
-// relaxed frame-ancestors on auth-backend's side (#196) can never fix this:
-// frame-ancestors is the *embedded* page's opt-in for who may frame it;
-// frame-src is the *embedding* page's own opt-in for what it may frame, and
-// only the dashboard can set that for itself.
-func setAuthFrameOrigin(accountURL string) {
-	u, err := url.Parse(accountURL)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return
-	}
-	authFrameOrigin = u.Scheme + "://" + u.Host
-}
-
 // vncBridgeOrigin (#805) is the read-only VNC bridge's own origin
 // (ws://host:port or wss://host), added to connect-src so the sandbox-vnc
 // page's browser-side WebSocket connection is not blocked by the same CSP
-// that protects every other page here -- same "opt in the one origin this
-// one page needs" shape as authFrameOrigin above, resolved once at startup
-// from SANDBOX_VNC_BRIDGE_WS (main.go), empty (no relaxation at all) when
-// that env var is unset.
+// that protects every other page here -- opting in only the one origin this
+// one page needs, resolved once at startup from SANDBOX_VNC_BRIDGE_WS
+// (main.go), empty (no relaxation at all) when that env var is unset.
 var vncBridgeOrigin string
 
 func setVNCBridgeOrigin(bridgeWS string) {
@@ -97,9 +67,6 @@ func setVNCBridgeOrigin(bridgeWS string) {
 
 func secHeaders(w http.ResponseWriter, nonceValue string) {
 	frameSrc := "frame-src 'self'"
-	if authFrameOrigin != "" {
-		frameSrc += " " + authFrameOrigin
-	}
 	connectSrc := "connect-src 'self' https://tile.openstreetmap.org"
 	if vncBridgeOrigin != "" {
 		connectSrc += " " + vncBridgeOrigin
@@ -107,11 +74,16 @@ func secHeaders(w http.ResponseWriter, nonceValue string) {
 	w.Header().Set("Content-Security-Policy",
 		"default-src 'self'; "+
 			"script-src 'self' 'nonce-"+nonceValue+"'; "+
-			"style-src 'self' 'nonce-"+nonceValue+"'; "+
+			// #1020: the vendored Xore/theme's theme.css @imports Google
+			// Fonts (Fira Sans/Space Grotesk/Fira Code); its own docs/CSP.md
+			// documents fonts.googleapis.com (style-src, for the @import
+			// itself) and fonts.gstatic.com (font-src, for the actual font
+			// files) as required for any consumer.
+			"style-src 'self' 'nonce-"+nonceValue+"' https://fonts.googleapis.com; "+
 			"img-src 'self' data: https://tile.openstreetmap.org; "+
 			connectSrc+"; "+
 			frameSrc+"; "+
-			"font-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+			"font-src 'self' https://fonts.gstatic.com; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")

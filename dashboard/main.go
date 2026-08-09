@@ -5,11 +5,13 @@
 // including rotated files like cowrie.json.2026-07-18), aggregates them into a
 // snapshot and serves an auto-refreshing HTML page plus /api/stats.
 //
-// It exposes attacker data, so it has NO auth of its own — put it behind the
-// auth-gateway or a Traefik basicAuth middleware (see the stack README).
+// It exposes attacker data, so every application route is protected by the
+// native Keycloak OIDC middleware below. Traefik remains the TLS boundary but
+// is not trusted to assert dashboard identity.
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -66,14 +68,20 @@ func main() {
 		}
 		os.Exit(0)
 	}
+	var err error
+	dashboardOIDC, err = newOIDCAuth(context.Background())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "dashboard: OIDC initialization failed: %v\n", err)
+		os.Exit(1)
+	}
 
 	authAccountURL := validatedAuthAccountURL()
-	setAuthFrameOrigin(authAccountURL)
 	setVNCBridgeOrigin(getenv("SANDBOX_VNC_BRIDGE_WS", ""))
 	s := &store{
 		dir:            getenv("LOG_DIR", "/logs"),
 		yaraFile:       os.Getenv("YARA_RESULTS_FILE"),
 		authAccountURL: authAccountURL,
+		authAdminURL:   validatedExternalURL("AUTH_ADMIN_URL"),
 	}
 	for _, name := range strings.Split(os.Getenv("EXPECTED_SENSORS"), ",") {
 		if name = strings.TrimSpace(name); name != "" && name != "portbridge" {
@@ -270,7 +278,7 @@ func main() {
 	}()
 
 	// Orphan-preference retention (Milestone F): accounts deleted or disabled
-	// in auth-backend stop producing activity immediately — live introspection
+	// in Keycloak stop producing activity immediately — token introspection
 	// already revokes their access on the very next request — and this sweep
 	// expires their stored dashboard preferences after the retention window.
 	retentionDays := 90
@@ -300,6 +308,9 @@ func main() {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	}
 	http.HandleFunc("/healthz", healthzHandler(s))
+	http.HandleFunc("/auth/login", dashboardOIDC.serveLogin)
+	http.HandleFunc("/auth/callback", dashboardOIDC.serveCallback)
+	http.HandleFunc("/auth/logout", dashboardOIDC.serveLogout)
 	http.HandleFunc("/api/stats", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(s.get())
@@ -308,8 +319,8 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(currentRuntime())
 	})
-	// Current identity is resolved live through auth-backend. Caller-supplied
-	// X-Auth-* headers are intentionally ignored.
+	// Current identity comes only from the server-side OIDC session.
+	// Caller-supplied X-Auth-* headers are intentionally ignored.
 	http.HandleFunc("/api/whoami", s.serveWhoAmI)
 	http.HandleFunc("/api/settings/me", s.serveSettingsMe)
 	http.HandleFunc("/api/settings/me/preferences", s.servePreferencesPatch)
@@ -785,7 +796,7 @@ func main() {
 		if r.URL.Path != "/healthz" {
 			s.touchActivity()
 		}
-		mux.ServeHTTP(w, r)
+		dashboardOIDC.middleware(mux).ServeHTTP(w, r)
 	})
 
 	srv := &http.Server{

@@ -10,10 +10,9 @@ import (
 
 func testIdentity(subject, username, role string) authenticatedIdentity {
 	return authenticatedIdentity{
-		Subject:    subject,
-		Username:   username,
-		Role:       role,
-		Generation: 1,
+		Subject:  subject,
+		Username: username,
+		Role:     role,
 	}
 }
 

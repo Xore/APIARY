@@ -1,0 +1,391 @@
+{
+  "realm": "apiary",
+  "displayName": "APIARY",
+  "loginTheme": "apiary",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "registrationEmailAsUsername": false,
+  "rememberMe": false,
+  "verifyEmail": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "failureFactor": 5,
+  "waitIncrementSeconds": 900,
+  "quickLoginCheckMilliSeconds": 1000,
+  "minimumQuickLoginWaitSeconds": 60,
+  "maxFailureWaitSeconds": 86400,
+  "maxDeltaTimeSeconds": 43200,
+  "passwordPolicy": "length(15) and maxLength(72) and digits(1) and lowerCase(1) and upperCase(1) and specialChars(1) and notUsername(undefined) and passwordHistory(5)",
+  "ssoSessionIdleTimeout": 3600,
+  "ssoSessionMaxLifespan": 43200,
+  "ssoSessionIdleTimeoutRememberMe": 0,
+  "ssoSessionMaxLifespanRememberMe": 0,
+  "offlineSessionIdleTimeout": 2592000,
+  "offlineSessionMaxLifespanEnabled": true,
+  "offlineSessionMaxLifespan": 5184000,
+  "accessTokenLifespan": 300,
+  "accessTokenLifespanForImplicitFlow": 0,
+  "accessCodeLifespan": 60,
+  "accessCodeLifespanUserAction": 300,
+  "accessCodeLifespanLogin": 1800,
+  "actionTokenGeneratedByAdminLifespan": 43200,
+  "actionTokenGeneratedByUserLifespan": 900,
+  "oauth2DeviceCodeLifespan": 600,
+  "oauth2DevicePollingInterval": 5,
+  "revokeRefreshToken": true,
+  "refreshTokenMaxReuse": 0,
+  "defaultSignatureAlgorithm": "RS256",
+  "requiredActions": [
+    {
+      "alias": "CONFIGURE_TOTP",
+      "name": "Configure OTP",
+      "providerId": "CONFIGURE_TOTP",
+      "enabled": true,
+      "defaultAction": true,
+      "priority": 10,
+      "config": {}
+    },
+    {
+      "alias": "VERIFY_EMAIL",
+      "name": "Verify Email",
+      "providerId": "VERIFY_EMAIL",
+      "enabled": true,
+      "defaultAction": true,
+      "priority": 20,
+      "config": {}
+    },
+    {
+      "alias": "UPDATE_PASSWORD",
+      "name": "Update Password",
+      "providerId": "UPDATE_PASSWORD",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 30,
+      "config": {}
+    },
+    {
+      "alias": "UPDATE_PROFILE",
+      "name": "Update Profile",
+      "providerId": "UPDATE_PROFILE",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 40,
+      "config": {}
+    },
+    {
+      "alias": "webauthn-register",
+      "name": "Webauthn Register",
+      "providerId": "webauthn-register",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 50,
+      "config": {}
+    },
+    {
+      "alias": "webauthn-register-passwordless",
+      "name": "Webauthn Register Passwordless",
+      "providerId": "webauthn-register-passwordless",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 60,
+      "config": {}
+    }
+  ],
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA256",
+  "otpPolicyInitialCounter": 0,
+  "otpPolicyDigits": 6,
+  "otpPolicyLookAheadWindow": 1,
+  "otpPolicyPeriod": 30,
+  "otpPolicyCodeReusable": false,
+  "webAuthnPolicyRpEntityName": "APIARY",
+  "webAuthnPolicySignatureAlgorithms": ["ES256", "RS256"],
+  "webAuthnPolicyRpId": "example.invalid",
+  "webAuthnPolicyAttestationConveyancePreference": "none",
+  "webAuthnPolicyAuthenticatorAttachment": "not specified",
+  "webAuthnPolicyResidentKey": "not specified",
+  "webAuthnPolicyUserVerificationRequirement": "required",
+  "webAuthnPolicyCreateTimeout": 0,
+  "webAuthnPolicyAvoidSameAuthenticatorRegister": true,
+  "webAuthnPolicyAcceptableAaguids": [],
+  "webAuthnPolicyExtraOrigins": [],
+  "webAuthnPolicyPasswordlessRpEntityName": "APIARY",
+  "webAuthnPolicyPasswordlessSignatureAlgorithms": ["ES256", "RS256"],
+  "webAuthnPolicyPasswordlessRpId": "example.invalid",
+  "webAuthnPolicyPasswordlessAttestationConveyancePreference": "none",
+  "webAuthnPolicyPasswordlessAuthenticatorAttachment": "not specified",
+  "webAuthnPolicyPasswordlessResidentKey": "required",
+  "webAuthnPolicyPasswordlessUserVerificationRequirement": "required",
+  "webAuthnPolicyPasswordlessCreateTimeout": 0,
+  "webAuthnPolicyPasswordlessAvoidSameAuthenticatorRegister": true,
+  "webAuthnPolicyPasswordlessAcceptableAaguids": [],
+  "webAuthnPolicyPasswordlessExtraOrigins": [],
+  "roles": {
+    "realm": [
+      {
+        "name": "apiary-user",
+        "description": "May sign in to APIARY",
+        "composite": true,
+        "composites": {
+          "client": {
+            "apiary-dashboard": ["access"],
+            "kibana": ["access"],
+            "evebox": ["access"],
+            "arkime": ["access"],
+            "tanner": ["access"],
+            "revdeck": ["access"]
+          }
+        }
+      },
+      {
+        "name": "apiary-admin",
+        "description": "May administer APIARY",
+        "composite": true,
+        "composites": {
+          "realm": ["apiary-user"],
+          "client": {
+            "realm-management": ["manage-users", "view-users", "query-users"],
+            "apiary-dashboard": ["admin"],
+            "dockge": ["admin"],
+            "traefik-dashboard": ["admin"]
+          }
+        }
+      }
+    ],
+    "client": {
+      "apiary-dashboard": [
+        {"name": "access"},
+        {
+          "name": "admin",
+          "description": "#1013: composite of 'access' so an admin-only grant (kcadm, a future provisioning script, a realm edit) can't lock a user out of dashboard auth, which hard-requires 'access' before it even looks at admin/user distinction",
+          "composite": true,
+          "composites": {
+            "client": {
+              "apiary-dashboard": ["access"]
+            }
+          }
+        }
+      ],
+      "kibana": [{"name": "access"}],
+      "evebox": [{"name": "access"}],
+      "arkime": [{"name": "access"}],
+      "tanner": [{"name": "access"}],
+      "revdeck": [{"name": "access"}],
+      "traefik-dashboard": [
+        {"name": "admin", "description": "#1014: distinctly named (not 'access') because this grants root-equivalent control of the homeserver's reverse proxy -- must never be conflated with the ordinary low-privilege 'access' role used by Kibana/EveBox/Arkime/TANNER/RevDeck"}
+      ],
+      "dockge": [
+        {"name": "admin", "description": "#1014: distinctly named (not 'access') because Dockge has /var/run/docker.sock mounted read-write -- root-equivalent control of the whole homeserver. Must never be conflated with the ordinary low-privilege 'access' role used by Kibana/EveBox/Arkime/TANNER/RevDeck"}
+      ]
+    }
+  },
+  "groups": [
+    {
+      "name": "users",
+      "realmRoles": ["apiary-user"],
+      "clientRoles": {
+        "apiary-dashboard": ["access"],
+        "kibana": ["access"],
+        "evebox": ["access"],
+        "arkime": ["access"],
+        "tanner": ["access"],
+        "revdeck": ["access"]
+      }
+    },
+    {
+      "name": "administrators",
+      "realmRoles": ["apiary-user", "apiary-admin"],
+      "clientRoles": {
+        "apiary-dashboard": ["access", "admin"],
+        "kibana": ["access"],
+        "evebox": ["access"],
+        "arkime": ["access"],
+        "tanner": ["access"],
+        "revdeck": ["access"],
+        "traefik-dashboard": ["admin"],
+        "dockge": ["admin"]
+      }
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "apiary-dashboard",
+      "name": "APIARY dashboard",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": true,
+      "rootUrl": "https://honeypot.example.invalid",
+      "baseUrl": "https://honeypot.example.invalid/",
+      "redirectUris": [
+        "https://honeypot.example.invalid/oauth2/callback",
+        "https://honeypot.example.invalid/auth/callback"
+      ],
+      "webOrigins": [
+        "https://honeypot.example.invalid"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "https://honeypot.example.invalid/*"
+      },
+      "defaultClientScopes": ["web-origins", "acr", "roles", "profile", "email"],
+      "optionalClientScopes": []
+    },
+    {
+      "clientId": "kibana",
+      "name": "Kibana oauth2-proxy",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": true,
+      "rootUrl": "https://kibana.example.invalid",
+      "baseUrl": "https://kibana.example.invalid/",
+      "redirectUris": ["https://kibana.example.invalid/oauth2/callback"],
+      "webOrigins": ["https://kibana.example.invalid"],
+      "attributes": {"pkce.code.challenge.method": "S256", "post.logout.redirect.uris": "https://kibana.example.invalid/*"},
+      "defaultClientScopes": ["web-origins", "acr", "roles", "profile", "email"],
+      "optionalClientScopes": []
+    },
+    {
+      "clientId": "evebox",
+      "name": "EveBox oauth2-proxy",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": true,
+      "rootUrl": "https://evebox.example.invalid",
+      "baseUrl": "https://evebox.example.invalid/",
+      "redirectUris": ["https://evebox.example.invalid/oauth2/callback"],
+      "webOrigins": ["https://evebox.example.invalid"],
+      "attributes": {"pkce.code.challenge.method": "S256", "post.logout.redirect.uris": "https://evebox.example.invalid/*"},
+      "defaultClientScopes": ["web-origins", "acr", "roles", "profile", "email"],
+      "optionalClientScopes": []
+    },
+    {
+      "clientId": "arkime",
+      "name": "Arkime oauth2-proxy",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": true,
+      "rootUrl": "https://arkime.example.invalid",
+      "baseUrl": "https://arkime.example.invalid/",
+      "redirectUris": ["https://arkime.example.invalid/oauth2/callback"],
+      "webOrigins": ["https://arkime.example.invalid"],
+      "attributes": {"pkce.code.challenge.method": "S256", "post.logout.redirect.uris": "https://arkime.example.invalid/*"},
+      "defaultClientScopes": ["web-origins", "acr", "roles", "profile", "email"],
+      "optionalClientScopes": []
+    },
+    {
+      "clientId": "tanner",
+      "name": "TANNER oauth2-proxy",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": true,
+      "rootUrl": "https://tanner.example.invalid",
+      "baseUrl": "https://tanner.example.invalid/",
+      "redirectUris": ["https://tanner.example.invalid/oauth2/callback"],
+      "webOrigins": ["https://tanner.example.invalid"],
+      "attributes": {"pkce.code.challenge.method": "S256", "post.logout.redirect.uris": "https://tanner.example.invalid/*"},
+      "defaultClientScopes": ["web-origins", "acr", "roles", "profile", "email"],
+      "optionalClientScopes": []
+    },
+    {
+      "clientId": "revdeck",
+      "name": "RevDeck oauth2-proxy",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": true,
+      "rootUrl": "https://rev.example.invalid",
+      "baseUrl": "https://rev.example.invalid/",
+      "redirectUris": ["https://rev.example.invalid/oauth2/callback"],
+      "webOrigins": ["https://rev.example.invalid"],
+      "attributes": {"pkce.code.challenge.method": "S256", "post.logout.redirect.uris": "https://rev.example.invalid/*"},
+      "defaultClientScopes": ["web-origins", "acr", "roles", "profile", "email"],
+      "optionalClientScopes": []
+    },
+    {
+      "clientId": "traefik-dashboard",
+      "name": "Traefik dashboard oauth2-proxy",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": true,
+      "rootUrl": "https://traefik.example.invalid",
+      "baseUrl": "https://traefik.example.invalid/",
+      "redirectUris": ["https://traefik.example.invalid/oauth2/callback"],
+      "webOrigins": ["https://traefik.example.invalid"],
+      "attributes": {"pkce.code.challenge.method": "S256", "post.logout.redirect.uris": "https://traefik.example.invalid/*"},
+      "defaultClientScopes": ["web-origins", "acr", "roles", "profile", "email"],
+      "optionalClientScopes": []
+    },
+    {
+      "clientId": "dockge",
+      "name": "Dockge oauth2-proxy",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": true,
+      "rootUrl": "https://dockge.example.invalid",
+      "baseUrl": "https://dockge.example.invalid/",
+      "redirectUris": ["https://dockge.example.invalid/oauth2/callback"],
+      "webOrigins": ["https://dockge.example.invalid"],
+      "attributes": {"pkce.code.challenge.method": "S256", "post.logout.redirect.uris": "https://dockge.example.invalid/*"},
+      "defaultClientScopes": ["web-origins", "acr", "roles", "profile", "email"],
+      "optionalClientScopes": []
+    }
+  ],
+  "eventsEnabled": true,
+  "eventsExpiration": 7776000,
+  "eventsListeners": ["jboss-logging"],
+  "enabledEventTypes": [],
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": true
+}

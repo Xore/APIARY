@@ -603,25 +603,22 @@
           badge.textContent = cap;
           capsEl.appendChild(badge);
         });
-        const accountURL = typeof identity.auth_account_url === "string" ? identity.auth_account_url.trim() : "";
-        if (accountURL) {
-          try {
-            const base = new URL(accountURL);
-            linkEl.href = accountURL;
-            logoutEl.href = base.origin + "/_auth/logout";
-            linkEl.hidden = false;
-            logoutEl.hidden = false;
-            // Stable deep links into the auth app's panes (Milestone F): the
-            // auth origin owns every credential mutation; the dashboard only
-            // ever links there.
-            qa("[data-hp-acct-deep]").forEach(a => {
-              const deep = new URL(accountURL);
-              deep.searchParams.set("pane", a.dataset.hpAcctDeep);
-              a.href = deep.toString();
-              a.hidden = false;
-            });
-          } catch { linkEl.hidden = true; logoutEl.hidden = true; }
-        } else { linkEl.hidden = true; logoutEl.hidden = true; }
+        const actions = identity.account_actions || {};
+        linkEl.href = actions.manage_account || "#";
+        linkEl.hidden = !actions.manage_account;
+        logoutEl.href = actions.logout || "/auth/logout";
+        logoutEl.hidden = false;
+        const targets = {
+          account: actions.profile,
+          passkeys: actions.security,
+          privacy: actions.security,
+          sessions: actions.sessions
+        };
+        qa("[data-hp-acct-deep]").forEach(a => {
+          const target = targets[a.dataset.hpAcctDeep];
+          a.href = target || "#";
+          a.hidden = !target;
+        });
       } catch {
         nameEl.textContent = "Identity unavailable";
         subjectEl.textContent = "";
@@ -898,20 +895,10 @@
           try {
             const response = await fetch("/api/whoami", { cache: "no-store" });
             const identity = response.ok ? await response.json() : null;
-            const accountURL = identity && identity.auth_account_url ? identity.auth_account_url.trim() : "";
-            if (accountURL) {
-              // Deep links into the auth app's admin panes (Milestone F).
-              const users = new URL(accountURL);
-              users.searchParams.set("pane", "admin-users");
-              adminLink.href = users.toString();
+            const usersURL = identity?.account_actions?.manage_users || "";
+            if (usersURL) {
+              adminLink.href = usersURL;
               adminLink.hidden = false;
-              const auditLink = q("[data-hp-users-audit-link]");
-              if (auditLink) {
-                const logs = new URL(accountURL);
-                logs.searchParams.set("pane", "admin-logs");
-                auditLink.href = logs.toString();
-                auditLink.hidden = false;
-              }
             }
           } catch { /* links stay hidden */ }
         }

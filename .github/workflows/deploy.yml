@@ -95,6 +95,35 @@ jobs:
           test ! -f .env || chmod 600 .env
           docker compose -f compose.yml config --quiet
 
+      - name: Check out the presentation-only Keycloak theme
+        uses: actions/checkout@v7
+        with:
+          repository: Xore/auth-backend
+          path: auth-theme-source
+          persist-credentials: false
+
+      - name: Synchronize honeypot-keycloak identity stack
+        shell: bash
+        run: |
+          destination=/var/dockge/stacks/honeypot-keycloak
+          install -d -m 755 "$destination"
+          install -d -m 750 "$destination/secrets"
+          cp docker-compose.keycloak.yml "$destination/compose.yml"
+          cp -r keycloak "$destination/"
+          install -d -m 755 "$destination/theme"
+          rsync -a --delete auth-theme-source/themes/apiary/ "$destination/theme/apiary/"
+          cd "$destination"
+          test ! -f .env || chmod 600 .env
+          docker compose -f compose.yml config --quiet
+          # Do not build: this stack uses reviewed, digest-pinned upstream
+          # Keycloak and PostgreSQL images. Missing secrets intentionally
+          # make first deployment fail closed until provisioned in Dockge.
+          if test -f secrets/postgres-password; then
+            docker compose -f compose.yml up -d
+          else
+            echo "honeypot-keycloak synchronized but not started: provision secrets in Dockge"
+          fi
+
       # #258 proof of concept: the Conpot persona family split into its own
       # Dockge stack, same arrangement as honeypot-init above. No ordering
       # dependency on honeypot-init here the way APIARY's own
@@ -269,6 +298,7 @@ jobs:
         run: |
           destination=/opt/stacks/honeypot-dashboard
           install -d -m 755 "$destination"
+          install -d -m 700 "$destination/secrets"
           cp docker-compose.dashboard.yml "$destination/compose.yml"
           cd "$destination"
           test ! -f .env || chmod 600 .env
@@ -281,8 +311,12 @@ jobs:
           # and services-adapter aren't replicated and still want a normal
           # reconcile, so run that first, then the rolling script for the
           # dashboard pair only (it builds the shared image itself).
-          docker compose -f compose.yml up -d --build es-results-importer services-adapter
-          COMPOSE_FILE=compose.yml /opt/stacks/apiary/scripts/deploy-dashboard-rolling.sh
+          docker compose -f compose.yml up -d --build es-results-importer services-adapter oidc-sessions
+          if test -f secrets/oidc-client-secret; then
+            COMPOSE_FILE=compose.yml /opt/stacks/apiary/scripts/deploy-dashboard-rolling.sh
+          else
+            echo "honeypot-dashboard synchronized but replicas not started: provision secrets/oidc-client-secret in Dockge"
+          fi
 
   vps:
     if: inputs.target == 'vps' || inputs.target == 'both'

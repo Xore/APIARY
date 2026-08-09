@@ -101,6 +101,7 @@ if $has_sensor; then
 fi
 if [ -v "enabled[dashboard]" ]; then
   [ -v "enabled[elk]" ] || fail "'dashboard' is enabled but 'elk' is not -- the dashboard reads several sensors' events from Elasticsearch, not their log files (#403), and always needs it reachable."
+  [ -v "enabled[keycloak]" ] || fail "'dashboard' is enabled but 'keycloak' is not -- the target dashboard authentication path uses native Keycloak OIDC."
 fi
 if $has_sensor && ! [ -v "enabled[utilities]" ]; then
   warn "'utilities' is not enabled -- no log rotation, disk-space monitoring, or autoheal for this deployment."

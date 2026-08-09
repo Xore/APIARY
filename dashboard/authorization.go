@@ -1,46 +1,47 @@
 package main
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
-	"time"
 )
 
 var (
 	errIdentityUnavailable  = errors.New("identity service unavailable")
 	errIdentityUnauthorized = errors.New("authenticated identity required")
+	dashboardOIDC           *oidcAuth
 )
+
+type identityContextKey struct{}
 
 type authenticatedIdentity struct {
 	Subject     string `json:"subject"`
 	Username    string `json:"username"`
 	DisplayName string `json:"display_name,omitempty"`
 	Role        string `json:"role"`
-	Generation  int    `json:"generation"`
 }
 
 type whoAmIResponse struct {
 	authenticatedIdentity
-	Capabilities   []string `json:"capabilities"`
-	AuthAccountURL string   `json:"auth_account_url,omitempty"`
+	Capabilities   []string       `json:"capabilities"`
+	AccountActions accountActions `json:"account_actions"`
 }
 
-type identityRequest struct {
-	TargetHost string `json:"target_host"`
+type accountActions struct {
+	ManageAccount string `json:"manage_account,omitempty"`
+	Profile       string `json:"profile,omitempty"`
+	Security      string `json:"security,omitempty"`
+	Sessions      string `json:"sessions,omitempty"`
+	Logout        string `json:"logout"`
+	ManageUsers   string `json:"manage_users,omitempty"`
 }
 
-// requireAdmin protects evidence-changing and raw-evidence operations. It
-// deliberately ignores X-Auth-Role: callers can reach the dashboard on its
-// internal WireGuard listener and could forge that header. The current browser
-// session is re-validated by auth-backend on every privileged request.
 func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	if !strings.EqualFold(strings.TrimSpace(os.Getenv("DASHBOARD_REQUIRE_ADMIN")), "true") {
 		return true
@@ -61,9 +62,6 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	return false
 }
 
-// capabilitiesFor maps a trusted role to dashboard capabilities. Capability
-// lists are computed server-side only; client code never derives permission
-// from a badge or a hidden control (roadmap §2).
 func capabilitiesFor(role string) []string {
 	capabilities := []string{"preferences:write", "evidence:read"}
 	if role == "admin" {
@@ -72,11 +70,6 @@ func capabilitiesFor(role string) []string {
 	return capabilities
 }
 
-// requireIdentity is the identity middleware for the settings APIs added in
-// Milestones C and E: it resolves the current session through live
-// introspection and writes the error response on failure. Authorization
-// beyond "any authenticated subject" (admin-only endpoints) additionally
-// checks identity.Role at the call site.
 func requireIdentity(w http.ResponseWriter, r *http.Request) (authenticatedIdentity, bool) {
 	identity, err := resolveIdentity(r)
 	if err != nil {
@@ -90,10 +83,6 @@ func requireIdentity(w http.ResponseWriter, r *http.Request) (authenticatedIdent
 	return identity, true
 }
 
-// serveWhoAmI answers the current identity and refreshes the dashboard-owned
-// user projection as a side effect. The projection is diagnostic and
-// best-effort; a projection write failure must never break the identity
-// response itself.
 func (s *store) serveWhoAmI(w http.ResponseWriter, r *http.Request) {
 	identity, err := resolveIdentity(r)
 	if err != nil {
@@ -113,18 +102,38 @@ func (s *store) serveWhoAmI(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(whoAmIResponse{
 		authenticatedIdentity: identity,
 		Capabilities:          capabilitiesFor(identity.Role),
-		AuthAccountURL:        s.authAccountURL,
+		AccountActions:        keycloakAccountActions(s.authAccountURL, identity.Role, s.authAdminURL),
 	})
 }
 
-// validatedAuthAccountURL resolves and validates AUTH_ACCOUNT_URL once at
-// startup. An unset value just leaves the settings menu item hidden
-// (hp-account.js). A set-but-malformed one is worse: it reaches the browser
-// as an opaque src, and the only symptom is a blank iframe inside the
-// settings modal with nothing but the browser console to explain it — so a
-// bad value is rejected here, loudly, before the server takes any traffic,
-// instead of failing silently in front of whichever user opens Settings
-// first (issue #93).
+func keycloakAccountActions(accountURL, role, adminURL string) accountActions {
+	actions := accountActions{Logout: "/auth/logout"}
+	if accountURL == "" {
+		return actions
+	}
+	base := strings.TrimSuffix(accountURL, "/") + "/"
+	actions.ManageAccount = base
+	actions.Profile = base + "#/personal-info"
+	actions.Security = base + "#/security/signingin"
+	actions.Sessions = base + "#/security/device-activity"
+	if role == "admin" && adminURL != "" {
+		actions.ManageUsers = strings.TrimSuffix(adminURL, "/") + "/#/apiary/users"
+	}
+	return actions
+}
+
+func validatedExternalURL(name string) string {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return ""
+	}
+	if err := validateHTTPSURL(raw); err != nil {
+		fmt.Fprintf(os.Stderr, "dashboard: %s is not a valid HTTPS URL; the related account action will stay hidden\n", name)
+		return ""
+	}
+	return raw
+}
+
 func validatedAuthAccountURL() string {
 	raw := strings.TrimSpace(os.Getenv("AUTH_ACCOUNT_URL"))
 	if raw == "" {
@@ -136,86 +145,30 @@ func validatedAuthAccountURL() string {
 		fmt.Fprintf(os.Stderr, "dashboard: AUTH_ACCOUNT_URL %q is not a valid HTTPS URL; the settings menu item will stay hidden\n", raw)
 		return ""
 	}
-	introspection := strings.TrimSpace(os.Getenv("AUTH_INTROSPECTION_URL"))
-	authOrigin, err := url.Parse(introspection)
-	if introspection == "" || err != nil || authOrigin.Hostname() == "" {
-		fmt.Fprintf(os.Stderr, "dashboard: AUTH_ACCOUNT_URL is set but AUTH_INTROSPECTION_URL is not a usable URL, so the auth origin cannot be confirmed; the settings menu item will stay hidden\n")
+	issuer, err := url.Parse(strings.TrimSpace(os.Getenv("OIDC_ISSUER_URL")))
+	if err != nil || issuer.Hostname() == "" {
+		fmt.Fprintln(os.Stderr, "dashboard: AUTH_ACCOUNT_URL is set but OIDC_ISSUER_URL is unusable; the settings menu item will stay hidden")
 		return ""
 	}
-	if !strings.EqualFold(accountURL.Hostname(), authOrigin.Hostname()) {
-		fmt.Fprintf(os.Stderr, "dashboard: AUTH_ACCOUNT_URL host %q does not match the AUTH_INTROSPECTION_URL auth origin %q; the settings menu item will stay hidden\n", accountURL.Hostname(), authOrigin.Hostname())
+	if !strings.EqualFold(accountURL.Hostname(), issuer.Hostname()) {
+		fmt.Fprintf(os.Stderr, "dashboard: AUTH_ACCOUNT_URL host %q does not match OIDC issuer host %q; the settings menu item will stay hidden\n", accountURL.Hostname(), issuer.Hostname())
 		return ""
 	}
 	return raw
 }
 
 func resolveIdentity(r *http.Request) (authenticatedIdentity, error) {
-	endpoint := strings.TrimSpace(os.Getenv("AUTH_INTROSPECTION_URL"))
-	token, err := secretFromEnvironment("AUTH_INTROSPECTION_TOKEN")
-	targetHost := strings.ToLower(strings.TrimSpace(os.Getenv("AUTH_TARGET_HOST")))
-	cookieName := strings.TrimSpace(os.Getenv("AUTH_SESSION_COOKIE_NAME"))
-	if cookieName == "" {
-		cookieName = "xore_sso"
+	if identity, ok := r.Context().Value(identityContextKey{}).(authenticatedIdentity); ok {
+		return identity, nil
 	}
-	if err != nil || endpoint == "" || len(token) < 32 || targetHost == "" {
+	if dashboardOIDC == nil {
 		return authenticatedIdentity{}, errIdentityUnavailable
 	}
-	parsed, err := url.Parse(endpoint)
-	if err != nil || parsed.User != nil || parsed.Fragment != "" || parsed.Hostname() == "" ||
-		(parsed.Scheme != "https" && !(parsed.Scheme == "http" && isLoopbackHost(parsed.Hostname()))) {
-		return authenticatedIdentity{}, errIdentityUnavailable
-	}
-	sessionCookie, err := r.Cookie(cookieName)
-	if err != nil || sessionCookie.Value == "" {
-		return authenticatedIdentity{}, errIdentityUnauthorized
-	}
-	body, err := json.Marshal(identityRequest{TargetHost: targetHost})
-	if err != nil {
-		return authenticatedIdentity{}, errIdentityUnavailable
-	}
-	request, err := http.NewRequestWithContext(r.Context(), http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return authenticatedIdentity{}, errIdentityUnavailable
-	}
-	request.Header.Set("Authorization", "Bearer "+token)
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("User-Agent", r.UserAgent())
-	request.AddCookie(&http.Cookie{Name: cookieName, Value: sessionCookie.Value})
-	client := &http.Client{
-		Timeout: 3 * time.Second,
-		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-	response, err := client.Do(request)
-	if err != nil {
-		return authenticatedIdentity{}, errIdentityUnavailable
-	}
-	defer response.Body.Close()
-	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
-		return authenticatedIdentity{}, errIdentityUnauthorized
-	}
-	if response.StatusCode != http.StatusOK {
-		return authenticatedIdentity{}, errIdentityUnavailable
-	}
-	contentType := strings.ToLower(response.Header.Get("Content-Type"))
-	if !strings.HasPrefix(contentType, "application/json") {
-		return authenticatedIdentity{}, errIdentityUnavailable
-	}
-	decoder := json.NewDecoder(io.LimitReader(response.Body, 8192))
-	decoder.DisallowUnknownFields()
-	var identity authenticatedIdentity
-	if err := decoder.Decode(&identity); err != nil {
-		return authenticatedIdentity{}, errIdentityUnavailable
-	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		return authenticatedIdentity{}, errIdentityUnavailable
-	}
-	if !validSubject(identity.Subject) || identity.Username == "" || identity.Generation < 1 ||
-		(identity.Role != "admin" && identity.Role != "user") {
-		return authenticatedIdentity{}, errIdentityUnavailable
-	}
-	return identity, nil
+	return dashboardOIDC.identityFromRequest(r)
+}
+
+func withIdentity(r *http.Request, identity authenticatedIdentity) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), identityContextKey{}, identity))
 }
 
 func secretFromEnvironment(name string) (string, error) {

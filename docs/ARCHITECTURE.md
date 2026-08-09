@@ -44,16 +44,16 @@ split what used to be a single `docker-compose.yml` into independently
 deployed Dockge stacks — each with its own compose file
 (`docker-compose.<name>.yml`) and its own start/stop/update lifecycle. That
 first split produced 12 stacks; new sensors and workers have each landed as
-their own stack since, and the home side now runs **20** — see
+their own stack since, and the home side now runs **21** — see
 `.github/workflows/deploy.yml`'s deploy jobs for the authoritative list. The
 root `docker-compose.yml` is a deliberate empty marker; nothing runs
-`docker compose up` against it any more, and it is not counted among the 20.
+`docker compose up` against it any more, and it is not counted among the 21.
 `docker-compose.sandbox.yml` is a per-detonation gateway/capture Compose file
 the Windows sandbox brings up and tears down around a single run — also not
 a standing stack. Host-owned systemd/libvirt services (Ghidra's worker, the
 Linux/Windows KVM sandboxes) and optional GPU/analysis stacks (ML worker,
 LLM worker, CAPE, GHOSTS) run outside Dockge entirely and outside this count
-as well. The diagrams below draw the 20 stack boundaries explicitly rather
+as well. The diagrams below draw the 21 stack boundaries explicitly rather
 than one "home server" box, because that boundary is where independent
 deployment, restart, and failure actually happen.
 
@@ -67,7 +67,7 @@ flowchart LR
     direction TB
     suricata["Suricata<br/>IDS + EVE + rotating PCAP"]
     traefik["Traefik<br/>TLS routing"]
-    auth["Xore/auth-backend<br/>forward-auth SSO"]
+    auth["Legacy Xore/auth-backend<br/>retired at Keycloak cutover"]
     httpBridges["socat HTTP bridges<br/>dashboard, Kibana, EveBox,<br/>Arkime, TANNER, Rev·Deck,<br/>web honeypots"]
     portbridge["portbridge<br/>raw TCP/UDP forwarding<br/>optional PROXY v1"]
     connlog[("portbridge connection log")]
@@ -75,8 +75,11 @@ flowchart LR
 
   wg["WireGuard tunnel"]
 
-  subgraph home["Home server — 20 independent Dockge stacks (#258)"]
+  subgraph home["Home server — 21 independent Dockge stacks (#258)"]
     direction TB
+    subgraph keycloakStack["honeypot-keycloak"]
+      keycloakSvc["Keycloak + private PostgreSQL<br/>Dockge-managed identity"]
+    end
     subgraph initStack["honeypot-init"]
       initJobs["Bootstrap one-shot jobs"]
     end
@@ -123,6 +126,7 @@ flowchart LR
   attacker -->|"HTTPS"| traefik
   traefik -->|"forward-auth check"| auth
   auth -->|"identity headers or reject"| traefik
+  traefik -->|"OIDC over WireGuard<br/>target migration path"| keycloakStack
   traefik -->|"decoy HTTP and protected UIs"| httpBridges
   attacker -->|"raw sensor ports"| portbridge
   portbridge --> connlog

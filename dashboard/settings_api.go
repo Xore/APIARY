@@ -7,7 +7,7 @@ package main
 //	PATCH /api/settings/me/preferences          typed partial update
 //	POST  /api/settings/me/preferences/reset    restore compiled defaults
 //
-// Every request resolves its subject through live auth-backend introspection
+// Every request resolves its subject through the native Keycloak OIDC session
 // (requireIdentity); there is no way to name another subject. Mutations
 // require a same-origin request (CSRF), a JSON content type, a bounded body,
 // an optional If-Match for optimistic concurrency, and stay under a
