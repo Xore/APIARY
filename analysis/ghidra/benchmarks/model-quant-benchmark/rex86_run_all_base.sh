@@ -42,12 +42,18 @@ WORK=/var/dockge/stacks/rex86-eval/work
 QUEUE_LOG="$WORK/other-models/queue-base.log"
 cd "$WORK"
 exec > >(tee -a "$QUEUE_LOG") 2>&1
-echo "=== BASE-MODEL QUEUE: waiting for the adapter queue to finish $(date -u +%FT%TZ) ==="
+echo "=== BASE-MODEL QUEUE: waiting for any other rex86_*.sh driver to finish $(date -u +%FT%TZ) ==="
 
-while pgrep -f 'bash .*rex86_run_all\.sh' >/dev/null 2>&1; do
+# Broadened from the original single "rex86_run_all.sh" (the adapter
+# queue) check to any driver in this directory -- the GPU is a
+# single-consumer resource shared across every script here, and this
+# queue gets re-run (with new models appended) well after that original
+# one-time adapter queue is long gone, so waiting on it specifically was
+# only ever correct for the very first run.
+while pgrep -f 'rex86_(run_all|run_one|run_base_model|backfill|prefetch)' | grep -vx "$$" | grep -q .; do
   sleep 30
 done
-echo "=== BASE-MODEL QUEUE: adapter queue finished, starting $(date -u +%FT%TZ) ==="
+echo "=== BASE-MODEL QUEUE: GPU clear, starting $(date -u +%FT%TZ) ==="
 
 run() {
   name="$1"; hf_repo="$2"; shift 2
@@ -102,6 +108,16 @@ run qwen-72b-instruct       "Qwen/Qwen2.5-72B-Instruct" Q6_K:24 Q5_K_M:25 Q4_K_M
 # Llama-3.3-70B-Instruct: gate confirmed accepted for the operator's HF
 # token (see header comment). Same quant tier as Qwen2.5-72B, same reasoning.
 run llama-3.3-70b-instruct  "meta-llama/Llama-3.3-70B-Instruct" Q6_K:20 Q5_K_M:25 Q4_K_M:30 Q3_K_M:40 Q2_K:55
+
+# LLM4Decompile v2 (#847, HF research pass 2026-08-09): purpose-trained
+# specifically to refine Ghidra's own pseudocode output into readable
+# decompiled source, not a general-purpose coding model like everything
+# above -- a closer domain match to this stack's actual Rev·Deck/Ghidra
+# pipeline stage. Both ungated, public repos, no HF token needed. 6.7B/9B
+# fit the same envelope as the 7-9B tier already run (codegemma-7B etc.),
+# ngl:99 (full offload) accordingly.
+run llm4decompile-6-7b-v2   "LLM4Binary/llm4decompile-6.7b-v2" Q6_K:99 Q5_K_M:99 Q4_K_M:99 Q3_K_M:99
+run llm4decompile-9b-v2     "LLM4Binary/llm4decompile-9b-v2"   Q6_K:99 Q5_K_M:99 Q4_K_M:99 Q3_K_M:99
 
 # DeepSeek-Coder-V2-Instruct FULL (235.74B, MoE) -- re-added per the
 # corrected feasibility check above, but NOT run from this queue: its
