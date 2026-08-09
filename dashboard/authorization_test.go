@@ -233,12 +233,10 @@ func TestAccountMenuUsesTopLevelKeycloakActions(t *testing.T) {
 }
 
 // #1015: this only asserts the legacy forward-auth middleware chain is gone
-// (true today) -- it does NOT assert the router targets the dashboard's own
-// native OIDC backend, because it currently doesn't: production still routes
-// through the oidc-dashboard compatibility gateway (see
-// TestDashboardTraefikRouteStillOnCompatibilityGateway below), pending #1026's
-// staged cutover. The original name of this test claimed more than it
-// checked; renamed to describe only what it verifies.
+// (true today) -- it does NOT assert the router's service target, see
+// TestDashboardTraefikRouteUsesNativeOIDCService below for that. The
+// original name of this test claimed more than it checked; renamed to
+// describe only what it verifies.
 func TestDashboardTraefikRouteHasNoForwardAuthMiddleware(t *testing.T) {
 	router := dashboardTraefikRouterBlock(t)
 	if strings.Contains(router, "forward-auth") || strings.Contains(router, "strip-auth-identity") ||
@@ -247,17 +245,19 @@ func TestDashboardTraefikRouteHasNoForwardAuthMiddleware(t *testing.T) {
 	}
 }
 
-// #1015 / #1026: production dashboard hostnames still target the
-// oidc-dashboard compatibility gateway, not the native-OIDC backend, until
-// every live dashboard replica is verified on the native implementation
-// (#1026's staged cutover). This test's job is to fail loudly -- not silently
-// pass -- the moment that changes without this test being updated alongside
-// it, so update the expected service name here when #1026 ships instead of
-// deleting or loosening this assertion.
-func TestDashboardTraefikRouteStillOnCompatibilityGateway(t *testing.T) {
+// #1015 / #1026: production dashboard hostnames targeted the oidc-dashboard
+// compatibility gateway until #1026's cutover flipped this router to the
+// native-OIDC honeypot-dashboard service (both replicas verified live:
+// direct unauthenticated access now redirects to /auth/login instead of
+// serving full content). Asserts the new state so a future regression back
+// to the compatibility gateway fails loudly here instead of silently.
+func TestDashboardTraefikRouteUsesNativeOIDCService(t *testing.T) {
 	router := dashboardTraefikRouterBlock(t)
-	if !strings.Contains(router, "service: oidc-dashboard") {
-		t.Fatalf("dashboard router's service target changed -- if this is #1026's native-OIDC cutover, update this test's expected service rather than deleting it:\n%s", router)
+	if !strings.Contains(router, "service: honeypot-dashboard") {
+		t.Fatalf("dashboard router no longer targets the native-OIDC honeypot-dashboard service:\n%s", router)
+	}
+	if strings.Contains(router, "service: oidc-dashboard") {
+		t.Fatalf("dashboard router still targets the retired oidc-dashboard compatibility gateway:\n%s", router)
 	}
 }
 
