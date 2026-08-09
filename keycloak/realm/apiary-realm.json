@@ -142,15 +142,28 @@
     "client": {
       "apiary-dashboard": [
         {"name": "access"},
-        {"name": "admin"}
+        {
+          "name": "admin",
+          "description": "#1013: composite of 'access' so an admin-only grant (kcadm, a future provisioning script, a realm edit) can't lock a user out of dashboard auth, which hard-requires 'access' before it even looks at admin/user distinction",
+          "composite": true,
+          "composites": {
+            "client": {
+              "apiary-dashboard": ["access"]
+            }
+          }
+        }
       ],
       "kibana": [{"name": "access"}],
       "evebox": [{"name": "access"}],
       "arkime": [{"name": "access"}],
       "tanner": [{"name": "access"}],
       "revdeck": [{"name": "access"}],
-      "traefik-dashboard": [{"name": "access"}],
-      "dockge": [{"name": "access"}]
+      "traefik-dashboard": [
+        {"name": "admin", "description": "#1014: distinctly named (not 'access') because this grants root-equivalent control of the homeserver's reverse proxy -- must never be conflated with the ordinary low-privilege 'access' role used by Kibana/EveBox/Arkime/TANNER/RevDeck"}
+      ],
+      "dockge": [
+        {"name": "admin", "description": "#1014: distinctly named (not 'access') because Dockge has /var/run/docker.sock mounted read-write -- root-equivalent control of the whole homeserver. Must never be conflated with the ordinary low-privilege 'access' role used by Kibana/EveBox/Arkime/TANNER/RevDeck"}
+      ]
     }
   },
   "groups": [
@@ -176,8 +189,8 @@
         "arkime": ["access"],
         "tanner": ["access"],
         "revdeck": ["access"],
-        "traefik-dashboard": ["access"],
-        "dockge": ["access"]
+        "traefik-dashboard": ["admin"],
+        "dockge": ["admin"]
       }
     }
   ],

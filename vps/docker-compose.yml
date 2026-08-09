@@ -561,7 +561,11 @@ services:
       OAUTH2_PROXY_CLIENT_SECRET_FILE: /run/oidc-secrets/client-secret
       OAUTH2_PROXY_COOKIE_SECRET_FILE: /run/oidc-secrets/cookie-secret
       OAUTH2_PROXY_REDIRECT_URL: https://dockge.${OIDC_PUBLIC_DOMAIN:?set OIDC_PUBLIC_DOMAIN}/oauth2/callback
-      OAUTH2_PROXY_ALLOWED_ROLES: dockge:access
+      # #1014: 'admin', not 'access' -- Dockge has /var/run/docker.sock
+      # mounted read-write (root-equivalent control of the homeserver), and
+      # must never share a role name with the ordinary low-privilege
+      # 'access' role every other app's gateway checks.
+      OAUTH2_PROXY_ALLOWED_ROLES: dockge:admin
       OAUTH2_PROXY_COOKIE_NAME: __Host-apiary-dockge
       OAUTH2_PROXY_UPSTREAMS: http://socat-hp-dockge:5001
     volumes:
@@ -577,7 +581,11 @@ services:
       OAUTH2_PROXY_CLIENT_SECRET_FILE: /run/oidc-secrets/client-secret
       OAUTH2_PROXY_COOKIE_SECRET_FILE: /run/oidc-secrets/cookie-secret
       OAUTH2_PROXY_REDIRECT_URL: https://traefik.${OIDC_PUBLIC_DOMAIN:?set OIDC_PUBLIC_DOMAIN}/oauth2/callback
-      OAUTH2_PROXY_ALLOWED_ROLES: traefik-dashboard:access
+      # #1014: 'admin', not 'access' -- reverse-proxy control is
+      # root-equivalent, and must never share a role name with the
+      # ordinary low-privilege 'access' role every other app's gateway
+      # checks.
+      OAUTH2_PROXY_ALLOWED_ROLES: traefik-dashboard:admin
       OAUTH2_PROXY_COOKIE_NAME: __Host-apiary-traefik
       OAUTH2_PROXY_UPSTREAMS: http://traefik:8081
     volumes:
