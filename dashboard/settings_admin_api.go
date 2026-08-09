@@ -541,7 +541,7 @@ func (s *store) serveSettingsConfigHistory(w http.ResponseWriter, r *http.Reques
 
 // userProjectionView is the read-only administration view of one projected
 // dashboard user. Preferences stay out of the list payload; the authoritative
-// user management surface is auth-backend.
+// user management surface is Keycloak's own admin console.
 type userProjectionView struct {
 	Subject            string `json:"subject"`
 	LastUsername       string `json:"last_username"`
