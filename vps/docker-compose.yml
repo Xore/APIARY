@@ -53,7 +53,15 @@ x-oidc-gateway: &oidc-gateway
     OAUTH2_PROXY_COOKIE_HTTPONLY: "true"
     OAUTH2_PROXY_COOKIE_SAMESITE: lax
     OAUTH2_PROXY_COOKIE_EXPIRE: 12h
-    OAUTH2_PROXY_COOKIE_REFRESH: 30m
+    # #979: was 30m -- live-tested and confirmed a real gap, not theoretical:
+    # an admin-revoked session (POST .../users/{id}/logout) and a naturally
+    # expired access token (accessTokenLifespan=300s in apiary-realm.json)
+    # both remained fully functional against Kibana/EveBox/Arkime for the
+    # entire refresh window, because oauth2-proxy only re-validates against
+    # Keycloak on its own refresh cadence, not per-request or against the
+    # token's own exp claim. 2m keeps the window close to the access token's
+    # own 5-minute lifespan instead of six times longer than it.
+    OAUTH2_PROXY_COOKIE_REFRESH: 2m
     OAUTH2_PROXY_COOKIE_CSRF_PER_REQUEST: "true"
     OAUTH2_PROXY_COOKIE_CSRF_PER_REQUEST_LIMIT: "8"
     OAUTH2_PROXY_REVERSE_PROXY: "true"
