@@ -6,17 +6,25 @@ realm_file="${script_dir}/apiary-realm.json"
 
 command -v jq >/dev/null || { printf 'jq is required\n' >&2; exit 1; }
 
+# verifyEmail: false and no VERIFY_EMAIL default action -- no SMTP is
+# configured for this realm, and mandatory 2FA is TOTP/WebAuthn, not an
+# emailed code or link. Caught live: a real admin-created account had no
+# email set, then got one added later -- Keycloak's realm-level
+# verifyEmail flag auto-queued VERIFY_EMAIL on the account regardless of
+# the required-action's own defaultAction setting, and login broke
+# outright trying (and failing) to send a verification email.
 jq -e '
   .realm == "apiary" and
   .enabled == true and
   .registrationAllowed == false and
-  .verifyEmail == true and
+  .verifyEmail == false and
   .loginTheme == "apiary" and
   .rememberMe == false and
   .bruteForceProtected == true and
   .ssoSessionIdleTimeout == 3600 and
   .ssoSessionMaxLifespan == 43200 and
   ([.requiredActions[] | select(.alias == "CONFIGURE_TOTP" and .enabled and .defaultAction)] | length == 1) and
+  ([.requiredActions[] | select(.alias == "VERIFY_EMAIL" and .defaultAction)] | length == 0) and
   ([.clients[].clientId] | sort == ["apiary-dashboard", "arkime", "dockge", "evebox", "kibana", "revdeck", "tanner", "traefik-dashboard"]) and
   (all(.clients[];
     .publicClient == false and
