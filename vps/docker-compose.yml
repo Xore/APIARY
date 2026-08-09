@@ -412,9 +412,10 @@ services:
     networks: [proxy]
 
   # Isolated on oidc-dashboard (not the shared proxy network) like every
-  # other protected upstream's socat bridge -- Traefik is already a member
-  # of oidc-dashboard to route to it. Reachable only from Traefik and the
-  # oidc-dashboard gateway, not from the ~20 unrelated containers on proxy.
+  # other protected upstream's socat bridge -- Traefik is a member of
+  # oidc-dashboard to route to it directly (#1026: native OIDC, no gateway
+  # container in this network any more). Not reachable from the ~20
+  # unrelated containers on proxy.
   socat-hp-dashboard:
     image: alpine/socat:latest
     container_name: socat-hp-dashboard
@@ -616,24 +617,13 @@ services:
       - ${OIDC_SECRETS_DIR:?set OIDC_SECRETS_DIR}/traefik-dashboard:/run/oidc-secrets:ro
     networks: [oidc-traefik]
 
-  # Temporary compatibility gateway for dashboard deployments that predate
-  # its native OIDC runtime. It can be retired only after every live dashboard
-  # replica is verified on the native implementation.
-  oidc-dashboard:
-    <<: *oidc-gateway
-    container_name: oidc-dashboard
-    environment:
-      <<: *oidc-gateway-environment
-      OAUTH2_PROXY_CLIENT_ID: apiary-dashboard
-      OAUTH2_PROXY_CLIENT_SECRET_FILE: /run/oidc-secrets/client-secret
-      OAUTH2_PROXY_COOKIE_SECRET_FILE: /run/oidc-secrets/cookie-secret
-      OAUTH2_PROXY_REDIRECT_URL: https://honeypot.${OIDC_PUBLIC_DOMAIN:?set OIDC_PUBLIC_DOMAIN}/oauth2/callback
-      OAUTH2_PROXY_ALLOWED_ROLES: apiary-dashboard:access
-      OAUTH2_PROXY_COOKIE_NAME: __Host-apiary-dashboard
-      OAUTH2_PROXY_UPSTREAMS: http://traefik:8082
-    volumes:
-      - ${OIDC_SECRETS_DIR:?set OIDC_SECRETS_DIR}/apiary-dashboard:/run/oidc-secrets:ro
-    networks: [oidc-dashboard]
+  # #1026: the oidc-dashboard compatibility gateway that used to live here
+  # (a temporary shim for dashboard deployments predating its native OIDC
+  # runtime) is retired -- every router that used to target it now points
+  # directly at the honeypot-dashboard native service (vps/traefik/
+  # dynamic.yml), verified live. The oidc-dashboard *network* below is not
+  # removed: socat-hp-dashboard/-b and Traefik itself still use it to reach
+  # the dashboard replicas directly.
 
   # =====================================================================
   # SURICATA IDS
