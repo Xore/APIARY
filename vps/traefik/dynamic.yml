@@ -135,6 +135,23 @@ http:
         options: modern
       middlewares: [security-headers, rate-limit-keycloak-admin]
 
+    # #1028: same problem, different console -- the self-service Account
+    # Console (/realms/<realm>/account/...) makes its own REST calls (e.g.
+    # .../account/sessions/devices for the Device Activity tab) that also
+    # aren't login/token brute-force targets, since they require an already-
+    # authenticated session. Caught live hitting rate-limit-auth's 429 the
+    # same way the admin assets did. Reuses rate-limit-keycloak-admin's
+    # budget rather than inventing a third tier for what's functionally the
+    # same "authenticated interactive SPA, not a login attempt" case.
+    keycloak-account-console:
+      rule: "Host(`auth.honeypot.example`) && PathRegexp(`^/realms/[^/]+/account`)"
+      priority: 110
+      entryPoints: [websecure]
+      service: keycloak-candidate
+      tls:
+        options: modern
+      middlewares: [security-headers, rate-limit-keycloak-admin]
+
     static-site:
       rule: "Host(`www.honeypot.example`) || Host(`honeypot.example`) || Host(`static.honeypot.example`)"
       entryPoints: [websecure]
