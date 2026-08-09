@@ -209,6 +209,15 @@ jobs:
       - name: Validate Keycloak realm policy
         shell: bash
         run: ./keycloak/realm/validate.sh
+      # #982 phase 1 / #1040: validate.sh only checks structure/policy --
+      # this actually imports the realm into a real, disposable Keycloak +
+      # PostgreSQL the way the real fresh-install bootstrap path does, to
+      # catch what only a real import catches (e.g. a role description over
+      # Postgres's varchar(255) column limit crash-looped the container on
+      # every fresh install, undetected by any static check).
+      - name: Keycloak realm imports cleanly into a real Postgres
+        shell: bash
+        run: ./scripts/test-keycloak-realm-import.sh
       - name: GitHub-analysis publisher stays dry-run by default
         shell: bash
         run: |
