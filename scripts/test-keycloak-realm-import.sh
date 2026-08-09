@@ -48,6 +48,14 @@ trap cleanup EXIT
 # succeeds, it never drives a login through these URLs.
 sed -E "s|https://[a-zA-Z0-9.-]*\\.example\\.invalid|http://127.0.0.1:${kc_port}|g" \
   "${realm_file}" > "${rendered_realm}"
+# mktemp defaults to 0600, owned by whatever host UID runs this script. The
+# Keycloak container reads this bind-mounted file as its own non-root
+# in-container user -- on a CI runner that UID doesn't match the host UID
+# that created the file, so the read fails outright ("Permission denied").
+# Worked locally only by UID coincidence. No secrets in this file -- it's
+# the same realm template already checked into the repo, just with the
+# domain substituted -- so world-readable is fine.
+chmod 644 "${rendered_realm}"
 
 docker network create "${network}" >/dev/null
 
