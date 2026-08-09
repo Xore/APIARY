@@ -272,6 +272,48 @@ func TestIdentityFromRequestSessionLifecycle(t *testing.T) {
 	})
 }
 
+// #978: "logout terminates dashboard access predictably" -- serveLogout()
+// itself had no direct test either.
+func TestServeLogoutDeletesSessionAndEndsAtKeycloak(t *testing.T) {
+	const subject = "b65ab0dc-cc07-4b3d-9af0-b482dbb4b096"
+	store := &memorySessionStore{values: make(map[string][]byte)}
+	now := time.Now().UTC()
+	auth := &oidcAuth{
+		sessions: store, now: func() time.Time { return now },
+		endSessionEndpoint: "https://keycloak.example/realms/apiary/protocol/openid-connect/logout",
+		externalURL:        "https://dashboard.example",
+	}
+	session := oidcSession{
+		Identity: authenticatedIdentity{Subject: subject, Role: "user"},
+		IDToken:  "opaque-id-token", TokenExpiry: now.Add(time.Hour), CreatedAt: now, LastValidated: now,
+	}
+	if err := auth.putJSON(context.Background(), "oidc:session:logout-me", session, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/auth/logout", nil)
+	request.AddCookie(&http.Cookie{Name: oidcSessionCookie, Value: "logout-me"})
+	recorder := httptest.NewRecorder()
+	auth.serveLogout(recorder, request)
+
+	if recorder.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusSeeOther)
+	}
+	location := recorder.Header().Get("Location")
+	if !strings.HasPrefix(location, auth.endSessionEndpoint+"?") || !strings.Contains(location, "id_token_hint=opaque-id-token") {
+		t.Fatalf("Location = %q, want a redirect to Keycloak's end_session_endpoint with the ID token hint", location)
+	}
+
+	if _, err := store.Get(context.Background(), "oidc:session:logout-me"); err != errSessionNotFound {
+		t.Fatalf("session survived logout: %v", err)
+	}
+	postLogout := httptest.NewRequest(http.MethodGet, "/", nil)
+	postLogout.AddCookie(&http.Cookie{Name: oidcSessionCookie, Value: "logout-me"})
+	if _, err := auth.identityFromRequest(postLogout); err != errIdentityUnauthorized {
+		t.Fatalf("logged-out session cookie still authenticated: err=%v", err)
+	}
+}
+
 // #978: nothing exercised the global middleware's anonymous-access
 // behavior directly -- this is the one function every protected route
 // (everything except /healthz, /auth/login, /auth/callback, /auth/logout)
