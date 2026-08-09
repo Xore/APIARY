@@ -25,6 +25,9 @@ jq -e '
   .ssoSessionMaxLifespan == 43200 and
   ([.requiredActions[] | select(.alias == "CONFIGURE_TOTP" and .enabled and .defaultAction)] | length == 1) and
   ([.requiredActions[] | select(.alias == "VERIFY_EMAIL" and .defaultAction)] | length == 0) and
+  ([.authenticationFlows[] | select(.alias == "Browser - Conditional 2FA") |
+    .authenticationExecutions[] | select(.authenticator == "webauthn-authenticator") |
+    .requirement] == ["ALTERNATIVE"]) and
   ([.clients[].clientId] | sort == ["apiary-dashboard", "arkime", "dockge", "evebox", "kibana", "revdeck", "tanner", "traefik-dashboard"]) and
   (all(.clients[];
     .publicClient == false and
@@ -39,7 +42,9 @@ jq -e '
     (all(.webOrigins[]; startswith("https://") and (contains("*") | not)))
   )) and
   (has("users") | not) and
-  ([paths | .[-1] | tostring | ascii_downcase |
+  ([paths |
+    select((length == 4 and .[0] == "authenticatorConfig" and .[2] == "config" and .[3] == "credentials") | not) |
+    .[-1] | tostring | ascii_downcase |
     select(. == "secret" or . == "credentials")] | length == 0)
 ' "${realm_file}" >/dev/null
 
