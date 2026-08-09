@@ -363,7 +363,21 @@ step_wireguard_install() {
 
 step_wireguard_config() {
   install -d -m 0700 /etc/wireguard
-  umask 077
+
+  # wg0.conf gets an explicit `chmod 600` below, so no umask override is
+  # needed here -- and a bare (unscoped) `umask 077` would be actively
+  # harmful: umask is a shell-wide setting that persists for the rest of
+  # this script's process, not just this function. Found live during
+  # #787's homeserver reinstall (2026-08-09): it silently downgraded every
+  # file `git clone` wrote in step_clone_repo (Phase 5, runs right after
+  # this) from the tracked 100644/100755 modes to 0600/0700, breaking any
+  # bind-mounted repo file a container reads as a non-root user --
+  # elasticsearch-setup.sh landed at 0600 root:root and the elasticsearch
+  # container (runs as a non-root uid) got "Permission denied" trying to
+  # read it. The other two umask uses in this file ((umask 027; ...) for
+  # postgres-password/bootstrap-admin-password) correctly scope it to a
+  # subshell instead -- this one didn't, and there's no reason to: this
+  # function already chmods its one sensitive file explicitly.
 
   # The home side's WireGuard private key AND preshared key were never part
   # of the .env-only backup (system config, not a Dockge stack secret) --
