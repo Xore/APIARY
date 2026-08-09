@@ -49,7 +49,7 @@ func configureIdentityTestBackend(t *testing.T, role string) {
 	now := time.Now().UTC()
 	auth := &oidcAuth{sessions: store, now: func() time.Time { return now }}
 	session := oidcSession{
-		Identity:    authenticatedIdentity{Subject: "b65ab0dc-cc07-4b3d-9af0-b482dbb4b096", Username: "analyst", DisplayName: "Analyst", Role: role, Generation: 1},
+		Identity:    authenticatedIdentity{Subject: "b65ab0dc-cc07-4b3d-9af0-b482dbb4b096", Username: "analyst", DisplayName: "Analyst", Role: role},
 		TokenExpiry: now.Add(time.Hour), CreatedAt: now, LastValidated: now,
 	}
 	if err := auth.putJSON(context.Background(), "oidc:session:"+testAuthCookie, session, time.Hour); err != nil {
@@ -185,7 +185,7 @@ func TestWhoAmIExposesKeycloakActionsWithoutFraming(t *testing.T) {
 			configureIdentityTestBackend(t, role)
 			t.Setenv("OIDC_ISSUER_URL", "https://auth.honeypot.example/realms/apiary")
 			t.Setenv("AUTH_ACCOUNT_URL", "https://auth.honeypot.example/realms/apiary/account/")
-			s := &store{authAccountURL: validatedAuthAccountURL(), authAdminURL: "https://keycloak-admin.honeypot.example/admin/apiary/console/"}
+			s := &store{authAccountURL: validatedAuthAccountURL(), authAdminURL: "https://auth.honeypot.example/admin/apiary/console/"}
 			if s.authAccountURL == "" {
 				t.Fatal("validatedAuthAccountURL rejected a well-formed, matching-origin URL")
 			}

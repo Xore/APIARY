@@ -346,7 +346,7 @@ func (a *oidcAuth) verifyIDToken(ctx context.Context, raw, nonce string) (authen
 	if containsString(roles, "admin") {
 		role = "admin"
 	}
-	return authenticatedIdentity{Subject: claims.Subject, Username: claims.PreferredUsername, DisplayName: claims.Name, Role: role, Generation: 1}, idToken, nil
+	return authenticatedIdentity{Subject: claims.Subject, Username: claims.PreferredUsername, DisplayName: claims.Name, Role: role}, idToken, nil
 }
 
 func (a *oidcAuth) refreshSession(ctx context.Context, session *oidcSession) error {
@@ -376,7 +376,7 @@ func (a *oidcAuth) refreshSession(ctx context.Context, session *oidcSession) err
 		if containsString(claims.ResourceAccess[oidcClientID].Roles, "admin") {
 			role = "admin"
 		}
-		identity = authenticatedIdentity{Subject: claims.Subject, Username: claims.PreferredUsername, DisplayName: claims.Name, Role: role, Generation: 1}
+		identity = authenticatedIdentity{Subject: claims.Subject, Username: claims.PreferredUsername, DisplayName: claims.Name, Role: role}
 		idToken = verified
 	}
 	session.Identity = identity

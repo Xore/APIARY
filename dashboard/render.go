@@ -52,10 +52,9 @@ func nonce() string {
 // vncBridgeOrigin (#805) is the read-only VNC bridge's own origin
 // (ws://host:port or wss://host), added to connect-src so the sandbox-vnc
 // page's browser-side WebSocket connection is not blocked by the same CSP
-// that protects every other page here -- same "opt in the one origin this
-// one page needs" shape as authFrameOrigin above, resolved once at startup
-// from SANDBOX_VNC_BRIDGE_WS (main.go), empty (no relaxation at all) when
-// that env var is unset.
+// that protects every other page here -- opting in only the one origin this
+// one page needs, resolved once at startup from SANDBOX_VNC_BRIDGE_WS
+// (main.go), empty (no relaxation at all) when that env var is unset.
 var vncBridgeOrigin string
 
 func setVNCBridgeOrigin(bridgeWS string) {

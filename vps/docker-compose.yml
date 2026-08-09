@@ -434,9 +434,10 @@ services:
     command: TCP4-LISTEN:8092,fork,reuseaddr TCP4:10.8.0.2:19092
     networks: [oidc-dashboard]
 
-  # Candidate Keycloak path. The public auth router remains on the legacy
-  # service until realm/theme/consumer validation passes the hard-cutover
-  # gate; this bridge makes the Dockge stack reachable for that validation.
+  # Bridges the homeserver's Keycloak (Dockge-managed honeypot-keycloak
+  # stack) to the public auth.* router (see the `keycloak` router in
+  # vps/traefik/dynamic.yml), which is the live issuer/admin path -- no
+  # legacy auth-backend service exists any more.
   socat-hp-keycloak:
     image: alpine/socat:latest
     container_name: socat-hp-keycloak

@@ -25,7 +25,6 @@ type authenticatedIdentity struct {
 	Username    string `json:"username"`
 	DisplayName string `json:"display_name,omitempty"`
 	Role        string `json:"role"`
-	Generation  int    `json:"generation"`
 }
 
 type whoAmIResponse struct {
