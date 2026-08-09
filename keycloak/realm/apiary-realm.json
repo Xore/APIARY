@@ -1074,6 +1074,20 @@
       "attributes": {"pkce.code.challenge.method": "S256", "post.logout.redirect.uris": "https://dockge.example.invalid/*"},
       "defaultClientScopes": ["web-origins", "acr", "roles", "profile", "email"],
       "optionalClientScopes": []
+    },
+    {
+      "clientId": "auth-events-poller",
+      "name": "Auth-failure telemetry poller (#1066)",
+      "description": "Service-account-only client for auth-events-worker's read-only polling of GET /admin/realms/apiary/events. No browser flow -- granted realm-management's view-events role post-import (never baked into this export, same reasoning as every other client secret/role grant here); see keycloak/provision-events-poller.sh.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "attributes": {}
     }
   ],
   "clientScopes": [

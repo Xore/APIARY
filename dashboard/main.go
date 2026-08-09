@@ -153,16 +153,19 @@ func main() {
 		s.mlAnomalies = &mlAnomalyStore{}
 		s.llmAnalysis = &llmAnalysisStore{}
 		s.agentCampaigns = &agentCampaignStore{}
+		s.authEvents = &authEventStore{}
 		s.es.refresh()
 		s.refreshMLAnomalies()
 		s.refreshLLMAnalysis()
 		s.refreshAgentCampaigns()
+		s.refreshAuthEvents()
 		go func() {
 			for range time.Tick(time.Minute) {
 				s.es.refresh()
 				s.refreshMLAnomalies()
 				s.refreshLLMAnalysis()
 				s.refreshAgentCampaigns()
+				s.refreshAuthEvents()
 			}
 		}()
 	}
@@ -347,6 +350,7 @@ func main() {
 	http.HandleFunc("/api/llm/analysis", s.serveLLMAnalysisAPI)
 	http.HandleFunc("/api/llm/analysis/search", s.serveLLMAnalysisSearch)
 	http.HandleFunc("/api/agent-campaigns", s.serveAgentCampaignsAPI)
+	http.HandleFunc("/api/auth-events", s.serveAuthEventsAPI)
 	http.HandleFunc("/api/events", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(s.eventsData(r))
@@ -595,6 +599,10 @@ func main() {
 		}
 		data := s.mlAnomaliesData(r)
 		renderPage(w, tmpl, "ml-anomalies", &data)
+	})
+	http.HandleFunc("/auth-events", func(w http.ResponseWriter, r *http.Request) {
+		data := s.authEventsData(r)
+		renderPage(w, tmpl, "auth-events", &data)
 	})
 	http.HandleFunc("/llm-analysis", func(w http.ResponseWriter, r *http.Request) {
 		data := s.llmAnalysisData(r)

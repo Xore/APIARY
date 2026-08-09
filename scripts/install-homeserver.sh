@@ -767,6 +767,53 @@ step_start_remaining_stacks() {
 }
 
 # ---------------------------------------------------------------------------
+# Phase 8a1 — auth-events-worker (#1066): Keycloak/gateway auth-failure
+# telemetry. Runs here, after start-remaining, because it needs hp-keycloak
+# actually healthy (to grant its service-account client the view-events
+# role) -- `up -d --wait` in the previous step already confirmed that.
+# ---------------------------------------------------------------------------
+step_provision_events_poller_secrets() {
+  local secrets_dir="/var/dockge/stacks/honeypot-keycloak/secrets"
+  [[ -f "$secrets_dir/bootstrap-admin-password" ]] || {
+    echo "no bootstrap-admin-password at $secrets_dir -- was provision-keycloak-secrets skipped?" >&2
+    return 1
+  }
+  KEYCLOAK_ADMIN_USERNAME="${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-admin}" \
+  KEYCLOAK_ADMIN_PASSWORD="$(< "$secrets_dir/bootstrap-admin-password")" \
+    "$REPO_DIR/keycloak/provision-events-poller.sh"
+}
+
+step_auth_events_worker_start() {
+  # Same relative-build-context symlink-the-whole-directory reasoning as
+  # step_ml_worker_start (docker-compose.yml here also has `build: context: .`).
+  # Secrets deliberately do NOT live under this symlinked path -- see
+  # docker-compose.yml's own volume-mount comment for why
+  # EVENTS_POLLER_SECRETS_DIR is a sibling directory instead.
+  local src="$REPO_DIR/auth-events-worker"
+  [[ -d "$src" ]] || { echo "no auth-events-worker/ directory in repo"; return 1; }
+  rm -rf /var/dockge/stacks/auth-events-worker
+  ln -sfn "$src" /var/dockge/stacks/auth-events-worker
+  ln -sf "$src/docker-compose.yml" "$src/compose.yml"
+  (cd "$src" && with_retry 3 15 docker compose -f compose.yml up -d --wait) || return 1
+
+  # No Docker HEALTHCHECK on this worker either -- same reasoning and same
+  # fix as step_ml_worker_start's own comment (#593): poll the log for the
+  # line worker.py actually emits once it's genuinely ready, instead of
+  # trusting compose's "running" status alone.
+  local waited=0 max_wait=60
+  while (( waited < max_wait )); do
+    if docker logs hp-auth-events-worker 2>&1 | grep -q 'auth-events-worker starting'; then
+      echo "auth-events-worker confirmed ready"
+      return 0
+    fi
+    sleep 5
+    waited=$(( waited + 5 ))
+  done
+  echo "auth-events-worker container is running but never logged its startup line within ${max_wait}s" >&2
+  return 1
+}
+
+# ---------------------------------------------------------------------------
 # Phase 8a2 — read-only sshfs mounts of the VPS's Suricata/portbridge logs
 # (and, since #518, the pcap/ subdirectory Suricata's pcap-log writes into
 # once its output-directory ownership is fixed VPS-side -- see the earlier
@@ -1226,6 +1273,9 @@ run_step shared-resources      "Create honeynet + placeholder volumes" step_crea
 run_step start-elasticsearch   "Start honeypot-elk, wait healthy"   step_start_elasticsearch_first
 run_step start-init            "Start honeypot-init, wait for one-shots" step_start_init
 run_step start-remaining       "Start remaining sensor/dashboard stacks" step_start_remaining_stacks
+
+run_step provision-events-poller-secrets "Grant auth-events-poller view-events + write its secret" step_provision_events_poller_secrets
+run_step auth-events-worker-start "Start auth-events-worker" step_auth_events_worker_start
 
 run_step sshfs-install         "Install sshfs, place VPS key"        step_sshfs_install
 run_step sshfs-mounts          "Mount VPS Suricata/portbridge logs"  step_sshfs_mounts

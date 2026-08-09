@@ -28,8 +28,8 @@ jq -e '
   ([.authenticationFlows[] | select(.alias == "Browser - Conditional 2FA") |
     .authenticationExecutions[] | select(.authenticator == "webauthn-authenticator") |
     .requirement] == ["ALTERNATIVE"]) and
-  ([.clients[].clientId] | sort == ["apiary-dashboard", "arkime", "dockge", "evebox", "kibana", "revdeck", "tanner", "traefik-dashboard"]) and
-  (all(.clients[];
+  ([.clients[].clientId] | sort == ["apiary-dashboard", "arkime", "auth-events-poller", "dockge", "evebox", "kibana", "revdeck", "tanner", "traefik-dashboard"]) and
+  (all(.clients[] | select(.clientId != "auth-events-poller");
     .publicClient == false and
     .standardFlowEnabled == true and
     .implicitFlowEnabled == false and
@@ -41,6 +41,19 @@ jq -e '
     (.webOrigins | length == 1) and
     (all(.webOrigins[]; startswith("https://") and (contains("*") | not)))
   )) and
+  # auth-events-poller (#1066) is deliberately shaped differently -- a
+  # machine-only service-account client with no browser flow, so none of
+  # the redirect/webOrigin/PKCE assertions above apply to it. Its own
+  # narrower shape is asserted here instead of just excluding it silently.
+  (.clients[] | select(.clientId == "auth-events-poller") |
+    .publicClient == false and
+    .standardFlowEnabled == false and
+    .implicitFlowEnabled == false and
+    .directAccessGrantsEnabled == false and
+    .serviceAccountsEnabled == true and
+    ((.redirectUris // []) | length == 0) and
+    ((.webOrigins // []) | length == 0)
+  ) and
   (has("users") | not) and
   ([paths |
     select((length == 4 and .[0] == "authenticatorConfig" and .[2] == "config" and .[3] == "credentials") | not) |

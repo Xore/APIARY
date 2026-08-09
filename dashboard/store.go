@@ -205,6 +205,7 @@ type store struct {
 	mlAnomalies       *mlAnomalyStore     // ml-worker's scored anomalies, polled via es (#64); nil until initialised in main()
 	llmAnalysis       *llmAnalysisStore   // llm-worker's guarded model output, polled via es (#150); nil until initialised in main()
 	agentCampaigns    *agentCampaignStore // agent-intrusion-worker's correlated campaign verdicts, polled via es (#154 phase 5); nil until initialised in main()
+	authEvents        *authEventStore     // auth-events-worker's redacted Keycloak/gateway auth-failure events, polled via es (#1066); nil until initialised in main()
 	// ollamaURL/embeddingModel (#151) back serveLLMAnalysisSearch's
 	// query-time embedding call. ollamaURL empty means semantic search is
 	// unconfigured/rejected -- the same "feature quietly off" posture geo

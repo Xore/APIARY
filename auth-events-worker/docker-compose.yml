@@ -1,0 +1,56 @@
+# auth-events-worker (#1066) — as its own Dockge stack, modelled directly
+# on ml-worker/docker-compose.yml's shape and reasoning (own stack, joins
+# honeynet as an external network since its entire job is reading/writing
+# Elasticsearch continuously -- same justification as that file's own
+# header comment, not repeated here).
+#
+# Reaches Keycloak over the WireGuard tunnel's own bound address
+# (HP_BIND:KEYCLOAK_PORT, same host as this stack, no round-trip through
+# Cloudflare/Traefik needed for host-internal traffic) rather than the
+# public hostname -- verified live (2026-08-09) that Keycloak's issuer
+# claim still correctly reflects KC_HOSTNAME's public URL regardless of
+# which address was used to reach it, so tokens/discovery stay correct.
+
+services:
+  auth-events-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hp-auth-events-worker
+    restart: unless-stopped
+    networks:
+      - honeynet
+    environment:
+      ES_HOST: http://elasticsearch:9200
+      POLL_INTERVAL: "60"
+      KEYCLOAK_ISSUER_URL: "http://${HP_BIND:-10.8.0.2}:${KEYCLOAK_PORT:-18080}/realms/${KEYCLOAK_REALM:-apiary}"
+      KEYCLOAK_REALM: "${KEYCLOAK_REALM:-apiary}"
+      KEYCLOAK_CLIENT_ID: auth-events-poller
+      KEYCLOAK_CLIENT_SECRET_FILE: /run/secrets/client-secret
+      LOG_LEVEL: INFO
+    volumes:
+      # A sibling of this stack's own directory, not nested inside it --
+      # install-homeserver.sh's step_auth_events_worker_start symlinks the
+      # WHOLE /var/dockge/stacks/auth-events-worker directory to this
+      # repo's own checkout (same build-context reasoning as ml-worker's
+      # install step), so anything written "into" that path would land
+      # inside the git checkout itself -- exactly where a secret must never
+      # live (wrong permissions from a fresh `git clone`, wiped on the next
+      # `git pull`, real risk of an accidental commit).
+      - ${EVENTS_POLLER_SECRETS_DIR:-/var/dockge/stacks/auth-events-worker-secrets}:/run/secrets:ro
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256m
+
+networks:
+  honeynet:
+    name: honeynet
+    external: true

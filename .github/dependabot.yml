@@ -63,6 +63,7 @@ updates:
       - /analysis/ghidra/service
       - /analysis/ghidra/statictools
       - /analysis/yara
+      - /auth-events-worker
       - /cisco-asa-honeypot
       - /citrix-honeypot
       - /conpot
@@ -155,5 +156,24 @@ updates:
         update-types: [minor, patch]
     ignore:
       - dependency-name: numpy
+      - dependency-name: elasticsearch
+    labels: [dependencies, python]
+
+  # #1066: same elasticsearch==8.19.3 pin, same reason, as ml-worker above
+  # -- split into its own entry for the same reason ml-worker's is split
+  # from the shared pip entry (an ignore rule scoped to one directory's
+  # requirements.txt, not every Python stack's).
+  - package-ecosystem: pip
+    directory: /auth-events-worker
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Berlin
+    groups:
+      python-compatible:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
       - dependency-name: elasticsearch
     labels: [dependencies, python]
