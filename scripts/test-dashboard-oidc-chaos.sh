@@ -190,6 +190,21 @@ if [ -z "${enroll_callback}" ]; then
 fi
 printf 'TOTP enrolled for chaos-test, secret captured\n'
 
+# --- Redis first, published on the host and confirmed responsive, BEFORE
+# the dashboard binary starts. Found live in CI: starting the dashboard
+# before Redis exists is a real race, not just a cosmetic ordering choice
+# -- the dashboard's OIDC init connects to Redis synchronously at startup
+# and exits outright (doesn't retry) if that first connection attempt
+# fails, and a warm Go build cache (this exact binary already compiled by
+# a prior script in the same CI job) makes the dashboard reach that
+# connection attempt fast enough to lose the race against Redis's own
+# container start + readiness poll. See
+# scripts/test-dashboard-oidc-pkce-totp-login.sh for the same fix. ---
+docker rm -f "${redis}" >/dev/null 2>&1 || true
+docker run -d --name "${redis}" -p "127.0.0.1:${redis_port}:6379" \
+  redis:7-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2 >/dev/null
+for _ in $(seq 1 30); do docker exec "${redis}" redis-cli ping >/dev/null 2>&1 && break; sleep 1; done
+
 state_dir="$(mktemp -d)"
 mkdir -p "${state_dir}/logs/cowrie" "${state_dir}/payloads"
 (
@@ -214,10 +229,6 @@ mkdir -p "${state_dir}/logs/cowrie" "${state_dir}/payloads"
 )
 sleep 1
 dash_pid=$(cat "${state_dir}/dash.pid")
-docker rm -f "${redis}" >/dev/null 2>&1 || true
-docker run -d --name "${redis}" -p "127.0.0.1:${redis_port}:6379" \
-  redis:7-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2 >/dev/null
-for _ in $(seq 1 30); do docker exec "${redis}" redis-cli ping >/dev/null 2>&1 && break; sleep 1; done
 
 dash_up=0
 for i in $(seq 1 60); do
