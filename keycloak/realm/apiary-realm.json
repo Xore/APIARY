@@ -180,7 +180,7 @@
         {"name": "admin", "description": "#1014: distinctly named (not 'access') because this grants root-equivalent control of the homeserver's reverse proxy -- must never be conflated with the ordinary low-privilege 'access' role used by Kibana/EveBox/Arkime/TANNER/RevDeck"}
       ],
       "dockge": [
-        {"name": "admin", "description": "#1014: distinctly named (not 'access') because Dockge has /var/run/docker.sock mounted read-write -- root-equivalent control of the whole homeserver. Must never be conflated with the ordinary low-privilege 'access' role used by Kibana/EveBox/Arkime/TANNER/RevDeck"}
+        {"name": "admin", "description": "#1014: distinctly named (not 'access') because Dockge has /var/run/docker.sock mounted read-write -- root-equivalent control of the whole homeserver. Never conflate with the low-privilege 'access' role used by other clients."}
       ]
     }
   },

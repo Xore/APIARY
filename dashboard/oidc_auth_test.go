@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -118,4 +119,239 @@ func TestVerifyIDTokenEnforcesIssuerAudienceNoncePartyAndRole(t *testing.T) {
 	if _, _, err := auth.verifyIDToken(context.Background(), sign(clone(), wrongKey), "expected-nonce"); err == nil {
 		t.Fatal("token with an untrusted signature was accepted")
 	}
+}
+
+// #978: identityFromRequest() is dashboard/oidc_auth.go's single
+// authoritative session check -- every one of #978's acceptance-criteria
+// cases (anonymous, expired, revoked) route through it, but nothing
+// exercised it directly before this: authorization_test.go's requireAdmin
+// tests all construct a session with LastValidated == now, so they never
+// hit the 30s introspection re-check or the 12h max-age expiry at all.
+func TestIdentityFromRequestSessionLifecycle(t *testing.T) {
+	const subject = "b65ab0dc-cc07-4b3d-9af0-b482dbb4b096"
+
+	newStore := func() *memorySessionStore { return &memorySessionStore{values: make(map[string][]byte)} }
+
+	t.Run("anonymous request with no cookie is rejected", func(t *testing.T) {
+		auth := &oidcAuth{sessions: newStore(), now: time.Now}
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		if _, err := auth.identityFromRequest(request); err != errIdentityUnauthorized {
+			t.Fatalf("err = %v, want errIdentityUnauthorized", err)
+		}
+	})
+
+	t.Run("cookie pointing at a session that was never created is rejected", func(t *testing.T) {
+		auth := &oidcAuth{sessions: newStore(), now: time.Now}
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		request.AddCookie(&http.Cookie{Name: oidcSessionCookie, Value: "unknown-session-id"})
+		if _, err := auth.identityFromRequest(request); err != errIdentityUnauthorized {
+			t.Fatalf("err = %v, want errIdentityUnauthorized", err)
+		}
+	})
+
+	t.Run("session older than the 12h max age is rejected and deleted", func(t *testing.T) {
+		store := newStore()
+		created := time.Now().UTC()
+		nowFn := func() time.Time { return created.Add(oidcSessionMaxAge + time.Minute) }
+		auth := &oidcAuth{sessions: store, now: nowFn}
+		session := oidcSession{
+			Identity: authenticatedIdentity{Subject: subject, Username: "analyst", Role: "user"},
+			// Far in the future so the refresh path is never reached --
+			// this test is specifically about the CreatedAt/max-age check.
+			TokenExpiry: created.Add(1000 * time.Hour), CreatedAt: created, LastValidated: created,
+		}
+		if err := auth.putJSON(context.Background(), "oidc:session:expired-session", session, time.Hour); err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		request.AddCookie(&http.Cookie{Name: oidcSessionCookie, Value: "expired-session"})
+		if _, err := auth.identityFromRequest(request); err != errIdentityUnauthorized {
+			t.Fatalf("err = %v, want errIdentityUnauthorized", err)
+		}
+		if _, getErr := store.Get(context.Background(), "oidc:session:expired-session"); getErr != errSessionNotFound {
+			t.Fatalf("expired session was not deleted: %v", getErr)
+		}
+	})
+
+	t.Run("session revoked at the identity provider is rejected and deleted on next check", func(t *testing.T) {
+		introspection := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"active": false})
+		}))
+		defer introspection.Close()
+
+		store := newStore()
+		created := time.Now().UTC()
+		// LastValidated 31s in the past forces identityFromRequest() past
+		// the 30s re-check threshold into a real introspection call, the
+		// same as a real session that's simply been sitting idle.
+		nowFn := func() time.Time { return created.Add(31 * time.Second) }
+		auth := &oidcAuth{
+			sessions: store, now: nowFn, httpClient: introspection.Client(),
+			introspectionEndpoint: introspection.URL, clientSecret: "unused-in-this-test",
+		}
+		session := oidcSession{
+			Identity:    authenticatedIdentity{Subject: subject, Username: "analyst", Role: "user"},
+			TokenExpiry: created.Add(time.Hour), CreatedAt: created, LastValidated: created,
+			AccessToken: "revoked-access-token",
+		}
+		if err := auth.putJSON(context.Background(), "oidc:session:revoked-session", session, time.Hour); err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		request.AddCookie(&http.Cookie{Name: oidcSessionCookie, Value: "revoked-session"})
+		if _, err := auth.identityFromRequest(request); err != errIdentityUnauthorized {
+			t.Fatalf("err = %v, want errIdentityUnauthorized (session was revoked at the identity provider)", err)
+		}
+		if _, getErr := store.Get(context.Background(), "oidc:session:revoked-session"); getErr != errSessionNotFound {
+			t.Fatalf("revoked session was not deleted: %v", getErr)
+		}
+	})
+
+	t.Run("still-active session survives its 30s introspection re-check", func(t *testing.T) {
+		introspection := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"active": true, "sub": subject, "client_id": oidcClientID})
+		}))
+		defer introspection.Close()
+
+		store := newStore()
+		created := time.Now().UTC()
+		nowFn := func() time.Time { return created.Add(31 * time.Second) }
+		auth := &oidcAuth{
+			sessions: store, now: nowFn, httpClient: introspection.Client(),
+			introspectionEndpoint: introspection.URL, clientSecret: "unused-in-this-test",
+		}
+		session := oidcSession{
+			Identity:    authenticatedIdentity{Subject: subject, Username: "analyst", Role: "admin"},
+			TokenExpiry: created.Add(time.Hour), CreatedAt: created, LastValidated: created,
+			AccessToken: subject,
+		}
+		if err := auth.putJSON(context.Background(), "oidc:session:live-session", session, time.Hour); err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		request.AddCookie(&http.Cookie{Name: oidcSessionCookie, Value: "live-session"})
+		identity, err := auth.identityFromRequest(request)
+		if err != nil || identity.Role != "admin" || identity.Subject != subject {
+			t.Fatalf("still-active session was rejected: identity=%#v err=%v", identity, err)
+		}
+	})
+
+	// #978: "Keycloak/JWKS failure is fail closed" -- distinct from
+	// TestRequireAdminFailsClosedWithoutIdentityService (dashboardOIDC ==
+	// nil, no identity service configured at all). This is the case that
+	// matters operationally: a real, previously-valid session mid-life
+	// whose next 30s introspection re-check can't reach Keycloak at all.
+	// A bug here would silently keep granting access on stale
+	// LastValidated forever during an outage, exactly what "fail closed"
+	// exists to prevent.
+	t.Run("session survives past a broken introspection endpoint by denying, not granting", func(t *testing.T) {
+		store := newStore()
+		created := time.Now().UTC()
+		nowFn := func() time.Time { return created.Add(31 * time.Second) }
+		auth := &oidcAuth{
+			sessions: store, now: nowFn, httpClient: &http.Client{Timeout: time.Second},
+			// No server listening on this port: simulates Keycloak/network
+			// being unreachable during the introspection re-check.
+			introspectionEndpoint: "http://127.0.0.1:1/introspect", clientSecret: "unused-in-this-test",
+		}
+		session := oidcSession{
+			Identity:    authenticatedIdentity{Subject: subject, Username: "analyst", Role: "admin"},
+			TokenExpiry: created.Add(time.Hour), CreatedAt: created, LastValidated: created,
+			AccessToken: subject,
+		}
+		if err := auth.putJSON(context.Background(), "oidc:session:outage-session", session, time.Hour); err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		request.AddCookie(&http.Cookie{Name: oidcSessionCookie, Value: "outage-session"})
+		if _, err := auth.identityFromRequest(request); err != errIdentityUnavailable {
+			t.Fatalf("err = %v, want errIdentityUnavailable (fail closed on identity-provider outage)", err)
+		}
+	})
+}
+
+// #978: "logout terminates dashboard access predictably" -- serveLogout()
+// itself had no direct test either.
+func TestServeLogoutDeletesSessionAndEndsAtKeycloak(t *testing.T) {
+	const subject = "b65ab0dc-cc07-4b3d-9af0-b482dbb4b096"
+	store := &memorySessionStore{values: make(map[string][]byte)}
+	now := time.Now().UTC()
+	auth := &oidcAuth{
+		sessions: store, now: func() time.Time { return now },
+		endSessionEndpoint: "https://keycloak.example/realms/apiary/protocol/openid-connect/logout",
+		externalURL:        "https://dashboard.example",
+	}
+	session := oidcSession{
+		Identity: authenticatedIdentity{Subject: subject, Role: "user"},
+		IDToken:  "opaque-id-token", TokenExpiry: now.Add(time.Hour), CreatedAt: now, LastValidated: now,
+	}
+	if err := auth.putJSON(context.Background(), "oidc:session:logout-me", session, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/auth/logout", nil)
+	request.AddCookie(&http.Cookie{Name: oidcSessionCookie, Value: "logout-me"})
+	recorder := httptest.NewRecorder()
+	auth.serveLogout(recorder, request)
+
+	if recorder.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusSeeOther)
+	}
+	location := recorder.Header().Get("Location")
+	if !strings.HasPrefix(location, auth.endSessionEndpoint+"?") || !strings.Contains(location, "id_token_hint=opaque-id-token") {
+		t.Fatalf("Location = %q, want a redirect to Keycloak's end_session_endpoint with the ID token hint", location)
+	}
+
+	if _, err := store.Get(context.Background(), "oidc:session:logout-me"); err != errSessionNotFound {
+		t.Fatalf("session survived logout: %v", err)
+	}
+	postLogout := httptest.NewRequest(http.MethodGet, "/", nil)
+	postLogout.AddCookie(&http.Cookie{Name: oidcSessionCookie, Value: "logout-me"})
+	if _, err := auth.identityFromRequest(postLogout); err != errIdentityUnauthorized {
+		t.Fatalf("logged-out session cookie still authenticated: err=%v", err)
+	}
+}
+
+// #978: nothing exercised the global middleware's anonymous-access
+// behavior directly -- this is the one function every protected route
+// (everything except /healthz, /auth/login, /auth/callback, /auth/logout)
+// actually runs through.
+func TestMiddlewareRejectsAnonymousRequests(t *testing.T) {
+	auth := &oidcAuth{sessions: &memorySessionStore{values: make(map[string][]byte)}, now: time.Now}
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusTeapot) })
+	handler := auth.middleware(next)
+
+	t.Run("anonymous GET is redirected to login, not served", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodGet, "/alerts", nil)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusSeeOther {
+			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusSeeOther)
+		}
+		if location := recorder.Header().Get("Location"); !strings.HasPrefix(location, "/auth/login?") {
+			t.Fatalf("Location = %q, want a redirect to /auth/login", location)
+		}
+	})
+
+	t.Run("anonymous POST is denied outright, not redirected", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodPost, "/api/settings", nil)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("exempt paths are served without identity", func(t *testing.T) {
+		for _, path := range []string{"/healthz", "/auth/login", "/auth/callback", "/auth/logout"} {
+			request := httptest.NewRequest(http.MethodGet, path, nil)
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusTeapot {
+				t.Fatalf("%s: status = %d, want the handler to run unauthenticated (%d)", path, recorder.Code, http.StatusTeapot)
+			}
+		}
+	})
 }

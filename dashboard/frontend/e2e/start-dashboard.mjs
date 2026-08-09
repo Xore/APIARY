@@ -3,6 +3,9 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { startFakeElasticsearch } from "./fake-elasticsearch.mjs";
+import { startFakeOIDCIssuer } from "./fake-oidc-issuer.mjs";
+import { startFakeRedis } from "./fake-redis.mjs";
+import { seedFixtureSession } from "./fixture-session.mjs";
 
 // #405 follow-up: Payload Workbench (and alerts/reports/payload-inventory/
 // static-analysis before it) are Elasticsearch-only with no local-disk
@@ -10,6 +13,15 @@ import { startFakeElasticsearch } from "./fake-elasticsearch.mjs";
 // cluster is too heavy for this fixture, so this points it at an in-memory
 // stand-in that speaks just enough of the doc CRUD API to round-trip.
 const fakeES = await startFakeElasticsearch();
+// #1034: main.go's newOIDCAuth() does live OIDC discovery and requires a
+// reachable session store at startup, unconditionally -- see the two fixture
+// modules for why each is shaped the way it is.
+const fakeOIDC = await startFakeOIDCIssuer();
+const fakeRedis = await startFakeRedis();
+// Pre-authenticate: dashboard.spec.ts sets the matching cookie on every
+// browser context instead of driving a real login round trip. See
+// fixture-session.mjs for why.
+await seedFixtureSession(fakeRedis.url);
 
 const root = mkdtempSync(join(tmpdir(), "honeypot-dashboard-e2e-"));
 const logs = join(root, "logs");
@@ -50,6 +62,13 @@ const child = spawn("go", ["run", "."], {
     DASHBOARD_REPORTS_FILE: stateFile("reports.json"),
     PAYLOAD_DIRS: payloads,
     ELASTICSEARCH_URL: fakeES.url,
+    OIDC_ISSUER_URL: fakeOIDC.url,
+    OIDC_EXTERNAL_URL: "http://127.0.0.1:18080",
+    // Fixture-only secret, well above the 32-char minimum oidc_auth.go
+    // enforces -- never a real client secret, this issuer doesn't
+    // authenticate anything.
+    OIDC_CLIENT_SECRET: "e2e-fixture-secret-not-a-real-credential-0000",
+    OIDC_SESSION_REDIS_URL: fakeRedis.url,
   },
   stdio: "inherit",
 });
@@ -60,16 +79,22 @@ const stop = () => {
   stopping = true;
   child.kill();
   fakeES.close();
+  fakeOIDC.close();
+  fakeRedis.close();
   rmSync(root, { recursive: true, force: true });
 };
 process.on("SIGINT", stop);
 process.on("SIGTERM", stop);
 process.on("exit", () => {
   fakeES.close();
+  fakeOIDC.close();
+  fakeRedis.close();
   rmSync(root, { recursive: true, force: true });
 });
 child.on("exit", (code, signal) => {
   fakeES.close();
+  fakeOIDC.close();
+  fakeRedis.close();
   rmSync(root, { recursive: true, force: true });
   if (!stopping && code !== 0) {
     process.exitCode = code ?? (signal ? 1 : 0);

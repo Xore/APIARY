@@ -112,6 +112,10 @@ jobs:
         working-directory: dashboard/frontend
       - run: npx playwright install --with-deps chromium
         working-directory: dashboard/frontend
+      # #1034: start-dashboard.mjs spawns a real redis-server for the OIDC
+      # session store fixture rather than reimplementing RESP -- ubuntu-latest
+      # ships it already in most images, but don't depend on that silently.
+      - run: command -v redis-server || sudo apt-get install -y redis-server
       - run: npm run test:browser
         working-directory: dashboard/frontend
 
@@ -205,6 +209,15 @@ jobs:
       - name: Validate Keycloak realm policy
         shell: bash
         run: ./keycloak/realm/validate.sh
+      # #982 phase 1 / #1040: validate.sh only checks structure/policy --
+      # this actually imports the realm into a real, disposable Keycloak +
+      # PostgreSQL the way the real fresh-install bootstrap path does, to
+      # catch what only a real import catches (e.g. a role description over
+      # Postgres's varchar(255) column limit crash-looped the container on
+      # every fresh install, undetected by any static check).
+      - name: Keycloak realm imports cleanly into a real Postgres
+        shell: bash
+        run: ./scripts/test-keycloak-realm-import.sh
       - name: GitHub-analysis publisher stays dry-run by default
         shell: bash
         run: |
