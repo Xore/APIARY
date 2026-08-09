@@ -232,7 +232,37 @@ func TestAccountMenuUsesTopLevelKeycloakActions(t *testing.T) {
 	}
 }
 
-func TestDashboardTraefikRouteUsesNativeOIDCWithoutForwardAuth(t *testing.T) {
+// #1015: this only asserts the legacy forward-auth middleware chain is gone
+// (true today) -- it does NOT assert the router targets the dashboard's own
+// native OIDC backend, because it currently doesn't: production still routes
+// through the oidc-dashboard compatibility gateway (see
+// TestDashboardTraefikRouteStillOnCompatibilityGateway below), pending #1026's
+// staged cutover. The original name of this test claimed more than it
+// checked; renamed to describe only what it verifies.
+func TestDashboardTraefikRouteHasNoForwardAuthMiddleware(t *testing.T) {
+	router := dashboardTraefikRouterBlock(t)
+	if strings.Contains(router, "forward-auth") || strings.Contains(router, "strip-auth-identity") ||
+		!strings.Contains(router, "middlewares: [security-headers]") {
+		t.Fatalf("dashboard router still has legacy forward-auth middleware wired in:\n%s", router)
+	}
+}
+
+// #1015 / #1026: production dashboard hostnames still target the
+// oidc-dashboard compatibility gateway, not the native-OIDC backend, until
+// every live dashboard replica is verified on the native implementation
+// (#1026's staged cutover). This test's job is to fail loudly -- not silently
+// pass -- the moment that changes without this test being updated alongside
+// it, so update the expected service name here when #1026 ships instead of
+// deleting or loosening this assertion.
+func TestDashboardTraefikRouteStillOnCompatibilityGateway(t *testing.T) {
+	router := dashboardTraefikRouterBlock(t)
+	if !strings.Contains(router, "service: oidc-dashboard") {
+		t.Fatalf("dashboard router's service target changed -- if this is #1026's native-OIDC cutover, update this test's expected service rather than deleting it:\n%s", router)
+	}
+}
+
+func dashboardTraefikRouterBlock(t *testing.T) string {
+	t.Helper()
 	raw, err := os.ReadFile("../vps/traefik/dynamic.yml")
 	if err != nil {
 		t.Fatal(err)
@@ -246,9 +276,5 @@ func TestDashboardTraefikRouteUsesNativeOIDCWithoutForwardAuth(t *testing.T) {
 	if end < 0 {
 		t.Fatal("dashboard router boundary missing")
 	}
-	router := config[start : start+1+end]
-	if strings.Contains(router, "forward-auth") || strings.Contains(router, "strip-auth-identity") ||
-		!strings.Contains(router, "middlewares: [security-headers]") {
-		t.Fatalf("dashboard router does not delegate identity exclusively to native OIDC:\n%s", router)
-	}
+	return config[start : start+1+end]
 }
