@@ -45,6 +45,39 @@ const esOverviewWindow = "now-48h"
 // the two without a compile-time reminder to update both.
 const esOverviewWindowDuration = 48 * time.Hour
 
+// suricataOverviewQuery is a small, separate aggregation over Suricata's own
+// index family (suricata-v2-*), run alongside esOverviewAggQuery and merged
+// into the same SensorCounts/SensorLastSeen maps as a synthetic "suricata"
+// sensor entry. Suricata cannot be folded into esOverviewAggQuery itself:
+// its events ship to their own index family, never honeypot-v2-* under
+// event.sensor:"suricata" the way every decoy sensor's events do (#41's
+// portbridge/suricata exclusion in aggregate.go's file-vs-ES read path is
+// the same underlying fact) -- so a card built only from
+// esOverviewAggQuery's own "sensors" bucket can never show Suricata,
+// regardless of how much real, current data it has. Confirmed live
+// (2026-08-09): EXPECTED_SENSORS lists "suricata" and expects it on this
+// card, but suricata-v2-* activity never appeared there no matter how
+// recent or heavy real traffic was.
+const suricataOverviewQuery = `{
+  "size": 0,
+  "track_total_hits": true,
+  "query": {"range": {"@timestamp": {"gte": "` + esOverviewWindow + `"}}},
+  "aggs": {"last_seen": {"max": {"field": "@timestamp"}}}
+}`
+
+type esSuricataOverviewResponse struct {
+	Hits struct {
+		Total struct {
+			Value int `json:"value"`
+		} `json:"total"`
+	} `json:"hits"`
+	Aggregations struct {
+		LastSeen struct {
+			ValueAsString string `json:"value_as_string"`
+		} `json:"last_seen"`
+	} `json:"aggregations"`
+}
+
 // esOverviewAggQuery is a fixed JSON literal: every "now" reference is
 // resolved by Elasticsearch itself (date math in the query), so no
 // per-request templating is needed on the Go side. Validated directly
@@ -295,12 +328,27 @@ func (s *store) fetchESOverview(now time.Time) (*esOverview, bool) {
 		out.EarliestSeen = t
 	}
 
-	out.SensorCounts = make(map[string]int, len(agg.Sensors.Buckets))
-	out.SensorLastSeen = make(map[string]time.Time, len(agg.Sensors.Buckets))
+	out.SensorCounts = make(map[string]int, len(agg.Sensors.Buckets)+1)
+	out.SensorLastSeen = make(map[string]time.Time, len(agg.Sensors.Buckets)+1)
 	for _, b := range agg.Sensors.Buckets {
 		out.SensorCounts[b.Key] = b.DocCount
 		if t, err := time.Parse(time.RFC3339, b.LastSeen.ValueAsString); err == nil {
 			out.SensorLastSeen[b.Key] = t
+		}
+	}
+
+	// Best-effort: a failure here (Elasticsearch briefly unreachable, a
+	// malformed response) must not fail the whole overview -- suricata
+	// just doesn't get its synthetic row for this one rebuild cycle,
+	// matching esOverviewOK's own graceful-degradation philosophy for the
+	// main query above.
+	if sb, err := s.es.searchBody("/suricata-v2-*/_search", []byte(suricataOverviewQuery)); err == nil {
+		var suricata esSuricataOverviewResponse
+		if json.Unmarshal(sb, &suricata) == nil {
+			out.SensorCounts["suricata"] = suricata.Hits.Total.Value
+			if t, err := time.Parse(time.RFC3339, suricata.Aggregations.LastSeen.ValueAsString); err == nil {
+				out.SensorLastSeen["suricata"] = t
+			}
 		}
 	}
 

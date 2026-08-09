@@ -35,11 +35,21 @@ func TestSyntheticSensorsReachDashboardSnapshot(t *testing.T) {
 	// into storedEvent (checked below via s.getEvents()); which sensors
 	// show up in the Sensors leaderboard is Elasticsearch's own job,
 	// covered by TestFetchESOverviewParsesCountsAndTerms.
+	//
+	// suricata is seeded through the separate suricata-v2-* query
+	// (esSuricataOverviewResponse), not the main sensors bucket list --
+	// #1100's fix made that match how production actually works: Suricata
+	// ships to its own index family, never honeypot-v2-* under
+	// event.sensor:"suricata" the way every other sensor here does (see
+	// es_aggregate.go's own comment on suricataOverviewQuery).
 	var resp esOverviewAggResponse
-	for _, sensor := range []string{"cowrie", "dionaea", "conpot", "tanner", "suricata"} {
+	for _, sensor := range []string{"cowrie", "dionaea", "conpot", "tanner"} {
 		resp.Aggregations.Sensors.Buckets = append(resp.Aggregations.Sensors.Buckets, esSensorBucket{Key: sensor, DocCount: 1})
 	}
-	esSrv := httptest.NewServer(esOverviewStub(t, resp))
+	var suricata esSuricataOverviewResponse
+	suricata.Hits.Total.Value = 1
+	suricata.Aggregations.LastSeen.ValueAsString = now
+	esSrv := httptest.NewServer(esOverviewStubWithSuricata(t, resp, suricata))
 	defer esSrv.Close()
 	s := &store{dir: root, es: newESClient(esSrv.URL, "")}
 	s.rebuild()

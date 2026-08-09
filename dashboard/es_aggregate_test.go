@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -57,13 +58,27 @@ func sensorFromSearchBody(body []byte) (sensor string, isSensorQuery bool) {
 // event.sensor (see events_es.go), the aggregation query's does not.
 func esOverviewStub(t *testing.T, resp esOverviewAggResponse) http.HandlerFunc {
 	t.Helper()
+	return esOverviewStubWithSuricata(t, resp, esSuricataOverviewResponse{})
+}
+
+// esOverviewStubWithSuricata additionally answers fetchESOverview's separate
+// suricata-v2-* query (see es_aggregate.go's own comment for why that's a
+// second query, not folded into esOverviewAggQuery) -- distinguished by URL
+// path, the one thing that does differ between it and the main overview
+// query (both are otherwise bodyless-of-event.sensor POSTs).
+func esOverviewStubWithSuricata(t *testing.T, resp esOverviewAggResponse, suricata esSuricataOverviewResponse) http.HandlerFunc {
+	t.Helper()
 	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "suricata") {
+			json.NewEncoder(w).Encode(suricata)
+			return
+		}
 		body, _ := io.ReadAll(r.Body)
 		if _, isSensorQuery := sensorFromSearchBody(body); isSensorQuery {
 			http.Error(w, "not stubbed", http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
 	}
 }
@@ -130,6 +145,77 @@ func TestFetchESOverviewParsesCountsAndTerms(t *testing.T) {
 	wantEarliest := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	if !out.EarliestSeen.Equal(wantEarliest) {
 		t.Fatalf("EarliestSeen = %v, want %v", out.EarliestSeen, wantEarliest)
+	}
+}
+
+// Suricata ships to its own index family (suricata-v2-*), never
+// honeypot-v2-* under event.sensor:"suricata" the way every decoy sensor's
+// events do -- a card built only from esOverviewAggQuery's own "sensors"
+// bucket can never show it, regardless of how much real, current Suricata
+// data exists. fetchESOverview must merge in a synthetic "suricata" row
+// from its own separate query. Confirmed live (2026-08-09): EXPECTED_SENSORS
+// lists "suricata" and the Sensors card is expected to show it, but it
+// never appeared no matter how recent or heavy real Suricata traffic was.
+func TestFetchESOverviewMergesSuricataFromItsOwnIndex(t *testing.T) {
+	var resp esOverviewAggResponse
+	resp.Aggregations.Sensors.Buckets = []esSensorBucket{{Key: "cowrie", DocCount: 5}}
+
+	var suricata esSuricataOverviewResponse
+	suricata.Hits.Total.Value = 3831
+	suricata.Aggregations.LastSeen.ValueAsString = "2026-08-09T21:32:33.000Z"
+
+	srv := httptest.NewServer(esOverviewStubWithSuricata(t, resp, suricata))
+	defer srv.Close()
+	s := &store{es: newESClient(srv.URL, "")}
+
+	out, ok := s.fetchESOverview(time.Now())
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if out.SensorCounts["suricata"] != 3831 {
+		t.Fatalf("SensorCounts[suricata] = %d, want 3831", out.SensorCounts["suricata"])
+	}
+	wantSeen := time.Date(2026, 8, 9, 21, 32, 33, 0, time.UTC)
+	if !out.SensorLastSeen["suricata"].Equal(wantSeen) {
+		t.Fatalf("SensorLastSeen[suricata] = %v, want %v", out.SensorLastSeen["suricata"], wantSeen)
+	}
+	// The main sensor unaffected by the merge.
+	if out.SensorCounts["cowrie"] != 5 {
+		t.Fatalf("SensorCounts[cowrie] = %d, want 5 (suricata merge must not disturb it)", out.SensorCounts["cowrie"])
+	}
+}
+
+// A failed/unreachable suricata-v2-* query must not blank the whole
+// overview -- same graceful-degradation philosophy as esOverviewOK itself.
+func TestFetchESOverviewSurvivesSuricataQueryFailure(t *testing.T) {
+	var resp esOverviewAggResponse
+	resp.Aggregations.Sensors.Buckets = []esSensorBucket{{Key: "cowrie", DocCount: 5}}
+
+	// No suricata-path handling at all -- esOverviewStub (not …WithSuricata)
+	// routes every request through the main-query path, which 500s any
+	// request it doesn't recognize as either the main query or a per-sensor
+	// query. The suricata-v2-* request has neither shape, so it 500s too --
+	// simulating suricata-v2-* itself being briefly unreachable/erroring
+	// independently of the main honeypot-v2-* index.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "suricata") {
+			http.Error(w, "simulated failure", http.StatusInternalServerError)
+			return
+		}
+		esOverviewStub(t, resp)(w, r)
+	}))
+	defer srv.Close()
+	s := &store{es: newESClient(srv.URL, "")}
+
+	out, ok := s.fetchESOverview(time.Now())
+	if !ok {
+		t.Fatal("expected ok=true -- a suricata-v2-* failure must not fail the whole overview")
+	}
+	if out.SensorCounts["cowrie"] != 5 {
+		t.Fatalf("SensorCounts[cowrie] = %d, want 5", out.SensorCounts["cowrie"])
+	}
+	if _, ok := out.SensorCounts["suricata"]; ok {
+		t.Fatalf("suricata should be absent (not zero-valued) after its own query failed: %+v", out.SensorCounts)
 	}
 }
 
