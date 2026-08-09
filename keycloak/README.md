@@ -41,10 +41,13 @@ stored in the export.
 The VPS route must target the WireGuard endpoint, preserve the original host,
 set reviewed `X-Forwarded-*` headers, and never expose port 9000.
 
-The administrator console uses `https://keycloak-admin.example.invalid`, not the
-public issuer hostname. VPS Traefik applies a tighter rate limit, while Keycloak
-requires a realm-administrator account and MFA. Do not add HTTP Basic in front
-of the console: its SPA uses the `Authorization` header for Bearer API calls.
+The administrator console shares the public issuer hostname
+(`https://auth.example.invalid/admin/apiary/console/`, #1028) rather than a
+separate host. VPS Traefik routes `/admin` through its own rate limit --
+looser than the login/token endpoints, since the SPA loads many assets at
+once -- while Keycloak requires a realm-administrator account and MFA. Do not
+add HTTP Basic in front of the console: its SPA uses the `Authorization`
+header for Bearer API calls.
 
 ## Backup and restore
 

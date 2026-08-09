@@ -54,7 +54,6 @@ Copy `keycloak.env.example` to `.env` and set host-local values:
 HP_BIND=<homeserver-wireguard-address>
 KEYCLOAK_PORT=18080
 KEYCLOAK_URL=https://auth.honeypot.example
-KEYCLOAK_ADMIN_URL=https://keycloak-admin.honeypot.example
 KEYCLOAK_PUBLIC_DOMAIN=honeypot.example
 KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME=bootstrap-admin
 KEYCLOAK_THEME_DIR=/var/dockge/stacks/honeypot-keycloak/theme/apiary
@@ -132,7 +131,7 @@ sudo docker exec hp-keycloak "$KC" get users -r apiary \
   -q username=<admin-user> --config /tmp/kcadm.config
 ```
 
-Open `https://keycloak-admin.honeypot.example/admin/apiary/console/`, replace the
+Open `https://auth.honeypot.example/admin/apiary/console/`, replace the
 temporary password, enroll TOTP, and confirm the administrator can read the
 realm. Then remove both bootstrap artifacts and restart:
 
@@ -212,23 +211,28 @@ docker compose --env-file .env -f docker-compose.yml up -d
 
 ## 4. DNS, TLS, and Traefik behavior
 
-Create public DNS/TLS coverage for the issuer, administrator, and protected
-application hostnames. Traefik must preserve the original Host and forwarded
-HTTPS scheme. Only the Keycloak application port crosses WireGuard; PostgreSQL
-and Keycloak port 9000 remain private.
+Create public DNS/TLS coverage for the issuer/administrator hostname (they are
+the same host, #1028) and the protected application hostnames. Traefik must
+preserve the original Host and forwarded HTTPS scheme. Only the Keycloak
+application port crosses WireGuard; PostgreSQL and Keycloak port 9000 remain
+private.
 
-The Keycloak administrator SPA is split across the admin and issuer hostnames.
-Two issuer endpoints must be frameable by the admin hostname:
+The Keycloak administrator SPA embeds two issuer endpoints from itself for
+session/cookie checks. Because they're the same origin, this only needs a
+same-origin framing exception, not a cross-host CSP allowlist:
 
 - `/realms/apiary/protocol/openid-connect/3p-cookies/`
 - `/realms/apiary/protocol/openid-connect/login-status-iframe.html`
 
-The dedicated `keycloak-embedded-frames` router removes `X-Frame-Options` only
-for those paths and sets `frame-ancestors` to self plus the admin hostname.
-Every ordinary Keycloak page retains `X-Frame-Options: DENY`.
+The dedicated `keycloak-embedded-frames` router sets `X-Frame-Options:
+SAMEORIGIN` and `frame-ancestors 'self'` only for those paths. Every ordinary
+Keycloak page retains `X-Frame-Options: DENY`. A separate
+`keycloak-admin-console` router (`PathPrefix(/admin)` on the same host) exists
+only to give the admin SPA's asset burst a larger rate limit than login/token
+endpoints get.
 
-Do not put Traefik BasicAuth in front of the administrator hostname. The admin
-SPA calls `/admin/serverinfo`, `/admin/realms/`, and related endpoints using
+Do not put Traefik BasicAuth in front of the admin path. The admin SPA calls
+`/admin/serverinfo`, `/admin/realms/`, and related endpoints using
 `Authorization: Bearer`; BasicAuth would consume the same header and cause an
 endless browser credential prompt. Keycloak realm-admin authorization and TOTP
 are the protection boundary.
@@ -251,8 +255,8 @@ upgrade:
 6. A wrong-role user is denied.
 7. The admin console loads without HTTP Basic and requires Keycloak login.
 8. First login requires a password replacement and TOTP.
-9. `login-status-iframe.html/init` returns `204` for the real admin origin and
-   has no X-Frame-Options header.
+9. `login-status-iframe.html/init` returns `204` and `X-Frame-Options:
+   SAMEORIGIN` (not `DENY`).
 10. Ordinary login/account pages still return X-Frame-Options `DENY`.
 11. Each oauth2-proxy container is healthy and has no configuration error.
 12. Direct access to each protected upstream is unreachable from other public

@@ -84,9 +84,11 @@ http:
       middlewares: [security-headers, rate-limit-auth]
 
     # Keycloak's admin SPA embeds these narrowly scoped session/cookie-check
-    # endpoints from the public issuer hostname. The general DENY header would
-    # block those cross-subdomain frames, so this more-specific router removes
-    # XFO and uses CSP to allow only Keycloak and the protected admin hostname.
+    # endpoints from itself. The general DENY header blocks framing outright
+    # (even same-origin), so this more-specific router allows just these two
+    # paths to be framed. #1028: admin and issuer are the same origin now
+    # (auth.honeypot.example), so this is a same-origin exception only --
+    # no cross-host CSP allowlist needed any more.
     keycloak-embedded-frames:
       rule: "Host(`auth.honeypot.example`) && (PathPrefix(`/realms/apiary/protocol/openid-connect/3p-cookies/`) || Path(`/realms/apiary/protocol/openid-connect/login-status-iframe.html`) || PathPrefix(`/realms/apiary/protocol/openid-connect/login-status-iframe.html/`))"
       priority: 120
@@ -96,14 +98,23 @@ http:
         options: modern
       middlewares: [security-headers-keycloak-frame, rate-limit-auth]
 
-    keycloak-admin:
-      rule: "Host(`keycloak-admin.honeypot.example`)"
+    # #1028: admin console now serves from the same host as the issuer
+    # (KC_HOSTNAME_ADMIN is unset, so Keycloak defaults it under /admin on
+    # KC_HOSTNAME) instead of a separate keycloak-admin.* host. This
+    # PathPrefix-scoped router exists only to give the admin SPA's bootstrap
+    # burst (dozens of modules/fonts/localization files loaded concurrently)
+    # the larger rate-limit-keycloak-admin budget; every other path on this
+    # host -- login, token, realm discovery -- keeps the tighter
+    # brute-force-resistant rate-limit-auth via the plain `keycloak` router
+    # below. Keycloak's realm-admin login and mandatory MFA remain the actual
+    # authorization boundary, same as when this had its own hostname.
+    keycloak-admin-console:
+      rule: "Host(`auth.honeypot.example`) && PathPrefix(`/admin`)"
+      priority: 110
       entryPoints: [websecure]
       service: keycloak-candidate
       tls:
         options: modern
-      # Keycloak's realm-admin login and mandatory MFA are the authorization
-      # boundary. HTTP Basic cannot coexist with the SPA's Bearer API calls.
       middlewares: [security-headers, rate-limit-keycloak-admin]
 
     static-site:
@@ -588,16 +599,21 @@ http:
           X-Powered-By: ""
           Server: ""
 
+    # #1028: SAMEORIGIN (not a blanked-out header relying on CSP alone) now
+    # that the admin SPA and the issuer paths it frames are the same origin
+    # -- matches this file's own security-headers-dashboard-pdf pattern.
+    # frame-ancestors 'self' is the CSP-level equivalent, kept for browsers
+    # that honor CSP frame-ancestors preferentially.
     security-headers-keycloak-frame:
       headers:
+        customFrameOptionsValue: "SAMEORIGIN"
         contentTypeNosniff: true
         referrerPolicy: "strict-origin-when-cross-origin"
         stsSeconds: 31536000
         stsIncludeSubdomains: true
         stsPreload: true
-        contentSecurityPolicy: "frame-ancestors 'self' https://keycloak-admin.honeypot.example; object-src 'none'"
+        contentSecurityPolicy: "frame-ancestors 'self'; object-src 'none'"
         customResponseHeaders:
-          X-Frame-Options: ""
           X-Powered-By: ""
           Server: ""
 
