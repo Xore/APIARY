@@ -18,10 +18,21 @@ INSTALL_HOSTNAME="<HOSTNAME>"
 GIT_REPO_URL="<GIT_REMOTE_URL>"          # e.g. git@github.com:<org>/apiary.git
 GIT_REF="main"
 
-# Where the repo checkout used by Dockge should live. Matches the layout
-# documented in docs/HOMESERVER-DISK-LAYOUT.md — this repo's own stack
-# expects to be findable at a fixed path.
-REPO_DIR="/var/dockge/stacks/honeypot-stack"
+# #1019: Xore/auth-backend, checked out separately for its presentation-only
+# themes/apiary/ (the Keycloak login theme) -- .github/workflows/deploy.yml's
+# CI path does the equivalent with a second `actions/checkout`; this is
+# install-homeserver.sh's from-scratch-install equivalent.
+AUTH_THEME_REPO_URL="<GIT_REMOTE_URL>"   # e.g. git@github.com:<org>/auth-backend.git
+
+# Where the repo checkout used by Dockge should live. The basename MUST be
+# "apiary" -- every split stack's compose file (citrix-honeypot, conpot,
+# honeypot-keycloak, ...) hardcodes absolute /opt/stacks/apiary/... paths,
+# and step_clone_repo symlinks /opt/stacks -> dirname(REPO_DIR), so
+# /opt/stacks/apiary only resolves to the real checkout when REPO_DIR's
+# last path segment is literally "apiary" (a stale "honeypot-stack" here,
+# from before the repo's rename to APIARY, silently breaks every one of
+# those stacks' builds on a fresh install).
+REPO_DIR="/var/dockge/stacks/apiary"
 
 # --- Networking (WireGuard tunnel to the VPS) ----------------------------
 # This box's address on the WireGuard tunnel. Honeypot sensors bind only
