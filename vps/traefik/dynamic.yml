@@ -258,7 +258,7 @@ http:
     honeypot-dashboard-pdf:
       rule: "(Host(`dashboard.honeypot.example`) || Host(`honeypot.honeypot.example`)) && PathRegexp(`^/api/reports/generated/[^/]+/pdf$`)"
       entryPoints: [websecure]
-      service: oidc-dashboard
+      service: honeypot-dashboard
       tls:
         options: modern
       middlewares: [security-headers-dashboard-pdf]
@@ -275,38 +275,41 @@ http:
     honeypot-dashboard-github-analysis-pdf:
       rule: "(Host(`dashboard.honeypot.example`) || Host(`honeypot.honeypot.example`)) && PathRegexp(`^/export/github-analysis/[^/]+/pdf$`)"
       entryPoints: [websecure]
-      service: oidc-dashboard
+      service: honeypot-dashboard
       tls:
         options: modern
       middlewares: [security-headers-dashboard-pdf]
 
     # dashboard.honeypot.example redirects here rather than sharing this
-    # router: oidc-dashboard's OAUTH2_PROXY_REDIRECT_URL is hardcoded to
-    # honeypot.honeypot.example only (e8bba20, "Use the canonical honeypot
-    # dashboard hostname"). oauth2-proxy's CSRF cookie is a __Host- cookie,
-    # bound to whichever host it was set on -- a login started on
-    # dashboard.* got its CSRF cookie scoped to dashboard.*, then bounced
-    # through Keycloak back to a callback on honeypot.* (the only
-    # registered redirect_uri), where the browser never sends a
-    # dashboard.*-scoped cookie. oauth2-proxy correctly refused it: "403
-    # Login Failed: Unable to find a valid CSRF token". Redirecting
-    # dashboard.* to the canonical host before oauth2-proxy ever runs
-    # keeps the whole OIDC round trip on one host.
+    # router: the dashboard's own native OIDC runtime (#1026) has
+    # OIDC_EXTERNAL_URL hardcoded to a single host (honeypot.honeypot.example)
+    # -- that's the only redirect_uri registered with the Keycloak client, and
+    # the only host its own session cookie is scoped to. A login started on
+    # dashboard.* would bounce through Keycloak back to a callback on
+    # honeypot.* (the only registered redirect_uri) with no valid session
+    # state for that host. Redirecting dashboard.* to the canonical host
+    # before the dashboard's own OIDC flow ever starts keeps the whole round
+    # trip on one host. Historically the same constraint existed one layer
+    # down, in oidc-dashboard's own OAUTH2_PROXY_REDIRECT_URL/CSRF-cookie
+    # scoping (e8bba20) -- the compatibility gateway this router used before
+    # #1026's cutover.
     honeypot-dashboard:
       rule: "Host(`honeypot.honeypot.example`)"
       entryPoints: [websecure]
-      service: oidc-dashboard
+      service: honeypot-dashboard
       tls:
         options: modern
-      # The compatibility OIDC gateway protects deployments that predate the
-      # dashboard's native OIDC runtime. Its callback terminates in the gateway,
-      # outside this router's middleware chain.
+      # #1026: routes directly to the dashboard's own native OIDC runtime.
+      # No proxy identity headers -- the dashboard validates tokens and owns
+      # its session itself (docs/KEYCLOAK-CUTOVER.md's route matrix). The
+      # oidc-dashboard compatibility gateway this used to route through is
+      # no longer referenced by any router; still running, not yet retired.
       middlewares: [security-headers]
 
     honeypot-dashboard-canonical-redirect:
       rule: "Host(`dashboard.honeypot.example`)"
       entryPoints: [websecure]
-      service: oidc-dashboard
+      service: honeypot-dashboard
       tls:
         options: modern
       middlewares: [security-headers, dashboard-canonical-redirect]
