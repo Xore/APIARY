@@ -549,10 +549,12 @@ step_dockge_install() {
 # ---------------------------------------------------------------------------
 # Phase 7 — secret restore from the LAN backup host
 # ---------------------------------------------------------------------------
-# Maps Dockge stack name -> subdirectory name under BACKUP_HOST_PATH. 1:1 for
-# everything except pihole, which the backup captured a bare .env for (no
-# compose file was ever backed up for it -- see step_pihole_provision, which
-# reconstructs a minimal one since it isn't part of this git repo).
+# Maps Dockge stack name -> "<name>.env" file directly under BACKUP_HOST_PATH
+# (a flat directory, not "<name>/.env" subdirectories -- confirmed against
+# the real backup host live during #787's homeserver reinstall, 2026-08-09).
+# 1:1 for everything except pihole, which the backup captured a bare .env for
+# (no compose file was ever backed up for it -- see step_pihole_provision,
+# which reconstructs a minimal one since it isn't part of this git repo).
 ENV_RESTORE_STACKS=(
   honeypot-keycloak honeypot-init honeypot-cowrie honeypot-dionaea honeypot-conpot honeypot-dnp3
   honeypot-http honeypot-multipot honeypot-dashboard honeypot-payload-analysis
@@ -563,7 +565,7 @@ ENV_RESTORE_STACKS=(
 step_restore_env_files() {
   local failures=0
   for name in "${ENV_RESTORE_STACKS[@]}"; do
-    local src="${BACKUP_HOST_PATH}/${name}/.env"
+    local src="${BACKUP_HOST_PATH}/${name}.env"
     local dest_dir="/var/dockge/stacks/${name}"
     mkdir -p "$dest_dir"
     if with_retry 3 5 scp -i "$BACKUP_HOST_KEY" -P 22 -o StrictHostKeyChecking=accept-new \
