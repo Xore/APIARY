@@ -304,8 +304,10 @@ replicas** (`dashboard` and `dashboard-b` in `docker-compose.dashboard.yml`
 different host port and container name only) instead of one.
 `vps/traefik/dynamic.yml`'s `honeypot-dashboard` service lists both as
 `loadBalancer` servers with an active `healthCheck` polling `/healthz`
-directly against each backend (bypassing the router and its `forward-auth`
-middleware entirely -- health checks are server-to-server, never routed).
+directly against each backend (bypassing the router's `security-headers`
+middleware entirely -- health checks are server-to-server, never routed;
+the dashboard has no ForwardAuth/oauth2-proxy gateway hop to bypass in the
+first place, unlike every other investigation UI -- native OIDC, #1026).
 Traefik stops sending a replica live traffic the instant it fails that
 check, before any redeploy script even touches it.
 

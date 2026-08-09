@@ -386,10 +386,11 @@ jobs:
           # deployed here instead, deliberately differently. Traefik's file
           # provider has no env-var substitution the way docker-compose's
           # ${VAR} syntax already gives every other host-specific value in
-          # this repo (docker-compose.yml's AUTH_INTROSPECTION_URL etc, which
-          # needed no change here) -- so the committed file is a placeholder
-          # (*.honeypot.example) and the DOMAIN secret substitutes it here,
-          # in CI, instead of via a manual live-only edit no one wrote down.
+          # this repo (vps/docker-compose.yml's OIDC_ISSUER_URL/OIDC_PUBLIC_DOMAIN
+          # etc, which needed no change here) -- so the committed file is a
+          # placeholder (*.honeypot.example) and the DOMAIN secret
+          # substitutes it here, in CI, instead of via a manual live-only
+          # edit no one wrote down.
           #
           # The substituted file is written to the live path with a plain
           # in-place `cat`, NOT copied via the rsync above (or any rename-

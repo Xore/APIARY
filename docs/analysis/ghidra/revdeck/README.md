@@ -51,7 +51,7 @@ different mechanism than `ghidra`/`ollama`/`statictools`: those three bind
 off-host; `revdeck`'s binding is `HP_BIND`-controlled because it is the one
 service here meant to be reachable remotely (see below).
 
-### Reaching it remotely (Traefik + forward-auth SSO)
+### Reaching it remotely (Traefik + Keycloak/oauth2-proxy SSO)
 
 Set `HP_BIND` in this directory's `.env` (copy from `.env.example`) to the
 same WireGuard address `APIARY`'s own `HP_BIND` uses, then redeploy
@@ -59,8 +59,8 @@ this stack — `revdeck`'s port publish reads it, everything else in this file
 stays loopback-only regardless. The VPS side (`socat-hp-revdeck` in
 `vps/docker-compose.yml`, the `honeypot-revdeck` router in
 `vps/traefik/dynamic.yml`) is already wired to a `rev.<domain>` route
-behind the same shared forward-auth SSO middleware every other investigation
-UI (dashboard, Kibana, Arkime, ...) uses — register the DNS record and it's
+behind the same shared Keycloak/oauth2-proxy SSO gateway every other
+gateway-fronted investigation UI (Kibana, Arkime, ...) uses — register the DNS record and it's
 reachable at `https://rev.<your-domain>`. No new auth pattern; this is
 the existing one extended to one more service.
 

@@ -422,7 +422,6 @@ flowchart TB
 
   subgraph vps["VPS"]
     traefik["Traefik<br/>Host() rule"]
-    auth["forward-auth<br/>Xore/auth-backend"]
     lb["loadBalancer —<br/>2 servers, active healthCheck<br/>GET /healthz every 5s"]
   end
 
@@ -454,9 +453,7 @@ flowchart TB
   dockerSock[("/var/run/docker.sock<br/>host Docker daemon")]
 
   analyst -->|"HTTPS"| traefik
-  traefik -->|"forward-auth check"| auth
-  auth -->|"identity headers or reject"| traefik
-  traefik --> lb
+  traefik -->|"straight through, no gateway hop<br/>(native OIDC, #1026)"| lb
   lb -->|"socat bridge, VPS side"| wg
   wg -->|"traffic only to whichever<br/>replica is passing healthCheck"| primaryReq
   wg --> secondaryReq
