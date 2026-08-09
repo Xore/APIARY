@@ -460,11 +460,12 @@ route to:
     unchanged by it. The only real gain would be keeping the value out of
     `docker inspect`/the rendered compose config at rest, a narrower
     benefit than the wrapper's own added complexity justifies given the
-    surrounding mitigations already in place: `config.ini`'s own
-    `authMode=header` block documents that Arkime's real access boundary
-    is network isolation (WireGuard-tunnel-only bind, no public port) plus
-    auth-backend's SSO injecting a trusted identity header — `passwordSecret`
-    here signs Arkime's own session cookies, it is not a login credential,
+    surrounding mitigations already in place: Arkime's real access
+    boundary is network isolation (WireGuard-tunnel-only bind, no public
+    port) plus the isolated `oidc-arkime` Keycloak gateway (#1021 removed
+    the earlier trusted-header approach after the cutover left it
+    forgeable) — `passwordSecret` here signs Arkime's own session cookies,
+    it is not a login credential,
     and a leak of it alone has a narrow blast radius already contained by
     that isolation. `GH_PAT` (this item's other named case) is a host-side
     `.env` file consumed by a root-owned host script, not a
