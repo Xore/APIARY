@@ -20,9 +20,14 @@ credential value -- but the allowlist stays explicit rather than "store
 whatever Keycloak sends" so a future Keycloak version adding a more
 sensitive detail key doesn't silently start leaking it.
 """
+import argparse
+import json
 import os
+import sys
+import tempfile
 import time
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 
 import requests
 from elasticsearch import Elasticsearch
@@ -44,6 +49,17 @@ STATE_INDEX = "auth-events-worker-state"
 STATE_DOC_ID = "checkpoint"
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+
+# #787: a hung cycle (confirmed live -- a Keycloak connection failure right
+# as urllib3's connection pool held a now-dead socket) left the process
+# technically running but silently dead: no further cycles, no further
+# logs, forever, with nothing to detect or restart it (no healthcheck was
+# ever wired up for this worker). Same heartbeat-file pattern llm-worker's
+# own healthcheck() already uses -- the loop below writes this on every
+# cycle attempt, success or caught failure; --healthcheck fails once it
+# goes stale for longer than a few missed polls, which is what actually
+# catches "the loop stopped iterating" instead of just "the process exited."
+STATUS_PATH = Path(os.getenv("AUTH_EVENTS_STATUS_PATH", str(Path(tempfile.gettempdir()) / "auth-events-worker-status.json")))
 
 # Explicit allowlist -- see module docstring. Anything Keycloak's `details`
 # object carries outside this list is dropped, not stored.
@@ -149,6 +165,23 @@ def write_events(es: Elasticsearch, events: list) -> None:
         es.index(index=EVENTS_INDEX, id=doc["event_id"], document=doc)
 
 
+def write_status(ok: bool) -> None:
+    payload = {"ok": ok, "updated_at": datetime.now(timezone.utc).isoformat()}
+    temporary = STATUS_PATH.with_suffix(".tmp")
+    temporary.write_text(json.dumps(payload), encoding="utf-8")
+    temporary.replace(STATUS_PATH)
+
+
+def healthcheck() -> int:
+    try:
+        status = json.loads(STATUS_PATH.read_text(encoding="utf-8"))
+        updated = datetime.fromisoformat(str(status["updated_at"]))
+        max_age = max(90, POLL_INTERVAL * 3)
+        return 0 if (datetime.now(timezone.utc) - updated).total_seconds() <= max_age else 1
+    except (OSError, ValueError, KeyError, TypeError):
+        return 1
+
+
 def run_worker() -> None:
     logger.remove()
     logger.add(lambda msg: print(msg, end=""), level=LOG_LEVEL)
@@ -211,12 +244,19 @@ def run_worker() -> None:
                 new_checkpoint = max(e["time"] for e in all_new)
                 save_checkpoint(es, new_checkpoint)
                 logger.info(f"Wrote {len(all_new)} new LOGIN_ERROR event(s)")
+            write_status(True)
         except Exception as exc:
             logger.error(f"Cycle failed: {exc}")
+            write_status(False)
 
         elapsed = time.time() - cycle_start
         time.sleep(max(0, POLL_INTERVAL - elapsed))
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--healthcheck", action="store_true", help="check the bounded status heartbeat")
+    args = parser.parse_args()
+    if args.healthcheck:
+        sys.exit(healthcheck())
     run_worker()
