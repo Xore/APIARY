@@ -1,5 +1,25 @@
 # Build mushorg/snare from source with a deterministic fictional portal.
-FROM python:3.14-slim@sha256:a7fb1e634c4a578f9e0bd6327f11a3cde11b7a9395f48e24360c0988bcc5c2bc
+#
+# python:3.11-slim, NOT 3.14 -- found live during #787's actual homeserver
+# reinstall (2026-08-09), on a genuinely fresh build with no Docker layer
+# cache to hide it behind: aiohttp==3.8.6 (below) is pinned deliberately, a
+# considered bump past upstream mushorg/snare's own requirements.txt
+# (aiohttp==3.7.4), not accidental drift -- so the fix is making that exact
+# pin installable again, not jumping to a modern aiohttp untested against
+# this file's compatibility_patch.py. aiohttp 3.8.6 has no prebuilt wheel
+# past cp311 (confirmed against the real PyPI file list), and its Cython-
+# generated _websocket.c directly reads CPython-internal PyLongObject
+# struct fields (ob_digit) that later CPython versions restructured --
+# this is a genuine C-ABI incompatibility, not a missing build dependency;
+# confirmed live that even installing every header package still fails
+# identically against 3.12, let alone 3.14. 3.11 is the newest version
+# with a real prebuilt wheel -- verified live: installs cleanly from a
+# wheel against this exact digest, no compilation at all (3.12 was tried
+# first, since ml-worker/Dockerfile and auth-events-worker/Dockerfile
+# already pin that version elsewhere in this repo; it fails identically to
+# 3.14, no cp312 wheel exists either -- 3.11 is the newest that actually
+# has one).
+FROM python:3.11-slim@sha256:90744cff8f32887f075c47d747a173ff333e9e98801667af93c357fa9f5e28ff
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git wget libxml2-dev libxslt-dev gcc \
