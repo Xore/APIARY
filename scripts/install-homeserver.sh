@@ -535,8 +535,26 @@ step_clone_repo() {
     git -C "$REPO_DIR" checkout "$GIT_REF"
     with_retry 3 10 git -C "$REPO_DIR" pull --ff-only origin "$GIT_REF"
   else
-    mkdir -p "$(dirname "$REPO_DIR")"
-    with_retry 3 10 git clone --branch "$GIT_REF" "$GIT_REPO_URL" "$REPO_DIR"
+    # REPO_DIR can already exist and be non-empty even on a fresh box:
+    # other stacks' sshfs mounts live under it (e.g. apiary/logs/suricata,
+    # set up by step_sshfs_boot_ordering's fstab entries), and systemd
+    # creates a mount unit's mountpoint directory at boot regardless of
+    # whether the mount itself actually succeeds. A plain `git clone`
+    # refuses to clone into a non-empty directory -- found live during
+    # #787's homeserver reinstall (2026-08-09), and only surfaced now
+    # because with_retry actually propagates failure correctly (#1078);
+    # before that fix this step silently "succeeded" while never cloning
+    # anything, and everything downstream cascaded off a missing repo.
+    # `git init` + fetch + checkout works fine into a pre-populated
+    # directory as long as there's no tracked-path collision (there isn't
+    # -- logs/ and state/ aren't part of this repo's tree).
+    mkdir -p "$REPO_DIR"
+    if [[ ! -d "$REPO_DIR/.git" ]]; then
+      git -C "$REPO_DIR" init -q
+      git -C "$REPO_DIR" remote add origin "$GIT_REPO_URL"
+    fi
+    with_retry 3 10 git -C "$REPO_DIR" fetch origin "$GIT_REF"
+    git -C "$REPO_DIR" checkout -f -B "$GIT_REF" FETCH_HEAD
   fi
 }
 
