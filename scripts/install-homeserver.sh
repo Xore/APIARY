@@ -650,6 +650,7 @@ STACK_DEFS=(
   "honeypot-rdp-honeypot|docker-compose.rdp-honeypot.yml"
   "honeypot-dicompot|docker-compose.dicompot.yml"
   "honeypot-dns-honeypot|docker-compose.dns-honeypot.yml"
+  "honeypot-endlessh|docker-compose.endlessh.yml"
   "honeypot-ip-enrichment-worker|docker-compose.ip-enrichment-worker.yml"
   "honeypot-agent-intrusion-worker|docker-compose.agent-intrusion-worker.yml"
   "honeypot-payload-analysis|docker-compose.payload-analysis.yml"
