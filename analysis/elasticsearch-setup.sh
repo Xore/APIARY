@@ -881,5 +881,20 @@ curl -fsS -X PUT "$es_url/_all/_settings?expand_wildcards=all" \
   -H 'Content-Type: application/json' \
   -d '{"index.number_of_replicas":0}' >/dev/null || true
 
+# #787: the PUT above only reaches indices that already exist the moment this
+# script runs. auth-events-worker-state, auth-failure-events, ml-anomalies,
+# ml-worker-metrics, ml-worker-state, dashboard-intelligence-archive-v1, and
+# dashboard-payload-bytes-v1 have no index template of their own (they're
+# dynamically created on each producer's first write, which can happen well
+# after this script's one-time pass) -- confirmed live, all seven picked up
+# Elasticsearch's built-in default of 1 replica instead and sat permanently
+# yellow on this single-node cluster. A lowest-priority catch-all template
+# closes this for good: every other template above sets its own
+# number_of_replicas explicitly and outranks this one on priority, so this
+# only ever applies to an index nothing more specific already covers.
+curl -fsS -X PUT "$es_url/_index_template/single-node-replica-default" \
+  -H 'Content-Type: application/json' \
+  --data-binary '{"index_patterns":["*"],"priority":1,"template":{"settings":{"index.number_of_replicas":0}}}' >/dev/null
+
 echo
 echo "elasticsearch-setup: GeoIP, retention policies, and event templates installed"
