@@ -897,8 +897,15 @@ step_sshfs_mounts() {
 
 # #518: read-only VPS log mounts for Suricata (eve.json + pcap/) and
 # portbridge, pulled over the WireGuard tunnel. See docs/SENSORS.md.
-root@${VPS_WG_ADDRESS}:/opt/stacks/honeypot-stack/logs/suricata $suricata_dir fuse.sshfs $opts 0 0
-root@${VPS_WG_ADDRESS}:/opt/stacks/honeypot-stack/logs/portbridge $portbridge_dir fuse.sshfs $opts 0 0
+# /opt/stacks/apiary, not the pre-#783-rebrand honeypot-stack -- confirmed
+# live against the VPS during #787's homeserver reinstall (2026-08-09):
+# the old path doesn't exist there anymore, silently failing this mount
+# (masked non-fatally without real VPS credentials to notice with, until
+# now). NOTE: this same stale honeypot-stack path still appears in ~20
+# other files across the repo (docs and other scripts) -- out of scope for
+# this fix, tracked separately.
+root@${VPS_WG_ADDRESS}:/opt/stacks/apiary/logs/suricata $suricata_dir fuse.sshfs $opts 0 0
+root@${VPS_WG_ADDRESS}:/opt/stacks/apiary/logs/portbridge $portbridge_dir fuse.sshfs $opts 0 0
 EOF
 
   mountpoint -q "$suricata_dir" || mount "$suricata_dir"
