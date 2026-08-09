@@ -28,8 +28,8 @@ jq -e '
   ([.authenticationFlows[] | select(.alias == "Browser - Conditional 2FA") |
     .authenticationExecutions[] | select(.authenticator == "webauthn-authenticator") |
     .requirement] == ["ALTERNATIVE"]) and
-  ([.clients[].clientId] | sort == ["apiary-dashboard", "arkime", "dockge", "evebox", "kibana", "revdeck", "tanner", "traefik-dashboard"]) and
-  (all(.clients[];
+  ([.clients[].clientId] | sort == ["apiary-dashboard", "arkime", "auth-events-poller", "dockge", "evebox", "kibana", "revdeck", "tanner", "traefik-dashboard"]) and
+  (all(.clients[] | select(.clientId != "auth-events-poller");
     .publicClient == false and
     .standardFlowEnabled == true and
     .implicitFlowEnabled == false and
@@ -41,6 +41,19 @@ jq -e '
     (.webOrigins | length == 1) and
     (all(.webOrigins[]; startswith("https://") and (contains("*") | not)))
   )) and
+  # auth-events-poller (#1066) is deliberately shaped differently -- a
+  # machine-only service-account client with no browser flow, so none of
+  # the redirect/webOrigin/PKCE assertions above apply to it. Its own
+  # narrower shape is asserted here instead of just excluding it silently.
+  (.clients[] | select(.clientId == "auth-events-poller") |
+    .publicClient == false and
+    .standardFlowEnabled == false and
+    .implicitFlowEnabled == false and
+    .directAccessGrantsEnabled == false and
+    .serviceAccountsEnabled == true and
+    ((.redirectUris // []) | length == 0) and
+    ((.webOrigins // []) | length == 0)
+  ) and
   (has("users") | not) and
   ([paths |
     select((length == 4 and .[0] == "authenticatorConfig" and .[2] == "config" and .[3] == "credentials") | not) |
@@ -53,17 +66,21 @@ if jq -e '.. | strings | select(test("localhost|127\\.0\\.0\\.1|http://"))' "${r
   exit 1
 fi
 
-# Keycloak's KEYCLOAK_ROLE table stores name/description in
-# character varying(255) columns. jq's own static checks above never
-# caught this -- confirmed live against a real Postgres: a 263-char role
-# description made the real `kc.sh start --import-realm` bootstrap path
-# (the same one docker-compose.keycloak.yml uses on every fresh install)
-# fail its batch update and crash-loop the container outright.
+# Keycloak's KEYCLOAK_ROLE and CLIENT tables both store name/description in
+# character varying(255) columns. jq's own static checks above never caught
+# either -- confirmed live against a real Postgres, twice: a 263-char role
+# description (#1040) and, separately, a 315-char client description
+# (#1066's first CI run) both made the real `kc.sh start --import-realm`
+# bootstrap path (the same one docker-compose.keycloak.yml uses on every
+# fresh install) fail its batch update and crash-loop the container
+# outright. Checks both object classes together now instead of only roles,
+# so this bug class can't silently recur a third time on a field neither
+# pass happens to cover.
 if jq -e '
-  [(.roles.realm // [])[], (.roles.client // {} | to_entries[] | .value[])] |
+  [(.roles.realm // [])[], (.roles.client // {} | to_entries[] | .value[]), (.clients // [])[]] |
   any(.name != null and (.name | length) > 255 or (.description != null and (.description | length) > 255))
 ' "${realm_file}" >/dev/null; then
-  printf 'A realm or client role name/description exceeds Keycloak schema'"'"'s 255-character limit\n' >&2
+  printf 'A realm, client, or role name/description exceeds Keycloak schema'"'"'s 255-character limit\n' >&2
   exit 1
 fi
 

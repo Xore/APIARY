@@ -1074,6 +1074,20 @@
       "attributes": {"pkce.code.challenge.method": "S256", "post.logout.redirect.uris": "https://dockge.example.invalid/*"},
       "defaultClientScopes": ["web-origins", "acr", "roles", "profile", "email"],
       "optionalClientScopes": []
+    },
+    {
+      "clientId": "auth-events-poller",
+      "name": "Auth-failure telemetry poller (#1066)",
+      "description": "Read-only poller for #1066's auth-failure telemetry. Granted view-events post-import -- see keycloak/provision-events-poller.sh.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "attributes": {}
     }
   ],
   "clientScopes": [
