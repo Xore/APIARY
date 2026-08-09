@@ -1078,7 +1078,7 @@
     {
       "clientId": "auth-events-poller",
       "name": "Auth-failure telemetry poller (#1066)",
-      "description": "Service-account-only client for auth-events-worker's read-only polling of GET /admin/realms/apiary/events. No browser flow -- granted realm-management's view-events role post-import (never baked into this export, same reasoning as every other client secret/role grant here); see keycloak/provision-events-poller.sh.",
+      "description": "Read-only poller for #1066's auth-failure telemetry. Granted view-events post-import -- see keycloak/provision-events-poller.sh.",
       "enabled": true,
       "protocol": "openid-connect",
       "publicClient": false,
