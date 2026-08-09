@@ -37,6 +37,14 @@ while pgrep -f 'rex86_(run_all|run_one|run_base_model|backfill|prefetch)' | grep
 done
 echo "GPU clear of other rex86 drivers, starting $(date -u +%FT%TZ)"
 
+# Swap in the updated corpus_eval.py (--manifest/--rubric flags, adds the
+# per-case "cases" output) only now that nothing still running depends on
+# the older positional-args interface it replaces.
+if [[ -f "$WORK/corpus_eval_new.py" ]]; then
+  mv "$WORK/corpus_eval_new.py" "$WORK/corpus_eval.py"
+  echo "=== corpus_eval.py updated to --manifest/--rubric interface ==="
+fi
+
 bash "$WORK/rex86_run_base_model.sh" codegemma-7B "google/codegemma-7b" \
   Q6_K:99 Q5_K_M:99 Q4_K_M:99 Q3_K_M:99
 

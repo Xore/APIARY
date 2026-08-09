@@ -21,6 +21,22 @@
 #     vps/docker-compose.yml)
 #   - stopping the gateway denies access outright (connection refused),
 #     it never falls through to the upstream
+#   - a tampered session cookie (the credential this deployment actually
+#     relies on -- see below) is rejected outright, not silently accepted
+#   - a session past OAUTH2_PROXY_COOKIE_EXPIRE is rejected, not honored
+#
+# On "wrong-issuer/audience/expired/bad-signature token thrown at the
+# gateway": this deployment sets OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER
+# and OAUTH2_PROXY_PASS_ACCESS_TOKEN both to "false" (see
+# vps/docker-compose.yml's x-oidc-gateway anchor) -- there is no bearer-
+# token code path in production for an attacker to target at all. The
+# actual credential this gateway relies on is its own encrypted, signed
+# session cookie; wrong-issuer/audience checks happen inside oauth2-proxy's
+# own server-to-server token exchange with Keycloak's token endpoint,
+# which an external attacker has no way to inject a forged response into
+# without already controlling Keycloak or the network path to it. What IS
+# on this gateway's real attack surface, and what the two new checks below
+# cover: can a tampered or expired session cookie still grant access.
 #
 # Not covered here (out of scope for this script, tracked as still-open
 # #977 work): a live outage of Keycloak itself mid-session, JWKS/discovery
@@ -32,11 +48,12 @@ pg="gwtest-pg-$$"
 kc="gwtest-kc-$$"
 proxy="gwtest-proxy-$$"
 upstream="gwtest-upstream-$$"
+proxy_short="gwtest-proxy-short-$$"
 proxy_port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
 fail=0
 
 cleanup() {
-  docker rm -f "${proxy}" "${upstream}" "${kc}" "${pg}" >/dev/null 2>&1 || true
+  docker rm -f "${proxy}" "${proxy_short}" "${upstream}" "${kc}" "${pg}" >/dev/null 2>&1 || true
   docker network rm "${network}" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -82,7 +99,7 @@ realm_json=$(cat <<EOF
     "secret": "test-gateway-secret-not-a-real-credential",
     "standardFlowEnabled": true, "implicitFlowEnabled": false,
     "directAccessGrantsEnabled": false, "serviceAccountsEnabled": false,
-    "redirectUris": ["http://${proxy}:4180/oauth2/callback"], "webOrigins": [],
+    "redirectUris": ["http://${proxy}:4180/oauth2/callback", "http://${proxy_short}:4180/oauth2/callback"], "webOrigins": [],
     "attributes": {"pkce.code.challenge.method": "S256"}
   }],
   "users": [
@@ -173,6 +190,52 @@ else
   bad "authorized login did not reach the protected page: callback=${callback_status} protected=${protected_status}"
 fi
 
+# --- 3b: tampering with the session cookie after a successful login is
+# rejected outright, not silently honored -- this is the actual credential
+# this gateway relies on (see header comment on why a bearer-token forgery
+# test isn't meaningful for this deployment). Target oauth2-proxy's own
+# session cookie by name (_oauth2_proxy), not "the first long value found"
+# -- curl's Netscape jar format prefixes HttpOnly cookies' domain field
+# with "#HttpOnly_", which looks like a comment line but isn't one; a naive
+# `startswith("#")` skip silently walks past the real session cookie and
+# tampers an unrelated Keycloak-side cookie instead, which of course still
+# "passes" since nothing about the actual gateway session changed. ---
+tampered_jar="${flow_dir}/jar-tampered.txt"
+cp "${flow_dir}/jar-authorized.txt" "${tampered_jar}"
+python3 - "${tampered_jar}" <<'PYEOF'
+import sys
+path = sys.argv[1]
+with open(path) as f:
+    lines = f.readlines()
+out = []
+tampered = False
+for line in lines:
+    raw = line.rstrip("\n")
+    unprefixed = raw[len("#HttpOnly_"):] if raw.startswith("#HttpOnly_") else raw
+    if not tampered and "\t" in unprefixed:
+        parts = unprefixed.split("\t")
+        if len(parts) == 7 and parts[5] == "_oauth2_proxy":
+            mid = len(parts[6]) // 2
+            ch = parts[6][mid]
+            flipped = "A" if ch != "A" else "B"
+            parts[6] = parts[6][:mid] + flipped + parts[6][mid + 1:]
+            prefix = "#HttpOnly_" if raw.startswith("#HttpOnly_") else ""
+            line = prefix + "\t".join(parts) + "\n"
+            tampered = True
+    out.append(line)
+if not tampered:
+    raise SystemExit("did not find the _oauth2_proxy session cookie to tamper with")
+with open(path, "w") as f:
+    f.writelines(out)
+PYEOF
+tampered_status=$(docker run --rm --network "${network}" -v "${flow_dir}:/w" curlimages/curl:latest \
+  curl -s -o /dev/null -w '%{http_code}' -b "/w/jar-tampered.txt" "http://${proxy}:4180/")
+if [ "${tampered_status}" != "200" ]; then
+  ok "tampered session cookie rejected (HTTP ${tampered_status}, not 200)"
+else
+  bad "tampered session cookie was still accepted -- cookie integrity is not actually enforced"
+fi
+
 # --- 4: real login, correct password but missing client role -> denied ---
 read -r norole_callback_status norole_protected_status <<< "$(drive_login no-role-user 'TestPass123!' jar-norole.txt)"
 if [ "${norole_callback_status}" = "403" ] && [ "${norole_protected_status}" = "403" ]; then
@@ -198,6 +261,65 @@ if [ "${outage_curl_exit}" -ne 0 ]; then
   ok "gateway outage: the public port refuses connections outright (curl exit ${outage_curl_exit}), no fallback to the upstream"
 else
   bad "request succeeded while the gateway was stopped -- something else is answering"
+fi
+
+# --- 7: a session past its own cookie expiry is rejected, not honored.
+# Uses a second, dedicated proxy instance with a deliberately short
+# OAUTH2_PROXY_COOKIE_EXPIRE (production uses 12h -- see
+# vps/docker-compose.yml's x-oidc-gateway anchor) so this check takes
+# seconds, not hours, without touching the main proxy instance's other
+# tests above. ---
+proxy_short_port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+docker run -d --name "${proxy_short}" --network "${network}" -p "127.0.0.1:${proxy_short_port}:4180" \
+  -e OAUTH2_PROXY_PROVIDER=keycloak-oidc \
+  -e OAUTH2_PROXY_OIDC_ISSUER_URL="http://${kc}:8080/realms/gwtest" \
+  -e OAUTH2_PROXY_HTTP_ADDRESS=0.0.0.0:4180 \
+  -e OAUTH2_PROXY_EMAIL_DOMAINS="*" \
+  -e OAUTH2_PROXY_CLIENT_ID=gwtest-client \
+  -e OAUTH2_PROXY_CLIENT_SECRET=test-gateway-secret-not-a-real-credential \
+  -e OAUTH2_PROXY_COOKIE_SECRET="$(openssl rand -base64 32 | tr -- '+/' '-_')" \
+  -e OAUTH2_PROXY_REDIRECT_URL="http://${proxy_short}:4180/oauth2/callback" \
+  -e OAUTH2_PROXY_UPSTREAMS="http://${upstream}:8000" \
+  -e OAUTH2_PROXY_ALLOWED_ROLES=gwtest-client:access \
+  -e OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256 \
+  -e OAUTH2_PROXY_COOKIE_SECURE=false \
+  -e OAUTH2_PROXY_OIDC_EMAIL_CLAIM=preferred_username \
+  -e OAUTH2_PROXY_INSECURE_OIDC_ALLOW_UNVERIFIED_EMAIL=true \
+  -e OAUTH2_PROXY_COOKIE_EXPIRE=3s \
+  -e OAUTH2_PROXY_COOKIE_REFRESH=0 \
+  quay.io/oauth2-proxy/oauth2-proxy:v7.15.3@sha256:10a1165743a192e1940b4708fb9647027185ce11a681a1c5519b442ff7f1f561 >/dev/null
+sleep 3
+
+drive_login_against() {
+  # same as drive_login above but targets an arbitrary proxy container name
+  local proxy_target="$1" user="$2" pass="$3" jar="$4"
+  cat > "${flow_dir}/login-short.sh" <<SCRIPT
+set -e
+JAR=/w/${jar}
+AUTH_URL=\$(curl -s -c "\${JAR}" -D - -o /dev/null "http://${proxy_target}:4180/oauth2/start?rd=/" | grep -i '^location:' | sed 's/^[Ll]ocation: //' | tr -d '\r')
+LOGIN_PAGE=\$(curl -s -c "\${JAR}" -b "\${JAR}" "\${AUTH_URL}")
+FORM_ACTION=\$(echo "\${LOGIN_PAGE}" | grep -o 'action="[^"]*"' | head -1 | sed 's/action="//;s/"\$//' | sed 's/&amp;/\&/g')
+CALLBACK=\$(curl -s -c "\${JAR}" -b "\${JAR}" -D - -o /dev/null --data-urlencode "username=${user}" --data-urlencode "password=${pass}" --data-urlencode "credentialId=" "\${FORM_ACTION}" | grep -i '^location:' | sed 's/^[Ll]ocation: //' | tr -d '\r')
+curl -s -c "\${JAR}" -b "\${JAR}" -o /dev/null -w '%{http_code} ' "\${CALLBACK}"
+curl -s -b "\${JAR}" -o /dev/null -w '%{http_code}' "http://${proxy_target}:4180/"
+SCRIPT
+  docker run --rm --network "${network}" -v "${flow_dir}:/w" curlimages/curl:latest sh /w/login-short.sh
+}
+read -r short_callback_status short_protected_status <<< "$(drive_login_against "${proxy_short}" authorized-user 'TestPass123!' jar-shortlived.txt)"
+if [ "${short_callback_status}" = "302" ] && [ "${short_protected_status}" = "200" ]; then
+  ok "short-lived-session login succeeded before expiry: callback 302, protected page 200"
+else
+  bad "short-lived-session login did not even succeed before expiry: callback=${short_callback_status} protected=${short_protected_status}"
+fi
+
+sleep 5
+expired_status=$(docker run --rm --network "${network}" -v "${flow_dir}:/w" curlimages/curl:latest \
+  curl -s -o /dev/null -w '%{http_code}' -b "/w/jar-shortlived.txt" "http://${proxy_short}:4180/")
+docker rm -f "${proxy_short}" >/dev/null 2>&1 || true
+if [ "${expired_status}" != "200" ]; then
+  ok "session past its own cookie expiry rejected (HTTP ${expired_status}, not 200)"
+else
+  bad "session past its own cookie expiry was still honored -- expiry is not actually enforced"
 fi
 
 if [ "${fail}" -ne 0 ]; then
