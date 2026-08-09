@@ -27,8 +27,14 @@ func TestRebuildKeepsEverySensorNotJustTop30(t *testing.T) {
 	s.rebuild()
 
 	snap := s.get()
-	if len(snap.Sensors) != sensorCount {
-		t.Fatalf("snap.Sensors has %d entries, want all %d ES-reported sensors (no top-N cut)", len(snap.Sensors), sensorCount)
+	// >=, not ==: #1100 added an always-present synthetic "suricata" entry
+	// (its own separate suricata-v2-* query, zero-valued here since this
+	// test's stub doesn't seed one) alongside whatever the main sensors
+	// bucket reports -- irrelevant to what this test actually checks (no
+	// top-N cut), so assert the real property instead of an exact count
+	// coupled to that unrelated implementation detail.
+	if len(snap.Sensors) < sensorCount {
+		t.Fatalf("snap.Sensors has %d entries, want at least %d ES-reported sensors (no top-N cut)", len(snap.Sensors), sensorCount)
 	}
 	seen := map[string]bool{}
 	for _, row := range snap.Sensors {
