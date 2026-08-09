@@ -38,6 +38,27 @@ instead of re-downloading or re-quantizing anything already on disk.
 | `rex86_run_all_base.sh` | Orchestrates a whole queue of `rex86_run_base_model.sh` calls (one per candidate model) with proven `-ngl` values already worked out per model/quant -- see its own comments for how those envelope numbers were computed. Edit this file's `run ...` lines to add/remove models from a benchmark round. |
 | `rex86_backfill_extra_quants.sh` | Fills in quant-level gaps on models that were only ever evaluated at one precision, so the comparison chart is apples-to-apples across every model. Also the reference example for requantizing from an already-quantized GGUF (`--allow-requantize`) when the f16 source has already been cleaned up, instead of re-downloading a multi-hundred-GB snapshot just to fill in one more quant level. |
 | `gen_answers_md.py <result.json> <label>` | Formats one `corpus_eval.py` result file into a GitHub-comment-ready Markdown block (score table + collapsible full answers per case) for posting to #847. |
+| `rex86_run_deepseek_v2_full.sh` | `rex86_run_base_model.sh`'s pipeline for one specific model, `deepseek-ai/DeepSeek-Coder-V2-Instruct` (the full 235.74B model) -- needs its own script because the ~940GB peak disk usage (raw snapshot + f16 GGUF coexisting mid-conversion) doesn't fit `/var`, so it runs in a separate throwaway container against `/mnt-1` instead. |
+
+## REx86-adapter evaluation pipeline (the original #847 models, not the base-model comparison above)
+
+The scripts above evaluate un-fine-tuned base models. These evaluate the
+REx86-paper's own fine-tuned LoRA adapters (the actual subject of #847) --
+merge the adapter onto its full-precision base, convert to GGUF, then run
+the same `corpus_eval.py` scoring used above.
+
+| Script | What it does |
+|---|---|
+| `merge.py` | Merges a PEFT/LoRA adapter (`ADAPTER_DIR`) onto its full-precision base model with `transformers`, producing the merged HF model `rex86_run_one.sh`'s pipeline converts to GGUF. |
+| `rex86_run_one.sh <name> <adapter_dir> <base_repo> [base_revision]` | The core per-adapter driver: merge -> GGUF -> `corpus_eval.py`, reusing the exact tooling proven on the original qwen-7B REx86 model. Resolves bnb-4bit adapter bases (codellama-34B, qwen-14B, qwen-32B) to their full-precision unsloth equivalent first, since `convert_hf_to_gguf.py` can't consume a bnb-4bit tensor layout directly. |
+| `rex86_run_all.sh` | Drives `rex86_run_one.sh` across all 6 not-yet-evaluated REx86-paper adapter models, smallest first so results accumulate before the largest/slowest model blocks everything. |
+| `rex86_retry_failed_adapters.sh` | Retries the 4 adapter models that failed `rex86_run_all.sh`'s first pass, after `rex86_run_one.sh` picked up fixes. |
+| `rex86_backfill_answers.sh` | Backfills full answer text (not just scores) for already-scored (model, quant) pairs whose `corpus_eval.out` predates a "cases" field fix -- reuses the existing idempotent scripts unchanged. |
+| `rex86_backfill_direct.sh` | Direct-eval backfill: for pairs whose quantized GGUF already exists on disk, launches `llama-server` at the same `-ngl` that succeeded originally, skipping re-download/re-convert/re-quantize. |
+| `rex86_backfill_resume.sh` | Resumes an interrupted direct-eval backfill after a reboot. |
+| `rex86_bench.sh` | Ad hoc single-request latency/throughput measurement (wall time, prompt/predicted token rates) against a serving backend, for spot-checking performance outside the full corpus eval. |
+| `real_bench_run.sh` | Benchmarks the merged REx86 model against the real corpus across all three serving backends (llama.cpp, Ollama, vLLM) in one run, for comparing serving-backend overhead rather than model quality. |
+| `vllm_tuning_run.sh` | Tunes vLLM serving settings (`top_k`/`repetition_penalty`, `--enforce-eager`, chunked-prefill) against the real corpus to find a configuration matching llama.cpp/Ollama's output parity. |
 
 ## Deployment layout
 
