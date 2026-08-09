@@ -9,18 +9,28 @@ import (
 	"testing"
 )
 
-// newSettingsAPITestStore builds a store whose settings service lives in a
-// temp directory, with the identity test backend configured for role.
+// newSettingsAPITestStore builds a store whose settings service is backed by
+// an in-memory Elasticsearch stand-in (memESDocStore, alerts_test.go) --
+// config/users are Elasticsearch-backed singleton documents since #787 --
+// with the identity test backend configured for role. The audit/history
+// logs stay local-file-backed (unaffected by #787, see settings_store_es.go's
+// own header comment for why), so those two still live in a temp directory.
 func newSettingsAPITestStore(t *testing.T, role string) *store {
 	t.Helper()
 	configureIdentityTestBackend(t, role)
 	dir := t.TempDir()
-	return &store{settings: newSettingsService(
-		filepath.Join(dir, "config.json"),
-		filepath.Join(dir, "users.json"),
-		filepath.Join(dir, "audit.jsonl"),
-		filepath.Join(dir, "history.jsonl"),
-	)}
+	esStore := newMemESDocStore()
+	esSrv := httptest.NewServer(esStore.handler())
+	t.Cleanup(esSrv.Close)
+	es := newESClient(esSrv.URL, "")
+	return &store{
+		es: es,
+		settings: newSettingsService(
+			es,
+			filepath.Join(dir, "audit.jsonl"),
+			filepath.Join(dir, "history.jsonl"),
+		),
+	}
 }
 
 func settingsRequest(t *testing.T, method, target string, sameOrigin bool, body string) *http.Request {
@@ -104,11 +114,14 @@ func TestPreferencesPatchAppliesAndPersists(t *testing.T) {
 		t.Fatal("successful patch must rotate the ETag")
 	}
 
-	// Untouched fields keep their values, and the write survives a reload.
+	// Untouched fields keep their values, and the write is visible from a
+	// second, independent store against the same Elasticsearch backend --
+	// standing in for the dashboard's second replica (#787): the write must
+	// be visible there too, not just in this store's own in-memory cache.
 	if parsed.Preferences.Density != "comfortable" {
 		t.Fatalf("partial patch clobbered untouched fields: %+v", parsed.Preferences)
 	}
-	reloaded := newUserStore(s.settings.users.inner.path, s.settings.audit)
+	reloaded := newUserStore(s.es, s.settings.audit)
 	prefs, _, ok := reloaded.Preferences("b65ab0dc-cc07-4b3d-9af0-b482dbb4b096")
 	if !ok || prefs.Theme != "dark" {
 		t.Fatal("patched preferences did not persist")

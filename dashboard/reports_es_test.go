@@ -14,8 +14,7 @@ import (
 // fallback (#475, same posture as #494's alert state and #483's payload
 // inventory).
 func TestGeneratedReportMethodsUnavailableWithoutES(t *testing.T) {
-	dir := t.TempDir()
-	store := newReportStore(filepath.Join(dir, "reports.json"), nil)
+	store := newReportStore(nil)
 
 	if _, _, err := store.addGenerated(generatedReport{Template: "custom"}, []byte("%PDF-1.4\n")); !errors.Is(err, errReportsStorageUnavailable) {
 		t.Fatalf("addGenerated error = %v, want errReportsStorageUnavailable", err)
@@ -41,10 +40,9 @@ func TestServeGeneratedPDFReportsUnavailableWithoutES(t *testing.T) {
 	dir := t.TempDir()
 	s := &store{
 		settings: newSettingsService(
-			filepath.Join(dir, "config.json"), filepath.Join(dir, "users.json"),
-			filepath.Join(dir, "audit.jsonl"), filepath.Join(dir, "history.jsonl"),
+			nil, filepath.Join(dir, "audit.jsonl"), filepath.Join(dir, "history.jsonl"),
 		),
-		reports: newReportStore(filepath.Join(dir, "reports.json"), nil),
+		reports: newReportStore(nil),
 	}
 	req := httptest.NewRequest(http.MethodGet, "/api/reports/generated/gen_0000000000000000/pdf", nil)
 	rec := httptest.NewRecorder()

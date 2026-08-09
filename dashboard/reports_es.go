@@ -1,12 +1,14 @@
 package main
 
 // reports_es.go — #475: generated PDF reports (metadata + bytes) live in
-// Elasticsearch, not local disk. Definitions (reports_store.go) are
-// unaffected and stay on the local atomicSettingsStore document -- only the
-// *generated* history moves, per the issue's own scope ("the generated
-// files... stored/indexed via Elasticsearch"). No local-file fallback:
-// errReportsStorageUnavailable when es is nil, the same "ES is mandatory
-// infrastructure" posture #494/#483 already established.
+// Elasticsearch, not local disk, in this file's own index
+// (dashboard-generated-reports-v1). Definitions (reports_store.go) are also
+// Elasticsearch-backed since #787, but in a separate singleton-document
+// index (dashboard-reports-definitions-v1, via settings_store_es.go) --
+// this file only covers the *generated* history, per #475's own scope ("the
+// generated files... stored/indexed via Elasticsearch"). No local-file
+// fallback: errReportsStorageUnavailable when es is nil, the same "ES is
+// mandatory infrastructure" posture #494/#483 already established.
 
 import (
 	"encoding/base64"

@@ -597,25 +597,32 @@ func validateReportsDocument(doc reportsDocument) error {
 	return nil
 }
 
-// reportStore owns the definitions document (local, unchanged) and generated
-// PDF reports (#475: Elasticsearch, via es -- see reports_es.go). es may be
-// nil (Elasticsearch not configured): definitions CRUD keeps working, but
-// every generated-report method returns errReportsStorageUnavailable rather
-// than falling back to local disk -- no local fallback, by design, the same
-// as #494's alert state.
+// dashboardReportsDefinitionsIndex/dashboardReportsDefinitionsDocID name the
+// singleton Elasticsearch document holding report definitions/schedules --
+// deliberately distinct from generatedReportIndex (reports_es.go), which
+// stores the actual generated PDFs and is keyed per-report, not a singleton.
+const (
+	dashboardReportsDefinitionsIndex = "dashboard-reports-definitions-v1"
+	dashboardReportsDefinitionsDocID = "definitions"
+)
+
+// reportStore owns the definitions document (#787: Elasticsearch-backed,
+// same esSettingsStore primitive as the typed settings -- see
+// settings_store_es.go) and generated PDF reports (#475: Elasticsearch, via
+// es -- see reports_es.go, a separate index). es may be nil (Elasticsearch
+// not configured): both halves then serve read-only/degraded defaults --
+// no local fallback, by design, the same as #494's alert state.
 type reportStore struct {
-	inner        *atomicSettingsStore[reportsDocument]
+	inner        *esSettingsStore[reportsDocument]
 	es           *esClient
 	maxGenerated int
 }
 
-func newReportStore(path string, es *esClient) *reportStore {
+func newReportStore(es *esClient) *reportStore {
 	store := &reportStore{es: es, maxGenerated: maxGeneratedReportsDefault}
-	store.inner = newAtomicSettingsStore(path, reportsDocument{}, validateReportsDocument)
+	store.inner = newESSettingsStore(es, dashboardReportsDefinitionsIndex, dashboardReportsDefinitionsDocID, reportsDocument{}, validateReportsDocument)
 	if store.inner.Degraded() {
-		fmt.Printf("dashboard: reports store at %s unreadable — serving defaults read-only\n", path)
-	} else if store.inner.Recovered() {
-		fmt.Printf("dashboard: reports store recovered from backup generation at %s\n", path)
+		fmt.Printf("dashboard: reports store (%s/%s) unreachable — serving defaults read-only\n", dashboardReportsDefinitionsIndex, dashboardReportsDefinitionsDocID)
 	}
 	return store
 }

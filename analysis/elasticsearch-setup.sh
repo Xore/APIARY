@@ -561,6 +561,50 @@ curl -fsS -X PUT "$es_url/_index_template/dashboard-alert-state" \
   }
 }' >/dev/null
 
+# #787: dashboard-config-v1 / dashboard-users-v1 / dashboard-reports-
+# definitions-v1 -- singleton documents (one fixed id per index: "config",
+# "users", "definitions") replacing what used to be local files on the
+# dashboard's shared /state volume. Each replica cached its local file in
+# memory forever after loading it once at startup, so a setting/preference/
+# report-definition change made through one replica was invisible to the
+# other until it was restarted -- confirmed live, this 404'd /agent-campaigns
+# on every other page load once an admin toggled a feature flag. Moved to
+# Elasticsearch, the one backend both replicas already treat as shared
+# source of truth (dashboard/settings_store_es.go). Writers use compare-and-
+# swap (docGet's _seq_no/_primary_term, dashboard/elastic.go), same idiom as
+# dashboard-alert-state-v1 above; readers poll every few seconds instead of
+# caching forever.
+#
+# payload is "flattened", not field-by-field like dashboard-workbench-runs-v1
+# below: every read of these three documents is docGet by the fixed
+# singleton id, never _search, so there's no query use case field-level
+# mapping would serve -- while dashboardConfig's schema (settingsSchemaVersion
+# already at 4) and the open-ended user/report-definition arrays would make
+# explicit field mapping pure maintenance overhead with real mapping-conflict
+# risk across schema revisions, for zero query benefit.
+for dashboard_settings_index in dashboard-config-v1 dashboard-users-v1 dashboard-reports-definitions-v1; do
+  curl -fsS -X PUT "$es_url/_index_template/${dashboard_settings_index}" \
+    -H 'Content-Type: application/json' \
+    --data-binary '{
+  "index_patterns": ["'"${dashboard_settings_index}"'"],
+  "priority": 460,
+  "template": {
+    "settings": {
+      "index.number_of_replicas": 0,
+      "index.refresh_interval": "1s"
+    },
+    "mappings": {
+      "properties": {
+        "schema_version": { "type": "integer" },
+        "revision": { "type": "long" },
+        "updated": { "type": "date" },
+        "payload": { "type": "flattened", "ignore_above": 32000 }
+      }
+    }
+  }
+}' >/dev/null
+done
+
 # Static-analysis cache (payload_analysis.go's staticAnalysisFor): the pure-
 # function-of-bytes half of a payload's analysis (hashes, entropy, extracted
 # strings/IOCs, static risk score) -- content-hash keyed and immutable once

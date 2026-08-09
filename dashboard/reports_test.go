@@ -16,23 +16,24 @@ import (
 
 // newReportTestStore builds a store with a reports studio and a settings
 // service backed by temporary state, for API-level tests. Generated-report
-// storage (#475) is Elasticsearch-only, so this wires an in-memory ES
-// document-store stub (memESDocStore, alerts_test.go) rather than a local
-// directory.
+// storage (#475) and, since #787, report definitions/config/users are all
+// Elasticsearch-backed, so this wires one in-memory ES document-store stub
+// (memESDocStore, alerts_test.go) shared by all of them, matching the real
+// single-cluster deployment.
 func newReportTestStore(t *testing.T) *store {
 	t.Helper()
 	dir := t.TempDir()
 	esStore := newMemESDocStore()
 	esSrv := httptest.NewServer(esStore.handler())
 	t.Cleanup(esSrv.Close)
+	es := newESClient(esSrv.URL, "")
 	return &store{
 		settings: newSettingsService(
-			filepath.Join(dir, "config.json"),
-			filepath.Join(dir, "users.json"),
+			es,
 			filepath.Join(dir, "audit.jsonl"),
 			filepath.Join(dir, "history.jsonl"),
 		),
-		reports: newReportStore(filepath.Join(dir, "reports.json"), newESClient(esSrv.URL, "")),
+		reports: newReportStore(es),
 	}
 }
 
@@ -221,8 +222,10 @@ func TestNormalizeReportElements(t *testing.T) {
 }
 
 func TestReportStoreDefinitionCRUD(t *testing.T) {
-	dir := t.TempDir()
-	store := newReportStore(filepath.Join(dir, "reports.json"), nil)
+	esStore := newMemESDocStore()
+	esSrv := httptest.NewServer(esStore.handler())
+	defer esSrv.Close()
+	store := newReportStore(newESClient(esSrv.URL, ""))
 
 	created, etag, err := store.putDefinition("", sampleDefinition("executive"))
 	if err != nil {
@@ -263,8 +266,7 @@ func TestReportStoreGeneratedRetention(t *testing.T) {
 	esStore := newMemESDocStore()
 	esSrv := httptest.NewServer(esStore.handler())
 	defer esSrv.Close()
-	dir := t.TempDir()
-	store := newReportStore(filepath.Join(dir, "reports.json"), newESClient(esSrv.URL, ""))
+	store := newReportStore(newESClient(esSrv.URL, ""))
 	store.maxGenerated = 3
 	pdf := []byte("%PDF-1.4\nfake\n%%EOF\n")
 

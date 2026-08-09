@@ -67,11 +67,11 @@ func (s *store) writeSettingsMetrics(w http.ResponseWriter) {
 		return 0
 	}
 	fmt.Fprintf(w, "# HELP honeypot_settings_config_revision Current dashboard configuration revision.\n# TYPE honeypot_settings_config_revision gauge\nhoneypot_settings_config_revision %d\n", settings.config.Revision())
-	fmt.Fprintf(w, "# HELP honeypot_settings_store_readonly Settings store refusing writes (1) or healthy (0).\n# TYPE honeypot_settings_store_readonly gauge\n")
+	fmt.Fprintf(w, "# HELP honeypot_settings_store_readonly Settings store refusing writes (1) because Elasticsearch is unreachable, or healthy (0). Self-heals on the next successful poll.\n# TYPE honeypot_settings_store_readonly gauge\n")
 	fmt.Fprintf(w, "honeypot_settings_store_readonly{store=\"config\"} %d\nhoneypot_settings_store_readonly{store=\"users\"} %d\n", flag(settings.config.ReadOnly()), flag(settings.users.inner.ReadOnly()))
-	fmt.Fprintf(w, "# HELP honeypot_settings_store_degraded Settings store serving compiled defaults because its file is unreadable.\n# TYPE honeypot_settings_store_degraded gauge\n")
+	fmt.Fprintf(w, "# HELP honeypot_settings_store_degraded Settings store serving compiled defaults because it has never yet loaded real state from Elasticsearch this process lifetime. Self-heals on the next successful poll.\n# TYPE honeypot_settings_store_degraded gauge\n")
 	fmt.Fprintf(w, "honeypot_settings_store_degraded{store=\"config\"} %d\nhoneypot_settings_store_degraded{store=\"users\"} %d\n", flag(settings.config.Degraded()), flag(settings.users.inner.Degraded()))
-	fmt.Fprintf(w, "# HELP honeypot_settings_store_recovered Settings store recovered from its backup generation at startup.\n# TYPE honeypot_settings_store_recovered gauge\n")
+	fmt.Fprintf(w, "# HELP honeypot_settings_store_recovered Always 0: #787 moved this store to Elasticsearch, which has no local backup-generation concept to recover from. Kept for metric-name stability.\n# TYPE honeypot_settings_store_recovered gauge\n")
 	fmt.Fprintf(w, "honeypot_settings_store_recovered{store=\"config\"} %d\nhoneypot_settings_store_recovered{store=\"users\"} %d\n", flag(settings.config.Recovered()), flag(settings.users.inner.Recovered()))
 	fmt.Fprintf(w, "# HELP honeypot_settings_projected_users Users with a dashboard projection and stored preferences.\n# TYPE honeypot_settings_projected_users gauge\nhoneypot_settings_projected_users %d\n", len(settings.users.Projections()))
 	fmt.Fprintf(w, "# HELP honeypot_settings_audit_events Settings audit events retained in the current log generation (capped at 500).\n# TYPE honeypot_settings_audit_events gauge\nhoneypot_settings_audit_events %d\n", len(settings.audit.read(500)))

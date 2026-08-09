@@ -45,7 +45,7 @@ var migrations = map[int]func(json.RawMessage) (json.RawMessage, error){
 // compiled defaults, read-only, discarding every other saved setting
 // (branding, feature toggles, everything) until an operator intervened.
 //
-// This registry is shared by every atomicSettingsStore, including the
+// This registry is shared by every esSettingsStore, including the
 // unrelated per-user preferences/projection document, so this must be a
 // no-op for any payload shape that isn't a dashboardConfig: no "honeypot"
 // object, or one that already has the field (already migrated, or written
