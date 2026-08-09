@@ -630,6 +630,33 @@ step_stage_keycloak_theme() {
   rsync -a --delete "$theme_repo_dir/themes/apiary/" "$destination/apiary/"
 }
 
+step_provision_keycloak_secrets() {
+  # #787: step_provision_stack_dirs only creates an empty secrets/ dir --
+  # nothing populated postgres-password/bootstrap-admin-password before this,
+  # so a genuinely fresh, unattended install would fail here (Postgres'
+  # POSTGRES_PASSWORD_FILE and Keycloak's own entrypoint both read files that
+  # never existed). This test/reinstall path resets Keycloak to a known
+  # initial admin rather than restoring a prior one -- same "start from
+  # zero" treatment as the rest of the honeypot stack's data, not an
+  # exception carved out just for identity.
+  local dir="/var/dockge/stacks/honeypot-keycloak/secrets"
+  install -d -m 750 "$dir"
+  if [[ ! -f "$dir/postgres-password" ]]; then
+    (umask 027; openssl rand -base64 48 > "$dir/postgres-password")
+    echo "generated postgres-password"
+  fi
+  if [[ ! -f "$dir/bootstrap-admin-password" ]]; then
+    (umask 027; printf 'admin123\n' > "$dir/bootstrap-admin-password")
+    echo "wrote initial bootstrap-admin-password (admin/admin123 -- rotate after first login)"
+  fi
+  chown root:root "$dir"/postgres-password "$dir"/bootstrap-admin-password
+  chmod 440 "$dir"/postgres-password "$dir"/bootstrap-admin-password
+  local env_file="/var/dockge/stacks/honeypot-keycloak/.env"
+  if [[ -f "$env_file" ]] && grep -q '^KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME=' "$env_file"; then
+    sed -i 's/^KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME=.*/KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME=admin/' "$env_file"
+  fi
+}
+
 step_bootstrap_missing_envs() {
   # Belt-and-suspenders after step_restore_env_files: any stack that still
   # has no .env at all (backup genuinely never had one, e.g. a stack created
@@ -1173,6 +1200,7 @@ run_step restore-env-files     "Restore .env files from LAN backup" step_restore
 run_step provision-stack-dirs  "Link compose.yml into each stack dir" step_provision_stack_dirs
 run_step stage-keycloak-theme  "Check out and sync the Keycloak login theme" step_stage_keycloak_theme
 run_step bootstrap-missing-envs "Bootstrap any still-missing .env from .example" step_bootstrap_missing_envs
+run_step provision-keycloak-secrets "Generate Keycloak secrets, reset bootstrap admin to admin/admin123" step_provision_keycloak_secrets
 
 run_step shared-resources      "Create honeynet + placeholder volumes" step_create_shared_resources
 run_step start-elasticsearch   "Start honeypot-elk, wait healthy"   step_start_elasticsearch_first
