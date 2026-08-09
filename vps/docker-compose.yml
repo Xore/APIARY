@@ -39,6 +39,15 @@ x-oidc-gateway: &oidc-gateway
     # sent), so this check is disabled rather than making emailVerified=true
     # a manual step every future admin has to remember when creating a user.
     OAUTH2_PROXY_INSECURE_OIDC_ALLOW_UNVERIFIED_EMAIL: "true"
+    # Same root cause, one layer deeper: admin-created accounts in this
+    # realm aren't required to have an email at all, so the ID token has no
+    # email claim to even be unverified -- caught live right after the
+    # above fix: "could not enrich oidc session: neither the id_token nor
+    # the profileURL set an email". oauth2-proxy needs *some* claim as its
+    # user-identity key; preferred_username is what Keycloak always sets
+    # for every account regardless of whether an email was ever configured,
+    # unlike email which is optional here.
+    OAUTH2_PROXY_OIDC_EMAIL_CLAIM: preferred_username
     OAUTH2_PROXY_CODE_CHALLENGE_METHOD: S256
     OAUTH2_PROXY_COOKIE_SECURE: "true"
     OAUTH2_PROXY_COOKIE_HTTPONLY: "true"
