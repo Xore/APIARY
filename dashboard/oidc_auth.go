@@ -138,13 +138,29 @@ func newOIDCAuth(ctx context.Context) (*oidcAuth, error) {
 	if err := provider.Claims(&metadata); err != nil || metadata.IntrospectionEndpoint == "" || metadata.EndSessionEndpoint == "" {
 		return nil, errors.New("OIDC discovery lacks introspection or end-session endpoint")
 	}
+	endpoint := provider.Endpoint()
+	// Left at the zero value (AuthStyleAutoDetect), golang.org/x/oauth2
+	// probes which client-auth style the token endpoint wants: it tries
+	// AuthStyleInHeader first, and on ANY failure blindly retries with
+	// AuthStyleInParams using the same authorization code
+	// (golang.org/x/oauth2/internal/token.go's RetrieveToken). Keycloak's
+	// codes are single-use, so if the first attempt fails for any reason
+	// at all, the "corrective" retry is guaranteed to fail too --
+	// "invalid_grant: Code not valid" -- even though that second auth
+	// style is the one Keycloak actually wants. Caught live: every real
+	// login failed with exactly that error despite the client secret,
+	// redirect_uri, and PKCE verifier all independently verified correct.
+	// Pinning AuthStyleInParams (client_secret in the POST body, verified
+	// working directly against this realm's token endpoint) skips the
+	// probe entirely.
+	endpoint.AuthStyle = oauth2.AuthStyleInParams
 	auth := &oidcAuth{
 		provider: provider,
 		verifier: provider.Verifier(&oidc.Config{ClientID: oidcClientID}),
 		oauth2: oauth2.Config{
 			ClientID:     oidcClientID,
 			ClientSecret: clientSecret,
-			Endpoint:     provider.Endpoint(),
+			Endpoint:     endpoint,
 			RedirectURL:  externalURL + "/auth/callback",
 			Scopes:       []string{oidc.ScopeOpenID, "profile", "email", "roles"},
 		},
@@ -216,8 +232,14 @@ func (a *oidcAuth) serveLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, secureCookie(oidcStateCookie, binding, oidcStateMaxAge))
-	challenge := oauth2.S256ChallengeFromVerifier(verifier)
-	destination := a.oauth2.AuthCodeURL(state, oauth2.SetAuthURLParam("nonce", nonce), oauth2.S256ChallengeOption(challenge))
+	// S256ChallengeOption takes the *verifier* and hashes it internally to
+	// produce the code_challenge -- it does not take an already-computed
+	// challenge. Passing a pre-hashed value here double-hashes it, so the
+	// challenge sent at authorization time never matches SHA256(verifier)
+	// as computed by VerifierOption at exchange time. Caught live: every
+	// login failed with Keycloak's own "PKCE verification failed: Code
+	// mismatch", confirmed by reproducing the exact double hash by hand.
+	destination := a.oauth2.AuthCodeURL(state, oauth2.SetAuthURLParam("nonce", nonce), oauth2.S256ChallengeOption(verifier))
 	http.Redirect(w, r, destination, http.StatusSeeOther)
 }
 
