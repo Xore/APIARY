@@ -580,8 +580,15 @@ step_dockge_install() {
   if docker ps -a --format '{{.Names}}' | grep -qx dockge; then
     return 0
   fi
+  # #787: bound to the WireGuard tunnel IP only, matching every other
+  # gateway-fronted service (HP_BIND=10.8.0.2, .env.example) and the real
+  # VPS-side socat-hp-dockge bridge (TCP4:10.8.0.2:5001). A plain -p
+  # 5001:5001 binds 0.0.0.0 -- confirmed live, this made Dockge's own web UI
+  # (root-equivalent Docker control via its read-write docker.sock mount)
+  # directly reachable from the LAN with zero Keycloak/oauth2-proxy
+  # involvement, bypassing the gateway entirely.
   docker run -d --name dockge --restart unless-stopped \
-    -p 5001:5001 \
+    -p 10.8.0.2:5001:5001 \
     -e DOCKGE_STACKS_DIR=/var/dockge/stacks \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v /var/dockge/data:/app/data \
