@@ -86,7 +86,7 @@ func TestSettingsModalIsCenteredOverlay(t *testing.T) {
 	}
 
 	if strings.Contains(html, "dashboard operator") {
-		t.Fatal("settings modal must render only the auth-backend provided identity")
+		t.Fatal("settings modal must render only the Keycloak-provided identity")
 	}
 }
 

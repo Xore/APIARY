@@ -1372,7 +1372,7 @@
     };
     syncPrefs();
 
-    /* Sidebar profile row from live auth-backend session introspection */
+    /* Sidebar profile row from live Keycloak token verification (see oidc_auth.go) */
     fetch("/api/whoami", {cache: "no-store"}).then(r => r.ok ? r.json() : null).then(identity => {
       if (!identity || !identity.username) return;
       const name = shell.querySelector("[data-hp-user-name]");
