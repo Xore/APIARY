@@ -89,8 +89,18 @@ http:
     # paths to be framed. #1028: admin and issuer are the same origin now
     # (auth.honeypot.example), so this is a same-origin exception only --
     # no cross-host CSP allowlist needed any more.
+    #
+    # Realm-agnostic (`[^/]+`, not a hardcoded `apiary`): the admin console
+    # runs this same cookie check against whichever realm the current admin
+    # session is in, including the built-in `master` realm (e.g. while still
+    # on the bootstrap-admin login, before a named apiary-realm admin exists
+    # -- see KEYCLOAK-OPERATIONS.md's step 2). The original apiary-only rule
+    # never matched `/realms/master/...`, so master-realm admin sessions hit
+    # the general DENY header and got "Timeout when waiting for 3rd party
+    # check iframe message" -- caught live, was already broken before #1028,
+    # not something #1028 introduced.
     keycloak-embedded-frames:
-      rule: "Host(`auth.honeypot.example`) && (PathPrefix(`/realms/apiary/protocol/openid-connect/3p-cookies/`) || Path(`/realms/apiary/protocol/openid-connect/login-status-iframe.html`) || PathPrefix(`/realms/apiary/protocol/openid-connect/login-status-iframe.html/`))"
+      rule: "Host(`auth.honeypot.example`) && PathRegexp(`^/realms/[^/]+/protocol/openid-connect/(3p-cookies/|login-status-iframe\\.html)`)"
       priority: 120
       entryPoints: [websecure]
       service: keycloak-candidate
