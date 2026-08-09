@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -21,6 +22,21 @@ import (
 func esSensorAndOverviewStub(t *testing.T, docsBySensor map[string][]map[string]any) http.HandlerFunc {
 	t.Helper()
 	return func(w http.ResponseWriter, r *http.Request) {
+		// #1097: loadSensorEventsES opens/closes a point-in-time around its
+		// search now (see events_es.go) -- answer those two requests before
+		// falling into the sensor/overview body-parsing logic below, which
+		// only knows how to answer a _search body.
+		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "_pit") {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"id": "test-pit-id"})
+			return
+		}
+		if r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "_pit") {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]bool{"succeeded": true})
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		body, _ := io.ReadAll(r.Body)
 		sensor, isSensorQuery := sensorFromSearchBody(body)

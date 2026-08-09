@@ -72,6 +72,28 @@ func (s *store) loadSensorEventsES(es *esClient, dirSensor string) ([]cachedEven
 		return nil, false
 	}
 
+	// #1097: _id can no longer be used as a search_after tie-breaker --
+	// confirmed live against this deployment's Elasticsearch version
+	// (2026-08-09): "Fielddata access on the _id field is disallowed",
+	// and unlike the older deprecated-but-functional id_field_data.enabled
+	// escape hatch, this version has removed that setting outright ("unknown
+	// setting... check the breaking changes documentation for removed
+	// settings"). This was silently failing loadSensorEventsES for every
+	// sensor on every rebuild cycle: the esOnlySensors six (no local-file
+	// fallback, so they went completely blank) and every other sensor too
+	// (silently falling back to a local-file read that happened to mask the
+	// failure for most of them). _shard_doc is Elasticsearch's own
+	// documented modern replacement, but it requires a point-in-time
+	// context to use at all ("[_shard_doc] sort field cannot be used
+	// without [point in time]") -- open one for this call, scoped to the
+	// same honeypot-v2-* pattern the plain index-pattern search this
+	// replaces used, and always close it before returning.
+	pitID, ok := es.openPointInTime("honeypot-v2-*", "1m")
+	if !ok {
+		return nil, false
+	}
+	defer es.closePointInTime(pitID)
+
 	var events []cachedEvent
 	var searchAfter []any
 	for page := 0; page < esEventsMaxPages; page++ {
@@ -80,10 +102,8 @@ func (s *store) loadSensorEventsES(es *esClient, dirSensor string) ([]cachedEven
 		// Elasticsearch's own max_result_window ceiling for a single
 		// request, not something raising `size` further can fix. Paginates
 		// via search_after instead, which needs a real query body (not the
-		// simple ?q= query-string form) and a fully stable sort:
-		// @timestamp alone can collide at this volume, so _id is added as
-		// a tie-breaker -- without one, search_after can silently skip or
-		// duplicate hits that share a timestamp across page boundaries.
+		// simple ?q= query-string form) and a fully stable sort -- see the
+		// PIT/_shard_doc comment above for why the tie-breaker is what it is.
 		//
 		// #880: this query had no time bound at all, so a sensor with more
 		// than esEventsPageSize sightings within the 30-day honeypot-30d ILM
@@ -95,9 +115,10 @@ func (s *store) loadSensorEventsES(es *esClient, dirSensor string) ([]cachedEven
 		// second window keeps that meaning consistent across the dashboard.
 		body := map[string]any{
 			"size": esEventsPageSize,
+			"pit":  map[string]any{"id": pitID, "keep_alive": "1m"},
 			"sort": []map[string]any{
 				{"@timestamp": "desc"},
-				{"_id": "desc"},
+				{"_shard_doc": "desc"},
 			},
 			"query": map[string]any{
 				"bool": map[string]any{
@@ -115,7 +136,9 @@ func (s *store) loadSensorEventsES(es *esClient, dirSensor string) ([]cachedEven
 		if err != nil {
 			return nil, false
 		}
-		b, err := es.searchBody("/honeypot-v2-*/_search", reqBody)
+		// A PIT search takes no index in the path -- the PIT itself already
+		// pins which index/indices it was opened against.
+		b, err := es.searchBody("/_search", reqBody)
 		if err != nil {
 			if page == 0 {
 				return nil, false
