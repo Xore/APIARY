@@ -55,10 +55,23 @@ for client in "${CLIENTS[@]}"; do
     "clients/${uuid}/client-secret" -r "$REALM" --config "$KC_CONFIG" \
     | python3 -c 'import sys,json; print(json.load(sys.stdin)["value"])')"
 
-  ssh "$VPS_HOST" "install -d -m 750 '${VPS_SECRETS_DIR}/${client}' && \
+  # #787: <<<"$secret" (a herestring) always appends exactly one trailing
+  # newline to whatever it feeds a command's stdin -- that's herestring
+  # syntax, not something $secret itself carries (command substitution
+  # already stripped any trailing newline off it). `cat` on the receiving
+  # end writes that byte to the file verbatim, so every synced secret file
+  # actually held the real secret plus a spurious trailing \n. Found live:
+  # oauth2-proxy reads --client-secret-file raw and does not trim it, so
+  # the client_secret it POSTed to Keycloak's token endpoint never matched
+  # what Keycloak had, and every gateway login failed with
+  # unauthorized_client/invalid_client_credentials after a rotation --
+  # masked until now by secrets rarely actually being rotated post-setup.
+  # printf '%s' (no \n) is exact-bytes; piping it in instead of using a
+  # herestring is what actually avoids the injected newline.
+  printf '%s' "$secret" | ssh "$VPS_HOST" "install -d -m 750 '${VPS_SECRETS_DIR}/${client}' && \
     umask 077 && cat > '${VPS_SECRETS_DIR}/${client}/client-secret' && \
     chown root:65532 '${VPS_SECRETS_DIR}/${client}/client-secret' && \
-    chmod 440 '${VPS_SECRETS_DIR}/${client}/client-secret'" <<<"$secret"
+    chmod 440 '${VPS_SECRETS_DIR}/${client}/client-secret'"
   echo "synced $client"
 done
 
