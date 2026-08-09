@@ -423,8 +423,19 @@ step_wireguard_sync_vps_peer() {
   psk="$(grep '^PresharedKey' /etc/wireguard/wg0.conf | awk '{print $3}')"
   [[ -n "$pubkey" && -n "$psk" ]] || { echo "could not read local wg0.conf pubkey/PSK"; return 1; }
 
+  # #1059 investigation: this must be HOME_WG_ADDRESS (stripped of its /24),
+  # not VPS_WG_ADDRESS -- the block being matched is the VPS's own peer
+  # entry FOR the home side, so its AllowedIPs is home's tunnel IP
+  # (confirmed live against the real VPS config: AllowedIPs = 10.8.0.2/32,
+  # not 10.8.0.1/32). Using VPS_WG_ADDRESS here matched zero peer blocks on
+  # the real config -- a silent no-op with no error, the exact failure
+  # class this function's own comments already describe from #518 (wrong
+  # keys, clean `wg show`, 0 bytes received, forever). The match-count
+  # guard below now also fails loudly instead of silently no-op-ing if this
+  # regresses again.
+  local home_ip="${HOME_WG_ADDRESS%%/*}"
   ssh -i "$VPS_SSH_KEY" -p "$VPS_SSH_PORT" -o StrictHostKeyChecking=accept-new \
-    -o ConnectTimeout=10 "${VPS_SSH_USER}@${VPS_SSH_HOST}" bash -s -- "$pubkey" "$psk" "$VPS_WG_ADDRESS" <<'REMOTE'
+    -o ConnectTimeout=10 "${VPS_SSH_USER}@${VPS_SSH_HOST}" bash -s -- "$pubkey" "$psk" "$home_ip" <<'REMOTE'
 set -euo pipefail
 new_pub="$1"
 new_psk="$2"
@@ -440,14 +451,23 @@ conf, new_pub, new_psk, peer_ip = sys.argv[1:5]
 text = open(conf).read()
 blocks = re.split(r'(?=\[Peer\])', text)
 out = []
+matched = 0
 for b in blocks:
     if b.startswith('[Peer]') and f"{peer_ip}/32" in b:
+        matched += 1
         b = re.sub(r'PublicKey\s*=\s*\S+', f'PublicKey = {new_pub}', b)
         if re.search(r'^PresharedKey\s*=', b, re.MULTILINE):
             b = re.sub(r'PresharedKey\s*=\s*\S+', f'PresharedKey = {new_psk}', b)
         else:
             b = re.sub(r'(PublicKey\s*=\s*\S+\n)', rf'\1PresharedKey = {new_psk}\n', b)
     out.append(b)
+# Fail loudly on 0 or >1 matches instead of silently no-op-ing (0 matches)
+# or updating the wrong/multiple peers (>1) -- exactly the kind of mistake
+# a clean `wg show` and no error would otherwise hide until the next real
+# handshake attempt fails.
+if matched != 1:
+    print(f"expected exactly 1 peer block with AllowedIPs {peer_ip}/32, found {matched}", file=sys.stderr)
+    sys.exit(1)
 open(conf, 'w').write(''.join(out))
 PY
 systemctl restart wg-quick@wg0
