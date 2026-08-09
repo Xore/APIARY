@@ -128,7 +128,16 @@
   "roles": {
     "realm": [
       {"name": "apiary-user", "description": "May sign in to APIARY"},
-      {"name": "apiary-admin", "description": "May administer APIARY"}
+      {
+        "name": "apiary-admin",
+        "description": "May administer APIARY",
+        "composite": true,
+        "composites": {
+          "client": {
+            "realm-management": ["manage-users", "view-users", "query-users"]
+          }
+        }
+      }
     ],
     "client": {
       "apiary-dashboard": [
@@ -149,7 +158,12 @@
       "name": "users",
       "realmRoles": ["apiary-user"],
       "clientRoles": {
-        "apiary-dashboard": ["access"]
+        "apiary-dashboard": ["access"],
+        "kibana": ["access"],
+        "evebox": ["access"],
+        "arkime": ["access"],
+        "tanner": ["access"],
+        "revdeck": ["access"]
       }
     },
     {
