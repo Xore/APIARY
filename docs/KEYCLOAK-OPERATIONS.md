@@ -179,7 +179,25 @@ sudo chmod 750 ./secrets/oidc/<client>
 sudo chmod 440 ./secrets/oidc/<client>/*
 ```
 
-Retrieve a client secret using the already authenticated homeserver `kcadm`:
+`client-secret` is different: since `apiary-realm.json` pins no client
+`secret`, Keycloak generates a fresh random one for all 8 confidential
+clients on every `--import-realm` (including a clean rebuild, #787). Use
+[`keycloak/sync-client-secrets.sh`](../keycloak/sync-client-secrets.sh) to
+fetch and install all 8 in one pass instead of the manual per-client
+procedure below -- run from the homeserver with SSH access to the VPS:
+
+```bash
+KEYCLOAK_ADMIN_USERNAME=<master-realm admin> \
+KEYCLOAK_ADMIN_PASSWORD=<its password> \
+./keycloak/sync-client-secrets.sh
+```
+
+It writes each secret directly over SSH (never to a local file or a
+command-line argument), fixes ownership/permissions to match the manual
+steps above, and restarts each of the 8 gateways so the new secret takes
+effect immediately. Manual fallback, retrieving a single client secret using
+the already authenticated homeserver `kcadm` (what the script above does for
+all 8):
 
 ```bash
 KC=/opt/keycloak/bin/kcadm.sh
@@ -328,7 +346,7 @@ sudo KEYCLOAK_RESTORE_CONFIRM=restore-keycloak-database \
 | Endless HTTP password prompts | BasicAuth conflicts with Keycloak Bearer calls | Remove BasicAuth and its htpasswd mount; use Keycloak login + MFA. |
 | Password update returns internal error | Unsupported recovery-code required action was imported | Rebuild from the validated realm without that action; do not patch database state. |
 | All gateways restart with secret read errors | UID 65532 cannot traverse/read host secret paths | Use `root:65532`, directory `0750`, files `0440`. |
-| Gateways redirect but callback fails after rebuild | VPS client secrets belong to the old realm | Rotate every client-secret file and restart every gateway. |
+| Gateways redirect but callback fails after rebuild | VPS client secrets belong to the old realm | Run `keycloak/sync-client-secrets.sh` to rotate all 8 client-secret files and restart every gateway in one pass. |
 | WireGuard port is absent | Keycloak is attached only to an internal Docker network | Attach Keycloak to `keycloak-data` and `keycloak-egress`; PostgreSQL uses only `keycloak-data`. |
 | Keycloak fails on a read-only filesystem | Upstream image needs first-start augmentation | Allow its disposable layer to be writable or build a separately reviewed optimized image. |
 | A theme file edit + `docker compose restart keycloak` doesn't reach real browsers, even though `curl` (no compression) and internal checks show the fix is live | Keycloak/Quarkus caches a gzip-compressed copy of every theme resource under `/opt/keycloak/data/tmp/kc-gzip-cache/`, which lives in the container's own writable layer -- it is not bind-mounted or a named volume, so it survives `docker restart` and is never invalidated when the source file on disk changes. Every real browser sends `Accept-Encoding: gzip` by default, so it keeps getting served the stale compiled variant indefinitely. Caught live (#108/#1027): repeated Cloudflare cache purges appeared not to fix a login theme bug because the *origin itself* was still serving the old file under gzip. | After any theme file change, before (or instead of) blaming CDN cache: `docker exec hp-keycloak rm -rf /opt/keycloak/data/tmp/kc-gzip-cache` -- no restart needed, Keycloak regenerates it lazily on the next request. Only a full container recreate (not `restart`) would otherwise clear it. Verify with `curl -H 'Accept-Encoding: gzip' --compressed ...` specifically, not a plain `curl`/`wget` that skips compression -- those two can disagree. |
