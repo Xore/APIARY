@@ -12,9 +12,18 @@
   --apiary-text: #e9e6df;
   --apiary-text-secondary: #a8a49c;
   --apiary-text-muted: #a5a9a6;
-  --apiary-copper: #d97757;
-  --apiary-copper-hover: #e18768;
-  --apiary-copper-pressed: #c9684b;
+  /* Split into -fill (paired with .apiary-button--primary's hardcoded dark
+     #211a17 text, in both themes) and -text (standalone text color on the
+     page background/card surface, e.g. .apiary-eyebrow/.apiary-card__index)
+     -- one color can't satisfy both pairings at once in light mode (see
+     Xore/APIARY#1044). Dark mode's original single value already passed
+     -fill's contrast requirement; -text needed a touch brighter to clear
+     4.5:1 against --apiary-surface specifically (4.48:1 before, its
+     hardest case -- --apiary-bg/-sidebar had more headroom). */
+  --apiary-copper-fill: #d97757;
+  --apiary-copper-fill-hover: #e18768;
+  --apiary-copper-fill-pressed: #c9684b;
+  --apiary-copper-text: #dc8264;
   --apiary-copper-soft: rgba(217, 119, 87, 0.14);
   --apiary-link: #6da7ec;
   --apiary-success: #79c99e;
@@ -41,9 +50,19 @@
   --apiary-text: #2f2b27;
   --apiary-text-secondary: #68615a;
   --apiary-text-muted: #66615b;
-  --apiary-copper: #c76548;
-  --apiary-copper-hover: #b9583c;
-  --apiary-copper-pressed: #a74b33;
+  /* Xore/APIARY#1044: the original single --apiary-copper failed WCAG AA
+     in both its usages here, in opposite directions -- lightened for -fill
+     (paired with hardcoded dark #211a17 button text: old base measured
+     4.40:1 against that text, needs 4.5:1) and darkened for -text
+     (standalone text on this theme's light background: old value measured
+     3.49-3.61:1 against --apiary-bg/-surface, also below 4.5:1). Verified:
+     -fill now clears 4.5:1 against #211a17 (6.38/5.65/4.93:1
+     base/hover/pressed) and -text clears 4.5:1 against both
+     --apiary-bg/--apiary-surface (5.24/5.06:1). */
+  --apiary-copper-fill: #d58c76;
+  --apiary-copper-fill-hover: #ca826d;
+  --apiary-copper-fill-pressed: #bd7866;
+  --apiary-copper-text: #9f513a;
   --apiary-copper-soft: rgba(199, 101, 72, 0.12);
   --apiary-link: #2a78d6;
   --apiary-success: #3f8764;
@@ -136,7 +155,7 @@ button, input { font: inherit; }
   align-items: center;
   gap: 9px;
   margin-bottom: 22px;
-  color: var(--apiary-copper);
+  color: var(--apiary-copper-text);
   font: 700 12px/1.2 var(--apiary-mono);
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -176,9 +195,9 @@ button, input { font: inherit; }
   transition: transform 140ms ease, background-color 140ms ease, border-color 140ms ease;
 }
 
-.apiary-button:hover { transform: translateY(-1px); border-color: var(--apiary-copper); }
-.apiary-button--primary { border-color: transparent; background: var(--apiary-copper); color: #211a17; }
-.apiary-button--primary:hover { background: var(--apiary-copper-hover); }
+.apiary-button:hover { transform: translateY(-1px); border-color: var(--apiary-copper-fill); }
+.apiary-button--primary { border-color: transparent; background: var(--apiary-copper-fill); color: #211a17; }
+.apiary-button--primary:hover { background: var(--apiary-copper-fill-hover); }
 
 .apiary-section { padding-block: 88px; }
 .apiary-section--tinted { border-block: 1px solid var(--apiary-border); background: var(--apiary-sidebar); }
@@ -197,7 +216,7 @@ button, input { font: inherit; }
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.025) inset;
 }
 
-.apiary-card__index { color: var(--apiary-copper); font: 700 12px/1 var(--apiary-mono); letter-spacing: 0.08em; }
+.apiary-card__index { color: var(--apiary-copper-text); font: 700 12px/1 var(--apiary-mono); letter-spacing: 0.08em; }
 .apiary-card h3 { margin: 34px 0 8px; font-size: 20px; letter-spacing: -0.015em; }
 .apiary-card p { margin: 0; color: var(--apiary-text-secondary); }
 
@@ -218,7 +237,7 @@ button, input { font: inherit; }
 .apiary-terminal { min-width: 0; padding: 30px; background: #161715; color: #d9d5ce; font: 13px/1.75 var(--apiary-mono); }
 .apiary-terminal__bar { display: flex; gap: 7px; margin-bottom: 22px; }
 .apiary-terminal__bar i { width: 9px; height: 9px; border-radius: 50%; background: var(--apiary-text-muted); }
-.apiary-terminal__bar i:first-child { background: var(--apiary-copper); }
+.apiary-terminal__bar i:first-child { background: var(--apiary-copper-fill); }
 .apiary-terminal code { color: var(--apiary-success); }
 .apiary-terminal .muted { color: #777a75; }
 
