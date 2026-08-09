@@ -148,7 +148,11 @@ services:
       timeout: 3s
       retries: 10
     read_only: true
-    tmpfs: [/data:size=16m,mode=0700]
+    # #1026: quoted -- the unquoted form's comma between size= and mode=
+    # was parsed by YAML as a flow-sequence separator, splitting this into
+    # two invalid tmpfs entries ("/data:size=16m" and "mode=0700") and
+    # making Docker reject "mode=0700" as a non-absolute mount path.
+    tmpfs: ["/data:size=16m,mode=0700"]
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     deploy:
