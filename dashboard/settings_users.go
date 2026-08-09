@@ -2,9 +2,9 @@ package main
 
 // settings_users.go — the dashboard-owned user projection and per-user
 // preferences store (roadmap §3). The projection is diagnostic only: it is
-// never used for authorization, which always goes through live auth-backend
-// introspection. Preferences are typed, validated, and strictly isolated per
-// immutable subject.
+// never used for authorization, which always goes through live Keycloak
+// token verification (see oidc_auth.go). Preferences are typed, validated,
+// and strictly isolated per immutable subject.
 
 import (
 	"crypto/sha256"
@@ -158,7 +158,7 @@ var errNoProjectionWrite = errors.New("projection already current")
 
 // SweepRetention removes projections — including their stored preferences —
 // whose last authenticated activity is older than maxAge (roadmap Milestone
-// F): when an auth-backend account is deleted or disabled it can no longer
+// F): when a Keycloak account is deleted or disabled it can no longer
 // produce activity, so its orphaned dashboard preferences expire through this
 // retention sweep instead of living forever. Every removal is audited with
 // the affected subject; the sweep returns the number of removed projections.
