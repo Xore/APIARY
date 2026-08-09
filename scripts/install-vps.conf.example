@@ -1,0 +1,67 @@
+# Answer file for scripts/install-vps.sh -- the public-edge-host
+# equivalent of scripts/install-homeserver.conf.example.
+#
+# Copy this file, fill in every <PLACEHOLDER>, then run:
+#   sudo ./scripts/install-vps.sh --config /path/to/your-filled-in.conf
+#
+# Never commit your filled-in copy. It will contain real IPs and a real
+# git remote. Keep it next to the script but outside version control
+# (.gitignore has a name-specific rule for this file -- only the
+# `.example` copy is tracked).
+
+# --- Repository -------------------------------------------------------------
+GIT_REPO_URL="<GIT_REMOTE_URL>"          # e.g. git@github.com:<org>/apiary.git
+GIT_REF="main"
+
+# --- Networking (WireGuard tunnel to the home server) ------------------------
+# This VPS's own tunnel address (bare, no /prefix -- the script adds /24).
+VPS_WG_ADDRESS="<VPS_WG_ADDRESS>"        # e.g. 10.8.0.1
+
+# The home server's tunnel address, /prefix included.
+HOME_WG_ADDRESS="<HOME_WG_ADDRESS>/24"   # e.g. 10.8.0.2/24
+
+# WireGuard keys. Generate with `wg genkey | tee privatekey | wg pubkey >
+# publickey` -- never reuse an example value, never commit a real one.
+#
+# VPS_WG_PRIVATE_KEY may be left empty on a first-ever run -- the script
+# generates a fresh keypair. Once the tunnel is up, fill in the real value
+# from the resulting /etc/wireguard/wg0.conf so future re-runs reuse the
+# same identity instead of rotating it (harmless, but unnecessary churn on
+# the home side's peer config -- home would need re-syncing every time).
+#
+# HOME_WG_PUBLIC_KEY may ALSO be left empty -- this is the expected case
+# when bootstrapping a genuinely fresh pair of hosts (this script runs
+# FIRST; home's key doesn't exist yet). A placeholder peer entry is written
+# instead; install-homeserver.sh's step_wireguard_sync_vps_peer overwrites
+# it with home's real public key + a fresh PSK once the home side exists.
+# If you already know home's real public key (re-provisioning the VPS only,
+# home stays untouched), set it here to skip that round-trip.
+VPS_WG_PRIVATE_KEY="<VPS_WG_PRIVATE_KEY>"
+HOME_WG_PUBLIC_KEY="<HOME_WG_PUBLIC_KEY>"
+
+# --- Firewall -----------------------------------------------------------
+# Real admin SSH port. cowrie owns 22 (see docs/CGNAT-DEPLOYMENT.md's VPS
+# deployment section) -- the actual sshd config move to this port is a
+# manual step this script does NOT perform; confirm it works and keep the
+# old session open before this script's firewall-base step locks 22 down
+# to the honeypot-only listener.
+SSH_ADMIN_PORT="2222"
+
+# --- Public domain --------------------------------------------------------
+# Substituted into vps/traefik/dynamic.yml in place of the committed
+# honeypot.example placeholder (same mechanism
+# .github/workflows/deploy.yml's own DOMAIN secret uses).
+DOMAIN="<DOMAIN>"                        # e.g. honeypot.example.com
+
+# --- Secret restore (LAN backup host) ---------------------------------------
+# Where the pre-rebuild backup lives -- same backup host
+# install-homeserver.conf.example's BACKUP_HOST_PATH points at, but this
+# script reads ${BACKUP_HOST_PATH}/vps/.env and
+# ${BACKUP_HOST_PATH}/vps/traefik/certs/{origin.pem,origin-key.pem}
+# specifically (see scripts/install-homeserver.conf.example's own
+# BACKUP_HOST_PATH comment for the sibling home-side layout under the same
+# dated snapshot directory).
+BACKUP_HOST="<BACKUP_HOST_IP_OR_HOST>"
+BACKUP_HOST_USER="<BACKUP_HOST_SSH_USER>"
+BACKUP_HOST_KEY="<PATH_TO_PRIVATE_KEY>"  # e.g. /home/<user>/.ssh/backup_host_key
+BACKUP_HOST_PATH="<PATH_ON_BACKUP_HOST>" # e.g. /home/<user>/honeypot-backups/<date>

@@ -14,9 +14,12 @@ wg0.conf
 wireguard/*.conf
 secrets/
 credentials/
-# scripts/install-homeserver.sh answer file -- real IPs/keys once filled in
+# scripts/install-homeserver.sh / scripts/install-vps.sh answer files --
+# real IPs/keys once filled in
 scripts/install-homeserver.conf
 !scripts/install-homeserver.conf.example
+scripts/install-vps.conf
+!scripts/install-vps.conf.example
 
 # scripts/install-homeserver.sh symlinks compose.yml -> the real
 # docker-compose.*.yml next to it so relative build contexts resolve
