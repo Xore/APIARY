@@ -104,12 +104,19 @@ kcadm add-roles -r apiary --uusername pkce-totp-test --rolename apiary-user >/de
 # credential -- the real shape of a freshly provisioned account (admin
 # hands out a one-time password, user must replace it before doing
 # anything else), as opposed to pkce-totp-test above whose password is
-# already permanent. "temporary=true" on the reset-password credential is
-# what makes Keycloak insert its own UPDATE_PASSWORD required action
-# ahead of CONFIGURE_TOTP -- not something this test sets explicitly.
+# already permanent. -t/--temporary on set-password is what makes Keycloak
+# insert its own UPDATE_PASSWORD required action ahead of CONFIGURE_TOTP --
+# not something this test sets explicitly.
+#
+# Found live in CI (2026-08-09): `kcadm update users/<id>/reset-password`
+# 404s -- kcadm's generic `update` does a GET-then-PUT against the given
+# resource, but reset-password is a write-only action endpoint with no GET,
+# so the GET half 404s before the PUT is ever attempted. set-password's own
+# -t flag hits the same endpoint correctly (confirmed via
+# `kcadm set-password --help` against a real 26.7.1 server) without that
+# generic-update assumption.
 kcadm create users -r apiary -s username=first-login-test -s enabled=true -s emailVerified=true >/dev/null
-first_login_user_id=$(kcadm get users -r apiary -q username=first-login-test --fields id --format csv --noquotes | tail -1)
-kcadm update "users/${first_login_user_id}/reset-password" -r apiary -s type=password -s value='TempOneTime1!Extra' -s temporary=true >/dev/null
+kcadm set-password -r apiary --username first-login-test --new-password 'TempOneTime1!Extra' --temporary >/dev/null
 kcadm add-roles -r apiary --uusername first-login-test --rolename apiary-user >/dev/null
 
 flow_dir="$(mktemp -d)"
