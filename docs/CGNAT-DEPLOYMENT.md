@@ -161,12 +161,37 @@ intervention.
 
 ## VPS deployment
 
+> **Prefer the script.** [`scripts/install-vps.sh`](../scripts/install-vps.sh)
+> automates Docker, WireGuard, the firewall, the NIC offload fix, the `vps/`
+> checkout, secret restore, and starting the stack against a
+> manually-installed base Ubuntu system — fill in
+> [`scripts/install-vps.conf.example`](../scripts/install-vps.conf.example)
+> first. Filed as [#1059](https://github.com/Xore/APIARY/issues/1059) after
+> confirming nothing in this repo could previously bring a genuinely
+> wiped/reimaged VPS back up — it's the current source of truth for the real
+> deployment order, not the numbered steps below, which predate it and
+> haven't been kept in lockstep since. File a gap against #1059 if the
+> script and reality ever disagree.
+>
+> For a genuinely fresh pair of hosts, run this script BEFORE
+> `install-homeserver.sh` — see its own header comment for why (its
+> WireGuard peer entry for home starts as a placeholder that
+> `install-homeserver.sh`'s `step_wireguard_sync_vps_peer` fills in once the
+> home side exists).
+
 1. Move real admin SSH to `2222` first, so cowrie can own `22` — confirm
    `2222` works before continuing. There is no script for this step; do it
    by hand and keep the old session open until the new port answers.
-2. `sudo ufw allow 2222/tcp comment 'REAL admin SSH'` and
-   `sudo ufw allow 80,443/tcp comment 'Traefik'` — outside
-   `honeypot-firewall.sh`'s scope (below), so do these by hand too.
+2. `sudo ufw allow 2222/tcp comment 'REAL admin SSH'` and, for `443/tcp`,
+   allow only Cloudflare's published ranges
+   (<https://www.cloudflare.com/ips-v4/> — see
+   `scripts/install-vps.sh`'s `step_firewall_base` for the exact list this
+   repo currently pins), not `Anywhere`: every real hostname is proxied
+   through Cloudflare, and a direct-origin connection bypassing it skips
+   Cloudflare's own WAF/rate-limiting. There is no `80/tcp` rule — Traefik
+   has no plain-HTTP listener here. Both of these are outside
+   `honeypot-firewall.sh`'s scope (below), so do them by hand too if not
+   using the script above.
 3. Copy `vps/.env.example` to `/root/vps/.env`.
 4. Replace all example domains, the Suricata `HOME_NET`, authentication
    credentials, cookie secrets, and TOTP values.

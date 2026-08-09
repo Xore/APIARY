@@ -7,7 +7,8 @@
 #
 # Never commit your filled-in copy. It will contain real IPs and a real
 # git remote. Keep it next to the script but outside version control
-# (a `*.conf` gitignore rule covers this — only `*.conf.example` is tracked).
+# (.gitignore has a name-specific rule for this file — only the
+# `.example` copy is tracked).
 
 # --- Identity -----------------------------------------------------------
 # Hostname this box should have. Leave empty to keep whatever's already set.
