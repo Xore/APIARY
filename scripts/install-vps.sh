@@ -425,6 +425,24 @@ step_restore_certs() {
   fi
 }
 
+step_prepare_log_dirs() {
+  # Found live on a real reinstall (#787): Suricata's pcap-log module
+  # (vps/suricata/suricata.yaml's `filename: pcap/log.pcap`) expects
+  # /opt/stacks/apiary/logs/suricata/pcap/ to already exist -- it does not
+  # create it itself, and nothing else in this repo did either. Missing on
+  # a genuinely fresh host (this whole logs/ tree starts empty by design,
+  # same as every other piece of honeypot operational data), so
+  # hp-suricata exited cleanly every time it hit this and Docker's
+  # `restart: unless-stopped` policy silently relaunched it forever --
+  # confirmed live at 428 restarts over ~6 hours, RestartCount climbing
+  # the whole time, providing zero real IDS coverage that entire window.
+  # UID/GID 998 is the `suricata` user's fixed UID baked into the
+  # jasonish/suricata image itself (confirmed via `docker exec ... cat
+  # /etc/passwd`), not something host-specific -- the bind mount needs a
+  # host-side owner matching the container's own numeric UID exactly.
+  install -d -m 755 -o 998 -g 998 /opt/stacks/apiary/logs/suricata/pcap
+}
+
 step_render_traefik_dynamic() {
   # Same substitution .github/workflows/deploy.yml's dedicated step does
   # (see that workflow's own comment for why this is a plain in-place cat,
@@ -493,6 +511,28 @@ step_verify_containers_healthy() {
     echo "$unhealthy" >&2
     return 1
   fi
+  # The status-text grep above has a real blind spot, found live (#787): a
+  # container crash-looping under `restart: unless-stopped` spends nearly
+  # all its time in a healthy-looking "Up" state between crashes -- the
+  # literal word "Restarting" only appears in `docker compose ps` output
+  # during the brief transition itself, easy to miss entirely on a single
+  # poll. hp-suricata accumulated 428 silent restarts (a real, undetected
+  # startup bug -- see step_prepare_log_dirs) while this check kept
+  # passing every time it happened to run. Docker's own RestartCount is a
+  # cumulative counter that doesn't have this gap.
+  local name count crashed=0
+  while IFS= read -r name; do
+    [[ -z "$name" ]] && continue
+    count="$(docker inspect "$name" --format '{{.RestartCount}}' 2>/dev/null || echo 0)"
+    if [[ "$count" =~ ^[0-9]+$ ]] && (( count > 0 )); then
+      echo "  ${name}: RestartCount=${count} (crash-looping, even though currently reported healthy/Up)" >&2
+      crashed=1
+    fi
+  done < <(docker compose -f docker-compose.yml ps --format '{{.Name}}')
+  if [[ "$crashed" -eq 1 ]]; then
+    echo "One or more containers have a nonzero RestartCount -- see above." >&2
+    return 1
+  fi
   return 0
 }
 
@@ -514,6 +554,7 @@ run_step stage-vps-dir           "Stage vps/ into /root/vps"               step_
 run_step restore-env             "Restore .env from LAN backup"            step_restore_env
 run_step restore-certs           "Restore Traefik origin certs from LAN backup" step_restore_certs
 run_step render-traefik-dynamic  "Substitute real domain into dynamic.yml" step_render_traefik_dynamic
+run_step prepare-log-dirs        "Create host-side log/pcap directories"   step_prepare_log_dirs
 run_step compose-up              "docker compose up -d --build"            step_compose_up
 run_step wireguard-verify        "Verify wg0 interface is up"              step_wireguard_verify
 run_step verify-containers       "Verify no unhealthy/restarting containers" step_verify_containers_healthy
