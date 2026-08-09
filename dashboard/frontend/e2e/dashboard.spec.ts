@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { FIXTURE_SESSION_COOKIE_NAME, FIXTURE_SESSION_COOKIE_VALUE } from "./fixture-session.mjs";
 
 const routes = [
   "/",
@@ -72,6 +73,22 @@ const viewports = {
 } as const;
 
 async function isolateReadOnlyBrowserState(page: Page) {
+  // #1034: the global OIDC middleware gates every route this matrix
+  // navigates to. start-dashboard.mjs seeds a matching session directly
+  // into the fixture Redis (see fixture-session.mjs) instead of driving a
+  // real login round trip; this just has to hand the browser the cookie
+  // that points at it. __Host- cookies require Secure, which Chromium
+  // honors over plain HTTP for loopback origins -- the same exception
+  // dashboard/oidc_auth.go's own isLoopbackHost() relies on.
+  await page.context().addCookies([{
+    name: FIXTURE_SESSION_COOKIE_NAME,
+    value: FIXTURE_SESSION_COOKIE_VALUE,
+    domain: "127.0.0.1",
+    path: "/",
+    secure: true,
+    httpOnly: true,
+    sameSite: "Lax",
+  }]);
   await page.route("**/api/stream", (route) => route.abort());
   await page.route("**/api/settings/**", (route) => route.fulfill({ status: 401, body: "signed out" }));
   await page.route("**/api/whoami", (route) => route.fulfill({

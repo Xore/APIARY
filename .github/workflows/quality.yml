@@ -112,6 +112,10 @@ jobs:
         working-directory: dashboard/frontend
       - run: npx playwright install --with-deps chromium
         working-directory: dashboard/frontend
+      # #1034: start-dashboard.mjs spawns a real redis-server for the OIDC
+      # session store fixture rather than reimplementing RESP -- ubuntu-latest
+      # ships it already in most images, but don't depend on that silently.
+      - run: command -v redis-server || sudo apt-get install -y redis-server
       - run: npm run test:browser
         working-directory: dashboard/frontend
 
