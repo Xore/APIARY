@@ -62,6 +62,22 @@ RUN curl -fsSL -o /tmp/capa.tar.gz \
 
 COPY server.py /app/server.py
 
+# py-tlsh's compiled extension calls into libstdc++ (C++ exception-handling
+# symbols like __gxx_personality_v0) but its own build doesn't declare
+# libstdc++ as a needed shared library -- ldd on the built .so shows only
+# libgcc_s/libc/ld-linux, no libstdc++.so.6, even though build-essential
+# (providing it) is installed above. This is the well-known "a C++ Python
+# extension got linked via the C compiler frontend, which doesn't
+# auto-add -lstdc++ the way g++ does" packaging gap: the shared-object
+# link step doesn't error on the unresolved symbol (most toolchains don't
+# reject undefined symbols in a `-shared` build by default), so it only
+# surfaces at import time. Found live during #787's homeserver reinstall
+# (2026-08-09): every statictools container crash-looped on `import tlsh`
+# with `undefined symbol: __gxx_personality_v0`. LD_PRELOAD-ing the
+# library that's already installed on this same image (just never linked
+# against) is the standard fix for this exact, well-known failure mode.
+ENV LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libstdc++.so.6
+
 # Non-root. capa needs the sample on disk (it has no stdin mode), so this
 # service writes one file per request under $TMPDIR -- /tmp is world-writable
 # by default, so 65534 can do that without owning anything else. It reads
