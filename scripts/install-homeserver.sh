@@ -1189,6 +1189,22 @@ step_sandbox_checksum_verify() {
   while IFS= read -r -d '' sums; do
     ( cd "$(dirname "$sums")" && sha256sum -c "$(basename "$sums")" ) || failures=$((failures + 1))
   done < <(find /var/dockge/sandbox -name "*.sha256" -print0)
+
+  # The loop above only checks whatever .sha256 files happen to exist --
+  # silently a no-op for a golden image whose checksum is missing entirely,
+  # which defeats the whole "root of trust" point just as surely as a
+  # mismatch would. Found live during #787's homeserver reinstall
+  # (2026-08-09): only win11-cape.qcow2 had a .sha256 in the actual LAN
+  # backup; win11-analysis.qcow2 and win11-ghosts.qcow2 had none at all and
+  # were never verified. Require one for every *.qcow2 under golden-images/.
+  local qcow2
+  while IFS= read -r -d '' qcow2; do
+    if [[ ! -f "${qcow2}.sha256" ]]; then
+      echo "no .sha256 for golden image: $qcow2 -- backup did not carry one"
+      failures=$((failures + 1))
+    fi
+  done < <(find /var/dockge/sandbox/golden-images -name "*.qcow2" -print0 2>/dev/null)
+
   [[ $failures -eq 0 ]]
 }
 
@@ -1222,6 +1238,26 @@ step_ghosts_host_install() {
 }
 
 step_ghosts_vm_start() {
+  # win11-ghosts-kvm.xml's <disk> points at vms/win11-ghosts.qcow2 -- a thin
+  # qcow2 clone of golden-images/win11-ghosts.qcow2, by its own comment. This
+  # step never actually created that clone (unlike
+  # step_windows_sandbox_vm_create's equivalent `qemu-img create -b
+  # $GOLDEN_IMAGE` for win11-sandbox), so on any box where the disk hadn't
+  # already been created some other way it just didn't exist. Found live
+  # during #787's homeserver reinstall (2026-08-09): `virsh start
+  # win11-ghosts` failed outright -- "Cannot access storage file
+  # '/var/dockge/sandbox/vms/win11-ghosts.qcow2': No such file or directory"
+  # -- while win11-sandbox came up fine right after, since only it had a
+  # create step. sandbox-checksum (run earlier in this same script) already
+  # verified the golden image before this step runs, so no second checksum
+  # pass here.
+  local golden="/var/dockge/sandbox/golden-images/win11-ghosts.qcow2"
+  local disk="/var/dockge/sandbox/vms/win11-ghosts.qcow2"
+  if [[ ! -e "$disk" ]]; then
+    [[ -f "$golden" ]] || { echo "golden image not found: $golden"; return 1; }
+    mkdir -p "$(dirname "$disk")"
+    qemu-img create -f qcow2 -F qcow2 -b "$golden" "$disk"
+  fi
   ensure_nvram_vars /var/lib/libvirt/qemu/nvram/win11-ghosts_VARS.qcow2
   virsh list --all --name | grep -qx win11-ghosts \
     || virsh define "$REPO_DIR/sandbox/ghosts/win11-ghosts-kvm.xml"
