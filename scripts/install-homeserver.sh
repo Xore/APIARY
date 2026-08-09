@@ -50,14 +50,25 @@ log() { printf '[%s] %s\n' "$(date -Iseconds)" "$*"; }
 # with_retry <max_attempts> <sleep_base_seconds> -- cmd args...
 # Retries transient (network/pull) failures with linear backoff. Does NOT
 # swallow the final failure -- after the last attempt, the real exit code
-# propagates so run_step still records FAILED correctly.
+# propagates so run_step still records FAILED correctly. (This comment was
+# aspirational until #787's homeserver reinstall found it wasn't true --
+# see the inline comment below.)
 with_retry() {
   local max="$1" base="$2"; shift 2
   local attempt=1 rc=0
   while (( attempt <= max )); do
-    if "$@"; then
-      return 0
-    fi
+    # Must be "$@" && return 0, NOT "if "$@"; then return 0; fi" -- when a
+    # plain if/fi (no else) takes neither branch, POSIX defines the if
+    # statement's own exit status as zero regardless of the condition's
+    # real exit code. That meant `rc=$?` on the next line always read 0,
+    # so with_retry could never detect a failure for ANY wrapped command --
+    # found live during #787's homeserver reinstall (2026-08-09): every
+    # `scp` in step_restore_env_files was genuinely failing (nested
+    # ${name}/.env path that never existed on the flat-structured backup
+    # host) yet with_retry reported success for all 17 stacks. `&&`
+    # short-circuits without touching $? when the command fails, so the
+    # following `rc=$?` captures the real code.
+    "$@" && return 0
     rc=$?
     if (( attempt == max )); then
       return "$rc"
