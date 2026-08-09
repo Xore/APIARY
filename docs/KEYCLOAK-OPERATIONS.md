@@ -53,9 +53,9 @@ Copy `keycloak.env.example` to `.env` and set host-local values:
 ```dotenv
 HP_BIND=<homeserver-wireguard-address>
 KEYCLOAK_PORT=18080
-KEYCLOAK_URL=https://auth.example.invalid
-KEYCLOAK_ADMIN_URL=https://keycloak-admin.example.invalid
-KEYCLOAK_PUBLIC_DOMAIN=example.invalid
+KEYCLOAK_URL=https://auth.honeypot.example
+KEYCLOAK_ADMIN_URL=https://keycloak-admin.honeypot.example
+KEYCLOAK_PUBLIC_DOMAIN=honeypot.example
 KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME=bootstrap-admin
 KEYCLOAK_THEME_DIR=/var/dockge/stacks/honeypot-keycloak/theme/apiary
 KEYCLOAK_SECRETS_DIR=/var/dockge/stacks/honeypot-keycloak/secrets
@@ -132,7 +132,7 @@ sudo docker exec hp-keycloak "$KC" get users -r apiary \
   -q username=<admin-user> --config /tmp/kcadm.config
 ```
 
-Open `https://keycloak-admin.example.invalid/admin/apiary/console/`, replace the
+Open `https://keycloak-admin.honeypot.example/admin/apiary/console/`, replace the
 temporary password, enroll TOTP, and confirm the administrator can read the
 realm. Then remove both bootstrap artifacts and restart:
 
@@ -151,8 +151,8 @@ human account, and TOTP is a default required action for all humans.
 Set these host-local values in the existing VPS stack `.env`:
 
 ```dotenv
-OIDC_ISSUER_URL=https://auth.example.invalid/realms/apiary
-OIDC_PUBLIC_DOMAIN=example.invalid
+OIDC_ISSUER_URL=https://auth.honeypot.example/realms/apiary
+OIDC_PUBLIC_DOMAIN=honeypot.example
 OIDC_SECRETS_DIR=./secrets/oidc
 ```
 
