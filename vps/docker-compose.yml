@@ -381,12 +381,16 @@ services:
     command: TCP4-LISTEN:8082,fork,reuseaddr TCP4:10.8.0.2:19082
     networks: [proxy]
 
+  # Isolated on oidc-dashboard (not the shared proxy network) like every
+  # other protected upstream's socat bridge -- Traefik is already a member
+  # of oidc-dashboard to route to it. Reachable only from Traefik and the
+  # oidc-dashboard gateway, not from the ~20 unrelated containers on proxy.
   socat-hp-dashboard:
     image: alpine/socat:latest
     container_name: socat-hp-dashboard
     restart: unless-stopped
     command: TCP4-LISTEN:8090,fork,reuseaddr TCP4:10.8.0.2:19090
-    networks: [proxy]
+    networks: [oidc-dashboard]
 
   # #266: second dashboard replica's bridge, for zero-downtime rolling
   # updates -- see docker-compose.dashboard.yml's own header comment and
@@ -398,7 +402,7 @@ services:
     container_name: socat-hp-dashboard-b
     restart: unless-stopped
     command: TCP4-LISTEN:8092,fork,reuseaddr TCP4:10.8.0.2:19092
-    networks: [proxy]
+    networks: [oidc-dashboard]
 
   # Candidate Keycloak path. The public auth router remains on the legacy
   # service until realm/theme/consumer validation passes the hard-cutover
