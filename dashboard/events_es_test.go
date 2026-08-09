@@ -24,6 +24,22 @@ import (
 func honeypotSearchStub(t *testing.T, docs []map[string]any, gotPaths *[]string) http.HandlerFunc {
 	t.Helper()
 	return func(w http.ResponseWriter, r *http.Request) {
+		// #1097: loadSensorEventsES now opens/closes a point-in-time around
+		// its search (see events_es.go's own comment for why _shard_doc,
+		// the modern _id-sort replacement, requires one). Handle those two
+		// requests distinctly rather than feeding them through the search
+		// stub below, which only knows how to answer a _search body.
+		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "_pit") {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"id": "test-pit-id"})
+			return
+		}
+		if r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "_pit") {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]bool{"succeeded": true})
+			return
+		}
+
 		body, _ := io.ReadAll(r.Body)
 		*gotPaths = append(*gotPaths, string(body))
 
@@ -166,6 +182,52 @@ func TestLoadSensorEventsESReturnsFalseWhenClientIsNil(t *testing.T) {
 	s := &store{}
 	if _, ok := s.loadSensorEventsES(nil, "multipot"); ok {
 		t.Fatal("expected ok=false with a nil esClient")
+	}
+}
+
+// #1097 regression: this deployment's Elasticsearch rejects sorting by _id
+// outright ("Fielddata access on the _id field is disallowed"), which was
+// silently failing loadSensorEventsES for every sensor on every rebuild
+// cycle -- confirmed live 2026-08-09. The fix opens a point-in-time and
+// sorts by _shard_doc instead. This test locks in both halves: the request
+// actually asks for a PIT-backed search, and a PIT-open failure is treated
+// as a real failure (ok=false), not silently swallowed into "zero events."
+func TestLoadSensorEventsESUsesPointInTimeNotIDSort(t *testing.T) {
+	var gotPaths []string
+	docs := []map[string]any{
+		{"sensor": "multipot", "proto": "pop3", "src_ip": "203.0.113.7", "timestamp": "2026-08-01T00:00:00Z"},
+	}
+	es := httptest.NewServer(honeypotSearchStub(t, docs, &gotPaths))
+	defer es.Close()
+
+	s := &store{}
+	events, ok := s.loadSensorEventsES(newESClient(es.URL, ""), "multipot")
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if strings.Contains(gotPaths[0], `"_id"`) {
+		t.Fatalf("request body %q still sorts by _id -- this Elasticsearch version rejects that", gotPaths[0])
+	}
+	if !strings.Contains(gotPaths[0], `"_shard_doc"`) || !strings.Contains(gotPaths[0], `"pit"`) {
+		t.Fatalf("request body %q does not use a point-in-time + _shard_doc sort", gotPaths[0])
+	}
+}
+
+func TestLoadSensorEventsESReturnsFalseWhenPointInTimeOpenFails(t *testing.T) {
+	// A server that 400s every request, including the PIT open -- must
+	// surface as ok=false, not as "zero events" (indistinguishable from a
+	// genuinely quiet sensor to every caller).
+	es := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer es.Close()
+
+	s := &store{}
+	if _, ok := s.loadSensorEventsES(newESClient(es.URL, ""), "multipot"); ok {
+		t.Fatal("expected ok=false when opening a point-in-time fails")
 	}
 }
 

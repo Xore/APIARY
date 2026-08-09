@@ -155,6 +155,40 @@ func (c *esClient) doRequest(method, path string, body []byte) (status int, resp
 	return r.StatusCode, b, nil
 }
 
+// openPointInTime opens a point-in-time context against indexPattern,
+// returning its ID for use in a subsequent search's "pit" field (see
+// loadSensorEventsES). Elasticsearch requires a PIT to sort by _shard_doc --
+// the modern, always-available search_after tie-breaker, needed since this
+// deployment's Elasticsearch version rejects sorting by _id outright (see
+// loadSensorEventsES's own comment for the full story).
+func (c *esClient) openPointInTime(indexPattern, keepAlive string) (id string, ok bool) {
+	status, b, err := c.doRequest(http.MethodPost, "/"+indexPattern+"/_pit?keep_alive="+url.QueryEscape(keepAlive), nil)
+	if err != nil || status/100 != 2 {
+		return "", false
+	}
+	var v struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal(b, &v) != nil || v.ID == "" {
+		return "", false
+	}
+	return v.ID, true
+}
+
+// closePointInTime releases a PIT opened by openPointInTime. Best-effort:
+// an idle PIT also expires on its own keep_alive, so a failure here (the
+// caller already got what it needed from the PIT) is not worth surfacing.
+func (c *esClient) closePointInTime(id string) {
+	if id == "" {
+		return
+	}
+	body, err := json.Marshal(map[string]string{"id": id})
+	if err != nil {
+		return
+	}
+	_, _, _ = c.doRequest(http.MethodDelete, "/_pit", body)
+}
+
 // esDocHit is one search hit carrying the concurrency-control fields
 // (SeqNo/PrimaryTerm) docIndex needs for a compare-and-swap update, alongside
 // the document ID and its raw _source.
