@@ -234,8 +234,20 @@ http:
         options: modern
       middlewares: [security-headers-dashboard-pdf]
 
+    # dashboard.honeypot.example redirects here rather than sharing this
+    # router: oidc-dashboard's OAUTH2_PROXY_REDIRECT_URL is hardcoded to
+    # honeypot.honeypot.example only (e8bba20, "Use the canonical honeypot
+    # dashboard hostname"). oauth2-proxy's CSRF cookie is a __Host- cookie,
+    # bound to whichever host it was set on -- a login started on
+    # dashboard.* got its CSRF cookie scoped to dashboard.*, then bounced
+    # through Keycloak back to a callback on honeypot.* (the only
+    # registered redirect_uri), where the browser never sends a
+    # dashboard.*-scoped cookie. oauth2-proxy correctly refused it: "403
+    # Login Failed: Unable to find a valid CSRF token". Redirecting
+    # dashboard.* to the canonical host before oauth2-proxy ever runs
+    # keeps the whole OIDC round trip on one host.
     honeypot-dashboard:
-      rule: "Host(`dashboard.honeypot.example`) || Host(`honeypot.honeypot.example`)"
+      rule: "Host(`honeypot.honeypot.example`)"
       entryPoints: [websecure]
       service: oidc-dashboard
       tls:
@@ -244,6 +256,14 @@ http:
       # dashboard's native OIDC runtime. Its callback terminates in the gateway,
       # outside this router's middleware chain.
       middlewares: [security-headers]
+
+    honeypot-dashboard-canonical-redirect:
+      rule: "Host(`dashboard.honeypot.example`)"
+      entryPoints: [websecure]
+      service: oidc-dashboard
+      tls:
+        options: modern
+      middlewares: [security-headers, dashboard-canonical-redirect]
 
     honeypot-kibana:
       rule: "Host(`kibana.honeypot.example`)"
@@ -608,6 +628,20 @@ http:
         regex: "^https://([^/]+)/(dashboard)?$"
         replacement: "https://${1}/dashboard/"
         permanent: false
+
+    # See honeypot-dashboard-canonical-redirect's router comment above.
+    # Dots deliberately unescaped (not "\." for a strict literal match): the
+    # router's own Host() rule above already exact-matched the hostname
+    # before any request reaches this middleware, and keeping the domain as
+    # one plain contiguous string here is what lets deploy.yml's
+    # `sed s/honeypot\.example/$DOMAIN/g` substitution find and replace it
+    # -- an escaped "honeypot\.example" would not match that sed pattern's
+    # literal text and would deploy with the placeholder domain still in it.
+    dashboard-canonical-redirect:
+      redirectRegex:
+        regex: "^https://dashboard.honeypot.example(/.*)?$"
+        replacement: "https://honeypot.honeypot.example${1}"
+        permanent: true
 
     rate-limit-auth:
       rateLimit:
