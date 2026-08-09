@@ -118,8 +118,16 @@ http:
     # brute-force-resistant rate-limit-auth via the plain `keycloak` router
     # below. Keycloak's realm-admin login and mandatory MFA remain the actual
     # authorization boundary, same as when this had its own hostname.
+    #
+    # /admin alone only covers the SPA shell -- caught live: its actual JS
+    # bundle loads from /resources/<build-fingerprint>/admin/keycloak.v2/
+    # assets/..., which fell through to the tighter rate-limit-auth and hit
+    # 429s loading two dozen chunks at once. The fingerprint segment is
+    # opaque/build-specific, hence the regex rather than a literal path.
+    # Scoped to the admin theme specifically (.../admin/...), not all of
+    # /resources, so login/account theme assets keep the tighter budget.
     keycloak-admin-console:
-      rule: "Host(`auth.honeypot.example`) && PathPrefix(`/admin`)"
+      rule: "Host(`auth.honeypot.example`) && (PathPrefix(`/admin`) || PathRegexp(`^/resources/[^/]+/admin/`))"
       priority: 110
       entryPoints: [websecure]
       service: keycloak-candidate
