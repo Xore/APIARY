@@ -411,28 +411,64 @@ fi
 jar_first_login="${flow_dir}/jar-first-login.txt"
 first_login_page=$(curl -s -c "${jar_first_login}" -b "${jar_first_login}" "http://127.0.0.1:${kc_port}/realms/apiary/protocol/openid-connect/auth?client_id=apiary-dashboard&redirect_uri=http%3A%2F%2F127.0.0.1%3A${dash_port}%2Fauth%2Fcallback&response_type=code&scope=openid&state=firstloginstate&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256")
 first_login_form_action=$(echo "${first_login_page}" | grep -o 'action="[^"]*"' | head -1 | sed 's/action="//;s/"$//' | sed 's/&amp;/\&/g')
-# -L: the password step redirects (302) straight to the UPDATE_PASSWORD
-# required-action page (Keycloak orders its own pending required actions
-# with this one first), not to CONFIGURE_TOTP yet.
-update_password_page=$(curl -sL -c "${jar_first_login}" -b "${jar_first_login}" --data-urlencode "username=first-login-test" --data-urlencode "password=TempOneTime1!Extra" --data-urlencode "credentialId=" "${first_login_form_action}")
-update_password_form_action=$(echo "${update_password_page}" | grep -o 'action="[^"]*"' | head -1 | sed 's/action="//;s/"$//' | sed 's/&amp;/\&/g')
-if [ -z "${update_password_form_action}" ] || ! echo "${update_password_page}" | grep -q 'name="password-new"'; then
-  bad "temporary-password login did not land on the expected UPDATE_PASSWORD form"
-else
+# -L: the password step redirects (302) to whichever of this account's two
+# pending required actions (UPDATE_PASSWORD from its temporary credential,
+# CONFIGURE_TOTP as the realm default) the realm's own authenticator
+# priority runs first. Confirmed live against the real deployed realm
+# (2026-08-09): CONFIGURE_TOTP first, THEN UPDATE_PASSWORD -- the opposite
+# of an unverified guess this test originally shipped with (fixed after a
+# real CI failure: "did not land on the expected UPDATE_PASSWORD form").
+# Detect which one actually rendered rather than hardcoding an order, so
+# this doesn't silently start failing again if the realm's own
+# required-action priorities ever change.
+first_required_action_page=$(curl -sL -c "${jar_first_login}" -b "${jar_first_login}" --data-urlencode "username=first-login-test" --data-urlencode "password=TempOneTime1!Extra" --data-urlencode "credentialId=" "${first_login_form_action}")
+
+if echo "${first_required_action_page}" | grep -q 'name="password-new"'; then
+  ok "first-login temporary password was rejected as a login credential and forced UPDATE_PASSWORD before granting access"
+  update_password_form_action=$(echo "${first_required_action_page}" | grep -o 'action="[^"]*"' | head -1 | sed 's/action="//;s/"$//' | sed 's/&amp;/\&/g')
   # -L: submitting the new password redirects on to CONFIGURE_TOTP, the
   # account's other pending required action.
-  first_login_totp_page=$(curl -sL -c "${jar_first_login}" -b "${jar_first_login}" --data-urlencode "password-new=FirstLoginPerm2!Extra" --data-urlencode "password-confirm=FirstLoginPerm2!Extra" "${update_password_form_action}")
-  if ! echo "${first_login_totp_page}" | grep -qi 'mode=manual'; then
+  second_required_action_page=$(curl -sL -c "${jar_first_login}" -b "${jar_first_login}" --data-urlencode "password-new=FirstLoginPerm2!Extra" --data-urlencode "password-confirm=FirstLoginPerm2!Extra" "${update_password_form_action}")
+  if ! echo "${second_required_action_page}" | grep -qi 'mode=manual'; then
     bad "first-login account did not proceed to CONFIGURE_TOTP after its forced password replacement"
   else
-    ok "first-login temporary password was rejected as a login credential and forced UPDATE_PASSWORD before granting access"
-    complete_totp_enrollment "${jar_first_login}" "${first_login_totp_page}" "127.0.0.1:${dash_port}/auth/callback"
+    complete_totp_enrollment "${jar_first_login}" "${second_required_action_page}" "127.0.0.1:${dash_port}/auth/callback"
     if [ -z "${_totp_enroll_callback}" ]; then
       bad "first-login account's post-password-reset TOTP enrollment was rejected across all retry attempts"
     else
       ok "first-login account completed forced password replacement + mandatory TOTP enrollment, reached a real authorization code"
     fi
   fi
+elif echo "${first_required_action_page}" | grep -qi 'mode=manual'; then
+  ok "first-login temporary password was rejected as a login credential and forced a required action (CONFIGURE_TOTP) before granting access"
+  # The next required action (UPDATE_PASSWORD) is still pending after this
+  # one, so the real success signal here is "redirected to another
+  # required-action page", not the final callback -- unlike every other
+  # complete_totp_enrollment() call in this script, which is always the
+  # last pending action for its account.
+  complete_totp_enrollment "${jar_first_login}" "${first_required_action_page}" "login-actions/required-action"
+  if [ -z "${_totp_enroll_callback}" ]; then
+    bad "first-login account's TOTP enrollment was rejected across all retry attempts"
+  else
+    second_required_action_page=$(curl -sk -c "${jar_first_login}" -b "${jar_first_login}" "${_totp_enroll_callback}")
+    if ! echo "${second_required_action_page}" | grep -q 'name="password-new"'; then
+      bad "first-login account did not proceed to UPDATE_PASSWORD after its forced TOTP enrollment"
+    else
+      update_password_form_action=$(echo "${second_required_action_page}" | grep -o 'action="[^"]*"' | head -1 | sed 's/action="//;s/"$//' | sed 's/&amp;/\&/g')
+      # -L: submitting the new password now redirects all the way to the
+      # dashboard's own /auth/callback -- this was the account's last
+      # pending required action.
+      final_callback_page_headers=$(curl -sk -D - -o /dev/null -c "${jar_first_login}" -b "${jar_first_login}" --data-urlencode "password-new=FirstLoginPerm2!Extra" --data-urlencode "password-confirm=FirstLoginPerm2!Extra" "${update_password_form_action}")
+      final_location=$(echo "${final_callback_page_headers}" | grep -i '^location:' | sed 's/^[Ll]ocation: //' | tr -d '\r')
+      case "${final_location}" in
+        "127.0.0.1:${dash_port}/auth/callback"*|"http://127.0.0.1:${dash_port}/auth/callback"*)
+          ok "first-login account completed forced TOTP enrollment + password replacement, reached a real authorization code" ;;
+        *) bad "first-login account's forced password replacement did not reach the dashboard callback: ${final_location}" ;;
+      esac
+    fi
+  fi
+else
+  bad "temporary-password login did not land on either the expected UPDATE_PASSWORD or CONFIGURE_TOTP form"
 fi
 
 if [ "${fail}" -ne 0 ]; then
