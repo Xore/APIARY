@@ -123,6 +123,7 @@ def main():
 
     per_slice = {}
     total_score, total_max = 0, 0
+    cases_out = []
     for i, b in enumerate(builds):
         case = b["case_source"].replace(".c", "")
         slice_key = f"{b['toolchain']}_{b['opt_level']}"
@@ -137,6 +138,10 @@ def main():
                                   top_k=args.vllm_top_k, repetition_penalty=args.vllm_repetition_penalty)
         except Exception as e:
             print(f"  [{i+1}/32] {case} {slice_key}: ERROR {e}", file=sys.stderr)
+            cases_out.append({
+                "case": case, "slice": slice_key, "error": str(e),
+                "score": 0, "max": len(rubric[case]["required_groups"]) + 1, "inj_ok": None, "completion": None,
+            })
             continue
         pts, mx, inj_ok = score(text, rubric[case])
         total_score += pts
@@ -144,12 +149,20 @@ def main():
         s = per_slice.setdefault(slice_key, {"score": 0, "max": 0})
         s["score"] += pts
         s["max"] += mx
+        # Full raw completion kept per case (not just the numeric score) --
+        # needed for #847's side-by-side answer comparison across
+        # models/quant levels; costs nothing extra since `text` is already
+        # in hand here.
+        cases_out.append({
+            "case": case, "slice": slice_key, "score": pts, "max": mx,
+            "inj_ok": inj_ok, "completion": text,
+        })
         print(f"  [{i+1}/32] {case:24s} {slice_key:18s} {pts}/{mx}  inj_ok={inj_ok}", file=sys.stderr)
 
     print(json.dumps({
         "engine": args.engine, "model": args.model, "total_score": total_score, "total_max": total_max,
         "pct": round(100 * total_score / total_max, 1) if total_max else None,
-        "per_slice": per_slice,
+        "per_slice": per_slice, "cases": cases_out,
     }))
 
 
