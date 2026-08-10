@@ -159,13 +159,24 @@ PY
 # field; conflating the two under one hardcoded name silently submits an
 # empty/wrong field and Keycloak just re-renders the form with no code
 # ever actually checked. $4=substring the resulting Location must contain
-# to count as real success -- a rejected code sometimes 200-renders the
-# same form inline (empty Location, the common case) but sometimes
-# redirects back to that same login-actions/authenticate URL instead
-# (non-empty Location that still isn't success) -- checking "non-empty"
-# alone was caught live falsely treating that second failure shape as a
-# win and returning the wrong URL to the caller. Remaining args are extra
-# --data-urlencode fields (already flag-prefixed).
+# to count as real success when Keycloak DOES redirect -- a rejected code
+# sometimes 200-renders the same form inline (empty Location, the common
+# case) but sometimes redirects back to that same login-actions/authenticate
+# URL instead (non-empty Location that still isn't success) -- checking
+# "non-empty" alone was caught live falsely treating that second failure
+# shape as a win and returning the wrong URL to the caller. Remaining args
+# are extra --data-urlencode fields (already flag-prefixed).
+#
+# #1096: Keycloak does NOT always redirect on real success either -- caught
+# live: when CONFIGURE_TOTP is not this account's last pending required
+# action, an ACCEPTED code 200-renders the *next* required-action form
+# inline (e.g. UPDATE_PASSWORD's password-new/password-confirm fields),
+# same HTTP shape as a rejection's own common case. The one thing that
+# reliably tells them apart: a rejection re-renders this SAME code-entry
+# field (name="totp" or name="otp", matching $field); real acceptance never
+# does, redirect or not. Sets _submit_totp_next_body (the response body of
+# the winning attempt) so a caller that lands on an inline next-page can
+# read it directly instead of re-fetching a URL that was never issued.
 #
 # Keycloak rotates the form's session_code on every re-render of the same
 # execution -- confirmed live: submitting a verified-CORRECT code against
@@ -178,18 +189,25 @@ PY
 submit_totp_with_retry() {
   local jar="$1" action="$2" field="$3" success_substr="$4"
   shift 4
-  local result="" attempt code into_period hdr_file body_file new_action
+  local result="" attempt code into_period hdr_file body_file new_action accepted
   hdr_file="$(mktemp)"
   body_file="$(mktemp)"
+  _submit_totp_next_body=""
   for attempt in 1 2 3 4 5; do
     into_period=$(python3 -c 'import time; print(int(time.time()) % 30)')
     [ "${into_period}" -gt 10 ] && sleep "$((30 - into_period + 1))"
     code=$(python3 "${flow_dir}/totp.py" "${totp_secret}")
     curl -s -c "${jar}" -b "${jar}" -D "${hdr_file}" -o "${body_file}" --data-urlencode "${field}=${code}" "$@" "${action}"
     result=$(grep -i '^location:' "${hdr_file}" | tail -1 | sed 's/^[Ll]ocation: //' | tr -d '\r' || true)
+    accepted=false
     case "${result}" in
-      *"${success_substr}"*) break ;;
+      *"${success_substr}"*) accepted=true ;;
     esac
+    if [ "${accepted}" != true ] && [ -z "${result}" ] && ! grep -q "name=\"${field}\"" "${body_file}"; then
+      accepted=true
+      _submit_totp_next_body="$(cat "${body_file}")"
+    fi
+    [ "${accepted}" = true ] && break
     printf '    (TOTP submit attempt %d rejected, retrying after brute-force cooldown)\n' "${attempt}" >&2
     result=""
     new_action=$(grep -o 'action="[^"]*"' "${body_file}" | head -1 | sed 's/action="//;s/"$//' | sed 's/&amp;/\&/g')
@@ -203,10 +221,19 @@ submit_totp_with_retry() {
 # Drives a CONFIGURE_TOTP required-action page (the "Unable to scan?"
 # manual-mode link -> secret capture -> submit) to completion. Shared by
 # the standalone enrollment flow and the first-login flow below, both of
-# which land on this same page shape via different paths. Sets the two
-# globals _totp_enroll_secret and _totp_enroll_callback rather than
-# echoing a delimited string -- both values are needed by callers and
-# either can legitimately be empty on failure.
+# which land on this same page shape via different paths. Sets globals
+# rather than echoing a delimited string -- multiple values are needed by
+# callers and any of them can legitimately be empty on success (a real
+# acceptance with no redirect, #1096) or failure alike:
+#   _totp_enroll_ok        "true" iff the code was genuinely accepted --
+#                           the one flag callers should actually branch on,
+#                           not emptiness of the other two.
+#   _totp_enroll_secret    the enrolled TOTP secret.
+#   _totp_enroll_callback  the redirect target, when Keycloak issued one
+#                           (empty on an inline-rendered next page even on
+#                           success -- see _totp_enroll_next_body).
+#   _totp_enroll_next_body the next page's own HTML, when acceptance
+#                           rendered it inline instead of redirecting.
 # $1=cookie jar path, $2=the CONFIGURE_TOTP page body, $3=success substring
 complete_totp_enrollment() {
   local jar="$1" totp_page="$2" success_substr="$3"
@@ -234,6 +261,9 @@ complete_totp_enrollment() {
   secret_field=$(echo "${manual_page}" | grep -o 'id="totpSecret"[^>]*value="[^"]*"' | head -1 | grep -o 'value="[^"]*"' | sed 's/value="//;s/"$//')
   _totp_enroll_secret="${totp_secret}"
   _totp_enroll_callback=$(submit_totp_with_retry "${jar}" "${form_action}" totp "${success_substr}" --data-urlencode "totpSecret=${secret_field}" --data-urlencode "userLabel=")
+  _totp_enroll_next_body="${_submit_totp_next_body}"
+  _totp_enroll_ok=""
+  { [ -n "${_totp_enroll_callback}" ] || [ -n "${_totp_enroll_next_body}" ]; } && _totp_enroll_ok=true
 }
 
 # Runs directly on the host, not inside a throwaway container: Keycloak's
@@ -265,7 +295,7 @@ enroll_totp_page=$(curl -sL -c "${jar_enroll}" -b "${jar_enroll}" --data-urlenco
 complete_totp_enrollment "${jar_enroll}" "${enroll_totp_page}" "127.0.0.1:${dash_port}/auth/callback"
 totp_secret="${_totp_enroll_secret}"
 enroll_callback="${_totp_enroll_callback}"
-if [ -z "${enroll_callback}" ]; then
+if [ -z "${_totp_enroll_ok}" ]; then
   printf 'FAIL: TOTP enrollment code was rejected across all retry attempts\n' >&2
   exit 1
 fi
@@ -433,7 +463,7 @@ if echo "${first_required_action_page}" | grep -q 'name="password-new"'; then
     bad "first-login account did not proceed to CONFIGURE_TOTP after its forced password replacement"
   else
     complete_totp_enrollment "${jar_first_login}" "${second_required_action_page}" "127.0.0.1:${dash_port}/auth/callback"
-    if [ -z "${_totp_enroll_callback}" ]; then
+    if [ -z "${_totp_enroll_ok}" ]; then
       bad "first-login account's post-password-reset TOTP enrollment was rejected across all retry attempts"
     else
       ok "first-login account completed forced password replacement + mandatory TOTP enrollment, reached a real authorization code"
@@ -442,15 +472,23 @@ if echo "${first_required_action_page}" | grep -q 'name="password-new"'; then
 elif echo "${first_required_action_page}" | grep -qi 'mode=manual'; then
   ok "first-login temporary password was rejected as a login credential and forced a required action (CONFIGURE_TOTP) before granting access"
   # The next required action (UPDATE_PASSWORD) is still pending after this
-  # one, so the real success signal here is "redirected to another
-  # required-action page", not the final callback -- unlike every other
+  # one. Confirmed live (2026-08-09): Keycloak 200-renders it inline rather
+  # than redirecting, since accepting this code does not finish the
+  # account's overall required-action chain -- unlike every other
   # complete_totp_enrollment() call in this script, which is always the
-  # last pending action for its account.
+  # last pending action for its account and does get a real redirect.
+  # "login-actions/required-action" as success_substr still covers the
+  # (unconfirmed but possible) case where a future realm change makes this
+  # a real redirect instead.
   complete_totp_enrollment "${jar_first_login}" "${first_required_action_page}" "login-actions/required-action"
-  if [ -z "${_totp_enroll_callback}" ]; then
+  if [ -z "${_totp_enroll_ok}" ]; then
     bad "first-login account's TOTP enrollment was rejected across all retry attempts"
   else
-    second_required_action_page=$(curl -sk -c "${jar_first_login}" -b "${jar_first_login}" "${_totp_enroll_callback}")
+    if [ -n "${_totp_enroll_callback}" ]; then
+      second_required_action_page=$(curl -sk -c "${jar_first_login}" -b "${jar_first_login}" "${_totp_enroll_callback}")
+    else
+      second_required_action_page="${_totp_enroll_next_body}"
+    fi
     if ! echo "${second_required_action_page}" | grep -q 'name="password-new"'; then
       bad "first-login account did not proceed to UPDATE_PASSWORD after its forced TOTP enrollment"
     else
