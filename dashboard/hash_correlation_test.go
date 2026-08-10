@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -26,22 +24,22 @@ const hashCorrelationSample = `{
 // sighting history are all checked together for one hash -- previously
 // Ghidra results weren't surfaced on /payload-analysis at all.
 func TestCorrelateHashChecksEverySourceIncludingGhidra(t *testing.T) {
-	ghidraDir := t.TempDir()
-	t.Setenv("GHIDRA_RESULTS_DIR", ghidraDir)
-	writeGhidraResult(t, ghidraDir, shaA, map[string]any{
-		"version": 1, "sha256": shaA, "exit_status": "ok", "completed_at": "2026-08-02T10:00:00Z",
+	// esResultsClient (loadGhidraResults/loadSandboxResults/
+	// loadGitHubAnalysisResults, #1103) is a separate client from s.es
+	// below (the sighting-history search correlateHash also does) -- two
+	// distinct servers, since correlationSearchStub answers every path with
+	// the same fixed sighting-history body, not per-index result docs.
+	esResultsClientFor(t, map[string][]map[string]any{
+		"ghidra-analysis-v1": {
+			{"ghidra": map[string]any{"version": 1, "sha256": shaA, "exit_status": "ok", "completed_at": "2026-08-02T10:00:00Z"}},
+		},
+		"sandbox-analysis-v1": {
+			{"sandbox": map[string]any{"version": 1, "job": "linux-x", "sha256": shaA, "completed_at": "2026-08-02T11:00:00Z"}},
+		},
+		"github-analysis-v1": {
+			{"github_analysis": map[string]any{"sha256": shaA, "exit_status": "ok", "family": "Mirai"}},
+		},
 	})
-
-	sandboxDir := t.TempDir()
-	t.Setenv("SANDBOX_RESULTS_DIR", sandboxDir)
-	if err := os.WriteFile(filepath.Join(sandboxDir, "linux-x.json"),
-		[]byte(`{"version":1,"job":"linux-x","sha256":"`+shaA+`","completed_at":"2026-08-02T11:00:00Z"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	githubDir := t.TempDir()
-	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", githubDir)
-	writeGitHubAnalysisResult(t, githubDir, shaA, map[string]any{"exit_status": "ok", "family": "Mirai"})
 
 	var gotPath string
 	es := httptest.NewServer(correlationSearchStub(t, &gotPath, hashCorrelationSample))

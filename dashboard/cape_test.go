@@ -21,23 +21,38 @@ func writeCapeResult(t *testing.T, dir, sha string, row map[string]any) {
 	}
 }
 
-func TestLoadCapeResults(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("CAPE_RESULTS_DIR", dir)
-
-	writeCapeResult(t, dir, shaA, map[string]any{
-		"version": 1, "exit_status": "ok", "cape_status": "reported",
-		"completed_at": "2026-08-08T17:16:22+00:00", "score": 42.0,
-	})
-	writeCapeResult(t, dir, shaB, map[string]any{
-		"version": 1, "exit_status": "error", "error": "task 10 ended in state 'failed_analysis'",
-		"completed_at": "2026-08-08T18:00:00+00:00",
-	})
-	// A non-CAPE result file in the same directory must be ignored -- same
-	// exact-suffix-match discipline loadRevdeckResults' own test asserts.
-	if err := os.WriteFile(filepath.Join(dir, shaA+"_ghidra.json"), []byte("{}"), 0o600); err != nil {
-		t.Fatal(err)
+// capeSearchNamespaceStub answers es.searchNamespace's own request shape --
+// see revdeckSearchNamespaceStub's doc comment in revdeck_test.go for the
+// underlying contract; this is the same pattern for cape-analysis-v1's own
+// "cape" field name.
+func capeSearchNamespaceStub(t *testing.T, docs []map[string]any) http.HandlerFunc {
+	t.Helper()
+	return func(w http.ResponseWriter, r *http.Request) {
+		type hit struct {
+			Source struct {
+				Cape map[string]any `json:"cape"`
+			} `json:"_source"`
+		}
+		hits := make([]hit, 0, len(docs))
+		for _, d := range docs {
+			var h hit
+			h.Source.Cape = d
+			hits = append(hits, h)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"hits": map[string]any{"hits": hits}})
 	}
+}
+
+func TestLoadCapeResults(t *testing.T) {
+	srv := httptest.NewServer(capeSearchNamespaceStub(t, []map[string]any{
+		{"sha256": shaA, "version": 1, "exit_status": "ok", "cape_status": "reported",
+			"completed_at": "2026-08-08T17:16:22+00:00", "score": 42.0},
+		{"sha256": shaB, "version": 1, "exit_status": "error", "error": "task 10 ended in state 'failed_analysis'",
+			"completed_at": "2026-08-08T18:00:00+00:00"},
+	}))
+	defer srv.Close()
+	withESResultsClient(t, srv.URL)
 
 	rows := loadCapeResults()
 	if len(rows) != 2 {
@@ -74,26 +89,27 @@ func TestCapeDataNotFound(t *testing.T) {
 }
 
 func TestCapeDataFindsMatchingResultAndParsesSummary(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("CAPE_RESULTS_DIR", dir)
-	writeCapeResult(t, dir, shaA, map[string]any{
-		"version": 1, "exit_status": "ok", "cape_status": "reported",
-		"completed_at": "2026-08-08T17:16:22+00:00", "score": 0.0,
-		"report": map[string]any{
-			"info": map[string]any{
-				"machine": map[string]any{"label": "win11-cape"},
-				"package": "generic", "route": "drop", "timeout": false, "duration": 317,
-			},
-			"malscore": 0.0, "malstatus": nil,
-			"behavior": map[string]any{
-				"summary": map[string]any{"files": []string{"C:\\Windows\\Temp\\x.dat"}},
-				"processes": []map[string]any{
-					{"process_id": 1000, "process_name": "sample.exe", "parent_id": 500,
-						"first_seen": "2026-08-08 17:11:06", "calls": []map[string]any{{"api": "NtOpenKey"}, {"api": "NtClose"}}},
+	srv := httptest.NewServer(capeSearchNamespaceStub(t, []map[string]any{
+		{"sha256": shaA, "version": 1, "exit_status": "ok", "cape_status": "reported",
+			"completed_at": "2026-08-08T17:16:22+00:00", "score": 0.0,
+			"report": map[string]any{
+				"info": map[string]any{
+					"machine": map[string]any{"label": "win11-cape"},
+					"package": "generic", "route": "drop", "timeout": false, "duration": 317,
+				},
+				"malscore": 0.0, "malstatus": nil,
+				"behavior": map[string]any{
+					"summary": map[string]any{"files": []string{"C:\\Windows\\Temp\\x.dat"}},
+					"processes": []map[string]any{
+						{"process_id": 1000, "process_name": "sample.exe", "parent_id": 500,
+							"first_seen": "2026-08-08 17:11:06", "calls": []map[string]any{{"api": "NtOpenKey"}, {"api": "NtClose"}}},
+					},
 				},
 			},
 		},
-	})
+	}))
+	defer srv.Close()
+	withESResultsClient(t, srv.URL)
 	data, err := capeData(shaA)
 	if err != nil {
 		t.Fatal(err)
@@ -182,12 +198,12 @@ func TestCountJSONArrayElements(t *testing.T) {
 }
 
 func TestServeCapeAPI(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("CAPE_RESULTS_DIR", dir)
-	writeCapeResult(t, dir, shaA, map[string]any{
-		"version": 1, "exit_status": "ok", "cape_status": "reported",
-		"completed_at": "2026-08-08T17:16:22+00:00",
-	})
+	srv := httptest.NewServer(capeSearchNamespaceStub(t, []map[string]any{
+		{"sha256": shaA, "version": 1, "exit_status": "ok", "cape_status": "reported",
+			"completed_at": "2026-08-08T17:16:22+00:00"},
+	}))
+	defer srv.Close()
+	withESResultsClient(t, srv.URL)
 
 	r := httptest.NewRequest(http.MethodGet, "/api/cape/"+shaA, nil)
 	w := httptest.NewRecorder()
@@ -218,9 +234,10 @@ func TestServeCapeAPINotFound(t *testing.T) {
 	}
 }
 
-// TestLoadCapeResultsPrefersESOverLocalFile (#319): matches
-// loadGhidraResults'/loadRevdeckResults' own ES-preferred behavior.
-func TestLoadCapeResultsPrefersESOverLocalFile(t *testing.T) {
+// TestLoadCapeResultsIgnoresLocalFile (#1103): a local *_cape.json file
+// present alongside a configured CAPE_RESULTS_DIR must never be read --
+// loadCapeResults reads Elasticsearch exclusively now.
+func TestLoadCapeResultsIgnoresLocalFile(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CAPE_RESULTS_DIR", dir)
 	writeCapeResult(t, dir, shaA, map[string]any{
@@ -228,19 +245,9 @@ func TestLoadCapeResultsPrefersESOverLocalFile(t *testing.T) {
 		"completed_at": "2026-08-08T09:00:00+00:00",
 	})
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		type hit struct {
-			Source struct {
-				Cape map[string]any `json:"cape"`
-			} `json:"_source"`
-		}
-		var h hit
-		h.Source.Cape = map[string]any{
-			"sha256": shaB, "exit_status": "ok", "cape_status": "es-sourced",
-			"completed_at": "2026-08-08T10:00:00+00:00",
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"hits": map[string]any{"hits": []hit{h}}})
+	srv := httptest.NewServer(capeSearchNamespaceStub(t, []map[string]any{
+		{"sha256": shaB, "exit_status": "ok", "cape_status": "es-sourced",
+			"completed_at": "2026-08-08T10:00:00+00:00"},
 	}))
 	defer srv.Close()
 	withESResultsClient(t, srv.URL)
@@ -251,20 +258,20 @@ func TestLoadCapeResultsPrefersESOverLocalFile(t *testing.T) {
 	}
 }
 
-// TestLoadCapeResultsFallsBackToLocalOnESFailure (#319): matches
-// loadGhidraResults'/loadRevdeckResults' own fallback behavior.
-func TestLoadCapeResultsFallsBackToLocalOnESFailure(t *testing.T) {
+// TestLoadCapeResultsESFailureYieldsNoResults (#1103): loadCapeResults reads
+// Elasticsearch exclusively now -- an ES error means "no results this
+// cycle," not a reason to fall back to a local file that happens to exist.
+func TestLoadCapeResultsESFailureYieldsNoResults(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CAPE_RESULTS_DIR", dir)
 	writeCapeResult(t, dir, shaA, map[string]any{
-		"version": 1, "sha256": shaA, "exit_status": "ok", "cape_status": "local-fallback",
+		"version": 1, "sha256": shaA, "exit_status": "ok", "cape_status": "local-only",
 		"completed_at": "2026-08-08T09:00:00+00:00",
 	})
 	withESResultsClient(t, "http://127.0.0.1:1") // nothing listening
 
-	rows := loadCapeResults()
-	if len(rows) != 1 || rows[0].SHA256 != shaA || rows[0].CapeStatus != "local-fallback" {
-		t.Fatalf("expected the local result as a fallback, got %+v", rows)
+	if rows := loadCapeResults(); rows != nil {
+		t.Fatalf("expected no results when ES fails, got %+v -- must not fall back to the local file", rows)
 	}
 }
 

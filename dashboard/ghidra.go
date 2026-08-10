@@ -278,21 +278,20 @@ const ghidraStatusStaleAfter = 30 * time.Minute
 // a parameter threaded through loadGhidraResults' many call sites.
 var esResultsClient *esClient
 
-// loadGhidraResults prefers #383's ghidra-analysis-v1 ES mirror (#384) and
-// falls back to the local JSON files it always used to read -- either
-// because ES isn't configured, or because the query failed (index not
-// created yet, cluster unreachable). workbench_orchestrator.go's
-// reconcileWorkbenchRun deliberately calls loadGhidraResultsLocal directly
-// instead of this: it polls for job completion to flip run state, and the
-// ES mirror's import interval (5 minutes by default) would delay or miss
-// that transition.
+// loadGhidraResults reads #383's ghidra-analysis-v1 ES mirror (#384)
+// exclusively (#1103) -- an unconfigured or failed ES query means "no
+// results this cycle," not a reason to fall back to the local JSON files.
+// workbench_orchestrator.go's reconcileWorkbenchRun deliberately calls
+// loadGhidraResultsLocal directly instead of this: it polls for job
+// completion to flip run state, and the ES mirror's import interval (5
+// minutes by default) would delay or miss that transition (#1103 Category
+// 3 tracks giving that path its own low-latency completion signal instead).
 func loadGhidraResults() []ghidraResult {
-	if esResultsClient != nil {
-		if rows, ok := loadGhidraResultsES(esResultsClient); ok {
-			return rows
-		}
+	if esResultsClient == nil {
+		return nil
 	}
-	return loadGhidraResultsLocal()
+	rows, _ := loadGhidraResultsES(esResultsClient)
+	return rows
 }
 
 func loadGhidraResultsES(es *esClient) ([]ghidraResult, bool) {

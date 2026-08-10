@@ -25,27 +25,30 @@ func writeGitHubAnalysisResult(t *testing.T, dir, sha string, row map[string]any
 	}
 }
 
-func TestLoadGitHubAnalysisResults(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", dir)
+// esGitHubAnalysisResult points esResultsClient (#1103: loadGitHubAnalysisResults'
+// only source now) at a stub serving rows -- each row wrapped under
+// "github_analysis" per searchNamespace's field-name contract (see
+// github_analysis.go's own searchNamespace call).
+func esGitHubAnalysisResult(t *testing.T, rows ...map[string]any) {
+	t.Helper()
+	docs := make([]map[string]any, len(rows))
+	for i, row := range rows {
+		docs[i] = map[string]any{"github_analysis": row}
+	}
+	esResultsClientFor(t, map[string][]map[string]any{"github-analysis-v1": docs})
+}
 
-	writeGitHubAnalysisResult(t, dir, shaA, map[string]any{
-		"version": 1, "exit_status": "ok", "completed_at": "2026-07-31T10:00:00+00:00",
-		"family": "mirai",
-	})
-	writeGitHubAnalysisResult(t, dir, shaB, map[string]any{
-		"version": 1, "exit_status": "error", "error": "boom",
-		"completed_at": "2026-07-31T12:00:00+00:00",
-	})
-	// Malformed JSON must not hide the valid results alongside it.
-	if err := os.WriteFile(filepath.Join(dir, "c"+strings.Repeat("c", 63)+".json"),
-		[]byte("{not json"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	// status.json lives in the same directory and must be ignored as a result.
-	if err := os.WriteFile(filepath.Join(dir, "status.json"), []byte("{}"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+func TestLoadGitHubAnalysisResults(t *testing.T) {
+	esGitHubAnalysisResult(t,
+		map[string]any{
+			"sha256": shaA, "version": 1, "exit_status": "ok", "completed_at": "2026-07-31T10:00:00+00:00",
+			"family": "mirai",
+		},
+		map[string]any{
+			"sha256": shaB, "version": 1, "exit_status": "error", "error": "boom",
+			"completed_at": "2026-07-31T12:00:00+00:00",
+		},
+	)
 
 	rows := loadGitHubAnalysisResults()
 	if len(rows) != 2 {
@@ -65,27 +68,12 @@ func TestLoadGitHubAnalysisResults(t *testing.T) {
 	}
 }
 
-// Identity comes from the filename, which both producer scripts derive from
-// the sample's validated content SHA-256 -- not from the document body.
-func TestLoadGitHubAnalysisResultsTrustsFilenameOverBody(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", dir)
-	writeGitHubAnalysisResult(t, dir, shaA, map[string]any{"sha256": shaB, "exit_status": "ok"})
-
-	rows := loadGitHubAnalysisResults()
-	if len(rows) != 1 || rows[0].SHA256 != shaA {
-		t.Fatalf("body sha256 overrode the filename: %+v", rows)
-	}
-}
-
 // Bash-written statuses (dry_run, denylist_blocked, quota_exceeded, error)
 // never include started_at or commit. Confirm the zero value decodes rather
 // than a stray JSON null breaking Unmarshal.
 func TestLoadGitHubAnalysisResultsBashWrittenStatusOmitsCommit(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", dir)
-	writeGitHubAnalysisResult(t, dir, shaA, map[string]any{
-		"version": 1, "sha256": shaA, "requested_at": "2026-07-31T09:00:00+00:00",
+	esGitHubAnalysisResult(t, map[string]any{
+		"sha256": shaA, "version": 1, "requested_at": "2026-07-31T09:00:00+00:00",
 		"completed_at": "2026-07-31T09:00:01+00:00", "exit_status": "denylist_blocked",
 		"reason": "path outside allowlist",
 	})
@@ -202,14 +190,10 @@ func TestLoadGitHubAnalysisStatus(t *testing.T) {
 }
 
 func TestGitHubAnalysisDataQuery(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", dir)
-	writeGitHubAnalysisResult(t, dir, shaA, map[string]any{
-		"exit_status": "ok", "family": "mirai",
-	})
-	writeGitHubAnalysisResult(t, dir, shaB, map[string]any{
-		"exit_status": "ok", "family": "qbot",
-	})
+	esGitHubAnalysisResult(t,
+		map[string]any{"sha256": shaA, "exit_status": "ok", "family": "mirai"},
+		map[string]any{"sha256": shaB, "exit_status": "ok", "family": "qbot"},
+	)
 
 	s := &store{}
 	data, err := s.githubAnalysisData("", "mirai")
@@ -250,9 +234,7 @@ func TestGitHubAnalysisHashesForFamily(t *testing.T) {
 	})
 
 	t.Run("single: one hash, one family", func(t *testing.T) {
-		dir := t.TempDir()
-		t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", dir)
-		writeGitHubAnalysisResult(t, dir, shaA, map[string]any{"exit_status": "ok", "family": "mirai"})
+		esGitHubAnalysisResult(t, map[string]any{"sha256": shaA, "exit_status": "ok", "family": "mirai"})
 		hashes := githubAnalysisHashesForFamily("mirai")
 		if len(hashes) != 1 || !hashes[shaA] {
 			t.Fatalf("single-hash resolution failed: %v", hashes)
@@ -264,10 +246,10 @@ func TestGitHubAnalysisHashesForFamily(t *testing.T) {
 	// resolve to one family's hash set, not fragment into two dead ends that
 	// each silently miss half the real evidence.
 	t.Run("conflicting: casing and whitespace do not fragment the family", func(t *testing.T) {
-		dir := t.TempDir()
-		t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", dir)
-		writeGitHubAnalysisResult(t, dir, shaA, map[string]any{"exit_status": "ok", "family": "Mirai"})
-		writeGitHubAnalysisResult(t, dir, shaB, map[string]any{"exit_status": "ok", "family": " mirai "})
+		esGitHubAnalysisResult(t,
+			map[string]any{"sha256": shaA, "exit_status": "ok", "family": "Mirai"},
+			map[string]any{"sha256": shaB, "exit_status": "ok", "family": " mirai "},
+		)
 
 		for _, query := range []string{"mirai", "Mirai", " MIRAI "} {
 			hashes := githubAnalysisHashesForFamily(query)
@@ -277,16 +259,14 @@ func TestGitHubAnalysisHashesForFamily(t *testing.T) {
 		}
 	})
 
-	// "Updated" attribution: a result written after the first resolution must
-	// be picked up on the next call -- there is no stale cache to invalidate,
-	// since loadGitHubAnalysisResults() always reads fresh from disk.
+	// "Updated" attribution: a result that appears after the first resolution
+	// must be picked up on the next call -- there is no stale cache to
+	// invalidate, since loadGitHubAnalysisResults() always queries fresh.
 	t.Run("updated: a later result is picked up without any cache to bust", func(t *testing.T) {
-		dir := t.TempDir()
-		t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", dir)
 		if hashes := githubAnalysisHashesForFamily("mirai"); len(hashes) != 0 {
 			t.Fatalf("expected no hashes before any result exists, got: %v", hashes)
 		}
-		writeGitHubAnalysisResult(t, dir, shaA, map[string]any{"exit_status": "ok", "family": "mirai"})
+		esGitHubAnalysisResult(t, map[string]any{"sha256": shaA, "exit_status": "ok", "family": "mirai"})
 		hashes := githubAnalysisHashesForFamily("mirai")
 		if len(hashes) != 1 || !hashes[shaA] {
 			t.Fatalf("newly written result was not picked up: %v", hashes)
@@ -306,9 +286,12 @@ func TestGitHubAnalysisDataDetailNotFound(t *testing.T) {
 }
 
 func TestServeGitHubAnalysisAPI(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", dir)
-	writeGitHubAnalysisResult(t, dir, shaA, map[string]any{"exit_status": "ok", "family": "mirai"})
+	// loadGitHubAnalysisStatus's "status" subtest below still reads
+	// GITHUB_ANALYSIS_RESULTS_DIR directly (unrelated to #1103 -- queue
+	// status polling was never part of the local-fallback pattern); the
+	// actual result data comes from ES.
+	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", t.TempDir())
+	esGitHubAnalysisResult(t, map[string]any{"sha256": shaA, "exit_status": "ok", "family": "mirai"})
 	s := &store{}
 
 	t.Run("list", func(t *testing.T) {
@@ -496,8 +479,8 @@ func TestGitHubAnalysisAlertsOnHighVerdict(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "status.json"), []byte(`{"version":1}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	writeGitHubAnalysisResult(t, dir, shaA, map[string]any{
-		"exit_status": "ok", "family": "mirai",
+	esGitHubAnalysisResult(t, map[string]any{
+		"sha256": shaA, "exit_status": "ok", "family": "mirai",
 		"verdict": map[string]any{"malicious": 12, "suspicious": 3, "total": 20, "level": "malicious"},
 	})
 

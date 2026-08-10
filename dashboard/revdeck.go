@@ -38,11 +38,9 @@ type revdeckPageData struct {
 func revdeckRequestDir() string { return getenv("REVDECK_REQUEST_DIR", "") }
 func revdeckResultsDir() string { return getenv("REVDECK_RESULTS_DIR", "") }
 
-// loadRevdeckResults prefers the revdeck-analysis-v1 ES mirror (#404) and
-// falls back to the local JSON files exactly as loadGhidraResults does --
-// same reasoning: a dashboard instance with no local revdeck-results mount
-// at all should still be able to show Rev·Deck results from Elasticsearch
-// alone.
+// loadRevdeckResults reads the revdeck-analysis-v1 ES mirror (#404)
+// exclusively (#1103) -- see loadGhidraResults' doc comment in ghidra.go for
+// the reasoning.
 //
 // reconcileWorkbenchRun deliberately calls loadRevdeckResultsLocal directly
 // instead of this: it polls for job completion to flip run state, and the
@@ -51,12 +49,11 @@ func revdeckResultsDir() string { return getenv("REVDECK_RESULTS_DIR", "") }
 // gives for why it calls loadGhidraResultsLocal/loadSandboxResultsLocal
 // there too.
 func loadRevdeckResults() []revdeckStandaloneResult {
-	if esResultsClient != nil {
-		if rows, ok := loadRevdeckResultsES(esResultsClient); ok {
-			return rows
-		}
+	if esResultsClient == nil {
+		return nil
 	}
-	return loadRevdeckResultsLocal()
+	rows, _ := loadRevdeckResultsES(esResultsClient)
+	return rows
 }
 
 func loadRevdeckResultsES(es *esClient) ([]revdeckStandaloneResult, bool) {

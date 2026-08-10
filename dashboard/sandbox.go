@@ -294,18 +294,17 @@ func sandboxRequestDirs() []string {
 	return dirs
 }
 
-// loadSandboxResults prefers #383's sandbox-analysis-v1 ES mirror (#384),
-// falling back to the local JSON files exactly as loadGhidraResults does --
-// see its doc comment for the fallback conditions. workbench_orchestrator.go's
-// reconcileWorkbenchRun calls loadSandboxResultsLocal directly instead, for
-// the same reconciliation-freshness reason as the Ghidra side.
+// loadSandboxResults reads #383's sandbox-analysis-v1 ES mirror (#384)
+// exclusively (#1103) -- see loadGhidraResults' doc comment in ghidra.go for
+// the reasoning. workbench_orchestrator.go's reconcileWorkbenchRun calls
+// loadSandboxResultsLocal directly instead, for the same reconciliation-
+// freshness reason as the Ghidra side.
 func loadSandboxResults() []sandboxResult {
-	if esResultsClient != nil {
-		if rows, ok := loadSandboxResultsES(esResultsClient); ok {
-			return rows
-		}
+	if esResultsClient == nil {
+		return nil
 	}
-	return loadSandboxResultsLocal()
+	rows, _ := loadSandboxResultsES(esResultsClient)
+	return rows
 }
 
 func loadSandboxResultsES(es *esClient) ([]sandboxResult, bool) {

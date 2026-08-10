@@ -155,19 +155,17 @@ const githubAnalysisStatusStaleAfter = 30 * time.Minute
 const githubAnalysisHandoffStaleAfter = 5 * time.Minute
 
 // loadGitHubAnalysisResults prefers #383's github-analysis-v1 ES mirror
-// (#384), falling back to the local JSON files exactly as loadGhidraResults
-// does -- see its doc comment in ghidra.go for the fallback conditions.
-// Unlike Ghidra/sandbox, every caller of this function is a browse/search/
-// filter surface (#384's audit found no write-adjacent reconciliation
-// caller for GitHub-analysis results), so there is no "Local"-only variant
-// here to preserve for a stricter freshness need.
+// (#384) exclusively (#1103) -- see loadGhidraResults' doc comment in
+// ghidra.go for the reasoning. Unlike Ghidra/sandbox, every caller of this
+// function is a browse/search/filter surface (#384's audit found no write-
+// adjacent reconciliation caller for GitHub-analysis results), so there is
+// no "Local"-only variant here to preserve for a stricter freshness need.
 func loadGitHubAnalysisResults() []githubAnalysisResult {
-	if esResultsClient != nil {
-		if rows, ok := loadGitHubAnalysisResultsES(esResultsClient); ok {
-			return rows
-		}
+	if esResultsClient == nil {
+		return nil
 	}
-	return loadGitHubAnalysisResultsLocal()
+	rows, _ := loadGitHubAnalysisResultsES(esResultsClient)
+	return rows
 }
 
 func loadGitHubAnalysisResultsES(es *esClient) ([]githubAnalysisResult, bool) {
@@ -199,58 +197,6 @@ func sortGitHubAnalysisResults(rows []githubAnalysisResult) {
 		}
 		return rows[i].SHA256 < rows[j].SHA256
 	})
-}
-
-func loadGitHubAnalysisResultsLocal() []githubAnalysisResult {
-	dir := githubAnalysisResultsDir()
-	if dir == "" {
-		return nil
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-	var rows []githubAnalysisResult
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
-			continue
-		}
-		raw, err := os.ReadFile(filepath.Join(dir, entry.Name()))
-		if err != nil {
-			continue
-		}
-		var row githubAnalysisResult
-		if err := json.Unmarshal(raw, &row); err != nil {
-			// A malformed result is skipped rather than failing the page. Both
-			// producer scripts write atomically (tmp file + rename), so this
-			// means hand-editing or disk damage, and one bad file should not
-			// hide the others.
-			continue
-		}
-		// Trust the filename over the document for identity: both producer
-		// scripts derive it from the sample's validated content SHA-256, and
-		// it is what every route below looks up by. This also rejects
-		// status.json, whose trimmed name ("status") never matches hashName.
-		row.SHA256 = strings.TrimSuffix(entry.Name(), ".json")
-		if !hashName.MatchString(row.SHA256) {
-			continue
-		}
-		row.SHA256 = strings.ToLower(row.SHA256)
-		// Always offered, unlike Ghidra's PDF link: the export route falls
-		// back to serving the JSON record when no PDF exists, so there is
-		// always something useful behind this link.
-		row.ExportURL = "/export/github-analysis/" + row.SHA256
-		if _, ok := githubAnalysisPDFURL(row); ok {
-			row.ViewURL = row.ExportURL + "/pdf"
-		}
-		rows = append(rows, row)
-	}
-	// Newest first. CompletedAt is an RFC3339 string from the producer
-	// scripts, which sorts correctly as text for a fixed offset; fall back to
-	// the hash so the order is stable rather than map-random when timestamps
-	// tie or are empty.
-	sortGitHubAnalysisResults(rows)
-	return rows
 }
 
 // githubAnalysisHashesForFamily resolves a family label to every SHA-256 the

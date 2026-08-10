@@ -14,23 +14,29 @@ import (
 )
 
 func TestSandboxPCAPExportRequiresAdminAndServesRegularCapture(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("SANDBOX_RESULTS_DIR", dir)
-	t.Setenv("DASHBOARD_REQUIRE_ADMIN", "true")
-	configureIdentityTestBackend(t, "admin")
 	job := "linux-20260726T000000Z-0123456789ab"
 	hash := strings.Repeat("a", 64)
-	result := `{"version":3,"job":"` + job + `","sha256":"` + hash + `"}`
-	if err := os.WriteFile(filepath.Join(dir, job+".json"), []byte(result), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	pcap := make([]byte, 24)
 	copy(pcap, []byte{0xd4, 0xc3, 0xb2, 0xa1})
-	// #638/#764: the artifact itself comes from sandbox-export-artifacts-v1
-	// now, not disk.
-	esSrv := httptest.NewServer(sandboxArtifactStub(t, chunkDocs(job, "host_pcap", "application/vnd.tcpdump.pcap", job+".host.pcap", pcap, 1<<20)))
+	// #638/#764: the artifact itself comes from sandbox-export-artifacts-v1;
+	// #1103: the base result (sandboxData's own job lookup, which runs
+	// before the admin check below) comes from sandbox-analysis-v1 now too
+	// -- one server answers both request shapes, routed by path.
+	artifacts := sandboxArtifactStub(t, chunkDocs(job, "host_pcap", "application/vnd.tcpdump.pcap", job+".host.pcap", pcap, 1<<20))
+	results := esResultsStub(t, map[string][]map[string]any{
+		"sandbox-analysis-v1": {{"sandbox": map[string]any{"version": 3, "job": job, "sha256": hash}}},
+	})
+	esSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/_doc/") {
+			artifacts(w, r)
+			return
+		}
+		results(w, r)
+	}))
 	defer esSrv.Close()
 	withESResultsClient(t, esSrv.URL)
+	t.Setenv("DASHBOARD_REQUIRE_ADMIN", "true")
+	configureIdentityTestBackend(t, "admin")
 	path := "/export/sandbox/" + job + ".host.pcap"
 
 	denied := httptest.NewRecorder()
@@ -52,20 +58,24 @@ func TestSandboxPCAPExportRequiresAdminAndServesRegularCapture(t *testing.T) {
 }
 
 func TestSandboxDiagnosticsExportRequiresAdmin(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("SANDBOX_RESULTS_DIR", dir)
-	t.Setenv("DASHBOARD_REQUIRE_ADMIN", "true")
-	configureIdentityTestBackend(t, "admin")
 	job := "windows-20260729T000000Z-0123456789ab"
 	hash := strings.Repeat("b", 64)
-	result := `{"version":3,"job":"` + job + `","sha256":"` + hash + `"}`
-	if err := os.WriteFile(filepath.Join(dir, job+".json"), []byte(result), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	bundle := []byte("PK\x05\x06" + strings.Repeat("\x00", 18))
-	esSrv := httptest.NewServer(sandboxArtifactStub(t, chunkDocs(job, "diagnostics", "application/zip", job+".diagnostics.zip", bundle, 1<<20)))
+	artifacts := sandboxArtifactStub(t, chunkDocs(job, "diagnostics", "application/zip", job+".diagnostics.zip", bundle, 1<<20))
+	results := esResultsStub(t, map[string][]map[string]any{
+		"sandbox-analysis-v1": {{"sandbox": map[string]any{"version": 3, "job": job, "sha256": hash}}},
+	})
+	esSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/_doc/") {
+			artifacts(w, r)
+			return
+		}
+		results(w, r)
+	}))
 	defer esSrv.Close()
 	withESResultsClient(t, esSrv.URL)
+	t.Setenv("DASHBOARD_REQUIRE_ADMIN", "true")
+	configureIdentityTestBackend(t, "admin")
 	path := "/export/sandbox/" + job + ".diagnostics.zip"
 
 	denied := httptest.NewRecorder()

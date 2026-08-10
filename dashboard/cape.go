@@ -259,18 +259,14 @@ type capePageData struct {
 	Summary   *capeReportSummary
 }
 
-// loadCapeResults prefers the cape-analysis-v1 ES mirror and falls back to
-// the local JSON files -- same pattern loadGhidraResults/loadSandboxResults/
-// loadRevdeckResults all already follow, for the same reason (a dashboard
-// instance with no local cape-results mount at all should still be able to
-// show CAPE results from Elasticsearch alone).
+// loadCapeResults reads the cape-analysis-v1 ES mirror exclusively (#1103)
+// -- see loadGhidraResults' doc comment in ghidra.go for the reasoning.
 func loadCapeResults() []capeResult {
-	if esResultsClient != nil {
-		if rows, ok := loadCapeResultsES(esResultsClient); ok {
-			return rows
-		}
+	if esResultsClient == nil {
+		return nil
 	}
-	return loadCapeResultsLocal()
+	rows, _ := loadCapeResultsES(esResultsClient)
+	return rows
 }
 
 func loadCapeResultsES(es *esClient) ([]capeResult, bool) {
@@ -297,43 +293,6 @@ func sortCapeResults(rows []capeResult) {
 		}
 		return rows[i].SHA256 < rows[j].SHA256
 	})
-}
-
-func loadCapeResultsLocal() []capeResult {
-	dir := capeResultsDir()
-	if dir == "" {
-		return nil
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-	var rows []capeResult
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_cape.json") {
-			continue
-		}
-		raw, err := os.ReadFile(filepath.Join(dir, entry.Name()))
-		if err != nil {
-			continue
-		}
-		var row capeResult
-		if json.Unmarshal(raw, &row) != nil {
-			// Malformed result skipped rather than failing the page, same
-			// reasoning as loadGhidraResults(): the worker writes
-			// atomically, so this means hand-editing or disk damage.
-			continue
-		}
-		// Trust the filename over the document for identity, same as
-		// loadGhidraResults()/loadRevdeckResultsLocal().
-		row.SHA256 = strings.TrimSuffix(entry.Name(), "_cape.json")
-		if !hashName.MatchString(row.SHA256) {
-			continue
-		}
-		rows = append(rows, row)
-	}
-	sortCapeResults(rows)
-	return rows
 }
 
 func capeData(sha256 string) (capePageData, error) {
