@@ -255,32 +255,36 @@ type payloadAggregation struct {
 }
 
 // payloadAggregationFor answers #1142's "aggregation takes very long"
-// report: SandboxRuns/GitHubAnalysis/Correlation each depend on
+// report: SandboxRuns/GitHubAnalysis/Correlation used to depend on
 // loadGhidraResults/loadSandboxResults/loadGitHubAnalysisResults, which
 // fetch up to 10000 documents from ES regardless of which hash is being
-// asked about (see correlateHash's own doc comment) -- genuinely slow
-// compared to analyzePayloadFast's single-file work, and unlike that work
-// it needs no access to the payload's own bytes, just the two hashes the
-// fast path already computed and sent to the browser. Takes sha256/altID
-// directly rather than re-deriving them from name/path, so this never
-// re-reads the file the fast path already read.
+// asked about (see correlateHash's own doc comment for the redundant-fetch
+// half of this bug, and loadGhidraResultByHash's for the whole-index-fetch
+// half) -- genuinely slow compared to analyzePayloadFast's single-file
+// work, and unlike that work it needs no access to the payload's own
+// bytes, just the two hashes the fast path already computed and sent to
+// the browser. Now scoped server-side via loadGhidraResultByHash/
+// loadSandboxResultsByHash/loadGitHubAnalysisResultByHash instead --
+// correlateHash's own filtering is still correct (and still runs) against
+// the now-already-scoped slices this passes it, it just has nothing left
+// to filter out. Takes sha256/altID directly rather than re-deriving them
+// from name/path, so this never re-reads the file the fast path already
+// read.
 func (s *store) payloadAggregationFor(sha256, altID string) payloadAggregation {
 	var agg payloadAggregation
-	ghidraResults, sandboxResults, githubResults := loadGhidraResults(), loadSandboxResults(), loadGitHubAnalysisResults()
-	for _, run := range sandboxResults {
-		if strings.EqualFold(run.SHA256, sha256) {
-			agg.SandboxRuns = append(agg.SandboxRuns, run)
-		}
+	var ghidraResults []ghidraResult
+	if row, ok := loadGhidraResultByHash(esResultsClient, sha256); ok {
+		ghidraResults = []ghidraResult{row}
 	}
-	for _, result := range githubResults {
-		if strings.EqualFold(result.SHA256, sha256) {
-			row := result
-			agg.GitHubAnalysis = &row
-			if row.Family != "" {
-				agg.Family = boundedFamily(row.Family)
-				agg.FamilyLink = eventsURL(url.Values{"family": {row.Family}})
-			}
-			break
+	sandboxResults := loadSandboxResultsByHash(esResultsClient, sha256)
+	agg.SandboxRuns = sandboxResults
+	var githubResults []githubAnalysisResult
+	if row, ok := loadGitHubAnalysisResultByHash(esResultsClient, sha256); ok {
+		githubResults = []githubAnalysisResult{row}
+		agg.GitHubAnalysis = &row
+		if row.Family != "" {
+			agg.Family = boundedFamily(row.Family)
+			agg.FamilyLink = eventsURL(url.Values{"family": {row.Family}})
 		}
 	}
 	// altID is whatever identifier addressed this payload on disk -- for a

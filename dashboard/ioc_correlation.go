@@ -119,16 +119,11 @@ func correlateIOCSet(flossSet, sandboxStatic, sandboxDynamic map[string]bool) io
 }
 
 // matchingSandboxRuns returns every Windows-sandbox result for the given
-// SHA-256, across every run (a sample can be re-detonated), same in-memory
-// scan ghidraData() already uses to find its own Detail row.
+// SHA-256, across every run (a sample can be re-detonated) -- scoped
+// server-side via loadSandboxResultsByHash (#1142) instead of a whole-index
+// fetch filtered down in Go.
 func matchingSandboxRuns(sha256 string) []sandboxResult {
-	var out []sandboxResult
-	for _, r := range loadSandboxResults() {
-		if r.SHA256 == sha256 {
-			out = append(out, r)
-		}
-	}
-	return out
+	return loadSandboxResultsByHash(esResultsClient, sha256)
 }
 
 // correlateFlossSandboxIOCs is #680's entry point, called from ghidraData()

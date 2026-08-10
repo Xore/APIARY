@@ -622,6 +622,68 @@ func (c *esClient) searchNamespace(index, field string, size int) ([]json.RawMes
 	return out, nil
 }
 
+// searchNamespaceByHash is searchNamespace scoped server-side to one hash,
+// instead of fetching the whole index and scanning every document in Go:
+// found live (#1142) that ghidraData/githubAnalysisData/matchingSandboxRuns
+// and others all called the unscoped, whole-index searchNamespace just to
+// find the one (or few) result(s) for a single hash -- genuinely slow
+// (up to 10000 documents fetched and unmarshaled) for what a single scoped
+// query answers directly. Uses file.hash.sha256, the keyword field
+// elasticsearch-setup.sh promotes on every analysis-result index
+// specifically for this kind of cross-index, single-hash correlation (the
+// same field correlate's own sighting-history search already keys on) --
+// not the importer's own "<label>:<sha256>" document _id convention,
+// which would work for a direct docGet on the sha256-keyed indices
+// (ghidra/github-analysis/revdeck) but not on sandbox's job-keyed one,
+// and would couple this dashboard to an internal detail of a different
+// program (analysis/es-results-importer) that has no reason to hold
+// stable for callers outside its own bulk-overwrite bookkeeping.
+func (c *esClient) searchNamespaceByHash(index, field, sha256 string, size int) ([]json.RawMessage, error) {
+	if c == nil || c.base == "" {
+		return nil, fmt.Errorf("elasticsearch is not configured")
+	}
+	if !hashName.MatchString(sha256) {
+		return nil, fmt.Errorf("invalid hash")
+	}
+	if size <= 0 || size > 10000 {
+		size = 50
+	}
+	reqBody, err := json.Marshal(map[string]any{
+		"query": map[string]any{"term": map[string]any{"file.hash.sha256": sha256}},
+		"size":  size,
+	})
+	if err != nil {
+		return nil, err
+	}
+	status, b, err := c.doRequest(http.MethodPost, fmt.Sprintf("/%s/_search", index), reqBody)
+	if err != nil {
+		return nil, err
+	}
+	if status == http.StatusNotFound {
+		return nil, nil
+	}
+	if status/100 != 2 {
+		return nil, fmt.Errorf("Elasticsearch POST %s: status %d: %s", index, status, strings.TrimSpace(string(b)))
+	}
+	var v struct {
+		Hits struct {
+			Hits []struct {
+				Source map[string]json.RawMessage `json:"_source"`
+			} `json:"hits"`
+		} `json:"hits"`
+	}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return nil, err
+	}
+	out := make([]json.RawMessage, 0, len(v.Hits.Hits))
+	for _, h := range v.Hits.Hits {
+		if raw, ok := h.Source[field]; ok {
+			out = append(out, raw)
+		}
+	}
+	return out, nil
+}
+
 // esStorageStats is the brief cluster/storage summary the admin settings
 // modal's Elasticsearch pane shows (#647): a metric-grid glance, not a
 // dashboard of its own -- deep exploration already exists via the

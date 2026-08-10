@@ -222,18 +222,31 @@ func (s *store) serveWorkbenchPage(w http.ResponseWriter, r *http.Request, tmpl 
 		return
 	}
 	classification := classifyPayload(head)
+	// This page deliberately only reads the payload's head, not the full
+	// file (kept lightweight, #352/#364), so it has no cheaper way to know
+	// the true content SHA-256 when hash itself is a Dionaea capture's
+	// on-disk MD5 identity (#364). Local-store matching (Ghidra/sandbox/
+	// GitHub-analysis, all keyed by true SHA-256) can therefore under-report
+	// "known" for such a payload here -- the Elasticsearch side still
+	// matches correctly either way, since hashQuery checks both hash
+	// fields for whatever hash it's given. The scoped loaders below
+	// (#1142) preserve this exact behavior: querying file.hash.sha256 for
+	// an MD5 value simply finds nothing, same as the old whole-index-scan-
+	// for-row.SHA256==hash did.
+	var ghidraResults []ghidraResult
+	if row, ok := loadGhidraResultByHash(esResultsClient, hash); ok {
+		ghidraResults = []ghidraResult{row}
+	}
+	sandboxResults := loadSandboxResultsByHash(esResultsClient, hash)
+	var githubResults []githubAnalysisResult
+	if row, ok := loadGitHubAnalysisResultByHash(esResultsClient, hash); ok {
+		githubResults = []githubAnalysisResult{row}
+	}
 	data := workbenchPageData{
 		Generated: time.Now(), SHA256: hash, Classification: classification,
-		Analyzers: workbenchRegistry(classification), ModelStatus: loadWorkbenchModelStatus(),
-		// This page deliberately only reads the payload's head, not the
-		// full file (kept lightweight, #352/#364), so it has no cheaper way
-		// to know the true content SHA-256 when hash itself is a Dionaea
-		// capture's on-disk MD5 identity (#364). Local-store matching
-		// (Ghidra/sandbox/GitHub-analysis, all keyed by true SHA-256) can
-		// therefore under-report "known" for such a payload here -- the
-		// Elasticsearch side still matches correctly either way, since
-		// hashQuery checks both hash fields for whatever hash it's given.
-		Correlation: s.correlateHash(hash, "", loadGhidraResults(), loadSandboxResults(), loadGitHubAnalysisResults()),
+		Analyzers:   workbenchRegistry(classification),
+		ModelStatus: loadWorkbenchModelStatus(),
+		Correlation: s.correlateHash(hash, "", ghidraResults, sandboxResults, githubResults),
 	}
 	renderPage(w, tmpl, "payload-workbench", &data)
 }
