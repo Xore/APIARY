@@ -174,9 +174,14 @@ PY
 # same HTTP shape as a rejection's own common case. The one thing that
 # reliably tells them apart: a rejection re-renders this SAME code-entry
 # field (name="totp" or name="otp", matching $field); real acceptance never
-# does, redirect or not. Sets _submit_totp_next_body (the response body of
-# the winning attempt) so a caller that lands on an inline next-page can
-# read it directly instead of re-fetching a URL that was never issued.
+# does, redirect or not. Writes the winning attempt's response body to
+# ${flow_dir}/totp-next-body.html (this function is always invoked via
+# command substitution, which subshells the whole body -- a plain variable
+# assignment in here never survives back to the caller, confirmed live in
+# CI as an "unbound variable" failure from an earlier version of this
+# function that tried exactly that; a file does) so a caller that lands on
+# an inline next-page can read it directly instead of re-fetching a URL
+# that was never issued.
 #
 # Keycloak rotates the form's session_code on every re-render of the same
 # execution -- confirmed live: submitting a verified-CORRECT code against
@@ -192,7 +197,17 @@ submit_totp_with_retry() {
   local result="" attempt code into_period hdr_file body_file new_action accepted
   hdr_file="$(mktemp)"
   body_file="$(mktemp)"
-  _submit_totp_next_body=""
+  # #1096: every caller of this function invokes it via command
+  # substitution (result=$(submit_totp_with_retry ...)), which runs the
+  # whole function body in a SUBSHELL -- a plain variable assignment made
+  # in here (however global-looking, no `local`) is invisible to the
+  # caller once that subshell exits. Confirmed live in CI: "unbound
+  # variable" on the caller's very next line, from an earlier version of
+  # this function that tried exactly that. A file survives the subshell
+  # exiting; a shell variable does not. rm -f up front so a caller that
+  # doesn't need this (every pre-#1096 call site) sees a clean absence
+  # rather than a previous call's stale leftover.
+  rm -f "${flow_dir}/totp-next-body.html"
   for attempt in 1 2 3 4 5; do
     into_period=$(python3 -c 'import time; print(int(time.time()) % 30)')
     [ "${into_period}" -gt 10 ] && sleep "$((30 - into_period + 1))"
@@ -205,7 +220,7 @@ submit_totp_with_retry() {
     esac
     if [ "${accepted}" != true ] && [ -z "${result}" ] && ! grep -q "name=\"${field}\"" "${body_file}"; then
       accepted=true
-      _submit_totp_next_body="$(cat "${body_file}")"
+      cp "${body_file}" "${flow_dir}/totp-next-body.html"
     fi
     [ "${accepted}" = true ] && break
     printf '    (TOTP submit attempt %d rejected, retrying after brute-force cooldown)\n' "${attempt}" >&2
@@ -261,7 +276,11 @@ complete_totp_enrollment() {
   secret_field=$(echo "${manual_page}" | grep -o 'id="totpSecret"[^>]*value="[^"]*"' | head -1 | grep -o 'value="[^"]*"' | sed 's/value="//;s/"$//')
   _totp_enroll_secret="${totp_secret}"
   _totp_enroll_callback=$(submit_totp_with_retry "${jar}" "${form_action}" totp "${success_substr}" --data-urlencode "totpSecret=${secret_field}" --data-urlencode "userLabel=")
-  _totp_enroll_next_body="${_submit_totp_next_body}"
+  _totp_enroll_next_body=""
+  if [ -f "${flow_dir}/totp-next-body.html" ]; then
+    _totp_enroll_next_body="$(cat "${flow_dir}/totp-next-body.html")"
+    rm -f "${flow_dir}/totp-next-body.html"
+  fi
   _totp_enroll_ok=""
   { [ -n "${_totp_enroll_callback}" ] || [ -n "${_totp_enroll_next_body}" ]; } && _totp_enroll_ok=true
 }
