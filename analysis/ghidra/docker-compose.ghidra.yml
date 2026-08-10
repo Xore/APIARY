@@ -184,16 +184,12 @@ services:
     #   docker compose --profile revdeck up -d revdeck
     profiles: ['revdeck']
     build:
-      # Context is the cloned repo root, not webui/ — its Dockerfile COPYs
-      # requirements.txt from the context root and webui/ into the image, so
-      # the context has to be the whole repo. Verified against a real clone
-      # (2026-08-01): the Dockerfile lives at webui/Dockerfile, not at the
-      # context root, and upstream's own docker-compose.yml uses exactly
-      # this context+dockerfile pair — `dockerfile: Dockerfile` alone (what
-      # this said before) does not exist and would fail the build outright,
-      # never caught because this service has never been deployed until now.
+      # PoC of a fork's PR #1 (a ground-up rewrite -- "1.0.0.big.update",
+      # +8458/-472 across 46 files; see docs/analysis/ghidra/revdeck/README.md
+      # for findings). The Dockerfile moved from webui/Dockerfile to the repo
+      # root in that rewrite; context stays the cloned repo root either way.
       context: ./revdeck/ai-reverse-engineering
-      dockerfile: webui/Dockerfile
+      dockerfile: Dockerfile
     restart: unless-stopped
     ports:
       # HP_BIND (the WireGuard address), not 127.0.0.1: this is the one
@@ -215,18 +211,13 @@ services:
         required: false
     environment:
       GHIDRA_API_BASE: 'http://ghidra:9090'
-      # Point it at the local model too. Its own README documents an OpenRouter
-      # option; using it would send sample-derived text off the host.
-      API_BASE: 'http://ollama:11434/v1'
-      # The app hard-fails at startup without this (its own compose file:
-      # `${MODEL_NAME:?set MODEL_NAME in .env}`) — missing here entirely
-      # before, another symptom of this service never having been run.
-      # Independent from GHIDRA_TRIAGE_MODEL on purpose: interactive Rev·Deck
-      # chat and the worker's automated triage are different-shaped tasks
-      # (#144), no reason to assume they want the same model.
-      MODEL_NAME: '${REVDECK_MODEL:-qwen3:14b}'
-      CHATS_DIR: '/data/chats'
-      LOG_FILE: '/var/log/revdeck/web.log'
+      # #1's rewrite replaced the old single-endpoint contract (API_BASE/
+      # MODEL_NAME) with an explicit provider switch. ollama is the local,
+      # no-egress option, same model host the old API_BASE pointed at.
+      LLM_PROVIDER: 'ollama'
+      OLLAMA_API_BASE: 'http://ollama:11434/v1'
+      OLLAMA_API_KEY: 'ollama'
+      OLLAMA_MODEL: '${REVDECK_MODEL:-qwen3:14b}'
     depends_on:
       ghidra:
         condition: service_healthy
@@ -243,24 +234,36 @@ services:
     mem_limit: 1g
     pids_limit: 256
     healthcheck:
+      # #1's rewrite dropped /healthz; /config is the lightest side-effect-
+      # free route that still exists (verified against a real clone).
       test: ['CMD', 'python', '-c',
-             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:5000/healthz', timeout=3).status==200 else 1)"]
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:5000/config', timeout=3).status==200 else 1)"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
     volumes:
-      # CHATS_DIR above, not the webui/chats path this said before -- the
-      # Dockerfile's own default and upstream's compose both use /data/chats;
-      # /app/webui/chats was never where the app actually writes.
-      - revdeck_chats:/data/chats
-      - revdeck_logs:/var/log/revdeck
+      # #1's rewrite writes to /app/data (jobs), /app/logs, and three
+      # webui-relative dirs (chats/recovery/recovered) instead of the old
+      # /data/chats + /var/log/revdeck/web.log -- read_only above means every
+      # one of these needs its own real mount or the app crashes on first
+      # write (verified against webui/app.py, webui/recovery_engine.py).
+      - revdeck_data:/app/data
+      - revdeck_applogs:/app/logs
+      - revdeck_webuichats:/app/webui/chats
+      - revdeck_recovery:/app/webui/recovery
+      - revdeck_recovered:/app/webui/recovered
+      - revdeck_settings:/app/webui/settings
 
 volumes:
   ghidra_projects:
   ollama_models:
-  revdeck_chats:
-  revdeck_logs:
+  revdeck_data:
+  revdeck_applogs:
+  revdeck_webuichats:
+  revdeck_recovery:
+  revdeck_recovered:
+  revdeck_settings:
 
 networks:
   llm_clients:

@@ -5,6 +5,26 @@ Source: [biniamf/ai-reverse-engineering](https://github.com/biniamf/ai-reverse-e
 Rev·Deck is a local AI-assisted reverse engineering workstation that pairs
 the Ghidra headless REST service with an LLM copilot.
 
+**PoC in progress (2026-08-10, #1164):** the deployed build currently tracks
+a fork's ground-up rewrite (PR #1, by `Dvurechensky`), not upstream `main`.
+**The payload-upload pipeline is currently broken against it** -- the
+rewrite expects a Ghidra REST contract (`/analyze_b64`, `/jobs`,
+`/tools/{endpoint}`) our own minimal `analysis/ghidra/service/server.py`
+(#245) doesn't implement. See #1164 for the live-verified findings and what
+adopting this for real would need. The previous, working build is one
+command away as a fallback:
+
+```bash
+cd analysis/ghidra
+docker tag ghidra-revdeck:backup-pre-pr1-20260810 ghidra-revdeck:latest
+docker compose -f docker-compose.ghidra.yml --profile revdeck up -d --no-build revdeck
+```
+
+(or `git -C revdeck/ai-reverse-engineering checkout main` before rebuilding,
+to go back to source rather than the tagged image). The **verified contract**
+section below describes the old, working build; it does not describe #1's
+rewrite.
+
 ## Setup
 
 ```bash
