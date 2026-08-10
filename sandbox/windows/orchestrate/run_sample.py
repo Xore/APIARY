@@ -765,7 +765,16 @@ def regshot_after():
 
 
 def stop_procmon():
-    winrm_run('Stop-Process -Name Procmon64 -Force -ErrorAction SilentlyContinue')
+    # /Terminate, not Stop-Process -Force: confirmed live (#502) that a raw
+    # process kill never gives Procmon's own shutdown code a chance to
+    # signal its kernel-mode minifilter (PROCMON24) to detach. The filter
+    # stays attached ("0 instances", per fltmc filters) and refuses manual
+    # unload (fltmc unload PROCMON24 -> 0x801f0010 / ERROR_FLT_DO_NOT_DETACH
+    # / "Do not detach the filter from the volume at this time.") until the
+    # guest reboots. /Terminate is Procmon's own documented clean-shutdown
+    # flag and, confirmed live, the filter unloads cleanly afterward (gone
+    # from fltmc filters entirely, not just 0 instances).
+    winrm_run('C:\\Tools\\SysinternalsSuite\\Procmon64.exe /Terminate')
     # Export to CSV. Originally assumed a too-short timeout (a real 30min
     # capture didn't finish exporting within 60s) -- that theory is wrong.
     # Confirmed live: a *tiny* (~20s) capture's export still hadn't finished
@@ -774,14 +783,20 @@ def stop_procmon():
     # for a big file" and the Session-0-vs-interactive pattern that explained
     # Regshot's and the GHOSTS client's hangs. The process stays
     # Responding=True with no visible window/dialog the whole time, so it
-    # isn't stuck on an un-dismissable prompt either. Root cause not found;
-    # tracked as a real bug rather than guessed at further live. Not fatal:
-    # a missing procmon.csv is far better than losing the entire report,
-    # same philosophy as Regshot's MISSING marker when that tool wasn't
-    # installed -- this is the one non-essential step in the whole sequence
-    # (Sysmon + registry snapshots + autoruns diff cover most of the same
-    # ground) and must not cost every other artifact a fully successful run
-    # already produced.
+    # isn't stuck on an un-dismissable prompt either.
+    #
+    # Re-confirmed live (#502, after landing the /Terminate fix above): this
+    # export hang is a genuinely separate problem from the filter-unload
+    # issue, not a symptom of it -- reproduced on a freshly /Terminate'd
+    # instance (filter cleanly unloaded, confirmed absent from fltmc filters)
+    # against a brand-new, ~20s capture, and the export still hadn't produced
+    # a .csv after 300+s. Root cause still not found; tracked as a real bug
+    # rather than guessed at further live. Not fatal: a missing procmon.csv
+    # is far better than losing the entire report, same philosophy as
+    # Regshot's MISSING marker when that tool wasn't installed -- this is
+    # the one non-essential step in the whole sequence (Sysmon + registry
+    # snapshots + autoruns diff cover most of the same ground) and must not
+    # cost every other artifact a fully successful run already produced.
     try:
         run_and_wait_via_cim(
             'C:\\Tools\\SysinternalsSuite\\Procmon64.exe '
