@@ -21,25 +21,25 @@ import (
 // across every owner, so there is nothing extra to learn from workbench's
 // own run history that would justify crossing its owner-isolation boundary.
 type hashCorrelation struct {
-	Known   bool
-	Ghidra  *ghidraResult
-	Sandbox []sandboxResult
-	GitHub  *githubAnalysisResult
+	Known   bool                  `json:"known"`
+	Ghidra  *ghidraResult         `json:"ghidra,omitempty"`
+	Sandbox []sandboxResult       `json:"sandbox,omitempty"`
+	GitHub  *githubAnalysisResult `json:"github,omitempty"`
 
 	// Elasticsearch sighting summary: how many raw sensor events carried
 	// this hash, and which sensors/when. Advisory and best-effort -- always
 	// zero-value when Elasticsearch is unconfigured or the query fails,
 	// never blocks anything that depends on the rest of this struct.
-	ESAvailable bool
-	ESSightings int
-	ESSensors   []kv
-	ESFirstSeen string
-	ESLastSeen  string
+	ESAvailable bool   `json:"es_available"`
+	ESSightings int    `json:"es_sightings"`
+	ESSensors   []kv   `json:"es_sensors,omitempty"`
+	ESFirstSeen string `json:"es_first_seen,omitempty"`
+	ESLastSeen  string `json:"es_last_seen,omitempty"`
 	// ESTruncated is true when ESSightings exceeds the number of records
 	// actually fetched (see correlate's cap below) -- ESFirstSeen is then
 	// only the oldest record within that capped, newest-first page, not the
 	// hash's true first sighting, which may be considerably earlier (#887).
-	ESTruncated bool
+	ESTruncated bool `json:"es_truncated"`
 }
 
 // correlateHash answers #354's "is this hash known" question by checking
@@ -61,14 +61,30 @@ type hashCorrelation struct {
 // Both identifiers are validated before use -- a malformed value must
 // never reach an Elasticsearch query string or a case-insensitive scan of
 // untrusted-shaped input.
-func (s *store) correlateHash(primary, altID string) hashCorrelation {
+//
+// ghidraResults/sandboxResults/githubResults are the caller's own
+// loadGhidraResults()/loadSandboxResults()/loadGitHubAnalysisResults()
+// results, not fetched again here: found live that each of those functions
+// fetches up to 10000 documents from its own ES namespace regardless of
+// which hash is being asked about, then scans the result in Go for a
+// match -- correlateHash used to call all three itself, on top of
+// whatever a caller had already fetched for its own purposes
+// (payload_analysis.go's analyzePayload loads sandbox/github results
+// directly for SandboxRuns/GitHubAnalysis, then called this, doubling
+// that fetch), and reports_api.go's payload-options search called this
+// once PER FILE in a loop capped at 30 -- up to 90 separate 10000-document
+// fetches for one search-as-you-type keystroke. Threading the three
+// slices through as parameters instead makes "fetch once, reuse across
+// every hash this request needs" the caller's job, which every call site
+// can now do correctly regardless of how many hashes it correlates.
+func (s *store) correlateHash(primary, altID string, ghidraResults []ghidraResult, sandboxResults []sandboxResult, githubResults []githubAnalysisResult) hashCorrelation {
 	primary = strings.ToLower(strings.TrimSpace(primary))
 	altID = strings.ToLower(strings.TrimSpace(altID))
 	if !hashName.MatchString(primary) {
 		return hashCorrelation{}
 	}
 	result := hashCorrelation{}
-	for _, r := range loadGhidraResults() {
+	for _, r := range ghidraResults {
 		if strings.EqualFold(r.SHA256, primary) {
 			row := r
 			result.Ghidra = &row
@@ -76,13 +92,13 @@ func (s *store) correlateHash(primary, altID string) hashCorrelation {
 			break
 		}
 	}
-	for _, r := range loadSandboxResults() {
+	for _, r := range sandboxResults {
 		if strings.EqualFold(r.SHA256, primary) {
 			result.Sandbox = append(result.Sandbox, r)
 			result.Known = true
 		}
 	}
-	for _, r := range loadGitHubAnalysisResults() {
+	for _, r := range githubResults {
 		if strings.EqualFold(r.SHA256, primary) {
 			row := r
 			result.GitHub = &row

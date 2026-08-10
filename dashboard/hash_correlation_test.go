@@ -53,7 +53,10 @@ func TestCorrelateHashChecksEverySourceIncludingGhidra(t *testing.T) {
 	// file.hash.md5, keyed by the MD5, not the SHA-256).
 	altID := "0123456789abcdef0123456789abcdef"
 	s := &store{es: newESClient(es.URL, "")}
-	result := s.correlateHash(shaA, altID)
+	// Loaded explicitly here, same as every real caller does now (#1142):
+	// correlateHash no longer fetches these itself, see its own doc
+	// comment.
+	result := s.correlateHash(shaA, altID, loadGhidraResults(), loadSandboxResults(), loadGitHubAnalysisResults())
 
 	if !result.Known {
 		t.Fatal("expected Known=true when every source has a result")
@@ -91,7 +94,7 @@ func TestCorrelateHashReportsUnknownWhenNothingMatches(t *testing.T) {
 	defer es.Close()
 
 	s := &store{es: newESClient(es.URL, "")}
-	result := s.correlateHash(shaB, "")
+	result := s.correlateHash(shaB, "", nil, nil, nil)
 	if result.Known {
 		t.Fatalf("expected Known=false with no matches anywhere, got %+v", result)
 	}
@@ -110,7 +113,7 @@ func TestCorrelateHashRejectsMalformedInputWithoutQuerying(t *testing.T) {
 
 	s := &store{es: newESClient(es.URL, "")}
 	for _, bad := range []string{"", "not-a-hash", `abc" OR "1`, "toolong" + strings.Repeat("a", 200)} {
-		if result := s.correlateHash(bad, ""); result.Known {
+		if result := s.correlateHash(bad, "", nil, nil, nil); result.Known {
 			t.Errorf("correlateHash(%q) should never report Known=true for malformed input, got %+v", bad, result)
 		}
 	}
@@ -130,7 +133,7 @@ func TestCorrelateHashRejectsMalformedAltID(t *testing.T) {
 	s := &store{es: newESClient(es.URL, "")}
 	for _, bad := range []string{"not-a-hash", `abc" OR "1`, shaA} {
 		gotPath = ""
-		s.correlateHash(shaA, bad)
+		s.correlateHash(shaA, bad, nil, nil, nil)
 		if gotPath == "" {
 			t.Fatal("a well-formed primary must still be queried even when altID is malformed")
 		}
@@ -159,7 +162,7 @@ func TestCorrelateHashFlagsTruncationWhenSightingsExceedReturnedRecords(t *testi
 	defer es.Close()
 
 	s := &store{es: newESClient(es.URL, "")}
-	result := s.correlateHash(shaA, "")
+	result := s.correlateHash(shaA, "", nil, nil, nil)
 	if !result.ESTruncated {
 		t.Fatalf("expected ESTruncated=true when total (5000) exceeds returned records (2), got %+v", result)
 	}
@@ -176,17 +179,22 @@ func TestCorrelateHashDoesNotFlagTruncationWhenAllSightingsAreReturned(t *testin
 	defer es.Close()
 
 	s := &store{es: newESClient(es.URL, "")}
-	result := s.correlateHash(shaA, "")
+	result := s.correlateHash(shaA, "", nil, nil, nil)
 	if result.ESTruncated {
 		t.Fatalf("did not expect ESTruncated when total (2) matches returned records, got %+v", result)
 	}
 }
 
-// TestPayloadAnalysisPageRendersKnownElsewhereCard (#354): the advisory card
-// must show Ghidra and Elasticsearch sighting summary when known, and a
-// clear "not seen elsewhere" state when not -- never blocking anything
-// either way.
-func TestPayloadAnalysisPageRendersKnownElsewhereCard(t *testing.T) {
+// TestPayloadAnalysisPageRendersSkeletonNotCorrelationDirectly (#1142):
+// /payload-analysis/<hash> no longer renders SandboxRuns/GitHubAnalysis/
+// Correlation synchronously -- even a binaryAnalysis with them fully
+// populated (as if a caller tried the old direct-render path) must not
+// leak that data into the page; only the skeleton placeholders and the
+// hash/sha256 data attributes hp-payload-analysis.js hydrates from should
+// appear. The real "known vs not seen elsewhere" content is covered by
+// payloadAggregationFor's own tests instead, against the JSON it produces
+// for that JS to render client-side.
+func TestPayloadAnalysisPageRendersSkeletonNotCorrelationDirectly(t *testing.T) {
 	funcs := templateFuncs(nil, "")
 	tmpl := template.Must(template.New("dashboard").Funcs(funcs).Parse(pageTemplate))
 
@@ -201,20 +209,61 @@ func TestPayloadAnalysisPageRendersKnownElsewhereCard(t *testing.T) {
 	}
 	var buf strings.Builder
 	if err := tmpl.ExecuteTemplate(&buf, "payload-analysis", &known); err != nil {
-		t.Fatalf("render known: %v", err)
+		t.Fatalf("render: %v", err)
 	}
 	body := buf.String()
-	if !strings.Contains(body, "already analyzed") || !strings.Contains(body, "3 event(s)") {
-		t.Fatalf("known-elsewhere card missing expected content: %s", body)
+	// "already analyzed" alone is too broad -- the card's own static note
+	// ("...you know if this hash was already analyzed...") legitimately
+	// contains that phrase regardless of Correlation; the badge markup is
+	// what must be absent.
+	for _, gone := range []string{`badge--green">already analyzed`, "3 event(s)", "not seen elsewhere"} {
+		if strings.Contains(body, gone) {
+			t.Fatalf("page must not render Correlation content directly anymore (found %q): %s", gone, body)
+		}
+	}
+	for _, want := range []string{
+		`data-hp-pl-hash="` + shaA + `"`, `data-hp-pl-sha256="` + shaA + `"`,
+		"data-hp-pl-sandbox-runs", "data-hp-pl-github-analysis", "data-hp-pl-known-elsewhere",
+		`id="hp-pl-known-elsewhere-heading"`, "/static/hp-payload-analysis.js",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("page is missing %q -- hp-payload-analysis.js needs this to hydrate", want)
+		}
+	}
+}
+
+// TestPayloadAggregationForReportsKnownVsNotSeenElsewhere (#354/#1142): the
+// data payloadAggregationFor produces (what hp-payload-analysis.js renders
+// as the Known-elsewhere card) must distinguish a hash with results
+// somewhere from one with none -- moved here from the old template-level
+// test now that this content renders client-side instead of server-side.
+func TestPayloadAggregationForReportsKnownVsNotSeenElsewhere(t *testing.T) {
+	esResultsClientFor(t, map[string][]map[string]any{
+		"ghidra-analysis-v1": {
+			{"ghidra": map[string]any{"version": 1, "sha256": shaA, "exit_status": "ok", "completed_at": "2026-08-02T10:00:00Z"}},
+		},
+	})
+	es := httptest.NewServer(correlationSearchStub(t, new(string), hashCorrelationSample))
+	defer es.Close()
+	s := &store{es: newESClient(es.URL, "")}
+
+	agg := s.payloadAggregationFor(shaA, "")
+	if !agg.Correlation.Known {
+		t.Fatal("expected Known=true when Ghidra has a result")
+	}
+	if agg.Correlation.Ghidra == nil || agg.Correlation.Ghidra.ExitStatus != "ok" {
+		t.Fatalf("expected the Ghidra result to be surfaced, got %+v", agg.Correlation.Ghidra)
 	}
 
-	unknown := binaryAnalysis{Hash: shaB, SHA256: shaB, Correlation: hashCorrelation{}}
-	buf.Reset()
-	if err := tmpl.ExecuteTemplate(&buf, "payload-analysis", &unknown); err != nil {
-		t.Fatalf("render unknown: %v", err)
-	}
-	if !strings.Contains(buf.String(), "not seen elsewhere") {
-		t.Fatal("unknown hash must render the not-seen-elsewhere state")
+	esResultsClientFor(t, map[string][]map[string]any{})
+	esNone := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"hits":{"total":{"value":0},"hits":[]}}`))
+	}))
+	defer esNone.Close()
+	s2 := &store{es: newESClient(esNone.URL, "")}
+	agg2 := s2.payloadAggregationFor(shaB, "")
+	if agg2.Correlation.Known {
+		t.Fatalf("expected Known=false with no matches anywhere, got %+v", agg2.Correlation)
 	}
 }
 
