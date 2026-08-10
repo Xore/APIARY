@@ -336,7 +336,10 @@ func (s *store) serveGeneratePayloadReport(w http.ResponseWriter, r *http.Reques
 // API and the scheduler: resolve the definition, render the PDF from live
 // telemetry (or the referenced sandbox/payload artifact), and persist it.
 func (s *store) renderDefinitionToStored(id, origin string) (generatedReport, string, error) {
-	def, ok := s.reports.definition(id)
+	// #787: definitionFresh, not definition -- generating right after saving
+	// a definition is the normal designer flow, and the two requests can
+	// land on different dashboard replicas. See GetFresh's own comment.
+	def, ok := s.reports.definitionFresh(id)
 	if !ok {
 		return generatedReport{}, "", fmt.Errorf("%w: no report definition with this id", errUnknownRecord)
 	}

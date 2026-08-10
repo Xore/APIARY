@@ -633,6 +633,18 @@ func (rs *reportStore) document() (reportsDocument, string) {
 
 func (rs *reportStore) definition(id string) (reportDefinition, bool) {
 	doc, _ := rs.inner.Get()
+	return definitionByID(doc, id)
+}
+
+// definitionFresh is definition's read-after-write-safe counterpart -- see
+// esSettingsStore.GetFresh's own comment for why this exists and why it's
+// deliberately not the default.
+func (rs *reportStore) definitionFresh(id string) (reportDefinition, bool) {
+	doc, _ := rs.inner.GetFresh()
+	return definitionByID(doc, id)
+}
+
+func definitionByID(doc reportsDocument, id string) (reportDefinition, bool) {
 	for _, def := range doc.Definitions {
 		if def.ID == id {
 			return def, true
