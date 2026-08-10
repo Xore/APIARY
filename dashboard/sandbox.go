@@ -308,7 +308,7 @@ func loadSandboxResults() []sandboxResult {
 }
 
 func loadSandboxResultsES(es *esClient) ([]sandboxResult, bool) {
-	raws, err := es.searchNamespace("sandbox-analysis-v1", "sandbox", 10000)
+	raws, err := es.searchNamespace("sandbox-analysis-v1", "sandbox")
 	if err != nil {
 		return nil, false
 	}

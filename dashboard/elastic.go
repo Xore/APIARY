@@ -582,42 +582,95 @@ func (c *esClient) set(st esStatus) {
 	c.mu.Unlock()
 }
 
-// searchNamespace runs a bounded _search against index and returns each
-// hit's `field` sub-document, still JSON-encoded. #384: the four
-// #383-mirrored result indices (ghidra/sandbox/github-analysis/workbench)
-// store the producer's original, unmodified result JSON under a
+// searchNamespacePageSize/searchNamespaceMaxPages bound searchNamespace's
+// own pagination (#1156) the same way esEventsPageSize/esEventsMaxPages
+// bound loadSensorEventsES's -- a smaller per-page size than that one
+// (these aren't the high-volume event stream) but the same safety-valve
+// shape: stop after a bounded number of pages rather than looping forever
+// against a corpus that somehow never stops growing mid-fetch.
+const searchNamespacePageSize = 1000
+const searchNamespaceMaxPages = 50
+
+// searchNamespace runs a fully paginated _search against index and returns
+// every hit's `field` sub-document, still JSON-encoded. #384: the
+// #383-mirrored result indices (ghidra/sandbox/github-analysis/cape/
+// revdeck) store the producer's original, unmodified result JSON under a
 // source-namespaced field (see analysis/es-results-importer/importer.py's
 // build_document) -- so a caller can unmarshal the returned bytes straight
 // into the same struct it already unmarshals the local JSON file into,
 // with no separate ES-specific schema to maintain.
 //
-// size is capped at Elasticsearch's default index.max_result_window
-// (10000): these are analysis-result indices, not the high-volume event
-// stream, so an unpaged single page comfortably covers realistic corpus
-// sizes today. Revisit with search_after/scroll if that stops being true.
-func (c *esClient) searchNamespace(index, field string, size int) ([]json.RawMessage, error) {
-	if size <= 0 || size > 10000 {
-		size = 10000
+// #1156: this used to be a single bounded request capped at 10000 (this
+// deployment's index.max_result_window), silently missing anything past
+// that ceiling and just as importantly always paying for the full 10000
+// -document scan on every listing-page load regardless of true corpus
+// size. Paginates via PIT + search_after now instead, the same mechanism
+// loadSensorEventsES already established in this codebase for the same
+// max_result_window problem on the honeypot-v2-* event stream (see that
+// function's own comment for why _shard_doc is the tie-breaker and why a
+// PIT is required to use it at all on this Elasticsearch version). Sorted
+// by @timestamp -- build_document sets it from completed_at/updated_at/
+// requested_at, so this naturally returns newest-first, and every one of
+// these five indices already promotes @timestamp as a real, sortable
+// field regardless of what's inside their own flattened namespace.
+func (c *esClient) searchNamespace(index, field string) ([]json.RawMessage, error) {
+	pitID, ok := c.openPointInTime(index, "1m")
+	if !ok {
+		return nil, fmt.Errorf("could not open a point-in-time against %s", index)
 	}
-	b, err := c.request(fmt.Sprintf("/%s/_search?size=%d", index, size))
-	if err != nil {
-		return nil, err
-	}
-	var v struct {
-		Hits struct {
-			Hits []struct {
-				Source map[string]json.RawMessage `json:"_source"`
-			} `json:"hits"`
-		} `json:"hits"`
-	}
-	if err := json.Unmarshal(b, &v); err != nil {
-		return nil, err
-	}
-	out := make([]json.RawMessage, 0, len(v.Hits.Hits))
-	for _, h := range v.Hits.Hits {
-		if raw, ok := h.Source[field]; ok {
-			out = append(out, raw)
+	defer c.closePointInTime(pitID)
+
+	var out []json.RawMessage
+	var searchAfter []any
+	for page := 0; page < searchNamespaceMaxPages; page++ {
+		body := map[string]any{
+			"size": searchNamespacePageSize,
+			"pit":  map[string]any{"id": pitID, "keep_alive": "1m"},
+			"sort": []map[string]any{
+				{"@timestamp": "desc"},
+				{"_shard_doc": "desc"},
+			},
 		}
+		if searchAfter != nil {
+			body["search_after"] = searchAfter
+		}
+		reqBody, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		b, err := c.searchBody("/_search", reqBody)
+		if err != nil {
+			if page == 0 {
+				return nil, err
+			}
+			break // later page failed -- keep what earlier pages already returned
+		}
+		var v struct {
+			Hits struct {
+				Hits []struct {
+					Sort   []any                      `json:"sort"`
+					Source map[string]json.RawMessage `json:"_source"`
+				} `json:"hits"`
+			} `json:"hits"`
+		}
+		if err := json.Unmarshal(b, &v); err != nil {
+			if page == 0 {
+				return nil, err
+			}
+			break
+		}
+		if len(v.Hits.Hits) == 0 {
+			break
+		}
+		for _, h := range v.Hits.Hits {
+			if raw, ok := h.Source[field]; ok {
+				out = append(out, raw)
+			}
+		}
+		if len(v.Hits.Hits) < searchNamespacePageSize {
+			break // last page
+		}
+		searchAfter = v.Hits.Hits[len(v.Hits.Hits)-1].Sort
 	}
 	return out, nil
 }
