@@ -201,8 +201,22 @@ if ! printf '%s' "$value" | grep -qi 'dword:00000000'; then
   exit 1
 fi
 
-present="$(guestfish -a "$image" -i glob ls "/Windows/Temp/*.sys" 2>/dev/null || true)"
-echo "  drivers present in C:\\Windows\\Temp: $(printf '%s\n' "$present" | grep -c '\.sys$' || true)"
+# `glob ls "/Windows/Temp/*.sys"` (the original form here) is wrong
+# guestfish usage, not a real check: `glob` expands the pattern to each
+# matched path and calls `ls` (a *directory* listing command) on every one
+# individually, which fails with "opendir: ...: Not a directory" for a
+# plain file -- confirmed live, silently swallowed by this line's own
+# `2>/dev/null || true`, so the script always reported 0 drivers present
+# regardless of whether the injection actually worked. `glob-expand`
+# returns the matched paths directly instead of trying to list each one as
+# a directory.
+present="$(guestfish -a "$image" -i glob-expand "/Windows/Temp/*.sys" 2>/dev/null || true)"
+present_count="$(printf '%s\n' "$present" | grep -c '\.sys$' || true)"
+echo "  drivers present in C:\\Windows\\Temp: $present_count"
+if [[ "$present_count" -ne "${#staged[@]}" ]]; then
+  echo "provision-loldrivers: expected ${#staged[@]} driver(s) present, found $present_count -- do NOT trust this image as gated-open. Investigate before use." >&2
+  exit 1
+fi
 
 cat <<EOF
 
