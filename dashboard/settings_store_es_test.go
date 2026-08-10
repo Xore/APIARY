@@ -247,6 +247,44 @@ func TestESSettingsStoreCrossInstanceVisibility(t *testing.T) {
 	})
 }
 
+// TestESSettingsStoreGetFreshSeesOtherReplicaWriteImmediately is the
+// regression test for #787's report-generate-after-create bug: replica B's
+// poll-based cache is deliberately stale between ticks (that's the whole
+// point of polling instead of hitting Elasticsearch on every Get()), but a
+// caller that cannot tolerate that window has GetFresh available. A long
+// poll interval proves this isn't just "the poll happened to fire" --
+// GetFresh must see replica A's write well before its own next tick would.
+func TestESSettingsStoreGetFreshSeesOtherReplicaWriteImmediately(t *testing.T) {
+	memStore := newMemESDocStore()
+	srv := httptest.NewServer(memStore.handler())
+	t.Cleanup(srv.Close)
+
+	esA := newESClient(srv.URL, "")
+	esB := newESClient(srv.URL, "")
+	replicaA := newESSettingsStoreWithPollInterval(esA, "test-settings-v1", "singleton", testSettingsDoc{}, validateTestSettingsDoc, time.Hour)
+	replicaB := newESSettingsStoreWithPollInterval(esB, "test-settings-v1", "singleton", testSettingsDoc{}, validateTestSettingsDoc, time.Hour)
+
+	if _, _, err := replicaA.Update("", func(doc *testSettingsDoc) error {
+		doc.Name = "toggled-via-replica-a"
+		doc.Count = 42
+		return nil
+	}); err != nil {
+		t.Fatalf("Update through replica A failed: %v", err)
+	}
+
+	// Plain Get() on replica B must NOT see it yet -- the poll interval is
+	// an hour, so if this ever starts passing it means GetFresh stopped
+	// forcing a live read and silently degraded to the stale Get() path.
+	if doc, _ := replicaB.Get(); doc.Name == "toggled-via-replica-a" {
+		t.Fatal("replica B's plain Get() saw the write before any poll tick -- test setup is broken")
+	}
+
+	docB, _ := replicaB.GetFresh()
+	if docB.Name != "toggled-via-replica-a" || docB.Count != 42 {
+		t.Fatalf("GetFresh did not see replica A's write immediately: %+v", docB)
+	}
+}
+
 func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)

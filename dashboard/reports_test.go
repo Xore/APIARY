@@ -259,6 +259,39 @@ func TestReportStoreDefinitionCRUD(t *testing.T) {
 	}
 }
 
+// TestReportStoreDefinitionFreshSeesOtherReplicaWriteImmediately is the
+// reportStore-level regression test for #787: the designer's normal
+// "Generate now" flow saves a definition and immediately generates from it,
+// and those two requests can land on different dashboard replicas. definition
+// (plain Get, matching every other frequent read) must NOT see a sibling
+// replica's write before its own poll tick -- that's the deliberate
+// staleness bound this whole store design accepts for everything else.
+// definitionFresh (used specifically by renderDefinitionToStored) must see
+// it immediately, or "Generate now" 404s seconds after a successful save,
+// which is exactly what happened live before this fix.
+func TestReportStoreDefinitionFreshSeesOtherReplicaWriteImmediately(t *testing.T) {
+	esStore := newMemESDocStore()
+	esSrv := httptest.NewServer(esStore.handler())
+	defer esSrv.Close()
+
+	replicaA := newReportStore(newESClient(esSrv.URL, ""))
+	replicaB := newReportStore(newESClient(esSrv.URL, ""))
+
+	created, _, err := replicaA.putDefinition("", sampleDefinition("executive"))
+	if err != nil {
+		t.Fatalf("create through replica A: %v", err)
+	}
+
+	if _, ok := replicaB.definition(created.ID); ok {
+		t.Fatal("replica B's plain definition() saw replica A's write before any poll tick -- test setup is broken")
+	}
+
+	fresh, ok := replicaB.definitionFresh(created.ID)
+	if !ok || fresh.ID != created.ID {
+		t.Fatalf("definitionFresh did not see replica A's write immediately: %+v (found %t)", fresh, ok)
+	}
+}
+
 // TestReportStoreGeneratedRetention proves generated PDFs land in
 // Elasticsearch, the history prunes to the retention cap, and pruned
 // records are actually deleted there (#475).

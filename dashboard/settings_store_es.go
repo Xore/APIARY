@@ -196,6 +196,22 @@ func (s *esSettingsStore[T]) Get() (T, string) {
 	return s.payload, settingsETag(s.payload, s.revision)
 }
 
+// GetFresh forces a synchronous refresh before returning, for the narrow
+// set of callers that read their own (or another replica's) very recent
+// write and cannot tolerate the poll interval's staleness window. #787:
+// confirmed live -- creating a report definition on one dashboard replica
+// and immediately generating from it landed the generate request on the
+// other replica often enough to matter, whose cache hadn't yet polled the
+// new definition, producing a spurious 404 seconds after a successful
+// create. Get() stays the default for everything else (page renders,
+// authorization checks, ...) precisely because those callers are frequent
+// and do not need this guarantee -- forcing a live Elasticsearch round
+// trip on every Get() would regress all of them to pay this cost.
+func (s *esSettingsStore[T]) GetFresh() (T, string) {
+	s.refresh()
+	return s.Get()
+}
+
 // Revision exposes the current revision for diagnostics.
 func (s *esSettingsStore[T]) Revision() int64 {
 	s.mu.RLock()
