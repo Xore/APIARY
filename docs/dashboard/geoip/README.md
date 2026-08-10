@@ -45,7 +45,7 @@ automatic MaxMind updates, set `MAXMIND_ACCOUNT_ID` and
 profile:
 
 ```bash
-cd /opt/stacks/honeypot-stack
+cd /opt/stacks/apiary
 docker compose -f compose.yml --profile geoip-update up -d geoipupdate
 ```
 

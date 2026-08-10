@@ -50,7 +50,7 @@ if [[ $(id -u) -ne 0 ]]; then
   exit 1
 fi
 
-export STACK_DIR="${STACK_DIR:-/opt/stacks/honeypot-stack}"
+export STACK_DIR="${STACK_DIR:-/opt/stacks/apiary}"
 
 if [[ -n "$git_ref" && "$apply" != true ]]; then
   echo "--git-ref requires --apply" >&2

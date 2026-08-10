@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-stack_dir=${STACK_DIR:-/opt/stacks/honeypot-stack}
+stack_dir=${STACK_DIR:-/opt/stacks/apiary}
 backup_root=${BACKUP_ROOT:-/opt/backups/honeypot}
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 destination="$backup_root/$stamp"

@@ -82,7 +82,7 @@ via `-c`). Notable settings:
   public NIC (sniffer-only would miss honeypot egress).
 - `pcap-log` — full packet capture to `logs/suricata/pcap/`. **Create the dir
   first** or Suricata falls back to the log root:
-  `mkdir -p /opt/stacks/honeypot-stack/logs/suricata/pcap`
+  `mkdir -p /opt/stacks/apiary/logs/suricata/pcap`
   Bounded: `limit: 4mb` × `max-files: 12500` is a ~50 GB ring. 4 MB is
   Suricata's hard minimum — below it `pcap-log` crashes at startup — and a
   small file is what keeps Arkime ingest latency low, since a file is only

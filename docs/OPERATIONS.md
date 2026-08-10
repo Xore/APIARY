@@ -219,7 +219,7 @@ commands/credentials, payloads, enriched IDS alerts, and ingest failures.
   unwanted L2 traffic.
 - **analyze.py** — summarize the bind-mounted logs directly on the home server:
   ```bash
-  python3 analysis/analyze.py /opt/stacks/honeypot-stack/logs --top 20
+  python3 analysis/analyze.py /opt/stacks/apiary/logs --top 20
   ```
 - **Kibana** → `https://kibana.<domain>` (Keycloak via the oauth2-proxy gateway). Data views already exist:
   `honeypot-*` and `suricata-*` (time field `@timestamp`) plus **Arkime

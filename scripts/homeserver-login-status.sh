@@ -112,8 +112,8 @@ http_status Arkime http://10.8.0.2:19080/
 
 section "Ingestion freshness"
 for source_file in \
-  /opt/stacks/honeypot-stack/logs/suricata/eve.json \
-  /opt/stacks/honeypot-stack/logs/portbridge/portbridge.json; do
+  /opt/stacks/apiary/logs/suricata/eve.json \
+  /opt/stacks/apiary/logs/portbridge/portbridge.json; do
   if [[ -e "$source_file" ]]; then
     stat --format='%y  %s bytes  %n' "$source_file"
   else
@@ -140,8 +140,8 @@ confirm() {
 
 compose_stack() {
   docker compose \
-    --project-directory /opt/stacks/honeypot-stack \
-    --file /opt/stacks/honeypot-stack/compose.yml \
+    --project-directory /opt/stacks/apiary \
+    --file /opt/stacks/apiary/compose.yml \
     "$@"
 }
 
@@ -171,15 +171,15 @@ deploy_latest_main() {
     --exclude '.git/' --exclude '.github/' --exclude '.env' \
     --exclude 'logs/' --exclude 'state/' --exclude 'dashboard-state/' \
     --exclude 'analysis/geoip/*.mmdb' --exclude 'sandbox/results/' \
-    "$deploy_dir/" /opt/stacks/honeypot-stack/; then
+    "$deploy_dir/" /opt/stacks/apiary/; then
     printf '%srsync failed, not touching compose.yml or recreating containers%s\n' "$red" "$reset" >&2
     rm -rf -- "$deploy_dir"
     return 1
   fi
   rm -rf -- "$deploy_dir"
 
-  cp /opt/stacks/honeypot-stack/docker-compose.yml \
-    /opt/stacks/honeypot-stack/compose.yml &&
+  cp /opt/stacks/apiary/docker-compose.yml \
+    /opt/stacks/apiary/compose.yml &&
   compose_stack config --quiet &&
   compose_stack up --detach --build --remove-orphans
 }

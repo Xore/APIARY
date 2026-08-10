@@ -196,7 +196,7 @@ rebuilds the signed golden image, repairs permissions, installs controlled
 egress, runs both smoke tests, and re-enables the queue only after success:
 
 ```bash
-sudo bash /opt/stacks/honeypot-stack/sandbox/install-windows-forensics.sh
+sudo bash /opt/stacks/apiary/sandbox/install-windows-forensics.sh
 ```
 
 ## Required operating controls

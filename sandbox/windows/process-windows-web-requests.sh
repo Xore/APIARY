@@ -34,7 +34,7 @@ flock -n 9 || exit 0
 # sandbox/submit-capture.sh's copy if either ever changes; there is no
 # shared config between the two, since one runs against the dashboard
 # container's mounts and this one runs on the bare host.
-roots=(/opt/stacks/honeypot-stack/logs/cowrie/downloads)
+roots=(/opt/stacks/apiary/logs/cowrie/downloads)
 labels=(cowrie)
 dionaea_root="$(docker volume inspect dionaea-lib --format '{{.Mountpoint}}' 2>/dev/null || true)/binaries"
 scripts_root="$(docker volume inspect dashboard-state --format '{{.Mountpoint}}' 2>/dev/null || true)/script-payloads"

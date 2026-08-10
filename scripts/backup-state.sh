@@ -22,7 +22,7 @@
 set -euo pipefail
 
 VOLUME="${1:-dashboard-state}"
-BACKUP_DIR="${BACKUP_DIR:-/opt/stacks/honeypot-stack/state/backups}"
+BACKUP_DIR="${BACKUP_DIR:-/opt/stacks/apiary/state/backups}"
 KEEP="${KEEP:-14}"
 
 if ! docker volume inspect "$VOLUME" >/dev/null 2>&1; then

@@ -120,7 +120,7 @@ service (23 of them) bridging the VPS-side port to the WireGuard tunnel.
 - Suricata log path confirmed: VPS writes to a named volume mounted at
   `/etc/suricata` + `/var/lib/suricata` inside `hp-suricata`, and the
   container's actual EVE/log output is bind-mounted from
-  `/opt/stacks/honeypot-stack/logs/suricata` on the VPS, which the
+  `/opt/stacks/apiary/logs/suricata` on the VPS, which the
   homeserver pulls **read-only** via `sshfs` (see `/etc/fstab` on home —
   `IdentityFile=/root/.ssh/strato_vps`, `port=2222`,
   `PasswordAuthentication=no`). Portbridge logs use the identical pattern.

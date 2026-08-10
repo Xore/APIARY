@@ -120,7 +120,7 @@ no third-party site is cloned. All `mushorg/*` images are third-party
 
 `suricata` runs **on the VPS** (host networking, sniffing the public interface
 `SURICATA_IFACE`, default `ens6`) so it sees real attacker source IPs before the
-tunnel. It writes to `/opt/stacks/honeypot-stack/logs/suricata/` on the VPS:
+tunnel. It writes to `/opt/stacks/apiary/logs/suricata/` on the VPS:
 
 - `eve.json` (alerts, http, dns, tls, flow) — Filebeat on the home server ships
   it to the `suricata-*` Elasticsearch index (stats events are dropped, see

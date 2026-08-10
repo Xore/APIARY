@@ -29,7 +29,7 @@ flock -n 9 || exit 0
 # Same capture roots sandbox/windows/process-windows-web-requests.sh and
 # sandbox/submit-capture.sh use -- keep this list in sync with both if either
 # ever changes; there is no shared config between any of the three.
-roots=(/opt/stacks/honeypot-stack/logs/cowrie/downloads)
+roots=(/opt/stacks/apiary/logs/cowrie/downloads)
 labels=(cowrie)
 dionaea_root="$(docker volume inspect dionaea-lib --format '{{.Mountpoint}}' 2>/dev/null || true)/binaries"
 scripts_root="$(docker volume inspect dashboard-state --format '{{.Mountpoint}}' 2>/dev/null || true)/script-payloads"
