@@ -45,6 +45,7 @@ flowchart LR
     result[("{sha256}_ghidra.json<br/>+ HTML/PDF report")]
     revdeckSpool[("standalone spool (#78)<br/>{sha256}.request")]
     revdeckResult[("{sha256}_revdeck.json")]
+    samples[("SAMPLES_DIR, else the raw<br/>capture roots (#1114)")]
   end
 
   subgraph containers["containers (127.0.0.1 only)"]
@@ -57,6 +58,7 @@ flowchart LR
 
   submit -->|writes| spool
   spool --> pathunit --> worker
+  worker -->|resolve_sample(): reads| samples
   worker -->|writes| result
   result --> poll
 
@@ -83,6 +85,19 @@ writes a `{sha256}.request` marker into one directory and reads
 sandbox already uses. Every container port is published on `127.0.0.1` only:
 between them they hold captured malware and every string, fuzzy hash and
 structural fact extracted from it.
+
+**Where the actual sample bytes come from (#1114):** the dashboard never
+writes them — only a marker naming the hash, by the same trust-boundary
+design as everything else on this page. `resolve_sample()` (in
+`ghidra-worker.py`) checks `GHIDRA_SAMPLES_DIR` first, then falls back to
+searching the raw capture roots directly (Cowrie's download directory, the
+`dionaea-lib` Docker volume's `binaries/`, the `dashboard-state` volume's
+`script-payloads/`) — first by exact filename match, then by hashing
+candidates, the same two-phase search `sandbox/submit-capture.sh` uses for
+the Linux-sandbox flow. Nothing pre-populates `GHIDRA_SAMPLES_DIR` for
+Ghidra/Rev-Deck submissions specifically; resolution happens live, on
+request, which is why there is no separate population step or spool for it
+in the diagram above.
 
 The worker is **stdlib-only Python 3** on purpose. A worker that needs
 `pip install` before it can drain a queue is a worker that will be broken after
