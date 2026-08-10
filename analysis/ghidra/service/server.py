@@ -37,6 +37,7 @@ scripting API, not here.
 """
 import base64
 import binascii
+import concurrent.futures
 import hashlib
 import http.server
 import io
@@ -85,6 +86,20 @@ _running_processes: dict[str, subprocess.Popen] = {}
 _hash_to_job: dict[str, str] = {}
 
 
+def _assert_within_data_dir(path: Path) -> Path:
+    # CodeQL's path-injection query doesn't treat a regex-match guard as a
+    # sanitizer (confirmed: it still flags the sink even with a `.match()`
+    # check directly above it in the same function) -- a resolve()+
+    # is_relative_to() containment check against the trusted root is the
+    # idiom it actually recognizes, and it's a real backstop regardless:
+    # any future bug that lets an unvalidated job_id reach here still can't
+    # escape DATA_DIR.
+    resolved = path.resolve()
+    if not resolved.is_relative_to(DATA_DIR.resolve()):
+        raise ValueError(f"path escapes data dir: {path}")
+    return resolved
+
+
 def job_dir(job_id: str) -> Path:
     # Re-validated here, not just at the route regex that produced job_id --
     # this is the actual trust boundary before the value touches a
@@ -92,7 +107,7 @@ def job_dir(job_id: str) -> Path:
     # worker thread) goes through this one function.
     if not _JOB_ID_RE.match(job_id):
         raise ValueError(f"invalid job_id: {job_id!r}")
-    return DATA_DIR / job_id
+    return _assert_within_data_dir(DATA_DIR / job_id)
 
 
 def update_job(job_id: str, **changes) -> None:
@@ -135,17 +150,11 @@ def start_job(content: bytes, dedupe: bool = True) -> dict:
 # the chat loop annotating a handful of functions), not a throughput path,
 # so one coarse lock is simpler than a per-job one and costs nothing real.
 def _annotations_path(job_id: str) -> Path:
-    # job_dir() already rejects a non-hex job_id, but CodeQL's interprocedural
-    # path-injection query doesn't trust a raise() in a callee as a barrier --
-    # this same-function check is redundant at runtime, purely so the sink
-    # below reads as sanitized to that analysis too.
-    if not _JOB_ID_RE.match(job_id):
-        raise ValueError(f"invalid job_id: {job_id!r}")
     return job_dir(job_id) / "annotations.json"
 
 
 def _load_annotations(job_id: str) -> dict:
-    path = _annotations_path(job_id)
+    path = _assert_within_data_dir(_annotations_path(job_id))
     try:
         data = json.loads(path.read_text())
         if isinstance(data, dict) and isinstance(data.get("entries"), dict):
@@ -156,7 +165,7 @@ def _load_annotations(job_id: str) -> dict:
 
 
 def _save_annotations(job_id: str, data: dict) -> None:
-    _annotations_path(job_id).write_text(json.dumps(data))
+    _assert_within_data_dir(_annotations_path(job_id)).write_text(json.dumps(data))
 
 
 def worker_loop() -> None:
@@ -457,9 +466,7 @@ def _v1_hexdump(job_id: str, addr: str, length: int):
     read_length = min(length, available)
     file_offset = block["file_offset"] + (target - block_start)
 
-    if not _JOB_ID_RE.match(job_id):
-        raise ValueError(f"invalid job_id: {job_id!r}")
-    memory_path = job_dir(job_id) / "artifacts" / "memory.bin"
+    memory_path = _assert_within_data_dir(job_dir(job_id) / "artifacts" / "memory.bin")
     try:
         with open(memory_path, "rb") as f:
             f.seek(file_offset)
@@ -554,9 +561,7 @@ def _delete_job(job_id: str):
         if job is not None:
             _hash_to_job.pop(job.get("sha256"), None)
         existed = job is not None
-    if not _JOB_ID_RE.match(job_id):
-        raise ValueError(f"invalid job_id: {job_id!r}")
-    jdir = job_dir(job_id)
+    jdir = _assert_within_data_dir(job_dir(job_id))
     if jdir.is_dir():
         shutil.rmtree(jdir, ignore_errors=True)
     elif not existed:
@@ -589,9 +594,7 @@ def _v1_cancel_job(job_id: str):
 
 
 def _v1_export_job(job_id: str):
-    if not _JOB_ID_RE.match(job_id):
-        raise ValueError(f"invalid job_id: {job_id!r}")
-    artifacts_dir = job_dir(job_id) / "artifacts"
+    artifacts_dir = _assert_within_data_dir(job_dir(job_id) / "artifacts")
     if not artifacts_dir.is_dir():
         return None
     buf = io.BytesIO()
@@ -599,10 +602,21 @@ def _v1_export_job(job_id: str):
         for path in sorted(artifacts_dir.iterdir()):
             if path.is_file():
                 zf.write(path, arcname=path.name)
-        annotations_path = _annotations_path(job_id)
+        annotations_path = _assert_within_data_dir(_annotations_path(job_id))
         if annotations_path.is_file():
             zf.write(annotations_path, arcname="annotations.json")
     return buf.getvalue()
+
+
+# A regex query's pattern AND target text are both attacker-controlled (the
+# uploaded sample drives function/string names) -- catastrophic backtracking
+# is a real risk here, not a hypothetical one. Python's re module has no
+# built-in execution budget, so the whole filter pass runs in a worker
+# thread with a hard wall-clock cap; a runaway match times out the request
+# instead of hanging the handler (the thread itself can't be killed, but it
+# no longer blocks a response).
+_QUERY_TIMEOUT_SECONDS = float(os.environ.get("GHIDRA_QUERY_TIMEOUT_SECONDS", "2"))
+_query_executor = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_prefix="query-filter")
 
 
 def _tool_query_artifacts(job_id: str, payload: dict):
@@ -611,9 +625,6 @@ def _tool_query_artifacts(job_id: str, payload: dict):
         return 400, {"error": "query is required"}
     use_regex = bool(payload.get("regex"))
     if use_regex and len(query) > 200:
-        # Bounds the worst-case catastrophic-backtracking blast radius of an
-        # attacker-controlled pattern -- this is a query tool over analysis
-        # artifacts, not a place that needs arbitrary-length regex support.
         return 400, {"error": "regex query is too long (max 200 chars)"}
     try:
         matcher = re.compile(query) if use_regex else None
@@ -625,8 +636,18 @@ def _tool_query_artifacts(job_id: str, payload: dict):
 
     functions_data = _read_job_artifact(job_id, "functions.json") or {"functions": []}
     strings_data = _read_job_artifact(job_id, "strings.json") or {"strings": []}
-    matched_functions = [fn for fn in functions_data.get("functions", []) if matches(fn.get("name", ""))]
-    matched_strings = [s for s in strings_data.get("strings", []) if matches(s.get("s", ""))]
+
+    def run_filter():
+        matched_functions = [fn for fn in functions_data.get("functions", []) if matches(fn.get("name", ""))]
+        matched_strings = [s for s in strings_data.get("strings", []) if matches(s.get("s", ""))]
+        return matched_functions, matched_strings
+
+    future = _query_executor.submit(run_filter)
+    try:
+        matched_functions, matched_strings = future.result(timeout=_QUERY_TIMEOUT_SECONDS)
+    except concurrent.futures.TimeoutError:
+        return 408, {"error": "query took too long to evaluate (pattern may be pathological)"}
+
     return 200, {
         "query": query, "regex": use_regex,
         "matches": {"functions": matched_functions[:200], "strings": matched_strings[:200]},
