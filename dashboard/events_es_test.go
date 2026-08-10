@@ -262,6 +262,9 @@ func TestRebuildMergesESSourcedSensorEvents(t *testing.T) {
 
 // multipot's own log directory must never be read once it's ES-sourced --
 // this is the actual #238 data-flow requirement, not just "ES also works."
+// #1103 removed the file-based cache entirely (no sensor reads local files
+// for event listing anymore), so the only thing left worth asserting is
+// that multipot's local file never produces an event without ES configured.
 func TestRebuildNeverReadsESOnlySensorsLogDirectory(t *testing.T) {
 	root := t.TempDir()
 	writeFileLines(t, root+"/multipot/multipot.json",
@@ -270,9 +273,6 @@ func TestRebuildNeverReadsESOnlySensorsLogDirectory(t *testing.T) {
 	s := &store{dir: root} // s.es is nil: loadSensorEventsES must no-op, not fall back to the file
 	s.rebuild()
 
-	if _, cached := s.logCache[root+"/multipot/multipot.json"]; cached {
-		t.Fatal("multipot's log file must never be read into the file-based cache -- it's an ES-only sensor")
-	}
 	for _, ev := range s.getEvents() {
 		if ev.Sensor == "multipot" {
 			t.Fatalf("multipot event present without ES configured -- must have been read from its log file: %+v", ev)

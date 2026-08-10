@@ -16,11 +16,7 @@ import (
 	"time"
 )
 
-// tailCap limits how much of a single log file is re-read each cycle so a
-// multi-GB log can't stall the refresh loop. 8 MiB of JSON lines is far more
-// history than the UI displays.
 const (
-	tailCap            = 8 << 20
 	recentCap          = 18
 	recentPerSensorCap = 4
 )
@@ -177,21 +173,15 @@ type storedEvent struct {
 }
 
 type store struct {
-	mu            sync.RWMutex
-	subsMu        sync.Mutex
-	payloadMu     sync.Mutex
-	ipsMu         sync.Mutex
-	hashPathMu    sync.Mutex
-	hashPathCache map[string]string    // sha256 -> resolved payload path (#364)
-	hashPathMiss  map[string]time.Time // sha256 -> when the full content-hash scan last found nothing (#516)
-	snap          snapshot
-	events        []storedEvent // newest first; replaced wholesale each rebuild
-	// logCache holds each log file's classified-but-not-yet-joined events
-	// between rebuild() cycles (#353). Only ever touched from inside
-	// rebuild(), whose own calls are already serialized (the periodic
-	// ticker and the one-off startup call never overlap), so no mutex
-	// guards it -- see log_cache.go for what is and isn't safe to cache.
-	logCache          map[string]*logFileState
+	mu                sync.RWMutex
+	subsMu            sync.Mutex
+	payloadMu         sync.Mutex
+	ipsMu             sync.Mutex
+	hashPathMu        sync.Mutex
+	hashPathCache     map[string]string    // sha256 -> resolved payload path (#364)
+	hashPathMiss      map[string]time.Time // sha256 -> when the full content-hash scan last found nothing (#516)
+	snap              snapshot
+	events            []storedEvent // newest first; replaced wholesale each rebuild
 	payloadCache      payloadsPage
 	payloadCacheAt    time.Time
 	payloadRefreshing bool

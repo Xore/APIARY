@@ -4,6 +4,16 @@ import (
 	"encoding/json"
 )
 
+// cachedEvent pairs a classified event with the srcPort its raw JSON line
+// carried -- computed once at classify time since the raw map itself isn't
+// retained, needed on every rebuild cycle for the portbridge via-map join
+// (buildViaMap, classify.go), which runs fresh every cycle regardless of
+// where the event came from (#1103).
+type cachedEvent struct {
+	ev      event
+	srcPort int
+}
+
 // esOnlySensors lists dirSensor values (the same names logFiles()'s
 // directory-derived dirSensor already produces) whose events are sourced
 // from Elasticsearch instead of a local log file (#403, prerequisite for
@@ -179,6 +189,117 @@ func (s *store) loadSensorEventsES(es *esClient, dirSensor string) ([]cachedEven
 		}
 		if len(v.Hits.Hits) < esEventsPageSize {
 			break // last page
+		}
+		searchAfter = v.Hits.Hits[len(v.Hits.Hits)-1].Sort
+	}
+	return events, true
+}
+
+// loadSuricataEventsES fetches suricata's events from the suricata-* index
+// family (#1103 Category 2) instead of the local eve.json tail -- suricata
+// was excluded from loadSensorEventsES entirely (not just left to "fail" it
+// naturally) because it ships to its own index family, never
+// honeypot-v2-* under event.sensor:"suricata" the way every other sensor
+// does; see aggregate.go's own comment on why that distinction mattered
+// before this adapter existed.
+//
+// Same PIT+_shard_doc+search_after pattern as loadSensorEventsES, for the
+// same reason (this deployment's Elasticsearch rejects sorting by _id
+// outright -- see that function's own comment for the full story), scoped
+// to suricata-* instead of honeypot-v2-*.
+//
+// event.category in (alert, anomaly) is filtered server-side, not left to
+// classify()'s own event_type check: suricata-events' own index template
+// comment already flags this index family as high-volume (flow/dns/
+// netflow/stats dwarf alert/anomaly in practice), and pulling all of it
+// just to discard most of it client-side would be wasteful in exactly the
+// way #880 already fixed for honeypot-v2-*'s own unbounded-history problem.
+//
+// The extracted suricata.eve.* object is the exact same raw eve.json line
+// classify()'s suricata branch has always parsed -- Filebeat nests it there
+// unmodified (analysis/filebeat.yml), so it feeds classify() identically
+// regardless of source, the same way honeypot.* does for every other
+// sensor.
+func (s *store) loadSuricataEventsES(es *esClient) ([]cachedEvent, bool) {
+	if es == nil {
+		return nil, false
+	}
+
+	pitID, ok := es.openPointInTime("suricata-*", "1m")
+	if !ok {
+		return nil, false
+	}
+	defer es.closePointInTime(pitID)
+
+	var events []cachedEvent
+	var searchAfter []any
+	for page := 0; page < esEventsMaxPages; page++ {
+		body := map[string]any{
+			"size": esEventsPageSize,
+			"pit":  map[string]any{"id": pitID, "keep_alive": "1m"},
+			"sort": []map[string]any{
+				{"@timestamp": "desc"},
+				{"_shard_doc": "desc"},
+			},
+			"query": map[string]any{
+				"bool": map[string]any{
+					"filter": []map[string]any{
+						{"terms": map[string]any{"event.category": []string{"alert", "anomaly"}}},
+						{"range": map[string]any{"@timestamp": map[string]any{"gte": esOverviewWindow}}},
+					},
+				},
+			},
+		}
+		if searchAfter != nil {
+			body["search_after"] = searchAfter
+		}
+		reqBody, err := json.Marshal(body)
+		if err != nil {
+			return nil, false
+		}
+		b, err := es.searchBody("/_search", reqBody)
+		if err != nil {
+			if page == 0 {
+				return nil, false
+			}
+			break
+		}
+		var v struct {
+			Hits struct {
+				Hits []struct {
+					Sort   []any `json:"sort"`
+					Source struct {
+						Suricata struct {
+							Eve map[string]any `json:"eve"`
+						} `json:"suricata"`
+					} `json:"_source"`
+				} `json:"hits"`
+			} `json:"hits"`
+		}
+		if json.Unmarshal(b, &v) != nil {
+			if page == 0 {
+				return nil, false
+			}
+			break
+		}
+		if len(v.Hits.Hits) == 0 {
+			break
+		}
+		for _, h := range v.Hits.Hits {
+			e := h.Source.Suricata.Eve
+			if e == nil {
+				continue
+			}
+			ev := classify(e, "suricata")
+			if ev.skip {
+				continue
+			}
+			ev.proto = normalizeProtocol(ev.proto)
+			s.captureScriptPayload(&ev)
+			events = append(events, cachedEvent{ev: ev, srcPort: eventSrcPort(e)})
+		}
+		if len(v.Hits.Hits) < esEventsPageSize {
+			break
 		}
 		searchAfter = v.Hits.Hits[len(v.Hits.Hits)-1].Sort
 	}

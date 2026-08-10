@@ -60,29 +60,76 @@ type viaEntry struct {
 // correlating a second, independently-rotated p0f.json log by IP after the
 // fact, portbridge queries p0f directly per connection (vps/portbridge/p0f.go)
 // and folds the answer into the same JSON line this function already reads.
-// One file, one pass, two maps.
+// One query, one pass, two maps.
+//
+// #1103 Category 2: reads portbridge-v2-* exclusively now, not the local
+// connlog -- portbridge-v2-* was added (#354) specifically so this join
+// could move off disk, matching every other sensor's ES-only read (#1103
+// Category 1). No local fallback: a query failure means the join simply
+// can't run this cycle (both maps come back empty), the same "no data this
+// cycle" behavior loadSensorEventsES already has for every other sensor.
+//
+// Sorted ascending (oldest first), the ES equivalent of the old
+// portbridge.json.1-then-portbridge.json file-generation order: viaLookup
+// takes the newest match, so processing oldest-to-newest makes plain
+// append-order correct for the via_port lists, and last-write-wins correct
+// for osByIP.
 func (s *store) buildViaMap() (map[int][]viaEntry, map[string]string) {
 	m := map[int][]viaEntry{}
 	osByIP := map[string]string{}
-	// The VPS rotator copytruncates the live log to portbridge.json.1, so the
-	// previous generation is read first — oldest entries first, because
-	// viaLookup takes the newest match. Reading only the live file means a
-	// rotation empties the map, and every tunnelled event whose connection was
-	// recorded before it goes unattributed until the file refills. The same
-	// old-file-first order makes plain last-write-wins correct for osByIP too:
-	// the live file's entries are processed last, so they win.
-	for _, name := range []string{"portbridge.json.1", "portbridge.json"} {
-		data := readTail(filepath.Join(s.dir, "portbridge", name))
-		for _, line := range strings.Split(string(data), "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			var e map[string]any
-			if json.Unmarshal([]byte(line), &e) != nil {
-				continue
-			}
-			if str(e["sensor"]) != "portbridge" {
+	if s.es == nil {
+		return m, osByIP
+	}
+	pitID, ok := s.es.openPointInTime("portbridge-v2-*", "1m")
+	if !ok {
+		return m, osByIP
+	}
+	defer s.es.closePointInTime(pitID)
+
+	var searchAfter []any
+	for page := 0; page < esEventsMaxPages; page++ {
+		body := map[string]any{
+			"size": esEventsPageSize,
+			"pit":  map[string]any{"id": pitID, "keep_alive": "1m"},
+			"sort": []map[string]any{
+				{"@timestamp": "asc"},
+				{"_shard_doc": "asc"},
+			},
+			"query": map[string]any{
+				"bool": map[string]any{
+					"filter": []map[string]any{
+						{"range": map[string]any{"@timestamp": map[string]any{"gte": esOverviewWindow}}},
+					},
+				},
+			},
+		}
+		if searchAfter != nil {
+			body["search_after"] = searchAfter
+		}
+		reqBody, err := json.Marshal(body)
+		if err != nil {
+			break
+		}
+		b, err := s.es.searchBody("/_search", reqBody)
+		if err != nil {
+			break
+		}
+		var v struct {
+			Hits struct {
+				Hits []struct {
+					Sort   []any `json:"sort"`
+					Source struct {
+						Portbridge map[string]any `json:"portbridge"`
+					} `json:"_source"`
+				} `json:"hits"`
+			} `json:"hits"`
+		}
+		if json.Unmarshal(b, &v) != nil || len(v.Hits.Hits) == 0 {
+			break
+		}
+		for _, h := range v.Hits.Hits {
+			e := h.Source.Portbridge
+			if e == nil || str(e["sensor"]) != "portbridge" {
 				continue
 			}
 			if ip := str(e["src_ip"]); ip != "" {
@@ -96,6 +143,10 @@ func (s *store) buildViaMap() (map[int][]viaEntry, map[string]string) {
 			}
 			m[vp] = append(m[vp], viaEntry{ip: str(e["src_ip"]), port: num(e["port"])})
 		}
+		if len(v.Hits.Hits) < esEventsPageSize {
+			break
+		}
+		searchAfter = v.Hits.Hits[len(v.Hits.Hits)-1].Sort
 	}
 	return m, osByIP
 }

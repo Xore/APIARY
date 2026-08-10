@@ -26,19 +26,22 @@ func TestP0fOSGuessFillsFingerprintWhenNoneCaptured(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
-	writeLog(t, root, "portbridge/portbridge.json", map[string]any{
-		"time": now, "sensor": "portbridge", "event": "connect", "proto": "tcp",
-		"port": 21.0, "src_ip": "203.0.113.9", "src_port": 51000.0, "os": "Linux 3.11 and newer",
-	})
 	// dionaea's own events come from Elasticsearch exclusively now (#1103).
 	// log_json shape, at the top level (dtagdevsec image) -- carries no
 	// fingerprint of its own, unlike cowrie's client.kex/HASSH.
 	esSensorPlaceholder(t, root, "dionaea")
-	esSrv := httptest.NewServer(esSensorAndOverviewStub(t, map[string][]map[string]any{
-		"dionaea": {{
-			"timestamp": now, "src_ip": "203.0.113.9", "dst_port": 21.0,
-			"connection": map[string]any{"protocol": "ftp", "transport": "tcp", "type": "accept"},
-		}},
+	esSrv := httptest.NewServer(esFullStub(t, esFullStubDocs{
+		HoneypotBySensor: map[string][]map[string]any{
+			"dionaea": {{
+				"timestamp": now, "src_ip": "203.0.113.9", "dst_port": 21.0,
+				"connection": map[string]any{"protocol": "ftp", "transport": "tcp", "type": "accept"},
+			}},
+		},
+		// buildViaMap reads portbridge-v2-* exclusively now (#1103 Category 2).
+		Portbridge: []map[string]any{
+			{"time": now, "sensor": "portbridge", "event": "connect", "proto": "tcp",
+				"port": 21.0, "src_ip": "203.0.113.9", "src_port": 51000.0, "os": "Linux 3.11 and newer"},
+		},
 	}))
 	defer esSrv.Close()
 
@@ -61,16 +64,18 @@ func TestP0fOSGuessNeverOverwritesExistingFingerprint(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
-	writeLog(t, root, "portbridge/portbridge.json", map[string]any{
-		"time": now, "sensor": "portbridge", "event": "connect", "proto": "tcp",
-		"port": 22.0, "src_ip": "203.0.113.9", "src_port": 51000.0, "os": "Linux 3.11 and newer",
-	})
 	esSensorPlaceholder(t, root, "cowrie")
-	esSrv := httptest.NewServer(esSensorAndOverviewStub(t, map[string][]map[string]any{
-		"cowrie": {{
-			"timestamp": now, "eventid": "cowrie.client.kex", "src_ip": "203.0.113.9",
-			"hassh": "aabbccddeeff00112233445566778899",
-		}},
+	esSrv := httptest.NewServer(esFullStub(t, esFullStubDocs{
+		HoneypotBySensor: map[string][]map[string]any{
+			"cowrie": {{
+				"timestamp": now, "eventid": "cowrie.client.kex", "src_ip": "203.0.113.9",
+				"hassh": "aabbccddeeff00112233445566778899",
+			}},
+		},
+		Portbridge: []map[string]any{
+			{"time": now, "sensor": "portbridge", "event": "connect", "proto": "tcp",
+				"port": 22.0, "src_ip": "203.0.113.9", "src_port": 51000.0, "os": "Linux 3.11 and newer"},
+		},
 	}))
 	defer esSrv.Close()
 
@@ -95,16 +100,20 @@ func TestNoP0fRecordLeavesFingerprintEmpty(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
-	writeLog(t, root, "portbridge/portbridge.json", map[string]any{
-		"time": now, "sensor": "portbridge", "event": "connect", "proto": "tcp",
-		"port": 21.0, "src_ip": "203.0.113.9", "src_port": 51000.0,
-	})
 	esSensorPlaceholder(t, root, "dionaea")
-	esSrv := httptest.NewServer(esSensorAndOverviewStub(t, map[string][]map[string]any{
-		"dionaea": {{
-			"timestamp": now, "src_ip": "203.0.113.9", "dst_port": 21.0,
-			"connection": map[string]any{"protocol": "ftp", "transport": "tcp", "type": "accept"},
-		}},
+	esSrv := httptest.NewServer(esFullStub(t, esFullStubDocs{
+		HoneypotBySensor: map[string][]map[string]any{
+			"dionaea": {{
+				"timestamp": now, "src_ip": "203.0.113.9", "dst_port": 21.0,
+				"connection": map[string]any{"protocol": "ftp", "transport": "tcp", "type": "accept"},
+			}},
+		},
+		// Portbridge record present (the join itself succeeds) but with no
+		// "os" field -- p0f never matched this IP.
+		Portbridge: []map[string]any{
+			{"time": now, "sensor": "portbridge", "event": "connect", "proto": "tcp",
+				"port": 21.0, "src_ip": "203.0.113.9", "src_port": 51000.0},
+		},
 	}))
 	defer esSrv.Close()
 

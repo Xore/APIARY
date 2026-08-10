@@ -13,11 +13,12 @@ export function startFakeElasticsearch() {
   const docs = new Map(); // "index/id" -> { seqNo, primaryTerm, source }
   // sensor -> raw honeypot event body (the shape classify() consumes,
   // unwrapped -- this fixture wraps it under _source.honeypot itself on the
-  // way out, matching honeypot-v2-*'s real document shape). #1103: cowrie/
-  // dionaea/conpot/... read Elasticsearch exclusively now, no local-file
-  // fallback, so the e2e fixture has to seed their events here instead of
-  // (or as well as) the local log files start-dashboard.mjs still writes
-  // for the sensors that keep a local read path (suricata, portbridge).
+  // way out, matching honeypot-v2-*'s real document shape). #1103: every
+  // sensor reads Elasticsearch exclusively now, no local-file fallback for
+  // any of them (suricata/portbridge included, as of Category 2's
+  // loadSuricataEventsES/buildViaMap rewrite), so the e2e fixture has to
+  // seed events here instead of relying on the local log files
+  // start-dashboard.mjs writes.
   const sensorEvents = new Map();
   const pits = new Set();
 
@@ -71,15 +72,15 @@ export function startFakeElasticsearch() {
     // Only the dashboard's own bookkeeping indices (dashboard-*) are backed
     // by real in-memory state here. Everything else -- suricata-*,
     // portbridge-v2-*, dead-letter-honeypot*, _cluster/health, _count -- is
-    // sensor telemetry this fixture never ingests. Answering those with a
-    // confident "200, zero hits" would make the dashboard trust an empty
-    // Elasticsearch over the real fixture data it should read instead (a
-    // local-file read for suricata/portbridge, which still have one; a
-    // seeded sensorEvents entry for everything else, which the two branches
-    // above already answer for real). A non-2xx response here is exactly
-    // what a real cluster that hasn't ingested this data would never
-    // produce, but it reaches the same "ES has nothing for this" handling
-    // every caller already has.
+    // sensor telemetry this fixture never ingests (the PIT/_search branches
+    // above already answer the seeded sensorEvents entries for real, for
+    // every sensor including suricata/portbridge; nothing left here has a
+    // local-file fallback to fall back to since #1103 Category 2). A
+    // non-2xx response here is exactly what a real cluster that hasn't
+    // ingested this data would never produce, but it reaches the same "ES
+    // has nothing for this" handling every caller already has -- answering
+    // with a confident "200, zero hits" instead would make the dashboard
+    // wrongly trust an empty Elasticsearch over data it should have read.
     if (parts[0] !== undefined && !parts[0].startsWith("dashboard-")) {
       res.writeHead(503);
       res.end(JSON.stringify({ error: "index not stubbed in fake-elasticsearch" }));
