@@ -110,22 +110,6 @@ func (rs *reportStore) listGenerated() ([]generatedReport, error) {
 	return out, nil
 }
 
-// generated fetches one generated report's metadata only.
-func (rs *reportStore) generated(id string) (generatedReport, bool) {
-	if rs.es == nil {
-		return generatedReport{}, false
-	}
-	hit, found, err := rs.es.docGet(generatedReportIndex, id)
-	if err != nil || !found {
-		return generatedReport{}, false
-	}
-	var stored storedGeneratedReport
-	if json.Unmarshal(hit.Source, &stored) != nil {
-		return generatedReport{}, false
-	}
-	return stored.generatedReport, true
-}
-
 // generatedPDF fetches one generated report's metadata and decoded PDF
 // bytes together -- the one place PDFBase64 actually gets decoded, so a page
 // that only needs the history list (listGenerated) never pays for it.

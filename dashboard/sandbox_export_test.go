@@ -148,9 +148,9 @@ func TestRenderSandboxReportPDF(t *testing.T) {
 	for index := 0; index < 35; index++ {
 		result.TopSyscalls = append(result.TopSyscalls, sandboxCount{Name: "representative_call_" + strconv.Itoa(index), Count: 100 - index})
 	}
-	body := renderSandboxReportPDF(result, time.Date(2026, 7, 29, 17, 0, 0, 0, time.UTC))
+	body := renderThemedSandboxReportPDF(result, time.Date(2026, 7, 29, 17, 0, 0, 0, time.UTC), pdfThemeDark(), defaultPDFBranding())
 	if !bytes.HasPrefix(body, []byte("%PDF-1.4")) || !bytes.Contains(body, []byte("%%EOF")) {
-		t.Fatal("renderSandboxReportPDF() did not produce a complete PDF")
+		t.Fatal("renderThemedSandboxReportPDF() did not produce a complete PDF")
 	}
 	for _, expected := range []string{"Sandbox Dynamic Analysis Report", "Process difference", "Sockets difference", "ntp.ubuntu.com", "api.snapcraft.io"} {
 		if !bytes.Contains(body, []byte(expected)) {

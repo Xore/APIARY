@@ -325,13 +325,13 @@ func TestReportStoreGeneratedRetention(t *testing.T) {
 		t.Fatalf("generated history = %d entries, want retention cap 3", len(all))
 	}
 	for _, meta := range kept[:2] {
-		if _, ok := store.generated(meta.ID); ok {
+		if _, _, err := store.generatedPDF(meta.ID); err == nil {
 			t.Fatalf("pruned record %s still present", meta.ID)
 		}
 	}
 	for _, meta := range kept[2:] {
-		if _, ok := store.generated(meta.ID); !ok {
-			t.Fatalf("retained record %s missing", meta.ID)
+		if _, _, err := store.generatedPDF(meta.ID); err != nil {
+			t.Fatalf("retained record %s missing: %v", meta.ID, err)
 		}
 	}
 
@@ -339,7 +339,7 @@ func TestReportStoreGeneratedRetention(t *testing.T) {
 	if err := store.deleteGenerated(victim.ID); err != nil {
 		t.Fatalf("deleteGenerated: %v", err)
 	}
-	if _, ok := store.generated(victim.ID); ok {
+	if _, _, err := store.generatedPDF(victim.ID); err == nil {
 		t.Fatal("deleted generated record still present")
 	}
 }

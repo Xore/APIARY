@@ -36,12 +36,28 @@ func sampleReportData(now time.Time) reportData {
 	}
 }
 
+// testAllReportElements exercises every selectable section in the designer's
+// canonical order, mirroring what an operator who selects everything in the
+// Reports studio would produce.
+var testAllReportElements = []string{
+	elementCover, elementMetrics, elementAssessment, elementFindings, elementRecommendations,
+	elementTopSensors, elementTopSources, elementTopSignatures, elementTopASNs, elementTopCountries,
+	elementTopPorts, elementOperationalAlert, elementEventAppendix, elementParameters,
+}
+
+// renderFullReportPDF drives renderDefinitionPDF (the live Reports studio
+// render path) with every element selected, standing in for the pre-R2
+// fixed-layout renderer these tests used to call directly.
+func renderFullReportPDF(data reportData, theme string, branding reportBranding) []byte {
+	return renderDefinitionPDF(data, reportDefinition{Theme: theme, Branding: branding, Elements: testAllReportElements, AppendixLimit: 120})
+}
+
 func TestRenderSecurityReportPDF(t *testing.T) {
 	now := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
 	data := sampleReportData(now)
-	body := renderSecurityReportPDF(data)
+	body := renderFullReportPDF(data, "dark", reportBranding{})
 	if !bytes.HasPrefix(body, []byte("%PDF-1.4")) || !bytes.Contains(body, []byte("%%EOF")) {
-		t.Fatal("renderSecurityReportPDF() did not produce a complete PDF")
+		t.Fatal("renderFullReportPDF() did not produce a complete PDF")
 	}
 	if !bytes.Contains(body, []byte("Honeypot Executive Security Report")) || !bytes.Contains(body, []byte("/Count ")) {
 		t.Fatal("rendered PDF is missing expected report content or page tree")
@@ -71,7 +87,7 @@ func TestEventAppendixTruncatesOversizedField(t *testing.T) {
 	}}
 	data.Summary.Events = 1
 
-	body := renderSecurityReportPDF(data)
+	body := renderFullReportPDF(data, "dark", reportBranding{})
 	// PDF string literals escape "(" and ")" with a backslash (escapePDFText),
 	// so the marker survives as \(truncated\) in the raw stream -- search
 	// without the parens to match either form.
@@ -94,14 +110,14 @@ func TestEventAppendixTruncatesOversizedField(t *testing.T) {
 func TestRenderThemedReportPDF(t *testing.T) {
 	now := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
 	data := sampleReportData(now)
-	branding := pdfBranding{
+	branding := reportBranding{
 		HeaderLeft:     "ACME//SOC",
 		HeaderRight:    "WEEKLY THREAT REVIEW",
 		FooterLeft:     "CONFIDENTIAL - ACME SOC",
 		Classification: "TLP:AMBER - handle with care",
 		Author:         "Jane Analyst",
 	}
-	body := renderThemedReportPDF(data, pdfThemeLight(), branding)
+	body := renderFullReportPDF(data, "light", branding)
 	text := string(body)
 
 	for _, want := range []string{
@@ -126,7 +142,7 @@ func TestRenderThemedReportPDF(t *testing.T) {
 	}
 
 	// The dark default keeps the canonical APIARY identity and palette.
-	dark := string(renderSecurityReportPDF(data))
+	dark := string(renderFullReportPDF(data, "dark", reportBranding{}))
 	if !strings.Contains(dark, "APIARY") || !strings.Contains(dark, "PRIVATE - APIARY") {
 		t.Fatal("default report must keep the deployment header and footer")
 	}
