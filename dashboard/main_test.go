@@ -1120,6 +1120,65 @@ func TestSemanticShellIsServerRendered(t *testing.T) {
 	}
 }
 
+// #1142: before the first rebuild() cycle completes, every card on the
+// overview page is empty for the same reason (no data has been collected
+// yet), not because the honeypot is genuinely quiet -- rendering the SAME
+// "no events"/"no sensor logs found"/etc. text either way makes a
+// warming-up dashboard indistinguishable from a broken one. Ready (mirroring
+// s.ready.Load(), set explicitly by the "/" handler, not by rebuild() --
+// see snapshot's own doc comment) picks which of the two the page shows.
+func TestOverviewShowsSkeletonPlaceholdersBeforeFirstRebuildInsteadOfEmptyStates(t *testing.T) {
+	s := newSettingsAPITestStore(t, "admin")
+	tmpl, err := template.New("t").Funcs(templateFuncs(s, "")).Parse(pageTemplate)
+	if err != nil {
+		t.Fatalf("dashboard template does not parse: %v", err)
+	}
+
+	render := func(snap snapshot) string {
+		var out strings.Builder
+		if err := tmpl.ExecuteTemplate(&out, "page", snap); err != nil {
+			t.Fatalf("overview page does not execute: %v", err)
+		}
+		return out.String()
+	}
+
+	warmingHTML := render(snapshot{Ready: false})
+	if !strings.Contains(warmingHTML, "skeleton") {
+		t.Fatal("Ready=false with no data must render skeleton placeholders")
+	}
+	if !strings.Contains(warmingHTML, "Warming up") {
+		t.Fatal("Ready=false must show the warming-up indicator in the header, not a zero-value timestamp")
+	}
+	for _, emptyState := range []string{
+		"No events in the last 24 hours.", "no sensor logs found under /logs",
+		"no events yet — waiting for traffic", "no payloads captured yet",
+		"waiting for correlatable public source addresses",
+	} {
+		if strings.Contains(warmingHTML, emptyState) {
+			t.Fatalf("Ready=false must not show the real empty-state text %q -- that reads as a genuinely quiet honeypot, not a warming-up dashboard", emptyState)
+		}
+	}
+
+	quietHTML := render(snapshot{Ready: true})
+	if strings.Contains(quietHTML, "skeleton") {
+		t.Fatal("Ready=true with no data is a genuinely quiet honeypot, not a loading state -- must not show skeleton placeholders")
+	}
+	if strings.Contains(quietHTML, "Warming up") {
+		t.Fatal("Ready=true must not show the warming-up indicator")
+	}
+	if !strings.Contains(quietHTML, "no sensor logs found under /logs") {
+		t.Fatal("Ready=true with no sensors must still show its real empty state")
+	}
+
+	// Ready=false must not mask REAL data that already arrived -- a card
+	// with content always wins over both the skeleton and the empty state,
+	// regardless of Ready.
+	readyFalseWithData := render(snapshot{Ready: false, Sensors: []sensorRow{{Name: "cowrie", Count: 3, State: "active"}}})
+	if !strings.Contains(readyFalseWithData, ">cowrie<") {
+		t.Fatal("real sensor data must render even while Ready=false, not be masked by the skeleton")
+	}
+}
+
 // #478: the overview page's "Correlated campaigns" card used to reuse
 // /campaigns' own full 17-column table verbatim (score/network/events/ips/
 // sensors/ports/creds/files/alerts/ASNs/provider/fingerprints/sequence/why

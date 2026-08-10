@@ -795,6 +795,7 @@ func main() {
 			return
 		}
 		data := s.get()
+		data.Ready = s.ready.Load()
 		renderPage(w, tmpl, "page", &data)
 	})
 

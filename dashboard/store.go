@@ -23,6 +23,17 @@ const (
 
 type snapshot struct {
 	pageMeta
+	// Ready mirrors s.ready.Load() at request time (#1142) -- NOT stored in
+	// rebuild()'s own snap, since by the time s.ready ever reads true the
+	// first rebuild() that flips it (main.go) has already populated s.snap
+	// with real data, so a fresh read here is always consistent with the
+	// rest of this same snapshot value. Lets overview.html tell "no data
+	// yet because the first rebuild() cycle hasn't finished" apart from "no
+	// data because this honeypot is genuinely quiet" -- the same all-zero
+	// snapshot otherwise looks identical for both (see main.go's own
+	// #828 comment on s.ready.Store(true) for the exact confusion this
+	// caused before /healthz got a way to tell them apart).
+	Ready     bool
 	Generated time.Time
 	Total     int
 	UniqueIPs int
