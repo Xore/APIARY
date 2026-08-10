@@ -66,6 +66,47 @@ func TestReportsPageRenders(t *testing.T) {
 	}
 }
 
+// #1138: the sandbox/payload template pickers ("which artifact does this
+// report cover") used to live in the Design tab and hide the Scope tab
+// outright for those two template types -- inconsistent with every other
+// template, where Scope is exactly where "what does this report cover"
+// lives. They moved into panel-scope alongside the generic criteria
+// fields instead; this pins the DOM nesting (not just that the ids exist
+// somewhere on the page) and that hp-reports.js no longer hides the tab.
+func TestReportsScopeTabHoldsTheArtifactPickersNotDesign(t *testing.T) {
+	scopeStart := strings.Index(pageReports, `id="panel-scope"`)
+	scheduleStart := strings.Index(pageReports, `id="panel-schedule"`)
+	if scopeStart < 0 || scheduleStart < 0 || scopeStart > scheduleStart {
+		t.Fatalf("could not locate panel-scope...panel-schedule bounds in reports page (scope=%d schedule=%d)", scopeStart, scheduleStart)
+	}
+	scopePanel := pageReports[scopeStart:scheduleStart]
+	for _, marker := range []string{`id="hp-rp-scope-section"`, `id="hp-rp-sandbox-section"`, `id="hp-rp-payload-section"`, `id="hp-rp-sandbox-job"`, `id="hp-rp-payload-search"`} {
+		if !strings.Contains(scopePanel, marker) {
+			t.Fatalf("panel-scope is missing %q -- the artifact pickers must live in Scope, not Design", marker)
+		}
+	}
+
+	designStart := strings.Index(pageReports, `id="panel-design"`)
+	if designStart < 0 || designStart > scopeStart {
+		t.Fatalf("could not locate panel-design before panel-scope (design=%d scope=%d)", designStart, scopeStart)
+	}
+	designPanel := pageReports[designStart:scopeStart]
+	for _, gone := range []string{`id="hp-rp-sandbox-section"`, `id="hp-rp-payload-section"`} {
+		if strings.Contains(designPanel, gone) {
+			t.Fatalf("panel-design still has %q -- it moved to panel-scope", gone)
+		}
+	}
+
+	body, err := os.ReadFile("static/hp-reports.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(body)
+	if strings.Contains(source, "setStepAvailable") {
+		t.Fatal(`hp-reports.js still references setStepAvailable -- the Scope tab must never hide now that every template type has something to show in it`)
+	}
+}
+
 // Generated reports render as a .project-grid/.project-card grid (#227,
 // following #221/#226), not the old <table>. Each card is a role="button"
 // (hp-reports.js), since it can't be a real <a>/<button> -- the Download

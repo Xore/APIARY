@@ -59,25 +59,17 @@
                 <p class="note">Each element becomes a section of the PDF, in this order.</p>
                 <div class="hp-rp-elements" id="hp-rp-elements"></div>
               </div>
-              <div class="card wide hp-rp-section" id="hp-rp-sandbox-section" hidden>
-                <h2>Sandbox run</h2>
-                <div class="hp-rp-grid">
-                  <div class="hp-rp-field"><label for="hp-rp-sandbox-job">Analysis job</label><select id="hp-rp-sandbox-job"></select></div>
-                </div>
-                <p class="note">Sandbox reports have a fixed evidence structure; theme and branding still apply.</p>
-              </div>
-              {{/* #653: payload template's picker -- search captured payloads and
-                   see which analysis sources (sandbox/ghidra/github) already exist
-                   for each one before picking, backed by /api/reports/payload-options. */}}
-              <div class="card wide hp-rp-section" id="hp-rp-payload-section" hidden>
-                <h2>Payload</h2>
-                <div class="hp-rp-field"><label for="hp-rp-payload-search">Search captured payloads</label><input id="hp-rp-payload-search" type="search" placeholder="hash or file kind…" autocomplete="off"></div>
-                <div class="hp-rp-payload-results" id="hp-rp-payload-results" role="listbox" aria-label="Captured payloads"></div>
-                <p class="hp-rp-status" id="hp-rp-payload-selected"></p>
-                <p class="note">Payload reports have a fixed evidence structure; theme and branding still apply.</p>
-              </div>
             </div>
 
+            {{/* #1138: the sandbox/payload template pickers used to live
+                 here in Design and hide the Scope tab outright (setStepAvailable
+                 in hp-reports.js) -- "which artifact does this report cover"
+                 is exactly what Scope means for every other template, so
+                 these two moved in alongside the generic criteria fields
+                 instead of being a Design-tab special case. Design stays
+                 about template/basics/theme regardless of template type;
+                 Scope is the one tab that answers "what data", whichever of
+                 the three shapes below applies. */}}
             <div class="dashboard-panel" id="panel-scope" role="tabpanel" data-dashboard-panel="scope" hidden>
               <div class="card wide hp-rp-section" id="hp-rp-scope-section">
                 <h2>Scope &amp; search criteria</h2>
@@ -99,6 +91,23 @@
                   <div class="hp-rp-field"><label for="hp-rp-scope-session">Session id</label><input id="hp-rp-scope-session" maxlength="128"></div>
                   <div class="hp-rp-field"><label for="hp-rp-scope-text">Free text</label><input id="hp-rp-scope-text" maxlength="200" placeholder="matches across all event fields"></div>
                 </div>
+              </div>
+              <div class="card wide hp-rp-section" id="hp-rp-sandbox-section" hidden>
+                <h2>Sandbox run</h2>
+                <div class="hp-rp-grid">
+                  <div class="hp-rp-field"><label for="hp-rp-sandbox-job">Analysis job</label><select id="hp-rp-sandbox-job"></select></div>
+                </div>
+                <p class="note">Sandbox reports have a fixed evidence structure; theme and branding still apply.</p>
+              </div>
+              {{/* #653: payload template's picker -- search captured payloads and
+                   see which analysis sources (sandbox/ghidra/github) already exist
+                   for each one before picking, backed by /api/reports/payload-options. */}}
+              <div class="card wide hp-rp-section" id="hp-rp-payload-section" hidden>
+                <h2>Payload</h2>
+                <div class="hp-rp-field"><label for="hp-rp-payload-search">Search captured payloads</label><input id="hp-rp-payload-search" type="search" placeholder="hash or file kind…" autocomplete="off"></div>
+                <div class="hp-rp-payload-results" id="hp-rp-payload-results" role="listbox" aria-label="Captured payloads"></div>
+                <p class="hp-rp-status" id="hp-rp-payload-selected"></p>
+                <p class="note">Payload reports have a fixed evidence structure; theme and branding still apply.</p>
               </div>
             </div>
 
