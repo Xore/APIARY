@@ -29,6 +29,30 @@ set -euo pipefail
 checksum="${1:?usage: build-with-retry.sh <iso_checksum> [max_attempts]}"
 max_attempts="${2:-3}"
 dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+iso_path="/var/dockge/sandbox/isos/Win11_Eval_x64.iso"
+qmp_sock="/tmp/win11-analysis-qmp.sock"
+unplug_script="$dir/pxe/unplug-pxe-on-reset.sh"
+
+# This is the 4th time a rebuild has silently boot-looped/fallen through to
+# the flaky CD path (#288) because two manual companion steps this script
+# never enforced were skipped on a fresh checkout/host: pxe/prepare-pxe.sh
+# was never run (so the PXE NIC has nothing to serve -- OVMF silently falls
+# through its NVRAM boot order to CD-ROM the instant PXE/DHCP/TFTP comes up
+# empty, no error, indistinguishable from a real CD-boot regression without
+# actually watching the guest screen), and pxe/unplug-pxe-on-reset.sh was
+# never started alongside packer (so Windows Setup's own self-triggered
+# restarts re-trigger PXE forever instead of continuing the disk-resident
+# install -- win11-cape's own build-with-retry.sh already wraps its
+# equivalent unplug script for exactly this reason; win11-analysis's never
+# did, on the assumption "whoever runs this build starts it by hand," which
+# is precisely the assumption that keeps not holding). Both are now
+# enforced here instead of documented and hoped for.
+#
+# prepare-pxe.sh's own file-existence guards make it cheap to call every
+# time (a no-op past the first run on a given host), so no separate
+# "already prepared?" check is needed here.
+echo "=== build-with-retry: ensuring PXE staging is ready (pxe/prepare-pxe.sh) ==="
+"$dir/pxe/prepare-pxe.sh" "$iso_path"
 
 # #86: packer-golden-image-guide.md has described win11-analysis.qcow2.sha256
 # as part of the storage layout since before any golden image existed to
@@ -77,7 +101,41 @@ while (( attempt <= max_attempts )); do
   # defensively -- a killed/timed-out attempt (e.g. build-supervisor.sh's
   # own retries) may not have run packer's own cleanup path.
   rm -rf "$build_output_dir"
-  if packer build -var "iso_checksum=${checksum}" -var "output_dir=${build_output_dir}" "$dir/win11-analysis.pkr.hcl"; then
+
+  # The socket path isn't touched between attempts, so a leftover file from
+  # a killed prior attempt could otherwise be mistaken for a live one by the
+  # wait loop below. Remove it first, then wait for THIS attempt's qemu to
+  # actually create it before connecting -- same pattern win11-cape's own
+  # build-with-retry.sh already uses for its equivalent unplug script.
+  rm -f "$qmp_sock"
+  unplug_pid=""
+  if [[ -x "$unplug_script" ]]; then
+    (
+      for _ in $(seq 1 120); do
+        [[ -S "$qmp_sock" ]] && break
+        sleep 1
+      done
+      if [[ -S "$qmp_sock" ]]; then
+        python3 "$unplug_script" "$qmp_sock"
+      else
+        echo "=== unplug-pxe-on-reset.sh: ${qmp_sock} never appeared within 120s -- not starting it, PXE NIC will not be unplugged this attempt ===" >&2
+      fi
+    ) &
+    unplug_pid=$!
+    echo "=== unplug-pxe-on-reset.sh: waiting for ${qmp_sock}, will unplug pxenet0 on the guest's first reset (wrapper pid ${unplug_pid}) ==="
+  else
+    echo "=== WARNING: ${unplug_script} not found or not executable -- PXE NIC will not be unplugged after boot; build may loop back into PXE on Setup's own restarts ===" >&2
+  fi
+
+  build_ok=1
+  packer build -var "iso_checksum=${checksum}" -var "output_dir=${build_output_dir}" "$dir/win11-analysis.pkr.hcl" || build_ok=0
+
+  if [[ -n "$unplug_pid" ]]; then
+    kill "$unplug_pid" 2>/dev/null || true
+    wait "$unplug_pid" 2>/dev/null || true
+  fi
+
+  if [[ $build_ok -eq 1 ]]; then
     echo "=== build-with-retry: attempt ${attempt} succeeded $(date -u +%FT%TZ) ==="
     built_qcow2="$build_output_dir/$vm_name.qcow2"
     if [[ -f "$built_qcow2" ]]; then
