@@ -33,7 +33,7 @@ VM_DISK=/var/dockge/sandbox/vms/win11-sandbox.qcow2
 # detonation. Not derived from this script's own installed location
 # (/usr/local/libexec/...) -- only the repo checkout below actually has
 # docker-compose.sandbox.yml. Override if your checkout lives elsewhere.
-SANDBOX_GATEWAY_COMPOSE=/var/dockge/stacks/honeypot-stack/docker-compose.sandbox.yml
+SANDBOX_GATEWAY_COMPOSE=/var/dockge/stacks/apiary/docker-compose.sandbox.yml
 
 # ── Guest access (WinRM over the isolated sandbox bridge) ────────────────
 # 10.10.10.0/24 has no route to the WAN; the host firewall drops forwarding.
