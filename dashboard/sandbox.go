@@ -327,6 +327,37 @@ func loadSandboxResultsES(es *esClient) ([]sandboxResult, bool) {
 	return rows, true
 }
 
+// loadSandboxResultsByHash answers "every sandbox run for this hash" --
+// matchingSandboxRuns' own need (a sample can be re-detonated, so unlike
+// ghidra/github-analysis/revdeck this genuinely can return more than one
+// result) -- scoped server-side via searchNamespaceByHash instead of
+// loadSandboxResults' whole-index fetch filtered down in Go. See
+// loadGhidraResultByHash's own comment (#1142).
+func loadSandboxResultsByHash(es *esClient, sha256 string) []sandboxResult {
+	if es == nil {
+		return nil
+	}
+	raws, err := es.searchNamespaceByHash("sandbox-analysis-v1", "sandbox", sha256, 50)
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	rows := make([]sandboxResult, 0, len(raws))
+	for _, raw := range raws {
+		var row sandboxResult
+		// Verified here, not trusted from the query alone -- see
+		// loadGhidraResultByHash's own comment on why.
+		if json.Unmarshal(raw, &row) != nil || !strings.EqualFold(row.SHA256, sha256) || row.Job == "" || seen[row.Job] {
+			continue
+		}
+		seen[row.Job] = true
+		normalizeSandboxResult(&row)
+		rows = append(rows, row)
+	}
+	sortSandboxResults(&rows)
+	return rows
+}
+
 func sortSandboxResults(rows *[]sandboxResult) {
 	sort.Slice(*rows, func(i, j int) bool { return (*rows)[i].CompletedAt > (*rows)[j].CompletedAt })
 	if len(*rows) > 250 {

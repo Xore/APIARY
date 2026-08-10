@@ -128,17 +128,32 @@ func newestRevdeckResult(hash string, results []revdeckStandaloneResult, after t
 	return revdeckStandaloneResult{}, false
 }
 
+// #1142: scoped server-side via searchNamespaceByHash instead of
+// loadRevdeckResults' whole-index fetch filtered down to one match in Go
+// -- this page has no listing view at all (unlike ghidra/github-analysis),
+// so there was never a reason to load more than the one result being
+// asked for. See loadGhidraResultByHash's own comment.
 func revdeckData(sha256 string) (revdeckPageData, error) {
 	data := revdeckPageData{Generated: time.Now()}
 	if sha256 == "" {
 		return data, errors.New("revdeck result not found")
 	}
-	for _, row := range loadRevdeckResults() {
-		if row.SHA256 == sha256 {
-			result := row
-			data.Detail = &result
-			return data, nil
+	if esResultsClient == nil {
+		return data, errors.New("revdeck result not found")
+	}
+	raws, err := esResultsClient.searchNamespaceByHash("revdeck-analysis-v1", "revdeck", sha256, 5)
+	if err != nil {
+		return data, errors.New("revdeck result not found")
+	}
+	// Verified here, not trusted from the query alone -- see
+	// loadGhidraResultByHash's own comment on why.
+	for _, raw := range raws {
+		var row revdeckStandaloneResult
+		if json.Unmarshal(raw, &row) != nil || !strings.EqualFold(row.SHA256, sha256) {
+			continue
 		}
+		data.Detail = &row
+		return data, nil
 	}
 	return data, errors.New("revdeck result not found")
 }

@@ -313,6 +313,40 @@ func loadGhidraResultsES(es *esClient) ([]ghidraResult, bool) {
 	return rows, true
 }
 
+// loadGhidraResultByHash answers "the one Ghidra result for this hash", the
+// single-result case ghidraData's detail view actually needs, scoped
+// server-side via searchNamespaceByHash instead of loadGhidraResults'
+// whole-index fetch (up to 10000 documents) filtered down to one match in
+// Go -- see that function's own doc comment. ghidra-analysis-v1 documents
+// are overwritten by deterministic _id on reanalysis (analysis/
+// es-results-importer's own doc_id()), so there is at most one to find;
+// this still handles more than one defensively rather than assuming that
+// invariant always held for every document that ever landed in the index.
+func loadGhidraResultByHash(es *esClient, sha256 string) (ghidraResult, bool) {
+	if es == nil {
+		return ghidraResult{}, false
+	}
+	raws, err := es.searchNamespaceByHash("ghidra-analysis-v1", "ghidra", sha256, 5)
+	if err != nil {
+		return ghidraResult{}, false
+	}
+	// Verified here, not trusted from the query alone: the server-side
+	// term filter is what makes this cheap, but a caller that gets back a
+	// document for the wrong hash (a test stub that does not actually
+	// filter, same as every other loader in this package already guards
+	// against with its own EqualFold/== check) must never be trusted
+	// silently.
+	for _, raw := range raws {
+		var row ghidraResult
+		if json.Unmarshal(raw, &row) != nil || !strings.EqualFold(row.SHA256, sha256) {
+			continue
+		}
+		attachGhidraDownload(&row, ghidraArtifactSet(es))
+		return row, true
+	}
+	return ghidraResult{}, false
+}
+
 func sortGhidraResults(rows []ghidraResult) {
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].CompletedAt != rows[j].CompletedAt {
@@ -493,6 +527,20 @@ func attachGhidraCallGraph(row *ghidraResult, artifacts map[string]bool) {
 }
 
 func ghidraData(sha256, query string) (ghidraPageData, error) {
+	// #1142: the single-hash detail view (below) never needs the whole
+	// listing -- ghidra.html's own {{if .Detail}} branch reads only
+	// .Detail, never .Rows, so loading every result just to linear-scan
+	// for the one that matches (loadGhidraResults' own doc comment) was
+	// pure waste on this path. Resolved directly via
+	// loadGhidraResultByHash instead, scoped server-side.
+	if sha256 != "" {
+		row, ok := loadGhidraResultByHash(esResultsClient, sha256)
+		if !ok {
+			return ghidraPageData{}, errors.New("ghidra result not found")
+		}
+		row.IOCCorrelation = correlateFlossSandboxIOCs(row.Floss, matchingSandboxRuns(sha256))
+		return ghidraPageData{Generated: time.Now(), Detail: &row}, nil
+	}
 	data := ghidraPageData{
 		Generated: time.Now(),
 		Rows:      loadGhidraResults(),
@@ -516,17 +564,7 @@ func ghidraData(sha256, query string) (ghidraPageData, error) {
 		}
 		data.Rows = filtered
 	}
-	if sha256 == "" {
-		return data, nil
-	}
-	for i := range data.Rows {
-		if data.Rows[i].SHA256 == sha256 {
-			data.Detail = &data.Rows[i]
-			data.Detail.IOCCorrelation = correlateFlossSandboxIOCs(data.Detail.Floss, matchingSandboxRuns(sha256))
-			return data, nil
-		}
-	}
-	return data, errors.New("ghidra result not found")
+	return data, nil
 }
 
 func triageFamily(row ghidraResult) string {

@@ -190,6 +190,36 @@ func loadGitHubAnalysisResultsES(es *esClient) ([]githubAnalysisResult, bool) {
 	return rows, true
 }
 
+// loadGitHubAnalysisResultByHash answers "the one GitHub-analysis result for
+// this hash" -- the single-result case githubAnalysisData's detail view
+// needs, scoped server-side via searchNamespaceByHash instead of
+// loadGitHubAnalysisResults' whole-index fetch filtered down to one match
+// in Go. See searchNamespaceByHash's own doc comment (#1142).
+func loadGitHubAnalysisResultByHash(es *esClient, sha256 string) (githubAnalysisResult, bool) {
+	if es == nil {
+		return githubAnalysisResult{}, false
+	}
+	raws, err := es.searchNamespaceByHash("github-analysis-v1", "github_analysis", sha256, 5)
+	if err != nil {
+		return githubAnalysisResult{}, false
+	}
+	// Verified here, not trusted from the query alone -- see
+	// loadGhidraResultByHash's own comment on why.
+	for _, raw := range raws {
+		var row githubAnalysisResult
+		if json.Unmarshal(raw, &row) != nil || !strings.EqualFold(row.SHA256, sha256) {
+			continue
+		}
+		row.SHA256 = strings.ToLower(row.SHA256)
+		row.ExportURL = "/export/github-analysis/" + row.SHA256
+		if _, ok := githubAnalysisPDFURL(row); ok {
+			row.ViewURL = row.ExportURL + "/pdf"
+		}
+		return row, true
+	}
+	return githubAnalysisResult{}, false
+}
+
 func sortGitHubAnalysisResults(rows []githubAnalysisResult) {
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].CompletedAt != rows[j].CompletedAt {
@@ -309,6 +339,17 @@ func (s *store) githubAnalysisRequester(sha256 string) string {
 }
 
 func (s *store) githubAnalysisData(sha256, query string) (githubAnalysisPageData, error) {
+	// #1142: the detail view (below) never reads .Rows -- see
+	// loadGhidraResultByHash's own comment on why this is scoped
+	// server-side instead of loading the whole index.
+	if sha256 != "" {
+		row, ok := loadGitHubAnalysisResultByHash(esResultsClient, sha256)
+		if !ok {
+			return githubAnalysisPageData{}, errors.New("github analysis result not found")
+		}
+		row.RequestedBy = s.githubAnalysisRequester(sha256)
+		return githubAnalysisPageData{Generated: time.Now(), Detail: &row}, nil
+	}
 	data := githubAnalysisPageData{
 		Generated: time.Now(),
 		Rows:      loadGitHubAnalysisResults(),
@@ -328,17 +369,7 @@ func (s *store) githubAnalysisData(sha256, query string) (githubAnalysisPageData
 		}
 		data.Rows = filtered
 	}
-	if sha256 == "" {
-		return data, nil
-	}
-	for i := range data.Rows {
-		if data.Rows[i].SHA256 == sha256 {
-			data.Detail = &data.Rows[i]
-			data.Detail.RequestedBy = s.githubAnalysisRequester(sha256)
-			return data, nil
-		}
-	}
-	return data, errors.New("github analysis result not found")
+	return data, nil
 }
 
 func (s *store) serveGitHubAnalysisAPI(w http.ResponseWriter, r *http.Request) {
