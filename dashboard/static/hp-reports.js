@@ -172,18 +172,6 @@
     return state.templates.find((template) => template.id === (state.template && state.template.id)) || null;
   }
 
-  /* Show or hide one studio step. If the step being hidden is the one on
-     screen, fall back to Design rather than leaving the operator on a blank
-     panel. */
-  function setStepAvailable(name, available) {
-    const tab = document.querySelector(`[data-dashboard-tab="${name}"]`);
-    if (!tab) return;
-    tab.hidden = !available;
-    if (!available && tab.classList.contains("active")) {
-      document.querySelector('[data-dashboard-tab="design"]')?.click();
-    }
-  }
-
   function selectTemplate(id, applyPreset) {
     const template = state.templates.find((candidate) => candidate.id === id);
     if (!template) return;
@@ -196,14 +184,15 @@
     // writer. Not worth a second, near-identical picker section for one
     // field's worth of difference.
     const payload = !!template.payload || !!template.ghidra;
+    // #1138: sandboxSection/payloadSection/scopeSection (the generic
+    // criteria fields) all now live inside the Scope panel together --
+    // exactly one of the three is visible per template, so the tab itself
+    // never needs hiding anymore (it used to, back when the artifact
+    // pickers lived in Design instead of here).
     els.sandboxSection.hidden = !sandbox;
     els.payloadSection.hidden = !payload;
     els.elementsSection.hidden = sandbox || payload;
     els.scopeSection.hidden = sandbox || payload;
-    // A sandbox or payload report is scoped by its referenced artifact, so
-    // the Scope step does not apply: hide the tab too, or it would open an
-    // empty panel.
-    setStepAvailable("scope", !sandbox && !payload);
     if (sandbox) loadSandboxJobs();
     if (payload && applyPreset) { resetPayloadPicker(); searchPayloads(""); }
     if (applyPreset) {
