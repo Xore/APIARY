@@ -135,6 +135,12 @@ def start_job(content: bytes, dedupe: bool = True) -> dict:
 # the chat loop annotating a handful of functions), not a throughput path,
 # so one coarse lock is simpler than a per-job one and costs nothing real.
 def _annotations_path(job_id: str) -> Path:
+    # job_dir() already rejects a non-hex job_id, but CodeQL's interprocedural
+    # path-injection query doesn't trust a raise() in a callee as a barrier --
+    # this same-function check is redundant at runtime, purely so the sink
+    # below reads as sanitized to that analysis too.
+    if not _JOB_ID_RE.match(job_id):
+        raise ValueError(f"invalid job_id: {job_id!r}")
     return job_dir(job_id) / "annotations.json"
 
 
@@ -451,6 +457,8 @@ def _v1_hexdump(job_id: str, addr: str, length: int):
     read_length = min(length, available)
     file_offset = block["file_offset"] + (target - block_start)
 
+    if not _JOB_ID_RE.match(job_id):
+        raise ValueError(f"invalid job_id: {job_id!r}")
     memory_path = job_dir(job_id) / "artifacts" / "memory.bin"
     try:
         with open(memory_path, "rb") as f:
@@ -546,6 +554,8 @@ def _delete_job(job_id: str):
         if job is not None:
             _hash_to_job.pop(job.get("sha256"), None)
         existed = job is not None
+    if not _JOB_ID_RE.match(job_id):
+        raise ValueError(f"invalid job_id: {job_id!r}")
     jdir = job_dir(job_id)
     if jdir.is_dir():
         shutil.rmtree(jdir, ignore_errors=True)
@@ -579,6 +589,8 @@ def _v1_cancel_job(job_id: str):
 
 
 def _v1_export_job(job_id: str):
+    if not _JOB_ID_RE.match(job_id):
+        raise ValueError(f"invalid job_id: {job_id!r}")
     artifacts_dir = job_dir(job_id) / "artifacts"
     if not artifacts_dir.is_dir():
         return None
@@ -598,6 +610,11 @@ def _tool_query_artifacts(job_id: str, payload: dict):
     if not query:
         return 400, {"error": "query is required"}
     use_regex = bool(payload.get("regex"))
+    if use_regex and len(query) > 200:
+        # Bounds the worst-case catastrophic-backtracking blast radius of an
+        # attacker-controlled pattern -- this is a query tool over analysis
+        # artifacts, not a place that needs arbitrary-length regex support.
+        return 400, {"error": "regex query is too long (max 200 chars)"}
     try:
         matcher = re.compile(query) if use_regex else None
     except re.error as exc:
@@ -816,7 +833,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         if filename:
-            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            safe_filename = filename.replace('"', "").replace("\r", "").replace("\n", "")
+            self.send_header("Content-Disposition", f'attachment; filename="{safe_filename}"')
         self.end_headers()
         self.wfile.write(body)
 
