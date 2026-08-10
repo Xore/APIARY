@@ -43,6 +43,8 @@ type campaignRow struct {
 // current request's filter, same as ipsData/commandsData/clustersData.
 type campaignsPage struct {
 	pageMeta
+	// Ready mirrors s.ready.Load() -- see eventsPage's own comment (#1142/#1155).
+	Ready     bool
 	Generated time.Time
 	Campaigns []campaignRow
 	Filters   []string

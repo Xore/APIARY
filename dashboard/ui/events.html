@@ -93,7 +93,19 @@
               {{template "eventrows" .}}
               </tbody>
             </table>
-            {{else}}<p class="empty">no events match this filter</p>{{end}}
+            {{else if .Ready}}<p class="empty">no events match this filter</p>
+            {{else}}
+            {{/* #1155: before the first rebuild() cycle completes, this
+                 table is empty for the same "no data collected yet"
+                 reason overview.html's own cards were (#1142) -- a shaped
+                 skeleton reads as loading; the real empty-state text would
+                 read as a filter matching nothing, which is a different
+                 and misleading claim this early. */}}
+            <div class="skeleton-line" style="width:90%"></div>
+            <div class="skeleton-line" style="width:75%"></div>
+            <div class="skeleton-line" style="width:80%"></div>
+            <div class="skeleton-line" style="width:65%"></div>
+            {{end}}
           </div>
         </div>
 
