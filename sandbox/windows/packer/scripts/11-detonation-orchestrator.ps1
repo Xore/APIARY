@@ -170,10 +170,23 @@ TryStep "autoruns_after" {
 
 # ---------------- Stop telemetry + export (best-effort) ----------------
 TryStep "procmon_stop_and_export" {
-    Stop-Process -Name Procmon64 -Force -ErrorAction SilentlyContinue
+    # /Terminate, not Stop-Process -Force: confirmed live (#502) that a raw
+    # process kill never gives Procmon's own shutdown code a chance to
+    # signal its kernel-mode minifilter (PROCMON24) to detach -- it stays
+    # attached and refuses manual unload (fltmc unload PROCMON24 ->
+    # 0x801f0010 / ERROR_FLT_DO_NOT_DETACH) until the guest reboots.
+    # /Terminate is Procmon's own documented clean-shutdown flag; confirmed
+    # live the filter unloads cleanly afterward instead.
+    Start-Process C:\Tools\SysinternalsSuite\Procmon64.exe -ArgumentList "/Terminate" -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue
     # #502: this export hangs unpredictably for reasons never fully
     # root-caused, in every session type tried (Responding=True, no visible
-    # window/dialog the whole time). Not fatal -- a missing procmon.csv is
+    # window/dialog the whole time). Re-confirmed live after landing the
+    # /Terminate fix above: this is a genuinely separate problem from the
+    # filter-unload issue that fix addresses, not a symptom of it --
+    # reproduced against a freshly /Terminate'd instance (filter cleanly
+    # unloaded, confirmed absent from fltmc filters) with a brand-new,
+    # ~20s capture, still hadn't produced a .csv after 300+s. Not fatal --
+    # a missing procmon.csv is far better than losing the whole report --
     # far better than losing the whole report -- but TryStep's try/catch
     # alone does NOT bound this: Start-Process -Wait never throws on its
     # own, it just blocks forever, unlike run_sample.py's WinRM-path
