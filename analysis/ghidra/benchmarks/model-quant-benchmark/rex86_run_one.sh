@@ -72,7 +72,12 @@ print("loading base...")
 # at a per-model scratch dir under the same work volume everything else
 # here already uses; nothing else reads or needs this directory to
 # persist after the merge finishes.
-max_memory = {0: "16GiB", "cpu": "48GiB"}
+# 14GiB, not 16GiB: found live (2026-08-10, codellama-13B) that
+# merge_and_unload()'s onload_layer step temporarily pulls offloaded
+# layers back onto the GPU to compute the merge, and that transient spike
+# isn't accounted against max_memory's own budget -- 16GiB left the merge
+# OOMing 136MiB over the card's 19.55GiB total with no headroom at all.
+max_memory = {0: "14GiB", "cpu": "48GiB"}
 base = AutoModelForCausalLM.from_pretrained(
     BASE, revision=REV, torch_dtype=torch.float16, device_map="auto",
     max_memory=max_memory,
@@ -88,7 +93,19 @@ tok = AutoTokenizer.from_pretrained(BASE, revision=REV)
 # llama.cpp refuses to load it. Resizing first (a no-op when they already
 # match) keeps the embedding matrix and tokenizer in sync the same way
 # every other loader in this pipeline already expects.
-if len(tok) != base.get_input_embeddings().weight.shape[0]:
+#
+# Growing only, never shrinking: found live (2026-08-10, qwen-14B) that
+# Qwen2.5's base repos intentionally pad the embedding matrix LARGER than
+# the tokenizer's own vocab (for tensor-core alignment) -- that's normal
+# and harmless, GGUF export never needs those extra rows. Shrinking it
+# back down actively broke the run instead: resize_token_embeddings() on
+# a model with accelerate-offloaded/meta-device parameters (device_map=
+# "auto" put some layers on a meta placeholder here) corrupted the
+# dispatch bookkeeping, and the very next step (PeftModel.from_pretrained
+# re-dispatching the model) crashed with "Cannot copy out of meta tensor;
+# no data!". Only the codellama-7B direction (tokenizer bigger than
+# embeddings) is ever a real problem worth fixing.
+if len(tok) > base.get_input_embeddings().weight.shape[0]:
     print(f"resizing embeddings {base.get_input_embeddings().weight.shape[0]} -> {len(tok)} to match tokenizer...")
     base.resize_token_embeddings(len(tok))
 
