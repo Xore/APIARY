@@ -85,11 +85,9 @@ updates:
       - /sandbox/ghosts
       - /sandbox/windows/gateway/inetsim
       - /services-adapter
-      - /snare
       - /tanner/phpox
       - /tanner/redis
       - /tanner/sandbox
-      - /tanner/tanner
       - /tftp-relay
       - /vps/p0f
       - /vps/portbridge
@@ -103,6 +101,37 @@ updates:
         patterns: ["*"]
         update-types: [minor, patch]
         group-by: dependency-name
+    labels: [dependencies, containers]
+
+  # #1116 (third occurrence of the same regression -- previously #1075 for
+  # snare, #1076/f6b5a97 for tanner): Dependabot's docker group treats
+  # python's two-part tags (3.11 -> 3.14) as a minor bump, so it sails
+  # straight through the shared group's update-types: [minor, patch]
+  # filter above and silently overwrites these two Dockerfiles' own
+  # documented, verified-live pins -- snare needs <=3.11 (no prebuilt
+  # aiohttp==3.8.6 wheel past cp311), tanner needs exactly 3.10
+  # (pylibinjection's pre-generated Cython C targets the pre-3.11
+  # PyCode_New ABI). Same fix as ml-worker/auth-events-worker below: split
+  # out of the shared group and ignore the dependency outright, since a
+  # comment documenting a compatibility constraint is invisible to
+  # Dependabot and it will keep proposing the exact same disproven bump
+  # indefinitely otherwise.
+  - package-ecosystem: docker
+    directories:
+      - /snare
+      - /tanner/tanner
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:45"
+      timezone: Europe/Berlin
+    groups:
+      container-compatible:
+        patterns: ["*"]
+        update-types: [minor, patch]
+        group-by: dependency-name
+    ignore:
+      - dependency-name: python
     labels: [dependencies, containers]
 
   - package-ecosystem: pip
