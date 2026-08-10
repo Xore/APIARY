@@ -48,20 +48,19 @@ func TestSyntheticSensorsReachDashboardSnapshot(t *testing.T) {
 	// show up in the Sensors leaderboard is Elasticsearch's own job,
 	// covered by TestFetchESOverviewParsesCountsAndTerms.
 	//
-	// suricata's OVERVIEW numbers still come through the separate
-	// suricata-v2-* aggregation (esSuricataOverviewResponse), not the main
-	// sensors bucket list -- #1100's fix made that match how production
-	// actually works (see es_aggregate.go's own comment on
-	// suricataOverviewQuery). Its *events* (checked below via
-	// s.getEvents()) come through loadSuricataEventsES instead, a third,
-	// separate mechanism from both of those.
+	// suricata's OVERVIEW numbers come through the same multi-index
+	// aggregation as every other sensor now (#1136: honeypot-v2-*,
+	// suricata-v2-* queried together), just its own bucket in the same
+	// sensors list -- not a separate query anymore. Its *events* (checked
+	// below via s.getEvents()) still come through loadSuricataEventsES
+	// instead, a separate mechanism from the aggregation.
 	var resp esOverviewAggResponse
 	for _, sensor := range []string{"cowrie", "dionaea", "conpot", "tanner"} {
 		resp.Aggregations.Sensors.Buckets = append(resp.Aggregations.Sensors.Buckets, esSensorBucket{Key: sensor, DocCount: 1})
 	}
-	var suricataOverview esSuricataOverviewResponse
-	suricataOverview.Hits.Total.Value = 1
-	suricataOverview.Aggregations.LastSeen.ValueAsString = now
+	resp.Aggregations.Sensors.Buckets = append(resp.Aggregations.Sensors.Buckets, esSensorBucket{Key: "suricata", DocCount: 1, LastSeen: struct {
+		ValueAsString string `json:"value_as_string"`
+	}{ValueAsString: now}})
 
 	esSrv := httptest.NewServer(esFullStub(t, esFullStubDocs{
 		HoneypotBySensor: docsBySensor,
@@ -69,8 +68,7 @@ func TestSyntheticSensorsReachDashboardSnapshot(t *testing.T) {
 			{"timestamp": now, "event_type": "alert", "src_ip": "4.2.2.2", "dest_port": 22.0, "proto": "TCP",
 				"alert": map[string]any{"signature": "SYNTHETIC TEST ALERT", "category": "Test", "severity": 3.0}},
 		},
-		Overview:         resp,
-		SuricataOverview: suricataOverview,
+		Overview: resp,
 	}))
 	defer esSrv.Close()
 	s := &store{dir: root, es: newESClient(esSrv.URL, "")}
