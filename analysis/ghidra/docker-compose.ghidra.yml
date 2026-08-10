@@ -184,14 +184,15 @@ services:
     #   docker compose --profile revdeck up -d revdeck
     profiles: ['revdeck']
     build:
-      # Context is the cloned repo root, not webui/ — its Dockerfile COPYs
-      # requirements.txt from the context root and webui/ into the image, so
-      # the context has to be the whole repo. Verified against a real clone
-      # (2026-08-01): the Dockerfile lives at webui/Dockerfile, not at the
-      # context root, and upstream's own docker-compose.yml uses exactly
-      # this context+dockerfile pair — `dockerfile: Dockerfile` alone (what
-      # this said before) does not exist and would fail the build outright,
-      # never caught because this service has never been deployed until now.
+      # Upstream's own main branch (the "Rev·Deck" rebrand -- real
+      # tokens/layout/components theme, Mermaid diagrams, citations, a much
+      # richer Ghidra REST client than either the old build or #1's fork),
+      # with #1's exclusive recovery pipeline (symbol/type/class recovery,
+      # the Analysis workbench's Recovery subtab) re-ported onto it --
+      # translation and live LLM-provider-switching were explicitly ruled
+      # out of scope. Dockerfile lives at webui/Dockerfile here, same as
+      # before #1's PoC moved it to the repo root; context is still the
+      # cloned repo root either way (its own COPY instructions expect that).
       context: ./revdeck/ai-reverse-engineering
       dockerfile: webui/Dockerfile
     restart: unless-stopped
@@ -215,24 +216,23 @@ services:
         required: false
     environment:
       GHIDRA_API_BASE: 'http://ghidra:9090'
-      # Point it at the local model too. Its own README documents an OpenRouter
-      # option; using it would send sample-derived text off the host.
+      # Startup-time only by this build's own design (webui/config.py's
+      # Config is a frozen dataclass; its own comment: "never exposed via a
+      # writable route") -- no runtime provider-switching panel here, unlike
+      # #1's fork. Point it at the local model the same way the very first
+      # version of this block did, before #1's PoC swap.
       API_BASE: 'http://ollama:11434/v1'
-      # The app hard-fails at startup without this (its own compose file:
-      # `${MODEL_NAME:?set MODEL_NAME in .env}`) — missing here entirely
-      # before, another symptom of this service never having been run.
-      # Independent from GHIDRA_TRIAGE_MODEL on purpose: interactive Rev·Deck
-      # chat and the worker's automated triage are different-shaped tasks
-      # (#144), no reason to assume they want the same model.
+      API_KEY: 'ollama'
       MODEL_NAME: '${REVDECK_MODEL:-qwen3:14b}'
       CHATS_DIR: '/data/chats'
       LOG_FILE: '/var/log/revdeck/web.log'
     depends_on:
       ghidra:
         condition: service_healthy
-    # Matches biniamf/ai-reverse-engineering's own reference compose file
-    # (checked against a real clone, 2026-08-01) — this service had none of
-    # this hardening before, only no-new-privileges below.
+    # This build's own Dockerfile is written for exactly this deployment
+    # shape already (non-root appuser, read-only root, /data + /var/log/
+    # revdeck as its only two writable mounts) -- verified live against a
+    # real clone, not assumed.
     security_opt:
       - no-new-privileges:true
     read_only: true
@@ -243,6 +243,7 @@ services:
     mem_limit: 1g
     pids_limit: 256
     healthcheck:
+      # /healthz exists on this build (unlike #1's fork, which dropped it).
       test: ['CMD', 'python', '-c',
              "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:5000/healthz', timeout=3).status==200 else 1)"]
       interval: 30s
@@ -250,17 +251,23 @@ services:
       retries: 3
       start_period: 10s
     volumes:
-      # CHATS_DIR above, not the webui/chats path this said before -- the
-      # Dockerfile's own default and upstream's compose both use /data/chats;
-      # /app/webui/chats was never where the app actually writes.
-      - revdeck_chats:/data/chats
-      - revdeck_logs:/var/log/revdeck
+      # The recovery-pipeline port deliberately writes under /data (CHATS_DIR's
+      # parent) rather than anywhere under webui/ -- the read-only root above
+      # means webui/ itself is never writable at runtime (COPY bakes it in
+      # owned by root, before the image ever switches to appuser), verified
+      # live when the first porting attempt hit exactly that permission error.
+      - revdeck2_data:/data
+      - revdeck2_logs:/var/log/revdeck
 
 volumes:
   ghidra_projects:
   ollama_models:
-  revdeck_chats:
-  revdeck_logs:
+  # revdeck2_* (not revdeck_*): #1's PoC build ran as root and left volumes
+  # by the old names root-owned; this build runs as a fixed non-root uid
+  # (appuser, 10001) and would hit the exact same stale-ownership permission
+  # trap reusing those names that the PoC swap itself hit once already.
+  revdeck2_data:
+  revdeck2_logs:
 
 networks:
   llm_clients:
