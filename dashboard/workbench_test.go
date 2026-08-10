@@ -264,6 +264,63 @@ func TestWorkbenchGhidraRejectsMD5IdentityMarkerFilename(t *testing.T) {
 	}
 }
 
+// TestWorkbenchGhidraMissingSampleMarkerIsRetryable is #1114's own smaller
+// finding: markerState()'s three failure-shaped outcomes
+// (.request.failed/.request.invalid/.request.missing-sample) never set
+// child.Retryable, unlike every result-based failure path in reconcile
+// (see TestWorkbenchGhidraQueueCancelAndPartialFailure below). Without it,
+// an operator who hits one of these -- most commonly missing-sample, before
+// #1114's own resolve_sample() fix -- has no "Retry child" button, only
+// changing an analyzer option to force a new idempotency key or
+// resubmitting from scratch.
+func TestWorkbenchGhidraMissingSampleMarkerIsRetryable(t *testing.T) {
+	sample := []byte("MZ" + strings.Repeat("\x00", 200))
+	trueHash := workbenchTestSampleSHA256(sample)
+	s, root := newWorkbenchFixture(t, sample)
+	requests, results := filepath.Join(root, "ghidra-requests"), filepath.Join(root, "ghidra-results")
+	for _, dir := range []string{requests, results} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(results, "status.json"), []byte(`{"version":1,"updated_at":"`+time.Now().UTC().Format(time.RFC3339)+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GHIDRA_REQUEST_DIR", requests)
+	t.Setenv("GHIDRA_RESULTS_DIR", results)
+
+	run, _, err := s.createWorkbenchRun(workbenchRunRequest{
+		PayloadSHA256: workbenchTestHash,
+		Analyzers:     []workbenchSelection{{AnalyzerID: "ghidra", Options: defaultWorkbenchOptions("ghidra")}},
+	}, "owner-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !markerExists(requests, trueHash, ".request") {
+		t.Fatal("Ghidra request marker missing")
+	}
+	// Simulate exactly what ghidra-worker.py does on an unresolvable sample:
+	// rename the marker in place, no result file written at all.
+	if err := os.Rename(
+		filepath.Join(requests, trueHash+".request"),
+		filepath.Join(requests, trueHash+".request.missing-sample"),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	reconciled, err := s.getWorkbenchRun(run.ID, "owner-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := reconciled.Children[0]
+	if child.State != "failed" {
+		t.Fatalf("child.State = %q, want failed", child.State)
+	}
+	if !child.Retryable {
+		t.Fatalf("a .request.missing-sample marker must leave the child retryable, same as any other terminal failure: %+v", child)
+	}
+}
+
 func TestWorkbenchGhidraQueueCancelAndPartialFailure(t *testing.T) {
 	sample := []byte("MZ" + strings.Repeat("\x00", 200))
 	trueHash := workbenchTestSampleSHA256(sample)

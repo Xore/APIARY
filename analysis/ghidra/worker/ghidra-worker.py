@@ -36,6 +36,7 @@ endpoint_is_local() refuses to send it anywhere but this host or its network.
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import ipaddress
 import json
 import mimetypes
@@ -63,6 +64,36 @@ REQUEST_DIR = Path(os.environ.get("GHIDRA_REQUEST_DIR", "/ghidra-requests"))
 RESULTS_DIR = Path(os.environ.get("GHIDRA_RESULTS_DIR", "/ghidra-results"))
 SAMPLES_DIR = Path(os.environ.get(
     "GHIDRA_SAMPLES_DIR", "/var/lib/honeypot-sandbox/inbox/samples"))
+
+# #1114: the dashboard's Ghidra/Rev-Deck submission path deliberately never
+# writes sample content -- only sandbox/submit-capture.sh's Linux-sandbox flow
+# ever populates SAMPLES_DIR. A Ghidra/Rev-Deck request whose sample was never
+# separately queued through the sandbox first had nowhere to resolve from and
+# always failed with "sample is not in SAMPLES_DIR", confirmed live against a
+# genuinely fresh install (#787). Rather than add a second population step
+# (a race between "request written" and "sample copied in" to guard against,
+# plus a new watcher process to run), resolve_sample() below searches the same
+# raw capture roots submit-capture.sh already knows about, on demand, the
+# first time a hash is actually requested -- removing the separate inbox
+# concept for this path entirely. ghidra-worker.py's systemd unit
+# (ProtectSystem=strict) already permits read access to arbitrary host paths;
+# only writes are confined to ReadWritePaths, so this needs no sandboxing
+# change, just read()s.
+#
+# COWRIE_DOWNLOADS_DIR intentionally does NOT default to
+# /opt/stacks/honeypot-stack/... (submit-capture.sh's own hardcoded value) --
+# that path predates the #783 apiary rebrand and no longer exists on any
+# current install (see #1088). /opt/stacks/apiary is this repo's own current
+# layout.
+COWRIE_DOWNLOADS_DIR = Path(os.environ.get(
+    "GHIDRA_COWRIE_DOWNLOADS_DIR", "/opt/stacks/apiary/logs/cowrie/downloads"))
+# dionaea-lib and dashboard-state are Docker-managed named volumes (no fixed
+# host path -- docker chooses the mountpoint), so their content roots are
+# resolved via `docker volume inspect` at run time, the same way
+# submit-capture.sh itself resolves them, rather than guessing a mountpoint.
+DIONAEA_VOLUME = os.environ.get("GHIDRA_DIONAEA_VOLUME", "dionaea-lib")
+DASHBOARD_STATE_VOLUME = os.environ.get(
+    "GHIDRA_DASHBOARD_STATE_VOLUME", "dashboard-state")
 API_BASE = os.environ.get("GHIDRA_API_BASE", "http://127.0.0.1:9090").rstrip("/")
 LOCK_FILE = Path(os.environ.get(
     "GHIDRA_LOCK", "/run/lock/honeypot-ghidra-worker.lock"))
@@ -300,6 +331,84 @@ def now() -> str:
 
 def log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
+
+
+def _docker_volume_mountpoint(volume: str) -> Path | None:
+    try:
+        out = subprocess.run(
+            ["docker", "volume", "inspect", volume, "--format", "{{.Mountpoint}}"],
+            capture_output=True, text=True, timeout=10, check=True,
+        ).stdout.strip()
+    except (subprocess.SubprocessError, OSError):
+        return None
+    return Path(out) if out.startswith("/") else None
+
+
+def _payload_roots() -> list[Path]:
+    """Raw capture directories a hash might resolve against -- the same set
+    sandbox/submit-capture.sh searches, so a Ghidra/Rev-Deck submission and a
+    Linux-sandbox submission of the same capture agree on where to look.
+    Recomputed on every call rather than cached: Docker volume mountpoints are
+    stable for a given volume's lifetime in practice, but the cost of an
+    extra `docker volume inspect` per drain cycle is negligible next to an
+    actual Ghidra analysis, and caching a stale path silently would be a far
+    worse failure mode than this."""
+    roots = []
+    if COWRIE_DOWNLOADS_DIR.is_dir():
+        roots.append(COWRIE_DOWNLOADS_DIR)
+    dionaea_mount = _docker_volume_mountpoint(DIONAEA_VOLUME)
+    if dionaea_mount is not None:
+        binaries = dionaea_mount / "binaries"
+        if binaries.is_dir():
+            roots.append(binaries)
+    state_mount = _docker_volume_mountpoint(DASHBOARD_STATE_VOLUME)
+    if state_mount is not None:
+        scripts = state_mount / "script-payloads"
+        if scripts.is_dir():
+            roots.append(scripts)
+    return roots
+
+
+def resolve_sample(sha: str) -> Path | None:
+    """Resolve a request's sha256 to real sample content, trying SAMPLES_DIR
+    first (already-populated -- e.g. the sample was also submitted through
+    the Linux sandbox, or a future population step writes there) and falling
+    back to a live search of the raw capture roots (#1114) otherwise. Never
+    writes into SAMPLES_DIR itself: unlike submit-capture.sh, this worker has
+    no reason to make the resolution durable across a lookup that already
+    only takes a live filesystem scan, and not caching keeps a rotated-out
+    capture from resolving to a stale copy forever.
+
+    Two passes over each root, matching submit-capture.sh's own two-phase
+    search: an exact filename match (cheap, and correct whenever the capture
+    is already stored under its own hash -- true for most of these sensors
+    most of the time) before falling back to hashing every candidate file
+    (needed for dionaea, which does not name captures by hash)."""
+    direct = SAMPLES_DIR / sha
+    if direct.is_file():
+        return direct
+
+    roots = _payload_roots()
+    for root in roots:
+        candidate = root / sha
+        if candidate.is_file():
+            return candidate
+
+    for root in roots:
+        try:
+            entries = list(root.iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            if not entry.is_file():
+                continue
+            try:
+                digest = hashlib.sha256(entry.read_bytes()).hexdigest()
+            except OSError:
+                continue
+            if digest == sha:
+                return entry
+    return None
 
 
 class GhidraError(RuntimeError):
@@ -1556,9 +1665,9 @@ def drain_revdeck() -> int:
             request.rename(request.with_suffix(".request.invalid"))
             continue
 
-        sample = SAMPLES_DIR / sha
-        if not sample.is_file():
-            log(f"sample {sha} is not in {SAMPLES_DIR} - dropping revdeck request")
+        sample = resolve_sample(sha)
+        if sample is None:
+            log(f"sample {sha} could not be resolved from {SAMPLES_DIR} or any known capture root - dropping revdeck request")
             request.rename(request.with_suffix(".request.missing-sample"))
             continue
 
@@ -1737,9 +1846,9 @@ def drain() -> int:
             request.rename(request.with_suffix(".request.invalid"))
             continue
 
-        sample = SAMPLES_DIR / sha
-        if not sample.is_file():
-            log(f"sample {sha} is not in {SAMPLES_DIR} - dropping request")
+        sample = resolve_sample(sha)
+        if sample is None:
+            log(f"sample {sha} could not be resolved from {SAMPLES_DIR} or any known capture root - dropping request")
             request.rename(request.with_suffix(".request.missing-sample"))
             continue
 

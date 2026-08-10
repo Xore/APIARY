@@ -302,6 +302,15 @@ func (s *store) reconcileWorkbenchRun(run workbenchRun) (workbenchRun, bool) {
 			if state != "" {
 				child.State, child.Reason = state, reason
 				child.Cancelable = state == "queued"
+				// #1114: a .request.failed/.request.invalid/.request.missing-sample
+				// marker is just as terminal-failed as a result-based failure
+				// above, which does set this -- without it, an operator who
+				// hits one of these has no "Retry child" button, only
+				// changing an analyzer option to force a new idempotency key
+				// or resubmitting from scratch.
+				if state == "failed" {
+					child.Retryable = child.Attempts <= child.Options.RetryLimit
+				}
 			}
 			child.Stale = loadGhidraStatus().Stale
 		case "revdeck":
@@ -324,6 +333,10 @@ func (s *store) reconcileWorkbenchRun(run workbenchRun) (workbenchRun, bool) {
 			if state != "" {
 				child.State, child.Reason = state, reason
 				child.Cancelable = state == "queued"
+				// #1114: see the matching comment in the ghidra case above.
+				if state == "failed" {
+					child.Retryable = child.Attempts <= child.Options.RetryLimit
+				}
 			}
 		case "linux-sandbox", "windows-sandbox":
 			if result, ok := newestSandboxResult(child.AnalyzerID, run.PayloadSHA256, sandboxResults, child.CreatedAt); ok {

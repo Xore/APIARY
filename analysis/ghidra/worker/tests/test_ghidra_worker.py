@@ -9,7 +9,7 @@ loud, so they are tested without a server in the way.
 
 Usage: analysis/ghidra/worker/tests/test_ghidra_worker.py
 """
-import importlib.util, json, os, subprocess, sys, tempfile, threading
+import hashlib, importlib.util, json, os, subprocess, sys, tempfile, threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -383,6 +383,51 @@ def test_unit():
         check(not w._prompt_was_truncated(usage, 25000), f"unknown is kept: {why}")
     # A short prompt is not a truncated one.
     check(not w._prompt_was_truncated({"prompt_tokens": 40}, 400), "40 of 400 chars")
+
+
+def test_resolve_sample():
+    """#1114: a Ghidra/Rev-Deck request must resolve real sample content even
+    when nothing pre-populated SAMPLES_DIR -- the dashboard never writes it,
+    and (before this fix) only the unrelated Linux-sandbox flow did.
+    DIONAEA/DASHBOARD_STATE volumes are left pointed at names that don't
+    exist so _docker_volume_mountpoint fails fast and this stays hermetic
+    (no real docker daemon needed to test the logic that matters here)."""
+    tmp = Path(tempfile.mkdtemp())
+    samples = tmp / "samples"
+    cowrie = tmp / "cowrie-downloads"
+    samples.mkdir()
+    cowrie.mkdir()
+    os.environ.update({
+        "GHIDRA_SAMPLES_DIR": str(samples),
+        "GHIDRA_COWRIE_DOWNLOADS_DIR": str(cowrie),
+        "GHIDRA_DIONAEA_VOLUME": "nonexistent-volume-1114-test",
+        "GHIDRA_DASHBOARD_STATE_VOLUME": "nonexistent-volume-1114-test-2",
+    })
+    w = load_worker()
+
+    sha_direct = "a" * 64
+    (samples / sha_direct).write_bytes(b"already in SAMPLES_DIR")
+    check(w.resolve_sample(sha_direct) == samples / sha_direct,
+          "sample already in SAMPLES_DIR resolves directly")
+
+    sha_named = "b" * 64
+    (cowrie / sha_named).write_bytes(b"cowrie download named by its own hash")
+    check(w.resolve_sample(sha_named) == cowrie / sha_named,
+          "capture root file named exactly by its hash resolves (exact-match pass)")
+
+    content = b"dionaea-style capture, not named by its own hash"
+    sha_content = hashlib.sha256(content).hexdigest()
+    (cowrie / "not-a-hash-filename.bin").write_bytes(content)
+    check(w.resolve_sample(sha_content) == cowrie / "not-a-hash-filename.bin",
+          "capture root file NOT named by its hash still resolves (content-hash fallback pass)")
+
+    sha_missing = "c" * 64
+    check(w.resolve_sample(sha_missing) is None,
+          "a hash with no matching sample anywhere resolves to None")
+
+    for key in ("GHIDRA_SAMPLES_DIR", "GHIDRA_COWRIE_DOWNLOADS_DIR",
+                "GHIDRA_DIONAEA_VOLUME", "GHIDRA_DASHBOARD_STATE_VOLUME"):
+        os.environ.pop(key, None)
 
 
 def test_spool(ghidra):
@@ -911,6 +956,7 @@ def main():
     statictools = serve(StaticToolsStub)
     revdeck = serve(RevDeckStub)
     test_unit()
+    test_resolve_sample()
     test_spool(ghidra)
     test_triage(ghidra, model, truncating)
     test_triage_gpu_queue_falls_back_when_enqueue_fails(ghidra, model)
