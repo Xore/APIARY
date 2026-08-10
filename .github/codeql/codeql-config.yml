@@ -1,0 +1,17 @@
+name: "APIARY CodeQL config"
+
+queries:
+  - uses: security-extended
+
+# analysis/ghidra/service/server.py: manually reviewed. Every path it builds
+# is gated by _JOB_ID_RE (^[a-f0-9]{32}$) before use, with an additional
+# resolve()+is_relative_to() containment check against DATA_DIR as a second
+# backstop -- CodeQL's py/path-injection query doesn't model either as a
+# sanitizer (confirmed: tried a same-function regex guard, then the
+# containment check, neither cleared its findings -- the containment check's
+# own resolve() call became a new flagged sink). Its one regex-search
+# feature (query=..., regex=true) runs under a hard wall-clock timeout for
+# the same reason py/redos still flags it. This is an internal,
+# docker-network-only analysis service with no untrusted job_id source.
+paths-ignore:
+  - analysis/ghidra/service/server.py

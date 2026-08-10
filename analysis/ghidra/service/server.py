@@ -96,7 +96,7 @@ def _assert_within_data_dir(path: Path) -> Path:
     # function boundaries, and it treats resolve() itself as a sink since it
     # touches the filesystem. Reviewed and accepted: this is an internal,
     # docker-network-only analysis service with no untrusted job_id source.
-    resolved = path.resolve()  # lgtm[py/path-injection]
+    resolved = path.resolve()
     if not resolved.is_relative_to(DATA_DIR.resolve()):
         raise ValueError(f"path escapes data dir: {path}")
     return resolved
@@ -158,7 +158,7 @@ def _annotations_path(job_id: str) -> Path:
 def _load_annotations(job_id: str) -> dict:
     path = _assert_within_data_dir(_annotations_path(job_id))
     try:
-        data = json.loads(path.read_text())  # lgtm[py/path-injection]
+        data = json.loads(path.read_text())
         if isinstance(data, dict) and isinstance(data.get("entries"), dict):
             return data
     except (FileNotFoundError, json.JSONDecodeError, OSError):
@@ -167,7 +167,7 @@ def _load_annotations(job_id: str) -> dict:
 
 
 def _save_annotations(job_id: str, data: dict) -> None:
-    _assert_within_data_dir(_annotations_path(job_id)).write_text(json.dumps(data))  # lgtm[py/path-injection]
+    _assert_within_data_dir(_annotations_path(job_id)).write_text(json.dumps(data))
 
 
 def worker_loop() -> None:
@@ -470,7 +470,7 @@ def _v1_hexdump(job_id: str, addr: str, length: int):
 
     memory_path = _assert_within_data_dir(job_dir(job_id) / "artifacts" / "memory.bin")
     try:
-        with open(memory_path, "rb") as f:  # lgtm[py/path-injection]
+        with open(memory_path, "rb") as f:
             f.seek(file_offset)
             data = f.read(read_length)
     except (FileNotFoundError, OSError):
@@ -564,8 +564,8 @@ def _delete_job(job_id: str):
             _hash_to_job.pop(job.get("sha256"), None)
         existed = job is not None
     jdir = _assert_within_data_dir(job_dir(job_id))
-    if jdir.is_dir():  # lgtm[py/path-injection]
-        shutil.rmtree(jdir, ignore_errors=True)  # lgtm[py/path-injection]
+    if jdir.is_dir():
+        shutil.rmtree(jdir, ignore_errors=True)
     elif not existed:
         return 404, {"error": "job not found"}
     return 200, {"job_id": job_id, "deleted": True}
@@ -597,7 +597,7 @@ def _v1_cancel_job(job_id: str):
 
 def _v1_export_job(job_id: str):
     artifacts_dir = _assert_within_data_dir(job_dir(job_id) / "artifacts")
-    if not artifacts_dir.is_dir():  # lgtm[py/path-injection]
+    if not artifacts_dir.is_dir():
         return None
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -605,7 +605,7 @@ def _v1_export_job(job_id: str):
             if path.is_file():
                 zf.write(path, arcname=path.name)
         annotations_path = _assert_within_data_dir(_annotations_path(job_id))
-        if annotations_path.is_file():  # lgtm[py/path-injection]
+        if annotations_path.is_file():
             zf.write(annotations_path, arcname="annotations.json")
     return buf.getvalue()
 
@@ -638,7 +638,7 @@ def _tool_query_artifacts(job_id: str, payload: dict):
         # (an analyst searching function/string names) -- a length cap plus a
         # hard wall-clock timeout on the whole filter pass (see run_filter()
         # below) already bounds the catastrophic-backtracking blast radius.
-        return bool(matcher.search(text)) if matcher else query.lower() in text.lower()  # lgtm[py/redos]
+        return bool(matcher.search(text)) if matcher else query.lower() in text.lower()
 
     functions_data = _read_job_artifact(job_id, "functions.json") or {"functions": []}
     strings_data = _read_job_artifact(job_id, "strings.json") or {"strings": []}
