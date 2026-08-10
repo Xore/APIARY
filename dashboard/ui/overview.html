@@ -20,7 +20,20 @@
             <p class="subtitle">{{if presentation.DashboardSubtitle}}{{presentation.DashboardSubtitle}}{{else}}Live attack telemetry, captured evidence, correlated campaigns, and collection health in one operational view.{{end}}</p>
           </div>
           <div class="live-panel">
+            {{if .Ready}}
             <span class="gen">updated <span data-hp-utc="{{utcOrEmpty .Generated}}">{{.Generated.Format "2006-01-02 15:04:05 MST"}}</span> &bull; refreshes automatically</span>
+            {{else}}
+            {{/* #1142: .Generated is the zero time before the first
+                 rebuild() cycle finishes -- printing it verbatim
+                 ("0001-01-01...") reads as broken the same way the empty
+                 card states below did. Same fast-reload pattern
+                 payloads.html's own data-payload-warming note already
+                 uses, so the skeleton state above resolves to real content
+                 within a couple seconds of the first rebuild() finishing,
+                 not the next 60s auto-refresh tick. */}}
+            <span class="gen" data-dashboard-warming><span class="status-dot" aria-hidden="true"></span> Warming up &mdash; running the first collection pass.</span>
+            <script nonce="{{.Nonce}}">setTimeout(()=>location.reload(),1500)</script>
+            {{end}}
           </div>
         </header>
 
@@ -86,8 +99,19 @@
             </div>
             <div class="heatmap__legend"><span>Less</span><span class="heatmap__cell"></span><span class="heatmap__cell"></span><span class="heatmap__cell"></span><span class="heatmap__cell"></span><span class="heatmap__cell"></span><span>More</span></div>
             <p class="note">Every sensor's activity in the last 24 hours, hour by hour. Hover or focus a cell for the exact count.</p>
-            {{else}}
+            {{else if .Ready}}
             <p class="empty">No events in the last 24 hours.</p>
+            {{else}}
+            {{/* #1142: before the first rebuild() cycle completes, every
+                 card on this page is empty not because the honeypot is
+                 quiet but because the dashboard hasn't finished its first
+                 pass yet -- rendering the SAME "no events" text either way
+                 makes a warming-up dashboard look identical to a broken
+                 one (the exact confusion #828's own comment on
+                 s.ready.Store(true), main.go, already documents). A
+                 shaped skeleton (Xore/theme's .skeleton, sized to this
+                 card's real content) reads as "still loading" instead. */}}
+            <div class="skeleton" style="height:90px" aria-hidden="true"></div>
             {{end}}
             </div>
             {{/* #471: companion panel, not a replacement for the heatmap --
@@ -112,7 +136,9 @@
           <div class="section-heading"><div><h2>Collection status</h2><p>Sensor activity and the protocols currently attracting traffic.</p></div><a class="section-link" href="/source-health">Open pipeline health &rarr;</a></div>
           <div class="card half sensor-card">
             <h2>Sensor feeds</h2>
+            {{if or .Sensors .Ready}}
             <p class="note">Showing all {{len .Sensors}} sensor{{if ne (len .Sensors) 1}}s{{end}}. Active = recent traffic, quiet = online with no recent event, stale = its log has stopped updating. A quiet honeypot is not necessarily offline.</p>
+            {{end}}
             {{if .Sensors}}
             <div class="card__scroll"><table class="data-table"><tbody>
               {{range .Sensors}}
@@ -122,7 +148,15 @@
                   <td class="ago">{{.Ago}}</td></tr>
               {{end}}
             </tbody></table></div>
-            {{else}}<p class="empty">no sensor logs found under /logs</p>{{end}}
+            {{else if .Ready}}<p class="empty">no sensor logs found under /logs</p>
+            {{else}}
+            {{/* #1142: see the Activity card's own comment above -- a
+                 config-sounding "no sensor logs found" before the first
+                 rebuild() cycle finishes reads as broken, not loading. */}}
+            <div class="skeleton-line" style="width:60%"></div>
+            <div class="skeleton-line" style="width:85%"></div>
+            <div class="skeleton-line" style="width:40%"></div>
+            {{end}}
           </div>
 
           {{template "tbl" dict "t" "Protocols probed" "rows" .Protocols "class" "half"}}
@@ -142,7 +176,14 @@
               <tbody>
               {{range .Recent}}{{template "everow" .}}{{end}}
             </tbody></table></div>
-            {{else}}<p class="empty">no events yet — waiting for traffic</p>{{end}}
+            {{else if .Ready}}<p class="empty">no events yet — waiting for traffic</p>
+            {{else}}
+            {{/* #1142: see the Activity card's own comment above. */}}
+            <div class="skeleton-line" style="width:90%"></div>
+            <div class="skeleton-line" style="width:75%"></div>
+            <div class="skeleton-line" style="width:80%"></div>
+            <div class="skeleton-line" style="width:65%"></div>
+            {{end}}
           </div>
         </div>
 
@@ -199,7 +240,12 @@
               {{end}}
               </tbody>
             </table></div>
-            {{else}}<p class="empty">no payloads captured yet — cowrie logs downloads/uploads during a shell session</p>{{end}}
+            {{else if .Ready}}<p class="empty">no payloads captured yet — cowrie logs downloads/uploads during a shell session</p>
+            {{else}}
+            {{/* #1142: see the Activity card's own comment above. */}}
+            <div class="skeleton-line" style="width:70%"></div>
+            <div class="skeleton-line" style="width:55%"></div>
+            {{end}}
           </div>
 
           <div class="card wide">
@@ -222,7 +268,12 @@
               <thead><tr><th>score</th><th>network</th><th>events</th><th>ips</th><th>sensors</th><th>last seen</th></tr></thead>
               <tbody>{{template "campaignrows-summary" .Campaigns}}</tbody>
             </table></div>
-            {{else}}<p class="empty">waiting for correlatable public source addresses</p>{{end}}
+            {{else if .Ready}}<p class="empty">waiting for correlatable public source addresses</p>
+            {{else}}
+            {{/* #1142: see the Activity card's own comment above. */}}
+            <div class="skeleton-line" style="width:80%"></div>
+            <div class="skeleton-line" style="width:60%"></div>
+            {{end}}
           </div>
 
         </div>
