@@ -159,31 +159,26 @@ wait_gpu_free() {
 }
 
 free_gpu; wait_gpu_free
-# -ngl 99: full GPU offload attempted first; if the model doesn't fit in
-# 20GB VRAM, llama.cpp's own allocator falls back / OOMs loudly rather than
-# silently mis-offloading — see the retry-with-lower-ngl handling below.
-docker exec -d rex86-eval bash -lc "cd /work && ./llama.cpp/build/bin/llama-server -m /work/other-models/${name}-f16.gguf -ngl 99 --port 8080 --host 0.0.0.0 > /tmp/${name}_server.log 2>&1"
+# -ngl auto (the default -- passed explicitly to be clear this isn't an
+# oversight): found live (2026-08-10, codellama-13B) that this pipeline's
+# old approach -- try a hardcoded -ngl 99, on failure retry once at a
+# hardcoded -ngl 40 -- actively defeated llama.cpp's own --fit mechanism
+# (on by default), which auto-computes the right GPU-layer split for
+# whatever VRAM is actually free, but only for args the invocation leaves
+# unset. Passing an explicit -ngl value disables that outright ("failed to
+# fit params to free device memory: n_gpu_layers already set by user to
+# 40, abort" in the log), and the fixed 40 was never a real reduction for
+# codellama-13B's own ~40 layers anyway -- it OOMed identically to -ngl 99.
+# Trusting --fit (default 'on') to size this itself replaces the whole
+# guess-and-retry pattern, correctly, for every model size in this queue.
+docker exec -d rex86-eval bash -lc "cd /work && ./llama.cpp/build/bin/llama-server -m /work/other-models/${name}-f16.gguf -ngl auto --port 8080 --host 0.0.0.0 > /tmp/${name}_server.log 2>&1"
 up=0
 for i in $(seq 1 60); do
   if docker exec rex86-eval curl -sf http://127.0.0.1:8080/health >/dev/null 2>&1; then up=1; break; fi
   sleep 3
 done
 if [[ "$up" -ne 1 ]]; then
-  echo "=== ${name}: llama-server did not come up at -ngl 99, check /tmp/${name}_server.log (likely VRAM OOM for this size) ==="
-  docker exec rex86-eval tail -40 "/tmp/${name}_server.log" || true
-  free_gpu
-  # RAM-offload retry: partial GPU layers, rest on system RAM -- explicitly
-  # authorized for the large models (codellama-34B, qwen-32B) that won't
-  # fit fully in 20GB.
-  echo "=== ${name}: retrying with partial GPU offload (-ngl 40) + system RAM ==="
-  docker exec -d rex86-eval bash -lc "cd /work && ./llama.cpp/build/bin/llama-server -m /work/other-models/${name}-f16.gguf -ngl 40 --port 8080 --host 0.0.0.0 > /tmp/${name}_server.log 2>&1"
-  for i in $(seq 1 60); do
-    if docker exec rex86-eval curl -sf http://127.0.0.1:8080/health >/dev/null 2>&1; then up=1; break; fi
-    sleep 3
-  done
-fi
-if [[ "$up" -ne 1 ]]; then
-  echo "=== ${name}: FAILED to bring up llama-server even with partial offload -- see /tmp/${name}_server.log ==="
+  echo "=== ${name}: FAILED to bring up llama-server -- see /tmp/${name}_server.log ==="
   docker exec rex86-eval tail -60 "/tmp/${name}_server.log" || true
   exit 1
 fi
