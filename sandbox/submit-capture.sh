@@ -12,7 +12,7 @@ samples="$root_dir/inbox/samples"
 mkdir -p "$queue" "$samples" "$root_dir/inbox/completed" "$root_dir/inbox/failed" "$root_dir/export"
 chmod 0700 "$root_dir/inbox" "$queue" "$samples" "$root_dir/inbox/completed" "$root_dir/inbox/failed" "$root_dir/export"
 
-roots=(/opt/stacks/honeypot-stack/logs/cowrie/downloads)
+roots=(/opt/stacks/apiary/logs/cowrie/downloads)
 labels=(cowrie)
 dionaea_root="$(docker volume inspect dionaea-lib --format '{{.Mountpoint}}' 2>/dev/null || true)/binaries"
 scripts_root="$(docker volume inspect dashboard-state --format '{{.Mountpoint}}' 2>/dev/null || true)/script-payloads"
