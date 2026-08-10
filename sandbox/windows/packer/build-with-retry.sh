@@ -111,14 +111,22 @@ while (( attempt <= max_attempts )); do
   unplug_pid=""
   if [[ -x "$unplug_script" ]]; then
     (
-      for _ in $(seq 1 120); do
+      # 300s, not 120s: packer's own pre-boot setup (ISO checksum over a
+      # ~7GB file, xorriso CD creation, port negotiation) can genuinely
+      # take longer than 120s on its own, and takes longer still if a
+      # just-killed prior attempt's packer process hasn't released its
+      # port reservation yet -- confirmed live, a stale packer process from
+      # a manually-killed attempt held port 5999 long enough that this
+      # wait loop gave up before qemu ever started, silently leaving a
+      # whole attempt with no unplug watcher running at all.
+      for _ in $(seq 1 300); do
         [[ -S "$qmp_sock" ]] && break
         sleep 1
       done
       if [[ -S "$qmp_sock" ]]; then
         python3 "$unplug_script" "$qmp_sock"
       else
-        echo "=== unplug-pxe-on-reset.sh: ${qmp_sock} never appeared within 120s -- not starting it, PXE NIC will not be unplugged this attempt ===" >&2
+        echo "=== unplug-pxe-on-reset.sh: ${qmp_sock} never appeared within 300s -- not starting it, PXE NIC will not be unplugged this attempt ===" >&2
       fi
     ) &
     unplug_pid=$!
