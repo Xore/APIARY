@@ -110,7 +110,7 @@
   {{template "topbar" .}}
   {{template "sidebar" .}}
   <main class="app-main">
-      <div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
+      <div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content data-hp-pl-hash="{{.Hash}}" data-hp-pl-sha256="{{.SHA256}}">
         <header class="overview-header" id="analysis-header">
           <div>
             <div class="label-section">Evidence</div>
@@ -198,11 +198,22 @@
                indicators) -- same additive, unbounded-list reasoning as
                earlier chunks. Every sandbox run this payload has ever had
                lands in this one table, no cap. */}}
-          <div class="card {{if or .ScriptType .Indicators}}half{{else}}wide{{end}}"><h2>Isolated dynamic analysis</h2>{{if .SandboxRuns}}<div class="card__scroll"><table class="data-table"><thead><tr><th>completed</th><th>exit</th><th>changed paths</th><th>details</th></tr></thead><tbody>{{range .SandboxRuns}}<tr><td>{{.CompletedAt}}</td><td class="n">{{.ExitStatus}}</td><td class="n">{{len .ChangedFiles}}</td><td><a class="lnk" href="/sandbox/{{.Job | urlquery}}">sandbox report &rarr;</a></td></tr>{{end}}</tbody></table></div>{{else}}<p class="empty">No completed KVM sandbox run for this payload. Queue one from the <a class="lnk" href="/payload-workbench/{{.Hash}}">analysis workbench</a>.</p>{{end}}</div>
-          <div class="card half"><h2>GitHub analysis</h2>{{if .GitHubAnalysis}}<div class="card__row"><span class="card__label">exit status</span><span class="card__value card__value--mono">{{.GitHubAnalysis.ExitStatus}}</span></div>{{if .GitHubAnalysis.Verdict}}<div class="card__row"><span class="card__label">detections</span><span class="card__value card__value--mono">{{.GitHubAnalysis.Verdict.Malicious}} / {{.GitHubAnalysis.Verdict.Total}} &bull; {{.GitHubAnalysis.Verdict.Level}}</span></div>{{end}}{{if .Family}}<div class="card__row"><span class="card__label">family</span><span class="card__value"><a class="lnk" href="{{.FamilyLink}}" title="Other sessions that delivered this family">{{.Family}}</a></span></div>{{end}}<a class="lnk" href="/github-analysis/{{.GitHubAnalysis.SHA256}}">full result &rarr;</a>{{else}}<p class="empty">Not published to Xore/honeypot. Use <strong>Publish to Xore/honeypot</strong> from the payload actions menu above to queue one.</p>{{end}}</div>
-          <div class="card wide" id="known-analysis"><h2>Known elsewhere {{if .Correlation.Known}}<span class="badge badge--green">already analyzed</span>{{else}}<span class="badge badge--muted">not seen elsewhere</span>{{end}}</h2><p class="note">Advisory only &mdash; checked before queueing a new run so you know if this hash was already analyzed. Never blocks a fresh submission.</p>
-            <div class="card__row"><span class="card__label">Ghidra</span><span class="card__value">{{if .Correlation.Ghidra}}<span class="badge badge--muted">{{.Correlation.Ghidra.ExitStatus}}</span> completed {{.Correlation.Ghidra.CompletedAt}} &mdash; <a class="lnk" href="/ghidra/{{.Hash}}">full result &rarr;</a>{{else}}<span class="empty">not yet analyzed</span> &mdash; <a class="lnk" href="/payload-workbench/{{.Hash}}">queue Ghidra &rarr;</a>{{end}}</span></div>
-            <div class="card__row"><span class="card__label">Elasticsearch sightings</span><span class="card__value">{{if .Correlation.ESAvailable}}{{.Correlation.ESSightings}} event(s){{if .Correlation.ESFirstSeen}}, {{if .Correlation.ESTruncated}}on or before {{end}}{{.Correlation.ESFirstSeen}} &ndash; {{.Correlation.ESLastSeen}}{{end}}{{if .Correlation.ESTruncated}} <span class="chip" title="More than 200 sightings; first-seen is the oldest record in the most recent 200, not necessarily the true first sighting.">truncated</span>{{end}}{{range .Correlation.ESSensors}} <span class="chip">{{.Key}}: {{.Count}}</span>{{end}}{{else}}<span class="empty">Elasticsearch not configured</span>{{end}}</span></div>
+          {{/* #1142: SandboxRuns/GitHubAnalysis/Correlation are no longer
+               computed synchronously for this page (analyzePayloadFast,
+               not analyzePayload -- see main.go's own comment) -- each
+               depends on a genuinely slow multi-source lookup
+               (payloadAggregationFor, ES fetches up to 10000 documents per
+               source). These three cards render a shaped skeleton
+               unconditionally on the initial response and hydrate for
+               real via /api/payload-analysis/<hash>/aggregation, fetched
+               by hp-payload-analysis.js once the page has loaded --
+               that script also owns the failure state (a fetch error
+               replaces the skeleton with a clear message, never leaves it
+               spinning forever). */}}
+          <div class="card {{if or .ScriptType .Indicators}}half{{else}}wide{{end}}" id="hp-pl-sandbox-card"><h2>Isolated dynamic analysis</h2><div data-hp-pl-sandbox-runs><div class="skeleton-line" style="width:70%"></div><div class="skeleton-line" style="width:50%"></div></div></div>
+          <div class="card half" id="hp-pl-github-card"><h2>GitHub analysis</h2><div data-hp-pl-github-analysis><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:40%"></div></div></div>
+          <div class="card wide" id="known-analysis"><h2 id="hp-pl-known-elsewhere-heading">Known elsewhere</h2><p class="note">Advisory only &mdash; checked before queueing a new run so you know if this hash was already analyzed. Never blocks a fresh submission.</p>
+            <div data-hp-pl-known-elsewhere><div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:65%"></div></div>
           </div>
         </div>
 
@@ -243,6 +254,7 @@
   <iframe class="pdf-viewer-frame" id="hp-pl-viewer-frame" title="Payload PDF report preview"></iframe>
 </section>
 <script defer src="{{asset "/static/hp-payload-report.js"}}"></script>
+<script defer src="{{asset "/static/hp-payload-analysis.js"}}"></script>
 </body>
 </html>
 {{end}}

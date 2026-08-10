@@ -21,25 +21,25 @@ import (
 // across every owner, so there is nothing extra to learn from workbench's
 // own run history that would justify crossing its owner-isolation boundary.
 type hashCorrelation struct {
-	Known   bool
-	Ghidra  *ghidraResult
-	Sandbox []sandboxResult
-	GitHub  *githubAnalysisResult
+	Known   bool                  `json:"known"`
+	Ghidra  *ghidraResult         `json:"ghidra,omitempty"`
+	Sandbox []sandboxResult       `json:"sandbox,omitempty"`
+	GitHub  *githubAnalysisResult `json:"github,omitempty"`
 
 	// Elasticsearch sighting summary: how many raw sensor events carried
 	// this hash, and which sensors/when. Advisory and best-effort -- always
 	// zero-value when Elasticsearch is unconfigured or the query fails,
 	// never blocks anything that depends on the rest of this struct.
-	ESAvailable bool
-	ESSightings int
-	ESSensors   []kv
-	ESFirstSeen string
-	ESLastSeen  string
+	ESAvailable bool   `json:"es_available"`
+	ESSightings int    `json:"es_sightings"`
+	ESSensors   []kv   `json:"es_sensors,omitempty"`
+	ESFirstSeen string `json:"es_first_seen,omitempty"`
+	ESLastSeen  string `json:"es_last_seen,omitempty"`
 	// ESTruncated is true when ESSightings exceeds the number of records
 	// actually fetched (see correlate's cap below) -- ESFirstSeen is then
 	// only the oldest record within that capped, newest-first page, not the
 	// hash's true first sighting, which may be considerably earlier (#887).
-	ESTruncated bool
+	ESTruncated bool `json:"es_truncated"`
 }
 
 // correlateHash answers #354's "is this hash known" question by checking

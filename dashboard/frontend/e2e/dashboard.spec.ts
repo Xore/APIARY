@@ -490,4 +490,19 @@ test.describe("dashboard browser behaviour", () => {
     await expect(card.locator(".action-menu__popover")).toBeVisible();
     await expect(page).toHaveURL("/payloads");
   });
+
+  test("payload analysis hydrates the aggregation cards after the initial render (#1142)", async ({ page }) => {
+    await page.goto("/payload-analysis/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
+    // The fast path renders identity/hashes immediately; the three
+    // aggregation cards start as skeletons and hp-payload-analysis.js
+    // replaces them once /api/payload-analysis/<hash>/aggregation
+    // resolves -- this fixture hash has no sandbox/GitHub/Ghidra/ES
+    // results seeded, so hydration should land on each card's real empty
+    // state, not leave the skeleton in place forever.
+    await expect(page.locator("[data-hp-pl-sandbox-runs] .skeleton-line")).toHaveCount(0, { timeout: 5000 });
+    await expect(page.locator("[data-hp-pl-sandbox-runs]")).toContainText("No completed KVM sandbox run");
+    await expect(page.locator("[data-hp-pl-github-analysis]")).toContainText("Not published to Xore/honeypot");
+    await expect(page.locator("[data-hp-pl-known-elsewhere]")).toContainText("not yet analyzed");
+    await expect(page.locator("#hp-pl-known-elsewhere-heading")).toContainText("not seen elsewhere");
+  });
 });

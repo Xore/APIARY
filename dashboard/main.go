@@ -774,13 +774,19 @@ func main() {
 	})
 	http.HandleFunc("/payload-analysis/", func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(r.URL.Path, "/payload-analysis/")
-		analysis, err := s.analyzePayload(name)
+		// #1142: analyzePayloadFast, not analyzePayload -- the page renders
+		// from single-file static/YARA work alone and hydrates SandboxRuns/
+		// GitHubAnalysis/Correlation in asynchronously via
+		// /api/payload-analysis/<hash>/aggregation instead of blocking on
+		// them here. See analyzePayloadFast's own comment.
+		analysis, err := s.analyzePayloadFast(name)
 		if err != nil {
 			http.NotFound(w, r)
 			return
 		}
 		renderPage(w, tmpl, "payload-analysis", &analysis)
 	})
+	http.HandleFunc("/api/payload-analysis/", s.servePayloadAggregation)
 	http.HandleFunc("/export/events.csv", s.exportEventsCSV)
 	http.HandleFunc("/export/commands.csv", s.exportCommandsCSV)
 	http.HandleFunc("/export/ips.csv", s.exportIPsCSV)

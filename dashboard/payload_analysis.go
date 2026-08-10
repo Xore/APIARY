@@ -236,7 +236,96 @@ func (s *store) staticAnalysisFor(path string) (payloadStaticAnalysis, error) {
 	return a, nil
 }
 
-func (s *store) analyzePayload(name string) (binaryAnalysis, error) {
+// payloadAggregation is #1142's "slow half" of binaryAnalysis, split out so
+// /payload-analysis/<hash> can render its Identity/Findings/Content tabs
+// immediately from analyzePayloadFast's single-file work, then hydrate
+// this half in asynchronously via /api/payload-analysis/<hash>/aggregation
+// (payloadAggregationFor below) instead of blocking the whole page on it.
+// Not the pure-file-bytes/static-analysis split payloadStaticAnalysis
+// already draws (that one separates cacheable-by-content-hash work from
+// everything else, including YARA -- this one separates "genuinely slow
+// multi-source lookups" from everything else, YARA included, since a
+// single networkless scanner call stays fast enough to keep synchronous).
+type payloadAggregation struct {
+	SandboxRuns    []sandboxResult       `json:"sandbox_runs,omitempty"`
+	GitHubAnalysis *githubAnalysisResult `json:"github_analysis,omitempty"`
+	Family         string                `json:"family,omitempty"`
+	FamilyLink     string                `json:"family_link,omitempty"`
+	Correlation    hashCorrelation       `json:"correlation"`
+}
+
+// payloadAggregationFor answers #1142's "aggregation takes very long"
+// report: SandboxRuns/GitHubAnalysis/Correlation each depend on
+// loadGhidraResults/loadSandboxResults/loadGitHubAnalysisResults, which
+// fetch up to 10000 documents from ES regardless of which hash is being
+// asked about (see correlateHash's own doc comment) -- genuinely slow
+// compared to analyzePayloadFast's single-file work, and unlike that work
+// it needs no access to the payload's own bytes, just the two hashes the
+// fast path already computed and sent to the browser. Takes sha256/altID
+// directly rather than re-deriving them from name/path, so this never
+// re-reads the file the fast path already read.
+func (s *store) payloadAggregationFor(sha256, altID string) payloadAggregation {
+	var agg payloadAggregation
+	ghidraResults, sandboxResults, githubResults := loadGhidraResults(), loadSandboxResults(), loadGitHubAnalysisResults()
+	for _, run := range sandboxResults {
+		if strings.EqualFold(run.SHA256, sha256) {
+			agg.SandboxRuns = append(agg.SandboxRuns, run)
+		}
+	}
+	for _, result := range githubResults {
+		if strings.EqualFold(result.SHA256, sha256) {
+			row := result
+			agg.GitHubAnalysis = &row
+			if row.Family != "" {
+				agg.Family = boundedFamily(row.Family)
+				agg.FamilyLink = eventsURL(url.Values{"family": {row.Family}})
+			}
+			break
+		}
+	}
+	// altID is whatever identifier addressed this payload on disk -- for a
+	// Dionaea capture that's an MD5 (#364), distinct from sha256 (the true
+	// content hash, what Ghidra/sandbox/GitHub-analysis key their own
+	// results by). Passing both lets the Elasticsearch side match on
+	// either; local-store matching only ever uses the true SHA-256.
+	agg.Correlation = s.correlateHash(sha256, altID, ghidraResults, sandboxResults, githubResults)
+	return agg
+}
+
+// servePayloadAggregation backs /api/payload-analysis/<hash>/aggregation
+// (#1142): the JS payload-analysis.html loads hydrates the Isolated dynamic
+// analysis/GitHub analysis/Known elsewhere cards from, once
+// payloadAggregationFor's slower lookups finish. Takes sha256 as a query
+// parameter rather than resolving it from hash itself -- the initial page
+// render already computed it (analyzePayloadFast), so this route never
+// touches the payload's own bytes at all, only the two hashes the browser
+// already has.
+func (s *store) servePayloadAggregation(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "GET required", http.StatusMethodNotAllowed)
+		return
+	}
+	rest := strings.TrimPrefix(r.URL.Path, "/api/payload-analysis/")
+	hash, action, ok := strings.Cut(rest, "/")
+	if !ok || action != "aggregation" || !hashName.MatchString(hash) {
+		http.NotFound(w, r)
+		return
+	}
+	sha256 := r.URL.Query().Get("sha256")
+	agg := s.payloadAggregationFor(sha256, hash)
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	json.NewEncoder(w).Encode(agg)
+}
+
+// analyzePayloadFast is #1142's "fast half" of analyzePayload: identity,
+// static analysis, and YARA -- everything that is either a pure function
+// of the file's own bytes or a single fast, local, networkless scan.
+// Deliberately excludes payloadAggregation's fields (left zero-valued);
+// /payload-analysis/<hash> uses this alone for its initial render and
+// hydrates the rest in via payloadAggregationFor, called separately.
+func (s *store) analyzePayloadFast(name string) (binaryAnalysis, error) {
 	if len(s.payloadDirs) == 0 || !hashName.MatchString(name) {
 		return binaryAnalysis{}, errors.New("invalid or unavailable payload")
 	}
@@ -258,39 +347,12 @@ func (s *store) analyzePayload(name string) (binaryAnalysis, error) {
 	}
 	yara := s.yaraFor(name)
 	a.YARAMatches, a.YARAScanned, a.YARAError = yara.Matches, yara.ScannedAt, yara.Error
-	// Loaded once and reused below for a.Correlation too, not fetched a
-	// second time by correlateHash itself: see that function's own doc
-	// comment -- these three each fetch up to 10000 documents from ES
-	// regardless of which hash is being asked about.
-	ghidraResults, sandboxResults, githubResults := loadGhidraResults(), loadSandboxResults(), loadGitHubAnalysisResults()
-	for _, run := range sandboxResults {
-		if strings.EqualFold(run.SHA256, a.SHA256) {
-			a.SandboxRuns = append(a.SandboxRuns, run)
-		}
-	}
-	for _, result := range githubResults {
-		if strings.EqualFold(result.SHA256, a.SHA256) {
-			row := result
-			a.GitHubAnalysis = &row
-			if row.Family != "" {
-				a.Family = boundedFamily(row.Family)
-				a.FamilyLink = eventsURL(url.Values{"family": {row.Family}})
-			}
-			break
-		}
-	}
 	if origin, ok := earliestEventByShasum(s.getEvents())[a.SHA256]; ok {
 		a.OriginLabel = origin.Sensor + " · " + origin.Time
 		if origin.Session != "" {
 			a.OriginLink = "/sessions/" + url.PathEscape(origin.Session)
 		}
 	}
-	// a.Hash is whatever identifier addressed this payload on disk -- for a
-	// Dionaea capture that's an MD5 (#364), distinct from a.SHA256 (the true
-	// content hash computed above, what Ghidra/sandbox/GitHub-analysis key
-	// their own results by). Passing both lets the Elasticsearch side match
-	// on either; local-store matching only ever uses the true SHA-256.
-	a.Correlation = s.correlateHash(a.SHA256, a.Hash, ghidraResults, sandboxResults, githubResults)
 	if len(a.YARAMatches) > 0 {
 		boost := 25
 		for _, match := range a.YARAMatches {
@@ -302,6 +364,22 @@ func (s *store) analyzePayload(name string) (binaryAnalysis, error) {
 		a.RiskScore = min(100, a.RiskScore+boost)
 		a.RiskLevel = riskLevel(a.RiskScore)
 	}
+	return a, nil
+}
+
+// analyzePayload is analyzePayloadFast + payloadAggregationFor, merged --
+// the original, complete, synchronous analysis. Still used by callers that
+// need the whole thing in one round trip and have nowhere to hydrate a
+// second half into: reports_api.go's PDF generation and
+// workbench_orchestrator.go's own result gathering. /payload-analysis/<hash>
+// itself no longer calls this -- see analyzePayloadFast's own comment.
+func (s *store) analyzePayload(name string) (binaryAnalysis, error) {
+	a, err := s.analyzePayloadFast(name)
+	if err != nil {
+		return binaryAnalysis{}, err
+	}
+	agg := s.payloadAggregationFor(a.SHA256, a.Hash)
+	a.SandboxRuns, a.GitHubAnalysis, a.Family, a.FamilyLink, a.Correlation = agg.SandboxRuns, agg.GitHubAnalysis, agg.Family, agg.FamilyLink, agg.Correlation
 	return a, nil
 }
 
