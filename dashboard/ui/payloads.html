@@ -123,8 +123,9 @@
         </header>
 
         <div class="filters" id="analysis-filters">
+          {{/* #1140: "back to payloads" is wayfinding, not a payload action
+               -- kept as a plain chip, unlike everything below it. */}}
           <a class="chip" href="/payloads">&larr; payloads</a>
-          <a class="chip" href="/payload-workbench/{{.Hash}}">analysis workbench</a>
           {{/* #673: was a plain chip printing "origin: <label>" -- now a
                popover matching the action-menu pattern the page's own
                "..." button (below) already uses, so origin detail reads
@@ -136,17 +137,23 @@
               {{if .OriginLink}}<a class="action-menu__item" role="menuitem" href="{{.OriginLink}}">Open capturing session &rarr;</a>{{else}}<div class="hp-pl-info-row"><span class="k">session</span><span class="v">none recorded for this capture</span></div>{{end}}
             </div>
           </details>{{end}}
-          <a class="chip" href="/events?shasum={{.Hash}}">related events</a>
-          <a class="chip" href="{{.VT}}" target="_blank" rel="noopener noreferrer">VirusTotal &rarr;</a>
-          <a class="chip" href="/payload/{{.Hash}}">download isolated sample &darr;</a>
-          {{/* #474: a one-click PDF, not the Reports studio designer flow --
-               the button POSTs, stays on this page, and opens the result in
-               the same modal viewer github_analysis.html's report card
-               uses, rather than navigating to /reports. */}}
-          <button class="chip" type="button" data-hp-pl-generate-report data-hp-pl-hash="{{.Hash}}">Generate PDF report</button>
+          {{/* #1140: analysis workbench/related events/VirusTotal/download/
+               generate-PDF used to be five standalone chips alongside this
+               menu, all of them the same kind of thing ("an action on this
+               payload") as Publish below -- folded into one menu instead,
+               matching /payloads' own payloadrow action-menu
+               (payloads.html:22-33). Generate PDF report stays a <button>
+               (see #474's comment on why it POSTs in place rather than
+               linking to /reports) but action-menu__item, not chip, styles
+               a <button> exactly like the <a> items around it. */}}
           <details class="action-menu">
             <summary aria-label="Payload actions" title="Payload actions">&#8942;</summary>
             <div class="action-menu__popover" role="menu">
+              <a class="action-menu__item" role="menuitem" href="/payload-workbench/{{.Hash}}">Analysis workbench &rarr;</a>
+              <a class="action-menu__item" role="menuitem" href="/events?shasum={{.Hash}}">Related events &rarr;</a>
+              <a class="action-menu__item" role="menuitem" href="{{.VT}}" target="_blank" rel="noopener noreferrer">VirusTotal &nearr;</a>
+              <a class="action-menu__item" role="menuitem" href="/payload/{{.Hash}}">Download sample &darr;</a>
+              <button class="action-menu__item" role="menuitem" type="button" data-hp-pl-generate-report data-hp-pl-hash="{{.Hash}}">Generate PDF report</button>
               <form method="post" action="/github-analysis/submit" data-hp-confirm-title="Publish to Xore/honeypot?" data-hp-confirm-description="This uploads the sample to the public Xore/honeypot repository and to third-party scanner APIs." data-hp-confirm-warning="This cannot be undone." data-hp-confirm-label="Publish sample"><input type="hidden" name="hash" value="{{.Hash}}"><input type="hidden" name="confirm" value="publish"><input type="hidden" name="return" value="/payload-analysis/{{.Hash}}"><button class="action-menu__item action-menu__item--danger" role="menuitem" type="submit">Publish to Xore/honeypot</button></form>
             </div>
           </details>
