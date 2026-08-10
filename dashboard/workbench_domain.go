@@ -54,12 +54,24 @@ type workbenchRecipe struct {
 }
 
 type workbenchChild struct {
-	AnalyzerID    string           `json:"analyzer_id"`
-	DisplayName   string           `json:"display_name"`
-	State         string           `json:"state"`
-	Reason        string           `json:"reason,omitempty"`
-	Summary       string           `json:"summary,omitempty"`
-	ResultURL     string           `json:"result_url,omitempty"`
+	AnalyzerID  string `json:"analyzer_id"`
+	DisplayName string `json:"display_name"`
+	State       string `json:"state"`
+	Reason      string `json:"reason,omitempty"`
+	Summary     string `json:"summary,omitempty"`
+	ResultURL   string `json:"result_url,omitempty"`
+	// TargetHash is the run's own payload identity (run.PayloadSHA256 -- a
+	// Dionaea capture's on-disk MD5, same split #364's comment on
+	// serveWorkbenchPage documents) resolved to a true, content-derived
+	// SHA-256, for the two analyzers whose host-side worker strictly
+	// requires one for the request marker filename. #787: confirmed live
+	// the Ghidra and Rev·Deck worker scripts silently reject (and discard,
+	// renamed *.request.invalid) any marker that isn't a real 64-hex-char
+	// SHA-256, so every Dionaea-sourced submission previously vanished
+	// without ever running. Resolved once at submission time and persisted
+	// here rather than re-resolved on every status poll. Empty for every
+	// other analyzer, which use run.PayloadSHA256 directly like before.
+	TargetHash    string           `json:"target_hash,omitempty"`
 	Options       workbenchOptions `json:"options"`
 	CreatedAt     time.Time        `json:"created_at"`
 	UpdatedAt     time.Time        `json:"updated_at"`

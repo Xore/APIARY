@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"html/template"
@@ -33,6 +35,17 @@ func newWorkbenchFixture(t *testing.T, sample []byte) (*store, string) {
 	t.Cleanup(esSrv.Close)
 	es := newESClient(esSrv.URL, "")
 	return &store{payloadDirs: []string{payloads}, es: es, workbench: newWorkbenchService(es)}, root
+}
+
+// workbenchTestSampleSHA256 is the sample's real, content-derived SHA-256 --
+// deliberately different from workbenchTestHash, the placeholder used as
+// the fixture's on-disk filename, mirroring a real Dionaea capture (#787:
+// on-disk MD5 identity vs. true content SHA-256). The ghidra/revdeck
+// analyzers resolve and use this one; every other analyzer still uses
+// workbenchTestHash.
+func workbenchTestSampleSHA256(sample []byte) string {
+	sum := sha256.Sum256(sample)
+	return hex.EncodeToString(sum[:])
 }
 
 func deterministicSelection() []workbenchSelection {
@@ -190,8 +203,71 @@ func TestWorkbenchRegistryRevdeckUnconfiguredByDefault(t *testing.T) {
 	}
 }
 
+// TestWorkbenchGhidraRejectsMD5IdentityMarkerFilename is #787's precise
+// regression case: a Dionaea capture's real on-disk identity is that
+// sensor's own MD5 (32 hex chars), not a SHA-256 (64). Confirmed live
+// against the real host-side worker (analysis/ghidra/worker/ghidra-worker.py)
+// that it validates the request marker's filename with a strict
+// SHA256_RE.fullmatch and discards (renames *.request.invalid) anything
+// that doesn't match -- so every real Dionaea payload silently never got
+// analyzed. This reproduces that exact filename shape rather than just a
+// same-length placeholder, so a future change to workbenchTestHash's length
+// alone couldn't accidentally make this pass without the real fix.
+func TestWorkbenchGhidraRejectsMD5IdentityMarkerFilename(t *testing.T) {
+	sample := []byte("MZ" + strings.Repeat("\x00", 200))
+	sum := sha256.Sum256(sample)
+	trueHash := hex.EncodeToString(sum[:])
+
+	root := t.TempDir()
+	payloads := filepath.Join(root, "payloads")
+	if err := os.MkdirAll(payloads, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	md5Identity := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" // 32 hex chars, real MD5 shape
+	if err := os.WriteFile(filepath.Join(payloads, md5Identity), sample, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DASHBOARD_REQUIRE_ADMIN", "false")
+	esStore := newMemESDocStore()
+	esSrv := httptest.NewServer(esStore.handler())
+	t.Cleanup(esSrv.Close)
+	es := newESClient(esSrv.URL, "")
+	s := &store{payloadDirs: []string{payloads}, es: es, workbench: newWorkbenchService(es)}
+
+	requests, results := filepath.Join(root, "ghidra-requests"), filepath.Join(root, "ghidra-results")
+	for _, dir := range []string{requests, results} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(results, "status.json"), []byte(`{"version":1,"updated_at":"`+time.Now().UTC().Format(time.RFC3339)+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GHIDRA_REQUEST_DIR", requests)
+	t.Setenv("GHIDRA_RESULTS_DIR", results)
+
+	run, _, err := s.createWorkbenchRun(workbenchRunRequest{
+		PayloadSHA256: md5Identity,
+		Analyzers:     []workbenchSelection{{AnalyzerID: "ghidra", Options: defaultWorkbenchOptions("ghidra")}},
+	}, "owner-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if markerExists(requests, md5Identity, ".request") {
+		t.Fatal("a marker filed under the 32-char MD5 identity is exactly the bug: the real worker's SHA256_RE rejects it outright")
+	}
+	if !markerExists(requests, trueHash, ".request") {
+		t.Fatal("marker must be filed under the payload's true 64-char SHA-256")
+	}
+	if run.Children[0].TargetHash != trueHash {
+		t.Fatalf("child.TargetHash = %q, want the resolved true SHA-256 %q", run.Children[0].TargetHash, trueHash)
+	}
+}
+
 func TestWorkbenchGhidraQueueCancelAndPartialFailure(t *testing.T) {
-	s, root := newWorkbenchFixture(t, []byte("MZ"+strings.Repeat("\x00", 200)))
+	sample := []byte("MZ" + strings.Repeat("\x00", 200))
+	trueHash := workbenchTestSampleSHA256(sample)
+	s, root := newWorkbenchFixture(t, sample)
 	requests, results := filepath.Join(root, "ghidra-requests"), filepath.Join(root, "ghidra-results")
 	for _, dir := range []string{requests, results} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -208,14 +284,17 @@ func TestWorkbenchGhidraQueueCancelAndPartialFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !markerExists(requests, workbenchTestHash, ".request") {
+	if !markerExists(requests, trueHash, ".request") {
 		t.Fatal("Ghidra request marker missing")
+	}
+	if markerExists(requests, workbenchTestHash, ".request") {
+		t.Fatal("Ghidra request marker must be filed under the true content SHA-256, not the on-disk placeholder identity")
 	}
 	cancelled, err := s.workbenchChildAction(run.ID, "ghidra", "cancel", "owner-a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cancelled.Children[1].State != "cancelled" || markerExists(requests, workbenchTestHash, ".request") {
+	if cancelled.Children[1].State != "cancelled" || markerExists(requests, trueHash, ".request") {
 		t.Fatalf("cancel did not stay inside queued marker: %+v", cancelled.Children[1])
 	}
 
@@ -226,9 +305,9 @@ func TestWorkbenchGhidraQueueCancelAndPartialFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := map[string]any{"version": 2, "sha256": workbenchTestHash, "requested_at": run.CreatedAt.Format(time.RFC3339Nano), "started_at": run.CreatedAt.Format(time.RFC3339Nano), "completed_at": run.CreatedAt.Add(time.Second).Format(time.RFC3339Nano), "exit_status": "error", "error": "synthetic backend failure"}
+	result := map[string]any{"version": 2, "sha256": trueHash, "requested_at": run.CreatedAt.Format(time.RFC3339Nano), "started_at": run.CreatedAt.Format(time.RFC3339Nano), "completed_at": run.CreatedAt.Add(time.Second).Format(time.RFC3339Nano), "exit_status": "error", "error": "synthetic backend failure"}
 	body, _ := json.Marshal(result)
-	if err := os.WriteFile(filepath.Join(results, workbenchTestHash+"_ghidra.json"), body, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(results, trueHash+"_ghidra.json"), body, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	reconciled, err := s.getWorkbenchRun(run.ID, "owner-a")
@@ -244,7 +323,9 @@ func TestWorkbenchGhidraQueueCancelAndPartialFailure(t *testing.T) {
 // of the "ghidra" analyzer above -- selecting only "revdeck" must not create
 // a Ghidra request marker at all.
 func TestWorkbenchRevdeckStandaloneQueueAndResult(t *testing.T) {
-	s, root := newWorkbenchFixture(t, []byte("MZ"+strings.Repeat("\x00", 200)))
+	sample := []byte("MZ" + strings.Repeat("\x00", 200))
+	trueHash := workbenchTestSampleSHA256(sample)
+	s, root := newWorkbenchFixture(t, sample)
 	ghidraRequests := filepath.Join(root, "ghidra-requests")
 	requests, results := filepath.Join(root, "revdeck-requests"), filepath.Join(root, "revdeck-results")
 	for _, dir := range []string{ghidraRequests, requests, results} {
@@ -260,19 +341,22 @@ func TestWorkbenchRevdeckStandaloneQueueAndResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !markerExists(requests, workbenchTestHash, ".request") {
+	if !markerExists(requests, trueHash, ".request") {
 		t.Fatal("Rev·Deck request marker missing")
 	}
-	if markerExists(ghidraRequests, workbenchTestHash, ".request") {
+	if markerExists(requests, workbenchTestHash, ".request") {
+		t.Fatal("Rev·Deck request marker must be filed under the true content SHA-256, not the on-disk placeholder identity")
+	}
+	if markerExists(ghidraRequests, workbenchTestHash, ".request") || markerExists(ghidraRequests, trueHash, ".request") {
 		t.Fatal("selecting revdeck alone must not also queue a Ghidra request")
 	}
 
 	// A failed standalone run: RevDeck is nil and exit_status is "error" --
 	// the failure mode drain_revdeck() actually writes when REVDECK_API_BASE
 	// is unset or the answer comes back empty.
-	failResult := map[string]any{"version": 1, "sha256": workbenchTestHash, "requested_at": run.CreatedAt.Format(time.RFC3339Nano), "started_at": run.CreatedAt.Format(time.RFC3339Nano), "completed_at": run.CreatedAt.Add(time.Second).Format(time.RFC3339Nano), "exit_status": "error", "error": "REVDECK_API_BASE is not configured on this worker", "revdeck": nil}
+	failResult := map[string]any{"version": 1, "sha256": trueHash, "requested_at": run.CreatedAt.Format(time.RFC3339Nano), "started_at": run.CreatedAt.Format(time.RFC3339Nano), "completed_at": run.CreatedAt.Add(time.Second).Format(time.RFC3339Nano), "exit_status": "error", "error": "REVDECK_API_BASE is not configured on this worker", "revdeck": nil}
 	body, _ := json.Marshal(failResult)
-	if err := os.WriteFile(filepath.Join(results, workbenchTestHash+"_revdeck.json"), body, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(results, trueHash+"_revdeck.json"), body, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	reconciled, err := s.getWorkbenchRun(run.ID, "owner-a")
@@ -280,7 +364,7 @@ func TestWorkbenchRevdeckStandaloneQueueAndResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	revdeckChild := reconciled.Children[1]
-	if revdeckChild.State != "failed" || revdeckChild.Reason != "REVDECK_API_BASE is not configured on this worker" || revdeckChild.ResultURL != "/revdeck/"+workbenchTestHash || !revdeckChild.Retryable {
+	if revdeckChild.State != "failed" || revdeckChild.Reason != "REVDECK_API_BASE is not configured on this worker" || revdeckChild.ResultURL != "/revdeck/"+trueHash || !revdeckChild.Retryable {
 		t.Fatalf("failed standalone revdeck result not reconciled: %+v", revdeckChild)
 	}
 
@@ -290,9 +374,9 @@ func TestWorkbenchRevdeckStandaloneQueueAndResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	okResult := map[string]any{"version": 1, "sha256": workbenchTestHash, "requested_at": run.CreatedAt.Format(time.RFC3339Nano), "started_at": run.CreatedAt.Format(time.RFC3339Nano), "completed_at": run.CreatedAt.Add(time.Second).Format(time.RFC3339Nano), "exit_status": "ok", "revdeck": map[string]any{"workflow": "program_triage", "status": "complete", "answer": "looks benign", "tool_calls": 3}}
+	okResult := map[string]any{"version": 1, "sha256": trueHash, "requested_at": run.CreatedAt.Format(time.RFC3339Nano), "started_at": run.CreatedAt.Format(time.RFC3339Nano), "completed_at": run.CreatedAt.Add(time.Second).Format(time.RFC3339Nano), "exit_status": "ok", "revdeck": map[string]any{"workflow": "program_triage", "status": "complete", "answer": "looks benign", "tool_calls": 3}}
 	body, _ = json.Marshal(okResult)
-	if err := os.WriteFile(filepath.Join(results, workbenchTestHash+"_revdeck.json"), body, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(results, trueHash+"_revdeck.json"), body, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	reconciled, err = s.getWorkbenchRun(run.ID, "owner-a")

@@ -109,6 +109,34 @@ func (s *store) createWorkbenchRun(request workbenchRunRequest, owner string) (w
 	return result, reused, nil
 }
 
+// trueSHA256 resolves a payload's real, content-derived SHA-256 -- distinct
+// from its primary on-disk identity, which for a Dionaea capture is that
+// sensor's own MD5 (#364's own comment on serveWorkbenchPage documents this
+// same split). #787: confirmed live that the Ghidra and Rev·Deck host-side
+// worker scripts both reject any request marker whose filename doesn't
+// match a strict 64-hex-char SHA-256 regex outright ("skipping malformed
+// request"), renaming it to *.request.invalid and never processing it --
+// so every Dionaea-sourced payload (the overwhelming majority of real
+// captures) silently never got Ghidra/Rev·Deck analysis at all, no matter
+// how many times an operator queued it. staticAnalysisFor already computes
+// and ES-caches the real hash as part of the same work "deterministic local
+// analysis" always runs, so this is a cache hit whenever that has already
+// run for this payload, not a second full-file read.
+func (s *store) trueSHA256(hash string) (string, error) {
+	path, err := s.payloadPath(hash)
+	if err != nil {
+		return "", err
+	}
+	static, err := s.staticAnalysisFor(path)
+	if err != nil {
+		return "", err
+	}
+	if !hashName.MatchString(static.SHA256) {
+		return "", errors.New("payload static analysis did not produce a usable SHA-256")
+	}
+	return static.SHA256, nil
+}
+
 func (s *store) submitWorkbenchChild(hash string, classification payloadClassification, child *workbenchChild) error {
 	now := time.Now().UTC()
 	child.UpdatedAt = now
@@ -124,9 +152,14 @@ func (s *store) submitWorkbenchChild(hash string, classification payloadClassifi
 		child.Retryable, child.Cancelable = false, false
 		return nil
 	case "ghidra":
-		if err := createWorkbenchMarker(ghidraRequestDir(), hash); err != nil {
+		sha256, err := s.trueSHA256(hash)
+		if err != nil {
+			return fmt.Errorf("could not resolve the payload's true SHA-256: %w", err)
+		}
+		if err := createWorkbenchMarker(ghidraRequestDir(), sha256); err != nil {
 			return fmt.Errorf("Ghidra request spool unavailable: %w", err)
 		}
+		child.TargetHash = sha256
 		child.State, child.Reason, child.Cancelable = "queued", "waiting for the host-side Ghidra worker", true
 		return nil
 	case "linux-sandbox":
@@ -157,9 +190,14 @@ func (s *store) submitWorkbenchChild(hash string, classification payloadClassifi
 		child.State, child.Reason, child.Cancelable = "queued", "waiting for the WAN-permitted GHOSTS sandbox handoff", true
 		return nil
 	case "revdeck":
-		if err := createWorkbenchMarker(revdeckRequestDir(), hash); err != nil {
+		sha256, err := s.trueSHA256(hash)
+		if err != nil {
+			return fmt.Errorf("could not resolve the payload's true SHA-256: %w", err)
+		}
+		if err := createWorkbenchMarker(revdeckRequestDir(), sha256); err != nil {
 			return fmt.Errorf("Rev·Deck request spool unavailable: %w", err)
 		}
+		child.TargetHash = sha256
 		child.State, child.Reason, child.Cancelable = "queued", "waiting for the host-side Rev·Deck drain", true
 		return nil
 	default:
@@ -238,10 +276,19 @@ func (s *store) reconcileWorkbenchRun(run workbenchRun) (workbenchRun, bool) {
 		child.Stale = false
 		switch child.AnalyzerID {
 		case "ghidra":
-			if result, ok := newestGhidraResult(run.PayloadSHA256, ghidraResults, child.CreatedAt); ok {
+			// #787: TargetHash is the resolved true SHA-256 (see
+			// submitWorkbenchChild/trueSHA256) -- the Ghidra worker names
+			// its results and its request markers by that, never by
+			// run.PayloadSHA256 (a Dionaea capture's own MD5 identity).
+			// The fallback keeps any run created before this fix (none in
+			// a fresh install, but a live upgrade could have one in
+			// flight) behaving exactly as it did previously rather than
+			// losing track of an already-queued job.
+			ghidraHash := firstNonEmpty(child.TargetHash, run.PayloadSHA256)
+			if result, ok := newestGhidraResult(ghidraHash, ghidraResults, child.CreatedAt); ok {
 				child.UpdatedAt = now
 				child.Cancelable = false
-				child.ResultURL = "/ghidra/" + run.PayloadSHA256
+				child.ResultURL = "/ghidra/" + ghidraHash
 				if result.ExitStatus == "error" {
 					child.State, child.Reason = "failed", firstNonEmpty(result.Error, "Ghidra analysis failed")
 					child.Retryable = child.Attempts <= child.Options.RetryLimit
@@ -251,17 +298,19 @@ func (s *store) reconcileWorkbenchRun(run workbenchRun) (workbenchRun, bool) {
 				}
 				continue
 			}
-			state, reason := markerState(ghidraRequestDir(), run.PayloadSHA256)
+			state, reason := markerState(ghidraRequestDir(), ghidraHash)
 			if state != "" {
 				child.State, child.Reason = state, reason
 				child.Cancelable = state == "queued"
 			}
 			child.Stale = loadGhidraStatus().Stale
 		case "revdeck":
-			if result, ok := newestRevdeckResult(run.PayloadSHA256, revdeckResults, child.CreatedAt); ok {
+			// #787: same TargetHash split as the ghidra case above.
+			revdeckHash := firstNonEmpty(child.TargetHash, run.PayloadSHA256)
+			if result, ok := newestRevdeckResult(revdeckHash, revdeckResults, child.CreatedAt); ok {
 				child.UpdatedAt = now
 				child.Cancelable = false
-				child.ResultURL = "/revdeck/" + run.PayloadSHA256
+				child.ResultURL = "/revdeck/" + revdeckHash
 				if result.ExitStatus == "error" || result.RevDeck == nil {
 					child.State, child.Reason = "failed", firstNonEmpty(result.Error, "Rev·Deck produced no usable answer")
 					child.Retryable = child.Attempts <= child.Options.RetryLimit
@@ -271,7 +320,7 @@ func (s *store) reconcileWorkbenchRun(run workbenchRun) (workbenchRun, bool) {
 				}
 				continue
 			}
-			state, reason := markerState(workbenchMarkerDir("revdeck"), run.PayloadSHA256)
+			state, reason := markerState(workbenchMarkerDir("revdeck"), revdeckHash)
 			if state != "" {
 				child.State, child.Reason = state, reason
 				child.Cancelable = state == "queued"
@@ -432,9 +481,14 @@ func (s *store) workbenchChildAction(runID, analyzerID, action, owner string) (w
 			if !child.Cancelable || child.State != "queued" {
 				return false, errors.New("only a queued child can be cancelled")
 			}
+			// #787: the request marker for ghidra/revdeck was filed under
+			// child.TargetHash (the resolved true SHA-256), not
+			// run.PayloadSHA256 -- see submitWorkbenchChild. Cancelling by
+			// the wrong name would always fail with "already claimed."
+			cancelHash := firstNonEmpty(child.TargetHash, run.PayloadSHA256)
 			dir := workbenchMarkerDir(analyzerID)
-			marker := filepath.Join(dir, run.PayloadSHA256+".request")
-			if dir == "" || filepath.Base(marker) != run.PayloadSHA256+".request" {
+			marker := filepath.Join(dir, cancelHash+".request")
+			if dir == "" || filepath.Base(marker) != cancelHash+".request" {
 				return false, errors.New("analyzer does not support cancellation")
 			}
 			if err := os.Remove(marker); err != nil {
