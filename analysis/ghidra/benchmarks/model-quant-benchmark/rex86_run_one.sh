@@ -34,6 +34,7 @@ gguf_path="$WORK/other-models/${name}-f16.gguf"
 # --- 1. Merge adapter into pinned base (same merge.py shape, parameterized) -
 if [[ ! -f "$gguf_path" ]]; then
   cat > "$WORK/other-models/${name}-merge.py" <<PYEOF
+import os
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
@@ -43,41 +44,55 @@ REV = "${base_rev}"
 ADAPTER_DIR = "/work/${adapter_dir}"
 
 print("loading base...")
-# device_map="auto" (accelerate), not a hardcoded "cuda:0": found live
-# (2026-08-07) that fp16-on-GPU-only OOMs outright once the base exceeds
-# ~11B params on this 20GB card (codellama-13B: 13B*2 bytes = 26GB, doesn't
-# fit at all) -- "auto" lets accelerate offload whatever doesn't fit onto
-# system RAM instead of just failing, which is the actual point of having
-# ~60GB of RAM available for this.
-#
-# max_memory is required, not optional: found live (2026-08-07, qwen-14B)
-# that device_map="auto" WITHOUT it queries torch.cuda.mem_get_info() for
-# currently-free VRAM and budgets against that with no safety margin --
-# accelerate's own infer_auto_device_map greedily fills the GPU right up
-# to that reported-free figure, and the load path's own transient buffers
-# (dtype casting, etc.) then overflow it by a few hundred MiB, OOMing at
-# the very last shard instead of leaving any headroom. Capping well under
-# the card's real 20GB and leaving system RAM for everything else this
-# host is doing concurrently (the base-model queue + CAPE build + prefetch)
-# fixes the boundary case without disabling offload entirely.
-#
-# offload_folder is required for 32B+ bases: found live (2026-08-07,
-# qwen-32B) that once a model's fp16 size exceeds the max_memory budget
-# above (GPU 16GiB + CPU 48GiB = 64GiB, and a 32B model in fp16 is
-# already ~64GB before any tokenizer/embedding/activation overhead),
-# accelerate's dispatch_model refuses outright with "We need an
-# offload_dir to dispatch this model" rather than silently erroring
-# later -- it wants somewhere on disk to spill the remainder. Point it
-# at a per-model scratch dir under the same work volume everything else
-# here already uses; nothing else reads or needs this directory to
-# persist after the merge finishes.
-max_memory = {0: "16GiB", "cpu": "48GiB"}
+# device_map={"": "cpu"}, not "auto": found live (2026-08-10, three
+# separate failures on codellama-13B/qwen-14B/codellama-34B) that
+# device_map="auto"'s GPU/CPU/disk offload mix puts some layers on a
+# meta-device placeholder, and that meta-device state kept breaking
+# unrelated later steps -- merge_and_unload()'s onload_layer step OOMing
+# on the GPU well past whatever max_memory budget was set (accelerate
+# doesn't seem to account its transient onload against that budget at
+# all -- two different budgets, 16GiB and 14GiB, both died at the exact
+# same ~19.4GiB figure), resize_token_embeddings() corrupting dispatch
+# bookkeeping when shrinking, and its mean_resizing=True crashing outright
+# trying to compute a covariance matrix over meta tensors. merge_and_unload
+# is pure weight arithmetic (base_weight + lora_B @ lora_A * scale), not a
+# forward pass -- it never needed the GPU in the first place. Loading the
+# whole base straight onto CPU (this host has ~90GiB RAM, comfortably
+# fits even the 34B/32B bases in fp16) sidesteps every one of those bugs
+# at once instead of chasing each symptom individually. Slower than GPU,
+# but the eval step right after (a fresh llama-server process against the
+# GGUF this produces) is unaffected either way.
 base = AutoModelForCausalLM.from_pretrained(
-    BASE, revision=REV, torch_dtype=torch.float16, device_map="auto",
-    max_memory=max_memory,
-    offload_folder="/work/other-models/${name}-offload",
+    BASE, revision=REV, torch_dtype=torch.float16, device_map={"": "cpu"},
 )
 tok = AutoTokenizer.from_pretrained(BASE, revision=REV)
+
+# Some unsloth/CodeLlama base repos (found live 2026-08-10, codellama-7B
+# and codellama-13B both) ship a tokenizer with one more token than the
+# model's own embedding matrix (an added pad token that was never baked
+# into config.vocab_size) -- merging the adapter and saving as-is then
+# produces a GGUF whose tokenizer-derived vocab size doesn't match
+# token_embd.weight's actual row count, and llama.cpp refuses to load it.
+# Resizing first (a no-op when they already match) keeps the embedding
+# matrix and tokenizer in sync the same way every other loader in this
+# pipeline already expects.
+#
+# Growing only, never shrinking: found live (2026-08-10, qwen-14B) that
+# Qwen2.5's base repos intentionally pad the embedding matrix LARGER than
+# the tokenizer's own vocab (for tensor-core alignment) -- that's normal
+# and harmless, GGUF export never needs those extra rows. Only the
+# codellama direction (tokenizer bigger than embeddings) is ever a real
+# problem worth fixing.
+#
+# mean_resizing=False: transformers' default mean_resizing=True
+# initializes new embedding rows from a covariance matrix computed over
+# the OLD embeddings. The new rows are unused padding tokens this eval
+# never feeds real input through, so the simpler non-mean init is fine
+# -- and cheaper, since a real covariance computation over a full-size
+# embedding table is wasted work for tokens nothing ever reads.
+if len(tok) > base.get_input_embeddings().weight.shape[0]:
+    print(f"resizing embeddings {base.get_input_embeddings().weight.shape[0]} -> {len(tok)} to match tokenizer...")
+    base.resize_token_embeddings(len(tok), mean_resizing=False)
 
 print("applying adapter...")
 merged = PeftModel.from_pretrained(base, ADAPTER_DIR)
@@ -86,6 +101,21 @@ merged = merged.merge_and_unload()
 print("saving merged fp16 model...")
 merged.save_pretrained("/work/other-models/${name}-merged", safe_serialization=True)
 tok.save_pretrained("/work/other-models/${name}-merged")
+
+# Some base repos' own tokenizers are missing files their GGUF converter
+# still needs (found live 2026-08-10, codegemma-7B: unsloth/codegemma-7b-it
+# never ships tokenizer.model at all, only tokenizer.json, but
+# convert_hf_to_gguf.py's Gemma path requires the raw SentencePiece file).
+# The Zenodo adapter release is the exact tokenizer this model was trained
+# and evaluated with, so it's the right fallback source, not a guess.
+import shutil
+for fname in os.listdir(ADAPTER_DIR):
+    if "tokenizer" in fname or fname == "special_tokens_map.json":
+        dest = os.path.join("/work/other-models/${name}-merged", fname)
+        if not os.path.exists(dest):
+            print(f"copying {fname} from adapter dir (missing from base tokenizer)...")
+            shutil.copy(os.path.join(ADAPTER_DIR, fname), dest)
+
 print("done")
 PYEOF
 
@@ -129,35 +159,31 @@ wait_gpu_free() {
 }
 
 free_gpu; wait_gpu_free
-# -ngl 99: full GPU offload attempted first; if the model doesn't fit in
-# 20GB VRAM, llama.cpp's own allocator falls back / OOMs loudly rather than
-# silently mis-offloading — see the retry-with-lower-ngl handling below.
-docker exec -d rex86-eval bash -lc "cd /work && ./llama.cpp/build/bin/llama-server -m /work/other-models/${name}-f16.gguf -ngl 99 --port 8080 --host 0.0.0.0 > /tmp/${name}_server.log 2>&1"
+# -ngl auto (the default -- passed explicitly to be clear this isn't an
+# oversight): found live (2026-08-10, codellama-13B) that this pipeline's
+# old approach -- try a hardcoded -ngl 99, on failure retry once at a
+# hardcoded -ngl 40 -- actively defeated llama.cpp's own --fit mechanism
+# (on by default), which auto-computes the right GPU-layer split for
+# whatever VRAM is actually free, but only for args the invocation leaves
+# unset. Passing an explicit -ngl value disables that outright ("failed to
+# fit params to free device memory: n_gpu_layers already set by user to
+# 40, abort" in the log), and the fixed 40 was never a real reduction for
+# codellama-13B's own ~40 layers anyway -- it OOMed identically to -ngl 99.
+# Trusting --fit (default 'on') to size this itself replaces the whole
+# guess-and-retry pattern, correctly, for every model size in this queue.
+docker exec -d rex86-eval bash -lc "cd /work && ./llama.cpp/build/bin/llama-server -m /work/other-models/${name}-f16.gguf -ngl auto --port 8080 --host 0.0.0.0 > /tmp/${name}_server.log 2>&1"
 up=0
 for i in $(seq 1 60); do
   if docker exec rex86-eval curl -sf http://127.0.0.1:8080/health >/dev/null 2>&1; then up=1; break; fi
   sleep 3
 done
 if [[ "$up" -ne 1 ]]; then
-  echo "=== ${name}: llama-server did not come up at -ngl 99, check /tmp/${name}_server.log (likely VRAM OOM for this size) ==="
-  docker exec rex86-eval tail -40 "/tmp/${name}_server.log" || true
-  free_gpu
-  # RAM-offload retry: partial GPU layers, rest on system RAM -- explicitly
-  # authorized for the large models (codellama-34B, qwen-32B) that won't
-  # fit fully in 20GB.
-  echo "=== ${name}: retrying with partial GPU offload (-ngl 40) + system RAM ==="
-  docker exec -d rex86-eval bash -lc "cd /work && ./llama.cpp/build/bin/llama-server -m /work/other-models/${name}-f16.gguf -ngl 40 --port 8080 --host 0.0.0.0 > /tmp/${name}_server.log 2>&1"
-  for i in $(seq 1 60); do
-    if docker exec rex86-eval curl -sf http://127.0.0.1:8080/health >/dev/null 2>&1; then up=1; break; fi
-    sleep 3
-  done
-fi
-if [[ "$up" -ne 1 ]]; then
-  echo "=== ${name}: FAILED to bring up llama-server even with partial offload -- see /tmp/${name}_server.log ==="
+  echo "=== ${name}: FAILED to bring up llama-server -- see /tmp/${name}_server.log ==="
   docker exec rex86-eval tail -60 "/tmp/${name}_server.log" || true
   exit 1
 fi
 echo "=== ${name}: llama-server up, running #159 corpus (32 cases) $(date -u +%FT%TZ) ==="
-docker exec rex86-eval python3 /work/corpus_eval.py llama_cpp http://127.0.0.1:8080 "" /work/manifest.json /work/rev_cases_v2_rubric.json | tee "$WORK/other-models/${name}.corpus_eval.out"
+docker exec rex86-eval python3 /work/corpus_eval.py llama_cpp "http://127.0.0.1:8080" \
+  --manifest /work/manifest.json --rubric /work/rev_cases_v2_rubric.json | tee "$WORK/other-models/${name}.corpus_eval.out"
 free_gpu
 echo "=== ${name}: DONE $(date -u +%FT%TZ) ==="

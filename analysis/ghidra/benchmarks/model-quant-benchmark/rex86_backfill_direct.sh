@@ -44,7 +44,8 @@ run_direct() {
     return 1
   fi
   echo "=== ${name} (${tag}): llama-server up, running #159 corpus (32 cases) $(date -u +%FT%TZ) ==="
-  docker exec rex86-eval python3 /work/corpus_eval.py llama_cpp http://127.0.0.1:8080 "" /work/manifest.json /work/rev_cases_v2_rubric.json | tee "$result"
+  docker exec rex86-eval python3 /work/corpus_eval.py llama_cpp "http://127.0.0.1:8080" \
+    --manifest /work/manifest.json --rubric /work/rev_cases_v2_rubric.json | tee "$result"
   free_gpu
   echo "=== ${name} (${tag}): eval done $(date -u +%FT%TZ) ==="
 }
