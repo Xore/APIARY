@@ -379,6 +379,13 @@ type behaviorConfig struct {
 	ShowMLPanels       bool   `json:"show_ml_panels"`
 	MaintenanceMode    bool   `json:"maintenance_mode"`
 	ReadOnly           bool   `json:"read_only"`
+	// ShowProblemReportButton (#1147) gates the "Report a problem" button
+	// present on every page. Off by default: the button's own capture
+	// (click/nav trail, console errors, failed requests, a DOM snapshot,
+	// recent API bodies) is meaningful surface area an operator should
+	// opt into deliberately, not something a fresh install silently turns
+	// on for every user.
+	ShowProblemReportButton bool `json:"show_problem_report_button"`
 	// DefaultTimezone (#282) is what a brand new user's own Timezone
 	// preference starts as -- the "real site-wide default concept" that
 	// issue asked for, distinct from a hardcoded "browser" literal every

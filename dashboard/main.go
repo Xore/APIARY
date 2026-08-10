@@ -343,6 +343,11 @@ func main() {
 	http.HandleFunc("/api/settings/services", s.serveSettingsServices)
 	http.HandleFunc("/api/settings/services/", s.serveSettingsServiceItem)
 	http.HandleFunc("/api/settings/audit", s.serveSettingsAudit)
+	http.HandleFunc("/api/problem-reports", s.serveProblemReports)
+	http.HandleFunc("/api/problem-reports/", s.serveProblemReportItem)
+	http.HandleFunc("/admin/problem-reports", func(w http.ResponseWriter, r *http.Request) {
+		s.serveProblemReportsPage(w, r, tmpl)
+	})
 	http.HandleFunc("/api/map-points", s.serveMapPoints)
 	http.HandleFunc("/api/heatmap", s.serveHeatmap)
 	http.HandleFunc("/api/attack-vectors", s.serveAttackVectors)
