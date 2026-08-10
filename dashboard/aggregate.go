@@ -51,13 +51,6 @@ func (s *store) rebuild() {
 	// by joining on the tunnel ephemeral port recorded in the portbridge log.
 	viaMap, p0fOS := s.buildViaMap()
 
-	// #353: nextCache replaces s.logCache wholesale at the end of this
-	// function rather than being mutated in place -- a file that rotated
-	// out of logFiles()'s result this cycle (deleted, or renamed past
-	// classify's own rotation-suffix matching) simply has no entry copied
-	// forward, which is the prune: no separate sweep needed.
-	nextCache := make(map[string]*logFileState, len(s.logCache))
-
 	processEntry := func(entry cachedEvent) {
 		ev := entry.ev
 		// cowrie / dionaea / conpot only see the tunnel peer (10.8.0.1)
@@ -211,17 +204,17 @@ func (s *store) rebuild() {
 		})
 	}
 
-	// #34/#403: group by dirSensor (not file) before deciding ES vs. local --
-	// a sensor's own log directory can hold several matching files at once
-	// (today's live file plus rotated foo.json.<date> generations), and the
-	// decision of which source to trust has to be made once per sensor, not
-	// once per file: querying ES once per sensor here and letting a later
-	// file for the same sensor fall through to a second, redundant ES query
-	// would waste a full aggregation-sized request per rotated file for no
-	// benefit (the dedup in processEntry via seen[] would mask the result
-	// being fetched twice, not prevent the wasted round trip).
-	filesBySensor := map[string][]string{}
+	// #34/#403/#1103: every sensor is ES-only now, but rebuild() still
+	// discovers WHICH sensors to query by walking the local log directory
+	// tree -- each sensor's own container still writes its raw log purely
+	// for Filebeat to tail (see aggregate.go's own module doc / #1103's own
+	// commit for why this discovery mechanism was kept as-is rather than
+	// redesigned to be disk-independent), even though the dashboard itself
+	// never reads that content anymore. sensorOrder is deduplicated names
+	// only -- unlike before #1103, nothing here needs the actual file list
+	// per sensor, since no sensor's local file content is ever read.
 	var sensorOrder []string
+	seenSensor := map[string]bool{}
 	for _, fn := range logFiles(s.dir) {
 		rel, _ := filepath.Rel(s.dir, fn)
 		parts := strings.Split(filepath.ToSlash(rel), "/")
@@ -242,29 +235,32 @@ func (s *store) rebuild() {
 		if slices.Contains(esOnlySensors, dirSensor) {
 			continue
 		}
-		filesBySensor[dirSensor] = append(filesBySensor[dirSensor], fn)
-		if len(filesBySensor[dirSensor]) == 1 {
-			sensorOrder = append(sensorOrder, dirSensor)
+		// portbridge is transport metadata, never a displayable sensor
+		// (classify.go's portbridge branch always sets ev.skip) -- it needs
+		// no event-listing read of any kind, ES or local. Its real job, the
+		// via-map join, is buildViaMap's own direct ES query above, not
+		// this per-sensor loop.
+		if dirSensor == "portbridge" {
+			continue
 		}
+		if seenSensor[dirSensor] {
+			continue
+		}
+		seenSensor[dirSensor] = true
+		sensorOrder = append(sensorOrder, dirSensor)
 	}
 	for _, dirSensor := range sensorOrder {
-		// #41 regression fix: suricata and portbridge stay on their local
-		// log mount, not ES. Both ship to their own index families
-		// (suricata-*, portbridge-v2-*, "logset" values other than
-		// "sensors"; see analysis/filebeat.yml/elasticsearch-setup.sh) and
-		// never appear in honeypot-v2-* under
-		// event.sensor:"suricata"/"portbridge" the way every other sensor
-		// here does. loadSensorEventsES only ever queries honeypot-v2-*,
-		// so for these two it "successfully" returns zero hits every cycle
-		// -- ES has no data for them at all yet (#1103 Category 2 tracks
-		// giving them their own ES adapter), so a local read is still the
-		// only source, not a fallback path.
-		if dirSensor == "suricata" || dirSensor == "portbridge" {
-			for _, fn := range filesBySensor[dirSensor] {
-				cached, state := s.classifiedEventsFor(fn, dirSensor, s.logCache[fn], tailCap)
-				if state != nil {
-					nextCache[fn] = state
-				}
+		if s.es == nil {
+			continue
+		}
+		// suricata ships to its own index family (suricata-*, "logset"
+		// values other than "sensors"; see analysis/filebeat.yml/
+		// elasticsearch-setup.sh), never honeypot-v2-* under
+		// event.sensor:"suricata" the way every other sensor here does --
+		// loadSensorEventsES only ever queries honeypot-v2-*, so it needs
+		// its own adapter (#1103 Category 2), not the generic one.
+		if dirSensor == "suricata" {
+			if cached, ok := s.loadSuricataEventsES(s.es); ok {
 				for _, entry := range cached {
 					processEntry(entry)
 				}
@@ -276,9 +272,6 @@ func (s *store) rebuild() {
 		// an ES query failure means "no data this cycle," the same as
 		// esOnlySensors below, not a reason to fall back to this dashboard
 		// instance's own local log mount.
-		if s.es == nil {
-			continue
-		}
 		if cached, ok := s.loadSensorEventsES(s.es, dirSensor); ok {
 			for _, entry := range cached {
 				processEntry(entry)
@@ -468,7 +461,6 @@ func (s *store) rebuild() {
 	if s.es != nil {
 		snap.ES = s.es.get()
 	}
-	s.logCache = nextCache
 	s.mu.Lock()
 	s.snap = snap
 	s.events = evs

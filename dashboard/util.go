@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -58,35 +57,6 @@ func logFiles(dir string) []string {
 		return nil
 	})
 	return files
-}
-
-// readTail returns up to tailCap bytes from the end of the file, aligned to
-// the next full line when truncated.
-func readTail(fn string) []byte {
-	f, err := os.Open(fn)
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-	st, err := f.Stat()
-	if err != nil {
-		return nil
-	}
-	if st.Size() > tailCap {
-		if _, err := f.Seek(st.Size()-tailCap, io.SeekStart); err != nil {
-			return nil
-		}
-	}
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return nil
-	}
-	if st.Size() > tailCap {
-		if i := strings.IndexByte(string(data), '\n'); i >= 0 {
-			data = data[i+1:]
-		}
-	}
-	return data
 }
 
 // tunnelPeerIP is the WireGuard peer address cowrie logs for every session:

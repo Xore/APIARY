@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,48 +11,22 @@ import (
 	"time"
 )
 
-// esUnattributedAndSensorStub combines the #39 overview aggregation
-// (carrying only Unattributed, all these tests need from it -- the count
-// itself is Elasticsearch's own responsibility, covered in isolation by
-// es_aggregate_test.go) with real per-sensor answers for docsBySensor.
-// Unlike esOverviewStub (which deliberately 500s any per-sensor query to
-// force these tests' old local-file fallback), dionaea/conpot/cowrie read
-// Elasticsearch exclusively now (#1103) -- there is no fallback left to
-// force, so their events have to come from here for real.
-func esUnattributedAndSensorStub(t *testing.T, unattributed int, docsBySensor map[string][]map[string]any) http.HandlerFunc {
+func writeFileLines(t *testing.T, path string, lines ...string) {
 	t.Helper()
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "_pit") {
-			json.NewEncoder(w).Encode(map[string]string{"id": "test-pit-id"})
-			return
-		}
-		if r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "_pit") {
-			json.NewEncoder(w).Encode(map[string]bool{"succeeded": true})
-			return
-		}
-		body, _ := io.ReadAll(r.Body)
-		sensor, isSensorQuery := sensorFromSearchBody(body)
-		if !isSensorQuery {
-			var resp esOverviewAggResponse
-			resp.Aggregations.Unattributed.DocCount = unattributed
-			json.NewEncoder(w).Encode(resp)
-			return
-		}
-		docs := docsBySensor[sensor]
-		type hit struct {
-			Source struct {
-				Honeypot map[string]any `json:"honeypot"`
-			} `json:"_source"`
-		}
-		hits := make([]hit, 0, len(docs))
-		for _, d := range docs {
-			var h hit
-			h.Source.Honeypot = d
-			hits = append(hits, h)
-		}
-		json.NewEncoder(w).Encode(map[string]any{"hits": map[string]any{"hits": hits}})
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatal(err)
 	}
+	body := ""
+	for _, l := range lines {
+		body += l + "\n"
+	}
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func cowrieLine(sensor, when string) string {
+	return `{"eventid":"cowrie.login.success","timestamp":"` + when + `","username":"root","password":"x","session":"` + sensor + `","src_ip":"203.0.113.5"}`
 }
 
 // writeLog puts one JSON record per line into <root>/<rel>, creating the sensor
@@ -87,30 +60,37 @@ func TestTunnelPeerIsRecoveredOrLeftUnattributed(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
-	// Only the first connection has a portbridge record to join against.
-	writeLog(t, root, "portbridge/portbridge.json", map[string]any{
-		"time": now, "sensor": "portbridge", "event": "connect", "proto": "tcp",
-		"port": 445.0, "src_ip": "203.0.113.9", "src_port": 51000.0, "via_port": 41001.0,
-	})
 	// dionaea's own events come from Elasticsearch exclusively now (#1103);
 	// rebuild() still discovers the sensor via this local directory
 	// placeholder (see aggregate.go's own comment on why).
 	writeFileLines(t, filepath.Join(root, "dionaea", "dionaea.json"), "{}")
-	esSrv := httptest.NewServer(esUnattributedAndSensorStub(t, 1, map[string][]map[string]any{
-		"dionaea": {
-			{
-				"timestamp": now, "origin": "dionaea.connection.tcp.connect",
-				"data": map[string]any{"connection": map[string]any{
-					"protocol": "smb", "remote_ip": tunnelPeerIP, "remote_port": 41001.0, "local_port": 445.0,
-				}},
+	var overview esOverviewAggResponse
+	overview.Aggregations.Unattributed.DocCount = 1
+	esSrv := httptest.NewServer(esFullStub(t, esFullStubDocs{
+		Overview: overview,
+		HoneypotBySensor: map[string][]map[string]any{
+			"dionaea": {
+				{
+					"timestamp": now, "origin": "dionaea.connection.tcp.connect",
+					"data": map[string]any{"connection": map[string]any{
+						"protocol": "smb", "remote_ip": tunnelPeerIP, "remote_port": 41001.0, "local_port": 445.0,
+					}},
+				},
+				// No matching via_port: a UDP-fronted or already-rotated connection.
+				{
+					"timestamp": now, "origin": "dionaea.connection.tcp.reject",
+					"data": map[string]any{"connection": map[string]any{
+						"protocol": "smb", "remote_ip": tunnelPeerIP, "remote_port": 49999.0, "local_port": 445.0,
+					}},
+				},
 			},
-			// No matching via_port: a UDP-fronted or already-rotated connection.
-			{
-				"timestamp": now, "origin": "dionaea.connection.tcp.reject",
-				"data": map[string]any{"connection": map[string]any{
-					"protocol": "smb", "remote_ip": tunnelPeerIP, "remote_port": 49999.0, "local_port": 445.0,
-				}},
-			},
+		},
+		// Only this one connection has a portbridge record to join against
+		// -- buildViaMap reads portbridge-v2-* exclusively now (#1103
+		// Category 2), not the local connlog.
+		Portbridge: []map[string]any{
+			{"time": now, "sensor": "portbridge", "event": "connect", "proto": "tcp",
+				"port": 445.0, "src_ip": "203.0.113.9", "src_port": 51000.0, "via_port": 41001.0},
 		},
 	}))
 	defer esSrv.Close()
@@ -169,26 +149,31 @@ func TestViaMapSpansTheRotatedConnLog(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
-	// The SNMP connection was recorded before the last rotation; only the
-	// newer FTP one is still in the live file.
-	writeLog(t, root, "portbridge/portbridge.json.1", map[string]any{
-		"time": now, "sensor": "portbridge", "event": "connect", "proto": "udp",
-		"port": 161.0, "src_ip": "198.51.100.7", "src_port": 33001.0, "via_port": 41002.0,
-	})
-	writeLog(t, root, "portbridge/portbridge.json", map[string]any{
-		"time": now, "sensor": "portbridge", "event": "connect", "proto": "tcp",
-		"port": 21.0, "src_ip": "203.0.113.9", "src_port": 51000.0, "via_port": 41003.0,
-	})
 	// conpot's own events come from Elasticsearch exclusively now (#1103);
 	// rebuild() still discovers the sensor via this local directory
 	// placeholder (see aggregate.go's own comment on why).
 	writeFileLines(t, filepath.Join(root, "conpot", "conpot.json"), "{}")
-	esSrv := httptest.NewServer(esUnattributedAndSensorStub(t, 0, map[string][]map[string]any{
-		"conpot": {{
-			"timestamp": now, "sensorid": "snmp", "data_type": "snmp",
-			"src_ip": tunnelPeerIP, "src_port": 41002.0, "dst_port": 161.0,
-			"event_type": "snmp_get",
-		}},
+	esSrv := httptest.NewServer(esFullStub(t, esFullStubDocs{
+		HoneypotBySensor: map[string][]map[string]any{
+			"conpot": {{
+				"timestamp": now, "sensorid": "snmp", "data_type": "snmp",
+				"src_ip": tunnelPeerIP, "src_port": 41002.0, "dst_port": 161.0,
+				"event_type": "snmp_get",
+			}},
+		},
+		// buildViaMap reads portbridge-v2-* exclusively now (#1103 Category
+		// 2) -- what the old local-file rotation test proved (the previous
+		// generation must still be considered, not just the live file) has
+		// no ES equivalent: there is no "rotation" once every connection is
+		// just a document within the 48h query window. Both connections
+		// simply have to be present in one query's results, oldest first,
+		// which is exactly what this list already represents.
+		Portbridge: []map[string]any{
+			{"time": now, "sensor": "portbridge", "event": "connect", "proto": "udp",
+				"port": 161.0, "src_ip": "198.51.100.7", "src_port": 33001.0, "via_port": 41002.0},
+			{"time": now, "sensor": "portbridge", "event": "connect", "proto": "tcp",
+				"port": 21.0, "src_ip": "203.0.113.9", "src_port": 51000.0, "via_port": 41003.0},
+		},
 	}))
 	defer esSrv.Close()
 	s := &store{dir: root, es: newESClient(esSrv.URL, "")}

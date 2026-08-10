@@ -33,9 +33,9 @@ import (
 // esOverviewWindow bounds every aggregation below to the same 48h window
 // aggregate.go's own Total/Last24h/Previous24h/Change24h always meant in
 // practice: even before this change, "Total" was never a true lifetime
-// count (bounded by tailCap's local-file byte cap, or the 10000-document
-// cap on esOnlySensors' own reads) -- an explicit 48h window is a more
-// honest description of the same thing, not a narrower one.
+// count (bounded by the 10000-document cap every ES-sourced sensor's own
+// read already had) -- an explicit 48h window is a more honest description
+// of the same thing, not a narrower one.
 const esOverviewWindow = "now-48h"
 
 // esOverviewWindowDuration mirrors esOverviewWindow as a time.Duration for
