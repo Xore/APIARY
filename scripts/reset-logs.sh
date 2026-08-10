@@ -46,8 +46,8 @@
 
 set -euo pipefail
 
-LOGS_BASE="/opt/stacks/honeypot-stack/logs"
-STATE_BASE="/opt/stacks/honeypot-stack/state"
+LOGS_BASE="/opt/stacks/apiary/logs"
+STATE_BASE="/opt/stacks/apiary/state"
 
 # Every target that moved into its own stack (#258), and which services live
 # there. cowrie is the one target with a foot in both worlds: cowrie itself

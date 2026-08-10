@@ -95,7 +95,7 @@ self-hosted, linux, x64, honeypot-home
 ```
 
 Attach the runner to the protected `production-home` environment. Its service
-account needs write access to `/opt/stacks/honeypot-stack` and permission to
+account needs write access to `/opt/stacks/apiary` and permission to
 run Docker Compose. The workflow preserves the server's `.env` and runtime
 state, synchronizes the repository, writes Dockge's authoritative
 `compose.yml`, validates it, and recreates changed services.
@@ -103,7 +103,7 @@ state, synchronizes the repository, writes Dockge's authoritative
 Require a manual reviewer on `production-home`; never accept pull-request code
 on this production runner.
 
-Run [`../safe-update.sh`](../safe-update.sh) (`STACK_DIR=/opt/stacks/honeypot-stack`)
+Run [`../safe-update.sh`](../safe-update.sh) (`STACK_DIR=/opt/stacks/apiary`)
 before a manual deploy to snapshot the current git commit SHA, any
 uncommitted config drift, and every `.env` file -- a lightweight, read-only
 "about to deploy, keep a snapshot in case this is bad" step, distinct from
@@ -130,7 +130,7 @@ per-stack workaround.
 flowchart TB
   approve["Operator approves<br/>production-home environment"]
   runner["Self-hosted honeypot-home runner<br/>polls GitHub, pulls the job"]
-  sync["Local rsync into<br/>/opt/stacks/honeypot-stack<br/>(--delete-delay, .env/logs/state<br/>preserved -- see table below)"]
+  sync["Local rsync into<br/>/opt/stacks/apiary<br/>(--delete-delay, .env/logs/state<br/>preserved -- see table below)"]
   init["honeypot-init<br/>(one-shot bootstrap jobs)"]
   marker["apiary marker sync<br/>(root docker-compose.yml,<br/>zero-service, not a real stack)"]
   conpot["honeypot-conpot<br/>(#258 split proof of concept,<br/>its own job)"]
@@ -168,7 +168,7 @@ SSH connection to the home network:
 1. The permanently installed Actions runner polls GitHub for an approved job.
 2. `actions/checkout` downloads the selected repository commit into the
    runner's temporary work directory.
-3. Local `rsync` copies that checkout into `/opt/stacks/honeypot-stack`.
+3. Local `rsync` copies that checkout into `/opt/stacks/apiary`.
 4. The workflow copies `docker-compose.yml` to `compose.yml`, which is the
    filename Dockge manages.
 5. `docker compose config --quiet` validates the deployed configuration.
@@ -446,8 +446,8 @@ history is not preserved across the split.
 This split also surfaced a real pre-existing ordering bug in
 `.github/workflows/deploy.yml`, dating back to the original
 `honeypot-conpot` proof of concept (#336): every split stack's `build:`
-points at an absolute path under `/opt/stacks/honeypot-stack` (e.g.
-`/opt/stacks/honeypot-stack/dionaea`), populated by the "Synchronize Dockge
+points at an absolute path under `/opt/stacks/apiary` (e.g.
+`/opt/stacks/apiary/dionaea`), populated by the "Synchronize Dockge
 source" rsync step -- but that step used to run *after* every one of those
 builds, near the end of the job, in the slot where `APIARY`'s own
 `docker compose up` used to live. Never a hard failure (the destination
@@ -712,7 +712,7 @@ diagnostics workflow itself.
 ```text
 Home:
 GitHub -> outbound-polling self-hosted runner on homeserver
-       -> local rsync /opt/stacks/honeypot-stack
+       -> local rsync /opt/stacks/apiary
        -> Dockge compose.yml -> docker compose up
 
 VPS:

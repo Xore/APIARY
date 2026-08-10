@@ -89,7 +89,7 @@ worker milestones.
 | Container GPU passthrough | nvidia-container-toolkit 1.19.1, `nvidia` runtime registered | `docker info \| grep -i runtime` |
 | End-to-end container test | `docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi -L` lists the GPU | run it |
 | Host RAM / CPU | 91 GiB / 16 logical CPUs | `free -h`, `nproc` |
-| Stack deployment | Dockge stack at `/opt/stacks/honeypot-stack/compose.yml`, containers `hp-*` | `docker ps` |
+| Stack deployment | Dockge stack at `/opt/stacks/apiary/compose.yml`, containers `hp-*` | `docker ps` |
 | Internal network | `honeynet` (Elasticsearch and all sensors live here) | `docker network ls` |
 | Elasticsearch | 8.13.4 single-node, `xpack.security.enabled=false`, reachable as `http://elasticsearch:9200` inside `honeynet` | compose file |
 

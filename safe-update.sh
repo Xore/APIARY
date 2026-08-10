@@ -17,7 +17,7 @@ set -euo pipefail
 #   ./safe-update.sh                # snapshot only, prints the rollback command
 #   ./safe-update.sh --snapshot-dir <dir>
 
-STACK_DIR="${STACK_DIR:-/opt/stacks/honeypot-stack}"
+STACK_DIR="${STACK_DIR:-/opt/stacks/apiary}"
 snapshot_dir=""
 
 while [[ $# -gt 0 ]]; do

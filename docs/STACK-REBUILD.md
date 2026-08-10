@@ -83,8 +83,8 @@ ssh vps
 docker stop hp-suricata hp-suricata-rules-refresh hp-suricata-log-maintenance \
   hp-portbridge hp-portbridge-log-rotate hp-portbridge-log-maintenance \
   hp-portbridge-blackhole-refresh hp-p0f
-sudo find /opt/stacks/honeypot-stack/logs/suricata -mindepth 1 -delete
-sudo find /opt/stacks/honeypot-stack/logs/portbridge -mindepth 1 -delete
+sudo find /opt/stacks/apiary/logs/suricata -mindepth 1 -delete
+sudo find /opt/stacks/apiary/logs/portbridge -mindepth 1 -delete
 ```
 
 ### 2. Stop and wipe the homeserver
@@ -108,7 +108,7 @@ should preserve (see "What survives" above). Leave it running through the
 whole reset; nothing else in this doc's sequence needs it stopped.
 
 Then remove every honeypot-owned volume (list above), and wipe every log
-directory under `/opt/stacks/honeypot-stack/logs/` **except** `suricata/` and
+directory under `/opt/stacks/apiary/logs/` **except** `suricata/` and
 `portbridge/` (those are sshfs mounts from the VPS, already handled in step 1
 and read-only from this side). Don't forget `logs/arkime-raw/` — it's the
 local copy `pcap-sync` makes of the VPS's PCAP files, easy to miss since it's

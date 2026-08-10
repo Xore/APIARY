@@ -17,7 +17,7 @@ split this into -- but nothing tied them into one entry point.
 [`factory-reset.sh`](../factory-reset.sh), at the repo root next to
 `setup-home-network.sh`/`setup-suricata-logs-home.sh`, is that entry point.
 
-Run it **on the homeserver** (`/opt/stacks/honeypot-stack`), not from a
+Run it **on the homeserver** (`/opt/stacks/apiary`), not from a
 local checkout -- it operates on the deployed Dockge stack directories
 (`/opt/stacks/honeypot-<name>/compose.yml`), same as every script it composes.
 
@@ -41,7 +41,7 @@ sudo ./factory-reset.sh --apply --wipe --no-restart   # backup, stop, wipe, leav
 | --- | --- |
 | *(none)* | Back up via `analysis/backup-honeypot.sh`. Nothing is stopped. |
 | `--apply --wipe` | Also stop every stack and wipe state -- sensor logs via `scripts/reset-logs.sh all` (per-sensor ownership already worked out there, see its own header for why), Filebeat's registry, the dedupe cache, init-markers, and every named Docker volume `docs/STACK-REBUILD.md` documents as wiped (`es-data`, `dionaea-lib`, `dashboard-state`, `yara-results`, `evebox-config`, `arkime-pcap`, `snare-pages`, `reporter-data`) -- all **after** the backup step already ran. |
-| `--apply --git-ref <ref>` | Also `git fetch` and `git reset --hard <ref>` against `/opt/stacks/honeypot-stack` -- never a bare `--hard` against whatever `HEAD` happens to be. |
+| `--apply --git-ref <ref>` | Also `git fetch` and `git reset --hard <ref>` against `/opt/stacks/apiary` -- never a bare `--hard` against whatever `HEAD` happens to be. |
 | `--no-restart` | Leave every stack stopped instead of starting it back up at the end. |
 
 `--wipe` and `--git-ref` both require `--apply`; the script refuses to run

@@ -27,7 +27,7 @@ flowchart TD
   `docker-compose.ip-enrichment-worker.yml`, each its own stack. The
   top-level `docker-compose.yml` (project `APIARY`) is now a
   deliberately empty marker (`services: {}`) kept only because
-  `/opt/stacks/honeypot-stack` is still the fixed path every other stack's
+  `/opt/stacks/apiary` is still the fixed path every other stack's
   `build:` context points at as an absolute string — see that file's own
   header comment. `honeypot-init` still deploys first; every sensor stack
   waits on its completion markers at its own entrypoint rather than a
@@ -73,8 +73,8 @@ the only internet-facing component.
 > disagree.
 
 1. Establish WireGuard and verify that the VPS can reach `10.8.0.2`.
-2. Copy this repository to `/opt/stacks/honeypot-stack/`.
-3. Copy `.env.example` to `.env` in `/opt/stacks/honeypot-stack/` and generate
+2. Copy this repository to `/opt/stacks/apiary/`.
+3. Copy `.env.example` to `.env` in `/opt/stacks/apiary/` and generate
    every value marked `CHANGE_ME`.
 4. Create `/opt/stacks/honeypot-init/`, copy `docker-compose.init.yml` from
    the repo into it as `compose.yml`, and copy the repo's
@@ -82,11 +82,11 @@ the only internet-facing component.
    `ARKIME_ADMIN_PASSWORD`/`ARKIME_PASSWORD_SECRET` — the latter must match
    the value in `APIARY`'s `.env` exactly).
 5. Before first deploying `honeypot-init`:
-   `install -d -m 777 /opt/stacks/honeypot-stack/state/init-markers` — its
+   `install -d -m 777 /opt/stacks/apiary/state/init-markers` — its
    jobs run as several different container UIDs, and a root-owned 755
    directory 403's the non-root ones.
 6. Ensure the repository `docker-compose.yml` is also present as
-   `/opt/stacks/honeypot-stack/compose.yml`.
+   `/opt/stacks/apiary/compose.yml`.
 7. In Dockge, validate and deploy **`honeypot-init` first**, then
    `APIARY`. `APIARY`'s sensors wait on `honeypot-init`'s
    completion markers at their own entrypoint rather than a Compose-level
@@ -149,8 +149,8 @@ Verify the installed state:
 ```bash
 systemctl status systemd-networkd-wait-online wg-quick@wg0 \
   honeypot-log-mounts.service
-findmnt /opt/stacks/honeypot-stack/logs/suricata
-findmnt /opt/stacks/honeypot-stack/logs/portbridge
+findmnt /opt/stacks/apiary/logs/suricata
+findmnt /opt/stacks/apiary/logs/portbridge
 docker logs --since 5m hp-evebox
 ```
 
