@@ -23,7 +23,7 @@ func TestReportPDFWatermarkPresent(t *testing.T) {
 		name string
 		pdf  pdfTheme
 	}{{"dark", pdfThemeDark()}, {"light", pdfThemeLight()}} {
-		body := renderThemedReportPDF(data, theme.pdf, defaultPDFBranding())
+		body := renderFullReportPDF(data, theme.name, reportBranding{})
 		text := string(body)
 
 		if !strings.Contains(text, "/Subtype /Image") || !strings.Contains(text, "/ImageMask true") {
@@ -55,7 +55,7 @@ func TestReportPDFWatermarkPresent(t *testing.T) {
 }
 
 func TestReportPDFHeaderMarkPresent(t *testing.T) {
-	body := renderThemedReportPDF(sampleReportData(time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)), pdfThemeLight(), defaultPDFBranding())
+	body := renderFullReportPDF(sampleReportData(time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)), "light", reportBranding{})
 	text := string(body)
 	for _, want := range []string{
 		"/ImageMask true",

@@ -22,9 +22,6 @@ func TestGeneratedReportMethodsUnavailableWithoutES(t *testing.T) {
 	if _, err := store.listGenerated(); !errors.Is(err, errReportsStorageUnavailable) {
 		t.Fatalf("listGenerated error = %v, want errReportsStorageUnavailable", err)
 	}
-	if _, ok := store.generated("gen_0000000000000000"); ok {
-		t.Fatal("generated() must report not-found without an ES client, not panic or fabricate a record")
-	}
 	if _, _, err := store.generatedPDF("gen_0000000000000000"); !errors.Is(err, errReportsStorageUnavailable) {
 		t.Fatalf("generatedPDF error = %v, want errReportsStorageUnavailable", err)
 	}

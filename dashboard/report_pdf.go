@@ -382,24 +382,6 @@ func reportRecommendations(data reportData) []string {
 	return recommendations
 }
 
-// allReportElements is the historical full-report layout order, kept as the
-// security-template default and for the legacy render entry points.
-var allReportElements = []string{
-	elementCover, elementMetrics, elementAssessment, elementFindings, elementRecommendations,
-	elementTopSensors, elementTopSources, elementTopSignatures, elementTopASNs, elementTopCountries,
-	elementTopPorts, elementOperationalAlert, elementEventAppendix, elementParameters,
-}
-
-// renderSecurityReportPDF keeps the historical executive layout with the
-// dark theme and default branding.
-func renderSecurityReportPDF(data reportData) []byte {
-	return renderThemedReportPDF(data, pdfThemeDark(), defaultPDFBranding())
-}
-
-func renderThemedReportPDF(data reportData, theme pdfTheme, branding pdfBranding) []byte {
-	return renderReportElements(data, theme, branding, allReportElements, 120)
-}
-
 // renderDefinitionPDF renders a Reports studio definition: its theme,
 // branding, element selection, and appendix bound.
 func renderDefinitionPDF(data reportData, def reportDefinition) []byte {
