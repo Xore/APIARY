@@ -412,7 +412,9 @@ for spec in \
   "ghidra-analysis-v1:ghidra" \
   "sandbox-analysis-v1:sandbox" \
   "github-analysis-v1:github_analysis" \
-  "workbench-runs-v1:workbench"
+  "workbench-runs-v1:workbench" \
+  "cape-analysis-v1:cape" \
+  "revdeck-analysis-v1:revdeck"
 do
   index_name=${spec%%:*}
   ns=${spec#*:}

@@ -105,8 +105,8 @@ fixed back into this document and the install scripts themselves.
    - Dashboard reads ES only: confirm no code path falls back to direct
      log-file access that happened to work during development but would
      silently break once ES is the only source of truth (see
-     `docs/persona-design.md`'s and the dashboard's own ES-only-reads
-     rule).
+     `docs/ARCHITECTURE.md`'s own ES-only-reads rule; #1103 tracks closing
+     the remaining gaps in this).
    - Firewalling: every loopback-only/WireGuard-only service is actually
      that on the freshly-installed host — cross-check against
      `docs/honeypot-network-isolation.md`.

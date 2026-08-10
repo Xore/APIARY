@@ -32,7 +32,7 @@ mkdirSync(state, { recursive: true });
 mkdirSync(payloads, { recursive: true });
 
 const now = Date.now();
-const events = Array.from({ length: 60 }, (_, index) => JSON.stringify({
+const events = Array.from({ length: 60 }, (_, index) => ({
   timestamp: new Date(now - index * 60_000).toISOString(),
   eventid: index % 3 === 0 ? "cowrie.command.input" : "cowrie.login.failed",
   src_ip: `203.0.113.${(index % 40) + 1}`,
@@ -41,8 +41,15 @@ const events = Array.from({ length: 60 }, (_, index) => JSON.stringify({
   password: `fixture-${index}`,
   input: index % 3 === 0 ? `uname -a # ${index}` : undefined,
   session: `browser-session-${String(index).padStart(2, "0")}`,
-})).join("\n");
-writeFileSync(join(logs, "cowrie", "cowrie.json"), `${events}\n`);
+}));
+// #1103: cowrie reads Elasticsearch exclusively now, no local-file fallback
+// -- seed the fake ES with these same events instead of only writing the
+// local file. The local file is still written too: rebuild()'s directory
+// walk still discovers "cowrie" as a sensor to query in ES that way (see
+// dashboard/aggregate.go's own comment on why), even though its content is
+// never read once discovered.
+fakeES.seedSensorEvents("cowrie", events);
+writeFileSync(join(logs, "cowrie", "cowrie.json"), `${events.map((e) => JSON.stringify(e)).join("\n")}\n`);
 writeFileSync(join(payloads, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"), "#!/bin/sh\ncurl http://example.invalid/fixture\n");
 
 const stateFile = (name) => join(state, name);
