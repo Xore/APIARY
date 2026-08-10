@@ -166,6 +166,8 @@ type clusterRow struct {
 
 type clustersPage struct {
 	pageMeta
+	// Ready mirrors s.ready.Load() -- see eventsPage's own comment (#1142/#1155).
+	Ready     bool
 	Generated time.Time
 	Rows      []clusterRow
 	Filters   []string

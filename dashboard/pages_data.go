@@ -65,6 +65,12 @@ func mapPointEventsURL(city, country string) string {
 // eventsPage is the data for the /events drill-down view.
 type eventsPage struct {
 	pageMeta
+	// Ready mirrors s.ready.Load() at request time -- see snapshot's own
+	// doc comment (#1142) for why this reads fresh at request time rather
+	// than being cached anywhere: eventsData reads s.getEvents(), the same
+	// rebuild()-populated cache overview's snapshot reads, so it has the
+	// exact same cold-start gap before the first rebuild() cycle finishes.
+	Ready     bool
 	Generated time.Time
 	Filters   []string
 	Total     int
@@ -283,6 +289,8 @@ type ipRow struct {
 
 type ipsPage struct {
 	pageMeta
+	// Ready mirrors s.ready.Load() -- see eventsPage's own comment (#1142/#1155).
+	Ready     bool
 	Generated time.Time
 	Rows      []ipRow
 	Total     int

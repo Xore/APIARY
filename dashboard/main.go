@@ -476,6 +476,7 @@ func main() {
 	})
 	http.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
 		data := s.eventsData(r)
+		data.Ready = s.ready.Load()
 		renderPage(w, tmpl, "events", &data)
 	})
 	// The investigation command dock submits here. Resolution is server-side so
@@ -488,6 +489,7 @@ func main() {
 		if len(data.Rows) > 25 {
 			data.Rows = data.Rows[:25]
 		}
+		data.Ready = s.ready.Load()
 		renderPage(w, tmpl, "ips", &data)
 	})
 	http.HandleFunc("/investigate/ip/", func(w http.ResponseWriter, r *http.Request) {
@@ -577,10 +579,12 @@ func main() {
 		if encoded := r.URL.Query().Encode(); encoded != "" {
 			data.ExportURL += "?" + encoded
 		}
+		data.Ready = s.ready.Load()
 		renderPage(w, tmpl, "clusters", &data)
 	})
 	http.HandleFunc("/campaigns", func(w http.ResponseWriter, r *http.Request) {
 		data := s.campaignsData(r)
+		data.Ready = s.ready.Load()
 		renderPage(w, tmpl, "campaigns", &data)
 	})
 	http.HandleFunc("/history", func(w http.ResponseWriter, r *http.Request) {

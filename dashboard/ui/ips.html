@@ -51,7 +51,13 @@
             {{template "iprows" .}}
             </tbody>
           </table>
-          {{else}}<p class="empty">no source IPs recorded yet</p>{{end}}
+          {{else if .Ready}}<p class="empty">no source IPs recorded yet</p>
+          {{else}}
+          {{/* #1155: see events.html's own comment (#1142). */}}
+          <div class="skeleton-line" style="width:85%"></div>
+          <div class="skeleton-line" style="width:70%"></div>
+          <div class="skeleton-line" style="width:78%"></div>
+          {{end}}
         </div>
 
         <footer id="ips-footer">{{brandText}} &bull; defensive sensor &bull; do not expose without auth</footer>
