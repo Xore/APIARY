@@ -35,6 +35,21 @@
 </div>{{end}}
 {{define "payloadrows"}}{{range .Files}}{{template "payloadrow" .}}{{end}}{{end}}
 
+{{/* #1139: the "Start analysis" panel's selection card -- ported unchanged
+     from the former standalone /payload-workbench index (payload_workbench.html's
+     "payload-workbench-index"), which merged into this page's second tab. Unlike
+     payloadrow above, this card links directly to the workbench (its one purpose
+     here is picking an artifact to analyze), so it stays a single <a>. */}}
+{{define "workbenchselectrows"}}{{range .Files}}<a class="project-card" href="/payload-workbench/{{.Hash}}">
+  <div class="project-card__header">
+    <span class="project-card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4z"/><path d="M14 17h6M17 14v6"/></svg></span>
+    <span class="project-card__title mono">{{.Hash}}</span>
+    <div class="project-card__badges">{{range .Sources}}<span class="badge badge--muted">{{.}}</span>{{end}}</div>
+  </div>
+  <p class="project-card__desc"><strong>{{.Kind}}</strong> &bull; {{.Platform}} &bull; {{.MIME}} &bull; {{.SizeH}}</p>
+  <div class="project-card__meta"><span>captured <span{{if .MtimeUTC}} data-hp-utc="{{.MtimeUTC}}"{{end}}>{{.Mtime}}</span></span></div>
+</a>{{end}}{{end}}
+
 {{define "payloads"}}<!doctype html>
 <html lang="en">
 <head>
@@ -61,6 +76,15 @@
           </div>
         </header>
 
+        {{/* #1139: consolidates the former standalone /payload-workbench index
+             (artifact selection) into this page's second tab, following
+             /reports' own tabbed-panel pattern. */}}
+        <div class="tabs" role="tablist" aria-label="Payload evidence views">
+          <button class="tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-payloads" data-dashboard-tab="payloads"><span>01</span>Captured payloads</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-start-analysis" data-dashboard-tab="start-analysis"><span>02</span>Start analysis</button>
+        </div>
+
+        <div class="dashboard-panel" id="panel-payloads" role="tabpanel" data-dashboard-panel="payloads">
         <div class="filters" id="payloads-filters">
           <a class="chip" href="/">&larr; dashboard</a>
           {{if .Filter}}<a class="chip" href="/payloads">all sources</a>{{else}}<span class="chip">all sources</span>{{end}}
@@ -71,7 +95,7 @@
 
         <div class="tw:grid tw:grid-cols-12 tw:gap-3.5" id="payloads-grid">
           <div class="card wide" id="payloads-table-card">
-            {{if .Notice}}<div class="tw:mb-4 tw:flex tw:items-center tw:gap-2 tw:rounded-lg tw:border tw:border-subtle tw:bg-surface-1 tw:px-4 tw:py-3 tw:text-sm tw:text-green" role="status"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>{{.Notice}} <a class="lnk" href="/sandbox">Open sandbox queue</a></div>{{end}}
+            {{if .Notice}}<div class="tw:mb-4 tw:flex tw:items-center tw:gap-2 tw:rounded-lg tw:border tw:border-subtle tw:bg-surface-1 tw:px-4 tw:py-3 tw:text-sm tw:text-green" role="status"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>{{.Notice}} <a class="lnk" href="/payload-workbench/results#sandbox">Open sandbox queue</a></div>{{end}}
             <p class="note">
               &#9888; Unified inventory of Dionaea captures, Cowrie uploads/downloads,
               and retained shell, PowerShell, VBS, Python, JavaScript and other script
@@ -86,6 +110,20 @@
             </div>
             {{else}}<p class="empty">no payloads captured yet</p>{{end}}
           </div>
+        </div>
+        </div>
+
+        <div class="dashboard-panel" id="panel-start-analysis" role="tabpanel" data-dashboard-panel="start-analysis" hidden>
+          <section class="card wide" aria-labelledby="wb-select-title">
+            <div class="section-heading"><div><h2 id="wb-select-title">Select a captured payload</h2><p>The workbench derives analyzer applicability from the selected artifact. Opening an artifact does not execute it.</p></div></div>
+            {{if not .Enabled}}<p class="empty">Payload serving is disabled. Configure PAYLOAD_DIRS and/or SCRIPT_PAYLOAD_DIR.</p>
+            {{else if .Loading}}<p class="note" data-payload-warming><span class="status-dot" aria-hidden="true"></span> Preparing the payload inventory. This page will update automatically.</p>
+            {{else if .Files}}
+            <div class="project-grid" id="wb-select-results">
+            {{template "workbenchselectrows" .}}
+            </div>
+            {{else}}<p class="empty">No payloads captured yet.</p>{{end}}
+          </section>
         </div>
 
         <footer id="payloads-footer">{{brandText}} &bull; defensive sensor &bull; do not expose without auth</footer>

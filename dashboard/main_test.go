@@ -1087,7 +1087,7 @@ func TestSemanticShellIsServerRendered(t *testing.T) {
 	// in this "always present" list.
 	for _, route := range []string{
 		"/", "/events", "/ips", "/campaigns",
-		"/clusters", "/commands", "/payloads", "/sandbox",
+		"/clusters", "/commands", "/payloads", "/payload-workbench/results",
 		"/reports",
 	} {
 		if !strings.Contains(html, `data-hp-nav="`+route+`" href="`+route+`"`) {
@@ -1107,6 +1107,16 @@ func TestSemanticShellIsServerRendered(t *testing.T) {
 	for _, route := range []string{"/history", "/dead-letters", "/source-health", "/alerts"} {
 		if strings.Contains(html, `data-hp-nav="`+route+`" href="`+route+`"`) {
 			t.Fatalf("rendered shell still carries the removed sidebar nav route %q", route)
+		}
+	}
+	// #1139: "/payload-workbench" (index), "/sandbox" (list), and
+	// "/github-analysis" (list) merged into /payloads and
+	// /payload-workbench/results -- their own sidebar entries are gone, not
+	// just relabeled. The bare routes still work as redirects (main.go), and
+	// /payload-workbench/results itself is asserted present above.
+	for _, route := range []string{"/payload-workbench", "/sandbox", "/github-analysis"} {
+		if strings.Contains(html, `data-hp-nav="`+route+`" href="`+route+`"`) {
+			t.Fatalf("rendered shell still carries the merged-away sidebar nav route %q", route)
 		}
 	}
 	if !strings.Contains(html, `data-hp-behavior-nav="show_ml_panels"`) || !strings.Contains(html, `data-hp-nav="/ml-anomalies" data-hp-behavior-nav="show_ml_panels" href="/ml-anomalies" hidden`) {
@@ -1309,7 +1319,7 @@ func TestRouteTemplatesRenderFromEmbeddedUI(t *testing.T) {
 		"session.html":                 {"session"},
 		"intel.html":                   {"clusters", "campaigns", "campaignrows", "cidr-correlation", "cluster-correlation", "commands"},
 		"payloads.html":                {"payloadrow", "payloadrows", "payloads", "payload-analysis"},
-		"payload_workbench.html":       {"payload-workbench-index", "workbench-results", "payload-workbench"},
+		"payload_workbench.html":       {"workbench-results", "payload-workbench"},
 		"sandbox.html":                 {"sandbox"},
 		"ghidra.html":                  {"ghidra"},
 		"history.html":                 {"history"},
