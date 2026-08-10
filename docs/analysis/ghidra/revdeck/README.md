@@ -5,14 +5,16 @@ Source: [biniamf/ai-reverse-engineering](https://github.com/biniamf/ai-reverse-e
 Rev·Deck is a local AI-assisted reverse engineering workstation that pairs
 the Ghidra headless REST service with an LLM copilot.
 
-**PoC in progress (2026-08-10, #1164):** the deployed build currently tracks
-a fork's ground-up rewrite (PR #1, by `Dvurechensky`), not upstream `main`.
-**The payload-upload pipeline is currently broken against it** -- the
-rewrite expects a Ghidra REST contract (`/analyze_b64`, `/jobs`,
-`/tools/{endpoint}`) our own minimal `analysis/ghidra/service/server.py`
-(#245) doesn't implement. See #1164 for the live-verified findings and what
-adopting this for real would need. The previous, working build is one
-command away as a fallback:
+**Current build (2026-08-10, #1165):** the deployed build tracks upstream
+`main` (the real "Rev·Deck" rebrand -- tokens/layout/components theme,
+Mermaid diagrams, citations, a much richer Ghidra REST client), not the
+fork's PR #1 rewrite this banner used to describe -- that PoC was evaluated
+and abandoned (#1164) because its rewrite expected a Ghidra REST contract
+(`/analyze_b64`, `/jobs`, `/tools/{endpoint}`) this project doesn't
+implement. PR #1's one genuinely exclusive feature (symbol/type/class
+recovery, the Analysis workbench's Recovery subtab) was re-ported onto
+upstream `main` instead of adopting the rest of the fork. Rollback to the
+last known-good pre-#1165 image, if ever needed:
 
 ```bash
 cd analysis/ghidra
@@ -20,10 +22,15 @@ docker tag ghidra-revdeck:backup-pre-pr1-20260810 ghidra-revdeck:latest
 docker compose -f docker-compose.ghidra.yml --profile revdeck up -d --no-build revdeck
 ```
 
-(or `git -C revdeck/ai-reverse-engineering checkout main` before rebuilding,
-to go back to source rather than the tagged image). The **verified contract**
-section below describes the old, working build; it does not describe #1's
-rewrite.
+**CORS/403 fix (2026-08-11, #1156-adjacent):** the deployed build's own
+same-origin guard (`webui/app.py`'s `_reject_cross_origin`) rejected every
+state-changing route (upload, chat, cancel, ...) with 403 `"cross-origin
+request is not allowed"` when reached through Traefik's TLS-terminating
+edge -- confirmed live against the deployed container's own request log.
+Root cause and fix: `revdeck-proxyfix/wsgi_proxyfix.py`'s own doc comment.
+No change to the vendored `webui/` tree itself; the fix is a bind-mounted
+shim plus a `command:` override in `docker-compose.ghidra.yml`, so a future
+re-clone of upstream `main` doesn't silently lose it.
 
 ## Setup
 

@@ -195,6 +195,14 @@ services:
       # cloned repo root either way (its own COPY instructions expect that).
       context: ./revdeck/ai-reverse-engineering
       dockerfile: webui/Dockerfile
+    # #1156-adjacent CORS/403 fix: run through the APIARY-owned ProxyFix
+    # shim instead of the vendored build's own wsgi:app entrypoint -- see
+    # revdeck-proxyfix/wsgi_proxyfix.py's own doc comment for why (the
+    # vendored app has no proxy-scheme trust configured, so it 403s every
+    # state-changing request when reached through Traefik's TLS-terminating
+    # edge). Same Dockerfile CMD otherwise (gunicorn -c gunicorn.conf.py),
+    # only the WSGI module target changes.
+    command: ['gunicorn', '-c', 'gunicorn.conf.py', 'wsgi_proxyfix:app']
     restart: unless-stopped
     ports:
       # HP_BIND (the WireGuard address), not 127.0.0.1: this is the one
@@ -258,6 +266,11 @@ services:
       # live when the first porting attempt hit exactly that permission error.
       - revdeck2_data:/data
       - revdeck2_logs:/var/log/revdeck
+      # ProxyFix shim (see command: above and the file's own doc comment) --
+      # read-only bind mount, not baked into the image: it's APIARY-owned
+      # config layered onto a vendored build, the same reasoning env vars
+      # and volumes elsewhere in this service already follow.
+      - ./revdeck-proxyfix/wsgi_proxyfix.py:/app/webui/wsgi_proxyfix.py:ro
 
 volumes:
   ghidra_projects:
