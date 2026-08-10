@@ -34,6 +34,7 @@ gguf_path="$WORK/other-models/${name}-f16.gguf"
 # --- 1. Merge adapter into pinned base (same merge.py shape, parameterized) -
 if [[ ! -f "$gguf_path" ]]; then
   cat > "$WORK/other-models/${name}-merge.py" <<PYEOF
+import os
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
@@ -79,6 +80,18 @@ base = AutoModelForCausalLM.from_pretrained(
 )
 tok = AutoTokenizer.from_pretrained(BASE, revision=REV)
 
+# Some unsloth base repos (found live 2026-08-10, codellama-7B) ship a
+# tokenizer with one more token than the model's own embedding matrix (an
+# added pad token that was never baked into config.vocab_size) -- merging
+# the adapter and saving as-is then produces a GGUF whose tokenizer-derived
+# vocab size doesn't match token_embd.weight's actual row count, and
+# llama.cpp refuses to load it. Resizing first (a no-op when they already
+# match) keeps the embedding matrix and tokenizer in sync the same way
+# every other loader in this pipeline already expects.
+if len(tok) != base.get_input_embeddings().weight.shape[0]:
+    print(f"resizing embeddings {base.get_input_embeddings().weight.shape[0]} -> {len(tok)} to match tokenizer...")
+    base.resize_token_embeddings(len(tok))
+
 print("applying adapter...")
 merged = PeftModel.from_pretrained(base, ADAPTER_DIR)
 merged = merged.merge_and_unload()
@@ -86,6 +99,21 @@ merged = merged.merge_and_unload()
 print("saving merged fp16 model...")
 merged.save_pretrained("/work/other-models/${name}-merged", safe_serialization=True)
 tok.save_pretrained("/work/other-models/${name}-merged")
+
+# Some base repos' own tokenizers are missing files their GGUF converter
+# still needs (found live 2026-08-10, codegemma-7B: unsloth/codegemma-7b-it
+# never ships tokenizer.model at all, only tokenizer.json, but
+# convert_hf_to_gguf.py's Gemma path requires the raw SentencePiece file).
+# The Zenodo adapter release is the exact tokenizer this model was trained
+# and evaluated with, so it's the right fallback source, not a guess.
+import shutil
+for fname in os.listdir(ADAPTER_DIR):
+    if "tokenizer" in fname or fname == "special_tokens_map.json":
+        dest = os.path.join("/work/other-models/${name}-merged", fname)
+        if not os.path.exists(dest):
+            print(f"copying {fname} from adapter dir (missing from base tokenizer)...")
+            shutil.copy(os.path.join(ADAPTER_DIR, fname), dest)
+
 print("done")
 PYEOF
 
