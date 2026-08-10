@@ -44,76 +44,52 @@ REV = "${base_rev}"
 ADAPTER_DIR = "/work/${adapter_dir}"
 
 print("loading base...")
-# device_map="auto" (accelerate), not a hardcoded "cuda:0": found live
-# (2026-08-07) that fp16-on-GPU-only OOMs outright once the base exceeds
-# ~11B params on this 20GB card (codellama-13B: 13B*2 bytes = 26GB, doesn't
-# fit at all) -- "auto" lets accelerate offload whatever doesn't fit onto
-# system RAM instead of just failing, which is the actual point of having
-# ~60GB of RAM available for this.
-#
-# max_memory is required, not optional: found live (2026-08-07, qwen-14B)
-# that device_map="auto" WITHOUT it queries torch.cuda.mem_get_info() for
-# currently-free VRAM and budgets against that with no safety margin --
-# accelerate's own infer_auto_device_map greedily fills the GPU right up
-# to that reported-free figure, and the load path's own transient buffers
-# (dtype casting, etc.) then overflow it by a few hundred MiB, OOMing at
-# the very last shard instead of leaving any headroom. Capping well under
-# the card's real 20GB and leaving system RAM for everything else this
-# host is doing concurrently (the base-model queue + CAPE build + prefetch)
-# fixes the boundary case without disabling offload entirely.
-#
-# offload_folder is required for 32B+ bases: found live (2026-08-07,
-# qwen-32B) that once a model's fp16 size exceeds the max_memory budget
-# above (GPU 16GiB + CPU 48GiB = 64GiB, and a 32B model in fp16 is
-# already ~64GB before any tokenizer/embedding/activation overhead),
-# accelerate's dispatch_model refuses outright with "We need an
-# offload_dir to dispatch this model" rather than silently erroring
-# later -- it wants somewhere on disk to spill the remainder. Point it
-# at a per-model scratch dir under the same work volume everything else
-# here already uses; nothing else reads or needs this directory to
-# persist after the merge finishes.
-# 14GiB, not 16GiB: found live (2026-08-10, codellama-13B) that
-# merge_and_unload()'s onload_layer step temporarily pulls offloaded
-# layers back onto the GPU to compute the merge, and that transient spike
-# isn't accounted against max_memory's own budget -- 16GiB left the merge
-# OOMing 136MiB over the card's 19.55GiB total with no headroom at all.
-max_memory = {0: "14GiB", "cpu": "48GiB"}
+# device_map={"": "cpu"}, not "auto": found live (2026-08-10, three
+# separate failures on codellama-13B/qwen-14B/codellama-34B) that
+# device_map="auto"'s GPU/CPU/disk offload mix puts some layers on a
+# meta-device placeholder, and that meta-device state kept breaking
+# unrelated later steps -- merge_and_unload()'s onload_layer step OOMing
+# on the GPU well past whatever max_memory budget was set (accelerate
+# doesn't seem to account its transient onload against that budget at
+# all -- two different budgets, 16GiB and 14GiB, both died at the exact
+# same ~19.4GiB figure), resize_token_embeddings() corrupting dispatch
+# bookkeeping when shrinking, and its mean_resizing=True crashing outright
+# trying to compute a covariance matrix over meta tensors. merge_and_unload
+# is pure weight arithmetic (base_weight + lora_B @ lora_A * scale), not a
+# forward pass -- it never needed the GPU in the first place. Loading the
+# whole base straight onto CPU (this host has ~90GiB RAM, comfortably
+# fits even the 34B/32B bases in fp16) sidesteps every one of those bugs
+# at once instead of chasing each symptom individually. Slower than GPU,
+# but the eval step right after (a fresh llama-server process against the
+# GGUF this produces) is unaffected either way.
 base = AutoModelForCausalLM.from_pretrained(
-    BASE, revision=REV, torch_dtype=torch.float16, device_map="auto",
-    max_memory=max_memory,
-    offload_folder="/work/other-models/${name}-offload",
+    BASE, revision=REV, torch_dtype=torch.float16, device_map={"": "cpu"},
 )
 tok = AutoTokenizer.from_pretrained(BASE, revision=REV)
 
-# Some unsloth base repos (found live 2026-08-10, codellama-7B) ship a
-# tokenizer with one more token than the model's own embedding matrix (an
-# added pad token that was never baked into config.vocab_size) -- merging
-# the adapter and saving as-is then produces a GGUF whose tokenizer-derived
-# vocab size doesn't match token_embd.weight's actual row count, and
-# llama.cpp refuses to load it. Resizing first (a no-op when they already
-# match) keeps the embedding matrix and tokenizer in sync the same way
-# every other loader in this pipeline already expects.
+# Some unsloth/CodeLlama base repos (found live 2026-08-10, codellama-7B
+# and codellama-13B both) ship a tokenizer with one more token than the
+# model's own embedding matrix (an added pad token that was never baked
+# into config.vocab_size) -- merging the adapter and saving as-is then
+# produces a GGUF whose tokenizer-derived vocab size doesn't match
+# token_embd.weight's actual row count, and llama.cpp refuses to load it.
+# Resizing first (a no-op when they already match) keeps the embedding
+# matrix and tokenizer in sync the same way every other loader in this
+# pipeline already expects.
 #
 # Growing only, never shrinking: found live (2026-08-10, qwen-14B) that
 # Qwen2.5's base repos intentionally pad the embedding matrix LARGER than
 # the tokenizer's own vocab (for tensor-core alignment) -- that's normal
-# and harmless, GGUF export never needs those extra rows. Shrinking it
-# back down actively broke the run instead: resize_token_embeddings() on
-# a model with accelerate-offloaded/meta-device parameters (device_map=
-# "auto" put some layers on a meta placeholder here) corrupted the
-# dispatch bookkeeping, and the very next step (PeftModel.from_pretrained
-# re-dispatching the model) crashed with "Cannot copy out of meta tensor;
-# no data!". Only the codellama-7B direction (tokenizer bigger than
-# embeddings) is ever a real problem worth fixing.
+# and harmless, GGUF export never needs those extra rows. Only the
+# codellama direction (tokenizer bigger than embeddings) is ever a real
+# problem worth fixing.
 #
-# mean_resizing=False: found live (2026-08-10, codellama-34B) that
-# transformers' default mean_resizing=True initializes new embedding rows
-# from a covariance matrix computed over the OLD embeddings -- on a model
-# large enough to need CPU/disk offload (accelerate leaves some params on
-# a meta placeholder), that covariance computation crashes outright
-# ("Tensor.item() cannot be called on meta tensors"). The new rows are
-# unused padding tokens this eval never feeds real input through, so the
-# simpler non-mean init this flag falls back to is fine.
+# mean_resizing=False: transformers' default mean_resizing=True
+# initializes new embedding rows from a covariance matrix computed over
+# the OLD embeddings. The new rows are unused padding tokens this eval
+# never feeds real input through, so the simpler non-mean init is fine
+# -- and cheaper, since a real covariance computation over a full-size
+# embedding table is wasted work for tokens nothing ever reads.
 if len(tok) > base.get_input_embeddings().weight.shape[0]:
     print(f"resizing embeddings {base.get_input_embeddings().weight.shape[0]} -> {len(tok)} to match tokenizer...")
     base.resize_token_embeddings(len(tok), mean_resizing=False)
