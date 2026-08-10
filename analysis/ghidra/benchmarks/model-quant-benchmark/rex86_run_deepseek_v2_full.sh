@@ -125,7 +125,8 @@ run_eval() {
     return 1
   fi
   echo "=== ${NAME} (${tag}): llama-server up, running #159 corpus (32 cases) $(date -u +%FT%TZ) ==="
-  docker exec rex86-eval-big python3 /work/corpus_eval.py llama_cpp http://127.0.0.1:8081 "" /work/manifest.json /work/rev_cases_v2_rubric.json | tee "$result"
+  docker exec rex86-eval-big python3 /work/corpus_eval.py llama_cpp "http://127.0.0.1:8081" \
+    --manifest /work/manifest.json --rubric /work/rev_cases_v2_rubric.json | tee "$result"
   free_gpu
   echo "=== ${NAME} (${tag}): eval done $(date -u +%FT%TZ) ==="
 }

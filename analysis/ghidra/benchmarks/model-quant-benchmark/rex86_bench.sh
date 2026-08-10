@@ -74,7 +74,8 @@ print('wall_s=%.3f prompt_tokens=%s prompt_ms=%s prompt_tps=%s predicted_tokens=
 done
 
 echo "--- llama.cpp: full 32-case corpus ---"
-docker exec rex86-eval python3 /work/corpus_eval.py llama_cpp http://127.0.0.1:8080 "" /work/manifest.json /work/rev_cases_v2_rubric.json
+docker exec rex86-eval python3 /work/corpus_eval.py llama_cpp "http://127.0.0.1:8080" \
+  --manifest /work/manifest.json --rubric /work/rev_cases_v2_rubric.json
 free_gpu
 
 echo "############ 2) Ollama (same GGUF, same sampling) ############"
@@ -120,7 +121,8 @@ print('wall_s=%.3f prompt_tokens=%s prompt_s=%.3f prompt_tps=%.1f eval_tokens=%s
 done
 
 echo "--- Ollama: full 32-case corpus ---"
-python3 "$WORK/corpus_eval.py" ollama http://127.0.0.1:18100 rex86raw "$WORK/manifest.json" "$WORK/rev_cases_v2_rubric.json"
+python3 "$WORK/corpus_eval.py" ollama "http://127.0.0.1:18100" --model rex86raw \
+  --manifest "$WORK/manifest.json" --rubric "$WORK/rev_cases_v2_rubric.json"
 free_gpu
 
 echo "############ 3) vLLM (same weights, HF safetensors, OpenAI-compatible) ############"
@@ -156,7 +158,8 @@ print('wall_s=%.3f prompt_tokens=%s completion_tokens=%s overall_tps=%.1f' % (wa
 done
 
 echo "--- vLLM: full 32-case corpus ---"
-python3 "$WORK/corpus_eval.py" vllm http://127.0.0.1:18000 /model "$WORK/manifest.json" "$WORK/rev_cases_v2_rubric.json"
+python3 "$WORK/corpus_eval.py" vllm "http://127.0.0.1:18000" --model /model \
+  --manifest "$WORK/manifest.json" --rubric "$WORK/rev_cases_v2_rubric.json"
 free_gpu
 
 echo "=== BENCH DONE $(date -u +%FT%TZ) ==="
