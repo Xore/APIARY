@@ -2,8 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -14,16 +12,16 @@ import (
 func newGhidraReportTestStore(t *testing.T, hash string, result ghidraResult) *store {
 	t.Helper()
 	s := newReportTestStore(t)
-	dir := t.TempDir()
 	result.SHA256 = hash
-	raw, err := json.MarshalIndent(result, "", "  ")
+	raw, err := json.Marshal(result)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, hash+"_ghidra.json"), raw, 0o600); err != nil {
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("GHIDRA_RESULTS_DIR", dir)
+	esGhidraResult(t, doc)
 	return s
 }
 

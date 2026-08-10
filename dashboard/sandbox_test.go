@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/base64"
 	"html/template"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -12,23 +13,26 @@ import (
 )
 
 func TestSandboxResultsAreBoundedAndValidated(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("SANDBOX_RESULTS_DIR", dir)
-	valid := `{"version":1,"job":"linux-test","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","completed_at":"2026-01-01T00:00:00Z","stdout":"<script>"}`
-	if err := os.WriteFile(filepath.Join(dir, "linux-test.json"), []byte(valid), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	windows := `{"version":2,"job":"windows-test","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","completed_at":"2026-01-02T00:00:00Z","windows_forensics":{"detected":true,"execution_mode":"wine","pe_type":"PE32+","imphash":"test"},"network_summary":{"dns_queries":["raw.githubusercontent.com"],"guest_packets":12}}`
-	if err := os.WriteFile(filepath.Join(dir, "windows-test.json"), []byte(windows), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "linux-invalid.json"), []byte(`{"job":"bad","sha256":"../escape"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	failed := `{"version":2,"job":"linux-timeout","sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","completed_at":"2026-01-03T00:00:00Z","exit_status":"unknown","timeout_reason":"host deadline","risk_score":20,"risk_level":"low"}`
-	if err := os.WriteFile(filepath.Join(dir, "linux-timeout.json"), []byte(failed), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	// The invalid-hash doc ("../escape") is included to prove
+	// loadSandboxResultsES applies the same hashName validation
+	// loadSandboxResultsLocal always did -- ES has no such thing as a
+	// stray non-result file mixed into a directory, so that half of the
+	// original local-only test is dropped, not translated.
+	esResultsClientFor(t, map[string][]map[string]any{
+		"sandbox-analysis-v1": {
+			{"sandbox": map[string]any{"version": 1, "job": "linux-test", "sha256": strings.Repeat("a", 64), "completed_at": "2026-01-01T00:00:00Z", "stdout": "<script>"}},
+			{"sandbox": map[string]any{
+				"version": 2, "job": "windows-test", "sha256": strings.Repeat("b", 64), "completed_at": "2026-01-02T00:00:00Z",
+				"windows_forensics": map[string]any{"detected": true, "execution_mode": "wine", "pe_type": "PE32+", "imphash": "test"},
+				"network_summary":   map[string]any{"dns_queries": []string{"raw.githubusercontent.com"}, "guest_packets": 12},
+			}},
+			{"sandbox": map[string]any{"job": "bad", "sha256": "../escape"}},
+			{"sandbox": map[string]any{
+				"version": 2, "job": "linux-timeout", "sha256": strings.Repeat("c", 64), "completed_at": "2026-01-03T00:00:00Z",
+				"exit_status": "unknown", "timeout_reason": "host deadline", "risk_score": 20, "risk_level": "low",
+			}},
+		},
+	})
 	rows := loadSandboxResults()
 	if len(rows) != 3 || rows[0].Job != "linux-timeout" || !rows[0].Incomplete ||
 		rows[0].RunStatus != "failed" || rows[0].FailureReason == "" ||
@@ -100,10 +104,18 @@ func TestSandboxMergesBothBackends(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write(linuxResults, "linux-a.json",
-		`{"version":2,"job":"linux-a","sha256":"`+strings.Repeat("a", 64)+`","completed_at":"2026-01-01T00:00:00Z","platform":"Linux"}`)
-	write(windowsResults, "windows-b.json",
-		`{"version":2,"job":"windows-b","sha256":"`+strings.Repeat("b", 64)+`","completed_at":"2026-01-02T00:00:00Z","platform":"Windows"}`)
+	// loadSandboxStatus below still reads status.json directly from these
+	// same dirs (unrelated to #1103 -- status polling was never part of the
+	// local-fallback pattern); the two jobs loadSandboxResults sees come
+	// from ES now, one merged stream regardless of which backend produced
+	// each job -- that merge itself no longer depends on which directory a
+	// result's file happened to live in.
+	esResultsClientFor(t, map[string][]map[string]any{
+		"sandbox-analysis-v1": {
+			{"sandbox": map[string]any{"version": 2, "job": "linux-a", "sha256": strings.Repeat("a", 64), "completed_at": "2026-01-01T00:00:00Z", "platform": "Linux"}},
+			{"sandbox": map[string]any{"version": 2, "job": "windows-b", "sha256": strings.Repeat("b", 64), "completed_at": "2026-01-02T00:00:00Z", "platform": "Windows"}},
+		},
+	})
 
 	rows := loadSandboxResults()
 	if len(rows) != 2 || rows[0].Job != "windows-b" || rows[1].Job != "linux-a" {
@@ -153,20 +165,29 @@ func TestSandboxMergesBothBackends(t *testing.T) {
 // artifact itself now comes from sandbox-export-artifacts-v1, not disk --
 // see sandbox_artifacts_es_test.go for the ES stub this uses.
 func TestSandboxExportsResolveAcrossBackends(t *testing.T) {
-	linuxResults, windowsResults := t.TempDir(), t.TempDir()
-	t.Setenv("SANDBOX_RESULTS_DIR", linuxResults)
-	t.Setenv("WINDOWS_SANDBOX_RESULTS_DIR", windowsResults)
-	body := `{"version":2,"job":"windows-c","sha256":"` + strings.Repeat("c", 64) + `","completed_at":"2026-01-03T00:00:00Z"}`
-	if err := os.WriteFile(filepath.Join(windowsResults, "windows-c.json"), []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	sha := strings.Repeat("c", 64)
 	pcap := append([]byte{0xd4, 0xc3, 0xb2, 0xa1}, make([]byte, 64)...)
-	srv := httptest.NewServer(sandboxArtifactStub(t, map[string]sandboxArtifactChunkDoc{
+	artifacts := sandboxArtifactStub(t, map[string]sandboxArtifactChunkDoc{
 		sandboxArtifactChunkID("windows-c", "host_pcap", 0): {
 			Job: "windows-c", Kind: "host_pcap", Filename: "windows-c.host.pcap",
 			ContentType: "application/vnd.tcpdump.pcap", ChunkIndex: 0, TotalChunks: 1,
 			SizeBytes: int64(len(pcap)), DataBase64: base64.StdEncoding.EncodeToString(pcap),
 		},
+	})
+	results := esResultsStub(t, map[string][]map[string]any{
+		"sandbox-analysis-v1": {
+			{"sandbox": map[string]any{"version": 2, "job": "windows-c", "sha256": sha, "completed_at": "2026-01-03T00:00:00Z"}},
+		},
+	})
+	// loadSandboxResults() now needs ES for the base result (#1103), on top
+	// of this test's existing artifact-doc stub for the PCAP itself -- one
+	// server answers both request shapes, routed by path.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/_doc/") {
+			artifacts(w, r)
+			return
+		}
+		results(w, r)
 	}))
 	defer srv.Close()
 	withESResultsClient(t, srv.URL)

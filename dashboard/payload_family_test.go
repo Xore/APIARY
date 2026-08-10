@@ -22,10 +22,8 @@ func TestPayloadsDataSurfacesFamilyAttribution(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resultsDir := t.TempDir()
-	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", resultsDir)
-	writeGitHubAnalysisResult(t, resultsDir, hash, map[string]any{
-		"exit_status": "ok", "family": "Mirai",
+	esGitHubAnalysisResult(t, map[string]any{
+		"sha256": hash, "exit_status": "ok", "family": "Mirai",
 		"verdict": map[string]any{"malicious": 12, "suspicious": 1, "total": 20, "level": "malicious"},
 	})
 
@@ -89,10 +87,8 @@ func TestAnalyzePayloadSurfacesFamilyAttribution(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resultsDir := t.TempDir()
-	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", resultsDir)
-	writeGitHubAnalysisResult(t, resultsDir, sha256hex, map[string]any{
-		"exit_status": "ok", "family": "Qbot",
+	esGitHubAnalysisResult(t, map[string]any{
+		"sha256": sha256hex, "exit_status": "ok", "family": "Qbot",
 	})
 
 	s := &store{payloadDirs: []string{payloadDir}}
@@ -125,10 +121,8 @@ func TestAnalyzePayloadBoundsLongFamilyLabel(t *testing.T) {
 	}
 
 	long := strings.Repeat("x", familyDisplayCap+50)
-	resultsDir := t.TempDir()
-	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", resultsDir)
-	writeGitHubAnalysisResult(t, resultsDir, sha256hex, map[string]any{
-		"exit_status": "ok", "family": long,
+	esGitHubAnalysisResult(t, map[string]any{
+		"sha256": sha256hex, "exit_status": "ok", "family": long,
 	})
 
 	s := &store{payloadDirs: []string{payloadDir}}
@@ -158,9 +152,7 @@ func TestPayloadsPageRendersFamilyBadge(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(payloadDir, hash), []byte("payload"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	resultsDir := t.TempDir()
-	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", resultsDir)
-	writeGitHubAnalysisResult(t, resultsDir, hash, map[string]any{"exit_status": "ok", "family": "Mirai"})
+	esGitHubAnalysisResult(t, map[string]any{"sha256": hash, "exit_status": "ok", "family": "Mirai"})
 
 	s := &store{payloadDirs: []string{payloadDir}, es: newESClient("http://127.0.0.1:1", "")}
 	s.payloadCache = s.scanPayloads()

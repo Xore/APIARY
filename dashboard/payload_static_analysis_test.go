@@ -30,11 +30,7 @@ func TestAnalyzePayloadCachesStaticWorkButRefreshesDynamicData(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resultsDir := t.TempDir()
-	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", resultsDir)
-	writeGitHubAnalysisResult(t, resultsDir, sha256hex, map[string]any{
-		"exit_status": "ok", "family": "Qbot",
-	})
+	esGitHubAnalysisResult(t, map[string]any{"sha256": sha256hex, "exit_status": "ok", "family": "Qbot"})
 
 	esStore := newMemESDocStore()
 	esSrv := httptest.NewServer(esStore.handler())
@@ -55,10 +51,9 @@ func TestAnalyzePayloadCachesStaticWorkButRefreshesDynamicData(t *testing.T) {
 	// Overwrite the GitHub-analysis result (dynamic data) without touching
 	// the payload file itself -- the second call must reflect the new
 	// family attribution, proving the whole binaryAnalysis wasn't cached,
-	// only the static half.
-	writeGitHubAnalysisResult(t, resultsDir, sha256hex, map[string]any{
-		"exit_status": "ok", "family": "Emotet",
-	})
+	// only the static half. esGitHubAnalysisResult repoints esResultsClient
+	// at a fresh stub server, same as writing a new local file used to.
+	esGitHubAnalysisResult(t, map[string]any{"sha256": sha256hex, "exit_status": "ok", "family": "Emotet"})
 	second, err := s.analyzePayload(sha256hex)
 	if err != nil {
 		t.Fatal(err)

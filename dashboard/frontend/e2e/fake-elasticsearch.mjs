@@ -11,22 +11,75 @@ import { createServer } from "node:http";
 // cluster in CI.
 export function startFakeElasticsearch() {
   const docs = new Map(); // "index/id" -> { seqNo, primaryTerm, source }
+  // sensor -> raw honeypot event body (the shape classify() consumes,
+  // unwrapped -- this fixture wraps it under _source.honeypot itself on the
+  // way out, matching honeypot-v2-*'s real document shape). #1103: cowrie/
+  // dionaea/conpot/... read Elasticsearch exclusively now, no local-file
+  // fallback, so the e2e fixture has to seed their events here instead of
+  // (or as well as) the local log files start-dashboard.mjs still writes
+  // for the sensors that keep a local read path (suricata, portbridge).
+  const sensorEvents = new Map();
+  const pits = new Set();
 
   const server = createServer((req, res) => {
     const url = new URL(req.url, "http://fake-es");
     const parts = url.pathname.replace(/^\//, "").split("/");
 
+    // #1103: loadSensorEventsES opens a point-in-time scoped to
+    // honeypot-v2-* (POST /<pattern>/_pit) and then searches via a bodyless-
+    // of-index POST /_search that carries the PIT id in its body instead --
+    // answer both before the dashboard-* index gate below, which would
+    // otherwise 503 the bare /_search (no index segment at all).
+    if (parts.length === 2 && parts[1] === "_pit" && req.method === "POST") {
+      const id = `fake-pit-${pits.size}`;
+      pits.add(id);
+      res.setHeader("Content-Type", "application/json");
+      res.writeHead(200);
+      res.end(JSON.stringify({ id }));
+      return;
+    }
+    if (parts.length === 1 && parts[0] === "_pit" && req.method === "DELETE") {
+      readBody(req).then(() => {
+        res.setHeader("Content-Type", "application/json");
+        res.writeHead(200);
+        res.end(JSON.stringify({ succeeded: true }));
+      });
+      return;
+    }
+    if (parts.length === 1 && parts[0] === "_search" && req.method === "POST") {
+      readBody(req).then((body) => {
+        const req_ = body.length ? JSON.parse(body) : {};
+        const filters = req_.query?.bool?.filter ?? [];
+        const sensorFilter = filters.find((f) => f.term?.["event.sensor"] !== undefined);
+        res.setHeader("Content-Type", "application/json");
+        res.writeHead(200);
+        if (!sensorFilter) {
+          // The #39 overview aggregation query, not a per-sensor search --
+          // this fixture doesn't back it with real aggregation buckets
+          // (fetchESOverview's own ok=false path is already exercised and
+          // tolerated by every caller, same as before #1103).
+          res.end(JSON.stringify({ hits: { hits: [] } }));
+          return;
+        }
+        const events = sensorEvents.get(sensorFilter.term["event.sensor"]) ?? [];
+        const hits = events.map((source) => ({ _source: { honeypot: source } }));
+        res.end(JSON.stringify({ hits: { hits } }));
+      });
+      return;
+    }
+
     // Only the dashboard's own bookkeeping indices (dashboard-*) are backed
-    // by real in-memory state here. Everything else -- honeypot-v2-*,
-    // suricata-*, portbridge-v2-*, dead-letter-honeypot*, _cluster/health,
-    // _count -- is sensor telemetry this fixture never ingests. Answering
-    // those with a confident "200, zero hits" would make aggregate.go's own
-    // ES-preferred read (#34/#403, aggregate.go's loadSensorEventsES call)
-    // trust an empty Elasticsearch over the real fixture log files it should
-    // fall back to. A non-2xx response here is exactly what a real cluster
-    // that hasn't ingested this data would never produce, but it reaches the
-    // same "ES query failed, use local files" branch every caller already
-    // has for a genuine ES outage.
+    // by real in-memory state here. Everything else -- suricata-*,
+    // portbridge-v2-*, dead-letter-honeypot*, _cluster/health, _count -- is
+    // sensor telemetry this fixture never ingests. Answering those with a
+    // confident "200, zero hits" would make the dashboard trust an empty
+    // Elasticsearch over the real fixture data it should read instead (a
+    // local-file read for suricata/portbridge, which still have one; a
+    // seeded sensorEvents entry for everything else, which the two branches
+    // above already answer for real). A non-2xx response here is exactly
+    // what a real cluster that hasn't ingested this data would never
+    // produce, but it reaches the same "ES has nothing for this" handling
+    // every caller already has.
     if (parts[0] !== undefined && !parts[0].startsWith("dashboard-")) {
       res.writeHead(503);
       res.end(JSON.stringify({ error: "index not stubbed in fake-elasticsearch" }));
@@ -120,7 +173,17 @@ export function startFakeElasticsearch() {
   return new Promise((resolvePromise) => {
     server.listen(0, "127.0.0.1", () => {
       const { port } = server.address();
-      resolvePromise({ url: `http://127.0.0.1:${port}`, close: () => server.close() });
+      resolvePromise({
+        url: `http://127.0.0.1:${port}`,
+        close: () => server.close(),
+        // seedSensorEvents(sensor, events): register raw honeypot event
+        // bodies (unwrapped, classify()'s own input shape) so a
+        // loadSensorEventsES query for `sensor` returns them. Additive --
+        // safe to call more than once for the same sensor.
+        seedSensorEvents: (sensor, events) => {
+          sensorEvents.set(sensor, [...(sensorEvents.get(sensor) ?? []), ...events]);
+        },
+      });
     });
   });
 }

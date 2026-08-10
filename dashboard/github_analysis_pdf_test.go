@@ -41,14 +41,14 @@ func withFakeGitHubAnalysisUpstream(t *testing.T, rt http.RoundTripper) {
 const githubAnalysisTestCommit = "0123456789abcdef0123456789abcdef01234567"
 
 func TestLoadGitHubAnalysisResultsSetsViewURLOnlyWhenAPDFExists(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", dir)
-	writeGitHubAnalysisResult(t, dir, shaA, map[string]any{
-		"exit_status": "ok", "commit": githubAnalysisTestCommit, "report_pdf": "reports/" + shaA + ".pdf",
-	})
-	writeGitHubAnalysisResult(t, dir, shaB, map[string]any{
-		"exit_status": "quota_exceeded", "daily_cap": 10,
-	})
+	esGitHubAnalysisResult(t,
+		map[string]any{
+			"sha256": shaA, "exit_status": "ok", "commit": githubAnalysisTestCommit, "report_pdf": "reports/" + shaA + ".pdf",
+		},
+		map[string]any{
+			"sha256": shaB, "exit_status": "quota_exceeded", "daily_cap": 10,
+		},
+	)
 
 	rows := loadGitHubAnalysisResults()
 	byHash := map[string]githubAnalysisResult{}

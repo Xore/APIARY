@@ -1,9 +1,20 @@
 package main
 
 import (
+	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 )
+
+// esSensorPlaceholder writes a placeholder local file so rebuild()'s
+// directory walk still discovers `sensor` as needing an ES query (#1103:
+// discovery still comes from the local directory tree even though the
+// sensor's own event content is read from Elasticsearch exclusively now).
+func esSensorPlaceholder(t *testing.T, root, sensor string) {
+	t.Helper()
+	writeFileLines(t, filepath.Join(root, sensor, sensor+".json"), "{}")
+}
 
 // #241: portbridge queries p0f per connection and folds the OS guess into
 // its own conn log (vps/portbridge/p0f.go) rather than shipping a second,
@@ -19,14 +30,19 @@ func TestP0fOSGuessFillsFingerprintWhenNoneCaptured(t *testing.T) {
 		"time": now, "sensor": "portbridge", "event": "connect", "proto": "tcp",
 		"port": 21.0, "src_ip": "203.0.113.9", "src_port": 51000.0, "os": "Linux 3.11 and newer",
 	})
-	// dionaea's log_json shape, at the top level (dtagdevsec image) -- carries
-	// no fingerprint of its own, unlike cowrie's client.kex/HASSH.
-	writeLog(t, root, "dionaea/dionaea.json", map[string]any{
-		"timestamp": now, "src_ip": "203.0.113.9", "dst_port": 21.0,
-		"connection": map[string]any{"protocol": "ftp", "transport": "tcp", "type": "accept"},
-	})
+	// dionaea's own events come from Elasticsearch exclusively now (#1103).
+	// log_json shape, at the top level (dtagdevsec image) -- carries no
+	// fingerprint of its own, unlike cowrie's client.kex/HASSH.
+	esSensorPlaceholder(t, root, "dionaea")
+	esSrv := httptest.NewServer(esSensorAndOverviewStub(t, map[string][]map[string]any{
+		"dionaea": {{
+			"timestamp": now, "src_ip": "203.0.113.9", "dst_port": 21.0,
+			"connection": map[string]any{"protocol": "ftp", "transport": "tcp", "type": "accept"},
+		}},
+	}))
+	defer esSrv.Close()
 
-	s := &store{dir: root}
+	s := &store{dir: root, es: newESClient(esSrv.URL, "")}
 	s.rebuild()
 
 	events := s.getEvents()
@@ -49,12 +65,16 @@ func TestP0fOSGuessNeverOverwritesExistingFingerprint(t *testing.T) {
 		"time": now, "sensor": "portbridge", "event": "connect", "proto": "tcp",
 		"port": 22.0, "src_ip": "203.0.113.9", "src_port": 51000.0, "os": "Linux 3.11 and newer",
 	})
-	writeLog(t, root, "cowrie/cowrie.json", map[string]any{
-		"timestamp": now, "eventid": "cowrie.client.kex", "src_ip": "203.0.113.9",
-		"hassh": "aabbccddeeff00112233445566778899",
-	})
+	esSensorPlaceholder(t, root, "cowrie")
+	esSrv := httptest.NewServer(esSensorAndOverviewStub(t, map[string][]map[string]any{
+		"cowrie": {{
+			"timestamp": now, "eventid": "cowrie.client.kex", "src_ip": "203.0.113.9",
+			"hassh": "aabbccddeeff00112233445566778899",
+		}},
+	}))
+	defer esSrv.Close()
 
-	s := &store{dir: root}
+	s := &store{dir: root, es: newESClient(esSrv.URL, "")}
 	s.rebuild()
 
 	events := s.getEvents()
@@ -79,12 +99,16 @@ func TestNoP0fRecordLeavesFingerprintEmpty(t *testing.T) {
 		"time": now, "sensor": "portbridge", "event": "connect", "proto": "tcp",
 		"port": 21.0, "src_ip": "203.0.113.9", "src_port": 51000.0,
 	})
-	writeLog(t, root, "dionaea/dionaea.json", map[string]any{
-		"timestamp": now, "src_ip": "203.0.113.9", "dst_port": 21.0,
-		"connection": map[string]any{"protocol": "ftp", "transport": "tcp", "type": "accept"},
-	})
+	esSensorPlaceholder(t, root, "dionaea")
+	esSrv := httptest.NewServer(esSensorAndOverviewStub(t, map[string][]map[string]any{
+		"dionaea": {{
+			"timestamp": now, "src_ip": "203.0.113.9", "dst_port": 21.0,
+			"connection": map[string]any{"protocol": "ftp", "transport": "tcp", "type": "accept"},
+		}},
+	}))
+	defer esSrv.Close()
 
-	s := &store{dir: root}
+	s := &store{dir: root, es: newESClient(esSrv.URL, "")}
 	s.rebuild()
 
 	events := s.getEvents()

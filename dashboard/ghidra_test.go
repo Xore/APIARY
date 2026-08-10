@@ -23,6 +23,19 @@ func writeGhidraResult(t *testing.T, dir, sha string, row map[string]any) {
 	}
 }
 
+// esGhidraResult points esResultsClient (#1103: loadGhidraResults' only
+// source now) at a stub serving rows -- each row is a ghidraResult's raw
+// JSON fields, wrapped under "ghidra" per searchNamespace's field-name
+// contract (see ghidra.go's own searchNamespace call).
+func esGhidraResult(t *testing.T, rows ...map[string]any) {
+	t.Helper()
+	docs := make([]map[string]any, len(rows))
+	for i, row := range rows {
+		docs[i] = map[string]any{"ghidra": row}
+	}
+	esResultsClientFor(t, map[string][]map[string]any{"ghidra-analysis-v1": docs})
+}
+
 const shaA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 const shaB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
@@ -77,26 +90,16 @@ func TestSafeReturnPathAllowlist(t *testing.T) {
 }
 
 func TestLoadGhidraResults(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("GHIDRA_RESULTS_DIR", dir)
-
-	writeGhidraResult(t, dir, shaA, map[string]any{
-		"version": 1, "exit_status": "ok", "completed_at": "2026-07-31T10:00:00+00:00",
-		"imports": []string{"kernel32.dll!CreateProcessA"},
-	})
-	writeGhidraResult(t, dir, shaB, map[string]any{
-		"version": 1, "exit_status": "error", "error": "boom",
-		"completed_at": "2026-07-31T12:00:00+00:00",
-	})
-	// Malformed JSON must not hide the valid results alongside it.
-	if err := os.WriteFile(filepath.Join(dir, "c"+strings.Repeat("c", 63)+"_ghidra.json"),
-		[]byte("{not json"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	// A non-result file in the same directory must be ignored.
-	if err := os.WriteFile(filepath.Join(dir, "status.json"), []byte("{}"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	esGhidraResult(t,
+		map[string]any{
+			"sha256": shaA, "version": 1, "exit_status": "ok", "completed_at": "2026-07-31T10:00:00+00:00",
+			"imports": []string{"kernel32.dll!CreateProcessA"},
+		},
+		map[string]any{
+			"sha256": shaB, "version": 1, "exit_status": "error", "error": "boom",
+			"completed_at": "2026-07-31T12:00:00+00:00",
+		},
+	)
 
 	rows := loadGhidraResults()
 	if len(rows) != 2 {
@@ -109,6 +112,32 @@ func TestLoadGhidraResults(t *testing.T) {
 	// A failed analysis is still a visible result, with its reason.
 	if rows[0].ExitStatus != "error" || rows[0].Error != "boom" {
 		t.Errorf("failed result lost its status/reason: %+v", rows[0])
+	}
+}
+
+// TestLoadGhidraResultsLocalSkipsMalformedAndNonResultFiles covers
+// loadGhidraResultsLocal directly (not loadGhidraResults, #1103's ES-only
+// wrapper) -- workbench_orchestrator.go's reconcileWorkbenchRun still calls
+// it for job-completion freshness (see ghidra.go's own doc comment), so its
+// directory-scanning behavior remains real, live code.
+func TestLoadGhidraResultsLocalSkipsMalformedAndNonResultFiles(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GHIDRA_RESULTS_DIR", dir)
+
+	writeGhidraResult(t, dir, shaA, map[string]any{"version": 1, "exit_status": "ok"})
+	// Malformed JSON must not hide the valid result alongside it.
+	if err := os.WriteFile(filepath.Join(dir, "c"+strings.Repeat("c", 63)+"_ghidra.json"),
+		[]byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A non-result file in the same directory must be ignored.
+	if err := os.WriteFile(filepath.Join(dir, "status.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rows := loadGhidraResultsLocal()
+	if len(rows) != 1 || rows[0].SHA256 != shaA {
+		t.Fatalf("got %+v, want exactly one row for %s", rows, shaA)
 	}
 }
 
@@ -125,11 +154,8 @@ func TestLoadGhidraResults(t *testing.T) {
 // documents were affected at the time, so /ghidra showed a completely
 // empty table despite two successful analyses existing in Elasticsearch.
 func TestLoadGhidraResultsDecodesRevDeckCitations(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("GHIDRA_RESULTS_DIR", dir)
-
-	writeGhidraResult(t, dir, shaA, map[string]any{
-		"version": 1, "exit_status": "ok", "completed_at": "2026-08-06T00:00:00+00:00",
+	esGhidraResult(t, map[string]any{
+		"sha256": shaA, "version": 1, "exit_status": "ok", "completed_at": "2026-08-06T00:00:00+00:00",
 		"revdeck": map[string]any{
 			"workflow": "program_triage", "status": "complete", "answer": "ok",
 			"citations": map[string]any{
@@ -163,21 +189,19 @@ func TestLoadGhidraResultsDecodesRevDeckCitations(t *testing.T) {
 // rather than zero-valued false/0, which the template depends on to tell
 // "not applicable to this format" from "computed as false/zero" (#138).
 func TestLoadGhidraResultsDecodesFuzzyHashesAndLief(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("GHIDRA_RESULTS_DIR", dir)
-
-	raw := `{
-		"version": 2, "exit_status": "ok", "completed_at": "2026-08-01T10:00:00+00:00",
-		"fuzzy_hashes": {"ssdeep": "3:AXGBicFlIT:AXGHFF", "ssdeep_error": null,
-		                 "tlsh": "T1STUB", "tlsh_error": null},
-		"lief": {"format": "ELF", "architecture": "X86_64", "entrypoint": "0x6760",
-		         "is_pie": true, "section_count": 1, "sections_truncated": false,
-		         "sections": [{"name": ".text", "size": 100, "entropy": 6.234}],
-		         "libraries": ["libc.so.6"], "stripped": false}
-	}`
-	if err := os.WriteFile(filepath.Join(dir, shaA+"_ghidra.json"), []byte(raw), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	esGhidraResult(t, map[string]any{
+		"sha256": shaA, "version": 2, "exit_status": "ok", "completed_at": "2026-08-01T10:00:00+00:00",
+		"fuzzy_hashes": map[string]any{
+			"ssdeep": "3:AXGBicFlIT:AXGHFF", "ssdeep_error": nil,
+			"tlsh": "T1STUB", "tlsh_error": nil,
+		},
+		"lief": map[string]any{
+			"format": "ELF", "architecture": "X86_64", "entrypoint": "0x6760",
+			"is_pie": true, "section_count": 1, "sections_truncated": false,
+			"sections":  []map[string]any{{"name": ".text", "size": 100, "entropy": 6.234}},
+			"libraries": []string{"libc.so.6"}, "stripped": false,
+		},
+	})
 
 	rows := loadGhidraResults()
 	if len(rows) != 1 {
@@ -217,20 +241,22 @@ func TestLoadGhidraResultsDecodesFuzzyHashesAndLief(t *testing.T) {
 // the decode side there is only one shape to check: present, full summary
 // (#78).
 func TestLoadGhidraResultsDecodesCapa(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("GHIDRA_RESULTS_DIR", dir)
-
-	raw := `{
-		"version": 3, "exit_status": "ok", "completed_at": "2026-08-01T10:00:00+00:00",
-		"capa": {"arch": "amd64", "os": "linux", "format": "elf",
-		         "capabilities": [{"name": "create TCP socket", "namespace": "communication/socket/tcp", "matches": 2}],
-		         "capabilities_truncated": false,
-		         "attack": [{"id": "T1071.001", "tactic": "COMMAND_AND_CONTROL", "technique": "Application Layer Protocol", "subtechnique": "Web Protocols"}],
-		         "mbc": [{"id": "C0001", "objective": "Communication", "behavior": "Socket Communication", "method": "Send Data"}]}
-	}`
-	if err := os.WriteFile(filepath.Join(dir, shaA+"_ghidra.json"), []byte(raw), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	esGhidraResult(t, map[string]any{
+		"sha256": shaA, "version": 3, "exit_status": "ok", "completed_at": "2026-08-01T10:00:00+00:00",
+		"capa": map[string]any{
+			"arch": "amd64", "os": "linux", "format": "elf",
+			"capabilities": []map[string]any{
+				{"name": "create TCP socket", "namespace": "communication/socket/tcp", "matches": 2},
+			},
+			"capabilities_truncated": false,
+			"attack": []map[string]any{
+				{"id": "T1071.001", "tactic": "COMMAND_AND_CONTROL", "technique": "Application Layer Protocol", "subtechnique": "Web Protocols"},
+			},
+			"mbc": []map[string]any{
+				{"id": "C0001", "objective": "Communication", "behavior": "Socket Communication", "method": "Send Data"},
+			},
+		},
+	})
 
 	rows := loadGhidraResults()
 	if len(rows) != 1 {
@@ -258,10 +284,8 @@ func TestLoadGhidraResultsDecodesCapa(t *testing.T) {
 // {"unsupported": reason} instead of collapsing it to the same nil a down
 // sidecar produces (TestLoadGhidraResultsCapaAbsentIsNil below).
 func TestLoadGhidraResultsDecodesCapaUnsupported(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("GHIDRA_RESULTS_DIR", dir)
-	writeGhidraResult(t, dir, shaA, map[string]any{
-		"exit_status": "ok",
+	esGhidraResult(t, map[string]any{
+		"sha256": shaA, "exit_status": "ok",
 		"capa": map[string]any{
 			"unsupported": "unsupported architecture -- capa's default backend covers only x86/amd64/arm64",
 		},
@@ -285,9 +309,7 @@ func TestLoadGhidraResultsDecodesCapaUnsupported(t *testing.T) {
 // at all must not panic or synthesize a zero-valued struct (#78). Distinct
 // from the Unsupported case above since #195.
 func TestLoadGhidraResultsCapaAbsentIsNil(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("GHIDRA_RESULTS_DIR", dir)
-	writeGhidraResult(t, dir, shaA, map[string]any{"exit_status": "ok"})
+	esGhidraResult(t, map[string]any{"sha256": shaA, "exit_status": "ok"})
 
 	rows := loadGhidraResults()
 	if len(rows) != 1 || rows[0].Capa != nil {
@@ -296,10 +318,8 @@ func TestLoadGhidraResultsCapaAbsentIsNil(t *testing.T) {
 }
 
 func TestLoadGhidraResultsDecodesFloss(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("GHIDRA_RESULTS_DIR", dir)
-	writeGhidraResult(t, dir, shaA, map[string]any{
-		"exit_status": "ok",
+	esGhidraResult(t, map[string]any{
+		"sha256": shaA, "exit_status": "ok",
 		"floss": map[string]any{
 			"static_strings": []string{"/lib/ld-linux.so"}, "static_strings_total": 1,
 			"stack_strings": []string{"stub-stack-string"}, "stack_strings_total": 1,
@@ -332,10 +352,8 @@ func TestLoadGhidraResultsDecodesFloss(t *testing.T) {
 // collapsing it to the same nil a down sidecar produces
 // (TestLoadGhidraResultsFlossAbsentIsNil below) (#207).
 func TestLoadGhidraResultsDecodesFlossUnsupported(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("GHIDRA_RESULTS_DIR", dir)
-	writeGhidraResult(t, dir, shaA, map[string]any{
-		"exit_status": "ok",
+	esGhidraResult(t, map[string]any{
+		"sha256": shaA, "exit_status": "ok",
 		"floss": map[string]any{
 			"unsupported": "unsupported format for string decoding -- floss's decoding/stack-string analysis covers PE and raw shellcode only",
 		},
@@ -359,9 +377,7 @@ func TestLoadGhidraResultsDecodesFlossUnsupported(t *testing.T) {
 // at all must not panic or synthesize a zero-valued struct, mirroring
 // TestLoadGhidraResultsCapaAbsentIsNil (#207).
 func TestLoadGhidraResultsFlossAbsentIsNil(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("GHIDRA_RESULTS_DIR", dir)
-	writeGhidraResult(t, dir, shaA, map[string]any{"exit_status": "ok"})
+	esGhidraResult(t, map[string]any{"sha256": shaA, "exit_status": "ok"})
 
 	rows := loadGhidraResults()
 	if len(rows) != 1 || rows[0].Floss != nil {
@@ -375,19 +391,18 @@ func TestLoadGhidraResultsFlossAbsentIsNil(t *testing.T) {
 // Lief's CompileTimestamp is, since the field exists to tell "absent" from
 // "zero" apart on the template side.
 func TestLoadGhidraResultsDecodesRevDeck(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("GHIDRA_RESULTS_DIR", dir)
-
-	raw := `{
-		"version": 4, "exit_status": "ok", "completed_at": "2026-08-01T10:00:00+00:00",
-		"revdeck": {"workflow": "program_triage", "status": "max_turns",
-		            "answer": "This binary looks benign.", "steps": 4, "tool_calls": 3,
-		            "citations": {"valid": [{"kind":"function","raw":"[function:0x401000]","value":"0x401000","valid":true}], "invalid": [{"kind":"function","raw":"[function:0xdead]","value":"0xdead","valid":false}]},
-		            "warnings": ["capped tool budget"]}
-	}`
-	if err := os.WriteFile(filepath.Join(dir, shaA+"_ghidra.json"), []byte(raw), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	esGhidraResult(t, map[string]any{
+		"sha256": shaA, "version": 4, "exit_status": "ok", "completed_at": "2026-08-01T10:00:00+00:00",
+		"revdeck": map[string]any{
+			"workflow": "program_triage", "status": "max_turns",
+			"answer": "This binary looks benign.", "steps": 4, "tool_calls": 3,
+			"citations": map[string]any{
+				"valid":   []map[string]any{{"kind": "function", "raw": "[function:0x401000]", "value": "0x401000", "valid": true}},
+				"invalid": []map[string]any{{"kind": "function", "raw": "[function:0xdead]", "value": "0xdead", "valid": false}},
+			},
+			"warnings": []string{"capped tool budget"},
+		},
+	})
 
 	rows := loadGhidraResults()
 	if len(rows) != 1 {
@@ -421,9 +436,7 @@ func TestLoadGhidraResultsDecodesRevDeck(t *testing.T) {
 // so decoding a result with no "revdeck" key at all must not panic or
 // synthesize a zero-valued struct (#78).
 func TestLoadGhidraResultsRevDeckAbsentIsNil(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("GHIDRA_RESULTS_DIR", dir)
-	writeGhidraResult(t, dir, shaA, map[string]any{"exit_status": "ok"})
+	esGhidraResult(t, map[string]any{"sha256": shaA, "exit_status": "ok"})
 
 	rows := loadGhidraResults()
 	if len(rows) != 1 || rows[0].RevDeck != nil {
@@ -431,14 +444,19 @@ func TestLoadGhidraResultsRevDeckAbsentIsNil(t *testing.T) {
 	}
 }
 
-// Identity comes from the filename, which the worker derived from a validated
-// request — not from the document body, which could disagree with it.
+// Identity comes from the filename, which the worker derived from a
+// validated request — not from the document body, which could disagree
+// with it. This is loadGhidraResultsLocal-specific (the ES path has no
+// filename to trust; it trusts the document's own sha256 field, checked
+// only against hashName -- see loadGhidraResultsES), and
+// loadGhidraResultsLocal remains real, live code: workbench_orchestrator.go
+// still calls it directly (#1103).
 func TestLoadGhidraResultsTrustsFilenameOverBody(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("GHIDRA_RESULTS_DIR", dir)
 	writeGhidraResult(t, dir, shaA, map[string]any{"sha256": shaB, "exit_status": "ok"})
 
-	rows := loadGhidraResults()
+	rows := loadGhidraResultsLocal()
 	if len(rows) != 1 || rows[0].SHA256 != shaA {
 		t.Fatalf("body sha256 overrode the filename: %+v", rows)
 	}
@@ -590,10 +608,12 @@ func TestServeGhidraExportWithoutReport(t *testing.T) {
 }
 
 func TestServeGhidraAPI(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("GHIDRA_RESULTS_DIR", dir)
-	writeGhidraResult(t, dir, shaA, map[string]any{
-		"exit_status": "ok", "imports": []string{"ws2_32.dll!connect"},
+	// loadGhidraStatus's "status" subtest below still reads GHIDRA_RESULTS_DIR
+	// directly (unrelated to #1103 -- queue status polling was never part of
+	// the local-fallback pattern); the actual result data comes from ES.
+	t.Setenv("GHIDRA_RESULTS_DIR", t.TempDir())
+	esGhidraResult(t, map[string]any{
+		"sha256": shaA, "exit_status": "ok", "imports": []string{"ws2_32.dll!connect"},
 	})
 
 	t.Run("list", func(t *testing.T) {
@@ -668,12 +688,10 @@ func TestServeGhidraAPI(t *testing.T) {
 // Search must not match on the string table: nearly every binary contains
 // nearly every short substring, which would make the filter useless.
 func TestGhidraDataQueryIgnoresStrings(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("GHIDRA_RESULTS_DIR", dir)
-	writeGhidraResult(t, dir, shaA, map[string]any{
-		"exit_status": "ok",
-		"strings":     []string{"needle"},
-		"imports":     []string{"ws2_32.dll!connect"},
+	esGhidraResult(t, map[string]any{
+		"sha256": shaA, "exit_status": "ok",
+		"strings": []string{"needle"},
+		"imports": []string{"ws2_32.dll!connect"},
 	})
 
 	data, err := ghidraData("", "needle")
@@ -750,8 +768,8 @@ func TestGhidraAlertsOnFailedResult(t *testing.T) {
 		[]byte(`{"version":1}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	writeGhidraResult(t, dir, shaA, map[string]any{
-		"exit_status": "error", "error": "analysis exceeded 4200s",
+	esGhidraResult(t, map[string]any{
+		"sha256": shaA, "exit_status": "error", "error": "analysis exceeded 4200s",
 	})
 	messages := ghidraAlertMessages(t, dir)
 	if !hasAlert(messages, "analysis failed") || !hasAlert(messages, "exceeded 4200s") {
@@ -767,9 +785,9 @@ func TestGhidraCryptoAloneDoesNotAlertByDefault(t *testing.T) {
 		[]byte(`{"version":1}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	writeGhidraResult(t, dir, shaA, map[string]any{
-		"exit_status": "ok",
-		"findcrypt":   []map[string]string{{"address": "0x1", "constant": "AES Te0", "algorithm": "AES"}},
+	esGhidraResult(t, map[string]any{
+		"sha256": shaA, "exit_status": "ok",
+		"findcrypt": []map[string]string{{"address": "0x1", "constant": "AES Te0", "algorithm": "AES"}},
 	})
 
 	if messages := ghidraAlertMessages(t, dir); hasAlert(messages, "flagged") {
@@ -788,9 +806,9 @@ func TestGhidraAlertsOnHighAIRisk(t *testing.T) {
 		[]byte(`{"version":1}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	writeGhidraResult(t, dir, shaA, map[string]any{
-		"exit_status": "ok",
-		"ai_triage":   map[string]any{"risk_level": "high", "model": "qwen3:8b"},
+	esGhidraResult(t, map[string]any{
+		"sha256": shaA, "exit_status": "ok",
+		"ai_triage": map[string]any{"risk_level": "high", "model": "qwen3:8b"},
 	})
 	messages := ghidraAlertMessages(t, dir)
 	if !hasAlert(messages, "flagged") {

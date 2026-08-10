@@ -248,39 +248,38 @@ func (s *store) rebuild() {
 		}
 	}
 	for _, dirSensor := range sensorOrder {
-		// ES-preferred (#34/#403): every sensor Filebeat already ships to
-		// honeypot-v2-* under event.sensor:<dirSensor> can be read from
-		// there instead of this dashboard's own local log mount. Local
-		// files stay as the fallback (not removed) for the same reason
-		// loadGhidraResults/loadSandboxResults/loadGitHubAnalysisResults
-		// already fall back to their own local copies: a dashboard instance
-		// should degrade gracefully on a transient ES outage, not go blank
-		// for that sensor.
-		//
-		// #41 regression fix: suricata and portbridge are excluded from
-		// this attempt entirely, not just left to "fail" it naturally --
-		// both ship to their own index families (suricata-*,
-		// portbridge-v2-*, "logset" values other than "sensors"; see
-		// analysis/filebeat.yml/elasticsearch-setup.sh) and never appear in
-		// honeypot-v2-* under event.sensor:"suricata"/"portbridge" the way
-		// every other sensor here does. loadSensorEventsES only ever
-		// queries honeypot-v2-*, so for these two it was "successfully"
-		// returning zero hits every cycle (confirmed live) -- indistinguishable
-		// from "ES has this sensor and it's just quiet" to the code above,
-		// which then skipped the local read that actually has the data.
-		if s.es != nil && dirSensor != "suricata" && dirSensor != "portbridge" {
-			if cached, ok := s.loadSensorEventsES(s.es, dirSensor); ok {
+		// #41 regression fix: suricata and portbridge stay on their local
+		// log mount, not ES. Both ship to their own index families
+		// (suricata-*, portbridge-v2-*, "logset" values other than
+		// "sensors"; see analysis/filebeat.yml/elasticsearch-setup.sh) and
+		// never appear in honeypot-v2-* under
+		// event.sensor:"suricata"/"portbridge" the way every other sensor
+		// here does. loadSensorEventsES only ever queries honeypot-v2-*,
+		// so for these two it "successfully" returns zero hits every cycle
+		// -- ES has no data for them at all yet (#1103 Category 2 tracks
+		// giving them their own ES adapter), so a local read is still the
+		// only source, not a fallback path.
+		if dirSensor == "suricata" || dirSensor == "portbridge" {
+			for _, fn := range filesBySensor[dirSensor] {
+				cached, state := s.classifiedEventsFor(fn, dirSensor, s.logCache[fn], tailCap)
+				if state != nil {
+					nextCache[fn] = state
+				}
 				for _, entry := range cached {
 					processEntry(entry)
 				}
-				continue
 			}
+			continue
 		}
-		for _, fn := range filesBySensor[dirSensor] {
-			cached, state := s.classifiedEventsFor(fn, dirSensor, s.logCache[fn], tailCap)
-			if state != nil {
-				nextCache[fn] = state
-			}
+		// ES-only (#1103): every sensor Filebeat ships to honeypot-v2-*
+		// under event.sensor:<dirSensor> is read from there exclusively --
+		// an ES query failure means "no data this cycle," the same as
+		// esOnlySensors below, not a reason to fall back to this dashboard
+		// instance's own local log mount.
+		if s.es == nil {
+			continue
+		}
+		if cached, ok := s.loadSensorEventsES(s.es, dirSensor); ok {
 			for _, entry := range cached {
 				processEntry(entry)
 			}

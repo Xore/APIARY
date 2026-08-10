@@ -46,23 +46,14 @@ func writeRevdeckResult(t *testing.T, dir, sha string, row map[string]any) {
 }
 
 func TestLoadRevdeckResults(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("REVDECK_RESULTS_DIR", dir)
-
-	writeRevdeckResult(t, dir, shaA, map[string]any{
-		"version": 1, "exit_status": "ok", "completed_at": "2026-07-31T10:00:00+00:00",
-		"revdeck": map[string]any{"workflow": "program_triage", "status": "complete", "answer": "benign", "tool_calls": 2},
-	})
-	writeRevdeckResult(t, dir, shaB, map[string]any{
-		"version": 1, "exit_status": "error", "error": "REVDECK_API_BASE is not configured on this worker",
-		"completed_at": "2026-07-31T12:00:00+00:00", "revdeck": nil,
-	})
-	// A non-result file in the same directory must be ignored -- this is the
-	// same results directory the Ghidra worker's own _ghidra.json files could
-	// share a mount with in principle, so the suffix match has to be exact.
-	if err := os.WriteFile(filepath.Join(dir, shaA+"_ghidra.json"), []byte("{}"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	srv := httptest.NewServer(revdeckSearchNamespaceStub(t, []map[string]any{
+		{"sha256": shaA, "version": 1, "exit_status": "ok", "completed_at": "2026-07-31T10:00:00+00:00",
+			"revdeck": map[string]any{"workflow": "program_triage", "status": "complete", "answer": "benign", "tool_calls": 2}},
+		{"sha256": shaB, "version": 1, "exit_status": "error", "error": "REVDECK_API_BASE is not configured on this worker",
+			"completed_at": "2026-07-31T12:00:00+00:00", "revdeck": nil},
+	}))
+	defer srv.Close()
+	withESResultsClient(t, srv.URL)
 
 	rows := loadRevdeckResults()
 	if len(rows) != 2 {
@@ -102,12 +93,12 @@ func TestRevdeckDataNotFound(t *testing.T) {
 }
 
 func TestRevdeckDataFindsMatchingResult(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("REVDECK_RESULTS_DIR", dir)
-	writeRevdeckResult(t, dir, shaA, map[string]any{
-		"version": 1, "exit_status": "ok", "completed_at": "2026-07-31T10:00:00+00:00",
-		"revdeck": map[string]any{"workflow": "program_triage", "status": "complete", "tool_calls": 1},
-	})
+	srv := httptest.NewServer(revdeckSearchNamespaceStub(t, []map[string]any{
+		{"sha256": shaA, "version": 1, "exit_status": "ok", "completed_at": "2026-07-31T10:00:00+00:00",
+			"revdeck": map[string]any{"workflow": "program_triage", "status": "complete", "tool_calls": 1}},
+	}))
+	defer srv.Close()
+	withESResultsClient(t, srv.URL)
 	data, err := revdeckData(shaA)
 	if err != nil {
 		t.Fatal(err)
@@ -155,21 +146,20 @@ func TestLoadRevdeckResultsPrefersESOverLocalFile(t *testing.T) {
 	}
 }
 
-// TestLoadRevdeckResultsFallsBackToLocalOnESFailure (#404): matches
-// loadGhidraResults' own fallback behavior -- an ES error must not blank
-// the page when a local result is still available.
-func TestLoadRevdeckResultsFallsBackToLocalOnESFailure(t *testing.T) {
+// TestLoadRevdeckResultsESFailureYieldsNoResults (#1103): loadRevdeckResults
+// reads Elasticsearch exclusively now -- an ES error means "no results this
+// cycle," not a reason to fall back to a local file that happens to exist.
+func TestLoadRevdeckResultsESFailureYieldsNoResults(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("REVDECK_RESULTS_DIR", dir)
 	writeRevdeckResult(t, dir, shaA, map[string]any{
 		"version": 1, "sha256": shaA, "exit_status": "ok", "completed_at": "2026-07-31T09:00:00+00:00",
-		"revdeck": map[string]any{"workflow": "local-fallback", "status": "complete", "tool_calls": 1},
+		"revdeck": map[string]any{"workflow": "local-only", "status": "complete", "tool_calls": 1},
 	})
 	withESResultsClient(t, "http://127.0.0.1:1") // nothing listening
 
-	rows := loadRevdeckResults()
-	if len(rows) != 1 || rows[0].SHA256 != shaA || rows[0].RevDeck.Workflow != "local-fallback" {
-		t.Fatalf("expected the local result as a fallback, got %+v", rows)
+	if rows := loadRevdeckResults(); rows != nil {
+		t.Fatalf("expected no results when ES fails, got %+v -- must not fall back to the local file", rows)
 	}
 }
 

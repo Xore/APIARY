@@ -805,10 +805,10 @@ func TestFingerprintAndEnrichmentFilters(t *testing.T) {
 // #149: /events?family= pivots from a GitHub-analysis scanner attribution to
 // the sessions that delivered a matching payload.
 func TestFamilyFilterMatchesResolvedHashSet(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", dir)
-	writeGitHubAnalysisResult(t, dir, shaA, map[string]any{"exit_status": "ok", "family": "Mirai"})
-	writeGitHubAnalysisResult(t, dir, shaB, map[string]any{"exit_status": "ok", "family": "qbot"})
+	esGitHubAnalysisResult(t,
+		map[string]any{"sha256": shaA, "exit_status": "ok", "family": "Mirai"},
+		map[string]any{"sha256": shaB, "exit_status": "ok", "family": "qbot"},
+	)
 
 	delivered := storedEvent{Shasum: shaA, Session: "session-a"}
 	other := storedEvent{Shasum: shaB, Session: "session-b"}

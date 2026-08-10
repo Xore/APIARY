@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -537,23 +536,17 @@ func TestRenderDefinitionPDFRespectsElements(t *testing.T) {
 // TestGenerateSandboxReportThroughPipeline proves the sandbox template turns a
 // referenced analysis run into a stored, themed PDF.
 func TestGenerateSandboxReportThroughPipeline(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("SANDBOX_RESULTS_DIR", dir)
 	job := "linux-20260729T164848Z-cbe0b83cb4a0"
-	result := `{
-		"version":3,
-		"job":"` + job + `",
-		"sha256":"` + strings.Repeat("c", 64) + `",
-		"run_status":"completed",
-		"guest_started":true,
-		"risk_score":22,
-		"risk_level":"low",
-		"duration_seconds":14.5,
-		"network_summary":{"dns_queries":["ntp.ubuntu.com"]}
-	}`
-	if err := os.WriteFile(filepath.Join(dir, job+".json"), []byte(result), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	esResultsClientFor(t, map[string][]map[string]any{
+		"sandbox-analysis-v1": {
+			{"sandbox": map[string]any{
+				"version": 3, "job": job, "sha256": strings.Repeat("c", 64),
+				"run_status": "completed", "guest_started": true,
+				"risk_score": 22, "risk_level": "low", "duration_seconds": 14.5,
+				"network_summary": map[string]any{"dns_queries": []string{"ntp.ubuntu.com"}},
+			}},
+		},
+	})
 	s := newReportTestStore(t)
 	def := sampleDefinition("sandbox")
 	def.Branding.FooterLeft = "CONFIDENTIAL - SANDBOX"

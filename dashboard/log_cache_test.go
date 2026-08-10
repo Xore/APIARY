@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -241,29 +242,41 @@ func TestRebuildIncrementalMatchesFullRebuild(t *testing.T) {
 // TestRebuildRejoinsCachedEventOnceViaMapCatchesUp (#353) is the
 // correctness-critical case log_cache.go's own header comment documents: a
 // sensor event logged before its matching portbridge connect record lands
-// must still successfully join to the real attacker IP on a LATER rebuild
-// cycle, even though the sensor's own log file didn't change between
-// cycles (and its classification therefore came from the cache both
-// times). Caching the classify() output but re-running the via-join fresh
-// every cycle is what makes this possible; caching the joined result would
-// have permanently frozen the miss.
+// must still successfully join to the real attacker IP on a later rebuild
+// cycle -- the via-join (classify.go's buildViaMap, still purely local per
+// #1103's Category 2) must run fresh every cycle regardless of where the
+// sensor event itself came from, not just once at classify time.
 func TestRebuildRejoinsCachedEventOnceViaMapCatchesUp(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 
-	writeLog(t, root, "dionaea/incidents.json", map[string]any{
-		"timestamp": now, "origin": "dionaea.connection.tcp.connect",
-		"data": map[string]any{"connection": map[string]any{
-			"protocol": "smb", "remote_ip": tunnelPeerIP, "remote_port": 41001.0, "local_port": 445.0,
+	// dionaea's own events come from Elasticsearch exclusively now (#1103);
+	// the "delayed until portbridge lands" event under test is the same
+	// raw shape classify() has always consumed, just wrapped under
+	// _source.honeypot the way loadSensorEventsES reads it, instead of a
+	// local log line. rebuild() still discovers WHICH sensors to query in
+	// ES by walking this local directory tree (#1103 kept that discovery
+	// mechanism as-is -- see aggregate.go's own comment), so an empty
+	// placeholder file is still needed here even though its content is
+	// never read; on a real host the dionaea container writing its own
+	// local log plays this same role.
+	writeFileLines(t, filepath.Join(root, "dionaea", "dionaea.json"), "{}")
+	esSrv := httptest.NewServer(esSensorAndOverviewStub(t, map[string][]map[string]any{
+		"dionaea": {{
+			"timestamp": now, "origin": "dionaea.connection.tcp.connect",
+			"data": map[string]any{"connection": map[string]any{
+				"protocol": "smb", "remote_ip": tunnelPeerIP, "remote_port": 41001.0, "local_port": 445.0,
+			}},
 		}},
-	})
+	}))
+	defer esSrv.Close()
 
 	// #39: the aggregate Unattributed count is Elasticsearch's own job now
 	// (es_aggregate.go) -- what this test is actually about, the retry
 	// property itself, is fully covered below by checking each event's own
 	// SrcIP directly, unaffected by that migration since the local via_port
 	// join in aggregate.go's processEntry is unchanged.
-	s := &store{dir: root}
+	s := &store{dir: root, es: newESClient(esSrv.URL, "")}
 	s.rebuild()
 	for _, event := range s.getEvents() {
 		if event.SrcIP != "" {
@@ -295,20 +308,22 @@ func TestRebuildRejoinsCachedEventOnceViaMapCatchesUp(t *testing.T) {
 // map from only the files logFiles() finds each cycle, which is the prune.
 func TestRebuildPrunesLogCacheForRemovedFiles(t *testing.T) {
 	root := t.TempDir()
-	keep := filepath.Join(root, "cowrie", "cowrie.json")
-	// dionaea, not multipot (#403): multipot moved to an ES-sourced sensor
-	// (events_es.go's esOnlySensors) as part of #238, so its directory is
-	// deliberately skipped by rebuild()'s file walk now and would never be
-	// cached -- this test needs a still-file-based sensor to exercise the
-	// prune behavior it's actually testing.
-	gone := filepath.Join(root, "dionaea", "dionaea.json")
-	writeFileLines(t, keep, cowrieLine("a", "2026-01-01T00:00:00Z"))
-	writeFileLines(t, gone, `{"eventid":"connect","timestamp":"2026-01-01T00:00:00Z","src_ip":"203.0.113.5"}`)
+	// portbridge, not cowrie/dionaea (#1103): every sensor with its own
+	// honeypot-v2-* ES mirror is read from Elasticsearch exclusively now,
+	// so their directories are never file-cached at all. portbridge is one
+	// of the two sensors (with suricata) still read from disk -- this test
+	// needs a still-file-based sensor to exercise the prune behavior it's
+	// actually testing. Two files in the same portbridge/ directory, same
+	// as the rotation coverage in tunnel_peer_test.go.
+	keep := filepath.Join(root, "portbridge", "keep.json")
+	gone := filepath.Join(root, "portbridge", "gone.json")
+	writeFileLines(t, keep, `{"time":"2026-01-01T00:00:00Z","sensor":"portbridge","event":"connect","proto":"tcp","port":445,"src_ip":"203.0.113.5","src_port":41001,"via_port":41001}`)
+	writeFileLines(t, gone, `{"time":"2026-01-01T00:00:00Z","sensor":"portbridge","event":"connect","proto":"tcp","port":445,"src_ip":"203.0.113.6","src_port":41002,"via_port":41002}`)
 
 	s := &store{dir: root}
 	s.rebuild()
 	if _, ok := s.logCache[gone]; !ok {
-		t.Fatal("expected the dionaea file to be cached after its first rebuild")
+		t.Fatal("expected the portbridge file to be cached after its first rebuild")
 	}
 
 	if err := os.Remove(gone); err != nil {

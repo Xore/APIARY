@@ -100,10 +100,15 @@ func TestRebuildPrefersESOverLocalFileForFormerlyFileOnlySensors(t *testing.T) {
 	}
 }
 
-// TestRebuildFallsBackToLocalFileWhenESUnavailable (#34/#403): a sensor with
+// TestRebuildNeverReadsLocalFileWithoutESConfigured (#1103): a sensor with
 // no ES client configured at all -- or one Elasticsearch can't currently
-// answer for -- must still show its local events rather than going blank.
-func TestRebuildFallsBackToLocalFileWhenESUnavailable(t *testing.T) {
+// answer for -- must show no events for that sensor, not fall back to its
+// local log file. cowrie/dionaea/conpot/dnp3/http-honeypot/api-honeypot/
+// tanner/endlessh read Elasticsearch exclusively now; only suricata and
+// portbridge (their own index families, not honeypot-v2-*) still read
+// local files at all -- see TestRebuildNeverMasksSuricataOrPortbridgeWithAnEmptyESResult
+// below for that pair's own (unrelated, still-correct) coverage.
+func TestRebuildNeverReadsLocalFileWithoutESConfigured(t *testing.T) {
 	root := t.TempDir()
 	writeLog(t, root, "cowrie/cowrie.json", map[string]any{
 		"timestamp": time.Now().UTC().Format(time.RFC3339Nano), "eventid": "cowrie.login.failed",
@@ -113,14 +118,10 @@ func TestRebuildFallsBackToLocalFileWhenESUnavailable(t *testing.T) {
 	s := &store{dir: root} // no ES client at all
 	s.rebuild()
 
-	found := false
 	for _, ev := range s.getEvents() {
 		if ev.User == "local-only" {
-			found = true
+			t.Fatalf("cowrie event was read from the local file with no ES configured, must be empty: %+v", s.getEvents())
 		}
-	}
-	if !found {
-		t.Fatalf("expected the local cowrie event as a fallback with no ES configured: %+v", s.getEvents())
 	}
 }
 

@@ -336,12 +336,12 @@ flowchart TB
   es --> kibana
   kibanainit -.->|"configures via API,<br/>no ordering dependency"| kibana
 
-  logs -->|"local-file tail, ES-preferred<br/>with this as fallback --<br/>every sensor except the six<br/>ES-only ones below"| dashboard
+  logs -->|"local-file tail --<br/>suricata and portbridge only,<br/>no ES mirror to read yet<br/>(#1103 Category 2)"| dashboard
   payloads --> dashboard
   dashboardState --> dashboard
   yaraResults --> dashboard
   dashboard --> es
-  es -.->|"ES-only, no local-file path at<br/>all: multipot, dicompot,<br/>DNS honeypot, Citrix, Cisco ASA,<br/>RDP (events_es.go esOnlySensors)"| dashboard
+  es -.->|"ES-only, no local-file path at<br/>all: every other sensor<br/>(events_es.go, #1103)"| dashboard
   dashboard -.->|"health only"| filebeat
 
   es --> evebox
@@ -365,23 +365,26 @@ Elasticsearch archive outlives the dashboard's bounded in-memory window.
 multipot was the original exception (#403): the dashboard never reads its
 log file directly, only Elasticsearch (`events_es.go`'s
 `loadSensorEventsES`, queried by `sensor` against `honeypot-v2-*` on every
-rebuild cycle, merged into the same `s.events` pipeline every file-based
-sensor's events go through). This was made a prerequisite for #238's new
-protocol handlers (POP3, IMAP, SOCKS5, HL7/MLLP, ADB — all added directly
-to multipot rather than vendoring five separate third-party images) so they
+rebuild cycle, merged into the same `s.events` pipeline every sensor's
+events go through). This was made a prerequisite for #238's new protocol
+handlers (POP3, IMAP, SOCKS5, HL7/MLLP, ADB — all added directly to
+multipot rather than vendoring five separate third-party images) so they
 show up in the normal Event Explorer without the dashboard reading their
-log file at all. As the sensor inventory grew, five more sensors landed the
-same way and joined the same `esOnlySensors` list (`events_es.go`):
-DICOMpot, DNS honeypot, Citrix, Cisco ASA, and RDP — six total today, all
-ES-only reads with no local-file fallback in the dashboard at all. Every
-one of these six still writes its log file exactly as before, purely for
-Filebeat to pick up — only the dashboard's own read path differs from the
-other six sensors (Cowrie, Dionaea, Conpot, DNP3, HTTP, Endlessh, plus
-TANNER), which stay file-based with Elasticsearch preferred and the local
-tail as fallback on an ES outage. http-honeypot's deepened WordPress bait
-(readme.html version fingerprinting, xmlrpc.php, vulnerable-plugin
-readme.txt endpoints — also #238) is one of the file-based six and
-unaffected by any of this.
+log file at all. Five more sensors (DICOMpot, DNS honeypot, Citrix, Cisco
+ASA, RDP) joined the same `esOnlySensors` list (`events_es.go`) the same
+way, and #1103 finished the job: every remaining sensor with its own
+`honeypot-v2-*` mirror (Cowrie, Dionaea, Conpot and its personas, DNP3,
+HTTP, api-honeypot, Endlessh, TANNER) reads Elasticsearch exclusively now
+too — an ES query failure means "no data this cycle," not a fallback to
+the local file. Only suricata and portbridge still read local files at
+all: both ship to their own index families (`suricata-*`,
+`portbridge-v2-*`), not `honeypot-v2-*`, so there is no ES mirror for the
+dashboard to prefer yet (tracked as #1103's own Category 2). Every sensor
+still writes its log file exactly as before regardless, purely for
+Filebeat to pick up — only the dashboard's own read path differs.
+http-honeypot's deepened WordPress bait (readme.html version
+fingerprinting, xmlrpc.php, vulnerable-plugin readme.txt endpoints — also
+#238) is one of the ES-only sensors and unaffected by any of this.
 
 **Two consumers not drawn above read every sensor's events uniformly, once
 they reach Elasticsearch, regardless of raw-vs-enriched routing or
@@ -556,8 +559,8 @@ flowchart LR
   ipEnrich(("ip-enrichment-worker<br/>networkless — reads raw logs +<br/>portbridge connlog off disk only"))
   enrichedLogs[("logs/enriched/*.json<br/>already-correct src_ip")]
   filebeat["Filebeat<br/>filestream registry"]
-  live["Dashboard parser<br/>bounded file tails<br/>(non-ES-only sensors,<br/>ES-preferred with this as fallback)"]
-  esRead["Dashboard ES read<br/>preferred for most sensors;<br/>the only path for six ES-only<br/>sensors, no local fallback (#403)"]
+  live["Dashboard parser<br/>bounded file tails<br/>(suricata/portbridge only --<br/>no ES mirror to prefer yet,<br/>#1103 Category 2)"]
+  esRead["Dashboard ES read<br/>the only path for every other<br/>sensor, no local fallback<br/>(#403, #1103)"]
   normalize["Normalization + GeoIP +<br/>source-IP correlation<br/>(viaMap join — see below)"]
   es[("Elasticsearch")]
   dlq[("dead-letter-honeypot")]
@@ -588,9 +591,7 @@ flowchart LR
   filebeat -->|"non-indexable original event"| dlq
   es --> kibana
 
-  sensorEventsProxy --> live
-  sensorEventsJoin -.->|"cowrie/dionaea/conpot only —<br/>local-fallback, raw+un-joined;<br/>viaMap still needed on ES outage.<br/>dns-honeypot/cisco-asa are ES-only,<br/>no local fallback at all"| live
-  sshfs --> live
+  sshfs -.->|"suricata/portbridge raw files<br/>only -- every honeypot sensor's<br/>events (both groups above) are<br/>ES-only reads now, #1103"| live
   live --> normalize
   es -->|"query by sensor"| esRead
   esRead --> normalize
@@ -609,8 +610,8 @@ The analysis layers serve different purposes:
 
 | Layer | Input | Output | Primary use |
 |---|---|---|---|
-| Dashboard live parser | recent sensor/EVE/portbridge file tails — ES-preferred with this as fallback for most sensors; the only path for a handful never read from ES at all (suricata, portbridge) | normalized in-memory snapshot, alerts, campaigns, exports | immediate operations and cross-sensor pivots |
-| Dashboard ES read (#403) | `honeypot-v2-*`, queried by sensor — preferred for most sensors, the *only* read for six ES-only sensors (multipot, dicompot, dns-honeypot, citrix-honeypot, cisco-asa-honeypot, rdp-honeypot; `esOnlySensors`, `dashboard/events_es.go`) | same normalized snapshot as the file parser, merged in | ES-only sensors' events, and an already-correct source IP for the two of those six the ingest-time enrichment worker covers (dns-honeypot, cisco-asa-honeypot) |
+| Dashboard live parser | recent EVE/portbridge file tails — the only path for suricata and portbridge, which have no `honeypot-v2-*` mirror to read yet (#1103 Category 2) | normalized in-memory snapshot, alerts, campaigns, exports | immediate operations and cross-sensor pivots |
+| Dashboard ES read (#403, #1103) | `honeypot-v2-*`, queried by sensor — the *only* read for every sensor except suricata/portbridge (`dashboard/events_es.go`) | same normalized snapshot as the file parser, merged in | every ES-backed sensor's events, and an already-correct source IP for the two the ingest-time enrichment worker covers (dns-honeypot, cisco-asa-honeypot) |
 | Filebeat | durable JSON filestreams | versioned Elasticsearch indices/data streams | complete historical indexing with restart-safe offsets |
 | Elasticsearch setup | templates and pipelines | flattened heterogeneous sensor fields, GeoIP, ILM, dead-letter fallback | mapping safety and retention |
 | Kibana | Elasticsearch | saved searches, visualizations, archive investigations | long-range analysis |
@@ -717,9 +718,9 @@ flowchart TB
     esPipeline --> esGeo["writes source.geo,<br/>source.as, destination.geo"]
   end
 
-  subgraph dashEnrich["Dashboard live parser — per rebuild cycle<br/>(local-file fallback path only for<br/>cowrie/dionaea/conpot; ES-preferred<br/>read already has the worker's join)"]
+  subgraph dashEnrich["Dashboard — every rebuild cycle<br/>(classify()/viaMap run uniformly on<br/>both ES-sourced and local-file-sourced<br/>events, #1103 -- not a local-only path)"]
     classify["classify() —<br/>extract fingerprint + fingerKind<br/>per event"]
-    viaMap["portbridge via-map join —<br/>recover real attacker IP,<br/>p0f OS as fallback fingerprint<br/>when no HASSH/JA3/UA.<br/>dns-honeypot/cisco-asa never reach<br/>here — ES-only, no local fallback"]
+    viaMap["portbridge via-map join —<br/>recover real attacker IP,<br/>p0f OS as fallback fingerprint<br/>when no HASSH/JA3/UA.<br/>dns-honeypot/cisco-asa never reach<br/>here — already has the worker's join"]
     localGeo["dashboard/geoip.go —<br/>local MMDB lookup on the<br/>real (post-join) IP"]
     classify --> viaMap --> localGeo
   end
@@ -728,7 +729,7 @@ flowchart TB
   cowrieBanner --> classify
   suricataTLS --> classify
   httpUA --> classify
-  connlog -.->|"local-fallback join, same as<br/>the worker's below — see dashEnrich"| viaMap
+  connlog -.->|"same join the worker below<br/>also does at ingest time —<br/>see dashEnrich"| viaMap
   connlog -->|"Filebeat tails live file only"| esPipeline
   connlog --> ingestJoin
   rawJoinLogs --> ingestJoin
@@ -771,16 +772,18 @@ cycle used to see between a fresh connection and its correct source IP
 becoming visible.
 
 **`viaMap` — the dashboard's own join — didn't go away, its scope just
-narrowed.** It's still the only join mechanism for every sensor the worker
-never covered (all PROXY-aware sensors, which never needed a join, don't
-reach it at all; that's unrelated). For the five worker-covered sensors it
-now only matters in one place: cowrie/dionaea/conpot's local-file
-*fallback* path, exercised only when the dashboard's ES-preferred read
-(which already has the worker's join) is unavailable. dns-honeypot and
-cisco-asa-honeypot are ES-only reads with no local-file fallback in the
-dashboard at all (`esOnlySensors`, `dashboard/events_es.go`), so for those
-two the worker's ingest-time join is the *only* place source IP is ever
-corrected — `viaMap` structurally cannot run for them.
+changed shape.** It's still the only join mechanism for every sensor the
+worker never covered (all PROXY-aware sensors, which never needed a join,
+don't reach it at all; that's unrelated). Of the five worker-covered
+sensors, cowrie/dionaea/conpot read Elasticsearch exclusively now (#1103)
+— there is no local-file path left at all for them, fallback or otherwise
+— so `viaMap` runs unconditionally on their ES-sourced events every
+rebuild cycle, re-joining freshly each time rather than trusting a cached
+result (see `TestRebuildRejoinsCachedEventOnceViaMapCatchesUp` in
+`dashboard/log_cache_test.go`). dns-honeypot and cisco-asa-honeypot are
+also ES-only reads (`esOnlySensors`, `dashboard/events_es.go`), but for
+those two `viaMap` never runs at all: the worker's ingest-time join is the
+*only* place their source IP is ever corrected.
 
 **p0f runs on the VPS, not at home, and only an OS guess survives.** It has
 to run there: `portbridge` terminates every TCP connection and re-establishes
