@@ -672,8 +672,10 @@ func main() {
 	http.HandleFunc("/gpu-queue/abort", serveGPUQueueAbort)
 	http.HandleFunc("/github-analysis/submit", s.serveGitHubAnalysisSubmit)
 	http.HandleFunc("/ml-anomalies/ack", s.serveMLAnomalyAck)
+	// #1139: the standalone artifact-selection index merged into /payloads'
+	// second tab -- old bookmarks/links redirect rather than 404.
 	http.HandleFunc("/payload-workbench", func(w http.ResponseWriter, r *http.Request) {
-		s.serveWorkbenchIndex(w, r, tmpl)
+		http.Redirect(w, r, "/payloads#start-analysis", http.StatusFound)
 	})
 	http.HandleFunc("/payload-workbench/results", func(w http.ResponseWriter, r *http.Request) {
 		s.serveWorkbenchResults(w, r, tmpl)
@@ -726,10 +728,11 @@ func main() {
 		}
 		renderPage(w, tmpl, "cape", &data)
 	})
+	// #1139: the standalone GitHub-analysis list view merged into
+	// /payload-workbench/results' third tab -- old bookmarks/links redirect
+	// rather than 404. /github-analysis/{sha} detail pages are unaffected.
 	http.HandleFunc("/github-analysis", func(w http.ResponseWriter, r *http.Request) {
-		data, _ := s.githubAnalysisData("", r.URL.Query().Get("q"))
-		data.Analysis = r.URL.Query().Get("analysis")
-		renderPage(w, tmpl, "github-analysis", &data)
+		http.Redirect(w, r, "/payload-workbench/results#github", http.StatusFound)
 	})
 	http.HandleFunc("/github-analysis/", func(w http.ResponseWriter, r *http.Request) {
 		sha, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/github-analysis/"))
@@ -745,9 +748,12 @@ func main() {
 		data.Analysis = r.URL.Query().Get("analysis")
 		renderPage(w, tmpl, "github-analysis", &data)
 	})
+	// #1139: the standalone sandbox list view merged into
+	// /payload-workbench/results' second tab -- old bookmarks/links redirect
+	// rather than 404. /sandbox/{job} detail pages and /sandbox/vnc are
+	// unaffected (registered separately below).
 	http.HandleFunc("/sandbox", func(w http.ResponseWriter, r *http.Request) {
-		data, _ := sandboxData("", r.URL.Query().Get("q"))
-		renderPage(w, tmpl, "sandbox", &data)
+		http.Redirect(w, r, "/payload-workbench/results#sandbox", http.StatusFound)
 	})
 	// #805: registered ahead of the "/sandbox/{job}" prefix route below --
 	// Go's ServeMux resolves the longest matching pattern regardless of

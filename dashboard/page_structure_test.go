@@ -168,14 +168,19 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 		{"cape", capePageData{Generated: now, Detail: capeDetail, Summary: parseCapeReportSummary(capeDetail.Report)}},
 		{"cape-list", capePageData{Generated: now}},
 		{"payload-analysis", binaryAnalysis{}},
-		{"payload-workbench-index", payloadsPage{Generated: now, Enabled: true, Files: []capturedFile{{Hash: strings.Repeat("e", 64), Kind: "Binary", Platform: "Linux", MIME: "application/octet-stream", SizeH: "1 KiB", Sources: []string{"dionaea"}}}}},
-		{"workbench-results", workbenchResultsPageData{
+		{"payloads-with-files", payloadsPage{Generated: now, Enabled: true, Files: []capturedFile{{Hash: strings.Repeat("e", 64), Kind: "Binary", Platform: "Linux", MIME: "application/octet-stream", SizeH: "1 KiB", Sources: []string{"dionaea"}}}}},
+		{"workbench-results", evidenceResultsPageData{
 			Generated: now,
-			Runs: []workbenchRun{{
-				ID: "run_1234567890abcdef", PayloadSHA256: strings.Repeat("e", 64), PayloadKind: "binary",
-				RecipeName: "Static first", RecipeRevision: 1, State: "completed", CreatedAt: now,
-				Children: []workbenchChild{{AnalyzerID: "deterministic", DisplayName: "Deterministic", State: "completed", UpdatedAt: now, ResultURL: "/payload-analysis/" + strings.Repeat("e", 64)}},
-			}},
+			Workbench: workbenchResultsPageData{
+				Generated: now,
+				Runs: []workbenchRun{{
+					ID: "run_1234567890abcdef", PayloadSHA256: strings.Repeat("e", 64), PayloadKind: "binary",
+					RecipeName: "Static first", RecipeRevision: 1, State: "completed", CreatedAt: now,
+					Children: []workbenchChild{{AnalyzerID: "deterministic", DisplayName: "Deterministic", State: "completed", UpdatedAt: now, ResultURL: "/payload-analysis/" + strings.Repeat("e", 64)}},
+				}},
+			},
+			Sandbox: sandboxPageData{Generated: now, Detail: sandboxDetail},
+			GitHub:  githubAnalysisPageData{Generated: now, Detail: githubAnalysisDetail},
 		}},
 		{"payload-workbench", workbenchPageData{Generated: now, SHA256: strings.Repeat("e", 64), Classification: payloadKind("binary", "Binary", "Unknown", "binary", "Static", false), Analyzers: workbenchRegistry(payloadKind("binary", "Binary", "Unknown", "binary", "Static", false)), ModelStatus: workbenchModelStatus{Overall: "unavailable", AdvisoryOnly: true}}},
 		{"payloads", payloadsPage{Generated: now}},
@@ -207,6 +212,9 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 		}
 		if name == "cape-list" {
 			name = "cape"
+		}
+		if name == "payloads-with-files" {
+			name = "payloads"
 		}
 		var buf bytes.Buffer
 		if err := tmpl.ExecuteTemplate(&buf, name, page.data); err != nil {
@@ -251,6 +259,8 @@ func TestTabsAndPanelsAgreeOnEveryPage(t *testing.T) {
 		{"github-analysis", "github analysis detail", githubAnalysisPageData{Generated: now, Detail: githubAnalysisDetail}},
 		{"payload-analysis", "payload analysis", binaryAnalysis{}},
 		{"reports", "reports studio", snapshot{}},
+		{"payloads", "captured payloads", payloadsPage{Generated: now}},
+		{"workbench-results", "analysis results", evidenceResultsPageData{Generated: now}},
 	} {
 		var buf bytes.Buffer
 		if err := tmpl.ExecuteTemplate(&buf, page.template, page.data); err != nil {

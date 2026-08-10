@@ -1,57 +1,33 @@
-{{define "payload-workbench-index"}}<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
-<title>{{brandText}} &mdash; payload workbench</title>
-{{template "style" .}}
-</head>
-<body><div class="app-shell">{{template "topbar" .}}{{template "sidebar" .}}
-<main class="app-main"><div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
-  <header class="overview-header"><div><div class="label-section">Unified analysis</div><h1>Payload workbench</h1><p class="subtitle">Choose captured evidence, then build a typed recipe and run every applicable local analyzer from one page.</p></div><div class="live-panel"><span class="gen">{{.UniqueTotal}} unique captures &bull; generated <span data-hp-utc="{{utcOrEmpty .Generated}}">{{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></span></div></header>
-  <div class="filters"><a class="chip" href="/payloads">Captured payload inventory</a><a class="chip" href="/payload-workbench/results">Workbench results</a><span class="chip">Select one payload to begin</span></div>
-  <section class="card wide" aria-labelledby="wb-select-title">
-    <div class="section-heading"><div><h2 id="wb-select-title">Select a captured payload</h2><p>The workbench derives analyzer applicability from the selected artifact. Opening an artifact does not execute it.</p></div></div>
-    {{if not .Enabled}}<p class="empty">Payload serving is disabled. Configure PAYLOAD_DIRS and/or SCRIPT_PAYLOAD_DIR.</p>
-    {{else if .Loading}}<p class="note" data-payload-warming><span class="status-dot" aria-hidden="true"></span> Preparing the payload inventory. This page will update automatically.</p><script nonce="{{.Nonce}}">setTimeout(()=>location.reload(),1500)</script>
-    {{else if .Files}}
-    <div class="project-grid" id="wb-select-results">
-      {{range .Files}}
-      <a class="project-card" href="/payload-workbench/{{.Hash}}">
-        <div class="project-card__header">
-          <span class="project-card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4z"/><path d="M14 17h6M17 14v6"/></svg></span>
-          <span class="project-card__title mono">{{.Hash}}</span>
-          <div class="project-card__badges">{{range .Sources}}<span class="badge badge--muted">{{.}}</span>{{end}}</div>
-        </div>
-        <p class="project-card__desc"><strong>{{.Kind}}</strong> &bull; {{.Platform}} &bull; {{.MIME}} &bull; {{.SizeH}}</p>
-        <div class="project-card__meta"><span>captured <span{{if .MtimeUTC}} data-hp-utc="{{.MtimeUTC}}"{{end}}>{{.Mtime}}</span></span></div>
-      </a>
-      {{end}}
-    </div>
-    {{if gt .ResultTotal 50}}<p class="note">Showing the 50 most recent captures. Open the full inventory to find older evidence.</p>{{end}}
-    {{else}}<p class="empty">No payloads captured yet.</p>{{end}}
-  </section>
-  <footer>{{brandText}} &bull; select evidence before orchestration &bull; captured files remain inert</footer>
-</div></main></div></body></html>{{end}}
-
 {{define "workbench-results"}}<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
-<title>{{brandText}} &mdash; workbench results</title>
+<title>{{brandText}} &mdash; analysis results</title>
 {{template "style" .}}
 </head>
 <body><div class="app-shell">{{template "topbar" .}}{{template "sidebar" .}}
 <main class="app-main"><div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
-  <header class="overview-header"><div><div class="label-section">Unified analysis</div><h1>Workbench results</h1><p class="subtitle">Review correlated analyzer runs across captured payloads without losing successful child results when another backend fails.</p></div><div class="live-panel"><span class="gen">generated <span data-hp-utc="{{utcOrEmpty .Generated}}">{{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></span></div></header>
-  <div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:xl:grid-cols-5 tw:gap-3 tw:mb-6">
-    <div class="metric"><div class="metric__value">{{.Counts.Total}}</div><div class="metric__label">Matching runs</div></div><div class="metric"><div class="metric__value">{{.Counts.Active}}</div><div class="metric__label">Active</div></div><div class="metric"><div class="metric__value">{{.Counts.Completed}}</div><div class="metric__label">Completed</div></div><div class="metric"><div class="metric__value">{{.Counts.Partial}}</div><div class="metric__label">Partial</div></div><div class="metric"><div class="metric__value">{{.Counts.Failed}}</div><div class="metric__label">Failed / stopped</div></div>
+  <header class="overview-header"><div><div class="label-section">Evidence</div><h1>Analysis results</h1><p class="subtitle">Correlated workbench runs, isolated sandbox detonations, and published GitHub scans, without losing successful child results when another backend fails.</p></div><div class="live-panel"><span class="gen">generated <span data-hp-utc="{{utcOrEmpty .Generated}}">{{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></span></div></header>
+
+  {{/* #1139: consolidates the former standalone /sandbox and /github-analysis
+       list views into this page's second and third tabs, following /reports'
+       own tabbed-panel pattern. */}}
+  <div class="tabs" role="tablist" aria-label="Analysis results views">
+    <button class="tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-workbench" data-dashboard-tab="workbench"><span>01</span>Workbench</button>
+    <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-sandbox" data-dashboard-tab="sandbox"><span>02</span>Sandbox</button>
+    <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-github" data-dashboard-tab="github"><span>03</span>GitHub</button>
   </div>
-  <form class="filters" method="get" action="/payload-workbench/results"><a class="chip" href="/payload-workbench">Start analysis</a><a class="chip" href="/payloads">Captured payloads</a><a class="chip" href="/sandbox">All sandbox jobs</a><input class="hp-input" name="q" value="{{.Query}}" placeholder="hash, recipe, analyzer or state" aria-label="Search workbench results"><button class="copy" type="submit">search</button>{{if .Query}}<a class="chip" href="/payload-workbench/results">clear</a>{{end}}</form>
-  <section aria-labelledby="wb-results-title"><div class="section-heading"><div><h2 id="wb-results-title">Retained analysis runs</h2><p>Only runs started from this workbench, owned by the current administrator session, are shown. Sandbox jobs submitted via the CLI fallback or another session appear only under <a class="lnk" href="/sandbox">Sandbox results</a>.</p></div></div>
+
+  <div class="dashboard-panel" id="panel-workbench" role="tabpanel" data-dashboard-panel="workbench">
+  <div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:xl:grid-cols-5 tw:gap-3 tw:mb-6">
+    <div class="metric"><div class="metric__value">{{.Workbench.Counts.Total}}</div><div class="metric__label">Matching runs</div></div><div class="metric"><div class="metric__value">{{.Workbench.Counts.Active}}</div><div class="metric__label">Active</div></div><div class="metric"><div class="metric__value">{{.Workbench.Counts.Completed}}</div><div class="metric__label">Completed</div></div><div class="metric"><div class="metric__value">{{.Workbench.Counts.Partial}}</div><div class="metric__label">Partial</div></div><div class="metric"><div class="metric__value">{{.Workbench.Counts.Failed}}</div><div class="metric__label">Failed / stopped</div></div>
+  </div>
+  <form class="filters" method="get" action="/payload-workbench/results#workbench"><a class="chip" href="/payloads#start-analysis">Start analysis</a><a class="chip" href="/payloads">Captured payloads</a><input class="hp-input" name="q" value="{{.Workbench.Query}}" placeholder="hash, recipe, analyzer or state" aria-label="Search workbench results"><button class="copy" type="submit">search</button>{{if .Workbench.Query}}<a class="chip" href="/payload-workbench/results#workbench">clear</a>{{end}}</form>
+  <section aria-labelledby="wb-results-title"><div class="section-heading"><div><h2 id="wb-results-title">Retained analysis runs</h2><p>Only runs started from this workbench, owned by the current administrator session, are shown. Sandbox jobs submitted via the CLI fallback or another session appear under the Sandbox tab.</p></div></div>
     <div id="workbench-results-list">
-    {{if .Runs}}
+    {{if .Workbench.Runs}}
     <div class="project-grid">
-      {{range .Runs}}
+      {{range .Workbench.Runs}}
       {{$target := workbenchRunSummary .}}
       <a class="project-card" href="{{$target.Href}}">
         <div class="project-card__header">
@@ -70,6 +46,16 @@
     {{else}}<div class="card wide"><p class="empty">No workbench runs match this view.</p></div>{{end}}
     </div>
   </section>
+  </div>
+
+  <div class="dashboard-panel" id="panel-sandbox" role="tabpanel" data-dashboard-panel="sandbox" hidden>
+  {{template "sandboxresultspanel" .Sandbox}}
+  </div>
+
+  <div class="dashboard-panel" id="panel-github" role="tabpanel" data-dashboard-panel="github" hidden>
+  {{template "githubanalysisresultspanel" .GitHub}}
+  </div>
+
   <footer>{{brandText}} &bull; owner-isolated correlated results &bull; native analyzer reports remain canonical</footer>
 </div></main></div></body></html>{{end}}
 
@@ -127,6 +113,6 @@
   </form>
 
   <section class="tw:mt-5" aria-labelledby="wb-runs-title"><div class="section-heading"><div><h2 id="wb-runs-title">Correlated runs</h2><p>Partial results remain available when another backend fails or times out.</p></div></div><div data-wb-runs aria-live="polite"><div class="card wide"><p class="empty">Loading analysis runs&hellip;</p></div></div></section>
-  <section class="card wide tw:mt-5" aria-labelledby="wb-external-title"><div class="tw:flex tw:flex-wrap tw:items-center tw:gap-2"><h2 id="wb-external-title" class="tw:mr-auto">External publication</h2><span class="badge badge--red">leaves local trust boundary</span><span class="badge badge--muted">never in Run all</span></div><p>GitHub analysis uploads captured material externally. It remains a separate administrator-only workflow with the existing confirmation phrase, dry-run guard, and audit trail.</p><a class="lnk" href="/github-analysis">Open the separately gated GitHub publisher &rarr;</a></section>
+  <section class="card wide tw:mt-5" aria-labelledby="wb-external-title"><div class="tw:flex tw:flex-wrap tw:items-center tw:gap-2"><h2 id="wb-external-title" class="tw:mr-auto">External publication</h2><span class="badge badge--red">leaves local trust boundary</span><span class="badge badge--muted">never in Run all</span></div><p>GitHub analysis uploads captured material externally. It remains a separate administrator-only workflow with the existing confirmation phrase, dry-run guard, and audit trail.</p><a class="lnk" href="/payload-workbench/results#github">Open the separately gated GitHub publisher &rarr;</a></section>
   <footer>{{brandText}} &bull; immutable recipe snapshots &bull; bounded local orchestration</footer>
 </div></main></div></body></html>{{end}}

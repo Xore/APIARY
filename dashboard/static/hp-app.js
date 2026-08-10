@@ -52,9 +52,7 @@
     ]],
     ["Evidence", [
       ["Captured payloads", "/payloads"],
-      ["Analysis workbench", "/payload-workbench"],
-      ["Workbench results", "/payload-workbench/results"],
-      ["Sandbox results", "/sandbox"],
+      ["Analysis results", "/payload-workbench/results"],
       ["Elasticsearch history", "/history"],
       ["Ingest dead letters", "/dead-letters"],
     ]]
@@ -75,9 +73,10 @@
   const activeHref = () => {
     const path = location.pathname;
     if (path.startsWith("/payload-analysis") || path.startsWith("/payload/")) return "/payloads";
-    if (path === "/payload-workbench/results") return "/payload-workbench/results";
-    if (path.startsWith("/payload-workbench/")) return "/payload-workbench";
-    if (path.startsWith("/sandbox/")) return "/sandbox";
+    // #1139: workbench/sandbox/GitHub-analysis detail pages, and the merged
+    // results list itself, all roll up to the one remaining "Analysis
+    // results" sidebar entry -- their own standalone entries are gone.
+    if (path.startsWith("/payload-workbench/") || path.startsWith("/sandbox/") || path.startsWith("/github-analysis/")) return "/payload-workbench/results";
     if (path.startsWith("/sessions/")) return "/events";
     if (path.startsWith("/investigate/ip/")) return "/ips";
     return path;
@@ -928,10 +927,21 @@
       shell.classList.toggle("hp-collapsed", collapsed);
       try { localStorage.setItem(collapseStorageKey, collapsed ? "1" : "0"); } catch {}
     };
+    /* The topbar's own brand mark (theme.css: .app-toolbar__brand, shown only
+       <=520px) sits directly above the off-canvas drawer's brand mark
+       (.app-sidebar .hp-brand) once the drawer opens at that same width --
+       two logos on screen at once. theme.css is vendored from Xore/theme, so
+       the fix lives here instead: hide the topbar mark for as long as the
+       drawer is open. */
+    const toolbarBrand = shell.querySelector(".app-toolbar__brand");
+    const setNavOpen = open => {
+      shell.classList.toggle("hp-nav-open", open);
+      if (toolbarBrand) toolbarBrand.hidden = open;
+    };
     if (innerWidth > 520 && localStorage.getItem(collapseStorageKey) === "1") shell.classList.add("hp-collapsed");
     shell.querySelector("[data-hp-sidebar-toggle]")?.addEventListener("click", () => {
       if (innerWidth <= 520) {
-        shell.classList.toggle("hp-nav-open");
+        setNavOpen(!shell.classList.contains("hp-nav-open"));
       } else {
         const collapsed = shell.classList.toggle("hp-collapsed");
         try { localStorage.setItem(collapseStorageKey, collapsed ? "1" : "0"); } catch {}
@@ -939,7 +949,7 @@
       }
     });
     shell.querySelectorAll("[data-hp-nav]").forEach(link => link.addEventListener("click", () => {
-      if (innerWidth <= 520) shell.classList.remove("hp-nav-open");
+      if (innerWidth <= 520) setNavOpen(false);
     }));
 
     /* Investigation command palette (#193, closing #183): a modal, not a
@@ -982,7 +992,7 @@
     addEventListener("keydown", event => {
       if (event.key !== "Escape") return;
       if (commandPalette?.classList.contains("open")) closeCommandPalette();
-      else shell.classList.remove("hp-nav-open");
+      else setNavOpen(false);
     });
 
     /* Enter submits, Shift+Enter adds a line, "/" opens the palette from

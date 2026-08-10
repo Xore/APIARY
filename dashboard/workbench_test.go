@@ -574,7 +574,10 @@ func TestWorkbenchMissingPayloadAndPathTraversal(t *testing.T) {
 	}
 }
 
-func TestWorkbenchIndexProvidesPayloadSelection(t *testing.T) {
+// TestPayloadsPageOffersStartAnalysisTab (#1139): the standalone
+// /payload-workbench artifact-selection index merged into /payloads' second
+// tab, so /payloads itself (not a separate route) must offer the picker.
+func TestPayloadsPageOffersStartAnalysisTab(t *testing.T) {
 	s, _ := newWorkbenchFixture(t, []byte("payload"))
 	// #483: payloadsData's Enabled flag now also requires a configured ES
 	// client; unreachable is fine since payloadCacheAt is seeded fresh here.
@@ -582,18 +585,21 @@ func TestWorkbenchIndexProvidesPayloadSelection(t *testing.T) {
 	s.payloadCache = s.scanPayloads()
 	s.payloadCacheAt = time.Now()
 	tmpl := template.Must(template.New("t").Funcs(templateFuncs(s, "")).Parse(pageTemplate))
-	response := httptest.NewRecorder()
-	s.serveWorkbenchIndex(response, httptest.NewRequest(http.MethodGet, "/payload-workbench", nil), tmpl)
-	if response.Code != http.StatusOK {
-		t.Fatalf("workbench index status = %d body=%s", response.Code, response.Body.String())
+	data := s.payloadsData(payloadsFilter{})
+	var buf strings.Builder
+	if err := tmpl.ExecuteTemplate(&buf, "payloads", &data); err != nil {
+		t.Fatalf("render: %v", err)
 	}
-	body := response.Body.String()
+	body := buf.String()
 	if !strings.Contains(body, "/payload-workbench/"+workbenchTestHash) || !strings.Contains(body, "Select a captured payload") {
-		t.Fatalf("workbench index does not offer a captured payload: %s", body)
+		t.Fatalf("payloads page does not offer a captured payload for analysis: %s", body)
+	}
+	if !strings.Contains(body, `data-dashboard-tab="start-analysis"`) {
+		t.Fatal("payloads page is missing the Start analysis tab")
 	}
 	partial := mustReadUI("partials/dashboard.html")
-	if !strings.Contains(partial, `data-hp-nav="/payload-workbench" href="/payload-workbench"`) {
-		t.Fatal("workbench sidebar link does not target the workbench landing page")
+	if strings.Contains(partial, `data-hp-nav="/payload-workbench" href="/payload-workbench"`) {
+		t.Fatal("sidebar still carries the merged-away standalone workbench index link")
 	}
 }
 
@@ -744,16 +750,19 @@ func TestWorkbenchResultsPageRendersAsCardGrid(t *testing.T) {
 
 	sha := strings.Repeat("e", 64)
 	now := time.Now()
-	data := workbenchResultsPageData{
+	data := evidenceResultsPageData{
 		Generated: now,
-		Runs: []workbenchRun{{
-			ID: "run_1234567890abcdef", PayloadSHA256: sha, PayloadKind: "binary",
-			RecipeName: "Static first", RecipeRevision: 1, State: "completed", CreatedAt: now,
-			Children: []workbenchChild{
-				{AnalyzerID: "deterministic", DisplayName: "Deterministic", State: "completed", UpdatedAt: now, ResultURL: "/payload-analysis/" + sha},
-				{AnalyzerID: "ghidra", DisplayName: "Ghidra", State: "failed", UpdatedAt: now, Reason: "timed out"},
-			},
-		}},
+		Workbench: workbenchResultsPageData{
+			Generated: now,
+			Runs: []workbenchRun{{
+				ID: "run_1234567890abcdef", PayloadSHA256: sha, PayloadKind: "binary",
+				RecipeName: "Static first", RecipeRevision: 1, State: "completed", CreatedAt: now,
+				Children: []workbenchChild{
+					{AnalyzerID: "deterministic", DisplayName: "Deterministic", State: "completed", UpdatedAt: now, ResultURL: "/payload-analysis/" + sha},
+					{AnalyzerID: "ghidra", DisplayName: "Ghidra", State: "failed", UpdatedAt: now, Reason: "timed out"},
+				},
+			}},
+		},
 	}
 
 	var buf strings.Builder
@@ -793,15 +802,18 @@ func TestWorkbenchResultsCardLinksDirectlyToSingleChildFindings(t *testing.T) {
 
 	sha := strings.Repeat("f", 64)
 	now := time.Now()
-	data := workbenchResultsPageData{
+	data := evidenceResultsPageData{
 		Generated: now,
-		Runs: []workbenchRun{{
-			ID: "run_abcdef1234567890", PayloadSHA256: sha, PayloadKind: "binary",
-			RecipeName: "Linux sandbox", RecipeRevision: 1, State: "completed", CreatedAt: now,
-			Children: []workbenchChild{
-				{AnalyzerID: "linux-sandbox", DisplayName: "Linux sandbox", State: "completed", UpdatedAt: now, ResultURL: "/sandbox/job-123", Summary: "risk 62/100 (high); 4 techniques"},
-			},
-		}},
+		Workbench: workbenchResultsPageData{
+			Generated: now,
+			Runs: []workbenchRun{{
+				ID: "run_abcdef1234567890", PayloadSHA256: sha, PayloadKind: "binary",
+				RecipeName: "Linux sandbox", RecipeRevision: 1, State: "completed", CreatedAt: now,
+				Children: []workbenchChild{
+					{AnalyzerID: "linux-sandbox", DisplayName: "Linux sandbox", State: "completed", UpdatedAt: now, ResultURL: "/sandbox/job-123", Summary: "risk 62/100 (high); 4 techniques"},
+				},
+			}},
+		},
 	}
 
 	var buf strings.Builder
@@ -838,7 +850,7 @@ func TestWorkbenchIndexRendersAsCardGrid(t *testing.T) {
 	}
 
 	var buf strings.Builder
-	if err := tmpl.ExecuteTemplate(&buf, "payload-workbench-index", &data); err != nil {
+	if err := tmpl.ExecuteTemplate(&buf, "payloads", &data); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	body := buf.String()

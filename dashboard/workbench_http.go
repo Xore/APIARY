@@ -41,17 +41,18 @@ type workbenchResultsPageData struct {
 	Counts    workbenchResultsCounts
 }
 
-func (s *store) serveWorkbenchIndex(w http.ResponseWriter, r *http.Request, tmpl *template.Template) {
-	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", http.MethodGet)
-		http.Error(w, "GET required", http.StatusMethodNotAllowed)
-		return
-	}
-	data := s.payloadsData(payloadsFilter{})
-	if len(data.Files) > 50 {
-		data.Files = data.Files[:50]
-	}
-	renderPage(w, tmpl, "payload-workbench-index", &data)
+// evidenceResultsPageData (#1139) backs the merged /payload-workbench/results
+// page: workbench runs, sandbox detonations, and GitHub-analysis publications
+// each keep their own sub-page-data (own Query, own Rows/Runs), rendered as
+// three tabs of one page rather than three separate routes. Sandbox and
+// GitHub are always list-mode here (Detail is nil) -- their own detail pages
+// remain separate routes, untouched by this consolidation.
+type evidenceResultsPageData struct {
+	pageMeta
+	Generated time.Time
+	Workbench workbenchResultsPageData
+	Sandbox   sandboxPageData
+	GitHub    githubAnalysisPageData
 }
 
 func (s *store) workbenchResultsData(query, owner string) workbenchResultsPageData {
@@ -142,7 +143,11 @@ func (s *store) serveWorkbenchResults(w http.ResponseWriter, r *http.Request, tm
 	if !ok {
 		return
 	}
-	data := s.workbenchResultsData(r.URL.Query().Get("q"), identity.Subject)
+	q := r.URL.Query()
+	data := evidenceResultsPageData{Generated: time.Now()}
+	data.Workbench = s.workbenchResultsData(q.Get("q"), identity.Subject)
+	data.Sandbox, _ = sandboxData("", q.Get("sandbox_q"))
+	data.GitHub, _ = s.githubAnalysisData("", q.Get("github_q"))
 	renderPage(w, tmpl, "workbench-results", &data)
 }
 
@@ -282,7 +287,7 @@ func (s *store) serveWorkbenchRegistry(w http.ResponseWriter, r *http.Request) {
 		"model_status":   loadWorkbenchModelStatus(),
 		"external_publication": map[string]any{
 			"included_in_run_all": false,
-			"route":               "/github-analysis",
+			"route":               "/payload-workbench/results#github",
 			"reason":              "Captured material leaves the local trust boundary and retains its separate administrator confirmation and dry-run gates.",
 		},
 	})

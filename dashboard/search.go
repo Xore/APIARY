@@ -240,7 +240,7 @@ func (s *store) searchSandbox(needle string) searchGroup {
 			runs.add(run.Job, strings.TrimSpace(run.Classification.Label+" "+run.RiskLevel))
 		}
 	}
-	return runs.group("Sandbox runs", "Completed dynamic analysis", "/sandbox",
+	return runs.group("Sandbox runs", "Completed dynamic analysis", "/payload-workbench/results#sandbox",
 		func(v string) string { return "/sandbox/" + url.PathEscape(v) })
 }
 
@@ -256,7 +256,7 @@ func (s *store) searchGitHubAnalysis(needle string) searchGroup {
 			rows.add(result.SHA256, strings.TrimSpace(result.Family+" "+verdictLevel))
 		}
 	}
-	return rows.group("GitHub analyses", "External scanner verdicts", "/github-analysis",
+	return rows.group("GitHub analyses", "External scanner verdicts", "/payload-workbench/results#github",
 		func(v string) string { return "/github-analysis/" + url.PathEscape(v) })
 }
 

@@ -241,7 +241,7 @@ var (
 	allowedThemes          = []string{"system", "dark", "light"}
 	allowedDensities       = []string{"comfortable", "compact"}
 	allowedMotionModes     = []string{"system", "on", "off"}
-	allowedLandingPages    = []string{"/", "/events", "/alerts", "/source-health", "/ips", "/payloads", "/sandbox", "/campaigns", "/clusters", "/commands", "/history", "/dead-letters"}
+	allowedLandingPages    = []string{"/", "/events", "/alerts", "/source-health", "/ips", "/payloads", "/payload-workbench/results", "/campaigns", "/clusters", "/commands", "/history", "/dead-letters"}
 	allowedRowsPerPage     = []int{10, 25, 50, 100}
 	allowedClocks          = []string{"h24", "h12"}
 	allowedTimestampStyles = []string{"relative", "absolute"}
