@@ -100,6 +100,25 @@ kcadm create users -r apiary -s username=pkce-totp-test -s enabled=true -s email
 kcadm set-password -r apiary --username pkce-totp-test --new-password 'PkceTotpTest9!Extra' >/dev/null
 kcadm add-roles -r apiary --uusername pkce-totp-test --rolename apiary-user >/dev/null
 
+# --- #1036: a second, separate user with a Keycloak-admin-set TEMPORARY
+# credential -- the real shape of a freshly provisioned account (admin
+# hands out a one-time password, user must replace it before doing
+# anything else), as opposed to pkce-totp-test above whose password is
+# already permanent. -t/--temporary on set-password is what makes Keycloak
+# insert its own UPDATE_PASSWORD required action ahead of CONFIGURE_TOTP --
+# not something this test sets explicitly.
+#
+# Found live in CI (2026-08-09): `kcadm update users/<id>/reset-password`
+# 404s -- kcadm's generic `update` does a GET-then-PUT against the given
+# resource, but reset-password is a write-only action endpoint with no GET,
+# so the GET half 404s before the PUT is ever attempted. set-password's own
+# -t flag hits the same endpoint correctly (confirmed via
+# `kcadm set-password --help` against a real 26.7.1 server) without that
+# generic-update assumption.
+kcadm create users -r apiary -s username=first-login-test -s enabled=true -s emailVerified=true >/dev/null
+kcadm set-password -r apiary --username first-login-test --new-password 'TempOneTime1!Extra' --temporary >/dev/null
+kcadm add-roles -r apiary --uusername first-login-test --rolename apiary-user >/dev/null
+
 flow_dir="$(mktemp -d)"
 chmod 777 "${flow_dir}"
 
@@ -140,13 +159,29 @@ PY
 # field; conflating the two under one hardcoded name silently submits an
 # empty/wrong field and Keycloak just re-renders the form with no code
 # ever actually checked. $4=substring the resulting Location must contain
-# to count as real success -- a rejected code sometimes 200-renders the
-# same form inline (empty Location, the common case) but sometimes
-# redirects back to that same login-actions/authenticate URL instead
-# (non-empty Location that still isn't success) -- checking "non-empty"
-# alone was caught live falsely treating that second failure shape as a
-# win and returning the wrong URL to the caller. Remaining args are extra
-# --data-urlencode fields (already flag-prefixed).
+# to count as real success when Keycloak DOES redirect -- a rejected code
+# sometimes 200-renders the same form inline (empty Location, the common
+# case) but sometimes redirects back to that same login-actions/authenticate
+# URL instead (non-empty Location that still isn't success) -- checking
+# "non-empty" alone was caught live falsely treating that second failure
+# shape as a win and returning the wrong URL to the caller. Remaining args
+# are extra --data-urlencode fields (already flag-prefixed).
+#
+# #1096: Keycloak does NOT always redirect on real success either -- caught
+# live: when CONFIGURE_TOTP is not this account's last pending required
+# action, an ACCEPTED code 200-renders the *next* required-action form
+# inline (e.g. UPDATE_PASSWORD's password-new/password-confirm fields),
+# same HTTP shape as a rejection's own common case. The one thing that
+# reliably tells them apart: a rejection re-renders this SAME code-entry
+# field (name="totp" or name="otp", matching $field); real acceptance never
+# does, redirect or not. Writes the winning attempt's response body to
+# ${flow_dir}/totp-next-body.html (this function is always invoked via
+# command substitution, which subshells the whole body -- a plain variable
+# assignment in here never survives back to the caller, confirmed live in
+# CI as an "unbound variable" failure from an earlier version of this
+# function that tried exactly that; a file does) so a caller that lands on
+# an inline next-page can read it directly instead of re-fetching a URL
+# that was never issued.
 #
 # Keycloak rotates the form's session_code on every re-render of the same
 # execution -- confirmed live: submitting a verified-CORRECT code against
@@ -159,18 +194,35 @@ PY
 submit_totp_with_retry() {
   local jar="$1" action="$2" field="$3" success_substr="$4"
   shift 4
-  local result="" attempt code into_period hdr_file body_file new_action
+  local result="" attempt code into_period hdr_file body_file new_action accepted
   hdr_file="$(mktemp)"
   body_file="$(mktemp)"
+  # #1096: every caller of this function invokes it via command
+  # substitution (result=$(submit_totp_with_retry ...)), which runs the
+  # whole function body in a SUBSHELL -- a plain variable assignment made
+  # in here (however global-looking, no `local`) is invisible to the
+  # caller once that subshell exits. Confirmed live in CI: "unbound
+  # variable" on the caller's very next line, from an earlier version of
+  # this function that tried exactly that. A file survives the subshell
+  # exiting; a shell variable does not. rm -f up front so a caller that
+  # doesn't need this (every pre-#1096 call site) sees a clean absence
+  # rather than a previous call's stale leftover.
+  rm -f "${flow_dir}/totp-next-body.html"
   for attempt in 1 2 3 4 5; do
     into_period=$(python3 -c 'import time; print(int(time.time()) % 30)')
     [ "${into_period}" -gt 10 ] && sleep "$((30 - into_period + 1))"
     code=$(python3 "${flow_dir}/totp.py" "${totp_secret}")
     curl -s -c "${jar}" -b "${jar}" -D "${hdr_file}" -o "${body_file}" --data-urlencode "${field}=${code}" "$@" "${action}"
     result=$(grep -i '^location:' "${hdr_file}" | tail -1 | sed 's/^[Ll]ocation: //' | tr -d '\r' || true)
+    accepted=false
     case "${result}" in
-      *"${success_substr}"*) break ;;
+      *"${success_substr}"*) accepted=true ;;
     esac
+    if [ "${accepted}" != true ] && [ -z "${result}" ] && ! grep -q "name=\"${field}\"" "${body_file}"; then
+      accepted=true
+      cp "${body_file}" "${flow_dir}/totp-next-body.html"
+    fi
+    [ "${accepted}" = true ] && break
     printf '    (TOTP submit attempt %d rejected, retrying after brute-force cooldown)\n' "${attempt}" >&2
     result=""
     new_action=$(grep -o 'action="[^"]*"' "${body_file}" | head -1 | sed 's/action="//;s/"$//' | sed 's/&amp;/\&/g')
@@ -179,6 +231,58 @@ submit_totp_with_retry() {
   done
   rm -f "${hdr_file}" "${body_file}"
   echo "${result}"
+}
+
+# Drives a CONFIGURE_TOTP required-action page (the "Unable to scan?"
+# manual-mode link -> secret capture -> submit) to completion. Shared by
+# the standalone enrollment flow and the first-login flow below, both of
+# which land on this same page shape via different paths. Sets globals
+# rather than echoing a delimited string -- multiple values are needed by
+# callers and any of them can legitimately be empty on success (a real
+# acceptance with no redirect, #1096) or failure alike:
+#   _totp_enroll_ok        "true" iff the code was genuinely accepted --
+#                           the one flag callers should actually branch on,
+#                           not emptiness of the other two.
+#   _totp_enroll_secret    the enrolled TOTP secret.
+#   _totp_enroll_callback  the redirect target, when Keycloak issued one
+#                           (empty on an inline-rendered next page even on
+#                           success -- see _totp_enroll_next_body).
+#   _totp_enroll_next_body the next page's own HTML, when acceptance
+#                           rendered it inline instead of redirecting.
+# $1=cookie jar path, $2=the CONFIGURE_TOTP page body, $3=success substring
+complete_totp_enrollment() {
+  local jar="$1" totp_page="$2" success_substr="$3"
+  local manual_link manual_page form_action secret_field
+  manual_link=$(echo "${totp_page}" | grep -o 'href="[^"]*mode=manual[^"]*"' | head -1 | sed 's/^href="//;s/"$//' | sed 's/&amp;/\&/g')
+  if [ -z "${manual_link}" ]; then
+    printf 'FAIL: no "Unable to scan?" manual-mode link found on the CONFIGURE_TOTP page -- response follows\n' >&2
+    echo "${totp_page}" >&2
+    exit 1
+  fi
+  manual_page=$(curl -s -c "${jar}" -b "${jar}" "${manual_link}")
+  # Deliberately NOT `local` -- submit_totp_with_retry reads this same
+  # name as a global (it computes its TOTP code from whatever
+  # ${totp_secret} currently holds, rather than taking it as a parameter,
+  # since it was written for the single-enrollment case where that's
+  # always the right value). Any caller of this function past the first
+  # must account for this global getting overwritten here.
+  totp_secret=$(echo "${manual_page}" | grep -oE '[A-Z2-7]{4}( [A-Z2-7]{4}){7}' | head -1 | tr -d ' ')
+  if [ -z "${totp_secret}" ]; then
+    printf 'FAIL: no TOTP secret found on the manual-mode CONFIGURE_TOTP page -- response follows\n' >&2
+    echo "${manual_page}" >&2
+    exit 1
+  fi
+  form_action=$(echo "${manual_page}" | grep -o 'action="[^"]*"' | head -1 | sed 's/action="//;s/"$//' | sed 's/&amp;/\&/g')
+  secret_field=$(echo "${manual_page}" | grep -o 'id="totpSecret"[^>]*value="[^"]*"' | head -1 | grep -o 'value="[^"]*"' | sed 's/value="//;s/"$//')
+  _totp_enroll_secret="${totp_secret}"
+  _totp_enroll_callback=$(submit_totp_with_retry "${jar}" "${form_action}" totp "${success_substr}" --data-urlencode "totpSecret=${secret_field}" --data-urlencode "userLabel=")
+  _totp_enroll_next_body=""
+  if [ -f "${flow_dir}/totp-next-body.html" ]; then
+    _totp_enroll_next_body="$(cat "${flow_dir}/totp-next-body.html")"
+    rm -f "${flow_dir}/totp-next-body.html"
+  fi
+  _totp_enroll_ok=""
+  { [ -n "${_totp_enroll_callback}" ] || [ -n "${_totp_enroll_next_body}" ]; } && _totp_enroll_ok=true
 }
 
 # Runs directly on the host, not inside a throwaway container: Keycloak's
@@ -206,30 +310,11 @@ enroll_totp_page=$(curl -sL -c "${jar_enroll}" -b "${jar_enroll}" --data-urlenco
 # code's PNG image, not as text -- the plain-text secret only appears
 # after following the page's own "Unable to scan?" (mode=manual) link.
 # Keycloak renders it space-grouped for readability (e.g. "JBGH Q4DM
-# JRGX ..."), not as one contiguous base32 run.
-manual_link=$(echo "${enroll_totp_page}" | grep -o 'href="[^"]*mode=manual[^"]*"' | head -1 | sed 's/^href="//;s/"$//' | sed 's/&amp;/\&/g')
-if [ -z "${manual_link}" ]; then
-  printf 'FAIL: no "Unable to scan?" manual-mode link found on the CONFIGURE_TOTP page -- response follows\n' >&2
-  echo "${enroll_totp_page}" >&2
-  exit 1
-fi
-enroll_totp_manual_page=$(curl -s -c "${jar_enroll}" -b "${jar_enroll}" "${manual_link}")
-totp_secret=$(echo "${enroll_totp_manual_page}" | grep -oE '[A-Z2-7]{4}( [A-Z2-7]{4}){7}' | head -1 | tr -d ' ')
-if [ -z "${totp_secret}" ]; then
-  printf 'FAIL: no TOTP secret found on the manual-mode CONFIGURE_TOTP page -- response follows\n' >&2
-  echo "${enroll_totp_manual_page}" >&2
-  exit 1
-fi
-enroll_totp_form_action=$(echo "${enroll_totp_manual_page}" | grep -o 'action="[^"]*"' | head -1 | sed 's/action="//;s/"$//' | sed 's/&amp;/\&/g')
-# The form also carries a required hidden "totpSecret" field -- an
-# opaque, differently-encoded token Keycloak uses server-side to
-# correlate this submission with the secret it displayed (not the same
-# string as the base32 secret itself, and not optional: omitting it
-# doesn't fail validation gracefully, it 500s server-side). Extract it
-# rather than guessing/omitting it.
-enroll_totp_secret_field=$(echo "${enroll_totp_manual_page}" | grep -o 'id="totpSecret"[^>]*value="[^"]*"' | head -1 | grep -o 'value="[^"]*"' | sed 's/value="//;s/"$//')
-enroll_callback=$(submit_totp_with_retry "${jar_enroll}" "${enroll_totp_form_action}" totp "127.0.0.1:${dash_port}/auth/callback" --data-urlencode "totpSecret=${enroll_totp_secret_field}" --data-urlencode "userLabel=")
-if [ -z "${enroll_callback}" ]; then
+# JRGX ..."), not as one contiguous base32 run. See complete_totp_enrollment().
+complete_totp_enrollment "${jar_enroll}" "${enroll_totp_page}" "127.0.0.1:${dash_port}/auth/callback"
+totp_secret="${_totp_enroll_secret}"
+enroll_callback="${_totp_enroll_callback}"
+if [ -z "${_totp_enroll_ok}" ]; then
   printf 'FAIL: TOTP enrollment code was rejected across all retry attempts\n' >&2
   exit 1
 fi
@@ -359,6 +444,88 @@ else
   else
     bad "the same authorization code was accepted twice -- code reuse is not being rejected"
   fi
+fi
+
+# --- #1036: first-login-test's password was set with temporary=true
+# (above) -- Keycloak must force UPDATE_PASSWORD before anything else,
+# including before the CONFIGURE_TOTP enrollment this same fresh account
+# also owes it. Proves the "admin hands out a one-time password" path
+# actually works, not just the "password is already permanent" path
+# pkce-totp-test exercises above. Run last, not alongside that enrollment:
+# complete_totp_enrollment() overwrites the shared ${totp_secret} global
+# that the golden-path login above still depends on for its own OTP
+# challenge -- ordering this after that whole flow finishes avoids the
+# clash rather than plumbing the secret through as a parameter everywhere
+# submit_totp_with_retry is already called. ---
+jar_first_login="${flow_dir}/jar-first-login.txt"
+first_login_page=$(curl -s -c "${jar_first_login}" -b "${jar_first_login}" "http://127.0.0.1:${kc_port}/realms/apiary/protocol/openid-connect/auth?client_id=apiary-dashboard&redirect_uri=http%3A%2F%2F127.0.0.1%3A${dash_port}%2Fauth%2Fcallback&response_type=code&scope=openid&state=firstloginstate&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256")
+first_login_form_action=$(echo "${first_login_page}" | grep -o 'action="[^"]*"' | head -1 | sed 's/action="//;s/"$//' | sed 's/&amp;/\&/g')
+# -L: the password step redirects (302) to whichever of this account's two
+# pending required actions (UPDATE_PASSWORD from its temporary credential,
+# CONFIGURE_TOTP as the realm default) the realm's own authenticator
+# priority runs first. Confirmed live against the real deployed realm
+# (2026-08-09): CONFIGURE_TOTP first, THEN UPDATE_PASSWORD -- the opposite
+# of an unverified guess this test originally shipped with (fixed after a
+# real CI failure: "did not land on the expected UPDATE_PASSWORD form").
+# Detect which one actually rendered rather than hardcoding an order, so
+# this doesn't silently start failing again if the realm's own
+# required-action priorities ever change.
+first_required_action_page=$(curl -sL -c "${jar_first_login}" -b "${jar_first_login}" --data-urlencode "username=first-login-test" --data-urlencode "password=TempOneTime1!Extra" --data-urlencode "credentialId=" "${first_login_form_action}")
+
+if echo "${first_required_action_page}" | grep -q 'name="password-new"'; then
+  ok "first-login temporary password was rejected as a login credential and forced UPDATE_PASSWORD before granting access"
+  update_password_form_action=$(echo "${first_required_action_page}" | grep -o 'action="[^"]*"' | head -1 | sed 's/action="//;s/"$//' | sed 's/&amp;/\&/g')
+  # -L: submitting the new password redirects on to CONFIGURE_TOTP, the
+  # account's other pending required action.
+  second_required_action_page=$(curl -sL -c "${jar_first_login}" -b "${jar_first_login}" --data-urlencode "password-new=FirstLoginPerm2!Extra" --data-urlencode "password-confirm=FirstLoginPerm2!Extra" "${update_password_form_action}")
+  if ! echo "${second_required_action_page}" | grep -qi 'mode=manual'; then
+    bad "first-login account did not proceed to CONFIGURE_TOTP after its forced password replacement"
+  else
+    complete_totp_enrollment "${jar_first_login}" "${second_required_action_page}" "127.0.0.1:${dash_port}/auth/callback"
+    if [ -z "${_totp_enroll_ok}" ]; then
+      bad "first-login account's post-password-reset TOTP enrollment was rejected across all retry attempts"
+    else
+      ok "first-login account completed forced password replacement + mandatory TOTP enrollment, reached a real authorization code"
+    fi
+  fi
+elif echo "${first_required_action_page}" | grep -qi 'mode=manual'; then
+  ok "first-login temporary password was rejected as a login credential and forced a required action (CONFIGURE_TOTP) before granting access"
+  # The next required action (UPDATE_PASSWORD) is still pending after this
+  # one. Confirmed live (2026-08-09): Keycloak 200-renders it inline rather
+  # than redirecting, since accepting this code does not finish the
+  # account's overall required-action chain -- unlike every other
+  # complete_totp_enrollment() call in this script, which is always the
+  # last pending action for its account and does get a real redirect.
+  # "login-actions/required-action" as success_substr still covers the
+  # (unconfirmed but possible) case where a future realm change makes this
+  # a real redirect instead.
+  complete_totp_enrollment "${jar_first_login}" "${first_required_action_page}" "login-actions/required-action"
+  if [ -z "${_totp_enroll_ok}" ]; then
+    bad "first-login account's TOTP enrollment was rejected across all retry attempts"
+  else
+    if [ -n "${_totp_enroll_callback}" ]; then
+      second_required_action_page=$(curl -sk -c "${jar_first_login}" -b "${jar_first_login}" "${_totp_enroll_callback}")
+    else
+      second_required_action_page="${_totp_enroll_next_body}"
+    fi
+    if ! echo "${second_required_action_page}" | grep -q 'name="password-new"'; then
+      bad "first-login account did not proceed to UPDATE_PASSWORD after its forced TOTP enrollment"
+    else
+      update_password_form_action=$(echo "${second_required_action_page}" | grep -o 'action="[^"]*"' | head -1 | sed 's/action="//;s/"$//' | sed 's/&amp;/\&/g')
+      # -L: submitting the new password now redirects all the way to the
+      # dashboard's own /auth/callback -- this was the account's last
+      # pending required action.
+      final_callback_page_headers=$(curl -sk -D - -o /dev/null -c "${jar_first_login}" -b "${jar_first_login}" --data-urlencode "password-new=FirstLoginPerm2!Extra" --data-urlencode "password-confirm=FirstLoginPerm2!Extra" "${update_password_form_action}")
+      final_location=$(echo "${final_callback_page_headers}" | grep -i '^location:' | sed 's/^[Ll]ocation: //' | tr -d '\r')
+      case "${final_location}" in
+        "127.0.0.1:${dash_port}/auth/callback"*|"http://127.0.0.1:${dash_port}/auth/callback"*)
+          ok "first-login account completed forced TOTP enrollment + password replacement, reached a real authorization code" ;;
+        *) bad "first-login account's forced password replacement did not reach the dashboard callback: ${final_location}" ;;
+      esac
+    fi
+  fi
+else
+  bad "temporary-password login did not land on either the expected UPDATE_PASSWORD or CONFIGURE_TOTP form"
 fi
 
 if [ "${fail}" -ne 0 ]; then
