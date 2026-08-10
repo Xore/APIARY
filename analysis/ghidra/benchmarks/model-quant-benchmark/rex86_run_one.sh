@@ -105,9 +105,18 @@ tok = AutoTokenizer.from_pretrained(BASE, revision=REV)
 # re-dispatching the model) crashed with "Cannot copy out of meta tensor;
 # no data!". Only the codellama-7B direction (tokenizer bigger than
 # embeddings) is ever a real problem worth fixing.
+#
+# mean_resizing=False: found live (2026-08-10, codellama-34B) that
+# transformers' default mean_resizing=True initializes new embedding rows
+# from a covariance matrix computed over the OLD embeddings -- on a model
+# large enough to need CPU/disk offload (accelerate leaves some params on
+# a meta placeholder), that covariance computation crashes outright
+# ("Tensor.item() cannot be called on meta tensors"). The new rows are
+# unused padding tokens this eval never feeds real input through, so the
+# simpler non-mean init this flag falls back to is fine.
 if len(tok) > base.get_input_embeddings().weight.shape[0]:
     print(f"resizing embeddings {base.get_input_embeddings().weight.shape[0]} -> {len(tok)} to match tokenizer...")
-    base.resize_token_embeddings(len(tok))
+    base.resize_token_embeddings(len(tok), mean_resizing=False)
 
 print("applying adapter...")
 merged = PeftModel.from_pretrained(base, ADAPTER_DIR)
