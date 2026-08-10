@@ -151,9 +151,15 @@ func (s *store) serveReportPayloadOptions(w http.ResponseWriter, r *http.Request
 	if len(files) > reportPayloadOptionsLimit {
 		files = files[:reportPayloadOptionsLimit]
 	}
+	// Loaded once for the whole search, not once per file below: see
+	// correlateHash's own doc comment -- each of these fetches up to 10000
+	// documents from ES regardless of hash, so calling it inside this loop
+	// (as this used to) meant up to reportPayloadOptionsLimit separate
+	// fetches per source for one search-as-you-type keystroke.
+	ghidraResults, sandboxResults, githubResults := loadGhidraResults(), loadSandboxResults(), loadGitHubAnalysisResults()
 	options := make([]reportPayloadOption, 0, len(files))
 	for _, file := range files {
-		correlation := s.correlateHash(file.Hash, "")
+		correlation := s.correlateHash(file.Hash, "", ghidraResults, sandboxResults, githubResults)
 		options = append(options, reportPayloadOption{
 			Hash:     file.Hash,
 			Kind:     file.Kind,

@@ -258,12 +258,17 @@ func (s *store) analyzePayload(name string) (binaryAnalysis, error) {
 	}
 	yara := s.yaraFor(name)
 	a.YARAMatches, a.YARAScanned, a.YARAError = yara.Matches, yara.ScannedAt, yara.Error
-	for _, run := range loadSandboxResults() {
+	// Loaded once and reused below for a.Correlation too, not fetched a
+	// second time by correlateHash itself: see that function's own doc
+	// comment -- these three each fetch up to 10000 documents from ES
+	// regardless of which hash is being asked about.
+	ghidraResults, sandboxResults, githubResults := loadGhidraResults(), loadSandboxResults(), loadGitHubAnalysisResults()
+	for _, run := range sandboxResults {
 		if strings.EqualFold(run.SHA256, a.SHA256) {
 			a.SandboxRuns = append(a.SandboxRuns, run)
 		}
 	}
-	for _, result := range loadGitHubAnalysisResults() {
+	for _, result := range githubResults {
 		if strings.EqualFold(result.SHA256, a.SHA256) {
 			row := result
 			a.GitHubAnalysis = &row
@@ -285,7 +290,7 @@ func (s *store) analyzePayload(name string) (binaryAnalysis, error) {
 	// content hash computed above, what Ghidra/sandbox/GitHub-analysis key
 	// their own results by). Passing both lets the Elasticsearch side match
 	// on either; local-store matching only ever uses the true SHA-256.
-	a.Correlation = s.correlateHash(a.SHA256, a.Hash)
+	a.Correlation = s.correlateHash(a.SHA256, a.Hash, ghidraResults, sandboxResults, githubResults)
 	if len(a.YARAMatches) > 0 {
 		boost := 25
 		for _, match := range a.YARAMatches {

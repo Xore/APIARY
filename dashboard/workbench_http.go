@@ -233,7 +233,7 @@ func (s *store) serveWorkbenchPage(w http.ResponseWriter, r *http.Request, tmpl 
 		// therefore under-report "known" for such a payload here -- the
 		// Elasticsearch side still matches correctly either way, since
 		// hashQuery checks both hash fields for whatever hash it's given.
-		Correlation: s.correlateHash(hash, ""),
+		Correlation: s.correlateHash(hash, "", loadGhidraResults(), loadSandboxResults(), loadGitHubAnalysisResults()),
 	}
 	renderPage(w, tmpl, "payload-workbench", &data)
 }

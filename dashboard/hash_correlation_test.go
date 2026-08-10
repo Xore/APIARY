@@ -53,7 +53,10 @@ func TestCorrelateHashChecksEverySourceIncludingGhidra(t *testing.T) {
 	// file.hash.md5, keyed by the MD5, not the SHA-256).
 	altID := "0123456789abcdef0123456789abcdef"
 	s := &store{es: newESClient(es.URL, "")}
-	result := s.correlateHash(shaA, altID)
+	// Loaded explicitly here, same as every real caller does now (#1142):
+	// correlateHash no longer fetches these itself, see its own doc
+	// comment.
+	result := s.correlateHash(shaA, altID, loadGhidraResults(), loadSandboxResults(), loadGitHubAnalysisResults())
 
 	if !result.Known {
 		t.Fatal("expected Known=true when every source has a result")
@@ -91,7 +94,7 @@ func TestCorrelateHashReportsUnknownWhenNothingMatches(t *testing.T) {
 	defer es.Close()
 
 	s := &store{es: newESClient(es.URL, "")}
-	result := s.correlateHash(shaB, "")
+	result := s.correlateHash(shaB, "", nil, nil, nil)
 	if result.Known {
 		t.Fatalf("expected Known=false with no matches anywhere, got %+v", result)
 	}
@@ -110,7 +113,7 @@ func TestCorrelateHashRejectsMalformedInputWithoutQuerying(t *testing.T) {
 
 	s := &store{es: newESClient(es.URL, "")}
 	for _, bad := range []string{"", "not-a-hash", `abc" OR "1`, "toolong" + strings.Repeat("a", 200)} {
-		if result := s.correlateHash(bad, ""); result.Known {
+		if result := s.correlateHash(bad, "", nil, nil, nil); result.Known {
 			t.Errorf("correlateHash(%q) should never report Known=true for malformed input, got %+v", bad, result)
 		}
 	}
@@ -130,7 +133,7 @@ func TestCorrelateHashRejectsMalformedAltID(t *testing.T) {
 	s := &store{es: newESClient(es.URL, "")}
 	for _, bad := range []string{"not-a-hash", `abc" OR "1`, shaA} {
 		gotPath = ""
-		s.correlateHash(shaA, bad)
+		s.correlateHash(shaA, bad, nil, nil, nil)
 		if gotPath == "" {
 			t.Fatal("a well-formed primary must still be queried even when altID is malformed")
 		}
@@ -159,7 +162,7 @@ func TestCorrelateHashFlagsTruncationWhenSightingsExceedReturnedRecords(t *testi
 	defer es.Close()
 
 	s := &store{es: newESClient(es.URL, "")}
-	result := s.correlateHash(shaA, "")
+	result := s.correlateHash(shaA, "", nil, nil, nil)
 	if !result.ESTruncated {
 		t.Fatalf("expected ESTruncated=true when total (5000) exceeds returned records (2), got %+v", result)
 	}
@@ -176,7 +179,7 @@ func TestCorrelateHashDoesNotFlagTruncationWhenAllSightingsAreReturned(t *testin
 	defer es.Close()
 
 	s := &store{es: newESClient(es.URL, "")}
-	result := s.correlateHash(shaA, "")
+	result := s.correlateHash(shaA, "", nil, nil, nil)
 	if result.ESTruncated {
 		t.Fatalf("did not expect ESTruncated when total (2) matches returned records, got %+v", result)
 	}
