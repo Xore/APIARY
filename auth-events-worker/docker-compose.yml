@@ -44,6 +44,21 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    # #787: a hung Keycloak-connection cycle (live, reproduced) left the
+    # process technically running but stuck forever with no further poll
+    # attempts and nothing to notice -- this worker never had a
+    # healthcheck at all. Heartbeat-file check (llm-worker's own
+    # healthcheck() is the precedent) plus autoheal, same restart pattern
+    # already used for elasticsearch/the conpot personas/tanner_docker --
+    # #119/#111.
+    healthcheck:
+      test: ["CMD", "python", "worker.py", "--healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    labels:
+      - autoheal=true
     deploy:
       resources:
         limits:
