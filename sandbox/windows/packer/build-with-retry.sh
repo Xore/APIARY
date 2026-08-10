@@ -32,6 +32,7 @@ dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 iso_path="/var/dockge/sandbox/isos/Win11_Eval_x64.iso"
 qmp_sock="/tmp/win11-analysis-qmp.sock"
 unplug_script="$dir/pxe/unplug-pxe-on-reset.sh"
+eject_script="$dir/pxe/unplug-pxe-when-idle.sh"
 
 # This is the 4th time a rebuild has silently boot-looped/fallen through to
 # the flaky CD path (#288) because two manual companion steps this script
@@ -47,6 +48,19 @@ unplug_script="$dir/pxe/unplug-pxe-on-reset.sh"
 # did, on the assumption "whoever runs this build starts it by hand," which
 # is precisely the assumption that keeps not holding). Both are now
 # enforced here instead of documented and hoped for.
+#
+# A 5th, related failure was found and fixed live rebuilding
+# win11-analysis.qcow2 for #1123 with the above two fixes already in place:
+# once pxenet0 is gone, neither it nor the install ISO (ide1-cd0) has an
+# explicit bootindex (packer generates both drives itself; qemuargs can't
+# safely inject a property into a drive it also auto-adds), so which one
+# firmware tries on the guest's *next* self-triggered reset is unspecified.
+# A reset landed back on the ISO instead of the now-bootable disk, and
+# Setup -- booting fresh and finding an existing install on the target
+# disk -- asked whether to reinstall from scratch, which would have wiped
+# the whole build. This is exactly what #953 already found and designed a
+# fix for (an idle-gated ISO eject) but never landed in this file.
+# pxe/unplug-pxe-when-idle.sh is that fix, ported for real this time.
 #
 # prepare-pxe.sh's own file-existence guards make it cheap to call every
 # time (a no-op past the first run on a given host), so no separate
@@ -135,12 +149,35 @@ while (( attempt <= max_attempts )); do
     echo "=== WARNING: ${unplug_script} not found or not executable -- PXE NIC will not be unplugged after boot; build may loop back into PXE on Setup's own restarts ===" >&2
   fi
 
+  eject_pid=""
+  if [[ -x "$eject_script" ]]; then
+    (
+      for _ in $(seq 1 300); do
+        [[ -S "$qmp_sock" ]] && break
+        sleep 1
+      done
+      if [[ -S "$qmp_sock" ]]; then
+        python3 "$eject_script" "$qmp_sock"
+      else
+        echo "=== unplug-pxe-when-idle.sh: ${qmp_sock} never appeared within 300s -- not starting it, install ISO will not be ejected this attempt ===" >&2
+      fi
+    ) &
+    eject_pid=$!
+    echo "=== unplug-pxe-when-idle.sh: waiting for ${qmp_sock}, will eject the install ISO once Setup is done reading it (wrapper pid ${eject_pid}) ==="
+  else
+    echo "=== WARNING: ${eject_script} not found or not executable -- install ISO will not be ejected; a later reset may boot it instead of the disk and offer to reinstall from scratch ===" >&2
+  fi
+
   build_ok=1
   packer build -var "iso_checksum=${checksum}" -var "output_dir=${build_output_dir}" "$dir/win11-analysis.pkr.hcl" || build_ok=0
 
   if [[ -n "$unplug_pid" ]]; then
     kill "$unplug_pid" 2>/dev/null || true
     wait "$unplug_pid" 2>/dev/null || true
+  fi
+  if [[ -n "$eject_pid" ]]; then
+    kill "$eject_pid" 2>/dev/null || true
+    wait "$eject_pid" 2>/dev/null || true
   fi
 
   if [[ $build_ok -eq 1 ]]; then
