@@ -1,0 +1,83 @@
+{{define "problem-reports"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{brandText}} &mdash; problem reports</title>
+{{template "style" .}}
+</head>
+<body>
+<div class="app-shell">
+  {{template "topbar" .}}
+  {{template "sidebar" .}}
+  <main class="app-main">
+      <div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
+        <header class="overview-header">
+          <div>
+            <div class="label-section">Administration</div>
+            <h1>Problem reports</h1>
+            <p class="subtitle">Reports submitted via the "Report a problem" button, newest first.</p>
+          </div>
+        </header>
+
+        {{if not .Reports}}
+        <p class="note">No problem reports have been submitted yet.</p>
+        {{else}}
+        <div class="hp-table-wrap">
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th>Submitted</th>
+              <th>By</th>
+              <th>Page</th>
+              <th>Expected</th>
+              <th>Actual</th>
+              <th>Status</th>
+              <th>Details</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Reports}}
+            <tr data-hp-pr-row="{{.ID}}">
+              <td data-hp-utc="{{.SubmittedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.SubmittedAt.Format "2006-01-02 15:04"}}</td>
+              <td>{{if .SubmittedByName}}{{.SubmittedByName}}{{else}}{{.SubmittedBy}}{{end}}</td>
+              <td>{{.Page}}</td>
+              <td class="hp-pr-cell">{{.Expected}}</td>
+              <td class="hp-pr-cell">{{.Actual}}</td>
+              <td>
+                <select class="form-input" data-hp-pr-status data-id="{{.ID}}">
+                  <option value="open"{{if eq .Status "open"}} selected{{end}}>Open</option>
+                  <option value="triaged"{{if eq .Status "triaged"}} selected{{end}}>Triaged</option>
+                  <option value="closed"{{if eq .Status "closed"}} selected{{end}}>Closed</option>
+                </select>
+              </td>
+              <td>
+                <button type="button" class="btn btn-secondary btn-sm" data-hp-pr-details data-id="{{.ID}}">View</button>
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+        </div>
+        {{end}}
+
+        <div class="modal-backdrop" id="hp-pr-detail-backdrop" aria-hidden="true" hidden></div>
+        <section class="modal hp-evidence-modal" id="hp-pr-detail-modal" role="dialog" aria-modal="true" aria-label="Problem report details" hidden>
+          <div class="modal__header">
+            <h2 class="modal__header-title">Problem report</h2>
+            <button class="modal__close" type="button" data-hp-pr-detail-close aria-label="Close">&#10005;</button>
+          </div>
+          <div class="hp-evidence-body" data-hp-pr-detail-body></div>
+        </section>
+
+        <footer>{{brandText}}</footer>
+      </div>
+    </main>
+</div>
+<script nonce="{{.Nonce}}">
+window.__hpProblemReports = {{json .Reports}};
+</script>
+<script type="module" src="{{asset "/static/hp-problem-reports-admin.js"}}"></script>
+</body>
+</html>
+{{end}}

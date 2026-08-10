@@ -563,6 +563,48 @@ curl -fsS -X PUT "$es_url/_index_template/dashboard-alert-state" \
   }
 }' >/dev/null
 
+# #1147: dashboard-owned "Report a problem" button submissions. Append-only
+# (one fresh document per report, deterministic _id per problem_reports.go),
+# so this is a plain index like dashboard-alert-state-v1 above rather than a
+# CAS-updated singleton doc like dashboard-config-v1 below. Captured content
+# (action trail, console errors, API bodies, DOM snapshot) is heterogeneous
+# and can legitimately be large, so it stays `flattened` -- same reasoning
+# workbench-runs-v1 already uses above -- while the handful of fields an
+# admin actually filters/sorts by (status, submitted_by, submitted_at) are
+# promoted to real types. No ILM: an open bug report should not silently
+# expire, same posture as dashboard-alert-state-v1.
+curl -fsS -X PUT "$es_url/_index_template/dashboard-problem-reports" \
+  -H 'Content-Type: application/json' \
+  --data-binary '{
+  "index_patterns": ["dashboard-problem-reports-v1"],
+  "priority": 460,
+  "template": {
+    "settings": {
+      "index.number_of_replicas": 0,
+      "index.refresh_interval": "1s",
+      "index.mapping.total_fields.limit": 100
+    },
+    "mappings": {
+      "properties": {
+        "id": { "type": "keyword" },
+        "submitted_at": { "type": "date" },
+        "submitted_by": { "type": "keyword" },
+        "submitted_by_name": { "type": "keyword" },
+        "page": { "type": "keyword" },
+        "status": { "type": "keyword" },
+        "expected": { "type": "text" },
+        "actual": { "type": "text" },
+        "action_trail": { "type": "flattened", "ignore_above": 32000 },
+        "console_errors": { "type": "flattened", "ignore_above": 32000 },
+        "network_failures": { "type": "flattened", "ignore_above": 32000 },
+        "api_calls": { "type": "flattened", "ignore_above": 32000 },
+        "dom_snapshot": { "type": "text" },
+        "user_agent": { "type": "keyword" }
+      }
+    }
+  }
+}' >/dev/null
+
 # #787: dashboard-config-v1 / dashboard-users-v1 / dashboard-reports-
 # definitions-v1 -- singleton documents (one fixed id per index: "config",
 # "users", "definitions") replacing what used to be local files on the

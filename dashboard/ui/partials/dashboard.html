@@ -16,6 +16,7 @@
 <script defer src="{{asset "/static/hp-account.js"}}"></script>
 <script defer src="{{asset "/static/hp-settings.js"}}"></script>
 <script defer src="{{asset "/static/hp-reports.js"}}"></script>
+<script defer src="{{asset "/static/hp-problem-report.js"}}"></script>
 {{end}}
 
 {{define "sidebar"}}
@@ -160,6 +161,7 @@
     <div class="hp-evidence-body" data-hp-evidence-body-target></div>
   </section>
   <div id="hp-dash-settings-root"></div>
+  {{if (behavior).ShowProblemReportButton}}<div id="hp-problem-report-root"></div>{{end}}
 </div>
 {{end}}
 

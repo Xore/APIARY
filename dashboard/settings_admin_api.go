@@ -80,17 +80,18 @@ type presentationPatch struct {
 }
 
 type behaviorPatch struct {
-	DefaultLanding     *string `json:"default_landing"`
-	DefaultTimeWindow  *string `json:"default_time_window"`
-	RowsPerPageOptions *[]int  `json:"rows_per_page_options"`
-	MaxExportRows      *int    `json:"max_export_rows"`
-	RefreshIntervals   *[]int  `json:"refresh_interval_seconds_options"`
-	SourceStaleMinutes *int    `json:"source_stale_minutes"`
-	MapProvider        *string `json:"map_provider"`
-	ShowMLPanels       *bool   `json:"show_ml_panels"`
-	MaintenanceMode    *bool   `json:"maintenance_mode"`
-	ReadOnly           *bool   `json:"read_only"`
-	DefaultTimezone    *string `json:"default_timezone"`
+	DefaultLanding          *string `json:"default_landing"`
+	DefaultTimeWindow       *string `json:"default_time_window"`
+	RowsPerPageOptions      *[]int  `json:"rows_per_page_options"`
+	MaxExportRows           *int    `json:"max_export_rows"`
+	RefreshIntervals        *[]int  `json:"refresh_interval_seconds_options"`
+	SourceStaleMinutes      *int    `json:"source_stale_minutes"`
+	MapProvider             *string `json:"map_provider"`
+	ShowMLPanels            *bool   `json:"show_ml_panels"`
+	MaintenanceMode         *bool   `json:"maintenance_mode"`
+	ReadOnly                *bool   `json:"read_only"`
+	DefaultTimezone         *string `json:"default_timezone"`
+	ShowProblemReportButton *bool   `json:"show_problem_report_button"`
 }
 
 type honeypotPatch struct {
@@ -193,6 +194,10 @@ func (p configPatch) apply(c *dashboardConfig) []string {
 		if q.ReadOnly != nil {
 			c.Behavior.ReadOnly = *q.ReadOnly
 			fields = append(fields, "behavior.read_only")
+		}
+		if q.ShowProblemReportButton != nil {
+			c.Behavior.ShowProblemReportButton = *q.ShowProblemReportButton
+			fields = append(fields, "behavior.show_problem_report_button")
 		}
 	}
 	if q := p.Honeypot; q != nil {
