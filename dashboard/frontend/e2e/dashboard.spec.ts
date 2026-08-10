@@ -472,4 +472,22 @@ test.describe("dashboard browser behaviour", () => {
     await expect(page.locator(".wb-run").first()).toContainText("completed");
     await expect(page.locator(".wb-run").first().getByRole("link", { name: /Open native result/ })).toHaveAttribute("href", /\/payload-analysis\//);
   });
+
+  test("clicking a payload card outside its action menu opens payload analysis (#1137)", async ({ page }) => {
+    await page.goto("/payloads");
+    const card = page.locator(".project-card").first();
+    await expect(card).toBeVisible();
+    // .project-card__desc is plain text, not the title link or the action
+    // menu -- exactly the "dead" part of the card #1137 reported.
+    await card.locator(".project-card__desc").click();
+    await expect(page).toHaveURL(/\/payload-analysis\//);
+  });
+
+  test("clicking a payload card's action menu opens the menu instead of navigating (#1137)", async ({ page }) => {
+    await page.goto("/payloads");
+    const card = page.locator(".project-card").first();
+    await card.locator("summary").click();
+    await expect(card.locator(".action-menu__popover")).toBeVisible();
+    await expect(page).toHaveURL("/payloads");
+  });
 });

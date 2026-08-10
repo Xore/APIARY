@@ -657,6 +657,29 @@
     });
   }, true);
 
+  /* ---------- clickable .project-card (#1137) ----------
+     Most .project-card usages (payload_workbench.html's payload picker and
+     run list) are themselves a whole-card <a href>, so a click anywhere on
+     one already navigates natively -- nothing to do here. payloads.html's
+     own payloadrow is deliberately the one exception (see that template's
+     own top-of-file comment): it has several distinct actions behind an
+     .action-menu, and HTML forbids nesting that menu's <details>/<form>
+     inside an <a>, so only the hash title text itself is a real link. That
+     reads as "the card doesn't work" for anything other than that one
+     line of text. Delegate a click anywhere else on the card to the title
+     link instead, same as every other project-card already behaves --
+     except inside the action menu (or any other interactive element a
+     future card variant might add), which must keep doing its own thing,
+     not navigate away. Delegated on document, not per-card, for the same
+     mountPage-survives-a-refresh reason as every other listener here. */
+  document.addEventListener("click", e => {
+    const card = e.target.closest?.(".project-card");
+    if (!card || card.tagName === "A") return;
+    if (e.target.closest("a, button, form, summary")) return;
+    const link = card.querySelector(".project-card__title[href]");
+    if (link) location.href = link.href;
+  });
+
   /* ---------- workspace tabs ----------
      Any page can group its cards: render .tabs buttons with
      data-dashboard-tab and matching [data-dashboard-panel] sections. The valid
