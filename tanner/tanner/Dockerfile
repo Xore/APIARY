@@ -13,7 +13,7 @@
 # reinstall (2026-08-09), a genuinely fresh build with no Docker layer
 # cache to hide the contradiction behind. Re-pinned to match this file's
 # own documented requirement, verified with a real build.
-FROM python:3.10-slim@sha256:63669fd2563fa90b0442fa7b568e66e3667755636cda086d7bcaaa895f66fe39
+FROM python:3.14-slim@sha256:a7fb1e634c4a578f9e0bd6327f11a3cde11b7a9395f48e24360c0988bcc5c2bc
 
 LABEL maintainer="honeypot-stack"
 
