@@ -29,26 +29,27 @@ func esSensorAndOverviewStub(t *testing.T, docsBySensor map[string][]map[string]
 	return esFullStub(t, esFullStubDocs{HoneypotBySensor: docsBySensor})
 }
 
-// esFullStubDocs seeds esFullStub's three index families independently --
-// zero-value fields simply return no hits for that family's queries.
+// esFullStubDocs seeds esFullStub's index families independently -- zero-
+// value fields simply return no hits for that family's queries.
 type esFullStubDocs struct {
 	HoneypotBySensor map[string][]map[string]any // honeypot-v2-*, per event.sensor -- raw "honeypot" objects
 	SuricataEve      []map[string]any            // suricata-*, loadSuricataEventsES -- raw "suricata.eve" objects
 	Portbridge       []map[string]any            // portbridge-v2-*, buildViaMap -- raw "portbridge" objects, in the order buildViaMap should process them (oldest first)
-	Overview         esOverviewAggResponse       // the #39 plain overview aggregation
-	SuricataOverview esSuricataOverviewResponse  // fetchESOverview's separate suricata-v2-* query -- NOT the same as SuricataEve/loadSuricataEventsES, see es_aggregate.go's own comment on why that's a second query
+	Overview         esOverviewAggResponse       // the #39 overview aggregation (#1136: also covers suricata-v2-*, queried as the same multi-index pattern -- no separate suricata overview query anymore)
 }
 
 // esFullStub answers every Elasticsearch request shape a rebuild() cycle
 // can make (#1103): loadSensorEventsES's per-sensor honeypot-v2-* search,
 // loadSuricataEventsES's suricata-* search, buildViaMap's portbridge-v2-*
-// search, the #39 overview aggregation, and fetchESOverview's separate
-// suricata-v2-* overview query. A single PIT-scoped bare POST /_search is
-// used by all three of the first three (the PIT itself, not the path or
-// body shape, pins which index family a given search targets) -- this
-// stub tracks each open PIT's family by which index pattern its own
-// POST /<pattern>/_pit request named, then routes the follow-up /_search
-// accordingly.
+// search, and the #39/#1136 overview aggregation (honeypot-v2-*,
+// suricata-v2-* combined). A single PIT-scoped bare POST /_search is used
+// by the first three (the PIT itself, not the path or body shape, pins
+// which index family a given search targets) -- this stub tracks each open
+// PIT's family by which index pattern its own POST /<pattern>/_pit request
+// named, then routes the follow-up /_search accordingly. The overview
+// aggregation carries no PIT at all, so it falls through to the plain
+// honeypot-family branch below regardless of which index pattern its own
+// request named.
 func esFullStub(t *testing.T, docs esFullStubDocs) http.HandlerFunc {
 	t.Helper()
 	pitFamily := map[string]string{} // pit id -> "honeypot" | "suricata" | "portbridge"
@@ -56,13 +57,6 @@ func esFullStub(t *testing.T, docs esFullStubDocs) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		// fetchESOverview's own separate suricata-v2-* aggregation -- a
-		// direct index-scoped POST, never PIT-based, so it's distinguished
-		// by path alone before any of the PIT handling below.
-		if strings.Contains(r.URL.Path, "suricata-v2-") && !strings.Contains(r.URL.Path, "_pit") {
-			json.NewEncoder(w).Encode(docs.SuricataOverview)
-			return
-		}
 		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "_pit") {
 			family := "honeypot"
 			if strings.HasPrefix(r.URL.Path, "/suricata-") {

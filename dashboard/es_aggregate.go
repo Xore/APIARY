@@ -45,38 +45,29 @@ const esOverviewWindow = "now-48h"
 // the two without a compile-time reminder to update both.
 const esOverviewWindowDuration = 48 * time.Hour
 
-// suricataOverviewQuery is a small, separate aggregation over Suricata's own
-// index family (suricata-v2-*), run alongside esOverviewAggQuery and merged
-// into the same SensorCounts/SensorLastSeen maps as a synthetic "suricata"
-// sensor entry. Suricata cannot be folded into esOverviewAggQuery itself:
-// its events ship to their own index family, never honeypot-v2-* under
+// esOverviewIndices is queried as one multi-index pattern, not
+// honeypot-v2-* alone: found live (#1136) that Suricata ships to its own
+// index family (suricata-v2-*), never honeypot-v2-* under
 // event.sensor:"suricata" the way every decoy sensor's events do (#41's
 // portbridge/suricata exclusion in aggregate.go's file-vs-ES read path is
-// the same underlying fact) -- so a card built only from
-// esOverviewAggQuery's own "sensors" bucket can never show Suricata,
-// regardless of how much real, current data it has. Confirmed live
-// (2026-08-09): EXPECTED_SENSORS lists "suricata" and expects it on this
-// card, but suricata-v2-* activity never appeared there no matter how
-// recent or heavy real traffic was.
-const suricataOverviewQuery = `{
-  "size": 0,
-  "track_total_hits": true,
-  "query": {"range": {"@timestamp": {"gte": "` + esOverviewWindow + `"}}},
-  "aggs": {"last_seen": {"max": {"field": "@timestamp"}}}
-}`
-
-type esSuricataOverviewResponse struct {
-	Hits struct {
-		Total struct {
-			Value int `json:"value"`
-		} `json:"total"`
-	} `json:"hits"`
-	Aggregations struct {
-		LastSeen struct {
-			ValueAsString string `json:"value_as_string"`
-		} `json:"last_seen"`
-	} `json:"aggregations"`
-}
+// the same underlying fact) -- so this query used to be honeypot-v2-*
+// only, and Suricata was patched into just the SensorCounts/SensorLastSeen
+// half of esOverview's result via a second, separate suricata-v2-* query.
+// Every OTHER field this function builds (Total/Last24h/Previous24h,
+// UniqueIPs, SensorHeatmap, Protocols, Ports, Countries, TopIPs, ASNs,
+// MapPoints) stayed silently honeypot-v2-*-only regardless -- confirmed
+// live that Suricata's own suricata-v2-* index already has full ECS field
+// parity with what this aggregation expects (source.ip, source.geo.*,
+// source.as.*, destination.port, network.protocol, event.sensor, all the
+// same field names and types), so a second bolted-on query per field was
+// never actually necessary; one multi-index pattern covers every field at
+// once. Elasticsearch aggregates gracefully across indices where a field
+// is simply absent (e.g. url.path, which only honeypot-v2-* has), as long
+// as no two indices map the same field to conflicting types -- confirmed
+// live, none do. Portbridge is correctly NOT included here: it never
+// produces a displayable event (classify.go always sets ev.skip for it),
+// so it has nothing meaningful to contribute to any of these aggregations.
+const esOverviewIndices = "/honeypot-v2-*,suricata-v2-*/_search"
 
 // esOverviewAggQuery is a fixed JSON literal: every "now" reference is
 // resolved by Elasticsearch itself (date math in the query), so no
@@ -307,7 +298,7 @@ func (s *store) fetchESOverview(now time.Time) (*esOverview, bool) {
 	if s.es == nil {
 		return nil, false
 	}
-	b, err := s.es.searchBody("/honeypot-v2-*/_search", []byte(esOverviewAggQuery))
+	b, err := s.es.searchBody(esOverviewIndices, []byte(esOverviewAggQuery))
 	if err != nil {
 		return nil, false
 	}
@@ -334,21 +325,6 @@ func (s *store) fetchESOverview(now time.Time) (*esOverview, bool) {
 		out.SensorCounts[b.Key] = b.DocCount
 		if t, err := time.Parse(time.RFC3339, b.LastSeen.ValueAsString); err == nil {
 			out.SensorLastSeen[b.Key] = t
-		}
-	}
-
-	// Best-effort: a failure here (Elasticsearch briefly unreachable, a
-	// malformed response) must not fail the whole overview -- suricata
-	// just doesn't get its synthetic row for this one rebuild cycle,
-	// matching esOverviewOK's own graceful-degradation philosophy for the
-	// main query above.
-	if sb, err := s.es.searchBody("/suricata-v2-*/_search", []byte(suricataOverviewQuery)); err == nil {
-		var suricata esSuricataOverviewResponse
-		if json.Unmarshal(sb, &suricata) == nil {
-			out.SensorCounts["suricata"] = suricata.Hits.Total.Value
-			if t, err := time.Parse(time.RFC3339, suricata.Aggregations.LastSeen.ValueAsString); err == nil {
-				out.SensorLastSeen["suricata"] = t
-			}
 		}
 	}
 
