@@ -2500,8 +2500,14 @@ a.project-card { display: block; color: inherit; text-decoration: none; }
    long-hash-in-a-card problem as Ghidra's. The "..." action menu is a
    sibling in the meta row, not part of the title, and stays pinned to the
    row's trailing edge regardless of how long the origin-event text next to
-   it runs. */
-#payloads-results .project-card { cursor: default; }
+   it runs. Same reasoning as #hp-rp-generated below: the consuming app
+   delegates a click anywhere on the card outside the action menu to the
+   title link (document-level, not a per-card listener), so the card reads
+   and behaves like a single destination even though it isn't literally
+   one <a> -- cursor: pointer, the same affordance a real <a>/<button>
+   would carry for free, not the "default" arrow a plain non-interactive
+   <div> gets. */
+#payloads-results .project-card { cursor: pointer; }
 #payloads-results .project-card__title {
   overflow: hidden;
   text-overflow: ellipsis;
