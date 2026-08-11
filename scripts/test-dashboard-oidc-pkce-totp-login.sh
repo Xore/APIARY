@@ -451,6 +451,31 @@ else
   else
     bad "the same authorization code was accepted twice -- code reuse is not being rejected"
   fi
+
+  # --- #1094: /auth/logout must actually revoke the session server-side,
+  # not just clear the browser's own cookie. dashboard/oidc_auth.go's
+  # serveLogout deletes the Redis-backed session BEFORE it ever clears the
+  # cookie or redirects -- proving that precisely means testing with a
+  # SAVED COPY of the pre-logout cookie (never touched by the clear-cookie
+  # response), not the live jar. A live-jar-only check would only prove
+  # the browser lost its cookie, which a copied/stolen cookie would sail
+  # straight past. ---
+  cp "${jar}" "${flow_dir}/jar-prelogout.txt"
+  logout_headers=$(curl -s -D - -o /dev/null -c "${jar}" -b "${jar}" "http://127.0.0.1:${dash_port}/auth/logout")
+  logout_status=$(echo "${logout_headers}" | head -1 | awk '{print $2}')
+  logout_location=$(echo "${logout_headers}" | grep -i '^location:' | sed 's/^[Ll]ocation: //' | tr -d '\r')
+  case "${logout_status}:${logout_location}" in
+    303:"http://127.0.0.1:${kc_port}"*"protocol/openid-connect/logout"*"id_token_hint"*)
+      ok "/auth/logout redirects (303) to Keycloak's real end-session endpoint with id_token_hint (ends the SSO session too, not just this app's cookie)" ;;
+    *) bad "/auth/logout did not redirect as expected: status=${logout_status} location=$(redact_code "${logout_location}")" ;;
+  esac
+
+  reused_old_cookie_status=$(curl -s -o /dev/null -w '%{http_code}' -b "${flow_dir}/jar-prelogout.txt" "http://127.0.0.1:${dash_port}/")
+  if [ "${reused_old_cookie_status}" != "200" ]; then
+    ok "a saved copy of the pre-logout session cookie no longer grants access after /auth/logout (HTTP ${reused_old_cookie_status}) -- the Redis-backed session was actually deleted server-side, not just the browser's cookie cleared"
+  else
+    bad "a saved copy of the pre-logout session cookie STILL granted access after /auth/logout -- the session was not actually revoked server-side"
+  fi
 fi
 
 # --- #1036: first-login-test's password was set with temporary=true
