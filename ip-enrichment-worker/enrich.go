@@ -84,6 +84,11 @@ func enrichLine(line []byte, vm viaMap, tftpVM viaMap, persona string) (out []by
 		return line, true // unparseable: nothing to retry, pass through as-is
 	}
 	portFixed := fixConpotDestPort(e, persona)
+	// #1197: canonical_* field promotion is independent of src_ip
+	// resolution below -- it's applied on every attempt (including
+	// retries; cheap, and idempotent against the same original line) so a
+	// canonical field never waits on the via_port join to appear.
+	fieldsChanged := promoteCanonicalFields(persona, e) || portFixed
 
 	ip, _ := e["src_ip"].(string)
 	lookup := vm
@@ -93,21 +98,21 @@ func enrichLine(line []byte, vm viaMap, tftpVM viaMap, persona string) (out []by
 	case isTftpRelayRecord(e, persona):
 		lookup = tftpVM
 	default:
-		return marshalIfChanged(line, e, portFixed), true // already correct (or genuinely unknown) -- not ours to touch further
+		return marshalIfChanged(line, e, fieldsChanged), true // already correct (or genuinely unknown) -- not ours to touch further
 	}
 	port := extractSrcPort(e)
 	if port == 0 {
-		return marshalIfChanged(line, e, portFixed), true // no src_port to join on -- nothing further to try
+		return marshalIfChanged(line, e, fieldsChanged), true // no src_port to join on -- nothing further to try
 	}
 	real, ok := lookup[port]
 	if !ok {
-		// Still returns the dst_port fix (if any) even though src_ip isn't
-		// resolved yet: pendingQueue.drain calls enrichLine again on every
-		// retry (cheap, re-derives fresh from the original stored line each
-		// time -- see pending.go) and writes *this* return value once the
-		// line either resolves or times out, so the port fix must not be
-		// silently dropped on a miss.
-		return marshalIfChanged(line, e, portFixed), false
+		// Still returns the dst_port/canonical-field changes (if any) even
+		// though src_ip isn't resolved yet: pendingQueue.drain calls
+		// enrichLine again on every retry (cheap, re-derives fresh from the
+		// original stored line each time -- see pending.go) and writes
+		// *this* return value once the line either resolves or times out,
+		// so those changes must not be silently dropped on a miss.
+		return marshalIfChanged(line, e, fieldsChanged), false
 	}
 	e["src_ip"] = real
 	return marshalIfChanged(line, e, true), true
@@ -174,7 +179,8 @@ func enrichDionaeaIncidentLine(line []byte, vm viaMap, _ viaMap, _ string) (out 
 		return line, true // unparseable: nothing to retry, pass through as-is
 	}
 	changed, allResolved := rewriteDionaeaConnections(e["data"], vm)
-	if changed == 0 {
+	canonicalized := promoteDionaeaIncidentFields(e) // #1197, independent of the IP join above
+	if changed == 0 && !canonicalized {
 		return line, allResolved
 	}
 	rewritten, err := json.Marshal(e)
