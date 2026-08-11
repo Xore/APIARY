@@ -100,6 +100,16 @@ run Docker Compose. The workflow preserves the server's `.env` and runtime
 state, synchronizes the repository, writes Dockge's authoritative
 `compose.yml`, validates it, and recreates changed services.
 
+Install or repair the runner with
+[`../scripts/github-ci-runner/install-deploy-runner.sh`](../scripts/github-ci-runner/install-deploy-runner.sh)
+(`sudo ... --repo Xore/APIARY`) -- registers the runner and, precisely and
+idempotently, chowns exactly the directories deploy.yml itself writes into,
+never anything under a `state/`, `dashboard-state/`, or `logs/` subtree
+anywhere in that list (#1143: a manual, broader `chown -R` swept those
+container-owned paths too, crash-looping Keycloak and Filebeat until fixed
+live -- this script is the precise command that should be run instead of
+reasoning through the exclusion list by hand next time).
+
 Require a manual reviewer on `production-home`; never accept pull-request code
 on this production runner.
 
