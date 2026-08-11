@@ -52,7 +52,19 @@ x-oidc-gateway: &oidc-gateway
     OAUTH2_PROXY_COOKIE_SECURE: "true"
     OAUTH2_PROXY_COOKIE_HTTPONLY: "true"
     OAUTH2_PROXY_COOKIE_SAMESITE: lax
-    OAUTH2_PROXY_COOKIE_EXPIRE: 12h
+    # #1178: was 12h -- live-tested (test-oauth2-proxy-gateway-resilience.sh's
+    # outage scenario) and confirmed a real gap: oauth2-proxy fails OPEN
+    # through a Keycloak network outage past its own refresh cadence -- a
+    # failed refresh due to unreachability (as opposed to an explicit
+    # rejection, which IS enforced correctly, see #979's own revocation
+    # test) doesn't invalidate the still-cookie-valid session. That meant a
+    # session established right before an outage kept working, fully, for
+    # up to the old 12h cookie lifetime regardless of whether Keycloak ever
+    # came back. 30m doesn't touch active users at all -- COOKIE_REFRESH
+    # below silently renews the cookie every 2m as long as Keycloak is
+    # reachable -- it only bounds the worst case: an outage now forces
+    # re-login after at most 30m of inactivity instead of up to 12h.
+    OAUTH2_PROXY_COOKIE_EXPIRE: 30m
     # #979: was 30m -- live-tested and confirmed a real gap, not theoretical:
     # an admin-revoked session (POST .../users/{id}/logout) and a naturally
     # expired access token (accessTokenLifespan=300s in apiary-realm.json)
