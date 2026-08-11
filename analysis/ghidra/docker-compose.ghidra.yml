@@ -271,6 +271,11 @@ services:
       # config layered onto a vendored build, the same reasoning env vars
       # and volumes elsewhere in this service already follow.
       - ./revdeck-proxyfix/wsgi_proxyfix.py:/app/webui/wsgi_proxyfix.py:ro
+      # Preset-prompts composer overlay (see wsgi_proxyfix.py's own comment
+      # on the after_request hook that references this path) -- same
+      # webui/static/js/ directory the vendored composer.js/app.js already
+      # live in, so Flask's own static handler serves it with no extra route.
+      - ./revdeck-proxyfix/preset_prompts.js:/app/webui/static/js/preset_prompts.js:ro
 
 volumes:
   ghidra_projects:
