@@ -13,7 +13,7 @@ including Keycloak's own deployment, realm, and routing.
 
 ## Fixed architecture
 
-Keycloak and PostgreSQL run in the Dockge-managed `honeypot-keycloak` stack on
+Keycloak and PostgreSQL run in the Arcane-managed `honeypot-keycloak` stack on
 the homeserver. Public TLS terminates at VPS Traefik, which reaches Keycloak and
 protected applications only over WireGuard bridges. `auth.example.invalid` is
 both the OIDC issuer and the administrator console (`/admin/apiary/console/`,
@@ -43,8 +43,7 @@ pinned Keycloak runtime does not provide a recovery-code required-action factory
 | `tanner.*` | TANNER UI | Isolated gateway | `tanner` | `user` | Gateway-only upstream network; preserve API and static assets. |
 | `rev.*` | RevDeck/Ghidra UI | Isolated gateway | `revdeck` | `user` | Gateway-only upstream network; preserve long responses, downloads, and streams. |
 | `traefik.*` | Traefik read-only dashboard | Isolated gateway | `traefik-dashboard` | `admin` | Gateway fronts `api@internal`; callback is excluded from recursive auth. |
-| `dockge.*` | Dockge administrator UI | Isolated gateway | `dockge` | `admin` | Gateway-only route; WebSockets must pass. Dockge's own authorization remains enabled when supported. |
-| `arcane.*` | Arcane administrator UI (#1185, running alongside Dockge -- decommissioning Dockge is a separate later step) | Native authorization-code OIDC | `arcane` | `admin` | No gateway: Arcane authenticates directly, unlike Dockge. Same root-equivalent risk as `dockge.*` (both mount `/var/run/docker.sock` read-write) -- `admin` role is granted only to the `administrators` group, same as `dockge`. |
+| `arcane.*` | Arcane administrator UI (#1185, Dockge's replacement -- Dockge decommissioned) | Native authorization-code OIDC | `arcane` | `admin` | No gateway: Arcane authenticates directly against Keycloak. Root-equivalent risk (`/var/run/docker.sock` mounted read-write) -- `admin` role is granted only to the `administrators` group. |
 | `auth.example.invalid` | OIDC login, discovery, JWKS, account console | Direct Keycloak | n/a | public protocol endpoints; authenticated account actions | Rate-limited edge route to the Keycloak WireGuard bridge. |
 | `auth.example.invalid/admin` | Keycloak administration | Direct Keycloak | n/a | Keycloak administrator + MFA | Same host as the issuer (#1028); a `PathPrefix(/admin)` router gives the SPA's bootstrap burst a larger rate limit. Keycloak owns authentication; HTTP Basic would conflict with the SPA's Bearer API calls. |
 | decoy/static/API/status/file/blog hosts currently lacking `forward-auth` | Public honeypot or explicitly application-owned auth | Public / unchanged | none | none | Never attach operator SSO merely because the hostname exists. Public collection must remain independent of IdP availability. |

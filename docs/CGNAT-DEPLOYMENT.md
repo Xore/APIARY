@@ -9,13 +9,13 @@ flowchart TD
     Internet --> Portbridge["VPS portbridge<br/>TCP/UDP"]
     Traefik --> HTTPBridge["WireGuard HTTP bridge"]
     Portbridge --> Tunnel["WireGuard tunnel"]
-    HTTPBridge --> Home["home server 10.8.0.2<br/>Dockge APIARY stack"]
+    HTTPBridge --> Home["home server 10.8.0.2<br/>Arcane APIARY stack"]
     Tunnel --> Home
 ```
 
 ## Authoritative deployment paths
 
-- Home server: **#258 split what used to be two stacks into one Dockge
+- Home server: **#258 split what used to be two stacks into one Arcane-managed
   project per compose file** — `honeypot-init` (one-shot bootstrap: log
   paths, Elasticsearch templates, Arkime schema, persona validation),
   `honeypot-elk`, `honeypot-cowrie`, `honeypot-dionaea`, `honeypot-conpot`,
@@ -38,14 +38,14 @@ flowchart TD
 - VPS: plain Docker Compose manages `/root/vps/docker-compose.yml`.
 - The repository home Compose sources are the top-level `docker-compose.*.yml`
   files, one per stack listed above; each gets symlinked or copied to its
-  Dockge stack directory as `compose.yml`. `scripts/install-homeserver.sh`
+  Arcane-managed stack directory as `compose.yml`. `scripts/install-homeserver.sh`
   does this automatically (see below) — the per-stack directory layout
   matches what `docs/HOMESERVER-DISK-LAYOUT.md` documents as the box's
   actual live state (`/var/dockge/stacks/<name>/`, with `/opt/stacks`
   symlinked to it).
 - The public gateway source is under `vps/`.
 
-Dockge is used only on the home server. The VPS uses `docker compose` directly.
+Arcane is used only on the home server. The VPS uses `docker compose` directly.
 
 ## WireGuard addressing
 
@@ -57,7 +57,7 @@ the only internet-facing component.
 ## Home deployment
 
 > **Prefer the script.** [`scripts/install-homeserver.sh`](../scripts/install-homeserver.sh)
-> automates Docker, GPU/NVIDIA, WireGuard, Dockge, the repo checkout,
+> automates Docker, GPU/NVIDIA, WireGuard, Arcane, the repo checkout,
 > per-stack provisioning, secret restore, and starting every stack in the
 > correct order (plus the GPU/LLM/ML worker chain and, optionally, the
 > KVM/libvirt sandbox VMs) against a manually-installed base Ubuntu system
@@ -87,7 +87,7 @@ the only internet-facing component.
    directory 403's the non-root ones.
 6. Ensure the repository `docker-compose.yml` is also present as
    `/opt/stacks/apiary/compose.yml`.
-7. In Dockge, validate and deploy **`honeypot-init` first**, then
+7. In Arcane, validate and deploy **`honeypot-init` first**, then
    `APIARY`. `APIARY`'s sensors wait on `honeypot-init`'s
    completion markers at their own entrypoint rather than a Compose-level
    dependency (they can't cross a Compose project boundary) — deploying
@@ -97,11 +97,11 @@ the only internet-facing component.
    interaction map" for why these are two stacks.
 8. Run `python3 analysis/verify-stack.py` and inspect `/source-health`.
 
-Each stack is a folder under your Dockge stacks dir (default `/opt/stacks/`).
+Each stack is a folder under your Arcane stacks dir (default `/opt/stacks/`).
 Upload the whole home folder via SFTP — compose **and** the build
 sub-folders (`cowrie/`, `multipot/`, `http-honeypot/`, `dashboard/`, …) —
-since Dockge's own editor only edits the compose file. After editing Go
-source or honeyfs content, rebuild from the `APIARY` stack's Dockge
+since Arcane's own editor only edits the compose file. After editing Go
+source or honeyfs content, rebuild from the `APIARY` stack's Arcane
 **terminal**: `docker compose -f compose.yml up -d --build`.
 
 ### Boot-safe home networking and VPS log mounts
@@ -222,10 +222,11 @@ honeypots on the `proxy` network for Traefik. The reusable Traefik router
 template is in [`vps/traefik/dynamic.yml`](../vps/traefik/dynamic.yml):
 `honeypot-http` (`decoy.<domain>`) + `honeypot-web` (catch-all) → fake nginx,
 `honeypot-snare` (`www-portal.<domain>` and `snare.<domain>`) → SNARE, one
-native-OIDC route for the dashboard (no gateway, since #1026), and seven
-forward-auth-protected investigation routes sitting behind their own
-Keycloak-backed `oauth2-proxy` gateway: Kibana, TANNER, EveBox, Arkime,
-Rev·Deck, Dockge, and the Traefik dashboard itself. Each has a matching
+native-OIDC route for the dashboard (no gateway, since #1026), one native-OIDC
+route for Arcane (no gateway, #1185), and six forward-auth-protected
+investigation routes sitting behind their own Keycloak-backed `oauth2-proxy`
+gateway: Kibana, TANNER, EveBox, Arkime, Rev·Deck, and the Traefik dashboard
+itself. Each has a matching
 `socat-hp-*` bridge in [`vps/docker-compose.yml`](../vps/docker-compose.yml).
 
 Traefik is an HTTP(S) reverse proxy — it adds TLS, per-subdomain routing and
@@ -235,12 +236,12 @@ forwards them raw. Both paths terminate on the VPS public IP.
 
 ### The forward-auth bridge, generically
 
-Seven investigation UIs (Kibana, TANNER, EveBox, Arkime, Rev·Deck, Dockge,
+Six investigation UIs (Kibana, TANNER, EveBox, Arkime, Rev·Deck,
 the Traefik dashboard) reach home through the identical chain — one pattern,
-seven routers in `vps/traefik/dynamic.yml`, seven `socat-hp-*` bridges, each
+six routers in `vps/traefik/dynamic.yml`, six `socat-hp-*` bridges, each
 fronted by its own Keycloak-backed `oauth2-proxy` gateway container, not
-seven different mechanisms. The honeypot dashboard is the one exception —
-see the note below.
+six different mechanisms. The honeypot dashboard and Arcane are the two
+exceptions — both speak native OIDC directly, no gateway — see the note below.
 
 ```mermaid
 sequenceDiagram
@@ -309,10 +310,11 @@ Create proxied DNS records for the HTTP services you enable, normally:
   `revdeck` profile is enabled; see `docs/analysis/ghidra/revdeck/README.md`)
 - `traefik` (optional — Traefik's own dashboard/API, read-only, behind
   forward-auth same as everything else here)
-- `dockge` (optional — **root-equivalent host control**: Dockge has
-  `/var/run/docker.sock` mounted read-write. forward-auth SSO is
-  defense-in-depth here, not a substitute for treating this subdomain as
-  sensitive as SSH access to the homeserver itself)
+- `arcane` (optional — **root-equivalent host control**: Arcane has
+  `/var/run/docker.sock` mounted read-write. Unlike the routes above, it
+  authenticates natively against Keycloak rather than through an
+  `oauth2-proxy` gateway, but treat this subdomain as sensitive as SSH
+  access to the homeserver itself)
 
 All names point to the VPS. Raw TCP/UDP sensors need no DNS record.
 

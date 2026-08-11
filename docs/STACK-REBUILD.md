@@ -2,7 +2,7 @@
 
 [← back to README](../README.md)
 
-A runbook for a **deliberate full reset**: every Dockge stack (home) and the
+A runbook for a **deliberate full reset**: every Arcane-managed stack (home) and the
 plain-Compose VPS stack stopped, every honeypot-owned volume and log wiped,
 everything brought back up cold. Different from
 [`docs/analysis/RECOVERY.md`](analysis/RECOVERY.md), which restores a backup
@@ -18,7 +18,7 @@ traps hit on the first live run — read it before trusting the script blind,
 and definitely before doing any of this by hand on the VPS side, which the
 script doesn't touch.
 
-Since #258 split the stack into ~19 independent Dockge projects
+Since #258 split the stack into ~19 independent Arcane-managed projects
 (`honeypot-init`, `honeypot-conpot`, `honeypot-cowrie`, `honeypot-multipot`,
 `honeypot-http`, `honeypot-dnp3`, `honeypot-dionaea`, `honeypot-dicompot`,
 `honeypot-dns-honeypot`, `honeypot-citrix`, `honeypot-cisco-asa`,

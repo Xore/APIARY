@@ -97,7 +97,7 @@ self-hosted, linux, x64, honeypot-home
 Attach the runner to the protected `production-home` environment. Its service
 account needs write access to `/opt/stacks/apiary` and permission to
 run Docker Compose. The workflow preserves the server's `.env` and runtime
-state, synchronizes the repository, writes Dockge's authoritative
+state, synchronizes the repository, writes Arcane's authoritative
 `compose.yml`, validates it, and recreates changed services.
 
 Install or repair the runner with
@@ -180,13 +180,13 @@ SSH connection to the home network:
    runner's temporary work directory.
 3. Local `rsync` copies that checkout into `/opt/stacks/apiary`.
 4. The workflow copies `docker-compose.yml` to `compose.yml`, which is the
-   filename Dockge manages.
+   filename Arcane manages.
 5. `docker compose config --quiet` validates the deployed configuration.
 6. `docker compose up -d --build` builds local images and reconciles the
    running stack.
 
 The runner therefore needs outbound HTTPS access to GitHub, local filesystem
-access to the Dockge stack, and access to the Docker socket. It does not need a
+access to the Arcane-managed stack, and access to the Docker socket. It does not need a
 publicly reachable SSH port.
 
 The synchronization uses `--delete-delay`, so repository-controlled files
@@ -208,7 +208,7 @@ not give the `production-home` environment to pull-request workflows.
 
 ### honeypot-init
 
-`docker-compose.init.yml` runs as a second, separate Dockge stack at
+`docker-compose.init.yml` runs as a second, separate Arcane-managed stack at
 `/opt/stacks/honeypot-init`, not as part of `APIARY`. It holds the
 one-shot bootstrap jobs (log directory ownership, persona seeding,
 Elasticsearch/Kibana/Arkime first-run setup) that used to live in the main
@@ -226,7 +226,7 @@ is still correct.
 
 ### honeypot-conpot (#258 proof of concept)
 
-`docker-compose.conpot.yml` runs as a third, separate Dockge stack at
+`docker-compose.conpot.yml` runs as a third, separate Arcane-managed stack at
 `/opt/stacks/honeypot-conpot`: the six Conpot personas (base S7-200,
 S7-1200, S7-1500, IEC104, Guardian AST, Kamstrup) split out of
 `APIARY`'s monolithic compose file, as a proof of concept for #258.
@@ -240,7 +240,7 @@ needed for a standalone honeypot persona; `autoheal`, which watches by Docker
 label rather than by compose project, needs no changes at all).
 
 Log directories (`logs/conpot*`) and the `state/init-markers` mount are
-pre-existing host paths the "Synchronize Dockge source" rsync step already
+pre-existing host paths the "Synchronize APIARY source" rsync step already
 preserves; this stack does not create or own them, and has no `.env` of its
 own.
 
@@ -259,7 +259,7 @@ are otherwise identical in shape. Same log-directory/`.env` posture as
 
 ### honeypot-dashboard (#258)
 
-`docker-compose.dashboard.yml` runs as its own Dockge stack at
+`docker-compose.dashboard.yml` runs as its own Arcane-managed stack at
 `/opt/stacks/honeypot-dashboard`, bundling `dashboard` and
 `services-adapter` -- kept together because they talk to each other only
 over `services-adapter-socket`, a volume nothing else touches. Unlike the
@@ -351,7 +351,7 @@ rows, so duplication there is harmless.
 
 ### honeypot-utilities (#258)
 
-`docker-compose.utilities.yml` runs as its own Dockge stack at
+`docker-compose.utilities.yml` runs as its own Arcane-managed stack at
 `/opt/stacks/honeypot-utilities`, bundling `log-maintenance`, `autoheal`,
 and `reporter` -- the first #258 split that isn't one honeypot family. All
 three watch or act across the whole host rather than belonging to a single
@@ -370,7 +370,7 @@ this stack, so -- like the standalone honeypots -- it deploys ahead of
 
 `docker-compose.dionaea.yml` (`dionaea` and `tftp-relay`) and
 `docker-compose.payload-analysis.yml` (`payload-dedupe` and `yara-scanner`)
-split into two separate Dockge stacks, per explicit instruction rather than
+split into two separate Arcane-managed stacks, per explicit instruction rather than
 bundled together the way `dashboard`+`services-adapter` were. `dionaea` and
 `tftp-relay` stay paired -- `tftp-relay` has `depends_on: dionaea` and
 actually forwards TFTP traffic to it over `dionaea_net`, the one exception
@@ -457,7 +457,7 @@ This split also surfaced a real pre-existing ordering bug in
 `.github/workflows/deploy.yml`, dating back to the original
 `honeypot-conpot` proof of concept (#336): every split stack's `build:`
 points at an absolute path under `/opt/stacks/apiary` (e.g.
-`/opt/stacks/apiary/dionaea`), populated by the "Synchronize Dockge
+`/opt/stacks/apiary/dionaea`), populated by the "Synchronize APIARY
 source" rsync step -- but that step used to run *after* every one of those
 builds, near the end of the job, in the slot where `APIARY`'s own
 `docker compose up` used to live. Never a hard failure (the destination
@@ -723,7 +723,7 @@ diagnostics workflow itself.
 Home:
 GitHub -> outbound-polling self-hosted runner on homeserver
        -> local rsync /opt/stacks/apiary
-       -> Dockge compose.yml -> docker compose up
+       -> Arcane compose.yml -> docker compose up
 
 VPS:
 GitHub-hosted runner -> rsync + SSH over VPS_PORT

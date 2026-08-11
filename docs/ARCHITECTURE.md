@@ -3,9 +3,9 @@
 [← back to README](../README.md)
 
 This section describes the active implementation across the home server's
-Dockge stacks and the VPS Compose file, plus pieces that are real but live
+Arcane-managed stacks and the VPS Compose file, plus pieces that are real but live
 outside ordinary Compose services: the Ghidra static analysis pipeline
-(`analysis/ghidra/`, its own Dockge stack plus a host systemd worker —
+(`analysis/ghidra/`, its own Arcane-managed stack plus a host systemd worker —
 genuinely deployed, see "Captured payload lifecycle and static analysis"
 below) and the Linux KVM sandbox (root-owned host worker described below).
 
@@ -41,7 +41,7 @@ malware detonation sandboxes.
 
 **The home side is not one deployment unit.** [#258](https://github.com/Xore/APIARY/issues/258)
 split what used to be a single `docker-compose.yml` into independently
-deployed Dockge stacks — each with its own compose file
+deployed Arcane-managed stacks — each with its own compose file
 (`docker-compose.<name>.yml`) and its own start/stop/update lifecycle. That
 first split produced 12 stacks; new sensors and workers have each landed as
 their own stack since, and the home side now runs **21** — see
@@ -52,7 +52,7 @@ root `docker-compose.yml` is a deliberate empty marker; nothing runs
 the Windows sandbox brings up and tears down around a single run — also not
 a standing stack. Host-owned systemd/libvirt services (Ghidra's worker, the
 Linux/Windows KVM sandboxes) and optional GPU/analysis stacks (ML worker,
-LLM worker, CAPE, GHOSTS) run outside Dockge entirely and outside this count
+LLM worker, CAPE, GHOSTS) run outside Arcane entirely and outside this count
 as well. The diagrams below draw the 21 stack boundaries explicitly rather
 than one "home server" box, because that boundary is where independent
 deployment, restart, and failure actually happen.
@@ -67,7 +67,7 @@ flowchart LR
     direction TB
     suricata["Suricata<br/>IDS + EVE + rotating PCAP"]
     traefik["Traefik<br/>TLS routing"]
-    oauth2Proxy["oauth2-proxy gateways ×7<br/>Keycloak-backed, one per service:<br/>Kibana, EveBox, Arkime, TANNER,<br/>Rev·Deck, Dockge, Traefik dashboard"]
+    oauth2Proxy["oauth2-proxy gateways ×6<br/>Keycloak-backed, one per service:<br/>Kibana, EveBox, Arkime, TANNER,<br/>Rev·Deck, Traefik dashboard"]
     httpBridges["socat HTTP bridges<br/>dashboard, Kibana, EveBox,<br/>Arkime, TANNER, Rev·Deck,<br/>web honeypots"]
     portbridge["portbridge<br/>raw TCP/UDP forwarding<br/>optional PROXY v1"]
     connlog[("portbridge connection log")]
@@ -75,15 +75,15 @@ flowchart LR
 
   wg["WireGuard tunnel"]
 
-  subgraph home["Home server — 21 independent Dockge stacks (#258)"]
+  subgraph home["Home server — 21 independent Arcane-managed stacks (#258)"]
     direction TB
     subgraph keycloakStack["honeypot-keycloak"]
-      keycloakSvc["Keycloak + private PostgreSQL<br/>Dockge-managed identity"]
+      keycloakSvc["Keycloak + private PostgreSQL<br/>Arcane-managed identity"]
     end
     subgraph initStack["honeypot-init"]
       initJobs["Bootstrap one-shot jobs"]
     end
-    subgraph sensorStacks["Sensor stacks — one Dockge stack each, each its own isolated network (#235)"]
+    subgraph sensorStacks["Sensor stacks — one Arcane-managed stack each, each its own isolated network (#235)"]
       direction LR
       cowrieStack["honeypot-cowrie"]
       dionaeaStack["honeypot-dionaea<br/>+ tftp-relay"]
@@ -119,7 +119,7 @@ flowchart LR
     subgraph utilStack["honeypot-utilities"]
       utilSvcs["autoheal + log-maintenance<br/>+ reporter"]
     end
-    hostSandbox["Root-owned host services<br/>Linux + Windows sandbox, Ghidra —<br/>systemd + libvirt/KVM, not Dockge stacks"]
+    hostSandbox["Root-owned host services<br/>Linux + Windows sandbox, Ghidra —<br/>systemd + libvirt/KVM, not Arcane-managed stacks"]
   end
 
   attacker -->|"all public traffic is observed"| suricata
@@ -161,7 +161,7 @@ taking the others down — not that they can't see each other's data.
 
 The VPS is the only internet-facing layer. Suricata sees traffic before it
 enters WireGuard, so IDS records and PCAPs retain the original network view.
-Traefik handles HTTPS routes and delegates authentication for seven
+Traefik handles HTTPS routes and delegates authentication for six
 investigation UIs to per-service `oauth2-proxy` gateways, all backed by the
 same Keycloak realm running at home (`honeypot-keycloak`). `Xore/auth-backend`
 is retired as a runtime service; it now supplies only the read-only Keycloak
@@ -174,13 +174,13 @@ Raw protocols pass through `portbridge`; targets that understand HAProxy
 PROXY v1 receive the original client address in-band, while the connection
 log lets the dashboard recover source attribution for PROXY-unaware sensors.
 
-The `httpBridges` box above collapses seven otherwise-identical
+The `httpBridges` box above collapses six otherwise-identical
 Cloudflare → Traefik → forward-auth (`oauth2-proxy`) → `socat-hp-*` →
 WireGuard chains, plus the dashboard's own gateway-free native-OIDC chain,
 into one node — see
 ["The forward-auth bridge, generically"](CGNAT-DEPLOYMENT.md#the-forward-auth-bridge-generically)
-in the deployment guide for the per-request sequence the seven gateway-fronted
-services (Kibana, TANNER, EveBox, Arkime, Rev·Deck, Dockge, Traefik dashboard)
+in the deployment guide for the per-request sequence the six gateway-fronted
+services (Kibana, TANNER, EveBox, Arkime, Rev·Deck, Traefik dashboard)
 share, and how the honeypot dashboard's own request differs.
 
 Home container ports bind to `HP_BIND` (normally the home WireGuard address),
@@ -199,7 +199,7 @@ socket.
 
 ```mermaid
 flowchart TB
-  subgraph honeypotInit["honeypot-init — separate Dockge stack (#111, #258)"]
+  subgraph honeypotInit["honeypot-init — separate Arcane-managed stack (#111, #258)"]
     direction TB
     persona["persona-apply<br/>validate/apply personas"]
     loginit["log-init<br/>create host log paths"]
@@ -216,7 +216,7 @@ flowchart TB
   arkinit --> initMarkers
   snareclone --> initMarkers
 
-  subgraph sensorGroup["Sensor stacks — one Dockge stack each (#258), each its own isolated network (#235)"]
+  subgraph sensorGroup["Sensor stacks — one Arcane-managed stack each (#258), each its own isolated network (#235)"]
     direction LR
     subgraph cowrieStackG["honeypot-cowrie"]
       cowrie["Cowrie"]
