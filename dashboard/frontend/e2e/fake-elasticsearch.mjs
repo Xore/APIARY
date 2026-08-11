@@ -69,19 +69,23 @@ export function startFakeElasticsearch() {
       return;
     }
 
-    // Only the dashboard's own bookkeeping indices (dashboard-*) are backed
-    // by real in-memory state here. Everything else -- suricata-*,
-    // portbridge-v2-*, dead-letter-honeypot*, _cluster/health, _count -- is
-    // sensor telemetry this fixture never ingests (the PIT/_search branches
-    // above already answer the seeded sensorEvents entries for real, for
-    // every sensor including suricata/portbridge; nothing left here has a
-    // local-file fallback to fall back to since #1103 Category 2). A
-    // non-2xx response here is exactly what a real cluster that hasn't
-    // ingested this data would never produce, but it reaches the same "ES
-    // has nothing for this" handling every caller already has -- answering
-    // with a confident "200, zero hits" instead would make the dashboard
-    // wrongly trust an empty Elasticsearch over data it should have read.
-    if (parts[0] !== undefined && !parts[0].startsWith("dashboard-")) {
+    // The dashboard's own bookkeeping indices (dashboard-*) and the
+    // #1205-epic backend workers' flat output indices (attackers-v1 --
+    // #1200 -- and, when the dashboard eventually reads them too,
+    // campaigns-v1/attacker-clusters-v1 -- #1199) are backed by real
+    // in-memory state here. Everything else -- suricata-*, portbridge-v2-*,
+    // dead-letter-honeypot*, _cluster/health, _count -- is sensor telemetry
+    // this fixture never ingests (the PIT/_search branches above already
+    // answer the seeded sensorEvents entries for real, for every sensor
+    // including suricata/portbridge; nothing left here has a local-file
+    // fallback to fall back to since #1103 Category 2). A non-2xx response
+    // here is exactly what a real cluster that hasn't ingested this data
+    // would never produce, but it reaches the same "ES has nothing for
+    // this" handling every caller already has -- answering with a
+    // confident "200, zero hits" instead would make the dashboard wrongly
+    // trust an empty Elasticsearch over data it should have read.
+    const workerOwnedIndices = ["attackers-v1", "campaigns-v1", "attacker-clusters-v1"];
+    if (parts[0] !== undefined && !parts[0].startsWith("dashboard-") && !workerOwnedIndices.includes(parts[0])) {
       res.writeHead(503);
       res.end(JSON.stringify({ error: "index not stubbed in fake-elasticsearch" }));
       return;

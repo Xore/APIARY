@@ -143,5 +143,10 @@ func templateFuncs(s *store, world template.HTML) template.FuncMap {
 		// applyTimeDisplay) applies to it too instead of it being stuck in
 		// whatever zone/format the server process itself renders in.
 		"utcOrEmpty": utcOrEmpty,
+		// #1203: attackers.html's entity graph -- shortAttackerID trims the
+		// entity ID for display, attackerGraph computes the radial node/edge
+		// layout for the selected entity's member IPs.
+		"shortAttackerID": shortAttackerID,
+		"attackerGraph":   buildAttackerGraph,
 	}
 }

@@ -1,0 +1,67 @@
+{{define "attackers"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>{{brandText}} &mdash; attacker identities</title>
+{{template "style" .}}
+</head>
+<body>
+<div class="app-shell">
+  {{template "topbar" .}}
+  {{template "sidebar" .}}
+  <main class="app-main">
+      <div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
+        <header class="overview-header" id="attackers-header">
+          <div>
+            <div class="label-section">Correlation</div>
+            <h1>Attacker identities</h1>
+            <p class="subtitle">Durable entities merged across IP churn by shared fingerprint, payload, and credential signals (#1200) &mdash; unlike campaigns and clusters, these persist once created rather than recomputing every cycle.</p>
+          </div>
+          <div class="live-panel">
+            <span class="gen">generated <span data-hp-utc="{{utcOrEmpty .Generated}}">{{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></span>
+          </div>
+        </header>
+        <div class="filters" id="attackers-filters">
+          <a class="chip" href="/">&larr; dashboard</a>
+          <a class="chip" href="/campaigns">network campaigns</a>
+          <a class="chip" href="/clusters">infrastructure clusters</a>
+          <span class="chip">{{.Total}} identities</span>
+          <span class="chip">{{.MultiIPRows}} merged across &gt;1 IP</span>
+        </div>
+        {{if .Selected}}
+        <div class="card wide" id="attackers-graph">
+          <div class="tw:flex tw:items-center tw:justify-between tw:gap-2">
+            <h2>Entity {{shortAttackerID .Selected.ID}} &mdash; member IPs</h2>
+            <a class="lnk" href="/attackers">close &times;</a>
+          </div>
+          {{$graph := attackerGraph .Selected}}
+          <svg viewBox="0 0 520 520" role="img" aria-label="Attacker entity graph: {{len .Selected.IPs}} member IPs around one entity node" style="width:100%;max-width:520px;height:auto;display:block;margin:0 auto">
+            {{range $graph.Edges}}<line x1="{{.X1}}" y1="{{.Y1}}" x2="{{.X2}}" y2="{{.Y2}}" style="stroke:var(--border-strong);stroke-width:1.2"></line>{{end}}
+            {{range $graph.Nodes}}
+              {{if .IsCenter}}<circle cx="{{.X}}" cy="{{.Y}}" r="30" style="fill:var(--accent);stroke:var(--surface-1);stroke-width:2"></circle><text x="{{.X}}" y="{{.Y}}" text-anchor="middle" dominant-baseline="central" style="fill:#fff;font-size:13px;font-weight:600">{{.Label}}</text>
+              {{else if .IsOverflow}}<circle cx="{{.X}}" cy="{{.Y}}" r="16" style="fill:var(--surface-2);stroke:var(--border-strong);stroke-width:1.2"></circle><text x="{{.X}}" y="{{.Y}}" text-anchor="middle" dominant-baseline="central" style="fill:var(--text-muted);font-size:11px">{{.Label}}</text>
+              {{else}}<circle cx="{{.X}}" cy="{{.Y}}" r="16" style="fill:var(--surface-2);stroke:var(--accent);stroke-width:1.2"></circle><text x="{{.X}}" y="{{.Y}}" dy="26" text-anchor="middle" style="fill:var(--text-muted);font-size:10px">{{.Label}}</text>
+              {{end}}
+            {{end}}
+          </svg>
+          <div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:gap-3.5 tw:mt-4">
+            <div><div class="label-section">Events</div><div class="v">{{.Selected.Events}}</div></div>
+            <div><div class="label-section">Sensors</div><div class="v">{{range .Selected.Sensors}}<span class="badge badge--muted">{{.}}</span> {{end}}</div></div>
+            <div><div class="label-section">First / last seen</div><div class="v">{{.Selected.First}} &rarr; {{.Selected.Last}}</div></div>
+            {{if .Selected.Credentials}}<div><div class="label-section">Credential pairs ({{len .Selected.Credentials}})</div><div class="v">{{range .Selected.Credentials}}<code>{{.}}</code> {{end}}</div></div>{{end}}
+            {{if .Selected.Fingerprints}}<div><div class="label-section">Fingerprints ({{len .Selected.Fingerprints}})</div><div class="v">{{range .Selected.Fingerprints}}<code>{{.}}</code> {{end}}</div></div>{{end}}
+            {{if .Selected.Payloads}}<div><div class="label-section">Payload hashes ({{len .Selected.Payloads}})</div><div class="v">{{range .Selected.Payloads}}<a class="lnk" href="/payload-analysis/{{.}}"><code>{{.}}</code></a> {{end}}</div></div>{{end}}
+            {{if .Selected.Verdicts}}<div><div class="label-section">Ghidra verdicts</div><div class="v">{{range .Selected.Verdicts}}<span class="badge badge--accent">{{.}}</span> {{end}}</div></div>{{end}}
+          </div>
+        </div>
+        {{end}}
+        <div class="card wide" id="attackers-table">{{if .Rows}}<table class="data-table"><thead><tr><th>entity</th><th>ips</th><th>events</th><th>sensors</th><th>first</th><th>last</th><th></th><th></th></tr></thead><tbody>{{range .Rows}}<tr><td><a href="{{.Link}}">{{shortAttackerID .ID}}</a></td><td class="n"><a href="{{.Link}}">{{len .IPs}}</a></td><td class="n">{{.Events}}</td><td class="v">{{range .Sensors}}<span class="badge badge--muted">{{.}}</span> {{end}}</td><td class="v">{{.First}}</td><td class="v">{{.Last}}</td><td>{{if .Verdicts}}<span class="badge badge--accent">verdict</span>{{end}}</td><td><a class="lnk" href="{{.Link}}">graph &rarr;</a></td></tr>{{end}}</tbody></table>{{else if .Ready}}<p class="empty">No attacker entities yet &mdash; attacker-identity-worker (#1200) merges IPs sharing 2+ strong signals (fingerprint, payload hash, credential pair) into durable entities as traffic accumulates.</p>{{else}}<div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:70%"></div>{{end}}</div>
+        <footer id="attackers-footer">{{brandText}} &bull; entity-resolved identity &bull; #1200</footer>
+      </div>
+    </main>
+</div>
+</body>
+</html>
+{{end}}

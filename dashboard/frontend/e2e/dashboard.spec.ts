@@ -9,6 +9,7 @@ const routes = [
   "/ips",
   "/campaigns",
   "/clusters",
+  "/attackers",
   "/commands",
   "/payloads",
   "/sandbox",
@@ -489,6 +490,17 @@ test.describe("dashboard browser behaviour", () => {
     await card.locator("summary").click();
     await expect(card.locator(".action-menu__popover")).toBeVisible();
     await expect(page).toHaveURL("/payloads");
+  });
+
+  test("attacker identities list shows the seeded entity and its graph (#1203)", async ({ page }) => {
+    await page.goto("/attackers");
+    await expect(page.locator("#attackers-table")).toContainText("e2efixtu");
+    await expect(page.locator("#attackers-table")).toContainText("3"); // 3 member IPs
+    await page.getByRole("link", { name: "graph →" }).first().click();
+    await expect(page).toHaveURL(/\/attackers\?id=/);
+    await expect(page.locator("#attackers-graph")).toBeVisible();
+    await expect(page.locator("#attackers-graph")).toContainText("203.0.113.1");
+    await expect(page.locator("#attackers-graph")).toContainText("root / fixture-0");
   });
 
   test("payload analysis hydrates the aggregation cards after the initial render (#1142)", async ({ page }) => {
