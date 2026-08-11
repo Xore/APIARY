@@ -104,3 +104,33 @@ func (s *store) attackersData(r *http.Request) attackersPage {
 	}
 	return p
 }
+
+// serveAttackerGraph is /api/attacker-graph -- hp-attackers.js fetches this
+// once on page load (the same fetch-then-render split /api/map-points'
+// Leaflet consumer uses) and feeds the result straight into Cytoscape's
+// elements list. Re-reads attackers-v1 rather than reusing attackersData's
+// Selected (that's computed per-request from the page handler, not cached
+// anywhere this handler could reach) -- readAttackers' own doc comment
+// already accepts this cost at the current few-hundred-entity scale.
+func (s *store) serveAttackerGraph(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	if id == "" || s.es == nil {
+		http.NotFound(w, r)
+		return
+	}
+	rows, err := readAttackers(s.es)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	for i := range rows {
+		if rows[i].ID != id {
+			continue
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		json.NewEncoder(w).Encode(buildAttackerGraph(&rows[i]))
+		return
+	}
+	http.NotFound(w, r)
+}
