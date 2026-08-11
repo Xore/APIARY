@@ -499,7 +499,14 @@ test.describe("dashboard browser behaviour", () => {
     await page.getByRole("link", { name: "graph →" }).first().click();
     await expect(page).toHaveURL(/\/attackers\?id=/);
     await expect(page.locator("#attackers-graph")).toBeVisible();
-    await expect(page.locator("#attackers-graph")).toContainText("203.0.113.1");
+    // The graph itself renders to Cytoscape.js canvas layers (#1203
+    // rework), not DOM text -- Cytoscape's own scratch layers (e.g. its
+    // rubber-band selectbox canvas) are legitimately zero-sized until
+    // used, so assert the fetch-then-render status line completed and
+    // that canvases mounted at all, rather than any one canvas's
+    // visibility or reading node labels off the canvas.
+    await expect(page.locator("[data-attacker-graph-status]")).toContainText("member IP");
+    await expect(page.locator("#attackers-graph canvas")).not.toHaveCount(0);
     await expect(page.locator("#attackers-graph")).toContainText("root / fixture-0");
   });
 

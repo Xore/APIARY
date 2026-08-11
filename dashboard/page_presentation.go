@@ -143,10 +143,11 @@ func templateFuncs(s *store, world template.HTML) template.FuncMap {
 		// applyTimeDisplay) applies to it too instead of it being stuck in
 		// whatever zone/format the server process itself renders in.
 		"utcOrEmpty": utcOrEmpty,
-		// #1203: attackers.html's entity graph -- shortAttackerID trims the
-		// entity ID for display, attackerGraph computes the radial node/edge
-		// layout for the selected entity's member IPs.
+		// #1203: shortAttackerID trims the entity ID for display in
+		// attackers.html's header and table. The graph itself (node/edge
+		// data for the selected entity's member IPs) is served by
+		// /api/attacker-graph and rendered client-side by hp-attackers.js
+		// (Cytoscape.js), not through a template func.
 		"shortAttackerID": shortAttackerID,
-		"attackerGraph":   buildAttackerGraph,
 	}
 }

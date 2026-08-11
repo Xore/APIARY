@@ -9,9 +9,11 @@ import (
 	"sync"
 )
 
-// The compiled Tailwind stylesheet, the hp-app.js enhancement layer, and
-// Leaflet are vendored so the dashboard UI does not depend on a third-party
-// JavaScript CDN. Map tiles remain separately configurable at runtime.
+// The compiled Tailwind stylesheet, the hp-app.js enhancement layer,
+// Leaflet, and Cytoscape.js (#1203's attacker graph, see
+// attackers_graph.go) are vendored so the dashboard UI does not depend on a
+// third-party JavaScript CDN. Map tiles remain separately configurable at
+// runtime.
 //
 //go:embed static
 var staticAssets embed.FS

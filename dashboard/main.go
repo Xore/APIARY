@@ -348,6 +348,7 @@ func main() {
 		s.serveProblemReportsPage(w, r, tmpl)
 	})
 	http.HandleFunc("/api/map-points", s.serveMapPoints)
+	http.HandleFunc("/api/attacker-graph", s.serveAttackerGraph)
 	http.HandleFunc("/api/heatmap", s.serveHeatmap)
 	http.HandleFunc("/api/attack-vectors", s.serveAttackVectors)
 	http.HandleFunc("/api/quick-search", s.serveQuickSearch)
