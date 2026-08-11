@@ -86,6 +86,21 @@ class Stub(BaseHTTPRequestHandler):
             return self._j(dict(DECOMPILE, addr="0x401000"))
         if "/xrefs/" in p:
             return self._j(dict(XREFS, addr="0x401000"))
+        if "/graph/" in p:
+            # #1186: real shape from server.py's own _build_callgraph --
+            # "nodes" is a bare list of address strings (not {addr,name}
+            # objects) with names in a separate "node_names" dict, and
+            # "edges" uses "from"/"to" (not "source"/"target"). The worker's
+            # own build_call_graph assumed the wrong shape on both counts
+            # until a live run crashed on it; this stub existed with no
+            # /graph/ route at all before that, so the mismatch was never
+            # exercised here either.
+            return self._j({
+                "root": "0x401000", "nodes": ["0x401000", "0x401050"],
+                "node_names": {"0x401000": "sub_401000", "0x401050": "sub_401050"},
+                "edges": [{"from": "0x401000", "to": "0x401050"}],
+                "depth": 2, "truncated": False, "source": "v1",
+            })
         self._j({"detail": "Not Found"}, 404)
 
     def do_POST(self):
@@ -472,6 +487,21 @@ def test_spool(ghidra):
     print("--- worker stderr ---"); print(r.stderr.strip())
     print("--- spool ---")
     check(r.returncode == 0, "exit 0")
+    # #1186 regression: an AttributeError here used to crash the whole
+    # worker process mid-analysis (returncode != 0, no result written at
+    # all) -- the fail-soft wrapper now means the worst case is a logged,
+    # swallowed failure, never this.
+    check("call graph build failed unexpectedly" not in r.stderr,
+          "call graph build does not fail on the real service response shape")
+
+    # #1186: proves nodes/edges were actually parsed out of the stub's real
+    # response shape, not just "didn't crash" -- the .dot file is only ever
+    # written once _build_call_graph has at least one real edge (it returns
+    # None before that point otherwise), so its presence is independent of
+    # whether the CI runner happens to have the graphviz "dot" binary
+    # installed to render the .svg from it.
+    check((res / f"{good}_callgraph.dot").is_file(),
+          "call graph .dot file written from the stub's real graph response")
 
     rf = res / f"{good}_ghidra.json"
     check(rf.is_file(), "result written for valid request")
