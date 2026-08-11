@@ -316,6 +316,28 @@ class RevDeckStub(BaseHTTPRequestHandler):
             calls = RevDeckStub._status_calls.get(job_id, 0) + 1
             RevDeckStub._status_calls[job_id] = calls
             return self._j({"job_id": job_id, "status": "running" if calls == 1 else "done"})
+        # #1193 shapes, captured live against the deployed RevDeck webui
+        # this session: /chat/threads lists thread metadata; /chat/history
+        # answers for whichever thread is currently active server-side (no
+        # per-thread route exists) and starts with the system prompt, which
+        # _revdeck_chat_threads must filter out.
+        if self.path.startswith("/chat/threads/"):
+            return self._j({"threads": [{"thread_id": "main", "title": "Main", "message_count": 3}]})
+        if self.path.startswith("/chat/history/"):
+            return self._j([
+                {"role": "system", "content": "You are a reverse engineering assistant..."},
+                {"role": "user", "content": "List every function related to process creation."},
+                {"role": "assistant", "content": "No process-creation functions were found."},
+            ])
+        if self.path.startswith("/recovery/index/"):
+            return self._j({"job_id": "rd-job-1",
+                            "metadata": {"function_count": 12, "compiler": None},
+                            "stages": {"enum_candidates": {"FUN_401000": 2}}})
+        if self.path.startswith("/recovery/symbols/"):
+            return self._j({"job_id": "rd-job-1",
+                            "summary": {"functions": 12, "renamed": 1, "unrenamed": 11},
+                            "symbols": [{"address": "0x401000", "original": "FUN_401000",
+                                        "renamed": "handle_request", "renamed_active": True}]})
         self.send_response(404); self.end_headers()
 
     def do_POST(self):
@@ -525,11 +547,11 @@ def test_spool(ghidra):
               "function addr mapped to address")
         check(d.get("analyzer_version") == "ghidra-11.3.2",
               "analyzer version recorded from /status")
-        check(d["version"] == 7, "version stamped")
+        check(d["version"] == 8, "version stamped")
         check(all(k in d for k in ("findcrypt", "call_graph_svg", "ai_triage",
                                    "fuzzy_hashes", "lief", "capa", "floss", "revdeck",
                                    "report_pdf", "types", "globals", "annotations",
-                                   "memory_map",
+                                   "memory_map", "revdeck_chat_threads", "revdeck_recovery",
                                    "functions_deepened", "functions_deepened_truncated")),
               "every result key present")
         check(d["functions"][0].get("pseudocode") == DECOMPILE["pseudocode"],
@@ -826,6 +848,24 @@ def test_revdeck(ghidra, revdeck):
                   f"citations carried through (got {rd.get('citations')!r})")
             check(rd["warnings"] == ["capped tool budget"],
                   f"warnings carried through (got {rd.get('warnings')!r})")
+            check("chat_threads" not in rd and "recovery" not in rd,
+                  "chat_threads/recovery popped out of the revdeck field, not left nested")
+        # #1193
+        threads = d.get("revdeck_chat_threads")
+        check(threads is not None and threads["threads"] == [{"thread_id": "main", "title": "Main", "message_count": 3}],
+              f"chat thread metadata mirrored (got {threads!r})")
+        if threads:
+            msgs = threads["active_thread_messages"]
+            check(len(msgs) == 2 and all(m["role"] != "system" for m in msgs),
+                  f"active thread history mirrored with the system prompt filtered out (got {msgs!r})")
+            check(msgs[0]["role"] == "user" and msgs[1]["role"] == "assistant",
+                  "user/assistant turns kept in order")
+        recovery = d.get("revdeck_recovery")
+        check(recovery is not None and recovery["index"]["metadata"]["function_count"] == 12,
+              f"recovery index mirrored (got {recovery!r})")
+        if recovery:
+            check(recovery["symbols"]["symbols"][0]["renamed"] == "handle_request",
+                  "recovery symbols mirrored")
     check(RevDeckStub._status_calls.get("rd-job-1", 0) >= 2,
           f"poll loop actually exercised (>=2 status calls, got "
           f"{RevDeckStub._status_calls.get('rd-job-1', 0)})")
@@ -957,6 +997,11 @@ def test_revdeck_standalone(revdeck):
                   f"workflow recorded (got {rd.get('workflow')!r})")
             check(rd["tool_calls"] == 1,
                   f"tool_calls counted (got {rd.get('tool_calls')!r})")
+        # #1193: same popped-into-top-level shape as the embedded path.
+        check(d.get("revdeck_chat_threads") is not None,
+              "standalone spool also mirrors chat_threads")
+        check(d.get("revdeck_recovery") is not None,
+              "standalone spool also mirrors recovery")
 
     print("--- a non-local REVDECK_API_BASE is an explicit error ---")
     r, d, sha = revdeck_standalone_run(

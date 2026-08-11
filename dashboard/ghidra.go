@@ -193,6 +193,53 @@ type ghidraRevDeck struct {
 	Warnings  []string                `json:"warnings"`
 }
 
+// ghidraChatMessage mirrors one entry of #1193's active_thread_messages.
+// Content/ToolCalls stay as json.RawMessage rather than a fixed type: the
+// webui's own message shapes vary by role (a tool message's content is
+// already-serialized JSON text; an assistant message's tool_calls is a list
+// of objects, absent on every other role), and this file has already been
+// burned once by assuming a rigid shape here -- see ghidraRevDeckCitation's
+// own comment above: a document that fails to unmarshal over an
+// unanticipated variant vanishes silently from the whole ES-backed listing,
+// which is worse than rendering this one field as raw text.
+type ghidraChatMessage struct {
+	Role      string          `json:"role"`
+	Content   json.RawMessage `json:"content,omitempty"`
+	ToolCalls json.RawMessage `json:"tool_calls,omitempty"`
+	Name      string          `json:"name,omitempty"`
+}
+
+// ghidraChatThread is one entry of GET /chat/threads/{job_id} (#1193).
+type ghidraChatThread struct {
+	ThreadID     string `json:"thread_id"`
+	Title        string `json:"title"`
+	MessageCount int    `json:"message_count"`
+}
+
+// ghidraChatThreads mirrors _revdeck_chat_threads()'s return (#1193): the
+// analyst's actual back-and-forth Q&A with the RevDeck assistant, distinct
+// from the one-shot triage answer ghidraRevDeck.Answer already carries.
+// ActiveThreadMessages is only ever the currently-active thread's history --
+// see that worker function's own comment on why there's no per-thread
+// history route to fetch every thread's messages individually.
+type ghidraChatThreads struct {
+	Threads              []ghidraChatThread  `json:"threads"`
+	ActiveThreadMessages []ghidraChatMessage `json:"active_thread_messages"`
+}
+
+// ghidraRecovery mirrors _revdeck_recovery()'s return (#1193): RevDeck's own
+// symbol/type-recovery model, distinct from the deep-dive Types/Globals
+// above, which pull straight from Ghidra's own DataTypeManager. Index/
+// Symbols stay as opaque JSON rather than fully-typed structs -- their real
+// shape (stages/summary/etc.) is richer and less stable than this dashboard
+// needs to parse field-by-field, and per the same citation-typing lesson
+// above, rendering it raw can't fail the whole document's unmarshal over a
+// field this page doesn't act on programmatically anyway.
+type ghidraRecovery struct {
+	Index   json.RawMessage `json:"index"`
+	Symbols json.RawMessage `json:"symbols"`
+}
+
 type ghidraTriage struct {
 	Workflow    string   `json:"workflow"`
 	FamilyGuess string   `json:"family_guess"`
@@ -318,14 +365,16 @@ type ghidraResult struct {
 	Annotations *ghidraAnnotations  `json:"annotations"`
 	MemoryMap   []ghidraMemoryBlock `json:"memory_map"`
 
-	CallGraphSVG string             `json:"call_graph_svg"`
-	AITriage     *ghidraTriage      `json:"ai_triage"`
-	FuzzyHashes  *ghidraFuzzyHashes `json:"fuzzy_hashes"`
-	Lief         *ghidraLief        `json:"lief"`
-	Capa         *ghidraCapa        `json:"capa"`
-	Floss        *ghidraFloss       `json:"floss"`
-	RevDeck      *ghidraRevDeck     `json:"revdeck"`
-	ReportPDF    string             `json:"report_pdf"`
+	CallGraphSVG       string             `json:"call_graph_svg"`
+	AITriage           *ghidraTriage      `json:"ai_triage"`
+	FuzzyHashes        *ghidraFuzzyHashes `json:"fuzzy_hashes"`
+	Lief               *ghidraLief        `json:"lief"`
+	Capa               *ghidraCapa        `json:"capa"`
+	Floss              *ghidraFloss       `json:"floss"`
+	RevDeck            *ghidraRevDeck     `json:"revdeck"`
+	RevDeckChatThreads *ghidraChatThreads `json:"revdeck_chat_threads"`
+	RevDeckRecovery    *ghidraRecovery    `json:"revdeck_recovery"`
+	ReportPDF          string             `json:"report_pdf"`
 
 	// Set by the dashboard, not the worker: download routes, present only when
 	// the file actually exists.

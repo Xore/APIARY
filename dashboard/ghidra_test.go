@@ -923,6 +923,17 @@ func TestGhidraDetailPageRendersDeepDiveData(t *testing.T) {
 				Name: ".text", Start: "0x401000", End: "0x40100f", Size: 16,
 				Preview: &ghidraHexdumpPreview{Hex: "90909090", ASCII: "...."},
 			}},
+			RevDeckChatThreads: &ghidraChatThreads{
+				Threads: []ghidraChatThread{{ThreadID: "main", Title: "Main", MessageCount: 2}},
+				ActiveThreadMessages: []ghidraChatMessage{
+					{Role: "user", Content: json.RawMessage(`"List every function related to process creation."`)},
+					{Role: "assistant", Content: json.RawMessage(`"No process-creation functions were found."`)},
+				},
+			},
+			RevDeckRecovery: &ghidraRecovery{
+				Index:   json.RawMessage(`{"metadata":{"function_count":12}}`),
+				Symbols: json.RawMessage(`{"summary":{"renamed":1},"symbols":[{"renamed":"handle_request"}]}`),
+			},
 		},
 	}
 
@@ -944,6 +955,9 @@ func TestGhidraDetailPageRendersDeepDiveData(t *testing.T) {
 		"1 initialized memory block",                    // memory map card summary
 		"0x401000-0x40100f",                             // block range, in the memory map evidence body
 		"90909090",                                      // hexdump preview hex, in the memory map evidence body
+		"1 thread, 2 messages",                          // chat threads card summary
+		"No process-creation functions were found.",     // active thread message, in the chat threads evidence body
+		"handle_request",                                // recovery symbol, in the recovery evidence body
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("rendered page missing %q", want)
