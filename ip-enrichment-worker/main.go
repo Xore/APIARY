@@ -36,6 +36,7 @@
 package main
 
 import (
+	"bytes"
 	"log"
 	"os"
 	"path/filepath"
@@ -72,6 +73,20 @@ type source struct {
 	statePath string
 	queue     pendingQueue
 	enrich    enrichFunc
+	stats     sourceStats
+}
+
+// sourceStats is a DEBUG-temporary (#1206) per-source resolution counter,
+// logged periodically so a live miss-rate regression like #1206's
+// near-100% cowrie/dns-honeypot failure is visible without guessing from
+// Elasticsearch after the fact. Counts reset each log interval, not
+// cumulative -- a snapshot of "what happened in the last N seconds", which
+// is what matters for spotting a live regression.
+type sourceStats struct {
+	attempted     atomic.Int64 // lines whose src_ip was the tunnel peer (join was attempted at all)
+	resolvedFirst atomic.Int64 // resolved on the first attempt
+	resolvedRetry atomic.Int64 // resolved on a pendingQueue retry
+	timedOut      atomic.Int64 // never resolved within PENDING_TIMEOUT
 }
 
 // discoverSources finds every input file this worker is responsible for.
@@ -142,8 +157,9 @@ func main() {
 		}
 	}
 
+	viaBuilder := newViaMapBuilder(filepath.Join(logsDir, "portbridge"))
 	var vm atomic.Pointer[viaMap]
-	initial := buildViaMap(filepath.Join(logsDir, "portbridge"))
+	initial := viaBuilder.refresh()
 	vm.Store(&initial)
 
 	var tftpVM atomic.Pointer[viaMap]
@@ -152,18 +168,41 @@ func main() {
 
 	go func() {
 		for range time.Tick(refresh) {
-			m := buildViaMap(filepath.Join(logsDir, "portbridge"))
+			m := viaBuilder.refresh()
 			vm.Store(&m)
 			t := buildTftpSessionMap(logsDir)
 			tftpVM.Store(&t)
 		}
 	}()
 
+	go logStats(sources, 30*time.Second)
+
 	done := make(chan struct{})
 	for _, s := range sources {
 		go runSource(s, &vm, &tftpVM, refresh, pendingTimeout)
 	}
 	<-done // runs forever; process supervision (docker restart policy) handles crashes
+}
+
+// logStats prints each source's tunnel-peer-join resolution counts once per
+// interval, then resets them -- a snapshot of the last interval, not a
+// cumulative total (see sourceStats). #1206 debug instrumentation: the
+// worker previously logged nothing after startup, making a live resolution-
+// rate regression invisible short of querying Elasticsearch after the fact.
+func logStats(sources []*source, interval time.Duration) {
+	for range time.Tick(interval) {
+		for _, s := range sources {
+			attempted := s.stats.attempted.Swap(0)
+			first := s.stats.resolvedFirst.Swap(0)
+			retry := s.stats.resolvedRetry.Swap(0)
+			timedOut := s.stats.timedOut.Swap(0)
+			if attempted == 0 && first == 0 {
+				continue // nothing seen for this source this interval
+			}
+			log.Printf("ip-enrichment-worker: %s: tunnel-peer joins attempted=%d resolved_first=%d resolved_retry=%d timed_out=%d",
+				s.name, attempted, first, retry, timedOut)
+		}
+	}
 }
 
 func runSource(s *source, vm, tftpVM *atomic.Pointer[viaMap], refresh, pendingTimeout time.Duration) {
@@ -181,6 +220,8 @@ func runSource(s *source, vm, tftpVM *atomic.Pointer[viaMap], refresh, pendingTi
 		}
 	}
 
+	tunnelPeerMarker := []byte(`"src_ip":"` + tunnelPeerIP + `"`)
+
 	for range time.Tick(refresh) {
 		offset, _ := loadOffset(s.statePath)
 		lines, newOffset, err := readNewLines(s.input, offset)
@@ -190,14 +231,27 @@ func runSource(s *source, vm, tftpVM *atomic.Pointer[viaMap], refresh, pendingTi
 		now := time.Now()
 		var ready [][]byte
 		for _, line := range lines {
+			isTunnelPeer := bytes.Contains(line, tunnelPeerMarker) // #1206 debug stat only
 			enriched, resolved := s.enrich(line, *vm.Load(), *tftpVM.Load(), s.name)
 			if resolved {
+				if isTunnelPeer {
+					s.stats.resolvedFirst.Add(1)
+				}
 				ready = append(ready, enriched)
 			} else {
+				s.stats.attempted.Add(1)
 				s.queue.add(line, pendingTimeout, now)
 			}
 		}
-		ready = append(ready, s.queue.drain(*vm.Load(), *tftpVM.Load(), now, s.name, s.enrich)...)
+		drained := s.queue.drain(*vm.Load(), *tftpVM.Load(), now, s.name, s.enrich)
+		for _, out := range drained {
+			if bytes.Contains(out, tunnelPeerMarker) {
+				s.stats.timedOut.Add(1)
+			} else {
+				s.stats.resolvedRetry.Add(1)
+			}
+		}
+		ready = append(ready, drained...)
 		write(ready)
 		if newOffset != offset {
 			saveOffset(s.statePath, newOffset)
