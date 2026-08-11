@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -28,6 +29,19 @@ func writeCapeResult(t *testing.T, dir, sha string, row map[string]any) {
 func capeSearchNamespaceStub(t *testing.T, docs []map[string]any) http.HandlerFunc {
 	t.Helper()
 	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// #1156: searchNamespace opens a PIT before searching (see
+		// elastic.go's own comment); this stub only ever serves one index,
+		// so it doesn't need es_results_stub_test.go's own PIT-id-encodes-
+		// the-index trick, just something that satisfies openPointInTime.
+		if strings.Contains(r.URL.Path, "_pit") {
+			if r.Method == http.MethodDelete {
+				json.NewEncoder(w).Encode(map[string]bool{"succeeded": true})
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]string{"id": "test-pit-id"})
+			return
+		}
 		type hit struct {
 			Source struct {
 				Cape map[string]any `json:"cape"`

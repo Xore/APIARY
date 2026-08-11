@@ -270,7 +270,7 @@ func loadCapeResults() []capeResult {
 }
 
 func loadCapeResultsES(es *esClient) ([]capeResult, bool) {
-	raws, err := es.searchNamespace("cape-analysis-v1", "cape", 10000)
+	raws, err := es.searchNamespace("cape-analysis-v1", "cape")
 	if err != nil {
 		return nil, false
 	}

@@ -169,7 +169,7 @@ func loadGitHubAnalysisResults() []githubAnalysisResult {
 }
 
 func loadGitHubAnalysisResultsES(es *esClient) ([]githubAnalysisResult, bool) {
-	raws, err := es.searchNamespace("github-analysis-v1", "github_analysis", 10000)
+	raws, err := es.searchNamespace("github-analysis-v1", "github_analysis")
 	if err != nil {
 		return nil, false
 	}

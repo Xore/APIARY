@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -31,12 +32,31 @@ func esResultsStub(t *testing.T, docsByIndex map[string][]map[string]any) http.H
 				json.NewEncoder(w).Encode(map[string]bool{"succeeded": true})
 				return
 			}
-			json.NewEncoder(w).Encode(map[string]string{"id": "test-pit-id"})
+			// r.URL.Path is "/{indexPattern}/_pit" (openPointInTime's own
+			// request shape). #1156: searchNamespace now searches via the
+			// PIT-scoped global /_search endpoint instead of
+			// /{index}/_search -- the index is only visible here, at
+			// PIT-open time, so it's encoded into the returned PIT id and
+			// recovered below.
+			index := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/"), "/_pit")
+			json.NewEncoder(w).Encode(map[string]string{"id": "test-pit-id:" + index})
 			return
 		}
 		index := strings.TrimPrefix(r.URL.Path, "/")
 		if i := strings.Index(index, "/"); i >= 0 {
 			index = index[:i]
+		}
+		if index == "_search" {
+			// PIT-scoped global search (#1156) -- the URL carries no index
+			// of its own; recover it from the request body's pit.id.
+			body, _ := io.ReadAll(r.Body)
+			var req struct {
+				Pit struct {
+					ID string `json:"id"`
+				} `json:"pit"`
+			}
+			json.Unmarshal(body, &req)
+			index = strings.TrimPrefix(req.Pit.ID, "test-pit-id:")
 		}
 		docs := docsByIndex[index]
 		hits := make([]map[string]any, 0, len(docs))

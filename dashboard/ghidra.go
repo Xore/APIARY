@@ -385,7 +385,7 @@ func loadGhidraResults() []ghidraResult {
 }
 
 func loadGhidraResultsES(es *esClient) ([]ghidraResult, bool) {
-	raws, err := es.searchNamespace("ghidra-analysis-v1", "ghidra", 10000)
+	raws, err := es.searchNamespace("ghidra-analysis-v1", "ghidra")
 	if err != nil {
 		return nil, false
 	}

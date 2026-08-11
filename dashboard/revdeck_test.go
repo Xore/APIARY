@@ -6,18 +6,31 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
 
 // revdeckSearchNamespaceStub answers es.searchNamespace's own request shape
-// (a plain GET, size in the query string) with docs as the "revdeck"
-// namespace field of each hit -- matching searchNamespace's own doc comment
-// on how analysis/es-results-importer/importer.py's build_document nests
-// each source under its own label.
+// (#1156: a PIT-scoped POST to /_search, paged via search_after) with docs
+// as the "revdeck" namespace field of each hit -- matching searchNamespace's
+// own doc comment on how analysis/es-results-importer/importer.py's
+// build_document nests each source under its own label.
 func revdeckSearchNamespaceStub(t *testing.T, docs []map[string]any) http.HandlerFunc {
 	t.Helper()
 	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// This stub only ever serves one index, so it doesn't need
+		// es_results_stub_test.go's own PIT-id-encodes-the-index trick --
+		// just something that satisfies openPointInTime.
+		if strings.Contains(r.URL.Path, "_pit") {
+			if r.Method == http.MethodDelete {
+				json.NewEncoder(w).Encode(map[string]bool{"succeeded": true})
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]string{"id": "test-pit-id"})
+			return
+		}
 		type hit struct {
 			Source struct {
 				Revdeck map[string]any `json:"revdeck"`

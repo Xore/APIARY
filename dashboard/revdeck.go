@@ -57,7 +57,7 @@ func loadRevdeckResults() []revdeckStandaloneResult {
 }
 
 func loadRevdeckResultsES(es *esClient) ([]revdeckStandaloneResult, bool) {
-	raws, err := es.searchNamespace("revdeck-analysis-v1", "revdeck", 10000)
+	raws, err := es.searchNamespace("revdeck-analysis-v1", "revdeck")
 	if err != nil {
 		return nil, false
 	}
