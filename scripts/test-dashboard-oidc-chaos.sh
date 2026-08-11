@@ -58,6 +58,10 @@ dash_pid=""
 
 ok()  { printf '  OK    %s\n' "$*"; }
 bad() { printf '  FAIL  %s\n' "$*"; fail=1; }
+# #982: see scripts/test-dashboard-oidc-pkce-totp-login.sh's own comment on
+# this same helper -- every callback URL printed below carries a real,
+# live, single-use authorization code as its ?code= query param.
+redact_code() { printf '%s' "$1" | sed -E 's/([?&]code=)[^&]*/\1REDACTED/'; }
 
 cleanup() {
   [ -n "${dash_pid}" ] && kill "${dash_pid}" >/dev/null 2>&1 || true
@@ -188,7 +192,7 @@ if [ -z "${enroll_callback}" ]; then
   printf 'FAIL: TOTP enrollment code was rejected across all retry attempts\n' >&2
   exit 1
 fi
-printf 'TOTP enrolled for chaos-test, secret captured\n'
+printf 'TOTP enrolled for chaos-test, secret captured, callback=%s\n' "$(redact_code "${enroll_callback}")"
 
 # --- Redis first, published on the host and confirmed responsive, BEFORE
 # the dashboard binary starts. Found live in CI: starting the dashboard
@@ -379,7 +383,7 @@ else
   case "${callback_url2}" in
     "http://127.0.0.1:${dash_port}/auth/callback"*)
       ok "post-rotation login succeeded, Keycloak issued a code signed under the new key" ;;
-    *) bad "post-rotation login was rejected: ${callback_url2}" ;;
+    *) bad "post-rotation login was rejected: $(redact_code "${callback_url2}")" ;;
   esac
   if [ -n "${callback_url2}" ]; then
     curl -s -o /dev/null -c "${jar2}" -b "${jar2}" "${callback_url2}"

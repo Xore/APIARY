@@ -35,6 +35,13 @@ dash_pid=""
 
 ok()   { printf '  OK    %s\n' "$*"; }
 bad()  { printf '  FAIL  %s\n' "$*"; fail=1; }
+# #982: this is a public repo -- CI output is public log. Every callback URL
+# printed below (success or failure) is a real, live redirect Keycloak
+# issued, carrying a real single-use authorization code as its ?code=
+# query param. Single-use and scoped to this run's own ephemeral,
+# loopback-only Keycloak doesn't make it fine to print verbatim: redact it
+# the same way a real token/secret would be.
+redact_code() { printf '%s' "$1" | sed -E 's/([?&]code=)[^&]*/\1REDACTED/'; }
 
 cleanup() {
   [ -n "${dash_pid}" ] && kill "${dash_pid}" >/dev/null 2>&1 || true
@@ -318,7 +325,7 @@ if [ -z "${_totp_enroll_ok}" ]; then
   printf 'FAIL: TOTP enrollment code was rejected across all retry attempts\n' >&2
   exit 1
 fi
-printf 'TOTP enrolled for pkce-totp-test, secret captured, callback=%s\n' "${enroll_callback}"
+printf 'TOTP enrolled for pkce-totp-test, secret captured, callback=%s\n' "$(redact_code "${enroll_callback}")"
 
 # --- Redis first, published on the host and confirmed responsive, BEFORE
 # the dashboard binary starts. Redis is only reachable inside the docker
@@ -421,7 +428,7 @@ else
   case "${callback_url}" in
     "http://127.0.0.1:${dash_port}/auth/callback"*)
       ok "real password+TOTP login succeeded, Keycloak issued a real authorization code back to the dashboard" ;;
-    *) bad "unexpected redirect after TOTP submit: ${callback_url}" ;;
+    *) bad "unexpected redirect after TOTP submit: $(redact_code "${callback_url}")" ;;
   esac
 
   # The dashboard's own /auth/callback handler redirects with 303 See
@@ -520,7 +527,7 @@ elif echo "${first_required_action_page}" | grep -qi 'mode=manual'; then
       case "${final_location}" in
         "127.0.0.1:${dash_port}/auth/callback"*|"http://127.0.0.1:${dash_port}/auth/callback"*)
           ok "first-login account completed forced TOTP enrollment + password replacement, reached a real authorization code" ;;
-        *) bad "first-login account's forced password replacement did not reach the dashboard callback: ${final_location}" ;;
+        *) bad "first-login account's forced password replacement did not reach the dashboard callback: $(redact_code "${final_location}")" ;;
       esac
     fi
   fi
