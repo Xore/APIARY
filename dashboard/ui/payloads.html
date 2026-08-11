@@ -130,6 +130,11 @@
       </div>
     </main>
 </div>
+{{/* #1141: dynamic in-place navigation across the #1139 consolidated
+     payload/results page family -- see hp-dynamic-nav.js's own doc
+     comment for the full route list and why it's a separate file from
+     hp-app.js. */}}
+<script defer src="{{asset "/static/hp-dynamic-nav.js"}}"></script>
 </body>
 </html>
 {{end}}
@@ -293,6 +298,8 @@
 </section>
 <script defer src="{{asset "/static/hp-payload-report.js"}}"></script>
 <script defer src="{{asset "/static/hp-payload-analysis.js"}}"></script>
+{{/* #1141: see the "payloads" template's own comment above. */}}
+<script defer src="{{asset "/static/hp-dynamic-nav.js"}}"></script>
 </body>
 </html>
 {{end}}
