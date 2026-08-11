@@ -56,10 +56,23 @@ jobs:
         shell: bash
         run: |
           destination=/opt/stacks/apiary
+          # analysis/ghidra/revdeck/ and sandbox/windows/packer/pxe/ipxe*
+          # are hand-vendored/build-generated on the host, not tracked in
+          # this repo (see analysis/ghidra/revdeck-proxyfix/'s own doc
+          # comment and prepare-pxe.sh respectively) -- without excluding
+          # them, --delete-delay either fails outright (a populated
+          # directory rsync can't recursively delete under this call) or,
+          # worse, silently deletes a hand-built ipxe.efi/webui checkout on
+          # every future deploy. Found live: this rsync step failed here
+          # once these existed on disk, exit 23.
           rsync -a --delete-delay \
             --exclude '.git/' --exclude '.github/' --exclude '.env' \
             --exclude 'logs/' --exclude 'state/' --exclude 'dashboard-state/' \
             --exclude 'analysis/geoip/*.mmdb' --exclude 'sandbox/results/' \
+            --exclude 'analysis/ghidra/revdeck/' \
+            --exclude 'sandbox/windows/packer/pxe/ipxe/' \
+            --exclude 'sandbox/windows/packer/pxe/ipxe.efi' \
+            --exclude 'sandbox/windows/packer/pxe/ipxe.efi.unsigned' \
             ./ "$destination/"
           cp "$destination/docker-compose.yml" "$destination/compose.yml"
           cd "$destination"
