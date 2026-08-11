@@ -437,7 +437,23 @@ services:
       - ARKIME__pcapDir=/opt/arkime/raw
       - ARKIME__passwordSecret=${ARKIME_PASSWORD_SECRET:-change-me-in-env}
     networks:
-      - honeynet
+      honeynet:
+        # arkime-capture below registers every session it writes to
+        # Elasticsearch under node host "honeypot-vps" (its own --host
+        # flag) -- a label describing where the traffic originates (VPS),
+        # not a real container name. When this viewer opens a session's
+        # packet/PCAP detail, Arkime makes a real HTTP call to
+        # "<that node's registered host>:8005" to fetch it (true even for
+        # a node serving its own sessions -- confirmed against Arkime's own
+        # source: "Error talking to node '%s' using host '%s:8005' check
+        # viewer logs on '%s'" is a real inter-node HTTP failure, not a
+        # config-only check). Nothing in this compose file actually
+        # resolves "honeypot-vps" on this network, so every session ever
+        # opened failed this way -- caught live (2026-08-11). This viewer
+        # is the one that actually serves port 8005 and shares the same
+        # arkime-pcap volume arkime-capture writes to, so it's the correct
+        # target for that alias.
+        aliases: [honeypot-vps]
     deploy:
       resources:
         limits:
