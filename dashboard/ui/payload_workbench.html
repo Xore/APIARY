@@ -57,7 +57,7 @@
   </div>
 
   <footer>{{brandText}} &bull; owner-isolated correlated results &bull; native analyzer reports remain canonical</footer>
-</div></main></div></body></html>{{end}}
+</div></main></div>{{/* #1141: see hp-dynamic-nav.js's own doc comment. */}}<script defer src="{{asset "/static/hp-dynamic-nav.js"}}"></script></body></html>{{end}}
 
 {{define "payload-workbench"}}<!doctype html>
 <html lang="en">
@@ -115,4 +115,4 @@
   <section class="tw:mt-5" aria-labelledby="wb-runs-title"><div class="section-heading"><div><h2 id="wb-runs-title">Correlated runs</h2><p>Partial results remain available when another backend fails or times out.</p></div></div><div data-wb-runs aria-live="polite"><div class="card wide"><p class="empty">Loading analysis runs&hellip;</p></div></div></section>
   <section class="card wide tw:mt-5" aria-labelledby="wb-external-title"><div class="tw:flex tw:flex-wrap tw:items-center tw:gap-2"><h2 id="wb-external-title" class="tw:mr-auto">External publication</h2><span class="badge badge--red">leaves local trust boundary</span><span class="badge badge--muted">never in Run all</span></div><p>GitHub analysis uploads captured material externally. It remains a separate administrator-only workflow with the existing confirmation phrase, dry-run guard, and audit trail.</p><a class="lnk" href="/payload-workbench/results#github">Open the separately gated GitHub publisher &rarr;</a></section>
   <footer>{{brandText}} &bull; immutable recipe snapshots &bull; bounded local orchestration</footer>
-</div></main></div></body></html>{{end}}
+</div></main></div>{{/* #1141: see hp-dynamic-nav.js's own doc comment. */}}<script defer src="{{asset "/static/hp-dynamic-nav.js"}}"></script></body></html>{{end}}
