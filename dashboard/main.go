@@ -586,6 +586,10 @@ func main() {
 		data.Ready = s.ready.Load()
 		renderPage(w, tmpl, "campaigns", &data)
 	})
+	http.HandleFunc("/attackers", func(w http.ResponseWriter, r *http.Request) {
+		data := s.attackersData(r)
+		renderPage(w, tmpl, "attackers", &data)
+	})
 	http.HandleFunc("/history", func(w http.ResponseWriter, r *http.Request) {
 		data := s.get()
 		renderPage(w, tmpl, "history", &data)

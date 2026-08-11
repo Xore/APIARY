@@ -85,6 +85,29 @@ await fetch(`${fakeES.url}/dashboard-payload-inventory-v1/_doc/${payloadHash}?op
   }),
 });
 
+// #1203: attacker-identity-worker (#1200) writes attackers-v1 the same
+// way payload-inventory-worker writes payload-inventory-v1 above -- this
+// e2e fixture doesn't run that worker either, so seed one durable entity
+// directly, the same document shape it would have written, so /attackers
+// has a real graph to render.
+const attackerID = "e2efixtureattacker01";
+await fetch(`${fakeES.url}/attackers-v1/_doc/${attackerID}?op_type=create`, {
+  method: "PUT",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    id: attackerID,
+    ips: ["203.0.113.1", "198.51.100.1", "192.0.2.1"],
+    fingerprints: ["SSH-2.0-libssh2"],
+    payloads: [payloadHash],
+    credentials: ["root / fixture-0"],
+    sensors: ["cowrie"],
+    events: 60,
+    first: events[events.length - 1].timestamp,
+    last: events[0].timestamp,
+    updated: new Date(now).toISOString(),
+  }),
+});
+
 const stateFile = (name) => join(state, name);
 const child = spawn("go", ["run", "."], {
   cwd: resolve(".."),
