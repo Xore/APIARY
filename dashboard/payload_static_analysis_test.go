@@ -1,8 +1,11 @@
 package main
 
 import (
+	"crypto/md5"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -80,5 +83,58 @@ func TestAnalyzePayloadCachesStaticWorkButRefreshesDynamicData(t *testing.T) {
 	}
 	if third.SHA256 == first.SHA256 {
 		t.Fatal("static analysis cache was not invalidated after the underlying file changed")
+	}
+}
+
+// TestStaticAnalysisPrefersESMirrorOverDiskOnCacheMiss is the #1103 hybrid
+// item's own regression guard: on a staticAnalysisIndex cache miss, the
+// source bytes must come from the already-ES-mirrored dashboard-payload-
+// bytes-v1 copy when its recorded fingerprint still matches the local file,
+// not from a fresh disk read -- proven here by mirroring content that
+// deliberately differs from what's actually on disk (tagged with the local
+// file's own real fingerprint) and confirming the analysis reflects the
+// mirrored content, not the disk content.
+func TestStaticAnalysisPrefersESMirrorOverDiskOnCacheMiss(t *testing.T) {
+	payloadDir := t.TempDir()
+	hash := "f" + hex.EncodeToString(make([]byte, 31)) // 64 hex chars, valid hashName format
+	diskContent := []byte("disk content -- must NOT be what analysis reflects")
+	path := filepath.Join(payloadDir, hash)
+	if err := os.WriteFile(path, diskContent, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	realFingerprint := fileFingerprint(fi)
+
+	esStore := newMemESDocStore()
+	esSrv := httptest.NewServer(esStore.handler())
+	defer esSrv.Close()
+	s := &store{payloadDirs: []string{payloadDir}, es: newESClient(esSrv.URL, "")}
+
+	mirroredContent := []byte("mirrored ES content -- analysis MUST reflect this instead")
+	mirroredMD5 := md5.Sum(mirroredContent)
+	doc := storedPayloadBytes{
+		Hash:        hash,
+		SizeBytes:   int64(len(mirroredContent)),
+		DataBase64:  base64.StdEncoding.EncodeToString(mirroredContent),
+		Fingerprint: realFingerprint,
+	}
+	body, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.es.docIndex(payloadBytesIndex, hash, body, true, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.staticAnalysisFor(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantMD5 := hex.EncodeToString(mirroredMD5[:])
+	if got.MD5 != wantMD5 {
+		t.Fatalf("static analysis MD5 = %q, want %q (the ES-mirrored copy's hash) -- read disk instead of the ES mirror on a cache miss", got.MD5, wantMD5)
 	}
 }
