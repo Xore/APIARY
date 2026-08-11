@@ -124,8 +124,38 @@ func TestServeGhidraExportServesStoredArtifactWithCorrectedContentType(t *testin
 	if !strings.Contains(w.Header().Get("Content-Disposition"), shaA+"_ghidra_report.html") {
 		t.Errorf("Content-Disposition missing the real filename: %q", w.Header().Get("Content-Disposition"))
 	}
+	// Live report: "view report" pointed an <iframe> straight at this URL
+	// and got a download prompt instead of the rendered report, because
+	// this handler forced attachment unconditionally. Default must be
+	// inline so the iframe actually renders it.
+	if !strings.HasPrefix(w.Header().Get("Content-Disposition"), "inline") {
+		t.Errorf("Content-Disposition = %q, want inline by default (the iframe viewer's own request)", w.Header().Get("Content-Disposition"))
+	}
 	if w.Body.String() != "<h1>hi</h1>" {
 		t.Errorf("body = %q, want decoded artifact bytes", w.Body.String())
+	}
+}
+
+func TestServeGhidraExportDownloadQueryForcesAttachment(t *testing.T) {
+	srv := httptest.NewServer(ghidraArtifactStub(t, map[string]ghidraArtifactDoc{
+		shaA + ":report": {
+			SHA256: shaA, Kind: "report", Filename: shaA + "_ghidra_report.html",
+			ContentType: "text/html", DataBase64: base64.StdEncoding.EncodeToString([]byte("<h1>hi</h1>")),
+		},
+	}))
+	defer srv.Close()
+	withESResultsClient(t, srv.URL)
+
+	// ghidra.html's own "full report ↓" link -- the download-instead
+	// action -- appends this, mirroring serveGitHubAnalysisPDFProxy's own
+	// identical one-endpoint-two-dispositions convention.
+	w := httptest.NewRecorder()
+	serveGhidraExport(w, httptest.NewRequest(http.MethodGet, "/export/ghidra/"+shaA+"?download=1", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200: %s", w.Code, w.Body.String())
+	}
+	if !strings.HasPrefix(w.Header().Get("Content-Disposition"), "attachment") {
+		t.Errorf("Content-Disposition = %q, want attachment with ?download=1", w.Header().Get("Content-Disposition"))
 	}
 }
 
