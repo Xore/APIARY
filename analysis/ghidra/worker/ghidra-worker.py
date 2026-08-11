@@ -1064,6 +1064,22 @@ def _revdeck_triage(sample: Path) -> dict | None:
 
 def build_call_graph(client: "GhidraClient", job: str, functions: list,
                      sha: str) -> str | None:
+    """Fail-soft wrapper (#1186), same two-tier shape as
+    revdeck_triage/_revdeck_triage and generate_report: a call-graph bug
+    must not throw away everything else analyse_one() already computed
+    (decompile, fuzzy hashes, capa, floss, RevDeck triage) -- confirmed live
+    that it did exactly that (an uncaught AttributeError here crashed the
+    whole worker process mid-analysis) before this wrapper existed.
+    """
+    try:
+        return _build_call_graph(client, job, functions, sha)
+    except Exception as e:  # noqa: BLE001
+        log(f"  [!] call graph build failed unexpectedly: {e!r}")
+        return None
+
+
+def _build_call_graph(client: "GhidraClient", job: str, functions: list,
+                      sha: str) -> str | None:
     """Walk the call graph and render it, returning the SVG filename or None.
 
     The service has no bulk edge dump — /v1/query is a text search — so the
@@ -1094,14 +1110,19 @@ def build_call_graph(client: "GhidraClient", job: str, functions: list,
             continue
         if not isinstance(g, dict):
             continue
+        # #1186: confirmed live against a real response from server.py's own
+        # _build_callgraph -- "nodes" is a bare list of address strings, with
+        # names in a separate "node_names": {addr: name} dict, and "edges"
+        # uses "from"/"to", not {"addr":...,"name":...} node objects or
+        # "source"/"target" edge keys the way this comment used to claim.
+        # That claim was itself wrong against the server's current, actual
+        # shape -- the service's own real contract, not a second guess.
+        g_names = g.get("node_names") if isinstance(g.get("node_names"), dict) else {}
         for n in g.get("nodes", []):
-            if n.get("addr"):
-                nodes[n["addr"]] = n.get("name") or n["addr"]
+            if isinstance(n, str) and n:
+                nodes[n] = g_names.get(n) or n
         for e in g.get("edges", []):
-            # The service names these "source"/"target" — not from/to or
-            # src/dst, both of which were guessed wrong the first time and
-            # produced a silent zero-edge graph.
-            src, dst = e.get("source"), e.get("target")
+            src, dst = e.get("from"), e.get("to")
             if src and dst:
                 edges.add((src, dst))
     if not edges:
