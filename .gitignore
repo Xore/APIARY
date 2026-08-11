@@ -90,6 +90,7 @@ vps/portbridge/portbridge
 rdp-honeypot/rdp-honeypot
 tftp-relay/tftp-relay
 ip-enrichment-worker/ip-enrichment-worker
+payload-inventory-worker/payload-inventory-worker
 node_modules/
 playwright-report/
 test-results/
