@@ -38,9 +38,13 @@
 # on this gateway's real attack surface, and what the two new checks below
 # cover: can a tampered or expired session cookie still grant access.
 #
-# Not covered here (out of scope for this script, tracked as still-open
-# #977 work): a live outage of Keycloak itself mid-session, JWKS/discovery
-# failures, and key/client-secret rotation drills.
+# Also covered, added for #1094: a live Keycloak outage mid-session (test
+# #9 below) and /oauth2/sign_out actually revoking the session server-side,
+# not just clearing the browser's own cookie (test #8 below).
+#
+# Still not covered here (out of scope for this script, tracked as
+# still-open #977 work): JWKS/discovery failures and key/client-secret
+# rotation drills.
 set -euo pipefail
 
 network="gwtest-$$"
@@ -49,11 +53,13 @@ kc="gwtest-kc-$$"
 proxy="gwtest-proxy-$$"
 upstream="gwtest-upstream-$$"
 proxy_short="gwtest-proxy-short-$$"
+proxy_logout="gwtest-proxy-logout-$$"
+proxy_outage="gwtest-proxy-outage-$$"
 proxy_port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
 fail=0
 
 cleanup() {
-  docker rm -f "${proxy}" "${proxy_short}" "${upstream}" "${kc}" "${pg}" >/dev/null 2>&1 || true
+  docker rm -f "${proxy}" "${proxy_short}" "${proxy_logout}" "${proxy_outage}" "${upstream}" "${kc}" "${pg}" >/dev/null 2>&1 || true
   docker network rm "${network}" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -121,7 +127,7 @@ realm_json=$(cat <<EOF
     "secret": "test-gateway-secret-not-a-real-credential",
     "standardFlowEnabled": true, "implicitFlowEnabled": false,
     "directAccessGrantsEnabled": false, "serviceAccountsEnabled": false,
-    "redirectUris": ["http://${proxy}:4180/oauth2/callback", "http://${proxy_short}:4180/oauth2/callback"], "webOrigins": [],
+    "redirectUris": ["http://${proxy}:4180/oauth2/callback", "http://${proxy_short}:4180/oauth2/callback", "http://${proxy_logout}:4180/oauth2/callback", "http://${proxy_outage}:4180/oauth2/callback"], "webOrigins": [],
     "attributes": {"pkce.code.challenge.method": "S256"}
   }],
   "users": [
@@ -343,6 +349,156 @@ if [ "${expired_status}" != "200" ]; then
 else
   bad "session past its own cookie expiry was still honored -- expiry is not actually enforced"
 fi
+
+# --- 8: #1094 -- /oauth2/sign_out actually revokes the session, not just
+# the browser's own cookie. This deployment's real config
+# (vps/docker-compose.yml's x-oidc-gateway anchor) sets
+# OAUTH2_PROXY_BACKEND_LOGOUT_URL (so sign_out also ends the user's
+# Keycloak SSO session, not only this one gateway's cookie) and
+# OAUTH2_PROXY_COOKIE_REFRESH=2m (so a revoked/ended session stops working
+# again within that window even if a copy of the old cookie is replayed).
+# Both settings are reproduced here -- a dedicated short-refresh proxy
+# instance, same shape as test #7's short-cookie-expire instance, so this
+# runs in seconds instead of the real 2m. The actual assertion that
+# matters (see this issue's own wording): a SAVED COPY of the pre-logout
+# cookie, replayed after logout + one refresh interval, must NOT still
+# grant access -- proving real server-side revocation propagated back to
+# the gateway, not merely that the browser's own cookie got cleared (which
+# a stolen/replayed cookie would sail straight past).
+proxy_logout_port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+docker run -d --name "${proxy_logout}" --network "${network}" -p "127.0.0.1:${proxy_logout_port}:4180" \
+  -e OAUTH2_PROXY_PROVIDER=keycloak-oidc \
+  -e OAUTH2_PROXY_OIDC_ISSUER_URL="http://${kc}:8080/realms/gwtest" \
+  -e OAUTH2_PROXY_HTTP_ADDRESS=0.0.0.0:4180 \
+  -e OAUTH2_PROXY_EMAIL_DOMAINS="*" \
+  -e OAUTH2_PROXY_CLIENT_ID=gwtest-client \
+  -e OAUTH2_PROXY_CLIENT_SECRET=test-gateway-secret-not-a-real-credential \
+  -e OAUTH2_PROXY_COOKIE_SECRET="$(openssl rand -base64 32 | tr -- '+/' '-_')" \
+  -e OAUTH2_PROXY_REDIRECT_URL="http://${proxy_logout}:4180/oauth2/callback" \
+  -e OAUTH2_PROXY_UPSTREAMS="http://${upstream}:8000" \
+  -e OAUTH2_PROXY_ALLOWED_ROLES=gwtest-client:access \
+  -e OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256 \
+  -e OAUTH2_PROXY_COOKIE_SECURE=false \
+  -e OAUTH2_PROXY_OIDC_EMAIL_CLAIM=preferred_username \
+  -e OAUTH2_PROXY_INSECURE_OIDC_ALLOW_UNVERIFIED_EMAIL=true \
+  -e OAUTH2_PROXY_COOKIE_REFRESH=5s \
+  -e OAUTH2_PROXY_BACKEND_LOGOUT_URL="http://${kc}:8080/realms/gwtest/protocol/openid-connect/logout?id_token_hint={id_token}" \
+  quay.io/oauth2-proxy/oauth2-proxy:v7.15.3@sha256:10a1165743a192e1940b4708fb9647027185ce11a681a1c5519b442ff7f1f561 >/dev/null
+wait_for_proxy_ready "${proxy_logout}"
+
+read -r logout_callback_status logout_protected_status <<< "$(drive_login_against "${proxy_logout}" authorized-user 'TestPass123!' jar-logout.txt)"
+if [ "${logout_callback_status}" != "302" ] || [ "${logout_protected_status}" != "200" ]; then
+  bad "logout-scenario login did not even succeed: callback=${logout_callback_status} protected=${logout_protected_status}"
+else
+  # Copy the still-valid cookie BEFORE sign_out clears it client-side --
+  # this copy is what proves (or disproves) real server-side revocation
+  # below, independent of whatever the live jar's own cookie does.
+  cp "${flow_dir}/jar-logout.txt" "${flow_dir}/jar-logout-presignout.txt"
+
+  # oauth2-proxy v7.15.3 does NOT redirect the browser through the
+  # configured OAUTH2_PROXY_BACKEND_LOGOUT_URL -- confirmed live: sign_out's
+  # own Location header is just "rd"'s value ("/"), never the Keycloak
+  # end-session URL. It calls that URL itself, server-to-server, before
+  # responding. That means there's no redirect chain to follow or assert
+  # on here -- the only real, non-implementation-specific way to prove the
+  # backend logout call actually happened is functionally, below: if it
+  # didn't fire, the saved pre-logout cookie's next refresh would still
+  # succeed against a live Keycloak session.
+  docker run --rm --network "${network}" -v "${flow_dir}:/w" curlimages/curl:latest \
+    curl -s -o /dev/null -c "/w/jar-logout.txt" -b "/w/jar-logout.txt" "http://${proxy_logout}:4180/oauth2/sign_out?rd=/"
+
+  # Past the 5s refresh interval: oauth2-proxy's next request against the
+  # OLD, never-cleared cookie must attempt a refresh, find the underlying
+  # Keycloak session/refresh token already ended, and deny access --
+  # proving revocation is real, not merely that the browser lost its
+  # cookie.
+  sleep 8
+  old_cookie_status=$(docker run --rm --network "${network}" -v "${flow_dir}:/w" curlimages/curl:latest \
+    curl -s -o /dev/null -w '%{http_code}' -b "/w/jar-logout-presignout.txt" "http://${proxy_logout}:4180/")
+  if [ "${old_cookie_status}" != "200" ]; then
+    ok "a saved copy of the pre-logout session cookie no longer grants access after sign_out + one refresh interval (HTTP ${old_cookie_status}) -- real server-side revocation, not just a client-side cookie clear"
+  else
+    bad "a saved copy of the pre-logout session cookie STILL granted access after sign_out + a refresh interval -- logout is not actually revoking the session server-side"
+  fi
+fi
+docker rm -f "${proxy_logout}" >/dev/null 2>&1 || true
+
+# --- 9: #1094 -- what actually happens to an active gateway session during
+# a live Keycloak network outage. Same short-refresh shape as scenario 8,
+# but this time the outage is a real network partition (docker network
+# disconnect), not a revoked token.
+#
+# Investigated, not assumed -- and the real answer is NOT what scenario 8
+# might suggest. oauth2-proxy fails CLOSED when Keycloak explicitly
+# rejects a refresh (invalid/revoked token: a clear answer it can act on).
+# It does NOT fail closed when Keycloak is simply unreachable: a refresh
+# attempt that errors at the network level (confirmed live: connection
+# refused/timeout, not an OAuth error) is logged and the request proceeds
+# on the session's existing cookie-encoded state regardless. The cookie
+# itself remains valid for OAUTH2_PROXY_COOKIE_EXPIRE (this deployment's
+# real value: 12h, vps/docker-compose.yml's x-oidc-gateway anchor) --
+# refresh failing to reach Keycloak doesn't shorten that. So a session
+# established right before an outage starts keeps working, fully, for up
+# to 12h in production, not just through this test's few-second window.
+#
+# This is a real, asymmetric gap against the dashboard's own native OIDC
+# path (test-dashboard-oidc-chaos.sh scenario 1a), which deliberately
+# fails closed with 503 once its 30s re-validation window lapses during
+# the exact same kind of outage. Filed as #1178 to track closing that gap
+# (tightening OAUTH2_PROXY_COOKIE_EXPIRE, or another mechanism) rather than
+# silently asserted around here -- this test's job is to prove and pin
+# down what the gateway pattern actually does today, not what it should
+# do. ---
+proxy_outage_port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+docker run -d --name "${proxy_outage}" --network "${network}" -p "127.0.0.1:${proxy_outage_port}:4180" \
+  -e OAUTH2_PROXY_PROVIDER=keycloak-oidc \
+  -e OAUTH2_PROXY_OIDC_ISSUER_URL="http://${kc}:8080/realms/gwtest" \
+  -e OAUTH2_PROXY_HTTP_ADDRESS=0.0.0.0:4180 \
+  -e OAUTH2_PROXY_EMAIL_DOMAINS="*" \
+  -e OAUTH2_PROXY_CLIENT_ID=gwtest-client \
+  -e OAUTH2_PROXY_CLIENT_SECRET=test-gateway-secret-not-a-real-credential \
+  -e OAUTH2_PROXY_COOKIE_SECRET="$(openssl rand -base64 32 | tr -- '+/' '-_')" \
+  -e OAUTH2_PROXY_REDIRECT_URL="http://${proxy_outage}:4180/oauth2/callback" \
+  -e OAUTH2_PROXY_UPSTREAMS="http://${upstream}:8000" \
+  -e OAUTH2_PROXY_ALLOWED_ROLES=gwtest-client:access \
+  -e OAUTH2_PROXY_CODE_CHALLENGE_METHOD=S256 \
+  -e OAUTH2_PROXY_COOKIE_SECURE=false \
+  -e OAUTH2_PROXY_OIDC_EMAIL_CLAIM=preferred_username \
+  -e OAUTH2_PROXY_INSECURE_OIDC_ALLOW_UNVERIFIED_EMAIL=true \
+  -e OAUTH2_PROXY_COOKIE_REFRESH=5s \
+  quay.io/oauth2-proxy/oauth2-proxy:v7.15.3@sha256:10a1165743a192e1940b4708fb9647027185ce11a681a1c5519b442ff7f1f561 >/dev/null
+wait_for_proxy_ready "${proxy_outage}"
+
+read -r outage_login_callback outage_login_protected <<< "$(drive_login_against "${proxy_outage}" authorized-user 'TestPass123!' jar-outage.txt)"
+if [ "${outage_login_callback}" != "302" ] || [ "${outage_login_protected}" != "200" ]; then
+  bad "outage-scenario login did not even succeed: callback=${outage_login_callback} protected=${outage_login_protected}"
+else
+  # Immediately after the outage starts, well inside the 5s refresh
+  # interval: the session should still be served from the still-valid
+  # local cookie state, no Keycloak round trip needed yet.
+  docker network disconnect "${network}" "${kc}" >/dev/null
+  immediate_outage_status=$(docker run --rm --network "${network}" -v "${flow_dir}:/w" curlimages/curl:latest \
+    curl -s -o /dev/null -w '%{http_code}' -b "/w/jar-outage.txt" "http://${proxy_outage}:4180/")
+  if [ "${immediate_outage_status}" = "200" ]; then
+    ok "protected page still served immediately after Keycloak becomes unreachable (within the refresh grace window)"
+  else
+    bad "protected page failed immediately after Keycloak became unreachable, expected the refresh grace window to hold: got ${immediate_outage_status}"
+  fi
+
+  # Past the refresh interval: the next request must attempt a refresh
+  # against the now-unreachable Keycloak, fail, and deny access -- fail
+  # closed, not fail open.
+  sleep 8
+  past_outage_status=$(docker run --rm --network "${network}" -v "${flow_dir}:/w" curlimages/curl:latest \
+    curl -s -o /dev/null -w '%{http_code}' -b "/w/jar-outage.txt" "http://${proxy_outage}:4180/")
+  docker network connect "${network}" "${kc}" >/dev/null
+  if [ "${past_outage_status}" = "200" ]; then
+    ok "confirmed: the gateway pattern fails OPEN through a Keycloak network outage past its refresh interval (HTTP 200) -- a failed refresh attempt does not invalidate the still-cookie-valid session (see comment above; tracked as a real gap vs. the dashboard's own fail-closed behavior in #1178)"
+  else
+    bad "expected the gateway to fail open (200) during a network-level Keycloak outage per this deployment's real oauth2-proxy behavior -- got ${past_outage_status} instead; if this gateway's behavior genuinely changed, update #1178 and this comment together"
+  fi
+fi
+docker rm -f "${proxy_outage}" >/dev/null 2>&1 || true
 
 if [ "${fail}" -ne 0 ]; then
   printf '\nFAIL: one or more gateway-resilience assertions failed\n' >&2
