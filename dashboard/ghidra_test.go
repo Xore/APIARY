@@ -919,6 +919,10 @@ func TestGhidraDetailPageRendersDeepDiveData(t *testing.T) {
 					"0x401000": {DisplayName: "real_main", Comment: "entry point, not CRT startup", Tags: []string{"reviewed"}},
 				},
 			},
+			MemoryMap: []ghidraMemoryBlock{{
+				Name: ".text", Start: "0x401000", End: "0x40100f", Size: 16,
+				Preview: &ghidraHexdumpPreview{Hex: "90909090", ASCII: "...."},
+			}},
 		},
 	}
 
@@ -937,6 +941,9 @@ func TestGhidraDetailPageRendersDeepDiveData(t *testing.T) {
 		"sub_401050",                                    // callee name, in the functions evidence body
 		"real_main",                                     // annotation display name, in the annotations evidence body
 		"entry point, not CRT startup",                  // annotation comment
+		"1 initialized memory block",                    // memory map card summary
+		"0x401000-0x40100f",                             // block range, in the memory map evidence body
+		"90909090",                                      // hexdump preview hex, in the memory map evidence body
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("rendered page missing %q", want)

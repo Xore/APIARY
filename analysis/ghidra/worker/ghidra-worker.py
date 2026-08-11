@@ -54,11 +54,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-# 5: added floss (#207). Informational only — nothing reads this field to
-# decide how to parse the rest of the document; it exists so a result can be
-# tied to the worker version that produced it. (4: added revdeck (#78). 3:
-# added capa. 2: added fuzzy_hashes and lief (#138).)
-RESULT_VERSION = 6
+# 7: added memory_map (#1167). Informational only — nothing reads this field
+# to decide how to parse the rest of the document; it exists so a result can
+# be tied to the worker version that produced it. (6: added the v1 deep-dive
+# -- pseudocode/callers/callees/types/globals/annotations (#1168). 5: added
+# floss (#207). 4: added revdeck (#78). 3: added capa. 2: added fuzzy_hashes
+# and lief (#138).)
+RESULT_VERSION = 7
 
 REQUEST_DIR = Path(os.environ.get("GHIDRA_REQUEST_DIR", "/ghidra-requests"))
 RESULTS_DIR = Path(os.environ.get("GHIDRA_RESULTS_DIR", "/ghidra-results"))
@@ -132,6 +134,16 @@ DEEPDIVE_MAX_FUNCTIONS = int(os.environ.get("GHIDRA_DEEPDIVE_MAX_FUNCTIONS", "30
 # default, so this asks for the whole (server-side-bounded, see
 # GHIDRA_MAX_TYPES/GHIDRA_MAX_GLOBALS in export_json.py) list in one request.
 MAX_TYPES_GLOBALS = int(os.environ.get("GHIDRA_DEEPDIVE_MAX_TYPES_GLOBALS", "5000"))
+# #1167: a bounded static hexdump *preview* per memory block, mirrored to ES
+# alongside the block's own metadata -- not the whole block (memory.bin
+# itself deliberately stays server-side only, see server.py's own comment on
+# _v1_list_memory). The dashboard has no network path to the Ghidra service
+# and the standing rule for it is ES-only reads (see #1167's own issue text),
+# so a live "type any address, get bytes" viewer isn't an option here the
+# way it is for an in-flight job talking to RevDeck directly -- this gives
+# every historical report a small, always-available look at each section's
+# opening bytes instead.
+DEEPDIVE_HEXDUMP_PREVIEW_BYTES = int(os.environ.get("GHIDRA_DEEPDIVE_HEXDUMP_PREVIEW_BYTES", "256"))
 
 # ── Static tools: fuzzy hashing and structural parsing (#85, #138) ──────────
 #
@@ -607,10 +619,11 @@ class GhidraClient:
 
     def deep_dive(self, job: str, functions: list) -> dict:
         """Pseudocode + xrefs for the largest functions, plus types/globals/
-        annotations for the whole job (#1167). Best-effort throughout, same
-        reasoning as collect(): a partial deep-dive is still worth keeping.
+        annotations/memory_map for the whole job (#1167). Best-effort
+        throughout, same reasoning as collect(): a partial deep-dive is
+        still worth keeping.
         """
-        out: dict = {"types": [], "globals": [], "annotations": None}
+        out: dict = {"types": [], "globals": [], "annotations": None, "memory_map": []}
 
         types_resp = self._v1_bulk(f"/results/{job}/types?limit={MAX_TYPES_GLOBALS}")
         if types_resp:
@@ -621,6 +634,24 @@ class GhidraClient:
         annotations_resp = self._v1_bulk(f"/jobs/{job}/annotations")
         if annotations_resp is not None:
             out["annotations"] = annotations_resp
+
+        # #1167: block metadata plus a small bounded hexdump preview of each
+        # block's opening bytes -- one extra round trip per block, cheap
+        # since a program's initialized memory blocks are naturally few
+        # (unlike functions/types/globals). memory.bin's raw bytes never
+        # leave the Ghidra service; only this bounded preview is mirrored.
+        memory_resp = self._v1_bulk(f"/results/{job}/memory")
+        if memory_resp:
+            blocks = memory_resp.get("blocks", [])
+            for block in blocks:
+                addr = block.get("start")
+                if not addr:
+                    continue
+                preview = self._v1_bulk(
+                    f"/results/{job}/hexdump/{addr}?length={DEEPDIVE_HEXDUMP_PREVIEW_BYTES}")
+                if preview:
+                    block["hexdump_preview"] = {"hex": preview.get("hex", ""), "ascii": preview.get("ascii", "")}
+            out["memory_map"] = blocks
 
         # Largest functions first -- same heuristic build_call_graph's
         # GRAPH_SEEDS uses and for the same reason: the small PLT thunks and
@@ -1887,6 +1918,7 @@ def analyse_one(client: GhidraClient, sha: str, sample: Path,
         "types": deep["types"],
         "globals": deep["globals"],
         "annotations": deep["annotations"],
+        "memory_map": deep["memory_map"],
         "ai_triage": ai_triage,
         "fuzzy_hashes": fuzzy,
         "lief": lief_info,
@@ -1988,7 +2020,7 @@ def drain() -> int:
                 "functions": [], "strings": [], "imports": [], "findcrypt": [],
                 "functions_deepened": 0, "functions_deepened_truncated": False,
                 "call_graph_svg": None, "ai_triage": None,
-                "types": [], "globals": [], "annotations": None,
+                "types": [], "globals": [], "annotations": None, "memory_map": [],
                 "fuzzy_hashes": None, "lief": None, "capa": None, "floss": None,
                 "revdeck": None,
                 "report_pdf": None,
