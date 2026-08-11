@@ -28,7 +28,7 @@ jq -e '
   ([.authenticationFlows[] | select(.alias == "Browser - Conditional 2FA") |
     .authenticationExecutions[] | select(.authenticator == "webauthn-authenticator") |
     .requirement] == ["ALTERNATIVE"]) and
-  ([.clients[].clientId] | sort == ["apiary-dashboard", "arkime", "auth-events-poller", "dockge", "evebox", "kibana", "revdeck", "tanner", "traefik-dashboard"]) and
+  ([.clients[].clientId] | sort == ["apiary-dashboard", "arcane", "arkime", "auth-events-poller", "dockge", "evebox", "kibana", "revdeck", "tanner", "traefik-dashboard"]) and
   (all(.clients[] | select(.clientId != "auth-events-poller");
     .publicClient == false and
     .standardFlowEnabled == true and
