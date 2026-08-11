@@ -50,7 +50,40 @@ const events = Array.from({ length: 60 }, (_, index) => ({
 // never read once discovered.
 fakeES.seedSensorEvents("cowrie", events);
 writeFileSync(join(logs, "cowrie", "cowrie.json"), `${events.map((e) => JSON.stringify(e)).join("\n")}\n`);
-writeFileSync(join(payloads, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"), "#!/bin/sh\ncurl http://example.invalid/fixture\n");
+
+// #1202: dashboard/payloads_data.go's refreshPayloadCacheAsync no longer
+// scans PAYLOAD_DIRS itself -- that walk now happens once, centrally, in
+// payload-inventory-worker (#1201), which this e2e fixture doesn't run.
+// Still write the fixture file to disk (payload_analysis.go's on-demand
+// reads -- Ghidra/sandbox/Workbench submission -- still stat PAYLOAD_DIRS
+// directly), but seed dashboard-payload-inventory-v1 directly too, the
+// same shape payload-inventory-worker would have written, so /payloads
+// has something to list without relying on a scan dashboard itself no
+// longer performs.
+const payloadHash = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+const payloadContent = "#!/bin/sh\ncurl http://example.invalid/fixture\n";
+writeFileSync(join(payloads, payloadHash), payloadContent);
+await fetch(`${fakeES.url}/dashboard-payload-inventory-v1/_doc/${payloadHash}?op_type=create`, {
+  method: "PUT",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    Hash: payloadHash,
+    Size: Buffer.byteLength(payloadContent),
+    SizeH: `${Buffer.byteLength(payloadContent)} B`,
+    Mtime: "2026-08-01 00:00",
+    MtimeUTC: "2026-08-01T00:00:00Z",
+    MIME: "text/plain; charset=utf-8",
+    Kind: "POSIX shell command/script",
+    KindCode: "shell",
+    Platform: "Linux",
+    AnalysisPath: "Bash under strace",
+    Dynamic: true,
+    Sources: ["scripts"],
+    Copies: 1,
+    Preview: "",
+    PreviewTruncated: false,
+  }),
+});
 
 const stateFile = (name) => join(state, name);
 const child = spawn("go", ["run", "."], {

@@ -390,10 +390,19 @@ func (s *store) refreshPayloadCacheAsync() {
 	s.payloadRefreshing = true
 	s.payloadMu.Unlock()
 	go func() {
-		scanned := s.scanPayloads()
-		attachGitHubAnalysisVerdicts(scanned.Files)
-		indexPayloadInventory(s.es, scanned.Files)
-		s.mirrorPayloadBytes(scanned.Files)
+		// #1202: the disk walk (scanPayloads) and raw-bytes mirror
+		// (mirrorPayloadBytes) that used to run here on every dashboard
+		// instance's own timer now run once, centrally, in
+		// payload-inventory-worker (#1201) -- this reads the same
+		// payloadInventoryIndex/payloadBytesIndex that worker writes,
+		// unchanged. GitHub-analysis verdict attachment stays here: it's a
+		// dashboard-specific concern (the /github-analysis/ submission
+		// flow), not something payload-inventory-worker knows about, and
+		// still needs to persist onto the shared document so every
+		// instance's own read sees it -- same indexPayloadInventory this
+		// file has always used, now applied to freshly-read docs instead
+		// of a freshly-scanned ones, and still a no-op write for any file
+		// whose verdict fields haven't changed since the last cycle.
 		fresh, err := readPayloadInventory(s.es)
 		if err != nil {
 			// Elasticsearch is unreachable this cycle -- keep serving
@@ -405,6 +414,8 @@ func (s *store) refreshPayloadCacheAsync() {
 			s.payloadMu.Unlock()
 			return
 		}
+		attachGitHubAnalysisVerdicts(fresh.Files)
+		indexPayloadInventory(s.es, fresh.Files)
 		s.payloadMu.Lock()
 		s.payloadCache = fresh
 		s.payloadCacheAt = time.Now()
