@@ -79,7 +79,6 @@ func main() {
 	setVNCBridgeOrigin(getenv("SANDBOX_VNC_BRIDGE_WS", ""))
 	s := &store{
 		dir:            getenv("LOG_DIR", "/logs"),
-		yaraFile:       os.Getenv("YARA_RESULTS_FILE"),
 		authAccountURL: authAccountURL,
 		authAdminURL:   validatedExternalURL("AUTH_ADMIN_URL"),
 	}

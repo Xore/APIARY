@@ -79,13 +79,14 @@ x-dashboard-volumes: &dashboard-volumes
   # Unified read-only payload inventory: Dionaea binaries, Cowrie
   # transfers, and dashboard-retained inline script artifacts are all
   # listed, source-labelled, analysed, and downloadable from /payloads.
-  # dionaea-lib/yara-results are shared, explicitly-named volumes (see
-  # this file's header) -- dionaea and yara-scanner (main stack) write
-  # into them, this stack only ever reads.
+  # dionaea-lib is a shared, explicitly-named volume (see this file's
+  # header) -- dionaea (main stack) writes into it, this stack only reads.
+  # yara-results (same mechanism) is no longer mounted here (#1103 Category
+  # 4): dashboard/yara.go reads yara-analysis-v1 from ES exclusively now,
+  # es-results-importer's own mount below is the only remaining consumer.
   - dionaea-lib:/dionaea-lib:ro
   - /opt/stacks/apiary/logs/cowrie/downloads:/cowrie-downloads:ro
   - dashboard-state:/state
-  - yara-results:/yara:ro
   - /var/lib/honeypot-sandbox/export:/sandbox-results:ro
   # Narrow intent channel for the Analyze button. The dashboard never
   # receives access to libvirt, systemd, Docker, or sandbox samples.
@@ -252,7 +253,6 @@ services:
       - ALERT_COOLDOWN=${HONEYPOT_ALERT_COOLDOWN:-6h}
       - PAYLOAD_DIRS=/dionaea-lib/binaries,/cowrie-downloads
       - SCRIPT_PAYLOAD_DIR=/state/script-payloads
-      - YARA_RESULTS_FILE=/yara/results.json
       - INTELLIGENCE_STATE_FILE=/state/intelligence.json
       - SANDBOX_RESULTS_DIR=/sandbox-results
       - SANDBOX_REQUEST_DIR=/sandbox-requests
@@ -400,7 +400,6 @@ services:
       - ALERT_COOLDOWN=${HONEYPOT_ALERT_COOLDOWN:-6h}
       - PAYLOAD_DIRS=/dionaea-lib/binaries,/cowrie-downloads
       - SCRIPT_PAYLOAD_DIR=/state/script-payloads
-      - YARA_RESULTS_FILE=/yara/results.json
       - INTELLIGENCE_STATE_FILE=/state/intelligence.json
       - SANDBOX_RESULTS_DIR=/sandbox-results
       - SANDBOX_REQUEST_DIR=/sandbox-requests
@@ -523,6 +522,12 @@ services:
       # into the dashboard: mirrored into ES here, never mounted into the
       # dashboard service itself.
       - reporter-data:/reporter-data:ro
+      # #1103 Category 4: analysis/yara/scanner.py's aggregate results.json,
+      # same shared named volume the dashboard service's own YARA_RESULTS_FILE
+      # mount above uses -- see importer.py's "yara" source comment for why
+      # this is a new document-per-sample-inside-one-file shape rather than
+      # a plain glob-of-files source like everything else here.
+      - yara-results:/yara-results:ro
     environment:
       - ES_HOST=http://elasticsearch:9200
       - IMPORT_INTERVAL=${ES_IMPORTER_INTERVAL:-300}
@@ -537,6 +542,7 @@ services:
       - CAPE_RESULTS_DIR=/cape-results
       - COWRIE_TTYLOG_DIR=/cowrie-tty
       - REPORTER_METRICS_DIR=/reporter-data
+      - YARA_RESULTS_DIR=/yara-results
       - TZ=Europe/Berlin
     networks:
       - honeynet
