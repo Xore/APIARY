@@ -54,11 +54,17 @@ import zipfile
 from pathlib import Path
 from urllib.parse import parse_qsl
 
+import security_index
+
 GHIDRA_BIN = os.environ.get("GHIDRA_ANALYZE_HEADLESS", "/opt/ghidra/support/analyzeHeadless")
 SCRIPT_DIR = os.environ.get("GHIDRA_SCRIPT_DIR", "/opt/service")
 DATA_DIR = Path(os.environ.get("GHIDRA_DATA_DIR", "/data/ghidra_projects"))
 ANALYSIS_TIMEOUT = int(os.environ.get("ANALYSIS_TIMEOUT", "3600"))
 PORT = int(os.environ.get("PORT", "9090"))
+# Mirrors export_json.py's own MAX_DECOMPILE_FUNCTIONS env var (same name,
+# same default) -- read here only to report an honest decompile-coverage
+# ratio in the security index (#1180), never to change what gets exported.
+GHIDRA_MAX_DECOMPILE_FUNCTIONS = int(os.environ.get("GHIDRA_MAX_DECOMPILE_FUNCTIONS", "500"))
 
 REQUIRED_ARTIFACTS = ("functions.json", "strings.json", "imports.json")
 
@@ -709,11 +715,12 @@ TOOL_HANDLERS = {
 # route here is additive: nothing above changes shape or behavior.
 
 # Service-vocabulary capability names this build actually implements.
-# security_index (attack-surface/vulnerability triage scoring) and
-# string_references (data-xref reverse lookup) are deliberately left False
-# -- both need real new analysis methodology, not just routing, and are
-# out of scope here; every other v1 route below is a real implementation,
-# not a stub that returns empty data.
+# string_references (data-xref reverse lookup) is deliberately left False
+# -- it needs real new analysis methodology and is out of scope here.
+# security_index (attack-surface/vulnerability triage scoring) is real as
+# of #1180: see security_index.py's own module docstring for the
+# methodology and its deliberate scope limits. Every other v1 route below
+# is a real implementation too, not a stub that returns empty data.
 V1_CAPABILITIES = {
     "summary": True,
     "types": True,
@@ -726,7 +733,7 @@ V1_CAPABILITIES = {
     "cancellation": True,
     "deduplication": True,
     "string_references": False,
-    "security_index": False,
+    "security_index": True,
 }
 
 
@@ -753,6 +760,117 @@ def _build_summary(job_id: str) -> dict:
         },
         "source": "v1",
     }
+
+
+def _build_security_index(job_id: str):
+    """Returns security_index.build_security_index()'s own dict, or None if
+    the artifacts it needs (functions.json/imports.json/xrefs.json) are not
+    all present -- the same "have the required files" gate every other v1
+    route already uses, no separate rescore/build lifecycle (#1180's own
+    issue text explains why: this is computed fresh from data that's
+    already exactly synchronized with the job's own completed artifacts,
+    every time, not cached against a separately-versioned index)."""
+    functions_data = _read_job_artifact(job_id, "functions.json")
+    imports_data = _read_job_artifact(job_id, "imports.json")
+    xrefs_data = _read_job_artifact(job_id, "xrefs.json")
+    if functions_data is None or imports_data is None or xrefs_data is None:
+        return None
+    return security_index.build_security_index(
+        functions_data.get("functions", []),
+        imports_data if isinstance(imports_data, list) else [],
+        xrefs_data,
+        max_decompile_functions=GHIDRA_MAX_DECOMPILE_FUNCTIONS,
+    )
+
+
+def _v1_security_summary(job_id: str):
+    index = _build_security_index(job_id)
+    if index is None:
+        return 200, {"available": False, "status": "missing", "rescore_available": False}
+    return 200, {
+        "available": True,
+        "schema_version": security_index.SCHEMA_VERSION,
+        "scorer_version": security_index.SCORER_VERSION,
+        "weights_version": security_index.WEIGHTS_VERSION,
+        "summary": index["summary"],
+        "coverage": index["coverage"],
+        "metadata": index["metadata"],
+    }
+
+
+def _v1_security_functions(job_id: str, params: dict):
+    index = _build_security_index(job_id)
+    if index is None:
+        return 409, {"available": False, "status": "missing", "rescore_available": False}
+    items = index["scored"]
+
+    band = (params.get("band") or "").strip().lower()
+    if band:
+        items = [it for it in items if it["band"] == band]
+    category = (params.get("category") or "").strip().lower()
+    if category:
+        items = [it for it in items if category in it["categories"]]
+    min_score_raw = params.get("min_score")
+    if min_score_raw not in (None, ""):
+        try:
+            min_score = float(min_score_raw)
+        except ValueError:
+            return 422, {"error": "min_score must be a number"}
+        items = [it for it in items if it["score"] >= min_score]
+    query = (params.get("q") or "").strip().lower()
+    if query:
+        items = [it for it in items if query in (it.get("name") or "").lower()]
+    rank_raw = params.get("rank")
+    if rank_raw not in (None, ""):
+        try:
+            rank = int(rank_raw)
+        except ValueError:
+            return 422, {"error": "rank must be an integer"}
+        items = [it for it in items if it["rank"] == rank]
+
+    sort_key = params.get("sort") or "score"
+    if sort_key not in ("score", "rank", "name"):
+        return 422, {"error": "sort must be one of score, rank, name"}
+    order = params.get("order") or "desc"
+    if order not in ("asc", "desc"):
+        return 422, {"error": "order must be asc or desc"}
+    items = sorted(items, key=lambda it: it.get(sort_key) or 0, reverse=(order == "desc"))
+
+    total = len(items)
+    try:
+        offset = int(params.get("offset") or 0)
+        limit = int(params.get("limit") or 25)
+    except ValueError:
+        return 422, {"error": "offset/limit must be integers"}
+    page = items[offset:offset + limit]
+    return 200, {
+        "items": [
+            {
+                "rank": it["rank"], "addr": it["addr"], "name": it["name"],
+                "score": it["score"], "band": it["band"], "confidence": it["confidence"],
+                "categories": it["categories"],
+            }
+            for it in page
+        ],
+        "pagination": {"total": total, "offset": offset, "limit": limit},
+    }
+
+
+def _v1_security_function_detail(job_id: str, addr: str):
+    norm_addr = _normalize_addr(addr)
+    if norm_addr is None:
+        return 400, {"error": "addr is not a valid hex address"}
+    index = _build_security_index(job_id)
+    if index is None:
+        return 409, {"available": False, "status": "missing", "rescore_available": False}
+    for it in index["scored"]:
+        if it["addr"] == norm_addr:
+            return 200, {
+                "rank": it["rank"], "addr": it["addr"], "name": it["name"],
+                "score": it["score"], "band": it["band"], "confidence": it["confidence"],
+                "categories": it["categories"], "signals": it["signals"],
+            }
+    return 404, {"error": f"no security explanation for {norm_addr} (zero signals detected)"}
 
 
 def _v1_query(job_id: str, payload: dict):
@@ -1020,6 +1138,48 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             handler = _v1_list_types if kind == "types" else _v1_list_globals
             status, result = handler(job_id, params)
+            self._json(status, result)
+            return
+
+        # #1180: security_index -- attack-surface/vulnerability-triage
+        # scoring. summary/functions gate on job existence but NOT on
+        # V1_CAPABILITIES the way a client-side capability_required error
+        # implies -- the capability flag is what tells the client whether
+        # to call these at all; a build that still had it False would 404
+        # here anyway (route wouldn't exist), matching that contract.
+        match = re.match(r"^/v1/results/([a-f0-9]{32})/security/summary$", path)
+        if match:
+            job_id = match.group(1)
+            with _lock:
+                job = _jobs.get(job_id)
+            if job is None or job.get("status") != "done":
+                self._json(404, {"error": "result not available"})
+                return
+            status, result = _v1_security_summary(job_id)
+            self._json(status, result)
+            return
+
+        match = re.match(r"^/v1/results/([a-f0-9]{32})/security/functions/([0-9a-fA-Fx]+)$", path)
+        if match:
+            job_id, addr = match.groups()
+            with _lock:
+                job = _jobs.get(job_id)
+            if job is None or job.get("status") != "done":
+                self._json(404, {"error": "result not available"})
+                return
+            status, result = _v1_security_function_detail(job_id, addr)
+            self._json(status, result)
+            return
+
+        match = re.match(r"^/v1/results/([a-f0-9]{32})/security/functions$", path)
+        if match:
+            job_id = match.group(1)
+            with _lock:
+                job = _jobs.get(job_id)
+            if job is None or job.get("status") != "done":
+                self._json(404, {"error": "result not available"})
+                return
+            status, result = _v1_security_functions(job_id, params)
             self._json(status, result)
             return
 
