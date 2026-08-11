@@ -120,7 +120,20 @@ jobs:
         run: |
           destination=/var/dockge/stacks/honeypot-keycloak
           install -d -m 755 "$destination"
-          install -d -m 750 "$destination/secrets"
+          # #1143: NOT install -d -m 750, which unconditionally chmods an
+          # already-existing directory too. docker-compose.keycloak.yml
+          # bind-mounts this whole directory (not a single file) into both
+          # keycloak and its postgres sidecar as :ro -- once an operator has
+          # provisioned real secrets here, its ownership/mode is whatever
+          # lets the container's own internal UID (1000, no userns remap;
+          # see #1143's own postmortem) actually traverse and read them,
+          # which is not necessarily the deploy-runner's UID. #1143 already
+          # documented one production Keycloak crash-loop from exactly this
+          # kind of blanket permission reassertion; only create the
+          # directory (deploy-runner-owned, mode 750, matching the original
+          # "fail closed until provisioned" intent below) the first time it
+          # doesn't exist yet, never touch it again afterward.
+          [ -d "$destination/secrets" ] || install -d -m 750 "$destination/secrets"
           cp docker-compose.keycloak.yml "$destination/compose.yml"
           cp -r keycloak "$destination/"
           install -d -m 755 "$destination/theme"
