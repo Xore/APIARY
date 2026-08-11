@@ -56,7 +56,7 @@ cat > "$artifacts_dir/imports.json" <<'EOF'
 [{"name": "printf", "library": "libc.so.6"}, {"name": "CreateProcessA", "library": "kernel32.dll"}]
 EOF
 cat > "$artifacts_dir/xrefs.json" <<'EOF'
-{"0x401000": {"callers": [], "callees": [{"addr": "0x401100", "name": "FUN_00401100"}]},
+{"0x401000": {"callers": [], "callees": [{"addr": "0x401100", "name": "FUN_00401100"}, {"addr": "0x401200", "name": "CreateProcessA"}]},
  "0x401100": {"callers": [{"addr": "0x401000", "name": "main"}], "callees": []}}
 EOF
 cat > "$artifacts_dir/decompiled.json" <<'EOF'
@@ -325,8 +325,10 @@ def test_v1_capabilities_and_results():
 
             caps = get(f"{base}/v1/capabilities")
             check(caps["capabilities"]["types"] is True, "v1/capabilities advertises real features")
-            check(caps["capabilities"]["security_index"] is False,
-                  "v1/capabilities does not falsely advertise unimplemented security scoring")
+            check(caps["capabilities"]["security_index"] is True,
+                  "v1/capabilities advertises the real security-index scorer (#1180)")
+            check(caps["capabilities"]["string_references"] is False,
+                  "v1/capabilities does not falsely advertise the still-unimplemented string_references")
 
             submit = post_file(f"{base}/analyze", b"sample for v1 results test")
             job_id = submit["job_id"]
@@ -428,6 +430,70 @@ def test_v1_types_globals_hexdump():
                 check(False, "hexdump for a never-exported address 404s")
             except urllib.error.HTTPError as e:
                 check(e.code == 404, "hexdump for a never-exported address 404s")
+        finally:
+            proc.terminate()
+            proc.wait(timeout=5)
+
+
+def test_v1_security_index():
+    # #1180: FAKE_HEADLESS's own xrefs.json has main (0x401000) call both
+    # FUN_00401100 (internal, no signal) and CreateProcessA (imported,
+    # command_execution, high weight) -- so main is the one function that
+    # should score, and FUN_00401100 should have zero signals.
+    with tempfile.TemporaryDirectory() as tmp:
+        port = 19200
+        proc = run_server(FAKE_HEADLESS, port, tmp)
+        try:
+            base = f"http://127.0.0.1:{port}"
+            wait_health(base)
+
+            submit = post_file(f"{base}/analyze", b"sample for v1 security index test")
+            job_id = submit["job_id"]
+            wait_status(base, job_id)
+
+            summary = get(f"{base}/v1/results/{job_id}/security/summary")
+            check(summary["available"] is True, "security summary reports available for a completed job")
+            check(summary["summary"]["total_functions"] == 1,
+                  "security summary counts only the one function with real signals")
+            check(summary["summary"]["bands"]["high"] == 1,
+                  "security summary bands the CreateProcessA caller as high")
+            check(summary["summary"]["categories"]["command_execution"] == 1,
+                  "security summary counts the command_execution category")
+            check(summary["summary"]["root_count"] == 1,
+                  "security summary counts main (no callers) as an attack-surface root")
+            check(summary["coverage"]["components"]["call_edges"] == 1.0,
+                  "security coverage reports call_edges as fully computed")
+
+            functions = get(f"{base}/v1/results/{job_id}/security/functions")
+            check(len(functions["items"]) == 1 and functions["items"][0]["name"] == "main",
+                  "security functions route ranks the scored function")
+            check(functions["items"][0]["band"] == "high" and functions["items"][0]["score"] == 40.0,
+                  "security functions route reports the right score/band")
+            check(functions["pagination"]["total"] == 1, "security functions pagination reports the real total")
+
+            filtered = get(f"{base}/v1/results/{job_id}/security/functions?category=memory_safety")
+            check(filtered["items"] == [], "security functions route filters by category")
+
+            bad_sort = None
+            try:
+                get(f"{base}/v1/results/{job_id}/security/functions?sort=bogus")
+            except urllib.error.HTTPError as e:
+                bad_sort = e.code
+            check(bad_sort == 422, "security functions route rejects an invalid sort field")
+
+            detail = get(f"{base}/v1/results/{job_id}/security/functions/0x401000")
+            check(detail["name"] == "main" and len(detail["signals"]) == 1,
+                  "security function detail returns main's own signal")
+            check(detail["signals"][0]["signal_id"] == "calls_createprocessa",
+                  "security function detail identifies the CreateProcessA signal")
+            check(len(detail["signals"][0]["evidence"]) == 1,
+                  "security function detail carries evidence for its signal")
+
+            try:
+                get(f"{base}/v1/results/{job_id}/security/functions/0x401100")
+                check(False, "security function detail 404s for a zero-signal function")
+            except urllib.error.HTTPError as e:
+                check(e.code == 404, "security function detail 404s for a zero-signal function")
         finally:
             proc.terminate()
             proc.wait(timeout=5)
@@ -669,6 +735,7 @@ if __name__ == "__main__":
     test_v1_capabilities_and_results()
     test_v1_decompile_xrefs_query_graph()
     test_v1_types_globals_hexdump()
+    test_v1_security_index()
     test_v1_annotations()
     test_v1_job_lifecycle_and_dedup()
     test_v1_job_cancel()

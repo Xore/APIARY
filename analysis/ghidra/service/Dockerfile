@@ -32,6 +32,7 @@ RUN curl -fsSL -o /tmp/ghidra.zip \
     && chmod +x /opt/ghidra/support/analyzeHeadless
 
 COPY server.py /opt/service/server.py
+COPY security_index.py /opt/service/security_index.py
 COPY export_json.py /opt/service/export_json.py
 
 RUN mkdir -p /data/ghidra_projects \
