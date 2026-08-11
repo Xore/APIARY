@@ -7,13 +7,13 @@ package main
 // threshold) so campaigns-v1/attacker-clusters-v1 read the same as the
 // in-process versions they're meant to replace (#1202, not this).
 //
-// Not ported: campaigns.go's Providers grouping/scoring (dashboard's own
-// geoInfo/threat-intel lookup, a local MaxMind/CSV-backed subsystem this
-// worker has no access to and no reason to duplicate) and alert counts
-// (suricata-v2-alert-* is a different index shape entirely, a distinct
-// query this worker doesn't do yet) -- both explicit follow-ups, not
-// silently dropped without a trace: see the doc comments on
-// campaignAgg/clusterAgg below for exactly what's missing and why.
+// #1218 added Providers grouping/scoring and alert counts, both via
+// ES-native signals rather than duplicating dashboard's own
+// geoInfo/threat-intel lookup (a genuinely dashboard-instance-local
+// subsystem this worker still has no access to) -- see fetch.go's own doc
+// comment for exactly which fields/queries back each one, and campaignDoc/
+// clusterDoc below for the remaining, narrower gap against dashboard's
+// exact Provider field.
 
 import (
 	"fmt"
@@ -74,10 +74,13 @@ func sortedSet(m map[string]bool, limit int) string {
 }
 
 // campaignDoc is one campaigns-v1 document -- field names match
-// dashboard/campaigns.go's campaignRow where the same signal exists here;
-// Alerts/Providers are omitted (see this file's header) rather than
-// written as permanently-zero placeholders that would look like real
-// "no IDS alerts seen" data.
+// dashboard/campaigns.go's campaignRow where the same signal exists here.
+// Alerts/Providers were previously omitted (see #1218); both are now
+// populated from the ES-native signals fetch.go's own doc comment
+// describes -- Alerts from a real suricata-v2-alert-* count, Providers
+// from source.as.type (a narrower signal than dashboard's own Provider
+// field, which also folds in a local-only threat-intel CIDR list this
+// worker has no access to -- see fetch.go).
 type campaignDoc struct {
 	CIDR         string   `json:"cidr"`
 	Score        int      `json:"score"`
@@ -87,6 +90,8 @@ type campaignDoc struct {
 	Ports        []string `json:"ports"`
 	Creds        int      `json:"creds"`
 	Payloads     int      `json:"payloads"`
+	Alerts       int      `json:"alerts"`
+	Providers    []string `json:"providers"`
 	Fingerprints int      `json:"fingerprints"`
 	First        string   `json:"first"`
 	Last         string   `json:"last"`
@@ -99,14 +104,20 @@ type campaignAgg struct {
 	ips, sensors map[string]bool
 	ports, creds map[string]bool
 	payloads     map[string]bool
+	providers    map[string]bool
 	fingerprints map[string]bool
 	first, last  time.Time
 }
 
 // correlateCampaigns mirrors dashboard/campaigns.go's correlateCampaigns:
-// same CIDR grouping, same score formula (Providers/Alerts terms omitted,
-// see header), same top-50 cap.
-func correlateCampaigns(evs []corrEvent, now time.Time) []campaignDoc {
+// same CIDR grouping, same score formula, same top-50 cap. alertCounts is
+// fetchSuricataAlertCounts' own per-source-IP result (nil/empty is fine --
+// every group's alert term is just 0, same as before #1218); a group's
+// total is the sum over its own member IPs, computed once per group after
+// the main pass below (an alert count is per-IP, not per-event, so it
+// can't be accumulated inside the per-event loop without double-counting
+// every IP's count once per event it appears in).
+func correlateCampaigns(evs []corrEvent, now time.Time, alertCounts map[string]int) []campaignDoc {
 	groups := map[string]*campaignAgg{}
 	for _, e := range evs {
 		cidr := campaignCIDR(e.SrcIP)
@@ -115,7 +126,7 @@ func correlateCampaigns(evs []corrEvent, now time.Time) []campaignDoc {
 		}
 		a := groups[cidr]
 		if a == nil {
-			a = &campaignAgg{ips: map[string]bool{}, sensors: map[string]bool{}, ports: map[string]bool{}, creds: map[string]bool{}, payloads: map[string]bool{}, fingerprints: map[string]bool{}}
+			a = &campaignAgg{ips: map[string]bool{}, sensors: map[string]bool{}, ports: map[string]bool{}, creds: map[string]bool{}, payloads: map[string]bool{}, providers: map[string]bool{}, fingerprints: map[string]bool{}}
 			groups[cidr] = a
 		}
 		a.events++
@@ -125,6 +136,9 @@ func correlateCampaigns(evs []corrEvent, now time.Time) []campaignDoc {
 		}
 		if e.Shasum != "" {
 			a.payloads[e.Shasum] = true
+		}
+		if e.Provider != "" {
+			a.providers[e.Provider] = true
 		}
 		if e.Fingerprint != "" {
 			a.fingerprints[e.Fingerprint] = true
@@ -139,7 +153,11 @@ func correlateCampaigns(evs []corrEvent, now time.Time) []campaignDoc {
 
 	docs := make([]campaignDoc, 0, len(groups))
 	for cidr, a := range groups {
-		score := min(100, min(a.events, 30)+len(a.sensors)*15+len(a.ips)*3+len(a.creds)*8+len(a.payloads)*20+len(a.fingerprints)*3)
+		alerts := 0
+		for ip := range a.ips {
+			alerts += alertCounts[ip]
+		}
+		score := min(100, min(a.events, 30)+len(a.sensors)*15+len(a.ips)*3+len(a.creds)*8+len(a.payloads)*20+min(alerts, 15)*2+len(a.fingerprints)*3+len(a.providers)*2)
 		var why []string
 		if len(a.sensors) > 1 {
 			why = append(why, fmt.Sprintf("cross-sensor activity (%d)", len(a.sensors)))
@@ -153,6 +171,9 @@ func correlateCampaigns(evs []corrEvent, now time.Time) []campaignDoc {
 		if len(a.creds) > 0 {
 			why = append(why, fmt.Sprintf("%d reused credentials", len(a.creds)))
 		}
+		if alerts > 0 {
+			why = append(why, fmt.Sprintf("%d IDS alerts", alerts))
+		}
 		if len(a.fingerprints) > 0 {
 			why = append(why, fmt.Sprintf("%d fingerprints", len(a.fingerprints)))
 		}
@@ -162,7 +183,8 @@ func correlateCampaigns(evs []corrEvent, now time.Time) []campaignDoc {
 		docs = append(docs, campaignDoc{
 			CIDR: cidr, Score: score, Events: a.events, UniqueIPs: len(a.ips),
 			Sensors: setSlice(a.sensors), Ports: setSlice(a.ports),
-			Creds: len(a.creds), Payloads: len(a.payloads), Fingerprints: len(a.fingerprints),
+			Creds: len(a.creds), Payloads: len(a.payloads), Alerts: alerts,
+			Providers: setSlice(a.providers), Fingerprints: len(a.fingerprints),
 			First: a.first.UTC().Format(time.RFC3339), Last: a.last.UTC().Format(time.RFC3339),
 			Generated:   now.UTC().Format(time.RFC3339),
 			Explanation: strings.Join(why, "; "),
@@ -195,9 +217,11 @@ func setSlice(m map[string]bool) []string {
 }
 
 // clusterDoc is one attacker-clusters-v1 document -- mirrors dashboard/
-// intelligence.go's clusterRow. "Provider class" (dashboard's local geoip/
-// threat-intel lookup, see this file's header) is not one of the kinds
-// this worker groups by; Fingerprint/Payload/Autonomous-system are.
+// intelligence.go's clusterRow's four grouping kinds (Fingerprint/Payload/
+// Autonomous system/Provider class), lowercased (kind/asn/provider, not
+// "Autonomous system"/"Provider class") matching this worker's own
+// existing "fingerprint"/"payload" convention rather than dashboard's
+// display-string labels.
 type clusterDoc struct {
 	Kind      string   `json:"kind"`
 	Value     string   `json:"value"`
@@ -237,6 +261,7 @@ func correlateClusters(evs []corrEvent, now time.Time) []clusterDoc {
 		if e.ASN != 0 {
 			add("asn", fmt.Sprintf("AS%d %s", e.ASN, e.ASNOrg), e.SrcIP, e.Sensor)
 		}
+		add("provider", e.Provider, e.SrcIP, e.Sensor)
 	}
 
 	var docs []clusterDoc
