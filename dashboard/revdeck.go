@@ -19,14 +19,16 @@ import (
 // "error" with Error explaining why -- there is no other field to fall back
 // on reading.
 type revdeckStandaloneResult struct {
-	Version     int            `json:"version"`
-	SHA256      string         `json:"sha256"`
-	RequestedAt string         `json:"requested_at"`
-	StartedAt   string         `json:"started_at"`
-	CompletedAt string         `json:"completed_at"`
-	ExitStatus  string         `json:"exit_status"`
-	Error       string         `json:"error,omitempty"`
-	RevDeck     *ghidraRevDeck `json:"revdeck"`
+	Version            int                `json:"version"`
+	SHA256             string             `json:"sha256"`
+	RequestedAt        string             `json:"requested_at"`
+	StartedAt          string             `json:"started_at"`
+	CompletedAt        string             `json:"completed_at"`
+	ExitStatus         string             `json:"exit_status"`
+	Error              string             `json:"error,omitempty"`
+	RevDeck            *ghidraRevDeck     `json:"revdeck"`
+	RevDeckChatThreads *ghidraChatThreads `json:"revdeck_chat_threads"`
+	RevDeckRecovery    *ghidraRecovery    `json:"revdeck_recovery"`
 }
 
 type revdeckPageData struct {

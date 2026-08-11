@@ -54,13 +54,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-# 7: added memory_map (#1167). Informational only — nothing reads this field
-# to decide how to parse the rest of the document; it exists so a result can
-# be tied to the worker version that produced it. (6: added the v1 deep-dive
-# -- pseudocode/callers/callees/types/globals/annotations (#1168). 5: added
+# 8: added revdeck_chat_threads/revdeck_recovery (#1193). Informational
+# only — nothing reads this field to decide how to parse the rest of the
+# document; it exists so a result can be tied to the worker version that
+# produced it. (7: added memory_map (#1167). 6: added the v1 deep-dive --
+# pseudocode/callers/callees/types/globals/annotations (#1168). 5: added
 # floss (#207). 4: added revdeck (#78). 3: added capa. 2: added fuzzy_hashes
 # and lief (#138).)
-RESULT_VERSION = 7
+RESULT_VERSION = 8
 
 REQUEST_DIR = Path(os.environ.get("GHIDRA_REQUEST_DIR", "/ghidra-requests"))
 RESULTS_DIR = Path(os.environ.get("GHIDRA_RESULTS_DIR", "/ghidra-results"))
@@ -292,7 +293,8 @@ REVDECK_RESULTS_DIR = os.environ.get("REVDECK_RESULTS_DIR", "")
 # Its own version line, not RESULT_VERSION above: this is a different,
 # smaller result document ({sha256}_revdeck.json), not a field on the
 # {sha256}_ghidra.json the rest of this file produces.
-REVDECK_STANDALONE_RESULT_VERSION = 1
+# 2: added revdeck_chat_threads/revdeck_recovery (#1193).
+REVDECK_STANDALONE_RESULT_VERSION = 2
 
 # GHIDRA_ALERT_RISK_LEVELS in the dashboard matches these exactly. A model that
 # free-forms "Highly Suspicious" would silently never alert, so anything that
@@ -1059,6 +1061,74 @@ def _revdeck_chat(job_id: str) -> dict | None:
     }
 
 
+def _revdeck_get(path: str) -> dict | list | None:
+    """GET a REVDECK_API_BASE JSON route. None on any failure -- same
+    best-effort convention as GhidraClient._v1_bulk, for the same reason:
+    an older RevDeck webui without a route (or one this job's own session
+    never populated, e.g. a job with no chat activity yet) must not fail
+    the whole triage the way an unreachable/refused endpoint does.
+    """
+    req = urllib.request.Request(f"{REVDECK_API_BASE}{path}")
+    try:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        log(f"  [!] revdeck {path}: HTTP {e.code}: {e.read()[:200]!r}")
+        return None
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
+        log(f"  [!] revdeck {path}: {e}")
+        return None
+
+
+REVDECK_CHAT_MESSAGE_CHARS = int(os.environ.get("REVDECK_CHAT_MESSAGE_CHARS", "4000"))
+
+
+def _revdeck_chat_threads(job_id: str) -> dict | None:
+    """Thread metadata plus the currently-active thread's own message
+    history (#1193) -- the analyst's actual back-and-forth Q&A, distinct
+    from the one-shot triage answer _revdeck_chat above already captures.
+
+    There is no per-thread history route on the webui, only
+    GET /chat/history/{job_id} for whichever thread is currently active
+    server-side -- if an analyst created and switched between more than one
+    thread, only the active one's messages are captured here.
+    """
+    threads = _revdeck_get(f"/chat/threads/{job_id}")
+    if not isinstance(threads, dict):
+        return None
+    history = _revdeck_get(f"/chat/history/{job_id}")
+    messages = []
+    if isinstance(history, list):
+        for m in history:
+            if not isinstance(m, dict) or m.get("role") == "system":
+                # The system prompt is static across every job -- not
+                # job-specific signal, and repeating it per mirrored job
+                # would be pure waste.
+                continue
+            content = m.get("content")
+            messages.append({
+                "role": m.get("role", ""),
+                "content": _clean(content, REVDECK_CHAT_MESSAGE_CHARS) if isinstance(content, str) else content,
+                "tool_calls": m.get("tool_calls"),
+                "name": m.get("name"),
+            })
+    return {"threads": threads.get("threads", []), "active_thread_messages": messages}
+
+
+def _revdeck_recovery(job_id: str) -> dict | None:
+    """Symbol-recovery pipeline output (#1193): recovered/renamed function
+    symbols and the class/type-layout model, distinct from the deep-dive
+    types/globals GhidraClient.deep_dive already pulls straight from
+    Ghidra's own DataTypeManager -- this is RevDeck's own inferred model on
+    top of that, not a duplicate of it.
+    """
+    index = _revdeck_get(f"/recovery/index/{job_id}")
+    symbols = _revdeck_get(f"/recovery/symbols/{job_id}")
+    if index is None and symbols is None:
+        return None
+    return {"index": index, "symbols": symbols}
+
+
 def revdeck_triage(sample: Path) -> dict | None:
     """Ask Rev·Deck's own autonomous workflow to triage this sample.
 
@@ -1090,7 +1160,21 @@ def _revdeck_triage(sample: Path) -> dict | None:
         return None
     if not _revdeck_wait(job_id):
         return None
-    return _revdeck_chat(job_id)
+    chat = _revdeck_chat(job_id)
+    if chat is None:
+        return None
+    # #1193: chat_threads/recovery are additive keys on the same dict, not a
+    # nested wrapper -- every existing reader of this function's return
+    # value (the workflow/status/answer/etc. fields _revdeck_chat already
+    # returns) keeps working unchanged. Only fetched once the one-shot
+    # triage chat itself already succeeded, since job_id's whole lifetime
+    # here is tied to that one upload -- a job whose triage chat failed
+    # outright is the rarer case and this worker's existing "the whole
+    # thing is best-effort, together" contract already treats it as
+    # nothing-to-report rather than a partial result.
+    chat["chat_threads"] = _revdeck_chat_threads(job_id)
+    chat["recovery"] = _revdeck_recovery(job_id)
+    return chat
 
 
 def build_call_graph(client: "GhidraClient", job: str, functions: list,
@@ -1812,6 +1896,12 @@ def drain_revdeck() -> int:
             reason = None
 
         revdeck_info = None if reason else revdeck_triage(sample)
+        # #1193: see the matching comment in analyse_one() -- pop chat_threads/
+        # recovery into their own top-level fields so revdeck_info (once
+        # popped) stays exactly the shape revdeckStandaloneResult.RevDeck
+        # already expects.
+        revdeck_chat_threads = revdeck_info.pop("chat_threads", None) if revdeck_info else None
+        revdeck_recovery = revdeck_info.pop("recovery", None) if revdeck_info else None
         if revdeck_info:
             log(f"  [+] revdeck {sha} ({revdeck_info['workflow']}, "
                 f"status={revdeck_info['status']}): "
@@ -1824,6 +1914,8 @@ def drain_revdeck() -> int:
                 "completed_at": now(),
                 "exit_status": "ok",
                 "revdeck": revdeck_info,
+                "revdeck_chat_threads": revdeck_chat_threads,
+                "revdeck_recovery": revdeck_recovery,
             })
             claimed.unlink()
         else:
@@ -1841,6 +1933,8 @@ def drain_revdeck() -> int:
                 "exit_status": "error",
                 "error": reason,
                 "revdeck": None,
+                "revdeck_chat_threads": None,
+                "revdeck_recovery": None,
             })
             claimed.rename(claimed.with_suffix(".failed"))
         processed += 1
@@ -1888,6 +1982,13 @@ def analyse_one(client: GhidraClient, sha: str, sample: Path,
     capa_info = capa_scan(sample)
     floss_info = floss_scan(sample)
     revdeck_info = revdeck_triage(sample)
+    # #1193: chat_threads/recovery are distinct signal from the one-shot
+    # triage chat above -- popped into their own top-level result fields
+    # (revdeck-analysis-v1... this doc's own top level) rather than left
+    # nested under "revdeck", so ghidraRevDeck's Go shape on the dashboard
+    # side stays exactly what it already was.
+    revdeck_chat_threads = revdeck_info.pop("chat_threads", None) if revdeck_info else None
+    revdeck_recovery = revdeck_info.pop("recovery", None) if revdeck_info else None
     if revdeck_info:
         log(f"  [+] revdeck ({revdeck_info['workflow']}, "
             f"status={revdeck_info['status']}): "
@@ -1925,6 +2026,8 @@ def analyse_one(client: GhidraClient, sha: str, sample: Path,
         "capa": capa_info,
         "floss": floss_info,
         "revdeck": revdeck_info,
+        "revdeck_chat_threads": revdeck_chat_threads,
+        "revdeck_recovery": revdeck_recovery,
         # Overwritten below by generate_report(), which needs the rest of
         # this dict built first. Emitted as null here rather than omitted so
         # the dashboard reads one stable shape even if report generation
@@ -2022,7 +2125,7 @@ def drain() -> int:
                 "call_graph_svg": None, "ai_triage": None,
                 "types": [], "globals": [], "annotations": None, "memory_map": [],
                 "fuzzy_hashes": None, "lief": None, "capa": None, "floss": None,
-                "revdeck": None,
+                "revdeck": None, "revdeck_chat_threads": None, "revdeck_recovery": None,
                 "report_pdf": None,
             })
             claimed.rename(claimed.with_suffix(".failed"))

@@ -207,6 +207,11 @@
                snapshot, not a live "jump to any address" viewer, since this
                page only ever reads from ES. */}}
           <div class="card wide"><h2>Memory map</h2>{{if .Detail.MemoryMap}}<p class="note">{{len .Detail.MemoryMap}} initialized memory block{{if ne (len .Detail.MemoryMap) 1}}s{{end}}, each with a bounded preview of its opening bytes.</p><button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="gh-memory">Open the memory map</button>{{else}}<p class="empty">No memory map was recovered &mdash; either this analysis predates the deep-dive worker (#1167), or the sample had no initialized memory blocks within the export budget.</p>{{end}}</div>
+          {{/* #1193: only the currently-active RevDeck thread's messages are
+               ever mirrored (there is no per-thread history route) -- see
+               _revdeck_chat_threads' own comment in ghidra-worker.py. */}}
+          <div class="card wide"><h2>Chat threads</h2>{{if .Detail.RevDeckChatThreads}}<p class="note">{{len .Detail.RevDeckChatThreads.Threads}} thread{{if ne (len .Detail.RevDeckChatThreads.Threads) 1}}s{{end}}, {{len .Detail.RevDeckChatThreads.ActiveThreadMessages}} message{{if ne (len .Detail.RevDeckChatThreads.ActiveThreadMessages) 1}}s{{end}} mirrored from the currently-active thread &mdash; the analyst's actual back-and-forth with the RevDeck assistant, distinct from the one-shot triage answer above.</p><button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="gh-chat-threads">Open the chat history</button>{{else}}<p class="empty">No chat threads were mirrored for this analysis &mdash; either it predates the chat-mirroring worker (#1193), the triage chat itself never completed, or no analyst has opened a chat session for this job yet.</p>{{end}}</div>
+          <div class="card wide"><h2>Symbol recovery</h2>{{if .Detail.RevDeckRecovery}}<p class="note">RevDeck's own symbol/type-recovery model for this job &mdash; recovered function names, renamed symbols, and class/type-layout candidates, distinct from the Ghidra-native types/globals above.</p><button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="gh-recovery">Open the recovery data</button>{{else}}<p class="empty">No recovery-pipeline data was mirrored for this analysis &mdash; either it predates the recovery-mirroring worker (#1193), or the triage chat itself never completed.</p>{{end}}</div>
         </div>
 
         <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-data" role="tabpanel" data-dashboard-panel="data" hidden>
@@ -235,6 +240,19 @@
 {{if .Preview}}    {{.Preview.Hex}}
     {{.Preview.ASCII}}
 {{end}}{{end}}</pre></div>{{end}}
+        {{if .Detail.RevDeckChatThreads}}<div hidden data-hp-evidence-body="gh-chat-threads"><h3>Chat threads</h3><pre class="code">{{range .Detail.RevDeckChatThreads.Threads}}{{.ThreadID}}  {{.Title}}  ({{.MessageCount}} message{{if ne .MessageCount 1}}s{{end}})
+{{end}}
+--- active thread ---
+{{range .Detail.RevDeckChatThreads.ActiveThreadMessages}}[{{.Role}}]{{if .Name}} ({{.Name}}){{end}}
+{{printf "%s" .Content}}
+
+{{end}}</pre></div>{{end}}
+        {{if .Detail.RevDeckRecovery}}<div hidden data-hp-evidence-body="gh-recovery"><h3>Symbol recovery</h3><pre class="code">--- index ---
+{{printf "%s" .Detail.RevDeckRecovery.Index}}
+
+--- symbols ---
+{{printf "%s" .Detail.RevDeckRecovery.Symbols}}
+</pre></div>{{end}}
         <div hidden data-hp-evidence-body="gh-strings"><h3>Strings</h3><pre class="code">{{range .Detail.Strings}}{{.}}
 {{end}}</pre></div>
         {{if .Detail.Capa}}<div hidden data-hp-evidence-body="gh-capa-capabilities"><h3>Capabilities</h3><pre class="code">{{range .Detail.Capa.Capabilities}}{{.Name}}  [{{.Namespace}}]  matches={{.Matches}}
