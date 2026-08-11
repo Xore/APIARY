@@ -11,11 +11,13 @@
 
   {{/* #1139: consolidates the former standalone /sandbox and /github-analysis
        list views into this page's second and third tabs, following /reports'
-       own tabbed-panel pattern. */}}
+       own tabbed-panel pattern. #1180-adjacent: /ghidra folds in the same
+       way as a fourth. */}}
   <div class="tabs" role="tablist" aria-label="Analysis results views">
     <button class="tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-workbench" data-dashboard-tab="workbench"><span>01</span>Workbench</button>
     <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-sandbox" data-dashboard-tab="sandbox"><span>02</span>Sandbox</button>
     <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-github" data-dashboard-tab="github"><span>03</span>GitHub</button>
+    <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-ghidra" data-dashboard-tab="ghidra"><span>04</span>Ghidra</button>
   </div>
 
   <div class="dashboard-panel" id="panel-workbench" role="tabpanel" data-dashboard-panel="workbench">
@@ -54,6 +56,10 @@
 
   <div class="dashboard-panel" id="panel-github" role="tabpanel" data-dashboard-panel="github" hidden>
   {{template "githubanalysisresultspanel" .GitHub}}
+  </div>
+
+  <div class="dashboard-panel" id="panel-ghidra" role="tabpanel" data-dashboard-panel="ghidra" hidden>
+  {{template "ghidraresultspanel" .Ghidra}}
   </div>
 
   <footer>{{brandText}} &bull; owner-isolated correlated results &bull; native analyzer reports remain canonical</footer>

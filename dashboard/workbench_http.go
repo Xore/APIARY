@@ -41,11 +41,12 @@ type workbenchResultsPageData struct {
 	Counts    workbenchResultsCounts
 }
 
-// evidenceResultsPageData (#1139) backs the merged /payload-workbench/results
-// page: workbench runs, sandbox detonations, and GitHub-analysis publications
-// each keep their own sub-page-data (own Query, own Rows/Runs), rendered as
-// three tabs of one page rather than three separate routes. Sandbox and
-// GitHub are always list-mode here (Detail is nil) -- their own detail pages
+// evidenceResultsPageData (#1139, #1180-adjacent) backs the merged
+// /payload-workbench/results page: workbench runs, sandbox detonations,
+// GitHub-analysis publications, and Ghidra static analyses each keep their
+// own sub-page-data (own Query, own Rows/Runs), rendered as four tabs of
+// one page rather than four separate routes. Sandbox, GitHub, and Ghidra
+// are always list-mode here (Detail is nil) -- their own detail pages
 // remain separate routes, untouched by this consolidation.
 type evidenceResultsPageData struct {
 	pageMeta
@@ -53,6 +54,7 @@ type evidenceResultsPageData struct {
 	Workbench workbenchResultsPageData
 	Sandbox   sandboxPageData
 	GitHub    githubAnalysisPageData
+	Ghidra    ghidraPageData
 }
 
 func (s *store) workbenchResultsData(query, owner string) workbenchResultsPageData {
@@ -148,6 +150,7 @@ func (s *store) serveWorkbenchResults(w http.ResponseWriter, r *http.Request, tm
 	data.Workbench = s.workbenchResultsData(q.Get("q"), identity.Subject)
 	data.Sandbox, _ = sandboxData("", q.Get("sandbox_q"))
 	data.GitHub, _ = s.githubAnalysisData("", q.Get("github_q"))
+	data.Ghidra, _ = ghidraData("", q.Get("ghidra_q"))
 	renderPage(w, tmpl, "workbench-results", &data)
 }
 

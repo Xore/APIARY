@@ -2,6 +2,77 @@
 {{end}}</pre><p class="note">sandbox-static-only:</p><pre class="code">{{range .SandboxStaticOnly}}{{.}}
 {{end}}</pre><p class="note">confirmed at runtime:</p><pre class="code">{{range .ConfirmedAtRuntime}}{{.}}
 {{end}}</pre>{{end}}
+{{/* #1180-adjacent: the bare list view (previously served at "/ghidra") --
+     factored out so both the standalone "ghidra" template's list branch
+     below (now unreachable via HTTP since "/ghidra" redirects to the
+     merged results page, kept for template-level completeness) and the
+     merged /payload-workbench/results page's Ghidra panel render identical
+     markup from one definition. Takes a ghidraPageData context, same
+     convention as sandboxresultspanel/githubanalysisresultspanel. */}}
+{{define "ghidraresultspanel"}}
+        {{if not .Status.Configured}}<div class="tw:mb-6 tw:rounded-lg tw:border tw:border-orange tw:bg-orange-subtle tw:px-4 tw:py-4" role="status"><strong>Ghidra analysis is not configured on this host.</strong> The host-side worker (<code>honeypot-ghidra-worker.service</code>) has not been deployed, so <code>GHIDRA_RESULTS_DIR</code> is unset and no analysis can be queued. This is the expected state until that worker is installed.</div>{{else if .Status.Stale}}<div class="tw:mb-6 tw:rounded-lg tw:border tw:border-red tw:bg-red-subtle tw:px-4 tw:py-4 tw:text-red" role="alert"><strong>The Ghidra worker is not running.</strong> Its queue file has not been updated recently, so queued requests are not being consumed. Check <code>honeypot-ghidra-worker.path</code> and its service. An empty queue below means nothing is being processed, not that there is nothing to do.</div>{{end}}
+
+        <div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-4 tw:gap-3 tw:mb-6" id="ghidra-stats">
+          <div class="metric"><div class="metric__value">{{.Status.Queued}}</div><div class="metric__label">Queued</div></div>
+          <div class="metric"><div class="metric__value">{{.Status.Running}}</div><div class="metric__label">Running</div></div>
+          <div class="metric"><div class="metric__value">{{.Status.Done}}</div><div class="metric__label">Completed</div></div>
+          <div class="metric"><div class="metric__value {{if .Status.Failed}}tw:text-red{{end}}">{{.Status.Failed}}</div><div class="metric__label">Failed</div></div>
+        </div>
+
+        {{if .GPUQueue}}
+        <div class="card wide tw:mb-6" id="gpu-queue">
+          <h2>GPU queue</h2>
+          <p class="note">Jobs deferred because there wasn't enough free GPU headroom when they were submitted. A queued job's AI triage runs automatically once the card frees up; the rest of that analysis (Ghidra decompilation, imports, strings, fuzzy hashes) already completed and is not affected. Aborting only has an effect while a job is still <strong>queued</strong> &mdash; once it starts running, the model call is already committed.</p>
+          {{/* #790 chunk 4: card__scroll -- an unbounded, potentially busy
+               queue. The abort confirm dialog (#hp-confirm-backdrop) is a
+               single fixed-position element elsewhere in the page, not a
+               row-local popover, so it isn't clipped by this card's own
+               overflow -- unlike the payloads kebab menu's popover, which
+               is why that one's card deliberately does NOT get
+               card__scroll (see theme.css's own comment on it). */}}
+          <div class="card__scroll"><table class="data-table">
+            <thead><tr><th>type</th><th>ref</th><th>status</th><th>model</th><th>requested</th><th>attempts</th><th></th></tr></thead>
+            <tbody>
+              {{range .GPUQueue}}
+              <tr>
+                <td class="v">{{.JobType}}</td>
+                <td class="v"><a href="/ghidra/{{.Ref}}" title="{{.Ref}}">{{slice .Ref 0 12}}&hellip;</a></td>
+                <td class="state s-{{.Status}}">{{.Status}}{{if .AbortRequested}} (abort requested){{end}}</td>
+                <td class="v">{{.Model}}</td>
+                <td class="ago">{{.RequestedAt}}</td>
+                <td class="n">{{.Attempts}}</td>
+                <td>{{if eq .Status "queued"}}<form method="post" action="/gpu-queue/abort" data-hp-confirm-title="Abort this queued job?" data-hp-confirm-description="The deferred AI triage for this analysis will not run. The rest of the analysis already completed and is not affected." data-hp-confirm-label="Abort"><input type="hidden" name="job_id" value="{{.ID}}"><input type="hidden" name="return" value="/payload-workbench/results#ghidra"><button class="btn btn-sm btn-secondary" type="submit" title="Abort this queued job">Abort</button></form>{{end}}</td>
+              </tr>
+              {{end}}
+            </tbody>
+          </table></div>
+        </div>
+        {{end}}
+
+        <form class="filters" id="ghidra-filters" method="get" action="/payload-workbench/results#ghidra"><a class="chip" href="/payloads">&larr; captured payloads</a><input class="hp-input" name="ghidra_q" value="{{.Query}}" placeholder="hash, imported symbol or family" aria-label="Search Ghidra results"><button class="copy" type="submit">search</button>{{if .Query}}<a class="chip" href="/payload-workbench/results#ghidra">clear</a>{{end}}<span class="chip">{{len .Rows}} analyses</span>{{if .Status.UpdatedAt}}<span class="chip">status {{.Status.UpdatedAt}}</span>{{end}}</form>
+
+        <div id="ghidra-results">
+          <p class="note">Administrators queue analyses with the <strong>Ghidra</strong> button on the payloads page. Unlike the sandbox, this runs on any binary containing code &mdash; including DLLs and documents that have no detonation path, where static analysis is the only route available. Search matches hashes, imported symbols, and the triage family guess; the string table is deliberately excluded, since almost every binary would match almost every query.</p>
+          {{if .Rows}}
+          <div class="project-grid">
+            {{range .Rows}}
+            <a class="project-card" href="/ghidra/{{.SHA256}}">
+              <div class="project-card__header">
+                <span class="project-card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></span>
+                <span class="project-card__title mono">{{.SHA256}}</span>
+                <div class="project-card__badges">
+                  {{if eq .ExitStatus "error"}}<span class="badge badge--muted tw:text-red">error</span>{{else}}<span class="badge badge--muted">{{.ExitStatus}}</span>{{end}}
+                  {{if .AITriage}}{{if .AITriage.FamilyGuess}}<span class="badge badge--accent">{{.AITriage.FamilyGuess}}</span>{{end}}{{end}}
+                </div>
+              </div>
+              <p class="project-card__desc">{{len .Functions}} function{{if ne (len .Functions) 1}}s{{end}} &bull; {{len .Imports}} import{{if ne (len .Imports) 1}}s{{end}}{{if .FindCrypt}} &bull; {{len .FindCrypt}} crypto constant{{if ne (len .FindCrypt) 1}}s{{end}}{{end}}</p>
+              <div class="project-card__meta"><span>completed {{.CompletedAt}}</span></div>
+            </a>
+            {{end}}
+          </div>
+          {{else}}<p class="empty">No Ghidra analyses match this view.</p>{{end}}
+        </div>
+{{end}}
 {{define "ghidra"}}<!doctype html>
 <html lang="en">
 <head>
@@ -28,11 +99,16 @@
           </div>
         </header>
 
-        {{if not .Status.Configured}}<div class="tw:mb-6 tw:rounded-lg tw:border tw:border-orange tw:bg-orange-subtle tw:px-4 tw:py-4" role="status"><strong>Ghidra analysis is not configured on this host.</strong> The host-side worker (<code>honeypot-ghidra-worker.service</code>) has not been deployed, so <code>GHIDRA_RESULTS_DIR</code> is unset and no analysis can be queued. This is the expected state until that worker is installed.</div>{{else if .Status.Stale}}<div class="tw:mb-6 tw:rounded-lg tw:border tw:border-red tw:bg-red-subtle tw:px-4 tw:py-4 tw:text-red" role="alert"><strong>The Ghidra worker is not running.</strong> Its queue file has not been updated recently, so queued requests are not being consumed. Check <code>honeypot-ghidra-worker.path</code> and its service. An empty queue below means nothing is being processed, not that there is nothing to do.</div>{{end}}
+        {{/* #1180-adjacent: the "not configured"/"stale" worker banners
+             moved into ghidraresultspanel (below) -- they're about being
+             unable to QUEUE new analyses, which only matters looking at
+             the list/queue, not viewing an already-completed result here;
+             showing "not configured" while looking at a result that
+             obviously WAS analyzed was the wrong scope for this page. */}}
 
         {{if .Detail}}
         <div class="filters"><a class="chip" href="/payload-workbench/{{.Detail.SHA256}}">Open unified analysis workbench &rarr;</a></div>
-        <div class="filters" id="ghidra-detail-actions"><a class="chip" href="/ghidra">&larr; all Ghidra results</a><a class="chip" href="/payload-analysis/{{.Detail.SHA256}}">static analysis</a><a class="chip" href="/events?shasum={{.Detail.SHA256}}">related events</a><a class="chip" href="https://www.virustotal.com/gui/file/{{.Detail.SHA256}}" target="_blank" rel="noopener noreferrer">VirusTotal &nearr;</a>{{if .Detail.ExportURL}}<button class="chip" type="button" id="hp-gh-report-view" data-hp-gh-report-url="{{.Detail.ExportURL}}">view report</button><a class="chip" href="{{.Detail.ExportURL}}">full report &darr;</a>{{end}}<form method="post" action="/ghidra/submit" data-hp-confirm-title="Re-run Ghidra analysis?" data-hp-confirm-description="This queues a fresh headless decompilation of the same capture. Nothing is executed; the existing result is replaced when the new run completes." data-hp-confirm-warning="The existing analysis for this payload is replaced when the new run finishes. Nothing is executed." data-hp-confirm-label="Queue re-analysis"><input type="hidden" name="hash" value="{{.Detail.SHA256}}"><input type="hidden" name="return" value="/ghidra/{{.Detail.SHA256}}"><button class="btn btn-sm btn-secondary" type="submit" title="Queue a fresh Ghidra analysis of this capture"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Re-analyze</button></form></div>
+        <div class="filters" id="ghidra-detail-actions"><a class="chip" href="/payload-workbench/results#ghidra">&larr; all Ghidra results</a><a class="chip" href="/payload-analysis/{{.Detail.SHA256}}">static analysis</a><a class="chip" href="/events?shasum={{.Detail.SHA256}}">related events</a><a class="chip" href="https://www.virustotal.com/gui/file/{{.Detail.SHA256}}" target="_blank" rel="noopener noreferrer">VirusTotal &nearr;</a>{{if .Detail.ExportURL}}<button class="chip" type="button" id="hp-gh-report-view" data-hp-gh-report-url="{{.Detail.ExportURL}}">view report</button><a class="chip" href="{{.Detail.ExportURL}}?download=1">full report &darr;</a>{{end}}<form method="post" action="/ghidra/submit" data-hp-confirm-title="Re-run Ghidra analysis?" data-hp-confirm-description="This queues a fresh headless decompilation of the same capture. Nothing is executed; the existing result is replaced when the new run completes." data-hp-confirm-warning="The existing analysis for this payload is replaced when the new run finishes. Nothing is executed." data-hp-confirm-label="Queue re-analysis"><input type="hidden" name="hash" value="{{.Detail.SHA256}}"><input type="hidden" name="return" value="/ghidra/{{.Detail.SHA256}}"><button class="btn btn-sm btn-secondary" type="submit" title="Queue a fresh Ghidra analysis of this capture"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Re-analyze</button></form></div>
 
         {{if eq .Analysis "queued"}}<div class="alert alert--success" role="status">Re-analysis queued. The refreshed result replaces this one once the host worker finishes.</div>{{end}}
 
@@ -162,66 +238,7 @@
 
         {{else}}
 
-        <div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-4 tw:gap-3 tw:mb-6" id="ghidra-stats">
-          <div class="metric"><div class="metric__value">{{.Status.Queued}}</div><div class="metric__label">Queued</div></div>
-          <div class="metric"><div class="metric__value">{{.Status.Running}}</div><div class="metric__label">Running</div></div>
-          <div class="metric"><div class="metric__value">{{.Status.Done}}</div><div class="metric__label">Completed</div></div>
-          <div class="metric"><div class="metric__value {{if .Status.Failed}}tw:text-red{{end}}">{{.Status.Failed}}</div><div class="metric__label">Failed</div></div>
-        </div>
-
-        {{if .GPUQueue}}
-        <div class="card wide tw:mb-6" id="gpu-queue">
-          <h2>GPU queue</h2>
-          <p class="note">Jobs deferred because there wasn't enough free GPU headroom when they were submitted. A queued job's AI triage runs automatically once the card frees up; the rest of that analysis (Ghidra decompilation, imports, strings, fuzzy hashes) already completed and is not affected. Aborting only has an effect while a job is still <strong>queued</strong> &mdash; once it starts running, the model call is already committed.</p>
-          {{/* #790 chunk 4: card__scroll -- an unbounded, potentially busy
-               queue. The abort confirm dialog (#hp-confirm-backdrop) is a
-               single fixed-position element elsewhere in the page, not a
-               row-local popover, so it isn't clipped by this card's own
-               overflow -- unlike the payloads kebab menu's popover, which
-               is why that one's card deliberately does NOT get
-               card__scroll (see theme.css's own comment on it). */}}
-          <div class="card__scroll"><table class="data-table">
-            <thead><tr><th>type</th><th>ref</th><th>status</th><th>model</th><th>requested</th><th>attempts</th><th></th></tr></thead>
-            <tbody>
-              {{range .GPUQueue}}
-              <tr>
-                <td class="v">{{.JobType}}</td>
-                <td class="v"><a href="/ghidra/{{.Ref}}" title="{{.Ref}}">{{slice .Ref 0 12}}&hellip;</a></td>
-                <td class="state s-{{.Status}}">{{.Status}}{{if .AbortRequested}} (abort requested){{end}}</td>
-                <td class="v">{{.Model}}</td>
-                <td class="ago">{{.RequestedAt}}</td>
-                <td class="n">{{.Attempts}}</td>
-                <td>{{if eq .Status "queued"}}<form method="post" action="/gpu-queue/abort" data-hp-confirm-title="Abort this queued job?" data-hp-confirm-description="The deferred AI triage for this analysis will not run. The rest of the analysis already completed and is not affected." data-hp-confirm-label="Abort"><input type="hidden" name="job_id" value="{{.ID}}"><input type="hidden" name="return" value="/ghidra"><button class="btn btn-sm btn-secondary" type="submit" title="Abort this queued job">Abort</button></form>{{end}}</td>
-              </tr>
-              {{end}}
-            </tbody>
-          </table></div>
-        </div>
-        {{end}}
-
-        <form class="filters" id="ghidra-filters" method="get" action="/ghidra"><a class="chip" href="/payloads">&larr; captured payloads</a><input class="hp-input" name="q" value="{{.Query}}" placeholder="hash, imported symbol or family" aria-label="Search Ghidra results"><button class="copy" type="submit">search</button>{{if .Query}}<a class="chip" href="/ghidra">clear</a>{{end}}<span class="chip">{{len .Rows}} analyses</span>{{if .Status.UpdatedAt}}<span class="chip">status {{.Status.UpdatedAt}}</span>{{end}}</form>
-
-        <div id="ghidra-results">
-          <p class="note">Administrators queue analyses with the <strong>Ghidra</strong> button on the payloads page. Unlike the sandbox, this runs on any binary containing code &mdash; including DLLs and documents that have no detonation path, where static analysis is the only route available. Search matches hashes, imported symbols, and the triage family guess; the string table is deliberately excluded, since almost every binary would match almost every query.</p>
-          {{if .Rows}}
-          <div class="project-grid">
-            {{range .Rows}}
-            <a class="project-card" href="/ghidra/{{.SHA256}}">
-              <div class="project-card__header">
-                <span class="project-card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg></span>
-                <span class="project-card__title mono">{{.SHA256}}</span>
-                <div class="project-card__badges">
-                  {{if eq .ExitStatus "error"}}<span class="badge badge--muted tw:text-red">error</span>{{else}}<span class="badge badge--muted">{{.ExitStatus}}</span>{{end}}
-                  {{if .AITriage}}{{if .AITriage.FamilyGuess}}<span class="badge badge--accent">{{.AITriage.FamilyGuess}}</span>{{end}}{{end}}
-                </div>
-              </div>
-              <p class="project-card__desc">{{len .Functions}} function{{if ne (len .Functions) 1}}s{{end}} &bull; {{len .Imports}} import{{if ne (len .Imports) 1}}s{{end}}{{if .FindCrypt}} &bull; {{len .FindCrypt}} crypto constant{{if ne (len .FindCrypt) 1}}s{{end}}{{end}}</p>
-              <div class="project-card__meta"><span>completed {{.CompletedAt}}</span></div>
-            </a>
-            {{end}}
-          </div>
-          {{else}}<p class="empty">No Ghidra analyses match this view.</p>{{end}}
-        </div>
+        {{template "ghidraresultspanel" .}}
 
         {{end}}
 

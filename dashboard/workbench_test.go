@@ -788,6 +788,51 @@ func TestWorkbenchResultsPageRendersAsCardGrid(t *testing.T) {
 	}
 }
 
+// TestWorkbenchResultsPageOffersGhidraTab (#1180-adjacent): Ghidra folded
+// into Analysis results as a fourth tab, the same consolidation #1139 gave
+// sandbox/GitHub-analysis. Renders through the real "workbench-results"
+// template (not a synthetic fixture) so a broken {{template
+// "ghidraresultspanel" .Ghidra}} reference would fail this the same way it
+// would fail every other page render.
+func TestWorkbenchResultsPageOffersGhidraTab(t *testing.T) {
+	funcs := templateFuncs(nil, "")
+	tmpl := template.Must(template.New("dashboard").Funcs(funcs).Parse(pageTemplate))
+
+	data := evidenceResultsPageData{
+		Generated: time.Now(),
+		Ghidra: ghidraPageData{
+			Generated: time.Now(),
+			Status:    ghidraQueueStatus{Configured: true},
+			Rows:      []ghidraResult{{SHA256: shaA, ExitStatus: "ok", CompletedAt: "2026-08-11T00:00:00Z"}},
+		},
+	}
+
+	var buf strings.Builder
+	if err := tmpl.ExecuteTemplate(&buf, "workbench-results", &data); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	body := buf.String()
+
+	if !strings.Contains(body, `data-dashboard-tab="ghidra"`) || !strings.Contains(body, ">Ghidra</button>") {
+		t.Fatal("workbench-results page is missing the Ghidra tab")
+	}
+	if !strings.Contains(body, `id="panel-ghidra"`) {
+		t.Fatal("workbench-results page is missing the Ghidra panel")
+	}
+	if !strings.Contains(body, `href="/ghidra/`+shaA+`"`) {
+		t.Fatal("Ghidra panel does not render the real result row")
+	}
+	// The panel's own filter form/clear-link must target this page's own
+	// #ghidra hash, not the old standalone /ghidra route the bare route
+	// now just redirects away from.
+	if !strings.Contains(body, `action="/payload-workbench/results#ghidra"`) {
+		t.Fatal("Ghidra panel's filter form does not post back to the merged results page")
+	}
+	if strings.Contains(body, `name="q"`) && !strings.Contains(body, `name="ghidra_q"`) {
+		t.Fatal("Ghidra panel's search field still uses the old bare 'q' name, colliding with the Workbench tab's own")
+	}
+}
+
 // TestWorkbenchResultsCardLinksDirectlyToSingleChildFindings (#350): a
 // results-list card always linked to the recipe/orchestration page and
 // showed a generic "N analyzers" line, never the actual findings -- landing

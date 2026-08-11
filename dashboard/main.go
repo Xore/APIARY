@@ -686,10 +686,15 @@ func main() {
 	http.HandleFunc("/payload-workbench/", func(w http.ResponseWriter, r *http.Request) {
 		s.serveWorkbenchPage(w, r, tmpl)
 	})
+	// #1180-adjacent: the standalone Ghidra list view merged into
+	// /payload-workbench/results' fourth tab -- old bookmarks/links
+	// redirect rather than 404, same convention as #1139's sandbox/
+	// GitHub-analysis redirects just below. /ghidra/{sha} detail pages are
+	// unaffected. The list view's own ?analysis= re-analyze flash message
+	// only ever fires on the detail page (ghidra.html's own re-analyze
+	// form always returns there), so there's nothing to carry across here.
 	http.HandleFunc("/ghidra", func(w http.ResponseWriter, r *http.Request) {
-		data, _ := ghidraData("", r.URL.Query().Get("q"))
-		data.Analysis = r.URL.Query().Get("analysis")
-		renderPage(w, tmpl, "ghidra", &data)
+		http.Redirect(w, r, "/payload-workbench/results#ghidra", http.StatusFound)
 	})
 	http.HandleFunc("/ghidra/", func(w http.ResponseWriter, r *http.Request) {
 		sha, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/ghidra/"))

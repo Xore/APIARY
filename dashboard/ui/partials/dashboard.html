@@ -63,8 +63,10 @@
          gone, not just relabeled; the old bare routes still work as
          redirects (see main.go) for existing bookmarks/links. */}}
     <a class="sidebar__item" data-hp-nav="/payloads" href="/payloads"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span>Captured payloads</span></a>
+    {{/* #1180-adjacent: Ghidra folded into Analysis results as a fourth tab,
+         same as sandbox/GitHub-analysis under #1139 -- no separate sidebar
+         entry, same as those two no longer have one. */}}
     <a class="sidebar__item" data-hp-nav="/payload-workbench/results" href="/payload-workbench/results"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V9M10 19V5M16 19v-7M22 19V3"/><path d="M2 19h22"/></svg><span>Analysis results</span></a>
-    <a class="sidebar__item" data-hp-nav="/ghidra" href="/ghidra"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg><span>Ghidra analysis</span></a>
   </nav>
   <div class="hp-account" data-hp-account>
     <div class="dropdown hp-account-menu" role="menu" aria-label="Account actions" data-hp-account-menu hidden>

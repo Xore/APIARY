@@ -726,8 +726,21 @@ func serveGhidraExport(w http.ResponseWriter, r *http.Request) {
 	// .pdf filename -- what this handler did before -- handed the browser a
 	// file that fails to open in any real PDF viewer. Content-Type/filename
 	// now come from what the stored artifact actually is.
+	//
+	// Content-Disposition defaults to inline (ghidra.html's own "view
+	// report" button, which points an <iframe> straight at this URL);
+	// unconditional attachment here -- what this handler did before --
+	// forced a download even for that iframe, so "view report" only ever
+	// downloaded the file instead of rendering it. ?download=1 switches to
+	// attachment, mirroring serveGitHubAnalysisPDFProxy's own identical
+	// one-endpoint-two-dispositions shape; ghidra.html's own "full report
+	// ↓" link sets it.
+	disposition := "inline"
+	if r.URL.Query().Get("download") == "1" {
+		disposition = "attachment"
+	}
 	w.Header().Set("Content-Type", doc.ContentType)
-	w.Header().Set("Content-Disposition", `attachment; filename="`+doc.Filename+`"`)
+	w.Header().Set("Content-Disposition", disposition+`; filename="`+doc.Filename+`"`)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Write(data)
 }
