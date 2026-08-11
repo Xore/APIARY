@@ -887,6 +887,97 @@ func TestGhidraResultsPageRendersAsCardGrid(t *testing.T) {
 	}
 }
 
+// #1167: the deep-dive tab (types/globals/annotations) and the Functions
+// evidence modal (pseudocode/callers/callees) actually render real content,
+// not just "doesn't panic on nil" -- every other test touching ghidraResult
+// leaves these fields zero-valued.
+func TestGhidraDetailPageRendersDeepDiveData(t *testing.T) {
+	s := &store{}
+	tmpl := template.Must(template.New("dashboard").Funcs(templateFuncs(s, "")).Parse(pageTemplate))
+
+	data := ghidraPageData{
+		Generated: time.Now(),
+		Status:    ghidraQueueStatus{Configured: true},
+		Detail: &ghidraResult{
+			SHA256: shaA, CompletedAt: "2026-08-01T10:00:00Z", ExitStatus: "success",
+			Functions: []ghidraFunction{{
+				Address: "0x401000", Name: "main", Signature: "int main()",
+				Pseudocode: "int main(void)\n\n{\n  return 0;\n}\n",
+				Callers:    []ghidraXref{},
+				Callees:    []ghidraXref{{Addr: "0x401050", Name: "sub_401050"}},
+			}},
+			FunctionsDeepened:          1,
+			FunctionsDeepenedTruncated: true,
+			Types: []ghidraType{{
+				Name: "POINT", Kind: "struct", Size: 8,
+				Fields: []ghidraTypeField{{Name: "x", Type: "int", Offset: 0, Size: 4}},
+			}},
+			Globals: []ghidraGlobal{{Addr: "0x403000", Name: "g_counter", Type: "int", Size: 4}},
+			Annotations: &ghidraAnnotations{
+				Revision: 3,
+				Entries: map[string]ghidraAnnotation{
+					"0x401000": {DisplayName: "real_main", Comment: "entry point, not CRT startup", Tags: []string{"reviewed"}},
+				},
+			},
+		},
+	}
+
+	var buf strings.Builder
+	if err := tmpl.ExecuteTemplate(&buf, "ghidra", &data); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	body := buf.String()
+
+	for _, want := range []string{
+		"Deep dive",                                     // new tab
+		"1 struct/union/enum/typedef",                   // types card summary
+		"1 non-string global data",                      // globals card summary
+		"1 analyst-authored annotation",                 // annotations card summary
+		"deep-dive budget did not cover the whole list", // truncation note
+		"sub_401050",                                    // callee name, in the functions evidence body
+		"real_main",                                     // annotation display name, in the annotations evidence body
+		"entry point, not CRT startup",                  // annotation comment
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("rendered page missing %q", want)
+		}
+	}
+}
+
+// #1167: viewing the generated report inline (a modal + iframe, same shape
+// as the Reports Studio viewer) needs the trigger button carrying the
+// report URL, the modal markup itself, and its own script tag -- all three
+// only when a report actually exists for this analysis.
+func TestGhidraDetailPageRendersReportViewer(t *testing.T) {
+	s := &store{}
+	tmpl := template.Must(template.New("dashboard").Funcs(templateFuncs(s, "")).Parse(pageTemplate))
+
+	data := ghidraPageData{
+		Generated: time.Now(),
+		Status:    ghidraQueueStatus{Configured: true},
+		Detail: &ghidraResult{
+			SHA256: shaA, CompletedAt: "2026-08-01T10:00:00Z", ExitStatus: "success",
+			ExportURL: "/export/ghidra/" + shaA,
+		},
+	}
+
+	var buf strings.Builder
+	if err := tmpl.ExecuteTemplate(&buf, "ghidra", &data); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	body := buf.String()
+
+	if !strings.Contains(body, `data-hp-gh-report-url="/export/ghidra/`+shaA+`"`) {
+		t.Error("report-view trigger button is missing its report URL")
+	}
+	if !strings.Contains(body, `id="hp-gh-viewer"`) || !strings.Contains(body, `id="hp-gh-viewer-frame"`) {
+		t.Error("report viewer modal markup is missing")
+	}
+	if !strings.Contains(body, `/static/hp-ghidra-report.js`) {
+		t.Error("hp-ghidra-report.js is not loaded on the detail page")
+	}
+}
+
 // A query that matches nothing keeps the plain empty state, not an empty grid.
 func TestGhidraResultsPageEmptyStateHasNoCardGrid(t *testing.T) {
 	s := &store{}

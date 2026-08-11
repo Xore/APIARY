@@ -32,7 +32,7 @@
 
         {{if .Detail}}
         <div class="filters"><a class="chip" href="/payload-workbench/{{.Detail.SHA256}}">Open unified analysis workbench &rarr;</a></div>
-        <div class="filters" id="ghidra-detail-actions"><a class="chip" href="/ghidra">&larr; all Ghidra results</a><a class="chip" href="/payload-analysis/{{.Detail.SHA256}}">static analysis</a><a class="chip" href="/events?shasum={{.Detail.SHA256}}">related events</a><a class="chip" href="https://www.virustotal.com/gui/file/{{.Detail.SHA256}}" target="_blank" rel="noopener noreferrer">VirusTotal &nearr;</a>{{if .Detail.ExportURL}}<a class="chip" href="{{.Detail.ExportURL}}">full report &darr;</a>{{end}}<form method="post" action="/ghidra/submit" data-hp-confirm-title="Re-run Ghidra analysis?" data-hp-confirm-description="This queues a fresh headless decompilation of the same capture. Nothing is executed; the existing result is replaced when the new run completes." data-hp-confirm-warning="The existing analysis for this payload is replaced when the new run finishes. Nothing is executed." data-hp-confirm-label="Queue re-analysis"><input type="hidden" name="hash" value="{{.Detail.SHA256}}"><input type="hidden" name="return" value="/ghidra/{{.Detail.SHA256}}"><button class="btn btn-sm btn-secondary" type="submit" title="Queue a fresh Ghidra analysis of this capture"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Re-analyze</button></form></div>
+        <div class="filters" id="ghidra-detail-actions"><a class="chip" href="/ghidra">&larr; all Ghidra results</a><a class="chip" href="/payload-analysis/{{.Detail.SHA256}}">static analysis</a><a class="chip" href="/events?shasum={{.Detail.SHA256}}">related events</a><a class="chip" href="https://www.virustotal.com/gui/file/{{.Detail.SHA256}}" target="_blank" rel="noopener noreferrer">VirusTotal &nearr;</a>{{if .Detail.ExportURL}}<button class="chip" type="button" id="hp-gh-report-view" data-hp-gh-report-url="{{.Detail.ExportURL}}">view report</button><a class="chip" href="{{.Detail.ExportURL}}">full report &darr;</a>{{end}}<form method="post" action="/ghidra/submit" data-hp-confirm-title="Re-run Ghidra analysis?" data-hp-confirm-description="This queues a fresh headless decompilation of the same capture. Nothing is executed; the existing result is replaced when the new run completes." data-hp-confirm-warning="The existing analysis for this payload is replaced when the new run finishes. Nothing is executed." data-hp-confirm-label="Queue re-analysis"><input type="hidden" name="hash" value="{{.Detail.SHA256}}"><input type="hidden" name="return" value="/ghidra/{{.Detail.SHA256}}"><button class="btn btn-sm btn-secondary" type="submit" title="Queue a fresh Ghidra analysis of this capture"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Re-analyze</button></form></div>
 
         {{if eq .Analysis "queued"}}<div class="alert alert--success" role="status">Re-analysis queued. The refreshed result replaces this one once the host worker finishes.</div>{{end}}
 
@@ -49,6 +49,7 @@
           <button class="tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-overview" data-dashboard-tab="overview"><span>01</span>Overview</button>
           <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-code" data-dashboard-tab="code"><span>02</span>Code</button>
           <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-data" data-dashboard-tab="data"><span>03</span>Data</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-deepdive" data-dashboard-tab="deepdive"><span>04</span>Deep dive</button>
         </div>
 
         <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-overview" role="tabpanel" data-dashboard-panel="overview">
@@ -116,7 +117,14 @@
           <div class="section-heading"><div><h2>What the code contains</h2><p>Recovered functions and the imported APIs they can reach.</p></div></div>
           <div class="card wide"><h2>Imports</h2>{{if .Detail.Imports}}<p class="note">{{len .Detail.Imports}} imported symbol{{if ne (len .Detail.Imports) 1}}s{{end}}. What a binary imports bounds what it can do without further tricks.</p><button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="gh-imports">Open the full import list</button>{{else}}<p class="empty">No imports were recovered.</p>{{end}}</div>
           <div class="card wide"><h2>Call graph</h2>{{if .Detail.CallGraphURL}}<p class="note">Assembled from the largest functions outward. Node labels are names recovered from the sample and are untrusted: the graph is embedded as an image, which cannot execute script.</p><a href="{{.Detail.CallGraphURL}}" target="_blank" rel="noopener noreferrer"><img src="{{.Detail.CallGraphURL}}" alt="Call graph of the analysed binary" class="tw:max-w-full tw:bg-white tw:rounded-md"></a>{{else}}<p class="empty">No call graph was rendered. This needs graphviz (<code>dot</code>) on the analysis host; without it the worker still writes the raw <code>.dot</code> beside the result.</p>{{end}}</div>
-          <div class="card wide"><h2>Functions</h2>{{if .Detail.Functions}}<p class="note">{{len .Detail.Functions}} recovered function{{if ne (len .Detail.Functions) 1}}s{{end}}. Decompiled pseudocode is deliberately not rendered here; it is in the downloadable report.</p><button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="gh-functions">Open the full function list</button>{{else}}<p class="empty">No functions were recovered. For a packed or corrupt binary this is itself the finding.</p>{{end}}</div>
+          <div class="card wide"><h2>Functions</h2>{{if .Detail.Functions}}<p class="note">{{len .Detail.Functions}} recovered function{{if ne (len .Detail.Functions) 1}}s{{end}}{{if .Detail.FunctionsDeepened}}, {{.Detail.FunctionsDeepened}} with decompiled pseudocode and callers/callees{{if .Detail.FunctionsDeepenedTruncated}} (the largest functions only &mdash; the deep-dive budget did not cover the whole list){{end}}{{else}} &mdash; none were decompiled for this analysis{{end}}.</p><button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="gh-functions">Open the full function list</button>{{else}}<p class="empty">No functions were recovered. For a packed or corrupt binary this is itself the finding.</p>{{end}}</div>
+        </div>
+
+        <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-deepdive" role="tabpanel" data-dashboard-panel="deepdive" hidden>
+          <div class="section-heading"><div><h2>Deep dive</h2><p>Everything the Ghidra REST v1 surface recovered beyond the functions/imports/strings above: recovered types, non-string globals, and any analyst annotations.</p></div></div>
+          <div class="card wide"><h2>Recovered types</h2>{{if .Detail.Types}}<p class="note">{{len .Detail.Types}} struct/union/enum/typedef recovered from the program's own type database.</p><button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="gh-types">Open the full type list</button>{{else}}<p class="empty">No types were recovered &mdash; either the sample has no debug/type info Ghidra could reconstruct, or this analysis predates the deep-dive worker (#1167).</p>{{end}}</div>
+          <div class="card wide"><h2>Globals</h2>{{if .Detail.Globals}}<p class="note">{{len .Detail.Globals}} non-string global data symbol{{if ne (len .Detail.Globals) 1}}s{{end}}. Distinct from the string table &mdash; these are named/typed data locations, not text.</p><button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="gh-globals">Open the full globals list</button>{{else}}<p class="empty">No globals were recovered.</p>{{end}}</div>
+          <div class="card wide"><h2>Annotations</h2>{{if .Detail.Annotations}}{{if .Detail.Annotations.Entries}}<p class="note">{{len .Detail.Annotations.Entries}} analyst-authored annotation{{if ne (len .Detail.Annotations.Entries) 1}}s{{end}} (revision {{.Detail.Annotations.Revision}}), written through the analysis workbench and mirrored here read-only.</p><button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="gh-annotations">Open the full annotation list</button>{{else}}<p class="empty">No annotations have been added for this analysis yet.</p>{{end}}{{else}}<p class="empty">No annotation data was mirrored for this analysis &mdash; either it predates the deep-dive worker (#1167), or the annotation store was unreachable when it ran.</p>{{end}}</div>
         </div>
 
         <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-data" role="tabpanel" data-dashboard-panel="data" hidden>
@@ -127,7 +135,20 @@
         <div hidden data-hp-evidence-body="gh-imports"><h3>Imports</h3><pre class="code">{{range .Detail.Imports}}{{.}}
 {{end}}</pre></div>
         <div hidden data-hp-evidence-body="gh-functions"><h3>Functions</h3><pre class="code">{{range .Detail.Functions}}{{.Address}}  {{.Name}}  {{.Signature}}
-{{end}}</pre></div>
+{{if .Pseudocode}}{{.Pseudocode}}
+{{end}}{{if .Callers}}  callers: {{range .Callers}}{{.Name}}@{{.Addr}} {{end}}
+{{end}}{{if .Callees}}  callees: {{range .Callees}}{{.Name}}@{{.Addr}} {{end}}
+{{end}}{{end}}</pre></div>
+        {{if .Detail.Types}}<div hidden data-hp-evidence-body="gh-types"><h3>Types</h3><pre class="code">{{range .Detail.Types}}{{.Name}}  [{{.Kind}}]  size={{.Size}}
+{{range .Fields}}    {{.Name}} : {{.Type}}  offset={{.Offset}} size={{.Size}}
+{{end}}{{if .BaseType}}    base: {{.BaseType}}
+{{end}}{{end}}</pre></div>{{end}}
+        {{if .Detail.Globals}}<div hidden data-hp-evidence-body="gh-globals"><h3>Globals</h3><pre class="code">{{range .Detail.Globals}}{{.Addr}}  {{.Name}}  {{.Type}}  size={{.Size}}
+{{end}}</pre></div>{{end}}
+        {{if .Detail.Annotations}}<div hidden data-hp-evidence-body="gh-annotations"><h3>Annotations (revision {{.Detail.Annotations.Revision}})</h3><pre class="code">{{range $addr, $entry := .Detail.Annotations.Entries}}{{$addr}}  {{if $entry.DisplayName}}{{$entry.DisplayName}}{{else}}(no display name){{end}}
+{{if $entry.Comment}}    {{$entry.Comment}}
+{{end}}{{if $entry.Tags}}    tags: {{range $entry.Tags}}{{.}} {{end}}
+{{end}}{{end}}</pre></div>{{end}}
         <div hidden data-hp-evidence-body="gh-strings"><h3>Strings</h3><pre class="code">{{range .Detail.Strings}}{{.}}
 {{end}}</pre></div>
         {{if .Detail.Capa}}<div hidden data-hp-evidence-body="gh-capa-capabilities"><h3>Capabilities</h3><pre class="code">{{range .Detail.Capa.Capabilities}}{{.Name}}  [{{.Namespace}}]  matches={{.Matches}}
@@ -207,7 +228,20 @@
         <footer id="ghidra-footer">{{brandText}} &bull; headless static analysis &bull; nothing is executed</footer>
       </div>
     </main>
+  <!-- Report viewer: application-managed centered overlay, same shape and
+       open/close mechanics as the Reports Studio viewer (hp-reports.js) and
+       the dashboard settings modal (hp-settings.js). The report itself is
+       generated HTML, not a PDF (see ghidra.go's own ReportPDF field
+       comment) -- an iframe renders either equally well, so the same
+       pdf-viewer-modal styling is reused as-is. -->
+  <div class="modal-backdrop" id="hp-gh-viewer-backdrop" aria-hidden="true" inert></div>
+  <section class="modal pdf-viewer-modal" id="hp-gh-viewer" role="dialog" aria-modal="true" aria-labelledby="hp-gh-viewer-title" aria-hidden="true" inert>
+    <button class="modal__close" type="button" id="hp-gh-viewer-close" aria-label="Close report viewer">&#10005;</button>
+    <h2 class="pdf-viewer-title" id="hp-gh-viewer-title">Analysis report</h2>
+    <iframe class="pdf-viewer-frame" id="hp-gh-viewer-frame" title="Ghidra analysis report preview"></iframe>
+  </section>
 </div>
+{{if .Detail}}<script defer src="{{asset "/static/hp-ghidra-report.js"}}"></script>{{end}}
 </body>
 </html>
 {{end}}
