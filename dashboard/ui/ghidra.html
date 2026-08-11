@@ -197,10 +197,16 @@
         </div>
 
         <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-deepdive" role="tabpanel" data-dashboard-panel="deepdive" hidden>
-          <div class="section-heading"><div><h2>Deep dive</h2><p>Everything the Ghidra REST v1 surface recovered beyond the functions/imports/strings above: recovered types, non-string globals, and any analyst annotations.</p></div></div>
+          <div class="section-heading"><div><h2>Deep dive</h2><p>Everything the Ghidra REST v1 surface recovered beyond the functions/imports/strings above: recovered types, non-string globals, any analyst annotations, and the program's memory layout.</p></div></div>
           <div class="card wide"><h2>Recovered types</h2>{{if .Detail.Types}}<p class="note">{{len .Detail.Types}} struct/union/enum/typedef recovered from the program's own type database.</p><button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="gh-types">Open the full type list</button>{{else}}<p class="empty">No types were recovered &mdash; either the sample has no debug/type info Ghidra could reconstruct, or this analysis predates the deep-dive worker (#1167).</p>{{end}}</div>
           <div class="card wide"><h2>Globals</h2>{{if .Detail.Globals}}<p class="note">{{len .Detail.Globals}} non-string global data symbol{{if ne (len .Detail.Globals) 1}}s{{end}}. Distinct from the string table &mdash; these are named/typed data locations, not text.</p><button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="gh-globals">Open the full globals list</button>{{else}}<p class="empty">No globals were recovered.</p>{{end}}</div>
           <div class="card wide"><h2>Annotations</h2>{{if .Detail.Annotations}}{{if .Detail.Annotations.Entries}}<p class="note">{{len .Detail.Annotations.Entries}} analyst-authored annotation{{if ne (len .Detail.Annotations.Entries) 1}}s{{end}} (revision {{.Detail.Annotations.Revision}}), written through the analysis workbench and mirrored here read-only.</p><button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="gh-annotations">Open the full annotation list</button>{{else}}<p class="empty">No annotations have been added for this analysis yet.</p>{{end}}{{else}}<p class="empty">No annotation data was mirrored for this analysis &mdash; either it predates the deep-dive worker (#1167), or the annotation store was unreachable when it ran.</p>{{end}}</div>
+          {{/* #1167: memory.bin's raw bytes never leave the Ghidra service (see
+               ghidra-worker.py's own comment on DEEPDIVE_HEXDUMP_PREVIEW_BYTES) --
+               each block's hexdump here is a small, bounded, analysis-time
+               snapshot, not a live "jump to any address" viewer, since this
+               page only ever reads from ES. */}}
+          <div class="card wide"><h2>Memory map</h2>{{if .Detail.MemoryMap}}<p class="note">{{len .Detail.MemoryMap}} initialized memory block{{if ne (len .Detail.MemoryMap) 1}}s{{end}}, each with a bounded preview of its opening bytes.</p><button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="gh-memory">Open the memory map</button>{{else}}<p class="empty">No memory map was recovered &mdash; either this analysis predates the deep-dive worker (#1167), or the sample had no initialized memory blocks within the export budget.</p>{{end}}</div>
         </div>
 
         <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-data" role="tabpanel" data-dashboard-panel="data" hidden>
@@ -224,6 +230,10 @@
         {{if .Detail.Annotations}}<div hidden data-hp-evidence-body="gh-annotations"><h3>Annotations (revision {{.Detail.Annotations.Revision}})</h3><pre class="code">{{range $addr, $entry := .Detail.Annotations.Entries}}{{$addr}}  {{if $entry.DisplayName}}{{$entry.DisplayName}}{{else}}(no display name){{end}}
 {{if $entry.Comment}}    {{$entry.Comment}}
 {{end}}{{if $entry.Tags}}    tags: {{range $entry.Tags}}{{.}} {{end}}
+{{end}}{{end}}</pre></div>{{end}}
+        {{if .Detail.MemoryMap}}<div hidden data-hp-evidence-body="gh-memory"><h3>Memory map</h3><pre class="code">{{range .Detail.MemoryMap}}{{.Start}}-{{.End}}  {{.Name}}  size={{.Size}}
+{{if .Preview}}    {{.Preview.Hex}}
+    {{.Preview.ASCII}}
 {{end}}{{end}}</pre></div>{{end}}
         <div hidden data-hp-evidence-body="gh-strings"><h3>Strings</h3><pre class="code">{{range .Detail.Strings}}{{.}}
 {{end}}</pre></div>

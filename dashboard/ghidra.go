@@ -265,6 +265,28 @@ type ghidraAnnotations struct {
 	Entries  map[string]ghidraAnnotation `json:"entries"`
 }
 
+// ghidraHexdumpPreview is a small, bounded snapshot of a memory block's
+// opening bytes (#1167) -- GHIDRA_DEEPDIVE_HEXDUMP_PREVIEW_BYTES in
+// ghidra-worker.py, 256 by default. The full block's bytes never leave the
+// Ghidra service (see server.py's own comment on _v1_list_memory); this is
+// the only hexdump data that ever reaches ES, matching the standing rule
+// that this dashboard reads from ES only, never a live analysis backend.
+type ghidraHexdumpPreview struct {
+	Hex   string `json:"hex"`
+	ASCII string `json:"ascii"`
+}
+
+// ghidraMemoryBlock mirrors one entry of GET /v1/results/{job}/memory
+// (#1167): one of the program's initialized memory sections (.text, .data,
+// ...), with a bounded hexdump preview of its opening bytes.
+type ghidraMemoryBlock struct {
+	Name    string                `json:"name"`
+	Start   string                `json:"start"`
+	End     string                `json:"end"`
+	Size    int                   `json:"size"`
+	Preview *ghidraHexdumpPreview `json:"hexdump_preview,omitempty"`
+}
+
 type ghidraResult struct {
 	Version     int    `json:"version"`
 	SHA256      string `json:"sha256"`
@@ -291,9 +313,10 @@ type ghidraResult struct {
 	FunctionsDeepened          int  `json:"functions_deepened"`
 	FunctionsDeepenedTruncated bool `json:"functions_deepened_truncated"`
 
-	Types       []ghidraType       `json:"types"`
-	Globals     []ghidraGlobal     `json:"globals"`
-	Annotations *ghidraAnnotations `json:"annotations"`
+	Types       []ghidraType        `json:"types"`
+	Globals     []ghidraGlobal      `json:"globals"`
+	Annotations *ghidraAnnotations  `json:"annotations"`
+	MemoryMap   []ghidraMemoryBlock `json:"memory_map"`
 
 	CallGraphSVG string             `json:"call_graph_svg"`
 	AITriage     *ghidraTriage      `json:"ai_triage"`

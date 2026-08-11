@@ -446,6 +446,25 @@ def _v1_list_globals(job_id: str, params: dict):
     }
 
 
+def _v1_list_memory(job_id: str):
+    # #1167: block metadata only (name/start/end/size) -- file_offset is
+    # meaningless outside this service (it's an offset into this job's own
+    # memory.bin on disk, not the target program's address space) and
+    # _v1_hexdump below is the only thing that needs it, internally.
+    # Unlike types/globals/functions there's no offset/limit here: a
+    # program's initialized memory blocks are naturally few (sections like
+    # .text/.data/.rdata), nothing like the thousands of functions/globals
+    # those endpoints paginate.
+    data = _read_job_artifact(job_id, "memory_map.json")
+    if data is None:
+        return 404, {"error": "result not available"}
+    blocks = [
+        {"name": b.get("name", ""), "start": b.get("start", ""), "end": b.get("end", ""), "size": b.get("size", 0)}
+        for b in data.get("blocks", [])
+    ]
+    return 200, {"blocks": blocks, "total_bytes": data.get("total_bytes", 0)}
+
+
 def _v1_hexdump(job_id: str, addr: str, length: int):
     norm_addr = _normalize_addr(addr)
     if norm_addr is None:
@@ -1138,6 +1157,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             handler = _v1_list_types if kind == "types" else _v1_list_globals
             status, result = handler(job_id, params)
+            self._json(status, result)
+            return
+
+        # #1167: memory_map block metadata -- a prerequisite for the
+        # dashboard's own bounded hexdump preview (deep_dive() calls this,
+        # then _v1_hexdump above per block), and useful standalone too.
+        match = re.match(r"^/v1/results/([a-f0-9]{32})/memory$", path)
+        if match:
+            job_id = match.group(1)
+            with _lock:
+                job = _jobs.get(job_id)
+            if job is None or job.get("status") != "done":
+                self._json(404, {"error": "result not available"})
+                return
+            status, result = _v1_list_memory(job_id)
             self._json(status, result)
             return
 

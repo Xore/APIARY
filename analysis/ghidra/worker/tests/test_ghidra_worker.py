@@ -32,6 +32,11 @@ TYPES = [{"name": "POINT", "kind": "struct", "size": 8,
 GLOBALS = [{"addr": "0x403000", "name": "g_counter", "type": "int", "size": 4}]
 DECOMPILE = {"pseudocode": "int f(void)\n\n{\n  return 0;\n}\n", "signature": "int f()"}
 XREFS = {"callers": [], "callees": [{"addr": "0x401050", "name": "sub_401050"}]}
+# #1167 shapes: _v1_list_memory strips file_offset before returning (see
+# server.py's own comment), and _v1_hexdump's response shape.
+MEMORY_MAP = {"blocks": [{"name": ".text", "start": "0x401000", "end": "0x40100f", "size": 16}],
+              "total_bytes": 16}
+HEXDUMP = {"addr": "0x401000", "length": 4, "hex": "90909090", "ascii": "...."}
 
 fails = []
 
@@ -82,6 +87,10 @@ class Stub(BaseHTTPRequestHandler):
             return self._j({"total": len(GLOBALS), "offset": 0, "limit": 5000, "globals": GLOBALS})
         if p.endswith("/annotations"):
             return self._j({"revision": 0, "entries": {}})
+        if p.endswith("/memory"):
+            return self._j(MEMORY_MAP)
+        if "/hexdump/" in p:
+            return self._j(HEXDUMP)
         if p.endswith("/decompile"):
             return self._j(dict(DECOMPILE, addr="0x401000"))
         if "/xrefs/" in p:
@@ -516,10 +525,11 @@ def test_spool(ghidra):
               "function addr mapped to address")
         check(d.get("analyzer_version") == "ghidra-11.3.2",
               "analyzer version recorded from /status")
-        check(d["version"] == 6, "version stamped")
+        check(d["version"] == 7, "version stamped")
         check(all(k in d for k in ("findcrypt", "call_graph_svg", "ai_triage",
                                    "fuzzy_hashes", "lief", "capa", "floss", "revdeck",
                                    "report_pdf", "types", "globals", "annotations",
+                                   "memory_map",
                                    "functions_deepened", "functions_deepened_truncated")),
               "every result key present")
         check(d["functions"][0].get("pseudocode") == DECOMPILE["pseudocode"],
@@ -531,6 +541,10 @@ def test_spool(ghidra):
         check(d["globals"] == GLOBALS, "globals pulled from the v1 deep-dive")
         check(d["annotations"] == {"revision": 0, "entries": {}},
               "annotations pulled from the v1 deep-dive")
+        check(len(d["memory_map"]) == 1 and d["memory_map"][0]["name"] == ".text",
+              "memory_map block metadata pulled from the v1 deep-dive")
+        check(d["memory_map"][0].get("hexdump_preview") == {"hex": HEXDUMP["hex"], "ascii": HEXDUMP["ascii"]},
+              "memory_map block carries a bounded hexdump preview")
         check(d["ai_triage"] is None, "triage disabled leaves ai_triage null")
         check(d["fuzzy_hashes"] is None, "statictools disabled leaves fuzzy_hashes null")
         check(d["lief"] is None, "statictools disabled leaves lief null")

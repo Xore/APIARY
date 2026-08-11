@@ -418,6 +418,14 @@ def test_v1_types_globals_hexdump():
             check(globs["total"] == 1 and globs["globals"][0]["name"] == "g_counter",
                   "v1 globals route serves globals.json")
 
+            mem = get(f"{base}/v1/results/{job_id}/memory")
+            check(len(mem["blocks"]) == 1 and mem["blocks"][0]["name"] == ".text"
+                  and mem["blocks"][0]["start"] == "0x401000" and mem["blocks"][0]["size"] == 16,
+                  "v1 memory route serves memory_map.json block metadata")
+            check("file_offset" not in mem["blocks"][0],
+                  "v1 memory route strips file_offset -- meaningless outside this service")
+            check(mem["total_bytes"] == 16, "v1 memory route reports total_bytes")
+
             dump = get(f"{base}/v1/results/{job_id}/hexdump/0x401000?length=4")
             check(dump["hex"] == "90909090", "v1 hexdump route reads the right file offset for a block-start addr")
 
