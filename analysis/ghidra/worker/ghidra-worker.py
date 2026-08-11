@@ -58,7 +58,7 @@ SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 # decide how to parse the rest of the document; it exists so a result can be
 # tied to the worker version that produced it. (4: added revdeck (#78). 3:
 # added capa. 2: added fuzzy_hashes and lief (#138).)
-RESULT_VERSION = 5
+RESULT_VERSION = 6
 
 REQUEST_DIR = Path(os.environ.get("GHIDRA_REQUEST_DIR", "/ghidra-requests"))
 RESULTS_DIR = Path(os.environ.get("GHIDRA_RESULTS_DIR", "/ghidra-results"))
@@ -118,6 +118,20 @@ MAX_FUNCTIONS = int(os.environ.get("GHIDRA_MAX_FUNCTIONS", "20000"))
 # functions outward and merged. limit is capped at 500 server-side.
 GRAPH_SEEDS = int(os.environ.get("GHIDRA_GRAPH_SEEDS", "60"))
 GRAPH_DEPTH = int(os.environ.get("GHIDRA_GRAPH_DEPTH", "2"))
+
+# Deep-dive (#1167): pseudocode + xrefs per function, over the v1 surface
+# (#1165). One HTTP round trip per function per artifact, unlike the bulk
+# paged /results/{job}/functions call above -- MAX_FUNCTIONS' cap (20000) is
+# fine for cheap metadata but would mean tens of thousands of requests here,
+# so this pulls only the largest functions, same "largest = most worth the
+# expensive treatment" heuristic build_call_graph's GRAPH_SEEDS already uses.
+# types/globals/annotations are single bulk calls each, no per-item cap needed
+# beyond what export_json.py already enforces server-side.
+DEEPDIVE_MAX_FUNCTIONS = int(os.environ.get("GHIDRA_DEEPDIVE_MAX_FUNCTIONS", "300"))
+# types/globals are one bulk call each -- the v1 route itself pages at 100 by
+# default, so this asks for the whole (server-side-bounded, see
+# GHIDRA_MAX_TYPES/GHIDRA_MAX_GLOBALS in export_json.py) list in one request.
+MAX_TYPES_GLOBALS = int(os.environ.get("GHIDRA_DEEPDIVE_MAX_TYPES_GLOBALS", "5000"))
 
 # ── Static tools: fuzzy hashing and structural parsing (#85, #138) ──────────
 #
@@ -573,6 +587,63 @@ class GhidraClient:
             ]
         except GhidraError as e:
             log(f"  [!] imports: {e}")
+        return out
+
+    def _v1_bulk(self, path: str) -> dict | None:
+        """GET one of the v1 bulk endpoints (#1165/#1167). None on any
+        failure -- an older service image without the v1 surface, or one
+        this job's own analysis never populated a given artifact for (a
+        stripped binary can have zero recovered types), must not fail the
+        whole deep-dive the way collect()'s functions/strings/imports
+        failing entirely does; those three are the contract, this is an
+        enrichment on top of it.
+        """
+        try:
+            resp = self._request("GET", f"/v1{path}")
+            return resp if isinstance(resp, dict) else None
+        except GhidraError as e:
+            log(f"  [!] {path}: {e}")
+            return None
+
+    def deep_dive(self, job: str, functions: list) -> dict:
+        """Pseudocode + xrefs for the largest functions, plus types/globals/
+        annotations for the whole job (#1167). Best-effort throughout, same
+        reasoning as collect(): a partial deep-dive is still worth keeping.
+        """
+        out: dict = {"types": [], "globals": [], "annotations": None}
+
+        types_resp = self._v1_bulk(f"/results/{job}/types?limit={MAX_TYPES_GLOBALS}")
+        if types_resp:
+            out["types"] = types_resp.get("types", [])
+        globals_resp = self._v1_bulk(f"/results/{job}/globals?limit={MAX_TYPES_GLOBALS}")
+        if globals_resp:
+            out["globals"] = globals_resp.get("globals", [])
+        annotations_resp = self._v1_bulk(f"/jobs/{job}/annotations")
+        if annotations_resp is not None:
+            out["annotations"] = annotations_resp
+
+        # Largest functions first -- same heuristic build_call_graph's
+        # GRAPH_SEEDS uses and for the same reason: the small PLT thunks and
+        # init stubs that dominate address-order/first-N are the least
+        # interesting things to spend a decompile+xrefs round trip on.
+        ranked = sorted(functions, key=lambda f: -(f.get("size") or 0))
+        seeds = [f["address"] for f in ranked[:DEEPDIVE_MAX_FUNCTIONS] if f.get("address")]
+        by_addr = {f["address"]: f for f in functions}
+        deepened = 0
+        for addr in seeds:
+            decompile = self._v1_bulk(f"/results/{job}/function/{addr}/decompile")
+            xrefs = self._v1_bulk(f"/results/{job}/xrefs/{addr}")
+            target = by_addr.get(addr)
+            if target is None:
+                continue
+            if decompile and decompile.get("pseudocode"):
+                target["pseudocode"] = decompile["pseudocode"]
+            if xrefs:
+                target["callers"] = xrefs.get("callers", [])
+                target["callees"] = xrefs.get("callees", [])
+            deepened += 1
+        out["functions_deepened"] = deepened
+        out["functions_deepened_truncated"] = len(functions) > DEEPDIVE_MAX_FUNCTIONS
         return out
 
 
@@ -1748,6 +1819,10 @@ def analyse_one(client: GhidraClient, sha: str, sample: Path,
     if truncated:
         log(f"  [!] function list truncated at {MAX_FUNCTIONS}")
 
+    deep = client.deep_dive(job, parts["functions"])
+    log(f"  [+] deep-dive: {deep['functions_deepened']} function(s) decompiled, "
+        f"{len(deep['types'])} type(s), {len(deep['globals'])} global(s)")
+
     # After collection, from the collected artifacts only: the model never sees
     # the sample itself, and it runs last so nothing above depends on it.
     ai_triage = triage(parts, sha)
@@ -1782,10 +1857,15 @@ def analyse_one(client: GhidraClient, sha: str, sample: Path,
         "service_sha256": status.get("sha256", ""),
         "functions": parts["functions"],
         "functions_truncated": truncated,
+        "functions_deepened": deep["functions_deepened"],
+        "functions_deepened_truncated": deep["functions_deepened_truncated"],
         "strings": parts["strings"],
         "imports": parts["imports"],
         "findcrypt": scan_crypto(sample),
         "call_graph_svg": build_call_graph(client, job, parts["functions"], sha),
+        "types": deep["types"],
+        "globals": deep["globals"],
+        "annotations": deep["annotations"],
         "ai_triage": ai_triage,
         "fuzzy_hashes": fuzzy,
         "lief": lief_info,
@@ -1885,7 +1965,9 @@ def drain() -> int:
                 "exit_status": "error",
                 "error": str(e),
                 "functions": [], "strings": [], "imports": [], "findcrypt": [],
+                "functions_deepened": 0, "functions_deepened_truncated": False,
                 "call_graph_svg": None, "ai_triage": None,
+                "types": [], "globals": [], "annotations": None,
                 "fuzzy_hashes": None, "lief": None, "capa": None, "floss": None,
                 "revdeck": None,
                 "report_pdf": None,

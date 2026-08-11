@@ -23,6 +23,15 @@ FUNCS = [{"addr": "0x401000", "name": "sub_401000", "signature": "int f()",
 STRINGS = ["hello", "evil.example"]
 IMPORTS = [{"name": "CreateProcessA", "library": "kernel32.dll",
             "address": "0xexternal:01", "ordinal": None}]
+# Deep-dive (#1167) shapes, captured from the real v1 surface (#1165) this
+# session: types/globals field names from export_json.py's own writer,
+# decompile/xrefs from server.py's _tool_decompile_function/_tool_get_xrefs.
+TYPES = [{"name": "POINT", "kind": "struct", "size": 8,
+          "fields": [{"name": "x", "type": "int", "offset": 0, "size": 4},
+                     {"name": "y", "type": "int", "offset": 4, "size": 4}]}]
+GLOBALS = [{"addr": "0x403000", "name": "g_counter", "type": "int", "size": 4}]
+DECOMPILE = {"pseudocode": "int f(void)\n\n{\n  return 0;\n}\n", "signature": "int f()"}
+XREFS = {"callers": [], "callees": [{"addr": "0x401050", "name": "sub_401050"}]}
 
 fails = []
 
@@ -67,6 +76,16 @@ class Stub(BaseHTTPRequestHandler):
                             "strings": [{"addr": "0x1", "s": v} for v in STRINGS]})
         if p.endswith("/imports"):
             return self._j(IMPORTS)
+        if p.endswith("/types"):
+            return self._j({"total": len(TYPES), "offset": 0, "limit": 5000, "types": TYPES})
+        if p.endswith("/globals"):
+            return self._j({"total": len(GLOBALS), "offset": 0, "limit": 5000, "globals": GLOBALS})
+        if p.endswith("/annotations"):
+            return self._j({"revision": 0, "entries": {}})
+        if p.endswith("/decompile"):
+            return self._j(dict(DECOMPILE, addr="0x401000"))
+        if "/xrefs/" in p:
+            return self._j(dict(XREFS, addr="0x401000"))
         self._j({"detail": "Not Found"}, 404)
 
     def do_POST(self):
@@ -467,11 +486,21 @@ def test_spool(ghidra):
               "function addr mapped to address")
         check(d.get("analyzer_version") == "ghidra-11.3.2",
               "analyzer version recorded from /status")
-        check(d["version"] == 5, "version stamped")
+        check(d["version"] == 6, "version stamped")
         check(all(k in d for k in ("findcrypt", "call_graph_svg", "ai_triage",
                                    "fuzzy_hashes", "lief", "capa", "floss", "revdeck",
-                                   "report_pdf")),
+                                   "report_pdf", "types", "globals", "annotations",
+                                   "functions_deepened", "functions_deepened_truncated")),
               "every result key present")
+        check(d["functions"][0].get("pseudocode") == DECOMPILE["pseudocode"],
+              "function pseudocode pulled from the v1 deep-dive")
+        check(d["functions"][0].get("callees") == XREFS["callees"],
+              "function xrefs pulled from the v1 deep-dive")
+        check(d["functions_deepened"] == 1, "one function deepened")
+        check(d["types"] == TYPES, "types pulled from the v1 deep-dive")
+        check(d["globals"] == GLOBALS, "globals pulled from the v1 deep-dive")
+        check(d["annotations"] == {"revision": 0, "entries": {}},
+              "annotations pulled from the v1 deep-dive")
         check(d["ai_triage"] is None, "triage disabled leaves ai_triage null")
         check(d["fuzzy_hashes"] is None, "statictools disabled leaves fuzzy_hashes null")
         check(d["lief"] is None, "statictools disabled leaves lief null")

@@ -16,11 +16,30 @@ import (
 // That worker is the only producer; the dashboard never writes a result and
 // never calls the Ghidra REST service.
 
+// ghidraXref is one entry of a function's callers/callees (#1167), matching
+// export_json.py's own xrefs.json shape (addr+name, nothing else -- getting
+// the full signature back out means a second lookup into Functions by
+// address, which the template does rather than duplicating it here per edge).
+type ghidraXref struct {
+	Addr string `json:"addr"`
+	Name string `json:"name"`
+}
+
 type ghidraFunction struct {
 	Address   string `json:"address"`
 	Name      string `json:"name"`
 	Signature string `json:"signature"`
 	Size      int    `json:"size"`
+
+	// Pseudocode/Callers/Callees (#1167) are set only for the largest
+	// functions the worker's deep-dive budget covered (see
+	// GHIDRA_DEEPDIVE_MAX_FUNCTIONS in ghidra-worker.py) -- empty on every
+	// other function in the list, not an error, the same three-state
+	// convention FunctionsDeepenedTruncated below documents at the result
+	// level.
+	Pseudocode string       `json:"pseudocode,omitempty"`
+	Callers    []ghidraXref `json:"callers,omitempty"`
+	Callees    []ghidraXref `json:"callees,omitempty"`
 }
 
 type ghidraCrypto struct {
@@ -188,6 +207,64 @@ type ghidraTriage struct {
 	EvidenceShown string `json:"evidence_shown"`
 }
 
+// ghidraTypeField is one struct/union member (#1167), mirroring
+// export_json.py's types.json writer.
+type ghidraTypeField struct {
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+	Offset int    `json:"offset"`
+	Size   int    `json:"size"`
+}
+
+// ghidraType mirrors one entry of types.json (#1167) -- a recovered struct,
+// union, enum or typedef from the program's own DataTypeManager. Kind
+// selects which of Fields/Values/BaseType is populated; the other two stay
+// zero-value for that entry, same "kind tells you which fields are live"
+// convention ghidraLief's format-specific pointers use, but as plain values
+// here since every type in the list has some kind, unlike Lief's
+// format-conditional absence.
+type ghidraType struct {
+	Name     string            `json:"name"`
+	Kind     string            `json:"kind"` // "struct" | "union" | "enum" | "typedef"
+	Size     int               `json:"size"`
+	Fields   []ghidraTypeField `json:"fields,omitempty"`    // struct/union
+	Values   map[string]int64  `json:"values,omitempty"`    // enum
+	BaseType string            `json:"base_type,omitempty"` // typedef
+}
+
+// ghidraGlobal mirrors one entry of globals.json (#1167): a non-string
+// defined-data symbol export_json.py found while walking the program's
+// memory, distinct from the free-text Strings list above.
+type ghidraGlobal struct {
+	Addr string `json:"addr"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+	Size int    `json:"size"`
+}
+
+// ghidraAnnotation is one analyst-authored entry (#1167) -- display
+// name/comment/tags/confidence on a function or address, written through
+// RevDeck's own annotation UI (PUT /v1/jobs/{job}/annotations/{addr}) and
+// mirrored here read-only. Confidence is left as json.RawMessage rather
+// than a fixed type: server.py copies whatever the client PUT verbatim
+// (_ENTRY_FIELDS) with no type coercion, so this must not fail to decode a
+// numeric confidence just because a different analyst UI sent a string.
+type ghidraAnnotation struct {
+	DisplayName string          `json:"display_name,omitempty"`
+	Comment     string          `json:"comment,omitempty"`
+	Tags        []string        `json:"tags,omitempty"`
+	Confidence  json.RawMessage `json:"confidence,omitempty"`
+}
+
+// ghidraAnnotations mirrors GET /v1/jobs/{job}/annotations's whole-document
+// shape (#1167): a revision counter (optimistic-concurrency, not meaningful
+// once mirrored read-only here) plus entries keyed by the same canonical
+// hex address ghidraFunction.Address and ghidraXref.Addr use.
+type ghidraAnnotations struct {
+	Revision int                         `json:"revision"`
+	Entries  map[string]ghidraAnnotation `json:"entries"`
+}
+
 type ghidraResult struct {
 	Version     int    `json:"version"`
 	SHA256      string `json:"sha256"`
@@ -204,6 +281,19 @@ type ghidraResult struct {
 	Strings   []string         `json:"strings"`
 	Imports   []string         `json:"imports"`
 	FindCrypt []ghidraCrypto   `json:"findcrypt"`
+
+	// FunctionsDeepened/FunctionsDeepenedTruncated (#1167) say how many of
+	// Functions above actually got the Pseudocode/Callers/Callees
+	// treatment, and whether the deep-dive budget (GHIDRA_DEEPDIVE_MAX_FUNCTIONS
+	// in ghidra-worker.py) cut off before covering every function -- a
+	// result showing zero of either must not be read as "this binary has
+	// no functions worth decompiling."
+	FunctionsDeepened          int  `json:"functions_deepened"`
+	FunctionsDeepenedTruncated bool `json:"functions_deepened_truncated"`
+
+	Types       []ghidraType       `json:"types"`
+	Globals     []ghidraGlobal     `json:"globals"`
+	Annotations *ghidraAnnotations `json:"annotations"`
 
 	CallGraphSVG string             `json:"call_graph_svg"`
 	AITriage     *ghidraTriage      `json:"ai_triage"`
