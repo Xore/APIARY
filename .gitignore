@@ -92,6 +92,7 @@ tftp-relay/tftp-relay
 ip-enrichment-worker/ip-enrichment-worker
 payload-inventory-worker/payload-inventory-worker
 correlator-worker/correlator-worker
+attacker-identity-worker/attacker-identity-worker
 node_modules/
 playwright-report/
 test-results/
