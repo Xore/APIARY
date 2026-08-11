@@ -19,25 +19,29 @@ filebeat.inputs:
   # attacker IP -- that used to be joined against portbridge's connection
   # log at dashboard read time. ip-enrichment-worker now does that join at
   # ingest time instead and writes an already-correct copy to
-  # /logs/enriched/*.json, which is what gets tailed for these five sensors
-  # -- their own raw paths are deliberately absent from this list so the
-  # event isn't shipped twice. Every other sensor already gets the real IP
-  # directly via PROXY protocol (or, for cisco-asa-honeypot's own WebVPN/
-  # HTTPS side, is passed through unchanged by the worker) and is tailed
-  # from its raw path as before. See ip-enrichment-worker/main.go's package
-  # doc comment for the full design.
+  # /logs/enriched/*.json.
+  #
+  # #1217: multipot/tanner/http-honeypot/citrix-honeypot/rdp-honeypot
+  # already get the real attacker IP directly via PROXY protocol (no join
+  # needed) but are ALSO now watched by ip-enrichment-worker, purely to
+  # promote canonical_* creds/command/fingerprint fields (see
+  # ip-enrichment-worker/canonical.go) -- their enriched copies land in
+  # /logs/enriched/ too (multipot.json, tanner.json, http-honeypot.json,
+  # citrix-honeypot.json, rdp-honeypot.json).
+  #
+  # Every one of these ten sensors' own raw paths is deliberately absent
+  # from this list -- only /logs/enriched/*.json is tailed for them, so no
+  # event is ever shipped twice. api-honeypot/dnp3/dicompot/endlessh are
+  # NOT in ip-enrichment-worker's scope at all (#1217 is exactly these
+  # five, no more) and keep tailing their raw path as before. See
+  # ip-enrichment-worker/main.go's package doc comment for the full design.
   - type: filestream
     id: honeypot-json
     paths:
       - /logs/*.json
-      - /logs/http-honeypot/*.json
       - /logs/api-honeypot/*.json
-      - /logs/multipot/*.json
-      - /logs/tanner/*.json
       - /logs/dnp3/*.json
       - /logs/dicompot/*.json
-      - /logs/citrix-honeypot/*.json
-      - /logs/rdp-honeypot/*.json
       - /logs/endlessh/*.json
       - /logs/enriched/*.json
     # Keep an extra guard for a top-level Suricata mount. Explicit per-sensor
@@ -234,10 +238,15 @@ processors:
   # freshness tracking). Confirmed live (2026-08-09). Fixed at the source
   # here rather than adding a third hardcoded path fallback to the ingest
   # pipeline's already-accumulating special cases.
+  # #1217: tanner_report.json now routes through ip-enrichment-worker like
+  # cowrie/dionaea/conpot do (field normalization only, not IP resolution --
+  # see canonical.go), so log.file.path is always under /logs/enriched/ by
+  # the time Filebeat sees it, never the raw /logs/tanner/ path -- same
+  # #746 fix applied here as the cowrie/dionaea/conpot rules above.
   - add_fields:
       target: honeypot
       fields: {sensor: tanner, persona_id: meridian-customer-portal, site_id: meridian-public-web, asset_id: customer-portal-02, organization: Meridian Retail Systems Ltd.}
-      when.contains: {log.file.path: "/logs/tanner/"}
+      when.contains: {log.file.path: "enriched/tanner.json"}
   # NOTE on stats events: they carry ~600 engine-internal counter fields and
   # once exhausted the shared daily index's field limit (2026-07-19 outage).
   # With per-event-type indices (see output below) they are contained in
