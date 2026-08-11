@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -343,6 +344,143 @@ func TestIdentityFromRequestSessionLifecycle(t *testing.T) {
 		}
 		if _, getErr := store.Get(context.Background(), "oidc:session:revoked-refresh-session"); getErr != errSessionNotFound {
 			t.Fatalf("session with a genuinely revoked refresh token was not deleted: %v", getErr)
+		}
+	})
+
+	// #1127: reproduces the actual production bug. Keycloak's refresh
+	// tokens here are single-use (revokeRefreshToken=true,
+	// refreshTokenMaxReuse=0, keycloak/realm/apiary-realm.json) -- two
+	// concurrent requests for the same session, both arriving after its
+	// access token entered the last-minute refresh window, both read the
+	// same still-valid refresh token and race to spend it. Before the
+	// #1127 fix, the loser's exchange got a real invalid_grant (Keycloak
+	// telling the truth: that exact token was already used), which
+	// identityFromRequest treated as a genuine revocation -- deleting the
+	// session the winner had just legitimately refreshed a moment earlier.
+	// The fake token endpoint below plays Keycloak's actual behavior: the
+	// first exchange succeeds, every one after it (reusing the same
+	// spent refresh token) gets invalid_grant.
+	t.Run("concurrent requests racing to refresh the same session do not delete it", func(t *testing.T) {
+		originalTimeout, originalPoll := oidcRefreshWaitTimeout, oidcRefreshPollInterval
+		oidcRefreshWaitTimeout, oidcRefreshPollInterval = 2*time.Second, 5*time.Millisecond
+		t.Cleanup(func() { oidcRefreshWaitTimeout, oidcRefreshPollInterval = originalTimeout, originalPoll })
+
+		// The winning exchange must actually succeed end to end -- unlike
+		// the transient/revoked-refresh tests above, which only need the
+		// token endpoint to fail, this one needs refreshSession() to reach
+		// a valid identity, which means a real signed ID token verified
+		// against a real JWKS (verifyIDToken does real signature checking,
+		// same setup as TestVerifyIDTokenEnforcesIssuerAudienceNoncePartyAndRole).
+		key, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var server *httptest.Server
+		var mu sync.Mutex
+		exchanges := 0
+		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/.well-known/openid-configuration":
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"issuer": server.URL, "authorization_endpoint": server.URL + "/authorize",
+					"token_endpoint": server.URL + "/token", "jwks_uri": server.URL + "/jwks",
+					"id_token_signing_alg_values_supported": []string{"RS256"},
+				})
+			case "/jwks":
+				_ = json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &key.PublicKey, KeyID: "test", Algorithm: "RS256", Use: "sig"}}})
+			case "/token":
+				mu.Lock()
+				exchanges++
+				first := exchanges == 1
+				mu.Unlock()
+				if !first {
+					// Keycloak's real response to a refresh token already
+					// spent by the winning concurrent request.
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = w.Write([]byte(`{"error":"invalid_grant","error_description":"Token reuse detected"}`))
+					return
+				}
+				signer, signErr := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: key}, (&jose.SignerOptions{}).WithType("JWT").WithHeader("kid", "test"))
+				if signErr != nil {
+					t.Fatal(signErr)
+				}
+				idToken, signErr := jwt.Signed(signer).Claims(map[string]any{
+					"iss": server.URL, "sub": subject, "aud": oidcClientID, "azp": oidcClientID,
+					"exp": time.Now().Add(time.Hour).Unix(), "iat": time.Now().Add(-time.Minute).Unix(),
+					"preferred_username": "analyst", "name": "Analyst",
+					"resource_access": map[string]any{oidcClientID: map[string]any{"roles": []string{"access", "admin"}}},
+				}).Serialize()
+				if signErr != nil {
+					t.Fatal(signErr)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"access_token": "new-access-token", "refresh_token": "new-refresh-token",
+					"token_type": "Bearer", "expires_in": 300, "id_token": idToken,
+				})
+			case "/introspect":
+				// now() is 1h past LastValidated in this test, so every
+				// request also crosses the 30s introspection re-check --
+				// this needs to succeed for the request to reach a clean
+				// identity, same as the refresh above.
+				_ = json.NewEncoder(w).Encode(map[string]any{"active": true, "sub": subject, "client_id": oidcClientID})
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer server.Close()
+
+		provider, err := oidc.NewProvider(context.Background(), server.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		store := newStore()
+		created := time.Now().UTC()
+		nowFn := func() time.Time { return created.Add(time.Hour) }
+		auth := &oidcAuth{
+			sessions: store, now: nowFn, httpClient: server.Client(),
+			verifier:              provider.Verifier(&oidc.Config{ClientID: oidcClientID}),
+			oauth2:                oauth2.Config{ClientID: oidcClientID, Endpoint: provider.Endpoint()},
+			introspectionEndpoint: server.URL + "/introspect",
+			clientSecret:          "unused-in-this-test",
+		}
+		session := oidcSession{
+			Identity:    authenticatedIdentity{Subject: subject, Username: "analyst", Role: "admin"},
+			TokenExpiry: created.Add(-time.Hour), CreatedAt: created, LastValidated: created,
+			AccessToken: subject, RefreshToken: "refresh-token-still-valid",
+		}
+		if err := auth.putJSON(context.Background(), "oidc:session:racing-session", session, time.Hour); err != nil {
+			t.Fatal(err)
+		}
+
+		const concurrency = 8
+		results := make([]error, concurrency)
+		var wg sync.WaitGroup
+		for i := 0; i < concurrency; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				request := httptest.NewRequest(http.MethodGet, "/", nil)
+				request.AddCookie(&http.Cookie{Name: oidcSessionCookie, Value: "racing-session"})
+				_, results[i] = auth.identityFromRequest(request)
+			}(i)
+		}
+		wg.Wait()
+
+		for i, err := range results {
+			if err != nil {
+				t.Errorf("request %d: identityFromRequest() = %v, want nil (a losing racer must wait for the winner, not force a logout)", i, err)
+			}
+		}
+		if _, getErr := store.Get(context.Background(), "oidc:session:racing-session"); getErr != nil {
+			t.Fatalf("session was deleted by a losing racer's spent refresh token: %v", getErr)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if exchanges != 1 {
+			t.Errorf("token endpoint hit %d times, want exactly 1 -- the lock should have serialized every concurrent request onto one real exchange", exchanges)
 		}
 	})
 }

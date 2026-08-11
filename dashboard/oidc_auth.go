@@ -24,14 +24,44 @@ const (
 	oidcClientID      = "apiary-dashboard"
 	oidcSessionMaxAge = 12 * time.Hour
 	oidcStateMaxAge   = 10 * time.Minute
+
+	// #1127: the refresh-token exchange below is serialized per session
+	// with a short-lived lock, since Keycloak's refresh tokens here are
+	// single-use (realm config: revokeRefreshToken=true,
+	// refreshTokenMaxReuse=0). oidcRefreshLockTTL bounds how long a crashed
+	// or hung lock-holder can block everyone else. oidcRefreshWaitTimeout
+	// is how long a request that lost the race waits for the winner to
+	// finish before giving up (transient 503, not a forced logout) --
+	// generous enough for one real Keycloak round trip, short enough not
+	// to stall a page load noticeably.
+	oidcRefreshLockTTL = 15 * time.Second
 )
 
-var errSessionNotFound = errors.New("OIDC session not found")
+// oidcRefreshWaitTimeout/oidcRefreshPollInterval are vars, not consts, so
+// tests can shrink them -- the wait loop paces itself against real
+// wall-clock time (below), deliberately not the mockable a.now() the rest
+// of this file uses for session-expiry logic, since this is genuinely
+// about how long to wait for another goroutine, not simulated session age.
+var (
+	oidcRefreshWaitTimeout  = 5 * time.Second
+	oidcRefreshPollInterval = 100 * time.Millisecond
+)
+
+var (
+	errSessionNotFound     = errors.New("OIDC session not found")
+	errRefreshLockTimedOut = errors.New("timed out waiting for a concurrent token refresh to finish")
+)
 
 type sessionStore interface {
 	Get(context.Context, string) ([]byte, error)
 	Set(context.Context, string, []byte, time.Duration) error
 	Delete(context.Context, string) error
+	// TryLock atomically acquires a short-lived lock at key, returning
+	// true only if this call acquired it (false if another holder already
+	// has it -- not an error). Unlock releases it early; the TTL is the
+	// backstop if a holder never calls Unlock (crash, context cancellation).
+	TryLock(ctx context.Context, key string, ttl time.Duration) (bool, error)
+	Unlock(ctx context.Context, key string) error
 }
 
 type redisSessionStore struct{ client *redis.Client }
@@ -49,6 +79,14 @@ func (s redisSessionStore) Set(ctx context.Context, key string, value []byte, tt
 }
 
 func (s redisSessionStore) Delete(ctx context.Context, key string) error {
+	return s.client.Del(ctx, key).Err()
+}
+
+func (s redisSessionStore) TryLock(ctx context.Context, key string, ttl time.Duration) (bool, error) {
+	return s.client.SetNX(ctx, key, "1", ttl).Result()
+}
+
+func (s redisSessionStore) Unlock(ctx context.Context, key string) error {
 	return s.client.Del(ctx, key).Err()
 }
 
@@ -323,7 +361,8 @@ func (a *oidcAuth) identityFromRequest(r *http.Request) (authenticatedIdentity, 
 	}
 	changed := false
 	if now.Add(time.Minute).After(session.TokenExpiry) {
-		if err := a.refreshSession(r.Context(), &session); err != nil {
+		remaining := oidcSessionMaxAge - now.Sub(session.CreatedAt)
+		if err := a.refreshSessionLocked(r.Context(), cookie.Value, &session, remaining); err != nil {
 			if isTransientOAuthError(err) {
 				// Keycloak unreachable/overloaded right as this session's
 				// token needed refreshing -- the same "fail closed, but
@@ -332,7 +371,10 @@ func (a *oidcAuth) identityFromRequest(r *http.Request) (authenticatedIdentity, 
 				// this, a Keycloak blip landing in this exact one-minute
 				// window would silently and permanently log the user out
 				// even though nothing about their own session was actually
-				// invalid.
+				// invalid. errRefreshLockTimedOut and a lock-store error
+				// both fall through isTransientOAuthError's own default
+				// (errors.As fails to match *oauth2.RetrieveError -> true),
+				// so they land here too, same as a real Keycloak outage.
 				return authenticatedIdentity{}, errIdentityUnavailable
 			}
 			_ = a.sessions.Delete(r.Context(), "oidc:session:"+cookie.Value)
@@ -380,6 +422,91 @@ func (a *oidcAuth) verifyIDToken(ctx context.Context, raw, nonce string) (authen
 		role = "admin"
 	}
 	return authenticatedIdentity{Subject: claims.Subject, Username: claims.PreferredUsername, DisplayName: claims.Name, Role: role}, idToken, nil
+}
+
+// refreshSessionLocked serializes refreshSession per session ID (#1127).
+//
+// Keycloak's refresh tokens here are single-use (revokeRefreshToken=true,
+// refreshTokenMaxReuse=0 in the realm config) -- reusing one gets a real
+// invalid_grant rejection, indistinguishable at the HTTP level from a
+// genuinely revoked session. Without this lock, two concurrent requests for
+// the same session both arriving after its access token entered the
+// "needs refresh" window (the last minute of its 300s lifespan) both read
+// the same still-valid refresh token from Redis and both race to spend it:
+// whichever's exchange Keycloak processes first succeeds and overwrites
+// the session with new tokens; the loser's exchange, using the
+// now-already-consumed token, gets invalid_grant -- a real rejection by
+// isTransientOAuthError's own classification -- and identityFromRequest
+// deleted the session it named, discarding the winner's still-good
+// refresh a moment earlier. Reproduces exactly as reported in #1127: a
+// burst of near-simultaneous requests after idle time (the common case
+// once the access token has been sitting in its last minute), self-healing
+// once enough wall-clock time passes for the race to resolve on its own,
+// which is why a full reload "fixes" it but an instant same-page retry
+// usually lands in the same window and fails again.
+//
+// remaining is the session's own remaining TTL (identityFromRequest's own
+// oidcSessionMaxAge - age calculation) -- the refreshed session is
+// persisted here, still under the lock, not left to identityFromRequest's
+// later shared "if changed" write: a losing racer that acquires this lock
+// immediately after release must see the already-persisted refreshed
+// session, not the stale one that would let it back into refreshSession()
+// with an already-spent refresh token.
+func (a *oidcAuth) refreshSessionLocked(ctx context.Context, sessionID string, session *oidcSession, remaining time.Duration) error {
+	lockKey := "oidc:refreshlock:" + sessionID
+	acquired, err := a.sessions.TryLock(ctx, lockKey, oidcRefreshLockTTL)
+	if err != nil {
+		return err
+	}
+	if !acquired {
+		return a.waitForConcurrentRefresh(ctx, sessionID, session, remaining)
+	}
+	defer func() { _ = a.sessions.Unlock(ctx, lockKey) }()
+
+	// Someone may have refreshed and released the lock between our own
+	// session read (by the caller, before acquiring this lock) and here --
+	// re-read rather than assume we're first.
+	var fresh oidcSession
+	if err := a.getJSON(ctx, "oidc:session:"+sessionID, &fresh); err == nil && fresh.TokenExpiry.After(session.TokenExpiry) {
+		*session = fresh
+		return nil
+	}
+	if err := a.refreshSession(ctx, session); err != nil {
+		return err
+	}
+	return a.putJSON(ctx, "oidc:session:"+sessionID, *session, remaining)
+}
+
+// waitForConcurrentRefresh is the losing side of refreshSessionLocked's
+// race: rather than attempting a second exchange with an already-spent
+// refresh token, it polls for the lock-holder's write. If the holder never
+// finishes (crashed, or its own request context was cancelled) the lock
+// self-expires (oidcRefreshLockTTL) and this takes over the refresh
+// itself, rather than waiting out the full timeout for nothing.
+func (a *oidcAuth) waitForConcurrentRefresh(ctx context.Context, sessionID string, session *oidcSession, remaining time.Duration) error {
+	lockKey := "oidc:refreshlock:" + sessionID
+	staleExpiry := session.TokenExpiry
+	deadline := time.Now().Add(oidcRefreshWaitTimeout)
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(oidcRefreshPollInterval):
+		}
+		var fresh oidcSession
+		if err := a.getJSON(ctx, "oidc:session:"+sessionID, &fresh); err == nil && fresh.TokenExpiry.After(staleExpiry) {
+			*session = fresh
+			return nil
+		}
+		if acquired, err := a.sessions.TryLock(ctx, lockKey, oidcRefreshLockTTL); err == nil && acquired {
+			defer func() { _ = a.sessions.Unlock(ctx, lockKey) }()
+			if err := a.refreshSession(ctx, session); err != nil {
+				return err
+			}
+			return a.putJSON(ctx, "oidc:session:"+sessionID, *session, remaining)
+		}
+	}
+	return errRefreshLockTimedOut
 }
 
 func (a *oidcAuth) refreshSession(ctx context.Context, session *oidcSession) error {

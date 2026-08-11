@@ -17,6 +17,7 @@ const testAuthCookie = "test-session"
 type memorySessionStore struct {
 	mu     sync.Mutex
 	values map[string][]byte
+	locks  map[string]bool
 }
 
 func (s *memorySessionStore) Get(_ context.Context, key string) ([]byte, error) {
@@ -40,6 +41,30 @@ func (s *memorySessionStore) Delete(_ context.Context, key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.values, key)
+	return nil
+}
+
+// TryLock/Unlock (#1127) -- a real compare-and-set under the same mutex
+// Get/Set/Delete already use, mirroring redisSessionStore's SETNX
+// atomicity (a real Redis instance would reject a concurrent SETNX the
+// same way this rejects a concurrent map write while the mutex is held).
+func (s *memorySessionStore) TryLock(_ context.Context, key string, _ time.Duration) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.locks == nil {
+		s.locks = make(map[string]bool)
+	}
+	if s.locks[key] {
+		return false, nil
+	}
+	s.locks[key] = true
+	return true, nil
+}
+
+func (s *memorySessionStore) Unlock(_ context.Context, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.locks, key)
 	return nil
 }
 
