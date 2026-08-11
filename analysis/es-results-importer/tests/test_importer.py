@@ -113,6 +113,39 @@ class ScanSourceBinaryTest(unittest.TestCase):
         self.assertNotEqual(report_id, callgraph_id)
         self.assertEqual({report_id, callgraph_id}, {f"{SHA}:report", f"{SHA}:callgraph"})
 
+    def test_plain_json_source_still_resolves_the_module_level_doc_id_function(self):
+        """Regression test for a real production incident (#1134): the
+        ghidra_report_html/callgraph branch above assigns a local variable
+        also named `doc_id` (scan_source's own "doc_id = f'{sha256}:...'").
+        Python's static scoping makes any name assigned anywhere in a
+        function local to the WHOLE function -- so that local assignment
+        shadowed the module-level doc_id() function for every call to
+        scan_source(), including this one, on every plain-JSON source
+        (ghidra/sandbox/github_analysis/revdeck/cape alike), unconditionally,
+        regardless of which branch actually ran. Confirmed live: this
+        crashed hp-es-results-importer's entire import pass, every source,
+        every cycle, from whenever the artifact_kind branch landed until
+        fixed -- "cannot access local variable 'doc_id' where it is not
+        associated with a value". The two sources are exercised back to
+        back here specifically because the bug only reproduces when both
+        code paths exist in the same module, which every existing test
+        above already technically satisfied without ever calling this one."""
+        report_source = next(s for s in MODULE.SOURCES if s["label"] == "ghidra_report_html")
+        json_source = next(s for s in MODULE.SOURCES if s["label"] == "ghidra")
+
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / f"{SHA}_ghidra_report.html").write_bytes(b"report")
+            MODULE.scan_source(report_source, root, {})
+
+            (root / f"{SHA}_ghidra.json").write_text('{"sha256": "%s"}' % SHA)
+            pending = MODULE.scan_source(json_source, root, {})
+
+        self.assertEqual(len(pending), 1)
+        _, _, action = pending[0]
+        self.assertEqual(action["_id"], f"ghidra:{SHA}")
+
     def test_oversized_artifact_is_skipped_not_indexed(self):
         source = next(s for s in MODULE.SOURCES if s["label"] == "ghidra_report_html")
         original_max = MODULE.MAX_TTYLOG_BYTES

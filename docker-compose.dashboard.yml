@@ -117,6 +117,16 @@ x-dashboard-volumes: &dashboard-volumes
   # results boundary. ghidra-worker.py's drain_revdeck() is the consumer.
   - /var/lib/honeypot-revdeck/results:/revdeck-results:ro
   - /var/lib/honeypot-revdeck/requests/pending:/revdeck-requests
+  # #1134: CAPE sandbox spool, same shape as the Ghidra/Rev·Deck pairs above
+  # -- host paths per sandbox/cape/worker/honeypot-cape.default.example's
+  # own CAPE_REQUEST_DIR/CAPE_RESULTS_DIR, cape-worker.py is the consumer.
+  # #319 added the Go-side Workbench entry/result page against these same
+  # env vars (dashboard/cape.go's capeRequestDir()/capeResultsDir()) but
+  # never actually wired the compose mounts/env -- both defaulted to "",
+  # so CAPE submissions and results silently went nowhere on every real
+  # deployment until now.
+  - /var/lib/honeypot-cape/results:/cape-results:ro
+  - /var/lib/honeypot-cape/requests/pending:/cape-requests
   # Privileged read-only adapter for #158's owner-only model-status file.
   # The dashboard sees only an AF_UNIX HTTP socket and never mounts the
   # 0600 host artifact or gains a model-management action.
@@ -266,6 +276,10 @@ services:
       - GHIDRA_REQUEST_DIR=${GHIDRA_REQUEST_DIR:-}
       - REVDECK_RESULTS_DIR=${REVDECK_RESULTS_DIR:-}
       - REVDECK_REQUEST_DIR=${REVDECK_REQUEST_DIR:-}
+      # #1134: CAPE spool -- see x-dashboard-volumes' own comment on why
+      # this was silently unwired until now.
+      - CAPE_RESULTS_DIR=${CAPE_RESULTS_DIR:-}
+      - CAPE_REQUEST_DIR=${CAPE_REQUEST_DIR:-}
       - GHIDRA_ALERT_RISK_LEVELS=${GHIDRA_ALERT_RISK_LEVELS:-high,critical}
       - GHIDRA_ALERT_ON_CRYPTO=${GHIDRA_ALERT_ON_CRYPTO:-false}
       # #154 item 9 follow-up: same allowlist pattern as
@@ -404,6 +418,10 @@ services:
       - GHIDRA_REQUEST_DIR=${GHIDRA_REQUEST_DIR:-}
       - REVDECK_RESULTS_DIR=${REVDECK_RESULTS_DIR:-}
       - REVDECK_REQUEST_DIR=${REVDECK_REQUEST_DIR:-}
+      # #1134: CAPE spool -- see x-dashboard-volumes' own comment on why
+      # this was silently unwired until now.
+      - CAPE_RESULTS_DIR=${CAPE_RESULTS_DIR:-}
+      - CAPE_REQUEST_DIR=${CAPE_REQUEST_DIR:-}
       - GHIDRA_ALERT_RISK_LEVELS=${GHIDRA_ALERT_RISK_LEVELS:-high,critical}
       - GHIDRA_ALERT_ON_CRYPTO=${GHIDRA_ALERT_ON_CRYPTO:-false}
       - GITHUB_ANALYSIS_REQUEST_DIR=${GITHUB_ANALYSIS_REQUEST_DIR:-}
@@ -489,6 +507,9 @@ services:
       # mount above uses -- see that comment for the write-side boundary
       # (ghidra-worker.py's drain_revdeck() is the sole producer).
       - /var/lib/honeypot-revdeck/results:/revdeck-results:ro
+      # #1134: same shape as the Ghidra/Rev·Deck mounts above -- was missing
+      # entirely, the actual root cause of cape-analysis-v1 having no writer.
+      - /var/lib/honeypot-cape/results:/cape-results:ro
       - dashboard-state:/state:ro
       - es-importer-state:/state-importer
       # #638/#612: cowrie's persisted TTY session recordings (#611) --
@@ -513,6 +534,7 @@ services:
       - GHOSTS_SANDBOX_RESULTS_DIR=/ghosts-sandbox-results
       - GITHUB_ANALYSIS_RESULTS_DIR=/github-analysis-results
       - REVDECK_RESULTS_DIR=/revdeck-results
+      - CAPE_RESULTS_DIR=/cape-results
       - COWRIE_TTYLOG_DIR=/cowrie-tty
       - REPORTER_METRICS_DIR=/reporter-data
       - TZ=Europe/Berlin

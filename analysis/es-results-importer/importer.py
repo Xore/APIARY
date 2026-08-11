@@ -165,6 +165,19 @@ SOURCES = [
         "glob": "*_revdeck.json",
     },
     {
+        # #1134: cape-analysis-v1 had no writer anywhere -- CAPE_RESULTS_DIR
+        # was never mounted into this container (or the dashboard's own)
+        # at all, despite #319 already wiring the Go side against it.
+        # cape-worker.py's own write_status() (status.json, same convention
+        # ghidra-worker.py's own status.json uses) needs the same skip.
+        "env": "CAPE_RESULTS_DIR",
+        "label": "cape",
+        "index": "cape-analysis-v1",
+        "id_fields": ("sha256",),
+        "glob": "*_cape.json",
+        "skip": {"status.json"},
+    },
+    {
         "env": "COWRIE_TTYLOG_DIR",
         "label": "cowrie_ttylog",
         "index": "cowrie-ttylog-v1",
@@ -390,11 +403,11 @@ def scan_source(source: dict, root: Path, state: dict) -> list:
                 # "sha256:kind" so the two artifact kinds for one sample share
                 # this index without colliding.
                 sha256 = path.name[: -len(source["id_suffix"])]
-                doc_id = f"{sha256}:{source['artifact_kind']}"
+                artifact_doc_id = f"{sha256}:{source['artifact_kind']}"
                 action = {
                     "_op_type": "index",
                     "_index": source["index"],
-                    "_id": doc_id,
+                    "_id": artifact_doc_id,
                     "_source": {
                         "sha256": sha256,
                         "kind": source["artifact_kind"],
