@@ -373,14 +373,14 @@ jobs:
             'set -eu; cd /root/vps 2>/dev/null || exit 0
              stamp=$(date -u +%Y%m%dT%H%M%SZ)
              install -d -m 700 /root/vps-backups
-             set -- ; for p in traefik/certs traefik/dynamic.yml .env; do
+             set -- ; for p in traefik/certs traefik/dynamic.yml .env secrets; do
                test -e "$p" && set -- "$@" "$p"
              done
              test "$#" -gt 0 && tar czf "/root/vps-backups/pre-deploy-$stamp.tar.gz" "$@"
              ls -1t /root/vps-backups/pre-deploy-*.tar.gz | tail -n +11 | xargs -r rm -f'
 
           # --delete-delay removes anything on the VPS that is absent from the
-          # repository. Three things must therefore never be synchronized by
+          # repository. Things that must therefore never be synchronized by
           # the bulk rsync below:
           #   .env                  secrets, host-specific
           #   traefik/certs/        issued certificates — deleting these takes
@@ -391,10 +391,26 @@ jobs:
           #                         this one deliberately differently (not
           #                         "never touch it") now that DOMAIN is a
           #                         secret instead of tribal knowledge.
+          #   secrets/              per-gateway cookie-secret/client-secret
+          #                         files (OIDC_SECRETS_DIR=./secrets/oidc in
+          #                         vps/.env.example), git-ignored and never
+          #                         present in this checkout at all --
+          #                         --delete-delay treats "absent from the
+          #                         source" as "delete it", which took down
+          #                         all seven oauth2-proxy gateways
+          #                         (Kibana/EveBox/Arkime/TANNER/RevDeck/
+          #                         Dockge/Traefik) in a real incident this
+          #                         exclude list didn't cover at the time.
+          #                         client-secret must be recovered from
+          #                         Keycloak's own stored value (kcadm get
+          #                         clients/<id>/client-secret), never
+          #                         regenerated -- it has to match what's
+          #                         already registered per client.
           rsync -az --delete-delay \
             --exclude '.env' \
             --exclude 'traefik/certs/' \
             --exclude 'traefik/dynamic.yml' \
+            --exclude 'secrets/' \
             -e "ssh ${ssh_options[*]}" vps/ "${VPS_USER:-root}@${VPS_HOST}:/root/vps/"
 
           ssh "${ssh_options[@]}" "${VPS_USER:-root}@${VPS_HOST}" \
