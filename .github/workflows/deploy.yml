@@ -150,6 +150,29 @@ jobs:
             echo "honeypot-keycloak synchronized but not started: provision secrets in Dockge"
           fi
 
+      # #1185: replaces Dockge as the stack-management UI. Same
+      # fail-closed-until-provisioned shape as honeypot-keycloak above --
+      # ENCRYPTION_KEY/JWT_SECRET/OIDC_CLIENT_SECRET have no *_FILE variant
+      # Arcane supports, so they live in this stack's own .env (never
+      # synced or overwritten here, same as every other stack's .env).
+      # Deployed after honeypot-keycloak, not before: OIDC_ISSUER_URL in
+      # that .env points at the same realm this step's own OIDC client
+      # depends on already existing.
+      - name: Synchronize honeypot-arcane
+        shell: bash
+        run: |
+          destination=/var/dockge/stacks/honeypot-arcane
+          install -d -m 755 "$destination"
+          cp docker-compose.arcane.yml "$destination/compose.yml"
+          cd "$destination"
+          if test -f .env; then
+            chmod 600 .env
+            docker compose -f compose.yml config --quiet
+            docker compose -f compose.yml up -d
+          else
+            echo "honeypot-arcane synchronized but not started: provision .env (ARCANE_ENCRYPTION_KEY, ARCANE_JWT_SECRET, OIDC_ISSUER_URL, ARCANE_OIDC_CLIENT_SECRET) first"
+          fi
+
       # #258 proof of concept: the Conpot persona family split into its own
       # Dockge stack, same arrangement as honeypot-init above. No ordering
       # dependency on honeypot-init here the way APIARY's own

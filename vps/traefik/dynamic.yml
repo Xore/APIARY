@@ -23,10 +23,28 @@
 # socat-hp-dockge         :5001   →  10.8.0.2:5001  (dockge :5001, host infra
 #                                     with root-equivalent /var/run/docker.sock
 #                                     access -- not a scoped UI like the rest)
+# socat-hp-arcane         :3552   →  10.8.0.2:3552  (arcane :3552, #1185's
+#                                     Dockge replacement -- same
+#                                     root-equivalent docker.sock access, but
+#                                     native OIDC, joins the shared `proxy`
+#                                     network directly, no oidc-<app> gateway)
 #
 # Traefik dashboard — localhost only:
 #   curl http://localhost:8080/dashboard/
 #   curl http://localhost:8080/api/rawdata
+#
+# #1185: adding a genuinely NEW router (a hostname Traefik has never served
+# before) can 421 "Misdirected Request" on some/most requests even though
+# this file is watched and reloads without a restart -- confirmed live: the
+# file provider picked up the new router+service fine (RouterName matched
+# correctly in the access log, OriginStatus:0 -- Traefik itself rejected the
+# request before ever contacting the backend), but its internal HTTP/2
+# muxer's per-host TLS-options cache didn't get rebuilt for the new host by
+# the hot reload alone. A full `docker compose restart traefik` (not just
+# editing this file) fixed it immediately, with zero config change. If a
+# newly added Host(...) here 421s intermittently or consistently right after
+# being added, restart the container before assuming the router config
+# itself is wrong.
 
 http:
 
@@ -364,6 +382,18 @@ http:
         options: modern
       middlewares: [security-headers]
 
+    # #1185: Arcane, unlike Dockge above, authenticates natively against
+    # Keycloak -- no oidc-<app> gateway hop, this routes straight to its
+    # own socat bridge (service defined below, same shape as svelte-blog's
+    # own direct passthrough).
+    honeypot-arcane:
+      rule: "Host(`arcane.honeypot.example`)"
+      entryPoints: [websecure]
+      service: honeypot-arcane
+      tls:
+        options: modern
+      middlewares: [security-headers, rate-limit]
+
     svelte-blog:
       rule: "Host(`svelte.honeypot.example`)"
       entryPoints: [websecure]
@@ -568,6 +598,12 @@ http:
       loadBalancer:
         servers:
           - url: "http://socat-hp-dockge:5001"
+        passHostHeader: true
+
+    honeypot-arcane:
+      loadBalancer:
+        servers:
+          - url: "http://socat-hp-arcane:3552"
         passHostHeader: true
 
     svelte-blog:
