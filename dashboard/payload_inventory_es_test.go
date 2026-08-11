@@ -3,8 +3,6 @@ package main
 import (
 	"encoding/json"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -131,22 +129,26 @@ func TestReadPayloadInventoryAggregatesSourcesAndTotals(t *testing.T) {
 	}
 }
 
-// TestRefreshPayloadCacheAsyncIndexesDiskThenServesFromES exercises the
-// full path end to end: a real payload on disk gets scanned, indexed into
-// Elasticsearch, and the in-memory cache that /payloads reads is populated
-// from a subsequent ES read -- not directly from the local scan result.
-func TestRefreshPayloadCacheAsyncIndexesDiskThenServesFromES(t *testing.T) {
+// TestRefreshPayloadCacheAsyncServesFromESWithoutScanningDisk covers #1202:
+// payload-inventory-worker (#1201) now owns the disk walk and writes
+// payloadInventoryIndex directly -- refreshPayloadCacheAsync's job is only
+// to read what's already there and serve it, never to scan payloadDirs
+// itself. Deliberately configures payloadDirs pointing at an *empty*
+// directory (no file on disk at all) to prove the cache is populated purely
+// from a pre-seeded Elasticsearch document, not from any local scan.
+func TestRefreshPayloadCacheAsyncServesFromESWithoutScanningDisk(t *testing.T) {
 	memStore := newMemESDocStore()
 	srv := httptest.NewServer(memStore.handler())
 	defer srv.Close()
+	es := newESClient(srv.URL, "")
 
-	dir := t.TempDir()
 	hash := strings.Repeat("f", 64)
-	if err := os.WriteFile(filepath.Join(dir, hash), []byte("payload bytes"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	// Seeded directly via indexPayloadInventory, the same call
+	// payload-inventory-worker makes -- simulating that worker's prior
+	// write, not this dashboard instance's own disk scan.
+	indexPayloadInventory(es, []capturedFile{{Hash: hash, Size: 13, SizeH: "13 B", Mtime: "2026-08-01 00:00", MIME: "text/plain", Sources: []string{"cowrie"}, Copies: 1}})
 
-	s := &store{payloadDirs: []string{dir}, es: newESClient(srv.URL, "")}
+	s := &store{payloadDirs: []string{t.TempDir()}, es: es}
 	s.refreshPayloadCacheAsync()
 
 	// refreshPayloadCacheAsync does its work in a background goroutine;
@@ -166,11 +168,6 @@ func TestRefreshPayloadCacheAsyncIndexesDiskThenServesFromES(t *testing.T) {
 	cache := s.payloadCache
 	s.payloadMu.Unlock()
 	if len(cache.Files) != 1 || cache.Files[0].Hash != hash {
-		t.Fatalf("expected the disk-scanned file to reach the cache via Elasticsearch: %+v", cache.Files)
-	}
-
-	// Confirm it actually landed in Elasticsearch, not just the local cache.
-	if _, found, err := s.es.docGet(payloadInventoryIndex, hash); err != nil || !found {
-		t.Fatalf("expected the file to be indexed in Elasticsearch: found=%v err=%v", found, err)
+		t.Fatalf("expected the ES-seeded file to reach the cache via a plain read, with no matching file ever on disk: %+v", cache.Files)
 	}
 }
