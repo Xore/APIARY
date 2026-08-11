@@ -146,6 +146,45 @@ class ScanSourceBinaryTest(unittest.TestCase):
         _, _, action = pending[0]
         self.assertEqual(action["_id"], f"ghidra:{SHA}")
 
+    def test_yara_aggregate_file_explodes_into_one_document_per_sample(self):
+        """#1103 Category 4: scanner.py writes one results.json covering
+        every sample it has ever scanned -- unlike every other JSON source,
+        which is already one-document-per-file. This must produce one ES
+        action per entry in payload["samples"], all sharing the file's own
+        (key, mtime) so a partial bulk failure still retries every sample
+        next pass (advance_state_after_bulk's own shared-key contract)."""
+        source = next(s for s in MODULE.SOURCES if s["label"] == "yara")
+
+        sha_b = "b" * 64
+        report = {
+            "version": 1, "scanner": "YARA", "updated_at": "2026-08-11T00:00:00Z",
+            "rules_sha256": "deadbeef", "samples": {
+                SHA: {"sha256": SHA, "matches": ["susp_string"], "source": "dionaea", "size": 123},
+                sha_b: {"sha256": sha_b, "matches": [], "error": "", "source": "cowrie", "size": 45},
+            },
+            "errors": [],
+        }
+
+        import json as jsonlib
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "results.json").write_text(jsonlib.dumps(report))
+            pending = MODULE.scan_source(source, root, {})
+
+        self.assertEqual(len(pending), 2)
+        ids = {action["_id"] for _, _, action in pending}
+        self.assertEqual(ids, {f"yara:{SHA}", f"yara:{sha_b}"})
+
+        keys = {key for key, _, _ in pending}
+        self.assertEqual(len(keys), 1, "both samples must share one (key, mtime) -- same source file")
+
+        matched = next(a for _, _, a in pending if a["_id"] == f"yara:{SHA}")
+        self.assertEqual(matched["_source"]["yara"]["matches"], ["susp_string"])
+        self.assertEqual(matched["_source"]["file"]["hash"]["sha256"], SHA)
+        self.assertEqual(matched["_source"]["report"]["rules_sha256"], "deadbeef")
+        self.assertNotIn("samples", matched["_source"]["report"], "report context must exclude the (large) samples dict itself")
+
     def test_oversized_artifact_is_skipped_not_indexed(self):
         source = next(s for s in MODULE.SOURCES if s["label"] == "ghidra_report_html")
         original_max = MODULE.MAX_TTYLOG_BYTES

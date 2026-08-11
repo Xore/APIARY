@@ -198,6 +198,23 @@ SOURCES = [
         "id_fields": (),
         "glob": "metrics.json",
     },
+    {
+        # #1103 Category 4: analysis/yara/scanner.py is deliberately
+        # "networkless" (its own module docstring) -- scanning
+        # attacker-supplied samples with a scanner that cannot reach the
+        # network at all is a real security boundary, not an oversight, so
+        # it must not gain an ES client itself. It writes one aggregate
+        # results.json (every sample it has ever scanned, keyed by hash) to
+        # the same yara-results named volume the dashboard already reads
+        # read-only (docker-compose.dashboard.yml) -- this source explodes
+        # that one file into one ES document per sample on every change,
+        # via the "aggregate_samples" branch in scan_source() below.
+        "env": "YARA_RESULTS_DIR",
+        "label": "yara",
+        "index": "yara-analysis-v1",
+        "glob": "results.json",
+        "aggregate_samples": "samples",
+    },
 ]
 
 # #638/#764: sandbox export artifacts (guest/host PCAP, diagnostics ZIP).
@@ -333,6 +350,51 @@ def scan_source(source: dict, root: Path, state: dict) -> list:
         key = str(path)
         mtime = path.stat().st_mtime
         if state.get(key) == mtime:
+            continue
+
+        samples_key = source.get("aggregate_samples")
+        if samples_key:
+            # #1103 Category 4: one file, one document per entry in
+            # payload[samples_key] -- unlike every other JSON source here,
+            # which is already one-document-per-file. All entries share
+            # this file's own (key, mtime): a single scanner interval can
+            # change any subset of samples, and there is no per-sample
+            # mtime to key off of, so every sample gets re-indexed on any
+            # change to the aggregate file. Same shared-key mechanism the
+            # chunked sandbox-export branch below already relies on --
+            # advance_state_after_bulk() only advances `key` once every
+            # action sharing it has succeeded.
+            try:
+                payload = json.loads(path.read_text())
+            except (OSError, json.JSONDecodeError) as exc:
+                logger.warning(f"{source['label']}: skipping unreadable {path}: {exc}")
+                continue
+            report_context = {k: v for k, v in payload.items() if k != samples_key}
+            samples = payload.get(samples_key) or {}
+            for sample_id, sample in samples.items():
+                if not isinstance(sample, dict):
+                    continue
+                sha256 = sample.get("sha256") or sample_id
+                # report_updated_at rides along on each sample doc, not just
+                # in the report envelope below -- dashboard/yara.go's own ES
+                # reader only fetches the source["label"] sub-object
+                # (searchNamespace's one-field contract, same as every other
+                # ES-backed loader here), so this is the only way it can see
+                # "when was this last scanned" without a second query shape.
+                sample_doc = dict(sample, report_updated_at=report_context.get("updated_at"))
+                action = {
+                    "_op_type": "index",
+                    "_index": source["index"],
+                    "_id": f"{source['label']}:{sample_id}",
+                    "_source": {
+                        source["label"]: sample_doc,
+                        "report": report_context,
+                        "event": {"category": source["label"]},
+                        "@timestamp": report_context.get("updated_at"),
+                        "file": {"hash": {"sha256": sha256}},
+                    },
+                }
+                pending.append((key, mtime, action))
             continue
 
         if chunked:

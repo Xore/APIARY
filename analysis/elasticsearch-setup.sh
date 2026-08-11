@@ -414,7 +414,8 @@ for spec in \
   "github-analysis-v1:github_analysis" \
   "workbench-runs-v1:workbench" \
   "cape-analysis-v1:cape" \
-  "revdeck-analysis-v1:revdeck"
+  "revdeck-analysis-v1:revdeck" \
+  "yara-analysis-v1:yara"
 do
   index_name=${spec%%:*}
   ns=${spec#*:}

@@ -2,8 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"io"
-	"os"
 	"strings"
 )
 
@@ -14,14 +12,15 @@ type yaraSample struct {
 	Source    string   `json:"source"`
 	Size      int64    `json:"size"`
 	Matches   []string `json:"matches"`
-}
-
-type yaraReport struct {
-	UpdatedAt   string                `json:"updated_at"`
-	Scanner     string                `json:"scanner"`
-	RulesSHA256 string                `json:"rules_sha256"`
-	Samples     map[string]yaraSample `json:"samples"`
-	Errors      []string              `json:"errors"`
+	// ReportUpdatedAt is analysis/yara/scanner.py's own results.json
+	// updated_at, riding along on every sample document -- see
+	// es-results-importer's "yara" source (importer.py) for why: it reads
+	// one aggregate file covering every scanned sample and explodes it
+	// into one ES document per sample, and this loader only ever fetches
+	// the yara-analysis-v1 mirror's "yara" sub-object (searchNamespace's
+	// one-field contract, same as every other ES-backed loader here), so
+	// this is the only way "when was this last scanned" survives the trip.
+	ReportUpdatedAt string `json:"report_updated_at"`
 }
 
 type yaraStatus struct {
@@ -30,24 +29,42 @@ type yaraStatus struct {
 	Samples, Matched, Errors int
 }
 
-func loadYARA(path string) yaraReport {
-	if path == "" {
-		return yaraReport{}
+// loadYaraSamplesES reads the yara-analysis-v1 ES mirror exclusively
+// (#1103 Category 4) -- see loadGhidraResults' doc comment in ghidra.go for
+// the reasoning. analysis/yara/scanner.py is deliberately "networkless"
+// (its own module docstring) and must stay that way: scanning
+// attacker-supplied samples with a scanner that cannot reach the network at
+// all is a real security boundary, so mirroring into ES is
+// es-results-importer's job, never the scanner's own.
+func loadYaraSamplesES(es *esClient) (map[string]yaraSample, bool) {
+	if es == nil {
+		return nil, false
 	}
-	file, err := os.Open(path)
+	raws, err := es.searchNamespace("yara-analysis-v1", "yara")
 	if err != nil {
-		return yaraReport{}
+		return nil, false
 	}
-	defer file.Close()
-	var report yaraReport
-	_ = json.NewDecoder(io.LimitReader(file, 32<<20)).Decode(&report)
-	return report
+	samples := make(map[string]yaraSample, len(raws))
+	for _, raw := range raws {
+		var row yaraSample
+		if json.Unmarshal(raw, &row) != nil || !hashName.MatchString(row.SHA256) {
+			continue
+		}
+		samples[strings.ToLower(row.SHA256)] = row
+	}
+	return samples, true
 }
 
-func yaraSummary(path string) yaraStatus {
-	report := loadYARA(path)
-	status := yaraStatus{Enabled: path != "", Updated: report.UpdatedAt, Samples: len(report.Samples), Errors: len(report.Errors)}
-	for _, sample := range report.Samples {
+func yaraSummary(es *esClient) yaraStatus {
+	samples, ok := loadYaraSamplesES(es)
+	status := yaraStatus{Enabled: ok, Samples: len(samples)}
+	for _, sample := range samples {
+		if sample.ScannedAt > status.Updated {
+			status.Updated = sample.ScannedAt
+		}
+		if sample.ReportUpdatedAt > status.Updated {
+			status.Updated = sample.ReportUpdatedAt
+		}
 		if len(sample.Matches) > 0 {
 			status.Matched++
 		}
@@ -59,20 +76,13 @@ func yaraSummary(path string) yaraStatus {
 }
 
 func (s *store) yaraFor(hash string) yaraSample {
-	if s.yaraFile == "" {
+	if s.es == nil {
 		return yaraSample{}
 	}
-	return loadYARA(s.yaraFile).Samples[strings.ToLower(hash)]
+	samples, _ := loadYaraSamplesES(s.es)
+	return samples[strings.ToLower(hash)]
 }
 
 func (s *store) yaraForSHA(hash string) yaraSample {
-	if s.yaraFile == "" {
-		return yaraSample{}
-	}
-	for _, sample := range loadYARA(s.yaraFile).Samples {
-		if strings.EqualFold(sample.SHA256, hash) {
-			return sample
-		}
-	}
-	return yaraSample{}
+	return s.yaraFor(hash)
 }

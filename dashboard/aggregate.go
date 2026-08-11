@@ -457,7 +457,7 @@ func (s *store) rebuild() {
 	snap.Campaigns = campaigns
 	snap.Recent = recents
 	snap.Runtime = currentRuntime()
-	snap.YARA = yaraSummary(s.yaraFile)
+	snap.YARA = yaraSummary(s.es)
 	if s.es != nil {
 		snap.ES = s.es.get()
 	}

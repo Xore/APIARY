@@ -220,8 +220,7 @@ type store struct {
 	settings       *settingsService  // typed settings stores; nil only in partial test fixtures
 	reports        *reportStore      // Reports studio definitions + generated PDFs; nil only in test fixtures
 	workbench      *workbenchService // immutable recipes + correlated analyzer runs (#155)
-	yaraFile       string
-	expected       []string // configured feeds shown even before their first event
+	expected       []string          // configured feeds shown even before their first event
 	subs           map[chan struct{}]struct{}
 	authAccountURL string // validated once at startup; see validatedAuthAccountURL
 	authAdminURL   string // validated Keycloak admin-console URL; exposed only to dashboard admins
@@ -363,8 +362,8 @@ func (s *store) notifyLoop(endpoint string) {
 				}
 			}
 		}
-		if s.yaraFile != "" {
-			for hash, sample := range loadYARA(s.yaraFile).Samples {
+		if yaraSamples, ok := loadYaraSamplesES(s.es); ok {
+			for hash, sample := range yaraSamples {
 				if len(sample.Matches) == 0 {
 					continue
 				}
