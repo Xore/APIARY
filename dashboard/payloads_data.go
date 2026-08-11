@@ -213,10 +213,15 @@ func (s *store) payloadsData(f payloadsFilter) payloadsPage {
 	for i := range p.Sources {
 		p.Sources[i].Active = p.Sources[i].Name == source
 	}
-	verdicts := map[string]githubAnalysisResult{}
-	for _, result := range loadGitHubAnalysisResults() {
-		verdicts[result.SHA256] = result
-	}
+	// #1157: GitHubAnalysisURL/Family/etc. are no longer looked up here on
+	// every request -- attachGitHubAnalysisVerdicts already populated them
+	// on base.Files during the last background refresh cycle (see
+	// refreshPayloadCacheAsync). loadGitHubAnalysisResults() is a whole-
+	// index ES fetch; calling it synchronously on every /payloads request
+	// was exactly the kind of blocking work #1142/#1153/#1156 already
+	// moved off other pages' hot paths, just never caught here since this
+	// page already had an (unrelated) cache/Loading mechanism that made it
+	// look fast on a warm load.
 	origins := earliestEventByShasum(s.getEvents())
 	var total int64
 	for _, file := range base.Files {
@@ -247,20 +252,6 @@ func (s *store) payloadsData(f payloadsFilter) payloadsPage {
 		}
 		if hashSub != "" && !strings.Contains(file.Hash, hashSub) {
 			continue
-		}
-		if result, ok := verdicts[file.Hash]; ok {
-			file.GitHubAnalysisURL = "/github-analysis/" + file.Hash
-			file.GitHubAnalysisLabel = result.ExitStatus
-			if result.Verdict != nil {
-				file.GitHubAnalysisLabel = fmt.Sprintf("%d/%d %s", result.Verdict.Malicious, result.Verdict.Total, result.Verdict.Level)
-			}
-			if result.Family != "" {
-				file.Family = boundedFamily(result.Family)
-				// The link carries the full, untruncated value -- truncating
-				// first would let two different long family names collide at
-				// the display cut point and pivot to the wrong set of hashes.
-				file.FamilyLink = eventsURL(url.Values{"family": {result.Family}})
-			}
 		}
 		p.Files = append(p.Files, file)
 		total += file.Size
@@ -354,6 +345,39 @@ func readPayloadInventory(es *esClient) (payloadsPage, error) {
 // available while a refresh is running. A no-op entirely when Elasticsearch
 // isn't configured -- see payloadInventoryIndex's own comment for why there
 // is deliberately no disk-scan fallback to fall back to.
+// attachGitHubAnalysisVerdicts populates GitHubAnalysisURL/GitHubAnalysisLabel/
+// Family/FamilyLink on every file in place, one loadGitHubAnalysisResults()
+// call (a whole-index ES fetch) per background refresh cycle instead of one
+// per HTTP request (#1157) -- payloadsData used to call this synchronously
+// on every /payloads render, which is exactly the blocking-work-on-the-hot-
+// path pattern #1142/#1153/#1156 already fixed elsewhere, just never caught
+// here since this page already had its own (unrelated) cache/Loading
+// mechanism that made a warm load look fast regardless.
+func attachGitHubAnalysisVerdicts(files []capturedFile) {
+	verdicts := map[string]githubAnalysisResult{}
+	for _, result := range loadGitHubAnalysisResults() {
+		verdicts[result.SHA256] = result
+	}
+	for i := range files {
+		result, ok := verdicts[files[i].Hash]
+		if !ok {
+			continue
+		}
+		files[i].GitHubAnalysisURL = "/github-analysis/" + files[i].Hash
+		files[i].GitHubAnalysisLabel = result.ExitStatus
+		if result.Verdict != nil {
+			files[i].GitHubAnalysisLabel = fmt.Sprintf("%d/%d %s", result.Verdict.Malicious, result.Verdict.Total, result.Verdict.Level)
+		}
+		if result.Family != "" {
+			files[i].Family = boundedFamily(result.Family)
+			// The link carries the full, untruncated value -- truncating
+			// first would let two different long family names collide at
+			// the display cut point and pivot to the wrong set of hashes.
+			files[i].FamilyLink = eventsURL(url.Values{"family": {result.Family}})
+		}
+	}
+}
+
 func (s *store) refreshPayloadCacheAsync() {
 	if s.es == nil {
 		return
@@ -367,6 +391,7 @@ func (s *store) refreshPayloadCacheAsync() {
 	s.payloadMu.Unlock()
 	go func() {
 		scanned := s.scanPayloads()
+		attachGitHubAnalysisVerdicts(scanned.Files)
 		indexPayloadInventory(s.es, scanned.Files)
 		s.mirrorPayloadBytes(scanned.Files)
 		fresh, err := readPayloadInventory(s.es)

@@ -29,6 +29,7 @@ func TestPayloadsDataSurfacesFamilyAttribution(t *testing.T) {
 
 	s := &store{payloadDirs: []string{payloadDir}}
 	s.payloadCache = s.scanPayloads()
+	attachGitHubAnalysisVerdicts(s.payloadCache.Files)
 	s.payloadCacheAt = time.Now()
 
 	page := s.payloadsData(payloadsFilter{})
@@ -156,6 +157,7 @@ func TestPayloadsPageRendersFamilyBadge(t *testing.T) {
 
 	s := &store{payloadDirs: []string{payloadDir}, es: newESClient("http://127.0.0.1:1", "")}
 	s.payloadCache = s.scanPayloads()
+	attachGitHubAnalysisVerdicts(s.payloadCache.Files)
 	s.payloadCacheAt = time.Now()
 
 	funcs := templateFuncs(s, "")
