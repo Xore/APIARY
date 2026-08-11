@@ -61,6 +61,28 @@ trap cleanup EXIT
 ok()   { printf '  OK    %s\n' "$*"; }
 bad()  { printf '  FAIL  %s\n' "$*"; fail=1; }
 
+# #982: every other service booted below (Postgres, Keycloak, the dashboard
+# binary in the companion scripts) is confirmed ready with a real bounded
+# poll before anything depends on it -- this one relied on a bare `sleep 3`
+# instead, unlike the rest of this file. A loaded/slow CI runner taking
+# longer than 3s to get oauth2-proxy's own HTTP server listening (its own
+# OIDC-provider-discovery round trip against Keycloak, not just process
+# start) would make test #1 below race a container that isn't actually
+# serving yet -- a real, not hypothetical, source of flakiness given how
+# CI resource contention actually behaves. /ping is oauth2-proxy's own
+# unauthenticated healthcheck path, live as soon as its HTTP server is up.
+# $1=container name to poll.
+wait_for_proxy_ready() {
+  local name="$1"
+  for _ in $(seq 1 30); do
+    code=$(docker run --rm --network "${network}" curlimages/curl:latest -s -o /dev/null -w '%{http_code}' "http://${name}:4180/ping" 2>/dev/null || true)
+    [ "${code}" = "200" ] && return 0
+    sleep 1
+  done
+  printf 'FAIL: %s never became ready (no 200 from /ping after 30s)\n' "${name}" >&2
+  exit 1
+}
+
 docker network create "${network}" >/dev/null
 
 docker run -d --name "${pg}" --network "${network}" \
@@ -138,7 +160,7 @@ docker run -d --name "${proxy}" --network "${network}" -p "127.0.0.1:${proxy_por
   -e OAUTH2_PROXY_OIDC_EMAIL_CLAIM=preferred_username \
   -e OAUTH2_PROXY_INSECURE_OIDC_ALLOW_UNVERIFIED_EMAIL=true \
   quay.io/oauth2-proxy/oauth2-proxy:v7.15.3@sha256:10a1165743a192e1940b4708fb9647027185ce11a681a1c5519b442ff7f1f561 >/dev/null
-sleep 3
+wait_for_proxy_ready "${proxy}"
 
 flow_dir="$(mktemp -d)"
 # mktemp -d defaults to 0700, owned by the host user. curlimages/curl runs
@@ -288,7 +310,7 @@ docker run -d --name "${proxy_short}" --network "${network}" -p "127.0.0.1:${pro
   -e OAUTH2_PROXY_COOKIE_EXPIRE=3s \
   -e OAUTH2_PROXY_COOKIE_REFRESH=0 \
   quay.io/oauth2-proxy/oauth2-proxy:v7.15.3@sha256:10a1165743a192e1940b4708fb9647027185ce11a681a1c5519b442ff7f1f561 >/dev/null
-sleep 3
+wait_for_proxy_ready "${proxy_short}"
 
 drive_login_against() {
   # same as drive_login above but targets an arbitrary proxy container name
