@@ -875,6 +875,9 @@
       ],
       "dockge": [
         {"name": "admin", "description": "#1014: distinctly named (not 'access') because Dockge has /var/run/docker.sock mounted read-write -- root-equivalent control of the whole homeserver. Never conflate with the low-privilege 'access' role used by other clients."}
+      ],
+      "arcane": [
+        {"name": "admin", "description": "#1185: same reasoning as dockge's own 'admin' role -- Arcane has /var/run/docker.sock mounted read-write, root-equivalent control of the whole homeserver. Mapped to Arcane's own role_admin via OIDC_ROLE_MAPPINGS."}
       ]
     }
   },
@@ -902,7 +905,8 @@
         "tanner": ["access"],
         "revdeck": ["access"],
         "traefik-dashboard": ["admin"],
-        "dockge": ["admin"]
+        "dockge": ["admin"],
+        "arcane": ["admin"]
       }
     }
   ],
@@ -1085,6 +1089,27 @@
       "redirectUris": ["https://dockge.example.invalid/oauth2/callback"],
       "webOrigins": ["https://dockge.example.invalid"],
       "attributes": {"pkce.code.challenge.method": "S256", "post.logout.redirect.uris": "https://dockge.example.invalid/*"},
+      "defaultClientScopes": ["web-origins", "acr", "roles", "profile", "email"],
+      "optionalClientScopes": []
+    },
+    {
+      "clientId": "arcane",
+      "name": "Arcane (native OIDC, #1185)",
+      "description": "#1185: unlike every other client above, Arcane authenticates directly against this client -- no oauth2-proxy gateway in front of it. frontchannelLogout is false: no gateway session to tear down, only Arcane's own.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": false,
+      "rootUrl": "https://arcane.example.invalid",
+      "baseUrl": "https://arcane.example.invalid/",
+      "redirectUris": ["https://arcane.example.invalid/auth/oidc/callback"],
+      "webOrigins": ["https://arcane.example.invalid"],
+      "attributes": {"pkce.code.challenge.method": "S256", "post.logout.redirect.uris": "https://arcane.example.invalid/*"},
       "defaultClientScopes": ["web-origins", "acr", "roles", "profile", "email"],
       "optionalClientScopes": []
     },

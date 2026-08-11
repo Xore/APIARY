@@ -610,6 +610,20 @@ services:
     command: TCP4-LISTEN:5001,fork,reuseaddr TCP4:10.8.0.2:5001
     networks: [oidc-dockge]
 
+  # #1185: Arcane, Dockge's replacement. Same root-equivalent risk as
+  # Dockge above (/var/run/docker.sock mounted read-write on the home
+  # server), but no OIDC gateway in front of it here -- Arcane
+  # authenticates natively against Keycloak (docker-compose.arcane.yml on
+  # the home server), so this joins the shared `proxy` network directly,
+  # same as every other non-gated app (svelte-blog etc.), instead of an
+  # isolated oidc-<app> network.
+  socat-hp-arcane:
+    image: alpine/socat:latest
+    container_name: socat-hp-arcane
+    restart: unless-stopped
+    command: TCP4-LISTEN:3552,fork,reuseaddr TCP4:10.8.0.2:3552
+    networks: [proxy]
+
   oidc-dockge:
     <<: *oidc-gateway
     container_name: oidc-dockge

@@ -1,0 +1,115 @@
+# honeypot-arcane — #1185: replaces Dockge as the stack-management UI on
+# the homeserver. Public HTTPS terminates at VPS Traefik and reaches
+# ARCANE_PORT only over WireGuard, same shape as every other homeserver app
+# the VPS fronts. Unlike Dockge, Arcane has real OIDC support (see
+# vps/docker-compose.yml's oidc-arcane router / keycloak/realm/apiary-
+# realm.json's arcane client), so this stack is reached directly by Traefik
+# with no oauth2-proxy gateway hop in front of it -- Arcane authenticates
+# its own users instead of the network-level "any authenticated role holder"
+# gate the gateway pattern gives Dockge today.
+#
+# PROJECTS_DIRECTORY is /var/dockge/stacks itself (self-referential mount,
+# same host path both sides of the bind mount) -- deliberately not moved or
+# copied. Arcane's own compose commands run against the *host* docker
+# daemon via the socket below, so any project path it passes to `docker
+# compose` must resolve on the host, not just inside this container (same
+# reasoning Dockge's own DOCKGE_STACKS_DIR mount already followed). This
+# also means this stack's own directory
+# (/var/dockge/stacks/honeypot-arcane/) is itself one of the projects Arcane
+# discovers -- unlike Dockge, which was never brought under its own
+# management (a bare `docker run`, no compose file, not git-tracked).
+#
+# /opt/stacks is a symlink to /var/dockge/stacks (confirmed live, #1185) --
+# every stack deploy.yml's own rsync steps write to either path lands in
+# the same physical tree, so Arcane's single Projects Directory here really
+# does cover everything, including pihole and any other non-APIARY stack
+# living alongside it.
+
+name: honeypot-arcane
+
+services:
+  arcane:
+    image: ghcr.io/getarcaneapp/manager:v2.7.0@sha256:bc30d6a5d3eeadeade22c83aec4935632ba0b5b841050586f8272dfe84e20f0f
+    container_name: hp-arcane
+    restart: unless-stopped
+    environment:
+      APP_URL: ${ARCANE_URL:-https://arcane.honeypot.example}
+      PORT: "3552"
+      PUID: "0"
+      PGID: "0"
+      # #1185: ENCRYPTION_KEY/JWT_SECRET/OIDC_CLIENT_SECRET have no *_FILE
+      # variant Arcane supports (confirmed against its own environment-
+      # variable reference, unlike OIDC_ROLE_MAPPINGS_FILE below) -- sourced
+      # from this stack's own .env, same as every other secret this repo
+      # can't hand to a container as a mounted file.
+      ENCRYPTION_KEY: ${ARCANE_ENCRYPTION_KEY:?set ARCANE_ENCRYPTION_KEY in .env (32 raw/base64/hex bytes)}
+      JWT_SECRET: ${ARCANE_JWT_SECRET:?set ARCANE_JWT_SECRET in .env (openssl rand -hex 32)}
+      PROJECTS_DIRECTORY: /var/dockge/stacks
+      PROJECT_SCAN_MAX_DEPTH: "5"
+      # OIDC -- native login, see this file's own header for why there is
+      # no oauth2-proxy gateway in front of this service instead.
+      OIDC_ENABLED: "true"
+      OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:?set OIDC_ISSUER_URL in .env}
+      OIDC_CLIENT_ID: arcane
+      OIDC_CLIENT_SECRET: ${ARCANE_OIDC_CLIENT_SECRET:?set ARCANE_OIDC_CLIENT_SECRET in .env}
+      # No "groups" scope -- this realm has no such clientScope defined
+      # (only roles/web-origins/acr/profile/email, confirmed against
+      # keycloak/realm/apiary-realm.json). Client roles already ride in the
+      # standard "roles" scope's resource_access claim, which every OIDC
+      # client here gets by default -- OIDC_GROUPS_CLAIM below just points
+      # OIDC_ROLE_MAPPINGS at that existing claim path instead.
+      OIDC_SCOPES: openid email profile
+      # Keycloak's client-role claim lives under realm_access/resource_access,
+      # not a top-level "groups" claim -- OIDC_GROUPS_CLAIM points at the
+      # client-role path so OIDC_ROLE_MAPPINGS below can match against it.
+      # Verify live against a real token during rollout (#1185) rather than
+      # trusting this unconfirmed against Arcane's actual claim-parsing
+      # behavior -- Keycloak's own claim shape is a nested object per client,
+      # not a flat list, and Arcane's docs don't confirm dotted-path support.
+      OIDC_GROUPS_CLAIM: resource_access.arcane.roles
+      OIDC_AUTO_REDIRECT_TO_PROVIDER: "true"
+      OIDC_PROVIDER_NAME: APIARY
+      OIDC_ROLE_MAPPINGS: '[{"claimValue":"admin","roleId":"role_admin"}]'
+      # #1185: confirmed live -- Arcane sends a heartbeat (instance ID,
+      # version, project counts) to checkin.getarcane.app on a schedule by
+      # default. Honeypot infrastructure's own management tooling has no
+      # business phoning home to a third party; disabled outright rather
+      # than left as an opt-out default.
+      ANALYTICS_DISABLED: "true"
+      # GPU monitoring (#1185) -- the homeserver's own RTX 4000 Ada,
+      # nvidia-container-toolkit already installed, confirmed live.
+      GPU_MONITORING_ENABLED: "true"
+      GPU_TYPE: nvidia
+      NVIDIA_VISIBLE_DEVICES: all
+      TZ: ${TZ:-UTC}
+    ports:
+      - ${HP_BIND:-10.8.0.2}:${ARCANE_PORT:-3552}:3552
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - arcane-data:/app/data
+      - /var/dockge/stacks:/var/dockge/stacks
+    # cgroup: host is Arcane's own documented requirement for container
+    # resource-stat collection (not GPU-specific) -- see
+    # getarcane.app/docs/setup/installation.
+    cgroup: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # Arcane's own documented healthcheck command (getarcane.app), not a
+    # hand-rolled probe -- it hits /api/health locally and exits non-zero
+    # if the server isn't responding.
+    healthcheck:
+      test: ["CMD", "./arcane", "health", "--timeout", "2s"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+    stop_grace_period: 30s
+    security_opt: [no-new-privileges:true]
+
+volumes:
+  arcane-data:
