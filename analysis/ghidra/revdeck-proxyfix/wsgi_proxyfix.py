@@ -33,3 +33,36 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from wsgi import app
 
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+
+
+# Preset-prompts composer button: same "never patch webui/ itself" reasoning
+# as the ProxyFix wrapping above. preset_prompts.js (this directory,
+# bind-mounted read-only into webui/static/js/ alongside the vendored
+# composer.js/app.js -- see docker-compose.ghidra.yml's revdeck service)
+# does the actual DOM work; this hook's only job is getting a <script> tag
+# for it onto every HTML page, since the vendored index.html template can't
+# be edited to reference it directly.
+#
+# CSP-safe without a nonce: app.py's own Content-Security-Policy header sets
+# script-src to same-origin only (no 'unsafe-inline', no nonce requirement
+# for a same-origin src URL) -- confirmed by reading that header's own
+# construction. A same-origin <script src> tag needs nothing special here.
+#
+# Registered after create_app() already added its own after_request hooks
+# inside app.py (this decorator runs at import time, after that factory
+# function returns), so Flask's LIFO after_request order runs this one
+# FIRST, before app.py's own CSP/security-header hooks -- irrelevant here
+# since this only rewrites the HTML body, never touches headers.
+@app.after_request
+def _inject_preset_prompts_script(response):
+    if response.content_type and response.content_type.startswith("text/html"):
+        body = response.get_data(as_text=True)
+        if "</body>" in body:
+            response.set_data(
+                body.replace(
+                    "</body>",
+                    '<script defer src="/static/js/preset_prompts.js"></script></body>',
+                    1,
+                )
+            )
+    return response
