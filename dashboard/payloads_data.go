@@ -517,7 +517,7 @@ func (s *store) servePayload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid payload id", http.StatusBadRequest)
 		return
 	}
-	data, tooLarge, found, err := s.fetchPayloadBytes(name)
+	data, tooLarge, found, _, err := s.fetchPayloadBytes(name)
 	if err != nil {
 		http.Error(w, "payload storage unavailable", http.StatusServiceUnavailable)
 		return

@@ -159,6 +159,56 @@ func fileFingerprint(fi os.FileInfo) string {
 	return fmt.Sprintf("%d-%d", fi.Size(), fi.ModTime().UnixNano())
 }
 
+// payloadBytesForAnalysis resolves the full content behind an already-open,
+// already-stat'd local payload file for staticAnalysisFor, preferring the
+// already-ES-mirrored copy (dashboard-payload-bytes-v1, #762) over a local
+// read of f (#1103 hybrid item -- this used to read local disk
+// unconditionally on a static-analysis cache miss, even when ES already
+// held the exact same bytes). f/fi are still required (not read from here
+// directly) so staticAnalysisFor keeps stat'ing the real local file: the
+// mirrored copy is trusted only when its own recorded fingerprint (size+
+// mtime at mirror time) matches the current local file's fingerprint --
+// dashboard-payload-bytes-v1 is otherwise "immutable once written" by
+// design (#762, the download route never revisits a hash once mirrored),
+// which alone can't detect a local file that changed content under an
+// unchanged name, exactly the case staticAnalysisFor's own cache-fingerprint
+// check above just proved happened (that's the only way execution reaches
+// here on a hash whose bytes were already mirrored).
+// Falls back to f itself for two genuinely structural cases, not as a
+// standing fallback: a payload too large for the mirror's own cap
+// (payloadBytesRawCap, marked TooLarge and never mirrored by design --
+// servePayload accepts the identical limitation rather than reading disk,
+// see its own comment) needs the real bytes read once to compute a
+// hash/analysis at all; and a payload not yet mirrored, or mirrored under a
+// stale fingerprint, (a fresh capture inside refreshPayloadCacheAsync's
+// up-to-2-minute payloadCacheTTL window, or a changed file) is read once
+// and immediately re-mirrored on demand via mirrorOnePayloadBytes, so every
+// later call for the same hash+fingerprint is ES-sourced. An ES query error
+// (as opposed to a clean "not found") is treated the same as not-yet-
+// mirrored rather than failing the whole analysis -- static analysis backs
+// the workbench and payload pages directly, where a transient ES hiccup
+// causing an outright failure is a worse regression than one local read.
+func (s *store) payloadBytesForAnalysis(hash string, f *os.File, fi os.FileInfo) ([]byte, error) {
+	if s != nil && s.es != nil {
+		stored, tooLarge, found, fingerprint, err := s.fetchPayloadBytes(hash)
+		if err == nil && found && !tooLarge && fingerprint == fileFingerprint(fi) {
+			return stored, nil
+		}
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, err
+	}
+	if s != nil && s.es != nil {
+		// force=true: this path is also reached when a previously mirrored
+		// copy's fingerprint just failed to match (stale, not merely
+		// missing), and that stale document must be overwritten, not
+		// skipped because one already exists.
+		s.mirrorOnePayloadBytes(hash, fi.Size(), true)
+	}
+	return data, nil
+}
+
 func (s *store) staticAnalysisFor(path string) (payloadStaticAnalysis, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -190,16 +240,17 @@ func (s *store) staticAnalysisFor(path string) (payloadStaticAnalysis, error) {
 			}
 		}
 	}
-	h1, h2, h3 := md5.New(), sha1.New(), sha256.New()
-	if _, err := io.Copy(io.MultiWriter(h1, h2, h3), f); err != nil {
-		return payloadStaticAnalysis{}, err
-	}
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return payloadStaticAnalysis{}, err
-	}
-	data, err := io.ReadAll(io.LimitReader(f, analysisReadCap))
+	full, err := s.payloadBytesForAnalysis(hash, f, fi)
 	if err != nil {
 		return payloadStaticAnalysis{}, err
+	}
+	h1, h2, h3 := md5.New(), sha1.New(), sha256.New()
+	if _, err := io.Copy(io.MultiWriter(h1, h2, h3), bytes.NewReader(full)); err != nil {
+		return payloadStaticAnalysis{}, err
+	}
+	data := full
+	if int64(len(data)) > analysisReadCap {
+		data = data[:analysisReadCap]
 	}
 	preview := data
 	if len(preview) > 512 {

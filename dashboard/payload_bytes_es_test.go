@@ -26,7 +26,7 @@ func TestMirrorPayloadBytesWritesThenSkipsUnchangedOnRescan(t *testing.T) {
 	files := []capturedFile{{Hash: hash, Size: int64(len("payload-" + hash))}}
 
 	s.mirrorPayloadBytes(files)
-	data, tooLarge, found, err := s.fetchPayloadBytes(hash)
+	data, tooLarge, found, _, err := s.fetchPayloadBytes(hash)
 	if err != nil || !found {
 		t.Fatalf("expected the payload to be mirrored: found=%v err=%v", found, err)
 	}
@@ -68,7 +68,7 @@ func TestMirrorPayloadBytesMarksOversizedAsTooLargeNotSilentlySkipped(t *testing
 	files := []capturedFile{{Hash: hash, Size: payloadBytesRawCap + 1}}
 
 	s.mirrorPayloadBytes(files)
-	data, tooLarge, found, err := s.fetchPayloadBytes(hash)
+	data, tooLarge, found, _, err := s.fetchPayloadBytes(hash)
 	if err != nil || !found {
 		t.Fatalf("expected a marker document to exist: found=%v err=%v", found, err)
 	}
@@ -90,13 +90,13 @@ func TestFetchPayloadBytesNotFoundVsUnavailable(t *testing.T) {
 	es := newESClient(srv.URL, "")
 
 	s := &store{es: es}
-	_, _, found, err := s.fetchPayloadBytes(strings.Repeat("c", 64))
+	_, _, found, _, err := s.fetchPayloadBytes(strings.Repeat("c", 64))
 	if err != nil || found {
 		t.Fatalf("unmirrored hash: found=%v err=%v, want found=false err=nil", found, err)
 	}
 
 	sNoES := &store{}
-	_, _, _, err = sNoES.fetchPayloadBytes(strings.Repeat("c", 64))
+	_, _, _, _, err = sNoES.fetchPayloadBytes(strings.Repeat("c", 64))
 	if err != errPayloadStorageUnavailable {
 		t.Fatalf("no ES client: err=%v, want errPayloadStorageUnavailable", err)
 	}
