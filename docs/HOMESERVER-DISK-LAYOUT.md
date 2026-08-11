@@ -14,7 +14,7 @@ this way rather than by hand.
 ## Why this layout, not one big disk
 
 The OS disk (NVMe) is deliberately small and separate from the bulk
-storage disks. Docker/Dockge state, container images, and honeypot capture
+storage disks. Docker/Arcane state, container images, and honeypot capture
 data are heavy-churn and can grow unpredictably (payload captures, ELK
 indices, sandbox images) — keeping them off the boot disk means a runaway
 log or a bad `docker system df` can't take the OS down with it, and a
@@ -25,7 +25,7 @@ reinstall of the OS disk alone doesn't touch captured evidence.
 | Device | Model | Size | Partition table | Filesystem | Mount | Role |
 |---|---|---|---|---|---|---|
 | `nvme0n1` | Samsung MZVLW256HEHP | 238.5G | GPT | vfat (p1) / ext4 (p2) | `/boot/efi`, `/` | OS + EFI, boot disk |
-| `sdb` | AVAGO MR9440-8i (RAID LUN) | 1.7T | whole-disk (no partition table) | xfs | `/var` | Docker root, Dockge stacks, container state — this is where `/var/lib/docker` and `/var/dockge` actually live |
+| `sdb` | AVAGO MR9440-8i (RAID LUN) | 1.7T | whole-disk (no partition table) | xfs | `/var` | Docker root, Arcane-managed stacks, container state — this is where `/var/lib/docker` and `/var/dockge` actually live |
 | `sdc` | AVAGO MR9440-8i (RAID LUN) | 1.7T | GPT, 1 partition | xfs | `/mnt-1` | Secondary bulk storage (in use: `github` checkouts) |
 | `sda` | Intel SSDSC2KB480G8L | 447.1G | GPT, 1 partition | xfs | `/mnt-2` | Reserved bulk storage (currently empty) |
 | `sr0` | ATAPI optical | — | — | — | — | Unused |
@@ -39,7 +39,7 @@ needs to be captured separately from the controller's own tooling
 to be reproducible, not just the OS partitioning on top of it.
 
 `/var` on its own disk is the key decision: `/var/lib/docker` is 103G and
-`/var/dockge` (bind-mounted stack data for all 23 Dockge stacks, including
+`/var/dockge` (bind-mounted stack data for all 23 Arcane-managed stacks, including
 Elasticsearch indices, Cowrie logs, payload captures, sandbox disks) is
 229G — 332G combined, well past what the 238G OS disk could hold even
 before accounting for the OS itself. Putting `/var` on the 1.7T `sdb`
@@ -107,7 +107,7 @@ question in
 [`docs/research/518-smoke-test-research.md`](research/518-smoke-test-research.md)).
 
 **What's intentionally not templated:** GPU driver install, Docker/
-Dockge install, NVIDIA container toolkit, WireGuard, and all the honeypot
+Arcane install, NVIDIA container toolkit, WireGuard, and all the honeypot
 stack deployment — those are post-install configuration management, not
 disk partitioning, and belong in the single install script that #518 is
 building, not in the autoinstall `user-data`. Ubuntu autoinstall supports

@@ -134,7 +134,6 @@ services:
       - oidc-arkime
       - oidc-tanner
       - oidc-revdeck
-      - oidc-dockge
       - oidc-traefik
       - oidc-dashboard
     # #117: `traefik healthcheck` does a full binary re-exec (new Go runtime
@@ -597,22 +596,11 @@ services:
       - ${OIDC_SECRETS_DIR:?set OIDC_SECRETS_DIR}/revdeck:/run/oidc-secrets:ro
     networks: [oidc-revdeck]
 
-  # Dockge itself (host-level infra, /var/dockge/compose.yaml on the home
-  # server -- not part of this repo, unlike everything else bridged here).
-  # Has /var/run/docker.sock mounted read-write: root-equivalent control
-  # over the whole homeserver, not a scoped investigation UI. Exposed behind
-  # a dedicated OIDC gateway, on the operator's explicit ask and with that
-  # risk spelled out and accepted -- see the commit that added this.
-  socat-hp-dockge:
-    image: alpine/socat:latest
-    container_name: socat-hp-dockge
-    restart: unless-stopped
-    command: TCP4-LISTEN:5001,fork,reuseaddr TCP4:10.8.0.2:5001
-    networks: [oidc-dockge]
-
-  # #1185: Arcane, Dockge's replacement. Same root-equivalent risk as
-  # Dockge above (/var/run/docker.sock mounted read-write on the home
-  # server), but no OIDC gateway in front of it here -- Arcane
+  # #1185: Arcane, the homeserver's stack-management UI (Dockge's
+  # replacement -- Dockge itself decommissioned, see the commit that
+  # removed its socat-hp-dockge/oidc-dockge pair here). Same root-equivalent
+  # risk Dockge carried (/var/run/docker.sock mounted read-write on the
+  # home server), but no OIDC gateway in front of it here -- Arcane
   # authenticates natively against Keycloak (docker-compose.arcane.yml on
   # the home server), so this joins the shared `proxy` network directly,
   # same as every other non-gated app (svelte-blog etc.), instead of an
@@ -623,26 +611,6 @@ services:
     restart: unless-stopped
     command: TCP4-LISTEN:3552,fork,reuseaddr TCP4:10.8.0.2:3552
     networks: [proxy]
-
-  oidc-dockge:
-    <<: *oidc-gateway
-    container_name: oidc-dockge
-    environment:
-      <<: *oidc-gateway-environment
-      OAUTH2_PROXY_CLIENT_ID: dockge
-      OAUTH2_PROXY_CLIENT_SECRET_FILE: /run/oidc-secrets/client-secret
-      OAUTH2_PROXY_COOKIE_SECRET_FILE: /run/oidc-secrets/cookie-secret
-      OAUTH2_PROXY_REDIRECT_URL: https://dockge.${OIDC_PUBLIC_DOMAIN:?set OIDC_PUBLIC_DOMAIN}/oauth2/callback
-      # #1014: 'admin', not 'access' -- Dockge has /var/run/docker.sock
-      # mounted read-write (root-equivalent control of the homeserver), and
-      # must never share a role name with the ordinary low-privilege
-      # 'access' role every other app's gateway checks.
-      OAUTH2_PROXY_ALLOWED_ROLES: dockge:admin
-      OAUTH2_PROXY_COOKIE_NAME: __Host-apiary-dockge
-      OAUTH2_PROXY_UPSTREAMS: http://socat-hp-dockge:5001
-    volumes:
-      - ${OIDC_SECRETS_DIR:?set OIDC_SECRETS_DIR}/dockge:/run/oidc-secrets:ro
-    networks: [oidc-dockge]
 
   oidc-traefik:
     <<: *oidc-gateway
@@ -900,8 +868,6 @@ networks:
   oidc-tanner:
     driver: bridge
   oidc-revdeck:
-    driver: bridge
-  oidc-dockge:
     driver: bridge
   oidc-traefik:
     driver: bridge

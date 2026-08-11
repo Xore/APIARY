@@ -52,7 +52,7 @@ jobs:
       # never applied to honeypot-init itself. Moved here, ahead of
       # honeypot-init, so both get a fresh checkout before either builds
       # anything from it.
-      - name: Synchronize Dockge source without runtime state
+      - name: Synchronize APIARY source without runtime state
         shell: bash
         run: |
           destination=/opt/stacks/apiary
@@ -90,7 +90,7 @@ jobs:
       - name: Synchronize honeypot-init (one-shot bootstrap jobs stack)
         shell: bash
         run: |
-          # A separate Dockge stack, not a subdirectory of APIARY --
+          # A separate Arcane-managed stack, not a subdirectory of APIARY --
           # see docker-compose.init.yml's header for why. Its own .env is
           # never touched here, same reasoning as APIARY's .env
           # below: ARKIME_ADMIN_PASSWORD/ARKIME_PASSWORD_SECRET in it must
@@ -156,11 +156,11 @@ jobs:
           docker compose -f compose.yml config --quiet
           # Do not build: this stack uses reviewed, digest-pinned upstream
           # Keycloak and PostgreSQL images. Missing secrets intentionally
-          # make first deployment fail closed until provisioned in Dockge.
+          # make first deployment fail closed until provisioned in Arcane.
           if test -f secrets/postgres-password; then
             docker compose -f compose.yml up -d
           else
-            echo "honeypot-keycloak synchronized but not started: provision secrets in Dockge"
+            echo "honeypot-keycloak synchronized but not started: provision secrets in Arcane"
           fi
 
       # #1185: replaces Dockge as the stack-management UI. Same
@@ -187,7 +187,7 @@ jobs:
           fi
 
       # #258 proof of concept: the Conpot persona family split into its own
-      # Dockge stack, same arrangement as honeypot-init above. No ordering
+      # Arcane-managed stack, same arrangement as honeypot-init above. No ordering
       # dependency on honeypot-init here the way APIARY's own
       # init-wait-* dependents have: each persona's command polls
       # /markers/log-init.done itself (#127, a bind-mounted file, not a
@@ -309,7 +309,7 @@ jobs:
           docker compose -f compose.yml up -d --build
 
       # #258: log-maintenance, autoheal, and reporter split into their own
-      # Dockge stack -- host-wide utilities rather than one honeypot family.
+      # Arcane-managed stack -- host-wide utilities rather than one honeypot family.
       # None of the three share a named volume/network with anything else,
       # so (like the standalone honeypots above) this can deploy ahead of
       # APIARY with no ordering requirement.
@@ -326,7 +326,7 @@ jobs:
 
       # #258: the ELK/analysis plane (elasticsearch, kibana, filebeat,
       # evebox, arkime-capture, arkime-viewer, pcap-sync) split into its own
-      # Dockge stack. Its bind mounts (analysis/geoip, analysis/filebeat.yml,
+      # Arcane-managed stack. Its bind mounts (analysis/geoip, analysis/filebeat.yml,
       # arkime/config.ini, arkime/geo) resolve against the checkout the
       # rsync step above already populated. Placed before honeypot-dashboard
       # below, which depends on elasticsearch/filebeat being reachable by
@@ -343,7 +343,7 @@ jobs:
           docker compose -f compose.yml config --quiet
           docker compose -f compose.yml up -d --build
 
-      # #258: dashboard + services-adapter split into their own Dockge stack,
+      # #258: dashboard + services-adapter split into their own Arcane-managed stack,
       # placed after honeypot-elk and honeypot-dionaea/honeypot-payload-
       # analysis above (not APIARY, which has no services of its
       # own any more) because it actually depends on those stacks at
@@ -377,7 +377,7 @@ jobs:
           if test -f secrets/oidc-client-secret; then
             COMPOSE_FILE=compose.yml /opt/stacks/apiary/scripts/deploy-dashboard-rolling.sh
           else
-            echo "honeypot-dashboard synchronized but replicas not started: provision secrets/oidc-client-secret in Dockge"
+            echo "honeypot-dashboard synchronized but replicas not started: provision secrets/oidc-client-secret in Arcane"
           fi
 
   vps:

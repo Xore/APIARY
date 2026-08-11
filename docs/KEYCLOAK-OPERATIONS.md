@@ -7,7 +7,7 @@ addresses, passwords, client secrets, cookies, and realm users out of Git.
 
 ## Resulting topology
 
-- `honeypot-keycloak` is a Dockge stack on the homeserver.
+- `honeypot-keycloak` is an Arcane-managed stack on the homeserver.
 - Keycloak and PostgreSQL use pinned upstream images; no local image is built.
 - PostgreSQL is reachable only on the internal `keycloak-data` network.
 - Keycloak publishes HTTP only on the homeserver WireGuard address.
@@ -25,15 +25,15 @@ addresses, passwords, client secrets, cookies, and realm users out of Git.
 
 | Item | Repository source | Runtime location |
 |---|---|---|
-| Dockge Compose file | `docker-compose.keycloak.yml` | `/var/dockge/stacks/honeypot-keycloak/compose.yml` |
-| Dockge environment | `keycloak.env.example` | `/var/dockge/stacks/honeypot-keycloak/.env` |
+| Arcane Compose file | `docker-compose.keycloak.yml` | `/var/dockge/stacks/honeypot-keycloak/compose.yml` |
+| Arcane environment | `keycloak.env.example` | `/var/dockge/stacks/honeypot-keycloak/.env` |
 | Realm template | `keycloak/realm/apiary-realm.json` | `/var/dockge/stacks/honeypot-keycloak/keycloak/realm/` |
 | Theme | `Xore/auth-backend:themes/apiary` | `/var/dockge/stacks/honeypot-keycloak/theme/apiary` |
 | Keycloak secrets | none | `/var/dockge/stacks/honeypot-keycloak/secrets` |
 | VPS Compose | `vps/docker-compose.yml` | existing VPS stack directory |
 | VPS OIDC secrets | none | `vps/secrets/oidc/<client>/` on the VPS |
 
-Dockge must own the homeserver stack directory. Do not create a second
+Arcane must own the homeserver stack directory. Do not create a second
 standalone Compose project for Keycloak.
 
 ## 1. Prepare the homeserver stack
@@ -86,7 +86,7 @@ docker compose --env-file keycloak.env.example \
   -f docker-compose.keycloak.yml config --quiet
 ```
 
-Start from Dockge, or from the Dockge stack directory:
+Start from Arcane, or from the stack directory:
 
 ```bash
 cd /var/dockge/stacks/honeypot-keycloak
@@ -166,7 +166,6 @@ For each client below, create its own directory and files:
 | `tanner` | TANNER |
 | `revdeck` | RevDeck |
 | `traefik-dashboard` | Traefik dashboard |
-| `dockge` | Dockge |
 
 `client-secret` is the value returned by Keycloak for that confidential client.
 `cookie-secret` is 32 independent random bytes:

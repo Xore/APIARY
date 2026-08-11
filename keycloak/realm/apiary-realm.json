@@ -845,7 +845,6 @@
           "client": {
             "realm-management": ["manage-users", "view-users", "query-users"],
             "apiary-dashboard": ["admin"],
-            "dockge": ["admin"],
             "traefik-dashboard": ["admin"]
           }
         }
@@ -873,11 +872,8 @@
       "traefik-dashboard": [
         {"name": "admin", "description": "#1014: distinctly named (not 'access') because this grants root-equivalent control of the homeserver's reverse proxy -- must never be conflated with the ordinary low-privilege 'access' role used by Kibana/EveBox/Arkime/TANNER/RevDeck"}
       ],
-      "dockge": [
-        {"name": "admin", "description": "#1014: distinctly named (not 'access') because Dockge has /var/run/docker.sock mounted read-write -- root-equivalent control of the whole homeserver. Never conflate with the low-privilege 'access' role used by other clients."}
-      ],
       "arcane": [
-        {"name": "admin", "description": "#1185: same reasoning as dockge's own 'admin' role -- Arcane has /var/run/docker.sock mounted read-write, root-equivalent control of the whole homeserver. Mapped to Arcane's own role_admin via OIDC_ROLE_MAPPINGS."}
+        {"name": "admin", "description": "#1014/#1185: distinctly named (not 'access') -- Arcane has /var/run/docker.sock mounted read-write, root-equivalent control of the homeserver. Never conflate with the low-privilege 'access' role. Mapped via OIDC_ROLE_MAPPINGS."}
       ]
     }
   },
@@ -905,7 +901,6 @@
         "tanner": ["access"],
         "revdeck": ["access"],
         "traefik-dashboard": ["admin"],
-        "dockge": ["admin"],
         "arcane": ["admin"]
       }
     }
@@ -1069,26 +1064,6 @@
       "redirectUris": ["https://traefik.example.invalid/oauth2/callback"],
       "webOrigins": ["https://traefik.example.invalid"],
       "attributes": {"pkce.code.challenge.method": "S256", "post.logout.redirect.uris": "https://traefik.example.invalid/*"},
-      "defaultClientScopes": ["web-origins", "acr", "roles", "profile", "email"],
-      "optionalClientScopes": []
-    },
-    {
-      "clientId": "dockge",
-      "name": "Dockge oauth2-proxy",
-      "enabled": true,
-      "protocol": "openid-connect",
-      "publicClient": false,
-      "clientAuthenticatorType": "client-secret",
-      "standardFlowEnabled": true,
-      "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": false,
-      "serviceAccountsEnabled": false,
-      "frontchannelLogout": true,
-      "rootUrl": "https://dockge.example.invalid",
-      "baseUrl": "https://dockge.example.invalid/",
-      "redirectUris": ["https://dockge.example.invalid/oauth2/callback"],
-      "webOrigins": ["https://dockge.example.invalid"],
-      "attributes": {"pkce.code.challenge.method": "S256", "post.logout.redirect.uris": "https://dockge.example.invalid/*"},
       "defaultClientScopes": ["web-origins", "acr", "roles", "profile", "email"],
       "optionalClientScopes": []
     },

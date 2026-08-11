@@ -20,14 +20,12 @@
 # socat-hp-arkime         :8005   →  10.8.0.2:19080 (arkime viewer :8005)
 # socat-hp-revdeck        :5000   →  10.8.0.2:19500 (revdeck :5000, ghidra stack)
 # socat-hp-keycloak       :8080   →  10.8.0.2:18080 (Keycloak :8080)
-# socat-hp-dockge         :5001   →  10.8.0.2:5001  (dockge :5001, host infra
+# socat-hp-arcane         :3552   →  10.8.0.2:3552  (arcane :3552, host infra
 #                                     with root-equivalent /var/run/docker.sock
-#                                     access -- not a scoped UI like the rest)
-# socat-hp-arcane         :3552   →  10.8.0.2:3552  (arcane :3552, #1185's
-#                                     Dockge replacement -- same
-#                                     root-equivalent docker.sock access, but
-#                                     native OIDC, joins the shared `proxy`
-#                                     network directly, no oidc-<app> gateway)
+#                                     access -- not a scoped UI like the rest.
+#                                     #1185's Dockge replacement; native OIDC,
+#                                     joins the shared `proxy` network
+#                                     directly, no oidc-<app> gateway)
 #
 # Traefik dashboard — localhost only:
 #   curl http://localhost:8080/dashboard/
@@ -374,18 +372,10 @@ http:
         options: modern
       middlewares: [security-headers]
 
-    honeypot-dockge:
-      rule: "Host(`dockge.honeypot.example`)"
-      entryPoints: [websecure]
-      service: oidc-dockge
-      tls:
-        options: modern
-      middlewares: [security-headers]
-
-    # #1185: Arcane, unlike Dockge above, authenticates natively against
-    # Keycloak -- no oidc-<app> gateway hop, this routes straight to its
-    # own socat bridge (service defined below, same shape as svelte-blog's
-    # own direct passthrough).
+    # #1185: Arcane (Dockge's replacement, now decommissioned) authenticates
+    # natively against Keycloak -- no oidc-<app> gateway hop, this routes
+    # straight to its own socat bridge (service defined below, same shape as
+    # svelte-blog's own direct passthrough).
     honeypot-arcane:
       rule: "Host(`arcane.honeypot.example`)"
       entryPoints: [websecure]
@@ -458,11 +448,6 @@ http:
     oidc-revdeck:
       loadBalancer:
         servers: [{url: "http://oidc-revdeck:4180"}]
-        passHostHeader: true
-
-    oidc-dockge:
-      loadBalancer:
-        servers: [{url: "http://oidc-dockge:4180"}]
         passHostHeader: true
 
     oidc-traefik:
@@ -592,12 +577,6 @@ http:
       loadBalancer:
         servers:
           - url: "http://socat-hp-revdeck:5000"
-        passHostHeader: true
-
-    honeypot-dockge:
-      loadBalancer:
-        servers:
-          - url: "http://socat-hp-dockge:5001"
         passHostHeader: true
 
     honeypot-arcane:

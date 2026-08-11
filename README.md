@@ -9,7 +9,7 @@
 # A multi-service honeypot and automated malware-analysis stack
 
 A full honeypot deployment that follows this repo's CGNAT pattern: the sensors
-run at **home under Dockge**, publish only on the WireGuard interface, and are
+run at **home under Arcane**, publish only on the WireGuard interface, and are
 exposed to the internet **through the VPS** — HTTP via Traefik, everything else
 raw-tunnelled with a port bridge.
 
@@ -27,13 +27,13 @@ flowchart LR
 
 **All core sensors run without compose profiles.** The only profile is the
 optional on-demand `geoip-update` maintenance job. 22 deployment pieces —
-21 independent Dockge stacks at home plus the VPS (see
+21 independent Arcane-managed stacks at home plus the VPS (see
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for why the home side split into
 21 separate Compose stacks):
 
 | Piece | Runs on | What |
 |---|---|---|
-| `honeypot-keycloak` ([docker-compose.keycloak.yml](docker-compose.keycloak.yml)) | **home** | Dockge-managed Keycloak/PostgreSQL identity stack; only Keycloak is reachable from VPS Traefik over WireGuard |
+| `honeypot-keycloak` ([docker-compose.keycloak.yml](docker-compose.keycloak.yml)) | **home** | Arcane-managed Keycloak/PostgreSQL identity stack; only Keycloak is reachable from VPS Traefik over WireGuard |
 | `honeypot-init` ([docker-compose.init.yml](docker-compose.init.yml)) | **home** | one-shot bootstrap jobs: log paths, Elasticsearch templates, Arkime schema, persona validation |
 | `honeypot-cowrie`, `honeypot-dionaea`, `honeypot-conpot`, `honeypot-dnp3`, `honeypot-http`, `honeypot-multipot` (this repository, one compose file each) | **home** | the sensors: Cowrie, Dionaea (+ TFTP relay), Conpot personas, DNP3, HTTP/API honeypots, multipot |
 | `honeypot-dicompot`, `honeypot-dns-honeypot`, `honeypot-citrix`, `honeypot-cisco-asa`, `honeypot-rdp`, `honeypot-endlessh` (this repository, one compose file each) | **home** | more sensors: DICOM medical-imaging decoy, DNS UDP reflection bait (response-capped, never a real amplification vector), Citrix ADC/NetScaler Gateway decoy (CVE-2019-19781), Cisco ASA WebVPN+IKE decoy (CVE-2018-0101), RDP decoy, SSH pre-auth tarpit |
@@ -48,7 +48,7 @@ optional on-demand `geoip-update` maintenance job. 22 deployment pieces —
 
 The root [`docker-compose.yml`](docker-compose.yml) is an empty marker kept
 only so `docker compose config` has something to validate against in this
-directory — it is not itself a Dockge stack and isn't counted above.
+directory — it is not itself an Arcane-managed stack and isn't counted above.
 [`docker-compose.sandbox.yml`](docker-compose.sandbox.yml) is a
 per-detonation Windows gateway/capture Compose file the sandbox brings up
 and tears down around a single run; it's likewise not a standing stack.
@@ -61,10 +61,10 @@ independently managed services outside this count — see
 | Guide | Covers |
 |---|---|
 | [branding/](branding/) / [live specimen](https://xore.github.io/APIARY/) | Canonical logos, favicons, social assets, web theme starter, design tokens, and printable brand guide |
-| [docs/CGNAT-DEPLOYMENT.md](docs/CGNAT-DEPLOYMENT.md) | **Start here to deploy.** Home + VPS setup, Dockge, firewall, DNS, boot-safe networking |
-| [docs/KEYCLOAK-OPERATIONS.md](docs/KEYCLOAK-OPERATIONS.md) | Complete Keycloak/Dockge deployment, secret provisioning, administrator/MFA bootstrap, VPS gateways, validation, backup, rebuild, and troubleshooting runbook |
+| [docs/CGNAT-DEPLOYMENT.md](docs/CGNAT-DEPLOYMENT.md) | **Start here to deploy.** Home + VPS setup, Arcane, firewall, DNS, boot-safe networking |
+| [docs/KEYCLOAK-OPERATIONS.md](docs/KEYCLOAK-OPERATIONS.md) | Complete Keycloak/Arcane deployment, secret provisioning, administrator/MFA bootstrap, VPS gateways, validation, backup, rebuild, and troubleshooting runbook |
 | [docs/HOMESERVER-DISK-LAYOUT.md](docs/HOMESERVER-DISK-LAYOUT.md) | Physical disk layout of the homeserver and an Ubuntu autoinstall template to reproduce it |
-| [scripts/install-homeserver.sh](scripts/install-homeserver.sh) | Unattended provisioning script (Docker, GPU/NVIDIA, WireGuard, Dockge, the stacks themselves) for a manually-installed base Ubuntu system — fill in [scripts/install-homeserver.conf.example](scripts/install-homeserver.conf.example) first, same idea as a Windows `autounattend.xml` answer file. First cut, see [#518](https://github.com/Xore/APIARY/issues/518) |
+| [scripts/install-homeserver.sh](scripts/install-homeserver.sh) | Unattended provisioning script (Docker, GPU/NVIDIA, WireGuard, Arcane, the stacks themselves) for a manually-installed base Ubuntu system — fill in [scripts/install-homeserver.conf.example](scripts/install-homeserver.conf.example) first, same idea as a Windows `autounattend.xml` answer file. First cut, see [#518](https://github.com/Xore/APIARY/issues/518) |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture and data flow — trust boundaries, container map, event ingestion, correlation/enrichment (p0f, HASSH/JA3/JA4, GeoIP), payload lifecycle, sandbox detonation, evidence types (6 diagrams) |
 | [docs/SENSORS.md](docs/SENSORS.md) | The sensor table, resource budgets, investigation UIs, SNARE+TANNER, Suricata, Arkime, and how real attacker IPs survive the tunnel |
 | [docs/OPERATIONS.md](docs/OPERATIONS.md) | Persona inventory, the seeded cowrie filesystem, GeoIP, and how to actually read the data (dashboard, Kibana, Arkime, backups) |
