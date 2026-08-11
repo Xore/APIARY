@@ -63,11 +63,32 @@ func (s *store) workbenchResultsData(query, owner string) workbenchResultsPageDa
 		return data
 	}
 	needle := strings.ToLower(data.Query)
+	// #1157: listRunsForOwner already did one docSearchAll and returned
+	// fully-populated workbenchRun docs -- getWorkbenchRun used to be
+	// called again per candidate anyway, and unlike its name suggests it
+	// is not a cheap re-read: it's updateRun's full read-mutate-maybe-write
+	// cycle, a fresh docGet (redundant with the search hit already in
+	// hand) purely to get a current SeqNo/PrimaryTerm for an optimistic-
+	// concurrency write. That's up to workbenchMaxRuns (500) sequential ES
+	// round trips, synchronously, on every load of this listing -- the
+	// actual reason it "loaded all results and only then finished," worse
+	// than the whole-index-fetch antipattern #1153/#1156 already covered
+	// elsewhere. reconcileWorkbenchRun itself is pure and already skips
+	// its own expensive local-file reads for any run whose children are
+	// all terminal (see its own #348 comment) -- call it directly against
+	// the in-memory candidate instead, for display only. This trades away
+	// this one code path's side effect of opportunistically persisting a
+	// freshly-reconciled state back to ES; that persistence still happens
+	// via getWorkbenchRun on the single-run detail page (and hp-workbench.js's
+	// 4s poll of it while a run is active), which is the low-latency path
+	// that comment was actually protecting -- nothing else reads
+	// workbenchRunsIndex's raw persisted State outside this reconcile-on-
+	// read layer (see workbench_es.go), so a stale-until-next-visit
+	// persisted doc for a run nobody revisits is a display-only concern,
+	// and this function's own output is never stale, since it reconciles
+	// every candidate before returning it.
 	for _, candidate := range s.workbench.listRunsForOwner(owner, workbenchMaxRuns) {
-		run, err := s.getWorkbenchRun(candidate.ID, owner)
-		if err != nil {
-			continue
-		}
+		run, _ := s.reconcileWorkbenchRun(candidate)
 		if needle != "" && !workbenchRunMatches(run, needle) {
 			continue
 		}

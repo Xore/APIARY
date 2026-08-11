@@ -658,6 +658,68 @@ func TestReconcileWorkbenchRunSkipsWorkOnceEveryChildIsTerminal(t *testing.T) {
 	}
 }
 
+// TestWorkbenchResultsDataReconcilesWithoutPerRunESRoundTrip (#1157):
+// workbenchResultsData used to call getWorkbenchRun per candidate --
+// updateRun's own fresh docGet, purely to obtain a current SeqNo/
+// PrimaryTerm for an optimistic-concurrency write -- on every single run in
+// the list, up to workbenchMaxRuns (500) sequential ES round trips on every
+// load of this listing page. #348 already stopped that path from doing its
+// four local-file scans or persisting a no-op write once a run's children
+// are all terminal, but the redundant per-run docGet itself remained
+// unconditional. listRunsForOwner already returns fully-populated run docs
+// from a single docSearchAll -- reconcileWorkbenchRun must be applied
+// in-memory to those, with no further ES traffic, while still reflecting
+// non-terminal state changes (like a timeout) in the returned data.
+func TestWorkbenchResultsDataReconcilesWithoutPerRunESRoundTrip(t *testing.T) {
+	s, root := newWorkbenchFixture(t, []byte("MZ"+strings.Repeat("\x00", 200)))
+	requests, results := filepath.Join(root, "ghidra-requests"), filepath.Join(root, "ghidra-results")
+	for _, dir := range []string{requests, results} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(results, "status.json"), []byte(`{"version":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GHIDRA_REQUEST_DIR", requests)
+	t.Setenv("GHIDRA_RESULTS_DIR", results)
+	if err := os.Chtimes(filepath.Join(results, "status.json"), time.Now(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	run, _, err := s.createWorkbenchRun(workbenchRunRequest{PayloadSHA256: workbenchTestHash, Analyzers: []workbenchSelection{{AnalyzerID: "ghidra", Options: workbenchOptions{TimeoutSeconds: 60, MaxQueueAgeSeconds: 10, RetryLimit: 1}}}}, "owner-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.Children[0].QueueDeadline = time.Now().Add(-time.Second)
+	if _, err := s.workbench.updateRun(run.ID, "owner-a", func(current *workbenchRun) (bool, error) {
+		*current = run
+		return true, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	before, found, err := s.es.docGet(workbenchRunsIndex, run.ID)
+	if err != nil || !found {
+		t.Fatalf("docGet before: found=%v err=%v", found, err)
+	}
+
+	data := s.workbenchResultsData("", "owner-a")
+	if len(data.Runs) != 1 || data.Runs[0].Children[0].State != "timed_out" || !data.Runs[0].Children[0].Retryable {
+		t.Fatalf("workbenchResultsData did not reconcile the listed run: %+v", data.Runs)
+	}
+	if data.Counts.Failed != 1 {
+		t.Fatalf("Counts.Failed = %d, want 1 (timed_out is a failure state)", data.Counts.Failed)
+	}
+
+	after, found, err := s.es.docGet(workbenchRunsIndex, run.ID)
+	if err != nil || !found {
+		t.Fatalf("docGet after: found=%v err=%v", found, err)
+	}
+	if before.SeqNo != after.SeqNo {
+		t.Fatalf("workbenchResultsData wrote back to ES (seq_no %d -> %d) -- it must reconcile for display only, not persist, to avoid the per-run round trip this fix removes", before.SeqNo, after.SeqNo)
+	}
+}
+
 func TestWorkbenchTimeoutAndOwnerIsolation(t *testing.T) {
 	s, root := newWorkbenchFixture(t, []byte("MZ"+strings.Repeat("\x00", 200)))
 	requests, results := filepath.Join(root, "ghidra-requests"), filepath.Join(root, "ghidra-results")
