@@ -171,7 +171,16 @@ func promoteCowrieFields(e map[string]any) bool {
 		if setFingerprint(e, str(e["fingerprint"]), "SSH pubkey") {
 			changed = true
 		}
-	case "cowrie.session.file_download", "cowrie.session.file_upload", "cowrie.log.closed":
+	// #1266: cowrie.log.closed deliberately excluded -- its own "shasum"
+	// field is the TTY log recording's own hash (dashboard/classify.go's
+	// ev.ttyReplay), not a downloaded file's hash, even though cowrie
+	// reuses the same JSON key for both. This case used to include it,
+	// mirroring dashboard/classify.go's own pre-#1266 conflation --
+	// promoting it here fed attacker-identity-worker's entity.Payloads
+	// (which reads exactly this field) with TTY-log noise instead of real
+	// payload hashes. Confirmed live: ~20x more cowrie.log.closed events
+	// than real file_download/file_upload events (57k vs 2.9k).
+	case "cowrie.session.file_download", "cowrie.session.file_upload":
 		if sha := str(e["shasum"]); sha != "" {
 			e["canonical_shasum"] = sha
 			changed = true

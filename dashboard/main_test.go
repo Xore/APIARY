@@ -1684,6 +1684,18 @@ func TestClassifyCowrieTTYLogSurfacesReplayableSession(t *testing.T) {
 	if !strings.Contains(ev.detail, "TTY session recorded") {
 		t.Fatalf("detail = %q, want it to flag a replayable TTY recording", ev.detail)
 	}
+	if ev.ttyReplay != "/tty/deadbeef" {
+		t.Fatalf("ttyReplay = %q, want /tty/deadbeef", ev.ttyReplay)
+	}
+	// #1266: the TTY log's own hash must NOT also become ev.shasum -- that
+	// field feeds every "this event delivered a payload" signal downstream
+	// (aggregate.go's payload leaderboard, the Shasum/VirusTotal action
+	// links on every event row, and via canonical_shasum, attacker-
+	// identity-worker's entity.Payloads), and a TTY session closing is not
+	// a payload delivery.
+	if ev.shasum != "" {
+		t.Fatalf("shasum = %q, want empty -- a TTY log hash is not a payload hash", ev.shasum)
+	}
 }
 
 func TestClassifyCowrieLoginFailedSurfacesPubkeyFingerprint(t *testing.T) {

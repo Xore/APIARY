@@ -281,18 +281,28 @@ func classify(e map[string]any, dirSensor string) event {
 			// only ever shown as the bare word "closed" (the eventid
 			// suffix), with no indication a recording exists at all.
 			ev.download = str(e["ttylog"])
-			ev.shasum = str(e["shasum"])
 			ev.detail = "TTY session recorded"
 			if ev.download != "" {
 				ev.detail += ": " + ev.download
 			}
-			// #638: the raw ev.download path above is container-internal and
-			// was never reachable from the dashboard -- ev.ttyReplay is the
-			// real, dashboard-served link (once es-results-importer's
-			// cowrie_ttylog source has mirrored the file into ES), keyed by
-			// the same shasum the file gets renamed to on session close.
-			if ev.shasum != "" {
-				ev.ttyReplay = "/tty/" + ev.shasum
+			// #638/#1266: ev.ttyReplay is keyed by the TTY log's own hash --
+			// the filename cowrie renames the recording to on session close
+			// -- read directly from the raw event's "shasum" field rather
+			// than through ev.shasum, deliberately NOT set here anymore.
+			// cowrie reuses that same JSON key for a genuinely different
+			// thing on cowrie.session.file_download/file_upload (a real
+			// downloaded file's hash), but ev.shasum feeds every "this event
+			// delivered a payload" signal downstream (the Shasum/VirusTotal
+			// action links on every event row, aggregate.go's payload
+			// leaderboard, and via canonical_shasum promotion,
+			// attacker-identity-worker's entity.Payloads) -- setting it here
+			// too silently counted every TTY session close as a payload
+			// delivery. Confirmed live: ~20x more cowrie.log.closed events
+			// than real file_download/file_upload events (57k vs 2.9k),
+			// so this was the dominant source of "payload" noise in those
+			// counts, not a rare edge case.
+			if ttyHash := str(e["shasum"]); ttyHash != "" {
+				ev.ttyReplay = "/tty/" + ttyHash
 			}
 		case eid == "cowrie.session.connect":
 			ev.detail = "connect"

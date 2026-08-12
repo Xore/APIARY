@@ -50,6 +50,22 @@ func TestPromoteCowrieFieldsCommand(t *testing.T) {
 	}
 }
 
+// #1266: cowrie.log.closed's own "shasum" is a TTY log recording's hash,
+// not a downloaded file's hash -- must never be promoted to
+// canonical_shasum, which attacker-identity-worker reads as "this attacker
+// delivered this payload" (identity.go's signals.payloads). Confirmed live
+// this was previously promoted here too (mirroring dashboard/classify.go's
+// own pre-#1266 conflation), inflating payload counts ~20x.
+func TestPromoteCowrieFieldsDoesNotPromoteTTYLogHashAsShasum(t *testing.T) {
+	e := map[string]any{"eventid": "cowrie.log.closed", "shasum": "deadbeef", "ttylog": "var/lib/cowrie/tty/deadbeef"}
+	if promoteCowrieFields(e) {
+		t.Fatalf("expected no change: %+v", e)
+	}
+	if _, ok := e["canonical_shasum"]; ok {
+		t.Fatalf("canonical_shasum must not be set for a TTY log hash: %+v", e)
+	}
+}
+
 func TestPromoteCowrieFieldsClientVersionAndKex(t *testing.T) {
 	e := map[string]any{"eventid": "cowrie.client.version", "version": "SSH-2.0-libssh2"}
 	if !promoteCowrieFields(e) {
