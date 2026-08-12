@@ -24,6 +24,7 @@ func (s *store) rebuild() {
 		providers         = map[string]int{}
 		clients           = map[string]int{}
 		fingerprints      = map[string]int{}
+		osGuesses         = map[string]int{}
 		payloads          = map[string]*payloadRow{}
 		evs               []storedEvent
 		seen              = map[string]bool{}
@@ -143,6 +144,15 @@ func (s *store) rebuild() {
 		}
 		if ev.fingerprint != "" {
 			fingerprints[ev.fingerKind+"\x00"+ev.fingerprint]++
+			// #1277: p0f's own OS guess (classify.go's buildViaMap, folded
+			// in above as fingerKind "p0f OS") previously only ever showed
+			// mixed into the generic Fingerprints leaderboard alongside
+			// JA3/JA4/User-Agent/SSH-client identities -- split out into
+			// its own count here so /api/os-distribution can chart it
+			// without a second events pass.
+			if ev.fingerKind == "p0f OS" {
+				osGuesses[ev.fingerprint]++
+			}
 		}
 		provider := firstNonEmpty(geo.Intel, geo.Provider)
 		if provider != "" {
@@ -454,6 +464,7 @@ func (s *store) rebuild() {
 	snap.Providers = linkRows(topN(providers, 10), "provider")
 	snap.Clients = linkRows(topN(clients, 10), "client")
 	snap.Fingerprints = fingerprintRows(fingerprints, 12)
+	snap.OSDistribution = topN(osGuesses, 12)
 	snap.Payloads = payloadRows
 	snap.Campaigns = campaigns
 	snap.Recent = recents

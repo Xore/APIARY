@@ -1,43 +1,64 @@
-/* Kill-chain analytics (#1224): three ECharts-powered charts (vendored,
- * static/echarts.min.js -- see assets.go's own doc comment for why
- * third-party JS is vendored rather than CDN-loaded here), each fetching
- * its own /api/... endpoint independently -- same fetch-then-render split
- * hp-attackers.js/hp-app.js's map already use, so one slow chart never
- * blocks the others or the page shell.
+/* Originally kill-chain analytics (#1224): three ECharts-powered charts
+ * (vendored, static/echarts.min.js -- see assets.go's own doc comment for
+ * why third-party JS is vendored rather than CDN-loaded here), each
+ * fetching its own /api/... endpoint independently -- same fetch-then-
+ * render split hp-attackers.js/hp-app.js's map already use, so one slow
+ * chart never blocks the others or the page shell. The [data-echart]
+ * bootstrap below is page-agnostic (queries the whole document, not a
+ * kill-chain-specific container), so #1277 reuses it from the overview
+ * page too for a plain pie chart rather than duplicating this file's own
+ * fetch/init/resize wiring -- this file's name is now a bit narrower than
+ * what it covers, kept as-is rather than a rename for a one-chart addition.
  */
 (() => {
   "use strict";
 
   if (typeof echarts === "undefined") return;
 
-  const initFns = { sankey: initSankey, timeline: initTimeline, heatmap: initHeatmap };
+  const initFns = { sankey: initSankey, timeline: initTimeline, heatmap: initHeatmap, pie: initPie };
 
-  document.querySelectorAll("[data-echart]").forEach(container => {
-    const kind = container.dataset.echartKind;
-    const url = container.dataset.echart;
-    const status = document.querySelector(`[data-echart-status="${url}"]`);
-    const setStatus = text => { if (status) status.textContent = text; };
-    const init = initFns[kind];
-    if (!init) return;
+  // #1277: exposed as window.initHoneypotCharts (same convention hp-app.js's
+  // own window.initHoneypotMaps already uses) so a page whose content gets
+  // wholesale-replaced on a refresh cycle (the overview page's
+  // replaceHoneypotPage, every ~15s) can re-run this against the fresh DOM
+  // -- the [data-echart] element(s) that existed at initial script load are
+  // gone after that replace, along with whatever ResizeObserver was
+  // watching them, so without this the chart would go dead after the very
+  // first background refresh. The kill-chain page itself never replaces its
+  // own content this way, so calling this twice against the same
+  // already-initialized container (which just re-creates the ECharts
+  // instance and re-fetches) is a real but harmless cost there, not a bug.
+  function initCharts() {
+    document.querySelectorAll("[data-echart]").forEach(container => {
+      const kind = container.dataset.echartKind;
+      const url = container.dataset.echart;
+      const status = document.querySelector(`[data-echart-status="${url}"]`);
+      const setStatus = text => { if (status) status.textContent = text; };
+      const init = initFns[kind];
+      if (!init) return;
 
-    fetch(url, { cache: "no-store", headers: { Accept: "application/json" } })
-      .then(response => {
-        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-        return response.json();
-      })
-      .then(data => {
-        const chart = echarts.init(container);
-        const summary = init(chart, data);
-        setStatus(summary);
-        const resize = () => chart.resize();
-        if (typeof ResizeObserver !== "undefined") {
-          new ResizeObserver(resize).observe(container);
-        } else {
-          window.addEventListener("resize", resize);
-        }
-      })
-      .catch(err => setStatus(`Chart failed to load: ${err.message}`));
-  });
+      fetch(url, { cache: "no-store", headers: { Accept: "application/json" } })
+        .then(response => {
+          if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+          return response.json();
+        })
+        .then(data => {
+          const chart = echarts.init(container);
+          const summary = init(chart, data);
+          setStatus(summary);
+          const resize = () => chart.resize();
+          if (typeof ResizeObserver !== "undefined") {
+            new ResizeObserver(resize).observe(container);
+          } else {
+            window.addEventListener("resize", resize);
+          }
+        })
+        .catch(err => setStatus(`Chart failed to load: ${err.message}`));
+    });
+  }
+
+  initCharts();
+  window.initHoneypotCharts = initCharts;
 
   function initSankey(chart, data) {
     const nodes = data.nodes || [];
@@ -56,7 +77,7 @@
         data: nodes,
         links: links,
         lineStyle: { color: "gradient", curveness: 0.5 },
-        label: { color: "var(--text)" },
+        label: { color: "var(--text-primary)" },
       }],
     });
     if (nodes.length === 0) return "No attacker sessions with a recognized ATT&CK technique yet.";
@@ -86,6 +107,28 @@
     });
     if (techniques.length === 0) return "No ATT&CK-mapped technique evidence yet.";
     return `${techniques.length} technique${techniques.length === 1 ? "" : "s"} across ${new Set(cells.map(c => c.tactic_idx)).size} tactics.`;
+  }
+
+  // Generic pie chart -- data is already the [{name, value}] array ECharts'
+  // own pie series expects, so this only ever needs to wrap it once, no
+  // per-endpoint reshaping. First consumer: #1277's /api/os-distribution.
+  function initPie(chart, data) {
+    data = data || [];
+    const total = data.reduce((sum, d) => sum + (d.value || 0), 0);
+    chart.setOption({
+      tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)" },
+      legend: { orient: "vertical", left: "left", textStyle: { color: "var(--text-primary)" } },
+      series: [{
+        type: "pie",
+        radius: ["35%", "65%"],
+        avoidLabelOverlap: true,
+        itemStyle: { borderColor: "var(--surface-1)", borderWidth: 2 },
+        label: { color: "var(--text-primary)" },
+        data,
+      }],
+    });
+    if (data.length === 0) return "No data yet.";
+    return `${data.length} categor${data.length === 1 ? "y" : "ies"}, ${total} total.`;
   }
 
   function initTimeline(chart, rows) {
