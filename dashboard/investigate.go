@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -41,13 +42,19 @@ func (s *store) commandsData(r *http.Request) commandsPage {
 	}
 	groups := map[string]*agg{}
 	for _, e := range s.getEvents() {
-		if e.Command == "" || !f.match(e) {
+		// #1241: trimmed before grouping, not just displayed trimmed --
+		// "enable" and "enable " (trailing whitespace some sensors emit)
+		// otherwise group separately, showing up as visually-identical
+		// duplicate rows with different Link hrefs (?cmd=enable vs
+		// ?cmd=enable+).
+		cmd := strings.TrimSpace(e.Command)
+		if cmd == "" || !f.match(e) {
 			continue
 		}
-		key := e.Sensor + "\x00" + e.Command
+		key := e.Sensor + "\x00" + cmd
 		a := groups[key]
 		if a == nil {
-			a = &agg{row: commandRow{Sensor: e.Sensor, Command: e.Command}, sources: map[string]bool{}, sessions: map[string]bool{}}
+			a = &agg{row: commandRow{Sensor: e.Sensor, Command: cmd}, sources: map[string]bool{}, sessions: map[string]bool{}}
 			groups[key] = a
 		}
 		a.row.Count++

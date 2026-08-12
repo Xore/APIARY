@@ -112,24 +112,36 @@ type workbenchOptionSchema struct {
 }
 
 type workbenchAnalyzer struct {
-	ID              string                `json:"id"`
-	DisplayName     string                `json:"display_name"`
-	Description     string                `json:"description"`
-	AcceptedKinds   []string              `json:"accepted_kinds"`
-	Availability    string                `json:"availability"`
-	Available       bool                  `json:"available"`
-	Applicable      bool                  `json:"applicable"`
-	Reason          string                `json:"reason"`
-	ResultLinkShape string                `json:"result_link_shape"`
-	RequiredRole    string                `json:"required_role"`
-	Confirmation    string                `json:"confirmation"`
-	Concurrency     string                `json:"concurrency_class"`
-	LocalOnly       bool                  `json:"local_only"`
-	ExternallySends bool                  `json:"externally_publishing"`
-	Detonates       bool                  `json:"detonates"`
-	GPU             bool                  `json:"gpu_consuming"`
-	DefaultOptions  workbenchOptions      `json:"default_options"`
-	OptionSchema    workbenchOptionSchema `json:"option_schema"`
+	ID              string   `json:"id"`
+	DisplayName     string   `json:"display_name"`
+	Description     string   `json:"description"`
+	AcceptedKinds   []string `json:"accepted_kinds"`
+	Availability    string   `json:"availability"`
+	Available       bool     `json:"available"`
+	Applicable      bool     `json:"applicable"`
+	Reason          string   `json:"reason"`
+	ResultLinkShape string   `json:"result_link_shape"`
+	RequiredRole    string   `json:"required_role"`
+	Confirmation    string   `json:"confirmation"`
+	Concurrency     string   `json:"concurrency_class"`
+	LocalOnly       bool     `json:"local_only"`
+	ExternallySends bool     `json:"externally_publishing"`
+	Detonates       bool     `json:"detonates"`
+	GPU             bool     `json:"gpu_consuming"`
+	// RequiresOptIn (#1234): true only for the one route that reaches real
+	// internet infrastructure (windows-ghosts) -- ui/payload_workbench.html
+	// pre-checks every other Applicable+Available analyzer's checkbox by
+	// default, which is fine for routes that only ever touch this host's
+	// own isolated KVM network, but meant an operator who reviewed the
+	// recipe quickly and clicked "Run all applicable" could detonate live
+	// malware with real outbound C2/exfiltration connectivity without
+	// deliberately choosing that route. Not LocalOnly: every analyzer here
+	// (including windows-ghosts and cape) sets LocalOnly true -- it means
+	// "orchestrated by this dashboard instance", not "network-isolated",
+	// so it can't be reused for this.
+	RequiresOptIn  bool                  `json:"requires_opt_in"`
+	DefaultOptions workbenchOptions      `json:"default_options"`
+	OptionSchema   workbenchOptionSchema `json:"option_schema"`
 }
 
 // #405/#36 decision, superseded: workbench run/recipe state used to stay
@@ -269,7 +281,7 @@ func workbenchRegistry(classification payloadClassification) []workbenchAnalyzer
 		// verified live in #325, not just configured. DisplayName and
 		// Description are deliberately loud about this rather than reading
 		// like just another sandbox option in the list, per #327.
-		{ID: "windows-ghosts", DisplayName: "Windows sandbox (WAN-permitted, GHOSTS)", Description: "⚠ Real internet access. Dynamic detonation on a separate, WAN-permitted Windows guest with a GHOSTS-driven NPC persona -- unlike every other route here, this guest can reach real infrastructure (C2 checkins, second-stage downloads, exfiltration all go somewhere real, not FakeNet/INetSim). The host's LAN/RFC1918 ranges are firewalled off, but the internet is not. Only choose this for samples where real network behavior is the point.", AcceptedKinds: []string{"windows"}, Availability: availabilityName(ghostsConfigured, ghostsConfigured), Available: ghostsConfigured, Applicable: windowsApplicable, Reason: analyzerReason(windowsApplicable, ghostsConfigured, ghostsConfigured, "payload is not compatible with the Windows detonation route", "GHOSTS sandbox spool is not configured", "GHOSTS sandbox is unavailable"), ResultLinkShape: "/sandbox/{job}", RequiredRole: "admin", Confirmation: "detonation", Concurrency: "windows-ghosts-kvm", LocalOnly: true, Detonates: true, DefaultOptions: defaultWorkbenchOptions("windows-sandbox"), OptionSchema: optionSchema},
+		{ID: "windows-ghosts", DisplayName: "Windows sandbox (WAN-permitted, GHOSTS)", Description: "⚠ Real internet access. Dynamic detonation on a separate, WAN-permitted Windows guest with a GHOSTS-driven NPC persona -- unlike every other route here, this guest can reach real infrastructure (C2 checkins, second-stage downloads, exfiltration all go somewhere real, not FakeNet/INetSim). The host's LAN/RFC1918 ranges are firewalled off, but the internet is not. Only choose this for samples where real network behavior is the point.", AcceptedKinds: []string{"windows"}, Availability: availabilityName(ghostsConfigured, ghostsConfigured), Available: ghostsConfigured, Applicable: windowsApplicable, Reason: analyzerReason(windowsApplicable, ghostsConfigured, ghostsConfigured, "payload is not compatible with the Windows detonation route", "GHOSTS sandbox spool is not configured", "GHOSTS sandbox is unavailable"), ResultLinkShape: "/sandbox/{job}", RequiredRole: "admin", Confirmation: "detonation", Concurrency: "windows-ghosts-kvm", LocalOnly: true, Detonates: true, RequiresOptIn: true, DefaultOptions: defaultWorkbenchOptions("windows-sandbox"), OptionSchema: optionSchema},
 		// Standalone adapter (#78): its own submission path (drain_revdeck() in
 		// ghidra-worker.py drains REVDECK_REQUEST_DIR independently of the
 		// Ghidra spool) and its own result link (/revdeck/{sha256}), separate

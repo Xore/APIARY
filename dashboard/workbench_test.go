@@ -190,6 +190,21 @@ func TestWorkbenchRegistryGhostsConfiguredUsesOwnSpool(t *testing.T) {
 	}
 }
 
+// #1234: windows-ghosts is the one route with real internet access, so it
+// must never ship pre-checked in the UI (ui/payload_workbench.html reads
+// RequiresOptIn to decide that) -- and it must be the ONLY analyzer with
+// this flag, since every other route only ever touches this host's own
+// isolated KVM network.
+func TestWorkbenchRegistryOnlyGhostsRequiresOptIn(t *testing.T) {
+	registry := workbenchRegistry(classifyPayload([]byte("MZ" + strings.Repeat("\x00", 200))))
+	for _, analyzer := range registry {
+		want := analyzer.ID == "windows-ghosts"
+		if analyzer.RequiresOptIn != want {
+			t.Fatalf("%s: RequiresOptIn = %v, want %v", analyzer.ID, analyzer.RequiresOptIn, want)
+		}
+	}
+}
+
 // Absent REVDECK_REQUEST_DIR/_RESULTS_DIR (the default) must leave the
 // standalone adapter unavailable, distinct from the "revdeck" field embedded
 // inside a "ghidra" analyzer result, which this Go process cannot see or
