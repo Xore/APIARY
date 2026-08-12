@@ -161,6 +161,20 @@
 
           {{template "tbl" dict "t" "Protocols probed" "rows" .Protocols "class" "half"}}
 
+          {{/* #1283: ml-worker-metrics' own backlog_count gauge, charted
+               live from Elasticsearch (ml_backlog.go), not accumulated
+               in-process -- belongs in Collection status alongside sensor
+               feeds/protocols since it answers the same "is the pipeline
+               keeping up" question as those, not an attacker-behavior one.
+               Placed as data-echart (this file's shared bootstrap, #1277)
+               with kind="line", the new generic multi-series time chart. */}}
+          <div class="card wide" id="ml-backlog-card">
+            <h2>ML classification backlog — last 7 days</h2>
+            <div data-echart="/api/ml-backlog" data-echart-kind="line" style="width:100%;height:280px"></div>
+            <p class="note" data-echart-status="/api/ml-backlog">Loading&hellip;</p>
+            <p class="note">Average queue depth per hour for honeypot-v2-* and suricata-v2-* events awaiting ml-worker classification. A rising line means the backlog is growing, not draining — see <a href="https://github.com/Xore/APIARY/issues/1227">#1227</a>.</p>
+          </div>
+
           <div class="section-heading"><div><h2>Live event stream</h2><p>A balanced sample of the newest normalized events across all sensors.</p></div><a class="section-link" href="/events">Open full event explorer &rarr;</a></div>
           <div class="card wide">
             <h2>Recent events</h2>

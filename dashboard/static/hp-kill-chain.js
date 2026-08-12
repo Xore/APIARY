@@ -15,7 +15,7 @@
 
   if (typeof echarts === "undefined") return;
 
-  const initFns = { sankey: initSankey, timeline: initTimeline, heatmap: initHeatmap, pie: initPie };
+  const initFns = { sankey: initSankey, timeline: initTimeline, heatmap: initHeatmap, pie: initPie, line: initLine };
 
   // #1277: exposed as window.initHoneypotCharts (same convention hp-app.js's
   // own window.initHoneypotMaps already uses) so a page whose content gets
@@ -129,6 +129,30 @@
     });
     if (data.length === 0) return "No data yet.";
     return `${data.length} categor${data.length === 1 ? "y" : "ies"}, ${total} total.`;
+  }
+
+  // Generic multi-series time line/area chart -- data is [{name, points:
+  // [{time, value}]}], ISO time strings parsed straight into ECharts' own
+  // time-axis type. First consumer: #1283's /api/ml-backlog.
+  function initLine(chart, data) {
+    data = data || [];
+    const totalPoints = data.reduce((sum, s) => sum + s.points.length, 0);
+    chart.setOption({
+      tooltip: { trigger: "axis" },
+      legend: { textStyle: { color: "var(--text-primary)" } },
+      grid: { left: "12%", right: "5%" },
+      xAxis: { type: "time" },
+      yAxis: { type: "value" },
+      series: data.map(s => ({
+        name: s.name,
+        type: "line",
+        showSymbol: false,
+        areaStyle: { opacity: 0.15 },
+        data: s.points.map(p => [p.time, p.value]),
+      })),
+    });
+    if (totalPoints === 0) return "No data yet.";
+    return `${data.length} series, ${totalPoints} points.`;
   }
 
   function initTimeline(chart, rows) {
