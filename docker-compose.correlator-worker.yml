@@ -5,10 +5,13 @@
 # Elasticsearch indices (campaigns-v1, attacker-clusters-v1) instead of
 # every dashboard instance recomputing the same correlation in its own
 # process on every rebuild cycle. See correlator-worker/main.go's own
-# package doc comment for the full design and correlator-worker/fetch.go's
-# for why CORRELATION_WINDOW defaults much shorter than dashboard's own
-# 7-day /campaigns and /clusters page default. Deployed as
-# /opt/stacks/honeypot-correlator-worker.
+# package doc comment for the full design. #1219: correlation now runs as
+# Elasticsearch-native aggregations (correlator-worker/fetch.go), which is
+# what makes CORRELATION_WINDOW=7d (dashboard's own 7-day /campaigns and
+# /clusters page default) affordable as a continuously-refreshing
+# background job -- the previous CORRELATION_WINDOW=6h here was a
+# scale-driven compromise forced by the raw-document-fetch approach that
+# redesign replaced. Deployed as /opt/stacks/honeypot-correlator-worker.
 #
 # Whether dashboard's own correlateCampaigns/clustersData are rewired to
 # read these indices instead of recomputing in-process (redundant, not
@@ -31,7 +34,7 @@ services:
       - honeynet
     environment:
       - ELASTICSEARCH_URL=http://elasticsearch:9200
-      - CORRELATION_WINDOW=6h
+      - CORRELATION_WINDOW=168h
       - RUN_INTERVAL=15m
       - TZ=Europe/Berlin
     deploy:

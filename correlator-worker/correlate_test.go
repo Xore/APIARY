@@ -1,7 +1,7 @@
 package main
 
 import (
-	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -20,157 +20,138 @@ func TestCampaignCIDRRejectsPrivateAndLoopback(t *testing.T) {
 	}
 }
 
-func TestCorrelateCampaignsGroupsByCIDRAndScores(t *testing.T) {
-	now := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
-	evs := []corrEvent{
-		{When: now.Add(-1 * time.Hour), SrcIP: "203.0.113.1", Sensor: "cowrie", Port: "22", User: "root", Pass: "toor"},
-		{When: now.Add(-2 * time.Hour), SrcIP: "203.0.113.2", Sensor: "dionaea", Port: "445", Shasum: "abc123"},
-		{When: now, SrcIP: "198.51.100.1", Sensor: "cowrie", Port: "22"},
+func TestScoreCampaignsComputesFormula(t *testing.T) {
+	now := time.Now()
+	buckets := []campaignBucket{
+		{CIDR: "203.0.113.0/24", Events: 2, UniqueIPs: 2, Sensors: []string{"cowrie", "dionaea"}, Creds: 1, Payloads: 1},
 	}
-	docs := correlateCampaigns(evs, now, nil)
-	if len(docs) != 2 {
-		t.Fatalf("expected 2 campaign groups, got %d: %+v", len(docs), docs)
+	docs := scoreCampaigns(buckets, now, nil)
+	if len(docs) != 1 {
+		t.Fatalf("expected 1 campaign, got %d: %+v", len(docs), docs)
 	}
-	var found *campaignDoc
-	for i := range docs {
-		if docs[i].CIDR == "203.0.113.0/24" {
-			found = &docs[i]
-		}
-	}
-	if found == nil {
-		t.Fatal("expected a 203.0.113.0/24 campaign")
-	}
-	if found.Events != 2 || found.UniqueIPs != 2 {
-		t.Fatalf("got %+v", found)
-	}
-	if found.Creds != 1 {
-		t.Fatalf("expected 1 credential pair counted, got %+v", found)
-	}
-	if found.Payloads != 1 {
-		t.Fatalf("expected 1 payload counted, got %+v", found)
-	}
-	// cross-sensor (2 sensors: cowrie+dionaea) + 2 unique IPs + 1 cred + 1 payload
-	// = min(2,30) + 2*15 + 2*3 + 1*8 + 1*20 + 0*3 = 2+30+6+8+20 = 66
-	if found.Score != 66 {
-		t.Fatalf("score = %d, want 66", found.Score)
+	// cross-sensor (2 sensors) + 2 unique IPs + 1 cred + 1 payload
+	// = min(2,30) + 2*15 + 2*3 + 1*8 + 1*20 = 2+30+6+8+20 = 66
+	if docs[0].Score != 66 {
+		t.Fatalf("score = %d, want 66", docs[0].Score)
 	}
 }
 
-func TestCorrelateCampaignsExcludesInvalidCredentialPairs(t *testing.T) {
+func TestScoreCampaignsCapsAtFifty(t *testing.T) {
 	now := time.Now()
-	evs := []corrEvent{
-		{When: now, SrcIP: "203.0.113.1", Sensor: "cowrie", User: "root", Pass: "; /bin/busybox"},
-	}
-	docs := correlateCampaigns(evs, now, nil)
-	if len(docs) != 1 || docs[0].Creds != 0 {
-		t.Fatalf("expected the invalid credential pair to be excluded: %+v", docs)
-	}
-}
-
-func TestCorrelateCampaignsCapsAtFifty(t *testing.T) {
-	now := time.Now()
-	var evs []corrEvent
+	var buckets []campaignBucket
 	for i := 0; i < 60; i++ {
-		evs = append(evs, corrEvent{When: now, SrcIP: "203.0." + strconv.Itoa(i) + ".1", Sensor: "cowrie"})
+		buckets = append(buckets, campaignBucket{CIDR: "203.0.113.0/24", Events: i})
 	}
-	docs := correlateCampaigns(evs, now, nil)
+	docs := scoreCampaigns(buckets, now, nil)
 	if len(docs) != 50 {
 		t.Fatalf("expected the top-50 cap to apply, got %d", len(docs))
 	}
 }
 
-func TestCorrelateCampaignsFoldsInProvidersAndAlertCounts(t *testing.T) {
+func TestScoreCampaignsSortsByScoreThenEventsThenCIDR(t *testing.T) {
 	now := time.Now()
-	evs := []corrEvent{
-		{When: now, SrcIP: "203.0.113.1", Sensor: "cowrie", Provider: "cloud"},
-		{When: now, SrcIP: "203.0.113.2", Sensor: "cowrie", Provider: "cloud"},
+	buckets := []campaignBucket{
+		{CIDR: "198.51.100.0/24", Events: 5},
+		{CIDR: "203.0.113.0/24", Events: 5, Creds: 3}, // higher score, same events
+	}
+	docs := scoreCampaigns(buckets, now, nil)
+	if docs[0].CIDR != "203.0.113.0/24" {
+		t.Fatalf("expected the higher-scoring campaign first, got %+v", docs)
+	}
+}
+
+func TestScoreCampaignsFoldsAlertCountsByCIDRNotLeakingAcrossGroups(t *testing.T) {
+	now := time.Now()
+	buckets := []campaignBucket{
+		{CIDR: "203.0.113.0/24", Events: 1},
+		{CIDR: "198.51.100.0/24", Events: 1},
 	}
 	alertCounts := map[string]int{"203.0.113.1": 3, "203.0.113.2": 2, "198.51.100.1": 100}
-	docs := correlateCampaigns(evs, now, alertCounts)
-	if len(docs) != 1 {
-		t.Fatalf("expected 1 campaign group, got %d: %+v", len(docs), docs)
-	}
-	d := docs[0]
-	if len(d.Providers) != 1 || d.Providers[0] != "cloud" {
-		t.Fatalf("expected providers=[cloud], got %+v", d.Providers)
-	}
-	// Only this group's own two member IPs count -- 198.51.100.1's 100
-	// alerts belong to a different, unrelated campaign and must not leak in.
-	if d.Alerts != 5 {
-		t.Fatalf("expected alerts=5 (3+2 from this group's own IPs), got %d", d.Alerts)
-	}
-	// 2 events + 1 sensor*15 + 2 ips*3 + min(5,15) alerts*2 + 1 provider*2
-	// = 2 + 15 + 6 + 10 + 2 = 35
-	if d.Score != 35 {
-		t.Fatalf("score = %d, want 35", d.Score)
-	}
-}
-
-func TestCorrelateCampaignsNilAlertCountsIsZeroNotPanic(t *testing.T) {
-	now := time.Now()
-	evs := []corrEvent{{When: now, SrcIP: "203.0.113.1", Sensor: "cowrie"}}
-	docs := correlateCampaigns(evs, now, nil)
-	if len(docs) != 1 || docs[0].Alerts != 0 {
-		t.Fatalf("expected a nil alertCounts map to behave as all-zero: %+v", docs)
-	}
-}
-
-func TestCorrelateClustersGroupsByProvider(t *testing.T) {
-	now := time.Now()
-	evs := []corrEvent{
-		{When: now, SrcIP: "203.0.113.1", Sensor: "cowrie", Provider: "scanner"},
-		{When: now, SrcIP: "198.51.100.1", Sensor: "dionaea", Provider: "scanner"},
-	}
-	docs := correlateClusters(evs, now)
-	if len(docs) != 1 || docs[0].Kind != "provider" || docs[0].Value != "scanner" {
-		t.Fatalf("got %+v", docs)
-	}
-}
-
-func TestCorrelateClustersRequiresAtLeastTwoSourceIPs(t *testing.T) {
-	now := time.Now()
-	evs := []corrEvent{
-		{When: now, SrcIP: "203.0.113.1", Sensor: "cowrie", Fingerprint: "shared-fp"},
-	}
-	docs := correlateClusters(evs, now)
-	if len(docs) != 0 {
-		t.Fatalf("a fingerprint seen from only 1 IP must not form a cluster: %+v", docs)
-	}
-}
-
-func TestCorrelateClustersGroupsByFingerprintPayloadASN(t *testing.T) {
-	now := time.Now()
-	evs := []corrEvent{
-		{When: now, SrcIP: "203.0.113.1", Sensor: "cowrie", Fingerprint: "shared-fp"},
-		{When: now, SrcIP: "198.51.100.1", Sensor: "dionaea", Fingerprint: "shared-fp"},
-		{When: now, SrcIP: "203.0.113.1", Sensor: "cowrie", Shasum: "same-hash"},
-		{When: now, SrcIP: "198.51.100.2", Sensor: "cowrie", Shasum: "same-hash"},
-		{When: now, SrcIP: "203.0.113.1", Sensor: "cowrie", ASN: 64512, ASNOrg: "Example ISP"},
-		{When: now, SrcIP: "198.51.100.3", Sensor: "cowrie", ASN: 64512, ASNOrg: "Example ISP"},
-	}
-	docs := correlateClusters(evs, now)
-	kinds := map[string]bool{}
+	docs := scoreCampaigns(buckets, now, alertCounts)
+	byCIDR := map[string]campaignDoc{}
 	for _, d := range docs {
-		kinds[d.Kind] = true
-		if d.Sources < 2 {
-			t.Errorf("cluster %+v has fewer than 2 sources", d)
-		}
+		byCIDR[d.CIDR] = d
 	}
-	for _, want := range []string{"fingerprint", "payload", "asn"} {
-		if !kinds[want] {
-			t.Errorf("expected a %q cluster, got %+v", want, docs)
+	if byCIDR["203.0.113.0/24"].Alerts != 5 {
+		t.Fatalf("expected 5 alerts (3+2) folded into 203.0.113.0/24, got %+v", byCIDR["203.0.113.0/24"])
+	}
+	if byCIDR["198.51.100.0/24"].Alerts != 100 {
+		t.Fatalf("expected 100 alerts folded into 198.51.100.0/24, got %+v", byCIDR["198.51.100.0/24"])
+	}
+}
+
+func TestScoreCampaignsIgnoresTunnelPeerAndUnroutableAlertIPs(t *testing.T) {
+	now := time.Now()
+	buckets := []campaignBucket{{CIDR: "203.0.113.0/24", Events: 1}}
+	alertCounts := map[string]int{tunnelPeerIP: 999, "10.0.0.5": 999}
+	docs := scoreCampaigns(buckets, now, alertCounts)
+	if docs[0].Alerts != 0 {
+		t.Fatalf("expected 0 alerts (tunnel peer / private IP must not count), got %d", docs[0].Alerts)
+	}
+}
+
+func TestScoreCampaignsExplanationCoversEveryReason(t *testing.T) {
+	now := time.Now()
+	buckets := []campaignBucket{{
+		CIDR: "203.0.113.0/24", Events: 1, UniqueIPs: 2, Sensors: []string{"cowrie", "dionaea"},
+		Creds: 1, Payloads: 1, Fingerprints: 1,
+	}}
+	docs := scoreCampaigns(buckets, now, map[string]int{"203.0.113.1": 4})
+	e := docs[0].Explanation
+	for _, want := range []string{"cross-sensor", "related source IPs", "shared payloads", "reused credentials", "IDS alerts", "fingerprints"} {
+		if !strings.Contains(e, want) {
+			t.Errorf("explanation %q missing %q", e, want)
 		}
 	}
 }
 
-func TestCorrelateClustersASNValueIncludesOrgName(t *testing.T) {
+func TestScoreCampaignsFallbackExplanationWhenNoSignals(t *testing.T) {
 	now := time.Now()
-	evs := []corrEvent{
-		{When: now, SrcIP: "203.0.113.1", Sensor: "cowrie", ASN: 64512, ASNOrg: "Example ISP"},
-		{When: now, SrcIP: "198.51.100.1", Sensor: "cowrie", ASN: 64512, ASNOrg: "Example ISP"},
+	buckets := []campaignBucket{{CIDR: "203.0.113.0/24", Events: 1}}
+	docs := scoreCampaigns(buckets, now, nil)
+	if docs[0].Explanation != "repeated activity from one routable network" {
+		t.Fatalf("got %q", docs[0].Explanation)
 	}
-	docs := correlateClusters(evs, now)
-	if len(docs) != 1 || docs[0].Value != "AS64512 Example ISP" {
-		t.Fatalf("got %+v", docs)
+}
+
+func TestFinalizeClustersSortsBySourcesThenEventsThenKindThenValue(t *testing.T) {
+	now := time.Now()
+	buckets := []clusterBucket{
+		{Kind: "payload", Value: "hash1", Events: 5, UniqueIPs: 2},
+		{Kind: "fingerprint", Value: "fp1", Events: 5, UniqueIPs: 3},
+	}
+	docs := finalizeClusters(buckets, now)
+	if docs[0].Kind != "fingerprint" || docs[0].Sources != 3 {
+		t.Fatalf("expected the higher-Sources cluster first, got %+v", docs)
+	}
+}
+
+func TestFinalizeClustersCapsAtTwoFifty(t *testing.T) {
+	now := time.Now()
+	var buckets []clusterBucket
+	for i := 0; i < 260; i++ {
+		buckets = append(buckets, clusterBucket{Kind: "fingerprint", Value: "fp", UniqueIPs: 2})
+	}
+	docs := finalizeClusters(buckets, now)
+	if len(docs) != 250 {
+		t.Fatalf("expected the top-250 cap to apply, got %d", len(docs))
+	}
+}
+
+func TestValidCredentialPairMatchesDashboardBehavior(t *testing.T) {
+	cases := []struct {
+		user, pass string
+		want       bool
+	}{
+		{"", "", false},
+		{"root", "toor", true},
+		{"root", "; /bin/busybox", false},
+		{"root ; rm -rf /", "x", false},
+		{"root", "powershell -enc ...", false},
+	}
+	for _, tc := range cases {
+		if got := validCredentialPair(tc.user, tc.pass); got != tc.want {
+			t.Errorf("validCredentialPair(%q, %q) = %v, want %v", tc.user, tc.pass, got, tc.want)
+		}
 	}
 }

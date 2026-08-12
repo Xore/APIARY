@@ -1,8 +1,8 @@
 // correlator-worker (#1199, part of the #1205 dashboard-aggregation
 // epic): periodically recomputes campaign (CIDR-grouped) and attacker
-// cluster (fingerprint/payload/ASN-grouped) correlation over a rolling
-// window of recent honeypot-v2-* events, writing the result to two flat,
-// backend-computed Elasticsearch indices -- campaigns-v1 and
+// cluster (fingerprint/payload/ASN/provider-grouped) correlation over a
+// rolling window of recent honeypot-v2-* events, writing the result to two
+// flat, backend-computed Elasticsearch indices -- campaigns-v1 and
 // attacker-clusters-v1 -- instead of every dashboard instance recomputing
 // the same correlation in its own process on every rebuild cycle
 // (dashboard/campaigns.go's correlateCampaigns, dashboard/intelligence.go's
@@ -11,6 +11,11 @@
 // available, running alongside the dashboard's own existing computation
 // for now, the same transition posture #1201's payload-inventory-worker
 // took.
+//
+// #1219: the correlation itself runs as Elasticsearch-native aggregations
+// (fetch.go), not a raw-document fetch-and-group-in-Go pass -- see that
+// file's own doc comment for why, and correlate.go for the pure
+// scoring/threshold logic that runs over the aggregation results.
 package main
 
 import (
@@ -49,13 +54,14 @@ func getenvDuration(k string, def time.Duration) time.Duration {
 
 func main() {
 	esURL := getenv("ELASTICSEARCH_URL", "http://elasticsearch:9200")
-	// Deliberately much shorter than dashboard/intelligence.go's own
-	// defaultCorrelationWindow (7 days) -- that default is fine for an
-	// on-demand HTTP request; it does not fit a continuously-refreshing
-	// background job's raw-document-fetch pagination cap at this
-	// deployment's real volume. See fetch.go's own doc comment for the
-	// full reasoning and the scale follow-up this implies.
-	window := getenvDuration("CORRELATION_WINDOW", 6*time.Hour)
+	// #1219: now the same 7-day default dashboard/intelligence.go's own
+	// defaultCorrelationWindow uses -- the ES-native aggregation approach
+	// (fetch.go) is what makes the full window affordable as a
+	// continuously-refreshing background job; the previous 6h default was
+	// a scale-driven compromise forced by the raw-document-fetch approach
+	// this replaces. Verified live (2026-08-12): the full 7-day
+	// aggregation completes in ~7s against this deployment's real volume.
+	window := getenvDuration("CORRELATION_WINDOW", 7*24*time.Hour)
 	interval := getenvDuration("RUN_INTERVAL", 15*time.Minute)
 
 	es := newESClient(esURL)
@@ -67,23 +73,30 @@ func main() {
 
 func runCorrelation(es *esClient, window time.Duration) {
 	start := time.Now()
-	events, ok := fetchRecentEvents(es, start.Add(-window))
+	since := start.Add(-window)
+
+	campaignBuckets, ok := fetchCampaignAggregates(es, since)
 	if !ok {
-		log.Printf("correlator-worker: fetching recent events failed, skipping this cycle")
+		log.Printf("correlator-worker: fetching campaign aggregates failed, skipping this cycle")
+		return
+	}
+	clusterBuckets, ok := fetchClusterAggregates(es, since)
+	if !ok {
+		log.Printf("correlator-worker: fetching cluster aggregates failed, skipping this cycle")
 		return
 	}
 	// #1218: a failed alert-count fetch degrades this cycle's campaign
 	// scoring (every group's alert term is just 0) rather than skipping
-	// the whole cycle -- the honeypot-v2-* correlation above is the
+	// the whole cycle -- the honeypot-v2-* aggregations above are the
 	// primary signal and already succeeded; losing the IDS-alert term for
 	// one cycle isn't worth discarding it.
-	alertCounts, ok := fetchSuricataAlertCounts(es, start.Add(-window))
+	alertCounts, ok := fetchSuricataAlertCounts(es, since)
 	if !ok {
 		log.Printf("correlator-worker: fetching suricata alert counts failed, scoring this cycle without them")
 		alertCounts = nil
 	}
 
-	campaigns := correlateCampaigns(events, start, alertCounts)
+	campaigns := scoreCampaigns(campaignBuckets, start, alertCounts)
 	campaignIDs := make([]string, 0, len(campaigns))
 	for _, c := range campaigns {
 		id := c.CIDR
@@ -100,7 +113,7 @@ func runCorrelation(es *esClient, window time.Duration) {
 		log.Printf("correlator-worker: clean up stale campaigns: %v", err)
 	}
 
-	clusters := correlateClusters(events, start)
+	clusters := finalizeClusters(clusterBuckets, start)
 	clusterIDs := make([]string, 0, len(clusters))
 	for _, c := range clusters {
 		id := clusterDocID(c.Kind, c.Value)
@@ -117,8 +130,8 @@ func runCorrelation(es *esClient, window time.Duration) {
 		log.Printf("correlator-worker: clean up stale clusters: %v", err)
 	}
 
-	log.Printf("correlator-worker: cycle complete: %d events, %d campaigns, %d clusters in %s",
-		len(events), len(campaigns), len(clusters), time.Since(start).Round(time.Millisecond))
+	log.Printf("correlator-worker: cycle complete: %d campaigns, %d clusters in %s",
+		len(campaigns), len(clusters), time.Since(start).Round(time.Millisecond))
 }
 
 // clusterDocID hashes kind+value into a URL/ID-safe document ID -- cluster
