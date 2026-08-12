@@ -101,6 +101,16 @@ func TestListingPagesShowSkeletonPlaceholdersBeforeFirstRebuildInsteadOfEmptySta
 			readyData:     &sandboxPageData{Loading: false},
 			realEmptyText: "No completed sandbox exports match this view.",
 		},
+		// problem-reports (#1157 follow-up) gates on Loading the same way
+		// githubanalysisresultspanel/ghidraresultspanel/sandboxresultspanel
+		// above do -- see problem_reports.go's own
+		// refreshProblemReportsCacheAsync comment.
+		{
+			name:          "problem-reports",
+			emptyData:     &problemReportsPageData{Loading: true},
+			readyData:     &problemReportsPageData{Loading: false},
+			realEmptyText: "No problem reports have been submitted yet.",
+		},
 	}
 
 	for _, c := range cases {
