@@ -128,6 +128,13 @@ type workbenchAnalyzer struct {
 	ExternallySends bool                  `json:"externally_publishing"`
 	Detonates       bool                  `json:"detonates"`
 	GPU             bool                  `json:"gpu_consuming"`
+	// #1234: every other applicable+available analyzer here is pre-checked
+	// by default (payload_workbench.html); the one route that can reach
+	// real internet infrastructure (C2, exfiltration -- see windows-ghosts'
+	// own Description) should not be, so an operator reviewing the recipe
+	// quickly and clicking "Run all applicable" can't detonate live malware
+	// with real outbound connectivity without deliberately opting in.
+	RequiresOptIn bool `json:"requires_opt_in"`
 	DefaultOptions  workbenchOptions      `json:"default_options"`
 	OptionSchema    workbenchOptionSchema `json:"option_schema"`
 }
@@ -269,7 +276,7 @@ func workbenchRegistry(classification payloadClassification) []workbenchAnalyzer
 		// verified live in #325, not just configured. DisplayName and
 		// Description are deliberately loud about this rather than reading
 		// like just another sandbox option in the list, per #327.
-		{ID: "windows-ghosts", DisplayName: "Windows sandbox (WAN-permitted, GHOSTS)", Description: "⚠ Real internet access. Dynamic detonation on a separate, WAN-permitted Windows guest with a GHOSTS-driven NPC persona -- unlike every other route here, this guest can reach real infrastructure (C2 checkins, second-stage downloads, exfiltration all go somewhere real, not FakeNet/INetSim). The host's LAN/RFC1918 ranges are firewalled off, but the internet is not. Only choose this for samples where real network behavior is the point.", AcceptedKinds: []string{"windows"}, Availability: availabilityName(ghostsConfigured, ghostsConfigured), Available: ghostsConfigured, Applicable: windowsApplicable, Reason: analyzerReason(windowsApplicable, ghostsConfigured, ghostsConfigured, "payload is not compatible with the Windows detonation route", "GHOSTS sandbox spool is not configured", "GHOSTS sandbox is unavailable"), ResultLinkShape: "/sandbox/{job}", RequiredRole: "admin", Confirmation: "detonation", Concurrency: "windows-ghosts-kvm", LocalOnly: true, Detonates: true, DefaultOptions: defaultWorkbenchOptions("windows-sandbox"), OptionSchema: optionSchema},
+		{ID: "windows-ghosts", DisplayName: "Windows sandbox (WAN-permitted, GHOSTS)", Description: "⚠ Real internet access. Dynamic detonation on a separate, WAN-permitted Windows guest with a GHOSTS-driven NPC persona -- unlike every other route here, this guest can reach real infrastructure (C2 checkins, second-stage downloads, exfiltration all go somewhere real, not FakeNet/INetSim). The host's LAN/RFC1918 ranges are firewalled off, but the internet is not. Only choose this for samples where real network behavior is the point.", AcceptedKinds: []string{"windows"}, Availability: availabilityName(ghostsConfigured, ghostsConfigured), Available: ghostsConfigured, Applicable: windowsApplicable, Reason: analyzerReason(windowsApplicable, ghostsConfigured, ghostsConfigured, "payload is not compatible with the Windows detonation route", "GHOSTS sandbox spool is not configured", "GHOSTS sandbox is unavailable"), ResultLinkShape: "/sandbox/{job}", RequiredRole: "admin", Confirmation: "detonation", Concurrency: "windows-ghosts-kvm", LocalOnly: true, Detonates: true, RequiresOptIn: true, DefaultOptions: defaultWorkbenchOptions("windows-sandbox"), OptionSchema: optionSchema},
 		// Standalone adapter (#78): its own submission path (drain_revdeck() in
 		// ghidra-worker.py drains REVDECK_REQUEST_DIR independently of the
 		// Ghidra spool) and its own result link (/revdeck/{sha256}), separate

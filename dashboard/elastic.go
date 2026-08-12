@@ -50,6 +50,29 @@ func newESClient(base, filebeatBase string) *esClient {
 	return &esClient{base: strings.TrimRight(base, "/"), filebeatBase: strings.TrimRight(filebeatBase, "/"), http: &http.Client{Timeout: 8 * time.Second}, stat: esStatus{Enabled: base != ""}}
 }
 
+// maxESResponseBytes bounds how much of an Elasticsearch response body this
+// client will buffer into memory.
+const maxESResponseBytes = 16 << 20
+
+// readESBody reads r capped at maxESResponseBytes and errors clearly if the
+// real response was actually larger, rather than silently handing truncated
+// bytes to json.Unmarshal (#1233: a genuinely oversized response -- seen
+// live from /dead-letters and /history, which return full raw documents
+// rather than a paginated/summarized view -- produced a confusing
+// "Unterminated string in JSON at position 16777216" instead of an
+// actionable error). io.LimitReader itself never errors on truncation, so
+// the +1/len comparison below is what actually detects it.
+func readESBody(r io.Reader) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(r, maxESResponseBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(b) > maxESResponseBytes {
+		return nil, fmt.Errorf("Elasticsearch response exceeds %d MB -- narrow the query (a smaller time window or a tighter filter)", maxESResponseBytes>>20)
+	}
+	return b, nil
+}
+
 func (c *esClient) get() esStatus {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -62,7 +85,7 @@ func (c *esClient) request(path string) ([]byte, error) {
 		return nil, err
 	}
 	defer r.Body.Close()
-	b, err := io.ReadAll(io.LimitReader(r.Body, 16<<20))
+	b, err := readESBody(r.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +110,7 @@ func (c *esClient) requestMethod(method, path string) ([]byte, error) {
 		return nil, err
 	}
 	defer r.Body.Close()
-	b, err := io.ReadAll(io.LimitReader(r.Body, 16<<20))
+	b, err := readESBody(r.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +137,7 @@ func (c *esClient) searchBody(path string, body []byte) ([]byte, error) {
 		return nil, err
 	}
 	defer r.Body.Close()
-	b, err := io.ReadAll(io.LimitReader(r.Body, 16<<20))
+	b, err := readESBody(r.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -148,7 +171,7 @@ func (c *esClient) doRequest(method, path string, body []byte) (status int, resp
 		return 0, nil, err
 	}
 	defer r.Body.Close()
-	b, err := io.ReadAll(io.LimitReader(r.Body, 16<<20))
+	b, err := readESBody(r.Body)
 	if err != nil {
 		return 0, nil, err
 	}

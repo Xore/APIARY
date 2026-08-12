@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -41,13 +42,19 @@ func (s *store) commandsData(r *http.Request) commandsPage {
 	}
 	groups := map[string]*agg{}
 	for _, e := range s.getEvents() {
-		if e.Command == "" || !f.match(e) {
+		// Trim before grouping: a command differing only in trailing
+		// whitespace (seen live from real cowrie sessions) otherwise gets
+		// its own row that's visually indistinguishable from the trimmed
+		// one, reading as a dashboard bug rather than the attacker-supplied
+		// data variance it actually is.
+		command := strings.TrimSpace(e.Command)
+		if command == "" || !f.match(e) {
 			continue
 		}
-		key := e.Sensor + "\x00" + e.Command
+		key := e.Sensor + "\x00" + command
 		a := groups[key]
 		if a == nil {
-			a = &agg{row: commandRow{Sensor: e.Sensor, Command: e.Command}, sources: map[string]bool{}, sessions: map[string]bool{}}
+			a = &agg{row: commandRow{Sensor: e.Sensor, Command: command}, sources: map[string]bool{}, sessions: map[string]bool{}}
 			groups[key] = a
 		}
 		a.row.Count++

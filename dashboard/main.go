@@ -735,6 +735,17 @@ func main() {
 		data.Analysis = r.URL.Query().Get("analysis")
 		renderPage(w, tmpl, "ghidra", &data)
 	})
+	// #1239: unlike /ghidra and /github-analysis just above, revdeck/cape
+	// results were never a standalone list view -- they're per-payload
+	// analyzer results only ever linked as /revdeck/{sha256} from a
+	// payload's own workbench page (workbench_domain.go's ResultLinkShape),
+	// so there's no former list tab to redirect a bare path to. Send it to
+	// /payloads instead, where an operator would actually go to find a
+	// hash to analyze, rather than the bare unstyled 404 the /revdeck/
+	// handler below produced for an empty/invalid sha.
+	http.HandleFunc("/revdeck", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/payloads", http.StatusFound)
+	})
 	http.HandleFunc("/revdeck/", func(w http.ResponseWriter, r *http.Request) {
 		sha, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/revdeck/"))
 		if err != nil || !hashName.MatchString(sha) {
@@ -747,6 +758,9 @@ func main() {
 			return
 		}
 		renderPage(w, tmpl, "revdeck", &data)
+	})
+	http.HandleFunc("/cape", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/payloads", http.StatusFound)
 	})
 	http.HandleFunc("/cape/", func(w http.ResponseWriter, r *http.Request) {
 		sha, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/cape/"))
