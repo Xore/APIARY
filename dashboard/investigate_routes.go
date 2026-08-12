@@ -127,12 +127,17 @@ func (s *store) registerInvestigateRoutes(mux *http.ServeMux, tmpl *template.Tem
 	})
 	// #805's own ordering note no longer applies literally (Go 1.22's
 	// ServeMux picks the more specific pattern regardless of registration
-	// order, not "longest match" of the old prefix-based routing) but the
-	// guarantee it documents still holds under the new mechanism: the
-	// literal, method-unrestricted "/sandbox/vnc" registered in main()
-	// still wins over this wildcard GET pattern for that exact path,
-	// since an all-literal pattern is always more specific than one
-	// containing a wildcard segment.
+	// order, not "longest match" of the old prefix-based routing) and its
+	// guarantee needed one adjustment under the new mechanism: an exact
+	// literal path only outranks a wildcard sibling when its own method
+	// set is a SUBSET of the wildcard's -- a bare, method-unrestricted
+	// "/sandbox/vnc" is not a subset of "GET /sandbox/{job}" (it also
+	// matches every other method for that path, which the GET-only
+	// wildcard doesn't cover), and ServeMux panics on that kind of
+	// ambiguity at registration time instead of picking a winner
+	// (confirmed live). main() registers "GET /sandbox/vnc" -- see that
+	// call site's own comment -- specifically to keep this a clean,
+	// non-conflicting subset.
 	mux.HandleFunc("GET /sandbox/{job}", func(w http.ResponseWriter, r *http.Request) {
 		job := r.PathValue("job")
 		data, err := s.sandboxData(job, "")

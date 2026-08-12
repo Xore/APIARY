@@ -458,7 +458,14 @@ func main() {
 	http.HandleFunc("/api/github-analysis/", s.serveGitHubAnalysisAPI)
 	http.HandleFunc("/export/github-analysis/", s.serveGitHubAnalysisExport)
 	http.HandleFunc("/export/portbridge-manual-blackhole.txt", s.serveManualBlackholeExport)
-	http.HandleFunc("/investigate/ip/block", s.serveIPBlockAction)
+	// #1312: an explicit method, not just serveIPBlockAction's own internal
+	// r.Method check -- net/http.ServeMux (Go 1.22+) requires this,
+	// otherwise this pattern and registerInvestigateRoutes' "GET
+	// /investigate/ip/{ip}" (below) aren't a strict subset of one another
+	// (this one covers every OTHER method for exactly this path that the
+	// GET-only wildcard doesn't) and ServeMux panics at startup rather than
+	// silently picking a winner -- confirmed live, this exact conflict.
+	http.HandleFunc("POST /investigate/ip/block", s.serveIPBlockAction)
 	http.HandleFunc("/api/payload-workbench/registry/", s.serveWorkbenchRegistry)
 	http.HandleFunc("/api/payload-workbench/recipes", s.serveWorkbenchRecipes)
 	http.HandleFunc("/api/payload-workbench/runs", s.serveWorkbenchRuns)
@@ -649,10 +656,19 @@ func main() {
 		w.Header().Set("Cache-Control", "no-store")
 		tmpl.ExecuteTemplate(w, "payloadrows", data)
 	})
-	http.HandleFunc("/sandbox/submit", s.serveSandboxSubmit)
-	http.HandleFunc("/ghidra/submit", s.serveGhidraSubmit)
+	// #1312: explicit methods for the same reason as /investigate/ip/block
+	// above -- each of these three otherwise conflicts with
+	// registerInvestigateRoutes' GET-only wildcard sibling
+	// (/sandbox/submit vs "GET /sandbox/{job}", /ghidra/submit vs "GET
+	// /ghidra/{sha}", /github-analysis/submit vs "GET
+	// /github-analysis/{sha}") the same way /investigate/ip/block did.
+	// serveSandboxSubmit/serveGhidraSubmit/serveGitHubAnalysisSubmit all
+	// already reject a non-POST request themselves; this doesn't change
+	// that, just lets ServeMux enforce it too (and register successfully).
+	http.HandleFunc("POST /sandbox/submit", s.serveSandboxSubmit)
+	http.HandleFunc("POST /ghidra/submit", s.serveGhidraSubmit)
 	http.HandleFunc("/gpu-queue/abort", serveGPUQueueAbort)
-	http.HandleFunc("/github-analysis/submit", s.serveGitHubAnalysisSubmit)
+	http.HandleFunc("POST /github-analysis/submit", s.serveGitHubAnalysisSubmit)
 	http.HandleFunc("/ml-anomalies/ack", s.serveMLAnomalyAck)
 	// #1139: the standalone artifact-selection index merged into /payloads'
 	// second tab -- old bookmarks/links redirect rather than 404.
@@ -713,14 +729,19 @@ func main() {
 	http.HandleFunc("/sandbox", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/payload-workbench/results#sandbox", http.StatusFound)
 	})
-	// #805: this exact-match, method-unrestricted registration still wins
-	// over registerInvestigateRoutes' "GET /sandbox/{job}" for exactly this
-	// path -- see that function's own comment on why (Go 1.22's ServeMux
-	// prefers the more specific, non-wildcard pattern regardless of
-	// registration order; #1312 replaced the old "longest prefix match"
-	// mechanism this comment used to describe, the guarantee itself is
-	// unchanged).
-	http.HandleFunc("/sandbox/vnc", func(w http.ResponseWriter, r *http.Request) {
+	// #805: an exact match still wins over registerInvestigateRoutes' "GET
+	// /sandbox/{job}" wildcard for exactly this path, matching this
+	// comment's original claim -- but #1312 found that guarantee only
+	// holds when the exact match's own method set is a subset of the
+	// wildcard's. A bare "/sandbox/vnc" (matching every method) is NOT a
+	// subset of "GET /sandbox/{job}" (GET only) -- it additionally
+	// matches every other method for this one path, which the wildcard
+	// doesn't cover -- so net/http.ServeMux (Go 1.22+) treated the two as
+	// a genuine conflict and panicked at startup rather than picking a
+	// winner (confirmed live). serveSandboxVNC is only ever a page
+	// navigation (GET), so restricting this registration to GET restores
+	// the strict-subset relationship the original comment assumed.
+	http.HandleFunc("GET /sandbox/vnc", func(w http.ResponseWriter, r *http.Request) {
 		s.serveSandboxVNC(w, r, tmpl)
 	})
 	// #1312: /sandbox/{job} itself is registered by registerInvestigateRoutes.

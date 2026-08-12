@@ -29,6 +29,42 @@ func doGet(mux *http.ServeMux, path string) *httptest.ResponseRecorder {
 	return rec
 }
 
+// TestInvestigateRoutesCoexistWithTheirLiteralSiblings (#1312 regression
+// guard): net/http.ServeMux.HandleFunc PANICS at registration time --  not
+// something go build/go vet/go test alone ever exercises -- when two
+// patterns overlap without one being a strict subset of the other. This
+// bit real production code: main.go registers five method-unrestricted
+// literal siblings under the same prefixes registerInvestigateRoutes'
+// GET-only wildcards now own (/investigate/ip/block, /sandbox/submit,
+// /sandbox/vnc, /ghidra/submit, /github-analysis/submit). A bare
+// "/sandbox/vnc" (every method) is NOT a subset of "GET /sandbox/{job}"
+// (GET only) -- it additionally matches every other method for that one
+// path, which the wildcard doesn't cover -- so the two conflict and
+// ServeMux panics the instant both are registered on the same mux. This
+// was invisible to every other test here (each builds its own mux with
+// only registerInvestigateRoutes' own patterns on it, never these five
+// siblings) and only surfaced when the real dashboard binary actually
+// started in CI. Confirmed live: this test panicked before main.go's
+// siblings were given matching method prefixes (POST for the block/
+// submit actions, GET for the VNC page).
+func TestInvestigateRoutesCoexistWithTheirLiteralSiblings(t *testing.T) {
+	s := &store{}
+	tmpl := template.Must(template.New("dashboard").Funcs(templateFuncs(s, "")).Parse(pageTemplate))
+	mux := http.NewServeMux()
+	s.registerInvestigateRoutes(mux, tmpl)
+
+	siblings := []string{
+		"POST /investigate/ip/block",
+		"POST /sandbox/submit",
+		"GET /sandbox/vnc",
+		"POST /ghidra/submit",
+		"POST /github-analysis/submit",
+	}
+	for _, pattern := range siblings {
+		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {})
+	}
+}
+
 // TestClusterDrillDownRoundTripsSpacesInKindAndValue (#1312, confirmed
 // bug): "Autonomous system" and "Provider class" -- and any cluster value
 // containing a literal space -- used to 404 because the drill-down link
