@@ -87,7 +87,7 @@ insufficient without the loud warning).
 | Axis | `win11-sandbox` | `win11-ghosts` | `win11-cape` |
 |---|---|---|---|
 | 1. Network exposure | Isolated (no `<forward>`; FakeNet-served for intercepted outbound) | **Real WAN** (`<forward>` present, deliberate — #325/#331) | Isolated (no `<forward>`, same posture as the Linux runner) |
-| 2. Persona / NPC | Legacy persona daemon (`07-living-persona.ps1`, #290) | GHOSTS NPC (real `Ghosts.Api` client, `sandbox/ghosts/Dockerfile.client-win`) | **None** — documented known gap (`autounattend.xml`'s own header: "the decoy persona ... KNOWN GAP, not fixed here") |
+| 2. Persona / NPC | Legacy persona daemon (`07-living-persona.ps1`, #290) | GHOSTS NPC (real `Ghosts.Api` client, `sandbox/ghosts/Dockerfile.client-win`) | **None** — no NPC daemon, deliberately excluded (`win11-cape.pkr.hcl`'s own header). Static identity (`autounattend.xml`'s `ComputerName`/`FullName`/etc.) is distinct from `win11-analysis`'s own as of #904, closing the fingerprint-reuse gap this cell used to flag |
 | 3. Simulated input | Yes — cubic-Bezier mouse movement, Gaussian jitter, periodic typing (`07-living-persona.ps1`) | N/A — GHOSTS' own real activity substitutes | No |
 | 4. Simulated background traffic | Yes (`08-traffic-noise.ps1`) | N/A — real traffic from real browsing | No |
 | 5. Filesystem bait | Yes (`05-decoy-content.ps1`) | No | No |

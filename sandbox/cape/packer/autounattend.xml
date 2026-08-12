@@ -4,17 +4,24 @@
      the q35 machine type has no floppy controller. Windows setup searches
      removable media for autounattend.xml, so no drive letter is assumed. -->
 <!-- Ref: https://github.com/proactivelabs/packer-windows -->
-<!-- Copied unchanged from sandbox/windows/packer/autounattend.xml (#315):
-     the Windows-install phase itself (language, partitioning, WinRM
-     bring-up, the local "analyst" account) has nothing sandbox/windows-
-     specific in it. KNOWN GAP, not fixed here: the decoy persona
-     (ComputerName ACP-FIN0142, FullName Robert Tanaka, Organization
-     Ashford Capital Partners) is therefore identical to win11-analysis's
-     own guest: a sample that has fingerprinted this repo's OTHER golden
-     image once would recognize this one as the same decoy identity.
-     Giving CAPE's guest its own distinct persona is real follow-up work
-     (docs/sandbox/cape/IMPLEMENTATION_PLAN.md Known Gaps), not attempted
-     here alongside getting the build itself working for the first time. -->
+<!-- Adapted from sandbox/windows/packer/autounattend.xml (#315): the
+     Windows-install phase itself (language, partitioning, WinRM bring-up,
+     the local "analyst" account) has nothing sandbox/windows-specific in
+     it, so that part stays unchanged. #904: the decoy identity
+     (ComputerName, FullName, Organization, RegisteredOwner,
+     RegisteredOrganization, JoinWorkgroup below) used to be copied
+     verbatim from win11-analysis's own guest, which meant a sample that
+     had fingerprinted this repo's OTHER golden image once would recognize
+     this one as the same decoy identity. It is now a distinct persona —
+     Daniel Kowalski at Vantage Precision Manufacturing, vs. win11-analysis's
+     Robert Tanaka at Ashford Capital Partners — so the two golden images no
+     longer share a recognizable identity tell. This is identity/fingerprint
+     distinctness only: unlike win11-analysis, win11-cape has no
+     05-decoy-content.ps1 equivalent (no decoy documents, no fake
+     recent-file shortcuts, no FakeNet intranet page) and no persona
+     daemon — those stay deliberately excluded per win11-cape.pkr.hcl's
+     own header (CAPE's debugger-class-evasion focus doesn't need full
+     persona realism). The name/company below exists only in this file. -->
 
 <unattend xmlns="urn:schemas-microsoft-com:unattend">
 
@@ -120,17 +127,17 @@
           <WillShowUI>Never</WillShowUI>
         </ProductKey>
         <AcceptEula>true</AcceptEula>
-        <!-- #293: was John Doe / Acme Corp — generic and, worse,
-             disconnected from every other layer of the image (decoy
-             documents named unrelated people, no Office/Outlook identity,
-             no OEMInformation tie-in). One persona now threads through
-             this file, 05-decoy-content.ps1, and config/fakenet.ini's
-             intranet page: Robert Tanaka, Senior Financial Analyst at
-             Ashford Capital Partners. Change the name/company/domain
-             suffix together if this is ever re-themed — they are meant
-             to agree everywhere a sample can read them from. -->
-        <FullName>Robert Tanaka</FullName>
-        <Organization>Ashford Capital Partners</Organization>
+        <!-- #904: distinct from win11-analysis's own Robert Tanaka /
+             Ashford Capital Partners persona, so the two golden images
+             don't share a recognizable identity fingerprint. Unlike that
+             image, nothing else in this build reads this name/company
+             (no decoy documents, no FakeNet intranet page) — it only
+             needs to agree with itself across this file's own fields
+             below (ComputerName, RegisteredOwner, RegisteredOrganization,
+             JoinWorkgroup). Change them together if this is ever
+             re-themed. -->
+        <FullName>Daniel Kowalski</FullName>
+        <Organization>Vantage Precision Manufacturing</Organization>
       </UserData>
 
     </component>
@@ -143,19 +150,16 @@
                publicKeyToken="31bf3856ad364e35"
                language="neutral" versionScope="nonSxS"
                xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
-      <!-- #91: was DESKTOP-AN4LY5T. scripts/05-decoy-content.ps1 goes to
-           real trouble building a decoy user environment — decoy
-           documents, fake recent-file shortcuts — and then named the
-           machine after the thing it's hiding. A substring check for
-           ANALY/SANDBOX/MALWARE in the hostname is among the cheapest
-           evasion checks a sample can run. Unremarkable and fixed, since
-           it's baked into the image.
-           #293: renamed again from the still-generic DESKTOP-JK3PLQ2 to a
-           name that reads as this persona's real corporate asset tag. -->
-      <ComputerName>ACP-FIN0142</ComputerName>
+      <!-- #904: distinct from win11-analysis's ACP-FIN0142 — reads as
+           this persona's own corporate asset tag (Vantage Precision
+           Manufacturing, Engineering-department asset 0089). A substring
+           check for ANALY/SANDBOX/MALWARE/CAPE in the hostname is among
+           the cheapest evasion checks a sample can run; this name avoids
+           all four, same as win11-analysis's own. -->
+      <ComputerName>VPM-ENG0089</ComputerName>
       <TimeZone>Eastern Standard Time</TimeZone>
-      <RegisteredOwner>Robert Tanaka</RegisteredOwner>
-      <RegisteredOrganization>Ashford Capital Partners</RegisteredOrganization>
+      <RegisteredOwner>Daniel Kowalski</RegisteredOwner>
+      <RegisteredOrganization>Vantage Precision Manufacturing</RegisteredOrganization>
     </component>
 
     <!-- #91: 01-hardening.ps1's Set-MpPreference/DisableAntiSpyware
@@ -247,14 +251,15 @@
     </component>
 
     <!-- Workgroup named like a corporate domain, matching the persona —
-         a bare WORKGROUP default is itself a tell next to everything else
-         built to look like a real finance-department workstation. -->
+         a bare WORKGROUP default is itself a tell. #904: distinct from
+         win11-analysis's ACPNET (Ashford Capital Partners), matching this
+         guest's own Vantage Precision Manufacturing persona instead. -->
     <component name="Microsoft-Windows-UnattendedJoin"
                processorArchitecture="amd64"
                publicKeyToken="31bf3856ad364e35"
                language="neutral" versionScope="nonSxS">
       <Identification>
-        <JoinWorkgroup>ACPNET</JoinWorkgroup>
+        <JoinWorkgroup>VPMNET</JoinWorkgroup>
       </Identification>
     </component>
 
