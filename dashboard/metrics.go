@@ -27,6 +27,11 @@ func (s *store) serveMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 	state := map[string]int{"green": 1, "yellow": 2, "red": 3}[snap.ES.State]
 	fmt.Fprintf(w, "honeypot_elasticsearch_state %d\nhoneypot_elasticsearch_documents %d\nhoneypot_dead_letters_total %d\nhoneypot_dead_letters_24h %d\n", state, snap.ES.Documents, snap.ES.DeadLetters, snap.ES.RecentDeadLetters)
+	// #1298: filebeat-* is a distinct, earlier failure layer from
+	// dead-letter-honeypot* above -- Filebeat's own json.decode fallback for
+	// log lines it couldn't parse at all, not a document Elasticsearch
+	// itself rejected.
+	fmt.Fprintf(w, "# HELP honeypot_filebeat_decode_failures_total Log lines Filebeat's own json.decode processor could not parse at all.\n# TYPE honeypot_filebeat_decode_failures_total gauge\nhoneypot_filebeat_decode_failures_total %d\n", snap.ES.FilebeatDecodeFailures)
 	fmt.Fprintf(w, "honeypot_filebeat_failed_total %d\nhoneypot_filebeat_dropped_total %d\nhoneypot_filebeat_active %d\n", snap.ES.FilebeatFailed, snap.ES.FilebeatDropped, snap.ES.FilebeatActive)
 	fmt.Fprintf(w, "honeypot_yara_samples %d\nhoneypot_yara_matches %d\nhoneypot_yara_errors %d\n", snap.YARA.Samples, snap.YARA.Matched, snap.YARA.Errors)
 	results := loadSandboxResults()
