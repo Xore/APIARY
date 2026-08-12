@@ -413,7 +413,7 @@
       const rows = await apiJSON("/api/sandbox");
       const jobs = (Array.isArray(rows) ? rows : []).filter((row) => row && row.job);
       els.sandboxJob.innerHTML = `<option value="">select an analysis run…</option>` + jobs.map((row) => {
-        const label = `${row.job} — ${String(row.sha256 || "").slice(0, 12)}… (${escapeHTML(row.risk_level || "unrated")})`;
+        const label = `${escapeHTML(row.job)} — ${escapeHTML(String(row.sha256 || "").slice(0, 12))}… (${escapeHTML(row.risk_level || "unrated")})`;
         return `<option value="${escapeHTML(row.job)}">${label}</option>`;
       }).join("");
       els.sandboxJob.dataset.loaded = "true";
