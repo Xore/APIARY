@@ -77,9 +77,15 @@ func TestMLAnomalyReopenClearsAcknowledgedState(t *testing.T) {
 // applyMLAnomalyAcks joins the snapshot against ack state without mutating
 // the underlying cache -- a re-snapshot later must reflect the current ack
 // state, not whatever was true the first time a snapshot was joined.
+//
+// applyMLAnomalyAcks reads mlAnomalyAckManager's own polled cache (#1157-
+// sweep: acknowledged() itself is a full, unbounded ES scan and must not
+// run on this read path per-request), so this test polls explicitly via
+// refresh() first, the same way the background ticker in main.go would.
 func TestApplyMLAnomalyAcksJoinsWithoutMutatingCache(t *testing.T) {
 	s := &store{mlAnomalyAcks: newTestMLAnomalyAckManager(t)}
 	s.mlAnomalyAcks.acknowledge("anomaly-1", true, "alice")
+	s.mlAnomalyAcks.refresh()
 
 	items := []mlAnomaly{{AnomalyID: "anomaly-1"}, {AnomalyID: "anomaly-2"}}
 	s.applyMLAnomalyAcks(items)
@@ -88,6 +94,52 @@ func TestApplyMLAnomalyAcksJoinsWithoutMutatingCache(t *testing.T) {
 	}
 	if items[1].Acknowledged {
 		t.Errorf("anomaly-2 should stay open: %+v", items[1])
+	}
+}
+
+// Before refresh() has ever run (cache still nil, e.g. between process
+// start and the first synchronous poll main.go does at startup),
+// applyMLAnomalyAcks must leave every item un-acknowledged rather than
+// panicking on a nil map read.
+func TestApplyMLAnomalyAcksNoopBeforeFirstRefresh(t *testing.T) {
+	s := &store{mlAnomalyAcks: newTestMLAnomalyAckManager(t)}
+	s.mlAnomalyAcks.acknowledge("anomaly-1", true, "alice") // written to ES, never polled
+
+	items := []mlAnomaly{{AnomalyID: "anomaly-1"}}
+	s.applyMLAnomalyAcks(items)
+	if items[0].Acknowledged {
+		t.Errorf("un-polled ack state must not be visible yet: %+v", items[0])
+	}
+}
+
+// refresh() must poll acknowledged() into the cache, and cached() must
+// return exactly what the last refresh() saw -- the read path
+// (applyMLAnomalyAcks) depends on both holding.
+func TestMLAnomalyAckManagerRefreshPopulatesCache(t *testing.T) {
+	m := newTestMLAnomalyAckManager(t)
+	m.acknowledge("anomaly-1", true, "alice")
+	if cached := m.cached(); len(cached) != 0 {
+		t.Fatalf("cached() before any refresh() = %+v, want empty", cached)
+	}
+	m.refresh()
+	cached := m.cached()
+	r, ok := cached["anomaly-1"]
+	if !ok || r.AckedBy != "alice" {
+		t.Fatalf("cached() after refresh() = %+v, want anomaly-1 acked by alice", cached)
+	}
+}
+
+// A reopen must clear the key out of the cache too, once polled -- the
+// cache is a wholesale replacement on every refresh(), not an incremental
+// merge, so stale acknowledged entries cannot survive a reopen.
+func TestMLAnomalyAckManagerRefreshReflectsReopen(t *testing.T) {
+	m := newTestMLAnomalyAckManager(t)
+	m.acknowledge("anomaly-1", true, "alice")
+	m.refresh()
+	m.acknowledge("anomaly-1", false, "")
+	m.refresh()
+	if cached := m.cached(); len(cached) != 0 {
+		t.Fatalf("cached() after reopen+refresh() = %+v, want empty", cached)
 	}
 }
 
@@ -121,6 +173,12 @@ func TestServeMLAnomalyAckAcknowledgesAndRedirects(t *testing.T) {
 	acked := s.mlAnomalyAcks.acknowledged()
 	if _, ok := acked["anomaly-1"]; !ok {
 		t.Fatalf("anomaly-1 not acknowledged: %+v", acked)
+	}
+	// serveMLAnomalyAck must refresh the cache inline (#1157-sweep) -- the
+	// operator's own action must be visible on the very next page load, not
+	// stale for up to a minute until the next background poll.
+	if cached := s.mlAnomalyAcks.cached(); !cached["anomaly-1"].Acknowledged {
+		t.Fatalf("cache not refreshed inline after ack write: %+v", cached)
 	}
 }
 

@@ -165,6 +165,12 @@ func main() {
 				s.refreshLLMAnalysis()
 				s.refreshAgentCampaigns()
 				s.refreshAuthEvents()
+				// #913-follow-up: s.mlAnomalyAcks isn't constructed until
+				// after this block (below, once s.es itself is set) -- by
+				// the time this first fires (a minute after startup) it's
+				// long since non-nil, and refreshMLAnomalyAcks is a no-op
+				// on nil anyway, same guard every other refresh* here has.
+				s.refreshMLAnomalyAcks()
 			}
 		}()
 	}
@@ -198,6 +204,12 @@ func main() {
 	// call site (applyMLAnomalyAcks, serveMLAnomalyAck) already treats a nil
 	// mlAnomalyAcks as "acknowledgment disabled".
 	s.mlAnomalyAcks = newMLAnomalyAckManager(s.es)
+	// Populate the ack cache before the first request can reach
+	// /ml-anomalies or /api/ml/anomalies (applyMLAnomalyAcks reads only the
+	// cache now, never Elasticsearch directly -- see ml_anomaly_ack.go);
+	// thereafter kept warm by the 1-minute ticker above, same as
+	// refreshMLAnomalies/refreshLLMAnalysis/refreshAgentCampaigns.
+	s.refreshMLAnomalyAcks()
 	s.intelligence = &intelligenceStore{path: getenv("INTELLIGENCE_STATE_FILE", "/state/intelligence.json"), es: s.es}
 	// #787: config/users are Elasticsearch-backed singleton documents (see
 	// settings_store_es.go) -- s.es nil (Elasticsearch not configured)

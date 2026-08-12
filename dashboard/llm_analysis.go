@@ -270,6 +270,12 @@ type llmAnalysisPage struct {
 	filterBar
 }
 
+// llmAnalysisData has no per-request slow call to gate with a skeleton
+// (#1157-sweep audit): it only parses the query string and reads
+// s.llmAnalysis.snapshot(), an in-memory copy of a <=llmAnalysisCacheCap
+// cache that refreshLLMAnalysis populates synchronously before
+// srv.ListenAndServe() (main.go) and thereafter only from the background
+// 1-minute ticker -- never from this handler.
 func (s *store) llmAnalysisData(r *http.Request) llmAnalysisPage {
 	f := parseLLMAnalysisFilter(r)
 	bar := buildFilterBar(r, "/llm-analysis",
