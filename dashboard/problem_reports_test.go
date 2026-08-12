@@ -316,3 +316,18 @@ func TestListProblemReportsRequiresAdmin(t *testing.T) {
 		t.Fatalf("expected 403 for a non-admin GET, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+// TestServeProblemReportItemRejectsAnOversizedBody (#1323): the PATCH body
+// is now wrapped in http.MaxBytesReader(w, r.Body, maxProblemReportPatchBody)
+// before Decode -- the real body is only ever {"status": "..."}, so a body
+// well past the 1KB limit must fail decoding and 400, not be read in full.
+func TestServeProblemReportItemRejectsAnOversizedBody(t *testing.T) {
+	s := newTestProblemReportStore(t)
+	oversized := `{"status": "` + strings.Repeat("A", maxProblemReportPatchBody+1) + `"}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/problem-reports/abc123", strings.NewReader(oversized))
+	rec := httptest.NewRecorder()
+	s.serveProblemReportItem(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400 for a body past maxProblemReportPatchBody: %s", rec.Code, rec.Body.String())
+	}
+}

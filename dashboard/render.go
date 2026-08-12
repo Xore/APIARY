@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"os"
 )
 
 // pageMeta is embedded (anonymously) in every top-level page data struct so
@@ -38,7 +39,26 @@ func renderPage(w http.ResponseWriter, tmpl *template.Template, name string, dat
 	secHeaders(w, n)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	data.SetNonce(n)
-	tmpl.ExecuteTemplate(w, name, data)
+	// #1323: html/template writes directly to w as it executes, so a
+	// failure partway through (a nil pointer the template dereferences, a
+	// missing field) leaves the client with a silently truncated page and,
+	// without this, no server-side trace of what went wrong at all -- the
+	// single call site every full-page route shares, so this one fix
+	// covers all of them.
+	logTemplateErr(name, tmpl.ExecuteTemplate(w, name, data))
+}
+
+// logTemplateErr (#1323) is the shared error path for every
+// tmpl.ExecuteTemplate call in the dashboard -- renderPage's own full-page
+// routes above, plus the smaller HTML-fragment endpoints (event/ip/payload
+// row pagination, the settings modal) that call ExecuteTemplate directly
+// since they don't go through renderPage's nonce/CSP setup. A no-op when
+// err is nil, so every call site can pass the ExecuteTemplate result
+// straight through without its own if-block.
+func logTemplateErr(name string, err error) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "dashboard: render %q: %v\n", name, err)
+	}
 }
 
 func nonce() string {

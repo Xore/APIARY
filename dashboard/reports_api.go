@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -52,7 +53,13 @@ func writeReportsJSON(w http.ResponseWriter, etag string, status int, payload an
 		w.Header().Set("ETag", etag)
 	}
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(payload)
+	// #1323: logged, not just discarded -- a real failure here (a client
+	// disconnect mid-write, or an unsupported type in payload) previously
+	// left no trace at all. Still can't be turned into an HTTP error at
+	// this point; WriteHeader has already committed the response.
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
+		fmt.Fprintf(os.Stderr, "dashboard: encode reports JSON response: %v\n", err)
+	}
 }
 
 // writeReportStoreError maps store failures onto the settings API contract's

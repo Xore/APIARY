@@ -228,6 +228,28 @@ func TestServeIPBlockActionRefusedWhenUnconfigured(t *testing.T) {
 	}
 }
 
+// TestServeIPBlockActionRejectsAnOversizedBody (#1323): r.Body is now
+// wrapped in http.MaxBytesReader(w, r.Body, maxActionFormBody) before
+// ParseForm() reads it -- this form only ever carries a handful of short
+// fields (ip, blocked, expires_days, return), so a body well past
+// maxActionFormBody must fail ParseForm() and 400, not be read in full.
+func TestServeIPBlockActionRejectsAnOversizedBody(t *testing.T) {
+	s := &store{ipBlocks: newTestIPBlockManager(t)}
+	oversized := "ip=203.0.113.9&blocked=true&junk=" + strings.Repeat("A", maxActionFormBody+1)
+	r := httptest.NewRequest(http.MethodPost, "https://honeypot.example/investigate/ip/block",
+		strings.NewReader(oversized))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("Origin", "https://honeypot.example")
+	w := httptest.NewRecorder()
+	s.serveIPBlockAction(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400 for a body past maxActionFormBody", w.Code)
+	}
+	if s.ipBlocks.get("203.0.113.9").Active() {
+		t.Fatal("an oversized, rejected request must not have blocked the IP")
+	}
+}
+
 // #914: the attacker page must offer a block/unblock action for any IP,
 // not just IPs IOC correlation happens to have flagged confirmed-malicious
 // (that badge is informational only -- decided explicitly after scoping

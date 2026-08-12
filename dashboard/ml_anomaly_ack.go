@@ -198,6 +198,7 @@ func (s *store) serveMLAnomalyAck(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "ML anomaly acknowledgment is not configured on this host", http.StatusServiceUnavailable)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxActionFormBody)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
 		return

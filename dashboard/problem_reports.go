@@ -46,6 +46,9 @@ const (
 	maxConsoleErrors      = 50
 	maxNetworkFailures    = 50
 	maxAPICalls           = 30
+	// maxProblemReportPatchBody (#1323) bounds serveProblemReportItem's PATCH
+	// body -- {"status": "..."} only, nowhere near this large in practice.
+	maxProblemReportPatchBody = 1 << 10 // 1KB
 )
 
 // redactPatterns matches key=value-shaped or JSON-field-shaped occurrences
@@ -296,7 +299,7 @@ func (s *store) serveProblemReportItem(w http.ResponseWriter, r *http.Request) {
 	var patch struct {
 		Status string `json:"status"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxProblemReportPatchBody)).Decode(&patch); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}

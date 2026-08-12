@@ -619,3 +619,60 @@ func TestMiddlewareRejectsAnonymousRequests(t *testing.T) {
 		}
 	})
 }
+
+// TestMiddlewareCacheControl (#1323): every authenticated response now
+// carries Cache-Control: private, no-store, set centrally in middleware()
+// itself rather than left to each handler to remember -- attacker/session
+// data scoped to one operator's own request must never be served from a
+// shared cache. /healthz and /static/ never reach the identity-resolved
+// branch (no per-operator data to scope), so they must be unaffected.
+func TestMiddlewareCacheControl(t *testing.T) {
+	const subject = "b65ab0dc-cc07-4b3d-9af0-b482dbb4b096"
+	store := &memorySessionStore{values: make(map[string][]byte)}
+	created := time.Now().UTC()
+	// now == created: zero elapsed time since LastValidated, so
+	// identityFromRequest() stays under the 30s re-check threshold and
+	// never needs a real introspection endpoint for this test.
+	auth := &oidcAuth{sessions: store, now: func() time.Time { return created }}
+	session := oidcSession{
+		Identity:    authenticatedIdentity{Subject: subject, Username: "analyst", Role: "user"},
+		TokenExpiry: created.Add(time.Hour), CreatedAt: created, LastValidated: created,
+	}
+	if err := auth.putJSON(context.Background(), "oidc:session:cache-control-test", session, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+	handler := auth.middleware(next)
+
+	t.Run("an authenticated request gets private, no-store", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodGet, "/alerts", nil)
+		request.AddCookie(&http.Cookie{Name: oidcSessionCookie, Value: "cache-control-test"})
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 (a valid session should reach the handler)", recorder.Code)
+		}
+		if got := recorder.Header().Get("Cache-Control"); got != "private, no-store" {
+			t.Fatalf("Cache-Control = %q, want %q", got, "private, no-store")
+		}
+	})
+
+	t.Run("/healthz gets no Cache-Control from the middleware", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if got := recorder.Header().Get("Cache-Control"); got != "" {
+			t.Fatalf("Cache-Control = %q, want unset -- /healthz never reaches the identity-resolved branch", got)
+		}
+	})
+
+	t.Run("static assets get no Cache-Control from the middleware", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodGet, "/static/site.webmanifest", nil)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if got := recorder.Header().Get("Cache-Control"); got != "" {
+			t.Fatalf("Cache-Control = %q, want unset -- static assets never reach the identity-resolved branch", got)
+		}
+	})
+}
