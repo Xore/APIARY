@@ -96,6 +96,11 @@
 <meta name="robots" content="noindex, nofollow">
 <title>{{brandText}} &mdash; Ghidra analysis</title>
 {{template "style" .}}
+{{/* #1288: prism.css is used by exactly this one page, same page-scoped-
+     asset convention xterm.css/echarts.min.js/cytoscape.min.js already
+     use on the pages that need them (see tty_replay.html's own comment
+     on this). */}}
+<link rel="stylesheet" href="{{asset "/static/prism.css"}}">
 </head>
 <body>
 <div class="app-shell">
@@ -236,11 +241,19 @@
 
         <div hidden data-hp-evidence-body="gh-imports"><h3>Imports</h3><pre class="code">{{range .Detail.Imports}}{{.}}
 {{end}}</pre></div>
-        <div hidden data-hp-evidence-body="gh-functions"><h3>Functions</h3><pre class="code">{{range .Detail.Functions}}{{.Address}}  {{.Name}}  {{.Signature}}
-{{if .Pseudocode}}{{.Pseudocode}}
-{{end}}{{if .Callers}}  callers: {{range .Callers}}{{.Name}}@{{.Addr}} {{end}}
+        {{/* #1288: pseudocode gets its own dedicated pre.language-c, separate
+             from this function's address/name/signature/callers/callees --
+             Prism only ever tokenizes real C-like code this way, never the
+             plain-text metadata lines that used to share one giant pre with
+             every function's pseudocode. The "language-c" class lives on
+             the pre itself (not a nested code element) because
+             hp-evidence.js's search filter rewrites a pre's textContent on
+             every keystroke, which would otherwise destroy a nested child
+             element; a class on the pre survives that untouched. */}}
+        <div hidden data-hp-evidence-body="gh-functions"><h3>Functions</h3>{{range .Detail.Functions}}<pre class="code">{{.Address}}  {{.Name}}  {{.Signature}}
+{{if .Callers}}  callers: {{range .Callers}}{{.Name}}@{{.Addr}} {{end}}
 {{end}}{{if .Callees}}  callees: {{range .Callees}}{{.Name}}@{{.Addr}} {{end}}
-{{end}}{{end}}</pre></div>
+{{end}}</pre>{{if .Pseudocode}}<pre class="code language-c">{{.Pseudocode}}</pre>{{end}}{{end}}</div>
         {{if .Detail.Types}}<div hidden data-hp-evidence-body="gh-types"><h3>Types</h3><pre class="code">{{range .Detail.Types}}{{.Name}}  [{{.Kind}}]  size={{.Size}}
 {{range .Fields}}    {{.Name}} : {{.Type}}  offset={{.Offset}} size={{.Size}}
 {{end}}{{if .BaseType}}    base: {{.BaseType}}
@@ -301,7 +314,8 @@
     <iframe class="pdf-viewer-frame" id="hp-gh-viewer-frame" title="Ghidra analysis report preview"></iframe>
   </section>
 </div>
-{{if .Detail}}<script defer src="{{asset "/static/hp-ghidra-report.js"}}"></script>{{end}}
+{{if .Detail}}<script defer src="{{asset "/static/prism.js"}}"></script>
+<script defer src="{{asset "/static/hp-ghidra-report.js"}}"></script>{{end}}
 </body>
 </html>
 {{end}}
