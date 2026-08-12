@@ -24,6 +24,16 @@
   let restoreFocus = null;
   const idleLabel = trigger.textContent;
 
+  // Tab-cycling/initial-focus/return-focus delegated to focus-trap (vendored,
+  // dashboard/static/vendor/focus-trap/); Escape stays hand-rolled below.
+  const trap = window.focusTrap.createFocusTrap(viewer, {
+    escapeDeactivates: false,
+    clickOutsideDeactivates: false,
+    initialFocus: () => closeButton,
+    fallbackFocus: () => closeButton,
+    setReturnFocus: () => (restoreFocus?.isConnected ? restoreFocus : false),
+  });
+
   const openViewer = report => {
     if (open) return;
     open = true;
@@ -35,12 +45,13 @@
     viewer.inert = false;
     viewer.setAttribute("aria-hidden", "false");
     viewer.classList.add("open");
-    closeButton.focus();
+    trap.activate();
   };
 
   const closeViewer = () => {
     if (!open) return;
     open = false;
+    trap.deactivate();
     viewer.classList.remove("open");
     viewer.setAttribute("aria-hidden", "true");
     viewer.inert = true;
@@ -48,8 +59,9 @@
     backdrop.setAttribute("aria-hidden", "true");
     backdrop.inert = true;
     frame.src = "about:blank";
-    if (restoreFocus?.isConnected) restoreFocus.focus();
-    restoreFocus = null;
+    // Not nulled here: focus-trap's deactivate() restores focus via a
+    // setTimeout(0), so setReturnFocus's closure must still see this value
+    // when that deferred callback runs. openViewer() overwrites it next time.
   };
 
   trigger.addEventListener("click", async () => {
@@ -86,21 +98,6 @@
       event.preventDefault();
       event.stopPropagation();
       closeViewer();
-      return;
-    }
-    if (event.key !== "Tab") return;
-    const controls = [...viewer.querySelectorAll(
-      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-    )].filter(el => !el.hidden && el.offsetParent !== null);
-    if (!controls.length) return;
-    const first = controls[0];
-    const last = controls[controls.length - 1];
-    if (event.shiftKey && (document.activeElement === first || !viewer.contains(document.activeElement))) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
     }
   });
 })();

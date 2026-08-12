@@ -16,9 +16,18 @@
   let initiatingControl = null;
   let running = false;
 
-  const focusable = () => Array.from(panel.querySelectorAll(
-    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-  )).filter((element) => !element.hidden);
+  // Tab-cycling/initial-focus/return-focus is delegated to focus-trap
+  // (vendored, dashboard/static/vendor/focus-trap/); Escape stays hand-rolled
+  // below since it has to coordinate with the settings modal's own
+  // document-level Escape listener via stopImmediatePropagation, which
+  // escapeDeactivates:false here defers to entirely.
+  const trap = window.focusTrap.createFocusTrap(panel, {
+    escapeDeactivates: false,
+    clickOutsideDeactivates: false,
+    initialFocus: () => confirmButton,
+    fallbackFocus: () => confirmButton,
+    setReturnFocus: () => (initiatingControl?.isConnected ? initiatingControl : false),
+  });
 
   function announce(message, failed = false) {
     if (!status) return;
@@ -31,13 +40,15 @@
   function close({ restoreFocus = true } = {}) {
     pendingAction = null;
     running = false;
+    trap.deactivate({ returnFocus: restoreFocus });
     backdrop.classList.remove("open");
     backdrop.setAttribute("aria-hidden", "true");
     backdrop.inert = true;
     confirmButton.disabled = false;
     confirmButton.textContent = "Confirm";
-    if (restoreFocus && initiatingControl?.isConnected) initiatingControl.focus();
-    initiatingControl = null;
+    // Not nulled here: focus-trap's deactivate() restores focus via a
+    // setTimeout(0), so setReturnFocus's closure must still see this value
+    // when that deferred callback runs. open() overwrites it next time.
   }
 
   function open(options) {
@@ -52,7 +63,7 @@
     backdrop.inert = false;
     backdrop.setAttribute("aria-hidden", "false");
     backdrop.classList.add("open");
-    confirmButton.focus();
+    trap.activate();
   }
 
   async function confirmOnce() {
@@ -96,19 +107,6 @@
     if (event.key === "Enter" && event.target !== cancelButton && !(event.target instanceof HTMLTextAreaElement)) {
       event.preventDefault();
       confirmOnce();
-      return;
-    }
-    if (event.key !== "Tab") return;
-    const controls = focusable();
-    if (!controls.length) return;
-    const first = controls[0];
-    const last = controls[controls.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
     }
   });
 

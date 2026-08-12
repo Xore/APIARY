@@ -37,9 +37,16 @@
   let restoreFocus = null;
   let isOpen = false;
 
-  const focusable = () => Array.from(modal.querySelectorAll(
-    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-  )).filter(element => !element.hidden && element.offsetParent !== null);
+  // Tab-cycling/initial-focus/return-focus delegated to focus-trap (vendored,
+  // dashboard/static/vendor/focus-trap/); Escape stays hand-rolled below since
+  // it has to yield to a destructive confirmation opened above this viewer,
+  // which escapeDeactivates:false here defers to entirely.
+  const trap = window.focusTrap.createFocusTrap(modal, {
+    escapeDeactivates: false,
+    clickOutsideDeactivates: false,
+    fallbackFocus: () => modal,
+    setReturnFocus: () => (restoreFocus?.isConnected ? restoreFocus : false),
+  });
 
   /* Filtering operates on whole lines of a <pre> and on table rows, which is
      what these blocks actually are. Anything else is left untouched. */
@@ -113,12 +120,14 @@
     modal.setAttribute("aria-hidden", "false");
     modal.classList.add("open");
     isOpen = true;
+    trap.activate();
     closeButton?.focus();
   }
 
   function close() {
     if (!isOpen) return;
     isOpen = false;
+    trap.deactivate();
     modal.classList.remove("open");
     modal.setAttribute("aria-hidden", "true");
     modal.inert = true;
@@ -126,8 +135,9 @@
     backdrop.setAttribute("aria-hidden", "true");
     backdrop.inert = true;
     body.replaceChildren();
-    if (restoreFocus?.isConnected) restoreFocus.focus();
-    restoreFocus = null;
+    // Not nulled here: focus-trap's deactivate() restores focus via a
+    // setTimeout(0), so setReturnFocus's closure must still see this value
+    // when that deferred callback runs. open() overwrites it next time.
   }
 
   document.addEventListener("click", event => {
@@ -148,19 +158,6 @@
       event.preventDefault();
       event.stopImmediatePropagation();
       close();
-      return;
-    }
-    if (event.key !== "Tab") return;
-    const controls = focusable();
-    if (!controls.length) return;
-    const first = controls[0];
-    const last = controls[controls.length - 1];
-    if (event.shiftKey && (document.activeElement === first || !modal.contains(document.activeElement))) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
     }
   });
 
