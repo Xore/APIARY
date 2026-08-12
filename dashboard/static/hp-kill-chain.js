@@ -15,7 +15,7 @@
 
   if (typeof echarts === "undefined") return;
 
-  const initFns = { sankey: initSankey, timeline: initTimeline, heatmap: initHeatmap, pie: initPie, line: initLine, bar: initBar };
+  const initFns = { sankey: initSankey, timeline: initTimeline, heatmap: initHeatmap, pie: initPie, line: initLine, bar: initBar, scatter: initScatter };
 
   // #1277: exposed as window.initHoneypotCharts (same convention hp-app.js's
   // own window.initHoneypotMaps already uses) so a page whose content gets
@@ -173,6 +173,34 @@
     const total = values.reduce((sum, v) => sum + v, 0);
     if (categories.length === 0) return "No data yet.";
     return `${categories.length} bucket${categories.length === 1 ? "" : "s"}, ${total} total.`;
+  }
+
+  // Generic multi-series time scatter chart -- same [{name, points:
+  // [{time, value}]}] shape initLine consumes (structurally a scatter
+  // series is identical to a line series, a named list of time+value
+  // points), just rendered as unconnected points instead of a line/area so
+  // several series plotted together show agreement/disagreement rather
+  // than obscuring each other under overlapping fills. First consumer:
+  // #1284's /api/ml-anomaly-scores (one series per ml-worker model, plus
+  // composite).
+  function initScatter(chart, data) {
+    data = data || [];
+    const totalPoints = data.reduce((sum, s) => sum + s.points.length, 0);
+    chart.setOption({
+      tooltip: { trigger: "item", formatter: p => `${p.seriesName}: ${p.value[1].toFixed(3)}` },
+      legend: { textStyle: { color: "var(--text-primary)" } },
+      grid: { left: "12%", right: "5%" },
+      xAxis: { type: "time" },
+      yAxis: { type: "value" },
+      series: data.map(s => ({
+        name: s.name,
+        type: "scatter",
+        symbolSize: 6,
+        data: s.points.map(p => [p.time, p.value]),
+      })),
+    });
+    if (totalPoints === 0) return "No anomalies scored yet.";
+    return `${data.length} series, ${totalPoints} points.`;
   }
 
   function initTimeline(chart, rows) {
