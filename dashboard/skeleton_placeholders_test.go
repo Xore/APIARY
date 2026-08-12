@@ -80,6 +80,15 @@ func TestListingPagesShowSkeletonPlaceholdersBeforeFirstRebuildInsteadOfEmptySta
 			readyData:     &ghidraPageData{Loading: false, Status: ghidraQueueStatus{Configured: true}},
 			realEmptyText: "No Ghidra analyses match this view.",
 		},
+		// sandboxresultspanel (#1156-follow-up) gates on Loading the same way
+		// githubanalysisresultspanel/ghidraresultspanel above do -- see
+		// sandbox.go's own refreshSandboxCacheAsync comment.
+		{
+			name:          "sandboxresultspanel",
+			emptyData:     &sandboxPageData{Loading: true},
+			readyData:     &sandboxPageData{Loading: false},
+			realEmptyText: "No completed sandbox exports match this view.",
+		},
 	}
 
 	for _, c := range cases {

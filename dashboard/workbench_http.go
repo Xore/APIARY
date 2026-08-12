@@ -186,7 +186,7 @@ func (s *store) serveWorkbenchResults(w http.ResponseWriter, r *http.Request, tm
 	q := r.URL.Query()
 	data := evidenceResultsPageData{Generated: time.Now()}
 	data.Workbench = s.workbenchResultsData(q.Get("q"), identity.Subject)
-	data.Sandbox, _ = sandboxData("", q.Get("sandbox_q"))
+	data.Sandbox, _ = s.sandboxData("", q.Get("sandbox_q"))
 	data.GitHub, _ = s.githubAnalysisData("", q.Get("github_q"))
 	data.Ghidra, _ = s.ghidraData("", q.Get("ghidra_q"))
 	renderPage(w, tmpl, "workbench-results", &data)

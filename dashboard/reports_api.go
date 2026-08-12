@@ -375,7 +375,7 @@ func (s *store) renderDefinitionPDFBytes(def reportDefinition) ([]byte, string, 
 	now := time.Now()
 	switch {
 	case template.Sandbox:
-		data, err := sandboxData(def.Scope.Job, "")
+		data, err := s.sandboxData(def.Scope.Job, "")
 		if err != nil || data.Detail == nil {
 			return nil, "", fmt.Errorf("%w: scope.job does not resolve to a completed sandbox result", errSettingsValidation)
 		}

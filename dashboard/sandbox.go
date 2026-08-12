@@ -265,6 +265,14 @@ type sandboxPageData struct {
 	// Analysis carries the ?analysis= marker set by the submit redirect so the
 	// detail page can confirm a queued re-analysis in place.
 	Analysis string
+	// Loading is true only while the listing cache (s.sandboxCache) has never
+	// been populated -- the same #1157 payloadsPage.Loading/#1156-follow-up
+	// githubAnalysisPageData.Loading/ghidraPageData.Loading convention,
+	// distinguishing "still warming up" from "genuinely no results yet" so
+	// the list branch can show a skeleton instead of misreporting an empty
+	// result. Always false on a detail-view render (Detail != nil), which
+	// never reads the cache.
+	Loading bool
 }
 
 func sandboxResultsDir() string { return getenv("SANDBOX_RESULTS_DIR", "/sandbox-results") }
@@ -312,6 +320,27 @@ func loadSandboxResultsES(es *esClient) ([]sandboxResult, bool) {
 	if err != nil {
 		return nil, false
 	}
+	return decodeSandboxRows(raws), true
+}
+
+// loadSandboxResultsESCapped is loadSandboxResultsES bounded to the newest
+// `limit` rows via searchNamespaceLimit's single bounded request, instead of
+// searchNamespace's whole-namespace pagination -- for
+// refreshSandboxCacheAsync, which only ever needs to fill a listing view's
+// own top-N (see that function's own comment, #1156-follow-up).
+func loadSandboxResultsESCapped(es *esClient, limit int) ([]sandboxResult, bool) {
+	raws, err := es.searchNamespaceLimit("sandbox-analysis-v1", "sandbox", limit)
+	if err != nil {
+		return nil, false
+	}
+	return decodeSandboxRows(raws), true
+}
+
+// decodeSandboxRows is the raw-hit-to-row conversion shared by
+// loadSandboxResultsES and loadSandboxResultsESCapped: validate the hash,
+// dedupe by job, and normalize -- identical regardless of which request
+// shape fetched the raw hits.
+func decodeSandboxRows(raws []json.RawMessage) []sandboxResult {
 	seen := map[string]bool{}
 	rows := make([]sandboxResult, 0, len(raws))
 	for _, raw := range raws {
@@ -324,7 +353,7 @@ func loadSandboxResultsES(es *esClient) ([]sandboxResult, bool) {
 		rows = append(rows, row)
 	}
 	sortSandboxResults(&rows)
-	return rows, true
+	return rows
 }
 
 // loadSandboxResultsByHash answers "every sandbox run for this hash" --
@@ -614,11 +643,51 @@ func loadGoldenImageStatus() *goldenImageStatus {
 	return &status
 }
 
-func sandboxData(job, query string) (sandboxPageData, error) {
+// sandboxListCap bounds refreshSandboxCacheAsync's own fetch to the newest N
+// rows -- matches sortSandboxResults' own pre-existing 250-row display
+// truncation (this page already discarded anything past row 250 after
+// fetching it; a listing has no use for anything past what it will ever
+// display). Mirrors githubAnalysisListCap/ghidraListCap's reasoning
+// (#1156-follow-up).
+const sandboxListCap = 250
+
+// sandboxCacheTTL mirrors githubAnalysisCacheTTL/ghidraCacheTTL's reasoning:
+// long enough that a burst of page loads shares one Elasticsearch round
+// trip, short enough that a freshly completed detonation shows up without a
+// meaningful wait.
+const sandboxCacheTTL = 2 * time.Minute
+
+func (s *store) sandboxData(job, query string) (sandboxPageData, error) {
 	data := sandboxPageData{
-		Generated: time.Now(), Rows: loadSandboxResults(), Status: loadSandboxStatus(),
+		Generated: time.Now(), Status: loadSandboxStatus(),
 		GoldenImage: loadGoldenImageStatus(), Query: strings.TrimSpace(query),
 		WindowsLiveSHA256: windowsSandboxLiveJob(), VNCViewerEnabled: getenv("SANDBOX_VNC_BRIDGE_WS", "") != "",
+	}
+	if job == "" {
+		// #1156-follow-up: this used to call loadSandboxResults() (a
+		// whole-namespace ES fetch, up to searchNamespaceMaxPages*
+		// searchNamespacePageSize documents, paginated) synchronously on
+		// every load of this listing, only to immediately discard
+		// everything past sortSandboxResults' own 250-row display cap.
+		// refreshSandboxCacheAsync keeps that off the request path entirely
+		// (#1157's payloadCache shape) and bounds the fetch itself to
+		// sandboxListCap, so the query stops after the rows the page will
+		// ever display instead of paginating the whole index first.
+		s.refreshSandboxCacheAsync()
+		s.sandboxMu.Lock()
+		data.Rows = append([]sandboxResult(nil), s.sandboxCache...)
+		data.Loading = s.sandboxCacheAt.IsZero() && s.sandboxRefreshing
+		s.sandboxMu.Unlock()
+	} else {
+		// Job-scoped detail lookup is unaffected by #1156-follow-up: unlike
+		// the sha256-keyed ghidra/github-analysis indices, sandbox results
+		// are keyed by job id, and there is no per-job ES lookup analogous
+		// to searchNamespaceByHash to scope this to (job is an opaque run
+		// id, not a hash). This keeps calling loadSandboxResults()'s
+		// whole-namespace scan-by-job exactly as before -- deliberately
+		// unchanged, since the operator-reported slow page this sweep
+		// targets is /payload-analysis/<hash>, not this one.
+		data.Rows = loadSandboxResults()
 	}
 	if data.Query != "" {
 		needle := strings.ToLower(data.Query)
@@ -642,6 +711,44 @@ func sandboxData(job, query string) (sandboxPageData, error) {
 		}
 	}
 	return data, errors.New("sandbox result not found")
+}
+
+// refreshSandboxCacheAsync keeps the listing view's own Elasticsearch round
+// trip off the HTTP request path, the same shape as
+// refreshGithubAnalysisCacheAsync/refreshGhidraCacheAsync (github_analysis.go/
+// ghidra.go, #1156-follow-up) -- see refreshGithubAnalysisCacheAsync's own
+// comment for the general reasoning. A no-op entirely when esResultsClient
+// isn't configured, mirroring loadSandboxResults' own gate, and a no-op
+// while a refresh is already running or the last successful one is still
+// within sandboxCacheTTL. Bounded to sandboxListCap via
+// loadSandboxResultsESCapped rather than the whole-namespace
+// loadSandboxResults() -- see that function's own comment.
+func (s *store) refreshSandboxCacheAsync() {
+	if esResultsClient == nil {
+		return
+	}
+	s.sandboxMu.Lock()
+	if s.sandboxRefreshing || (!s.sandboxCacheAt.IsZero() && time.Since(s.sandboxCacheAt) < sandboxCacheTTL) {
+		s.sandboxMu.Unlock()
+		return
+	}
+	s.sandboxRefreshing = true
+	s.sandboxMu.Unlock()
+	go func() {
+		fresh, ok := loadSandboxResultsESCapped(esResultsClient, sandboxListCap)
+		s.sandboxMu.Lock()
+		defer s.sandboxMu.Unlock()
+		s.sandboxRefreshing = false
+		if !ok {
+			// Elasticsearch unreachable this cycle -- keep serving whatever
+			// the last successful read produced (the same graceful-degrade-
+			// by-omission refreshPayloadCacheAsync's own ES-error path
+			// uses) rather than blanking an already-warm cache.
+			return
+		}
+		s.sandboxCache = fresh
+		s.sandboxCacheAt = time.Now()
+	}()
 }
 
 // attachSandboxDownloads exposes a download link only for an artifact that
@@ -675,7 +782,7 @@ func attachSandboxDownloads(result *sandboxResult) {
 	}
 }
 
-func serveSandboxAPI(w http.ResponseWriter, r *http.Request) {
+func (s *store) serveSandboxAPI(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/api/sandbox/status" {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(loadSandboxStatus())
@@ -685,7 +792,7 @@ func serveSandboxAPI(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/api/sandbox" {
 		job = strings.TrimPrefix(r.URL.Path, "/api/sandbox/")
 	}
-	data, err := sandboxData(job, r.URL.Query().Get("q"))
+	data, err := s.sandboxData(job, r.URL.Query().Get("q"))
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -698,7 +805,7 @@ func serveSandboxAPI(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(data.Rows)
 }
 
-func serveSandboxExport(w http.ResponseWriter, r *http.Request) {
+func (s *store) serveSandboxExport(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/export/sandbox/")
 	artifactKind := ""
 	job := strings.TrimSuffix(name, ".json")
@@ -712,7 +819,7 @@ func serveSandboxExport(w http.ResponseWriter, r *http.Request) {
 		job = strings.TrimSuffix(name, ".diagnostics.zip")
 		artifactKind = "diagnostics"
 	}
-	data, err := sandboxData(job, "")
+	data, err := s.sandboxData(job, "")
 	if err != nil || data.Detail == nil {
 		http.NotFound(w, r)
 		return

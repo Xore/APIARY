@@ -215,6 +215,15 @@ type store struct {
 	ghidraCache      []ghidraResult
 	ghidraCacheAt    time.Time
 	ghidraRefreshing bool
+	// sandboxMu/sandboxCache/sandboxCacheAt/sandboxRefreshing back
+	// refreshSandboxCacheAsync (sandbox.go, #1156-follow-up) -- same
+	// background-refreshed-cache shape as githubAnalysisMu/... and
+	// ghidraMu/... above, scoped to the sandbox listing view only. Job-scoped
+	// detail lookups (/sandbox/{job}) do not read this cache.
+	sandboxMu         sync.Mutex
+	sandboxCache      []sandboxResult
+	sandboxCacheAt    time.Time
+	sandboxRefreshing bool
 	dir               string
 	payloadDirs       []string // dionaea, cowrie and generated script artifact directories
 	scriptDir         string   // writable directory for safely retained inline scripts

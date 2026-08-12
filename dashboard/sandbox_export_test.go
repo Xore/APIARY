@@ -40,7 +40,7 @@ func TestSandboxPCAPExportRequiresAdminAndServesRegularCapture(t *testing.T) {
 	path := "/export/sandbox/" + job + ".host.pcap"
 
 	denied := httptest.NewRecorder()
-	serveSandboxExport(denied, httptest.NewRequest(http.MethodGet, path, nil))
+	(&store{}).serveSandboxExport(denied, httptest.NewRequest(http.MethodGet, path, nil))
 	if denied.Code != http.StatusForbidden {
 		t.Fatalf("unauthorized status = %d, want %d", denied.Code, http.StatusForbidden)
 	}
@@ -48,7 +48,7 @@ func TestSandboxPCAPExportRequiresAdminAndServesRegularCapture(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, path, nil)
 	addIdentityTestCookie(request)
 	allowed := httptest.NewRecorder()
-	serveSandboxExport(allowed, request)
+	(&store{}).serveSandboxExport(allowed, request)
 	if allowed.Code != http.StatusOK || allowed.Body.Len() != len(pcap) {
 		t.Fatalf("authorized response = status %d, bytes %d", allowed.Code, allowed.Body.Len())
 	}
@@ -79,7 +79,7 @@ func TestSandboxDiagnosticsExportRequiresAdmin(t *testing.T) {
 	path := "/export/sandbox/" + job + ".diagnostics.zip"
 
 	denied := httptest.NewRecorder()
-	serveSandboxExport(denied, httptest.NewRequest(http.MethodGet, path, nil))
+	(&store{}).serveSandboxExport(denied, httptest.NewRequest(http.MethodGet, path, nil))
 	if denied.Code != http.StatusForbidden {
 		t.Fatalf("unauthorized status = %d, want %d", denied.Code, http.StatusForbidden)
 	}
@@ -87,7 +87,7 @@ func TestSandboxDiagnosticsExportRequiresAdmin(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, path, nil)
 	addIdentityTestCookie(request)
 	allowed := httptest.NewRecorder()
-	serveSandboxExport(allowed, request)
+	(&store{}).serveSandboxExport(allowed, request)
 	if allowed.Code != http.StatusOK || allowed.Body.Len() != len(bundle) {
 		t.Fatalf("authorized response = status %d, bytes %d", allowed.Code, allowed.Body.Len())
 	}
@@ -131,7 +131,7 @@ func TestSandboxPDFExportRemoved(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/export/sandbox/"+job+".pdf", nil)
 	addIdentityTestCookie(request)
 	response := httptest.NewRecorder()
-	serveSandboxExport(response, request)
+	(&store{}).serveSandboxExport(response, request)
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("legacy sandbox PDF export status = %d, want %d", response.Code, http.StatusNotFound)
 	}

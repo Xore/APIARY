@@ -426,9 +426,9 @@ func main() {
 		}
 		s.es.deadLetters(w, r)
 	})
-	http.HandleFunc("/api/sandbox", serveSandboxAPI)
-	http.HandleFunc("/api/sandbox/", serveSandboxAPI)
-	http.HandleFunc("/export/sandbox/", serveSandboxExport)
+	http.HandleFunc("/api/sandbox", s.serveSandboxAPI)
+	http.HandleFunc("/api/sandbox/", s.serveSandboxAPI)
+	http.HandleFunc("/export/sandbox/", s.serveSandboxExport)
 	http.HandleFunc("/api/ghidra", s.serveGhidraAPI)
 	http.HandleFunc("/api/ghidra/", s.serveGhidraAPI)
 	http.HandleFunc("/export/ghidra/", serveGhidraExport)
@@ -788,7 +788,7 @@ func main() {
 			http.NotFound(w, r)
 			return
 		}
-		data, err := sandboxData(job, "")
+		data, err := s.sandboxData(job, "")
 		if err != nil {
 			http.NotFound(w, r)
 			return

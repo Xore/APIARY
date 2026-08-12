@@ -42,14 +42,128 @@ func TestSandboxResultsAreBoundedAndValidated(t *testing.T) {
 		rows[2].Job != "linux-test" || rows[2].Stdout != "<script>" {
 		t.Fatalf("unexpected sandbox rows: %#v", rows)
 	}
-	data, err := sandboxData("linux-test", "")
+	s := &store{}
+	data, err := s.sandboxData("linux-test", "")
 	if err != nil || data.Detail == nil {
 		t.Fatalf("detail lookup failed: %v", err)
 	}
-	filtered, err := sandboxData("", "does-not-match")
+	seedSandboxCache(s, rows...)
+	filtered, err := s.sandboxData("", "does-not-match")
 	if err != nil || len(filtered.Rows) != 0 {
 		t.Fatalf("sandbox search was not applied: %#v %v", filtered.Rows, err)
 	}
+}
+
+// seedSandboxCache primes s.sandboxCache directly, the same
+// seedGitHubAnalysisCache/seedGhidraCache convention
+// (github_analysis_test.go/ghidra_test.go) -- bypassing
+// refreshSandboxCacheAsync's own background goroutine so a listing-mode
+// s.sandboxData("", ...) call sees rows deterministically instead of racing
+// an in-process ES stub round trip.
+func seedSandboxCache(s *store, rows ...sandboxResult) {
+	s.sandboxCache = rows
+	s.sandboxCacheAt = time.Now()
+}
+
+// TestSandboxDataListLoadingBeforeFirstRefresh covers #1156-follow-up: a
+// request that reaches sandboxData's list branch before
+// refreshSandboxCacheAsync's first cycle ever completes must report
+// Loading=true with no rows, not an empty result --
+// ui/sandbox.html's sandboxresultspanel uses exactly this to choose a
+// skeleton over "No completed sandbox exports match this view."
+func TestSandboxDataListLoadingBeforeFirstRefresh(t *testing.T) {
+	s := &store{}
+	// Simulates the moment a request reaches sandboxData while
+	// refreshSandboxCacheAsync's background goroutine is still running its
+	// very first cycle -- set directly rather than racing the real
+	// (near-instant, in-process) ES stub round trip a live
+	// esResultsClientFor(t, ...) call would complete before this
+	// goroutine-free assertion could ever observe the in-flight state.
+	s.sandboxRefreshing = true
+
+	data, err := s.sandboxData("", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !data.Loading {
+		t.Fatal("Loading must be true while the cache has never been populated and a refresh is in flight")
+	}
+	if len(data.Rows) != 0 {
+		t.Fatalf("expected no rows before the first refresh completes, got %+v", data.Rows)
+	}
+}
+
+// TestSandboxDataListNeverMasksRealDataRegardlessOfLoading pairs with
+// skeleton_placeholders_test.go's own
+// TestListingPagesNeverMaskRealDataRegardlessOfReady -- a warm cache with
+// real rows must render them even if a background refresh happens to be in
+// flight (Loading only means "never populated", not "currently
+// refreshing").
+func TestSandboxDataListNeverMasksRealDataRegardlessOfLoading(t *testing.T) {
+	s := &store{}
+	seedSandboxCache(s, sandboxResult{Job: "linux-a", SHA256: strings.Repeat("a", 64)})
+	s.sandboxRefreshing = true
+
+	data, err := s.sandboxData("", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data.Rows) != 1 || data.Rows[0].Job != "linux-a" {
+		t.Fatalf("real cached data must render even mid-refresh: %+v", data.Rows)
+	}
+	if data.Loading {
+		t.Fatal("Loading must be false once the cache has been populated at least once, even mid-refresh")
+	}
+}
+
+// TestRefreshSandboxCacheAsyncBoundsAndCachesTheListing covers #1156-follow-up
+// end to end: refreshSandboxCacheAsync must populate s.sandboxCache from a
+// single bounded searchNamespaceLimit request (not searchNamespace's
+// whole-namespace pagination), and a second call within sandboxCacheTTL must
+// not repeat the round trip.
+func TestRefreshSandboxCacheAsyncBoundsAndCachesTheListing(t *testing.T) {
+	stub := esResultsStub(t, map[string][]map[string]any{
+		"sandbox-analysis-v1": {
+			{"sandbox": map[string]any{"version": 2, "job": "linux-a", "sha256": strings.Repeat("a", 64), "completed_at": "2026-01-01T00:00:00Z"}},
+		},
+	})
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		stub(w, r)
+	}))
+	defer srv.Close()
+	withESResultsClient(t, srv.URL)
+
+	s := &store{}
+	s.refreshSandboxCacheAsync()
+	waitForSandboxCache(t, s)
+	if len(s.sandboxCache) != 1 || s.sandboxCache[0].Job != "linux-a" {
+		t.Fatalf("refreshSandboxCacheAsync did not populate the cache: %#v", s.sandboxCache)
+	}
+	if requests != 1 {
+		t.Fatalf("expected a single bounded ES request, got %d", requests)
+	}
+
+	s.refreshSandboxCacheAsync()
+	if requests != 1 {
+		t.Fatalf("a refresh within sandboxCacheTTL must not repeat the ES round trip, got %d requests", requests)
+	}
+}
+
+func waitForSandboxCache(t *testing.T, s *store) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		s.sandboxMu.Lock()
+		done := !s.sandboxCacheAt.IsZero()
+		s.sandboxMu.Unlock()
+		if done {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("refreshSandboxCacheAsync did not populate the cache in time")
 }
 
 // #638/#764: attachSandboxDownloads/serveSandboxExport no longer read
@@ -121,7 +235,7 @@ func TestSandboxMergesBothBackends(t *testing.T) {
 	if len(rows) != 2 || rows[0].Job != "windows-b" || rows[1].Job != "linux-a" {
 		t.Fatalf("results did not merge in completion order: %#v", rows)
 	}
-	if _, err := sandboxData("windows-b", ""); err != nil {
+	if _, err := (&store{}).sandboxData("windows-b", ""); err != nil {
 		t.Fatalf("a Windows run is not reachable by job id: %v", err)
 	}
 
@@ -192,7 +306,7 @@ func TestSandboxExportsResolveAcrossBackends(t *testing.T) {
 	defer srv.Close()
 	withESResultsClient(t, srv.URL)
 
-	data, err := sandboxData("windows-c", "")
+	data, err := (&store{}).sandboxData("windows-c", "")
 	if err != nil || data.Detail == nil {
 		t.Fatalf("detail lookup failed: %v", err)
 	}
