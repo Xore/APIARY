@@ -233,6 +233,18 @@ func (a *oidcAuth) middleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// #1255: static assets (CSS/JS/images/site.webmanifest) carry no
+		// identity-bearing data, so there is no reason to gate them on
+		// session validity at all -- doing so used to mean a session that
+		// expired mid-page-view turned the browser's own background
+		// manifest fetch into a redirect toward Keycloak's authorization
+		// endpoint, which manifest-src/default-src then correctly blocked
+		// as a cross-origin CSP violation instead of anything the user
+		// could act on.
+		if strings.HasPrefix(r.URL.Path, "/static/") {
+			next.ServeHTTP(w, r)
+			return
+		}
 		identity, err := a.identityFromRequest(r)
 		if err == nil {
 			next.ServeHTTP(w, withIdentity(r, identity))
@@ -240,6 +252,19 @@ func (a *oidcAuth) middleware(next http.Handler) http.Handler {
 		}
 		if errors.Is(err, errIdentityUnavailable) {
 			http.Error(w, "identity service unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		// #1255: /api/* is exclusively fetched by page JS (fetch/XHR/
+		// EventSource), never a top-level browser navigation, so redirecting
+		// an unauthenticated call there toward Keycloak has the same
+		// problem as the /static/ case above -- the caller's fetch()
+		// follows the redirect and connect-src blocks the cross-origin
+		// target, surfacing as a bare "Failed to fetch" instead of a real
+		// response the frontend's existing 401/403 handling (several
+		// dashboard/static/*.js api() helpers already check response.status)
+		// can act on.
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			http.Error(w, "authentication required", http.StatusUnauthorized)
 			return
 		}
 		if r.Method == http.MethodGet || r.Method == http.MethodHead {
