@@ -181,5 +181,43 @@ result="$(simulate_flow "$tmp/netflow_neither_homenet.json")"
   fail "a flow with neither side in home_net was swapped when it shouldn't be (got: '$result')"
 pass "a flow with neither side in home_net falls back to positional (no false-positive swap)"
 
+simulate_hash() {
+  # simulate_hash <fixture-file> -> prints file.hash.sha256 (or empty)
+  curl -fsS -X POST "$es_url/_ingest/pipeline/geoip-honeypot/_simulate" \
+    -H 'Content-Type: application/json' \
+    --data-binary "@$1" |
+    python3 -c "
+import json, sys
+doc = json.load(sys.stdin)['docs'][0]['doc']['_source']
+print(doc.get('file', {}).get('hash', {}).get('sha256', ''))
+"
+}
+
+# #1240: cowrie.session.file_download's honeypot.shasum is a genuine
+# captured-payload hash and must still reach file.hash.sha256 -- confirms
+# the fix below doesn't regress the legitimate case.
+cat > "$tmp/file_download_shasum.json" <<'EOF'
+{"docs":[{"_source":{"honeypot":{"eventid":"cowrie.session.file_download","shasum":"deadbeefcafef00d0000000000000000000000000000000000000000000000","src_ip":"198.51.100.40"}}}]}
+EOF
+result="$(simulate_hash "$tmp/file_download_shasum.json")"
+[ "$result" = "deadbeefcafef00d0000000000000000000000000000000000000000000000" ] ||
+  fail "cowrie.session.file_download's shasum was not promoted to file.hash.sha256 (got: '$result')"
+pass "cowrie.session.file_download's shasum is promoted to file.hash.sha256"
+
+# #1240: cowrie.log.closed's honeypot.shasum is the TTY recording's own
+# filename-derived session ID, not a captured file's hash -- confirmed live
+# against real production data (51k+ documents carried a bogus
+# file.hash.sha256 from this event type alone, vs. 2.9k genuine
+# file_download hashes) that corrupted every payload-hash-keyed feature
+# reading it (attacker-identity entity panels, correlation, dedup) with
+# stale references that 404 when clicked.
+cat > "$tmp/log_closed_shasum.json" <<'EOF'
+{"docs":[{"_source":{"honeypot":{"eventid":"cowrie.log.closed","shasum":"1b160c2a72b76aa2b1e8cf1e2a2bca6dd2bd9d2de5df20f94577c138d6cc85b9","ttylog":"var/lib/cowrie/tty/1b160c2a72b76aa2b1e8cf1e2a2bca6dd2bd9d2de5df20f94577c138d6cc85b9","src_ip":"198.51.100.41"}}}]}
+EOF
+result="$(simulate_hash "$tmp/log_closed_shasum.json")"
+[ -z "$result" ] ||
+  fail "cowrie.log.closed's ttylog-derived shasum leaked into file.hash.sha256 (got: '$result', want empty)"
+pass "cowrie.log.closed's shasum is not mistaken for a real payload hash"
+
 echo
 echo "all geoip-honeypot pipeline tests passed"
