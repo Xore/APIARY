@@ -42,13 +42,15 @@ const analysisReadCap = 16 << 20
 const hashPathMissTTL = 5 * time.Minute
 
 type decodedArtifact struct {
-	Kind    string
-	Source  string
-	Preview string
+	Kind    string `json:"kind"`
+	Source  string `json:"source"`
+	Preview string `json:"preview"`
 }
 
 type ruleMatch struct {
-	Name, Severity, Description string
+	Name        string `json:"name"`
+	Severity    string `json:"severity"`
+	Description string `json:"description"`
 }
 
 type binaryAnalysis struct {
@@ -373,12 +375,125 @@ func (s *store) servePayloadAggregation(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(agg)
 }
 
+// payloadStaticAnalysisResult is analyzePayloadFast's output re-shaped for
+// JSON, minus the aggregation fields (SandboxRuns/GitHubAnalysis/Family/
+// FamilyLink/Correlation), which stay behind payloadAggregation's separate
+// endpoint. Field names are snake_case to match payloadAggregation's own
+// JSON shape and hp-payload-analysis.js's existing escapeHTML/render
+// convention. See servePayloadStaticAnalysis for why this exists as its
+// own endpoint rather than being folded into the aggregation one.
+type payloadStaticAnalysisResult struct {
+	Hash           string                `json:"hash"`
+	Size           string                `json:"size"`
+	MIME           string                `json:"mime"`
+	Magic          string                `json:"magic"`
+	Classification payloadClassification `json:"classification"`
+	MD5            string                `json:"md5"`
+	SHA1           string                `json:"sha1"`
+	SHA256         string                `json:"sha256"`
+	Entropy        string                `json:"entropy"`
+	EntropyValue   float64               `json:"entropy_value"`
+	PackedLikely   bool                  `json:"packed_likely"`
+	RiskScore      int                   `json:"risk_score"`
+	RiskLevel      string                `json:"risk_level"`
+	Truncated      bool                  `json:"truncated"`
+	Hexdump        string                `json:"hexdump"`
+	ASCII          []string              `json:"ascii"`
+	UTF16          []string              `json:"utf16"`
+	FormatInfo     []string              `json:"format_info"`
+	Decoded        []decodedArtifact     `json:"decoded"`
+	ScriptType     string                `json:"script_type"`
+	Indicators     []string              `json:"indicators"`
+	IOCs           []string              `json:"iocs"`
+	Rules          []ruleMatch           `json:"rules"`
+	YARAMatches    []string              `json:"yara_matches"`
+	YARAScanned    string                `json:"yara_scanned"`
+	YARAError      string                `json:"yara_error"`
+	VT             string                `json:"vt"`
+	OriginLabel    string                `json:"origin_label"`
+	OriginLink     string                `json:"origin_link"`
+}
+
+func newPayloadStaticAnalysisResult(a binaryAnalysis) payloadStaticAnalysisResult {
+	return payloadStaticAnalysisResult{
+		Hash: a.Hash, Size: a.Size, MIME: a.MIME, Magic: a.Magic, Classification: a.Classification,
+		MD5: a.MD5, SHA1: a.SHA1, SHA256: a.SHA256,
+		Entropy: a.Entropy, EntropyValue: a.EntropyValue, PackedLikely: a.PackedLikely,
+		RiskScore: a.RiskScore, RiskLevel: a.RiskLevel, Truncated: a.Truncated,
+		Hexdump: a.Hexdump, ASCII: a.ASCII, UTF16: a.UTF16, FormatInfo: a.FormatInfo, Decoded: a.Decoded,
+		ScriptType: a.ScriptType, Indicators: a.Indicators, IOCs: a.IOCs, Rules: a.Rules,
+		YARAMatches: a.YARAMatches, YARAScanned: a.YARAScanned, YARAError: a.YARAError,
+		VT: a.VT, OriginLabel: a.OriginLabel, OriginLink: a.OriginLink,
+	}
+}
+
+// servePayloadStaticAnalysis backs /api/payload-analysis/<hash>/static
+// (#1157, extending #1142's split one level further): a real captured
+// sample pulled from the live dionaea capture directory measured
+// analyzePayloadFast at 567ms of pure CPU/disk work for one 5.26MB PE32
+// DLL -- full-file MD5/SHA1/SHA256 hashing, entropy/hex-dump/string/IOC
+// extraction over an analysisReadCap-bounded prefix, and a YARA scan, with
+// no caching benefit at all on the first view of any given payload (the
+// common case; see staticAnalysisFor's own cacheable gate). #1142 already
+// split SandboxRuns/GitHubAnalysis/Correlation out of the synchronous
+// render on the theory that analyzePayloadFast itself stayed fast enough
+// to keep inline -- that assumption held for small scripts but not for
+// multi-megabyte binaries. /payload-analysis/<hash> now renders a shell
+// (payloadAnalysisShell) with none of this, and hp-payload-analysis.js
+// fetches this endpoint on page load to hydrate it in, the same pattern
+// already established for the aggregation endpoint below.
+func (s *store) servePayloadStaticAnalysis(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "GET required", http.StatusMethodNotAllowed)
+		return
+	}
+	rest := strings.TrimPrefix(r.URL.Path, "/api/payload-analysis/")
+	hash, action, ok := strings.Cut(rest, "/")
+	if !ok || action != "static" || !hashName.MatchString(hash) {
+		http.NotFound(w, r)
+		return
+	}
+	analysis, err := s.analyzePayloadFast(hash)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	json.NewEncoder(w).Encode(newPayloadStaticAnalysisResult(analysis))
+}
+
+// payloadAnalysisShell is #1157's fast half of the fast/slow split
+// analyzePayloadFast itself turned out to still need: everything
+// /payload-analysis/<hash> may still compute synchronously is resolving
+// and validating the hash from the URL (hashName plus payloadPath, which
+// only stats/walks directory entries, never reads or hashes file content).
+// Every field that requires reading the payload's own bytes -- hashes
+// beyond the URL-supplied name, MIME/magic, entropy, hex dump, strings,
+// IOCs, format info, decoded artifacts, YARA matches, risk score -- is left
+// zero-valued here and hydrated client-side via servePayloadStaticAnalysis
+// above, exactly the way payloadAggregation's fields already are.
+func (s *store) payloadAnalysisShell(name string) (binaryAnalysis, error) {
+	if len(s.payloadDirs) == 0 || !hashName.MatchString(name) {
+		return binaryAnalysis{}, errors.New("invalid or unavailable payload")
+	}
+	if _, err := s.payloadPath(name); err != nil {
+		return binaryAnalysis{}, err
+	}
+	return binaryAnalysis{Hash: name}, nil
+}
+
 // analyzePayloadFast is #1142's "fast half" of analyzePayload: identity,
 // static analysis, and YARA -- everything that is either a pure function
 // of the file's own bytes or a single fast, local, networkless scan.
-// Deliberately excludes payloadAggregation's fields (left zero-valued);
-// /payload-analysis/<hash> uses this alone for its initial render and
-// hydrates the rest in via payloadAggregationFor, called separately.
+// Deliberately excludes payloadAggregation's fields (left zero-valued).
+// No longer actually fast enough to call synchronously for every payload
+// (see servePayloadStaticAnalysis's own comment for the measurement) --
+// /payload-analysis/<hash> uses payloadAnalysisShell for its initial
+// render now, and calls this only from servePayloadStaticAnalysis, on the
+// client's follow-up request. analyzePayload (below) still calls this
+// synchronously for its own non-page callers.
 func (s *store) analyzePayloadFast(name string) (binaryAnalysis, error) {
 	if len(s.payloadDirs) == 0 || !hashName.MatchString(name) {
 		return binaryAnalysis{}, errors.New("invalid or unavailable payload")

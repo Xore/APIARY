@@ -805,19 +805,36 @@ func main() {
 	})
 	http.HandleFunc("/payload-analysis/", func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(r.URL.Path, "/payload-analysis/")
-		// #1142: analyzePayloadFast, not analyzePayload -- the page renders
-		// from single-file static/YARA work alone and hydrates SandboxRuns/
-		// GitHubAnalysis/Correlation in asynchronously via
-		// /api/payload-analysis/<hash>/aggregation instead of blocking on
-		// them here. See analyzePayloadFast's own comment.
-		analysis, err := s.analyzePayloadFast(name)
+		// #1157: payloadAnalysisShell, not analyzePayloadFast -- even
+		// analyzePayloadFast's "fast half" (#1142) turned out not to be fast
+		// enough for a multi-megabyte payload (567ms measured against a real
+		// 5.26MB capture, all of it before html/template writes a single
+		// byte, since Go's renderer buffers the whole document first). The
+		// shell resolves and validates the hash only; the Identity/Findings/
+		// Content tabs hydrate in via /api/payload-analysis/<hash>/static,
+		// the same pattern SandboxRuns/GitHubAnalysis/Correlation already
+		// use via /api/payload-analysis/<hash>/aggregation. See
+		// payloadAnalysisShell's own comment.
+		shell, err := s.payloadAnalysisShell(name)
 		if err != nil {
 			http.NotFound(w, r)
 			return
 		}
-		renderPage(w, tmpl, "payload-analysis", &analysis)
+		renderPage(w, tmpl, "payload-analysis", &shell)
 	})
-	http.HandleFunc("/api/payload-analysis/", s.servePayloadAggregation)
+	http.HandleFunc("/api/payload-analysis/", func(w http.ResponseWriter, r *http.Request) {
+		// #1157: one prefix, two hydration endpoints -- static (this
+		// route's addition) and aggregation (#1142, unchanged). Dispatched
+		// on the action segment of the path; servePayloadAggregation keeps
+		// owning its own "aggregation" validation/404, so the default case
+		// here just falls through to it unchanged.
+		rest := strings.TrimPrefix(r.URL.Path, "/api/payload-analysis/")
+		if _, action, ok := strings.Cut(rest, "/"); ok && action == "static" {
+			s.servePayloadStaticAnalysis(w, r)
+			return
+		}
+		s.servePayloadAggregation(w, r)
+	})
 	http.HandleFunc("/export/events.csv", s.exportEventsCSV)
 	http.HandleFunc("/export/commands.csv", s.exportCommandsCSV)
 	http.HandleFunc("/export/ips.csv", s.exportIPsCSV)
