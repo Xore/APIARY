@@ -608,6 +608,7 @@ func main() {
 	})
 	http.HandleFunc("/source-health", func(w http.ResponseWriter, r *http.Request) {
 		data := s.get()
+		data.Ready = s.ready.Load()
 		renderPage(w, tmpl, "source-health", &data)
 	})
 	http.HandleFunc("/alerts", func(w http.ResponseWriter, r *http.Request) {

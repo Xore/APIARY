@@ -57,6 +57,18 @@ func TestListingPagesShowSkeletonPlaceholdersBeforeFirstRebuildInsteadOfEmptySta
 			readyData:     &clustersPage{Ready: true},
 			realEmptyText: "No multi-source pivots are present",
 		},
+		// source-health (this sweep): /source-health reads the same
+		// rebuild()-populated s.get() snapshot as overview/ips/events, so it
+		// shares the identical cold-start gap -- the "Dashboard parser feeds"
+		// table had no Ready/empty guard at all before this change, silently
+		// rendering a header-only table indistinguishable from "this honeypot
+		// really has no sensors."
+		{
+			name:          "source-health",
+			emptyData:     &snapshot{Ready: false},
+			readyData:     &snapshot{Ready: true},
+			realEmptyText: "no configured parser feeds",
+		},
 		// githubanalysisresultspanel (#1156-follow-up) gates on Loading, not
 		// Ready -- it reads from its own background-refreshed cache
 		// (s.githubAnalysisCache), not rebuild()'s s.getEvents(), so its
