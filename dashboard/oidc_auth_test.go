@@ -592,4 +592,30 @@ func TestMiddlewareRejectsAnonymousRequests(t *testing.T) {
 			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
 		}
 	})
+
+	// #1237: an <iframe> (ghidra.html's "view report" viewer, any similar
+	// inline proxy) loading a page whose session just expired must also get
+	// a real 401, not a redirect toward Keycloak that frame-src then blocks.
+	t.Run("anonymous iframe GET is denied outright, not redirected", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodGet, "/export/ghidra/deadbeef", nil)
+		request.Header.Set("Sec-Fetch-Dest", "iframe")
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+		}
+	})
+
+	// A real top-level navigation to the same kind of path (no Sec-Fetch-Dest,
+	// or "document") must keep redirecting to login -- e.g. clicking a
+	// download link while logged out should still land the user at sign-in
+	// and back, not a bare 401 with no path forward.
+	t.Run("anonymous top-level GET to a non-API path still redirects", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodGet, "/export/ghidra/deadbeef", nil)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusSeeOther {
+			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusSeeOther)
+		}
+	})
 }

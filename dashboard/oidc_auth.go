@@ -263,7 +263,19 @@ func (a *oidcAuth) middleware(next http.Handler) http.Handler {
 		// response the frontend's existing 401/403 handling (several
 		// dashboard/static/*.js api() helpers already check response.status)
 		// can act on.
-		if strings.HasPrefix(r.URL.Path, "/api/") {
+		// #1237: same problem again, this time for the "view report"-style
+		// iframes (ghidra.html's report viewer, and every other inline PDF/
+		// report proxy that follows the same pattern) rather than an /api/
+		// fetch() call -- a session that expired mid-view turns the
+		// iframe's GET into a redirect toward Keycloak, and frame-src
+		// 'self' then blocks that cross-origin target, surfacing as a
+		// browser-level "refused to connect" inside the frame instead of
+		// anything the page can react to. Sec-Fetch-Dest (Fetch Metadata,
+		// broadly supported) reliably distinguishes an iframe/nested-frame
+		// load from a real top-level navigation regardless of path, unlike
+		// the /api/ and /static/ checks above which only cover specific
+		// prefixes.
+		if strings.HasPrefix(r.URL.Path, "/api/") || isFrameFetch(r) {
 			http.Error(w, "authentication required", http.StatusUnauthorized)
 			return
 		}
@@ -274,6 +286,21 @@ func (a *oidcAuth) middleware(next http.Handler) http.Handler {
 		}
 		http.Error(w, "authentication required", http.StatusUnauthorized)
 	})
+}
+
+// isFrameFetch reports whether r is the browser loading this response into
+// an <iframe>/nested browsing context, per the Sec-Fetch-Dest Fetch
+// Metadata header -- "iframe" for a same-origin frame, "frame" for the
+// (unused here) cross-origin case, "document" for a real top-level
+// navigation. Missing entirely on older browsers without Fetch Metadata
+// support; those fall through to the normal redirect-to-login path exactly
+// as before this existed.
+func isFrameFetch(r *http.Request) bool {
+	switch r.Header.Get("Sec-Fetch-Dest") {
+	case "iframe", "frame":
+		return true
+	}
+	return false
 }
 
 func (a *oidcAuth) serveLogin(w http.ResponseWriter, r *http.Request) {
