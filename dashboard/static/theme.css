@@ -1964,9 +1964,19 @@ body [hidden] { display: none !important; }
 .theme-art--light { display: none; }
 [data-theme="light"] .theme-art--dark { display: none; }
 [data-theme="light"] .theme-art--light { display: block; }
+/* .theme-art--light's own base-hide rule above (specificity 0,1,0) loses to
+   any container that also styles its own <img>/<picture> children directly
+   (e.g. .hp-brand-mark img, specificity 0,1,1) -- .theme-art--dark's
+   equivalent case is covered by the [data-theme="light"] override two
+   lines up (specificity 0,2,1, high enough to win), but nothing
+   symmetric existed for dark mode, so both images stayed visible there. */
+[data-theme="dark"] .theme-art--light { display: none; }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme]) .theme-art--dark { display: none; }
   :root:not([data-theme]) .theme-art--light { display: block; }
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .theme-art--light { display: none; }
 }
 .hp-brand-text { line-height: 1.25; }
 .hp-brand-text strong { display: block; font-size: 13px; font-weight: 700; letter-spacing: 0.04em; }
