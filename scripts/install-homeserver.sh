@@ -809,17 +809,45 @@ step_start_elasticsearch_first() {
 }
 
 step_start_init() {
-  if ! (cd /var/dockge/stacks/honeypot-init && with_retry 3 15 docker compose -f compose.yml up -d); then
+  # #1255's investigation: honeypot-init.env.example already carries
+  # MAXMIND_ACCOUNT_ID/MAXMIND_LICENSE_KEY placeholders (optional, empty by
+  # default), but nothing ever actually enabled the geoip-update Compose
+  # profile those gate -- a fresh install with real credentials filled in
+  # would still silently end up with no GeoIP databases, no attack-origin
+  # map markers, and every ingested document tagged
+  # _geoip_database_unavailable_GeoLite2-*. Enable the profile automatically
+  # whenever both values are actually filled in; leave it off (with a clear
+  # message, not a silent gap) otherwise.
+  local init_env="/var/dockge/stacks/honeypot-init/.env"
+  local -a compose_profile_args=()
+  if [[ -f "$init_env" ]] \
+    && grep -qE '^MAXMIND_ACCOUNT_ID=.+' "$init_env" \
+    && grep -qE '^MAXMIND_LICENSE_KEY=.+' "$init_env"; then
+    compose_profile_args=(--profile geoip-update)
+    echo "honeypot-init: MAXMIND_ACCOUNT_ID/LICENSE_KEY are set — enabling the geoip-update profile."
+  else
+    echo "honeypot-init: MAXMIND_ACCOUNT_ID/MAXMIND_LICENSE_KEY not set in $init_env —"
+    echo "  skipping GeoIP database provisioning. The attack-origin map and every"
+    echo "  GeoIP-derived field will stay empty until you fill those in (a free"
+    echo "  MaxMind account + license key, see docs/dashboard/geoip/README.md)"
+    echo "  and re-run: cd /var/dockge/stacks/honeypot-init && docker compose -f compose.yml --profile geoip-update up -d geoipupdate"
+  fi
+  if ! (cd /var/dockge/stacks/honeypot-init && with_retry 3 15 docker compose -f compose.yml "${compose_profile_args[@]}" up -d); then
     echo "honeypot-init: docker compose up -d failed" >&2
     return 1
   fi
   # honeypot-init's jobs are one-shots; give them a bounded window to exit 0
   # rather than racing straight into the sensor stacks that assume its log
-  # paths/ES templates/persona state already exist.
+  # paths/ES templates/persona state already exist. geoipupdate (and
+  # threat-cidrs-refresh, same shape) are deliberately long-running
+  # (restart: unless-stopped) and excluded from this check -- them still
+  # running is the success case, not something to wait out.
   local waited=0
   while (( waited < 120 )); do
     local running
-    running=$(docker compose -f /var/dockge/stacks/honeypot-init/compose.yml ps --status running -q 2>/dev/null | wc -l)
+    running=$(docker compose -f /var/dockge/stacks/honeypot-init/compose.yml ps --status running -q 2>/dev/null \
+      | xargs -r docker inspect --format '{{.Name}}' 2>/dev/null \
+      | grep -vE '/hp-(geoipupdate|threat-cidrs-refresh)$' | wc -l)
     (( running == 0 )) && return 0
     sleep 5
     waited=$(( waited + 5 ))
