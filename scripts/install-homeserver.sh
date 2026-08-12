@@ -819,11 +819,19 @@ step_start_init() {
   # whenever both values are actually filled in; leave it off (with a clear
   # message, not a silent gap) otherwise.
   local init_env="/var/dockge/stacks/honeypot-init/.env"
-  local -a compose_profile_args=()
+  # #1226: threat-cidrs-refresh (Spamhaus/Tor/AWS/GCP -- all free, zero-auth
+  # sources per refresh-threat-cidrs.sh's own header) has no credential to
+  # gate on the way geoip-update below does, so unlike that one it belongs
+  # on unconditionally rather than behind an env-driven check. Nothing
+  # enabled it before this: a fresh install left threat-cidrs.csv never
+  # created at all, so campaigns.go's Provider/Intel classification (and
+  # #1218's correlator-worker Providers grouping) silently had no CIDR data
+  # to classify against.
+  local -a compose_profile_args=(--profile threat-intel)
   if [[ -f "$init_env" ]] \
     && grep -qE '^MAXMIND_ACCOUNT_ID=.+' "$init_env" \
     && grep -qE '^MAXMIND_LICENSE_KEY=.+' "$init_env"; then
-    compose_profile_args=(--profile geoip-update)
+    compose_profile_args+=(--profile geoip-update)
     echo "honeypot-init: MAXMIND_ACCOUNT_ID/LICENSE_KEY are set — enabling the geoip-update profile."
   else
     echo "honeypot-init: MAXMIND_ACCOUNT_ID/MAXMIND_LICENSE_KEY not set in $init_env —"
