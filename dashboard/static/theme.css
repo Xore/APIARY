@@ -2478,13 +2478,12 @@ pre.code {
 .diff-line--add { background: var(--success-soft); color: var(--success); }
 .diff-line--del { background: var(--danger-soft); color: var(--danger); }
 
-/* ── AI-generated report body + citations panel (#1285) ──────────────────
-   The orange "AI-generated assessment" banner above these (ghidra.html's
-   existing markup, unchanged) already carries the "don't trust this as
-   fact" framing; this is the typographic layer underneath it, for the
-   markdown hp-ghidra-markdown.js renders into any [data-markdown] node.
-   A left accent rule + tinted surface reads as "generated report", not
-   plain page copy, without repeating the same big warning box twice. */
+/* ── AI-generated report body + citations panel ───────────────────────────
+   The typographic layer for a markdown-parsed AI report: a left accent
+   rule + tinted surface reads as "generated report", not plain page copy,
+   without needing a second, separate warning-box treatment. Consuming
+   apps pair this with their own "AI-generated, unverified" banner above
+   it; this only styles the body markdown itself renders. */
 .hp-ai-report {
   margin: 8px 0; padding: 14px 16px;
   border-left: 3px solid var(--accent);
@@ -2506,8 +2505,7 @@ pre.code {
 
 /* Valid vs. invalid citations get distinct pill colors (success vs.
    warning), reusing the same state-color tokens .badge--success/--warning
-   already establish, so the distinction reads the same way it does
-   everywhere else on this dashboard. */
+   already establish. */
 .hp-ai-citations { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
 .hp-ai-citations__label { font: 11px var(--hp-mono); text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 4px; }
 .hp-ai-citations__label--valid { color: var(--success-text-on-soft); }
@@ -2517,11 +2515,10 @@ pre.code {
 .hp-ai-citations__item--valid code { background: var(--success-soft); color: var(--success-text-on-soft); border-color: transparent; }
 .hp-ai-citations__item--invalid code { background: var(--warning-soft); color: var(--warning-text-on-soft); border-color: transparent; opacity: 0.85; }
 
-/* ── Rev·Deck chat transcript (#1286) ──────────────────────────────────
-   Bubbles by role instead of the flat [role] text dump this replaces --
-   user right-aligned/accent-tinted, assistant left-aligned/neutral, tool
-   left-aligned/info-tinted and a step smaller (it's machine output, not
-   conversation). */
+/* ── Chat transcript bubbles ────────────────────────────────────────────
+   Bubbles by role: user right-aligned/accent-tinted, assistant left-
+   aligned/neutral, tool left-aligned/info-tinted and a step smaller
+   (it's machine output, not conversation). */
 .hp-chat { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 .hp-chat-msg { max-width: 88%; padding: 10px 14px; border-radius: var(--radius-control); }
 .hp-chat-msg--user { align-self: flex-end; background: var(--accent-soft); }
