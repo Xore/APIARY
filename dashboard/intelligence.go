@@ -118,7 +118,10 @@ type sessionPage struct {
 	Total                                    int
 	Sensors, Commands, Credentials, Payloads []kv
 	Techniques                               []attackTechnique
-	Events                                   []storedEvent
+	// Sequences (#1291): known multi-step attack patterns recognized
+	// across this session's commands -- see attack_sequences.go.
+	Sequences []attackSequence
+	Events    []storedEvent
 }
 
 func (s *store) sessionData(id string) (sessionPage, bool) {
@@ -157,6 +160,7 @@ func (s *store) sessionData(id string) (sessionPage, bool) {
 	}
 	p.Sensors, p.Commands, p.Credentials, p.Payloads = topN(sensors, 20), topN(commands, 30), topN(creds, 20), topN(payloads, 20)
 	p.Techniques = aggregateTechniques(p.Events)
+	p.Sequences = detectAttackSequences(p.Events)
 	return p, true
 }
 
