@@ -155,45 +155,47 @@ type storedEvent struct {
 	// client-side timezone conversion (#282) -- Time itself stays a fixed
 	// UTC display string since it's computed once in rebuild()'s shared,
 	// cross-viewer cache, long before any per-viewer preference is known.
-	UTC           string
-	Sensor        string
-	Persona       string `json:",omitempty"`
-	Site          string `json:",omitempty"`
-	Asset         string `json:",omitempty"`
-	PersonaOrg    string `json:",omitempty"`
-	SrcIP         string
-	Country       string  `json:",omitempty"`
-	City          string  `json:",omitempty"`
-	Lat           float64 `json:",omitempty"`
-	Lon           float64 `json:",omitempty"`
-	ASN           uint    `json:",omitempty"`
-	Org           string  `json:",omitempty"`
-	Provider      string  `json:",omitempty"`
-	Intel         string  `json:",omitempty"`
-	Proto         string  `json:",omitempty"`
-	Port          string  `json:",omitempty"`
-	User          string  `json:",omitempty"`
-	Pass          string  `json:",omitempty"`
-	Command       string  `json:",omitempty"`
-	Path          string  `json:",omitempty"`
-	Alert         string  `json:",omitempty"`
-	Session       string  `json:",omitempty"`
-	Shasum        string  `json:",omitempty"`
-	Download      string  `json:",omitempty"`
-	TTYReplay     string  `json:",omitempty"`
-	ClientVer     string  `json:",omitempty"`
-	Fingerprint   string  `json:",omitempty"`
-	FingerKind    string  `json:",omitempty"`
-	Category      string  `json:",omitempty"`
-	Severity      int     `json:",omitempty"`
-	HeldMs        int     `json:",omitempty"` // endlessh (#1294): tarpit hold duration, disconnect events only
-	ICSSeverity   string  `json:",omitempty"` // dnp3 (#1290): "critical"/"high" for control-function app_function codes
-	Detail        string
-	IsLogin       bool   `json:",omitempty"`
-	HasCredential bool   `json:",omitempty"`
-	Kibana        string `json:",omitempty"`
-	EveBox        string `json:",omitempty"`
-	Arkime        string `json:",omitempty"`
+	UTC             string
+	Sensor          string
+	Persona         string `json:",omitempty"`
+	Site            string `json:",omitempty"`
+	Asset           string `json:",omitempty"`
+	PersonaOrg      string `json:",omitempty"`
+	SrcIP           string
+	Country         string  `json:",omitempty"`
+	City            string  `json:",omitempty"`
+	Lat             float64 `json:",omitempty"`
+	Lon             float64 `json:",omitempty"`
+	ASN             uint    `json:",omitempty"`
+	Org             string  `json:",omitempty"`
+	Provider        string  `json:",omitempty"`
+	Intel           string  `json:",omitempty"`
+	Proto           string  `json:",omitempty"`
+	Port            string  `json:",omitempty"`
+	User            string  `json:",omitempty"`
+	Pass            string  `json:",omitempty"`
+	Command         string  `json:",omitempty"`
+	Path            string  `json:",omitempty"`
+	Alert           string  `json:",omitempty"`
+	Session         string  `json:",omitempty"`
+	Shasum          string  `json:",omitempty"`
+	Download        string  `json:",omitempty"`
+	TTYReplay       string  `json:",omitempty"`
+	ClientVer       string  `json:",omitempty"`
+	Fingerprint     string  `json:",omitempty"`
+	FingerKind      string  `json:",omitempty"`
+	Category        string  `json:",omitempty"`
+	Severity        int     `json:",omitempty"`
+	HeldMs          int     `json:",omitempty"` // endlessh (#1294): tarpit hold duration, disconnect events only
+	ICSSeverity     string  `json:",omitempty"` // dnp3 (#1290): "critical"/"high" for control-function app_function codes
+	AnomalyEvent    string  `json:",omitempty"` // suricata (#1279): protocol-conformance violation identity, Category=="anomaly" only
+	AnomalyAppProto string  `json:",omitempty"`
+	Detail          string
+	IsLogin         bool   `json:",omitempty"`
+	HasCredential   bool   `json:",omitempty"`
+	Kibana          string `json:",omitempty"`
+	EveBox          string `json:",omitempty"`
+	Arkime          string `json:",omitempty"`
 }
 
 type store struct {
