@@ -20,9 +20,9 @@ import (
 // produced an alert.
 //
 // suricata-v2-tls-* mixes genuine attacker connections with this
-// deployment's OWN legitimate HTTPS traffic (Traefik-fronted
-// auth./honeypot./kibana./arcane.-style *.xore.rocks hosts, confirmed live
-// -- one sample was a Cloudflare-range IP hitting the dashboard's own
+// deployment's OWN legitimate HTTPS traffic (Traefik-fronted operator
+// subdomains -- auth., dashboard, monitoring, admin tooling -- confirmed
+// live: one sample was a Cloudflare-range IP hitting the dashboard's own
 // SNI). Confirmed live that dest_port 443 alone accounts for ~10,800 of
 // ~11,900 sampled TLS docs and is dominated by exactly those operator
 // hostnames, while the honeypot's own decoy TLS-adjacent ports (8443,
