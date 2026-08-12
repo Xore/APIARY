@@ -370,6 +370,7 @@ func main() {
 	http.HandleFunc("/api/ml-anomaly-scores", s.serveMLAnomalyScores)
 	http.HandleFunc("/api/anomaly-trend", s.serveAnomalyTrend)
 	http.HandleFunc("/api/attacker-graph", s.serveAttackerGraph)
+	http.HandleFunc("/api/attacker-fusion", s.serveAttackerFingerprintFusion)
 	http.HandleFunc("/api/attck-coverage", s.serveAttckCoverage)
 	http.HandleFunc("/api/campaign-timeline", s.serveCampaignTimeline)
 	http.HandleFunc("/api/kill-chain-sankey", s.serveKillChainSankey)
