@@ -9,20 +9,29 @@
    Mirrors hp-reports.js's openViewer/closeViewer shape, not its code --
    that file's version is wired to a list of many generated reports this
    page has no equivalent of (same reasoning hp-github-analysis.js's own
-   header comment already gives). */
+   header comment already gives).
+
+   The modal itself (backdrop/viewer/frame/closeButton) lives outside
+   [data-hp-page-content] (a .app-shell sibling, per hp-dynamic-nav.js's
+   own mergeExtraContent comment) so it persists unchanged across SPA
+   navigations within /payloads and /payload-analysis/{hash}'s
+   DYNAMIC_ROUTES family -- set up once, below. The trigger chip, though,
+   is INSIDE [data-hp-page-content] and gets swapped for a fresh,
+   listener-less element on every such navigation -- wireTrigger()
+   re-queries it and reattaches on both initial load and every
+   "hp-dynamic-nav" event, or navigating from one hash's page to another's
+   would leave "Generate PDF report" a dead click on the second one. */
 (() => {
   "use strict";
 
-  const trigger = document.querySelector("[data-hp-pl-generate-report]");
   const backdrop = document.getElementById("hp-pl-viewer-backdrop");
   const viewer = document.getElementById("hp-pl-viewer");
   const frame = document.getElementById("hp-pl-viewer-frame");
   const closeButton = document.getElementById("hp-pl-viewer-close");
-  if (!trigger || !backdrop || !viewer || !frame || !closeButton) return;
+  if (!backdrop || !viewer || !frame || !closeButton) return;
 
   let open = false;
   let restoreFocus = null;
-  const idleLabel = trigger.textContent;
 
   // Tab-cycling/initial-focus/return-focus delegated to focus-trap (vendored,
   // dashboard/static/vendor/focus-trap/); Escape stays hand-rolled below.
@@ -64,28 +73,6 @@
     // when that deferred callback runs. openViewer() overwrites it next time.
   };
 
-  trigger.addEventListener("click", async () => {
-    if (trigger.disabled) return;
-    trigger.disabled = true;
-    trigger.textContent = "Generating…";
-    try {
-      const response = await fetch(`/api/reports/payloads/${encodeURIComponent(trigger.dataset.hpPlHash)}/generate`, { method: "POST" });
-      if (!response.ok) {
-        const text = (await response.text()).trim();
-        throw new Error(text || `request failed (${response.status})`);
-      }
-      const payload = await response.json();
-      openViewer(payload.generated);
-    } catch (error) {
-      trigger.textContent = "Generate failed — retry";
-      trigger.title = error.message;
-      trigger.disabled = false;
-      return;
-    }
-    trigger.textContent = idleLabel;
-    trigger.disabled = false;
-  });
-
   closeButton.addEventListener("click", closeViewer);
   backdrop.addEventListener("click", closeViewer);
 
@@ -100,4 +87,34 @@
       closeViewer();
     }
   });
+
+  function wireTrigger() {
+    const trigger = document.querySelector("[data-hp-pl-generate-report]");
+    if (!trigger) return;
+    const idleLabel = trigger.textContent;
+    trigger.addEventListener("click", async () => {
+      if (trigger.disabled) return;
+      trigger.disabled = true;
+      trigger.textContent = "Generating…";
+      try {
+        const response = await fetch(`/api/reports/payloads/${encodeURIComponent(trigger.dataset.hpPlHash)}/generate`, { method: "POST" });
+        if (!response.ok) {
+          const text = (await response.text()).trim();
+          throw new Error(text || `request failed (${response.status})`);
+        }
+        const payload = await response.json();
+        openViewer(payload.generated);
+      } catch (error) {
+        trigger.textContent = "Generate failed — retry";
+        trigger.title = error.message;
+        trigger.disabled = false;
+        return;
+      }
+      trigger.textContent = idleLabel;
+      trigger.disabled = false;
+    });
+  }
+
+  wireTrigger();
+  document.addEventListener("hp-dynamic-nav", wireTrigger);
 })();

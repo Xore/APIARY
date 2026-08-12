@@ -7,7 +7,18 @@
    handling below (a native <button> gets that for free; a plain
    role="button" element does not). Mirrors hp-reports.js's openViewer/
    closeViewer shape, not its code -- that file's version is wired to a
-   list of many generated reports this page has no equivalent of. */
+   list of many generated reports this page has no equivalent of.
+
+   The modal itself (backdrop/viewer/frame/closeButton) lives outside
+   [data-hp-page-content] (a .app-shell sibling, per hp-dynamic-nav.js's
+   own mergeExtraContent comment) so it persists unchanged across SPA
+   navigations within /github-analysis/{hash}'s DYNAMIC_ROUTES family --
+   set up once, below. The trigger card, though, is INSIDE
+   [data-hp-page-content] and gets swapped for a fresh, listener-less
+   element on every such navigation -- wireTrigger() re-queries it and
+   reattaches on both initial load and every "hp-dynamic-nav" event, or
+   navigating from one hash's page to another's would leave "View PDF
+   report" a dead click on the second one. */
 (() => {
   "use strict";
 
@@ -15,11 +26,11 @@
   const viewer = document.getElementById("hp-ga-viewer");
   const frame = document.getElementById("hp-ga-viewer-frame");
   const closeButton = document.getElementById("hp-ga-viewer-close");
-  const trigger = document.querySelector("[data-hp-ga-view-report]");
-  if (!backdrop || !viewer || !frame || !closeButton || !trigger) return;
+  if (!backdrop || !viewer || !frame || !closeButton) return;
 
   let open = false;
   let restoreFocus = null;
+  let trigger = null;
 
   // Tab-cycling/initial-focus/return-focus delegated to focus-trap (vendored,
   // dashboard/static/vendor/focus-trap/); Escape stays hand-rolled below.
@@ -32,7 +43,7 @@
   });
 
   const openViewer = () => {
-    if (open) return;
+    if (open || !trigger) return;
     open = true;
     restoreFocus = document.activeElement;
     frame.src = trigger.dataset.hpGaViewReport;
@@ -61,12 +72,6 @@
     // when that deferred callback runs. openViewer() overwrites it next time.
   };
 
-  trigger.addEventListener("click", openViewer);
-  trigger.addEventListener("keydown", event => {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    openViewer();
-  });
   closeButton.addEventListener("click", closeViewer);
   backdrop.addEventListener("click", closeViewer);
 
@@ -82,4 +87,18 @@
       closeViewer();
     }
   });
+
+  function wireTrigger() {
+    trigger = document.querySelector("[data-hp-ga-view-report]");
+    if (!trigger) return;
+    trigger.addEventListener("click", openViewer);
+    trigger.addEventListener("keydown", event => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      openViewer();
+    });
+  }
+
+  wireTrigger();
+  document.addEventListener("hp-dynamic-nav", wireTrigger);
 })();

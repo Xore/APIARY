@@ -106,6 +106,19 @@
       window.honeypotDashboardTab = undefined;
       window.initDashboardTabs?.();
       window.scrollTo(0, 0);
+      // Per-page hydration scripts (hp-payload-analysis.js, hp-workbench.js,
+      // hp-github-analysis.js) read data-* attributes off [data-hp-page-content]
+      // once at their own top-level IIFE scope. mergeExtraContent above only
+      // ever injects a given <script src> the first time this page family is
+      // visited -- correct for avoiding duplicate listener registration
+      // (this file's own header comment), but it means navigating from one
+      // page in a route family to ANOTHER (e.g. /payload-analysis/{hashA} ->
+      // /payload-analysis/{hashB}) swaps in a fresh DOM with nothing left to
+      // re-run the already-loaded script's hydration logic against it --
+      // caught live: skeleton cards stayed skeletons until a full reload.
+      // Scripts that need to re-hydrate on every navigation (not just their
+      // own first load) listen for this.
+      document.dispatchEvent(new CustomEvent("hp-dynamic-nav"));
     } catch {
       location.href = url;
     } finally {
