@@ -377,6 +377,12 @@ func TestClassifySuricataSurfacesAnomalyEvent(t *testing.T) {
 		!strings.Contains(ev.detail, "proto_parser") {
 		t.Fatalf("anomaly detail incomplete: %q", ev.detail)
 	}
+	// #1279: anomalyEvent/anomalyAppProto must be their own fields (not
+	// only baked into ev.detail text) so the trend chart can group by them
+	// directly instead of parsing them back out.
+	if ev.anomalyEvent != "REQUEST_HEADER_REPETITION" || ev.anomalyAppProto != "http" {
+		t.Fatalf("anomalyEvent/anomalyAppProto = %q/%q, want REQUEST_HEADER_REPETITION/http", ev.anomalyEvent, ev.anomalyAppProto)
+	}
 }
 
 // TestClassifySuricataDropsHighVolumeNonAlertTypes confirms flow/dns/

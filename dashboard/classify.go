@@ -37,10 +37,16 @@ type event struct {
 	severity    int    // suricata alert severity (1 = most severe)
 	heldMs      int    // endlessh (#1294): tarpit hold duration, disconnect events only
 	icsSeverity string // dnp3 (#1290): "critical"/"high" for control-function app_function codes, "" for read/status traffic
-	isLogin     bool
-	skip        bool
-	when        time.Time
-	whenStr     string
+	// anomalyEvent/anomalyAppProto (#1279): suricata protocol-conformance
+	// violation identity, category=="anomaly" events only -- separate
+	// fields (not parsed back out of ev.detail) so the trend chart can
+	// group by them directly.
+	anomalyEvent    string
+	anomalyAppProto string
+	isLogin         bool
+	skip            bool
+	when            time.Time
+	whenStr         string
 }
 
 // viaEntry is one portbridge connection indexed by its tunnel-side local port.
@@ -948,9 +954,11 @@ func classify(e map[string]any, dirSensor string) event {
 		if an, ok := e["anomaly"].(map[string]any); ok {
 			// e.g. "REQUEST_HEADER_REPETITION [http] (layer: proto_parser)"
 			ev.category = "anomaly"
-			ev.detail = str(an["event"])
-			if appProto := str(an["app_proto"]); appProto != "" {
-				ev.detail += "  [" + appProto + "]"
+			ev.anomalyEvent = str(an["event"])
+			ev.anomalyAppProto = str(an["app_proto"])
+			ev.detail = ev.anomalyEvent
+			if ev.anomalyAppProto != "" {
+				ev.detail += "  [" + ev.anomalyAppProto + "]"
 			}
 			if layer := str(an["layer"]); layer != "" {
 				ev.detail += "  (layer: " + layer + ")"
