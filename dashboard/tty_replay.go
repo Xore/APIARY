@@ -159,6 +159,46 @@ type ttyReplayPageData struct {
 	pageMeta
 	Shasum    string
 	SizeBytes int64
+	// #1268 "ask 2": the Attacker replay tab needs to know who made this
+	// recording, which the recording itself (keyed purely by content hash)
+	// never carries. HasAttacker is false when no in-memory event still
+	// references this shasum (log-tail-bounded cache rolled it off) or the
+	// resolved source IP fails attackerData's own netip.ParseAddr guard --
+	// the tab degrades to an explanatory empty state rather than a zero-value
+	// Attacker rendering as a broken-looking page.
+	HasAttacker    bool
+	Attacker       attackerPage
+	MapTileURL     string
+	MapAttribution string
+	MapLat         float64
+	MapLon         float64
+	MapHasPoint    bool
+	// ShasumLink lets the timeline template flag "this recording" among
+	// the attacker's other events -- storedEvent.TTYReplay holds the full
+	// "/tty/<hash>" link (classify.go's own #612/#638 comment), not the
+	// bare Shasum above, and html/template has no string-concatenation
+	// operator to rebuild that comparison value inline.
+	ShasumLink string
+}
+
+// ttyRecordingSourceIP finds the storedEvent that produced this recording --
+// the same in-memory scan recordingsData (recordings.go) already does over
+// the whole cache, narrowed to one shasum match. No new index/query: this
+// reads the identical s.getEvents() cache every other listing page on this
+// dashboard already uses.
+func (s *store) ttyRecordingSourceIP(shasum string) (storedEvent, bool) {
+	// classify.go sets TTYReplay to the full "/tty/<hash>" link (its own
+	// #612/#638 comment, and recordingsData/recordings.html render it
+	// directly as an href) -- not the bare hash this function's own
+	// caller works with, so the comparison has to rebuild that same link
+	// rather than compare against shasum directly.
+	want := "/tty/" + shasum
+	for _, e := range s.getEvents() {
+		if e.TTYReplay == want {
+			return e, true
+		}
+	}
+	return storedEvent{}, false
 }
 
 // fetchTTYLog is the one place that talks to cowrie-ttylog-v1 and decodes
@@ -218,7 +258,23 @@ func (s *store) serveTTYReplay(w http.ResponseWriter, r *http.Request, tmpl *tem
 		// immediately (rather than blocking on an ES round trip here) means
 		// a slow/unavailable ES surfaces as a normal in-page fetch error,
 		// not a broken page load.
-		renderPage(w, tmpl, "tty-replay", &ttyReplayPageData{Shasum: shasum})
+		data := &ttyReplayPageData{Shasum: shasum, ShasumLink: "/tty/" + shasum}
+		snap := s.get()
+		data.MapTileURL, data.MapAttribution = snap.MapTileURL, snap.MapAttribution
+		if event, ok := s.ttyRecordingSourceIP(shasum); ok {
+			if attacker, ok := s.attackerData(event.SrcIP); ok {
+				data.HasAttacker = true
+				data.Attacker = attacker
+			}
+			// event.Lat/Lon come from the same GeoIP enrichment
+			// aggregate.go already ran at ingest time (geo.Lat/geo.Lon,
+			// aggregate.go:176-177) -- no separate s.geo.lookup call
+			// needed here.
+			if event.Lat != 0 || event.Lon != 0 {
+				data.MapLat, data.MapLon, data.MapHasPoint = event.Lat, event.Lon, true
+			}
+		}
+		renderPage(w, tmpl, "tty-replay", data)
 		return
 	}
 

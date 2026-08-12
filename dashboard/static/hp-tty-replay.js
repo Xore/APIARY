@@ -261,5 +261,48 @@
       });
   }
 
+  // #1268 "ask 2": a single-marker map for the Attacker replay tab's own
+  // source IP -- deliberately NOT hp-app.js's initMaps() (that one drives
+  // the overview page's clustered, drill-down-on-click origins layer
+  // against a global, unfiltered GeoJSON feed; this is one fixed point,
+  // no fetch, no clustering). Initialized lazily on first reveal of the
+  // Attacker replay tab rather than eagerly on page load, since Leaflet
+  // cannot size itself correctly inside a still-hidden [hidden] panel --
+  // simpler to just not create the map until the container is visible
+  // than to reuse activateDashboardTab's own invalidateSize() hook (which
+  // only watches for the "leaflet-map" class this map deliberately
+  // doesn't carry, to stay out of initMaps()'s own query).
+  function initAttackerMap() {
+    var mapDiv = document.getElementById("tty-attacker-map");
+    if (!mapDiv || mapDiv.dataset.mapReady) return;
+    mapDiv.dataset.mapReady = "1";
+    if (!window.L) { mapDiv.textContent = "Interactive map library unavailable."; return; }
+    var lat = Number(mapDiv.dataset.lat), lon = Number(mapDiv.dataset.lon);
+    var tileURL = mapDiv.dataset.tileUrl;
+    var attributionText = mapDiv.dataset.attribution || "OpenStreetMap contributors";
+    var safeAttribution = document.createElement("span");
+    safeAttribution.textContent = attributionText;
+    var map = L.map(mapDiv, { minZoom: 1, maxZoom: 12 }).setView([lat, lon], 6);
+    L.tileLayer(tileURL, {
+      maxZoom: 19,
+      attribution: '<a href="https://www.openstreetmap.org/copyright">' + safeAttribution.innerHTML + "</a>",
+    }).addTo(map);
+    L.marker([lat, lon]).addTo(map);
+  }
+
+  function initAttackerTab() {
+    var tabButton = document.querySelector('[data-dashboard-tab="attacker"]');
+    if (!tabButton) return;
+    tabButton.addEventListener("click", initAttackerMap);
+    // Direct-load with #attacker already the active tab (hp-app.js's own
+    // activateDashboardTab runs before this, per document script order --
+    // see this function's own comment on why that ordering is safe to
+    // depend on): the click handler above never fires, so check the
+    // panel's actual visibility once at startup too.
+    var panel = document.getElementById("panel-attacker");
+    if (panel && !panel.hidden) initAttackerMap();
+  }
+
   document.addEventListener("DOMContentLoaded", init);
+  document.addEventListener("DOMContentLoaded", initAttackerTab);
 })();
