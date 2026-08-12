@@ -221,6 +221,22 @@ echo
 # Sensor formats are intentionally heterogeneous. Mapping the complete source
 # object as `flattened` keeps every key/value searchable without allowing one
 # sensor's value type to reject another sensor's event.
+#
+# ignore_above:32000 on the flattened `honeypot` field below (#1295/#1296):
+# this template's own comment used to claim honeypot-v2-*'s per-sensor
+# values were "short... never hit this" limit, unlike the analysis-results
+# indices further down (which got ignore_above back on 2026-08-02, see that
+# block's own comment). Found live (#1295) that claim is false: a real
+# MSSQL CLR-assembly RCE attempt (CREATE ASSEMBLY ... FROM 0x<hex-encoded
+# PE>) landed a multi-hundred-KB command string in honeypot.command, which
+# Elasticsearch's flattened type rejected outright -- not just that one
+# leaf, the *entire document* -- since flattened stores each leaf as a
+# single Lucene keyword term (32766-byte hard limit) with no ignore_above
+# set. Confirmed live: 66/66 documents in dead-letter-honeypot as of #1295
+# trace to exactly this failure mode, 33 of them this field. ignore_above
+# makes ES skip *indexing* (not storing) an overlong leaf instead -- still
+# present and returned in _source/the document view, just not
+# term-searchable past 32000 bytes -- so the document is never lost again.
 curl -fsS -X PUT "$es_url/_index_template/honeypot-events-v2" \
   -H 'Content-Type: application/json' \
   --data-binary @- <<'JSON'
@@ -239,7 +255,7 @@ curl -fsS -X PUT "$es_url/_index_template/honeypot-events-v2" \
     },
     "mappings": {
       "properties": {
-        "honeypot": { "type": "flattened" },
+        "honeypot": { "type": "flattened", "ignore_above": 32000 },
         "sensor": { "type": "keyword" },
         "event_format": { "type": "keyword" },
         "logset": { "type": "keyword" },
@@ -367,6 +383,12 @@ JSON
 # handler (~line 427) reads this file directly off disk, unaffected either
 # way -- this is purely an additive ES-only path. Plain daily indices, not
 # a data stream, same reasoning as portbridge-events above.
+#
+# ignore_above:32000 on `data` below (#1295/#1296): same fix, same reason
+# as honeypot-events-v2's `honeypot` field above -- confirmed live 33 of
+# the 66 dead-lettered documents #1295 found were this field rejecting an
+# oversized dionaea incident value (SMB exploit payloads routinely carry a
+# multi-KB+ embedded binary blob in `data`).
 curl -fsS -X PUT "$es_url/_index_template/dionaea-incidents" \
   -H 'Content-Type: application/json' \
   --data-binary @- <<'JSON'
@@ -386,7 +408,7 @@ curl -fsS -X PUT "$es_url/_index_template/dionaea-incidents" \
         "timestamp": { "type": "date" },
         "name": { "type": "keyword" },
         "origin": { "type": "keyword" },
-        "data": { "type": "flattened" }
+        "data": { "type": "flattened", "ignore_above": 32000 }
       }
     }
   }
@@ -415,10 +437,16 @@ JSON
 # sandbox results -- flattened stores each leaf value as a Lucene keyword
 # term, and sandbox.stdout/runner_log routinely carry multi-KB dmesg/boot
 # output past Lucene's 32766-byte term limit, which fails the *entire*
-# document, not just that one leaf, unlike honeypot-events-v2's `honeypot`
-# field (short per-sensor values only, never hit this). ignore_above makes
-# ES skip indexing (not storing) an overlong leaf instead -- still present
-# and returned in _source/the document view, just not term-searchable.
+# document, not just that one leaf. This comment used to claim
+# honeypot-events-v2's own `honeypot` field never needed the same guard
+# ("short per-sensor values only, never hit this") -- found live (#1295,
+# 2026-08-12) that was wrong: a real MSSQL CLR-assembly RCE attempt landed
+# a multi-hundred-KB command string there, dead-lettering the whole
+# document. `honeypot` and dionaea-incidents' `data` both got the same
+# ignore_above:32000 guard added above/below once this was found.
+# ignore_above makes ES skip indexing (not storing) an overlong leaf
+# instead -- still present and returned in _source/the document view, just
+# not term-searchable.
 for spec in \
   "ghidra-analysis-v1:ghidra" \
   "sandbox-analysis-v1:sandbox" \
