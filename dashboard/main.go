@@ -735,6 +735,24 @@ func main() {
 		data.Analysis = r.URL.Query().Get("analysis")
 		renderPage(w, tmpl, "ghidra", &data)
 	})
+	// #1239: unlike /ghidra and /github-analysis just above, revdeck/cape
+	// have no merged listing view to redirect a bare visit into -- both are
+	// detail-only (capeData/revdeckData both error immediately on an empty
+	// hash, #1156's own comment). Without this, a bare "/revdeck" request
+	// fell through to net/http.ServeMux's own implicit redirect-to-
+	// trailing-slash behavior, landing on "/revdeck/" with an empty sha --
+	// which the handler below correctly treats as an invalid hash and
+	// answers with a bare, chrome-less http.NotFound, indistinguishable
+	// from a broken route. Redirecting to /payloads (the natural place to
+	// find a real hash to visit either page with) fixes the reported
+	// symptom regardless of which layer the ServeMux redirect itself
+	// behaves correctly at.
+	http.HandleFunc("/revdeck", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/payloads", http.StatusFound)
+	})
+	http.HandleFunc("/cape", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/payloads", http.StatusFound)
+	})
 	http.HandleFunc("/revdeck/", func(w http.ResponseWriter, r *http.Request) {
 		sha, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/revdeck/"))
 		if err != nil || !hashName.MatchString(sha) {
