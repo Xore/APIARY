@@ -621,8 +621,18 @@
   // Centered application-managed overlay, opened/closed the same way as the
   // dashboard settings modal (hp-settings.js): inert + aria-hidden toggled
   // alongside .open, focus moved to the close control on open and restored
-  // to the trigger on close, Escape/Tab handled below (#211 -- this used to
-  // render inline below the generated-reports grid instead of as a modal).
+  // to the trigger on close, Escape handled below, Tab-cycling delegated to
+  // focus-trap (vendored, dashboard/static/vendor/focus-trap/) -- #211, this
+  // used to render inline below the generated-reports grid instead of as a
+  // modal.
+  const viewerTrap = window.focusTrap.createFocusTrap(els.viewer, {
+    escapeDeactivates: false,
+    clickOutsideDeactivates: false,
+    initialFocus: () => els.viewerClose,
+    fallbackFocus: () => els.viewerClose,
+    setReturnFocus: () => (state.viewerRestoreFocus?.isConnected ? state.viewerRestoreFocus : false),
+  });
+
   function openViewer(report) {
     if (state.viewerOpen) return;
     state.viewerOpen = true;
@@ -635,12 +645,13 @@
     els.viewer.inert = false;
     els.viewer.setAttribute("aria-hidden", "false");
     els.viewer.classList.add("open");
-    els.viewerClose.focus();
+    viewerTrap.activate();
   }
 
   function closeViewer() {
     if (!state.viewerOpen) return;
     state.viewerOpen = false;
+    viewerTrap.deactivate();
     els.viewer.classList.remove("open");
     els.viewer.setAttribute("aria-hidden", "true");
     els.viewer.inert = true;
@@ -648,8 +659,9 @@
     els.viewerBackdrop.setAttribute("aria-hidden", "true");
     els.viewerBackdrop.inert = true;
     els.viewerFrame.src = "about:blank";
-    if (state.viewerRestoreFocus?.isConnected) state.viewerRestoreFocus.focus();
-    state.viewerRestoreFocus = null;
+    // Not nulled here: focus-trap's deactivate() restores focus via a
+    // setTimeout(0), so setReturnFocus's closure must still see this value
+    // when that deferred callback runs. openViewer() overwrites it next time.
   }
 
   els.viewerClose.addEventListener("click", closeViewer);
@@ -657,7 +669,7 @@
 
   // Keyboard contract (Xore/theme docs/MODALS.md), same as hp-settings.js:
   // Escape closes the modal unless a destructive confirmation is stacked
-  // above it, and Tab stays inside the open modal.
+  // above it; Tab-cycling is the focus-trap instance created above.
   document.addEventListener("keydown", (event) => {
     if (!state.viewerOpen) return;
     if (window.HoneypotModals?.isOpen()) return;
@@ -665,21 +677,6 @@
       event.preventDefault();
       event.stopPropagation();
       closeViewer();
-      return;
-    }
-    if (event.key !== "Tab") return;
-    const controls = Array.from(els.viewer.querySelectorAll(
-      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-    )).filter((el) => !el.hidden && el.offsetParent !== null);
-    if (!controls.length) return;
-    const first = controls[0];
-    const last = controls[controls.length - 1];
-    if (event.shiftKey && (document.activeElement === first || !els.viewer.contains(document.activeElement))) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
     }
   });
 

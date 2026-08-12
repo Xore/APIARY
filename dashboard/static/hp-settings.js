@@ -30,6 +30,7 @@
   let restoreFocus = null;
   let modal = null;
   let backdrop = null;
+  let trap = null;
 
   function announceLoadFailure() {
     const status = document.getElementById("hp-flash");
@@ -52,6 +53,19 @@
           host.innerHTML = html;
           modal = document.getElementById("hp-settings");
           backdrop = document.getElementById("hp-dash-settings-backdrop");
+          // Tab-cycling/initial-focus/return-focus delegated to focus-trap
+          // (vendored, dashboard/static/vendor/focus-trap/); Escape stays
+          // hand-rolled below since it has to yield to both the nested native
+          // <dialog> confirmation (which the browser itself already traps)
+          // and the shared destructive-confirmation modal, which
+          // escapeDeactivates:false here defers to entirely.
+          trap = window.focusTrap.createFocusTrap(modal, {
+            escapeDeactivates: false,
+            clickOutsideDeactivates: false,
+            initialFocus: () => modal.querySelector("[data-hp-settings-close]") || modal,
+            fallbackFocus: () => modal,
+            setReturnFocus: () => (restoreFocus?.isConnected ? restoreFocus : false),
+          });
           initController(host);
           const closeButton = modal.querySelector("[data-hp-settings-close]");
           if (closeButton) closeButton.addEventListener("click", closeSettings);
@@ -78,22 +92,23 @@
       modal.inert = false;
       modal.setAttribute("aria-hidden", "false");
       modal.classList.add("open");
-      const closeButton = modal.querySelector("[data-hp-settings-close]");
-      if (closeButton) closeButton.focus();
+      trap.activate();
     });
   }
 
   function closeSettings() {
     if (!isOpen) return;
     isOpen = false;
+    trap.deactivate();
     modal.classList.remove("open");
     modal.setAttribute("aria-hidden", "true");
     modal.inert = true;
     backdrop.classList.remove("open");
     backdrop.setAttribute("aria-hidden", "true");
     backdrop.inert = true;
-    if (restoreFocus && restoreFocus.isConnected) restoreFocus.focus();
-    restoreFocus = null;
+    // Not nulled here: focus-trap's deactivate() restores focus via a
+    // setTimeout(0), so setReturnFocus's closure must still see this value
+    // when that deferred callback runs. openSettings() overwrites it next time.
   }
 
   trigger.addEventListener("click", event => {
@@ -121,22 +136,6 @@
       event.preventDefault();
       event.stopPropagation();
       closeSettings();
-      return;
-    }
-    if (event.key === "Tab") {
-      const controls = Array.from(modal.querySelectorAll(
-        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-      )).filter(el => !el.hidden && el.offsetParent !== null);
-      if (!controls.length) return;
-      const first = controls[0];
-      const last = controls[controls.length - 1];
-      if (event.shiftKey && (document.activeElement === first || !modal.contains(document.activeElement))) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
     }
   });
 

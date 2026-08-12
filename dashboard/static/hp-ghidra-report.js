@@ -22,9 +22,15 @@
   let isOpen = false;
   let restoreFocus = null;
 
-  const focusable = () => Array.from(modal.querySelectorAll(
-    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-  )).filter(el => !el.hidden && el.offsetParent !== null);
+  // Tab-cycling/initial-focus/return-focus delegated to focus-trap (vendored,
+  // dashboard/static/vendor/focus-trap/); Escape stays hand-rolled below.
+  const trap = window.focusTrap.createFocusTrap(modal, {
+    escapeDeactivates: false,
+    clickOutsideDeactivates: false,
+    initialFocus: () => closeButton,
+    fallbackFocus: () => closeButton,
+    setReturnFocus: () => (restoreFocus?.isConnected ? restoreFocus : false),
+  });
 
   function open() {
     if (isOpen) return;
@@ -39,12 +45,13 @@
     modal.inert = false;
     modal.setAttribute("aria-hidden", "false");
     modal.classList.add("open");
-    closeButton.focus();
+    trap.activate();
   }
 
   function close() {
     if (!isOpen) return;
     isOpen = false;
+    trap.deactivate();
     modal.classList.remove("open");
     modal.setAttribute("aria-hidden", "true");
     modal.inert = true;
@@ -52,8 +59,9 @@
     backdrop.setAttribute("aria-hidden", "true");
     backdrop.inert = true;
     frame.src = "about:blank";
-    if (restoreFocus?.isConnected) restoreFocus.focus();
-    restoreFocus = null;
+    // Not nulled here: focus-trap's deactivate() restores focus via a
+    // setTimeout(0), so setReturnFocus's closure must still see this value
+    // when that deferred callback runs. open() overwrites it next time.
   }
 
   button.addEventListener("click", open);
@@ -67,19 +75,6 @@
       event.preventDefault();
       event.stopPropagation();
       close();
-      return;
-    }
-    if (event.key !== "Tab") return;
-    const controls = focusable();
-    if (!controls.length) return;
-    const first = controls[0];
-    const last = controls[controls.length - 1];
-    if (event.shiftKey && (document.activeElement === first || !modal.contains(document.activeElement))) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
     }
   });
 })();

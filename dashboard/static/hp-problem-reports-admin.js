@@ -32,6 +32,22 @@
   const modal = document.getElementById("hp-pr-detail-modal");
   const body = modal ? modal.querySelector("[data-hp-pr-detail-body]") : null;
 
+  let restoreFocus = null;
+
+  // Tab-cycling/initial-focus/return-focus via focus-trap (vendored,
+  // dashboard/static/vendor/focus-trap/); this modal previously had no
+  // keyboard containment at all -- #1244's audit flagged it as one of two
+  // dialogs in the dashboard missing the trap every other one already
+  // implements. It shows other users' captured report data (DOM snapshot,
+  // API bodies) to an admin, so the gap mattered more here than most.
+  const trap = modal ? window.focusTrap.createFocusTrap(modal, {
+    escapeDeactivates: false,
+    clickOutsideDeactivates: false,
+    initialFocus: () => modal.querySelector("[data-hp-pr-detail-close]") || modal,
+    fallbackFocus: () => modal,
+    setReturnFocus: () => (restoreFocus?.isConnected ? restoreFocus : false),
+  }) : null;
+
   function esc(s) {
     const div = document.createElement("div");
     div.textContent = s == null ? "" : String(s);
@@ -68,16 +84,32 @@
       const report = byId.get(btn.dataset.id);
       if (!report || !body) return;
       renderDetail(report);
+      restoreFocus = btn;
       backdrop.hidden = false;
       modal.hidden = false;
+      trap.activate();
     });
   });
 
   function closeModal() {
+    trap.deactivate();
     backdrop.hidden = true;
     modal.hidden = true;
+    // Not nulled here: focus-trap's deactivate() restores focus via a
+    // setTimeout(0), so setReturnFocus's closure must still see this value
+    // when that deferred callback runs. The click handler above overwrites
+    // it next time.
   }
   const closeBtn = modal ? modal.querySelector("[data-hp-pr-detail-close]") : null;
   if (closeBtn) closeBtn.addEventListener("click", closeModal);
   if (backdrop) backdrop.addEventListener("click", closeModal);
+  document.addEventListener("keydown", event => {
+    if (!modal || modal.hidden) return;
+    if (window.HoneypotModals?.isOpen()) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeModal();
+    }
+  });
 })();

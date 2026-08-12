@@ -213,22 +213,50 @@
   root.appendChild(backdrop);
   root.appendChild(dialog);
 
+  let restoreFocus = null;
+
+  // Tab-cycling/initial-focus/return-focus via focus-trap (vendored,
+  // dashboard/static/vendor/focus-trap/); Escape handled below. This modal
+  // previously had no keyboard containment at all -- #1244's audit flagged
+  // it as one of two dialogs in the dashboard missing the trap every other
+  // one already implements.
+  const trap = window.focusTrap.createFocusTrap(dialog, {
+    escapeDeactivates: false,
+    clickOutsideDeactivates: false,
+    initialFocus: () => dialog.querySelector("#hp-pr-expected") || dialog,
+    fallbackFocus: () => dialog,
+    setReturnFocus: () => (restoreFocus?.isConnected ? restoreFocus : false),
+  });
+
   function openModal() {
+    restoreFocus = document.activeElement;
     backdrop.hidden = false;
     dialog.hidden = false;
     backdrop.setAttribute("aria-hidden", "false");
-    const expected = dialog.querySelector("#hp-pr-expected");
-    if (expected) expected.focus();
+    trap.activate();
   }
   function closeModal() {
+    trap.deactivate();
     backdrop.hidden = true;
     dialog.hidden = true;
     backdrop.setAttribute("aria-hidden", "true");
+    // Not nulled here: focus-trap's deactivate() restores focus via a
+    // setTimeout(0), so setReturnFocus's closure must still see this value
+    // when that deferred callback runs. openModal() overwrites it next time.
   }
 
   button.addEventListener("click", openModal);
   backdrop.addEventListener("click", closeModal);
   dialog.querySelectorAll("[data-hp-pr-close]").forEach(el => el.addEventListener("click", closeModal));
+  document.addEventListener("keydown", event => {
+    if (dialog.hidden) return;
+    if (window.HoneypotModals?.isOpen()) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeModal();
+    }
+  });
 
   dialog.querySelector("[data-hp-pr-form]").addEventListener("submit", async event => {
     event.preventDefault();

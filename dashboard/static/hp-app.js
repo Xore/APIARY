@@ -964,6 +964,19 @@
     const searchInput = search?.querySelector("textarea");
     let commandPaletteRestoreFocus = null;
 
+    // Tab-cycling/initial-focus/return-focus delegated to focus-trap
+    // (vendored, dashboard/static/vendor/focus-trap/) -- this modal already
+    // followed the rest of the contract (inert/aria-hidden, restore focus)
+    // but, unlike every other modal in the dashboard, never actually trapped
+    // Tab inside itself.
+    const commandPaletteTrap = commandPalette ? window.focusTrap.createFocusTrap(commandPalette, {
+      escapeDeactivates: false,
+      clickOutsideDeactivates: false,
+      initialFocus: () => searchInput || commandPalette,
+      fallbackFocus: () => commandPalette,
+      setReturnFocus: () => (commandPaletteRestoreFocus?.isConnected ? commandPaletteRestoreFocus : false),
+    }) : null;
+
     const openCommandPalette = trigger => {
       if (!commandPalette || !commandPaletteBackdrop) return;
       commandPaletteRestoreFocus = trigger || document.activeElement;
@@ -973,18 +986,20 @@
       commandPalette.removeAttribute("inert");
       commandPalette.setAttribute("aria-hidden", "false");
       commandPalette.classList.add("open");
-      searchInput?.focus();
+      commandPaletteTrap.activate();
     };
     const closeCommandPalette = () => {
       if (!commandPalette || !commandPaletteBackdrop) return;
+      commandPaletteTrap.deactivate();
       commandPalette.classList.remove("open");
       commandPalette.setAttribute("aria-hidden", "true");
       commandPalette.setAttribute("inert", "");
       commandPaletteBackdrop.classList.remove("open");
       commandPaletteBackdrop.setAttribute("aria-hidden", "true");
       commandPaletteBackdrop.setAttribute("inert", "");
-      if (commandPaletteRestoreFocus?.isConnected) commandPaletteRestoreFocus.focus();
-      commandPaletteRestoreFocus = null;
+      // Not nulled here: focus-trap's deactivate() restores focus via a
+      // setTimeout(0), so setReturnFocus's closure must still see this value
+      // when that deferred callback runs. openCommandPalette() overwrites it next time.
     };
     commandPaletteOpener?.addEventListener("click", () => openCommandPalette(commandPaletteOpener));
     commandPalette?.querySelector("[data-hp-command-palette-close]")?.addEventListener("click", closeCommandPalette);
