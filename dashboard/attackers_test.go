@@ -52,6 +52,33 @@ func TestReadAttackersSetsLink(t *testing.T) {
 	}
 }
 
+// #1268: RecordingsURL scopes /recordings to every one of the entity's
+// member IPs via the shared ?ips= filter, so an operator can find this
+// entity's TTY session recordings without hunting through /events.
+func TestReadAttackersSetsRecordingsURL(t *testing.T) {
+	memStore := newMemESDocStore()
+	srv := httptest.NewServer(memStore.handler())
+	defer srv.Close()
+	es := newESClient(srv.URL, "")
+
+	seedAttacker(t, es, attackerRow{ID: "entity-1", IPs: []string{"203.0.113.1", "203.0.113.2"}, Events: 1})
+
+	rows, err := readAttackers(es)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "/recordings?ips=203.0.113.1&ips=203.0.113.2"
+	if rows[0].RecordingsURL != want {
+		t.Fatalf("RecordingsURL = %q, want %q", rows[0].RecordingsURL, want)
+	}
+}
+
+func TestRecordingsURLForIPsEmptyForNoIPs(t *testing.T) {
+	if got := recordingsURLForIPs(nil); got != "" {
+		t.Fatalf("got %q, want empty", got)
+	}
+}
+
 func TestAttackersDataCountsMultiIPEntities(t *testing.T) {
 	memStore := newMemESDocStore()
 	srv := httptest.NewServer(memStore.handler())

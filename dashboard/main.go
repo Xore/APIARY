@@ -834,6 +834,14 @@ func main() {
 		data := s.commandsData(r)
 		renderPage(w, tmpl, "commands", &data)
 	})
+	// #1268: TTY session replays previously had no dedicated, browsable
+	// entry point -- only surfaced inline on the one event row that carries
+	// TTYReplay (/events, /sessions/<id>). Same in-memory-cache shape as
+	// /commands just above.
+	http.HandleFunc("/recordings", func(w http.ResponseWriter, r *http.Request) {
+		data := s.recordingsData(r)
+		renderPage(w, tmpl, "recordings", &data)
+	})
 	http.HandleFunc("/payload-analysis/", func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(r.URL.Path, "/payload-analysis/")
 		// #1157: payloadAnalysisShell, not analyzePayloadFast -- even

@@ -37,6 +37,11 @@ type attackerRow struct {
 	// shows its graph on the same page (see attackers.html's "graph"
 	// section).
 	Link string `json:"-"`
+	// RecordingsURL (#1268) points at /recordings scoped to every one of
+	// this entity's member IPs via the shared ?ips= filter (filters.go's
+	// includeIPs) -- same mechanism /events already uses to isolate a
+	// fingerprint/cluster pivot down to specific source IPs.
+	RecordingsURL string `json:"-"`
 }
 
 type attackersPage struct {
@@ -67,6 +72,7 @@ func readAttackers(es *esClient) ([]attackerRow, error) {
 			continue
 		}
 		row.Link = "/attackers?id=" + url.QueryEscape(row.ID)
+		row.RecordingsURL = recordingsURLForIPs(row.IPs)
 		rows = append(rows, row)
 	}
 	sort.Slice(rows, func(i, j int) bool {

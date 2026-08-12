@@ -1103,7 +1103,7 @@ func TestSemanticShellIsServerRendered(t *testing.T) {
 	// in this "always present" list.
 	for _, route := range []string{
 		"/", "/events", "/ips", "/campaigns",
-		"/clusters", "/attackers", "/kill-chain", "/commands", "/payloads", "/payload-workbench/results",
+		"/clusters", "/attackers", "/kill-chain", "/commands", "/recordings", "/payloads", "/payload-workbench/results",
 		"/reports",
 	} {
 		if !strings.Contains(html, `data-hp-nav="`+route+`" href="`+route+`"`) {

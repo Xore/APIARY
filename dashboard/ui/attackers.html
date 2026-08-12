@@ -34,7 +34,7 @@
         <div class="card wide" id="attackers-graph">
           <div class="tw:flex tw:items-center tw:justify-between tw:gap-2">
             <h2>Entity {{shortAttackerID .Selected.ID}} &mdash; member IPs</h2>
-            <a class="lnk" href="/attackers">close &times;</a>
+            <div class="tw:flex tw:items-center tw:gap-3">{{if .Selected.RecordingsURL}}<a class="lnk" href="{{.Selected.RecordingsURL}}" title="TTY session recordings from this entity's member IPs, if any">session recordings</a>{{end}}<a class="lnk" href="/attackers">close &times;</a></div>
           </div>
           <div class="attacker-graph-shell" style="position:relative;width:100%;height:420px;min-height:220px;max-height:80vh;resize:vertical;overflow:hidden;border:1px solid var(--border-strong);border-radius:8px">
             <div data-attacker-graph-url="/api/attacker-graph?id={{.Selected.ID | urlquery}}" role="img" aria-label="Attacker entity graph: {{len .Selected.IPs}} member IPs around one entity node" style="width:100%;height:100%"></div>
