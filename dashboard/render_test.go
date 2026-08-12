@@ -235,8 +235,10 @@ func TestEveryFullPageRouteUsesRenderPage(t *testing.T) {
 	// #1312: investigate_routes.go holds what used to be inline closures in
 	// main.go (attacker/session/cidr-correlation/cluster-correlation/ghidra/
 	// revdeck/cape/github-analysis/sandbox), extracted so they're testable
-	// against a real http.ServeMux -- see that file's own comment.
-	for _, f := range []string{"main.go", "search.go", "investigate_routes.go"} {
+	// against a real http.ServeMux -- see that file's own comment. #1323:
+	// routes.go now holds the rest of main()'s route registrations
+	// (including the page routes' renderPage calls) for the same reason.
+	for _, f := range []string{"main.go", "search.go", "investigate_routes.go", "routes.go"} {
 		b, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatalf("read %s: %v", f, err)

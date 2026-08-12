@@ -65,15 +65,23 @@ func TestPurgeDeadLettersWithoutQueryPurgesEverythingExplicitly(t *testing.T) {
 // TestDeadLettersRouteBranchesOnMethod pins that /api/dead-letters routes
 // DELETE to the purge path and everything else to the existing read-only
 // search -- a regression here would either break search or, worse, make
-// purge unreachable from the UI silently.
+// purge unreachable from the UI silently. #1323: this used to be one
+// handler with an internal r.Method branch; it's now two separate
+// method-scoped ServeMux registrations (routes.go) so an unsupported
+// method gets net/http's own 405 instead of silently falling through to
+// the GET-shaped read. The invariant this test protects is unchanged --
+// only where the method decision is made.
 func TestDeadLettersRouteBranchesOnMethod(t *testing.T) {
-	b, err := os.ReadFile("main.go")
+	b, err := os.ReadFile("routes.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 	src := string(b)
-	if !strings.Contains(src, "r.Method == http.MethodDelete") || !strings.Contains(src, "s.es.purgeDeadLetters(w, r)") {
-		t.Fatal("/api/dead-letters does not branch DELETE to purgeDeadLetters")
+	if !strings.Contains(src, `mux.HandleFunc("DELETE /api/dead-letters"`) || !strings.Contains(src, "s.es.purgeDeadLetters(w, r)") {
+		t.Fatal("DELETE /api/dead-letters is not registered to purgeDeadLetters")
+	}
+	if !strings.Contains(src, `mux.HandleFunc("GET /api/dead-letters"`) || !strings.Contains(src, "s.es.deadLetters(w, r)") {
+		t.Fatal("GET /api/dead-letters is not registered to the read-only search")
 	}
 }
 
