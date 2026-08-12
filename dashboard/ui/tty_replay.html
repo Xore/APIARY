@@ -6,6 +6,12 @@
 <meta name="robots" content="noindex, nofollow">
 <title>{{brandText}} &mdash; TTY recording {{.Shasum}}</title>
 {{template "style" .}}
+{{/* #1282: xterm.js is used by exactly this one page, unlike leaflet.css/
+     leaflet.js in the shared "style" partial above (loaded dashboard-wide
+     since the origins map appears on the overview page nearly every
+     operator visits) -- same page-scoped-script convention echarts.min.js/
+     cytoscape.min.js already use on the pages that need them. */}}
+<link rel="stylesheet" href="{{asset "/static/xterm.css"}}">
 </head>
 <body>
 <div class="app-shell">
@@ -17,7 +23,7 @@
           <div>
             <div class="label-section">Cowrie TTY session recording</div>
             <h1>{{.Shasum}}</h1>
-            <p class="subtitle">Replayed from the session's Elasticsearch mirror, not read off disk (#638) &mdash; a small VT100 subset, not a full terminal emulator. For exact fidelity use the .cast download with the real <code>asciinema</code> tool.</p>
+            <p class="subtitle">Replayed from the session's Elasticsearch mirror, not read off disk (#638), rendered by a real terminal emulator (xterm.js, #1282). Anything genuinely exotic still round-trips correctly through the .cast download with the real <code>asciinema</code> tool.</p>
           </div>
         </header>
 
@@ -44,7 +50,7 @@
               <label>speed <select id="tty-speed"><option value="1">1&times;</option><option value="2">2&times;</option><option value="4">4&times;</option><option value="0.5">0.5&times;</option></select></label>
             </div>
             <div class="hp-tty-status" id="tty-status">Loading&hellip;</div>
-            <pre class="hp-tty-term" id="tty-screen" aria-live="polite"></pre>
+            <div class="hp-tty-term" id="tty-screen"></div>
           </div>
         </div>
 
@@ -104,6 +110,7 @@
       </div>
     </main>
 </div>
+<script defer src="{{asset "/static/xterm.js"}}"></script>
 <script defer src="{{asset "/static/hp-tty-replay.js"}}"></script>
 </body>
 </html>

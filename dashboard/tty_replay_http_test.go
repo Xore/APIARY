@@ -64,6 +64,38 @@ func TestServeTTYReplayViewerPageRendersWithoutESLookup(t *testing.T) {
 	}
 }
 
+// TestServeTTYReplayViewerPageLoadsXtermJS (#1282) pins that the viewer
+// shell loads the real xterm.js terminal emulator (vendored, static/
+// xterm.js) and mounts it into a plain container, not the former
+// hand-rolled VT100 subset's <pre id="tty-screen" aria-live="polite">
+// (xterm.js manages its own internal accessibility tree instead).
+func TestServeTTYReplayViewerPageLoadsXtermJS(t *testing.T) {
+	s, tmpl := newTestTTYStore(t)
+	req := httptest.NewRequest(http.MethodGet, "/tty/"+strings.Repeat("a", 64), nil)
+	w := httptest.NewRecorder()
+	s.serveTTYReplay(w, req, tmpl)
+	body := w.Body.String()
+	if !strings.Contains(body, `src="/static/xterm.js`) {
+		t.Error("expected the vendored xterm.js script tag")
+	}
+	if !strings.Contains(body, `href="/static/xterm.css`) {
+		t.Error("expected the vendored xterm.css stylesheet link")
+	}
+	if !strings.Contains(body, `id="tty-screen"`) {
+		t.Error("expected the #tty-screen mount point")
+	}
+	// The shared "style"/topbar partial has its own, unrelated aria-live
+	// elements (a flash-message toast, an evidence-count badge) -- this
+	// checks specifically that #tty-screen itself no longer carries one,
+	// not that the whole page is aria-live-free.
+	if strings.Contains(body, `id="tty-screen" aria-live`) {
+		t.Error("aria-live on #tty-screen is a leftover from the old hand-rolled renderer -- xterm.js manages its own accessibility tree")
+	}
+	if !strings.Contains(body, `<div class="hp-tty-term" id="tty-screen"></div>`) {
+		t.Error("expected a plain <div> mount point, not the old <pre> element")
+	}
+}
+
 func TestServeTTYReplayRejectsBadShasum(t *testing.T) {
 	s, tmpl := newTestTTYStore(t)
 	for _, path := range []string{"/tty/not-a-hash", "/tty/../../etc/passwd", "/tty/"} {
