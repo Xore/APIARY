@@ -373,15 +373,40 @@ def score_and_write_events(es: Elasticsearch, rdb, iso_model, lstm_model,
     (defaults to None, falling back to extract_features()'s own pre-#277
     neutral defaults) only so existing direct callers/tests that don't care
     about these three features don't have to construct a tracker.
+
+    #1227: feature extraction stays a per-event pass (cheap, ~0.2ms/event,
+    and this is where a single malformed event's own error is caught and
+    isolated per event() -- see the module docstring above), but
+    IsolationForest/HBOS scoring is now ONE batched call over every
+    successfully-extracted event's features instead of one call per event.
+    Confirmed live (see isolation_forest.py's score_batch() docstring) that
+    the per-row path cost ~1000x more than the batched one for numerically
+    identical scores -- this was ml-worker's actual classification-backlog
+    bottleneck (#1227), not a capacity/hardware problem. LSTM stays
+    per-event: its own per-IP sliding-window state is inherently
+    sequential, and it's already cheap (~3ms/call) next to what
+    iso_model.score()/hbos_score() used to cost.
     """
+    extracted = []  # (event, features, session_feats) for every event that survived extraction
     for event in events:
         try:
             src = event.get("_source", {})
             session_feats = session_tracker.observe(src) if session_tracker is not None else {}
             features = iso_model.extract_features(src, **session_feats)
+            extracted.append((event, features, session_feats))
+        except Exception as exc:
+            write_malformed_event_metric(es, event, exc)
 
-            iso_score  = iso_model.score(features)
-            hbos_score = iso_model.hbos_score(features)  # fast pre-filter
+    if not extracted:
+        return
+
+    matrix = np.vstack([features for _, features, _ in extracted])
+    iso_scores = iso_model.score_batch(matrix)
+    hbos_scores = iso_model.hbos_score_batch(matrix)  # fast pre-filter
+
+    for (event, features, session_feats), iso_score, hbos_score in zip(extracted, iso_scores, hbos_scores):
+        try:
+            src = event.get("_source", {})
             lstm_score = 0.0
 
             # Only run LSTM if HBOS flagged as potentially anomalous
@@ -389,8 +414,8 @@ def score_and_write_events(es: Elasticsearch, rdb, iso_model, lstm_model,
                 lstm_score = lstm_model.score(src, cmd_count=session_feats.get("cmd_count", 0))
 
             scores = {
-                "isolation_forest": iso_score,
-                "hbos":             hbos_score,
+                "isolation_forest": float(iso_score),
+                "hbos":             float(hbos_score),
                 "lstm_ae":          lstm_score,
             }
             composite = compute_composite(scores)

@@ -279,6 +279,69 @@ class TestRetrainAttachesCalibration:
             assert len(set(values)) > 1, f"{name} scores must show real spread across genuinely different inputs, not a single tied value"
 
 
+class TestBatchedScoringMatchesPerRow:
+    """#1227: score_batch()/hbos_score_batch() exist purely as a
+    performance fix (confirmed live: ~1000x fewer sklearn/pyod call-site
+    overhead than the same work one row at a time -- see score_batch()'s
+    own docstring for the measured numbers) -- they must never change WHAT
+    gets computed, only how many calls it takes. Every case here compares
+    the batched result directly against the existing, already-trusted
+    per-row score()/hbos_score() loop."""
+
+    def _trained_model(self, tmp_path):
+        model = IsoForestModel(model_dir=str(tmp_path))
+        result = model.retrain(TestRetrainAttachesCalibration()._varied_sources())
+        assert result.accepted is True
+        return model
+
+    def _feature_matrix(self, model, n=12):
+        rows = [
+            model.extract_features({
+                **fixtures.COWRIE_LOGIN_FAILED["_source"],
+                "destination": {"port": 1000 + i},
+            })
+            for i in range(n)
+        ]
+        return rows, np.vstack(rows)
+
+    def test_score_batch_matches_the_per_row_loop_on_a_calibrated_model(self, tmp_path):
+        model = self._trained_model(tmp_path)
+        rows, matrix = self._feature_matrix(model)
+
+        batched = model.score_batch(matrix)
+        per_row = [model.score(r) for r in rows]
+
+        assert list(batched) == pytest.approx(per_row)
+
+    def test_hbos_score_batch_matches_the_per_row_loop_on_a_calibrated_model(self, tmp_path):
+        model = self._trained_model(tmp_path)
+        rows, matrix = self._feature_matrix(model)
+
+        batched = model.hbos_score_batch(matrix)
+        per_row = [model.hbos_score(r) for r in rows]
+
+        assert list(batched) == pytest.approx(per_row)
+
+    def test_score_batch_on_an_untrained_model_returns_the_neutral_default(self, tmp_path):
+        # No retrain() called -- self.iso/self.hbos are both None, same
+        # state score()/hbos_score() already return 0.5 for (#171's
+        # malformed-event test exercises this exact path).
+        model = IsoForestModel(model_dir=str(tmp_path))
+        _, matrix = self._feature_matrix(model, n=5)
+
+        assert list(model.score_batch(matrix)) == [0.5] * 5
+        assert list(model.hbos_score_batch(matrix)) == [0.5] * 5
+
+    def test_score_batch_handles_a_single_row(self, tmp_path):
+        # worker.py's score_and_write_events() calls this even for a
+        # one-event batch (the common case for a live, low-volume cycle) --
+        # np.vstack of a single row must not misbehave.
+        model = self._trained_model(tmp_path)
+        rows, matrix = self._feature_matrix(model, n=1)
+
+        assert list(model.score_batch(matrix)) == pytest.approx([model.score(rows[0])])
+
+
 class TestAtomicSymlinkPromotion:
     """#169: _symlink() must never leave `link` missing, even if the
     process is killed between removing the old link and creating the new

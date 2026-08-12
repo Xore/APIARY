@@ -236,6 +236,44 @@ class TestBufferStateNotPersisted:
         assert "203.0.113.3" in model._last_seen
 
 
+class TestScoreAndWriteEventsUsesBatchedScoring:
+    """#1227: score_and_write_events() must call score_batch()/
+    hbos_score_batch() ONCE per cycle, not score()/hbos_score() once per
+    event -- the whole point of the fix (see isolation_forest.py's
+    score_batch() docstring) was collapsing N sklearn/pyod calls into one,
+    confirmed live to cut ~1000x off ml-worker's dominant per-event cost.
+    A silent regression back to the per-row path would reintroduce the
+    classification-backlog bottleneck this issue diagnosed, with nothing
+    else here to catch it -- the other score_and_write_events tests only
+    check final observable behavior (recent_flags, malformed-event
+    metrics), not which scoring path produced it."""
+
+    def test_iso_model_batch_methods_are_called_once_not_per_event(self):
+        import worker
+
+        iso_model = MagicMock()
+        iso_model.extract_features.side_effect = lambda src, **kw: np.zeros((1, 14), dtype=np.float32)
+        iso_model.score_batch.return_value = np.array([0.1, 0.1, 0.1])
+        iso_model.hbos_score_batch.return_value = np.array([0.1, 0.1, 0.1])
+
+        lstm_model = MagicMock()
+        es = MagicMock()
+        recent_flags = []
+
+        events = [
+            {"_id": f"e{i}", "_index": "honeypot-v2-2026.07.31", "_source": dict(REAL_SHAPED_DOCUMENT["_source"])}
+            for i in range(3)
+        ]
+
+        worker.score_and_write_events(es, None, iso_model, lstm_model, events, recent_flags)
+
+        assert iso_model.score_batch.call_count == 1
+        assert iso_model.hbos_score_batch.call_count == 1
+        assert iso_model.score.call_count == 0, "score() must not be called per-event anymore"
+        assert iso_model.hbos_score.call_count == 0, "hbos_score() must not be called per-event anymore"
+        assert len(recent_flags) == 3
+
+
 class TestUnhandledEventErrorsCrashTheBatch:
     """Finding #8, fixed in #171 (roadmap: 'malformed payloads ... are not
     isolated from the processing loop'): worker.py's per-event extract/
