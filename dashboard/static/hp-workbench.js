@@ -35,12 +35,12 @@
     runs.forEach(run => { const section = document.createElement("article"); section.className = "card wide wb-run"; const head = document.createElement("div"); head.className = "wb-run-head"; const title = document.createElement("div"), h = document.createElement("h3"), meta = document.createElement("p"); h.textContent = `${run.recipe_name} · r${run.recipe_revision}`; meta.className = "note"; meta.textContent = `${run.id} · ${new Date(run.created_at).toLocaleString()}`; title.append(h, meta); head.append(title, badge(run.state)); section.append(head); const children = document.createElement("div"); children.className = "wb-child-grid"; run.children.forEach(child => children.append(childCard(run, child))); section.append(children); runsRoot.append(section); });
   }
   async function loadRuns() { const data = await api(`/api/payload-workbench/runs?sha256=${encodeURIComponent(sha256)}`); renderRuns(data.runs || []); const active = (data.runs || []).some(run => ["queued", "running"].includes(run.state)); clearTimeout(pollTimer); if (active) pollTimer = setTimeout(() => loadRuns().catch(error => say(error.message, true)), 4000); }
-  // #1234: "Run all applicable" is a one-click bulk action, exactly where an
-  // operator moving quickly would miss that one of the analyzers it just
-  // selected can reach real internet infrastructure -- excluded here so
-  // that route stays opt-in only, chosen deliberately per-payload rather
-  // than swept up by this button.
-  root.querySelector("[data-wb-run-all]").addEventListener("click", () => { root.querySelectorAll('[data-wb-analyzer][data-ready="true"][data-requires-opt-in="false"] input[type="checkbox"]').forEach(input => { input.checked = true; }); recipeSelect.value = ""; say("All currently applicable local analyzers selected."); });
+  // #1234: excludes [data-requires-opt-in="true"] (currently just
+  // windows-ghosts, the one route with real internet access) -- "Run all
+  // applicable" must not be the click that silently opts an operator into
+  // real outbound C2/exfiltration connectivity; that route stays opt-in,
+  // selected deliberately by its own checkbox, never by this button.
+  root.querySelector("[data-wb-run-all]").addEventListener("click", () => { root.querySelectorAll('[data-wb-analyzer][data-ready="true"]:not([data-requires-opt-in="true"]) input[type="checkbox"]').forEach(input => { input.checked = true; }); recipeSelect.value = ""; say("All currently applicable local analyzers selected."); });
   recipeSelect.addEventListener("change", () => { const [id, revision] = recipeSelect.value.split("@"); const recipe = recipes.find(item => item.id === id && item.revision === Number(revision)); if (recipe) applyRecipe(recipe); });
   // #349: disabling the button was the only feedback while a request was in
   // flight -- easy to miss (no visual change beyond a slightly greyed-out

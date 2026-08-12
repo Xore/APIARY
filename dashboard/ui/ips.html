@@ -97,6 +97,7 @@
         <div class="filters">
           <a class="chip" href="/ips">&larr; attack sources</a>
           <a class="chip" href="/events?ip={{.IP | urlquery}}">all matching events</a>
+          <a class="chip" href="/recordings?ip={{.IP | urlquery}}" title="TTY session recordings from this IP, if any">session recordings</a>
           <a class="chip" href="/export/events.csv?ip={{.IP | urlquery}}">export CSV &darr;</a>
           {{if .ConfirmedMalicious}}<span class="chip badge badge--danger" title="A Windows sandbox run made a network connection to this IP -- floss/sandbox IOC correlation, #680">confirmed malicious (sandbox)</span>{{end}}
         </div>

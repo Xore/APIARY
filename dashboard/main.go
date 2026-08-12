@@ -736,14 +736,21 @@ func main() {
 		renderPage(w, tmpl, "ghidra", &data)
 	})
 	// #1239: unlike /ghidra and /github-analysis just above, revdeck/cape
-	// results were never a standalone list view -- they're per-payload
-	// analyzer results only ever linked as /revdeck/{sha256} from a
-	// payload's own workbench page (workbench_domain.go's ResultLinkShape),
-	// so there's no former list tab to redirect a bare path to. Send it to
-	// /payloads instead, where an operator would actually go to find a
-	// hash to analyze, rather than the bare unstyled 404 the /revdeck/
-	// handler below produced for an empty/invalid sha.
+	// have no merged listing view to redirect a bare visit into -- both are
+	// detail-only (capeData/revdeckData both error immediately on an empty
+	// hash, #1156's own comment). Without this, a bare "/revdeck" request
+	// fell through to net/http.ServeMux's own implicit redirect-to-
+	// trailing-slash behavior, landing on "/revdeck/" with an empty sha --
+	// which the handler below correctly treats as an invalid hash and
+	// answers with a bare, chrome-less http.NotFound, indistinguishable
+	// from a broken route. Redirecting to /payloads (the natural place to
+	// find a real hash to visit either page with) fixes the reported
+	// symptom regardless of which layer the ServeMux redirect itself
+	// behaves correctly at.
 	http.HandleFunc("/revdeck", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/payloads", http.StatusFound)
+	})
+	http.HandleFunc("/cape", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/payloads", http.StatusFound)
 	})
 	http.HandleFunc("/revdeck/", func(w http.ResponseWriter, r *http.Request) {
@@ -758,9 +765,6 @@ func main() {
 			return
 		}
 		renderPage(w, tmpl, "revdeck", &data)
-	})
-	http.HandleFunc("/cape", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/payloads", http.StatusFound)
 	})
 	http.HandleFunc("/cape/", func(w http.ResponseWriter, r *http.Request) {
 		sha, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/cape/"))
@@ -829,6 +833,14 @@ func main() {
 	http.HandleFunc("/commands", func(w http.ResponseWriter, r *http.Request) {
 		data := s.commandsData(r)
 		renderPage(w, tmpl, "commands", &data)
+	})
+	// #1268: TTY session replays previously had no dedicated, browsable
+	// entry point -- only surfaced inline on the one event row that carries
+	// TTYReplay (/events, /sessions/<id>). Same in-memory-cache shape as
+	// /commands just above.
+	http.HandleFunc("/recordings", func(w http.ResponseWriter, r *http.Request) {
+		data := s.recordingsData(r)
+		renderPage(w, tmpl, "recordings", &data)
 	})
 	http.HandleFunc("/payload-analysis/", func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(r.URL.Path, "/payload-analysis/")

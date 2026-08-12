@@ -128,12 +128,17 @@ type workbenchAnalyzer struct {
 	ExternallySends bool     `json:"externally_publishing"`
 	Detonates       bool     `json:"detonates"`
 	GPU             bool     `json:"gpu_consuming"`
-	// #1234: every other applicable+available analyzer here is pre-checked
-	// by default (payload_workbench.html); the one route that can reach
-	// real internet infrastructure (C2, exfiltration -- see windows-ghosts'
-	// own Description) should not be, so an operator reviewing the recipe
-	// quickly and clicking "Run all applicable" can't detonate live malware
-	// with real outbound connectivity without deliberately opting in.
+	// RequiresOptIn (#1234): true only for the one route that reaches real
+	// internet infrastructure (windows-ghosts) -- ui/payload_workbench.html
+	// pre-checks every other Applicable+Available analyzer's checkbox by
+	// default, which is fine for routes that only ever touch this host's
+	// own isolated KVM network, but meant an operator who reviewed the
+	// recipe quickly and clicked "Run all applicable" could detonate live
+	// malware with real outbound C2/exfiltration connectivity without
+	// deliberately choosing that route. Not LocalOnly: every analyzer here
+	// (including windows-ghosts and cape) sets LocalOnly true -- it means
+	// "orchestrated by this dashboard instance", not "network-isolated",
+	// so it can't be reused for this.
 	RequiresOptIn  bool                  `json:"requires_opt_in"`
 	DefaultOptions workbenchOptions      `json:"default_options"`
 	OptionSchema   workbenchOptionSchema `json:"option_schema"`

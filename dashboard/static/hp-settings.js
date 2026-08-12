@@ -41,11 +41,30 @@
     window.setTimeout(() => status.classList.remove("open"), 5000);
   }
 
+  // #1235: a bare 401 here means the OIDC session itself is gone (the
+  // middleware only 401s /api/* for a missing/invalid session -- this
+  // handler's own identity check degrades to the non-admin panes instead of
+  // erroring, see /api/settings/modal's registration). The Keycloak browser
+  // SSO cookie almost always outlives this dashboard's own session/refresh
+  // token, so redirecting through /auth/login re-authenticates silently and
+  // lands back on the same page -- the same thing a manual reload was doing
+  // (a top-level nav's 401 already redirects to login via the middleware),
+  // just without the user having to notice the dead-end error and do it
+  // themselves.
+  function redirectToLogin() {
+    const returnTo = window.location.pathname + window.location.search + window.location.hash;
+    window.location.href = "/auth/login?return_to=" + encodeURIComponent(returnTo);
+  }
+
   function ensureLoaded() {
     if (ready) return Promise.resolve(true);
     if (!loading) {
       loading = fetch("/api/settings/modal", { cache: "no-store" })
         .then(response => {
+          if (response.status === 401) {
+            redirectToLogin();
+            throw new Error("401");
+          }
           if (!response.ok) throw new Error(String(response.status));
           return response.text();
         })
@@ -393,6 +412,17 @@
         ...options,
         headers: { Accept: "application/json", ...(options.headers || {}) }
       });
+      // #1235: same reasoning as ensureLoaded()'s own 401 handling above --
+      // every settings/admin pane in this file goes through here, so this
+      // one branch covers the PATCH-preferences 401 and all six admin
+      // subsections' own "could not be loaded" failures, not just the
+      // modal's initial fetch.
+      if (response.status === 401) {
+        redirectToLogin();
+        const error = new Error("session expired -- redirecting to sign in");
+        error.status = 401;
+        throw error;
+      }
       if (!response.ok) {
         const error = new Error(await response.text().catch(() => response.statusText));
         error.status = response.status;

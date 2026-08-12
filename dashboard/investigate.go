@@ -42,19 +42,19 @@ func (s *store) commandsData(r *http.Request) commandsPage {
 	}
 	groups := map[string]*agg{}
 	for _, e := range s.getEvents() {
-		// Trim before grouping: a command differing only in trailing
-		// whitespace (seen live from real cowrie sessions) otherwise gets
-		// its own row that's visually indistinguishable from the trimmed
-		// one, reading as a dashboard bug rather than the attacker-supplied
-		// data variance it actually is.
-		command := strings.TrimSpace(e.Command)
-		if command == "" || !f.match(e) {
+		// #1241: trimmed before grouping, not just displayed trimmed --
+		// "enable" and "enable " (trailing whitespace some sensors emit)
+		// otherwise group separately, showing up as visually-identical
+		// duplicate rows with different Link hrefs (?cmd=enable vs
+		// ?cmd=enable+).
+		cmd := strings.TrimSpace(e.Command)
+		if cmd == "" || !f.match(e) {
 			continue
 		}
-		key := e.Sensor + "\x00" + command
+		key := e.Sensor + "\x00" + cmd
 		a := groups[key]
 		if a == nil {
-			a = &agg{row: commandRow{Sensor: e.Sensor, Command: command}, sources: map[string]bool{}, sessions: map[string]bool{}}
+			a = &agg{row: commandRow{Sensor: e.Sensor, Command: cmd}, sources: map[string]bool{}, sessions: map[string]bool{}}
 			groups[key] = a
 		}
 		a.row.Count++

@@ -50,25 +50,27 @@ func newESClient(base, filebeatBase string) *esClient {
 	return &esClient{base: strings.TrimRight(base, "/"), filebeatBase: strings.TrimRight(filebeatBase, "/"), http: &http.Client{Timeout: 8 * time.Second}, stat: esStatus{Enabled: base != ""}}
 }
 
-// maxESResponseBytes bounds how much of an Elasticsearch response body this
-// client will buffer into memory.
-const maxESResponseBytes = 16 << 20
+// esResponseBodyCap bounds every Elasticsearch response this client reads.
+// esResultsClient (elastic search results, a separate *esClient instance)
+// uses the same cap via this same helper.
+const esResponseBodyCap = 16 << 20 // 16MiB
 
-// readESBody reads r capped at maxESResponseBytes and errors clearly if the
-// real response was actually larger, rather than silently handing truncated
-// bytes to json.Unmarshal (#1233: a genuinely oversized response -- seen
-// live from /dead-letters and /history, which return full raw documents
-// rather than a paginated/summarized view -- produced a confusing
-// "Unterminated string in JSON at position 16777216" instead of an
-// actionable error). io.LimitReader itself never errors on truncation, so
-// the +1/len comparison below is what actually detects it.
-func readESBody(r io.Reader) ([]byte, error) {
-	b, err := io.ReadAll(io.LimitReader(r, maxESResponseBytes+1))
+// readCappedBody reads up to esResponseBodyCap bytes from r and errors
+// instead of silently truncating when the real response is larger (#1233).
+// The four call sites below used to feed io.LimitReader's silently-cut-off
+// bytes straight to json.Unmarshal, surfacing a confusing "unterminated
+// string" parse error with no indication the response was ever truncated
+// -- deadLetters()/history() in particular return full raw documents
+// rather than a paginated/summarized view, so a real ES response can
+// exceed this cap. Reads one byte past the cap (not the whole oversized
+// body) to tell "exactly at the cap" apart from "larger than the cap".
+func readCappedBody(r io.Reader) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(r, esResponseBodyCap+1))
 	if err != nil {
 		return nil, err
 	}
-	if len(b) > maxESResponseBytes {
-		return nil, fmt.Errorf("Elasticsearch response exceeds %d MB -- narrow the query (a smaller time window or a tighter filter)", maxESResponseBytes>>20)
+	if int64(len(b)) > esResponseBodyCap {
+		return nil, fmt.Errorf("Elasticsearch response exceeds the %d byte cap -- narrow the query and try again", esResponseBodyCap)
 	}
 	return b, nil
 }
@@ -85,7 +87,7 @@ func (c *esClient) request(path string) ([]byte, error) {
 		return nil, err
 	}
 	defer r.Body.Close()
-	b, err := readESBody(r.Body)
+	b, err := readCappedBody(r.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +112,7 @@ func (c *esClient) requestMethod(method, path string) ([]byte, error) {
 		return nil, err
 	}
 	defer r.Body.Close()
-	b, err := readESBody(r.Body)
+	b, err := readCappedBody(r.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +139,7 @@ func (c *esClient) searchBody(path string, body []byte) ([]byte, error) {
 		return nil, err
 	}
 	defer r.Body.Close()
-	b, err := readESBody(r.Body)
+	b, err := readCappedBody(r.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +173,7 @@ func (c *esClient) doRequest(method, path string, body []byte) (status int, resp
 		return 0, nil, err
 	}
 	defer r.Body.Close()
-	b, err := readESBody(r.Body)
+	b, err := readCappedBody(r.Body)
 	if err != nil {
 		return 0, nil, err
 	}
