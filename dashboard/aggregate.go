@@ -205,6 +205,7 @@ func (s *store) rebuild() {
 			FingerKind:    ev.fingerKind,
 			Category:      ev.category,
 			Severity:      ev.severity,
+			ICSSeverity:   ev.icsSeverity,
 			Detail:        ev.detail,
 			IsLogin:       ev.isLogin,
 			HasCredential: ev.isLogin && validCredentialPair(ev.user, ev.pass),

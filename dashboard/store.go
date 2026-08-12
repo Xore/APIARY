@@ -176,6 +176,7 @@ type storedEvent struct {
 	FingerKind    string  `json:",omitempty"`
 	Category      string  `json:",omitempty"`
 	Severity      int     `json:",omitempty"`
+	ICSSeverity   string  `json:",omitempty"` // dnp3 (#1290): "critical"/"high" for control-function app_function codes
 	Detail        string
 	IsLogin       bool   `json:",omitempty"`
 	HasCredential bool   `json:",omitempty"`
