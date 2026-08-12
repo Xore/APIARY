@@ -22,6 +22,23 @@ on:
         required: true
         default: home
         options: [home, vps, both]
+  # #1225: the VPS's live traefik/dynamic.yml reverted to the repo's own
+  # committed auth.honeypot.example placeholder sometime between 2026-08-02
+  # (deploy.yml's own domain-substitution step's last confirmed-successful
+  # VPS run) and 2026-08-11 (when it was found live, breaking OIDC
+  # discovery for every fresh dashboard container start) -- outside
+  # deploy.yml entirely, since that workflow never targeted the VPS at all
+  # in that whole window (confirmed via `gh run list` history). Whatever
+  # touched the file did so without going through the one place that
+  # substitutes the real domain, so the fix isn't "make the substitution
+  # step more reliable" (it already was, every time it ran) -- it's
+  # catching the *drift* between deploys, which nothing did before this.
+  # A schedule trigger on this otherwise on-demand, read-only workflow
+  # does exactly that: on(schedule) can't carry workflow_dispatch's own
+  # `inputs.target`, so every job below also runs unconditionally for a
+  # scheduled trigger (see each job's own `if`).
+  schedule:
+    - cron: '17 */6 * * *'
 
 permissions:
   contents: read
@@ -32,7 +49,7 @@ concurrency:
 
 jobs:
   home:
-    if: inputs.target == 'home' || inputs.target == 'both'
+    if: github.event_name == 'schedule' || inputs.target == 'home' || inputs.target == 'both'
     runs-on: [self-hosted, linux, x64, honeypot-home]
     environment: production-home
     steps:
@@ -150,7 +167,7 @@ jobs:
           exit "$status"
 
   vps:
-    if: inputs.target == 'vps' || inputs.target == 'both'
+    if: github.event_name == 'schedule' || inputs.target == 'vps' || inputs.target == 'both'
     runs-on: ubuntu-latest
     environment: production-vps
     steps:
@@ -215,3 +232,38 @@ jobs:
              wg show 2>&1 | grep -E "interface|latest handshake|transfer"' \
             2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || report "SSH to the VPS failed"
           report '```'
+      # #1225: catches exactly the drift a scheduled run exists for --
+      # the live traefik/dynamic.yml reverting to the repo's own committed
+      # placeholder domain independent of (and undetected between) actual
+      # deploy.yml runs. Unlike every other step in this job, this one
+      # hard-fails (does not just report(1) and continue) so a scheduled
+      # run's own red X is the alert -- there is no human reading
+      # GITHUB_STEP_SUMMARY on a cron trigger.
+      - name: OIDC discovery is reachable (#1225)
+        shell: bash
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          DOMAIN: ${{ secrets.DOMAIN }}
+        run: |
+          set -uo pipefail
+          report() { printf '%s\n' "$*" >> "$GITHUB_STEP_SUMMARY"; printf '%s\n' "$*"; }
+          ssh_options=(-i ~/.ssh/honeypot_vps -p "${VPS_PORT:-2222}" -o StrictHostKeyChecking=accept-new)
+          report "# OIDC discovery check"
+          if ssh "${ssh_options[@]}" "${VPS_USER:-root}@${VPS_HOST}" \
+            'grep -q "honeypot.example" /root/vps/traefik/dynamic.yml 2>/dev/null'; then
+            report "::error::traefik/dynamic.yml on the live VPS contains placeholder domains (auth.honeypot.example) -- every Traefik router keyed on the real domain is unreachable. Was this file touched outside deploy.yml's own domain-substitution step? See #1225."
+            exit 1
+          fi
+          if [ -z "$DOMAIN" ]; then
+            report "DOMAIN secret is not set -- cannot check OIDC discovery reachability, only checked for the placeholder string above."
+            exit 0
+          fi
+          status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+            "https://auth.${DOMAIN}/realms/apiary/.well-known/openid-configuration" || echo "000")
+          report "OIDC discovery HTTP status: $status"
+          if [ "$status" != "200" ]; then
+            report "::error::OIDC discovery at https://auth.\${DOMAIN}/realms/apiary/.well-known/openid-configuration returned $status, not 200 -- a fresh dashboard container start will fail outright (newOIDCAuth requires this unconditionally at startup). See #1225."
+            exit 1
+          fi
