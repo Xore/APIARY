@@ -99,8 +99,10 @@ func templateFuncs(s *store, world template.HTML) template.FuncMap {
 		return cfg.Behavior
 	}
 	return template.FuncMap{
-		"asset":    assetURL,
-		"worldMap": func() template.HTML { return world },
+		"asset":             assetURL,
+		"worldMap":          func() template.HTML { return world },
+		"chatMessageText":   chatMessageText,
+		"chatToolCallsText": chatToolCallsText,
 		// inc turns a 0-based {{range}} index into a 1-based CSS
 		// :nth-child() position, for the activity chart's per-bar height
 		// rule (see overview.html) -- nth-child counts from 1, {{range}}

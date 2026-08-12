@@ -162,6 +162,11 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 		{"sandbox-list", sandboxPageData{Generated: now}},
 		{"sandbox-vnc", sandboxVNCPageData{SHA256: strings.Repeat("f", 64), BridgeWS: "wss://sandbox-vnc.example.invalid/vnc"}},
 		{"ghidra", ghidraPageData{Generated: now, Detail: ghidraDetail}},
+		// #1288/#1285/#1286 shell+hydrate: "ghidra" above is now just the
+		// skeleton shell -- the real cards/tabs/evidence bodies (and their
+		// own risk of an unbalanced tag) only exist in "ghidra-detail-body",
+		// rendered separately by the fragment route.
+		{"ghidra-detail-body", ghidraPageData{Generated: now, Detail: ghidraDetail}},
 		{"ghidra-list", ghidraPageData{Generated: now}},
 		{"github-analysis", githubAnalysisPageData{Generated: now, Detail: githubAnalysisDetail}},
 		{"github-analysis-list", githubAnalysisPageData{Generated: now}},
@@ -255,7 +260,11 @@ func TestTabsAndPanelsAgreeOnEveryPage(t *testing.T) {
 	}{
 		{"page", "overview", snapshot{}},
 		{"sandbox", "sandbox detail", sandboxPageData{Generated: now, Detail: detail}},
-		{"ghidra", "ghidra detail", ghidraPageData{Generated: now, Detail: ghidraDetail}},
+		// #1288/#1285/#1286 shell+hydrate: the "ghidra" template is now
+		// just the shell (no tabs -- those, and everything else ES-derived,
+		// only exist in "ghidra-detail-body", rendered by the fragment
+		// route hp-ghidra-report.js fetches client-side).
+		{"ghidra-detail-body", "ghidra detail", ghidraPageData{Generated: now, Detail: ghidraDetail}},
 		{"github-analysis", "github analysis detail", githubAnalysisPageData{Generated: now, Detail: githubAnalysisDetail}},
 		{"payload-analysis", "payload analysis", binaryAnalysis{}},
 		{"reports", "reports studio", snapshot{}},

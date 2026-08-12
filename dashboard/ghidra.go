@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -207,6 +208,36 @@ type ghidraChatMessage struct {
 	Content   json.RawMessage `json:"content,omitempty"`
 	ToolCalls json.RawMessage `json:"tool_calls,omitempty"`
 	Name      string          `json:"name,omitempty"`
+}
+
+// chatMessageText (#1286) renders a ghidraChatMessage.Content for display.
+// A user/assistant message's content is a bare JSON string ("hello"),
+// which this unquotes to the actual text an operator should read; a tool
+// message's content shape is not fixed (see ghidraChatMessage's own
+// comment on why Content stays json.RawMessage), so anything that is not
+// a bare string falls back to an indented JSON dump rather than showing
+// nothing.
+func chatMessageText(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	var pretty bytes.Buffer
+	if json.Indent(&pretty, raw, "", "  ") == nil {
+		return pretty.String()
+	}
+	return string(raw)
+}
+
+// chatToolCallsText (#1286) pretty-prints a ghidraChatMessage.ToolCalls
+// array for the collapsible detail under a chat bubble -- always a JSON
+// array/object, never a bare string, unlike chatMessageText's content.
+func chatToolCallsText(raw json.RawMessage) string {
+	var pretty bytes.Buffer
+	if json.Indent(&pretty, raw, "", "  ") == nil {
+		return pretty.String()
+	}
+	return string(raw)
 }
 
 // ghidraChatThread is one entry of GET /chat/threads/{job_id} (#1193).
@@ -732,6 +763,21 @@ func attachGhidraCallGraph(row *ghidraResult, artifacts map[string]bool) {
 		return
 	}
 	row.CallGraphURL = "/export/ghidra/" + row.SHA256 + "/callgraph.svg"
+}
+
+// ghidraDetailShell (#1288/#1285/#1286 shell+hydrate conversion) is the
+// synchronous half of "GET /ghidra/{sha}": everything the initial page
+// render needs is the hash itself, taken straight from the URL and never
+// read from Elasticsearch. The real content -- everything ghidraData
+// below actually resolves via ES -- is rendered by the "ghidra-detail-body"
+// template against a real ghidraData() result, executed only by the new
+// "GET /ghidra/{sha}/fragment" route on the client's own follow-up
+// request; hp-ghidra-report.js fetches that fragment once on page load to
+// replace the shell's skeleton placeholder. Mirrors
+// payload_analysis.go's payloadAnalysisShell/servePayloadStaticAnalysis
+// split -- see that file's own comment for the general reasoning.
+func ghidraDetailShell(sha256 string) ghidraPageData {
+	return ghidraPageData{Generated: time.Now(), Detail: &ghidraResult{SHA256: sha256}}
 }
 
 func (s *store) ghidraData(sha256, query string) (ghidraPageData, error) {
