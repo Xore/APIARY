@@ -135,7 +135,7 @@ func (s *store) registerInvestigateRoutes(mux *http.ServeMux, tmpl *template.Tem
 	// matches every other method for that path, which the GET-only
 	// wildcard doesn't cover), and ServeMux panics on that kind of
 	// ambiguity at registration time instead of picking a winner
-	// (confirmed live). main() registers "GET /sandbox/vnc" -- see that
+	// (confirmed live). routes.go registers "GET /sandbox/vnc" -- see that
 	// call site's own comment -- specifically to keep this a clean,
 	// non-conflicting subset.
 	mux.HandleFunc("GET /sandbox/{job}", func(w http.ResponseWriter, r *http.Request) {
