@@ -80,6 +80,25 @@ func secHeaders(w http.ResponseWriter, nonceValue string) {
 			// itself) and fonts.gstatic.com (font-src, for the actual font
 			// files) as required for any consumer.
 			"style-src 'self' 'nonce-"+nonceValue+"' https://fonts.googleapis.com; "+
+			// #1224: ECharts' own canvas renderer sets inline style
+			// ATTRIBUTES via plain JS DOM property assignment (container.
+			// style.cssText = ..., not a <style> tag) -- confirmed live,
+			// this genuinely broke chart rendering without an explicit
+			// allowance. A bare 'unsafe-inline' on style-src itself
+			// wouldn't work here: per the CSP spec (confirmed against
+			// Chrome's own console message when this was diagnosed),
+			// 'unsafe-inline' is ignored outright wherever a nonce or hash
+			// source is ALSO present in that same directive's source list,
+			// regardless of order -- so it would need dropping style-src's
+			// nonce entirely (weakening its real protection against an
+			// injected <style> block) just to unblock attribute mutations.
+			// style-src-attr is CSP3's own separate, more specific
+			// directive for exactly style="" attribute mutations -- an
+			// independent source list from style-src, so its own
+			// 'unsafe-inline' isn't shadowed by style-src's nonce, and
+			// style-src itself (governing <style> tags/blocks) keeps its
+			// full nonce-only protection unchanged.
+			"style-src-attr 'unsafe-inline'; "+
 			"img-src 'self' data: https://tile.openstreetmap.org; "+
 			connectSrc+"; "+
 			frameSrc+"; "+

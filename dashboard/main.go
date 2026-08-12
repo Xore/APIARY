@@ -349,6 +349,9 @@ func main() {
 	})
 	http.HandleFunc("/api/map-points", s.serveMapPoints)
 	http.HandleFunc("/api/attacker-graph", s.serveAttackerGraph)
+	http.HandleFunc("/api/attck-coverage", s.serveAttckCoverage)
+	http.HandleFunc("/api/campaign-timeline", s.serveCampaignTimeline)
+	http.HandleFunc("/api/kill-chain-sankey", s.serveKillChainSankey)
 	http.HandleFunc("/api/heatmap", s.serveHeatmap)
 	http.HandleFunc("/api/attack-vectors", s.serveAttackVectors)
 	http.HandleFunc("/api/quick-search", s.serveQuickSearch)
@@ -590,6 +593,10 @@ func main() {
 	http.HandleFunc("/attackers", func(w http.ResponseWriter, r *http.Request) {
 		data := s.attackersData(r)
 		renderPage(w, tmpl, "attackers", &data)
+	})
+	http.HandleFunc("/kill-chain", func(w http.ResponseWriter, r *http.Request) {
+		data := s.killChainData()
+		renderPage(w, tmpl, "kill-chain", &data)
 	})
 	http.HandleFunc("/history", func(w http.ResponseWriter, r *http.Request) {
 		data := s.get()
