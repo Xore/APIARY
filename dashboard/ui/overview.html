@@ -208,6 +208,27 @@
           {{if .GeoOn}}{{template "tbl" dict "t" "Top countries" "rows" .Countries}}{{else if .Countries}}{{template "tbl" dict "t" "Top countries (cf-ipcountry)" "rows" .Countries}}{{end}}
           {{template "tbl" dict "t" "Top autonomous systems" "rows" .ASNs "class" "half"}}
           {{template "tbl" dict "t" "Network/provider classes" "rows" .Providers "class" "half"}}
+
+          {{/* #1278: wire-level flow volume from suricata-v2-netflow-*, live
+               ES date_histogram+sum (netflow_volume.go) -- the event-count
+               heatmap above cannot show this: a large download/exfil spike
+               and a single probe look identical in an event count, only
+               visible in actual bytes/packets. Two cards, not one dual-axis
+               chart -- bytes and packets are different units on wildly
+               different scales, and initLine's shared value axis (built for
+               same-unit multi-series like #1283's per-source backlog) would
+               make one series unreadable next to the other. */}}
+          <div class="card wide" id="netflow-bytes-card">
+            <h2>Traffic volume — bytes/hour, last 7 days</h2>
+            <div data-echart="/api/netflow-bytes" data-echart-kind="line" style="width:100%;height:280px"></div>
+            <p class="note" data-echart-status="/api/netflow-bytes">Loading&hellip;</p>
+            <p class="note">Summed from every captured flow's byte count, all sensors and ports combined. A spike stands out here even when it doesn't in the event-count activity heatmap above.</p>
+          </div>
+          <div class="card wide" id="netflow-packets-card">
+            <h2>Traffic volume — packets/hour, last 7 days</h2>
+            <div data-echart="/api/netflow-packets" data-echart-kind="line" style="width:100%;height:280px"></div>
+            <p class="note" data-echart-status="/api/netflow-packets">Loading&hellip;</p>
+          </div>
         </div>
 
         <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-behavior" role="tabpanel" data-dashboard-panel="behavior" hidden>
