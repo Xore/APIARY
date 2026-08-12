@@ -15,7 +15,7 @@
 
   if (typeof echarts === "undefined") return;
 
-  const initFns = { sankey: initSankey, timeline: initTimeline, heatmap: initHeatmap, pie: initPie, line: initLine, bar: initBar, scatter: initScatter };
+  const initFns = { sankey: initSankey, timeline: initTimeline, heatmap: initHeatmap, pie: initPie, line: initLine, bar: initBar, scatter: initScatter, radar: initRadar };
 
   // #1277: exposed as window.initHoneypotCharts (same convention hp-app.js's
   // own window.initHoneypotMaps already uses) so a page whose content gets
@@ -129,6 +129,39 @@
     });
     if (data.length === 0) return "No data yet.";
     return `${data.length} categor${data.length === 1 ? "y" : "ies"}, ${total} total.`;
+  }
+
+  // Single-series radar chart -- data is {categories: [string], values:
+  // [number], ips: [string]}, one axis per category. First consumer:
+  // #1280's /api/attacker-fusion, where each axis is a signal category
+  // (JA3/JA4/p0f OS/SSH client/Payload hash) and the value is how many
+  // distinct values in that category are shared by 2+ of the entity's
+  // member IPs -- a visibly larger radar lobe on one axis is direct
+  // evidence that signal drove the merge. Max per axis is derived from the
+  // data itself (largest value across all axes, floor 1 so an
+  // all-zero/no-overlap-yet entity still renders a real polygon instead of
+  // a degenerate point).
+  function initRadar(chart, data) {
+    data = data || {};
+    const categories = data.categories || [];
+    const values = data.values || [];
+    const max = Math.max(1, ...values);
+    chart.setOption({
+      tooltip: { trigger: "item" },
+      radar: {
+        indicator: categories.map(c => ({ name: c, max })),
+        axisName: { color: "var(--text-primary)" },
+        splitArea: { areaStyle: { color: ["transparent"] } },
+      },
+      series: [{
+        type: "radar",
+        data: [{ value: values, areaStyle: { opacity: 0.25 }, itemStyle: { color: "var(--accent)" } }],
+      }],
+    });
+    const total = values.reduce((sum, v) => sum + v, 0);
+    if (categories.length === 0) return "No data yet.";
+    if (total === 0) return "No shared signals across this entity's member IPs yet.";
+    return `${total} shared signal value${total === 1 ? "" : "s"} across ${categories.length} categories.`;
   }
 
   // Generic multi-series time line/area chart -- data is [{name, points:
