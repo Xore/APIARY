@@ -1108,6 +1108,16 @@ step_ollama_model_pull() {
   model=$(jq -r '.slots.ghidra.artifact.tag // empty' "$REPO_DIR/analysis/ghidra/models/approved-models.json" 2>/dev/null)
   [[ -n "$model" ]] || { echo "could not resolve pinned model from approved-models.json"; return 1; }
   docker exec ghidra-ollama-1 ollama pull "$model"
+
+  # #1236: the dashboard's own semantic search (dashboard/main.go's
+  # LLM_EMBEDDING_MODEL, default "nomic-embed-text:latest") hits this same
+  # ollama instance for embeddings -- a completely different kind of model
+  # (embedding, not chat/completion) than the three qualification-gated
+  # slots above, so it deliberately isn't in approved-models.json's own
+  # benchmark/gate manifest. Without this, semantic search 404'd on every
+  # fresh install with "model \"nomic-embed-text:latest\" not found, try
+  # pulling it first" until someone happened to pull it by hand.
+  docker exec ghidra-ollama-1 ollama pull nomic-embed-text:latest
 }
 
 step_ghidra_worker_install() {

@@ -191,6 +191,17 @@ if [ "$SKIP_PULL" = 0 ]; then
   # Pulls are resumable and skip layers already present, so re-running this is
   # cheap; checking first would only save the round trip.
   dc exec -T ollama ollama pull "$MODEL"
+
+  # #1236: the dashboard's own semantic search (dashboard/main.go's
+  # LLM_EMBEDDING_MODEL, default "nomic-embed-text:latest") hits this same
+  # ollama instance for embeddings -- a different kind of model (embedding,
+  # not chat/completion) than $MODEL above, so it's pulled separately here
+  # rather than folded into approved-models.json's chat-model qualification
+  # manifest. Without this, semantic search 404'd with "model
+  # \"nomic-embed-text:latest\" not found, try pulling it first" on any
+  # host installed via this script until someone pulled it by hand.
+  say "pulling embedding model nomic-embed-text:latest"
+  dc exec -T ollama ollama pull nomic-embed-text:latest
 fi
 dc exec -T ollama ollama list
 
