@@ -25,307 +25,327 @@
 
    Markup mirrors payloads.html's own template output exactly (same
    classes, same empty-state copy) so hydration is visually seamless --
-   this is a Go template's output re-expressed in JS, not a redesign. */
+   this is a Go template's output re-expressed in JS, not a redesign.
+
+   /payload-analysis/<hash> is one of hp-dynamic-nav.js's DYNAMIC_ROUTES:
+   navigating from one hash's page to another's swaps in a fresh
+   [data-hp-page-content] without ever re-fetching this script (already
+   loaded from the first visit) -- run() below re-queries the live DOM and
+   re-fires both fetches on every "hp-dynamic-nav" event, not just once at
+   initial script load, so the second hash's skeleton cards actually
+   hydrate instead of sitting there until a full reload. The click
+   listeners are registered exactly once, outside run(), and always
+   dispatch to whichever page's load functions are current -- registering
+   them inside run() would pile up a duplicate listener per navigation. */
 (() => {
   "use strict";
 
-  const root = document.querySelector("[data-hp-page-content]");
-  const hash = root?.dataset.hpPlHash;
-  if (!root || !hash) return;
-
   const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-  // --- Aggregation hydration (#1142, unchanged) ---------------------------
+  let loadAggregation = () => {};
+  let loadStaticAnalysis = () => {};
 
-  const sandboxTarget = document.querySelector("[data-hp-pl-sandbox-runs]");
-  const githubTarget = document.querySelector("[data-hp-pl-github-analysis]");
-  const knownTarget = document.querySelector("[data-hp-pl-known-elsewhere]");
-  const knownHeading = document.getElementById("hp-pl-known-elsewhere-heading");
-
-  function renderSandboxRuns(runs) {
-    if (!runs || !runs.length) {
-      sandboxTarget.innerHTML = `<p class="empty">No completed KVM sandbox run for this payload. Queue one from the <a class="lnk" href="/payload-workbench/${escapeHTML(hash)}">analysis workbench</a>.</p>`;
+  function run() {
+    const root = document.querySelector("[data-hp-page-content]");
+    const hash = root?.dataset.hpPlHash;
+    if (!root || !hash) {
+      loadAggregation = () => {};
+      loadStaticAnalysis = () => {};
       return;
     }
-    const rows = runs.map(run => `
+
+    // --- Aggregation hydration (#1142, unchanged) ---------------------------
+
+    const sandboxTarget = document.querySelector("[data-hp-pl-sandbox-runs]");
+    const githubTarget = document.querySelector("[data-hp-pl-github-analysis]");
+    const knownTarget = document.querySelector("[data-hp-pl-known-elsewhere]");
+    const knownHeading = document.getElementById("hp-pl-known-elsewhere-heading");
+
+    function renderSandboxRuns(runs) {
+      if (!runs || !runs.length) {
+        sandboxTarget.innerHTML = `<p class="empty">No completed KVM sandbox run for this payload. Queue one from the <a class="lnk" href="/payload-workbench/${escapeHTML(hash)}">analysis workbench</a>.</p>`;
+        return;
+      }
+      const rows = runs.map(run => `
       <tr><td>${escapeHTML(run.completed_at)}</td><td class="n">${escapeHTML(run.exit_status)}</td><td class="n">${(run.changed_files || []).length}</td><td><a class="lnk" href="/sandbox/${encodeURIComponent(run.job)}">sandbox report &rarr;</a></td></tr>`).join("");
-    sandboxTarget.innerHTML = `<div class="card__scroll"><table class="data-table"><thead><tr><th>completed</th><th>exit</th><th>changed paths</th><th>details</th></tr></thead><tbody>${rows}</tbody></table></div>`;
-  }
+      sandboxTarget.innerHTML = `<div class="card__scroll"><table class="data-table"><thead><tr><th>completed</th><th>exit</th><th>changed paths</th><th>details</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    }
 
-  function renderGitHubAnalysis(github, family, familyLink) {
-    if (!github) {
-      githubTarget.innerHTML = `<p class="empty">Not published to Xore/honeypot. Use <strong>Publish to Xore/honeypot</strong> from the payload actions menu above to queue one.</p>`;
-      return;
+    function renderGitHubAnalysis(github, family, familyLink) {
+      if (!github) {
+        githubTarget.innerHTML = `<p class="empty">Not published to Xore/honeypot. Use <strong>Publish to Xore/honeypot</strong> from the payload actions menu above to queue one.</p>`;
+        return;
+      }
+      let html = `<div class="card__row"><span class="card__label">exit status</span><span class="card__value card__value--mono">${escapeHTML(github.exit_status)}</span></div>`;
+      if (github.verdict) {
+        html += `<div class="card__row"><span class="card__label">detections</span><span class="card__value card__value--mono">${escapeHTML(github.verdict.malicious)} / ${escapeHTML(github.verdict.total)} &bull; ${escapeHTML(github.verdict.level)}</span></div>`;
+      }
+      if (family) {
+        html += `<div class="card__row"><span class="card__label">family</span><span class="card__value"><a class="lnk" href="${escapeHTML(familyLink)}" title="Other sessions that delivered this family">${escapeHTML(family)}</a></span></div>`;
+      }
+      html += `<a class="lnk" href="/github-analysis/${encodeURIComponent(github.sha256)}">full result &rarr;</a>`;
+      githubTarget.innerHTML = html;
     }
-    let html = `<div class="card__row"><span class="card__label">exit status</span><span class="card__value card__value--mono">${escapeHTML(github.exit_status)}</span></div>`;
-    if (github.verdict) {
-      html += `<div class="card__row"><span class="card__label">detections</span><span class="card__value card__value--mono">${escapeHTML(github.verdict.malicious)} / ${escapeHTML(github.verdict.total)} &bull; ${escapeHTML(github.verdict.level)}</span></div>`;
-    }
-    if (family) {
-      html += `<div class="card__row"><span class="card__label">family</span><span class="card__value"><a class="lnk" href="${escapeHTML(familyLink)}" title="Other sessions that delivered this family">${escapeHTML(family)}</a></span></div>`;
-    }
-    html += `<a class="lnk" href="/github-analysis/${encodeURIComponent(github.sha256)}">full result &rarr;</a>`;
-    githubTarget.innerHTML = html;
-  }
 
-  function renderKnownElsewhere(correlation) {
-    if (knownHeading) {
-      const badge = correlation.known
-        ? `<span class="badge badge--green">already analyzed</span>`
-        : `<span class="badge badge--muted">not seen elsewhere</span>`;
-      knownHeading.innerHTML = `Known elsewhere ${badge}`;
-    }
-    const ghidraCell = correlation.ghidra
-      ? `<span class="badge badge--muted">${escapeHTML(correlation.ghidra.exit_status)}</span> completed ${escapeHTML(correlation.ghidra.completed_at)} &mdash; <a class="lnk" href="/ghidra/${escapeHTML(hash)}">full result &rarr;</a>`
-      : `<span class="empty">not yet analyzed</span> &mdash; <a class="lnk" href="/payload-workbench/${escapeHTML(hash)}">queue Ghidra &rarr;</a>`;
-    let esCell;
-    if (correlation.es_available) {
-      esCell = `${correlation.es_sightings} event(s)`;
-      if (correlation.es_first_seen) {
-        esCell += `, ${correlation.es_truncated ? "on or before " : ""}${escapeHTML(correlation.es_first_seen)} &ndash; ${escapeHTML(correlation.es_last_seen)}`;
+    function renderKnownElsewhere(correlation) {
+      if (knownHeading) {
+        const badge = correlation.known
+          ? `<span class="badge badge--green">already analyzed</span>`
+          : `<span class="badge badge--muted">not seen elsewhere</span>`;
+        knownHeading.innerHTML = `Known elsewhere ${badge}`;
       }
-      if (correlation.es_truncated) {
-        esCell += ` <span class="chip" title="More than 200 sightings; first-seen is the oldest record in the most recent 200, not necessarily the true first sighting.">truncated</span>`;
+      const ghidraCell = correlation.ghidra
+        ? `<span class="badge badge--muted">${escapeHTML(correlation.ghidra.exit_status)}</span> completed ${escapeHTML(correlation.ghidra.completed_at)} &mdash; <a class="lnk" href="/ghidra/${escapeHTML(hash)}">full result &rarr;</a>`
+        : `<span class="empty">not yet analyzed</span> &mdash; <a class="lnk" href="/payload-workbench/${escapeHTML(hash)}">queue Ghidra &rarr;</a>`;
+      let esCell;
+      if (correlation.es_available) {
+        esCell = `${correlation.es_sightings} event(s)`;
+        if (correlation.es_first_seen) {
+          esCell += `, ${correlation.es_truncated ? "on or before " : ""}${escapeHTML(correlation.es_first_seen)} &ndash; ${escapeHTML(correlation.es_last_seen)}`;
+        }
+        if (correlation.es_truncated) {
+          esCell += ` <span class="chip" title="More than 200 sightings; first-seen is the oldest record in the most recent 200, not necessarily the true first sighting.">truncated</span>`;
+        }
+        for (const sensor of correlation.es_sensors || []) {
+          esCell += ` <span class="chip">${escapeHTML(sensor.Key)}: ${escapeHTML(sensor.Count)}</span>`;
+        }
+      } else {
+        esCell = `<span class="empty">Elasticsearch not configured</span>`;
       }
-      for (const sensor of correlation.es_sensors || []) {
-        esCell += ` <span class="chip">${escapeHTML(sensor.Key)}: ${escapeHTML(sensor.Count)}</span>`;
-      }
-    } else {
-      esCell = `<span class="empty">Elasticsearch not configured</span>`;
-    }
-    knownTarget.innerHTML = `
+      knownTarget.innerHTML = `
       <div class="card__row"><span class="card__label">Ghidra</span><span class="card__value">${ghidraCell}</span></div>
       <div class="card__row"><span class="card__label">Elasticsearch sightings</span><span class="card__value">${esCell}</span></div>`;
-  }
-
-  function renderAggregationFailure(message) {
-    const errorHTML = `<p class="empty">Could not load &mdash; ${escapeHTML(message)}. <button class="lnk" type="button" data-hp-pl-aggregation-retry>Retry</button></p>`;
-    sandboxTarget.innerHTML = errorHTML;
-    githubTarget.innerHTML = errorHTML;
-    knownTarget.innerHTML = errorHTML;
-  }
-
-  async function loadAggregation() {
-    if (!sandboxTarget || !githubTarget || !knownTarget) return;
-    try {
-      const sha256 = root.dataset.hpPlSha256 || "";
-      const response = await fetch(`/api/payload-analysis/${encodeURIComponent(hash)}/aggregation?sha256=${encodeURIComponent(sha256)}`, { cache: "no-store" });
-      if (!response.ok) throw new Error(`request failed (${response.status})`);
-      const agg = await response.json();
-      renderSandboxRuns(agg.sandbox_runs);
-      renderGitHubAnalysis(agg.github_analysis, agg.family, agg.family_link);
-      renderKnownElsewhere(agg.correlation || {});
-    } catch (error) {
-      renderAggregationFailure(error.message);
     }
+
+    function renderAggregationFailure(message) {
+      const errorHTML = `<p class="empty">Could not load &mdash; ${escapeHTML(message)}. <button class="lnk" type="button" data-hp-pl-aggregation-retry>Retry</button></p>`;
+      sandboxTarget.innerHTML = errorHTML;
+      githubTarget.innerHTML = errorHTML;
+      knownTarget.innerHTML = errorHTML;
+    }
+
+    loadAggregation = async function () {
+      if (!sandboxTarget || !githubTarget || !knownTarget) return;
+      try {
+        const sha256 = root.dataset.hpPlSha256 || "";
+        const response = await fetch(`/api/payload-analysis/${encodeURIComponent(hash)}/aggregation?sha256=${encodeURIComponent(sha256)}`, { cache: "no-store" });
+        if (!response.ok) throw new Error(`request failed (${response.status})`);
+        const agg = await response.json();
+        renderSandboxRuns(agg.sandbox_runs);
+        renderGitHubAnalysis(agg.github_analysis, agg.family, agg.family_link);
+        renderKnownElsewhere(agg.correlation || {});
+      } catch (error) {
+        renderAggregationFailure(error.message);
+      }
+    };
+
+    loadAggregation();
+
+    // --- Static-analysis hydration (#1157) -----------------------------------
+
+    const noteTarget = document.querySelector("[data-hp-pl-classification-note]");
+    const riskTarget = document.querySelector("[data-hp-pl-risk]");
+    const packedTarget = document.querySelector("[data-hp-pl-packed]");
+    const iocsCountTarget = document.querySelector("[data-hp-pl-iocs-count]");
+    const moreHashesTarget = document.querySelector("[data-hp-pl-more-hashes]");
+    const identityTarget = document.querySelector("[data-hp-pl-identity]");
+    const scriptCard = document.getElementById("hp-pl-script-card");
+    const scriptBodyTarget = document.querySelector("[data-hp-pl-script-body]");
+    const yaraTarget = document.querySelector("[data-hp-pl-yara]");
+    const rulesTarget = document.querySelector("[data-hp-pl-rules]");
+    const iocListTarget = document.querySelector("[data-hp-pl-ioc-list]");
+    const bytesActionsTarget = document.querySelector("[data-hp-pl-bytes-actions]");
+    const textTarget = document.querySelector("[data-hp-pl-text]");
+    const decodedTarget = document.querySelector("[data-hp-pl-decoded]");
+
+    const evidenceBody = key => document.querySelector(`[data-hp-evidence-body="${key}"]`);
+    const setEvidence = (key, title, note, html) => {
+      const el = evidenceBody(key);
+      if (!el) return;
+      el.dataset.hpEvidenceTitle = title;
+      if (note) el.dataset.hpEvidenceNote = note;
+      el.innerHTML = html;
+    };
+
+    function renderClassificationNote(c) {
+      if (!noteTarget) return;
+      noteTarget.innerHTML = c.dynamic ? "" :
+        `<p class="note">${escapeHTML(c.label)} has no dynamic detonation path &mdash; ${escapeHTML(c.analysis_path)}. The evidence below is the whole analysis for this artifact.</p>`;
+    }
+
+    function renderKPIs(data) {
+      if (riskTarget) riskTarget.textContent = `${data.risk_score} / 100 • ${data.risk_level}`;
+      if (packedTarget) packedTarget.textContent = data.packed_likely ? "elevated" : "not indicated";
+      if (iocsCountTarget) iocsCountTarget.textContent = String((data.iocs || []).length);
+    }
+
+    function renderIdentity(data) {
+      const c = data.classification || {};
+      if (moreHashesTarget) {
+        moreHashesTarget.innerHTML = `<details class="action-menu hp-pl-label-trigger"><summary aria-label="More hashes" title="MD5 and SHA-1">More hashes</summary><div class="action-menu__popover hp-pl-info-popover" role="menu"><div class="hp-pl-info-row"><span class="k">MD5</span><span class="v">${escapeHTML(data.md5)}</span></div><div class="hp-pl-info-row"><span class="k">SHA-1</span><span class="v">${escapeHTML(data.sha1)}</span></div></div></details>`;
+      }
+      if (!identityTarget) return;
+      let html = `<div class="card__row"><span class="card__label">identified type</span><span class="card__value"><strong>${escapeHTML(c.label)}</strong> <span class="badge badge--muted">${escapeHTML(c.code)}</span></span></div>`;
+      html += `<div class="card__row"><span class="card__label">platform / category</span><span class="card__value card__value--mono">${escapeHTML(c.platform)} / ${escapeHTML(c.category)}</span></div>`;
+      html += `<div class="card__row"><span class="card__label">sandbox route</span><span class="card__value card__value--mono">${escapeHTML(c.analysis_path)}</span></div>`;
+      html += `<div class="card__row"><span class="card__label">dynamic execution</span><span class="card__value">${c.dynamic ? "supported for this type" : "not automatic; static analysis only"}</span></div>`;
+      html += `<div class="card__row"><span class="card__label">magic</span><span class="card__value">${escapeHTML(data.magic)}</span></div>`;
+      html += `<div class="card__row"><span class="card__label">MIME</span><span class="card__value card__value--mono">${escapeHTML(data.mime)}</span></div>`;
+      html += `<div class="card__row"><span class="card__label">size</span><span class="card__value card__value--mono">${escapeHTML(data.size)}</span></div>`;
+      html += `<div class="card__row"><span class="card__label">entropy</span><span class="card__value card__value--mono">${escapeHTML(data.entropy)}</span></div>`;
+      html += `<div class="card__row"><span class="card__label">SHA-256</span><span class="card__value card__value--mono">${escapeHTML(data.sha256)}</span></div>`;
+      if (data.truncated) html += `<p class="note">deep inspection capped at 16 MiB; hashes cover the complete file</p>`;
+      identityTarget.innerHTML = html;
+    }
+
+    // #1157: was a server-side `{{if or .ScriptType .Indicators}}` that
+    // omitted the whole card -- ScriptType/Indicators aren't known until this
+    // fetch resolves, so the card always renders (skeleton) and is hidden
+    // here instead when it turns out empty. See payloads.html's own comment
+    // on why the neighboring sandbox card no longer reflows to "wide" to fill
+    // the gap.
+    function renderScriptClassification(data) {
+      if (!scriptCard) return;
+      if (!data.script_type && !(data.indicators || []).length) {
+        scriptCard.hidden = true;
+        return;
+      }
+      scriptCard.hidden = false;
+      if (!scriptBodyTarget) return;
+      let html = "";
+      if (data.script_type) html += `<div class="card__row"><span class="card__label">language/type</span><span class="card__value card__value--mono">${escapeHTML(data.script_type)}</span></div>`;
+      if ((data.indicators || []).length) {
+        html += `<div class="card__row"><span class="card__label">behavior indicators</span><span class="card__value">${data.indicators.map(i => `<span class="chip">${escapeHTML(i)}</span>`).join(" ")}</span></div>`;
+      }
+      html += `<p class="note">Heuristic static findings only. Captured content is never interpreted or executed.</p>`;
+      scriptBodyTarget.innerHTML = html;
+    }
+
+    function renderYARA(data) {
+      if (!yaraTarget) return;
+      let html;
+      if ((data.yara_matches || []).length) {
+        const rows = data.yara_matches.map(m => `<tr><td><span class="badge badge--red">match</span></td><td class="v">${escapeHTML(m)}</td></tr>`).join("");
+        html = `<div class="card__scroll"><table class="data-table"><tbody>${rows}</tbody></table></div>`;
+      } else {
+        html = `<p class="empty">${data.yara_scanned ? "No YARA rules matched this sample." : "Waiting for the isolated YARA scanner."}</p>`;
+      }
+      if (data.yara_error) html += `<p class="note tw:text-red">${escapeHTML(data.yara_error)}</p>`;
+      if (data.yara_scanned) html += `<p class="note">Scanned ${escapeHTML(data.yara_scanned)} by the networkless YARA sidecar. A match is a triage signal, not attribution.</p>`;
+      yaraTarget.innerHTML = html;
+    }
+
+    function renderRules(data) {
+      if (!rulesTarget) return;
+      if ((data.rules || []).length) {
+        const rows = data.rules.map(r => `<tr><td><span class="badge badge--muted">${escapeHTML(r.severity)}</span></td><td class="v">${escapeHTML(r.name)}</td><td class="v">${escapeHTML(r.description)}</td></tr>`).join("");
+        rulesTarget.innerHTML = `<div class="card__scroll"><table class="data-table"><thead><tr><th>severity</th><th>rule</th><th>reason</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+      } else {
+        rulesTarget.innerHTML = `<p class="empty">No built-in static rules matched.</p>`;
+      }
+    }
+
+    function renderIOCList(data) {
+      if (!iocListTarget) return;
+      if ((data.iocs || []).length) {
+        const rows = data.iocs.map(ioc => `<tr><td class="v"><a href="/events?q=${encodeURIComponent(ioc)}" title="search telemetry for this indicator">${escapeHTML(ioc)}</a></td></tr>`).join("");
+        iocListTarget.innerHTML = `<div class="card__scroll"><table class="data-table"><tbody>${rows}</tbody></table></div>`;
+      } else {
+        iocListTarget.innerHTML = `<p class="empty">No URL, domain, or IP indicators found.</p>`;
+      }
+    }
+
+    function renderBytesAndMetadata(data) {
+      setEvidence("pl-hexdump", "Hex / ASCII preview — first 512 bytes", "", `<pre class="code">${escapeHTML(data.hexdump)}</pre>`);
+      if (bytesActionsTarget) {
+        let html = `<button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-hexdump">Hex / ASCII preview</button> `;
+        if ((data.format_info || []).length) {
+          html += `<button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-format">Executable metadata</button>`;
+          setEvidence("pl-format", "Executable metadata", "", `<pre class="code">${data.format_info.map(escapeHTML).join("\n")}</pre>`);
+        } else {
+          html += `<span class="chip">not a recognized PE/ELF file</span>`;
+        }
+        bytesActionsTarget.innerHTML = html;
+      }
+    }
+
+    function renderExtractedText(data) {
+      const ascii = data.ascii || [];
+      const utf16 = data.utf16 || [];
+      if (ascii.length) setEvidence("pl-ascii", "Printable strings", "Printable sequences extracted from the sample. Filter to find a specific indicator.", `<pre class="code">${ascii.map(escapeHTML).join("\n")}</pre>`);
+      if (utf16.length) setEvidence("pl-utf16", "UTF-16LE strings", "Wide-character sequences extracted from the sample.", `<pre class="code">${utf16.map(escapeHTML).join("\n")}</pre>`);
+      if (!textTarget) return;
+      if (!ascii.length && !utf16.length) {
+        textTarget.innerHTML = `<p class="empty">No printable sequences extracted.</p>`;
+        return;
+      }
+      let html = `<p class="note">${ascii.length} printable and ${utf16.length} wide-character sequence${utf16.length !== 1 ? "s" : ""} extracted.</p>`;
+      if (ascii.length) html += `<button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-ascii">Printable strings (${ascii.length})</button> `;
+      if (utf16.length) html += `<button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-utf16">UTF-16LE strings (${utf16.length})</button>`;
+      textTarget.innerHTML = html;
+    }
+
+    function renderDecoded(data) {
+      const decoded = data.decoded || [];
+      if (!decodedTarget) return;
+      if (!decoded.length) {
+        decodedTarget.innerHTML = `<p class="empty">no bounded Base64, hex, URL or UTF-16 candidates found</p>`;
+        return;
+      }
+      setEvidence("pl-decoded", "Decoded / deobfuscated candidates", "Bounded decodes of encoded content found in the sample. Never executed.",
+        decoded.map(d => `<p class="note">${escapeHTML(d.kind)} from <code>${escapeHTML(d.source)}</code></p><pre class="code">${escapeHTML(d.preview)}</pre>`).join(""));
+      decodedTarget.innerHTML = `<p class="note">${decoded.length} bounded Base64, hex, URL or UTF-16 candidate${decoded.length !== 1 ? "s" : ""} recovered.</p><button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-decoded">Open decoded candidates</button>`;
+    }
+
+    function renderStaticFailure(message) {
+      const errorHTML = `<p class="empty">Could not load &mdash; ${escapeHTML(message)}. <button class="lnk" type="button" data-hp-pl-static-retry>Retry</button></p>`;
+      if (identityTarget) identityTarget.innerHTML = errorHTML;
+      if (yaraTarget) yaraTarget.innerHTML = errorHTML;
+      if (rulesTarget) rulesTarget.innerHTML = errorHTML;
+      if (iocListTarget) iocListTarget.innerHTML = errorHTML;
+      if (bytesActionsTarget) bytesActionsTarget.innerHTML = errorHTML;
+      if (textTarget) textTarget.innerHTML = errorHTML;
+      if (decodedTarget) decodedTarget.innerHTML = errorHTML;
+      if (scriptCard) scriptCard.hidden = true;
+    }
+
+    loadStaticAnalysis = async function () {
+      try {
+        const response = await fetch(`/api/payload-analysis/${encodeURIComponent(hash)}/static`, { cache: "no-store" });
+        if (!response.ok) throw new Error(`request failed (${response.status})`);
+        const data = await response.json();
+        renderClassificationNote(data.classification || {});
+        renderKPIs(data);
+        renderIdentity(data);
+        renderScriptClassification(data);
+        renderYARA(data);
+        renderRules(data);
+        renderIOCList(data);
+        renderBytesAndMetadata(data);
+        renderExtractedText(data);
+        renderDecoded(data);
+        // The aggregation fetch above may already have gone out with no
+        // sha256 (the page shell doesn't have one) -- now that the real
+        // value is known, record it and, if that first aggregation call ran
+        // unscoped, re-run it once with the real value.
+        if (data.sha256 && root.dataset.hpPlSha256 !== data.sha256) {
+          const hadSha256 = !!root.dataset.hpPlSha256;
+          root.dataset.hpPlSha256 = data.sha256;
+          if (!hadSha256) loadAggregation();
+        }
+      } catch (error) {
+        renderStaticFailure(error.message);
+      }
+    };
+
+    loadStaticAnalysis();
   }
 
   document.addEventListener("click", e => {
     if (e.target.closest?.("[data-hp-pl-aggregation-retry]")) loadAggregation();
-  });
-
-  loadAggregation();
-
-  // --- Static-analysis hydration (#1157) -----------------------------------
-
-  const noteTarget = document.querySelector("[data-hp-pl-classification-note]");
-  const riskTarget = document.querySelector("[data-hp-pl-risk]");
-  const packedTarget = document.querySelector("[data-hp-pl-packed]");
-  const iocsCountTarget = document.querySelector("[data-hp-pl-iocs-count]");
-  const moreHashesTarget = document.querySelector("[data-hp-pl-more-hashes]");
-  const identityTarget = document.querySelector("[data-hp-pl-identity]");
-  const scriptCard = document.getElementById("hp-pl-script-card");
-  const scriptBodyTarget = document.querySelector("[data-hp-pl-script-body]");
-  const yaraTarget = document.querySelector("[data-hp-pl-yara]");
-  const rulesTarget = document.querySelector("[data-hp-pl-rules]");
-  const iocListTarget = document.querySelector("[data-hp-pl-ioc-list]");
-  const bytesActionsTarget = document.querySelector("[data-hp-pl-bytes-actions]");
-  const textTarget = document.querySelector("[data-hp-pl-text]");
-  const decodedTarget = document.querySelector("[data-hp-pl-decoded]");
-
-  const evidenceBody = key => document.querySelector(`[data-hp-evidence-body="${key}"]`);
-  const setEvidence = (key, title, note, html) => {
-    const el = evidenceBody(key);
-    if (!el) return;
-    el.dataset.hpEvidenceTitle = title;
-    if (note) el.dataset.hpEvidenceNote = note;
-    el.innerHTML = html;
-  };
-
-  function renderClassificationNote(c) {
-    if (!noteTarget) return;
-    noteTarget.innerHTML = c.dynamic ? "" :
-      `<p class="note">${escapeHTML(c.label)} has no dynamic detonation path &mdash; ${escapeHTML(c.analysis_path)}. The evidence below is the whole analysis for this artifact.</p>`;
-  }
-
-  function renderKPIs(data) {
-    if (riskTarget) riskTarget.textContent = `${data.risk_score} / 100 • ${data.risk_level}`;
-    if (packedTarget) packedTarget.textContent = data.packed_likely ? "elevated" : "not indicated";
-    if (iocsCountTarget) iocsCountTarget.textContent = String((data.iocs || []).length);
-  }
-
-  function renderIdentity(data) {
-    const c = data.classification || {};
-    if (moreHashesTarget) {
-      moreHashesTarget.innerHTML = `<details class="action-menu hp-pl-label-trigger"><summary aria-label="More hashes" title="MD5 and SHA-1">More hashes</summary><div class="action-menu__popover hp-pl-info-popover" role="menu"><div class="hp-pl-info-row"><span class="k">MD5</span><span class="v">${escapeHTML(data.md5)}</span></div><div class="hp-pl-info-row"><span class="k">SHA-1</span><span class="v">${escapeHTML(data.sha1)}</span></div></div></details>`;
-    }
-    if (!identityTarget) return;
-    let html = `<div class="card__row"><span class="card__label">identified type</span><span class="card__value"><strong>${escapeHTML(c.label)}</strong> <span class="badge badge--muted">${escapeHTML(c.code)}</span></span></div>`;
-    html += `<div class="card__row"><span class="card__label">platform / category</span><span class="card__value card__value--mono">${escapeHTML(c.platform)} / ${escapeHTML(c.category)}</span></div>`;
-    html += `<div class="card__row"><span class="card__label">sandbox route</span><span class="card__value card__value--mono">${escapeHTML(c.analysis_path)}</span></div>`;
-    html += `<div class="card__row"><span class="card__label">dynamic execution</span><span class="card__value">${c.dynamic ? "supported for this type" : "not automatic; static analysis only"}</span></div>`;
-    html += `<div class="card__row"><span class="card__label">magic</span><span class="card__value">${escapeHTML(data.magic)}</span></div>`;
-    html += `<div class="card__row"><span class="card__label">MIME</span><span class="card__value card__value--mono">${escapeHTML(data.mime)}</span></div>`;
-    html += `<div class="card__row"><span class="card__label">size</span><span class="card__value card__value--mono">${escapeHTML(data.size)}</span></div>`;
-    html += `<div class="card__row"><span class="card__label">entropy</span><span class="card__value card__value--mono">${escapeHTML(data.entropy)}</span></div>`;
-    html += `<div class="card__row"><span class="card__label">SHA-256</span><span class="card__value card__value--mono">${escapeHTML(data.sha256)}</span></div>`;
-    if (data.truncated) html += `<p class="note">deep inspection capped at 16 MiB; hashes cover the complete file</p>`;
-    identityTarget.innerHTML = html;
-  }
-
-  // #1157: was a server-side `{{if or .ScriptType .Indicators}}` that
-  // omitted the whole card -- ScriptType/Indicators aren't known until this
-  // fetch resolves, so the card always renders (skeleton) and is hidden
-  // here instead when it turns out empty. See payloads.html's own comment
-  // on why the neighboring sandbox card no longer reflows to "wide" to fill
-  // the gap.
-  function renderScriptClassification(data) {
-    if (!scriptCard) return;
-    if (!data.script_type && !(data.indicators || []).length) {
-      scriptCard.hidden = true;
-      return;
-    }
-    scriptCard.hidden = false;
-    if (!scriptBodyTarget) return;
-    let html = "";
-    if (data.script_type) html += `<div class="card__row"><span class="card__label">language/type</span><span class="card__value card__value--mono">${escapeHTML(data.script_type)}</span></div>`;
-    if ((data.indicators || []).length) {
-      html += `<div class="card__row"><span class="card__label">behavior indicators</span><span class="card__value">${data.indicators.map(i => `<span class="chip">${escapeHTML(i)}</span>`).join(" ")}</span></div>`;
-    }
-    html += `<p class="note">Heuristic static findings only. Captured content is never interpreted or executed.</p>`;
-    scriptBodyTarget.innerHTML = html;
-  }
-
-  function renderYARA(data) {
-    if (!yaraTarget) return;
-    let html;
-    if ((data.yara_matches || []).length) {
-      const rows = data.yara_matches.map(m => `<tr><td><span class="badge badge--red">match</span></td><td class="v">${escapeHTML(m)}</td></tr>`).join("");
-      html = `<div class="card__scroll"><table class="data-table"><tbody>${rows}</tbody></table></div>`;
-    } else {
-      html = `<p class="empty">${data.yara_scanned ? "No YARA rules matched this sample." : "Waiting for the isolated YARA scanner."}</p>`;
-    }
-    if (data.yara_error) html += `<p class="note tw:text-red">${escapeHTML(data.yara_error)}</p>`;
-    if (data.yara_scanned) html += `<p class="note">Scanned ${escapeHTML(data.yara_scanned)} by the networkless YARA sidecar. A match is a triage signal, not attribution.</p>`;
-    yaraTarget.innerHTML = html;
-  }
-
-  function renderRules(data) {
-    if (!rulesTarget) return;
-    if ((data.rules || []).length) {
-      const rows = data.rules.map(r => `<tr><td><span class="badge badge--muted">${escapeHTML(r.severity)}</span></td><td class="v">${escapeHTML(r.name)}</td><td class="v">${escapeHTML(r.description)}</td></tr>`).join("");
-      rulesTarget.innerHTML = `<div class="card__scroll"><table class="data-table"><thead><tr><th>severity</th><th>rule</th><th>reason</th></tr></thead><tbody>${rows}</tbody></table></div>`;
-    } else {
-      rulesTarget.innerHTML = `<p class="empty">No built-in static rules matched.</p>`;
-    }
-  }
-
-  function renderIOCList(data) {
-    if (!iocListTarget) return;
-    if ((data.iocs || []).length) {
-      const rows = data.iocs.map(ioc => `<tr><td class="v"><a href="/events?q=${encodeURIComponent(ioc)}" title="search telemetry for this indicator">${escapeHTML(ioc)}</a></td></tr>`).join("");
-      iocListTarget.innerHTML = `<div class="card__scroll"><table class="data-table"><tbody>${rows}</tbody></table></div>`;
-    } else {
-      iocListTarget.innerHTML = `<p class="empty">No URL, domain, or IP indicators found.</p>`;
-    }
-  }
-
-  function renderBytesAndMetadata(data) {
-    setEvidence("pl-hexdump", "Hex / ASCII preview — first 512 bytes", "", `<pre class="code">${escapeHTML(data.hexdump)}</pre>`);
-    if (bytesActionsTarget) {
-      let html = `<button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-hexdump">Hex / ASCII preview</button> `;
-      if ((data.format_info || []).length) {
-        html += `<button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-format">Executable metadata</button>`;
-        setEvidence("pl-format", "Executable metadata", "", `<pre class="code">${data.format_info.map(escapeHTML).join("\n")}</pre>`);
-      } else {
-        html += `<span class="chip">not a recognized PE/ELF file</span>`;
-      }
-      bytesActionsTarget.innerHTML = html;
-    }
-  }
-
-  function renderExtractedText(data) {
-    const ascii = data.ascii || [];
-    const utf16 = data.utf16 || [];
-    if (ascii.length) setEvidence("pl-ascii", "Printable strings", "Printable sequences extracted from the sample. Filter to find a specific indicator.", `<pre class="code">${ascii.map(escapeHTML).join("\n")}</pre>`);
-    if (utf16.length) setEvidence("pl-utf16", "UTF-16LE strings", "Wide-character sequences extracted from the sample.", `<pre class="code">${utf16.map(escapeHTML).join("\n")}</pre>`);
-    if (!textTarget) return;
-    if (!ascii.length && !utf16.length) {
-      textTarget.innerHTML = `<p class="empty">No printable sequences extracted.</p>`;
-      return;
-    }
-    let html = `<p class="note">${ascii.length} printable and ${utf16.length} wide-character sequence${utf16.length !== 1 ? "s" : ""} extracted.</p>`;
-    if (ascii.length) html += `<button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-ascii">Printable strings (${ascii.length})</button> `;
-    if (utf16.length) html += `<button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-utf16">UTF-16LE strings (${utf16.length})</button>`;
-    textTarget.innerHTML = html;
-  }
-
-  function renderDecoded(data) {
-    const decoded = data.decoded || [];
-    if (!decodedTarget) return;
-    if (!decoded.length) {
-      decodedTarget.innerHTML = `<p class="empty">no bounded Base64, hex, URL or UTF-16 candidates found</p>`;
-      return;
-    }
-    setEvidence("pl-decoded", "Decoded / deobfuscated candidates", "Bounded decodes of encoded content found in the sample. Never executed.",
-      decoded.map(d => `<p class="note">${escapeHTML(d.kind)} from <code>${escapeHTML(d.source)}</code></p><pre class="code">${escapeHTML(d.preview)}</pre>`).join(""));
-    decodedTarget.innerHTML = `<p class="note">${decoded.length} bounded Base64, hex, URL or UTF-16 candidate${decoded.length !== 1 ? "s" : ""} recovered.</p><button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-decoded">Open decoded candidates</button>`;
-  }
-
-  function renderStaticFailure(message) {
-    const errorHTML = `<p class="empty">Could not load &mdash; ${escapeHTML(message)}. <button class="lnk" type="button" data-hp-pl-static-retry>Retry</button></p>`;
-    if (identityTarget) identityTarget.innerHTML = errorHTML;
-    if (yaraTarget) yaraTarget.innerHTML = errorHTML;
-    if (rulesTarget) rulesTarget.innerHTML = errorHTML;
-    if (iocListTarget) iocListTarget.innerHTML = errorHTML;
-    if (bytesActionsTarget) bytesActionsTarget.innerHTML = errorHTML;
-    if (textTarget) textTarget.innerHTML = errorHTML;
-    if (decodedTarget) decodedTarget.innerHTML = errorHTML;
-    if (scriptCard) scriptCard.hidden = true;
-  }
-
-  async function loadStaticAnalysis() {
-    try {
-      const response = await fetch(`/api/payload-analysis/${encodeURIComponent(hash)}/static`, { cache: "no-store" });
-      if (!response.ok) throw new Error(`request failed (${response.status})`);
-      const data = await response.json();
-      renderClassificationNote(data.classification || {});
-      renderKPIs(data);
-      renderIdentity(data);
-      renderScriptClassification(data);
-      renderYARA(data);
-      renderRules(data);
-      renderIOCList(data);
-      renderBytesAndMetadata(data);
-      renderExtractedText(data);
-      renderDecoded(data);
-      // The aggregation fetch above may already have gone out with no
-      // sha256 (the page shell doesn't have one) -- now that the real
-      // value is known, record it and, if that first aggregation call ran
-      // unscoped, re-run it once with the real value.
-      if (data.sha256 && root.dataset.hpPlSha256 !== data.sha256) {
-        const hadSha256 = !!root.dataset.hpPlSha256;
-        root.dataset.hpPlSha256 = data.sha256;
-        if (!hadSha256) loadAggregation();
-      }
-    } catch (error) {
-      renderStaticFailure(error.message);
-    }
-  }
-
-  document.addEventListener("click", e => {
     if (e.target.closest?.("[data-hp-pl-static-retry]")) loadStaticAnalysis();
   });
 
-  loadStaticAnalysis();
+  run();
+  document.addEventListener("hp-dynamic-nav", run);
 })();
