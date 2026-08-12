@@ -36,6 +36,7 @@ type event struct {
 	country     string // ISO country code, from a cf-ipcountry header when present
 	severity    int    // suricata alert severity (1 = most severe)
 	heldMs      int    // endlessh (#1294): tarpit hold duration, disconnect events only
+	icsSeverity string // dnp3 (#1290): "critical"/"high" for control-function app_function codes, "" for read/status traffic
 	isLogin     bool
 	skip        bool
 	when        time.Time
@@ -438,6 +439,7 @@ func classify(e map[string]any, dirSensor string) event {
 			// far more often than not.
 			if app := str(e["app_function"]); app != "" {
 				ev.detail += ", app " + app
+				ev.icsSeverity = dnp3FunctionSeverity(app)
 			}
 			if src, dst := num(e["dnp3_source"]), num(e["dnp3_destination"]); src != "" || dst != "" {
 				ev.detail += fmt.Sprintf(" (src %s -> dst %s)", src, dst)
@@ -643,6 +645,19 @@ func classify(e map[string]any, dirSensor string) event {
 		ev.isLogin = (ev.user != "" || ev.pass != "") &&
 			(strings.Contains(kind, "login") || strings.Contains(kind, "auth"))
 		ev.detail = kind
+		// #1276: data.cve/data.name carry the actual exploit identity (e.g.
+		// name "DoublePulsar connection attempt", cve
+		// "CVE-2017-0144..CVE-2017-0148") on every exploit-attempt incident
+		// -- previously unread, so an operator only ever saw the generic
+		// Python module path (kind, e.g. "modules.python.smb.exploit")
+		// where the real exploit name would tell them immediately what's
+		// actually being tried.
+		if name := str(data["name"]); name != "" {
+			ev.detail = name
+			if cve := str(data["cve"]); cve != "" {
+				ev.detail += " (" + cve + ")"
+			}
+		}
 		if ev.download != "" {
 			ev.detail += " " + ev.download
 		}
