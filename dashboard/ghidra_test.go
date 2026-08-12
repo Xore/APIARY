@@ -1100,6 +1100,64 @@ func TestGhidraDetailPageRendersDeepDiveData(t *testing.T) {
 	}
 }
 
+// TestGhidraDetailPageIsolatesPseudocodeForSyntaxHighlighting covers #1288:
+// each function's decompiled pseudocode must render inside its own
+// pre.language-c, separate from the plain-text address/name/signature/
+// callers/callees lines that used to share one giant pre with it -- Prism
+// tokenizing that mixed content would have mangled the non-code lines.
+// Functions with no pseudocode (never deepened) must not get an empty
+// pre.language-c at all. The page must also load prism.js/prism.css so the
+// class actually does something client-side.
+func TestGhidraDetailPageIsolatesPseudocodeForSyntaxHighlighting(t *testing.T) {
+	s := &store{}
+	tmpl := template.Must(template.New("dashboard").Funcs(templateFuncs(s, "")).Parse(pageTemplate))
+
+	data := ghidraPageData{
+		Generated: time.Now(),
+		Status:    ghidraQueueStatus{Configured: true},
+		Detail: &ghidraResult{
+			SHA256: shaA, CompletedAt: "2026-08-01T10:00:00Z", ExitStatus: "success",
+			Functions: []ghidraFunction{
+				{
+					Address: "0x401000", Name: "main", Signature: "int main()",
+					Pseudocode: "int main(void)\n\n{\n  return 0;\n}\n",
+					Callers:    []ghidraXref{},
+					Callees:    []ghidraXref{{Addr: "0x401050", Name: "sub_401050"}},
+				},
+				{
+					// Not deepened: no pseudocode, no callers/callees.
+					Address: "0x401100", Name: "sub_401100", Signature: "void sub_401100()",
+				},
+			},
+		},
+	}
+
+	var buf strings.Builder
+	if err := tmpl.ExecuteTemplate(&buf, "ghidra", &data); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	body := buf.String()
+
+	if !strings.Contains(body, `<pre class="code language-c">int main(void)`) {
+		t.Errorf("pseudocode should render in its own pre.language-c, got: %s", body)
+	}
+	if strings.Contains(body, "  return 0;\n}\ncallers:") || strings.Contains(body, "return 0;\n}\n  callers:") {
+		t.Error("pseudocode and the callers/callees line must not share one pre any more")
+	}
+	if got := strings.Count(body, `class="code language-c"`); got != 1 {
+		t.Errorf("expected exactly 1 pre.language-c (only the deepened function has pseudocode), got %d", got)
+	}
+	if !strings.Contains(body, `<pre class="code">0x401100  sub_401100  void sub_401100()`) {
+		t.Errorf("un-deepened function should still render its header line in a plain pre, got: %s", body)
+	}
+	if !strings.Contains(body, `/static/prism.js`) {
+		t.Error("detail page should load the vendored Prism bundle")
+	}
+	if !strings.Contains(body, `/static/prism.css`) {
+		t.Error("detail page should load the Prism token theme")
+	}
+}
+
 // #1167: viewing the generated report inline (a modal + iframe, same shape
 // as the Reports Studio viewer) needs the trigger button carrying the
 // report URL, the modal markup itself, and its own script tag -- all three

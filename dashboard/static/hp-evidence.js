@@ -78,6 +78,16 @@
 
     const counter = modal.querySelector("[data-hp-evidence-count]");
     if (counter) counter.textContent = needle ? `${shown} of ${total} lines` : "";
+
+    // #1288: re-tokenize any code block after every filter pass, not just on
+    // open() -- the `pre.textContent = ...` above (both branches) replaces
+    // whatever Prism.highlightElement() had built with a plain text node,
+    // since a filtered <pre> only ever remembers its own line text
+    // (dataset.hpLines), not markup. Soft dependency: most evidence bodies
+    // aren't code and never load prism.js, so this is a no-op there.
+    if (window.Prism) {
+      body.querySelectorAll('pre[class*="language-"]').forEach(pre => window.Prism.highlightElement(pre));
+    }
   };
 
   function open(trigger) {
