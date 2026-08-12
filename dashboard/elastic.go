@@ -25,17 +25,26 @@ type esStatus struct {
 	Documents         int64
 	DeadLetters       int64
 	RecentDeadLetters int64
-	FilebeatState     string
-	FilebeatAcked     int64
-	FilebeatFailed    int64
-	FilebeatDropped   int64
-	FilebeatActive    int64
-	LastIngest        string
-	LastIngestAge     string
-	IngestState       string
-	Checked           string
-	Error             string `json:",omitempty"`
-	Sources           []esSource
+	// FilebeatDecodeFailures (#1298): filebeat-* is Filebeat's own default
+	// fallback index for lines its json.decode processor couldn't parse at
+	// all -- a distinct, earlier failure layer from dead-letter-honeypot*
+	// (which only ever holds documents Elasticsearch itself rejected after
+	// Filebeat successfully decoded and shipped them). No dashboard code
+	// path read this index before; a corrupted Suricata eve.json write
+	// (crash, disk pressure, a rotation race) landed here completely
+	// invisibly.
+	FilebeatDecodeFailures int64
+	FilebeatState          string
+	FilebeatAcked          int64
+	FilebeatFailed         int64
+	FilebeatDropped        int64
+	FilebeatActive         int64
+	LastIngest             string
+	LastIngestAge          string
+	IngestState            string
+	Checked                string
+	Error                  string `json:",omitempty"`
+	Sources                []esSource
 }
 
 type esClient struct {
@@ -474,6 +483,7 @@ func (c *esClient) refresh() {
 	st.Documents, _ = c.count("honeypot-v2-*,suricata-*", "")
 	st.DeadLetters, _ = c.count("dead-letter-honeypot*", "")
 	st.RecentDeadLetters, _ = c.count("dead-letter-honeypot*", "@timestamp:[now-24h TO now]")
+	st.FilebeatDecodeFailures, _ = c.count("filebeat-*", "")
 	c.refreshFilebeat(&st)
 	if b, err := c.request("/honeypot-v2-*,suricata-*/_search?size=1&sort=%40timestamp%3Adesc&filter_path=hits.hits._source.%40timestamp"); err == nil {
 		var v struct {
