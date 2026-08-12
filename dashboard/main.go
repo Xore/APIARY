@@ -13,12 +13,15 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -55,6 +58,33 @@ func healthzHandler(s *store) http.HandlerFunc {
 	}
 }
 
+// trackedHandler (#1312) wraps mux with #486's idle-activity tracking and
+// the OIDC auth gate, in that order relative to each other -- touchActivity
+// now only runs for a request that actually reaches mux, i.e. one the OIDC
+// gate already let through. Previously touchActivity ran BEFORE the OIDC
+// gate (an inline closure built directly in main()), so any unauthenticated
+// probe against a normal route -- redirected to login or 401'd inside
+// middleware() before next.ServeHTTP was ever reached -- still kept the
+// idle-rebuild loop alive indefinitely, the exact failure mode #486 itself
+// was meant to prevent. /healthz stays excluded for the same reason as
+// before: Docker's own healthcheck (and any external uptime monitor) hits
+// it on a fixed interval regardless of whether an operator is looking,
+// which would defeat idle detection entirely on an unattended host.
+//
+// A named function (not an inline closure), matching healthzHandler's own
+// convention just above, so it's unit-testable -- and, #1312's other
+// finding, built exactly once here rather than reconstructing the OIDC
+// wrapper on every single request the way the old inline closure did.
+func trackedHandler(s *store, oidc *oidcAuth, mux http.Handler) http.Handler {
+	tracked := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			s.touchActivity()
+		}
+		mux.ServeHTTP(w, r)
+	})
+	return oidc.middleware(tracked)
+}
+
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "-healthcheck" {
 		addr := getenv("LISTEN_ADDR", ":8080")
@@ -62,7 +92,17 @@ func main() {
 			addr = "127.0.0.1" + addr
 		}
 		c := http.Client{Timeout: 3 * time.Second}
-		if r, err := c.Get("http://" + addr + "/healthz"); err != nil || r.StatusCode != 200 {
+		r, err := c.Get("http://" + addr + "/healthz")
+		if err != nil {
+			os.Exit(1)
+		}
+		// #1312: close the response body even on the success path -- Go's
+		// http.Client docs require this for the underlying connection to
+		// be returned to the pool. Harmless in practice (this process
+		// exits immediately after either branch below, which reclaims
+		// everything anyway), but there is no reason to leave it unclosed.
+		r.Body.Close()
+		if r.StatusCode != http.StatusOK {
 			os.Exit(1)
 		}
 		os.Exit(0)
@@ -809,24 +849,67 @@ func main() {
 		renderPage(w, tmpl, "page", &data)
 	})
 
-	// #486: touchActivity is the idle-rebuild loop's only signal that a real
-	// viewer is present. /healthz is excluded deliberately -- Docker's own
-	// healthcheck (and any external uptime monitor) hits it on a fixed
-	// interval regardless of whether an operator is looking, which would
-	// defeat idle detection entirely by keeping the dashboard "active"
-	// forever on an unattended host.
-	mux := http.DefaultServeMux
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/healthz" {
-			s.touchActivity()
-		}
-		dashboardOIDC.middleware(mux).ServeHTTP(w, r)
-	})
+	handler := trackedHandler(s, dashboardOIDC, http.DefaultServeMux)
 
 	srv := &http.Server{
 		Addr:              getenv("LISTEN_ADDR", ":8080"),
 		ReadHeaderTimeout: 5 * time.Second,
-		Handler:           handler,
+		// #1312: bounds how long reading the rest of a request (past the
+		// headers ReadHeaderTimeout already covers) or an idle keep-alive
+		// connection may sit open, closing the gap #1312 found -- neither
+		// had any deadline before. Deliberately no WriteTimeout: it applies
+		// per-connection for the whole response, which would kill
+		// /api/stream's long-lived SSE connections at a fixed wall-clock
+		// age regardless of whether the client is still actively
+		// consuming events -- the issue's own text flags this as needing
+		// special handling, not a blanket value, and the acceptance
+		// criteria only asks for read/idle deadlines here.
+		ReadTimeout: 30 * time.Second,
+		IdleTimeout: 120 * time.Second,
+		Handler:     handler,
 	}
-	srv.ListenAndServe()
+
+	// #1312: graceful shutdown -- SIGTERM is what `docker stop`/Compose
+	// send before escalating to SIGKILL after its own stop_grace_period.
+	// Without this, the process previously only reacted to a hard kill,
+	// dropping in-flight requests (including a live /api/stream SSE
+	// connection) mid-response instead of letting Shutdown drain them.
+	// docker-compose.dashboard.yml sets no stop_grace_period for either
+	// dashboard service, so Docker's own default (10s) applies -- the
+	// shutdown timeout below stays comfortably under that so this code's
+	// own drain-and-exit has a real chance to finish (and exit 0 cleanly)
+	// before Docker's SIGKILL would otherwise fire regardless.
+	//
+	// srv.Shutdown()'s own docs are explicit that ListenAndServe() below
+	// returns (with ErrServerClosed) the moment Shutdown is CALLED, not
+	// once it completes -- "make sure the program doesn't exit and waits
+	// instead for Shutdown to return". Without idleConnsClosed, main()
+	// would reach its end and the whole process would exit the instant
+	// Shutdown started, making the shutdownCtx timeout below meaningless
+	// and defeating graceful shutdown entirely (exactly as abrupt as no
+	// signal handling at all).
+	idleConnsClosed := make(chan struct{})
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			fmt.Fprintf(os.Stderr, "dashboard: graceful shutdown: %v\n", err)
+		}
+		close(idleConnsClosed)
+	}()
+
+	// #1312: ListenAndServe always returns a non-nil error -- exactly
+	// http.ErrServerClosed on the graceful path above, anything else (most
+	// commonly the configured port already being in use) is a real startup
+	// or runtime failure. Previously this was discarded entirely, letting
+	// main() return and the process exit 0 with no logged cause even when
+	// the dashboard never actually started serving traffic.
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		fmt.Fprintf(os.Stderr, "dashboard: HTTP server: %v\n", err)
+		os.Exit(1)
+	}
+	<-idleConnsClosed
 }
