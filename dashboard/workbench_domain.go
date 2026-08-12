@@ -112,31 +112,31 @@ type workbenchOptionSchema struct {
 }
 
 type workbenchAnalyzer struct {
-	ID              string                `json:"id"`
-	DisplayName     string                `json:"display_name"`
-	Description     string                `json:"description"`
-	AcceptedKinds   []string              `json:"accepted_kinds"`
-	Availability    string                `json:"availability"`
-	Available       bool                  `json:"available"`
-	Applicable      bool                  `json:"applicable"`
-	Reason          string                `json:"reason"`
-	ResultLinkShape string                `json:"result_link_shape"`
-	RequiredRole    string                `json:"required_role"`
-	Confirmation    string                `json:"confirmation"`
-	Concurrency     string                `json:"concurrency_class"`
-	LocalOnly       bool                  `json:"local_only"`
-	ExternallySends bool                  `json:"externally_publishing"`
-	Detonates       bool                  `json:"detonates"`
-	GPU             bool                  `json:"gpu_consuming"`
+	ID              string   `json:"id"`
+	DisplayName     string   `json:"display_name"`
+	Description     string   `json:"description"`
+	AcceptedKinds   []string `json:"accepted_kinds"`
+	Availability    string   `json:"availability"`
+	Available       bool     `json:"available"`
+	Applicable      bool     `json:"applicable"`
+	Reason          string   `json:"reason"`
+	ResultLinkShape string   `json:"result_link_shape"`
+	RequiredRole    string   `json:"required_role"`
+	Confirmation    string   `json:"confirmation"`
+	Concurrency     string   `json:"concurrency_class"`
+	LocalOnly       bool     `json:"local_only"`
+	ExternallySends bool     `json:"externally_publishing"`
+	Detonates       bool     `json:"detonates"`
+	GPU             bool     `json:"gpu_consuming"`
 	// #1234: every other applicable+available analyzer here is pre-checked
 	// by default (payload_workbench.html); the one route that can reach
 	// real internet infrastructure (C2, exfiltration -- see windows-ghosts'
 	// own Description) should not be, so an operator reviewing the recipe
 	// quickly and clicking "Run all applicable" can't detonate live malware
 	// with real outbound connectivity without deliberately opting in.
-	RequiresOptIn bool `json:"requires_opt_in"`
-	DefaultOptions  workbenchOptions      `json:"default_options"`
-	OptionSchema    workbenchOptionSchema `json:"option_schema"`
+	RequiresOptIn  bool                  `json:"requires_opt_in"`
+	DefaultOptions workbenchOptions      `json:"default_options"`
+	OptionSchema   workbenchOptionSchema `json:"option_schema"`
 }
 
 // #405/#36 decision, superseded: workbench run/recipe state used to stay
