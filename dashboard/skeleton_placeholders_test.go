@@ -57,6 +57,20 @@ func TestListingPagesShowSkeletonPlaceholdersBeforeFirstRebuildInsteadOfEmptySta
 			readyData:     &clustersPage{Ready: true},
 			realEmptyText: "No multi-source pivots are present",
 		},
+		// githubanalysisresultspanel (#1156-follow-up) gates on Loading, not
+		// Ready -- it reads from its own background-refreshed cache
+		// (s.githubAnalysisCache), not rebuild()'s s.getEvents(), so its
+		// cold-start signal is genuinely different (see github_analysis.go's
+		// own refreshGithubAnalysisCacheAsync comment) -- but the render
+		// harness itself only cares that "no rows yet" renders a skeleton
+		// vs. the real empty state, which is exactly what this shares with
+		// the other four cases.
+		{
+			name:          "githubanalysisresultspanel",
+			emptyData:     &githubAnalysisPageData{Loading: true},
+			readyData:     &githubAnalysisPageData{Loading: false},
+			realEmptyText: "No GitHub analyses match this view.",
+		},
 	}
 
 	for _, c := range cases {

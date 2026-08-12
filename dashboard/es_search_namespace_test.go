@@ -185,3 +185,117 @@ func TestSearchNamespaceFailsWhenPointInTimeCannotBeOpened(t *testing.T) {
 		t.Fatal("expected an error when the PIT cannot be opened")
 	}
 }
+
+// #1156-follow-up: searchNamespaceLimit is searchNamespace's own PIT/
+// search_after pagination made pointless for a caller that only wants the
+// newest few hundred rows -- see its own doc comment. These pin its request
+// shape (a single bounded /{index}/_search, no PIT) independent of
+// refreshGithubAnalysisCacheAsync, the one caller today (github_analysis.go).
+
+func TestSearchNamespaceLimitSendsASingleBoundedRequestNoPIT(t *testing.T) {
+	var gotPath string
+	var gotBody []byte
+	var pitRequested bool
+	es := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "_pit") {
+			pitRequested = true
+		}
+		gotPath = r.URL.Path
+		gotBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"hits":{"hits":[]}}`))
+	}))
+	defer es.Close()
+
+	if _, err := newESClient(es.URL, "").searchNamespaceLimit("github-analysis-v1", "github_analysis", 500); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pitRequested {
+		t.Fatal("searchNamespaceLimit must not open a point-in-time -- it's a single bounded request, not a paginated walk")
+	}
+	if gotPath != "/github-analysis-v1/_search" {
+		t.Fatalf("queried %q, want /github-analysis-v1/_search", gotPath)
+	}
+	var req struct {
+		Size int              `json:"size"`
+		Sort []map[string]any `json:"sort"`
+	}
+	if err := json.Unmarshal(gotBody, &req); err != nil {
+		t.Fatalf("request body is not valid JSON: %v (%s)", err, gotBody)
+	}
+	if req.Size != 500 {
+		t.Fatalf("size = %d, want 500", req.Size)
+	}
+	if len(req.Sort) == 0 || req.Sort[0]["@timestamp"] != "desc" {
+		t.Fatalf("request did not sort newest-first by @timestamp: %+v", req.Sort)
+	}
+}
+
+func TestSearchNamespaceLimitReturnsTheRequestedField(t *testing.T) {
+	es := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"hits":{"hits":[{"_source":{"github_analysis":{"sha256":"` + shaA + `","exit_status":"ok"},"other_field":"ignored"}}]}}`))
+	}))
+	defer es.Close()
+
+	raws, err := newESClient(es.URL, "").searchNamespaceLimit("github-analysis-v1", "github_analysis", 500)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(raws) != 1 {
+		t.Fatalf("got %d raw results, want 1", len(raws))
+	}
+	var row githubAnalysisResult
+	if err := json.Unmarshal(raws[0], &row); err != nil {
+		t.Fatalf("result is not a valid githubAnalysisResult: %v", err)
+	}
+	if row.SHA256 != shaA || row.ExitStatus != "ok" {
+		t.Fatalf("unexpected row: %+v", row)
+	}
+}
+
+func TestSearchNamespaceLimitClampsOutOfRangeLimits(t *testing.T) {
+	var gotBody []byte
+	es := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"hits":{"hits":[]}}`))
+	}))
+	defer es.Close()
+	c := newESClient(es.URL, "")
+
+	for _, limit := range []int{0, -5, 20000} {
+		if _, err := c.searchNamespaceLimit("github-analysis-v1", "github_analysis", limit); err != nil {
+			t.Fatalf("limit=%d: unexpected error: %v", limit, err)
+		}
+		var req struct {
+			Size int `json:"size"`
+		}
+		json.Unmarshal(gotBody, &req)
+		if req.Size != 500 {
+			t.Errorf("limit=%d: sent size=%d, want the clamped default 500", limit, req.Size)
+		}
+	}
+}
+
+func TestSearchNamespaceLimitReturnsErrorWhenUnconfigured(t *testing.T) {
+	var c *esClient
+	if _, err := c.searchNamespaceLimit("github-analysis-v1", "github_analysis", 500); err == nil {
+		t.Fatal("expected an error with no client configured")
+	}
+}
+
+func TestSearchNamespaceLimitPropagatesServerErrors(t *testing.T) {
+	es := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("boom"))
+	}))
+	defer es.Close()
+
+	c := newESClient(es.URL, "")
+	if _, err := c.searchNamespaceLimit("github-analysis-v1", "github_analysis", 500); err == nil {
+		t.Fatal("expected an error when the server fails")
+	} else if !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("error %v does not surface the server's own message", err)
+	}
+}

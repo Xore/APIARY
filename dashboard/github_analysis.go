@@ -139,6 +139,13 @@ type githubAnalysisPageData struct {
 	Status    githubAnalysisQueueStatus
 	Query     string
 	Analysis  string
+	// Loading is true only while the listing cache (s.githubAnalysisCache)
+	// has never been populated -- the same #1157 payloadsPage.Loading
+	// convention, distinguishing "still warming up" from "genuinely no
+	// results yet" so the list branch can show a skeleton instead of
+	// misreporting an empty result. Always false on a detail-view render
+	// (Detail != nil), which never reads the cache.
+	Loading bool
 }
 
 func githubAnalysisResultsDir() string { return getenv("GITHUB_ANALYSIS_RESULTS_DIR", "") }
@@ -153,6 +160,19 @@ const githubAnalysisStatusStaleAfter = 30 * time.Minute
 // reacts to a non-empty spool immediately, so five minutes already well
 // exceeds normal pickup latency.
 const githubAnalysisHandoffStaleAfter = 5 * time.Minute
+
+// githubAnalysisListCap bounds refreshGithubAnalysisCacheAsync's own fetch
+// to the newest N rows -- matching workbenchMaxRuns (workbench_domain.go),
+// the sibling cap the merged /payload-workbench/results page's own
+// Workbench tab already applies to its listing. A listing page has no use
+// for anything past what it will ever display.
+const githubAnalysisListCap = 500
+
+// githubAnalysisCacheTTL mirrors payloadCacheTTL's reasoning (payloads_data.go):
+// long enough that a burst of page loads shares one Elasticsearch round
+// trip, short enough that a freshly published result shows up without a
+// meaningful wait.
+const githubAnalysisCacheTTL = 2 * time.Minute
 
 // loadGitHubAnalysisResults prefers #383's github-analysis-v1 ES mirror
 // (#384) exclusively (#1103) -- see loadGhidraResults' doc comment in
@@ -173,6 +193,28 @@ func loadGitHubAnalysisResultsES(es *esClient) ([]githubAnalysisResult, bool) {
 	if err != nil {
 		return nil, false
 	}
+	return decodeGitHubAnalysisRows(raws), true
+}
+
+// loadGitHubAnalysisResultsESCapped is loadGitHubAnalysisResultsES bounded to
+// the newest `limit` rows via searchNamespaceLimit's single bounded request,
+// instead of searchNamespace's whole-namespace pagination -- for
+// refreshGithubAnalysisCacheAsync, which only ever needs to fill a listing
+// view's own top-N (see that function's own comment, #1156-follow-up).
+func loadGitHubAnalysisResultsESCapped(es *esClient, limit int) ([]githubAnalysisResult, bool) {
+	raws, err := es.searchNamespaceLimit("github-analysis-v1", "github_analysis", limit)
+	if err != nil {
+		return nil, false
+	}
+	return decodeGitHubAnalysisRows(raws), true
+}
+
+// decodeGitHubAnalysisRows is the raw-hit-to-row conversion shared by
+// loadGitHubAnalysisResultsES and loadGitHubAnalysisResultsESCapped:
+// validate the hash, lower-case it, and attach the export/view URLs derived
+// from it -- identical regardless of which request shape fetched the raw
+// hits.
+func decodeGitHubAnalysisRows(raws []json.RawMessage) []githubAnalysisResult {
 	rows := make([]githubAnalysisResult, 0, len(raws))
 	for _, raw := range raws {
 		var row githubAnalysisResult
@@ -187,7 +229,7 @@ func loadGitHubAnalysisResultsES(es *esClient) ([]githubAnalysisResult, bool) {
 		rows = append(rows, row)
 	}
 	sortGitHubAnalysisResults(rows)
-	return rows, true
+	return rows
 }
 
 // loadGitHubAnalysisResultByHash answers "the one GitHub-analysis result for
@@ -352,10 +394,22 @@ func (s *store) githubAnalysisData(sha256, query string) (githubAnalysisPageData
 	}
 	data := githubAnalysisPageData{
 		Generated: time.Now(),
-		Rows:      loadGitHubAnalysisResults(),
 		Status:    loadGitHubAnalysisStatus(),
 		Query:     strings.TrimSpace(query),
 	}
+	// #1156-follow-up: this used to call loadGitHubAnalysisResults() (a
+	// whole-namespace ES fetch, up to searchNamespaceMaxPages*
+	// searchNamespacePageSize documents, paginated) synchronously on every
+	// load of this listing. refreshGithubAnalysisCacheAsync keeps that off
+	// the request path entirely (#1157's payloadCache shape) and bounds the
+	// fetch itself to githubAnalysisListCap -- a listing only ever displays
+	// a top-N slice anyway, matching this same fix's docListIDs/search_after
+	// reasoning applied to ghidra/sandbox's own listings.
+	s.refreshGithubAnalysisCacheAsync()
+	s.githubAnalysisMu.Lock()
+	data.Rows = append([]githubAnalysisResult(nil), s.githubAnalysisCache...)
+	data.Loading = s.githubAnalysisCacheAt.IsZero() && s.githubAnalysisRefreshing
+	s.githubAnalysisMu.Unlock()
 	if data.Query != "" {
 		needle := strings.ToLower(data.Query)
 		filtered := data.Rows[:0]
@@ -370,6 +424,43 @@ func (s *store) githubAnalysisData(sha256, query string) (githubAnalysisPageData
 		data.Rows = filtered
 	}
 	return data, nil
+}
+
+// refreshGithubAnalysisCacheAsync keeps the listing view's own Elasticsearch
+// round trip off the HTTP request path, the same shape as
+// refreshPayloadCacheAsync (payloads_data.go, #1157) -- see that function's
+// own comment for the general reasoning. A no-op entirely when esResultsClient
+// isn't configured, mirroring loadGitHubAnalysisResults' own gate, and a
+// no-op while a refresh is already running or the last successful one is
+// still within githubAnalysisCacheTTL. Bounded to githubAnalysisListCap via
+// loadGitHubAnalysisResultsESCapped rather than the whole-namespace
+// loadGitHubAnalysisResults() -- see that function's own comment.
+func (s *store) refreshGithubAnalysisCacheAsync() {
+	if esResultsClient == nil {
+		return
+	}
+	s.githubAnalysisMu.Lock()
+	if s.githubAnalysisRefreshing || (!s.githubAnalysisCacheAt.IsZero() && time.Since(s.githubAnalysisCacheAt) < githubAnalysisCacheTTL) {
+		s.githubAnalysisMu.Unlock()
+		return
+	}
+	s.githubAnalysisRefreshing = true
+	s.githubAnalysisMu.Unlock()
+	go func() {
+		fresh, ok := loadGitHubAnalysisResultsESCapped(esResultsClient, githubAnalysisListCap)
+		s.githubAnalysisMu.Lock()
+		defer s.githubAnalysisMu.Unlock()
+		s.githubAnalysisRefreshing = false
+		if !ok {
+			// Elasticsearch unreachable this cycle -- keep serving whatever
+			// the last successful read produced (the same graceful-degrade-
+			// by-omission refreshPayloadCacheAsync's own ES-error path
+			// uses) rather than blanking an already-warm cache.
+			return
+		}
+		s.githubAnalysisCache = fresh
+		s.githubAnalysisCacheAt = time.Now()
+	}()
 }
 
 func (s *store) serveGitHubAnalysisAPI(w http.ResponseWriter, r *http.Request) {

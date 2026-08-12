@@ -198,6 +198,15 @@ type store struct {
 	payloadRefreshing bool
 	ipsCache          ipsPage
 	ipsCacheAt        time.Time
+	// githubAnalysisMu/githubAnalysisCache/githubAnalysisCacheAt/
+	// githubAnalysisRefreshing back refreshGithubAnalysisCacheAsync
+	// (github_analysis.go, #1156-follow-up) -- same background-refreshed-
+	// cache shape as payloadMu/payloadCache/payloadCacheAt/payloadRefreshing
+	// above, scoped to the GitHub-analysis listing view only.
+	githubAnalysisMu         sync.Mutex
+	githubAnalysisCache      []githubAnalysisResult
+	githubAnalysisCacheAt    time.Time
+	githubAnalysisRefreshing bool
 	dir               string
 	payloadDirs       []string // dionaea, cowrie and generated script artifact directories
 	scriptDir         string   // writable directory for safely retained inline scripts
