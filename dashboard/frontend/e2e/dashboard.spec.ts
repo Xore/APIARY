@@ -10,6 +10,7 @@ const routes = [
   "/campaigns",
   "/clusters",
   "/attackers",
+  "/kill-chain",
   "/commands",
   "/payloads",
   "/sandbox",
@@ -508,6 +509,29 @@ test.describe("dashboard browser behaviour", () => {
     await expect(page.locator("[data-attacker-graph-status]")).toContainText("member IP");
     await expect(page.locator("#attackers-graph canvas")).not.toHaveCount(0);
     await expect(page.locator("#attackers-graph")).toContainText("root / fixture-0");
+  });
+
+  
+
+  test("kill-chain analytics renders all three ECharts charts (#1224)", async ({ page }) => {
+    await page.goto("/kill-chain");
+    // All three have real fixture data and render to an actual ECharts
+    // canvas -- same "canvas mounted, not any specific pixel" assertion
+    // shape the attacker graph's own Cytoscape test above uses, for the
+    // same reason (a charting library's internal canvas layout is its own
+    // implementation detail, not this dashboard's contract).
+    await expect(page.locator("#kill-chain-sankey-card canvas")).not.toHaveCount(0);
+    await expect(page.locator("#kill-chain-timeline-card canvas")).not.toHaveCount(0);
+    await expect(page.locator("#kill-chain-attck-card canvas")).not.toHaveCount(0);
+    await expect(page.locator('[data-echart-status="/api/campaign-timeline"]')).toContainText("campaign");
+    await expect(page.locator('[data-echart-status="/api/attck-coverage"]')).toContainText("technique");
+    // The fixture's seeded events each touch exactly one ATT&CK tactic on
+    // their own session, so both tactics still appear as Sankey nodes but
+    // there's no same-session pair to flow between them -- a real,
+    // legitimate "0 flows" state, not the genuinely-empty (0 nodes) case
+    // initSankey guards separately (ECharts' own sankey layout throws on
+    // a zero-node graph, confirmed live during #1224's own development).
+    await expect(page.locator('[data-echart-status="/api/kill-chain-sankey"]')).toContainText("tactics observed, 0 flows");
   });
 
   test("payload analysis hydrates the aggregation cards after the initial render (#1142)", async ({ page }) => {
