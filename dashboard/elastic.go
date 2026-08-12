@@ -50,6 +50,31 @@ func newESClient(base, filebeatBase string) *esClient {
 	return &esClient{base: strings.TrimRight(base, "/"), filebeatBase: strings.TrimRight(filebeatBase, "/"), http: &http.Client{Timeout: 8 * time.Second}, stat: esStatus{Enabled: base != ""}}
 }
 
+// esResponseBodyCap bounds every Elasticsearch response this client reads.
+// esResultsClient (elastic search results, a separate *esClient instance)
+// uses the same cap via this same helper.
+const esResponseBodyCap = 16 << 20 // 16MiB
+
+// readCappedBody reads up to esResponseBodyCap bytes from r and errors
+// instead of silently truncating when the real response is larger (#1233).
+// The four call sites below used to feed io.LimitReader's silently-cut-off
+// bytes straight to json.Unmarshal, surfacing a confusing "unterminated
+// string" parse error with no indication the response was ever truncated
+// -- deadLetters()/history() in particular return full raw documents
+// rather than a paginated/summarized view, so a real ES response can
+// exceed this cap. Reads one byte past the cap (not the whole oversized
+// body) to tell "exactly at the cap" apart from "larger than the cap".
+func readCappedBody(r io.Reader) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(r, esResponseBodyCap+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) > esResponseBodyCap {
+		return nil, fmt.Errorf("Elasticsearch response exceeds the %d byte cap -- narrow the query and try again", esResponseBodyCap)
+	}
+	return b, nil
+}
+
 func (c *esClient) get() esStatus {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -62,7 +87,7 @@ func (c *esClient) request(path string) ([]byte, error) {
 		return nil, err
 	}
 	defer r.Body.Close()
-	b, err := io.ReadAll(io.LimitReader(r.Body, 16<<20))
+	b, err := readCappedBody(r.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +112,7 @@ func (c *esClient) requestMethod(method, path string) ([]byte, error) {
 		return nil, err
 	}
 	defer r.Body.Close()
-	b, err := io.ReadAll(io.LimitReader(r.Body, 16<<20))
+	b, err := readCappedBody(r.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +139,7 @@ func (c *esClient) searchBody(path string, body []byte) ([]byte, error) {
 		return nil, err
 	}
 	defer r.Body.Close()
-	b, err := io.ReadAll(io.LimitReader(r.Body, 16<<20))
+	b, err := readCappedBody(r.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -148,7 +173,7 @@ func (c *esClient) doRequest(method, path string, body []byte) (status int, resp
 		return 0, nil, err
 	}
 	defer r.Body.Close()
-	b, err := io.ReadAll(io.LimitReader(r.Body, 16<<20))
+	b, err := readCappedBody(r.Body)
 	if err != nil {
 		return 0, nil, err
 	}
