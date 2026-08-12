@@ -207,6 +207,14 @@ type store struct {
 	githubAnalysisCache      []githubAnalysisResult
 	githubAnalysisCacheAt    time.Time
 	githubAnalysisRefreshing bool
+	// ghidraMu/ghidraCache/ghidraCacheAt/ghidraRefreshing back
+	// refreshGhidraCacheAsync (ghidra.go, #1156-follow-up) -- same
+	// background-refreshed-cache shape as githubAnalysisMu/... above, scoped
+	// to the Ghidra listing view only.
+	ghidraMu         sync.Mutex
+	ghidraCache      []ghidraResult
+	ghidraCacheAt    time.Time
+	ghidraRefreshing bool
 	dir               string
 	payloadDirs       []string // dionaea, cowrie and generated script artifact directories
 	scriptDir         string   // writable directory for safely retained inline scripts

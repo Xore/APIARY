@@ -387,7 +387,7 @@ func (s *store) renderDefinitionPDFBytes(def reportDefinition) ([]byte, string, 
 		}
 		return renderThemedPayloadReportPDF(analysis, now, pdfThemeNamed(def.Theme), def.Branding.pdf()), title, nil
 	case template.Ghidra:
-		data, err := ghidraData(def.Scope.Hash, "")
+		data, err := s.ghidraData(def.Scope.Hash, "")
 		if err != nil || data.Detail == nil {
 			return nil, "", fmt.Errorf("%w: scope.hash does not resolve to a completed ghidra result", errSettingsValidation)
 		}

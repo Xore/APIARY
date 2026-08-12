@@ -71,6 +71,15 @@ func TestListingPagesShowSkeletonPlaceholdersBeforeFirstRebuildInsteadOfEmptySta
 			readyData:     &githubAnalysisPageData{Loading: false},
 			realEmptyText: "No GitHub analyses match this view.",
 		},
+		// ghidraresultspanel (#1156-follow-up) gates on Loading the same way
+		// githubanalysisresultspanel above does -- see ghidra.go's own
+		// refreshGhidraCacheAsync comment.
+		{
+			name:          "ghidraresultspanel",
+			emptyData:     &ghidraPageData{Loading: true, Status: ghidraQueueStatus{Configured: true}},
+			readyData:     &ghidraPageData{Loading: false, Status: ghidraQueueStatus{Configured: true}},
+			realEmptyText: "No Ghidra analyses match this view.",
+		},
 	}
 
 	for _, c := range cases {

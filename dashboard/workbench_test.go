@@ -886,6 +886,43 @@ func TestWorkbenchResultsGitHubPanelShowsSkeletonAndGetsARealNonceWhenWarming(t 
 	}
 }
 
+// TestWorkbenchResultsGhidraPanelShowsSkeletonAndGetsARealNonceWhenWarming
+// mirrors TestWorkbenchResultsGitHubPanelShowsSkeletonAndGetsARealNonceWhenWarming
+// for the Ghidra panel (#1156-follow-up): ghidraresultspanel
+// (ui/ghidra.html) renders a skeleton instead of the real empty state while
+// Ghidra.Loading is true, and evidenceResultsPageData's own SetNonce
+// override (workbench_http.go) actually reaches .Ghidra.Nonce -- the
+// panel's warming-state inline reload script needs the request's real CSP
+// nonce even though it's rendered here through this merged page's own
+// .Ghidra sub-struct, not through this page's top-level pageMeta directly.
+// A mismatched (empty) nonce would make the browser's CSP silently drop the
+// script, leaving a stuck skeleton with no auto-refresh.
+func TestWorkbenchResultsGhidraPanelShowsSkeletonAndGetsARealNonceWhenWarming(t *testing.T) {
+	funcs := templateFuncs(nil, "")
+	tmpl := template.Must(template.New("dashboard").Funcs(funcs).Parse(pageTemplate))
+
+	data := evidenceResultsPageData{
+		Generated: time.Now(),
+		Ghidra:    ghidraPageData{Loading: true, Status: ghidraQueueStatus{Configured: true}},
+	}
+	data.SetNonce("test-nonce-value")
+
+	var buf strings.Builder
+	if err := tmpl.ExecuteTemplate(&buf, "workbench-results", &data); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	body := buf.String()
+	if !strings.Contains(body, "skeleton") {
+		t.Fatal("Ghidra panel with Loading=true and no rows must render a skeleton placeholder")
+	}
+	if strings.Contains(body, "No Ghidra analyses match this view.") {
+		t.Fatal("Ghidra panel with Loading=true must not show the real empty-state text -- that claims a genuinely empty result, not a still-warming cache")
+	}
+	if !strings.Contains(body, `<script nonce="test-nonce-value">`) {
+		t.Fatalf("Ghidra panel's warming-state script did not receive the page's real nonce: %s", body)
+	}
+}
+
 // TestWorkbenchResultsPageOffersGhidraTab (#1180-adjacent): Ghidra folded
 // into Analysis results as a fourth tab, the same consolidation #1139 gave
 // sandbox/GitHub-analysis. Renders through the real "workbench-results"

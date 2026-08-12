@@ -59,17 +59,19 @@ type evidenceResultsPageData struct {
 
 // SetNonce shadows pageMeta's own promoted method: renderPage only ever
 // calls SetNonce once, against this page's own top-level pageMeta, but the
-// GitHub panel it embeds (githubanalysisresultspanel, rendered here as
-// {{template "githubanalysisresultspanel" .GitHub}}) carries its own,
-// separate pageMeta -- and needs a real nonce on its own warming-state
+// GitHub and Ghidra panels it embeds (githubanalysisresultspanel/
+// ghidraresultspanel, rendered here as {{template "githubanalysisresultspanel"
+// .GitHub}}/{{template "ghidraresultspanel" .Ghidra}}) each carry their own,
+// separate pageMeta -- and each needs a real nonce on its own warming-state
 // inline reload script (#1156-follow-up, matching overview.html/
 // payloads.html's own `<script nonce="{{.Nonce}}">` convention) when
 // rendered inside this merged page, not just via the standalone (redirect-
-// only) /github-analysis route where .Nonce already resolves to this same
-// top-level struct.
+// only) /github-analysis or /ghidra routes where .Nonce already resolves to
+// this same top-level struct.
 func (d *evidenceResultsPageData) SetNonce(n string) {
 	d.pageMeta.SetNonce(n)
 	d.GitHub.Nonce = n
+	d.Ghidra.Nonce = n
 }
 
 func (s *store) workbenchResultsData(query, owner string) workbenchResultsPageData {
@@ -186,7 +188,7 @@ func (s *store) serveWorkbenchResults(w http.ResponseWriter, r *http.Request, tm
 	data.Workbench = s.workbenchResultsData(q.Get("q"), identity.Subject)
 	data.Sandbox, _ = sandboxData("", q.Get("sandbox_q"))
 	data.GitHub, _ = s.githubAnalysisData("", q.Get("github_q"))
-	data.Ghidra, _ = ghidraData("", q.Get("ghidra_q"))
+	data.Ghidra, _ = s.ghidraData("", q.Get("ghidra_q"))
 	renderPage(w, tmpl, "workbench-results", &data)
 }
 

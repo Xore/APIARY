@@ -429,8 +429,8 @@ func main() {
 	http.HandleFunc("/api/sandbox", serveSandboxAPI)
 	http.HandleFunc("/api/sandbox/", serveSandboxAPI)
 	http.HandleFunc("/export/sandbox/", serveSandboxExport)
-	http.HandleFunc("/api/ghidra", serveGhidraAPI)
-	http.HandleFunc("/api/ghidra/", serveGhidraAPI)
+	http.HandleFunc("/api/ghidra", s.serveGhidraAPI)
+	http.HandleFunc("/api/ghidra/", s.serveGhidraAPI)
 	http.HandleFunc("/export/ghidra/", serveGhidraExport)
 	http.HandleFunc("/api/revdeck/", serveRevdeckAPI)
 	http.HandleFunc("/api/cape/", serveCapeAPI)
@@ -714,7 +714,7 @@ func main() {
 			http.NotFound(w, r)
 			return
 		}
-		data, err := ghidraData(strings.ToLower(sha), "")
+		data, err := s.ghidraData(strings.ToLower(sha), "")
 		if err != nil {
 			http.NotFound(w, r)
 			return

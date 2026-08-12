@@ -425,6 +425,13 @@ type ghidraPageData struct {
 	// because there's nowhere else on the dashboard an operator would look
 	// for it yet.
 	GPUQueue []gpuQueueJob
+	// Loading is true only while the listing cache (s.ghidraCache) has never
+	// been populated -- the same #1157 payloadsPage.Loading/#1156-follow-up
+	// githubAnalysisPageData.Loading convention, distinguishing "still
+	// warming up" from "genuinely no results yet" so the list branch can show
+	// a skeleton instead of misreporting an empty result. Always false on a
+	// detail-view render (Detail != nil), which never reads the cache.
+	Loading bool
 }
 
 func ghidraResultsDir() string { return getenv("GHIDRA_RESULTS_DIR", "") }
@@ -434,6 +441,18 @@ func ghidraResultsDir() string { return getenv("GHIDRA_RESULTS_DIR", "") }
 // no-op run, so anything much older than a path-unit trigger means nothing is
 // consuming the spool.
 const ghidraStatusStaleAfter = 30 * time.Minute
+
+// ghidraListCap bounds refreshGhidraCacheAsync's own fetch to the newest N
+// rows -- mirrors githubAnalysisListCap (github_analysis.go, #1156-follow-up)
+// and workbenchMaxRuns (workbench_domain.go): a listing page has no use for
+// anything past what it will ever display.
+const ghidraListCap = 500
+
+// ghidraCacheTTL mirrors githubAnalysisCacheTTL/payloadCacheTTL's reasoning:
+// long enough that a burst of page loads shares one Elasticsearch round
+// trip (and one ghidraArtifactSet docListIDs call), short enough that a
+// freshly completed analysis shows up without a meaningful wait.
+const ghidraCacheTTL = 2 * time.Minute
 
 // esResultsClient is nil unless ELASTICSEARCH_URL is configured (main.go).
 // See its doc comment there for why this is a package-level var rather than
@@ -461,6 +480,33 @@ func loadGhidraResultsES(es *esClient) ([]ghidraResult, bool) {
 	if err != nil {
 		return nil, false
 	}
+	return decodeGhidraRows(es, raws), true
+}
+
+// loadGhidraResultsESCapped is loadGhidraResultsES bounded to the newest
+// `limit` rows via searchNamespaceLimit's single bounded request, instead of
+// searchNamespace's whole-namespace pagination -- for
+// refreshGhidraCacheAsync, which only ever needs to fill a listing view's
+// own top-N (mirrors loadGitHubAnalysisResultsESCapped in github_analysis.go,
+// #1156-follow-up). Also sidesteps this listing's own second unbounded call:
+// decodeGhidraRows still calls ghidraArtifactSet(es) (a 20000-doc docListIDs
+// query) to resolve each row's download/call-graph links, but moving the
+// whole fetch off the request path and behind ghidraCacheTTL means that
+// second query now runs at most once per refresh cycle, not once per page
+// load.
+func loadGhidraResultsESCapped(es *esClient, limit int) ([]ghidraResult, bool) {
+	raws, err := es.searchNamespaceLimit("ghidra-analysis-v1", "ghidra", limit)
+	if err != nil {
+		return nil, false
+	}
+	return decodeGhidraRows(es, raws), true
+}
+
+// decodeGhidraRows is the raw-hit-to-row conversion shared by
+// loadGhidraResultsES and loadGhidraResultsESCapped: unmarshal, validate the
+// hash, and attach the download/call-graph URLs -- identical regardless of
+// which request shape fetched the raw hits.
+func decodeGhidraRows(es *esClient, raws []json.RawMessage) []ghidraResult {
 	artifacts := ghidraArtifactSet(es)
 	rows := make([]ghidraResult, 0, len(raws))
 	for _, raw := range raws {
@@ -472,7 +518,7 @@ func loadGhidraResultsES(es *esClient) ([]ghidraResult, bool) {
 		rows = append(rows, row)
 	}
 	sortGhidraResults(rows)
-	return rows, true
+	return rows
 }
 
 // loadGhidraResultByHash answers "the one Ghidra result for this hash", the
@@ -688,7 +734,7 @@ func attachGhidraCallGraph(row *ghidraResult, artifacts map[string]bool) {
 	row.CallGraphURL = "/export/ghidra/" + row.SHA256 + "/callgraph.svg"
 }
 
-func ghidraData(sha256, query string) (ghidraPageData, error) {
+func (s *store) ghidraData(sha256, query string) (ghidraPageData, error) {
 	// #1142: the single-hash detail view (below) never needs the whole
 	// listing -- ghidra.html's own {{if .Detail}} branch reads only
 	// .Detail, never .Rows, so loading every result just to linear-scan
@@ -705,11 +751,24 @@ func ghidraData(sha256, query string) (ghidraPageData, error) {
 	}
 	data := ghidraPageData{
 		Generated: time.Now(),
-		Rows:      loadGhidraResults(),
 		Status:    loadGhidraStatus(),
 		Query:     strings.TrimSpace(query),
 		GPUQueue:  loadGPUQueue(),
 	}
+	// #1156-follow-up: this used to call loadGhidraResults() (a
+	// whole-namespace ES fetch, up to searchNamespaceMaxPages*
+	// searchNamespacePageSize documents, paginated, PLUS a second unbounded
+	// ghidraArtifactSet docListIDs call) synchronously on every load of this
+	// listing -- the worst of the three listing pages audited, since it paid
+	// two full-index ES round trips per request. refreshGhidraCacheAsync
+	// keeps both off the request path entirely (#1157's payloadCache shape)
+	// and bounds the fetch itself to ghidraListCap -- a listing only ever
+	// displays a top-N slice anyway.
+	s.refreshGhidraCacheAsync()
+	s.ghidraMu.Lock()
+	data.Rows = append([]ghidraResult(nil), s.ghidraCache...)
+	data.Loading = s.ghidraCacheAt.IsZero() && s.ghidraRefreshing
+	s.ghidraMu.Unlock()
 	if data.Query != "" {
 		needle := strings.ToLower(data.Query)
 		filtered := data.Rows[:0]
@@ -729,6 +788,43 @@ func ghidraData(sha256, query string) (ghidraPageData, error) {
 	return data, nil
 }
 
+// refreshGhidraCacheAsync keeps the listing view's own Elasticsearch round
+// trips off the HTTP request path, the same shape as
+// refreshGithubAnalysisCacheAsync (github_analysis.go, #1156-follow-up) --
+// see that function's own comment for the general reasoning. A no-op
+// entirely when esResultsClient isn't configured, mirroring loadGhidraResults'
+// own gate, and a no-op while a refresh is already running or the last
+// successful one is still within ghidraCacheTTL. Bounded to ghidraListCap via
+// loadGhidraResultsESCapped rather than the whole-namespace
+// loadGhidraResults() -- see that function's own comment.
+func (s *store) refreshGhidraCacheAsync() {
+	if esResultsClient == nil {
+		return
+	}
+	s.ghidraMu.Lock()
+	if s.ghidraRefreshing || (!s.ghidraCacheAt.IsZero() && time.Since(s.ghidraCacheAt) < ghidraCacheTTL) {
+		s.ghidraMu.Unlock()
+		return
+	}
+	s.ghidraRefreshing = true
+	s.ghidraMu.Unlock()
+	go func() {
+		fresh, ok := loadGhidraResultsESCapped(esResultsClient, ghidraListCap)
+		s.ghidraMu.Lock()
+		defer s.ghidraMu.Unlock()
+		s.ghidraRefreshing = false
+		if !ok {
+			// Elasticsearch unreachable this cycle -- keep serving whatever
+			// the last successful read produced (the same graceful-degrade-
+			// by-omission refreshGithubAnalysisCacheAsync's own ES-error path
+			// uses) rather than blanking an already-warm cache.
+			return
+		}
+		s.ghidraCache = fresh
+		s.ghidraCacheAt = time.Now()
+	}()
+}
+
 func triageFamily(row ghidraResult) string {
 	if row.AITriage == nil {
 		return ""
@@ -736,7 +832,7 @@ func triageFamily(row ghidraResult) string {
 	return row.AITriage.FamilyGuess
 }
 
-func serveGhidraAPI(w http.ResponseWriter, r *http.Request) {
+func (s *store) serveGhidraAPI(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/api/ghidra/status" {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(loadGhidraStatus())
@@ -753,7 +849,7 @@ func serveGhidraAPI(w http.ResponseWriter, r *http.Request) {
 	// #876: stored SHA256 values are always lowercase (worker output); a
 	// request for an upper/mixed-case hash must still resolve, matching
 	// serveGitHubAnalysisAPI's strings.ToLower(sha) convention.
-	data, err := ghidraData(strings.ToLower(sha), r.URL.Query().Get("q"))
+	data, err := s.ghidraData(strings.ToLower(sha), r.URL.Query().Get("q"))
 	if err != nil {
 		http.NotFound(w, r)
 		return
