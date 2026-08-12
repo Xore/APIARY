@@ -28,6 +28,13 @@ func (s *store) rebuild() {
 		payloads          = map[string]*payloadRow{}
 		evs               []storedEvent
 		seen              = map[string]bool{}
+		// #1294: endlessh's held_ms lives on honeypot-v2-*, mapped as
+		// Elasticsearch's flattened field type -- a stats/sum aggregation on
+		// it fails outright ("not supported for aggregation"), confirmed
+		// live, so this accumulates in this same in-memory pass rather than
+		// joining es_aggregate.go's ES-native fields above.
+		endlesshTotalHeldMs int64
+		endlesshHeldBuckets = map[string]int{}
 	)
 	now := time.Now()
 	// Captured before s.snap is overwritten at the end of this function --
@@ -167,6 +174,10 @@ func (s *store) rebuild() {
 			}
 			p.Count++
 		}
+		if ev.heldMs > 0 {
+			endlesshTotalHeldMs += int64(ev.heldMs)
+			endlesshHeldBuckets[heldMsBucket(ev.heldMs)]++
+		}
 		evs = append(evs, storedEvent{
 			when: ev.when,
 			Time: ev.whenStr,
@@ -205,6 +216,7 @@ func (s *store) rebuild() {
 			FingerKind:    ev.fingerKind,
 			Category:      ev.category,
 			Severity:      ev.severity,
+			HeldMs:        ev.heldMs,
 			Detail:        ev.detail,
 			IsLogin:       ev.isLogin,
 			HasCredential: ev.isLogin && validCredentialPair(ev.user, ev.pass),
@@ -444,6 +456,9 @@ func (s *store) rebuild() {
 	snap.Generated = now
 	snap.Logins = logins
 	snap.Downloads = downloads
+	snap.EndlesshTotalHeldMs = endlesshTotalHeldMs
+	snap.EndlesshTotalHeldHuman = endlesshHeldHumanDuration(endlesshTotalHeldMs)
+	snap.EndlesshHeldBuckets = endlesshHeldBuckets
 	// #470: read from the same ES-backed cache /payloads itself uses
 	// (payloads_data.go's refreshPayloadCacheAsync, populated by
 	// payload-inventory-worker per #1201/#1223), not Downloads above --

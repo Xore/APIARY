@@ -15,7 +15,7 @@
 
   if (typeof echarts === "undefined") return;
 
-  const initFns = { sankey: initSankey, timeline: initTimeline, heatmap: initHeatmap, pie: initPie, line: initLine };
+  const initFns = { sankey: initSankey, timeline: initTimeline, heatmap: initHeatmap, pie: initPie, line: initLine, bar: initBar };
 
   // #1277: exposed as window.initHoneypotCharts (same convention hp-app.js's
   // own window.initHoneypotMaps already uses) so a page whose content gets
@@ -153,6 +153,26 @@
     });
     if (totalPoints === 0) return "No data yet.";
     return `${data.length} series, ${totalPoints} points.`;
+  }
+
+  // Generic single-series bar/histogram chart -- data is {categories:
+  // [string], values: [number]}, one bar per category in the given order
+  // (a pre-binned histogram, a top-N ranking, whatever the endpoint already
+  // sorted). First consumer: #1294's /api/endlessh-held-histogram.
+  function initBar(chart, data) {
+    data = data || {};
+    const categories = data.categories || [];
+    const values = data.values || [];
+    chart.setOption({
+      tooltip: { trigger: "axis" },
+      grid: { left: "10%", right: "5%" },
+      xAxis: { type: "category", data: categories, axisLabel: { color: "var(--text-primary)" } },
+      yAxis: { type: "value" },
+      series: [{ type: "bar", data: values, itemStyle: { color: "var(--accent)" } }],
+    });
+    const total = values.reduce((sum, v) => sum + v, 0);
+    if (categories.length === 0) return "No data yet.";
+    return `${categories.length} bucket${categories.length === 1 ? "" : "s"}, ${total} total.`;
   }
 
   function initTimeline(chart, rows) {

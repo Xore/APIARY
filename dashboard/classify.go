@@ -35,6 +35,7 @@ type event struct {
 	category    string // suricata alert category / http probe class
 	country     string // ISO country code, from a cf-ipcountry header when present
 	severity    int    // suricata alert severity (1 = most severe)
+	heldMs      int    // endlessh (#1294): tarpit hold duration, disconnect events only
 	isLogin     bool
 	skip        bool
 	when        time.Time
@@ -607,6 +608,7 @@ func classify(e map[string]any, dirSensor string) event {
 		case "disconnect":
 			ms := int(numFloat(e["held_ms"]))
 			lines := int(numFloat(e["lines"]))
+			ev.heldMs = ms
 			ev.detail = fmt.Sprintf("tarpit held %dms, %d banner lines sent", ms, lines)
 		default:
 			ev.detail = str(e["event"])

@@ -361,6 +361,7 @@ func main() {
 	})
 	http.HandleFunc("/api/map-points", s.serveMapPoints)
 	http.HandleFunc("/api/os-distribution", s.serveOSDistribution)
+	http.HandleFunc("/api/endlessh-held-histogram", s.serveEndlesshHeldHistogram)
 	http.HandleFunc("/api/ml-backlog", s.serveMLBacklog)
 	http.HandleFunc("/api/attacker-graph", s.serveAttackerGraph)
 	http.HandleFunc("/api/attck-coverage", s.serveAttckCoverage)
