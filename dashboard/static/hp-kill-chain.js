@@ -158,15 +158,31 @@
   // Generic single-series bar/histogram chart -- data is {categories:
   // [string], values: [number]}, one bar per category in the given order
   // (a pre-binned histogram, a top-N ranking, whatever the endpoint already
-  // sorted). First consumer: #1294's /api/endlessh-held-histogram.
+  // sorted). First consumer: #1294's /api/endlessh-held-histogram (short,
+  // fixed-width bucket labels like "1-5s"). #1276's /api/dionaea-cves added
+  // a second consumer whose labels can run long ("DoublePulsar connection
+  // attempt (CVE-2017-0144..CVE-2017-0148)") -- rotated + truncated with
+  // the full text still in the axis tooltip (trigger: "axis" already shows
+  // it untruncated) rather than a fixed-length category axis overlapping
+  // itself illegibly.
   function initBar(chart, data) {
     data = data || {};
     const categories = data.categories || [];
     const values = data.values || [];
+    const longLabels = categories.some(c => c.length > 14);
     chart.setOption({
       tooltip: { trigger: "axis" },
-      grid: { left: "10%", right: "5%" },
-      xAxis: { type: "category", data: categories, axisLabel: { color: "var(--text-primary)" } },
+      grid: { left: "10%", right: "5%", bottom: longLabels ? 110 : 30 },
+      xAxis: {
+        type: "category",
+        data: categories,
+        axisLabel: {
+          color: "var(--text-primary)",
+          rotate: longLabels ? 30 : 0,
+          overflow: "truncate",
+          width: longLabels ? 160 : undefined,
+        },
+      },
       yAxis: { type: "value" },
       series: [{ type: "bar", data: values, itemStyle: { color: "var(--accent)" } }],
     });

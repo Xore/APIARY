@@ -109,3 +109,59 @@ func TestDionaeaIncidentWithoutDCERPCFieldsIsUnaffected(t *testing.T) {
 		t.Fatalf("a non-dcerpc incident must not gain a uuid field: %q", ev.detail)
 	}
 }
+
+// TestDionaeaExploitIncidentSurfacesNameAndCVE (#1276): data.cve/data.name
+// carry the actual exploit identity on an exploit-attempt incident (live
+// sample: name "DoublePulsar connection attempt", cve
+// "CVE-2017-0144..CVE-2017-0148") -- previously unread, so ev.detail only
+// ever showed the generic Python module path (kind), e.g.
+// "modules.python.smb.exploit", with no indication of which real-world
+// exploit was actually being tried.
+func TestDionaeaExploitIncidentSurfacesNameAndCVE(t *testing.T) {
+	ev := classify(map[string]any{
+		"origin": "dionaea.modules.python.smb.exploit",
+		"data": map[string]any{
+			"connection": map[string]any{"protocol": "smbd", "remote_ip": "203.0.113.5", "local_port": float64(445)},
+			"cve":        "CVE-2017-0144..CVE-2017-0148",
+			"name":       "DoublePulsar connection attempt",
+		},
+	}, "dionaea")
+	if ev.detail != "DoublePulsar connection attempt (CVE-2017-0144..CVE-2017-0148)" {
+		t.Fatalf("detail = %q, want the exploit name plus its CVE range, not the raw module path", ev.detail)
+	}
+}
+
+// TestDionaeaIncidentWithNameButNoCVESurfacesNameOnly covers a named
+// incident with no known CVE mapping (e.g. #1276's own live sample, "MS17-010
+// SMB RCE exploit scanning" carries both, but a future named-only incident
+// kind should not fabricate a CVE parenthetical).
+func TestDionaeaIncidentWithNameButNoCVESurfacesNameOnly(t *testing.T) {
+	ev := classify(map[string]any{
+		"origin": "dionaea.modules.python.smb.exploit",
+		"data": map[string]any{
+			"connection": map[string]any{"protocol": "smbd", "remote_ip": "203.0.113.5", "local_port": float64(445)},
+			"name":       "MS17-010 SMB RCE exploit scanning",
+		},
+	}, "dionaea")
+	if ev.detail != "MS17-010 SMB RCE exploit scanning" {
+		t.Fatalf("detail = %q, want the bare name with no CVE parenthetical", ev.detail)
+	}
+}
+
+// TestDionaeaIncidentWithoutNameFallsBackToKind proves the #1276 change is
+// additive: an incident with neither data.name nor data.cve (login/bind/
+// connection incidents, the vast majority) must still show the generic
+// module-path kind exactly as before.
+func TestDionaeaIncidentWithoutNameFallsBackToKind(t *testing.T) {
+	ev := classify(map[string]any{
+		"origin": "dionaea.modules.python.ftp.login",
+		"data": map[string]any{
+			"con":      map[string]any{"local_host": "203.0.113.5"},
+			"username": "anonymous",
+			"password": "guest@example.com",
+		},
+	}, "dionaea")
+	if !strings.HasPrefix(ev.detail, "modules.python.ftp.login") {
+		t.Fatalf("detail = %q, want it to still fall back to the module-path kind", ev.detail)
+	}
+}
