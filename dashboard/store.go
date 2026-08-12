@@ -71,6 +71,7 @@ type snapshot struct {
 	Providers      []kv
 	Clients        []kv // ssh/telnet client banners
 	Fingerprints   []kv // HASSH / JA3 / JA4 / User-Agent / client identities
+	OSDistribution []kv // p0f OS guess only (#1277) -- split out of Fingerprints above
 	MapPoints      []mapPoint
 	Payloads       []payloadRow
 	Campaigns      []campaignRow
