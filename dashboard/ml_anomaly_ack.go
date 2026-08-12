@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -33,12 +34,21 @@ type mlAnomalyAckRecord struct {
 	AckedAt      time.Time `json:",omitempty"`
 }
 
-// mlAnomalyAckManager mirrors alertManager: a thin, stateless wrapper, every
-// method a live Elasticsearch round-trip, optimistic concurrency against
-// errESConflict since two dashboard instances (or two requests) can race to
-// acknowledge the same anomaly.
+// mlAnomalyAckManager mirrors alertManager for writes (acknowledge is always
+// a live, optimistic-concurrency Elasticsearch round-trip -- two dashboard
+// instances, or two requests, can race to acknowledge the same anomaly, and
+// a write must see the current state to resolve that race). Reads are
+// different: acknowledged() itself is a full, unbounded (size=10000)
+// index scan, so applyMLAnomalyAcks (the read path, called on every
+// /ml-anomalies and /api/ml/anomalies request) reads a polled cache instead
+// of hitting Elasticsearch per request -- see cache/refresh/cached below,
+// same "poll on the 1-minute ticker, read the snapshot" shape as
+// mlAnomalyStore/llmAnalysisStore/agentCampaignStore.
 type mlAnomalyAckManager struct {
 	es *esClient
+
+	mu    sync.RWMutex
+	cache map[string]mlAnomalyAckRecord
 }
 
 // newMLAnomalyAckManager returns nil when es is nil (Elasticsearch not
@@ -122,6 +132,29 @@ func (m *mlAnomalyAckManager) acknowledged() map[string]mlAnomalyAckRecord {
 	return out
 }
 
+// refresh polls acknowledged() (the live, unbounded ES scan) and replaces
+// the cache wholesale -- called from main()'s synchronous startup block and
+// its 1-minute ticker, alongside refreshMLAnomalies/refreshLLMAnalysis/
+// refreshAgentCampaigns, plus once more after a successful acknowledge()
+// write so the redirect back to /ml-anomalies doesn't show stale ack state
+// for up to a minute.
+func (m *mlAnomalyAckManager) refresh() {
+	acked := m.acknowledged()
+	m.mu.Lock()
+	m.cache = acked
+	m.mu.Unlock()
+}
+
+// cached returns the last-polled ack snapshot -- the read path
+// (applyMLAnomalyAcks) uses this instead of acknowledged() itself, which is
+// a full, unbounded (size=10000) Elasticsearch index scan and must not run
+// on every /ml-anomalies or /api/ml/anomalies request.
+func (m *mlAnomalyAckManager) cached() map[string]mlAnomalyAckRecord {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.cache
+}
+
 // applyMLAnomalyAcks joins the polled anomaly cache against ack state
 // in-place. A nil manager (Elasticsearch not configured, same as every
 // other ml-anomalies code path) leaves every item un-acknowledged rather
@@ -130,7 +163,7 @@ func (s *store) applyMLAnomalyAcks(items []mlAnomaly) {
 	if s.mlAnomalyAcks == nil || len(items) == 0 {
 		return
 	}
-	acked := s.mlAnomalyAcks.acknowledged()
+	acked := s.mlAnomalyAcks.cached()
 	if len(acked) == 0 {
 		return
 	}
@@ -184,6 +217,12 @@ func (s *store) serveMLAnomalyAck(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "acknowledgment update failed", http.StatusInternalServerError)
 		return
 	}
+	// Refresh the cache inline: this is an explicit, low-frequency,
+	// user-triggered POST (not a page-load read), so paying one extra live
+	// ES round-trip here is fine, and it means the redirect below shows the
+	// operator's own action immediately instead of stale state for up to a
+	// minute (until the next background poll).
+	s.mlAnomalyAcks.refresh()
 	fallback := "/ml-anomalies"
 	target := fallback
 	if parsed, ok := safeReturnPath(r.FormValue("return"), []string{"/ml-anomalies"}); ok {

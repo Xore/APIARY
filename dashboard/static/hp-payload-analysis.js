@@ -1,17 +1,27 @@
-/* Payload analysis: hydrates the three slow, multi-source cards
-   (#1142 -- Isolated dynamic analysis / GitHub analysis / Known elsewhere)
-   in after the page itself has already rendered.
+/* Payload analysis: hydrates the page in two independent passes after the
+   page shell itself has already rendered.
 
-   /payload-analysis/<hash> renders from analyzePayloadFast alone now
-   (single-file static analysis + YARA, both fast) -- SandboxRuns/
-   GitHubAnalysis/Correlation each depend on loadGhidraResults/
-   loadSandboxResults/loadGitHubAnalysisResults, which fetch up to 10000
-   documents from Elasticsearch regardless of which hash is being asked
-   about (see hash_correlation.go's own comment), genuinely slow compared
-   to everything else on this page. Fetching them here, after the page has
-   already painted, means the operator sees identity/hashes/hex dump/
-   strings/YARA findings immediately instead of waiting on three slow
-   lookups the vast majority of hashes don't even have results in.
+   /payload-analysis/<hash> used to render from analyzePayloadFast (#1142's
+   "fast half": single-file static analysis + YARA) -- fast for a small
+   script, but measured at 567ms of pure CPU/disk work (full-file hashing,
+   entropy/hex-dump/string/IOC extraction, YARA) against a real 5.26MB
+   captured sample, all of it before Go's html/template renderer writes a
+   single byte of the response (no streaming -- the whole document is
+   buffered first). #1157 pushes that work one level further out: the route
+   now renders a bare shell (just the hash from the URL) and this file
+   fetches /api/payload-analysis/<hash>/static to hydrate the Identity/
+   Findings/Content tabs in afterward.
+
+   The second pass -- SandboxRuns/GitHubAnalysis/Correlation via
+   /api/payload-analysis/<hash>/aggregation -- is #1142's original
+   hydration, unchanged. The two fetches are independent and unsequenced:
+   neither waits on the other. The one exception is sha256, which the
+   aggregation fetch needs to scope its ES lookups and which the page shell
+   no longer has synchronously -- if the static-analysis fetch resolves a
+   sha256 the aggregation fetch didn't have yet, it re-fires loadAggregation()
+   once with the now-known value, rather than leaving Known-elsewhere
+   permanently scoped to nothing for hashes addressed by MD5 (Dionaea
+   captures, see payload_analysis.go's own comment on payloadPathBySHA256).
 
    Markup mirrors payloads.html's own template output exactly (same
    classes, same empty-state copy) so hydration is visually seamless --
@@ -21,14 +31,16 @@
 
   const root = document.querySelector("[data-hp-page-content]");
   const hash = root?.dataset.hpPlHash;
-  const sha256 = root?.dataset.hpPlSha256;
+  if (!root || !hash) return;
+
+  const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  // --- Aggregation hydration (#1142, unchanged) ---------------------------
+
   const sandboxTarget = document.querySelector("[data-hp-pl-sandbox-runs]");
   const githubTarget = document.querySelector("[data-hp-pl-github-analysis]");
   const knownTarget = document.querySelector("[data-hp-pl-known-elsewhere]");
   const knownHeading = document.getElementById("hp-pl-known-elsewhere-heading");
-  if (!root || !hash || !sandboxTarget || !githubTarget || !knownTarget) return;
-
-  const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
   function renderSandboxRuns(runs) {
     if (!runs || !runs.length) {
@@ -86,7 +98,7 @@
       <div class="card__row"><span class="card__label">Elasticsearch sightings</span><span class="card__value">${esCell}</span></div>`;
   }
 
-  function renderFailure(message) {
+  function renderAggregationFailure(message) {
     const errorHTML = `<p class="empty">Could not load &mdash; ${escapeHTML(message)}. <button class="lnk" type="button" data-hp-pl-aggregation-retry>Retry</button></p>`;
     sandboxTarget.innerHTML = errorHTML;
     githubTarget.innerHTML = errorHTML;
@@ -94,15 +106,17 @@
   }
 
   async function loadAggregation() {
+    if (!sandboxTarget || !githubTarget || !knownTarget) return;
     try {
-      const response = await fetch(`/api/payload-analysis/${encodeURIComponent(hash)}/aggregation?sha256=${encodeURIComponent(sha256 || "")}`, { cache: "no-store" });
+      const sha256 = root.dataset.hpPlSha256 || "";
+      const response = await fetch(`/api/payload-analysis/${encodeURIComponent(hash)}/aggregation?sha256=${encodeURIComponent(sha256)}`, { cache: "no-store" });
       if (!response.ok) throw new Error(`request failed (${response.status})`);
       const agg = await response.json();
       renderSandboxRuns(agg.sandbox_runs);
       renderGitHubAnalysis(agg.github_analysis, agg.family, agg.family_link);
       renderKnownElsewhere(agg.correlation || {});
     } catch (error) {
-      renderFailure(error.message);
+      renderAggregationFailure(error.message);
     }
   }
 
@@ -111,4 +125,207 @@
   });
 
   loadAggregation();
+
+  // --- Static-analysis hydration (#1157) -----------------------------------
+
+  const noteTarget = document.querySelector("[data-hp-pl-classification-note]");
+  const riskTarget = document.querySelector("[data-hp-pl-risk]");
+  const packedTarget = document.querySelector("[data-hp-pl-packed]");
+  const iocsCountTarget = document.querySelector("[data-hp-pl-iocs-count]");
+  const moreHashesTarget = document.querySelector("[data-hp-pl-more-hashes]");
+  const identityTarget = document.querySelector("[data-hp-pl-identity]");
+  const scriptCard = document.getElementById("hp-pl-script-card");
+  const scriptBodyTarget = document.querySelector("[data-hp-pl-script-body]");
+  const yaraTarget = document.querySelector("[data-hp-pl-yara]");
+  const rulesTarget = document.querySelector("[data-hp-pl-rules]");
+  const iocListTarget = document.querySelector("[data-hp-pl-ioc-list]");
+  const bytesActionsTarget = document.querySelector("[data-hp-pl-bytes-actions]");
+  const textTarget = document.querySelector("[data-hp-pl-text]");
+  const decodedTarget = document.querySelector("[data-hp-pl-decoded]");
+
+  const evidenceBody = key => document.querySelector(`[data-hp-evidence-body="${key}"]`);
+  const setEvidence = (key, title, note, html) => {
+    const el = evidenceBody(key);
+    if (!el) return;
+    el.dataset.hpEvidenceTitle = title;
+    if (note) el.dataset.hpEvidenceNote = note;
+    el.innerHTML = html;
+  };
+
+  function renderClassificationNote(c) {
+    if (!noteTarget) return;
+    noteTarget.innerHTML = c.dynamic ? "" :
+      `<p class="note">${escapeHTML(c.label)} has no dynamic detonation path &mdash; ${escapeHTML(c.analysis_path)}. The evidence below is the whole analysis for this artifact.</p>`;
+  }
+
+  function renderKPIs(data) {
+    if (riskTarget) riskTarget.textContent = `${data.risk_score} / 100 • ${data.risk_level}`;
+    if (packedTarget) packedTarget.textContent = data.packed_likely ? "elevated" : "not indicated";
+    if (iocsCountTarget) iocsCountTarget.textContent = String((data.iocs || []).length);
+  }
+
+  function renderIdentity(data) {
+    const c = data.classification || {};
+    if (moreHashesTarget) {
+      moreHashesTarget.innerHTML = `<details class="action-menu hp-pl-label-trigger"><summary aria-label="More hashes" title="MD5 and SHA-1">More hashes</summary><div class="action-menu__popover hp-pl-info-popover" role="menu"><div class="hp-pl-info-row"><span class="k">MD5</span><span class="v">${escapeHTML(data.md5)}</span></div><div class="hp-pl-info-row"><span class="k">SHA-1</span><span class="v">${escapeHTML(data.sha1)}</span></div></div></details>`;
+    }
+    if (!identityTarget) return;
+    let html = `<div class="card__row"><span class="card__label">identified type</span><span class="card__value"><strong>${escapeHTML(c.label)}</strong> <span class="badge badge--muted">${escapeHTML(c.code)}</span></span></div>`;
+    html += `<div class="card__row"><span class="card__label">platform / category</span><span class="card__value card__value--mono">${escapeHTML(c.platform)} / ${escapeHTML(c.category)}</span></div>`;
+    html += `<div class="card__row"><span class="card__label">sandbox route</span><span class="card__value card__value--mono">${escapeHTML(c.analysis_path)}</span></div>`;
+    html += `<div class="card__row"><span class="card__label">dynamic execution</span><span class="card__value">${c.dynamic ? "supported for this type" : "not automatic; static analysis only"}</span></div>`;
+    html += `<div class="card__row"><span class="card__label">magic</span><span class="card__value">${escapeHTML(data.magic)}</span></div>`;
+    html += `<div class="card__row"><span class="card__label">MIME</span><span class="card__value card__value--mono">${escapeHTML(data.mime)}</span></div>`;
+    html += `<div class="card__row"><span class="card__label">size</span><span class="card__value card__value--mono">${escapeHTML(data.size)}</span></div>`;
+    html += `<div class="card__row"><span class="card__label">entropy</span><span class="card__value card__value--mono">${escapeHTML(data.entropy)}</span></div>`;
+    html += `<div class="card__row"><span class="card__label">SHA-256</span><span class="card__value card__value--mono">${escapeHTML(data.sha256)}</span></div>`;
+    if (data.truncated) html += `<p class="note">deep inspection capped at 16 MiB; hashes cover the complete file</p>`;
+    identityTarget.innerHTML = html;
+  }
+
+  // #1157: was a server-side `{{if or .ScriptType .Indicators}}` that
+  // omitted the whole card -- ScriptType/Indicators aren't known until this
+  // fetch resolves, so the card always renders (skeleton) and is hidden
+  // here instead when it turns out empty. See payloads.html's own comment
+  // on why the neighboring sandbox card no longer reflows to "wide" to fill
+  // the gap.
+  function renderScriptClassification(data) {
+    if (!scriptCard) return;
+    if (!data.script_type && !(data.indicators || []).length) {
+      scriptCard.hidden = true;
+      return;
+    }
+    scriptCard.hidden = false;
+    if (!scriptBodyTarget) return;
+    let html = "";
+    if (data.script_type) html += `<div class="card__row"><span class="card__label">language/type</span><span class="card__value card__value--mono">${escapeHTML(data.script_type)}</span></div>`;
+    if ((data.indicators || []).length) {
+      html += `<div class="card__row"><span class="card__label">behavior indicators</span><span class="card__value">${data.indicators.map(i => `<span class="chip">${escapeHTML(i)}</span>`).join(" ")}</span></div>`;
+    }
+    html += `<p class="note">Heuristic static findings only. Captured content is never interpreted or executed.</p>`;
+    scriptBodyTarget.innerHTML = html;
+  }
+
+  function renderYARA(data) {
+    if (!yaraTarget) return;
+    let html;
+    if ((data.yara_matches || []).length) {
+      const rows = data.yara_matches.map(m => `<tr><td><span class="badge badge--red">match</span></td><td class="v">${escapeHTML(m)}</td></tr>`).join("");
+      html = `<div class="card__scroll"><table class="data-table"><tbody>${rows}</tbody></table></div>`;
+    } else {
+      html = `<p class="empty">${data.yara_scanned ? "No YARA rules matched this sample." : "Waiting for the isolated YARA scanner."}</p>`;
+    }
+    if (data.yara_error) html += `<p class="note tw:text-red">${escapeHTML(data.yara_error)}</p>`;
+    if (data.yara_scanned) html += `<p class="note">Scanned ${escapeHTML(data.yara_scanned)} by the networkless YARA sidecar. A match is a triage signal, not attribution.</p>`;
+    yaraTarget.innerHTML = html;
+  }
+
+  function renderRules(data) {
+    if (!rulesTarget) return;
+    if ((data.rules || []).length) {
+      const rows = data.rules.map(r => `<tr><td><span class="badge badge--muted">${escapeHTML(r.severity)}</span></td><td class="v">${escapeHTML(r.name)}</td><td class="v">${escapeHTML(r.description)}</td></tr>`).join("");
+      rulesTarget.innerHTML = `<div class="card__scroll"><table class="data-table"><thead><tr><th>severity</th><th>rule</th><th>reason</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    } else {
+      rulesTarget.innerHTML = `<p class="empty">No built-in static rules matched.</p>`;
+    }
+  }
+
+  function renderIOCList(data) {
+    if (!iocListTarget) return;
+    if ((data.iocs || []).length) {
+      const rows = data.iocs.map(ioc => `<tr><td class="v"><a href="/events?q=${encodeURIComponent(ioc)}" title="search telemetry for this indicator">${escapeHTML(ioc)}</a></td></tr>`).join("");
+      iocListTarget.innerHTML = `<div class="card__scroll"><table class="data-table"><tbody>${rows}</tbody></table></div>`;
+    } else {
+      iocListTarget.innerHTML = `<p class="empty">No URL, domain, or IP indicators found.</p>`;
+    }
+  }
+
+  function renderBytesAndMetadata(data) {
+    setEvidence("pl-hexdump", "Hex / ASCII preview — first 512 bytes", "", `<pre class="code">${escapeHTML(data.hexdump)}</pre>`);
+    if (bytesActionsTarget) {
+      let html = `<button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-hexdump">Hex / ASCII preview</button> `;
+      if ((data.format_info || []).length) {
+        html += `<button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-format">Executable metadata</button>`;
+        setEvidence("pl-format", "Executable metadata", "", `<pre class="code">${data.format_info.map(escapeHTML).join("\n")}</pre>`);
+      } else {
+        html += `<span class="chip">not a recognized PE/ELF file</span>`;
+      }
+      bytesActionsTarget.innerHTML = html;
+    }
+  }
+
+  function renderExtractedText(data) {
+    const ascii = data.ascii || [];
+    const utf16 = data.utf16 || [];
+    if (ascii.length) setEvidence("pl-ascii", "Printable strings", "Printable sequences extracted from the sample. Filter to find a specific indicator.", `<pre class="code">${ascii.map(escapeHTML).join("\n")}</pre>`);
+    if (utf16.length) setEvidence("pl-utf16", "UTF-16LE strings", "Wide-character sequences extracted from the sample.", `<pre class="code">${utf16.map(escapeHTML).join("\n")}</pre>`);
+    if (!textTarget) return;
+    if (!ascii.length && !utf16.length) {
+      textTarget.innerHTML = `<p class="empty">No printable sequences extracted.</p>`;
+      return;
+    }
+    let html = `<p class="note">${ascii.length} printable and ${utf16.length} wide-character sequence${utf16.length !== 1 ? "s" : ""} extracted.</p>`;
+    if (ascii.length) html += `<button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-ascii">Printable strings (${ascii.length})</button> `;
+    if (utf16.length) html += `<button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-utf16">UTF-16LE strings (${utf16.length})</button>`;
+    textTarget.innerHTML = html;
+  }
+
+  function renderDecoded(data) {
+    const decoded = data.decoded || [];
+    if (!decodedTarget) return;
+    if (!decoded.length) {
+      decodedTarget.innerHTML = `<p class="empty">no bounded Base64, hex, URL or UTF-16 candidates found</p>`;
+      return;
+    }
+    setEvidence("pl-decoded", "Decoded / deobfuscated candidates", "Bounded decodes of encoded content found in the sample. Never executed.",
+      decoded.map(d => `<p class="note">${escapeHTML(d.kind)} from <code>${escapeHTML(d.source)}</code></p><pre class="code">${escapeHTML(d.preview)}</pre>`).join(""));
+    decodedTarget.innerHTML = `<p class="note">${decoded.length} bounded Base64, hex, URL or UTF-16 candidate${decoded.length !== 1 ? "s" : ""} recovered.</p><button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-decoded">Open decoded candidates</button>`;
+  }
+
+  function renderStaticFailure(message) {
+    const errorHTML = `<p class="empty">Could not load &mdash; ${escapeHTML(message)}. <button class="lnk" type="button" data-hp-pl-static-retry>Retry</button></p>`;
+    if (identityTarget) identityTarget.innerHTML = errorHTML;
+    if (yaraTarget) yaraTarget.innerHTML = errorHTML;
+    if (rulesTarget) rulesTarget.innerHTML = errorHTML;
+    if (iocListTarget) iocListTarget.innerHTML = errorHTML;
+    if (bytesActionsTarget) bytesActionsTarget.innerHTML = errorHTML;
+    if (textTarget) textTarget.innerHTML = errorHTML;
+    if (decodedTarget) decodedTarget.innerHTML = errorHTML;
+    if (scriptCard) scriptCard.hidden = true;
+  }
+
+  async function loadStaticAnalysis() {
+    try {
+      const response = await fetch(`/api/payload-analysis/${encodeURIComponent(hash)}/static`, { cache: "no-store" });
+      if (!response.ok) throw new Error(`request failed (${response.status})`);
+      const data = await response.json();
+      renderClassificationNote(data.classification || {});
+      renderKPIs(data);
+      renderIdentity(data);
+      renderScriptClassification(data);
+      renderYARA(data);
+      renderRules(data);
+      renderIOCList(data);
+      renderBytesAndMetadata(data);
+      renderExtractedText(data);
+      renderDecoded(data);
+      // The aggregation fetch above may already have gone out with no
+      // sha256 (the page shell doesn't have one) -- now that the real
+      // value is known, record it and, if that first aggregation call ran
+      // unscoped, re-run it once with the real value.
+      if (data.sha256 && root.dataset.hpPlSha256 !== data.sha256) {
+        const hadSha256 = !!root.dataset.hpPlSha256;
+        root.dataset.hpPlSha256 = data.sha256;
+        if (!hadSha256) loadAggregation();
+      }
+    } catch (error) {
+      renderStaticFailure(error.message);
+    }
+  }
+
+  document.addEventListener("click", e => {
+    if (e.target.closest?.("[data-hp-pl-static-retry]")) loadStaticAnalysis();
+  });
+
+  loadStaticAnalysis();
 })();

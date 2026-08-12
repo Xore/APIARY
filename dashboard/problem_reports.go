@@ -349,23 +349,79 @@ func (s *store) problemReportButtonEnabled() bool {
 type problemReportsPageData struct {
 	pageMeta
 	Reports []problemReport
+	// Loading is true only while the listing cache (s.problemReportsCache)
+	// has never been populated -- the same #1157 payloadsPage.Loading
+	// convention, distinguishing "still warming up" from "genuinely no
+	// reports yet" so the page can show a skeleton instead of misreporting
+	// an empty result.
+	Loading bool
 }
+
+// problemReportsCacheTTL mirrors githubAnalysisCacheTTL's reasoning: long
+// enough that a burst of admin page loads shares one Elasticsearch round
+// trip, short enough that a freshly submitted report shows up without a
+// meaningful wait.
+const problemReportsCacheTTL = 2 * time.Minute
 
 func (s *store) serveProblemReportsPage(w http.ResponseWriter, r *http.Request, tmpl *template.Template) {
 	if !requireAdmin(w, r) {
 		return
 	}
-	hits, err := s.es.docSearchAll(problemReportsIndex, 500)
-	reports := make([]problemReport, 0, len(hits))
-	if err == nil {
+	// #1157 follow-up: this used to call s.es.docSearchAll(problemReportsIndex,
+	// 500) synchronously on every load of this admin page -- a real,
+	// uncached ES round trip whose worst case (500 hits, each carrying up
+	// to a 200KB DOM snapshot plus up to 30 API calls with 20KB bodies
+	// each) is on the order of 100MB of JSON transferred and unmarshaled
+	// before any byte reached the browser. refreshProblemReportsCacheAsync
+	// keeps that off the request path entirely, the same
+	// refreshGithubAnalysisCacheAsync shape (github_analysis.go).
+	s.refreshProblemReportsCacheAsync()
+	s.problemReportsMu.Lock()
+	reports := append([]problemReport(nil), s.problemReportsCache...)
+	loading := s.problemReportsCacheAt.IsZero() && s.problemReportsRefreshing
+	s.problemReportsMu.Unlock()
+	data := problemReportsPageData{Reports: reports, Loading: loading}
+	renderPage(w, tmpl, "problem-reports", &data)
+}
+
+// refreshProblemReportsCacheAsync keeps the /admin/problem-reports listing's
+// own Elasticsearch round trip off the HTTP request path, the same shape as
+// refreshGithubAnalysisCacheAsync (github_analysis.go, #1156-follow-up). A
+// no-op entirely when Elasticsearch isn't configured, and a no-op while a
+// refresh is already running or the last successful one is still within
+// problemReportsCacheTTL.
+func (s *store) refreshProblemReportsCacheAsync() {
+	if s.es == nil {
+		return
+	}
+	s.problemReportsMu.Lock()
+	if s.problemReportsRefreshing || (!s.problemReportsCacheAt.IsZero() && time.Since(s.problemReportsCacheAt) < problemReportsCacheTTL) {
+		s.problemReportsMu.Unlock()
+		return
+	}
+	s.problemReportsRefreshing = true
+	s.problemReportsMu.Unlock()
+	go func() {
+		hits, err := s.es.docSearchAll(problemReportsIndex, 500)
+		s.problemReportsMu.Lock()
+		defer s.problemReportsMu.Unlock()
+		s.problemReportsRefreshing = false
+		if err != nil {
+			// Elasticsearch unreachable this cycle -- keep serving whatever
+			// the last successful read produced (the same graceful-degrade-
+			// by-omission refreshGithubAnalysisCacheAsync's own ES-error
+			// path uses) rather than blanking an already-warm cache.
+			return
+		}
+		fresh := make([]problemReport, 0, len(hits))
 		for _, h := range hits {
 			var rep problemReport
 			if json.Unmarshal(h.Source, &rep) == nil {
-				reports = append(reports, rep)
+				fresh = append(fresh, rep)
 			}
 		}
-		sortProblemReportsNewestFirst(reports)
-	}
-	data := problemReportsPageData{Reports: reports}
-	renderPage(w, tmpl, "problem-reports", &data)
+		sortProblemReportsNewestFirst(fresh)
+		s.problemReportsCache = fresh
+		s.problemReportsCacheAt = time.Now()
+	}()
 }

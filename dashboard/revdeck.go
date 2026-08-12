@@ -135,6 +135,14 @@ func newestRevdeckResult(hash string, results []revdeckStandaloneResult, after t
 // -- this page has no listing view at all (unlike ghidra/github-analysis),
 // so there was never a reason to load more than the one result being
 // asked for. See loadGhidraResultByHash's own comment.
+//
+// Skeleton-sweep audit (#1157 follow-up): checked against the site-wide
+// instant-render sweep and needs no change. searchNamespaceByHash issues one
+// bounded size=5 term-query round trip -- not an unbounded whole-index
+// fetch like #1156 flagged elsewhere -- and there is no per-file computation
+// (hashing/entropy/YARA) like the /payload-analysis finding this sweep
+// otherwise centers on. No skeleton is warranted; there's no genuinely slow
+// work here to hide behind one.
 func revdeckData(sha256 string) (revdeckPageData, error) {
 	data := revdeckPageData{Generated: time.Now()}
 	if sha256 == "" {

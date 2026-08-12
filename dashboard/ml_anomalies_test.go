@@ -346,6 +346,9 @@ func TestMLAnomaliesPageRendersAcknowledgeAction(t *testing.T) {
 	})
 	acks := newTestMLAnomalyAckManager(t)
 	acks.acknowledge("acked-anomaly", true, "alice")
+	// applyMLAnomalyAcks reads the polled cache, not live ES (#1157-sweep) --
+	// refresh() once to simulate the background poll before rendering.
+	acks.refresh()
 	s := &store{mlAnomalies: c, es: &esClient{}, mlAnomalyAcks: acks}
 	funcs := templateFuncs(s, "")
 	tmpl := template.Must(template.New("t").Funcs(funcs).Parse(pageTemplate))

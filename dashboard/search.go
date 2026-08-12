@@ -49,6 +49,17 @@ type searchPage struct {
 
 // searchRedirect resolves a query that unambiguously names one entity. The
 // caller redirects rather than rendering a result page with a single row.
+//
+// #1157-follow-up: the sandbox-job check below used to call
+// loadSandboxResults() -- a whole-namespace, paginated ES fetch (up to
+// searchNamespaceMaxPages*searchNamespacePageSize documents) -- directly,
+// on every /search request AND every per-keystroke /api/quick-search
+// autocomplete lookup (quickSearchResults calls this too). It now reads
+// s.sandboxCacheSnapshot(), the same bounded, background-refreshed cache
+// the /sandbox listing itself uses, so this never blocks on ES. The
+// tradeoff: a sandbox job older than sandboxListCap's newest-N window won't
+// exact-match here (it still surfaces via /sandbox's own search). Given how
+// hot this path is (every keystroke), that's the right side to bound.
 func (s *store) searchRedirect(query string) string {
 	events := s.getEvents()
 	lower := strings.ToLower(query)
@@ -62,7 +73,7 @@ func (s *store) searchRedirect(query string) string {
 			return "/investigate/ip/" + url.PathEscape(e.SrcIP)
 		}
 	}
-	for _, run := range loadSandboxResults() {
+	for _, run := range s.sandboxCacheSnapshot() {
 		if strings.EqualFold(run.Job, query) {
 			return "/sandbox/" + url.PathEscape(run.Job)
 		}
@@ -232,9 +243,14 @@ func (s *store) searchData(query string, f filter) searchPage {
 	return page
 }
 
+// searchSandbox matches against s.sandboxCacheSnapshot() rather than calling
+// loadSandboxResults() directly -- see searchRedirect's comment above for
+// why (#1157-follow-up): this used to be a second independent whole-
+// namespace ES fetch on top of searchRedirect's, meaning a single /search
+// request could trigger the same unbounded scan twice.
 func (s *store) searchSandbox(needle string) searchGroup {
 	runs := newCounter()
-	for _, run := range loadSandboxResults() {
+	for _, run := range s.sandboxCacheSnapshot() {
 		haystack := strings.ToLower(strings.Join([]string{run.Job, run.SHA256, run.CaptureName, run.FileType, run.RiskLevel, run.Classification.Label}, " "))
 		if strings.Contains(haystack, needle) {
 			runs.add(run.Job, strings.TrimSpace(run.Classification.Label+" "+run.RiskLevel))
@@ -244,9 +260,13 @@ func (s *store) searchSandbox(needle string) searchGroup {
 		func(v string) string { return "/sandbox/" + url.PathEscape(v) })
 }
 
+// searchGitHubAnalysis matches against s.githubAnalysisCacheSnapshot()
+// rather than calling loadGitHubAnalysisResults() directly -- same
+// unbounded-fetch-off-the-hot-path reasoning as searchSandbox above
+// (#1157-follow-up).
 func (s *store) searchGitHubAnalysis(needle string) searchGroup {
 	rows := newCounter()
-	for _, result := range loadGitHubAnalysisResults() {
+	for _, result := range s.githubAnalysisCacheSnapshot() {
 		verdictLevel := ""
 		if result.Verdict != nil {
 			verdictLevel = result.Verdict.Level

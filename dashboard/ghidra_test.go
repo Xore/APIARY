@@ -39,6 +39,16 @@ func esGhidraResult(t *testing.T, rows ...map[string]any) {
 const shaA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 const shaB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
+// seedGhidraCache populates s.ghidraCache directly, bypassing
+// refreshGhidraCacheAsync's background Elasticsearch round trip -- mirrors
+// github_analysis_test.go's own seedGitHubAnalysisCache for the same reason:
+// ghidraData's list branch reads only the cache (#1156-follow-up), so
+// that's what a test needs to seed, not the ES stub.
+func seedGhidraCache(s *store, rows ...ghidraResult) {
+	s.ghidraCache = rows
+	s.ghidraCacheAt = time.Now()
+}
+
 // A return path that leaves the dashboard must never be honored. "//evil" is
 // the case a bare strings.HasPrefix(raw, "/") check lets through, which is
 // exactly why safeReturnPath exists and is shared with sandbox submission.
@@ -615,10 +625,15 @@ func TestServeGhidraAPI(t *testing.T) {
 	esGhidraResult(t, map[string]any{
 		"sha256": shaA, "exit_status": "ok", "imports": []string{"ws2_32.dll!connect"},
 	})
+	s := &store{}
+	// "list" reads s.ghidraCache (#1156-follow-up), not ES directly -- seeded
+	// here rather than relying on refreshGhidraCacheAsync's background
+	// goroutine racing this synchronous request.
+	seedGhidraCache(s, ghidraResult{SHA256: shaA, ExitStatus: "ok", Imports: []string{"ws2_32.dll!connect"}})
 
 	t.Run("list", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		serveGhidraAPI(w, httptest.NewRequest(http.MethodGet, "/api/ghidra", nil))
+		s.serveGhidraAPI(w, httptest.NewRequest(http.MethodGet, "/api/ghidra", nil))
 		var rows []ghidraResult
 		if err := json.NewDecoder(w.Body).Decode(&rows); err != nil {
 			t.Fatal(err)
@@ -630,7 +645,7 @@ func TestServeGhidraAPI(t *testing.T) {
 
 	t.Run("detail", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		serveGhidraAPI(w, httptest.NewRequest(http.MethodGet, "/api/ghidra/"+shaA, nil))
+		s.serveGhidraAPI(w, httptest.NewRequest(http.MethodGet, "/api/ghidra/"+shaA, nil))
 		var row ghidraResult
 		if err := json.NewDecoder(w.Body).Decode(&row); err != nil {
 			t.Fatal(err)
@@ -646,7 +661,7 @@ func TestServeGhidraAPI(t *testing.T) {
 	// has a completed analysis used to 404.
 	t.Run("detail with uppercase hash still resolves", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		serveGhidraAPI(w, httptest.NewRequest(http.MethodGet, "/api/ghidra/"+strings.ToUpper(shaA), nil))
+		s.serveGhidraAPI(w, httptest.NewRequest(http.MethodGet, "/api/ghidra/"+strings.ToUpper(shaA), nil))
 		var row ghidraResult
 		if err := json.NewDecoder(w.Body).Decode(&row); err != nil {
 			t.Fatal(err)
@@ -658,7 +673,7 @@ func TestServeGhidraAPI(t *testing.T) {
 
 	t.Run("unknown hash is 404", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		serveGhidraAPI(w, httptest.NewRequest(http.MethodGet, "/api/ghidra/"+shaB, nil))
+		s.serveGhidraAPI(w, httptest.NewRequest(http.MethodGet, "/api/ghidra/"+shaB, nil))
 		if w.Code != http.StatusNotFound {
 			t.Errorf("got %d, want 404", w.Code)
 		}
@@ -666,7 +681,7 @@ func TestServeGhidraAPI(t *testing.T) {
 
 	t.Run("malformed hash is 404, not a directory read", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		serveGhidraAPI(w, httptest.NewRequest(http.MethodGet, "/api/ghidra/../../etc", nil))
+		s.serveGhidraAPI(w, httptest.NewRequest(http.MethodGet, "/api/ghidra/../../etc", nil))
 		if w.Code != http.StatusNotFound {
 			t.Errorf("got %d, want 404", w.Code)
 		}
@@ -674,12 +689,12 @@ func TestServeGhidraAPI(t *testing.T) {
 
 	t.Run("status", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		serveGhidraAPI(w, httptest.NewRequest(http.MethodGet, "/api/ghidra/status", nil))
-		var s ghidraQueueStatus
-		if err := json.NewDecoder(w.Body).Decode(&s); err != nil {
+		s.serveGhidraAPI(w, httptest.NewRequest(http.MethodGet, "/api/ghidra/status", nil))
+		var status ghidraQueueStatus
+		if err := json.NewDecoder(w.Body).Decode(&status); err != nil {
 			t.Fatal(err)
 		}
-		if !s.Configured {
+		if !status.Configured {
 			t.Error("status should report Configured with a results dir set")
 		}
 	})
@@ -688,13 +703,14 @@ func TestServeGhidraAPI(t *testing.T) {
 // Search must not match on the string table: nearly every binary contains
 // nearly every short substring, which would make the filter useless.
 func TestGhidraDataQueryIgnoresStrings(t *testing.T) {
-	esGhidraResult(t, map[string]any{
-		"sha256": shaA, "exit_status": "ok",
-		"strings": []string{"needle"},
-		"imports": []string{"ws2_32.dll!connect"},
+	s := &store{}
+	seedGhidraCache(s, ghidraResult{
+		SHA256: shaA, ExitStatus: "ok",
+		Strings: []string{"needle"},
+		Imports: []string{"ws2_32.dll!connect"},
 	})
 
-	data, err := ghidraData("", "needle")
+	data, err := s.ghidraData("", "needle")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -702,12 +718,131 @@ func TestGhidraDataQueryIgnoresStrings(t *testing.T) {
 		t.Errorf("query matched the string table: %+v", data.Rows)
 	}
 
-	data, err = ghidraData("", "ws2_32")
+	data, err = s.ghidraData("", "ws2_32")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(data.Rows) != 1 {
 		t.Errorf("query did not match imports: %+v", data.Rows)
+	}
+}
+
+// TestGhidraDataListLoadingBeforeFirstRefresh covers #1156-follow-up: a
+// request that reaches ghidraData's list branch before
+// refreshGhidraCacheAsync's first cycle ever completes must report
+// Loading=true with no rows, not an empty result -- ui/ghidra.html's
+// ghidraresultspanel uses exactly this to choose a skeleton over "No Ghidra
+// analyses match this view."
+func TestGhidraDataListLoadingBeforeFirstRefresh(t *testing.T) {
+	s := &store{}
+	// Simulates the moment a request reaches ghidraData while
+	// refreshGhidraCacheAsync's background goroutine is still running its
+	// very first cycle -- set directly rather than racing the real
+	// (near-instant, in-process) ES stub round trip a live esGhidraResult(t,
+	// ...) call would complete before this goroutine-free assertion could
+	// ever observe the in-flight state.
+	s.ghidraRefreshing = true
+
+	data, err := s.ghidraData("", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !data.Loading {
+		t.Fatal("Loading must be true while the cache has never been populated and a refresh is in flight")
+	}
+	if len(data.Rows) != 0 {
+		t.Fatalf("expected no rows before the first refresh completes, got %+v", data.Rows)
+	}
+}
+
+// TestGhidraDataListNeverMasksRealDataRegardlessOfLoading pairs with
+// skeleton_placeholders_test.go's own TestListingPagesNeverMaskRealDataRegardlessOfReady
+// -- a warm cache with real rows must render them even if a background
+// refresh happens to be in flight (Loading only means "never populated", not
+// "currently refreshing").
+func TestGhidraDataListNeverMasksRealDataRegardlessOfLoading(t *testing.T) {
+	s := &store{}
+	seedGhidraCache(s, ghidraResult{SHA256: shaA, ExitStatus: "ok"})
+	s.ghidraRefreshing = true
+
+	data, err := s.ghidraData("", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data.Rows) != 1 || data.Rows[0].SHA256 != shaA {
+		t.Fatalf("real cached data must render even mid-refresh: %+v", data.Rows)
+	}
+	if data.Loading {
+		t.Fatal("Loading must be false once the cache has been populated at least once, even mid-refresh")
+	}
+}
+
+// TestRefreshGhidraCacheAsyncNoopWithoutES mirrors
+// TestRefreshGithubAnalysisCacheAsyncNoopWithoutES: with no esResultsClient
+// configured, the cache must stay unpopulated -- there is no local-file
+// fallback for the listing cache, matching loadGhidraResults' own ES-only
+// gate.
+func TestRefreshGhidraCacheAsyncNoopWithoutES(t *testing.T) {
+	s := &store{}
+	s.refreshGhidraCacheAsync()
+	if !s.ghidraCacheAt.IsZero() {
+		t.Fatal("refreshGhidraCacheAsync populated the cache without a configured esResultsClient")
+	}
+}
+
+// TestRefreshGhidraCacheAsyncPopulatesFromES proves the background refresh
+// actually fills the cache from the (bounded, #1156-follow-up) Elasticsearch
+// fetch -- runs in a goroutine, so poll briefly rather than asserting
+// synchronously, the same pattern
+// TestRefreshGithubAnalysisCacheAsyncPopulatesFromES uses.
+func TestRefreshGhidraCacheAsyncPopulatesFromES(t *testing.T) {
+	esGhidraResult(t, map[string]any{"sha256": shaA, "exit_status": "ok"})
+	s := &store{}
+	s.refreshGhidraCacheAsync()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		s.ghidraMu.Lock()
+		ready := !s.ghidraCacheAt.IsZero()
+		s.ghidraMu.Unlock()
+		if ready {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	s.ghidraMu.Lock()
+	cache := append([]ghidraResult(nil), s.ghidraCache...)
+	s.ghidraMu.Unlock()
+	if len(cache) != 1 || cache[0].SHA256 != shaA {
+		t.Fatalf("expected the ES-seeded result to reach the cache: %+v", cache)
+	}
+}
+
+// TestRefreshGhidraCacheAsyncSkipsWhileWarm proves the TTL/in-flight guard
+// actually prevents a redundant Elasticsearch round trip, mirroring
+// TestRefreshGithubAnalysisCacheAsyncSkipsWhileWarm.
+func TestRefreshGhidraCacheAsyncSkipsWhileWarm(t *testing.T) {
+	var requests int
+	es := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"hits":{"hits":[]}}`))
+	}))
+	defer es.Close()
+	prev := esResultsClient
+	esResultsClient = newESClient(es.URL, "")
+	t.Cleanup(func() { esResultsClient = prev })
+
+	s := &store{}
+	s.ghidraCacheAt = time.Now() // already warm
+	s.refreshGhidraCacheAsync()
+	// No goroutine should even be spawned -- the TTL guard returns
+	// synchronously -- but give any accidental one a moment to prove it
+	// wrong before asserting.
+	time.Sleep(50 * time.Millisecond)
+	if requests != 0 {
+		t.Fatalf("expected no Elasticsearch request while the cache is still within TTL, got %d", requests)
 	}
 }
 

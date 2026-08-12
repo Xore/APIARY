@@ -38,6 +38,16 @@ func esGitHubAnalysisResult(t *testing.T, rows ...map[string]any) {
 	esResultsClientFor(t, map[string][]map[string]any{"github-analysis-v1": docs})
 }
 
+// seedGitHubAnalysisCache populates s.githubAnalysisCache directly, bypassing
+// refreshGithubAnalysisCacheAsync's background Elasticsearch round trip --
+// mirrors reports_payload_options_test.go's own seedPayloadCache for the
+// same reason: githubAnalysisData's list branch reads only the cache (#1156-
+// follow-up), so that's what a test needs to seed, not the ES stub.
+func seedGitHubAnalysisCache(s *store, rows ...githubAnalysisResult) {
+	s.githubAnalysisCache = rows
+	s.githubAnalysisCacheAt = time.Now()
+}
+
 func TestLoadGitHubAnalysisResults(t *testing.T) {
 	esGitHubAnalysisResult(t,
 		map[string]any{
@@ -190,18 +200,143 @@ func TestLoadGitHubAnalysisStatus(t *testing.T) {
 }
 
 func TestGitHubAnalysisDataQuery(t *testing.T) {
-	esGitHubAnalysisResult(t,
-		map[string]any{"sha256": shaA, "exit_status": "ok", "family": "mirai"},
-		map[string]any{"sha256": shaB, "exit_status": "ok", "family": "qbot"},
+	s := &store{}
+	seedGitHubAnalysisCache(s,
+		githubAnalysisResult{SHA256: shaA, ExitStatus: "ok", Family: "mirai"},
+		githubAnalysisResult{SHA256: shaB, ExitStatus: "ok", Family: "qbot"},
 	)
 
-	s := &store{}
 	data, err := s.githubAnalysisData("", "mirai")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(data.Rows) != 1 || data.Rows[0].SHA256 != shaA {
 		t.Fatalf("query did not filter by family: %+v", data.Rows)
+	}
+	if data.Loading {
+		t.Fatal("Loading must be false once the cache has been populated")
+	}
+}
+
+// TestGitHubAnalysisDataListLoadingBeforeFirstRefresh covers #1156-follow-up:
+// a request that reaches githubAnalysisData's list branch before
+// refreshGithubAnalysisCacheAsync's first cycle ever completes must report
+// Loading=true with no rows, not an empty result -- ui/github_analysis.html's
+// githubanalysisresultspanel uses exactly this to choose a skeleton over
+// "No GitHub analyses match this view."
+func TestGitHubAnalysisDataListLoadingBeforeFirstRefresh(t *testing.T) {
+	s := &store{}
+	// Simulates the moment a request reaches githubAnalysisData while
+	// refreshGithubAnalysisCacheAsync's background goroutine is still
+	// running its very first cycle -- set directly rather than racing the
+	// real (near-instant, in-process) ES stub round trip a live
+	// esGitHubAnalysisResult(t, ...) call would complete before this
+	// goroutine-free assertion could ever observe the in-flight state.
+	s.githubAnalysisRefreshing = true
+
+	data, err := s.githubAnalysisData("", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !data.Loading {
+		t.Fatal("Loading must be true while the cache has never been populated and a refresh is in flight")
+	}
+	if len(data.Rows) != 0 {
+		t.Fatalf("expected no rows before the first refresh completes, got %+v", data.Rows)
+	}
+}
+
+// TestGitHubAnalysisDataListNeverMasksRealDataRegardlessOfLoading pairs with
+// skeleton_placeholders_test.go's own TestListingPagesNeverMaskRealDataRegardlessOfReady
+// -- a warm cache with real rows must render them even if a background
+// refresh happens to be in flight (Loading only means "never populated",
+// not "currently refreshing").
+func TestGitHubAnalysisDataListNeverMasksRealDataRegardlessOfLoading(t *testing.T) {
+	s := &store{}
+	seedGitHubAnalysisCache(s, githubAnalysisResult{SHA256: shaA, ExitStatus: "ok"})
+	s.githubAnalysisRefreshing = true
+
+	data, err := s.githubAnalysisData("", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data.Rows) != 1 || data.Rows[0].SHA256 != shaA {
+		t.Fatalf("real cached data must render even mid-refresh: %+v", data.Rows)
+	}
+	if data.Loading {
+		t.Fatal("Loading must be false once the cache has been populated at least once, even mid-refresh")
+	}
+}
+
+// TestRefreshGithubAnalysisCacheAsyncNoopWithoutES mirrors
+// TestRefreshPayloadCacheAsyncNoopWithoutES (payload_inventory_es_test.go):
+// with no esResultsClient configured, the cache must stay unpopulated --
+// there is no local-file fallback for the listing cache, matching
+// loadGitHubAnalysisResults' own ES-only gate.
+func TestRefreshGithubAnalysisCacheAsyncNoopWithoutES(t *testing.T) {
+	s := &store{}
+	s.refreshGithubAnalysisCacheAsync()
+	if !s.githubAnalysisCacheAt.IsZero() {
+		t.Fatal("refreshGithubAnalysisCacheAsync populated the cache without a configured esResultsClient")
+	}
+}
+
+// TestRefreshGithubAnalysisCacheAsyncPopulatesFromES proves the background
+// refresh actually fills the cache from the (bounded, #1156-follow-up)
+// Elasticsearch fetch -- runs in a goroutine, so poll briefly rather than
+// asserting synchronously, the same pattern
+// TestRefreshPayloadCacheAsyncServesFromESWithoutScanningDisk uses.
+func TestRefreshGithubAnalysisCacheAsyncPopulatesFromES(t *testing.T) {
+	esGitHubAnalysisResult(t, map[string]any{"sha256": shaA, "exit_status": "ok", "family": "mirai"})
+	s := &store{}
+	s.refreshGithubAnalysisCacheAsync()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		s.githubAnalysisMu.Lock()
+		ready := !s.githubAnalysisCacheAt.IsZero()
+		s.githubAnalysisMu.Unlock()
+		if ready {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	s.githubAnalysisMu.Lock()
+	cache := append([]githubAnalysisResult(nil), s.githubAnalysisCache...)
+	s.githubAnalysisMu.Unlock()
+	if len(cache) != 1 || cache[0].SHA256 != shaA {
+		t.Fatalf("expected the ES-seeded result to reach the cache: %+v", cache)
+	}
+}
+
+// TestRefreshGithubAnalysisCacheAsyncSkipsWhileWarm proves the TTL/in-flight
+// guard actually prevents a redundant Elasticsearch round trip -- the same
+// property refreshPayloadCacheAsync's own TTL guard has, just never pinned
+// by a dedicated test for that sibling function either; this is the first
+// such regression test for either cache and doubles as documentation for
+// both.
+func TestRefreshGithubAnalysisCacheAsyncSkipsWhileWarm(t *testing.T) {
+	var requests int
+	es := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"hits":{"hits":[]}}`))
+	}))
+	defer es.Close()
+	prev := esResultsClient
+	esResultsClient = newESClient(es.URL, "")
+	t.Cleanup(func() { esResultsClient = prev })
+
+	s := &store{}
+	s.githubAnalysisCacheAt = time.Now() // already warm
+	s.refreshGithubAnalysisCacheAsync()
+	// No goroutine should even be spawned -- the TTL guard returns
+	// synchronously -- but give any accidental one a moment to prove it
+	// wrong before asserting.
+	time.Sleep(50 * time.Millisecond)
+	if requests != 0 {
+		t.Fatalf("expected no Elasticsearch request while the cache is still within TTL, got %d", requests)
 	}
 }
 
@@ -293,6 +428,10 @@ func TestServeGitHubAnalysisAPI(t *testing.T) {
 	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", t.TempDir())
 	esGitHubAnalysisResult(t, map[string]any{"sha256": shaA, "exit_status": "ok", "family": "mirai"})
 	s := &store{}
+	// "list" reads s.githubAnalysisCache (#1156-follow-up), not ES directly
+	// -- seeded here rather than relying on refreshGithubAnalysisCacheAsync's
+	// background goroutine racing this synchronous request.
+	seedGitHubAnalysisCache(s, githubAnalysisResult{SHA256: shaA, ExitStatus: "ok", Family: "mirai"})
 
 	t.Run("list", func(t *testing.T) {
 		w := httptest.NewRecorder()

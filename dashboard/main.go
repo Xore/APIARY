@@ -165,6 +165,12 @@ func main() {
 				s.refreshLLMAnalysis()
 				s.refreshAgentCampaigns()
 				s.refreshAuthEvents()
+				// #913-follow-up: s.mlAnomalyAcks isn't constructed until
+				// after this block (below, once s.es itself is set) -- by
+				// the time this first fires (a minute after startup) it's
+				// long since non-nil, and refreshMLAnomalyAcks is a no-op
+				// on nil anyway, same guard every other refresh* here has.
+				s.refreshMLAnomalyAcks()
 			}
 		}()
 	}
@@ -198,6 +204,12 @@ func main() {
 	// call site (applyMLAnomalyAcks, serveMLAnomalyAck) already treats a nil
 	// mlAnomalyAcks as "acknowledgment disabled".
 	s.mlAnomalyAcks = newMLAnomalyAckManager(s.es)
+	// Populate the ack cache before the first request can reach
+	// /ml-anomalies or /api/ml/anomalies (applyMLAnomalyAcks reads only the
+	// cache now, never Elasticsearch directly -- see ml_anomaly_ack.go);
+	// thereafter kept warm by the 1-minute ticker above, same as
+	// refreshMLAnomalies/refreshLLMAnalysis/refreshAgentCampaigns.
+	s.refreshMLAnomalyAcks()
 	s.intelligence = &intelligenceStore{path: getenv("INTELLIGENCE_STATE_FILE", "/state/intelligence.json"), es: s.es}
 	// #787: config/users are Elasticsearch-backed singleton documents (see
 	// settings_store_es.go) -- s.es nil (Elasticsearch not configured)
@@ -426,11 +438,11 @@ func main() {
 		}
 		s.es.deadLetters(w, r)
 	})
-	http.HandleFunc("/api/sandbox", serveSandboxAPI)
-	http.HandleFunc("/api/sandbox/", serveSandboxAPI)
-	http.HandleFunc("/export/sandbox/", serveSandboxExport)
-	http.HandleFunc("/api/ghidra", serveGhidraAPI)
-	http.HandleFunc("/api/ghidra/", serveGhidraAPI)
+	http.HandleFunc("/api/sandbox", s.serveSandboxAPI)
+	http.HandleFunc("/api/sandbox/", s.serveSandboxAPI)
+	http.HandleFunc("/export/sandbox/", s.serveSandboxExport)
+	http.HandleFunc("/api/ghidra", s.serveGhidraAPI)
+	http.HandleFunc("/api/ghidra/", s.serveGhidraAPI)
 	http.HandleFunc("/export/ghidra/", serveGhidraExport)
 	http.HandleFunc("/api/revdeck/", serveRevdeckAPI)
 	http.HandleFunc("/api/cape/", serveCapeAPI)
@@ -608,6 +620,7 @@ func main() {
 	})
 	http.HandleFunc("/source-health", func(w http.ResponseWriter, r *http.Request) {
 		data := s.get()
+		data.Ready = s.ready.Load()
 		renderPage(w, tmpl, "source-health", &data)
 	})
 	http.HandleFunc("/alerts", func(w http.ResponseWriter, r *http.Request) {
@@ -714,7 +727,7 @@ func main() {
 			http.NotFound(w, r)
 			return
 		}
-		data, err := ghidraData(strings.ToLower(sha), "")
+		data, err := s.ghidraData(strings.ToLower(sha), "")
 		if err != nil {
 			http.NotFound(w, r)
 			return
@@ -788,7 +801,7 @@ func main() {
 			http.NotFound(w, r)
 			return
 		}
-		data, err := sandboxData(job, "")
+		data, err := s.sandboxData(job, "")
 		if err != nil {
 			http.NotFound(w, r)
 			return
@@ -805,19 +818,36 @@ func main() {
 	})
 	http.HandleFunc("/payload-analysis/", func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(r.URL.Path, "/payload-analysis/")
-		// #1142: analyzePayloadFast, not analyzePayload -- the page renders
-		// from single-file static/YARA work alone and hydrates SandboxRuns/
-		// GitHubAnalysis/Correlation in asynchronously via
-		// /api/payload-analysis/<hash>/aggregation instead of blocking on
-		// them here. See analyzePayloadFast's own comment.
-		analysis, err := s.analyzePayloadFast(name)
+		// #1157: payloadAnalysisShell, not analyzePayloadFast -- even
+		// analyzePayloadFast's "fast half" (#1142) turned out not to be fast
+		// enough for a multi-megabyte payload (567ms measured against a real
+		// 5.26MB capture, all of it before html/template writes a single
+		// byte, since Go's renderer buffers the whole document first). The
+		// shell resolves and validates the hash only; the Identity/Findings/
+		// Content tabs hydrate in via /api/payload-analysis/<hash>/static,
+		// the same pattern SandboxRuns/GitHubAnalysis/Correlation already
+		// use via /api/payload-analysis/<hash>/aggregation. See
+		// payloadAnalysisShell's own comment.
+		shell, err := s.payloadAnalysisShell(name)
 		if err != nil {
 			http.NotFound(w, r)
 			return
 		}
-		renderPage(w, tmpl, "payload-analysis", &analysis)
+		renderPage(w, tmpl, "payload-analysis", &shell)
 	})
-	http.HandleFunc("/api/payload-analysis/", s.servePayloadAggregation)
+	http.HandleFunc("/api/payload-analysis/", func(w http.ResponseWriter, r *http.Request) {
+		// #1157: one prefix, two hydration endpoints -- static (this
+		// route's addition) and aggregation (#1142, unchanged). Dispatched
+		// on the action segment of the path; servePayloadAggregation keeps
+		// owning its own "aggregation" validation/404, so the default case
+		// here just falls through to it unchanged.
+		rest := strings.TrimPrefix(r.URL.Path, "/api/payload-analysis/")
+		if _, action, ok := strings.Cut(rest, "/"); ok && action == "static" {
+			s.servePayloadStaticAnalysis(w, r)
+			return
+		}
+		s.servePayloadAggregation(w, r)
+	})
 	http.HandleFunc("/export/events.csv", s.exportEventsCSV)
 	http.HandleFunc("/export/commands.csv", s.exportCommandsCSV)
 	http.HandleFunc("/export/ips.csv", s.exportIPsCSV)

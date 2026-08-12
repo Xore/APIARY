@@ -241,6 +241,14 @@ type authEventsPage struct {
 	filterBar
 }
 
+// Skeleton-sweep audit (#1157 follow-up): this handler was checked against
+// the site-wide instant-render sweep and needs no change. It only reads
+// s.authEvents.snapshot() -- an in-memory, mutex-protected slice -- with no
+// ES/file I/O in the per-request path; the real ES fetch (refreshAuthEvents)
+// runs on a background ticker AND once synchronously in main() before
+// http.ListenAndServe, so unlike the rebuild()-backed listing pages #1155
+// fixed there is no cold-start window where a request can observe a
+// not-yet-populated cache. No Ready/Loading gate or skeleton is warranted.
 func (s *store) authEventsData(r *http.Request) authEventsPage {
 	f := parseAuthEventFilter(r)
 	bar := buildFilterBar(r, "/auth-events",

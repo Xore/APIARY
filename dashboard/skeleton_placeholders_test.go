@@ -57,6 +57,60 @@ func TestListingPagesShowSkeletonPlaceholdersBeforeFirstRebuildInsteadOfEmptySta
 			readyData:     &clustersPage{Ready: true},
 			realEmptyText: "No multi-source pivots are present",
 		},
+		// source-health (this sweep): /source-health reads the same
+		// rebuild()-populated s.get() snapshot as overview/ips/events, so it
+		// shares the identical cold-start gap -- the "Dashboard parser feeds"
+		// table had no Ready/empty guard at all before this change, silently
+		// rendering a header-only table indistinguishable from "this honeypot
+		// really has no sensors."
+		{
+			name:          "source-health",
+			emptyData:     &snapshot{Ready: false},
+			readyData:     &snapshot{Ready: true},
+			realEmptyText: "no configured parser feeds",
+		},
+		// githubanalysisresultspanel (#1156-follow-up) gates on Loading, not
+		// Ready -- it reads from its own background-refreshed cache
+		// (s.githubAnalysisCache), not rebuild()'s s.getEvents(), so its
+		// cold-start signal is genuinely different (see github_analysis.go's
+		// own refreshGithubAnalysisCacheAsync comment) -- but the render
+		// harness itself only cares that "no rows yet" renders a skeleton
+		// vs. the real empty state, which is exactly what this shares with
+		// the other four cases.
+		{
+			name:          "githubanalysisresultspanel",
+			emptyData:     &githubAnalysisPageData{Loading: true},
+			readyData:     &githubAnalysisPageData{Loading: false},
+			realEmptyText: "No GitHub analyses match this view.",
+		},
+		// ghidraresultspanel (#1156-follow-up) gates on Loading the same way
+		// githubanalysisresultspanel above does -- see ghidra.go's own
+		// refreshGhidraCacheAsync comment.
+		{
+			name:          "ghidraresultspanel",
+			emptyData:     &ghidraPageData{Loading: true, Status: ghidraQueueStatus{Configured: true}},
+			readyData:     &ghidraPageData{Loading: false, Status: ghidraQueueStatus{Configured: true}},
+			realEmptyText: "No Ghidra analyses match this view.",
+		},
+		// sandboxresultspanel (#1156-follow-up) gates on Loading the same way
+		// githubanalysisresultspanel/ghidraresultspanel above do -- see
+		// sandbox.go's own refreshSandboxCacheAsync comment.
+		{
+			name:          "sandboxresultspanel",
+			emptyData:     &sandboxPageData{Loading: true},
+			readyData:     &sandboxPageData{Loading: false},
+			realEmptyText: "No completed sandbox exports match this view.",
+		},
+		// problem-reports (#1157 follow-up) gates on Loading the same way
+		// githubanalysisresultspanel/ghidraresultspanel/sandboxresultspanel
+		// above do -- see problem_reports.go's own
+		// refreshProblemReportsCacheAsync comment.
+		{
+			name:          "problem-reports",
+			emptyData:     &problemReportsPageData{Loading: true},
+			readyData:     &problemReportsPageData{Loading: false},
+			realEmptyText: "No problem reports have been submitted yet.",
+		},
 	}
 
 	for _, c := range cases {

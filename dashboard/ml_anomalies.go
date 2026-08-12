@@ -156,6 +156,19 @@ func (s *store) refreshMLAnomalies() {
 	s.mlAnomalies.absorb(items)
 }
 
+// refreshMLAnomalyAcks polls ack state into mlAnomalyAckManager's own cache
+// -- kept as a separate call (not folded into refreshMLAnomalies above)
+// because it polls a different index (mlAnomalyAckIndex, not ml-anomalies)
+// through a different type (mlAnomalyAckManager, not mlAnomalyStore). A nil
+// manager (Elasticsearch not configured) is a no-op, matching every other
+// refresh* function's posture toward its own nil store.
+func (s *store) refreshMLAnomalyAcks() {
+	if s.mlAnomalyAcks == nil {
+		return
+	}
+	s.mlAnomalyAcks.refresh()
+}
+
 // mlAnomalyFilter holds the /ml-anomalies and /api/ml/anomalies query
 // parameters. All set fields must match (AND), mirroring filter's shape in
 // filters.go (#280) -- mlAnomaly isn't a storedEvent, so it gets its own

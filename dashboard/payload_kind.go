@@ -13,12 +13,12 @@ import (
 // artifacts are stored under their SHA-256 rather than their original name.
 // Code values are shared with the disposable guest classifier.
 type payloadClassification struct {
-	Code         string
-	Label        string
-	Platform     string
-	Category     string
-	AnalysisPath string
-	Dynamic      bool
+	Code         string `json:"code"`
+	Label        string `json:"label"`
+	Platform     string `json:"platform"`
+	Category     string `json:"category"`
+	AnalysisPath string `json:"analysis_path"`
+	Dynamic      bool   `json:"dynamic"`
 }
 
 func payloadKind(code, label, platform, category, path string, dynamic bool) payloadClassification {

@@ -20,9 +20,7 @@
           </div>
         </header>
 
-        {{if not .Reports}}
-        <p class="note">No problem reports have been submitted yet.</p>
-        {{else}}
+        {{if .Reports}}
         <div class="hp-table-wrap">
         <table class="tbl">
           <thead>
@@ -59,6 +57,38 @@
           </tbody>
         </table>
         </div>
+        {{else if .Loading}}
+        {{/* #1157 follow-up: the same shaped-skeleton + auto-reload
+             convention as overview.html (#1142), payloads.html (#1157) and
+             github_analysis.html's githubanalysisresultspanel
+             (#1156-follow-up) -- before refreshProblemReportsCacheAsync's
+             first cycle completes, "No problem reports have been submitted
+             yet" would misreport a genuinely empty result instead of a
+             still-warming cache. */}}
+        <p class="note" data-hp-pr-warming><span class="status-dot" aria-hidden="true"></span> Loading problem reports. This page will update automatically.</p>
+        <div class="hp-table-wrap" aria-hidden="true">
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th>Submitted</th>
+              <th>By</th>
+              <th>Page</th>
+              <th>Expected</th>
+              <th>Actual</th>
+              <th>Status</th>
+              <th>Details</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td colspan="7"><div class="skeleton-line" style="width:80%"></div></td></tr>
+            <tr><td colspan="7"><div class="skeleton-line" style="width:60%"></div></td></tr>
+            <tr><td colspan="7"><div class="skeleton-line" style="width:70%"></div></td></tr>
+          </tbody>
+        </table>
+        </div>
+        <script nonce="{{.Nonce}}">setTimeout(()=>location.reload(),1500)</script>
+        {{else}}
+        <p class="note">No problem reports have been submitted yet.</p>
         {{end}}
 
         <div class="modal-backdrop" id="hp-pr-detail-backdrop" aria-hidden="true" hidden></div>

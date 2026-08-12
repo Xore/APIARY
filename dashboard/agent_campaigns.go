@@ -333,6 +333,13 @@ type agentCampaignsPage struct {
 	filterBar
 }
 
+// agentCampaignsData has no per-request slow call to gate with a skeleton
+// (#1157-sweep audit): it only parses the query string and reads
+// s.agentCampaigns.snapshot(), an in-memory copy of a <=agentCampaignCacheCap
+// cache that refreshAgentCampaigns populates synchronously before
+// srv.ListenAndServe() (main.go) and thereafter only from the background
+// 1-minute ticker -- never from this handler. Unlike /ml-anomalies, there is
+// no ack-join or any other side call here to worry about.
 func (s *store) agentCampaignsData(r *http.Request) agentCampaignsPage {
 	f := parseAgentCampaignFilter(r)
 	bar := buildFilterBar(r, "/agent-campaigns",

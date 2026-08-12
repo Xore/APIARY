@@ -222,12 +222,23 @@
             </div>
           </details>
         </div>
-        {{if not .Classification.Dynamic}}<p class="note">{{.Classification.Label}} has no dynamic detonation path &mdash; {{.Classification.AnalysisPath}}. The evidence below is the whole analysis for this artifact.</p>{{end}}
+        {{/* #1157: the Classification.Dynamic note, every Identity-card
+             field, Script classification, YARA/Rules/IOCs, and the
+             Content-tab cards below all depend on analyzePayloadFast's
+             file-bytes work, which the route handler no longer runs
+             synchronously (see main.go's own comment on payloadAnalysisShell).
+             Every one of them starts as a shaped skeleton and is hydrated by
+             hp-payload-analysis.js's loadStaticAnalysis() from
+             /api/payload-analysis/<hash>/static once it resolves -- the
+             SandboxRuns/GitHubAnalysis/Correlation cards further down keep
+             their own #1142 skeleton/hydration pass unchanged, run
+             concurrently with this one rather than sequenced after it. */}}
+        <div data-hp-pl-classification-note></div>
 
         <div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:gap-3 tw:mb-6" id="analysis-kpis">
-          <div class="metric"><div class="metric__value">{{.RiskScore}} / 100 &bull; {{.RiskLevel}}</div><div class="metric__label">Static risk</div></div>
-          <div class="metric"><div class="metric__value metric__value--text">{{if .PackedLikely}}elevated{{else}}not indicated{{end}}</div><div class="metric__label">Packing likelihood</div></div>
-          <div class="metric"><div class="metric__value">{{len .IOCs}}</div><div class="metric__label">Extracted IOCs</div></div>
+          <div class="metric"><div class="metric__value" data-hp-pl-risk><div class="skeleton-line" style="width:70%"></div></div><div class="metric__label">Static risk</div></div>
+          <div class="metric"><div class="metric__value metric__value--text" data-hp-pl-packed><div class="skeleton-line" style="width:60%"></div></div><div class="metric__label">Packing likelihood</div></div>
+          <div class="metric"><div class="metric__value" data-hp-pl-iocs-count><div class="skeleton-line" style="width:30%"></div></div><div class="metric__label">Extracted IOCs</div></div>
         </div>
 
         <div class="tabs" role="tablist" aria-label="Payload analysis views">
@@ -249,14 +260,21 @@
                Known elsewhere's mixed badge/link/chip content converts to
                plain (non-mono) card__value, same treatment already proven
                on sandbox.html's Run identity card this same chunk. */}}
-          <div class="card wide"><h2>Identity and selected analysis path<details class="action-menu hp-pl-label-trigger"><summary aria-label="More hashes" title="MD5 and SHA-1">More hashes</summary><div class="action-menu__popover hp-pl-info-popover" role="menu"><div class="hp-pl-info-row"><span class="k">MD5</span><span class="v">{{.MD5}}</span></div><div class="hp-pl-info-row"><span class="k">SHA-1</span><span class="v">{{.SHA1}}</span></div></div></details></h2><div class="card__row"><span class="card__label">identified type</span><span class="card__value"><strong>{{.Classification.Label}}</strong> <span class="badge badge--muted">{{.Classification.Code}}</span></span></div><div class="card__row"><span class="card__label">platform / category</span><span class="card__value card__value--mono">{{.Classification.Platform}} / {{.Classification.Category}}</span></div><div class="card__row"><span class="card__label">sandbox route</span><span class="card__value card__value--mono">{{.Classification.AnalysisPath}}</span></div><div class="card__row"><span class="card__label">dynamic execution</span><span class="card__value">{{if .Classification.Dynamic}}supported for this type{{else}}not automatic; static analysis only{{end}}</span></div><div class="card__row"><span class="card__label">magic</span><span class="card__value">{{.Magic}}</span></div><div class="card__row"><span class="card__label">MIME</span><span class="card__value card__value--mono">{{.MIME}}</span></div><div class="card__row"><span class="card__label">size</span><span class="card__value card__value--mono">{{.Size}}</span></div><div class="card__row"><span class="card__label">entropy</span><span class="card__value card__value--mono">{{.Entropy}}</span></div><div class="card__row"><span class="card__label">SHA-256</span><span class="card__value card__value--mono">{{.SHA256}}</span></div>{{if .Truncated}}<p class="note">deep inspection capped at 16 MiB; hashes cover the complete file</p>{{end}}</div>
+          <div class="card wide"><h2>Identity and selected analysis path<span data-hp-pl-more-hashes></span></h2><div data-hp-pl-identity>
+            <div class="skeleton-line" style="width:75%"></div><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:50%"></div><div class="skeleton-line" style="width:65%"></div><div class="skeleton-line" style="width:90%"></div><div class="skeleton-line" style="width:70%"></div>
+          </div></div>
           {{/* #790 chunk 6: card__row -- language/type is a short string,
                and the indicators row's chips wrap individually inside the
                value flex item rather than risking a single unbroken
                overflow, unlike the hash/free-text values this page's
                Identity and Known-elsewhere cards deliberately keep as
                <table> (see those cards' own #790 comment below). */}}
-          {{if or .ScriptType .Indicators}}<div class="card half"><h2>Script classification</h2>{{if .ScriptType}}<div class="card__row"><span class="card__label">language/type</span><span class="card__value card__value--mono">{{.ScriptType}}</span></div>{{end}}{{if .Indicators}}<div class="card__row"><span class="card__label">behavior indicators</span><span class="card__value">{{range .Indicators}}<span class="chip">{{.}}</span> {{end}}</span></div>{{end}}<p class="note">Heuristic static findings only. Captured content is never interpreted or executed.</p></div>{{end}}
+          {{/* #1157: ScriptType/Indicators aren't known at initial render,
+               so this card can't be conditionally omitted server-side the
+               way it used to be -- it always renders with a skeleton and
+               hp-payload-analysis.js hides it (data-hp-pl-script) if
+               neither field turns out to be set. */}}
+          <div class="card half" id="hp-pl-script-card" data-hp-pl-script><h2>Script classification</h2><div data-hp-pl-script-body><div class="skeleton-line" style="width:55%"></div><div class="skeleton-line" style="width:75%"></div></div></div>
           {{/* #790 chunk 6: card__scroll on this card and the 3 findings-tab
                cards below (YARA static scan, Rule matches, Extracted
                indicators) -- same additive, unbounded-list reasoning as
@@ -274,7 +292,15 @@
                that script also owns the failure state (a fetch error
                replaces the skeleton with a clear message, never leaves it
                spinning forever). */}}
-          <div class="card {{if or .ScriptType .Indicators}}half{{else}}wide{{end}}" id="hp-pl-sandbox-card"><h2>Isolated dynamic analysis</h2><div data-hp-pl-sandbox-runs><div class="skeleton-line" style="width:70%"></div><div class="skeleton-line" style="width:50%"></div></div></div>
+          {{/* #1157: was `{{if or .ScriptType .Indicators}}half{{else}}wide{{end}}`
+               -- that data isn't known at initial render any more either.
+               Fixed at half width now; hp-payload-analysis.js's static-
+               analysis hydration (independent of, and unsequenced with,
+               this card's own aggregation hydration) hides the Script
+               classification card next to it when it turns out to be
+               empty, which leaves harmless whitespace instead of the old
+               reflow -- a deliberate simplification, not a bug. */}}
+          <div class="card half" id="hp-pl-sandbox-card"><h2>Isolated dynamic analysis</h2><div data-hp-pl-sandbox-runs><div class="skeleton-line" style="width:70%"></div><div class="skeleton-line" style="width:50%"></div></div></div>
           <div class="card half" id="hp-pl-github-card"><h2>GitHub analysis</h2><div data-hp-pl-github-analysis><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:40%"></div></div></div>
           <div class="card wide" id="known-analysis"><h2 id="hp-pl-known-elsewhere-heading">Known elsewhere</h2><p class="note">Advisory only &mdash; checked before queueing a new run so you know if this hash was already analyzed. Never blocks a fresh submission.</p>
             <div data-hp-pl-known-elsewhere><div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:65%"></div></div>
@@ -283,28 +309,32 @@
 
         <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-findings" role="tabpanel" data-dashboard-panel="findings" hidden>
           <div class="section-heading"><div><h2>What the scanners found</h2><p>YARA matches, built-in heuristics, and the indicators worth pivoting on.</p></div></div>
-          <div class="card wide"><h2>YARA static scan</h2>{{if .YARAMatches}}<div class="card__scroll"><table class="data-table"><tbody>{{range .YARAMatches}}<tr><td><span class="badge badge--red">match</span></td><td class="v">{{.}}</td></tr>{{end}}</tbody></table></div>{{else}}<p class="empty">{{if .YARAScanned}}No YARA rules matched this sample.{{else}}Waiting for the isolated YARA scanner.{{end}}</p>{{end}}{{if .YARAError}}<p class="note tw:text-red">{{.YARAError}}</p>{{end}}{{if .YARAScanned}}<p class="note">Scanned {{.YARAScanned}} by the networkless YARA sidecar. A match is a triage signal, not attribution.</p>{{end}}</div>
-          <div class="card half"><h2>Rule matches</h2>{{if .Rules}}<div class="card__scroll"><table class="data-table"><thead><tr><th>severity</th><th>rule</th><th>reason</th></tr></thead><tbody>{{range .Rules}}<tr><td><span class="badge badge--muted">{{.Severity}}</span></td><td class="v">{{.Name}}</td><td class="v">{{.Description}}</td></tr>{{end}}</tbody></table></div>{{else}}<p class="empty">No built-in static rules matched.</p>{{end}}<p class="note">Deterministic YARA-style heuristics; no sample execution or attribution.</p></div>
-          <div class="card half"><h2>Extracted indicators</h2>{{if .IOCs}}<div class="card__scroll"><table class="data-table"><tbody>{{range .IOCs}}<tr><td class="v"><a href="/events?q={{. | urlquery}}" title="search telemetry for this indicator">{{.}}</a></td></tr>{{end}}</tbody></table></div>{{else}}<p class="empty">No URL, domain, or IP indicators found.</p>{{end}}</div>
+          <div class="card wide"><h2>YARA static scan</h2><div data-hp-pl-yara><div class="skeleton-line" style="width:70%"></div><div class="skeleton-line" style="width:55%"></div></div></div>
+          <div class="card half"><h2>Rule matches</h2><div data-hp-pl-rules><div class="skeleton-line" style="width:65%"></div><div class="skeleton-line" style="width:50%"></div></div><p class="note">Deterministic YARA-style heuristics; no sample execution or attribution.</p></div>
+          <div class="card half"><h2>Extracted indicators</h2><div data-hp-pl-ioc-list><div class="skeleton-line" style="width:75%"></div><div class="skeleton-line" style="width:45%"></div></div></div>
         </div>
 
         <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-content" role="tabpanel" data-dashboard-panel="content" hidden>
           <div class="section-heading"><div><h2>What is inside the file</h2><p>Raw bytes, metadata, and extracted text. Each block opens in the evidence viewer, where it can be filtered.</p></div></div>
-          <div class="card wide"><h2>Bytes and metadata</h2><p class="note">The sample is read, never interpreted or executed.</p><button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-hexdump">Hex / ASCII preview</button> {{if .FormatInfo}}<button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-format">Executable metadata</button>{{else}}<span class="chip">not a recognized PE/ELF file</span>{{end}}</div>
-          <div class="card half"><h2>Extracted text</h2>{{if or .ASCII .UTF16}}<p class="note">{{len .ASCII}} printable and {{len .UTF16}} wide-character sequence{{if ne (len .UTF16) 1}}s{{end}} extracted.</p>{{if .ASCII}}<button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-ascii">Printable strings ({{len .ASCII}})</button> {{end}}{{if .UTF16}}<button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-utf16">UTF-16LE strings ({{len .UTF16}})</button>{{end}}{{else}}<p class="empty">No printable sequences extracted.</p>{{end}}</div>
-          <div class="card half"><h2>Decoded candidates</h2>{{if .Decoded}}<p class="note">{{len .Decoded}} bounded Base64, hex, URL or UTF-16 candidate{{if ne (len .Decoded) 1}}s{{end}} recovered.</p><button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-decoded">Open decoded candidates</button>{{else}}<p class="empty">no bounded Base64, hex, URL or UTF-16 candidates found</p>{{end}}</div>
+          <div class="card wide"><h2>Bytes and metadata</h2><p class="note">The sample is read, never interpreted or executed.</p><div data-hp-pl-bytes-actions><div class="skeleton-line" style="width:45%"></div></div></div>
+          <div class="card half"><h2>Extracted text</h2><div data-hp-pl-text><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:40%"></div></div></div>
+          <div class="card half"><h2>Decoded candidates</h2><div data-hp-pl-decoded><div class="skeleton-line" style="width:55%"></div></div></div>
         </div>
 
-        <!-- Evidence bodies: raw file content the viewer opens on demand. -->
+        {{/* #1157: the evidence viewer (hp-evidence.js) reads these bodies
+             from the DOM at click time, not at page load -- see its own
+             top-of-file comment -- so it's fine for them to start empty and
+             be filled in by hp-payload-analysis.js's static-analysis
+             hydration once the file-bytes work behind them resolves. The
+             buttons that open them live in data-hp-pl-bytes-actions/
+             data-hp-pl-text/data-hp-pl-decoded above and are only rendered
+             once there is something real behind them to open. */}}
         <div class="hp-evidence-source" hidden>
-          <div data-hp-evidence-body="pl-hexdump" data-hp-evidence-title="Hex / ASCII preview — first 512 bytes"><pre class="code">{{.Hexdump}}</pre></div>
-          <div data-hp-evidence-body="pl-format" data-hp-evidence-title="Executable metadata"><pre class="code">{{range .FormatInfo}}{{.}}
-{{end}}</pre></div>
-          <div data-hp-evidence-body="pl-ascii" data-hp-evidence-title="Printable strings" data-hp-evidence-note="Printable sequences extracted from the sample. Filter to find a specific indicator."><pre class="code">{{range .ASCII}}{{.}}
-{{end}}</pre></div>
-          <div data-hp-evidence-body="pl-utf16" data-hp-evidence-title="UTF-16LE strings" data-hp-evidence-note="Wide-character sequences extracted from the sample."><pre class="code">{{range .UTF16}}{{.}}
-{{end}}</pre></div>
-          <div data-hp-evidence-body="pl-decoded" data-hp-evidence-title="Decoded / deobfuscated candidates" data-hp-evidence-note="Bounded decodes of encoded content found in the sample. Never executed.">{{range .Decoded}}<p class="note">{{.Kind}} from <code>{{.Source}}</code></p><pre class="code">{{.Preview}}</pre>{{end}}</div>
+          <div data-hp-evidence-body="pl-hexdump"></div>
+          <div data-hp-evidence-body="pl-format"></div>
+          <div data-hp-evidence-body="pl-ascii"></div>
+          <div data-hp-evidence-body="pl-utf16"></div>
+          <div data-hp-evidence-body="pl-decoded"></div>
         </div>
 
         <footer id="analysis-footer">{{brandText}} &bull; static analysis only &bull; never execute captured samples</footer>

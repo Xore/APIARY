@@ -737,6 +737,60 @@ func (c *esClient) searchNamespaceByHash(index, field, sha256 string, size int) 
 	return out, nil
 }
 
+// searchNamespaceLimit is searchNamespace bounded to the newest `limit`
+// documents via a single request -- no PIT, no search_after loop. #1156
+// fixed searchNamespace's own silent truncation past 10000 documents by
+// paginating through the whole namespace, but a caller that only ever
+// displays a top-N slice of a listing (githubAnalysisData's list branch,
+// via refreshGithubAnalysisCacheAsync) has no reason to pay for that walk:
+// paginating up to searchNamespaceMaxPages*searchNamespacePageSize
+// documents just to keep the newest few hundred is exactly the unbounded-
+// fetch cost #1156 flagged, merely moved off the request path instead of
+// actually bounded. Sorted by @timestamp desc, same as searchNamespace, so
+// "newest limit documents" is really what comes back.
+func (c *esClient) searchNamespaceLimit(index, field string, limit int) ([]json.RawMessage, error) {
+	if c == nil || c.base == "" {
+		return nil, fmt.Errorf("elasticsearch is not configured")
+	}
+	if limit <= 0 || limit > 10000 {
+		limit = 500
+	}
+	reqBody, err := json.Marshal(map[string]any{
+		"size": limit,
+		"sort": []map[string]any{{"@timestamp": "desc"}},
+	})
+	if err != nil {
+		return nil, err
+	}
+	status, b, err := c.doRequest(http.MethodPost, fmt.Sprintf("/%s/_search", index), reqBody)
+	if err != nil {
+		return nil, err
+	}
+	if status == http.StatusNotFound {
+		return nil, nil
+	}
+	if status/100 != 2 {
+		return nil, fmt.Errorf("Elasticsearch POST %s: status %d: %s", index, status, strings.TrimSpace(string(b)))
+	}
+	var v struct {
+		Hits struct {
+			Hits []struct {
+				Source map[string]json.RawMessage `json:"_source"`
+			} `json:"hits"`
+		} `json:"hits"`
+	}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return nil, err
+	}
+	out := make([]json.RawMessage, 0, len(v.Hits.Hits))
+	for _, h := range v.Hits.Hits {
+		if raw, ok := h.Source[field]; ok {
+			out = append(out, raw)
+		}
+	}
+	return out, nil
+}
+
 // esStorageStats is the brief cluster/storage summary the admin settings
 // modal's Elasticsearch pane shows (#647): a metric-grid glance, not a
 // dashboard of its own -- deep exploration already exists via the
