@@ -16,19 +16,14 @@ import (
 // family attribution as its own badge, distinct from the existing verdict
 // badge, linking to the /events?family= pivot.
 func TestPayloadsDataSurfacesFamilyAttribution(t *testing.T) {
-	payloadDir := t.TempDir()
 	hash := strings.Repeat("c", 64)
-	if err := os.WriteFile(filepath.Join(payloadDir, hash), []byte("payload"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
 	esGitHubAnalysisResult(t, map[string]any{
 		"sha256": hash, "exit_status": "ok", "family": "Mirai",
 		"verdict": map[string]any{"malicious": 12, "suspicious": 1, "total": 20, "level": "malicious"},
 	})
 
-	s := &store{payloadDirs: []string{payloadDir}}
-	s.payloadCache = s.scanPayloads()
+	s := &store{}
+	s.payloadCache = payloadsPage{UniqueTotal: 1, Files: []capturedFile{{Hash: hash}}}
 	attachGitHubAnalysisVerdicts(s.payloadCache.Files)
 	s.payloadCacheAt = time.Now()
 
@@ -55,15 +50,11 @@ func TestPayloadsDataSurfacesFamilyAttribution(t *testing.T) {
 // attribution) must leave Family/FamilyLink empty -- no badge, not an empty
 // or misleading one.
 func TestPayloadsDataLeavesFamilyEmptyWithoutAttribution(t *testing.T) {
-	payloadDir := t.TempDir()
 	hash := strings.Repeat("d", 64)
-	if err := os.WriteFile(filepath.Join(payloadDir, hash), []byte("payload"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	t.Setenv("GITHUB_ANALYSIS_RESULTS_DIR", "")
 
-	s := &store{payloadDirs: []string{payloadDir}}
-	s.payloadCache = s.scanPayloads()
+	s := &store{}
+	s.payloadCache = payloadsPage{UniqueTotal: 1, Files: []capturedFile{{Hash: hash}}}
 	s.payloadCacheAt = time.Now()
 
 	page := s.payloadsData(payloadsFilter{})
@@ -148,15 +139,11 @@ func TestAnalyzePayloadBoundsLongFamilyLabel(t *testing.T) {
 // to the /events?family= pivot -- a struct-level assertion alone wouldn't
 // catch a template that never references the new fields.
 func TestPayloadsPageRendersFamilyBadge(t *testing.T) {
-	payloadDir := t.TempDir()
 	hash := strings.Repeat("e", 64)
-	if err := os.WriteFile(filepath.Join(payloadDir, hash), []byte("payload"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	esGitHubAnalysisResult(t, map[string]any{"sha256": hash, "exit_status": "ok", "family": "Mirai"})
 
-	s := &store{payloadDirs: []string{payloadDir}, es: newESClient("http://127.0.0.1:1", "")}
-	s.payloadCache = s.scanPayloads()
+	s := &store{payloadDirs: []string{t.TempDir()}, es: newESClient("http://127.0.0.1:1", "")}
+	s.payloadCache = payloadsPage{UniqueTotal: 1, Files: []capturedFile{{Hash: hash}}}
 	attachGitHubAnalysisVerdicts(s.payloadCache.Files)
 	s.payloadCacheAt = time.Now()
 

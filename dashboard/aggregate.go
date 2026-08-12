@@ -434,11 +434,12 @@ func (s *store) rebuild() {
 	snap.Generated = now
 	snap.Logins = logins
 	snap.Downloads = downloads
-	// #470: read from the same disk-scan cache /payloads itself uses
-	// (payloads_data.go's scanPayloads/refreshPayloadCacheAsync), not
-	// Downloads above -- Downloads counts per-event observations in the log
-	// tail window, a much smaller and differently-scoped number than the
-	// distinct binaries /payloads reports.
+	// #470: read from the same ES-backed cache /payloads itself uses
+	// (payloads_data.go's refreshPayloadCacheAsync, populated by
+	// payload-inventory-worker per #1201/#1223), not Downloads above --
+	// Downloads counts per-event observations in the log tail window, a
+	// much smaller and differently-scoped number than the distinct
+	// binaries /payloads reports.
 	s.refreshPayloadCacheAsync()
 	s.payloadMu.Lock()
 	snap.UniquePayloads = s.payloadCache.UniqueTotal

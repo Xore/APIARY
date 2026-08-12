@@ -3,8 +3,6 @@ package main
 import (
 	"html/template"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -77,14 +75,10 @@ func TestPayloadsPageDropsRedundantActionButtons(t *testing.T) {
 // itself links out, to the same /payload-analysis/ destination the old
 // table's hash cell used, and every other action stays in the kebab menu.
 func TestPayloadsPageRendersAsCardGrid(t *testing.T) {
-	dir := t.TempDir()
 	hash := strings.Repeat("c", 64)
-	if err := os.WriteFile(filepath.Join(dir, hash), []byte("#!/bin/sh\necho hi\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 
-	s := &store{payloadDirs: []string{dir}, es: newESClient("http://127.0.0.1:1", "")}
-	s.payloadCache = s.scanPayloads()
+	s := &store{payloadDirs: []string{t.TempDir()}, es: newESClient("http://127.0.0.1:1", "")}
+	s.payloadCache = payloadsPage{UniqueTotal: 1, Files: []capturedFile{{Hash: hash}}}
 	s.payloadCacheAt = time.Now()
 
 	funcs := templateFuncs(s, "")
@@ -118,14 +112,10 @@ func TestPayloadsPageRendersAsCardGrid(t *testing.T) {
 // same offset-based /api/payload-rows pagination the table used), not the
 // table-specific tbody attributes.
 func TestPayloadsPageResultsUseGenericLazyListContract(t *testing.T) {
-	dir := t.TempDir()
 	hash := strings.Repeat("d", 64)
-	if err := os.WriteFile(filepath.Join(dir, hash), []byte("#!/bin/sh\necho hi\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 
-	s := &store{payloadDirs: []string{dir}, es: newESClient("http://127.0.0.1:1", "")}
-	s.payloadCache = s.scanPayloads()
+	s := &store{payloadDirs: []string{t.TempDir()}, es: newESClient("http://127.0.0.1:1", "")}
+	s.payloadCache = payloadsPage{UniqueTotal: 1, Files: []capturedFile{{Hash: hash}}}
 	s.payloadCacheAt = time.Now()
 
 	funcs := templateFuncs(s, "")

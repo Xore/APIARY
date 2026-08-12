@@ -200,11 +200,10 @@ func (s *store) payloadBytesForAnalysis(hash string, f *os.File, fi os.FileInfo)
 		return nil, err
 	}
 	if s != nil && s.es != nil {
-		// force=true: this path is also reached when a previously mirrored
-		// copy's fingerprint just failed to match (stale, not merely
-		// missing), and that stale document must be overwritten, not
-		// skipped because one already exists.
-		s.mirrorOnePayloadBytes(hash, fi.Size(), true)
+		// This path is also reached when a previously mirrored copy's
+		// fingerprint just failed to match (stale, not merely missing), and
+		// mirrorOnePayloadBytes always overwrites for exactly that reason.
+		s.mirrorOnePayloadBytes(hash, fi.Size())
 	}
 	return data, nil
 }

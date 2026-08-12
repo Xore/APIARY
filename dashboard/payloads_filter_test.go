@@ -25,18 +25,15 @@ func writeTestPayload(t *testing.T, dir, hash string, mtime time.Time) {
 }
 
 func TestPayloadsDataFiltersBySensor(t *testing.T) {
-	dir := t.TempDir()
 	now := time.Now()
 	hashA, hashB := strings.Repeat("a", 64), strings.Repeat("b", 64)
-	writeTestPayload(t, dir, hashA, now)
-	writeTestPayload(t, dir, hashB, now)
 
-	s := &store{payloadDirs: []string{dir}}
+	s := &store{}
 	s.events = []storedEvent{
 		{Shasum: hashA, Sensor: "cowrie", Session: "sess-a", when: now},
 		{Shasum: hashB, Sensor: "dionaea", when: now},
 	}
-	s.payloadCache = s.scanPayloads()
+	s.payloadCache = payloadsPage{UniqueTotal: 2, Files: []capturedFile{{Hash: hashA}, {Hash: hashB}}}
 	s.payloadCacheAt = time.Now()
 
 	page := s.payloadsData(payloadsFilter{Sensor: "cowrie"})
@@ -52,13 +49,10 @@ func TestPayloadsDataFiltersBySensor(t *testing.T) {
 // Sensor and must be excluded by a sensor filter, not treated as a wildcard
 // match.
 func TestPayloadsDataSensorFilterExcludesUnattributedCaptures(t *testing.T) {
-	dir := t.TempDir()
-	now := time.Now()
 	hash := strings.Repeat("c", 64)
-	writeTestPayload(t, dir, hash, now)
 
-	s := &store{payloadDirs: []string{dir}}
-	s.payloadCache = s.scanPayloads()
+	s := &store{}
+	s.payloadCache = payloadsPage{UniqueTotal: 1, Files: []capturedFile{{Hash: hash}}}
 	s.payloadCacheAt = time.Now()
 
 	page := s.payloadsData(payloadsFilter{Sensor: "cowrie"})
@@ -68,14 +62,14 @@ func TestPayloadsDataSensorFilterExcludesUnattributedCaptures(t *testing.T) {
 }
 
 func TestPayloadsDataFiltersBySince(t *testing.T) {
-	dir := t.TempDir()
 	now := time.Now()
 	recent, old := strings.Repeat("d", 64), strings.Repeat("e", 64)
-	writeTestPayload(t, dir, recent, now)
-	writeTestPayload(t, dir, old, now.Add(-48*time.Hour))
 
-	s := &store{payloadDirs: []string{dir}}
-	s.payloadCache = s.scanPayloads()
+	s := &store{}
+	s.payloadCache = payloadsPage{UniqueTotal: 2, Files: []capturedFile{
+		{Hash: recent, Mtime: now.Format("2006-01-02 15:04")},
+		{Hash: old, Mtime: now.Add(-48 * time.Hour).Format("2006-01-02 15:04")},
+	}}
 	s.payloadCacheAt = time.Now()
 
 	page := s.payloadsData(payloadsFilter{Since: "24h"})
@@ -85,15 +79,11 @@ func TestPayloadsDataFiltersBySince(t *testing.T) {
 }
 
 func TestPayloadsDataFiltersByHashSubstring(t *testing.T) {
-	dir := t.TempDir()
-	now := time.Now()
 	hashA := strings.Repeat("a", 60) + "1234"
 	hashB := strings.Repeat("b", 64)
-	writeTestPayload(t, dir, hashA, now)
-	writeTestPayload(t, dir, hashB, now)
 
-	s := &store{payloadDirs: []string{dir}}
-	s.payloadCache = s.scanPayloads()
+	s := &store{}
+	s.payloadCache = payloadsPage{UniqueTotal: 2, Files: []capturedFile{{Hash: hashA}, {Hash: hashB}}}
 	s.payloadCacheAt = time.Now()
 
 	page := s.payloadsData(payloadsFilter{Hash: "1234"})
@@ -112,23 +102,19 @@ func TestPayloadsDataFiltersByHashSubstring(t *testing.T) {
 // same result set together (AND, matching every other filter on this
 // dashboard), not just individually.
 func TestPayloadsDataCombinesAllFilters(t *testing.T) {
-	root := t.TempDir()
-	dionaeaDir, cowrieDir := filepath.Join(root, "dionaea"), filepath.Join(root, "cowrie")
-	if err := os.MkdirAll(dionaeaDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(cowrieDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
 	now := time.Now()
 	match := strings.Repeat("f", 60) + "9999"
-	writeTestPayload(t, cowrieDir, match, now)
-	writeTestPayload(t, cowrieDir, strings.Repeat("a", 64), now)         // wrong hash
-	writeTestPayload(t, dionaeaDir, strings.Repeat("b", 60)+"9999", now) // wrong source
+	wrongHash := strings.Repeat("a", 64)
+	wrongSource := strings.Repeat("b", 60) + "9999"
+	mtime := now.Format("2006-01-02 15:04")
 
-	s := &store{payloadDirs: []string{dionaeaDir, cowrieDir}}
+	s := &store{}
 	s.events = []storedEvent{{Shasum: match, Sensor: "cowrie", when: now}}
-	s.payloadCache = s.scanPayloads()
+	s.payloadCache = payloadsPage{UniqueTotal: 3, Files: []capturedFile{
+		{Hash: match, Mtime: mtime, Sources: []string{"cowrie"}},
+		{Hash: wrongHash, Mtime: mtime, Sources: []string{"cowrie"}},    // wrong hash
+		{Hash: wrongSource, Mtime: mtime, Sources: []string{"dionaea"}}, // wrong source
+	}}
 	s.payloadCacheAt = time.Now()
 
 	page := s.payloadsData(payloadsFilter{Source: "cowrie", Sensor: "cowrie", Since: "1h", Hash: "9999"})
@@ -192,13 +178,11 @@ func TestPayloadsFilterBarPreFillsFromRequest(t *testing.T) {
 // End-to-end through the real template: the filter bar disclosure renders,
 // pre-filled, and the lazy-list's remote page URL carries the active filter.
 func TestPayloadsPageRendersFilterBarAndCarriesFilterIntoRowsURL(t *testing.T) {
-	dir := t.TempDir()
 	hash := strings.Repeat("1", 64)
-	writeTestPayload(t, dir, hash, time.Now())
 
-	s := &store{payloadDirs: []string{dir}, es: newESClient("http://127.0.0.1:1", "")}
+	s := &store{payloadDirs: []string{t.TempDir()}, es: newESClient("http://127.0.0.1:1", "")}
 	s.events = []storedEvent{{Shasum: hash, Sensor: "cowrie", when: time.Now()}}
-	s.payloadCache = s.scanPayloads()
+	s.payloadCache = payloadsPage{UniqueTotal: 1, Files: []capturedFile{{Hash: hash}}}
 	s.payloadCacheAt = time.Now()
 
 	r := httptest.NewRequest("GET", "/payloads?sensor=cowrie", nil)

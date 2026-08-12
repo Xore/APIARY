@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -46,6 +48,49 @@ func TestScanDirsClassifiesAndSourcesAFile(t *testing.T) {
 	}
 	if paths[hash] == "" {
 		t.Fatal("expected a resolved path for the scanned hash")
+	}
+}
+
+// TestScanDirsCarriesMtimeUTC covers #512 for this worker's own copy of the
+// scan (ported from dashboard/payloads_data.go's original scanPayloads,
+// removed there by #1223): every timestamp field needs a UTC twin for
+// hp-app.js's timezone/clock-format conversion, not just a server-formatted
+// display string.
+func TestScanDirsCarriesMtimeUTC(t *testing.T) {
+	dir := t.TempDir()
+	hash := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	writeHashNamedFile(t, dir, hash, []byte("sample"))
+
+	files, _ := scanDirs([]string{dir})
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+	if files[0].MtimeUTC == "" {
+		t.Fatal("captured file MtimeUTC must be populated")
+	}
+}
+
+// TestScanDirsCarriesSizeCappedPreview covers #59 for this worker's own
+// copy of the scan: a hex-dump preview of the file head, capped at
+// payloadPreviewCap so an oversized capture never grows the preview or the
+// row it backs.
+func TestScanDirsCarriesSizeCappedPreview(t *testing.T) {
+	dir := t.TempDir()
+	hash := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	big := bytes.Repeat([]byte{'A'}, payloadPreviewCap*4)
+	writeHashNamedFile(t, dir, hash, big)
+
+	files, _ := scanDirs([]string{dir})
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+	f := files[0]
+	if !f.PreviewTruncated {
+		t.Fatal("a file larger than payloadPreviewCap must be marked truncated")
+	}
+	wantDump := hex.Dump(big[:payloadPreviewCap])
+	if f.Preview != wantDump {
+		t.Fatalf("preview was not capped at payloadPreviewCap bytes: got %d dump chars, want %d", len(f.Preview), len(wantDump))
 	}
 }
 

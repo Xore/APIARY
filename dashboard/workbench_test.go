@@ -582,7 +582,7 @@ func TestPayloadsPageOffersStartAnalysisTab(t *testing.T) {
 	// #483: payloadsData's Enabled flag now also requires a configured ES
 	// client; unreachable is fine since payloadCacheAt is seeded fresh here.
 	s.es = newESClient("http://127.0.0.1:1", "")
-	s.payloadCache = s.scanPayloads()
+	s.payloadCache = payloadsPage{UniqueTotal: 1, Files: []capturedFile{{Hash: workbenchTestHash}}}
 	s.payloadCacheAt = time.Now()
 	tmpl := template.Must(template.New("t").Funcs(templateFuncs(s, "")).Parse(pageTemplate))
 	data := s.payloadsData(payloadsFilter{})

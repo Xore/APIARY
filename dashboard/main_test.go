@@ -708,8 +708,24 @@ func TestPayloadInventoryIncludesEverySourceAndNestedArtifact(t *testing.T) {
 		}
 	}
 
+	// #1223: scanPayloads (the disk walk that used to build payloadCache
+	// here) moved to payload-inventory-worker -- payloadsData's own dedup/
+	// multi-source/filter logic is what this test actually verifies, so
+	// payloadCache is built directly instead, matching what a real scan
+	// would have produced from the files written above. The files
+	// themselves stay real and on disk: payloadPath's own disk-search
+	// fallback (checked below) is unaffected by #1223 and still needs them.
 	s := &store{payloadDirs: []string{dionaea, cowrie, filepath.Dir(scripts)}}
-	s.payloadCache = s.scanPayloads()
+	s.payloadCache = payloadsPage{
+		Enabled: true, UniqueTotal: 2,
+		Files: []capturedFile{
+			{Hash: shared, Copies: 2, Sources: []string{"cowrie", "dionaea"}},
+			{Hash: script, Copies: 1, Sources: []string{"scripts"}},
+		},
+		Sources: []payloadSourceStat{
+			{Name: "cowrie", Count: 1}, {Name: "dionaea", Count: 1}, {Name: "scripts", Count: 1},
+		},
+	}
 	s.payloadCacheAt = time.Now()
 	page := s.payloadsData(payloadsFilter{})
 	if page.UniqueTotal != 2 || page.ResultTotal != 2 || len(page.Files) != 2 || len(page.Sources) != 3 {
