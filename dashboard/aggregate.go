@@ -217,6 +217,7 @@ func (s *store) rebuild() {
 			Category:      ev.category,
 			Severity:      ev.severity,
 			HeldMs:        ev.heldMs,
+			ICSSeverity:   ev.icsSeverity,
 			Detail:        ev.detail,
 			IsLogin:       ev.isLogin,
 			HasCredential: ev.isLogin && validCredentialPair(ev.user, ev.pass),

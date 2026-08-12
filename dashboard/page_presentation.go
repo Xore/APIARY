@@ -140,14 +140,15 @@ func templateFuncs(s *store, world template.HTML) template.FuncMap {
 			h.Write(b)
 			return strconv.FormatUint(h.Sum64(), 36)
 		},
-		"presentation":        presentation,
-		"behavior":            behavior,
-		"reportPresetRows":    func() []reportPresetRow { return reportPresetRowsFor(presentation().ReportPresets) },
-		"brandHTML":           func() template.HTML { return brandHTML(presentation().BrandPrefix + presentation().AppName) },
-		"brandText":           func() string { return brandText(presentation().BrandPrefix, presentation().AppName) },
-		"activeBanner":        func() *bannerView { return activeBannerView(presentation(), behavior(), time.Now()) },
-		"intelBadgeClass":     intelBadgeClass,
-		"workbenchRunSummary": workbenchRunSummary,
+		"presentation":          presentation,
+		"behavior":              behavior,
+		"reportPresetRows":      func() []reportPresetRow { return reportPresetRowsFor(presentation().ReportPresets) },
+		"brandHTML":             func() template.HTML { return brandHTML(presentation().BrandPrefix + presentation().AppName) },
+		"brandText":             func() string { return brandText(presentation().BrandPrefix, presentation().AppName) },
+		"activeBanner":          func() *bannerView { return activeBannerView(presentation(), behavior(), time.Now()) },
+		"intelBadgeClass":       intelBadgeClass,
+		"icsSeverityBadgeClass": icsSeverityBadgeClass,
+		"workbenchRunSummary":   workbenchRunSummary,
 		// utcOrEmpty gives the header "generated"/"updated" timestamp the
 		// same data-hp-utc twin events.html's rows carry, so hp-app.js's
 		// shared timezone/clock-format conversion (see hp-app.js's

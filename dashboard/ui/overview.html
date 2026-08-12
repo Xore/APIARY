@@ -229,6 +229,19 @@
             <div data-echart="/api/netflow-packets" data-echart-kind="line" style="width:100%;height:280px"></div>
             <p class="note" data-echart-status="/api/netflow-packets">Loading&hellip;</p>
           </div>
+
+          {{/* #1276: dionaea-incidents-v1-*'s data.name/data.cve carry the
+               actual exploit identity on every exploit-attempt incident --
+               live ES terms aggregation (dionaea_cve_chart.go), same
+               "queried live, not accumulated" reasoning netflow above uses,
+               since a terms aggregation (unlike stats/sum) works fine on a
+               flattened field. */}}
+          <div class="card wide" id="dionaea-cves-card">
+            <h2>Top exploited CVEs / named incidents — last 7 days</h2>
+            <p class="note">Real, human-readable exploit identities dionaea itself recognized in the traffic it captured (e.g. DoublePulsar/EternalBlue), not a generic incident-kind label.</p>
+            <div data-echart="/api/dionaea-cves" data-echart-kind="bar" style="width:100%;height:320px"></div>
+            <p class="note" data-echart-status="/api/dionaea-cves">Loading&hellip;</p>
+          </div>
         </div>
 
         <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-behavior" role="tabpanel" data-dashboard-panel="behavior" hidden>

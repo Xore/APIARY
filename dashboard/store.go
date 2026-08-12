@@ -187,6 +187,7 @@ type storedEvent struct {
 	Category      string  `json:",omitempty"`
 	Severity      int     `json:",omitempty"`
 	HeldMs        int     `json:",omitempty"` // endlessh (#1294): tarpit hold duration, disconnect events only
+	ICSSeverity   string  `json:",omitempty"` // dnp3 (#1290): "critical"/"high" for control-function app_function codes
 	Detail        string
 	IsLogin       bool   `json:",omitempty"`
 	HasCredential bool   `json:",omitempty"`
