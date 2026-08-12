@@ -19,6 +19,26 @@ package main
 // nothing, the same graceful-degrade-by-absence every other ES-native
 // aggregate in this codebase already relies on.
 //
+// #1218: Providers grouping reads source.as.type, the same pipeline's own
+// scanner/cloud/hosting/network classification of source.as.organization_name
+// -- computed at ES ingest time, so this needs no local MaxMind/CSV state
+// of its own (unlike dashboard/geoip.go's geoDB.lookup(), a genuinely
+// dashboard-instance-local subsystem this worker still has no access to
+// and no reason to duplicate). This is narrower than dashboard's own
+// Provider field, though: dashboard folds in a second, separate signal
+// (a local threat-intel CIDR list, THREAT_CIDRS_FILE) that has no ES-side
+// equivalent -- not ported here, same "explicit follow-up" posture as
+// every other partial-parity gap this file documents. Same GeoLite2
+// dependency as ASN grouping above, so it degrades the same way (see
+// #1226) until the databases are provisioned.
+//
+// #1218: fetchSuricataAlertCounts is a second, separate query against
+// suricata-v2-alert-* (a different index family from honeypot-v2-*, see
+// analysis/elasticsearch-setup.sh's output.elasticsearch.indices routing)
+// -- an ES-native terms aggregation on source.ip rather than a raw-document
+// page-and-count, since only the per-IP count is needed, not the alert
+// documents themselves.
+//
 // Scale: this fetches raw documents into memory and correlates in Go,
 // the same approach dashboard/campaigns.go's correlateCampaigns and
 // dashboard/intelligence.go's clustersData already use (the epic's own
@@ -40,6 +60,7 @@ package main
 import (
 	"encoding/json"
 	"log"
+	"net/http"
 	"strconv"
 	"time"
 )
@@ -62,6 +83,7 @@ type corrEvent struct {
 	Fingerprint string
 	ASN         int64
 	ASNOrg      string
+	Provider    string
 }
 
 // fetchRecentEvents pages through every honeypot-v2-* document at or after
@@ -97,7 +119,7 @@ func fetchRecentEvents(es *esClient, since time.Time) ([]corrEvent, bool) {
 				"@timestamp", "source.ip", "event.sensor", "destination.port",
 				"honeypot.canonical_user", "honeypot.canonical_pass", "honeypot.canonical_shasum",
 				"honeypot.canonical_fingerprint",
-				"source.as.asn", "source.as.organization_name",
+				"source.as.asn", "source.as.organization_name", "source.as.type",
 			},
 		}
 		if searchAfter != nil {
@@ -122,6 +144,7 @@ func fetchRecentEvents(es *esClient, since time.Time) ([]corrEvent, bool) {
 							AS struct {
 								ASN              int64  `json:"asn"`
 								OrganizationName string `json:"organization_name"`
+								Type             string `json:"type"`
 							} `json:"as"`
 						} `json:"source"`
 						Event struct {
@@ -158,6 +181,7 @@ func fetchRecentEvents(es *esClient, since time.Time) ([]corrEvent, bool) {
 				User: h.Source.Honeypot.CanonicalUser, Pass: h.Source.Honeypot.CanonicalPass,
 				Shasum: h.Source.Honeypot.CanonicalShasum, Fingerprint: h.Source.Honeypot.CanonicalFingerprint,
 				ASN: h.Source.Source.AS.ASN, ASNOrg: h.Source.Source.AS.OrganizationName,
+				Provider: h.Source.Source.AS.Type,
 			})
 		}
 		if len(v.Hits.Hits) < esPageSize {
@@ -177,3 +201,79 @@ func fetchRecentEvents(es *esClient, since time.Time) ([]corrEvent, bool) {
 // connection yet (see #1198/#1206); it's never a real attacker, so it must
 // never seed a campaign or cluster.
 const tunnelPeerIP = "10.8.0.1"
+
+const suricataAlertIndexPattern = "suricata-v2-alert-*"
+
+// alertBucketCap is the terms aggregation's size -- one bucket per
+// distinct alerting source IP within the window. Generously above
+// esPageSize/esPageSize-scale volumes for the same reason esMaxPages is:
+// a deployment large enough to exceed it needs the #1219 ES-native
+// redesign regardless, and a truncated aggregation (Elasticsearch simply
+// returns its top alertBucketCap IPs by doc count, not a random subset)
+// degrades gracefully -- the highest-volume alerters, the ones that matter
+// most for campaign scoring, are exactly the ones a truncated result
+// still keeps.
+const alertBucketCap = 10000
+
+// fetchSuricataAlertCounts returns, for every source IP that triggered at
+// least one Suricata alert at or after since, how many. An ES-native terms
+// aggregation (size: 0, no hits) rather than fetchRecentEvents' raw-
+// document paging: only the per-IP count is ever used (correlateCampaigns
+// folds it into whichever CIDR group each alerting IP belongs to), so
+// there's no reason to pull the alert documents themselves into this
+// worker's memory at all.
+func fetchSuricataAlertCounts(es *esClient, since time.Time) (map[string]int, bool) {
+	body := map[string]any{
+		"size": 0,
+		"query": map[string]any{
+			"bool": map[string]any{
+				"filter": []map[string]any{
+					{"range": map[string]any{"@timestamp": map[string]any{"gte": since.UTC().Format(time.RFC3339)}}},
+					{"exists": map[string]any{"field": "source.ip"}},
+				},
+			},
+		},
+		"aggs": map[string]any{
+			"by_ip": map[string]any{
+				"terms": map[string]any{"field": "source.ip", "size": alertBucketCap},
+			},
+		},
+	}
+	reqBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, false
+	}
+	status, b, err := es.doRequest(http.MethodPost, "/"+suricataAlertIndexPattern+"/_search", reqBody)
+	if err != nil {
+		return nil, false
+	}
+	if status == http.StatusNotFound {
+		// No suricata-v2-alert-* index yet (no alerts ever shipped on this
+		// deployment) is not a failure -- fetchRecentEvents' own
+		// honeypot-v2-* fetch already runs regardless, campaign scoring
+		// just gets a zero alert count for every group, same as before
+		// this signal existed.
+		return map[string]int{}, true
+	}
+	if status/100 != 2 {
+		return nil, false
+	}
+	var v struct {
+		Aggregations struct {
+			ByIP struct {
+				Buckets []struct {
+					Key      string `json:"key"`
+					DocCount int    `json:"doc_count"`
+				} `json:"buckets"`
+			} `json:"by_ip"`
+		} `json:"aggregations"`
+	}
+	if json.Unmarshal(b, &v) != nil {
+		return nil, false
+	}
+	counts := make(map[string]int, len(v.Aggregations.ByIP.Buckets))
+	for _, bucket := range v.Aggregations.ByIP.Buckets {
+		counts[bucket.Key] = bucket.DocCount
+	}
+	return counts, true
+}

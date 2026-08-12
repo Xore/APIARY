@@ -72,8 +72,18 @@ func runCorrelation(es *esClient, window time.Duration) {
 		log.Printf("correlator-worker: fetching recent events failed, skipping this cycle")
 		return
 	}
+	// #1218: a failed alert-count fetch degrades this cycle's campaign
+	// scoring (every group's alert term is just 0) rather than skipping
+	// the whole cycle -- the honeypot-v2-* correlation above is the
+	// primary signal and already succeeded; losing the IDS-alert term for
+	// one cycle isn't worth discarding it.
+	alertCounts, ok := fetchSuricataAlertCounts(es, start.Add(-window))
+	if !ok {
+		log.Printf("correlator-worker: fetching suricata alert counts failed, scoring this cycle without them")
+		alertCounts = nil
+	}
 
-	campaigns := correlateCampaigns(events, start)
+	campaigns := correlateCampaigns(events, start, alertCounts)
 	campaignIDs := make([]string, 0, len(campaigns))
 	for _, c := range campaigns {
 		id := c.CIDR

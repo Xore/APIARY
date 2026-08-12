@@ -27,7 +27,7 @@ func TestCorrelateCampaignsGroupsByCIDRAndScores(t *testing.T) {
 		{When: now.Add(-2 * time.Hour), SrcIP: "203.0.113.2", Sensor: "dionaea", Port: "445", Shasum: "abc123"},
 		{When: now, SrcIP: "198.51.100.1", Sensor: "cowrie", Port: "22"},
 	}
-	docs := correlateCampaigns(evs, now)
+	docs := correlateCampaigns(evs, now, nil)
 	if len(docs) != 2 {
 		t.Fatalf("expected 2 campaign groups, got %d: %+v", len(docs), docs)
 	}
@@ -61,7 +61,7 @@ func TestCorrelateCampaignsExcludesInvalidCredentialPairs(t *testing.T) {
 	evs := []corrEvent{
 		{When: now, SrcIP: "203.0.113.1", Sensor: "cowrie", User: "root", Pass: "; /bin/busybox"},
 	}
-	docs := correlateCampaigns(evs, now)
+	docs := correlateCampaigns(evs, now, nil)
 	if len(docs) != 1 || docs[0].Creds != 0 {
 		t.Fatalf("expected the invalid credential pair to be excluded: %+v", docs)
 	}
@@ -73,9 +73,57 @@ func TestCorrelateCampaignsCapsAtFifty(t *testing.T) {
 	for i := 0; i < 60; i++ {
 		evs = append(evs, corrEvent{When: now, SrcIP: "203.0." + strconv.Itoa(i) + ".1", Sensor: "cowrie"})
 	}
-	docs := correlateCampaigns(evs, now)
+	docs := correlateCampaigns(evs, now, nil)
 	if len(docs) != 50 {
 		t.Fatalf("expected the top-50 cap to apply, got %d", len(docs))
+	}
+}
+
+func TestCorrelateCampaignsFoldsInProvidersAndAlertCounts(t *testing.T) {
+	now := time.Now()
+	evs := []corrEvent{
+		{When: now, SrcIP: "203.0.113.1", Sensor: "cowrie", Provider: "cloud"},
+		{When: now, SrcIP: "203.0.113.2", Sensor: "cowrie", Provider: "cloud"},
+	}
+	alertCounts := map[string]int{"203.0.113.1": 3, "203.0.113.2": 2, "198.51.100.1": 100}
+	docs := correlateCampaigns(evs, now, alertCounts)
+	if len(docs) != 1 {
+		t.Fatalf("expected 1 campaign group, got %d: %+v", len(docs), docs)
+	}
+	d := docs[0]
+	if len(d.Providers) != 1 || d.Providers[0] != "cloud" {
+		t.Fatalf("expected providers=[cloud], got %+v", d.Providers)
+	}
+	// Only this group's own two member IPs count -- 198.51.100.1's 100
+	// alerts belong to a different, unrelated campaign and must not leak in.
+	if d.Alerts != 5 {
+		t.Fatalf("expected alerts=5 (3+2 from this group's own IPs), got %d", d.Alerts)
+	}
+	// 2 events + 1 sensor*15 + 2 ips*3 + min(5,15) alerts*2 + 1 provider*2
+	// = 2 + 15 + 6 + 10 + 2 = 35
+	if d.Score != 35 {
+		t.Fatalf("score = %d, want 35", d.Score)
+	}
+}
+
+func TestCorrelateCampaignsNilAlertCountsIsZeroNotPanic(t *testing.T) {
+	now := time.Now()
+	evs := []corrEvent{{When: now, SrcIP: "203.0.113.1", Sensor: "cowrie"}}
+	docs := correlateCampaigns(evs, now, nil)
+	if len(docs) != 1 || docs[0].Alerts != 0 {
+		t.Fatalf("expected a nil alertCounts map to behave as all-zero: %+v", docs)
+	}
+}
+
+func TestCorrelateClustersGroupsByProvider(t *testing.T) {
+	now := time.Now()
+	evs := []corrEvent{
+		{When: now, SrcIP: "203.0.113.1", Sensor: "cowrie", Provider: "scanner"},
+		{When: now, SrcIP: "198.51.100.1", Sensor: "dionaea", Provider: "scanner"},
+	}
+	docs := correlateClusters(evs, now)
+	if len(docs) != 1 || docs[0].Kind != "provider" || docs[0].Value != "scanner" {
+		t.Fatalf("got %+v", docs)
 	}
 }
 
