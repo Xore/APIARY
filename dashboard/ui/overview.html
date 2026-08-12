@@ -254,6 +254,18 @@
             <div data-echart="/api/os-distribution" data-echart-kind="pie" style="width:100%;height:360px"></div>
             <p class="note" data-echart-status="/api/os-distribution">Loading&hellip;</p>
           </div>
+          {{/* #1294: held_ms/lines were already captured per disconnect
+               (classify.go's endlessh branch) but only ever showed as text
+               on that one event's own detail line -- a direct measurement
+               of defensive effectiveness (time an attacker/bot spent stuck
+               talking to nothing) had no cumulative or distribution view
+               anywhere. */}}
+          <div class="card wide" id="endlessh-held-card">
+            <h2>Attacker time wasted (endlessh tarpit)</h2>
+            <p class="note"><strong>{{.EndlesshTotalHeldHuman}}</strong> of cumulative attacker/bot time spent stuck in the tarpit before giving up, across every held connection observed.</p>
+            <div data-echart="/api/endlessh-held-histogram" data-echart-kind="bar" style="width:100%;height:320px"></div>
+            <p class="note" data-echart-status="/api/endlessh-held-histogram">Loading&hellip;</p>
+          </div>
         </div>
 
         <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-evidence" role="tabpanel" data-dashboard-panel="evidence" hidden>

@@ -72,14 +72,24 @@ type snapshot struct {
 	Clients        []kv // ssh/telnet client banners
 	Fingerprints   []kv // HASSH / JA3 / JA4 / User-Agent / client identities
 	OSDistribution []kv // p0f OS guess only (#1277) -- split out of Fingerprints above
-	MapPoints      []mapPoint
-	Payloads       []payloadRow
-	Campaigns      []campaignRow
-	SensorHeatmap  []heatmapRow
-	Recent         []storedEvent
-	ES             esStatus
-	Runtime        runtimeStatus
-	YARA           yaraStatus
+	// EndlesshTotalHeldMs/EndlesshHeldBuckets (#1294): summed and bucketed
+	// in aggregate.go's rebuild() in-memory pass, not a live ES aggregation
+	// -- see endlessh_stats.go's own header comment for why.
+	EndlesshTotalHeldMs int64
+	// EndlesshTotalHeldHuman is EndlesshTotalHeldMs pre-formatted ("3h 24m")
+	// -- computed server-side (rebuild(), via endlesshHeldHumanDuration)
+	// rather than a template helper, matching this struct's existing
+	// Time/TimeUTC-style convention of shipping display-ready strings.
+	EndlesshTotalHeldHuman string
+	EndlesshHeldBuckets    map[string]int
+	MapPoints              []mapPoint
+	Payloads               []payloadRow
+	Campaigns              []campaignRow
+	SensorHeatmap          []heatmapRow
+	Recent                 []storedEvent
+	ES                     esStatus
+	Runtime                runtimeStatus
+	YARA                   yaraStatus
 }
 
 type runtimeStatus struct {
@@ -176,6 +186,7 @@ type storedEvent struct {
 	FingerKind    string  `json:",omitempty"`
 	Category      string  `json:",omitempty"`
 	Severity      int     `json:",omitempty"`
+	HeldMs        int     `json:",omitempty"` // endlessh (#1294): tarpit hold duration, disconnect events only
 	ICSSeverity   string  `json:",omitempty"` // dnp3 (#1290): "critical"/"high" for control-function app_function codes
 	Detail        string
 	IsLogin       bool   `json:",omitempty"`
