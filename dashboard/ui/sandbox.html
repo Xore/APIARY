@@ -130,7 +130,16 @@
 
         <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-behavior" role="tabpanel" data-dashboard-panel="behavior" hidden>
           <div class="section-heading"><div><h2>What the payload did</h2><p>System calls, filesystem changes, and the process and socket state before and after detonation.</p></div></div>
-          <div class="card half"><h2>Top system calls</h2>{{if .Detail.TopSyscalls}}<div class="card__scroll"><table class="data-table"><thead><tr><th>call</th><th>count</th></tr></thead><tbody>{{range .Detail.TopSyscalls}}<tr><td class="v">{{.Name}}</td><td class="n">{{.Count}}</td></tr>{{end}}</tbody></table></div>{{else}}<p class="empty">No syscall trace was exported.</p>{{end}}</div>
+          <div class="card half"><h2>Top system calls</h2>{{if .Detail.TopSyscalls}}
+            {{/* #1292: a syscall frequency profile is a classic malware-
+                 behavior fingerprint (a dropper vs. ransomware vs. a
+                 backdoor have distinctly different shapes) and reads
+                 faster as a bar chart than a table -- same "chart
+                 summarizes the table beneath it" pattern #1268's own
+                 top-commands chart established (hp-commands-chart.js),
+                 not a replacement for the full table. */}}
+            <div id="syscalls-chart" style="width:100%;height:260px"></div>
+            <div class="card__scroll"><table class="data-table"><thead><tr><th>call</th><th>count</th></tr></thead><tbody>{{range .Detail.TopSyscalls}}<tr><td class="v">{{.Name}}</td><td class="n">{{.Count}}</td></tr>{{end}}</tbody></table></div>{{else}}<p class="empty">No syscall trace was exported.</p>{{end}}</div>
           <div class="card half"><h2>Created or changed paths</h2>{{if .Detail.ChangedFiles}}<p class="note">{{len .Detail.ChangedFiles}} tracked path{{if ne (len .Detail.ChangedFiles) 1}}s{{end}} changed.</p><button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="sb-changed-paths">Open the full list</button>{{else}}<p class="empty">No tracked path changes.</p>{{end}}</div>
           <div class="card half"><h2>Process difference</h2><p class="note">Userspace commands added or removed between the pre- and post-execution snapshots. Volatile PID/resource columns and kernel-worker churn are ignored.</p>{{if .Detail.ProcessDiff.Added}}<details open><summary>Added ({{len .Detail.ProcessDiff.Added}})</summary><pre class="code tw:mt-2">{{range .Detail.ProcessDiff.Added}}+ {{.}}
 {{end}}</pre></details>{{else}}<p class="empty">No added processes.</p>{{end}}{{if .Detail.ProcessDiff.Removed}}<details open class="tw:mt-3"><summary>Removed ({{len .Detail.ProcessDiff.Removed}})</summary><pre class="code tw:mt-2">{{range .Detail.ProcessDiff.Removed}}- {{.}}
@@ -232,6 +241,10 @@
           {{end}}
         </div>
         <p class="note tw:mt-3">Guest-produced text is untrusted, HTML-escaped, and size-bounded. Raw PCAP and diagnostics downloads require the administrator role; complete raw result directories and syscall traces remain root-only on the homeserver.</p>
+        {{if .Detail.TopSyscalls}}
+        <script nonce="{{.Nonce}}">window.__hpTopSyscalls = {{json .Detail.TopSyscalls}};</script>
+        <script defer src="{{asset "/static/hp-syscalls-chart.js"}}"></script>
+        {{end}}
         {{else}}
         {{template "sandboxresultspanel" .}}
         {{end}}
