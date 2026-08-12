@@ -88,7 +88,12 @@ func enrichLine(line []byte, vm viaMap, tftpVM viaMap, persona string) (out []by
 	// resolution below -- it's applied on every attempt (including
 	// retries; cheap, and idempotent against the same original line) so a
 	// canonical field never waits on the via_port join to appear.
-	fieldsChanged := promoteCanonicalFields(persona, e) || portFixed
+	// promoteAttckTechniqueFields (#1260) runs after promoteCanonicalFields
+	// on purpose -- it reads canonical_command/canonical_user/
+	// canonical_pass/canonical_fingerprint/canonical_shasum, not raw
+	// per-persona fields, so it must see this call's own output first.
+	canonicalChanged := promoteCanonicalFields(persona, e)
+	fieldsChanged := promoteAttckTechniqueFields(e) || canonicalChanged || portFixed
 
 	ip, _ := e["src_ip"].(string)
 	lookup := vm
