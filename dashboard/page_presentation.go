@@ -106,9 +106,20 @@ func templateFuncs(s *store, world template.HTML) template.FuncMap {
 		// rule (see overview.html) -- nth-child counts from 1, {{range}}
 		// counts from 0.
 		"inc": func(i int) int { return i + 1 },
-		"json": func(value any) string {
+		// template.JS, not string: html/template's contextual auto-escaper
+		// treats a plain-string pipeline result inside a <script> value
+		// position (window.x = {{json .}};) as untrusted JS string data and
+		// re-encodes it as a quoted, escaped JS string literal -- the
+		// caller ends up with window.x === "[...]" (a string) rather than
+		// the parsed array/object, silently breaking every .map/.forEach
+		// call on it. template.JS marks this as already-safe JS/JSON, which
+		// is honored only within a genuine JS context; verified this still
+		// gets ordinary HTML-escaping when used in an HTML text context
+		// instead (events.html's <pre>{{json .}}</pre>), so this is safe
+		// for both of this function's call sites, not just the broken one.
+		"json": func(value any) template.JS {
 			b, _ := json.MarshalIndent(value, "", "  ")
-			return string(b)
+			return template.JS(b)
 		},
 		"dict": func(pairs ...any) map[string]any {
 			m := make(map[string]any, len(pairs)/2)

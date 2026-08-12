@@ -254,6 +254,56 @@ func TestServeProblemReportsPageServesSkeletonBeforeFirstRefresh(t *testing.T) {
 	}
 }
 
+// TestServeProblemReportsPageEmbedsReportsAsARealJSArray guards against a
+// regression where window.__hpProblemReports rendered as a JSON-encoded
+// *string* instead of a parsed array/object: templateFuncs' "json" helper
+// used to return a plain Go string, which html/template's contextual
+// auto-escaper then treated as untrusted JS string data inside the <script>
+// value position and re-encoded as a quoted, escaped JS string literal --
+// window.__hpProblemReports became "[...]" (a string) rather than [...] (an
+// array), so every reports.map()/forEach() call in
+// hp-problem-reports-admin.js threw "reports.map is not a function" and the
+// admin "View" button did nothing. Confirmed live 2026-08-12.
+func TestServeProblemReportsPageEmbedsReportsAsARealJSArray(t *testing.T) {
+	s := newTestProblemReportStore(t)
+	report := problemReport{ID: "abc123", SubmittedAt: time.Now(), Status: "open", Expected: "it should load"}
+	doc, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.es.docIndex(problemReportsIndex, report.ID, doc, true, 0, 0); err != nil {
+		t.Fatalf("seed report: %v", err)
+	}
+	s.refreshProblemReportsCacheAsync()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		s.problemReportsMu.Lock()
+		ready := !s.problemReportsCacheAt.IsZero()
+		s.problemReportsMu.Unlock()
+		if ready {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	tmpl := template.Must(template.New("t").Funcs(templateFuncs(nil, "")).Parse(pageTemplate))
+	req := httptest.NewRequest(http.MethodGet, "/admin/problem-reports", nil)
+	req = withIdentity(req, authenticatedIdentity{Subject: "0123456789abcdef", Role: "admin"})
+	rec := httptest.NewRecorder()
+	s.serveProblemReportsPage(rec, req, tmpl)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `window.__hpProblemReports = [`) {
+		t.Fatalf("expected window.__hpProblemReports to be assigned a raw JS array, got: %s", body)
+	}
+	if strings.Contains(body, `window.__hpProblemReports = "`) {
+		t.Fatalf("window.__hpProblemReports rendered as a quoted JS string instead of a real array, got: %s", body)
+	}
+	if !strings.Contains(body, `"id": "abc123"`) {
+		t.Fatalf("expected the seeded report's id to appear unescaped in the embedded array, got: %s", body)
+	}
+}
+
 func TestListProblemReportsRequiresAdmin(t *testing.T) {
 	s := newTestProblemReportStore(t)
 	t.Setenv("DASHBOARD_REQUIRE_ADMIN", "true")
