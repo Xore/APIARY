@@ -232,7 +232,11 @@ func TestNoUnnoncedInlineScriptOrStyleRemains(t *testing.T) {
 // renderPage) doesn't silently regress back to sending no CSP header.
 func TestEveryFullPageRouteUsesRenderPage(t *testing.T) {
 	var src strings.Builder
-	for _, f := range []string{"main.go", "search.go"} {
+	// #1312: investigate_routes.go holds what used to be inline closures in
+	// main.go (attacker/session/cidr-correlation/cluster-correlation/ghidra/
+	// revdeck/cape/github-analysis/sandbox), extracted so they're testable
+	// against a real http.ServeMux -- see that file's own comment.
+	for _, f := range []string{"main.go", "search.go", "investigate_routes.go"} {
 		b, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatalf("read %s: %v", f, err)
