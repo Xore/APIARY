@@ -296,6 +296,25 @@ http:
         options: modern
       middlewares: [security-headers-dashboard-pdf]
 
+    # Same relaxation again, for the Ghidra detail page's own "view report"
+    # iframe (#1237). serveGhidraExport (dashboard/ghidra.go) has the
+    # identical gap serveGeneratedPDF/serveGitHubAnalysisPDFProxy both had
+    # above: it streams the stored report directly (never through
+    # secHeaders()/renderPage()), so without this router the only framing
+    # header on that response was the blanket honeypot-dashboard router's
+    # DENY below -- the iframe showed "refused to connect" with no console
+    # error, since X-Frame-Options blocking doesn't log one. Anchored with
+    # $ right after the hash segment so this deliberately does NOT match
+    # /export/ghidra/{hash}/callgraph.svg (an <img src>, never framed, and
+    # not the resource this issue is about).
+    honeypot-dashboard-ghidra-report:
+      rule: "(Host(`dashboard.honeypot.example`) || Host(`honeypot.honeypot.example`)) && PathRegexp(`^/export/ghidra/[^/]+$`)"
+      entryPoints: [websecure]
+      service: honeypot-dashboard
+      tls:
+        options: modern
+      middlewares: [security-headers-dashboard-pdf]
+
     # dashboard.honeypot.example redirects here rather than sharing this
     # router: the dashboard's own native OIDC runtime (#1026) has
     # OIDC_EXTERNAL_URL hardcoded to a single host (honeypot.honeypot.example)
