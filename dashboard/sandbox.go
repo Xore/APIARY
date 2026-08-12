@@ -751,6 +751,21 @@ func (s *store) refreshSandboxCacheAsync() {
 	}()
 }
 
+// sandboxCacheSnapshot returns a copy of the current sandbox listing cache,
+// triggering a background refresh first (a no-op if one is already in
+// flight or the last successful fetch is still within sandboxCacheTTL).
+// search.go's searchRedirect/searchSandbox read through this instead of
+// calling loadSandboxResults() (a whole-namespace, paginated ES fetch)
+// directly, so a /search or per-keystroke /api/quick-search request never
+// repeats that scan -- it reuses the same bounded cache the /sandbox
+// listing itself keeps warm (#1157-follow-up).
+func (s *store) sandboxCacheSnapshot() []sandboxResult {
+	s.refreshSandboxCacheAsync()
+	s.sandboxMu.Lock()
+	defer s.sandboxMu.Unlock()
+	return append([]sandboxResult(nil), s.sandboxCache...)
+}
+
 // attachSandboxDownloads exposes a download link only for an artifact that
 // actually exists in sandbox-export-artifacts-v1 (#638/#764) -- never from
 // disk. minSize is a light sanity floor (an empty/near-empty artifact

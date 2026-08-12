@@ -207,6 +207,46 @@ func TestServeQuickSearchReturnsJSONResults(t *testing.T) {
 	}
 }
 
+// #1157-follow-up: searchRedirect/searchSandbox/searchGitHubAnalysis must
+// read the same background-refreshed caches the /sandbox and
+// /github-analysis listings themselves use (sandboxCacheSnapshot/
+// githubAnalysisCacheSnapshot), not call loadSandboxResults()/
+// loadGitHubAnalysisResults() directly -- those are whole-namespace,
+// paginated ES fetches that used to run redundantly on every /search
+// request and every per-keystroke /api/quick-search lookup. Seeding the
+// cache directly (esResultsClient stays nil, no ES stub) and still getting
+// a hit proves the read goes through the cache rather than requiring a
+// live ES round trip.
+func TestSearchReadsSandboxAndGitHubAnalysisFromCacheNotDirectES(t *testing.T) {
+	s := searchTestStore(t)
+	seedSandboxCache(s, sandboxResult{
+		Job: "job-alpha", SHA256: strings.Repeat("a", 64), RiskLevel: "high",
+		Classification: sandboxClassification{Label: "trojan"},
+	})
+	seedGitHubAnalysisCache(s, githubAnalysisResult{
+		SHA256: strings.Repeat("b", 64), Family: "mirai", ExitStatus: "ok",
+	})
+
+	if got := s.searchRedirect("job-alpha"); got != "/sandbox/job-alpha" {
+		t.Fatalf("searchRedirect(job-alpha) = %q, want /sandbox/job-alpha", got)
+	}
+
+	groupTitles := func(page searchPage) string {
+		var titles []string
+		for _, g := range page.Groups {
+			titles = append(titles, g.Title)
+		}
+		return strings.Join(titles, ",")
+	}
+
+	if got := groupTitles(s.searchData("trojan", filter{})); !strings.Contains(got, "Sandbox runs") {
+		t.Fatalf("groups %q missing Sandbox runs for a cached sandbox match", got)
+	}
+	if got := groupTitles(s.searchData("mirai", filter{})); !strings.Contains(got, "GitHub analyses") {
+		t.Fatalf("groups %q missing GitHub analyses for a cached match", got)
+	}
+}
+
 func TestServeQuickSearchRejectsNonGET(t *testing.T) {
 	s := searchTestStore(t)
 	r := httptest.NewRequest(http.MethodPost, "/api/quick-search?q=hunter2", nil)

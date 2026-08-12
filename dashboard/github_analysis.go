@@ -463,6 +463,22 @@ func (s *store) refreshGithubAnalysisCacheAsync() {
 	}()
 }
 
+// githubAnalysisCacheSnapshot returns a copy of the current GitHub-analysis
+// listing cache, triggering a background refresh first (a no-op if one is
+// already in flight or the last successful fetch is still within
+// githubAnalysisCacheTTL). search.go's searchGitHubAnalysis reads through
+// this instead of calling loadGitHubAnalysisResults() (a whole-namespace,
+// paginated ES fetch) directly, so a /search or per-keystroke
+// /api/quick-search request never repeats that scan -- it reuses the same
+// bounded cache the /github-analysis listing itself keeps warm
+// (#1157-follow-up).
+func (s *store) githubAnalysisCacheSnapshot() []githubAnalysisResult {
+	s.refreshGithubAnalysisCacheAsync()
+	s.githubAnalysisMu.Lock()
+	defer s.githubAnalysisMu.Unlock()
+	return append([]githubAnalysisResult(nil), s.githubAnalysisCache...)
+}
+
 func (s *store) serveGitHubAnalysisAPI(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/api/github-analysis/status" {
 		w.Header().Set("Content-Type", "application/json")
