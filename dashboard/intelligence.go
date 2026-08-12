@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -197,6 +198,17 @@ func clustersRequestFilter(r *http.Request) filter {
 // aggregate.go's periodic intelligence snapshot -- which has no request to
 // parse and always wants the unfiltered view (filter{}).
 func (s *store) clustersData(f filter) clustersPage {
+	// #1222: unlike campaignsData, clustersData has never had a caching
+	// fast path at all -- every /clusters visit (filtered or not)
+	// recomputed from every matching raw event on every request. Prefer
+	// correlator-worker's own attacker-clusters-v1 (#1219) for the default
+	// view, falling back to the recompute below on any read failure (index
+	// not created yet, ES unreachable, worker never deployed).
+	if f.isDefaultCorrelationView() {
+		if rows, ok := s.readClustersFromWorkerIndex(); ok {
+			return clustersPage{Generated: time.Now(), Rows: rows, Filters: f.describe()}
+		}
+	}
 	type agg struct {
 		events       int
 		ips, sensors map[string]bool
@@ -276,6 +288,91 @@ func (s *store) clustersData(f filter) clustersPage {
 		rows = rows[:250]
 	}
 	return clustersPage{Generated: time.Now(), Rows: rows, Filters: f.describe()}
+}
+
+const clustersIndex = "attacker-clusters-v1"
+
+// clusterWorkerDoc mirrors correlator-worker/correlate.go's own
+// clusterDoc field-for-field.
+type clusterWorkerDoc struct {
+	Kind    string   `json:"kind"`
+	Value   string   `json:"value"`
+	Events  int      `json:"events"`
+	Sources int      `json:"sources"`
+	Sensors []string `json:"sensors"`
+}
+
+// clusterWorkerKindLabels maps correlator-worker's own lowercase,
+// single-word kind convention (fingerprint/payload/asn/provider -- see
+// correlate.go's clusterDoc doc comment for why it deliberately doesn't
+// match dashboard's display strings) back to the exact Title Case labels
+// clusterRow.Kind has always used -- filters.go's own "kind" dropdown
+// (?kind=) and main.go's /clusters handler both compare against these
+// literal strings, so a worker-sourced row must carry the same ones a
+// locally-computed row would.
+var clusterWorkerKindLabels = map[string]string{
+	"fingerprint": "Fingerprint",
+	"payload":     "Payload",
+	"asn":         "Autonomous system",
+	"provider":    "Provider class",
+}
+
+// readClustersFromWorkerIndex reads correlator-worker's own
+// attacker-clusters-v1 (#1219, #1222) instead of recomputing in-process.
+func (s *store) readClustersFromWorkerIndex() ([]clusterRow, bool) {
+	if s.es == nil {
+		return nil, false
+	}
+	hits, err := s.es.docSearchAll(clustersIndex, 250)
+	if err != nil || len(hits) == 0 {
+		return nil, false
+	}
+	rows := make([]clusterRow, 0, len(hits))
+	for _, hit := range hits {
+		var doc clusterWorkerDoc
+		if json.Unmarshal(hit.Source, &doc) != nil || doc.Value == "" {
+			continue
+		}
+		kind, ok := clusterWorkerKindLabels[doc.Kind]
+		if !ok {
+			continue
+		}
+		param, linkValue := "q", doc.Value
+		switch kind {
+		case "Fingerprint":
+			param = "fingerprint"
+		case "Payload":
+			param = "shasum"
+		case "Provider class":
+			param = "provider"
+		case "Autonomous system":
+			param = "asn"
+			if fields := strings.Fields(doc.Value); len(fields) > 0 {
+				linkValue = strings.TrimPrefix(fields[0], "AS")
+			}
+		}
+		rows = append(rows, clusterRow{
+			Kind: kind, Value: doc.Value, Events: doc.Events, Sources: doc.Sources,
+			Summary: fmt.Sprintf("%d sensors: %s", len(doc.Sensors), strings.Join(doc.Sensors, " ")),
+			Link:    eventsURL(url.Values{param: {linkValue}}),
+		})
+	}
+	if len(rows) == 0 {
+		return nil, false
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Sources != rows[j].Sources {
+			return rows[i].Sources > rows[j].Sources
+		}
+		if rows[i].Events != rows[j].Events {
+			return rows[i].Events > rows[j].Events
+		}
+		if rows[i].Kind != rows[j].Kind {
+			return rows[i].Kind < rows[j].Kind
+		}
+		return rows[i].Value < rows[j].Value
+	})
+	return rows, true
 }
 
 // clusterIPs recomputes one specific cluster's member IP set by kind+value

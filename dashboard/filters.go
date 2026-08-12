@@ -83,6 +83,27 @@ func (f filter) isEmpty() bool {
 		len(f.includeIPs) == 0 && f.since.IsZero() && f.family == ""
 }
 
+// isDefaultCorrelationView reports whether f carries no filter criteria
+// beyond an unset ?since= -- either genuinely zero (aggregate.go's own
+// periodic clustersData(filter{}) call) or filled in by
+// clustersRequestFilter's own defaultCorrelationWindow default (an
+// ordinary /clusters page visit with no explicit ?since=). #1222: the
+// case /campaigns and /clusters can serve from correlator-worker's own
+// centrally-computed campaigns-v1/attacker-clusters-v1 instead of
+// recomputing from raw events -- like isEmpty(), but sinceStr (only ever
+// set when the request itself carried an explicit ?since=) stands in for
+// since.IsZero(), since clustersRequestFilter always fills since in even
+// on a bare request.
+func (f filter) isDefaultCorrelationView() bool {
+	return f.sinceStr == "" && f.ip == "" && f.cidr == "" && f.port == "" && f.sensor == "" && f.proto == "" && f.path == "" &&
+		f.persona == "" && f.site == "" && f.asset == "" &&
+		f.cred == "" && f.cmd == "" && f.session == "" && f.shasum == "" &&
+		f.cat == "" && f.country == "" && f.city == "" && f.client == "" &&
+		f.fingerprint == "" && f.provider == "" && f.org == "" && f.asn == "" &&
+		f.sig == "" && f.q == "" && f.typ == "" &&
+		len(f.includeIPs) == 0 && f.family == ""
+}
+
 func containsFold(haystack, needle string) bool {
 	return strings.Contains(strings.ToLower(haystack), strings.ToLower(needle))
 }

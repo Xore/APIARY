@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/netip"
@@ -78,7 +79,20 @@ func (s *store) campaignsData(r *http.Request) campaignsPage {
 	// snapshot. isEmpty() treats the filter as opaque instead, matching how
 	// every other filter.match() consumer in the dashboard already does.
 	if f.isEmpty() {
-		return campaignsPage{Generated: time.Now(), Campaigns: s.get().Campaigns, Filters: f.describe(), ExportURL: exportURL, filterBar: bar}
+		// #1222: prefer correlator-worker's own campaigns-v1 (#1219, a real
+		// 7-day window computed once centrally) over this instance's own
+		// aggregate.go snapshot (also 7 days, but recomputed independently
+		// by every dashboard replica every rebuild cycle) -- falls back to
+		// the local snapshot on any read failure (index not created yet,
+		// ES unreachable, worker never deployed), so this never turns an
+		// ES hiccup into an empty page. See readCampaignsFromWorkerIndex's
+		// own doc comment for the two known, presentation-only field gaps
+		// this fallback doesn't have.
+		campaigns := s.get().Campaigns
+		if fromWorker, ok := s.readCampaignsFromWorkerIndex(); ok {
+			campaigns = fromWorker
+		}
+		return campaignsPage{Generated: time.Now(), Campaigns: campaigns, Filters: f.describe(), ExportURL: exportURL, filterBar: bar}
 	}
 
 	// Default matches aggregate.go's own periodic snapshot window; ?since=
@@ -286,4 +300,80 @@ func correlateCampaigns(evs []storedEvent, since time.Time) []campaignRow {
 		rows = rows[:50]
 	}
 	return rows
+}
+
+const campaignsIndex = "campaigns-v1"
+
+// campaignWorkerDoc mirrors correlator-worker/correlate.go's own
+// campaignDoc field-for-field -- deliberately reusing the wire shape
+// rather than inventing a parallel one, same convention attackers.go's
+// attackerRow already follows for attacker-identity-worker's documents.
+type campaignWorkerDoc struct {
+	CIDR         string   `json:"cidr"`
+	Score        int      `json:"score"`
+	Events       int      `json:"events"`
+	UniqueIPs    int      `json:"unique_ips"`
+	Sensors      []string `json:"sensors"`
+	Ports        []string `json:"ports"`
+	Creds        int      `json:"creds"`
+	Payloads     int      `json:"payloads"`
+	Alerts       int      `json:"alerts"`
+	Providers    []string `json:"providers"`
+	Fingerprints int      `json:"fingerprints"`
+	First        string   `json:"first"`
+	Last         string   `json:"last"`
+	Explanation  string   `json:"explanation"`
+}
+
+// readCampaignsFromWorkerIndex reads correlator-worker's own campaigns-v1
+// (#1219, #1222) instead of recomputing in-process. Two known gaps against
+// correlateCampaigns' own campaignRow, both presentation-only (its score
+// formula uses neither, so scoring/ranking is unaffected):
+//
+//   - ASNs is always empty -- correlator-worker's campaign aggregation
+//     doesn't group by ASN at all, only its separate cluster aggregation
+//     does (attacker-clusters-v1's own "asn" kind).
+//   - Sequence (the chronological "cowrie ← dionaea" sensor-hop chain) is
+//     always empty -- an aggregation bucket has no per-event ordering left
+//     to derive it from once correlator-worker has already summarized it.
+func (s *store) readCampaignsFromWorkerIndex() ([]campaignRow, bool) {
+	if s.es == nil {
+		return nil, false
+	}
+	hits, err := s.es.docSearchAll(campaignsIndex, 50)
+	if err != nil || len(hits) == 0 {
+		return nil, false
+	}
+	rows := make([]campaignRow, 0, len(hits))
+	for _, hit := range hits {
+		var doc campaignWorkerDoc
+		if json.Unmarshal(hit.Source, &doc) != nil || doc.CIDR == "" {
+			continue
+		}
+		first, _ := time.Parse(time.RFC3339, doc.First)
+		last, _ := time.Parse(time.RFC3339, doc.Last)
+		rows = append(rows, campaignRow{
+			CIDR: doc.CIDR, Score: doc.Score, Events: doc.Events, UniqueIPs: doc.UniqueIPs,
+			Sensors: strings.Join(doc.Sensors, " "), Ports: strings.Join(doc.Ports, " "),
+			Creds: doc.Creds, Payloads: doc.Payloads, Alerts: doc.Alerts,
+			Providers: strings.Join(doc.Providers, " "), Fingerprints: doc.Fingerprints,
+			First: first.Format("2006-01-02 15:04"), FirstUTC: utcOrEmpty(first),
+			Last: last.Format("2006-01-02 15:04"), LastUTC: utcOrEmpty(last),
+			Link:        eventsURL(url.Values{"cidr": {doc.CIDR}, "since": {"168h"}}),
+			Explanation: doc.Explanation,
+		})
+	}
+	if len(rows) == 0 {
+		return nil, false
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Score != rows[j].Score {
+			return rows[i].Score > rows[j].Score
+		}
+		if rows[i].Events != rows[j].Events {
+			return rows[i].Events > rows[j].Events
+		}
+		return rows[i].CIDR < rows[j].CIDR
+	})
+	return rows, true
 }
