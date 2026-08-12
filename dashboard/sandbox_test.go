@@ -361,3 +361,54 @@ func TestSandboxResultsPageRendersAsCardGrid(t *testing.T) {
 		t.Fatal("exit-status badge for the failed run is missing")
 	}
 }
+
+// TestSandboxDetailPageChartsTopSyscalls (#1292): TopSyscalls previously
+// rendered as a plain table only -- this pins that a completed job's detail
+// view also inlines window.__hpTopSyscalls and loads the chart script, and
+// that a job with no syscall trace exported gets neither (no empty chart
+// container, no dead inline var).
+func TestSandboxDetailPageChartsTopSyscalls(t *testing.T) {
+	funcs := templateFuncs(nil, "")
+	tmpl := template.Must(template.New("dashboard").Funcs(funcs).Parse(pageTemplate))
+
+	sha := strings.Repeat("a", 64)
+	withSyscalls := sandboxPageData{
+		Generated: time.Now(),
+		Detail: &sandboxResult{
+			Job: "job-1", SHA256: sha, Source: "dionaea", CompletedAt: "2026-08-01T10:00:00Z",
+			RiskScore: 10, RiskLevel: "low", ExitStatus: "ok",
+			TopSyscalls: []sandboxCount{{Name: "openat", Count: 195}, {Name: "read", Count: 88}},
+		},
+	}
+
+	var buf strings.Builder
+	if err := tmpl.ExecuteTemplate(&buf, "sandbox", &withSyscalls); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	body := buf.String()
+	if !strings.Contains(body, `id="syscalls-chart"`) {
+		t.Fatal("missing the #syscalls-chart chart container")
+	}
+	if !strings.Contains(body, "window.__hpTopSyscalls") || !strings.Contains(body, `"openat"`) {
+		t.Fatal("missing the inlined window.__hpTopSyscalls data")
+	}
+	if !strings.Contains(body, "hp-syscalls-chart.js") {
+		t.Fatal("missing the hp-syscalls-chart.js script tag")
+	}
+
+	noSyscalls := sandboxPageData{
+		Generated: time.Now(),
+		Detail: &sandboxResult{
+			Job: "job-2", SHA256: strings.Repeat("b", 64), Source: "dionaea", CompletedAt: "2026-08-01T10:00:00Z",
+			RiskScore: 10, RiskLevel: "low", ExitStatus: "ok",
+		},
+	}
+	buf.Reset()
+	if err := tmpl.ExecuteTemplate(&buf, "sandbox", &noSyscalls); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	body = buf.String()
+	if strings.Contains(body, "hp-syscalls-chart.js") || strings.Contains(body, "window.__hpTopSyscalls") {
+		t.Fatal("a job with no syscall trace must not get the chart script or an empty inline var")
+	}
+}
