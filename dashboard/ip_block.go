@@ -187,6 +187,7 @@ func (s *store) serveIPBlockAction(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "manual IP blocking is not configured on this host", http.StatusServiceUnavailable)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxActionFormBody)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
 		return

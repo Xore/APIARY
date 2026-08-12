@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html/template"
 	"io"
 	"net/http"
@@ -226,7 +227,12 @@ func decodeWorkbenchJSON(w http.ResponseWriter, r *http.Request, target any) boo
 		http.Error(w, "application/json required", http.StatusUnsupportedMediaType)
 		return false
 	}
-	decoder := json.NewDecoder(io.LimitReader(r.Body, 64<<10))
+	// #1323: MaxBytesReader over a plain io.LimitReader -- LimitReader
+	// silently truncates an oversized body (still produces a 400 here,
+	// since the decoder then sees invalid/incomplete JSON, but Go's
+	// MaxBytesReader additionally closes the connection instead of letting
+	// the client keep streaming data nobody's going to read).
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		http.Error(w, "invalid JSON request", http.StatusBadRequest)
@@ -243,7 +249,11 @@ func writeWorkbenchJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(value)
+	// #1323: logged, not just discarded -- see writeReportsJSON's own
+	// comment (reports_api.go) for why.
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		fmt.Fprintf(os.Stderr, "dashboard: encode workbench JSON response: %v\n", err)
+	}
 }
 
 func (s *store) serveWorkbenchPage(w http.ResponseWriter, r *http.Request, tmpl *template.Template) {

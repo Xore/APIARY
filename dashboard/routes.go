@@ -113,7 +113,7 @@ func (s *store) routes(tmpl *template.Template) *http.ServeMux {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
-		tmpl.ExecuteTemplate(w, "eventrows", data)
+		logTemplateErr("eventrows", tmpl.ExecuteTemplate(w, "eventrows", data))
 	})
 	mux.HandleFunc("GET /api/ip-rows", func(w http.ResponseWriter, r *http.Request) {
 		data := s.ipsData(r)
@@ -128,7 +128,7 @@ func (s *store) routes(tmpl *template.Template) *http.ServeMux {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
-		tmpl.ExecuteTemplate(w, "iprows", data)
+		logTemplateErr("iprows", tmpl.ExecuteTemplate(w, "iprows", data))
 	})
 	mux.HandleFunc("GET /api/campaigns", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -220,7 +220,7 @@ func (s *store) routes(tmpl *template.Template) *http.ServeMux {
 		if identity, err := resolveIdentity(r); err == nil && identity.Role == "admin" {
 			data.Admin = true
 		}
-		tmpl.ExecuteTemplate(w, "settingsModal", data)
+		logTemplateErr("settingsModal", tmpl.ExecuteTemplate(w, "settingsModal", data))
 	})
 	mux.HandleFunc("GET /events", func(w http.ResponseWriter, r *http.Request) {
 		data := s.eventsData(r)
@@ -372,7 +372,7 @@ func (s *store) routes(tmpl *template.Template) *http.ServeMux {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
-		tmpl.ExecuteTemplate(w, "payloadrows", data)
+		logTemplateErr("payloadrows", tmpl.ExecuteTemplate(w, "payloadrows", data))
 	})
 	// #1312: explicit methods for the same reason as /investigate/ip/block
 	// above -- each of these three otherwise conflicts with

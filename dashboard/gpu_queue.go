@@ -112,6 +112,7 @@ func serveGPUQueueAbort(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "same-origin request required", http.StatusForbidden)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxActionFormBody)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
 		return

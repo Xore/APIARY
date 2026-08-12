@@ -247,6 +247,16 @@ func (a *oidcAuth) middleware(next http.Handler) http.Handler {
 		}
 		identity, err := a.identityFromRequest(r)
 		if err == nil {
+			// #1323: centralized here rather than per-handler -- every
+			// authenticated response carries attacker/session data scoped
+			// to this operator's own request, and the dashboard sits
+			// behind Traefik and (per real deployments) shared browsers/
+			// proxies where a cached copy could otherwise leak across
+			// sessions or survive a logout. /healthz, /static/, and the
+			// /auth/* flow above never reach this branch (no identity to
+			// scope the response to), so genuinely cacheable static assets
+			// are unaffected.
+			w.Header().Set("Cache-Control", "private, no-store")
 			next.ServeHTTP(w, withIdentity(r, identity))
 			return
 		}

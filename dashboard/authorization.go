@@ -42,6 +42,14 @@ type accountActions struct {
 	ManageUsers   string `json:"manage_users,omitempty"`
 }
 
+// maxActionFormBody (#1323) bounds the small POST forms every admin action
+// route (IP block, GPU queue abort, sandbox/ghidra/GitHub-analysis submit,
+// ML anomaly ack) reads via r.ParseForm() -- none of these forms carry more
+// than a handful of short fields (a hash, a flag, a return path), so this
+// is deliberately far above real usage while still being a real ceiling,
+// not just relying on net/http's own undocumented internal ParseForm cap.
+const maxActionFormBody = 4 << 10 // 4KB
+
 func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	if !strings.EqualFold(strings.TrimSpace(os.Getenv("DASHBOARD_REQUIRE_ADMIN")), "true") {
 		return true
