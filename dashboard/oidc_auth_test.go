@@ -567,4 +567,29 @@ func TestMiddlewareRejectsAnonymousRequests(t *testing.T) {
 			}
 		}
 	})
+
+	// #1255: static assets carry no identity-bearing data, so an anonymous
+	// request for one should never gate on session validity at all.
+	t.Run("static assets are served without identity", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodGet, "/static/site.webmanifest", nil)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusTeapot {
+			t.Fatalf("status = %d, want the handler to run unauthenticated (%d)", recorder.Code, http.StatusTeapot)
+		}
+	})
+
+	// #1255: /api/* is only ever called by page JS (fetch/XHR/EventSource),
+	// so an anonymous GET there must fail with a real status the caller can
+	// branch on -- redirecting it toward Keycloak instead sends fetch()
+	// chasing a cross-origin URL that connect-src then blocks, surfacing as
+	// an opaque network error rather than a 401 the frontend can handle.
+	t.Run("anonymous API GET is denied outright, not redirected", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodGet, "/api/whoami", nil)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+		}
+	})
 }
