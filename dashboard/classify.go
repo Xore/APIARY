@@ -643,6 +643,19 @@ func classify(e map[string]any, dirSensor string) event {
 		ev.isLogin = (ev.user != "" || ev.pass != "") &&
 			(strings.Contains(kind, "login") || strings.Contains(kind, "auth"))
 		ev.detail = kind
+		// #1276: data.cve/data.name carry the actual exploit identity (e.g.
+		// name "DoublePulsar connection attempt", cve
+		// "CVE-2017-0144..CVE-2017-0148") on every exploit-attempt incident
+		// -- previously unread, so an operator only ever saw the generic
+		// Python module path (kind, e.g. "modules.python.smb.exploit")
+		// where the real exploit name would tell them immediately what's
+		// actually being tried.
+		if name := str(data["name"]); name != "" {
+			ev.detail = name
+			if cve := str(data["cve"]); cve != "" {
+				ev.detail += " (" + cve + ")"
+			}
+		}
 		if ev.download != "" {
 			ev.detail += " " + ev.download
 		}
