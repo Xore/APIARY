@@ -49,6 +49,52 @@ func TestDocGetParsesHitFields(t *testing.T) {
 	}
 }
 
+func TestDocExistsUsesHEADNotGET(t *testing.T) {
+	var gotMethod string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	es := newESClient(srv.URL)
+	exists, err := es.docExists("some-index", "some-id")
+	if err != nil || !exists {
+		t.Fatalf("exists=%v err=%v", exists, err)
+	}
+	if gotMethod != http.MethodHead {
+		t.Fatalf("method = %s, want HEAD (#1221 -- must not transfer _source just to check existence)", gotMethod)
+	}
+}
+
+func TestDocExistsReturnsFalseOnNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	es := newESClient(srv.URL)
+	exists, err := es.docExists("some-index", "some-id")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if exists {
+		t.Fatal("expected exists=false on a 404")
+	}
+}
+
+func TestDocExistsReturnsErrorOnNon2xx(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	es := newESClient(srv.URL)
+	if _, err := es.docExists("some-index", "some-id"); err == nil {
+		t.Fatal("expected an error on a 500 response")
+	}
+}
+
 func TestDocIndexCreateUsesOpTypeCreate(t *testing.T) {
 	var gotQuery string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
