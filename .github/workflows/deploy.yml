@@ -65,10 +65,19 @@ jobs:
           # worse, silently deletes a hand-built ipxe.efi/webui checkout on
           # every future deploy. Found live: this rsync step failed here
           # once these existed on disk, exit 23.
+          #
+          # analysis/geoip/ itself (not just its *.mmdb files) is excluded
+          # wholesale, not just the mmdb pattern: nothing under this path is
+          # git-tracked, and geoipupdate (root-owned container, #1258) also
+          # writes a root:root .geoipupdate.lock into the root:root
+          # directory it owns -- the deploy-runner user can't unlink a file
+          # inside a directory it has no write permission on, so a narrower
+          # exclude that missed this file broke every deploy once the
+          # geoip-update profile started actually running (#1226 fix).
           rsync -a --delete-delay \
             --exclude '.git/' --exclude '.github/' --exclude '.env' \
             --exclude 'logs/' --exclude 'state/' --exclude 'dashboard-state/' \
-            --exclude 'analysis/geoip/*.mmdb' --exclude 'sandbox/results/' \
+            --exclude 'analysis/geoip/' --exclude 'sandbox/results/' \
             --exclude 'analysis/ghidra/revdeck/' \
             --exclude 'sandbox/windows/packer/pxe/ipxe/' \
             --exclude 'sandbox/windows/packer/pxe/ipxe.efi' \
