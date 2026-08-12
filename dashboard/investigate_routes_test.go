@@ -201,6 +201,57 @@ func TestHashKeyedRoutesRejectInvalidHashesAfterSingleDecode(t *testing.T) {
 	}
 }
 
+// TestGhidraDetailShellRendersWithoutES covers #1288/#1285/#1286's
+// shell+hydrate conversion: /ghidra/{sha} must render a 200 shell for any
+// hash-format-valid hash with esResultsClient left nil (unconfigured) --
+// the old behavior synchronously queried Elasticsearch and 404'd here for
+// an unknown hash; that check now happens only on the client's own
+// follow-up fetch to the fragment route below. The shell must carry the
+// fragment URL for hp-ghidra-report.js to hydrate from and must not leak
+// any card content that would only be true for a real result.
+func TestGhidraDetailShellRendersWithoutES(t *testing.T) {
+	s := &store{}
+	mux := investigateTestMux(t, s)
+	rec := doGet(mux, "/ghidra/"+shaA)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 for a shell render (it fetches ES client-side)", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `data-hp-gh-fragment-url="/ghidra/`+shaA+`/fragment"`) {
+		t.Errorf("shell is missing the fragment URL hp-ghidra-report.js hydrates from, got: %s", body)
+	}
+	if strings.Contains(body, "ghidra-detail-body") {
+		t.Error("shell must not render the detail-body template's own define name as literal text")
+	}
+}
+
+// TestGhidraFragmentRoute covers the fragment route's own two outcomes:
+// a real result renders the full detail body, and an unknown hash 404s
+// (moved here from the shell route above, which used to do this check
+// synchronously before any response bytes were written).
+func TestGhidraFragmentRoute(t *testing.T) {
+	s := &store{}
+	esGhidraResult(t, map[string]any{
+		"sha256": shaA, "exit_status": "success",
+		"functions": []any{map[string]any{"address": "0x401000", "name": "main", "signature": "int main()"}},
+	})
+	mux := investigateTestMux(t, s)
+
+	rec := doGet(mux, "/ghidra/"+shaA+"/fragment")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("known hash: status = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "0x401000") {
+		t.Errorf("fragment missing the resolved function, got: %s", rec.Body.String())
+	}
+
+	unknown := "b" + shaA[1:]
+	rec = doGet(mux, "/ghidra/"+unknown+"/fragment")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("unknown hash: status = %d, want 404", rec.Code)
+	}
+}
+
 // TestCIDRWildcardCapturesTheEmbeddedSlash (#1312): CIDR notation always
 // contains a literal "/" ("203.0.113.0/24"), which Go 1.22's plain {name}
 // wildcard cannot span -- /investigate/cidr/{cidr...} uses the "rest of

@@ -2477,6 +2477,68 @@ pre.code {
 .diff-line { display: block; padding: 0 6px; border-radius: 2px; }
 .diff-line--add { background: var(--success-soft); color: var(--success); }
 .diff-line--del { background: var(--danger-soft); color: var(--danger); }
+
+/* ── AI-generated report body + citations panel ───────────────────────────
+   The typographic layer for a markdown-parsed AI report: a left accent
+   rule + tinted surface reads as "generated report", not plain page copy,
+   without needing a second, separate warning-box treatment. Consuming
+   apps pair this with their own "AI-generated, unverified" banner above
+   it; this only styles the body markdown itself renders. */
+.hp-ai-report {
+  margin: 8px 0; padding: 14px 16px;
+  border-left: 3px solid var(--accent);
+  background: var(--surface-2);
+  border-radius: var(--radius-control);
+}
+.hp-ai-report__body { color: var(--text-primary); font-size: var(--font-size-body); line-height: 1.6; }
+.hp-ai-report__body :is(h1, h2, h3, h4, h5, h6) { color: var(--accent-text-on-soft); font-size: 1rem; font-weight: 600; margin: 16px 0 6px; }
+.hp-ai-report__body :is(h1, h2, h3, h4, h5, h6):first-child { margin-top: 0; }
+.hp-ai-report__body p { margin: 0 0 10px; }
+.hp-ai-report__body p:last-child { margin-bottom: 0; }
+.hp-ai-report__body :is(ul, ol) { margin: 0 0 10px; padding-left: 20px; }
+.hp-ai-report__body code { font: 12px var(--hp-mono); background: var(--sidebar-bg); border-radius: 3px; padding: 1px 5px; }
+.hp-ai-report__body pre { background: var(--sidebar-bg); border: 1px solid var(--border-subtle); border-radius: var(--radius-control); padding: 10px; overflow: auto; }
+.hp-ai-report__body pre code { background: none; padding: 0; }
+.hp-ai-report__body blockquote { margin: 0 0 10px; padding-left: 12px; border-left: 2px solid var(--border-subtle); color: var(--text-secondary); }
+.hp-ai-report__body a { color: var(--text-link); }
+.hp-ai-report__body strong { color: var(--text-primary); font-weight: 700; }
+
+/* Valid vs. invalid citations get distinct pill colors (success vs.
+   warning), reusing the same state-color tokens .badge--success/--warning
+   already establish. */
+.hp-ai-citations { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.hp-ai-citations__label { font: 11px var(--hp-mono); text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 4px; }
+.hp-ai-citations__label--valid { color: var(--success-text-on-soft); }
+.hp-ai-citations__label--invalid { color: var(--warning-text-on-soft); }
+.hp-ai-citations__list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.hp-ai-citations__item code { font: 12px var(--hp-mono); padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border-subtle); }
+.hp-ai-citations__item--valid code { background: var(--success-soft); color: var(--success-text-on-soft); border-color: transparent; }
+.hp-ai-citations__item--invalid code { background: var(--warning-soft); color: var(--warning-text-on-soft); border-color: transparent; opacity: 0.85; }
+
+/* ── Chat transcript bubbles ────────────────────────────────────────────
+   Bubbles by role: user right-aligned/accent-tinted, assistant left-
+   aligned/neutral, tool left-aligned/info-tinted and a step smaller
+   (it's machine output, not conversation). */
+.hp-chat { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.hp-chat-msg { max-width: 88%; padding: 10px 14px; border-radius: var(--radius-control); }
+.hp-chat-msg--user { align-self: flex-end; background: var(--accent-soft); }
+.hp-chat-msg--assistant { align-self: flex-start; background: var(--surface-2); border: 1px solid var(--border-subtle); }
+.hp-chat-msg--tool { align-self: flex-start; background: var(--info-soft); font-size: var(--font-size-caption); }
+.hp-chat-msg__meta { display: flex; gap: 8px; align-items: baseline; margin-bottom: 4px; }
+.hp-chat-msg__role { font: 10px var(--hp-mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
+.hp-chat-msg--user .hp-chat-msg__role { color: var(--accent-text-on-soft); }
+.hp-chat-msg--tool .hp-chat-msg__role { color: var(--info-text-on-soft); }
+.hp-chat-msg__name { font-size: var(--font-size-caption); color: var(--text-muted); }
+.hp-chat-msg__content { color: var(--text-primary); font-size: var(--font-size-body); line-height: 1.55; }
+.hp-chat-msg__content p { margin: 0 0 8px; }
+.hp-chat-msg__content p:last-child { margin-bottom: 0; }
+.hp-chat-msg__content code { font: 12px var(--hp-mono); background: var(--sidebar-bg); border-radius: 3px; padding: 1px 5px; }
+.hp-chat-msg__content pre { background: var(--sidebar-bg); border: 1px solid var(--border-subtle); border-radius: var(--radius-control); padding: 8px; overflow: auto; margin: 6px 0; }
+.hp-chat-msg__content pre code { background: none; padding: 0; }
+.hp-chat-msg__toolcalls { margin-top: 8px; }
+.hp-chat-msg__toolcalls summary { cursor: pointer; font-size: var(--font-size-caption); color: var(--text-muted); }
+.hp-chat-msg__toolcalls pre { margin-top: 6px; }
+
 footer {
   margin-top: 24px; padding-top: 8px;
   font: 10px var(--hp-mono); letter-spacing: 0.08em; text-transform: uppercase;

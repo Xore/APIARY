@@ -88,49 +88,10 @@
           {{else}}<p class="empty">No Ghidra analyses match this view.</p>{{end}}
         </div>
 {{end}}
-{{define "ghidra"}}<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex, nofollow">
-<title>{{brandText}} &mdash; Ghidra analysis</title>
-{{template "style" .}}
-{{/* #1288: prism.css is used by exactly this one page, same page-scoped-
-     asset convention xterm.css/echarts.min.js/cytoscape.min.js already
-     use on the pages that need them (see tty_replay.html's own comment
-     on this). */}}
-<link rel="stylesheet" href="{{asset "/static/prism.css"}}">
-</head>
-<body>
-<div class="app-shell">
-  {{template "topbar" .}}
-  {{template "sidebar" .}}
-  <main class="app-main">
-      <div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
-        <header class="overview-header" id="ghidra-header">
-          <div>
-            <div class="label-section">Static analysis</div>
-            <h1>Ghidra disassembly</h1>
-            <p class="subtitle">Headless decompilation of captured payloads. Nothing here is executed.</p>
-          </div>
-          <div class="live-panel">
-            <span class="gen">generated <span data-hp-utc="{{utcOrEmpty .Generated}}">{{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></span>
-          </div>
-        </header>
 
-        {{/* #1180-adjacent: the "not configured"/"stale" worker banners
-             moved into ghidraresultspanel (below) -- they're about being
-             unable to QUEUE new analyses, which only matters looking at
-             the list/queue, not viewing an already-completed result here;
-             showing "not configured" while looking at a result that
-             obviously WAS analyzed was the wrong scope for this page. */}}
-
-        {{if .Detail}}
+{{define "ghidra-detail-body"}}
         <div class="filters"><a class="chip" href="/payload-workbench/{{.Detail.SHA256}}">Open unified analysis workbench &rarr;</a></div>
         <div class="filters" id="ghidra-detail-actions"><a class="chip" href="/payload-workbench/results#ghidra">&larr; all Ghidra results</a><a class="chip" href="/payload-analysis/{{.Detail.SHA256}}">static analysis</a><a class="chip" href="/events?shasum={{.Detail.SHA256}}">related events</a><a class="chip" href="https://www.virustotal.com/gui/file/{{.Detail.SHA256}}" target="_blank" rel="noopener noreferrer">VirusTotal &nearr;</a>{{if .Detail.ExportURL}}<button class="chip" type="button" id="hp-gh-report-view" data-hp-gh-report-url="{{.Detail.ExportURL}}">view report</button><a class="chip" href="{{.Detail.ExportURL}}?download=1">full report &darr;</a>{{end}}<form method="post" action="/ghidra/submit" data-hp-confirm-title="Re-run Ghidra analysis?" data-hp-confirm-description="This queues a fresh headless decompilation of the same capture. Nothing is executed; the existing result is replaced when the new run completes." data-hp-confirm-warning="The existing analysis for this payload is replaced when the new run finishes. Nothing is executed." data-hp-confirm-label="Queue re-analysis"><input type="hidden" name="hash" value="{{.Detail.SHA256}}"><input type="hidden" name="return" value="/ghidra/{{.Detail.SHA256}}"><button class="btn btn-sm btn-secondary" type="submit" title="Queue a fresh Ghidra analysis of this capture"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Re-analyze</button></form></div>
-
-        {{if eq .Analysis "queued"}}<div class="alert alert--success" role="status">Re-analysis queued. The refreshed result replaces this one once the host worker finishes.</div>{{end}}
 
         {{if eq .Detail.ExitStatus "error"}}<div class="tw:mb-6 tw:rounded-lg tw:border tw:border-red tw:bg-red-subtle tw:px-4 tw:py-4 tw:text-red" role="alert"><strong>This analysis did not complete.</strong> {{if .Detail.Error}}{{.Detail.Error}}{{else}}The worker reported a failure with no detail.{{end}} The empty sections below are an infrastructure failure, not a clean result for this binary.</div>{{end}}
 
@@ -173,8 +134,18 @@
           <div class="card wide" id="ghidra-revdeck"><h2>Rev&middot;Deck automated triage</h2>
             <div class="tw:mb-4 tw:rounded-md tw:border tw:border-orange tw:bg-orange-subtle tw:px-4 tw:py-3"><strong>AI-generated assessment.</strong> A second, independent AI aid: Rev&middot;Deck's own bounded autonomous tool-calling loop against the Ghidra service, distinct from the automated triage above. Treat every claim below as unverified until you have checked it against the functions, imports, and strings in the other tabs.</div>
             <div class="card__row"><span class="card__label">workflow</span><span class="card__value card__value--mono">{{.Detail.RevDeck.Workflow}}</span></div><div class="card__row"><span class="card__label">status</span><span class="card__value">{{.Detail.RevDeck.Status}}{{if eq .Detail.RevDeck.Status "max_turns"}} &mdash; the step budget ran out before the model finished; this is its best-effort synthesis, not a completed analysis{{end}}</span></div>{{if .Detail.RevDeck.Steps}}<div class="card__row"><span class="card__label">steps</span><span class="card__value card__value--mono">{{.Detail.RevDeck.Steps}}</span></div>{{end}}<div class="card__row"><span class="card__label">tool calls</span><span class="card__value card__value--mono">{{.Detail.RevDeck.ToolCalls}}</span></div>
-            {{if .Detail.RevDeck.Answer}}<p class="note">Answer:</p><p>{{.Detail.RevDeck.Answer}}</p>{{end}}
-            {{if .Detail.RevDeck.Citations}}{{if .Detail.RevDeck.Citations.Valid}}<p class="note">Citations:</p><ul class="tw:list-disc tw:pl-5">{{range .Detail.RevDeck.Citations.Valid}}<li>{{.Raw}}</li>{{end}}</ul>{{end}}{{if .Detail.RevDeck.Citations.Invalid}}<p class="note">Citations the model referenced that could not be verified against the analysis:</p><ul class="tw:list-disc tw:pl-5">{{range .Detail.RevDeck.Citations.Invalid}}<li>{{.Raw}}</li>{{end}}</ul>{{end}}{{end}}
+            {{/* #1285: .Detail.RevDeck.Answer is markdown-formatted AI
+                 output, still passed through as plain text here (auto-
+                 escaped by html/template exactly like every other
+                 untrusted field on this page) -- hp-ghidra-markdown.js
+                 finds this data-markdown node at page load, parses it with
+                 marked.js, and sanitizes the result with DOMPurify before
+                 ever setting innerHTML. If that script never runs (JS
+                 disabled, or window.marked/DOMPurify missing), this note
+                 stays exactly as safe and legible as it is now -- literal
+                 markdown syntax characters, not a blank card. */}}
+            {{if .Detail.RevDeck.Answer}}<div class="hp-ai-report"><p class="note">Answer:</p><div class="hp-ai-report__body" data-markdown>{{.Detail.RevDeck.Answer}}</div></div>{{end}}
+            {{if .Detail.RevDeck.Citations}}<div class="hp-ai-citations">{{if .Detail.RevDeck.Citations.Valid}}<div class="hp-ai-citations__group"><p class="hp-ai-citations__label hp-ai-citations__label--valid">Citations</p><ul class="hp-ai-citations__list">{{range .Detail.RevDeck.Citations.Valid}}<li class="hp-ai-citations__item hp-ai-citations__item--valid"><code>{{.Raw}}</code></li>{{end}}</ul></div>{{end}}{{if .Detail.RevDeck.Citations.Invalid}}<div class="hp-ai-citations__group"><p class="hp-ai-citations__label hp-ai-citations__label--invalid">Unverified &mdash; referenced by the model but not matched against the analysis</p><ul class="hp-ai-citations__list">{{range .Detail.RevDeck.Citations.Invalid}}<li class="hp-ai-citations__item hp-ai-citations__item--invalid"><code>{{.Raw}}</code></li>{{end}}</ul></div>{{end}}</div>{{end}}
             {{if .Detail.RevDeck.Warnings}}<p class="note">Warnings from the run:</p><ul class="tw:list-disc tw:pl-5">{{range .Detail.RevDeck.Warnings}}<li>{{.}}</li>{{end}}</ul>{{end}}
           </div>
           {{else}}
@@ -268,13 +239,26 @@
 {{if .Preview}}    {{.Preview.Hex}}
     {{.Preview.ASCII}}
 {{end}}{{end}}</pre></div>{{end}}
+        {{/* #1286: a real chat transcript, not a flat pre dump -- one
+             bubble per message, visually distinct by role. Content's
+             display text goes through chatMessageText (unwraps the plain
+             JSON string a user/assistant message actually is; falls back
+             to an indented JSON dump for whatever shape a tool message's
+             content turns out to be, since ghidraChatMessage's own comment
+             explains that shape isn't fixed). Rendered here, hidden, same
+             as every other evidence body -- hp-ghidra-markdown.js walks
+             this node's data-markdown children at page load, well before
+             a user ever opens the modal that clones it, so assistant
+             messages get the same sanitized markdown treatment as #1285's
+             one-shot Answer. */}}
         {{if .Detail.RevDeckChatThreads}}<div hidden data-hp-evidence-body="gh-chat-threads"><h3>Chat threads</h3><pre class="code">{{range .Detail.RevDeckChatThreads.Threads}}{{.ThreadID}}  {{.Title}}  ({{.MessageCount}} message{{if ne .MessageCount 1}}s{{end}})
-{{end}}
---- active thread ---
-{{range .Detail.RevDeckChatThreads.ActiveThreadMessages}}[{{.Role}}]{{if .Name}} ({{.Name}}){{end}}
-{{printf "%s" .Content}}
-
-{{end}}</pre></div>{{end}}
+{{end}}</pre>
+<div class="hp-chat">{{range .Detail.RevDeckChatThreads.ActiveThreadMessages}}<div class="hp-chat-msg hp-chat-msg--{{.Role}}">
+<div class="hp-chat-msg__meta"><span class="hp-chat-msg__role">{{.Role}}</span>{{if .Name}}<span class="hp-chat-msg__name">{{.Name}}</span>{{end}}</div>
+{{if .Content}}<div class="hp-chat-msg__content" data-markdown>{{chatMessageText .Content}}</div>{{end}}
+{{if .ToolCalls}}<details class="hp-chat-msg__toolcalls"><summary>tool calls</summary><pre class="code">{{chatToolCallsText .ToolCalls}}</pre></details>{{end}}
+</div>{{end}}</div>
+</div>{{end}}
         {{if .Detail.RevDeckRecovery}}<div hidden data-hp-evidence-body="gh-recovery"><h3>Symbol recovery</h3><pre class="code">--- index ---
 {{printf "%s" .Detail.RevDeckRecovery.Index}}
 
@@ -291,7 +275,81 @@
 {{end}}</pre><h3>Static strings</h3><pre class="code">{{range .Detail.Floss.StaticStrings}}{{.}}
 {{end}}</pre></div>{{end}}
         {{if .Detail.IOCCorrelation}}<div hidden data-hp-evidence-body="gh-ioc-correlation"><h3>IP addresses</h3>{{template "ioc-kind-evidence" .Detail.IOCCorrelation.IPs}}<h3>Domains</h3>{{template "ioc-kind-evidence" .Detail.IOCCorrelation.Domains}}<h3>URLs</h3>{{template "ioc-kind-evidence" .Detail.IOCCorrelation.URLs}}<h3>UNC/SMB paths</h3>{{template "ioc-kind-evidence" .Detail.IOCCorrelation.UNCPaths}}</div>{{end}}
+{{end}}
 
+{{define "ghidra"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>{{brandText}} &mdash; Ghidra analysis</title>
+{{template "style" .}}
+{{/* #1288: prism.css is used by exactly this one page, same page-scoped-
+     asset convention xterm.css/echarts.min.js/cytoscape.min.js already
+     use on the pages that need them (see tty_replay.html's own comment
+     on this). */}}
+<link rel="stylesheet" href="{{asset "/static/prism.css"}}">
+</head>
+<body>
+<div class="app-shell">
+  {{template "topbar" .}}
+  {{template "sidebar" .}}
+  <main class="app-main">
+      <div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
+        <header class="overview-header" id="ghidra-header">
+          <div>
+            <div class="label-section">Static analysis</div>
+            <h1>Ghidra disassembly</h1>
+            <p class="subtitle">Headless decompilation of captured payloads. Nothing here is executed.</p>
+          </div>
+          <div class="live-panel">
+            <span class="gen">generated <span data-hp-utc="{{utcOrEmpty .Generated}}">{{.Generated.Format "2006-01-02 15:04:05 MST"}}</span></span>
+          </div>
+        </header>
+
+        {{/* #1180-adjacent: the "not configured"/"stale" worker banners
+             moved into ghidraresultspanel (below) -- they're about being
+             unable to QUEUE new analyses, which only matters looking at
+             the list/queue, not viewing an already-completed result here;
+             showing "not configured" while looking at a result that
+             obviously WAS analyzed was the wrong scope for this page. */}}
+
+        {{if .Detail}}
+        {{if eq .Analysis "queued"}}<div class="alert alert--success" role="status">Re-analysis queued. The refreshed result replaces this one once the host worker finishes.</div>{{end}}
+        {{/* #1288/#1285/#1286 shell+hydrate: this used to render the whole
+             detail body (cards, tabs, evidence bodies) from .Detail fields
+             resolved via a synchronous Elasticsearch round trip in the
+             route handler itself (investigate_routes.go's old "GET
+             /ghidra/{sha}" closure called s.ghidraData() before writing
+             any response bytes). The route now only ever resolves the
+             hash from the URL (ghidraDetailShell, no ES call) -- the real
+             content lives in the "ghidra-detail-body" template below,
+             executed against the real ghidraData() result by the new "GET
+             /ghidra/{sha}/fragment" route, and hp-ghidra-report.js fetches
+             that fragment once on page load to replace this skeleton.
+             Mirrors payload_analysis.go's payloadAnalysisShell +
+             servePayloadStaticAnalysis split -- see that file's own
+             comment for the general reasoning. A coarser grain than that
+             pattern's per-field skeleton (this page has ~20 cards versus
+             payload-analysis' half dozen fields): the whole body swaps in
+             as one fragment rather than each card resolving its own
+             sub-fetch, which keeps the fragment-side Go template (and its
+             existing tests) as the single source of truth for every
+             card's markup instead of a second, hand-written JS
+             reimplementation of the same ~20 sections. */}}
+        <div id="ghidra-detail-root" data-hp-gh-fragment-url="/ghidra/{{.Detail.SHA256}}/fragment" aria-busy="true">
+          <div class="filters"><div class="skeleton-line" style="width:220px"></div></div>
+          <div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-4 tw:gap-3 tw:mb-6">
+            <div class="metric"><div class="metric__value"><div class="skeleton-line" style="width:40%"></div></div><div class="metric__label">Functions</div></div>
+            <div class="metric"><div class="metric__value"><div class="skeleton-line" style="width:40%"></div></div><div class="metric__label">Imports</div></div>
+            <div class="metric"><div class="metric__value"><div class="skeleton-line" style="width:40%"></div></div><div class="metric__label">Strings</div></div>
+            <div class="metric"><div class="metric__value"><div class="skeleton-line" style="width:40%"></div></div><div class="metric__label">Crypto constants</div></div>
+          </div>
+          <div class="card wide"><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:85%"></div><div class="skeleton-line" style="width:40%"></div></div>
+          <div class="card wide"><div class="skeleton-line" style="width:55%"></div><div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:35%"></div></div>
+          <div class="card wide"><div class="skeleton-line" style="width:65%"></div><div class="skeleton-line" style="width:75%"></div><div class="skeleton-line" style="width:45%"></div></div>
+        </div>
         {{else}}
 
         {{template "ghidraresultspanel" .}}
@@ -315,6 +373,9 @@
   </section>
 </div>
 {{if .Detail}}<script defer src="{{asset "/static/prism.js"}}"></script>
+<script defer src="{{asset "/static/marked.js"}}"></script>
+<script defer src="{{asset "/static/dompurify.min.js"}}"></script>
+<script defer src="{{asset "/static/hp-ghidra-markdown.js"}}"></script>
 <script defer src="{{asset "/static/hp-ghidra-report.js"}}"></script>{{end}}
 </body>
 </html>

@@ -2,6 +2,6 @@
 # scripts/check-vendored-theme.sh. dashboard/static/theme.css must stay
 # byte-identical to theme.css at this commit.
 repository=https://github.com/Xore/theme
-commit=2639e685dfc1f2c97f8dc34f57133a7bf41bc602
-date=2026-08-12T16:55:56+00:00
-sha256=42e9f2c98ad190d1e4432ba8942a4430d65a32e0a35d14a29c111c4aa71cd993
+commit=e3e16e1af7d41df15e558a3b9090e03d23caa86e
+date=2026-08-13T00:40:20+02:00
+sha256=4b2907e4e70e1cc0de1fbe6d921956f0856285c86bb1ebbac9f48b842b7454ff

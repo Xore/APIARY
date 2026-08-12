@@ -1073,7 +1073,7 @@ func TestGhidraDetailPageRendersDeepDiveData(t *testing.T) {
 	}
 
 	var buf strings.Builder
-	if err := tmpl.ExecuteTemplate(&buf, "ghidra", &data); err != nil {
+	if err := tmpl.ExecuteTemplate(&buf, "ghidra-detail-body", &data); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	body := buf.String()
@@ -1133,7 +1133,7 @@ func TestGhidraDetailPageIsolatesPseudocodeForSyntaxHighlighting(t *testing.T) {
 	}
 
 	var buf strings.Builder
-	if err := tmpl.ExecuteTemplate(&buf, "ghidra", &data); err != nil {
+	if err := tmpl.ExecuteTemplate(&buf, "ghidra-detail-body", &data); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	body := buf.String()
@@ -1150,11 +1150,136 @@ func TestGhidraDetailPageIsolatesPseudocodeForSyntaxHighlighting(t *testing.T) {
 	if !strings.Contains(body, `<pre class="code">0x401100  sub_401100  void sub_401100()`) {
 		t.Errorf("un-deepened function should still render its header line in a plain pre, got: %s", body)
 	}
-	if !strings.Contains(body, `/static/prism.js`) {
-		t.Error("detail page should load the vendored Prism bundle")
+
+	// The Prism script/stylesheet tags live in the page shell (loaded
+	// unconditionally once .Detail is non-nil, real data or not -- #1288's
+	// shell+hydrate conversion moved everything ES-derived into
+	// "ghidra-detail-body" above, but these two tags never depended on ES
+	// data in the first place).
+	var shellBuf strings.Builder
+	if err := tmpl.ExecuteTemplate(&shellBuf, "ghidra", &data); err != nil {
+		t.Fatalf("render shell: %v", err)
 	}
-	if !strings.Contains(body, `/static/prism.css`) {
-		t.Error("detail page should load the Prism token theme")
+	shell := shellBuf.String()
+	if !strings.Contains(shell, `/static/prism.js`) {
+		t.Error("detail page shell should load the vendored Prism bundle")
+	}
+	if !strings.Contains(shell, `/static/prism.css`) {
+		t.Error("detail page shell should load the Prism token theme")
+	}
+}
+
+// TestChatMessageText covers #1286's unwrap of a chat message's Content:
+// a plain user/assistant message is a bare JSON string, which should come
+// back exactly as written (no surrounding quotes); a tool message's
+// content shape isn't fixed (ghidraChatMessage's own comment explains
+// why), so anything else should fall back to a readable indented dump
+// rather than an empty string.
+func TestChatMessageText(t *testing.T) {
+	if got := chatMessageText(json.RawMessage(`"List every function related to process creation."`)); got != "List every function related to process creation." {
+		t.Errorf("plain string content: got %q", got)
+	}
+	if got := chatMessageText(json.RawMessage(`{"ok":true,"count":3}`)); !strings.Contains(got, `"ok": true`) {
+		t.Errorf("non-string content should fall back to an indented dump, got %q", got)
+	}
+}
+
+// TestGhidraDetailPageRendersAIReportAndCitations covers #1285: the
+// RevDeck Answer must render inside a data-markdown node (so
+// hp-ghidra-markdown.js can find and parse it -- covered client-side, not
+// here) instead of a bare <p>, and valid/invalid citations must render in
+// visually distinct groups rather than two identical plain bullet lists.
+func TestGhidraDetailPageRendersAIReportAndCitations(t *testing.T) {
+	s := &store{}
+	tmpl := template.Must(template.New("dashboard").Funcs(templateFuncs(s, "")).Parse(pageTemplate))
+
+	data := ghidraPageData{
+		Generated: time.Now(),
+		Status:    ghidraQueueStatus{Configured: true},
+		Detail: &ghidraResult{
+			SHA256: shaA, CompletedAt: "2026-08-01T10:00:00Z", ExitStatus: "success",
+			RevDeck: &ghidraRevDeck{
+				Workflow: "triage", Status: "completed", Answer: "### Summary\n\nThis binary connects to a C2 server.",
+				Citations: &ghidraRevDeckCitations{
+					Valid:   []ghidraRevDeckCitation{{Kind: "function", Raw: "sub_401000@0x401000", Valid: true}},
+					Invalid: []ghidraRevDeckCitation{{Kind: "function", Raw: "sub_999999@0x999999", Valid: false}},
+				},
+			},
+		},
+	}
+
+	var buf strings.Builder
+	if err := tmpl.ExecuteTemplate(&buf, "ghidra-detail-body", &data); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	body := buf.String()
+
+	if !strings.Contains(body, `<div class="hp-ai-report__body" data-markdown>### Summary`) {
+		t.Errorf("Answer should render inside a data-markdown node for client-side rendering, got: %s", body)
+	}
+	if !strings.Contains(body, `hp-ai-citations__item--valid`) || !strings.Contains(body, "sub_401000@0x401000") {
+		t.Error("valid citation missing its own styled group")
+	}
+	if !strings.Contains(body, `hp-ai-citations__item--invalid`) || !strings.Contains(body, "sub_999999@0x999999") {
+		t.Error("invalid citation missing its own styled group")
+	}
+
+	// marked.js/DOMPurify/hp-ghidra-markdown.js load from the shell, same
+	// reasoning as prism.js/prism.css above.
+	var shellBuf strings.Builder
+	if err := tmpl.ExecuteTemplate(&shellBuf, "ghidra", &data); err != nil {
+		t.Fatalf("render shell: %v", err)
+	}
+	shell := shellBuf.String()
+	if !strings.Contains(shell, `/static/marked.js`) || !strings.Contains(shell, `/static/dompurify.min.js`) || !strings.Contains(shell, `/static/hp-ghidra-markdown.js`) {
+		t.Error("detail page shell should load marked.js, DOMPurify, and hp-ghidra-markdown.js")
+	}
+}
+
+// TestGhidraDetailPageRendersChatBubblesByRole covers #1286: each message
+// in the mirrored RevDeck chat transcript must render as its own
+// role-tagged bubble (not one flat pre dump), with the assistant's text
+// content inside a data-markdown node and any tool_calls behind a
+// collapsible <details>.
+func TestGhidraDetailPageRendersChatBubblesByRole(t *testing.T) {
+	s := &store{}
+	tmpl := template.Must(template.New("dashboard").Funcs(templateFuncs(s, "")).Parse(pageTemplate))
+
+	data := ghidraPageData{
+		Generated: time.Now(),
+		Status:    ghidraQueueStatus{Configured: true},
+		Detail: &ghidraResult{
+			SHA256: shaA, CompletedAt: "2026-08-01T10:00:00Z", ExitStatus: "success",
+			RevDeckChatThreads: &ghidraChatThreads{
+				Threads: []ghidraChatThread{{ThreadID: "main", Title: "Main", MessageCount: 2}},
+				ActiveThreadMessages: []ghidraChatMessage{
+					{Role: "user", Content: json.RawMessage(`"Run the standard triage workflow."`)},
+					{
+						Role: "assistant", Content: json.RawMessage(`"Calling get_function to inspect main."`),
+						ToolCalls: json.RawMessage(`[{"name":"get_function","arguments":{"address":"0x401000"}}]`),
+					},
+				},
+			},
+		},
+	}
+
+	var buf strings.Builder
+	if err := tmpl.ExecuteTemplate(&buf, "ghidra-detail-body", &data); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	body := buf.String()
+
+	if !strings.Contains(body, `hp-chat-msg--user`) {
+		t.Error("user message should get its own role-tagged bubble")
+	}
+	if !strings.Contains(body, `hp-chat-msg--assistant`) {
+		t.Error("assistant message should get its own role-tagged bubble")
+	}
+	if !strings.Contains(body, `<div class="hp-chat-msg__content" data-markdown>Run the standard triage workflow.</div>`) {
+		t.Errorf("user message content should be unwrapped from its JSON string and marked for client-side rendering, got: %s", body)
+	}
+	if !strings.Contains(body, `<details class="hp-chat-msg__toolcalls">`) || !strings.Contains(body, "get_function") {
+		t.Error("tool_calls should render in a collapsible detail, not be silently dropped")
 	}
 }
 
@@ -1176,7 +1301,7 @@ func TestGhidraDetailPageRendersReportViewer(t *testing.T) {
 	}
 
 	var buf strings.Builder
-	if err := tmpl.ExecuteTemplate(&buf, "ghidra", &data); err != nil {
+	if err := tmpl.ExecuteTemplate(&buf, "ghidra-detail-body", &data); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	body := buf.String()
@@ -1184,10 +1309,18 @@ func TestGhidraDetailPageRendersReportViewer(t *testing.T) {
 	if !strings.Contains(body, `data-hp-gh-report-url="/export/ghidra/`+shaA+`"`) {
 		t.Error("report-view trigger button is missing its report URL")
 	}
-	if !strings.Contains(body, `id="hp-gh-viewer"`) || !strings.Contains(body, `id="hp-gh-viewer-frame"`) {
+
+	// The modal shell and its script tag live outside "ghidra-detail-body"
+	// (unconditional page chrome, not derived from .Detail's ES fields).
+	var shellBuf strings.Builder
+	if err := tmpl.ExecuteTemplate(&shellBuf, "ghidra", &data); err != nil {
+		t.Fatalf("render shell: %v", err)
+	}
+	shell := shellBuf.String()
+	if !strings.Contains(shell, `id="hp-gh-viewer"`) || !strings.Contains(shell, `id="hp-gh-viewer-frame"`) {
 		t.Error("report viewer modal markup is missing")
 	}
-	if !strings.Contains(body, `/static/hp-ghidra-report.js`) {
+	if !strings.Contains(shell, `/static/hp-ghidra-report.js`) {
 		t.Error("hp-ghidra-report.js is not loaded on the detail page")
 	}
 }

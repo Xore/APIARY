@@ -71,7 +71,27 @@ func (s *store) registerInvestigateRoutes(mux *http.ServeMux, tmpl *template.Tem
 		}
 		renderPage(w, tmpl, "session", &data)
 	})
+	// #1288/#1285/#1286 shell+hydrate: this used to call s.ghidraData(),
+	// a synchronous Elasticsearch round trip, before writing any response
+	// bytes. ghidraDetailShell needs nothing but the URL's own hash --
+	// the real content is fetched client-side from the fragment route
+	// just below (see ghidraDetailShell's own comment in ghidra.go). A
+	// hash that doesn't resolve to a real analysis now gets a 200 shell
+	// instead of a 404 here; the fragment fetch 404s instead, and
+	// hp-ghidra-report.js surfaces that as an in-page error state rather
+	// than a browser-level not-found (same tradeoff tty_replay.go's own
+	// viewer shell already accepts for the same reason).
 	mux.HandleFunc("GET /ghidra/{sha}", func(w http.ResponseWriter, r *http.Request) {
+		sha := r.PathValue("sha")
+		if !hashName.MatchString(sha) {
+			http.NotFound(w, r)
+			return
+		}
+		data := ghidraDetailShell(strings.ToLower(sha))
+		data.Analysis = r.URL.Query().Get("analysis")
+		renderPage(w, tmpl, "ghidra", &data)
+	})
+	mux.HandleFunc("GET /ghidra/{sha}/fragment", func(w http.ResponseWriter, r *http.Request) {
 		sha := r.PathValue("sha")
 		if !hashName.MatchString(sha) {
 			http.NotFound(w, r)
@@ -82,8 +102,9 @@ func (s *store) registerInvestigateRoutes(mux *http.ServeMux, tmpl *template.Tem
 			http.NotFound(w, r)
 			return
 		}
-		data.Analysis = r.URL.Query().Get("analysis")
-		renderPage(w, tmpl, "ghidra", &data)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		tmpl.ExecuteTemplate(w, "ghidra-detail-body", &data)
 	})
 	mux.HandleFunc("GET /revdeck/{sha}", func(w http.ResponseWriter, r *http.Request) {
 		sha := r.PathValue("sha")
