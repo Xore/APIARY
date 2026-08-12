@@ -104,6 +104,47 @@ func TestCommandsDataOrderIsDeterministicOnFullTie(t *testing.T) {
 	}
 }
 
+// TestCommandsDataTopCommandsCapsAtLimit (#1268 "ask 3"): the frequency
+// bar chart above the table reads TopCommands, capped separately from the
+// full Rows list so a busy deployment with hundreds of distinct commands
+// doesn't try to chart all of them -- same top-N-by-Count slice of Rows,
+// not a second query.
+func TestCommandsDataTopCommandsCapsAtLimit(t *testing.T) {
+	var events []storedEvent
+	for i := 0; i < topCommandsChartLimit+5; i++ {
+		cmd := strings.Repeat("x", 1) + string(rune('a'+i))
+		// Higher i gets fewer occurrences so Count strictly decreases and
+		// sort order is unambiguous.
+		count := topCommandsChartLimit + 5 - i
+		for c := 0; c < count; c++ {
+			events = append(events, storedEvent{SrcIP: "203.0.113.1", Sensor: "cowrie", Command: cmd, Time: "2026-08-01 01:00"})
+		}
+	}
+	s := &store{events: events}
+	page := s.commandsData(httptest.NewRequest("GET", "/commands", nil))
+	if len(page.Rows) != topCommandsChartLimit+5 {
+		t.Fatalf("expected every distinct command in Rows, got %d", len(page.Rows))
+	}
+	if len(page.TopCommands) != topCommandsChartLimit {
+		t.Fatalf("expected TopCommands capped at %d, got %d", topCommandsChartLimit, len(page.TopCommands))
+	}
+	for i := range page.TopCommands {
+		if page.TopCommands[i] != page.Rows[i] {
+			t.Fatalf("TopCommands must be Rows' own leading (highest-Count) slice, diverged at index %d: %+v vs %+v", i, page.TopCommands[i], page.Rows[i])
+		}
+	}
+}
+
+func TestCommandsDataTopCommandsNoSeparateCapWhenFewRows(t *testing.T) {
+	s := &store{events: []storedEvent{
+		{SrcIP: "203.0.113.1", Sensor: "cowrie", Command: "id", Time: "2026-08-01 01:00"},
+	}}
+	page := s.commandsData(httptest.NewRequest("GET", "/commands", nil))
+	if len(page.TopCommands) != 1 {
+		t.Fatalf("expected TopCommands to include the one row present, got %+v", page.TopCommands)
+	}
+}
+
 func TestExportCommandsCSVRespectsFilter(t *testing.T) {
 	s := &store{events: []storedEvent{
 		{SrcIP: "203.0.113.1", Sensor: "cowrie", Command: "id", Time: "2026-08-01 01:00"},

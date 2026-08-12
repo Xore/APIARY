@@ -27,9 +27,19 @@ type commandsPage struct {
 	pageMeta
 	Generated time.Time
 	Rows      []commandRow
-	Filters   []string
+	// TopCommands (#1268 "ask 3" -- the visualization audit's one
+	// implemented follow-up) feeds a bar chart above the table: the
+	// existing Rows table stays the full, drill-down-capable list every
+	// operator already relies on (#790's own revert -- this page grows
+	// with its content rather than being boxed into a scrollbox), while
+	// the chart adds the "see the shape of it at a glance" view a flat
+	// table can't. Same slice of Rows, just capped -- no separate query.
+	TopCommands []commandRow
+	Filters     []string
 	filterBar
 }
+
+const topCommandsChartLimit = 15
 
 func (s *store) commandsData(r *http.Request) commandsPage {
 	f := parseFilter(r)
@@ -97,7 +107,11 @@ func (s *store) commandsData(r *http.Request) commandsPage {
 	})
 	bar := buildFilterBar(r, "/commands",
 		[2]string{"sensor", "Sensor"}, [2]string{"q", "Command contains"}, [2]string{"since", "Since (e.g. 24h)"})
-	return commandsPage{Generated: time.Now(), Rows: rows, Filters: f.describe(), filterBar: bar}
+	top := rows
+	if len(top) > topCommandsChartLimit {
+		top = top[:topCommandsChartLimit]
+	}
+	return commandsPage{Generated: time.Now(), Rows: rows, TopCommands: top, Filters: f.describe(), filterBar: bar}
 }
 
 func (s *store) exportEventsCSV(w http.ResponseWriter, r *http.Request) {
