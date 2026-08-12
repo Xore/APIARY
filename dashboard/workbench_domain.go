@@ -112,22 +112,22 @@ type workbenchOptionSchema struct {
 }
 
 type workbenchAnalyzer struct {
-	ID              string                `json:"id"`
-	DisplayName     string                `json:"display_name"`
-	Description     string                `json:"description"`
-	AcceptedKinds   []string              `json:"accepted_kinds"`
-	Availability    string                `json:"availability"`
-	Available       bool                  `json:"available"`
-	Applicable      bool                  `json:"applicable"`
-	Reason          string                `json:"reason"`
-	ResultLinkShape string                `json:"result_link_shape"`
-	RequiredRole    string                `json:"required_role"`
-	Confirmation    string                `json:"confirmation"`
-	Concurrency     string                `json:"concurrency_class"`
-	LocalOnly       bool                  `json:"local_only"`
-	ExternallySends bool                  `json:"externally_publishing"`
-	Detonates       bool                  `json:"detonates"`
-	GPU             bool                  `json:"gpu_consuming"`
+	ID              string   `json:"id"`
+	DisplayName     string   `json:"display_name"`
+	Description     string   `json:"description"`
+	AcceptedKinds   []string `json:"accepted_kinds"`
+	Availability    string   `json:"availability"`
+	Available       bool     `json:"available"`
+	Applicable      bool     `json:"applicable"`
+	Reason          string   `json:"reason"`
+	ResultLinkShape string   `json:"result_link_shape"`
+	RequiredRole    string   `json:"required_role"`
+	Confirmation    string   `json:"confirmation"`
+	Concurrency     string   `json:"concurrency_class"`
+	LocalOnly       bool     `json:"local_only"`
+	ExternallySends bool     `json:"externally_publishing"`
+	Detonates       bool     `json:"detonates"`
+	GPU             bool     `json:"gpu_consuming"`
 	// RequiresOptIn (#1234): true only for the one route that reaches real
 	// internet infrastructure (windows-ghosts) -- ui/payload_workbench.html
 	// pre-checks every other Applicable+Available analyzer's checkbox by
@@ -139,9 +139,9 @@ type workbenchAnalyzer struct {
 	// (including windows-ghosts and cape) sets LocalOnly true -- it means
 	// "orchestrated by this dashboard instance", not "network-isolated",
 	// so it can't be reused for this.
-	RequiresOptIn bool `json:"requires_opt_in"`
-	DefaultOptions  workbenchOptions      `json:"default_options"`
-	OptionSchema    workbenchOptionSchema `json:"option_schema"`
+	RequiresOptIn  bool                  `json:"requires_opt_in"`
+	DefaultOptions workbenchOptions      `json:"default_options"`
+	OptionSchema   workbenchOptionSchema `json:"option_schema"`
 }
 
 // #405/#36 decision, superseded: workbench run/recipe state used to stay
