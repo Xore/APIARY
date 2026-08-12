@@ -1420,8 +1420,20 @@
     };
     syncPrefs();
 
-    /* Sidebar profile row from live Keycloak token verification (see oidc_auth.go) */
-    fetch("/api/whoami", {cache: "no-store"}).then(r => r.ok ? r.json() : null).then(identity => {
+    /* Sidebar profile row from live Keycloak token verification (see
+       oidc_auth.go). #1235: a bare 401 means the OIDC session itself is
+       gone -- redirect through /auth/login rather than leaving the row
+       blank, same reasoning as hp-settings.js's own redirectToLogin
+       (Keycloak's browser SSO cookie almost always outlives this
+       dashboard's own session, so this self-heals silently). */
+    fetch("/api/whoami", {cache: "no-store"}).then(r => {
+      if (r.status === 401) {
+        const returnTo = window.location.pathname + window.location.search + window.location.hash;
+        window.location.href = "/auth/login?return_to=" + encodeURIComponent(returnTo);
+        return null;
+      }
+      return r.ok ? r.json() : null;
+    }).then(identity => {
       if (!identity || !identity.username) return;
       const name = shell.querySelector("[data-hp-user-name]");
       const avatar = shell.querySelector("[data-hp-user-avatar]");

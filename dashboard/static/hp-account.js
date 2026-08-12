@@ -30,8 +30,21 @@
     menu.querySelector(".dropdown__item:not([hidden])")?.focus();
   };
 
+  // #1235: a bare 401 here means the OIDC session itself is gone -- same
+  // reasoning as hp-settings.js's own redirectToLogin (see that file for
+  // the full explanation). Without this, a session that went stale between
+  // page load and this fetch just showed a permanent "Identity unavailable"
+  // instead of self-healing through Keycloak's still-live browser SSO
+  // cookie the way a manual reload already does.
   fetch("/api/whoami", { cache: "no-store" })
-    .then(response => response.ok ? response.json() : Promise.reject(new Error(String(response.status))))
+    .then(response => {
+      if (response.status === 401) {
+        const returnTo = window.location.pathname + window.location.search + window.location.hash;
+        window.location.href = "/auth/login?return_to=" + encodeURIComponent(returnTo);
+        return Promise.reject(new Error("401"));
+      }
+      return response.ok ? response.json() : Promise.reject(new Error(String(response.status)));
+    })
     .then(identity => {
       const display = identity.display_name || identity.username || "Account";
       name.textContent = display;
