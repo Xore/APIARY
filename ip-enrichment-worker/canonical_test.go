@@ -225,6 +225,147 @@ func TestPromoteCanonicalFieldsDispatchesByPersona(t *testing.T) {
 	}
 }
 
+// #1217 -- field shapes below are ported directly from real live records
+// (homeserver, 2026-08-12), not invented.
+
+func TestPromoteMultipotFieldsLoginCreds(t *testing.T) {
+	e := map[string]any{"sensor": "multipot", "proto": "smtp", "event": "login", "username": "dvr@mail01.nexusai.local", "password": "123456789"}
+	if !promoteMultipotFields(e) {
+		t.Fatal("expected a change")
+	}
+	if e["canonical_user"] != "dvr@mail01.nexusai.local" || e["canonical_pass"] != "123456789" {
+		t.Fatalf("got %+v", e)
+	}
+}
+
+func TestPromoteMultipotFieldsIgnoresNonMultipotSensor(t *testing.T) {
+	e := map[string]any{"sensor": "dns-honeypot", "event": "login", "username": "a", "password": "b"}
+	if promoteMultipotFields(e) {
+		t.Fatalf("expected no change for a non-multipot record: %+v", e)
+	}
+}
+
+func TestPromoteMultipotFieldsCommand(t *testing.T) {
+	e := map[string]any{"sensor": "multipot", "proto": "socks5", "event": "command", "command": "CONNECT 10.0.0.1:80"}
+	if !promoteMultipotFields(e) {
+		t.Fatal("expected a change")
+	}
+	if e["canonical_command"] != "CONNECT 10.0.0.1:80" {
+		t.Fatalf("got %v", e["canonical_command"])
+	}
+}
+
+func TestPromoteMultipotFieldsSkipsHTTPRequestCommand(t *testing.T) {
+	// #41: http_request's own "command" is an HTTP request line, not an
+	// attacker command -- must not pollute canonical_command.
+	e := map[string]any{"sensor": "multipot", "event": "http_request", "command": "GET /_search HTTP/1.1"}
+	if promoteMultipotFields(e) {
+		t.Fatalf("expected no change for an http_request event: %+v", e)
+	}
+}
+
+func TestPromoteMultipotFieldsClientBannerFingerprint(t *testing.T) {
+	e := map[string]any{"sensor": "multipot", "event": "connect", "client": "libssh2_1.0"}
+	if !promoteMultipotFields(e) {
+		t.Fatal("expected a change")
+	}
+	if e["canonical_fingerprint"] != "libssh2_1.0" || e["canonical_fingerprint_kind"] != "client banner" {
+		t.Fatalf("got %+v", e)
+	}
+}
+
+func TestPromoteCitrixFieldsPayloadAndFingerprint(t *testing.T) {
+	e := map[string]any{
+		"sensor": "citrix-honeypot", "event": "get", "path": "/",
+		"headers": map[string]any{"User-Agent": "Mozilla/5.0 zgrab/0.x", "x-ja3": "cba7f3", "x-ja4": "t12i13"},
+	}
+	if !promoteCitrixFields(e) {
+		t.Fatal("expected a change")
+	}
+	if e["canonical_fingerprint"] != "t12i13" || e["canonical_fingerprint_kind"] != "JA4" {
+		t.Fatalf("expected JA4 to win over JA3/User-Agent: %+v", e)
+	}
+}
+
+func TestPromoteCitrixFieldsCVEPayload(t *testing.T) {
+	e := map[string]any{"sensor": "citrix-honeypot", "event": "cve_2019_19781_payload", "data": "id"}
+	if !promoteCitrixFields(e) {
+		t.Fatal("expected a change")
+	}
+	if e["canonical_command"] != "id" {
+		t.Fatalf("got %v", e["canonical_command"])
+	}
+}
+
+func TestPromoteRDPFieldsUsernameOnly(t *testing.T) {
+	e := map[string]any{"sensor": "rdp-honeypot", "event": "connect", "username": "Test"}
+	if !promoteRDPFields(e) {
+		t.Fatal("expected a change")
+	}
+	if e["canonical_user"] != "Test" || e["canonical_pass"] != "" {
+		t.Fatalf("got %+v", e)
+	}
+}
+
+func TestPromoteRDPFieldsNoUsernameNoChange(t *testing.T) {
+	e := map[string]any{"sensor": "rdp-honeypot", "event": "listening"}
+	if promoteRDPFields(e) {
+		t.Fatalf("expected no change: %+v", e)
+	}
+}
+
+func TestPromoteWebRequestFieldsCredsAndFingerprint(t *testing.T) {
+	e := map[string]any{
+		"sensor": "http-honeypot", "method": "GET", "path": "/admin", "username": "admin", "password": "admin123",
+		"headers": map[string]any{"User-Agent": "curl/8.0"},
+	}
+	if !promoteWebRequestFields("http-honeypot", e) {
+		t.Fatal("expected a change")
+	}
+	if e["canonical_user"] != "admin" || e["canonical_pass"] != "admin123" {
+		t.Fatalf("got %+v", e)
+	}
+	if e["canonical_fingerprint"] != "curl/8.0" || e["canonical_fingerprint_kind"] != "User-Agent" {
+		t.Fatalf("got %+v", e)
+	}
+}
+
+func TestPromoteWebRequestFieldsSkipsStartupCategory(t *testing.T) {
+	e := map[string]any{"category": "startup"}
+	if promoteWebRequestFields("tanner", e) {
+		t.Fatalf("expected no change for a startup record: %+v", e)
+	}
+}
+
+func TestPromoteWebRequestFieldsSkipsLegacyPeerShape(t *testing.T) {
+	// No "method" or "category" field -- the legacy tanner peer-shape
+	// report, which carries no creds/fingerprint/command to promote.
+	e := map[string]any{"peer": map[string]any{"ip": "10.8.0.2"}, "paths": []any{}}
+	if promoteWebRequestFields("tanner", e) {
+		t.Fatalf("expected no change for the legacy peer shape: %+v", e)
+	}
+}
+
+func TestPromoteWebRequestFieldsTannerPostDataBecomesCanonicalCommand(t *testing.T) {
+	e := map[string]any{"method": "POST", "path": "/login", "post_data": map[string]any{"password": "toor", "username": "root"}}
+	if !promoteWebRequestFields("tanner", e) {
+		t.Fatal("expected a change")
+	}
+	if e["canonical_command"] != "password=toor&username=root" {
+		t.Fatalf("got %v (expected sorted key order for determinism)", e["canonical_command"])
+	}
+}
+
+func TestPromoteWebRequestFieldsHTTPHoneypotIgnoresPostData(t *testing.T) {
+	// Parity with classify.go: post_data is only ever read for tanner, not
+	// http-honeypot -- its own POST body was never promoted into
+	// TopCommands by the dashboard either.
+	e := map[string]any{"method": "POST", "path": "/login", "post_data": map[string]any{"a": "b"}}
+	if promoteWebRequestFields("http-honeypot", e) {
+		t.Fatalf("expected no change for http-honeypot's post_data: %+v", e)
+	}
+}
+
 func TestValidCredentialPairMatchesDashboardBehavior(t *testing.T) {
 	cases := []struct {
 		user, pass string

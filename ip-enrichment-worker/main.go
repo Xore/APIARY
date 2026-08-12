@@ -8,10 +8,12 @@
 // Scope: cowrie, dionaea, every conpot persona, dns-honeypot, and
 // cisco-asa-honeypot's IKE side -- the sensors that aren't PROXY-protocol
 // wrapped and so only ever see the tunnel peer address (10.8.0.1), never
-// the real attacker IP, in their own raw log. Every other sensor (multipot,
-// http-honeypot, tanner, dnp3-honeypot, dicompot, citrix-honeypot,
-// cisco-asa-honeypot's own WebVPN/HTTPS side, rdp-honeypot) already gets
-// the real IP directly via PROXY protocol and needs no rewriting here.
+// the real attacker IP, in their own raw log. cisco-asa-honeypot's own
+// WebVPN/HTTPS side, dnp3-honeypot, and dicompot already get the real IP
+// directly via PROXY protocol and need no rewriting; neither do
+// multipot/tanner/http-honeypot/citrix-honeypot/rdp-honeypot, but #1217
+// watches those five anyway, purely for canonical.go's field normalization
+// (creds/commands/fingerprints) -- see canonical.go's own doc comment.
 //
 // dionaea_incident.json (#623) is also enriched, but differently: it
 // carries no top-level src_ip at all, so enrichDionaeaIncidentLine walks
@@ -118,6 +120,21 @@ func discoverSources(logsDir, outDir, stateDir string) []*source {
 	// instead of the raw file, the same "enriched supersedes raw" pattern
 	// the other five sources already established.
 	add("dionaea-incident", filepath.Join(logsDir, "dionaea", "dionaea_incident.json"), enrichDionaeaIncidentLine)
+
+	// #1217: field-normalization-only sources -- these five already carry
+	// the real attacker IP via PROXY protocol (never the tunnel peer
+	// address), so enrichLine's src_ip join is always a no-op for them;
+	// they're watched solely so canonical.go's per-sensor promotion runs
+	// on their lines too. Filenames confirmed live against the homeserver
+	// (2026-08-12), not just each sensor's own docker-compose LOG_FILE/
+	// volume declaration -- http-honeypot's container is named
+	// "http-honeypot" but its own log file is "http.json", not
+	// "http-honeypot.json".
+	add("multipot", filepath.Join(logsDir, "multipot", "multipot.json"), enrichLine)
+	add("tanner", filepath.Join(logsDir, "tanner", "tanner_report.json"), enrichLine)
+	add("http-honeypot", filepath.Join(logsDir, "http-honeypot", "http.json"), enrichLine)
+	add("citrix-honeypot", filepath.Join(logsDir, "citrix-honeypot", "citrix-honeypot.json"), enrichLine)
+	add("rdp-honeypot", filepath.Join(logsDir, "rdp-honeypot", "rdp-honeypot.json"), enrichLine)
 
 	conpotFiles, _ := filepath.Glob(filepath.Join(logsDir, "conpot*", "conpot.json"))
 	for _, f := range conpotFiles {
