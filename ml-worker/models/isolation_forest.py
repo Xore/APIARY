@@ -330,6 +330,16 @@ def _percentile_normalize(raw: float, p50: float, p99: float, lower_is_more_anom
     return float(np.clip(0.2 + frac * 0.75, 0.0, 1.0))
 
 
+def _percentile_normalize_batch(raw: np.ndarray, p50: float, p99: float, lower_is_more_anomalous: bool) -> np.ndarray:
+    """Array form of _percentile_normalize() -- identical anchors and
+    formula, vectorized over a whole batch of raw scores instead of one at
+    a time. Used by score_batch()/hbos_score_batch() (#1227)."""
+    if p99 == p50:
+        return np.full_like(raw, 0.5, dtype=float)
+    frac = (p50 - raw) / (p50 - p99) if lower_is_more_anomalous else (raw - p50) / (p99 - p50)
+    return np.clip(0.2 + frac * 0.75, 0.0, 1.0)
+
+
 def _anomaly_rate(iso: IsolationForest, hbos: HBOS, X: np.ndarray) -> float:
     """Fraction of X either model's OWN contamination-driven decision
     boundary calls anomalous -- IsolationForest.predict()==-1,
@@ -440,6 +450,43 @@ class IsoForestModel:
             return _percentile_normalize(raw, calib["p50"], calib["p99"], lower_is_more_anomalous=False)
         # Fallback for a model saved before #174 -- see score()'s comment.
         return float(np.clip(raw / 10.0, 0.0, 1.0))
+
+    def score_batch(self, features: np.ndarray) -> np.ndarray:
+        """Batched form of score(): one score_samples() call over the whole
+        (n_events, n_features) matrix instead of one call per row.
+
+        #1227: confirmed live (production model, 2000 real events) that the
+        per-row call path -- score() invoked once per event, as
+        score_and_write_events() used to do -- cost ~38ms/event, over 1000x
+        more than the same work done in one batched score_samples() call
+        (~0.02ms/event). This is the dominant cost in ml-worker's growing
+        classification backlog (worker's own real combined throughput was
+        ~25 events/sec against ~50/sec combined real ingest), not GPU/LSTM
+        as the issue's own filer initially suspected -- LSTM only costs
+        ~3ms/call and runs on roughly half of events. sklearn's tree
+        traversal doesn't amortize its setup cost across single-row Python
+        calls the way it does across one vectorized call; scores are
+        numerically identical to calling score() in a loop (confirmed: max
+        abs diff 0.0 over the same 2000-event sample).
+        """
+        if self.iso is None:
+            return np.full(features.shape[0], 0.5)
+        raw = self.iso.score_samples(features)
+        calib = getattr(self.iso, "hp_calib", None)
+        if calib is not None:
+            return _percentile_normalize_batch(raw, calib["p50"], calib["p99"], lower_is_more_anomalous=True)
+        return np.clip((-raw) * 2, 0.0, 1.0)
+
+    def hbos_score_batch(self, features: np.ndarray) -> np.ndarray:
+        """Batched form of hbos_score() -- see score_batch()'s own comment
+        for why this exists and the measured speedup."""
+        if self.hbos is None:
+            return np.full(features.shape[0], 0.5)
+        raw = self.hbos.decision_function(features)
+        calib = getattr(self.hbos, "hp_calib", None)
+        if calib is not None:
+            return _percentile_normalize_batch(raw, calib["p50"], calib["p99"], lower_is_more_anomalous=False)
+        return np.clip(raw / 10.0, 0.0, 1.0)
 
     def explain(self, features: np.ndarray, scores: dict) -> str:
         """Generate a human-readable explanation of the anomaly."""
