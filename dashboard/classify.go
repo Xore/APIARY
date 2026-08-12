@@ -36,6 +36,7 @@ type event struct {
 	country     string // ISO country code, from a cf-ipcountry header when present
 	severity    int    // suricata alert severity (1 = most severe)
 	heldMs      int    // endlessh (#1294): tarpit hold duration, disconnect events only
+	icsSeverity string // dnp3 (#1290): "critical"/"high" for control-function app_function codes, "" for read/status traffic
 	isLogin     bool
 	skip        bool
 	when        time.Time
@@ -438,6 +439,7 @@ func classify(e map[string]any, dirSensor string) event {
 			// far more often than not.
 			if app := str(e["app_function"]); app != "" {
 				ev.detail += ", app " + app
+				ev.icsSeverity = dnp3FunctionSeverity(app)
 			}
 			if src, dst := num(e["dnp3_source"]), num(e["dnp3_destination"]); src != "" || dst != "" {
 				ev.detail += fmt.Sprintf(" (src %s -> dst %s)", src, dst)
