@@ -271,10 +271,12 @@ func fieldsUnchanged(got, want map[string]json.RawMessage) bool {
 // ported from dashboard/payload_bytes_es.go's own function of the same
 // name. path is resolved by the caller (scanDirs already knows each
 // file's real path; re-deriving dashboard's own payloadPath disk-search
-// fallback isn't needed here).
+// fallback isn't needed here). The existence check is a HEAD (docExists),
+// not a full docGet -- #1221, see docExists' own doc comment for why that
+// mattered live.
 func mirrorPayloadBytes(es *esClient, hash, path string, size int64) {
-	_, found, err := es.docGet(payloadBytesIndex, hash)
-	if err != nil || found {
+	exists, err := es.docExists(payloadBytesIndex, hash)
+	if err != nil || exists {
 		return
 	}
 	if size > payloadBytesRawCap {

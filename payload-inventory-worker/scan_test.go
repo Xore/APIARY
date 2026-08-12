@@ -214,7 +214,7 @@ func TestMirrorPayloadBytesMarksOversizeAsTooLarge(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/dashboard-payload-bytes-v1/_doc/", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
-		case http.MethodGet:
+		case http.MethodHead:
 			w.WriteHeader(http.StatusNotFound)
 		case http.MethodPut:
 			decodeJSONBody(t, r, &indexed)
@@ -239,7 +239,7 @@ func TestMirrorPayloadBytesEncodesSmallFile(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/dashboard-payload-bytes-v1/_doc/", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
-		case http.MethodGet:
+		case http.MethodHead:
 			w.WriteHeader(http.StatusNotFound)
 		case http.MethodPut:
 			decodeJSONBody(t, r, &indexed)
@@ -264,8 +264,10 @@ func TestMirrorPayloadBytesSkipsAlreadyIndexed(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/dashboard-payload-bytes-v1/_doc/", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
+		case http.MethodHead:
+			w.WriteHeader(http.StatusOK) // exists -- no body, matching a real ES HEAD response
 		case http.MethodGet:
-			w.Write([]byte(`{"_seq_no":1,"_primary_term":1,"_source":{"hash":"deadbeef"}}`))
+			t.Fatal("mirrorPayloadBytes must use a HEAD existence check (#1221), not a full docGet")
 		case http.MethodPut:
 			puts++
 		}

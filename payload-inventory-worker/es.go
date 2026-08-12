@@ -82,6 +82,28 @@ func (c *esClient) docGet(index, id string) (hit esDocHit, found bool, err error
 	return esDocHit{Source: v.Source, SeqNo: v.SeqNo, PrimaryTerm: v.PrimaryTerm}, true, nil
 }
 
+// docExists checks whether a document exists via HEAD, without
+// transferring its _source -- #1221: mirrorPayloadBytes used to call the
+// full docGet just to decide "already indexed, skip", which for this
+// index means fetching the base64-encoded payload body itself (up to
+// payloadBytesMaxBytes, ~43MB) on every already-mirrored file, every
+// scan cycle. Confirmed live: a full re-scan of an already-fully-mirrored
+// 590-file/2.9GB capture set took ~5m35s per cycle, almost entirely spent
+// on this. HEAD returns just a status code, no body at all.
+func (c *esClient) docExists(index, id string) (bool, error) {
+	status, _, err := c.doRequest(http.MethodHead, "/"+index+"/_doc/"+url.PathEscape(id), nil)
+	if err != nil {
+		return false, err
+	}
+	if status == http.StatusNotFound {
+		return false, nil
+	}
+	if status/100 != 2 {
+		return false, fmt.Errorf("elasticsearch HEAD %s/%s: status %d", index, id, status)
+	}
+	return true, nil
+}
+
 // docIndex writes doc as document id. create=true uses op_type=create (the
 // only mode this worker needs -- every write here follows a docGet that
 // already told us whether the document exists, and on the "exists but
