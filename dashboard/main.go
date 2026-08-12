@@ -365,6 +365,8 @@ func main() {
 	http.HandleFunc("/api/ml-backlog", s.serveMLBacklog)
 	http.HandleFunc("/api/netflow-bytes", s.serveNetflowBytes)
 	http.HandleFunc("/api/netflow-packets", s.serveNetflowPackets)
+	http.HandleFunc("/api/tls-fingerprints", s.serveTLSFingerprints)
+	http.HandleFunc("/api/ssh-fingerprints", s.serveSSHFingerprints)
 	http.HandleFunc("/api/attacker-graph", s.serveAttackerGraph)
 	http.HandleFunc("/api/attck-coverage", s.serveAttckCoverage)
 	http.HandleFunc("/api/campaign-timeline", s.serveCampaignTimeline)
