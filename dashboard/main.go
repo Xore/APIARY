@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -516,68 +515,14 @@ func main() {
 		data.Ready = s.ready.Load()
 		renderPage(w, tmpl, "ips", &data)
 	})
-	http.HandleFunc("/investigate/ip/", func(w http.ResponseWriter, r *http.Request) {
-		ip, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/investigate/ip/"))
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		data, ok := s.attackerData(ip)
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		renderPage(w, tmpl, "attacker", &data)
-	})
-	http.HandleFunc("/investigate/cidr/", func(w http.ResponseWriter, r *http.Request) {
-		cidr, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/investigate/cidr/"))
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		data, ok := s.cidrCorrelationData(cidr)
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		renderPage(w, tmpl, "cidr-correlation", &data)
-	})
-	// #354: kind and value are carried as one URL-escaped path segment
-	// (joined by \x00, the same separator clustersData's own internal
-	// grouping key already uses) rather than two segments, since kind
-	// itself contains spaces ("Autonomous system", "Provider class") that
-	// would otherwise make it ambiguous where kind ends and value begins.
-	http.HandleFunc("/investigate/cluster/", func(w http.ResponseWriter, r *http.Request) {
-		raw, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/investigate/cluster/"))
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		kind, value, ok := strings.Cut(raw, "\x00")
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		data, ok := s.clusterCorrelationData(kind, value)
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		renderPage(w, tmpl, "cluster-correlation", &data)
-	})
-	http.HandleFunc("/sessions/", func(w http.ResponseWriter, r *http.Request) {
-		id, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/sessions/"))
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		data, ok := s.sessionData(id)
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		renderPage(w, tmpl, "session", &data)
-	})
+	// #1312: /investigate/ip/{ip}, /investigate/cidr/{cidr...},
+	// /investigate/cluster, /sessions/{id}, /ghidra/{sha}, /revdeck/{sha},
+	// /cape/{sha}, /github-analysis/{sha}, and /sandbox/{job} are
+	// registered together in registerInvestigateRoutes -- see that
+	// function's own comment for why (a fixed double-path-decoding bug and
+	// the cluster drill-down's own confirmed 404 bug, both only testable
+	// through a real ServeMux).
+	s.registerInvestigateRoutes(http.DefaultServeMux, tmpl)
 	http.HandleFunc("/clusters", func(w http.ResponseWriter, r *http.Request) {
 		data := s.clustersData(clustersRequestFilter(r))
 		// Cluster Kind (Fingerprint/Payload/Autonomous system/Provider class)
@@ -730,20 +675,9 @@ func main() {
 	http.HandleFunc("/ghidra", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/payload-workbench/results#ghidra", http.StatusFound)
 	})
-	http.HandleFunc("/ghidra/", func(w http.ResponseWriter, r *http.Request) {
-		sha, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/ghidra/"))
-		if err != nil || !hashName.MatchString(sha) {
-			http.NotFound(w, r)
-			return
-		}
-		data, err := s.ghidraData(strings.ToLower(sha), "")
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		data.Analysis = r.URL.Query().Get("analysis")
-		renderPage(w, tmpl, "ghidra", &data)
-	})
+	// #1312: /ghidra/{sha} itself is registered by registerInvestigateRoutes
+	// (called near the top of route setup, alongside /investigate/ip/{ip}
+	// and friends) -- only this redirect stays here.
 	// #1239: unlike /ghidra and /github-analysis just above, revdeck/cape
 	// have no merged listing view to redirect a bare visit into -- both are
 	// detail-only (capeData/revdeckData both error immediately on an empty
@@ -762,52 +696,16 @@ func main() {
 	http.HandleFunc("/cape", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/payloads", http.StatusFound)
 	})
-	http.HandleFunc("/revdeck/", func(w http.ResponseWriter, r *http.Request) {
-		sha, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/revdeck/"))
-		if err != nil || !hashName.MatchString(sha) {
-			http.NotFound(w, r)
-			return
-		}
-		data, err := revdeckData(sha)
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		renderPage(w, tmpl, "revdeck", &data)
-	})
-	http.HandleFunc("/cape/", func(w http.ResponseWriter, r *http.Request) {
-		sha, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/cape/"))
-		if err != nil || !hashName.MatchString(sha) {
-			http.NotFound(w, r)
-			return
-		}
-		data, err := capeData(sha)
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		renderPage(w, tmpl, "cape", &data)
-	})
+	// #1312: /revdeck/{sha} and /cape/{sha} are registered by
+	// registerInvestigateRoutes -- only the two redirects above stay here.
 	// #1139: the standalone GitHub-analysis list view merged into
 	// /payload-workbench/results' third tab -- old bookmarks/links redirect
 	// rather than 404. /github-analysis/{sha} detail pages are unaffected.
 	http.HandleFunc("/github-analysis", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/payload-workbench/results#github", http.StatusFound)
 	})
-	http.HandleFunc("/github-analysis/", func(w http.ResponseWriter, r *http.Request) {
-		sha, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/github-analysis/"))
-		if err != nil || !hashName.MatchString(sha) {
-			http.NotFound(w, r)
-			return
-		}
-		data, err := s.githubAnalysisData(strings.ToLower(sha), "")
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		data.Analysis = r.URL.Query().Get("analysis")
-		renderPage(w, tmpl, "github-analysis", &data)
-	})
+	// #1312: /github-analysis/{sha} is registered by
+	// registerInvestigateRoutes -- only the redirect above stays here.
 	// #1139: the standalone sandbox list view merged into
 	// /payload-workbench/results' second tab -- old bookmarks/links redirect
 	// rather than 404. /sandbox/{job} detail pages and /sandbox/vnc are
@@ -815,30 +713,17 @@ func main() {
 	http.HandleFunc("/sandbox", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/payload-workbench/results#sandbox", http.StatusFound)
 	})
-	// #805: registered ahead of the "/sandbox/{job}" prefix route below --
-	// Go's ServeMux resolves the longest matching pattern regardless of
-	// registration order, so this exact match always wins over "vnc" being
-	// parsed as a (nonexistent) job name there.
+	// #805: this exact-match, method-unrestricted registration still wins
+	// over registerInvestigateRoutes' "GET /sandbox/{job}" for exactly this
+	// path -- see that function's own comment on why (Go 1.22's ServeMux
+	// prefers the more specific, non-wildcard pattern regardless of
+	// registration order; #1312 replaced the old "longest prefix match"
+	// mechanism this comment used to describe, the guarantee itself is
+	// unchanged).
 	http.HandleFunc("/sandbox/vnc", func(w http.ResponseWriter, r *http.Request) {
 		s.serveSandboxVNC(w, r, tmpl)
 	})
-	http.HandleFunc("/sandbox/", func(w http.ResponseWriter, r *http.Request) {
-		job, err := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/sandbox/"))
-		if err != nil || job == "" {
-			http.NotFound(w, r)
-			return
-		}
-		data, err := s.sandboxData(job, "")
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		data.StaticYARA = s.yaraForSHA(data.Detail.SHA256).Matches
-		_, captureErr := s.payloadPath(data.Detail.SHA256)
-		data.Detail.CaptureAvailable = captureErr == nil
-		data.Analysis = r.URL.Query().Get("analysis")
-		renderPage(w, tmpl, "sandbox", &data)
-	})
+	// #1312: /sandbox/{job} itself is registered by registerInvestigateRoutes.
 	http.HandleFunc("/commands", func(w http.ResponseWriter, r *http.Request) {
 		data := s.commandsData(r)
 		renderPage(w, tmpl, "commands", &data)
