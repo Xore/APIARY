@@ -235,6 +235,7 @@
 <meta name="robots" content="noindex, nofollow">
 <title>{{brandText}} &mdash; executed commands</title>
 {{template "style" .}}
+<script defer src="{{asset "/static/echarts.min.js"}}"></script>
 </head>
 <body>
 <div class="app-shell">
@@ -253,6 +254,21 @@
           </div>
         </header>
         <div class="filters" id="commands-filters"><a class="chip" href="/">&larr; dashboard</a><a class="chip" href="/export/commands.csv">export CSV &darr;</a><span class="chip">{{len .Rows}} unique commands</span>{{template "filterbar" .}}</div>
+        {{/* #1268 "ask 3": the flat frequency list this page always was is
+             exactly the kind of view that issue's own text called out --
+             "a natural bar-chart... candidate". The table below (its own
+             #790 revert, see that card's comment) stays the full,
+             drill-down-capable list; this chart adds the "shape of it at
+             a glance" view on top, not a replacement -- same top 15 by
+             Count the table's own first rows already are, so this reads
+             as a summary of the table beneath it, not a second source of
+             truth. */}}
+        {{if .TopCommands}}
+        <div class="card wide chart-card" id="commands-chart-card">
+          <h2>Top commands by frequency</h2>
+          <div id="commands-chart" style="width:100%;height:320px"></div>
+        </div>
+        {{end}}
         {{/* This card deliberately does NOT use card__scroll (#790 originally
              added it here, capping the card to a small internal scrollbox --
              reverted on direct request: the single-card-per-page layout
@@ -269,6 +285,10 @@
     </main>
 </div>
 <script nonce="{{.Nonce}}">document.querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>navigator.clipboard.writeText(b.dataset.copy));</script>
+{{if .TopCommands}}
+<script nonce="{{.Nonce}}">window.__hpTopCommands = {{json .TopCommands}};</script>
+<script defer src="{{asset "/static/hp-commands-chart.js"}}"></script>
+{{end}}
 </body>
 </html>
 {{end}}
