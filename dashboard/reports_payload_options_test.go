@@ -9,15 +9,14 @@ import (
 	"time"
 )
 
-// seedPayloadCache populates s.payloadCache directly from a real disk scan,
-// bypassing the async Elasticsearch round-trip refreshPayloadCacheAsync
-// normally does -- the same test-only shortcut payloads_filter_test.go's
-// own TestPayloadsDataFiltersBySensor already uses. payloadsData() itself
-// reads only s.payloadCache (Elasticsearch-backed in production, per #403 --
-// the dashboard never scans disk directly from a request handler), so this
-// is what a test needs to seed, not the handler under test.
-func seedPayloadCache(s *store) {
-	s.payloadCache = s.scanPayloads()
+// seedPayloadCache populates s.payloadCache directly, bypassing both the
+// async Elasticsearch round-trip refreshPayloadCacheAsync normally does and
+// (#1223) the disk-walk payload-inventory-worker now owns -- payloadsData()
+// itself reads only s.payloadCache (Elasticsearch-backed in production, per
+// #403: the dashboard never scans disk directly from a request handler), so
+// this is what a test needs to seed, not the handler under test.
+func seedPayloadCache(s *store, hash string) {
+	s.payloadCache = payloadsPage{UniqueTotal: 1, Files: []capturedFile{{Hash: hash}}}
 	s.payloadCacheAt = time.Now()
 }
 
@@ -31,7 +30,7 @@ func TestServeReportPayloadOptionsFindsRealCapturedPayload(t *testing.T) {
 	configureIdentityTestBackend(t, "admin")
 	hash := strings.Repeat("a", 64)
 	s := newPayloadReportTestStore(t, hash, []byte("#!/bin/sh\necho hi\n"))
-	seedPayloadCache(s)
+	seedPayloadCache(s, hash)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/reports/payload-options?q="+hash[:12], nil)
 	addIdentityTestCookie(req)
@@ -63,7 +62,7 @@ func TestServeReportPayloadOptionsFiltersByQuery(t *testing.T) {
 	configureIdentityTestBackend(t, "admin")
 	hash := strings.Repeat("b", 64)
 	s := newPayloadReportTestStore(t, hash, []byte("content"))
-	seedPayloadCache(s)
+	seedPayloadCache(s, hash)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/reports/payload-options?q="+strings.Repeat("z", 8), nil)
 	addIdentityTestCookie(req)

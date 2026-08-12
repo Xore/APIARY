@@ -9,10 +9,13 @@ import (
 	"time"
 )
 
-// TestMirrorPayloadBytesWritesThenSkipsUnchangedOnRescan covers #762: the
-// same "index once, skip on rescan" contract indexPayloadInventory already
-// has, applied to raw bytes instead of metadata.
-func TestMirrorPayloadBytesWritesThenSkipsUnchangedOnRescan(t *testing.T) {
+// TestMirrorOnePayloadBytesWritesToES covers #762: mirrorOnePayloadBytes
+// (payloadBytesForAnalysis's on-demand mirror -- #1223 removed the old
+// periodic-batch-scan caller and its own "skip if already mirrored" fast
+// path along with it, see mirrorOnePayloadBytes' own doc comment for why
+// this always overwrites now) writes the payload's bytes into
+// payloadBytesIndex.
+func TestMirrorOnePayloadBytesWritesToES(t *testing.T) {
 	memStore := newMemESDocStore()
 	srv := httptest.NewServer(memStore.handler())
 	defer srv.Close()
@@ -23,9 +26,8 @@ func TestMirrorPayloadBytesWritesThenSkipsUnchangedOnRescan(t *testing.T) {
 	writeTestPayload(t, dir, hash, time.Now())
 
 	s := &store{payloadDirs: []string{dir}, es: es}
-	files := []capturedFile{{Hash: hash, Size: int64(len("payload-" + hash))}}
+	s.mirrorOnePayloadBytes(hash, int64(len("payload-"+hash)))
 
-	s.mirrorPayloadBytes(files)
 	data, tooLarge, found, _, err := s.fetchPayloadBytes(hash)
 	if err != nil || !found {
 		t.Fatalf("expected the payload to be mirrored: found=%v err=%v", found, err)
@@ -36,23 +38,13 @@ func TestMirrorPayloadBytesWritesThenSkipsUnchangedOnRescan(t *testing.T) {
 	if string(data) != "payload-"+hash {
 		t.Fatalf("mirrored bytes = %q, want %q", data, "payload-"+hash)
 	}
-
-	// A rescan with the same hash already present must not touch the file
-	// again (no docGet-then-rewrite churn on every scan tick).
-	hit, _, _ := es.docGet(payloadBytesIndex, hash)
-	firstSeqNo := hit.SeqNo
-	s.mirrorPayloadBytes(files)
-	hit2, _, _ := es.docGet(payloadBytesIndex, hash)
-	if hit2.SeqNo != firstSeqNo {
-		t.Fatalf("already-mirrored payload was rewritten on rescan: seq_no %d -> %d", firstSeqNo, hit2.SeqNo)
-	}
 }
 
-// TestMirrorPayloadBytesMarksOversizedAsTooLargeNotSilentlySkipped covers
-// the size-cap path: a payload over payloadBytesRawCap gets an explicit
-// TooLarge marker document, not silent omission indistinguishable from
-// "never scanned."
-func TestMirrorPayloadBytesMarksOversizedAsTooLargeNotSilentlySkipped(t *testing.T) {
+// TestMirrorOnePayloadBytesMarksOversizedAsTooLargeNotSilentlySkipped
+// covers the size-cap path: a payload over payloadBytesRawCap gets an
+// explicit TooLarge marker document, not silent omission indistinguishable
+// from "never mirrored."
+func TestMirrorOnePayloadBytesMarksOversizedAsTooLargeNotSilentlySkipped(t *testing.T) {
 	memStore := newMemESDocStore()
 	srv := httptest.NewServer(memStore.handler())
 	defer srv.Close()
@@ -63,11 +55,10 @@ func TestMirrorPayloadBytesMarksOversizedAsTooLargeNotSilentlySkipped(t *testing
 	writeTestPayload(t, dir, hash, time.Now())
 
 	s := &store{payloadDirs: []string{dir}, es: es}
-	// capturedFile.Size drives the cap check, not the real (tiny) file on
+	// The passed size drives the cap check, not the real (tiny) file on
 	// disk -- exercises the marker path without writing a real 32MB fixture.
-	files := []capturedFile{{Hash: hash, Size: payloadBytesRawCap + 1}}
+	s.mirrorOnePayloadBytes(hash, payloadBytesRawCap+1)
 
-	s.mirrorPayloadBytes(files)
 	data, tooLarge, found, _, err := s.fetchPayloadBytes(hash)
 	if err != nil || !found {
 		t.Fatalf("expected a marker document to exist: found=%v err=%v", found, err)
@@ -116,7 +107,7 @@ func TestServePayloadReadsFromESNotDisk(t *testing.T) {
 	writeTestPayload(t, dir, hash, time.Now())
 
 	s := &store{payloadDirs: []string{dir}, es: es}
-	s.mirrorPayloadBytes([]capturedFile{{Hash: hash, Size: int64(len("payload-" + hash))}})
+	s.mirrorOnePayloadBytes(hash, int64(len("payload-"+hash)))
 
 	if err := os.Remove(filepath.Join(dir, hash)); err != nil {
 		t.Fatal(err)
@@ -148,7 +139,7 @@ func TestServePayloadTooLargeReturns413(t *testing.T) {
 	writeTestPayload(t, dir, hash, time.Now())
 
 	s := &store{payloadDirs: []string{dir}, es: es}
-	s.mirrorPayloadBytes([]capturedFile{{Hash: hash, Size: payloadBytesRawCap + 1}})
+	s.mirrorOnePayloadBytes(hash, payloadBytesRawCap+1)
 
 	req := httptest.NewRequest("GET", "/payload/"+hash, nil)
 	w := httptest.NewRecorder()

@@ -2,14 +2,10 @@ package main
 
 import (
 	"bytes"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -31,12 +27,10 @@ type capturedFile struct {
 	Sources      []string
 	Copies       int
 	// Preview and PreviewTruncated back the /payloads list "Preview" action
-	// (#59): a hex dump of the same file head already read for MIME
-	// sniffing below, capped further to payloadPreviewCap so the row stays
-	// cheap to render. The byte read here is real (this is not the deeper
-	// io.ReadAll(analysisReadCap) analyzePayload does for /payload-analysis/),
-	// it is just bounded much smaller because every visible row pays this
-	// cost on every scan, not one file on demand.
+	// (#59): a hex dump of the file's head, size-capped so the row stays
+	// cheap to render -- computed once centrally by payload-inventory-
+	// worker (#1201/#1223, its own scan.go) and read here straight off the
+	// shared ES document, not recomputed by this dashboard instance.
 	Preview          string
 	PreviewTruncated bool
 	// GitHubAnalysisURL/GitHubAnalysisLabel back the /payloads list verdict
@@ -60,8 +54,9 @@ type capturedFile struct {
 	Family     string
 	FamilyLink string
 	// OriginLabel/OriginLink answer "what event did this payload come from"
-	// (#205) -- capture is filesystem-based (scanPayloads walks disk, never
-	// touches an event), so this is recovered by matching this file's hash
+	// (#205) -- capture is filesystem-based (payload-inventory-worker's own
+	// disk walk never touches an event), so this is recovered by matching
+	// this file's hash
 	// against the in-memory event feed's Shasum field and keeping the
 	// earliest hit, i.e. the event that first brought the file in. OriginLink
 	// only points somewhere when that event has a Session: that is the one
@@ -93,11 +88,6 @@ func earliestEventByShasum(events []storedEvent) map[string]storedEvent {
 	}
 	return out
 }
-
-// payloadPreviewCap bounds the /payloads list preview action -- distinct
-// from and much smaller than analysisReadCap (payload_analysis.go), which
-// backs the deliberate, one-file-at-a-time /payload-analysis/ detail page.
-const payloadPreviewCap = 512
 
 type payloadSourceStat struct {
 	Name   string
@@ -158,24 +148,6 @@ func parsePayloadsFilter(r *http.Request) payloadsFilter {
 // respects the same filters the initial page did (#301).
 func payloadsRowsURL(r *http.Request) string {
 	return "/api/payload-rows?" + r.URL.Query().Encode()
-}
-
-func payloadSourceName(dir string) string {
-	lower := strings.ToLower(filepath.ToSlash(dir))
-	switch {
-	case strings.Contains(lower, "dionaea"):
-		return "dionaea"
-	case strings.Contains(lower, "cowrie"):
-		return "cowrie"
-	case strings.Contains(lower, "script"):
-		return "scripts"
-	default:
-		name := strings.TrimSpace(filepath.Base(filepath.Clean(dir)))
-		if name == "" || name == "." || name == string(filepath.Separator) {
-			return "payloads"
-		}
-		return name
-	}
 }
 
 // payloadsData inventories all configured capture directories recursively,
@@ -431,87 +403,6 @@ func (s *store) payloadInventoryLoop() {
 	for range ticker.C {
 		s.refreshPayloadCacheAsync()
 	}
-}
-
-func (s *store) scanPayloads() payloadsPage {
-	p := payloadsPage{Generated: time.Now(), Enabled: len(s.payloadDirs) != 0}
-	if len(s.payloadDirs) == 0 {
-		return p
-	}
-	files := map[string]*capturedFile{}
-	sourceSets := map[string]map[string]bool{}
-	sourceCounts := map[string]int{}
-	for _, dir := range s.payloadDirs {
-		source := payloadSourceName(dir)
-		filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
-			if walkErr != nil || d.IsDir() || !hashName.MatchString(d.Name()) {
-				return nil
-			}
-			fi, err := d.Info()
-			if err != nil || !fi.Mode().IsRegular() {
-				return nil
-			}
-			hash := strings.ToLower(d.Name())
-			if sourceSets[hash] == nil {
-				sourceSets[hash] = map[string]bool{}
-			}
-			if !sourceSets[hash][source] {
-				sourceSets[hash][source] = true
-				sourceCounts[source]++
-			}
-			if existing := files[hash]; existing != nil {
-				existing.Copies++
-				if modified := fi.ModTime().Format("2006-01-02 15:04"); modified > existing.Mtime {
-					existing.Mtime, existing.MtimeUTC = modified, utcOrEmpty(fi.ModTime())
-				}
-				return nil
-			}
-			mime := "application/octet-stream"
-			classification := classifyPayload(nil)
-			var preview string
-			if f, err := os.Open(path); err == nil {
-				head := make([]byte, 64<<10)
-				n, _ := f.Read(head)
-				f.Close()
-				head = head[:n]
-				mime = http.DetectContentType(head)
-				classification = classifyPayload(head)
-				previewBytes := head
-				if len(previewBytes) > payloadPreviewCap {
-					previewBytes = previewBytes[:payloadPreviewCap]
-				}
-				preview = hex.Dump(previewBytes)
-			}
-			files[hash] = &capturedFile{
-				Hash: hash, Size: fi.Size(), SizeH: humanBytes(fi.Size()),
-				Mtime: fi.ModTime().Format("2006-01-02 15:04"), MtimeUTC: utcOrEmpty(fi.ModTime()), MIME: mime,
-				Kind: classification.Label, KindCode: classification.Code,
-				Platform: classification.Platform, AnalysisPath: classification.AnalysisPath,
-				Dynamic: classification.Dynamic, Copies: 1,
-				Preview: preview, PreviewTruncated: fi.Size() > payloadPreviewCap,
-			}
-			return nil
-		})
-	}
-	var total int64
-	for hash, file := range files {
-		for source := range sourceSets[hash] {
-			file.Sources = append(file.Sources, source)
-		}
-		sort.Strings(file.Sources)
-		p.UniqueTotal++
-		total += file.Size
-		p.Files = append(p.Files, *file)
-	}
-	for source, count := range sourceCounts {
-		p.Sources = append(p.Sources, payloadSourceStat{
-			Name: source, Count: count, Link: "/payloads?source=" + url.QueryEscape(source),
-		})
-	}
-	sort.Slice(p.Sources, func(i, j int) bool { return p.Sources[i].Name < p.Sources[j].Name })
-	sort.Slice(p.Files, func(i, j int) bool { return p.Files[i].Mtime > p.Files[j].Mtime })
-	p.TotalH = humanBytes(total)
-	return p
 }
 
 // servePayload streams one captured binary as a download. The hash is

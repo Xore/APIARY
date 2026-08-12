@@ -142,10 +142,9 @@ func (s *store) serveReportPayloadOptions(w http.ResponseWriter, r *http.Request
 	}
 	// payloadsData, not a direct disk scan: this dashboard reads payload
 	// inventory through Elasticsearch only (the same rule #403 established
-	// for sensor/event data) -- scanPayloads() itself is the disk-walking
-	// half of that pipeline, but it belongs to the async cache-refresh path
-	// (refreshPayloadCacheAsync indexes it into ES, then reads it back),
-	// never called directly from a request handler.
+	// for sensor/event data) -- payload-inventory-worker owns the disk walk
+	// itself (#1201/#1223), refreshPayloadCacheAsync just reads its output
+	// back, never called directly from a request handler.
 	data := s.payloadsData(payloadsFilter{Hash: r.URL.Query().Get("q")})
 	files := data.Files
 	if len(files) > reportPayloadOptionsLimit {

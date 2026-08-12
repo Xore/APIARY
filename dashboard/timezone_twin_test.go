@@ -2,8 +2,6 @@ package main
 
 import (
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -92,19 +90,6 @@ func TestCorrelateCampaignsCarriesUTCTwins(t *testing.T) {
 	}
 }
 
-func TestScanPayloadsCarriesMtimeUTC(t *testing.T) {
-	dir := t.TempDir()
-	hash := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	path := filepath.Join(dir, hash)
-	if err := os.WriteFile(path, []byte("sample"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	s := &store{payloadDirs: []string{dir}}
-	page := s.scanPayloads()
-	if len(page.Files) != 1 {
-		t.Fatalf("expected 1 captured file, got %d", len(page.Files))
-	}
-	if page.Files[0].MtimeUTC == "" {
-		t.Fatal("captured file MtimeUTC must be populated")
-	}
-}
+// #1223: the disk scan that used to back this (scanPayloads) moved to
+// payload-inventory-worker -- see its own scan_test.go's
+// TestScanDirsCarriesMtimeUTC for the equivalent coverage.

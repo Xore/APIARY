@@ -6,17 +6,19 @@ package main
 // disk-backed *read* path this stack had, following the same #475/#483
 // pattern already used for generated PDF reports and payload inventory
 // metadata. The write-side detonation/analysis tooling (Payload Workbench,
-// sandbox submission, Ghidra worker, and scanPayloads' own disk walk for
-// metadata) stays disk-based by design -- this is about the dashboard's own
-// serving route only, per the issue's own scope note.
+// sandbox submission, Ghidra worker) stays disk-based by design -- this is
+// about the dashboard's own serving route only, per the issue's own scope
+// note.
 //
-// Mirroring piggybacks on the existing periodic payload-inventory scan
-// (refreshPayloadCacheAsync) rather than a separate one-off backfill
-// script or a lazy mirror-on-first-download: that scan already walks every
-// captured file's disk path on every tick, so extending it to also mirror
-// bytes backfills every existing payload within the first couple of scan
-// cycles, and covers every new capture the same way going forward, with no
-// separate migration step to run or forget to run.
+// #1201/#1202 moved the periodic disk-walk-and-batch-mirror this file used
+// to piggyback on (scanPayloads/refreshPayloadCacheAsync) into
+// payload-inventory-worker, which owns bytes-mirroring for every payload it
+// scans (#1221's own mirrorPayloadBytes, a separate function in a separate
+// Go module -- not this file's). What's left here is on-demand only:
+// mirrorOnePayloadBytes, called from payloadBytesForAnalysis when static
+// analysis needs a hash this instance hasn't seen mirrored yet (or whose
+// mirrored copy's fingerprint is stale), so static analysis never blocks on
+// the worker's own next scan cycle.
 
 import (
 	"encoding/base64"
@@ -65,47 +67,33 @@ type storedPayloadBytes struct {
 	Fingerprint string `json:"fingerprint,omitempty"`
 }
 
-// mirrorPayloadBytes upserts the raw bytes for every scanned file into
-// payloadBytesIndex, skipping any hash already recorded (found -- whether
-// successfully mirrored or previously marked too-large) so a repeat scan of
-// an unchanged capture directory costs one docGet per file, not a disk
-// read. Best effort throughout, same posture as indexPayloadInventory: a
-// failed mirror this cycle is retried next cycle, not treated as fatal.
-func (s *store) mirrorPayloadBytes(files []capturedFile) {
-	if s.es == nil {
+// mirrorOnePayloadBytes mirrors one payload's bytes into payloadBytesIndex
+// on demand -- #1223: its only remaining caller is
+// payloadBytesForAnalysis's self-heal path (a previously mirrored copy's
+// fingerprint no longer matches the local file, or nothing's mirrored
+// yet), which always needs the write to go through whether or not a
+// (stale) document already exists. docIndex's non-create mode is a
+// conditional overwrite (if_seq_no/if_primary_term), not a plain PUT --
+// passing 0/0 blind (as this function did before this fix) only succeeds
+// by coincidence for a document whose real seq_no genuinely is 0, and
+// fails outright for the common "never mirrored before" case, exactly the
+// case this on-demand path exists for. A docGet first tells this whether
+// to create (found=false) or overwrite with the document's real seq_no/
+// primary_term (found=true) -- one extra read, but this is an on-demand,
+// per-cache-miss path already paying a disk read and a write, not a hot
+// loop.
+func (s *store) mirrorOnePayloadBytes(hash string, size int64) {
+	hit, found, err := s.es.docGet(payloadBytesIndex, hash)
+	if err != nil {
 		return
 	}
-	for _, file := range files {
-		s.mirrorOnePayloadBytes(file.Hash, file.Size, false)
-	}
-}
-
-// mirrorOnePayloadBytes is mirrorPayloadBytes' per-file body, split out so
-// staticAnalysisFor (#1103 hybrid item) can mirror a single payload on
-// demand. Two callers, two different staleness needs:
-//   - The periodic batch scan (force=false) only ever mirrors a hash it has
-//     never seen before -- a freshly captured file can be read for static
-//     analysis before refreshPayloadCacheAsync's next tick (payloadCacheTTL,
-//     2 minutes) would otherwise mirror it, and an on-demand mirror closes
-//     that window immediately rather than leaving every caller to fall back
-//     to a disk read until the next scan.
-//   - staticAnalysisFor's own self-heal path (force=true) calls this after
-//     finding an existing mirrored copy whose fingerprint no longer matches
-//     the local file (a hash-named file whose content changed underneath
-//     it) -- this must overwrite the stale document, not skip because one
-//     already exists.
-func (s *store) mirrorOnePayloadBytes(hash string, size int64, force bool) {
-	if !force {
-		if _, found, err := s.es.docGet(payloadBytesIndex, hash); err != nil || found {
-			return
-		}
-	}
+	create, seqNo, primaryTerm := !found, hit.SeqNo, hit.PrimaryTerm
 	if size > payloadBytesRawCap {
 		marker, err := json.Marshal(storedPayloadBytes{Hash: hash, SizeBytes: size, TooLarge: true})
 		if err != nil {
 			return
 		}
-		_ = s.es.docIndex(payloadBytesIndex, hash, marker, !force, 0, 0)
+		_ = s.es.docIndex(payloadBytesIndex, hash, marker, create, seqNo, primaryTerm)
 		return
 	}
 	path, err := s.payloadPath(hash)
@@ -121,7 +109,7 @@ func (s *store) mirrorOnePayloadBytes(hash string, size int64, force bool) {
 	if err != nil {
 		return
 	}
-	_ = s.es.docIndexSized(payloadBytesIndex, hash, body, payloadBytesMaxBytes, !force, 0, 0)
+	_ = s.es.docIndexSized(payloadBytesIndex, hash, body, payloadBytesMaxBytes, create, seqNo, primaryTerm)
 }
 
 // readPayloadBytesCapped re-stats the file (its size may have changed since
