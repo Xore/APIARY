@@ -24,6 +24,34 @@ func TestCommandsDataAppliesFilter(t *testing.T) {
 	}
 }
 
+// #1241: a trailing (or leading) space some sensors emit on an otherwise
+// identical command used to group separately from the untrimmed version,
+// showing up as a visually-indistinguishable duplicate row.
+func TestCommandsDataTrimsWhitespaceBeforeGrouping(t *testing.T) {
+	s := &store{events: []storedEvent{
+		{SrcIP: "203.0.113.1", Sensor: "cowrie", Command: "enable", Time: "2026-08-01 01:00"},
+		{SrcIP: "203.0.113.2", Sensor: "cowrie", Command: "enable ", Time: "2026-08-01 01:01"},
+		{SrcIP: "203.0.113.3", Sensor: "cowrie", Command: " enable", Time: "2026-08-01 01:02"},
+	}}
+	page := s.commandsData(httptest.NewRequest("GET", "/commands", nil))
+	if len(page.Rows) != 1 {
+		t.Fatalf("expected the three whitespace variants to merge into one row, got %+v", page.Rows)
+	}
+	if page.Rows[0].Command != "enable" || page.Rows[0].Count != 3 {
+		t.Fatalf("got %+v", page.Rows[0])
+	}
+}
+
+func TestCommandsDataWhitespaceOnlyCommandExcluded(t *testing.T) {
+	s := &store{events: []storedEvent{
+		{SrcIP: "203.0.113.1", Sensor: "cowrie", Command: "   ", Time: "2026-08-01 01:00"},
+	}}
+	page := s.commandsData(httptest.NewRequest("GET", "/commands", nil))
+	if len(page.Rows) != 0 {
+		t.Fatalf("a whitespace-only command should not produce a row, got %+v", page.Rows)
+	}
+}
+
 func TestCommandsDataUnfilteredShowsEveryRow(t *testing.T) {
 	s := &store{events: []storedEvent{
 		{SrcIP: "203.0.113.1", Sensor: "cowrie", Command: "id", Time: "2026-08-01 01:00"},
