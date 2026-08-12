@@ -87,6 +87,10 @@
       restoreFocus = btn;
       backdrop.hidden = false;
       modal.hidden = false;
+      // theme.css's .modal/.modal-backdrop are display:none by default --
+      // only .open (not the hidden attribute) actually makes them visible.
+      backdrop.classList.add("open");
+      modal.classList.add("open");
       trap.activate();
     });
   });
@@ -95,6 +99,8 @@
     trap.deactivate();
     backdrop.hidden = true;
     modal.hidden = true;
+    backdrop.classList.remove("open");
+    modal.classList.remove("open");
     // Not nulled here: focus-trap's deactivate() restores focus via a
     // setTimeout(0), so setReturnFocus's closure must still see this value
     // when that deferred callback runs. The click handler above overwrites

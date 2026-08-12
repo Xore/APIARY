@@ -232,6 +232,14 @@
     restoreFocus = document.activeElement;
     backdrop.hidden = false;
     dialog.hidden = false;
+    // theme.css's .modal/.modal-backdrop are display:none by default --
+    // only .open (not the hidden attribute) actually makes them visible,
+    // same contract hp-settings.js's own modal follows. Toggling hidden
+    // alone left this dialog reachable (focus-trap active, ARIA updated)
+    // but permanently display:none -- clicking "Report a problem" did
+    // nothing visible.
+    backdrop.classList.add("open");
+    dialog.classList.add("open");
     backdrop.setAttribute("aria-hidden", "false");
     trap.activate();
   }
@@ -239,6 +247,8 @@
     trap.deactivate();
     backdrop.hidden = true;
     dialog.hidden = true;
+    backdrop.classList.remove("open");
+    dialog.classList.remove("open");
     backdrop.setAttribute("aria-hidden", "true");
     // Not nulled here: focus-trap's deactivate() restores focus via a
     // setTimeout(0), so setReturnFocus's closure must still see this value
