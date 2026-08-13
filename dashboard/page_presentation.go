@@ -163,5 +163,9 @@ func templateFuncs(s *store, world template.HTML) template.FuncMap {
 		// /api/attacker-graph and rendered client-side by hp-attackers.js
 		// (Cytoscape.js), not through a template func.
 		"shortAttackerID": shortAttackerID,
+		// #1260: links attacker-identity-worker's own durable
+		// Techniques field (bare ATT&CK IDs) on attackers.html the same
+		// way techniquesForEvent's own attackTechnique.URL already does.
+		"attckTechniqueURL": attckTechniqueURL,
 	}
 }

@@ -6,7 +6,7 @@ import (
 )
 
 func obs(ip string, fp, payload, cred string, when time.Time) *ipObservation {
-	o := &ipObservation{ip: ip, signals: newSignalSet(), sensors: map[string]bool{"cowrie": true}, first: when, last: when, events: 1}
+	o := &ipObservation{ip: ip, signals: newSignalSet(), sensors: map[string]bool{"cowrie": true}, techniques: map[string]bool{}, first: when, last: when, events: 1}
 	if fp != "" {
 		o.signals.fingerprints[fp] = true
 	}
@@ -170,4 +170,81 @@ func TestResolveIdentitiesIsDeterministicAcrossRuns(t *testing.T) {
 	if len(changedA) != len(changedB) {
 		t.Fatalf("non-deterministic entity count: %d vs %d", len(changedA), len(changedB))
 	}
+}
+
+// withTechniques mutates o's techniques set in place and returns it, so a
+// call site reads as withTechniques(obs(...), "T1110") rather than
+// threading a sixth positional arg through every existing obs() call.
+func withTechniques(o *ipObservation, ids ...string) *ipObservation {
+	for _, id := range ids {
+		o.techniques[id] = true
+	}
+	return o
+}
+
+// TestResolveIdentitiesFoldsTechniquesIntoNewEntity (#1260): a brand new
+// entity's Techniques field must carry forward whatever ATT&CK IDs its
+// founding observation(s) brought in -- attacker-identity-worker's own
+// durable coverage document, not just a per-request computation.
+func TestResolveIdentitiesFoldsTechniquesIntoNewEntity(t *testing.T) {
+	now := time.Now()
+	observations := map[string]*ipObservation{
+		"203.0.113.1":  withTechniques(obs("203.0.113.1", "shared-fp", "shared-hash", "", now), "T1110", "T1059"),
+		"198.51.100.1": withTechniques(obs("198.51.100.1", "shared-fp", "shared-hash", "", now), "T1105"),
+	}
+	changed, _ := resolveIdentities(nil, observations)
+	if len(changed) != 1 {
+		t.Fatalf("expected both IPs merged into 1 entity, got %d: %+v", len(changed), changed)
+	}
+	want := []string{"T1059", "T1105", "T1110"} // sortedKeys' output order
+	if got := changed[0].Techniques; !equalStrings(got, want) {
+		t.Fatalf("Techniques = %+v, want %+v", got, want)
+	}
+}
+
+// TestResolveIdentitiesGrowsExistingEntityTechniques (#1260): a member IP
+// reappearing with a new technique must accumulate onto the entity's
+// existing Techniques set, same as any other signal, and never drop a
+// technique it already carried.
+func TestResolveIdentitiesGrowsExistingEntityTechniques(t *testing.T) {
+	now := time.Now()
+	existing := &entity{ID: "existing-1", IPs: []string{"203.0.113.1"}, Techniques: []string{"T1110"}}
+	observations := map[string]*ipObservation{
+		"203.0.113.1": withTechniques(obs("203.0.113.1", "", "", "", now), "T1595"),
+	}
+	changed, _ := resolveIdentities([]*entity{existing}, observations)
+	if len(changed) != 1 || changed[0].ID != "existing-1" {
+		t.Fatalf("got %+v", changed)
+	}
+	want := []string{"T1110", "T1595"}
+	if got := changed[0].Techniques; !equalStrings(got, want) {
+		t.Fatalf("Techniques = %+v, want %+v", got, want)
+	}
+}
+
+// TestMergeEntityIntoMergesTechniques (#1260): when two previously-
+// separate entities merge (a bridging IP shares 2+ signals with both),
+// the surviving entity's Techniques must be the union of both, not just
+// the one it started with.
+func TestMergeEntityIntoMergesTechniques(t *testing.T) {
+	a := &entity{ID: "a", Techniques: []string{"T1110"}}
+	b := &entity{ID: "b", Techniques: []string{"T1595"}}
+	mergeEntityInto(a, b)
+	finalizeEntity(a)
+	want := []string{"T1110", "T1595"}
+	if got := a.Techniques; !equalStrings(got, want) {
+		t.Fatalf("Techniques = %+v, want %+v", got, want)
+	}
+}
+
+func equalStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }

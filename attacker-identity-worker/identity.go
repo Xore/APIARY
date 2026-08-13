@@ -90,12 +90,13 @@ const mergeThreshold = 2
 // ipObservation is one IP's accumulated signals from a single fetch
 // window -- buildIPObservations' output, resolveIdentities' input.
 type ipObservation struct {
-	ip      string
-	signals signalSet
-	sensors map[string]bool
-	first   time.Time
-	last    time.Time
-	events  int
+	ip         string
+	signals    signalSet
+	sensors    map[string]bool
+	techniques map[string]bool
+	first      time.Time
+	last       time.Time
+	events     int
 }
 
 // buildIPObservations groups a fetch window's events by source IP.
@@ -104,11 +105,16 @@ func buildIPObservations(evs []corrEvent) map[string]*ipObservation {
 	for _, e := range evs {
 		o := out[e.SrcIP]
 		if o == nil {
-			o = &ipObservation{ip: e.SrcIP, signals: newSignalSet(), sensors: map[string]bool{}}
+			o = &ipObservation{ip: e.SrcIP, signals: newSignalSet(), sensors: map[string]bool{}, techniques: map[string]bool{}}
 			out[e.SrcIP] = o
 		}
 		o.events++
 		o.sensors[e.Sensor] = true
+		for _, t := range e.Techniques {
+			if t != "" {
+				o.techniques[t] = true
+			}
+		}
 		if e.Fingerprint != "" {
 			o.signals.fingerprints[e.Fingerprint] = true
 		}
@@ -142,12 +148,25 @@ type entity struct {
 	Last         string   `json:"last"`
 	Updated      string   `json:"updated"`
 	Verdicts     []string `json:"verdicts,omitempty"`
+	// Techniques (#1260) is this entity's own durable MITRE ATT&CK
+	// technique-coverage document -- the union of every canonical_attck_
+	// techniques (#1261) ID any member IP's events have carried, folded in
+	// by absorb/mergeEntityInto the same way Sensors already is. Unlike
+	// the dashboard's own aggregateTechniques (still the correct, complete
+	// per-session/per-attacker-page computation -- see #1260's own
+	// follow-up comment for why that stays untouched), this is scoped to
+	// only the techniques ip-enrichment-worker can derive from fields it
+	// already promotes (T1110/T1059.x/T1105/T1595 -- not T1190 or the ICS
+	// techniques, which need fields no worker in this pipeline promotes
+	// today).
+	Techniques []string `json:"techniques,omitempty"`
 
 	// unexported working state, not persisted -- rebuilt from the fields
 	// above via entitySignals when an existing doc is loaded.
-	ipSet     map[string]bool
-	sensorSet map[string]bool
-	signals   signalSet
+	ipSet        map[string]bool
+	sensorSet    map[string]bool
+	techniqueSet map[string]bool
+	signals      signalSet
 }
 
 func entitySignals(e *entity) signalSet {
@@ -192,13 +211,30 @@ func entitySensorSet(e *entity) map[string]bool {
 	return m
 }
 
-// absorb folds o's IPs/signals/sensors/events/time-range into e in place.
+func entityTechniqueSet(e *entity) map[string]bool {
+	if e.techniqueSet != nil {
+		return e.techniqueSet
+	}
+	m := map[string]bool{}
+	for _, t := range e.Techniques {
+		m[t] = true
+	}
+	e.techniqueSet = m
+	return m
+}
+
+// absorb folds o's IPs/signals/sensors/techniques/events/time-range into e
+// in place.
 func absorb(e *entity, o *ipObservation) {
 	entityIPSet(e)[o.ip] = true
 	entitySignals(e).merge(o.signals)
 	sensors := entitySensorSet(e)
 	for s := range o.sensors {
 		sensors[s] = true
+	}
+	techniques := entityTechniqueSet(e)
+	for t := range o.techniques {
+		techniques[t] = true
 	}
 	e.Events += o.events
 	if e.First == "" || (!o.first.IsZero() && o.first.Format(time.RFC3339) < e.First) {
@@ -219,6 +255,9 @@ func mergeEntityInto(a, b *entity) {
 	entitySignals(a).merge(entitySignals(b))
 	for s := range entitySensorSet(b) {
 		entitySensorSet(a)[s] = true
+	}
+	for t := range entityTechniqueSet(b) {
+		entityTechniqueSet(a)[t] = true
 	}
 	a.Events += b.Events
 	if b.First != "" && (a.First == "" || b.First < a.First) {
@@ -301,7 +340,7 @@ func resolveIdentities(existing []*entity, observations map[string]*ipObservatio
 					}
 				}
 			} else {
-				target = &entity{ID: newEntityID(ip, o.first), signals: newSignalSet(), ipSet: map[string]bool{}, sensorSet: map[string]bool{}}
+				target = &entity{ID: newEntityID(ip, o.first), signals: newSignalSet(), ipSet: map[string]bool{}, sensorSet: map[string]bool{}, techniqueSet: map[string]bool{}}
 				candidates = append(candidates, target)
 			}
 			ipToEntity[ip] = target
@@ -334,6 +373,7 @@ func finalizeEntity(e *entity) {
 	e.Payloads = sortedKeys(sig.payloads)
 	e.Credentials = sortedKeys(sig.creds)
 	e.Sensors = sortedKeys(entitySensorSet(e))
+	e.Techniques = sortedKeys(entityTechniqueSet(e))
 }
 
 func sortedKeys(m map[string]bool) []string {

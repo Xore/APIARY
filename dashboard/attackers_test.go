@@ -138,6 +138,26 @@ func TestAttackersDataNoSelectionWithoutIDParam(t *testing.T) {
 	}
 }
 
+// TestReadAttackersCarriesTechniques (#1260): attacker-identity-worker's
+// own durable technique-coverage field round-trips through readAttackers
+// unchanged, same as every other field this reader is a pure mirror of.
+func TestReadAttackersCarriesTechniques(t *testing.T) {
+	memStore := newMemESDocStore()
+	srv := httptest.NewServer(memStore.handler())
+	defer srv.Close()
+	es := newESClient(srv.URL, "")
+
+	seedAttacker(t, es, attackerRow{ID: "entity-1", IPs: []string{"203.0.113.1"}, Events: 1, Techniques: []string{"T1059", "T1110"}})
+
+	rows, err := readAttackers(es)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows[0].Techniques) != 2 || rows[0].Techniques[0] != "T1059" || rows[0].Techniques[1] != "T1110" {
+		t.Fatalf("Techniques = %+v", rows[0].Techniques)
+	}
+}
+
 func TestAttackersDataNoESClientReturnsEmptyPage(t *testing.T) {
 	s := &store{}
 	req := httptest.NewRequest("GET", "/attackers", nil)

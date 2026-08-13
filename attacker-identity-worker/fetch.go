@@ -37,6 +37,16 @@ type corrEvent struct {
 	User, Pass  string
 	Shasum      string
 	Fingerprint string
+	// Techniques (#1260) is ip-enrichment-worker's canonical_attck_techniques
+	// (#1261) -- a per-event ATT&CK technique-ID array promoted from the
+	// same canonical_user/pass/shasum/fingerprint/command fields this
+	// worker already reads, ported from dashboard/kill_chain.go's
+	// techniquesForEvent. identity.go folds these into each entity's own
+	// durable Techniques field so an entity's technique coverage persists
+	// once observed instead of only ever existing as a per-request,
+	// per-dashboard-instance computation (see identity.go's own comment
+	// on entityTechniqueSet for the rest of this).
+	Techniques []string
 }
 
 func fetchRecentEvents(es *esClient, since time.Time) ([]corrEvent, bool) {
@@ -67,7 +77,7 @@ func fetchRecentEvents(es *esClient, since time.Time) ([]corrEvent, bool) {
 			"_source": []string{
 				"@timestamp", "source.ip", "event.sensor",
 				"honeypot.canonical_user", "honeypot.canonical_pass", "honeypot.canonical_shasum",
-				"honeypot.canonical_fingerprint",
+				"honeypot.canonical_fingerprint", "honeypot.canonical_attck_techniques",
 			},
 		}
 		if searchAfter != nil {
@@ -94,10 +104,11 @@ func fetchRecentEvents(es *esClient, since time.Time) ([]corrEvent, bool) {
 							Sensor string `json:"sensor"`
 						} `json:"event"`
 						Honeypot struct {
-							CanonicalUser        string `json:"canonical_user"`
-							CanonicalPass        string `json:"canonical_pass"`
-							CanonicalShasum      string `json:"canonical_shasum"`
-							CanonicalFingerprint string `json:"canonical_fingerprint"`
+							CanonicalUser            string   `json:"canonical_user"`
+							CanonicalPass            string   `json:"canonical_pass"`
+							CanonicalShasum          string   `json:"canonical_shasum"`
+							CanonicalFingerprint     string   `json:"canonical_fingerprint"`
+							CanonicalAttckTechniques []string `json:"canonical_attck_techniques"`
 						} `json:"honeypot"`
 					} `json:"_source"`
 				} `json:"hits"`
@@ -116,6 +127,7 @@ func fetchRecentEvents(es *esClient, since time.Time) ([]corrEvent, bool) {
 				When: when, SrcIP: ip, Sensor: h.Source.Event.Sensor,
 				User: h.Source.Honeypot.CanonicalUser, Pass: h.Source.Honeypot.CanonicalPass,
 				Shasum: h.Source.Honeypot.CanonicalShasum, Fingerprint: h.Source.Honeypot.CanonicalFingerprint,
+				Techniques: h.Source.Honeypot.CanonicalAttckTechniques,
 			})
 		}
 		if len(v.Hits.Hits) < esPageSize {
