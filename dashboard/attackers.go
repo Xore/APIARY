@@ -32,6 +32,14 @@ type attackerRow struct {
 	Last         string   `json:"last"`
 	Updated      string   `json:"updated"`
 	Verdicts     []string `json:"verdicts,omitempty"`
+	// Techniques (#1260) is attacker-identity-worker's own durable MITRE
+	// ATT&CK technique-coverage document for this entity -- the union of
+	// every canonical_attck_techniques (#1261) ID any member IP's events
+	// have carried. Bare technique IDs, not the richer attackTechnique
+	// (ID/Name/Domain/Evidence) intelligence.go's own per-event
+	// aggregateTechniques produces -- see attckTechniqueURL's own comment
+	// for why attackers.html links these without that extra data.
+	Techniques []string `json:"techniques,omitempty"`
 
 	// Link is computed at read time, not stored -- selecting an entity
 	// shows its graph on the same page (see attackers.html's "graph"

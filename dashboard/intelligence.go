@@ -31,8 +31,16 @@ type attackTechnique struct {
 }
 
 func technique(id, name, domain, evidence string) attackTechnique {
-	path := "techniques/" + strings.ReplaceAll(id, ".", "/")
-	return attackTechnique{ID: id, Name: name, Domain: domain, Evidence: evidence, URL: "https://attack.mitre.org/" + path + "/"}
+	return attackTechnique{ID: id, Name: name, Domain: domain, Evidence: evidence, URL: attckTechniqueURL(id)}
+}
+
+// attckTechniqueURL (#1260) builds a technique ID's canonical MITRE ATT&CK
+// link -- factored out of technique() above so attackers.html can link
+// attacker-identity-worker's own durable Techniques field (bare IDs, no
+// name/evidence text; see identity.go's entityTechniqueSet) the same way
+// without needing a full attackTechnique value to do it.
+func attckTechniqueURL(id string) string {
+	return "https://attack.mitre.org/techniques/" + strings.ReplaceAll(id, ".", "/") + "/"
 }
 
 func techniquesForEvent(e storedEvent) []attackTechnique {
