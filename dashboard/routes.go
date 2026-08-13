@@ -75,6 +75,7 @@ func (s *store) routes(tmpl *template.Template) *http.ServeMux {
 	mux.HandleFunc("GET /api/anomaly-trend", s.serveAnomalyTrend)
 	mux.HandleFunc("GET /api/attacker-graph", s.serveAttackerGraph)
 	mux.HandleFunc("GET /api/attacker-fusion", s.serveAttackerFingerprintFusion)
+	mux.HandleFunc("GET /api/ghidra-callgraph/{sha}", s.serveGhidraInteractiveCallGraph)
 	mux.HandleFunc("GET /api/attck-coverage", s.serveAttckCoverage)
 	mux.HandleFunc("GET /api/campaign-timeline", s.serveCampaignTimeline)
 	mux.HandleFunc("GET /api/kill-chain-sankey", s.serveKillChainSankey)

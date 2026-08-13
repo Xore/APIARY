@@ -74,12 +74,13 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 	stripped := true
 	revdeckSteps := 4
 	ghidraDetail := &ghidraResult{
-		SHA256:     strings.Repeat("c", 64),
-		ExitStatus: "ok",
-		Functions:  []ghidraFunction{{Address: "0x401000", Name: "sub_401000"}},
-		Strings:    []string{"evil.example"},
-		Imports:    []string{"kernel32.dll!CreateProcessA"},
-		FindCrypt:  []ghidraCrypto{{Address: "0x402a10", Constant: "AES Te0", Algorithm: "AES"}},
+		SHA256:            strings.Repeat("c", 64),
+		ExitStatus:        "ok",
+		Functions:         []ghidraFunction{{Address: "0x401000", Name: "sub_401000", Callers: []ghidraXref{{Addr: "0x400f00", Name: "start"}}}},
+		FunctionsDeepened: 1,
+		Strings:           []string{"evil.example"},
+		Imports:           []string{"kernel32.dll!CreateProcessA"},
+		FindCrypt:         []ghidraCrypto{{Address: "0x402a10", Constant: "AES Te0", Algorithm: "AES"}},
 		AITriage: &ghidraTriage{
 			Workflow: "program_triage", RiskLevel: "high",
 			Behaviors:     []string{"spawns a process"},
@@ -239,13 +240,14 @@ func TestTabsAndPanelsAgreeOnEveryPage(t *testing.T) {
 	detail := &sandboxResult{Job: "job-1", SHA256: strings.Repeat("a", 64)}
 	detail.Windows.Detected = true
 	ghidraDetail := &ghidraResult{
-		SHA256:     strings.Repeat("c", 64),
-		ExitStatus: "ok",
-		Functions:  []ghidraFunction{{Address: "0x401000", Name: "sub_401000"}},
-		Strings:    []string{"evil.example"},
-		Imports:    []string{"kernel32.dll!CreateProcessA"},
-		FindCrypt:  []ghidraCrypto{{Address: "0x402a10", Constant: "AES Te0", Algorithm: "AES"}},
-		AITriage:   &ghidraTriage{Workflow: "program_triage", RiskLevel: "high"},
+		SHA256:            strings.Repeat("c", 64),
+		ExitStatus:        "ok",
+		Functions:         []ghidraFunction{{Address: "0x401000", Name: "sub_401000", Callers: []ghidraXref{{Addr: "0x400f00", Name: "start"}}}},
+		FunctionsDeepened: 1,
+		Strings:           []string{"evil.example"},
+		Imports:           []string{"kernel32.dll!CreateProcessA"},
+		FindCrypt:         []ghidraCrypto{{Address: "0x402a10", Constant: "AES Te0", Algorithm: "AES"}},
+		AITriage:          &ghidraTriage{Workflow: "program_triage", RiskLevel: "high"},
 	}
 	githubAnalysisDetail := &githubAnalysisResult{
 		SHA256: strings.Repeat("d", 64), ExitStatus: "ok",

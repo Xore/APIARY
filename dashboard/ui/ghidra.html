@@ -183,7 +183,19 @@
         <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-code" role="tabpanel" data-dashboard-panel="code" hidden>
           <div class="section-heading"><div><h2>What the code contains</h2><p>Recovered functions and the imported APIs they can reach.</p></div></div>
           <div class="card wide"><h2>Imports</h2>{{if .Detail.Imports}}<p class="note">{{len .Detail.Imports}} imported symbol{{if ne (len .Detail.Imports) 1}}s{{end}}. What a binary imports bounds what it can do without further tricks.</p><button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="gh-imports">Open the full import list</button>{{else}}<p class="empty">No imports were recovered.</p>{{end}}</div>
-          <div class="card wide"><h2>Call graph</h2>{{if .Detail.CallGraphURL}}<p class="note">Assembled from the largest functions outward. Node labels are names recovered from the sample and are untrusted: the graph is embedded as an image, which cannot execute script.</p><a href="{{.Detail.CallGraphURL}}" target="_blank" rel="noopener noreferrer"><img src="{{.Detail.CallGraphURL}}" alt="Call graph of the analysed binary" class="tw:max-w-full tw:bg-white tw:rounded-md"></a>{{else}}<p class="empty">No call graph was rendered. This needs graphviz (<code>dot</code>) on the analysis host; without it the worker still writes the raw <code>.dot</code> beside the result.</p>{{end}}</div>
+          {{/* #1287: an interactive complement to the static SVG card just
+               below, built client-side from the same recovered Callers/
+               Callees cross-reference data (ghidra_callgraph.go's
+               buildGhidraCallGraph via /api/ghidra-callgraph/{sha}) rather
+               than a flat image -- see hp-ghidra-callgraph.js's own doc
+               comment for why untrusted function-name labels stay safe
+               under Cytoscape.js's canvas rendering. Gated on
+               FunctionsDeepened, not Functions: only deepened functions
+               have any Callers/Callees data to graph at all -- a result
+               with plenty of recovered functions but zero deepened ones
+               would otherwise show an empty, confusing graph. */}}
+          <div class="card wide"><h2>Interactive call graph</h2>{{if .Detail.FunctionsDeepened}}<div class="tw:flex tw:items-center tw:justify-between tw:gap-2 tw:flex-wrap tw:mb-2"><p class="note tw:mb-0">Click a node to focus its direct neighbors; click the background to clear. Node labels are names recovered from the sample and are untrusted &mdash; Cytoscape.js draws them to canvas, not the DOM, so they cannot execute script.</p><input type="search" class="tw:max-w-[220px]" placeholder="Filter by function name&hellip;" data-ghidra-callgraph-filter aria-label="Filter call graph by function name"></div><div class="ghidra-callgraph-shell" style="position:relative;width:100%;height:480px;min-height:220px;max-height:80vh;resize:vertical;overflow:hidden;border:1px solid var(--border-strong);border-radius:8px"><div data-ghidra-callgraph-url="/api/ghidra-callgraph/{{.Detail.SHA256}}" role="img" aria-label="Interactive call graph of the analysed binary's recovered functions" style="width:100%;height:100%"></div></div><p class="note" data-ghidra-callgraph-status>Loading&hellip;</p>{{else}}<p class="empty">No caller/callee cross-references were recovered to graph &mdash; this analysis's deep-dive budget (#1167) didn't cover any function, or predates it.</p>{{end}}</div>
+          <div class="card wide"><h2>Call graph (static image)</h2>{{if .Detail.CallGraphURL}}<p class="note">Assembled from the largest functions outward. A plain, script-free fallback for the interactive graph above -- always available even with JavaScript disabled, and downloadable on its own.</p><a href="{{.Detail.CallGraphURL}}" target="_blank" rel="noopener noreferrer"><img src="{{.Detail.CallGraphURL}}" alt="Call graph of the analysed binary" class="tw:max-w-full tw:bg-white tw:rounded-md"></a>{{else}}<p class="empty">No call graph was rendered. This needs graphviz (<code>dot</code>) on the analysis host; without it the worker still writes the raw <code>.dot</code> beside the result.</p>{{end}}</div>
           <div class="card wide"><h2>Functions</h2>{{if .Detail.Functions}}<p class="note">{{len .Detail.Functions}} recovered function{{if ne (len .Detail.Functions) 1}}s{{end}}{{if .Detail.FunctionsDeepened}}, {{.Detail.FunctionsDeepened}} with decompiled pseudocode and callers/callees{{if .Detail.FunctionsDeepenedTruncated}} (the largest functions only &mdash; the deep-dive budget did not cover the whole list){{end}}{{else}} &mdash; none were decompiled for this analysis{{end}}.</p><button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="gh-functions">Open the full function list</button>{{else}}<p class="empty">No functions were recovered. For a packed or corrupt binary this is itself the finding.</p>{{end}}</div>
         </div>
 
@@ -376,6 +388,8 @@
 <script defer src="{{asset "/static/marked.js"}}"></script>
 <script defer src="{{asset "/static/dompurify.min.js"}}"></script>
 <script defer src="{{asset "/static/hp-ghidra-markdown.js"}}"></script>
+<script defer src="{{asset "/static/cytoscape.min.js"}}"></script>
+<script defer src="{{asset "/static/hp-ghidra-callgraph.js"}}"></script>
 <script defer src="{{asset "/static/hp-ghidra-report.js"}}"></script>{{end}}
 </body>
 </html>
