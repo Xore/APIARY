@@ -2,7 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"html/template"
+	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -141,5 +144,85 @@ func TestAttackersDataNoESClientReturnsEmptyPage(t *testing.T) {
 	page := s.attackersData(req)
 	if page.Total != 0 || page.Rows != nil {
 		t.Fatalf("expected an empty page without an ES client, got %+v", page)
+	}
+}
+
+// TestAttackersShellRendersWithoutES covers #1327's shell+hydrate
+// conversion: /attackers must render a 200 shell with no Elasticsearch
+// client configured at all -- the old behavior synchronously called
+// readAttackers() and would have rendered an empty table here; that read
+// now happens only on the client's own follow-up fetch to the fragment
+// route below. The shell must carry the fragment URL for
+// hp-attackers-detail.js to hydrate from, and it must not leak table rows
+// that would only be true for a real result.
+func TestAttackersShellRendersWithoutES(t *testing.T) {
+	s := &store{}
+	tmpl := template.Must(template.New("dashboard").Funcs(templateFuncs(s, "")).Parse(pageTemplate))
+	mux := s.routes(tmpl)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/attackers", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 for a shell render (it fetches entities client-side)", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `data-hp-attackers-fragment-url="/attackers/fragment"`) {
+		t.Errorf("shell is missing the fragment URL hp-attackers-detail.js hydrates from, got: %s", body)
+	}
+	if strings.Contains(body, "attackers-body") {
+		t.Error("shell must not render the body template's own define name as literal text")
+	}
+}
+
+// TestAttackersShellPreservesSelectedIDInFragmentURL: an ?id= query
+// param selects an entity's graph/fusion cards synchronously in the
+// shell (attackersShell needs no ES read to know the id was requested),
+// but the fragment URL the client hydrates from must carry that same id
+// forward so the metadata grid and table it resolves stay in sync with
+// which entity is selected.
+func TestAttackersShellPreservesSelectedIDInFragmentURL(t *testing.T) {
+	s := &store{}
+	tmpl := template.Must(template.New("dashboard").Funcs(templateFuncs(s, "")).Parse(pageTemplate))
+	mux := s.routes(tmpl)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/attackers?id=entity-1", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `data-hp-attackers-fragment-url="/attackers/fragment?id=entity-1"`) {
+		t.Errorf("shell did not carry the selected id into the fragment URL, got: %s", body)
+	}
+	if !strings.Contains(body, "Entity entity-1") {
+		t.Errorf("shell did not render the selected entity's graph card immediately, got: %s", body)
+	}
+}
+
+// TestAttackersFragmentRoute covers the fragment route's own real-data
+// path: it renders the resolved entity table (and, given a selected id,
+// that entity's own metadata grid) from a real attackersData() result.
+func TestAttackersFragmentRoute(t *testing.T) {
+	memStore := newMemESDocStore()
+	srv := httptest.NewServer(memStore.handler())
+	defer srv.Close()
+	es := newESClient(srv.URL, "")
+	seedAttacker(t, es, attackerRow{ID: "entity-1", IPs: []string{"203.0.113.1"}, Events: 7})
+
+	s := &store{es: es}
+	tmpl := template.Must(template.New("dashboard").Funcs(templateFuncs(s, "")).Parse(pageTemplate))
+	mux := s.routes(tmpl)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/attackers/fragment?id=entity-1", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "entity-1") {
+		t.Errorf("fragment missing the resolved entity, got: %s", body)
+	}
+	if !strings.Contains(body, ">7<") {
+		t.Errorf("fragment missing the selected entity's own event count, got: %s", body)
 	}
 }

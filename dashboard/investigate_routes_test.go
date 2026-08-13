@@ -118,13 +118,18 @@ func TestClusterDrillDownReturns404ForAnUnknownCluster(t *testing.T) {
 // once), and re-decoding "sess-100%" (the correct, once-decoded value)
 // fails outright (a trailing "%" is not a valid escape sequence), taking
 // the err != nil branch regardless of whether a matching session exists.
+// #1327/#1328 shell+hydrate moved the actual sessionData() lookup (and so
+// this decode) to the fragment route -- the shell route below always 200s
+// on any non-empty id, so the decode-fidelity assertion now has to be made
+// against /sessions/{id}/fragment, the same way TestGhidraFragmentRoute
+// checks ghidra's fragment rather than its shell.
 func TestSessionPathValueIsDecodedExactlyOnce(t *testing.T) {
 	s := &store{events: []storedEvent{
 		{Session: "sess-100%", SrcIP: "203.0.113.5", Sensor: "cowrie", Time: "2026-08-12 00:00"},
 	}}
 	mux := investigateTestMux(t, s)
 
-	rec := doGet(mux, "/sessions/sess-100%25")
+	rec := doGet(mux, "/sessions/sess-100%25/fragment")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 -- a single-encoded literal %% must survive as part of the session id (body: %s)", rec.Code, rec.Body.String())
 	}
@@ -137,14 +142,15 @@ func TestSessionPathValueIsDecodedExactlyOnce(t *testing.T) {
 // unescape that a SECOND time into an actual "/", silently changing which
 // session the request resolves to. This proves no second decode happens:
 // a session ID containing the literal substring "%2F" is looked up as
-// exactly that, not as if it contained a slash.
+// exactly that, not as if it contained a slash. See the fragment-route
+// note on TestSessionPathValueIsDecodedExactlyOnce above.
 func TestSessionDoubleEncodedPercentIsNotSilentlyUnwrapped(t *testing.T) {
 	s := &store{events: []storedEvent{
 		{Session: "sess-100%2F", SrcIP: "203.0.113.5", Sensor: "cowrie", Time: "2026-08-12 00:00"},
 	}}
 	mux := investigateTestMux(t, s)
 
-	rec := doGet(mux, "/sessions/sess-100%252F")
+	rec := doGet(mux, "/sessions/sess-100%252F/fragment")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 -- %%252F must decode to the literal substring %%2F exactly once, not be silently re-decoded into a slash (body: %s)", rec.Code, rec.Body.String())
 	}
@@ -183,6 +189,55 @@ func TestSessionUnsupportedMethodReturns405(t *testing.T) {
 	}
 	if rec.Header().Get("Allow") == "" {
 		t.Fatal("405 response must carry an Allow header")
+	}
+}
+
+// TestSessionShellRendersWithoutEventScan covers #1327/#1328's
+// shell+hydrate conversion: /sessions/{id} must render a 200 shell for any
+// non-empty id with no events in the store at all -- the old behavior
+// synchronously scanned every cached event and 404'd here for an unknown
+// id; that check now happens only on the client's own follow-up fetch to
+// the fragment route below. The shell must carry the fragment URL for
+// hp-session-detail.js to hydrate from and must not leak any content that
+// would only be true for a real session.
+func TestSessionShellRendersWithoutEventScan(t *testing.T) {
+	s := &store{}
+	mux := investigateTestMux(t, s)
+	rec := doGet(mux, "/sessions/sess-unknown")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 for a shell render (it fetches events client-side)", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `data-hp-session-fragment-url="/sessions/sess-unknown/fragment"`) {
+		t.Errorf("shell is missing the fragment URL hp-session-detail.js hydrates from, got: %s", body)
+	}
+	if strings.Contains(body, "session-body") {
+		t.Error("shell must not render the body template's own define name as literal text")
+	}
+}
+
+// TestSessionFragmentRoute covers the fragment route's own two outcomes:
+// a real session renders its full detail body, and an id matching no
+// cached events 404s (moved here from the shell route above, which used
+// to do this check synchronously before any response bytes were
+// written).
+func TestSessionFragmentRoute(t *testing.T) {
+	s := &store{events: []storedEvent{
+		{Session: "sess-a", SrcIP: "203.0.113.5", Sensor: "cowrie", Time: "2026-08-12 00:00", Command: "whoami"},
+	}}
+	mux := investigateTestMux(t, s)
+
+	rec := doGet(mux, "/sessions/sess-a/fragment")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("known session: status = %d, want 200", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "whoami") {
+		t.Errorf("fragment missing the resolved command, got: %s", rec.Body.String())
+	}
+
+	rec = doGet(mux, "/sessions/sess-unknown/fragment")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("unknown session: status = %d, want 404", rec.Code)
 	}
 }
 

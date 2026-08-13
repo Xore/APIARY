@@ -199,6 +199,19 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 			{Timestamp: now.Format(time.RFC3339), DocType: "error", ErrorCode: "model_timeout", Error: "ollama request timed out"},
 		}}},
 		{"alerts", alertsPageData{snapshot: snapshot{}}},
+		{"session", sessionShell("sess-1")},
+		// #1327/#1328 shell+hydrate: "session" above is now just the
+		// skeleton shell -- the real tables and chronological replay only
+		// exist in "session-body", rendered separately by the fragment
+		// route.
+		{"session-body", sessionPage{Generated: now, ID: "sess-1", Total: 1}},
+		{"attackers", attackersPage{Generated: now, Selected: &attackerRow{ID: "entity-1"}}},
+		// #1327 shell+hydrate: "attackers" above is now just the shell
+		// (plus the entity graph/fusion cards, which need only the
+		// selected id) -- the identity counts and full entity table only
+		// exist in "attackers-body", rendered separately by the fragment
+		// route.
+		{"attackers-body", attackersPage{Generated: now, Rows: []attackerRow{{ID: "entity-1", Link: "/attackers?id=entity-1"}}, Total: 1, Selected: &attackerRow{ID: "entity-1"}}},
 	}
 	for _, page := range pages {
 		name := page.name

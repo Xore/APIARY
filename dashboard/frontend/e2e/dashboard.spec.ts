@@ -508,7 +508,12 @@ test.describe("dashboard browser behaviour", () => {
     // visibility or reading node labels off the canvas.
     await expect(page.locator("[data-attacker-graph-status]")).toContainText("member IP");
     await expect(page.locator("#attackers-graph canvas")).not.toHaveCount(0);
-    await expect(page.locator("#attackers-graph")).toContainText("root / fixture-0");
+    // #1327 shell+hydrate: the selected entity's own metadata grid
+    // (events/sensors/dates/credential pairs) used to render inline
+    // inside #attackers-graph itself; it's now part of the
+    // #attackers-root fragment hp-attackers-detail.js hydrates in
+    // separately, alongside #attackers-graph rather than nested in it.
+    await expect(page.locator("#attackers-selected-meta")).toContainText("root / fixture-0");
   });
 
   

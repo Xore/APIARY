@@ -1,3 +1,32 @@
+{{/* #1327/#1328 shell+hydrate: the body content below used to render
+     inline as part of the "session" template itself, from a sessionPage
+     resolved by a synchronous O(n) scan of every cached event
+     (intelligence.go's sessionData) in the route handler before any
+     response bytes were written. It's now its own template, executed
+     against a real sessionData() result by the new "GET
+     /sessions/{id}/fragment" route, and hp-session-detail.js fetches that
+     fragment once on page load to replace the "session" template's
+     skeleton placeholder. Mirrors ghidra.html's "ghidra-detail-body"
+     split -- see that template's own comment for the general reasoning. */}}
+{{define "session-body"}}<p class="subtitle">{{.IP}} {{if .Country}}&bull; {{.Country}}{{end}} &bull; <span{{if .FirstUTC}} data-hp-utc="{{.FirstUTC}}"{{end}}>{{.First}}</span> &mdash; <span{{if .LastUTC}} data-hp-utc="{{.LastUTC}}"{{end}}>{{.Last}}</span> &bull; <strong>{{.Total}}</strong> normalized events</p>
+
+<div class="filters"><a class="chip" href="/events">&larr; event explorer</a>{{if .IP}}<a class="chip" href="/investigate/ip/{{.IP | urlquery}}">attacker profile</a>{{end}}<a class="chip" href="/events?session={{.ID | urlquery}}">filtered events</a><a class="chip" href="/export/events.csv?session={{.ID | urlquery}}">export CSV &darr;</a></div>
+
+{{/* #1291: a small, curated pattern list matches known multi-step
+     attack techniques (Redis-to-SSH RCE, ADB botnet-recon
+     fingerprinting) across this session's own commands -- a banner
+     here, not just N unremarkable-looking rows an operator has to
+     already know to recognize by reading protocol internals. */}}
+{{range .Sequences}}
+<div class="tw:mb-4 tw:rounded-md tw:border {{if eq .Severity "critical"}}tw:border-red tw:bg-red-subtle tw:text-red{{else}}tw:border-orange tw:bg-orange-subtle{{end}} tw:px-4 tw:py-3">
+  <strong>{{if eq .Severity "critical"}}Critical{{else}}High-severity{{end}} attack pattern recognized: {{.Name}}</strong>
+  <p class="tw:mt-1">{{.Summary}}</p>
+</div>
+{{end}}
+
+<div class="tw:grid tw:grid-cols-12 tw:gap-3.5">{{template "tbl" (dict "t" "Sensors" "rows" .Sensors "class" "half" "hint" "none")}}{{template "tbl" (dict "t" "Credentials" "rows" .Credentials "class" "half" "hint" "none")}}{{template "tbl" (dict "t" "Commands" "rows" .Commands "class" "half" "hint" "none")}}{{template "tbl" (dict "t" "Payload hashes" "rows" .Payloads "class" "half" "hint" "none")}}{{template "techniques" .Techniques}}
+<div class="card wide"><h2>Chronological replay</h2><p class="note">Oldest to newest. Commands, credentials, downloads, fingerprints, and investigation pivots remain linked.</p><table class="recent data-table"><thead><tr><th>time</th><th>sensor</th><th>source</th><th>port</th><th>detail</th></tr></thead><tbody>{{range .Events}}{{template "everow" .}}{{end}}</tbody></table></div></div>
+{{end}}
 {{define "session"}}<!doctype html>
 <html lang="en">
 <head>
@@ -17,35 +46,26 @@
           <div>
             <div class="label-section">Session replay</div>
             <h1>{{.ID}}</h1>
-            <p class="subtitle">{{.IP}} {{if .Country}}&bull; {{.Country}}{{end}} &bull; <span{{if .FirstUTC}} data-hp-utc="{{.FirstUTC}}"{{end}}>{{.First}}</span> &mdash; <span{{if .LastUTC}} data-hp-utc="{{.LastUTC}}"{{end}}>{{.Last}}</span></p>
-          </div>
-          <div class="live-panel">
-            <span class="gen">{{.Total}} normalized events</span>
           </div>
         </header>
 
-        <div class="filters"><a class="chip" href="/events">&larr; event explorer</a>{{if .IP}}<a class="chip" href="/investigate/ip/{{.IP | urlquery}}">attacker profile</a>{{end}}<a class="chip" href="/events?session={{.ID | urlquery}}">filtered events</a><a class="chip" href="/export/events.csv?session={{.ID | urlquery}}">export CSV &darr;</a></div>
-
-        {{/* #1291: a small, curated pattern list matches known multi-step
-             attack techniques (Redis-to-SSH RCE, ADB botnet-recon
-             fingerprinting) across this session's own commands -- a banner
-             here, not just N unremarkable-looking rows an operator has to
-             already know to recognize by reading protocol internals. */}}
-        {{range .Sequences}}
-        <div class="tw:mb-4 tw:rounded-md tw:border {{if eq .Severity "critical"}}tw:border-red tw:bg-red-subtle tw:text-red{{else}}tw:border-orange tw:bg-orange-subtle{{end}} tw:px-4 tw:py-3">
-          <strong>{{if eq .Severity "critical"}}Critical{{else}}High-severity{{end}} attack pattern recognized: {{.Name}}</strong>
-          <p class="tw:mt-1">{{.Summary}}</p>
+        {{/* #1327/#1328 shell+hydrate: see "session-body" above for the
+             full explanation. The id is the only thing known here --
+             everything else (IP/country/timing, sensors, credentials,
+             commands, payloads, techniques, sequences, and the
+             chronological replay) is hydrated in below. */}}
+        <div id="session-detail-root" data-hp-session-fragment-url="/sessions/{{.ID | urlquery}}/fragment" aria-busy="true">
+          <div class="filters"><div class="skeleton-line" style="width:220px"></div></div>
+          <div class="card wide"><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:85%"></div><div class="skeleton-line" style="width:40%"></div></div>
+          <div class="card wide"><div class="skeleton-line" style="width:55%"></div><div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:35%"></div></div>
+          <div class="card wide"><div class="skeleton-line" style="width:65%"></div><div class="skeleton-line" style="width:75%"></div><div class="skeleton-line" style="width:45%"></div></div>
         </div>
-        {{end}}
-
-        <div class="tw:grid tw:grid-cols-12 tw:gap-3.5">{{template "tbl" (dict "t" "Sensors" "rows" .Sensors "class" "half" "hint" "none")}}{{template "tbl" (dict "t" "Credentials" "rows" .Credentials "class" "half" "hint" "none")}}{{template "tbl" (dict "t" "Commands" "rows" .Commands "class" "half" "hint" "none")}}{{template "tbl" (dict "t" "Payload hashes" "rows" .Payloads "class" "half" "hint" "none")}}{{template "techniques" .Techniques}}
-        <div class="card wide"><h2>Chronological replay</h2><p class="note">Oldest to newest. Commands, credentials, downloads, fingerprints, and investigation pivots remain linked.</p><table class="recent data-table"><thead><tr><th>time</th><th>sensor</th><th>source</th><th>port</th><th>detail</th></tr></thead><tbody>{{range .Events}}{{template "everow" .}}{{end}}</tbody></table></div></div>
 
         <footer>{{brandText}} &bull; session investigation</footer>
       </div>
     </main>
 </div>
+<script defer src="{{asset "/static/hp-session-detail.js"}}"></script>
 </body>
 </html>
 {{end}}
-
