@@ -14,13 +14,14 @@
  * escaping guarantees stay in force for every field this page renders,
  * including the AI-generated/attacker-influenced ones (#1285/#1286).
  *
- * Once the fragment lands, two other page scripts need a nudge: Prism
- * (#1288) and hp-ghidra-markdown.js (#1285/#1286) each only look at
- * whatever's in the document at the moment they're invoked, and neither
- * exists in the DOM until this fetch resolves. hp-evidence.js needs no
- * such nudge -- its click listener and evidence-body lookups are already
- * live-DOM/delegated, so newly-inserted evidence buttons and bodies just
- * work (see hp-evidence.js's own open()).
+ * Once the fragment lands, three other page scripts need a nudge: Prism
+ * (#1288), hp-ghidra-markdown.js (#1285/#1286), and hp-ghidra-
+ * callgraph.js (#1287) each only look at whatever's in the document at
+ * the moment they're invoked, and none of it exists in the DOM until
+ * this fetch resolves. hp-evidence.js needs no such nudge -- its click
+ * listener and evidence-body lookups are already live-DOM/delegated, so
+ * newly-inserted evidence buttons and bodies just work (see
+ * hp-evidence.js's own open()).
  *
  * The report viewer overlay (unchanged behavior from before #1288) opens
  * a #hp-gh-report-view button. That button lives inside the fragment, but
@@ -121,6 +122,11 @@
         root.removeAttribute("aria-busy");
         window.Prism?.highlightAll();
         window.HoneypotGhidraMarkdown?.render();
+        // #1287: the interactive call graph's own [data-ghidra-callgraph-
+        // url] canvas is part of this same fragment -- hp-ghidra-
+        // callgraph.js's own <script defer> already ran once, before this
+        // fetch resolved, and found nothing.
+        window.initHoneypotGhidraCallGraph?.();
         wireReportViewerTrigger();
       })
       .catch(() => {
