@@ -84,6 +84,30 @@ func readAttackers(es *esClient) ([]attackerRow, error) {
 	return rows, nil
 }
 
+// attackersShell (#1327 shell+hydrate conversion) is the synchronous half
+// of "GET /attackers": everything the initial page render needs is the
+// optional selected-entity id, taken straight from the request's own
+// query string and never read from Elasticsearch. The real content --
+// attackers-v1's full, unbounded doc listing readAttackers below actually
+// resolves -- is rendered by the "attackers-body" template against a real
+// attackersData() result, executed only by the new "GET
+// /attackers/fragment" route on the client's own follow-up request;
+// hp-attackers-detail.js fetches that fragment once on page load to
+// replace the shell's skeleton placeholder. Mirrors ghidra.go's
+// ghidraDetailShell -- see that function's own comment for the general
+// reasoning. Selected is set to a bare stub carrying only the id so the
+// entity graph/fusion cards (each already an independent client-side
+// fetch against /api/attacker-graph and /api/attacker-fusion, unaffected
+// by this change) can render immediately instead of waiting on the
+// fragment too.
+func attackersShell(r *http.Request) attackersPage {
+	p := attackersPage{Generated: time.Now()}
+	if id := r.URL.Query().Get("id"); id != "" {
+		p.Selected = &attackerRow{ID: id}
+	}
+	return p
+}
+
 func (s *store) attackersData(r *http.Request) attackersPage {
 	p := attackersPage{Generated: time.Now(), Ready: s.ready.Load()}
 	if s.es == nil {

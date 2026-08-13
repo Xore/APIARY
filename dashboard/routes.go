@@ -281,9 +281,21 @@ func (s *store) routes(tmpl *template.Template) *http.ServeMux {
 		data.Ready = s.ready.Load()
 		renderPage(w, tmpl, "campaigns", &data)
 	})
+	// #1327 shell+hydrate: this used to call s.attackersData(r), an
+	// unbounded readAttackers() Elasticsearch fetch of every attackers-v1
+	// doc, before writing any response bytes. attackersShell needs
+	// nothing but the request's own optional "id" query parameter -- the
+	// real content is fetched client-side from the fragment route just
+	// below (see attackersShell's own comment in attackers.go).
 	mux.HandleFunc("GET /attackers", func(w http.ResponseWriter, r *http.Request) {
-		data := s.attackersData(r)
+		data := attackersShell(r)
 		renderPage(w, tmpl, "attackers", &data)
+	})
+	mux.HandleFunc("GET /attackers/fragment", func(w http.ResponseWriter, r *http.Request) {
+		data := s.attackersData(r)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		tmpl.ExecuteTemplate(w, "attackers-body", &data)
 	})
 	mux.HandleFunc("GET /kill-chain", func(w http.ResponseWriter, r *http.Request) {
 		data := s.killChainData()

@@ -63,13 +63,34 @@ func (s *store) registerInvestigateRoutes(mux *http.ServeMux, tmpl *template.Tem
 		}
 		renderPage(w, tmpl, "cluster-correlation", &data)
 	})
+	// #1327/#1328 shell+hydrate: this used to call s.sessionData(), a
+	// synchronous O(n) scan of every cached event, before writing any
+	// response bytes. sessionShell needs nothing but the URL's own id --
+	// the real content is fetched client-side from the fragment route
+	// just below (see sessionShell's own comment in intelligence.go). A
+	// session id that doesn't resolve to any events now gets a 200 shell
+	// instead of a 404 here; the fragment fetch 404s instead, and
+	// hp-session-detail.js surfaces that as an in-page error state rather
+	// than a browser-level not-found (same tradeoff the ghidra shell
+	// above already accepts for the same reason).
 	mux.HandleFunc("GET /sessions/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimSpace(r.PathValue("id"))
+		if id == "" || len(id) > 256 {
+			http.NotFound(w, r)
+			return
+		}
+		data := sessionShell(id)
+		renderPage(w, tmpl, "session", &data)
+	})
+	mux.HandleFunc("GET /sessions/{id}/fragment", func(w http.ResponseWriter, r *http.Request) {
 		data, ok := s.sessionData(r.PathValue("id"))
 		if !ok {
 			http.NotFound(w, r)
 			return
 		}
-		renderPage(w, tmpl, "session", &data)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		tmpl.ExecuteTemplate(w, "session-body", &data)
 	})
 	// #1288/#1285/#1286 shell+hydrate: this used to call s.ghidraData(),
 	// a synchronous Elasticsearch round trip, before writing any response

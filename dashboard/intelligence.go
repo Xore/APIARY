@@ -124,6 +124,21 @@ type sessionPage struct {
 	Events    []storedEvent
 }
 
+// sessionShell (#1327/#1328 shell+hydrate conversion) is the synchronous
+// half of "GET /sessions/{id}": everything the initial page render needs
+// is the id itself, taken straight from the URL and never read from the
+// event cache. The real content -- everything sessionData below actually
+// resolves via its O(n) scan of every cached event -- is rendered by the
+// "session-body" template against a real sessionData() result, executed
+// only by the new "GET /sessions/{id}/fragment" route on the client's own
+// follow-up request; hp-session-detail.js fetches that fragment once on
+// page load to replace the shell's skeleton placeholder. Mirrors
+// ghidra.go's ghidraDetailShell/investigate_routes.go's fragment split --
+// see that function's own comment for the general reasoning.
+func sessionShell(id string) sessionPage {
+	return sessionPage{Generated: time.Now(), ID: id}
+}
+
 func (s *store) sessionData(id string) (sessionPage, bool) {
 	id = strings.TrimSpace(id)
 	if id == "" || len(id) > 256 {
