@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -33,6 +34,108 @@ func TestOIDCSessionCookieIsHostOnlySecureAndHTTPOnly(t *testing.T) {
 	cookie := secureCookie(oidcSessionCookie, "opaque", time.Hour)
 	if cookie.Domain != "" || cookie.Path != "/" || !cookie.Secure || !cookie.HttpOnly || cookie.SameSite != http.SameSiteLaxMode {
 		t.Fatalf("unsafe OIDC cookie: %#v", cookie)
+	}
+}
+
+func TestOIDCBindingCookieNameIsDistinctPerState(t *testing.T) {
+	a := oidcBindingCookieName("state-a")
+	b := oidcBindingCookieName("state-b")
+	if a == b {
+		t.Fatalf("two different states produced the same cookie name %q", a)
+	}
+	if a[:len(oidcStateCookie)] != oidcStateCookie {
+		t.Fatalf("cookie name %q lost the __Host- prefix oidcStateCookie carries", a)
+	}
+}
+
+// loginRedirectState pulls the "state" query parameter back out of
+// serveLogin's own redirect Location -- the same value Keycloak would echo
+// back on /auth/callback.
+func loginRedirectState(t *testing.T, rec *httptest.ResponseRecorder) string {
+	t.Helper()
+	loc, err := url.Parse(rec.Result().Header.Get("Location"))
+	if err != nil {
+		t.Fatalf("serveLogin redirect Location did not parse: %v", err)
+	}
+	state := loc.Query().Get("state")
+	if state == "" {
+		t.Fatal("serveLogin redirect is missing its own state param")
+	}
+	return state
+}
+
+// TestServeLoginBindingCookiesDoNotCollideAcrossConcurrentFlows is #1235
+// item 5's own regression guard: two tabs in the same browser starting a
+// login flow in close succession used to share ONE fixed-name binding
+// cookie ("__Host-apiary_oidc") -- the second /auth/login's Set-Cookie
+// silently overwrote the first tab's binding value before its own round
+// trip back from Keycloak completed, so the first tab's callback compared
+// its state's stored Binding against the wrong cookie and failed with
+// "invalid OIDC browser binding" (confirmed live, self-resolving on a
+// fresh, no-longer-racing retry -- see #1235's own investigation
+// comment). oidcBindingCookieName gives each flow its own cookie name;
+// this proves a browser holding BOTH concurrent flows' cookies still lets
+// the FIRST flow's callback find and validate its own.
+func TestServeLoginBindingCookiesDoNotCollideAcrossConcurrentFlows(t *testing.T) {
+	// serveCallback's token exchange step runs after the binding check
+	// this test cares about -- pointed at a real (but failing) endpoint so
+	// Exchange fails fast and deterministically rather than the test
+	// depending on network access or hanging on an unroutable URL.
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "no", http.StatusBadRequest)
+	}))
+	defer tokenServer.Close()
+
+	store := &memorySessionStore{values: make(map[string][]byte)}
+	auth := &oidcAuth{
+		sessions:   store,
+		now:        time.Now,
+		httpClient: tokenServer.Client(),
+		oauth2: oauth2.Config{
+			ClientID: oidcClientID,
+			Endpoint: oauth2.Endpoint{AuthURL: tokenServer.URL + "/auth", TokenURL: tokenServer.URL + "/token"},
+		},
+	}
+
+	// Tab A starts a login flow.
+	recA := httptest.NewRecorder()
+	auth.serveLogin(recA, httptest.NewRequest(http.MethodGet, "/auth/login", nil))
+	stateA := loginRedirectState(t, recA)
+	cookiesA := recA.Result().Cookies()
+	if len(cookiesA) != 1 {
+		t.Fatalf("serveLogin set %d cookies, want 1: %+v", len(cookiesA), cookiesA)
+	}
+
+	// Tab B starts a SECOND login flow in the same browser before tab A's
+	// own round trip completes -- the exact race #1235 item 5 reported.
+	recB := httptest.NewRecorder()
+	auth.serveLogin(recB, httptest.NewRequest(http.MethodGet, "/auth/login", nil))
+	cookiesB := recB.Result().Cookies()
+	if len(cookiesB) != 1 {
+		t.Fatalf("serveLogin set %d cookies, want 1: %+v", len(cookiesB), cookiesB)
+	}
+
+	if cookiesA[0].Name == cookiesB[0].Name {
+		t.Fatalf("two concurrent login flows must not share one binding cookie name, both got %q", cookiesA[0].Name)
+	}
+
+	// Tab A's callback arrives. A real browser holds BOTH cookies at this
+	// point (they have different names) -- attach both, the way an actual
+	// browser's cookie jar would.
+	req := httptest.NewRequest(http.MethodGet, "/auth/callback?state="+stateA+"&code=fake-code", nil)
+	req.AddCookie(cookiesA[0])
+	req.AddCookie(cookiesB[0])
+	rec := httptest.NewRecorder()
+	auth.serveCallback(rec, req)
+
+	if strings.Contains(rec.Body.String(), "invalid OIDC browser binding") {
+		t.Fatalf("tab A's callback was confused by tab B's concurrent flow: %s", rec.Body.String())
+	}
+	// Getting to (and failing at) the token exchange step confirms the
+	// binding check itself passed -- the exchange failure is expected and
+	// unrelated, tokenServer above deliberately rejects it.
+	if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), "OIDC code exchange failed") {
+		t.Fatalf("expected to reach (and fail at) the token exchange step, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 

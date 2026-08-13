@@ -313,6 +313,31 @@ func isFrameFetch(r *http.Request) bool {
 	return false
 }
 
+// oidcBindingCookieName (#1235 item 5) gives each login attempt its own,
+// distinctly-named binding cookie instead of every attempt sharing one
+// fixed cookie name. state is safe to fold into the name unencrypted --
+// it's already public (visible in the redirect to Keycloak and in the
+// callback URL itself); only the cookie's *value* (binding) is the secret
+// half of this check. base64.RawURLEncoding's alphabet (randomToken's own
+// encoding) is a valid RFC 6265 cookie-name token as-is, so no further
+// escaping is needed.
+//
+// Without this, two tabs in the same browser starting a login flow in
+// close succession raced on ONE shared "__Host-apiary_oidc" cookie: the
+// second /auth/login's Set-Cookie silently overwrote the first tab's
+// binding value before its own round trip back from Keycloak completed,
+// so the first tab's callback compared its state's stored Binding against
+// the SECOND tab's cookie value and failed with "invalid OIDC browser
+// binding" -- confirmed live and reported as #1235 item 5's own
+// self-resolving-on-retry symptom (a fresh, no-longer-racing /auth/login
+// from the same tab works). A per-state cookie name means concurrent
+// flows never share a name, so a browser holds one cookie per in-flight
+// attempt (RFC 6265 allows arbitrarily many same-origin cookies with
+// distinct names) and each callback reads back exactly its own.
+func oidcBindingCookieName(state string) string {
+	return oidcStateCookie + "." + state
+}
+
 func (a *oidcAuth) serveLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -331,7 +356,7 @@ func (a *oidcAuth) serveLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "login unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	http.SetCookie(w, secureCookie(oidcStateCookie, binding, oidcStateMaxAge))
+	http.SetCookie(w, secureCookie(oidcBindingCookieName(state), binding, oidcStateMaxAge))
 	// S256ChallengeOption takes the *verifier* and hashes it internally to
 	// produce the code_challenge -- it does not take an already-computed
 	// challenge. Passing a pre-hashed value here double-hashes it, so the
@@ -355,8 +380,8 @@ func (a *oidcAuth) serveCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = a.sessions.Delete(r.Context(), "oidc:state:"+state)
-	binding, err := r.Cookie(oidcStateCookie)
-	clearCookie(w, oidcStateCookie)
+	binding, err := r.Cookie(oidcBindingCookieName(state))
+	clearCookie(w, oidcBindingCookieName(state))
 	if err != nil || binding.Value == "" || binding.Value != attempt.Binding || a.now().Sub(attempt.CreatedAt) > oidcStateMaxAge {
 		http.Error(w, "invalid OIDC browser binding", http.StatusBadRequest)
 		return
