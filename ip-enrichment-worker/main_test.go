@@ -3,8 +3,117 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 )
+
+// passthroughEnrich always "resolves" a line unchanged -- enough to drive
+// processSourceTick's read/write/offset bookkeeping without depending on
+// enrichLine's own join logic.
+func passthroughEnrich(line []byte, vm, tftpVM viaMap, persona string) ([]byte, bool) {
+	return line, true
+}
+
+func newTestSource(t *testing.T, input string) (*source, *atomic.Pointer[viaMap], *atomic.Pointer[viaMap]) {
+	t.Helper()
+	s := &source{
+		name:      "test",
+		input:     input,
+		output:    filepath.Join(t.TempDir(), "test.json"),
+		statePath: filepath.Join(t.TempDir(), "test.offset"),
+		enrich:    passthroughEnrich,
+	}
+	var vm, tftpVM atomic.Pointer[viaMap]
+	empty := viaMap{}
+	vm.Store(&empty)
+	tftpVM.Store(&empty)
+	return s, &vm, &tftpVM
+}
+
+// TestProcessSourceTickDoesNotAdvanceOffsetOnWriteFailure covers #1351: a
+// failed write to the output file must not advance/persist the input
+// offset, or the lines that failed to write are never read again.
+func TestProcessSourceTickDoesNotAdvanceOffsetOnWriteFailure(t *testing.T) {
+	input := filepath.Join(t.TempDir(), "in.json")
+	if err := os.WriteFile(input, []byte(`{"a":1}`+"\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	s, vm, tftpVM := newTestSource(t, input)
+
+	out, err := os.OpenFile(s.output, os.O_CREATE|os.O_WRONLY, 0o640)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out.Close() // closed on purpose: any Write on it now fails
+
+	marker := []byte(`"src_ip":"` + tunnelPeerIP + `"`)
+	got := processSourceTick(s, vm, tftpVM, time.Second, out, marker, 0, time.Now())
+	if got != 0 {
+		t.Fatalf("offset = %d, want 0 (unchanged) after a write failure", got)
+	}
+	if _, ok := loadOffset(s.statePath); ok {
+		t.Fatal("offset must not be persisted when the write failed")
+	}
+}
+
+// TestProcessSourceTickDoesNotAdvanceOffsetOnSaveFailure covers #1351's
+// second finding: if saveOffset fails, the in-memory offset returned to the
+// caller must stay at the old value too, or the next tick reads from disk
+// (loadOffset) and diverges from what was actually persisted -- previously
+// this caused the same lines to be re-read, re-enriched and re-appended
+// forever.
+func TestProcessSourceTickDoesNotAdvanceOffsetOnSaveFailure(t *testing.T) {
+	input := filepath.Join(t.TempDir(), "in.json")
+	if err := os.WriteFile(input, []byte(`{"a":1}`+"\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	s, vm, tftpVM := newTestSource(t, input)
+	// statePath's parent directory doesn't exist, so saveOffset fails
+	// while the write to `out` still succeeds.
+	s.statePath = filepath.Join(t.TempDir(), "does-not-exist", "test.offset")
+
+	out, err := os.OpenFile(s.output, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+
+	marker := []byte(`"src_ip":"` + tunnelPeerIP + `"`)
+	got := processSourceTick(s, vm, tftpVM, time.Second, out, marker, 0, time.Now())
+	if got != 0 {
+		t.Fatalf("offset = %d, want 0 (unchanged) after a saveOffset failure", got)
+	}
+}
+
+// TestProcessSourceTickAdvancesOffsetOnSuccess is the control case: a clean
+// write and a clean save must advance the returned offset to newOffset and
+// persist it, so the two failure-path tests above are actually exercising
+// the failure branch and not just a no-op path.
+func TestProcessSourceTickAdvancesOffsetOnSuccess(t *testing.T) {
+	input := filepath.Join(t.TempDir(), "in.json")
+	line := `{"a":1}` + "\n"
+	if err := os.WriteFile(input, []byte(line), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	s, vm, tftpVM := newTestSource(t, input)
+
+	out, err := os.OpenFile(s.output, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+
+	marker := []byte(`"src_ip":"` + tunnelPeerIP + `"`)
+	got := processSourceTick(s, vm, tftpVM, time.Second, out, marker, 0, time.Now())
+	if got != int64(len(line)) {
+		t.Fatalf("offset = %d, want %d", got, len(line))
+	}
+	persisted, ok := loadOffset(s.statePath)
+	if !ok || persisted != got {
+		t.Fatalf("loadOffset = (%d, %v), want (%d, true)", persisted, ok, got)
+	}
+}
 
 func TestDiscoverSourcesFindsEveryConpotPersonaByGlob(t *testing.T) {
 	logsDir := t.TempDir()

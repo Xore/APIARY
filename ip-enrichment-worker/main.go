@@ -230,48 +230,82 @@ func runSource(s *source, vm, tftpVM *atomic.Pointer[viaMap], refresh, pendingTi
 	}
 	defer out.Close()
 
-	write := func(lines [][]byte) {
-		for _, line := range lines {
-			out.Write(line)
-			out.Write([]byte("\n"))
-		}
-	}
-
 	tunnelPeerMarker := []byte(`"src_ip":"` + tunnelPeerIP + `"`)
 
+	// offset is tracked in memory across ticks rather than reloaded from
+	// disk every time: reloading from disk on every tick means a single
+	// transient saveOffset failure is invisible, and the very next tick
+	// re-reads (and re-enriches, re-appends) the same already-written
+	// range from disk again -- and keeps doing so on every subsequent tick
+	// until the state write happens to succeed again.
+	offset, _ := loadOffset(s.statePath)
+
 	for range time.Tick(refresh) {
-		offset, _ := loadOffset(s.statePath)
-		lines, newOffset, err := readNewLines(s.input, offset)
-		if err != nil {
-			continue // sensor container restarting, file briefly absent, etc. -- retry next tick
-		}
-		now := time.Now()
-		var ready [][]byte
-		for _, line := range lines {
-			isTunnelPeer := bytes.Contains(line, tunnelPeerMarker) // #1206 debug stat only
-			enriched, resolved := s.enrich(line, *vm.Load(), *tftpVM.Load(), s.name)
-			if resolved {
-				if isTunnelPeer {
-					s.stats.resolvedFirst.Add(1)
-				}
-				ready = append(ready, enriched)
-			} else {
-				s.stats.attempted.Add(1)
-				s.queue.add(line, pendingTimeout, now)
+		offset = processSourceTick(s, vm, tftpVM, pendingTimeout, out, tunnelPeerMarker, offset, time.Now())
+	}
+}
+
+// processSourceTick runs one read/enrich/write cycle for a source and
+// returns the offset that should be used on the next tick: newOffset on
+// success, or the offset passed in, unchanged, if either the write or the
+// offset persist failed -- so the same input range is retried next tick
+// instead of being silently skipped (a failed write) or repeatedly
+// re-written (a failed persist with the in-memory offset already moved on).
+func processSourceTick(s *source, vm, tftpVM *atomic.Pointer[viaMap], pendingTimeout time.Duration, out *os.File, tunnelPeerMarker []byte, offset int64, now time.Time) int64 {
+	lines, newOffset, err := readNewLines(s.input, offset)
+	if err != nil {
+		return offset // sensor container restarting, file briefly absent, etc. -- retry next tick
+	}
+	var ready [][]byte
+	for _, line := range lines {
+		isTunnelPeer := bytes.Contains(line, tunnelPeerMarker) // #1206 debug stat only
+		enriched, resolved := s.enrich(line, *vm.Load(), *tftpVM.Load(), s.name)
+		if resolved {
+			if isTunnelPeer {
+				s.stats.resolvedFirst.Add(1)
 			}
-		}
-		drained := s.queue.drain(*vm.Load(), *tftpVM.Load(), now, s.name, s.enrich)
-		for _, out := range drained {
-			if bytes.Contains(out, tunnelPeerMarker) {
-				s.stats.timedOut.Add(1)
-			} else {
-				s.stats.resolvedRetry.Add(1)
-			}
-		}
-		ready = append(ready, drained...)
-		write(ready)
-		if newOffset != offset {
-			saveOffset(s.statePath, newOffset)
+			ready = append(ready, enriched)
+		} else {
+			s.stats.attempted.Add(1)
+			s.queue.add(line, pendingTimeout, now)
 		}
 	}
+	drained := s.queue.drain(*vm.Load(), *tftpVM.Load(), now, s.name, s.enrich)
+	for _, out := range drained {
+		if bytes.Contains(out, tunnelPeerMarker) {
+			s.stats.timedOut.Add(1)
+		} else {
+			s.stats.resolvedRetry.Add(1)
+		}
+	}
+	ready = append(ready, drained...)
+	if !writeLines(out, s.name, s.output, ready) {
+		return offset // don't advance/persist offset over a batch that failed to write
+	}
+	if newOffset == offset {
+		return offset
+	}
+	if err := saveOffset(s.statePath, newOffset); err != nil {
+		log.Printf("ip-enrichment-worker: %s: save offset %s: %v", s.name, s.statePath, err)
+		return offset // keep the in-memory offset unchanged; retry the same range next tick
+	}
+	return newOffset
+}
+
+// writeLines reports whether every line was written successfully. On a
+// partial/failed write the caller must not advance/persist the input
+// offset, or the unwritten lines are gone for good -- readNewLines would
+// resume past them on the next tick.
+func writeLines(out *os.File, name, path string, lines [][]byte) bool {
+	for _, line := range lines {
+		if _, err := out.Write(line); err != nil {
+			log.Printf("ip-enrichment-worker: %s: write output %s: %v", name, path, err)
+			return false
+		}
+		if _, err := out.Write([]byte("\n")); err != nil {
+			log.Printf("ip-enrichment-worker: %s: write output %s: %v", name, path, err)
+			return false
+		}
+	}
+	return true
 }
