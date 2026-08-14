@@ -94,7 +94,12 @@ func (rs *reportStore) listGenerated() ([]generatedReport, error) {
 	if rs.es == nil {
 		return nil, errReportsStorageUnavailable
 	}
-	hits, err := rs.es.docSearchAll(generatedReportIndex, 10000)
+	// #1341: excludes pdf_base64 -- every caller here only reads
+	// generatedReport's own metadata fields (stored.generatedReport below
+	// never touches stored.PDFBase64), so there's no reason to pull every
+	// stored report's full base64 PDF (up to generatedReportMaxBytes each)
+	// over the wire just to read a few small fields out of it.
+	hits, err := rs.es.docSearchAllExcluding(generatedReportIndex, 10000, "pdf_base64")
 	if err != nil {
 		return nil, err
 	}
