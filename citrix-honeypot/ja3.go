@@ -36,6 +36,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -56,12 +57,16 @@ func isGREASE(v uint16) bool {
 	return hi == lo && lo&0x0f == 0x0a
 }
 
-// ja3Listener peeks each connection's ClientHello at Accept() time --
-// same blocking-at-accept precedent proxyproto.go's proxyListener already
-// established for the PROXY header -- and computes its JA3 and JA4 (#759)
-// fingerprints before the real TLS handshake (tls.NewListener wraps this
-// listener) ever runs. A short read deadline bounds how long a slow/absent
-// ClientHello can hold up the shared accept loop.
+// ja3Listener wraps each accepted connection so its ClientHello is peeked
+// and fingerprinted (JA3 and JA4, #759) before the real TLS handshake
+// (tls.NewListener wraps this listener) ever runs. The peek itself happens
+// lazily, on the connection's first Read -- not here in Accept(). net/http's
+// Server.Serve() calls l.Accept() from a single, unbuffered accept loop and
+// only spawns a per-connection goroutine (and, for a *tls.Conn, only then
+// begins the handshake, which triggers this Read) after Accept() returns;
+// peeking synchronously inside Accept() would block that shared loop for up
+// to the peek's own read deadline on every connection, including a
+// slow/silent one, stalling admission of every other connection too.
 type ja3Listener struct{ net.Listener }
 
 func (l *ja3Listener) Accept() (net.Conn, error) {
@@ -69,37 +74,48 @@ func (l *ja3Listener) Accept() (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	c.SetReadDeadline(time.Now().Add(5 * time.Second))
-	r := bufio.NewReaderSize(c, maxClientHelloBytes)
-	// Both peek (never consume) the same buffered reader -- Peek doesn't
-	// advance the read position, so calling both here costs one extra
-	// small-buffer reparse, not a second byte read off the wire.
-	fp3 := peekJA3(r)
-	fp4 := peekJA4(r)
-	c.SetReadDeadline(time.Time{}) // clear; the real TLS handshake sets its own
-	return &ja3Conn{Conn: c, r: r, fp: fp3, fp4: fp4}, nil
+	return &ja3Conn{Conn: c, r: bufio.NewReaderSize(c, maxClientHelloBytes)}, nil
 }
 
-// ja3Conn replays the bytes peekJA3/peekJA4 already read (via r) to the
-// real TLS handshake, and carries the computed fingerprints for
-// ConnContext to pick up (see main.go) once the handshake calls Read.
+// ja3Conn peeks (once, via sync.Once) the ClientHello off r on the first
+// Read the real TLS handshake makes -- running in the per-connection
+// goroutine, not the shared accept loop -- then replays those same bytes
+// (Peek never consumes them) to the handshake. JA3/JA4 also trigger the
+// peek defensively, in case either is ever called before any Read has.
 type ja3Conn struct {
 	net.Conn
-	r   *bufio.Reader
-	fp  string
-	fp4 string
+	r    *bufio.Reader
+	once sync.Once
+	fp   string
+	fp4  string
 }
 
-func (j *ja3Conn) Read(b []byte) (int, error) { return j.r.Read(b) }
+func (j *ja3Conn) peek() {
+	j.once.Do(func() {
+		j.Conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		// Both peek (never consume) the same buffered reader -- Peek
+		// doesn't advance the read position, so calling both here costs
+		// one extra small-buffer reparse, not a second byte read off the
+		// wire.
+		j.fp = peekJA3(j.r)
+		j.fp4 = peekJA4(j.r)
+		j.Conn.SetReadDeadline(time.Time{}) // clear; the real TLS handshake sets its own
+	})
+}
+
+func (j *ja3Conn) Read(b []byte) (int, error) {
+	j.peek()
+	return j.r.Read(b)
+}
 
 // JA3 returns the fingerprint computed from this connection's ClientHello,
 // or "" if none was found (non-TLS traffic or a truncated/malformed
 // handshake).
-func (j *ja3Conn) JA3() string { return j.fp }
+func (j *ja3Conn) JA3() string { j.peek(); return j.fp }
 
 // JA4 returns the JA4 fingerprint (#759) computed from this connection's
 // ClientHello, or "" if none was found -- same conditions as JA3 above.
-func (j *ja3Conn) JA4() string { return j.fp4 }
+func (j *ja3Conn) JA4() string { j.peek(); return j.fp4 }
 
 // peekClientHelloBody peeks (never consumes -- the real TLS handshake still
 // needs every byte) a single TLS record off r and returns the Handshake
