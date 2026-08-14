@@ -85,6 +85,60 @@ func TestDeadLettersRouteBranchesOnMethod(t *testing.T) {
 	}
 }
 
+// TestPurgeDeadLettersRequiresAdmin is a regression test for #1336:
+// DELETE /api/dead-letters is a destructive bulk delete, but unlike every
+// other mutating/destructive endpoint in the dashboard it never called
+// requireAdmin. Under DASHBOARD_REQUIRE_ADMIN=true, a non-admin session
+// must be rejected before the delete-by-query request ever reaches
+// Elasticsearch, and a genuine admin session must still succeed.
+func TestPurgeDeadLettersRequiresAdmin(t *testing.T) {
+	t.Setenv("DASHBOARD_REQUIRE_ADMIN", "true")
+
+	t.Run("non-admin is rejected", func(t *testing.T) {
+		configureIdentityTestBackend(t, "user")
+		called := false
+		es := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = true
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"deleted":99}`)
+		}))
+		defer es.Close()
+
+		c := newESClient(es.URL, "")
+		req := httptest.NewRequest("DELETE", "/api/dead-letters", nil)
+		addIdentityTestCookie(req)
+		w := httptest.NewRecorder()
+		c.purgeDeadLetters(w, req)
+
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusForbidden)
+		}
+		if called {
+			t.Fatal("purgeDeadLetters must not reach Elasticsearch for a non-admin session")
+		}
+	})
+
+	t.Run("admin succeeds", func(t *testing.T) {
+		configureIdentityTestBackend(t, "admin")
+		var gotMethod, gotPath string
+		es := httptest.NewServer(deadLetterPurgeStub(t, &gotMethod, &gotPath, 7))
+		defer es.Close()
+
+		c := newESClient(es.URL, "")
+		req := httptest.NewRequest("DELETE", "/api/dead-letters", nil)
+		addIdentityTestCookie(req)
+		w := httptest.NewRecorder()
+		c.purgeDeadLetters(w, req)
+
+		if w.Code != 200 {
+			t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+		}
+		if gotMethod != "POST" {
+			t.Fatalf("expected Elasticsearch to receive POST for _delete_by_query, got %s", gotMethod)
+		}
+	})
+}
+
 func deadLetterPurgeStub(t *testing.T, gotMethod, gotPath *string, deleted int64) http.HandlerFunc {
 	t.Helper()
 	return func(w http.ResponseWriter, r *http.Request) {

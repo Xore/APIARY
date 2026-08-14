@@ -563,6 +563,9 @@ func (c *esClient) deadLetters(w http.ResponseWriter, r *http.Request) {
 // the operator explicitly clearing the search box first -- the confirmation
 // modal states the scope in words either way.
 func (c *esClient) purgeDeadLetters(w http.ResponseWriter, r *http.Request) {
+	if !requireAdmin(w, r) {
+		return
+	}
 	path := "/dead-letter-honeypot*/_delete_by_query?conflicts=proceed"
 	if q := strings.TrimSpace(r.URL.Query().Get("q")); q != "" {
 		path += "&q=" + url.QueryEscape(q)
