@@ -43,6 +43,50 @@ func TestRandomBannerLineNeverStartsWithSSHPrefix(t *testing.T) {
 	}
 }
 
+// TestResolveDelayRejectsNonPositive covers #1349: DELAY_MS=0 (or negative)
+// must be rejected here, at startup, rather than reaching serve's
+// time.NewTicker(delay), which panics for any non-positive duration inside
+// a per-connection goroutine with no recover.
+func TestResolveDelayRejectsNonPositive(t *testing.T) {
+	for _, ms := range []int{0, -1, -10000} {
+		if _, err := resolveDelay(ms); err == nil {
+			t.Errorf("resolveDelay(%d) = nil error, want a rejection", ms)
+		}
+	}
+}
+
+func TestResolveDelayAcceptsPositive(t *testing.T) {
+	d, err := resolveDelay(10000)
+	if err != nil {
+		t.Fatalf("resolveDelay(10000) = %v, want no error", err)
+	}
+	if d != 10*time.Second {
+		t.Fatalf("resolveDelay(10000) = %s, want 10s", d)
+	}
+}
+
+// TestNextAcceptBackoffDoublesAndCaps covers #1349: repeated Accept()
+// errors must back off instead of retrying unconditionally (which spins a
+// CPU core at 100% under persistent fd exhaustion), and the backoff must
+// not grow unbounded.
+func TestNextAcceptBackoffDoublesAndCaps(t *testing.T) {
+	d := time.Duration(0)
+	d = nextAcceptBackoff(d)
+	if d != 5*time.Millisecond {
+		t.Fatalf("first backoff = %s, want 5ms", d)
+	}
+	d = nextAcceptBackoff(d)
+	if d != 10*time.Millisecond {
+		t.Fatalf("second backoff = %s, want 10ms", d)
+	}
+	for i := 0; i < 20; i++ {
+		d = nextAcceptBackoff(d)
+	}
+	if d != maxAcceptBackoff {
+		t.Fatalf("backoff after many failures = %s, want it capped at %s", d, maxAcceptBackoff)
+	}
+}
+
 func TestPortOfParsesListenAddr(t *testing.T) {
 	cases := map[string]int{":2222": 2222, "0.0.0.0:22": 22, "not-an-addr": 0}
 	for addr, want := range cases {
