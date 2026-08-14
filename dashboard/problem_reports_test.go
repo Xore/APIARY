@@ -56,6 +56,31 @@ func TestRedactCapturedTextTruncatesOversizedInput(t *testing.T) {
 	}
 }
 
+// Regression test for #1338: redactCapturedURL must mask every
+// query-string parameter VALUE, including ones outside
+// redactCapturedText's own fixed field-name list (e.g. a bare "token"),
+// while leaving the path intact so operators can still tell which endpoint
+// was called.
+func TestRedactCapturedURLMasksQueryStringValues(t *testing.T) {
+	got := redactCapturedURL("/api/export?token=eyJhbGciOiJIUzI1NiJ9.secret&format=csv")
+	if strings.Contains(got, "eyJhbGciOiJIUzI1NiJ9.secret") {
+		t.Fatalf("redactCapturedURL(%q) = %q, still contains the token value", "...", got)
+	}
+	if !strings.Contains(got, "/api/export") {
+		t.Fatalf("redactCapturedURL should keep the path, got %q", got)
+	}
+	if !strings.Contains(got, "redacted") {
+		t.Fatalf("redactCapturedURL should mask query values with a redacted marker, got %q", got)
+	}
+
+	if got := redactCapturedURL(""); got != "" {
+		t.Fatalf("redactCapturedURL(\"\") = %q, want empty", got)
+	}
+	if got := redactCapturedURL("/api/whoami"); got != "/api/whoami" {
+		t.Fatalf("redactCapturedURL should leave a query-free URL untouched, got %q", got)
+	}
+}
+
 func TestSubmitProblemReportRejectsWhenFeatureDisabled(t *testing.T) {
 	s := newTestProblemReportStore(t)
 	// s.settings is nil, so problemReportButtonEnabled() falls back to
@@ -142,6 +167,53 @@ func TestSubmitProblemReportSucceedsAndRedactsBeforeStoring(t *testing.T) {
 	}
 	if strings.Contains(stored.DOMSnapshot, "supersecrettoken123") {
 		t.Fatalf("expected the stored DOM snapshot to be redacted, got %q", stored.DOMSnapshot)
+	}
+}
+
+// Regression test for #1338: submitProblemReport redacted every captured
+// API-call field except APICall.URL, so a secret embedded as a
+// query-string value (rather than a JSON body field) was stored and served
+// back in cleartext. The URL must now come out redacted the same as
+// RequestBody/ResponseBody.
+func TestSubmitProblemReportRedactsAPICallURL(t *testing.T) {
+	s := newTestProblemReportStore(t)
+	enableProblemReportButton(t, s)
+
+	body, _ := json.Marshal(problemReportSubmission{
+		Page:     "/overview",
+		Expected: "the page should load",
+		APICalls: []problemReportAPICall{
+			{Method: "GET", URL: "/api/export?token=eyJhbGciOiJIUzI1NiJ9.supersecrettoken456", Status: 200},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/problem-reports", bytes.NewReader(body))
+	req = withIdentity(req, authenticatedIdentity{Subject: "0123456789abcdef", Username: "alice", Role: "operator"})
+	rec := httptest.NewRecorder()
+	s.serveProblemReports(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil || created.ID == "" {
+		t.Fatalf("expected a report id in the response, got %s (err=%v)", rec.Body.String(), err)
+	}
+
+	hit, found, err := s.es.docGet(problemReportsIndex, created.ID)
+	if err != nil || !found {
+		t.Fatalf("expected the report to be stored under its id: found=%v err=%v", found, err)
+	}
+	var stored problemReport
+	if err := json.Unmarshal(hit.Source, &stored); err != nil {
+		t.Fatalf("unmarshal stored report: %v", err)
+	}
+	if len(stored.APICalls) != 1 {
+		t.Fatalf("expected 1 stored API call, got %d", len(stored.APICalls))
+	}
+	if strings.Contains(stored.APICalls[0].URL, "supersecrettoken456") {
+		t.Fatalf("expected the stored API call URL to be redacted, got %q", stored.APICalls[0].URL)
 	}
 }
 

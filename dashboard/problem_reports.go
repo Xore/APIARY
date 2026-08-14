@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"html/template"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -80,6 +81,35 @@ func redactCapturedText(s string) string {
 		s = re.ReplaceAllString(s, "${1}[redacted]")
 	}
 	return s
+}
+
+// redactCapturedURL masks every query-string parameter VALUE in raw,
+// unconditionally, regardless of key name (#1338): a captured API call's
+// URL can carry a secret as a query-string value (e.g.
+// /api/export?token=eyJhbGciOi...) under any of many possible key names --
+// redactCapturedText's own key=value pattern only recognizes a fixed list
+// of field names, so a query param outside that list (like a bare "token")
+// would pass through untouched. The path and host are left intact --
+// operators need them to identify which endpoint was called, and this
+// codebase's own API surface never carries a request-scoped secret there.
+// Falls back to redactCapturedText alone if raw doesn't parse as a URL.
+func redactCapturedURL(raw string) string {
+	if raw == "" {
+		return raw
+	}
+	if len(raw) > maxCapturedTextBytes {
+		raw = raw[:maxCapturedTextBytes] + "...[truncated]"
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.RawQuery == "" {
+		return redactCapturedText(raw)
+	}
+	q := u.Query()
+	for key := range q {
+		q[key] = []string{"[redacted]"}
+	}
+	u.RawQuery = q.Encode()
+	return redactCapturedText(u.String())
 }
 
 type problemReportActionEntry struct {
@@ -211,6 +241,7 @@ func (s *store) submitProblemReport(w http.ResponseWriter, r *http.Request) {
 		apiCalls = apiCalls[len(apiCalls)-maxAPICalls:]
 	}
 	for i := range apiCalls {
+		apiCalls[i].URL = redactCapturedURL(apiCalls[i].URL)
 		apiCalls[i].RequestBody = redactCapturedText(apiCalls[i].RequestBody)
 		apiCalls[i].ResponseBody = redactCapturedText(apiCalls[i].ResponseBody)
 	}
