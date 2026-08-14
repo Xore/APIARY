@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -173,7 +174,7 @@ func docScrollAll[T any](es *esClient, index string, limit int) ([]T, bool) {
 		}
 		b, err := es.searchBody("/_search", reqBody)
 		if err != nil {
-			break
+			return out, false
 		}
 		var v struct {
 			Hits struct {
@@ -183,7 +184,17 @@ func docScrollAll[T any](es *esClient, index string, limit int) ([]T, bool) {
 				} `json:"hits"`
 			} `json:"hits"`
 		}
-		if json.Unmarshal(b, &v) != nil || len(v.Hits.Hits) == 0 {
+		// An unmarshal error means this page's response is unparseable --
+		// not "no more results". Treating the two the same silently
+		// truncates the existing-entity population and reports a complete,
+		// successful load: on the next cycle, resolveIdentities can't find
+		// the un-loaded entities' IPs and forks their identity into a
+		// brand-new entity instead of merging into the real one.
+		if err := json.Unmarshal(b, &v); err != nil {
+			log.Printf("attacker-identity-worker: docScrollAll %s: unmarshal search response: %v", index, err)
+			return out, false
+		}
+		if len(v.Hits.Hits) == 0 {
 			break
 		}
 		for _, h := range v.Hits.Hits {
