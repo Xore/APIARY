@@ -43,6 +43,14 @@ func loadWorkbenchModelStatus() workbenchModelStatus {
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{Timeout: time.Second}).DialContext(ctx, "unix", socket)
 	}}
+	// This Transport is built fresh per call and discarded after one request,
+	// so its idle connection must be closed explicitly (#1339): Body.Close()
+	// alone only returns the connection to THIS transport's own idle pool --
+	// it doesn't close the underlying socket -- and with the transport itself
+	// then unreferenced except by the pooled conn's own readLoop goroutine,
+	// nothing would ever call CloseIdleConnections for it otherwise, leaking
+	// one goroutine and one open Unix-socket fd per call indefinitely.
+	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: 2 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
 	response, err := client.Get("http://model-status/v1/status")
 	if err != nil {
