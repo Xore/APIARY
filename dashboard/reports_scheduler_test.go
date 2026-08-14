@@ -147,6 +147,73 @@ func TestScheduledReportLifecycle(t *testing.T) {
 	_ = created2
 }
 
+// TestRenderDueReportRecoversFromPanic is a regression test for #1340:
+// renderDueReport must recover a panic from the render step and turn it
+// into an error, not let it propagate and crash the process -- matching
+// the safety net net/http already provides per-request.
+func TestRenderDueReportRecoversFromPanic(t *testing.T) {
+	previous := renderDefinitionForSchedule
+	t.Cleanup(func() { renderDefinitionForSchedule = previous })
+	renderDefinitionForSchedule = func(s *store, id, origin string) (generatedReport, string, error) {
+		panic("boom: pathological scope/template combination")
+	}
+
+	s := newReportTestStore(t)
+	err := s.renderDueReport(reportDefinition{ID: "def-1", Name: "Panicking report"})
+	if err == nil {
+		t.Fatal("expected renderDueReport to return an error for a panicking render, got nil")
+	}
+	if !strings.Contains(err.Error(), "panic") || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("expected the recovered panic to be reflected in the error, got %v", err)
+	}
+}
+
+// TestRunDueReportsRecoversAndAdvancesSchedule is a regression test for
+// #1340's failure mode: without recovery, a panicking definition crashes
+// the whole process before markScheduledRun ever runs, so the same
+// still-due definition gets picked up again on the very next tick after
+// restart -- a persistent crash-restart loop. With recovery, the run still
+// advances the schedule (same as any other failed run) and the process
+// keeps running to process the rest of the tick.
+func TestRunDueReportsRecoversAndAdvancesSchedule(t *testing.T) {
+	previous := renderDefinitionForSchedule
+	t.Cleanup(func() { renderDefinitionForSchedule = previous })
+	renderDefinitionForSchedule = func(s *store, id, origin string) (generatedReport, string, error) {
+		panic("boom")
+	}
+
+	s := newReportTestStore(t)
+	def := sampleDefinition("custom")
+	def.Name = "Panicking scheduled report"
+	def.Schedule = &reportSchedule{Enabled: true, Frequency: "daily", Hour: 6, Minute: 30}
+	created, _, err := s.reports.putDefinition("", def)
+	if err != nil {
+		t.Fatalf("create scheduled definition: %v", err)
+	}
+	past := time.Now().UTC().Add(-time.Minute)
+	if _, _, err := s.reports.inner.Update("", func(doc *reportsDocument) error {
+		doc.Definitions[0].Schedule.NextRunAt = past
+		return nil
+	}); err != nil {
+		t.Fatalf("backdate schedule: %v", err)
+	}
+
+	// The panic inside runDueReports must not propagate out of this call --
+	// a real regression here would fail the test process itself (a bare
+	// panic in a test goroutine crashes `go test`), not just this assertion.
+	s.runDueReports()
+
+	doc, _ := s.reports.document()
+	failing := doc.Definitions[0].Schedule
+	if !failing.LastRunAt.IsZero() {
+		t.Fatal("a panicking run must not record LastRunAt, same as any other failed run")
+	}
+	if !failing.NextRunAt.After(time.Now().UTC()) {
+		t.Fatal("schedule must still advance to its next fire time after a panicking run, not get stuck re-firing every tick")
+	}
+	_ = created
+}
+
 // TestScheduleDisablesCleanly proves turning a schedule off clears the fire
 // time so the scheduler ignores the definition.
 func TestScheduleDisablesCleanly(t *testing.T) {
