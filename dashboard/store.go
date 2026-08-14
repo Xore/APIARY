@@ -206,6 +206,8 @@ type store struct {
 	hashPathMu        sync.Mutex
 	hashPathCache     map[string]string    // sha256 -> resolved payload path (#364)
 	hashPathMiss      map[string]time.Time // sha256 -> when the full content-hash scan last found nothing (#516)
+	hashPathScanStart time.Time            // start of the current hashPathScanBudgetWindow (#1335)
+	hashPathScanCount int                  // full-corpus scans spent within hashPathScanStart's window (#1335)
 	snap              snapshot
 	events            []storedEvent // newest first; replaced wholesale each rebuild
 	payloadCache      payloadsPage

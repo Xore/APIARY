@@ -4,12 +4,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestPayloadAnalysisShellDoesNoFileAnalysis (#1157): even measured against
@@ -149,5 +151,103 @@ func TestServePayloadStaticAnalysisReturnsFullAnalysisJSON(t *testing.T) {
 	s.servePayloadStaticAnalysis(wrongActionW, wrongActionReq)
 	if wrongActionW.Code != 404 {
 		t.Fatalf("wrong action segment: status = %d, want 404", wrongActionW.Code)
+	}
+}
+
+// Regression test for #1335: hashPathMiss must not grow without bound. A
+// burst of distinct not-found hashes, all still within hashPathMissTTL (so
+// the TTL sweep alone can't shrink it), must still be capped at
+// hashPathMissMax by evicting the oldest entry to make room.
+func TestRecordHashPathMissBoundsMapSize(t *testing.T) {
+	s := &store{}
+	for i := 0; i < hashPathMissMax+50; i++ {
+		s.recordHashPathMiss(fmt.Sprintf("%064x", i))
+	}
+	if len(s.hashPathMiss) > hashPathMissMax {
+		t.Fatalf("hashPathMiss grew to %d entries, want <= %d", len(s.hashPathMiss), hashPathMissMax)
+	}
+}
+
+// Regression test for #1335: entries past hashPathMissTTL must be swept on
+// insert, not retained forever.
+func TestRecordHashPathMissSweepsExpiredEntries(t *testing.T) {
+	s := &store{hashPathMiss: map[string]time.Time{
+		"stale": time.Now().Add(-2 * hashPathMissTTL),
+	}}
+	s.recordHashPathMiss("fresh")
+	if _, ok := s.hashPathMiss["stale"]; ok {
+		t.Fatal("expired miss entry should have been swept on insert")
+	}
+	if _, ok := s.hashPathMiss["fresh"]; !ok {
+		t.Fatal("newly recorded miss should be present")
+	}
+}
+
+// Regression test for #1335: allowHashPathScan must cap full-corpus scans
+// at hashPathScanBudget within one hashPathScanBudgetWindow.
+func TestAllowHashPathScanEnforcesBudget(t *testing.T) {
+	s := &store{}
+	for i := 0; i < hashPathScanBudget; i++ {
+		if !s.allowHashPathScan() {
+			t.Fatalf("allowHashPathScan denied scan %d, want allowed within budget", i)
+		}
+	}
+	if s.allowHashPathScan() {
+		t.Fatal("allowHashPathScan should deny once the per-window budget is spent")
+	}
+}
+
+// Regression test for #1335: once the scan budget for a window is spent, a
+// scripted loop of distinct fake hashes must not be able to force further
+// full-corpus disk walks -- confirmed here against a REAL payload that
+// exists on disk but was never looked up before, which must still miss.
+func TestPayloadPathBySHA256StopsScanningPastBudget(t *testing.T) {
+	dir := t.TempDir()
+	s := &store{payloadDirs: []string{dir}}
+
+	for i := 0; i < hashPathScanBudget; i++ {
+		want := fmt.Sprintf("%064x", i)
+		if _, err := s.payloadPathBySHA256(want); err == nil {
+			t.Fatalf("payloadPathBySHA256(%s) unexpectedly found a match", want)
+		}
+	}
+
+	content := []byte("budget-exhausted payload, never looked up before")
+	sum := sha256.Sum256(content)
+	name := hex.EncodeToString(sum[:])
+	if err := os.WriteFile(filepath.Join(dir, name), content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.payloadPathBySHA256(name); err == nil {
+		t.Fatal("payloadPathBySHA256 should not find a real payload once the scan budget for this window is spent")
+	}
+}
+
+// Regression test for #1335: a local payload with no fresh ES mirror and a
+// size over payloadBytesRawCap must not be read into memory in full to
+// compute MD5/SHA1/SHA256 -- staticAnalysisFor must fall back to a reduced,
+// hash-free result (SHA256 still derived from the trusted filename) instead.
+func TestStaticAnalysisForTooLargePayloadSkipsFullRead(t *testing.T) {
+	dir := t.TempDir()
+	name := strings.Repeat("b", 64)
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, make([]byte, payloadBytesRawCap+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &store{payloadDirs: []string{dir}}
+	a, err := s.staticAnalysisFor(path)
+	if err != nil {
+		t.Fatalf("staticAnalysisFor: %v", err)
+	}
+	if !a.Truncated {
+		t.Fatal("oversized payload analysis should report Truncated")
+	}
+	if a.SHA256 != name {
+		t.Fatalf("SHA256 = %q, want %q (derived from the trusted filename, not a content hash)", a.SHA256, name)
+	}
+	if a.MD5 != "" || a.SHA1 != "" {
+		t.Fatalf("MD5/SHA1 should be left blank for a too-large payload rather than computed from a truncated read, got MD5=%q SHA1=%q", a.MD5, a.SHA1)
 	}
 }
