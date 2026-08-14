@@ -41,6 +41,37 @@ type commandsPage struct {
 
 const topCommandsChartLimit = 15
 
+// sanitizeCSVField neutralizes a leading =, +, -, or @ (#1337): opened in
+// Excel/Sheets/LibreOffice, a cell starting with one of those characters is
+// evaluated as a formula, letting attacker-controlled honeypot text (a
+// Cowrie command, a captured username/password, ...) execute arbitrary
+// spreadsheet formulas -- or DDE commands -- on the analyst's machine.
+// encoding/csv only handles CSV syntax (quoting/commas), not spreadsheet
+// formula semantics, so this runs first. Prefixing a single quote is the
+// standard CSV-injection mitigation: every spreadsheet app treats a
+// leading quote as "this is text", and encoding/csv's own quoting takes
+// care of escaping the quote itself from there.
+func sanitizeCSVField(s string) string {
+	if s == "" {
+		return s
+	}
+	switch s[0] {
+	case '=', '+', '-', '@':
+		return "'" + s
+	}
+	return s
+}
+
+// sanitizeCSVRow applies sanitizeCSVField to every field in row, so each of
+// this file's export functions can build its row in one pass instead of
+// wrapping each field individually.
+func sanitizeCSVRow(row []string) []string {
+	for i, field := range row {
+		row[i] = sanitizeCSVField(field)
+	}
+	return row
+}
+
 func (s *store) commandsData(r *http.Request) commandsPage {
 	f := parseFilter(r)
 	type agg struct {
@@ -121,7 +152,7 @@ func (s *store) exportEventsCSV(w http.ResponseWriter, r *http.Request) {
 	defer c.Flush()
 	_ = c.Write([]string{"time", "sensor", "source_ip", "country", "city", "asn", "organization", "provider", "protocol", "port", "username", "password", "command", "path", "alert", "session", "payload_hash", "detail"})
 	for _, e := range parseFilter(r).filtered(s.getEvents()) {
-		_ = c.Write([]string{e.Time, e.Sensor, e.SrcIP, e.Country, e.City, strconv.FormatUint(uint64(e.ASN), 10), e.Org, firstNonEmpty(e.Intel, e.Provider), e.Proto, e.Port, e.User, e.Pass, e.Command, e.Path, e.Alert, e.Session, e.Shasum, e.Detail})
+		_ = c.Write(sanitizeCSVRow([]string{e.Time, e.Sensor, e.SrcIP, e.Country, e.City, strconv.FormatUint(uint64(e.ASN), 10), e.Org, firstNonEmpty(e.Intel, e.Provider), e.Proto, e.Port, e.User, e.Pass, e.Command, e.Path, e.Alert, e.Session, e.Shasum, e.Detail}))
 	}
 }
 
@@ -132,7 +163,7 @@ func (s *store) exportCommandsCSV(w http.ResponseWriter, r *http.Request) {
 	defer c.Flush()
 	_ = c.Write([]string{"sensor", "command", "count", "sources", "sessions", "first", "last"})
 	for _, row := range s.commandsData(r).Rows {
-		_ = c.Write([]string{row.Sensor, row.Command, strconv.Itoa(row.Count), row.Sources, strconv.Itoa(row.Sessions), row.First, row.Last})
+		_ = c.Write(sanitizeCSVRow([]string{row.Sensor, row.Command, strconv.Itoa(row.Count), row.Sources, strconv.Itoa(row.Sessions), row.First, row.Last}))
 	}
 }
 
@@ -148,7 +179,7 @@ func (s *store) exportIPsCSV(w http.ResponseWriter, r *http.Request) {
 	defer c.Flush()
 	_ = c.Write([]string{"ip", "country", "count", "logins", "sensors", "sessions", "first", "last"})
 	for _, row := range s.buildIPsData(parseFilter(r)).Rows {
-		_ = c.Write([]string{row.IP, row.Country, strconv.Itoa(row.Count), strconv.Itoa(row.Logins), row.Sensors, strconv.Itoa(row.Sessions), row.First, row.Last})
+		_ = c.Write(sanitizeCSVRow([]string{row.IP, row.Country, strconv.Itoa(row.Count), strconv.Itoa(row.Logins), row.Sensors, strconv.Itoa(row.Sessions), row.First, row.Last}))
 	}
 }
 
@@ -164,11 +195,11 @@ func (s *store) exportCampaignsCSV(w http.ResponseWriter, r *http.Request) {
 	defer c.Flush()
 	_ = c.Write([]string{"score", "network", "events", "ips", "sensors", "ports", "creds", "payloads", "alerts", "asns", "providers", "fingerprints", "sequence", "why_correlated", "first", "last"})
 	for _, row := range s.campaignsData(r).Campaigns {
-		_ = c.Write([]string{
+		_ = c.Write(sanitizeCSVRow([]string{
 			strconv.Itoa(row.Score), row.CIDR, strconv.Itoa(row.Events), strconv.Itoa(row.UniqueIPs),
 			row.Sensors, row.Ports, strconv.Itoa(row.Creds), strconv.Itoa(row.Payloads), strconv.Itoa(row.Alerts),
 			row.ASNs, row.Providers, strconv.Itoa(row.Fingerprints), row.Sequence, row.Explanation, row.First, row.Last,
-		})
+		}))
 	}
 }
 
@@ -188,6 +219,6 @@ func (s *store) exportClustersCSV(w http.ResponseWriter, r *http.Request) {
 		if kind != "" && row.Kind != kind {
 			continue
 		}
-		_ = c.Write([]string{row.Kind, row.Value, strconv.Itoa(row.Sources), strconv.Itoa(row.Events), row.Summary})
+		_ = c.Write(sanitizeCSVRow([]string{row.Kind, row.Value, strconv.Itoa(row.Sources), strconv.Itoa(row.Events), row.Summary}))
 	}
 }
