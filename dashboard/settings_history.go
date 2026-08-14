@@ -91,7 +91,10 @@ func (h *configHistory) read(limit int) []configHistoryEntry {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	var raw []byte
-	for _, path := range []string{h.path, h.path + ".1"} {
+	// Read the rotated generation first, then the live file, so the live
+	// file's lines sit at the tail of raw — the backward walk below
+	// reaches them first and returns them as the newest.
+	for _, path := range []string{h.path + ".1", h.path} {
 		data, err := os.ReadFile(path)
 		if err == nil {
 			raw = append(raw, data...)
