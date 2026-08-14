@@ -79,6 +79,7 @@ output/
 tmp/
 dashboard/dashboard
 cisco-asa-honeypot/cisco-asa-honeypot
+endlessh-honeypot/endlessh-honeypot
 citrix-honeypot/citrix-honeypot
 dicompot/dicompot-honeypot
 dns-honeypot/dns-honeypot
