@@ -160,11 +160,18 @@ func clientIP(r *http.Request) string {
 	}
 	// Behind a ":pp" portbridge rule the PROXY-aware listener has already
 	// rewritten RemoteAddr to the real attacker address — it wins over any
-	// header. Traefik-routed requests still show the tunnel peer, so take the
-	// first XFF hop Traefik recorded.
+	// header. Traefik-routed requests still show the tunnel peer, so fall
+	// back to XFF. Cloudflare APPENDS the real client IP to any XFF value
+	// the client already sent rather than replacing it, and socat does a
+	// pure byte-for-byte forward in between with no header rewriting -- so
+	// the leftmost hop is always attacker-controlled (`curl -H
+	// "X-Forwarded-For: 1.2.3.4" ...` spoofs it outright) while the
+	// rightmost hop is the one Cloudflare itself appended. Take the last
+	// hop, not the first.
 	if host == tunnelPeerIP {
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			return strings.TrimSpace(strings.Split(xff, ",")[0])
+			hops := strings.Split(xff, ",")
+			return strings.TrimSpace(hops[len(hops)-1])
 		}
 	}
 	return host
