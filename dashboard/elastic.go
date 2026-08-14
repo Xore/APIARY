@@ -377,10 +377,24 @@ func (c *esClient) docDelete(index, id string) error {
 // of this function (countRuns, listRuns*), so treat 404 the same way docGet
 // already treats a missing single document: zero hits, not an error.
 func (c *esClient) docSearchAll(index string, size int) ([]esDocHit, error) {
+	return c.docSearchAllExcluding(index, size)
+}
+
+// docSearchAllExcluding is docSearchAll's counterpart for callers that only
+// need a subset of each document's fields (#1341): an ES `_source_excludes`
+// filter means the excluded field's bytes are never sent over the wire or
+// unmarshaled, instead of being fetched and discarded -- the difference
+// that matters when a document can embed a large blob (a generated
+// report's base64 PDF, for one) that most callers don't need at all.
+func (c *esClient) docSearchAllExcluding(index string, size int, excludeFields ...string) ([]esDocHit, error) {
 	if size <= 0 || size > 10000 {
 		size = 10000
 	}
-	status, body, err := c.doRequest(http.MethodGet, fmt.Sprintf("/%s/_search?size=%d", index, size), nil)
+	path := fmt.Sprintf("/%s/_search?size=%d", index, size)
+	if len(excludeFields) > 0 {
+		path += "&_source_excludes=" + url.QueryEscape(strings.Join(excludeFields, ","))
+	}
+	status, body, err := c.doRequest(http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
 	}
