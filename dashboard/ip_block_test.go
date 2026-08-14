@@ -58,8 +58,12 @@ func TestIPBlockCreateReopenAndReblockWithNewExpiry(t *testing.T) {
 	if m.get("203.0.113.9").Active() {
 		t.Fatal("record still active after unblock")
 	}
-	if len(m.blockedIPs()) != 0 {
-		t.Fatalf("blockedIPs() after unblock = %v, want empty", m.blockedIPs())
+	afterUnblock, err := m.blockedIPs()
+	if err != nil {
+		t.Fatalf("blockedIPs(): %v", err)
+	}
+	if len(afterUnblock) != 0 {
+		t.Fatalf("blockedIPs() after unblock = %v, want empty", afterUnblock)
 	}
 
 	// Re-blocking with a new expiry must apply even though Blocked is
@@ -81,7 +85,10 @@ func TestIPBlockedIPsExcludesExpired(t *testing.T) {
 	m.block("203.0.113.2", true, "alice", time.Now().Add(time.Hour))  // future expiry, still active
 	m.block("203.0.113.3", true, "alice", time.Now().Add(-time.Hour)) // already expired
 
-	got := m.blockedIPs()
+	got, err := m.blockedIPs()
+	if err != nil {
+		t.Fatalf("blockedIPs(): %v", err)
+	}
 	want := []string{"203.0.113.1", "203.0.113.2"}
 	if len(got) != len(want) {
 		t.Fatalf("blockedIPs() = %v, want %v", got, want)
@@ -119,6 +126,64 @@ func TestServeManualBlackholeExportEmptyWhenUnconfigured(t *testing.T) {
 	s.serveManualBlackholeExport(w, r)
 	if w.Body.String() != "" {
 		t.Fatalf("expected empty export when ipBlocks is nil, got %q", w.Body.String())
+	}
+}
+
+// Regression test for #1342: on a genuine Elasticsearch failure,
+// serveManualBlackholeExport must respond with a 5xx status, not the same
+// 200-with-empty-body response it gives for a legitimately empty block
+// list -- vps/portbridge-manual-blackhole-refresh.sh treats this response
+// as authoritative and has no other way to tell "ES is down, keep the
+// existing rules" apart from "operator cleared every block".
+func TestServeManualBlackholeExportReturns5xxOnESError(t *testing.T) {
+	es := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "simulated ES outage", http.StatusInternalServerError)
+	}))
+	defer es.Close()
+	m := newIPBlockManager(newESClient(es.URL, ""))
+	s := &store{ipBlocks: m}
+
+	r := httptest.NewRequest(http.MethodGet, "/export/portbridge-manual-blackhole.txt", nil)
+	w := httptest.NewRecorder()
+	s.serveManualBlackholeExport(w, r)
+
+	if w.Code/100 == 2 {
+		t.Fatalf("expected a non-2xx status on an ES failure, got %d with body %q", w.Code, w.Body.String())
+	}
+}
+
+// TestServeManualBlackholeExportEmptyWithNoErrorWhenGenuinelyUnblocked is
+// #1342's other half: a genuinely empty block list (no ES error at all)
+// must still be the normal 200 with an empty body, distinct from the 5xx
+// error case above.
+func TestServeManualBlackholeExportEmptyWithNoErrorWhenGenuinelyUnblocked(t *testing.T) {
+	m := newTestIPBlockManager(t) // real, reachable, empty ES index
+	s := &store{ipBlocks: m}
+
+	r := httptest.NewRequest(http.MethodGet, "/export/portbridge-manual-blackhole.txt", nil)
+	w := httptest.NewRecorder()
+	s.serveManualBlackholeExport(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 for a genuinely empty block list", w.Code)
+	}
+	if w.Body.String() != "" {
+		t.Fatalf("expected empty body for a genuinely empty block list, got %q", w.Body.String())
+	}
+}
+
+// Regression test for #1342: blockedIPs() must return the error instead of
+// collapsing it to the same nil slice a genuinely empty index produces.
+func TestBlockedIPsReturnsErrorOnESFailure(t *testing.T) {
+	es := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "simulated ES outage", http.StatusInternalServerError)
+	}))
+	defer es.Close()
+	m := newIPBlockManager(newESClient(es.URL, ""))
+
+	ips, err := m.blockedIPs()
+	if err == nil {
+		t.Fatalf("expected an error on ES failure, got ips=%v err=nil", ips)
 	}
 }
 

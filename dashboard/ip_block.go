@@ -130,11 +130,15 @@ func (m *ipBlockManager) get(ip string) ipBlockRecord {
 
 // blockedIPs returns every currently-blocked address, sorted, for
 // serveManualBlackholeExport to render as the plain-text list
-// portbridge-manual-blackhole-refresh.sh pulls.
-func (m *ipBlockManager) blockedIPs() []string {
+// portbridge-manual-blackhole-refresh.sh pulls. A non-nil error means the
+// query itself failed (transport/ES error) -- distinct from a nil slice
+// with a nil error, which means the index genuinely has zero active blocks
+// right now (#1342): the caller must be able to tell an outage apart from
+// "nothing is blocked".
+func (m *ipBlockManager) blockedIPs() ([]string, error) {
 	hits, err := m.es.docSearchAll(ipBlockIndex, 10000)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var out []string
 	for _, hit := range hits {
@@ -144,7 +148,7 @@ func (m *ipBlockManager) blockedIPs() []string {
 		}
 	}
 	sort.Strings(out)
-	return out
+	return out, nil
 }
 
 // serveManualBlackholeExport is GET /export/portbridge-manual-blackhole.txt
@@ -156,11 +160,21 @@ func (m *ipBlockManager) blockedIPs() []string {
 // and the data itself is no more sensitive than the maltrail feed it sits
 // alongside on the VPS.
 func (s *store) serveManualBlackholeExport(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	if s.ipBlocks == nil {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		return
 	}
-	for _, ip := range s.ipBlocks.blockedIPs() {
+	ips, err := s.ipBlocks.blockedIPs()
+	if err != nil {
+		// A transient ES hiccup must not read as "operator cleared every
+		// block" to the puller (#1342): distinguish an outage (5xx, keep
+		// the existing rules) from a legitimately empty block list (200,
+		// empty body) below.
+		http.Error(w, "manual blackhole export unavailable: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	for _, ip := range ips {
 		fmt.Fprintln(w, ip)
 	}
 }
