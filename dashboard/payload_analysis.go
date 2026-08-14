@@ -28,6 +28,12 @@ import (
 
 const analysisReadCap = 16 << 20
 
+// errPayloadTooLargeForAnalysis signals a local payload larger than
+// payloadBytesRawCap with no fresh ES mirror to fall back on (#1335):
+// reading it in full to compute MD5/SHA1/SHA256 would have no upper bound
+// at all, so staticAnalysisFor returns a reduced, hash-free result instead.
+var errPayloadTooLargeForAnalysis = errors.New("payload too large to analyze inline")
+
 // hashPathMissTTL (#516) bounds how long payloadPathBySHA256 trusts a
 // "scanned every payloadDir, found nothing" result before paying for another
 // full content-hash scan. Without this, a hash that will never resolve --
@@ -40,6 +46,23 @@ const analysisReadCap = 16 << 20
 // session, long enough that repeatedly reloading the same still-missing
 // page (the exact reported pattern) stays fast.
 const hashPathMissTTL = 5 * time.Minute
+
+// hashPathMissMax bounds hashPathMiss's size (#1335): expired entries are
+// swept on every insert, but a burst of distinct not-found hashes within
+// one hashPathMissTTL window could still accumulate unboundedly without a
+// hard cap -- once at capacity the single oldest entry is evicted to make
+// room for the newest.
+const hashPathMissMax = 4096
+
+// hashPathScanBudget and hashPathScanBudgetWindow (#1335) cap how many
+// full-corpus WalkDir+hash scans distinct not-found lookups can trigger per
+// window, so a scripted loop of fake hashes can't force unlimited disk
+// walks. Lookups that hit the cache or are within hashPathMissTTL never
+// reach this budget; only genuinely new not-found hashes spend it.
+const (
+	hashPathScanBudget       = 30
+	hashPathScanBudgetWindow = time.Minute
+)
 
 type decodedArtifact struct {
 	Kind    string `json:"kind"`
@@ -197,6 +220,16 @@ func (s *store) payloadBytesForAnalysis(hash string, f *os.File, fi os.FileInfo)
 			return stored, nil
 		}
 	}
+	if fi.Size() > payloadBytesRawCap {
+		// Never mirrored by design (see payloadBytesRawCap) and, unlike the
+		// "not yet mirrored" case below, this state is permanent for this
+		// file -- every analysis request would otherwise pay an unbounded
+		// io.ReadAll of the whole file with no upper bound at all (#1335).
+		// MD5/SHA1/SHA256 below are computed from these bytes, so we can't
+		// just truncate the read without silently reporting wrong hashes;
+		// the caller falls back to a reduced, hash-free analysis instead.
+		return nil, errPayloadTooLargeForAnalysis
+	}
 	data, err := io.ReadAll(f)
 	if err != nil {
 		return nil, err
@@ -242,39 +275,52 @@ func (s *store) staticAnalysisFor(path string) (payloadStaticAnalysis, error) {
 		}
 	}
 	full, err := s.payloadBytesForAnalysis(hash, f, fi)
-	if err != nil {
+	var a payloadStaticAnalysis
+	switch {
+	case errors.Is(err, errPayloadTooLargeForAnalysis):
+		// hash is trusted as this payload's real SHA256 -- the capture
+		// pipeline names every payload file by its own hash (hashName,
+		// enforced everywhere a payload path is resolved) -- so SHA256/VT
+		// still work without hashing content. MD5/SHA1 need the actual
+		// bytes and are left blank rather than paying an unbounded read.
+		a = payloadStaticAnalysis{
+			Size: humanBytes(fi.Size()), SHA256: hash, Truncated: true,
+			VT: "https://www.virustotal.com/gui/file/" + hash,
+		}
+	case err != nil:
 		return payloadStaticAnalysis{}, err
+	default:
+		h1, h2, h3 := md5.New(), sha1.New(), sha256.New()
+		if _, err := io.Copy(io.MultiWriter(h1, h2, h3), bytes.NewReader(full)); err != nil {
+			return payloadStaticAnalysis{}, err
+		}
+		data := full
+		if int64(len(data)) > analysisReadCap {
+			data = data[:analysisReadCap]
+		}
+		preview := data
+		if len(preview) > 512 {
+			preview = preview[:512]
+		}
+		entropy := shannonEntropy(data)
+		classification := classifyPayload(data)
+		a = payloadStaticAnalysis{
+			Size: humanBytes(fi.Size()), MIME: http.DetectContentType(data), Magic: magicName(data),
+			Classification: classification,
+			MD5:            hex.EncodeToString(h1.Sum(nil)), SHA1: hex.EncodeToString(h2.Sum(nil)), SHA256: hex.EncodeToString(h3.Sum(nil)),
+			Entropy: fmt.Sprintf("%.3f bits/byte", entropy), EntropyValue: entropy, PackedLikely: entropy >= 7.2, Truncated: fi.Size() > analysisReadCap,
+			Hexdump: hex.Dump(preview), ASCII: extractASCII(data, 4, 160), UTF16: extractUTF16LE(data, 4, 80),
+			VT: "https://www.virustotal.com/gui/file/" + hex.EncodeToString(h3.Sum(nil)),
+		}
+		a.FormatInfo = executableMetadata(data)
+		a.Decoded = decodeArtifacts(data, append(append([]string{}, a.ASCII...), a.UTF16...))
+		a.ScriptType, a.Indicators = scriptMetadata(data)
+		if a.ScriptType == "" && classification.Category == "script" {
+			a.ScriptType = classification.Label
+		}
+		a.IOCs = extractIOCs(data)
+		a.Rules, a.StaticRiskScore, a.StaticRiskLevel = payloadRules(a, data)
 	}
-	h1, h2, h3 := md5.New(), sha1.New(), sha256.New()
-	if _, err := io.Copy(io.MultiWriter(h1, h2, h3), bytes.NewReader(full)); err != nil {
-		return payloadStaticAnalysis{}, err
-	}
-	data := full
-	if int64(len(data)) > analysisReadCap {
-		data = data[:analysisReadCap]
-	}
-	preview := data
-	if len(preview) > 512 {
-		preview = preview[:512]
-	}
-	entropy := shannonEntropy(data)
-	classification := classifyPayload(data)
-	a := payloadStaticAnalysis{
-		Size: humanBytes(fi.Size()), MIME: http.DetectContentType(data), Magic: magicName(data),
-		Classification: classification,
-		MD5:            hex.EncodeToString(h1.Sum(nil)), SHA1: hex.EncodeToString(h2.Sum(nil)), SHA256: hex.EncodeToString(h3.Sum(nil)),
-		Entropy: fmt.Sprintf("%.3f bits/byte", entropy), EntropyValue: entropy, PackedLikely: entropy >= 7.2, Truncated: fi.Size() > analysisReadCap,
-		Hexdump: hex.Dump(preview), ASCII: extractASCII(data, 4, 160), UTF16: extractUTF16LE(data, 4, 80),
-		VT: "https://www.virustotal.com/gui/file/" + hex.EncodeToString(h3.Sum(nil)),
-	}
-	a.FormatInfo = executableMetadata(data)
-	a.Decoded = decodeArtifacts(data, append(append([]string{}, a.ASCII...), a.UTF16...))
-	a.ScriptType, a.Indicators = scriptMetadata(data)
-	if a.ScriptType == "" && classification.Category == "script" {
-		a.ScriptType = classification.Label
-	}
-	a.IOCs = extractIOCs(data)
-	a.Rules, a.StaticRiskScore, a.StaticRiskLevel = payloadRules(a, data)
 	if cacheable {
 		if body, err := json.Marshal(staticAnalysisCacheDoc{Fingerprint: fingerprint, Analysis: a}); err == nil {
 			// Best-effort: a lost race against a concurrent analysis of the
@@ -694,6 +740,9 @@ func (s *store) payloadPathBySHA256(want string) (string, error) {
 		if missed && time.Since(missedAt) < hashPathMissTTL {
 			return "", os.ErrNotExist
 		}
+		if !s.allowHashPathScan() {
+			return "", os.ErrNotExist
+		}
 	}
 	var found string
 	for _, dir := range s.payloadDirs {
@@ -737,14 +786,59 @@ func (s *store) payloadPathBySHA256(want string) (string, error) {
 		}
 	}
 	if s != nil {
-		s.hashPathMu.Lock()
-		if s.hashPathMiss == nil {
-			s.hashPathMiss = make(map[string]time.Time)
-		}
-		s.hashPathMiss[want] = time.Now()
-		s.hashPathMu.Unlock()
+		s.recordHashPathMiss(want)
 	}
 	return "", os.ErrNotExist
+}
+
+// allowHashPathScan spends one of hashPathScanBudget full-corpus scans
+// allotted per hashPathScanBudgetWindow (#1335). It resets the window when
+// expired rather than sliding it, so it's a fixed-window limiter: cheap and
+// sufficient for bounding worst-case disk I/O from a scripted loop, not a
+// precise rate guarantee.
+func (s *store) allowHashPathScan() bool {
+	s.hashPathMu.Lock()
+	defer s.hashPathMu.Unlock()
+	now := time.Now()
+	if now.Sub(s.hashPathScanStart) >= hashPathScanBudgetWindow {
+		s.hashPathScanStart = now
+		s.hashPathScanCount = 0
+	}
+	if s.hashPathScanCount >= hashPathScanBudget {
+		return false
+	}
+	s.hashPathScanCount++
+	return true
+}
+
+// recordHashPathMiss caches a "scanned, found nothing" result and bounds
+// hashPathMiss's size (#1335): entries past hashPathMissTTL are swept on
+// every insert, and if the map is still at hashPathMissMax capacity after
+// the sweep, the single oldest entry is evicted to make room -- so a run of
+// distinct fake hashes can't grow the map without bound.
+func (s *store) recordHashPathMiss(want string) {
+	s.hashPathMu.Lock()
+	defer s.hashPathMu.Unlock()
+	if s.hashPathMiss == nil {
+		s.hashPathMiss = make(map[string]time.Time)
+	}
+	now := time.Now()
+	for hash, missedAt := range s.hashPathMiss {
+		if now.Sub(missedAt) >= hashPathMissTTL {
+			delete(s.hashPathMiss, hash)
+		}
+	}
+	if len(s.hashPathMiss) >= hashPathMissMax {
+		var oldestHash string
+		var oldestAt time.Time
+		for hash, missedAt := range s.hashPathMiss {
+			if oldestHash == "" || missedAt.Before(oldestAt) {
+				oldestHash, oldestAt = hash, missedAt
+			}
+		}
+		delete(s.hashPathMiss, oldestHash)
+	}
+	s.hashPathMiss[want] = now
 }
 
 func scriptMetadata(data []byte) (string, []string) {
