@@ -81,9 +81,20 @@ func parseProxy(r *bufio.Reader) net.Addr {
 	return nil
 }
 
+// maxProxyV1Line bounds how many bytes parseProxyV1 will buffer hunting for
+// the header's terminating newline. Per the PROXY protocol v1 spec, a
+// well-formed header line is never longer than 107 bytes (including the
+// CRLF); without this cap, bufio.Reader.ReadString keeps appending every
+// byte read to a growing slice with no size limit, so an attacker who sends
+// the 5-byte "PROXY" prefix followed by megabytes of non-newline data can
+// force this connection to buffer all of it in memory for the full 5-second
+// read-deadline window -- an easy memory-exhaustion DoS with many
+// concurrent connections.
+const maxProxyV1Line = 107
+
 // parseProxyV1 reads "PROXY TCP4 <src> <dst> <sport> <dport>\r\n".
 func parseProxyV1(r *bufio.Reader) net.Addr {
-	line, err := r.ReadString('\n')
+	line, err := bufio.NewReader(io.LimitReader(r, maxProxyV1Line)).ReadString('\n')
 	if err != nil {
 		return nil
 	}
