@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -201,7 +202,7 @@ func utcOrEmpty(t time.Time) string {
 // dashboard/payloads_data.go's own function of the same name, minus the
 // optimistic-concurrency CAS (see es.go's docIndex doc comment for why an
 // unconditioned overwrite is fine here).
-func indexPayloadInventory(es *esClient, files []capturedFile) {
+func indexPayloadInventory(es *esClient, files []capturedFile) (failures int) {
 	for _, file := range files {
 		fresh, err := json.Marshal(file)
 		if err != nil {
@@ -214,6 +215,8 @@ func indexPayloadInventory(es *esClient, files []capturedFile) {
 
 		hit, found, err := es.docGet(payloadInventoryIndex, file.Hash)
 		if err != nil {
+			log.Printf("payload-inventory-worker: docGet %s/%s: %v", payloadInventoryIndex, file.Hash, err)
+			failures++
 			continue
 		}
 
@@ -250,8 +253,12 @@ func indexPayloadInventory(es *esClient, files []capturedFile) {
 				body = merged
 			}
 		}
-		_ = es.docIndex(payloadInventoryIndex, file.Hash, body, !found)
+		if err := es.docIndex(payloadInventoryIndex, file.Hash, body, !found); err != nil {
+			log.Printf("payload-inventory-worker: docIndex %s/%s: %v", payloadInventoryIndex, file.Hash, err)
+			failures++
+		}
 	}
+	return failures
 }
 
 // fieldsUnchanged reports whether every key in want has an identical raw
@@ -274,29 +281,44 @@ func fieldsUnchanged(got, want map[string]json.RawMessage) bool {
 // fallback isn't needed here). The existence check is a HEAD (docExists),
 // not a full docGet -- #1221, see docExists' own doc comment for why that
 // mattered live.
-func mirrorPayloadBytes(es *esClient, hash, path string, size int64) {
+// mirrorPayloadBytes returns a non-nil error only for a failed Elasticsearch
+// call (docExists/docIndex), so runScan can distinguish an ES-side failure
+// from the benign case of a file that vanished or grew between the scan and
+// the mirror attempt.
+func mirrorPayloadBytes(es *esClient, hash, path string, size int64) error {
 	exists, err := es.docExists(payloadBytesIndex, hash)
-	if err != nil || exists {
-		return
+	if err != nil {
+		log.Printf("payload-inventory-worker: docExists %s/%s: %v", payloadBytesIndex, hash, err)
+		return err
+	}
+	if exists {
+		return nil
 	}
 	if size > payloadBytesRawCap {
 		marker, err := json.Marshal(storedPayloadBytes{Hash: hash, SizeBytes: size, TooLarge: true})
 		if err != nil {
-			return
+			return nil
 		}
-		_ = es.docIndex(payloadBytesIndex, hash, marker, true)
-		return
+		if err := es.docIndex(payloadBytesIndex, hash, marker, true); err != nil {
+			log.Printf("payload-inventory-worker: docIndex %s/%s: %v", payloadBytesIndex, hash, err)
+			return err
+		}
+		return nil
 	}
 	data, err := readPayloadBytesCapped(path, payloadBytesRawCap)
 	if err != nil {
-		return
+		return nil
 	}
 	doc := storedPayloadBytes{Hash: hash, SizeBytes: int64(len(data)), DataBase64: base64.StdEncoding.EncodeToString(data)}
 	body, err := json.Marshal(doc)
 	if err != nil || len(body) > payloadBytesMaxBytes {
-		return
+		return nil
 	}
-	_ = es.docIndex(payloadBytesIndex, hash, body, true)
+	if err := es.docIndex(payloadBytesIndex, hash, body, true); err != nil {
+		log.Printf("payload-inventory-worker: docIndex %s/%s: %v", payloadBytesIndex, hash, err)
+		return err
+	}
+	return nil
 }
 
 func readPayloadBytesCapped(path string, cap int64) ([]byte, error) {
