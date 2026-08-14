@@ -31,6 +31,41 @@ type rule struct {
 	target     string // host:port
 }
 
+// defaultIdleTimeout bounds how long a forwarded TCP connection may sit with
+// no data flowing in either direction before it's closed. Without this, an
+// attacker opening a connection and sending nothing holds two fds and two
+// goroutines open forever on the single process that fronts every forwarded
+// port, and enough idle connections against one rule starve every other
+// rule sharing this binary.
+const defaultIdleTimeout = 5 * time.Minute
+
+func idleTimeout() time.Duration {
+	if v := os.Getenv("IDLE_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return defaultIdleTimeout
+}
+
+// deadlineConn refreshes the connection's read/write deadline on every
+// operation, so io.Copy stops (and the connection closes) once the peer has
+// been silent for longer than timeout, instead of blocking indefinitely.
+type deadlineConn struct {
+	net.Conn
+	timeout time.Duration
+}
+
+func (d *deadlineConn) Read(p []byte) (int, error) {
+	d.Conn.SetReadDeadline(time.Now().Add(d.timeout))
+	return d.Conn.Read(p)
+}
+
+func (d *deadlineConn) Write(p []byte) (int, error) {
+	d.Conn.SetWriteDeadline(time.Now().Add(d.timeout))
+	return d.Conn.Write(p)
+}
+
 func parseRules(raw string) []rule {
 	fields := strings.FieldsFunc(raw, func(r rune) bool {
 		return r == ' ' || r == '\n' || r == '\t' || r == ',' || r == '\r'
@@ -94,20 +129,22 @@ func serveTCP(ip string, r rule) {
 		if err != nil {
 			continue
 		}
-		go pipeTCP(c, r.target)
+		go pipeTCP(c, r.target, idleTimeout())
 	}
 }
 
-func pipeTCP(client net.Conn, target string) {
+func pipeTCP(client net.Conn, target string, idle time.Duration) {
 	defer client.Close()
 	up, err := net.DialTimeout("tcp", target, 10*time.Second)
 	if err != nil {
 		return
 	}
 	defer up.Close()
+	dc := &deadlineConn{Conn: client, timeout: idle}
+	du := &deadlineConn{Conn: up, timeout: idle}
 	done := make(chan struct{}, 2)
-	go func() { io.Copy(up, client); done <- struct{}{} }()
-	go func() { io.Copy(client, up); done <- struct{}{} }()
+	go func() { io.Copy(du, dc); done <- struct{}{} }()
+	go func() { io.Copy(dc, du); done <- struct{}{} }()
 	<-done
 }
 
