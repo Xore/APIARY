@@ -31,6 +31,34 @@ func TestDocScrollAllTreatsMissingIndexAsEmptyNotFailure(t *testing.T) {
 	}
 }
 
+// TestDocScrollAllFailsOnUnmarshalableSearchResponse covers #1345: a
+// malformed/unparseable page response must be reported as a failure
+// (ok=false), not silently treated the same as "no more hits" and reported
+// as a complete, successful load -- otherwise entities whose IPs live only
+// in the un-loaded remainder get forked into new duplicate entities instead
+// of being merged into the real one.
+func TestDocScrollAllFailsOnUnmarshalableSearchResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodHead:
+			w.WriteHeader(http.StatusOK)
+		case r.URL.Path == "/attackers-v1/_pit":
+			w.Write([]byte(`{"id":"pit123"}`))
+		case r.URL.Path == "/_search":
+			w.Write([]byte(`not valid json`))
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer srv.Close()
+
+	es := newESClient(srv.URL)
+	_, ok := docScrollAll[entity](es, "attackers-v1", 100)
+	if ok {
+		t.Fatal("an unparseable search response must fail docScrollAll, not report a silently-truncated success")
+	}
+}
+
 func TestDocScrollAllReturnsExistingDocs(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
