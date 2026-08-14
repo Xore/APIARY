@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -205,10 +206,30 @@ func (s *store) submitWorkbenchChild(hash string, classification payloadClassifi
 	}
 }
 
+// createWorkbenchMarker checks the analyzer's pending queue depth and, if
+// under cap, creates hash+".request" in dir.
+//
+// #1343: the pending-count check and the O_EXCL create below used to run
+// with no lock held across them. createWorkbenchRun's own createMu only
+// serializes calls within this one process, but this dashboard runs with
+// two replicas sharing state via a shared volume -- two near-simultaneous
+// submissions for the same analyzer (from different replicas, or a fresh
+// run creation racing an unrelated child's "retry" action, which calls
+// submitWorkbenchChild without createMu) could both observe pending < cap
+// and both create their marker file, pushing the analyzer's spool past
+// workbenchMaxQueueDepth. An advisory flock on a per-directory lockfile
+// serializes the whole check-then-create sequence across processes, not
+// just goroutines within one.
 func createWorkbenchMarker(dir, hash string) error {
 	if dir == "" || !hashName.MatchString(hash) {
 		return errors.New("backend is not configured")
 	}
+	unlock, err := lockWorkbenchQueueDir(dir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return err
@@ -231,6 +252,33 @@ func createWorkbenchMarker(dir, hash string) error {
 		return err
 	}
 	return file.Close()
+}
+
+// workbenchQueueLockName is the per-directory lockfile
+// lockWorkbenchQueueDir holds an exclusive advisory lock on for the
+// duration of createWorkbenchMarker's check-then-create. Named distinctly
+// from any real marker (.request/.request.running/...) so it's never
+// counted by the pending-count scan above or mistaken for a job by the
+// host-side worker scripts that also read this directory.
+const workbenchQueueLockName = ".queue.lock"
+
+// lockWorkbenchQueueDir acquires an exclusive, blocking flock on dir's own
+// lockfile, creating it if needed. flock is process-scoped but filesystem-
+// backed, so it serializes across both dashboard replicas sharing dir over
+// the same volume, unlike an in-process sync.Mutex.
+func lockWorkbenchQueueDir(dir string) (unlock func(), err error) {
+	file, err := os.OpenFile(filepath.Join(dir, workbenchQueueLockName), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open workbench queue lock: %w", err)
+	}
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+		file.Close()
+		return nil, fmt.Errorf("acquire workbench queue lock: %w", err)
+	}
+	return func() {
+		syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		file.Close()
+	}, nil
 }
 
 func workbenchResultAfter(value string, threshold time.Time) bool {
@@ -338,7 +386,7 @@ func (s *store) reconcileWorkbenchRun(run workbenchRun) (workbenchRun, bool) {
 					child.Retryable = child.Attempts <= child.Options.RetryLimit
 				}
 			}
-		case "linux-sandbox", "windows-sandbox":
+		case "linux-sandbox", "windows-sandbox", "windows-ghosts":
 			if result, ok := newestSandboxResult(child.AnalyzerID, run.PayloadSHA256, sandboxResults, child.CreatedAt); ok {
 				child.UpdatedAt = now
 				child.Cancelable = false
