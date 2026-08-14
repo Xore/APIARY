@@ -89,7 +89,7 @@ func fetchRecentEvents(es *esClient, since time.Time) ([]corrEvent, bool) {
 		}
 		b, err := es.searchBody("/_search", reqBody)
 		if err != nil {
-			break
+			return out, false
 		}
 		var v struct {
 			Hits struct {
@@ -114,7 +114,17 @@ func fetchRecentEvents(es *esClient, since time.Time) ([]corrEvent, bool) {
 				} `json:"hits"`
 			} `json:"hits"`
 		}
-		if json.Unmarshal(b, &v) != nil || len(v.Hits.Hits) == 0 {
+		// An unmarshal error means this page's response is unparseable --
+		// not "no more results". Treating the two the same silently
+		// discards every hit already decoded on this page and abandons any
+		// subsequent pages, while still returning (out, true): runCycle
+		// then logs a normal-looking "cycle complete" with an artificially
+		// small event count and no indication anything went wrong.
+		if err := json.Unmarshal(b, &v); err != nil {
+			log.Printf("attacker-identity-worker: fetchRecentEvents: unmarshal search response: %v", err)
+			return out, false
+		}
+		if len(v.Hits.Hits) == 0 {
 			break
 		}
 		for _, h := range v.Hits.Hits {
