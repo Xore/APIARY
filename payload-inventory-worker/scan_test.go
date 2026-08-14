@@ -304,6 +304,89 @@ func TestMirrorPayloadBytesEncodesSmallFile(t *testing.T) {
 	}
 }
 
+// TestIndexPayloadInventoryReportsFailureOnDocGetError covers #1352: an ES
+// error must be surfaced as a failure, not silently swallowed and reported
+// as an ordinary completed scan.
+func TestIndexPayloadInventoryReportsFailureOnDocGetError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/dashboard-payload-inventory-v1/_doc/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	es := newESClient(srv.URL)
+	failures := indexPayloadInventory(es, []capturedFile{{Hash: "deadbeef"}})
+	if failures != 1 {
+		t.Fatalf("failures = %d, want 1 on a docGet error", failures)
+	}
+}
+
+// TestIndexPayloadInventoryReportsFailureOnDocIndexError covers the write
+// half of #1352: a failed PUT must also count as a failure, not be
+// discarded via the old `_ = es.docIndex(...)`.
+func TestIndexPayloadInventoryReportsFailureOnDocIndexError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/dashboard-payload-inventory-v1/_doc/", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			w.WriteHeader(http.StatusNotFound)
+		case http.MethodPut:
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	es := newESClient(srv.URL)
+	failures := indexPayloadInventory(es, []capturedFile{{Hash: "deadbeef"}})
+	if failures != 1 {
+		t.Fatalf("failures = %d, want 1 on a docIndex error", failures)
+	}
+}
+
+// TestMirrorPayloadBytesReturnsErrorOnDocExistsFailure covers #1352's
+// mirrorPayloadBytes path: the docExists HEAD failing must be reported to
+// the caller, not treated the same as "already exists, skip".
+func TestMirrorPayloadBytesReturnsErrorOnDocExistsFailure(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/dashboard-payload-bytes-v1/_doc/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	es := newESClient(srv.URL)
+	if err := mirrorPayloadBytes(es, "deadbeef", "/does/not/matter", 10); err == nil {
+		t.Fatal("expected an error when docExists fails, got nil")
+	}
+}
+
+// TestMirrorPayloadBytesReturnsErrorOnDocIndexFailure covers the write half
+// of mirrorPayloadBytes: a failed PUT must be reported, not discarded via
+// the old `_ = es.docIndex(...)`.
+func TestMirrorPayloadBytesReturnsErrorOnDocIndexFailure(t *testing.T) {
+	dir := t.TempDir()
+	path := writeHashNamedFile(t, dir, "deadbeef", []byte("hello payload"))
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/dashboard-payload-bytes-v1/_doc/", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodHead:
+			w.WriteHeader(http.StatusNotFound)
+		case http.MethodPut:
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	es := newESClient(srv.URL)
+	if err := mirrorPayloadBytes(es, "deadbeef", path, 13); err == nil {
+		t.Fatal("expected an error when docIndex fails, got nil")
+	}
+}
+
 func TestMirrorPayloadBytesSkipsAlreadyIndexed(t *testing.T) {
 	var puts int
 	mux := http.NewServeMux()

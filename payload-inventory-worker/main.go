@@ -68,11 +68,17 @@ func main() {
 func runScan(es *esClient, dirs []string) {
 	start := time.Now()
 	files, paths := scanDirs(dirs)
-	indexPayloadInventory(es, files)
+	failures := indexPayloadInventory(es, files)
 	for _, file := range files {
 		if path, ok := paths[file.Hash]; ok {
-			mirrorPayloadBytes(es, file.Hash, path, file.Size)
+			if err := mirrorPayloadBytes(es, file.Hash, path, file.Size); err != nil {
+				failures++
+			}
 		}
+	}
+	if failures > 0 {
+		log.Printf("payload-inventory-worker: scan complete WITH %d elasticsearch failure(s): %d unique files in %s", failures, len(files), time.Since(start).Round(time.Millisecond))
+		return
 	}
 	log.Printf("payload-inventory-worker: scan complete: %d unique files in %s", len(files), time.Since(start).Round(time.Millisecond))
 }
