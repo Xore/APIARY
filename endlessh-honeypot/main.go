@@ -20,7 +20,9 @@ package main
 import (
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"strconv"
@@ -191,8 +193,17 @@ func main() {
 		ln = &proxyListener{ln}
 	}
 
-	log := newLogger(getenv("LOG_PATH", ""))
-	delay := time.Duration(getenvInt("DELAY_MS", 10000)) * time.Millisecond
+	evLog := newLogger(getenv("LOG_PATH", ""))
+	// serve's time.NewTicker(delay) panics for any non-positive duration
+	// (Go's own documented behavior), and that call runs inside a
+	// per-connection goroutine with no recover -- so a bad DELAY_MS (e.g.
+	// "0" from a misconfigured compose override) would otherwise crash
+	// the whole process on the first accepted connection instead of
+	// failing loudly at startup.
+	delay, err := resolveDelay(getenvInt("DELAY_MS", 10000))
+	if err != nil {
+		log.Fatalf("endlessh-honeypot: %v", err)
+	}
 	// maxClients bounds concurrent held connections -- endlessh's own
 	// default (4096), matched here for the same reason: unbounded holds
 	// are the whole point per-connection, but a large scanning botnet
@@ -202,17 +213,28 @@ func main() {
 	maxClients := getenvInt("MAX_CLIENTS", 4096)
 	sem := make(chan struct{}, maxClients)
 
-	log.emit(event{Port: portOf(addr), Event: "listening"})
+	evLog.emit(event{Port: portOf(addr), Event: "listening"})
+	// acceptBackoff mirrors net/http.Server.Serve's own tempDelay
+	// handling: MAX_CLIENTS defaults to 4096 but common container/host fd
+	// limits (e.g. ulimit -n 1024) are lower, so under real scanning load
+	// Accept() can start returning a persistent error (EMFILE) on every
+	// call. Retrying that unconditionally with no backoff spins a CPU
+	// core at 100% accepting nothing; back off (and log) instead.
+	var acceptBackoff time.Duration
 	for {
 		c, err := ln.Accept()
 		if err != nil {
+			acceptBackoff = nextAcceptBackoff(acceptBackoff)
+			log.Printf("endlessh-honeypot: accept: %v; retrying in %s", err, acceptBackoff)
+			time.Sleep(acceptBackoff)
 			continue
 		}
+		acceptBackoff = 0
 		select {
 		case sem <- struct{}{}:
 			go func() {
 				defer func() { <-sem }()
-				serve(c, log, portOf(addr), delay)
+				serve(c, evLog, portOf(addr), delay)
 			}()
 		default:
 			// At capacity -- close immediately rather than queueing
@@ -230,4 +252,32 @@ func portOf(addr string) int {
 	}
 	n, _ := strconv.Atoi(p)
 	return n
+}
+
+// resolveDelay converts DELAY_MS into a validated ticker interval.
+// time.NewTicker panics for any non-positive duration, so a bad env var
+// (0, negative) must be rejected here at startup rather than reaching
+// serve's per-connection ticker.
+func resolveDelay(ms int) (time.Duration, error) {
+	d := time.Duration(ms) * time.Millisecond
+	if d <= 0 {
+		return 0, fmt.Errorf("DELAY_MS must be a positive duration in milliseconds, got %dms", ms)
+	}
+	return d, nil
+}
+
+const maxAcceptBackoff = time.Second
+
+// nextAcceptBackoff returns the next Accept() retry delay given the
+// previous one, mirroring net/http.Server.Serve's own tempDelay pattern:
+// start small, double each consecutive failure, cap at maxAcceptBackoff.
+func nextAcceptBackoff(prev time.Duration) time.Duration {
+	if prev == 0 {
+		return 5 * time.Millisecond
+	}
+	next := prev * 2
+	if next > maxAcceptBackoff {
+		return maxAcceptBackoff
+	}
+	return next
 }
