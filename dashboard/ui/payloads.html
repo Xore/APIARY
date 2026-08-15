@@ -108,17 +108,16 @@
                  (#1142) and ips.html/events.html (#1155) -- before the first
                  scanPayloads()/refreshPayloadCacheAsync cycle completes, a
                  blank card with only a text note reads as broken, not
-                 loading. The fast-reload script is unchanged (it's the
-                 established mechanism these other pages use too, see
-                 overview.html's own comment on it); this just gives it
-                 something shaped to show while it waits. */}}
+                 loading. The retry is hp-warming-reload.js (shared with
+                 ghidra.html/sandbox.html/github_analysis.html's own
+                 resultspanel templates) -- see that file's own doc comment
+                 for why this is no longer an inline <script> tag here. */}}
             <p class="note" data-payload-warming><span class="status-dot" aria-hidden="true"></span> Preparing the payload inventory. This page will update automatically.</p>
             <div class="project-grid" aria-hidden="true">
               <div class="project-card"><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:85%"></div><div class="skeleton-line" style="width:40%"></div></div>
               <div class="project-card"><div class="skeleton-line" style="width:55%"></div><div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:35%"></div></div>
               <div class="project-card"><div class="skeleton-line" style="width:65%"></div><div class="skeleton-line" style="width:75%"></div><div class="skeleton-line" style="width:45%"></div></div>
             </div>
-            <script nonce="{{.Nonce}}">setTimeout(()=>location.reload(),1500)</script>
             {{else if .Files}}
             <div class="project-grid" id="payloads-results" data-hp-lazy-list data-hp-page-url="{{.RowsURL}}" data-hp-total="{{.ResultTotal}}">
             {{template "payloadrows" .}}
@@ -156,6 +155,7 @@
      comment for the full route list and why it's a separate file from
      hp-app.js. */}}
 <script defer src="{{asset "/static/hp-dynamic-nav.js"}}"></script>
+<script defer src="{{asset "/static/hp-warming-reload.js"}}"></script>
 </body>
 </html>
 {{end}}

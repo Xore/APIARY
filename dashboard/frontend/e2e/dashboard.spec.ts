@@ -553,4 +553,36 @@ test.describe("dashboard browser behaviour", () => {
     await expect(page.locator("[data-hp-pl-known-elsewhere]")).toContainText("not yet analyzed");
     await expect(page.locator("#hp-pl-known-elsewhere-heading")).toContainText("not seen elsewhere");
   });
+
+  test("cache-warming skeletons auto-reload after an SPA navigation, not just a hard refresh (#1384)", async ({ page }) => {
+    // The warming retry used to be an inline <script nonce=...> next to
+    // each warming marker -- fine on a real page load, but hp-dynamic-nav.js's
+    // SPA-style swap (hp-app.js's mountPage -> pageContent.replaceChildren)
+    // never executes a <script> inserted via DOM APIs, so a page reached
+    // via an in-app link (not a hard refresh) got a skeleton that never
+    // retried. hp-warming-reload.js fixes this by living outside the
+    // swapped content and listening for the "hp-dynamic-nav" event itself.
+    await page.goto("/payloads");
+    // A marker set in this JS realm only survives if nothing actually
+    // reloads -- confirming its absence afterward proves a real navigation
+    // happened, not just that some in-page timer fired.
+    await page.evaluate(() => {
+      (window as unknown as Record<string, unknown>).__hpPreReloadMarker = true;
+    });
+    const reloaded = page.waitForEvent("load", { timeout: 5000 });
+    // Simulate exactly what mountPage leaves behind: a swapped-in warming
+    // panel plus the same event hp-dynamic-nav.js dispatches after every
+    // in-family navigation -- no real second navigation needed to trigger it.
+    await page.evaluate(() => {
+      const container = document.querySelector("[data-hp-page-content]") ?? document.body;
+      const marker = document.createElement("div");
+      marker.setAttribute("data-payload-warming", "");
+      container.appendChild(marker);
+      document.dispatchEvent(new CustomEvent("hp-dynamic-nav"));
+    });
+    await reloaded;
+    expect(
+      await page.evaluate(() => (window as unknown as Record<string, unknown>).__hpPreReloadMarker),
+    ).toBeUndefined();
+  });
 });
