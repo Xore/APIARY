@@ -37,6 +37,7 @@ suricata_days=$(( retention_days * 7 / 30 ))
 [ "$suricata_days" -ge 1 ] || suricata_days=1
 for spec in "suricata-7d:${suricata_days}d" \
             "dead-letter-60d:$(( retention_days * 2 ))d" "portbridge-30d:${retention_days}d" \
+            "dionaea-incidents-30d:${retention_days}d" \
             "analysis-results-180d:$(( retention_days * 6 ))d"; do
   name=${spec%%:*}
   age=${spec#*:}
@@ -397,7 +398,7 @@ curl -fsS -X PUT "$es_url/_index_template/dionaea-incidents" \
   "priority": 465,
   "template": {
     "settings": {
-      "index.lifecycle.name": "honeypot-30d",
+      "index.lifecycle.name": "dionaea-incidents-30d",
       "index.number_of_replicas": 0,
       "index.mapping.total_fields.limit": 200,
       "index.mapping.ignore_malformed": true,
@@ -958,6 +959,32 @@ curl -fsS -X PUT "$es_url/suricata-*/_settings?allow_no_indices=true" \
 curl -fsS -X PUT "$es_url/.ds-honeypot-v2-*/_settings?allow_no_indices=true&expand_wildcards=all" \
   -H 'Content-Type: application/json' \
   -d '{"index.lifecycle.name":"honeypot-30d"}' >/dev/null || true
+
+# #1375: dionaea writes one plain date-suffixed index per day, so rollover is
+# already performed by Filebeat's index name and there is no write alias for
+# ILM to roll. These indices were previously attached to honeypot-30d (the
+# rollover policy required by the honeypot-v2 data stream) and consequently
+# entered ERROR at check-rollover-ready. Elasticsearch's supported policy
+# switch sequence is remove first, then apply the new policy; assigning a new
+# name directly can retain the old cached hot-phase definition and silently
+# fail. Removing also clears the existing ERROR metadata, so the newly applied
+# delete-only policy starts cleanly and no _ilm/retry of the invalid rollover
+# step is needed. Inspect each current policy first: setup runs on every deploy,
+# and removing/reapplying the already-correct policy each time would needlessly
+# reset ILM execution metadata for healthy indices.
+curl -fsS "$es_url/_cat/indices/dionaea-incidents-v1-*?h=index&allow_no_indices=true" 2>/dev/null |
+  while IFS= read -r index; do
+    [ -n "$index" ] || continue
+    lifecycle=$(curl -fsS "$es_url/$index/_settings/index.lifecycle.name?flat_settings=true")
+    case "$lifecycle" in
+      *'"index.lifecycle.name":"dionaea-incidents-30d"'*) continue ;;
+      *'"index.lifecycle.name":"honeypot-30d"'*)
+        curl -fsS -X POST "$es_url/$index/_ilm/remove" >/dev/null ;;
+    esac
+    curl -fsS -X PUT "$es_url/$index/_settings" \
+      -H 'Content-Type: application/json' \
+      -d '{"index.lifecycle.name":"dionaea-incidents-30d"}' >/dev/null
+  done
 
 # This is intentionally a single-node analysis cluster. Replica shards cannot
 # be allocated here and only make cluster health yellow; primaries retain data.

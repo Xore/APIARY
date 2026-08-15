@@ -67,6 +67,8 @@ func newLogger(path string) *logger {
 	}
 	if f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640); err == nil {
 		l.out = f
+	} else {
+		stdlog.Printf("cisco-asa-honeypot: log file %q unavailable, continuing with stdout only: %v", path, err)
 	}
 	return l
 }

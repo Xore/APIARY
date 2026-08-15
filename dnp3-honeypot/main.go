@@ -48,7 +48,11 @@ type logger struct {
 func newLogger(path string) *logger {
 	l := &logger{out: os.Stdout}
 	if path != "" {
-		l.file, _ = os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0640)
+		var err error
+		l.file, err = os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0640)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dnp3-honeypot: log file %q unavailable, continuing with stdout only: %v\n", path, err)
+		}
 	}
 	return l
 }

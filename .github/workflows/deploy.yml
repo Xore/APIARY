@@ -128,6 +128,13 @@ jobs:
           cd "$destination"
           test ! -f .env || chmod 600 .env
           docker compose -f compose.yml config --quiet
+          # #1374: `up -d` is not an explicit guarantee that an unchanged,
+          # already-completed one-shot container is recreated. Run the
+          # idempotent ownership reconciliation synchronously on every deploy
+          # before any split sensor stack is rebuilt/restarted below. `run`
+          # uses a fresh container even when hp-log-init already exists, and
+          # --no-deps avoids needlessly rerunning persona-apply here.
+          docker compose -f compose.yml run --rm --no-deps log-init
           docker compose -f compose.yml up -d
 
       - name: Check out the presentation-only Keycloak theme

@@ -12,6 +12,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -67,6 +68,8 @@ func newLogger(path string) *logger {
 			if st, err := f.Stat(); err == nil {
 				l.size = st.Size()
 			}
+		} else {
+			fmt.Fprintf(os.Stderr, "multipot: log file %q unavailable, continuing with stdout only: %v\n", path, err)
 		}
 	}
 	return l
@@ -91,6 +94,7 @@ func (l *logger) rotate() {
 	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
 	if err != nil {
 		l.f = nil
+		fmt.Fprintf(os.Stderr, "multipot: log file %q unavailable after rotation, continuing with stdout only: %v\n", l.path, err)
 		return
 	}
 	l.f = f
