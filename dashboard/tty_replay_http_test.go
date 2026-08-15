@@ -91,8 +91,8 @@ func TestServeTTYReplayViewerPageLoadsXtermJS(t *testing.T) {
 	if strings.Contains(body, `id="tty-screen" aria-live`) {
 		t.Error("aria-live on #tty-screen is a leftover from the old hand-rolled renderer -- xterm.js manages its own accessibility tree")
 	}
-	if !strings.Contains(body, `<div class="hp-tty-term" id="tty-screen"></div>`) {
-		t.Error("expected a plain <div> mount point, not the old <pre> element")
+	if !strings.Contains(body, `<div class="hp-tty-term" id="tty-screen" aria-busy="true">`) || !strings.Contains(body, `data-tty-loading`) {
+		t.Error("expected the xterm mount point with a terminal-shaped loading surface, not the old <pre> element")
 	}
 }
 

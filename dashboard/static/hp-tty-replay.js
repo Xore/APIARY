@@ -88,6 +88,8 @@
       fontFamily: "var(--font-mono, monospace)", fontSize: 13,
       theme: { background: "#16181d", foreground: "#e6e6e6" },
     });
+    screenEl.replaceChildren();
+    screenEl.setAttribute("aria-busy", "true");
     openTerminalUnderCSP(term, screenEl);
 
     function setStatus(msg) { statusEl.textContent = msg; }
@@ -158,7 +160,8 @@
       })
       .then(function (payload) {
         records = payload.records || [];
-        if (!records.length) { setStatus("This recording has no replayable output."); return; }
+        screenEl.setAttribute("aria-busy", "false");
+        if (!records.length) { setStatus("This recording has no replayable output. The terminal is empty."); return; }
         seekEl.max = records.length - 1;
         setStatus(records.length + " event(s), " + (payload.size_bytes || 0) + " bytes recorded.");
         playBtn.disabled = false;
@@ -167,6 +170,7 @@
         applyUpTo(-1);
       })
       .catch(function (err) {
+        screenEl.setAttribute("aria-busy", "false");
         setStatus("Could not load recording: " + err.message + " — try the raw/.cast download instead.");
       });
   }

@@ -132,12 +132,28 @@ await fetch(`${fakeES.url}/sandbox-analysis-v1/_doc/sandbox:${sandboxJob}?op_typ
       exit_status: "ok",
       risk_score: 42,
       risk_level: "medium",
+      stdout: "sandbox fixture standard output",
+      stderr: "sandbox fixture standard error",
+      changed_files: ["C:\\Users\\Public\\fixture.bin"],
       top_syscalls: [{ name: "CreateFileW", count: 7 }],
-      network_summary: { packets: 3 },
+      network_summary: { packets: 3, events: ["TCP fixture packet"], dns_queries: ["sandbox-fixture.example"] },
+      windows_forensics: { detected: true, ascii_strings: ["sandbox visible string"], utf16_strings: ["sandbox wide string"] },
+      artifacts: { kernel: "Windows fixture kernel", host_tcpdump_log: "tcpdump fixture log", console_log: "serial fixture log" },
     },
     file: { hash: { sha256: payloadHash } },
     event: { category: "sandbox" },
   }),
+});
+
+await fetch(`${fakeES.url}/cape-analysis-v1/_doc/cape:${payloadHash}?op_type=create`, {
+  method: "PUT",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ cape: {
+    version: 1, sha256: payloadHash, exit_status: "ok", cape_status: "reported", route: "drop",
+    requested_at: "2026-08-01T00:00:00Z", started_at: "2026-08-01T00:00:01Z", completed_at: "2026-08-01T00:00:02Z",
+    signatures: [{ severity: 2, name: "fixture behavior", description: "Browser fixture signature" }],
+    report: { info: { machine: { label: "win11-cape" }, package: "generic", duration: 12 }, behavior: { processes: [{ process_id: 7, process_name: "fixture.exe", parent_id: 1, first_seen: "now", calls: [{ api: "CreateFileW" }] }] }, debug: { log: "CAPE analyzer fixture line\nsecond bounded line", errors: ["fixture warning"] } },
+  }, file: { hash: { sha256: payloadHash } }, event: { category: "cape" } }),
 });
 
 // #1203: attacker-identity-worker (#1200) writes attackers-v1 the same

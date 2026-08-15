@@ -25,7 +25,7 @@
 {{end}}
 
 <div class="tw:grid tw:grid-cols-12 tw:gap-3.5">{{template "tbl" (dict "t" "Sensors" "rows" .Sensors "class" "half" "hint" "none")}}{{template "tbl" (dict "t" "Credentials" "rows" .Credentials "class" "half" "hint" "none")}}{{template "tbl" (dict "t" "Commands" "rows" .Commands "class" "half" "hint" "none")}}{{template "tbl" (dict "t" "Payload hashes" "rows" .Payloads "class" "half" "hint" "none")}}{{template "techniques" .Techniques}}
-<div class="card wide"><h2>Chronological replay</h2><p class="note">Oldest to newest. Commands, credentials, downloads, fingerprints, and investigation pivots remain linked.</p><table class="recent data-table"><thead><tr><th>time</th><th>sensor</th><th>source</th><th>port</th><th>detail</th></tr></thead><tbody>{{range .Events}}{{template "everow" .}}{{end}}</tbody></table></div></div>
+<div class="card wide"><h2>Chronological replay</h2><p class="note">Oldest to newest. Commands, credentials, downloads, fingerprints, and investigation pivots remain linked.</p><div class="card__scroll"><table class="recent data-table"><thead><tr><th>time</th><th>sensor</th><th>source</th><th>port</th><th>detail</th></tr></thead><tbody>{{range .Events}}{{template "everow" .}}{{end}}</tbody></table></div></div></div>
 {{end}}
 {{define "session"}}<!doctype html>
 <html lang="en">
@@ -55,10 +55,10 @@
              commands, payloads, techniques, sequences, and the
              chronological replay) is hydrated in below. */}}
         <div id="session-detail-root" data-hp-session-fragment-url="/sessions/{{.ID | urlquery}}/fragment" aria-busy="true">
-          <div class="filters"><div class="skeleton-line" style="width:220px"></div></div>
-          <div class="card wide"><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:85%"></div><div class="skeleton-line" style="width:40%"></div></div>
-          <div class="card wide"><div class="skeleton-line" style="width:55%"></div><div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:35%"></div></div>
-          <div class="card wide"><div class="skeleton-line" style="width:65%"></div><div class="skeleton-line" style="width:75%"></div><div class="skeleton-line" style="width:45%"></div></div>
+          <p class="subtitle"><span class="skeleton-line" style="width:68%"></span></p>
+          <div class="filters"><div class="skeleton-line" style="width:220px"></div><div class="skeleton-line" style="width:150px"></div><div class="skeleton-line" style="width:180px"></div></div>
+          <div class="tw:mb-4 tw:rounded-md tw:border tw:border-orange tw:bg-orange-subtle tw:px-4 tw:py-3" aria-hidden="true"><div class="skeleton-line" style="width:72%"></div><div class="skeleton-line" style="width:88%"></div></div>
+          <div class="tw:grid tw:grid-cols-12 tw:gap-3.5"><div class="card half"><h2>Sensors</h2><div class="skeleton-line" style="width:76%"></div><div class="skeleton-line" style="width:58%"></div></div><div class="card half"><h2>Credentials</h2><div class="skeleton-line" style="width:82%"></div><div class="skeleton-line" style="width:64%"></div></div><div class="card half"><h2>Commands</h2><div class="skeleton-line" style="width:88%"></div><div class="skeleton-line" style="width:70%"></div></div><div class="card half"><h2>Payload hashes</h2><div class="skeleton-line" style="width:92%"></div><div class="skeleton-line" style="width:74%"></div></div><div class="card wide"><h2>MITRE ATT&amp;CK techniques</h2><div class="skeleton-line" style="width:84%"></div><div class="skeleton-line" style="width:66%"></div></div><div class="card wide"><h2>Chronological replay</h2><div class="card__scroll"><table class="recent data-table" aria-hidden="true"><thead><tr><th>time</th><th>sensor</th><th>source</th><th>port</th><th>detail</th></tr></thead><tbody><tr><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td></tr><tr><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td></tr><tr><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td></tr></tbody></table></div></div></div>
         </div>
 
         <footer>{{brandText}} &bull; session investigation</footer>

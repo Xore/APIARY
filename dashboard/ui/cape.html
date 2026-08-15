@@ -25,6 +25,10 @@
         </header>
 
         {{if .Detail}}
+        {{if .DetailLoading}}
+        <div id="cape-detail-root" data-hp-cape-fragment-url="/cape/{{.Detail.SHA256}}/fragment" aria-busy="true"><div class="filters"><div class="skeleton-line" style="width:220px"></div></div><div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-4 tw:gap-3 tw:mb-6"><div class="metric"><div class="metric__value"><div class="skeleton-line" style="width:45%"></div></div><div class="metric__label">Malscore</div></div><div class="metric"><div class="metric__value"><div class="skeleton-line" style="width:45%"></div></div><div class="metric__label">Task status</div></div><div class="metric"><div class="metric__value"><div class="skeleton-line" style="width:45%"></div></div><div class="metric__label">Signatures</div></div><div class="metric"><div class="metric__value"><div class="skeleton-line" style="width:45%"></div></div><div class="metric__label">Processes traced</div></div></div><div class="card wide"><h2>Task identity</h2><div class="skeleton-line" style="width:88%"></div><div class="skeleton-line" style="width:72%"></div><div class="skeleton-line" style="width:80%"></div></div><div class="card wide"><h2>Signatures</h2><div class="card__scroll"><table class="data-table"><thead><tr><th>severity</th><th>name</th><th>description</th></tr></thead><tbody><tr><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td></tr></tbody></table></div></div><div class="card wide"><h2>Process activity</h2><div class="card__scroll"><div class="skeleton-line" style="width:90%"></div><div class="skeleton-line" style="width:76%"></div></div></div><div class="card wide"><h2>Behavior summary</h2><div class="skeleton-line" style="width:82%"></div><div class="skeleton-line" style="width:68%"></div></div><div class="card wide"><h2>Dumped payloads &amp; extracted configuration</h2><div class="skeleton-line" style="width:78%"></div></div><div class="card wide"><h2>Analyzer log</h2><div class="card__scroll"><pre class="code"><span class="skeleton-line" style="width:86%"></span><span class="skeleton-line" style="width:64%"></span><span class="skeleton-line" style="width:74%"></span></pre></div></div></div>
+        {{else}}
+        {{block "cape-detail-body" .}}
         <div class="filters"><a class="chip" href="/payload-workbench/{{.Detail.SHA256}}">Open unified analysis workbench &rarr;</a></div>
         <div class="filters" id="cape-detail-actions"><a class="chip" href="/payload-analysis/{{.Detail.SHA256}}">static analysis</a><a class="chip" href="/events?shasum={{.Detail.SHA256}}">related events</a><a class="chip" href="/api/cape/{{.Detail.SHA256}}">raw report (JSON) &darr;</a></div>
 
@@ -71,11 +75,9 @@
         <div class="card wide"><h2>Dumped payloads &amp; extracted configuration</h2><p class="empty">CAPE's debugger did not dump any payloads or extract any malware configuration during this run.</p></div>
         {{end}}
 
-        <div class="card wide"><h2>Analyzer log</h2><p class="note">The in-guest analyzer's own operational log, not a per-instruction trace -- see Process activity above for that.</p>{{if .Summary.DebugErrors}}<p class="note tw:text-red">{{len .Summary.DebugErrors}} analyzer error(s) were logged.</p>{{end}}{{if .Summary.DebugLog}}<button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="cape-debug-log">Open the analyzer log</button>{{else}}<p class="empty">No analyzer log was recorded.</p>{{end}}</div>
+        <div class="card wide"><h2>Analyzer log</h2><p class="note">The in-guest analyzer's own operational log, not a per-instruction trace. Untrusted guest output is HTML-escaped and size-bounded; see Process activity above for the execution summary.</p>{{if .Summary.DebugErrors}}<p class="note tw:text-red">{{len .Summary.DebugErrors}} analyzer error(s) were logged.</p>{{end}}{{if .Summary.DebugLog}}<div class="card__scroll" aria-label="Analyzer log output"><pre class="code">{{.Summary.DebugLog}}</pre></div>{{else}}<p class="empty">No analyzer log was recorded.</p>{{end}}</div>
         {{end}}
-
-        {{if and .Summary .Summary.DebugLog}}
-        <div hidden data-hp-evidence-body="cape-debug-log" data-hp-evidence-title="Analyzer log" data-hp-evidence-note="The in-guest analyzer's own operational log. Untrusted guest output, HTML-escaped and size-bounded."><pre class="code">{{.Summary.DebugLog}}</pre></div>
+        {{end}}
         {{end}}
 
         {{else}}
@@ -86,6 +88,7 @@
       </div>
     </main>
 </div>
+<script defer src="{{asset "/static/hp-cape-detail.js"}}"></script>
 </body>
 </html>
 {{end}}

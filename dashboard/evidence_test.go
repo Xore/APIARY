@@ -11,10 +11,9 @@ import (
 )
 
 var (
-	evidenceTrigger = regexp.MustCompile(`data-hp-evidence="([^"]+)"`)
-	evidenceBody    = regexp.MustCompile(`data-hp-evidence-body="([^"]+)"`)
-	panelName       = regexp.MustCompile(`data-dashboard-panel="([^"]+)"`)
-	tabName         = regexp.MustCompile(`data-dashboard-tab="([^"]+)"`)
+	evidenceBody = regexp.MustCompile(`data-hp-evidence-body="([^"]+)"`)
+	panelName    = regexp.MustCompile(`data-dashboard-panel="([^"]+)"`)
+	tabName      = regexp.MustCompile(`data-dashboard-tab="([^"]+)"`)
 )
 
 func keys(matches [][]string) []string {
@@ -62,23 +61,18 @@ func renderSandboxDetail(t *testing.T, windows bool) string {
 	return buf.String()
 }
 
-// A trigger whose body was renamed or dropped silently does nothing when
-// clicked, so the pairing is the invariant worth pinning.
-func TestEveryEvidenceTriggerHasABody(t *testing.T) {
+// #1450: every evidence body is part of the visible in-page collection;
+// JavaScript only applies the final card/scroll classes and removes the now
+// redundant launch controls.
+func TestEverySandboxEvidenceBodyIsRenderedInline(t *testing.T) {
 	for _, windows := range []bool{false, true} {
 		html := renderSandboxDetail(t, windows)
-		triggers := keys(evidenceTrigger.FindAllStringSubmatch(html, -1))
-		bodies := map[string]bool{}
-		for _, key := range keys(evidenceBody.FindAllStringSubmatch(html, -1)) {
-			bodies[key] = true
+		bodies := keys(evidenceBody.FindAllStringSubmatch(html, -1))
+		if len(bodies) < 20 {
+			t.Fatalf("windows=%v: sandbox detail rendered only %d inline evidence datasets", windows, len(bodies))
 		}
-		if len(triggers) == 0 {
-			t.Fatalf("windows=%v: sandbox detail offers no evidence viewer at all", windows)
-		}
-		for _, key := range triggers {
-			if !bodies[key] {
-				t.Fatalf("windows=%v: evidence trigger %q has no matching body", windows, key)
-			}
+		if strings.Contains(html, `class="hp-evidence-source" hidden`) {
+			t.Fatalf("windows=%v: complete evidence collection is still hidden", windows)
 		}
 	}
 }

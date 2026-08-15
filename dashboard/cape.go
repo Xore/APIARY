@@ -254,9 +254,10 @@ func countJSONArrayElements(raw json.RawMessage) int {
 
 type capePageData struct {
 	pageMeta
-	Generated time.Time
-	Detail    *capeResult
-	Summary   *capeReportSummary
+	Generated     time.Time
+	Detail        *capeResult
+	Summary       *capeReportSummary
+	DetailLoading bool
 }
 
 // loadCapeResults reads the cape-analysis-v1 ES mirror exclusively (#1103)
@@ -300,15 +301,24 @@ func capeData(sha256 string) (capePageData, error) {
 	if sha256 == "" {
 		return data, errors.New("cape result not found")
 	}
-	for _, row := range loadCapeResults() {
-		if row.SHA256 == sha256 {
-			result := row
-			data.Detail = &result
-			data.Summary = parseCapeReportSummary(result.Report)
-			return data, nil
+	if esResultsClient != nil {
+		raws, err := esResultsClient.searchNamespaceByHash("cape-analysis-v1", "cape", sha256, 5)
+		if err == nil {
+			for _, raw := range raws {
+				var result capeResult
+				if json.Unmarshal(raw, &result) == nil && strings.EqualFold(result.SHA256, sha256) {
+					data.Detail = &result
+					data.Summary = parseCapeReportSummary(result.Report)
+					return data, nil
+				}
+			}
 		}
 	}
 	return data, errors.New("cape result not found")
+}
+
+func capeDetailShell(sha256 string) capePageData {
+	return capePageData{Generated: time.Now(), Detail: &capeResult{SHA256: sha256}, DetailLoading: true}
 }
 
 func serveCapeAPI(w http.ResponseWriter, r *http.Request) {

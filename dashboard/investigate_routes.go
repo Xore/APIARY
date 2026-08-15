@@ -179,12 +179,23 @@ func (s *store) registerInvestigateRoutes(mux *http.ServeMux, tmpl *template.Tem
 			http.NotFound(w, r)
 			return
 		}
-		data, err := capeData(sha)
+		data := capeDetailShell(strings.ToLower(sha))
+		renderPage(w, tmpl, "cape", &data)
+	})
+	mux.HandleFunc("GET /cape/{sha}/fragment", func(w http.ResponseWriter, r *http.Request) {
+		sha := r.PathValue("sha")
+		if !hashName.MatchString(sha) {
+			http.NotFound(w, r)
+			return
+		}
+		data, err := capeData(strings.ToLower(sha))
 		if err != nil {
 			http.NotFound(w, r)
 			return
 		}
-		renderPage(w, tmpl, "cape", &data)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		tmpl.ExecuteTemplate(w, "cape-detail-body", &data)
 	})
 	mux.HandleFunc("GET /github-analysis/{sha}", func(w http.ResponseWriter, r *http.Request) {
 		sha := r.PathValue("sha")

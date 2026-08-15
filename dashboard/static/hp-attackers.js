@@ -17,6 +17,17 @@
 
   const status = document.querySelector("[data-attacker-graph-status]");
   const setStatus = text => { if (status) status.textContent = text; };
+  const renderState = (text, error = false) => {
+    canvas.replaceChildren();
+    canvas.setAttribute("aria-busy", "false");
+    canvas.setAttribute("role", error ? "alert" : "status");
+    const message = document.createElement("p");
+    message.className = "empty";
+    message.textContent = text;
+    message.style.cssText = "display:grid;place-items:center;width:100%;height:100%;padding:2rem;text-align:center";
+    canvas.appendChild(message);
+    setStatus(text);
+  };
 
   fetch(canvas.dataset.attackerGraphUrl, { cache: "no-store", headers: { Accept: "application/json" } })
     .then(response => {
@@ -24,6 +35,12 @@
       return response.json();
     })
     .then(data => {
+      if (!data.nodes || data.nodes.length === 0) {
+        renderState("No graph nodes were returned for this attacker identity.");
+        return;
+      }
+      canvas.replaceChildren();
+      canvas.setAttribute("aria-busy", "false");
       const elements = [
         ...data.nodes.map(n => ({ data: { id: n.id, label: n.label, kind: n.kind } })),
         ...data.edges.map(e => ({ data: { source: e.source, target: e.target } })),
@@ -104,5 +121,5 @@
 
       setStatus(`${data.nodes.length - 1} member IP${data.nodes.length - 1 === 1 ? "" : "s"} — drag to pan, scroll to zoom, drag the corner to resize`);
     })
-    .catch(err => setStatus(`Graph failed to load: ${err.message}`));
+    .catch(err => renderState(`Graph failed to load: ${err.message}`, true));
 })();

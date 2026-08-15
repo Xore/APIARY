@@ -34,6 +34,17 @@
       const url = container.dataset.echart;
       const status = document.querySelector(`[data-echart-status="${url}"]`);
       const setStatus = text => { if (status) status.textContent = text; };
+      const renderState = (text, error = false) => {
+        container.replaceChildren();
+        container.setAttribute("aria-busy", "false");
+        container.setAttribute("role", error ? "alert" : "status");
+        const message = document.createElement("p");
+        message.className = "empty";
+        message.textContent = text;
+        message.style.cssText = "display:grid;place-items:center;width:100%;height:100%;padding:2rem;text-align:center";
+        container.appendChild(message);
+        setStatus(text);
+      };
       const init = initFns[kind];
       if (!init) return;
 
@@ -43,8 +54,15 @@
           return response.json();
         })
         .then(data => {
+          container.replaceChildren();
+          container.setAttribute("aria-busy", "false");
           const chart = echarts.init(container);
           const summary = init(chart, data);
+          if (summary.startsWith("No ")) {
+            chart.dispose();
+            renderState(summary);
+            return;
+          }
           setStatus(summary);
           const resize = () => chart.resize();
           if (typeof ResizeObserver !== "undefined") {
@@ -53,7 +71,7 @@
             window.addEventListener("resize", resize);
           }
         })
-        .catch(err => setStatus(`Chart failed to load: ${err.message}`));
+        .catch(err => renderState(`Chart failed to load: ${err.message}`, true));
     });
   }
 
