@@ -1,0 +1,18 @@
+quick reference: reaching the dc01/bastion02 estate from outside VLAN10
+(nobody ever documented this properly, writing it down before I forget again)
+
+gw does NAT port-forwarding for the directory/AI-tooling boxes, same public
+IP as everything else, just different ports -- ops never split them onto
+their own external address:
+
+  bastion02 (ssh, secondary admin bastion)........ gw:2200
+  dc01 (ldap, directory services)................. gw:389
+  agent-gateway-01 (mcp, AI-agent tooling gw)...... gw:8000
+  cms-legacy-01 (http, old CMS nobody retired)..... gw:8880
+
+analytics-es-04 (standalone ES node, analytics team's own instance, NOT the
+same as es-logs-01 in /opt/nexusai-inference/.env) is on VLAN12, same
+NAT-forward setup, just port 9201.
+
+if bastion02 SSH keys ever get rotated again ping devops, ask them not to
+break the gpu01->bastion02 backup path

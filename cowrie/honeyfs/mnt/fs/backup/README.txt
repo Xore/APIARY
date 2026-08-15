@@ -13,4 +13,8 @@ Password    : stored in AD credential manager (gMSA svc-backup$)
 
 Scheduled via cron on gpu01 — see /etc/cron.d/nexusai-backup
 
+Analytics team runs their own separate restic repo for analytics-es-04
+(VLAN12, see ~mwagner/internal-services.txt) — do NOT point this job at
+it, they've asked twice already.
+
 Contacts: devops@nexusai.local  oncall: +49-30-2091-4417

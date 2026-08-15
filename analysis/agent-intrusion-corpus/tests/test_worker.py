@@ -187,6 +187,30 @@ class TestBuildCampaignVerdict(unittest.TestCase):
         self.assertIn("gzip", [step["transform"] for step in chain])
         self.assertEqual(len(chain[-1]["output_sha256"]), 64)
 
+    def test_breadcrumb_followed_surfaces_on_the_later_event(self):
+        # #1427 item 4, proven through the real worker call sequence: a
+        # cowrie reference to a planted breadcrumb, then the same
+        # (correlated) identity reaching that breadcrumb's real target
+        # sensor, produces a breadcrumb-followed match attached to the
+        # LATER event -- and campaign_severity sees it as a second
+        # distinct category on top of whatever the reference event itself
+        # matched, verified against the real verdict document shape, not
+        # criticality_rules.py's own functions directly.
+        events_by_id = {
+            "e1": {"event_id": "e1", "timestamp": "2026-02-09T00:00:00Z", "source_index": "honeypot-v2-x",
+                   "raw": {"eventid": "cowrie.command.input", "input": "ssh bastion02", "session": "s1", "sensor": "cowrie"}},
+            "e2": {"event_id": "e2", "timestamp": "2026-02-09T00:05:00Z", "source_index": "honeypot-v2-x",
+                   "raw": {"sensor": "beelzebub", "src_ip": "203.0.113.9", "session": "s1"}},
+        }
+        campaign = worker.corr.Campaign(event_ids=["e1", "e2"], identifiers={"session:s1"}, start="2026-02-09T00:00:00Z", end="2026-02-09T00:05:00Z")
+        verdict = worker.build_campaign_verdict(campaign, events_by_id)
+        self.assertIsNotNone(verdict)
+        self.assertIn("breadcrumb-followed", verdict["matched_categories"])
+        e2_rules = [m["rule"] for m in verdict["events"][1]["matched_rules"]]
+        self.assertIn("breadcrumb-followed", e2_rules)
+        e1_rules = [m["rule"] for m in verdict["events"][0]["matched_rules"]]
+        self.assertNotIn("breadcrumb-followed", e1_rules)  # attached to e2, not e1
+
     def test_campaign_id_is_deterministic(self):
         events_by_id = {
             "e1": {"event_id": "e1", "timestamp": "2026-02-09T00:00:00Z", "source_index": "x",

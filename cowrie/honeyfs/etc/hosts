@@ -13,6 +13,14 @@
 10.10.0.1   gw.nexusai.local gw
 10.10.0.5   prometheus.nexusai.local prometheus
 
+# Directory/AI-tooling estate (dc01) and analytics -- separate VLAN, reachable
+# through gw's own NAT port-forwards, see ~mwagner/internal-services.txt
+10.10.2.10  dc01.nexusai.local dc01
+10.10.2.11  bastion02.nexusai.local bastion02
+10.10.2.12  agent-gateway-01.nexusai.local agent-gateway-01
+10.10.2.13  cms-legacy-01.nexusai.local cms-legacy-01
+10.10.3.10  analytics-es-04.nexusai.local analytics-es-04
+
 ::1     ip6-localhost ip6-loopback
 fe00::0 ip6-localnet
 ff00::0 ip6-mcastprefix
