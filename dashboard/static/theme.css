@@ -2622,12 +2622,7 @@ a.project-card { display: block; color: inherit; text-decoration: none; }
   color: var(--text-secondary); font: 10px var(--hp-mono);
   pointer-events: none;
 }
-.map-fallback[hidden], .leaflet-map[hidden] { display: none; }
-.map-fallback { padding-top: 34px; }
-.map-fallback-note {
-  position: absolute; z-index: 2; top: 8px; left: 10px;
-  color: var(--danger); font: 11px var(--hp-mono);
-}
+.leaflet-map[hidden] { display: none; }
 .leaflet-container { font-family: var(--hp-font); color: var(--text-primary); background: var(--app-bg); }
 [data-theme="dark"] .leaflet-tile-pane { filter: brightness(0.62) invert(1) contrast(1.25) hue-rotate(180deg) saturate(0.35); }
 @media (prefers-color-scheme: dark) {
@@ -2657,36 +2652,6 @@ a.project-card { display: block; color: inherit; text-decoration: none; }
 .leaflet-tooltip.attack-tooltip::before { display: none; }
 .leaflet-interactive { transition: fill-opacity 0.12s, stroke-opacity 0.12s; }
 .leaflet-interactive:hover { fill-opacity: 0.88 !important; stroke-opacity: 1 !important; }
-
-/* ── Offline SVG world map fallback ─────────────────────────────────────── */
-.world { display: block; width: 100%; height: auto; min-height: 260px; touch-action: none; cursor: grab; user-select: none; }
-.world.dragging { cursor: grabbing; }
-.world .ocean { fill: transparent; }
-.world .graticule { stroke: var(--border-subtle); stroke-width: 1; stroke-dasharray: 3 5; }
-.world .land { fill: var(--surface-2); stroke: var(--border-strong); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
-.world .country:hover { fill: var(--accent-soft); }
-.world .country-label {
-  fill: var(--text-secondary);
-  font: 600 9px var(--hp-mono); letter-spacing: 0.02em; text-anchor: middle;
-  paint-order: stroke; stroke: var(--surface-1); stroke-width: 2.5px; stroke-linejoin: round;
-  pointer-events: none;
-}
-.world .country-label.rank-3, .world .country-label.rank-4,
-.world .country-label.rank-5, .world .country-label.rank-6 { display: none; }
-.world[data-zoom-level="2"] .country-label.rank-3,
-.world[data-zoom-level="3"] .country-label.rank-3,
-.world[data-zoom-level="4"] .country-label.rank-3 { display: block; }
-.world[data-zoom-level="3"] .country-label.rank-4,
-.world[data-zoom-level="4"] .country-label.rank-4 { display: block; }
-.world[data-zoom-level="4"] .country-label.rank-5,
-.world[data-zoom-level="4"] .country-label.rank-6 { display: block; }
-.world circle {
-  fill: var(--danger); fill-opacity: 0.62;
-  stroke: var(--danger); stroke-width: 1.2;
-  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--danger) 55%, transparent));
-  transition: r 0.12s, fill-opacity 0.12s;
-}
-.world circle:hover { fill-opacity: 1; r: 8px; }
 
 /* ── Lazy loading controls (hp-app.js) ──────────────────────────────────── */
 .hp-lazy-controls {

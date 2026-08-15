@@ -134,10 +134,11 @@ commands/credentials, payloads, enriched IDS alerts, and ingest failures.
   with zoom. Hover shows IP/city/ASN/provider details and selecting a circle
   opens every event for that attacker. Live refreshes retain the Leaflet map DOM
   and update only its GeoJSON layer, preserving pan and zoom. If the map library
-  or tiles fail, the generated Natural Earth map remains available as an offline
-  fallback. `HONEYPOT_MAP_TILE_URL` and `HONEYPOT_MAP_ATTRIBUTION` can be set in
-  Dockge's `.env`; when using the default public OSM tiles, keep attribution
-  visible and follow the [tile usage policy](https://operations.osmfoundation.org/policies/tiles/).
+  or tiles fail, the current OpenStreetMap container remains visible with an
+  availability message; there is no local basemap fallback.
+  `HONEYPOT_MAP_TILE_URL` and `HONEYPOT_MAP_ATTRIBUTION` can be set in Dockge's
+  `.env`; when using the default public OSM tiles, keep attribution visible and
+  follow the [tile usage policy](https://operations.osmfoundation.org/policies/tiles/).
   The hourly activity chart also exposes exact counts on hover/focus. The 24-hour
   KPI compares activity with the preceding 24 hours and labels large changes;
   source health reports dashboard heap, reserved and cgroup memory, uptime, and

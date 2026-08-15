@@ -386,29 +386,35 @@
     box.append(hint);
     return box;
   };
-  const showMapFallback = (shell, message) => {
-    const map = shell.querySelector(".leaflet-map"), fallback = shell.querySelector(".map-fallback"), note = shell.querySelector("[data-map-status]");
-    if (map) map.hidden = true;
-    if (fallback) fallback.hidden = false;
-    if (note) note.textContent = message;
-  };
   const initMaps = () => document.querySelectorAll(".leaflet-map:not([data-map-ready])").forEach(container => {
     const shell = container.closest(".map-shell"), status = shell.querySelector("[data-map-status]");
     container.dataset.mapReady = "1";
-    if (!window.L) { showMapFallback(shell, "Interactive map library unavailable — showing offline map"); return; }
+    if (!window.L) {
+      if (status) status.textContent = "OpenStreetMap unavailable — interactive map library did not load";
+      return;
+    }
     const savedView = window.honeypotLeafletView || {center: [20, 0], zoom: 2};
     const map = L.map(container, {minZoom: 1, maxZoom: 12, maxBounds: [[-85, -180], [85, 180]], maxBoundsViscosity: 0.75, worldCopyJump: false}).setView(savedView.center, savedView.zoom);
     const tileURL = decodeURIComponent(container.dataset.tileUrl), attributionText = container.dataset.attribution || "OpenStreetMap contributors";
     const safeAttribution = document.createElement("span");
     safeAttribution.textContent = attributionText;
-    let tileErrors = 0;
+    let tileErrors = 0, tileUnavailable = false, mapSummary = "Loading attack origins…";
+    const setMapSummary = message => {
+      mapSummary = message;
+      if (!tileUnavailable && status) status.textContent = message;
+    };
     const tiles = L.tileLayer(tileURL, {maxZoom: 19, noWrap: true, attribution: '<a href="https://www.openstreetmap.org/copyright">' + safeAttribution.innerHTML + "</a>"})
-      .on("tileerror", () => { if (++tileErrors >= 8) showMapFallback(shell, "Map tiles unavailable — showing offline fallback"); })
+      .on("tileerror", () => {
+        if (++tileErrors >= 8) {
+          tileUnavailable = true;
+          if (status) status.textContent = "OpenStreetMap tiles unavailable";
+        }
+      })
       .on("load", () => {
         tileErrors = 0;
+        tileUnavailable = false;
         container.hidden = false;
-        const fallback = shell.querySelector(".map-fallback");
-        if (fallback) fallback.hidden = true;
+        if (status) status.textContent = mapSummary;
       })
       .addTo(map);
     const origins = L.layerGroup().addTo(map);
@@ -445,12 +451,12 @@
             });
           }
         }).addTo(origins);
-        status.textContent = data.features.length + " geolocated locations • zoom " + map.getZoom();
+        setMapSummary(data.features.length + " geolocated locations • zoom " + map.getZoom());
       } catch (e) {
-        status.textContent = "Attack origin update failed: " + e.message;
+        setMapSummary("Attack origin update failed: " + e.message);
       }
     };
-    map.on("zoomend", () => { status.textContent = status.textContent.replace(/zoom \d+$/, "zoom " + map.getZoom()); });
+    map.on("zoomend", () => setMapSummary(mapSummary.replace(/zoom \d+$/, "zoom " + map.getZoom())));
     window.honeypotLeaflet = {map, origins, tiles, container, shell, update};
     window.updateHoneypotMap = update;
     update();
@@ -708,43 +714,84 @@
 
   /* ---------- live page mounting (SSE / interval refresh) ---------- */
   const pageContent = document.querySelector("[data-hp-page-content]");
-  const refreshOverviewPreservingMap = source => {
-    const currentLive = pageContent.querySelector("#panel-live");
-    const incomingLive = source.querySelector("#panel-live");
-    const mapCard = currentLive?.querySelector(":scope > [data-attack-map-card]");
-    const incomingMap = incomingLive?.querySelector(":scope > [data-attack-map-card]");
-    if (!currentLive || !incomingLive || !mapCard || !incomingMap) return false;
+  const overviewRegionIDs = [
+    "overview-header",
+    "overview-kpis",
+    "panel-live",
+    "panel-threats",
+    "panel-behavior",
+    "panel-evidence",
+    "overview-footer",
+  ];
 
-    const childKey = element => {
-      if (element.id) return `#${element.id}`;
-      if (element.matches(".tabs")) return "overview-tabs";
-      return "";
-    };
-    [...source.children].forEach(incoming => {
-      if (incoming === incomingLive) return;
-      const key = childKey(incoming);
-      if (!key) return;
-      const current = key.startsWith("#")
-        ? pageContent.querySelector(`:scope > ${key}`)
-        : pageContent.querySelector(":scope > .tabs");
-      current?.replaceWith(incoming);
-    });
+  // #1393: hydrate the overview's data-bearing regions without replacing
+  // [data-hp-page-content] or its tab shell. Replacing that entire subtree on
+  // every SSE/timer tick discarded focused controls, reset tab DOM state, and
+  // could move the viewport while an operator was reading lower cards.
+  const hydrateOverview = source => {
+    if (!pageContent?.querySelector("#overview-header") || !source.querySelector("#overview-header")) {
+      source.remove?.();
+      return false;
+    }
 
-    // Rebuild the live panel around the existing map node. The Leaflet
-    // container never leaves the connected DOM, so its viewport is untouched.
-    [...currentLive.children].forEach(child => {
-      if (child !== mapCard) child.remove();
-    });
-    let afterMap = false;
-    [...incomingLive.children].forEach(incoming => {
-      if (incoming === incomingMap) {
-        afterMap = true;
-        return;
+    reNonce(source);
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+    const pageViewport = pageContent.closest(".app-main");
+    const viewportLeft = pageViewport?.scrollLeft || 0;
+    const viewportTop = pageViewport?.scrollTop || 0;
+    const active = document.activeElement instanceof Element ? document.activeElement : null;
+
+    overviewRegionIDs.forEach(id => {
+      const current = pageContent.querySelector(`#${id}`);
+      const incoming = source.querySelector(`#${id}`);
+      if (!current || !incoming) return;
+
+      // A focused input, open page-local modal, or other in-progress control
+      // owns its region until focus leaves it. Other cards still hydrate now;
+      // this region catches up on the next refresh cycle.
+      if (active && current.contains(active)) return;
+
+      if (id === "panel-live") {
+        const mapCard = current.querySelector(":scope > [data-attack-map-card]");
+        const incomingMap = incoming.querySelector(":scope > [data-attack-map-card]");
+        if (mapCard && incomingMap) {
+          // Rebuild the live panel around the existing Leaflet node. Its
+          // connected canvas and viewport never leave the document.
+          [...current.children].forEach(child => {
+            if (child !== mapCard) child.remove();
+          });
+          let afterMap = false;
+          [...incoming.children].forEach(child => {
+            if (child === incomingMap) {
+              afterMap = true;
+              return;
+            }
+            if (afterMap) current.appendChild(child);
+            else current.insertBefore(child, mapCard);
+          });
+          return;
+        }
       }
-      if (afterMap) currentLive.appendChild(incoming);
-      else currentLive.insertBefore(incoming, mapCard);
+
+      // Keep each named region node connected and update only its server-
+      // rendered contents. In particular, the overview root and tabs are
+      // never recreated by a background refresh.
+      current.replaceChildren(...incoming.children);
     });
+
     source.remove();
+    initLazyViews(pageContent);
+    reapplyTimezone();
+
+    // DOM insertion and chart initialization can both alter layout. Restore
+    // immediately, then once more after this frame's layout work settles.
+    const restoreViewport = () => {
+      window.scrollTo(scrollX, scrollY);
+      pageViewport?.scrollTo(viewportLeft, viewportTop);
+    };
+    restoreViewport();
+    requestAnimationFrame(restoreViewport);
     return true;
   };
 
@@ -758,20 +805,16 @@
     const prefs = window.HpPreferences?.prefs;
     window.HpPreferences?.applyTimeDisplay?.(prefs?.timezone, prefs?.clock);
   };
-  const mountPage = (source, options = {}) => {
+  const mountPage = source => {
     if (!pageContent) { source.remove?.(); return; }
     reNonce(source);
-    if (options.preserveMap && refreshOverviewPreservingMap(source)) {
-      initLazyViews(pageContent);
-      reapplyTimezone();
-      return;
-    }
     pageContent.replaceChildren(...source.children);
     source.remove();
     initLazyViews(pageContent);
     reapplyTimezone();
   };
   window.replaceHoneypotPage = mountPage;
+  window.hydrateHoneypotOverview = hydrateOverview;
 
   /* #514: events.html's "Isolate IP" panel (a fingerprint shared by many
      IPs) had per-row checkboxes and a free-text add box, but no visible

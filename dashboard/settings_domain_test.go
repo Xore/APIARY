@@ -25,6 +25,7 @@ func TestPreferencesRejectInvalidEnumsAndBounds(t *testing.T) {
 		{"rows", func(p *userPreferences) { p.RowsPerPage = 51 }, "rows_per_page"},
 		{"timezone", func(p *userPreferences) { p.Timezone = "Mars/Olympus" }, "timezone"},
 		{"refresh", func(p *userPreferences) { p.RefreshInterval = 1 }, "refresh_interval_seconds"},
+		{"map basemap", func(p *userPreferences) { p.MapBasemap = "offline" }, "map_basemap"},
 		{"window", func(p *userPreferences) { p.DefaultEventWindow = "365d" }, "default_event_window"},
 		{"severity", func(p *userPreferences) { p.NotifySeverity = "extreme" }, "notify_severity"},
 		{"landing", func(p *userPreferences) { p.LandingPage = "https://evil.example" }, "landing_page"},
@@ -71,7 +72,7 @@ func TestConfigRejectsUnsafeOrOutOfRangeValues(t *testing.T) {
 		{"export rows high", func(c *dashboardConfig) { c.Behavior.MaxExportRows = 100001 }, "max_export_rows"},
 		{"rows subset", func(c *dashboardConfig) { c.Behavior.RowsPerPageOptions = []int{25, 500} }, "rows_per_page_options"},
 		{"refresh subset", func(c *dashboardConfig) { c.Behavior.RefreshIntervals = []int{} }, "refresh_interval_seconds_options"},
-		{"map provider", func(c *dashboardConfig) { c.Behavior.MapProvider = "https://tiles.evil.example/{z}.png" }, "map_provider"},
+		{"map provider", func(c *dashboardConfig) { c.Behavior.MapProvider = "offline" }, "map_provider"},
 		{"cooldown syntax", func(c *dashboardConfig) { c.Honeypot.AlertCooldown = "soon" }, "alert_cooldown"},
 		{"cooldown bounds", func(c *dashboardConfig) { c.Honeypot.AlertCooldown = "30s" }, "alert_cooldown"},
 		{"campaign score", func(c *dashboardConfig) { c.Honeypot.AlertCampaignScore = 101 }, "alert_campaign_score"},
@@ -255,6 +256,63 @@ func TestMigrationBackfillsMissingDefaultTimezone(t *testing.T) {
 	}
 	if string(passedThrough) != string(unrelated) {
 		t.Fatalf("migration must not touch a payload with no behavior object, got %s", passedThrough)
+	}
+}
+
+func TestMigrationNormalizesLegacyMapSettingsToOpenStreetMap(t *testing.T) {
+	configPayload := json.RawMessage(`{"behavior":{"map_provider":"offline"},"unrelated":"kept"}`)
+	migratedConfig, err := migratePayload(4, configPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]json.RawMessage
+	if err := json.Unmarshal(migratedConfig, &config); err != nil {
+		t.Fatal(err)
+	}
+	var behavior struct {
+		MapProvider string `json:"map_provider"`
+	}
+	if err := json.Unmarshal(config["behavior"], &behavior); err != nil {
+		t.Fatal(err)
+	}
+	if behavior.MapProvider != "osm" || string(config["unrelated"]) != `"kept"` {
+		t.Fatalf("config migration = %s, want osm provider with unrelated data retained", migratedConfig)
+	}
+
+	usersPayload := json.RawMessage(`{"users":[` +
+		`{"subject":"offline","preferences_version":4,"preferences":{"map_basemap":"offline"}},` +
+		`{"subject":"system","preferences_version":4,"preferences":{"map_basemap":"system"}},` +
+		`{"subject":"osm","preferences_version":4,"preferences":{"map_basemap":"osm"}}]}`)
+	migratedUsers, err := migratePayload(4, usersPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var users struct {
+		Users []struct {
+			PreferencesVersion int `json:"preferences_version"`
+			Preferences        struct {
+				MapBasemap string `json:"map_basemap"`
+			} `json:"preferences"`
+		} `json:"users"`
+	}
+	if err := json.Unmarshal(migratedUsers, &users); err != nil {
+		t.Fatal(err)
+	}
+	if len(users.Users) != 3 {
+		t.Fatalf("migrated users = %s", migratedUsers)
+	}
+	for i, user := range users.Users {
+		if user.Preferences.MapBasemap != "osm" || user.PreferencesVersion != settingsSchemaVersion {
+			t.Fatalf("user %d migration = %+v, want OpenStreetMap at schema %d", i, user, settingsSchemaVersion)
+		}
+	}
+
+	migratedAgain, err := migrateOpenStreetMapOnly(migratedUsers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(migratedAgain) != string(migratedUsers) {
+		t.Fatalf("OpenStreetMap migration must be idempotent:\nfirst  %s\nsecond %s", migratedUsers, migratedAgain)
 	}
 }
 

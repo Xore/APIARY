@@ -40,9 +40,7 @@ func mapPointsGeoJSON(points []mapPoint) mapFeatureCollection {
 				// #228: drills into every event for this city (or country,
 				// when GeoIP never resolved a city), not one
 				// arbitrarily-chosen IP's events -- matching what the
-				// marker is now actually showing. Same helper the
-				// server-rendered SVG fallback map uses for p.Link, so the
-				// two can never drift apart.
+				// marker is now actually showing.
 				Events: mapPointEventsURL(p.City, p.Country),
 			},
 		})

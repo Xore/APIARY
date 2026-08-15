@@ -43,17 +43,11 @@ type mapPoint struct {
 	Lon     float64 `json:"lon"`
 	Count   int     `json:"count"`
 	IPCount int     `json:"ip_count"`
-	Link    string  `json:"-"` // /events?city=&country= drill-down, shared by the SVG fallback and the GeoJSON API
-	X       float64 `json:"-"`
-	Y       float64 `json:"-"`
-	R       int     `json:"-"`
 }
 
 // mapPointEventsURL is the drill-down target for a city (or, when GeoIP only
 // resolved to country level, country) marker -- every event from that place,
-// not one arbitrarily-chosen contributing IP. Shared by the server-rendered
-// SVG fallback map (aggregate.go) and the Leaflet GeoJSON API (map_api.go)
-// so the two never drift apart.
+// not one arbitrarily-chosen contributing IP.
 func mapPointEventsURL(city, country string) string {
 	q := url.Values{"country": {country}}
 	if city != "" {

@@ -258,7 +258,7 @@ All references pinned to `Xore/APIARY@e3b6bc9`.
   = `pageStyle + pageOverview + pageEvents + pageIPs + pageSession +
   pageIntel + pagePayloads + pageSandbox + pageOps`), parsed once in
   [`main.go#L118-L133`](https://github.com/Xore/APIARY/blob/e3b6bc92c5149492fcaddb7526c3934d51dd3513/dashboard/main.go#L118-L133)
-  with a `FuncMap` (`worldMap`, `json`, `dict`) and executed per route with
+  with a `FuncMap` (`json`, `dict`, presentation helpers) and executed per route with
   typed data structs (`s.get()`, `s.eventsData(r)`, `s.attackerData(ip)`, …).
 - The semantic shell is already server-rendered in `ui/partials/dashboard.html`:
   `{{define "style"}}` ([L1-L13](https://github.com/Xore/APIARY/blob/main/dashboard/ui/partials/dashboard.html#L1-L13)),
@@ -349,7 +349,6 @@ var uiFS embed.FS
 func mustReadUI(name string) []byte { /* panic on error, same as auth-backend apppage.go#L14-L20 */ }
 
 var tmplFuncs = template.FuncMap{
-	"worldMap": func() template.HTML { return template.HTML(worldMapSVG) },
 	"json":     func(v any) string { b, _ := json.MarshalIndent(v, "", "  "); return string(b) },
 	"dict":     func(pairs ...any) map[string]any { /* as in main.go#L118-L131 today */ },
 	"seq":      func(n int) []int { /* as in auth-backend page.go#L18-L24 */ },
