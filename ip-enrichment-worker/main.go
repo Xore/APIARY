@@ -6,9 +6,9 @@
 // enrichment half.
 //
 // Scope: cowrie, dionaea, every conpot persona, dns-honeypot,
-// cisco-asa-honeypot's IKE side, beelzebub (#1418), and hellpot (#1419) --
-// the sensors that aren't PROXY-protocol wrapped and so only ever see the
-// tunnel peer
+// cisco-asa-honeypot's IKE side, beelzebub (#1418), hellpot (#1419), and
+// sentrypeer (#1424) -- the sensors that aren't PROXY-protocol wrapped and
+// so only ever see the tunnel peer
 // address (10.8.0.1), never the real attacker IP, in their own raw log.
 // cisco-asa-honeypot's own WebVPN/HTTPS side, dnp3-honeypot, and dicompot
 // already get the real IP directly via PROXY protocol and need no
@@ -164,6 +164,14 @@ func discoverSources(logsDir, outDir, stateDir string) []*source {
 	// deliberately leave galah's own (pre-join, tunnel-peer-derived)
 	// srcHost/tags fields untouched -- see galah.go's doc comment.
 	add("galah", filepath.Join(logsDir, "galah", "event_log.json"), enrichGalahLine)
+
+	// #1424: sentrypeer is raw-port/portbridge-only, same reasoning as
+	// beelzebub/hellpot above (SIP has no PROXY-protocol equivalent) -- its
+	// own "source_ip" field is a single "ip:port" string (confirmed by
+	// actually running the patched binary and sending it a real SIP
+	// REGISTER), same shape as hellpot's REMOTE_ADDR, hence its own enrich
+	// function -- see sentrypeer.go's doc comment.
+	add("sentrypeer", filepath.Join(logsDir, "sentrypeer", "sentrypeer.json"), enrichSentrypeerLine)
 
 	// #1217: field-normalization-only sources -- these five already carry
 	// the real attacker IP via PROXY protocol (never the tunnel peer

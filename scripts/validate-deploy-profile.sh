@@ -60,6 +60,7 @@ declare -A STACK_TO_SENSORS=(
   [hellpot]="hellpot"
   [elasticpot]="elasticpot"
   [galah]="galah"
+  [sentrypeer]="sentrypeer"
   [tanner]="tanner"
   [conpot]="conpot conpot-s7-1200 conpot-s7-1500 conpot-iec104 conpot-guardian conpot-kamstrup"
   [endlessh]="endlessh"
