@@ -82,38 +82,73 @@ def dedupe(roots, state: Path) -> dict:
     reclaimed = 0
     errors = []
     cross_device = 0
+    paths_examined = 0
+    bytes_hashed = 0
 
+    # #1380: stat every candidate first and group by physical inode before
+    # hashing anything. A pathname that already shares an inode with another
+    # -- because a previous pass hardlinked them, or they arrived pre-linked
+    # -- is the same on-disk bytes as every other name in its group, so each
+    # group is hashed once and every member reuses that digest, instead of
+    # rereading and rehashing every pathname on every pass regardless of
+    # whether it was already linked.
+    inode_paths: dict[tuple[int, int], list[Path]] = {}
+    stats: dict[Path, os.stat_result] = {}
     for path in sorted(candidates(roots), key=lambda item: str(item)):
         try:
             stat = path.stat()
-            if stat.st_size == 0:
-                continue
-            sha256 = digest(path)
-            hashed += 1
-            content_key = (stat.st_size, sha256)
-            device_key = (stat.st_dev, stat.st_size, sha256)
-            if content_key in canonical and canonical[content_key].stat().st_dev != stat.st_dev:
-                cross_device += 1
-            first = canonical.get(device_key)
-            if first is None:
-                canonical[device_key] = path
-                canonical.setdefault(content_key, path)
-                continue
-            first_stat = first.stat()
-            if first_stat.st_ino == stat.st_ino:
-                continue
-            temporary = path.with_name(f".{path.name}.dedupe-{os.getpid()}")
-            temporary.unlink(missing_ok=True)
-            os.link(first, temporary)
-            os.replace(temporary, path)
-            linked += 1
-            reclaimed += stat.st_size
-        except (OSError, PermissionError) as error:
+        except OSError as error:
             errors.append(f"{path}: {error}")
+            continue
+        if stat.st_size == 0:
+            continue
+        paths_examined += 1
+        stats[path] = stat
+        inode_paths.setdefault((stat.st_dev, stat.st_ino), []).append(path)
+
+    # Groups are visited in the same order the very first path in the group
+    # would have been reached under the old flat, sorted-by-path loop, so
+    # which physical file ends up canonical for a given piece of content is
+    # unchanged.
+    for _, paths in sorted(inode_paths.items(), key=lambda item: str(item[1][0])):
+        representative = paths[0]
+        stat = stats[representative]
+        try:
+            sha256 = digest(representative)
+        except (OSError, PermissionError) as error:
+            errors.append(f"{representative}: {error}")
+            continue
+        hashed += 1
+        bytes_hashed += stat.st_size
+        content_key = (stat.st_size, sha256)
+        device_key = (stat.st_dev, stat.st_size, sha256)
+        if content_key in canonical and canonical[content_key].stat().st_dev != stat.st_dev:
+            cross_device += 1
+        first = canonical.get(device_key)
+        if first is None:
+            canonical[device_key] = representative
+            canonical.setdefault(content_key, representative)
+            continue
+        # Every name in this group already shares one inode, distinct from
+        # `first`'s -- relink each of them so every pathname ends up
+        # pointing at the canonical inode, same as the old per-path loop did
+        # one path at a time.
+        for path in paths:
+            try:
+                temporary = path.with_name(f".{path.name}.dedupe-{os.getpid()}")
+                temporary.unlink(missing_ok=True)
+                os.link(first, temporary)
+                os.replace(temporary, path)
+                linked += 1
+                reclaimed += stat.st_size
+            except (OSError, PermissionError) as error:
+                errors.append(f"{path}: {error}")
 
     result = {
         "completed_at": datetime.now(timezone.utc).isoformat(),
+        "paths_examined": paths_examined,
         "files_hashed": hashed,
+        "bytes_hashed": bytes_hashed,
         "duplicates_linked": linked,
         "bytes_reclaimed": reclaimed,
         "cross_device_duplicates_retained": cross_device,
