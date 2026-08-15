@@ -173,6 +173,13 @@ func discoverSources(logsDir, outDir, stateDir string) []*source {
 	// function -- see sentrypeer.go's doc comment.
 	add("sentrypeer", filepath.Join(logsDir, "sentrypeer", "sentrypeer.json"), enrichSentrypeerLine)
 
+	// #1421: wordpot is raw-port/portbridge-only too (see docker-compose.wordpot.yml
+	// for why) -- wordpot_patch.py's own JSON formatter wraps a fixed,
+	// known set of Python %-format message templates rather than emitting
+	// separate structured fields, hence its own enrich function -- see
+	// wordpot.go's doc comment.
+	add("wordpot", filepath.Join(logsDir, "wordpot", "wordpot.log"), enrichWordpotLine)
+
 	// #1217: field-normalization-only sources -- these five already carry
 	// the real attacker IP via PROXY protocol (never the tunnel peer
 	// address), so enrichLine's src_ip join is always a no-op for them;
