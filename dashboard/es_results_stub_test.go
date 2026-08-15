@@ -27,6 +27,24 @@ func esResultsStub(t *testing.T, docsByIndex map[string][]map[string]any) http.H
 	t.Helper()
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/_doc/") {
+			parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/"), "/_doc/", 2)
+			if len(parts) != 2 {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			index, id := parts[0], parts[1]
+			for _, source := range docsByIndex[index] {
+				namespace, _ := source["sandbox"].(map[string]any)
+				job, _ := namespace["job"].(string)
+				if id == "sandbox:"+job {
+					json.NewEncoder(w).Encode(map[string]any{"_id": id, "_source": source})
+					return
+				}
+			}
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		if strings.Contains(r.URL.Path, "_pit") {
 			if r.Method == http.MethodDelete {
 				json.NewEncoder(w).Encode(map[string]bool{"succeeded": true})

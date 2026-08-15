@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"html/template"
 	"net/http"
 	"net/http/httptest"
@@ -51,6 +52,48 @@ func TestSandboxResultsAreBoundedAndValidated(t *testing.T) {
 	filtered, err := s.sandboxData("", "does-not-match")
 	if err != nil || len(filtered.Rows) != 0 {
 		t.Fatalf("sandbox search was not applied: %#v %v", filtered.Rows, err)
+	}
+}
+
+func TestLoadSandboxResultByJobUsesOneDirectDocumentGet(t *testing.T) {
+	job := "windows-ghosts-20260810T185343Z-25b7e641f8b6"
+	stub := esResultsStub(t, map[string][]map[string]any{
+		"sandbox-analysis-v1": {
+			{"sandbox": map[string]any{"version": 2, "job": job, "sha256": strings.Repeat("a", 64)}},
+		},
+	})
+	var requests int
+	var path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		path = r.URL.Path
+		stub(w, r)
+	}))
+	defer srv.Close()
+
+	row, ok := loadSandboxResultByJob(newESClient(srv.URL, ""), job)
+	if !ok || row.Job != job {
+		t.Fatalf("direct job lookup failed: ok=%v row=%+v", ok, row)
+	}
+	if requests != 1 || path != "/sandbox-analysis-v1/_doc/sandbox:"+job {
+		t.Fatalf("lookup made %d requests to %q, want one direct document GET", requests, path)
+	}
+}
+
+func TestLoadSandboxResultByJobVerifiesReturnedJob(t *testing.T) {
+	requested := "windows-requested"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"_id": "sandbox:" + requested,
+			"_source": map[string]any{"sandbox": map[string]any{
+				"job": "windows-other", "sha256": strings.Repeat("a", 64),
+			}},
+		})
+	}))
+	defer srv.Close()
+
+	if _, ok := loadSandboxResultByJob(newESClient(srv.URL, ""), requested); ok {
+		t.Fatal("a document whose body names a different job must be rejected")
 	}
 }
 
@@ -297,7 +340,7 @@ func TestSandboxExportsResolveAcrossBackends(t *testing.T) {
 	// of this test's existing artifact-doc stub for the PCAP itself -- one
 	// server answers both request shapes, routed by path.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.Contains(r.URL.Path, "/_doc/") {
+		if strings.HasPrefix(r.URL.Path, "/sandbox-export-artifacts-v1/") {
 			artifacts(w, r)
 			return
 		}
@@ -364,9 +407,9 @@ func TestSandboxResultsPageRendersAsCardGrid(t *testing.T) {
 
 // TestSandboxDetailPageChartsTopSyscalls (#1292): TopSyscalls previously
 // rendered as a plain table only -- this pins that a completed job's detail
-// view also inlines window.__hpTopSyscalls and loads the chart script, and
-// that a job with no syscall trace exported gets neither (no empty chart
-// container, no dead inline var).
+// view stores its rows on the chart element and loads the chart script. A job
+// with no syscall trace has no chart container; the small initializer remains
+// shell-level because a hydrated fragment may add the container later.
 func TestSandboxDetailPageChartsTopSyscalls(t *testing.T) {
 	funcs := templateFuncs(nil, "")
 	tmpl := template.Must(template.New("dashboard").Funcs(funcs).Parse(pageTemplate))
@@ -389,8 +432,8 @@ func TestSandboxDetailPageChartsTopSyscalls(t *testing.T) {
 	if !strings.Contains(body, `id="syscalls-chart"`) {
 		t.Fatal("missing the #syscalls-chart chart container")
 	}
-	if !strings.Contains(body, "window.__hpTopSyscalls") || !strings.Contains(body, `"openat"`) {
-		t.Fatal("missing the inlined window.__hpTopSyscalls data")
+	if !strings.Contains(body, `data-hp-syscalls=`) || !strings.Contains(body, "openat") || strings.Contains(body, "ZgotmplZ") {
+		t.Fatal("missing syscall data on the chart container")
 	}
 	if !strings.Contains(body, "hp-syscalls-chart.js") {
 		t.Fatal("missing the hp-syscalls-chart.js script tag")
@@ -408,7 +451,7 @@ func TestSandboxDetailPageChartsTopSyscalls(t *testing.T) {
 		t.Fatalf("render: %v", err)
 	}
 	body = buf.String()
-	if strings.Contains(body, "hp-syscalls-chart.js") || strings.Contains(body, "window.__hpTopSyscalls") {
-		t.Fatal("a job with no syscall trace must not get the chart script or an empty inline var")
+	if strings.Contains(body, `id="syscalls-chart"`) || strings.Contains(body, "window.__hpTopSyscalls") {
+		t.Fatal("a job with no syscall trace must not get a chart container or an inline global")
 	}
 }

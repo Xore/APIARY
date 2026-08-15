@@ -307,6 +307,49 @@ func TestGhidraFragmentRoute(t *testing.T) {
 	}
 }
 
+func TestSandboxDetailShellRendersWithoutES(t *testing.T) {
+	s := &store{}
+	mux := investigateTestMux(t, s)
+	job := "windows-ghosts-20260810T185343Z-25b7e641f8b6"
+	rec := doGet(mux, "/sandbox/"+job)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 for a shell render", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `data-hp-sandbox-fragment-url="/sandbox/`+job+`/fragment"`) {
+		t.Errorf("shell is missing its fragment URL, got: %s", body)
+	}
+	if strings.Contains(body, `id="sandbox-detail-actions"`) {
+		t.Error("shell must not render result-only actions before hydration")
+	}
+}
+
+func TestSandboxFragmentRouteUsesJobScopedResult(t *testing.T) {
+	job := "windows-ghosts-test"
+	esResultsClientFor(t, map[string][]map[string]any{
+		"sandbox-analysis-v1": {
+			{"sandbox": map[string]any{
+				"version": 2, "job": job, "sha256": shaA, "file_type": "PE32 fixture",
+			}},
+		},
+	})
+	s := &store{}
+	mux := investigateTestMux(t, s)
+
+	rec := doGet(mux, "/sandbox/"+job+"/fragment")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("known job: status = %d, want 200", rec.Code)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, `id="sandbox-detail-actions"`) || !strings.Contains(body, "PE32 fixture") {
+		t.Errorf("fragment missing resolved sandbox detail, got: %s", body)
+	}
+
+	rec = doGet(mux, "/sandbox/no-such-job/fragment")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("unknown job: status = %d, want 404", rec.Code)
+	}
+}
+
 // TestCIDRWildcardCapturesTheEmbeddedSlash (#1312): CIDR notation always
 // contains a literal "/" ("203.0.113.0/24"), which Go 1.22's plain {name}
 // wildcard cannot span -- /investigate/cidr/{cidr...} uses the "rest of
