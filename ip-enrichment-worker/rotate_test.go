@@ -64,6 +64,48 @@ func TestOutputWriterRotatesAtMaxBytesWithoutLosingLines(t *testing.T) {
 	}
 }
 
+// TestOutputWriterRotatesRapidlyWithoutCollidingOnTimestamp covers a real
+// bug found while testing #1389's Dionaea-side fix: rotate()'s rename
+// target was a second-granularity timestamp with no collision check, so
+// two rotations landing in the same wall-clock second silently replaced
+// the first rotated file with the second, losing every line in it.
+func TestOutputWriterRotatesRapidlyWithoutCollidingOnTimestamp(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cowrie.json")
+	w, err := newOutputWriter(path, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { w.Close() })
+
+	const n = 20
+	for i := 0; i < n; i++ {
+		if !w.write("cowrie", [][]byte{[]byte(strings.Repeat("x", 20))}) {
+			t.Fatalf("write %d failed", i)
+		}
+	}
+
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	total := 0
+	for _, f := range files {
+		data, err := os.ReadFile(filepath.Join(dir, f.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+			if line != "" {
+				total++
+			}
+		}
+	}
+	if total != n {
+		t.Fatalf("want all %d lines preserved across every rotation, got %d (files: %v)", n, total, files)
+	}
+}
+
 // TestOutputWriterZeroMaxNeverRotates matches newLogger's own "0 disables
 // rotation" contract (multipot/main.go) -- OUTPUT_MAX_BYTES=0 should mean
 // "no bound", not "rotate on every write" (size starts at 0 too, so a naive

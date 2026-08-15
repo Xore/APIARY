@@ -61,8 +61,23 @@ func (w *outputWriter) rotate() {
 	if err := w.f.Close(); err != nil {
 		fmt.Fprintf(os.Stderr, "ip-enrichment-worker: close %q for rotation: %v\n", w.path, err)
 	}
-	stamp := time.Now().UTC().Format("20060102-150405")
-	if err := os.Rename(w.path, w.path+"."+stamp); err != nil {
+	// Second-granularity timestamps collide when two rotations happen within
+	// the same wall-clock second (confirmed live while testing this exact
+	// pattern for #1389's Dionaea half: a small enough max_bytes rotates
+	// more than once a second, and the second os.Rename silently replaces
+	// the first rotated file, losing everything in it). Disambiguate with a
+	// counter suffix instead of trusting the clock alone.
+	target := w.path + "." + time.Now().UTC().Format("20060102-150405")
+	if _, err := os.Stat(target); err == nil {
+		for n := 2; ; n++ {
+			candidate := fmt.Sprintf("%s.%d", target, n)
+			if _, err := os.Stat(candidate); err != nil {
+				target = candidate
+				break
+			}
+		}
+	}
+	if err := os.Rename(w.path, target); err != nil {
 		fmt.Fprintf(os.Stderr, "ip-enrichment-worker: rename %q for rotation: %v\n", w.path, err)
 	}
 	f, err := os.OpenFile(w.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
