@@ -49,8 +49,8 @@
               <input type="range" id="tty-seek" min="0" max="0" value="0" disabled>
               <label>speed <select id="tty-speed"><option value="1">1&times;</option><option value="2">2&times;</option><option value="4">4&times;</option><option value="0.5">0.5&times;</option></select></label>
             </div>
-            <div class="hp-tty-status" id="tty-status">Loading&hellip;</div>
-            <div class="hp-tty-term" id="tty-screen"></div>
+            <div class="hp-tty-status" id="tty-status" role="status">Loading recording&hellip;</div>
+            <div class="hp-tty-term" id="tty-screen" aria-busy="true"><div data-tty-loading aria-hidden="true" style="padding:14px"><div class="skeleton-line" style="width:72%"></div><div class="skeleton-line" style="width:44%"></div><div class="skeleton-line" style="width:86%"></div><div class="skeleton-line" style="width:61%"></div><div class="skeleton-line" style="width:78%"></div><div class="skeleton-line" style="width:35%"></div><div class="skeleton-line" style="width:68%"></div></div></div>
           </div>
         </div>
 

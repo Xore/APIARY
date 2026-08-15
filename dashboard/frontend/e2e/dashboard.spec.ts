@@ -803,7 +803,31 @@ test.describe("dashboard browser behaviour", () => {
     await expect(page.getByRole("button", { name: "More hashes" })).toHaveCount(0);
     await expect(root.locator("#sandbox-detail-actions")).toBeVisible();
     await expect(root).toContainText("PE32 browser fixture");
+    await expect(root.locator('[data-hp-evidence-body="sb-stdout"]')).toBeVisible();
+    await expect(root.locator('[data-hp-evidence-body="sb-stdout"] .card__scroll')).toContainText("sandbox fixture standard output");
+    await expect(root.locator('[data-hp-evidence-body="sb-ascii-strings"]')).toContainText("sandbox visible string");
+    await expect(root.locator("[data-hp-evidence]")).toHaveCount(0);
     await expect(root.locator("#syscalls-chart canvas")).not.toHaveCount(0);
+  });
+
+  test("CAPE detail hydrates a shaped shell and renders its analyzer log inline", async ({ page }) => {
+    const hash = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    await page.route(`**/cape/${hash}/fragment`, async route => {
+      const response = await route.fetch();
+      await gate;
+      await route.fulfill({ response });
+    });
+    await page.goto(`/cape/${hash}`);
+    const root = page.locator("#cape-detail-root");
+    await expect(root).toHaveAttribute("aria-busy", "true");
+    await expect(root.getByRole("heading", { name: "Analyzer log" })).toBeVisible();
+    await expect(root.locator(".card.wide")).toHaveCount(6);
+    release();
+    await expect(root).not.toHaveAttribute("aria-busy", "true");
+    await expect(root.locator('[aria-label="Analyzer log output"]')).toContainText("CAPE analyzer fixture line");
+    await expect(root.getByRole("button", { name: "Open the analyzer log" })).toHaveCount(0);
   });
 
   test("cache-warming skeletons auto-reload after an SPA navigation, not just a hard refresh (#1384)", async ({ page }) => {

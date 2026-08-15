@@ -14,18 +14,32 @@ if (root) {
   const target = root.querySelector("[data-vnc-target]");
   const url = root.dataset.vncUrl;
 
-  const setStatus = text => { if (status) status.textContent = text; };
+  const setStatus = (text, state) => {
+    if (status) status.textContent = text;
+    target.querySelector("[data-vnc-loading]")?.remove();
+    target.setAttribute("aria-busy", "false");
+    root.dataset.vncState = state;
+    if (state !== "connected" && !target.querySelector("canvas") && !target.querySelector("[data-vnc-state-message]")) {
+      const message = document.createElement("p");
+      message.className = "empty";
+      message.dataset.vncStateMessage = "";
+      message.textContent = text;
+      target.appendChild(message);
+    }
+  };
 
   const rfb = new RFB(target, url, {shared: true});
   rfb.viewOnly = true;
   rfb.scaleViewport = true;
 
-  rfb.addEventListener("connect", () => setStatus("Connected — view only."));
+  rfb.addEventListener("connect", () => {
+    setStatus("Connected — view only.", "connected");
+  });
   rfb.addEventListener("disconnect", e => {
     setStatus(e.detail && e.detail.clean
       ? "Disconnected."
-      : "Connection lost — the detonation may have finished, or the bridge is unreachable.");
+      : "Connection lost — the detonation may have finished, or the bridge is unreachable.", "disconnected");
   });
-  rfb.addEventListener("credentialsrequired", () => setStatus("This bridge does not support authenticated VNC sessions."));
-  rfb.addEventListener("securityfailure", e => setStatus("Security handshake failed: " + (e.detail && e.detail.reason || "unknown reason")));
+  rfb.addEventListener("credentialsrequired", () => setStatus("This bridge does not support authenticated VNC sessions.", "error"));
+  rfb.addEventListener("securityfailure", e => setStatus("Security handshake failed: " + (e.detail && e.detail.reason || "unknown reason"), "error"));
 }

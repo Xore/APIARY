@@ -12,6 +12,32 @@
   const url = root?.dataset.hpSandboxFragmentUrl;
   if (!root || !url) return;
 
+  const renderInlineEvidence = () => {
+    root.querySelectorAll("[data-hp-evidence]").forEach(trigger => trigger.remove());
+    root.querySelectorAll("[data-hp-evidence-body]").forEach(body => {
+      body.hidden = false;
+      body.classList.add("card", "wide");
+      if (!body.querySelector(":scope > h2")) {
+        const heading = document.createElement("h2");
+        heading.textContent = body.dataset.hpEvidenceTitle || "Evidence";
+        body.prepend(heading);
+      }
+      const noteText = body.dataset.hpEvidenceNote;
+      if (noteText && !body.querySelector(":scope > .note")) {
+        const note = document.createElement("p");
+        note.className = "note";
+        note.textContent = noteText;
+        body.querySelector(":scope > h2")?.after(note);
+      }
+      body.querySelectorAll(":scope > pre").forEach(pre => {
+        const scroll = document.createElement("div");
+        scroll.className = "card__scroll";
+        pre.before(scroll);
+        scroll.appendChild(pre);
+      });
+    });
+  };
+
   fetch(url, { cache: "no-store" })
     .then(response => {
       if (!response.ok) throw new Error("HTTP " + response.status);
@@ -20,6 +46,7 @@
     .then(html => {
       root.innerHTML = html;
       root.removeAttribute("aria-busy");
+      renderInlineEvidence();
       window.initHoneypotSyscallsChart?.();
     })
     .catch(() => {

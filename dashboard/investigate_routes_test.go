@@ -350,6 +350,28 @@ func TestSandboxFragmentRouteUsesJobScopedResult(t *testing.T) {
 	}
 }
 
+func TestCapeDetailShellAndScopedFragment(t *testing.T) {
+	s := &store{}
+	mux := investigateTestMux(t, s)
+	rec := doGet(mux, "/cape/"+shaA)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `data-hp-cape-fragment-url="/cape/`+shaA+`/fragment"`) {
+		t.Fatalf("CAPE shell did not render without ES: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), `id="cape-detail-actions"`) {
+		t.Fatal("CAPE shell synchronously rendered result-only content")
+	}
+
+	esResultsClientFor(t, map[string][]map[string]any{"cape-analysis-v1": {{"cape": map[string]any{
+		"version": 1, "sha256": shaA, "exit_status": "ok", "cape_status": "reported",
+		"report": map[string]any{"debug": map[string]any{"log": "fixture analyzer line"}},
+	}}}})
+	mux = investigateTestMux(t, s)
+	rec = doGet(mux, "/cape/"+shaA+"/fragment")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "fixture analyzer line") || !strings.Contains(rec.Body.String(), `aria-label="Analyzer log output"`) {
+		t.Fatalf("CAPE fragment did not render the scoped visible log: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 // TestCIDRWildcardCapturesTheEmbeddedSlash (#1312): CIDR notation always
 // contains a literal "/" ("203.0.113.0/24"), which Go 1.22's plain {name}
 // wildcard cannot span -- /investigate/cidr/{cidr...} uses the "rest of

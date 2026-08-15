@@ -95,8 +95,8 @@
             <div class="metric"><div class="metric__value"><div class="skeleton-line" style="width:45%"></div></div><div class="metric__label">Captured packets</div></div>
             <div class="metric"><div class="metric__value"><div class="skeleton-line" style="width:45%"></div></div><div class="metric__label">Changed paths</div></div>
           </div>
-          <div class="card wide"><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:85%"></div><div class="skeleton-line" style="width:40%"></div></div>
-          <div class="card wide"><div class="skeleton-line" style="width:55%"></div><div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:35%"></div></div>
+          <div class="tabs" role="tablist" aria-label="Loading sandbox analysis sections"><button class="tab active" type="button" role="tab" aria-selected="true"><span>01</span>Verdict</button><button class="tab" type="button" role="tab" aria-selected="false"><span>02</span>Behavior</button><button class="tab" type="button" role="tab" aria-selected="false"><span>03</span>Network</button><button class="tab" type="button" role="tab" aria-selected="false"><span>04</span>File forensics</button><button class="tab" type="button" role="tab" aria-selected="false"><span>05</span>Diagnostics</button></div>
+          <div class="tw:grid tw:grid-cols-12 tw:gap-3.5"><div class="section-heading"><div><h2>What happened</h2><p>Loading verdict, identity, classification, techniques, and evidence.</p></div></div><div class="card wide"><h2>Run identity and analysis route</h2><div class="skeleton-line" style="width:92%"></div><div class="skeleton-line" style="width:78%"></div><div class="skeleton-line" style="width:86%"></div><div class="skeleton-line" style="width:64%"></div></div><div class="card wide"><h2>Behavioral classification</h2><div class="skeleton-line" style="width:82%"></div><div class="skeleton-line" style="width:70%"></div></div><div class="card wide"><h2>Observed techniques</h2><div class="card__scroll"><div class="skeleton-line" style="width:88%"></div><div class="skeleton-line" style="width:76%"></div></div></div><div class="card wide"><h2>Complete evidence</h2><div class="card__scroll"><pre class="code"><span class="skeleton-line" style="width:84%"></span><span class="skeleton-line" style="width:68%"></span><span class="skeleton-line" style="width:78%"></span></pre></div></div></div>
         </div>
         {{else}}
         {{block "sandbox-detail-body" .}}
@@ -197,9 +197,7 @@
           {{if .Detail.Incomplete}}<div class="card wide"><h2>Sandbox infrastructure diagnostics</h2><div class="card__row"><span class="card__label">run status</span><span class="card__value card__value--mono tw:text-red">{{.Detail.RunStatus}}</span></div><div class="card__row"><span class="card__label">exit status</span><span class="card__value card__value--mono">{{.Detail.ExitStatus}}</span></div><div class="card__row"><span class="card__label">last host phase</span><span class="card__value card__value--mono">{{.Detail.Artifacts.HostPhase}}</span></div><div class="card__row"><span class="card__label">guest service started</span><span class="card__value card__value--mono">{{.Detail.GuestStarted}}</span></div><p class="note tw:mt-3">{{if .Detail.Artifacts.ConsoleLog}}<button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="sb-console">Guest serial console</button> {{end}}{{if .Detail.Artifacts.QEMULog}}<button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="sb-qemu">QEMU log</button> {{end}}{{if .Detail.Artifacts.DomainState}}<button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="sb-domain">Domain state</button>{{end}}</p></div>{{end}}
         </div>
 
-        <!-- Evidence bodies: raw analysis output the viewer opens on demand.
-             They stay in the page so the record is complete without JavaScript. -->
-        <div class="hp-evidence-source" hidden>
+        <section class="card wide"><h2>Complete evidence</h2><p class="note">Every log, string set, IOC list, parser result, and diagnostic is rendered below without a modal. The complete card collection stays inside this bounded scroll region so it cannot make the page excessively long.</p><div class="card__scroll"><div class="hp-evidence-source tw:grid tw:grid-cols-12 tw:gap-3.5" data-sandbox-inline-evidence>
           <div data-hp-evidence-body="sb-changed-paths" data-hp-evidence-title="Created or changed paths" data-hp-evidence-note="Filesystem paths the run created or modified inside the disposable guest."><pre class="code">{{range .Detail.ChangedFiles}}{{.}}
 {{end}}</pre></div>
           <div data-hp-evidence-body="sb-stdout" data-hp-evidence-title="Standard output" data-hp-evidence-note="Untrusted guest output, HTML-escaped and size-bounded."><pre class="code">{{.Detail.Stdout}}</pre></div>
@@ -256,7 +254,7 @@
           <div data-hp-evidence-body="sb-utf16-strings" data-hp-evidence-title="Extracted UTF-16LE strings" data-hp-evidence-note="Wide-character sequences extracted from the sample."><pre class="code">{{range .Detail.Windows.UTF16Strings}}{{.}}
 {{end}}</pre></div>
           {{end}}
-        </div>
+        </div></div></section>
         <p class="note tw:mt-3">Guest-produced text is untrusted, HTML-escaped, and size-bounded. Raw PCAP and diagnostics downloads require the administrator role; complete raw result directories and syscall traces remain root-only on the homeserver.</p>
         {{end}}
         {{end}}
