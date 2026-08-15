@@ -83,7 +83,7 @@ func (s *store) mlPanelsEnabled() bool {
 // presentation funcs resolve the effective configuration at render time; a
 // nil store or settings service serves the compiled defaults, so the shell
 // renders even while the settings stores are unavailable.
-func templateFuncs(s *store, world template.HTML) template.FuncMap {
+func templateFuncs(s *store, _ template.HTML) template.FuncMap {
 	presentation := func() presentationConfig {
 		if s == nil || s.settings == nil {
 			return defaultDashboardConfig().Presentation
@@ -100,7 +100,6 @@ func templateFuncs(s *store, world template.HTML) template.FuncMap {
 	}
 	return template.FuncMap{
 		"asset":             assetURL,
-		"worldMap":          func() template.HTML { return world },
 		"chatMessageText":   chatMessageText,
 		"chatToolCallsText": chatToolCallsText,
 		// inc turns a 0-based {{range}} index into a 1-based CSS

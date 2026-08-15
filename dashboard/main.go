@@ -358,7 +358,7 @@ func main() {
 	// `dict` lets the template pass named args into the reusable "tbl" block.
 	// The presentation funcs wire the admin-configurable shell copy (Milestone
 	// E) into every page at render time.
-	funcs := templateFuncs(s, template.HTML(worldMapSVG))
+	funcs := templateFuncs(s, "")
 	tmpl := template.Must(template.New("t").Funcs(funcs).Parse(pageTemplate))
 
 	handler := trackedHandler(s, dashboardOIDC, s.routes(tmpl))

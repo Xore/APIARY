@@ -123,15 +123,7 @@
 
           {{if .MapPoints}}<div class="card wide map-card" data-attack-map-card><h2>Attack origins &mdash; live geographic view</h2>
             <div class="map-shell" data-map-shell><div id="attack-map" class="leaflet-map" data-tile-url="{{.MapTileURL}}" data-attribution="{{.MapAttribution}}" role="region" aria-label="interactive map of geolocated attack origins"></div><div class="map-status" data-map-status aria-live="polite">Loading attack origins…</div>
-            <div class="map-fallback" hidden><div class="map-fallback-note">Interactive map unavailable — offline geographic fallback</div><svg class="world" viewBox="0 0 1000 450" role="img" aria-label="offline world map of geolocated attack origins">
-              <rect class="ocean" width="1000" height="450" rx="10"/>
-              <g class="graticule">
-                <line x1="83" y1="0" x2="83" y2="450"/><line x1="167" y1="0" x2="167" y2="450"/><line x1="250" y1="0" x2="250" y2="450"/><line x1="333" y1="0" x2="333" y2="450"/><line x1="417" y1="0" x2="417" y2="450"/><line x1="500" y1="0" x2="500" y2="450"/><line x1="583" y1="0" x2="583" y2="450"/><line x1="667" y1="0" x2="667" y2="450"/><line x1="750" y1="0" x2="750" y2="450"/><line x1="833" y1="0" x2="833" y2="450"/><line x1="917" y1="0" x2="917" y2="450"/>
-                <line x1="0" y1="75" x2="1000" y2="75"/><line x1="0" y1="150" x2="1000" y2="150"/><line x1="0" y1="225" x2="1000" y2="225"/><line x1="0" y1="300" x2="1000" y2="300"/><line x1="0" y1="375" x2="1000" y2="375"/>
-              </g>
-              {{worldMap}}
-              {{range .MapPoints}}<a href="{{.Link}}"><circle cx="{{printf "%.1f" .X}}" cy="{{printf "%.1f" .Y}}" r="{{.R}}"><title>{{if .City}}{{.City}}, {{end}}{{.Country}} — {{.IPCount}} IPs — {{.Count}} events</title></circle></a>{{end}}
-            </svg></div></div><p class="note">Approximate geolocation only. One marker per city, accumulating every IP that geolocated there. Marker radius is geographic—not fixed-size—so it changes naturally with zoom and is weighted by event count. Hover for city, country and IP count; select a marker for all related events. Map data © OpenStreetMap contributors.</p></div>{{end}}
+            </div><p class="note">Approximate geolocation only. One marker per city, accumulating every IP that geolocated there. Marker radius is geographic—not fixed-size—so it changes naturally with zoom and is weighted by event count. Hover for city, country and IP count; select a marker for all related events. Map data © OpenStreetMap contributors.</p></div>{{end}}
 
           <div class="section-heading"><div><h2>Collection status</h2><p>Sensor activity and the protocols currently attracting traffic.</p></div><a class="section-link" href="/source-health">Open pipeline health &rarr;</a></div>
           <div class="card half sensor-card">
@@ -408,16 +400,13 @@ async function refreshDashboard(){
     if (!r.ok) return;
     const doc = new DOMParser().parseFromString(await r.text(), "text/html");
     const next = doc.querySelector("[data-hp-page-content]"),current=document.querySelector("[data-hp-page-content]");
-    // #347: window.replaceHoneypotPage (hp-app.js's mountPage) re-nonces the
-    // fetched fragment's nonced style and script elements against the live
-    // page's own CSP nonce before insertion -- each server response gets a
-    // fresh random nonce (dashboard/render.go's nonce()) that never matches
-    // the document already loaded. A plain unconditional DOM swap here would
-    // insert un-renonced markup and trip the style-src CSP directive. If
-    // hp-app.js (deferred) hasn't finished executing yet, skip this refresh
-    // cycle instead of inserting unsafe markup -- the next 'update' event or
-    // timer tick retries, and hp-app.js is always ready well before that.
-    if (next&&current&&window.replaceHoneypotPage) {const preserveMap=Boolean(current.querySelector('[data-attack-map-card]')&&next.querySelector('[data-attack-map-card]'));window.replaceHoneypotPage(next,{preserveMap});if(window.initDashboardTabs)window.initDashboardTabs();if(window.initHoneypotMaps)window.initHoneypotMaps();if(window.initHoneypotCharts)window.initHoneypotCharts();}
+    // #1393: hydrate named overview regions in the existing document rather
+    // than replacing the page-content subtree. hp-app.js also re-nonces the
+    // incoming fragment before insertion (#347), preserves the live map,
+    // focused controls, modal state, tabs, and the current viewport. If the
+    // deferred enhancement layer is not ready yet, leave the current view
+    // untouched and let the next SSE/timer tick retry.
+    if (next&&current&&window.hydrateHoneypotOverview&&window.hydrateHoneypotOverview(next)) {if(window.initDashboardTabs)window.initDashboardTabs();if(window.initHoneypotMaps)window.initHoneypotMaps();if(window.initHoneypotCharts)window.initHoneypotCharts();}
   } catch {} finally {refreshing=false}
 }
 /* #210: the overview page used to track its own SSE connection health for a
@@ -439,4 +428,3 @@ addEventListener('hp-live-resumed',refreshDashboard);
 </body>
 </html>
 {{end}}
-

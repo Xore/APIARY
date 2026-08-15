@@ -96,8 +96,8 @@ func TestOverviewRefreshTargetsTheCurrentPageContentSelector(t *testing.T) {
 }
 
 // TestOverviewRefreshNeverInsertsUnrenoncedMarkup (#347): refreshDashboard()
-// used to fall back to a bare current.replaceWith(next) whenever
-// window.replaceHoneypotPage (hp-app.js's mountPage, which re-nonces the
+// used to fall back to a bare current.replaceWith(next) whenever the
+// hp-app.js enhancement layer (which re-nonces the
 // fetched fragment's <style>/<script> tags against the live page's own CSP
 // nonce before insertion) wasn't defined yet -- e.g. an SSE 'update' firing
 // before the deferred hp-app.js script finishes executing. That fallback
@@ -110,9 +110,55 @@ func TestOverviewRefreshNeverInsertsUnrenoncedMarkup(t *testing.T) {
 		t.Fatal("overview's refresh script must not fall back to replaceWith(next) -- " +
 			"that path skips reNonce and inserts markup carrying a mismatched CSP nonce")
 	}
-	if !strings.Contains(pageTemplate, "next&&current&&window.replaceHoneypotPage") {
-		t.Fatal("overview's refresh script must gate the DOM swap on window.replaceHoneypotPage " +
+	if !strings.Contains(pageTemplate, "next&&current&&window.hydrateHoneypotOverview") {
+		t.Fatal("overview's refresh script must gate hydration on window.hydrateHoneypotOverview " +
 			"being defined, so an early SSE update can't race hp-app.js's deferred load")
+	}
+}
+
+// TestOverviewRefreshHydratesNamedRegionsWithoutReplacingThePage (#1393):
+// automatic updates must leave the overview root/tab shell and any focused
+// region connected. Those nodes carry scroll, tab, modal and input state that
+// a wholesale replaceChildren call discards even though it is not a browser
+// navigation in the traditional sense.
+func TestOverviewRefreshHydratesNamedRegionsWithoutReplacingThePage(t *testing.T) {
+	appJS, err := staticAssets.ReadFile("static/hp-app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(appJS)
+	for _, marker := range []string{
+		"window.hydrateHoneypotOverview = hydrateOverview",
+		"overviewRegionIDs",
+		"current.replaceChildren(...incoming.children)",
+		"current.contains(active)",
+		`pageContent.closest(".app-main")`,
+		"requestAnimationFrame(restoreViewport)",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Fatalf("overview background hydration is missing %q", marker)
+		}
+	}
+	if strings.Contains(pageTemplate, "window.replaceHoneypotPage(next,{preserveMap})") {
+		t.Fatal("overview refresh still replaces the page-content subtree through mountPage")
+	}
+}
+
+func TestOverviewUsesOpenStreetMapWithoutLocalFallback(t *testing.T) {
+	appJS, err := staticAssets.ReadFile("static/hp-app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(appJS)
+	for _, absent := range []string{"map-fallback", "showMapFallback", "offline fallback", "showing offline map"} {
+		if strings.Contains(pageTemplate, absent) || strings.Contains(js, absent) {
+			t.Fatalf("dashboard still contains local map fallback marker %q", absent)
+		}
+	}
+	for _, want := range []string{"OpenStreetMap contributors", "OpenStreetMap tiles unavailable", "openstreetmap.org/copyright"} {
+		if !strings.Contains(pageTemplate, want) && !strings.Contains(js, want) {
+			t.Fatalf("OpenStreetMap-only implementation is missing %q", want)
+		}
 	}
 }
 

@@ -321,12 +321,10 @@
         <section class="card">
           <div class="card__title">Attack map</div>
           <div class="settings-grid">
-            <div class="hp-field settings-field" data-hp-search="map basemap tiles openstreetmap offline provider">
+            <div class="hp-field settings-field" data-hp-search="map basemap tiles openstreetmap provider">
               <label class="form-label" for="hp-pref-basemap">Basemap</label>
               <select class="form-input" id="hp-pref-basemap" data-pref="map_basemap">
-                <option value="system">Deployment default</option>
                 <option value="osm">OpenStreetMap</option>
-                <option value="offline">Offline (no tiles)</option>
               </select>
             </div>
           </div>
@@ -514,7 +512,6 @@
             <label class="form-label" for="hp-cfg-provider">Default map provider</label>
             <select class="form-input" id="hp-cfg-provider" data-cfg="behavior.map_provider">
               <option value="osm">OpenStreetMap</option>
-              <option value="offline">Offline tiles</option>
             </select>
           </div>
           <div class="hp-field settings-field" data-hp-search="behavior default timezone iana zone new user">

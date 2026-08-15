@@ -10,10 +10,6 @@ import (
 	"time"
 )
 
-// mapPointRadius is the fixed SVG-fallback marker radius (viewBox units).
-// #228: not scaled by event count -- see the comment where it's assigned.
-const mapPointRadius = 6
-
 func (s *store) rebuild() {
 	var (
 		logins, downloads int
@@ -396,15 +392,6 @@ func (s *store) rebuild() {
 		snap.ASNs = asnRows(esOverviewResult.ASNs)
 		snap.SensorHeatmap = esOverviewResult.SensorHeatmap
 		for _, p := range esOverviewResult.MapPoints {
-			p.X = (p.Lon + 180) / 360 * 1000
-			p.Y = (90 - p.Lat) / 180 * 450
-			// #228: fixed, not scaled by Count -- same reasoning as the
-			// Leaflet map's circleMarker switch in hp-app.js. A
-			// count-scaled radius on a high-traffic country-level point
-			// (no city resolved) could grow large enough to visually cover
-			// a real city's own marker nearby.
-			p.R = mapPointRadius
-			p.Link = mapPointEventsURL(p.City, p.Country)
 			snap.MapPoints = append(snap.MapPoints, p)
 		}
 		sort.Slice(snap.MapPoints, func(i, j int) bool {

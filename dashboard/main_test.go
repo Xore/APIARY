@@ -1055,10 +1055,10 @@ func TestDashboardCSSAssetsAreEmbeddedAndReferenced(t *testing.T) {
 	if !strings.Contains(string(adapter), "window.replaceHoneypotPage = mountPage") {
 		t.Fatal("dashboard enhancement layer does not expose the live-refresh content mount")
 	}
-	if !strings.Contains(pageTemplate, `document.querySelector("[data-hp-page-content]")`) || !strings.Contains(pageTemplate, "window.replaceHoneypotPage(next,{preserveMap})") {
+	if !strings.Contains(pageTemplate, `document.querySelector("[data-hp-page-content]")`) || !strings.Contains(pageTemplate, "window.hydrateHoneypotOverview(next)") {
 		t.Fatal("dashboard refresh does not target the server-rendered content container")
 	}
-	if !strings.Contains(string(adapter), "refreshOverviewPreservingMap") || !strings.Contains(string(adapter), "child !== mapCard") {
+	if !strings.Contains(string(adapter), "hydrateOverview") || !strings.Contains(string(adapter), "child !== mapCard") {
 		t.Fatal("dashboard refresh does not preserve the connected Leaflet map")
 	}
 }

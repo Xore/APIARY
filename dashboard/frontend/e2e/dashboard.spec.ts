@@ -331,7 +331,7 @@ test.describe("dashboard browser behaviour", () => {
     await expect(controls).toContainText(`50 of ${total} entries`);
   });
 
-  test("live overview replacement preserves the connected map node", async ({ page }) => {
+  test("live overview hydration preserves the connected map node", async ({ page }) => {
     await page.goto("/");
     const result = await page.evaluate(() => {
       const live = document.querySelector('[data-dashboard-panel="live"]');
@@ -344,13 +344,13 @@ test.describe("dashboard browser behaviour", () => {
 
       const incoming = document.createElement("div");
       incoming.innerHTML = `
-        <div class="tabs" data-browser-replacement="tabs"></div>
+        <header id="overview-header"><h1>Hydrated overview</h1></header>
         <div id="panel-live" data-dashboard-panel="live">
           <div data-browser-replacement="before"></div>
           <div data-attack-map-card><div id="replacement-map">replace me</div></div>
           <div data-browser-replacement="after"></div>
         </div>`;
-      window.replaceHoneypotPage(incoming, { preserveMap: true });
+      (window as any).hydrateHoneypotOverview(incoming);
       return {
         sameNode: document.querySelector("#browser-map-sentinel") === original,
         connected: Boolean(original?.isConnected),
@@ -364,6 +364,67 @@ test.describe("dashboard browser behaviour", () => {
       replacementDiscarded: true,
       surroundingContentUpdated: true,
     });
+  });
+
+  test("overview refresh preserves tabs, modal focus, viewport, and focused controls", async ({ page }) => {
+    const initial = await page.goto("/");
+    expect(initial?.ok()).toBe(true);
+    const refreshedHTML = (await initial!.text()).replaceAll("Honeypot command center", "Hydrated command center");
+    await page.route(page.url(), (route) => route.fulfill({ status: 200, contentType: "text/html", body: refreshedHTML }));
+
+    const threats = page.getByRole("tab", { name: /Threat landscape/ });
+    await threats.click();
+    await page.evaluate(() => {
+      const tabs = document.querySelector<HTMLElement>('[role="tablist"][aria-label="Dashboard views"]');
+      if (!tabs) throw new Error("overview tabs missing");
+      tabs.dataset.hydrationSentinel = "connected";
+      const root = document.querySelector<HTMLElement>("[data-hp-page-content]");
+      if (!root) throw new Error("page root missing");
+      root.style.paddingBottom = "2000px";
+      const viewport = document.querySelector<HTMLElement>(".app-main");
+      if (!viewport) throw new Error("page viewport missing");
+      viewport.scrollTo(0, 700);
+    });
+    const scrollBefore = await page.locator(".app-main").evaluate((element) => element.scrollTop);
+    expect(scrollBefore).toBeGreaterThan(0);
+
+    await page.keyboard.press("/");
+    const command = page.locator("#hp-investigation-query");
+    await command.fill("operator draft");
+    await expect(command).toBeFocused();
+    await (page.evaluate(() => (window as any).refreshDashboard()) as Promise<void>);
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+
+    await expect(page.locator("#overview-header h1")).toContainText("Hydrated command center");
+    await expect(page.locator("#hp-command-palette")).toHaveClass(/open/);
+    await expect(command).toHaveValue("operator draft");
+    await expect(command).toBeFocused();
+    await expect(threats).toHaveAttribute("aria-selected", "true");
+    await expect(page.locator('[role="tablist"][data-hydration-sentinel="connected"]')).toHaveCount(1);
+    expect(Math.abs((await page.locator(".app-main").evaluate((element) => element.scrollTop)) - scrollBefore)).toBeLessThanOrEqual(1);
+
+    await page.keyboard.press("Escape");
+    await page.getByRole("tab", { name: /Live operations/ }).click();
+    const focusedControl = page.locator('#panel-live a[href="/events?since=24h"]');
+    await focusedControl.evaluate((element) => { element.dataset.hydrationSentinel = "focused"; });
+    await focusedControl.focus();
+    await expect(focusedControl).toBeFocused();
+    await (page.evaluate(() => (window as any).refreshDashboard()) as Promise<void>);
+    await expect(page.locator('#panel-live a[data-hydration-sentinel="focused"]')).toHaveCount(1);
+    await expect(focusedControl).toBeFocused();
+  });
+
+  test("failed overview refresh retains the current document", async ({ page }) => {
+    await page.goto("/");
+    await page.evaluate(() => {
+      const root = document.querySelector<HTMLElement>("[data-hp-page-content]");
+      if (!root) throw new Error("page root missing");
+      root.dataset.refreshFailureSentinel = "retained";
+    });
+    await page.route(page.url(), (route) => route.fulfill({ status: 503, body: "temporarily unavailable" }));
+    await (page.evaluate(() => (window as any).refreshDashboard()) as Promise<void>);
+    await expect(page.locator('[data-hp-page-content][data-refresh-failure-sentinel="retained"]')).toHaveCount(1);
+    await expect(page.locator("#overview-header")).toBeVisible();
   });
 
   test("confirmation modal owns focus, closes on Escape, and restores its trigger", async ({ page }) => {

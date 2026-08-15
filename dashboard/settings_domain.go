@@ -23,7 +23,7 @@ var errSettingsValidation = errors.New("settings validation failed")
 
 // settingsSchemaVersion is the current on-disk schema. The migration registry
 // below exists so future versions slot in without touching the store layer.
-const settingsSchemaVersion = 4
+const settingsSchemaVersion = 5
 
 // migrations upgrades a persisted payload from schema version N to N+1.
 // Unknown older versions fail loudly instead of being silently misread, and
@@ -33,6 +33,7 @@ var migrations = map[int]func(json.RawMessage) (json.RawMessage, error){
 	1: migrateAddMLAlertThresholdDefault,
 	2: migrateAddDefaultTimezone,
 	3: migrateAddBrandPrefix,
+	4: migrateOpenStreetMapOnly,
 }
 
 // migrateAddMLAlertThresholdDefault backfills honeypot.ml_alert_threshold
@@ -166,6 +167,78 @@ func migrateAddBrandPrefix(payload json.RawMessage) (json.RawMessage, error) {
 	return json.Marshal(doc)
 }
 
+// migrateOpenStreetMapOnly (#1399) removes the two persisted names that used
+// to select the embedded SVG fallback: behavior.map_provider="offline" and
+// preferences.map_basemap="offline". "system" was also a user-facing alias
+// for the deployment provider; now that OpenStreetMap is the sole provider,
+// store the explicit value instead. The migration registry is shared by the
+// config and users documents, so both shapes are handled in one idempotent
+// step and unrelated payloads pass through byte-for-byte.
+func migrateOpenStreetMapOnly(payload json.RawMessage) (json.RawMessage, error) {
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &doc); err != nil {
+		return payload, nil
+	}
+	changed := false
+
+	if behaviorRaw, ok := doc["behavior"]; ok {
+		var behavior map[string]json.RawMessage
+		if json.Unmarshal(behaviorRaw, &behavior) == nil {
+			var provider string
+			if json.Unmarshal(behavior["map_provider"], &provider) == nil && provider == "offline" {
+				behavior["map_provider"] = json.RawMessage(`"osm"`)
+				encoded, err := json.Marshal(behavior)
+				if err != nil {
+					return nil, err
+				}
+				doc["behavior"] = encoded
+				changed = true
+			}
+		}
+	}
+
+	if usersRaw, ok := doc["users"]; ok {
+		var users []map[string]json.RawMessage
+		if json.Unmarshal(usersRaw, &users) == nil {
+			usersChanged := false
+			for i := range users {
+				var prefs map[string]json.RawMessage
+				if json.Unmarshal(users[i]["preferences"], &prefs) != nil {
+					continue
+				}
+				var basemap string
+				if json.Unmarshal(prefs["map_basemap"], &basemap) == nil && (basemap == "offline" || basemap == "system") {
+					prefs["map_basemap"] = json.RawMessage(`"osm"`)
+					encoded, err := json.Marshal(prefs)
+					if err != nil {
+						return nil, err
+					}
+					users[i]["preferences"] = encoded
+					usersChanged = true
+				}
+				var preferencesVersion int
+				if json.Unmarshal(users[i]["preferences_version"], &preferencesVersion) != nil || preferencesVersion != settingsSchemaVersion {
+					users[i]["preferences_version"] = json.RawMessage(fmt.Sprintf("%d", settingsSchemaVersion))
+					usersChanged = true
+				}
+			}
+			if usersChanged {
+				encoded, err := json.Marshal(users)
+				if err != nil {
+					return nil, err
+				}
+				doc["users"] = encoded
+				changed = true
+			}
+		}
+	}
+
+	if !changed {
+		return payload, nil
+	}
+	return json.Marshal(doc)
+}
+
 // ---------------------------------------------------------------------------
 // Per-user preferences (roadmap §3)
 // ---------------------------------------------------------------------------
@@ -211,7 +284,7 @@ func defaultPreferences() userPreferences {
 		AutoRefresh:        true,
 		RefreshInterval:    30,
 		LiveToasts:         true,
-		MapBasemap:         "system",
+		MapBasemap:         "osm",
 		MapClustering:      true,
 		MapAnimation:       true,
 		NotifySeverity:     "high",
@@ -246,7 +319,7 @@ var (
 	allowedClocks          = []string{"h24", "h12"}
 	allowedTimestampStyles = []string{"relative", "absolute"}
 	allowedRefreshSeconds  = []int{10, 15, 30, 60, 120, 300}
-	allowedBasemaps        = []string{"system", "osm", "offline"}
+	allowedBasemaps        = []string{"osm"}
 	allowedSeverities      = []string{"low", "medium", "high", "critical"}
 	allowedEventWindows    = []string{"1h", "6h", "24h", "7d", "30d"}
 )
@@ -281,7 +354,7 @@ func validatePreferences(p userPreferences) error {
 		problems = append(problems, "refresh_interval_seconds must be one of 10, 15, 30, 60, 120, 300")
 	}
 	if !oneOf(p.MapBasemap, allowedBasemaps) {
-		problems = append(problems, "map_basemap must be system, osm or offline")
+		problems = append(problems, "map_basemap must be osm")
 	}
 	if !oneOf(p.NotifySeverity, allowedSeverities) {
 		problems = append(problems, "notify_severity must be low, medium, high or critical")
@@ -503,7 +576,7 @@ const reportPresetNameLimit = 80
 const reportPresetDescriptionLimit = 300
 
 var allowedBannerSeverities = []string{"", "info", "success", "warning", "danger"}
-var allowedMapProviders = []string{"osm", "offline"}
+var allowedMapProviders = []string{"osm"}
 
 func validateConfig(c dashboardConfig) error {
 	var problems []string
@@ -586,7 +659,7 @@ func validateConfig(c dashboardConfig) error {
 		problems = append(problems, "behavior.source_stale_minutes must be between 2 and 120")
 	}
 	if !oneOf(b.MapProvider, allowedMapProviders) {
-		problems = append(problems, "behavior.map_provider must be osm or offline")
+		problems = append(problems, "behavior.map_provider must be osm")
 	}
 	if !validTimezone(b.DefaultTimezone) {
 		problems = append(problems, "behavior.default_timezone must be browser, utc or an IANA zone name")
@@ -674,8 +747,8 @@ type storedEnvelope struct {
 }
 
 // migratePayload brings a persisted payload up to settingsSchemaVersion.
-// v1 is current, so any older version without a registered migration and any
-// newer version is an error — never a silent reinterpretation.
+// Any older version without a registered migration and any newer version is
+// an error — never a silent reinterpretation.
 func migratePayload(version int, payload json.RawMessage) (json.RawMessage, error) {
 	if version == settingsSchemaVersion {
 		return payload, nil

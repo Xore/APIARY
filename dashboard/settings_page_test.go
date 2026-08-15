@@ -90,6 +90,19 @@ func TestSettingsModalIsCenteredOverlay(t *testing.T) {
 	}
 }
 
+func TestSettingsOfferOpenStreetMapOnly(t *testing.T) {
+	for _, html := range []string{renderSettings(t, false), renderSettings(t, true)} {
+		if !strings.Contains(html, `<option value="osm">OpenStreetMap</option>`) {
+			t.Fatal("settings must offer OpenStreetMap")
+		}
+		for _, absent := range []string{`value="offline"`, `value="system">Deployment default`, "Offline tiles", "Offline (no tiles)"} {
+			if strings.Contains(html, absent) {
+				t.Fatalf("settings still expose removed map choice %q", absent)
+			}
+		}
+	}
+}
+
 // The shared confirmation is the deepest layer when it is open, so it must
 // stop the keydown reaching the settings modal's own document listener —
 // plain stopPropagation would not, since both listen on document.
