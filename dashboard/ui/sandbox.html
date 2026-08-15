@@ -44,14 +44,16 @@
                and githubanalysisresultspanel/ghidraresultspanel above --
                before refreshSandboxCacheAsync's first cycle completes, "No
                completed sandbox exports match this view" would misreport a
-               genuinely empty result instead of a still-warming cache. */}}
+               genuinely empty result instead of a still-warming cache. The
+               retry is hp-warming-reload.js -- see that file's own doc
+               comment for why this is no longer an inline script tag
+               here. */}}
           <p class="note" data-sandbox-warming><span class="status-dot" aria-hidden="true"></span> Preparing sandbox results. This page will update automatically.</p>
           <div class="project-grid" aria-hidden="true">
             <div class="project-card"><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:85%"></div><div class="skeleton-line" style="width:40%"></div></div>
             <div class="project-card"><div class="skeleton-line" style="width:55%"></div><div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:35%"></div></div>
             <div class="project-card"><div class="skeleton-line" style="width:65%"></div><div class="skeleton-line" style="width:75%"></div><div class="skeleton-line" style="width:45%"></div></div>
           </div>
-          <script nonce="{{.Nonce}}">setTimeout(()=>location.reload(),1500)</script>
           {{else}}<p class="empty">No completed sandbox exports match this view.</p>{{end}}
         </div>
 {{end}}
