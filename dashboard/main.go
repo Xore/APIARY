@@ -116,9 +116,11 @@ func main() {
 	authAccountURL := validatedAuthAccountURL()
 	setVNCBridgeOrigin(getenv("SANDBOX_VNC_BRIDGE_WS", ""))
 	s := &store{
-		dir:            getenv("LOG_DIR", "/logs"),
-		authAccountURL: authAccountURL,
-		authAdminURL:   validatedExternalURL("AUTH_ADMIN_URL"),
+		dir:                   getenv("LOG_DIR", "/logs"),
+		logStreamMaxBytes:     configuredLogStreamMaxBytes(os.Getenv("LOG_STREAM_MAX_BYTES")),
+		logStreamAlertPercent: configuredLogStreamAlertPercent(os.Getenv("LOG_STREAM_ALERT_PERCENT")),
+		authAccountURL:        authAccountURL,
+		authAdminURL:          validatedExternalURL("AUTH_ADMIN_URL"),
 	}
 	for _, name := range strings.Split(os.Getenv("EXPECTED_SENSORS"), ",") {
 		if name = strings.TrimSpace(name); name != "" && name != "portbridge" {

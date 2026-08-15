@@ -33,6 +33,7 @@ services:
       - STATE_DIR=/state/ip-enrichment-worker
       - REFRESH_INTERVAL=2s
       - PENDING_TIMEOUT=5s
+      - OUTPUT_MAX_BYTES=${JSON_STREAM_MAX_BYTES:-67108864}
       - TZ=Europe/Berlin
     volumes:
       # Read-only for every sensor's raw log directory and portbridge's own

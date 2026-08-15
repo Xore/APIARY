@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func metricLabel(value string) string {
@@ -25,6 +26,7 @@ func (s *store) serveMetrics(w http.ResponseWriter, r *http.Request) {
 	for _, sensor := range snap.Sensors {
 		fmt.Fprintf(w, "honeypot_sensor_events{sensor=\"%s\",state=\"%s\"} %d\n", metricLabel(sensor.Name), metricLabel(sensor.State), sensor.Count)
 	}
+	s.writeLogStreamMetrics(w, time.Now())
 	state := map[string]int{"green": 1, "yellow": 2, "red": 3}[snap.ES.State]
 	fmt.Fprintf(w, "honeypot_elasticsearch_state %d\nhoneypot_elasticsearch_documents %d\nhoneypot_dead_letters_total %d\nhoneypot_dead_letters_24h %d\n", state, snap.ES.Documents, snap.ES.DeadLetters, snap.ES.RecentDeadLetters)
 	// #1298: filebeat-* is a distinct, earlier failure layer from
@@ -54,6 +56,20 @@ func (s *store) serveMetrics(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "honeypot_dashboard_memory_bytes %s\n", strconv.FormatInt(value, 10))
 	}
 	s.writeSettingsMetrics(w)
+}
+
+// writeLogStreamMetrics exposes both halves of #1389's active JSON stream
+// set. Size shows whether rotation still bounds each writer; age distinguishes
+// a quiet stream from one that is actively growing toward the limit.
+func (s *store) writeLogStreamMetrics(w http.ResponseWriter, now time.Time) {
+	fmt.Fprintf(w, "# HELP honeypot_log_stream_size_bytes Current active JSON stream size before self-rotation.\n# TYPE honeypot_log_stream_size_bytes gauge\n")
+	fmt.Fprintf(w, "# HELP honeypot_log_stream_age_seconds Seconds since the active JSON stream was last modified.\n# TYPE honeypot_log_stream_age_seconds gauge\n")
+	fmt.Fprintf(w, "# HELP honeypot_log_stream_limit_bytes Configured self-rotation limit shared by Dionaea and enriched JSON writers.\n# TYPE honeypot_log_stream_limit_bytes gauge\nhoneypot_log_stream_limit_bytes %d\n", s.logStreamMaxBytes)
+	for _, stream := range scanLogStreams(s.dir) {
+		name := metricLabel(stream.Name)
+		fmt.Fprintf(w, "honeypot_log_stream_size_bytes{stream=\"%s\"} %d\n", name, stream.Size)
+		fmt.Fprintf(w, "honeypot_log_stream_age_seconds{stream=\"%s\"} %d\n", name, logStreamAgeSeconds(stream, now))
+	}
 }
 
 // writeSettingsMetrics exposes the Milestone G operational view of the

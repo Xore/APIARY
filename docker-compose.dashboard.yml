@@ -224,6 +224,8 @@ services:
     environment:
       - LISTEN_ADDR=:8080
       - LOG_DIR=/logs
+      - LOG_STREAM_MAX_BYTES=${JSON_STREAM_MAX_BYTES:-67108864}
+      - LOG_STREAM_ALERT_PERCENT=${LOG_STREAM_ALERT_PERCENT:-90}
       - GEOIP_CSV=/geoip/country.csv
       - GEOIP_CITY_MMDB=/geoip-mmdb/GeoLite2-City.mmdb
       - GEOIP_ASN_MMDB=/geoip-mmdb/GeoLite2-ASN.mmdb
@@ -380,6 +382,8 @@ services:
     environment:
       - LISTEN_ADDR=:8080
       - LOG_DIR=/logs
+      - LOG_STREAM_MAX_BYTES=${JSON_STREAM_MAX_BYTES:-67108864}
+      - LOG_STREAM_ALERT_PERCENT=${LOG_STREAM_ALERT_PERCENT:-90}
       - GEOIP_CSV=/geoip/country.csv
       - GEOIP_CITY_MMDB=/geoip-mmdb/GeoLite2-City.mmdb
       - GEOIP_ASN_MMDB=/geoip-mmdb/GeoLite2-ASN.mmdb

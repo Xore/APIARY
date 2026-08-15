@@ -94,6 +94,10 @@ services:
       - /opt/stacks/apiary/state/init-markers:/markers:ro
     environment:
       - TZ=Europe/Berlin
+      # #1389: one shared knob also consumed by ip-enrichment-worker and the
+      # dashboard's pre-limit alert/metrics, so observability cannot drift
+      # from the writer's real self-rotation threshold.
+      - DIONAEA_LOG_MAX_BYTES=${JSON_STREAM_MAX_BYTES:-67108864}
     # Capabilities measured, not guessed (2026-07-31). Baseline was run first —
     # default caps + SYS_PTRACE — and each reduction re-measured against the
     # exact set of listening ports, because a container that stays up with dead
