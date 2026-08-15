@@ -23,7 +23,6 @@ services:
     # /bin/sh: no such file or directory`, caught deploying this the first
     # time). The wait lives in the Go binary itself instead (main.go).
     ports:
-      - ${HP_BIND:-10.8.0.2}:19025:25
       - ${HP_BIND:-10.8.0.2}:5432:5432
       - ${HP_BIND:-10.8.0.2}:5900:5900
       - ${HP_BIND:-10.8.0.2}:6379:6379
@@ -40,7 +39,7 @@ services:
       - /opt/stacks/apiary/state/init-markers:/markers:ro
     environment:
       - LOG_FILE=/var/log/honeypot/multipot.json
-      - MULTIPOT_DISABLE=ftp,mysql,mssql,mongodb
+      - MULTIPOT_DISABLE=ftp,mysql,mssql,mongodb,smtp
       # Parse the PROXY header portbridge prepends (:pp rules) so every event
       # carries the real attacker IP instead of the tunnel peer 10.8.0.1.
       - PROXY_PROTOCOL=1
