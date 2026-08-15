@@ -683,6 +683,63 @@ test.describe("dashboard browser behaviour", () => {
     await expect(page.locator('[data-echart-status="/api/kill-chain-sankey"]')).toContainText("tactics observed, 0 flows");
   });
 
+  test("visualization and session shells hydrate in place and settle independently (#1454, #1456, #1457)", async ({ page }) => {
+    let releaseGraph!: () => void;
+    const graphGate = new Promise<void>(resolve => { releaseGraph = resolve; });
+    await page.route("**/api/attacker-graph?id=e2efixtureattacker01", async route => {
+      await graphGate;
+      await route.continue();
+    });
+    await page.goto("/attackers?id=e2efixtureattacker01");
+    const graph = page.locator("[data-attacker-graph-url]");
+    await expect(graph.locator("[data-attacker-graph-loading]")).toBeVisible();
+    await expect(graph).toHaveAttribute("aria-busy", "true");
+    releaseGraph();
+    await expect(graph.locator("canvas")).not.toHaveCount(0);
+    await expect(graph).toHaveAttribute("aria-busy", "false");
+    await expect(page.locator("#attackers-fusion [data-chart-loading]")).toHaveCount(0);
+    await page.unroute("**/api/attacker-graph?id=e2efixtureattacker01");
+
+    let releaseCoverage!: () => void;
+    const coverageGate = new Promise<void>(resolve => { releaseCoverage = resolve; });
+    await page.route("**/api/attck-coverage", async route => {
+      await coverageGate;
+      await route.continue();
+    });
+    await page.route("**/api/campaign-timeline", route => route.fulfill({ status: 503, body: "fixture timeline unavailable" }));
+    await page.goto("/kill-chain");
+    const coverage = page.locator('#kill-chain-attck-card [data-echart="/api/attck-coverage"]');
+    await expect(coverage.locator("[data-chart-loading]")).toBeVisible();
+    await expect(page.locator("#kill-chain-sankey-card canvas")).not.toHaveCount(0);
+    await expect(page.locator('#kill-chain-timeline-card [data-echart="/api/campaign-timeline"]')).toHaveAttribute("role", "alert");
+    releaseCoverage();
+    await expect(coverage.locator("canvas")).not.toHaveCount(0);
+    await expect(coverage).toHaveAttribute("aria-busy", "false");
+    await page.unroute("**/api/attck-coverage");
+    await page.unroute("**/api/campaign-timeline");
+
+    let releaseSession!: () => void;
+    const sessionGate = new Promise<void>(resolve => { releaseSession = resolve; });
+    await page.route("**/sessions/browser-session-00/fragment", async route => {
+      await sessionGate;
+      await route.continue();
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/sessions/browser-session-00");
+    const session = page.locator("#session-detail-root");
+    await expect(session.getByRole("heading", { name: "Sensors" })).toBeVisible();
+    await expect(session.getByRole("heading", { name: "Credentials" })).toBeVisible();
+    await expect(session.getByRole("heading", { name: "Chronological replay" })).toBeVisible();
+    await expect(session.locator(".card__scroll")).toBeVisible();
+    await expect(session).toHaveAttribute("aria-busy", "true");
+    releaseSession();
+    await expect(session).not.toHaveAttribute("aria-busy", "true");
+    const replayCard = session.getByRole("heading", { name: "Chronological replay" }).locator("..");
+    await expect(replayCard.locator(".card__scroll .data-table")).toContainText("cowrie");
+    const sessionBox = await session.boundingBox();
+    expect(sessionBox?.width).toBeLessThanOrEqual(390);
+  });
+
   test("payload analysis hydrates the aggregation cards after the initial render (#1142)", async ({ page }) => {
     await page.goto("/payload-analysis/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
     // The fast path renders identity/hashes immediately; the three
