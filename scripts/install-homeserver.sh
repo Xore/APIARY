@@ -253,7 +253,7 @@ step_apt_update() {
 
 step_base_packages() {
   with_retry 3 10 env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    ca-certificates curl gnupg lsb-release git jq rsync ufw \
+    ca-certificates curl dnsutils gnupg lsb-release git jq rsync ufw \
     xfsprogs nvme-cli openssh-client
 }
 
@@ -1051,12 +1051,12 @@ step_sshfs_boot_ordering() {
 }
 
 # ---------------------------------------------------------------------------
-# Phase 8b — pihole (not part of this repo; reconstructed compose since the
-# LAN backup only captured pihole/.env, no compose file, see #518)
+# Phase 8b — Pi-hole + DNSCrypt. The LAN backup only captured pihole/.env;
+# the complete, tested deployment definition now lives under pihole/.
 # ---------------------------------------------------------------------------
 step_pihole_provision() {
   local dir="/var/dockge/stacks/pihole"
-  mkdir -p "$dir/etc-pihole" "$dir/etc-dnsmasq.d"
+  mkdir -p "$dir/etc-pihole" "$dir/etc-dnsmasq.d" "$dir/dnscrypt-proxy"
 
   # Binding 0.0.0.0:53 collides with hp-dns-honeypot, which already publishes
   # 53/udp on 10.8.0.2 (the WireGuard bind IP every honeypot sensor uses,
@@ -1073,41 +1073,41 @@ step_pihole_provision() {
   # one of two on this box's first pass, confirmed live #518), hence
   # PIHOLE_LAN_IP is an explicit config value, not inferred.
   local lan_ip="$PIHOLE_LAN_IP"
-
-  cat > "$dir/compose.yml" <<'EOF'
-# Reconstructed for #518 -- pihole was never part of this git repo (it's
-# home-network infra, not a honeypot component) and no compose file for it
-# existed in the pre-rebuild backup, only its .env (PIHOLE_PASSWORD). This
-# is deliberately minimal (official image, standard ports/volumes) rather
-# than guessed-at custom configuration.
-#
-# Ports are bound to __LAN_IP__ specifically, not 0.0.0.0 -- see
-# step_pihole_provision in scripts/install-homeserver.sh for why (conflicts
-# with hp-dns-honeypot's 10.8.0.2:53/udp otherwise).
-services:
-  pihole:
-    image: pihole/pihole:latest
-    container_name: pihole
-    restart: unless-stopped
-    ports:
-      - "__LAN_IP__:53:53/tcp"
-      - "__LAN_IP__:53:53/udp"
-      - "__LAN_IP__:80:80/tcp"
-    environment:
-      TZ: "${INSTALL_TIMEZONE:-Europe/Berlin}"
-      WEBPASSWORD: "${PIHOLE_PASSWORD}"
-    volumes:
-      - ./etc-pihole:/etc/pihole
-      - ./etc-dnsmasq.d:/etc/dnsmasq.d
-    cap_add:
-      - NET_ADMIN
-EOF
+  install -m 0644 "$REPO_DIR/pihole/compose.yml" "$dir/compose.yml"
+  install -m 0444 "$REPO_DIR/pihole/dnscrypt-proxy.toml" \
+    "$dir/dnscrypt-proxy/dnscrypt-proxy.toml"
+  # klutchell/dnscrypt-proxy is a distroless image pinned above and runs as
+  # the standard nonroot uid/gid 65532. It must be able to atomically refresh
+  # public-resolvers.md in this directory, while the config itself stays
+  # read-only.
+  chown 65532:65532 "$dir/dnscrypt-proxy"
   sed -i "s/__LAN_IP__/$lan_ip/g" "$dir/compose.yml"
 }
 
 step_pihole_start() {
   [[ -f /var/dockge/stacks/pihole/.env ]] || { echo "no pihole .env restored — skipping start"; return 1; }
   (cd /var/dockge/stacks/pihole && with_retry 3 15 docker compose -f compose.yml up -d --wait)
+}
+
+step_pihole_verify() {
+  local dir="/var/dockge/stacks/pihole"
+  local dnscrypt_answer pihole_answer lan_answer
+
+  # Probe each hop separately so an unattended install failure identifies
+  # whether the encrypted upstream, Pi-hole forwarding, or LAN bind is bad.
+  dnscrypt_answer="$(cd "$dir" && docker compose exec -T dnscrypt \
+    dnscrypt-proxy -config /config/dnscrypt-proxy.toml \
+    -resolve example.com,127.0.0.1:5053 2>&1)" || return
+  pihole_answer="$(docker exec pihole \
+    dig @127.0.0.1 example.com A +time=3 +tries=1 +short)" || return
+  lan_answer="$(dig @"$PIHOLE_LAN_IP" example.com A +time=3 +tries=1 +short)" || return
+
+  [[ "$dnscrypt_answer" == *"Resolver IP"* ]] || {
+    echo "DNSCrypt returned no resolver answer: $dnscrypt_answer" >&2
+    return 1
+  }
+  [[ -n "$pihole_answer" ]] || { echo "Pi-hole returned no recursive answer" >&2; return 1; }
+  [[ -n "$lan_answer" ]] || { echo "Pi-hole returned no LAN-side answer" >&2; return 1; }
 }
 
 # ---------------------------------------------------------------------------
@@ -1519,8 +1519,9 @@ run_step sshfs-install         "Install sshfs, place VPS key"        step_sshfs_
 run_step sshfs-mounts          "Mount VPS Suricata/portbridge logs"  step_sshfs_mounts
 run_step sshfs-boot-ordering   "Install WireGuard-aware mount ordering" step_sshfs_boot_ordering
 
-run_step pihole-provision      "Reconstruct pihole compose.yml"     step_pihole_provision
-run_step pihole-start          "Start pihole"                       step_pihole_start
+run_step pihole-provision      "Install Pi-hole + DNSCrypt config"  step_pihole_provision
+run_step pihole-start          "Start Pi-hole after DNSCrypt ready" step_pihole_start
+run_step pihole-verify         "Resolve DNSCrypt, Pi-hole, and LAN"  step_pihole_verify
 
 if [[ "$ENABLE_GPU_STACK" == "true" ]]; then
   run_step ghidra-provision      "Link ghidra compose.yml"            step_ghidra_stack_provision

@@ -448,3 +448,6 @@ jobs:
             -f llm-worker/docker-compose.production-session-canary.yml config --quiet
           docker compose -f llm-worker/docker-compose.yml \
             -f llm-worker/docker-compose.captured-data.yml config --quiet
+      - name: Pi-hole/DNSCrypt install topology (#1387)
+        shell: bash
+        run: python3 scripts/tests/test_pihole_install.py

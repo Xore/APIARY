@@ -1,0 +1,68 @@
+# Source of truth for the homeserver's LAN DNS stack. The installer copies
+# this file into Dockge and replaces __LAN_IP__ with the explicitly configured
+# LAN address; binding to every interface would collide with dns-honeypot on
+# the WireGuard address (see scripts/install-homeserver.sh and #518).
+services:
+  dnscrypt:
+    image: klutchell/dnscrypt-proxy:v2.1.15
+    container_name: dnscrypt-proxy
+    restart: unless-stopped
+    volumes:
+      # The directory also holds DNSCrypt's downloaded resolver-list cache.
+      - ./dnscrypt-proxy:/config
+    healthcheck:
+      # Client mode performs a real external lookup against the running
+      # proxy. The image is distroless, so this must use CMD rather than a
+      # shell pipeline.
+      test:
+        - CMD
+        - dnscrypt-proxy
+        - -config
+        - /config/dnscrypt-proxy.toml
+        - -resolve
+        - example.com,127.0.0.1:5053
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  pihole:
+    image: pihole/pihole:latest
+    container_name: pihole
+    restart: unless-stopped
+    depends_on:
+      dnscrypt:
+        condition: service_healthy
+        restart: true
+    ports:
+      - "__LAN_IP__:53:53/tcp"
+      - "__LAN_IP__:53:53/udp"
+      - "__LAN_IP__:80:80/tcp"
+    environment:
+      TZ: "${INSTALL_TIMEZONE:-Europe/Berlin}"
+      WEBPASSWORD: "${PIHOLE_PASSWORD}"
+      # Pi-hole and DNSCrypt have separate network namespaces. Use Compose
+      # service discovery, never either container's loopback address.
+      FTLCONF_dns_upstreams: "dnscrypt#5053"
+    volumes:
+      - ./etc-pihole:/etc/pihole
+      - ./etc-dnsmasq.d:/etc/dnsmasq.d
+    cap_add:
+      - NET_ADMIN
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 2GB
+    healthcheck:
+      # Process/socket checks stayed green throughout #1387's outage. Only
+      # a response to a cache-busting recursive query proves the complete
+      # path is working. NXDOMAIN is a valid external DNS response here; a
+      # timeout produces no status line and fails the pipeline.
+      test:
+        - CMD-SHELL
+        - 'dig @127.0.0.1 "$(date +%s).healthcheck.example.com" A +time=3 +tries=1 +noall +comments | grep -Eq "status: (NOERROR|NXDOMAIN)"'
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
