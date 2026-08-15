@@ -180,6 +180,20 @@ func discoverSources(logsDir, outDir, stateDir string) []*source {
 	// wordpot.go's doc comment.
 	add("wordpot", filepath.Join(logsDir, "wordpot", "wordpot.log"), enrichWordpotLine)
 
+	// #1422: mailoney takes over port 25 from multipot's own retired SMTP
+	// handler (docker-compose.multipot.yml's MULTIPOT_DISABLE now includes
+	// smtp -- see that file's own comment). Raw-port/portbridge-only, no
+	// Traefik hostname (SMTP has no hostname-routing concept). Like
+	// elasticpot, its log shape already matches enrichLine's exactly: flat
+	// top-level "src_ip"/"src_port" plus a literal "sensor":"mailoney" --
+	// mailoney/json_log_patch.py emits this format directly (upstream has
+	// no JSON log of its own at all, only a SQLAlchemy DB write), so no
+	// field-shape adaptation is needed here either. Unlike elasticpot, it
+	// DOES capture credentials (AUTH PLAIN), hence canonical.go's
+	// promoteMailoneyFields case exists even though this uses enrichLine
+	// directly for the src_ip join.
+	add("mailoney", filepath.Join(logsDir, "mailoney", "mailoney.json"), enrichLine)
+
 	// #1217: field-normalization-only sources -- these five already carry
 	// the real attacker IP via PROXY protocol (never the tunnel peer
 	// address), so enrichLine's src_ip join is always a no-op for them;

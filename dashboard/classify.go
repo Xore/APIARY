@@ -746,6 +746,36 @@ func classify(e map[string]any, dirSensor string) event {
 		return ev
 	}
 
+	// ---- mailoney (#1422) --------------------------------------------------
+	// Takes over port 25 from multipot's own retired SMTP handler (the
+	// multipot block above no longer sees SMTP events -- see
+	// docker-compose.multipot.yml's MULTIPOT_DISABLE). Reads
+	// mailoney/json_log_patch.py's flat event shape directly, same as
+	// elasticpot's block above -- no ip-enrichment-worker promotion beyond
+	// the plain src_ip/src_port join every raw-port sensor gets.
+	if s, ok := e["sensor"].(string); ok && s == "mailoney" {
+		ev.sensor = "mailoney"
+		ev.proto = "smtp"
+		ev.port = num(e["dst_port"])
+		ev.user, ev.pass = str(e["username"]), str(e["password"])
+		switch str(e["event"]) {
+		case "login":
+			ev.isLogin = true
+			ev.detail = "AUTH PLAIN: " + ev.user + " / " + ev.pass
+		case "envelope":
+			ev.command = str(e["command"])
+			ev.detail = ev.command
+		case "mail-body":
+			ev.detail = fmt.Sprintf("DATA: %v bytes", e["size"])
+			if p := str(e["body_path"]); p != "" {
+				ev.detail += "  saved: " + p
+			}
+		default:
+			ev.detail = str(e["event"])
+		}
+		return ev
+	}
+
 	// ---- endlessh (#246) ---------------------------------------------------
 	// A "connect" and a later "disconnect" are logged per held connection;
 	// the disconnect carries the actual investigative value (how long/how

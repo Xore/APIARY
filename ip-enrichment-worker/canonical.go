@@ -42,6 +42,8 @@ func promoteCanonicalFields(persona string, e map[string]any) bool {
 		return promoteDionaeaIncidentFields(e)
 	case "multipot":
 		return promoteMultipotFields(e)
+	case "mailoney":
+		return promoteMailoneyFields(e)
 	case "citrix-honeypot":
 		return promoteCitrixFields(e)
 	case "rdp-honeypot":
@@ -319,6 +321,19 @@ func promoteMultipotFields(e map[string]any) bool {
 		changed = true
 	}
 	return changed
+}
+
+// promoteMailoneyFields mirrors promoteMultipotFields' login-ranking
+// shape for mailoney/json_log_patch.py's "login" events -- username/
+// password are already correctly-cased there (that patch's own
+// request_raw fix), so no further decoding is needed here, just the
+// same validCredentialPair-gated promotion every other credential-
+// capturing sensor gets.
+func promoteMailoneyFields(e map[string]any) bool {
+	if str(e["event"]) != "login" {
+		return false
+	}
+	return setCreds(e, str(e["username"]), str(e["password"]))
 }
 
 // promoteCitrixFields mirrors classify.go's citrix-honeypot branch

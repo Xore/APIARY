@@ -21,7 +21,7 @@
         "smtp": "mail01", "postgres": "pg-db-02", "redis": "cache01",
         "vnc": "ops-vnc-01", "elasticsearch": "es-logs-01", "docker": "build01"
       },
-      "services": ["multipot"]
+      "services": ["multipot", "mailoney"]
     },
     "nexusai-edge": {
       "organization": "NexusAI Research GmbH",
