@@ -19,19 +19,28 @@
 #   that network's own "sensors must never be able to submit prompts or
 #   observe model traffic" invariant. See galah-llm-broker/main.go's own
 #   doc comment for what the broker does and doesn't allow.
-# - LLM_MODEL=qwen3.5:4b, not ghidra-worker.py's own qwen3:14b default:
-#   galah's HTTP server hardcodes a 10s WriteTimeout (internal/server/
-#   server.go, not configurable) and returns a bare 500 on any LLM error
-#   including a timeout -- confirmed no fallback/static response exists
-#   for that path. docs/local-llm-model-evaluation.md's own benchmark
-#   measured qwen3:14b's real generation speed as too slow for that
-#   budget; qwen3.5:4b is the fastest model already in this stack's
-#   fleet (docs/local-llm-model-evaluation.md's own "#144 session
-#   decision", also used by the Rev-Deck/session worker) and was picked
-#   over introducing a fourth distinct model, given OLLAMA_MAX_LOADED_MODELS=1
-#   already means the three existing consumers (ghidra-worker, llm-worker,
-#   now galah) take turns reloading regardless of which model galah asks
-#   for. Response caching (built into galah, event_log.json shows
+# - LLM_MODEL=qwen2.5:7b-instruct-q4_K_M, not any of the Qwen3/3.5 models
+#   already pulled on this host (qwen3:14b, and qwen3.5:4b which this PR
+#   originally picked from docs/local-llm-model-evaluation.md's own
+#   benchmark table before live-testing it): those benchmarks were run
+#   with Ollama's `think: false` request field explicitly set, and
+#   galah's vendored LLM client (langchaingo v0.1.10) has no support for
+#   that field at all -- confirmed against its source, no "think"/"Think"
+#   anywhere. Found live: a direct qwen3.5:4b /api/chat call with no
+#   think field ran for the full 90s test window without stopping
+#   (n_decoded reached 1413 tokens, no natural stop) -- Qwen3.5's
+#   thinking mode, unsuppressable through this client, blows past any
+#   realistic response deadline. galah's HTTP server hardcodes a 10s
+#   WriteTimeout (internal/server/server.go, not configurable) and
+#   returns a bare 500 on any LLM error including a timeout -- confirmed
+#   no fallback/static response exists for that path. qwen2.5:7b-instruct
+#   has no thinking-mode toggle to begin with (confirmed live: real
+#   requests return done_reason:"stop" with a clean, complete JSON body,
+#   ~1s warm) and was already evaluated favorably in
+#   docs/local-llm-model-evaluation.md, so this is a fourth distinct
+#   model on the shared OLLAMA_MAX_LOADED_MODELS=1 slot -- an accepted
+#   cost given none of the three already-pulled models were actually
+#   usable here. Response caching (built into galah, event_log.json shows
 #   responseMetadata.generationSource) means only the first hit on a given
 #   request shape pays the LLM cost at all.
 
@@ -51,7 +60,7 @@ services:
     environment:
       - TZ=Europe/Berlin
       - LLM_PROVIDER=ollama
-      - LLM_MODEL=qwen3.5:4b
+      - LLM_MODEL=qwen2.5:7b-instruct-q4_K_M
       - LLM_SERVER_URL=http://galah-llm-broker:11434
     ports:
       - ${HP_BIND:-10.8.0.2}:8888:8888
