@@ -52,26 +52,26 @@
             </div>
             <details>
               <summary>Evidence timeline ({{len .Events}} event{{if ne (len .Events) 1}}s{{end}})</summary>
-              <table class="recent data-table tw:mt-2">
+              <table class="recent data-table data-table--responsive tw:mt-2">
                 <thead><tr><th>time</th><th>rule</th><th>trust boundary crossed</th><th>reason</th><th>decoded artifact</th><th>source event</th></tr></thead>
                 <tbody>
                   {{range $event := .Events}}
                     {{if $event.MatchedRules}}
                       {{range $rule := $event.MatchedRules}}
                       <tr>
-                        <td{{if $event.Timestamp}} data-hp-utc="{{$event.Timestamp}}"{{end}}>{{$event.Timestamp}}</td>
-                        <td class="v">{{$rule.Rule}}</td>
-                        <td class="v">{{$rule.TrustBoundary}}</td>
-                        <td class="v">{{$rule.Reason}}</td>
-                        <td class="v">{{if $rule.DecodeChain}}<small>{{$rule.TransformPath}} <span class="tw:text-muted">sha256:{{$rule.FinalArtifactHash}}</span></small>{{else}}<span class="tw:text-muted">&mdash;</span>{{end}}</td>
-                        <td class="v">{{if $event.SourceLink}}<a href="{{$event.SourceLink}}">view source</a>{{else}}<span class="tw:text-muted">&mdash;</span>{{end}}</td>
+                        <td data-label="time"{{if $event.Timestamp}} data-hp-utc="{{$event.Timestamp}}"{{end}}>{{$event.Timestamp}}</td>
+                        <td class="v" data-label="rule">{{$rule.Rule}}</td>
+                        <td class="v" data-label="trust boundary crossed">{{$rule.TrustBoundary}}</td>
+                        <td class="v" data-label="reason">{{$rule.Reason}}</td>
+                        <td class="v" data-label="decoded artifact">{{if $rule.DecodeChain}}<small>{{$rule.TransformPath}} <span class="tw:text-muted">sha256:{{$rule.FinalArtifactHash}}</span></small>{{else}}<span class="tw:text-muted">&mdash;</span>{{end}}</td>
+                        <td class="v" data-label="source event">{{if $event.SourceLink}}<a href="{{$event.SourceLink}}">view source</a>{{else}}<span class="tw:text-muted">&mdash;</span>{{end}}</td>
                       </tr>
                       {{end}}
                     {{else}}
                       <tr>
-                        <td{{if $event.Timestamp}} data-hp-utc="{{$event.Timestamp}}"{{end}}>{{$event.Timestamp}}</td>
-                        <td class="v" colspan="4"><span class="tw:text-muted">correlated into this campaign, no rule matched on its own</span></td>
-                        <td class="v">{{if $event.SourceLink}}<a href="{{$event.SourceLink}}">view source</a>{{else}}<span class="tw:text-muted">&mdash;</span>{{end}}</td>
+                        <td data-label="time"{{if $event.Timestamp}} data-hp-utc="{{$event.Timestamp}}"{{end}}>{{$event.Timestamp}}</td>
+                        <td class="v" data-label="rule" colspan="4"><span class="tw:text-muted">correlated into this campaign, no rule matched on its own</span></td>
+                        <td class="v" data-label="source event">{{if $event.SourceLink}}<a href="{{$event.SourceLink}}">view source</a>{{else}}<span class="tw:text-muted">&mdash;</span>{{end}}</td>
                       </tr>
                     {{end}}
                   {{end}}
