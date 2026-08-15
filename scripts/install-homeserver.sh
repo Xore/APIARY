@@ -307,6 +307,56 @@ EOF
   systemctl restart docker
 }
 
+# #1388: short-lived Docker veth interfaces vanish before networkd-dispatcher,
+# libvirtd, and systemd-resolved get around to inspecting them, producing a
+# continuous "not found"/"ethtool ioctl error"/"Failed to determine whether
+# the interface is managed" flood at warning/error severity that buries real
+# host/network failures -- confirmed live: 16,593 networkd-dispatcher and
+# 4,754 libvirtd priority-3 entries in 24 hours, almost entirely veth noise.
+#
+# networkd-dispatcher has zero configured hook scripts under any
+# /etc/networkd-dispatcher/*.d/ on this host (confirmed live), so it does no
+# actual work here -- disabling it entirely, rather than trying to filter its
+# output, is the clean fix its own noise volume (the majority of the flood)
+# deserves. Idempotent to a box where it isn't installed at all.
+#
+# libvirtd/systemd-resolved still do real work for real interfaces, so they
+# stay running; systemd's own LogFilterPatterns= (v253+, this fleet runs
+# 259) drops exactly the veth-shaped messages by content before they reach
+# journald, leaving every other warning/error -- real NICs, bridges,
+# WireGuard, libvirt-managed taps -- fully intact. A broad severity/rate
+# suppression was deliberately rejected (see the issue): this is the
+# narrowest mechanism systemd offers that's actually message-content-aware.
+step_quiet_veth_noise() {
+  if systemctl list-unit-files networkd-dispatcher.service 2>/dev/null | grep -q networkd-dispatcher; then
+    systemctl disable --now networkd-dispatcher.service || true
+  fi
+
+  if systemctl list-unit-files libvirtd.service 2>/dev/null | grep -q libvirtd; then
+    mkdir -p /etc/systemd/system/libvirtd.service.d
+    cat >/etc/systemd/system/libvirtd.service.d/99-veth-noise.conf <<'EOF'
+[Service]
+LogFilterPatterns=~ethtool ioctl error on veth[0-9a-f]+: No such device
+EOF
+  fi
+
+  if systemctl list-unit-files systemd-resolved.service 2>/dev/null | grep -q systemd-resolved; then
+    mkdir -p /etc/systemd/system/systemd-resolved.service.d
+    cat >/etc/systemd/system/systemd-resolved.service.d/99-veth-noise.conf <<'EOF'
+[Service]
+LogFilterPatterns=~veth[0-9a-f]+: Failed to determine whether the interface is managed
+EOF
+  fi
+
+  systemctl daemon-reload
+  if systemctl is-active --quiet libvirtd.service 2>/dev/null; then
+    systemctl restart libvirtd.service
+  fi
+  if systemctl is-active --quiet systemd-resolved.service 2>/dev/null; then
+    systemctl restart systemd-resolved.service
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # Phase 3 — NVIDIA GPU stack (driver + container toolkit), skippable
 # ---------------------------------------------------------------------------
@@ -1521,6 +1571,12 @@ else
   skip_step linux-sandbox-base "Download + verify Linux base image" "ENABLE_SANDBOX_RESTORE=false"
   skip_step linux-sandbox-verify "Run Linux sandbox smoke test" "ENABLE_SANDBOX_RESTORE=false"
 fi
+
+# Runs last, unconditionally (self-guarding on whether each service is
+# actually installed): needs libvirtd already present when
+# ENABLE_SANDBOX_RESTORE=true, and is a correct no-op for that part when it
+# is not.
+run_step quiet-veth-noise      "Quiet expected Docker veth noise from networkd-dispatcher/libvirtd/systemd-resolved" step_quiet_veth_noise
 
 print_summary
 exit $?
