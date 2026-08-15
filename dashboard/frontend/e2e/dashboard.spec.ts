@@ -615,6 +615,46 @@ test.describe("dashboard browser behaviour", () => {
     await expect(page.locator("#hp-pl-known-elsewhere-heading")).toContainText("not seen elsewhere");
   });
 
+  test("Ghidra AI reports put single-line prose sentences on separate lines (#1442)", async ({ page }) => {
+    await page.goto("/");
+    await page.addScriptTag({ url: "/static/marked.js" });
+    await page.addScriptTag({ url: "/static/dompurify.min.js" });
+    await page.evaluate(() => {
+      const report = document.createElement("div");
+      report.className = "hp-ai-report__body";
+      report.setAttribute("data-markdown", "");
+      report.textContent = [
+        "First sentence. Second sentence! Third sentence?",
+        "",
+        "- List sentence one. List sentence two.",
+        "",
+        "A [linked sentence.](https://example.com/report) Next sentence.",
+        "",
+        "```text",
+        "code.example. must stay untouched.",
+        "```",
+      ].join("\n");
+      document.body.appendChild(report);
+    });
+    await page.addScriptTag({ url: "/static/hp-ghidra-markdown.js" });
+
+    const report = page.locator(".hp-ai-report__body");
+    await expect(report.locator("p").first().locator("br")).toHaveCount(2);
+    await expect(report.locator("li br")).toHaveCount(1);
+    await expect(report.locator('a[href="https://example.com/report"]')).toHaveCount(1);
+    await expect(report.locator("pre code br")).toHaveCount(0);
+    await expect(report.locator("pre code")).toHaveText("code.example. must stay untouched.\n");
+  });
+
+  test("sandbox detail hydrates from a job-scoped fragment (#1441)", async ({ page }) => {
+    await page.goto("/sandbox/windows-ghosts-browser-fixture");
+    const root = page.locator("#sandbox-detail-root");
+    await expect(root).not.toHaveAttribute("aria-busy", "true");
+    await expect(root.locator("#sandbox-detail-actions")).toBeVisible();
+    await expect(root).toContainText("PE32 browser fixture");
+    await expect(root.locator("#syscalls-chart canvas")).not.toHaveCount(0);
+  });
+
   test("cache-warming skeletons auto-reload after an SPA navigation, not just a hard refresh (#1384)", async ({ page }) => {
     // The warming retry used to be an inline <script nonce=...> next to
     // each warming marker -- fine on a real page load, but hp-dynamic-nav.js's

@@ -27,7 +27,7 @@ func TestSandboxPCAPExportRequiresAdminAndServesRegularCapture(t *testing.T) {
 		"sandbox-analysis-v1": {{"sandbox": map[string]any{"version": 3, "job": job, "sha256": hash}}},
 	})
 	esSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.Contains(r.URL.Path, "/_doc/") {
+		if strings.HasPrefix(r.URL.Path, "/sandbox-export-artifacts-v1/") {
 			artifacts(w, r)
 			return
 		}
@@ -66,7 +66,7 @@ func TestSandboxDiagnosticsExportRequiresAdmin(t *testing.T) {
 		"sandbox-analysis-v1": {{"sandbox": map[string]any{"version": 3, "job": job, "sha256": hash}}},
 	})
 	esSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.Contains(r.URL.Path, "/_doc/") {
+		if strings.HasPrefix(r.URL.Path, "/sandbox-export-artifacts-v1/") {
 			artifacts(w, r)
 			return
 		}

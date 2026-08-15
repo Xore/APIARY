@@ -84,7 +84,12 @@ export function startFakeElasticsearch() {
     // this" handling every caller already has -- answering with a
     // confident "200, zero hits" instead would make the dashboard wrongly
     // trust an empty Elasticsearch over data it should have read.
-    const workerOwnedIndices = ["attackers-v1", "campaigns-v1", "attacker-clusters-v1"];
+    const workerOwnedIndices = [
+      "attackers-v1", "campaigns-v1", "attacker-clusters-v1",
+      // Seeded by start-dashboard.mjs to exercise sandbox detail's
+      // deterministic sandbox:{job} document lookup and fragment hydration.
+      "sandbox-analysis-v1",
+    ];
     if (parts[0] !== undefined && !parts[0].startsWith("dashboard-") && !workerOwnedIndices.includes(parts[0])) {
       res.writeHead(503);
       res.end(JSON.stringify({ error: "index not stubbed in fake-elasticsearch" }));

@@ -46,10 +46,56 @@
     ALLOWED_URI_REGEXP: /^https?:\/\//i,
   };
 
+  function sentenceBoundaries(text) {
+    if (typeof Intl?.Segmenter === "function") {
+      const segmenter = new Intl.Segmenter(undefined, { granularity: "sentence" });
+      return Array.from(segmenter.segment(text), part => part.index + part.segment.trimEnd().length)
+        .filter(end => /\S/.test(text.slice(end)));
+    }
+    const ends = [];
+    const pattern = /[.!?]+(?:["')\]]+)?(?=\s+\S)/g;
+    for (const match of text.matchAll(pattern)) ends.push(match.index + match[0].length);
+    return ends;
+  }
+
+  // Add visual sentence breaks only after Markdown has been parsed and
+  // sanitized. Working on text nodes preserves headings, lists, links and
+  // emphasis exactly as marked produced them, while code/pre content is kept
+  // byte-for-byte intact. A reverse-order insertion keeps all recorded text
+  // offsets stable as <br> nodes are added.
+  function addSentenceBreaks(root) {
+    root.querySelectorAll("p, li").forEach(block => {
+      const nodes = [];
+      const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        if (node.parentElement?.closest("code, pre")) continue;
+        if (node.parentElement?.closest("p, li") !== block) continue;
+        nodes.push(node);
+      }
+      const text = nodes.map(node => node.data).join("");
+      const boundaries = sentenceBoundaries(text);
+      for (let i = boundaries.length - 1; i >= 0; i--) {
+        let remaining = boundaries[i];
+        for (const node of nodes) {
+          if (remaining <= node.data.length) {
+            const range = document.createRange();
+            range.setStart(node, remaining);
+            range.collapse(true);
+            range.insertNode(document.createElement("br"));
+            break;
+          }
+          remaining -= node.data.length;
+        }
+      }
+    });
+  }
+
   function render() {
     document.querySelectorAll("[data-markdown]").forEach(el => {
       const html = DOMPurify.sanitize(marked.parse(el.textContent), SANITIZE_OPTS);
       el.innerHTML = html;
+      if (el.classList.contains("hp-ai-report__body")) addSentenceBreaks(el);
       el.querySelectorAll("a[href]").forEach(a => {
         a.target = "_blank";
         a.rel = "noopener noreferrer";

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -273,7 +274,13 @@ type sandboxPageData struct {
 	// result. Always false on a detail-view render (Detail != nil), which
 	// never reads the cache.
 	Loading bool
+	// DetailLoading marks the initial /sandbox/{job} shell. The shell only
+	// carries the validated job from the URL; the full result is fetched by
+	// /sandbox/{job}/fragment after the page is already visible.
+	DetailLoading bool
 }
+
+var sandboxJobName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$`)
 
 func sandboxResultsDir() string { return getenv("SANDBOX_RESULTS_DIR", "/sandbox-results") }
 
@@ -385,6 +392,33 @@ func loadSandboxResultsByHash(es *esClient, sha256 string) []sandboxResult {
 	}
 	sortSandboxResults(&rows)
 	return rows
+}
+
+// loadSandboxResultByJob resolves the one result a sandbox detail page needs
+// with a realtime document GET. es-results-importer keys sandbox documents as
+// "sandbox:{job}", so scanning or searching the whole namespace here is both
+// slower and less precise than addressing that stable ID directly. The body is
+// still checked against the requested job rather than trusting the ID alone.
+func loadSandboxResultByJob(es *esClient, job string) (sandboxResult, bool) {
+	if es == nil || !sandboxJobName.MatchString(job) {
+		return sandboxResult{}, false
+	}
+	hit, found, err := es.docGet("sandbox-analysis-v1", "sandbox:"+job)
+	if err != nil || !found {
+		return sandboxResult{}, false
+	}
+	var source struct {
+		Sandbox json.RawMessage `json:"sandbox"`
+	}
+	if json.Unmarshal(hit.Source, &source) != nil {
+		return sandboxResult{}, false
+	}
+	var row sandboxResult
+	if json.Unmarshal(source.Sandbox, &row) != nil || row.Job != job || !hashName.MatchString(row.SHA256) {
+		return sandboxResult{}, false
+	}
+	normalizeSandboxResult(&row)
+	return row, true
 }
 
 func sortSandboxResults(rows *[]sandboxResult) {
@@ -658,6 +692,14 @@ const sandboxListCap = 250
 const sandboxCacheTTL = 2 * time.Minute
 
 func (s *store) sandboxData(job, query string) (sandboxPageData, error) {
+	if job != "" {
+		row, ok := loadSandboxResultByJob(esResultsClient, job)
+		if !ok {
+			return sandboxPageData{}, errors.New("sandbox result not found")
+		}
+		attachSandboxDownloads(&row)
+		return sandboxPageData{Generated: time.Now(), Detail: &row}, nil
+	}
 	data := sandboxPageData{
 		Generated: time.Now(), Status: loadSandboxStatus(),
 		GoldenImage: loadGoldenImageStatus(), Query: strings.TrimSpace(query),
@@ -678,16 +720,6 @@ func (s *store) sandboxData(job, query string) (sandboxPageData, error) {
 		data.Rows = append([]sandboxResult(nil), s.sandboxCache...)
 		data.Loading = s.sandboxCacheAt.IsZero() && s.sandboxRefreshing
 		s.sandboxMu.Unlock()
-	} else {
-		// Job-scoped detail lookup is unaffected by #1156-follow-up: unlike
-		// the sha256-keyed ghidra/github-analysis indices, sandbox results
-		// are keyed by job id, and there is no per-job ES lookup analogous
-		// to searchNamespaceByHash to scope this to (job is an opaque run
-		// id, not a hash). This keeps calling loadSandboxResults()'s
-		// whole-namespace scan-by-job exactly as before -- deliberately
-		// unchanged, since the operator-reported slow page this sweep
-		// targets is /payload-analysis/<hash>, not this one.
-		data.Rows = loadSandboxResults()
 	}
 	if data.Query != "" {
 		needle := strings.ToLower(data.Query)
@@ -700,17 +732,16 @@ func (s *store) sandboxData(job, query string) (sandboxPageData, error) {
 		}
 		data.Rows = filtered
 	}
-	if job == "" {
-		return data, nil
+	return data, nil
+}
+
+// sandboxDetailShell is the synchronous half of /sandbox/{job}. It performs
+// no Elasticsearch or artifact reads; hp-sandbox-detail.js replaces the
+// skeleton with the server-rendered fragment on its own follow-up request.
+func sandboxDetailShell(job string) sandboxPageData {
+	return sandboxPageData{
+		Generated: time.Now(), Detail: &sandboxResult{Job: job}, DetailLoading: true,
 	}
-	for i := range data.Rows {
-		if data.Rows[i].Job == job {
-			data.Detail = &data.Rows[i]
-			attachSandboxDownloads(data.Detail)
-			return data, nil
-		}
-	}
-	return data, errors.New("sandbox result not found")
 }
 
 // refreshSandboxCacheAsync keeps the listing view's own Elasticsearch round

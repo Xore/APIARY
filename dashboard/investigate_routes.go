@@ -127,6 +127,39 @@ func (s *store) registerInvestigateRoutes(mux *http.ServeMux, tmpl *template.Tem
 		w.Header().Set("Cache-Control", "no-store")
 		tmpl.ExecuteTemplate(w, "ghidra-detail-body", &data)
 	})
+	// Sandbox detail follows the same shell/fragment split as Ghidra above.
+	// The shell validates only the URL job name and writes immediately; the
+	// fragment performs the single document lookup after first paint. The
+	// exact GET /sandbox/vnc route registered in routes.go remains the more
+	// specific match for that literal path.
+	mux.HandleFunc("GET /sandbox/{job}", func(w http.ResponseWriter, r *http.Request) {
+		job := r.PathValue("job")
+		if !sandboxJobName.MatchString(job) {
+			http.NotFound(w, r)
+			return
+		}
+		data := sandboxDetailShell(job)
+		data.Analysis = r.URL.Query().Get("analysis")
+		renderPage(w, tmpl, "sandbox", &data)
+	})
+	mux.HandleFunc("GET /sandbox/{job}/fragment", func(w http.ResponseWriter, r *http.Request) {
+		job := r.PathValue("job")
+		if !sandboxJobName.MatchString(job) {
+			http.NotFound(w, r)
+			return
+		}
+		data, err := s.sandboxData(job, "")
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		data.StaticYARA = s.yaraForSHA(data.Detail.SHA256).Matches
+		_, captureErr := s.payloadPath(data.Detail.SHA256)
+		data.Detail.CaptureAvailable = captureErr == nil
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		logTemplateErr("sandbox-detail-body", tmpl.ExecuteTemplate(w, "sandbox-detail-body", &data))
+	})
 	mux.HandleFunc("GET /revdeck/{sha}", func(w http.ResponseWriter, r *http.Request) {
 		sha := r.PathValue("sha")
 		if !hashName.MatchString(sha) {
@@ -166,31 +199,5 @@ func (s *store) registerInvestigateRoutes(mux *http.ServeMux, tmpl *template.Tem
 		}
 		data.Analysis = r.URL.Query().Get("analysis")
 		renderPage(w, tmpl, "github-analysis", &data)
-	})
-	// #805's own ordering note no longer applies literally (Go 1.22's
-	// ServeMux picks the more specific pattern regardless of registration
-	// order, not "longest match" of the old prefix-based routing) and its
-	// guarantee needed one adjustment under the new mechanism: an exact
-	// literal path only outranks a wildcard sibling when its own method
-	// set is a SUBSET of the wildcard's -- a bare, method-unrestricted
-	// "/sandbox/vnc" is not a subset of "GET /sandbox/{job}" (it also
-	// matches every other method for that path, which the GET-only
-	// wildcard doesn't cover), and ServeMux panics on that kind of
-	// ambiguity at registration time instead of picking a winner
-	// (confirmed live). routes.go registers "GET /sandbox/vnc" -- see that
-	// call site's own comment -- specifically to keep this a clean,
-	// non-conflicting subset.
-	mux.HandleFunc("GET /sandbox/{job}", func(w http.ResponseWriter, r *http.Request) {
-		job := r.PathValue("job")
-		data, err := s.sandboxData(job, "")
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		data.StaticYARA = s.yaraForSHA(data.Detail.SHA256).Matches
-		_, captureErr := s.payloadPath(data.Detail.SHA256)
-		data.Detail.CaptureAvailable = captureErr == nil
-		data.Analysis = r.URL.Query().Get("analysis")
-		renderPage(w, tmpl, "sandbox", &data)
 	})
 }

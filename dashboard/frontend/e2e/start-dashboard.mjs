@@ -85,6 +85,32 @@ await fetch(`${fakeES.url}/dashboard-payload-inventory-v1/_doc/${payloadHash}?op
   }),
 });
 
+// Seed one job-addressable sandbox result for the detail shell/fragment
+// browser test. The real importer uses this exact deterministic document ID
+// and source namespace, so the fixture exercises the direct GET path rather
+// than the listing search API.
+const sandboxJob = "windows-ghosts-browser-fixture";
+await fetch(`${fakeES.url}/sandbox-analysis-v1/_doc/sandbox:${sandboxJob}?op_type=create`, {
+  method: "PUT",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    sandbox: {
+      version: 2,
+      job: sandboxJob,
+      sha256: payloadHash,
+      route: "windows-ghosts",
+      file_type: "PE32 browser fixture",
+      exit_status: "ok",
+      risk_score: 42,
+      risk_level: "medium",
+      top_syscalls: [{ name: "CreateFileW", count: 7 }],
+      network_summary: { packets: 3 },
+    },
+    file: { hash: { sha256: payloadHash } },
+    event: { category: "sandbox" },
+  }),
+});
+
 // #1203: attacker-identity-worker (#1200) writes attackers-v1 the same
 // way payload-inventory-worker writes payload-inventory-v1 above -- this
 // e2e fixture doesn't run that worker either, so seed one durable entity
