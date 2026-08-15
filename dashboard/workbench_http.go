@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -267,43 +268,15 @@ func (s *store) serveWorkbenchPage(w http.ResponseWriter, r *http.Request, tmpl 
 		http.NotFound(w, r)
 		return
 	}
-	path, err := s.payloadPath(hash)
-	if err != nil {
+	if _, err := s.payloadPath(hash); err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	head, err := readPayloadHead(path)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	classification := classifyPayload(head)
-	// This page deliberately only reads the payload's head, not the full
-	// file (kept lightweight, #352/#364), so it has no cheaper way to know
-	// the true content SHA-256 when hash itself is a Dionaea capture's
-	// on-disk MD5 identity (#364). Local-store matching (Ghidra/sandbox/
-	// GitHub-analysis, all keyed by true SHA-256) can therefore under-report
-	// "known" for such a payload here -- the Elasticsearch side still
-	// matches correctly either way, since hashQuery checks both hash
-	// fields for whatever hash it's given. The scoped loaders below
-	// (#1142) preserve this exact behavior: querying file.hash.sha256 for
-	// an MD5 value simply finds nothing, same as the old whole-index-scan-
-	// for-row.SHA256==hash did.
-	var ghidraResults []ghidraResult
-	if row, ok := loadGhidraResultByHash(esResultsClient, hash); ok {
-		ghidraResults = []ghidraResult{row}
-	}
-	sandboxResults := loadSandboxResultsByHash(esResultsClient, hash)
-	var githubResults []githubAnalysisResult
-	if row, ok := loadGitHubAnalysisResultByHash(esResultsClient, hash); ok {
-		githubResults = []githubAnalysisResult{row}
-	}
-	data := workbenchPageData{
-		Generated: time.Now(), SHA256: hash, Classification: classification,
-		Analyzers:   workbenchRegistry(classification),
-		ModelStatus: loadWorkbenchModelStatus(),
-		Correlation: s.correlateHash(hash, "", ghidraResults, sandboxResults, githubResults),
-	}
+	// The route renders only the identifier-aware shell. Payload-head
+	// classification, analyzer discovery, model health, and multi-source
+	// correlation are independent API reads hydrated by hp-workbench.js.
+	// None of those backends can delay the structural page response.
+	data := workbenchPageData{Generated: time.Now(), SHA256: hash}
 	renderPage(w, tmpl, "payload-workbench", &data)
 }
 
@@ -331,15 +304,82 @@ func (s *store) serveWorkbenchRegistry(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	classification := classifyPayload(head)
 	writeWorkbenchJSON(w, http.StatusOK, map[string]any{
 		"payload_sha256": hash,
-		"payload_kind":   classifyPayload(head).Code,
-		"analyzers":      workbenchRegistry(classifyPayload(head)),
-		"model_status":   loadWorkbenchModelStatus(),
+		"payload_kind":   classification.Code,
+		"classification": classification,
+		"analyzers":      workbenchRegistry(classification),
 		"external_publication": map[string]any{
 			"included_in_run_all": false,
 			"route":               "/payload-workbench/results#github",
 			"reason":              "Captured material leaves the local trust boundary and retains its separate administrator confirmation and dry-run gates.",
+		},
+	})
+}
+
+func (s *store) serveWorkbenchModelStatus(w http.ResponseWriter, r *http.Request) {
+	if _, ok := workbenchIdentity(w, r); !ok {
+		return
+	}
+	status := loadWorkbenchModelStatus()
+	writeWorkbenchJSON(w, http.StatusOK, map[string]any{"model_status": map[string]any{
+		"schema_version": status.SchemaVersion, "checked_at": status.CheckedAt, "overall": status.Overall,
+		"codes": status.Codes, "slots": status.Slots, "runtime": status.Runtime, "host": status.Host,
+		"advisory_only": status.AdvisoryOnly, "available": status.Available, "reason": status.Reason,
+	}})
+}
+
+func (s *store) serveWorkbenchCorrelation(w http.ResponseWriter, r *http.Request) {
+	if _, ok := workbenchIdentity(w, r); !ok {
+		return
+	}
+	hash := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/api/payload-workbench/correlation/")))
+	if !hashName.MatchString(hash) {
+		http.NotFound(w, r)
+		return
+	}
+	if _, err := s.payloadPath(hash); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	var ghidraResults []ghidraResult
+	var sandboxResults []sandboxResult
+	var githubResults []githubAnalysisResult
+	var sources sync.WaitGroup
+	sources.Add(3)
+	go func() {
+		defer sources.Done()
+		if row, ok := loadGhidraResultByHash(esResultsClient, hash); ok {
+			ghidraResults = []ghidraResult{row}
+		}
+	}()
+	go func() {
+		defer sources.Done()
+		sandboxResults = loadSandboxResultsByHash(esResultsClient, hash)
+	}()
+	go func() {
+		defer sources.Done()
+		if row, ok := loadGitHubAnalysisResultByHash(esResultsClient, hash); ok {
+			githubResults = []githubAnalysisResult{row}
+		}
+	}()
+	sources.Wait()
+	correlation := s.correlateHash(hash, "", ghidraResults, sandboxResults, githubResults)
+	// Keep hydration deliberately compact. Native result documents can contain
+	// megabytes of functions, strings, artifacts, and logs; this decision card
+	// only needs presence, status, and indexed-sighting counts.
+	var ghidra, github map[string]string
+	if correlation.Ghidra != nil {
+		ghidra = map[string]string{"exit_status": correlation.Ghidra.ExitStatus, "completed_at": correlation.Ghidra.CompletedAt}
+	}
+	if correlation.GitHub != nil {
+		github = map[string]string{"exit_status": correlation.GitHub.ExitStatus, "completed_at": correlation.GitHub.CompletedAt}
+	}
+	writeWorkbenchJSON(w, http.StatusOK, map[string]any{
+		"correlation": map[string]any{
+			"known": correlation.Known, "ghidra": ghidra, "sandbox_count": len(correlation.Sandbox), "github": github,
+			"es_available": correlation.ESAvailable, "es_sightings": correlation.ESSightings,
 		},
 	})
 }
