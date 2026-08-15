@@ -569,12 +569,21 @@ test.describe("dashboard browser behaviour", () => {
     // visibility or reading node labels off the canvas.
     await expect(page.locator("[data-attacker-graph-status]")).toContainText("member IP");
     await expect(page.locator("#attackers-graph canvas")).not.toHaveCount(0);
-    // #1327 shell+hydrate: the selected entity's own metadata grid
-    // (events/sensors/dates/credential pairs) used to render inline
+    // #1327 shell+hydrate: the selected entity's own metadata cards
+    // (events/sensors/dates/evidence collections) used to render inline
     // inside #attackers-graph itself; it's now part of the
     // #attackers-root fragment hp-attackers-detail.js hydrates in
     // separately, alongside #attackers-graph rather than nested in it.
     await expect(page.locator("#attackers-selected-meta")).toContainText("root / fixture-0");
+    // #1444: all selected fields use the shared card treatment, while
+    // potentially long evidence collections and the entity table stay
+    // inside bounded scroll regions.
+    await expect(page.locator("#attackers-selected-meta > .card")).toHaveCount(9);
+    await expect(page.getByRole("heading", { name: "Credential pairs (1)" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Fingerprints (1)" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Payload hashes (1)" })).toBeVisible();
+    await expect(page.locator("#attackers-selected-meta .card__scroll")).toHaveCount(5);
+    await expect(page.locator("#attackers-table > .card__scroll")).toBeVisible();
   });
 
   

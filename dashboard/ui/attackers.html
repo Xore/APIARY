@@ -21,25 +21,59 @@
   <span class="chip">{{.MultiIPRows}} merged across &gt;1 IP</span>
 </div>
 {{if .Selected}}
-<div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:gap-3.5 tw:mt-4" id="attackers-selected-meta">
-  {{if .Selected.RecordingsURL}}<div class="tw:col-span-2 tw:sm:col-span-3"><a class="lnk" href="{{.Selected.RecordingsURL}}" title="TTY session recordings from this entity's member IPs, if any">session recordings</a></div>{{end}}
-  <div><div class="label-section">Events</div><div class="v">{{.Selected.Events}}</div></div>
-  <div><div class="label-section">Sensors</div><div class="v">{{range .Selected.Sensors}}<span class="badge badge--muted">{{.}}</span> {{end}}</div></div>
-  <div><div class="label-section">First / last seen</div><div class="v">{{.Selected.First}} &rarr; {{.Selected.Last}}</div></div>
-  {{if .Selected.Credentials}}<div><div class="label-section">Credential pairs ({{len .Selected.Credentials}})</div><div class="v">{{range .Selected.Credentials}}<code>{{.}}</code> {{end}}</div></div>{{end}}
-  {{if .Selected.Fingerprints}}<div><div class="label-section">Fingerprints ({{len .Selected.Fingerprints}})</div><div class="v">{{range .Selected.Fingerprints}}<code>{{.}}</code> {{end}}</div></div>{{end}}
-  {{if .Selected.Payloads}}<div><div class="label-section">Payload hashes ({{len .Selected.Payloads}})</div><div class="v">{{range .Selected.Payloads}}<a class="lnk" href="/payload-analysis/{{.}}"><code>{{.}}</code></a> {{end}}</div></div>{{end}}
-  {{if .Selected.Verdicts}}<div><div class="label-section">Ghidra verdicts</div><div class="v">{{range .Selected.Verdicts}}<span class="badge badge--accent">{{.}}</span> {{end}}</div></div>{{end}}
+{{/* #1444: use the same responsive cards and bounded collection regions
+     as the rest of the dashboard. Every persisted field remains visible
+     even when empty, so hydration cannot make evidence appear to vanish. */}}
+<div class="tw:grid tw:grid-cols-12 tw:gap-3.5 tw:mt-4" id="attackers-selected-meta">
+  <div class="card">
+    <h2>Identity</h2>
+    <div class="card__row"><span class="card__label">entity</span><span class="card__value card__value--mono">{{.Selected.ID}}</span></div>
+    <div class="card__row"><span class="card__label">events</span><span class="card__value card__value--mono">{{.Selected.Events}}</span></div>
+    <div class="card__row"><span class="card__label">updated</span><span class="card__value">{{if .Selected.Updated}}{{.Selected.Updated}}{{else}}not recorded{{end}}</span></div>
+    {{if .Selected.RecordingsURL}}<div class="card__footer"><a class="lnk" href="{{.Selected.RecordingsURL}}" title="TTY session recordings from this entity's member IPs, if any">session recordings &rarr;</a></div>{{end}}
+  </div>
+  <div class="card">
+    <h2>Observed activity</h2>
+    <div class="card__row"><span class="card__label">first seen</span><span class="card__value">{{if .Selected.First}}{{.Selected.First}}{{else}}not recorded{{end}}</span></div>
+    <div class="card__row"><span class="card__label">last seen</span><span class="card__value">{{if .Selected.Last}}{{.Selected.Last}}{{else}}not recorded{{end}}</span></div>
+  </div>
+  <div class="card">
+    <h2>Sensors ({{len .Selected.Sensors}})</h2>
+    {{if .Selected.Sensors}}<div class="card__scroll">{{range .Selected.Sensors}}<div class="card__row"><span class="badge badge--muted">{{.}}</span></div>{{end}}</div>{{else}}<p class="empty">No sensors recorded for this identity.</p>{{end}}
+  </div>
+  <div class="card">
+    <h2>Member IPs ({{len .Selected.IPs}})</h2>
+    {{if .Selected.IPs}}<div class="card__scroll">{{range .Selected.IPs}}<div class="card__row"><a class="card__value card__value--mono" href="/investigate/ip/{{. | urlquery}}">{{.}}</a></div>{{end}}</div>{{else}}<p class="empty">No member IPs recorded for this identity.</p>{{end}}
+  </div>
+  <div class="card">
+    <h2>Credential pairs ({{len .Selected.Credentials}})</h2>
+    {{if .Selected.Credentials}}<div class="card__scroll">{{range .Selected.Credentials}}<div class="card__row"><code class="card__value card__value--mono">{{.}}</code></div>{{end}}</div>{{else}}<p class="empty">No credential pairs recorded for this identity.</p>{{end}}
+  </div>
+  <div class="card">
+    <h2>Fingerprints ({{len .Selected.Fingerprints}})</h2>
+    {{if .Selected.Fingerprints}}<div class="card__scroll">{{range .Selected.Fingerprints}}<div class="card__row"><code class="card__value card__value--mono">{{.}}</code></div>{{end}}</div>{{else}}<p class="empty">No fingerprints recorded for this identity.</p>{{end}}
+  </div>
+  <div class="card">
+    <h2>Payload hashes ({{len .Selected.Payloads}})</h2>
+    {{if .Selected.Payloads}}<div class="card__scroll">{{range .Selected.Payloads}}<div class="card__row"><a class="card__value card__value--mono" href="/payload-analysis/{{. | urlquery}}">{{.}}</a></div>{{end}}</div>{{else}}<p class="empty">No payload hashes recorded for this identity.</p>{{end}}
+  </div>
+  <div class="card">
+    <h2>Ghidra verdicts ({{len .Selected.Verdicts}})</h2>
+    {{if .Selected.Verdicts}}<div class="card__scroll">{{range .Selected.Verdicts}}<div class="card__row"><span class="badge badge--accent">{{.}}</span></div>{{end}}</div>{{else}}<p class="empty">No Ghidra verdicts recorded for this identity.</p>{{end}}
+  </div>
   {{/* #1260: attacker-identity-worker's own durable technique-coverage
        field (bare IDs folded in from every member IP's
        canonical_attck_techniques, #1261) -- not the richer per-event
        attackTechnique the ATT&CK coverage grid elsewhere computes, just
        enough to confirm at a glance which techniques this entity has
        actually been observed using. */}}
-  {{if .Selected.Techniques}}<div><div class="label-section">ATT&amp;CK techniques ({{len .Selected.Techniques}})</div><div class="v">{{range .Selected.Techniques}}<a class="badge badge--info" href="{{attckTechniqueURL .}}" target="_blank" rel="noopener noreferrer">{{.}}</a> {{end}}</div></div>{{end}}
+  <div class="card">
+    <h2>ATT&amp;CK techniques ({{len .Selected.Techniques}})</h2>
+    {{if .Selected.Techniques}}<div class="card__scroll">{{range .Selected.Techniques}}<div class="card__row"><a class="badge badge--info" href="{{attckTechniqueURL .}}" target="_blank" rel="noopener noreferrer">{{.}}</a></div>{{end}}</div>{{else}}<p class="empty">No ATT&amp;CK techniques recorded for this identity.</p>{{end}}
+  </div>
 </div>
 {{end}}
-<div class="card wide" id="attackers-table">{{if .Rows}}<table class="data-table"><thead><tr><th>entity</th><th>ips</th><th>events</th><th>sensors</th><th>first</th><th>last</th><th></th><th></th></tr></thead><tbody>{{range .Rows}}<tr><td><a href="{{.Link}}">{{shortAttackerID .ID}}</a></td><td class="n"><a href="{{.Link}}">{{len .IPs}}</a></td><td class="n">{{.Events}}</td><td class="v">{{range .Sensors}}<span class="badge badge--muted">{{.}}</span> {{end}}</td><td class="v">{{.First}}</td><td class="v">{{.Last}}</td><td>{{if .Verdicts}}<span class="badge badge--accent">verdict</span>{{end}}</td><td><a class="lnk" href="{{.Link}}">graph &rarr;</a></td></tr>{{end}}</tbody></table>{{else if .Ready}}<p class="empty">No attacker entities yet &mdash; attacker-identity-worker (#1200) merges IPs sharing 2+ strong signals (fingerprint, payload hash, credential pair) into durable entities as traffic accumulates.</p>{{else}}<div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:70%"></div>{{end}}</div>
+<div class="card wide tw:mt-4" id="attackers-table"><h2>Known identities</h2>{{if .Rows}}<div class="card__scroll"><table class="data-table"><thead><tr><th>entity</th><th>ips</th><th>events</th><th>sensors</th><th>first</th><th>last</th><th></th><th></th></tr></thead><tbody>{{range .Rows}}<tr><td><a href="{{.Link}}">{{shortAttackerID .ID}}</a></td><td class="n"><a href="{{.Link}}">{{len .IPs}}</a></td><td class="n">{{.Events}}</td><td class="v">{{range .Sensors}}<span class="badge badge--muted">{{.}}</span> {{end}}</td><td class="v">{{.First}}</td><td class="v">{{.Last}}</td><td>{{if .Verdicts}}<span class="badge badge--accent">verdict</span>{{end}}</td><td><a class="lnk" href="{{.Link}}">graph &rarr;</a></td></tr>{{end}}</tbody></table></div>{{else if .Ready}}<p class="empty">No attacker entities yet &mdash; attacker-identity-worker (#1200) merges IPs sharing 2+ strong signals (fingerprint, payload hash, credential pair) into durable entities as traffic accumulates.</p>{{else}}<div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:70%"></div>{{end}}</div>
 {{end}}
 {{define "attackers"}}<!doctype html>
 <html lang="en">
@@ -100,7 +134,18 @@
              grid, and full entity table are all hydrated in below. */}}
         <div id="attackers-root" data-hp-attackers-fragment-url="/attackers/fragment{{if .Selected}}?id={{.Selected.ID | urlquery}}{{end}}" aria-busy="true">
           <div class="filters"><div class="skeleton-line" style="width:220px"></div></div>
-          <div class="card wide"><div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:70%"></div></div>
+          {{if .Selected}}<div class="tw:grid tw:grid-cols-12 tw:gap-3.5 tw:mt-4" aria-hidden="true">
+            <div class="card"><div class="skeleton-line" style="width:55%"></div><div class="skeleton-line" style="width:85%"></div><div class="skeleton-line" style="width:70%"></div></div>
+            <div class="card"><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:75%"></div><div class="skeleton-line" style="width:65%"></div></div>
+            <div class="card"><div class="skeleton-line" style="width:45%"></div><div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:60%"></div></div>
+            <div class="card"><div class="skeleton-line" style="width:50%"></div><div class="skeleton-line" style="width:70%"></div><div class="skeleton-line" style="width:85%"></div></div>
+            <div class="card"><div class="skeleton-line" style="width:65%"></div><div class="skeleton-line" style="width:85%"></div><div class="skeleton-line" style="width:55%"></div></div>
+            <div class="card"><div class="skeleton-line" style="width:50%"></div><div class="skeleton-line" style="width:75%"></div><div class="skeleton-line" style="width:60%"></div></div>
+            <div class="card"><div class="skeleton-line" style="width:55%"></div><div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:65%"></div></div>
+            <div class="card"><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:70%"></div><div class="skeleton-line" style="width:50%"></div></div>
+            <div class="card"><div class="skeleton-line" style="width:45%"></div><div class="skeleton-line" style="width:75%"></div><div class="skeleton-line" style="width:55%"></div></div>
+          </div>{{end}}
+          <div class="card wide tw:mt-4" aria-hidden="true"><div class="skeleton-line" style="width:35%"></div><div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:70%"></div></div>
         </div>
         <footer id="attackers-footer">{{brandText}} &bull; entity-resolved identity &bull; #1200</footer>
       </div>
