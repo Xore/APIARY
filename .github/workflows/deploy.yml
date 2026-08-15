@@ -249,10 +249,10 @@ jobs:
       # stack in scripts/validate-deploy-profile.sh -- a correctly-performed
       # standard deployment left EXPECTED_SENSORS naming a sensor nothing
       # ever provisioned.
-      - name: Synchronize honeypot-cowrie/multipot/http/dnp3/dionaea/tanner/dicompot/dns-honeypot/citrix-honeypot/cisco-asa-honeypot/rdp-honeypot/endlessh/beelzebub/hellpot/galah (#258 split, #1418, #1419, #1420)
+      - name: Synchronize honeypot-cowrie/multipot/http/dnp3/dionaea/tanner/dicompot/dns-honeypot/citrix-honeypot/cisco-asa-honeypot/rdp-honeypot/endlessh/beelzebub/hellpot/elasticpot/galah (#258 split, #1418, #1419, #1420, #1423)
         shell: bash
         run: |
-          for stack in cowrie multipot http dnp3 dionaea tanner dicompot dns-honeypot citrix-honeypot cisco-asa-honeypot rdp-honeypot endlessh beelzebub hellpot galah; do
+          for stack in cowrie multipot http dnp3 dionaea tanner dicompot dns-honeypot citrix-honeypot cisco-asa-honeypot rdp-honeypot endlessh beelzebub hellpot elasticpot galah; do
             destination="/opt/stacks/honeypot-$stack"
             install -d -m 755 "$destination"
             cp "docker-compose.$stack.yml" "$destination/compose.yml"

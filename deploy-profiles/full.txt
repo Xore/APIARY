@@ -22,4 +22,5 @@ rdp-honeypot
 endlessh
 beelzebub
 hellpot
+elasticpot
 galah

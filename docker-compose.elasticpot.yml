@@ -1,0 +1,69 @@
+# honeypot-elasticpot -- #1423: Elasticsearch decoy (gitlab.com/bontchev/
+# elasticpot, vendored -- see elasticpot/Dockerfile). Same shape as
+# docker-compose.hellpot.yml -- no depends_on, its own fully private
+# network, only host bind mounts. Deployed as /opt/stacks/honeypot-elasticpot.
+#
+# NAMING/PLACEMENT CARE (#1423's own hard requirement): this is a SECOND,
+# genuinely distinct Elasticsearch decoy in this stack -- multipot already
+# hand-rolls a minimal one on port 9200 (multipot/protocols.go's
+# handleElastic, persona nexusai-core/es-logs-01). That pre-existing
+# decoy is itself self-written rather than vendored (a gap against this
+# epic's own "prefer vendored over self-written" principle), flagged as a
+# follow-up decision for the operator rather than silently ripped out
+# here -- this PR only ADDS the new sensor, per its own issue's literal
+# scope.
+#
+# To keep the two unmistakably distinguishable everywhere:
+#   - Different port (9201, not 9200 -- multipot's decoy keeps 9200)
+#   - Different persona/asset_id (personas/personas.json's
+#     nexusai-analytics-legacy/analytics-es-04, never es-logs-01)
+#   - Different container name (hp-elasticpot, not anything
+#     elasticsearch-shaped)
+#   - event.sensor is the literal "elasticpot" (elasticpot/honeypot.cfg's
+#     sensor_name override), never confusable with the real cluster's own
+#     indices or multipot's "elasticsearch" protocol tag
+#   - The REAL Elasticsearch cluster (docker-compose.elk.yml) is never
+#     reachable from this network at all -- elasticpot_net is fully
+#     isolated, same as every other sensor's own network here
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  elasticpot:
+    <<: *runtime-defaults
+    build: /opt/stacks/apiary/elasticpot
+    container_name: hp-elasticpot
+    restart: unless-stopped
+    environment:
+      - TZ=Europe/Berlin
+    ports:
+      - ${HP_BIND:-10.8.0.2}:9201:9200
+    volumes:
+      - /opt/stacks/apiary/logs/elasticpot:/elasticpot/log
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    networks: [elasticpot_net]
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "9200"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    labels:
+      - autoheal=true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+networks:
+  elasticpot_net:
+    driver: bridge

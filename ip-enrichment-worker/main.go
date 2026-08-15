@@ -140,6 +140,19 @@ func discoverSources(logsDir, outDir, stateDir string) []*source {
 	// see hellpot.go's doc comment.
 	add("hellpot", filepath.Join(logsDir, "hellpot", "HellPot.log"), enrichHellpotLine)
 
+	// #1423: elasticpot is raw-port/portbridge-only like the two sensors
+	// above (no Traefik hostname -- see docker-compose.elasticpot.yml's own
+	// comment on why), but unlike them its native log shape already
+	// matches enrichLine's exactly: flat top-level "src_ip"/"src_port"
+	// (confirmed live against real captured output, not assumed), plus a
+	// stable "sensor":"elasticpot" literal via elasticpot/honeypot.cfg's
+	// sensor_name override (its upstream default is gethostname(), a
+	// random per-container value -- fixed at the config layer, not here).
+	// No bespoke enrich function needed; it isn't in canonical.go's
+	// promoteCanonicalFields switch either since it captures no
+	// credentials for the login-ranking canonical fields to apply to.
+	add("elasticpot", filepath.Join(logsDir, "elasticpot", "elasticpot.json"), enrichLine)
+
 	// #1420: galah is raw-port/portbridge-only, same reasoning as
 	// beelzebub/hellpot above (confirmed directly against its vendored
 	// source -- commonFields() in internal/logger/logger.go resolves
