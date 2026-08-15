@@ -285,7 +285,20 @@ func (a *oidcAuth) middleware(next http.Handler) http.Handler {
 		// load from a real top-level navigation regardless of path, unlike
 		// the /api/ and /static/ checks above which only cover specific
 		// prefixes.
-		if strings.HasPrefix(r.URL.Path, "/api/") || isFrameFetch(r) {
+		// #1394: same problem a third time -- overview.html's own in-place
+		// live refresh (its 60s timer / SSE "update" handler) does a plain
+		// fetch(location.pathname), i.e. fetch("/"), which is neither under
+		// /api/ nor a frame load, so it fell straight through to the
+		// redirect-to-Keycloak branch below and connect-src blocked the
+		// resulting cross-origin hop exactly like the two cases above.
+		// Rather than special-case yet another path, isProgrammaticFetch
+		// covers the general case Sec-Fetch-Dest already distinguishes:
+		// "empty" is what a browser sends for any script-initiated fetch()/
+		// XMLHttpRequest that is not a navigation and not a frame load --
+		// this subsumes the /api/ prefix check for modern browsers too, but
+		// that check stays as-is for the older, pre-Fetch-Metadata browsers
+		// isProgrammaticFetch's own comment already carves out.
+		if strings.HasPrefix(r.URL.Path, "/api/") || isProgrammaticFetch(r) {
 			http.Error(w, "authentication required", http.StatusUnauthorized)
 			return
 		}
@@ -298,16 +311,17 @@ func (a *oidcAuth) middleware(next http.Handler) http.Handler {
 	})
 }
 
-// isFrameFetch reports whether r is the browser loading this response into
-// an <iframe>/nested browsing context, per the Sec-Fetch-Dest Fetch
-// Metadata header -- "iframe" for a same-origin frame, "frame" for the
-// (unused here) cross-origin case, "document" for a real top-level
-// navigation. Missing entirely on older browsers without Fetch Metadata
-// support; those fall through to the normal redirect-to-login path exactly
-// as before this existed.
-func isFrameFetch(r *http.Request) bool {
+// isProgrammaticFetch reports whether r is the browser loading this response
+// via script (fetch()/XMLHttpRequest, "empty") or into an <iframe>/nested
+// browsing context ("iframe" for same-origin, "frame" for the unused-here
+// cross-origin case), per the Sec-Fetch-Dest Fetch Metadata header --
+// "document" is what a real top-level navigation carries instead. Missing
+// entirely on older browsers without Fetch Metadata support; those fall
+// through to the normal redirect-to-login path exactly as before this
+// existed.
+func isProgrammaticFetch(r *http.Request) bool {
 	switch r.Header.Get("Sec-Fetch-Dest") {
-	case "iframe", "frame":
+	case "empty", "iframe", "frame":
 		return true
 	}
 	return false

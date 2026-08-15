@@ -749,6 +749,22 @@ func TestMiddlewareRejectsAnonymousRequests(t *testing.T) {
 		}
 	})
 
+	// #1394: overview.html's own in-place live refresh does a plain
+	// fetch(location.pathname) -- fetch("/") for the overview page itself --
+	// which is neither under /api/ nor a frame load, so an expired session
+	// must still get a real 401 there too, not a redirect toward Keycloak
+	// that connect-src then blocks the same way #1255/#1237 already fixed
+	// for /api/ and iframe loads.
+	t.Run("anonymous script-initiated GET to a non-API path is denied outright, not redirected", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		request.Header.Set("Sec-Fetch-Dest", "empty")
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+		}
+	})
+
 	// A real top-level navigation to the same kind of path (no Sec-Fetch-Dest,
 	// or "document") must keep redirecting to login -- e.g. clicking a
 	// download link while logged out should still land the user at sign-in
