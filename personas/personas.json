@@ -120,6 +120,14 @@
       "hostname": "legacy.meridian.example",
       "role": "Decommissioned marketing site, never formally taken offline -- exactly the kind of forgotten host WordPress/CMS scanners keep finding",
       "services": ["hellpot"]
+    },
+    "nexusai-analytics-legacy": {
+      "organization": "NexusAI Research GmbH",
+      "site_id": "nexusai-berlin-analytics",
+      "asset_id": "analytics-es-04",
+      "hostname": "analytics-es-04.nexusai.local",
+      "role": "Standalone legacy analytics-team Elasticsearch node -- deliberately a distinct persona/asset_id from nexusai-core's own es-logs-01 (multipot's existing 9200 decoy) so the two never look like the same instance in any log or dashboard view (#1423's own naming-care requirement)",
+      "services": ["elasticpot"]
     }
   }
 }

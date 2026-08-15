@@ -645,6 +645,31 @@ func classify(e map[string]any, dirSensor string) event {
 		return ev
 	}
 
+	// ---- elasticpot (#1423) -------------------------------------------------
+	// Genuinely flat native fields (eventid/message/url/request/payload) --
+	// no ip-enrichment-worker promotion needed beyond the plain src_ip/
+	// src_port join every other raw-port sensor gets from enrichLine, so
+	// nothing here reads a promoted/renamed field the way beelzebub/
+	// hellpot's blocks do.
+	if s, ok := e["sensor"].(string); ok && s == "elasticpot" {
+		ev.sensor = "elasticpot"
+		ev.proto = "elasticsearch"
+		ev.port = num(e["dst_port"])
+		ev.path = str(e["url"])
+		if ev.fingerprint = str(e["user_agent"]); ev.fingerprint != "" {
+			ev.fingerKind = "User-Agent"
+		}
+		switch {
+		case str(e["payload"]) != "":
+			ev.detail = str(e["request"]) + " " + ev.path + "  payload: " + str(e["payload"])
+		case ev.path != "":
+			ev.detail = str(e["request"]) + " " + ev.path
+		default:
+			ev.detail = str(e["message"])
+		}
+		return ev
+	}
+
 	// ---- endlessh (#246) ---------------------------------------------------
 	// A "connect" and a later "disconnect" are logged per held connection;
 	// the disconnect carries the actual investigative value (how long/how
