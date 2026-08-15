@@ -223,7 +223,7 @@ func logStats(sources []*source, interval time.Duration) {
 }
 
 func runSource(s *source, vm, tftpVM *atomic.Pointer[viaMap], refresh, pendingTimeout time.Duration) {
-	out, err := os.OpenFile(s.output, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
+	out, err := newOutputWriter(s.output, getenvInt64("OUTPUT_MAX_BYTES", 67108864))
 	if err != nil {
 		log.Printf("ip-enrichment-worker: %s: open output %s: %v", s.name, s.output, err)
 		return
@@ -251,7 +251,7 @@ func runSource(s *source, vm, tftpVM *atomic.Pointer[viaMap], refresh, pendingTi
 // offset persist failed -- so the same input range is retried next tick
 // instead of being silently skipped (a failed write) or repeatedly
 // re-written (a failed persist with the in-memory offset already moved on).
-func processSourceTick(s *source, vm, tftpVM *atomic.Pointer[viaMap], pendingTimeout time.Duration, out *os.File, tunnelPeerMarker []byte, offset int64, now time.Time) int64 {
+func processSourceTick(s *source, vm, tftpVM *atomic.Pointer[viaMap], pendingTimeout time.Duration, out *outputWriter, tunnelPeerMarker []byte, offset int64, now time.Time) int64 {
 	lines, newOffset, err := readNewLines(s.input, offset)
 	if err != nil {
 		return offset // sensor container restarting, file briefly absent, etc. -- retry next tick
@@ -279,7 +279,7 @@ func processSourceTick(s *source, vm, tftpVM *atomic.Pointer[viaMap], pendingTim
 		}
 	}
 	ready = append(ready, drained...)
-	if !writeLines(out, s.name, s.output, ready) {
+	if !out.write(s.name, ready) {
 		return offset // don't advance/persist offset over a batch that failed to write
 	}
 	if newOffset == offset {
@@ -290,22 +290,4 @@ func processSourceTick(s *source, vm, tftpVM *atomic.Pointer[viaMap], pendingTim
 		return offset // keep the in-memory offset unchanged; retry the same range next tick
 	}
 	return newOffset
-}
-
-// writeLines reports whether every line was written successfully. On a
-// partial/failed write the caller must not advance/persist the input
-// offset, or the unwritten lines are gone for good -- readNewLines would
-// resume past them on the next tick.
-func writeLines(out *os.File, name, path string, lines [][]byte) bool {
-	for _, line := range lines {
-		if _, err := out.Write(line); err != nil {
-			log.Printf("ip-enrichment-worker: %s: write output %s: %v", name, path, err)
-			return false
-		}
-		if _, err := out.Write([]byte("\n")); err != nil {
-			log.Printf("ip-enrichment-worker: %s: write output %s: %v", name, path, err)
-			return false
-		}
-	}
-	return true
 }
