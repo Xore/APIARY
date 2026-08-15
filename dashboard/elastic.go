@@ -543,6 +543,7 @@ func (c *esClient) refresh() {
 		{"sentrypeer", "honeypot-v2-*", "event.sensor:sentrypeer"},
 		{"wordpot", "honeypot-v2-*", "event.sensor:wordpot"},
 		{"mailoney", "honeypot-v2-*", "event.sensor:mailoney"},
+		{"canarytokens", "honeypot-v2-*", "event.sensor:canarytokens"},
 		{"suricata", "suricata-*", ""},
 	}
 	for _, q := range queries {

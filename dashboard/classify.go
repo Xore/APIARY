@@ -776,6 +776,34 @@ func classify(e map[string]any, dirSensor string) event {
 		return ev
 	}
 
+	// ---- canarytokens (#1426) -----------------------------------------------
+	// Written by canarytokens-adapter, not by ip-enrichment-worker or a
+	// vendored sensor directly -- canarytokens itself only ever POSTs a
+	// webhook per fired token; the adapter translates that into this
+	// repo's shared JSON shape (canarytokens-adapter/main.go's buildEvent).
+	// No port: a fired honeytoken isn't "an attacker hit our listener on
+	// port N", it's "something touched a planted artifact", so there's no
+	// dst_port to show. manage_url is Canarytokens' own admin link for
+	// this specific token (disable/rotate it), not this repo's dashboard --
+	// surfaced via ev.path purely as an investigative pointer, same
+	// "external reference link" role http-honeypot's own probed-path field
+	// plays for a URL, not a claim that it's the same kind of thing.
+	if s, ok := e["sensor"].(string); ok && s == "canarytokens" {
+		ev.sensor = "canarytokens"
+		ev.proto = str(e["token_type"])
+		ev.path = str(e["manage_url"])
+		memo := str(e["memo"])
+		switch {
+		case memo != "" && str(e["channel"]) != "":
+			ev.detail = "token fired: " + memo + "  (" + str(e["channel"]) + ")"
+		case memo != "":
+			ev.detail = "token fired: " + memo
+		default:
+			ev.detail = "token fired (" + ev.proto + ")"
+		}
+		return ev
+	}
+
 	// ---- endlessh (#246) ---------------------------------------------------
 	// A "connect" and a later "disconnect" are logged per held connection;
 	// the disconnect carries the actual investigative value (how long/how
