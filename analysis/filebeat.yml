@@ -43,6 +43,13 @@ filebeat.inputs:
       - /logs/dnp3/*.json
       - /logs/dicompot/*.json
       - /logs/endlessh/*.json
+      # #1426: canarytokens-adapter already writes fully-correct fields
+      # (sensor/src_ip/timestamp/etc, canarytokens-adapter/main.go's
+      # buildEvent) straight to /logs/canarytokens/canarytokens.json --
+      # nothing for ip-enrichment-worker to join or promote, same "not in
+      # its scope, tail the raw path directly" bucket as api-honeypot/
+      # dnp3/dicompot/endlessh above.
+      - /logs/canarytokens/*.json
       - /logs/enriched/*.json
     # Keep an extra guard for a top-level Suricata mount. Explicit per-sensor
     # paths above ensure incidents and portbridge metadata cannot be decoded

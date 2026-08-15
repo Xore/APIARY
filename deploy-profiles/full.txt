@@ -27,3 +27,4 @@ galah
 sentrypeer
 wordpot
 mailoney
+canarytokens

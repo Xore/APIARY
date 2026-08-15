@@ -63,6 +63,7 @@ declare -A STACK_TO_SENSORS=(
   [sentrypeer]="sentrypeer"
   [wordpot]="wordpot"
   [mailoney]="mailoney"
+  [canarytokens]="canarytokens"
   [tanner]="tanner"
   [conpot]="conpot conpot-s7-1200 conpot-s7-1500 conpot-iec104 conpot-guardian conpot-kamstrup"
   [endlessh]="endlessh"
