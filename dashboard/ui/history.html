@@ -25,7 +25,10 @@
           </div>
         </header>
         <div class="filters" id="history-filters"><a class="chip" href="/">&larr; dashboard</a><input id="history-q" class="search" placeholder="query_string, e.g. honeypot.sensor:cowrie AND honeypot.username:root" aria-label="Elasticsearch query"><button id="history-run" class="copy">search</button><a id="history-export" class="chip" href="/export/history.json">export JSON &darr;</a></div>
-        <div class="card wide" id="history-card"><p id="history-meta" class="note">Enter an Elasticsearch query or leave blank for newest documents.</p><pre id="history-results" class="code">waiting</pre></div>
+        <div class="card wide" id="history-card">
+          <p id="history-meta" class="note" role="status" aria-live="polite">Loading the newest indexed documents&hellip;</p>
+          <pre id="history-results" class="code hp-code-results" aria-busy="true"><span class="skeleton-line" style="width:38%"></span><span class="skeleton-line" style="width:82%"></span><span class="skeleton-line" style="width:72%"></span><span class="skeleton-line" style="width:90%"></span><span class="skeleton-line" style="width:56%"></span><span class="skeleton-line" style="width:76%"></span></pre>
+        </div>
         <footer id="history-footer">{{brandText}} &bull; historical data from Elasticsearch</footer>
       </div>
     </main>
@@ -33,7 +36,20 @@
 <script nonce="{{.Nonce}}">
 const q=document.getElementById('history-q'), out=document.getElementById('history-results'), meta=document.getElementById('history-meta');
 q.value=new URLSearchParams(location.search).get('q')||'';
-async function run(){const query=q.value.trim(), u='/api/history?limit=200'+(query?'&q='+encodeURIComponent(query):'');document.getElementById('history-export').href='/export/history.json?limit=500'+(query?'&q='+encodeURIComponent(query):'');document.getElementById('history-export-top').href='/export/history.json?limit=500'+(query?'&q='+encodeURIComponent(query):'');meta.textContent='loading…';try{const r=await fetch(u);const j=await r.json();const hits=j.hits?.hits||[];meta.textContent=hits.length+' documents shown';out.textContent=hits.map(h=>JSON.stringify(h._source,null,2)).join('\n\n')}catch(e){meta.textContent='query failed';out.textContent=String(e)}}
+const historySkeleton='<span class="skeleton-line" style="width:38%"></span><span class="skeleton-line" style="width:82%"></span><span class="skeleton-line" style="width:72%"></span><span class="skeleton-line" style="width:90%"></span><span class="skeleton-line" style="width:56%"></span><span class="skeleton-line" style="width:76%"></span>';
+async function run(){
+  const query=q.value.trim(), u='/api/history?limit=200'+(query?'&q='+encodeURIComponent(query):'');
+  document.getElementById('history-export').href='/export/history.json?limit=500'+(query?'&q='+encodeURIComponent(query):'');
+  document.getElementById('history-export-top').href='/export/history.json?limit=500'+(query?'&q='+encodeURIComponent(query):'');
+  meta.textContent='Loading indexed documents…';out.setAttribute('aria-busy','true');out.innerHTML=historySkeleton;
+  try{
+    const r=await fetch(u);if(!r.ok)throw new Error('request failed ('+r.status+')');
+    const j=await r.json(),hits=j.hits?.hits||[];
+    meta.textContent=hits.length+' documents shown';
+    out.textContent=hits.length?hits.map(h=>JSON.stringify(h._source,null,2)).join('\n\n'):'No matching documents.';
+  }catch(e){meta.textContent='Query failed';out.textContent=String(e)}
+  finally{out.setAttribute('aria-busy','false')}
+}
 document.getElementById('history-run').onclick=run;q.onkeydown=e=>{if(e.key==='Enter')run()};run();
 </script>
 </body>

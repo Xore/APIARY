@@ -87,12 +87,12 @@
         <div class="tw:grid tw:grid-cols-12 tw:gap-3.5" id="events-grid">
           <div class="card wide">
             {{if .Events}}
-            <table class="recent data-table data-table--responsive">
+            <div class="card__scroll"><table class="recent data-table data-table--responsive">
               <thead><tr><th>time</th><th>sensor</th><th>source ip</th><th>port</th><th>detail</th></tr></thead>
               <tbody data-hp-page-url="{{.RowsURL}}" data-hp-total="{{.Total}}" data-hp-offset="{{.Offset}}">
               {{template "eventrows" .}}
               </tbody>
-            </table>
+            </table></div>
             {{else if .Ready}}<p class="empty">no events match this filter</p>
             {{else}}
             {{/* #1155: before the first rebuild() cycle completes, this

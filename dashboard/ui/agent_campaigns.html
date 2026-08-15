@@ -50,8 +50,9 @@
               {{range .MatchedCategories}}<span class="badge badge--muted">{{.}}</span>{{end}}
               {{range .IdentifierLinks}}{{if .Link}}<a class="chip" href="{{.Link}}">{{.Key}}</a>{{else}}<span class="chip">{{.Key}}</span>{{end}}{{end}}
             </div>
-            <details>
-              <summary>Evidence timeline ({{len .Events}} event{{if ne (len .Events) 1}}s{{end}})</summary>
+            <section aria-label="Evidence timeline">
+              <h3>Evidence timeline <span class="tw:text-muted">({{len .Events}} event{{if ne (len .Events) 1}}s{{end}})</span></h3>
+              <div class="card__scroll">
               <table class="recent data-table data-table--responsive tw:mt-2">
                 <thead><tr><th>time</th><th>rule</th><th>trust boundary crossed</th><th>reason</th><th>decoded artifact</th><th>source event</th></tr></thead>
                 <tbody>
@@ -77,7 +78,8 @@
                   {{end}}
                 </tbody>
               </table>
-            </details>
+              </div>
+            </section>
           </div>
           {{end}}
         </div>

@@ -40,16 +40,16 @@
             <div><h3>Semantic search</h3><p class="card__meta">Finds session summaries by meaning, not exact keywords &mdash; e.g. "credential exfiltration over an encoded channel". Results are ranked by similarity, not recency, and are the same AI-generated output as the table below.</p></div>
           </div>
           <div class="filters"><input id="hp-llm-search-q" class="search" placeholder="Describe what you're looking for&hellip;" aria-label="Semantic search query"><button id="hp-llm-search-run" class="copy" type="button">search</button></div>
-          <p id="hp-llm-search-meta" class="card__meta" hidden></p>
-          <div class="table-scroll" id="hp-llm-search-results" hidden><table class="data-table">
+          <p id="hp-llm-search-meta" class="card__meta" role="status" aria-live="polite">Enter a description to search.</p>
+          <div class="card__scroll" id="hp-llm-search-results" aria-busy="false"><table class="data-table" data-hp-no-lazy>
             <thead><tr><th>score</th><th>time</th><th>severity</th><th>summary</th><th>evidence</th></tr></thead>
-            <tbody id="hp-llm-search-rows"></tbody>
+            <tbody id="hp-llm-search-rows"><tr class="hp-table-state"><td colspan="5"><p class="empty">Semantic-search results will appear here.</p></td></tr></tbody>
           </table></div>
         </section>
         <div class="tw:grid tw:grid-cols-12 tw:gap-3.5" id="llm-grid">
           <div class="card wide">
             {{if .Docs}}
-            <table class="recent data-table">
+            <div class="card__scroll"><table class="recent data-table">
               <thead><tr><th>time</th><th>type</th><th>severity</th><th>confidence</th><th>summary</th><th>evidence</th></tr></thead>
               <tbody>
                 {{range .Docs}}<tr>
@@ -61,7 +61,7 @@
                   <td class="v">{{if .EvidenceLink}}<a href="{{.EvidenceLink}}">view source</a>{{else}}<span class="tw:text-muted">&mdash;</span>{{end}}</td>
                 </tr>{{end}}
               </tbody>
-            </table>
+            </table></div>
             {{else}}<p class="empty">No LLM analysis documents yet.</p>{{end}}
           </div>
         </div>

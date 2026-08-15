@@ -33,7 +33,7 @@
         <div class="tw:grid tw:grid-cols-12 tw:gap-3.5" id="auth-events-grid">
           <div class="card wide">
             {{if .Events}}
-            <table class="recent data-table">
+            <div class="card__scroll"><table class="recent data-table">
               <thead><tr><th>time</th><th>client</th><th>error</th><th>username tried</th><th>source ip</th></tr></thead>
               <tbody>
                 {{range .Events}}<tr>
@@ -44,7 +44,7 @@
                   <td class="v">{{if .IPAddress}}<a href="/events?ip={{.IPAddress | urlquery}}">{{.IPAddress}}</a>{{else}}<span class="tw:text-muted">unattributed</span>{{end}}</td>
                 </tr>{{end}}
               </tbody>
-            </table>
+            </table></div>
             {{else}}<p class="empty">No failed logins recorded yet.</p>{{end}}
           </div>
           {{if .Stats.ByClient}}

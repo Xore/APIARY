@@ -38,13 +38,17 @@
               <div class="card wide" id="hp-rp-designer">
                 <h2>Start from a template</h2>
                 <p class="note">Pick the closest starting point, then adjust it across the steps above. Nothing is generated until you say so.</p>
-                <div class="hp-rp-templates" id="hp-rp-templates" role="group" aria-label="Report templates"></div>
+                <div class="hp-rp-templates" id="hp-rp-templates" role="group" aria-label="Report templates" aria-busy="true">
+                  <div class="hp-rp-template" aria-hidden="true"><span class="skeleton-line" style="width:54%"></span><span class="skeleton-line" style="width:88%"></span></div>
+                  <div class="hp-rp-template" aria-hidden="true"><span class="skeleton-line" style="width:62%"></span><span class="skeleton-line" style="width:80%"></span></div>
+                  <div class="hp-rp-template" aria-hidden="true"><span class="skeleton-line" style="width:48%"></span><span class="skeleton-line" style="width:84%"></span></div>
+                </div>
               </div>
               <div class="card wide">
                 <h2>Report basics</h2>
                 <div class="hp-rp-grid">
                 <div class="hp-rp-field"><label for="hp-rp-name">Report name</label><input id="hp-rp-name" maxlength="60" required placeholder="Weekly board briefing"></div>
-                <div class="hp-rp-field"><label for="hp-rp-window">Observation window</label><select id="hp-rp-window"></select></div>
+                <div class="hp-rp-field"><label for="hp-rp-window">Observation window</label><select id="hp-rp-window" aria-busy="true"><option>loading observation windows&hellip;</option></select></div>
                 <div class="hp-rp-field"><label for="hp-rp-appendix">Event appendix limit</label><input id="hp-rp-appendix" type="number" min="0" max="500" step="10" value="120"></div>
                 <div class="hp-rp-field"><label>PDF theme</label>
                   <div class="hp-rp-theme" id="hp-rp-theme" role="group" aria-label="PDF theme">
@@ -57,7 +61,7 @@
               <div class="card wide hp-rp-section" id="hp-rp-elements-section">
                 <h2>Elements</h2>
                 <p class="note">Each element becomes a section of the PDF, in this order.</p>
-                <div class="hp-rp-elements" id="hp-rp-elements"></div>
+                <div class="hp-rp-elements" id="hp-rp-elements" aria-busy="true"><span class="skeleton-line" style="width:88%"></span><span class="skeleton-line" style="width:72%"></span><span class="skeleton-line" style="width:82%"></span><span class="skeleton-line" style="width:68%"></span></div>
               </div>
             </div>
 
@@ -95,7 +99,7 @@
               <div class="card wide hp-rp-section" id="hp-rp-sandbox-section" hidden>
                 <h2>Sandbox run</h2>
                 <div class="hp-rp-grid">
-                  <div class="hp-rp-field"><label for="hp-rp-sandbox-job">Analysis job</label><select id="hp-rp-sandbox-job"></select></div>
+                  <div class="hp-rp-field"><label for="hp-rp-sandbox-job">Analysis job</label><select id="hp-rp-sandbox-job"><option value="">Select a template to load analysis runs.</option></select></div>
                 </div>
                 <p class="note">Sandbox reports have a fixed evidence structure; theme and branding still apply.</p>
               </div>
@@ -105,7 +109,7 @@
               <div class="card wide hp-rp-section" id="hp-rp-payload-section" hidden>
                 <h2>Payload</h2>
                 <div class="hp-rp-field"><label for="hp-rp-payload-search">Search captured payloads</label><input id="hp-rp-payload-search" type="search" placeholder="hash or file kind…" autocomplete="off"></div>
-                <div class="hp-rp-payload-results" id="hp-rp-payload-results" role="listbox" aria-label="Captured payloads"></div>
+                <div class="hp-rp-payload-results" id="hp-rp-payload-results" role="listbox" aria-label="Captured payloads"><p class="note">Select a payload report template to load captured payloads.</p></div>
                 <p class="hp-rp-status" id="hp-rp-payload-selected"></p>
                 <p class="note">Payload reports have a fixed evidence structure; theme and branding still apply.</p>
               </div>
@@ -160,16 +164,24 @@
             <p class="note">Saved designs you can re-generate, refine, or schedule.</p>
             <div class="card__scroll"><table class="data-table" id="hp-rp-definitions-table">
               <thead><tr><th>Name</th><th>Template</th><th>Theme</th><th>Window</th><th>Schedule</th><th>Updated</th><th>Actions</th></tr></thead>
-              <tbody id="hp-rp-definitions"></tbody>
+              <tbody id="hp-rp-definitions" aria-busy="true">
+                <tr class="hp-table-state" aria-hidden="true"><td class="hp-skeleton-cell" colspan="7"><span class="skeleton-line" style="width:88%"></span></td></tr>
+                <tr class="hp-table-state" aria-hidden="true"><td class="hp-skeleton-cell" colspan="7"><span class="skeleton-line" style="width:74%"></span></td></tr>
+                <tr class="hp-table-state" aria-hidden="true"><td class="hp-skeleton-cell" colspan="7"><span class="skeleton-line" style="width:82%"></span></td></tr>
+              </tbody>
             </table></div>
-            <p class="empty" id="hp-rp-definitions-empty" hidden>No saved definitions yet &mdash; design one above and save it.</p>
+            <p class="empty" id="hp-rp-definitions-empty" role="status" aria-live="polite" hidden>No saved definitions yet &mdash; design one above and save it.</p>
           </div>
 
           <div class="card wide" id="hp-rp-generated-card">
             <h2>Generated reports</h2>
             <p class="note">Newest first. Select a card to view inline, download the PDF, or delete stale artifacts.</p>
-            <div class="project-grid" id="hp-rp-generated"></div>
-            <p class="empty" id="hp-rp-generated-empty" hidden>No reports generated yet.</p>
+            <div class="card__scroll hp-project-grid-scroll"><div class="project-grid" id="hp-rp-generated" aria-busy="true">
+              <article class="project-card" aria-hidden="true"><span class="skeleton-line" style="width:58%"></span><span class="skeleton-line" style="width:86%"></span><span class="skeleton-line" style="width:68%"></span></article>
+              <article class="project-card" aria-hidden="true"><span class="skeleton-line" style="width:64%"></span><span class="skeleton-line" style="width:78%"></span><span class="skeleton-line" style="width:72%"></span></article>
+              <article class="project-card" aria-hidden="true"><span class="skeleton-line" style="width:52%"></span><span class="skeleton-line" style="width:84%"></span><span class="skeleton-line" style="width:62%"></span></article>
+            </div></div>
+            <p class="empty" id="hp-rp-generated-empty" role="status" aria-live="polite" hidden>No reports generated yet.</p>
           </div>
           </div>
 
