@@ -3,7 +3,9 @@ package main
 import (
 	"html/template"
 	"net/http"
+	"net/netip"
 	"strings"
+	"time"
 )
 
 // registerInvestigateRoutes wires up every path-parameter drill-down route
@@ -33,13 +35,56 @@ func (s *store) registerInvestigateRoutes(mux *http.ServeMux, tmpl *template.Tem
 		}
 		renderPage(w, tmpl, "attacker", &data)
 	})
+	mux.HandleFunc("GET /investigate/ip/{ip}/fragment", func(w http.ResponseWriter, r *http.Request) {
+		ip := strings.TrimSpace(r.PathValue("ip"))
+		if _, err := netip.ParseAddr(ip); err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		if s.es == nil {
+			http.Error(w, "correlation backend unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		data := attackerPage{Generated: time.Now(), IP: ip, Correlation: s.es.correlateIP(ip, 100)}
+		if !data.Correlation.Available {
+			http.Error(w, "correlation backend unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		tmpl.ExecuteTemplate(w, "attacker-correlation-body", &data)
+	})
+	mux.HandleFunc("GET /investigate/ip/{ip}/state-fragment", func(w http.ResponseWriter, r *http.Request) {
+		ip := strings.TrimSpace(r.PathValue("ip"))
+		if _, err := netip.ParseAddr(ip); err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		data := attackerPage{Generated: time.Now(), IP: ip}
+		if s.ipBlocks != nil {
+			data.Block = s.ipBlocks.get(ip)
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		tmpl.ExecuteTemplate(w, "attacker-block-body", &data)
+	})
 	mux.HandleFunc("GET /investigate/cidr/{cidr...}", func(w http.ResponseWriter, r *http.Request) {
-		data, ok := s.cidrCorrelationData(r.PathValue("cidr"))
+		data, ok := cidrCorrelationShell(r.PathValue("cidr"))
 		if !ok {
 			http.NotFound(w, r)
 			return
 		}
 		renderPage(w, tmpl, "cidr-correlation", &data)
+	})
+	mux.HandleFunc("GET /investigate/cidr-fragment", func(w http.ResponseWriter, r *http.Request) {
+		data, ok := s.cidrCorrelationData(r.URL.Query().Get("cidr"))
+		if !ok {
+			http.Error(w, "correlation backend unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		tmpl.ExecuteTemplate(w, "cidr-correlation-body", &data)
 	})
 	// #1312 confirmed bug: kind/value used to be packed into one
 	// url.PathUnescape'd path segment, joined by \x00 (#354's own
@@ -56,12 +101,22 @@ func (s *store) registerInvestigateRoutes(mux *http.ServeMux, tmpl *template.Tem
 	// entirely.
 	mux.HandleFunc("GET /investigate/cluster", func(w http.ResponseWriter, r *http.Request) {
 		kind, value := r.URL.Query().Get("kind"), r.URL.Query().Get("value")
-		data, ok := s.clusterCorrelationData(kind, value)
+		data, _, ok := s.clusterCorrelationShell(kind, value)
 		if !ok {
 			http.NotFound(w, r)
 			return
 		}
 		renderPage(w, tmpl, "cluster-correlation", &data)
+	})
+	mux.HandleFunc("GET /investigate/cluster/fragment", func(w http.ResponseWriter, r *http.Request) {
+		data, ok := s.clusterCorrelationData(r.URL.Query().Get("kind"), r.URL.Query().Get("value"))
+		if !ok {
+			http.Error(w, "correlation backend unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		tmpl.ExecuteTemplate(w, "cluster-correlation-body", &data)
 	})
 	// #1327/#1328 shell+hydrate: this used to call s.sessionData(), a
 	// synchronous O(n) scan of every cached event, before writing any

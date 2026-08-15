@@ -69,6 +69,35 @@ export function startFakeElasticsearch() {
       return;
     }
 
+    // #1467: investigation correlation queries the three ECS index families
+    // through one multi-index _search. Project the seeded raw honeypot events
+    // into the small shared ECS envelope ip_correlation.go consumes.
+    if (parts.length === 2 && parts[0] === "honeypot-v2-*,suricata-*,portbridge-v2-*" && parts[1] === "_search" && req.method === "GET") {
+      const query = url.searchParams.get("q") ?? "";
+      const requestedIPs = new Set(query.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g) ?? []);
+      const hits = [];
+      for (const [sensor, events] of sensorEvents) {
+        for (const event of events) {
+          if (requestedIPs.size > 0 && !requestedIPs.has(event.src_ip)) continue;
+          hits.push({
+            _index: `honeypot-v2-${sensor}`,
+            _source: {
+              "@timestamp": event.timestamp,
+              event: { sensor, category: "honeypot" },
+              source: { ip: event.src_ip },
+              destination: { port: event.dst_port },
+              user: { name: event.username },
+              process: { command_line: event.input },
+            },
+          });
+        }
+      }
+      res.setHeader("Content-Type", "application/json");
+      res.writeHead(200);
+      res.end(JSON.stringify({ hits: { total: { value: hits.length }, hits } }));
+      return;
+    }
+
     // The dashboard's own bookkeeping indices (dashboard-*) and the
     // #1205-epic backend workers' flat output indices (attackers-v1 --
     // #1200 -- and, when the dashboard eventually reads them too,

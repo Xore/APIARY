@@ -740,6 +740,71 @@ test.describe("dashboard browser behaviour", () => {
     expect(sessionBox?.width).toBeLessThanOrEqual(390);
   });
 
+  test("intel lists and investigations render first, then hydrate independently (#1460, #1464, #1467)", async ({ page }) => {
+    let releaseCampaigns!: () => void;
+    const campaignsGate = new Promise<void>(resolve => { releaseCampaigns = resolve; });
+    await page.route("**/campaigns/fragment?*", async route => {
+      const response = await route.fetch();
+      await campaignsGate;
+      await route.fulfill({ response });
+    });
+    await page.goto("/campaigns?sensor=cowrie");
+    const campaigns = page.locator("#campaigns-root");
+    await expect(campaigns).toHaveAttribute("aria-busy", "true");
+    await expect(campaigns.locator("#campaigns-table .card__scroll")).toBeVisible();
+    releaseCampaigns();
+    await expect(campaigns).not.toHaveAttribute("aria-busy", "true");
+    await expect(campaigns.locator("#campaigns-table .skeleton-line")).toHaveCount(0);
+    await page.unroute("**/campaigns/fragment?*");
+
+    let releaseClusters!: () => void;
+    const clustersGate = new Promise<void>(resolve => { releaseClusters = resolve; });
+    await page.route("**/clusters/fragment?*", async route => {
+      const response = await route.fetch();
+      await clustersGate;
+      await route.fulfill({ response });
+    });
+    await page.goto("/clusters?kind=Fingerprint&sensor=cowrie");
+    const clusters = page.locator("#clusters-root");
+    await expect(clusters).toHaveAttribute("aria-busy", "true");
+    await expect(clusters.locator("#clusters-table .card__scroll")).toBeVisible();
+    releaseClusters();
+    await expect(clusters).not.toHaveAttribute("aria-busy", "true");
+    await expect(clusters.locator("#clusters-table")).toContainText("fixture-shared-hassh");
+    await page.unroute("**/clusters/fragment?*");
+
+    await page.route("**/investigate/ip/203.0.113.1/fragment", route => route.fulfill({ status: 503, body: "fixture correlation unavailable" }));
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/investigate/ip/203.0.113.1");
+    await expect(page.getByRole("heading", { name: "203.0.113.1" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Attack progression" }).locator("..")).toContainText("cowrie");
+    await expect(page.locator("#attacker-correlation-root")).toHaveAttribute("role", "alert");
+    await expect(page.locator("#attacker-block-root")).not.toHaveAttribute("aria-busy", "true");
+    await page.unroute("**/investigate/ip/203.0.113.1/fragment");
+
+    await page.route("**/investigate/cidr-fragment?*", route => route.fulfill({ status: 503, body: "fixture CIDR correlation unavailable" }));
+    await page.goto("/investigate/cidr/203.0.113.0/24");
+    await expect(page.getByRole("heading", { name: "203.0.113.0/24" })).toBeVisible();
+    await expect(page.locator("#cidr-correlation-root")).toHaveAttribute("role", "alert");
+    await page.unroute("**/investigate/cidr-fragment?*");
+
+    let releaseClusterCorrelation!: () => void;
+    const clusterCorrelationGate = new Promise<void>(resolve => { releaseClusterCorrelation = resolve; });
+    await page.route("**/investigate/cluster/fragment?*", async route => {
+      const response = await route.fetch();
+      await clusterCorrelationGate;
+      await route.fulfill({ response });
+    });
+    await page.goto("/investigate/cluster?kind=Fingerprint&value=fixture-shared-hassh");
+    const clusterCorrelation = page.locator("#cluster-correlation-root");
+    await expect(page.getByRole("heading", { name: "Fingerprint: fixture-shared-hassh" })).toBeVisible();
+    await expect(clusterCorrelation).toHaveAttribute("aria-busy", "true");
+    releaseClusterCorrelation();
+    await expect(clusterCorrelation).not.toHaveAttribute("aria-busy", "true");
+    await expect(clusterCorrelation.getByRole("heading", { name: "Correlated records" })).toBeVisible();
+    expect((await clusterCorrelation.boundingBox())?.width ?? 391).toBeLessThanOrEqual(390);
+  });
+
   test("payload analysis hydrates the aggregation cards after the initial render (#1142)", async ({ page }) => {
     await page.goto("/payload-analysis/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
     // The fast path renders identity/hashes immediately; the three

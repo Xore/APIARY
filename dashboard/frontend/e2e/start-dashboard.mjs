@@ -42,6 +42,10 @@ const events = Array.from({ length: 60 }, (_, index) => ({
   input: index % 3 === 0 ? `uname -a # ${index}` : undefined,
   session: `browser-session-${String(index).padStart(2, "0")}`,
 }));
+events.push(
+  { timestamp: new Date(now - 30_000).toISOString(), eventid: "cowrie.client.kex", src_ip: "203.0.113.1", dst_port: 22, hassh: "fixture-shared-hassh", session: "browser-kex-01" },
+  { timestamp: new Date(now - 45_000).toISOString(), eventid: "cowrie.client.kex", src_ip: "203.0.113.2", dst_port: 22, hassh: "fixture-shared-hassh", session: "browser-kex-02" },
+);
 // #1103: cowrie reads Elasticsearch exclusively now, no local-file fallback
 // -- seed the fake ES with these same events instead of only writing the
 // local file. The local file is still written too: rebuild()'s directory

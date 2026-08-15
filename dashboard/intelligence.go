@@ -195,12 +195,55 @@ type clusterRow struct {
 type clustersPage struct {
 	pageMeta
 	// Ready mirrors s.ready.Load() -- see eventsPage's own comment (#1142/#1155).
-	Ready     bool
-	Generated time.Time
-	Rows      []clusterRow
-	Filters   []string
-	ExportURL string
+	Ready        bool
+	Generated    time.Time
+	Rows         []clusterRow
+	Filters      []string
+	ExportURL    string
+	FragmentURL  string
+	SkeletonRows []int
 	filterBar
+}
+
+// clustersShell contains only request-derived page chrome. It is safe on the
+// initial response path because it neither queries attacker-clusters-v1 nor
+// scans the event snapshot; clustersHTTPData performs that work for the
+// independently hydrated fragment.
+func clustersShell(r *http.Request) clustersPage {
+	f := clustersRequestFilter(r)
+	p := clustersPage{
+		Generated: time.Now(),
+		Filters:   f.describe(),
+		filterBar: buildFilterBar(r, "/clusters",
+			[2]string{"sensor", "Sensor"}, [2]string{"kind", "Kind"}, [2]string{"since", "Since (e.g. 24h)"}),
+		ExportURL:    "/export/clusters.csv",
+		FragmentURL:  "/clusters/fragment",
+		SkeletonRows: []int{0, 1, 2, 3, 4},
+	}
+	if kind := r.URL.Query().Get("kind"); kind != "" {
+		p.Filters = append(p.Filters, "kind = "+kind)
+	}
+	if encoded := r.URL.Query().Encode(); encoded != "" {
+		p.ExportURL += "?" + encoded
+		p.FragmentURL += "?" + encoded
+	}
+	return p
+}
+
+func (s *store) clustersHTTPData(r *http.Request) clustersPage {
+	p := clustersShell(r)
+	data := s.clustersData(clustersRequestFilter(r))
+	p.Rows = data.Rows
+	if kind := r.URL.Query().Get("kind"); kind != "" {
+		filtered := make([]clusterRow, 0, len(p.Rows))
+		for _, row := range p.Rows {
+			if row.Kind == kind {
+				filtered = append(filtered, row)
+			}
+		}
+		p.Rows = filtered
+	}
+	return p
 }
 
 // clustersRequestFilter builds the filter a live /clusters HTTP request
@@ -459,13 +502,10 @@ type clusterCorrelationPage struct {
 }
 
 func (s *store) clusterCorrelationData(kind, value string) (clusterCorrelationPage, bool) {
-	ips := s.clusterIPs(kind, value)
-	if len(ips) < 2 {
-		// Matches clustersData's own "not a cluster" threshold -- a single
-		// IP sharing a value with no one else isn't a cluster to correlate.
+	p, ips, ok := s.clusterCorrelationShell(kind, value)
+	if !ok {
 		return clusterCorrelationPage{}, false
 	}
-	p := clusterCorrelationPage{Generated: time.Now(), Kind: kind, Value: value, IPCount: len(ips)}
 	if s.es != nil {
 		p.Correlation = s.es.correlateIPs(ips, 200)
 	}
@@ -473,4 +513,15 @@ func (s *store) clusterCorrelationData(kind, value string) (clusterCorrelationPa
 		return p, false
 	}
 	return p, true
+}
+
+// clusterCorrelationShell resolves the in-memory member set needed to
+// preserve unknown-cluster 404s, but deliberately does not query
+// Elasticsearch. The correlation fragment reuses the returned IP set.
+func (s *store) clusterCorrelationShell(kind, value string) (clusterCorrelationPage, []string, bool) {
+	ips := s.clusterIPs(kind, value)
+	if len(ips) < 2 {
+		return clusterCorrelationPage{}, nil, false
+	}
+	return clusterCorrelationPage{Generated: time.Now(), Kind: kind, Value: value, IPCount: len(ips)}, ips, true
 }

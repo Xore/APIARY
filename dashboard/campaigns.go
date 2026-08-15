@@ -45,25 +45,19 @@ type campaignRow struct {
 type campaignsPage struct {
 	pageMeta
 	// Ready mirrors s.ready.Load() -- see eventsPage's own comment (#1142/#1155).
-	Ready     bool
-	Generated time.Time
-	Campaigns []campaignRow
-	Filters   []string
-	ExportURL string
+	Ready                         bool
+	Generated                     time.Time
+	Campaigns                     []campaignRow
+	Filters                       []string
+	ExportURL                     string
+	FragmentURL                   string
+	SkeletonRows, SkeletonColumns []int
 	filterBar
 }
 
 func (s *store) campaignsData(r *http.Request) campaignsPage {
 	f := parseFilter(r)
-	bar := buildFilterBar(r, "/campaigns",
-		[2]string{"cidr", "Network (CIDR)"}, [2]string{"asn", "ASN"}, [2]string{"sensor", "Sensor"},
-		[2]string{"since", "Since (e.g. 24h)"})
-	// #513/#59: exports exactly the current filtered scope, never the
-	// unfiltered set.
-	exportURL := "/export/campaigns.csv"
-	if encoded := r.URL.Query().Encode(); encoded != "" {
-		exportURL += "?" + encoded
-	}
+	p := campaignsShell(r)
 
 	// #307: the plain, unfiltered page visit -- overwhelmingly the common
 	// case -- is answered from the already-fresh, already-paid-for
@@ -88,11 +82,11 @@ func (s *store) campaignsData(r *http.Request) campaignsPage {
 		// ES hiccup into an empty page. See readCampaignsFromWorkerIndex's
 		// own doc comment for the two known, presentation-only field gaps
 		// this fallback doesn't have.
-		campaigns := s.get().Campaigns
+		p.Campaigns = s.get().Campaigns
 		if fromWorker, ok := s.readCampaignsFromWorkerIndex(); ok {
-			campaigns = fromWorker
+			p.Campaigns = fromWorker
 		}
-		return campaignsPage{Generated: time.Now(), Campaigns: campaigns, Filters: f.describe(), ExportURL: exportURL, filterBar: bar}
+		return p
 	}
 
 	// Default matches aggregate.go's own periodic snapshot window; ?since=
@@ -101,12 +95,35 @@ func (s *store) campaignsData(r *http.Request) campaignsPage {
 	if !f.since.IsZero() {
 		since = f.since
 	}
+	p.Campaigns = correlateCampaigns(f.filtered(s.getEvents()), since)
+	return p
+}
+
+// campaignsShell is deliberately request-only: it builds the filters and
+// export link that are already knowable from the URL, but never reads the
+// campaigns worker index or correlates events. /campaigns renders this
+// immediately; /campaigns/fragment calls campaignsData for the real rows.
+func campaignsShell(r *http.Request) campaignsPage {
+	f := parseFilter(r)
+	bar := buildFilterBar(r, "/campaigns",
+		[2]string{"cidr", "Network (CIDR)"}, [2]string{"asn", "ASN"}, [2]string{"sensor", "Sensor"},
+		[2]string{"since", "Since (e.g. 24h)"})
+	// #513/#59: exports exactly the current filtered scope, never the
+	// unfiltered set.
+	exportURL := "/export/campaigns.csv"
+	fragmentURL := "/campaigns/fragment"
+	if encoded := r.URL.Query().Encode(); encoded != "" {
+		exportURL += "?" + encoded
+		fragmentURL += "?" + encoded
+	}
 	return campaignsPage{
-		Generated: time.Now(),
-		Campaigns: correlateCampaigns(f.filtered(s.getEvents()), since),
-		Filters:   f.describe(),
-		ExportURL: exportURL,
-		filterBar: bar,
+		Generated:       time.Now(),
+		Filters:         f.describe(),
+		ExportURL:       exportURL,
+		FragmentURL:     fragmentURL,
+		SkeletonRows:    []int{0, 1, 2, 3, 4},
+		SkeletonColumns: []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
+		filterBar:       bar,
 	}
 }
 

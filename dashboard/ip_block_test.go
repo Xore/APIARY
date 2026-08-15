@@ -315,7 +315,7 @@ func TestServeIPBlockActionRejectsAnOversizedBody(t *testing.T) {
 	}
 }
 
-// #914: the attacker page must offer a block/unblock action for any IP,
+// #914: the attacker block-state fragment must offer a block/unblock action for any IP,
 // not just IPs IOC correlation happens to have flagged confirmed-malicious
 // (that badge is informational only -- decided explicitly after scoping
 // this narrower in an earlier draft).
@@ -325,7 +325,7 @@ func TestAttackerPageRendersBlockAction(t *testing.T) {
 
 	open := attackerPage{IP: "203.0.113.9", Total: 1, Events: []storedEvent{{Time: "now", Sensor: "cowrie", SrcIP: "203.0.113.9"}}}
 	var buf strings.Builder
-	if err := tmpl.ExecuteTemplate(&buf, "attacker", &open); err != nil {
+	if err := tmpl.ExecuteTemplate(&buf, "attacker-block-body", &open); err != nil {
 		t.Fatalf("render unblocked: %v", err)
 	}
 	body := buf.String()
@@ -339,7 +339,7 @@ func TestAttackerPageRendersBlockAction(t *testing.T) {
 	blocked := open
 	blocked.Block = ipBlockRecord{IP: "203.0.113.9", Blocked: true, BlockedBy: "alice", BlockedAt: time.Now()}
 	buf.Reset()
-	if err := tmpl.ExecuteTemplate(&buf, "attacker", &blocked); err != nil {
+	if err := tmpl.ExecuteTemplate(&buf, "attacker-block-body", &blocked); err != nil {
 		t.Fatalf("render blocked: %v", err)
 	}
 	body = buf.String()

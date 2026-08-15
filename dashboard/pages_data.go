@@ -174,18 +174,13 @@ type attackerPage struct {
 	Fingerprints []kv
 	Events       []storedEvent
 	Techniques   []attackTechnique
-	// Correlation is #354's "ask the backend for everything" answer --
-	// Elasticsearch-backed, so it includes portbridge tunnel connections
-	// (never visible here before) and history beyond the in-memory,
-	// log-tail-bounded Events above. Advisory only: Available is false
-	// (never blocks the page) whenever Elasticsearch is unconfigured or the
-	// query fails.
+	// Correlation is populated only for the attacker-correlation-body
+	// fragment. attackerData deliberately leaves it empty so Elasticsearch
+	// never gates the identifier-aware profile and its in-memory evidence.
 	Correlation ipCorrelation
-	// Block is #914's manual-block state for this IP -- zero value (not
-	// blocked) when ipBlocks is nil (Elasticsearch unconfigured) or no
-	// record exists yet. ConfirmedMalicious is informational context only
-	// (docs/dashboard-manual-ip-block-design.md decision 1): it does not
-	// gate whether the block action is offered.
+	// Block is populated only for attacker-block-body for the same reason:
+	// ipBlockManager.get is a live Elasticsearch round trip. ConfirmedMalicious
+	// is local informational context and remains on the immediate page.
 	Block              ipBlockRecord
 	ConfirmedMalicious bool
 }
@@ -257,12 +252,6 @@ func (s *store) attackerData(ip string) (attackerPage, bool) {
 		p.Fingerprints[i].Link = eventsURL(url.Values{"fingerprint": {fp}})
 	}
 	p.Techniques = aggregateTechniques(p.Events)
-	if s.es != nil {
-		p.Correlation = s.es.correlateIP(ip, 100)
-	}
-	if s.ipBlocks != nil {
-		p.Block = s.ipBlocks.get(ip)
-	}
 	p.ConfirmedMalicious = ipIsConfirmedMalicious(ip)
 	return p, true
 }

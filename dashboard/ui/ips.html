@@ -68,6 +68,23 @@
 </html>
 {{end}}
 
+{{define "attacker-correlation-body"}}<div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:gap-3 tw:mb-4">
+  <div class="metric"><div class="metric__value">{{.Correlation.Total}}</div><div class="metric__label">Total ES matches</div></div>
+  <div class="metric"><div class="metric__value">{{.Correlation.TunnelConnections}}</div><div class="metric__label">Tunnel connections</div></div>
+  <div class="metric"><div class="metric__value">{{len .Correlation.Sensors}}</div><div class="metric__label">Distinct sensors</div></div>
+</div>
+<div class="card wide" id="attacker-correlation">
+  <h2>Elasticsearch correlation</h2>
+  <p class="note">Everything the backend has seen for this IP across honeypot, Suricata, and portbridge tunnel records &mdash; not limited to the in-memory window above.{{if .Correlation.Truncated}} Showing the {{len .Correlation.Records}} most recent of {{.Correlation.Total}} total matches.{{end}}</p>
+  {{if .Correlation.TunnelOSGuesses}}<p><strong>p0f OS guesses seen over this tunnel:</strong> {{range $i, $os := .Correlation.TunnelOSGuesses}}{{if $i}}, {{end}}{{$os}}{{end}}</p>{{end}}
+  {{if .Correlation.Records}}<div class="card__scroll"><table class="recent data-table"><thead><tr><th>time</th><th>sensor</th><th>summary</th></tr></thead><tbody>{{range .Correlation.Records}}<tr><td>{{.Time.Format "2006-01-02 15:04:05"}}</td><td>{{.Sensor}}</td><td>{{.Summary}}</td></tr>{{end}}</tbody></table></div>{{else}}<p class="empty">No Elasticsearch correlation records were found for this IP.</p>{{end}}
+</div>{{end}}
+
+{{define "attacker-block-body"}}<div class="filters" id="attacker-block-actions">
+  {{if .Block.Active}}<span class="chip badge badge--danger">blocked{{if .Block.BlockedBy}} by {{.Block.BlockedBy}}{{end}}{{if not .Block.ExpiresAt.IsZero}}, expires <span data-hp-utc="{{.Block.ExpiresAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.Block.ExpiresAt.Format "2006-01-02 15:04"}}</span>{{end}}</span><form method="post" action="/investigate/ip/block"><input type="hidden" name="ip" value="{{.IP}}"><input type="hidden" name="blocked" value="false"><input type="hidden" name="return" value="/investigate/ip/{{.IP}}"><button class="btn btn-sm btn-secondary" type="submit">unblock</button></form>
+  {{else}}<form method="post" action="/investigate/ip/block" class="inline-form"><input type="hidden" name="ip" value="{{.IP}}"><input type="hidden" name="blocked" value="true"><input type="hidden" name="return" value="/investigate/ip/{{.IP}}"><label for="attacker-block-expires">expire after</label> <input type="number" id="attacker-block-expires" name="expires_days" min="1" placeholder="never" class="hp-input" style="width:6em"> <span>day(s)</span> <button class="btn btn-sm btn-danger" type="submit" title="Drop this IP's connections at portbridge going forward; does not retroactively affect anything already logged">block</button></form>{{end}}
+</div>{{end}}
+
 {{define "attacker"}}<!doctype html>
 <html lang="en">
 <head>
@@ -102,23 +119,15 @@
           {{if .ConfirmedMalicious}}<span class="chip badge badge--danger" title="A Windows sandbox run made a network connection to this IP -- floss/sandbox IOC correlation, #680">confirmed malicious (sandbox)</span>{{end}}
         </div>
 
-        {{/* #914: manual IP block -- any IP on this page, not gated on
-             ConfirmedMalicious above (that badge is context only). See
-             docs/dashboard-manual-ip-block-design.md. */}}
-        <div class="filters" id="attacker-block-actions">
-          {{if .Block.Active}}
-          <span class="chip badge badge--danger">blocked{{if .Block.BlockedBy}} by {{.Block.BlockedBy}}{{end}}{{if not .Block.ExpiresAt.IsZero}}, expires <span data-hp-utc="{{.Block.ExpiresAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.Block.ExpiresAt.Format "2006-01-02 15:04"}}</span>{{end}}</span>
-          <form method="post" action="/investigate/ip/block"><input type="hidden" name="ip" value="{{.IP}}"><input type="hidden" name="blocked" value="false"><input type="hidden" name="return" value="/investigate/ip/{{.IP}}"><button class="btn btn-sm btn-secondary" type="submit">unblock</button></form>
-          {{else}}
-          <form method="post" action="/investigate/ip/block" class="inline-form"><input type="hidden" name="ip" value="{{.IP}}"><input type="hidden" name="blocked" value="true"><input type="hidden" name="return" value="/investigate/ip/{{.IP}}"><label for="attacker-block-expires">expire after</label> <input type="number" id="attacker-block-expires" name="expires_days" min="1" placeholder="never" class="hp-input" style="width:6em"> <span>day(s)</span> <button class="btn btn-sm btn-danger" type="submit" title="Drop this IP's connections at portbridge going forward (#268); does not retroactively affect anything already logged">block</button></form>
-          {{end}}
+        <div id="attacker-block-root" data-hp-correlation-fragment-url="/investigate/ip/{{.IP | urlquery}}/state-fragment" data-hp-hydration-error="IP block state could not be loaded" aria-busy="true">
+          <div class="filters" aria-hidden="true"><span class="chip"><span class="skeleton-line" style="width:90px"></span></span><span class="skeleton-line" style="width:220px"></span>
+          </div>
         </div>
 
         <div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:gap-3 tw:mb-6" id="attacker-kpis">
           <div class="metric"><div class="metric__value">{{.Total}}</div><div class="metric__label">Events</div></div>
           <div class="metric"><div class="metric__value">{{.Sessions}}</div><div class="metric__label">Sessions</div></div>
           <div class="metric"><div class="metric__value">{{.PayloadCount}}</div><div class="metric__label">Payload observations</div></div>
-          {{if .Correlation.Available}}<div class="metric"><div class="metric__value">{{.Correlation.TunnelConnections}}</div><div class="metric__label">Tunnel connections (ES)</div></div>{{end}}
         </div>
 
         <div class="tw:grid tw:grid-cols-12 tw:gap-3.5" id="attacker-grid">
@@ -130,20 +139,10 @@
           {{template "tbl" (dict "t" "Alerts" "rows" .Alerts "class" "half" "hint" "none")}}
           {{template "tbl" (dict "t" "Fingerprints" "rows" .Fingerprints "class" "half" "hint" "none")}}
           {{template "techniques" .Techniques}}
-          {{if .Correlation.Available}}
-          {{/* #790 chunk 7: card__scroll on this card and "Attack
-               progression" below -- same correlationRecordCap (500) /
-               explicit 250-record cap reasoning as intel.html's own
-               Correlated records cards. */}}
-          <div class="card wide" id="attacker-correlation">
-            <h2>Elasticsearch correlation</h2>
-            <p class="note">#354: everything the backend has seen for this IP across honeypot, Suricata, and portbridge tunnel records &mdash; not limited to the in-memory window the tables above draw from.{{if .Correlation.Truncated}} Showing the {{len .Correlation.Records}} most recent of {{.Correlation.Total}} total matches.{{end}}</p>
-            {{if .Correlation.TunnelOSGuesses}}<p><strong>p0f OS guesses seen over this tunnel:</strong> {{range $i, $os := .Correlation.TunnelOSGuesses}}{{if $i}}, {{end}}{{$os}}{{end}}</p>{{end}}
-            <div class="card__scroll"><table class="recent data-table"><thead><tr><th>time</th><th>sensor</th><th>summary</th></tr></thead><tbody>
-              {{range .Correlation.Records}}<tr><td>{{.Time.Format "2006-01-02 15:04:05"}}</td><td>{{.Sensor}}</td><td>{{.Summary}}</td></tr>{{end}}
-            </tbody></table></div>
+          <div class="wide" id="attacker-correlation-root" data-hp-correlation-fragment-url="/investigate/ip/{{.IP | urlquery}}/fragment" aria-busy="true">
+            <div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:gap-3 tw:mb-4" aria-hidden="true"><div class="metric"><div class="metric__value skeleton-line"></div><div class="metric__label">Total ES matches</div></div><div class="metric"><div class="metric__value skeleton-line"></div><div class="metric__label">Tunnel connections</div></div><div class="metric"><div class="metric__value skeleton-line"></div><div class="metric__label">Distinct sensors</div></div></div>
+            <div class="card wide"><h2>Elasticsearch correlation</h2><p class="note"><span class="skeleton-line" style="width:78%"></span></p><div class="card__scroll"><table class="recent data-table" aria-hidden="true"><thead><tr><th>time</th><th>sensor</th><th>summary</th></tr></thead><tbody><tr><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td></tr><tr><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td></tr><tr><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td></tr></tbody></table></div></div>
           </div>
-          {{end}}
           <div class="card wide"><h2>Attack progression</h2><p class="note">Chronological, oldest to newest; capped to the latest 250 matching records.</p><div class="card__scroll"><table class="recent data-table data-table--responsive"><thead><tr><th>time</th><th>sensor</th><th>source ip</th><th>port</th><th>detail</th></tr></thead><tbody>{{range .Events}}{{template "everow" .}}{{end}}</tbody></table></div></div>
         </div>
 
@@ -151,7 +150,7 @@
       </div>
     </main>
 </div>
+<script defer src="{{asset "/static/hp-intel-detail.js"}}"></script>
 </body>
 </html>
 {{end}}
-

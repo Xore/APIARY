@@ -81,8 +81,8 @@ func TestClusterCorrelationDataRequiresAtLeastTwoMembersAndAvailableES(t *testin
 }
 
 // TestClusterCorrelationPageRenders (#354) proves the clusters drill-down
-// template renders the cluster identity, member count, and at least one
-// correlated record.
+// shell renders the cluster identity immediately and the independently
+// hydrated fragment renders the records.
 func TestClusterCorrelationPageRenders(t *testing.T) {
 	funcs := templateFuncs(nil, "")
 	tmpl := template.Must(template.New("dashboard").Funcs(funcs).Parse(pageTemplate))
@@ -102,7 +102,14 @@ func TestClusterCorrelationPageRenders(t *testing.T) {
 	if !strings.Contains(body, "shared-hassh") {
 		t.Fatal("page does not render the cluster value")
 	}
-	if !strings.Contains(body, "cowrie.login.success") {
-		t.Fatal("page does not render a correlated record")
+	if strings.Contains(body, "cowrie.login.success") || !strings.Contains(body, "data-hp-correlation-fragment-url") {
+		t.Fatal("initial page must render the correlation shell without embedding backend records")
+	}
+	buf.Reset()
+	if err := tmpl.ExecuteTemplate(&buf, "cluster-correlation-body", &data); err != nil {
+		t.Fatalf("render fragment: %v", err)
+	}
+	if !strings.Contains(buf.String(), "cowrie.login.success") {
+		t.Fatal("correlation fragment does not render a correlated record")
 	}
 }
