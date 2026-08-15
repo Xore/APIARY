@@ -45,6 +45,24 @@ _NAMED_ACTORS = {"admin", "system", "hp-autoheal", "dependabot[bot]", "github-ac
 
 METADATA_SERVICE_IP = "169.254.169.254"
 
+# #1427 item 2/3/4: planted breadcrumb hostnames (cowrie/honeyfs's own
+# /etc/hosts and ~mwagner/internal-services.txt) mapped to the real sensor
+# each one's real, portbridge-forwarded port actually reaches -- see
+# internal-services.txt's own NAT-portmap framing for why this is a real,
+# not aspirational, reachable target rather than a DNS-resolution trick
+# (confirmed against cowrie's own vendored ping.py/ssh.py: neither performs
+# real hostname resolution, both just MD5-hash whatever string was typed --
+# so the only actually-reachable version of "this hostname points
+# somewhere real" is naming another sensor's own real public port on the
+# same shared VPS IP, which is what these five names do).
+BREADCRUMB_TARGETS = {
+    "bastion02": "beelzebub",
+    "dc01": "beelzebub",
+    "agent-gateway-01": "beelzebub",
+    "cms-legacy-01": "beelzebub",
+    "analytics-es-04": "elasticpot",
+}
+
 
 @dataclasses.dataclass(frozen=True)
 class RuleMatch:
@@ -289,6 +307,20 @@ def rule_staged_payload_reference(raw: dict) -> RuleMatch | None:
     return None
 
 
+def rule_breadcrumb_reference(raw: dict) -> RuleMatch | None:
+    """#1427 item 2/3: a cowrie command referencing one of the planted
+    internal-asset breadcrumb names (BREADCRUMB_TARGETS above -- cowrie's
+    own /etc/hosts and ~mwagner/internal-services.txt). Weak signal alone
+    -- an attacker who merely `cat`s /etc/hosts sees every name without
+    acting on any of them -- campaign_breadcrumb_followed below is the
+    actual "did they act on it" claim."""
+    text = _cowrie_input(raw)
+    for name in BREADCRUMB_TARGETS:
+        if name in text:
+            return RuleMatch("breadcrumb-reference", f"command references planted breadcrumb {name!r}")
+    return None
+
+
 ALL_RULES = (
     rule_sensitive_path_read,
     rule_chunked_c2_protocol,
@@ -301,6 +333,7 @@ ALL_RULES = (
     rule_internal_connector_enumeration,
     rule_scm_write_unexpected_actor,
     rule_staged_payload_reference,
+    rule_breadcrumb_reference,
 )
 
 
@@ -328,6 +361,8 @@ TRUST_BOUNDARIES = {
     "internal-connector-enumeration": "mesh identity -> internal service catalog",
     "scm-write-unexpected-actor": "workload/mesh identity -> source control",
     "staged-payload-reference": "honeypot session -> local filesystem (staged artifacts)",
+    "breadcrumb-reference": "honeypot session -> named internal decoy asset (unconfirmed)",
+    "breadcrumb-followed": "honeypot session -> named internal decoy asset -> real target sensor (confirmed)",
 }
 
 
@@ -349,3 +384,36 @@ def campaign_severity(matched_rules_per_event: dict) -> tuple[str, set]:
     if len(categories) >= 1:
         return "high", categories
     return "low", categories
+
+
+def campaign_breadcrumb_followed(campaign_event_ids: list, events_by_id: dict, matches_per_event: dict) -> tuple | None:
+    """#1427 item 4: the real "followed the breadcrumb" claim, distinct
+    from rule_breadcrumb_reference's per-event "the name was read" match.
+    Requires BOTH, in order: some event in this campaign matched
+    breadcrumb-reference naming an asset, AND a chronologically *later*
+    event in the same campaign was actually served by that asset's real
+    target sensor (BREADCRUMB_TARGETS). campaign_event_ids is already
+    timestamp-sorted (campaign_correlator.py's own Campaign.event_ids), so
+    one forward pass is sufficient -- no re-sorting needed here.
+
+    Returns (event_id, RuleMatch): event_id is the LATER "reached the
+    target" event, not the earlier reference -- worker.py attaches the
+    match there so agent_campaigns.html's evidence timeline shows it
+    against the actual arrival, not the passive read that merely named
+    it. Returns None if no campaign event ever reaches a referenced
+    target (the common case: most breadcrumb reads are never acted on).
+    """
+    referenced_targets: set = set()
+    for eid in campaign_event_ids:
+        for m in matches_per_event.get(eid, ()):
+            if m.rule == "breadcrumb-reference":
+                for name, target in BREADCRUMB_TARGETS.items():
+                    if name in m.reason:
+                        referenced_targets.add(target)
+        sensor = events_by_id[eid]["raw"].get("sensor")
+        if sensor in referenced_targets:
+            return eid, RuleMatch(
+                "breadcrumb-followed",
+                f"referenced a breadcrumb pointing at {sensor!r}, then {sensor!r} was actually reached",
+            )
+    return None

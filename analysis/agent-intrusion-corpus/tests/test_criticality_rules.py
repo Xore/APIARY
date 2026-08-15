@@ -282,5 +282,50 @@ class TestCampaignSeverity(unittest.TestCase):
         self.assertLess(len(categories), 3)
 
 
+class TestBreadcrumbFollowed(unittest.TestCase):
+    def test_reference_alone_does_not_match_followed(self):
+        # Reading /etc/hosts (or internal-services.txt) that happens to
+        # mention "bastion02" is a reference, not a followed breadcrumb --
+        # the attacker never actually shows up on beelzebub.
+        events_by_id = {
+            "e1": {"raw": {"eventid": "cowrie.command.input", "input": "cat internal-services.txt", "sensor": "cowrie"}},
+        }
+        matches = {"e1": cr.evaluate_event(events_by_id["e1"]["raw"])}
+        self.assertIsNone(cr.campaign_breadcrumb_followed(["e1"], events_by_id, matches))
+
+    def test_reference_then_reaching_target_sensor_matches(self):
+        events_by_id = {
+            "e1": {"raw": {"eventid": "cowrie.command.input", "input": "ssh bastion02", "sensor": "cowrie"}},
+            "e2": {"raw": {"sensor": "beelzebub", "src_ip": "203.0.113.9"}},
+        }
+        matches = {eid: cr.evaluate_event(events_by_id[eid]["raw"]) for eid in ("e1", "e2")}
+        result = cr.campaign_breadcrumb_followed(["e1", "e2"], events_by_id, matches)
+        self.assertIsNotNone(result)
+        eid, match = result
+        self.assertEqual(eid, "e2")  # attached to the later, "reached it" event
+        self.assertEqual(match.rule, "breadcrumb-followed")
+
+    def test_reaching_target_before_reference_does_not_match(self):
+        # Order matters: hitting beelzebub BEFORE ever reading the
+        # breadcrumb is unrelated activity, not evidence of following it.
+        events_by_id = {
+            "e1": {"raw": {"sensor": "beelzebub", "src_ip": "203.0.113.9"}},
+            "e2": {"raw": {"eventid": "cowrie.command.input", "input": "ssh bastion02", "sensor": "cowrie"}},
+        }
+        matches = {eid: cr.evaluate_event(events_by_id[eid]["raw"]) for eid in ("e1", "e2")}
+        self.assertIsNone(cr.campaign_breadcrumb_followed(["e1", "e2"], events_by_id, matches))
+
+    def test_wrong_target_sensor_does_not_match(self):
+        # Referenced "dc01" points at beelzebub, not elasticpot -- showing
+        # up on elasticpot afterward is unrelated, not a followed
+        # breadcrumb for THIS reference.
+        events_by_id = {
+            "e1": {"raw": {"eventid": "cowrie.command.input", "input": "cat /etc/hosts | grep dc01", "sensor": "cowrie"}},
+            "e2": {"raw": {"sensor": "elasticpot", "src_ip": "203.0.113.9"}},
+        }
+        matches = {eid: cr.evaluate_event(events_by_id[eid]["raw"]) for eid in ("e1", "e2")}
+        self.assertIsNone(cr.campaign_breadcrumb_followed(["e1", "e2"], events_by_id, matches))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -159,6 +159,17 @@ def build_campaign_verdict(campaign: corr.Campaign, events_by_id: dict) -> dict 
     duplicate document -- the same campaign reappearing in every cycle's
     rolling FETCH_WINDOW is expected, not a bug to work around."""
     matches_per_event = {eid: rules.evaluate_event(events_by_id[eid]["raw"]) for eid in campaign.event_ids}
+    # #1427 item 4: campaign_breadcrumb_followed needs the full
+    # per-event match set already built above (it looks for a prior
+    # breadcrumb-reference match), so it runs after evaluate_event, not
+    # inside it -- attaching its own match to the "reached the target"
+    # event's own list is what makes it show up in that event's
+    # matched_rules in the verdict document below, same as every other
+    # rule's match.
+    followed = rules.campaign_breadcrumb_followed(campaign.event_ids, events_by_id, matches_per_event)
+    if followed is not None:
+        followed_eid, followed_match = followed
+        matches_per_event[followed_eid] = matches_per_event[followed_eid] + [followed_match]
     severity, categories = rules.campaign_severity(matches_per_event)
     if severity not in MIN_SEVERITY_TO_WRITE:
         return None
