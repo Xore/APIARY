@@ -645,6 +645,32 @@ func classify(e map[string]any, dirSensor string) event {
 		return ev
 	}
 
+	// ---- galah (#1420) ---------------------------------------------------
+	// Reads the flat fields ip-enrichment-worker/galah.go promotes from
+	// upstream's own nested httpRequest object -- see that file's doc
+	// comment for why. Unlike beelzebub/hellpot, galah's raw event does
+	// carry a listen-port (dst_port, a string -- not num(), unlike the
+	// portbridge-native dst_port fields elsewhere in this file). Doesn't
+	// read galah's own srcHost/tags: those reflect its pre-join
+	// enrichment against the tunnel peer, not the real attacker -- see
+	// galah.go's doc comment.
+	if s, ok := e["sensor"].(string); ok && s == "galah" {
+		ev.sensor = "galah"
+		ev.proto = "http"
+		ev.port = str(e["dst_port"])
+		ev.path = str(e["path"])
+		if ev.fingerprint = str(e["user_agent"]); ev.fingerprint != "" {
+			ev.fingerKind = "User-Agent"
+		}
+		switch {
+		case ev.path != "":
+			ev.detail = "LLM-generated response: " + ev.path
+		default:
+			ev.detail = str(e["msg"])
+		}
+		return ev
+	}
+
 	// ---- endlessh (#246) ---------------------------------------------------
 	// A "connect" and a later "disconnect" are logged per held connection;
 	// the disconnect carries the actual investigative value (how long/how

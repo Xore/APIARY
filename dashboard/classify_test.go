@@ -204,3 +204,39 @@ func TestBeelzebubHTTPCommandTakesPriorityOverPath(t *testing.T) {
 		t.Fatalf("detail = %q, want command to take priority over path", ev.detail)
 	}
 }
+
+func TestGalahSurfacesPathAndUserAgent(t *testing.T) {
+	ev := classify(map[string]any{
+		"sensor":     "galah",
+		"protocol":   "HTTP",
+		"dst_port":   "8888",
+		"path":       "/wp-login.php?a=1",
+		"user_agent": "curl/8.18.0",
+		"msg":        "successfulResponse",
+	}, "galah")
+	if ev.sensor != "galah" {
+		t.Fatalf("sensor = %q, want galah", ev.sensor)
+	}
+	if ev.proto != "http" {
+		t.Fatalf("proto = %q, want lowercased http", ev.proto)
+	}
+	if ev.port != "8888" {
+		t.Fatalf("port = %q, want 8888", ev.port)
+	}
+	if ev.fingerKind != "User-Agent" {
+		t.Fatalf("fingerKind = %q, want User-Agent", ev.fingerKind)
+	}
+	if !strings.Contains(ev.detail, "/wp-login.php?a=1") {
+		t.Fatalf("detail = %q, want it to surface the request path", ev.detail)
+	}
+}
+
+func TestGalahWithoutPathFallsBackToMsg(t *testing.T) {
+	ev := classify(map[string]any{
+		"sensor": "galah",
+		"msg":    "successfulResponse",
+	}, "galah")
+	if ev.detail != "successfulResponse" {
+		t.Fatalf("detail = %q, want the raw msg fallback", ev.detail)
+	}
+}

@@ -140,6 +140,18 @@ func discoverSources(logsDir, outDir, stateDir string) []*source {
 	// see hellpot.go's doc comment.
 	add("hellpot", filepath.Join(logsDir, "hellpot", "HellPot.log"), enrichHellpotLine)
 
+	// #1420: galah is raw-port/portbridge-only, same reasoning as
+	// beelzebub/hellpot above (confirmed directly against its vendored
+	// source -- commonFields() in internal/logger/logger.go resolves
+	// srcIP/srcPort purely from r.RemoteAddr, no X-Forwarded-For/
+	// X-Real-IP trust anywhere). Its srcIP/srcPort fields are already
+	// flat (unlike beelzebub's nested event or hellpot's combined
+	// REMOTE_ADDR), but it still needs its own function for sensor
+	// tagging, dst_port/path/user_agent/body_sha256 promotion, and to
+	// deliberately leave galah's own (pre-join, tunnel-peer-derived)
+	// srcHost/tags fields untouched -- see galah.go's doc comment.
+	add("galah", filepath.Join(logsDir, "galah", "event_log.json"), enrichGalahLine)
+
 	// #1217: field-normalization-only sources -- these five already carry
 	// the real attacker IP via PROXY protocol (never the tunnel peer
 	// address), so enrichLine's src_ip join is always a no-op for them;

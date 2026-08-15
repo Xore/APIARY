@@ -144,13 +144,14 @@ func TestDiscoverSourcesFindsEveryConpotPersonaByGlob(t *testing.T) {
 		"multipot", "tanner", "http-honeypot", "citrix-honeypot", "rdp-honeypot", // #1217
 		"beelzebub", // #1418
 		"hellpot",   // #1419
+		"galah",     // #1420
 	} {
 		if _, ok := byName[want]; !ok {
 			t.Errorf("expected a source named %q, got %+v", want, byName)
 		}
 	}
-	if len(sources) != 15 {
-		t.Fatalf("got %d sources, want 15 (no duplicates/collisions across conpot personas)", len(sources))
+	if len(sources) != 16 {
+		t.Fatalf("got %d sources, want 16 (no duplicates/collisions across conpot personas)", len(sources))
 	}
 	if byName["conpot-s7-1200"].input != filepath.Join(logsDir, "conpot-s7-1200", "conpot.json") {
 		t.Fatalf("conpot-s7-1200 input path = %q", byName["conpot-s7-1200"].input)
