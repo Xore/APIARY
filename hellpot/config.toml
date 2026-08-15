@@ -1,0 +1,17 @@
+[deception]
+  server_name = "nginx"
+
+[http]
+  bind_addr = "0.0.0.0"
+  bind_port = "8080"
+  uagent_string_blacklist = []
+
+  [http.router]
+    catchall = true
+
+[logger]
+  debug = false
+  trace = false
+  directory = "/var/log/honeypot"
+  nocolor = true
+  use_date_filename = false

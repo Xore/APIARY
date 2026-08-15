@@ -1,0 +1,51 @@
+# github.com/yunginnanet/HellPot -- #1419: HTTP bot tarpit, vendored rather
+# than reimplemented (the Markov-chain garbage generator and streaming
+# response writer is real logic not worth rebuilding for one sensor). MIT
+# licensed -- no copyleft concern at all, confirmed directly against the
+# vendored LICENSE file.
+#
+# Pinned the same way beelzebub/Dockerfile pins BEELZEBUB_REF: building an
+# unpinned master would change behavior whenever this image happens to
+# rebuild. HELLPOT_REF is the commit tagged v0.5.4+build2 (latest at
+# integration time, confirmed via `git ls-remote --tags`).
+#
+# router_patch.py removes getRealRemote()'s X-Real-IP trust -- see that
+# file's own doc comment for why (confirmed live, not assumed: an
+# unpatched build logs an attacker-supplied X-Real-IP header verbatim as
+# REMOTE_ADDR with zero validation of which hop set it). This stack runs
+# HellPot raw-port/portbridge-only (docker-compose.hellpot.yml) and
+# resolves the real attacker IP via ip-enrichment-worker's via_port join
+# instead, the same trusted mechanism every other non-PROXY-protocol
+# sensor here already uses.
+FROM golang:1.23@sha256:60deed95d3888cc5e4d9ff8a10c54e5edc008c6ae3fba6187be6fb592e19e8c0 AS build
+RUN apt-get update && apt-get install -y --no-install-recommends python3 git \
+ && rm -rf /var/lib/apt/lists/*
+ARG HELLPOT_REF=0ba62c99ea4599ec32474e4982a8ea4d4105c471
+WORKDIR /build
+RUN git clone https://github.com/yunginnanet/HellPot /build \
+ && git checkout "$HELLPOT_REF"
+COPY router_patch.py /tmp/router_patch.py
+RUN python3 /tmp/router_patch.py
+RUN go mod download
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
+    -ldflags "-s -w -X main.version=$HELLPOT_REF" \
+    -o /hellpot cmd/HellPot/*.go
+
+# alpine, not upstream's own distroless/static-debian11 choice: distroless
+# has no shell/nc at all, which breaks this repo's established `nc -z`
+# HEALTHCHECK pattern (beelzebub/Dockerfile, rdp-honeypot's Dockerfile,
+# etc.) -- consistency with the rest of this stack wins over matching
+# upstream's own base image exactly.
+FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+RUN apk add --no-cache busybox-extras
+COPY --from=build /hellpot /usr/local/bin/hellpot
+COPY config.toml /config.toml
+
+EXPOSE 8080
+
+USER 65534
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD nc -z 127.0.0.1 8080 || exit 1
+
+ENTRYPOINT ["/usr/local/bin/hellpot", "-c", "/config.toml"]

@@ -57,6 +57,7 @@ declare -A STACK_TO_SENSORS=(
   [cisco-asa-honeypot]="cisco-asa-honeypot"
   [rdp-honeypot]="rdp-honeypot"
   [beelzebub]="beelzebub"
+  [hellpot]="hellpot"
   [tanner]="tanner"
   [conpot]="conpot conpot-s7-1200 conpot-s7-1500 conpot-iec104 conpot-guardian conpot-kamstrup"
   [endlessh]="endlessh"
