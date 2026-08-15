@@ -245,4 +245,60 @@ func TestAttackersFragmentRoute(t *testing.T) {
 	if !strings.Contains(body, ">7<") {
 		t.Errorf("fragment missing the selected entity's own event count, got: %s", body)
 	}
+	if !strings.Contains(body, `id="attackers-selected-meta"`) || strings.Count(body, `class="card"`) < 9 {
+		t.Errorf("fragment must render every selected identity category as a card, got: %s", body)
+	}
+	if !strings.Contains(body, "No credential pairs recorded for this identity.") ||
+		!strings.Contains(body, "No fingerprints recorded for this identity.") ||
+		!strings.Contains(body, "No payload hashes recorded for this identity.") {
+		t.Errorf("fragment must keep empty evidence categories visible, got: %s", body)
+	}
+	if !strings.Contains(body, `<div class="card__scroll"><table class="data-table">`) {
+		t.Errorf("identities table must be inside a bounded scroll region, got: %s", body)
+	}
+}
+
+// #1444: populated evidence collections render as independent scrollable
+// cards instead of one inline run that makes the complete page unbounded.
+func TestAttackersFragmentRendersEvidenceInScrollableCards(t *testing.T) {
+	memStore := newMemESDocStore()
+	srv := httptest.NewServer(memStore.handler())
+	defer srv.Close()
+	es := newESClient(srv.URL, "")
+	seedAttacker(t, es, attackerRow{
+		ID:           "entity-evidence",
+		IPs:          []string{"203.0.113.10", "203.0.113.11"},
+		Fingerprints: []string{"SSH-2.0-libssh2"},
+		Payloads:     []string{"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		Credentials:  []string{"root / password"},
+		Sensors:      []string{"cowrie"},
+		Events:       12,
+		First:        "2026-08-14T10:00:00Z",
+		Last:         "2026-08-15T10:00:00Z",
+		Updated:      "2026-08-15T10:01:00Z",
+		Verdicts:     []string{"malicious"},
+		Techniques:   []string{"T1110"},
+	})
+
+	s := &store{es: es}
+	tmpl := template.Must(template.New("dashboard").Funcs(templateFuncs(s, "")).Parse(pageTemplate))
+	mux := s.routes(tmpl)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/attackers/fragment?id=entity-evidence", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		"Member IPs (2)", "Credential pairs (1)", "root / password",
+		"Fingerprints (1)", "SSH-2.0-libssh2", "Payload hashes (1)",
+		"Ghidra verdicts (1)", "ATT&amp;CK techniques (1)",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("fragment missing %q, got: %s", want, body)
+		}
+	}
+	if got := strings.Count(body, `class="card__scroll"`); got < 7 {
+		t.Errorf("scrollable collections plus identities table = %d, want at least 7", got)
+	}
 }
