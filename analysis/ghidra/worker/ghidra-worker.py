@@ -1053,7 +1053,7 @@ def _revdeck_chat(job_id: str) -> dict | None:
     return {
         "workflow": REVDECK_WORKFLOW,
         "status": status,
-        "answer": _clean(answer, REVDECK_ANSWER_CHARS),
+        "answer": _clean(answer, REVDECK_ANSWER_CHARS, keep_newlines=True),
         "steps": steps,
         "tool_calls": tool_calls,
         "citations": citations,
@@ -1108,7 +1108,7 @@ def _revdeck_chat_threads(job_id: str) -> dict | None:
             content = m.get("content")
             messages.append({
                 "role": m.get("role", ""),
-                "content": _clean(content, REVDECK_CHAT_MESSAGE_CHARS) if isinstance(content, str) else content,
+                "content": _clean(content, REVDECK_CHAT_MESSAGE_CHARS, keep_newlines=True) if isinstance(content, str) else content,
                 "tool_calls": m.get("tool_calls"),
                 "name": m.get("name"),
             })
@@ -1355,13 +1355,25 @@ def normalise_risk(value: object) -> str:
     return ""
 
 
-def _clean(text: str, limit: int) -> str:
+def _clean(text: str, limit: int, *, keep_newlines: bool = False) -> str:
     """Strip control characters and bound the length.
 
     Everything fed to the model comes out of the sample, so it can contain
     anything at all, including terminal escapes that would also land in this
     worker's own journal output.
+
+    keep_newlines additionally preserves \\n/\\r/\\t: str.isprintable()
+    treats those as non-printable right alongside real control/escape
+    characters, so the default behavior above silently flattened RevDeck's
+    own one-shot answer and mirrored chat messages -- markdown text meant to
+    keep its author's paragraph/line breaks, not raw sample content -- into
+    one unbroken line before dashboard/static/hp-ghidra-markdown.js's
+    marked.js `breaks: true` config ever saw a single \\n to convert.
+    Genuine escape sequences (ESC and other C0/C1 control codes) are still
+    stripped either way.
     """
+    if keep_newlines:
+        return "".join(c for c in str(text) if c.isprintable() or c in "\n\r\t")[:limit]
     return "".join(c for c in str(text) if c.isprintable())[:limit]
 
 
