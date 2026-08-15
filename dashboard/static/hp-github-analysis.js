@@ -101,4 +101,5 @@
 
   wireTrigger();
   document.addEventListener("hp-dynamic-nav", wireTrigger);
+  document.addEventListener("hp-analyzer-hydrated", wireTrigger);
 })();

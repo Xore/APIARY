@@ -805,6 +805,63 @@ test.describe("dashboard browser behaviour", () => {
     expect((await clusterCorrelation.boundingBox())?.width ?? 391).toBeLessThanOrEqual(390);
   });
 
+  test("analyzer detail shells hydrate scoped results in place (#1465, #1466)", async ({ page }) => {
+    const hash = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+    let releaseRevDeck!: () => void;
+    const revDeckGate = new Promise<void>(resolve => { releaseRevDeck = resolve; });
+    await page.route(`**/revdeck/${hash}/fragment`, async route => {
+      const response = await route.fetch();
+      await revDeckGate;
+      await route.fulfill({ response });
+    });
+    await page.goto(`/revdeck/${hash}`);
+    const revDeck = page.locator("#revdeck-detail-root");
+    await expect(revDeck).toHaveAttribute("aria-busy", "true");
+    await expect(revDeck.getByRole("heading", { name: "Rev·Deck" })).toBeVisible();
+    await expect(revDeck.locator(".card__scroll")).toBeVisible();
+    releaseRevDeck();
+    await expect(revDeck).not.toHaveAttribute("aria-busy", "true");
+    await expect(revDeck).toContainText("RevDeck browser fixture answer");
+    await page.unroute(`**/revdeck/${hash}/fragment`);
+
+    const missingHash = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+    await page.goto(`/revdeck/${missingHash}`);
+    await expect(page.locator("#revdeck-detail-root")).toHaveAttribute("role", "status");
+    await expect(page.locator("#revdeck-detail-root")).toContainText("No standalone Rev·Deck result");
+
+    let releaseGitHub!: () => void;
+    const githubGate = new Promise<void>(resolve => { releaseGitHub = resolve; });
+    await page.route(`**/github-analysis/${hash}/fragment`, async route => {
+      const response = await route.fetch();
+      await githubGate;
+      await route.fulfill({ response });
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`/github-analysis/${hash}`);
+    const github = page.locator("#github-analysis-detail-root");
+    await expect(github).toHaveAttribute("aria-busy", "true");
+    await expect(github.getByText("Detections", { exact: true })).toBeVisible();
+    await expect(github.getByRole("heading", { name: "Scanner results" })).toBeVisible();
+    releaseGitHub();
+    await expect(github).not.toHaveAttribute("aria-busy", "true");
+    await expect(github).toContainText("BrowserFixture");
+    await expect(github).toContainText("FixtureAV");
+    await github.getByRole("tab", { name: /Provenance/ }).click();
+    await expect(github.getByRole("heading", { name: "Publication record" }).locator("..")).toContainText(hash);
+    await github.getByRole("tab", { name: /Artifacts/ }).click();
+    await expect(github).toContainText("rules/auto/browser_fixture.yar");
+    await expect(github.getByRole("button", { name: "View PDF report" })).toBeVisible();
+    await expect(github.locator(".card__scroll")).not.toHaveCount(0);
+    expect((await github.boundingBox())?.width ?? 391).toBeLessThanOrEqual(390);
+    await page.unroute(`**/github-analysis/${hash}/fragment`);
+
+    const failedHash = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+    await page.route(`**/github-analysis/${failedHash}/fragment`, route => route.fulfill({ status: 503, body: "fixture analyzer unavailable" }));
+    await page.goto(`/github-analysis/${failedHash}`);
+    await expect(page.locator("#github-analysis-detail-root")).toHaveAttribute("role", "alert");
+    await expect(page.locator("#github-analysis-detail-root")).toContainText("Analyzer result could not be loaded");
+  });
+
   test("payload analysis hydrates the aggregation cards after the initial render (#1142)", async ({ page }) => {
     await page.goto("/payload-analysis/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
     // The fast path renders identity/hashes immediately; the three

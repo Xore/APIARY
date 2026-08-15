@@ -133,12 +133,13 @@ type githubAnalysisQueueStatus struct {
 
 type githubAnalysisPageData struct {
 	pageMeta
-	Generated time.Time
-	Rows      []githubAnalysisResult
-	Detail    *githubAnalysisResult
-	Status    githubAnalysisQueueStatus
-	Query     string
-	Analysis  string
+	Generated     time.Time
+	Rows          []githubAnalysisResult
+	Detail        *githubAnalysisResult
+	Status        githubAnalysisQueueStatus
+	Query         string
+	Analysis      string
+	DetailLoading bool
 	// Loading is true only while the listing cache (s.githubAnalysisCache)
 	// has never been populated -- the same #1157 payloadsPage.Loading
 	// convention, distinguishing "still warming up" from "genuinely no
@@ -146,6 +147,15 @@ type githubAnalysisPageData struct {
 	// misreporting an empty result. Always false on a detail-view render
 	// (Detail != nil), which never reads the cache.
 	Loading bool
+}
+
+func githubAnalysisDetailShell(sha string) githubAnalysisPageData {
+	return githubAnalysisPageData{
+		Generated:     time.Now(),
+		Detail:        &githubAnalysisResult{SHA256: strings.ToLower(sha)},
+		Status:        loadGitHubAnalysisStatus(),
+		DetailLoading: true,
+	}
 }
 
 func githubAnalysisResultsDir() string { return getenv("GITHUB_ANALYSIS_RESULTS_DIR", "") }

@@ -35,6 +35,11 @@ type revdeckPageData struct {
 	pageMeta
 	Generated time.Time
 	Detail    *revdeckStandaloneResult
+	Loading   bool
+}
+
+func revdeckDetailShell(sha string) revdeckPageData {
+	return revdeckPageData{Generated: time.Now(), Detail: &revdeckStandaloneResult{SHA256: strings.ToLower(sha)}, Loading: true}
 }
 
 func revdeckRequestDir() string { return getenv("REVDECK_REQUEST_DIR", "") }

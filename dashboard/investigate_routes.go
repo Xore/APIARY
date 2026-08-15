@@ -221,12 +221,23 @@ func (s *store) registerInvestigateRoutes(mux *http.ServeMux, tmpl *template.Tem
 			http.NotFound(w, r)
 			return
 		}
-		data, err := revdeckData(sha)
+		data := revdeckDetailShell(sha)
+		renderPage(w, tmpl, "revdeck", &data)
+	})
+	mux.HandleFunc("GET /revdeck/{sha}/fragment", func(w http.ResponseWriter, r *http.Request) {
+		sha := r.PathValue("sha")
+		if !hashName.MatchString(sha) {
+			http.NotFound(w, r)
+			return
+		}
+		data, err := revdeckData(strings.ToLower(sha))
 		if err != nil {
 			http.NotFound(w, r)
 			return
 		}
-		renderPage(w, tmpl, "revdeck", &data)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		tmpl.ExecuteTemplate(w, "revdeck-detail-body", &data)
 	})
 	mux.HandleFunc("GET /cape/{sha}", func(w http.ResponseWriter, r *http.Request) {
 		sha := r.PathValue("sha")
@@ -258,12 +269,24 @@ func (s *store) registerInvestigateRoutes(mux *http.ServeMux, tmpl *template.Tem
 			http.NotFound(w, r)
 			return
 		}
+		data := githubAnalysisDetailShell(sha)
+		data.Analysis = r.URL.Query().Get("analysis")
+		renderPage(w, tmpl, "github-analysis", &data)
+	})
+	mux.HandleFunc("GET /github-analysis/{sha}/fragment", func(w http.ResponseWriter, r *http.Request) {
+		sha := r.PathValue("sha")
+		if !hashName.MatchString(sha) {
+			http.NotFound(w, r)
+			return
+		}
 		data, err := s.githubAnalysisData(strings.ToLower(sha), "")
 		if err != nil {
 			http.NotFound(w, r)
 			return
 		}
 		data.Analysis = r.URL.Query().Get("analysis")
-		renderPage(w, tmpl, "github-analysis", &data)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		tmpl.ExecuteTemplate(w, "github-analysis-detail-body", &data)
 	})
 }

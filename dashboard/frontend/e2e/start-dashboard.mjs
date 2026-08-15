@@ -89,6 +89,35 @@ await fetch(`${fakeES.url}/dashboard-payload-inventory-v1/_doc/${payloadHash}?op
   }),
 });
 
+await fetch(`${fakeES.url}/revdeck-analysis-v1/_doc/revdeck:${payloadHash}?op_type=create`, {
+  method: "PUT",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    revdeck: {
+      version: 1, sha256: payloadHash, requested_at: "2026-08-01T00:00:00Z", started_at: "2026-08-01T00:00:01Z",
+      completed_at: "2026-08-01T00:00:02Z", exit_status: "ok",
+      revdeck: { workflow: "browser fixture workflow", status: "complete", steps: 4, tool_calls: 7, answer: "RevDeck browser fixture answer", warnings: ["fixture warning"] },
+    },
+    file: { hash: { sha256: payloadHash } }, event: { category: "revdeck" },
+  }),
+});
+
+await fetch(`${fakeES.url}/github-analysis-v1/_doc/github-analysis:${payloadHash}?op_type=create`, {
+  method: "PUT",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    github_analysis: {
+      version: 1, sha256: payloadHash, requested_at: "2026-08-01T00:00:00Z", started_at: "2026-08-01T00:00:01Z",
+      completed_at: "2026-08-01T00:00:02Z", exit_status: "ok", commit: "1111111111111111111111111111111111111111", report_commit: "2222222222222222222222222222222222222222",
+      run_url: "https://github.com/Xore/honeypot/actions/runs/123", sample_path: `malware/fixture/${payloadHash}`, family: "BrowserFixture",
+      verdict: { malicious: 1, suspicious: 0, total: 2, level: "high" },
+      scanners: [{ source: "FixtureAV", ok: true, positives: 1, total: 2, permalink: "https://example.invalid/scanner" }],
+      yara_auto_rules: ["rules/auto/browser_fixture.yar"], report_pdf: "reports/browser-fixture.pdf",
+    },
+    file: { hash: { sha256: payloadHash } }, event: { category: "github-analysis" },
+  }),
+});
+
 // Seed one rich Ghidra document so the detail shell, visible bounded
 // datasets, and nested call-graph hydration can be exercised together.
 await fetch(`${fakeES.url}/ghidra-analysis-v1/_doc/ghidra:${payloadHash}?op_type=create`, {
