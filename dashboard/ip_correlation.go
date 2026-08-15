@@ -27,10 +27,10 @@ type cidrCorrelationPage struct {
 }
 
 func (s *store) cidrCorrelationData(cidr string) (cidrCorrelationPage, bool) {
-	if _, _, err := net.ParseCIDR(cidr); err != nil {
+	p, ok := cidrCorrelationShell(cidr)
+	if !ok {
 		return cidrCorrelationPage{}, false
 	}
-	p := cidrCorrelationPage{Generated: time.Now(), CIDR: cidr}
 	if s.es != nil {
 		p.Correlation = s.es.correlateCIDR(cidr, 200)
 	}
@@ -38,6 +38,16 @@ func (s *store) cidrCorrelationData(cidr string) (cidrCorrelationPage, bool) {
 		return p, false
 	}
 	return p, true
+}
+
+// cidrCorrelationShell validates the route identifier and returns only the
+// structure known before Elasticsearch responds. The fragment endpoint calls
+// cidrCorrelationData to hydrate the correlation region independently.
+func cidrCorrelationShell(cidr string) (cidrCorrelationPage, bool) {
+	if _, _, err := net.ParseCIDR(cidr); err != nil {
+		return cidrCorrelationPage{}, false
+	}
+	return cidrCorrelationPage{Generated: time.Now(), CIDR: cidr}, true
 }
 
 // correlatedRecord is one Elasticsearch hit normalized across the three

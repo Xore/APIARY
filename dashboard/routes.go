@@ -252,37 +252,28 @@ func (s *store) routes(tmpl *template.Template) *http.ServeMux {
 	// through a real ServeMux).
 	s.registerInvestigateRoutes(mux, tmpl)
 	mux.HandleFunc("GET /clusters", func(w http.ResponseWriter, r *http.Request) {
-		data := s.clustersData(clustersRequestFilter(r))
-		// Cluster Kind (Fingerprint/Payload/Autonomous system/Provider class)
-		// only exists after clustersData's own aggregation groups events --
-		// it isn't a storedEvent attribute the shared filter type can match
-		// on, so it's filtered here as a narrow post-aggregation step (#280
-		// Phase 4) instead of inside filter.match().
-		if kind := r.URL.Query().Get("kind"); kind != "" {
-			filtered := make([]clusterRow, 0, len(data.Rows))
-			for _, row := range data.Rows {
-				if row.Kind == kind {
-					filtered = append(filtered, row)
-				}
-			}
-			data.Rows = filtered
-			data.Filters = append(data.Filters, "kind = "+kind)
-		}
-		data.filterBar = buildFilterBar(r, "/clusters",
-			[2]string{"sensor", "Sensor"}, [2]string{"kind", "Kind"}, [2]string{"since", "Since (e.g. 24h)"})
-		// #513/#59: exports exactly the current filtered scope (including the
-		// post-aggregation kind= narrowing above), never the unfiltered set.
-		data.ExportURL = "/export/clusters.csv"
-		if encoded := r.URL.Query().Encode(); encoded != "" {
-			data.ExportURL += "?" + encoded
-		}
+		data := clustersShell(r)
 		data.Ready = s.ready.Load()
 		renderPage(w, tmpl, "clusters", &data)
 	})
+	mux.HandleFunc("GET /clusters/fragment", func(w http.ResponseWriter, r *http.Request) {
+		data := s.clustersHTTPData(r)
+		data.Ready = s.ready.Load()
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		tmpl.ExecuteTemplate(w, "clusters-body", &data)
+	})
 	mux.HandleFunc("GET /campaigns", func(w http.ResponseWriter, r *http.Request) {
-		data := s.campaignsData(r)
+		data := campaignsShell(r)
 		data.Ready = s.ready.Load()
 		renderPage(w, tmpl, "campaigns", &data)
+	})
+	mux.HandleFunc("GET /campaigns/fragment", func(w http.ResponseWriter, r *http.Request) {
+		data := s.campaignsData(r)
+		data.Ready = s.ready.Load()
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		tmpl.ExecuteTemplate(w, "campaigns-body", &data)
 	})
 	// #1327 shell+hydrate: this used to call s.attackersData(r), an
 	// unbounded readAttackers() Elasticsearch fetch of every attackers-v1

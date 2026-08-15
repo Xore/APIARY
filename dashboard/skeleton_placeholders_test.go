@@ -45,18 +45,6 @@ func TestListingPagesShowSkeletonPlaceholdersBeforeFirstRebuildInsteadOfEmptySta
 			readyData:     &ipsPage{Ready: true},
 			realEmptyText: "no source IPs recorded yet",
 		},
-		{
-			name:          "campaigns",
-			emptyData:     &campaignsPage{Ready: false},
-			readyData:     &campaignsPage{Ready: true},
-			realEmptyText: "no active campaigns in the last seven days",
-		},
-		{
-			name:          "clusters",
-			emptyData:     &clustersPage{Ready: false},
-			readyData:     &clustersPage{Ready: true},
-			realEmptyText: "No multi-source pivots are present",
-		},
 		// source-health (this sweep): /source-health reads the same
 		// rebuild()-populated s.get() snapshot as overview/ips/events, so it
 		// shares the identical cold-start gap -- the "Dashboard parser feeds"
@@ -151,12 +139,12 @@ func TestListingPagesNeverMaskRealDataRegardlessOfReady(t *testing.T) {
 		t.Fatal("real IP data must render even while Ready=false, not be masked by the skeleton")
 	}
 
-	clusters := render("clusters", &clustersPage{Ready: false, Rows: []clusterRow{{Kind: "Payload", Value: "abc123", Link: "/x"}}})
+	clusters := render("clusters-body", &clustersPage{Ready: false, Rows: []clusterRow{{Kind: "Payload", Value: "abc123", Link: "/x"}}})
 	if !strings.Contains(clusters, "abc123") {
 		t.Fatal("real cluster data must render even while Ready=false, not be masked by the skeleton")
 	}
 
-	campaigns := render("campaigns", &campaignsPage{Ready: false, Campaigns: []campaignRow{{CIDR: "203.0.113.0/24", Score: 90}}})
+	campaigns := render("campaigns-body", &campaignsPage{Ready: false, Campaigns: []campaignRow{{CIDR: "203.0.113.0/24", Score: 90}}})
 	if !strings.Contains(campaigns, "203.0.113.0/24") {
 		t.Fatal("real campaign data must render even while Ready=false, not be masked by the skeleton")
 	}

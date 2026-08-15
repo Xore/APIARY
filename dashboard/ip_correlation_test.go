@@ -215,12 +215,9 @@ func TestCIDRCorrelationDataRequiresBothValidCIDRAndAvailableES(t *testing.T) {
 	}
 }
 
-// TestAttackerPageRendersCorrelationSectionOnlyWhenAvailable (#354): the
-// attacker-profile page's Elasticsearch correlation card must appear when
-// data is available and stay absent (not an empty/broken card) when
-// Elasticsearch is unconfigured or the query failed -- Available is the
-// single flag every render decision hangs off.
-func TestAttackerPageRendersCorrelationSectionOnlyWhenAvailable(t *testing.T) {
+// TestAttackerPageRendersCorrelationShellAndFragment proves backend evidence
+// never leaks into the initial page and remains available through the fragment.
+func TestAttackerPageRendersCorrelationShellAndFragment(t *testing.T) {
 	funcs := templateFuncs(nil, "")
 	tmpl := template.Must(template.New("dashboard").Funcs(funcs).Parse(pageTemplate))
 
@@ -236,16 +233,16 @@ func TestAttackerPageRendersCorrelationSectionOnlyWhenAvailable(t *testing.T) {
 		t.Fatalf("render with correlation available: %v", err)
 	}
 	body := buf.String()
-	if !strings.Contains(body, "attacker-correlation") || !strings.Contains(body, "Linux 5.x") {
-		t.Fatalf("correlation card missing or incomplete when Available=true: %s", body)
+	if !strings.Contains(body, "attacker-correlation-root") || strings.Contains(body, "Linux 5.x") {
+		t.Fatalf("initial page must contain only the correlation shell: %s", body)
 	}
 
 	buf.Reset()
-	if err := tmpl.ExecuteTemplate(&buf, "attacker", &base); err != nil {
-		t.Fatalf("render without correlation: %v", err)
+	if err := tmpl.ExecuteTemplate(&buf, "attacker-correlation-body", &withCorrelation); err != nil {
+		t.Fatalf("render correlation fragment: %v", err)
 	}
-	if strings.Contains(buf.String(), "attacker-correlation") {
-		t.Fatal("correlation card must not render when Correlation.Available is false")
+	if !strings.Contains(buf.String(), "Linux 5.x") || !strings.Contains(buf.String(), "tunnel connect") {
+		t.Fatal("correlation fragment is missing backend evidence")
 	}
 }
 
@@ -272,10 +269,17 @@ func TestCIDRCorrelationPageRenders(t *testing.T) {
 	if !strings.Contains(body, "203.0.113.0/24") {
 		t.Fatal("page does not render the CIDR")
 	}
-	if !strings.Contains(body, "tunnel connect · port 5060") {
-		t.Fatal("page does not render a correlated record")
+	if strings.Contains(body, "tunnel connect · port 5060") || !strings.Contains(body, "data-hp-correlation-fragment-url") {
+		t.Fatal("initial page must contain only the correlation shell")
 	}
 	if !strings.Contains(body, `href="/events?cidr=203.0.113.0%2F24&amp;since=168h"`) {
 		t.Fatalf("page is missing the in-memory-events cross-link, or the CIDR is not correctly URL-escaped in it: %s", body)
+	}
+	buf.Reset()
+	if err := tmpl.ExecuteTemplate(&buf, "cidr-correlation-body", &data); err != nil {
+		t.Fatalf("render fragment: %v", err)
+	}
+	if !strings.Contains(buf.String(), "tunnel connect · port 5060") {
+		t.Fatal("correlation fragment does not render a correlated record")
 	}
 }

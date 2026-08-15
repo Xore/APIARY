@@ -1337,9 +1337,9 @@ func TestRouteTemplatesRenderFromEmbeddedUI(t *testing.T) {
 	pages := map[string][]string{
 		"overview.html":                {"page"},
 		"events.html":                  {"everow", "eventrows", "events"},
-		"ips.html":                     {"iprow", "iprows", "ips", "attacker"},
+		"ips.html":                     {"iprow", "iprows", "ips", "attacker", "attacker-correlation-body", "attacker-block-body"},
 		"session.html":                 {"session"},
-		"intel.html":                   {"clusters", "campaigns", "campaignrows", "cidr-correlation", "cluster-correlation", "commands"},
+		"intel.html":                   {"clusters", "clusters-body", "campaigns", "campaigns-body", "campaignrows", "cidr-correlation", "cidr-correlation-body", "cluster-correlation", "cluster-correlation-body", "commands"},
 		"attackers.html":               {"attackers"},
 		"kill_chain.html":              {"kill-chain"},
 		"payloads.html":                {"payloadrow", "payloadrows", "payloads", "payload-analysis"},
