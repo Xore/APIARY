@@ -120,6 +120,7 @@
       .then((html) => {
         root.innerHTML = html;
         root.removeAttribute("aria-busy");
+        window.initDashboardTabs?.();
         window.Prism?.highlightAll();
         window.HoneypotGhidraMarkdown?.render();
         // #1287: the interactive call graph's own [data-ghidra-callgraph-

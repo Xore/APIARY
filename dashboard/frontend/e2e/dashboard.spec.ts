@@ -737,6 +737,63 @@ test.describe("dashboard browser behaviour", () => {
     await expect(report.locator("pre code")).toHaveText("code.example. must stay untouched.\n");
   });
 
+  test("Ghidra detail keeps its shaped shell and all datasets visible in bounded cards", async ({ page }) => {
+    const hash = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+    let releaseFragment!: () => void;
+    const fragmentGate = new Promise<void>(resolve => { releaseFragment = resolve; });
+    let releaseGraph!: () => void;
+    const graphGate = new Promise<void>(resolve => { releaseGraph = resolve; });
+    await page.route(`**/ghidra/${hash}/fragment`, async route => {
+      const response = await route.fetch();
+      await fragmentGate;
+      await route.fulfill({ response });
+    });
+    await page.route(`**/api/ghidra-callgraph/${hash}`, async route => {
+      const response = await route.fetch();
+      await graphGate;
+      await route.fulfill({ response });
+    });
+
+    await page.goto(`/ghidra/${hash}`);
+    const root = page.locator("#ghidra-detail-root");
+    await expect(root).toHaveAttribute("aria-busy", "true");
+    await expect(root.getByRole("tab", { name: /Overview/ })).toBeVisible();
+    await expect(root.getByRole("heading", { name: "Analysis identity" })).toBeVisible();
+    await expect(root.locator(".card.wide")).toHaveCount(18);
+
+    releaseFragment();
+    await expect(root).not.toHaveAttribute("aria-busy", "true");
+    await root.getByRole("tab", { name: /Code/ }).click();
+    await expect(root.locator('[aria-label="Full import list"]')).toContainText("CreateFileW");
+    await expect(root.locator("[data-ghidra-callgraph-loading]")).toBeVisible();
+    await expect(root.getByRole("button", { name: /Open the full|Open the recovered|Open the recovery/ })).toHaveCount(0);
+
+    releaseGraph();
+    await expect(root.locator("[data-ghidra-callgraph-url]")).toHaveAttribute("aria-busy", "false");
+    await expect(root.locator("[data-ghidra-callgraph-status]")).toContainText("function");
+    await root.getByRole("tab", { name: /Deep dive/ }).click();
+    await expect(root.locator('[aria-label="Full type list"]')).toContainText("FIXTURE");
+    await root.getByRole("tab", { name: /Data/ }).click();
+    await expect(root.locator('[aria-label="Full string table"]')).toContainText("browser-fixture.example");
+
+    await page.unroute(`**/api/ghidra-callgraph/${hash}`);
+    await page.route(`**/api/ghidra-callgraph/${hash}`, route => route.fulfill({ status: 503, body: "fixture graph source unavailable" }));
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`/ghidra/${hash}`);
+    await page.locator("#ghidra-detail-root").getByRole("tab", { name: /Code/ }).click();
+    const failedGraph = page.locator("[data-ghidra-callgraph-url]");
+    await expect(failedGraph).toHaveAttribute("role", "alert");
+    await expect(failedGraph).toContainText("Call graph failed to load");
+    expect((await failedGraph.boundingBox())?.width ?? 391).toBeLessThanOrEqual(390);
+
+    await page.unroute(`**/api/ghidra-callgraph/${hash}`);
+    await page.route(`**/api/ghidra-callgraph/${hash}`, route => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ nodes: [], edges: [] }) }));
+    await page.goto(`/ghidra/${hash}`);
+    await page.locator("#ghidra-detail-root").getByRole("tab", { name: /Code/ }).click();
+    await expect(page.locator("[data-ghidra-callgraph-url]")).toHaveAttribute("role", "status");
+    await expect(page.locator("[data-ghidra-callgraph-url]")).toContainText("No caller/callee cross-references");
+  });
+
   test("sandbox detail hydrates from a job-scoped fragment (#1441)", async ({ page }) => {
     await page.goto("/sandbox/windows-ghosts-browser-fixture");
     const root = page.locator("#sandbox-detail-root");

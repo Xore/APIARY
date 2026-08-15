@@ -38,6 +38,17 @@
     const status = document.querySelector("[data-ghidra-callgraph-status]");
     const setStatus = text => { if (status) status.textContent = text; };
     const filterInput = document.querySelector("[data-ghidra-callgraph-filter]");
+    const renderGraphState = (message, isError = false) => {
+      canvas.replaceChildren();
+      canvas.setAttribute("aria-busy", "false");
+      canvas.setAttribute("role", isError ? "alert" : "status");
+      const state = document.createElement("p");
+      state.className = "empty";
+      state.textContent = message;
+      state.style.cssText = "display:grid;place-items:center;width:100%;height:100%;padding:2rem;text-align:center";
+      canvas.appendChild(state);
+      setStatus(message);
+    };
 
     fetch(canvas.dataset.ghidraCallgraphUrl, { cache: "no-store", headers: { Accept: "application/json" } })
       .then(response => {
@@ -46,10 +57,14 @@
       })
       .then(data => {
         if (!data.nodes || data.nodes.length === 0) {
-          setStatus("No caller/callee cross-references were recovered for this binary's deep-dived functions.");
+          renderGraphState("No caller/callee cross-references were recovered for this binary's deep-dived functions.");
           return;
         }
 
+        canvas.replaceChildren();
+        canvas.setAttribute("aria-busy", "false");
+        canvas.setAttribute("role", "img");
+        if (filterInput) filterInput.disabled = false;
         const elements = [
           ...data.nodes.map(n => ({ data: { id: n.id, label: n.label, kind: n.kind } })),
           ...data.edges.map(e => ({ data: { source: e.source, target: e.target } })),
@@ -151,7 +166,7 @@
         if (data.truncated) statusText += " (truncated to the largest functions)";
         setStatus(statusText);
       })
-      .catch(err => setStatus(`Call graph failed to load: ${err.message}`));
+      .catch(err => renderGraphState(`Call graph failed to load: ${err.message}`, true));
   }
 
   initGraph();
