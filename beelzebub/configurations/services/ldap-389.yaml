@@ -1,0 +1,17 @@
+# #1418: genuinely new protocol coverage -- this repo has no LDAP/AD
+# decoy at all today (verified: no port 389 anywhere else in
+# docker-compose.multipot.yml or any other sensor). Upstream's own
+# documented AD/LDAP example (README.md), matching persona nexusai-directory
+# ("dc01" domain controller).
+apiVersion: "v1"
+protocol: "tcp"
+address: ":389"
+description: "Active Directory LDAP Domain Controller"
+banner: "0\x84\x00\x00\x00\x10\x02\x01\x01\x61\x84\x00\x00\x00\x07\x0a\x01\x00\x04\x00\x04\x00"
+commands:
+  - regex: "\\x30.*\\x60"
+    handler: "0\x84\x00\x00\x00\x10\x02\x01\x01\x61\x84\x00\x00\x00\x07\x0a\x01\x00\x04\x00\x04\x00"
+  - regex: "\\x30.*\\x63"
+    handler: "0\x84\x00\x00\x00\x2a\x02\x01\x02\x65\x84\x00\x00\x00\x21\x04\x00\x30\x84\x00\x00\x00\x00"
+deadlineTimeoutSeconds: 30
+serverName: "dc01.nexusai.local"

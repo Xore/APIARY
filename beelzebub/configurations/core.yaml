@@ -1,0 +1,25 @@
+# Beelzebub's own core config schema (upstream configurations/beelzebub.yaml).
+# RabbitMQ tracing and Beelzebub Cloud reporting are both opt-in and stay
+# disabled here -- this sensor's only output path is logsPath, the same
+# local-JSON-file-into-ip-enrichment-worker/Filebeat pipeline every other
+# sensor in this stack already uses. Prometheus stays on its default
+# loopback-shaped :2112/metrics -- unused by this stack (no Prometheus
+# deployed) but harmless left on, and it's what upstream's own healthcheck
+# convention assumes if that ever changes.
+core:
+  logging:
+    debug: false
+    debugReportCaller: false
+    logDisableTimestamp: true
+    logsPath: /var/log/honeypot/beelzebub.json
+  tracings:
+    rabbit-mq:
+      enabled: false
+      uri: ""
+  prometheus:
+    path: "/metrics"
+    port: ":2112"
+  beelzebub-cloud:
+    enabled: false
+    uri: ""
+    auth-token: ""

@@ -247,6 +247,17 @@ processors:
       target: honeypot
       fields: {sensor: tanner, persona_id: meridian-customer-portal, site_id: meridian-public-web, asset_id: customer-portal-02, organization: Meridian Retail Systems Ltd.}
       when.contains: {log.file.path: "enriched/tanner.json"}
+  # #1418: beelzebub.json has no "sensor" field of its own either (a
+  # vendored, unmodified binary with no knowledge of this repo's
+  # convention) -- ip-enrichment-worker/beelzebub.go already writes
+  # sensor/src_ip/src_port as flat lowercase fields onto every line before
+  # Filebeat ever sees it, same "enriched supersedes raw" path as
+  # cowrie/dionaea/conpot/tanner above, so this only needs to attach
+  # defender-side persona identity, same as every other rule in this block.
+  - add_fields:
+      target: honeypot
+      fields: {persona_id: nexusai-directory, site_id: nexusai-berlin-core, asset_id: directory-estate, organization: NexusAI Research GmbH}
+      when.contains: {log.file.path: "enriched/beelzebub.json"}
   # NOTE on stats events: they carry ~600 engine-internal counter fields and
   # once exhausted the shared daily index's field limit (2026-07-19 outage).
   # With per-event-type indices (see output below) they are contained in

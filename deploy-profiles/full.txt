@@ -20,3 +20,4 @@ citrix-honeypot
 cisco-asa-honeypot
 rdp-honeypot
 endlessh
+beelzebub

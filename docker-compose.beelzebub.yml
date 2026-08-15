@@ -1,0 +1,97 @@
+# honeypot-beelzebub -- #1418: multi-protocol deception runtime
+# (github.com/beelzebub-labs/beelzebub, vendored -- see beelzebub/Dockerfile).
+# Same shape and reasoning as docker-compose.cisco-asa-honeypot.yml -- no
+# depends_on, its own fully private network, only host bind mounts.
+# Deployed as /opt/stacks/honeypot-beelzebub.
+#
+# Scope decisions made integrating this sensor (see PR description for the
+# full writeup):
+#
+# - No Redis (6379) or PostgreSQL (5432) services enabled, despite upstream
+#   supporting both: docker-compose.multipot.yml already binds those exact
+#   ports (confirmed directly, not assumed from #1415's own research text,
+#   which was wrong on this point). A second listener on a nonstandard port
+#   would have far lower attacker-discovery value than the ports it can't
+#   have, for real added scope/risk.
+# - No Telnet service: Cowrie already owns port 23 at the standard,
+#   expected location; a secondary Telnet decoy has much lower marginal
+#   value than the secondary SSH decoy below (Telnet scanners essentially
+#   only ever try 23).
+# - No Ollama/LLM-adaptive responses (every services/*.yaml here is static/
+#   regex-only, no `plugin: LLMHoneypot`): analysis/ghidra/docker-compose.ghidra.yml's
+#   own `llm_clients` network is explicitly `internal: true` specifically so
+#   that "sensors must never be able to submit prompts or observe model
+#   traffic" -- ghidra-worker is documented as "the sole bridge". Beelzebub
+#   is itself a sensor, directly reachable by real attackers; connecting it
+#   to that network would cross a boundary this stack has deliberately never
+#   crossed for any other sensor. Revisit only via a dedicated broker/proxy
+#   service (mirroring "the worker is the sole bridge"), as its own
+#   separately-reviewed follow-up, not a direct connection.
+# - No Traefik/hostname routing for the HTTP service: beelzebub cannot parse
+#   the PROXY-protocol header portbridge prepends on ":pp" rules (confirmed
+#   directly against the vendored source -- no proxyproto import anywhere),
+#   and the Traefik/socat path never touches portbridge's CONN_LOG at all --
+#   so a hostname-fronted copy of this service would produce events with a
+#   permanently unattributable source IP, unlike http-honeypot's own Go code
+#   (which explicitly reads X-Forwarded-For on that path). Raw-port-only
+#   keeps every single event resolvable via ip-enrichment-worker's via_port
+#   join (ip-enrichment-worker/beelzebub.go) instead.
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  beelzebub:
+    <<: *runtime-defaults
+    build: /opt/stacks/apiary/beelzebub
+    container_name: hp-beelzebub
+    restart: unless-stopped
+    environment:
+      - TZ=Europe/Berlin
+    ports:
+      - ${HP_BIND:-10.8.0.2}:2200:2200
+      - ${HP_BIND:-10.8.0.2}:389:389
+      - ${HP_BIND:-10.8.0.2}:8000:8000
+      - ${HP_BIND:-10.8.0.2}:8880:8880
+    volumes:
+      - /opt/stacks/apiary/logs/beelzebub:/var/log/honeypot
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
+    security_opt:
+      - no-new-privileges:true
+    # LDAP (389) is a privileged port -- caught live in local testing: the
+    # unmodified binary, run non-root (USER 65534 below), fails to bind it
+    # under a bare cap_drop: [ALL] with "permission denied" (confirmed by
+    # actually running it, not assumed). NET_BIND_SERVICE is normally part
+    # of Docker's own default capability set (why cisco-asa-honeypot's IKE
+    # 500/udp and dnp3-honeypot's own privileged ports need no special
+    # handling at all -- neither sets cap_drop), but this service drops
+    # everything first, same posture as p0f/Dockerfile's own "cap_drop:
+    # [ALL] + explicit cap_add for exactly what's needed" -- so it has to
+    # be added back explicitly rather than left to the default.
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    read_only: true
+    networks: [beelzebub_net]
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "8880"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    labels:
+      - autoheal=true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+networks:
+  beelzebub_net:
+    driver: bridge

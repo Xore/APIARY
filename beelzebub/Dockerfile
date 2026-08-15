@@ -1,0 +1,44 @@
+# github.com/beelzebub-labs/beelzebub (formerly mariocandela/beelzebub) --
+# #1418: multi-protocol deception runtime, vendored rather than reimplemented
+# (SSH/HTTP/TCP/TELNET/MCP protocol handling + LLM-driven adaptive responses
+# is a lot of real logic not worth rebuilding for one sensor). GPL-3.0 --
+# same posture already taken for Dionaea's GPL-2.0-or-later: internal/
+# private use only, never redistributed, so copyleft has no practical effect
+# here. Confirmed directly against the vendored LICENSE file, not assumed.
+#
+# Pinned the same way tanner/tanner/Dockerfile pins TANNER_REF: building an
+# unpinned master would change behavior whenever this image happens to
+# rebuild. BEELZEBUB_REF is the commit tagged v3.9.0 (latest at integration
+# time, confirmed via `git ls-remote --tags`).
+#
+# No plugins (configurations/plugins.yaml ships empty in upstream and stays
+# that way here) -- every service this stack uses is upstream's own built-in
+# SSH/HTTP/TCP/MCP strategy, configured via YAML, not custom Go code.
+FROM golang:1.26-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2 AS build
+RUN apk add --no-cache git
+ARG BEELZEBUB_REF=39242822af79a59a6b8d0139adc4a8ccf2edec0c
+WORKDIR /build
+RUN git clone https://github.com/mariocandela/beelzebub /build \
+ && git checkout "$BEELZEBUB_REF"
+RUN go mod download
+# go run . plugin install --no-build is upstream's own Dockerfile step for
+# compiling declared plugins in -- skipped here, plugins.yaml is empty.
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /beelzebub .
+
+FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+RUN apk add --no-cache ca-certificates busybox-extras
+COPY --from=build /beelzebub /usr/local/bin/beelzebub
+COPY configurations /etc/beelzebub/configurations
+
+# /var/log/honeypot is a bind-mount point (docker-compose.beelzebub.yml),
+# same convention as every other sensor's image -- not created here.
+# core.yaml's logsPath points at a file under it.
+
+EXPOSE 2200 389 8000 8880
+
+USER 65534
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD nc -z 127.0.0.1 8880 || exit 1
+
+ENTRYPOINT ["/usr/local/bin/beelzebub", "run", "-c", "/etc/beelzebub/configurations/core.yaml", "-s", "/etc/beelzebub/configurations/services/"]

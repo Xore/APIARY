@@ -165,3 +165,42 @@ func TestDionaeaIncidentWithoutNameFallsBackToKind(t *testing.T) {
 		t.Fatalf("detail = %q, want it to still fall back to the module-path kind", ev.detail)
 	}
 }
+
+// TestBeelzebubSSHAuthSurfacesCredentials covers #1418's classify.go block
+// reading the flat lowercase fields ip-enrichment-worker/beelzebub.go
+// promotes, not upstream's own PascalCase Event field names.
+func TestBeelzebubSSHAuthSurfacesCredentials(t *testing.T) {
+	ev := classify(map[string]any{
+		"sensor":   "beelzebub",
+		"protocol": "SSH",
+		"username": "root",
+		"password": "changeme",
+	}, "beelzebub")
+	if ev.sensor != "beelzebub" {
+		t.Fatalf("sensor = %q, want beelzebub", ev.sensor)
+	}
+	if ev.proto != "ssh" {
+		t.Fatalf("proto = %q, want lowercased ssh", ev.proto)
+	}
+	if !ev.isLogin {
+		t.Fatal("expected isLogin=true when username/password are present")
+	}
+	if !strings.Contains(ev.detail, "root / changeme") {
+		t.Fatalf("detail = %q, want it to surface the attempted credentials", ev.detail)
+	}
+}
+
+// TestBeelzebubHTTPCommandTakesPriorityOverPath proves a command (an LLM
+// or regex-plugin response body) wins over a bare path when both are
+// present -- matches cowrie's own command-over-auth precedence just above.
+func TestBeelzebubHTTPCommandTakesPriorityOverPath(t *testing.T) {
+	ev := classify(map[string]any{
+		"sensor":   "beelzebub",
+		"protocol": "HTTP",
+		"path":     "/wp-login.php",
+		"command":  "POST /wp-login.php",
+	}, "beelzebub")
+	if !strings.HasPrefix(ev.detail, "cmd:") {
+		t.Fatalf("detail = %q, want command to take priority over path", ev.detail)
+	}
+}
