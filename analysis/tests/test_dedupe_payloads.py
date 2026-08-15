@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import tempfile
 import unittest
 from datetime import date
@@ -21,6 +22,50 @@ class DedupePayloadsTest(unittest.TestCase):
             self.assertEqual(result["duplicates_linked"], 1)
             self.assertEqual(first.stat().st_ino, second.stat().st_ino)
             self.assertEqual(second.read_bytes(), b"same payload")
+
+    def test_already_hardlinked_names_are_hashed_once(self):
+        # #1380: three names sharing one inode (as a previous dedupe pass, or
+        # pre-existing hardlinks, would leave them) should cost one digest()
+        # call, not three.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            first, second, third = root / "a.bin", root / "b.bin", root / "c.bin"
+            first.write_bytes(b"same payload")
+            os.link(first, second)
+            os.link(first, third)
+            calls = []
+            original_digest = MODULE.digest
+
+            def counting_digest(path):
+                calls.append(path)
+                return original_digest(path)
+
+            MODULE.digest = counting_digest
+            try:
+                result = MODULE.dedupe([root], root / "state.json")
+            finally:
+                MODULE.digest = original_digest
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(result["files_hashed"], 1)
+            self.assertEqual(result["paths_examined"], 3)
+            self.assertEqual(result["duplicates_linked"], 0)
+            self.assertEqual(result["bytes_hashed"], len(b"same payload"))
+
+    def test_two_separate_inode_groups_with_same_content_still_link(self):
+        # Distinct physical files (not yet linked to each other) with equal
+        # content must still be discovered and linked -- grouping by inode
+        # must not stop cross-inode-group discovery.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            group_a1, group_a2 = root / "a1.bin", root / "a2.bin"
+            group_b = root / "b.bin"
+            group_a1.write_bytes(b"same payload")
+            os.link(group_a1, group_a2)
+            group_b.write_bytes(b"same payload")
+            result = MODULE.dedupe([root], root / "state.json")
+            self.assertEqual(result["files_hashed"], 2)
+            self.assertEqual(result["duplicates_linked"], 1)
+            self.assertEqual(group_a1.stat().st_ino, group_b.stat().st_ino)
 
 
 class PruneOldDirectoriesTest(unittest.TestCase):
