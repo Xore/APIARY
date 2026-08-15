@@ -1,0 +1,89 @@
+# honeypot-sentrypeer -- #1424: SIP/VoIP honeypot (github.com/SentryPeer/SentryPeer,
+# vendored -- see sentrypeer/Dockerfile). Same shape and reasoning as
+# docker-compose.hellpot.yml -- no depends_on, its own fully private
+# network, only host bind mounts. Deployed as /opt/stacks/honeypot-sentrypeer.
+#
+# Scope decisions made integrating this sensor (see PR description for the
+# full writeup):
+#
+# - Public port 5070 (tcp+udp), not 5060: dionaea already binds host
+#   ${HP_BIND}:5060 (docker-compose.dionaea.yml) for its own generic
+#   SIP banner-grab -- SentryPeer's own SIP listener is hardcoded to port
+#   5060 *inside* its container regardless (no config option for this,
+#   confirmed against sentrypeer.1), so the host-side port is shifted
+#   instead, same "port-shift, not a collision" pattern galah's own
+#   8889->8888 shift used for the same reason (#1420).
+# - No cap_drop/cap_add: Docker's own default capability set already
+#   includes NET_BIND_SERVICE, same as cisco-asa-honeypot/dnp3-honeypot's
+#   own privileged ports (neither sets cap_drop either) -- only beelzebub's
+#   LDAP/389 needed an explicit cap_add, because that service drops
+#   everything else first for unrelated hardening reasons.
+# - Raw-port/portbridge-only, no Traefik hostname: SIP has no HTTP-style
+#   header a proxy could set for the real client IP, and confirmed directly
+#   against the vendored source that nothing PROXY-protocol-aware exists
+#   here either -- same CONN_LOG-join posture as beelzebub/hellpot
+#   (ip-enrichment-worker/sentrypeer.go).
+# - /opt/sentrypeer (WORKDIR) needs a small writable tmpfs even under
+#   read_only: true -- confirmed live that upstream's own TLS self-signed
+#   cert/key generation (sentrypeer_rust/src/config.rs) hardcodes the
+#   relative path "cert.pem"/"key.pem" regardless of SENTRYPEER_CERT/
+#   SENTRYPEER_KEY, and runs unconditionally on startup even though this
+#   stack only ever uses plain SIP (5061/TLS is never exposed).
+# - sentrypeer/nul_byte_crash_patch.py fixes a real, confirmed-live crash:
+#   any packet containing an embedded NUL byte (including our own
+#   healthcheck's nc -z -u probe) panicked the whole SIP listener thread --
+#   a trivial DoS for a sensor whose entire job is accepting arbitrary
+#   internet garbage. See that file's doc comment.
+# - No third-party sharing: SentryPeer's own Peer-to-Peer bad-actor-list
+#   distribution (-p/SENTRYPEER_PEER_TO_PEER) and its RESTful API
+#   (-a/SENTRYPEER_API) are both left off -- same call already made in
+#   docs/community-threat-intel-sharing.md for T-Pot's own ewsposter/hpfeeds.
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  sentrypeer:
+    <<: *runtime-defaults
+    build: /opt/stacks/apiary/sentrypeer
+    container_name: hp-sentrypeer
+    restart: unless-stopped
+    environment:
+      - TZ=Europe/Berlin
+    ports:
+      - ${HP_BIND:-10.8.0.2}:5070:5060
+      - ${HP_BIND:-10.8.0.2}:5070:5060/udp
+    volumes:
+      - /opt/stacks/apiary/logs/sentrypeer:/var/log/sentrypeer
+      - sentrypeer-db:/var/lib/sentrypeer
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
+    tmpfs:
+      - /opt/sentrypeer:uid=2000,gid=2000,mode=0700
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    networks: [sentrypeer_net]
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "5060"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    labels:
+      - autoheal=true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+networks:
+  sentrypeer_net:
+    driver: bridge
+
+volumes:
+  sentrypeer-db:

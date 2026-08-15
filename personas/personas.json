@@ -136,6 +136,14 @@
       "hostname": "console.meridian.example",
       "role": "Internal staff/admin console -- backend tooling whose exact surface varies request to request, which is what galah's adaptive responses (#1420) are actually for, unlike the two static Meridian assets above",
       "services": ["galah"]
+    },
+    "harborline-pbx": {
+      "organization": "Harborline Logistics AG",
+      "site_id": "harborline-dispatch-office",
+      "asset_id": "pbx-trunk-02",
+      "hostname": "voip-trunk02.harborline.example",
+      "role": "Legacy SIP trunk for the old dispatch office phone system -- the kind of forgotten VoIP gateway toll-fraud scanners specifically hunt for",
+      "services": ["sentrypeer"]
     }
   }
 }

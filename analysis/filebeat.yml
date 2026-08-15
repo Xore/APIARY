@@ -283,6 +283,14 @@ processors:
       target: honeypot
       fields: {persona_id: nexusai-analytics-legacy, site_id: nexusai-berlin-analytics, asset_id: analytics-es-04, organization: NexusAI Research GmbH}
       when.contains: {log.file.path: "enriched/elasticpot.json"}
+  # #1424: sentrypeer.json has no "sensor" field of its own either, same
+  # reasoning as beelzebub/hellpot above -- ip-enrichment-worker/sentrypeer.go
+  # already writes sensor/src_ip/src_port as flat fields before Filebeat
+  # ever sees it.
+  - add_fields:
+      target: honeypot
+      fields: {persona_id: harborline-pbx, site_id: harborline-dispatch-office, asset_id: pbx-trunk-02, organization: Harborline Logistics AG}
+      when.contains: {log.file.path: "enriched/sentrypeer.json"}
   # NOTE on stats events: they carry ~600 engine-internal counter fields and
   # once exhausted the shared daily index's field limit (2026-07-19 outage).
   # With per-event-type indices (see output below) they are contained in

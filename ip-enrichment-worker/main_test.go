@@ -146,6 +146,7 @@ func TestDiscoverSourcesFindsEveryConpotPersonaByGlob(t *testing.T) {
 		"hellpot",    // #1419
 		"elasticpot", // #1423
 		"galah",      // #1420
+		"sentrypeer", // #1424
 	} {
 		if _, ok := byName[want]; !ok {
 			t.Errorf("expected a source named %q, got %+v", want, byName)

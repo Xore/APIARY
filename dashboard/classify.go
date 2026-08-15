@@ -696,6 +696,27 @@ func classify(e map[string]any, dirSensor string) event {
 		return ev
 	}
 
+	// ---- sentrypeer (#1424) ---------------------------------------------------
+	// Reads the flat fields ip-enrichment-worker/sentrypeer.go promotes
+	// (sip_method is already native/flat in upstream's own JSON, only
+	// user_agent needed mirroring from sip_user_agent -- see that file's
+	// doc comment). No port: sentrypeer logs a fixed "0.0.0.0:5060"
+	// destination_ip, not the real per-request listen port.
+	if s, ok := e["sensor"].(string); ok && s == "sentrypeer" {
+		ev.sensor = "sentrypeer"
+		ev.proto = "sip"
+		ev.command = str(e["sip_method"])
+		if ev.fingerprint = str(e["user_agent"]); ev.fingerprint != "" {
+			ev.fingerKind = "User-Agent"
+		}
+		if called := str(e["called_number"]); called != "" {
+			ev.detail = ev.command + " -> " + called
+		} else {
+			ev.detail = ev.command
+		}
+		return ev
+	}
+
 	// ---- endlessh (#246) ---------------------------------------------------
 	// A "connect" and a later "disconnect" are logged per held connection;
 	// the disconnect carries the actual investigative value (how long/how
