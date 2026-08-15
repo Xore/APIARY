@@ -64,7 +64,14 @@ RUN apk -U add --no-cache \
     chown -R sentrypeer:sentrypeer /var/lib/sentrypeer /var/log/sentrypeer && \
     rm -rf /root/* /var/cache/apk/*
 
-COPY --from=builder /SentryPeer/sentrypeer /opt/sentrypeer/sentrypeer
+# Installed outside /opt/sentrypeer deliberately: docker-compose.sentrypeer.yml
+# mounts a tmpfs at exactly that path (for the cert/key writability below),
+# which shadows/empties whatever the image had there at container start --
+# confirmed live, the binary silently disappeared and the container failed
+# to start ("stat ./sentrypeer: no such file or directory") the first time
+# this was actually deployed through the real compose file rather than a
+# standalone `docker run`.
+COPY --from=builder /SentryPeer/sentrypeer /usr/local/bin/sentrypeer
 
 # /var/log/sentrypeer is a bind-mount point (docker-compose.sentrypeer.yml),
 # same convention as every other sensor's image.
@@ -79,7 +86,7 @@ COPY --from=builder /SentryPeer/sentrypeer /opt/sentrypeer/sentrypeer
 # root-owned and the non-root sentrypeer user can't write there. Making
 # WORKDIR itself writable is simpler than patching upstream for a feature
 # this sensor doesn't use.
-RUN chown sentrypeer:sentrypeer /opt/sentrypeer
+RUN mkdir -p /opt/sentrypeer && chown sentrypeer:sentrypeer /opt/sentrypeer
 
 USER sentrypeer:sentrypeer
 WORKDIR /opt/sentrypeer/
@@ -87,6 +94,14 @@ WORKDIR /opt/sentrypeer/
 ENV SENTRYPEER_JSON_LOG=1
 ENV SENTRYPEER_JSON_LOG_FILE=/var/log/sentrypeer/sentrypeer.json
 ENV SENTRYPEER_SIP_RESPONSIVE=1
+# sentrypeer_rust/src/config.rs also writes its own config dir via the
+# `directories` crate's XDG_CONFIG_HOME convention (confirmed live: without
+# this, it tries $HOME/.config/sentrypeer, which read_only: true makes
+# unwritable and isn't covered by docker-compose.sentrypeer.yml's own
+# /opt/sentrypeer tmpfs -- a second real crash found deploying this for the
+# first time, on top of the binary-location one above). Point it at the
+# same already-writable tmpfs instead of adding a second mount.
+ENV XDG_CONFIG_HOME=/opt/sentrypeer
 
 EXPOSE 5060/udp 5060/tcp
 
@@ -97,4 +112,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # JSON log file is read directly, and it's an unused extra surface. No -p
 # (Peer to Peer): declined third-party data sharing, same call already made
 # in docs/community-threat-intel-sharing.md.
-CMD ["./sentrypeer", "-v", "-f", "/var/lib/sentrypeer/sentrypeer.db"]
+CMD ["/usr/local/bin/sentrypeer", "-v", "-f", "/var/lib/sentrypeer/sentrypeer.db"]
