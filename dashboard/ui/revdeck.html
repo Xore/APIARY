@@ -25,12 +25,21 @@
         </header>
 
         {{if .Detail}}
+        {{if .Loading}}
+        <div id="revdeck-detail-root" data-hp-analyzer-fragment-url="/revdeck/{{.Detail.SHA256 | urlquery}}/fragment" data-hp-analyzer-missing="No standalone Rev&middot;Deck result was found for this hash." aria-busy="true">
+          <div class="filters" aria-hidden="true"><span class="chip"><span class="skeleton-line" style="width:210px"></span></span><span class="chip"><span class="skeleton-line" style="width:160px"></span></span><span class="chip"><span class="skeleton-line" style="width:140px"></span></span></div>
+          <div class="card wide"><h2>Rev&middot;Deck</h2><p class="note"><span class="skeleton-line" style="width:82%"></span></p><div class="card__scroll"><table class="data-table" aria-hidden="true"><tbody><tr><td>workflow</td><td><span class="skeleton-line"></span></td></tr><tr><td>status</td><td><span class="skeleton-line"></span></td></tr><tr><td>steps</td><td><span class="skeleton-line"></span></td></tr><tr><td>tool calls</td><td><span class="skeleton-line"></span></td></tr></tbody></table><div class="skeleton-line" style="width:94%"></div><div class="skeleton-line" style="width:88%"></div><div class="skeleton-line" style="width:76%"></div></div></div>
+        </div>
+        {{else}}
+        {{block "revdeck-detail-body" .}}
         <div class="filters"><a class="chip" href="/payload-workbench/{{.Detail.SHA256}}">Open unified analysis workbench &rarr;</a></div>
         <div class="filters" id="revdeck-detail-actions"><a class="chip" href="/ghidra/{{.Detail.SHA256}}">Ghidra analysis for this capture</a><a class="chip" href="/payload-analysis/{{.Detail.SHA256}}">static analysis</a><a class="chip" href="/events?shasum={{.Detail.SHA256}}">related events</a></div>
 
         {{if eq .Detail.ExitStatus "error"}}<div class="tw:mb-6 tw:rounded-lg tw:border tw:border-red tw:bg-red-subtle tw:px-4 tw:py-4 tw:text-red" role="alert"><strong>This run did not complete.</strong> {{if .Detail.Error}}{{.Detail.Error}}{{else}}The worker reported a failure with no detail.{{end}} Rev&middot;Deck's answer is the entire point of a standalone request, so a failure here means there is nothing else on this page.</div>{{end}}
 
-        <div class="card wide"><h2>Rev&middot;Deck</h2>{{if .Detail.RevDeck}}<p class="note">Rev&middot;Deck's own bounded, autonomous tool-calling loop against the Ghidra REST service &mdash; a second and independent AI aid alongside the worker's own AI triage, not a replacement for it. Every claim below is a language model's reading of decompiled code.</p><table class="data-table"><tbody><tr><td>workflow</td><td class="v">{{.Detail.RevDeck.Workflow}}</td></tr><tr><td>status</td><td class="v">{{.Detail.RevDeck.Status}}{{if eq .Detail.RevDeck.Status "max_turns"}} &mdash; the step budget ran out before the model finished; this is its best-effort synthesis, not a completed analysis{{end}}</td></tr>{{if .Detail.RevDeck.Steps}}<tr><td>steps</td><td class="v">{{.Detail.RevDeck.Steps}}</td></tr>{{end}}<tr><td>tool calls</td><td class="v">{{.Detail.RevDeck.ToolCalls}}</td></tr></tbody></table>{{if .Detail.RevDeck.Answer}}<p class="note">Answer:</p><p>{{.Detail.RevDeck.Answer}}</p>{{end}}{{if .Detail.RevDeck.Citations}}{{if .Detail.RevDeck.Citations.Valid}}<p class="note">Citations:</p><ul class="tw:list-disc tw:pl-5">{{range .Detail.RevDeck.Citations.Valid}}<li>{{.Raw}}</li>{{end}}</ul>{{end}}{{if .Detail.RevDeck.Citations.Invalid}}<p class="note">Citations the model referenced that could not be verified against the analysis:</p><ul class="tw:list-disc tw:pl-5">{{range .Detail.RevDeck.Citations.Invalid}}<li>{{.Raw}}</li>{{end}}</ul>{{end}}{{end}}{{if .Detail.RevDeck.Warnings}}<p class="note">Warnings from the run:</p><ul class="tw:list-disc tw:pl-5">{{range .Detail.RevDeck.Warnings}}<li>{{.}}</li>{{end}}</ul>{{end}}{{else}}<p class="empty">No Rev&middot;Deck data &mdash; see the error above.</p>{{end}}</div>
+        <div class="card wide"><h2>Rev&middot;Deck</h2>{{if .Detail.RevDeck}}<p class="note">Rev&middot;Deck's own bounded, autonomous tool-calling loop against the Ghidra REST service &mdash; a second and independent AI aid alongside the worker's own AI triage, not a replacement for it. Every claim below is a language model's reading of decompiled code.</p><div class="card__scroll"><table class="data-table"><tbody><tr><td>workflow</td><td class="v">{{.Detail.RevDeck.Workflow}}</td></tr><tr><td>status</td><td class="v">{{.Detail.RevDeck.Status}}{{if eq .Detail.RevDeck.Status "max_turns"}} &mdash; the step budget ran out before the model finished; this is its best-effort synthesis, not a completed analysis{{end}}</td></tr>{{if .Detail.RevDeck.Steps}}<tr><td>steps</td><td class="v">{{.Detail.RevDeck.Steps}}</td></tr>{{end}}<tr><td>tool calls</td><td class="v">{{.Detail.RevDeck.ToolCalls}}</td></tr></tbody></table>{{if .Detail.RevDeck.Answer}}<p class="note">Answer:</p><p>{{.Detail.RevDeck.Answer}}</p>{{end}}{{if .Detail.RevDeck.Citations}}{{if .Detail.RevDeck.Citations.Valid}}<p class="note">Citations:</p><ul class="tw:list-disc tw:pl-5">{{range .Detail.RevDeck.Citations.Valid}}<li>{{.Raw}}</li>{{end}}</ul>{{end}}{{if .Detail.RevDeck.Citations.Invalid}}<p class="note">Citations the model referenced that could not be verified against the analysis:</p><ul class="tw:list-disc tw:pl-5">{{range .Detail.RevDeck.Citations.Invalid}}<li>{{.Raw}}</li>{{end}}</ul>{{end}}{{end}}{{if .Detail.RevDeck.Warnings}}<p class="note">Warnings from the run:</p><ul class="tw:list-disc tw:pl-5">{{range .Detail.RevDeck.Warnings}}<li>{{.}}</li>{{end}}</ul>{{end}}</div>{{else}}<p class="empty">No Rev&middot;Deck data &mdash; see the error above.</p>{{end}}</div>
+        {{end}}
+        {{end}}
 
         {{else}}
         <p class="empty">No standalone Rev&middot;Deck result found for this hash. Submit one from the <a href="/payloads#start-analysis">analysis workbench</a>.</p>
@@ -40,6 +49,7 @@
       </div>
     </main>
 </div>
+<script defer src="{{asset "/static/hp-analyzer-detail.js"}}"></script>
 </body>
 </html>
 {{end}}
