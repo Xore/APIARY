@@ -7,13 +7,10 @@ import (
 	"testing"
 )
 
-// TestEventDetailModalContract is #59's event-detail modal, reviewed here as
-// its own data-attribute contract: each row's "details" trigger
-// (data-hp-evidence) must have exactly one matching hidden body
-// (data-hp-evidence-body) carrying the full normalized event as escaped
-// JSON, plus pivot links -- rendered through the existing shared
-// hp-evidence.js viewer (no new JS controller for this modal).
-func TestEventDetailModalContract(t *testing.T) {
+// TestEventDetailInlineContract covers #1447's in-flow event evidence: every
+// row carries one complete, bounded normalized record plus its pivots, with
+// no modal trigger or hidden evidence body between the analyst and the data.
+func TestEventDetailInlineContract(t *testing.T) {
 	s := &store{}
 	s.events = []storedEvent{
 		{Time: "2026-08-01 10:00", Sensor: "cowrie", SrcIP: "203.0.113.9", Session: "sess-a", Command: "id", Detail: "login attempt"},
@@ -29,23 +26,12 @@ func TestEventDetailModalContract(t *testing.T) {
 	}
 	html := out.String()
 
-	triggers := extractAttrValues(html, `data-hp-evidence="`)
-	bodies := extractAttrValues(html, `data-hp-evidence-body="`)
-	if len(triggers) != 2 || len(bodies) != 2 {
-		t.Fatalf("expected 2 trigger/body pairs for 2 events, got triggers=%v bodies=%v", triggers, bodies)
+	if got := strings.Count(html, `data-hp-event-detail="`); got != 2 {
+		t.Fatalf("expected one inline normalized record per event, got %d", got)
 	}
-	if triggers[0] == triggers[1] {
-		t.Fatalf("two distinct events produced the same evidence key: %q", triggers[0])
-	}
-	for _, key := range triggers {
-		found := false
-		for _, b := range bodies {
-			if b == key {
-				found = true
-			}
-		}
-		if !found {
-			t.Fatalf("trigger key %q has no matching data-hp-evidence-body", key)
+	for _, forbidden := range []string{`data-hp-evidence="`, `data-hp-evidence-body="`} {
+		if strings.Contains(html, forbidden) {
+			t.Fatalf("event detail is still modal-only or hidden: %q", forbidden)
 		}
 	}
 
@@ -54,7 +40,7 @@ func TestEventDetailModalContract(t *testing.T) {
 		// dump's literal `"` becomes `&#34;` -- still valid, still readable,
 		// still exactly the content-integrity property that matters here.
 		`&#34;SrcIP&#34;: &#34;203.0.113.9&#34;`, `&#34;SrcIP&#34;: &#34;203.0.113.10&#34;`,
-		"investigate/ip/203.0.113.9", "sessions/sess-a",
+		"investigate/ip/203.0.113.9", "sessions/sess-a", `class="card__scroll"><pre class="code"`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("rendered event detail is missing %q", want)
@@ -96,13 +82,11 @@ func TestEventTimestampCarriesUTCAttribute(t *testing.T) {
 	}
 }
 
-// TestEventDetailModalEscapesHostileContent proves the guide's own
-// requirement for this class of modal ("never inject raw ... bytes as
-// HTML") holds for the event-detail JSON dump specifically: html/template's
+// TestEventDetailInlineEscapesHostileContent proves html/template's
 // auto-escaping must turn a markup-shaped Detail field into inert text, both
 // in the visible row and inside the JSON block a real attacker-controlled
 // command could otherwise reach.
-func TestEventDetailModalEscapesHostileContent(t *testing.T) {
+func TestEventDetailInlineEscapesHostileContent(t *testing.T) {
 	s := &store{}
 	s.events = []storedEvent{
 		{Time: "2026-08-01 10:00", Sensor: "cowrie", SrcIP: "203.0.113.9", Command: `<img src=x onerror=alert(1)>`, Detail: `<script>alert(1)</script>`},
@@ -126,23 +110,4 @@ func TestEventDetailModalEscapesHostileContent(t *testing.T) {
 	if !strings.Contains(html, "&lt;script&gt;alert(1)&lt;/script&gt;") {
 		t.Fatal("expected the hostile Detail value to appear HTML-escaped in the JSON dump")
 	}
-}
-
-func extractAttrValues(html, prefix string) []string {
-	var values []string
-	rest := html
-	for {
-		idx := strings.Index(rest, prefix)
-		if idx < 0 {
-			break
-		}
-		rest = rest[idx+len(prefix):]
-		end := strings.Index(rest, `"`)
-		if end < 0 {
-			break
-		}
-		values = append(values, rest[:end])
-		rest = rest[end:]
-	}
-	return values
 }
