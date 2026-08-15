@@ -267,34 +267,28 @@ func TestPayloadAggregationForReportsKnownVsNotSeenElsewhere(t *testing.T) {
 	}
 }
 
-// TestWorkbenchPageRendersKnownElsewhereBannerOnlyWhenKnown (#354): the
-// workbench is the actual "about to submit new work" decision point, so the
-// advisory banner belongs there too -- present when known, absent (not an
-// empty banner) when not, and never disabling analyzer selection either way.
-func TestWorkbenchPageRendersKnownElsewhereBannerOnlyWhenKnown(t *testing.T) {
+// TestWorkbenchPageRendersKnownElsewhereSkeleton (#1472): correlation is an
+// independent hydrated source. The identifier-aware shell must always reserve
+// its visible card without synchronously embedding either stale results or a
+// false "not known" state.
+func TestWorkbenchPageRendersKnownElsewhereSkeleton(t *testing.T) {
 	funcs := templateFuncs(nil, "")
 	tmpl := template.Must(template.New("dashboard").Funcs(funcs).Parse(pageTemplate))
 
-	known := workbenchPageData{
-		SHA256: shaA,
-		Correlation: hashCorrelation{
-			Known: true, Sandbox: []sandboxResult{{Job: "linux-x"}},
-		},
-	}
+	shell := workbenchPageData{SHA256: shaA}
 	var buf strings.Builder
-	if err := tmpl.ExecuteTemplate(&buf, "payload-workbench", &known); err != nil {
-		t.Fatalf("render known: %v", err)
+	if err := tmpl.ExecuteTemplate(&buf, "payload-workbench", &shell); err != nil {
+		t.Fatalf("render shell: %v", err)
 	}
-	if !strings.Contains(buf.String(), "wb-known-elsewhere") || !strings.Contains(buf.String(), "Sandbox: 1 run(s)") {
-		t.Fatalf("known-elsewhere banner missing or incomplete: %s", buf.String())
+	body := buf.String()
+	for _, want := range []string{`id="wb-known-elsewhere"`, `data-wb-known aria-busy="true"`, `data-wb-classification aria-busy="true"`, `data-wb-model-status aria-busy="true"`, `data-wb-analyzers aria-busy="true"`, `data-wb-runs aria-live="polite" aria-busy="true"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("render-first workbench shell is missing %q", want)
+		}
 	}
-
-	unknown := workbenchPageData{SHA256: shaB, Correlation: hashCorrelation{}}
-	buf.Reset()
-	if err := tmpl.ExecuteTemplate(&buf, "payload-workbench", &unknown); err != nil {
-		t.Fatalf("render unknown: %v", err)
-	}
-	if strings.Contains(buf.String(), "wb-known-elsewhere") {
-		t.Fatal("banner must not render when Correlation.Known is false")
+	for _, synchronous := range []string{"Sandbox: 1 run(s)", "No prior native analysis", "identified type"} {
+		if strings.Contains(body, synchronous) {
+			t.Fatalf("shell synchronously rendered hydrated data %q", synchronous)
+		}
 	}
 }

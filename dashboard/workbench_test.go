@@ -809,7 +809,7 @@ func TestWorkbenchRunButtonGivesImmediateFeedback(t *testing.T) {
 	if !strings.Contains(source, `say("Submitting analysis run…")`) {
 		t.Fatal(`submitting the workbench run form must post an immediate status message before the fetch starts`)
 	}
-	if !strings.Contains(source, `withBusyButton(button, "Starting…"`) {
+	if !strings.Contains(source, `withBusyButton(runButton, "Starting…"`) {
 		t.Fatal(`the Start analysis run button must switch to a visible busy label while the request is in flight, not just disable`)
 	}
 }

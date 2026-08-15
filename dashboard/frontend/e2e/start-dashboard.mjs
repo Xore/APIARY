@@ -80,7 +80,7 @@ await fetch(`${fakeES.url}/dashboard-payload-inventory-v1/_doc/${payloadHash}?op
     Dynamic: true,
     Sources: ["scripts"],
     Copies: 1,
-    Preview: "",
+    Preview: "00000000  23 21 2f 62 69 6e 2f 73  68 0a 63 75 72 6c 20 68  |#!/bin/sh.curl h|",
     PreviewTruncated: false,
   }),
 });
@@ -98,6 +98,7 @@ await fetch(`${fakeES.url}/sandbox-analysis-v1/_doc/sandbox:${sandboxJob}?op_typ
       version: 2,
       job: sandboxJob,
       sha256: payloadHash,
+      hashes: { md5: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", sha1: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
       route: "windows-ghosts",
       file_type: "PE32 browser fixture",
       exit_status: "ok",

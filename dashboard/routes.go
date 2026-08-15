@@ -178,6 +178,8 @@ func (s *store) routes(tmpl *template.Template) *http.ServeMux {
 	// silently picking a winner -- confirmed live, this exact conflict.
 	mux.HandleFunc("POST /investigate/ip/block", s.serveIPBlockAction)
 	mux.HandleFunc("GET /api/payload-workbench/registry/", s.serveWorkbenchRegistry)
+	mux.HandleFunc("GET /api/payload-workbench/model-status", s.serveWorkbenchModelStatus)
+	mux.HandleFunc("GET /api/payload-workbench/correlation/", s.serveWorkbenchCorrelation)
 	mux.HandleFunc("GET /api/payload-workbench/recipes", s.serveWorkbenchRecipes)
 	mux.HandleFunc("POST /api/payload-workbench/recipes", s.serveWorkbenchRecipes)
 	mux.HandleFunc("GET /api/payload-workbench/runs", s.serveWorkbenchRuns)

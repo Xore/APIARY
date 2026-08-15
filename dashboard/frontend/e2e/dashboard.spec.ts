@@ -593,10 +593,13 @@ test.describe("dashboard browser behaviour", () => {
   });
 
   test("payload workbench runs applicable analyzers and keeps external publication separate", async ({ page }) => {
+    await page.route("**/api/payload-workbench/model-status", route => route.fulfill({ status: 503, body: "fixture model source unavailable" }));
     await page.goto("/payload-workbench/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
     await expect(page.getByRole("heading", { name: "Payload workbench" })).toBeVisible();
     await expect(page.locator('[data-wb-analyzer][data-analyzer-id="deterministic"] input[type="checkbox"]')).toBeChecked();
     await expect(page.locator('[data-wb-analyzer][data-analyzer-id="revdeck"] input[type="checkbox"]')).toBeDisabled();
+    await expect(page.locator("[data-wb-model-status]")).toContainText("could not be loaded");
+    await expect(page.locator("[data-wb-known]")).not.toHaveAttribute("aria-busy", "true");
     await expect(page.getByText("never in Run all", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Start analysis run" }).focus();
     await expect(page.getByRole("button", { name: "Start analysis run" })).toBeFocused();
@@ -609,6 +612,8 @@ test.describe("dashboard browser behaviour", () => {
     await page.goto("/payloads");
     const card = page.locator(".project-card").first();
     await expect(card).toBeVisible();
+    await expect(card.getByRole("region", { name: "Byte preview" })).toContainText("00000000");
+    await expect(card.getByRole("button", { name: "Preview bytes" })).toHaveCount(0);
     // .project-card__desc is plain text, not the title link or the action
     // menu -- exactly the "dead" part of the card #1137 reported.
     await card.locator(".project-card__desc").click();
@@ -691,6 +696,14 @@ test.describe("dashboard browser behaviour", () => {
     await expect(page.locator("[data-hp-pl-github-analysis]")).toContainText("Not published to Xore/honeypot");
     await expect(page.locator("[data-hp-pl-known-elsewhere]")).toContainText("not yet analyzed");
     await expect(page.locator("#hp-pl-known-elsewhere-heading")).toContainText("not seen elsewhere");
+    await page.getByRole("tab", { name: /Content/ }).click();
+    await expect(page.getByRole("heading", { name: "Hex / ASCII preview — first 512 bytes" })).toBeVisible();
+    await expect(page.locator("[data-hp-pl-text] .card__scroll")).toContainText("example.invalid");
+    await expect(page.getByRole("button", { name: /Printable strings|Open decoded candidates|Hex \/ ASCII preview/ })).toHaveCount(0);
+    await page.getByRole("tab", { name: /Identity/ }).click();
+    await expect(page.locator("[data-hp-pl-identity] .card__label", { hasText: "SHA-1" })).toBeVisible();
+    await expect(page.locator("[data-hp-pl-identity] .card__label", { hasText: "MD5" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "More hashes" })).toHaveCount(0);
   });
 
   test("Ghidra AI reports put single-line prose sentences on separate lines (#1442)", async ({ page }) => {
@@ -728,6 +741,9 @@ test.describe("dashboard browser behaviour", () => {
     await page.goto("/sandbox/windows-ghosts-browser-fixture");
     const root = page.locator("#sandbox-detail-root");
     await expect(root).not.toHaveAttribute("aria-busy", "true");
+    await expect(root.locator(".card__row", { hasText: "SHA-1" })).toContainText("bbbbbbbb");
+    await expect(root.locator(".card__row", { hasText: "MD5" })).toContainText("aaaaaaaa");
+    await expect(page.getByRole("button", { name: "More hashes" })).toHaveCount(0);
     await expect(root.locator("#sandbox-detail-actions")).toBeVisible();
     await expect(root).toContainText("PE32 browser fixture");
     await expect(root.locator("#syscalls-chart canvas")).not.toHaveCount(0);

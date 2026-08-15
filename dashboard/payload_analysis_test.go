@@ -96,7 +96,7 @@ func TestPayloadAnalysisPageRendersShellSkeletonForEveryHydratedField(t *testing
 	for _, want := range []string{
 		`data-hp-pl-hash="` + shaA + `"`,
 		"data-hp-pl-risk", "data-hp-pl-packed", "data-hp-pl-iocs-count",
-		"data-hp-pl-identity", "data-hp-pl-more-hashes",
+		"data-hp-pl-identity",
 		"data-hp-pl-script", "data-hp-pl-yara", "data-hp-pl-rules", "data-hp-pl-ioc-list",
 		"data-hp-pl-bytes-actions", "data-hp-pl-text", "data-hp-pl-decoded",
 		"data-hp-pl-classification-note",

@@ -1,6 +1,6 @@
 {{/* A payload card keeps .project-card as a plain, non-linking container --
      unlike a single-destination card (e.g. Ghidra results), a payload has
-     several distinct actions (static analysis, workbench, preview, download,
+     several distinct actions (static analysis, workbench, download,
      publish), and HTML forbids nesting interactive controls (the action
      menu's <details>/<button>/<form>) inside an <a>. The hash itself is the
      one direct link (to static analysis, matching the old table's hash-cell
@@ -16,6 +16,10 @@
     </div>
   </div>
   <p class="project-card__desc"><strong>{{.Kind}}</strong> &bull; {{.Platform}} &bull; {{.MIME}} &bull; {{.SizeH}}{{if gt .Copies 1}} &bull; {{.Copies}} copies{{end}} &bull; <span title="{{.AnalysisPath}}">{{if .Dynamic}}dynamic route ready{{else}}static-only route{{end}}</span></p>
+  <section class="tw:my-2" aria-label="Byte preview">
+    <p class="note">{{if .Preview}}First {{if .PreviewTruncated}}512 of {{.SizeH}}{{else}}{{.SizeH}}{{end}} bytes, hex/ASCII. Read only; never interpreted or executed.{{else}}No byte preview is available for this capture.{{end}}</p>
+    {{if .Preview}}<pre class="code hp-code-results">{{.Preview}}</pre>{{end}}
+  </section>
   <div class="project-card__meta">
     <span{{if .MtimeUTC}} data-hp-utc="{{.MtimeUTC}}"{{end}}>{{.Mtime}}</span>
     {{if .OriginLabel}}{{if .OriginLink}}<a class="lnk" href="{{.OriginLink}}" title="Open the session this payload was captured in">{{.OriginLabel}} &rarr;</a>{{else}}<span title="No session recorded for this capture">{{.OriginLabel}}</span>{{end}}{{else}}<span class="tw:text-muted">unknown origin</span>{{end}}
@@ -24,7 +28,6 @@
       <div class="action-menu__popover" role="menu">
         <a class="action-menu__item" role="menuitem" href="/payload-analysis/{{.Hash}}">Static analysis &rarr;</a>
         <a class="action-menu__item" role="menuitem" href="/payload-workbench/{{.Hash}}">Analysis workbench &rarr;</a>
-        {{if .Preview}}<button class="action-menu__item" role="menuitem" type="button" data-hp-evidence="pf-{{.Hash}}">Preview bytes</button><div hidden data-hp-evidence-body="pf-{{.Hash}}" data-hp-evidence-title="Payload preview — {{.Hash}}" data-hp-evidence-note="First {{if .PreviewTruncated}}512 of {{.SizeH}}{{else}}{{.SizeH}}{{end}} bytes, hex/ASCII. The sample is read, never interpreted or executed."><pre class="code">{{.Preview}}</pre></div>{{end}}
         <a class="action-menu__item" role="menuitem" href="/payload/{{.Hash}}">Download sample &darr;</a>
         <a class="action-menu__item" role="menuitem" href="/events?shasum={{.Hash}}">Related events &rarr;</a>
         <a class="action-menu__item" role="menuitem" href="https://www.virustotal.com/gui/file/{{.Hash}}" target="_blank" rel="noopener noreferrer">VirusTotal &nearr;</a>
@@ -249,19 +252,14 @@
 
         <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-identity" role="tabpanel" data-dashboard-panel="identity">
           <div class="section-heading"><div><h2>What this file is</h2><p>Type, hashes, and whether it has been detonated in the isolated sandbox.</p></div></div>
-          {{/* #673: MD5/SHA-1 moved out of the always-visible table into a
-               popover -- SHA-256 stays in the table since it is this
-               page's own primary identifier (the URL, download link, and
-               every cross-reference on this page already key off it), but
-               the other two are secondary lookups most visits never need. */}}
           {{/* #790 chunk 10: this card and "Known elsewhere" below now
                convert too -- Xore/theme#29 gave .card__value word-break
                handling, unblocking SHA-256/magic (long/free-text) here.
                Known elsewhere's mixed badge/link/chip content converts to
                plain (non-mono) card__value, same treatment already proven
                on sandbox.html's Run identity card this same chunk. */}}
-          <div class="card wide"><h2>Identity and selected analysis path<span data-hp-pl-more-hashes></span></h2><div data-hp-pl-identity>
-            <div class="skeleton-line" style="width:75%"></div><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:50%"></div><div class="skeleton-line" style="width:65%"></div><div class="skeleton-line" style="width:90%"></div><div class="skeleton-line" style="width:70%"></div>
+          <div class="card wide"><h2>Identity and selected analysis path</h2><div data-hp-pl-identity>
+            <div class="skeleton-line" style="width:75%"></div><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:50%"></div><div class="skeleton-line" style="width:65%"></div><div class="skeleton-line" style="width:90%"></div><div class="skeleton-line" style="width:70%"></div><div class="skeleton-line" style="width:82%"></div><div class="skeleton-line" style="width:76%"></div><div class="skeleton-line" style="width:88%"></div>
           </div></div>
           {{/* #790 chunk 6: card__row -- language/type is a short string,
                and the indicators row's chips wrap individually inside the
@@ -315,26 +313,10 @@
         </div>
 
         <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-content" role="tabpanel" data-dashboard-panel="content" hidden>
-          <div class="section-heading"><div><h2>What is inside the file</h2><p>Raw bytes, metadata, and extracted text. Each block opens in the evidence viewer, where it can be filtered.</p></div></div>
+          <div class="section-heading"><div><h2>What is inside the file</h2><p>Raw bytes, metadata, and extracted text are visible below in bounded, searchable regions.</p></div></div>
           <div class="card wide"><h2>Bytes and metadata</h2><p class="note">The sample is read, never interpreted or executed.</p><div data-hp-pl-bytes-actions><div class="skeleton-line" style="width:45%"></div></div></div>
           <div class="card half"><h2>Extracted text</h2><div data-hp-pl-text><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:40%"></div></div></div>
           <div class="card half"><h2>Decoded candidates</h2><div data-hp-pl-decoded><div class="skeleton-line" style="width:55%"></div></div></div>
-        </div>
-
-        {{/* #1157: the evidence viewer (hp-evidence.js) reads these bodies
-             from the DOM at click time, not at page load -- see its own
-             top-of-file comment -- so it's fine for them to start empty and
-             be filled in by hp-payload-analysis.js's static-analysis
-             hydration once the file-bytes work behind them resolves. The
-             buttons that open them live in data-hp-pl-bytes-actions/
-             data-hp-pl-text/data-hp-pl-decoded above and are only rendered
-             once there is something real behind them to open. */}}
-        <div class="hp-evidence-source" hidden>
-          <div data-hp-evidence-body="pl-hexdump"></div>
-          <div data-hp-evidence-body="pl-format"></div>
-          <div data-hp-evidence-body="pl-ascii"></div>
-          <div data-hp-evidence-body="pl-utf16"></div>
-          <div data-hp-evidence-body="pl-decoded"></div>
         </div>
 
         <footer id="analysis-footer">{{brandText}} &bull; static analysis only &bull; never execute captured samples</footer>

@@ -8,11 +8,8 @@ import (
 	"time"
 )
 
-// TestPayloadPreviewModalContract is #59's payload-preview modal, reviewed
-// as its own data-attribute contract: the /payloads list "preview" trigger
-// pairs with exactly one hidden body per row, keyed by the payload's own
-// hash (already globally unique -- no derived key needed, unlike event
-// detail). The preview is a hex dump computed once, elsewhere -- #1223:
+// TestPayloadPreviewCardContract is #1452's inline payload preview. The
+// preview is a hex dump computed once, elsewhere -- #1223:
 // payload-inventory-worker now owns that computation (its own scan.go,
 // ported from this file's original scanPayloads, removed here) and writes
 // it onto the shared payloadInventoryIndex document; this only needs to
@@ -20,7 +17,7 @@ import (
 // whatever Preview value it's handed -- so this seeds s.payloadCache
 // directly with a hostile Preview value instead of computing one via a
 // real scan.
-func TestPayloadPreviewModalContract(t *testing.T) {
+func TestPayloadPreviewCardContract(t *testing.T) {
 	hash := strings.Repeat("a", 64)
 	// Content includes markup-shaped bytes that are also printable ASCII, so
 	// they land in hex.Dump's own ASCII sidebar column -- exactly the case
@@ -44,17 +41,14 @@ func TestPayloadPreviewModalContract(t *testing.T) {
 	html := out.String()
 
 	triggerKey := "pf-" + hash
-	if !strings.Contains(html, `data-hp-evidence="`+triggerKey+`"`) {
-		t.Fatalf("no preview trigger for hash %s", hash)
+	if strings.Contains(html, "Preview bytes") || strings.Contains(html, `data-hp-evidence="`+triggerKey+`"`) || strings.Contains(html, `data-hp-evidence-body="`+triggerKey+`"`) {
+		t.Fatal("payload preview is still hidden behind an action or evidence modal")
 	}
-	if !strings.Contains(html, `data-hp-evidence-body="`+triggerKey+`"`) {
-		t.Fatalf("no matching preview body for hash %s", hash)
-	}
-	bodyStart := strings.Index(html, `data-hp-evidence-body="`+triggerKey+`"`)
+	bodyStart := strings.Index(html, `aria-label="Byte preview"`)
 	if bodyStart < 0 {
-		t.Fatal("preview body not found")
+		t.Fatalf("no inline byte-preview card for hash %s", hash)
 	}
-	bodyEnd := bodyStart + strings.Index(html[bodyStart:], "</div>")
+	bodyEnd := bodyStart + strings.Index(html[bodyStart:], "</section>")
 	previewBlock := html[bodyStart:bodyEnd]
 
 	if strings.Contains(previewBlock, "<script>alert(1)") || strings.Contains(previewBlock, "</script>") {

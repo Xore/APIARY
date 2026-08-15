@@ -147,7 +147,6 @@
     const riskTarget = document.querySelector("[data-hp-pl-risk]");
     const packedTarget = document.querySelector("[data-hp-pl-packed]");
     const iocsCountTarget = document.querySelector("[data-hp-pl-iocs-count]");
-    const moreHashesTarget = document.querySelector("[data-hp-pl-more-hashes]");
     const identityTarget = document.querySelector("[data-hp-pl-identity]");
     const scriptCard = document.getElementById("hp-pl-script-card");
     const scriptBodyTarget = document.querySelector("[data-hp-pl-script-body]");
@@ -157,15 +156,6 @@
     const bytesActionsTarget = document.querySelector("[data-hp-pl-bytes-actions]");
     const textTarget = document.querySelector("[data-hp-pl-text]");
     const decodedTarget = document.querySelector("[data-hp-pl-decoded]");
-
-    const evidenceBody = key => document.querySelector(`[data-hp-evidence-body="${key}"]`);
-    const setEvidence = (key, title, note, html) => {
-      const el = evidenceBody(key);
-      if (!el) return;
-      el.dataset.hpEvidenceTitle = title;
-      if (note) el.dataset.hpEvidenceNote = note;
-      el.innerHTML = html;
-    };
 
     function renderClassificationNote(c) {
       if (!noteTarget) return;
@@ -181,9 +171,6 @@
 
     function renderIdentity(data) {
       const c = data.classification || {};
-      if (moreHashesTarget) {
-        moreHashesTarget.innerHTML = `<details class="action-menu hp-pl-label-trigger"><summary aria-label="More hashes" title="MD5 and SHA-1">More hashes</summary><div class="action-menu__popover hp-pl-info-popover" role="menu"><div class="hp-pl-info-row"><span class="k">MD5</span><span class="v">${escapeHTML(data.md5)}</span></div><div class="hp-pl-info-row"><span class="k">SHA-1</span><span class="v">${escapeHTML(data.sha1)}</span></div></div></details>`;
-      }
       if (!identityTarget) return;
       let html = `<div class="card__row"><span class="card__label">identified type</span><span class="card__value"><strong>${escapeHTML(c.label)}</strong> <span class="badge badge--muted">${escapeHTML(c.code)}</span></span></div>`;
       html += `<div class="card__row"><span class="card__label">platform / category</span><span class="card__value card__value--mono">${escapeHTML(c.platform)} / ${escapeHTML(c.category)}</span></div>`;
@@ -194,6 +181,8 @@
       html += `<div class="card__row"><span class="card__label">size</span><span class="card__value card__value--mono">${escapeHTML(data.size)}</span></div>`;
       html += `<div class="card__row"><span class="card__label">entropy</span><span class="card__value card__value--mono">${escapeHTML(data.entropy)}</span></div>`;
       html += `<div class="card__row"><span class="card__label">SHA-256</span><span class="card__value card__value--mono">${escapeHTML(data.sha256)}</span></div>`;
+      html += `<div class="card__row"><span class="card__label">SHA-1</span><span class="card__value card__value--mono">${escapeHTML(data.sha1)}</span></div>`;
+      html += `<div class="card__row"><span class="card__label">MD5</span><span class="card__value card__value--mono">${escapeHTML(data.md5)}</span></div>`;
       if (data.truncated) html += `<p class="note">deep inspection capped at 16 MiB; hashes cover the complete file</p>`;
       identityTarget.innerHTML = html;
     }
@@ -255,46 +244,92 @@
       }
     }
 
+    function renderSearchableEvidence(target, entries, options) {
+      if (!target) return;
+      target.replaceChildren();
+      if (!entries.length) {
+        const empty = document.createElement("p");
+        empty.className = "empty";
+        empty.textContent = options.empty;
+        target.appendChild(empty);
+        return;
+      }
+      const note = document.createElement("p");
+      note.className = "note";
+      const input = document.createElement("input");
+      input.className = "search";
+      input.type = "search";
+      input.placeholder = options.placeholder;
+      input.setAttribute("aria-label", options.placeholder);
+      const scroll = document.createElement("div");
+      scroll.className = "card__scroll";
+      const pre = document.createElement("pre");
+      pre.className = "code";
+      scroll.appendChild(pre);
+      const update = () => {
+        const query = input.value.trim().toLowerCase();
+        const shown = query ? entries.filter(entry => `${entry.label} ${entry.value}`.toLowerCase().includes(query)) : entries;
+        note.textContent = `${shown.length} of ${entries.length} ${options.label}${entries.length === 1 ? "" : "s"} shown${options.note ? ` — ${options.note}` : ""}`;
+        pre.textContent = shown.length ? shown.map(entry => entry.label ? `[${entry.label}]\n${entry.value}` : entry.value).join("\n\n") : "No entries match this filter.";
+      };
+      input.addEventListener("input", update);
+      target.append(note, input, scroll);
+      update();
+    }
+
     function renderBytesAndMetadata(data) {
-      setEvidence("pl-hexdump", "Hex / ASCII preview — first 512 bytes", "", `<pre class="code">${escapeHTML(data.hexdump)}</pre>`);
-      if (bytesActionsTarget) {
-        let html = `<button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-hexdump">Hex / ASCII preview</button> `;
-        if ((data.format_info || []).length) {
-          html += `<button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-format">Executable metadata</button>`;
-          setEvidence("pl-format", "Executable metadata", "", `<pre class="code">${data.format_info.map(escapeHTML).join("\n")}</pre>`);
-        } else {
-          html += `<span class="chip">not a recognized PE/ELF file</span>`;
-        }
-        bytesActionsTarget.innerHTML = html;
+      if (!bytesActionsTarget) return;
+      bytesActionsTarget.replaceChildren();
+      const previewTitle = document.createElement("h3");
+      previewTitle.textContent = "Hex / ASCII preview — first 512 bytes";
+      const preview = document.createElement("pre");
+      preview.className = "code hp-code-results";
+      preview.textContent = data.hexdump || "No byte preview is available.";
+      bytesActionsTarget.append(previewTitle, preview);
+      const formatTitle = document.createElement("h3");
+      formatTitle.textContent = "Executable metadata";
+      bytesActionsTarget.appendChild(formatTitle);
+      if ((data.format_info || []).length) {
+        const format = document.createElement("pre");
+        format.className = "code hp-code-results";
+        format.textContent = data.format_info.join("\n");
+        bytesActionsTarget.appendChild(format);
+      } else {
+        const empty = document.createElement("p");
+        empty.className = "empty";
+        empty.textContent = "Not a recognized PE or ELF file.";
+        bytesActionsTarget.appendChild(empty);
+      }
+      if (data.truncated) {
+        const cap = document.createElement("p");
+        cap.className = "note";
+        cap.textContent = "Deep inspection is capped at 16 MiB; hashes cover the complete file.";
+        bytesActionsTarget.appendChild(cap);
       }
     }
 
     function renderExtractedText(data) {
-      const ascii = data.ascii || [];
-      const utf16 = data.utf16 || [];
-      if (ascii.length) setEvidence("pl-ascii", "Printable strings", "Printable sequences extracted from the sample. Filter to find a specific indicator.", `<pre class="code">${ascii.map(escapeHTML).join("\n")}</pre>`);
-      if (utf16.length) setEvidence("pl-utf16", "UTF-16LE strings", "Wide-character sequences extracted from the sample.", `<pre class="code">${utf16.map(escapeHTML).join("\n")}</pre>`);
-      if (!textTarget) return;
-      if (!ascii.length && !utf16.length) {
-        textTarget.innerHTML = `<p class="empty">No printable sequences extracted.</p>`;
-        return;
-      }
-      let html = `<p class="note">${ascii.length} printable and ${utf16.length} wide-character sequence${utf16.length !== 1 ? "s" : ""} extracted.</p>`;
-      if (ascii.length) html += `<button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-ascii">Printable strings (${ascii.length})</button> `;
-      if (utf16.length) html += `<button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-utf16">UTF-16LE strings (${utf16.length})</button>`;
-      textTarget.innerHTML = html;
+      const ascii = (data.ascii || []).map(value => ({label: "ASCII", value}));
+      const utf16 = (data.utf16 || []).map(value => ({label: "UTF-16LE", value}));
+      renderSearchableEvidence(textTarget, [...ascii, ...utf16], {
+        empty: "No printable sequences extracted.",
+        placeholder: "Filter printable strings",
+        label: "sequence",
+        note: "bounded static extraction; sample content is never executed",
+      });
     }
 
     function renderDecoded(data) {
-      const decoded = data.decoded || [];
-      if (!decodedTarget) return;
-      if (!decoded.length) {
-        decodedTarget.innerHTML = `<p class="empty">no bounded Base64, hex, URL or UTF-16 candidates found</p>`;
-        return;
-      }
-      setEvidence("pl-decoded", "Decoded / deobfuscated candidates", "Bounded decodes of encoded content found in the sample. Never executed.",
-        decoded.map(d => `<p class="note">${escapeHTML(d.kind)} from <code>${escapeHTML(d.source)}</code></p><pre class="code">${escapeHTML(d.preview)}</pre>`).join(""));
-      decodedTarget.innerHTML = `<p class="note">${decoded.length} bounded Base64, hex, URL or UTF-16 candidate${decoded.length !== 1 ? "s" : ""} recovered.</p><button class="btn btn-sm btn-secondary" type="button" data-hp-evidence="pl-decoded">Open decoded candidates</button>`;
+      const entries = (data.decoded || []).map(item => ({
+        label: item.kind || "decoded",
+        value: `source: ${item.source || "unknown"}\n${item.preview || ""}`,
+      }));
+      renderSearchableEvidence(decodedTarget, entries, {
+        empty: "No bounded Base64, hex, URL or UTF-16 candidates found.",
+        placeholder: "Filter decoded candidates",
+        label: "candidate",
+        note: "bounded decodes only; recovered content is never executed",
+      });
     }
 
     function renderStaticFailure(message) {
