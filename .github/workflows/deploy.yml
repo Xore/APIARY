@@ -135,7 +135,18 @@ jobs:
           # uses a fresh container even when hp-log-init already exists, and
           # --no-deps avoids needlessly rerunning persona-apply here.
           docker compose -f compose.yml run --rm --no-deps log-init
-          docker compose -f compose.yml up -d
+          # #1431: mirrors install-homeserver.sh's step_start_init exactly --
+          # a bare `up -d` never activates a profile-gated service
+          # (geoipupdate has `profiles: [geoip-update]`), so without this a
+          # routine deploy silently left it on whatever image/config it had
+          # from initial provisioning, forever.
+          compose_profile_args=(--profile threat-intel)
+          if [ -f .env ] \
+            && grep -qE '^MAXMIND_ACCOUNT_ID=.+' .env \
+            && grep -qE '^MAXMIND_LICENSE_KEY=.+' .env; then
+            compose_profile_args+=(--profile geoip-update)
+          fi
+          docker compose -f compose.yml "${compose_profile_args[@]}" up -d
 
       - name: Check out the presentation-only Keycloak theme
         uses: actions/checkout@v7
