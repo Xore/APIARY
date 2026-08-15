@@ -20,7 +20,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN groupadd -g 2000 cowrie && useradd -u 2000 -g cowrie -d /cowrie -s /sbin/nologin cowrie
 
-RUN git clone --depth 1 https://github.com/cowrie/cowrie /cowrie/cowrie-git
+# #1488: pinned to v3.0.12 (ced855a) -- was an unpinned `--depth 1` HEAD
+# clone, which is exactly how the honeyfs.py rewrite below silently landed
+# and broke the entire honeyfs mechanism. Shallow-fetch of the exact commit,
+# not a full clone, so this stays fast.
+RUN git init -q /cowrie/cowrie-git \
+ && cd /cowrie/cowrie-git \
+ && git remote add origin https://github.com/cowrie/cowrie \
+ && git fetch -q --depth 1 origin ced855a5cda953eb4ad439d8ee8060afe4234fe4 \
+ && git checkout -q FETCH_HEAD
 
 WORKDIR /cowrie/cowrie-git
 
@@ -32,12 +40,15 @@ RUN python3 -m venv /cowrie/cowrie-env \
     fi \
  && /cowrie/cowrie-env/bin/pip install --no-cache-dir .
 
-RUN /cowrie/cowrie-env/bin/python3 -c \
-    "import cowrie.shell.fs as f; import pickle, pathlib; \
-     p = pathlib.Path('share/cowrie/fs.pickle'); \
-     p.parent.mkdir(parents=True, exist_ok=True); \
-     pickle.dump(f.CowrieFilesystem('/').fs, open(str(p), 'wb'))" \
-  || true
+# #1488: the old `cowrie.shell.fs.CowrieFilesystem('/').fs` snippet this
+# replaced no longer exists in current Cowrie (renamed to HoneyPotFilesystem
+# as part of the honeyfs.py rewrite) and was failing silently behind
+# `|| true`. `createfs` (a real installed console script, walking this
+# builder stage's own root filesystem as the template) is upstream's own
+# documented replacement -- same node format bin/sync-fs.py already merges
+# onto, no `|| true`: a real failure here should fail the build.
+RUN mkdir -p share/cowrie \
+ && /cowrie/cowrie-env/bin/createfs -l / -d 100 -o share/cowrie/fs.pickle
 
 # Static honeyfs and txtcmds
 COPY honeyfs/   /cowrie/cowrie-git/honeyfs/
