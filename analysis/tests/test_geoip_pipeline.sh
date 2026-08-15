@@ -13,7 +13,7 @@
 # Usage: analysis/tests/test_geoip_pipeline.sh
 set -euo pipefail
 
-ES_IMAGE="docker.elastic.co/elasticsearch/elasticsearch:8.19.20@sha256:e4797708584bd0df7c746b33a6640d243018a0ae8c8b088391c6f4675a3bef52"
+ES_IMAGE="docker.elastic.co/elasticsearch/elasticsearch:9.5.1@sha256:b70b3017fbd35310bc57e7e3f8c0ca42ca0b94df3331f747b7cdcfddae430a5a"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "SKIP: docker is not installed"
