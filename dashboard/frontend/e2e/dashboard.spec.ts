@@ -867,14 +867,14 @@ test.describe("dashboard browser behaviour", () => {
     // The fast path renders identity/hashes immediately; the three
     // aggregation cards start as skeletons and hp-payload-analysis.js
     // replaces them once /api/payload-analysis/<hash>/aggregation
-    // resolves -- this fixture hash has no sandbox/GitHub/Ghidra/ES
-    // results seeded, so hydration should land on each card's real empty
-    // state, not leave the skeleton in place forever.
+    // resolves. The analyzer-detail fixtures now make this hash known in
+    // the indexed correlation while the direct sandbox/GitHub subcards
+    // still exercise their empty states.
     await expect(page.locator("[data-hp-pl-sandbox-runs] .skeleton-line")).toHaveCount(0, { timeout: 5000 });
     await expect(page.locator("[data-hp-pl-sandbox-runs]")).toContainText("No completed KVM sandbox run");
     await expect(page.locator("[data-hp-pl-github-analysis]")).toContainText("Not published to Xore/honeypot");
     await expect(page.locator("[data-hp-pl-known-elsewhere]")).toContainText("not yet analyzed");
-    await expect(page.locator("#hp-pl-known-elsewhere-heading")).toContainText("not seen elsewhere");
+    await expect(page.locator("#hp-pl-known-elsewhere-heading")).toContainText("already analyzed");
     await page.getByRole("tab", { name: /Content/ }).click();
     await expect(page.getByRole("heading", { name: "Hex / ASCII preview — first 512 bytes" })).toBeVisible();
     await expect(page.locator("[data-hp-pl-text] .card__scroll")).toContainText("example.invalid");
