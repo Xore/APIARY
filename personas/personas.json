@@ -128,6 +128,14 @@
       "hostname": "analytics-es-04.nexusai.local",
       "role": "Standalone legacy analytics-team Elasticsearch node -- deliberately a distinct persona/asset_id from nexusai-core's own es-logs-01 (multipot's existing 9200 decoy) so the two never look like the same instance in any log or dashboard view (#1423's own naming-care requirement)",
       "services": ["elasticpot"]
+    },
+    "meridian-staff-console": {
+      "organization": "Meridian Retail Systems Ltd.",
+      "site_id": "meridian-internal-tools",
+      "asset_id": "staff-console-07",
+      "hostname": "console.meridian.example",
+      "role": "Internal staff/admin console -- backend tooling whose exact surface varies request to request, which is what galah's adaptive responses (#1420) are actually for, unlike the two static Meridian assets above",
+      "services": ["galah"]
     }
   }
 }
