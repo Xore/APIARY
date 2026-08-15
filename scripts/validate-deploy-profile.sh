@@ -56,6 +56,7 @@ declare -A STACK_TO_SENSORS=(
   [citrix-honeypot]="citrix-honeypot"
   [cisco-asa-honeypot]="cisco-asa-honeypot"
   [rdp-honeypot]="rdp-honeypot"
+  [beelzebub]="beelzebub"
   [tanner]="tanner"
   [conpot]="conpot conpot-s7-1200 conpot-s7-1500 conpot-iec104 conpot-guardian conpot-kamstrup"
   [endlessh]="endlessh"

@@ -5,15 +5,16 @@
 // decided ingest-time enrichment + live ES aggregations, and this is the
 // enrichment half.
 //
-// Scope: cowrie, dionaea, every conpot persona, dns-honeypot, and
-// cisco-asa-honeypot's IKE side -- the sensors that aren't PROXY-protocol
-// wrapped and so only ever see the tunnel peer address (10.8.0.1), never
-// the real attacker IP, in their own raw log. cisco-asa-honeypot's own
-// WebVPN/HTTPS side, dnp3-honeypot, and dicompot already get the real IP
-// directly via PROXY protocol and need no rewriting; neither do
-// multipot/tanner/http-honeypot/citrix-honeypot/rdp-honeypot, but #1217
-// watches those five anyway, purely for canonical.go's field normalization
-// (creds/commands/fingerprints) -- see canonical.go's own doc comment.
+// Scope: cowrie, dionaea, every conpot persona, dns-honeypot,
+// cisco-asa-honeypot's IKE side, and beelzebub (#1418) -- the sensors that
+// aren't PROXY-protocol wrapped and so only ever see the tunnel peer
+// address (10.8.0.1), never the real attacker IP, in their own raw log.
+// cisco-asa-honeypot's own WebVPN/HTTPS side, dnp3-honeypot, and dicompot
+// already get the real IP directly via PROXY protocol and need no
+// rewriting; neither do multipot/tanner/http-honeypot/citrix-honeypot/
+// rdp-honeypot, but #1217 watches those five anyway, purely for
+// canonical.go's field normalization (creds/commands/fingerprints) -- see
+// canonical.go's own doc comment.
 //
 // dionaea_incident.json (#623) is also enriched, but differently: it
 // carries no top-level src_ip at all, so enrichDionaeaIncidentLine walks
@@ -120,6 +121,15 @@ func discoverSources(logsDir, outDir, stateDir string) []*source {
 	// instead of the raw file, the same "enriched supersedes raw" pattern
 	// the other five sources already established.
 	add("dionaea-incident", filepath.Join(logsDir, "dionaea", "dionaea_incident.json"), enrichDionaeaIncidentLine)
+
+	// #1418: beelzebub isn't PROXY-protocol wrapped either (confirmed
+	// directly against its vendored source -- no proxyproto import
+	// anywhere), so like the six sources above it only ever sees the
+	// tunnel peer address in its own raw log. Its own field names
+	// (SourceIp/SourcePort, no "sensor" field at all) don't match
+	// enrichLine's src_ip/src_port/sensor shape, hence its own enrich
+	// function -- see beelzebub.go's doc comment.
+	add("beelzebub", filepath.Join(logsDir, "beelzebub", "beelzebub.json"), enrichBeelzebubLine)
 
 	// #1217: field-normalization-only sources -- these five already carry
 	// the real attacker IP via PROXY protocol (never the tunnel peer

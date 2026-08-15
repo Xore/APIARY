@@ -94,6 +94,17 @@
       "asset_id": "heatmeter-west-0382",
       "vendor": "Kamstrup", "model": "MULTICAL 382", "services": ["conpot-kamstrup"]
     },
+    "nexusai-directory": {
+      "organization": "NexusAI Research GmbH",
+      "site_id": "nexusai-berlin-core",
+      "asset_id": "directory-estate",
+      "domain": "nexusai.local",
+      "role": "Directory services, AI-agent tooling gateway, and a secondary admin bastion",
+      "assets": {
+        "ldap": "dc01", "mcp": "agent-gateway-01", "ssh": "bastion02", "http": "cms-legacy-01"
+      },
+      "services": ["beelzebub"]
+    },
     "meridian-customer-portal": {
       "organization": "Meridian Retail Systems Ltd.",
       "site_id": "meridian-public-web",

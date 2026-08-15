@@ -1,0 +1,46 @@
+# #1418, #1421 (WordPress/CMS decoy ask): upstream's own documented
+# WordPress example (README.md "Service Configuration"), on the
+# nexusai-directory persona's public web surface. No Traefik/hostname
+# routing for this -- see docker-compose.beelzebub.yml's own header comment
+# for why (beelzebub can't parse the PROXY-protocol header portbridge would
+# prepend, and the Traefik/socat path never reaches portbridge's CONN_LOG at
+# all, so a hostname-fronted copy of this service would have a permanently
+# unattributable source IP; raw-port-only keeps every event resolvable via
+# ip-enrichment-worker's via_port join instead).
+#
+# No `methods:` on each command (present in upstream's own current README,
+# absent here): confirmed directly against the pinned commit
+# (BEELZEBUB_REF in beelzebub/Dockerfile) with `beelzebub validate` --
+# that field isn't in this commit's schema yet, it's newer than the pin.
+apiVersion: "v1"
+protocol: "http"
+address: ":8880"
+description: "Wordpress 6.0"
+commands:
+  - regex: "^(/index.php|/index.html|/)$"
+    handler: |
+      <html><header><title>Wordpress 6 test page</title></header>
+      <body><h1>Hello from Wordpress</h1></body></html>
+    headers:
+      - "Content-Type: text/html"
+      - "Server: Apache/2.4.53 (Debian)"
+      - "X-Powered-By: PHP/7.4.29"
+    statusCode: 200
+  - regex: "^(/wp-login.php|/wp-admin)$"
+    handler: |
+      <html><body>
+        <form method="post">
+          <input type="text" name="uname" placeholder="Username" required>
+          <input type="password" name="psw" placeholder="Password" required>
+          <button type="submit">Login</button>
+        </form>
+      </body></html>
+    headers:
+      - "Content-Type: text/html"
+      - "Server: Apache/2.4.53 (Debian)"
+    statusCode: 200
+  - regex: "^.*$"
+    handler: "<html><body><h1>Not found!</h1></body></html>"
+    headers:
+      - "Content-Type: text/html"
+    statusCode: 404

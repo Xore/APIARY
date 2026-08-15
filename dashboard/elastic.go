@@ -536,6 +536,7 @@ func (c *esClient) refresh() {
 		{"citrix-honeypot", "honeypot-v2-*", "event.sensor:citrix-honeypot"},
 		{"cisco-asa-honeypot", "honeypot-v2-*", "event.sensor:cisco-asa-honeypot"},
 		{"rdp-honeypot", "honeypot-v2-*", "event.sensor:rdp-honeypot"},
+		{"beelzebub", "honeypot-v2-*", "event.sensor:beelzebub"},
 		{"suricata", "suricata-*", ""},
 	}
 	for _, q := range queries {

@@ -594,6 +594,31 @@ func classify(e map[string]any, dirSensor string) event {
 		return ev
 	}
 
+	// ---- beelzebub (#1418) --------------------------------------------------
+	// Reads the flat lowercase fields ip-enrichment-worker/beelzebub.go
+	// promotes from upstream's own PascalCase Event (Protocol/User/Command/
+	// RequestURI), not the raw field names -- see that file's doc comment
+	// for why. No port: upstream's Event carries no listen-port field of its
+	// own, a documented gap, not an oversight (same comment).
+	if s, ok := e["sensor"].(string); ok && s == "beelzebub" {
+		ev.sensor = "beelzebub"
+		ev.proto = strings.ToLower(str(e["protocol"]))
+		ev.user, ev.pass = str(e["username"]), str(e["password"])
+		ev.isLogin = ev.user != "" || ev.pass != ""
+		ev.command = str(e["command"])
+		switch {
+		case ev.command != "":
+			ev.detail = "cmd: " + ev.command
+		case ev.user != "" || ev.pass != "":
+			ev.detail = "auth: " + ev.user + " / " + ev.pass
+		case str(e["path"]) != "":
+			ev.detail = "request: " + str(e["path"])
+		default:
+			ev.detail = str(e["Status"])
+		}
+		return ev
+	}
+
 	// ---- endlessh (#246) ---------------------------------------------------
 	// A "connect" and a later "disconnect" are logged per held connection;
 	// the disconnect carries the actual investigative value (how long/how

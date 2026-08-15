@@ -23,6 +23,7 @@
 | **api-honeypot** | raw 8888 | raw tunnel + PROXY | cloud metadata, Kubernetes, registry, DevOps and LLM API probes — same binary as http-honeypot, same tarpit behavior |
 | **snare + tanner** | `www-portal.<domain>` | Traefik | fictional Meridian portal → payload analysis |
 | **endlessh** | SSH 2222 (own port, not cowrie's) | raw tunnel + PROXY (once wired) | SSH pre-auth tarpit, Go port of `skeeto/endlessh`'s core trick — sends random non-"SSH-" banner lines forever, real handshake never begins. Own port deliberately, not cowrie's: diverting an attacker here instead of cowrie's real fake-shell capture would trade depth for a cheap time-waste (#246) |
+| **beelzebub** | SSH 2200 (2nd, LLM-capable listener, static-only here), LDAP 389, MCP 8000, HTTP 8880 | raw tunnel | vendored `beelzebub-labs/beelzebub` deception runtime (#1418) -- LDAP/MCP fill real protocol gaps, SSH is a second differently-fingerprinted listener alongside Cowrie, HTTP is a WordPress decoy; no Ollama wiring (would cross the `honeypot-llm` network's sensors-never-reach-the-model boundary, see docker-compose.beelzebub.yml) and no Traefik hostname (beelzebub can't parse PROXY protocol or read X-Forwarded-For, so a hostname-fronted copy would have an unattributable source IP) -- ES-only from day one |
 | **suricata** | (sniffs all traffic, runs on the **VPS**) | — | IDS over every honeypot packet → eve.json → ELK, pcap → Arkime |
 
 multipot cedes FTP/MySQL/MSSQL/Mongo to Dionaea automatically

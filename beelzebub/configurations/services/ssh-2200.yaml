@@ -1,0 +1,37 @@
+# #1418: a second, differently-fingerprinted SSH decoy alongside Cowrie
+# (docs/CONTAINER-UPDATES.md's own research pass 1 conclusion: "the
+# genuinely interesting angle is running a second, differently-fingerprinted
+# listener... not replacing anything"). Port 2200, not 22 (Cowrie's own,
+# docker-compose.cowrie.yml) and not 2222 either -- docs/SENSORS.md already
+# names 2222 as endlessh's intended public port ("own port, not cowrie's...
+# once wired"), so 2200 avoids colliding with that documented future intent
+# even though endlessh isn't actually tunneled yet. Still reads as
+# plausible on its own: real admins running sshd on a high alt-port as lazy
+# security-by-obscurity is a common, real pattern. Static command
+# responses only (no LLMHoneypot plugin) -- see docker-compose.beelzebub.yml
+# for why this integration doesn't wire Beelzebub to Ollama.
+apiVersion: "v1"
+protocol: "ssh"
+address: ":2200"
+description: "SSH interactive bastion02"
+commands:
+  - regex: "^ls$"
+    handler: "backups  configs  keytabs  scripts"
+  - regex: "^pwd$"
+    handler: "/home/svc-admin"
+  - regex: "^uname -a$"
+    handler: "Linux bastion02 5.15.0-119-generic #129-Ubuntu SMP x86_64 GNU/Linux"
+  - regex: "^whoami$"
+    handler: "svc-admin"
+  - regex: "^id$"
+    handler: "uid=1001(svc-admin) gid=1001(svc-admin) groups=1001(svc-admin),27(sudo)"
+  - regex: "^(.+)$"
+    handler: "command not found"
+# Deliberately not cowrie's own banner (persona-design.md's reference
+# example, "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.13") -- a Debian flavor
+# one generation newer keeps this a genuinely distinct fingerprint rather
+# than a second listener indistinguishable from Cowrie's.
+serverVersion: "SSH-2.0-OpenSSH_9.2p1 Debian-2+deb12u3"
+serverName: "bastion02"
+passwordRegex: "^(root|admin|changeme|Password1|nexusai2025|svc-admin)$"
+deadlineTimeoutSeconds: 60
