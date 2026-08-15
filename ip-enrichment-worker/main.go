@@ -6,8 +6,9 @@
 // enrichment half.
 //
 // Scope: cowrie, dionaea, every conpot persona, dns-honeypot,
-// cisco-asa-honeypot's IKE side, and beelzebub (#1418) -- the sensors that
-// aren't PROXY-protocol wrapped and so only ever see the tunnel peer
+// cisco-asa-honeypot's IKE side, beelzebub (#1418), and hellpot (#1419) --
+// the sensors that aren't PROXY-protocol wrapped and so only ever see the
+// tunnel peer
 // address (10.8.0.1), never the real attacker IP, in their own raw log.
 // cisco-asa-honeypot's own WebVPN/HTTPS side, dnp3-honeypot, and dicompot
 // already get the real IP directly via PROXY protocol and need no
@@ -130,6 +131,14 @@ func discoverSources(logsDir, outDir, stateDir string) []*source {
 	// enrichLine's src_ip/src_port/sensor shape, hence its own enrich
 	// function -- see beelzebub.go's doc comment.
 	add("beelzebub", filepath.Join(logsDir, "beelzebub", "beelzebub.json"), enrichBeelzebubLine)
+
+	// #1419: hellpot is raw-port/portbridge-only, same reasoning as
+	// beelzebub above (confirmed directly against its vendored source --
+	// no proxyproto import anywhere) -- but its patched getRealRemote()
+	// (hellpot/router_patch.py) logs a single "ip:port" REMOTE_ADDR string,
+	// not separate src_ip/src_port fields, hence its own enrich function --
+	// see hellpot.go's doc comment.
+	add("hellpot", filepath.Join(logsDir, "hellpot", "HellPot.log"), enrichHellpotLine)
 
 	// #1217: field-normalization-only sources -- these five already carry
 	// the real attacker IP via PROXY protocol (never the tunnel peer

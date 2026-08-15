@@ -112,7 +112,7 @@ services:
         # full command per physical line -- no folding ambiguity, no
         # backslash continuations, every line does exactly what it shows.
         rm -f /markers/log-init.done
-        mkdir -p /logs/cowrie/downloads /logs/cowrie/tty /logs/cowrie/lib-cowrie /logs/conpot /logs/conpot-s7-1200 /logs/conpot-s7-1500 /logs/conpot-iec104 /logs/conpot-guardian /logs/conpot-kamstrup /logs/api-honeypot /logs/dionaea /logs/multipot /logs/http-honeypot /logs/tanner /logs/snare /logs/dnp3 /logs/dicompot /logs/dns-honeypot /logs/citrix-honeypot /logs/cisco-asa-honeypot /logs/rdp-honeypot /logs/tftp-relay /logs/endlessh /logs/beelzebub /logs/suricata/pcap /logs/portbridge /logs/arkime-raw
+        mkdir -p /logs/cowrie/downloads /logs/cowrie/tty /logs/cowrie/lib-cowrie /logs/conpot /logs/conpot-s7-1200 /logs/conpot-s7-1500 /logs/conpot-iec104 /logs/conpot-guardian /logs/conpot-kamstrup /logs/api-honeypot /logs/dionaea /logs/multipot /logs/http-honeypot /logs/tanner /logs/snare /logs/dnp3 /logs/dicompot /logs/dns-honeypot /logs/citrix-honeypot /logs/cisco-asa-honeypot /logs/rdp-honeypot /logs/tftp-relay /logs/endlessh /logs/beelzebub /logs/hellpot /logs/suricata/pcap /logs/portbridge /logs/arkime-raw
         # -R on /logs/cowrie specifically: mkdir -p above just created
         # downloads/, tty/, and lib-cowrie/ as this container's own root
         # user, and a bare (non-recursive) chown of the parent only touches
@@ -130,7 +130,7 @@ services:
         chown -R 2000:2000 /logs/cowrie
         chown -R 2000:2000 /logs/conpot /logs/conpot-s7-1200 /logs/conpot-s7-1500 /logs/conpot-iec104 /logs/conpot-guardian /logs/conpot-kamstrup
         chown -R 1000:1000 /logs/dionaea
-        chown -R 65534:65534 /logs/multipot /logs/http-honeypot /logs/api-honeypot /logs/tanner /logs/snare /logs/dnp3 /logs/dicompot /logs/dns-honeypot /logs/citrix-honeypot /logs/cisco-asa-honeypot /logs/rdp-honeypot /logs/tftp-relay /logs/endlessh /logs/beelzebub
+        chown -R 65534:65534 /logs/multipot /logs/http-honeypot /logs/api-honeypot /logs/tanner /logs/snare /logs/dnp3 /logs/dicompot /logs/dns-honeypot /logs/citrix-honeypot /logs/cisco-asa-honeypot /logs/rdp-honeypot /logs/tftp-relay /logs/endlessh /logs/beelzebub /logs/hellpot
         # SNARE checks both paths before/while dropping from root-without-
         # CAP_DAC_OVERRIDE to nobody. Both identities therefore need an
         # actual write permission; ownership alone cannot satisfy both.

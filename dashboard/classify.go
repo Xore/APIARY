@@ -619,6 +619,32 @@ func classify(e map[string]any, dirSensor string) event {
 		return ev
 	}
 
+	// ---- hellpot (#1419) -----------------------------------------------------
+	// Reads the flat lowercase fields ip-enrichment-worker/hellpot.go
+	// promotes from upstream's own field names (URL/USERAGENT), not the raw
+	// ones -- see that file's doc comment for why. No port, same documented
+	// gap as beelzebub above: hellpot logs no listen-port of its own.
+	if s, ok := e["sensor"].(string); ok && s == "hellpot" {
+		ev.sensor = "hellpot"
+		ev.proto = "http"
+		ev.path = str(e["path"])
+		if ev.fingerprint = str(e["user_agent"]); ev.fingerprint != "" {
+			ev.fingerKind = "User-Agent"
+		}
+		switch {
+		// BYTES/DURATION are JSON numbers (num(), not str()) -- DURATION is
+		// milliseconds (confirmed live: a ~2s held connection logged
+		// DURATION:1998.9), not seconds.
+		case str(e["message"]) == "FINISH":
+			ev.detail = "tarpitted " + num(e["BYTES"]) + " bytes over " + num(e["DURATION"]) + "ms: " + ev.path
+		case ev.path != "":
+			ev.detail = "request: " + ev.path
+		default:
+			ev.detail = str(e["message"])
+		}
+		return ev
+	}
+
 	// ---- endlessh (#246) ---------------------------------------------------
 	// A "connect" and a later "disconnect" are logged per held connection;
 	// the disconnect carries the actual investigative value (how long/how

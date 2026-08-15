@@ -112,6 +112,14 @@
       "hostname": "portal.meridian.example",
       "role": "Customer order and service portal",
       "services": ["snare", "tanner"]
+    },
+    "meridian-legacy-web": {
+      "organization": "Meridian Retail Systems Ltd.",
+      "site_id": "meridian-legacy-infra",
+      "asset_id": "web-legacy-04",
+      "hostname": "legacy.meridian.example",
+      "role": "Decommissioned marketing site, never formally taken offline -- exactly the kind of forgotten host WordPress/CMS scanners keep finding",
+      "services": ["hellpot"]
     }
   }
 }

@@ -258,6 +258,14 @@ processors:
       target: honeypot
       fields: {persona_id: nexusai-directory, site_id: nexusai-berlin-core, asset_id: directory-estate, organization: NexusAI Research GmbH}
       when.contains: {log.file.path: "enriched/beelzebub.json"}
+  # #1419: hellpot.json has no "sensor" field of its own either, same
+  # reasoning as beelzebub above -- ip-enrichment-worker/hellpot.go already
+  # writes sensor/src_ip/src_port as flat lowercase fields before Filebeat
+  # ever sees it.
+  - add_fields:
+      target: honeypot
+      fields: {persona_id: meridian-legacy-web, site_id: meridian-legacy-infra, asset_id: web-legacy-04, organization: Meridian Retail Systems Ltd.}
+      when.contains: {log.file.path: "enriched/hellpot.json"}
   # NOTE on stats events: they carry ~600 engine-internal counter fields and
   # once exhausted the shared daily index's field limit (2026-07-19 outage).
   # With per-event-type indices (see output below) they are contained in
