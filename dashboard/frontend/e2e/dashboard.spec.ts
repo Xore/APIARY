@@ -304,6 +304,75 @@ test.describe("dashboard browser behaviour", () => {
     await isolateReadOnlyBrowserState(page);
   });
 
+  test("render-first collection batch keeps shaped placeholders until hydration completes", async ({ page }) => {
+    const holdJSON = async (pattern: string, body: unknown) => {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      await page.route(pattern, async (route) => {
+        await gate;
+        await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+      });
+      return release;
+    };
+
+    const releaseAlerts = await holdJSON("**/api/alerts", []);
+    await page.goto("/alerts", { waitUntil: "domcontentloaded" });
+    await expect(page.locator("#alerts-results")).toHaveAttribute("aria-busy", "true");
+    await expect(page.locator("#alert-rows .skeleton-line")).toHaveCount(3);
+    releaseAlerts();
+    await expect(page.locator("#alerts-results")).toHaveAttribute("aria-busy", "false");
+    await expect(page.locator("#alert-empty")).toContainText("No alerts recorded");
+    await page.unroute("**/api/alerts");
+
+    const releaseHistory = await holdJSON("**/api/history**", { hits: { hits: [{ _source: { sensor: "fixture" } }] } });
+    await page.goto("/history", { waitUntil: "domcontentloaded" });
+    await expect(page.locator("#history-results .skeleton-line")).toHaveCount(6);
+    releaseHistory();
+    await expect(page.locator("#history-results")).toHaveAttribute("aria-busy", "false");
+    await expect(page.locator("#history-results")).toContainText('"sensor": "fixture"');
+    await page.unroute("**/api/history**");
+
+    const releaseDeadLetters = await holdJSON("**/api/dead-letters**", { hits: { hits: [] } });
+    await page.goto("/dead-letters", { waitUntil: "domcontentloaded" });
+    await expect(page.locator("#dead-rows .hp-data-card")).toHaveCount(3);
+    releaseDeadLetters();
+    await expect(page.locator("#dead-rows")).toHaveAttribute("aria-busy", "false");
+    await expect(page.locator("#dead-rows")).toContainText("No matching dead letters");
+    await page.unroute("**/api/dead-letters**");
+
+    const releaseTemplates = await holdJSON("**/api/reports/templates", {
+      templates: [{ id: "executive", name: "Executive", description: "Fixture template", theme: "dark", elements: ["cover"] }],
+      elements: [{ id: "cover", label: "Cover", description: "Title and scope" }],
+      windows: ["24h"],
+    });
+    const releaseDefinitions = await holdJSON("**/api/reports/definitions", { definitions: [] });
+    const releaseGenerated = await holdJSON("**/api/reports/generated", { generated: [] });
+    await page.goto("/reports", { waitUntil: "domcontentloaded" });
+    await expect(page.locator("#hp-rp-templates .skeleton-line")).toHaveCount(6);
+    await expect(page.locator("#hp-rp-definitions .skeleton-line")).toHaveCount(3);
+    await expect(page.locator("#hp-rp-generated .project-card")).toHaveCount(3);
+    releaseTemplates(); releaseDefinitions(); releaseGenerated();
+    await expect(page.locator("#hp-rp-templates")).toContainText("Executive");
+    await expect(page.locator("#hp-rp-definitions")).toHaveAttribute("aria-busy", "false");
+    await expect(page.locator("#hp-rp-generated")).toHaveAttribute("aria-busy", "false");
+    await page.unroute("**/api/reports/templates");
+    await page.unroute("**/api/reports/definitions");
+    await page.unroute("**/api/reports/generated");
+
+    const releaseSemantic = await holdJSON("**/api/llm/analysis/search**", {
+      available: true,
+      hits: [{ score: 0.91, "@timestamp": "2026-08-15T10:00:00Z", severity: "high", summary: "Fixture match", session_id: "fixture-session" }],
+    });
+    await page.goto("/llm-analysis", { waitUntil: "domcontentloaded" });
+    await page.locator("#hp-llm-search-q").fill("credential exfiltration");
+    await page.locator("#hp-llm-search-run").click();
+    await expect(page.locator("#hp-llm-search-results")).toHaveAttribute("aria-busy", "true");
+    await expect(page.locator("#hp-llm-search-rows .skeleton-line")).toHaveCount(3);
+    releaseSemantic();
+    await expect(page.locator("#hp-llm-search-results")).toHaveAttribute("aria-busy", "false");
+    await expect(page.locator("#hp-llm-search-rows")).toContainText("Fixture match");
+  });
+
   test("command dock focuses with slash and routes non-empty queries through /search", async ({ page }) => {
     await page.goto("/");
     const command = page.locator("[data-hp-investigate] textarea");

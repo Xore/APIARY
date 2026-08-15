@@ -145,25 +145,28 @@
   // -------------------------------------------------------------------------
 
   function renderTemplates() {
-    els.templates.innerHTML = state.templates.map((template) => `
+    els.templates.setAttribute("aria-busy", "false");
+    els.templates.innerHTML = state.templates.length ? state.templates.map((template) => `
       <button type="button" class="hp-rp-template" data-template="${escapeHTML(template.id)}" aria-pressed="${state.template && state.template.id === template.id}">
         <strong>${escapeHTML(template.name)}</strong>
         <span>${escapeHTML(template.description)}</span>
-      </button>`).join("");
+      </button>`).join("") : '<p class="empty">No report templates are available.</p>';
     els.templates.querySelectorAll("[data-template]").forEach((button) => {
       button.addEventListener("click", () => selectTemplate(button.dataset.template, true));
     });
   }
 
   function renderElementChoices() {
-    els.elements.innerHTML = state.elements.map((element) => `
+    els.elements.setAttribute("aria-busy", "false");
+    els.elements.innerHTML = state.elements.length ? state.elements.map((element) => `
       <label title="${escapeHTML(element.description)}">
         <input type="checkbox" value="${escapeHTML(element.id)}">
         <span>${escapeHTML(element.label)}<small>${escapeHTML(element.description)}</small></span>
-      </label>`).join("");
+      </label>`).join("") : '<p class="empty">No report elements are available.</p>';
   }
 
   function renderWindowChoices() {
+    els.window.setAttribute("aria-busy", "false");
     els.window.innerHTML = `<option value="">full observation window</option>` +
       state.windows.map((w) => `<option value="${escapeHTML(w)}">last ${escapeHTML(w)}</option>`).join("");
   }
@@ -340,7 +343,8 @@
   function resetPayloadPicker() {
     state.selectedPayload = null;
     els.payloadSearch.value = "";
-    els.payloadResults.innerHTML = "";
+    els.payloadResults.innerHTML = '<p class="note">Captured payloads will appear here.</p>';
+    els.payloadResults.setAttribute("aria-busy", "false");
     els.payloadSelected.textContent = "";
   }
 
@@ -380,11 +384,17 @@
   }
 
   async function searchPayloads(query) {
+    els.payloadResults.setAttribute("aria-busy", "true");
+    els.payloadResults.innerHTML = ["84%", "72%", "80%"].map((width) =>
+      `<div class="hp-rp-payload-row" aria-hidden="true"><span class="skeleton-line" style="width:${width}"></span></div>`
+    ).join("");
     try {
       const payload = await apiJSON(`/api/reports/payload-options?q=${encodeURIComponent(query)}`);
       renderPayloadResults(payload.payloads || []);
     } catch (err) {
       els.payloadResults.innerHTML = `<p class="note">payload search unavailable: ${escapeHTML(err.message)}</p>`;
+    } finally {
+      els.payloadResults.setAttribute("aria-busy", "false");
     }
   }
 
@@ -409,6 +419,8 @@
 
   async function loadSandboxJobs() {
     if (els.sandboxJob.dataset.loaded === "true") return;
+    els.sandboxJob.setAttribute("aria-busy", "true");
+    els.sandboxJob.innerHTML = '<option value="">loading analysis runs…</option>';
     try {
       const rows = await apiJSON("/api/sandbox");
       const jobs = (Array.isArray(rows) ? rows : []).filter((row) => row && row.job);
@@ -419,6 +431,8 @@
       els.sandboxJob.dataset.loaded = "true";
     } catch {
       els.sandboxJob.innerHTML = `<option value="">sandbox results unavailable</option>`;
+    } finally {
+      els.sandboxJob.setAttribute("aria-busy", "false");
     }
   }
 
@@ -509,13 +523,22 @@
   // Saved definitions
   // -------------------------------------------------------------------------
 
+  const tableSkeleton = (columns) => ["88%", "74%", "82%"].map((width) =>
+    `<tr class="hp-table-state" aria-hidden="true"><td class="hp-skeleton-cell" colspan="${columns}"><span class="skeleton-line" style="width:${width}"></span></td></tr>`
+  ).join("");
+
   async function refreshDefinitions() {
-    const response = await api("/api/reports/definitions");
-    state.etag = response.headers.get("ETag") || state.etag;
-    const payload = await response.json();
-    state.definitions = payload.definitions || [];
-    els.definitionsEmpty.hidden = state.definitions.length > 0;
-    els.definitions.innerHTML = state.definitions.map((definition) => `
+    els.definitions.setAttribute("aria-busy", "true");
+    els.definitionsEmpty.hidden = true;
+    els.definitions.innerHTML = tableSkeleton(7);
+    try {
+      const response = await api("/api/reports/definitions");
+      state.etag = response.headers.get("ETag") || state.etag;
+      const payload = await response.json();
+      state.definitions = payload.definitions || [];
+      els.definitionsEmpty.textContent = "No saved definitions yet — design one above and save it.";
+      els.definitionsEmpty.hidden = state.definitions.length > 0;
+      els.definitions.innerHTML = state.definitions.map((definition) => `
       <tr>
         <td><strong>${escapeHTML(definition.name)}</strong></td>
         <td><span class="hp-rp-tag">${escapeHTML(definition.template)}</span></td>
@@ -529,6 +552,14 @@
           <button class="btn btn-sm btn-danger" type="button" data-drop="${escapeHTML(definition.id)}" data-name="${escapeHTML(definition.name)}">Delete</button>
         </div></td>
       </tr>`).join("");
+    } catch (error) {
+      els.definitions.replaceChildren();
+      els.definitionsEmpty.textContent = `Saved definitions could not be loaded: ${error.message}`;
+      els.definitionsEmpty.hidden = false;
+      throw error;
+    } finally {
+      els.definitions.setAttribute("aria-busy", "false");
+    }
   }
 
   els.definitions.addEventListener("click", (event) => {
@@ -594,10 +625,17 @@
   // and its own click/keydown handling below instead, exactly mirroring
   // what a native <a>/<button> would give for free.
   async function refreshGenerated() {
-    const payload = await apiJSON("/api/reports/generated");
-    state.generated = payload.generated || [];
-    els.generatedEmpty.hidden = state.generated.length > 0;
-    els.generated.innerHTML = state.generated.map((report) => `
+    els.generated.setAttribute("aria-busy", "true");
+    els.generatedEmpty.hidden = true;
+    els.generated.innerHTML = ["58%", "64%", "52%"].map((width) =>
+      `<article class="project-card" aria-hidden="true"><span class="skeleton-line" style="width:${width}"></span><span class="skeleton-line" style="width:84%"></span><span class="skeleton-line" style="width:68%"></span></article>`
+    ).join("");
+    try {
+      const payload = await apiJSON("/api/reports/generated");
+      state.generated = payload.generated || [];
+      els.generatedEmpty.textContent = "No reports generated yet.";
+      els.generatedEmpty.hidden = state.generated.length > 0;
+      els.generated.innerHTML = state.generated.map((report) => `
       <article class="project-card" data-hp-report-card="${escapeHTML(report.id)}" role="button" tabindex="0" aria-label="View ${escapeHTML(report.title || report.name)}">
         <div class="project-card__header">
           <span class="project-card__icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>
@@ -616,6 +654,14 @@
           </div>
         </div>
       </article>`).join("");
+    } catch (error) {
+      els.generated.replaceChildren();
+      els.generatedEmpty.textContent = `Generated reports could not be loaded: ${error.message}`;
+      els.generatedEmpty.hidden = false;
+      throw error;
+    } finally {
+      els.generated.setAttribute("aria-busy", "false");
+    }
   }
 
   // Centered application-managed overlay, opened/closed the same way as the
@@ -740,6 +786,30 @@
       selectTemplate("executive", true);
       await Promise.all([refreshDefinitions(), refreshGenerated()]);
     } catch (error) {
+      if (els.templates.getAttribute("aria-busy") === "true") {
+        els.templates.setAttribute("aria-busy", "false");
+        els.templates.innerHTML = `<p class="empty">Report templates could not be loaded: ${escapeHTML(error.message)}</p>`;
+      }
+      if (els.elements.getAttribute("aria-busy") === "true") {
+        els.elements.setAttribute("aria-busy", "false");
+        els.elements.innerHTML = `<p class="empty">Report elements could not be loaded: ${escapeHTML(error.message)}</p>`;
+      }
+      if (els.window.getAttribute("aria-busy") === "true") {
+        els.window.setAttribute("aria-busy", "false");
+        els.window.innerHTML = '<option value="">observation windows unavailable</option>';
+      }
+      if (els.definitions.getAttribute("aria-busy") === "true") {
+        els.definitions.setAttribute("aria-busy", "false");
+        els.definitions.replaceChildren();
+        els.definitionsEmpty.textContent = `Saved definitions could not be loaded: ${error.message}`;
+        els.definitionsEmpty.hidden = false;
+      }
+      if (els.generated.getAttribute("aria-busy") === "true") {
+        els.generated.setAttribute("aria-busy", "false");
+        els.generated.replaceChildren();
+        els.generatedEmpty.textContent = `Generated reports could not be loaded: ${error.message}`;
+        els.generatedEmpty.hidden = false;
+      }
       if (!state.forbidden) setStatus(error.message, "error");
     }
   })();

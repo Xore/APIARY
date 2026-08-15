@@ -874,31 +874,53 @@
       return `<span class="badge ${cls}">${escapeHTML(severity)}</span>`;
     };
 
+    const renderState = message => {
+      rows.replaceChildren();
+      const row = document.createElement("tr");
+      row.className = "hp-table-state";
+      const cell = document.createElement("td");
+      cell.colSpan = 5;
+      const text = document.createElement("p");
+      text.className = "empty";
+      text.textContent = message;
+      cell.appendChild(text);
+      row.appendChild(cell);
+      rows.appendChild(row);
+    };
+
+    const renderSkeleton = () => {
+      rows.innerHTML = ["86%", "72%", "80%"].map(width =>
+        `<tr class="hp-table-state" aria-hidden="true"><td class="hp-skeleton-cell" colspan="5"><span class="skeleton-line" style="width:${width}"></span></td></tr>`
+      ).join("");
+    };
+
     const run = async () => {
       const q = input.value.trim();
       if (!q) {
-        results.hidden = true;
-        meta.hidden = false;
         meta.textContent = "Enter a description to search.";
+        results.setAttribute("aria-busy", "false");
+        renderState("Semantic-search results will appear here.");
         return;
       }
-      meta.hidden = false;
       meta.textContent = "Searching…";
-      results.hidden = true;
+      results.setAttribute("aria-busy", "true");
+      renderSkeleton();
       try {
         const response = await fetch(`/api/llm/analysis/search?q=${encodeURIComponent(q)}`);
+        if (!response.ok) throw new Error(`request failed (${response.status})`);
         const body = await response.json();
         if (!body.available) {
           meta.textContent = "Semantic search unavailable" + (body.reason ? " — " + body.reason : "") + ".";
+          renderState(meta.textContent);
           return;
         }
         const hits = body.hits || [];
         if (hits.length === 0) {
           meta.textContent = "No similar sessions found.";
+          renderState(meta.textContent);
           return;
         }
-        meta.hidden = true;
-        results.hidden = false;
+        meta.textContent = `${hits.length} similar session${hits.length === 1 ? "" : "s"} found.`;
         rows.innerHTML = hits.map(hit => {
           const evidence = hit.session_id
             ? `<a href="/history?q=${encodeURIComponent('honeypot.session:"' + hit.session_id + '"')}">view source</a>`
@@ -907,10 +929,15 @@
             : hit.error ? `<span class="tw:text-muted">error: ${escapeHTML(hit.error)}</span>`
             : '<span class="tw:text-muted">&mdash;</span>';
           const ts = escapeHTML(hit["@timestamp"] || "");
-          return `<tr><td class="v">${hit.score.toFixed(3)}</td><td${ts ? ` data-hp-utc="${ts}"` : ""}>${ts}</td><td>${severityBadge(hit.severity)}</td><td class="v">${summary}</td><td class="v">${evidence}</td></tr>`;
+          const score = Number(hit.score);
+          return `<tr><td class="v">${Number.isFinite(score) ? score.toFixed(3) : "—"}</td><td${ts ? ` data-hp-utc="${ts}"` : ""}>${ts}</td><td>${severityBadge(hit.severity)}</td><td class="v">${summary}</td><td class="v">${evidence}</td></tr>`;
         }).join("");
+        reapplyTimezone();
       } catch (error) {
         meta.textContent = "Semantic search failed — " + error.message.trim();
+        renderState(meta.textContent);
+      } finally {
+        results.setAttribute("aria-busy", "false");
       }
     };
     button.addEventListener("click", run);
