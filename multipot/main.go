@@ -85,8 +85,23 @@ func (l *logger) rotate() {
 		return
 	}
 	l.f.Close()
-	stamp := time.Now().UTC().Format("20060102-150405")
-	if err := os.Rename(l.path, l.path+"."+stamp); err != nil {
+	// Second-granularity timestamps collide when two rotations happen within
+	// the same wall-clock second (#1403 -- the same pattern this file
+	// originated already caught the same bug once copied into
+	// ip-enrichment-worker/rotate.go and dionaea/log_rotation_patch.py, both
+	// fixed with a counter suffix; applying the identical fix back here).
+	// Disambiguate with a counter suffix instead of trusting the clock alone.
+	target := l.path + "." + time.Now().UTC().Format("20060102-150405")
+	if _, err := os.Stat(target); err == nil {
+		for n := 2; ; n++ {
+			candidate := fmt.Sprintf("%s.%d", target, n)
+			if _, err := os.Stat(candidate); err != nil {
+				target = candidate
+				break
+			}
+		}
+	}
+	if err := os.Rename(l.path, target); err != nil {
 		// Rename failing (e.g. path already gone) shouldn't stop logging --
 		// reopening O_APPEND on the original path either resumes the same
 		// file or creates a new one, either of which beats losing the fd.
