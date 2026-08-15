@@ -41,11 +41,11 @@ func TestProcessSourceTickDoesNotAdvanceOffsetOnWriteFailure(t *testing.T) {
 	}
 	s, vm, tftpVM := newTestSource(t, input)
 
-	out, err := os.OpenFile(s.output, os.O_CREATE|os.O_WRONLY, 0o640)
+	out, err := newOutputWriter(s.output, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	out.Close() // closed on purpose: any Write on it now fails
+	out.f.Close() // closed on purpose: any Write on it now fails
 
 	marker := []byte(`"src_ip":"` + tunnelPeerIP + `"`)
 	got := processSourceTick(s, vm, tftpVM, time.Second, out, marker, 0, time.Now())
@@ -73,7 +73,7 @@ func TestProcessSourceTickDoesNotAdvanceOffsetOnSaveFailure(t *testing.T) {
 	// while the write to `out` still succeeds.
 	s.statePath = filepath.Join(t.TempDir(), "does-not-exist", "test.offset")
 
-	out, err := os.OpenFile(s.output, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
+	out, err := newOutputWriter(s.output, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestProcessSourceTickAdvancesOffsetOnSuccess(t *testing.T) {
 	}
 	s, vm, tftpVM := newTestSource(t, input)
 
-	out, err := os.OpenFile(s.output, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o640)
+	out, err := newOutputWriter(s.output, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

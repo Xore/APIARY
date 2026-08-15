@@ -81,6 +81,14 @@ while true; do
   find /logs/multipot -maxdepth 1 -name 'multipot.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
   find /logs/http-honeypot -maxdepth 1 -name 'http.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
   find /logs/api-honeypot -maxdepth 1 -name 'api.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  # #1389: ip-enrichment-worker's own output (OUT_DIR, default /logs/enriched)
+  # now self-rotates the same way (rotate.go's outputWriter), suffixing every
+  # source's output flatly in that one directory -- cowrie.json.<stamp>,
+  # dionaea-incident.json.<stamp>, and so on for every source
+  # discoverSources() registers, present or future. One glob covers all of
+  # them, same reasoning as the conpot persona glob in the rotate() loop
+  # above.
+  find /logs/enriched -maxdepth 1 -name '*.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
 
   sleep "$interval"
 done
