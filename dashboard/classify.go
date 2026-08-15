@@ -717,6 +717,35 @@ func classify(e map[string]any, dirSensor string) event {
 		return ev
 	}
 
+	// ---- wordpot (#1421) -----------------------------------------------------
+	// Reads the flat lowercase fields ip-enrichment-worker/wordpot.go
+	// promotes from wordpot_patch.py's fixed message templates (see that
+	// file's doc comment for why a template-regex parse, not raw fields).
+	// No port, same documented gap as beelzebub/hellpot above: wordpot logs
+	// no listen-port of its own.
+	if s, ok := e["sensor"].(string); ok && s == "wordpot" {
+		ev.sensor = "wordpot"
+		ev.proto = "http"
+		ev.path = str(e["path"])
+		ev.user, ev.pass = str(e["username"]), str(e["password"])
+		ev.isLogin = ev.pass != ""
+		switch {
+		case ev.pass != "":
+			ev.detail = "auth: " + ev.user + " / " + ev.pass
+		case str(e["plugin"]) != "":
+			ev.detail = "plugin probe: " + str(e["plugin"]) + "  " + ev.path
+		case str(e["theme"]) != "":
+			ev.detail = "theme probe: " + str(e["theme"]) + "  " + ev.path
+		case ev.user != "":
+			ev.detail = "author enum: " + ev.user
+		case ev.path != "":
+			ev.detail = "request: " + ev.path
+		default:
+			ev.detail = str(e["message"])
+		}
+		return ev
+	}
+
 	// ---- endlessh (#246) ---------------------------------------------------
 	// A "connect" and a later "disconnect" are logged per held connection;
 	// the disconnect carries the actual investigative value (how long/how

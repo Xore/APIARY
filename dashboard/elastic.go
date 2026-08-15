@@ -541,6 +541,7 @@ func (c *esClient) refresh() {
 		{"elasticpot", "honeypot-v2-*", "event.sensor:elasticpot"},
 		{"galah", "honeypot-v2-*", "event.sensor:galah"},
 		{"sentrypeer", "honeypot-v2-*", "event.sensor:sentrypeer"},
+		{"wordpot", "honeypot-v2-*", "event.sensor:wordpot"},
 		{"suricata", "suricata-*", ""},
 	}
 	for _, q := range queries {

@@ -240,3 +240,39 @@ func TestGalahWithoutPathFallsBackToMsg(t *testing.T) {
 		t.Fatalf("detail = %q, want the raw msg fallback", ev.detail)
 	}
 }
+
+// TestWordpotLoginAttemptSurfacesCredentials covers #1421's classify.go
+// block reading the flat lowercase fields ip-enrichment-worker/wordpot.go
+// promotes from wordpot_patch.py's fixed message templates.
+func TestWordpotLoginAttemptSurfacesCredentials(t *testing.T) {
+	ev := classify(map[string]any{
+		"sensor":   "wordpot",
+		"protocol": "HTTP",
+		"path":     "/wp-login.php",
+		"username": "admin",
+		"password": "hunter2",
+	}, "wordpot")
+	if ev.sensor != "wordpot" {
+		t.Fatalf("sensor = %q, want wordpot", ev.sensor)
+	}
+	if !ev.isLogin {
+		t.Fatal("expected isLogin=true when a password is present")
+	}
+	if !strings.Contains(ev.detail, "admin / hunter2") {
+		t.Fatalf("detail = %q, want it to surface the attempted credentials", ev.detail)
+	}
+}
+
+// TestWordpotPluginProbeTakesPriorityOverBarePath proves a plugin probe
+// (the more specific signal) wins over a bare path when both are present.
+func TestWordpotPluginProbeTakesPriorityOverBarePath(t *testing.T) {
+	ev := classify(map[string]any{
+		"sensor":   "wordpot",
+		"protocol": "HTTP",
+		"path":     "/wp-content/plugins/akismet/readme.txt",
+		"plugin":   "akismet",
+	}, "wordpot")
+	if !strings.HasPrefix(ev.detail, "plugin probe: akismet") {
+		t.Fatalf("detail = %q, want plugin probe to take priority over a bare path", ev.detail)
+	}
+}
