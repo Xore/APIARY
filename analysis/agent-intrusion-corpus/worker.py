@@ -9,13 +9,10 @@ Structurally follows ml-worker/worker.py's own established pattern
 (source indices, ES client, poll loop) rather than inventing a new one --
 same ES-unavailable handling posture, same "never raise out of the poll
 loop" discipline. Deliberately simpler where this worker's own job allows
-it: campaign correlation needs to see events across the whole time window
-at once (campaign_correlator.py's own `window` parameter, not just
-whatever arrived since the last poll), so this re-queries a bounded
-rolling window fresh every cycle rather than maintaining ml-worker's own
-incremental equal-timestamp checkpoint -- a real, deliberate tradeoff
-(some repeated ES query cost) for a lot less state-management complexity,
-reasonable at this worker's own poll cadence and data volume.
+it: campaign correlation re-queries the newest bounded event set inside a
+rolling time window each cycle rather than maintaining ml-worker's own
+incremental equal-timestamp checkpoint. The separate per-source event cap
+keeps this bounded even when that time window contains millions of events.
 
 Every one of decode_correlate/campaign_correlator/criticality_rules stays
 completely untouched by this file -- it only adapts real ES documents into
@@ -40,6 +37,7 @@ ES_HOST = os.getenv("ES_HOST", "http://elasticsearch:9200")
 SOURCE_INDICES = ["honeypot-v2-*", "suricata-v2-*"]
 CAMPAIGN_INDEX = "agent-intrusion-campaigns"
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "300"))
+MAX_EVENTS_PER_SOURCE = int(os.getenv("MAX_EVENTS_PER_SOURCE", "10000"))
 # Matches campaign_correlator.correlate_campaigns's own default -- kept as
 # a separate constant (not importing corr's default directly) so this
 # worker's own fetch window and the correlator's own union-find window stay
@@ -59,8 +57,31 @@ FETCH_WINDOW = timedelta(days=int(os.getenv("FETCH_WINDOW_DAYS", "10")))
 MIN_SEVERITY_TO_WRITE = {"high", "critical"}
 
 
-def fetch_window_events(es: Elasticsearch, index_pattern: str, since: str, page_size: int = 1000) -> list[dict]:
-    """Scrolls every event in `index_pattern` at or after `since`, mapped
+def _sensor_raw(source: dict) -> dict:
+    """Returns the sensor-native portion of a live ECS document.
+
+    Corpus fixtures already use the sensor-native shape at the top level,
+    while the production ingest pipelines retain it below ``honeypot`` or
+    ``suricata.eve``.  Supporting both keeps the deterministic rules working
+    against the documents Elasticsearch actually stores.
+    """
+    honeypot = source.get("honeypot")
+    if isinstance(honeypot, dict):
+        return honeypot
+    suricata = source.get("suricata")
+    if isinstance(suricata, dict) and isinstance(suricata.get("eve"), dict):
+        return suricata["eve"]
+    return source
+
+
+def fetch_window_events(
+    es: Elasticsearch,
+    index_pattern: str,
+    since: str,
+    page_size: int = 1000,
+    max_events: int = MAX_EVENTS_PER_SOURCE,
+) -> list[dict]:
+    """Scrolls the newest capped events at or after `since`, mapped
     into the {event_id, timestamp, raw} shape campaign_correlator.py and
     criticality_rules.py already consume (proven against the corpus).
     Real ES `_id`s are used directly as event_id -- unlike the corpus's own
@@ -70,8 +91,15 @@ def fetch_window_events(es: Elasticsearch, index_pattern: str, since: str, page_
     events: list[dict] = []
     query = {
         "query": {"range": {"@timestamp": {"gte": since}}},
-        "sort": [{"@timestamp": {"order": "asc"}}],
+        # Work backwards from the newest evidence when the safety cap is
+        # reached.  Without a cap the live 10-day window currently contains
+        # tens of millions of documents and the worker is OOM-killed before
+        # completing even one cycle.
+        "sort": [{"@timestamp": {"order": "desc"}}],
         "size": page_size,
+        # Raw packet bytes duplicate payload_printable and dominate memory in
+        # Suricata documents; none of the deterministic rules consume them.
+        "_source": {"excludes": ["suricata.eve.packet", "suricata.eve.payload"]},
     }
     try:
         resp = es.search(index=index_pattern, body=query, scroll="2m")
@@ -87,8 +115,16 @@ def fetch_window_events(es: Elasticsearch, index_pattern: str, since: str, page_
                     "event_id": hit["_id"],
                     "timestamp": ts,
                     "source_index": hit["_index"],
-                    "raw": source,
+                    "raw": _sensor_raw(source),
                 })
+                if len(events) >= max_events:
+                    logger.warning(
+                        f"Fetch cap reached for {index_pattern}: processing "
+                        f"the newest {max_events} events from this cycle"
+                    )
+                    break
+            if len(events) >= max_events:
+                break
             resp = es.scroll(scroll_id=scroll_id, scroll="2m")
             scroll_id = resp["_scroll_id"]
             hits = resp["hits"]["hits"]

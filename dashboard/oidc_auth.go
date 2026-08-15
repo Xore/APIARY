@@ -447,7 +447,21 @@ func (a *oidcAuth) identityFromRequest(r *http.Request) (authenticatedIdentity, 
 		return authenticatedIdentity{}, errIdentityUnauthorized
 	}
 	changed := false
-	if now.Add(time.Minute).After(session.TokenExpiry) {
+	// #1235: an SSE connection is authenticated once, when the stream is
+	// opened; it is not re-authorized when its access token expires later.
+	// Refreshing a still-valid token in the proactive one-minute window buys
+	// the stream no additional security, but it can make EventSource lose the
+	// per-session refresh race and wait behind the winning page request for up
+	// to oidcRefreshWaitTimeout before the response headers are even flushed.
+	// That was the live indicator's long "Reconnecting..." stall. Let ordinary
+	// short-lived API requests perform the proactive refresh and let the stream
+	// use its still-valid cached identity; an already-expired stream request
+	// still refreshes normally and therefore never fails open.
+	needsRefresh := !now.Before(session.TokenExpiry)
+	if r.URL.Path != "/api/stream" {
+		needsRefresh = now.Add(time.Minute).After(session.TokenExpiry)
+	}
+	if needsRefresh {
 		remaining := oidcSessionMaxAge - now.Sub(session.CreatedAt)
 		if err := a.refreshSessionLocked(r.Context(), cookie.Value, &session, remaining); err != nil {
 			if isTransientOAuthError(err) {

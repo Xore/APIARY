@@ -71,6 +71,8 @@ func newLogger(path string) *logger {
 	}
 	if f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640); err == nil {
 		l.out = f
+	} else {
+		fmt.Fprintf(os.Stderr, "dicompot: log file %q unavailable, continuing with stdout only: %v\n", path, err)
 	}
 	return l
 }

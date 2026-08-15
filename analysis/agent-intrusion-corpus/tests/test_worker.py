@@ -97,6 +97,33 @@ class TestFetchWindowEvents(unittest.TestCase):
         events = worker.fetch_window_events(es, "honeypot-v2-*", "2026-02-01T00:00:00Z")
         self.assertEqual([e["event_id"] for e in events], ["a"])
 
+    def test_unwraps_live_honeypot_ecs_shape(self):
+        es = FakeElasticsearch({"honeypot-v2-2026.02.09": [{
+            "_id": "wrapped",
+            "_source": {
+                "@timestamp": "2026-02-09T04:01:00Z",
+                "honeypot": {
+                    "eventid": "cowrie.command.input",
+                    "session": "s1",
+                    "src_ip": "203.0.113.10",
+                    "input": "cat /proc/self/environ",
+                },
+            },
+        }]})
+        events = worker.fetch_window_events(es, "honeypot-v2-*", "2026-02-01T00:00:00Z")
+        self.assertEqual(events[0]["raw"]["input"], "cat /proc/self/environ")
+
+    def test_caps_each_source_pattern(self):
+        docs = [
+            _cowrie_doc(str(i), f"2026-02-09T00:00:{i:02d}Z", "s", "203.0.113.1", "id")
+            for i in range(5)
+        ]
+        es = FakeElasticsearch({"honeypot-v2-2026.02.09": docs})
+        events = worker.fetch_window_events(
+            es, "honeypot-v2-*", "2026-02-01T00:00:00Z", max_events=2
+        )
+        self.assertEqual(len(events), 2)
+
 
 class TestNormalizeTimestamp(unittest.TestCase):
     def test_bare_z_suffix_passes_through(self):

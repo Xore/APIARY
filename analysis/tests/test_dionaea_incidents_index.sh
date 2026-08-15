@@ -56,9 +56,9 @@ for _ in $(seq 1 40); do
 done
 [ "$ready" -eq 1 ] || fail "Elasticsearch did not become reachable at $es_url"
 
-# The template references index.lifecycle.name: honeypot-30d -- register it
+# The template references the delete-only daily-index policy -- register it
 # so index creation doesn't warn/fail on a missing policy reference.
-curl -fsS -X PUT "$es_url/_ilm/policy/honeypot-30d" \
+curl -fsS -X PUT "$es_url/_ilm/policy/dionaea-incidents-30d" \
   -H 'Content-Type: application/json' \
   --data-binary '{"policy":{"phases":{"hot":{"actions":{}},"delete":{"min_age":"30d","actions":{"delete":{}}}}}}' >/dev/null
 
@@ -80,6 +80,57 @@ curl -fsS -X PUT "$es_url/_index_template/dionaea-incidents" \
   --data-binary "@$tmp/template.json" >/dev/null ||
   fail "Elasticsearch rejected the index template"
 pass "index template installs cleanly"
+
+policy_name=$(python3 -c "import json; print(json.load(open('$tmp/template.json'))['template']['settings']['index.lifecycle.name'])")
+[ "$policy_name" = "dionaea-incidents-30d" ] ||
+  fail "dionaea template uses $policy_name, want the non-rollover dionaea-incidents-30d policy"
+pass "daily Dionaea indices use their dedicated non-rollover retention policy"
+
+# #1375 migration regression: reproduce an already-existing daily index in
+# the exact ERROR state from production, then exercise setup.sh's supported
+# remove-then-apply policy switch. Directly overwriting index.lifecycle.name
+# is deliberately not tested because Elasticsearch can retain the cached hot
+# phase from the old policy in that unsupported sequence.
+legacy_index="dionaea-incidents-v1-legacy-$$"
+curl -fsS -X PUT "$es_url/_ilm/policy/honeypot-30d" \
+  -H 'Content-Type: application/json' \
+  --data-binary '{"policy":{"phases":{"hot":{"actions":{"rollover":{"max_age":"1d"}}},"delete":{"min_age":"30d","actions":{"delete":{}}}}}}' >/dev/null
+curl -fsS -X PUT "$es_url/_cluster/settings" -H 'Content-Type: application/json' \
+  --data-binary '{"transient":{"indices.lifecycle.poll_interval":"1s"}}' >/dev/null
+curl -fsS -X PUT "$es_url/$legacy_index" -H 'Content-Type: application/json' \
+  --data-binary '{"settings":{"index.lifecycle.name":"honeypot-30d"}}' >/dev/null
+
+errored=0
+for _ in $(seq 1 20); do
+  step=$(curl -fsS "$es_url/$legacy_index/_ilm/explain" |
+    python3 -c "import json,sys; print(json.load(sys.stdin)['indices']['$legacy_index'].get('step', ''))")
+  if [ "$step" = "ERROR" ]; then
+    errored=1
+    break
+  fi
+  sleep 1
+done
+[ "$errored" -eq 1 ] || fail "legacy rollover-managed Dionaea index did not reproduce the ERROR step"
+pass "legacy daily index reproduces the missing-rollover-alias ERROR"
+
+curl -fsS -X POST "$es_url/$legacy_index/_ilm/remove" >/dev/null
+curl -fsS -X PUT "$es_url/$legacy_index/_settings" \
+  -H 'Content-Type: application/json' \
+  -d '{"index.lifecycle.name":"dionaea-incidents-30d"}' >/dev/null
+
+migrated=0
+for _ in $(seq 1 20); do
+  read -r policy step <<EOF
+$(curl -fsS "$es_url/$legacy_index/_ilm/explain" | python3 -c "import json,sys; i=json.load(sys.stdin)['indices']['$legacy_index']; print(i.get('policy', ''), i.get('step', ''))")
+EOF
+  if [ "$policy" = "dionaea-incidents-30d" ] && [ "$step" != "ERROR" ]; then
+    migrated=1
+    break
+  fi
+  sleep 1
+done
+[ "$migrated" -eq 1 ] || fail "legacy Dionaea index did not leave ERROR under the delete-only policy"
+pass "remove-then-apply migration clears the old ERROR and starts the delete-only policy"
 
 # Two incidents from different origins reusing the same "port" key with
 # incompatible value types (int vs string) -- exactly the scenario the

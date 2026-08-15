@@ -32,6 +32,10 @@ services:
       ES_HOST: http://elasticsearch:9200
       POLL_INTERVAL: "300"
       FETCH_WINDOW_DAYS: "10"
+      # The 10-day live window contains tens of millions of events. Bound
+      # each source pattern so one cycle completes instead of exhausting the
+      # container while retaining the newest evidence from both sources.
+      MAX_EVENTS_PER_SOURCE: "10000"
     security_opt:
       - no-new-privileges:true
     cap_drop: [ALL]

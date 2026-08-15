@@ -450,6 +450,46 @@ func TestIdentityFromRequestSessionLifecycle(t *testing.T) {
 		}
 	})
 
+	// #1235: /api/stream is authenticated once before its long-lived response
+	// begins. If another page request already owns the refresh lock while the
+	// access token is still valid (inside the normal one-minute proactive
+	// refresh window), EventSource must not wait behind it before receiving
+	// the SSE headers. The still-held lock after this call proves this request
+	// neither waited for nor took over the refresh.
+	t.Run("SSE does not wait for a proactive concurrent refresh while its token is valid", func(t *testing.T) {
+		store := newStore()
+		now := time.Now().UTC()
+		auth := &oidcAuth{sessions: store, now: func() time.Time { return now }}
+		const sessionID = "near-expiry-stream-session"
+		session := oidcSession{
+			Identity: authenticatedIdentity{Subject: subject, Username: "analyst", Role: "admin"},
+			// Inside the ordinary request path's proactive refresh window, but
+			// not expired -- exactly the concurrent page-load race from #1235.
+			TokenExpiry: now.Add(30 * time.Second), CreatedAt: now, LastValidated: now,
+		}
+		if err := auth.putJSON(context.Background(), "oidc:session:"+sessionID, session, time.Hour); err != nil {
+			t.Fatal(err)
+		}
+		lockKey := "oidc:refreshlock:" + sessionID
+		acquired, err := store.TryLock(context.Background(), lockKey, oidcRefreshLockTTL)
+		if err != nil || !acquired {
+			t.Fatalf("pre-acquire refresh lock: acquired=%v err=%v", acquired, err)
+		}
+
+		request := httptest.NewRequest(http.MethodGet, "/api/stream", nil)
+		request.AddCookie(&http.Cookie{Name: oidcSessionCookie, Value: sessionID})
+		identity, err := auth.identityFromRequest(request)
+		if err != nil {
+			t.Fatalf("identityFromRequest() = %v, want immediate cached identity", err)
+		}
+		if identity.Subject != subject {
+			t.Fatalf("identity subject = %q, want %q", identity.Subject, subject)
+		}
+		if !store.locks[lockKey] {
+			t.Fatal("SSE unexpectedly acquired/released the refresh lock for a still-valid token")
+		}
+	})
+
 	// #1127: reproduces the actual production bug. Keycloak's refresh
 	// tokens here are single-use (revokeRefreshToken=true,
 	// refreshTokenMaxReuse=0, keycloak/realm/apiary-realm.json) -- two
