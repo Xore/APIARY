@@ -251,6 +251,8 @@ type store struct {
 	problemReportsCacheAt    time.Time
 	problemReportsRefreshing bool
 	dir                      string
+	logStreamMaxBytes        int64    // shared #1389 self-rotation limit; 0 disables rotation/alerts
+	logStreamAlertPercent    int      // warn while the active file still has headroom before rotation
 	payloadDirs              []string // dionaea, cowrie and generated script artifact directories
 	scriptDir                string   // writable directory for safely retained inline scripts
 	geo                      *geoDB   // nil if no GeoIP database configured
@@ -391,6 +393,17 @@ func (s *store) notifyLoop(endpoint string) {
 					if !markOnly {
 						messages = append(messages, message)
 					}
+				}
+			}
+		}
+		// #1389: the writers now self-rotate, but without an independent
+		// observer a regression would silently recreate the multi-gigabyte
+		// files that prompted the issue. Warn at 90% (configurable) while
+		// there is still headroom before the shared rotation limit.
+		for _, alert := range logStreamAlerts(scanLogStreams(s.dir), s.logStreamMaxBytes, s.logStreamAlertPercent, time.Now()) {
+			if s.alerts == nil || s.alerts.observe(alert.Key, alert.Message, "", markOnly) {
+				if !markOnly {
+					messages = append(messages, alert.Message)
 				}
 			}
 		}
