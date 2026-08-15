@@ -42,8 +42,16 @@
 #   canarytokens-adapter/main.go's package doc for the full shape.
 #
 # Required .env values (no safe defaults, unlike most settings here):
-#   CANARY_WG_PRIVATE_KEY_SEED  -- any random string, used to derive
-#                                  switchboard's WireGuard-token keypairs.
+#   CANARY_WG_PRIVATE_KEY_SEED  -- a base64-encoded 32-byte value (NOT "any
+#                                  random string" -- caught live: canarytokens/
+#                                  wireguard.py's getDevices() does
+#                                  base64.b64decode(seed) then requires
+#                                  exactly 32 raw bytes for nacl's
+#                                  randombytes_deterministic, and a
+#                                  mismatched length crashes switchboard
+#                                  outright at startup). Generate with:
+#                                    python3 -c "import secrets, base64; \
+#                                    print(base64.b64encode(secrets.token_bytes(32)).decode())"
 #                                  Generate once, keep stable (rotating it
 #                                  invalidates already-issued WireGuard
 #                                  tokens).
@@ -88,6 +96,14 @@ services:
       - LOG_FILE=/logs/frontend.log
       - CANARY_REDIS_HOST=canarytokens-redis
       - CANARY_SWITCHBOARD_HOSTNAME=canarytokens-switchboard
+      # See canarytokens-switchboard's own comment on the same
+      # cross-coupling in the other direction: frontend/app.py's import
+      # chain (aws_infra -> queries -> channel_output_webhook ->
+      # canarydrop) instantiates SwitchboardSettings() too, at import
+      # time. Confirmed live -- frontend crash-looped on exactly these two
+      # fields until added here.
+      - CANARY_PUBLIC_DOMAIN=canarytokens.internal.apiary
+      - CANARY_WG_PRIVATE_KEY_SEED=${CANARY_WG_PRIVATE_KEY_SEED:?set a random seed in .env}
     ports:
       - ${HP_BIND:-10.8.0.2}:19426:8082
     volumes:
@@ -116,6 +132,19 @@ services:
       - LOG_FILE=/logs/switchboard.log
       - CANARY_REDIS_HOST=canarytokens-redis
       - CANARY_CHANNEL_HTTP_PORT=8083
+      # PUBLIC_IP/DOMAINS/NXDOMAINS are documented as frontend-only settings
+      # upstream, but switchboard needs them too: switchboard.tac's own
+      # import chain (channel_dns -> queries -> channel_output_webhook ->
+      # canarydrop -> webdav) instantiates FrontendSettings() at module
+      # load time regardless of which process is running -- confirmed live,
+      # switchboard crash-looped with a pydantic ValidationError on exactly
+      # these three fields until they were added here too. Matches
+      # upstream's own canarytokens-docker, which bind-mounts both
+      # frontend.env AND switchboard.env into both containers for the same
+      # reason.
+      - CANARY_PUBLIC_IP=${HP_BIND:-10.8.0.2}
+      - CANARY_DOMAINS=canarytokens.internal.apiary
+      - CANARY_NXDOMAINS=nx.canarytokens.internal.apiary
       # SMTP(25)/DNS(53)/WireGuard(51820) channels stay enabled inside the
       # container (upstream default) but are deliberately not published as
       # host ports below -- see the file header for why.
