@@ -31,7 +31,7 @@
               <th>Expected</th>
               <th>Actual</th>
               <th>Status</th>
-              <th>Details</th>
+              <th>Report</th>
             </tr>
           </thead>
           <tbody>
@@ -50,7 +50,7 @@
                 </select>
               </td>
               <td>
-                <button type="button" class="btn btn-secondary btn-sm" data-hp-pr-details data-id="{{.ID}}">View</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-hp-pr-details data-id="{{.ID}}" aria-controls="hp-pr-detail-panel">Select</button>
               </td>
             </tr>
             {{end}}
@@ -76,7 +76,7 @@
               <th>Expected</th>
               <th>Actual</th>
               <th>Status</th>
-              <th>Details</th>
+              <th>Report</th>
             </tr>
           </thead>
           <tbody>
@@ -91,13 +91,11 @@
         <p class="note">No problem reports have been submitted yet.</p>
         {{end}}
 
-        <div class="modal-backdrop" id="hp-pr-detail-backdrop" aria-hidden="true" hidden></div>
-        <section class="modal hp-evidence-modal" id="hp-pr-detail-modal" role="dialog" aria-modal="true" aria-label="Problem report details" hidden>
-          <div class="modal__header">
-            <h2 class="modal__header-title">Problem report</h2>
-            <button class="modal__close" type="button" data-hp-pr-detail-close aria-label="Close">&#10005;</button>
+        <section class="card wide tw:mt-6" id="hp-pr-detail-panel" aria-live="polite"{{if .Reports}} aria-busy="true"{{end}}>
+          <div class="section-heading"><div><div class="label-section">Selected report</div><h2>Complete submitted context</h2><p>Every captured field stays in this page and long datasets remain bounded.</p></div></div>
+          <div data-hp-pr-detail-body>
+            {{if .Reports}}<div class="tw:grid tw:grid-cols-12 tw:gap-3.5" aria-hidden="true"><div class="card wide"><h3>Report identity</h3><div class="skeleton-line" style="width:88%"></div><div class="skeleton-line" style="width:72%"></div><div class="skeleton-line" style="width:80%"></div></div><div class="card half"><h3>Expected</h3><div class="skeleton-line" style="width:82%"></div></div><div class="card half"><h3>Actual</h3><div class="skeleton-line" style="width:76%"></div></div><div class="card wide"><h3>Action trail</h3><div class="card__scroll"><div class="skeleton-line" style="width:90%"></div><div class="skeleton-line" style="width:68%"></div></div></div><div class="card wide"><h3>Captured diagnostics</h3><div class="card__scroll"><div class="skeleton-line" style="width:86%"></div><div class="skeleton-line" style="width:74%"></div></div></div></div>{{else}}<p class="empty">Select a problem report to inspect its complete submitted context.</p>{{end}}
           </div>
-          <div class="hp-evidence-body" data-hp-pr-detail-body></div>
         </section>
 
         <footer>{{brandText}}</footer>

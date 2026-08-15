@@ -1,121 +1,141 @@
-/* /admin/problem-reports page controller (#1147): status changes and a
- * details modal showing the full captured context (action trail, console
- * errors, network failures, API calls, DOM snapshot) for one report.
- * window.__hpProblemReports is inlined server-side (problem_reports.html)
- * so this page needs no extra round-trip just to show what already
- * rendered in the table.
+/* /admin/problem-reports controller: status changes plus an in-flow,
+ * bounded master/detail view of the complete captured report context.
+ * The reports are already embedded by problem_reports.html, so selecting a
+ * row hydrates the visible card collection without another request.
  */
 (function () {
   "use strict";
 
-  const reports = window.__hpProblemReports || [];
-  const byId = new Map(reports.map(r => [r.id, r]));
+  const reports = Array.isArray(window.__hpProblemReports) ? window.__hpProblemReports : [];
+  const byId = new Map(reports.map(report => [report.id, report]));
+  const panel = document.getElementById("hp-pr-detail-panel");
+  const body = panel?.querySelector("[data-hp-pr-detail-body]");
+  let selectedID = "";
+
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text != null) node.textContent = String(text);
+    return node;
+  }
+
+  function empty(text) {
+    return el("p", "empty", text);
+  }
+
+  function scrollList(items, render) {
+    if (!items?.length) return empty("None captured.");
+    const scroll = el("div", "card__scroll");
+    items.forEach((item, index) => scroll.appendChild(render(item, index)));
+    return scroll;
+  }
+
+  function card(title, className = "wide") {
+    const node = el("article", `card ${className}`);
+    node.appendChild(el("h3", "", title));
+    return node;
+  }
+
+  function row(label, value, mono = false) {
+    const node = el("div", "card__row");
+    node.appendChild(el("span", "card__label", label));
+    node.appendChild(el("span", `card__value${mono ? " card__value--mono" : ""}`, value || "—"));
+    return node;
+  }
+
+  function textCard(title, value, className = "half") {
+    const node = card(title, className);
+    const scroll = el("div", "card__scroll");
+    scroll.appendChild(el("pre", "code", value || "None captured."));
+    node.appendChild(scroll);
+    return node;
+  }
+
+  function renderDetail(report) {
+    if (!body || !panel || !report) return;
+    selectedID = report.id;
+    body.replaceChildren();
+    const grid = el("div", "tw:grid tw:grid-cols-12 tw:gap-3.5");
+
+    const identity = card("Report identity");
+    const submitted = row("submitted", report.submitted_at || "—", true);
+    const submittedValue = submitted.querySelector(".card__value");
+    if (report.submitted_at && submittedValue) submittedValue.dataset.hpUtc = report.submitted_at;
+    identity.append(
+      row("report ID", report.id, true),
+      submitted,
+      row("submitted by", report.submitted_by_name || report.submitted_by || "—"),
+      row("identity subject", report.submitted_by || "—", true),
+      row("page", report.page || "—", true),
+      row("status", report.status || "open"),
+    );
+    grid.append(identity, textCard("Expected behavior", report.expected), textCard("Actual behavior", report.actual));
+
+    const trail = card("Action trail");
+    trail.appendChild(scrollList(report.action_trail, action => {
+      const item = el("div", "card__row");
+      item.append(el("span", "card__label", `${action.at || "unknown time"} · ${action.kind || "action"}`), el("span", "card__value card__value--mono", action.detail || "—"));
+      return item;
+    }));
+    grid.appendChild(trail);
+
+    const consoleCard = card("Console errors", "half");
+    consoleCard.appendChild(scrollList(report.console_errors, error => row("error", error, true)));
+    const networkCard = card("Failed network requests", "half");
+    networkCard.appendChild(scrollList(report.network_failures, failure => row("failure", failure, true)));
+    grid.append(consoleCard, networkCard);
+
+    const apiCard = card("API calls");
+    apiCard.appendChild(scrollList(report.api_calls, call => {
+      const item = el("article", "project-card");
+      item.appendChild(el("div", "project-card__title", `${call.method || "GET"} ${call.url || "—"} → ${call.status ?? "—"}`));
+      if (call.at) item.appendChild(el("p", "note", call.at));
+      if (call.request_body) item.appendChild(textCard("Request body", call.request_body));
+      if (call.response_body) item.appendChild(textCard("Response body", call.response_body));
+      return item;
+    }));
+    grid.appendChild(apiCard);
+
+    grid.append(textCard("DOM snapshot", report.dom_snapshot, "wide"), textCard("User agent", report.user_agent, "wide"));
+    body.appendChild(grid);
+    panel.setAttribute("aria-busy", "false");
+    document.querySelectorAll("[data-hp-pr-details]").forEach(button => {
+      const active = button.dataset.id === selectedID;
+      button.setAttribute("aria-pressed", String(active));
+      button.textContent = active ? "Selected" : "Select";
+    });
+    window.applyHoneypotTimezone?.(body);
+  }
 
   document.querySelectorAll("[data-hp-pr-status]").forEach(select => {
     select.addEventListener("change", async () => {
       const id = select.dataset.id;
-      const status = select.value;
+      const report = byId.get(id);
+      const previous = report?.status || "open";
       try {
         const response = await fetch("/api/problem-reports/" + encodeURIComponent(id), {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status }),
+          body: JSON.stringify({ status: select.value }),
         });
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+        if (report) report.status = select.value;
+        if (id === selectedID) renderDetail(report);
       } catch (err) {
-        alert("Failed to update status: " + (err && err.message ? err.message : "unknown error"));
+        select.value = previous;
+        alert("Failed to update status: " + (err?.message || "unknown error"));
       }
     });
   });
 
-  const backdrop = document.getElementById("hp-pr-detail-backdrop");
-  const modal = document.getElementById("hp-pr-detail-modal");
-  const body = modal ? modal.querySelector("[data-hp-pr-detail-body]") : null;
-
-  let restoreFocus = null;
-
-  // Tab-cycling/initial-focus/return-focus via focus-trap (vendored,
-  // dashboard/static/vendor/focus-trap/); this modal previously had no
-  // keyboard containment at all -- #1244's audit flagged it as one of two
-  // dialogs in the dashboard missing the trap every other one already
-  // implements. It shows other users' captured report data (DOM snapshot,
-  // API bodies) to an admin, so the gap mattered more here than most.
-  const trap = modal ? window.focusTrap.createFocusTrap(modal, {
-    escapeDeactivates: false,
-    clickOutsideDeactivates: false,
-    initialFocus: () => modal.querySelector("[data-hp-pr-detail-close]") || modal,
-    fallbackFocus: () => modal,
-    setReturnFocus: () => (restoreFocus?.isConnected ? restoreFocus : false),
-  }) : null;
-
-  function esc(s) {
-    const div = document.createElement("div");
-    div.textContent = s == null ? "" : String(s);
-    return div.innerHTML;
-  }
-
-  function renderDetail(report) {
-    const trail = (report.action_trail || [])
-      .map(a => `<div>${esc(a.at)} — ${esc(a.kind)}: ${esc(a.detail)}</div>`)
-      .join("");
-    const errors = (report.console_errors || []).map(e => `<div>${esc(e)}</div>`).join("");
-    const failures = (report.network_failures || []).map(f => `<div>${esc(f)}</div>`).join("");
-    const apiCalls = (report.api_calls || [])
-      .map(
-        c =>
-          `<div><strong>${esc(c.method)} ${esc(c.url)} -&gt; ${esc(c.status)}</strong>` +
-          (c.request_body ? `<pre>${esc(c.request_body)}</pre>` : "") +
-          (c.response_body ? `<pre>${esc(c.response_body)}</pre>` : "") +
-          `</div>`
-      )
-      .join("");
-    body.innerHTML = `
-      <h3>Action trail</h3>${trail || "<p class=\"note\">None captured.</p>"}
-      <h3>Console errors</h3>${errors || "<p class=\"note\">None captured.</p>"}
-      <h3>Failed network requests</h3>${failures || "<p class=\"note\">None captured.</p>"}
-      <h3>API calls</h3>${apiCalls || "<p class=\"note\">None captured.</p>"}
-      <h3>DOM snapshot</h3><pre>${esc(report.dom_snapshot || "")}</pre>
-      <h3>User agent</h3><p>${esc(report.user_agent || "")}</p>
-    `;
-  }
-
-  document.querySelectorAll("[data-hp-pr-details]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const report = byId.get(btn.dataset.id);
-      if (!report || !body) return;
+  document.querySelectorAll("[data-hp-pr-details]").forEach(button => {
+    button.addEventListener("click", () => {
+      const report = byId.get(button.dataset.id);
+      if (!report) return;
       renderDetail(report);
-      restoreFocus = btn;
-      backdrop.hidden = false;
-      modal.hidden = false;
-      // theme.css's .modal/.modal-backdrop are display:none by default --
-      // only .open (not the hidden attribute) actually makes them visible.
-      backdrop.classList.add("open");
-      modal.classList.add("open");
-      trap.activate();
+      panel?.scrollIntoView({ block: "nearest", behavior: "smooth" });
     });
   });
 
-  function closeModal() {
-    trap.deactivate();
-    backdrop.hidden = true;
-    modal.hidden = true;
-    backdrop.classList.remove("open");
-    modal.classList.remove("open");
-    // Not nulled here: focus-trap's deactivate() restores focus via a
-    // setTimeout(0), so setReturnFocus's closure must still see this value
-    // when that deferred callback runs. The click handler above overwrites
-    // it next time.
-  }
-  const closeBtn = modal ? modal.querySelector("[data-hp-pr-detail-close]") : null;
-  if (closeBtn) closeBtn.addEventListener("click", closeModal);
-  if (backdrop) backdrop.addEventListener("click", closeModal);
-  document.addEventListener("keydown", event => {
-    if (!modal || modal.hidden) return;
-    if (window.HoneypotModals?.isOpen()) return;
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      closeModal();
-    }
-  });
+  if (reports.length) renderDetail(reports[0]);
 })();

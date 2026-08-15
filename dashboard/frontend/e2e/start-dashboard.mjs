@@ -118,6 +118,30 @@ await fetch(`${fakeES.url}/github-analysis-v1/_doc/github-analysis:${payloadHash
   }),
 });
 
+// Seed complete problem reports so the admin master/detail view exercises
+// every captured field without relying on a submission made by another test.
+const problemReport = {
+  id: "browser-problem-report-01",
+  submitted_at: "2026-08-15T10:30:00Z",
+  submitted_by: "browser-e2e-fixture-session-subject",
+  submitted_by_name: "Browser Fixture Admin",
+  page: "/events?sensor=cowrie",
+  expected: "Browser fixture expected behavior",
+  actual: "Browser fixture actual behavior",
+  action_trail: Array.from({ length: 20 }, (_, index) => ({ at: `2026-08-15T10:${String(index).padStart(2, "0")}:00Z`, kind: index % 2 ? "navigation" : "click", detail: `fixture action ${index}` })),
+  console_errors: ["fixture console error"],
+  network_failures: ["GET /api/fixture failed"],
+  api_calls: [{ at: "2026-08-15T10:29:00Z", method: "POST", url: "/api/fixture", status: 503, request_body: "fixture request body", response_body: "fixture response body" }],
+  dom_snapshot: Array.from({ length: 80 }, (_, index) => `<div>fixture DOM line ${index}</div>`).join("\n"),
+  user_agent: "APIARY browser fixture agent",
+  status: "open",
+};
+await fetch(`${fakeES.url}/dashboard-problem-reports-v1/_doc/${problemReport.id}?op_type=create`, {
+  method: "PUT",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(problemReport),
+});
+
 // Seed one rich Ghidra document so the detail shell, visible bounded
 // datasets, and nested call-graph hydration can be exercised together.
 await fetch(`${fakeES.url}/ghidra-analysis-v1/_doc/ghidra:${payloadHash}?op_type=create`, {

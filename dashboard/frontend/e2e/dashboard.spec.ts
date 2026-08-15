@@ -862,6 +862,56 @@ test.describe("dashboard browser behaviour", () => {
     await expect(page.locator("#github-analysis-detail-root")).toContainText("Analyzer result could not be loaded");
   });
 
+  test("event and problem-report details stay complete, inline, and bounded (#1447, #1470)", async ({ page }) => {
+    await page.goto("/events");
+    const eventTableScroll = page.locator("#events-grid > .card .card__scroll").first();
+    const eventDetails = page.locator("[data-hp-event-detail]");
+    await expect(eventDetails).toHaveCount(25);
+    await expect(eventDetails.first().getByRole("heading", { name: "Normalized event" })).toBeVisible();
+    await expect(eventDetails.first()).toContainText("browser-session");
+    await expect(eventDetails.first().locator("pre.code")).toContainText('"SrcIP"');
+    await expect(page.locator('[data-hp-evidence], [data-hp-evidence-body]')).toHaveCount(0);
+    const eventBounds = await eventTableScroll.evaluate(element => ({
+      overflowY: getComputedStyle(element).overflowY,
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+    }));
+    expect(eventBounds.overflowY).toBe("auto");
+    expect(eventBounds.scrollHeight).toBeGreaterThan(eventBounds.clientHeight);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/events");
+    await expect(page.locator("[data-hp-event-detail]").first()).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+
+    await page.goto("/admin/problem-reports");
+    const reportsPanel = page.locator("#hp-pr-detail-panel");
+    await expect(reportsPanel).toHaveAttribute("aria-busy", "false", { timeout: 10_000 });
+    for (const text of [
+      "Browser fixture expected behavior", "Browser fixture actual behavior", "Browser Fixture Admin",
+      "browser-e2e-fixture-session-subject", "fixture action 19", "fixture console error",
+      "GET /api/fixture failed", "fixture request body", "fixture response body",
+      "fixture DOM line 79", "APIARY browser fixture agent",
+    ]) {
+      await expect(reportsPanel).toContainText(text);
+    }
+    await expect(page.locator("#hp-pr-detail-modal, #hp-pr-detail-backdrop")).toHaveCount(0);
+    await expect(page.locator(".hp-table-wrap.card__scroll")).toBeVisible();
+    await expect(reportsPanel.locator(".card__scroll")).not.toHaveCount(0);
+    const boundedPanel = await reportsPanel.locator(".card__scroll").filter({ hasText: "fixture DOM line 79" }).evaluate(element => ({
+      overflowY: getComputedStyle(element).overflowY,
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+    }));
+    expect(boundedPanel.overflowY).toBe("auto");
+    expect(boundedPanel.scrollHeight).toBeGreaterThan(boundedPanel.clientHeight);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+
+    const status = page.locator('[data-hp-pr-status][data-id="browser-problem-report-01"]');
+    await status.selectOption("triaged");
+    await expect(reportsPanel.locator(".card__row", { hasText: "status" })).toContainText("triaged");
+  });
+
   test("payload analysis hydrates the aggregation cards after the initial render (#1142)", async ({ page }) => {
     await page.goto("/payload-analysis/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
     // The fast path renders identity/hashes immediately; the three
