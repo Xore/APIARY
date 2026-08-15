@@ -266,6 +266,15 @@ processors:
       target: honeypot
       fields: {persona_id: meridian-legacy-web, site_id: meridian-legacy-infra, asset_id: web-legacy-04, organization: Meridian Retail Systems Ltd.}
       when.contains: {log.file.path: "enriched/hellpot.json"}
+  # #1423: elasticpot.json DOES already carry its own native "sensor"
+  # field (elasticpot/honeypot.cfg's sensor_name override sets it to the
+  # literal "elasticpot", unlike beelzebub/hellpot above which needed
+  # ip-enrichment-worker to inject one) -- this rule only attaches
+  # defender-side persona identity, same as every other rule in this block.
+  - add_fields:
+      target: honeypot
+      fields: {persona_id: nexusai-analytics-legacy, site_id: nexusai-berlin-analytics, asset_id: analytics-es-04, organization: NexusAI Research GmbH}
+      when.contains: {log.file.path: "enriched/elasticpot.json"}
   # NOTE on stats events: they carry ~600 engine-internal counter fields and
   # once exhausted the shared daily index's field limit (2026-07-19 outage).
   # With per-event-type indices (see output below) they are contained in
