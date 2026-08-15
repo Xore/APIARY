@@ -449,6 +449,20 @@ def test_unit():
     # A short prompt is not a truncated one.
     check(not w._prompt_was_truncated({"prompt_tokens": 40}, 400), "40 of 400 chars")
 
+    print("--- _clean ---")
+    # str.isprintable() treats \n/\r/\t as non-printable right alongside real
+    # control characters -- the default (keep_newlines=False, used for raw
+    # sample strings/short labels) strips all of it, same as before.
+    check(w._clean("a\nb\tc", 100) == "abc", "default strips newlines/tabs like before")
+    # keep_newlines=True (RevDeck's own answer/chat content, markdown text
+    # meant for dashboard/static/hp-ghidra-markdown.js's marked.js) must
+    # preserve real line breaks while still stripping an actual escape byte.
+    check(w._clean("line one\nline two", 100, keep_newlines=True) == "line one\nline two",
+          "keep_newlines preserves \\n")
+    check(w._clean("a\x1b[31mred\x1b[0m\nb", 100, keep_newlines=True) == "a[31mred[0m\nb",
+          "keep_newlines still strips ESC, keeps \\n")
+    check(w._clean("x" * 20, 5, keep_newlines=True) == "xxxxx", "keep_newlines still bounds length")
+
 
 def test_resolve_sample():
     """#1114: a Ghidra/Rev-Deck request must resolve real sample content even
