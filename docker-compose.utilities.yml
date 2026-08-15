@@ -42,7 +42,7 @@ services:
   # and in place.
   log-maintenance:
     <<: *runtime-defaults
-    image: busybox:1.36
+    image: busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
     container_name: hp-log-maintenance
     restart: unless-stopped
     # #127: waits on the marker directly instead of depends_on-ing
@@ -151,7 +151,7 @@ services:
   # read-only here for the same reason.
   disk-space-monitor:
     <<: *runtime-defaults
-    image: curlimages/curl:8.10.1
+    image: curlimages/curl:8.21.0@sha256:7c12af72ceb38b7432ab85e1a265cff6ae58e06f95539d539b654f2cfa64bb13
     container_name: hp-disk-space-monitor
     restart: unless-stopped
     entrypoint: ["sh", "/usr/local/bin/disk-space-check.sh"]
@@ -230,7 +230,7 @@ services:
   # never the raw socket.
   docker-hygiene:
     <<: *runtime-defaults
-    image: curlimages/curl:8.10.1
+    image: curlimages/curl:8.21.0@sha256:7c12af72ceb38b7432ab85e1a265cff6ae58e06f95539d539b654f2cfa64bb13
     container_name: hp-docker-hygiene
     restart: unless-stopped
     entrypoint: ["sh", "/usr/local/bin/docker-hygiene.sh"]

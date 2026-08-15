@@ -192,7 +192,7 @@ services:
 
   honeypot-kibana-setup:
     <<: *runtime-defaults
-    image: curlimages/curl:8.10.1
+    image: curlimages/curl:8.21.0@sha256:7c12af72ceb38b7432ab85e1a265cff6ae58e06f95539d539b654f2cfa64bb13
     container_name: hp-honeypot-kibana-setup
     restart: no
     entrypoint: ["sh", "/usr/local/bin/honeypot-kibana-setup.sh"]
@@ -400,7 +400,7 @@ services:
   # threatIntelReloadInterval of a refresh landing on disk -- no dashboard
   # restart needed for a new refresh to take effect.
   threat-cidrs-refresh:
-    image: alpine:3.24
+    image: alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
     container_name: hp-threat-cidrs-refresh
     profiles: [threat-intel]
     restart: unless-stopped

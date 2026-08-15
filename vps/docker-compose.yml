@@ -113,7 +113,7 @@ services:
 
   # ===== TRAEFIK =====
   traefik:
-    image: traefik:v3.7
+    image: traefik:v3.7.10@sha256:9c3b91d5fb7770853ca5c1124a23c34bf2d9b47ffaebeab2614cbaf410dcb2ac
     container_name: traefik
     restart: unless-stopped
     ports:
@@ -404,7 +404,7 @@ services:
   # readable, and the dashboard also reads the .1 generation kept here, so the
   # join window spans a rotation instead of restarting from empty.
   portbridge-log-rotate:
-    image: busybox:1.36
+    image: busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
     container_name: hp-portbridge-log-rotate
     restart: unless-stopped
     command:
@@ -763,7 +763,7 @@ services:
   # log-maintenance service (that one's sshfs mount of this same directory
   # is read-only from the home side).
   suricata-log-maintenance:
-    image: busybox:1.36
+    image: busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
     container_name: hp-suricata-log-maintenance
     restart: unless-stopped
     command: ["sh", "/usr/local/bin/suricata-log-maintenance.sh"]
@@ -839,7 +839,7 @@ services:
   # the home stack over a read-only sshfs/NFS mount, so the home side's
   # log-maintenance can't write here either).
   portbridge-log-maintenance:
-    image: busybox:1.36
+    image: busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
     container_name: hp-portbridge-log-maintenance
     restart: unless-stopped
     command: ["sh", "/usr/local/bin/portbridge-log-maintenance.sh"]
