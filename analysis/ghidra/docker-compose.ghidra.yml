@@ -50,7 +50,7 @@ services:
     # take this slot. Ollama is retained because issue #144 benchmarked the
     # pinned runtime and local model contract on the deployment GPU; see
     # docs/local-llm-model-evaluation.md.
-    image: ollama/ollama:0.32.0@sha256:57f573b47f1f71ebb445789f279fe3e596a8beab182f7cf486db9205bad87c5a
+    image: ollama/ollama:0.32.13@sha256:77f1a2a54460f0380f2611e1464233d9b82cb6e58afc8f60abec0061049d2d82
     restart: unless-stopped
     ports:
       # Loopback only. The prompts carry strings, imports and function names
