@@ -85,6 +85,34 @@ await fetch(`${fakeES.url}/dashboard-payload-inventory-v1/_doc/${payloadHash}?op
   }),
 });
 
+// Seed one rich Ghidra document so the detail shell, visible bounded
+// datasets, and nested call-graph hydration can be exercised together.
+await fetch(`${fakeES.url}/ghidra-analysis-v1/_doc/ghidra:${payloadHash}?op_type=create`, {
+  method: "PUT",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    ghidra: {
+      version: 2,
+      sha256: payloadHash,
+      requested_at: "2026-08-01T00:00:00Z",
+      started_at: "2026-08-01T00:00:01Z",
+      completed_at: "2026-08-01T00:00:02Z",
+      exit_status: "ok",
+      imports: ["CreateFileW", "WinHttpOpen"],
+      strings: ["browser-fixture.example", "GET /fixture"],
+      functions_deepened: 1,
+      functions: [{ address: "0x401000", name: "main", signature: "int main(void)", pseudocode: "int main(void) { return 0; }", callers: [], callees: [{ addr: "0x401050", name: "download" }] }, { address: "0x401050", name: "download", signature: "void download(void)", callers: [{ addr: "0x401000", name: "main" }], callees: [] }],
+      types: [{ name: "FIXTURE", kind: "struct", size: 4, fields: [{ name: "value", type: "int", offset: 0, size: 4 }] }],
+      globals: [{ addr: "0x403000", name: "fixture_global", type: "int", size: 4 }],
+      memory_map: [{ name: ".text", start: "0x401000", end: "0x4010ff", size: 256, hexdump_preview: { hex: "90 90 c3", ascii: "..." } }],
+      capa: { arch: "amd64", os: "windows", format: "pe", capabilities: [{ name: "download URL", namespace: "communication/http", matches: 1 }] },
+      floss: { decoded_strings_total: 1, decoded_strings: ["decoded-fixture.example"] },
+    },
+    file: { hash: { sha256: payloadHash } },
+    event: { category: "ghidra" },
+  }),
+});
+
 // Seed one job-addressable sandbox result for the detail shell/fragment
 // browser test. The real importer uses this exact deterministic document ID
 // and source namespace, so the fixture exercises the direct GET path rather

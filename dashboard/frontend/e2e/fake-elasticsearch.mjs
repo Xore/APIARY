@@ -88,7 +88,7 @@ export function startFakeElasticsearch() {
       "attackers-v1", "campaigns-v1", "attacker-clusters-v1",
       // Seeded by start-dashboard.mjs to exercise sandbox detail's
       // deterministic sandbox:{job} document lookup and fragment hydration.
-      "sandbox-analysis-v1",
+      "sandbox-analysis-v1", "ghidra-analysis-v1", "ghidra-report-artifacts-v1",
     ];
     if (parts[0] !== undefined && !parts[0].startsWith("dashboard-") && !workerOwnedIndices.includes(parts[0])) {
       res.writeHead(503);

@@ -1022,8 +1022,31 @@ func TestGhidraResultsPageRendersAsCardGrid(t *testing.T) {
 	}
 }
 
-// #1167: the deep-dive tab (types/globals/annotations) and the Functions
-// evidence modal (pseudocode/callers/callees) actually render real content,
+func TestGhidraDetailShellMirrorsHydratedTabsAndContentShapes(t *testing.T) {
+	tmpl := template.Must(template.New("dashboard").Funcs(templateFuncs(&store{}, "")).Parse(pageTemplate))
+	data := ghidraPageData{Detail: &ghidraResult{SHA256: shaA}}
+	var buf strings.Builder
+	if err := tmpl.ExecuteTemplate(&buf, "ghidra", &data); err != nil {
+		t.Fatalf("render shell: %v", err)
+	}
+	body := buf.String()
+	for _, want := range []string{
+		`data-hp-gh-fragment-url="/ghidra/` + shaA + `/fragment"`,
+		`data-dashboard-panel="overview-loading"`, `data-dashboard-panel="code-loading"`,
+		`data-dashboard-panel="data-loading"`, `data-dashboard-panel="deepdive-loading"`,
+		"Analysis identity", "Interactive call graph", "Functions", "Strings", "Recovered types", "Symbol recovery",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("Ghidra detail shell is missing shape-matched region %q", want)
+		}
+	}
+	if strings.Count(body, `class="card wide"`) < 18 || strings.Count(body, `class="card__scroll"`) < 10 {
+		t.Fatal("Ghidra detail shell does not mirror the hydrated card and bounded-collection geometry")
+	}
+}
+
+// #1167/#1449: the deep-dive tab (types/globals/annotations) and the visible
+// Functions card (pseudocode/callers/callees) actually render real content,
 // not just "doesn't panic on nil" -- every other test touching ghidraResult
 // leaves these fields zero-valued.
 func TestGhidraDetailPageRendersDeepDiveData(t *testing.T) {
@@ -1097,6 +1120,12 @@ func TestGhidraDetailPageRendersDeepDiveData(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("rendered page missing %q", want)
 		}
+	}
+	if strings.Contains(body, "data-hp-evidence") || strings.Contains(body, "Open the full") {
+		t.Fatal("Ghidra datasets must be visible in bounded cards, not evidence-modal controls")
+	}
+	if strings.Count(body, `class="card__scroll"`) < 6 {
+		t.Fatal("representative long Ghidra datasets are missing bounded in-page scroll regions")
 	}
 }
 
@@ -1239,8 +1268,8 @@ func TestGhidraDetailPageRendersAIReportAndCitations(t *testing.T) {
 // TestGhidraDetailPageRendersChatBubblesByRole covers #1286: each message
 // in the mirrored RevDeck chat transcript must render as its own
 // role-tagged bubble (not one flat pre dump), with the assistant's text
-// content inside a data-markdown node and any tool_calls behind a
-// collapsible <details>.
+// content inside a data-markdown node and tool_calls visible in the same
+// bounded card rather than hidden behind a disclosure.
 func TestGhidraDetailPageRendersChatBubblesByRole(t *testing.T) {
 	s := &store{}
 	tmpl := template.Must(template.New("dashboard").Funcs(templateFuncs(s, "")).Parse(pageTemplate))
@@ -1278,8 +1307,8 @@ func TestGhidraDetailPageRendersChatBubblesByRole(t *testing.T) {
 	if !strings.Contains(body, `<div class="hp-chat-msg__content" data-markdown>Run the standard triage workflow.</div>`) {
 		t.Errorf("user message content should be unwrapped from its JSON string and marked for client-side rendering, got: %s", body)
 	}
-	if !strings.Contains(body, `<details class="hp-chat-msg__toolcalls">`) || !strings.Contains(body, "get_function") {
-		t.Error("tool_calls should render in a collapsible detail, not be silently dropped")
+	if strings.Contains(body, `<details class="hp-chat-msg__toolcalls">`) || !strings.Contains(body, "get_function") {
+		t.Error("tool_calls should render visibly in the chat card, not be hidden or silently dropped")
 	}
 }
 
