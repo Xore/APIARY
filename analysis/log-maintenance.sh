@@ -89,6 +89,13 @@ while true; do
   # them, same reasoning as the conpot persona glob in the rotate() loop
   # above.
   find /logs/enriched -maxdepth 1 -name '*.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  # #1389 part 2: dionaea/log_rotation_patch.py gives dionaea.json/
+  # dionaea_incident.json the same self-rotation, suffixed the same way
+  # (dionaea.json.<stamp>, with a further .2/.3/... suffix on the rare
+  # collision -- still starts with a digit right after .json., so the same
+  # glob shape covers it).
+  find /logs/dionaea -maxdepth 1 -name 'dionaea.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
+  find /logs/dionaea -maxdepth 1 -name 'dionaea_incident.json.[0-9]*' -mmin "+${json_retention_min}" -print -delete 2>/dev/null || true
 
   sleep "$interval"
 done
