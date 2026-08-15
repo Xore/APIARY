@@ -508,6 +508,23 @@ jobs:
           fi
           scp -i ~/.ssh/honeypot_vps -P "${VPS_PORT:-2222}" -o StrictHostKeyChecking=accept-new \
             /tmp/dynamic.yml.deployable "${VPS_USER:-root}@${VPS_HOST}:/tmp/dynamic.yml.deployable"
+          # ssh_options is a bash array from the "Synchronize and restart"
+          # step above -- array variables don't survive across separate
+          # GitHub Actions steps (each `run:` is its own shell process), so
+          # referencing it here without redefining it silently expanded to
+          # nothing: no -i, no -p, no -o StrictHostKeyChecking=accept-new.
+          # That dropped the deploy key and the port entirely and fell back
+          # to ssh's default (interactive/no-tty) host-key policy, which
+          # fails outright as "Host key verification failed" against a host
+          # this job's own ephemeral known_hosts has never seen -- exactly
+          # what happened live (2026-08-15) the first time this step ran
+          # after the deploy key itself was fixed. Every other step that
+          # uses "${ssh_options[@]}" either defines it in the same step
+          # (this one now included) or reuses it later within the *same*
+          # step it was defined in (the scp above it, and the "Synchronize"
+          # step's own later ssh call) -- this was the one place that
+          # crossed a step boundary.
+          ssh_options=(-i ~/.ssh/honeypot_vps -p "${VPS_PORT:-2222}" -o StrictHostKeyChecking=accept-new)
           ssh "${ssh_options[@]}" "${VPS_USER:-root}@${VPS_HOST}" \
             'cat /tmp/dynamic.yml.deployable > /root/vps/traefik/dynamic.yml && rm -f /tmp/dynamic.yml.deployable'
 
