@@ -332,6 +332,13 @@ func (s *store) routes(tmpl *template.Template) *http.ServeMux {
 		data := s.authEventsData(r)
 		renderPage(w, tmpl, "auth-events", &data)
 	})
+	// #1538: per-sensor detail view -- mailoney/http-honeypot's own
+	// structured fields, queried live from Elasticsearch on each load (same
+	// posture as auth-events above). See sensor_detail.go's package comment.
+	mux.HandleFunc("GET /sensors", func(w http.ResponseWriter, r *http.Request) {
+		data := s.sensorDetailData(r)
+		renderPage(w, tmpl, "sensors", &data)
+	})
 	mux.HandleFunc("GET /llm-analysis", func(w http.ResponseWriter, r *http.Request) {
 		data := s.llmAnalysisData(r)
 		renderPage(w, tmpl, "llm-analysis", &data)
