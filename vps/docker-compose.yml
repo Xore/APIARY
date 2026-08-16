@@ -513,6 +513,34 @@ services:
     command: TCP4-LISTEN:8084,fork,reuseaddr TCP4:10.8.0.2:8080
     networks: [proxy]
 
+  # #1511: galah's own raw port (8889, RULES above) isn't on Cloudflare's
+  # proxied non-standard-port allowlist, so it's unreachable through this
+  # domain at all -- confirmed live (see #1511's own issue text). This
+  # bridge backs a Traefik-routed subdomain instead, on 443 (always
+  # proxied). galah/xff_trust_patch.py makes this path safe for real IP
+  # attribution: without it, every hit through this route would silently
+  # log the WireGuard tunnel peer instead of the attacker. The raw port
+  # stays too -- unaffected by any of this, still catches IP-range
+  # scanners that never resolve a hostname at all.
+  socat-hp-galah:
+    image: alpine/socat:latest
+    container_name: socat-hp-galah
+    restart: unless-stopped
+    command: TCP4-LISTEN:8085,fork,reuseaddr TCP4:10.8.0.2:8888
+    networks: [proxy]
+
+  # #1512: same reasoning as socat-hp-galah above -- wordpot's raw port
+  # (8082, RULES above) isn't on Cloudflare's proxied-port allowlist.
+  # wordpot_patch.py's middleware now trusts XFF from the tunnel peer for
+  # exactly this route, falling back to via_port join (its original #1421
+  # fix) for the raw-port path.
+  socat-hp-wordpot:
+    image: alpine/socat:latest
+    container_name: socat-hp-wordpot
+    restart: unless-stopped
+    command: TCP4-LISTEN:8086,fork,reuseaddr TCP4:10.8.0.2:8081
+    networks: [proxy]
+
   # Isolated on oidc-dashboard (not the shared proxy network) like every
   # other protected upstream's socat bridge -- Traefik is a member of
   # oidc-dashboard to route to it directly (#1026: native OIDC, no gateway

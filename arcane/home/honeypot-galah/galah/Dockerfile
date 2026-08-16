@@ -9,13 +9,23 @@
 # whenever this image happens to rebuild. GALAH_REF is the commit tagged
 # v1.1.1 (latest at integration time, confirmed via `git ls-remote --tags`).
 #
-# No source patch needed here (unlike hellpot/router_patch.py): galah's
-# commonFields() (internal/logger/logger.go) resolves srcIP/srcPort purely
-# from r.RemoteAddr via net.SplitHostPort -- confirmed directly against the
-# vendored source, no X-Forwarded-For/X-Real-IP trust anywhere in the
-# request path. Raw-port/portbridge-only (docker-compose.galah.yml),
-# resolved via ip-enrichment-worker's via_port join, same as beelzebub/
-# hellpot.
+# #1511: galah's commonFields() (internal/logger/logger.go) originally
+# resolved srcIP/srcPort purely from r.RemoteAddr via net.SplitHostPort --
+# correct standalone, since galah was raw-port/portbridge-only, resolved via
+# ip-enrichment-worker's via_port join same as beelzebub/hellpot. Now that
+# #1511 adds a Traefik-routed subdomain alongside that raw port (Cloudflare
+# doesn't proxy 8889 -- not on its allowed non-standard-port list), a
+# Traefik-routed request's RemoteAddr becomes the WireGuard tunnel peer, not
+# the attacker. xff_trust_patch.py adds the same tunnel-peer-only XFF trust
+# http-honeypot/main.go's own clientIP() already uses for exactly this gap
+# -- see that patch's own docstring for the full reasoning (last-hop-only,
+# Cloudflare append semantics).
+#
+# timeout_patch.py DOES patch source (#1513): SetupServer()'s hardcoded
+# WriteTimeout: 10 * time.Second -- not exposed via any CLI flag or `env:`
+# binding -- silently 500'd every request that hit a cold Ollama model load
+# (confirmed live: 15.1s load_duration alone for qwen2.5:7b-instruct-q4_K_M
+# after its default 5-minute idle unload). See that patch's own docstring.
 #
 # LLM_PROVIDER/LLM_MODEL/LLM_SERVER_URL are set via environment (they carry
 # `env:` tags in internal/app/args.go); everything else needs an explicit
@@ -38,12 +48,16 @@
 # netcat-openbsd for the same `nc -z` HEALTHCHECK convention alpine gives
 # every other sensor here via busybox-extras.
 FROM golang:1.23@sha256:60deed95d3888cc5e4d9ff8a10c54e5edc008c6ae3fba6187be6fb592e19e8c0 AS build
-RUN apt-get update && apt-get install -y --no-install-recommends git \
+RUN apt-get update && apt-get install -y --no-install-recommends python3 git \
  && rm -rf /var/lib/apt/lists/*
 ARG GALAH_REF=8f77b85e892731cf1402963d8121c79fef0e59c7
 WORKDIR /build
 RUN git clone https://github.com/0x4d31/galah /build \
  && git checkout "$GALAH_REF"
+COPY timeout_patch.py /tmp/timeout_patch.py
+RUN python3 /tmp/timeout_patch.py
+COPY xff_trust_patch.py /tmp/xff_trust_patch.py
+RUN python3 /tmp/xff_trust_patch.py
 RUN go mod download
 RUN CGO_ENABLED=1 GOOS=linux go build -trimpath \
     -ldflags "-s -w -X main.version=$GALAH_REF" \
