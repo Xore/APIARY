@@ -257,6 +257,19 @@ http:
         options: modern
       middlewares: [security-headers]
 
+    # #1487: self-hosted Canarytokens' switchboard HTTP channel (bridged via
+    # socat-hp-canarytokens -> 10.8.0.2:19427). Unauthenticated like
+    # honeypot-http/-snare above -- this is what fires when a
+    # dashboard-created PDF/Word/Excel/image/QR/Windows-Folder token is
+    # opened anywhere on the internet, not an operator-facing route.
+    honeypot-canarytokens:
+      rule: "Host(`cdn.honeypot.example`)"
+      entryPoints: [websecure]
+      service: honeypot-canarytokens
+      tls:
+        options: modern
+      middlewares: [security-headers]
+
     # Narrow relaxation of the blanket clickjacking protection below, scoped
     # to exactly the one route the dashboard frames itself (#211): its own
     # downloadable-report PDF viewer. Everything else on this host still
@@ -545,6 +558,12 @@ http:
       loadBalancer:
         servers:
           - url: "http://socat-hp-snare:8082"
+        passHostHeader: true
+
+    honeypot-canarytokens:
+      loadBalancer:
+        servers:
+          - url: "http://socat-hp-canarytokens:8083"
         passHostHeader: true
 
     # #266: two servers for zero-downtime rolling updates -- see

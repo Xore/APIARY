@@ -23,6 +23,7 @@
     <button class="sidebar__item" type="button" data-hp-pane-nav="honeypot">Honeypot operations</button>
     <button class="sidebar__item" type="button" data-hp-pane-nav="users">Users</button>
     <button class="sidebar__item" type="button" data-hp-pane-nav="services">Services</button>
+    <button class="sidebar__item" type="button" data-hp-pane-nav="canarytokens">Canarytokens</button>
     <button class="sidebar__item" type="button" data-hp-pane-nav="elasticsearch">Elasticsearch history</button>
     <button class="sidebar__item" type="button" data-hp-pane-nav="dead-letters">Ingest dead letters</button>
     <button class="sidebar__item" type="button" data-hp-pane-nav="history">Configuration history</button>
@@ -658,6 +659,57 @@
           </table></div>
           <button type="button" hidden data-hp-evidence="services-log" data-hp-services-log-trigger>View logs</button>
           <div hidden data-hp-evidence-body="services-log" data-hp-evidence-note="Most recent lines, newest at the bottom."><pre data-hp-services-log-pre></pre></div>
+        </section>
+      </section>
+
+      <!-- Canarytokens (#1487): create a real PDF/Word/Excel/custom-image/
+           Windows-Folder/QR honeytoken for use OUTSIDE this honeypot -- plant
+           it anywhere, and it fires (via the self-hosted Canarytokens
+           platform's own webhook, #1426) the instant someone opens it. The
+           trigger URL is public (vps/traefik/dynamic.yml's `cdn` host) so it
+           works regardless of where the artifact ends up; token creation
+           itself stays admin-only and WireGuard-internal. -->
+      <section class="hp-settings-pane" data-hp-pane="canarytokens" aria-label="Canarytokens" hidden>
+        <section class="card hp-field" data-hp-search="canarytokens honeytoken pdf word excel image qr folder external plant">
+          <div class="card__header">
+            <div><h3>Create a Canarytoken</h3><p class="card__meta">The resulting artifact is yours to plant anywhere -- an email, a fileshare, a USB drive. It phones home the instant it's opened, wherever that is.</p></div>
+          </div>
+          <p class="card__meta" data-hp-canarytokens-unavailable hidden>Canarytoken creation is not configured on this host (CANARYTOKENS_API_URL unset).</p>
+          <form data-hp-canarytokens-form>
+            <div class="hp-field-row">
+              <label class="form-label" for="hp-ct-type">Type</label>
+              <select class="form-input" id="hp-ct-type" data-hp-ct-type required></select>
+              <p class="hp-cfg-source" data-hp-ct-type-desc></p>
+            </div>
+            <div class="hp-field-row">
+              <label class="form-label" for="hp-ct-memo">Memo (shown only to you, in the history below)</label>
+              <input class="form-input" id="hp-ct-memo" data-hp-ct-memo maxlength="200" required autocomplete="off" placeholder="e.g. left on the finance fileshare">
+            </div>
+            <div class="hp-field-row" data-hp-ct-upload-row hidden>
+              <label class="form-label" for="hp-ct-file">Image to embed (PNG/GIF/JPEG)</label>
+              <input class="form-input" type="file" id="hp-ct-file" data-hp-ct-file accept="image/png,image/gif,image/jpeg">
+            </div>
+            <div class="hp-field-row" data-hp-ct-snippet-row hidden>
+              <label class="form-label"><input type="checkbox" data-hp-ct-snippet-toggle> Include a decoy text snippet inside the document</label>
+              <textarea class="form-input" rows="2" data-hp-ct-snippet-text disabled placeholder="e.g. Q3 payroll figures -- do not distribute"></textarea>
+            </div>
+            <div class="settings-actions">
+              <button class="btn btn-primary" type="submit" data-hp-ct-submit>Create token</button>
+            </div>
+          </form>
+          <p class="card__meta" data-hp-ct-result hidden></p>
+        </section>
+        <section class="card hp-field" data-hp-search="canarytokens history created tokens download">
+          <div class="card__header">
+            <div><h3>Created tokens</h3><p class="card__meta">Newest first. Re-download an artifact any time -- nothing here re-fires its token.</p></div>
+            <div class="hp-head-actions">
+              <button class="btn btn-ghost btn-sm" type="button" data-hp-ct-refresh>Refresh</button>
+            </div>
+          </div>
+          <div class="table-scroll"><table class="data-table">
+            <thead><tr><th>Type</th><th>Memo</th><th>Created</th><th>By</th><th>Artifact</th></tr></thead>
+            <tbody data-hp-ct-list><tr><td colspan="5">Loading&hellip;</td></tr></tbody>
+          </table></div>
         </section>
       </section>
 

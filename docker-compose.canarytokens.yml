@@ -14,24 +14,32 @@
 #
 # Scope decisions (see PR description for the full writeup):
 #
-# - Internal-only for now, no VPS/portbridge wiring: nothing to attract
-#   real attacker traffic to yet (no tokens planted), and switchboard's own
-#   listener channels for SMTP(25)/DNS(53)/WireGuard(51820) collide with
-#   sensors this stack already runs on those exact public ports (mailoney,
-#   dns-honeypot, and this repo's own real WireGuard tunnel respectively --
-#   confirmed directly against vps/docker-compose.yml's RULES, not
-#   assumed). Those three switchboard host-port bindings are dropped
-#   entirely here; MySQL(3306)/Kubeconfig(6443)-credential token types and
-#   every non-listener token type (web bug, DNS, documents, AWS keys,
-#   redirects, QR codes, etc.) are unaffected. Real external reachability
-#   for the listener-based token types is a #1427 design question (likely
-#   delegating a subdomain/zone to switchboard's DNS channel through
-#   dns-honeypot rather than fighting it for port 53), not decided here.
-# - frontend (token management UI + REST API) and switchboard's HTTP
-#   channel (where non-DNS token hits actually land) are reachable over
-#   the WireGuard tunnel only (HP_BIND, nonstandard ports), matching how
-#   this stack's other operator-facing tools (e.g. Kibana on 19601) are
-#   exposed -- not raw-LAN, not internet-public.
+# - #1487 update: switchboard's HTTP channel is now publicly reachable --
+#   vps/docker-compose.yml's socat-hp-canarytokens bridges VPS Traefik
+#   (Host(`cdn.honeypot.example`), vps/traefik/dynamic.yml) to this stack's
+#   19427 over the WireGuard tunnel, unauthenticated, the same posture as
+#   honeypot-http/-snare. This is required for dashboard-created file/doc
+#   tokens (#1487 item 1: PDF/Word/Excel/custom-image/Windows-Folder/QR) to
+#   actually fire when opened by anyone outside our own network -- that was
+#   the entire point of #1487's "external hosted canarytokens" ask, and
+#   inert (internal-only) tokens don't serve it. CANARY_DOMAINS/
+#   CANARY_PUBLIC_DOMAIN below now point at that public hostname instead of
+#   the old internal-only placeholder.
+# - SMTP(25)/DNS(53)/WireGuard(51820) switchboard listener channels still
+#   collide with sensors this stack already runs on those exact public
+#   ports (mailoney, dns-honeypot, and this repo's own real WireGuard
+#   tunnel respectively -- confirmed directly against vps/docker-compose.yml's
+#   RULES, not assumed) and stay unpublished. Only the HTTP channel is
+#   exposed. DNS-type tokens and NXDOMAIN detection remain a separate,
+#   not-yet-decided design question (would need a real subdomain/zone
+#   delegation through dns-honeypot); every token type #1487 actually
+#   generates (see above) fires over HTTP only, confirmed against the
+#   vendored source at CANARYTOKENS_REF.
+# - frontend (token management UI + REST API) stays WireGuard-tunnel-only
+#   (HP_BIND, nonstandard port 19426) -- the dashboard's own backend is the
+#   only caller, reaching it directly over WireGuard, so there's nothing to
+#   gain and a real credential-exposure cost to making token creation/
+#   management itself internet-reachable.
 # - Own Redis instance, not shared with anything else in this stack:
 #   canarytokens' schema/keyspace conventions are opaque to us and
 #   upstream doesn't document safe multi-tenant namespacing.
@@ -91,7 +99,17 @@ services:
     environment:
       - TZ=Europe/Berlin
       - CANARY_PUBLIC_IP=${HP_BIND:-10.8.0.2}
-      - CANARY_DOMAINS=canarytokens.internal.apiary
+      # #1487: the public hostname embedded in every generated token's
+      # trigger URL (canary_http_channel in frontend/app.py, computed in
+      # THIS process). Must match vps/traefik/dynamic.yml's
+      # honeypot-canarytokens router exactly. Placeholder here per this
+      # repo's usual convention (docs/CGNAT-DEPLOYMENT.md's "cdn" entry) --
+      # override CANARY_PUBLIC_HOSTNAME in .env with the real deployed
+      # domain (this repo's usual honeypot.example placeholder gets
+      # sed-replaced to the real deployed domain at deploy time, same as
+      # every other public hostname in this repo -- see
+      # docs/CGNAT-DEPLOYMENT.md).
+      - CANARY_DOMAINS=${CANARY_PUBLIC_HOSTNAME:-cdn.honeypot.example}
       - CANARY_NXDOMAINS=nx.canarytokens.internal.apiary
       - LOG_FILE=/logs/frontend.log
       - CANARY_REDIS_HOST=canarytokens-redis
@@ -102,8 +120,19 @@ services:
       # canarydrop) instantiates SwitchboardSettings() too, at import
       # time. Confirmed live -- frontend crash-looped on exactly these two
       # fields until added here.
-      - CANARY_PUBLIC_DOMAIN=canarytokens.internal.apiary
+      - CANARY_PUBLIC_DOMAIN=${CANARY_PUBLIC_HOSTNAME:-cdn.honeypot.example}
       - CANARY_WG_PRIVATE_KEY_SEED=${CANARY_WG_PRIVATE_KEY_SEED:?set a random seed in .env}
+      # #1487: app.py's canary_http_channel computation (this process, not
+      # switchboard's) reads switchboard_settings.FORCE_HTTPS/USING_NGINX to
+      # decide the generated token URL's scheme and whether to append a
+      # port. Traefik terminates TLS on 443 and forwards to switchboard's
+      # 8083 internally (same shape upstream's own nginx-fronted deployment
+      # assumes, hence USING_NGINX's name) -- without FORCE_HTTPS=true here,
+      # every generated token URL would be a plain http:// link with no
+      # port, which switchboard's own HTTP channel then can't actually
+      # serve (nothing listens on port 80).
+      - CANARY_FORCE_HTTPS=true
+      - CANARY_USING_NGINX=true
     ports:
       - ${HP_BIND:-10.8.0.2}:19426:8082
     volumes:
@@ -127,7 +156,7 @@ services:
     depends_on: [canarytokens-redis]
     environment:
       - TZ=Europe/Berlin
-      - CANARY_PUBLIC_DOMAIN=canarytokens.internal.apiary
+      - CANARY_PUBLIC_DOMAIN=${CANARY_PUBLIC_HOSTNAME:-cdn.honeypot.example}
       - CANARY_WG_PRIVATE_KEY_SEED=${CANARY_WG_PRIVATE_KEY_SEED:?set a random seed in .env}
       - LOG_FILE=/logs/switchboard.log
       - CANARY_REDIS_HOST=canarytokens-redis
@@ -143,7 +172,7 @@ services:
       # frontend.env AND switchboard.env into both containers for the same
       # reason.
       - CANARY_PUBLIC_IP=${HP_BIND:-10.8.0.2}
-      - CANARY_DOMAINS=canarytokens.internal.apiary
+      - CANARY_DOMAINS=${CANARY_PUBLIC_HOSTNAME:-cdn.honeypot.example}
       - CANARY_NXDOMAINS=nx.canarytokens.internal.apiary
       # SMTP(25)/DNS(53)/WireGuard(51820) channels stay enabled inside the
       # container (upstream default) but are deliberately not published as

@@ -315,6 +315,12 @@ Create proxied DNS records for the HTTP services you enable, normally:
   authenticates natively against Keycloak rather than through an
   `oauth2-proxy` gateway, but treat this subdomain as sensitive as SSH
   access to the homeserver itself)
+- `cdn` (optional — self-hosted Canarytokens' switchboard HTTP channel,
+  #1487. Deliberately not named `canary`/`token*`: this is the hostname
+  embedded in every dashboard-created PDF/Word/Excel/image/QR/Windows-Folder
+  token, and a planted artifact that outs itself as a tripwire on inspection
+  defeats the point. Unauthenticated, like `decoy`/`www-portal` — it must be
+  reachable by whoever opens the planted artifact, not just operators)
 
 All names point to the VPS. Raw TCP/UDP sensors need no DNS record.
 

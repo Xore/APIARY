@@ -477,6 +477,20 @@ services:
     command: TCP4-LISTEN:8082,fork,reuseaddr TCP4:10.8.0.2:19082
     networks: [proxy]
 
+  # #1487: bridges the self-hosted Canarytokens switchboard's HTTP channel
+  # (docker-compose.canarytokens.yml, published on the WireGuard interface
+  # at 19427) so file/document tokens created from the dashboard actually
+  # fire when opened anywhere on the internet, not just inside the WireGuard
+  # net. Deliberately unauthenticated/public like socat-hp-http/-snare above
+  # (not the oidc-* gateway pattern below) -- a token's trigger request comes
+  # from whoever opened the planted artifact, not an operator.
+  socat-hp-canarytokens:
+    image: alpine/socat:latest
+    container_name: socat-hp-canarytokens
+    restart: unless-stopped
+    command: TCP4-LISTEN:8083,fork,reuseaddr TCP4:10.8.0.2:19427
+    networks: [proxy]
+
   # Isolated on oidc-dashboard (not the shared proxy network) like every
   # other protected upstream's socat bridge -- Traefik is a member of
   # oidc-dashboard to route to it directly (#1026: native OIDC, no gateway
