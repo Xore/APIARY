@@ -10,7 +10,16 @@
 #
 # Ghidra is deliberately not given the GPU: decompilation is CPU work and would
 # only compete for the card with the model it is feeding.
-
+#
+# #1539: the homeserver carries two NVIDIA cards -- an RTX 4000 Ada
+# (this model's own card) and a Quadro P2200 reserved for Windows sandbox
+# VM passthrough (arcane/home/honeypot-cowrie's own docs, sandbox/windows/).
+# `count: all` handed Ollama both, which is wrong even when it works and
+# outright starves the sandbox VM of its own card if Ollama loads a model
+# while a detonation is running. Pinned to the RTX 4000 Ada's UUID
+# specifically -- confirmed live via `nvidia-smi -L` on the actual
+# homeserver, not guessed. Re-confirm this UUID if the card is ever
+# physically replaced (`nvidia-smi -L` again).
 services:
   ollama:
     deploy:
@@ -18,5 +27,5 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: all
+              device_ids: ["GPU-18a00c7e-670a-c305-a2aa-20e3a71917a3"]
               capabilities: [gpu]
