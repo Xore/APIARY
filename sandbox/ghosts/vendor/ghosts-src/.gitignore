@@ -1,0 +1,11 @@
+# Vendored third-party source (#1506) must be tracked verbatim so a fresh
+# checkout builds the exact image upstream's own remote build context did.
+# The repo-root .gitignore's build-artifact rules would otherwise silently
+# drop upstream-COMMITTED files from this snapshot -- notably the
+# wwwroot/lib/signalr/dist/ SignalR browser client (root rule "dist/"),
+# which Dockerfile-api COPYs wholesale. Re-include everything under this
+# vendored tree; real build artifacts were already excluded at vendoring
+# time (see .dockerignore / VENDORED.md), so there's nothing here that
+# shouldn't be tracked.
+!/**/
+!/**

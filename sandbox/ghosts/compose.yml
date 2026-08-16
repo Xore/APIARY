@@ -11,13 +11,23 @@
 # a concrete need shows up; don't add them speculatively.
 #
 # Upstream ships no published images, so both services build from CMU SEI's
-# own source via a git build context -- this file alone is enough,
-# `docker compose build` clones nothing to disk itself. Pinned to the v9.0.0
-# tag's commit SHA, not the tag name: confirmed live (#1502) that Arcane's
-# own image-prep step resolves a build context's git ref under refs/heads/
-# only, so a bare tag name (which plain `docker build`/BuildKit resolves
-# fine on its own) fails there with "couldn't find remote ref". A commit SHA
-# needs no ref-namespace guessing and resolves the same way everywhere.
+# own source -- vendored at ./vendor/ghosts-src/ (see that directory's own
+# VENDORED.md), not a remote git build context. #1502 originally pinned a
+# remote `https://github.com/cmu-sei/GHOSTS.git#<ref>:src` context to the
+# v9.0.0 tag's commit SHA instead of the tag name, expecting a SHA to need
+# no ref-namespace guessing -- confirmed live (#1502) that didn't help:
+# Arcane's own image-prep step resolves a build context's git ref under
+# refs/heads/ only, unlike plain `docker build`/BuildKit (which resolves
+# either a tag or a SHA fine on its own), and it prefixes refs/heads/ onto
+# ANY ref string passed this way, not just tag names -- both attempts
+# failed identically ("couldn't find remote ref refs/heads/<ref>"). #1506
+# vendors the source instead: no compose-file-level fix exists for Arcane's
+# own ref resolution, and a local build context sidesteps it entirely
+# (Arcane's directory sync already materializes local files correctly --
+# this was never a problem with syncing the compose file itself, only with
+# a *remote* git ref inside it). Trades "no local copy of upstream source"
+# for "actually buildable through Arcane like every other stack," matching
+# #1506's own resolution.
 #
 # ghosts-api publishes port 5000 on 10.20.30.1 -- virbr-ghosts's own gateway
 # address (#325), not the docker-internal 10.90.0.2 an earlier version of
@@ -72,7 +82,7 @@ services:
 
   ghosts-api:
     build:
-      context: https://github.com/cmu-sei/GHOSTS.git#335d11e5b73c278626a0a63f5bfbdec60cda7d8e:src
+      context: ./vendor/ghosts-src
       dockerfile: Dockerfile-api
     depends_on:
       ghosts-postgres:
@@ -97,7 +107,7 @@ services:
   # name "ghosts-api" on ghosts_net, so it needs no address override.
   ghosts-client-test:
     build:
-      context: https://github.com/cmu-sei/GHOSTS.git#335d11e5b73c278626a0a63f5bfbdec60cda7d8e:src
+      context: ./vendor/ghosts-src
       dockerfile: Dockerfile-client-universal
     profiles: ["test"]
     networks:
