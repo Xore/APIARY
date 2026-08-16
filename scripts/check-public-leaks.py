@@ -46,9 +46,14 @@ PATTERNS = (
     # "change-me-in-env" (arcane/home/honeypot-elk/compose.yml/init.yml, predates
     # #1502) never matched this pattern while embedded inline in a YAML
     # list item -- generating a real per-stack .env.example put it at the
-    # start of a line for the first time. (?i:change.me) covers both that
-    # and CHANGE_ME's own different casing/separator in one exemption.
-    (re.compile(r"(?m)^[ \t]*[A-Z][A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|API_KEY)[ \t]*=[ \t]*(?!(?:(?i:change.me)|DECOY_ONLY|\$\{|\"?<|$))[^#\s]{8,}"), "literal credential assignment"),
+    # start of a line for the first time. (?i:change.?me) covers that,
+    # CHANGE_ME's own different casing/separator, and bare "changeme"
+    # (no separator -- vendor/ghosts-src's own upstream .env.example
+    # convention, #1506) in one exemption. \$\( alongside \$\{ exempts
+    # command-substitution-generated secrets (e.g. install-homeserver.sh's
+    # `$(openssl rand ...)` bootstrap values, #1504) the same way variable
+    # expansion was already exempt.
+    (re.compile(r"(?m)^[ \t]*[A-Z][A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|API_KEY)[ \t]*=[ \t]*(?!(?:(?i:change.?me)|DECOY_ONLY|\$[\{\(]|\"?<|$))[^#\s]{8,}"), "literal credential assignment"),
     (re.compile(r"(?i)https?://[^/\s:@]+:[^/\s@]+@"), "credential embedded in URL"),
 )
 BINARY_SUFFIXES = {
