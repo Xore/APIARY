@@ -13,5 +13,14 @@ queries:
 # feature (query=..., regex=true) runs under a hard wall-clock timeout for
 # the same reason py/redos still flags it. This is an internal,
 # docker-network-only analysis service with no untrusted job_id source.
+
+# #1506: sandbox/ghosts/vendor/ghosts-src vendors upstream GHOSTS' own repo
+# verbatim (pinned commit) so ghosts-api can build through Arcane's directory
+# sync. wwwroot/lib/ is GHOSTS' own bundled third-party static JS libraries
+# (Font Awesome, SignalR, D3) shipped inside its web UI, not APIARY or GHOSTS
+# application code -- CodeQL flagged property-injection/log-injection findings
+# inside Font Awesome's and SignalR's own upstream library source, which this
+# repo can't fix without diverging from the pinned vendor snapshot.
 paths-ignore:
   - analysis/ghidra/service/server.py
+  - sandbox/ghosts/vendor/ghosts-src/Ghosts.Api/wwwroot/lib

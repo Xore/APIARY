@@ -1,0 +1,112 @@
+
+services:
+  ghosts-postgres:
+    image: postgres:16.8
+    container_name: ghosts-postgres
+    environment:
+      POSTGRES_DB: ghosts
+      POSTGRES_USER: ghosts
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-Scotty@@1!}
+    volumes:
+      - ghosts-postgres-data:/var/lib/postgresql/data
+    logging:
+      options:
+        max-size: "100m"
+        max-file: "5"
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ghosts"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+  ghosts-frontend:
+    build:
+      context: ../Ghosts.Frontend
+      dockerfile: Dockerfile
+    container_name: ghosts-frontend
+    ports:
+      - "4200:80"
+    environment:
+      # API_URL must be reachable by the browser, not by Docker — use localhost since ports are mapped to the host
+      API_URL: ${WEB_API_URL:-http://host.docker.internal:5000/api}
+      N8N_API_URL: ${WEB_N8N_API_URL:-http://host.docker.internal:5678}
+      GRAFANA_URL: ${WEB_GRAFANA_URL:-http://host.docker.internal:3000}
+  ghosts-api:
+    build:
+      context: ..
+      dockerfile: Dockerfile-api
+    container_name: ghosts-api
+    depends_on:
+      ghosts-postgres:
+        condition: service_healthy
+    ports:
+      - "5000:5000"
+    environment:
+      N8N_API_URL: ${N8N_API_URL:-http://host.docker.internal:5678/api/v1/workflows}
+      N8N_API_KEY: ${N8N_API_KEY:-replace-me}
+    restart: unless-stopped
+
+  ghosts-n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: ghosts-n8n
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true
+      - N8N_SECURE_COOKIE=false
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=false
+      - N8N_DIAGNOSTICS_ENABLED=false
+    volumes:
+      - ghosts-n8n-data:/home/node/.n8n
+      - ../../configuration/n8n-workflows:/bootstrap/workflows:ro
+      - ../../configuration/n8n-bootstrap/credentials:/bootstrap/credentials:ro
+    restart: unless-stopped
+
+  ghosts-n8n-provisioner:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: ghosts-n8n-provisioner
+    depends_on:
+      ghosts-n8n:
+        condition: service_started
+    entrypoint: ["/bin/sh", "/scripts/provision-n8n.sh"]
+    environment:
+      - N8N_HOST=ghosts-n8n
+      - N8N_OWNER_EMAIL=${N8N_OWNER_EMAIL:-admin@ghosts.local}
+      - N8N_OWNER_FIRST_NAME=${N8N_OWNER_FIRST_NAME:-GHOSTS}
+      - N8N_OWNER_LAST_NAME=${N8N_OWNER_LAST_NAME:-Admin}
+      - N8N_OWNER_PASSWORD=${N8N_OWNER_PASSWORD:-Ghosts@@1!}
+    volumes:
+      - ghosts-n8n-data:/home/node/.n8n
+      - ../../configuration/n8n-workflows:/bootstrap/workflows:ro
+      - ../../configuration/n8n-bootstrap/credentials:/bootstrap/credentials:ro
+      - ../../configuration/n8n-bootstrap/scripts:/scripts:ro
+    restart: "no"
+
+  ghosts-grafana:
+    image: grafana/grafana
+    container_name: ghosts-grafana
+    depends_on:
+      ghosts-postgres:
+        condition: service_healthy
+    user: root
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_SECURITY_X_FRAME_OPTIONS=
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/provisioning/dashboards/GHOSTS-default Grafana dashboard.json
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    volumes:
+      - ghosts-grafana-data:/var/lib/grafana
+      - ../../configuration/grafana/datasources:/etc/grafana/provisioning/datasources
+      - ../../configuration/grafana/dashboards:/etc/grafana/provisioning/dashboards
+
+volumes:
+  ghosts-postgres-data:
+  ghosts-n8n-data:
+  ghosts-grafana-data:

@@ -1,0 +1,106 @@
+// Copyright 2017 Carnegie Mellon University. All Rights Reserved. See LICENSE.md file for terms.
+
+using System;
+using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+using System.Linq;
+using AutoMapper;
+using Ghosts.Animator.Models;
+
+namespace Ghosts.Api.Infrastructure.Models;
+
+[Table("npcs")]
+public class NpcRecord
+{
+    [Key]
+    public Guid Id { get; set; }
+
+    public Guid? MachineId { get; set; }
+
+    /// <summary>
+    /// Optional association with a scenario for scenario-scoped operations
+    /// </summary>
+    public int? ScenarioId { get; set; }
+
+    /// <summary>
+    /// Optional association with a specific execution run.
+    /// NULL = global/ambient NPC, set = tied to that execution.
+    /// </summary>
+    public int? ExecutionId { get; set; }
+
+    /// <summary>
+    /// Used for grouping NPCs together, e.g. 2020, 2021
+    /// </summary>
+    public string Campaign { get; set; }
+
+    /// <summary>
+    /// Used for grouping NPCs together, e.g. we could call this a group
+    /// but to differentiate from other types of groups, we use enclave.
+    /// </summary>
+    public string Enclave { get; set; }
+
+    /// <summary>
+    /// Used for grouping NPCs together, e.g.
+    /// A team within an enclave
+    /// </summary>
+    public string Team { get; set; }
+
+    public DateTime CreatedUtc { get; set; }
+
+    // this is also currently jsonb
+    public NpcProfile NpcProfile { get; set; }
+
+    // Social graph properties (previously in NpcSocialGraph)
+    public long CurrentStep { get; set; }
+
+    // Navigation properties for social graph collections
+    public virtual ICollection<NpcSocialConnection> Connections { get; set; }
+    public virtual ICollection<NpcLearning> Knowledge { get; set; }
+    public virtual ICollection<NpcBelief> Beliefs { get; set; }
+    public virtual ICollection<NpcPreference> Preferences { get; set; }
+
+    // Navigation properties for scenario/execution association
+    public virtual Scenario Scenario { get; set; }
+    public virtual Execution Execution { get; set; }
+
+    public static NpcRecord TransformToNpc(NpcProfile o)
+    {
+        if (o == null) return new NpcRecord();
+
+        var n = new NpcRecord
+        {
+            NpcProfile = o,
+            Id = o.Id,
+            Connections = new List<NpcSocialConnection>(),
+            Knowledge = new List<NpcLearning>(),
+            Beliefs = new List<NpcBelief>(),
+            Preferences = new List<NpcPreference>(),
+            CurrentStep = 0
+        };
+
+        return n;
+    }
+
+    /// <summary>
+    /// Summary only copies the first record for many of the lists a profile might have
+    /// Often used to submit to a system such as an LLM where a full profile would be too much data
+    /// </summary>
+    public static NpcProfileSummary TransformToNpcProfileSummary(NpcProfile o)
+    {
+        var config = new MapperConfiguration(cfg =>
+        {
+            cfg.CreateMap<NpcProfile, NpcProfileSummary>()
+                .ForMember(dest => dest.Address,
+                    opt => opt.MapFrom(src => src.Address.FirstOrDefault()))
+                .ForMember(dest => dest.Education.Degrees,
+                    opt => opt.MapFrom(src => src.Education.Degrees.FirstOrDefault()))
+                .ForMember(dest => dest.Employment.EmploymentRecords,
+                    opt => opt.MapFrom(src => src.Employment.EmploymentRecords.FirstOrDefault()))
+                .ForMember(dest => dest.ForeignTravel.Trips,
+                    opt => opt.MapFrom(src => src.ForeignTravel.Trips.FirstOrDefault()));
+        }, null);
+
+        return config.CreateMapper().Map<NpcProfileSummary>(o);
+    }
+}
