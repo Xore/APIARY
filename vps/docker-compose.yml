@@ -155,13 +155,6 @@ services:
           cpus: "0.5"
           memory: 128M
 
-  socat-static:
-    image: alpine/socat:latest
-    container_name: socat-static
-    restart: unless-stopped
-    command: TCP4-LISTEN:8080,fork,reuseaddr TCP4:10.8.0.2:8080
-    networks: [proxy]
-
   socat-python-api:
     image: alpine/socat:latest
     container_name: socat-python-api
@@ -361,7 +354,17 @@ services:
       # no-op, not an error" posture as BLACKHOLE_LIST -- see
       # portbridge-manual-blackhole-refresh.sh for what keeps it current.
       - BLACKHOLE_MANUAL_LIST=/blackhole/manual.txt
-      - "RULES=tcp:22:10.8.0.2:19022 tcp:23:10.8.0.2:19023 tcp:25:10.8.0.2:25 tcp:5432:10.8.0.2:5432:pp tcp:5900:10.8.0.2:5900:pp tcp:6379:10.8.0.2:6379:pp tcp:9200:10.8.0.2:9200:pp tcp:2375:10.8.0.2:2375:pp tcp:110:10.8.0.2:110:pp tcp:143:10.8.0.2:143:pp tcp:1080:10.8.0.2:1080:pp tcp:2575:10.8.0.2:2575:pp tcp:5555:10.8.0.2:5555:pp tcp:11112:10.8.0.2:11112:pp tcp:4443:10.8.0.2:443:pp tcp:8443:10.8.0.2:8443:pp tcp:3389:10.8.0.2:3389:pp tcp:8888:10.8.0.2:18083:pp tcp:8081:10.8.0.2:19081:pp tcp:21:10.8.0.2:21 tcp:135:10.8.0.2:135 tcp:445:10.8.0.2:445 tcp:1433:10.8.0.2:1433 tcp:3306:10.8.0.2:3306 tcp:27017:10.8.0.2:27017 tcp:1723:10.8.0.2:1723 tcp:1883:10.8.0.2:1883 tcp:5060:10.8.0.2:5060 tcp:9100:10.8.0.2:9100 tcp:11211:10.8.0.2:11211 tcp:20000:10.8.0.2:20000:pp tcp:102:10.8.0.2:102:pp tcp:1102:10.8.0.2:1102:pp tcp:2102:10.8.0.2:2102:pp tcp:502:10.8.0.2:502:pp tcp:1502:10.8.0.2:1502:pp tcp:2502:10.8.0.2:2502:pp tcp:2404:10.8.0.2:2404:pp tcp:10001:10.8.0.2:10001:pp tcp:1025:10.8.0.2:1025:pp tcp:50100:10.8.0.2:50100:pp tcp:44818:10.8.0.2:44818:pp tcp:2200:10.8.0.2:2200 tcp:389:10.8.0.2:389 tcp:8000:10.8.0.2:8000 tcp:8880:10.8.0.2:8880 tcp:8080:10.8.0.2:8080 tcp:9201:10.8.0.2:9201 tcp:8889:10.8.0.2:8888 tcp:5070:10.8.0.2:5060 udp:69:10.8.0.2:1069 udp:161:10.8.0.2:19161 udp:1900:10.8.0.2:1900 udp:47808:10.8.0.2:47808 udp:623:10.8.0.2:623 udp:5060:10.8.0.2:5060 udp:5070:10.8.0.2:5060 udp:53:10.8.0.2:53 udp:500:10.8.0.2:500"
+      # #1509: wordpot (tcp:8082, plain -- via_port join like cowrie/dionaea,
+      # wordpot_patch.py preserves the source port for exactly this) and
+      # endlessh (tcp:2022, :pp -- endlessh-honeypot/proxyproto.go parses
+      # PROXY protocol directly, same as citrix/cisco-asa/rdp/dnp3/dicompot)
+      # were running with zero live public exposure: no portbridge rule and
+      # no Traefik route existed for either, confirmed live via `docker ps`
+      # + `ss -tlnp` on both hosts, not assumed from docs. 8082/2022 both
+      # confirmed free (checked `ss -tlnp` on the VPS before picking them --
+      # 2222 looked free from the RULES list alone but is actually this
+      # box's own real sshd, not a honeypot port).
+      - "RULES=tcp:22:10.8.0.2:19022 tcp:23:10.8.0.2:19023 tcp:25:10.8.0.2:25 tcp:5432:10.8.0.2:5432:pp tcp:5900:10.8.0.2:5900:pp tcp:6379:10.8.0.2:6379:pp tcp:9200:10.8.0.2:9200:pp tcp:2375:10.8.0.2:2375:pp tcp:110:10.8.0.2:110:pp tcp:143:10.8.0.2:143:pp tcp:1080:10.8.0.2:1080:pp tcp:2575:10.8.0.2:2575:pp tcp:5555:10.8.0.2:5555:pp tcp:11112:10.8.0.2:11112:pp tcp:4443:10.8.0.2:443:pp tcp:8443:10.8.0.2:8443:pp tcp:3389:10.8.0.2:3389:pp tcp:8888:10.8.0.2:18083:pp tcp:8081:10.8.0.2:19081:pp tcp:21:10.8.0.2:21 tcp:135:10.8.0.2:135 tcp:445:10.8.0.2:445 tcp:1433:10.8.0.2:1433 tcp:3306:10.8.0.2:3306 tcp:27017:10.8.0.2:27017 tcp:1723:10.8.0.2:1723 tcp:1883:10.8.0.2:1883 tcp:5060:10.8.0.2:5060 tcp:9100:10.8.0.2:9100 tcp:11211:10.8.0.2:11211 tcp:20000:10.8.0.2:20000:pp tcp:102:10.8.0.2:102:pp tcp:1102:10.8.0.2:1102:pp tcp:2102:10.8.0.2:2102:pp tcp:502:10.8.0.2:502:pp tcp:1502:10.8.0.2:1502:pp tcp:2502:10.8.0.2:2502:pp tcp:2404:10.8.0.2:2404:pp tcp:10001:10.8.0.2:10001:pp tcp:1025:10.8.0.2:1025:pp tcp:50100:10.8.0.2:50100:pp tcp:44818:10.8.0.2:44818:pp tcp:2200:10.8.0.2:2200 tcp:389:10.8.0.2:389 tcp:8000:10.8.0.2:8000 tcp:8880:10.8.0.2:8880 tcp:8080:10.8.0.2:8080 tcp:9201:10.8.0.2:9201 tcp:8889:10.8.0.2:8888 tcp:5070:10.8.0.2:5060 tcp:8082:10.8.0.2:8081 tcp:2022:10.8.0.2:19024:pp udp:69:10.8.0.2:1069 udp:161:10.8.0.2:19161 udp:1900:10.8.0.2:1900 udp:47808:10.8.0.2:47808 udp:623:10.8.0.2:623 udp:5060:10.8.0.2:5060 udp:5070:10.8.0.2:5060 udp:53:10.8.0.2:53 udp:500:10.8.0.2:500"
     volumes:
       # portbridge connection log — ship this dir to the home stack's
       # /opt/stacks/apiary/logs/portbridge so the dashboard ingests it.
@@ -489,6 +492,25 @@ services:
     container_name: socat-hp-canarytokens
     restart: unless-stopped
     command: TCP4-LISTEN:8083,fork,reuseaddr TCP4:10.8.0.2:19427
+    networks: [proxy]
+
+  # #1509: deliberately routes the bare/www/static hostnames straight into
+  # HellPot's own tarpit, replacing a dead `socat-static` bridge that has
+  # pointed at a "(nginx)" backend which hasn't existed in years -- nothing
+  # ever ran on 10.8.0.2:8080 until HellPot (#1419) claimed that exact port,
+  # at which point the stale route silently started "working" (serving raw
+  # Markov-garbage text/plain to real browsers) by accident. This bridge
+  # makes the same destination intentional and documented instead: any
+  # scanner/browser hitting the top-level domain with no more specific host
+  # match gets HellPot's endless garbage, same as HellPot's own dedicated
+  # raw-portbridge exposure (RULES' `tcp:8080:10.8.0.2:8080` above) already
+  # gives it -- this is just a second, HTTP-hostname-routed path to the same
+  # intentional destination, not a new capability.
+  socat-hp-hellpot:
+    image: alpine/socat:latest
+    container_name: socat-hp-hellpot
+    restart: unless-stopped
+    command: TCP4-LISTEN:8084,fork,reuseaddr TCP4:10.8.0.2:8080
     networks: [proxy]
 
   # Isolated on oidc-dashboard (not the shared proxy network) like every
