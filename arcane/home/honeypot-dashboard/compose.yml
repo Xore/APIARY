@@ -417,6 +417,13 @@ services:
       # service, over the honeypot-llm network below -- same service name
       # ("ollama") that network's own internal DNS already resolves.
       - OLLAMA_URL=http://ollama:11434
+      # Same posture and reasoning as dashboard's own CANARYTOKENS_API_URL
+      # above -- this line was missing here, leaving this replica silently
+      # unable to create tokens while dashboard could, a load-balanced
+      # split-brain (types requests landing on dashboard reported available,
+      # create requests landing here 503'd with "not configured on this
+      # host").
+      - CANARYTOKENS_API_URL=${CANARYTOKENS_API_URL:-}
       - HONEYPOT_DOMAIN=${HONEYPOT_DOMAIN:-}
       - KIBANA_PUBLIC_URL=${KIBANA_PUBLIC_URL:-}
       - EVEBOX_PUBLIC_URL=${EVEBOX_PUBLIC_URL:-}
@@ -447,6 +454,9 @@ services:
       - CAPE_REQUEST_DIR=${CAPE_REQUEST_DIR:-}
       - GHIDRA_ALERT_RISK_LEVELS=${GHIDRA_ALERT_RISK_LEVELS:-high,critical}
       - GHIDRA_ALERT_ON_CRYPTO=${GHIDRA_ALERT_ON_CRYPTO:-false}
+      # Also missing here alongside CANARYTOKENS_API_URL above -- same
+      # split-brain bug, different env var.
+      - LLM_ANALYSIS_ALERT_SEVERITIES=${LLM_ANALYSIS_ALERT_SEVERITIES:-high,critical}
       - GITHUB_ANALYSIS_REQUEST_DIR=${GITHUB_ANALYSIS_REQUEST_DIR:-}
       - GITHUB_ANALYSIS_RESULTS_DIR=${GITHUB_ANALYSIS_RESULTS_DIR:-}
       - GITHUB_ANALYSIS_ALERT_POSITIVES=${GITHUB_ANALYSIS_ALERT_POSITIVES:-10}
