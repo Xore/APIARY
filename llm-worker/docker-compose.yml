@@ -5,6 +5,12 @@
 #
 # #83 owns use of docker-compose.captured-data.yml and the explicit canary
 # authorization. Do not fold those mounts/networks into this base file.
+#
+# #1502: migrated into arcane/home/ for Arcane directory-aware Git sync.
+# Already self-contained; only the explicit name: below and the file's own
+# relocation/rename to compose.yml were needed.
+
+name: llm-worker
 
 services:
   llm-worker:

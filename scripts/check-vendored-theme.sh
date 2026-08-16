@@ -11,8 +11,9 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-lock="$root/dashboard/frontend/theme.lock"
-vendored="$root/dashboard/static/theme.css"
+# #1502: dashboard/ moved under arcane/home/honeypot-dashboard/.
+lock="$root/arcane/home/honeypot-dashboard/dashboard/frontend/theme.lock"
+vendored="$root/arcane/home/honeypot-dashboard/dashboard/static/theme.css"
 
 [ -f "$lock" ] || { echo "missing $lock" >&2; exit 1; }
 [ -f "$vendored" ] || { echo "missing $vendored" >&2; exit 1; }

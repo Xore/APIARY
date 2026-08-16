@@ -26,36 +26,56 @@ flowchart LR
 ```
 
 **All core sensors run without compose profiles.** The only profile is the
-optional on-demand `geoip-update` maintenance job. 30 deployment pieces —
-29 independent Arcane-managed stacks at home plus the VPS (see
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for why the home side split into
-21 separate Compose stacks):
+optional on-demand `geoip-update` maintenance job. 33 deployment pieces —
+32 independent Arcane-managed stacks at home plus the VPS (see
+[docs/ARCANE-GIT-SYNC.md](docs/ARCANE-GIT-SYNC.md) for how a repo commit
+reaches the live host, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for
+why the home side split into this many Compose stacks):
 
 | Piece | Runs on | What |
 |---|---|---|
-| `honeypot-keycloak` ([docker-compose.keycloak.yml](docker-compose.keycloak.yml)) | **home** | Arcane-managed Keycloak/PostgreSQL identity stack; only Keycloak is reachable from VPS Traefik over WireGuard |
-| `honeypot-init` ([docker-compose.init.yml](docker-compose.init.yml)) | **home** | one-shot bootstrap jobs: log paths, Elasticsearch templates, Arkime schema, persona validation |
-| `honeypot-cowrie`, `honeypot-dionaea`, `honeypot-conpot`, `honeypot-dnp3`, `honeypot-http`, `honeypot-multipot` (this repository, one compose file each) | **home** | the sensors: Cowrie, Dionaea (+ TFTP relay), Conpot personas, DNP3, HTTP/API honeypots, multipot |
-| `honeypot-dicompot`, `honeypot-dns-honeypot`, `honeypot-citrix`, `honeypot-cisco-asa`, `honeypot-rdp`, `honeypot-endlessh`, `honeypot-beelzebub`, `honeypot-hellpot`, `honeypot-elasticpot`, `honeypot-galah`, `honeypot-sentrypeer`, `honeypot-wordpot`, `honeypot-mailoney` (this repository, one compose file each) | **home** | more sensors: DICOM medical-imaging decoy, DNS UDP reflection bait (response-capped, never a real amplification vector), Citrix ADC/NetScaler Gateway decoy (CVE-2019-19781), Cisco ASA WebVPN+IKE decoy (CVE-2018-0101), RDP decoy, SSH pre-auth tarpit, vendored multi-protocol deception runtime (SSH/LDAP/MCP/HTTP, #1418), vendored HTTP bot tarpit (#1419), vendored Elasticsearch decoy distinct from multipot's own (#1423), vendored LLM-powered HTTP honeypot behind its own broker-guarded bridge onto the shared Ollama instance (#1420), vendored SIP/VoIP fraud-detection honeypot (#1424), vendored WordPress/CMS decoy (#1421), vendored SMTP honeypot taking over port 25 from multipot's own retired handler (#1422) |
-| `honeypot-canarytokens` ([docker-compose.canarytokens.yml](docker-compose.canarytokens.yml)) | **home** | self-hosted honeytoken platform (#1426) -- planted-artifact deception, not a listening protocol decoy; `canarytokens-adapter` translates its webhook alerts into this repo's shared JSON event shape. The dashboard's Settings > Canarytokens pane (#1487) creates PDF/Word/Excel/custom-image/Windows-Folder/QR tokens on demand for use *outside* this honeypot; see [docs/dashboard-canarytoken-creation-design.md](docs/dashboard-canarytoken-creation-design.md) |
-| `honeypot-tanner` ([docker-compose.tanner.yml](docker-compose.tanner.yml)) | **home** | SNARE + TANNER application-emulation boundary |
-| `honeypot-elk` ([docker-compose.elk.yml](docker-compose.elk.yml)) | **home** | Filebeat, Elasticsearch, Kibana, EveBox, Arkime |
-| `honeypot-ip-enrichment-worker` ([docker-compose.ip-enrichment-worker.yml](docker-compose.ip-enrichment-worker.yml)) | **home** | networkless worker that moves the portbridge `via_port` → real attacker IP join from dashboard read-time to ingest-time, writing `logs/enriched/*.json` for Filebeat |
-| `honeypot-agent-intrusion-worker` ([docker-compose.agent-intrusion-worker.yml](docker-compose.agent-intrusion-worker.yml)) | **home** | correlates sensor/Suricata events into campaigns, scores them against deterministic criticality rules, writes the `agent-intrusion-campaigns` index the dashboard's `/agent-campaigns` route reads |
-| `honeypot-dashboard` ([docker-compose.dashboard.yml](docker-compose.dashboard.yml)) | **home** | the live investigation dashboard |
-| `honeypot-payload-analysis` ([docker-compose.payload-analysis.yml](docker-compose.payload-analysis.yml)) | **home** | payload dedup + YARA scanning |
-| `honeypot-utilities` ([docker-compose.utilities.yml](docker-compose.utilities.yml)) | **home** | autoheal, log rotation, disk-space monitoring, reporting |
+| `honeypot-keycloak` ([arcane/home/honeypot-keycloak/compose.yml](arcane/home/honeypot-keycloak/compose.yml)) | **home** | Arcane-managed Keycloak/PostgreSQL identity stack; only Keycloak is reachable from VPS Traefik over WireGuard |
+| `honeypot-init` ([arcane/home/honeypot-init/compose.yml](arcane/home/honeypot-init/compose.yml)) | **home** | one-shot bootstrap jobs: log paths, Elasticsearch templates, Arkime schema, persona validation |
+| `honeypot-cowrie`, `honeypot-dionaea`, `honeypot-conpot`, `honeypot-dnp3`, `honeypot-http`, `honeypot-multipot` (`arcane/home/honeypot-<name>/compose.yml`, one directory each) | **home** | the sensors: Cowrie, Dionaea (+ TFTP relay), Conpot personas, DNP3, HTTP/API honeypots, multipot |
+| `honeypot-dicompot`, `honeypot-dns-honeypot`, `honeypot-citrix`, `honeypot-cisco-asa`, `honeypot-rdp`, `honeypot-endlessh`, `honeypot-beelzebub`, `honeypot-hellpot`, `honeypot-elasticpot`, `honeypot-galah`, `honeypot-sentrypeer`, `honeypot-wordpot`, `honeypot-mailoney` (`arcane/home/honeypot-<name>/compose.yml`, one directory each) | **home** | more sensors: DICOM medical-imaging decoy, DNS UDP reflection bait (response-capped, never a real amplification vector), Citrix ADC/NetScaler Gateway decoy (CVE-2019-19781), Cisco ASA WebVPN+IKE decoy (CVE-2018-0101), RDP decoy, SSH pre-auth tarpit, vendored multi-protocol deception runtime (SSH/LDAP/MCP/HTTP, #1418), vendored HTTP bot tarpit (#1419), vendored Elasticsearch decoy distinct from multipot's own (#1423), vendored LLM-powered HTTP honeypot behind its own broker-guarded bridge onto the shared Ollama instance (#1420), vendored SIP/VoIP fraud-detection honeypot (#1424), vendored WordPress/CMS decoy (#1421), vendored SMTP honeypot taking over port 25 from multipot's own retired handler (#1422) |
+| `honeypot-canarytokens` ([arcane/home/honeypot-canarytokens/compose.yml](arcane/home/honeypot-canarytokens/compose.yml)) | **home** | self-hosted honeytoken platform (#1426) -- planted-artifact deception, not a listening protocol decoy; `canarytokens-adapter` translates its webhook alerts into this repo's shared JSON event shape. The dashboard's Settings > Canarytokens pane (#1487) creates PDF/Word/Excel/custom-image/Windows-Folder/QR tokens on demand for use *outside* this honeypot; see [docs/dashboard-canarytoken-creation-design.md](docs/dashboard-canarytoken-creation-design.md) |
+| `honeypot-tanner` ([arcane/home/honeypot-tanner/compose.yml](arcane/home/honeypot-tanner/compose.yml)) | **home** | SNARE + TANNER application-emulation boundary |
+| `honeypot-elk` ([arcane/home/honeypot-elk/compose.yml](arcane/home/honeypot-elk/compose.yml)) | **home** | Filebeat, Elasticsearch, Kibana, EveBox, Arkime |
+| `honeypot-ip-enrichment-worker` ([arcane/home/honeypot-ip-enrichment-worker/compose.yml](arcane/home/honeypot-ip-enrichment-worker/compose.yml)) | **home** | networkless worker that moves the portbridge `via_port` → real attacker IP join from dashboard read-time to ingest-time, writing `logs/enriched/*.json` for Filebeat |
+| `honeypot-agent-intrusion-worker` ([arcane/home/honeypot-agent-intrusion-worker/compose.yml](arcane/home/honeypot-agent-intrusion-worker/compose.yml)) | **home** | correlates sensor/Suricata events into campaigns, scores them against deterministic criticality rules, writes the `agent-intrusion-campaigns` index the dashboard's `/agent-campaigns` route reads |
+| `honeypot-attacker-identity-worker`, `honeypot-correlator-worker`, `honeypot-payload-inventory-worker` (`arcane/home/honeypot-<name>/compose.yml`, one directory each) | **home** | three more workers that had their own top-level compose file but had drifted out of the deploy/installer inventory before #1502's audit caught it (same class of gap #560 and #891 each fixed once before) -- attacker-identity correlation, cross-sensor campaign correlation, and payload inventory tracking |
+| `honeypot-dashboard` ([arcane/home/honeypot-dashboard/compose.yml](arcane/home/honeypot-dashboard/compose.yml)) | **home** | the live investigation dashboard |
+| `honeypot-payload-analysis` ([arcane/home/honeypot-payload-analysis/compose.yml](arcane/home/honeypot-payload-analysis/compose.yml)) | **home** | payload dedup + YARA scanning |
+| `honeypot-utilities` ([arcane/home/honeypot-utilities/compose.yml](arcane/home/honeypot-utilities/compose.yml)) | **home** | autoheal, log rotation, disk-space monitoring, reporting |
 | [`vps/`](vps/) | **VPS** | Traefik, portbridge raw tunnels, Suricata, WireGuard HTTP bridges, and isolated Keycloak OIDC gateways |
+
+Every stack above is a directory-aware Arcane Git sync driven by
+[`arcane/manifests/home-production.json`](arcane/manifests/home-production.json)
+-- see [docs/ARCANE-GIT-SYNC.md](docs/ARCANE-GIT-SYNC.md) for the sync
+model, cutover procedure, and confirmed platform limitations.
+`honeypot-arcane` itself (the manager these syncs run inside) stays
+installer/`deploy.yml`-managed rather than becoming a self-referential sync
+-- syncing the thing that has to already be running before any sync can
+happen would be a bootstrap loop.
+
+Six more home-hosted stacks are Arcane-managed the same way but keep their
+existing repository-root path instead of moving under `arcane/home/`, since
+they were already self-contained and are cross-referenced by CI/the
+installer at those paths:
+[`auth-events-worker/`](auth-events-worker/),
+[`llm-worker/`](llm-worker/), [`ml-worker/`](ml-worker/),
+[`analysis/ghidra/`](analysis/ghidra/), [`sandbox/ghosts/`](sandbox/ghosts/),
+[`pihole/`](pihole/).
 
 The root [`docker-compose.yml`](docker-compose.yml) is an empty marker kept
 only so `docker compose config` has something to validate against in this
-directory — it is not itself an Arcane-managed stack and isn't counted above.
-[`docker-compose.sandbox.yml`](docker-compose.sandbox.yml) is a
+directory — it is not itself an Arcane-managed stack and isn't counted
+above. [`docker-compose.sandbox.yml`](docker-compose.sandbox.yml) is a
 per-detonation Windows gateway/capture Compose file the sandbox brings up
 and tears down around a single run; it's likewise not a standing stack.
-Ghidra, ML, LLM, the Windows sandbox, GHOSTS, and CAPE run their own
-independently managed services outside this count — see
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for where those fit.
+ML, LLM, the Windows sandbox, and CAPE run their own independently managed
+services outside this count — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+for where those fit.
 
 ## Read next
 
@@ -63,6 +83,7 @@ independently managed services outside this count — see
 |---|---|
 | [branding/](branding/) / [live specimen](https://xore.github.io/APIARY/) | Canonical logos, favicons, social assets, web theme starter, design tokens, and printable brand guide |
 | [docs/CGNAT-DEPLOYMENT.md](docs/CGNAT-DEPLOYMENT.md) | **Start here to deploy.** Home + VPS setup, Arcane, firewall, DNS, boot-safe networking |
+| [docs/ARCANE-GIT-SYNC.md](docs/ARCANE-GIT-SYNC.md) | How a repo commit reaches a live home stack: the directory-aware Git sync model, cutover procedure, and confirmed Arcane v2.8.0 platform limitations |
 | [docs/KEYCLOAK-OPERATIONS.md](docs/KEYCLOAK-OPERATIONS.md) | Complete Keycloak/Arcane deployment, secret provisioning, administrator/MFA bootstrap, VPS gateways, validation, backup, rebuild, and troubleshooting runbook |
 | [docs/HOMESERVER-DISK-LAYOUT.md](docs/HOMESERVER-DISK-LAYOUT.md) | Physical disk layout of the homeserver and an Ubuntu autoinstall template to reproduce it |
 | [scripts/install-homeserver.sh](scripts/install-homeserver.sh) | Unattended provisioning script (Docker, GPU/NVIDIA, WireGuard, Arcane, the stacks themselves) for a manually-installed base Ubuntu system — fill in [scripts/install-homeserver.conf.example](scripts/install-homeserver.conf.example) first, same idea as a Windows `autounattend.xml` answer file. First cut, see [#518](https://github.com/Xore/APIARY/issues/518) |

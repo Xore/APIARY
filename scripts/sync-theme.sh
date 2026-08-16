@@ -9,8 +9,9 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 clone="${1:-$root/../theme}"
 ref="${2:-HEAD}"
-lock="$root/dashboard/frontend/theme.lock"
-vendored="$root/dashboard/static/theme.css"
+# #1502: dashboard/ moved under arcane/home/honeypot-dashboard/.
+lock="$root/arcane/home/honeypot-dashboard/dashboard/frontend/theme.lock"
+vendored="$root/arcane/home/honeypot-dashboard/dashboard/static/theme.css"
 
 if [ ! -d "$clone/.git" ]; then
   echo "not a git clone: $clone" >&2

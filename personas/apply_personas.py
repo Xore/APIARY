@@ -15,7 +15,7 @@ def apply(stack: Path, dionaea: Path, state: Path) -> dict:
 
     copied = []
     for service in ("ftp", "tftp", "upnp", "printer"):
-        source = stack / "dionaea" / "persona" / service
+        source = stack / "arcane/home/honeypot-dionaea/dionaea" / "persona" / service  # #1502
         target = dionaea / service / "root"
         target.mkdir(parents=True, exist_ok=True)
         if not source.exists():

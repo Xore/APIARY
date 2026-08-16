@@ -14,11 +14,13 @@
 # Usage:
 #   scripts/validate-deploy-profile.sh deploy-profiles/<name>.txt
 #   scripts/validate-deploy-profile.sh --emit-expected-sensors deploy-profiles/<name>.txt
-# Run from the repo root (reads docker-compose.dashboard.yml relative to it).
+# Run from the repo root (reads arcane/home/honeypot-dashboard/compose.yml
+# relative to it -- #1502 moved it there).
 #
 # --emit-expected-sensors prints the EXPECTED_SENSORS value this profile
-# actually needs, instead of validating against docker-compose.dashboard.yml's
-# current one. EXPECTED_SENSORS there is a single hardcoded value assuming
+# actually needs, instead of validating against
+# arcane/home/honeypot-dashboard/compose.yml's current one. EXPECTED_SENSORS
+# there is a single hardcoded value assuming
 # every sensor is present -- it is NOT profile-aware today, so any profile
 # narrower than deploy-profiles/full.txt WILL fail the cross-check below
 # until that line is hand-edited (or overridden) to match. This flag exists
@@ -36,13 +38,13 @@ profile="${1:?Usage: $0 [--emit-expected-sensors] deploy-profiles/<name>.txt}"
 [ -f "$profile" ] || { echo "No such profile file: $profile" >&2; exit 1; }
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-dashboard_compose="$repo_root/docker-compose.dashboard.yml"
-[ -f "$dashboard_compose" ] || { echo "Cannot find docker-compose.dashboard.yml at $dashboard_compose" >&2; exit 1; }
+dashboard_compose="$repo_root/arcane/home/honeypot-dashboard/compose.yml"
+[ -f "$dashboard_compose" ] || { echo "Cannot find compose.yml at $dashboard_compose" >&2; exit 1; }
 
 # Every sensor stack this profile format can name, mapped to the
 # EXPECTED_SENSORS name(s) that stack is responsible for. Kept in sync by
 # hand with .github/workflows/deploy.yml's own sensor loop and
-# docker-compose.dashboard.yml's EXPECTED_SENSORS -- both are cross-checked
+# arcane/home/honeypot-dashboard/compose.yml's EXPECTED_SENSORS -- both are cross-checked
 # below, so a stale entry here shows up as a mismatch rather than silently
 # passing.
 declare -A STACK_TO_SENSORS=(

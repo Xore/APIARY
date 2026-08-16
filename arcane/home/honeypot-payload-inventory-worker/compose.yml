@@ -1,0 +1,60 @@
+# honeypot-payload-inventory-worker -- #1201, part of the #1205 dashboard-
+# aggregation epic: moves the payload inventory's write side (discovering
+# and classifying every captured file under PAYLOAD_DIRS) off every
+# dashboard instance's own periodic disk walk (dashboard/payloads_data.go's
+# scanPayloads, gated on that instance mounting PAYLOAD_DIRS) into one
+# standalone worker, matching the "one process writes, every dashboard
+# instance reads" pattern ghidra-worker/es-results-importer already
+# established. Writes to the exact same Elasticsearch indices
+# (dashboard-payload-inventory-v1, dashboard-payload-bytes-v1) the
+# dashboard's own read path (readPayloadInventory, servePayload) already
+# reads from -- the read side doesn't change. Deployed as
+# /opt/stacks/honeypot-payload-inventory-worker.
+#
+# Whether dashboard's own scanPayloads is removed once this worker is
+# confirmed running (redundant, not wrong -- both writers converge on the
+# same hash-keyed documents) is #1202, not this.
+
+name: honeypot-payload-inventory-worker
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  payload-inventory-worker:
+    <<: *runtime-defaults
+    build: ./payload-inventory-worker
+    container_name: hp-payload-inventory-worker
+    restart: unless-stopped
+    networks:
+      - honeynet
+    environment:
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - PAYLOAD_DIRS=/dionaea-lib/binaries,/cowrie-downloads
+      - SCAN_INTERVAL=5m
+      - TZ=Europe/Berlin
+    volumes:
+      # Same two capture sources dashboard/main.go's own PAYLOAD_DIRS
+      # config reads -- see docker-compose.dashboard.yml's own comments for
+      # why dionaea-lib is a shared named volume and cowrie-downloads is a
+      # host bind path.
+      - dionaea-lib:/dionaea-lib:ro
+      - /opt/stacks/apiary/logs/cowrie/downloads:/cowrie-downloads:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+networks:
+  honeynet:
+    name: honeynet
+    driver: bridge
+
+volumes:
+  dionaea-lib:
+    name: dionaea-lib

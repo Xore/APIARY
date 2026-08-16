@@ -22,7 +22,7 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "${script_dir}/.." && pwd)"
-realm_file="${repo_root}/keycloak/realm/apiary-realm.json"
+realm_file="${repo_root}/arcane/home/honeypot-keycloak/keycloak/realm/apiary-realm.json"  # #1502
 
 command -v docker >/dev/null || { printf 'docker is required\n' >&2; exit 1; }
 

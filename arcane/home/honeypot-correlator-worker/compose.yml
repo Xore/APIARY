@@ -1,0 +1,51 @@
+# honeypot-correlator-worker -- #1199, part of the #1205 dashboard-
+# aggregation epic: periodically recomputes campaign (CIDR-grouped) and
+# attacker cluster (fingerprint/payload/ASN-grouped) correlation over a
+# rolling window of recent honeypot-v2-* events, writing to two flat
+# Elasticsearch indices (campaigns-v1, attacker-clusters-v1) instead of
+# every dashboard instance recomputing the same correlation in its own
+# process on every rebuild cycle. See correlator-worker/main.go's own
+# package doc comment for the full design. #1219: correlation now runs as
+# Elasticsearch-native aggregations (correlator-worker/fetch.go), which is
+# what makes CORRELATION_WINDOW=7d (dashboard's own 7-day /campaigns and
+# /clusters page default) affordable as a continuously-refreshing
+# background job -- the previous CORRELATION_WINDOW=6h here was a
+# scale-driven compromise forced by the raw-document-fetch approach that
+# redesign replaced. Deployed as /opt/stacks/honeypot-correlator-worker.
+#
+# Whether dashboard's own correlateCampaigns/clustersData are rewired to
+# read these indices instead of recomputing in-process (redundant, not
+# wrong) is #1202, not this.
+
+name: honeypot-correlator-worker
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  correlator-worker:
+    <<: *runtime-defaults
+    build: ./correlator-worker
+    container_name: hp-correlator-worker
+    restart: unless-stopped
+    networks:
+      - honeynet
+    environment:
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - CORRELATION_WINDOW=168h
+      - RUN_INTERVAL=15m
+      - TZ=Europe/Berlin
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+networks:
+  honeynet:
+    name: honeynet
+    driver: bridge

@@ -1,0 +1,131 @@
+# honeypot-galah -- #1420: LLM-powered HTTP honeypot
+# (github.com/0x4d31/galah, vendored -- see galah/Dockerfile). Same shape
+# and reasoning as docker-compose.beelzebub.yml/docker-compose.hellpot.yml
+# -- no depends_on, its own private network, only host bind mounts.
+# Deployed as /opt/stacks/honeypot-galah.
+#
+# Scope decisions made integrating this sensor (see PR description for the
+# full writeup):
+#
+# - Raw-port/portbridge-only, no Traefik hostname: galah's own
+#   commonFields() (internal/logger/logger.go) resolves srcIP/srcPort
+#   purely from r.RemoteAddr via net.SplitHostPort -- confirmed directly
+#   against the vendored source, no X-Forwarded-For/X-Real-IP trust
+#   anywhere. Same resolved-via-ip-enrichment-worker's-via_port-join
+#   posture as beelzebub/hellpot.
+# - galah-llm-broker is the sole bridge to the shared Ollama instance
+#   (analysis/ghidra/docker-compose.ghidra.yml) -- galah's own container
+#   is never attached to the llm_clients/honeypot-llm network, mirroring
+#   that network's own "sensors must never be able to submit prompts or
+#   observe model traffic" invariant. See galah-llm-broker/main.go's own
+#   doc comment for what the broker does and doesn't allow.
+# - LLM_MODEL=qwen2.5:7b-instruct-q4_K_M, not any of the Qwen3/3.5 models
+#   already pulled on this host (qwen3:14b, and qwen3.5:4b which this PR
+#   originally picked from docs/local-llm-model-evaluation.md's own
+#   benchmark table before live-testing it): those benchmarks were run
+#   with Ollama's `think: false` request field explicitly set, and
+#   galah's vendored LLM client (langchaingo v0.1.10) has no support for
+#   that field at all -- confirmed against its source, no "think"/"Think"
+#   anywhere. Found live: a direct qwen3.5:4b /api/chat call with no
+#   think field ran for the full 90s test window without stopping
+#   (n_decoded reached 1413 tokens, no natural stop) -- Qwen3.5's
+#   thinking mode, unsuppressable through this client, blows past any
+#   realistic response deadline. galah's HTTP server hardcodes a 10s
+#   WriteTimeout (internal/server/server.go, not configurable) and
+#   returns a bare 500 on any LLM error including a timeout -- confirmed
+#   no fallback/static response exists for that path. qwen2.5:7b-instruct
+#   has no thinking-mode toggle to begin with (confirmed live: real
+#   requests return done_reason:"stop" with a clean, complete JSON body,
+#   ~1s warm) and was already evaluated favorably in
+#   docs/local-llm-model-evaluation.md, so this is a fourth distinct
+#   model on the shared OLLAMA_MAX_LOADED_MODELS=1 slot -- an accepted
+#   cost given none of the three already-pulled models were actually
+#   usable here. Response caching (built into galah, event_log.json shows
+#   responseMetadata.generationSource) means only the first hit on a given
+#   request shape pays the LLM cost at all.
+
+name: honeypot-galah
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  galah:
+    <<: *runtime-defaults
+    build: ./galah
+    container_name: hp-galah
+    restart: unless-stopped
+    environment:
+      - TZ=Europe/Berlin
+      - LLM_PROVIDER=ollama
+      - LLM_MODEL=qwen2.5:7b-instruct-q4_K_M
+      - LLM_SERVER_URL=http://galah-llm-broker:11434
+    ports:
+      - ${HP_BIND:-10.8.0.2}:8888:8888
+    volumes:
+      - /opt/stacks/apiary/logs/galah:/var/log/honeypot
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    networks: [galah_net]
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "8888"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    labels:
+      - autoheal=true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    depends_on:
+      galah-llm-broker:
+        condition: service_healthy
+
+  galah-llm-broker:
+    <<: *runtime-defaults
+    build: ./galah-llm-broker
+    container_name: hp-galah-llm-broker
+    restart: unless-stopped
+    environment:
+      - OLLAMA_URL=http://ollama:11434
+      - LISTEN_ADDR=:11434
+      - MAX_BODY_BYTES=65536
+      - UPSTREAM_TIMEOUT_SECONDS=8
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    networks:
+      galah_net:
+      llm_clients:
+        aliases: [galah-llm-broker]
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "11434"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
+
+networks:
+  galah_net:
+    driver: bridge
+  # Shared with analysis/ghidra/docker-compose.ghidra.yml's own ollama
+  # service (that file creates the real network: internal: true,
+  # confirmed there). galah itself never joins this network -- only the
+  # broker above does, and only the broker.
+  llm_clients:
+    name: honeypot-llm
+    external: true

@@ -23,9 +23,7 @@ def rendered_compose() -> dict[str, object]:
     """Render the installer template and ask Compose to normalize it."""
     with tempfile.TemporaryDirectory() as temp_dir:
         work = Path(temp_dir)
-        work.joinpath("compose.yml").write_text(
-            COMPOSE.read_text().replace("__LAN_IP__", TEST_LAN_IP)
-        )
+        work.joinpath("compose.yml").write_text(COMPOSE.read_text())
         work.joinpath("dnscrypt-proxy").mkdir()
         work.joinpath("dnscrypt-proxy", "dnscrypt-proxy.toml").write_bytes(
             DNSCRYPT_CONFIG.read_bytes()
@@ -33,6 +31,12 @@ def rendered_compose() -> dict[str, object]:
         env = os.environ | {
             "PIHOLE_PASSWORD": "ci-placeholder-not-a-secret",
             "INSTALL_TIMEZONE": "Europe/Berlin",
+            # #1502: LAN_IP moved from a literal __LAN_IP__ substitution
+            # placeholder to Compose's own ${LAN_IP:-127.0.0.1} interpolation
+            # (the placeholder form broke Arcane's own pre-flight validator
+            # in a port-binding position). Set it the same way the real
+            # deployed .env does now.
+            "LAN_IP": TEST_LAN_IP,
         }
         result = subprocess.run(
             [

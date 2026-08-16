@@ -18,8 +18,9 @@ set -euo pipefail
 export LC_ALL=C
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-lock="$root/dashboard/frontend/novnc.lock"
-vendored="$root/dashboard/static/vendor/novnc"
+# #1502: dashboard/ moved under arcane/home/honeypot-dashboard/.
+lock="$root/arcane/home/honeypot-dashboard/dashboard/frontend/novnc.lock"
+vendored="$root/arcane/home/honeypot-dashboard/dashboard/static/vendor/novnc"
 
 [ -f "$lock" ] || { echo "missing $lock" >&2; exit 1; }
 [ -d "$vendored" ] || { echo "missing $vendored" >&2; exit 1; }

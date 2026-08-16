@@ -1,0 +1,69 @@
+# honeypot-mailoney -- #1422: SMTP honeypot (github.com/awhitehatter/mailoney,
+# vendored -- see mailoney/Dockerfile). Takes over port 25 from multipot's own
+# self-written SMTP handler (docker-compose.multipot.yml's MULTIPOT_DISABLE
+# now includes smtp) -- see that file and vps/docker-compose.yml for the full
+# writeup on why. Same shape as docker-compose.hellpot.yml -- no depends_on,
+# its own fully private network, only host bind mounts.
+#
+# Scope decisions made integrating this sensor (see PR description for the
+# full writeup):
+#
+# - Raw-port/portbridge-only, no Traefik hostname: SMTP isn't HTTP, there's
+#   no hostname routing concept here -- matches every other non-HTTP sensor.
+# - read_only:true means /data (Mailoney's own SQLite session DB, additive
+#   to the JSON log this stack actually reads -- see mailoney/json_log_patch.py)
+#   needs its own writable mount. It's disposable: the JSON log under
+#   /var/log/honeypot is the sink ip-enrichment-worker/Filebeat read, so
+#   /data is tmpfs, not a bind mount -- nothing there needs to survive a
+#   restart.
+# - MAILONEY_MAIL_DIR enables real message-body capture (opt-in upstream,
+#   see mailoney/core.py's own docstring) under the same log volume, so
+#   captured bodies land alongside the JSON event log instead of a third
+#   location.
+
+name: honeypot-mailoney
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  mailoney:
+    <<: *runtime-defaults
+    build: ./mailoney
+    container_name: hp-mailoney
+    restart: unless-stopped
+    environment:
+      - TZ=Europe/Berlin
+      - MAILONEY_MAIL_DIR=/var/log/honeypot/mail
+    ports:
+      - ${HP_BIND:-10.8.0.2}:25:25
+    volumes:
+      - /opt/stacks/apiary/logs/mailoney:/var/log/honeypot
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
+    tmpfs:
+      - /data
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    networks: [mailoney_net]
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "25"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    labels:
+      - autoheal=true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+networks:
+  mailoney_net:
+    driver: bridge

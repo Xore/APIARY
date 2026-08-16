@@ -8,6 +8,17 @@
 # None of the three is reachable off this host. All publish on 127.0.0.1
 # only, because between them they hold captured malware and every string,
 # fuzzy hash and structural fact extracted from it.
+#
+# #1502: brought under Arcane directory-aware Git sync in place (not moved
+# under arcane/home/ like the split honeypot-* stacks) -- this directory is
+# already self-contained (relative build contexts, named volumes, no
+# absolute host bind mounts) and is referenced by path from
+# install-homeserver.sh, deploy.yml's host-level systemd re-sync step, and
+# several CI workflows; relocating it would have meant updating all of
+# those instead of just adding a sync. name: pinned to the live project
+# name so directory sync can never rename it.
+
+name: ghidra
 
 services:
   ghidra:

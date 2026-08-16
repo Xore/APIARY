@@ -28,7 +28,8 @@ done
 # already the point-in-time-correct backup; tar-ing the raw directory
 # underneath it too was never needed.
 tar -czf "$destination/stack-config-state.tar.gz" \
-  --exclude='./logs' --exclude='./analysis/geoip/*.mmdb' --exclude='./dashboard/geoip/*.csv' \
+  --exclude='./logs' --exclude='./analysis/geoip/*.mmdb' \
+  --exclude='./arcane/home/honeypot-dashboard/dashboard/geoip/*.csv' \
   --exclude='./state/elasticsearch-snapshots' \
   "$@"
 

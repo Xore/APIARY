@@ -288,7 +288,9 @@ func TestDashboardTraefikRouteUsesNativeOIDCService(t *testing.T) {
 
 func dashboardTraefikRouterBlock(t *testing.T) string {
 	t.Helper()
-	raw, err := os.ReadFile("../vps/traefik/dynamic.yml")
+	// #1502: dashboard/ moved from repo root to arcane/home/honeypot-dashboard/dashboard/,
+	// two levels deeper -- ../../../.. now reaches repo root instead of ...
+	raw, err := os.ReadFile("../../../../vps/traefik/dynamic.yml")
 	if err != nil {
 		t.Fatal(err)
 	}

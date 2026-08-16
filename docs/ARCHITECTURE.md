@@ -41,19 +41,29 @@ malware detonation sandboxes.
 
 **The home side is not one deployment unit.** [#258](https://github.com/Xore/APIARY/issues/258)
 split what used to be a single `docker-compose.yml` into independently
-deployed Arcane-managed stacks — each with its own compose file
-(`docker-compose.<name>.yml`) and its own start/stop/update lifecycle. That
-first split produced 12 stacks; new sensors and workers have each landed as
-their own stack since, and the home side now runs **21** — see
-`.github/workflows/deploy.yml`'s deploy jobs for the authoritative list. The
-root `docker-compose.yml` is a deliberate empty marker; nothing runs
-`docker compose up` against it any more, and it is not counted among the 21.
-`docker-compose.sandbox.yml` is a per-detonation gateway/capture Compose file
-the Windows sandbox brings up and tears down around a single run — also not
-a standing stack. Host-owned systemd/libvirt services (Ghidra's worker, the
-Linux/Windows KVM sandboxes) and optional GPU/analysis stacks (ML worker,
-LLM worker, CAPE, GHOSTS) run outside Arcane entirely and outside this count
-as well. The diagrams below draw the 21 stack boundaries explicitly rather
+deployed Arcane-managed stacks, and [#1502](https://github.com/Xore/APIARY/issues/1502)
+moved every one of them onto Arcane's own directory-aware Git sync — each
+stack has its own self-contained directory (`arcane/home/<name>/compose.yml`
+for the 32 that needed relocating, or their existing repository-root path
+for 6 more that were already self-contained) and its own start/stop/update
+lifecycle. That first #258 split produced 12 stacks; new sensors and
+workers have each landed as their own stack since, and the home side now
+runs **32** Arcane-managed stacks via that Git sync, plus 6 more — see
+[`arcane/manifests/home-production.json`](../arcane/manifests/home-production.json)
+for the authoritative list (not `.github/workflows/deploy.yml`, which no
+longer deploys any of them — see `docs/ARCANE-GIT-SYNC.md`). The root
+`docker-compose.yml` is a deliberate empty marker; nothing runs
+`docker compose up` against it any more, and it is not counted among the
+32. `docker-compose.sandbox.yml` is a per-detonation gateway/capture
+Compose file the Windows sandbox brings up and tears down around a single
+run — also not a standing stack. Host-owned systemd/libvirt services
+(Ghidra's own worker process, the Linux/Windows KVM sandboxes) and CAPE run
+outside Arcane entirely and outside this count — but as of #1502, the
+Ghidra/ML worker/LLM worker/GHOSTS **Compose stacks themselves** (not
+those host-level services) are Arcane-managed too, at their own existing
+repository paths (`analysis/ghidra/`, `ml-worker/`, `llm-worker/`,
+`sandbox/ghosts/`), same as `auth-events-worker/` and `pihole/`.
+The diagrams below draw the 32 stack boundaries explicitly rather
 than one "home server" box, because that boundary is where independent
 deployment, restart, and failure actually happen.
 

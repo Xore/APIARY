@@ -12,11 +12,16 @@ ROOT = Path(__file__).resolve().parents[1]
 ALLOWED_DOTENV = {
     Path(".env.example"),
     Path("vps/.env.example"),
-    Path("cowrie/honeyfs/opt/nexusai-inference/.env"),
+    # #1502: moved under arcane/home/honeypot-cowrie/ along with the rest
+    # of cowrie/'s build context -- still a decoy honeyfs file for
+    # attackers to find, not a real credential.
+    Path("arcane/home/honeypot-cowrie/cowrie/honeyfs/opt/nexusai-inference/.env"),
 }
 SKIP_PREFIXES = (
-    "dashboard/vendor/",
-    "dashboard/frontend/node_modules/",
+    # #1502: moved under arcane/home/honeypot-dashboard/ along with the
+    # rest of dashboard/'s build context.
+    "arcane/home/honeypot-dashboard/dashboard/vendor/",
+    "arcane/home/honeypot-dashboard/dashboard/frontend/node_modules/",
     ".git/",
 )
 FORBIDDEN_LITERALS = {
@@ -30,7 +35,20 @@ PATTERNS = (
     (re.compile(r"\bgh[opsu]_[A-Za-z0-9]{30,}\b"), "GitHub token"),
     (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "AWS access key"),
     (re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"), "Slack token"),
-    (re.compile(r"(?m)^[ \t]*[A-Z][A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|API_KEY)[ \t]*=[ \t]*(?!(?:CHANGE_ME|DECOY_ONLY|\$\{|$))[^#\s]{8,}"), "literal credential assignment"),
+    # #1502: two exemptions added generating the new per-stack .env.example
+    # files. "<ARCANE_API_TOKEN>" tripped this before (?:"?<) existed --
+    # install-homeserver.conf.example's own established convention for
+    # every unfilled answer-file placeholder (VPS_SSH_KEY, BACKUP_HOST_KEY,
+    # ...) is a bare or quoted <PLACEHOLDER>, same template-not-a-secret
+    # shape CHANGE_ME/DECOY_ONLY already covered; just never had a
+    # PASSWORD/SECRET/TOKEN/API_KEY-named var use it before. Separately,
+    # ARKIME_PASSWORD_SECRET's own compose-file default of
+    # "change-me-in-env" (docker-compose.elk.yml/init.yml, predates
+    # #1502) never matched this pattern while embedded inline in a YAML
+    # list item -- generating a real per-stack .env.example put it at the
+    # start of a line for the first time. (?i:change.me) covers both that
+    # and CHANGE_ME's own different casing/separator in one exemption.
+    (re.compile(r"(?m)^[ \t]*[A-Z][A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|API_KEY)[ \t]*=[ \t]*(?!(?:(?i:change.me)|DECOY_ONLY|\$\{|\"?<|$))[^#\s]{8,}"), "literal credential assignment"),
     (re.compile(r"(?i)https?://[^/\s:@]+:[^/\s@]+@"), "credential embedded in URL"),
 )
 BINARY_SUFFIXES = {

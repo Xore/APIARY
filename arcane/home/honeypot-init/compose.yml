@@ -1,0 +1,457 @@
+# honeypot-init — one-shot bootstrap jobs for APIARY, run as a
+# separate Dockge stack so the main stack's compose file only holds services
+# that run continuously. Moved out of docker-compose.yml while fixing #111.
+#
+# Deploy this stack once (or re-run it whenever a bootstrap step needs to run
+# again -- every job here is idempotent) before or alongside APIARY.
+# `docker compose up` runs every job below to completion and exits, with one
+# exception: geoipupdate (#123) is long-running by design (it loops on its
+# own update schedule) and was moved here only because it's optional and
+# GeoIP-adjacent, not because it's a bootstrap step anything depends on.
+#
+# Cross-stack wiring, and why:
+#
+#   Completion markers. log-init, elasticsearch-setup, and arkime-init write
+#   a "<job>.done" file to state/init-markers/ on success, and remove it
+#   first, so a reader never sees a stale marker from a previous run while
+#   this run is still in progress. APIARY's init-wait-* services
+#   poll for these files instead of depends_on: condition:
+#   service_completed_successfully, because that condition cannot cross a
+#   Compose project boundary -- it only resolves against a service defined
+#   in the same file. persona-apply and honeypot-kibana-setup need no
+#   marker: log-init depends on persona-apply within this same file, and
+#   nothing outside this stack depends on honeypot-kibana-setup at all.
+#
+#   state/init-markers/ must be mode 777 on the host before this stack's
+#   first run. The jobs that write into it run as different container
+#   UIDs -- root for the busybox/arkime images, the image's own non-root
+#   user for elasticsearch-setup -- and a root-owned 755 directory 403's
+#   that second one. .github/workflows/deploy.yml creates it that way;
+#   a manual bootstrap needs the same `install -d -m 777`.
+#
+#   honeynet. elasticsearch-setup, honeypot-kibana-setup, and arkime-init
+#   reach elasticsearch/kibana in the main stack over this network, which
+#   APIARY creates with a fixed name (not project-prefixed)
+#   specifically so a second stack can attach to it.
+#
+#   dionaea-lib / yara-results. Named the same way, for the same reason:
+#   persona-apply/log-init and the main stack's
+#   dionaea/yara-scanner/payload-dedupe/dashboard must land on the identical
+#   physical volume, not two project-scoped copies that happen to share a
+#   name.
+#
+#   /opt/stacks/apiary absolute paths. This stack has no checkout of
+#   its own -- it reads the scripts, config, and persona manifest it needs
+#   straight out of the APIARY checkout by absolute path, since a
+#   Dockge stack directory otherwise holds only its own compose.yml and .env.
+#
+#   ARKIME_PASSWORD_SECRET in this stack's .env MUST match the same value in
+#   APIARY's .env exactly -- arkime-init sets the secret that
+#   arkime-capture/arkime-viewer (main stack) use for session auth. Dockge
+#   gives each stack its own .env, so this is a manual sync, not automatic.
+#   ARKIME_ADMIN_PASSWORD (#1021) is the Arkime admin account's real,
+#   recorded login password -- set it to something real, not the
+#   change-me-arkime default.
+
+name: honeypot-init
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  # Validate the canonical manifest and seed mutable runtime personas before
+  # any sensor starts. Compiled/baked personas are checked by the validator;
+  # Dionaea's FTP/TFTP/UPnP/printer files are copied into its persistent volume.
+  persona-apply:
+    <<: *runtime-defaults
+    image: python:3.12-alpine
+    container_name: hp-persona-apply
+    restart: no
+    working_dir: /stack
+    command: ["python3", "/stack/personas/apply_personas.py"]
+    volumes:
+      - /opt/stacks/apiary:/stack:ro
+      - dionaea-lib:/dionaea
+      - /opt/stacks/apiary/state/personas:/state
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+
+  # ===================== Log dir ownership bootstrap =====================
+  log-init:
+    <<: *runtime-defaults
+    image: busybox:latest
+    container_name: hp-log-init
+    restart: no
+    depends_on:
+      persona-apply:
+        condition: service_completed_successfully
+    command:
+      - sh
+      - -c
+      - |
+        set -x
+        # #787: found live during the actual homeserver reinstall
+        # (2026-08-09) -- this command used to be a YAML folded (`>`)
+        # scalar with shell backslash-newline continuations for the long
+        # mkdir/chown lines. YAML folding and shell line-continuation
+        # don't compose the way they look on the page: some of the
+        # "continued" lines ended up as extra-indented literal blocks
+        # instead of being joined, which silently dropped the
+        # `chown -R 2000:2000 /logs/cowrie` line entirely and mangled the
+        # conpot chown into `sh: line 10: /logs/conpot-s7-1500: Permission
+        # denied` (the shell tried to *execute* that path as a command).
+        # Confirmed live: cowrie's SSH factory then crashed with
+        # `PermissionError` writing its host key (lib-cowrie stayed
+        # root-owned), and every conpot variant past the break point got
+        # the same treatment. Rewritten as a literal (`|`) block with one
+        # full command per physical line -- no folding ambiguity, no
+        # backslash continuations, every line does exactly what it shows.
+        rm -f /markers/log-init.done
+        mkdir -p /logs/cowrie/downloads /logs/cowrie/tty /logs/cowrie/lib-cowrie /logs/conpot /logs/conpot-s7-1200 /logs/conpot-s7-1500 /logs/conpot-iec104 /logs/conpot-guardian /logs/conpot-kamstrup /logs/api-honeypot /logs/dionaea /logs/multipot /logs/http-honeypot /logs/tanner /logs/snare /logs/dnp3 /logs/dicompot /logs/dns-honeypot /logs/citrix-honeypot /logs/cisco-asa-honeypot /logs/rdp-honeypot /logs/tftp-relay /logs/endlessh /logs/beelzebub /logs/hellpot /logs/elasticpot /logs/galah /logs/sentrypeer /logs/wordpot /logs/mailoney/mail /logs/canarytokens/frontend /logs/canarytokens/switchboard /logs/suricata/pcap /logs/portbridge /logs/arkime-raw
+        # -R on /logs/cowrie specifically: mkdir -p above just created
+        # downloads/, tty/, and lib-cowrie/ as this container's own root
+        # user, and a bare (non-recursive) chown of the parent only touches
+        # /logs/cowrie itself, leaving those subdirectories root-owned --
+        # which is exactly what silently broke downloads/tty on every fresh
+        # install until now (cowrie runs as uid 2000 and got
+        # PermissionError writing to either, found live testing #612/#638's
+        # TTY persistence), and would have done the same to lib-cowrie
+        # (#239's read_only pass -- SSH host keys, uuid, auth_random.json)
+        # had it been added non-recursively.
+        # #1374: every path is recursive now even when it is otherwise flat.
+        # A deploy-runner ownership drift affected the already-existing log
+        # files, not only their parent directories; repairing just the parent
+        # left every restarted sensor unable to reopen its own file.
+        chown -R 2000:2000 /logs/cowrie
+        chown -R 2000:2000 /logs/conpot /logs/conpot-s7-1200 /logs/conpot-s7-1500 /logs/conpot-iec104 /logs/conpot-guardian /logs/conpot-kamstrup
+        chown -R 1000:1000 /logs/dionaea
+        chown -R 65534:65534 /logs/multipot /logs/http-honeypot /logs/api-honeypot /logs/tanner /logs/snare /logs/dnp3 /logs/dicompot /logs/dns-honeypot /logs/citrix-honeypot /logs/cisco-asa-honeypot /logs/rdp-honeypot /logs/tftp-relay /logs/endlessh /logs/beelzebub /logs/hellpot /logs/elasticpot /logs/galah /logs/wordpot /logs/mailoney /logs/canarytokens
+        # sentrypeer/Dockerfile's own non-root user is uid 2000 (matching
+        # upstream's own Dockerfile choice), same numeric uid cowrie/conpot
+        # happen to use for unrelated reasons -- not a real collision, just
+        # a directory-specific chown like every line above.
+        chown -R 2000:2000 /logs/sentrypeer
+        # SNARE checks both paths before/while dropping from root-without-
+        # CAP_DAC_OVERRIDE to nobody. Both identities therefore need an
+        # actual write permission; ownership alone cannot satisfy both.
+        chown -R 65534:65534 /snare-pages
+        chmod o+w /logs/snare /snare-pages
+        # Arkime capture/viewer run as nobody (uid 65534) inside the official image
+        chown 65534:65534 /logs/suricata/pcap || true
+        # pcap-sync's raw output is consumed by Arkime's systemd-network
+        # runtime identity (uid/gid 998 in the deployed image).
+        chown -R 998:998 /logs/arkime-raw
+        chmod 755 /logs
+        mkdir -p /snapshots
+        chown 1000:1000 /snapshots
+        mkdir -p /yara-results
+        chown 0:0 /yara-results && chmod 700 /yara-results
+        mkdir -p /markers && touch /markers/log-init.done
+    volumes:
+      - /opt/stacks/apiary/logs:/logs
+      - snare-pages:/snare-pages
+      - /opt/stacks/apiary/state/elasticsearch-snapshots:/snapshots
+      - yara-results:/yara-results
+      - /opt/stacks/apiary/state/init-markers:/markers
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+
+  elasticsearch-setup:
+    <<: *runtime-defaults
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.1@sha256:b70b3017fbd35310bc57e7e3f8c0ca42ca0b94df3331f747b7cdcfddae430a5a
+    container_name: hp-elasticsearch-setup
+    restart: no
+    entrypoint:
+      - sh
+      - -c
+      - >
+        rm -f /markers/elasticsearch-setup.done &&
+        sh /usr/local/bin/elasticsearch-setup.sh &&
+        mkdir -p /markers && touch /markers/elasticsearch-setup.done
+    environment:
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      # #261: single knob every ILM min_age below scales from.
+      - HONEYPOT_RETENTION_DAYS=${HONEYPOT_RETENTION_DAYS:-30}
+      # #827: see elasticsearch-setup.sh's own comment above the
+      # geoip-honeypot pipeline definition -- bare IPs, exact match, not
+      # CIDR. Empty/unset is a safe no-op, not a startup failure.
+      - ES_HOME_NET=${ES_HOME_NET:-}
+    volumes:
+      - ./analysis/elasticsearch-setup.sh:/usr/local/bin/elasticsearch-setup.sh:ro
+      - /opt/stacks/apiary/state/init-markers:/markers
+    networks:
+      - honeynet
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  honeypot-kibana-setup:
+    <<: *runtime-defaults
+    image: curlimages/curl:8.21.0@sha256:7c12af72ceb38b7432ab85e1a265cff6ae58e06f95539d539b654f2cfa64bb13
+    container_name: hp-honeypot-kibana-setup
+    restart: no
+    entrypoint: ["sh", "/usr/local/bin/honeypot-kibana-setup.sh"]
+    environment:
+      - KIBANA_URL=http://kibana:5601
+    volumes:
+      - ./analysis/honeypot-kibana-setup.sh:/usr/local/bin/honeypot-kibana-setup.sh:ro
+    networks: [honeynet]
+    depends_on:
+      elasticsearch-setup:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+
+  arkime-init:
+    <<: *runtime-defaults
+    image: ghcr.io/arkime/arkime/arkime:v6-latest
+    container_name: hp-arkime-init
+    restart: no
+    command:
+      - /bin/sh
+      - -c
+      - >
+        set -e
+
+        rm -f /markers/arkime-init.done
+
+        # Wait for Elasticsearch to be ready
+
+        until curl -sf http://elasticsearch:9200/_cluster/health > /dev/null; do
+          echo "Waiting for Elasticsearch..."; sleep 5
+        done
+
+        # Bootstrap or upgrade the Arkime DB non-interactively. db.pl prompts
+
+        # ("INIT" to erase on init over an existing DB, "RED" when cluster
+
+        # health is red) and aborts without a TTY - pipe the expected answer.
+
+        # INIT is only auto-typed when no Arkime DB exists yet (DB Version -1),
+
+        # so it can never wipe existing session data.
+
+        if /opt/arkime/db/db.pl --insecure http://elasticsearch:9200 info 2>/dev/null \
+             | grep 'DB Version' | grep -vq -- '-1'; then
+          echo RED | /opt/arkime/db/db.pl --insecure http://elasticsearch:9200 upgradenoprompt
+        else
+          echo INIT | /opt/arkime/db/db.pl --insecure http://elasticsearch:9200 init
+        fi
+
+        # Create the admin user once, with a real local password (#122, #134,
+
+        # #275, #1021). --createOnly makes creation idempotent: once the doc
+
+        # exists, every later run hits a version conflict, addUser.js logs
+
+        # "User already exists" and leaves the doc untouched rather than
+
+        # clobbering admin-managed fields (roles/settings) on every deploy.
+
+        #
+
+        # #1021: previously --webauthonly set headerAuthEnabled=true and
+
+        # replaced passStore with a random, never-recorded value, trusting
+
+        # auth-backend's injected X-Auth-User header as the only login path.
+
+        # That header is no longer trustworthy post-Keycloak-cutover (nothing
+
+        # strips a client-supplied copy of it any more -- see arkime/
+
+        # config.ini's own comment), so the admin account now gets a real,
+
+        # recorded password via ARKIME_ADMIN_PASSWORD instead.
+
+        /opt/arkime/bin/arkime_add_user.sh admin "Admin" \
+          "${ARKIME_ADMIN_PASSWORD:-change-me-arkime}" --admin --createOnly \
+          || echo "admin user already exists (createOnly), nothing changed"
+
+        # #1021: --createOnly above is a no-op against a doc that already
+
+        # exists from before this fix -- every prior deploy created the
+
+        # admin account with --webauthonly (headerAuthEnabled=true, a random
+
+        # passStore nobody ever recorded). A doc in that exact state has no
+
+        # working login at all once header trust is removed, so it needs a
+
+        # one-time full repair, not just a field patch: re-run the same
+
+        # arkime_add_user.sh call WITHOUT --createOnly (its normal, intended
+
+        # "reset this account to a known state" mode, same tool #134 already
+
+        # established is safe for that) whenever the existing doc still has
+
+        # headerAuthEnabled=true. Once repaired, headerAuthEnabled is false
+
+        # and this whole block is a no-op on every later deploy -- it only
+
+        # ever fires once per installation, not on every run.
+
+        if curl -sf "http://elasticsearch:9200/arkime_users/_doc/admin" 2>/dev/null \
+             | grep -q '"headerAuthEnabled":true'; then
+          echo "admin user still has #1021's pre-fix headerAuthEnabled=true -- repairing with a real password"
+          /opt/arkime/bin/arkime_add_user.sh admin "Admin" \
+            "${ARKIME_ADMIN_PASSWORD:-change-me-arkime}" --admin \
+            || echo "warning: could not repair the pre-#1021 admin user"
+        fi
+
+        mkdir -p /markers && touch /markers/arkime-init.done
+    volumes:
+      - ./arkime/config.ini:/opt/arkime/etc/config.ini:ro
+      - /opt/stacks/apiary/state/init-markers:/markers
+    environment:
+      - TZ=Europe/Berlin
+      # #1021: the Arkime admin account's real login password -- set this
+      # to something real in .env, not the change-me-arkime default.
+      - ARKIME_ADMIN_PASSWORD=${ARKIME_ADMIN_PASSWORD:-change-me-arkime}
+      - ARKIME__elasticsearch=http://elasticsearch:9200
+      - ARKIME__passwordSecret=${ARKIME_PASSWORD_SECRET:-change-me-in-env}
+    networks:
+      - honeynet
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+
+  # #124: moved from APIARY -- hp-snare depended on this completing
+  # via condition: service_completed_successfully, which cannot cross a
+  # Compose project boundary (same reason log-init/elasticsearch-setup/
+  # arkime-init write markers instead of being depended on directly). Writes
+  # snare-clone.done here; hp-snare's entrypoint waits for it the same way
+  # every other init-wait-* replacement does.
+  snare-clone:
+    <<: *runtime-defaults
+    build:
+      context: ./snare
+      args:
+        PAGE_URL: portal.meridian.example
+        TANNER: tanner
+    container_name: hp-snare-clone
+    restart: no
+    command:
+      - sh
+      - -c
+      - |
+        rm -f /markers/snare-clone.done
+        cp -a /opt/persona-pages/. /opt/snare/pages/
+        mkdir -p /markers && touch /markers/snare-clone.done
+    volumes:
+      - snare-pages:/opt/snare/pages
+      - /opt/stacks/apiary/state/init-markers:/markers
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+  # #123: not actually a bootstrap job -- unlike everything else in this
+  # file, geoipupdate is long-running (restart: unless-stopped, loops
+  # internally on GEOIPUPDATE_FREQUENCY) and nothing depends on it
+  # completing. Moved here anyway because it's optional (profiles:
+  # [geoip-update], off unless MAXMIND_ACCOUNT_ID/LICENSE_KEY are set) and
+  # its only reason to exist in APIARY was proximity to the other
+  # GeoIP-adjacent setup, which already lives here. See docker-compose.yml
+  # for why one-shot jobs live in this stack at all -- this one just
+  # doesn't need the depends_on/marker machinery that motivates the rest.
+  geoipupdate:
+    image: ghcr.io/maxmind/geoipupdate:v8.0.0@sha256:51e70dd6f16cd3e4d845ac02d09940b10772a75b9d741427d235a78570923c1d
+    container_name: hp-geoipupdate
+    profiles: [geoip-update]
+    restart: unless-stopped
+    environment:
+      - GEOIPUPDATE_ACCOUNT_ID=${MAXMIND_ACCOUNT_ID:-}
+      - GEOIPUPDATE_LICENSE_KEY=${MAXMIND_LICENSE_KEY:-}
+      - GEOIPUPDATE_EDITION_IDS=GeoLite2-City GeoLite2-ASN
+      - GEOIPUPDATE_FREQUENCY=24
+    volumes:
+      - /opt/stacks/apiary/analysis/geoip:/usr/share/GeoIP
+    deploy:
+      resources: { limits: { cpus: "0.25", memory: 128M } }
+
+  # #244: same shape as geoipupdate above -- long-running (restart:
+  # unless-stopped, loops internally rather than completing), optional, and
+  # GeoIP-adjacent rather than a bootstrap step anything depends on. Keeps
+  # dashboard/geoip/threat-cidrs.csv current from free, zero-auth
+  # threat-intel sources (Spamhaus DROP, the Tor bulk exit list, AWS/GCP
+  # published ranges) -- see refresh-threat-cidrs.sh for the fetch/merge
+  # logic and docs/dashboard/geoip/README.md for the file's shape.
+  #
+  # profiles: [threat-intel], off by default like geoip-update above: unlike
+  # geoipupdate this needs no credentials, but it does add new outbound
+  # calls (to spamhaus.org, torproject.org, amazonaws.com, gstatic.com) that
+  # an existing deployment did not previously make, which deserves the same
+  # explicit opt-in.
+  #
+  # geoip.go's threatIntelReloadLoop re-reads threat-cidrs.csv within
+  # threatIntelReloadInterval of a refresh landing on disk -- no dashboard
+  # restart needed for a new refresh to take effect.
+  threat-cidrs-refresh:
+    image: alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+    container_name: hp-threat-cidrs-refresh
+    profiles: [threat-intel]
+    restart: unless-stopped
+    environment:
+      - TZ=Europe/Berlin
+      # Daily: comfortably inside Spamhaus's own stated polling-cadence rule
+      # (no more than once per hour) -- see refresh-threat-cidrs.sh's header.
+      - THREAT_INTEL_REFRESH_INTERVAL=86400
+      - THREAT_INTEL_START_DELAY=300
+    volumes:
+      - ./dashboard/geoip:/geoip
+    command: >
+      sh -c "
+        apk add --no-cache bash curl jq >/dev/null &&
+        sleep \"$$THREAT_INTEL_START_DELAY\" &&
+        while true; do
+          bash /geoip/refresh-threat-cidrs.sh ||
+            echo 'threat-cidrs-refresh: run failed, will retry next interval' >&2;
+          sleep \"$$THREAT_INTEL_REFRESH_INTERVAL\";
+        done
+      "
+    deploy:
+      resources: { limits: { cpus: "0.25", memory: 128M } }
+
+networks:
+  honeynet:
+    name: honeynet
+    external: true
+
+volumes:
+  # Created by APIARY (name: overrides there too); referenced here
+  # the same way honeynet is, since APIARY is the primary owner --
+  # dionaea, yara-scanner, payload-dedupe, and the dashboard all read these
+  # too, and only APIARY ever runs continuously.
+  dionaea-lib:
+    name: dionaea-lib
+    external: true
+  yara-results:
+    name: yara-results
+    external: true
+  # #124: opposite direction from the two above -- snare-clone (this stack)
+  # writes it, hp-snare (APIARY) reads it. Owned here (no
+  # external: true) because honeypot-init deploys first: docker-compose.yml
+  # references this one as external, which would fail on a first-ever
+  # deploy if APIARY tried to own it instead.
+  snare-pages:
+    name: snare-pages

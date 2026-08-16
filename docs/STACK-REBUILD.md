@@ -138,7 +138,8 @@ On a cold start there is nothing already running, so bringing up
 waiting on a service that doesn't exist yet.
 
 `honeypot-init` also expects `dionaea-lib`, `yara-results`, and `honeynet` to
-already exist (`external: true` in `docker-compose.init.yml`) — if you wiped
+already exist (`external: true` in `arcane/home/honeypot-init/compose.yml`,
+formerly `docker-compose.init.yml` before #1502) — if you wiped
 those volumes in step 2, create empty placeholders first:
 
 ```bash

@@ -67,8 +67,8 @@ curl -fsS -X PUT "$es_url/_cluster/settings" -H 'Content-Type: application/json'
 # then substitute in fast rollover/delete ages for this test only -- stays
 # in sync with the real policy's *shape* (still has a rollover action in
 # the hot phase) automatically, without waiting real days for it to fire.
-policy_line=$(grep -n '_ilm/policy/honeypot-30d"' "$src_root/analysis/elasticsearch-setup.sh" | head -1 | cut -d: -f1)
-policy_body=$(sed -n "$((policy_line + 2))p" "$src_root/analysis/elasticsearch-setup.sh" |
+policy_line=$(grep -n '_ilm/policy/honeypot-30d"' "$src_root/arcane/home/honeypot-init/analysis/elasticsearch-setup.sh" | head -1 | cut -d: -f1)
+policy_body=$(sed -n "$((policy_line + 2))p" "$src_root/arcane/home/honeypot-init/analysis/elasticsearch-setup.sh" |
   sed -e "s/--data-binary '//" -e "s/' >\/dev\/null$//")
 
 echo "$policy_body" | grep -q '"rollover"' ||

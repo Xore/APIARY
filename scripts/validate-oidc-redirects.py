@@ -8,10 +8,12 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-REALM = ROOT / "keycloak/realm/apiary-realm.json"
+# #1502: keycloak/ and keycloak.env.example both moved under
+# arcane/home/honeypot-keycloak/.
+REALM = ROOT / "arcane/home/honeypot-keycloak/keycloak/realm/apiary-realm.json"
 COMPOSE = ROOT / "vps/docker-compose.yml"
 VPS_ENV_EXAMPLE = ROOT / "vps/.env.example"
-KEYCLOAK_ENV_EXAMPLE = ROOT / "keycloak.env.example"
+KEYCLOAK_ENV_EXAMPLE = ROOT / "arcane/home/honeypot-keycloak/.env.example"
 PLACEHOLDER = "${OIDC_PUBLIC_DOMAIN:?set OIDC_PUBLIC_DOMAIN}"
 REALM_TEMPLATE_DOMAIN = "example.invalid"
 

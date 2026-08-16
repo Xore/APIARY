@@ -84,15 +84,15 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-          cache-dependency-path: dashboard/frontend/package-lock.json
+          cache-dependency-path: arcane/home/honeypot-dashboard/dashboard/frontend/package-lock.json
       - run: npm ci
-        working-directory: dashboard/frontend
+        working-directory: arcane/home/honeypot-dashboard/dashboard/frontend
       - run: npm run typecheck
-        working-directory: dashboard/frontend
+        working-directory: arcane/home/honeypot-dashboard/dashboard/frontend
       - run: npm run build
-        working-directory: dashboard/frontend
+        working-directory: arcane/home/honeypot-dashboard/dashboard/frontend
       - name: Generated assets are current
-        run: git diff --exit-code -- dashboard/static/hp-api.js
+        run: git diff --exit-code -- arcane/home/honeypot-dashboard/dashboard/static/hp-api.js
 
   dashboard-browser:
     name: Dashboard browser matrix
@@ -102,22 +102,22 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: "1.25.x"
-          cache-dependency-path: dashboard/go.sum
+          cache-dependency-path: arcane/home/honeypot-dashboard/dashboard/go.sum
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
-          cache-dependency-path: dashboard/frontend/package-lock.json
+          cache-dependency-path: arcane/home/honeypot-dashboard/dashboard/frontend/package-lock.json
       - run: npm ci
-        working-directory: dashboard/frontend
+        working-directory: arcane/home/honeypot-dashboard/dashboard/frontend
       - run: npx playwright install --with-deps chromium
-        working-directory: dashboard/frontend
+        working-directory: arcane/home/honeypot-dashboard/dashboard/frontend
       # #1034: start-dashboard.mjs spawns a real redis-server for the OIDC
       # session store fixture rather than reimplementing RESP -- ubuntu-latest
       # ships it already in most images, but don't depend on that silently.
       - run: command -v redis-server || sudo apt-get install -y redis-server
       - run: npm run test:browser
-        working-directory: dashboard/frontend
+        working-directory: arcane/home/honeypot-dashboard/dashboard/frontend
 
   vendored-theme:
     name: Vendored Xore/theme is in sync
@@ -163,7 +163,7 @@ jobs:
           # from the patch's own OLD_CLASS/OLD_IMPORT text, and the actual
           # patched FileHandler class body (exec'd, not reimplemented) for
           # rotation/data-loss behavior.
-          python dionaea/tests/test_log_rotation_patch.py
+          python arcane/home/honeypot-dionaea/dionaea/tests/test_log_rotation_patch.py
       - name: Ghidra worker, spool discipline and AI triage
         shell: bash
         run: |
@@ -212,14 +212,14 @@ jobs:
       - name: es-results-importer chunked-upload and dedup contracts
         shell: bash
         run: |
-          python -m pip install -r analysis/es-results-importer/requirements.txt
-          python -m unittest discover -s analysis/es-results-importer/tests -v
+          python -m pip install -r arcane/home/honeypot-dashboard/analysis/es-results-importer/requirements.txt
+          python -m unittest discover -s arcane/home/honeypot-dashboard/analysis/es-results-importer/tests -v
       - name: Persona application is idempotent
         shell: bash
         run: python -m unittest discover -s personas/tests -v
       - name: services-adapter allowlist enforcement
         shell: bash
-        run: python -m unittest discover -s services-adapter/tests -v
+        run: python -m unittest discover -s arcane/home/honeypot-dashboard/services-adapter/tests -v
       - name: Sandbox guest string-cleaning filter (#530)
         shell: bash
         run: python3 sandbox/test_guest_clean_strings.py -v
@@ -249,7 +249,7 @@ jobs:
           fi
       - name: Validate Keycloak realm policy
         shell: bash
-        run: ./keycloak/realm/validate.sh
+        run: ./arcane/home/honeypot-keycloak/keycloak/realm/validate.sh
       # #982 phase 1 / #1040: validate.sh only checks structure/policy --
       # this actually imports the realm into a real, disposable Keycloak +
       # PostgreSQL the way the real fresh-install bootstrap path does, to
@@ -299,7 +299,7 @@ jobs:
           done
       - name: Threat-intel CIDR refresh script (#244)
         shell: bash
-        run: dashboard/geoip/tests/test_refresh_threat_cidrs.sh
+        run: arcane/home/honeypot-dashboard/dashboard/geoip/tests/test_refresh_threat_cidrs.sh
       - name: honeypot-30d ILM policy rolls over and deletes (#585)
         shell: bash
         run: analysis/tests/test_honeypot_ilm_rollover.sh
@@ -338,8 +338,8 @@ jobs:
           # corpus) and its test suite (which additionally proves the
           # validator catches deliberately-broken input, not just that
           # today's corpus happens to pass).
-          python3 analysis/agent-intrusion-corpus/validate_corpus.py
-          python3 analysis/agent-intrusion-corpus/tests/test_corpus.py -v
+          python3 arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/validate_corpus.py
+          python3 arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/tests/test_corpus.py -v
       - name: Agent-intrusion decode/correlate pipeline (#154 phase 2)
         shell: bash
         run: |
@@ -348,7 +348,7 @@ jobs:
           # corpus above -- not just hand-built fixtures -- per that
           # corpus's own README ("expected_findings is ground truth for
           # phase 2's decoder").
-          python3 analysis/agent-intrusion-corpus/tests/test_decode_correlate.py -v
+          python3 arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/tests/test_decode_correlate.py -v
       - name: Agent-intrusion campaign correlator (#154 phase 2)
         shell: bash
         run: |
@@ -357,7 +357,7 @@ jobs:
           # union-find over session/IP/channel identifiers, proven against
           # the real corpus's own multi-hop case (a C2 channel ID bridging
           # two otherwise-unconnected actor identities into one campaign).
-          python3 analysis/agent-intrusion-corpus/tests/test_campaign_correlator.py -v
+          python3 arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/tests/test_campaign_correlator.py -v
       - name: Agent-intrusion criticality rules (#154 phase 3)
         shell: bash
         run: |
@@ -367,7 +367,7 @@ jobs:
           # corpus events matching its own independently-established
           # ground truth, plus the campaign-level severity scoring proven
           # against the real merged 8-event campaign reaching "critical".
-          python3 analysis/agent-intrusion-corpus/tests/test_criticality_rules.py -v
+          python3 arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/tests/test_criticality_rules.py -v
       - name: Agent-intrusion campaign worker (#154 phase 5)
         shell: bash
         run: |
@@ -377,8 +377,8 @@ jobs:
           # real corpus through the worker's own correlate-then-score call
           # sequence, proving the pipeline wiring itself is correct, not
           # just each module independently.
-          python3 -m pip install -r analysis/agent-intrusion-corpus/requirements.txt
-          python3 analysis/agent-intrusion-corpus/tests/test_worker.py -v
+          python3 -m pip install -r arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/requirements.txt
+          python3 arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/tests/test_worker.py -v
       - name: Sandbox VNC bridge read-only enforcement (#805)
         shell: bash
         run: python3 sandbox/windows/vnc-bridge/tests/test_server.py
@@ -393,14 +393,14 @@ jobs:
           # apt yara: "does it compile" is only a useful answer from the
           # compiler that will actually load it, and the two versions differ.
           # The image is read from the Dockerfile so a base bump moves CI too.
-          image="$(awk '/^FROM /{print $2; exit}' analysis/yara/Dockerfile)"
+          image="$(awk '/^FROM /{print $2; exit}' arcane/home/honeypot-payload-analysis/analysis/yara/Dockerfile)"
           echo "validating against $image"
           docker run --rm -v "$PWD:/w" -w /w "$image" sh -c '
             apk add --no-cache bash git yara >/dev/null
             yara --version
             scripts/check-yara-corpus.sh
-            yara -w analysis/yara/rules/index.yar /dev/null
-            analysis/yara/tests/test_sync_yara.sh
+            yara -w arcane/home/honeypot-payload-analysis/analysis/yara/rules/index.yar /dev/null
+            arcane/home/honeypot-payload-analysis/analysis/yara/tests/test_sync_yara.sh
           '
       - name: Rev-eng benchmark corpus is reproducible and safe (#159)
         shell: bash
@@ -425,7 +425,7 @@ jobs:
           # APIARY's honeynet network and two of its named volumes by
           # external reference; config validation does not require those to
           # actually exist, so no APIARY setup is needed here either.
-          docker compose -f docker-compose.init.yml config --quiet
+          docker compose -f arcane/home/honeypot-init/compose.yml config --quiet
           docker compose -f vps/docker-compose.yml config --quiet
           # The sandbox gateway is never started here — it answers live malware
           # on an isolated bridge that does not exist on a CI runner. Validating

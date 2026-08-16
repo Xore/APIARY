@@ -1,7 +1,17 @@
-# Source of truth for the homeserver's LAN DNS stack. The installer copies
-# this file into Dockge and replaces __LAN_IP__ with the explicitly configured
-# LAN address; binding to every interface would collide with dns-honeypot on
-# the WireGuard address (see scripts/install-homeserver.sh and #518).
+# Source of truth for the homeserver's LAN DNS stack. Binding to every
+# interface would collide with dns-honeypot on the WireGuard address (see
+# scripts/install-homeserver.sh and #518).
+#
+# #1502: migrated into arcane/home/pihole/ for Arcane directory-aware Git
+# sync. The port bindings below used to be a literal __LAN_IP__ placeholder
+# the installer text-substituted into a copied file at deploy time -- Arcane
+# has no equivalent substitution step, so this now uses ordinary Compose
+# ${LAN_IP} interpolation instead, set via this stack's own .env (see
+# .env.example). Same value, same mechanism every other stack in this repo
+# already uses for host-specific config.
+
+name: pihole
+
 services:
   dnscrypt:
     image: klutchell/dnscrypt-proxy:v2.1.15
@@ -35,12 +45,12 @@ services:
         condition: service_healthy
         restart: true
     ports:
-      - "__LAN_IP__:53:53/tcp"
-      - "__LAN_IP__:53:53/udp"
-      - "__LAN_IP__:80:80/tcp"
+      - "${LAN_IP:-127.0.0.1}:53:53/tcp"
+      - "${LAN_IP:-127.0.0.1}:53:53/udp"
+      - "${LAN_IP:-127.0.0.1}:80:80/tcp"
     environment:
       TZ: "${INSTALL_TIMEZONE:-Europe/Berlin}"
-      WEBPASSWORD: "${PIHOLE_PASSWORD}"
+      WEBPASSWORD: "${PIHOLE_PASSWORD:?set PIHOLE_PASSWORD in .env}"
       # Pi-hole and DNSCrypt have separate network namespaces. Use Compose
       # service discovery, never either container's loopback address.
       FTLCONF_dns_upstreams: "dnscrypt#5053"

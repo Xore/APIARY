@@ -21,7 +21,7 @@
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-realm_file="${repo_root}/keycloak/realm/apiary-realm.json"
+realm_file="${repo_root}/arcane/home/honeypot-keycloak/keycloak/realm/apiary-realm.json"  # #1502
 
 network="dashkc-$$"
 pg="dashkc-pg-$$"
@@ -352,7 +352,7 @@ for _ in $(seq 1 30); do docker exec "${redis}" redis-cli ping >/dev/null 2>&1 &
 state_dir="$(mktemp -d)"
 mkdir -p "${state_dir}/logs/cowrie" "${state_dir}/payloads"
 (
-  cd "${repo_root}/dashboard"
+  cd "${repo_root}/arcane/home/honeypot-dashboard/dashboard"  # #1502
   LISTEN_ADDR="127.0.0.1:${dash_port}" \
   LOG_DIR="${state_dir}/logs" \
   SCRIPT_PAYLOAD_DIR="${state_dir}/script-payloads" \

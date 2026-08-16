@@ -17,42 +17,48 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # #1502: contexts below repointed at arcane/home/honeypot-<name>/ for
+      # every image whose stack migrated there (build context now lives
+      # self-contained next to its own compose.yml, not at repository
+      # root) -- llm-worker/portbridge/vps-portbridge are untouched, their
+      # stacks either stayed at their existing self-contained path or are
+      # VPS-side and out of #1502's scope entirely.
       matrix:
         include:
           - image: agent-intrusion-worker
-            context: analysis/agent-intrusion-corpus
+            context: arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus
           - image: cisco-asa-honeypot
-            context: cisco-asa-honeypot
+            context: arcane/home/honeypot-cisco-asa-honeypot/cisco-asa-honeypot
           - image: citrix-honeypot
-            context: citrix-honeypot
+            context: arcane/home/honeypot-citrix-honeypot/citrix-honeypot
           - image: conpot
-            context: conpot
+            context: arcane/home/honeypot-conpot/conpot
           - image: dashboard
-            context: dashboard
+            context: arcane/home/honeypot-dashboard/dashboard
           - image: dicompot
-            context: dicompot
+            context: arcane/home/honeypot-dicompot/dicompot
           - image: dionaea
-            context: dionaea
+            context: arcane/home/honeypot-dionaea/dionaea
           - image: dnp3-honeypot
-            context: dnp3-honeypot
+            context: arcane/home/honeypot-dnp3/dnp3-honeypot
           - image: dns-honeypot
-            context: dns-honeypot
+            context: arcane/home/honeypot-dns-honeypot/dns-honeypot
           - image: endlessh-honeypot
-            context: endlessh-honeypot
+            context: arcane/home/honeypot-endlessh/endlessh-honeypot
           - image: http-honeypot
-            context: http-honeypot
+            context: arcane/home/honeypot-http/http-honeypot
           - image: ip-enrichment-worker
-            context: ip-enrichment-worker
+            context: arcane/home/honeypot-ip-enrichment-worker/ip-enrichment-worker
           - image: llm-worker
             context: llm-worker
           - image: multipot
-            context: multipot
+            context: arcane/home/honeypot-multipot/multipot
           - image: portbridge
             context: portbridge
           - image: rdp-honeypot
-            context: rdp-honeypot
+            context: arcane/home/honeypot-rdp-honeypot/rdp-honeypot
           - image: tftp-relay
-            context: tftp-relay
+            context: arcane/home/honeypot-dionaea/tftp-relay
           - image: vps-portbridge
             context: vps/portbridge
     steps:

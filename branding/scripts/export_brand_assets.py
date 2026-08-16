@@ -17,8 +17,9 @@ SOURCE = BRAND / "source"
 LOGO = BRAND / "assets" / "logo"
 FAVICON = BRAND / "assets" / "favicon"
 SOCIAL = BRAND / "assets" / "social"
-DASHBOARD_STATIC = ROOT / "dashboard" / "static"
-PDF_ASSETS = ROOT / "dashboard" / "assets_pdf"
+# #1502: dashboard/ moved under arcane/home/honeypot-dashboard/.
+DASHBOARD_STATIC = ROOT / "arcane" / "home" / "honeypot-dashboard" / "dashboard" / "static"
+PDF_ASSETS = ROOT / "arcane" / "home" / "honeypot-dashboard" / "dashboard" / "assets_pdf"
 
 CHARCOAL = (32, 32, 31)
 IVORY = (247, 246, 242)
