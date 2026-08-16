@@ -99,7 +99,21 @@ services:
       - OLLAMA_URL=http://ollama:11434
       - LISTEN_ADDR=:11434
       - MAX_BODY_BYTES=65536
-      - UPSTREAM_TIMEOUT_SECONDS=8
+      # #1513: was 8 -- confirmed live that a cold-loaded
+      # qwen2.5:7b-instruct-q4_K_M (Ollama's default keep_alive unloads it
+      # after 5 minutes idle, the normal case for a honeypot) took 15.1s of
+      # load_duration alone in one live sample (19.28s total for a trivial
+      # prompt), and over 40s in a second sample under real GPU contention
+      # from this host's other Ollama consumers (llm-worker, ml-worker,
+      # rex86-eval) -- the cold-load cost is genuinely variable, not a fixed
+      # ~19s. 8s guaranteed a broker-side timeout on every request after any
+      # quiet period, the root cause of galah returning HTTP 500 instead of
+      # a real decoy response. 90s gives real margin past either single
+      # observation rather than just the first one; galah's own WriteTimeout
+      # is patched to 100s alongside this (galah/timeout_patch.py) so
+      # galah's own deadline doesn't cut the connection before the broker's
+      # does.
+      - UPSTREAM_TIMEOUT_SECONDS=90
     security_opt:
       - no-new-privileges:true
     read_only: true

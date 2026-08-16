@@ -343,6 +343,13 @@ Create proxied DNS records for the HTTP services you enable, normally:
   token, and a planted artifact that outs itself as a tripwire on inspection
   defeats the point. Unauthenticated, like `decoy`/`www-portal` — it must be
   reachable by whoever opens the planted artifact, not just operators)
+- `hub` (optional — galah's Traefik-routed path, #1511. Its own raw
+  non-standard port isn't on Cloudflare's proxied-port allowlist, so this
+  is the only way it's reachable through this domain at all. Deliberately
+  not named `galah`/`llm`/`ai`)
+- `news` (optional — wordpot's Traefik-routed path, #1512. Same
+  Cloudflare-port-allowlist reasoning as `hub`. Deliberately not named
+  `wordpot`/`wp`/`cms`)
 
 All names point to the VPS. Raw TCP/UDP sensors need no DNS record.
 
