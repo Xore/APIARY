@@ -44,6 +44,8 @@ func promoteCanonicalFields(persona string, e map[string]any) bool {
 		return promoteMultipotFields(e)
 	case "mailoney":
 		return promoteMailoneyFields(e)
+	case "beelzebub":
+		return promoteBeelzebubFields(e)
 	case "citrix-honeypot":
 		return promoteCitrixFields(e)
 	case "rdp-honeypot":
@@ -333,6 +335,17 @@ func promoteMailoneyFields(e map[string]any) bool {
 	if str(e["event"]) != "login" {
 		return false
 	}
+	return setCreds(e, str(e["username"]), str(e["password"]))
+}
+
+// promoteBeelzebubFields mirrors dashboard/classify.go's beelzebub branch:
+// username/password are already flat lowercase fields by the time this
+// runs (ip-enrichment-worker/beelzebub.go's own field-mirror step, which
+// calls this), same shape as promoteMailoneyFields above -- no
+// event-type gate needed since beelzebub.go only ever populates these two
+// keys from a real ssh/ldap/mcp auth attempt's User/Password fields, never
+// from unrelated data.
+func promoteBeelzebubFields(e map[string]any) bool {
 	return setCreds(e, str(e["username"]), str(e["password"]))
 }
 
