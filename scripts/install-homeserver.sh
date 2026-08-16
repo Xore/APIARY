@@ -184,7 +184,8 @@ for var in GIT_REPO_URL GIT_REF REPO_DIR HOME_WG_ADDRESS \
            VPS_WG_ADDRESS VPS_WG_ENDPOINT VPS_WG_PUBLIC_KEY \
            VPS_SSH_HOST VPS_SSH_PORT VPS_SSH_USER VPS_SSH_KEY ENABLE_GPU_STACK \
            INSTALL_TIMEZONE BACKUP_HOST BACKUP_HOST_USER BACKUP_HOST_KEY BACKUP_HOST_PATH \
-           PIHOLE_LAN_IP ENABLE_SANDBOX_RESTORE AUTH_THEME_REPO_URL; do
+           PIHOLE_LAN_IP ENABLE_SANDBOX_RESTORE AUTH_THEME_REPO_URL \
+           ARCANE_URL ARCANE_API_TOKEN; do
   if [[ -z "${!var:-}" || "${!var}" == *'<'*'>'* ]]; then
     echo "Config value $var is unset or still a <PLACEHOLDER> in $CONFIG_FILE." >&2
     echo "Fill in every field before running unattended." >&2
@@ -207,6 +208,20 @@ done
 # by the .env-only backup pass, see #518 comment history), step_wireguard_config
 # generates a fresh keypair and step_wireguard_sync_vps_peer pushes the new
 # public key to the VPS side automatically.
+#
+# ARCANE_URL/ARCANE_API_TOKEN (#1502): a real bootstrap gap, not just a
+# documentation note like the ones above. step_arcane_import_stacks needs
+# an already-running Arcane with an API key generated through its own UI
+# (Settings -> API Keys, after Arcane's first interactive login -- an
+# unattended installer can't complete Arcane's own OIDC/passkey login
+# itself). On a truly from-scratch host that also means Arcane has to
+# already be installed and reachable before this script gets this far,
+# which step_dockge_install does NOT currently do -- it still installs
+# plain Dockge (confirmed live, #1502), not Arcane, unlike every already-
+# provisioned APIARY homeserver today. Fixing that install/bootstrap gap
+# is tracked as an explicit follow-up rather than done here; until it
+# lands, a from-scratch run needs Arcane stood up and an API key minted by
+# hand before --config can point at a filled-in ARCANE_API_TOKEN.
 
 # BACKUP_HOST_SANDBOX_PATH is only needed when ENABLE_SANDBOX_RESTORE=true --
 # don't force every user to fill it in just to skip a 170G+ optional restore.
@@ -625,6 +640,19 @@ step_clone_repo() {
 # ---------------------------------------------------------------------------
 # Phase 6 — Dockge
 # ---------------------------------------------------------------------------
+  # STALE (#1502): every already-provisioned APIARY homeserver replaced
+  # Dockge with Arcane (#1185) months before this migration -- deploy.yml
+  # and docker-compose.arcane.yml both assume Arcane, not this. This step
+  # was never updated to match, so a genuinely from-scratch install run
+  # today still stands up plain Dockge here, then step_arcane_import_stacks
+  # (later in this same run) fails outright with nothing at ARCANE_URL to
+  # talk to. Tracked as an explicit follow-up (see ARCANE_URL/
+  # ARCANE_API_TOKEN's own comment above) rather than fixed inside #1502 --
+  # replacing this needs its own Arcane secrets-bootstrap step
+  # (ENCRYPTION_KEY/JWT_SECRET/OIDC_CLIENT_SECRET, no *_FILE variant
+  # Arcane supports, same shape as step_provision_keycloak_secrets) and
+  # verification against a real from-scratch host, which nothing in this
+  # change had a safe way to do.
 step_dockge_install() {
   mkdir -p /var/dockge/data /var/dockge/stacks
   if docker ps -a --format '{{.Names}}' | grep -qx dockge; then
@@ -691,53 +719,125 @@ step_restore_env_files() {
 # Everything after honeypot-init has no real cross-stack ordering
 # requirement (shared volumes are non-external and get created empty by
 # whichever stack starts first).
-STACK_DEFS=(
-  "honeypot-keycloak|docker-compose.keycloak.yml"
-  "honeypot-elk|docker-compose.elk.yml"
-  "honeypot-init|docker-compose.init.yml"
-  "honeypot-tanner|docker-compose.tanner.yml"
-  "honeypot-cowrie|docker-compose.cowrie.yml"
-  "honeypot-dionaea|docker-compose.dionaea.yml"
-  "honeypot-conpot|docker-compose.conpot.yml"
-  "honeypot-dnp3|docker-compose.dnp3.yml"
-  "honeypot-http|docker-compose.http.yml"
-  "honeypot-multipot|docker-compose.multipot.yml"
-  "honeypot-cisco-asa-honeypot|docker-compose.cisco-asa-honeypot.yml"
-  "honeypot-citrix-honeypot|docker-compose.citrix-honeypot.yml"
-  "honeypot-rdp-honeypot|docker-compose.rdp-honeypot.yml"
-  "honeypot-dicompot|docker-compose.dicompot.yml"
-  "honeypot-dns-honeypot|docker-compose.dns-honeypot.yml"
-  "honeypot-endlessh|docker-compose.endlessh.yml"
-  "honeypot-ip-enrichment-worker|docker-compose.ip-enrichment-worker.yml"
-  "honeypot-agent-intrusion-worker|docker-compose.agent-intrusion-worker.yml"
-  "honeypot-payload-analysis|docker-compose.payload-analysis.yml"
-  "honeypot-dashboard|docker-compose.dashboard.yml"
-  "honeypot-utilities|docker-compose.utilities.yml"
-)
-# NOTE: cisco-asa/citrix/rdp/dicompot/dns-honeypot/ip-enrichment-worker/
-# agent-intrusion-worker are NOT in STACK-REBUILD.md's documented 12-stack
-# reset list even though they have their own container_name and top-level
-# compose file in this repo -- that doc appears to predate these being
-# split into their own stacks. They have no env_file/${VAR} substitution in
-# their compose files (confirmed by grep), so no .env restore is needed for
-# them either. Flagged as a docs-vs-reality gap in the #518 issue rather
-# than silently guessed away.
+# #1502: the 32 honeypot-* stacks (STACK_DEFS' old 21 plus the 11 that had
+# drifted out of it -- see arcane/manifests/home-production.json's own
+# generation history) are no longer symlinked in from a shared
+# /var/stacks/apiary checkout. Each one's build context and config now
+# lives self-contained under arcane/home/<name>/ (or, for the 6 stacks that
+# were already self-contained before this migration -- auth-events-worker,
+# llm-worker, ml-worker, analysis/ghidra, sandbox/ghosts, pihole -- at its
+# existing path), and Arcane's own directory-aware Git sync owns
+# materializing and deploying it, driven by this manifest. The manifest
+# also lists those 6 non-honeypot-* stacks (the live host has all 38 under
+# Arcane), but step_arcane_import_stacks below only imports the
+# honeypot-*-prefixed entries -- the other 6 keep going through their own
+# existing dedicated steps (step_pihole_provision, step_ghidra_stack_*,
+# step_ml_worker_start, step_llm_worker_selftest,
+# step_auth_events_worker_start) for a from-scratch install. Folding those
+# into Arcane management too is a deliberate follow-up, not done here:
+# each of those steps carries real historical incident fixes (address
+# collisions, relative-build-path breakage) that need the same live
+# verification this honeypot-* replacement got, and doing that without a
+# disposable test host to break wasn't a safe call to make unilaterally
+# inside this already-large change.
+ARCANE_STACK_MANIFEST="$REPO_DIR/arcane/manifests/home-production.json"
 
-step_provision_stack_dirs() {
-  local name compose_file
-  for entry in "${STACK_DEFS[@]}"; do
-    IFS='|' read -r name compose_file <<<"$entry"
+# arcane_api <method> <path> [json-body] -- authenticated call against this
+# host's own Arcane instance. ARCANE_URL/ARCANE_API_TOKEN are operator-
+# provided config (see install-homeserver.conf.example): an unattended
+# installer can't complete Arcane's own interactive OIDC/passkey login, so
+# bootstrapping requires a pre-generated API key (Arcane's own UI, Settings
+# -> API Keys, after its first login) the same way step_provision_keycloak_secrets
+# requires the Keycloak realm to already exist rather than creating one
+# from nothing.
+arcane_api() {
+  local method="$1" path="$2" body="${3:-}"
+  local -a curl_args=(-sS -X "$method" "${ARCANE_URL%/}/api${path}" \
+    -H "Authorization: Bearer $ARCANE_API_TOKEN" -H "Content-Type: application/json")
+  [[ -n "$body" ]] && curl_args+=(-d "$body")
+  curl "${curl_args[@]}"
+}
+
+step_arcane_import_stacks() {
+  [[ -f "$ARCANE_STACK_MANIFEST" ]] || { echo "missing $ARCANE_STACK_MANIFEST"; return 1; }
+
+  # Register the apiary repo if it isn't already (idempotent: Arcane has no
+  # upsert-by-name endpoint, so check first). Public HTTPS clone, no
+  # credentials needed -- confirmed live against Xore/APIARY.
+  local existing_repo_id
+  existing_repo_id=$(arcane_api GET /customize/git-repositories \
+    | jq -r '.data[] | select(.name=="apiary") | .id' | head -1)
+  if [[ -z "$existing_repo_id" ]]; then
+    local repo_resp
+    repo_resp=$(arcane_api POST /customize/git-repositories \
+      "$(jq -n --arg url "$GIT_REPO_URL" \
+        '{name:"apiary", url:$url, authType:"none", enabled:true}')")
+    existing_repo_id=$(echo "$repo_resp" | jq -r '.data.id')
+    [[ -n "$existing_repo_id" && "$existing_repo_id" != "null" ]] || {
+      echo "failed to register apiary git repository in Arcane: $repo_resp" >&2
+      return 1
+    }
+  fi
+
+  # environmentId 0 is Arcane's own "Local Docker" environment -- the only
+  # one this single-host deployment has (confirmed live: /api/environments
+  # returns exactly one entry, id "0", for every APIARY homeserver).
+  #
+  # Confirmed live during #1502's own migration: Arcane's directory sync
+  # refuses to create a project if anything already exists at that path
+  # ("a directory with that name already exists; refusing to create a
+  # duplicate") -- it fails closed rather than merging into or wiping it,
+  # which is good for safety but means step_restore_env_files running
+  # before this step (it pre-creates /var/dockge/stacks/<name>/.env for
+  # anything the backup had) would block every one of those stacks from
+  # ever being imported. Stage any pre-existing .env aside, let Arcane
+  # create the directory fresh, then put it back and re-deploy -- the same
+  # backup/remove/sync/restore sequence used for every stack in the real
+  # #1502 cutover, just automated here instead of run by hand.
+  local failures=0 name compose_path
+  while IFS=$'\t' read -r name compose_path; do
     local dir="/var/dockge/stacks/$name"
-    mkdir -p "$dir"
-    if [[ "$name" == "honeypot-keycloak" || "$name" == "honeypot-dashboard" ]]; then
-      install -d -m 700 "$dir/secrets"
+    [[ -f "$dir/compose.yml" ]] && { echo "$name: already synced, skipping"; continue; }
+
+    local staged_env=""
+    if [[ -f "$dir/.env" ]]; then
+      staged_env="$(mktemp)"
+      mv "$dir/.env" "$staged_env"
     fi
-    if [[ ! -f "$REPO_DIR/$compose_file" ]]; then
-      echo "MISSING compose source in repo: $compose_file (stack $name)"
-      continue
+    [[ -d "$dir" ]] && rm -rf "$dir"
+
+    echo "-- importing $name via Arcane directory sync"
+    local resp status project_id
+    resp=$(arcane_api POST /environments/0/gitops-syncs \
+      "$(jq -n --arg name "$name" --arg repo "$existing_repo_id" \
+             --arg branch "$GIT_REF" --arg path "$compose_path" \
+        '{name:$name, repositoryId:$repo, branch:$branch, composePath:$path,
+          autoSync:false, syncDirectory:true, syncInterval:300}')")
+    status=$(echo "$resp" | jq -r '.data.lastSyncStatus // "unknown"')
+    project_id=$(echo "$resp" | jq -r '.data.projectId // empty')
+
+    if [[ -n "$staged_env" ]]; then
+      mkdir -p "$dir"
+      mv "$staged_env" "$dir/.env"
+      chmod 600 "$dir/.env"
+      if [[ -n "$project_id" ]]; then
+        arcane_api POST "/environments/0/projects/$project_id/up" >/dev/null
+      fi
     fi
-    ln -sf "$REPO_DIR/$compose_file" "$dir/compose.yml"
-  done
+
+    if [[ "$status" != "success" && -z "$staged_env" ]]; then
+      # Matches this repo's own live experience migrating #1502: a stack
+      # whose required secrets aren't in place yet fails its first deploy
+      # closed rather than starting broken -- step_bootstrap_missing_envs
+      # (below) and the per-stack secret-provisioning steps run right
+      # after this one and re-trigger a deploy once real values exist.
+      echo "  $name: sync reported '$status' (often expected pre-secrets -- see: $resp)"
+      failures=$((failures + 1))
+    fi
+  done < <(jq -r '.[] | select(.syncName | startswith("honeypot-")) | [.syncName, .dockerComposePath] | @tsv' "$ARCANE_STACK_MANIFEST")
+
+  echo "$failures stack(s) reported a non-success initial sync (see above -- often just missing secrets, not a hard failure)."
+  return 0
 }
 
 # #1019: docker-compose.keycloak.yml's realm-template mount was fixed to an
@@ -799,23 +899,23 @@ step_bootstrap_missing_envs() {
   # it'll be full of CHANGE_ME placeholders and won't be fully functional,
   # but that's a visible, fixable gap instead of a silent compose failure.
   local n=0
-  for entry in "${STACK_DEFS[@]}"; do
-    local name; name="${entry%%|*}"
+  local name compose_path
+  while IFS=$'\t' read -r name compose_path; do
     local dir="/var/dockge/stacks/$name"
     [[ -f "$dir/.env" ]] && continue
-    local example=""
-    case "$name" in
-      honeypot-init) example="$REPO_DIR/honeypot-init.env.example" ;;
-      honeypot-keycloak) example="$REPO_DIR/keycloak.env.example" ;;
-      *) example="$REPO_DIR/.env.example" ;;
-    esac
+    # #1502: each stack's .env.example now lives next to its own compose.yml
+    # under arcane/home/<name>/ (moved there in the same migration that
+    # gave every honeypot-* stack an explicit name: and a self-contained
+    # directory) rather than at two special-cased repo-root files plus a
+    # generic root fallback.
+    local example="$REPO_DIR/$(dirname "$compose_path")/.env.example"
     if [[ -f "$example" ]]; then
       cp "$example" "$dir/.env"
       chmod 600 "$dir/.env"
       n=$((n + 1))
-      echo "bootstrapped placeholder .env for $name from $(basename "$example")"
+      echo "bootstrapped placeholder .env for $name from ${example#"$REPO_DIR"/}"
     fi
-  done
+  done < <(jq -r '.[] | select(.syncName | startswith("honeypot-")) | [.syncName, .dockerComposePath] | @tsv' "$ARCANE_STACK_MANIFEST")
   echo "Bootstrapped $n placeholder .env file(s) — review for CHANGE_ME values."
 }
 
@@ -916,9 +1016,15 @@ step_start_init() {
 }
 
 step_start_remaining_stacks() {
-  local failures=0
-  for entry in "${STACK_DEFS[@]}"; do
-    local name="${entry%%|*}"
+  # #1502: Arcane's own directory sync already brought each stack up as
+  # part of step_arcane_import_stacks -- this step is now a safety-net
+  # re-assertion (idempotent: `up -d --wait` on an already-running,
+  # unchanged stack is a no-op), not the primary start mechanism. Kept
+  # rather than removed so a secret provisioned by a step *after* the
+  # import (e.g. keycloak's, dashboard's) still gets a real `up` against
+  # it even if that step didn't call Arcane's own /up endpoint itself.
+  local failures=0 name compose_path
+  while IFS=$'\t' read -r name compose_path; do
     [[ "$name" == "honeypot-elk" || "$name" == "honeypot-init" ]] && continue
     local dir="/var/dockge/stacks/$name"
     [[ -f "$dir/compose.yml" ]] || continue
@@ -927,7 +1033,7 @@ step_start_remaining_stacks() {
       echo "FAILED: $name"
       failures=$((failures + 1))
     fi
-  done
+  done < <(jq -r '.[] | select(.syncName | startswith("honeypot-")) | [.syncName, .dockerComposePath] | @tsv' "$ARCANE_STACK_MANIFEST")
   [[ $failures -eq 0 ]]
 }
 
@@ -1510,7 +1616,7 @@ run_step clone-repo            "Clone/update APIARY to $REPO_DIR" step_clone_rep
 run_step dockge-install        "Install Dockge"                     step_dockge_install
 
 run_step restore-env-files     "Restore .env files from LAN backup" step_restore_env_files
-run_step provision-stack-dirs  "Link compose.yml into each stack dir" step_provision_stack_dirs
+run_step arcane-import-stacks  "Import honeypot-* stacks as Arcane Git syncs" step_arcane_import_stacks
 run_step stage-keycloak-theme  "Check out and sync the Keycloak login theme" step_stage_keycloak_theme
 run_step bootstrap-missing-envs "Bootstrap any still-missing .env from .example" step_bootstrap_missing_envs
 run_step provision-keycloak-secrets "Generate Keycloak secrets, reset bootstrap admin to admin/admin123" step_provision_keycloak_secrets

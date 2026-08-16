@@ -24,34 +24,27 @@ jobs:
     environment: production-home
     steps:
       - uses: actions/checkout@v7
-      # #258: every split stack below (including honeypot-init just below
-      # it) builds from or bind-mounts an absolute path under
-      # /opt/stacks/apiary (e.g. `build: /opt/stacks/apiary/dionaea`,
-      # honeypot-init's own elasticsearch-setup.sh bind mount) -- this rsync
-      # is what actually populates that checkout, so it has to run before
-      # any of them. Confirmed as a real bug while working on the ELK
-      # split: this step used to run near the end of the job (where
-      # APIARY's own `docker compose up` used to live, back when that file
-      # still had services), and every #258 step above it was silently
-      # building from whatever the *previous* deploy run had rsynced, one
-      # deploy stale, rather than this run's checkout -- never a hard
-      # failure (the directory already existed from prior runs), just
-      # quietly wrong. docker-compose.yml itself has no services left (see
-      # its own header) and now the `up -d --build` call is gone --
-      # `docker compose up -d --build` against a zero-service compose file
-      # fails outright ("no service selected", confirmed locally) rather
-      # than being a harmless no-op. `config --quiet` alone stays as a
-      # lightweight sanity check that the file is still valid YAML/Compose
-      # syntax.
+      # #258, updated by #1502: this rsync's only remaining direct consumer
+      # in THIS workflow is the ghidra-worker.py host-level re-sync step
+      # right below it (bash /opt/stacks/apiary/analysis/ghidra/
+      # install-analysis-host.sh --host-files-only) -- every stack that
+      # used to build from or bind-mount an absolute path under
+      # /opt/stacks/apiary is now either an Arcane-managed directory-aware
+      # Git sync with its own self-contained build context (32 stacks,
+      # arcane/home/<name>/) or one of the 6 stacks that were already
+      # self-contained and are provisioned by scripts/install-homeserver.sh
+      # instead of this file. Kept rather than removed: still the simplest
+      # way to give the ghidra-worker.py step a fresh checkout, and
+      # `docker compose -f compose.yml config --quiet` below is a cheap
+      # sanity check that the (deliberately empty, see its own header)
+      # root docker-compose.yml is still valid YAML/Compose syntax.
       #
-      # Confirmed live (#1103's Category 4 index-template additions):
-      # honeypot-init used to run *before* this step, so its own
-      # elasticsearch-setup.sh always ran against the *previous* deploy's
-      # checkout -- the exact same one-deploy-stale bug this rsync's own
-      # comment already describes fixing for the #258 split stacks, just
-      # never applied to honeypot-init itself. Moved here, ahead of
-      # honeypot-init, so both get a fresh checkout before either builds
-      # anything from it.
+      # Historical note this comment used to carry: an earlier version of
+      # this step ran near the end of the job and every stack above it
+      # silently built from the *previous* deploy's checkout, one deploy
+      # stale (#1103). Not a live concern for what this step does now, but
+      # worth remembering if something gets added above the rsync again --
+      # anything that reads from $destination has to run after it.
       - name: Synchronize APIARY source without runtime state
         shell: bash
         run: |
@@ -122,108 +115,6 @@ jobs:
             echo "honeypot-ghidra-worker.path not installed on this host -- skipping re-sync (ENABLE_GPU_STACK=false at provisioning time, or not yet provisioned)"
           fi
 
-      # Runs before every other split stack below: each one polls a
-      # completion marker this stack's jobs write (state/init-markers, e.g.
-      # log-init.done, elasticsearch-setup.done, arkime-init.done) before
-      # starting its own real work. Deploying it after them made the very
-      # first rollout of the #258 split hang for 29 minutes waiting on
-      # markers that could not exist yet -- see #111. Still runs after the
-      # apiary rsync above it, though -- see that step's own comment for
-      # why it has to.
-      - name: Synchronize honeypot-init (one-shot bootstrap jobs stack)
-        shell: bash
-        run: |
-          # A separate Arcane-managed stack, not a subdirectory of APIARY --
-          # see docker-compose.init.yml's header for why. Its own .env is
-          # never touched here, same reasoning as APIARY's .env
-          # below: ARKIME_ADMIN_PASSWORD/ARKIME_PASSWORD_SECRET in it must
-          # keep matching APIARY's real values, which an automated
-          # sync has no safe way to verify.
-          destination=/opt/stacks/honeypot-init
-          install -d -m 755 "$destination"
-          # 777, not 755: the jobs that write into this directory run as
-          # different container UIDs (root for the busybox/arkime jobs, the
-          # image's own non-root user for elasticsearch-setup), and the
-          # markers themselves are empty sentinel files with nothing sensitive
-          # in them. A 755 root-owned directory 403'd elasticsearch-setup's
-          # own touch on the first rollout of this stack.
-          #
-          # Not `install -d`: Docker auto-creates this path root:root the
-          # first time any container bind-mounts it, and `install -d -m 777`
-          # on an existing directory still issues a chmod even when the mode
-          # already matches -- which the runner's own non-root user cannot do
-          # on a directory it does not own. A root-in-container chmod against
-          # the bind mount sidesteps the runner user's permissions entirely,
-          # the same trick log-init already uses for host paths it does not
-          # own either.
-          docker run --rm -v /opt/stacks/apiary/state:/state busybox \
-            sh -c 'mkdir -p /state/init-markers && chmod 777 /state/init-markers'
-          cp docker-compose.init.yml "$destination/compose.yml"
-          cd "$destination"
-          test ! -f .env || chmod 600 .env
-          docker compose -f compose.yml config --quiet
-          # #1374: `up -d` is not an explicit guarantee that an unchanged,
-          # already-completed one-shot container is recreated. Run the
-          # idempotent ownership reconciliation synchronously on every deploy
-          # before any split sensor stack is rebuilt/restarted below. `run`
-          # uses a fresh container even when hp-log-init already exists, and
-          # --no-deps avoids needlessly rerunning persona-apply here.
-          docker compose -f compose.yml run --rm --no-deps log-init
-          # #1431: mirrors install-homeserver.sh's step_start_init exactly --
-          # a bare `up -d` never activates a profile-gated service
-          # (geoipupdate has `profiles: [geoip-update]`), so without this a
-          # routine deploy silently left it on whatever image/config it had
-          # from initial provisioning, forever.
-          compose_profile_args=(--profile threat-intel)
-          if [ -f .env ] \
-            && grep -qE '^MAXMIND_ACCOUNT_ID=.+' .env \
-            && grep -qE '^MAXMIND_LICENSE_KEY=.+' .env; then
-            compose_profile_args+=(--profile geoip-update)
-          fi
-          docker compose -f compose.yml "${compose_profile_args[@]}" up -d
-
-      - name: Check out the presentation-only Keycloak theme
-        uses: actions/checkout@v7
-        with:
-          repository: Xore/auth-backend
-          path: auth-theme-source
-          persist-credentials: false
-
-      - name: Synchronize honeypot-keycloak identity stack
-        shell: bash
-        run: |
-          destination=/var/dockge/stacks/honeypot-keycloak
-          install -d -m 755 "$destination"
-          # #1143: NOT install -d -m 750, which unconditionally chmods an
-          # already-existing directory too. docker-compose.keycloak.yml
-          # bind-mounts this whole directory (not a single file) into both
-          # keycloak and its postgres sidecar as :ro -- once an operator has
-          # provisioned real secrets here, its ownership/mode is whatever
-          # lets the container's own internal UID (1000, no userns remap;
-          # see #1143's own postmortem) actually traverse and read them,
-          # which is not necessarily the deploy-runner's UID. #1143 already
-          # documented one production Keycloak crash-loop from exactly this
-          # kind of blanket permission reassertion; only create the
-          # directory (deploy-runner-owned, mode 750, matching the original
-          # "fail closed until provisioned" intent below) the first time it
-          # doesn't exist yet, never touch it again afterward.
-          [ -d "$destination/secrets" ] || install -d -m 750 "$destination/secrets"
-          cp docker-compose.keycloak.yml "$destination/compose.yml"
-          cp -r keycloak "$destination/"
-          install -d -m 755 "$destination/theme"
-          rsync -a --delete auth-theme-source/themes/apiary/ "$destination/theme/apiary/"
-          cd "$destination"
-          test ! -f .env || chmod 600 .env
-          docker compose -f compose.yml config --quiet
-          # Do not build: this stack uses reviewed, digest-pinned upstream
-          # Keycloak and PostgreSQL images. Missing secrets intentionally
-          # make first deployment fail closed until provisioned in Arcane.
-          if test -f secrets/postgres-password; then
-            docker compose -f compose.yml up -d
-          else
-            echo "honeypot-keycloak synchronized but not started: provision secrets in Arcane"
-          fi
-
       # #1185: replaces Dockge as the stack-management UI. Same
       # fail-closed-until-provisioned shape as honeypot-keycloak above --
       # ENCRYPTION_KEY/JWT_SECRET/OIDC_CLIENT_SECRET have no *_FILE variant
@@ -247,199 +138,71 @@ jobs:
             echo "honeypot-arcane synchronized but not started: provision .env (ARCANE_ENCRYPTION_KEY, ARCANE_JWT_SECRET, OIDC_ISSUER_URL, ARCANE_OIDC_CLIENT_SECRET) first"
           fi
 
-      # #258 proof of concept: the Conpot persona family split into its own
-      # Arcane-managed stack, same arrangement as honeypot-init above. No ordering
-      # dependency on honeypot-init here the way APIARY's own
-      # init-wait-* dependents have: each persona's command polls
-      # /markers/log-init.done itself (#127, a bind-mounted file, not a
-      # compose depends_on chain), so `docker compose up -d` returns
-      # immediately rather than blocking on the marker. Placed here anyway,
-      # ahead of honeypot-utilities/honeypot-elk/honeypot-dashboard below,
-      # purely for readability -- smaller/simpler stacks first. Log
-      # directories (logs/conpot*) and the init-markers mount are
-      # pre-existing host paths the rsync step above already preserves;
-      # this stack does not create or own them.
-      - name: Synchronize honeypot-conpot (#258 split proof of concept)
+      # #1502: honeypot-init/keycloak/conpot and the 20-stack loop that used
+      # to run here (plus ip-enrichment-worker/agent-intrusion-worker/
+      # payload-analysis/utilities/elk/dashboard below them) are gone --
+      # those 29 stacks (30 counting honeypot-arcane's own bootstrap
+      # deploy above, which stays) are now Arcane-managed directory-aware
+      # Git syncs (arcane/manifests/home-production.json), not something
+      # this workflow copies files for. Running this cp/build loop
+      # alongside Arcane's own sync would be exactly the "second writer"
+      # problem #1502's own migration review flagged: two independent
+      # mechanisms racing to own the same on-host directory. What's left
+      # for this job to do now is a lightweight CI gate: every stack listed
+      # in the manifest -- the 32 that migrated under arcane/home/ plus the
+      # 6 that were already self-contained (auth-events-worker, llm-worker,
+      # ml-worker, ghidra, ghosts, pihole) and stayed at their existing
+      # path -- still has a syntactically valid compose file, so a broken
+      # commit on this branch fails here instead of silently sitting
+      # unsynced (or, worse, half-synced) on the Arcane side. None of those
+      # 38 are deployed by this workflow at all any more; the 6
+      # self-contained ones are still provisioned by
+      # scripts/install-homeserver.sh's own dedicated steps on a
+      # from-scratch install, not by anything in this file.
+      - name: Validate every Arcane-managed stack's compose file
         shell: bash
         run: |
-          destination=/opt/stacks/honeypot-conpot
-          install -d -m 755 "$destination"
-          cp docker-compose.conpot.yml "$destination/compose.yml"
-          cd "$destination"
-          test ! -f .env || chmod 600 .env
-          docker compose -f compose.yml config --quiet
-          docker compose -f compose.yml up -d --build
+          # A stack with a genuinely required secret (canarytokens, ghosts,
+          # pihole, keycloak, arcane, ...) makes `docker compose config`
+          # fail on purpose when nothing provides a real value -- that's
+          # the fail-closed behavior #1502's own migration deliberately
+          # kept, not something CI should route around with a hand-
+          # maintained list of every required var across 38 stacks (which
+          # would silently drift the moment a new one is added). Instead:
+          # retry with whatever variable Compose's own error names as
+          # missing set to a throwaway placeholder, until config succeeds
+          # or nothing is left to fill in -- validates real structure/
+          # syntax without needing to know any stack's real secrets.
+          validate_one() {
+            local path="$1"
+            local -a extra_env=()
+            local attempt=0 err=""
+            while (( attempt < 10 )); do
+              err=$(env "${extra_env[@]}" docker compose -f "$path" config --quiet 2>&1)
+              [ -z "$err" ] && return 0
+              local missing
+              missing=$(echo "$err" | grep -oE 'required variable [A-Za-z_][A-Za-z0-9_]* is missing' | head -1 | awk '{print $3}')
+              [ -z "$missing" ] && { echo "$err" >&2; return 1; }
+              extra_env+=("$missing=ci-placeholder-value")
+              attempt=$((attempt + 1))
+            done
+            echo "$err" >&2
+            return 1
+          }
 
-      # #258: four more standalone honeypots split the same way, each with
-      # no depends_on and its own fully private network (same reasoning as
-      # honeypot-conpot above, which is why the loop below is safe to treat
-      # them identically) -- looped instead of one step per stack purely to
-      # avoid repeating the same six lines four times. dionaea joins this
-      # loop too: it has its own private dionaea_net (like the other four)
-      # and its one cross-stack resource, dionaea-lib, is a non-external
-      # shared-name volume Compose creates if absent -- no ordering
-      # requirement forces it out of the loop the way honeypot-dashboard
-      # below needed its own step. tanner joins for the same reason: its
-      # own private tanner_local, and its one cross-stack resource
-      # (snare-pages) is `external: true`, already created by
-      # honeypot-init's snare-clone job, which this workflow deploys before
-      # this step runs.
-      #
-      # #891: endlessh joins the loop too -- docker-compose.endlessh.yml's
-      # own header comment already described it as belonging here ("Same
-      # shape as docker-compose.dnp3.yml -- no depends_on, its own fully
-      # private network") and asserted it was "Deployed as
-      # /opt/stacks/honeypot-endlessh", but it was never actually added to
-      # this loop, deploy-profiles/full.txt, or EXPECTED_SENSORS's owning
-      # stack in scripts/validate-deploy-profile.sh -- a correctly-performed
-      # standard deployment left EXPECTED_SENSORS naming a sensor nothing
-      # ever provisioned.
-      - name: Synchronize honeypot-cowrie/multipot/http/dnp3/dionaea/tanner/dicompot/dns-honeypot/citrix-honeypot/cisco-asa-honeypot/rdp-honeypot/endlessh/beelzebub/hellpot/elasticpot/galah/sentrypeer/wordpot/mailoney/canarytokens (#258 split, #1418, #1419, #1420, #1421, #1422, #1423, #1424, #1426)
-        shell: bash
-        run: |
-          for stack in cowrie multipot http dnp3 dionaea tanner dicompot dns-honeypot citrix-honeypot cisco-asa-honeypot rdp-honeypot endlessh beelzebub hellpot elasticpot galah sentrypeer wordpot mailoney canarytokens; do
-            destination="/opt/stacks/honeypot-$stack"
-            install -d -m 755 "$destination"
-            cp "docker-compose.$stack.yml" "$destination/compose.yml"
-            ( cd "$destination"
-              test ! -f .env || chmod 600 .env
-              docker compose -f compose.yml config --quiet
-              docker compose -f compose.yml up -d --build )
-          done
-
-      # #560: docker-compose.ip-enrichment-worker.yml, scripts/install-
-      # homeserver.sh's COMPOSE_ORDER, and .github/workflows/containers.yml
-      # (which builds this image) all treat this stack as real and deployed
-      # -- but this deploy job never actually synced or started it, so any
-      # push touching ip-enrichment-worker/ never reached production.
-      # network_mode: none and no shared volume/network with anything else
-      # (see the compose file's own header), so -- like the standalone
-      # honeypots above -- it has no ordering requirement either way; placed
-      # here to mirror install-homeserver.sh's own COMPOSE_ORDER position
-      # (after the sensor stacks, before payload-analysis/dashboard), purely
-      # for readability.
-      - name: Synchronize honeypot-ip-enrichment-worker (#560)
-        shell: bash
-        run: |
-          destination=/opt/stacks/honeypot-ip-enrichment-worker
-          install -d -m 755 "$destination"
-          cp docker-compose.ip-enrichment-worker.yml "$destination/compose.yml"
-          cd "$destination"
-          test ! -f .env || chmod 600 .env
-          docker compose -f compose.yml config --quiet
-          docker compose -f compose.yml up -d --build
-
-      # #154 phase 5: agent-intrusion-worker reads real sensor events,
-      # correlates them into campaigns, scores each against the
-      # deterministic criticality rules, and writes provenance-rich
-      # verdicts to agent-intrusion-campaigns for dashboard/agent_campaigns.go
-      # (route /agent-campaigns) to render. Same #560 placement reasoning as
-      # honeypot-ip-enrichment-worker immediately above: it joins honeynet
-      # to reach elasticsearch (docker-compose.agent-intrusion-worker.yml's
-      # own header), but worker.py never crashes on an unreachable ES --
-      # it logs and retries next poll cycle (run_cycle's own "never raises"
-      # discipline) -- so there is no hard ordering requirement forcing this
-      # step after honeypot-elk below.
-      - name: Synchronize honeypot-agent-intrusion-worker (#154)
-        shell: bash
-        run: |
-          destination=/opt/stacks/honeypot-agent-intrusion-worker
-          install -d -m 755 "$destination"
-          cp docker-compose.agent-intrusion-worker.yml "$destination/compose.yml"
-          cd "$destination"
-          test ! -f .env || chmod 600 .env
-          docker compose -f compose.yml config --quiet
-          docker compose -f compose.yml up -d --build
-
-      # #258: payload-dedupe and yara-scanner split out separately from
-      # dionaea/tftp-relay above, per explicit instruction. Placed right
-      # after that step (not in its loop) purely for readability -- the
-      # "reader" half of the dionaea-lib sharing arrangement following the
-      # "writer" half. No hard ordering requirement either way: dionaea-lib/
-      # dashboard-state/yara-results are all non-external shared-name
-      # volumes Compose creates if absent, same as everywhere else in #258.
-      - name: Synchronize honeypot-payload-analysis (#258 split)
-        shell: bash
-        run: |
-          destination=/opt/stacks/honeypot-payload-analysis
-          install -d -m 755 "$destination"
-          cp docker-compose.payload-analysis.yml "$destination/compose.yml"
-          cd "$destination"
-          test ! -f .env || chmod 600 .env
-          docker compose -f compose.yml config --quiet
-          docker compose -f compose.yml up -d --build
-
-      # #258: log-maintenance, autoheal, and reporter split into their own
-      # Arcane-managed stack -- host-wide utilities rather than one honeypot family.
-      # None of the three share a named volume/network with anything else,
-      # so (like the standalone honeypots above) this can deploy ahead of
-      # APIARY with no ordering requirement.
-      - name: Synchronize honeypot-utilities (#258 split)
-        shell: bash
-        run: |
-          destination=/opt/stacks/honeypot-utilities
-          install -d -m 755 "$destination"
-          cp docker-compose.utilities.yml "$destination/compose.yml"
-          cd "$destination"
-          test ! -f .env || chmod 600 .env
-          docker compose -f compose.yml config --quiet
-          docker compose -f compose.yml up -d --build
-
-      # #258: the ELK/analysis plane (elasticsearch, kibana, filebeat,
-      # evebox, arkime-capture, arkime-viewer, pcap-sync) split into its own
-      # Arcane-managed stack. Its bind mounts (analysis/geoip, analysis/filebeat.yml,
-      # arkime/config.ini, arkime/geo) resolve against the checkout the
-      # rsync step above already populated. Placed before honeypot-dashboard
-      # below, which depends on elasticsearch/filebeat being reachable by
-      # service name over honeynet at runtime (Compose itself doesn't
-      # enforce this -- see the dashboard step's own comment).
-      - name: Synchronize honeypot-elk (#258 split)
-        shell: bash
-        run: |
-          destination=/opt/stacks/honeypot-elk
-          install -d -m 755 "$destination"
-          cp docker-compose.elk.yml "$destination/compose.yml"
-          cd "$destination"
-          test ! -f .env || chmod 600 .env
-          docker compose -f compose.yml config --quiet
-          docker compose -f compose.yml up -d --build
-
-      # #258: dashboard + services-adapter split into their own Arcane-managed stack,
-      # placed after honeypot-elk and honeypot-dionaea/honeypot-payload-
-      # analysis above (not APIARY, which has no services of its
-      # own any more) because it actually depends on those stacks at
-      # runtime -- it resolves elasticsearch/filebeat by service name over
-      # the shared honeynet network, and reads dionaea-lib/yara-results/
-      # dashboard-state, three named volumes those stacks' own services
-      # write. Compose itself doesn't enforce this order (none of those are
-      # `external: true`, so whichever project runs first would simply
-      # create them), but starting the writers first means the dashboard
-      # has something to show immediately rather than booting against
-      # empty indices.
-      - name: Synchronize honeypot-dashboard (#258 split)
-        shell: bash
-        run: |
-          destination=/opt/stacks/honeypot-dashboard
-          install -d -m 755 "$destination"
-          install -d -m 700 "$destination/secrets"
-          cp docker-compose.dashboard.yml "$destination/compose.yml"
-          cd "$destination"
-          test ! -f .env || chmod 600 .env
-          docker compose -f compose.yml config --quiet
-          # #266: dashboard now runs two replicas (dashboard/dashboard-b)
-          # behind Traefik's health-gated load balancer specifically so a
-          # redeploy never has a real gap in availability -- a blind
-          # `up -d --build` here would recreate both simultaneously and
-          # throw that away for every automated deploy. es-results-importer
-          # and services-adapter aren't replicated and still want a normal
-          # reconcile, so run that first, then the rolling script for the
-          # dashboard pair only (it builds the shared image itself).
-          docker compose -f compose.yml up -d --build es-results-importer services-adapter oidc-sessions
-          if test -f secrets/oidc-client-secret; then
-            COMPOSE_FILE=compose.yml /opt/stacks/apiary/scripts/deploy-dashboard-rolling.sh
-          else
-            echo "honeypot-dashboard synchronized but replicas not started: provision secrets/oidc-client-secret in Arcane"
-          fi
+          fail=0
+          while IFS=$'\t' read -r name path; do
+            if [ ! -f "$path" ]; then
+              echo "::error::$name: $path listed in the manifest does not exist"
+              fail=1
+              continue
+            fi
+            if ! validate_one "$path"; then
+              echo "::error::$name: docker compose config failed for $path (see above)"
+              fail=1
+            fi
+          done < <(jq -r '.[] | [.syncName, .dockerComposePath] | @tsv' arcane/manifests/home-production.json)
+          exit "$fail"
 
   vps:
     if: inputs.target == 'vps' || inputs.target == 'both'
