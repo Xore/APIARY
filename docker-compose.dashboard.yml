@@ -242,6 +242,23 @@ services:
       # service, over the honeypot-llm network below -- same service name
       # ("ollama") that network's own internal DNS already resolves.
       - OLLAMA_URL=http://ollama:11434
+      # #1487: dashboard-driven Canarytoken creation. canarytokens-frontend
+      # (docker-compose.canarytokens.yml) lives on its own isolated
+      # canarytokens_net, not shared with this stack's network -- unlike
+      # OLLAMA_URL/ELASTICSEARCH_URL above, this reaches it the same way an
+      # operator's own browser would (10.8.0.2:19426, the WireGuard-bound
+      # port), not a docker service name. Empty by default -- an unset value
+      # leaves canarytoken creation disabled (canarytokensAPIURLIsLocal in
+      # dashboard/canarytokens_client.go), the same "off unless configured"
+      # posture OLLAMA_URL itself takes. Set CANARYTOKENS_API_URL=http://10.8.0.2:19426
+      # once the canarytokens stack (#1426) is deployed on this host --
+      # unverified whether a container on this stack's default bridge
+      # network can actually route to another container's host-published
+      # WireGuard-interface port on the same machine; confirm at deploy time
+      # before relying on this rather than assuming it works like Kibana's
+      # own 10.8.0.2:19601 exposure (a cross-host case, VPS reaching in, not
+      # this same-host case).
+      - CANARYTOKENS_API_URL=${CANARYTOKENS_API_URL:-}
       # Where the Open-in links on an event point. Set HONEYPOT_DOMAIN and the
       # dashboard derives https://<tool>.<domain>; the three explicit URLs
       # override it for path-routed deployments. All four are deliberately
@@ -397,6 +414,23 @@ services:
       # service, over the honeypot-llm network below -- same service name
       # ("ollama") that network's own internal DNS already resolves.
       - OLLAMA_URL=http://ollama:11434
+      # #1487: dashboard-driven Canarytoken creation. canarytokens-frontend
+      # (docker-compose.canarytokens.yml) lives on its own isolated
+      # canarytokens_net, not shared with this stack's network -- unlike
+      # OLLAMA_URL/ELASTICSEARCH_URL above, this reaches it the same way an
+      # operator's own browser would (10.8.0.2:19426, the WireGuard-bound
+      # port), not a docker service name. Empty by default -- an unset value
+      # leaves canarytoken creation disabled (canarytokensAPIURLIsLocal in
+      # dashboard/canarytokens_client.go), the same "off unless configured"
+      # posture OLLAMA_URL itself takes. Set CANARYTOKENS_API_URL=http://10.8.0.2:19426
+      # once the canarytokens stack (#1426) is deployed on this host --
+      # unverified whether a container on this stack's default bridge
+      # network can actually route to another container's host-published
+      # WireGuard-interface port on the same machine; confirm at deploy time
+      # before relying on this rather than assuming it works like Kibana's
+      # own 10.8.0.2:19601 exposure (a cross-host case, VPS reaching in, not
+      # this same-host case).
+      - CANARYTOKENS_API_URL=${CANARYTOKENS_API_URL:-}
       - HONEYPOT_DOMAIN=${HONEYPOT_DOMAIN:-}
       - KIBANA_PUBLIC_URL=${KIBANA_PUBLIC_URL:-}
       - EVEBOX_PUBLIC_URL=${EVEBOX_PUBLIC_URL:-}
