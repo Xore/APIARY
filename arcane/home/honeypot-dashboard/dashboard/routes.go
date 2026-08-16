@@ -314,9 +314,12 @@ func (s *store) routes(tmpl *template.Template) *http.ServeMux {
 		renderPage(w, tmpl, "source-health", &data)
 	})
 	mux.HandleFunc("GET /alerts", func(w http.ResponseWriter, r *http.Request) {
+		// #1535: state (open/acknowledged) is no longer a filter-bar field --
+		// the New/Acknowledged tabs in alerts.html own that axis now. Only
+		// the free-text key-or-message search stays a query-string filter.
 		data := alertsPageData{
 			snapshot:  s.get(),
-			filterBar: buildFilterBar(r, "/alerts", [2]string{"state", "State"}, [2]string{"q", "Key or message contains"}),
+			filterBar: buildFilterBar(r, "/alerts", [2]string{"q", "Key or message contains"}),
 		}
 		renderPage(w, tmpl, "alerts", &data)
 	})

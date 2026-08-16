@@ -381,3 +381,79 @@ func TestAlertsPageRendersFilterBarAndClientSideFilterWiring(t *testing.T) {
 		t.Error("acknowledge-all count must be computed from the unfiltered alert list, not the filtered one")
 	}
 }
+
+// #1535: acknowledging an alert must no longer leave it mixed into the
+// primary/default alert view -- the page gains a New/Acknowledged tablist
+// (the same data-dashboard-tab/data-dashboard-panel convention every other
+// tabbed page here uses, driven by hp-app.js's shared activateDashboardTab)
+// with New the default-active tab, and each tab owns its own row container
+// so a background loadAlerts() refresh (fired after every acknowledge/
+// reopen) moves a row from one tab's table to the other's without a page
+// reload.
+func TestAlertsPageHasNewAndAcknowledgedTabs(t *testing.T) {
+	funcs := templateFuncs(nil, "")
+	tmpl := template.Must(template.New("t").Funcs(funcs).Parse(pageTemplate))
+	data := alertsPageData{filterBar: buildFilterBar(httptest.NewRequest("GET", "/alerts", nil), "/alerts", [2]string{"q", "Key or message contains"})}
+	var out strings.Builder
+	if err := tmpl.ExecuteTemplate(&out, "alerts", &data); err != nil {
+		t.Fatalf("alerts page does not render: %v", err)
+	}
+	html := out.String()
+
+	if !strings.Contains(html, `data-dashboard-tab="new"`) || !strings.Contains(html, `data-dashboard-tab="acknowledged"`) {
+		t.Fatalf("alerts page is missing the New/Acknowledged tab buttons: %s", html)
+	}
+	if !strings.Contains(html, `data-dashboard-panel="new"`) || !strings.Contains(html, `data-dashboard-panel="acknowledged"`) {
+		t.Fatalf("alerts page is missing the New/Acknowledged tab panels: %s", html)
+	}
+	// New must be the default-active tab (open alerts are the "primary" view
+	// per #1535), and the Acknowledged panel must start hidden.
+	newTabIdx := strings.Index(html, `data-dashboard-tab="new"`)
+	if !strings.Contains(html[:newTabIdx], `class="tab active"`) {
+		t.Error(`the "new" tab button is not the default-active one`)
+	}
+	ackPanelIdx := strings.Index(html, `id="panel-acknowledged"`)
+	if ackPanelIdx == -1 || !strings.Contains(html[ackPanelIdx:ackPanelIdx+200], "hidden") {
+		t.Error("the acknowledged panel is not hidden by default")
+	}
+	// Each tab hydrates its own row container from the shared /api/alerts
+	// fetch -- acknowledging a row must be able to disappear from one table
+	// and reappear in the other on the next refresh, not just toggle a class
+	// on a single shared table.
+	for _, id := range []string{"alert-rows", "alert-ack-rows"} {
+		if !strings.Contains(html, `id="`+id+`"`) {
+			t.Errorf("alerts page is missing its own row container %q", id)
+		}
+	}
+	if !strings.Contains(html, "function renderAlertRows") {
+		t.Error("alerts page is missing the shared per-tab row-rendering function")
+	}
+}
+
+// #1535: the real GET /alerts route (not a hand-built filterBar fixture, as
+// above) must no longer offer the old "state" filter-bar field -- the New/
+// Acknowledged tabs replaced it as the actual mechanism operators use to
+// separate open alerts from acknowledged ones. The free-text key-or-message
+// search stays.
+func TestAlertsRouteFilterBarNoLongerOffersState(t *testing.T) {
+	s := &store{}
+	tmpl := template.Must(template.New("dashboard").Funcs(templateFuncs(s, "")).Parse(pageTemplate))
+	mux := s.routes(tmpl)
+
+	req := httptest.NewRequest(http.MethodGet, "/alerts", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /alerts status = %d", rec.Code)
+	}
+	html := rec.Body.String()
+	if strings.Contains(html, `name="state"`) {
+		t.Error(`GET /alerts still renders a "state" filter-bar field -- the New/Acknowledged tabs should be the only way to separate open from acknowledged now`)
+	}
+	if !strings.Contains(html, `name="q"`) {
+		t.Error("GET /alerts lost the key-or-message text filter")
+	}
+	if !strings.Contains(html, `data-dashboard-tab="new"`) || !strings.Contains(html, `data-dashboard-tab="acknowledged"`) {
+		t.Error("GET /alerts is missing the New/Acknowledged tabs")
+	}
+}
