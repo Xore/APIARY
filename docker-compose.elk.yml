@@ -327,6 +327,26 @@ services:
   # (IN_MOVED_TO) would be invisible to it.
   # Local copies older than 50 days are pruned (~50GB, matching the VPS
   # ring of 50000 x 1mb; the viewer needs these files for packet payloads).
+  #
+  # #1409: found live -- when the underlying sshfs mount at
+  # /opt/stacks/apiary/logs/suricata/pcap drops and reconnects (a real,
+  # observed event, not hypothetical -- the VPS tunnel/mount is exactly the
+  # kind of thing that blips), this container's own bind mount into that
+  # path goes stale: it keeps showing whatever /src looked like at the
+  # moment the container's mount namespace was set up, even though the
+  # real host-side sshfs mount underneath has already moved on. `ls /src`
+  # from inside a stale container showed content from days earlier while
+  # the host's own `ls` on the same path showed live, current files --
+  # confirmed live, not assumed. The container process itself keeps
+  # running the whole time (`docker ps` shows it healthy/Up), so nothing
+  # about the container's own liveness signals this failure; only a
+  # restart re-establishes a fresh view of the live mount. This silently
+  # starved arkime-capture of new input for 5 days before being noticed.
+  # The healthcheck below re-derives the same signal a human would check
+  # manually (is /src's newest file actually recent) so autoheal (see
+  # elasticsearch's own healthcheck comment above for that convention)
+  # restarts this container automatically the next time the mount goes
+  # stale, instead of it silently sitting broken again.
   pcap-sync:
     <<: *runtime-defaults
     image: busybox:latest
@@ -355,6 +375,26 @@ services:
       - /opt/stacks/apiary/logs/suricata/pcap:/src:ro
       - /opt/stacks/apiary/logs/arkime-raw:/dst
       - /opt/stacks/apiary/state/init-markers:/markers:ro
+    # #1409: 15 minutes tolerates a genuinely idle capture interface (this
+    # stack routinely sees background-noise scanner traffic well inside
+    # that window, confirmed against this same session's own live
+    # observations) while still catching a stale mount long before it
+    # goes unnoticed for days.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          newest=$$(ls -t /src 2>/dev/null | head -1);
+          [ -n "$$newest" ] || exit 1;
+          mtime=$$(stat -c %Y "/src/$$newest" 2>/dev/null) || exit 1;
+          now=$$(date +%s);
+          [ $$((now - mtime)) -lt 900 ]
+      interval: 120s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      - autoheal=true
     deploy:
       resources:
         limits:
