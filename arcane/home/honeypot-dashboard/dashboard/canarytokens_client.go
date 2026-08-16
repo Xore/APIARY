@@ -210,6 +210,17 @@ type canarytokensGenerateResult struct {
 	ErrorMessage string `json:"error_message,omitempty"`
 }
 
+// canarytokensAdapterWebhookURL is where every token this stack creates
+// sends its fired-alert webhook -- canarytokens-adapter, reachable by
+// Docker DNS on canarytokens_net (compose.yml gives it no host port; it
+// isn't meant to be reached any other way), on canarytokens-adapter/main.go's
+// own LISTEN_ADDR default of :8090. TokenRequest (models/common.py) rejects
+// a generate() call that supplies neither email nor webhook_url ("either
+// webhook or email is required") -- confirmed live, every request without
+// this field fails with "Malformed request, invalid data supplied." before
+// this constant existed.
+const canarytokensAdapterWebhookURL = "http://canarytokens-adapter:8090/"
+
 // generate calls POST {root}/generate. A file upload (web_image only)
 // forces a multipart/form-data request -- app.py's own generate() branches
 // on Content-Type: application/json is parsed as JSON, anything else as a
@@ -229,6 +240,9 @@ func (c *canarytokensClient) generate(req canarytokensGenerateRequest) (*canaryt
 		if err := w.WriteField("memo", req.Memo); err != nil {
 			return nil, err
 		}
+		if err := w.WriteField("webhook_url", canarytokensAdapterWebhookURL); err != nil {
+			return nil, err
+		}
 		part, err := w.CreateFormFile(string(req.TokenType), req.UploadFilename)
 		if err != nil {
 			return nil, err
@@ -243,8 +257,9 @@ func (c *canarytokensClient) generate(req canarytokensGenerateRequest) (*canaryt
 		contentType = w.FormDataContentType()
 	} else {
 		payload := map[string]any{
-			"token_type": req.TokenType,
-			"memo":       req.Memo,
+			"token_type":  req.TokenType,
+			"memo":        req.Memo,
+			"webhook_url": canarytokensAdapterWebhookURL,
 		}
 		if req.IncludeTextSnippet {
 			payload["include_text_snippet"] = true
