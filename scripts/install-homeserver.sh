@@ -727,19 +727,48 @@ step_restore_env_files() {
 # were already self-contained before this migration -- auth-events-worker,
 # llm-worker, ml-worker, analysis/ghidra, sandbox/ghosts, pihole -- at its
 # existing path), and Arcane's own directory-aware Git sync owns
-# materializing and deploying it, driven by this manifest. The manifest
-# also lists those 6 non-honeypot-* stacks (the live host has all 38 under
-# Arcane), but step_arcane_import_stacks below only imports the
-# honeypot-*-prefixed entries -- the other 6 keep going through their own
-# existing dedicated steps (step_pihole_provision, step_ghidra_stack_*,
-# step_ml_worker_start, step_llm_worker_selftest,
-# step_auth_events_worker_start) for a from-scratch install. Folding those
-# into Arcane management too is a deliberate follow-up, not done here:
-# each of those steps carries real historical incident fixes (address
-# collisions, relative-build-path breakage) that need the same live
-# verification this honeypot-* replacement got, and doing that without a
-# disposable test host to break wasn't a safe call to make unilaterally
-# inside this already-large change.
+# materializing and deploying it, driven by this manifest.
+#
+# #1505: of those 6, three (auth-events-worker, llm-worker, ml-worker) are
+# now ALSO imported by step_arcane_import_stacks below -- confirmed to have
+# no host-local state beyond .env (no bind-mounted persistent directories,
+# no ownership requirements a generic directory sync wouldn't already get
+# right), so folding them in was safe without a disposable host to verify
+# against. Their old dedicated steps (step_auth_events_worker_start,
+# step_ml_worker_start, step_llm_worker_selftest) are kept, but trimmed down
+# to just the parts Arcane's own sync can't do: readiness verification
+# (polling each container's own log line, since neither has a Docker
+# HEALTHCHECK Arcane's `up --wait` could rely on alone -- see each step's
+# own comment, #593) and, for llm-worker, its actual --selftest invocation.
+#
+# The other 3 stay fully on their own dedicated steps, deliberately not
+# folded in:
+#   - pihole (step_pihole_provision/-start/-verify): real host-local state
+#     beyond .env -- etc-pihole/, etc-dnsmasq.d/, and a dnscrypt-proxy/
+#     directory that needs non-root ownership for its distroless image
+#     (chown 65532:65532). #1502's own cutover lost this exact state once
+#     already (disclosed in that issue's own comments) when it wasn't
+#     accounted for -- a generic Arcane directory sync has no way to know
+#     about it either.
+#   - analysis/ghidra (step_ghidra_stack_provision/-start): needs a second,
+#     conditional compose file layered on top (docker-compose.ghidra.gpu.yml,
+#     only when ENABLE_GPU_STACK=true) that the Arcane manifest's single
+#     dockerComposePath can't express, plus the relative-build-context
+#     breakage this step's own comment already documents from the first
+#     live attempt to symlink only the compose file instead of the whole
+#     directory. GPU-stack correctness is expensive to get wrong and hard
+#     to verify without a GPU-enabled disposable host.
+#   - sandbox/ghosts (step_ghosts_host_install): ghosts-api's remote Git
+#     build context (GHOSTS.git#<ref>:src) hits a confirmed Arcane v2.8.0
+#     limitation (#1506 -- its image-prep step only resolves refs under
+#     refs/heads/, so a tag or commit SHA both fail) -- not unverified, but
+#     confirmed *broken* through Arcane's own directory sync today. Folding
+#     this in would trade a working installer step for a non-functional one.
+# All three needed the same kind of live verification this honeypot-*
+# replacement got before being deemed safe to fold in; pihole/ghidra/ghosts
+# either failed that bar for a real reason above, or -- for pihole and
+# ghidra specifically -- couldn't be checked at all without a disposable
+# test host to break, which wasn't a safe call to make unilaterally.
 ARCANE_STACK_MANIFEST="$REPO_DIR/arcane/manifests/home-production.json"
 
 # arcane_api <method> <path> [json-body] -- authenticated call against this
@@ -834,7 +863,11 @@ step_arcane_import_stacks() {
       echo "  $name: sync reported '$status' (often expected pre-secrets -- see: $resp)"
       failures=$((failures + 1))
     fi
-  done < <(jq -r '.[] | select(.syncName | startswith("honeypot-")) | [.syncName, .dockerComposePath] | @tsv' "$ARCANE_STACK_MANIFEST")
+  # #1505: also imports auth-events-worker/llm-worker/ml-worker -- see this
+  # file's own header comment (Phase 8) for why those 3 of the 6 non-
+  # honeypot-* stacks were safe to fold in and the other 3 (pihole, ghidra,
+  # ghosts) deliberately weren't.
+  done < <(jq -r '.[] | select((.syncName | startswith("honeypot-")) or (.syncName as $n | ["auth-events-worker","llm-worker","ml-worker"] | index($n) != null)) | [.syncName, .dockerComposePath] | @tsv' "$ARCANE_STACK_MANIFEST")
 
   echo "$failures stack(s) reported a non-success initial sync (see above -- often just missing secrets, not a hard failure)."
   return 0
@@ -915,7 +948,7 @@ step_bootstrap_missing_envs() {
       n=$((n + 1))
       echo "bootstrapped placeholder .env for $name from ${example#"$REPO_DIR"/}"
     fi
-  done < <(jq -r '.[] | select(.syncName | startswith("honeypot-")) | [.syncName, .dockerComposePath] | @tsv' "$ARCANE_STACK_MANIFEST")
+  done < <(jq -r '.[] | select((.syncName | startswith("honeypot-")) or (.syncName as $n | ["auth-events-worker","llm-worker","ml-worker"] | index($n) != null)) | [.syncName, .dockerComposePath] | @tsv' "$ARCANE_STACK_MANIFEST")
   echo "Bootstrapped $n placeholder .env file(s) — review for CHANGE_ME values."
 }
 
@@ -1033,7 +1066,7 @@ step_start_remaining_stacks() {
       echo "FAILED: $name"
       failures=$((failures + 1))
     fi
-  done < <(jq -r '.[] | select(.syncName | startswith("honeypot-")) | [.syncName, .dockerComposePath] | @tsv' "$ARCANE_STACK_MANIFEST")
+  done < <(jq -r '.[] | select((.syncName | startswith("honeypot-")) or (.syncName as $n | ["auth-events-worker","llm-worker","ml-worker"] | index($n) != null)) | [.syncName, .dockerComposePath] | @tsv' "$ARCANE_STACK_MANIFEST")
   [[ $failures -eq 0 ]]
 }
 
@@ -1074,22 +1107,21 @@ step_provision_dashboard_oidc_secret() {
 }
 
 step_auth_events_worker_start() {
-  # Same relative-build-context symlink-the-whole-directory reasoning as
-  # step_ml_worker_start (docker-compose.yml here also has `build: context: .`).
-  # Secrets deliberately do NOT live under this symlinked path -- see
-  # docker-compose.yml's own volume-mount comment for why
-  # EVENTS_POLLER_SECRETS_DIR is a sibling directory instead.
-  local src="$REPO_DIR/auth-events-worker"
-  [[ -d "$src" ]] || { echo "no auth-events-worker/ directory in repo"; return 1; }
-  rm -rf /var/dockge/stacks/auth-events-worker
-  ln -sfn "$src" /var/dockge/stacks/auth-events-worker
-  ln -sf "$src/docker-compose.yml" "$src/compose.yml"
-  (cd "$src" && with_retry 3 15 docker compose -f compose.yml up -d --wait) || return 1
-
-  # No Docker HEALTHCHECK on this worker either -- same reasoning and same
-  # fix as step_ml_worker_start's own comment (#593): poll the log for the
-  # line worker.py actually emits once it's genuinely ready, instead of
-  # trusting compose's "running" status alone.
+  # #1505: provisioning (materializing the directory, `docker compose up`)
+  # is now step_arcane_import_stacks/step_start_remaining_stacks' job, same
+  # as any honeypot-* stack -- no more repo-checkout symlink here, which
+  # would fight Arcane's own ownership of /var/dockge/stacks/auth-events-worker
+  # (a real directory Arcane's sync materializes, not something to replace
+  # with a symlink out from under it). This step runs after
+  # provision-events-poller-secrets (its secret doesn't exist yet when
+  # start-remaining first runs it -- restart: unless-stopped's own
+  # crash-loop picks up the freshly written secret within seconds, same
+  # reasoning step_provision_dashboard_oidc_secret's own comment already
+  # documents for dashboard) and just verifies real readiness.
+  #
+  # No Docker HEALTHCHECK signal this step can trust alone (#593): poll the
+  # log for the line worker.py actually emits once it's genuinely ready,
+  # instead of trusting compose's "running" status.
   local waited=0 max_wait=60
   while (( waited < max_wait )); do
     if docker logs hp-auth-events-worker 2>&1 | grep -q 'auth-events-worker starting'; then
@@ -1187,7 +1219,30 @@ step_pihole_provision() {
   # public-resolvers.md in this directory, while the config itself stays
   # read-only.
   chown 65532:65532 "$dir/dnscrypt-proxy"
-  sed -i "s/__LAN_IP__/$lan_ip/g" "$dir/compose.yml"
+
+  # #1505: pihole/compose.yml dropped its literal __LAN_IP__ placeholder for
+  # ${LAN_IP:-127.0.0.1} Compose interpolation instead (part of #1502's own
+  # Arcane compose-validator fix -- a `:?required` var in a port-binding
+  # host-IP position broke Arcane's own pre-flight check, see
+  # docs/ARCANE-GIT-SYNC.md). The sed this step used to run here had nothing
+  # left to match -- a confirmed no-op, not a working code path -- so the
+  # only thing that actually set the real LAN address was whatever LAN_IP
+  # value happened to already be in a restored .env from a prior install.
+  # Written explicitly here instead, so a genuinely fresh install (no
+  # backed-up .env at all) gets the operator-configured PIHOLE_LAN_IP
+  # rather than silently falling back to compose's own 127.0.0.1 default
+  # and binding to loopback only.
+  if [[ ! -f "$dir/.env" && -f "$REPO_DIR/pihole/.env.example" ]]; then
+    install -m 0644 "$REPO_DIR/pihole/.env.example" "$dir/.env"
+  fi
+  if [[ -f "$dir/.env" ]]; then
+    if grep -q '^LAN_IP=' "$dir/.env"; then
+      sed -i "s|^LAN_IP=.*|LAN_IP=$lan_ip|" "$dir/.env"
+    else
+      printf 'LAN_IP=%s\n' "$lan_ip" >> "$dir/.env"
+    fi
+    chmod 600 "$dir/.env"
+  fi
 }
 
 step_pihole_start() {
@@ -1301,30 +1356,26 @@ step_ghidra_worker_install() {
 }
 
 step_ml_worker_start() {
-  # Same relative-build-context issue as ghidra (docker-compose.yml here has
-  # `build: context: .`) -- symlink the whole directory, not just the
-  # compose file, confirmed live (first #518 test run: "failed to read
-  # dockerfile: open Dockerfile: no such file or directory").
-  local src="$REPO_DIR/ml-worker"
-  [[ -d "$src" ]] || { echo "no ml-worker/ directory in repo"; return 1; }
-  [[ -f "$src/docker-compose.yml" ]] || { echo "no docker-compose.yml under ml-worker/"; return 1; }
-  if [[ -f /var/dockge/stacks/ml-worker/.env && ! -L /var/dockge/stacks/ml-worker ]]; then
-    mv /var/dockge/stacks/ml-worker/.env "$src/.env"
-  fi
-  rm -rf /var/dockge/stacks/ml-worker
-  ln -sfn "$src" /var/dockge/stacks/ml-worker
-  ln -sf "$src/docker-compose.yml" "$src/compose.yml"
-  (cd "$src" && with_retry 3 15 docker compose -f compose.yml up -d --wait) || return 1
-
-  # #593: `--wait` above only waits for the container to reach "running" --
-  # ml-worker has no Docker HEALTHCHECK defined, so this step reported OK on
-  # every run even while the container was stuck in its own internal
-  # 5-minute Elasticsearch-connect retry loop (a real requirements.txt
-  # regression, #599) or had built against a broken dependency set
-  # entirely. Neither failure mode makes the container exit or crash-loop
-  # at the Docker level, so `--wait` alone can never catch either one.
-  # Poll the container's own log for the exact line worker.py emits once
-  # it's genuinely ready, instead of trusting compose's exit code.
+  # #1505: provisioning is now step_arcane_import_stacks/
+  # step_start_remaining_stacks' job -- the relative-build-context breakage
+  # this step used to work around by symlinking the whole directory
+  # (confirmed live, first #518 test run: "failed to read dockerfile: open
+  # Dockerfile: no such file or directory") is exactly what Arcane's own
+  # directory-aware sync solves generically for every stack, which is the
+  # entire point of #1502. Symlinking here now would fight Arcane's
+  # ownership of /var/dockge/stacks/ml-worker instead. This step just
+  # verifies real readiness.
+  #
+  # #593: compose's own `--wait` (in step_start_remaining_stacks) only
+  # waits for the container to reach "running" -- ml-worker has no Docker
+  # HEALTHCHECK defined, so trusting that alone reported OK on every run
+  # even while the container was stuck in its own internal 5-minute
+  # Elasticsearch-connect retry loop (a real requirements.txt regression,
+  # #599) or had built against a broken dependency set entirely. Neither
+  # failure mode makes the container exit or crash-loop at the Docker
+  # level, so `--wait` alone can never catch either one. Poll the
+  # container's own log for the exact line worker.py emits once it's
+  # genuinely ready, instead of trusting compose's exit code.
   local waited=0 max_wait=90
   while (( waited < max_wait )); do
     if docker logs hp-ml-worker 2>&1 | grep -q 'Worker ready\.'; then
@@ -1353,9 +1404,19 @@ step_llm_worker_selftest() {
   # it failed with "exec: --selftest: executable file not found in $PATH"
   # because the image has no ENTRYPOINT, so args replace CMD rather than
   # appending to it.
-  [[ -d "$REPO_DIR/llm-worker" ]] || { echo "no llm-worker/ directory in repo"; return 1; }
-  ( cd "$REPO_DIR/llm-worker" && \
-    with_retry 3 15 docker compose -f docker-compose.yml up -d --build --wait && \
+  #
+  # #1505: runs against Arcane's own materialized directory now, not
+  # $REPO_DIR/llm-worker directly -- container_name is fixed (hp-llm-worker)
+  # so a stray `up` from the repo checkout would likely still reconcile
+  # against the same container rather than duplicate it, but running it
+  # from the same directory Arcane manages avoids relying on that and
+  # matches step_ghidra_worker_install's own "reconcile in place, don't
+  # deploy a second copy" precedent. `up -d --build --wait` on an
+  # already-running, unchanged stack is a safe no-op here, same reasoning.
+  local dir="/var/dockge/stacks/llm-worker"
+  [[ -f "$dir/compose.yml" ]] || { echo "no $dir/compose.yml -- was arcane-import-stacks skipped or llm-worker not yet synced?"; return 1; }
+  ( cd "$dir" && \
+    with_retry 3 15 docker compose -f compose.yml up -d --build --wait && \
     docker exec hp-llm-worker python worker.py --selftest )
 }
 
@@ -1616,7 +1677,7 @@ run_step clone-repo            "Clone/update APIARY to $REPO_DIR" step_clone_rep
 run_step dockge-install        "Install Dockge"                     step_dockge_install
 
 run_step restore-env-files     "Restore .env files from LAN backup" step_restore_env_files
-run_step arcane-import-stacks  "Import honeypot-* stacks as Arcane Git syncs" step_arcane_import_stacks
+run_step arcane-import-stacks  "Import honeypot-* + auth-events-worker/llm-worker/ml-worker as Arcane Git syncs" step_arcane_import_stacks
 run_step stage-keycloak-theme  "Check out and sync the Keycloak login theme" step_stage_keycloak_theme
 run_step bootstrap-missing-envs "Bootstrap any still-missing .env from .example" step_bootstrap_missing_envs
 run_step provision-keycloak-secrets "Generate Keycloak secrets, reset bootstrap admin to admin/admin123" step_provision_keycloak_secrets
