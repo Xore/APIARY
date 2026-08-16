@@ -148,16 +148,11 @@ func (s *server) handleImplant(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// CodeQL flags target (derived from req.Path) as tainted reaching a
-	// path sink -- it doesn't model resolveHoneyfsPath's containment check
-	// as a sanitizer. TestResolveHoneyfsPathRejectsEscapes proves it holds
-	// against 14 traversal shapes (absolute paths, "..", mixed traversal,
-	// empty/bare "."), not just asserted by inspection.
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil { // codeql[go/path-injection]
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("mkdir: %v", err))
 		return
 	}
-	if err := os.WriteFile(target, content, 0o644); err != nil { // codeql[go/path-injection]
+	if err := os.WriteFile(target, content, 0o644); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("write: %v", err))
 		return
 	}
