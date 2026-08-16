@@ -1253,6 +1253,15 @@ step_llm_worker_selftest() {
     docker exec hp-llm-worker python worker.py --selftest )
 }
 
+step_backup_timer_install() {
+  # #1413: analysis/backup-honeypot.sh existed but was never actually wired
+  # into anything that would run it -- no systemd timer, no cron entry, zero
+  # snapshots in the live honeypot-fs repository despite it being registered
+  # on the cluster. Same class of "the script exists but nothing invokes it"
+  # gap as ghidra-worker-install above.
+  "$REPO_DIR/analysis/install-backup-timer.sh"
+}
+
 # ---------------------------------------------------------------------------
 # Phase 10 — verification
 # ---------------------------------------------------------------------------
@@ -1539,6 +1548,7 @@ else
   skip_step llm-worker-selftest "Run llm-worker --selftest" "ENABLE_GPU_STACK=false"
 fi
 
+run_step backup-timer-install  "Install daily Elasticsearch/stack backup timer" step_backup_timer_install
 run_step verify-containers     "Check for unhealthy containers"     step_verify_containers_healthy
 run_step verify-exited         "Check for non-zero-exit containers" step_verify_exited
 run_step verify-es-events      "Check Elasticsearch is reachable"   step_verify_elasticsearch_events
