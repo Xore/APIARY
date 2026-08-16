@@ -15,22 +15,26 @@
 # Skips cleanly when nothing has been vendored yet: the sync is optional, and
 # the local rules work on their own.
 #
-# Usage: scripts/check-yara-corpus.sh
+# Usage: scripts/check-yara-corpus.sh [rules-dir]
+# rules-dir defaults to the real #1502 location; test_sync_yara.sh passes its
+# own throwaway fixture path explicitly instead, since scripts/ (repo-shared)
+# and analysis/yara/ (moved under arcane/home/honeypot-payload-analysis/) no
+# longer sit at the same relative depth for dirname-arithmetic to bridge.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-rules="$root/analysis/yara/rules"
+rules="${1:-$root/arcane/home/honeypot-payload-analysis/analysis/yara/rules}"
 dest="$rules/upstream"
 lock="$rules/upstream.lock"
 index="$rules/index.yar"
 
 if [ ! -e "$lock" ] && [ ! -d "$dest" ]; then
-  echo "no upstream corpus vendored - skipping (analysis/yara/sync-yara.sh adds one)"
+  echo "no upstream corpus vendored - skipping (arcane/home/honeypot-payload-analysis/analysis/yara/sync-yara.sh adds one)"
   exit 0
 fi
 
-[ -f "$lock" ] || { echo "$dest exists but $lock does not - run analysis/yara/sync-yara.sh" >&2; exit 1; }
-[ -d "$dest" ] || { echo "$lock exists but $dest does not - run analysis/yara/sync-yara.sh" >&2; exit 1; }
+[ -f "$lock" ] || { echo "$dest exists but $lock does not - run arcane/home/honeypot-payload-analysis/analysis/yara/sync-yara.sh" >&2; exit 1; }
+[ -d "$dest" ] || { echo "$lock exists but $dest does not - run arcane/home/honeypot-payload-analysis/analysis/yara/sync-yara.sh" >&2; exit 1; }
 [ -f "$dest/MANIFEST" ] || { echo "missing $dest/MANIFEST" >&2; exit 1; }
 
 read_pin() { sed -n "s/^$1=//p" "$lock" | head -n1; }
@@ -71,7 +75,7 @@ if [ "$listed" != "$present" ]; then
   exit 1
 fi
 
-[ -f "$index" ] || { echo "missing $index - run analysis/yara/sync-yara.sh" >&2; exit 1; }
+[ -f "$index" ] || { echo "missing $index - run arcane/home/honeypot-payload-analysis/analysis/yara/sync-yara.sh" >&2; exit 1; }
 while read -r included; do
   [ -f "$rules/$included" ] || {
     echo "index.yar includes $included, which does not exist" >&2; exit 1; }

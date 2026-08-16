@@ -65,12 +65,12 @@ curl -fsS -X PUT "$es_url/_ilm/policy/dionaea-incidents-30d" \
 # Extract exactly the dionaea-incidents template's JSON body between its PUT
 # command's heredoc markers, same technique test_geoip_pipeline.sh uses --
 # stays in sync with elasticsearch-setup.sh automatically.
-start_line=$(grep -n '_index_template/dionaea-incidents"' "$src_root/analysis/elasticsearch-setup.sh" | head -1 | cut -d: -f1)
+start_line=$(grep -n '_index_template/dionaea-incidents"' "$src_root/arcane/home/honeypot-init/analysis/elasticsearch-setup.sh" | head -1 | cut -d: -f1)
 body_start=$((start_line + 3))
-end_line=$(tail -n "+$body_start" "$src_root/analysis/elasticsearch-setup.sh" | grep -n '^JSON$' | head -1 | cut -d: -f1)
+end_line=$(tail -n "+$body_start" "$src_root/arcane/home/honeypot-init/analysis/elasticsearch-setup.sh" | grep -n '^JSON$' | head -1 | cut -d: -f1)
 body_end=$((body_start + end_line - 2))
 tmp="$(mktemp -d)"
-sed -n "${body_start},${body_end}p" "$src_root/analysis/elasticsearch-setup.sh" > "$tmp/template.json"
+sed -n "${body_start},${body_end}p" "$src_root/arcane/home/honeypot-init/analysis/elasticsearch-setup.sh" > "$tmp/template.json"
 
 python3 -c "import json; json.load(open('$tmp/template.json'))" ||
   fail "extracted template body is not valid JSON -- extraction line range needs updating"

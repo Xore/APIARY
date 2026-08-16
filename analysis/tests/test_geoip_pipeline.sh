@@ -66,11 +66,11 @@ done
 # after the heredoc (the body needs a placeholder substituted first, see
 # below), so it's no longer adjacent to "<<'JSON'" the way earlier versions
 # of this pipeline's install code had it.
-start_line=$(grep -n "cat <<'JSON'" "$src_root/analysis/elasticsearch-setup.sh" | head -1 | cut -d: -f1)
+start_line=$(grep -n "cat <<'JSON'" "$src_root/arcane/home/honeypot-init/analysis/elasticsearch-setup.sh" | head -1 | cut -d: -f1)
 body_start=$((start_line + 1))
-end_line=$(tail -n "+$body_start" "$src_root/analysis/elasticsearch-setup.sh" | grep -n '^JSON$' | head -1 | cut -d: -f1)
+end_line=$(tail -n "+$body_start" "$src_root/arcane/home/honeypot-init/analysis/elasticsearch-setup.sh" | grep -n '^JSON$' | head -1 | cut -d: -f1)
 body_end=$((body_start + end_line - 2))
-sed -n "${body_start},${body_end}p" "$src_root/analysis/elasticsearch-setup.sh" > "$tmp/pipeline.json.tmpl"
+sed -n "${body_start},${body_end}p" "$src_root/arcane/home/honeypot-init/analysis/elasticsearch-setup.sh" > "$tmp/pipeline.json.tmpl"
 
 # #827: the extracted body still has the literal __ES_HOME_NET_JSON__
 # placeholder elasticsearch-setup.sh's own sed substitutes at install time --

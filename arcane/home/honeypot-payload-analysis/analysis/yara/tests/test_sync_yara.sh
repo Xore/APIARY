@@ -14,7 +14,12 @@ if ! command -v yara >/dev/null 2>&1 && ! command -v yarac >/dev/null 2>&1; then
   exit 0
 fi
 
-src_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+# #1502: analysis/yara/ moved under arcane/home/honeypot-payload-analysis/,
+# but scripts/ (repo-shared, not per-stack) did not -- the two source files
+# below no longer share a common ancestor at the same relative depth, so
+# this needs two roots instead of one.
+yara_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../../../.." && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
@@ -28,8 +33,8 @@ compile() {
 # ── A tree to sync into ──────────────────────────────────────────────────────
 root="$tmp/root"
 mkdir -p "$root/analysis/yara/rules" "$root/scripts"
-cp "$src_root/analysis/yara/sync-yara.sh" "$root/analysis/yara/"
-cp "$src_root/scripts/check-yara-corpus.sh" "$root/scripts/"
+cp "$yara_dir/sync-yara.sh" "$root/analysis/yara/"
+cp "$repo_root/scripts/check-yara-corpus.sh" "$root/scripts/"
 cat > "$root/analysis/yara/rules/honeypot.yar" <<'EOF'
 rule HP_Local_Marker {
   condition: uint16(0) == 0x5a4d
@@ -63,7 +68,7 @@ git -C "$up" -c user.email=t@example.invalid -c user.name=test commit -qm corpus
 upstream_commit="$(git -C "$up" rev-parse HEAD)"
 
 run_sync() { ( cd "$root" && YARA_UPSTREAM_REPO="$up" "$root/analysis/yara/sync-yara.sh" "$@" ); }
-run_check() { ( cd "$root" && "$root/scripts/check-yara-corpus.sh" ); }
+run_check() { ( cd "$root" && "$root/scripts/check-yara-corpus.sh" "$root/analysis/yara/rules" ); }
 
 # ── check passes when nothing is vendored ────────────────────────────────────
 run_check >/dev/null || fail "check should skip cleanly with no corpus vendored"

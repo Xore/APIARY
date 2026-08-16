@@ -21,7 +21,7 @@
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-realm_file="${repo_root}/keycloak/realm/apiary-realm.json"
+realm_file="${repo_root}/arcane/home/honeypot-keycloak/keycloak/realm/apiary-realm.json"  # #1502
 
 network="dashkc-$$"
 pg="dashkc-pg-$$"

@@ -5,7 +5,8 @@ import unittest
 from datetime import date
 from pathlib import Path
 
-MODULE_PATH = Path(__file__).resolve().parent.parent / "dedupe-payloads.py"
+ROOT = Path(__file__).resolve().parents[2]
+MODULE_PATH = ROOT / "arcane/home/honeypot-payload-analysis/analysis/dedupe-payloads.py"  # #1502
 SPEC = importlib.util.spec_from_file_location("dedupe_payloads", MODULE_PATH)
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
