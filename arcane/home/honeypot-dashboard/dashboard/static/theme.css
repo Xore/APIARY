@@ -417,6 +417,22 @@ p { color: var(--text-secondary); }
 }
 .timeline-block { animation: timeline-block-in 320ms var(--ease-out) backwards; }
 
+/* #1533: the attacker replay tab's session timeline (ui/tty_replay.html,
+   #tty-attacker-timeline) reads left-to-right, oldest entry first, like an
+   actual timeline -- not top-to-bottom like every other event list on the
+   dashboard. .timeline-track turns .card__scroll's generic overflow:auto
+   into a horizontal filmstrip; each .timeline-block is a fixed-width column
+   with a top rule (the horizontal equivalent of the vertical layout's left
+   rule) instead of stretching full-width with a left rule. */
+.timeline-track { display: flex; align-items: stretch; gap: 14px; }
+.timeline-block {
+  flex: 0 0 auto;
+  width: 240px;
+  padding: 10px 12px 6px;
+  border-top: 2px solid var(--border-subtle);
+}
+.timeline-block__meta { font-size: .875rem; color: var(--text-muted); }
+
 .btn {
   display: inline-flex;
   min-height: 34px;
