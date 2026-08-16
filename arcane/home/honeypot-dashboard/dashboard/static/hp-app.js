@@ -759,6 +759,7 @@
     "overview-header",
     "overview-kpis",
     "panel-live",
+    "panel-health",
     "panel-threats",
     "panel-behavior",
     "panel-evidence",
