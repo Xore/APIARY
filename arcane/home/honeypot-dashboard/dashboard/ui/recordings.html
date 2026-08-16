@@ -24,12 +24,15 @@
           </div>
         </header>
         <div class="filters" id="recordings-filters"><a class="chip" href="/">&larr; dashboard</a><span class="chip">{{len .Rows}} recordings</span>{{template "filterbar" .}}</div>
-        <div class="card wide" id="recordings-table">{{if .Rows}}<div class="card__scroll"><table class="recent data-table"><thead><tr><th>time</th><th>source</th><th>session</th><th></th></tr></thead><tbody>
+        {{/* #1526: this table is the whole page's content -- see events.html's
+             main table for the full reasoning against card__scroll's fixed
+             340px cap here. */}}
+        <div class="card wide" id="recordings-table">{{if .Rows}}<table class="recent data-table"><thead><tr><th>time</th><th>source</th><th>session</th><th></th></tr></thead><tbody>
         {{range .Rows}}<tr><td data-hp-time{{if .TimeUTC}} data-hp-utc="{{.TimeUTC}}"{{end}}>{{.Time}}</td>
         <td class="v">{{if .SrcIP}}<a href="/investigate/ip/{{.SrcIP | urlquery}}" title="attacker profile for {{.SrcIP}}">{{.SrcIP}}</a>{{else}}<span class="tw:text-muted">unattributed</span>{{end}}{{if .Country}} <span class="badge badge--info">{{.Country}}</span>{{end}}</td>
         <td class="v">{{if .Session}}<a class="lnk sess" href="/sessions/{{.Session | urlquery}}" title="full chronological session replay">session {{.Session}}</a>{{end}}</td>
         <td><a class="lnk" href="{{.TTYReplay}}" title="watch the session play back in-browser">watch &rarr;</a></td></tr>{{end}}
-        </tbody></table></div>{{else}}<p class="empty">no session recordings captured yet</p>{{end}}</div>
+        </tbody></table>{{else}}<p class="empty">no session recordings captured yet</p>{{end}}</div>
         <footer id="recordings-footer">{{brandText}} &bull; static investigation view</footer>
       </div>
     </main>

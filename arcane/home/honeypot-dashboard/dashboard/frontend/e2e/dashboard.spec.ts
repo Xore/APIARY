@@ -657,7 +657,10 @@ test.describe("dashboard browser behaviour", () => {
     await expect(page.getByRole("heading", { name: "Fingerprints (1)" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Payload hashes (1)" })).toBeVisible();
     await expect(page.locator("#attackers-selected-meta .card__scroll")).toHaveCount(5);
-    await expect(page.locator("#attackers-table > .card__scroll")).toBeVisible();
+    // #1526: #attackers-table is this page's whole content -- no longer
+    // wrapped in card__scroll's fixed 340px cap (see events.html's own
+    // comment for the full reasoning); the table itself is a direct child.
+    await expect(page.locator("#attackers-table > table")).toBeVisible();
   });
 
   
@@ -751,7 +754,10 @@ test.describe("dashboard browser behaviour", () => {
     await page.goto("/campaigns?sensor=cowrie");
     const campaigns = page.locator("#campaigns-root");
     await expect(campaigns).toHaveAttribute("aria-busy", "true");
-    await expect(campaigns.locator("#campaigns-table .card__scroll")).toBeVisible();
+    // #1526: #campaigns-table's skeleton and loaded table are both direct
+    // children now -- no card__scroll wrapper (fixed 340px cap) on a
+    // single-card page that should grow with the page instead.
+    await expect(campaigns.locator("#campaigns-table > table")).toBeVisible();
     releaseCampaigns();
     await expect(campaigns).not.toHaveAttribute("aria-busy", "true");
     await expect(campaigns.locator("#campaigns-table .skeleton-line")).toHaveCount(0);
@@ -767,7 +773,8 @@ test.describe("dashboard browser behaviour", () => {
     await page.goto("/clusters?kind=Fingerprint&sensor=cowrie");
     const clusters = page.locator("#clusters-root");
     await expect(clusters).toHaveAttribute("aria-busy", "true");
-    await expect(clusters.locator("#clusters-table .card__scroll")).toBeVisible();
+    // #1526: same reasoning as #campaigns-table above -- direct child now.
+    await expect(clusters.locator("#clusters-table > table")).toBeVisible();
     releaseClusters();
     await expect(clusters).not.toHaveAttribute("aria-busy", "true");
     await expect(clusters.locator("#clusters-table")).toContainText("fixture-shared-hassh");
@@ -864,20 +871,24 @@ test.describe("dashboard browser behaviour", () => {
 
   test("event and problem-report details stay complete, inline, and bounded (#1447, #1470)", async ({ page }) => {
     await page.goto("/events");
-    const eventTableScroll = page.locator("#events-grid > .card .card__scroll").first();
     const eventDetails = page.locator("[data-hp-event-detail]");
     await expect(eventDetails).toHaveCount(25);
     await expect(eventDetails.first().getByRole("heading", { name: "Normalized event" })).toBeVisible();
     await expect(eventDetails.first()).toContainText("browser-session");
     await expect(eventDetails.first().locator("pre.code")).toContainText('"SrcIP"');
     await expect(page.locator('[data-hp-evidence], [data-hp-evidence-body]')).toHaveCount(0);
-    const eventBounds = await eventTableScroll.evaluate(element => ({
+    // #1526: Event Explorer's table is no longer wrapped in its own
+    // card__scroll (a fixed 340px cap that left most of a tall page blank
+    // below a short table) -- the page itself (.app-main) is the bounded,
+    // scrollable region now, same as every other single-card-per-page
+    // layout this fix touched.
+    const appMainBounds = await page.locator(".app-main").evaluate(element => ({
       overflowY: getComputedStyle(element).overflowY,
       clientHeight: element.clientHeight,
       scrollHeight: element.scrollHeight,
     }));
-    expect(eventBounds.overflowY).toBe("auto");
-    expect(eventBounds.scrollHeight).toBeGreaterThan(eventBounds.clientHeight);
+    expect(appMainBounds.overflowY).toBe("auto");
+    expect(appMainBounds.scrollHeight).toBeGreaterThan(appMainBounds.clientHeight);
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/events");

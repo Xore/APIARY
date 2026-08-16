@@ -87,14 +87,24 @@
         <p class="note">showing events {{.From}}–{{.To}} of {{.Total}} &bull; additional events load in groups of 25 while scrolling</p>
 
         <div class="tw:grid tw:grid-cols-12 tw:gap-3.5" id="events-grid">
+          {{/* #1526: this card is the entire page's content -- unlike the
+               dashboard grids (overview.html, ghidra.html) that stack many
+               cards and need each one's card__scroll to stay a modest,
+               bounded 340px, a single-card-per-page layout should grow
+               with its content and let the page (.app-main) itself scroll,
+               the same reasoning intel.html's "commands" page documents on
+               its own #790-reverted card__scroll. Wrapping this table in
+               card__scroll capped it to 340px regardless of viewport
+               height, leaving most of a tall page blank below a short
+               table. */}}
           <div class="card wide">
             {{if .Events}}
-            <div class="card__scroll"><table class="recent data-table data-table--responsive">
+            <table class="recent data-table data-table--responsive">
               <thead><tr><th>time</th><th>sensor</th><th>source ip</th><th>port</th><th>detail</th></tr></thead>
               <tbody data-hp-page-url="{{.RowsURL}}" data-hp-total="{{.Total}}" data-hp-offset="{{.Offset}}">
               {{template "eventrows" .}}
               </tbody>
-            </table></div>
+            </table>
             {{else if .Ready}}<p class="empty">no events match this filter</p>
             {{else}}
             {{/* #1155: before the first rebuild() cycle completes, this
@@ -103,7 +113,7 @@
                  skeleton reads as loading; the real empty-state text would
                  read as a filter matching nothing, which is a different
                  and misleading claim this early. */}}
-            <div class="card__scroll" aria-hidden="true"><table class="recent data-table"><thead><tr><th>time</th><th>sensor</th><th>source ip</th><th>port</th><th>detail</th></tr></thead><tbody><tr><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><div class="skeleton-line" style="width:84%"></div><article class="card wide tw:mt-3"><h3>Normalized event</h3><div class="card__scroll"><div class="skeleton-line" style="width:92%"></div><div class="skeleton-line" style="width:76%"></div><div class="skeleton-line" style="width:86%"></div></div></article></td></tr><tr><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><div class="skeleton-line" style="width:72%"></div><article class="card wide tw:mt-3"><h3>Normalized event</h3><div class="card__scroll"><div class="skeleton-line" style="width:88%"></div><div class="skeleton-line" style="width:68%"></div></div></article></td></tr></tbody></table></div>
+            <table class="recent data-table" aria-hidden="true"><thead><tr><th>time</th><th>sensor</th><th>source ip</th><th>port</th><th>detail</th></tr></thead><tbody><tr><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><div class="skeleton-line" style="width:84%"></div><article class="card wide tw:mt-3"><h3>Normalized event</h3><div class="card__scroll"><div class="skeleton-line" style="width:92%"></div><div class="skeleton-line" style="width:76%"></div><div class="skeleton-line" style="width:86%"></div></div></article></td></tr><tr><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><div class="skeleton-line" style="width:72%"></div><article class="card wide tw:mt-3"><h3>Normalized event</h3><div class="card__scroll"><div class="skeleton-line" style="width:88%"></div><div class="skeleton-line" style="width:68%"></div></div></article></td></tr></tbody></table>
             {{end}}
           </div>
         </div>
