@@ -240,6 +240,21 @@ func main() {
 	// call site (serveIPBlockAction, serveManualBlackholeExport) already
 	// treats a nil ipBlocks as "manual blocking disabled".
 	s.ipBlocks = newIPBlockManager(s.es)
+	// #1487: same local-only-endpoint posture as OLLAMA_URL above --
+	// CANARYTOKENS_API_URL must point at the self-hosted Canarytokens
+	// frontend's WireGuard-tunnel address (docker-compose.canarytokens.yml,
+	// e.g. http://10.8.0.2:19426), never a public endpoint. Unset or
+	// rejected leaves s.canarytokens nil, and every call site treats that
+	// as "canarytoken creation disabled" (settings_modal.html's Canarytokens
+	// pane reports itself unavailable rather than erroring).
+	if canarytokensAPIURL := os.Getenv("CANARYTOKENS_API_URL"); canarytokensAPIURL != "" {
+		if canarytokensAPIURLIsLocal(canarytokensAPIURL) {
+			s.canarytokens = newCanarytokensClient(canarytokensAPIURL, os.Getenv("CANARYTOKENS_API_ROOT"))
+		} else {
+			fmt.Fprintf(os.Stderr, "dashboard: CANARYTOKENS_API_URL %s rejected (must be a local/internal endpoint), canarytoken creation disabled\n", canarytokensAPIURL)
+		}
+	}
+	s.canarytokensHistory = newCanarytokensManager(s.es)
 	// #913: same nil-when-unconfigured posture as s.alerts above -- every
 	// call site (applyMLAnomalyAcks, serveMLAnomalyAck) already treats a nil
 	// mlAnomalyAcks as "acknowledgment disabled".

@@ -270,14 +270,23 @@ type store struct {
 	alerts         *alertManager
 	ipBlocks       *ipBlockManager      // #914: manual IP block state; nil until initialised in main()
 	mlAnomalyAcks  *mlAnomalyAckManager // #913: ack/dismiss state for ml-anomalies, mirrors alerts' own shape; nil until initialised in main()
-	intelligence   *intelligenceStore
-	settings       *settingsService  // typed settings stores; nil only in partial test fixtures
-	reports        *reportStore      // Reports studio definitions + generated PDFs; nil only in test fixtures
-	workbench      *workbenchService // immutable recipes + correlated analyzer runs (#155)
-	expected       []string          // configured feeds shown even before their first event
-	subs           map[chan struct{}]struct{}
-	authAccountURL string // validated once at startup; see validatedAuthAccountURL
-	authAdminURL   string // validated Keycloak admin-console URL; exposed only to dashboard admins
+	// canarytokens/canarytokensHistory (#1487): dashboard-driven creation of
+	// external-use Canarytokens (PDF/Word/Excel/custom-image/Windows-Folder/
+	// QR). canarytokens is nil unless CANARYTOKENS_API_URL is set and passes
+	// canarytokensAPIURLIsLocal -- creation itself is "unconfigured", the
+	// same posture s.ollamaURL takes. canarytokensHistory is the dashboard's
+	// own record of what it created (ipBlocks' own nil-when-no-es shape);
+	// nil only disables the history/re-download list, not creation.
+	canarytokens        *canarytokensClient
+	canarytokensHistory *canarytokensManager
+	intelligence        *intelligenceStore
+	settings            *settingsService  // typed settings stores; nil only in partial test fixtures
+	reports             *reportStore      // Reports studio definitions + generated PDFs; nil only in test fixtures
+	workbench           *workbenchService // immutable recipes + correlated analyzer runs (#155)
+	expected            []string          // configured feeds shown even before their first event
+	subs                map[chan struct{}]struct{}
+	authAccountURL      string // validated once at startup; see validatedAuthAccountURL
+	authAdminURL        string // validated Keycloak admin-console URL; exposed only to dashboard admins
 	// lastActivity (#486) is a unix-second timestamp of the most recent
 	// dashboard request, touched by touchActivity (main.go's request
 	// middleware) and read by the periodic rebuild loop to skip its ES/log

@@ -21,16 +21,18 @@
 # Usage:
 #   ./scripts/deploy-dashboard-rolling.sh
 #
-# Run from the actual Dockge-managed dashboard stack directory on the
+# Run from the actual Arcane-managed dashboard stack directory on the
 # homeserver (/opt/stacks/honeypot-dashboard) -- see
 # feedback_dashboard_deploy_path in this repo's own deploy docs for why
-# that path, not a git checkout, is the real build tree. Requires
-# docker-compose.dashboard.yml (this repo's copy or the deployed one) in
-# the current directory or passed via COMPOSE_FILE.
+# that path, not a git checkout, is the real build tree. #1502: Arcane's
+# directory-aware sync materializes the compose file there as compose.yml
+# (from arcane/home/honeypot-dashboard/compose.yml), not
+# docker-compose.dashboard.yml. Requires compose.yml in the current
+# directory or passed via COMPOSE_FILE.
 
 set -euo pipefail
 
-COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.dashboard.yml}"
+COMPOSE_FILE="${COMPOSE_FILE:-compose.yml}"
 REPLICAS=(dashboard dashboard-b)
 CONTAINER_NAMES=(hp-dashboard hp-dashboard-b)
 

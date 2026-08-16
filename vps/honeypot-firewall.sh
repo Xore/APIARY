@@ -10,14 +10,27 @@
 # and is unaffected -- portbridge's 22 is a separate host listener bound
 # only after 2222 takes over the real SSH port.
 #
+# #1509: the exact same drift happened again, silently, and much further --
+# this script is documented as needing a manual re-run
+# (check-firewall-portbridge-sync.sh) "after editing either file", not
+# wired into CI, and nobody re-ran it as sensors were added over time.
+# Confirmed live via `ufw status numbered` on the VPS that beelzebub
+# (389/2200/8000/8880), hellpot (8080), elasticpot (9201), galah (8889), and
+# sentrypeer (5070 tcp+udp) all had a live portbridge RULES entry but no
+# firewall rule -- fully unreachable from the internet despite every other
+# piece (dashboard visibility, ip-enrichment-worker joins) being wired.
+# wordpot (8082) and endlessh (2022) are newly added in this same commit.
+# check-firewall-portbridge-sync.sh now passes clean against this file.
+#
 # vps/check-firewall-portbridge-sync.sh statically compares this list
-# against RULES so this can't silently fall behind again.
+# against RULES so this can't silently fall behind again -- run it after
+# editing either file.
 set -eu
 
-for port in 21 22 23 25 102 110 135 143 445 502 1025 1080 1102 1433 1502 1723 1883 2102 2375 2404 2502 2575 3306 3389 4443 5060 5432 5555 5900 6379 8081 8443 8888 9100 9200 10001 11112 11211 20000 27017 44818 50100; do
+for port in 21 22 23 25 102 110 135 143 389 445 502 1025 1080 1102 1433 1502 1723 1883 2022 2102 2200 2375 2404 2502 2575 3306 3389 4443 5060 5070 5432 5555 5900 6379 8000 8080 8081 8082 8443 8880 8888 8889 9100 9200 9201 10001 11112 11211 20000 27017 44818 50100; do
     ufw allow "${port}/tcp" comment honeypot
 done
 
-for port in 53 69 161 500 623 1900 5060 47808; do
+for port in 53 69 161 500 623 1900 5060 5070 47808; do
     ufw allow "${port}/udp" comment honeypot
 done

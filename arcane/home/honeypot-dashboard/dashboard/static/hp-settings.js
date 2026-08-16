@@ -194,12 +194,13 @@
       honeypot:   { title: "Honeypot operations",    desc: "Staged operational thresholds. Saving never restarts anything — apply with an operator-run restart." },
       users:      { title: "Users",                  desc: "Read-only projection of dashboard activity. Accounts are managed in the auth service." },
       services:   { title: "Services",                desc: "Live container status for sensors, probes, and analysis workers, with start/stop/restart and logs." },
+      canarytokens: { title: "Canarytokens",           desc: "Create PDF/Word/Excel/image/QR/folder honeytokens for use outside this honeypot -- plant anywhere, alerted the instant one's opened." },
       elasticsearch: { title: "Elasticsearch history", desc: "Raw query_string search across every indexed honeypot and Suricata document." },
       "dead-letters": { title: "Ingest dead letters", desc: "Documents Elasticsearch rejected, with their original error and field shape." },
       history:    { title: "Configuration history",  desc: "Retained configuration revisions with rollback." },
       audit:      { title: "Audit log",              desc: "Settings changes with actor, fields, and result." }
     };
-    const ADMIN_PANES = ["branding", "report-presets", "behavior", "honeypot", "users", "services", "elasticsearch", "dead-letters", "history", "audit"];
+    const ADMIN_PANES = ["branding", "report-presets", "behavior", "honeypot", "users", "services", "canarytokens", "elasticsearch", "dead-letters", "history", "audit"];
     const isAdmin = navItems.some(nav => ADMIN_PANES.includes(nav.dataset.hpPaneNav));
 
     /* ---- state ----
@@ -317,6 +318,7 @@
         if (name === "honeypot") loadReporterStats();
         else if (name === "users") loadUsers();
         else if (name === "services") loadServices();
+        else if (name === "canarytokens") loadCanarytokensPane();
         else if (name === "elasticsearch") { loadEsStorageStats(); loadElasticsearchHistory(); }
         else if (name === "dead-letters") loadDeadLetters();
         else if (name === "history") loadHistory();
@@ -1110,6 +1112,168 @@
 
     const servicesRefresh = q("[data-hp-services-refresh]");
     if (servicesRefresh) servicesRefresh.addEventListener("click", loadServices);
+
+    /* ---- Canarytokens (#1487): create a PDF/Word/Excel/custom-image/
+       Windows-Folder/QR honeytoken for external use, and revisit/re-download
+       anything already created. Creation is a multipart POST (a plain JSON
+       body can't carry the optional image upload), so this bypasses api()'s
+       JSON body handling and calls it with a FormData body directly --
+       apiOnce() only sets an Accept header, letting fetch set its own
+       multipart Content-Type with boundary. */
+    let ctTypesByKey = null;
+
+    function ctTypeSelect() { return q("[data-hp-ct-type]"); }
+
+    async function loadCanarytokensTypes() {
+      const unavailable = q("[data-hp-canarytokens-unavailable]");
+      const form = q("[data-hp-canarytokens-form]");
+      try {
+        const { body } = await api("/api/settings/canarytokens/types");
+        ctTypesByKey = {};
+        (body.types || []).forEach(t => { ctTypesByKey[t.key] = t; });
+        const select = ctTypeSelect();
+        select.textContent = "";
+        (body.types || []).forEach(t => {
+          const option = document.createElement("option");
+          option.value = t.key;
+          option.textContent = t.label;
+          select.appendChild(option);
+        });
+        if (unavailable) unavailable.hidden = Boolean(body.available);
+        if (form) form.hidden = !body.available;
+        updateCanarytokensTypeUI();
+      } catch (error) {
+        if (unavailable) { unavailable.hidden = false; unavailable.textContent = "Canarytoken types could not be loaded — " + error.message.trim(); }
+        if (form) form.hidden = true;
+      }
+    }
+
+    function updateCanarytokensTypeUI() {
+      if (!ctTypesByKey) return;
+      const info = ctTypesByKey[ctTypeSelect().value] || {};
+      const desc = q("[data-hp-ct-type-desc]");
+      if (desc) desc.textContent = info.description || "";
+      const uploadRow = q("[data-hp-ct-upload-row]");
+      if (uploadRow) uploadRow.hidden = !info.requires_upload;
+      const fileInput = q("[data-hp-ct-file]");
+      if (fileInput) fileInput.required = Boolean(info.requires_upload);
+      const snippetRow = q("[data-hp-ct-snippet-row]");
+      if (snippetRow) snippetRow.hidden = !info.supports_snippet;
+    }
+
+    const ctTypeEl = ctTypeSelect();
+    if (ctTypeEl) ctTypeEl.addEventListener("change", updateCanarytokensTypeUI);
+    const ctSnippetToggle = q("[data-hp-ct-snippet-toggle]");
+    if (ctSnippetToggle) ctSnippetToggle.addEventListener("change", () => {
+      const text = q("[data-hp-ct-snippet-text]");
+      if (text) text.disabled = !ctSnippetToggle.checked;
+    });
+
+    function ctArtifactCell(record) {
+      const cell = document.createElement("td");
+      if (record.download_url) {
+        const link = document.createElement("a");
+        link.className = "btn btn-ghost btn-sm";
+        link.href = record.download_url;
+        link.textContent = "Download";
+        cell.appendChild(link);
+      } else if (record.token_url) {
+        const link = document.createElement("a");
+        link.className = "btn btn-ghost btn-sm";
+        link.href = record.token_url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = "Embed URL";
+        cell.appendChild(link);
+      } else {
+        cell.textContent = "—";
+      }
+      return cell;
+    }
+
+    async function loadCanarytokensHistory() {
+      const list = q("[data-hp-ct-list]");
+      if (!list) return;
+      try {
+        const { body } = await api("/api/settings/canarytokens");
+        const tokens = body.tokens || [];
+        list.textContent = "";
+        if (!tokens.length) { list.innerHTML = '<tr><td colspan="5">No canarytokens created yet.</td></tr>'; return; }
+        tokens.forEach(record => {
+          const row = document.createElement("tr");
+          const typeCell = document.createElement("td");
+          typeCell.textContent = (ctTypesByKey && ctTypesByKey[record.token_type] && ctTypesByKey[record.token_type].label) || record.token_type;
+          row.appendChild(typeCell);
+          const memoCell = document.createElement("td");
+          memoCell.textContent = record.memo;
+          row.appendChild(memoCell);
+          const createdCell = document.createElement("td");
+          createdCell.textContent = record.created_at ? new Date(record.created_at).toLocaleString() : "—";
+          row.appendChild(createdCell);
+          const byCell = document.createElement("td");
+          byCell.textContent = record.created_by || "—";
+          row.appendChild(byCell);
+          row.appendChild(ctArtifactCell(record));
+          list.appendChild(row);
+        });
+      } catch (error) {
+        list.textContent = "";
+        const row = document.createElement("tr");
+        const cell = document.createElement("td");
+        cell.colSpan = 5;
+        cell.textContent = "Could not load history — " + error.message.trim();
+        row.appendChild(cell);
+        list.appendChild(row);
+      }
+    }
+
+    async function loadCanarytokensPane() {
+      await loadCanarytokensTypes();
+      await loadCanarytokensHistory();
+    }
+
+    const ctRefresh = q("[data-hp-ct-refresh]");
+    if (ctRefresh) ctRefresh.addEventListener("click", loadCanarytokensHistory);
+
+    const ctForm = q("[data-hp-canarytokens-form]");
+    if (ctForm) ctForm.addEventListener("submit", async event => {
+      event.preventDefault();
+      const resultEl = q("[data-hp-ct-result]");
+      const submitBtn = q("[data-hp-ct-submit]");
+      const info = (ctTypesByKey && ctTypesByKey[ctTypeSelect().value]) || {};
+      const fileInput = q("[data-hp-ct-file]");
+      if (info.requires_upload && (!fileInput || !fileInput.files || !fileInput.files.length)) {
+        if (resultEl) { resultEl.hidden = false; resultEl.textContent = "Choose a file to upload first."; resultEl.classList.add("is-error"); }
+        return;
+      }
+      const formData = new FormData();
+      formData.set("token_type", ctTypeSelect().value);
+      formData.set("memo", q("[data-hp-ct-memo]").value.trim());
+      if (info.supports_snippet && ctSnippetToggle && ctSnippetToggle.checked) {
+        formData.set("include_text_snippet", "true");
+        formData.set("text_snippet", q("[data-hp-ct-snippet-text]").value);
+      }
+      if (info.requires_upload && fileInput.files.length) formData.set("file", fileInput.files[0]);
+
+      submitBtn.disabled = true;
+      try {
+        const { body: record } = await api("/api/settings/canarytokens/create", { method: "POST", body: formData });
+        if (resultEl) {
+          resultEl.hidden = false;
+          resultEl.classList.remove("is-error");
+          resultEl.textContent = record.embed_only
+            ? "Created. Embed this URL wherever the image should live: " + record.token_url
+            : "Created. Use the Download link in the table below to get the artifact.";
+        }
+        q("[data-hp-ct-memo]").value = "";
+        if (fileInput) fileInput.value = "";
+        await loadCanarytokensHistory();
+      } catch (error) {
+        if (resultEl) { resultEl.hidden = false; resultEl.classList.add("is-error"); resultEl.textContent = "Creation failed — " + error.message.trim(); }
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
 
     /* ---- Elasticsearch storage stats (#647): a brief cluster/storage
        glance above the history search below. ---- */

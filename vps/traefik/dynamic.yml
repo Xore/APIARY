@@ -8,7 +8,11 @@
 # socat forwards: VPS listen port → 10.8.0.2:home-exposed-port → app
 #
 # socat container         listen  →  home exposed  →  app internal
-# socat-static            :8080   →  10.8.0.2:8080  (nginx)
+# socat-hp-hellpot        :8084   →  10.8.0.2:8080  (hellpot :8080,
+#                                     intentional -- #1509, catches the
+#                                     bare/www/static hosts, was a dead
+#                                     `socat-static` bridge to a "(nginx)"
+#                                     backend that hasn't existed in years)
 # socat-hp-http           :8081   →  10.8.0.2:19081 (http-honeypot :8080)
 # socat-hp-snare          :8082   →  10.8.0.2:19082 (snare :8080)
 # socat-hp-dashboard      :8090   →  10.8.0.2:19090 (dashboard :8080)
@@ -168,13 +172,20 @@ http:
         options: modern
       middlewares: [security-headers, rate-limit-keycloak-admin]
 
-    static-site:
+    # #1509: was `static-site`, routing to a dead `socat-static` bridge --
+    # see socat-hp-hellpot's own header comment in vps/docker-compose.yml
+    # for the full story. Middlewares match every other honeypot-facing
+    # router (honeypot-http/-snare/-canarytokens) now: plain
+    # `[security-headers]`, no `rate-limit` -- that middleware belongs to
+    # this file's personal/dev routes, not a decoy meant to absorb
+    # unlimited scanner traffic.
+    honeypot-hellpot-root:
       rule: "Host(`www.honeypot.example`) || Host(`honeypot.example`) || Host(`static.honeypot.example`)"
       entryPoints: [websecure]
-      service: static-site
+      service: honeypot-hellpot
       tls:
         options: modern
-      middlewares: [security-headers, rate-limit]
+      middlewares: [security-headers]
 
     python-api:
       rule: "Host(`api.honeypot.example`)"
@@ -253,6 +264,19 @@ http:
       rule: "Host(`www-portal.honeypot.example`) || Host(`snare.honeypot.example`)"
       entryPoints: [websecure]
       service: honeypot-snare
+      tls:
+        options: modern
+      middlewares: [security-headers]
+
+    # #1487: self-hosted Canarytokens' switchboard HTTP channel (bridged via
+    # socat-hp-canarytokens -> 10.8.0.2:19427). Unauthenticated like
+    # honeypot-http/-snare above -- this is what fires when a
+    # dashboard-created PDF/Word/Excel/image/QR/Windows-Folder token is
+    # opened anywhere on the internet, not an operator-facing route.
+    honeypot-canarytokens:
+      rule: "Host(`cdn.honeypot.example`)"
+      entryPoints: [websecure]
+      service: honeypot-canarytokens
       tls:
         options: modern
       middlewares: [security-headers]
@@ -480,10 +504,10 @@ http:
         passHostHeader: true
 
 
-    static-site:
+    honeypot-hellpot:
       loadBalancer:
         servers:
-          - url: "http://socat-static:8080"
+          - url: "http://socat-hp-hellpot:8084"
         passHostHeader: true
 
     python-api:
@@ -545,6 +569,12 @@ http:
       loadBalancer:
         servers:
           - url: "http://socat-hp-snare:8082"
+        passHostHeader: true
+
+    honeypot-canarytokens:
+      loadBalancer:
+        servers:
+          - url: "http://socat-hp-canarytokens:8083"
         passHostHeader: true
 
     # #266: two servers for zero-downtime rolling updates -- see

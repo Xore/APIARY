@@ -56,6 +56,11 @@ func (s *store) routes(tmpl *template.Template) *http.ServeMux {
 	mux.HandleFunc("GET /api/settings/services/{name}/logs", s.serveSettingsServiceItem)
 	mux.HandleFunc("POST /api/settings/services/{name}/{action}", s.serveSettingsServiceItem)
 	mux.HandleFunc("GET /api/settings/audit", s.serveSettingsAudit)
+	// #1487: dashboard-driven Canarytoken creation for external use.
+	mux.HandleFunc("GET /api/settings/canarytokens/types", s.serveCanarytokensTypes)
+	mux.HandleFunc("GET /api/settings/canarytokens", s.serveCanarytokensList)
+	mux.HandleFunc("POST /api/settings/canarytokens/create", s.serveCanarytokensCreate)
+	mux.HandleFunc("GET /api/settings/canarytokens/{id}/download", s.serveCanarytokensDownload)
 	mux.HandleFunc("GET /api/problem-reports", s.serveProblemReports)
 	mux.HandleFunc("POST /api/problem-reports", s.serveProblemReports)
 	mux.HandleFunc("PATCH /api/problem-reports/{id}", s.serveProblemReportItem)
