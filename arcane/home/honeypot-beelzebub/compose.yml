@@ -1,6 +1,6 @@
 # honeypot-beelzebub -- #1418: multi-protocol deception runtime
 # (github.com/beelzebub-labs/beelzebub, vendored -- see beelzebub/Dockerfile).
-# Same shape and reasoning as docker-compose.cisco-asa-honeypot.yml -- no
+# Same shape and reasoning as arcane/home/honeypot-cisco-asa-honeypot/compose.yml -- no
 # depends_on, its own fully private network, only host bind mounts.
 # Deployed as /opt/stacks/honeypot-beelzebub.
 #
@@ -8,7 +8,7 @@
 # full writeup):
 #
 # - No Redis (6379) or PostgreSQL (5432) services enabled, despite upstream
-#   supporting both: docker-compose.multipot.yml already binds those exact
+#   supporting both: arcane/home/honeypot-multipot/compose.yml already binds those exact
 #   ports (confirmed directly, not assumed from #1415's own research text,
 #   which was wrong on this point). A second listener on a nonstandard port
 #   would have far lower attacker-discovery value than the ports it can't

@@ -120,7 +120,7 @@ against this repo's own logic before pinning it:
   real failure/success path cleanly, not some unrelated startup error.
   Note for `geoipupdate` specifically: v8.0.0 changed error handling so
   it halts on the *first* per-database error instead of continuing
-  through the rest of the run. `docker-compose.init.yml` requests two
+  through the rest of the run. `arcane/home/honeypot-init/compose.yml` requests two
   editions (`GeoLite2-City`, `GeoLite2-ASN`) in a single run, so a
   transient failure on one can now silently prevent the other from
   refreshing too — worth remembering when diagnosing a stale `.mmdb`.

@@ -525,7 +525,7 @@ been deleted, not patched. The real files:
 
 - [`ml-worker/docker-compose.yml`](../ml-worker/docker-compose.yml) — the
   CPU-safe base. Joins `honeynet` as an **external** network (the same
-  pattern `docker-compose.init.yml` uses, `external: true`, since
+  pattern `arcane/home/honeypot-init/compose.yml` uses, `external: true`, since
   `docker-compose.yml` creates `honeynet` with a fixed, non-project-prefixed
   name precisely so a second stack can attach to it) — ml-worker has to read
   Elasticsearch continuously, unlike `analysis/ghidra/`'s stack, which is

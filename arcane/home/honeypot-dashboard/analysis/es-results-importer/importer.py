@@ -206,7 +206,7 @@ SOURCES = [
         # it must not gain an ES client itself. It writes one aggregate
         # results.json (every sample it has ever scanned, keyed by hash) to
         # the same yara-results named volume the dashboard already reads
-        # read-only (docker-compose.dashboard.yml) -- this source explodes
+        # read-only (arcane/home/honeypot-dashboard/compose.yml) -- this source explodes
         # that one file into one ES document per sample on every change,
         # via the "aggregate_samples" branch in scan_source() below.
         "env": "YARA_RESULTS_DIR",

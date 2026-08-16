@@ -48,7 +48,7 @@ logs access-controlled and short-lived"). Publishing structured attack
 data to an open community broker is a materially bigger, harder-to-reverse
 commitment than this repo's existing IP-blocklist reporting:
 
-- The existing reporter (`reporter/`, #68/#69, `docker-compose.utilities.yml`)
+- The existing reporter (`reporter/`, #68/#69, `arcane/home/honeypot-utilities/compose.yml`)
   sends a *narrow* signal (an IP, to a blocklist, for a defensive purpose:
   getting that IP blocked elsewhere) to a small number of well-understood
   destinations (AbuseIPDB, Blocklist.de), stays dry-run by default, and

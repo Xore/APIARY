@@ -46,7 +46,7 @@ services:
       timeout: 5s
       retries: 20
       start_period: 30s
-    # Restarted by the autoheal sidecar (docker-compose.utilities.yml, #258)
+    # Restarted by the autoheal sidecar (arcane/home/honeypot-utilities/compose.yml, #258)
     # on unhealthy, not by restart: alone -- see #119, the same gap #111
     # found and fixed for conpot. autoheal watches Docker directly via
     # docker.sock by label, daemon-wide, so it needs no changes for this

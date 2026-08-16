@@ -1,7 +1,7 @@
 # honeypot-dns-honeypot — #238, #415: DNS UDP reflection bait, response-
 # capped in code (dns-honeypot/dns.go) so it can never function as a real
 # amplification vector -- see that file's own doc comment. Same shape and
-# reasoning as docker-compose.dnp3.yml -- no depends_on, its own fully
+# reasoning as arcane/home/honeypot-dnp3/compose.yml -- no depends_on, its own fully
 # private network, only host bind mounts. Deployed as
 # /opt/stacks/honeypot-dns-honeypot.
 

@@ -1,6 +1,6 @@
 # honeypot-dicompot — #238, #413: DICOM (medical imaging) decoy, vendoring
 # github.com/nsmfoo/dicompot (see dicompot/Dockerfile, dicompot/main.go for
-# why). Same shape and reasoning as docker-compose.conpot.yml -- no
+# why). Same shape and reasoning as arcane/home/honeypot-conpot/compose.yml -- no
 # depends_on, its own fully private network, only host bind mounts.
 # Deployed as /opt/stacks/honeypot-dicompot.
 

@@ -1,13 +1,13 @@
 # honeypot-sentrypeer -- #1424: SIP/VoIP honeypot (github.com/SentryPeer/SentryPeer,
 # vendored -- see sentrypeer/Dockerfile). Same shape and reasoning as
-# docker-compose.hellpot.yml -- no depends_on, its own fully private
+# arcane/home/honeypot-hellpot/compose.yml -- no depends_on, its own fully private
 # network, only host bind mounts. Deployed as /opt/stacks/honeypot-sentrypeer.
 #
 # Scope decisions made integrating this sensor (see PR description for the
 # full writeup):
 #
 # - Public port 5070 (tcp+udp), not 5060: dionaea already binds host
-#   ${HP_BIND}:5060 (docker-compose.dionaea.yml) for its own generic
+#   ${HP_BIND}:5060 (arcane/home/honeypot-dionaea/compose.yml) for its own generic
 #   SIP banner-grab -- SentryPeer's own SIP listener is hardcoded to port
 #   5060 *inside* its container regardless (no config option for this,
 #   confirmed against sentrypeer.1), so the host-side port is shifted

@@ -1,8 +1,8 @@
 # honeypot-mailoney -- #1422: SMTP honeypot (github.com/awhitehatter/mailoney,
 # vendored -- see mailoney/Dockerfile). Takes over port 25 from multipot's own
-# self-written SMTP handler (docker-compose.multipot.yml's MULTIPOT_DISABLE
+# self-written SMTP handler (arcane/home/honeypot-multipot/compose.yml's MULTIPOT_DISABLE
 # now includes smtp) -- see that file and vps/docker-compose.yml for the full
-# writeup on why. Same shape as docker-compose.hellpot.yml -- no depends_on,
+# writeup on why. Same shape as arcane/home/honeypot-hellpot/compose.yml -- no depends_on,
 # its own fully private network, only host bind mounts.
 #
 # Scope decisions made integrating this sensor (see PR description for the

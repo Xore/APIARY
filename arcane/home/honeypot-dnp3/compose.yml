@@ -1,5 +1,5 @@
 # honeypot-dnp3 — #258: dnp3 split into its own Dockge-managed stack. Same
-# shape and reasoning as docker-compose.conpot.yml -- no depends_on, its own
+# shape and reasoning as arcane/home/honeypot-conpot/compose.yml -- no depends_on, its own
 # fully private network, only host bind mounts. Deployed as
 # /opt/stacks/honeypot-dnp3.
 #

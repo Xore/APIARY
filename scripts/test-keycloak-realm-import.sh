@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # test-keycloak-realm-import.sh — boots an ephemeral, disposable
 # Keycloak + PostgreSQL and imports keycloak/realm/apiary-realm.json through
-# the exact bootstrap path docker-compose.keycloak.yml uses on every real
+# the exact bootstrap path arcane/home/honeypot-keycloak/compose.yml uses on every real
 # fresh install (`kc.sh start --import-realm`), then asserts it actually
 # succeeds.
 #
@@ -15,7 +15,7 @@
 # (that's the rest of #982), only "does the realm this repo ships actually
 # import into a real Keycloak."
 #
-# Uses no docker-compose.keycloak.yml secrets/volumes -- this is a
+# Uses no arcane/home/honeypot-keycloak/compose.yml secrets/volumes -- this is a
 # throwaway topology (plain `docker run`, ephemeral network, ephemeral
 # ports, ephemeral admin credentials), never real production Keycloak.
 set -euo pipefail
