@@ -249,7 +249,8 @@
     "dockerComposePath": "arcane/home/honeypot-dashboard/compose.yml",
     "autoSync": false,
     "syncDirectory": true,
-    "syncInterval": 300
+    "syncInterval": 300,
+    "maxSyncFiles": 2500
   },
   {
     "syncName": "honeypot-utilities",
@@ -283,6 +284,60 @@
     "gitRepo": "apiary",
     "branch": "main",
     "dockerComposePath": "arcane/home/honeypot-payload-inventory-worker/compose.yml",
+    "autoSync": false,
+    "syncDirectory": true,
+    "syncInterval": 300
+  },
+  {
+    "syncName": "auth-events-worker",
+    "gitRepo": "apiary",
+    "branch": "main",
+    "dockerComposePath": "auth-events-worker/docker-compose.yml",
+    "autoSync": false,
+    "syncDirectory": true,
+    "syncInterval": 300
+  },
+  {
+    "syncName": "llm-worker",
+    "gitRepo": "apiary",
+    "branch": "main",
+    "dockerComposePath": "llm-worker/docker-compose.yml",
+    "autoSync": false,
+    "syncDirectory": true,
+    "syncInterval": 300
+  },
+  {
+    "syncName": "ml-worker",
+    "gitRepo": "apiary",
+    "branch": "main",
+    "dockerComposePath": "ml-worker/docker-compose.yml",
+    "autoSync": false,
+    "syncDirectory": true,
+    "syncInterval": 300
+  },
+  {
+    "syncName": "ghosts",
+    "gitRepo": "apiary",
+    "branch": "main",
+    "dockerComposePath": "sandbox/ghosts/compose.yml",
+    "autoSync": false,
+    "syncDirectory": true,
+    "syncInterval": 300
+  },
+  {
+    "syncName": "pihole",
+    "gitRepo": "apiary",
+    "branch": "main",
+    "dockerComposePath": "pihole/compose.yml",
+    "autoSync": false,
+    "syncDirectory": true,
+    "syncInterval": 300
+  },
+  {
+    "syncName": "ghidra",
+    "gitRepo": "apiary",
+    "branch": "main",
+    "dockerComposePath": "analysis/ghidra/docker-compose.ghidra.yml",
     "autoSync": false,
     "syncDirectory": true,
     "syncInterval": 300
