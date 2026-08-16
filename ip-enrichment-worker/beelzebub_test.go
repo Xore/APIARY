@@ -99,3 +99,38 @@ func TestEnrichBeelzebubLineUnparseableLinePassesThrough(t *testing.T) {
 		t.Errorf("out = %q, want unchanged %q", out, line)
 	}
 }
+
+// #1485: real line captured live against the actual running hp-beelzebub
+// container (a real SSH login attempt, username "someuser" password
+// "nexusai2025", against the bastion02 service on port 2200) -- not a
+// hand-written fixture. Password was never mirrored to the flat "password"
+// field before this fix, despite dashboard/classify.go's beelzebub block
+// already reading e["password"] for its own detail line -- every real
+// credential-capture event silently showed an empty password. Also proves
+// canonical_user/canonical_pass (attacker-identity-worker's cross-sensor
+// shared-credential signal) now gets set for beelzebub, matching every
+// other credential-capturing sensor.
+const beelzebubRealSSHCredLine = `{"event":{"DateTime":"2026-08-16T12:02:13Z","RemoteAddr":"10.8.0.2:55736","Protocol":"SSH","Command":"","CommandOutput":"","Status":"Stateless","Msg":"New SSH Login Attempt","ID":"eaff3139-e4fe-4f28-8fcb-82485e20d841","Environ":"","User":"someuser","Password":"nexusai2025","Client":"SSH-2.0-OpenSSH_10.3","Headers":"","HeadersMap":null,"Cookies":"","UserAgent":"","HostHTTPRequest":"","Body":"","HTTPMethod":"","RequestURI":"","Description":"SSH interactive bastion02","SourceIp":"10.8.0.2","SourcePort":"55736","TLSServerName":"","Handler":""},"level":"info","msg":"New Event","status":"Stateless"}`
+
+func TestEnrichBeelzebubLinePromotesPasswordAndCanonicalCreds(t *testing.T) {
+	out, resolved := enrichBeelzebubLine([]byte(beelzebubRealSSHCredLine), viaMap{}, viaMap{}, "beelzebub")
+	if !resolved {
+		t.Fatal("expected resolved=true (SourceIp is not the tunnel peer here)")
+	}
+	var e map[string]any
+	if err := json.Unmarshal(out, &e); err != nil {
+		t.Fatalf("output not valid JSON: %v", err)
+	}
+	if e["username"] != "someuser" {
+		t.Errorf("username = %v, want someuser", e["username"])
+	}
+	if e["password"] != "nexusai2025" {
+		t.Errorf("password = %v, want nexusai2025", e["password"])
+	}
+	if e["canonical_user"] != "someuser" {
+		t.Errorf("canonical_user = %v, want someuser", e["canonical_user"])
+	}
+	if e["canonical_pass"] != "nexusai2025" {
+		t.Errorf("canonical_pass = %v, want nexusai2025", e["canonical_pass"])
+	}
+}

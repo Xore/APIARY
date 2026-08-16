@@ -70,11 +70,21 @@ func enrichBeelzebubLine(line []byte, vm viaMap, tftpVM viaMap, persona string) 
 			changed = true
 		}
 	}
-	for srcKey, dstKey := range map[string]string{"User": "username", "Command": "command", "RequestURI": "path"} {
+	for srcKey, dstKey := range map[string]string{"User": "username", "Password": "password", "Command": "command", "RequestURI": "path"} {
 		if v, ok := ev[srcKey].(string); ok && v != "" && e[dstKey] != v {
 			e[dstKey] = v
 			changed = true
 		}
+	}
+	// #1485: Password was never mirrored above until now -- dashboard/
+	// classify.go's beelzebub block has always read e["password"] for its
+	// own "auth: user / pass" detail line, so every credential-capture
+	// event (e.g. a real login attempt against bastion02's SSH, #1418) was
+	// silently displaying an empty password. Promoting it here also feeds
+	// canonical_user/canonical_pass (below), which attacker-identity-worker
+	// needs for its own cross-sensor shared-credential signal (#1485).
+	if promoteCanonicalFields("beelzebub", e) {
+		changed = true
 	}
 
 	ip, _ := ev["SourceIp"].(string)
