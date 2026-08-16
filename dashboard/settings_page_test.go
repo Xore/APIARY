@@ -197,10 +197,11 @@ func TestSettingsAdminPanesAreServerGated(t *testing.T) {
 	for _, want := range []string{
 		`data-hp-pane-nav="branding"`, `data-hp-pane-nav="report-presets"`, `data-hp-pane-nav="behavior"`, `data-hp-pane-nav="honeypot"`,
 		`data-hp-pane-nav="users"`, `data-hp-pane-nav="services"`, `data-hp-pane-nav="history"`, `data-hp-pane-nav="audit"`,
-		`data-hp-pane-nav="elasticsearch"`, `data-hp-pane-nav="dead-letters"`,
+		`data-hp-pane-nav="elasticsearch"`, `data-hp-pane-nav="dead-letters"`, `data-hp-pane-nav="canarytokens"`,
 		`data-hp-pane="branding"`, `data-hp-pane="report-presets"`, `data-hp-pane="behavior"`, `data-hp-pane="honeypot"`,
 		`data-hp-pane="users"`, `data-hp-pane="services"`, `data-hp-pane="history"`, `data-hp-pane="audit"`,
-		`data-hp-pane="elasticsearch"`, `data-hp-pane="dead-letters"`,
+		`data-hp-pane="elasticsearch"`, `data-hp-pane="dead-letters"`, `data-hp-pane="canarytokens"`,
+		`data-hp-canarytokens-form`, `data-hp-ct-type`, `data-hp-ct-memo`, `data-hp-ct-list`, `data-hp-ct-refresh`,
 		`data-hp-report-preset="executive"`, `data-hp-report-preset-name`, `data-hp-report-preset-description`,
 		`data-hp-report-preset-save`,
 		`hp-es-history-results`, `hp-es-history-run`, `hp-es-history-export`,
@@ -230,6 +231,7 @@ func TestSettingsAdminPanesAreServerGated(t *testing.T) {
 		`data-hp-services-list`,
 		`data-hp-pane-nav="elasticsearch"`, `data-hp-pane="elasticsearch"`,
 		`data-hp-pane-nav="dead-letters"`, `data-hp-pane="dead-letters"`,
+		`data-hp-pane-nav="canarytokens"`, `data-hp-pane="canarytokens"`, `data-hp-canarytokens-form`,
 		`Administration`,
 	} {
 		if strings.Contains(user, absent) {
