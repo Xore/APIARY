@@ -44,11 +44,29 @@ services:
       # Pi-hole and DNSCrypt have separate network namespaces. Use Compose
       # service discovery, never either container's loopback address.
       FTLCONF_dns_upstreams: "dnscrypt#5053"
+      # #1391: FTL defaults to both syncing its own clock (ntp.sync.active)
+      # and running an NTP *server* on the LAN (ntp.ipv4/ipv6.active) --
+      # neither was ever asked for. The host already runs its own NTP
+      # client (standard on this Ubuntu base), so granting CAP_SYS_TIME
+      # just to let FTL redundantly set the system clock too is an
+      # unnecessary privilege escalation, not a fix; disabling all three
+      # explicitly (instead of leaving the warning as an unexplained
+      # startup artifact) also means this container stops opening an
+      # undocumented NTP listener on the LAN nobody decided to run.
+      FTLCONF_ntp_sync_active: "false"
+      FTLCONF_ntp_ipv4_active: "false"
+      FTLCONF_ntp_ipv6_active: "false"
     volumes:
       - ./etc-pihole:/etc/pihole
       - ./etc-dnsmasq.d:/etc/dnsmasq.d
     cap_add:
       - NET_ADMIN
+      # #1391: FTL always tries to renice its own process to -10 on
+      # startup; CAP_SYS_NICE only lets it adjust its own priority, not a
+      # broad privilege, so granting it (rather than leaving priority
+      # pinned at 0 with a warning every boot) is the minimum-capability
+      # fix the issue asked for.
+      - SYS_NICE
     deploy:
       resources:
         limits:
