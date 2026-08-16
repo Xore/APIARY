@@ -45,6 +45,14 @@
         ...data.nodes.map(n => ({ data: { id: n.id, label: n.label, kind: n.kind } })),
         ...data.edges.map(e => ({ data: { source: e.source, target: e.target } })),
       ];
+      // #1532: Cytoscape.js has the same problem ECharts does -- it draws
+      // to <canvas> and parses style color values itself, so a literal
+      // "var(--x)" string is not a color it understands and silently
+      // fails, leaving nodes/edges in Cytoscape's own default grey/black.
+      // hp-echarts-theme.js's window.hpChartColor resolves the current
+      // theme.css value up front instead (same helper ECharts' own chart
+      // files use for their one-off itemStyle colors).
+      const c = window.hpChartColor || ((name, fallback) => fallback || name);
       const cy = cytoscape({
         container: canvas,
         elements,
@@ -54,11 +62,11 @@
             style: {
               label: "data(label)",
               "font-size": 10,
-              color: "var(--text-muted)",
+              color: c("--text-muted", "#a5a9a6"),
               "text-valign": "bottom",
               "text-margin-y": 6,
-              "background-color": "var(--surface-2)",
-              "border-color": "var(--accent)",
+              "background-color": c("--surface-2", "#343432"),
+              "border-color": c("--accent", "#d97757"),
               "border-width": 1.2,
               width: 26,
               height: 26,
@@ -72,9 +80,9 @@
               "text-halign": "center",
               "font-size": 12,
               "font-weight": 600,
-              color: "#fff",
-              "background-color": "var(--accent)",
-              "border-color": "var(--surface-1)",
+              color: c("--text-on-accent", "#211a17"),
+              "background-color": c("--accent", "#d97757"),
+              "border-color": c("--surface-1", "#2c2c2a"),
               "border-width": 2,
               width: 56,
               height: 56,
@@ -83,16 +91,16 @@
           {
             selector: "node[kind = 'overflow']",
             style: {
-              "background-color": "var(--surface-2)",
-              "border-color": "var(--border-strong)",
-              color: "var(--text-muted)",
+              "background-color": c("--surface-2", "#343432"),
+              "border-color": c("--border-strong", "rgba(255,255,255,0.14)"),
+              color: c("--text-muted", "#a5a9a6"),
             },
           },
           {
             selector: "edge",
             style: {
               width: 1.2,
-              "line-color": "var(--border-strong)",
+              "line-color": c("--border-strong", "rgba(255,255,255,0.14)"),
               "curve-style": "straight",
             },
           },

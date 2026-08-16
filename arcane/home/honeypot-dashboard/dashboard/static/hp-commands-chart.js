@@ -26,7 +26,12 @@
   const fullCommands = ordered.map(r => r.Command);
   const sensors = ordered.map(r => r.Sensor);
 
-  const chart = echarts.init(container);
+  // #1532: echarts.init(..., "xore") applies hp-echarts-theme.js's
+  // registered theme (axis/legend/tooltip colors); itemStyle.color below
+  // still needs its own resolved value -- ECharts' canvas renderer parses
+  // color strings itself and cannot resolve a CSS var() the way real DOM
+  // elements can (see hp-echarts-theme.js's own comment).
+  const chart = echarts.init(container, "xore");
   chart.setOption({
     grid: { left: "28%", right: "4%", top: "4%", bottom: "4%" },
     tooltip: {
@@ -38,7 +43,7 @@
     series: [{
       type: "bar",
       data: counts,
-      itemStyle: { color: "var(--accent)" },
+      itemStyle: { color: window.hpChartColor("--accent", "#d97757") },
     }],
   });
 

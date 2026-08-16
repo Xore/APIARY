@@ -33,7 +33,11 @@
     const counts = ordered.map(r => r.count);
     const fullNames = ordered.map(r => r.name);
 
-    const chart = echarts.init(container);
+    // #1532: echarts.init(..., "xore") applies hp-echarts-theme.js's
+    // registered theme; itemStyle.color still needs its own resolved
+    // value since ECharts' canvas renderer can't resolve a CSS var()
+    // (see hp-echarts-theme.js's own comment).
+    const chart = echarts.init(container, "xore");
     chart.setOption({
       grid: { left: "30%", right: "6%", top: "4%", bottom: "4%" },
       tooltip: {
@@ -45,7 +49,7 @@
       series: [{
         type: "bar",
         data: counts,
-        itemStyle: { color: "var(--accent)" },
+        itemStyle: { color: window.hpChartColor("--accent", "#d97757") },
       }],
     });
 
