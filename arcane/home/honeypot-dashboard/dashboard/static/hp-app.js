@@ -805,9 +805,33 @@
     const prefs = window.HpPreferences?.prefs;
     window.HpPreferences?.applyTimeDisplay?.(prefs?.timezone, prefs?.clock);
   };
+  // #1527: mountPage only ever swapped pageContent's CHILDREN, never its own
+  // attributes. pageContent itself is captured once (the const above, at
+  // this script's first load) and reused, unswapped, for every subsequent
+  // SPA navigation -- so any page whose own [data-hp-page-content] element
+  // carries page-scoped data-* attributes (hp-workbench.js's data-wb-root/
+  // data-payload-sha256, hp-payload-analysis.js's data-hp-pl-hash, ...; see
+  // hp-dynamic-nav.js's own comment on this convention) kept whatever
+  // attributes belonged to the FIRST page that ever established pageContent
+  // -- typically none of them, since the family's own entry points
+  // (/payloads, sidebar links) don't carry any. Those scripts' own run()
+  // read the attributes off the live [data-hp-page-content] node, found
+  // none, and silently no-opped: skeletons stuck "loading" forever, only
+  // resolved by a full reload building a genuine fresh element. Syncing
+  // pageContent's attributes to source's on every mount -- adding/updating
+  // what source has, removing what it doesn't -- closes that gap so a
+  // fetch-and-swap navigation leaves pageContent indistinguishable from one
+  // freshly rendered by the server.
+  const syncPageContentAttrs = (target, source) => {
+    [...target.attributes].forEach(attr => {
+      if (!source.hasAttribute(attr.name)) target.removeAttribute(attr.name);
+    });
+    [...source.attributes].forEach(attr => target.setAttribute(attr.name, attr.value));
+  };
   const mountPage = source => {
     if (!pageContent) { source.remove?.(); return; }
     reNonce(source);
+    syncPageContentAttrs(pageContent, source);
     pageContent.replaceChildren(...source.children);
     source.remove();
     initLazyViews(pageContent);
