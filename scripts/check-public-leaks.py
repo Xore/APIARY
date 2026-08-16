@@ -43,7 +43,7 @@ PATTERNS = (
     # shape CHANGE_ME/DECOY_ONLY already covered; just never had a
     # PASSWORD/SECRET/TOKEN/API_KEY-named var use it before. Separately,
     # ARKIME_PASSWORD_SECRET's own compose-file default of
-    # "change-me-in-env" (docker-compose.elk.yml/init.yml, predates
+    # "change-me-in-env" (arcane/home/honeypot-elk/compose.yml/init.yml, predates
     # #1502) never matched this pattern while embedded inline in a YAML
     # list item -- generating a real per-stack .env.example put it at the
     # start of a line for the first time. (?i:change.me) covers both that

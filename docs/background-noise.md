@@ -632,7 +632,7 @@ implements its own independent exclusion rather than relying on an
 upstream filter to have already stripped noise out. A consumer added
 later that doesn't know about noise is safe by construction only if it's
 also expected to check for and drop the marker itself -- document that
-expectation next to `EXPECTED_SENSORS` in `docker-compose.dashboard.yml`
+expectation next to `EXPECTED_SENSORS` in `arcane/home/honeypot-dashboard/compose.yml`
 and in this file, not only here.
 
 ### 11.4 Capture labeling -- survives export

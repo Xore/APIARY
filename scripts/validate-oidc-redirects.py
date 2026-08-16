@@ -46,7 +46,7 @@ def main() -> None:
         )
 
     realm_text = REALM.read_text()
-    # Simulate the exact substitution docker-compose.keycloak.yml's startup
+    # Simulate the exact substitution arcane/home/honeypot-keycloak/compose.yml's startup
     # command performs (`sed s/example\.invalid/$KEYCLOAK_PUBLIC_DOMAIN/g`) so
     # the redirectUris checked below match what Keycloak will actually import.
     realm = json.loads(realm_text.replace(REALM_TEMPLATE_DOMAIN, keycloak_public_domain))

@@ -4,7 +4,7 @@
 # provision-events-poller.sh's own comment: no realm-JSON concept for
 # pinning a client secret). Nothing ever wrote that secret to where the
 # dashboard binary itself expects it
-# (docker-compose.dashboard.yml's OIDC_CLIENT_SECRET_FILE=
+# (arcane/home/honeypot-dashboard/compose.yml's OIDC_CLIENT_SECRET_FILE=
 # /run/dashboard-secrets/oidc-client-secret) -- sync-client-secrets.sh
 # covers the *gateway* sidecars' copies on the VPS, not this one. Found
 # live during #787's homeserver reinstall (2026-08-09): both dashboard and
@@ -43,7 +43,7 @@ secret="$(docker exec "$KC_CONTAINER" "$KC" get \
 install -d -m 750 "$SECRETS_DIR"
 umask 077
 printf '%s' "$secret" > "$SECRETS_DIR/oidc-client-secret"
-# dashboard/dashboard-b have no explicit `user:` in docker-compose.dashboard.yml
+# dashboard/dashboard-b have no explicit `user:` in arcane/home/honeypot-dashboard/compose.yml
 # and no USER in their Dockerfile, so they run as root:root -- matching
 # ownership here, same as step_provision_keycloak_secrets' own
 # postgres-password/bootstrap-admin-password convention.

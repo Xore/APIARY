@@ -1,19 +1,17 @@
 # APIARY — multi-service honeypot (HOME side, runs under Dockge).
 #
-# #258: every service that used to live in this file has split into its
-# own Dockge stack (docker-compose.conpot.yml, .cowrie.yml, .multipot.yml,
-# .http.yml, .dnp3.yml, .dionaea.yml, .payload-analysis.yml, .tanner.yml,
-# .elk.yml, .dashboard.yml, .utilities.yml -- each deployed the same way
-# this file always was, via .github/workflows/deploy.yml). This file has no
-# services of its own left, deliberately kept as a thin marker rather than
-# deleted outright: /opt/stacks/apiary is still the checkout every
-# other stack's `build:` points at with an absolute path (e.g.
-# `/opt/stacks/apiary/dionaea`), so the repo still needs to land
-# there even though nothing here runs `docker compose up` against it any
-# more. Retiring this file (and the deploy step that syncs it) once every
-# build context instead points at a location that doesn't need a
-# docker-compose.yml to justify its existence is tracked as the last step
-# of #258.
+# #258: every service that used to live in this file has long since split
+# into its own stack (see README.md's stack table). #1502 finished the
+# rest of that split's original rationale: each stack's `build:` is now a
+# relative path self-contained under arcane/home/<name>/, an
+# Arcane-managed directory-aware Git sync, not an absolute
+# /opt/stacks/apiary/<dir> path into this checkout any more. This file has
+# no services of its own left, kept as a thin marker rather than deleted
+# outright only because deploy.yml's rsync step still uses
+# `docker compose -f compose.yml config --quiet` against it as a cheap
+# sanity check that the checkout landed intact -- see that step's own
+# comment for why the rsync itself is still needed (ghidra-worker.py's
+# host-level resync).
 #
 # Topology (historical, describes the split stacks above, not this file):
 #   attacker -> VPS public port -> [Traefik (HTTP) | portbridge socat (raw TCP/UDP)]

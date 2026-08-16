@@ -840,7 +840,7 @@ step_arcane_import_stacks() {
   return 0
 }
 
-# #1019: docker-compose.keycloak.yml's realm-template mount was fixed to an
+# #1019: arcane/home/honeypot-keycloak/compose.yml's realm-template mount was fixed to an
 # absolute /opt/stacks/apiary path, but the login theme
 # (KEYCLOAK_THEME_DIR, default /var/dockge/stacks/honeypot-keycloak/theme/
 # apiary) isn't part of this repo at all -- it's Xore/auth-backend's
@@ -920,13 +920,13 @@ step_bootstrap_missing_envs() {
 }
 
 step_create_shared_resources() {
-  # docker-compose.init.yml declares these as external:true. On a genuinely
+  # arcane/home/honeypot-init/compose.yml declares these as external:true. On a genuinely
   # fresh Docker install none of them exist yet, and honeypot-init's
   # containers will fail to even create rather than run and fail --
   # STACK-REBUILD.md documents this exact trap.
   docker network inspect honeynet >/dev/null 2>&1 || docker network create honeynet
 
-  # docker-compose.dashboard.yml also declares honeypot-llm as external:true
+  # arcane/home/honeypot-dashboard/compose.yml also declares honeypot-llm as external:true
   # (its query-time embedding call to Ollama), but unlike honeynet it has a
   # real owner: analysis/ghidra/docker-compose.ghidra.yml defines it for
   # real (internal:true, no external:true) and only creates it when
@@ -943,7 +943,7 @@ step_create_shared_resources() {
   docker volume inspect dionaea-lib >/dev/null 2>&1 || docker volume create dionaea-lib
   docker volume inspect yara-results >/dev/null 2>&1 || docker volume create yara-results
 
-  # docker-compose.init.yml's own header comment: "state/init-markers/ must
+  # arcane/home/honeypot-init/compose.yml's own header comment: "state/init-markers/ must
   # be mode 777 on the host before this stack's [containers run]" --
   # log-init/elasticsearch-setup/arkime-init/snare-clone each touch a
   # <job>.done marker there on success. Confirmed live (first #518 test run):

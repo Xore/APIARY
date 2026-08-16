@@ -3,13 +3,13 @@
 # tftp-relay has depends_on: dionaea and actually forwards TFTP traffic to
 # it over dionaea_net (#235's one documented exception to "one honeypot per
 # network" -- see that network's own comment below), so they're one unit,
-# same shape as docker-compose.http.yml's http-honeypot+api-honeypot pair.
+# same shape as arcane/home/honeypot-http/compose.yml's http-honeypot+api-honeypot pair.
 #
 # dionaea-lib is the one resource this stack shares outside itself: it's
 # where dionaea writes captured binaries/bistreams, and
-# docker-compose.payload-analysis.yml's payload-dedupe/yara-scanner (also
+# arcane/home/honeypot-payload-analysis/compose.yml's payload-dedupe/yara-scanner (also
 # #258, split out separately per explicit instruction rather than bundled
-# in here) read from it, same as docker-compose.dashboard.yml already does.
+# in here) read from it, same as arcane/home/honeypot-dashboard/compose.yml already does.
 # Given the explicit shared `name:` treatment honeynet/es-data already use
 # between APIARY and honeypot-init.
 #
@@ -245,7 +245,7 @@ networks:
     internal: ${DIONAEA_AIR_GAPPED:-false}
 
 volumes:
-  # Shared with docker-compose.payload-analysis.yml (#258) -- explicit fixed
+  # Shared with arcane/home/honeypot-payload-analysis/compose.yml (#258) -- explicit fixed
   # name, matching docker-compose.yml's own historical declaration and the
   # same mechanism honeynet/es-data already use between APIARY and
   # honeypot-init. dionaea writes captured binaries/bistreams here;

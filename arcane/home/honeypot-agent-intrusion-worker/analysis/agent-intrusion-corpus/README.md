@@ -122,7 +122,7 @@ honeypot-agent-intrusion-worker" step), not just built-and-tested.
   this page — every field traces to a deterministic rule match, so there's
   no untrusted free-text output to guard against here the way
   `llm_analysis.go` has to.
-- **`Dockerfile`** / **`docker-compose.agent-intrusion-worker.yml`**
+- **`Dockerfile`** / **`arcane/home/honeypot-agent-intrusion-worker/compose.yml`**
   (repo root) — builds and runs `worker.py` as its own Dockge stack,
   modelled directly on `ml-worker/docker-compose.yml`'s own shape (joins
   `honeynet` as an external network, same hardening: `no-new-privileges`,
@@ -277,7 +277,7 @@ identity across a NAT/mesh boundary where its own address changes. Both
 limits carry through to `worker.py` unchanged -- it's the same function,
 called against real events instead of corpus ones.
 
-`docker-compose.agent-intrusion-worker.yml` is now wired into
+`arcane/home/honeypot-agent-intrusion-worker/compose.yml` is now wired into
 `deploy.yml` (deployed with explicit operator go-ahead, not silently as a
 side effect of an earlier PR -- see its own entry in "What's here" above)
 -- `agent-intrusion-campaigns` gets real production verdicts, not just

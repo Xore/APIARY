@@ -1,6 +1,6 @@
 # honeypot-endlessh — #246: SSH pre-auth tarpit (skeeto/endlessh's core
 # trick, ported to Go), split into its own Dockge-managed stack. Same shape
-# as docker-compose.dnp3.yml -- no depends_on, its own fully private
+# as arcane/home/honeypot-dnp3/compose.yml -- no depends_on, its own fully private
 # network, only host bind mounts. Deployed as /opt/stacks/honeypot-endlessh.
 #
 # Deliberately its OWN port, not cowrie's (19022/2222): diverting an

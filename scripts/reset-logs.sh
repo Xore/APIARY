@@ -95,7 +95,7 @@ declare -A SPLIT_STACK_SERVICES=(
 PAYLOAD_ANALYSIS_DIR="/opt/stacks/honeypot-payload-analysis"
 PAYLOAD_ANALYSIS_SERVICES="payload-dedupe yara-scanner"
 
-# evebox (docker-compose.elk.yml, #258) is the only ELK service this script
+# evebox (arcane/home/honeypot-elk/compose.yml, #258) is the only ELK service this script
 # ever stops/starts -- same reasoning as payload-dedupe/yara-scanner above,
 # no standalone CLI target of its own, only a side effect of `wants
 # suricata`. elasticsearch/kibana/filebeat/arkime-* hold no open handles
@@ -160,7 +160,7 @@ mkown() {
   run sudo chown -R "$uid" "$dir"
 }
 
-# Elasticsearch has no host-published port (docker-compose.elk.yml -- "no
+# Elasticsearch has no host-published port (arcane/home/honeypot-elk/compose.yml -- "no
 # ports: mapping at all -- reached by name over honeynet/llm-data"), so
 # `curl http://localhost:9200` from this host-side script has never
 # actually reached it (connection refused, silently swallowed below).
@@ -214,7 +214,7 @@ delete_es_index() {
 # deliberately excluded from SERVICES -- each lives in its own Dockge
 # stack/compose project now (SPLIT_STACK_DIR above) and is stopped/started
 # there separately, via split_stack_compose below, not through this array.
-# evebox is excluded the same way (docker-compose.elk.yml, #258) -- see
+# evebox is excluded the same way (arcane/home/honeypot-elk/compose.yml, #258) -- see
 # ELK_DIR/ELK_SURICATA_SERVICES/foreign_stack_compose below instead.
 SERVICES=()
 
@@ -237,8 +237,8 @@ split_stack_compose() {
   ( cd "$dir" && run docker compose "$@" "${services[@]}" )
 }
 
-# Shared by payload-dedupe/yara-scanner (docker-compose.payload-analysis.yml)
-# and evebox (docker-compose.elk.yml) -- both #258 splits that get
+# Shared by payload-dedupe/yara-scanner (arcane/home/honeypot-payload-analysis/compose.yml)
+# and evebox (arcane/home/honeypot-elk/compose.yml) -- both #258 splits that get
 # stopped/started only as a *side effect* of another target (cowrie,
 # suricata respectively), never their own standalone CLI target, because
 # they hold reads/hardlinks/handles into a directory that target's wipe
@@ -353,7 +353,7 @@ if wants suricata; then
   fi
   # Wipe EveBox's own config.sqlite (saved filters/comments/escalations) so
   # those reset too. Named evebox-data here historically but the volume
-  # EveBox actually declares is evebox-config (docker-compose.elk.yml) --
+  # EveBox actually declares is evebox-config (arcane/home/honeypot-elk/compose.yml) --
   # private/unnamed there, so project-prefixed as honeypot-elk_evebox-config.
   # Stop evebox first (foreign_stack_compose above) so Docker doesn't
   # refuse the removal with "volume is in use."

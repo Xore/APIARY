@@ -10,7 +10,7 @@
 # because it receives samples over a file spool and must never be reachable
 # from the sensor network. ml-worker's entire job is the opposite: it has to
 # read Elasticsearch continuously, so it joins honeynet as an external
-# network -- the same pattern docker-compose.init.yml already uses to reach
+# network -- the same pattern arcane/home/honeypot-init/compose.yml already uses to reach
 # elasticsearch from a separate stack (#111).
 #
 # No Redis here, unlike the old override. ml-gpu-coordinated-roadmap.md §1

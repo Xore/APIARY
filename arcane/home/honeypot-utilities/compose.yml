@@ -8,9 +8,9 @@
 #                     carries label autoheal=true, daemon-wide -- not scoped
 #                     to a project the way `docker compose restart` is. Today
 #                     that includes the six conpot personas
-#                     (docker-compose.conpot.yml), elasticsearch, and
+#                     (arcane/home/honeypot-conpot/compose.yml), elasticsearch, and
 #                     tanner_docker/tanner_redis (docker-compose.yml and
-#                     docker-compose.tanner.yml respectively) -- confirmed by
+#                     arcane/home/honeypot-tanner/compose.yml respectively) -- confirmed by
 #                     grepping every compose file for autoheal=true, not
 #                     assumed. Needs no changes for any of #258's splits:
 #                     it watches Docker directly via docker.sock by label,
@@ -132,7 +132,7 @@ services:
           cpus: "0.25"
           memory: 64M
 
-  # tanner_docker (docker-compose.tanner.yml) looks similar to the old
+  # tanner_docker (arcane/home/honeypot-tanner/compose.yml) looks similar to the old
   # direct-socket-mount arrangement here but is not the same trust boundary
   # -- it runs its own disposable nested Docker daemon and never touches
   # the host socket at all, narrow or otherwise.
@@ -145,11 +145,11 @@ services:
   # ship once free space on a checked path drops below the threshold; takes
   # no destructive action itself.
   #
-  # es-data (docker-compose.elk.yml) is deliberately never bind-mounted
+  # es-data (arcane/home/honeypot-elk/compose.yml) is deliberately never bind-mounted
   # cross-stack, so Elasticsearch's own disk usage is queried over HTTP via
   # honeynet instead -- same pattern elasticsearch-setup.sh already uses.
   # dionaea-lib is the same explicit shared-name volume
-  # docker-compose.payload-analysis.yml already reads from, mounted
+  # arcane/home/honeypot-payload-analysis/compose.yml already reads from, mounted
   # read-only here for the same reason.
   disk-space-monitor:
     <<: *runtime-defaults
@@ -266,7 +266,7 @@ services:
     build: ./reporter
     container_name: hp-reporter
     restart: unless-stopped
-    # Root, same reasoning as filebeat (docker-compose.elk.yml): every
+    # Root, same reasoning as filebeat (arcane/home/honeypot-elk/compose.yml): every
     # sensor's JSON log is 0640, owned by that sensor's own UID, no "other"
     # read bit. A fixed non-root UID could read none of them. Numeric "0:0",
     # not the string "root": this image is FROM scratch (Dockerfile) with no
@@ -322,14 +322,14 @@ networks:
     driver: bridge
 
 volumes:
-  # #666: fixed external name so docker-compose.dashboard.yml's
+  # #666: fixed external name so arcane/home/honeypot-dashboard/compose.yml's
   # es-results-importer can mount this read-only across stacks -- same
   # mechanism as dionaea-lib below. Was unnamed/project-scoped until now
   # (nothing else referenced it, per the monolithic compose file's original
   # shape); the reporter service here still owns writes.
   reporter-data:
     name: reporter-data
-  # Shared with docker-compose.dionaea.yml/docker-compose.payload-analysis.yml
+  # Shared with arcane/home/honeypot-dionaea/compose.yml/arcane/home/honeypot-payload-analysis/compose.yml
   # -- read-only here, same mechanism as honeynet/es-data.
   dionaea-lib:
     name: dionaea-lib

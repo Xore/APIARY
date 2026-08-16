@@ -1,10 +1,10 @@
 # honeypot-payload-analysis — #258: payload-dedupe and yara-scanner split
-# into their own Dockge stack, separate from docker-compose.dionaea.yml per
+# into their own Dockge stack, separate from arcane/home/honeypot-dionaea/compose.yml per
 # explicit instruction (rather than bundled with dionaea/tftp-relay).
 #
 # Both services here only ever read Dionaea's captures, never write them, so
 # this is the "reader" side of the same dionaea-lib sharing arrangement
-# docker-compose.dashboard.yml already uses: explicit shared `name:`, not
+# arcane/home/honeypot-dashboard/compose.yml already uses: explicit shared `name:`, not
 # `external: true` (this stack doesn't own dionaea-lib, but it isn't a
 # strict single-producer relationship like snare-pages either -- dionaea and
 # the dashboard both also touch it, so the same non-external shared-name
@@ -14,7 +14,7 @@
 # captures aren't the only thing they dedupe/scan -- cowrie's downloads
 # (bind mount, host path, unaffected by which stack owns it) and retained
 # script payloads under dashboard-state/script-payloads (written by
-# docker-compose.dashboard.yml's own SCRIPT_PAYLOAD_DIR) are read/written
+# arcane/home/honeypot-dashboard/compose.yml's own SCRIPT_PAYLOAD_DIR) are read/written
 # here too, same as the main compose file always did.
 #
 # Deployed as /opt/stacks/honeypot-payload-analysis.
@@ -128,17 +128,17 @@ services:
           memory: 512M
 
 volumes:
-  # Shared with docker-compose.dionaea.yml -- dionaea writes here, both
+  # Shared with arcane/home/honeypot-dionaea/compose.yml -- dionaea writes here, both
   # services in this stack only read. Explicit fixed name, same mechanism
   # as honeynet/es-data between APIARY and honeypot-init.
   dionaea-lib:
     name: dionaea-lib
-  # Shared with docker-compose.dashboard.yml -- both directions: dashboard's
+  # Shared with arcane/home/honeypot-dashboard/compose.yml -- both directions: dashboard's
   # SCRIPT_PAYLOAD_DIR writes retained script payloads here, both services
   # in this stack read (and payload-dedupe also writes, deduping in place).
   dashboard-state:
     name: dashboard-state
-  # Shared with docker-compose.dashboard.yml -- yara-scanner writes results
+  # Shared with arcane/home/honeypot-dashboard/compose.yml -- yara-scanner writes results
   # here, the dashboard reads them for the Workbench/alerts UI.
   yara-results:
     name: yara-results

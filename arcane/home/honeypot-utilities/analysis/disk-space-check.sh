@@ -42,7 +42,7 @@ check_path() {
   fi
 }
 
-# es-data is a stack-private volume (docker-compose.elk.yml), deliberately
+# es-data is a stack-private volume (arcane/home/honeypot-elk/compose.yml), deliberately
 # never bind-mounted cross-stack -- _cat/allocation is the only view a
 # sidecar outside that stack has of the filesystem backing it, and it is
 # already the pattern elasticsearch-setup.sh uses to talk to Elasticsearch

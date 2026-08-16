@@ -542,7 +542,7 @@ sequenceDiagram
   Note over D,DB: both replicas healthy on the<br/>new image — deploy complete
 ```
 
-The 180s wait budget is not arbitrary: `docker-compose.dashboard.yml`'s own
+The 180s wait budget is not arbitrary: `arcane/home/honeypot-dashboard/compose.yml`'s own
 healthcheck already declares `start_period: 180s`, because `/healthz`
 reports 503 until the first `rebuild()` has real ES-derived data — measured
 at 60-120s against this host's actual event volume. If a replica fails its

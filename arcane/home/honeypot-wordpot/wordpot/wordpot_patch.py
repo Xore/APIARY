@@ -33,7 +33,7 @@ exactly what it already does):
    Confirmed safe: `to_json_log()`'s own `source_ip`/`source_port`
    fields are never read anywhere in this vendored tree (only ever
    published over hpfeeds, which stays disabled by this stack's
-   wordpot.conf -- see docker-compose.wordpot.yml), so widening what
+   wordpot.conf -- see arcane/home/honeypot-wordpot/compose.yml), so widening what
    remote_addr contains has no other observer to break.
 
 Same shape as dionaea/log_rotation_patch.py/hellpot/router_patch.py:

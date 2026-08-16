@@ -39,7 +39,7 @@ services:
       - TZ=Europe/Berlin
     volumes:
       # Same two capture sources dashboard/main.go's own PAYLOAD_DIRS
-      # config reads -- see docker-compose.dashboard.yml's own comments for
+      # config reads -- see arcane/home/honeypot-dashboard/compose.yml's own comments for
       # why dionaea-lib is a shared named volume and cowrie-downloads is a
       # host bind path.
       - dionaea-lib:/dionaea-lib:ro

@@ -1,5 +1,5 @@
 # honeypot-http — #258: http-honeypot and api-honeypot split into their own
-# Dockge-managed stack. Same shape and reasoning as docker-compose.conpot.yml
+# Dockge-managed stack. Same shape and reasoning as arcane/home/honeypot-conpot/compose.yml
 # -- no depends_on, each on its own fully private network, only host bind
 # mounts. Kept as one stack, not two: they already share one build context
 # (build: ./http-honeypot) and are already treated as one logical unit

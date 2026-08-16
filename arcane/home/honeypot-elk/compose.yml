@@ -10,7 +10,7 @@
 # honeypot-init's elasticsearch-setup/arkime-init/honeypot-kibana-setup
 # jobs all talk to Elasticsearch purely over HTTP (http://elasticsearch:9200
 # via honeynet), never touching the es-data volume directly (confirmed by
-# grep: no es-data reference anywhere in docker-compose.init.yml). honeynet
+# grep: no es-data reference anywhere in arcane/home/honeypot-init/compose.yml). honeynet
 # is the actual shared resource here, same as it always was. es-data,
 # evebox-config, and arkime-pcap all stay private/unnamed -- a fresh
 # project-scoped volume on cutover, not migrated from
@@ -23,7 +23,7 @@
 # honeynet and llm-data are shared exactly like every other #258 split:
 # explicit, non-project-prefixed `name:`, non-external. elasticsearch joins
 # both -- honeynet for every other service in this stack (and the
-# dashboard, in docker-compose.dashboard.yml), llm-data so the LLM worker
+# dashboard, in arcane/home/honeypot-dashboard/compose.yml), llm-data so the LLM worker
 # can reach it by the `elasticsearch` alias without a route to the wider
 # honeynet.
 #
@@ -89,7 +89,7 @@ services:
       timeout: 10s
       retries: 10
       start_period: 60s
-    # Restarted by the autoheal sidecar (docker-compose.utilities.yml, #258)
+    # Restarted by the autoheal sidecar (arcane/home/honeypot-utilities/compose.yml, #258)
     # on unhealthy, not by restart: alone -- see #119, the same gap #111
     # found and fixed for conpot. autoheal watches Docker directly via
     # docker.sock by label, daemon-wide, so it needs no changes for this
@@ -306,7 +306,7 @@ services:
   # Arkime stores session metadata in the existing Elasticsearch instance
   # (hp-elasticsearch). No separate OpenSearch is needed.
   #
-  # First-run DB init (arkime-init) lives in docker-compose.init.yml (the
+  # First-run DB init (arkime-init) lives in arcane/home/honeypot-init/compose.yml (the
   # honeypot-init stack) and runs once and exits there. It bootstraps the
   # Elasticsearch indices and creates the admin user with a real recorded
   # password (#122, #134, #1021); arkime-capture/arkime-viewer below wait
@@ -540,7 +540,7 @@ services:
 networks:
   # Shared with every other stack that touches it -- explicit fixed name,
   # not project-prefixed, non-external. Same mechanism as
-  # docker-compose.dashboard.yml/docker-compose.tanner.yml/etc.
+  # arcane/home/honeypot-dashboard/compose.yml/arcane/home/honeypot-tanner/compose.yml/etc.
   honeynet:
     name: honeynet
     driver: bridge

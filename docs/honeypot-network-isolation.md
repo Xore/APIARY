@@ -65,8 +65,8 @@ from inside the guest.
 
 ## 3. Container isolation
 
-Each honeypot's own compose file (`docker-compose.cowrie.yml`,
-`docker-compose.dionaea.yml`, `docker-compose.conpot.yml`, etc. — split out
+Each honeypot's own compose file (`arcane/home/honeypot-cowrie/compose.yml`,
+`arcane/home/honeypot-dionaea/compose.yml`, `arcane/home/honeypot-conpot/compose.yml`, etc. — split out
 of `docker-compose.yml` under #258, which is now an empty stub) gives it its
 own single-member Docker network (`cowrie_net`, `dionaea_net`, `conpot_net`,
 `conpot_s7_1200_net`, and so on) —

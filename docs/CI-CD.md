@@ -208,7 +208,7 @@ not give the `production-home` environment to pull-request workflows.
 
 ### honeypot-init
 
-`docker-compose.init.yml` runs as a second, separate Arcane-managed stack at
+`arcane/home/honeypot-init/compose.yml` runs as a second, separate Arcane-managed stack at
 `/opt/stacks/honeypot-init`, not as part of `APIARY`. It holds the
 one-shot bootstrap jobs (log directory ownership, persona seeding,
 Elasticsearch/Kibana/Arkime first-run setup) that used to live in the main
@@ -226,7 +226,7 @@ is still correct.
 
 ### honeypot-conpot (#258 proof of concept)
 
-`docker-compose.conpot.yml` runs as a third, separate Arcane-managed stack at
+`arcane/home/honeypot-conpot/compose.yml` runs as a third, separate Arcane-managed stack at
 `/opt/stacks/honeypot-conpot`: the six Conpot personas (base S7-200,
 S7-1200, S7-1500, IEC104, Guardian AST, Kamstrup) split out of
 `APIARY`'s monolithic compose file, as a proof of concept for #258.
@@ -234,7 +234,7 @@ The same `home` job deploys it alongside `honeypot-init`, before
 `APIARY`, though (unlike `honeypot-init`) it has no hard ordering
 requirement -- each persona polls its own marker file rather than using a
 compose `depends_on` chain, so its `docker compose up -d` returns
-immediately either way. See `docker-compose.conpot.yml`'s own header for
+immediately either way. See `arcane/home/honeypot-conpot/compose.yml`'s own header for
 what this proved about #258's open questions (no external networks/volumes
 needed for a standalone honeypot persona; `autoheal`, which watches by Docker
 label rather than by compose project, needs no changes at all).
@@ -249,7 +249,7 @@ own.
 Four more standalone honeypots, split the same way as `honeypot-conpot` and
 for the same reason: each has no `depends_on` on any other service and its
 own fully private network, so no external network/volume treatment is
-needed. `docker-compose.http.yml` covers two services (`http-honeypot` and
+needed. `arcane/home/honeypot-http/compose.yml` covers two services (`http-honeypot` and
 `api-honeypot`) in one stack -- they already share one build context and are
 already treated as one logical unit elsewhere (`scripts/reset-logs.sh`'s
 `http` target covers both). Deployed the same way as `honeypot-conpot`, in a
@@ -259,7 +259,7 @@ are otherwise identical in shape. Same log-directory/`.env` posture as
 
 ### honeypot-dashboard (#258)
 
-`docker-compose.dashboard.yml` runs as its own Arcane-managed stack at
+`arcane/home/honeypot-dashboard/compose.yml` runs as its own Arcane-managed stack at
 `/opt/stacks/honeypot-dashboard`, bundling `dashboard` and
 `services-adapter` -- kept together because they talk to each other only
 over `services-adapter-socket`, a volume nothing else touches. Unlike the
@@ -267,10 +267,10 @@ five services above, this pair could not be split with the "own fully
 private network" treatment: `dashboard` resolves `elasticsearch` and
 `filebeat` by service name over the shared `honeynet` network, and reads/
 writes three named Docker volumes other stacks also touch --
-`dionaea-lib`/`yara-results` (`docker-compose.dionaea.yml`'s `dionaea` and
-`docker-compose.payload-analysis.yml`'s `yara-scanner` write there,
+`dionaea-lib`/`yara-results` (`arcane/home/honeypot-dionaea/compose.yml`'s `dionaea` and
+`arcane/home/honeypot-payload-analysis/compose.yml`'s `yara-scanner` write there,
 `dashboard` only reads) and `dashboard-state` (genuinely shared both ways:
-`payload-dedupe`/`yara-scanner`, now in `docker-compose.payload-analysis.yml`,
+`payload-dedupe`/`yara-scanner`, now in `arcane/home/honeypot-payload-analysis/compose.yml`,
 read/write retained script payloads under `/payloads/scripts`, the same
 subtree this stack's own `SCRIPT_PAYLOAD_DIR=/state/script-payloads`
 writes). All four resources are declared with an explicit shared `name:` in
@@ -309,7 +309,7 @@ this exists and what it doesn't fix.
 
 `dashboard` is the one user-facing, frequently-redeployed service behind
 Cloudflare/Traefik, so unlike every other stack here it runs as **two
-replicas** (`dashboard` and `dashboard-b` in `docker-compose.dashboard.yml`
+replicas** (`dashboard` and `dashboard-b` in `arcane/home/honeypot-dashboard/compose.yml`
 -- same image, same volumes via a shared `*dashboard-volumes` YAML anchor,
 different host port and container name only) instead of one.
 `vps/traefik/dynamic.yml`'s `honeypot-dashboard` service lists both as
@@ -351,7 +351,7 @@ rows, so duplication there is harmless.
 
 ### honeypot-utilities (#258)
 
-`docker-compose.utilities.yml` runs as its own Arcane-managed stack at
+`arcane/home/honeypot-utilities/compose.yml` runs as its own Arcane-managed stack at
 `/opt/stacks/honeypot-utilities`, bundling `log-maintenance`, `autoheal`,
 and `reporter` -- the first #258 split that isn't one honeypot family. All
 three watch or act across the whole host rather than belonging to a single
@@ -368,8 +368,8 @@ this stack, so -- like the standalone honeypots -- it deploys ahead of
 
 ### honeypot-dionaea and honeypot-payload-analysis (#258)
 
-`docker-compose.dionaea.yml` (`dionaea` and `tftp-relay`) and
-`docker-compose.payload-analysis.yml` (`payload-dedupe` and `yara-scanner`)
+`arcane/home/honeypot-dionaea/compose.yml` (`dionaea` and `tftp-relay`) and
+`arcane/home/honeypot-payload-analysis/compose.yml` (`payload-dedupe` and `yara-scanner`)
 split into two separate Arcane-managed stacks, per explicit instruction rather than
 bundled together the way `dashboard`+`services-adapter` were. `dionaea` and
 `tftp-relay` stay paired -- `tftp-relay` has `depends_on: dionaea` and
@@ -381,15 +381,15 @@ binaries/bistreams there, `payload-dedupe`/`yara-scanner` in the other
 stack only read. Explicit shared `name:` in both compose files, same
 mechanism as everywhere else in #258. `payload-dedupe`/`yara-scanner` also
 still touch `dashboard-state` and `yara-results` (shared with
-`docker-compose.dashboard.yml`, unchanged by this split) and cowrie's
+`arcane/home/honeypot-dashboard/compose.yml`, unchanged by this split) and cowrie's
 downloads directory (a host bind mount, unaffected by which Compose
 project owns the container that writes to it).
 
-`docker-compose.dionaea.yml` deploys in the same looped step as
+`arcane/home/honeypot-dionaea/compose.yml` deploys in the same looped step as
 `honeypot-cowrie`/`multipot`/`http`/`dnp3` (`.github/workflows/deploy.yml`)
 -- like them, it has no ordering requirement, since `dionaea-lib` is a
 non-external shared-name volume Compose creates if absent.
-`docker-compose.payload-analysis.yml` gets its own step right after, purely
+`arcane/home/honeypot-payload-analysis/compose.yml` gets its own step right after, purely
 for readability (the "reader" half following the "writer" half); no hard
 ordering requirement here either.
 
@@ -404,7 +404,7 @@ wipe of that directory.
 
 ### honeypot-tanner (#258)
 
-`docker-compose.tanner.yml` bundles the whole SNARE + TANNER web-app
+`arcane/home/honeypot-tanner/compose.yml` bundles the whole SNARE + TANNER web-app
 honeypot group (`tanner_docker`, `tanner_redis`, `tanner_phpox`,
 `tanner_api`, `tanner_web`, `tanner`, `snare`) into one stack at
 `/opt/stacks/honeypot-tanner` -- all seven form a single `depends_on`
@@ -416,7 +416,7 @@ every compose file), so it moved with them unchanged.
 The one resource this stack shares with anything outside itself is
 `snare-pages`: written by `honeypot-init`'s `snare-clone` job, read only by
 `snare` here, `external: true` in both the old monolithic file and this one
--- unaffected by the split. `autoheal` (`docker-compose.utilities.yml`)
+-- unaffected by the split. `autoheal` (`arcane/home/honeypot-utilities/compose.yml`)
 still restarts `tanner_docker`/`tanner_redis` on unhealthy via the
 `autoheal=true` label, same as always -- it needs no changes for this or
 any #258 split.
@@ -432,7 +432,7 @@ open handles into the log directories this script wipes for this target.
 
 ### honeypot-elk (#258)
 
-`docker-compose.elk.yml` bundles the ELK/analysis plane (`elasticsearch`,
+`arcane/home/honeypot-elk/compose.yml` bundles the ELK/analysis plane (`elasticsearch`,
 `kibana`, `filebeat`, `evebox`, `arkime-capture`, `arkime-viewer`,
 `pcap-sync`) into one stack at `/opt/stacks/honeypot-elk` -- the last group
 that was still in the monolithic file. Kept together, not split further:
@@ -446,7 +446,7 @@ for services that only ever make sense running together.
 `elasticsearch-setup`/`arkime-init`/`honeypot-kibana-setup` jobs all talk
 to Elasticsearch purely over HTTP (`http://elasticsearch:9200` via
 `honeynet`), never touching the `es-data` volume directly (confirmed by
-grep -- no `es-data` reference anywhere in `docker-compose.init.yml`).
+grep -- no `es-data` reference anywhere in `arcane/home/honeypot-init/compose.yml`).
 `honeynet` is the actual shared resource; `es-data`, `evebox-config`, and
 `arkime-pcap` all stay private/unnamed. Per explicit instruction (same as
 `dashboard-state` in the dashboard split), this means a fresh, empty
