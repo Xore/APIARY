@@ -264,6 +264,27 @@ func (s *store) rebuild() {
 		if dirSensor == "portbridge" {
 			continue
 		}
+		// #1529: suricata used to be handled inside the sensorOrder loop
+		// below, which only ever runs for a dirSensor this local-disk walk
+		// found at least one *.json file for. That silently coupled "does
+		// Elasticsearch have suricata alerts" to "does this dashboard
+		// replica's own /logs/suricata bind mount (the sshfs mount of the
+		// VPS's eve.json directory -- see vps/docker-compose.yml's own
+		// header comment) currently have at least one locally-visible
+		// eve-*.json file" -- a dead, stale, or not-yet-established sshfs
+		// mount silently zeroed out the Overview evidence tab's Suricata
+		// alerts/categories cards even when Filebeat's own, separate mount
+		// of the identical host directory (analysis/filebeat.yml) was
+		// healthy and Elasticsearch already held real suricata-v2-* alert
+		// documents. Suricata is queried unconditionally below instead --
+		// the same "ES-only, no local-file gate" posture esOnlySensors
+		// already has -- it just needs its own adapter
+		// (loadSuricataEventsES) rather than the generic
+		// loadSensorEventsES, because it ships to its own index family
+		// (suricata-*), never honeypot-v2-* under event.sensor:"suricata".
+		if dirSensor == "suricata" {
+			continue
+		}
 		if seenSensor[dirSensor] {
 			continue
 		}
@@ -272,20 +293,6 @@ func (s *store) rebuild() {
 	}
 	for _, dirSensor := range sensorOrder {
 		if s.es == nil {
-			continue
-		}
-		// suricata ships to its own index family (suricata-*, "logset"
-		// values other than "sensors"; see analysis/filebeat.yml/
-		// elasticsearch-setup.sh), never honeypot-v2-* under
-		// event.sensor:"suricata" the way every other sensor here does --
-		// loadSensorEventsES only ever queries honeypot-v2-*, so it needs
-		// its own adapter (#1103 Category 2), not the generic one.
-		if dirSensor == "suricata" {
-			if cached, ok := s.loadSuricataEventsES(s.es); ok {
-				for _, entry := range cached {
-					processEntry(entry)
-				}
-			}
 			continue
 		}
 		// ES-only (#1103): every sensor Filebeat ships to honeypot-v2-*
@@ -307,6 +314,21 @@ func (s *store) rebuild() {
 		}
 		for _, entry := range cached {
 			processEntry(entry)
+		}
+	}
+
+	// #1529: queried unconditionally, the same "ES-only, no local-file
+	// gate" posture as the esOnlySensors loop just above -- see the
+	// sensorOrder discovery loop's own #1529 comment for why gating this
+	// on local-file discovery was the bug. suricata isn't itself listed in
+	// esOnlySensors because it needs loadSuricataEventsES (its own index
+	// family, suricata-*), not the generic loadSensorEventsES every
+	// esOnlySensors entry uses (honeypot-v2-*).
+	if s.es != nil {
+		if cached, ok := s.loadSuricataEventsES(s.es); ok {
+			for _, entry := range cached {
+				processEntry(entry)
+			}
 		}
 	}
 
