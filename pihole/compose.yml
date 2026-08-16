@@ -45,9 +45,9 @@ services:
         condition: service_healthy
         restart: true
     ports:
-      - "${LAN_IP:?set LAN_IP in .env to the homeserver LAN address}:53:53/tcp"
-      - "${LAN_IP:?set LAN_IP in .env to the homeserver LAN address}:53:53/udp"
-      - "${LAN_IP:?set LAN_IP in .env to the homeserver LAN address}:80:80/tcp"
+      - "${LAN_IP:-127.0.0.1}:53:53/tcp"
+      - "${LAN_IP:-127.0.0.1}:53:53/udp"
+      - "${LAN_IP:-127.0.0.1}:80:80/tcp"
     environment:
       TZ: "${INSTALL_TIMEZONE:-Europe/Berlin}"
       WEBPASSWORD: "${PIHOLE_PASSWORD:?set PIHOLE_PASSWORD in .env}"
