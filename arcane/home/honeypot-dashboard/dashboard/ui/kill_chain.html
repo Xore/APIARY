@@ -51,6 +51,9 @@
         </div>
 
         <script defer src="{{asset "/static/echarts.min.js"}}"></script>
+        {{/* #1532: registers hp-echarts-theme.js's "xore" ECharts theme;
+             must run after echarts.min.js and before hp-kill-chain.js. */}}
+        <script defer src="{{asset "/static/hp-echarts-theme.js"}}"></script>
         <script defer src="{{asset "/static/hp-kill-chain.js"}}"></script>
         <footer id="kill-chain-footer">{{brandText}} &bull; kill-chain analytics &bull; #1224</footer>
       </div>

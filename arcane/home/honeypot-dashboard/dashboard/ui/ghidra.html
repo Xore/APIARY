@@ -206,7 +206,20 @@
           <div class="card wide"><h2>Functions</h2>{{if .Detail.Functions}}<p class="note">{{len .Detail.Functions}} recovered function{{if ne (len .Detail.Functions) 1}}s{{end}}{{if .Detail.FunctionsDeepened}}, {{.Detail.FunctionsDeepened}} with decompiled pseudocode and callers/callees{{if .Detail.FunctionsDeepenedTruncated}} (the largest functions only &mdash; the deep-dive budget did not cover the whole list){{end}}{{else}} &mdash; none were decompiled for this analysis{{end}}.</p><div class="card__scroll" aria-label="Full function list">{{range .Detail.Functions}}<pre class="code">{{.Address}}  {{.Name}}  {{.Signature}}
 {{if .Callers}}  callers: {{range .Callers}}{{.Name}}@{{.Addr}} {{end}}
 {{end}}{{if .Callees}}  callees: {{range .Callees}}{{.Name}}@{{.Addr}} {{end}}
-{{end}}</pre>{{if .Pseudocode}}<pre class="code language-c">{{.Pseudocode}}</pre>{{end}}{{end}}</div>{{else}}<p class="empty">No functions were recovered. For a packed or corrupt binary this is itself the finding.</p>{{end}}</div>
+{{end}}</pre>{{if .Pseudocode}}{{/* #1532: Prism's own default highlightAll() selector is
+     "code[class*='language-'], [class*='language-'] code" -- it requires a
+     <code> element, either bearing the language class itself or nested one
+     level under something that does. A bare <pre class="language-c"> with
+     no <code> child (what this used to render) matches neither branch, so
+     Prism silently never tokenizes it: no .token spans are ever added, so
+     none of prism.css's carefully theme-mapped token colors apply and the
+     decompiled pseudocode renders as flat, unhighlighted pre.code text --
+     the "grey text, not readable" complaint. Prism's own highlightElement()
+     copies the detected language class up onto the parent <pre> once it
+     runs (prism.js's own setLanguage(parentElement, lang) call), so
+     prism.css's "pre.code[class*='language-'] .token.*" selectors still
+     match post-highlight even though only the <code> carries the class
+     here. */}}<pre class="code"><code class="language-c">{{.Pseudocode}}</code></pre>{{end}}{{end}}</div>{{else}}<p class="empty">No functions were recovered. For a packed or corrupt binary this is itself the finding.</p>{{end}}</div>
         </div>
 
         <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-deepdive" role="tabpanel" data-dashboard-panel="deepdive" hidden>
@@ -365,6 +378,10 @@
 <script defer src="{{asset "/static/dompurify.min.js"}}"></script>
 <script defer src="{{asset "/static/hp-ghidra-markdown.js"}}"></script>
 <script defer src="{{asset "/static/cytoscape.min.js"}}"></script>
+{{/* #1532: registers window.hpChartColor, the CSS-var-to-literal-color
+     resolver hp-ghidra-callgraph.js's Cytoscape.js styling needs (Cytoscape
+     draws to <canvas> and can't resolve a var() reference itself). */}}
+<script defer src="{{asset "/static/hp-echarts-theme.js"}}"></script>
 <script defer src="{{asset "/static/hp-ghidra-callgraph.js"}}"></script>
 <script defer src="{{asset "/static/hp-ghidra-report.js"}}"></script>{{end}}
 </body>

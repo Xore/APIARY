@@ -69,6 +69,14 @@
           ...data.nodes.map(n => ({ data: { id: n.id, label: n.label, kind: n.kind } })),
           ...data.edges.map(e => ({ data: { source: e.source, target: e.target } })),
         ];
+        // #1532: Cytoscape.js draws to <canvas> and parses color values
+        // itself -- a literal "var(--x)" string is not a color it
+        // understands and silently fails, leaving nodes/edges in
+        // Cytoscape's own default grey/black regardless of the site's
+        // theme. hp-echarts-theme.js's window.hpChartColor resolves the
+        // current theme.css value up front instead (same helper
+        // hp-attackers.js's own entity graph uses).
+        const c = window.hpChartColor || ((name, fallback) => fallback || name);
         const cy = cytoscape({
           container: canvas,
           elements,
@@ -78,13 +86,13 @@
               style: {
                 label: "data(label)",
                 "font-size": 9,
-                color: "var(--text-muted)",
+                color: c("--text-muted", "#a5a9a6"),
                 "text-valign": "bottom",
                 "text-margin-y": 4,
                 "text-wrap": "ellipsis",
                 "text-max-width": "80px",
-                "background-color": "var(--surface-2)",
-                "border-color": "var(--border-strong)",
+                "background-color": c("--surface-2", "#343432"),
+                "border-color": c("--border-strong", "rgba(255,255,255,0.14)"),
                 "border-width": 1,
                 width: 14,
                 height: 14,
@@ -97,12 +105,12 @@
               // subjects, versus the leaf nodes around them.
               selector: `node[kind = "function"]`,
               style: {
-                "background-color": "var(--accent)",
-                "border-color": "var(--surface-1)",
+                "background-color": c("--accent", "#d97757"),
+                "border-color": c("--surface-1", "#2c2c2a"),
                 "border-width": 1.5,
                 width: 22,
                 height: 22,
-                color: "var(--text)",
+                color: c("--text-on-accent", "#211a17"),
                 "font-weight": 600,
               },
             },
@@ -110,8 +118,8 @@
               selector: "edge",
               style: {
                 width: 1,
-                "line-color": "var(--border-strong)",
-                "target-arrow-color": "var(--border-strong)",
+                "line-color": c("--border-strong", "rgba(255,255,255,0.14)"),
+                "target-arrow-color": c("--border-strong", "rgba(255,255,255,0.14)"),
                 "target-arrow-shape": "triangle",
                 "arrow-scale": 0.7,
                 "curve-style": "bezier",

@@ -1131,12 +1131,14 @@ func TestGhidraDetailPageRendersDeepDiveData(t *testing.T) {
 
 // TestGhidraDetailPageIsolatesPseudocodeForSyntaxHighlighting covers #1288:
 // each function's decompiled pseudocode must render inside its own
-// pre.language-c, separate from the plain-text address/name/signature/
-// callers/callees lines that used to share one giant pre with it -- Prism
-// tokenizing that mixed content would have mangled the non-code lines.
-// Functions with no pseudocode (never deepened) must not get an empty
-// pre.language-c at all. The page must also load prism.js/prism.css so the
-// class actually does something client-side.
+// pre > code.language-c, separate from the plain-text address/name/
+// signature/callers/callees lines that used to share one giant pre with it
+// -- Prism tokenizing that mixed content would have mangled the non-code
+// lines. Functions with no pseudocode (never deepened) must not get an
+// empty pre/code.language-c at all. The page must also load prism.js/
+// prism.css so the class actually does something client-side. #1532: the
+// language class lives on a <code> child (not the <pre> itself), matching
+// Prism's default highlightAll() selector -- see the assertion below.
 func TestGhidraDetailPageIsolatesPseudocodeForSyntaxHighlighting(t *testing.T) {
 	s := &store{}
 	tmpl := template.Must(template.New("dashboard").Funcs(templateFuncs(s, "")).Parse(pageTemplate))
@@ -1167,14 +1169,21 @@ func TestGhidraDetailPageIsolatesPseudocodeForSyntaxHighlighting(t *testing.T) {
 	}
 	body := buf.String()
 
-	if !strings.Contains(body, `<pre class="code language-c">int main(void)`) {
-		t.Errorf("pseudocode should render in its own pre.language-c, got: %s", body)
+	// #1532: a bare <pre class="language-c"> with no <code> child never
+	// matched Prism's own default highlightAll() selector
+	// ("code[class*='language-'], [class*='language-'] code"), so pseudocode
+	// was never actually tokenized/colored client-side despite prism.css's
+	// token rules existing for exactly this content. The language class now
+	// lives on a nested <code>, which Prism can find; Prism's own
+	// highlightElement() copies it back onto the parent <pre> once it runs.
+	if !strings.Contains(body, `<pre class="code"><code class="language-c">int main(void)`) {
+		t.Errorf("pseudocode should render in its own <code class=\"language-c\"> for Prism to find, got: %s", body)
 	}
 	if strings.Contains(body, "  return 0;\n}\ncallers:") || strings.Contains(body, "return 0;\n}\n  callers:") {
 		t.Error("pseudocode and the callers/callees line must not share one pre any more")
 	}
-	if got := strings.Count(body, `class="code language-c"`); got != 1 {
-		t.Errorf("expected exactly 1 pre.language-c (only the deepened function has pseudocode), got %d", got)
+	if got := strings.Count(body, `class="language-c"`); got != 1 {
+		t.Errorf("expected exactly 1 code.language-c (only the deepened function has pseudocode), got %d", got)
 	}
 	if !strings.Contains(body, `<pre class="code">0x401100  sub_401100  void sub_401100()`) {
 		t.Errorf("un-deepened function should still render its header line in a plain pre, got: %s", body)
