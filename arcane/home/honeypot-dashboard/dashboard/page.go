@@ -11,4 +11,4 @@ package main
 //	           query that does not name one specific entity
 //
 // All share the "style" block and the embedded Tailwind/Leaflet frontend assets.
-var pageTemplate = pageStyle + settingsModal + pageOverview + pageEvents + pageIPs + pageSession + pageIntel + pagePayloads + pageWorkbench + pageSandbox + pageSandboxVNC + pageGhidra + pageRevdeck + pageCape + pageGitHubAnalysis + pageOps + pageReports + pageSearch + pageMLAnomalies + pageLLMAnalysis + pageAgentCampaigns + pageTTYReplay + pageRecordings + pageAuthEvents + pageAttackers + pageKillChain + pageProblemReports + pageCanarytokens
+var pageTemplate = pageStyle + settingsModal + pageOverview + pageEvents + pageIPs + pageSession + pageIntel + pagePayloads + pageWorkbench + pageSandbox + pageSandboxVNC + pageGhidra + pageRevdeck + pageCape + pageGitHubAnalysis + pageOps + pageReports + pageSearch + pageMLAnomalies + pageLLMAnalysis + pageAgentCampaigns + pageTTYReplay + pageRecordings + pageAuthEvents + pageAttackers + pageKillChain + pageProblemReports + pageCanarytokens + pageSensors

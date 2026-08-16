@@ -213,6 +213,27 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 		// exist in "attackers-body", rendered separately by the fragment
 		// route.
 		{"attackers-body", attackersPage{Generated: now, Rows: []attackerRow{{ID: "entity-1", Link: "/attackers?id=entity-1"}}, Total: 1, Selected: &attackerRow{ID: "entity-1"}}},
+		// #1538: "sensors-populated" exercises both tabs' non-empty branch
+		// (session table rows, request table rows, and the <details>
+		// preview/headers blocks each row can carry) -- "sensors" (in the
+		// pages loop's own name, mapped below) covers the Enabled-but-empty
+		// branch of both tabs.
+		{"sensors", sensorDetailPage{Generated: now, Enabled: true}},
+		{"sensors-populated", sensorDetailPage{Generated: now, Enabled: true,
+			Mailoney: []mailoneySession{{
+				SessionID: "sess-1", When: now.Format(time.RFC3339), IP: "203.0.113.9", Port: "51000",
+				LoggedIn: true, User: "admin", Pass: "hunter2",
+				MailFrom: []string{"mail from:<attacker@evil.example>"}, RcptTo: []string{"rcpt to:<victim@example.invalid>"},
+				BodySize: 128, Truncated: true, BodyPath: "/data/mail/sess-1.eml", BodyPreview: "Subject: test\r\n\r\nbody",
+			}},
+			HTTPRequests: []httpHoneypotRequest{{
+				When: now.Format(time.RFC3339), IP: "198.51.100.7", Method: "POST", Host: "example.invalid",
+				Path: "/wp-login.php", Query: "action=login", UserAgent: "curl/8.0",
+				Headers: map[string]string{"x-ja4": "t13d..."}, Body: "log=admin&pwd=hunter2",
+				Username: "admin", Password: "hunter2", AuthType: "form", Status: 200, Category: "wordpress",
+				Tarpitted: true, TarpitBytes: 4096, TarpitMS: 1500,
+			}},
+		}},
 	}
 	for _, page := range pages {
 		name := page.name
@@ -234,6 +255,9 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 		}
 		if name == "payloads-with-files" {
 			name = "payloads"
+		}
+		if name == "sensors-populated" {
+			name = "sensors"
 		}
 		var buf bytes.Buffer
 		if err := tmpl.ExecuteTemplate(&buf, name, page.data); err != nil {
@@ -286,6 +310,7 @@ func TestTabsAndPanelsAgreeOnEveryPage(t *testing.T) {
 		{"reports", "reports studio", snapshot{}},
 		{"payloads", "captured payloads", payloadsPage{Generated: now}},
 		{"workbench-results", "analysis results", evidenceResultsPageData{Generated: now}},
+		{"sensors", "sensor detail", sensorDetailPage{Generated: now, Enabled: true}},
 	} {
 		var buf bytes.Buffer
 		if err := tmpl.ExecuteTemplate(&buf, page.template, page.data); err != nil {
