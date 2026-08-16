@@ -157,7 +157,12 @@ func (s *server) handleImplant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("implanted %d bytes at %s (memo=%q)", len(content), req.Path, req.Memo)
+	// %q, not %s, for req.Path -- it's operator-controlled but unvalidated
+	// for log-safety specifically (resolveHoneyfsPath only checks it can't
+	// escape honeyfsDir), so a newline in it could otherwise forge fake
+	// log lines. Matches canarytokens-adapter's own fix for the same class
+	// of finding (#1487, #1556).
+	log.Printf("implanted %d bytes at %q (memo=%q)", len(content), req.Path, req.Memo)
 
 	if err := s.setImplantPending(); err != nil {
 		// The file is planted; a missed marker just means the operator has
