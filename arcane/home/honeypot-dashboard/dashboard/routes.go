@@ -348,6 +348,14 @@ func (s *store) routes(tmpl *template.Template) *http.ServeMux {
 		data := s.get()
 		renderPage(w, tmpl, "reports", &data)
 	})
+	// #1487: instant shell, no query on page load -- Tokens/Create bait/
+	// Reports all hydrate client-side (static/hp-canarytokens.js) against
+	// the existing /api/settings/canarytokens* endpoints (#1508) and
+	// /api/events?sensor=canarytokens, same posture as attackersShell above.
+	mux.HandleFunc("GET /canarytokens", func(w http.ResponseWriter, r *http.Request) {
+		data := s.get()
+		renderPage(w, tmpl, "canarytokens", &data)
+	})
 	mux.HandleFunc("GET /payloads", func(w http.ResponseWriter, r *http.Request) {
 		data := s.payloadsData(parsePayloadsFilter(r))
 		data.filterBar = buildFilterBar(r, "/payloads",
