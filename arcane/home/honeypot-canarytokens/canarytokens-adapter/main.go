@@ -134,7 +134,12 @@ func writeEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("token fired: type=%s memo=%q src_ip=%s", p.TokenType, p.Memo, p.SrcIP)
+	// %q, not %s, for every field below: all three ultimately trace back to
+	// whoever tripped the token (Canarytokens' own webhook payload, not
+	// validated before this point) -- a newline/control character in
+	// token_type or src_ip could otherwise forge fake log lines. %q quotes
+	// and escapes them the same way it already (correctly) did for memo.
+	log.Printf("token fired: type=%q memo=%q src_ip=%q", p.TokenType, p.Memo, p.SrcIP)
 	w.WriteHeader(http.StatusOK)
 }
 
