@@ -18,8 +18,9 @@ tag="${1:?usage: scripts/sync-novnc.sh <tag> <expected-tarball-sha256>}"
 expected_sha256="${2:?usage: scripts/sync-novnc.sh <tag> <expected-tarball-sha256>}"
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-lock="$root/dashboard/frontend/novnc.lock"
-vendored="$root/dashboard/static/vendor/novnc"
+# #1502: dashboard/ moved under arcane/home/honeypot-dashboard/.
+lock="$root/arcane/home/honeypot-dashboard/dashboard/frontend/novnc.lock"
+vendored="$root/arcane/home/honeypot-dashboard/dashboard/static/vendor/novnc"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT

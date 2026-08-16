@@ -24,8 +24,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FRONTEND="$ROOT/dashboard/frontend"
-ASSETS=(dashboard/static/hp-api.js)
+# #1502: dashboard/ moved under arcane/home/honeypot-dashboard/.
+FRONTEND="$ROOT/arcane/home/honeypot-dashboard/dashboard/frontend"
+ASSETS=(arcane/home/honeypot-dashboard/dashboard/static/hp-api.js)
 
 MODE=report
 for arg in "$@"; do
@@ -43,7 +44,7 @@ if command -v npm >/dev/null 2>&1; then
   npm --prefix "$FRONTEND" run typecheck
   npm --prefix "$FRONTEND" run build
 elif command -v docker >/dev/null 2>&1; then
-  docker run --rm -v "$ROOT/dashboard:/app" -w /app/frontend node:22-alpine \
+  docker run --rm -v "$ROOT/arcane/home/honeypot-dashboard/dashboard:/app" -w /app/frontend node:22-alpine \
     sh -c "npm ci && npm run typecheck && npm run build"
 else
   echo "error: neither npm nor docker is available to build the frontend" >&2

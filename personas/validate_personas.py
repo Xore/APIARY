@@ -24,7 +24,7 @@ retired = (
     "web-03", "Meridian Retail", "meridian-portal", "meridian.internal",
     "meridian.example", "portal-noreply", "Debian 12",
 )
-for path in (ROOT / "cowrie").rglob("*"):
+for path in (ROOT / "arcane/home/honeypot-cowrie/cowrie").rglob("*"):  # #1502
     if not path.is_file() or path.name == "README-fs.md":
         continue
     try:
@@ -41,9 +41,12 @@ compose_path = ROOT / "docker-compose.yml"
 if not compose_path.exists():  # Dockge deploys the repository file as compose.yml.
     compose_path = ROOT / "compose.yml"
 surfaces = [
-    compose_path, ROOT / "analysis/filebeat.yml",
-    ROOT / "dashboard/main.go", ROOT / "multipot/main.go",
-    ROOT / "http-honeypot/main.go", ROOT / "dnp3-honeypot/main.go",
+    # #1502: each of these moved under arcane/home/honeypot-<name>/.
+    compose_path, ROOT / "arcane/home/honeypot-elk/analysis/filebeat.yml",
+    ROOT / "arcane/home/honeypot-dashboard/dashboard/main.go",
+    ROOT / "arcane/home/honeypot-multipot/multipot/main.go",
+    ROOT / "arcane/home/honeypot-http/http-honeypot/main.go",
+    ROOT / "arcane/home/honeypot-dnp3/dnp3-honeypot/main.go",
 ]
 wiring = "\n".join(path.read_text(encoding="utf-8") for path in surfaces)
 for persona_id in personas:
@@ -51,7 +54,7 @@ for persona_id in personas:
         errors.append(f"{persona_id}: not wired into an event/enrichment surface")
 if "SNARE_TARGET" in compose_path.read_text(encoding="utf-8"):
     errors.append(f"{compose_path.name}: live-site SNARE_TARGET override is not allowed")
-if "portal.meridian.example" not in (ROOT / "snare/Dockerfile").read_text(encoding="utf-8"):
+if "portal.meridian.example" not in (ROOT / "arcane/home/honeypot-init/snare/Dockerfile").read_text(encoding="utf-8"):  # #1502
     errors.append("snare/Dockerfile: canonical fictional portal is missing")
 
 if errors:

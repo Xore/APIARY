@@ -84,15 +84,15 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-          cache-dependency-path: dashboard/frontend/package-lock.json
+          cache-dependency-path: arcane/home/honeypot-dashboard/dashboard/frontend/package-lock.json
       - run: npm ci
-        working-directory: dashboard/frontend
+        working-directory: arcane/home/honeypot-dashboard/dashboard/frontend
       - run: npm run typecheck
-        working-directory: dashboard/frontend
+        working-directory: arcane/home/honeypot-dashboard/dashboard/frontend
       - run: npm run build
-        working-directory: dashboard/frontend
+        working-directory: arcane/home/honeypot-dashboard/dashboard/frontend
       - name: Generated assets are current
-        run: git diff --exit-code -- dashboard/static/hp-api.js
+        run: git diff --exit-code -- arcane/home/honeypot-dashboard/dashboard/static/hp-api.js
 
   dashboard-browser:
     name: Dashboard browser matrix
@@ -102,22 +102,22 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: "1.25.x"
-          cache-dependency-path: dashboard/go.sum
+          cache-dependency-path: arcane/home/honeypot-dashboard/dashboard/go.sum
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
-          cache-dependency-path: dashboard/frontend/package-lock.json
+          cache-dependency-path: arcane/home/honeypot-dashboard/dashboard/frontend/package-lock.json
       - run: npm ci
-        working-directory: dashboard/frontend
+        working-directory: arcane/home/honeypot-dashboard/dashboard/frontend
       - run: npx playwright install --with-deps chromium
-        working-directory: dashboard/frontend
+        working-directory: arcane/home/honeypot-dashboard/dashboard/frontend
       # #1034: start-dashboard.mjs spawns a real redis-server for the OIDC
       # session store fixture rather than reimplementing RESP -- ubuntu-latest
       # ships it already in most images, but don't depend on that silently.
       - run: command -v redis-server || sudo apt-get install -y redis-server
       - run: npm run test:browser
-        working-directory: dashboard/frontend
+        working-directory: arcane/home/honeypot-dashboard/dashboard/frontend
 
   vendored-theme:
     name: Vendored Xore/theme is in sync
@@ -163,7 +163,7 @@ jobs:
           # from the patch's own OLD_CLASS/OLD_IMPORT text, and the actual
           # patched FileHandler class body (exec'd, not reimplemented) for
           # rotation/data-loss behavior.
-          python dionaea/tests/test_log_rotation_patch.py
+          python arcane/home/honeypot-dionaea/dionaea/tests/test_log_rotation_patch.py
       - name: Ghidra worker, spool discipline and AI triage
         shell: bash
         run: |
@@ -249,7 +249,7 @@ jobs:
           fi
       - name: Validate Keycloak realm policy
         shell: bash
-        run: ./keycloak/realm/validate.sh
+        run: ./arcane/home/honeypot-keycloak/keycloak/realm/validate.sh
       # #982 phase 1 / #1040: validate.sh only checks structure/policy --
       # this actually imports the realm into a real, disposable Keycloak +
       # PostgreSQL the way the real fresh-install bootstrap path does, to
@@ -299,7 +299,7 @@ jobs:
           done
       - name: Threat-intel CIDR refresh script (#244)
         shell: bash
-        run: dashboard/geoip/tests/test_refresh_threat_cidrs.sh
+        run: arcane/home/honeypot-dashboard/dashboard/geoip/tests/test_refresh_threat_cidrs.sh
       - name: honeypot-30d ILM policy rolls over and deletes (#585)
         shell: bash
         run: analysis/tests/test_honeypot_ilm_rollover.sh
@@ -425,7 +425,7 @@ jobs:
           # APIARY's honeynet network and two of its named volumes by
           # external reference; config validation does not require those to
           # actually exist, so no APIARY setup is needed here either.
-          docker compose -f docker-compose.init.yml config --quiet
+          docker compose -f arcane/home/honeypot-init/compose.yml config --quiet
           docker compose -f vps/docker-compose.yml config --quiet
           # The sandbox gateway is never started here — it answers live malware
           # on an isolated bridge that does not exist on a CI runner. Validating

@@ -30,20 +30,23 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-CLASSIFY_GO = REPO_ROOT / "dashboard" / "classify.go"
+# #1502: dashboard/ and every sensor dir below moved under arcane/home/.
+CLASSIFY_GO = REPO_ROOT / "arcane/home/honeypot-dashboard/dashboard" / "classify.go"
 
-# sensor dir -> classify.go section marker substring (from the "---- name ----"
-# comment headers already used to organise that file).
+# sensor dir (also KNOWN_CLEAN's lookup key -- keep it the short name, not
+# the #1502 arcane/home/ path) -> (actual directory to scan, classify.go
+# section marker substring from the "---- name ----" comment headers
+# already used to organise that file).
 SENSORS = {
-    "dnp3-honeypot": "dnp3-honeypot",
-    "citrix-honeypot": "citrix-honeypot",
-    "cisco-asa-honeypot": "cisco-asa-honeypot",
-    "dicompot": "dicompot",
-    "rdp-honeypot": "rdp-honeypot",
-    "dns-honeypot": "dns-honeypot",
-    "endlessh-honeypot": "endlessh",
-    "http-honeypot": "http-honeypot",
-    "multipot": "multipot",
+    "dnp3-honeypot": ("arcane/home/honeypot-dnp3/dnp3-honeypot", "dnp3-honeypot"),
+    "citrix-honeypot": ("arcane/home/honeypot-citrix-honeypot/citrix-honeypot", "citrix-honeypot"),
+    "cisco-asa-honeypot": ("arcane/home/honeypot-cisco-asa-honeypot/cisco-asa-honeypot", "cisco-asa-honeypot"),
+    "dicompot": ("arcane/home/honeypot-dicompot/dicompot", "dicompot"),
+    "rdp-honeypot": ("arcane/home/honeypot-rdp-honeypot/rdp-honeypot", "rdp-honeypot"),
+    "dns-honeypot": ("arcane/home/honeypot-dns-honeypot/dns-honeypot", "dns-honeypot"),
+    "endlessh-honeypot": ("arcane/home/honeypot-endlessh/endlessh-honeypot", "endlessh"),
+    "http-honeypot": ("arcane/home/honeypot-http/http-honeypot", "http-honeypot"),
+    "multipot": ("arcane/home/honeypot-multipot/multipot", "multipot"),
 }
 
 # Matches the two literal-assignment shapes this codebase's sensors use:
@@ -131,11 +134,11 @@ def has_generic_fallback(section: str) -> bool:
 
 def main():
     any_gap = False
-    for sensor_dir, marker in SENSORS.items():
-        if not (REPO_ROOT / sensor_dir).is_dir():
+    for sensor_dir, (actual_dir, marker) in SENSORS.items():
+        if not (REPO_ROOT / actual_dir).is_dir():
             print(f"SKIP  {sensor_dir}: directory not found")
             continue
-        emitted, dynamic = emitted_kinds(sensor_dir)
+        emitted, dynamic = emitted_kinds(actual_dir)
         section = classify_section(marker)
         if not section:
             print(f"SKIP  {sensor_dir}: no classify.go section found for marker {marker!r}")
