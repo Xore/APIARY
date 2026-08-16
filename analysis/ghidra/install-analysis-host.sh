@@ -30,6 +30,12 @@
 #   --containers-only  Bring up/refresh the containers and stop. Needs docker
 #                      but not root, which is the half an operator in the
 #                      docker group can run.
+#   --host-files-only  The inverse of --containers-only: skip the Ghidra/
+#                      Ollama/statictools containers entirely and only
+#                      re-install the worker/systemd-unit half. Needs root.
+#                      For CI to re-sync ghidra-worker.py and siblings on a
+#                      routine deploy without also restarting the GPU
+#                      containers every time (#1406).
 #   --model NAME       Model to pull (default qwen3:14b, or GHIDRA_TRIAGE_MODEL
 #                      from /etc/default/honeypot-ghidra if that file exists).
 #   --no-gpu           Run the model on CPU even if an NVIDIA runtime is present.
@@ -48,6 +54,7 @@ env_file=/etc/default/honeypot-ghidra
 target=/opt/honeypot-ghidra
 
 CONTAINERS_ONLY=0
+HOST_FILES_ONLY=0
 USE_GPU=auto
 SKIP_PULL=0
 MODEL=""
@@ -60,6 +67,7 @@ STACK_DIR="$([ -d /opt/stacks ] && echo /opt/stacks/ghidra || true)"
 while [ $# -gt 0 ]; do
   case "$1" in
     --containers-only) CONTAINERS_ONLY=1; shift ;;
+    --host-files-only) HOST_FILES_ONLY=1; shift ;;
     --model) MODEL="${2:?--model needs a value}"; shift 2 ;;
     --no-gpu) USE_GPU=no; shift ;;
     --skip-pull) SKIP_PULL=1; shift ;;
@@ -86,6 +94,8 @@ if [ -z "$MODEL" ] && [ -r "$env_file" ]; then
   MODEL="${MODEL%\"}"; MODEL="${MODEL#\"}"   # tolerate a quoted value
 fi
 MODEL="${MODEL:-qwen3:14b}"
+
+if [ "$HOST_FILES_ONLY" != 1 ]; then
 
 # ── Preflight ────────────────────────────────────────────────────────────────
 command -v docker >/dev/null 2>&1 || die "docker is required"
@@ -212,6 +222,8 @@ if [ "$CONTAINERS_ONLY" = 1 ]; then
   exit 0
 fi
 
+fi # HOST_FILES_ONLY
+
 # ── Host-side worker ─────────────────────────────────────────────────────────
 [ "$(id -u)" -eq 0 ] || die "installing the worker needs root; re-run with sudo, or pass --containers-only"
 
@@ -285,6 +297,13 @@ systemctl enable --now honeypot-ghidra-worker.path
 systemctl enable --now honeypot-gpu-queue-drain.timer
 systemctl enable --now honeypot-model-drift.timer
 systemctl enable --now honeypot-model-status-adapter.service
+# The only long-running (Type=simple) unit installed here -- the other three
+# are path/timer-triggered oneshots that naturally pick up a re-installed
+# .py on their next invocation, with no running process to go stale.
+# enable --now is a no-op on a re-run against an already-active unit, so a
+# re-sync (#1406) that only overwrote the .py file would otherwise leave
+# this one serving the old code from memory indefinitely.
+systemctl restart honeypot-model-status-adapter.service
 
 # ── Verify ───────────────────────────────────────────────────────────────────
 # Against the running services, with the worker's own environment file, rather
