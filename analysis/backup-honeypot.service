@@ -1,0 +1,10 @@
+[Unit]
+Description=Elasticsearch snapshot + stack-config backup for the honeypot stack
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/honeypot-backup
+ExecStart=/opt/stacks/apiary/analysis/backup-honeypot.sh
+UMask=0077
