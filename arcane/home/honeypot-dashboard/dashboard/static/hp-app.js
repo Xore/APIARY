@@ -1331,6 +1331,67 @@
       addEventListener("resize", () => { if (activeInput) positionOptions(activeInput); });
     }
 
+    /* "since" filter fields (#1531): a native <input type="datetime-local">
+       picker paired with the existing plain-text duration field
+       (partials/dashboard.html's "filterbar" template, Kind == "since") --
+       clicking it offers a real calendar/clock picker the same way the
+       sensor field's autocomplete offers real values on focus, above.
+       The text input stays the only thing actually submitted (name=
+       "since", a Go time.ParseDuration string like "24h" -- see filters.go)
+       so every existing link/bookmark/CSV export that already carries a
+       ?since= duration keeps working untouched; the picker only ever
+       writes into it, converting whatever moment it's set to into an
+       equivalent duration entirely client-side. That conversion (now -
+       picked, both read from the browser's own clock) is also what keeps
+       this free of timezone bugs: the server only ever sees a relative
+       duration and re-anchors it to its own clock, never the picker's
+       absolute value. */
+    const parseSinceDurationMs = text => {
+      const re = /(\d+(?:\.\d+)?)\s*(h|m|s)/g;
+      let ms = 0;
+      let matched = false;
+      let m;
+      while ((m = re.exec(text))) {
+        matched = true;
+        const value = parseFloat(m[1]);
+        ms += m[2] === "h" ? value * 3600000 : m[2] === "m" ? value * 60000 : value * 1000;
+      }
+      return matched ? ms : null;
+    };
+    const formatSinceDuration = ms => {
+      const totalMinutes = Math.round(ms / 60000);
+      if (totalMinutes <= 0) return null;
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = totalMinutes % 60;
+      if (hours === 0) return `${minutes}m`;
+      return minutes === 0 ? `${hours}h` : `${hours}h${minutes}m`;
+    };
+    const localDatetimeValue = date => {
+      const pad = n => String(n).padStart(2, "0");
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    };
+    document.querySelectorAll(".hp-since-field").forEach(field => {
+      const text = field.querySelector("[data-hp-since-text]");
+      const picker = field.querySelector("[data-hp-since-picker]");
+      if (!text || !picker) return;
+      picker.max = localDatetimeValue(new Date());
+      const syncPickerFromText = () => {
+        const ms = parseSinceDurationMs(text.value.trim());
+        picker.value = ms == null ? "" : localDatetimeValue(new Date(Date.now() - ms));
+      };
+      syncPickerFromText();
+      picker.addEventListener("change", () => {
+        if (!picker.value) return;
+        const duration = formatSinceDuration(Date.now() - new Date(picker.value).getTime());
+        if (!duration) return;
+        text.value = duration;
+        text.dispatchEvent(new Event("input", { bubbles: true }));
+        text.dispatchEvent(new Event("change", { bubbles: true }));
+        syncPickerFromText();
+      });
+      text.addEventListener("input", syncPickerFromText);
+    });
+
     /* Theme preference: cycle system -> dark -> light (persisted) */
     const themeStorageKey = "hp-theme";
     const themeOrder = ["system", "dark", "light"];

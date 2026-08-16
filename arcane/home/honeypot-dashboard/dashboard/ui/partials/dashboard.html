@@ -6,6 +6,7 @@
 <link rel="apple-touch-icon" href="{{asset "/static/apple-touch-icon.png"}}">
 <link rel="manifest" href="{{asset "/static/site.webmanifest"}}">
 <link rel="stylesheet" href="{{asset "/static/theme.css"}}">
+<link rel="stylesheet" href="{{asset "/static/hp-app.css"}}">
 <link rel="stylesheet" href="{{asset "/static/leaflet.css"}}">
 <script defer src="{{asset "/static/leaflet.js"}}"></script>
 <script defer src="{{asset "/static/vendor/focus-trap/tabbable.umd.min.js"}}"></script>
@@ -201,7 +202,21 @@
       {{$val := .Value}}
       <label class="hp-filterbar-field"><span>{{.Label}}</span>
         {{if eq .Kind "select"}}<select name="{{.Name}}">{{range .Options}}<option value="{{.Value}}"{{if eq .Value $val}} selected{{end}}>{{.Label}}</option>{{end}}</select>
-        {{else}}<input type="text" name="{{.Name}}" value="{{.Value}}" autocomplete="off" spellcheck="false"{{if eq .Kind "autocomplete"}} data-hp-filter-field="{{.Name}}"{{end}}>{{end}}
+        {{else if eq .Kind "since"}}
+        {{/* #1531: the text input stays the source of truth (a plain Go
+             duration string like "24h", parsed server-side by
+             time.ParseDuration -- not an absolute timestamp), so typing one
+             by hand keeps working exactly as before. The datetime-local
+             input alongside is a picker-only convenience with no name= of
+             its own (never submitted): hp-app.js converts whatever moment
+             it's set to into an equivalent duration and writes that into
+             the text input, entirely client-side, so this never has to
+             reconcile the browser's timezone against the server's. */}}
+        <span class="hp-since-field">
+          <input type="text" name="{{.Name}}" value="{{.Value}}" autocomplete="off" spellcheck="false" placeholder="e.g. 24h" data-hp-since-text>
+          <input type="datetime-local" class="hp-since-picker" data-hp-since-picker title="Pick a date and time" aria-label="Pick a date and time for {{.Label}}">
+        </span>
+        {{else}}<input type="text" name="{{.Name}}" value="{{.Value}}" autocomplete="off" spellcheck="false"{{if .Placeholder}} placeholder="{{.Placeholder}}"{{end}}{{if eq .Kind "autocomplete"}} data-hp-filter-field="{{.Name}}"{{end}}>{{end}}
       </label>
       {{end}}
       <div class="hp-filterbar-actions">

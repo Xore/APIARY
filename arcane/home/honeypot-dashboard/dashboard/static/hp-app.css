@@ -1,0 +1,48 @@
+/* This app's own small stylesheet layered on top of the vendored
+   Xore/theme (static/theme.css, byte-identical to Xore/theme by
+   scripts/check-vendored-theme.sh -- never hand-edited). Anything the
+   dashboard itself needs that isn't part of the shared theme belongs here
+   instead of in theme.css. */
+
+/* #1531: .btn-secondary as vendored is theme.css's own surface-1 fill,
+   which sits only one step above --app-bg -- next to a real .btn-primary
+   (an inverted, high-contrast fill) in every Apply/Reset and Filter/Reset
+   pair across the app, it reads flat and barely-there rather than as a
+   deliberately muted second button. theme.css's OWN other secondary-weight
+   interactive surfaces (.hp-rp-theme button, .hp-rp-payload-row, the
+   .segmented control's active state) go a full two steps -- surface-1 idle,
+   surface-hover/surface-3 on interaction -- so this gives .btn-secondary
+   that same, already-established two-step presence instead of inventing a
+   new one. Pure theme tokens throughout, no hardcoded colors, no vendored
+   file touched. */
+.btn-secondary {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+}
+.btn-secondary:hover {
+  background: var(--surface-3);
+  border-color: var(--text-disabled);
+}
+
+/* #1531: the "since" filter-bar field pairs its existing duration text
+   input (kept as the actual submitted value -- see partials/dashboard.html's
+   "filterbar" template and hp-app.js's own conversion) with a native
+   datetime-local picker. .hp-filterbar-field's own `input { width: 100% }`
+   rule (theme.css) is exactly right for a single field but would stack two
+   full-width inputs awkwardly here, so this narrows it back down to a
+   normal flex row -- the picker sized to its own content, the text input
+   filling the rest. */
+.hp-since-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.hp-since-field input[type="text"] {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+.hp-since-field input[type="datetime-local"] {
+  flex: none;
+  width: auto;
+}
