@@ -11,8 +11,13 @@
 # a concrete need shows up; don't add them speculatively.
 #
 # Upstream ships no published images, so both services build from CMU SEI's
-# own source via a git build context pinned to the v9.0.0 tag -- this file
-# alone is enough, `docker compose build` clones nothing to disk itself.
+# own source via a git build context -- this file alone is enough,
+# `docker compose build` clones nothing to disk itself. Pinned to the v9.0.0
+# tag's commit SHA, not the tag name: confirmed live (#1502) that Arcane's
+# own image-prep step resolves a build context's git ref under refs/heads/
+# only, so a bare tag name (which plain `docker build`/BuildKit resolves
+# fine on its own) fails there with "couldn't find remote ref". A commit SHA
+# needs no ref-namespace guessing and resolves the same way everywhere.
 #
 # ghosts-api publishes port 5000 on 10.20.30.1 -- virbr-ghosts's own gateway
 # address (#325), not the docker-internal 10.90.0.2 an earlier version of
@@ -67,7 +72,7 @@ services:
 
   ghosts-api:
     build:
-      context: https://github.com/cmu-sei/GHOSTS.git#v9.0.0:src
+      context: https://github.com/cmu-sei/GHOSTS.git#335d11e5b73c278626a0a63f5bfbdec60cda7d8e:src
       dockerfile: Dockerfile-api
     depends_on:
       ghosts-postgres:
@@ -92,7 +97,7 @@ services:
   # name "ghosts-api" on ghosts_net, so it needs no address override.
   ghosts-client-test:
     build:
-      context: https://github.com/cmu-sei/GHOSTS.git#v9.0.0:src
+      context: https://github.com/cmu-sei/GHOSTS.git#335d11e5b73c278626a0a63f5bfbdec60cda7d8e:src
       dockerfile: Dockerfile-client-universal
     profiles: ["test"]
     networks:
