@@ -662,6 +662,47 @@
     });
   }, true);
 
+  /* ---------- .hp-open-in-menu escapes its scroll container (#1537) ----------
+     events.html's per-row "actions" menu lives inside .card__scroll's own
+     max-height:340px/overflow:auto region (the same bounded-scroll list
+     the neighboring #payloads-table-card comment describes). .hp-open-in-menu
+     defaults to position:absolute against its .hp-open-in trigger, which is
+     itself inside that scroll box -- so opening the menu just grows THAT
+     box's scrollable area instead of floating over the page, and the
+     operator has to scroll the card a second time to see the rest of it.
+     Fixed here by repositioning the panel to position:fixed, computed from
+     the trigger <summary>'s own on-screen box, the instant its <details>
+     opens -- covers every .hp-open-in-menu call site (per-event menu,
+     fingerprint IP-filter menu, filter-bar menu) with one mechanism, same
+     as the open/close handling above. Kept in sync across scroll/resize the
+     same way #303's hp-filter-autocomplete already is, so it doesn't drift
+     from its trigger while open. */
+  let openActionMenu = null;
+  const positionActionMenu = details => {
+    const menu = details.querySelector(":scope > .hp-open-in-menu");
+    const trigger = details.querySelector(":scope > summary");
+    if (!menu || !trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    menu.style.position = "fixed";
+    menu.style.top = `${rect.bottom + 6}px`;
+    menu.style.left = `${rect.left}px`;
+    // Clamp to the viewport so a trigger near the right edge (a wide
+    // events table can run close to it) doesn't push the panel off-screen.
+    const overflowRight = rect.left + menu.offsetWidth - (innerWidth - 8);
+    if (overflowRight > 0) menu.style.left = `${Math.max(8, rect.left - overflowRight)}px`;
+  };
+  document.addEventListener("toggle", e => {
+    if (!e.target.matches?.(".action-menu")) return;
+    if (e.target.matches(".action-menu[open]")) {
+      openActionMenu = e.target;
+      positionActionMenu(e.target);
+    } else if (openActionMenu === e.target) {
+      openActionMenu = null;
+    }
+  }, true);
+  addEventListener("scroll", () => { if (openActionMenu) positionActionMenu(openActionMenu); }, true);
+  addEventListener("resize", () => { if (openActionMenu) positionActionMenu(openActionMenu); });
+
   /* ---------- clickable .project-card (#1137) ----------
      Most .project-card usages (payload_workbench.html's payload picker and
      run list) are themselves a whole-card <a href>, so a click anywhere on
