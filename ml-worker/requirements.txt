@@ -62,8 +62,8 @@ torch==2.13.0+cpu
 # Outlier detection (HBOS). Pulls in numba+llvmlite -- see the numpy pin
 # above; this is the version pair actually verified to install together.
 pyod==3.6.4
-numba==0.66.0
-llvmlite==0.48.0
+numba==0.67.0
+llvmlite==0.49.0
 
 # Redis pub/sub
 redis==8.1.0
