@@ -88,6 +88,40 @@ jobs:
           test ! -f .env || chmod 600 .env
           docker compose -f compose.yml config --quiet
 
+      # #1406: ghidra-worker.py and its siblings are a host-level systemd
+      # service (analysis/ghidra/install-analysis-host.sh), not a Docker
+      # Compose service the sync loops below touch -- the rsync step above
+      # only updates the /opt/stacks/apiary checkout those files are
+      # installed FROM, it never re-runs the installer that actually copies
+      # them to /opt/honeypot-ghidra and restarts the long-running unit.
+      # Confirmed live (#1406's own issue): a merged worker fix sat on
+      # main, deploy.yml reported success, and the running copy stayed
+      # stale for days until manually re-synced.
+      #
+      # This runner has no passwordless sudo, and the installer needs real
+      # root against the real host systemd -- nsenter into PID 1's
+      # namespaces from a throwaway privileged container is this repo's
+      # established escape hatch for exactly that (same trick already used
+      # for host-level directory permission fixes this session).
+      #
+      # Conditional on the unit already existing: this step re-SYNCs an
+      # already-installed worker, it must not be the thing that newly
+      # provisions one on a host where ENABLE_GPU_STACK=false deliberately
+      # skipped it during install-homeserver.sh.
+      - name: Re-sync ghidra-worker.py and siblings (host-level systemd, not Compose)
+        shell: bash
+        run: |
+          if docker run --rm --privileged --pid=host debian:bookworm-slim \
+               nsenter --target 1 --mount --uts --ipc --net --pid -- \
+               systemctl list-unit-files honeypot-ghidra-worker.path \
+               >/dev/null 2>&1; then
+            docker run --rm --privileged --pid=host debian:bookworm-slim \
+              nsenter --target 1 --mount --uts --ipc --net --pid -- \
+              bash /opt/stacks/apiary/analysis/ghidra/install-analysis-host.sh --host-files-only
+          else
+            echo "honeypot-ghidra-worker.path not installed on this host -- skipping re-sync (ENABLE_GPU_STACK=false at provisioning time, or not yet provisioned)"
+          fi
+
       # Runs before every other split stack below: each one polls a
       # completion marker this stack's jobs write (state/init-markers, e.g.
       # log-init.done, elasticsearch-setup.done, arkime-init.done) before
