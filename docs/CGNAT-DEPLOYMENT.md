@@ -51,9 +51,17 @@ flowchart TD
   these syncs on a from-scratch install, driven by the single source of
   truth at `arcane/manifests/home-production.json`. Six more home-hosted
   stacks (`auth-events-worker`, `llm-worker`, `ml-worker`,
-  `analysis/ghidra`, `sandbox/ghosts`, `pihole`) are Arcane-managed the
-  same way but were already self-contained, so they kept their existing
-  repository-root path instead of moving.
+  `analysis/ghidra`, `sandbox/ghosts`, `pihole`) are Arcane-managed too but
+  were already self-contained, so they kept their existing repository-root
+  path instead of moving. Three of those six (`auth-events-worker`,
+  `llm-worker`, `ml-worker`) are also imported by
+  `step_arcane_import_stacks` itself now (#1505 — confirmed to have no
+  host-local state beyond `.env`); the other three keep their own dedicated
+  installer steps for reasons specific to each (`pihole`'s non-`.env` host
+  state, `analysis/ghidra`'s conditional GPU compose overlay, and
+  `sandbox/ghosts`'s confirmed Arcane build-context limitation, #1506) —
+  see `scripts/install-homeserver.sh`'s own Phase 8 header comment for the
+  full reasoning behind each.
 - The public gateway source is under `vps/`.
 
 Arcane is used only on the home server. The VPS uses `docker compose` directly.
