@@ -182,8 +182,14 @@ func (s *store) serveCanarytokensCreate(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		defer file.Close()
-		data := make([]byte, header.Size)
-		if _, err := io.ReadFull(file, data); err != nil {
+		// Bounded by canarytokensMaxUploadBytes, not header.Size (a
+		// client-declared value, already caught by CodeQL as an
+		// excessive-allocation risk if used directly to size a buffer --
+		// the MaxBytesReader on the request body upstream makes it
+		// unreachable in practice, but read via a capped reader here too
+		// rather than relying on that indirection).
+		data, err := io.ReadAll(io.LimitReader(file, canarytokensMaxUploadBytes))
+		if err != nil {
 			http.Error(w, "failed to read uploaded file", http.StatusBadRequest)
 			return
 		}
