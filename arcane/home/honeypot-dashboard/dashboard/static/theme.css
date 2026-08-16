@@ -417,6 +417,21 @@ p { color: var(--text-secondary); }
 }
 .timeline-block { animation: timeline-block-in 320ms var(--ease-out) backwards; }
 
+/* #1533 (APIARY): a session-replay timeline that reads left-to-right,
+   oldest entry first, like an actual timeline -- not top-to-bottom like a
+   plain event list. .timeline-track turns a generic overflow:auto
+   container into a horizontal filmstrip; each .timeline-block becomes a
+   fixed-width column with a top rule (the horizontal equivalent of a
+   vertical layout's left rule) instead of stretching full-width. */
+.timeline-track { display: flex; align-items: stretch; gap: 14px; }
+.timeline-track .timeline-block {
+  flex: 0 0 auto;
+  width: 240px;
+  padding: 10px 12px 6px;
+  border-top: 2px solid var(--border-subtle);
+}
+.timeline-block__meta { font-size: .875rem; color: var(--text-muted); }
+
 .btn {
   display: inline-flex;
   min-height: 34px;
@@ -444,8 +459,16 @@ p { color: var(--text-secondary); }
 .btn svg { width: 15px; height: 15px; }
 .btn-primary { background: var(--btn-inverted-bg); color: var(--btn-inverted-text); }
 .btn-primary:hover { background: var(--btn-inverted-bg-hover); color: var(--btn-inverted-text); }
-.btn-secondary { border-color: var(--border-strong); background: var(--surface-1); }
-.btn-secondary:hover { background: var(--surface-2); }
+/* #1531 (APIARY): surface-1 sits only one step above --app-bg -- next to a
+   real .btn-primary (an inverted, high-contrast fill) in an Apply/Reset or
+   Filter/Reset pair, it read flat and barely-there rather than as a
+   deliberately muted second button. Other secondary-weight interactive
+   surfaces already in this file (.hp-rp-theme button, .hp-rp-payload-row,
+   the .segmented control's active state) go a full two steps -- surface-1/2
+   idle, surface-hover/3 on interaction -- so this gives .btn-secondary that
+   same, already-established two-step presence instead of a new one. */
+.btn-secondary { border-color: var(--border-strong); background: var(--surface-2); }
+.btn-secondary:hover { background: var(--surface-3); border-color: var(--text-disabled); }
 .btn-ghost { color: var(--text-secondary); }
 .btn-ghost:hover { background: var(--surface-2); color: var(--text-primary); }
 .btn-danger { border-color: color-mix(in srgb, var(--danger) 32%, transparent); background: var(--danger-soft); color: var(--danger); }
@@ -2127,6 +2150,17 @@ a.metric:hover { border-color: var(--border-strong); background: var(--surface-2
    first ~8 ever visible, zero indication the rest existed). Two independent
    fixes, not one: */
 .card__scroll {
+  /* #1536 (APIARY): .card__scroll is sometimes a card's whole content
+     region (no separate wrapper -- directly after the <h2> header).
+     Without flex:1 it only takes its own content's height, same as a plain
+     block child; when a CSS-grid row stretches the card taller than that
+     (a sibling .half card in the same row has more rows), the extra height
+     lands as dead space below the table/list instead of the region growing
+     into it. flex:1 1 auto with min-height:0 (the same pairing
+     .card__content already uses) grows this region to fill exactly the
+     space between the header and whatever follows it, still capped at
+     max-height with a scrollbar past that point. */
+  flex: 1 1 auto; min-height: 0;
   max-height: 340px; overflow: auto;
   /* 1. A thin, always-rendered scrollbar (not overlay-hidden) makes the
      region legible as "scrollable" at a glance, matching this file's own
@@ -2462,6 +2496,15 @@ button.copy:hover { color: var(--text-primary); background: var(--surface-2); }
 .hp-filterbar-field span { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); margin-bottom: 4px; }
 .hp-filterbar-field input, .hp-filterbar-field select { width: 100%; background: var(--surface-0); border: 1px solid var(--border-subtle); border-radius: var(--radius-control); color: var(--text-primary); padding: 6px 10px; font-size: 12.5px; }
 .hp-filterbar-field input:focus, .hp-filterbar-field select:focus { outline: none; border-color: var(--border-focus); }
+/* #1531 (APIARY): a "since" field pairs its existing duration text input
+   (the actual submitted value) with a native datetime-local picker.
+   .hp-filterbar-field's own `input { width: 100% }` rule above is exactly
+   right for a single field but would stack two full-width inputs
+   awkwardly here, so this narrows it back down to a normal flex row -- the
+   picker sized to its own content, the text input filling the rest. */
+.hp-since-field { display: flex; align-items: center; gap: 6px; }
+.hp-since-field input[type="text"] { flex: 1 1 auto; width: auto; min-width: 0; }
+.hp-since-field input[type="datetime-local"] { flex: none; width: auto; }
 .hp-filterbar-actions { display: flex; gap: 8px; margin-top: 4px; }
 
 /* ── Shared filter-value autocomplete (#303) ──────────────────────────────
