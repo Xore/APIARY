@@ -31,6 +31,14 @@
 # change this address without updating #325's network.xml/network-filter.sh
 # to match -- the same "one fixed, documented address" pattern as RevDeck's
 # REVDECK_API_BASE=http://10.8.0.2:19500.
+#
+# #1502: migrated into arcane/home/ghosts/ for Arcane directory-aware Git
+# sync (kept its previous sandbox/ghosts/ path's contents together as-is --
+# already self-contained, and the build context is a remote git URL, not a
+# local Dockerfile, so nothing needed rewriting). name: pinned to the live
+# project name.
+
+name: ghosts
 
 services:
   ghosts-postgres:

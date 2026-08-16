@@ -10,6 +10,14 @@
 # public hostname -- verified live (2026-08-09) that Keycloak's issuer
 # claim still correctly reflects KC_HOSTNAME's public URL regardless of
 # which address was used to reach it, so tokens/discovery stay correct.
+#
+# #1502: migrated into arcane/home/ for Arcane directory-aware Git sync.
+# Already self-contained (Dockerfile/source were already co-located with
+# this compose file, unlike the honeypot-* stacks split off repo root), so
+# this move only added the explicit name: below and relocated the file --
+# no path rewriting needed.
+
+name: auth-events-worker
 
 services:
   auth-events-worker:
