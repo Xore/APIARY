@@ -1,0 +1,64 @@
+# honeypot-multipot — #258: multipot split into its own Dockge-managed stack.
+# Same shape and reasoning as docker-compose.conpot.yml -- no depends_on, its
+# own fully private network, only host bind mounts. Deployed as
+# /opt/stacks/honeypot-multipot.
+
+name: honeypot-multipot
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  multipot:
+    <<: *runtime-defaults
+    build: ./multipot
+    container_name: hp-multipot
+    restart: unless-stopped
+    # #128: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). Unlike most other
+    # services, this image is FROM scratch with no shell -- an
+    # entrypoint: sh -c wrapper can't run here (`exec: "/bin/sh": stat
+    # /bin/sh: no such file or directory`, caught deploying this the first
+    # time). The wait lives in the Go binary itself instead (main.go).
+    ports:
+      - ${HP_BIND:-10.8.0.2}:5432:5432
+      - ${HP_BIND:-10.8.0.2}:5900:5900
+      - ${HP_BIND:-10.8.0.2}:6379:6379
+      - ${HP_BIND:-10.8.0.2}:9200:9200
+      - ${HP_BIND:-10.8.0.2}:2375:2375
+      # #238
+      - ${HP_BIND:-10.8.0.2}:110:110
+      - ${HP_BIND:-10.8.0.2}:143:143
+      - ${HP_BIND:-10.8.0.2}:1080:1080
+      - ${HP_BIND:-10.8.0.2}:2575:2575
+      - ${HP_BIND:-10.8.0.2}:5555:5555
+    volumes:
+      - /opt/stacks/apiary/logs/multipot:/var/log/honeypot
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
+    environment:
+      - LOG_FILE=/var/log/honeypot/multipot.json
+      - MULTIPOT_DISABLE=ftp,mysql,mssql,mongodb,smtp
+      # Parse the PROXY header portbridge prepends (:pp rules) so every event
+      # carries the real attacker IP instead of the tunnel peer 10.8.0.1.
+      - PROXY_PROTOCOL=1
+      - TZ=Europe/Berlin
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    networks:
+      - multipot_net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+
+networks:
+  multipot_net:
+    driver: bridge

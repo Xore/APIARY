@@ -1,0 +1,126 @@
+# honeypot-keycloak — Dockge-managed identity stack on the homeserver.
+# Public HTTPS terminates at VPS Traefik and reaches KEYCLOAK_PORT only over
+# WireGuard. PostgreSQL and Keycloak's management port are never published.
+
+name: honeypot-keycloak
+
+services:
+  postgres:
+    image: postgres:18.6-bookworm@sha256:7d2695c3aa88e792e8b3b233e7e4adb296a20412c6c0ca361e3edaaacfada108
+    container_name: hp-keycloak-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD_FILE: /run/keycloak-secrets/postgres-password
+      PGDATA: /var/lib/postgresql/18/docker
+    volumes:
+      - keycloak-postgres:/var/lib/postgresql
+      - ${KEYCLOAK_SECRETS_DIR:-/var/dockge/stacks/honeypot-keycloak/secrets}:/run/keycloak-secrets:ro
+    networks: [keycloak-data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    stop_grace_period: 60s
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    deploy:
+      resources:
+        limits: {cpus: "1.0", memory: 1G}
+        reservations: {memory: 256M}
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.1@sha256:f1f1f01e472c8a78df40d8f2a49a925274eda4d3d80d5f6edbb5c880ee3c01c6
+    container_name: hp-keycloak
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+        restart: true
+    entrypoint: ["/bin/bash", "-ec"]
+    command:
+      - |
+        export KC_DB_PASSWORD="$$(< /run/keycloak-secrets/postgres-password)"
+        if [[ -f /run/keycloak-secrets/bootstrap-admin-password ]]; then
+          export KC_BOOTSTRAP_ADMIN_USERNAME="$${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-bootstrap-admin}"
+          export KC_BOOTSTRAP_ADMIN_PASSWORD="$$(< /run/keycloak-secrets/bootstrap-admin-password)"
+        fi
+        case "$${KEYCLOAK_PUBLIC_DOMAIN}" in
+          ""|*[!A-Za-z0-9.-]*) echo "invalid KEYCLOAK_PUBLIC_DOMAIN" >&2; exit 1 ;;
+        esac
+        sed "s/example\.invalid/$${KEYCLOAK_PUBLIC_DOMAIN}/g" \
+          /opt/keycloak/realm-template/apiary-realm.json \
+          > /opt/keycloak/data/import/apiary-realm.json
+        exec /opt/keycloak/bin/kc.sh start --import-realm
+    environment:
+      KC_DB: postgres
+      KC_DB_URL_HOST: postgres
+      KC_DB_URL_PORT: "5432"
+      KC_DB_URL_DATABASE: keycloak
+      KC_DB_USERNAME: keycloak
+      # #1028: KC_HOSTNAME_ADMIN deliberately unset -- the admin console now
+      # serves from the same hostname as the issuer (KC_HOSTNAME), under its
+      # default /admin path, instead of a separate keycloak-admin.* host.
+      KC_HOSTNAME: ${KEYCLOAK_URL:-https://auth.honeypot.example}
+      KEYCLOAK_PUBLIC_DOMAIN: ${KEYCLOAK_PUBLIC_DOMAIN:-honeypot.example}
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+      KC_HTTP_MANAGEMENT_SCHEME: http
+      KC_CACHE: local
+      KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-bootstrap-admin}
+    ports:
+      - ${HP_BIND:-10.8.0.2}:${KEYCLOAK_PORT:-18080}:8080
+    volumes:
+      - ${KEYCLOAK_SECRETS_DIR:-/var/dockge/stacks/honeypot-keycloak/secrets}:/run/keycloak-secrets:ro
+      - ${KEYCLOAK_THEME_DIR:-/var/dockge/stacks/honeypot-keycloak/theme/apiary}:/opt/keycloak/themes/apiary:ro
+      # #1019: absolute path, not relative -- Compose resolves a relative
+      # bind-mount source against the directory holding the *symlink*
+      # (compose.yml is symlinked into /var/dockge/stacks/honeypot-keycloak/,
+      # not copied), not the real file's directory. A relative ./keycloak/realm
+      # here resolved to an empty auto-created directory on a fresh install,
+      # which made the realm-import sed silently fail and Keycloak
+      # crash-loop. Matches every other split stack's own convention of
+      # absolute /opt/stacks/apiary/... paths (see step_clone_repo's comment
+      # in scripts/install-homeserver.sh for why REPO_DIR must land there).
+      - ./keycloak/realm:/opt/keycloak/realm-template:ro
+    networks: [keycloak-data, keycloak-egress]
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000 &&
+          printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          grep -q '200 OK' <&3
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    stop_grace_period: 60s
+    # The pinned upstream image performs Quarkus augmentation on startup.
+    # Keeping the root filesystem read-only would require a custom image build,
+    # which this Dockge baseline deliberately avoids.
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /opt/keycloak/data/import:size=4m,mode=0755,uid=1000,gid=0
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    deploy:
+      resources:
+        limits: {cpus: "2.0", memory: 2G}
+        reservations: {memory: 768M}
+
+networks:
+  keycloak-data:
+    internal: true
+  # Keycloak needs controlled outbound access for SMTP/recovery and future
+  # observability delivery. PostgreSQL is deliberately absent from this net.
+  keycloak-egress:
+
+volumes:
+  keycloak-postgres:

@@ -1,0 +1,45 @@
+# honeypot-attacker-identity-worker -- #1200, part of the #1205 dashboard-
+# aggregation epic: merges IPs sharing 2+ strong signals (fingerprint,
+# payload SHA-256, credential pair) into durable attacker entities in
+# attackers-v1, joined against ghidra-analysis-v1's malware-family
+# verdicts. See attacker-identity-worker/identity.go's own package doc
+# comment for the merge algorithm. Deployed as
+# /opt/stacks/honeypot-attacker-identity-worker.
+#
+# Unlike campaigns-v1/attacker-clusters-v1 (correlator-worker, #1199),
+# entities here are durable and only ever grow -- this worker never
+# deletes a document for going quiet, only when two entities merge into
+# one (see docDelete's own comment in es.go).
+
+name: honeypot-attacker-identity-worker
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  attacker-identity-worker:
+    <<: *runtime-defaults
+    build: ./attacker-identity-worker
+    container_name: hp-attacker-identity-worker
+    restart: unless-stopped
+    networks:
+      - honeynet
+    environment:
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - EVIDENCE_WINDOW=6h
+      - RUN_INTERVAL=15m
+      - TZ=Europe/Berlin
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+networks:
+  honeynet:
+    name: honeynet
+    driver: bridge

@@ -1,0 +1,452 @@
+# honeypot-conpot — #258 proof of concept: the Conpot persona family split out
+# of the monolithic docker-compose.yml into its own Dockge-managed stack.
+#
+# Why Conpot, and why the whole family together (not one persona alone):
+# docker-compose.yml's own networks: comment already establishes that no
+# honeypot has a depends_on relationship on another (except the dionaea +
+# tftp-relay pair, which stays in the main stack) -- they write to bind-
+# mounted log files for Filebeat to tail, never to each other or to
+# Elasticsearch over the network. Each Conpot persona already has its own
+# fully isolated network (#235: conpot_net, conpot_s7_1200_net, ...), so
+# extracting all six together is the "grouped by family" case #258 raised,
+# and a more representative proof than splitting a single service: it proves
+# the pattern across several independently-networked services, not just one.
+#
+# What this POC resolves from #258's open questions, for this class of
+# service (a honeypot persona with no cross-service dependency):
+#
+#   - External networks/volumes: NOT NEEDED. Every volume below is a host
+#     bind mount (log dirs, the read-only init-markers dir), not a Docker
+#     named volume, and every conpot_*_net network is wholly private to this
+#     stack -- nothing outside it, and nothing inside it, ever needs to reach
+#     another compose project's network. This is NOT true for the
+#     ELK/dashboard plane (honeynet, es-data are genuinely shared across
+#     APIARY and honeypot-init today) -- that split, if attempted,
+#     will need the external: true treatment #258 anticipated. Standalone
+#     honeypot personas do not.
+#   - Cross-project ordering: NOT a hard requirement. Each persona's command
+#     polls for /markers/log-init.done itself (a bind-mounted file, #127) --
+#     that is not a compose depends_on chain, so `docker compose up -d` for
+#     this stack returns immediately; it does not block waiting for the
+#     marker the way APIARY's own init-wait-* dependents used to (see
+#     docker-compose.init.yml and #111). honeypot-init still needs to exist
+#     and run at some point before these personas' healthchecks can pass, but
+#     the deploy job does not need to serialize on it.
+#   - autoheal: unaffected. It watches via /var/run/docker.sock against every
+#     container carrying label autoheal=true, daemon-wide -- not scoped to a
+#     compose project. It stays in the main stack unchanged and keeps
+#     restarting these six containers exactly as before.
+#   - Deploy tooling: DOES need to become multi-stack aware -- see
+#     .github/workflows/deploy.yml's "Synchronize honeypot-conpot" step and
+#     docs/CI-CD.md, added alongside this file.
+#
+# Deployed as /opt/stacks/honeypot-conpot, a separate Dockge stack from
+# APIARY -- same arrangement as docker-compose.init.yml's
+# honeypot-init. Log paths are unchanged (still
+# /opt/stacks/apiary/logs/conpot*), so Filebeat and the dashboard's
+# EXPECTED_SENSORS list need no changes at all.
+
+name: honeypot-conpot
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  conpot:
+    <<: *runtime-defaults
+    build: ./conpot
+    container_name: hp-conpot
+    restart: unless-stopped
+    # #127: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). Reproduces the base
+    # image's own CMD (checked directly: no ENTRYPOINT, just
+    # `sh -c "exec /usr/bin/conpot --mibcache $CONPOT_TMP ..."`) with the
+    # wait spliced in ahead of it -- $$ is compose's escaping for a literal
+    # $, so these survive as real env var references at the shell.
+    command:
+      - sh
+      - -c
+      - >
+        until [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec /usr/bin/conpot --mibcache $$CONPOT_TMP --temp_dir $$CONPOT_TMP
+        --template $$CONPOT_TEMPLATE --logfile $$CONPOT_LOG --config $$CONPOT_CONFIG
+    environment:
+      - CONPOT_CONFIG=/etc/conpot/conpot.cfg
+      - CONPOT_TEMPLATE=s7_200
+      - CONPOT_LOG=/var/log/conpot/conpot.log
+      - CONPOT_JSON_LOG=/var/log/conpot/conpot.json
+      - CONPOT_TMP=/tmp/conpot
+      # gevent PROXY shim baked into the image (conpot/proxy_patch.py): consume
+      # the PROXY header portbridge prepends (":pp" rules) and log the real
+      # attacker IP instead of tunnel peer 10.8.0.1.
+      - CONPOT_PROXY_PROTOCOL=1
+      - TZ=Europe/Berlin
+    tmpfs:
+      - /tmp/conpot:uid=2000,gid=2000
+    ports:
+      - ${HP_BIND:-10.8.0.2}:102:102
+      - ${HP_BIND:-10.8.0.2}:502:502
+      - ${HP_BIND:-10.8.0.2}:19161:161/udp
+      - ${HP_BIND:-10.8.0.2}:47808:47808/udp
+      - ${HP_BIND:-10.8.0.2}:623:623/udp
+      - ${HP_BIND:-10.8.0.2}:44818:44818
+    volumes:
+      - /opt/stacks/apiary/logs/conpot:/var/log/conpot
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
+    # A TCP connect (Docker's default "is the port open" notion of healthy)
+    # passes even while conpot is completely wedged: the kernel backlog
+    # completes the handshake without the process's help. This sends a real
+    # Modbus request and requires a real response, which only a live gevent
+    # reactor can produce. See conpot/healthcheck.py and #111.
+    healthcheck:
+      test: ["CMD", "python3", "/usr/local/bin/conpot-healthcheck.py", "modbus"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    # Restarted by the autoheal sidecar (main stack) on unhealthy, not by
+    # restart: alone -- Docker's restart policy reacts to the process
+    # exiting, not to health status. autoheal watches by label via
+    # /var/run/docker.sock daemon-wide, so it keeps working across the
+    # stack split with no changes on its side.
+    labels:
+      - autoheal=true
+    # Measured the same way (2026-07-31), against the repo's own image rather
+    # than the upstream base — the base alone exits before binding, so a probe
+    # against it would have measured nothing:
+    #
+    #   default caps + SYS_PTRACE          ports 21,80,102,502,44818  <- baseline
+    #   default caps, no SYS_PTRACE        identical
+    #   cap_drop ALL                       container exits
+    #   + NET_BIND_SERVICE                 identical to baseline
+    #   + no-new-privileges                identical to baseline
+    #
+    # conpot already runs as uid 2000, so it needs no SETUID/SETGID; the single
+    # capability it cannot do without is binding 102/502/161/623. SYS_PTRACE was
+    # never needed here either.
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    networks:
+      - conpot_net
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  # Three separately fingerprintable Siemens PLCs are exposed: the built-in
+  # S7-200 above on TCP/102, plus these S7-1200 and S7-1500 personas on
+  # alternate public ports. Each has an independent event stream.
+  conpot-s7-1200:
+    <<: *runtime-defaults
+    build: ./conpot
+    container_name: hp-conpot-s7-1200
+    restart: unless-stopped
+    # #127: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). See conpot above for why
+    # this reproduces the base image's own CMD.
+    command:
+      - sh
+      - -c
+      - >
+        until [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec /usr/bin/conpot --mibcache $$CONPOT_TMP --temp_dir $$CONPOT_TMP
+        --template $$CONPOT_TEMPLATE --logfile $$CONPOT_LOG --config $$CONPOT_CONFIG
+    environment:
+      - CONPOT_CONFIG=/etc/conpot/conpot.cfg
+      - CONPOT_TEMPLATE=s7_1200
+      - CONPOT_LOG=/var/log/conpot/conpot.log
+      - CONPOT_JSON_LOG=/var/log/conpot/conpot.json
+      - CONPOT_TMP=/tmp/conpot
+      # gevent PROXY shim baked into the image (conpot/proxy_patch.py): consume
+      # the PROXY header portbridge prepends (":pp" rules) and log the real
+      # attacker IP instead of tunnel peer 10.8.0.1.
+      - CONPOT_PROXY_PROTOCOL=1
+      - TZ=Europe/Berlin
+    tmpfs: ["/tmp/conpot:uid=2000,gid=2000"]
+    ports:
+      - ${HP_BIND:-10.8.0.2}:1102:102
+      - ${HP_BIND:-10.8.0.2}:1502:502
+    volumes:
+      - /opt/stacks/apiary/logs/conpot-s7-1200:/var/log/conpot
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
+    # #133: measured the same way as the base conpot service (2026-08-01) --
+    # same image/entrypoint/uid 2000, so the baseline is the internal listener
+    # set (netstat inside the container, not just the published ports:
+    # 21,80,102,161,502,623,44818,47808 are all bound even though only
+    # 102/502 are published here) before and after the reduction:
+    #
+    #   default caps + SYS_PTRACE     same 10 internal listeners  <- baseline
+    #   cap_drop ALL + NET_BIND_SERVICE + no-new-privileges   identical
+    #
+    # Needs NET_BIND_SERVICE (unlike guardian/kamstrup below): several of
+    # those internal listeners (21, 80, 102, 161, 502, 623) are privileged
+    # ports regardless of which host ports are actually published.
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python3", "/usr/local/bin/conpot-healthcheck.py", "modbus"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    labels:
+      - autoheal=true
+    read_only: true
+    networks: [conpot_s7_1200_net]
+    deploy:
+      resources: { limits: { cpus: "0.75", memory: 384M } }
+
+  conpot-s7-1500:
+    <<: *runtime-defaults
+    build: ./conpot
+    container_name: hp-conpot-s7-1500
+    restart: unless-stopped
+    # #127: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). See conpot above for why
+    # this reproduces the base image's own CMD.
+    command:
+      - sh
+      - -c
+      - >
+        until [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec /usr/bin/conpot --mibcache $$CONPOT_TMP --temp_dir $$CONPOT_TMP
+        --template $$CONPOT_TEMPLATE --logfile $$CONPOT_LOG --config $$CONPOT_CONFIG
+    environment:
+      - CONPOT_CONFIG=/etc/conpot/conpot.cfg
+      - CONPOT_TEMPLATE=s7_1500
+      - CONPOT_LOG=/var/log/conpot/conpot.log
+      - CONPOT_JSON_LOG=/var/log/conpot/conpot.json
+      - CONPOT_TMP=/tmp/conpot
+      # gevent PROXY shim baked into the image (conpot/proxy_patch.py): consume
+      # the PROXY header portbridge prepends (":pp" rules) and log the real
+      # attacker IP instead of tunnel peer 10.8.0.1.
+      - CONPOT_PROXY_PROTOCOL=1
+      - TZ=Europe/Berlin
+    tmpfs: ["/tmp/conpot:uid=2000,gid=2000"]
+    ports:
+      - ${HP_BIND:-10.8.0.2}:2102:102
+      - ${HP_BIND:-10.8.0.2}:2502:502
+    volumes:
+      - /opt/stacks/apiary/logs/conpot-s7-1500:/var/log/conpot
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
+    # #133: measured the same way as conpot-s7-1200 above (identical
+    # image/entrypoint/template family, identical internal listener set).
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python3", "/usr/local/bin/conpot-healthcheck.py", "modbus"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    labels:
+      - autoheal=true
+    read_only: true
+    networks: [conpot_s7_1500_net]
+    deploy:
+      resources: { limits: { cpus: "0.75", memory: 384M } }
+
+  # Additional industrial attack surfaces from Conpot's maintained templates.
+  conpot-iec104:
+    <<: *runtime-defaults
+    build: ./conpot
+    container_name: hp-conpot-iec104
+    restart: unless-stopped
+    # #127: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). See conpot above for why
+    # this reproduces the base image's own CMD.
+    command:
+      - sh
+      - -c
+      - >
+        until [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec /usr/bin/conpot --mibcache $$CONPOT_TMP --temp_dir $$CONPOT_TMP
+        --template $$CONPOT_TEMPLATE --logfile $$CONPOT_LOG --config $$CONPOT_CONFIG
+    environment:
+      - CONPOT_CONFIG=/etc/conpot/conpot.cfg
+      - CONPOT_TEMPLATE=IEC104
+      - CONPOT_LOG=/var/log/conpot/conpot.log
+      - CONPOT_JSON_LOG=/var/log/conpot/conpot.json
+      - CONPOT_TMP=/tmp/conpot
+      # gevent PROXY shim baked into the image (conpot/proxy_patch.py): consume
+      # the PROXY header portbridge prepends (":pp" rules) and log the real
+      # attacker IP instead of tunnel peer 10.8.0.1.
+      - CONPOT_PROXY_PROTOCOL=1
+      - TZ=Europe/Berlin
+    tmpfs: ["/tmp/conpot:uid=2000,gid=2000"]
+    ports: ["${HP_BIND:-10.8.0.2}:2404:2404"]
+    volumes:
+      - /opt/stacks/apiary/logs/conpot-iec104:/var/log/conpot
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
+    # #133: measured (2026-08-01). The IEC104 template's only *published*
+    # port is 2404 (unprivileged), but it still internally binds SNMP on 161
+    # -- confirmed via netstat inside the running container, not assumed from
+    # the port: list -- so NET_BIND_SERVICE is still required here.
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python3", "/usr/local/bin/conpot-healthcheck.py", "iec104"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    labels:
+      - autoheal=true
+    read_only: true
+    networks: [conpot_iec104_net]
+    deploy:
+      resources: { limits: { cpus: "0.5", memory: 256M } }
+
+  conpot-guardian:
+    <<: *runtime-defaults
+    build: ./conpot
+    container_name: hp-conpot-guardian
+    restart: unless-stopped
+    # #127: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). See conpot above for why
+    # this reproduces the base image's own CMD.
+    command:
+      - sh
+      - -c
+      - >
+        until [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec /usr/bin/conpot --mibcache $$CONPOT_TMP --temp_dir $$CONPOT_TMP
+        --template $$CONPOT_TEMPLATE --logfile $$CONPOT_LOG --config $$CONPOT_CONFIG
+    environment:
+      - CONPOT_CONFIG=/etc/conpot/conpot.cfg
+      - CONPOT_TEMPLATE=guardian_ast
+      - CONPOT_LOG=/var/log/conpot/conpot.log
+      - CONPOT_JSON_LOG=/var/log/conpot/conpot.json
+      - CONPOT_TMP=/tmp/conpot
+      # gevent PROXY shim baked into the image (conpot/proxy_patch.py): consume
+      # the PROXY header portbridge prepends (":pp" rules) and log the real
+      # attacker IP instead of tunnel peer 10.8.0.1.
+      - CONPOT_PROXY_PROTOCOL=1
+      - TZ=Europe/Berlin
+    tmpfs: ["/tmp/conpot:uid=2000,gid=2000"]
+    ports: ["${HP_BIND:-10.8.0.2}:10001:10001"]
+    volumes:
+      - /opt/stacks/apiary/logs/conpot-guardian:/var/log/conpot
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
+    # #133: measured (2026-08-01). Guardian_ast only binds one unprivileged
+    # port (10001), so the first attempt tried cap_drop ALL with no cap_add
+    # at all -- it failed immediately: `exec: /usr/bin/conpot: Operation not
+    # permitted`. Root cause (confirmed via `getcap` inside a working
+    # sibling): /usr/bin/python3.11, which actually runs conpot, has the file
+    # capability cap_net_bind_service=ep set. With no-new-privileges, exec-ing
+    # a binary carrying a file capability requires the caller to already hold
+    # that capability -- the kernel refuses to grant it via the file bit --
+    # regardless of which ports the process goes on to bind. So every conpot
+    # persona needs NET_BIND_SERVICE, not just the ones publishing privileged
+    # ports.
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python3", "/usr/local/bin/conpot-healthcheck.py", "guardian_ast"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    labels:
+      - autoheal=true
+    read_only: true
+    networks: [conpot_guardian_net]
+    deploy:
+      resources: { limits: { cpus: "0.5", memory: 256M } }
+
+  conpot-kamstrup:
+    <<: *runtime-defaults
+    build: ./conpot
+    container_name: hp-conpot-kamstrup
+    restart: unless-stopped
+    # #127: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). See conpot above for why
+    # this reproduces the base image's own CMD.
+    command:
+      - sh
+      - -c
+      - >
+        until [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec /usr/bin/conpot --mibcache $$CONPOT_TMP --temp_dir $$CONPOT_TMP
+        --template $$CONPOT_TEMPLATE --logfile $$CONPOT_LOG --config $$CONPOT_CONFIG
+    environment:
+      - CONPOT_CONFIG=/etc/conpot/conpot.cfg
+      - CONPOT_TEMPLATE=kamstrup_382
+      - CONPOT_LOG=/var/log/conpot/conpot.log
+      - CONPOT_JSON_LOG=/var/log/conpot/conpot.json
+      - CONPOT_TMP=/tmp/conpot
+      # gevent PROXY shim baked into the image (conpot/proxy_patch.py): consume
+      # the PROXY header portbridge prepends (":pp" rules) and log the real
+      # attacker IP instead of tunnel peer 10.8.0.1.
+      - CONPOT_PROXY_PROTOCOL=1
+      - TZ=Europe/Berlin
+    tmpfs: ["/tmp/conpot:uid=2000,gid=2000"]
+    ports:
+      - ${HP_BIND:-10.8.0.2}:1025:1025
+      - ${HP_BIND:-10.8.0.2}:50100:50100
+    volumes:
+      - /opt/stacks/apiary/logs/conpot-kamstrup:/var/log/conpot
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
+    # #133: measured (2026-08-01) -- needs NET_BIND_SERVICE too, for the same
+    # reason as guardian above: it's a file capability on /usr/bin/python3.11
+    # itself, required to exec it at all under no-new-privileges, independent
+    # of which ports kamstrup_382 goes on to bind (1025/50100 are both
+    # unprivileged, but that turned out not to matter).
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python3", "/usr/local/bin/conpot-healthcheck.py", "kamstrup"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    labels:
+      - autoheal=true
+    read_only: true
+    networks: [conpot_kamstrup_net]
+    deploy:
+      resources: { limits: { cpus: "0.5", memory: 256M } }
+
+networks:
+  conpot_net:
+    driver: bridge
+  conpot_s7_1200_net:
+    driver: bridge
+  conpot_s7_1500_net:
+    driver: bridge
+  conpot_iec104_net:
+    driver: bridge
+  conpot_guardian_net:
+    driver: bridge
+  conpot_kamstrup_net:
+    driver: bridge

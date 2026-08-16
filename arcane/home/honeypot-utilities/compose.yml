@@ -1,0 +1,335 @@
+# honeypot-utilities — #258: log-maintenance, autoheal, and reporter split
+# into their own Dockge stack. Unlike every other #258 split so far, these
+# three don't belong to one honeypot family -- they watch/act across the
+# whole host:
+#   log-maintenance  rotates every sensor's logs under logs/ and prunes
+#                     self-rotating JSON streams past retention
+#   autoheal          restarts any container across ANY Compose project that
+#                     carries label autoheal=true, daemon-wide -- not scoped
+#                     to a project the way `docker compose restart` is. Today
+#                     that includes the six conpot personas
+#                     (docker-compose.conpot.yml), elasticsearch, and
+#                     tanner_docker/tanner_redis (docker-compose.yml and
+#                     docker-compose.tanner.yml respectively) -- confirmed by
+#                     grepping every compose file for autoheal=true, not
+#                     assumed. Needs no changes for any of #258's splits:
+#                     it watches Docker directly via docker.sock by label,
+#                     never by Compose project.
+#   reporter          tails every sensor's JSON logs (bind mount, not
+#                     honeynet) and would report attacker IPs to AbuseIPDB
+#                     once explicitly authorized (#68); ships dry-run by
+#                     default
+# None of the three share a named Docker volume or network with anything
+# else in another stack, so this is a low-risk split, same shape as
+# conpot/cowrie/etc: absolute build/bind-mount paths, own volumes where
+# still needed, nothing declared external or explicitly shared. Deployed as
+# /opt/stacks/honeypot-utilities.
+
+name: honeypot-utilities
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  # Rotate verbose human-readable sensor logs (copytruncate, keeps writers
+  # alive without mounting Docker's socket) and, per #120, prune JSON event
+  # streams that now rotate themselves natively (cowrie, multipot,
+  # http-honeypot/api-honeypot) once the renamed files age past retention.
+  # The live JSON files this container never touches directly: Filebeat
+  # inode/offset tracking and dashboard ingestion require them to stay open
+  # and in place.
+  log-maintenance:
+    <<: *runtime-defaults
+    image: busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
+    container_name: hp-log-maintenance
+    restart: unless-stopped
+    # #127: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism).
+    command:
+      - sh
+      - -c
+      - >
+        until [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec sh /usr/local/bin/log-maintenance.sh
+    environment:
+      - MAX_LOG_BYTES=268435456
+      - CHECK_INTERVAL=300
+      - ROTATIONS=4
+      - START_DELAY=120
+      # #261: JSON_RETENTION_MINUTES derives from this by default; set
+      # JSON_RETENTION_MINUTES directly to override just this service.
+      - HONEYPOT_RETENTION_DAYS=${HONEYPOT_RETENTION_DAYS:-30}
+    volumes:
+      - ./analysis/log-maintenance.sh:/usr/local/bin/log-maintenance.sh:ro
+      - /opt/stacks/apiary/logs:/logs
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
+    networks:
+      - honeynet
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+
+  # docker-socket-proxy is the one service in this stack that still holds
+  # the real host /var/run/docker.sock -- narrowing what autoheal below can
+  # do with it, per the finding in docs/agent-intrusion-threat-model.md
+  # item 5: a raw bind mount of docker.sock is root-equivalent (arbitrary
+  # container create/exec/volume/network/image access), a far bigger grant
+  # than "restart the containers labeled autoheal=true" actually needs.
+  #
+  # CONTAINERS=1 + POST=1 is the narrowest working grant, confirmed against
+  # this proxy's real haproxy ACL rules (not assumed from the env var
+  # names): a per-action flag like ALLOW_RESTARTS exists, but the proxy's
+  # broader `^/containers` rule (gated by CONTAINERS alone) matches every
+  # /containers/* path first, including restart/stop/kill -- so
+  # ALLOW_RESTARTS adds nothing CONTAINERS doesn't already cover, and
+  # CONTAINERS is unavoidable anyway: autoheal's own polling loop calls
+  # `GET /containers/json?filters={"health":["unhealthy"],...}` to find
+  # what to restart, and no narrower flag covers that specific query.
+  # CONTAINERS=1 does grant the full /containers/* CRUD surface (create,
+  # delete, rename, prune -- not just restart), but critically excludes
+  # every other API category: IMAGES, EXEC, VOLUMES, NETWORKS, INFO,
+  # SYSTEM, SWARM, SECRETS, CONFIGS, BUILD, COMMIT, NODES, SERVICES, TASKS,
+  # PLUGINS all stay unset (denied). Verified directly, not assumed: ran a
+  # real docker-socket-proxy + a real unhealthy labeled container locally
+  # and confirmed (a) autoheal restarts it through the proxy, and (b)
+  # /images/json, /info, /volumes, and POST /exec/{id}/start (actually
+  # running a command inside a container, as opposed to the harmless
+  # /containers/{id}/exec create-only call CONTAINERS's broad match also
+  # permits) all still 403.
+  #
+  # IMAGES=1 (#252) added alongside the above for docker-hygiene's own
+  # POST /images/prune call -- CONTAINERS=1 already covers its
+  # POST /containers/prune the same "full CRUD surface" way, no separate
+  # grant needed there. Still no VOLUMES: docker-hygiene never prunes
+  # volumes (see its own header comment for why), so there is nothing to
+  # grant it.
+  docker-socket-proxy:
+    <<: *runtime-defaults
+    image: tecnativa/docker-socket-proxy:v0.5.0
+    container_name: hp-docker-socket-proxy
+    restart: unless-stopped
+    environment:
+      - CONTAINERS=1
+      - IMAGES=1
+      - POST=1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    security_opt:
+      - no-new-privileges:true
+    # Private to this pair -- nothing else in the stack talks to the proxy,
+    # and the proxy has no reason to reach honeynet or the internet.
+    networks:
+      - docker-socket-proxy_net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
+
+  # tanner_docker (docker-compose.tanner.yml) looks similar to the old
+  # direct-socket-mount arrangement here but is not the same trust boundary
+  # -- it runs its own disposable nested Docker daemon and never touches
+  # the host socket at all, narrow or otherwise.
+
+  # #263: nothing previously checked or alerted on actual free disk space --
+  # a bounded retention policy bounds the *rate* of growth but doesn't
+  # catch it if something else fills the disk (a stuck container's logs, a
+  # runaway payload capture, the ES snapshot repo). Purely "notice and
+  # surface": writes a warning line under /logs/diagnostics for Filebeat to
+  # ship once free space on a checked path drops below the threshold; takes
+  # no destructive action itself.
+  #
+  # es-data (docker-compose.elk.yml) is deliberately never bind-mounted
+  # cross-stack, so Elasticsearch's own disk usage is queried over HTTP via
+  # honeynet instead -- same pattern elasticsearch-setup.sh already uses.
+  # dionaea-lib is the same explicit shared-name volume
+  # docker-compose.payload-analysis.yml already reads from, mounted
+  # read-only here for the same reason.
+  disk-space-monitor:
+    <<: *runtime-defaults
+    image: curlimages/curl:8.21.0@sha256:7c12af72ceb38b7432ab85e1a265cff6ae58e06f95539d539b654f2cfa64bb13
+    container_name: hp-disk-space-monitor
+    restart: unless-stopped
+    entrypoint: ["sh", "/usr/local/bin/disk-space-check.sh"]
+    # curlimages/curl defaults to a non-root curl_user, unlike log-maintenance's
+    # busybox image (root by default). df only needs to stat mount points, but
+    # /logs/diagnostics is written here and every checked path is otherwise
+    # owned by its own sensor's UID (0640, no "other" bit) -- same reasoning
+    # as reporter/filebeat's own "user: 0:0" overrides elsewhere in this repo.
+    user: "0:0"
+    environment:
+      - CHECK_INTERVAL=300
+      - START_DELAY=120
+      - DISK_WARN_PERCENT_FREE=15
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - DISK_CHECK_PATHS=honeypot-logs=/logs:honeypot-state=/state:dionaea-payloads=/dionaea-lib
+    volumes:
+      - ./analysis/disk-space-check.sh:/usr/local/bin/disk-space-check.sh:ro
+      - /opt/stacks/apiary/logs:/logs
+      - /opt/stacks/apiary/state:/state:ro
+      - dionaea-lib:/dionaea-lib:ro
+    networks:
+      - honeynet
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 32M
+
+  # A healthcheck alone does not restart anything: Docker's restart policy
+  # reacts to the container process exiting, not to health status, so an
+  # unhealthy-but-still-running container just sits there marked unhealthy
+  # forever. Verified empirically while fixing #111 -- a plain
+  # restart: unless-stopped container that fails its healthcheck accrues zero
+  # restarts. This is the actual missing piece.
+  autoheal:
+    <<: *runtime-defaults
+    # Bumped past the 1.2.0 this repo previously pinned: that version's
+    # entrypoint hardcodes HTTPS + client-cert paths for any tcp:// DOCKER_SOCK
+    # value (no plain-HTTP option at all), which can't reach
+    # docker-socket-proxy's plain-HTTP frontend. Pinned by digest, not
+    # `:latest` -- there is no numbered release tag ahead of 1.2.0 yet
+    # upstream, so a digest is the only reproducible way to pin the fixed
+    # version. Confirmed directly: pulled and ran this exact digest against
+    # a real docker-socket-proxy and a real unhealthy container locally
+    # (see the proxy service's own comment above) -- it detects and
+    # restarts correctly.
+    image: willfarrell/autoheal@sha256:3cb356f1dd297d24cdfbb910a9c142cdf735c39d550ff2d9b8ed818d63d23282
+    container_name: hp-autoheal
+    restart: unless-stopped
+    environment:
+      - DOCKER_SOCK=tcp://docker-socket-proxy:2375
+      - AUTOHEAL_CONTAINER_LABEL=autoheal
+      - AUTOHEAL_INTERVAL=30
+      - AUTOHEAL_START_PERIOD=60
+    security_opt:
+      - no-new-privileges:true
+    # No docker.sock bind mount at all any more -- every Docker API call
+    # goes through docker-socket-proxy instead. Joins the proxy's private
+    # network only, same "no other network need" reasoning the old
+    # network_mode: none comment gave, just satisfied a different way now
+    # that there's a real peer to reach instead of none.
+    networks:
+      - docker-socket-proxy_net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
+
+  # #252: a narrow, safe subset of what T-Pot's own daily cron does (full
+  # container/image/volume prune + forced reboot) -- age-bounded dangling-
+  # image prune and stopped-container prune only, no volumes (real
+  # long-lived state lives there), no downtime, no destructive updates.
+  # See analysis/docker-hygiene.sh's own header for the full reasoning.
+  # Same trust boundary as autoheal: talks to docker-socket-proxy only,
+  # never the raw socket.
+  docker-hygiene:
+    <<: *runtime-defaults
+    image: curlimages/curl:8.21.0@sha256:7c12af72ceb38b7432ab85e1a265cff6ae58e06f95539d539b654f2cfa64bb13
+    container_name: hp-docker-hygiene
+    restart: unless-stopped
+    entrypoint: ["sh", "/usr/local/bin/docker-hygiene.sh"]
+    environment:
+      - DOCKER_PROXY_URL=http://docker-socket-proxy:2375
+      - HYGIENE_INTERVAL=604800
+      - HYGIENE_IMAGE_MAX_AGE_HOURS=168
+    volumes:
+      - ./analysis/docker-hygiene.sh:/usr/local/bin/docker-hygiene.sh:ro
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - docker-socket-proxy_net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 32M
+
+  # #68 (Phase 1 of docs/ip-reporting-plan.md): tails the same sensor JSON
+  # logs Filebeat does, and would report attacker IPs to AbuseIPDB. Ships
+  # dry-run by default (no REPORTER_LIVE, no ABUSEIPDB_API_KEY below) --
+  # per WORK-LEDGER.md rule 7, production reporting needs separate explicit
+  # authorization after a sampled false-positive review of dry-run output.
+  # reporter/dryrun_test.go proves this is unable to reach the network in
+  # that state, not just configured not to.
+  reporter:
+    <<: *runtime-defaults
+    build: ./reporter
+    container_name: hp-reporter
+    restart: unless-stopped
+    # Root, same reasoning as filebeat (docker-compose.elk.yml): every
+    # sensor's JSON log is 0640, owned by that sensor's own UID, no "other"
+    # read bit. A fixed non-root UID could read none of them. Numeric "0:0",
+    # not the string "root": this image is FROM scratch (Dockerfile) with no
+    # /etc/passwd for Docker to resolve a username against -- confirmed
+    # live, "user: root" here failed with "unable to find user root: no
+    # matching entries in passwd file".
+    user: "0:0"
+    environment:
+      - REPORTER_LIVE=${REPORTER_LIVE:-}
+      - ABUSEIPDB_API_KEY=${ABUSEIPDB_API_KEY:-}
+      - REPORTER_COOLDOWN_HOURS=${REPORTER_COOLDOWN_HOURS:-24}
+      - REPORTER_MIN_EVENTS=${REPORTER_MIN_EVENTS:-3}
+      - REPORTER_POLL_SECONDS=30
+      # #153 Phase 3: optional GreyNoise RIOT reputation guard, skips
+      # known-benign infrastructure (DNS resolvers, CDN edges, SaaS
+      # scanners) before it ever reaches a reporting decision. Disabled by
+      # default -- GREYNOISE_API_KEY alone does nothing until this is set.
+      - GREYNOISE_ENABLED=${GREYNOISE_ENABLED:-0}
+      - GREYNOISE_API_KEY=${GREYNOISE_API_KEY:-}
+      - GREYNOISE_FAIL_MODE=${GREYNOISE_FAIL_MODE:-open}
+      - GREYNOISE_CACHE_HOURS=${GREYNOISE_CACHE_HOURS:-24}
+    volumes:
+      - /opt/stacks/apiary/logs:/logs:ro
+      - reporter-data:/data
+      - ./reporter/whitelist.txt:/config/whitelist.txt:ro
+    # Deliberately not on honeynet: this container has no legitimate reason
+    # to reach any other container on that network, only to read log files
+    # (bind mount, not network) and -- once live -- reach AbuseIPDB over the
+    # public internet, which the default bridge network already provides.
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_READ_SEARCH
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+
+networks:
+  # Shared with the main stack -- explicit fixed name, not project-prefixed,
+  # non-external. log-maintenance doesn't actually reach any peer over it
+  # (preserves pre-split behavior unchanged); disk-space-monitor uses it to
+  # reach elasticsearch's _cat/allocation endpoint.
+  honeynet:
+    name: honeynet
+    driver: bridge
+  # Private to the docker-socket-proxy/autoheal pair only -- nothing else in
+  # this stack has any reason to reach either of them.
+  docker-socket-proxy_net:
+    driver: bridge
+
+volumes:
+  # #666: fixed external name so docker-compose.dashboard.yml's
+  # es-results-importer can mount this read-only across stacks -- same
+  # mechanism as dionaea-lib below. Was unnamed/project-scoped until now
+  # (nothing else referenced it, per the monolithic compose file's original
+  # shape); the reporter service here still owns writes.
+  reporter-data:
+    name: reporter-data
+  # Shared with docker-compose.dionaea.yml/docker-compose.payload-analysis.yml
+  # -- read-only here, same mechanism as honeynet/es-data.
+  dionaea-lib:
+    name: dionaea-lib

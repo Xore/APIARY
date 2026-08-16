@@ -1,0 +1,66 @@
+# honeypot-dicompot — #238, #413: DICOM (medical imaging) decoy, vendoring
+# github.com/nsmfoo/dicompot (see dicompot/Dockerfile, dicompot/main.go for
+# why). Same shape and reasoning as docker-compose.conpot.yml -- no
+# depends_on, its own fully private network, only host bind mounts.
+# Deployed as /opt/stacks/honeypot-dicompot.
+
+name: honeypot-dicompot
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  dicompot:
+    <<: *runtime-defaults
+    build: ./dicompot
+    container_name: hp-dicompot
+    restart: unless-stopped
+    # #128: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). The wait lives in the Go
+    # binary itself (main.go), same as multipot/dnp3/http-honeypot.
+    ports:
+      - ${HP_BIND:-10.8.0.2}:11112:11112
+    volumes:
+      - /opt/stacks/apiary/logs/dicompot:/var/log/honeypot
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
+    environment:
+      - BIND_IP=0.0.0.0
+      - PORT=11112
+      - AE_TITLE=RADIANT
+      - LOG_FILE=/var/log/honeypot/dicompot.json
+      # Parse the PROXY header portbridge prepends (":pp" rule on 11112) so
+      # events carry the real attacker IP instead of tunnel peer 10.8.0.1.
+      - PROXY_PROTOCOL=1
+      - TZ=Europe/Berlin
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # #239: measured baseline, same methodology as dnp3's read_only above.
+    # dicompot/Dockerfile's own RUN mkdir -p /dicom-store is dead weight
+    # from upstream's vendored server -- confirmed by pulling and grepping
+    # github.com/nsmfoo/dicompot's actual source (go mod download) for any
+    # os.Create/os.OpenFile/os.Mkdir/os.Remove: none exist anywhere in that
+    # package. main.go (this repo's own replacement entrypoint) writes only
+    # LOG_FILE, which lands on the /var/log/honeypot bind mount below and is
+    # therefore unaffected. No tmpfs entry needed: verified locally
+    # (sandboxed Docker, not the homeserver) that the container starts
+    # healthy, accepts a real connection, and successfully writes both the
+    # "listening" and "connect" events to the bind-mounted log file with
+    # read_only: true set.
+    read_only: true
+    networks:
+      - dicompot_net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+
+networks:
+  dicompot_net:
+    driver: bridge

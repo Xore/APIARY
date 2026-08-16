@@ -1,0 +1,102 @@
+# honeypot-http — #258: http-honeypot and api-honeypot split into their own
+# Dockge-managed stack. Same shape and reasoning as docker-compose.conpot.yml
+# -- no depends_on, each on its own fully private network, only host bind
+# mounts. Kept as one stack, not two: they already share one build context
+# (build: ./http-honeypot) and are already treated as one logical unit
+# elsewhere (scripts/reset-logs.sh's "http" target covers both). Deployed as
+# /opt/stacks/honeypot-http.
+
+name: honeypot-http
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  http-honeypot:
+    <<: *runtime-defaults
+    build: ./http-honeypot
+    container_name: hp-http
+    restart: unless-stopped
+    # #128: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). This image is FROM
+    # scratch with no shell -- an entrypoint: sh -c wrapper can't run here
+    # (`exec: "/bin/sh": stat /bin/sh: no such file or directory`, caught
+    # deploying this the first time). The wait lives in the Go binary
+    # itself instead (main.go).
+    ports:
+      - ${HP_BIND:-10.8.0.2}:19081:8080
+    volumes:
+      - /opt/stacks/apiary/logs/http-honeypot:/var/log/honeypot
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
+    environment:
+      - LISTEN_ADDR=:8080
+      - SERVER_HEADER=nginx/1.24.0 (Ubuntu)
+      - SENSOR_NAME=http-honeypot
+      - PERSONA_ID=nexusai-edge
+      - SITE_ID=nexusai-eu-edge
+      - ASSET_ID=web-edge-01
+      - ORGANIZATION=NexusAI Research GmbH
+      - LOG_FILE=/var/log/honeypot/http.json
+      # Parse the PROXY header portbridge prepends on raw port 8081 (":pp"
+      # rule); the listener sniffs it, so Traefik-routed requests (no header)
+      # keep working and are attributed via XFF from the tunnel peer instead.
+      - PROXY_PROTOCOL=1
+      - TZ=Europe/Berlin
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    networks:
+      - http_honeypot_net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+
+  # Raw API/cloud decoy: cloud metadata, Kubernetes, Docker Registry,
+  # DevOps admin panels and OpenAI-compatible bearer-token probes.
+  api-honeypot:
+    <<: *runtime-defaults
+    build: ./http-honeypot
+    container_name: hp-api-honeypot
+    restart: unless-stopped
+    # #128: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). This image is FROM
+    # scratch with no shell -- an entrypoint: sh -c wrapper can't run here
+    # (`exec: "/bin/sh": stat /bin/sh: no such file or directory`, caught
+    # deploying this the first time). The wait lives in the Go binary
+    # itself instead (main.go, shared build with http-honeypot).
+    ports:
+      - ${HP_BIND:-10.8.0.2}:18083:8080
+    volumes:
+      - /opt/stacks/apiary/logs/api-honeypot:/var/log/honeypot
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
+    environment:
+      - LISTEN_ADDR=:8080
+      - SERVER_HEADER=envoy
+      - SENSOR_NAME=api-honeypot
+      - PERSONA_ID=nexusai-platform
+      - SITE_ID=nexusai-eu-cloud
+      - ASSET_ID=platform-gw-03
+      - ORGANIZATION=NexusAI Research GmbH
+      - LOG_FILE=/var/log/honeypot/api.json
+      - PROXY_PROTOCOL=1
+      - TZ=Europe/Berlin
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    networks: [api_honeypot_net]
+    deploy:
+      resources: { limits: { cpus: "0.5", memory: 128M } }
+
+networks:
+  http_honeypot_net:
+    driver: bridge
+  api_honeypot_net:
+    driver: bridge

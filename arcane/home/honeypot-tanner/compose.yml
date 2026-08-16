@@ -1,0 +1,325 @@
+# honeypot-tanner — #258: the SNARE + TANNER web-app honeypot group split
+# into its own Dockge stack. Bundled as one stack, not split further: all
+# seven services form a single depends_on chain (tanner_api/tanner_web wait
+# on tanner_redis; tanner waits on all four of tanner_redis/tanner_api/
+# tanner_web/tanner_phpox/tanner_docker; snare waits on tanner), and
+# tanner_local, the network carrying all of it, was already wholly private
+# to this group (confirmed by grep -- nothing outside ever referenced it).
+#
+# The one external resource: snare-pages, written by honeypot-init's
+# snare-clone job (deploys first) and only ever read here -- already
+# `external: true` in the monolithic compose file, unchanged by this split.
+#
+# tanner_docker runs its own disposable nested Docker daemon
+# (privileged: true, DOCKER_TLS_CERTDIR=) -- never replace this with a bind
+# mount of the homeserver's /var/run/docker.sock; that would be the same
+# trust boundary autoheal/services-adapter deliberately keep narrow.
+#
+# Deployed as /opt/stacks/honeypot-tanner.
+
+name: honeypot-tanner
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  # Docker-backed emulators use this disposable nested daemon. Never replace
+  # it with a bind mount of the homeserver's /var/run/docker.sock.
+  tanner_docker:
+    <<: *runtime-defaults
+    build: ./tanner/sandbox
+    container_name: hp-tanner-docker
+    restart: unless-stopped
+    privileged: true
+    environment:
+      - DOCKER_TLS_CERTDIR=
+    tmpfs:
+      - /var/lib/docker:mode=0700,size=2147483648
+      - /run:mode=0755,size=67108864
+    healthcheck:
+      test: ["CMD-SHELL", "test -e /run/tanner-sandbox-ready && docker info >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    # Restarted by the autoheal sidecar (docker-compose.utilities.yml, #258)
+    # on unhealthy, not by restart: alone -- see #119, the same gap #111
+    # found and fixed for conpot. autoheal watches Docker directly via
+    # docker.sock by label, daemon-wide, so it needs no changes for this
+    # split.
+    labels:
+      - autoheal=true
+    read_only: true
+    networks:
+      - tanner_local
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 3G
+  tanner_redis:
+    <<: *runtime-defaults
+    build: ./tanner/redis
+    container_name: hp-tanner-redis
+    # Measured against the live baseline (2026-07-31): this service binds only
+    # unprivileged ports and needs no capability at all, so nothing is added
+    # back. Verified by recreating it and comparing its listening port against
+    # the pre-change value — see #89.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # Restarted by the autoheal sidecar on unhealthy, not by restart: alone --
+    # see #119, the same gap #111 found and fixed for conpot.
+    labels:
+      - autoheal=true
+    read_only: true
+    networks:
+      - tanner_local
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+  tanner_phpox:
+    <<: *runtime-defaults
+    build: ./tanner/phpox
+    container_name: hp-tanner-phpox
+    # Measured against the live baseline (2026-07-31): this service binds only
+    # unprivileged ports and needs no capability at all, so nothing is added
+    # back. Verified by recreating it and comparing its listening port against
+    # the pre-change value — see #89.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    # #589: `php -S` runs as SAPI "cli-server", not "cli" -- opcache.enable_cli
+    # doesn't gate it, so opcache.enable=On (this image's default) applies and
+    # OPcache tries to create a coordination lock file under /tmp on startup.
+    # Confirmed live: without this tmpfs, every request crashed the process
+    # with "Fatal Error Unable to create lock file: Read-only file system".
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    networks:
+      - tanner_local
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+  tanner_api:
+    <<: *runtime-defaults
+    build: ./tanner/tanner
+    container_name: hp-tanner-api
+    # Measured against the live baseline (2026-07-31): this service binds only
+    # unprivileged ports and needs no capability at all, so nothing is added
+    # back. Verified by recreating it and comparing its listening port against
+    # the pre-change value — see #89.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    command: tannerapi
+    tmpfs:
+      - /tmp/tanner:uid=65534,gid=65534
+      - /var/log/tanner:uid=65534,gid=65534
+    volumes:
+      - ./tanner/tanner/config.yaml:/opt/tanner/data/config.yaml:ro
+    depends_on:
+      tanner_redis:
+        condition: service_healthy
+    read_only: true
+    networks:
+      - tanner_local
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+  tanner_web:
+    <<: *runtime-defaults
+    build: ./tanner/tanner
+    container_name: hp-tanner-web
+    # Measured against the live baseline (2026-07-31): this service binds only
+    # unprivileged ports and needs no capability at all, so nothing is added
+    # back. Verified by recreating it and comparing its listening port against
+    # the pre-change value — see #89.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    command: tannerweb
+    tmpfs:
+      - /tmp/tanner:uid=65534,gid=65534
+      - /var/log/tanner:uid=65534,gid=65534
+    volumes:
+      - ./tanner/tanner/config.yaml:/opt/tanner/data/config.yaml:ro
+    ports:
+      - ${HP_BIND:-10.8.0.2}:19091:8091
+    depends_on:
+      tanner_redis:
+        condition: service_healthy
+    read_only: true
+    networks:
+      - tanner_local
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+  tanner:
+    <<: *runtime-defaults
+    build: ./tanner/tanner
+    container_name: hp-tanner
+    # Measured against the live baseline (2026-07-31): this service binds only
+    # unprivileged ports and needs no capability at all, so nothing is added
+    # back. Verified by recreating it and comparing its listening port against
+    # the pre-change value — see #89.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    # #128: waits on the marker directly instead of depends_on-ing
+    # init-wait-log (same-project-only mechanism). Reproduces the
+    # Dockerfile's own CMD (checked directly: ["tanner"], no ENTRYPOINT)
+    # with the wait spliced in ahead of it.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        until [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec tanner
+    environment:
+      - DOCKER_HOST=tcp://tanner_docker:2375
+    tmpfs:
+      - /tmp/tanner:uid=65534,gid=65534
+      - /opt/tanner/files:uid=65534,gid=65534
+    volumes:
+      - ./tanner/tanner/config.yaml:/opt/tanner/data/config.yaml:ro
+      - /opt/stacks/apiary/logs/tanner:/var/log/tanner
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
+    depends_on:
+      tanner_redis:
+        condition: service_healthy
+      tanner_api:
+        condition: service_started
+      tanner_web:
+        condition: service_started
+      tanner_phpox:
+        condition: service_started
+      tanner_docker:
+        condition: service_healthy
+    read_only: true
+    networks:
+      - tanner_local
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+  snare:
+    <<: *runtime-defaults
+    build:
+      context: ./snare
+      args:
+        PAGE_URL: portal.meridian.example
+        TANNER: tanner
+        PORT: "8080"
+    container_name: hp-snare
+    # SNARE drops privileges at startup (setgid/setuid), which is why the
+    # otherwise-empty set the other tanner services use makes it exit with
+    # PermissionError: [Errno 1] Operation not permitted before it binds.
+    # SETUID+SETGID is the measured minimum; CHOWN and DAC_OVERRIDE were
+    # tested on top and changed nothing, so they are not granted.
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    # #124: snare_clone used to be a same-project one-shot job this depended
+    # on via condition: service_completed_successfully. It moved to
+    # honeypot-init (that condition cannot cross a Compose project boundary
+    # -- same reason the init-wait-* services exist), so this waits on its
+    # completion marker directly instead, same mechanism as init-wait-log.
+    # #128: same treatment for the init-wait-log dependency -- both markers
+    # gate startup now.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        until [ -f /markers/snare-clone.done ] && [ -f /markers/log-init.done ]; do sleep 3; done;
+        exec /usr/local/bin/snare-entry.sh
+    ports:
+      - ${HP_BIND:-10.8.0.2}:19082:8080
+    volumes:
+      - /opt/stacks/apiary/logs/snare:/opt/snare
+      - snare-pages:/opt/snare/pages
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
+    depends_on:
+      tanner:
+        condition: service_started
+    read_only: true
+    networks:
+      - tanner_local
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+networks:
+  # Wholly private to this stack -- confirmed by grep across every compose
+  # file that nothing outside the Tanner group ever referenced tanner_local.
+  # Unnamed/project-scoped, same as it was in the monolithic compose file
+  # (just under a new project prefix now: honeypot-tanner_tanner_local
+  # instead of APIARY_tanner_local).
+  #
+  # #540: outbound is allowed by default, matching this stack's previous de
+  # facto behavior. Confirmed live (built the pinned tanner/tanner/Dockerfile
+  # image and read the actual cloned source): tanner/emulators/rfi.py's
+  # RfiEmulator.download_file() performs a real outbound fetch of an
+  # attacker-supplied URL (aiohttp for HTTP(S), ftplib for ftp://) and
+  # executes the downloaded PHP via PHPSandboxHelper -- this repo's own
+  # tanner/tanner/config.yaml has EMULATOR_ENABLED.rfi: True ("Every TANNER
+  # emulator is enabled"), so this is active, not hypothetical. Same
+  # tradeoff as Cowrie (#269/#538) and Dionaea (#541): captures the
+  # attacker's actual payload instead of just the RFI attempt. Set
+  # TANNER_AIR_GAPPED=true (.env) for a stricter, fully air-gapped Tanner
+  # group that trades that capture away -- note this also breaks the
+  # template_injection emulator's own REMOTE_DOCKERFILE fetch
+  # (raw.githubusercontent.com, config.yaml), a self-maintenance fetch
+  # unrelated to attacker-supplied content that also needs outbound. See
+  # docs/persona-design.md.
+  tanner_local:
+    driver: bridge
+    internal: ${TANNER_AIR_GAPPED:-false}
+
+volumes:
+  # #124: opposite direction from dionaea-lib/yara-results in the other
+  # #258 splits -- snare-clone (honeypot-init, deploys first) writes this,
+  # snare here only reads it. Owned by honeypot-init instead, so this side
+  # is external, unchanged by this split.
+  snare-pages:
+    name: snare-pages
+    external: true

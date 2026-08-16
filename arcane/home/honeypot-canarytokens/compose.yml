@@ -1,0 +1,199 @@
+# honeypot-canarytokens -- #1426: self-hosted honeytoken platform
+# (github.com/thinkst/canarytokens, vendored -- see canarytokens/Dockerfile).
+# Deployed as /opt/stacks/honeypot-canarytokens.
+#
+# Different deception category from every other stack here: not a listening
+# decoy protocol, but a platform for planting fake artifacts (documents,
+# URLs, credentials, DNS names) that alert the instant something touches
+# them. Nothing is planted yet -- that's #1427's job (cross-honeypot
+# breadcrumb design). This stack's own scope is standing the platform up,
+# getting fired-token alerts into Elasticsearch, and confirming tokens can
+# be created programmatically (see canarytokens-adapter/README.md for the
+# API finding -- the parent epic's research pass was wrong that token
+# creation is web-UI-only).
+#
+# Scope decisions (see PR description for the full writeup):
+#
+# - Internal-only for now, no VPS/portbridge wiring: nothing to attract
+#   real attacker traffic to yet (no tokens planted), and switchboard's own
+#   listener channels for SMTP(25)/DNS(53)/WireGuard(51820) collide with
+#   sensors this stack already runs on those exact public ports (mailoney,
+#   dns-honeypot, and this repo's own real WireGuard tunnel respectively --
+#   confirmed directly against vps/docker-compose.yml's RULES, not
+#   assumed). Those three switchboard host-port bindings are dropped
+#   entirely here; MySQL(3306)/Kubeconfig(6443)-credential token types and
+#   every non-listener token type (web bug, DNS, documents, AWS keys,
+#   redirects, QR codes, etc.) are unaffected. Real external reachability
+#   for the listener-based token types is a #1427 design question (likely
+#   delegating a subdomain/zone to switchboard's DNS channel through
+#   dns-honeypot rather than fighting it for port 53), not decided here.
+# - frontend (token management UI + REST API) and switchboard's HTTP
+#   channel (where non-DNS token hits actually land) are reachable over
+#   the WireGuard tunnel only (HP_BIND, nonstandard ports), matching how
+#   this stack's other operator-facing tools (e.g. Kibana on 19601) are
+#   exposed -- not raw-LAN, not internet-public.
+# - Own Redis instance, not shared with anything else in this stack:
+#   canarytokens' schema/keyspace conventions are opaque to us and
+#   upstream doesn't document safe multi-tenant namespacing.
+# - canarytokens-adapter (new, this repo's own code) is the only piece
+#   that writes to Elasticsearch's ingest path -- canarytokens itself never
+#   writes JSON Filebeat can tail; it POSTs a webhook per fired token,
+#   which the adapter receives and translates. See
+#   canarytokens-adapter/main.go's package doc for the full shape.
+#
+# Required .env values (no safe defaults, unlike most settings here):
+#   CANARY_WG_PRIVATE_KEY_SEED  -- a base64-encoded 32-byte value (NOT "any
+#                                  random string" -- caught live: canarytokens/
+#                                  wireguard.py's getDevices() does
+#                                  base64.b64decode(seed) then requires
+#                                  exactly 32 raw bytes for nacl's
+#                                  randombytes_deterministic, and a
+#                                  mismatched length crashes switchboard
+#                                  outright at startup). Generate with:
+#                                    python3 -c "import secrets, base64; \
+#                                    print(base64.b64encode(secrets.token_bytes(32)).decode())"
+#                                  Generate once, keep stable (rotating it
+#                                  invalidates already-issued WireGuard
+#                                  tokens).
+
+name: honeypot-canarytokens
+
+x-runtime-defaults: &runtime-defaults
+  logging:
+    driver: json-file
+    options:
+      max-size: "25m"
+      max-file: "3"
+
+services:
+  canarytokens-redis:
+    <<: *runtime-defaults
+    image: redis:7.0.10@sha256:92b8b307ee28ed74da17578064c73307ad41e43f422f0b7e4e91498b406c59e3
+    container_name: hp-canarytokens-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --protected-mode no --save 60 1
+    volumes:
+      - canarytokens-redis-data:/data
+    networks: [canarytokens_net]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  canarytokens-frontend:
+    <<: *runtime-defaults
+    build: ./canarytokens
+    container_name: hp-canarytokens-frontend
+    restart: unless-stopped
+    command: bash -c "cd frontend; uv run --no-sync python -m uvicorn app:app --host 0.0.0.0 --port 8082"
+    depends_on: [canarytokens-redis]
+    environment:
+      - TZ=Europe/Berlin
+      - CANARY_PUBLIC_IP=${HP_BIND:-10.8.0.2}
+      - CANARY_DOMAINS=canarytokens.internal.apiary
+      - CANARY_NXDOMAINS=nx.canarytokens.internal.apiary
+      - LOG_FILE=/logs/frontend.log
+      - CANARY_REDIS_HOST=canarytokens-redis
+      - CANARY_SWITCHBOARD_HOSTNAME=canarytokens-switchboard
+      # See canarytokens-switchboard's own comment on the same
+      # cross-coupling in the other direction: frontend/app.py's import
+      # chain (aws_infra -> queries -> channel_output_webhook ->
+      # canarydrop) instantiates SwitchboardSettings() too, at import
+      # time. Confirmed live -- frontend crash-looped on exactly these two
+      # fields until added here.
+      - CANARY_PUBLIC_DOMAIN=canarytokens.internal.apiary
+      - CANARY_WG_PRIVATE_KEY_SEED=${CANARY_WG_PRIVATE_KEY_SEED:?set a random seed in .env}
+    ports:
+      - ${HP_BIND:-10.8.0.2}:19426:8082
+    volumes:
+      - canarytokens-uploads:/uploads
+      - /opt/stacks/apiary/logs/canarytokens/frontend:/logs
+    networks: [canarytokens_net]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  canarytokens-switchboard:
+    <<: *runtime-defaults
+    build: ./canarytokens
+    container_name: hp-canarytokens-switchboard
+    restart: unless-stopped
+    command: bash -c "cd switchboard; rm -f switchboard.pid; uv run --no-sync twistd -noy switchboard.tac --pidfile=switchboard.pid"
+    depends_on: [canarytokens-redis]
+    environment:
+      - TZ=Europe/Berlin
+      - CANARY_PUBLIC_DOMAIN=canarytokens.internal.apiary
+      - CANARY_WG_PRIVATE_KEY_SEED=${CANARY_WG_PRIVATE_KEY_SEED:?set a random seed in .env}
+      - LOG_FILE=/logs/switchboard.log
+      - CANARY_REDIS_HOST=canarytokens-redis
+      - CANARY_CHANNEL_HTTP_PORT=8083
+      # PUBLIC_IP/DOMAINS/NXDOMAINS are documented as frontend-only settings
+      # upstream, but switchboard needs them too: switchboard.tac's own
+      # import chain (channel_dns -> queries -> channel_output_webhook ->
+      # canarydrop -> webdav) instantiates FrontendSettings() at module
+      # load time regardless of which process is running -- confirmed live,
+      # switchboard crash-looped with a pydantic ValidationError on exactly
+      # these three fields until they were added here too. Matches
+      # upstream's own canarytokens-docker, which bind-mounts both
+      # frontend.env AND switchboard.env into both containers for the same
+      # reason.
+      - CANARY_PUBLIC_IP=${HP_BIND:-10.8.0.2}
+      - CANARY_DOMAINS=canarytokens.internal.apiary
+      - CANARY_NXDOMAINS=nx.canarytokens.internal.apiary
+      # SMTP(25)/DNS(53)/WireGuard(51820) channels stay enabled inside the
+      # container (upstream default) but are deliberately not published as
+      # host ports below -- see the file header for why.
+    ports:
+      - ${HP_BIND:-10.8.0.2}:19427:8083
+    volumes:
+      - canarytokens-uploads:/uploads
+      - /opt/stacks/apiary/logs/canarytokens/switchboard:/logs
+    networks: [canarytokens_net]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  canarytokens-adapter:
+    <<: *runtime-defaults
+    build: ./canarytokens-adapter
+    container_name: hp-canarytokens-adapter
+    restart: unless-stopped
+    environment:
+      - TZ=Europe/Berlin
+    volumes:
+      - /opt/stacks/apiary/logs/canarytokens:/var/log/honeypot
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
+    networks: [canarytokens_net]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    cap_drop:
+      - ALL
+    # HEALTHCHECK is baked into canarytokens-adapter/Dockerfile itself
+    # (scratch image, no nc/shell available for a compose-level CMD check).
+    labels:
+      - autoheal=true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
+
+networks:
+  canarytokens_net:
+    driver: bridge
+
+volumes:
+  canarytokens-redis-data:
+  canarytokens-uploads:
