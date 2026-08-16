@@ -274,6 +274,7 @@ func TestTabsAndPanelsAgreeOnEveryPage(t *testing.T) {
 		data     any
 	}{
 		{"page", "overview", snapshot{}},
+		{"alerts", "alerts", alertsPageData{snapshot: snapshot{}}},
 		{"sandbox", "sandbox detail", sandboxPageData{Generated: now, Detail: detail}},
 		// #1288/#1285/#1286 shell+hydrate: the "ghidra" template is now
 		// just the shell (no tabs -- those, and everything else ES-derived,
