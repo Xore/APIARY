@@ -6,7 +6,7 @@
 #
 # Scope: this script provisions a MANUALLY installed base Ubuntu Server
 # system into a running APIARY homeserver (Docker, NVIDIA/GPU
-# stack, Dockge, WireGuard, the repo checkout, secret restore, and starting
+# stack, Arcane, WireGuard, the repo checkout, secret restore, and starting
 # the Compose stacks in dependency order). It does NOT partition disks or
 # install the OS itself — that's docs/autoinstall/homeserver-user-data.yaml,
 # run once, separately, before this script ever sees the box.
@@ -185,7 +185,7 @@ for var in GIT_REPO_URL GIT_REF REPO_DIR HOME_WG_ADDRESS \
            VPS_SSH_HOST VPS_SSH_PORT VPS_SSH_USER VPS_SSH_KEY ENABLE_GPU_STACK \
            INSTALL_TIMEZONE BACKUP_HOST BACKUP_HOST_USER BACKUP_HOST_KEY BACKUP_HOST_PATH \
            PIHOLE_LAN_IP ENABLE_SANDBOX_RESTORE AUTH_THEME_REPO_URL \
-           ARCANE_URL ARCANE_API_TOKEN; do
+           KEYCLOAK_PUBLIC_DOMAIN ARCANE_URL ARCANE_API_TOKEN; do
   if [[ -z "${!var:-}" || "${!var}" == *'<'*'>'* ]]; then
     echo "Config value $var is unset or still a <PLACEHOLDER> in $CONFIG_FILE." >&2
     echo "Fill in every field before running unattended." >&2
@@ -209,19 +209,26 @@ done
 # generates a fresh keypair and step_wireguard_sync_vps_peer pushes the new
 # public key to the VPS side automatically.
 #
-# ARCANE_URL/ARCANE_API_TOKEN (#1502): a real bootstrap gap, not just a
-# documentation note like the ones above. step_arcane_import_stacks needs
-# an already-running Arcane with an API key generated through its own UI
+# ARCANE_URL/ARCANE_API_TOKEN (#1502): step_arcane_import_stacks needs an
+# already-running Arcane with an API key generated through its own UI
 # (Settings -> API Keys, after Arcane's first interactive login -- an
 # unattended installer can't complete Arcane's own OIDC/passkey login
-# itself). On a truly from-scratch host that also means Arcane has to
-# already be installed and reachable before this script gets this far,
-# which step_dockge_install does NOT currently do -- it still installs
-# plain Dockge (confirmed live, #1502), not Arcane, unlike every already-
-# provisioned APIARY homeserver today. Fixing that install/bootstrap gap
-# is tracked as an explicit follow-up rather than done here; until it
-# lands, a from-scratch run needs Arcane stood up and an API key minted by
-# hand before --config can point at a filled-in ARCANE_API_TOKEN.
+# itself). #1504 closed half of this gap: step_arcane_install (formerly
+# step_dockge_install) now stands Arcane itself up from
+# docker-compose.arcane.yml, so it's installed and reachable before this
+# script reaches the import step, rather than the plain Dockge it used to
+# install. The remaining, irreducible part is a genuine two-pass bootstrap:
+# minting ARCANE_API_TOKEN still requires a first human login, and once
+# Keycloak is up that login is OIDC-only, so the very first from-scratch run
+# lands Arcane + Keycloak, a human logs in and mints a token, and a second
+# run with the filled-in token completes the honeypot-* import. Nothing in
+# this installer can complete Arcane's own interactive login for you.
+#
+# KEYCLOAK_PUBLIC_DOMAIN (#1504): the base domain the honeypot's public
+# hostnames hang off (auth.<domain>, arcane.<domain>, ...) -- step_arcane_install
+# derives Arcane's own APP_URL and OIDC issuer URL from it for the .env it
+# generates, matching the Keycloak realm's own example.invalid -> <domain>
+# substitution. Same value as honeypot-keycloak's KEYCLOAK_PUBLIC_DOMAIN.
 
 # BACKUP_HOST_SANDBOX_PATH is only needed when ENABLE_SANDBOX_RESTORE=true --
 # don't force every user to fill it in just to skip a 170G+ optional restore.
@@ -638,40 +645,92 @@ step_clone_repo() {
 }
 
 # ---------------------------------------------------------------------------
-# Phase 6 — Dockge
+# Phase 6 — Arcane (#1504: replaces the old step_dockge_install)
 # ---------------------------------------------------------------------------
-  # STALE (#1502): every already-provisioned APIARY homeserver replaced
-  # Dockge with Arcane (#1185) months before this migration -- deploy.yml
-  # and docker-compose.arcane.yml both assume Arcane, not this. This step
-  # was never updated to match, so a genuinely from-scratch install run
-  # today still stands up plain Dockge here, then step_arcane_import_stacks
-  # (later in this same run) fails outright with nothing at ARCANE_URL to
-  # talk to. Tracked as an explicit follow-up (see ARCANE_URL/
-  # ARCANE_API_TOKEN's own comment above) rather than fixed inside #1502 --
-  # replacing this needs its own Arcane secrets-bootstrap step
-  # (ENCRYPTION_KEY/JWT_SECRET/OIDC_CLIENT_SECRET, no *_FILE variant
-  # Arcane supports, same shape as step_provision_keycloak_secrets) and
-  # verification against a real from-scratch host, which nothing in this
-  # change had a safe way to do.
-step_dockge_install() {
+# #1504: every already-provisioned APIARY homeserver replaced Dockge with
+# Arcane (#1185) months before #1502's migration -- deploy.yml and
+# docker-compose.arcane.yml both assume Arcane. This step stands Arcane up on
+# a genuinely from-scratch host so step_arcane_import_stacks (later in this
+# same run) has a running instance at ARCANE_URL to import the honeypot-*
+# stacks into. It models docker-compose.arcane.yml's own live-verified
+# service definition exactly (same image, same WireGuard-only port binding,
+# same env-var names) -- that file, not this step, stays the source of truth
+# for the service shape; this step only supplies the .env it reads.
+#
+# Bootstrap ordering (the part that genuinely needed a live host to verify,
+# #1504's own caveat): Arcane's REST API -- the only thing this installer
+# talks to -- authenticates by the pre-minted ARCANE_API_TOKEN, NOT by an
+# OIDC session, so Arcane is fully usable by the installer the moment it's
+# healthy here, before Keycloak exists. OIDC (interactive human login) is a
+# separate concern that only has to work once a person visits the UI, which
+# is necessarily after honeypot-keycloak has itself been imported-and-started
+# by step_arcane_import_stacks. So this step writes a *placeholder*
+# ARCANE_OIDC_CLIENT_SECRET good enough to satisfy the compose file's `:?`
+# guard and start the container; step_provision_arcane_oidc_secret later
+# replaces it with the real per-realm secret Keycloak generates on
+# --import-realm (same pattern as apiary-dashboard's own client secret --
+# see provision-arcane-oidc-secret.sh) and re-ups Arcane.
+#
+# Unresolved from-scratch chicken-and-egg (#1504, still needs a live call):
+# minting ARCANE_API_TOKEN requires a first human login, and that login is
+# OIDC-only (OIDC_AUTO_REDIRECT_TO_PROVIDER=true) once Keycloak is up, so a
+# truly-first install is inherently two-pass -- see ARCANE_URL/
+# ARCANE_API_TOKEN's own comment near the top of this file.
+step_arcane_install() {
   mkdir -p /var/dockge/data /var/dockge/stacks
-  if docker ps -a --format '{{.Names}}' | grep -qx dockge; then
-    return 0
+  local dir="/var/dockge/stacks/honeypot-arcane"
+  install -d -m 755 "$dir"
+
+  # Arcane's ENCRYPTION_KEY/JWT_SECRET/OIDC_CLIENT_SECRET have no *_FILE
+  # variant it supports (confirmed against its own env-var reference, see
+  # docker-compose.arcane.yml's inline comment) -- they live in this stack's
+  # own .env, generated once here the same "start from zero, don't restore a
+  # prior value" way step_provision_keycloak_secrets treats Keycloak's own
+  # secrets. Idempotent: an existing .env is left untouched so a re-run never
+  # rotates a key out from under an already-encrypted arcane-data volume
+  # (rotating ENCRYPTION_KEY would make every stored secret undecryptable).
+  local env_file="$dir/.env"
+  if [[ ! -f "$env_file" ]]; then
+    # Derive the two public URLs Arcane's OIDC needs from the same
+    # KEYCLOAK_PUBLIC_DOMAIN the Keycloak realm's own example.invalid ->
+    # <domain> substitution uses (arcane.<domain> for redirect URIs,
+    # auth.<domain> for the issuer) -- matches docker-compose.arcane.yml's
+    # and honeypot-keycloak/compose.yml's own default hostnames.
+    local app_url="https://arcane.${KEYCLOAK_PUBLIC_DOMAIN}"
+    local issuer_url="https://auth.${KEYCLOAK_PUBLIC_DOMAIN}/realms/apiary"
+    (
+      umask 077
+      cat > "$env_file" <<EOF
+# honeypot-arcane -- generated by install-homeserver.sh step_arcane_install
+# (#1504). ENCRYPTION_KEY/JWT_SECRET are one-time-generated and MUST NOT be
+# rotated once arcane-data holds encrypted secrets. OIDC_CLIENT_SECRET below
+# is a bootstrap placeholder -- provision-arcane-oidc-secret.sh overwrites it
+# with the real Keycloak-generated value once the realm is imported.
+HP_BIND=${HP_BIND:-10.8.0.2}
+ARCANE_PORT=${ARCANE_PORT:-3552}
+ARCANE_URL=${app_url}
+ARCANE_ENCRYPTION_KEY=$(openssl rand -base64 32)
+ARCANE_JWT_SECRET=$(openssl rand -hex 32)
+OIDC_ISSUER_URL=${issuer_url}
+ARCANE_OIDC_CLIENT_SECRET=$(openssl rand -hex 32)
+TZ=${INSTALL_TIMEZONE}
+EOF
+    )
+    chmod 600 "$env_file"
+    echo "generated honeypot-arcane .env (placeholder OIDC secret -- synced later from Keycloak)"
+  else
+    echo "honeypot-arcane .env already present -- leaving secrets untouched"
   fi
-  # #787: bound to the WireGuard tunnel IP only, matching every other
-  # gateway-fronted service (HP_BIND=10.8.0.2, .env.example) and the real
-  # VPS-side socat-hp-dockge bridge (TCP4:10.8.0.2:5001). A plain -p
-  # 5001:5001 binds 0.0.0.0 -- confirmed live, this made Dockge's own web UI
-  # (root-equivalent Docker control via its read-write docker.sock mount)
-  # directly reachable from the LAN with zero Keycloak/oauth2-proxy
-  # involvement, bypassing the gateway entirely.
-  docker run -d --name dockge --restart unless-stopped \
-    -p 10.8.0.2:5001:5001 \
-    -e DOCKGE_STACKS_DIR=/var/dockge/stacks \
-    -v /var/run/docker.sock:/var/run/docker.sock \
-    -v /var/dockge/data:/app/data \
-    -v /var/dockge/stacks:/var/dockge/stacks \
-    louislam/dockge:1
+
+  # Same "copy the file, don't symlink it" shape deploy.yml's own
+  # Synchronize honeypot-arcane step uses -- honeypot-arcane is deliberately
+  # NOT one of the Arcane-managed Git syncs (syncing the thing that has to
+  # run before any sync can happen is a bootstrap loop, see
+  # docs/ARCANE-GIT-SYNC.md), so it's installer-/deploy.yml-managed by a
+  # plain file copy from the repo checkout.
+  cp "$REPO_DIR/docker-compose.arcane.yml" "$dir/compose.yml"
+  (cd "$dir" && docker compose -f compose.yml config --quiet \
+    && with_retry 3 15 docker compose -f compose.yml up -d --wait)
 }
 
 # ---------------------------------------------------------------------------
@@ -1104,6 +1163,24 @@ step_provision_dashboard_oidc_secret() {
   KEYCLOAK_ADMIN_USERNAME="${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-admin}" \
   KEYCLOAK_ADMIN_PASSWORD="$(< "$secrets_dir/bootstrap-admin-password")" \
     "$REPO_DIR/keycloak/provision-dashboard-oidc-secret.sh"
+}
+
+step_provision_arcane_oidc_secret() {
+  # #1504: step_arcane_install stood Arcane up with a placeholder OIDC secret
+  # (good enough for the API-token-driven import, not for interactive login).
+  # Now that Keycloak is up (start-remaining above waited it healthy, same as
+  # for dashboard/events-poller right above), fetch the real per-realm
+  # `arcane` client secret Keycloak generated on --import-realm and re-up
+  # Arcane with it. Path convention deliberately identical to its two sibling
+  # provisioner steps above so a single fix covers all three.
+  local secrets_dir="/var/dockge/stacks/honeypot-keycloak/secrets"
+  [[ -f "$secrets_dir/bootstrap-admin-password" ]] || {
+    echo "no bootstrap-admin-password at $secrets_dir -- was provision-keycloak-secrets skipped?" >&2
+    return 1
+  }
+  KEYCLOAK_ADMIN_USERNAME="${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-admin}" \
+  KEYCLOAK_ADMIN_PASSWORD="$(< "$secrets_dir/bootstrap-admin-password")" \
+    "$REPO_DIR/keycloak/provision-arcane-oidc-secret.sh"
 }
 
 step_auth_events_worker_start() {
@@ -1674,7 +1751,7 @@ run_step wireguard-sync-vps    "Sync home pubkey+PSK to VPS peer config" step_wi
 run_step wireguard-verify      "Verify tunnel is up"                step_wireguard_verify
 
 run_step clone-repo            "Clone/update APIARY to $REPO_DIR" step_clone_repo
-run_step dockge-install        "Install Dockge"                     step_dockge_install
+run_step arcane-install        "Install Arcane (stack-management UI + import target)" step_arcane_install
 
 run_step restore-env-files     "Restore .env files from LAN backup" step_restore_env_files
 run_step arcane-import-stacks  "Import honeypot-* + auth-events-worker/llm-worker/ml-worker as Arcane Git syncs" step_arcane_import_stacks
@@ -1689,6 +1766,7 @@ run_step start-remaining       "Start remaining sensor/dashboard stacks" step_st
 
 run_step provision-events-poller-secrets "Grant auth-events-poller view-events + write its secret" step_provision_events_poller_secrets
 run_step provision-dashboard-oidc-secret "Write dashboard's OIDC client secret from Keycloak" step_provision_dashboard_oidc_secret
+run_step provision-arcane-oidc-secret "Sync Arcane's real OIDC client secret from Keycloak, re-up" step_provision_arcane_oidc_secret
 run_step auth-events-worker-start "Start auth-events-worker" step_auth_events_worker_start
 
 run_step sshfs-install         "Install sshfs, place VPS key"        step_sshfs_install
