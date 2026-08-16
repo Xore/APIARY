@@ -2127,19 +2127,6 @@ a.metric:hover { border-color: var(--border-strong); background: var(--surface-2
    first ~8 ever visible, zero indication the rest existed). Two independent
    fixes, not one: */
 .card__scroll {
-  /* #1536: .card__scroll IS this markup's content region (no separate
-     .card__content wrapper -- see attackers.html/source_health.html, which
-     put .card__scroll directly after the <h2> header). Without flex:1 it
-     only takes its own content's height, same as a plain block child; when
-     a CSS-grid row stretches this .card taller than that (a sibling .half
-     card in the same row has more rows), the extra height lands as dead
-     space below the table/list instead of the region growing into it --
-     "only fills half the card" (#1536's Sensor feeds card). flex:1 1 auto
-     with min-height:0 (the same pairing #24's .card__content comment above
-     already documents) grows this region to fill exactly the space between
-     the header and whatever follows it, still capped at max-height with a
-     scrollbar past that point. */
-  flex: 1 1 auto; min-height: 0;
   max-height: 340px; overflow: auto;
   /* 1. A thin, always-rendered scrollbar (not overlay-hidden) makes the
      region legible as "scrollable" at a glance, matching this file's own
