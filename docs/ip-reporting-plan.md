@@ -5,7 +5,7 @@ blocklists via their APIs.
 
 > **Status:** built. `reporter/` (Go, not the Python layout sketched below --
 > that part of this plan is superseded) is a real service in
-> `docker-compose.utilities.yml`. Phase 1
+> `arcane/home/honeypot-utilities/compose.yml`. Phase 1
 > ([#68](https://github.com/Xore/APIARY/issues/68)) and Phase 2
 > ([#69](https://github.com/Xore/APIARY/issues/69)) are both closed.
 > Phase 3-4 (reputation validation, operator observability) is

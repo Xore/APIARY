@@ -81,7 +81,7 @@ STOP_ORDER=(
   honeypot-init
 )
 # External-referenced volumes honeypot-init's compose file expects to
-# already exist (docker-compose.init.yml, external: true) -- if --wipe
+# already exist (arcane/home/honeypot-init/compose.yml, external: true) -- if --wipe
 # removed them, they need an empty placeholder before honeypot-init can
 # start, same as docs/STACK-REBUILD.md step 3 documents.
 EXTERNAL_PLACEHOLDER_VOLUMES=(dionaea-lib yara-results)

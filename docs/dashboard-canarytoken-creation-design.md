@@ -60,7 +60,7 @@ facing reason to put a token-creation API on the public internet, and doing
 so would be a real credential-exposure cost for zero benefit. DNS-channel/
 NXDOMAIN-based token types and detection remain unexposed too — none of the
 six selected types need them, and delegating a real DNS zone is a
-separate, larger decision (`docker-compose.canarytokens.yml`'s own header,
+separate, larger decision (`arcane/home/honeypot-canarytokens/compose.yml`'s own header,
 inherited unchanged from #1426/#1427).
 
 ## Decision 3: the public hostname is deliberately generic

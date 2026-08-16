@@ -1,6 +1,6 @@
 # honeypot-galah -- #1420: LLM-powered HTTP honeypot
 # (github.com/0x4d31/galah, vendored -- see galah/Dockerfile). Same shape
-# and reasoning as docker-compose.beelzebub.yml/docker-compose.hellpot.yml
+# and reasoning as arcane/home/honeypot-beelzebub/compose.yml/arcane/home/honeypot-hellpot/compose.yml
 # -- no depends_on, its own private network, only host bind mounts.
 # Deployed as /opt/stacks/honeypot-galah.
 #

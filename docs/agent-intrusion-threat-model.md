@@ -60,7 +60,7 @@ detonation sandbox, not an LLM eval harness.**
   an LLM eval harness with a scored reference solution) — the nearest
   equivalent is the Ghidra/sandbox/GitHub-analysis result spools
   (`/var/lib/honeypot-ghidra/results`, etc.), which are mounted **read-only**
-  into the dashboard (`docker-compose.dashboard.yml`, every `*-results` mount)
+  into the dashboard (`arcane/home/honeypot-dashboard/compose.yml`, every `*-results` mount)
   specifically so a compromised guest or a malicious sample cannot forge a
   result by writing back into the directory the dashboard reads.
 
@@ -202,7 +202,7 @@ internal-only services" question is real and already has partial answers.**
 - The one exception, by explicit design: services that need cross-stack
   reach (dashboard, es-results-importer) join `honeynet` and resolve
   Elasticsearch by service-name DNS — a deliberate, narrow allowlist, not an
-  oversight (see `docker-compose.dashboard.yml`'s own header comment on
+  oversight (see `arcane/home/honeypot-dashboard/compose.yml`'s own header comment on
   this).
 - No egress-filtering control currently prevents a compromised sensor
   container from reaching the *public* internet, only from reaching other
@@ -222,20 +222,20 @@ gap is outbound-to-internet egress policy, tracked separately in #538.
 
 - The dashboard's own Docker-socket boundary is the strongest example in
   this tree: the dashboard container itself never mounts `/var/run/docker.sock`
-  (`docker-compose.dashboard.yml`, grepped directly — absent). All
+  (`arcane/home/honeypot-dashboard/compose.yml`, grepped directly — absent). All
   Docker-lifecycle actions (start/stop/restart) go through
   `hp-services-adapter`, a separate container that is `cap_drop: [ALL]`,
   `read_only: true`, `network_mode: none`, and reachable only via an
   AF_UNIX socket the dashboard also holds — no TCP path exists to abuse it
   remotely even if the dashboard container itself were compromised.
 - `hp-autoheal` is the one other service that does bind-mount the real
-  `/var/run/docker.sock` (`docker-compose.utilities.yml`) — it watches
+  `/var/run/docker.sock` (`arcane/home/honeypot-utilities/compose.yml`) — it watches
   containers by label daemon-wide and restarts unhealthy ones. This is a
   broad, standing grant (full Docker API access, not scoped to specific
   containers) held by a long-running service; workload-identity-scoped
   alternatives (e.g. a narrower label-filtered API surface) were not found
   in this tree.
-- `tanner_docker` (`docker-compose.tanner.yml`) is `privileged: true` with
+- `tanner_docker` (`arcane/home/honeypot-tanner/compose.yml`) is `privileged: true` with
   its own `tmpfs /var/lib/docker` — explicitly isolated Docker-in-Docker on
   the private `tanner_local` network, not a bind mount of the host socket.
   This is a deliberate, already-documented exception (#88's own scope note

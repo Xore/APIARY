@@ -1,6 +1,6 @@
 # honeypot-hellpot -- #1419: HTTP bot tarpit (github.com/yunginnanet/HellPot,
 # vendored -- see hellpot/Dockerfile). Same shape and reasoning as
-# docker-compose.beelzebub.yml -- no depends_on, its own fully private
+# arcane/home/honeypot-beelzebub/compose.yml -- no depends_on, its own fully private
 # network, only host bind mounts. Deployed as /opt/stacks/honeypot-hellpot.
 #
 # Scope decisions made integrating this sensor (see PR description for the

@@ -3,7 +3,7 @@
 # cisco-asa-honeypot/main.go and ike.go's own doc comments for exactly what
 # this reproduces and why (upstream's own IKE responder is far less
 # "faithful protocol implementation" than its line count suggests). Same
-# shape and reasoning as docker-compose.dnp3.yml -- no depends_on, its own
+# shape and reasoning as arcane/home/honeypot-dnp3/compose.yml -- no depends_on, its own
 # fully private network, only host bind mounts. Deployed as
 # /opt/stacks/honeypot-cisco-asa.
 

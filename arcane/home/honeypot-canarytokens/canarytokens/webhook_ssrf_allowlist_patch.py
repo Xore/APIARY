@@ -11,7 +11,7 @@ its own webhook_url to our own adapter service, a fixed value we control,
 never attacker input -- so there's nothing to protect against here, and the
 unmodified validator would silently blackhole every alert since our adapter
 only has a private Docker-network address (no public exposure planned for
-it, see docker-compose.canarytokens.yml).
+it, see arcane/home/honeypot-canarytokens/compose.yml).
 
 Confirmed live: an unpatched build's webhook send failed with "Disallowed
 requests to <adapter-url>" for a real self-triggered token before this

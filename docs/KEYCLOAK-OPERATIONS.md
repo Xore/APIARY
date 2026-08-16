@@ -25,9 +25,9 @@ addresses, passwords, client secrets, cookies, and realm users out of Git.
 
 | Item | Repository source | Runtime location |
 |---|---|---|
-| Arcane Compose file | `docker-compose.keycloak.yml` | `/var/dockge/stacks/honeypot-keycloak/compose.yml` |
-| Arcane environment | `keycloak.env.example` | `/var/dockge/stacks/honeypot-keycloak/.env` |
-| Realm template | `keycloak/realm/apiary-realm.json` | `/var/dockge/stacks/honeypot-keycloak/keycloak/realm/` |
+| Arcane Compose file | `arcane/home/honeypot-keycloak/compose.yml` | `/var/dockge/stacks/honeypot-keycloak/compose.yml` |
+| Arcane environment | `arcane/home/honeypot-keycloak/.env.example` | `/var/dockge/stacks/honeypot-keycloak/.env` |
+| Realm template | `arcane/home/honeypot-keycloak/keycloak/realm/apiary-realm.json` | `/var/dockge/stacks/honeypot-keycloak/keycloak/realm/` |
 | Theme | `Xore/auth-backend:themes/apiary` | `/var/dockge/stacks/honeypot-keycloak/theme/apiary` |
 | Keycloak secrets | none | `/var/dockge/stacks/honeypot-keycloak/secrets` |
 | VPS Compose | `vps/docker-compose.yml` | existing VPS stack directory |
@@ -48,7 +48,7 @@ sudo install -d -m 750 /var/dockge/stacks/honeypot-keycloak/secrets
 sudo install -d -m 755 /var/dockge/stacks/honeypot-keycloak/theme
 ```
 
-Copy `keycloak.env.example` to `.env` and set host-local values:
+Copy `arcane/home/honeypot-keycloak/.env.example` to `.env` and set host-local values:
 
 ```dotenv
 HP_BIND=<homeserver-wireguard-address>
@@ -81,9 +81,9 @@ in the realm template.
 Validate before starting:
 
 ```bash
-./keycloak/realm/validate.sh
-docker compose --env-file keycloak.env.example \
-  -f docker-compose.keycloak.yml config --quiet
+./arcane/home/honeypot-keycloak/keycloak/realm/validate.sh
+docker compose --env-file arcane/home/honeypot-keycloak/.env.example \
+  -f arcane/home/honeypot-keycloak/compose.yml config --quiet
 ```
 
 Start from Arcane, or from the stack directory:
@@ -326,7 +326,7 @@ sudo KEYCLOAK_RESTORE_CONFIRM=restore-keycloak-database \
 ## 7. Upgrade and rebuild procedure
 
 1. Review Keycloak and PostgreSQL release notes.
-2. Update image tag and digest together in `docker-compose.keycloak.yml`.
+2. Update image tag and digest together in `arcane/home/honeypot-keycloak/compose.yml`.
 3. Re-test the theme against the pinned Keycloak parent theme.
 4. Validate Compose and the realm template.
 5. Deploy to a disposable stack and exercise the acceptance tests.

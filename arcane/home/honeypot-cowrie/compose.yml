@@ -1,6 +1,6 @@
 # honeypot-cowrie — #258: cowrie split into its own Dockge-managed stack.
 #
-# Same shape and same reasoning as docker-compose.conpot.yml (see that file's
+# Same shape and same reasoning as arcane/home/honeypot-conpot/compose.yml (see that file's
 # header for the full #258 writeup): cowrie has no depends_on relationship on
 # any other honeypot, its own fully private network (cowrie_net), and every
 # volume here is a host bind mount, not a Docker named volume -- so no
@@ -10,8 +10,8 @@
 # The config-file mounts below (cowrie.cfg, userdb.txt, the fakefs DMI nodes)
 # used relative ./cowrie/... paths when this lived in docker-compose.yml --
 # relative to *that* file's own directory. Moved to absolute paths into the
-# APIARY checkout, matching docker-compose.init.yml's snare-clone
-# build-context precedent and docker-compose.conpot.yml's own build: path.
+# APIARY checkout, matching arcane/home/honeypot-init/compose.yml's snare-clone
+# build-context precedent and arcane/home/honeypot-conpot/compose.yml's own build: path.
 #
 # cowrie-downloads (the captured-payload directory under logs/cowrie) is
 # still a bind mount into the same host path other stacks already read from

@@ -56,7 +56,7 @@ Checks, against the *current* repository state (not a hardcoded snapshot):
    several sensors' events from Elasticsearch, not their log files --
    see #403 for why that's a real dependency, not a nice-to-have).
 2. **Dashboard consistency** -- every sensor stack in the profile maps to
-   at least one name in `docker-compose.dashboard.yml`'s `EXPECTED_SENSORS`
+   at least one name in `arcane/home/honeypot-dashboard/compose.yml`'s `EXPECTED_SENSORS`
    (parsed live from that file, so this can't silently drift the way a
    hardcoded copy would), and every name in `EXPECTED_SENSORS` traces back
    to a stack the profile actually includes. A stack enabled with no
@@ -70,7 +70,7 @@ change needed for the validator to pick it up.
 
 ## A real finding from writing this
 
-`docker-compose.dashboard.yml`'s `EXPECTED_SENSORS` is a single hardcoded
+`arcane/home/honeypot-dashboard/compose.yml`'s `EXPECTED_SENSORS` is a single hardcoded
 value listing every sensor -- confirmed by running the validator: `full.txt`
 passes cleanly (its emitted set matches `EXPECTED_SENSORS` exactly), but
 both `ics-focused.txt` and `minimal-web.txt` correctly **fail** the

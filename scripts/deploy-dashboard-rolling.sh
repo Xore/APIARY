@@ -27,7 +27,7 @@
 # that path, not a git checkout, is the real build tree. #1502: Arcane's
 # directory-aware sync materializes the compose file there as compose.yml
 # (from arcane/home/honeypot-dashboard/compose.yml), not
-# docker-compose.dashboard.yml. Requires compose.yml in the current
+# arcane/home/honeypot-dashboard/compose.yml. Requires compose.yml in the current
 # directory or passed via COMPOSE_FILE.
 
 set -euo pipefail
@@ -36,7 +36,7 @@ COMPOSE_FILE="${COMPOSE_FILE:-compose.yml}"
 REPLICAS=(dashboard dashboard-b)
 CONTAINER_NAMES=(hp-dashboard hp-dashboard-b)
 
-# 180s, not an arbitrary shorter number: docker-compose.dashboard.yml's own
+# 180s, not an arbitrary shorter number: arcane/home/honeypot-dashboard/compose.yml's own
 # healthcheck already declares start_period: 180s for both replicas --
 # this script's own wait budget was simply never kept in sync with that
 # when either was last tuned. Confirmed live (#174's redeploy): a real

@@ -28,7 +28,7 @@ tracked starter. Get real coverage one of two ways:
 - Populate it by hand: `cp threat-cidrs.csv.example threat-cidrs.csv` and add
   your own entries.
 - Run `./refresh-threat-cidrs.sh` (or enable the `threat-intel`
-  Compose profile in `docker-compose.init.yml`, which runs it on a daily
+  Compose profile in `arcane/home/honeypot-init/compose.yml`, which runs it on a daily
   loop) to auto-populate it from Spamhaus DROP, the Tor bulk exit list, and
   AWS/GCP's published IP ranges -- all free, no signup required. It creates
   the file from `threat-cidrs.csv.example` on first run, and leaves any

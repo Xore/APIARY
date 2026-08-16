@@ -100,7 +100,7 @@ that already exists** (home is reachable at `10.8.0.2`,
   the data itself (a list of IPs an operator already chose to block) is no
   more sensitive than the maltrail feed it sits alongside. Reachable from the
   VPS at `10.8.0.2:19090` — the `dashboard` service's real published port
-  (`docker-compose.dashboard.yml`, `${HP_BIND:-10.8.0.2}:19090:8080`), not an
+  (`arcane/home/honeypot-dashboard/compose.yml`, `${HP_BIND:-10.8.0.2}:19090:8080`), not an
   assumed default.
 - A new sidecar, `vps/portbridge-manual-blackhole-refresh.sh`, is a near-
   verbatim copy of `portbridge-blackhole-refresh.sh` pointed at that URL

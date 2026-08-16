@@ -13,7 +13,7 @@ tunnel peer and takes the last hop -- so left as-is, HellPot would log a
 fully attacker-controlled value as REMOTE_ADDR.
 
 The real fix is deployment, not code: this stack runs HellPot raw-port/
-portbridge-only (no Traefik hostname, see docker-compose.hellpot.yml),
+portbridge-only (no Traefik hostname, see arcane/home/honeypot-hellpot/compose.yml),
 resolving the true attacker IP the same trusted way as every other
 non-PROXY-protocol sensor here -- ip-enrichment-worker's via_port join
 against portbridge's own connection log (hellpot.go). That join is keyed

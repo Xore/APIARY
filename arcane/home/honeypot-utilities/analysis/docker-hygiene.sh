@@ -22,7 +22,7 @@ set -eu
 #     window. Volume hygiene, if wanted, needs its own separate, carefully
 #     scoped pass -- not bundled into this one.
 #
-# Talks to docker-socket-proxy (docker-compose.utilities.yml), never the raw
+# Talks to docker-socket-proxy (arcane/home/honeypot-utilities/compose.yml), never the raw
 # socket -- same trust boundary autoheal already uses, IMAGES=1 added
 # alongside its existing CONTAINERS=1/POST=1 grant for this job specifically.
 

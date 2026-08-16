@@ -2,7 +2,7 @@
 # own Dockge-managed stack, deployed as /opt/stacks/honeypot-dashboard.
 #
 # Unlike the standalone honeypot personas already split out (conpot, cowrie,
-# multipot, http, dnp3 -- see docker-compose.conpot.yml's header for that
+# multipot, http, dnp3 -- see arcane/home/honeypot-conpot/compose.yml's header for that
 # reasoning), this pair genuinely needs cross-stack access: dashboard talks
 # to elasticsearch/filebeat by service-name DNS over the shared `honeynet`
 # network, and reads/writes three named volumes the main stack also touches
@@ -13,7 +13,7 @@
 # SCRIPT_PAYLOAD_DIR=/state/script-payloads writes). This is the "harder
 # case" #258 raised -- resolved the same way this repo already resolves it
 # for honeypot-init (see docker-compose.yml's own networks: comment and
-# docker-compose.init.yml's header): give the shared network/volumes an
+# arcane/home/honeypot-init/compose.yml's header): give the shared network/volumes an
 # explicit, non-external `name:` in every stack that touches them. Compose
 # creates a named resource if absent or transparently reuses it if a
 # same-named one already exists -- no `external: true` pre-creation dance
@@ -638,7 +638,7 @@ volumes:
     name: dionaea-lib
   yara-results:
     name: yara-results
-  # #666: shared with docker-compose.utilities.yml -- reporter writes,
+  # #666: shared with arcane/home/honeypot-utilities/compose.yml -- reporter writes,
   # es-results-importer here only reads. Same mechanism as dionaea-lib.
   reporter-data:
     name: reporter-data

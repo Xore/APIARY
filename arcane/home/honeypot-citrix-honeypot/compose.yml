@@ -1,7 +1,7 @@
 # honeypot-citrix — #238, #414: Citrix ADC/NetScaler Gateway decoy for
 # CVE-2019-19781, Go port of t3chn0m4g3/CitrixHoneypot -- see
 # citrix-honeypot/main.go's own doc comment. Same shape and reasoning as
-# docker-compose.dnp3.yml -- no depends_on, its own fully private network,
+# arcane/home/honeypot-dnp3/compose.yml -- no depends_on, its own fully private network,
 # only host bind mounts. Deployed as /opt/stacks/honeypot-citrix.
 
 name: honeypot-citrix-honeypot

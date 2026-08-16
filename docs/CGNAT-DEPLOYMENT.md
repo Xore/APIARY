@@ -98,7 +98,7 @@ the only internet-facing component.
 2. Copy this repository to `/opt/stacks/apiary/`.
 3. Copy `.env.example` to `.env` in `/opt/stacks/apiary/` and generate
    every value marked `CHANGE_ME`.
-4. Create `/opt/stacks/honeypot-init/`, copy `docker-compose.init.yml` from
+4. Create `/opt/stacks/honeypot-init/`, copy `arcane/home/honeypot-init/compose.yml` from
    the repo into it as `compose.yml`, and copy the repo's
    `honeypot-init.env.example` to `.env` there (set
    `ARKIME_ADMIN_PASSWORD`/`ARKIME_PASSWORD_SECRET` — the latter must match

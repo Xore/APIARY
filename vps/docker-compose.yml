@@ -481,7 +481,7 @@ services:
     networks: [proxy]
 
   # #1487: bridges the self-hosted Canarytokens switchboard's HTTP channel
-  # (docker-compose.canarytokens.yml, published on the WireGuard interface
+  # (arcane/home/honeypot-canarytokens/compose.yml, published on the WireGuard interface
   # at 19427) so file/document tokens created from the dashboard actually
   # fire when opened anywhere on the internet, not just inside the WireGuard
   # net. Deliberately unauthenticated/public like socat-hp-http/-snare above
@@ -554,7 +554,7 @@ services:
     networks: [oidc-dashboard]
 
   # #266: second dashboard replica's bridge, for zero-downtime rolling
-  # updates -- see docker-compose.dashboard.yml's own header comment and
+  # updates -- see arcane/home/honeypot-dashboard/compose.yml's own header comment and
   # vps/traefik/dynamic.yml's honeypot-dashboard service (now two
   # loadBalancer servers + a healthCheck) for the full mechanism. Own
   # listen port (8092, not 8090) since two socat containers can't share one.

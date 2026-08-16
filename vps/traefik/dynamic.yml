@@ -622,7 +622,7 @@ http:
         passHostHeader: true
 
     # #266: two servers for zero-downtime rolling updates -- see
-    # docker-compose.dashboard.yml's dashboard/dashboard-b services and
+    # arcane/home/honeypot-dashboard/compose.yml's dashboard/dashboard-b services and
     # scripts/deploy-dashboard-rolling.sh. healthCheck is what makes this
     # actually zero-downtime: Traefik polls /healthz on each backend
     # directly (bypassing the router/middleware chain entirely, including

@@ -1,6 +1,6 @@
 # honeypot-elasticpot -- #1423: Elasticsearch decoy (gitlab.com/bontchev/
 # elasticpot, vendored -- see elasticpot/Dockerfile). Same shape as
-# docker-compose.hellpot.yml -- no depends_on, its own fully private
+# arcane/home/honeypot-hellpot/compose.yml -- no depends_on, its own fully private
 # network, only host bind mounts. Deployed as /opt/stacks/honeypot-elasticpot.
 #
 # NAMING/PLACEMENT CARE (#1423's own hard requirement): this is a SECOND,
@@ -22,7 +22,7 @@
 #   - event.sensor is the literal "elasticpot" (elasticpot/honeypot.cfg's
 #     sensor_name override), never confusable with the real cluster's own
 #     indices or multipot's "elasticsearch" protocol tag
-#   - The REAL Elasticsearch cluster (docker-compose.elk.yml) is never
+#   - The REAL Elasticsearch cluster (arcane/home/honeypot-elk/compose.yml) is never
 #     reachable from this network at all -- elasticpot_net is fully
 #     isolated, same as every other sensor's own network here
 

@@ -2,5 +2,5 @@
 # analysis/es-results-importer/requirements.txt -- the ES server
 # (docker-compose.yml's elasticsearch service) is 8.x; a 9.x client sends
 # request headers the 8.x server rejects.
-elasticsearch==8.19.3
+elasticsearch==9.5.0
 loguru==0.7.3

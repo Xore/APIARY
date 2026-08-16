@@ -1,11 +1,11 @@
 # Dockge-managed Keycloak
 
 For the complete installation and operations procedure, use
-[`docs/KEYCLOAK-OPERATIONS.md`](../docs/KEYCLOAK-OPERATIONS.md). This file is a
+[`docs/KEYCLOAK-OPERATIONS.md`](../../../../docs/KEYCLOAK-OPERATIONS.md). This file is a
 short component summary.
 
-The `honeypot-keycloak` Dockge stack is defined by
-[`docker-compose.keycloak.yml`](../docker-compose.keycloak.yml). Keycloak and
+The `honeypot-keycloak` Arcane stack is defined by
+[`compose.yml`](../compose.yml). Keycloak and
 PostgreSQL run on the homeserver; VPS Traefik forwards `auth.example.invalid` over
 WireGuard to `${HP_BIND}:${KEYCLOAK_PORT}`. PostgreSQL and port 9000 are never
 published.

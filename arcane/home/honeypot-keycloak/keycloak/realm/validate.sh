@@ -71,7 +71,7 @@ fi
 # either -- confirmed live against a real Postgres, twice: a 263-char role
 # description (#1040) and, separately, a 315-char client description
 # (#1066's first CI run) both made the real `kc.sh start --import-realm`
-# bootstrap path (the same one docker-compose.keycloak.yml uses on every
+# bootstrap path (the same one arcane/home/honeypot-keycloak/compose.yml uses on every
 # fresh install) fail its batch update and crash-loop the container
 # outright. Checks both object classes together now instead of only roles,
 # so this bug class can't silently recur a third time on a field neither

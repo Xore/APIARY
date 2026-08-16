@@ -1,7 +1,7 @@
 # honeypot-rdp — #238, #412: RDP (3389/tcp) decoy, Go port of
 # CommunityHoneyNetwork/rdphoney -- see rdp-honeypot/main.go's own doc
 # comment for why this reverses #238's original "vendor, don't port" call.
-# Same shape and reasoning as docker-compose.dnp3.yml -- no depends_on, its
+# Same shape and reasoning as arcane/home/honeypot-dnp3/compose.yml -- no depends_on, its
 # own fully private network, only host bind mounts. Deployed as
 # /opt/stacks/honeypot-rdp.
 
