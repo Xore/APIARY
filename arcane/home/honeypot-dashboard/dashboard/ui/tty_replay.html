@@ -12,6 +12,11 @@
      operator visits) -- same page-scoped-script convention echarts.min.js/
      cytoscape.min.js already use on the pages that need them. */}}
 <link rel="stylesheet" href="{{asset "/static/xterm.css"}}">
+{{/* #1533/#1546: theme.css is vendored (scripts/check-vendored-theme.sh
+     enforces byte-identity with Xore/theme) and cannot carry the session
+     timeline's app-specific layout rules directly -- same page-scoped-
+     stylesheet convention as xterm.css just above. */}}
+<link rel="stylesheet" href="{{asset "/static/hp-tty-replay.css"}}">
 </head>
 <body>
 <div class="app-shell">
