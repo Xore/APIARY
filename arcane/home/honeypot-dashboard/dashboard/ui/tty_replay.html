@@ -84,17 +84,27 @@
 
             {{/* A real timeline, not the plain data-table every other
                  events listing uses (#1268's own "not just a table" ask)
-                 -- a left-rule accent per entry plus .timeline-block's
+                 -- a top-rule accent per entry plus .timeline-block's
                  already-vendored settle-in animation (theme.css), reading
-                 top-to-bottom as this attacker's own chronological story
-                 rather than a sortable grid. */}}
+                 left-to-right as this attacker's own chronological story
+                 rather than a sortable grid. (#1533: this used to lay out
+                 top-to-bottom via a set of "tw:flex tw:flex-col tw:gap-1" /
+                 "tw:border-l-2 tw:pl-4 tw:py-1.5" utility classes that look
+                 like Tailwind but, per #191's own removal of the Tailwind
+                 build, only ~30 specific "tw:" classes still have any CSS
+                 behind them (theme.css's "One-off utilities" block) --
+                 flex-col/border-l-2/pl-4/py-1.5/gap-1 were never among them,
+                 so those classes were always inert and this only ever
+                 rendered as plain stacked <div>s, i.e. vertical. Real,
+                 scoped CSS for #tty-attacker-timeline lives in theme.css
+                 instead of more phantom utility classes. */}}
             <div class="card wide" id="tty-attacker-timeline">
               <h2>Session timeline</h2>
               <p class="note">Chronological, oldest to newest; capped to the latest 250 matching records.</p>
-              <div class="card__scroll tw:flex tw:flex-col tw:gap-1">
+              <div class="card__scroll timeline-track">
                 {{range .Attacker.Events}}
-                <div class="timeline-block tw:border-l-2 tw:border-subtle tw:pl-4 tw:py-1.5">
-                  <div class="tw:text-sm tw:text-muted"{{if .UTC}} data-hp-utc="{{.UTC}}"{{end}}>{{.Time}} &bull; {{.Sensor}}{{if eq .TTYReplay $.ShasumLink}} &bull; <span class="badge badge--info">this recording</span>{{end}}</div>
+                <div class="timeline-block">
+                  <div class="timeline-block__meta"{{if .UTC}} data-hp-utc="{{.UTC}}"{{end}}>{{.Time}} &bull; {{.Sensor}}{{if eq .TTYReplay $.ShasumLink}} &bull; <span class="badge badge--info">this recording</span>{{end}}</div>
                   <div>{{.Detail}}</div>
                 </div>
                 {{end}}

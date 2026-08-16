@@ -314,9 +314,12 @@ func (s *store) routes(tmpl *template.Template) *http.ServeMux {
 		renderPage(w, tmpl, "source-health", &data)
 	})
 	mux.HandleFunc("GET /alerts", func(w http.ResponseWriter, r *http.Request) {
+		// #1535: state (open/acknowledged) is no longer a filter-bar field --
+		// the New/Acknowledged tabs in alerts.html own that axis now. Only
+		// the free-text key-or-message search stays a query-string filter.
 		data := alertsPageData{
 			snapshot:  s.get(),
-			filterBar: buildFilterBar(r, "/alerts", [2]string{"state", "State"}, [2]string{"q", "Key or message contains"}),
+			filterBar: buildFilterBar(r, "/alerts", [2]string{"q", "Key or message contains"}),
 		}
 		renderPage(w, tmpl, "alerts", &data)
 	})
@@ -331,6 +334,13 @@ func (s *store) routes(tmpl *template.Template) *http.ServeMux {
 	mux.HandleFunc("GET /auth-events", func(w http.ResponseWriter, r *http.Request) {
 		data := s.authEventsData(r)
 		renderPage(w, tmpl, "auth-events", &data)
+	})
+	// #1538: per-sensor detail view -- mailoney/http-honeypot's own
+	// structured fields, queried live from Elasticsearch on each load (same
+	// posture as auth-events above). See sensor_detail.go's package comment.
+	mux.HandleFunc("GET /sensors", func(w http.ResponseWriter, r *http.Request) {
+		data := s.sensorDetailData(r)
+		renderPage(w, tmpl, "sensors", &data)
 	})
 	mux.HandleFunc("GET /llm-analysis", func(w http.ResponseWriter, r *http.Request) {
 		data := s.llmAnalysisData(r)

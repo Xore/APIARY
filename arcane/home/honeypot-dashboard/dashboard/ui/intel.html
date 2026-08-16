@@ -228,6 +228,9 @@
 <title>{{brandText}} &mdash; executed commands</title>
 {{template "style" .}}
 <script defer src="{{asset "/static/echarts.min.js"}}"></script>
+{{/* #1532: registers hp-echarts-theme.js's "xore" ECharts theme; must run
+     after echarts.min.js and before hp-commands-chart.js below. */}}
+<script defer src="{{asset "/static/hp-echarts-theme.js"}}"></script>
 </head>
 <body>
 <div class="app-shell">

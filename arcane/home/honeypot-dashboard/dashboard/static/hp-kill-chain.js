@@ -15,6 +15,14 @@
 
   if (typeof echarts === "undefined") return;
 
+  // #1532: ECharts' canvas renderer can't resolve a CSS var() the way real
+  // DOM elements can (see hp-echarts-theme.js's own comment) -- every
+  // itemStyle/lineStyle/visualMap color below that needs one explicit
+  // color resolves it through here instead of handing ECharts the raw
+  // "var(--x)" string, which silently fails to parse and falls back to
+  // black/ECharts-default-grey.
+  const themeColor = window.hpChartColor || (name => name);
+
   const initFns = { sankey: initSankey, timeline: initTimeline, heatmap: initHeatmap, pie: initPie, line: initLine, bar: initBar, scatter: initScatter, radar: initRadar };
 
   // #1277: exposed as window.initHoneypotCharts (same convention hp-app.js's
@@ -56,7 +64,7 @@
         .then(data => {
           container.replaceChildren();
           container.setAttribute("aria-busy", "false");
-          const chart = echarts.init(container);
+          const chart = echarts.init(container, "xore");
           const summary = init(chart, data);
           if (summary.startsWith("No ")) {
             chart.dispose();
@@ -95,7 +103,7 @@
         data: nodes,
         links: links,
         lineStyle: { color: "gradient", curveness: 0.5 },
-        label: { color: "var(--text-primary)" },
+        label: { color: themeColor("--text-primary", "#e9e6df") },
       }],
     });
     if (nodes.length === 0) return "No attacker sessions with a recognized ATT&CK technique yet.";
@@ -114,7 +122,8 @@
       yAxis: { type: "category", data: techniques, splitArea: { show: true } },
       visualMap: {
         min: 0, max: max, calculable: true, orient: "horizontal",
-        left: "center", bottom: "0%", inRange: { color: ["#1f2937", "var(--accent)"] },
+        left: "center", bottom: "0%",
+        inRange: { color: [themeColor("--surface-3", "#3d3d3b"), themeColor("--accent", "#d97757")] },
       },
       series: [{
         type: "heatmap",
@@ -135,13 +144,13 @@
     const total = data.reduce((sum, d) => sum + (d.value || 0), 0);
     chart.setOption({
       tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)" },
-      legend: { orient: "vertical", left: "left", textStyle: { color: "var(--text-primary)" } },
+      legend: { orient: "vertical", left: "left", textStyle: { color: themeColor("--text-primary", "#e9e6df") } },
       series: [{
         type: "pie",
         radius: ["35%", "65%"],
         avoidLabelOverlap: true,
-        itemStyle: { borderColor: "var(--surface-1)", borderWidth: 2 },
-        label: { color: "var(--text-primary)" },
+        itemStyle: { borderColor: themeColor("--surface-1", "#2c2c2a"), borderWidth: 2 },
+        label: { color: themeColor("--text-primary", "#e9e6df") },
         data,
       }],
     });
@@ -168,12 +177,14 @@
       tooltip: { trigger: "item" },
       radar: {
         indicator: categories.map(c => ({ name: c, max })),
-        axisName: { color: "var(--text-primary)" },
+        axisName: { color: themeColor("--text-primary", "#e9e6df") },
+        axisLine: { lineStyle: { color: themeColor("--border-strong", "rgba(255,255,255,0.14)") } },
+        splitLine: { lineStyle: { color: themeColor("--border-subtle", "rgba(255,255,255,0.075)") } },
         splitArea: { areaStyle: { color: ["transparent"] } },
       },
       series: [{
         type: "radar",
-        data: [{ value: values, areaStyle: { opacity: 0.25 }, itemStyle: { color: "var(--accent)" } }],
+        data: [{ value: values, areaStyle: { opacity: 0.25 }, itemStyle: { color: themeColor("--accent", "#d97757") } }],
       }],
     });
     const total = values.reduce((sum, v) => sum + v, 0);
@@ -190,7 +201,7 @@
     const totalPoints = data.reduce((sum, s) => sum + s.points.length, 0);
     chart.setOption({
       tooltip: { trigger: "axis" },
-      legend: { textStyle: { color: "var(--text-primary)" } },
+      legend: { textStyle: { color: themeColor("--text-primary", "#e9e6df") } },
       grid: { left: "12%", right: "5%" },
       xAxis: { type: "time" },
       yAxis: { type: "value" },
@@ -228,14 +239,14 @@
         type: "category",
         data: categories,
         axisLabel: {
-          color: "var(--text-primary)",
+          color: themeColor("--text-primary", "#e9e6df"),
           rotate: longLabels ? 30 : 0,
           overflow: "truncate",
           width: longLabels ? 160 : undefined,
         },
       },
       yAxis: { type: "value" },
-      series: [{ type: "bar", data: values, itemStyle: { color: "var(--accent)" } }],
+      series: [{ type: "bar", data: values, itemStyle: { color: themeColor("--accent", "#d97757") } }],
     });
     const total = values.reduce((sum, v) => sum + v, 0);
     if (categories.length === 0) return "No data yet.";
@@ -255,7 +266,7 @@
     const totalPoints = data.reduce((sum, s) => sum + s.points.length, 0);
     chart.setOption({
       tooltip: { trigger: "item", formatter: p => `${p.seriesName}: ${p.value[1].toFixed(3)}` },
-      legend: { textStyle: { color: "var(--text-primary)" } },
+      legend: { textStyle: { color: themeColor("--text-primary", "#e9e6df") } },
       grid: { left: "12%", right: "5%" },
       xAxis: { type: "time" },
       yAxis: { type: "value" },
@@ -299,7 +310,7 @@
       yAxis: { type: "category", data: categories },
       visualMap: {
         min: 0, max: maxScore, dimension: 3, show: false,
-        inRange: { color: ["#3b82f6", "var(--accent)", "#f87171"] },
+        inRange: { color: [themeColor("--info", "#78a9d4"), themeColor("--accent", "#d97757"), themeColor("--danger", "#dc7774")] },
       },
       series: [{
         type: "custom",

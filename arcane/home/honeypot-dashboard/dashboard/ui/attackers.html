@@ -131,8 +131,14 @@
           <p class="note" data-echart-status="/api/attacker-fusion?id={{.Selected.ID | urlquery}}">Loading&hellip;</p>
         </div>
         <script defer src="{{asset "/static/cytoscape.min.js"}}"></script>
-        <script defer src="{{asset "/static/hp-attackers.js"}}"></script>
         <script defer src="{{asset "/static/echarts.min.js"}}"></script>
+        {{/* #1532: registers hp-echarts-theme.js's "xore" ECharts theme and
+             window.hpChartColor -- must run after both libraries above and
+             before every consumer below (hp-attackers.js's cytoscape graph,
+             hp-kill-chain.js's echarts radar), same ordering convention
+             every other page with these scripts follows. */}}
+        <script defer src="{{asset "/static/hp-echarts-theme.js"}}"></script>
+        <script defer src="{{asset "/static/hp-attackers.js"}}"></script>
         <script defer src="{{asset "/static/hp-kill-chain.js"}}"></script>
         {{end}}
         {{/* #1327 shell+hydrate: see "attackers-body" above for the full

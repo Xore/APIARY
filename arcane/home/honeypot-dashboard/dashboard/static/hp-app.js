@@ -662,6 +662,47 @@
     });
   }, true);
 
+  /* ---------- .hp-open-in-menu escapes its scroll container (#1537) ----------
+     events.html's per-row "actions" menu lives inside .card__scroll's own
+     max-height:340px/overflow:auto region (the same bounded-scroll list
+     the neighboring #payloads-table-card comment describes). .hp-open-in-menu
+     defaults to position:absolute against its .hp-open-in trigger, which is
+     itself inside that scroll box -- so opening the menu just grows THAT
+     box's scrollable area instead of floating over the page, and the
+     operator has to scroll the card a second time to see the rest of it.
+     Fixed here by repositioning the panel to position:fixed, computed from
+     the trigger <summary>'s own on-screen box, the instant its <details>
+     opens -- covers every .hp-open-in-menu call site (per-event menu,
+     fingerprint IP-filter menu, filter-bar menu) with one mechanism, same
+     as the open/close handling above. Kept in sync across scroll/resize the
+     same way #303's hp-filter-autocomplete already is, so it doesn't drift
+     from its trigger while open. */
+  let openActionMenu = null;
+  const positionActionMenu = details => {
+    const menu = details.querySelector(":scope > .hp-open-in-menu");
+    const trigger = details.querySelector(":scope > summary");
+    if (!menu || !trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    menu.style.position = "fixed";
+    menu.style.top = `${rect.bottom + 6}px`;
+    menu.style.left = `${rect.left}px`;
+    // Clamp to the viewport so a trigger near the right edge (a wide
+    // events table can run close to it) doesn't push the panel off-screen.
+    const overflowRight = rect.left + menu.offsetWidth - (innerWidth - 8);
+    if (overflowRight > 0) menu.style.left = `${Math.max(8, rect.left - overflowRight)}px`;
+  };
+  document.addEventListener("toggle", e => {
+    if (!e.target.matches?.(".action-menu")) return;
+    if (e.target.matches(".action-menu[open]")) {
+      openActionMenu = e.target;
+      positionActionMenu(e.target);
+    } else if (openActionMenu === e.target) {
+      openActionMenu = null;
+    }
+  }, true);
+  addEventListener("scroll", () => { if (openActionMenu) positionActionMenu(openActionMenu); }, true);
+  addEventListener("resize", () => { if (openActionMenu) positionActionMenu(openActionMenu); });
+
   /* ---------- clickable .project-card (#1137) ----------
      Most .project-card usages (payload_workbench.html's payload picker and
      run list) are themselves a whole-card <a href>, so a click anywhere on
@@ -718,6 +759,7 @@
     "overview-header",
     "overview-kpis",
     "panel-live",
+    "panel-health",
     "panel-threats",
     "panel-behavior",
     "panel-evidence",
@@ -805,9 +847,33 @@
     const prefs = window.HpPreferences?.prefs;
     window.HpPreferences?.applyTimeDisplay?.(prefs?.timezone, prefs?.clock);
   };
+  // #1527: mountPage only ever swapped pageContent's CHILDREN, never its own
+  // attributes. pageContent itself is captured once (the const above, at
+  // this script's first load) and reused, unswapped, for every subsequent
+  // SPA navigation -- so any page whose own [data-hp-page-content] element
+  // carries page-scoped data-* attributes (hp-workbench.js's data-wb-root/
+  // data-payload-sha256, hp-payload-analysis.js's data-hp-pl-hash, ...; see
+  // hp-dynamic-nav.js's own comment on this convention) kept whatever
+  // attributes belonged to the FIRST page that ever established pageContent
+  // -- typically none of them, since the family's own entry points
+  // (/payloads, sidebar links) don't carry any. Those scripts' own run()
+  // read the attributes off the live [data-hp-page-content] node, found
+  // none, and silently no-opped: skeletons stuck "loading" forever, only
+  // resolved by a full reload building a genuine fresh element. Syncing
+  // pageContent's attributes to source's on every mount -- adding/updating
+  // what source has, removing what it doesn't -- closes that gap so a
+  // fetch-and-swap navigation leaves pageContent indistinguishable from one
+  // freshly rendered by the server.
+  const syncPageContentAttrs = (target, source) => {
+    [...target.attributes].forEach(attr => {
+      if (!source.hasAttribute(attr.name)) target.removeAttribute(attr.name);
+    });
+    [...source.attributes].forEach(attr => target.setAttribute(attr.name, attr.value));
+  };
   const mountPage = source => {
     if (!pageContent) { source.remove?.(); return; }
     reNonce(source);
+    syncPageContentAttrs(pageContent, source);
     pageContent.replaceChildren(...source.children);
     source.remove();
     initLazyViews(pageContent);
@@ -1330,6 +1396,67 @@
       addEventListener("scroll", () => { if (activeInput) positionOptions(activeInput); }, true);
       addEventListener("resize", () => { if (activeInput) positionOptions(activeInput); });
     }
+
+    /* "since" filter fields (#1531): a native <input type="datetime-local">
+       picker paired with the existing plain-text duration field
+       (partials/dashboard.html's "filterbar" template, Kind == "since") --
+       clicking it offers a real calendar/clock picker the same way the
+       sensor field's autocomplete offers real values on focus, above.
+       The text input stays the only thing actually submitted (name=
+       "since", a Go time.ParseDuration string like "24h" -- see filters.go)
+       so every existing link/bookmark/CSV export that already carries a
+       ?since= duration keeps working untouched; the picker only ever
+       writes into it, converting whatever moment it's set to into an
+       equivalent duration entirely client-side. That conversion (now -
+       picked, both read from the browser's own clock) is also what keeps
+       this free of timezone bugs: the server only ever sees a relative
+       duration and re-anchors it to its own clock, never the picker's
+       absolute value. */
+    const parseSinceDurationMs = text => {
+      const re = /(\d+(?:\.\d+)?)\s*(h|m|s)/g;
+      let ms = 0;
+      let matched = false;
+      let m;
+      while ((m = re.exec(text))) {
+        matched = true;
+        const value = parseFloat(m[1]);
+        ms += m[2] === "h" ? value * 3600000 : m[2] === "m" ? value * 60000 : value * 1000;
+      }
+      return matched ? ms : null;
+    };
+    const formatSinceDuration = ms => {
+      const totalMinutes = Math.round(ms / 60000);
+      if (totalMinutes <= 0) return null;
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = totalMinutes % 60;
+      if (hours === 0) return `${minutes}m`;
+      return minutes === 0 ? `${hours}h` : `${hours}h${minutes}m`;
+    };
+    const localDatetimeValue = date => {
+      const pad = n => String(n).padStart(2, "0");
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    };
+    document.querySelectorAll(".hp-since-field").forEach(field => {
+      const text = field.querySelector("[data-hp-since-text]");
+      const picker = field.querySelector("[data-hp-since-picker]");
+      if (!text || !picker) return;
+      picker.max = localDatetimeValue(new Date());
+      const syncPickerFromText = () => {
+        const ms = parseSinceDurationMs(text.value.trim());
+        picker.value = ms == null ? "" : localDatetimeValue(new Date(Date.now() - ms));
+      };
+      syncPickerFromText();
+      picker.addEventListener("change", () => {
+        if (!picker.value) return;
+        const duration = formatSinceDuration(Date.now() - new Date(picker.value).getTime());
+        if (!duration) return;
+        text.value = duration;
+        text.dispatchEvent(new Event("input", { bubbles: true }));
+        text.dispatchEvent(new Event("change", { bubbles: true }));
+        syncPickerFromText();
+      });
+      text.addEventListener("input", syncPickerFromText);
+    });
 
     /* Theme preference: cycle system -> dark -> light (persisted) */
     const themeStorageKey = "hp-theme";

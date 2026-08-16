@@ -47,9 +47,18 @@
 
         <div class="tabs" role="tablist" aria-label="Dashboard views">
           <button class="tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-live" data-dashboard-tab="live"><span>01</span>Live operations</button>
-          <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-threats" data-dashboard-tab="threats"><span>02</span>Threat landscape</button>
-          <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-behavior" data-dashboard-tab="behavior"><span>03</span>Attacker behavior</button>
-          <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-evidence" data-dashboard-tab="evidence"><span>04</span>Evidence &amp; campaigns</button>
+          {{/* #1530: sensor feeds, protocol volume, and the ML backlog chart
+               used to live inside the "live" panel above alongside the
+               heatmap/map/recent-events stream -- six cards deep before this
+               split, none of them answering "what is happening right now"
+               the way the rest of that panel does. They answer "is the
+               pipeline itself healthy", the same question /source-health
+               already exists to answer in depth, so they get their own tab
+               instead of crowding the live-activity view. */}}
+          <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-health" data-dashboard-tab="health"><span>02</span>Collection health</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-threats" data-dashboard-tab="threats"><span>03</span>Threat landscape</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-behavior" data-dashboard-tab="behavior"><span>04</span>Attacker behavior</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-evidence" data-dashboard-tab="evidence"><span>05</span>Evidence &amp; campaigns</button>
         </div>
 
         <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-live" role="tabpanel" data-dashboard-panel="live">
@@ -125,6 +134,42 @@
             <div class="map-shell" data-map-shell><div id="attack-map" class="leaflet-map" data-tile-url="{{.MapTileURL}}" data-attribution="{{.MapAttribution}}" role="region" aria-label="interactive map of geolocated attack origins"></div><div class="map-status" data-map-status aria-live="polite">Loading attack origins…</div>
             </div><p class="note">Approximate geolocation only. One marker per city, accumulating every IP that geolocated there. Marker radius is geographic—not fixed-size—so it changes naturally with zoom and is weighted by event count. Hover for city, country and IP count; select a marker for all related events. Map data © OpenStreetMap contributors.</p></div>{{end}}
 
+          <div class="section-heading"><div><h2>Live event stream</h2><p>A balanced sample of the newest normalized events across all sensors.</p></div><a class="section-link" href="/events">Open full event explorer &rarr;</a></div>
+          <div class="card wide" id="recent-events-card">
+            <h2>Recent events</h2>
+            {{if .Recent}}
+            {{/* #790 chunk 2: card__scroll, same rule as the bounded "tbl"
+                 template's top-N cards (#790 chunk 1, #841) -- 18 rows
+                 (recentCap in store.go) is well past card__scroll's own
+                 340px cap, so this card was growing well past its
+                 siblings' height on every page load, not just once the
+                 list happened to be long. #1530: each row is a full inline
+                 normalized-event record (#1447), not a single table line --
+                 at the shared 340px cap not even one complete row cleared
+                 the fold, so this card gets its own taller ceiling (roughly
+                 double) instead of reusing card__scroll's default. */}}
+            <div class="card__scroll" style="max-height:700px"><table class="recent data-table">
+              <thead><tr><th>time</th><th>sensor</th><th>source ip</th><th>port</th><th>detail</th></tr></thead>
+              <tbody>
+              {{range .Recent}}{{template "everow" .}}{{end}}
+            </tbody></table></div>
+            {{else if .Ready}}<p class="empty">no events yet — waiting for traffic</p>
+            {{else}}
+            {{/* #1142: see the Activity card's own comment above. */}}
+            <div class="skeleton-line" style="width:90%"></div>
+            <div class="skeleton-line" style="width:75%"></div>
+            <div class="skeleton-line" style="width:80%"></div>
+            <div class="skeleton-line" style="width:65%"></div>
+            {{end}}
+          </div>
+        </div>
+
+        {{/* #1530: split out of "live" above -- sensor feeds, protocol
+             volume, and the ML classification backlog all answer "is the
+             collection pipeline itself keeping up", not "what is happening
+             right now". Same data as before, just no longer crowding the
+             live-activity panel. */}}
+        <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-health" role="tabpanel" data-dashboard-panel="health" hidden>
           <div class="section-heading"><div><h2>Collection status</h2><p>Sensor activity and the protocols currently attracting traffic.</p></div><a class="section-link" href="/source-health">Open pipeline health &rarr;</a></div>
           <div class="card half sensor-card">
             <h2>Sensor feeds</h2>
@@ -165,31 +210,6 @@
             <div data-echart="/api/ml-backlog" data-echart-kind="line" style="width:100%;height:280px"></div>
             <p class="note" data-echart-status="/api/ml-backlog">Loading&hellip;</p>
             <p class="note">Average queue depth per hour for honeypot-v2-* and suricata-v2-* events awaiting ml-worker classification. A rising line means the backlog is growing, not draining — see <a href="https://github.com/Xore/APIARY/issues/1227">#1227</a>.</p>
-          </div>
-
-          <div class="section-heading"><div><h2>Live event stream</h2><p>A balanced sample of the newest normalized events across all sensors.</p></div><a class="section-link" href="/events">Open full event explorer &rarr;</a></div>
-          <div class="card wide">
-            <h2>Recent events</h2>
-            {{if .Recent}}
-            {{/* #790 chunk 2: card__scroll, same rule as the bounded "tbl"
-                 template's top-N cards (#790 chunk 1, #841) -- 18 rows
-                 (recentCap in store.go) is well past card__scroll's own
-                 340px cap, so this card was growing well past its
-                 siblings' height on every page load, not just once the
-                 list happened to be long. */}}
-            <div class="card__scroll"><table class="recent data-table">
-              <thead><tr><th>time</th><th>sensor</th><th>source ip</th><th>port</th><th>detail</th></tr></thead>
-              <tbody>
-              {{range .Recent}}{{template "everow" .}}{{end}}
-            </tbody></table></div>
-            {{else if .Ready}}<p class="empty">no events yet — waiting for traffic</p>
-            {{else}}
-            {{/* #1142: see the Activity card's own comment above. */}}
-            <div class="skeleton-line" style="width:90%"></div>
-            <div class="skeleton-line" style="width:75%"></div>
-            <div class="skeleton-line" style="width:80%"></div>
-            <div class="skeleton-line" style="width:65%"></div>
-            {{end}}
           </div>
         </div>
 
@@ -387,6 +407,9 @@
     </main>
 </div>
 <script defer src="{{asset "/static/echarts.min.js"}}"></script>
+{{/* #1532: registers hp-echarts-theme.js's "xore" ECharts theme; must run
+     after echarts.min.js and before hp-kill-chain.js. */}}
+<script defer src="{{asset "/static/hp-echarts-theme.js"}}"></script>
 <script defer src="{{asset "/static/hp-kill-chain.js"}}"></script>
 <script nonce="{{.Nonce}}">
 let refreshing=false;

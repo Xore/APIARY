@@ -247,3 +247,84 @@ func TestFilterBarTemplateRendersNothingWithoutFields(t *testing.T) {
 		t.Fatalf("a page with no filter fields must render nothing, got %q", buf.String())
 	}
 }
+
+// #1531: an empty autocomplete field previously rendered as a blank box with
+// no indication of what "unset" means, unlike the enum <select> fields
+// (whose first option is always visibly "any") or overview.html's own
+// hand-rolled sensor picker (placeholder="All sensors"). buildFilterBar must
+// give every autocomplete field a placeholder -- a hand-picked one for the
+// common fields, a generic "Any <label>" fallback for anything else, so a
+// future autocomplete field can never silently regress to a blank box.
+func TestBuildFilterBarAutocompleteFieldsGetAPlaceholder(t *testing.T) {
+	bar := buildFilterBar(
+		httptest.NewRequest("GET", "/commands", nil),
+		"/commands", [2]string{"sensor", "Sensor"}, [2]string{"q", "Command contains"},
+	)
+	var sensor, q *filterField
+	for i := range bar.FilterFields {
+		switch bar.FilterFields[i].Name {
+		case "sensor":
+			sensor = &bar.FilterFields[i]
+		case "q":
+			q = &bar.FilterFields[i]
+		}
+	}
+	if sensor == nil || sensor.Placeholder != "All sensors" {
+		t.Fatalf("sensor field placeholder = %+v, want \"All sensors\"", sensor)
+	}
+	// q isn't in filterAutocompleteFields (it's a free-text substring
+	// search, not backed by /api/filter-values) -- it must stay a plain
+	// text field with no placeholder manufactured for it.
+	if q == nil || q.Kind != "text" || q.Placeholder != "" {
+		t.Fatalf("q field = %+v, want Kind=text and no placeholder", q)
+	}
+}
+
+// filterFieldPlaceholder's fallback ("Any <label>") is what keeps a field
+// added to filterAutocompleteFields later from silently rendering blank
+// again -- covered directly since it only triggers for a name that isn't
+// one of the hand-picked entries in filterFieldPlaceholders.
+func TestFilterFieldPlaceholderFallsBackForUnlistedFields(t *testing.T) {
+	if got, want := filterFieldPlaceholder("client", "Client"), "Any client"; got != want {
+		t.Fatalf("filterFieldPlaceholder(client) = %q, want %q", got, want)
+	}
+}
+
+// #1531: "since" fields get a native datetime-local picker paired with the
+// existing plain-text duration input -- the text input stays the one and
+// only field actually submitted (name="since"), so every existing link
+// carrying a ?since=24h keeps resolving exactly as before; the picker has
+// no name= of its own and is wired up client-side (hp-app.js).
+func TestFilterBarTemplateRendersSinceFieldWithPicker(t *testing.T) {
+	tmpl, err := template.New("dashboard").Funcs(templateFuncs(nil, "")).Parse(pageTemplate)
+	if err != nil {
+		t.Fatalf("dashboard template does not parse: %v", err)
+	}
+	bar := buildFilterBar(
+		httptest.NewRequest("GET", "/commands?since=24h", nil),
+		"/commands", [2]string{"sensor", "Sensor"}, [2]string{"since", "Since (e.g. 24h)"},
+	)
+	var since *filterField
+	for i := range bar.FilterFields {
+		if bar.FilterFields[i].Name == "since" {
+			since = &bar.FilterFields[i]
+		}
+	}
+	if since == nil || since.Kind != "since" {
+		t.Fatalf("since field = %+v, want Kind=since", since)
+	}
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "filterbar", bar); err != nil {
+		t.Fatalf("filterbar template does not execute: %v", err)
+	}
+	html := buf.String()
+	if !strings.Contains(html, `name="since" value="24h"`) {
+		t.Fatalf("since text input not pre-filled in rendered HTML: %s", html)
+	}
+	if !strings.Contains(html, `type="datetime-local"`) || !strings.Contains(html, "data-hp-since-picker") {
+		t.Fatalf("since field missing its datetime-local picker: %s", html)
+	}
+	if strings.Contains(html, `name="datetime-local"`) {
+		t.Fatalf("the datetime-local picker must not have a name= (it must never be submitted): %s", html)
+	}
+}

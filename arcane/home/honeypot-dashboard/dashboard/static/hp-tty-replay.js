@@ -192,7 +192,11 @@
     mapDiv.dataset.mapReady = "1";
     if (!window.L) { mapDiv.textContent = "Interactive map library unavailable."; return; }
     var lat = Number(mapDiv.dataset.lat), lon = Number(mapDiv.dataset.lon);
-    var tileURL = mapDiv.dataset.tileUrl;
+    // #1533: Go's html/template auto-escapes data-tile-url as a URL-typed
+    // attribute (name contains "url"), percent-encoding the literal {z}/{x}/{y}
+    // placeholders Leaflet substitutes itself -- decode before handing to
+    // L.tileLayer, same as hp-app.js's initMaps() does for the overview map.
+    var tileURL = decodeURIComponent(mapDiv.dataset.tileUrl);
     var attributionText = mapDiv.dataset.attribution || "OpenStreetMap contributors";
     var safeAttribution = document.createElement("span");
     safeAttribution.textContent = attributionText;

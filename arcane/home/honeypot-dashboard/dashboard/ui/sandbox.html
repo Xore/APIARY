@@ -269,6 +269,9 @@
 {{/* #1141: see hp-dynamic-nav.js's own doc comment. */}}
 <script defer src="{{asset "/static/hp-dynamic-nav.js"}}"></script>
 {{if .Detail}}<script defer src="{{asset "/static/echarts.min.js"}}"></script>
+{{/* #1532: registers hp-echarts-theme.js's "xore" ECharts theme; must run
+     after echarts.min.js and before hp-syscalls-chart.js. */}}
+<script defer src="{{asset "/static/hp-echarts-theme.js"}}"></script>
 <script defer src="{{asset "/static/hp-syscalls-chart.js"}}"></script>
 <script defer src="{{asset "/static/hp-sandbox-detail.js"}}"></script>{{end}}
 </body>

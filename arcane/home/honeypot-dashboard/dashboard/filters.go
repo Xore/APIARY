@@ -333,19 +333,51 @@ var filterAutocompleteFields = map[string]bool{
 	"proto": true,
 }
 
+// filterFieldPlaceholders gives an empty autocomplete filter-bar field an
+// explicit "nothing selected" hint, for the fields common enough to word
+// one by hand; filterFieldPlaceholder falls back to a generic "Any <label>"
+// for anything else, so a field added to filterAutocompleteFields later
+// never silently regresses to a blank box.
+var filterFieldPlaceholders = map[string]string{
+	// Matches overview.html's own hand-rolled sensor picker
+	// (placeholder="All sensors") -- the shared filter-bar field is the
+	// same underlying widget and should read the same way (#1531).
+	"sensor":  "All sensors",
+	"ip":      "Any IP",
+	"country": "Any country",
+	"asn":     "Any ASN",
+	"port":    "Any port",
+	"sig":     "Any signature",
+	"proto":   "Any attack path",
+}
+
+func filterFieldPlaceholder(name, label string) string {
+	if p, ok := filterFieldPlaceholders[name]; ok {
+		return p
+	}
+	return "Any " + strings.ToLower(label)
+}
+
 // filterField is one input control for the shared filter-bar template
 // partial (#280 Phase 4): a query-param name, a human label, and the
 // current value from the request, so the form round-trips pre-filled.
 // Kind/Options (#303) let buildFilterBar upgrade a field to a real <select>
-// (Kind == "select") or an autocomplete-enabled text input (Kind ==
-// "autocomplete") automatically, purely from its Name -- existing callers
-// never need to change to get this.
+// (Kind == "select"), an autocomplete-enabled text input (Kind ==
+// "autocomplete"), or a duration field paired with a native date/time
+// picker (Kind == "since", #1531) automatically, purely from its Name --
+// existing callers never need to change to get this. Placeholder (#1531)
+// gives an empty autocomplete field the same visible "nothing selected"
+// hint the enum <select> fields already get for free from their own first
+// ("", "any") option -- previously blank, unlike overview.html's
+// hand-rolled sensor picker (placeholder="All sensors") this shared
+// template never matched.
 type filterField struct {
-	Name    string
-	Label   string
-	Value   string
-	Kind    string // "text" (default) | "select" | "autocomplete"
-	Options []filterFieldOption
+	Name        string
+	Label       string
+	Value       string
+	Kind        string // "text" (default) | "select" | "autocomplete" | "since"
+	Options     []filterFieldOption
+	Placeholder string
 }
 
 // filterBar is embedded by every page that gets the shared filter-bar UI:
@@ -374,11 +406,19 @@ func buildFilterBar(r *http.Request, action string, specs ...[2]string) filterBa
 			active = true
 		}
 		field := filterField{Name: s[0], Label: s[1], Value: val, Kind: "text"}
-		if opts, ok := filterSelectOptions[s[0]]; ok {
+		switch {
+		case s[0] == "since":
+			// #1531: every "since" field across every page's filter bar is
+			// this one query param, built through this one function -- a
+			// single Kind change here reaches all of them, not just
+			// whichever page prompted the audit.
+			field.Kind = "since"
+		case filterSelectOptions[s[0]] != nil:
 			field.Kind = "select"
-			field.Options = opts
-		} else if filterAutocompleteFields[s[0]] {
+			field.Options = filterSelectOptions[s[0]]
+		case filterAutocompleteFields[s[0]]:
 			field.Kind = "autocomplete"
+			field.Placeholder = filterFieldPlaceholder(s[0], s[1])
 		}
 		fields = append(fields, field)
 		names = append(names, s[0])
