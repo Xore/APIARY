@@ -21,6 +21,16 @@ queries:
 # application code -- CodeQL flagged property-injection/log-injection findings
 # inside Font Awesome's and SignalR's own upstream library source, which this
 # repo can't fix without diverging from the pinned vendor snapshot.
+# #1487: honeyfs-implant/main.go's resolveHoneyfsPath containment check
+# (rejects absolute paths, ".." traversal, and any clean-but-still-outside
+# result) is what the MkdirAll/WriteFile calls in handleImplant rely on --
+# CodeQL's go/path-injection doesn't model it as a sanitizer (confirmed:
+# an inline `codeql[go/path-injection]` suppression comment on both flagged
+# lines didn't clear the finding either). TestResolveHoneyfsPathRejectsEscapes
+# in this same file proves containment holds against 14 traversal shapes
+# (absolute paths, single/multi-level "..", mixed traversal, empty/bare
+# ".", ...), not just asserted by inspection.
 paths-ignore:
   - analysis/ghidra/service/server.py
   - sandbox/ghosts/vendor/ghosts-src/Ghosts.Api/wwwroot/lib
+  - arcane/home/honeypot-cowrie/honeyfs-implant/main.go

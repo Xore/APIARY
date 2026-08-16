@@ -75,6 +75,17 @@ services:
       - ./cowrie/fakefs/sys/class/dmi/id/sys_vendor:/sys/class/dmi/id/sys_vendor:ro
       - ./cowrie/fakefs/sys/class/dmi/id/board_name:/sys/class/dmi/id/board_name:ro
       - /opt/stacks/apiary/state/init-markers:/markers:ro
+      # #1487: honeyfs-implant's write target. Bind-mounted (not baked into
+      # the image, see the Dockerfile's honeyfs.dist comment) so a token or
+      # credential can be planted into this persona's fake filesystem live,
+      # picked up by entrypoint.sh's sync-fs.py re-merge on the next
+      # autoheal-triggered restart (see healthcheck below), without a
+      # rebuild/redeploy. Host paths need creating with uid:gid 2000:2000
+      # (cowrie's own user, matching read_only:true's write-access model
+      # below) before first boot -- entrypoint.sh seeds them from the
+      # image's honeyfs.dist/fs.pickle.dist on an empty first run.
+      - /opt/stacks/apiary/state/honeyfs/cowrie:/cowrie/cowrie-git/honeyfs
+      - /opt/stacks/apiary/state/honeyfs/cowrie-share:/cowrie/cowrie-git/share/cowrie
     environment:
       # #185: cowrie's own twisted/plugins/cowrie_plugin.py reads
       # [honeypot] timezone from cowrie.cfg (unset here, so it falls back
@@ -108,11 +119,79 @@ services:
       - /cowrie/cowrie-git/txtcmds:uid=2000,gid=2000
     networks:
       - cowrie_net
+    # #1487: fails while honeyfs-implant's marker (var/lib/cowrie, already
+    # bind-mounted above) is present -- autoheal (honeypot-utilities'
+    # willfarrell/autoheal, watching every autoheal=true container via
+    # docker-socket-proxy, same trust boundary as everywhere else this repo
+    # uses it) restarts this container on the next unhealthy check, and
+    # entrypoint.sh clears the marker once it's re-synced fs.pickle. No new
+    # docker.sock/proxy access needed here -- this container only ever
+    # writes the marker file, autoheal does the actual restart.
+    healthcheck:
+      test: ["CMD-SHELL", "test ! -f /cowrie/cowrie-git/var/lib/cowrie/.implant-pending"]
+      interval: 30s
+      timeout: 5s
+      retries: 2
+      start_period: 30s
+    labels:
+      - autoheal=true
     deploy:
       resources:
         limits:
           cpus: "1.0"
           memory: 512M
+
+  # #1487: honeyfs-implant plants a dashboard-created token/credential into
+  # cowrie's fake filesystem live -- see honeyfs-implant/main.go's package
+  # doc for the full mechanism (deliberately does not touch fs.pickle
+  # itself; cowrie's own entrypoint.sh does that on the restart this
+  # service's marker forces). WireGuard-tunnel-only (matches
+  # canarytokens-frontend's own internal-API posture); the dashboard's
+  # backend is the only intended caller. Shares cowrie's own uid:gid
+  # (2000:2000) so both containers can write the same bind-mounted honeyfs/
+  # directory without a permissions mismatch.
+  honeyfs-implant:
+    <<: *runtime-defaults
+    build: ./honeyfs-implant
+    container_name: hp-honeyfs-implant
+    restart: unless-stopped
+    depends_on: [cowrie]
+    environment:
+      - HONEYFS_DIR=/data/honeyfs
+      - MARKER_PATH=/data/lib/.implant-pending
+      # Optional defense-in-depth bearer token, layered under the primary
+      # WireGuard-only network boundary -- see main.go's requireToken doc.
+      # Empty by default, matching every other internal-only API in this
+      # repo (network reachability is the trust boundary).
+      - IMPLANT_TOKEN=${HONEYFS_IMPLANT_TOKEN:-}
+    ports:
+      - ${HP_BIND:-10.8.0.2}:19428:8091
+    volumes:
+      # Same host path as cowrie's own honeyfs mount above -- this service
+      # and cowrie must see the identical live directory.
+      - /opt/stacks/apiary/state/honeyfs/cowrie:/data/honeyfs
+      # Same lib-cowrie mount as cowrie's own var/lib/cowrie bind above,
+      # just remounted at a shorter container path -- this is where the
+      # implant-pending marker (cowrie's HEALTHCHECK target) gets written.
+      - /opt/stacks/apiary/logs/cowrie/lib-cowrie:/data/lib
+    networks: [cowrie_net]
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Every write this service makes lands in one of the two bind mounts
+    # above; nothing else needs a writable root filesystem (also a scratch
+    # image -- see honeyfs-implant/Dockerfile -- so there's no writable
+    # root filesystem to speak of regardless).
+    read_only: true
+    # HEALTHCHECK is baked into honeyfs-implant/Dockerfile itself (scratch
+    # image, no shell/curl available for a compose-level CMD check --
+    # same reasoning as canarytokens-adapter's own compose entry).
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
 
 networks:
   # #269: outbound is allowed by default, matching this repo's previous de
