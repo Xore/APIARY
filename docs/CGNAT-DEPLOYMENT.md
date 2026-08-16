@@ -16,36 +16,52 @@ flowchart TD
 ## Authoritative deployment paths
 
 - Home server: **#258 split what used to be two stacks into one Arcane-managed
-  project per compose file** — `honeypot-init` (one-shot bootstrap: log
-  paths, Elasticsearch templates, Arkime schema, persona validation),
-  `honeypot-elk`, `honeypot-cowrie`, `honeypot-dionaea`, `honeypot-conpot`,
-  `honeypot-dnp3`, `honeypot-http`, `honeypot-multipot`,
+  project per compose file**, and **#1502 moved every one of those projects
+  onto Arcane's own directory-aware Git sync** — `honeypot-init` (one-shot
+  bootstrap: log paths, Elasticsearch templates, Arkime schema, persona
+  validation), `honeypot-elk`, `honeypot-cowrie`, `honeypot-dionaea`,
+  `honeypot-conpot`, `honeypot-dnp3`, `honeypot-http`, `honeypot-multipot`,
   `honeypot-payload-analysis`, `honeypot-tanner`, `honeypot-dashboard`,
-  `honeypot-utilities`, plus the standalone honeypots
-  (`docker-compose.cisco-asa-honeypot.yml`, `.citrix-honeypot.yml`,
-  `.rdp-honeypot.yml`, `.dicompot.yml`, `.dns-honeypot.yml`) and
-  `docker-compose.ip-enrichment-worker.yml`, each its own stack. The
-  top-level `docker-compose.yml` (project `APIARY`) is now a
-  deliberately empty marker (`services: {}`) kept only because
-  `/opt/stacks/apiary` is still the fixed path every other stack's
-  `build:` context points at as an absolute string — see that file's own
-  header comment. `honeypot-init` still deploys first; every sensor stack
-  waits on its completion markers at its own entrypoint rather than a
-  Compose-level dependency, same reasoning as before, just across more
-  projects now. See `docs/STACK-REBUILD.md` for the full current list and
-  the ordering traps (Elasticsearch must be healthy before `honeypot-init`
-  runs, not the other way around).
+  `honeypot-utilities`, the standalone honeypots (cisco-asa, citrix, rdp,
+  dicompot, dns-honeypot, endlessh, beelzebub, hellpot, elasticpot, galah,
+  sentrypeer, wordpot, mailoney, canarytokens), `honeypot-keycloak`, and the
+  workers (ip-enrichment, agent-intrusion, attacker-identity, correlator,
+  payload-inventory) — 32 stacks total, one Arcane-managed directory each
+  under `arcane/home/<name>/`. `honeypot-init` still deploys first; every
+  sensor stack waits on its completion markers at its own entrypoint rather
+  than a Compose-level dependency, same reasoning as before, just across
+  more projects now. See `docs/STACK-REBUILD.md` for the full current list
+  and the ordering traps (Elasticsearch must be healthy before
+  `honeypot-init` runs, not the other way around), and
+  `docs/ARCANE-GIT-SYNC.md` for how a commit actually reaches the live
+  host now.
 - VPS: plain Docker Compose manages `/root/vps/docker-compose.yml`.
-- The repository home Compose sources are the top-level `docker-compose.*.yml`
-  files, one per stack listed above; each gets symlinked or copied to its
-  Arcane-managed stack directory as `compose.yml`. `scripts/install-homeserver.sh`
-  does this automatically (see below) — the per-stack directory layout
-  matches what `docs/HOMESERVER-DISK-LAYOUT.md` documents as the box's
-  actual live state (`/var/dockge/stacks/<name>/`, with `/opt/stacks`
-  symlinked to it).
+  Unchanged by #1502 — VPS deployment stays outside Arcane entirely, as
+  that issue's own scope decision.
+- Each of the 32 stacks' Compose source (build context, git-tracked config,
+  `compose.yml` with an explicit top-level `name:` pinned to its live
+  project name) lives self-contained under `arcane/home/<name>/` in this
+  repository. Arcane clones the repo and materializes the *entire
+  directory* containing the selected `compose.yml`, not just that one
+  file — that's what makes a build context or sidecar config file
+  resolvable without a shared checkout. Runtime data (`logs/`, `state/`,
+  and similarly host-owned paths) deliberately stays outside that synced
+  directory, at its existing absolute host path, unchanged.
+  `scripts/install-homeserver.sh`'s `step_arcane_import_stacks` creates
+  these syncs on a from-scratch install, driven by the single source of
+  truth at `arcane/manifests/home-production.json`. Six more home-hosted
+  stacks (`auth-events-worker`, `llm-worker`, `ml-worker`,
+  `analysis/ghidra`, `sandbox/ghosts`, `pihole`) are Arcane-managed the
+  same way but were already self-contained, so they kept their existing
+  repository-root path instead of moving.
 - The public gateway source is under `vps/`.
 
 Arcane is used only on the home server. The VPS uses `docker compose` directly.
+See `docs/ARCANE-GIT-SYNC.md` for the sync model, cutover procedure, and
+confirmed Arcane v2.8.0 platform limitations (a required compose variable
+in a port-binding position, remote build contexts pinned to a Git tag, the
+sync file-count limit, and stale project records after a `destroy` call
+all have confirmed workarounds documented there).
 
 ## WireGuard addressing
 
@@ -70,7 +86,13 @@ the only internet-facing component.
 > real deployment order, not the numbered steps below, which describe the
 > pre-#258 two-stack model and haven't been re-verified against the current
 > per-stack split. File a gap against #518 if the script and reality ever
-> disagree.
+> disagree. As of #1502, per-stack provisioning means importing an Arcane
+> directory-aware Git sync per `arcane/manifests/home-production.json`
+> entry, not copying/symlinking a compose file — see
+> `docs/ARCANE-GIT-SYNC.md`. Note the gap that doc's own comments flag: a
+> genuinely from-scratch run of this script can't reach that step yet,
+> since `step_dockge_install` still installs Dockge rather than Arcane
+> (tracked as an explicit follow-up, not fixed in #1502).
 
 1. Establish WireGuard and verify that the VPS can reach `10.8.0.2`.
 2. Copy this repository to `/opt/stacks/apiary/`.

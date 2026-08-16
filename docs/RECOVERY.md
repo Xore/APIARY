@@ -11,15 +11,22 @@ This repo already has the individual pieces T-Pot's single documented
 "Factory Reset" sequence (stop, back up `data/`, wipe it, `git reset
 --hard`, reinstall) covers -- [`analysis/backup-honeypot.sh`](../analysis/backup-honeypot.sh)
 for the backup, [`docs/STACK-REBUILD.md`](STACK-REBUILD.md)'s live-verified
-runbook for the stop/wipe/restart sequence across the ~13 independent
-Dockge stacks [#258](https://github.com/Xore/APIARY/issues/258)
-split this into -- but nothing tied them into one entry point.
-[`factory-reset.sh`](../factory-reset.sh), at the repo root next to
-`setup-home-network.sh`/`setup-suricata-logs-home.sh`, is that entry point.
+runbook for the stop/wipe/restart sequence across the 32 independent
+Arcane-managed stacks [#258](https://github.com/Xore/APIARY/issues/258)
+split this into (Dockge originally, replaced by Arcane per
+[#1185](https://github.com/Xore/APIARY/issues/1185); each now a
+directory-aware Arcane Git sync per
+[#1502](https://github.com/Xore/APIARY/issues/1502), see
+[`docs/ARCANE-GIT-SYNC.md`](ARCANE-GIT-SYNC.md)) -- but nothing tied them
+into one entry point. [`factory-reset.sh`](../factory-reset.sh), at the
+repo root next to `setup-home-network.sh`/`setup-suricata-logs-home.sh`, is
+that entry point.
 
 Run it **on the homeserver** (`/opt/stacks/apiary`), not from a
-local checkout -- it operates on the deployed Dockge stack directories
-(`/opt/stacks/honeypot-<name>/compose.yml`), same as every script it composes.
+local checkout -- it operates on the deployed Arcane-managed stack
+directories (`/opt/stacks/honeypot-<name>/compose.yml`, unchanged by
+#1502's migration -- Arcane materializes each stack at the same host path
+Dockge's symlinks used to point at), same as every script it composes.
 
 ## What it does
 
