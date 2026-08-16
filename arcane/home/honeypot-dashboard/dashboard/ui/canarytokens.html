@@ -1,0 +1,103 @@
+{{define "canarytokens"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>{{brandText}} &mdash; canarytokens</title>
+{{template "style" .}}
+</head>
+<body>
+<div class="app-shell">
+  {{template "topbar" .}}
+  {{template "sidebar" .}}
+  <main class="app-main">
+      <div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
+        <header class="overview-header" id="canarytokens-header">
+          <div>
+            <div class="label-section">Deception</div>
+            <h1>Canarytokens</h1>
+            <p class="subtitle">Create honeytokens to plant outside this honeypot, track everything created, and see what's fired &mdash; backed by the self-hosted Canarytokens platform.</p>
+          </div>
+        </header>
+
+        <div class="tabs" role="tablist" aria-label="Canarytokens sections">
+          <button class="tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-ct-tokens" data-dashboard-tab="ct-tokens"><span>01</span>Tokens</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-ct-create" data-dashboard-tab="ct-create"><span>02</span>Create bait</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-ct-reports" data-dashboard-tab="ct-reports"><span>03</span>Reports</button>
+        </div>
+
+        <div class="dashboard-panel" id="panel-ct-tokens" role="tabpanel" data-dashboard-panel="ct-tokens">
+          <div class="card wide" id="ct-tokens-card">
+            <div class="card__header">
+              <div><h2>Created tokens</h2><p class="card__meta">Newest first. Re-download an artifact any time &mdash; nothing here re-fires its token.</p></div>
+              <div class="hp-head-actions">
+                <button class="btn btn-ghost btn-sm" type="button" id="ct-tokens-refresh">Refresh</button>
+              </div>
+            </div>
+            <div class="card__scroll"><table class="data-table">
+              <thead><tr><th>Type</th><th>Memo</th><th>Created</th><th>By</th><th>Artifact</th></tr></thead>
+              <tbody id="ct-tokens-tbody" aria-busy="true">
+                <tr class="hp-table-state" aria-hidden="true"><td class="hp-skeleton-cell" colspan="5"><span class="skeleton-line" style="width:82%"></span></td></tr>
+                <tr class="hp-table-state" aria-hidden="true"><td class="hp-skeleton-cell" colspan="5"><span class="skeleton-line" style="width:68%"></span></td></tr>
+                <tr class="hp-table-state" aria-hidden="true"><td class="hp-skeleton-cell" colspan="5"><span class="skeleton-line" style="width:74%"></span></td></tr>
+              </tbody>
+            </table></div>
+            <p class="empty" id="ct-tokens-empty" role="status" aria-live="polite" hidden>No canarytokens created yet &mdash; use the Create bait tab.</p>
+            <p class="card__meta" id="ct-tokens-error" role="alert" hidden></p>
+          </div>
+        </div>
+
+        <div class="dashboard-panel" id="panel-ct-create" role="tabpanel" data-dashboard-panel="ct-create" hidden>
+          <div class="card wide" id="ct-create-card">
+            <div class="card__header">
+              <div><h2>Create a Canarytoken</h2><p class="card__meta">The resulting artifact is yours to plant anywhere &mdash; an email, a fileshare, a USB drive. It phones home the instant it's opened, wherever that is.</p></div>
+            </div>
+            <p class="card__meta" id="ct-create-unavailable" hidden>Canarytoken creation is not configured on this host (CANARYTOKENS_API_URL unset).</p>
+            <form id="ct-create-form" aria-busy="true">
+              <div class="hp-rp-grid">
+                <div class="hp-rp-field"><label for="ct-type">Type</label><select id="ct-type" required aria-busy="true"><option>loading types&hellip;</option></select><p class="hp-cfg-source" id="ct-type-desc"></p></div>
+                <div class="hp-rp-field"><label for="ct-memo">Memo (shown only to you, in the Tokens tab)</label><input id="ct-memo" maxlength="200" required autocomplete="off" placeholder="e.g. left on the finance fileshare"></div>
+              </div>
+              <div class="hp-rp-field" id="ct-upload-row" hidden><label for="ct-file">Image to embed (PNG/GIF/JPEG)</label><input type="file" id="ct-file" accept="image/png,image/gif,image/jpeg"></div>
+              <div class="hp-rp-field" id="ct-snippet-row" hidden>
+                <label class="hp-rp-toggle-row"><input type="checkbox" id="ct-snippet-toggle"> Include a decoy text snippet inside the document</label>
+                <textarea rows="2" id="ct-snippet-text" disabled placeholder="e.g. Q3 payroll figures -- do not distribute"></textarea>
+              </div>
+              <div class="tw:flex tw:items-center tw:gap-2 tw:mt-3.5">
+                <button class="btn btn-primary" type="submit" id="ct-create-submit">Create token</button>
+              </div>
+            </form>
+            <p class="card__meta" id="ct-create-result" role="status" aria-live="polite" hidden></p>
+          </div>
+        </div>
+
+        <div class="dashboard-panel" id="panel-ct-reports" role="tabpanel" data-dashboard-panel="ct-reports" hidden>
+          <div class="card wide" id="ct-reports-card">
+            <div class="card__header">
+              <div><h2>Fired tokens</h2><p class="card__meta">Every time a planted token was opened, scanned, or triggered &mdash; newest first.</p></div>
+              <div class="hp-head-actions">
+                <button class="btn btn-ghost btn-sm" type="button" id="ct-reports-refresh">Refresh</button>
+              </div>
+            </div>
+            <div class="card__scroll"><table class="data-table">
+              <thead><tr><th>Time</th><th>Source IP</th><th>Country</th><th>Token type</th><th>Detail</th><th>Manage</th></tr></thead>
+              <tbody id="ct-reports-tbody" aria-busy="true">
+                <tr class="hp-table-state" aria-hidden="true"><td class="hp-skeleton-cell" colspan="6"><span class="skeleton-line" style="width:78%"></span></td></tr>
+                <tr class="hp-table-state" aria-hidden="true"><td class="hp-skeleton-cell" colspan="6"><span class="skeleton-line" style="width:64%"></span></td></tr>
+                <tr class="hp-table-state" aria-hidden="true"><td class="hp-skeleton-cell" colspan="6"><span class="skeleton-line" style="width:70%"></span></td></tr>
+              </tbody>
+            </table></div>
+            <p class="empty" id="ct-reports-empty" role="status" aria-live="polite" hidden>No token has fired yet.</p>
+            <p class="card__meta" id="ct-reports-error" role="alert" hidden></p>
+          </div>
+        </div>
+
+        <footer id="canarytokens-footer">{{brandText}} &bull; honeytoken creation and activity</footer>
+      </div>
+    </main>
+</div>
+<script defer src="{{asset "/static/hp-canarytokens.js"}}"></script>
+</body>
+</html>
+{{end}}
