@@ -47,18 +47,35 @@ RUN python3 -m venv /cowrie/cowrie-env \
 # builder stage's own root filesystem as the template) is upstream's own
 # documented replacement -- same node format bin/sync-fs.py already merges
 # onto, no `|| true`: a real failure here should fail the build.
+#
+# #1487: this baseline pickle is built to fs.pickle.dist, not the live
+# share/cowrie/fs.pickle path -- see the honeyfs.dist comment below for why.
 RUN mkdir -p share/cowrie \
- && /cowrie/cowrie-env/bin/createfs -l / -d 100 -o share/cowrie/fs.pickle
+ && /cowrie/cowrie-env/bin/createfs -l / -d 100 -o fs.pickle.dist
 
-# Static honeyfs and txtcmds
-COPY honeyfs/   /cowrie/cowrie-git/honeyfs/
+# Static honeyfs and txtcmds.
+#
+# #1487: honeyfs lands at honeyfs.dist, not the live honeyfs/ path.
+# compose.yml now bind-mounts honeyfs/ and share/cowrie/ from the host (same
+# reasoning as cowrie.cfg/userdb.txt's existing bind mounts) so the
+# honeyfs-implant service (arcane/home/honeypot-cowrie/honeyfs-implant/) can
+# write a new artifact into a persona's fake filesystem live, without a
+# rebuild -- planting a file into a running container is not enough on its
+# own, since fs.pickle (not the directory listing) is what Cowrie's `ls`
+# actually consults (see bin/sync-fs.py's own docstring). A bind mount would
+# shadow this image's own baked content with an empty host directory on
+# first run, so the real content stays here, outside the mount points, as a
+# seed source entrypoint.sh copies from on first boot.
+COPY honeyfs/   /cowrie/cowrie-git/honeyfs.dist/
 COPY txtcmds/   /cowrie/cowrie-git/txtcmds/
 
-COPY bin/sync-fs.py /tmp/sync-fs.py
-RUN /cowrie/cowrie-env/bin/python3 /tmp/sync-fs.py \
-      /cowrie/cowrie-git/share/cowrie/fs.pickle \
-      /cowrie/cowrie-git/honeyfs \
- && rm -f /tmp/sync-fs.py
+# sync-fs.py now also runs at every container startup (entrypoint.sh) to
+# merge whatever's live in the bind-mounted honeyfs/ into fs.pickle -- kept
+# here as a permanent runtime script, not a /tmp scratch file.
+COPY bin/sync-fs.py /cowrie/cowrie-git/bin/sync-fs.py
+RUN /cowrie/cowrie-env/bin/python3 /cowrie/cowrie-git/bin/sync-fs.py \
+      /cowrie/cowrie-git/fs.pickle.dist \
+      /cowrie/cowrie-git/honeyfs.dist
 
 ENV PYTHONPATH="/cowrie/cowrie-git/src"
 RUN /cowrie/cowrie-env/bin/python3 /cowrie/cowrie-git/bin/regen-dropin.cache
