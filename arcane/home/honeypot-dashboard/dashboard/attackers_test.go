@@ -253,8 +253,18 @@ func TestAttackersFragmentRoute(t *testing.T) {
 		!strings.Contains(body, "No payload hashes recorded for this identity.") {
 		t.Errorf("fragment must keep empty evidence categories visible, got: %s", body)
 	}
-	if !strings.Contains(body, `<div class="card__scroll"><table class="data-table">`) {
-		t.Errorf("identities table must be inside a bounded scroll region, got: %s", body)
+	// #1526: unlike the small per-category evidence cards above (each its
+	// own independently-bounded card__scroll, asserted by
+	// TestAttackersFragmentRendersEvidenceInScrollableCards below), the
+	// identities table is /attackers' whole-page content on an
+	// unselected visit and must grow with the page instead of being
+	// capped to a fixed-height internal scrollbox -- same reasoning as
+	// TestCommandsPageTableFillsThePageLikeEventExplorerDoes.
+	if !strings.Contains(body, `id="attackers-table"><h2>Known identities</h2>`) || !strings.Contains(body, `<table class="data-table">`) {
+		t.Errorf("identities table did not render, got: %s", body)
+	}
+	if strings.Contains(body, `<div class="card__scroll"><table class="data-table">`) {
+		t.Errorf("identities table must not be wrapped in a bounded card__scroll region, got: %s", body)
 	}
 }
 

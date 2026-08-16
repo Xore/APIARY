@@ -24,8 +24,12 @@
           </div>
         </header>
         <div class="filters" id="alerts-filters"><a class="chip" href="/">&larr; dashboard</a><button class="copy" id="alerts-refresh" type="button">refresh</button><button class="copy" id="alerts-ack-all" type="button" data-hp-alert-ack-all hidden>acknowledge all</button>{{template "filterbar" .}}</div>
+        {{/* #1526: this table is the whole page's content -- see events.html's
+             main table for the full reasoning against card__scroll's fixed
+             340px cap here. #alerts-results keeps its id (loadAlerts() in
+             the script below targets it by id, not by this class). */}}
         <div class="card wide" id="alerts-card">
-          <div class="card__scroll" id="alerts-results" aria-busy="true">
+          <div id="alerts-results" aria-busy="true">
             <table class="recent data-table data-table--responsive"><thead><tr><th>state</th><th>key</th><th>message</th><th>observed</th><th>last seen</th><th>last notified</th><th>action</th></tr></thead><tbody id="alert-rows">
               <tr class="hp-table-state" aria-hidden="true"><td class="hp-skeleton-cell" colspan="7"><span class="skeleton-line" style="width:88%"></span></td></tr>
               <tr class="hp-table-state" aria-hidden="true"><td class="hp-skeleton-cell" colspan="7"><span class="skeleton-line" style="width:72%"></span></td></tr>
