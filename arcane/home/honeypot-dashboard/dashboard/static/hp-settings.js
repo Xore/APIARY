@@ -525,6 +525,13 @@
           document.documentElement.removeAttribute("data-theme");
           localStorage.removeItem("hp-theme");
         }
+        if (prefs.palette && prefs.palette !== "claude") {
+          document.documentElement.dataset.hpPalette = prefs.palette;
+          localStorage.setItem("hp-palette", prefs.palette);
+        } else {
+          delete document.documentElement.dataset.hpPalette;
+          localStorage.removeItem("hp-palette");
+        }
         if (prefs.collapsed_sidebar) localStorage.setItem("hp-sidebar-collapsed", "1");
         else localStorage.removeItem("hp-sidebar-collapsed");
       } catch { /* storage may be unavailable */ }

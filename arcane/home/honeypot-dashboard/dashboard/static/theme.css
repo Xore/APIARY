@@ -287,6 +287,54 @@
   }
 }
 
+/* ── Palette presets (per Xore): one-click accent palettes, selected in
+   Settings → Appearance and applied as data-hp-palette on <html>.
+   "claude" is the default token set above (no attribute). Every pair
+   below is WCAG-AA validated (soft ink + links vs surface-1, button
+   ink vs accent) in BOTH themes by scripts in the APIARY design lab;
+   status colors stay semantic across palettes. */
+:root[data-hp-palette="slate"] { --accent: #8aa2c0; --accent-hover: #9bafc9; --accent-pressed: #7995b7; --accent-soft: rgba(138, 162, 192, 0.16); --accent-text-on-soft: #8aa2c0; --text-on-accent: #1c1613; --text-link: #8aa2c0; --text-link-hover: #9eb2cb; }
+[data-theme="light"][data-hp-palette="slate"] { --accent: #44618a; --accent-hover: #3d577c; --accent-pressed: #374e6f; --accent-soft: rgba(68, 97, 138, 0.13); --accent-text-on-soft: #44618a; --text-on-accent: #ffffff; --text-link: #44618a; --text-link-hover: #3a5376; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme])[data-hp-palette="slate"] { --accent: #44618a; --accent-hover: #3d577c; --accent-pressed: #374e6f; --accent-soft: rgba(68, 97, 138, 0.13); --accent-text-on-soft: #44618a; --text-on-accent: #ffffff; --text-link: #44618a; --text-link-hover: #3a5376; }
+}
+:root[data-hp-palette="ocean"] { --accent: #55a7d8; --accent-hover: #6ab2dd; --accent-pressed: #409cd3; --accent-soft: rgba(85, 167, 216, 0.16); --accent-text-on-soft: #55a7d8; --text-on-accent: #1c1613; --text-link: #55a7d8; --text-link-hover: #6eb4de; }
+[data-theme="light"][data-hp-palette="ocean"] { --accent: #1f6fa8; --accent-hover: #1c6497; --accent-pressed: #195886; --accent-soft: rgba(31, 111, 168, 0.13); --accent-text-on-soft: #1f6fa8; --text-on-accent: #ffffff; --text-link: #1f6fa8; --text-link-hover: #1a5e8e; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme])[data-hp-palette="ocean"] { --accent: #1f6fa8; --accent-hover: #1c6497; --accent-pressed: #195886; --accent-soft: rgba(31, 111, 168, 0.13); --accent-text-on-soft: #1f6fa8; --text-on-accent: #ffffff; --text-link: #1f6fa8; --text-link-hover: #1a5e8e; }
+}
+:root[data-hp-palette="sage"] { --accent: #8fb27b; --accent-hover: #9dbb8b; --accent-pressed: #81a96b; --accent-soft: rgba(143, 178, 123, 0.16); --accent-text-on-soft: #8fb27b; --text-on-accent: #1c1613; --text-link: #8fb27b; --text-link-hover: #9fbd8e; }
+[data-theme="light"][data-hp-palette="sage"] { --accent: #4d7a42; --accent-hover: #456d3b; --accent-pressed: #3c6034; --accent-soft: rgba(77, 122, 66, 0.13); --accent-text-on-soft: #4a753f; --text-on-accent: #ffffff; --text-link: #4a753f; --text-link-hover: #3d6134; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme])[data-hp-palette="sage"] { --accent: #4d7a42; --accent-hover: #456d3b; --accent-pressed: #3c6034; --accent-soft: rgba(77, 122, 66, 0.13); --accent-text-on-soft: #4a753f; --text-on-accent: #ffffff; --text-link: #4a753f; --text-link-hover: #3d6134; }
+}
+:root[data-hp-palette="lavender"] { --accent: #ab93e3; --accent-hover: #bba7e8; --accent-pressed: #9b7fde; --accent-soft: rgba(171, 147, 227, 0.16); --accent-text-on-soft: #ab93e3; --text-on-accent: #1c1613; --text-link: #ab93e3; --text-link-hover: #beabe9; }
+[data-theme="light"][data-hp-palette="lavender"] { --accent: #6d4fc4; --accent-hover: #6040bf; --accent-pressed: #593baf; --accent-soft: rgba(109, 79, 196, 0.13); --accent-text-on-soft: #6d4fc4; --text-on-accent: #ffffff; --text-link: #6d4fc4; --text-link-hover: #5d3db7; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme])[data-hp-palette="lavender"] { --accent: #6d4fc4; --accent-hover: #6040bf; --accent-pressed: #593baf; --accent-soft: rgba(109, 79, 196, 0.13); --accent-text-on-soft: #6d4fc4; --text-on-accent: #ffffff; --text-link: #6d4fc4; --text-link-hover: #5d3db7; }
+}
+:root[data-hp-palette="lime"] { --accent: #b3cf5a; --accent-hover: #bcd56e; --accent-pressed: #aac946; --accent-soft: rgba(179, 207, 90, 0.16); --accent-text-on-soft: #b3cf5a; --text-on-accent: #1c1613; --text-link: #b3cf5a; --text-link-hover: #bed672; }
+[data-theme="light"][data-hp-palette="lime"] { --accent: #5f7d1f; --accent-hover: #536d1b; --accent-pressed: #465c17; --accent-soft: rgba(95, 125, 31, 0.13); --accent-text-on-soft: #5a771d; --text-on-accent: #ffffff; --text-link: #5a771d; --text-link-hover: #475e17; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme])[data-hp-palette="lime"] { --accent: #5f7d1f; --accent-hover: #536d1b; --accent-pressed: #465c17; --accent-soft: rgba(95, 125, 31, 0.13); --accent-text-on-soft: #5a771d; --text-on-accent: #ffffff; --text-link: #5a771d; --text-link-hover: #475e17; }
+}
+:root[data-hp-palette="amber"] { --accent: #d9a842; --accent-hover: #ddb257; --accent-pressed: #d59e2d; --accent-soft: rgba(217, 168, 66, 0.16); --accent-text-on-soft: #d9a842; --text-on-accent: #1c1613; --text-link: #d9a842; --text-link-hover: #deb45b; }
+[data-theme="light"][data-hp-palette="amber"] { --accent: #96690e; --accent-hover: #835c0c; --accent-pressed: #714f0b; --accent-soft: rgba(150, 105, 14, 0.13); --accent-text-on-soft: #8f640d; --text-on-accent: #ffffff; --text-link: #8f640d; --text-link-hover: #73500a; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme])[data-hp-palette="amber"] { --accent: #96690e; --accent-hover: #835c0c; --accent-pressed: #714f0b; --accent-soft: rgba(150, 105, 14, 0.13); --accent-text-on-soft: #8f640d; --text-on-accent: #ffffff; --text-link: #8f640d; --text-link-hover: #73500a; }
+}
+:root[data-hp-palette="rose"] { --accent: #d98298; --accent-hover: #df96a8; --accent-pressed: #d36e88; --accent-soft: rgba(217, 130, 152, 0.16); --accent-text-on-soft: #d98298; --text-on-accent: #1c1613; --text-link: #d98298; --text-link-hover: #e099ab; }
+[data-theme="light"][data-hp-palette="rose"] { --accent: #b04a66; --accent-hover: #a2445e; --accent-pressed: #933e55; --accent-soft: rgba(176, 74, 102, 0.13); --accent-text-on-soft: #b04a66; --text-on-accent: #ffffff; --text-link: #b04a66; --text-link-hover: #9a415a; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme])[data-hp-palette="rose"] { --accent: #b04a66; --accent-hover: #a2445e; --accent-pressed: #933e55; --accent-soft: rgba(176, 74, 102, 0.13); --accent-text-on-soft: #b04a66; --text-on-accent: #ffffff; --text-link: #b04a66; --text-link-hover: #9a415a; }
+}
+:root[data-hp-palette="neon"] { --accent: #3ee6c8; --accent-hover: #55e9ce; --accent-pressed: #27e3c2; --accent-soft: rgba(62, 230, 200, 0.16); --accent-text-on-soft: #3ee6c8; --text-on-accent: #1c1613; --text-link: #3ee6c8; --text-link-hover: #59ead0; }
+[data-theme="light"][data-hp-palette="neon"] { --accent: #0f8f7a; --accent-hover: #0d7d6a; --accent-pressed: #0b6a5a; --accent-soft: rgba(15, 143, 122, 0.13); --accent-text-on-soft: #0c7a68; --text-on-accent: #171210; --text-link: #0c7a68; --text-link-hover: #095e50; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme])[data-hp-palette="neon"] { --accent: #0f8f7a; --accent-hover: #0d7d6a; --accent-pressed: #0b6a5a; --accent-soft: rgba(15, 143, 122, 0.13); --accent-text-on-soft: #0c7a68; --text-on-accent: #171210; --text-link: #0c7a68; --text-link-hover: #095e50; }
+}
+
+
 *, *::before, *::after { box-sizing: border-box; }
 
 html {
@@ -3287,6 +3335,22 @@ div.hp-skel-batch .skeleton-line:first-child { width: 55%; }
 div.hp-skel-batch .skeleton-line:nth-child(2) { width: 80%; }
 div.hp-skel-batch .skeleton-line:nth-child(3) { width: 38%; }
 .metric__value .skeleton-line { display: inline-block; width: 74px; height: 18px; vertical-align: middle; }
+
+
+/* Settings palette picker: the shared .segmented contract plus a swatch
+   dot per option; the row wraps instead of forcing the pane wide. */
+.hp-palette-pick { flex-wrap: wrap; }
+.hp-palette-pick button { display: inline-flex; align-items: center; gap: 7px; }
+.hp-palette-pick .dot { width: 11px; height: 11px; border-radius: 50%; flex: none; border: 1px solid var(--border-strong); background: var(--accent); }
+.hp-palette-pick [data-value="claude"] .dot { background: #d97757; }
+.hp-palette-pick [data-value="slate"] .dot { background: #8aa2c0; }
+.hp-palette-pick [data-value="ocean"] .dot { background: #55a7d8; }
+.hp-palette-pick [data-value="sage"] .dot { background: #8fb27b; }
+.hp-palette-pick [data-value="lavender"] .dot { background: #ab93e3; }
+.hp-palette-pick [data-value="lime"] .dot { background: #b3cf5a; }
+.hp-palette-pick [data-value="amber"] .dot { background: #d9a842; }
+.hp-palette-pick [data-value="rose"] .dot { background: #d98298; }
+.hp-palette-pick [data-value="neon"] .dot { background: #3ee6c8; }
 
 /* Sidebar search affordance (claude.ai top-row pattern): a quiet icon
    button floated into the brand row, opening the same palette. */

@@ -1,5 +1,5 @@
 {{define "style"}}
-<script nonce="{{.Nonce}}">(function(){try{var t=localStorage.getItem("hp-theme");if(t==="light"||t==="dark"){document.documentElement.dataset.theme=t;}else if(t){localStorage.removeItem("hp-theme");}}catch(e){}})();</script>
+<script nonce="{{.Nonce}}">(function(){try{var t=localStorage.getItem("hp-theme");if(t==="light"||t==="dark"){document.documentElement.dataset.theme=t;}else if(t){localStorage.removeItem("hp-theme");}var p=localStorage.getItem("hp-palette");if(p&&/^[a-z]{3,16}$/.test(p)&&p!=="claude"){document.documentElement.dataset.hpPalette=p;}else if(p){localStorage.removeItem("hp-palette");}}catch(e){}})();</script>
 <link rel="icon" href="{{asset "/static/favicon.ico"}}" sizes="any">
 <link rel="icon" type="image/png" sizes="32x32" href="{{asset "/static/favicon-32x32.png"}}">
 <link rel="icon" type="image/png" sizes="16x16" href="{{asset "/static/favicon-16x16.png"}}">
