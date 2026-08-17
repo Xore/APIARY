@@ -18,6 +18,7 @@ use axum::{
 use serde::Serialize;
 use std::{net::SocketAddr, sync::Arc};
 
+mod aggregates;
 mod es;
 mod events;
 mod overview;
@@ -87,6 +88,9 @@ async fn main() -> anyhow::Result<()> {
     let api = Router::new()
         .route("/api/v1/overview/kpis", get(overview::kpis))
         .route("/api/v1/events", get(events::list))
+        .route("/api/v1/sources", get(aggregates::sources))
+        .route("/api/v1/campaigns", get(aggregates::campaigns))
+        .route("/api/v1/clusters", get(aggregates::clusters))
         .layer(middleware::from_fn_with_state(state.clone(), require_service_token));
 
     let app = Router::new()

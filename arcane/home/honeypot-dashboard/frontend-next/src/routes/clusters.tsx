@@ -1,0 +1,66 @@
+// Infrastructure clusters — compact list columns, heavy detail in the
+// click-open inspector (per the investigate-consistency round).
+import { createFileRoute } from '@tanstack/react-router'
+import { createServerFn } from '@tanstack/react-start'
+import { useEffect, useState } from 'react'
+import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+
+type ClusterRow = {
+  kind: string
+  value: string
+  sources: number
+  events: number
+  sensors: string[]
+}
+
+const fetchClusters = createServerFn({ method: 'GET' }).handler(async () => {
+  const { serviceJSON } = await import('../lib/backend.server')
+  return serviceJSON<{ rows: ClusterRow[] }>('/api/v1/clusters')
+})
+
+export const Route = createFileRoute('/clusters')({
+  loader: async () => ({ page: fetchClusters() }),
+  component: Clusters,
+})
+
+const COLUMNS: Column<ClusterRow>[] = [
+  { header: 'cluster type', render: (row) => <span className="badge badge--muted">{row.kind}</span> },
+  { header: 'shared value', className: 'v', render: (row) => row.value },
+  { header: 'source IPs', className: 'n', render: (row) => row.sources.toLocaleString('en-US') },
+  { header: 'events', className: 'n', render: (row) => row.events.toLocaleString('en-US') },
+  {
+    header: 'coverage',
+    detail: true,
+    render: (row) => `${row.sensors.length} sensors: ${row.sensors.join(' ')}`,
+  },
+]
+
+function Clusters() {
+  const { page } = Route.useLoaderData()
+  const [rows, setRows] = useState<ClusterRow[] | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    page.then((result) => {
+      if (!cancelled && result) setRows(result.rows)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [page])
+  return (
+    <>
+      <InvestigateHeader
+        label="Correlation"
+        title="Infrastructure clusters"
+        subtitle="Shared fingerprints, payloads, autonomous systems, and provider classifications across multiple source IPs."
+        chips={<span className="chip">{rows ? `${rows.length} shared pivots` : '…'}</span>}
+      />
+      <MasterDetailTable
+        rows={rows}
+        columns={COLUMNS}
+        rowKey={(row) => `${row.kind}:${row.value}`}
+        inspectorTitle="Row details"
+      />
+    </>
+  )
+}
