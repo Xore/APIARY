@@ -16,19 +16,9 @@ type OverviewKpis = {
   ready: boolean
 }
 
-const BACKEND = process.env.BACKEND_URL ?? 'http://127.0.0.1:8081'
-
 const fetchKpis = createServerFn({ method: 'GET' }).handler(async (): Promise<OverviewKpis | null> => {
-  try {
-    const response = await fetch(`${BACKEND}/api/v1/overview/kpis`, {
-      headers: { 'x-service-token': process.env.SERVICE_TOKEN ?? '' },
-      signal: AbortSignal.timeout(10_000),
-    })
-    if (!response.ok) return null
-    return (await response.json()) as OverviewKpis
-  } catch {
-    return null
-  }
+  const { serviceJSON } = await import('../lib/backend.server')
+  return serviceJSON<OverviewKpis>('/api/v1/overview/kpis')
 })
 
 export const Route = createFileRoute('/')({

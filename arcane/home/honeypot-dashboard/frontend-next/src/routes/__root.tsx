@@ -2,10 +2,25 @@
 // markup speaks the exact class vocabulary of Xore/theme's theme.css (the
 // same vendored stylesheet the Go dashboard serves), so the port inherits
 // the claude-pure element set 1:1 — no visual drift by construction.
-import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
+import { HeadContent, Scripts, createRootRoute, redirect } from '@tanstack/react-router'
 import { AppShell } from '../components/AppShell'
+import { getSessionUser } from '../lib/auth'
 
 export const Route = createRootRoute({
+  // BFF-owned auth: every navigation resolves the redis session on the
+  // server; unauthenticated requests bounce to the Keycloak flow. The
+  // /auth/* server routes stay reachable, and the resolved user rides the
+  // router context for the shell (avatar, profile).
+  beforeLoad: async ({ location }) => {
+    if (location.pathname.startsWith('/auth/')) return {}
+    const user = await getSessionUser()
+    if (!user) {
+      throw redirect({
+        href: `/auth/login?return_to=${encodeURIComponent(location.pathname + location.searchStr)}`,
+      })
+    }
+    return { user }
+  },
   head: () => ({
     meta: [
       { charSet: 'utf-8' },

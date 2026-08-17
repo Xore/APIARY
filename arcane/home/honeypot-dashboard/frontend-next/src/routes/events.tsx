@@ -20,21 +20,11 @@ type EventRow = {
 
 type EventsPage = { total: number; offset: number; rows: EventRow[] }
 
-const BACKEND = process.env.BACKEND_URL ?? 'http://127.0.0.1:8081'
-
 const fetchEvents = createServerFn({ method: 'GET' })
   .inputValidator((input: { offset: number }) => input)
   .handler(async ({ data }): Promise<EventsPage | null> => {
-    try {
-      const response = await fetch(`${BACKEND}/api/v1/events?offset=${data.offset}&size=25`, {
-        headers: { 'x-service-token': process.env.SERVICE_TOKEN ?? '' },
-        signal: AbortSignal.timeout(15_000),
-      })
-      if (!response.ok) return null
-      return (await response.json()) as EventsPage
-    } catch {
-      return null
-    }
+    const { serviceJSON } = await import('../lib/backend.server')
+    return serviceJSON<EventsPage>(`/api/v1/events?offset=${data.offset}&size=25`)
   })
 
 export const Route = createFileRoute('/events')({
