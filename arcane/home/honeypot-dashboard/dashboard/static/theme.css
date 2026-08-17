@@ -3035,6 +3035,25 @@ button.sidebar__profile:disabled:hover { background: transparent; }
 }
 .app-sidebar .tabs .tab span { width: 18px; height: 18px; }
 
+/* Sidebar search affordance (claude.ai top-row pattern): a quiet icon
+   button floated into the brand row, opening the same palette. */
+.hp-sidebar-search {
+  position: absolute;
+  top: 14px;
+  right: 10px;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.hp-sidebar-search:hover { background: var(--surface-2); color: var(--text-primary); }
+.app-sidebar { position: relative; }
+
 /* Sidebar primary action + recents (pick 12B, claude rail). */
 .sidebar__investigate {
   display: flex; align-items: center; justify-content: center; gap: 7px;
