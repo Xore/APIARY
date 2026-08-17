@@ -389,7 +389,9 @@ test.describe("dashboard browser behaviour", () => {
   test("remote event paging loads the next 25 rows through the accessible control", async ({ page }) => {
     await page.addInitScript(() => { delete window.IntersectionObserver; });
     await page.goto("/events");
-    const rows = page.locator("table.recent tbody tr");
+    // EV-D adds presentation-only minute-break rows to the same tbody; the
+    // pager (and this spec) count only real event rows.
+    const rows = page.locator("table.recent tbody tr:not(.hp-feed-break)");
     await expect(rows).toHaveCount(25);
     const controls = page.locator("table.recent + .hp-lazy-controls");
     const total = Number(await page.locator("table.recent tbody").getAttribute("data-hp-total"));
