@@ -86,6 +86,17 @@
   initCharts();
   window.initHoneypotCharts = initCharts;
 
+  // #1577: operator preference is kill-chain progressions stacking top to
+  // bottom rather than the previous left-to-right flow -- matching how
+  // events.html's own single-IP attack-chain view already reads
+  // ("chronological -- the attack reads top to bottom"). ECharts' sankey
+  // series supports this as a first-class orient flip rather than a
+  // reshape of the underlying data: buildKillChainSankey (kill_chain.go)
+  // hands over the same {nodes, links} shape either way, so only the
+  // rendering options below change. label.position moves from the
+  // horizontal layout's "right" (natural next to a vertical node bar) to
+  // "top" (natural above a horizontal node bar, clear of the flow curves
+  // entering its bottom edge from the tactic above).
   function initSankey(chart, data) {
     const nodes = data.nodes || [];
     const links = data.links || [];
@@ -99,11 +110,12 @@
       tooltip: { trigger: "item" },
       series: nodes.length === 0 ? [] : [{
         type: "sankey",
+        orient: "vertical",
         emphasis: { focus: "adjacency" },
         data: nodes,
         links: links,
         lineStyle: { color: "gradient", curveness: 0.5 },
-        label: { color: themeColor("--text-primary", "#e9e6df") },
+        label: { position: "top", color: themeColor("--text-primary", "#e9e6df") },
       }],
     });
     if (nodes.length === 0) return "No attacker sessions with a recognized ATT&CK technique yet.";
