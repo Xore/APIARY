@@ -790,15 +790,26 @@ test.describe("dashboard browser behaviour", () => {
     // inside #attackers-graph itself; it's now part of the
     // #attackers-root fragment hp-attackers-detail.js hydrates in
     // separately, alongside #attackers-graph rather than nested in it.
-    await expect(page.locator("#attackers-selected-meta")).toContainText("root / fixture-0");
+    // #1540: that single 9-card grid then split into two tabs --
+    // "01 Overview" (Identity/Observed activity/Sensors/Member IPs, the
+    // default/visible-on-load panel) and "02 Indicators" (Credential
+    // pairs/Fingerprints/Payload hashes/Ghidra verdicts/ATT&CK
+    // techniques, which starts hidden until the tab is activated).
+    await expect(page.locator("#attackers-overview-cards > .card")).toHaveCount(4);
     // #1444: all selected fields use the shared card treatment, while
     // potentially long evidence collections and the entity table stay
-    // inside bounded scroll regions.
-    await expect(page.locator("#attackers-selected-meta > .card")).toHaveCount(9);
+    // inside bounded scroll regions -- Sensors + Member IPs here.
+    await expect(page.locator("#attackers-overview-cards .card__scroll")).toHaveCount(2);
+    await page.locator('[data-dashboard-tab="indicators"]').click();
+    await expect(page.locator("#attackers-indicators-cards")).toBeVisible();
+    await expect(page.locator("#attackers-indicators-cards")).toContainText("root / fixture-0");
+    await expect(page.locator("#attackers-indicators-cards > .card")).toHaveCount(5);
     await expect(page.getByRole("heading", { name: "Credential pairs (1)" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Fingerprints (1)" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Payload hashes (1)" })).toBeVisible();
-    await expect(page.locator("#attackers-selected-meta .card__scroll")).toHaveCount(5);
+    // Credential pairs/Fingerprints/Payload hashes each have one entry;
+    // Ghidra verdicts/ATT&CK techniques are empty in this fixture.
+    await expect(page.locator("#attackers-indicators-cards .card__scroll")).toHaveCount(3);
     // #1526: #attackers-table is this page's whole content -- no longer
     // wrapped in card__scroll's fixed 340px cap (see events.html's own
     // comment for the full reasoning); the table itself is a direct child.
@@ -926,6 +937,18 @@ test.describe("dashboard browser behaviour", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/investigate/ip/203.0.113.1");
     await expect(page.getByRole("heading", { name: "203.0.113.1" })).toBeVisible();
+    // #1541: "Attack progression" and the correlation fragment now live in
+    // the "03 Correlation & timeline" tab panel (hidden by default), same
+    // data-dashboard-tab/data-dashboard-panel convention as tty_replay.html.
+    // At this test's mobile viewport, hp-app.js's sidebar-tabs sync (design
+    // refresh pick 7D) has already moved this page-level tablist out of the
+    // content flow into the off-canvas nav rail (main.tabs[role="tablist"]
+    // relocates to .app-sidebar__body) -- unlike the component-scoped tabs
+    // elsewhere in this file (github-analysis, ghidra, ...), which carry
+    // data-hp-tabs-inline and stay put. Open the drawer first, same as a
+    // real mobile operator would, before the tab is reachable at all.
+    await page.getByRole("button", { name: "Toggle navigation" }).click();
+    await page.getByRole("tab", { name: /Correlation & timeline/ }).click();
     await expect(page.getByRole("heading", { name: "Attack progression" }).locator("..")).toContainText("cowrie");
     await expect(page.locator("#attacker-correlation-root")).toHaveAttribute("role", "alert");
     await expect(page.locator("#attacker-block-root")).not.toHaveAttribute("aria-busy", "true");

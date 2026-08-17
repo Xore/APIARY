@@ -128,6 +128,39 @@
             <div class="dashboard-panel" id="panel-schedule" role="tabpanel" data-dashboard-panel="schedule" hidden>
               <div class="card wide hp-rp-section" id="hp-rp-schedule-section">
                 <h2>Schedule</h2>
+                {{/* #1575: claude.ai Scheduled-page pattern -- shown only while
+                     no saved definition has an active schedule (hp-reports.js'
+                     updateScheduleEmptyState, recomputed on every definitions
+                     refresh); a starter card fills the name + cadence fields
+                     below rather than leaving an operator to invent one. */}}
+                <div class="empty-state" id="hp-rp-schedule-empty" role="status" aria-live="polite" hidden>
+                  <div>
+                    <div class="empty-state__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg></div>
+                    <div class="empty-state__title">Nothing scheduled yet</div>
+                    <p class="empty-state__hint">Pick a cadence below, or start from one of these and adjust it.</p>
+                    <hr class="empty-state__divider">
+                    <div class="template-gallery" id="hp-rp-schedule-gallery" role="group" aria-label="Schedule starters">
+                      <button type="button" class="template-card" data-schedule-preset="weekly-board">
+                        <span class="template-card__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>
+                        <span class="template-card__title">Weekly board briefing</span>
+                        <span class="template-card__desc">A high-level roundup for leadership, once a week.</span>
+                        <span class="chip">Weekly &middot; Mon 06:00 UTC</span>
+                      </button>
+                      <button type="button" class="template-card" data-schedule-preset="daily-ops">
+                        <span class="template-card__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/></svg></span>
+                        <span class="template-card__title">Daily ops digest</span>
+                        <span class="template-card__desc">A daily pulse for the operations team.</span>
+                        <span class="chip">Daily &middot; 06:00 UTC</span>
+                      </button>
+                      <button type="button" class="template-card" data-schedule-preset="monthly-exec">
+                        <span class="template-card__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg></span>
+                        <span class="template-card__title">Monthly executive summary</span>
+                        <span class="template-card__desc">One consolidated report, first of the month.</span>
+                        <span class="chip">Monthly &middot; day 1</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
                 <div class="hp-rp-grid">
                   <div class="hp-rp-field"><label for="hp-rp-sched-enabled">Recurring generation</label><label class="hp-rp-toggle-row"><input type="checkbox" id="hp-rp-sched-enabled"> run this report automatically</label></div>
                   <div class="hp-rp-field"><label for="hp-rp-sched-frequency">Frequency</label><select id="hp-rp-sched-frequency"><option value="daily">daily</option><option value="weekly">weekly</option><option value="monthly">monthly</option></select></div>
@@ -174,7 +207,22 @@
                 <tr class="hp-table-state" aria-hidden="true"><td class="hp-skeleton-cell" colspan="7"><span class="skeleton-line" style="width:82%"></span></td></tr>
               </tbody>
             </table></div>
-            <p class="empty" id="hp-rp-definitions-empty" role="status" aria-live="polite" hidden>No saved definitions yet &mdash; design one above and save it.</p>
+            {{/* #1575: claude.ai Scheduled-page pattern -- the report
+                 templates already rendered as starters in Design (above)
+                 double as this empty state's gallery, populated by
+                 hp-reports.js' renderDefinitionsGallery() from the same
+                 state.templates the Design tab loaded; a click selects that
+                 template and jumps to Design instead of leaving a bare
+                 sentence with nothing to act on. */}}
+            <div class="empty-state" id="hp-rp-definitions-empty" role="status" aria-live="polite" hidden>
+              <div>
+                <div class="empty-state__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+                <div class="empty-state__title">No saved definitions yet</div>
+                <p class="empty-state__hint" id="hp-rp-definitions-empty-hint">Save a design from any template below and it will land here, ready to re-generate, refine, or schedule.</p>
+                <hr class="empty-state__divider" id="hp-rp-definitions-divider">
+                <div class="template-gallery" id="hp-rp-definitions-gallery" role="group" aria-label="Report templates"></div>
+              </div>
+            </div>
           </div>
 
           <div class="card wide" id="hp-rp-generated-card">

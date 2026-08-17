@@ -35,10 +35,22 @@ type nonceSetter interface {
 // embedding pageMeta -- ExecuteTemplate dereferences pointers transparently,
 // so the template author never needs to know or care.
 func renderPage(w http.ResponseWriter, tmpl *template.Template, name string, data nonceSetter) {
+	renderPageStatus(w, tmpl, name, data, http.StatusOK)
+}
+
+// renderPageStatus (#1575) is renderPage with an explicit status code, for
+// the handful of full-page routes that aren't a plain 200 -- today just the
+// catch-all 404 (routes.go). The status must be written after secHeaders
+// sets its response headers but before ExecuteTemplate's first Write (which
+// would otherwise implicitly commit 200): calling w.Header().Set after
+// WriteHeader is a silent no-op, so renderPage can't simply WriteHeader(200)
+// itself first and let callers overwrite it.
+func renderPageStatus(w http.ResponseWriter, tmpl *template.Template, name string, data nonceSetter, status int) {
 	n := nonce()
 	secHeaders(w, n)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	data.SetNonce(n)
+	w.WriteHeader(status)
 	// #1323: html/template writes directly to w as it executes, so a
 	// failure partway through (a nil pointer the template dereferences, a
 	// missing field) leaves the client with a silently truncated page and,

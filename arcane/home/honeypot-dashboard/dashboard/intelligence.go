@@ -334,7 +334,7 @@ func (s *store) clustersData(f filter) clustersPage {
 		}
 		linkValue := value
 		displayValue := strings.Split(key, "\x00")[1]
-		rows = append(rows, clusterRow{Kind: kind, Value: displayValue, Events: a.events, Sources: len(a.ips), Summary: fmt.Sprintf("%d sensors: %s", len(a.sensors), sortedSet(a.sensors, 6)), Link: eventsURL(url.Values{param: {linkValue}})})
+		rows = append(rows, clusterRow{Kind: kind, Value: displayValue, Events: a.events, Sources: len(a.ips), Summary: fmt.Sprintf("%d sensor%s: %s", len(a.sensors), pluralS(len(a.sensors)), sortedSet(a.sensors, 6)), Link: eventsURL(url.Values{param: {linkValue}})})
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].Sources != rows[j].Sources {
@@ -423,7 +423,7 @@ func (s *store) readClustersFromWorkerIndex() ([]clusterRow, bool) {
 		}
 		rows = append(rows, clusterRow{
 			Kind: kind, Value: doc.Value, Events: doc.Events, Sources: doc.Sources,
-			Summary: fmt.Sprintf("%d sensors: %s", len(doc.Sensors), strings.Join(doc.Sensors, " ")),
+			Summary: fmt.Sprintf("%d sensor%s: %s", len(doc.Sensors), pluralS(len(doc.Sensors)), strings.Join(doc.Sensors, " ")),
 			Link:    eventsURL(url.Values{param: {linkValue}}),
 		})
 	}
