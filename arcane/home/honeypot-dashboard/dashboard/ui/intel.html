@@ -55,7 +55,7 @@
   <a class="chip" href="/">&larr; dashboard</a><a class="chip" href="{{.ExportURL}}">export CSV &darr;</a><span class="chip">{{len .Campaigns}} active networks</span>{{template "filterbar" .}}
 </div>
 <p class="note">Score combines volume, unique sources, sensor and port spread, reused credentials, captured payloads, and IDS alerts. Select a network for its complete event chain.</p>
-<div class="card wide" data-hp-md-generic id="campaigns-table">{{if .Campaigns}}<table class="recent data-table"><thead><tr><th>score</th><th>network</th><th>events</th><th>ips</th><th>sensors</th><th>ports</th><th>creds</th><th>files</th><th>alerts</th><th>ASNs</th><th>provider</th><th>fingerprints</th><th>sequence</th><th>why correlated</th><th>first</th><th>last</th><th></th></tr></thead><tbody>{{template "campaignrows" .Campaigns}}</tbody></table>{{else if .Ready}}<p class="empty">No active campaigns in the selected correlation window.</p>{{else}}<p class="empty">Campaign data is still warming up.</p>{{end}}</div>{{end}}
+<div class="card wide" data-hp-md-generic id="campaigns-table">{{if .Campaigns}}<table class="recent data-table"><thead><tr><th>score</th><th>network</th><th>events</th><th>ips</th><th>sensors</th><th data-hp-md-detail>ports</th><th data-hp-md-detail>creds</th><th data-hp-md-detail>files</th><th data-hp-md-detail>alerts</th><th data-hp-md-detail>ASNs</th><th data-hp-md-detail>provider</th><th data-hp-md-detail>fingerprints</th><th data-hp-md-detail>sequence</th><th data-hp-md-detail>why correlated</th><th>first</th><th>last</th><th></th></tr></thead><tbody>{{template "campaignrows" .Campaigns}}</tbody></table>{{else if .Ready}}<p class="empty">No active campaigns in the selected correlation window.</p>{{else}}<p class="empty">Campaign data is still warming up.</p>{{end}}</div>{{end}}
 
 {{define "campaigns"}}<!doctype html>
 <html lang="en">
@@ -89,7 +89,7 @@
           {{template "filterbar" .}}
         </div>
         <p class="note">Score combines volume, unique sources, sensor and port spread, reused credentials, captured payloads, and IDS alerts. Select a network for its complete event chain.</p>
-        {{$page := .}}<div class="card wide" id="campaigns-table"><table class="recent data-table" aria-hidden="true"><thead><tr><th>score</th><th>network</th><th>events</th><th>ips</th><th>sensors</th><th>ports</th><th>creds</th><th>files</th><th>alerts</th><th>ASNs</th><th>provider</th><th>fingerprints</th><th>sequence</th><th>why correlated</th><th>first</th><th>last</th><th></th></tr></thead><tbody>{{range .SkeletonRows}}<tr>{{range $page.SkeletonColumns}}<td><span class="skeleton-line"></span></td>{{end}}</tr>{{end}}</tbody></table></div></div>
+        {{$page := .}}<div class="card wide" id="campaigns-table"><table class="recent data-table" aria-hidden="true"><thead><tr><th>score</th><th>network</th><th>events</th><th>ips</th><th>sensors</th><th data-hp-md-detail>ports</th><th data-hp-md-detail>creds</th><th data-hp-md-detail>files</th><th data-hp-md-detail>alerts</th><th data-hp-md-detail>ASNs</th><th data-hp-md-detail>provider</th><th data-hp-md-detail>fingerprints</th><th data-hp-md-detail>sequence</th><th data-hp-md-detail>why correlated</th><th>first</th><th>last</th><th></th></tr></thead><tbody>{{range .SkeletonRows}}<tr>{{range $page.SkeletonColumns}}<td><span class="skeleton-line"></span></td>{{end}}</tr>{{end}}</tbody></table></div></div>
         <footer id="campaigns-footer">{{brandText}} &bull; defensive sensor &bull; do not expose without auth</footer>
       </div>
     </main>
@@ -99,16 +99,20 @@
 </html>
 {{end}}
 
-{{define "campaignrows"}}
+{{define "campaignrows"}}{{/* Investigate consistency (per Xore): rows
+   show the "is this active and worth a look" columns; every heavy
+   column (ports/creds/files/alerts/ASNs/provider/fingerprints/
+   sequence/why) is data-hp-md-detail -- hidden in the list, shown in
+   the click-open row inspector, so nothing is lost. */}}
 {{range .}}
 <tr>
   <td class="n"><a href="{{.Link}}" title="investigate this campaign">{{.Score}}</a></td>
   <td class="v"><a href="{{.Link}}">{{.CIDR}}</a></td>
   <td class="n"><a href="{{.Link}}" title="show campaign events">{{.Events}}</a></td><td class="n"><a href="{{.Link}}" title="show campaign source addresses">{{.UniqueIPs}}</a></td>
-  <td class="v"><a href="{{.Link}}" title="show campaign sensor activity">{{.Sensors}}</a></td><td class="v"><a href="{{.Link}}" title="show campaign targeted ports">{{.Ports}}</a></td>
-  <td class="n"><a href="{{.Link}}" title="show campaign credentials">{{.Creds}}</a></td><td class="n"><a href="{{.Link}}" title="show campaign payloads">{{.Payloads}}</a></td><td class="n"><a href="{{.Link}}" title="show campaign alerts">{{.Alerts}}</a></td>
-  <td class="v"><a href="{{.Link}}" title="show campaign events and ASN details">{{.ASNs}}</a></td><td class="v"><a href="{{.Link}}" title="show campaign events and provider details">{{.Providers}}</a></td><td class="n"><a href="{{.Link}}" title="show campaign events and fingerprints">{{.Fingerprints}}</a></td><td class="v">{{.Sequence}}</td>
-  <td class="v" title="why these events were grouped">{{.Explanation}}</td><td{{if .FirstUTC}} data-hp-utc="{{.FirstUTC}}"{{end}}>{{.First}}</td><td{{if .LastUTC}} data-hp-utc="{{.LastUTC}}"{{end}}>{{.Last}}</td>
+  <td class="v"><a href="{{.Link}}" title="show campaign sensor activity">{{.Sensors}}</a></td><td class="v" data-hp-md-detail><a href="{{.Link}}" title="show campaign targeted ports">{{.Ports}}</a></td>
+  <td class="n" data-hp-md-detail><a href="{{.Link}}" title="show campaign credentials">{{.Creds}}</a></td><td class="n" data-hp-md-detail><a href="{{.Link}}" title="show campaign payloads">{{.Payloads}}</a></td><td class="n" data-hp-md-detail><a href="{{.Link}}" title="show campaign alerts">{{.Alerts}}</a></td>
+  <td class="v" data-hp-md-detail><a href="{{.Link}}" title="show campaign events and ASN details">{{.ASNs}}</a></td><td class="v" data-hp-md-detail><a href="{{.Link}}" title="show campaign events and provider details">{{.Providers}}</a></td><td class="n" data-hp-md-detail><a href="{{.Link}}" title="show campaign events and fingerprints">{{.Fingerprints}}</a></td><td class="v" data-hp-md-detail>{{.Sequence}}</td>
+  <td class="v" data-hp-md-detail title="why these events were grouped">{{.Explanation}}</td><td{{if .FirstUTC}} data-hp-utc="{{.FirstUTC}}"{{end}}>{{.First}}</td><td{{if .LastUTC}} data-hp-utc="{{.LastUTC}}"{{end}}>{{.Last}}</td>
   <td><a class="lnk" href="/investigate/cidr/{{.CIDR | urlquery}}" title="#354: everything Elasticsearch has correlated for this network, including portbridge tunnel connections">ES &rarr;</a></td>
 </tr>
 {{end}}

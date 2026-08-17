@@ -20,7 +20,10 @@
 (() => {
   "use strict";
 
-  const trigger = document.querySelector("[data-hp-account-dashboard-settings]");
+  /* All of them (account-menu item AND the 11E toolbar avatar): per Xore,
+     settings opens as the centered modal everywhere; the /settings page
+     stays only as the no-JS / deep-link fallback behind the same hrefs. */
+  const triggers = [...document.querySelectorAll("[data-hp-account-dashboard-settings]")];
   /* Design refresh (pick 13B): /settings renders this same fragment as a
      full page -- that page carries its own host with
      data-hp-settings-page-mode, which wins over the shell's modal root
@@ -155,11 +158,11 @@
 
   if (pageMode) {
     ensureLoaded();
-  } else if (trigger) {
-    trigger.addEventListener("click", event => {
+  } else {
+    triggers.forEach(trigger => trigger.addEventListener("click", event => {
       event.preventDefault();
       openSettings();
-    });
+    }));
   }
   // #settings keeps old bookmarks meaningful: any dashboard page loaded
   // with the hash opens the modal directly (page mode is already open).
