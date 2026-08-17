@@ -17,9 +17,23 @@
  * parameter the shell already knows synchronously, and each already does
  * its own independent client-side fetch against /api/attacker-graph and
  * /api/attacker-fusion.
+ *
+ * #1540: the shell also tabs the selected-entity dossier into "panel-
+ * overview" (graph + fusion chart + 4 cards) and "panel-indicators" (the
+ * other 5 cards), via the generic data-dashboard-tab/data-dashboard-panel
+ * convention. The fragment still returns one flat HTML blob -- chip bar,
+ * then (if an entity is selected) the "attackers-overview-cards" and
+ * "attackers-indicators-cards" grids, then the identities table -- but the
+ * two card grids belong inside the shell's pre-existing panels, not
+ * #attackers-root, since the chip bar and table stay untabbed. Pull each
+ * grid out of the fetched markup by id and swap it into its matching
+ * shell skeleton before mounting whatever's left (chip bar + table) into
+ * #attackers-root.
  */
 (() => {
   "use strict";
+
+  const FRAGMENT_PANEL_IDS = ["attackers-overview-cards", "attackers-indicators-cards"];
 
   function hydrateBody() {
     const root = document.getElementById("attackers-root");
@@ -31,7 +45,21 @@
         return r.text();
       })
       .then((html) => {
-        root.innerHTML = html;
+        const parsed = document.createElement("div");
+        parsed.innerHTML = html;
+
+        FRAGMENT_PANEL_IDS.forEach((id) => {
+          const incoming = parsed.querySelector("#" + id);
+          if (!incoming) return;
+          const placeholder = document.getElementById(id);
+          // No selected entity in the shell (id-less visit, or the fetch
+          // raced a navigation away from ?id=) to receive it -- drop the
+          // fragment's copy rather than leaving a second one lying around.
+          if (placeholder) placeholder.replaceWith(incoming);
+          else incoming.remove();
+        });
+
+        root.replaceChildren(...parsed.childNodes);
         root.removeAttribute("aria-busy");
       })
       .catch(() => {

@@ -790,15 +790,26 @@ test.describe("dashboard browser behaviour", () => {
     // inside #attackers-graph itself; it's now part of the
     // #attackers-root fragment hp-attackers-detail.js hydrates in
     // separately, alongside #attackers-graph rather than nested in it.
-    await expect(page.locator("#attackers-selected-meta")).toContainText("root / fixture-0");
+    // #1540: that single 9-card grid then split into two tabs --
+    // "01 Overview" (Identity/Observed activity/Sensors/Member IPs, the
+    // default/visible-on-load panel) and "02 Indicators" (Credential
+    // pairs/Fingerprints/Payload hashes/Ghidra verdicts/ATT&CK
+    // techniques, which starts hidden until the tab is activated).
+    await expect(page.locator("#attackers-overview-cards > .card")).toHaveCount(4);
     // #1444: all selected fields use the shared card treatment, while
     // potentially long evidence collections and the entity table stay
-    // inside bounded scroll regions.
-    await expect(page.locator("#attackers-selected-meta > .card")).toHaveCount(9);
+    // inside bounded scroll regions -- Sensors + Member IPs here.
+    await expect(page.locator("#attackers-overview-cards .card__scroll")).toHaveCount(2);
+    await page.locator('[data-dashboard-tab="indicators"]').click();
+    await expect(page.locator("#attackers-indicators-cards")).toBeVisible();
+    await expect(page.locator("#attackers-indicators-cards")).toContainText("root / fixture-0");
+    await expect(page.locator("#attackers-indicators-cards > .card")).toHaveCount(5);
     await expect(page.getByRole("heading", { name: "Credential pairs (1)" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Fingerprints (1)" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Payload hashes (1)" })).toBeVisible();
-    await expect(page.locator("#attackers-selected-meta .card__scroll")).toHaveCount(5);
+    // Credential pairs/Fingerprints/Payload hashes each have one entry;
+    // Ghidra verdicts/ATT&CK techniques are empty in this fixture.
+    await expect(page.locator("#attackers-indicators-cards .card__scroll")).toHaveCount(3);
     // #1526: #attackers-table is this page's whole content -- no longer
     // wrapped in card__scroll's fixed 340px cap (see events.html's own
     // comment for the full reasoning); the table itself is a direct child.
