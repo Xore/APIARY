@@ -203,18 +203,118 @@ func TestLoadHTTPHoneypotRequestsReadsRawFields(t *testing.T) {
 	}
 }
 
+// TestLoadTannerRequestsReadsRawFields verifies the follow-up to #1538 the
+// issue comment names tanner for: post_data/cookies (raw maps, key-case
+// preserved) and the nested response_msg.response.message.detection
+// object (name + emulator execution result) all come through, and that
+// the transport-level src_ip is overridden by the CF-Connecting-IP header
+// (classify.go's own tanner IP preference, since tanner sits behind
+// Cloudflare).
+func TestLoadTannerRequestsReadsRawFields(t *testing.T) {
+	docs := []map[string]any{
+		{
+			"sensor": "tanner", "method": "POST", "path": "/login.php",
+			"headers": map[string]any{
+				"User-Agent":       "sqlmap/1.7",
+				"CF-Connecting-IP": "203.0.113.55",
+			},
+			"username": "admin", "password": "' OR 1=1--",
+			"post_data": map[string]any{"user": "admin", "pass": "' OR 1=1--"},
+			"cookies":   map[string]any{"PHPSESSID": "abc123"},
+			"src_ip":    "198.51.100.1", // Cloudflare edge IP, should be overridden
+			"tarpitted": true, "tarpit_bytes": 2048.0, "tarpit_ms": 900.0,
+			"response_msg": map[string]any{
+				"response": map[string]any{
+					"message": map[string]any{
+						"detection": map[string]any{
+							"name":    "sqli",
+							"payload": map[string]any{"value": "1 row returned"},
+						},
+					},
+				},
+			},
+			"timestamp": "2026-08-16T11:00:00Z",
+		},
+	}
+	es := httptest.NewServer(sensorRawSearchStub(t, docs, new(string)))
+	defer es.Close()
+
+	s := &store{es: newESClient(es.URL, "")}
+	reqs, ok := s.loadTannerRequests()
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if len(reqs) != 1 {
+		t.Fatalf("expected 1 request, got %d", len(reqs))
+	}
+	req := reqs[0]
+	if req.Method != "POST" || req.Path != "/login.php" {
+		t.Fatalf("request line fields not read: %+v", req)
+	}
+	if req.IP != "203.0.113.55" {
+		t.Fatalf("expected CF-Connecting-IP to override src_ip, got %q", req.IP)
+	}
+	if req.UserAgent != "sqlmap/1.7" {
+		t.Fatalf("user agent not read: %+v", req)
+	}
+	if req.Username != "admin" || req.Password != "' OR 1=1--" {
+		t.Fatalf("submitted credentials not read: %+v", req)
+	}
+	if req.PostData["user"] != "admin" || req.PostData["pass"] != "' OR 1=1--" {
+		t.Fatalf("post_data not read: %+v", req.PostData)
+	}
+	if req.Cookies["PHPSESSID"] != "abc123" {
+		t.Fatalf("cookies not read: %+v", req.Cookies)
+	}
+	if !req.Tarpitted || req.TarpitBytes != 2048 || req.TarpitMS != 900 {
+		t.Fatalf("tarpit fields not read: %+v", req)
+	}
+	if req.DetectionName != "sqli" {
+		t.Fatalf("detection name not read: %+v", req)
+	}
+	if req.DetectionPayload != "1 row returned" {
+		t.Fatalf("detection payload not read: %+v", req)
+	}
+}
+
+// TestLoadTannerRequestsSkipsLegacyPeerShape verifies the legacy tanner
+// "peer" session-report shape (no method/category field) is skipped, same
+// as ip-enrichment-worker/canonical.go's promoteWebRequestFields guard --
+// it carries none of the per-request fields this tab renders.
+func TestLoadTannerRequestsSkipsLegacyPeerShape(t *testing.T) {
+	docs := []map[string]any{
+		{
+			"sensor":    "tanner",
+			"peer":      map[string]any{"ip": "203.0.113.9"},
+			"paths":     []any{map[string]any{"path": "/"}},
+			"timestamp": "2026-08-16T11:00:00Z",
+		},
+	}
+	es := httptest.NewServer(sensorRawSearchStub(t, docs, new(string)))
+	defer es.Close()
+
+	s := &store{es: newESClient(es.URL, "")}
+	reqs, ok := s.loadTannerRequests()
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if len(reqs) != 0 {
+		t.Fatalf("expected legacy peer-shape doc to be skipped, got %+v", reqs)
+	}
+}
+
 func TestSensorDetailDataDisabledWithoutES(t *testing.T) {
 	s := &store{}
 	page := s.sensorDetailData(httptest.NewRequest(http.MethodGet, "/sensors", nil))
 	if page.Enabled {
 		t.Fatal("expected Enabled=false with no ES client configured")
 	}
-	if page.Mailoney != nil || page.HTTPRequests != nil {
+	if page.Mailoney != nil || page.HTTPRequests != nil || page.Tanner != nil {
 		t.Fatalf("expected no data queried without an ES client: %+v", page)
 	}
 }
 
-func TestSensorDetailDataPopulatesBothSensors(t *testing.T) {
+func TestSensorDetailDataPopulatesAllSensors(t *testing.T) {
 	docs := []map[string]any{
 		{"sensor": "mailoney", "event": "login", "session_id": "sess-1", "username": "a", "password": "b", "timestamp": "2026-08-16T10:00:00Z"},
 	}
@@ -235,5 +335,12 @@ func TestSensorDetailDataPopulatesBothSensors(t *testing.T) {
 	// just that both queries ran and both fields got populated once ok=true.
 	if len(page.HTTPRequests) != 1 {
 		t.Fatalf("expected 1 http-honeypot row once ok=true, got %d", len(page.HTTPRequests))
+	}
+	// The tanner query also gets this same mailoney-shaped doc back, but
+	// loadTannerRequests' legacy-peer-shape guard (no method/category
+	// field) filters it out -- len 0, not nil, since the query itself
+	// still succeeded (ok=true).
+	if page.Tanner == nil || len(page.Tanner) != 0 {
+		t.Fatalf("expected an empty (non-nil) tanner slice, got %+v", page.Tanner)
 	}
 }
