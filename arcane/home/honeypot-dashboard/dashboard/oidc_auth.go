@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -260,6 +261,14 @@ func (a *oidcAuth) middleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, withIdentity(r, identity))
 			return
 		}
+		// #1571: the success branch above has carried this since #1323, but
+		// every rejection response below never did -- an unauthenticated
+		// 401/503/redirect has no session data to leak, but it is still a
+		// point-in-time answer ("this session/cookie is not valid right
+		// now") that must not be cached and replayed once it no longer
+		// reflects reality, e.g. by an intermediate proxy on a response
+		// that (before this) carried no caching directive at all.
+		w.Header().Set("Cache-Control", "private, no-store")
 		if errors.Is(err, errIdentityUnavailable) {
 			http.Error(w, "identity service unavailable", http.StatusServiceUnavailable)
 			return
@@ -451,12 +460,21 @@ func (a *oidcAuth) identityFromRequest(r *http.Request) (authenticatedIdentity, 
 	var session oidcSession
 	if err := a.getJSON(r.Context(), "oidc:session:"+cookie.Value, &session); err != nil {
 		if errors.Is(err, errSessionNotFound) {
+			// #1571: a browser-driven fetch() on a page that renders as
+			// fully authenticated hitting this branch (rather than the
+			// no-cookie branch above) means the cookie was present and
+			// valid-looking but the store had nothing under it -- distinct
+			// from an ordinary anonymous visit, and the detail worth having
+			// the next time this is seen live.
+			logSessionReject(cookie.Value, "not found in session store", oidcSession{}, time.Time{}, nil)
 			return authenticatedIdentity{}, errIdentityUnauthorized
 		}
+		logSessionReject(cookie.Value, "session store unavailable", oidcSession{}, time.Time{}, err)
 		return authenticatedIdentity{}, errIdentityUnavailable
 	}
 	now := a.now().UTC()
 	if now.Sub(session.CreatedAt) > oidcSessionMaxAge || !validSubject(session.Identity.Subject) {
+		logSessionReject(cookie.Value, "exceeded max age or invalid subject", session, now, nil)
 		_ = a.sessions.Delete(r.Context(), "oidc:session:"+cookie.Value)
 		return authenticatedIdentity{}, errIdentityUnauthorized
 	}
@@ -490,8 +508,16 @@ func (a *oidcAuth) identityFromRequest(r *http.Request) (authenticatedIdentity, 
 				// both fall through isTransientOAuthError's own default
 				// (errors.As fails to match *oauth2.RetrieveError -> true),
 				// so they land here too, same as a real Keycloak outage.
+				logSessionReject(cookie.Value, "refresh failed (transient)", session, now, err)
 				return authenticatedIdentity{}, errIdentityUnavailable
 			}
+			// #1571: this is the branch worth seeing a literal Keycloak
+			// error string from -- a real invalid_grant here (as opposed to
+			// the transient/5xx case just above) is the "refresh token was
+			// genuinely already spent" case #1127's lock exists to prevent.
+			// If this ever fires for a session that had no business being
+			// logged out, the error text is the evidence.
+			logSessionReject(cookie.Value, "refresh failed (non-transient)", session, now, err)
 			_ = a.sessions.Delete(r.Context(), "oidc:session:"+cookie.Value)
 			return authenticatedIdentity{}, errIdentityUnauthorized
 		}
@@ -500,7 +526,10 @@ func (a *oidcAuth) identityFromRequest(r *http.Request) (authenticatedIdentity, 
 	if now.Sub(session.LastValidated) >= 30*time.Second {
 		if err := a.introspect(r.Context(), session.AccessToken, session.Identity.Subject); err != nil {
 			if errors.Is(err, errIdentityUnauthorized) {
+				logSessionReject(cookie.Value, "introspection reported inactive", session, now, nil)
 				_ = a.sessions.Delete(r.Context(), "oidc:session:"+cookie.Value)
+			} else {
+				logSessionReject(cookie.Value, "introspection unavailable", session, now, err)
 			}
 			return authenticatedIdentity{}, err
 		}
@@ -752,6 +781,38 @@ func clearCookie(w http.ResponseWriter, name string) {
 	cookie := secureCookie(name, "", -time.Hour)
 	cookie.MaxAge = -1
 	http.SetCookie(w, cookie)
+}
+
+// logSessionReject (#1571) is the only place identityFromRequest's rejection
+// branches write anything -- previously a live "authentication required" 401
+// against what looked like a perfectly valid session gave no way to tell
+// which of six different checks actually failed (missing from the store?
+// too old? revoked at Keycloak? a genuinely spent refresh token? a
+// transient outage?) after the fact, since a reload's fresh success
+// overwrites the evidence. now/lastValidated are logged as durations, not
+// timestamps, so this is safe to leave on permanently -- no session ID,
+// access/refresh/ID token, or other bearer credential is ever written here,
+// only a truncated session ID (identifies which session, but is not itself
+// usable to authenticate) and the operator's already-public subject/username.
+func logSessionReject(sessionID, reason string, session oidcSession, now time.Time, err error) {
+	detail := ""
+	if err != nil {
+		detail = fmt.Sprintf(": %v", err)
+	}
+	age, lastValidated := "n/a", "n/a"
+	if !now.IsZero() {
+		age = now.Sub(session.CreatedAt).Round(time.Second).String()
+		lastValidated = now.Sub(session.LastValidated).Round(time.Second).String()
+	}
+	fmt.Fprintf(os.Stderr, "dashboard: oidc: rejecting session %s (%s) -- subject=%s age=%s lastValidated=%s%s\n",
+		truncateSessionID(sessionID), reason, session.Identity.Subject, age, lastValidated, detail)
+}
+
+func truncateSessionID(id string) string {
+	if len(id) <= 8 {
+		return id
+	}
+	return id[:8] + "…"
 }
 
 func containsString(values []string, want string) bool {

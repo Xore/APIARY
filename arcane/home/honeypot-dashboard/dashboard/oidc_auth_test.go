@@ -834,4 +834,20 @@ func TestMiddlewareCacheControl(t *testing.T) {
 			t.Fatalf("Cache-Control = %q, want unset -- static assets never reach the identity-resolved branch", got)
 		}
 	})
+
+	// #1571: a rejected /api/* request (bad/expired cookie) used to carry no
+	// Cache-Control at all, unlike the success branch -- an intermediate
+	// cache had no explicit instruction not to keep and later replay that
+	// "not authenticated" answer past the point it stopped being true.
+	t.Run("a rejected API request also gets private, no-store", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodGet, "/api/whoami", nil)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+		}
+		if got := recorder.Header().Get("Cache-Control"); got != "private, no-store" {
+			t.Fatalf("Cache-Control = %q, want %q", got, "private, no-store")
+		}
+	})
 }
