@@ -19,6 +19,7 @@ use serde::Serialize;
 use std::{net::SocketAddr, sync::Arc};
 
 mod es;
+mod events;
 mod overview;
 
 #[derive(Clone)]
@@ -85,6 +86,7 @@ async fn main() -> anyhow::Result<()> {
 
     let api = Router::new()
         .route("/api/v1/overview/kpis", get(overview::kpis))
+        .route("/api/v1/events", get(events::list))
         .layer(middleware::from_fn_with_state(state.clone(), require_service_token));
 
     let app = Router::new()
