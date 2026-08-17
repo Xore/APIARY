@@ -323,6 +323,38 @@ func TestServeCanarytokensDownload(t *testing.T) {
 	}
 }
 
+// #1586: fakeCanarytokensServer's own /root/download always answers
+// "application/pdf" regardless of the requested fmt (see its own handler
+// above) -- exactly the scenario a real upstream mismatch would look like.
+// A windows_dir token (DownloadFmt "zip", ContentType "application/zip")
+// downloaded through it must still come back as application/zip: our own
+// statically-known type for what we asked for, not whatever the response
+// happened to carry. Before this fix, dl.ContentType (the upstream header)
+// won whenever it was merely non-empty, so this download would have come
+// back mislabeled as a PDF.
+func TestServeCanarytokensDownloadTrustsOwnContentTypeOverUpstream(t *testing.T) {
+	srv := fakeCanarytokensServer(t)
+	s := newCanarytokensTestStore(t, "admin", srv.URL)
+
+	createResp := httptest.NewRecorder()
+	s.serveCanarytokensCreate(createResp, multipartCanarytokensRequest(t, true, map[string]string{"token_type": "windows_dir", "memo": "m"}, "", "", nil))
+	if createResp.Code != http.StatusOK {
+		t.Fatalf("create failed: %d %s", createResp.Code, createResp.Body.String())
+	}
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/settings/canarytokens/faketoken123/download", nil)
+	request.SetPathValue("id", "faketoken123")
+	addIdentityTestCookie(request)
+	s.serveCanarytokensDownload(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if ct := response.Header().Get("Content-Type"); ct != "application/zip" {
+		t.Fatalf("Content-Type = %q, want application/zip (our own known type, not the upstream response's application/pdf)", ct)
+	}
+}
+
 func TestServeCanarytokensDownloadUnknownID(t *testing.T) {
 	srv := fakeCanarytokensServer(t)
 	s := newCanarytokensTestStore(t, "admin", srv.URL)

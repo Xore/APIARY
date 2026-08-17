@@ -650,6 +650,25 @@ func TestDionaeaConnectionDeduplication(t *testing.T) {
 	}
 }
 
+// #1586: canarytokens-adapter's own buildEvent stamps every webhook with
+// time.RFC3339 (second precision), so two genuinely distinct fires landing
+// in the same second -- e.g. Windows Explorer's own multiple near-
+// simultaneous file touches when a single Windows-folder token is opened --
+// share dedupeKey's ip/port/proto/detail/session fields along with a
+// same-second bucket. Before the sensor == "canarytokens" carve-out, that
+// collided and silently dropped one of the two real events, non-
+// deterministically across rebuild cycles (whichever the log tail happened
+// to read second lost) -- reported live as "fired, then vanished from the
+// list a moment later."
+func TestCanarytokensEventsAreNeverDeduplicated(t *testing.T) {
+	when := time.Unix(100, 0)
+	a := event{sensor: "canarytokens", ip: "203.0.113.7", proto: "windows_dir", detail: "token fired: bait share", when: when}
+	b := event{sensor: "canarytokens", ip: "203.0.113.7", proto: "windows_dir", detail: "token fired: bait share", when: when}
+	if dedupeKey(a) != "" || dedupeKey(b) != "" {
+		t.Fatalf("canarytokens events must opt out of dedupeKey entirely, got %q and %q", dedupeKey(a), dedupeKey(b))
+	}
+}
+
 func TestPayloadStaticAnalysis(t *testing.T) {
 	dir := t.TempDir()
 	name := strings.Repeat("a", 64)

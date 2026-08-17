@@ -170,7 +170,28 @@ func isOverviewNoise(ev storedEvent) bool {
 // dedupeKey removes duplicate representations of the same observation. This
 // matters most for Dionaea, where log_json and log_incident both describe a
 // connection. Rich payload/auth incidents retain their own detail and remain.
+//
+// #1586: canarytokens events opt out entirely. bucket below buckets by
+// ev.when.UnixNano(), but canarytokens-adapter's own buildEvent timestamps
+// every webhook with time.RFC3339 (second precision, no fractional part) --
+// every canarytokens event's UnixNano() therefore lands exactly on a second
+// boundary, collapsing this key's effective granularity to whole seconds for
+// this sensor specifically. ev.port is also always empty here (no
+// dst_port -- see classify.go's own canarytokens comment) and ev.session is
+// never set for it either, leaving only ip/proto/detail to distinguish two
+// events landing in the same second. A single "open this folder" in Windows
+// Explorer routinely fires the underlying trap via more than one near-
+// simultaneous OS-level file access (icon/thumbnail load, metadata read,
+// ...), well within a one-second window -- each a genuinely separate touch
+// worth keeping, not "two representations of the same connection" the way
+// Dionaea's own carve-out above exists for. Colliding here silently drops
+// one of them, and because aggregate.go recomputes this fresh from the log
+// tail every rebuild cycle, which one survives can differ cycle to cycle --
+// exactly the "fired, then vanished from the list a moment later" report.
 func dedupeKey(ev event) string {
+	if ev.sensor == "canarytokens" {
+		return ""
+	}
 	if ev.sensor == "" || ev.when.IsZero() {
 		return ""
 	}

@@ -261,9 +261,20 @@ func (s *store) serveCanarytokensDownload(w http.ResponseWriter, r *http.Request
 	if filename == "" {
 		filename = record.ID + info.FilenameSuffix
 	}
-	contentType := dl.ContentType
+	// #1586: prefer our own statically-known type (info.ContentType, set
+	// per canarytokensTokenType in canarytokensSupportedTypes -- we asked
+	// for exactly this DownloadFmt, so we already know what it must be)
+	// over whatever Content-Type the upstream response happened to carry.
+	// A QR-code PNG reported as "It looks like we don't support this file
+	// format" is consistent with the upstream response's own header not
+	// reliably matching the bytes for at least one format; trusting dl.
+	// ContentType whenever it's merely non-empty (the previous behavior)
+	// had no way to catch that. dl.ContentType is now only the fallback,
+	// for a download whose upstream Content-Type genuinely differs from
+	// what we expect -- more useful than serving no type at all.
+	contentType := info.ContentType
 	if contentType == "" {
-		contentType = info.ContentType
+		contentType = dl.ContentType
 	}
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
