@@ -95,7 +95,17 @@ const esOverviewAggQuery = `{
       "terms": {"field": "source.as.asn", "size": 12},
       "aggs": {"org": {"terms": {"field": "source.as.organization_name", "size": 1}}}
     },
-    "top_ips": {"terms": {"field": "source.ip", "size": 15}},
+    // #1565: unlike classify.go's own in-process read path (which drops
+    // loopback healthchecks and resolves the tunnel peer to a real
+    // attacker IP via the portbridge join before anything reaches an
+    // aggregate), this query reads source.ip straight off the raw ES
+    // documents -- so 127.0.0.1/::1 (container-local healthchecks) and
+    // 10.8.0.1 (the WireGuard tunnel peer, already broken out above as its
+    // own "unattributed" bucket) showed up ranked in Top source IPs as if
+    // they were real attackers. None of the three is ever a genuine
+    // external source, so all three are excluded here rather than left
+    // for a viewer to recognize and mentally discount.
+    "top_ips": {"terms": {"field": "source.ip", "size": 15, "exclude": ["127.0.0.1", "::1", "10.8.0.1"]}},
     "paths": {"terms": {"field": "url.path", "size": 15}},
     "heatmap": {
       "filter": {"range": {"@timestamp": {"gte": "now-24h"}}},
@@ -387,20 +397,22 @@ func (s *store) fetchESOverview(now time.Time) (*esOverview, bool) {
 	return out, true
 }
 
-// quantizeHeatmap fills in each cell's Pct the same way buildSensorHeatmap
-// (aggregate.go) already did: a single global scale (the busiest cell across
-// every row), not per-row, so a quiet sensor's own peak hour never reads as
-// visually "hot" as the noisiest sensor's.
+// quantizeHeatmap fills in each cell's Pct against its OWN row's busiest
+// cell, not a scale shared across every sensor (#1565: a single global max
+// meant a high-volume sensor like dionaea (~90k events/hour) saturated the
+// color scale while quiet sensors -- multipot, endlessh, galah -- rendered
+// every cell near-empty even during their own busiest hour, since none of
+// them ever got close to dionaea's peak). Per-row normalization means every
+// sensor's own peak hour reads as fully "hot", regardless of how its raw
+// volume compares to any other sensor's.
 func quantizeHeatmap(rows []heatmapRow) {
-	maxCell := 1
-	for _, row := range rows {
-		for _, c := range row.Cells {
+	for r := range rows {
+		maxCell := 1
+		for _, c := range rows[r].Cells {
 			if c.Count > maxCell {
 				maxCell = c.Count
 			}
 		}
-	}
-	for r := range rows {
 		for c := range rows[r].Cells {
 			count := rows[r].Cells[c].Count
 			var pct int

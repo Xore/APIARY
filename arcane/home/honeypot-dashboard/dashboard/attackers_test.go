@@ -245,7 +245,12 @@ func TestAttackersFragmentRoute(t *testing.T) {
 	if !strings.Contains(body, ">7<") {
 		t.Errorf("fragment missing the selected entity's own event count, got: %s", body)
 	}
-	if !strings.Contains(body, `id="attackers-selected-meta"`) || strings.Count(body, `class="card"`) < 9 {
+	// #1540: the 9-card metadata grid split into two -- "attackers-overview-cards"
+	// (Identity, Observed activity, Sensors, Member IPs) and
+	// "attackers-indicators-cards" (Credential pairs, Fingerprints, Payload
+	// hashes, Ghidra verdicts, ATT&CK techniques) -- so hp-attackers-detail.js
+	// can swap each into its matching data-dashboard-panel in the shell.
+	if !strings.Contains(body, `id="attackers-overview-cards"`) || !strings.Contains(body, `id="attackers-indicators-cards"`) || strings.Count(body, `class="card"`) < 9 {
 		t.Errorf("fragment must render every selected identity category as a card, got: %s", body)
 	}
 	if !strings.Contains(body, "No credential pairs recorded for this identity.") ||

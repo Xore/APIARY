@@ -29,6 +29,7 @@
         <div class="tabs" role="tablist" aria-label="Sensor sections">
           <button class="tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-sd-mailoney" data-dashboard-tab="sd-mailoney"><span>01</span>Mailoney (SMTP)</button>
           <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-sd-http" data-dashboard-tab="sd-http"><span>02</span>HTTP honeypot</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-sd-tanner" data-dashboard-tab="sd-tanner"><span>03</span>Tanner (web emulator)</button>
         </div>
 
         <div class="dashboard-panel" id="panel-sd-mailoney" role="tabpanel" data-dashboard-panel="sd-mailoney">
@@ -81,6 +82,39 @@
               </tbody>
             </table></div>
             {{else}}<p class="empty">No http-honeypot activity recorded in the last 48h.</p>{{end}}
+          </div>
+        </div>
+
+        <div class="dashboard-panel" id="panel-sd-tanner" role="tabpanel" data-dashboard-panel="sd-tanner" hidden>
+          <div class="card wide" data-hp-md-generic>
+            <div class="card__header">
+              <div><h2>Tanner requests</h2><p class="card__meta">Every request tanner's web emulator handled &mdash; submitted POST fields, cookies, and (when one of its 10 emulators matched) the attack detection and captured execution result. Newest first, last 48h.</p></div>
+            </div>
+            {{if .Tanner}}
+            <div class="card__scroll"><table class="data-table">
+              <thead><tr><th>time</th><th>source</th><th>method</th><th>path</th><th>user-agent</th><th>request detail</th></tr></thead>
+              <tbody>
+                {{range .Tanner}}<tr>
+                  <td{{if .When}} data-hp-utc="{{.When}}"{{end}}>{{.When}}</td>
+                  <td class="v"><a href="/events?ip={{.IP | urlquery}}">{{.IP}}</a></td>
+                  <td class="v">{{.Method}}</td>
+                  <td class="v">{{.Path}}</td>
+                  <td class="v">{{if .UserAgent}}{{.UserAgent}}{{else}}<span class="tw:text-muted">&mdash;</span>{{end}}</td>
+                  <td class="v">
+                    {{if or .Username .Password}}<div>auth: <span class="card__value--mono">{{.Username}} / {{.Password}}</span></div>{{end}}
+                    {{if .Tarpitted}}<div>tarpitted {{.TarpitMS}}ms, {{.TarpitBytes}} bytes</div>{{end}}
+                    {{if and .DetectionName (ne .DetectionName "index")}}<div>detection: <span class="card__value--mono">{{.DetectionName}}</span></div>{{end}}
+                    {{if .DetectionPayload}}<details><summary>execution result</summary><pre class="code">{{.DetectionPayload}}</pre></details>{{end}}
+                    {{if or .PostData .Cookies .Headers}}<details><summary>headers / post data / cookies</summary>{{if .Headers}}<pre class="code">{{range $k, $v := .Headers}}{{$k}}: {{$v}}
+{{end}}</pre>{{end}}{{if .PostData}}<pre class="code">{{range $k, $v := .PostData}}{{$k}}={{$v}}
+{{end}}</pre>{{end}}{{if .Cookies}}<pre class="code">{{range $k, $v := .Cookies}}{{$k}}={{$v}}
+{{end}}</pre>{{end}}</details>{{end}}
+                    {{if not (or .Username .Password .Tarpitted .DetectionPayload .PostData .Cookies .Headers)}}<span class="tw:text-muted">&mdash;</span>{{end}}
+                  </td>
+                </tr>{{end}}
+              </tbody>
+            </table></div>
+            {{else}}<p class="empty">No tanner activity recorded in the last 48h.</p>{{end}}
           </div>
         </div>
         {{end}}

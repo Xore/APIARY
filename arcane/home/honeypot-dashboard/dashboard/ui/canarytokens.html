@@ -44,13 +44,43 @@
                 <tr class="hp-table-state" aria-hidden="true"><td class="hp-skeleton-cell" colspan="5"><span class="skeleton-line" style="width:74%"></span></td></tr>
               </tbody>
             </table></div>
-            {{/* Design refresh (pick 8B): icon + title + hint + action. */}}
+            {{/* Design refresh (pick 8B), extended per #1575: icon + title +
+                 hint above a dashed divider, then a gallery of common token
+                 types that jump into Create bait with that type preselected
+                 (claude.ai's Scheduled-page template-gallery pattern) in
+                 place of the old single generic "Create bait" action. */}}
           <div class="empty-state" id="ct-tokens-empty" role="status" aria-live="polite" hidden>
             <div>
               <div class="empty-state__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><line x1="12" y1="3" x2="12" y2="8"/><line x1="12" y1="16" x2="12" y2="21"/><line x1="3" y1="12" x2="8" y2="12"/><line x1="16" y1="12" x2="21" y2="12"/></svg></div>
               <div class="empty-state__title">No canarytokens yet</div>
               <p class="empty-state__hint">Plant tokens outside the honeypot and track everything that fires &mdash; nothing here re-fires a token.</p>
-              <a class="empty-state__action" href="#ct-create"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Create bait</a>
+              <hr class="empty-state__divider">
+              <div class="template-gallery" id="ct-tokens-gallery" role="group" aria-label="Common token types">
+                <button type="button" class="template-card" data-token-type="ms_word">
+                  <span class="template-card__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>
+                  <span class="template-card__title">Fake .docx</span>
+                  <span class="template-card__desc">A real Word doc that phones home the moment it's opened.</span>
+                  <span class="chip">Document</span>
+                </button>
+                <button type="button" class="template-card" data-token-type="qr_code">
+                  <span class="template-card__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><line x1="14" y1="14" x2="14" y2="21"/><line x1="21" y1="14" x2="21" y2="21"/><line x1="17.5" y1="14" x2="17.5" y2="17.5"/><line x1="17.5" y1="17.5" x2="21" y2="17.5"/></svg></span>
+                  <span class="template-card__title">QR code</span>
+                  <span class="template-card__desc">A PNG QR code that fires when scanned and opened.</span>
+                  <span class="chip">Image</span>
+                </button>
+                <button type="button" class="template-card" data-token-type="windows_dir">
+                  <span class="template-card__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
+                  <span class="template-card__title">Windows folder</span>
+                  <span class="template-card__desc">Fires the moment the folder opens in Explorer.</span>
+                  <span class="chip">Folder</span>
+                </button>
+                <button type="button" class="template-card" data-token-type="web_image">
+                  <span class="template-card__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></span>
+                  <span class="template-card__title">Web bug image</span>
+                  <span class="template-card__desc">An embeddable image that fires when it loads anywhere.</span>
+                  <span class="chip">Embed</span>
+                </button>
+              </div>
             </div>
           </div>
             <p class="card__meta" id="ct-tokens-error" role="alert" hidden></p>

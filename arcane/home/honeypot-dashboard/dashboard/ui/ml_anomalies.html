@@ -26,9 +26,23 @@
         {{if not .Enabled}}
         <p class="empty">Elasticsearch integration is disabled, so ml-worker anomaly scores cannot be polled. Set ELASTICSEARCH_URL to enable this page.</p>
         {{else}}
-        <div class="filters" id="ml-filters"><a class="chip" href="/">&larr; dashboard</a>{{template "filterbar" .}}</div>
+        {{/* #1566: ~40 identical per-row acknowledge buttons with no way to
+             clear the backlog at once -- same "acknowledge all (N)" bulk
+             action /alerts already has (alerts.html's data-hp-alert-ack-all
+             button), reusing hp-modals.js's existing generic
+             confirm-before-submit listener (data-hp-confirm-* attributes,
+             same convention ghidra.html/sandbox.html/github_analysis.html
+             already use for their own re-analyze forms) rather than
+             alerts.html's separate fetch-driven board, since this page is
+             otherwise plain server-rendered forms, not client-side fetch. */}}
+        <div class="filters" id="ml-filters"><a class="chip" href="/">&larr; dashboard</a>{{if gt .OpenCount 0}}<form method="post" action="/ml-anomalies/ack-all" class="inline-form" data-hp-confirm-title="Acknowledge every open anomaly?" data-hp-confirm-description="Acknowledging suppresses these from the open backlog until each is reopened individually." data-hp-confirm-warning="{{.OpenCount}} open anomal{{if eq .OpenCount 1}}y{{else}}ies{{end}} across the full history, not just the current filter." data-hp-confirm-label="Acknowledge all"><input type="hidden" name="return" value="/ml-anomalies"><button class="btn btn-sm btn-secondary" type="submit">acknowledge all ({{.OpenCount}})</button></form>{{end}}{{template "filterbar" .}}</div>
         <div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-4 tw:gap-3 tw:mb-6" id="ml-kpis">
           <div class="metric"><div class="metric__value">{{.Stats.Total24h}}</div><div class="metric__label">Anomalies, 24h</div></div>
+          {{/* #1566: a "0 in 24h" tile directly above a table full of
+               week-old open items read as "nothing to do here" when the
+               real backlog was 40 rows -- surface it alongside the 24h
+               count instead of only inside the bulk-ack button's label. */}}
+          <div class="metric"><div class="metric__value">{{.OpenCount}}</div><div class="metric__label">Open (all time)</div></div>
           {{range .Stats.BySeverity}}<div class="metric"><div class="metric__value">{{.Count}}</div><div class="metric__label">{{.Key}}</div></div>{{end}}
         </div>
         <div class="tw:grid tw:grid-cols-12 tw:gap-3.5" id="ml-grid">

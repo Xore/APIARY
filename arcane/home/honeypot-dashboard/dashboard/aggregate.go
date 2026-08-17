@@ -132,7 +132,14 @@ func (s *store) rebuild() {
 		if ev.command != "" {
 			// Keep the sensor in the aggregate key so the command drill-down
 			// can link to the exact source as well as the command text.
-			commands[ev.sensor+"\x00"+ev.command]++
+			// #1565: trim before keying -- cowrie's raw "input" field
+			// sometimes carries a trailing \r/\n or padding that the
+			// display side (compactText, below) already strips, so the
+			// SAME attacker command could split into two map entries that
+			// rendered as visually identical duplicate rows with the
+			// count divided between them. Aggregating on the trimmed text
+			// merges those back into one row with the real total count.
+			commands[ev.sensor+"\x00"+strings.TrimSpace(ev.command)]++
 		}
 		// Capture/decoder health warnings remain searchable in /events but
 		// should not be presented as attacker detections on the overview.

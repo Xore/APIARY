@@ -147,20 +147,52 @@
           <div class="metric"><div class="metric__value">{{.PayloadCount}}</div><div class="metric__label">Payload observations</div></div>
         </div>
 
-        <div class="tw:grid tw:grid-cols-12 tw:gap-3.5" id="attacker-grid">
-          {{template "tbl" (dict "t" "Sensors contacted" "rows" .Sensors "class" "half" "hint" "none")}}
-          {{template "tbl" (dict "t" "Credentials attempted" "rows" .Creds "class" "half" "hint" "none")}}
-          {{template "tbl" (dict "t" "Commands" "rows" .Commands "class" "half" "hint" "none")}}
-          {{template "tbl" (dict "t" "HTTP paths" "rows" .Paths "class" "half" "hint" "none")}}
-          {{template "tbl" (dict "t" "Payload hashes" "rows" .Payloads "class" "half" "hint" "none")}}
-          {{template "tbl" (dict "t" "Alerts" "rows" .Alerts "class" "half" "hint" "none")}}
-          {{template "tbl" (dict "t" "Fingerprints" "rows" .Fingerprints "class" "half" "hint" "none")}}
-          {{template "techniques" .Techniques}}
-          <div class="wide" id="attacker-correlation-root" data-hp-correlation-fragment-url="/investigate/ip/{{.IP | urlquery}}/fragment" aria-busy="true">
-            <div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:gap-3 tw:mb-4" aria-hidden="true"><div class="metric"><div class="metric__value skeleton-line"></div><div class="metric__label">Total ES matches</div></div><div class="metric"><div class="metric__value skeleton-line"></div><div class="metric__label">Tunnel connections</div></div><div class="metric"><div class="metric__value skeleton-line"></div><div class="metric__label">Distinct sensors</div></div></div>
-            <div class="card wide"><h2>Elasticsearch correlation</h2><p class="note"><span class="skeleton-line" style="width:78%"></span></p><div class="card__scroll"><table class="recent data-table" aria-hidden="true"><thead><tr><th>time</th><th>sensor</th><th>summary</th></tr></thead><tbody><tr><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td></tr><tr><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td></tr><tr><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td></tr></tbody></table></div></div>
+        {{/* #1541: the profile page's 10 cards genuinely sprawl, unlike the
+             single-table /ips list left untabbed (#1540 used the same
+             single-table-stays-flat reasoning for attackers.html's
+             directory table). Same generic data-dashboard-tab/
+             data-dashboard-panel convention hp-app.js's activateDashboardTab
+             already drives elsewhere (tty_replay.html, sandbox.html, ...);
+             no page-specific JS needed here. hp-intel-detail.js's fragment
+             hydration (attacker-correlation-root / attacker-block-root)
+             fetches and populates by element regardless of the "hidden"
+             attribute on an ancestor panel, and neither fragment carries a
+             map/chart that would need a reveal-time resize call the way
+             tty_replay's attacker-replay map does via activateDashboardTab's
+             own leaflet invalidateSize -- so the correlation panel starting
+             hidden needs no extra handling. */}}
+        <div class="tabs" role="tablist" aria-label="Attacker profile views">
+          <button class="tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-activity" data-dashboard-tab="activity"><span>01</span>Activity</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-indicators" data-dashboard-tab="indicators"><span>02</span>Indicators</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-correlation" data-dashboard-tab="correlation"><span>03</span>Correlation &amp; timeline</button>
+        </div>
+
+        <div class="dashboard-panel" id="panel-activity" role="tabpanel" data-dashboard-panel="activity">
+          <div class="tw:grid tw:grid-cols-12 tw:gap-3.5">
+            {{template "tbl" (dict "t" "Sensors contacted" "rows" .Sensors "class" "half" "hint" "none")}}
+            {{template "tbl" (dict "t" "Credentials attempted" "rows" .Creds "class" "half" "hint" "none")}}
+            {{template "tbl" (dict "t" "Commands" "rows" .Commands "class" "half" "hint" "none")}}
+            {{template "tbl" (dict "t" "HTTP paths" "rows" .Paths "class" "half" "hint" "none")}}
           </div>
-          <div class="card wide"><h2>Attack progression</h2><p class="note">Chronological, oldest to newest; capped to the latest 250 matching records.</p><div class="card__scroll"><table class="recent data-table data-table--responsive"><thead><tr><th>time</th><th>sensor</th><th>source ip</th><th>port</th><th>detail</th></tr></thead><tbody>{{range .Events}}{{template "everow" .}}{{end}}</tbody></table></div></div>
+        </div>
+
+        <div class="dashboard-panel" id="panel-indicators" role="tabpanel" data-dashboard-panel="indicators" hidden>
+          <div class="tw:grid tw:grid-cols-12 tw:gap-3.5">
+            {{template "tbl" (dict "t" "Payload hashes" "rows" .Payloads "class" "half" "hint" "none")}}
+            {{template "tbl" (dict "t" "Alerts" "rows" .Alerts "class" "half" "hint" "none")}}
+            {{template "tbl" (dict "t" "Fingerprints" "rows" .Fingerprints "class" "half" "hint" "none")}}
+            {{template "techniques" .Techniques}}
+          </div>
+        </div>
+
+        <div class="dashboard-panel" id="panel-correlation" role="tabpanel" data-dashboard-panel="correlation" hidden>
+          <div class="tw:grid tw:grid-cols-12 tw:gap-3.5">
+            <div class="wide" id="attacker-correlation-root" data-hp-correlation-fragment-url="/investigate/ip/{{.IP | urlquery}}/fragment" aria-busy="true">
+              <div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:gap-3 tw:mb-4" aria-hidden="true"><div class="metric"><div class="metric__value skeleton-line"></div><div class="metric__label">Total ES matches</div></div><div class="metric"><div class="metric__value skeleton-line"></div><div class="metric__label">Tunnel connections</div></div><div class="metric"><div class="metric__value skeleton-line"></div><div class="metric__label">Distinct sensors</div></div></div>
+              <div class="card wide"><h2>Elasticsearch correlation</h2><p class="note"><span class="skeleton-line" style="width:78%"></span></p><div class="card__scroll"><table class="recent data-table" aria-hidden="true"><thead><tr><th>time</th><th>sensor</th><th>summary</th></tr></thead><tbody><tr><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td></tr><tr><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td></tr><tr><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td></tr></tbody></table></div></div>
+            </div>
+            <div class="card wide"><h2>Attack progression</h2><p class="note">Chronological, oldest to newest; capped to the latest 250 matching records.</p><div class="card__scroll"><table class="recent data-table data-table--responsive"><thead><tr><th>time</th><th>sensor</th><th>source ip</th><th>port</th><th>detail</th></tr></thead><tbody>{{range .Events}}{{template "everow" .}}{{end}}</tbody></table></div></div>
+          </div>
         </div>
 
         <footer id="attacker-footer">{{brandText}} &bull; attacker investigation</footer>

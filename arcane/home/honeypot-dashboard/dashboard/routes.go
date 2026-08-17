@@ -434,6 +434,7 @@ func (s *store) routes(tmpl *template.Template) *http.ServeMux {
 	mux.HandleFunc("POST /gpu-queue/abort", serveGPUQueueAbort)
 	mux.HandleFunc("POST /github-analysis/submit", s.serveGitHubAnalysisSubmit)
 	mux.HandleFunc("POST /ml-anomalies/ack", s.serveMLAnomalyAck)
+	mux.HandleFunc("POST /ml-anomalies/ack-all", s.serveMLAnomalyAckAll)
 	// #1139: the standalone artifact-selection index merged into /payloads'
 	// second tab -- old bookmarks/links redirect rather than 404.
 	mux.HandleFunc("GET /payload-workbench", func(w http.ResponseWriter, r *http.Request) {
@@ -565,6 +566,16 @@ func (s *store) routes(tmpl *template.Template) *http.ServeMux {
 		data := s.get()
 		data.Ready = s.ready.Load()
 		renderPage(w, tmpl, "page", &data)
+	})
+	// #1575: humane 404 -- every route above is either an exact path or a
+	// "/prefix/" wildcard, both strictly more specific than a bare "/" in
+	// net/http.ServeMux's (1.22+) pattern matching, so this only ever fires
+	// once nothing else has claimed the request. Replaces the previous
+	// default (an unmatched path silently falling through to ServeMux's own
+	// bare "404 page not found" text response) with this dashboard's own
+	// chrome and empty-state voice.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		renderPageStatus(w, tmpl, "notfound", &notFoundPage{}, http.StatusNotFound)
 	})
 
 	return mux

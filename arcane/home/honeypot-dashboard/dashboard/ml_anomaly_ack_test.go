@@ -250,3 +250,106 @@ func TestServeMLAnomalyAckRejectsCrossOrigin(t *testing.T) {
 		t.Fatalf("status=%d, want 403", w.Code)
 	}
 }
+
+// acknowledgeAllKeys (#1566) must flip every key it's given and skip blanks
+// -- mirrors alertManager.acknowledgeAll's "changed" count, but keyed off a
+// caller-supplied ID list rather than its own index scan (see the method's
+// own doc comment for why: ml-worker, not this manager, owns anomaly
+// identity).
+func TestMLAnomalyAcknowledgeAllKeysAcknowledgesEveryKey(t *testing.T) {
+	m := newTestMLAnomalyAckManager(t)
+	changed := m.acknowledgeAllKeys([]string{"anomaly-1", "anomaly-2", "", "anomaly-3"}, "alice")
+	if changed != 3 {
+		t.Fatalf("acknowledgeAllKeys changed = %d, want 3", changed)
+	}
+	acked := m.acknowledged()
+	for _, key := range []string{"anomaly-1", "anomaly-2", "anomaly-3"} {
+		if !acked[key].Acknowledged {
+			t.Errorf("%s not acknowledged: %+v", key, acked)
+		}
+	}
+}
+
+func newTestMLAnomaliesStore(t *testing.T, items ...mlAnomaly) *mlAnomalyStore {
+	t.Helper()
+	c := &mlAnomalyStore{}
+	c.absorb(items)
+	return c
+}
+
+// serveMLAnomalyAckAll's "acknowledge all" must act on every currently
+// unacknowledged anomaly in the full polled snapshot -- not just whatever a
+// filter bar happens to be narrowing the page to -- the same "every open
+// one, plus anything the page doesn't show" semantics /alerts' own
+// acknowledge-all uses (alerts_test.go's
+// TestAcknowledgeAllCoversRecordsThePageNeverShows).
+func TestServeMLAnomalyAckAllAcknowledgesEveryOpenAnomaly(t *testing.T) {
+	acks := newTestMLAnomalyAckManager(t)
+	anomalies := newTestMLAnomaliesStore(t,
+		mlAnomaly{AnomalyID: "anomaly-1", Timestamp: "2026-08-01T12:00:00Z"},
+		mlAnomaly{AnomalyID: "anomaly-2", Timestamp: "2026-08-01T12:01:00Z"},
+	)
+	// anomaly-2 is already acknowledged going in -- acknowledgeAllKeys must
+	// not be asked to touch it again (acknowledged() below would still show
+	// it acknowledged either way, but re-acking would be wasted ES writes).
+	if !acks.acknowledge("anomaly-2", true, "bob") {
+		t.Fatal("seed acknowledge failed")
+	}
+	acks.refresh()
+	s := &store{mlAnomalyAcks: acks, mlAnomalies: anomalies}
+
+	r := httptest.NewRequest(http.MethodPost, "https://honeypot.example/ml-anomalies/ack-all",
+		strings.NewReader("return=/ml-anomalies"))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("Origin", "https://honeypot.example")
+	w := httptest.NewRecorder()
+	s.serveMLAnomalyAckAll(w, r)
+
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if loc := w.Header().Get("Location"); loc != "/ml-anomalies" {
+		t.Fatalf("Location = %q, want /ml-anomalies", loc)
+	}
+	acked := s.mlAnomalyAcks.acknowledged()
+	if !acked["anomaly-1"].Acknowledged {
+		t.Fatalf("anomaly-1 not acknowledged: %+v", acked)
+	}
+	if !acked["anomaly-2"].Acknowledged {
+		t.Fatalf("anomaly-2 (already acked) should still show acknowledged: %+v", acked)
+	}
+}
+
+func TestServeMLAnomalyAckAllRequiresPOST(t *testing.T) {
+	s := &store{mlAnomalyAcks: newTestMLAnomalyAckManager(t), mlAnomalies: newTestMLAnomaliesStore(t)}
+	r := httptest.NewRequest(http.MethodGet, "https://honeypot.example/ml-anomalies/ack-all", nil)
+	w := httptest.NewRecorder()
+	s.serveMLAnomalyAckAll(w, r)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status=%d, want 405", w.Code)
+	}
+}
+
+func TestServeMLAnomalyAckAllRefusedWhenUnconfigured(t *testing.T) {
+	s := &store{}
+	r := httptest.NewRequest(http.MethodPost, "https://honeypot.example/ml-anomalies/ack-all", strings.NewReader(""))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("Origin", "https://honeypot.example")
+	w := httptest.NewRecorder()
+	s.serveMLAnomalyAckAll(w, r)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d, want 503", w.Code)
+	}
+}
+
+func TestServeMLAnomalyAckAllRejectsCrossOrigin(t *testing.T) {
+	s := &store{mlAnomalyAcks: newTestMLAnomalyAckManager(t), mlAnomalies: newTestMLAnomaliesStore(t)}
+	r := httptest.NewRequest(http.MethodPost, "https://honeypot.example/ml-anomalies/ack-all", strings.NewReader(""))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("Origin", "https://evil.example")
+	w := httptest.NewRecorder()
+	s.serveMLAnomalyAckAll(w, r)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status=%d, want 403", w.Code)
+	}
+}

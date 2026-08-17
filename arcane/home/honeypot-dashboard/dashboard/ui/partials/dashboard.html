@@ -30,7 +30,12 @@
 <aside class="app-sidebar" aria-label="Primary navigation">
   {{/* Design refresh: claude.ai-style search affordance in the sidebar's
        top row -- one more opener for the same investigation palette. */}}
-  <button class="hp-sidebar-search" type="button" data-hp-command-palette-open aria-label="Search and investigate" title="Search and investigate (press /)">
+  {{/* #1575: "Title · shortcut" is this shell's one tooltip convention for
+       a genuinely key-bound action -- hp-app.js's own "/" keydown listener
+       opens this same palette; every other icon button in the shell
+       (sidebar toggle, theme, live, alerts, avatar) has no bound shortcut
+       to advertise, so none gained one here. */}}
+  <button class="hp-sidebar-search" type="button" data-hp-command-palette-open aria-label="Search and investigate" title="Search and investigate &middot; /">
     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
   </button>
   <a href="/" class="hp-brand">
@@ -274,7 +279,7 @@
 {{end}}
 
 {{define "tbl"}}
-<div class="card {{.class}}">
+<div class="card {{.class}}"{{if .id}} id="{{.id}}"{{end}}>
   <h2>{{.t}}</h2>
   {{if .rows}}
   {{/* #790: card__scroll (the same pattern overview.html's Sensor feeds and
