@@ -491,10 +491,13 @@ p { color: var(--text-secondary); }
   align-items: center;
   justify-content: center;
   gap: 7px;
-  padding: 7px 13px;
+  padding: 7px 15px;
   border: 1px solid transparent;
-  border-radius: var(--radius-control);
-  background: transparent;
+  /* Design refresh 2 (pick 6E, supersedes 6D): claude.ai's actual buttons
+     -- quiet surface pills, fully rounded, no borders; only the primary
+     carries the accent as a solid fill (below). */
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
   color: var(--text-primary);
   font-size: var(--font-size-footnote);
   font-weight: 500;
@@ -510,15 +513,14 @@ p { color: var(--text-secondary); }
 .btn:active { transform: translateY(1px); }
 .btn:disabled { opacity: 0.42; cursor: not-allowed; transform: none; }
 .btn svg { width: 15px; height: 15px; }
+.btn:hover { background: var(--surface-3); }
 .btn-primary {
-  /* Design refresh (pick 6D): only the primary carries color, as an accent
-     outline -- the inverted fill read heavier than anything else on the
-     page and made every action row shout. */
-  border-color: var(--accent);
-  background: transparent;
-  color: var(--accent);
+  /* 6E: the one solid accent pill on the page. */
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-weight: 600;
 }
-.btn-primary:hover { background: var(--accent-soft); color: var(--accent-hover); }
+.btn-primary:hover { background: var(--accent-hover); color: var(--text-on-accent); }
 /* #1531 (APIARY): surface-1 sits only one step above --app-bg -- next to a
    real .btn-primary (an inverted, high-contrast fill) in an Apply/Reset or
    Filter/Reset pair, it read flat and barely-there rather than as a
@@ -528,20 +530,18 @@ p { color: var(--text-secondary); }
    idle, surface-hover/3 on interaction -- so this gives .btn-secondary that
    same, already-established two-step presence instead of a new one. */
 .btn-secondary {
-  /* Design refresh (pick 6D): ghost by default -- chrome appears on hover,
-     not before. The two-step #1531 presence now lives in the hover pair. */
-  border-color: transparent;
-  background: transparent;
+  /* 6E: secondary == the quiet surface pill the base .btn already is. */
+  background: var(--surface-2);
   color: var(--text-primary);
 }
-.btn-secondary:hover { background: var(--surface-2); border-color: var(--border-strong); }
+.btn-secondary:hover { background: var(--surface-3); }
 .btn-ghost { color: var(--text-secondary); }
 .btn-ghost:hover { background: var(--surface-2); color: var(--text-primary); }
-.btn-danger { border-color: color-mix(in srgb, var(--danger) 50%, transparent); background: transparent; color: var(--danger); }
+.btn-danger { background: var(--danger-soft); color: var(--danger-text-on-soft); }
 .btn-danger:hover { background: var(--danger-soft); }
 .btn-sm { min-height: 28px; padding: 5px 9px; font-size: var(--font-size-caption); }
 .btn-lg { min-height: 42px; padding: 10px 17px; font-size: var(--font-size-body); }
-.btn-icon { width: 32px; min-height: 32px; padding: 0; border-radius: var(--radius-control); }
+.btn-icon { width: 32px; min-height: 32px; padding: 0; border-radius: var(--radius-pill); }
 
 .form-group { margin-bottom: 16px; }
 .form-label {
@@ -666,9 +666,12 @@ select.form-input { cursor: pointer; }
   flex-direction: column;
   margin-bottom: 14px;
   padding: var(--space-lg) var(--space-xl);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-panel);
+  /* Design refresh 2 (pick 1E, supersedes 1D): claude floating surface --
+     borderless, big radius, soft layered shadow. */
+  border: 0;
+  border-radius: 20px;
   background: var(--surface-1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .10), 0 8px 28px rgba(0, 0, 0, .12);
 }
 .card--raised { background: var(--surface-raised); border-color: var(--border-strong); box-shadow: var(--shadow-raised); }
 .card__title { margin-bottom: 4px; color: var(--text-primary); font-size: var(--font-size-body); font-weight: 600; }
@@ -737,13 +740,18 @@ select.form-input { cursor: pointer; }
 }
 .metric {
   min-width: 0;
-  padding: var(--space-md) var(--space-lg);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-panel);
-  background: var(--surface-1);
+  padding: var(--space-sm) var(--space-lg);
+  /* Design refresh 2 (pick 3E): boxless stat strip -- no tile chrome, a
+     hairline divider between neighbours (grid gaps keep them apart; the
+     border marks the seam), serif numerals. */
+  border: 0;
+  border-left: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: transparent;
 }
+.metric:first-child { border-left: 0; padding-left: 0; }
 .metric__label { color: var(--text-muted); font-size: var(--font-size-xs); }
-.metric__value { margin-top: 6px; color: var(--text-primary); font-size: 24px; font-weight: 600; letter-spacing: -0.03em; }
+.metric__value { margin-top: 6px; color: var(--text-primary); font-family: var(--font-serif); font-size: 26px; font-weight: 500; letter-spacing: -0.01em; }
 .metric__trend { margin-top: 4px; color: var(--text-secondary); font-size: var(--font-size-xs); }
 /* Discrete, server-chosen modifiers (not a per-element continuous value),
    so unlike .mini-chart/.heatmap below this needs no CSP.md nonce pattern.
@@ -873,14 +881,27 @@ select.form-input { cursor: pointer; }
   text-decoration: none;
 }
 .badge--accent { background: var(--accent-soft); color: var(--accent-text-on-soft); }
-/* Design refresh (pick 5D): status badges are solid fills. The fills are
-   the mid-tone state colors, readable against both themes' grounds; text is
-   a fixed near-black of each hue for AA contrast on the fill itself, so the
-   pair never depends on which theme is active. */
-.badge--green, .badge--success { background: var(--success-badge-fill); color: #0d2417; }
-.badge--blue, .badge--info { background: var(--info-badge-fill); color: #0f1b26; }
-.badge--orange, .badge--warning { background: var(--warning-badge-fill); color: #2a2008; }
-.badge--red, .badge--danger { background: var(--danger-badge-fill); color: #2b1312; }
+/* Design refresh 2 (pick 5E, supersedes 5D's solid fills -- and #82's
+   --*-badge-fill light-theme retune of them, which the neutral-chip
+   design no longer needs; the dot uses the badge-fill token so it
+   keeps #82's light-theme legibility): one quiet neutral chip
+   everywhere; only a leading dot and the ink carry the status hue.
+   Ink uses the *-text-on-soft tokens (#82's raised AA values). */
+.badge--green, .badge--success, .badge--blue, .badge--info,
+.badge--orange, .badge--warning, .badge--red, .badge--danger { background: var(--surface-2); }
+.badge--green::before, .badge--success::before, .badge--blue::before, .badge--info::before,
+.badge--orange::before, .badge--warning::before, .badge--red::before, .badge--danger::before {
+  content: ""; display: inline-block; width: 6px; height: 6px;
+  border-radius: 50%; margin-right: 6px; background: currentColor;
+}
+.badge--green, .badge--success { color: var(--success-text-on-soft); }
+.badge--green::before, .badge--success::before { background: var(--success-badge-fill); }
+.badge--blue, .badge--info { color: var(--info-text-on-soft); }
+.badge--blue::before, .badge--info::before { background: var(--info-badge-fill); }
+.badge--orange, .badge--warning { color: var(--warning-text-on-soft); }
+.badge--orange::before, .badge--warning::before { background: var(--warning-badge-fill); }
+.badge--red, .badge--danger { color: var(--danger-text-on-soft); }
+.badge--red::before, .badge--danger::before { background: var(--danger-badge-fill); }
 .badge--critical { border: 1px solid color-mix(in srgb, var(--critical) 45%, transparent); background: var(--critical-soft); color: var(--critical-text-on-soft); }
 .badge--muted { border: 1px solid var(--border-subtle); }
 .badge--current { background: var(--info-soft); color: var(--info-text-on-soft); }
@@ -905,24 +926,30 @@ select.form-input { cursor: pointer; }
 
 .tabs {
   display: inline-flex;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--border-subtle);
-  border-radius: calc(var(--radius-control) + 3px);
-  background: var(--surface-1);
+  gap: 6px;
+  /* Design refresh 2 (pick 7E): free-standing pills, no container box --
+     the active one floats raised on a soft shadow. */
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 .tab {
   min-height: 28px;
-  padding: 5px 10px;
+  padding: 5px 14px;
   border: 0;
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-pill);
   background: transparent;
   color: var(--text-secondary);
   font-size: var(--font-size-caption);
   cursor: pointer;
 }
-.tab:hover { color: var(--text-primary); }
-.tab.active, .tab[aria-selected="true"] { background: var(--surface-3); color: var(--text-primary); }
+.tab:hover { color: var(--text-primary); background: var(--surface-2); }
+.tab.active, .tab[aria-selected="true"] {
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .18);
+}
 
 .data-table {
   width: 100%;
@@ -1085,7 +1112,9 @@ select.form-input { cursor: pointer; }
   background: var(--surface-2);
   color: var(--text-muted);
 }
-.empty-state h3 { margin-bottom: 5px; font-family: var(--font-display); font-weight: 400; font-size: var(--font-size-xl); }
+.empty-state h3 { margin-bottom: 5px; font-family: var(--font-serif); font-weight: 500; font-size: var(--font-size-xl); }
+/* 8E: quiet pill action under the sentence; optional inline icon. */
+.empty-state .btn svg { width: 14px; height: 14px; }
 .empty-state p { max-width: 380px; margin-bottom: 16px; font-size: var(--font-size-caption); }
 
 .avatar {
@@ -1140,7 +1169,11 @@ select.form-input { cursor: pointer; }
    below (same surface-raised/border-strong/shadow-raised trio); only the
    menu-specific summary button styling stays exclusive to .action-menu. */
 .popover { position: relative; display: inline-block; --popover-width: 200px; }
-.action-menu > summary {
+/* :not(.btn): the filter-bar's trigger reuses this shell with real button
+   chrome (summary.btn btn-sm btn-secondary) -- the kebab box/font sizing
+   below must not out-specify it (it rendered as 20px text spilling out of
+   a 32px box). */
+.action-menu > summary:not(.btn) {
   display: flex;
   width: 32px;
   height: 32px;
@@ -1156,8 +1189,8 @@ select.form-input { cursor: pointer; }
   cursor: pointer;
 }
 .action-menu > summary::-webkit-details-marker { display: none; }
-.action-menu > summary:hover,
-.action-menu[open] > summary { background: var(--surface-2); color: var(--text-primary); }
+.action-menu > summary:not(.btn):hover,
+.action-menu[open] > summary:not(.btn) { background: var(--surface-2); color: var(--text-primary); }
 .action-menu__popover,
 .popover__panel {
   position: absolute;
@@ -1500,28 +1533,62 @@ pre {
 .app-shell {
   display: grid;
   min-height: 100dvh;
-  grid-template: var(--toolbar-height) 1fr / var(--sidebar-width) minmax(0, 1fr);
+  /* auto, not var(--toolbar-height): the 11E pill toolbar's box is
+     toolbar-height + its 8px inset (see .app-toolbar) -- a hard-sized row
+     kept the old 32px and let the pill overflow on top of .app-main
+     (browser matrix seam check, CI). The row now takes the toolbar's real
+     height whatever it is. */
+  grid-template: auto 1fr / var(--sidebar-width) minmax(0, 1fr);
   background: var(--app-bg);
 }
 .app-shell--wide { grid-template-columns: var(--sidebar-width-wide) minmax(0, 1fr); }
 .app-toolbar {
+  position: relative;
   z-index: 20;
   grid-column: 1 / -1;
   display: flex;
-  height: var(--toolbar-height);
+  /* Design refresh 2 (pick 11E): a detached floating pill bar instead of a
+     full-bleed bordered strip -- breadcrumb left, status right. The pill
+     is painted by ::before INSIDE the toolbar's own box (padding makes the
+     room) rather than with margins: a grid item's margin does not grow its
+     row track, so the margined pill visually overlapped the main region
+     below (caught by the browser matrix's toolbar/main seam check). */
+  height: calc(var(--toolbar-height) + 8px);
   align-items: center;
   gap: 4px;
-  padding: 0 6px;
-  border-bottom: 1px solid var(--border-subtle);
-  background: var(--toolbar-bg);
+  padding: 8px 26px 0;
+  border: 0;
+  background: transparent;
 }
+.app-toolbar::before {
+  content: "";
+  position: absolute;
+  inset: 8px 14px 0;
+  z-index: -1;
+  border-radius: var(--radius-pill);
+  background: var(--surface-1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .10), 0 6px 20px rgba(0, 0, 0, .12);
+}
+/* 11E breadcrumb: section / page, left-aligned in the pill. min-width:0 +
+   ellipsis on both halves: the crumb is the toolbar's only variable-width
+   text, and a long nowrap page name ("Source & pipeline health") made the
+   whole toolbar's min-content wider than a phone viewport -- the grid
+   stretched to it and every page scrolled sideways (browser matrix). */
+.hp-crumb { display: flex; min-width: 0; max-width: 48vw; flex: 0 1 auto; align-items: center; gap: 7px; padding: 0 6px; font-size: var(--font-size-caption); color: var(--text-secondary); white-space: nowrap; }
+.hp-crumb b { color: var(--text-primary); font-weight: 600; }
+.hp-crumb b, .hp-crumb [data-hp-crumb-section] { min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
+.hp-crumb .sep { opacity: .45; flex: none; }
+/* Toolbar icon controls never shrink -- the crumb is the flexible part. */
+.app-toolbar > .btn-icon, .hp-toolbar-actions .btn-icon, .hp-toolbar-avatar { flex: none; }
 .app-toolbar__title { flex: 1; color: var(--text-muted); font-size: var(--font-size-xs); text-align: center; }
 .app-sidebar {
   display: flex;
   min-height: 0;
   flex-direction: column;
   padding: 10px 8px;
-  border-right: 1px solid var(--border-subtle);
+  /* Design refresh 2 (pick 12E): borderless minimal rail -- the ground
+     itself separates it from the content. */
+  border-right: 0;
   background: var(--sidebar-bg);
 }
 .app-sidebar__body { flex: 1; overflow-y: auto; }
@@ -1555,14 +1622,15 @@ pre {
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
 }
-/* Design refresh (pick 10C): the active page is marked by an accent
-   keyline + a soft gradient wash instead of a plain filled block. */
-.sidebar__item { border-left: 2px solid transparent; border-radius: 0 var(--radius-xs) var(--radius-xs) 0; }
+/* Design refresh 2 (pick 10E, supersedes 10C's accent bar): the active
+   page floats on a raised pill with a soft shadow -- claude sidebar's
+   current-conversation treatment. */
+.sidebar__item { border-radius: 10px; }
 .sidebar__item:hover { background: var(--surface-2); color: var(--text-primary); }
 .sidebar__item.active {
-  border-left-color: var(--accent);
-  background: linear-gradient(90deg, var(--accent-soft), transparent 70%);
+  background: var(--surface-raised);
   color: var(--text-primary);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .16);
 }
 .sidebar__item svg { width: 15px; height: 15px; opacity: 0.72; }
 .sidebar__profile {
@@ -1936,7 +2004,10 @@ pre {
 
 @media (max-width: 520px) {
   :root { --sidebar-width: 0px; }
-  .app-shell { grid-template-columns: 1fr; }
+  /* minmax(0, 1fr), not bare 1fr: 1fr's auto minimum floors the track at
+     the toolbar's intrinsic width, so one long nowrap toolbar item (the
+     11E breadcrumb) stretched the whole shell past a phone viewport. */
+  .app-shell { grid-template-columns: minmax(0, 1fr); }
   .app-sidebar { display: none; }
   .app-main { grid-column: 1; }
   .app-toolbar__title { text-align: left; }
@@ -2045,6 +2116,8 @@ body [hidden] { display: none !important; }
 .hp-brand {
   display: flex; align-items: center; gap: 9px;
   padding: 4px 6px 10px;
+  /* 12E: serif wordmark, claude-style. */
+  font-family: var(--font-serif);
   color: var(--text-primary); text-decoration: none;
 }
 .hp-brand:hover { color: var(--text-primary); }
@@ -2118,7 +2191,7 @@ body [hidden] { display: none !important; }
    uses for a similar top-of-viewport status message. */
 .app-toolbar__banner {
   position: fixed;
-  top: calc(var(--toolbar-height) + 8px);
+  top: calc(var(--toolbar-height) + 16px);
   left: 50%;
   transform: translateX(-50%);
   z-index: 300;
@@ -2201,23 +2274,10 @@ a.metric:hover { border-color: var(--border-strong); background: var(--surface-2
 .card h2 {
   display: flex; align-items: center; gap: 8px;
   margin: 0 0 12px;
-  font-size: 15px; font-weight: 600; color: var(--text-primary);
-}
-.card h2::before {
-  content: ""; width: 7px; height: 7px; border-radius: 2px;
-  background: var(--accent);
-}
-/* Design refresh (pick 1D): a card whose title leads its content gets a
-   header strip -- the title sits in a contrasting band flush with the
-   card's top edge (negative margins retract .card's own padding; .card's
-   overflow:hidden clips the corners). Scoped to h2:first-child so a title
-   that follows a toolbar or KPI row keeps the plain in-flow treatment. */
-.card > h2:first-child {
-  margin: calc(-1 * var(--space-lg)) calc(-1 * var(--space-xl)) 14px;
-  padding: 11px var(--space-xl);
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--border-subtle);
-  font-size: 13px;
+  /* Design refresh 2 (pick 1E, supersedes 1D's header strip): serif card
+     titles, no accent tick, no contrasting band -- claude's card anatomy. */
+  font-family: var(--font-serif);
+  font-size: 16px; font-weight: 500; color: var(--text-primary);
 }
 .card:has(table) { overflow: auto; }
 .card table { min-width: 0; }
@@ -2402,6 +2462,16 @@ td.n { color: var(--accent); font-family: var(--hp-mono); font-size: 12px; text-
 td.n a { color: inherit; text-decoration: none; border-bottom: 1px dotted color-mix(in srgb, var(--accent) 45%, transparent); }
 td.n a:hover { color: var(--text-primary); border-color: var(--accent); }
 td.v { color: var(--text-secondary); font-family: var(--hp-mono); font-size: 12px; word-break: break-all; }
+/* min-width (desktop only): nowrap sibling columns (td.n, td.v a) could
+   crush a plain-text value column (clusters' "coverage") to
+   letter-per-line width -- word-break:break-all then breaks every
+   character. A readable floor stops the collapse without giving up
+   hash-wrapping. Scoped off phones: on a 390px viewport the floor made
+   every multi-value table wider than the page (browser matrix mobile
+   overflow, CI). */
+@media (min-width: 700px) {
+  td.v { min-width: 180px; }
+}
 td.v a, td a.lnk { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--border-strong); }
 td.v a:hover, td a.lnk:hover { color: var(--accent); border-color: var(--accent); }
 td.ago { color: var(--text-muted); font-family: var(--hp-mono); font-size: 11px; text-align: right; white-space: nowrap; }
@@ -2410,16 +2480,18 @@ td.s-active { color: var(--success); }
 td.s-quiet { color: var(--warning); }
 td.s-stale { color: var(--danger); }
 td.s-waiting { color: var(--text-muted); }
-/* Design refresh (pick 4C): rows as rounded slabs. border-spacing gives
-   the row gaps; every cell carries the row surface so the slab reads as
-   one piece; first/last cells round the ends. Header cells lose their
-   underline -- the slabs themselves separate the rows now. */
-.data-table { border-collapse: separate; border-spacing: 0 6px; }
-.data-table thead th { border-bottom: 0; padding-bottom: 2px; }
-.data-table td { background: var(--surface-2); border-bottom: 0; }
-.data-table td:first-child { border-radius: 10px 0 0 10px; }
-.data-table td:last-child { border-radius: 0 10px 10px 0; }
-.data-table tbody tr:hover td { background: var(--surface-hover); }
+/* Design refresh 2 (pick 4E, supersedes 4C's slabs): chrome-free open
+   rows -- airy padding, hairline separators only, and the whole row lifts
+   on a soft rounded hover wash (claude list feel). */
+.data-table { border-collapse: separate; border-spacing: 0; }
+.data-table thead th { border-bottom: 0; padding-bottom: 4px; }
+.data-table td { background: transparent; border-bottom: 1px solid var(--border-subtle); padding: 11px 10px; }
+.data-table tbody tr:last-child td { border-bottom: 0; }
+.data-table tbody tr:hover td { background: var(--surface-2); }
+.data-table tbody tr:hover td:first-child { border-radius: 8px 0 0 8px; }
+.data-table tbody tr:hover td:last-child { border-radius: 0 8px 8px 0; }
+.hp-md__list tbody tr.selected td:first-child { border-radius: 8px 0 0 8px; }
+.hp-md__list tbody tr.selected td:last-child { border-radius: 0 8px 8px 0; }
 /* #1566: linked identifiers (IPs, CIDRs, sessions), timestamps and ports
    never wrap mid-value -- the "85.14.245.1(newline)22" class of bug. Plain
    text in value cells (alert keys, long hashes as text) keeps wrapping;
@@ -2491,7 +2563,10 @@ button.copy:hover { color: var(--text-primary); background: var(--surface-2); }
 .empty { font: 12px var(--hp-mono); color: var(--text-muted); margin: 0; }
 .cc {
   padding: 1px 5px; border-radius: var(--radius-xs);
-  background: var(--info-soft); color: var(--info);
+  /* a11y: ink on the soft fill, not the fill's own hue -- var(--info) on
+     var(--info-soft) read as white-on-light-blue in dark theme. Same
+     pairing the sensor badges use. */
+  background: var(--info-soft); color: var(--info-text-on-soft);
   font: 10px var(--hp-mono); text-decoration: none;
 }
 .lnk.sess { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); }
@@ -2567,19 +2642,26 @@ button.copy:hover { color: var(--text-primary); background: var(--surface-2); }
 .hp-open-in > summary {
   display: inline-flex; align-items: center; gap: 5px;
   list-style: none; cursor: pointer;
+}
+/* Plain-link trigger styling only for summaries that do NOT opt into real
+   button chrome -- the :not(.btn) scoping keeps this from out-specifying
+   .btn/.btn-sm/.btn-secondary on the filter-bar's trigger (the bug behind
+   "the Filter button is not in the normal button theme": these rules used
+   to win on color/font-size and the border-bottom:none patch below cut the
+   button's own bottom border). */
+.hp-open-in > summary:not(.btn) {
   font-size: 11px; color: var(--accent);
   border-bottom: 1px dotted color-mix(in srgb, var(--accent) 45%, transparent);
   transition: color var(--transition-fast), border-color var(--transition-fast);
 }
 .hp-open-in > summary::-webkit-details-marker { display: none; }
 .hp-open-in > summary::marker { content: ""; }
-.hp-open-in > summary:hover, .hp-open-in[open] > summary { color: var(--text-primary); border-color: var(--accent); }
+.hp-open-in > summary:not(.btn):hover, .hp-open-in[open] > summary:not(.btn) { color: var(--text-primary); border-color: var(--accent); }
 .hp-open-in > summary svg { width: 13px; height: 13px; }
 /* #303: the filter-bar's trigger opts into real button chrome via .btn on
-   the <summary> itself (dashboard.html); this only cancels the plain-link
-   styling above for THAT case (summary.btn), so events.html's other
-   .hp-open-in usage (a link-list menu, no .btn class) is unaffected. */
-.hp-open-in > summary.btn { border-bottom: none; }
+   the <summary> itself (dashboard.html); the :not(.btn) scoping above is
+   what keeps the plain-link styling off it, so .btn/.btn-sm/.btn-secondary
+   apply untouched here. */
 /* Panel chrome (background/border/radius/shadow/padding) now comes from
    theme.css's own .dropdown, combined at every call site instead of
    duplicated here (Xore/theme is the reference) -- this is only the
@@ -2852,7 +2934,8 @@ a.project-card { display: block; color: inherit; text-decoration: none; }
   border-color: var(--border-strong) !important;
 }
 .leaflet-control-home {
-  width: 32px; height: 32px; text-align: center;
+  /* Sized to its label ("World") -- a fixed 32px clipped it to "Wor". */
+  min-width: 32px; width: auto; height: 32px; padding: 0 9px; text-align: center;
   font: 700 11px/30px var(--hp-mono); cursor: pointer;
 }
 .leaflet-control-attribution {
@@ -3104,6 +3187,37 @@ button.sidebar__profile:disabled:hover { background: transparent; }
 }
 .app-sidebar .tabs .tab span { width: 18px; height: 18px; }
 
+/* Design refresh 2 (pick OV-E): focus column -- a page opts into one
+   centered reading column (claude conversation geometry). */
+.hp-focus { max-width: 1180px; margin: 0 auto; width: 100%; }
+
+/* Attack sources (pick AS-D): profile card grid -- claude's projects
+   page applied to attackers. Cards keep every column the table showed. */
+.hp-src-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+.hp-src-card { display: flex; flex-direction: column; gap: 9px; padding: 13px 15px; border-radius: 14px; background: var(--surface-2); }
+.hp-src-card__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.hp-src-card__ip { font-family: var(--hp-mono); font-size: 13.5px; font-weight: 600; color: var(--text-primary); text-decoration: none; }
+.hp-src-card__ip:hover { color: var(--accent); }
+.hp-src-card__stats { display: flex; }
+.hp-src-card__stats a { flex: 1; min-width: 0; padding: 0 10px; border-left: 1px solid var(--border-subtle); color: var(--text-primary); text-decoration: none; }
+.hp-src-card__stats a:first-child { padding-left: 0; border-left: 0; }
+.hp-src-card__stats b { display: block; font-family: var(--font-serif); font-size: 17px; font-weight: 500; }
+.hp-src-card__stats span { color: var(--text-muted); font-size: 10.5px; }
+.hp-src-card__sensors { color: var(--text-secondary); font-size: 11.5px; text-decoration: none; overflow-wrap: anywhere; }
+.hp-src-card__sensors:hover { color: var(--accent); }
+.hp-src-card__when { color: var(--text-muted); font-size: 10.5px; font-family: var(--hp-mono); }
+
+/* Event explorer (pick EV-D): the table reads as a time-grouped feed --
+   quiet minute-break rows between event groups. */
+.hp-feed-break td {
+  padding: 12px 10px 4px;
+  border-bottom: 0;
+  color: var(--text-muted);
+  font-family: var(--hp-mono); font-size: 10.5px; letter-spacing: .05em;
+  text-align: center;
+}
+.hp-feed-break:hover td { background: transparent !important; }
+
 /* Sidebar search affordance (claude.ai top-row pattern): a quiet icon
    button floated into the brand row, opening the same palette. */
 .hp-sidebar-search {
@@ -3198,13 +3312,22 @@ button.sidebar__profile:disabled:hover { background: transparent; }
 .hp-hero__links a { color: var(--text-link); text-decoration: none; }
 .hp-hero__links a:hover { text-decoration: underline; }
 
-/* Master-detail event explorer (pick EV-B): compact list left, sticky
-   normalized-record pane right. Falls back to stacked below 1100px. */
-.hp-md { display: grid; grid-template-columns: minmax(0, 11fr) minmax(340px, 9fr); gap: 14px; align-items: start; }
+/* Master-detail investigate layout (pick EV-B, extended per Xore): the
+   table gets the whole width by default; selecting a row opens the sticky
+   detail pane on the right (.hp-md--open, added by hp-app.js), and the
+   pane's close control returns the full-width table. Falls back to
+   stacked below 1100px. */
+.hp-md { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: start; }
+.hp-md--open { grid-template-columns: minmax(0, 11fr) minmax(340px, 9fr); }
+.hp-md:not(.hp-md--open) > .hp-md__pane { display: none; }
 /* The list card carries .wide for the no-JS/stacked fallback; inside the
    two-column grid that span would push the pane below -- neutralize it. */
 .hp-md > .card.wide, .hp-md .hp-md__list { grid-column: auto; }
 .hp-md__list { min-width: 0; }
+/* Wide investigate tables keep their 720px floor (readable columns); when
+   the pane narrows the list, the card scrolls sideways instead of
+   spilling under the pane. */
+.hp-md--open .hp-md__list > .card { overflow-x: auto; }
 .hp-md__pane { position: sticky; top: 14px; min-width: 0; }
 .hp-md__pane .card { margin-bottom: 0; }
 .hp-md__list tbody tr { cursor: pointer; }
@@ -3221,14 +3344,40 @@ button.sidebar__profile:disabled:hover { background: transparent; }
 .hp-md__pane [data-hp-md-slot] article { margin: 0 0 12px; }
 .hp-md__pane [data-hp-md-slot] article.card.wide { grid-column: auto; }
 .hp-row-actions-cell { width: 1%; }
+/* Pane close control (the pane is sticky -- a positioned box -- so the
+   button anchors to it) and the generic row inspector: pages without a
+   dedicated per-row detail render the selected row as labelled fields. */
+.hp-md__close {
+  position: absolute; top: 8px; right: 8px; z-index: 2;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px;
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-pill);
+  background: var(--surface-2); color: var(--text-secondary);
+  font-size: 13px; line-height: 1; cursor: pointer;
+}
+.hp-md__close:hover { color: var(--text-primary); border-color: var(--border-strong); background: var(--surface-3); }
+.hp-md__rowcard dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 7px 12px; margin: 0; }
+.hp-md__rowcard dt { color: var(--text-muted); font: 10px/18px var(--hp-mono); text-transform: uppercase; letter-spacing: .04em; }
+.hp-md__rowcard dd { margin: 0; min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
+/* Cells projected into the inspector lose their table context: neutralize
+   the value-cell floor so the narrow pane isn't forced wide. */
+.hp-md__rowcard dd td.v, .hp-md__rowcard dd.v { min-width: 0; }
 
 @media (max-width: 1100px) {
-  .hp-md { grid-template-columns: 1fr; }
+  .hp-md--open { grid-template-columns: 1fr; }
   .hp-md__pane { position: static; }
 }
 
 /* Hover row actions (pick 14B): quiet icon buttons that fade in per row. */
-.hp-row-actions { display: inline-flex; gap: 4px; opacity: 0; transition: opacity var(--transition-fast); }
+/* Design refresh 2 (pick 14E): the revealed cluster reads as claude's
+   floating toolbar -- one raised pill of icon buttons. */
+.hp-row-actions {
+  display: inline-flex; gap: 2px; opacity: 0;
+  padding: 3px 5px; border-radius: var(--radius-pill);
+  background: var(--surface-raised);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, .24);
+  transition: opacity var(--transition-fast);
+}
 tr:hover .hp-row-actions, tr.selected .hp-row-actions { opacity: 1; }
 .hp-row-actions a, .hp-row-actions button {
   display: inline-grid; place-items: center;
@@ -3255,19 +3404,25 @@ tr:hover .hp-row-actions, tr.selected .hp-row-actions { opacity: 1; }
 .hp-wizard-progress i.on { background: var(--accent); border-color: var(--accent); }
 .hp-wizard-nav { display: flex; justify-content: space-between; gap: 10px; margin-top: 6px; }
 
-/* Icon empty states (pick 8B). */
+/* Empty states (pick 8E, evolving 8B): a calm serif sentence, a quiet
+   muted hint, and one surface-pill action -- with a small inline line
+   icon where the action genuinely has one (per Xore: icons only when
+   applicable). */
 .empty-state { display: grid; place-items: center; text-align: center; padding: 26px 16px; }
-.empty-state__icon { font-size: 24px; opacity: 0.65; }
-.empty-state__title { margin: 8px 0 2px; font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.empty-state__icon { font-size: 24px; opacity: 0.6; color: var(--text-muted); }
+.empty-state__icon svg { width: 26px; height: 26px; }
+.empty-state__title { margin: 8px 0 2px; font-family: var(--font-serif); font-size: 17px; font-weight: 500; color: var(--text-primary); }
 .empty-state__hint { margin: 0; max-width: 420px; font-size: 12.5px; color: var(--text-muted); }
 .empty-state__action {
-  display: inline-block; margin-top: 12px;
-  border: 1px solid var(--border-strong); border-radius: var(--radius-pill);
-  padding: 5px 16px;
+  display: inline-flex; align-items: center; gap: 7px; margin-top: 12px;
+  border: 0; border-radius: var(--radius-pill);
+  padding: 6px 16px;
+  background: var(--surface-2);
   font-size: 12.5px; color: var(--text-primary); text-decoration: none;
-  transition: border-color var(--transition-fast);
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
-.empty-state__action:hover { border-color: var(--accent); color: var(--accent); }
+.empty-state__action svg { width: 14px; height: 14px; }
+.empty-state__action:hover { background: var(--surface-3); color: var(--accent); }
 
 /* Content-shaped skeletons (pick 2D): ghosts that mirror the hydrated
    layout (tile / row primitives) with a gentle pulse; .skeleton-line
@@ -3297,11 +3452,16 @@ tr:hover .hp-row-actions, tr.selected .hp-row-actions { opacity: 1; }
    none) and only the --on state accepts input. */
 .hp-scroll-more {
   position: sticky; bottom: 8px; z-index: 3;
-  display: block; width: fit-content;
-  margin: -26px auto 4px;
-  border: 1px solid var(--border-strong); border-radius: var(--radius-pill);
-  padding: 2px 12px;
-  background: var(--surface-3);
+  display: grid; place-items: center;
+  width: 28px; height: 28px;
+  /* Design refresh 2 (pick 9D): claude's circular jump button -- the pill
+     becomes a raised round ↓ control; behaviour (page down mid-list, load
+     next batch at the end) is unchanged in hp-app.js. */
+  margin: -34px auto 6px;
+  border: 1px solid var(--border-subtle); border-radius: 50%;
+  padding: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .22);
+  background: var(--surface-raised);
   color: var(--text-primary); /* a11y: secondary measured 4.38:1 on surface-3 */
   font-size: 11px;
   font-family: inherit;

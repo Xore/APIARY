@@ -27,7 +27,7 @@
         {{/* #1526: this table is the whole page's content -- see events.html's
              main table for the full reasoning against card__scroll's fixed
              340px cap here. */}}
-        <div class="card wide" id="recordings-table">{{if .Rows}}<table class="recent data-table"><thead><tr><th>time</th><th>source</th><th>session</th><th></th></tr></thead><tbody>
+        <div class="card wide" data-hp-md-generic id="recordings-table">{{if .Rows}}<table class="recent data-table"><thead><tr><th>time</th><th>source</th><th>session</th><th></th></tr></thead><tbody>
         {{range .Rows}}<tr><td data-hp-time{{if .TimeUTC}} data-hp-utc="{{.TimeUTC}}"{{end}}>{{.Time}}</td>
         <td class="v">{{if .SrcIP}}<a href="/investigate/ip/{{.SrcIP | urlquery}}" title="attacker profile for {{.SrcIP}}">{{.SrcIP}}</a>{{else}}<span class="tw:text-muted">unattributed</span>{{end}}{{if .Country}} <span class="badge badge--info" data-hp-country="{{.Country}}">{{.Country}}</span>{{end}}</td>
         <td class="v">{{if .Session}}<a class="lnk sess" href="/sessions/{{.Session | urlquery}}" title="full chronological session replay">session {{.Session}}</a>{{end}}</td>

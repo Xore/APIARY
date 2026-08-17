@@ -38,7 +38,9 @@
 </tr>
 {{end}}
 
-{{define "eventrows"}}{{range .Events}}{{template "everow" .}}{{end}}{{end}}
+{{define "eventrows"}}{{/* Design refresh 2 (pick EV-D): the explorer reads
+   as a time-grouped feed -- a quiet minute-break row opens each group.
+   feedBreak returns the minute label only when it changes. */}}{{range $i, $e := .Events}}{{with feedBreak $.Events $i}}<tr class="hp-feed-break" aria-hidden="true"><td colspan="6">&mdash; {{.}} &mdash;</td></tr>{{end}}{{template "everow" $e}}{{end}}{{end}}
 
 {{define "events"}}<!doctype html>
 <html lang="en">
@@ -122,10 +124,10 @@
             {{else if .Ready}}
             {{/* Design refresh (pick 8B). */}}
             <div class="empty-state"><div>
-              <div class="empty-state__icon" aria-hidden="true">&#128269;</div>
+              <div class="empty-state__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></div>
               <div class="empty-state__title">No events match this filter</div>
               <p class="empty-state__hint">Loosen a filter chip above, or widen the time window.</p>
-              <a class="empty-state__action" href="/events">Clear filters &rarr;</a>
+              <a class="empty-state__action" href="/events"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/><line x1="2" y1="21" x2="22" y2="17"/></svg>Clear filters</a>
             </div></div>
             {{else}}
             {{/* #1155: before the first rebuild() cycle completes, this
