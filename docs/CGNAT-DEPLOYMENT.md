@@ -345,17 +345,24 @@ Create proxied DNS records for the HTTP services you enable, normally:
   authenticates natively against Keycloak rather than through an
   `oauth2-proxy` gateway, but treat this subdomain as sensitive as SSH
   access to the homeserver itself)
-- `cdn` (optional — self-hosted Canarytokens' switchboard HTTP channel,
-  #1487. Deliberately not named `canary`/`token*`: this is the hostname
-  embedded in every dashboard-created PDF/Word/Excel/image/QR/Windows-Folder
-  token, and a planted artifact that outs itself as a tripwire on inspection
-  defeats the point. Unauthenticated, like `decoy`/`www-portal` — it must be
-  reachable by whoever opens the planted artifact, not just operators.
-  **Must be a wildcard record (`*.cdn`), not a flat one** —
-  `canarydrop.generate_random_hostname()` prepends each token's own random
-  value as a subdomain (`<token>.cdn.example.com`), so a flat `cdn` record
-  alone leaves every actual trigger URL unresolvable; confirmed live, see
-  #1487's canarytokens follow-up work)
+- `*` (optional — a proxied **wildcard** record on the apex, required only
+  if self-hosted Canarytokens is enabled, #1487. `canarydrop.
+  generate_random_hostname()` prepends each token's own random value as a
+  subdomain of `CANARY_PUBLIC_HOSTNAME` (`<token>.example.com`), so this is
+  what a dashboard-created PDF/Word/Excel/image/QR/Windows-Folder token's
+  embedded trigger action actually resolves to when opened anywhere on the
+  internet. Deliberately the bare apex, not a dedicated `cdn`/`canary`/
+  `token*` subdomain: Cloudflare's free Universal SSL certs the apex plus
+  exactly one wildcard level (`example.com` + `*.example.com`), not a
+  nested one (`*.cdn.example.com`) — confirmed live, TLS handshake fails
+  at Cloudflare's edge for the nested form, and a flat non-wildcard record
+  leaves every actual trigger URL (a random label, never known in advance)
+  unresolvable regardless. vps/traefik/dynamic.yml's honeypot-canarytokens
+  router matches this same wildcard at low priority, below every other
+  named router's own exact `Host()` match, so a real random token label
+  can't collide with `auth`/`dashboard`/etc. above it. Set
+  `CANARY_PUBLIC_HOSTNAME` to the bare apex in `honeypot-canarytokens`'s
+  `.env` to match)
 - `hub` (optional — galah's Traefik-routed path, #1511. Its own raw
   non-standard port isn't on Cloudflare's proxied-port allowlist, so this
   is the only way it's reachable through this domain at all. Deliberately

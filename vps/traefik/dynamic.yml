@@ -305,8 +305,43 @@ http:
     # honeypot-http/-snare above -- this is what fires when a
     # dashboard-created PDF/Word/Excel/image/QR/Windows-Folder token is
     # opened anywhere on the internet, not an operator-facing route.
+    #
+    # Wildcard, not a fixed Host(): canarydrop.generate_random_hostname()
+    # prepends each token's own random value as a subdomain
+    # (<token>.honeypot.example), so a flat Host() match here (the original
+    # #1487 config) never actually caught a real trigger request -- every
+    # planted artifact's embedded action silently 404'd against this
+    # router, confirmed live. Matching a bare `*.honeypot.example` (rather
+    # than giving canarytokens its own dedicated subdomain, e.g. cdn.*)
+    # is deliberate too: Cloudflare's free Universal SSL only certs the
+    # apex plus one wildcard level (`*.honeypot.example`), not a nested one
+    # (`*.cdn.honeypot.example`) -- confirmed live, TLS handshake fails at
+    # Cloudflare's edge for the nested form. Riding the same wildcard every
+    # other single-label subdomain here already uses is what keeps this on
+    # the free tier.
+    #
+    # priority sits deliberately between honeypot-web's catch-all (1) and
+    # every named router above (Traefik auto-prioritizes those by rule
+    # length, comfortably higher): a real token's random label must beat
+    # the honeypot decoy catch-all, but every actual reserved subdomain
+    # (dashboard, auth, kibana, ...) must still win its own exact Host()
+    # match first. Don't lower this below 1 or raise it near/above the
+    # shortest named Host() rule's auto-priority without re-checking that
+    # ordering still holds.
+    #
+    # The rule below leaves "honeypot.example"'s own internal dot
+    # unescaped (only the separator dot before it is `\.`) so
+    # scripts/install-vps.sh's `sed s/honeypot\.example/${DOMAIN}/g`
+    # still finds and replaces the literal placeholder text verbatim --
+    # an escaped `honeypot\.example` wouldn't match that sed pattern and
+    # would silently never get templated to the real domain. The
+    # imprecision (an unescaped `.` also matches any single character,
+    # not just a literal dot) is harmless here: this is a routing
+    # convenience match, not a security boundary, and no real trigger
+    # hostname will ever collide with it by accident.
     honeypot-canarytokens:
-      rule: "Host(`cdn.honeypot.example`)"
+      rule: "HostRegexp(`^[a-z0-9]+\\.honeypot.example$`)"
+      priority: 5
       entryPoints: [websecure]
       service: honeypot-canarytokens
       tls:

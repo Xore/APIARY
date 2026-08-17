@@ -16,15 +16,17 @@
 #
 # - #1487 update: switchboard's HTTP channel is now publicly reachable --
 #   vps/docker-compose.yml's socat-hp-canarytokens bridges VPS Traefik
-#   (Host(`cdn.honeypot.example`), vps/traefik/dynamic.yml) to this stack's
-#   19427 over the WireGuard tunnel, unauthenticated, the same posture as
-#   honeypot-http/-snare. This is required for dashboard-created file/doc
-#   tokens (#1487 item 1: PDF/Word/Excel/custom-image/Windows-Folder/QR) to
-#   actually fire when opened by anyone outside our own network -- that was
-#   the entire point of #1487's "external hosted canarytokens" ask, and
-#   inert (internal-only) tokens don't serve it. CANARY_DOMAINS/
-#   CANARY_PUBLIC_DOMAIN below now point at that public hostname instead of
-#   the old internal-only placeholder.
+#   (a wildcard HostRegexp, not a dedicated cdn.* subdomain -- see that
+#   router's own comment in vps/traefik/dynamic.yml for why) to this
+#   stack's 19427 over the WireGuard tunnel, unauthenticated, the same
+#   posture as honeypot-http/-snare. This is required for dashboard-created
+#   file/doc tokens (#1487 item 1: PDF/Word/Excel/custom-image/
+#   Windows-Folder/QR) to actually fire when opened by anyone outside our
+#   own network -- that was the entire point of #1487's "external hosted
+#   canarytokens" ask, and inert (internal-only) tokens don't serve it.
+#   CANARY_DOMAINS/CANARY_PUBLIC_DOMAIN below now point at CANARY_PUBLIC_HOSTNAME,
+#   which must be the bare apex domain (not a cdn.* subdomain) -- see
+#   docs/CGNAT-DEPLOYMENT.md's DNS section for why.
 # - SMTP(25)/DNS(53)/WireGuard(51820) switchboard listener channels still
 #   collide with sensors this stack already runs on those exact public
 #   ports (mailoney, dns-honeypot, and this repo's own real WireGuard
@@ -110,15 +112,17 @@ services:
       - CANARY_PUBLIC_IP=${HP_BIND:-10.8.0.2}
       # #1487: the public hostname embedded in every generated token's
       # trigger URL (canary_http_channel in frontend/app.py, computed in
-      # THIS process). Must match vps/traefik/dynamic.yml's
-      # honeypot-canarytokens router exactly. Placeholder here per this
-      # repo's usual convention (docs/CGNAT-DEPLOYMENT.md's "cdn" entry) --
-      # override CANARY_PUBLIC_HOSTNAME in .env with the real deployed
-      # domain (this repo's usual honeypot.example placeholder gets
-      # sed-replaced to the real deployed domain at deploy time, same as
-      # every other public hostname in this repo -- see
-      # docs/CGNAT-DEPLOYMENT.md).
-      - CANARY_DOMAINS=${CANARY_PUBLIC_HOSTNAME:-cdn.honeypot.example}
+      # THIS process). Must be the bare apex domain -- vps/traefik/
+      # dynamic.yml's honeypot-canarytokens router matches a wildcard
+      # under it, not a dedicated cdn.* subdomain (see that router's own
+      # comment for why: Cloudflare's free Universal SSL doesn't cover a
+      # second wildcard level). Placeholder here per this repo's usual
+      # convention -- override CANARY_PUBLIC_HOSTNAME in .env with the
+      # real deployed apex domain (this repo's usual honeypot.example
+      # placeholder gets sed-replaced to the real deployed domain at
+      # deploy time, same as every other public hostname in this repo --
+      # see docs/CGNAT-DEPLOYMENT.md).
+      - CANARY_DOMAINS=${CANARY_PUBLIC_HOSTNAME:-honeypot.example}
       # #1487 follow-up: several token types (PDF, signed exe/dll -- see
       # pdfgen.py/authenticode.py call sites, both call get_hostname with
       # nxdomain=True) embed *this* domain, not CANARY_DOMAINS, as their
@@ -137,7 +141,7 @@ services:
       # domain as DOMAINS so every token type's embedded action actually
       # fires over HTTP; this makes the domain-split distinction inert
       # rather than broken.
-      - CANARY_NXDOMAINS=${CANARY_PUBLIC_HOSTNAME:-cdn.honeypot.example}
+      - CANARY_NXDOMAINS=${CANARY_PUBLIC_HOSTNAME:-honeypot.example}
       - LOG_FILE=/logs/frontend.log
       - CANARY_REDIS_HOST=canarytokens-redis
       - CANARY_SWITCHBOARD_HOSTNAME=canarytokens-switchboard
@@ -147,7 +151,7 @@ services:
       # canarydrop) instantiates SwitchboardSettings() too, at import
       # time. Confirmed live -- frontend crash-looped on exactly these two
       # fields until added here.
-      - CANARY_PUBLIC_DOMAIN=${CANARY_PUBLIC_HOSTNAME:-cdn.honeypot.example}
+      - CANARY_PUBLIC_DOMAIN=${CANARY_PUBLIC_HOSTNAME:-honeypot.example}
       - CANARY_WG_PRIVATE_KEY_SEED=${CANARY_WG_PRIVATE_KEY_SEED:?set a random seed in .env}
       # #1487: app.py's canary_http_channel computation (this process, not
       # switchboard's) reads switchboard_settings.FORCE_HTTPS/USING_NGINX to
@@ -183,7 +187,7 @@ services:
     depends_on: [canarytokens-redis]
     environment:
       - TZ=Europe/Berlin
-      - CANARY_PUBLIC_DOMAIN=${CANARY_PUBLIC_HOSTNAME:-cdn.honeypot.example}
+      - CANARY_PUBLIC_DOMAIN=${CANARY_PUBLIC_HOSTNAME:-honeypot.example}
       - CANARY_WG_PRIVATE_KEY_SEED=${CANARY_WG_PRIVATE_KEY_SEED:?set a random seed in .env}
       - LOG_FILE=/logs/switchboard.log
       - CANARY_REDIS_HOST=canarytokens-redis
@@ -199,7 +203,7 @@ services:
       # frontend.env AND switchboard.env into both containers for the same
       # reason.
       - CANARY_PUBLIC_IP=${HP_BIND:-10.8.0.2}
-      - CANARY_DOMAINS=${CANARY_PUBLIC_HOSTNAME:-cdn.honeypot.example}
+      - CANARY_DOMAINS=${CANARY_PUBLIC_HOSTNAME:-honeypot.example}
       # #1487 follow-up: several token types (PDF, signed exe/dll -- see
       # pdfgen.py/authenticode.py call sites, both call get_hostname with
       # nxdomain=True) embed *this* domain, not CANARY_DOMAINS, as their
@@ -218,7 +222,7 @@ services:
       # domain as DOMAINS so every token type's embedded action actually
       # fires over HTTP; this makes the domain-split distinction inert
       # rather than broken.
-      - CANARY_NXDOMAINS=${CANARY_PUBLIC_HOSTNAME:-cdn.honeypot.example}
+      - CANARY_NXDOMAINS=${CANARY_PUBLIC_HOSTNAME:-honeypot.example}
       # SMTP(25)/DNS(53)/WireGuard(51820) channels stay enabled inside the
       # container (upstream default) but are deliberately not published as
       # host ports below -- see the file header for why.
