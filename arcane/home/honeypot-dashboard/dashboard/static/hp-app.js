@@ -1855,8 +1855,17 @@
   const host = document.querySelector("[data-hp-recent]");
   if (!host) return;
   const KEY = "hp-recent-investigations";
+  /* localStorage is same-origin state, but it is still a sink-adjacent
+     store: only ever render hrefs that match the exact entity-page shapes
+     this feature writes -- an anchored, root-relative allowlist, so a
+     poisoned entry can never smuggle a javascript: URL or an off-site
+     redirect into the rail (CodeQL js/xss /
+     js/client-side-unvalidated-url-redirection). */
+  const safeEntry = item =>
+    item && typeof item.label === "string" && typeof item.href === "string" &&
+    /^\/(?:investigate\/ip\/[^/?#]+|sessions\/[^/?#]+|payload-analysis\/[^/?#]+|events\?[A-Za-z0-9=&%.:+-]*)$/.test(item.href);
   const read = () => {
-    try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch { return []; }
+    try { return (JSON.parse(localStorage.getItem(KEY)) || []).filter(safeEntry); } catch { return []; }
   };
   const write = list => {
     try { localStorage.setItem(KEY, JSON.stringify(list.slice(0, 5))); } catch {}
@@ -1872,16 +1881,17 @@
     return null;
   })();
   let list = read();
-  if (current) {
+  if (current && safeEntry(current)) {
     list = [current, ...list.filter(item => item.href !== current.href)];
     write(list);
   }
+  list = list.filter(safeEntry);
   if (!list.length) return;
   const label = document.querySelector("[data-hp-recent-label]");
   if (label) label.hidden = false;
   host.replaceChildren(...list.slice(0, 5).map(item => {
     const a = document.createElement("a");
-    a.href = item.href;
+    a.setAttribute("href", item.href);
     a.textContent = item.label;
     a.title = item.label;
     return a;
