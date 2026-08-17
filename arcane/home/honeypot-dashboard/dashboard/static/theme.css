@@ -1569,10 +1569,17 @@ pre {
   background: var(--surface-1);
   box-shadow: 0 1px 2px rgba(0, 0, 0, .10), 0 6px 20px rgba(0, 0, 0, .12);
 }
-/* 11E breadcrumb: section / page, left-aligned in the pill. */
-.hp-crumb { display: flex; align-items: center; gap: 7px; padding: 0 6px; font-size: var(--font-size-caption); color: var(--text-secondary); white-space: nowrap; }
+/* 11E breadcrumb: section / page, left-aligned in the pill. min-width:0 +
+   ellipsis on both halves: the crumb is the toolbar's only variable-width
+   text, and a long nowrap page name ("Source & pipeline health") made the
+   whole toolbar's min-content wider than a phone viewport -- the grid
+   stretched to it and every page scrolled sideways (browser matrix). */
+.hp-crumb { display: flex; min-width: 0; max-width: 48vw; flex: 0 1 auto; align-items: center; gap: 7px; padding: 0 6px; font-size: var(--font-size-caption); color: var(--text-secondary); white-space: nowrap; }
 .hp-crumb b { color: var(--text-primary); font-weight: 600; }
-.hp-crumb .sep { opacity: .45; }
+.hp-crumb b, .hp-crumb [data-hp-crumb-section] { min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; }
+.hp-crumb .sep { opacity: .45; flex: none; }
+/* Toolbar icon controls never shrink -- the crumb is the flexible part. */
+.app-toolbar > .btn-icon, .hp-toolbar-actions .btn-icon, .hp-toolbar-avatar { flex: none; }
 .app-toolbar__title { flex: 1; color: var(--text-muted); font-size: var(--font-size-xs); text-align: center; }
 .app-sidebar {
   display: flex;
@@ -1997,7 +2004,10 @@ pre {
 
 @media (max-width: 520px) {
   :root { --sidebar-width: 0px; }
-  .app-shell { grid-template-columns: 1fr; }
+  /* minmax(0, 1fr), not bare 1fr: 1fr's auto minimum floors the track at
+     the toolbar's intrinsic width, so one long nowrap toolbar item (the
+     11E breadcrumb) stretched the whole shell past a phone viewport. */
+  .app-shell { grid-template-columns: minmax(0, 1fr); }
   .app-sidebar { display: none; }
   .app-main { grid-column: 1; }
   .app-toolbar__title { text-align: left; }
