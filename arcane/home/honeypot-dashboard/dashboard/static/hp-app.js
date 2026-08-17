@@ -2004,6 +2004,23 @@
        sections, any hydrated fragment's inner tabs) that must stay in the
        content flow -- only page-level view tabs move to the rail. */
     const incoming = document.querySelector("main .tabs[role='tablist']:not([data-hp-tabs-inline]), .app-main .tabs[role='tablist']:not([data-hp-tabs-inline])");
+    /* #1576: below 520px the sidebar itself goes off-canvas (theme.css's
+       own breakpoint, matched here -- see .app-sidebar { display: none }
+       inside @media (max-width: 520px)), hidden until the hamburger drawer
+       opens it. Relocating a page's view tabs in there at this width would
+       make them reachable only behind that drawer instead of the inline
+       row theme.css already renders in the content flow for the no-JS
+       case (the reports wizard's Design/Scope/Schedule/Branding/Library
+       steps were the concrete case that surfaced this: JS moved them into
+       a sidebar a phone visitor never sees open by default). Leaving the
+       tablist inline at this width keeps the visible, always-reachable
+       no-JS layout instead of hiding it. Any tabs a wider viewport already
+       relocated for a *previous* page are stale once a fresh tablist has
+       arrived, so those still get swept out of the sidebar. */
+    if (incoming && innerWidth <= 520) {
+      side.querySelectorAll(".tabs[data-hp-sidebar-tabs], .hp-views-label").forEach(n => n.remove());
+      return;
+    }
     if (incoming) {
       /* A fresh tablist arrived with this page's content: it replaces
          whatever rail the previous page left, nesting directly under the
