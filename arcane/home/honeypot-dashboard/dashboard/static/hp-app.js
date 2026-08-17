@@ -1766,29 +1766,47 @@
    without JS); with JS the rail moves into the sidebar below the nav, so
    switching a page's views reads the same as switching pages. */
 (() => {
-  const sync = () => {
+  /* Resolve which sidebar item owns the current path -- the same roll-up
+     rules activeHref() uses inside the shell closure. Duplicated here
+     deliberately: this IIFE runs at script eval, before the shell's
+     DOMContentLoaded block has set .active, so anchoring on the class
+     appended the rail to the end of the nav on every initial load (the
+     exact bug Xore reported twice). */
+  const routeFor = path => {
+    if (path.startsWith("/payload-analysis") || path.startsWith("/payload/")) return "/payloads";
+    if (path.startsWith("/payload-workbench/") || path.startsWith("/sandbox/") || path.startsWith("/github-analysis/")) return "/payload-workbench/results";
+    if (path.startsWith("/sessions/")) return "/events";
+    if (path.startsWith("/investigate/ip/")) return "/ips";
+    return path;
+  };
+  const sync = allowRemove => {
     const side = document.querySelector(".app-sidebar__body");
     if (!side) return;
     const incoming = document.querySelector("main .tabs[role='tablist'], .app-main .tabs[role='tablist']");
     if (incoming) {
       /* A fresh tablist arrived with this page's content: it replaces
-         whatever rail the previous page left in the sidebar, nesting
-         directly under the ACTIVE nav item (per Xore: "overview's tabs
-         belong below Overview, not at the end"). syncActiveNav registered
-         its hp-page-mounted listener earlier in this file, so the active
-         class is already correct when this runs. */
+         whatever rail the previous page left, nesting directly under the
+         nav item that owns this page (per Xore: "overview's tabs belong
+         below Overview, not at the end"). */
       side.querySelectorAll(".tabs[data-hp-sidebar-tabs], .hp-views-label").forEach(n => n.remove());
       incoming.dataset.hpSidebarTabs = "1";
-      const active = side.querySelector(".sidebar__item.active");
-      if (active) active.after(incoming);
+      const route = routeFor(location.pathname);
+      const anchor = side.querySelector(`.sidebar__item[data-hp-nav="${CSS.escape(route)}"]`) ||
+        side.querySelector(".sidebar__item.active");
+      if (anchor) anchor.after(incoming);
       else side.append(incoming);
-    } else if (!document.contains(document.querySelector("[data-hp-page-content] .tabs"))) {
-      /* The new page has no view tabs at all -- drop the stale rail. */
+    } else if (allowRemove) {
+      /* Only a fresh content mount may conclude "this page has no view
+         tabs" -- on plain re-runs the absence just means the rail was
+         already moved into the sidebar (removing it here was the bug that
+         made the rail vanish entirely). */
       side.querySelectorAll(".tabs[data-hp-sidebar-tabs], .hp-views-label").forEach(n => n.remove());
     }
   };
-  sync();
-  document.addEventListener("hp-page-mounted", sync);
+  sync(false);
+  document.addEventListener("DOMContentLoaded", () => sync(false));
+  document.addEventListener("hp-page-mounted", () => sync(true));
+  addEventListener("popstate", () => sync(false));
 })();
 
 /* ── Design refresh: scroll "more" pill (pick 9C) ─────────────────────────
