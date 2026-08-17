@@ -1,13 +1,19 @@
-{{define "iprow"}}<tr>
-  <td class="n" data-label="events"><a href="/investigate/ip/{{.IP | urlquery}}" title="attacker profile for {{.IP}}">{{.Count}}</a></td>
-  <td class="v" data-label="source ip"><a href="/investigate/ip/{{.IP | urlquery}}" title="attacker profile for {{.IP}}">{{.IP}}</a></td>
-  <td class="v" data-label="cc">{{if .Country}}<a class="badge badge--info" href="/events?country={{.Country | urlquery}}">{{.Country}}</a>{{end}}</td>
-  <td class="n" data-label="logins"><a href="/events?ip={{.IP | urlquery}}&amp;type=login" title="login attempts from {{.IP}}">{{.Logins}}</a></td>
-  <td class="n" data-label="sessions"><a href="/events?ip={{.IP | urlquery}}" title="attack chain and sessions for {{.IP}}">{{.Sessions}}</a></td>
-  <td class="v" data-label="sensors hit"><a href="/events?ip={{.IP | urlquery}}" title="sensor activity for {{.IP}}">{{.Sensors}}</a></td>
-  <td data-label="first seen"{{if .FirstUTC}} data-hp-utc="{{.FirstUTC}}"{{end}}>{{.First}}</td>
-  <td data-label="last seen"{{if .LastUTC}} data-hp-utc="{{.LastUTC}}"{{end}}>{{.Last}}</td>
-</tr>{{end}}
+{{define "iprow"}}{{/* Design refresh 2 (pick AS-D): every source is a
+   claude-style profile card in a grid; every column the old table showed
+   is still here (events, ip, cc, logins, sessions, sensors, first/last
+   with their data-hp-utc twins). */}}<div class="hp-src-card">
+  <div class="hp-src-card__head">
+    <a class="hp-src-card__ip" href="/investigate/ip/{{.IP | urlquery}}" title="attacker profile for {{.IP}}">{{.IP}}</a>
+    {{if .Country}}<a class="badge badge--info" href="/events?country={{.Country | urlquery}}">{{.Country}}</a>{{end}}
+  </div>
+  <div class="hp-src-card__stats">
+    <a href="/investigate/ip/{{.IP | urlquery}}"><b>{{.Count}}</b><span>events</span></a>
+    <a href="/events?ip={{.IP | urlquery}}&amp;type=login" title="login attempts from {{.IP}}"><b>{{.Logins}}</b><span>logins</span></a>
+    <a href="/events?ip={{.IP | urlquery}}" title="attack chain and sessions for {{.IP}}"><b>{{.Sessions}}</b><span>sessions</span></a>
+  </div>
+  <a class="hp-src-card__sensors" href="/events?ip={{.IP | urlquery}}" title="sensor activity for {{.IP}}">{{.Sensors}}</a>
+  <div class="hp-src-card__when"><span{{if .FirstUTC}} data-hp-utc="{{.FirstUTC}}"{{end}}>{{.First}}</span> &rarr; <span{{if .LastUTC}} data-hp-utc="{{.LastUTC}}"{{end}}>{{.Last}}</span></div>
+</div>{{end}}
 {{define "iprows"}}{{range .Rows}}{{template "iprow" .}}{{end}}{{end}}
 
 {{define "ips"}}<!doctype html>
@@ -59,12 +65,9 @@
 
         <div class="card wide" id="ips-table">
           {{if .Rows}}
-          <table class="recent data-table data-table--responsive">
-            <thead><tr><th>events</th><th>source ip</th><th>cc</th><th>logins</th><th>sessions</th><th>sensors hit</th><th>first seen</th><th>last seen</th></tr></thead>
-            <tbody data-hp-page-url="{{.RowsURL}}" data-hp-total="{{.Total}}" data-hp-offset="0">
+          <div class="hp-src-grid" data-hp-lazy-list data-hp-page-url="{{.RowsURL}}" data-hp-total="{{.Total}}" data-hp-offset="0">
             {{template "iprows" .}}
-            </tbody>
-          </table>
+          </div>
           {{else if .Ready}}<p class="empty">no source IPs recorded yet</p>
           {{else}}
           {{/* #1155: see events.html's own comment (#1142). */}}
