@@ -3187,6 +3187,10 @@ button.sidebar__profile:disabled:hover { background: transparent; }
 }
 .app-sidebar .tabs .tab span { width: 18px; height: 18px; }
 
+/* Design refresh 2 (pick OV-E): focus column -- a page opts into one
+   centered reading column (claude conversation geometry). */
+.hp-focus { max-width: 1180px; margin: 0 auto; width: 100%; }
+
 /* Attack sources (pick AS-D): profile card grid -- claude's projects
    page applied to attackers. Cards keep every column the table showed. */
 .hp-src-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
