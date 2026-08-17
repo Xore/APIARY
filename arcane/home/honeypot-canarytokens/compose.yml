@@ -226,8 +226,13 @@ services:
       # SMTP(25)/DNS(53)/WireGuard(51820) channels stay enabled inside the
       # container (upstream default) but are deliberately not published as
       # host ports below -- see the file header for why.
-    ports:
-      - ${HP_BIND:-10.8.0.2}:19427:8083
+    # No host port here anymore -- canarytokens-http-router below now owns
+    # the published 19427, sitting in front of this container's 8083 so it
+    # can rewrite the Host-header-embedded token into the URL path before
+    # this container ever sees the request. See that service's own
+    # comment, and canarytokens-http-router/main.go's package doc, for
+    # why: a direct port mapping here left every real trigger unfindable
+    # ("Failed to find drop for: <mangled path>", confirmed live).
     volumes:
       - canarytokens-uploads:/uploads
       - /opt/stacks/apiary/logs/canarytokens/switchboard:/logs
@@ -239,6 +244,43 @@ services:
         limits:
           cpus: "1.0"
           memory: 512M
+
+  # #1487 follow-up: this repo's own code, not vendored -- see
+  # canarytokens-http-router/main.go's package doc for the full writeup
+  # of the two vendored-platform gaps this routes around (Host-header vs.
+  # URL-path token lookup, and two token types -- adobe_pdf, windows_dir
+  # -- with no HTTP-alerting handler in the vendored source at all).
+  # Publishes what canarytokens-switchboard used to publish directly;
+  # switchboard itself is now canarytokens_net-internal only.
+  canarytokens-http-router:
+    <<: *runtime-defaults
+    build: ./canarytokens-http-router
+    container_name: hp-canarytokens-http-router
+    restart: unless-stopped
+    depends_on: [canarytokens-switchboard, canarytokens-redis]
+    environment:
+      - TZ=Europe/Berlin
+      - LISTEN_ADDR=:8083
+      - SWITCHBOARD_URL=http://canarytokens-switchboard:8083
+      - REDIS_ADDR=canarytokens-redis:6379
+      - ADAPTER_URL=http://canarytokens-adapter.internal:8090/
+    ports:
+      - ${HP_BIND:-10.8.0.2}:19427:8083
+    volumes:
+      - /opt/stacks/apiary/state/init-markers:/markers:ro
+    networks: [canarytokens_net]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    cap_drop:
+      - ALL
+    labels:
+      - autoheal=true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
 
   canarytokens-adapter:
     <<: *runtime-defaults
