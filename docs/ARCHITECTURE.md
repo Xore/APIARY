@@ -422,12 +422,12 @@ anywhere: nothing waits on its marker because nothing needs to.
 
 ## Dashboard request, state, import, and control flows
 
-[#266](https://github.com/Xore/APIARY/issues/266): `honeypot-dashboard` runs
-two identical replicas, `dashboard` and `dashboard-b`, not one collapsed
-"live dashboard" node. Same image, same volumes, same Elasticsearch — a
-redeploy restarts one replica at a time while the other keeps serving every
-request, instead of the earlier blind `Recreate` that left a real
-listener-down window on every push.
+`honeypot-dashboard` runs a **single replica** (per Xore; this supersedes
+[#266](https://github.com/Xore/APIARY/issues/266)'s rolling pair — the
+former `dashboard-b` secondary and its per-replica plumbing are retired).
+A redeploy is a plain `docker compose build dashboard && docker compose
+up -d`, accepting the brief recreate window; Traefik's active `/healthz`
+check turns that window into clean 502s rather than hung connections.
 
 ```mermaid
 flowchart TB
@@ -435,22 +435,17 @@ flowchart TB
 
   subgraph vps["VPS"]
     traefik["Traefik<br/>Host() rule"]
-    lb["loadBalancer —<br/>2 servers, active healthCheck<br/>GET /healthz every 5s"]
+    lb["loadBalancer —<br/>1 server, active healthCheck<br/>GET /healthz every 5s"]
   end
 
   wg["WireGuard tunnel"]
 
   subgraph dashStack["honeypot-dashboard stack"]
     direction TB
-    subgraph primary["dashboard (primary replica)<br/>:19090"]
+    subgraph primary["dashboard (single replica)<br/>:19090"]
       primaryReq["stateless request handling"]
       primaryLoops["notifyLoop (webhook alerts) +<br/>reportScheduleLoop (scheduled PDFs) —<br/>DASHBOARD_BACKGROUND_LOOPS unset"]
       primaryRebuild["rebuild() / es.refresh() /<br/>retention sweep — every cycle,<br/>unconditionally"]
-    end
-    subgraph secondary["dashboard-b (secondary replica)<br/>:19092"]
-      secondaryReq["stateless request handling"]
-      secondaryLoops(["notifyLoop / reportScheduleLoop —<br/>never run here.<br/>DASHBOARD_BACKGROUND_LOOPS=false"])
-      secondaryRebuild["rebuild() / es.refresh() /<br/>retention sweep — same as primary,<br/>harmless if duplicated"]
     end
     importer["es-results-importer<br/>read-only mirror, SHARD_COUNT-<br/>partitionable, own state file"]
     adapter["services-adapter<br/>network_mode: none,<br/>read_only rootfs, cap_drop ALL"]
@@ -469,17 +464,13 @@ flowchart TB
   traefik -->|"straight through, no gateway hop<br/>(native OIDC, #1026)"| lb
   lb -->|"socat bridge, VPS side"| wg
   wg -->|"traffic only to whichever<br/>replica is passing healthCheck"| primaryReq
-  wg --> secondaryReq
 
   primaryReq <-.-> es
-  secondaryReq <-.-> es
   primaryReq <-.-> dashState
-  secondaryReq <-.-> dashState
 
   resultDirs --> importer --> es
 
   primaryReq -.->|"start/stop/restart requests,<br/>the Services pane's only path"| adapter
-  secondaryReq -.-> adapter
   adapter -->|"Unix socket only —<br/>never docker.sock itself"| dockerSock
 ```
 
@@ -487,7 +478,7 @@ flowchart TB
 must never double-fire.** `main.go`'s `backgroundLoopsEnabled()` is a fixed
 two-replica pick (`DASHBOARD_BACKGROUND_LOOPS != "false"`), not real leader
 election — `notifyLoop` and `reportScheduleLoop` pause during the primary's
-own restart window rather than failing over to the secondary. `rebuild()`,
+own restart window (single replica, no failover target). `rebuild()`,
 `es.refresh()`, and the retention sweep are deliberately **not** gated the
 same way: each replica just recomputes its own in-memory snapshot or
 idempotently deletes already-expired rows, so running both unconditionally
@@ -512,48 +503,12 @@ reads those read-only, ships them into
 authoritative. It scales horizontally by `sha256(path)` file sharding
 (`SHARD_COUNT`/`SHARD_INDEX`), independent of the two dashboard replicas.
 
-### Rolling update sequence
+### Rolling update sequence (retired)
 
-```mermaid
-sequenceDiagram
-  participant Op as scripts/deploy-dashboard-rolling.sh
-  participant D as dashboard
-  participant DB as dashboard-b
-  participant T as Traefik healthCheck
-
-  Op->>Op: docker compose build dashboard<br/>(one shared image tag, both replicas)
-  Op->>T: is dashboard-b already healthy?
-  T-->>Op: yes — proceed
-  Op->>D: docker compose up -d --no-deps dashboard
-  Note over D: Recreate — real listener-down<br/>window for THIS replica only
-  loop poll docker inspect .State.Health.Status
-    D-->>Op: starting (up to 180s budget,<br/>matching the compose healthcheck's<br/>own start_period)
-  end
-  D-->>Op: healthy
-  Note over DB: dashboard-b served 100% of<br/>traffic for this whole window
-  Op->>T: is dashboard now healthy?
-  T-->>Op: yes — proceed
-  Op->>DB: docker compose up -d --no-deps dashboard-b
-  Note over DB: Recreate — real listener-down<br/>window for THIS replica only
-  loop poll docker inspect .State.Health.Status
-    DB-->>Op: starting
-  end
-  DB-->>Op: healthy
-  Note over D,DB: both replicas healthy on the<br/>new image — deploy complete
-```
-
-The 180s wait budget is not arbitrary: `arcane/home/honeypot-dashboard/compose.yml`'s own
-healthcheck already declares `start_period: 180s`, because `/healthz`
-reports 503 until the first `rebuild()` has real ES-derived data — measured
-at 60-120s against this host's actual event volume. If a replica fails its
-post-restart healthcheck, the script stops immediately rather than touching
-the other one: the still-healthy replica keeps serving all traffic while an
-operator investigates, exactly the same "never take down the one thing
-serving live traffic" posture as every step before it. Separately, the
-`autoheal` sidecar (main stack) restarts either replica on an unhealthy
-Docker label independent of this script entirely — it watches
-`/var/run/docker.sock` daemon-wide and isn't affected by the dashboard's
-own stack split.
+The #266 two-replica rolling-update sequence lived here; the deployment
+runs a single dashboard replica now (see above), so the sequence and its
+diagram are retired with it. `scripts/deploy-dashboard-rolling.sh` keeps
+its name but performs a plain single-replica build + recreate.
 
 ## Event ingestion and network analysis
 

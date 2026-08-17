@@ -298,56 +298,20 @@ group) has since split out too -- see the `honeypot-dionaea` and
 `APIARY`, as part of its own internal `depends_on` chain not yet
 worth splitting.
 
-#### Zero-downtime dashboard rolling updates (#266)
+#### Dashboard redeploy (single replica; #266 rolling pair retired)
 
-See ["Dashboard request, state, import, and control flows" in
-`ARCHITECTURE.md`](ARCHITECTURE.md#dashboard-request-state-import-and-control-flows)
-for a dedicated sequence diagram of `deploy-dashboard-rolling.sh`'s actual
-build → verify-other-healthy → recreate → wait-healthy → repeat sequence
-and its 180s health-wait budget. The summary below stays focused on why
-this exists and what it doesn't fix.
+The dashboard runs one replica (per Xore). `scripts/deploy-dashboard-rolling.sh`
+keeps its historical name but now just builds `honeypot-dashboard:latest` and
+recreates the single `dashboard` service, then waits for its healthcheck:
 
-`dashboard` is the one user-facing, frequently-redeployed service behind
-Cloudflare/Traefik, so unlike every other stack here it runs as **two
-replicas** (`dashboard` and `dashboard-b` in `arcane/home/honeypot-dashboard/compose.yml`
--- same image, same volumes via a shared `*dashboard-volumes` YAML anchor,
-different host port and container name only) instead of one.
-`vps/traefik/dynamic.yml`'s `honeypot-dashboard` service lists both as
-`loadBalancer` servers with an active `healthCheck` polling `/healthz`
-directly against each backend (bypassing the router's `security-headers`
-middleware entirely -- health checks are server-to-server, never routed;
-the dashboard has no ForwardAuth/oauth2-proxy gateway hop to bypass in the
-first place, unlike every other investigation UI -- native OIDC, #1026).
-Traefik stops sending a replica live traffic the instant it fails that
-check, before any redeploy script even touches it.
-
-**Deploying:** `scripts/deploy-dashboard-rolling.sh` builds the shared
-image once, then restarts `dashboard` and `dashboard-b` one at a time,
-confirming the *other* replica is healthy before touching each one and
-waiting for the just-restarted replica's own healthcheck to pass before
-moving on. The CI `home` job's dashboard step runs this automatically
-(`.github/workflows/deploy.yml`) instead of a blind `docker compose up -d
---build`, which would recreate both replicas simultaneously and throw the
-whole point away. Run it by hand the same way for a manual redeploy:
-
-```sh
-cd /opt/stacks/honeypot-dashboard
-./deploy-dashboard-rolling.sh   # or scripts/deploy-dashboard-rolling.sh, whichever path synced it here
+```bash
+cd /var/dockge/stacks/honeypot-dashboard
+./scripts/deploy-dashboard-rolling.sh   # build + up -d dashboard + wait healthy
 ```
 
-**Why this doesn't (fully) fix background jobs:** `notifyLoop` (webhook
-alerts) and `reportScheduleLoop` (scheduled PDF generation) would fire/
-generate twice if both replicas ran them -- a visible, duplicate side
-effect a rolling *HTTP* update doesn't have. `dashboard-b` sets
-`DASHBOARD_BACKGROUND_LOOPS=false` (see `dashboard/main.go`'s
-`backgroundLoopsEnabled()`) so only `dashboard` ever runs them. This is a
-fixed two-replica pick, not real leader election: during `dashboard`'s own
-restart, those two loops pause for that window (HTTP traffic keeps flowing
-via `dashboard-b` the whole time; only the two singleton background jobs
-have a brief gap). `rebuild()`/`es.refresh()`/the settings retention sweep
-are unaffected and run on both replicas unconditionally -- each just
-recomputes its own in-memory state or idempotently deletes already-expired
-rows, so duplication there is harmless.
+The brief recreate window is accepted on this single-operator deployment;
+Traefik's active `/healthz` check (vps/traefik/dynamic.yml) fails fast during
+it instead of hanging connections.
 
 ### honeypot-utilities (#258)
 

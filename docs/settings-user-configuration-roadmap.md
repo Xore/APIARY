@@ -204,8 +204,9 @@ Those stay in protected environment/configuration files and deployment review.
 
 ## 5. Persistence and concurrency
 
-**Update (#787):** dashboard replicas were introduced (`dashboard`,
-`dashboard-b`), and the local-JSON-store design below turned out to have a
+**Update (#787, historical):** dashboard replicas were introduced
+(`dashboard`, `dashboard-b`; the pair has since been retired back to a
+single replica per Xore), and the local-JSON-store design below had a
 real multi-replica gap the file-sharing itself didn't prevent: each
 replica's in-memory cache loaded its file once at startup and never
 reloaded it, so a write via one replica was invisible on the other until it

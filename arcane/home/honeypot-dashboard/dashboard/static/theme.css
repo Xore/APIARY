@@ -3271,6 +3271,23 @@ button.sidebar__profile:disabled:hover { background: transparent; }
 }
 .hp-feed-break:hover td { background: transparent !important; }
 
+/* Skeleton-first (hard rule per Xore): placeholders for every ES-backed
+   surface. .hp-skel-batch rows/cards appear the moment "View more" is
+   pressed and are swapped for the fetched entries; KPI tiles show a
+   skeleton value while the store warms instead of a placeholder zero. */
+.hp-skel-batch td .skeleton-line { display: block; width: 62%; }
+tr.hp-skel-batch:nth-child(2n) td .skeleton-line { width: 78%; }
+tr.hp-skel-batch:nth-child(3n) td .skeleton-line { width: 47%; }
+div.hp-skel-batch {
+  display: flex; flex-direction: column; gap: 9px;
+  padding: 13px 15px; border-radius: 14px;
+  background: var(--surface-2);
+}
+div.hp-skel-batch .skeleton-line:first-child { width: 55%; }
+div.hp-skel-batch .skeleton-line:nth-child(2) { width: 80%; }
+div.hp-skel-batch .skeleton-line:nth-child(3) { width: 38%; }
+.metric__value .skeleton-line { display: inline-block; width: 74px; height: 18px; vertical-align: middle; }
+
 /* Sidebar search affordance (claude.ai top-row pattern): a quiet icon
    button floated into the brand row, opening the same palette. */
 .hp-sidebar-search {
