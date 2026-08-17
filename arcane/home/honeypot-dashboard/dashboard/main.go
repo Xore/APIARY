@@ -158,7 +158,6 @@ func main() {
 			fmt.Fprintf(os.Stderr, "dashboard: payload source %s unavailable\n", d)
 		}
 	}
-	go s.payloadInventoryLoop()
 	// Optional GeoIP: a CSV of "start_ip,end_ip,country" (DB-IP lite or a
 	// GeoLite2 country CSV export). Absent/unreadable → enrichment stays off.
 	// Prefer native GeoLite2 City/ASN MMDB. The CSV loader remains a fallback.
@@ -214,6 +213,25 @@ func main() {
 			}
 		}()
 	}
+	// #1579: started here, after s.es is assigned above, not immediately
+	// after s.payloadDirs is populated further up -- payloadInventoryLoop's
+	// very first call reads s.es with no synchronization against this
+	// function's own write to it, and a `go` statement only guarantees the
+	// new goroutine sees everything the launching goroutine did BEFORE that
+	// statement, not after. Starting it earlier let that first call lose
+	// the race on a freshly (re)started process and silently no-op on a nil
+	// s.es, leaving the overview KPI's payload count at 0 -- distinct from
+	// the ES-unconfigured case (a real, permanent no-op both here and in
+	// refreshPayloadCacheAsync's own guard) because it self-healed within
+	// about a minute, once rebuild()'s own independent 15s-interval calls
+	// to refreshPayloadCacheAsync eventually ran with s.es already set and
+	// warmed the cache -- exactly the kind of gap a post-deploy audit
+	// (freshly restarted process, checked within that window) would catch
+	// and a later recheck would no longer reproduce. /payloads itself never
+	// showed this: payloadsData() calls refreshPayloadCacheAsync()
+	// synchronously per-request, and by the time an operator's browser
+	// issues that request s.es has always long since been assigned.
+	go s.payloadInventoryLoop()
 	// #151: query-time embedding for llm-analysis semantic search. Off
 	// (ollamaURL left empty) unless OLLAMA_URL is both set and passes the
 	// same local-only-endpoint check llm-worker's own config enforces --
