@@ -3,6 +3,7 @@ package main
 import (
 	"html/template"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -44,31 +45,111 @@ func TestConsolidatedPayloadPagesLoadDynamicNavScript(t *testing.T) {
 	}
 }
 
-// Sanity-checks the script's own route list and navigation wiring directly
-// against its source, the same pattern TestWorkbenchRunButtonGivesImmediateFeedback
+// extractFullNavRoutes parses hp-dynamic-nav.js's FULL_NAV_ROUTES array
+// (the #1564 opt-out list -- every route not matching one of these patterns
+// is dynamically navigated by default) and compiles each regex literal as a
+// Go regexp, so tests can assert against real route-matching behavior
+// instead of a brittle substring check on the source text. The patterns
+// only use anchors, escaped slashes, character classes and non-capturing
+// alternation -- no JS-only regex syntax -- so a straight `\/` -> `/`
+// unescape is enough to make them valid Go (RE2) regexps too.
+func extractFullNavRoutes(t *testing.T, src string) []*regexp.Regexp {
+	t.Helper()
+	start := strings.Index(src, "const FULL_NAV_ROUTES = [")
+	if start < 0 {
+		t.Fatal("hp-dynamic-nav.js does not define FULL_NAV_ROUTES")
+	}
+	end := strings.Index(src[start:], "\n  ];")
+	if end < 0 {
+		t.Fatal("hp-dynamic-nav.js's FULL_NAV_ROUTES array is not closed as expected")
+	}
+	block := src[start : start+end]
+
+	literalRe := regexp.MustCompile(`/(\^[^\n]*?)/,`)
+	matches := literalRe.FindAllStringSubmatch(block, -1)
+	if len(matches) == 0 {
+		t.Fatal("no route patterns found inside FULL_NAV_ROUTES")
+	}
+	patterns := make([]*regexp.Regexp, 0, len(matches))
+	for _, m := range matches {
+		goPattern := strings.ReplaceAll(m[1], `\/`, `/`)
+		re, err := regexp.Compile(goPattern)
+		if err != nil {
+			t.Fatalf("FULL_NAV_ROUTES pattern %q does not compile as a Go regexp: %v", m[1], err)
+		}
+		patterns = append(patterns, re)
+	}
+	return patterns
+}
+
+func matchesAnyRoute(patterns []*regexp.Regexp, path string) bool {
+	for _, re := range patterns {
+		if re.MatchString(path) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestDynamicNavDefaultsToTheWholeShell (#1564): FULL_NAV_ROUTES is an
+// opt-out list now, not an allow-list -- every real shell route not in it
+// (including every route #1141/#1564 have already converted to the
+// mount/unmount convention) must be dynamically navigable by default, and
+// every route that is NOT yet convention-safe (or isn't a shell page at
+// all) must still force a full navigation.
+func TestDynamicNavDefaultsToTheWholeShell(t *testing.T) {
+	body, err := os.ReadFile("static/hp-dynamic-nav.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	patterns := extractFullNavRoutes(t, string(body))
+
+	mustStayDynamic := []string{
+		"/", "/payloads", "/payload-analysis/abc123",
+		"/payload-workbench/results", "/payload-workbench/run1",
+		"/sandbox/job1", "/github-analysis/abc123",
+		"/events", "/search", "/clusters", "/campaigns", "/history",
+		"/dead-letters", "/source-health", "/alerts", "/auth-events",
+		"/llm-analysis", "/agent-campaigns", "/recordings", "/sensors",
+		"/ips", "/attackers",
+	}
+	for _, path := range mustStayDynamic {
+		if matchesAnyRoute(patterns, path) {
+			t.Errorf("FULL_NAV_ROUTES wrongly forces a full navigation for %q", path)
+		}
+	}
+
+	mustStayFullNav := []string{
+		"/api/whoami", "/static/hp-app.js", "/export/history.json",
+		"/metrics", "/auth/login", "/admin/problem-reports", "/healthz",
+		"/payload/abc123", "/tty/abc123", "/tty/abc123.cast",
+		"/sandbox/vnc", "/payload-workbench", "/sandbox", "/github-analysis",
+		"/kill-chain", "/commands", "/ml-anomalies", "/reports",
+		"/canarytokens", "/settings", "/sessions/abc123",
+		"/investigate/ip/203.0.113.9", "/investigate/cidr/203.0.113.0/24",
+		"/investigate/cluster", "/ghidra", "/ghidra/abc123",
+		"/revdeck/abc123", "/cape/abc123",
+	}
+	for _, path := range mustStayFullNav {
+		if !matchesAnyRoute(patterns, path) {
+			t.Errorf("FULL_NAV_ROUTES no longer forces a full navigation for %q -- "+
+				"if its own script now supports mount/unmount, remove it from this test's "+
+				"mustStayFullNav list too, not just the source", path)
+		}
+	}
+}
+
+// Sanity-checks the script's own navigation wiring directly against its
+// source, the same pattern TestWorkbenchRunButtonGivesImmediateFeedback
 // already uses for hp-workbench.js -- not a substitute for a real browser
-// test (none exists in this Go suite), but catches a route regex or a
-// missing listener surviving an edit that a template-presence check alone
-// wouldn't.
+// test (none exists in this Go suite), but catches a missing listener
+// surviving an edit that a template-presence check alone wouldn't.
 func TestDynamicNavScriptCoversTheConsolidatedRoutesAndWiring(t *testing.T) {
 	body, err := os.ReadFile("static/hp-dynamic-nav.js")
 	if err != nil {
 		t.Fatal(err)
 	}
 	src := string(body)
-
-	for _, want := range []string{
-		`/^\/payloads$/`,
-		`/^\/payload-analysis\/`,
-		`/^\/payload-workbench\/results$/`,
-		`/^\/payload-workbench\/`,
-		`/^\/sandbox\/`,
-		`/^\/github-analysis\/`,
-	} {
-		if !strings.Contains(src, want) {
-			t.Errorf("hp-dynamic-nav.js is missing the expected route pattern %q", want)
-		}
-	}
 
 	for _, want := range []string{
 		`addEventListener("click"`,
