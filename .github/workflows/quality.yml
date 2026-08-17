@@ -49,8 +49,8 @@ jobs:
       - run: python scripts/check-public-leaks.py
       - run: python scripts/validate-oidc-redirects.py
 
-  go:
-    name: Go formatting and tests
+  go-fmt:
+    name: Go formatting
     runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.use_self_hosted_runner) && 'self-hosted' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
@@ -66,14 +66,60 @@ jobs:
         run: |
           files="$(find . -path '*/vendor' -prune -o -name '*.go' -type f -print)"
           test -z "$(gofmt -l $files)" || { gofmt -l $files; exit 1; }
-      - name: Test every Go module
-        shell: bash
-        run: |
-          while IFS= read -r module; do
-            echo "::group::${module%/go.mod}"
-            (cd "${module%/go.mod}" && go test ./...)
-            echo "::endgroup::"
-          done < <(find . -path '*/vendor' -prune -o -name go.mod -type f -print | sort)
+
+  go-test:
+    name: Test (${{ matrix.module }})
+    runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.use_self_hosted_runner) && 'self-hosted' || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every go.mod in the repo (excluding vendor/) -- kept as an explicit
+        # list rather than a dynamic discover-then-matrix job so a new
+        # module's tests actually run in CI the moment its go.mod lands,
+        # instead of silently needing a separate PR to register it here too.
+        # `find ... | sort` in this job's own history is the source of
+        # truth if this list and the repo ever drift.
+        module:
+          - arcane/home/honeypot-attacker-identity-worker/attacker-identity-worker
+          - arcane/home/honeypot-canarytokens/canarytokens-adapter
+          - arcane/home/honeypot-canarytokens/canarytokens-http-router
+          - arcane/home/honeypot-cisco-asa-honeypot/cisco-asa-honeypot
+          - arcane/home/honeypot-citrix-honeypot/citrix-honeypot
+          - arcane/home/honeypot-correlator-worker/correlator-worker
+          - arcane/home/honeypot-cowrie/honeyfs-implant
+          - arcane/home/honeypot-dashboard/dashboard
+          - arcane/home/honeypot-dicompot/dicompot
+          - arcane/home/honeypot-dionaea/tftp-relay
+          - arcane/home/honeypot-dnp3/dnp3-honeypot
+          - arcane/home/honeypot-dns-honeypot/dns-honeypot
+          - arcane/home/honeypot-endlessh/endlessh-honeypot
+          - arcane/home/honeypot-galah/galah-llm-broker
+          - arcane/home/honeypot-http/http-honeypot
+          - arcane/home/honeypot-ip-enrichment-worker/ip-enrichment-worker
+          - arcane/home/honeypot-multipot/multipot
+          - arcane/home/honeypot-payload-inventory-worker/payload-inventory-worker
+          - arcane/home/honeypot-rdp-honeypot/rdp-honeypot
+          - arcane/home/honeypot-utilities/reporter
+          - portbridge
+          - vps/portbridge
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.x"
+          cache-dependency-path: "${{ matrix.module }}/go.sum"
+      - run: go test ./...
+        working-directory: ${{ matrix.module }}
+
+  go-modules-complete:
+    name: Go formatting and tests
+    if: always()
+    needs: [go-fmt, go-test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any module job failed
+        if: needs.go-fmt.result != 'success' || needs.go-test.result != 'success'
+        run: exit 1
 
   frontend:
     name: Dashboard frontend
@@ -138,8 +184,310 @@ jobs:
         run: scripts/check-vendored-novnc.sh
 
   scripts-and-compose:
-    name: Scripts and Compose
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Python syntax
+            run: find . -path '*/vendor' -prune -o -name '*.py' -type f -print0 | xargs -0 -r python -m py_compile
+
+          - name: Dionaea log rotation patch (#1389)
+            run: |
+              # Build-time patch applied to dionaea's vendored log_json.py/
+              # log_incident.py -- exercises apply_patch() against fixtures built
+              # from the patch's own OLD_CLASS/OLD_IMPORT text, and the actual
+              # patched FileHandler class body (exec'd, not reimplemented) for
+              # rotation/data-loss behavior.
+              python arcane/home/honeypot-dionaea/dionaea/tests/test_log_rotation_patch.py
+
+          - name: Ghidra worker, spool discipline and AI triage
+            run: |
+              # Stdlib only and stubbed on both sides, so it runs here in seconds.
+              # Worth running: this worker decides what reaches an analyst's screen
+              # from a live malware sample, and the triage half will not send
+              # sample-derived text to a non-local model endpoint — a rule that is
+              # only worth anything if something checks it on every change.
+              python analysis/ghidra/worker/tests/test_ghidra_worker.py
+              # Replacement Ghidra REST service (#245): fake analyzeHeadless, no
+              # real Ghidra/JVM in CI -- verifies server.py's HTTP/queue layer
+              # only, same "stub both sides" reasoning as the worker test above.
+              python analysis/ghidra/service/tests/test_server.py
+              # Governance tests use synthetic snapshots/reports only. CI never
+              # pulls or loads multi-GB model weights.
+              python analysis/ghidra/models/tests/test_model_governance.py
+              python analysis/ghidra/models/tests/test_model_status_adapter.py
+              # full_capabilities.py (#800): inventories env vars straight out of
+              # the real pipeline source, so its own test runs against the real
+              # tree rather than fixtures -- proving that stays true.
+              python analysis/ghidra/tests/test_full_capabilities.py
+              # CAPE worker's status.json discipline (#319 follow-up). No live
+              # CAPE involved -- see the test file's own docstring for why that
+              # stays with --selftest --round-trip (#318) instead.
+              python sandbox/cape/worker/tests/test_cape_worker.py
+
+          - name: Guarded LLM worker contracts
+            run: |
+              python -m pip install -r llm-worker/requirements.txt
+              python -m unittest discover -s llm-worker/tests -v
+              python llm-worker/worker.py --selftest
+
+          # ml-worker/, analysis/es-results-importer/, personas/, and
+          # services-adapter/ are all deployed by deploy.yml but had zero test
+          # coverage wired into any workflow -- 189 tests across 11 files
+          # (found while auditing #982's own CI gap; this is the same class of
+          # issue, just for four whole modules instead of two scripts).
+          # ml-worker's suite uses pytest specifically (parametrized fixtures),
+          # unlike every other Python test dir in this workflow, which is
+          # plain unittest -- pytest isn't a production dependency so it's
+          # installed here rather than added to ml-worker/requirements.txt.
+          - name: ml-worker anomaly pipeline contracts
+            run: |
+              python -m pip install -r ml-worker/requirements.txt pytest
+              python -m pytest ml-worker/tests/ -v
+
+          - name: es-results-importer chunked-upload and dedup contracts
+            run: |
+              python -m pip install -r arcane/home/honeypot-dashboard/analysis/es-results-importer/requirements.txt
+              python -m unittest discover -s arcane/home/honeypot-dashboard/analysis/es-results-importer/tests -v
+
+          - name: Persona application is idempotent
+            run: python -m unittest discover -s personas/tests -v
+
+          - name: services-adapter allowlist enforcement
+            run: python -m unittest discover -s arcane/home/honeypot-dashboard/services-adapter/tests -v
+
+          - name: Sandbox guest string-cleaning filter (#530)
+            run: python3 sandbox/test_guest_clean_strings.py -v
+
+          - name: Windows sandbox static/dynamic IOC extraction (#482)
+            run: python3 sandbox/windows/orchestrate/test_extract_iocs.py -v
+
+          - name: Shell syntax and high-severity ShellCheck
+            run: |
+              sudo apt-get update
+              sudo apt-get install -y shellcheck
+              # A couple of sandbox/windows/packer/pxe/*.sh files are actually
+              # Python (named .sh to match their sibling shell scripts' calling
+              # convention, e.g. `packer trigger-callback... .sh`) -- filter to
+              # files whose own shebang names a shell, rather than assuming
+              # every *.sh is one, so bash -n/shellcheck don't choke on them.
+              shell_scripts=()
+              while IFS= read -r -d '' f; do
+                read -r shebang < "$f" || true
+                case "$shebang" in
+                  '#!'*/sh|'#!'*/bash|'#!'*env\ sh|'#!'*env\ bash) shell_scripts+=("$f") ;;
+                esac
+              done < <(find . -name '*.sh' -type f -print0)
+              if [ "${#shell_scripts[@]}" -gt 0 ]; then
+                printf '%s\0' "${shell_scripts[@]}" | xargs -0 -n1 bash -n
+                printf '%s\0' "${shell_scripts[@]}" | xargs -0 shellcheck --severity=error
+              fi
+
+          - name: Validate Keycloak realm policy
+            run: ./arcane/home/honeypot-keycloak/keycloak/realm/validate.sh
+
+          # #982 phase 1 / #1040: validate.sh only checks structure/policy --
+          # this actually imports the realm into a real, disposable Keycloak +
+          # PostgreSQL the way the real fresh-install bootstrap path does, to
+          # catch what only a real import catches (e.g. a role description over
+          # Postgres's varchar(255) column limit crash-looped the container on
+          # every fresh install, undetected by any static check).
+          - name: Keycloak realm imports cleanly into a real Postgres
+            run: ./scripts/test-keycloak-realm-import.sh
+
+          # #977: proves the isolated oauth2-proxy gateway pattern every
+          # protected app (Kibana/EveBox/Arkime/TANNER/RevDeck/Dockge/Traefik)
+          # uses against a real disposable Keycloak + real oauth2-proxy --
+          # unauthenticated redirect target, forged-callback rejection, role
+          # enforcement, upstream network isolation, and gateway-outage
+          # fail-closed behavior.
+          - name: oauth2-proxy gateway pattern is resilient
+            run: ./scripts/test-oauth2-proxy-gateway-resilience.sh
+
+          # #982: the OIDC protocol golden-path itself -- real authorization-
+          # code+PKCE login, including the realm's mandatory TOTP second
+          # factor, against the real dashboard binary and a real disposable
+          # Keycloak. Was previously only ever run by hand; nothing caught a
+          # regression here automatically before this.
+          - name: Dashboard PKCE + mandatory-TOTP login (real Keycloak)
+            run: ./scripts/test-dashboard-oidc-pkce-totp-login.sh
+
+          # #982: Keycloak outage/restart/signing-key-rotation chaos testing
+          # against the real dashboard binary + a real disposable Keycloak.
+          # Same "was only ever run by hand" gap as above.
+          - name: Dashboard survives Keycloak outage, restart, and key rotation
+            run: ./scripts/test-dashboard-oidc-chaos.sh
+
+          - name: GitHub-analysis publisher stays dry-run by default
+            run: |
+              # The one property this whole feature depends on (#74):
+              # GITHUB_PUBLISH_ENABLED unset must never reach publish-sample.sh,
+              # the only thing that can commit, zip, or push. WORK-LEDGER.md
+              # rule 7 requires this be a test, not a convention -- run it on
+              # every change, not just when analysis/github/ itself changes,
+              # since a change elsewhere (an env var default, a shared helper)
+              # could silently break the gate just as easily.
+              for t in analysis/github/tests/*.sh; do
+                echo "::group::$t"
+                bash "$t"
+                echo "::endgroup::"
+              done
+
+          - name: Threat-intel CIDR refresh script (#244)
+            run: arcane/home/honeypot-dashboard/dashboard/geoip/tests/test_refresh_threat_cidrs.sh
+
+          - name: honeypot-30d ILM policy rolls over and deletes (#585)
+            run: analysis/tests/test_honeypot_ilm_rollover.sh
+
+          - name: geoip-honeypot ingest pipeline (#563)
+            run: analysis/tests/test_geoip_pipeline.sh
+
+          - name: dionaea-incidents index template (#565)
+            run: analysis/tests/test_dionaea_incidents_index.sh
+
+          - name: conpot persona extraction in geoip-honeypot pipeline (#567)
+            run: analysis/tests/test_conpot_persona_pipeline.sh
+
+          - name: Sensor event-kind coverage audit (#789)
+            run: |
+              python3 scripts/tests/test_audit_sensor_event_coverage.py
+              python3 scripts/audit-sensor-event-coverage.py
+
+          - name: Payload/artifact dedupe (#481/#528)
+            run: |
+              # test_dedupe_payloads.py and test_cdc_dedup_prototype.py had
+              # zero CI coverage before this -- no workflow referenced either
+              # by name. Closing that gap alongside #528's own new modules
+              # rather than leaving it, since it's the same area of the tree
+              # and cheap to fix now that it's been noticed.
+              python3 analysis/tests/test_dedupe_payloads.py -v
+              python3 analysis/tests/test_cdc_dedup_prototype.py -v
+              python3 analysis/tests/test_procmon_cdc_store.py -v
+              python3 analysis/tests/test_archive_diagnostics.py -v
+
+          - name: Agent-intrusion synthetic replay corpus (#154 phase 1)
+            run: |
+              # #154's own acceptance criteria: "CI verifies schemas, safe
+              # fixtures, and replay expectations." Runs both the standalone
+              # validator (the same one a human runs by hand when editing the
+              # corpus) and its test suite (which additionally proves the
+              # validator catches deliberately-broken input, not just that
+              # today's corpus happens to pass).
+              python3 arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/validate_corpus.py
+              python3 arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/tests/test_corpus.py -v
+
+          - name: Agent-intrusion decode/correlate pipeline (#154 phase 2)
+            run: |
+              # Bounded, non-executing base64/gzip/zlib/xor decoder plus
+              # multi-part message-chunk reassembly, proven against the real
+              # corpus above -- not just hand-built fixtures -- per that
+              # corpus's own README ("expected_findings is ground truth for
+              # phase 2's decoder").
+              python3 arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/tests/test_decode_correlate.py -v
+
+          - name: Agent-intrusion campaign correlator (#154 phase 2)
+            run: |
+              # Second half of phase 2 ("correlate events across sensors into
+              # one campaign timeline using stable IDs and time windows") --
+              # union-find over session/IP/channel identifiers, proven against
+              # the real corpus's own multi-hop case (a C2 channel ID bridging
+              # two otherwise-unconnected actor identities into one campaign).
+              python3 arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/tests/test_campaign_correlator.py -v
+
+          - name: Agent-intrusion criticality rules (#154 phase 3)
+            run: |
+              # Deterministic, structural rules (never reads the corpus's own
+              # phase/should_escalate labels -- see criticality_rules.py's own
+              # module docstring) proven against every one of the 27 real
+              # corpus events matching its own independently-established
+              # ground truth, plus the campaign-level severity scoring proven
+              # against the real merged 8-event campaign reaching "critical".
+              python3 arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/tests/test_criticality_rules.py -v
+
+          - name: Agent-intrusion campaign worker (#154 phase 5)
+            run: |
+              # Wires decode_correlate/campaign_correlator/criticality_rules
+              # against Elasticsearch-shaped data for real (a hand-rolled fake
+              # ES client, no network) -- including an end-to-end run of the
+              # real corpus through the worker's own correlate-then-score call
+              # sequence, proving the pipeline wiring itself is correct, not
+              # just each module independently.
+              python3 -m pip install -r arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/requirements.txt
+              python3 arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/tests/test_worker.py -v
+
+          - name: Sandbox VNC bridge read-only enforcement (#805)
+            run: python3 sandbox/windows/vnc-bridge/tests/test_server.py
+
+          - name: Vendored YARA corpus is intact and loadable
+            run: |
+              # yara(1) refuses to start on a corpus with one bad rule rather than
+              # skipping it, so a rule file edited in place or dropped from
+              # index.yar takes the whole scanner down silently.
+              #
+              # Run in the scanner's own base image rather than against the runner's
+              # apt yara: "does it compile" is only a useful answer from the
+              # compiler that will actually load it, and the two versions differ.
+              # The image is read from the Dockerfile so a base bump moves CI too.
+              image="$(awk '/^FROM /{print $2; exit}' arcane/home/honeypot-payload-analysis/analysis/yara/Dockerfile)"
+              echo "validating against $image"
+              docker run --rm -v "$PWD:/w" -w /w "$image" sh -c '
+                apk add --no-cache bash git yara >/dev/null
+                yara --version
+                scripts/check-yara-corpus.sh
+                yara -w arcane/home/honeypot-payload-analysis/analysis/yara/rules/index.yar /dev/null
+                arcane/home/honeypot-payload-analysis/analysis/yara/tests/test_sync_yara.sh
+              '
+
+          - name: Rev-eng benchmark corpus is reproducible and safe (#159)
+            run: |
+              # Runs in the corpus's own documented build environment
+              # (debian:trixie-slim, matching corpus/README.md's "Rebuilding"
+              # section exactly), not the runner's own toolchain — the whole
+              # point is verifying that THIS environment reproduces the
+              # committed manifest.json byte-for-byte, which only means
+              # something if it is the same environment the corpus claims
+              # provenance against.
+              docker run --rm -v "$PWD:/w" -w /w debian:trixie-slim bash -c '
+                analysis/ghidra/benchmarks/corpus/ci_verify.sh
+              '
+
+          - name: Validate home and VPS Compose
+            run: |
+              cp .env.example .env
+              cp vps/.env.example vps/.env
+              docker compose -f docker-compose.yml config --quiet
+              # honeypot-init is a separate Dockge stack (#111) that attaches to
+              # APIARY's honeynet network and two of its named volumes by
+              # external reference; config validation does not require those to
+              # actually exist, so no APIARY setup is needed here either.
+              docker compose -f arcane/home/honeypot-init/compose.yml config --quiet
+              docker compose -f vps/docker-compose.yml config --quiet
+              # The sandbox gateway is never started here — it answers live malware
+              # on an isolated bridge that does not exist on a CI runner. Validating
+              # it still matters: run_sample.py shells out to this file mid-detonation,
+              # and a syntax error would surface as a failed run on the analysis host.
+              docker compose -f docker-compose.sandbox.yml config --quiet
+              # Same reasoning for the analysis host: not started here, but
+              # install-analysis-host.sh runs it unattended on a box with a GPU and
+              # captured malware on it. Both the base file and the GPU overlay,
+              # because the overlay is only ever used on top of the base one.
+              docker compose -f analysis/ghidra/docker-compose.ghidra.yml config --quiet
+              docker compose -f analysis/ghidra/docker-compose.ghidra.yml \
+                -f analysis/ghidra/docker-compose.ghidra.gpu.yml config --quiet
+              # #66's base file is synthetic and network-isolated. Validate both
+              # #83 overlays, but start neither worker nor model in CI.
+              docker compose -f llm-worker/docker-compose.yml config --quiet
+              docker compose -f llm-worker/docker-compose.yml \
+                -f llm-worker/docker-compose.synthetic-canary.yml config --quiet
+              docker compose -f llm-worker/docker-compose.yml \
+                -f llm-worker/docker-compose.production-session-canary.yml config --quiet
+              docker compose -f llm-worker/docker-compose.yml \
+                -f llm-worker/docker-compose.captured-data.yml config --quiet
+
+          - name: Pi-hole/DNSCrypt install topology (#1387)
+            run: python3 scripts/tests/test_pihole_install.py
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -147,307 +495,24 @@ jobs:
           python-version: "3.13"
       # Needed below by the two dashboard-binary Keycloak integration tests
       # (`go run .` against the real dashboard) -- same version floor as the
-      # `go` job, see that job's own go-version comment.
+      # go-test job, see that job's own go-version comment. Every matrix
+      # entry pays this setup cost even though only two of them use it --
+      # simpler and more robust than threading a per-entry needs-go flag
+      # through the matrix, and setup-go is fast.
       - uses: actions/setup-go@v7
         with:
           go-version: "1.26.x"
           cache-dependency-path: "**/go.sum"
-      - name: Python syntax
+      - name: ${{ matrix.name }}
         shell: bash
-        run: find . -path '*/vendor' -prune -o -name '*.py' -type f -print0 | xargs -0 -r python -m py_compile
-      - name: Dionaea log rotation patch (#1389)
-        shell: bash
-        run: |
-          # Build-time patch applied to dionaea's vendored log_json.py/
-          # log_incident.py -- exercises apply_patch() against fixtures built
-          # from the patch's own OLD_CLASS/OLD_IMPORT text, and the actual
-          # patched FileHandler class body (exec'd, not reimplemented) for
-          # rotation/data-loss behavior.
-          python arcane/home/honeypot-dionaea/dionaea/tests/test_log_rotation_patch.py
-      - name: Ghidra worker, spool discipline and AI triage
-        shell: bash
-        run: |
-          # Stdlib only and stubbed on both sides, so it runs here in seconds.
-          # Worth running: this worker decides what reaches an analyst's screen
-          # from a live malware sample, and the triage half will not send
-          # sample-derived text to a non-local model endpoint — a rule that is
-          # only worth anything if something checks it on every change.
-          python analysis/ghidra/worker/tests/test_ghidra_worker.py
-          # Replacement Ghidra REST service (#245): fake analyzeHeadless, no
-          # real Ghidra/JVM in CI -- verifies server.py's HTTP/queue layer
-          # only, same "stub both sides" reasoning as the worker test above.
-          python analysis/ghidra/service/tests/test_server.py
-          # Governance tests use synthetic snapshots/reports only. CI never
-          # pulls or loads multi-GB model weights.
-          python analysis/ghidra/models/tests/test_model_governance.py
-          python analysis/ghidra/models/tests/test_model_status_adapter.py
-          # full_capabilities.py (#800): inventories env vars straight out of
-          # the real pipeline source, so its own test runs against the real
-          # tree rather than fixtures -- proving that stays true.
-          python analysis/ghidra/tests/test_full_capabilities.py
-          # CAPE worker's status.json discipline (#319 follow-up). No live
-          # CAPE involved -- see the test file's own docstring for why that
-          # stays with --selftest --round-trip (#318) instead.
-          python sandbox/cape/worker/tests/test_cape_worker.py
-      - name: Guarded LLM worker contracts
-        shell: bash
-        run: |
-          python -m pip install -r llm-worker/requirements.txt
-          python -m unittest discover -s llm-worker/tests -v
-          python llm-worker/worker.py --selftest
-      # ml-worker/, analysis/es-results-importer/, personas/, and
-      # services-adapter/ are all deployed by deploy.yml but had zero test
-      # coverage wired into any workflow -- 189 tests across 11 files
-      # (found while auditing #982's own CI gap; this is the same class of
-      # issue, just for four whole modules instead of two scripts).
-      # ml-worker's suite uses pytest specifically (parametrized fixtures),
-      # unlike every other Python test dir in this workflow, which is
-      # plain unittest -- pytest isn't a production dependency so it's
-      # installed here rather than added to ml-worker/requirements.txt.
-      - name: ml-worker anomaly pipeline contracts
-        shell: bash
-        run: |
-          python -m pip install -r ml-worker/requirements.txt pytest
-          python -m pytest ml-worker/tests/ -v
-      - name: es-results-importer chunked-upload and dedup contracts
-        shell: bash
-        run: |
-          python -m pip install -r arcane/home/honeypot-dashboard/analysis/es-results-importer/requirements.txt
-          python -m unittest discover -s arcane/home/honeypot-dashboard/analysis/es-results-importer/tests -v
-      - name: Persona application is idempotent
-        shell: bash
-        run: python -m unittest discover -s personas/tests -v
-      - name: services-adapter allowlist enforcement
-        shell: bash
-        run: python -m unittest discover -s arcane/home/honeypot-dashboard/services-adapter/tests -v
-      - name: Sandbox guest string-cleaning filter (#530)
-        shell: bash
-        run: python3 sandbox/test_guest_clean_strings.py -v
-      - name: Windows sandbox static/dynamic IOC extraction (#482)
-        shell: bash
-        run: python3 sandbox/windows/orchestrate/test_extract_iocs.py -v
-      - name: Shell syntax and high-severity ShellCheck
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y shellcheck
-          # A couple of sandbox/windows/packer/pxe/*.sh files are actually
-          # Python (named .sh to match their sibling shell scripts' calling
-          # convention, e.g. `packer trigger-callback... .sh`) -- filter to
-          # files whose own shebang names a shell, rather than assuming
-          # every *.sh is one, so bash -n/shellcheck don't choke on them.
-          shell_scripts=()
-          while IFS= read -r -d '' f; do
-            read -r shebang < "$f" || true
-            case "$shebang" in
-              '#!'*/sh|'#!'*/bash|'#!'*env\ sh|'#!'*env\ bash) shell_scripts+=("$f") ;;
-            esac
-          done < <(find . -name '*.sh' -type f -print0)
-          if [ "${#shell_scripts[@]}" -gt 0 ]; then
-            printf '%s\0' "${shell_scripts[@]}" | xargs -0 -n1 bash -n
-            printf '%s\0' "${shell_scripts[@]}" | xargs -0 shellcheck --severity=error
-          fi
-      - name: Validate Keycloak realm policy
-        shell: bash
-        run: ./arcane/home/honeypot-keycloak/keycloak/realm/validate.sh
-      # #982 phase 1 / #1040: validate.sh only checks structure/policy --
-      # this actually imports the realm into a real, disposable Keycloak +
-      # PostgreSQL the way the real fresh-install bootstrap path does, to
-      # catch what only a real import catches (e.g. a role description over
-      # Postgres's varchar(255) column limit crash-looped the container on
-      # every fresh install, undetected by any static check).
-      - name: Keycloak realm imports cleanly into a real Postgres
-        shell: bash
-        run: ./scripts/test-keycloak-realm-import.sh
-      # #977: proves the isolated oauth2-proxy gateway pattern every
-      # protected app (Kibana/EveBox/Arkime/TANNER/RevDeck/Dockge/Traefik)
-      # uses against a real disposable Keycloak + real oauth2-proxy --
-      # unauthenticated redirect target, forged-callback rejection, role
-      # enforcement, upstream network isolation, and gateway-outage
-      # fail-closed behavior.
-      - name: oauth2-proxy gateway pattern is resilient
-        shell: bash
-        run: ./scripts/test-oauth2-proxy-gateway-resilience.sh
-      # #982: the OIDC protocol golden-path itself -- real authorization-
-      # code+PKCE login, including the realm's mandatory TOTP second
-      # factor, against the real dashboard binary and a real disposable
-      # Keycloak. Was previously only ever run by hand; nothing caught a
-      # regression here automatically before this.
-      - name: Dashboard PKCE + mandatory-TOTP login (real Keycloak)
-        shell: bash
-        run: ./scripts/test-dashboard-oidc-pkce-totp-login.sh
-      # #982: Keycloak outage/restart/signing-key-rotation chaos testing
-      # against the real dashboard binary + a real disposable Keycloak.
-      # Same "was only ever run by hand" gap as above.
-      - name: Dashboard survives Keycloak outage, restart, and key rotation
-        shell: bash
-        run: ./scripts/test-dashboard-oidc-chaos.sh
-      - name: GitHub-analysis publisher stays dry-run by default
-        shell: bash
-        run: |
-          # The one property this whole feature depends on (#74):
-          # GITHUB_PUBLISH_ENABLED unset must never reach publish-sample.sh,
-          # the only thing that can commit, zip, or push. WORK-LEDGER.md
-          # rule 7 requires this be a test, not a convention -- run it on
-          # every change, not just when analysis/github/ itself changes,
-          # since a change elsewhere (an env var default, a shared helper)
-          # could silently break the gate just as easily.
-          for t in analysis/github/tests/*.sh; do
-            echo "::group::$t"
-            bash "$t"
-            echo "::endgroup::"
-          done
-      - name: Threat-intel CIDR refresh script (#244)
-        shell: bash
-        run: arcane/home/honeypot-dashboard/dashboard/geoip/tests/test_refresh_threat_cidrs.sh
-      - name: honeypot-30d ILM policy rolls over and deletes (#585)
-        shell: bash
-        run: analysis/tests/test_honeypot_ilm_rollover.sh
-      - name: geoip-honeypot ingest pipeline (#563)
-        shell: bash
-        run: analysis/tests/test_geoip_pipeline.sh
-      - name: dionaea-incidents index template (#565)
-        shell: bash
-        run: analysis/tests/test_dionaea_incidents_index.sh
-      - name: conpot persona extraction in geoip-honeypot pipeline (#567)
-        shell: bash
-        run: analysis/tests/test_conpot_persona_pipeline.sh
-      - name: Sensor event-kind coverage audit (#789)
-        shell: bash
-        run: |
-          python3 scripts/tests/test_audit_sensor_event_coverage.py
-          python3 scripts/audit-sensor-event-coverage.py
-      - name: Payload/artifact dedupe (#481/#528)
-        shell: bash
-        run: |
-          # test_dedupe_payloads.py and test_cdc_dedup_prototype.py had
-          # zero CI coverage before this -- no workflow referenced either
-          # by name. Closing that gap alongside #528's own new modules
-          # rather than leaving it, since it's the same area of the tree
-          # and cheap to fix now that it's been noticed.
-          python3 analysis/tests/test_dedupe_payloads.py -v
-          python3 analysis/tests/test_cdc_dedup_prototype.py -v
-          python3 analysis/tests/test_procmon_cdc_store.py -v
-          python3 analysis/tests/test_archive_diagnostics.py -v
-      - name: Agent-intrusion synthetic replay corpus (#154 phase 1)
-        shell: bash
-        run: |
-          # #154's own acceptance criteria: "CI verifies schemas, safe
-          # fixtures, and replay expectations." Runs both the standalone
-          # validator (the same one a human runs by hand when editing the
-          # corpus) and its test suite (which additionally proves the
-          # validator catches deliberately-broken input, not just that
-          # today's corpus happens to pass).
-          python3 arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/validate_corpus.py
-          python3 arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/tests/test_corpus.py -v
-      - name: Agent-intrusion decode/correlate pipeline (#154 phase 2)
-        shell: bash
-        run: |
-          # Bounded, non-executing base64/gzip/zlib/xor decoder plus
-          # multi-part message-chunk reassembly, proven against the real
-          # corpus above -- not just hand-built fixtures -- per that
-          # corpus's own README ("expected_findings is ground truth for
-          # phase 2's decoder").
-          python3 arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/tests/test_decode_correlate.py -v
-      - name: Agent-intrusion campaign correlator (#154 phase 2)
-        shell: bash
-        run: |
-          # Second half of phase 2 ("correlate events across sensors into
-          # one campaign timeline using stable IDs and time windows") --
-          # union-find over session/IP/channel identifiers, proven against
-          # the real corpus's own multi-hop case (a C2 channel ID bridging
-          # two otherwise-unconnected actor identities into one campaign).
-          python3 arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/tests/test_campaign_correlator.py -v
-      - name: Agent-intrusion criticality rules (#154 phase 3)
-        shell: bash
-        run: |
-          # Deterministic, structural rules (never reads the corpus's own
-          # phase/should_escalate labels -- see criticality_rules.py's own
-          # module docstring) proven against every one of the 27 real
-          # corpus events matching its own independently-established
-          # ground truth, plus the campaign-level severity scoring proven
-          # against the real merged 8-event campaign reaching "critical".
-          python3 arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/tests/test_criticality_rules.py -v
-      - name: Agent-intrusion campaign worker (#154 phase 5)
-        shell: bash
-        run: |
-          # Wires decode_correlate/campaign_correlator/criticality_rules
-          # against Elasticsearch-shaped data for real (a hand-rolled fake
-          # ES client, no network) -- including an end-to-end run of the
-          # real corpus through the worker's own correlate-then-score call
-          # sequence, proving the pipeline wiring itself is correct, not
-          # just each module independently.
-          python3 -m pip install -r arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/requirements.txt
-          python3 arcane/home/honeypot-agent-intrusion-worker/analysis/agent-intrusion-corpus/tests/test_worker.py -v
-      - name: Sandbox VNC bridge read-only enforcement (#805)
-        shell: bash
-        run: python3 sandbox/windows/vnc-bridge/tests/test_server.py
-      - name: Vendored YARA corpus is intact and loadable
-        shell: bash
-        run: |
-          # yara(1) refuses to start on a corpus with one bad rule rather than
-          # skipping it, so a rule file edited in place or dropped from
-          # index.yar takes the whole scanner down silently.
-          #
-          # Run in the scanner's own base image rather than against the runner's
-          # apt yara: "does it compile" is only a useful answer from the
-          # compiler that will actually load it, and the two versions differ.
-          # The image is read from the Dockerfile so a base bump moves CI too.
-          image="$(awk '/^FROM /{print $2; exit}' arcane/home/honeypot-payload-analysis/analysis/yara/Dockerfile)"
-          echo "validating against $image"
-          docker run --rm -v "$PWD:/w" -w /w "$image" sh -c '
-            apk add --no-cache bash git yara >/dev/null
-            yara --version
-            scripts/check-yara-corpus.sh
-            yara -w arcane/home/honeypot-payload-analysis/analysis/yara/rules/index.yar /dev/null
-            arcane/home/honeypot-payload-analysis/analysis/yara/tests/test_sync_yara.sh
-          '
-      - name: Rev-eng benchmark corpus is reproducible and safe (#159)
-        shell: bash
-        run: |
-          # Runs in the corpus's own documented build environment
-          # (debian:trixie-slim, matching corpus/README.md's "Rebuilding"
-          # section exactly), not the runner's own toolchain — the whole
-          # point is verifying that THIS environment reproduces the
-          # committed manifest.json byte-for-byte, which only means
-          # something if it is the same environment the corpus claims
-          # provenance against.
-          docker run --rm -v "$PWD:/w" -w /w debian:trixie-slim bash -c '
-            analysis/ghidra/benchmarks/corpus/ci_verify.sh
-          '
-      - name: Validate home and VPS Compose
-        shell: bash
-        run: |
-          cp .env.example .env
-          cp vps/.env.example vps/.env
-          docker compose -f docker-compose.yml config --quiet
-          # honeypot-init is a separate Dockge stack (#111) that attaches to
-          # APIARY's honeynet network and two of its named volumes by
-          # external reference; config validation does not require those to
-          # actually exist, so no APIARY setup is needed here either.
-          docker compose -f arcane/home/honeypot-init/compose.yml config --quiet
-          docker compose -f vps/docker-compose.yml config --quiet
-          # The sandbox gateway is never started here — it answers live malware
-          # on an isolated bridge that does not exist on a CI runner. Validating
-          # it still matters: run_sample.py shells out to this file mid-detonation,
-          # and a syntax error would surface as a failed run on the analysis host.
-          docker compose -f docker-compose.sandbox.yml config --quiet
-          # Same reasoning for the analysis host: not started here, but
-          # install-analysis-host.sh runs it unattended on a box with a GPU and
-          # captured malware on it. Both the base file and the GPU overlay,
-          # because the overlay is only ever used on top of the base one.
-          docker compose -f analysis/ghidra/docker-compose.ghidra.yml config --quiet
-          docker compose -f analysis/ghidra/docker-compose.ghidra.yml \
-            -f analysis/ghidra/docker-compose.ghidra.gpu.yml config --quiet
-          # #66's base file is synthetic and network-isolated. Validate both
-          # #83 overlays, but start neither worker nor model in CI.
-          docker compose -f llm-worker/docker-compose.yml config --quiet
-          docker compose -f llm-worker/docker-compose.yml \
-            -f llm-worker/docker-compose.synthetic-canary.yml config --quiet
-          docker compose -f llm-worker/docker-compose.yml \
-            -f llm-worker/docker-compose.production-session-canary.yml config --quiet
-          docker compose -f llm-worker/docker-compose.yml \
-            -f llm-worker/docker-compose.captured-data.yml config --quiet
-      - name: Pi-hole/DNSCrypt install topology (#1387)
-        shell: bash
-        run: python3 scripts/tests/test_pihole_install.py
+        run: ${{ matrix.run }}
+
+  scripts-and-compose-complete:
+    name: Scripts and Compose
+    if: always()
+    needs: [scripts-and-compose]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any check failed
+        if: needs.scripts-and-compose.result != 'success'
+        run: exit 1
