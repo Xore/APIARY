@@ -17,7 +17,7 @@
           <div>
             <div class="label-section">Tools</div>
             <h1>Canarytokens</h1>
-            <p class="subtitle">Create honeytokens to plant outside this honeypot, track everything created, and see what's fired &mdash; backed by the self-hosted Canarytokens platform.</p>
+            <p class="subtitle">Create honeytokens to plant outside this honeypot, provision credentials live into a honeypot's own filesystem, track everything created, and see what's fired.</p>
           </div>
         </header>
 
@@ -25,6 +25,7 @@
           <button class="tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-ct-tokens" data-dashboard-tab="ct-tokens"><span>01</span>Tokens</button>
           <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-ct-create" data-dashboard-tab="ct-create"><span>02</span>Create bait</button>
           <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-ct-reports" data-dashboard-tab="ct-reports"><span>03</span>Reports</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-ct-credentials" data-dashboard-tab="ct-credentials"><span>04</span>Credentials</button>
         </div>
 
         <div class="dashboard-panel" id="panel-ct-tokens" role="tabpanel" data-dashboard-panel="ct-tokens">
@@ -128,6 +129,58 @@
             </table></div>
             <p class="empty" id="ct-reports-empty" role="status" aria-live="polite" hidden>No token has fired yet.</p>
             <p class="card__meta" id="ct-reports-error" role="alert" hidden></p>
+          </div>
+        </div>
+
+        <div class="dashboard-panel" id="panel-ct-credentials" role="tabpanel" data-dashboard-panel="ct-credentials" hidden>
+          <div class="card wide" id="ct-cred-card">
+            <div class="card__header">
+              <div><h2>Provision a credential</h2><p class="card__meta">Plants a username/password pair into Cowrie's live honeyfs via the honeyfs-implant service (#1553). Rotating re-implants the same path with a new password &mdash; the file's location never changes.</p></div>
+            </div>
+            <p class="card__meta" id="ct-cred-unavailable" hidden>Credential history is unavailable on this host (Elasticsearch not configured) &mdash; provisioning also requires HONEYFS_IMPLANT_URL to be set; a submit attempt below will report either as an error if unconfigured.</p>
+            <form id="ct-cred-form">
+              <div class="hp-rp-grid">
+                <div class="hp-rp-field"><label for="ct-cred-path">Honeyfs path</label><input id="ct-cred-path" required autocomplete="off" placeholder="e.g. home/mwagner/.aws/credentials"></div>
+                <div class="hp-rp-field"><label for="ct-cred-username">Username</label><input id="ct-cred-username" required autocomplete="off" placeholder="e.g. mwagner"></div>
+              </div>
+              <div class="hp-rp-grid">
+                <div class="hp-rp-field">
+                  <label for="ct-cred-password">Password</label>
+                  <input id="ct-cred-password" required autocomplete="off" placeholder="click Generate, or type your own">
+                  <button class="btn btn-ghost btn-sm tw:mt-2" type="button" id="ct-cred-generate">Generate</button>
+                </div>
+                <div class="hp-rp-field"><label for="ct-cred-memo">Memo (shown only to you)</label><input id="ct-cred-memo" maxlength="200" required autocomplete="off" placeholder="e.g. bastion02 backup script"></div>
+              </div>
+              <div class="hp-rp-field"><label for="ct-cred-template">File content template (optional)</label><textarea rows="3" id="ct-cred-template" placeholder="username={{"{{"}}username{{"}}"}}&#10;password={{"{{"}}password{{"}}"}}"></textarea><p class="hp-cfg-source">Leave blank for the default two-line format. Use <code>{{"{{"}}username{{"}}"}}</code> / <code>{{"{{"}}password{{"}}"}}</code> placeholders anywhere in your own template &mdash; e.g. to plant a full script with the password embedded.</p></div>
+              <div class="tw:flex tw:items-center tw:gap-2 tw:mt-3">
+                <button class="btn btn-primary" type="submit" id="ct-cred-submit">Provision credential</button>
+              </div>
+            </form>
+            <p class="card__meta" id="ct-cred-result" role="status" aria-live="polite" hidden></p>
+          </div>
+
+          <div class="card wide" id="ct-credentials-list-card">
+            <div class="card__header">
+              <div><h2>Provisioned credentials</h2><p class="card__meta">Newest first. Rotate plants a fresh password at the same path; linking a canarytoken is bookkeeping only &mdash; opening the file itself doesn't fire anything on its own unless the linked token IS that file.</p></div>
+              <div class="hp-head-actions">
+                <button class="btn btn-ghost btn-sm" type="button" id="ct-credentials-refresh">Refresh</button>
+              </div>
+            </div>
+            <div class="card__scroll"><table class="data-table">
+              <thead><tr><th>Path</th><th>Username</th><th>Password</th><th>Memo</th><th>Linked token</th><th>Rotated</th><th>Manage</th></tr></thead>
+              <tbody id="ct-credentials-tbody" aria-busy="true">
+                <tr class="hp-table-state" aria-hidden="true"><td class="hp-skeleton-cell" colspan="7"><span class="skeleton-line" style="width:80%"></span></td></tr>
+                <tr class="hp-table-state" aria-hidden="true"><td class="hp-skeleton-cell" colspan="7"><span class="skeleton-line" style="width:66%"></span></td></tr>
+              </tbody>
+            </table></div>
+            <div class="empty-state" id="ct-credentials-empty" role="status" aria-live="polite" hidden>
+              <div>
+                <div class="empty-state__icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+                <div class="empty-state__title">No credentials provisioned yet</div>
+                <p class="empty-state__hint">Provision one above to plant it into Cowrie's live honeyfs.</p>
+              </div>
+            </div>
+            <p class="card__meta" id="ct-credentials-error" role="alert" hidden></p>
           </div>
         </div>
 
