@@ -1,20 +1,40 @@
-/* #1141: makes the #1139 consolidated payload/results page family (Captured
-   payloads, payload-analysis, the workbench artifact picker, payload
-   workbench, Analysis results and its Sandbox/GitHub tabs, and the sandbox/
-   GitHub-analysis detail pages) navigate in place instead of a full page
-   load on every selection -- built directly on hp-app.js's own mountPage
-   (window.replaceHoneypotPage), the same fetch-and-swap mechanism
-   overview.html's 60s/SSE refresh already uses, just triggered by a click
-   instead of a timer, plus history.pushState so the URL/back/forward/
-   refresh/bookmarks all still resolve to the right view -- see the issue's
-   own text for why a plain SSE-timer refresh never had to solve that.
+/* #1141/#1564: shell-wide SPA router. Intercepts same-origin clicks on
+   in-app links and fetch-and-swaps [data-hp-page-content] instead of doing
+   a full page load -- built directly on hp-app.js's own mountPage
+   (window.replaceHoneypotPage), the same fetch-and-swap mechanism the
+   overview's live refresh (hp-app.js's refreshDashboardOverview) already
+   uses, just triggered by a click instead of a timer, plus
+   history.pushState so the URL/back/forward/refresh/bookmarks all still
+   resolve to the right view.
 
-   Scoped to exactly the routes #1139 actually consolidated (not a
-   site-wide router): a card whose target happens to fall outside this
-   family (e.g. a workbench run's ResultURL pointing at /ghidra/<hash> or
-   /revdeck/<hash>, neither part of this consolidation) simply isn't
-   matched below and falls through to a normal, full page navigation --
-   no special-casing needed, the route list is the single source of truth. */
+   #1141 originally scoped this to only the #1139 consolidated payload/
+   results page family, as an allow-list (DYNAMIC_ROUTES). #1564 promotes
+   it to the shell's default behavior: every route is dynamic UNLESS it
+   matches FULL_NAV_ROUTES below, which is now the single source of truth
+   for what still needs a real navigation, split into two reasons:
+
+     1. Genuinely different documents -- not an [data-hp-page-content] page
+        at all (an API/export/download endpoint, the noVNC viewer, a raw
+        session-recording file, an auth redirect). Fetching one of these
+        anyway would be harmless (the fallback below already catches a
+        response with no [data-hp-page-content] and falls through to
+        location.href), but excluding them up front skips a wasted fetch.
+
+     2. Real shell pages whose own bottom-of-content scripts don't (yet)
+        support being re-run against a freshly-swapped DOM -- cytoscape
+        graphs, ECharts hydration, studio bindings, and the like, written
+        as a plain "run once at IIFE load" the same way every page's own
+        script used to be written before this file's mount/unmount
+        convention (window.initHoneypot* re-entry points, the
+        "hp-dynamic-nav" event, hp-page-mounted) existed. A dynamically
+        appended <script src> executes once per session (mergeExtraContent
+        below dedups by src) -- so a second visit through a swap, with
+        nothing left to re-run that script's hydration logic, would leave
+        that page's own view stuck loading, exactly the bug this file's
+        own async=false fix and hp-warming-reload.js both exist to avoid
+        for the pages that ARE converted. Kept as full navigation rather
+        than risk shipping a broken mount; see the #1564 PR body for the
+        maintained list of which pages fall in this bucket and why. */
 (() => {
   "use strict";
 
@@ -26,48 +46,41 @@
 
   const pageNonce = document.querySelector("script[nonce], style[nonce]")?.nonce || "";
 
-  const DYNAMIC_ROUTES = [
-    /^\/payloads$/,
-    /^\/payload-analysis\/[^/]+$/,
-    /^\/payload-workbench\/results$/,
-    // Excludes /payload-workbench/results itself (already matched above)
-    // and the bare /payload-workbench index, which 302s (#1139) rather
-    // than rendering a page a fetch-and-swap could use.
-    /^\/payload-workbench\/(?!results$)[^/]+$/,
-    // Excludes /sandbox/vnc (registered ahead of the job-id prefix route in
-    // main.go -- a VNC viewer target, not a result detail page) and the
-    // bare /sandbox index, which also 302s.
-    /^\/sandbox\/(?!vnc$)[^/]+$/,
-    /^\/github-analysis\/[^/]+$/,
-    // #1564 (design refresh): shell routes navigate in place -- "one
-    // flawless page" -- but ONLY pages whose behaviour comes entirely from
-    // the shell scripts (hp-app.js delegation + hp-page-mounted
-    // re-attachers). Pages that ship their own bottom-of-content scripts
-    // (overview/ips/attackers/kill-chain/commands/ml-anomalies/reports/
-    // canarytokens/sessions/investigate: cytoscape graphs, ECharts
-    // hydration, studio bindings) stay full document loads until those
-    // scripts learn the mount/unmount convention -- a dynamically appended
-    // script executes once per session, so a second visit through a swap
-    // would leave their views stuck loading (caught by the browser matrix
-    // on the attackers graph). Also deliberately excluded: /settings
-    // (page mode resolves at script load), /sandbox/vnc, /tty/*,
-    // /revdeck/*, /auth/*, and anything that isn't a shell page (/api,
-    // /static, /export, /metrics, PDFs).
-    /^\/events$/,
-    /^\/search$/,
-    /^\/clusters$/,
-    /^\/campaigns$/,
-    /^\/history$/,
-    /^\/dead-letters$/,
-    /^\/source-health$/,
-    /^\/alerts$/,
-    /^\/auth-events$/,
-    /^\/llm-analysis$/,
-    /^\/agent-campaigns$/,
-    /^\/recordings$/,
-    /^\/sensors$/,
+  const FULL_NAV_ROUTES = [
+    // -- Not a shell page at all --
+    /^\/api\//,
+    /^\/static\//,
+    /^\/export\//,
+    /^\/metrics$/,
+    /^\/auth\//,
+    /^\/admin\//,
+    /^\/healthz$/,
+    /^\/payload\//,       // raw captured-sample download (distinct from the /payloads list)
+    /^\/tty\//,           // xterm.js replay page + its own .cast/.raw downloads
+    /^\/sandbox\/vnc$/,   // noVNC viewer, not a result detail page
+    // Bare index routes that 302 elsewhere rather than rendering a page a
+    // fetch-and-swap could use (their own sub-paths stay dynamic below).
+    /^\/payload-workbench$/,
+    /^\/sandbox$/,
+    /^\/github-analysis$/,
+
+    // -- Real shell pages not yet converted to the mount/unmount
+    //    convention (category 2 above) --
+    /^\/kill-chain$/,
+    /^\/commands$/,
+    /^\/ml-anomalies$/,
+    /^\/reports$/,
+    /^\/canarytokens$/,
+    /^\/settings$/,          // page mode resolves at script load
+    /^\/sessions\//,
+    /^\/investigate\/ip\/[^/]+$/,
+    /^\/investigate\/cidr\//,
+    /^\/investigate\/cluster/,
+    /^\/ghidra(\/|$)/,
+    /^\/revdeck(\/|$)/,
+    /^\/cape(\/|$)/,
   ];
-  const isDynamicRoute = pathname => DYNAMIC_ROUTES.some(re => re.test(pathname));
+  const isDynamicRoute = pathname => !FULL_NAV_ROUTES.some(re => re.test(pathname));
 
   const reNonceTree = root => {
     if (!pageNonce || !root.querySelectorAll) return;

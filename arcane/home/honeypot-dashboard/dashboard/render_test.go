@@ -85,12 +85,21 @@ func TestSecHeadersNeverAllowKeycloakAccountFraming(t *testing.T) {
 // moved. [data-hp-page-content] is the stable attribute every page wrapper
 // actually carries (see shell_layout_test.go) -- pin both lookups to it so
 // a future class rename can't quietly break this again.
+//
+// #1564: this script moved from a page-local inline <script> in
+// overview.html into hp-app.js's refreshDashboardOverview, so the check
+// moved with it.
 func TestOverviewRefreshTargetsTheCurrentPageContentSelector(t *testing.T) {
-	if strings.Contains(pageTemplate, `querySelector(".wrap")`) {
+	appJS, err := staticAssets.ReadFile("static/hp-app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(appJS)
+	if strings.Contains(js, `querySelector(".wrap")`) {
 		t.Fatal(`overview's refresh script still queries the removed .wrap class -- ` +
 			`it will silently stop finding page content the moment .wrap doesn't exist`)
 	}
-	if !strings.Contains(pageTemplate, `doc.querySelector("[data-hp-page-content]")`) {
+	if !strings.Contains(js, `doc.querySelector("[data-hp-page-content]")`) {
 		t.Fatal("overview's refresh script must select the freshly-fetched page content by [data-hp-page-content]")
 	}
 }
@@ -105,14 +114,25 @@ func TestOverviewRefreshTargetsTheCurrentPageContentSelector(t *testing.T) {
 // CSP header already pinned to the live document, tripping style-src. The
 // fix is to skip the refresh cycle entirely rather than insert unsafe
 // markup; the next update or timer tick retries once hp-app.js is ready.
+//
+// #1564: refreshDashboardOverview now lives inside hp-app.js itself (it used
+// to be a page-local inline <script> gated on window.hydrateHoneypotOverview
+// being defined yet, because it could race hp-app.js's own deferred load).
+// It calls the sibling hydrateOverview function directly now -- there is no
+// load-order race left to gate on, since this code cannot run at all until
+// hp-app.js has already finished executing top to bottom.
 func TestOverviewRefreshNeverInsertsUnrenoncedMarkup(t *testing.T) {
-	if strings.Contains(pageTemplate, "current.replaceWith(next)") {
+	appJS, err := staticAssets.ReadFile("static/hp-app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(appJS)
+	if strings.Contains(js, "current.replaceWith(next)") {
 		t.Fatal("overview's refresh script must not fall back to replaceWith(next) -- " +
 			"that path skips reNonce and inserts markup carrying a mismatched CSP nonce")
 	}
-	if !strings.Contains(pageTemplate, "next&&current&&window.hydrateHoneypotOverview") {
-		t.Fatal("overview's refresh script must gate hydration on window.hydrateHoneypotOverview " +
-			"being defined, so an early SSE update can't race hp-app.js's deferred load")
+	if !strings.Contains(js, "if (next && hydrateOverview(next)) {") {
+		t.Fatal("overview's refresh script must gate hydration on a real fetched [data-hp-page-content] fragment")
 	}
 }
 
@@ -169,18 +189,28 @@ func TestOverviewUsesOpenStreetMapWithoutLocalFallback(t *testing.T) {
 // the overview's own EventSource must still report connection health, but
 // into window.HoneypotLive's shared state rather than rendering anything
 // itself.
+//
+// #1564: there is no longer an "overview's own EventSource" -- overview.html
+// no longer opens one at all, and hp-app.js's single shell-wide connection
+// (shared with every other page, so navigation never opens a second one)
+// reports connection health the same way.
 func TestOverviewHasNoDuplicateLiveIndicator(t *testing.T) {
 	for _, marker := range []string{`data-hp-live-pill`, `class="live-pill"`, `renderLivePill`, `sseHealthy`} {
 		if strings.Contains(pageTemplate, marker) {
 			t.Fatalf("overview header must not carry its own live-status pill any more, found %q", marker)
 		}
 	}
-	if !strings.Contains(pageTemplate, `window.HoneypotLive.setConnectionHealthy(true)`) ||
-		!strings.Contains(pageTemplate, `window.HoneypotLive.setConnectionHealthy(false)`) {
-		t.Fatal("overview's EventSource must report open/error into window.HoneypotLive's shared connection state")
+	appJS, err := staticAssets.ReadFile("static/hp-app.js")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(pageTemplate, `es.onerror=`) || strings.Contains(pageTemplate, `es.onerror=()=>{};`) {
-		t.Fatal("overview's EventSource must react to onerror instead of silently ignoring connection failures")
+	js := string(appJS)
+	if !strings.Contains(js, `window.HoneypotLive.setConnectionHealthy(true)`) ||
+		!strings.Contains(js, `window.HoneypotLive.setConnectionHealthy(false)`) {
+		t.Fatal("the shell's shared EventSource must report open/error into window.HoneypotLive's shared connection state")
+	}
+	if !strings.Contains(js, `stream.onerror = () => window.HoneypotLive.setConnectionHealthy(false);`) {
+		t.Fatal("the shell's shared EventSource must react to onerror instead of silently ignoring connection failures")
 	}
 }
 
@@ -210,7 +240,7 @@ func TestToolbarLiveToggleIsTheSingleGlobalIndicator(t *testing.T) {
 		}
 	}
 	if !strings.Contains(js, `stream.addEventListener("open", () => window.HoneypotLive.setConnectionHealthy(true));`) {
-		t.Fatal("the non-overview EventSource must also report connection health, not just the overview's own")
+		t.Fatal("the shell's shared EventSource must report connection health")
 	}
 }
 

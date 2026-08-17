@@ -97,6 +97,17 @@ func feedState(last, now time.Time) string {
 	return "stale"
 }
 
+// pluralS (#1566) is the Go-side equivalent of the "{{if ne .Count 1}}s{{end}}"
+// pattern templates already use throughout ui/ -- clusters.go's own
+// "%d sensors: ..." summary was always plural, producing "1 sensors:" for a
+// single-sensor cluster.
+func pluralS(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
 func firstNonEmpty(vals ...string) string {
 	for _, v := range vals {
 		if v != "" {

@@ -29,6 +29,7 @@ import (
 	"mime/multipart"
 	"net"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"strings"
 	"time"
@@ -229,6 +230,67 @@ type canarytokensGenerateResult struct {
 // on canarytokens_net instead of the plain `canarytokens-adapter` name.
 const canarytokensAdapterWebhookURL = "http://canarytokens-adapter.internal:8090/"
 
+// canarytokensImageContentTypes is the exact set of Content-Type values
+// upstream's UploadedImage model (canarytokens/models/web_image.py) accepts
+// for a web_image upload -- a Pydantic Literal["image/png", "image/gif",
+// "image/jpeg"] validated against the uploaded multipart part's own
+// Content-Type header, not the bytes. Confirmed live against the actual
+// canarytokens-frontend container (#1586 item 4 reproduction): posting a
+// genuinely-valid PNG's bytes under any other Content-Type -- including
+// mime/multipart.CreateFormFile's own hardcoded "application/octet-stream"
+// default, which is what this client used to send unconditionally -- fails
+// every time with a generic {"error":"1","error_message":"Malformed
+// request, invalid data supplied."} (HTTP 400), which serveCanarytokensCreate
+// then surfaces to the browser as a 502. This wasn't an infra/routing issue
+// (the #1570-#1578 chain work the original report suspected): the browser
+// already sends an accurate Content-Type -- canarytokens.html's <input
+// accept="image/png,image/gif,image/jpeg"> -- and canarytokens_api.go's
+// serveCanarytokensCreate already captures it into
+// canarytokensGenerateRequest.UploadContentType, but generate() below
+// discarded it when building the outbound multipart part.
+var canarytokensImageContentTypes = map[string]bool{
+	"image/png":  true,
+	"image/gif":  true,
+	"image/jpeg": true,
+}
+
+// createFormFileWithContentType is mime/multipart's own CreateFormFile,
+// reimplemented here only because that function hardcodes
+// "application/octet-stream" with no way to override it -- see
+// canarytokensImageContentTypes' comment for why that default breaks
+// web_image uploads specifically. declaredType (the browser's own
+// Content-Type for the upload, threaded through from
+// canarytokens_api.go's serveCanarytokensCreate) is used whenever it's
+// already one of upstream's accepted values; otherwise data's actual bytes
+// are sniffed (http.DetectContentType reliably identifies PNG/GIF/JPEG from
+// their magic bytes) so a request with an empty or generic declared type
+// doesn't fail for genuinely-valid image bytes.
+func createFormFileWithContentType(w *multipart.Writer, fieldname, filename, declaredType string, data []byte) (io.Writer, error) {
+	ct := declaredType
+	if !canarytokensImageContentTypes[ct] {
+		if sniffed := http.DetectContentType(data); canarytokensImageContentTypes[sniffed] {
+			ct = sniffed
+		}
+	}
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, canarytokensEscapeQuotes(fieldname), canarytokensEscapeQuotes(filename)))
+	h.Set("Content-Type", ct)
+	return w.CreatePart(h)
+}
+
+// canarytokensQuoteEscaper mirrors mime/multipart's own unexported
+// escapeQuotes exactly (`\` -> `\\`, `"` -> `\"`) -- needed here because
+// CreatePart, unlike CreateFormFile, takes a raw header this package must
+// quote itself.
+var canarytokensQuoteEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`)
+
+func canarytokensEscapeQuotes(s string) string {
+	return canarytokensQuoteEscaper.Replace(s)
+}
+
 // generate calls POST {root}/generate. A file upload (web_image only)
 // forces a multipart/form-data request -- app.py's own generate() branches
 // on Content-Type: application/json is parsed as JSON, anything else as a
@@ -251,7 +313,7 @@ func (c *canarytokensClient) generate(req canarytokensGenerateRequest) (*canaryt
 		if err := w.WriteField("webhook_url", canarytokensAdapterWebhookURL); err != nil {
 			return nil, err
 		}
-		part, err := w.CreateFormFile(string(req.TokenType), req.UploadFilename)
+		part, err := createFormFileWithContentType(w, string(req.TokenType), req.UploadFilename, req.UploadContentType, req.UploadBytes)
 		if err != nil {
 			return nil, err
 		}

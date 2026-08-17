@@ -23,8 +23,14 @@
 {{if .Selected}}
 {{/* #1444: use the same responsive cards and bounded collection regions
      as the rest of the dashboard. Every persisted field remains visible
-     even when empty, so hydration cannot make evidence appear to vanish. */}}
-<div class="tw:grid tw:grid-cols-12 tw:gap-3.5 tw:mt-4" id="attackers-selected-meta">
+     even when empty, so hydration cannot make evidence appear to vanish.
+     #1540: split from one 9-card "attackers-selected-meta" grid into these
+     two, one per tab -- ids match the skeleton placeholders the "attackers"
+     shell template already rendered inside "panel-overview"/
+     "panel-indicators", so hp-attackers-detail.js can swap each of these
+     wholesale into the shell by id instead of leaving them in the flat
+     #attackers-root the rest of this fragment mounts into. */}}
+<div class="tw:grid tw:grid-cols-12 tw:gap-3.5 tw:mt-4" id="attackers-overview-cards">
   <div class="card">
     <h2>Identity</h2>
     <div class="card__row"><span class="card__label">entity</span><span class="card__value card__value--mono">{{.Selected.ID}}</span></div>
@@ -34,8 +40,15 @@
   </div>
   <div class="card">
     <h2>Observed activity</h2>
-    <div class="card__row"><span class="card__label">first seen</span><span class="card__value">{{if .Selected.First}}{{.Selected.First}}{{else}}not recorded{{end}}</span></div>
-    <div class="card__row"><span class="card__label">last seen</span><span class="card__value">{{if .Selected.Last}}{{.Selected.Last}}{{else}}not recorded{{end}}</span></div>
+    {{/* #1566: First/Last are attacker-identity-worker's own raw RFC3339
+         strings (identity.go's entity JSON, e.utc().Format(time.RFC3339))
+         -- rendered verbatim this is exactly the "2026-08-1(newline)6T23:
+         17:0(newline)1Z" mid-character wrap the issue reported for
+         /attackers. displayTime normalizes the text; data-hp-utc keeps the
+         raw ISO value as the twin hp-app.js's applyTimeDisplay reformats
+         per the viewer's own timezone/clock preference. */}}
+    <div class="card__row"><span class="card__label">first seen</span><span class="card__value"{{if .Selected.First}} data-hp-utc="{{.Selected.First}}"{{end}}>{{if .Selected.First}}{{displayTime .Selected.First}}{{else}}not recorded{{end}}</span></div>
+    <div class="card__row"><span class="card__label">last seen</span><span class="card__value"{{if .Selected.Last}} data-hp-utc="{{.Selected.Last}}"{{end}}>{{if .Selected.Last}}{{displayTime .Selected.Last}}{{else}}not recorded{{end}}</span></div>
   </div>
   <div class="card">
     <h2>Sensors ({{len .Selected.Sensors}})</h2>
@@ -45,6 +58,8 @@
     <h2>Member IPs ({{len .Selected.IPs}})</h2>
     {{if .Selected.IPs}}<div class="card__scroll">{{range .Selected.IPs}}<div class="card__row"><a class="card__value card__value--mono" href="/investigate/ip/{{. | urlquery}}">{{.}}</a></div>{{end}}</div>{{else}}<p class="empty">No member IPs recorded for this identity.</p>{{end}}
   </div>
+</div>
+<div class="tw:grid tw:grid-cols-12 tw:gap-3.5" id="attackers-indicators-cards">
   <div class="card">
     <h2>Credential pairs ({{len .Selected.Credentials}})</h2>
     {{if .Selected.Credentials}}<div class="card__scroll">{{range .Selected.Credentials}}<div class="card__row"><code class="card__value card__value--mono">{{.}}</code></div>{{end}}</div>{{else}}<p class="empty">No credential pairs recorded for this identity.</p>{{end}}
@@ -80,7 +95,7 @@
      an otherwise-empty page. Same fix, same reasoning as events.html's
      main table and intel.html's "commands" page: let it grow with content
      and let .app-main scroll the page. */}}
-<div class="card wide tw:mt-4" data-hp-md-generic id="attackers-table"><h2>Known identities</h2>{{if .Rows}}<table class="data-table"><thead><tr><th>entity</th><th>ips</th><th>events</th><th>sensors</th><th>first</th><th>last</th><th></th><th></th></tr></thead><tbody>{{range .Rows}}<tr><td><a href="{{.Link}}">{{shortAttackerID .ID}}</a></td><td class="n"><a href="{{.Link}}">{{len .IPs}}</a></td><td class="n">{{.Events}}</td><td class="v">{{range .Sensors}}<span class="badge badge--muted">{{.}}</span> {{end}}</td><td class="v">{{.First}}</td><td class="v">{{.Last}}</td><td>{{if .Verdicts}}<span class="badge badge--accent">verdict</span>{{end}}</td><td><a class="lnk" href="{{.Link}}">graph &rarr;</a></td></tr>{{end}}</tbody></table>{{else if .Ready}}<p class="empty">No attacker entities yet &mdash; attacker-identity-worker (#1200) merges IPs sharing 2+ strong signals (fingerprint, payload hash, credential pair) into durable entities as traffic accumulates.</p>{{else}}<div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:70%"></div>{{end}}</div>
+<div class="card wide tw:mt-4" data-hp-md-generic id="attackers-table"><h2>Known identities</h2>{{if .Rows}}<table class="data-table"><thead><tr><th>entity</th><th>ips</th><th>events</th><th>sensors</th><th>first</th><th>last</th><th></th><th></th></tr></thead><tbody>{{range .Rows}}<tr><td><a href="{{.Link}}">{{shortAttackerID .ID}}</a></td><td class="n"><a href="{{.Link}}">{{len .IPs}}</a></td><td class="n">{{.Events}}</td><td class="v">{{range .Sensors}}<span class="badge badge--muted">{{.}}</span> {{end}}</td><td class="v"{{if .First}} data-hp-utc="{{.First}}"{{end}}>{{displayTime .First}}</td><td class="v"{{if .Last}} data-hp-utc="{{.Last}}"{{end}}>{{displayTime .Last}}</td><td>{{if .Verdicts}}<span class="badge badge--accent">verdict</span>{{end}}</td><td><a class="lnk" href="{{.Link}}">graph &rarr;</a></td></tr>{{end}}</tbody></table>{{else if .Ready}}<p class="empty">No attacker entities yet &mdash; attacker-identity-worker (#1200) merges IPs sharing 2+ strong signals (fingerprint, payload hash, credential pair) into durable entities as traffic accumulates.</p>{{else}}<div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:70%"></div>{{end}}</div>
 {{end}}
 {{define "attackers"}}<!doctype html>
 <html lang="en">
@@ -108,6 +123,25 @@
           </div>
         </header>
         {{if .Selected}}
+        {{/* #1540: the always-visible chip bar and Known identities table
+             below stay outside this tablist -- they're browse/list
+             functionality across every entity, not part of any one
+             entity's profile. Only the selected-entity dossier (these 2
+             charts plus the 9 metadata cards the "attackers-body" fragment
+             hydrates below) gets split, into the same generic
+             data-dashboard-tab/data-dashboard-panel convention tty_replay.html
+             already uses -- hp-app.js's activateDashboardTab needs no
+             page-specific JS here either. The charts render synchronously
+             right in "panel-overview" below; hp-attackers-detail.js swaps
+             the fragment's #attackers-overview-cards/#attackers-indicators-cards
+             grids into these same two panels by id once the fragment
+             resolves (see that file's own comment). */}}
+        <div class="tabs" role="tablist" aria-label="Attacker entity views">
+          <button class="tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-overview" data-dashboard-tab="overview"><span>01</span>Overview</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-indicators" data-dashboard-tab="indicators"><span>02</span>Indicators</button>
+        </div>
+
+        <div class="dashboard-panel" id="panel-overview" role="tabpanel" data-dashboard-panel="overview">
         <div class="card wide" id="attackers-graph">
           <div class="tw:flex tw:items-center tw:justify-between tw:gap-2">
             <h2>Entity {{shortAttackerID .Selected.ID}} &mdash; member IPs</h2>
@@ -123,47 +157,99 @@
              here -- an operator saw the result (N member IPs) with no
              trace of WHY. One radar axis per signal category (JA3/JA4/
              p0f OS/SSH client/payload hash); a visibly larger lobe on one
-             axis is direct evidence that signal drove this merge. */}}
+             axis is direct evidence that signal drove this merge.
+             #1540: this stays in "panel-overview", which is the default
+             (first, visible-on-load) tab, so hp-kill-chain.js's own
+             ResizeObserver-based chart.resize() on reveal is all this ever
+             needs -- it never actually initializes while hidden. */}}
         <div class="card wide" id="attackers-fusion">
           <h2>Fingerprint fusion &mdash; why this entity merged</h2>
           <p class="note">Signal values shared by 2 or more of this entity's member IPs, by category. A value only one member IP exhibits is real telemetry but not evidence for this specific merge.</p>
           <div data-echart="/api/attacker-fusion?id={{.Selected.ID | urlquery}}" data-echart-kind="radar" aria-busy="true" style="width:100%;height:320px"><svg data-chart-loading class="skeleton" viewBox="0 0 700 320" aria-hidden="true" style="width:100%;height:100%;color:var(--border-strong)"><g fill="none" stroke="currentColor" stroke-width="3" opacity=".5"><polygon points="350,35 565,140 485,285 215,285 135,140"/><polygon points="350,90 495,160 440,250 260,250 205,160"/><path d="M350 160V35M350 160L565 140M350 160L485 285M350 160L215 285M350 160L135 140"/></g><polygon points="350,75 480,145 430,245 275,255 190,145" fill="currentColor" opacity=".22"/></svg></div>
           <p class="note" data-echart-status="/api/attacker-fusion?id={{.Selected.ID | urlquery}}">Loading&hellip;</p>
         </div>
-        <script defer src="{{asset "/static/cytoscape.min.js"}}"></script>
-        <script defer src="{{asset "/static/echarts.min.js"}}"></script>
-        {{/* #1532: registers hp-echarts-theme.js's "xore" ECharts theme and
-             window.hpChartColor -- must run after both libraries above and
-             before every consumer below (hp-attackers.js's cytoscape graph,
-             hp-kill-chain.js's echarts radar), same ordering convention
-             every other page with these scripts follows. */}}
-        <script defer src="{{asset "/static/hp-echarts-theme.js"}}"></script>
-        <script defer src="{{asset "/static/hp-attackers.js"}}"></script>
-        <script defer src="{{asset "/static/hp-kill-chain.js"}}"></script>
+        {{/* #1540: real content for these two grids is server-rendered by
+             the "attackers-body" fragment template and swapped in by id
+             (hp-attackers-detail.js) once /attackers/fragment resolves --
+             this shell only knows the selected id, not any of the entity's
+             actual fields (attackersShell's Selected is a bare id-only
+             stub), so these start as skeletons like #attackers-root's
+             below. */}}
+        <div class="tw:grid tw:grid-cols-12 tw:gap-3.5 tw:mt-4" id="attackers-overview-cards" aria-hidden="true">
+          <div class="card"><div class="skeleton-line" style="width:55%"></div><div class="skeleton-line" style="width:85%"></div><div class="skeleton-line" style="width:70%"></div></div>
+          <div class="card"><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:75%"></div><div class="skeleton-line" style="width:65%"></div></div>
+          <div class="card"><div class="skeleton-line" style="width:45%"></div><div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:60%"></div></div>
+          <div class="card"><div class="skeleton-line" style="width:50%"></div><div class="skeleton-line" style="width:70%"></div><div class="skeleton-line" style="width:85%"></div></div>
+        </div>
+        </div>
+
+        <div class="dashboard-panel" id="panel-indicators" role="tabpanel" data-dashboard-panel="indicators" hidden>
+        <div class="tw:grid tw:grid-cols-12 tw:gap-3.5" id="attackers-indicators-cards" aria-hidden="true">
+          <div class="card"><div class="skeleton-line" style="width:65%"></div><div class="skeleton-line" style="width:85%"></div><div class="skeleton-line" style="width:55%"></div></div>
+          <div class="card"><div class="skeleton-line" style="width:50%"></div><div class="skeleton-line" style="width:75%"></div><div class="skeleton-line" style="width:60%"></div></div>
+          <div class="card"><div class="skeleton-line" style="width:55%"></div><div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:65%"></div></div>
+          <div class="card"><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:70%"></div><div class="skeleton-line" style="width:50%"></div></div>
+          <div class="card"><div class="skeleton-line" style="width:45%"></div><div class="skeleton-line" style="width:75%"></div><div class="skeleton-line" style="width:55%"></div></div>
+        </div>
+        </div>
+        {{/* #1564: the five cytoscape/echarts/hp-attackers/hp-kill-chain
+             script tags that used to sit right here (immediately after
+             the two card grids above) moved out from inside
+             [data-hp-page-content] -- see the comment on their new location
+             below, right after the closing div for .app-shell, for why
+             leaving them in this content region breaks re-mounting via
+             hp-dynamic-nav.js's SPA navigation. */}}
         {{end}}
         {{/* #1327 shell+hydrate: see "attackers-body" above for the full
              explanation. The selected id (if any) is the only thing known
-             here -- the identity counts, selected entity's own metadata
-             grid, and full entity table are all hydrated in below. */}}
+             here -- the identity counts and full entity table are hydrated
+             in below. #1540: the selected entity's own metadata cards used
+             to skeleton here too, but now live in "panel-overview"/
+             "panel-indicators" above (still hydrated by this same fragment
+             fetch -- hp-attackers-detail.js pulls #attackers-overview-cards/
+             #attackers-indicators-cards back out of the fetched markup and
+             swaps them into those panels by id, since the chip bar and
+             table below stay outside the tablist). */}}
         <div id="attackers-root" data-hp-attackers-fragment-url="/attackers/fragment{{if .Selected}}?id={{.Selected.ID | urlquery}}{{end}}" aria-busy="true">
           <div class="filters"><div class="skeleton-line" style="width:220px"></div></div>
-          {{if .Selected}}<div class="tw:grid tw:grid-cols-12 tw:gap-3.5 tw:mt-4" aria-hidden="true">
-            <div class="card"><div class="skeleton-line" style="width:55%"></div><div class="skeleton-line" style="width:85%"></div><div class="skeleton-line" style="width:70%"></div></div>
-            <div class="card"><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:75%"></div><div class="skeleton-line" style="width:65%"></div></div>
-            <div class="card"><div class="skeleton-line" style="width:45%"></div><div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:60%"></div></div>
-            <div class="card"><div class="skeleton-line" style="width:50%"></div><div class="skeleton-line" style="width:70%"></div><div class="skeleton-line" style="width:85%"></div></div>
-            <div class="card"><div class="skeleton-line" style="width:65%"></div><div class="skeleton-line" style="width:85%"></div><div class="skeleton-line" style="width:55%"></div></div>
-            <div class="card"><div class="skeleton-line" style="width:50%"></div><div class="skeleton-line" style="width:75%"></div><div class="skeleton-line" style="width:60%"></div></div>
-            <div class="card"><div class="skeleton-line" style="width:55%"></div><div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:65%"></div></div>
-            <div class="card"><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:70%"></div><div class="skeleton-line" style="width:50%"></div></div>
-            <div class="card"><div class="skeleton-line" style="width:45%"></div><div class="skeleton-line" style="width:75%"></div><div class="skeleton-line" style="width:55%"></div></div>
-          </div>{{end}}
           <div class="card wide tw:mt-4" aria-hidden="true"><div class="skeleton-line" style="width:35%"></div><div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:70%"></div></div>
         </div>
         <footer id="attackers-footer">{{brandText}} &bull; entity-resolved identity &bull; #1200</footer>
       </div>
     </main>
 </div>
+{{if .Selected}}
+{{/* #1564: moved out from inside [data-hp-page-content] (where these five
+     tags used to sit, right after the graph/fusion cards they back) to
+     here, alongside hp-attackers-detail.js's own tag below -- every other
+     script this file family injects on demand
+     (hp-dynamic-nav.js's mergeExtraContent, which now also drives
+     /attackers's default SPA navigation) already lives outside the content
+     region for exactly this reason. mergeExtraContent dedups an injected
+     script tag's src against the LIVE document, but mountPage's own
+     content swap runs first and, for a script tag that used to live inside
+     [data-hp-page-content], ends up MOVING an inert (non-executing) copy
+     of it into the live document as a side effect of swapping in the rest
+     of the page -- inert or not, it's still a real script element whose
+     src a later `document.querySelector('script[src="..."]')` check matches,
+     so mergeExtraContent believed cytoscape.min.js/echarts.min.js/
+     hp-echarts-theme.js/hp-attackers.js/hp-kill-chain.js were already
+     loaded and never appended a real, executing copy the first time an
+     entity was selected via an in-app click rather than a fresh page load
+     -- confirmed live: the graph stayed on "Loading graph…" forever.
+     Scripts that live outside [data-hp-page-content] are never touched by
+     that swap, so they don't have this problem. */}}
+<script defer src="{{asset "/static/cytoscape.min.js"}}"></script>
+<script defer src="{{asset "/static/echarts.min.js"}}"></script>
+{{/* #1532: registers hp-echarts-theme.js's "xore" ECharts theme and
+     window.hpChartColor -- must run after both libraries above and before
+     every consumer below (hp-attackers.js's cytoscape graph,
+     hp-kill-chain.js's echarts radar), same ordering convention every
+     other page with these scripts follows. */}}
+<script defer src="{{asset "/static/hp-echarts-theme.js"}}"></script>
+<script defer src="{{asset "/static/hp-attackers.js"}}"></script>
+<script defer src="{{asset "/static/hp-kill-chain.js"}}"></script>
+{{end}}
 <script defer src="{{asset "/static/hp-attackers-detail.js"}}"></script>
 </body>
 </html>

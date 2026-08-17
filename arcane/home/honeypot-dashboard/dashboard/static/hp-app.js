@@ -69,38 +69,64 @@
     }).observe(document.body, {childList: true, subtree: true});
   }
 
-  /* ---------- navigation model ---------- */
-  const navGroups = [
-    ["Monitor", [
-      ["Overview", "/"],
-      ["Sensor & pipeline health", "/source-health"],
-      ["Alerts", "/alerts"],
-    ]],
-    ["Investigate", [
-      ["Event explorer", "/events"],
-      ["Attack sources", "/ips"],
-      ["Campaigns", "/campaigns"],
-      ["Infrastructure clusters", "/clusters"],
-      ["Executed commands", "/commands"],
-    ]],
-    ["Evidence", [
-      ["Captured payloads", "/payloads"],
-      ["Analysis results", "/payload-workbench/results"],
-      ["Elasticsearch history", "/history"],
-      ["Ingest dead letters", "/dead-letters"],
-    ]]
-  ];
+  /* ---------- navigation model ----------
+     #1564: the single source of truth for the topbar's center label
+     (data-hp-page-name, synced by syncActiveNav below on every mount). This
+     used to be a small navGroups table mirroring only part of the sidebar
+     (left over from before the design refresh added Operations/Reports/
+     Tools and several more Monitor/Investigate entries) -- any route not in
+     that stale table fell through to the literal string "Operations",
+     which is why the topbar read "Operations" on most pages regardless of
+     where you actually were (confirmed live: /ips, /attackers, /kill-chain,
+     /commands, /sensors, /recordings, /ml-anomalies, /llm-analysis,
+     /agent-campaigns, /auth-events, /reports, /canarytokens all fell
+     through). pageLabels below is exhaustive over every sidebar entry
+     (ui/partials/dashboard.html's "sidebar" template) plus the detail/
+     drill-down routes reachable by click but not themselves in the
+     sidebar. */
+  const pageLabels = {
+    "/": "Overview",
+    "/ml-anomalies": "ML anomalies",
+    "/llm-analysis": "LLM analysis",
+    "/agent-campaigns": "Agent campaigns",
+    "/auth-events": "Auth-failure events",
+    "/events": "Event explorer",
+    "/ips": "Attack sources",
+    "/campaigns": "Campaigns",
+    "/clusters": "Infrastructure clusters",
+    "/attackers": "Attacker identities",
+    "/kill-chain": "Kill-chain analytics",
+    "/commands": "Executed commands",
+    "/sensors": "Sensor detail",
+    "/recordings": "Session recordings",
+    "/alerts": "Alerts",
+    "/source-health": "Source & pipeline health",
+    "/history": "Event history",
+    "/reports": "Reports studio",
+    "/canarytokens": "Canarytokens",
+    "/payloads": "Captured payloads",
+    "/payload-workbench/results": "Analysis results",
+    "/settings": "Settings",
+    "/search": "Search",
+    "/dead-letters": "Ingest dead letters",
+  };
 
   const pageName = () => {
     const path = location.pathname;
-    if (path === "/") return "Overview";
-    if (path.startsWith("/payload-analysis")) return "Payload analysis";
+    if (pageLabels[path]) return pageLabels[path];
+    if (path.startsWith("/payload-analysis/")) return "Payload analysis";
+    if (path.startsWith("/payload-workbench/")) return "Analysis results";
+    if (path.startsWith("/sandbox/")) return "Sandbox result";
+    if (path.startsWith("/ghidra/")) return "Ghidra result";
+    if (path.startsWith("/revdeck/")) return "RevDeck result";
+    if (path.startsWith("/cape/")) return "CAPE result";
+    if (path.startsWith("/github-analysis/")) return "GitHub analysis";
     if (path.startsWith("/sessions/")) return "Session replay";
     if (path.startsWith("/investigate/ip/")) return "Attacker profile";
-    for (const [, items] of navGroups) {
-      for (const [label, href] of items) if (path === href) return label;
-    }
-    return "Operations";
+    if (path.startsWith("/investigate/cidr/")) return "CIDR investigation";
+    if (path.startsWith("/investigate/cluster")) return "Cluster investigation";
+    if (path.startsWith("/tty/")) return "Session recording";
+    return "Dashboard";
   };
 
   const activeHref = () => {
@@ -929,6 +955,21 @@
     source.remove();
     initLazyViews(pageContent);
     reapplyTimezone();
+    /* #1564: re-run every per-page enhancement hp-app.js itself owns
+       against the freshly-mounted DOM. Each of these already no-ops
+       cheaply when the page just mounted doesn't carry the elements it
+       looks for (initMaps/initHoneypotCharts already skip via their own
+       "already initialized"/"no [data-echart]" guards; the others just
+       find nothing to query). Scripts that ship their OWN re-init hook
+       (hp-attackers.js, hp-attackers-detail.js -- loaded once ever by
+       mergeExtraContent below, in hp-dynamic-nav.js, then re-run from here
+       on every later mount) are called the same optional-chained way. */
+    initMaps();
+    window.initHoneypotCharts?.();
+    window.initHoneypotAttackerGraph?.();
+    window.initHoneypotAttackersDetail?.();
+    initIPFilterMenus(pageContent);
+    initLLMSemanticSearch();
     /* Design refresh: one signal for every content swap -- SSE/interval
        refresh and hp-dynamic-nav navigations alike -- so the sidebar
        view-tabs, master-detail, wizard, and scroll-pill controllers can
@@ -1868,8 +1909,52 @@
       });
     }
 
-    /* SSE live updates on non-overview pages (overview refreshes in place) */
-    if (location.pathname !== "/" && window.EventSource) {
+    /* #1564: overview's own in-place refresh (previously a per-page inline
+       <script nonce> in overview.html, its own EventSource included) folded
+       in here so the whole shell shares exactly one /api/stream connection
+       across every navigation, per the issue's own ask -- a full page load
+       used to guarantee at most one of "the overview inline script" or
+       "the non-overview SSE block right below" ever ran, so two
+       connections were never actually possible before; a persistent shell
+       makes that no longer true unless the two are unified into one.
+       refreshDashboardOverview is deliberately self-guarding (checks for
+       #overview-header on the currently-mounted page) rather than wired up
+       via a mount/unmount pair, so the always-on interval/listeners below
+       are simply harmless no-ops on every other page -- one steady-state
+       shape, nothing to tear down or leak on navigation. */
+    let overviewRefreshing = false;
+    const refreshDashboardOverview = async () => {
+      if (window.HoneypotLive.paused()) return;
+      if (!pageContent?.querySelector("#overview-header")) return;
+      if (overviewRefreshing) return;
+      overviewRefreshing = true;
+      try {
+        const r = await fetch("/", {cache: "no-store"});
+        if (!r.ok) return;
+        const doc = new DOMParser().parseFromString(await r.text(), "text/html");
+        const next = doc.querySelector("[data-hp-page-content]");
+        if (next && hydrateOverview(next)) {
+          window.initDashboardTabs?.();
+          initMaps();
+          window.initHoneypotCharts?.();
+        }
+      } catch {} finally { overviewRefreshing = false; }
+    };
+    // Exposed under its original name (this used to be a page-local
+    // top-level `function refreshDashboard(){}` in overview.html, which a
+    // plain <script> tag makes a window property implicitly) -- kept as
+    // window.refreshDashboard for anything that still calls it directly by
+    // that name (manual debugging, the e2e suite's own
+    // page.evaluate(() => window.refreshDashboard())).
+    window.refreshDashboard = refreshDashboardOverview;
+    setInterval(refreshDashboardOverview, 60000);
+    addEventListener("hp-live-resumed", refreshDashboardOverview);
+
+    /* SSE live updates: one connection for the whole shell (#1564) --
+       "update" branches on whatever page is currently mounted rather than
+       each page owning its own connection, so navigating never tears one
+       down and opens another. */
+    if (window.EventSource) {
       let knownTotal = null;
       fetch("/api/events?per_page=25", {cache: "no-store"}).then(r => r.json()).then(data => { knownTotal = data.Total; }).catch(() => {});
       const stream = new EventSource("/api/stream");
@@ -1877,6 +1962,7 @@
       stream.onerror = () => window.HoneypotLive.setConnectionHealthy(false);
       stream.addEventListener("update", async () => {
         if (window.HoneypotLive.paused()) return;
+        if (pageContent?.querySelector("#overview-header")) { refreshDashboardOverview(); return; }
         try {
           const data = await (await fetch("/api/events?per_page=25", {cache: "no-store"})).json();
           if (knownTotal !== null && data.Total > knownTotal) showLiveToast(`${data.Total - knownTotal} new honeypot event${data.Total - knownTotal === 1 ? "" : "s"}`, "/events");
@@ -1918,6 +2004,23 @@
        sections, any hydrated fragment's inner tabs) that must stay in the
        content flow -- only page-level view tabs move to the rail. */
     const incoming = document.querySelector("main .tabs[role='tablist']:not([data-hp-tabs-inline]), .app-main .tabs[role='tablist']:not([data-hp-tabs-inline])");
+    /* #1576: below 520px the sidebar itself goes off-canvas (theme.css's
+       own breakpoint, matched here -- see .app-sidebar { display: none }
+       inside @media (max-width: 520px)), hidden until the hamburger drawer
+       opens it. Relocating a page's view tabs in there at this width would
+       make them reachable only behind that drawer instead of the inline
+       row theme.css already renders in the content flow for the no-JS
+       case (the reports wizard's Design/Scope/Schedule/Branding/Library
+       steps were the concrete case that surfaced this: JS moved them into
+       a sidebar a phone visitor never sees open by default). Leaving the
+       tablist inline at this width keeps the visible, always-reachable
+       no-JS layout instead of hiding it. Any tabs a wider viewport already
+       relocated for a *previous* page are stale once a fresh tablist has
+       arrived, so those still get swept out of the sidebar. */
+    if (incoming && innerWidth <= 520) {
+      side.querySelectorAll(".tabs[data-hp-sidebar-tabs], .hp-views-label").forEach(n => n.remove());
+      return;
+    }
     if (incoming) {
       /* A fresh tablist arrived with this page's content: it replaces
          whatever rail the previous page left, nesting directly under the

@@ -984,13 +984,24 @@ func TestProtocolDisplayNormalization(t *testing.T) {
 
 // The overview reloads itself in place, so it has to honor the pause too —
 // otherwise the one page that churns most would ignore the switch.
+//
+// #1564: refreshDashboardOverview moved from a page-local inline <script> in
+// overview.html into hp-app.js itself (self-guarded on #overview-header, so
+// the whole shell can share one persistent SSE connection instead of each
+// page opening its own) -- see hp-app.js's own comment on
+// refreshDashboardOverview for the full reasoning.
 func TestOverviewRefreshHonorsTheLivePause(t *testing.T) {
+	appJS, err := staticAssets.ReadFile("static/hp-app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(appJS)
 	for _, expected := range []string{
-		`window.HoneypotLive&&window.HoneypotLive.paused()`,
-		`addEventListener('hp-live-resumed',refreshDashboard)`,
+		"const refreshDashboardOverview = async () => {\n      if (window.HoneypotLive.paused()) return;",
+		`addEventListener("hp-live-resumed", refreshDashboardOverview);`,
 	} {
-		if !strings.Contains(pageOverview, expected) {
-			t.Fatalf("overview refresh script is missing %q", expected)
+		if !strings.Contains(js, expected) {
+			t.Fatalf("overview refresh (now in hp-app.js) is missing %q", expected)
 		}
 	}
 }
@@ -1074,7 +1085,12 @@ func TestDashboardCSSAssetsAreEmbeddedAndReferenced(t *testing.T) {
 	if !strings.Contains(string(adapter), "window.replaceHoneypotPage = mountPage") {
 		t.Fatal("dashboard enhancement layer does not expose the live-refresh content mount")
 	}
-	if !strings.Contains(pageTemplate, `document.querySelector("[data-hp-page-content]")`) || !strings.Contains(pageTemplate, "window.hydrateHoneypotOverview(next)") {
+	// #1564: refreshDashboardOverview moved from a page-local inline
+	// <script> in overview.html into hp-app.js itself (already read above
+	// as `adapter`) -- it calls the sibling hydrateOverview function
+	// directly rather than through the window.hydrateHoneypotOverview
+	// export (that export still exists, just for other/future callers).
+	if !strings.Contains(string(adapter), `doc.querySelector("[data-hp-page-content]")`) || !strings.Contains(string(adapter), "hydrateOverview(next)") {
 		t.Fatal("dashboard refresh does not target the server-rendered content container")
 	}
 	if !strings.Contains(string(adapter), "hydrateOverview") || !strings.Contains(string(adapter), "child !== mapCard") {
@@ -1234,8 +1250,13 @@ func TestOverviewShowsSkeletonPlaceholdersBeforeFirstRebuildInsteadOfEmptyStates
 // correlated/first/last/ES-link) -- far more than a glance-view card can
 // show without every wide cell wrapping to several lines (confirmed live
 // against production data). This asserts the overview now renders a
-// 6-column summary (score/network/events/ips/sensors/last seen) with a link
-// to the full table, while /campaigns itself keeps every column unchanged.
+// 5-column summary (network/events/ips/sensors/last seen) with a link to
+// the full table, while /campaigns itself keeps every column unchanged.
+// #1565: score itself dropped from this summary -- correlateCampaigns'
+// min(100, ...) weighting saturates at the cap for most real multi-signal
+// campaigns, so nearly every row on a live rolling-7-day window showed the
+// same "100" with no discriminating signal; see campaignrows-summary's own
+// comment in intel.html.
 func TestOverviewCampaignsCardIsADeclutteredSummary(t *testing.T) {
 	s := newSettingsAPITestStore(t, "admin")
 	tmpl, err := template.New("t").Funcs(templateFuncs(s, "")).Parse(pageTemplate)
@@ -1254,13 +1275,13 @@ func TestOverviewCampaignsCardIsADeclutteredSummary(t *testing.T) {
 	}
 	html := out.String()
 
-	if !strings.Contains(html, `<thead><tr><th>score</th><th>network</th><th>events</th><th>ips</th><th>sensors</th><th>last seen</th></tr></thead>`) {
-		t.Fatal("overview campaigns card must render the 6-column summary header")
+	if !strings.Contains(html, `<thead><tr><th>network</th><th>events</th><th>ips</th><th>sensors</th><th>last seen</th></tr></thead>`) {
+		t.Fatal("overview campaigns card must render the 5-column summary header")
 	}
 	if !strings.Contains(html, `href="/campaigns"`) {
 		t.Fatal("overview campaigns card must link to the full /campaigns table")
 	}
-	for _, detailOnly := range []string{">ports<", ">creds<", ">files<", ">alerts<", ">ASNs<", ">provider<", ">fingerprints<", ">sequence<", "why correlated"} {
+	for _, detailOnly := range []string{">score<", ">ports<", ">creds<", ">files<", ">alerts<", ">ASNs<", ">provider<", ">fingerprints<", ">sequence<", "why correlated"} {
 		if strings.Contains(html, detailOnly) {
 			t.Fatalf("overview campaigns summary must not carry detail-only column %q", detailOnly)
 		}

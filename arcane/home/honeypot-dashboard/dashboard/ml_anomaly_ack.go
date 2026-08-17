@@ -112,6 +112,27 @@ func (m *mlAnomalyAckManager) acknowledge(key string, ack bool, actor string) bo
 	return false
 }
 
+// acknowledgeAllKeys (#1566) acknowledges every one of the given anomaly
+// IDs, mirroring alertManager.acknowledgeAll's "flip everything currently
+// open" bulk action for the structurally identical /alerts "acknowledge
+// all" button. Unlike alertManager, this manager doesn't own anomaly
+// identity itself -- ml-worker's mlAnomalyStore does, via a completely
+// separate ES index -- so it can't scan its own index for "every open one"
+// the way acknowledgeAll does; the caller (serveMLAnomalyAckAll) supplies
+// the currently-unacknowledged IDs off the polled mlAnomalyStore snapshot
+// instead. Reuses acknowledge()'s existing per-record optimistic-concurrency
+// retry rather than a new bulk code path, so a write conflict on one
+// anomaly can't abort the rest.
+func (m *mlAnomalyAckManager) acknowledgeAllKeys(keys []string, actor string) int {
+	changed := 0
+	for _, key := range keys {
+		if key != "" && m.acknowledge(key, true, actor) {
+			changed++
+		}
+	}
+	return changed
+}
+
 // acknowledged returns every acknowledged record, keyed by anomaly ID, for
 // mlAnomaliesData/serveMLAnomaliesAPI to join against the polled cache.
 // Unacknowledged records are never written (acknowledge only writes when
@@ -223,6 +244,65 @@ func (s *store) serveMLAnomalyAck(w http.ResponseWriter, r *http.Request) {
 	// ES round-trip here is fine, and it means the redirect below shows the
 	// operator's own action immediately instead of stale state for up to a
 	// minute (until the next background poll).
+	s.mlAnomalyAcks.refresh()
+	fallback := "/ml-anomalies"
+	target := fallback
+	if parsed, ok := safeReturnPath(r.FormValue("return"), []string{"/ml-anomalies"}); ok {
+		target = parsed.String()
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
+}
+
+// serveMLAnomalyAckAll (#1566) is /ml-anomalies' bulk-acknowledge action --
+// the same "acknowledge all (N)" bulk button /alerts already has, added
+// here for the same reason: ~40 identical per-row acknowledge buttons with
+// no way to clear the backlog at once. Like serveMLAnomalyAck, this is a
+// plain form POST + redirect (ml_anomalies.html has no client-side fetch/JS
+// elsewhere, unlike alerts.html's fetch-driven board), confirmed
+// client-side by hp-modals.js's existing generic confirm-before-submit
+// listener rather than a new one -- see ml_anomalies.html's form for the
+// data-hp-confirm-* attributes that drive it.
+func (s *store) serveMLAnomalyAckAll(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "POST required", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireAdmin(w, r) {
+		return
+	}
+	if !sameOriginRequest(r) {
+		http.Error(w, "same-origin request required", http.StatusForbidden)
+		return
+	}
+	if s.mlAnomalyAcks == nil || s.mlAnomalies == nil {
+		http.Error(w, "ML anomaly acknowledgment is not configured on this host", http.StatusServiceUnavailable)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxActionFormBody)
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+	// The full polled snapshot, not just whatever the current filter bar
+	// shows -- same "acknowledges every open one, plus any older ones this
+	// page does not show" semantics /alerts' own acknowledge-all uses, so
+	// the action does what its confirmation text promises regardless of
+	// which severity/score/country filter happens to be active.
+	items := s.mlAnomalies.snapshot()
+	s.applyMLAnomalyAcks(items)
+	keys := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.AnomalyID != "" && !item.Acknowledged {
+			keys = append(keys, item.AnomalyID)
+		}
+	}
+	identity, _ := resolveIdentity(r)
+	actor := identity.Username
+	if actor == "" {
+		actor = identity.Subject
+	}
+	s.mlAnomalyAcks.acknowledgeAllKeys(keys, actor)
 	s.mlAnomalyAcks.refresh()
 	fallback := "/ml-anomalies"
 	target := fallback

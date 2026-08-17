@@ -56,6 +56,11 @@
     status: $("hp-rp-status"),
     definitions: $("hp-rp-definitions"),
     definitionsEmpty: $("hp-rp-definitions-empty"),
+    definitionsEmptyHint: $("hp-rp-definitions-empty-hint"),
+    definitionsDivider: $("hp-rp-definitions-divider"),
+    definitionsGallery: $("hp-rp-definitions-gallery"),
+    scheduleEmpty: $("hp-rp-schedule-empty"),
+    scheduleGallery: $("hp-rp-schedule-gallery"),
     generated: $("hp-rp-generated"),
     generatedEmpty: $("hp-rp-generated-empty"),
     viewerBackdrop: $("hp-rp-viewer-backdrop"),
@@ -174,6 +179,52 @@
   function currentTemplate() {
     return state.templates.find((template) => template.id === (state.template && state.template.id)) || null;
   }
+
+  // #1575: template gallery for the Library empty state -- the same
+  // catalog Design's own picker uses (state.templates, loaded once at
+  // boot), rendered as claude.ai-style starter cards instead of a bare "No
+  // saved definitions yet" sentence. Icon is a per-template guess (the
+  // catalog itself carries no icon field); chip echoes what the template
+  // scopes on, taken straight off the same sandbox/payload/ghidra flags
+  // selectTemplate() already switches its Scope section on.
+  const GALLERY_ICONS = {
+    executive: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>',
+    sandbox: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6L3 20a1 1 0 0 0 1 2h16a1 1 0 0 0 1-2l-6-12V2"/><line x1="9" y1="2" x2="15" y2="2"/></svg>',
+    payload: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>',
+    ghidra: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+  };
+  const GALLERY_DEFAULT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+
+  function templateChip(template) {
+    if (template.sandbox) return "Sandbox run";
+    if (template.payload) return "Payload";
+    if (template.ghidra) return "Ghidra";
+    return "Search criteria";
+  }
+
+  function templateCardHTML(template) {
+    const icon = GALLERY_ICONS[template.id] || GALLERY_DEFAULT_ICON;
+    return `
+      <button type="button" class="template-card" data-gallery-template="${escapeHTML(template.id)}">
+        <span class="template-card__icon" aria-hidden="true">${icon}</span>
+        <span class="template-card__title">${escapeHTML(template.name)}</span>
+        <span class="template-card__desc">${escapeHTML(template.description)}</span>
+        <span class="chip">${escapeHTML(templateChip(template))}</span>
+      </button>`;
+  }
+
+  function renderDefinitionsGallery() {
+    if (!els.definitionsGallery) return;
+    els.definitionsGallery.innerHTML = state.templates.map(templateCardHTML).join("");
+  }
+
+  els.definitionsGallery?.addEventListener("click", (event) => {
+    const card = event.target.closest("[data-gallery-template]");
+    if (!card) return;
+    selectTemplate(card.dataset.galleryTemplate, true);
+    document.querySelector('[data-dashboard-tab="design"]')?.click();
+    els.name.focus();
+  });
 
   function selectTemplate(id, applyPreset) {
     const template = state.templates.find((candidate) => candidate.id === id);
@@ -507,6 +558,49 @@
   }
   els.schedFrequency.addEventListener("change", syncScheduleFields);
 
+  // #1575: Schedule-step starter cards, shown while no saved definition has
+  // an active schedule (updateScheduleEmptyState, called after every
+  // definitions refresh). Each preset fills the current designer's name (if
+  // untouched) and schedule fields -- the same fields readDesigner() reads
+  // on Save, so "load a preset, then Save definition" is the whole flow.
+  const SCHEDULE_PRESETS = {
+    "weekly-board": { name: "Weekly board briefing", frequency: "weekly", hour: 6, minute: 0, weekday: 1 },
+    "daily-ops": { name: "Daily ops digest", frequency: "daily", hour: 6, minute: 0 },
+    "monthly-exec": { name: "Monthly executive summary", frequency: "monthly", hour: 6, minute: 0, monthDay: 1 },
+  };
+
+  function applySchedulePreset(id) {
+    const preset = SCHEDULE_PRESETS[id];
+    if (!preset) return;
+    if (!els.name.value || els.name.dataset.touched !== "true") {
+      els.name.value = preset.name;
+      els.name.dataset.touched = "true";
+    }
+    els.schedEnabled.checked = true;
+    els.schedFrequency.value = preset.frequency;
+    els.schedHour.value = preset.hour;
+    els.schedMinute.value = preset.minute;
+    if (preset.weekday !== undefined) els.schedWeekday.value = String(preset.weekday);
+    if (preset.monthDay !== undefined) els.schedMonthDay.value = preset.monthDay;
+    syncScheduleFields();
+    setStatus(`“${preset.name}” schedule loaded — adjust anything, then save.`);
+  }
+
+  els.scheduleGallery?.addEventListener("click", (event) => {
+    const card = event.target.closest("[data-schedule-preset]");
+    if (card) applySchedulePreset(card.dataset.schedulePreset);
+  });
+
+  // Recomputed after every definitions refresh (success or the initial
+  // empty state) -- "nothing scheduled" means no saved definition currently
+  // has schedule.enabled, not that the designer's own Schedule fields are
+  // at their defaults.
+  function updateScheduleEmptyState() {
+    if (!els.scheduleEmpty) return;
+    const anyScheduled = state.definitions.some((definition) => definition.schedule && definition.schedule.enabled);
+    els.scheduleEmpty.hidden = anyScheduled;
+  }
+
   const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
   function scheduleSummary(schedule) {
@@ -536,8 +630,15 @@
       state.etag = response.headers.get("ETag") || state.etag;
       const payload = await response.json();
       state.definitions = payload.definitions || [];
-      els.definitionsEmpty.textContent = "No saved definitions yet — design one above and save it.";
-      els.definitionsEmpty.hidden = state.definitions.length > 0;
+      const empty = state.definitions.length === 0;
+      els.definitionsEmpty.hidden = !empty;
+      if (empty) {
+        if (els.definitionsEmptyHint) els.definitionsEmptyHint.textContent = "Save a design from any template below and it will land here, ready to re-generate, refine, or schedule.";
+        if (els.definitionsDivider) els.definitionsDivider.hidden = false;
+        if (els.definitionsGallery) els.definitionsGallery.hidden = false;
+        renderDefinitionsGallery();
+      }
+      updateScheduleEmptyState();
       els.definitions.innerHTML = state.definitions.map((definition) => `
       <tr>
         <td><strong>${escapeHTML(definition.name)}</strong></td>
@@ -554,7 +655,9 @@
       </tr>`).join("");
     } catch (error) {
       els.definitions.replaceChildren();
-      els.definitionsEmpty.textContent = `Saved definitions could not be loaded: ${error.message}`;
+      if (els.definitionsEmptyHint) els.definitionsEmptyHint.textContent = `Saved definitions could not be loaded: ${error.message}`;
+      if (els.definitionsDivider) els.definitionsDivider.hidden = true;
+      if (els.definitionsGallery) { els.definitionsGallery.hidden = true; els.definitionsGallery.innerHTML = ""; }
       els.definitionsEmpty.hidden = false;
       throw error;
     } finally {
@@ -801,7 +904,9 @@
       if (els.definitions.getAttribute("aria-busy") === "true") {
         els.definitions.setAttribute("aria-busy", "false");
         els.definitions.replaceChildren();
-        els.definitionsEmpty.textContent = `Saved definitions could not be loaded: ${error.message}`;
+        if (els.definitionsEmptyHint) els.definitionsEmptyHint.textContent = `Saved definitions could not be loaded: ${error.message}`;
+        if (els.definitionsDivider) els.definitionsDivider.hidden = true;
+        if (els.definitionsGallery) { els.definitionsGallery.hidden = true; els.definitionsGallery.innerHTML = ""; }
         els.definitionsEmpty.hidden = false;
       }
       if (els.generated.getAttribute("aria-busy") === "true") {

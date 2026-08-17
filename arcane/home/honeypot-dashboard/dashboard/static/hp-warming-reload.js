@@ -1,7 +1,13 @@
 /* Shared "cache still warming" auto-reload for the #1139 consolidated
  * payload/results page family (payloads.html, and ghidra.html/sandbox.html/
  * github_analysis.html's own *resultspanel templates, embedded in
- * /payload-workbench/results).
+ * /payload-workbench/results) -- and, since #1564 promoted it to a
+ * shell-wide route, overview.html's own data-dashboard-warming marker too
+ * (it used to schedule its own identical inline-script reload, safe only
+ * because a full page load was the only way to reach "/" at all; now that
+ * the overview can also be reached by an in-app SPA navigation, it needs
+ * the same re-check-on-every-navigation this file already does for the
+ * other four).
  *
  * Each of those pages used to schedule its own reload with an inline
  * <script nonce="{{.Nonce}}">setTimeout(()=>location.reload(),1500)</script>
@@ -28,7 +34,7 @@
 (() => {
   "use strict";
 
-  const WARMING_SELECTOR = "[data-payload-warming], [data-ghidra-warming], [data-sandbox-warming], [data-github-analysis-warming]";
+  const WARMING_SELECTOR = "[data-payload-warming], [data-ghidra-warming], [data-sandbox-warming], [data-github-analysis-warming], [data-dashboard-warming]";
 
   function checkWarming() {
     if (document.querySelector(WARMING_SELECTOR)) {

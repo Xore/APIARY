@@ -262,6 +262,22 @@ services:
       # exposure (a cross-host case, VPS reaching in, not this same-host
       # case).
       - CANARYTOKENS_API_URL=${CANARYTOKENS_API_URL:-}
+      # #1487 items 3/5: live credential provisioning/rotation via
+      # honeyfs-implant (arcane/home/honeypot-cowrie/honeyfs-implant,
+      # #1553). Same reachability posture as CANARYTOKENS_API_URL above --
+      # honeyfs-implant is WireGuard-tunnel-bound (compose.yml in that
+      # project, e.g. 10.8.0.2:19428), not a docker service name reachable
+      # over this stack's own network. Empty by default -- an unset value
+      # leaves credential provisioning/rotation disabled
+      # (honeyfsImplantURLIsLocal in dashboard/honeyfs_implant_client.go),
+      # same "off unless configured" posture as everything else in this
+      # block. HONEYFS_IMPLANT_TOKEN is the optional defense-in-depth
+      # bearer token honeyfs-implant's own requireToken supports -- empty
+      # by default, matching that service's own compose.yml comment on why
+      # (network reachability is the trust boundary, this is a second,
+      # optional layer on top).
+      - HONEYFS_IMPLANT_URL=${HONEYFS_IMPLANT_URL:-}
+      - HONEYFS_IMPLANT_TOKEN=${HONEYFS_IMPLANT_TOKEN:-}
       # Where the Open-in links on an event point. Set HONEYPOT_DOMAIN and the
       # dashboard derives https://<tool>.<domain>; the three explicit URLs
       # override it for path-routed deployments. All four are deliberately
@@ -424,6 +440,11 @@ services:
       # create requests landing here 503'd with "not configured on this
       # host").
       - CANARYTOKENS_API_URL=${CANARYTOKENS_API_URL:-}
+      # #1487 items 3/5: same split-brain reasoning as CANARYTOKENS_API_URL
+      # immediately above -- omitting these here would leave this replica
+      # unable to provision/rotate credentials while dashboard could.
+      - HONEYFS_IMPLANT_URL=${HONEYFS_IMPLANT_URL:-}
+      - HONEYFS_IMPLANT_TOKEN=${HONEYFS_IMPLANT_TOKEN:-}
       - HONEYPOT_DOMAIN=${HONEYPOT_DOMAIN:-}
       - KIBANA_PUBLIC_URL=${KIBANA_PUBLIC_URL:-}
       - EVEBOX_PUBLIC_URL=${EVEBOX_PUBLIC_URL:-}

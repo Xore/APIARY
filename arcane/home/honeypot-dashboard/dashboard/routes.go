@@ -61,6 +61,12 @@ func (s *store) routes(tmpl *template.Template) *http.ServeMux {
 	mux.HandleFunc("GET /api/settings/canarytokens", s.serveCanarytokensList)
 	mux.HandleFunc("POST /api/settings/canarytokens/create", s.serveCanarytokensCreate)
 	mux.HandleFunc("GET /api/settings/canarytokens/{id}/download", s.serveCanarytokensDownload)
+	// #1487 items 3/5: credential provisioning/rotation via honeyfs-implant
+	// (#1553), plus linking a credential to an existing canarytoken.
+	mux.HandleFunc("GET /api/settings/credentials", s.serveCredentialsList)
+	mux.HandleFunc("POST /api/settings/credentials/create", s.serveCredentialsCreate)
+	mux.HandleFunc("POST /api/settings/credentials/{id}/rotate", s.serveCredentialRotate)
+	mux.HandleFunc("POST /api/settings/credentials/{id}/link-token", s.serveCredentialLinkToken)
 	mux.HandleFunc("GET /api/problem-reports", s.serveProblemReports)
 	mux.HandleFunc("POST /api/problem-reports", s.serveProblemReports)
 	mux.HandleFunc("PATCH /api/problem-reports/{id}", s.serveProblemReportItem)
@@ -428,6 +434,7 @@ func (s *store) routes(tmpl *template.Template) *http.ServeMux {
 	mux.HandleFunc("POST /gpu-queue/abort", serveGPUQueueAbort)
 	mux.HandleFunc("POST /github-analysis/submit", s.serveGitHubAnalysisSubmit)
 	mux.HandleFunc("POST /ml-anomalies/ack", s.serveMLAnomalyAck)
+	mux.HandleFunc("POST /ml-anomalies/ack-all", s.serveMLAnomalyAckAll)
 	// #1139: the standalone artifact-selection index merged into /payloads'
 	// second tab -- old bookmarks/links redirect rather than 404.
 	mux.HandleFunc("GET /payload-workbench", func(w http.ResponseWriter, r *http.Request) {
@@ -559,6 +566,16 @@ func (s *store) routes(tmpl *template.Template) *http.ServeMux {
 		data := s.get()
 		data.Ready = s.ready.Load()
 		renderPage(w, tmpl, "page", &data)
+	})
+	// #1575: humane 404 -- every route above is either an exact path or a
+	// "/prefix/" wildcard, both strictly more specific than a bare "/" in
+	// net/http.ServeMux's (1.22+) pattern matching, so this only ever fires
+	// once nothing else has claimed the request. Replaces the previous
+	// default (an unmatched path silently falling through to ServeMux's own
+	// bare "404 page not found" text response) with this dashboard's own
+	// chrome and empty-state voice.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		renderPageStatus(w, tmpl, "notfound", &notFoundPage{}, http.StatusNotFound)
 	})
 
 	return mux
