@@ -940,14 +940,14 @@ test.describe("dashboard browser behaviour", () => {
     // #1541: "Attack progression" and the correlation fragment now live in
     // the "03 Correlation & timeline" tab panel (hidden by default), same
     // data-dashboard-tab/data-dashboard-panel convention as tty_replay.html.
-    // At this test's mobile viewport, hp-app.js's sidebar-tabs sync (design
-    // refresh pick 7D) has already moved this page-level tablist out of the
-    // content flow into the off-canvas nav rail (main.tabs[role="tablist"]
-    // relocates to .app-sidebar__body) -- unlike the component-scoped tabs
-    // elsewhere in this file (github-analysis, ghidra, ...), which carry
-    // data-hp-tabs-inline and stay put. Open the drawer first, same as a
-    // real mobile operator would, before the tab is reachable at all.
-    await page.getByRole("button", { name: "Toggle navigation" }).click();
+    // #1576: hp-app.js's sidebar-tabs sync (design refresh pick 7D) skips
+    // relocating a page-level tablist into the off-canvas nav rail below
+    // the 520px breakpoint where the sidebar itself is off-canvas -- the
+    // rail is reachable only behind the hamburger drawer, and a page's own
+    // view switcher needs to stay in the always-visible content flow at
+    // phone width instead. The tab is inline here, same as the
+    // component-scoped tabs elsewhere in this file (github-analysis,
+    // ghidra, ...) that carry data-hp-tabs-inline -- no drawer to open.
     await page.getByRole("tab", { name: /Correlation & timeline/ }).click();
     await expect(page.getByRole("heading", { name: "Attack progression" }).locator("..")).toContainText("cowrie");
     await expect(page.locator("#attacker-correlation-root")).toHaveAttribute("role", "alert");
