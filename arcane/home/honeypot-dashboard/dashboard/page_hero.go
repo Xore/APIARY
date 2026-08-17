@@ -107,3 +107,21 @@ func hourlySpark(rows []heatmapRow) []sparkBar {
 	}
 	return bars
 }
+
+// feedBreak gives the event explorer its EV-D time-grouped feed rhythm: the
+// minute label ("15:04") when event i opens a new minute group, "" while the
+// previous event shares the minute. Works on the same normalized "2006-01-02
+// 15:04:05" strings storedEvent.Time already carries; an unparseable pair
+// simply never breaks, which degrades to the old ungrouped table. The first
+// row of every remote batch (offset fragments render in isolation) starts
+// its own group -- at worst that duplicates a label across a batch seam.
+func feedBreak(events []storedEvent, i int) string {
+	if i < 0 || i >= len(events) || len(events[i].Time) < 16 {
+		return ""
+	}
+	minute := events[i].Time[:16]
+	if i > 0 && len(events[i-1].Time) >= 16 && events[i-1].Time[:16] == minute {
+		return ""
+	}
+	return minute[11:]
+}

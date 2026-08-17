@@ -474,7 +474,9 @@ test.describe("dashboard browser behaviour", () => {
   test("remote event paging loads the next 25 rows through the accessible control", async ({ page }) => {
     await page.addInitScript(() => { delete window.IntersectionObserver; });
     await page.goto("/events");
-    const rows = page.locator("table.recent tbody tr");
+    // EV-D adds presentation-only minute-break rows to the same tbody; the
+    // pager (and this spec) count only real event rows.
+    const rows = page.locator("table.recent tbody tr:not(.hp-feed-break)");
     await expect(rows).toHaveCount(25);
     const controls = page.locator("table.recent + .hp-lazy-controls");
     const total = Number(await page.locator("table.recent tbody").getAttribute("data-hp-total"));
@@ -960,16 +962,25 @@ test.describe("dashboard browser behaviour", () => {
     await page.goto("/events");
     const eventDetails = page.locator("[data-hp-event-detail]");
     await expect(eventDetails).toHaveCount(25);
-    // Design refresh (EV-B): every record still arrives server-rendered and
-    // complete (#1447's no-round-trip contract), but the selected row's
-    // record is projected into the sticky master-detail pane -- that is the
-    // one visible "Normalized event"; the other 24 stay in their rows,
-    // hidden until selected.
+    // Design refresh (EV-B, closed by default per Xore): every record still
+    // arrives server-rendered and complete (#1447's no-round-trip
+    // contract), but the table owns the full width until a row is clicked;
+    // only then is that row's record projected into the sticky pane.
+    const grid = page.locator("#events-grid");
     const paneDetail = page.locator(".hp-md__pane [data-hp-event-detail]");
+    await expect(grid).not.toHaveClass(/hp-md--open/);
+    await expect(paneDetail).toHaveCount(0);
+    await page.locator(".hp-md__list tbody tr[data-hp-event]").first().click();
+    await expect(grid).toHaveClass(/hp-md--open/);
     await expect(paneDetail).toHaveCount(1);
     await expect(paneDetail.getByRole("heading", { name: "Normalized event" })).toBeVisible();
     await expect(paneDetail).toContainText("browser-session");
     await expect(paneDetail.locator("pre.code")).toContainText('"SrcIP"');
+    // The pane's × control returns the full-width table.
+    await page.locator(".hp-md__close").click();
+    await expect(grid).not.toHaveClass(/hp-md--open/);
+    await expect(paneDetail).toHaveCount(0);
+    await page.locator(".hp-md__list tbody tr[data-hp-event]").first().click();
     await expect(page.locator('[data-hp-evidence], [data-hp-evidence-body]')).toHaveCount(0);
     // Design refresh (EV-B, supersedes #1526's page-scroll assertion): the
     // list scrolls inside a viewport-height card__scroll (no fixed 340px
@@ -986,6 +997,7 @@ test.describe("dashboard browser behaviour", () => {
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/events");
+    await page.locator(".hp-md__list tbody tr[data-hp-event]").first().click();
     await expect(page.locator(".hp-md__pane [data-hp-event-detail]").first()).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
 
@@ -1206,7 +1218,8 @@ test.describe("dashboard browser behaviour", () => {
     // The list overflows in the fixture (the master-detail spec above
     // asserts it), so at the top the pill is the visible page-down control.
     await expect(pill).toHaveClass(/hp-scroll-more--on/);
-    await expect(pill).toHaveText("more ↓");
+    await expect(pill).toHaveText("↓");
+    await expect(pill).toHaveAttribute("data-hp-mode", "scroll");
     await pill.click();
     await expect
       .poll(() => region.evaluate(element => element.scrollTop), { timeout: 5000 })
@@ -1221,7 +1234,7 @@ test.describe("dashboard browser behaviour", () => {
     await expect
       .poll(async () => {
         await region.evaluate(element => { element.scrollTop = element.scrollHeight; });
-        if ((await pill.textContent()) === "load more ↓") await pill.click();
+        if ((await pill.getAttribute("data-hp-mode")) === "load") await pill.click();
         return region
           .locator(":scope > .hp-lazy-controls:not([hidden]) button:not([hidden])")
           .count();
@@ -1230,5 +1243,34 @@ test.describe("dashboard browser behaviour", () => {
     expect(await rows.count()).toBeGreaterThan(rowsBefore);
     await region.evaluate(element => { element.scrollTop = element.scrollHeight; });
     await expect(pill).not.toHaveClass(/hp-scroll-more--on/);
+  });
+
+  test("investigate tables open a generic row inspector on click, closed by default", async ({ page }) => {
+    await page.goto("/attackers");
+    const wrap = page.locator(".hp-md", { has: page.locator("#attackers-table") });
+    await expect(wrap).toHaveCount(1);
+    await expect(wrap).not.toHaveClass(/hp-md--open/);
+    // Click a non-interactive cell (events count), not the entity link.
+    await wrap.locator("tbody tr").first().locator("td").nth(2).click();
+    await expect(wrap).toHaveClass(/hp-md--open/);
+    const inspector = wrap.locator(".hp-md__rowcard");
+    await expect(inspector.locator("dt").first()).toContainText("entity");
+    await expect(inspector.locator("dd").first().locator("a")).toHaveCount(1);
+    await wrap.locator(".hp-md__close").click();
+    await expect(wrap).not.toHaveClass(/hp-md--open/);
+  });
+
+  test("filter-field autocomplete offers real values after an in-app navigation", async ({ page }) => {
+    // Land on a dynamic route, then reach /events through the SPA swap --
+    // the delegated widget must serve inputs that mounted after load.
+    await page.goto("/alerts");
+    await page.locator('.app-sidebar a[href="/events"]').click();
+    await expect(page).toHaveURL(/\/events$/);
+    await page.locator("#events-filters details.hp-open-in > summary").click();
+    const sensorInput = page.locator('#events-filters input[data-hp-filter-field="sensor"]');
+    await sensorInput.click();
+    const dropdown = page.locator(".hp-filter-autocomplete");
+    await expect(dropdown).toBeVisible();
+    await expect(dropdown.locator(".hp-filter-autocomplete__row").first()).toContainText("cowrie");
   });
 });
