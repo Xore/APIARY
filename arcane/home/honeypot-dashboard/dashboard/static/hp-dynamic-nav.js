@@ -39,38 +39,33 @@
     // bare /sandbox index, which also 302s.
     /^\/sandbox\/(?!vnc$)[^/]+$/,
     /^\/github-analysis\/[^/]+$/,
-    // #1564 (design refresh): the whole shell navigates in place -- "one
-    // flawless page". Every full-page shell route below shares the same
-    // [data-hp-page-content] region mountPage swaps, and every controller
-    // that binds inside it re-attaches off the hp-page-mounted signal
-    // (hp-app.js). Deliberately NOT matched, so they stay full document
-    // loads: /settings (hp-settings.js resolves its page mode at script
-    // load), /sandbox/vnc, /tty/* and /revdeck/* (self-contained viewer
-    // documents), /auth/*, and anything that isn't a shell page at all
-    // (/api, /static, /export, /metrics, PDFs).
-    /^\/$/,
+    // #1564 (design refresh): shell routes navigate in place -- "one
+    // flawless page" -- but ONLY pages whose behaviour comes entirely from
+    // the shell scripts (hp-app.js delegation + hp-page-mounted
+    // re-attachers). Pages that ship their own bottom-of-content scripts
+    // (overview/ips/attackers/kill-chain/commands/ml-anomalies/reports/
+    // canarytokens/sessions/investigate: cytoscape graphs, ECharts
+    // hydration, studio bindings) stay full document loads until those
+    // scripts learn the mount/unmount convention -- a dynamically appended
+    // script executes once per session, so a second visit through a swap
+    // would leave their views stuck loading (caught by the browser matrix
+    // on the attackers graph). Also deliberately excluded: /settings
+    // (page mode resolves at script load), /sandbox/vnc, /tty/*,
+    // /revdeck/*, /auth/*, and anything that isn't a shell page (/api,
+    // /static, /export, /metrics, PDFs).
     /^\/events$/,
     /^\/search$/,
-    /^\/ips$/,
     /^\/clusters$/,
     /^\/campaigns$/,
-    /^\/attackers$/,
-    /^\/kill-chain$/,
     /^\/history$/,
     /^\/dead-letters$/,
     /^\/source-health$/,
     /^\/alerts$/,
-    /^\/ml-anomalies$/,
     /^\/auth-events$/,
-    /^\/sensors$/,
     /^\/llm-analysis$/,
     /^\/agent-campaigns$/,
-    /^\/reports$/,
-    /^\/canarytokens$/,
-    /^\/commands$/,
     /^\/recordings$/,
-    /^\/investigate\/[^/]+\/.+$/,
-    /^\/sessions\/[^/]+$/,
+    /^\/sensors$/,
   ];
   const isDynamicRoute = pathname => DYNAMIC_ROUTES.some(re => re.test(pathname));
 
@@ -111,6 +106,14 @@
       if (document.querySelector(`script[src="${CSS.escape(src)}"]`)) return;
       const el = document.createElement("script");
       el.src = src;
+      // #1564 regression fix: dynamically-inserted scripts are async by
+      // default, so a page whose scripts have a load-order dependency
+      // (attackers.html: cytoscape.min.js -> hp-echarts-theme.js ->
+      // hp-attackers.js) could execute out of order -- hp-attackers.js ran
+      // before cytoscape existed and bailed, leaving the graph stuck on
+      // "Loading graph…". async=false restores insertion-order execution,
+      // matching how the server-rendered defer tags behave.
+      el.async = false;
       if (pageNonce) el.nonce = pageNonce;
       document.body.appendChild(el);
     });

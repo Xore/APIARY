@@ -103,7 +103,7 @@
           <div class="metric"><div class="metric__value {{if .Detail.FindCrypt}}tw:text-orange{{end}}">{{len .Detail.FindCrypt}}</div><div class="metric__label">Crypto constants</div></div>
         </div>
 
-        <div class="tabs" role="tablist" aria-label="Ghidra analysis sections" id="ghidra-detail-tabs">
+        <div class="tabs" role="tablist" aria-label="Ghidra analysis sections" id="ghidra-detail-tabs" data-hp-tabs-inline>
           <button class="tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-overview" data-dashboard-tab="overview"><span>01</span>Overview</button>
           <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-code" data-dashboard-tab="code"><span>02</span>Code</button>
           <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-data" data-dashboard-tab="data"><span>03</span>Data</button>
@@ -334,7 +334,7 @@
             <div class="metric"><div class="metric__value"><div class="skeleton-line" style="width:40%"></div></div><div class="metric__label">Strings</div></div>
             <div class="metric"><div class="metric__value"><div class="skeleton-line" style="width:40%"></div></div><div class="metric__label">Crypto constants</div></div>
           </div>
-          <div class="tabs" role="tablist" aria-label="Loading Ghidra analysis sections">
+          <div class="tabs" role="tablist" aria-label="Loading Ghidra analysis sections" data-hp-tabs-inline>
             <button class="tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-overview-loading" data-dashboard-tab="overview-loading"><span>01</span>Overview</button><button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-code-loading" data-dashboard-tab="code-loading"><span>02</span>Code</button><button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-data-loading" data-dashboard-tab="data-loading"><span>03</span>Data</button><button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-deepdive-loading" data-dashboard-tab="deepdive-loading"><span>04</span>Deep dive</button>
           </div>
           <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-overview-loading" role="tabpanel" data-dashboard-panel="overview-loading">

@@ -464,7 +464,9 @@ test.describe("dashboard browser behaviour", () => {
     await (page.evaluate(() => (window as any).refreshDashboard()) as Promise<void>);
     await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 
-    await expect(page.locator("#overview-header h1")).toContainText("Hydrated command center");
+    // Design refresh (OV-B): the configured title renders as the hero
+    // eyebrow; the h1 is the greeting.
+    await expect(page.locator("#overview-header .label-section")).toContainText("Hydrated command center");
     await expect(page.locator("#hp-command-palette")).toHaveClass(/open/);
     await expect(command).toHaveValue("operator draft");
     await expect(command).toBeFocused();
@@ -873,26 +875,33 @@ test.describe("dashboard browser behaviour", () => {
     await page.goto("/events");
     const eventDetails = page.locator("[data-hp-event-detail]");
     await expect(eventDetails).toHaveCount(25);
-    await expect(eventDetails.first().getByRole("heading", { name: "Normalized event" })).toBeVisible();
-    await expect(eventDetails.first()).toContainText("browser-session");
-    await expect(eventDetails.first().locator("pre.code")).toContainText('"SrcIP"');
+    // Design refresh (EV-B): every record still arrives server-rendered and
+    // complete (#1447's no-round-trip contract), but the selected row's
+    // record is projected into the sticky master-detail pane -- that is the
+    // one visible "Normalized event"; the other 24 stay in their rows,
+    // hidden until selected.
+    const paneDetail = page.locator(".hp-md__pane [data-hp-event-detail]");
+    await expect(paneDetail).toHaveCount(1);
+    await expect(paneDetail.getByRole("heading", { name: "Normalized event" })).toBeVisible();
+    await expect(paneDetail).toContainText("browser-session");
+    await expect(paneDetail.locator("pre.code")).toContainText('"SrcIP"');
     await expect(page.locator('[data-hp-evidence], [data-hp-evidence-body]')).toHaveCount(0);
-    // #1526: Event Explorer's table is no longer wrapped in its own
-    // card__scroll (a fixed 340px cap that left most of a tall page blank
-    // below a short table) -- the page itself (.app-main) is the bounded,
-    // scrollable region now, same as every other single-card-per-page
-    // layout this fix touched.
-    const appMainBounds = await page.locator(".app-main").evaluate(element => ({
+    // Design refresh (EV-B, supersedes #1526's page-scroll assertion): the
+    // list scrolls inside a viewport-height card__scroll (no fixed 340px
+    // cap) so the sticky record pane stays beside it; the region must be
+    // scrollable and sized well past the old cap.
+    const listBounds = await page.locator(".hp-md__list > .card__scroll").evaluate(element => ({
       overflowY: getComputedStyle(element).overflowY,
       clientHeight: element.clientHeight,
       scrollHeight: element.scrollHeight,
     }));
-    expect(appMainBounds.overflowY).toBe("auto");
-    expect(appMainBounds.scrollHeight).toBeGreaterThan(appMainBounds.clientHeight);
+    expect(["auto", "scroll"]).toContain(listBounds.overflowY);
+    expect(listBounds.scrollHeight).toBeGreaterThan(listBounds.clientHeight);
+    expect(listBounds.clientHeight).toBeGreaterThan(340);
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/events");
-    await expect(page.locator("[data-hp-event-detail]").first()).toBeVisible();
+    await expect(page.locator(".hp-md__pane [data-hp-event-detail]").first()).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
 
     await page.goto("/admin/problem-reports");

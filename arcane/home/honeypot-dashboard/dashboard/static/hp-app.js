@@ -1788,7 +1788,10 @@
     const reveal = () => side.querySelector(
       `.sidebar__item[data-hp-nav="${CSS.escape(routeFor(location.pathname))}"]`
     )?.scrollIntoView({block: "nearest"});
-    const incoming = document.querySelector("main .tabs[role='tablist'], .app-main .tabs[role='tablist']");
+    /* data-hp-tabs-inline marks component-level tablists (ghidra's detail
+       sections, any hydrated fragment's inner tabs) that must stay in the
+       content flow -- only page-level view tabs move to the rail. */
+    const incoming = document.querySelector("main .tabs[role='tablist']:not([data-hp-tabs-inline]), .app-main .tabs[role='tablist']:not([data-hp-tabs-inline])");
     if (incoming) {
       /* A fresh tablist arrived with this page's content: it replaces
          whatever rail the previous page left, nesting directly under the
