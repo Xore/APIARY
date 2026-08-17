@@ -168,13 +168,21 @@ func submitReturnURL(raw, hash string, target sandboxTarget) string {
 // guard that exists twice is one that will be fixed once.
 //
 // A leading "/" is deliberately not sufficient on its own — "//evil.example"
-// also starts with "/" and is a protocol-relative URL to another host. See
+// also starts with "/" and is a protocol-relative URL to another host, and
+// "/\evil.example" is too: some browsers normalize a leading backslash to
+// a forward slash before resolving a redirect Location, turning it into
+// the same protocol-relative form (CodeQL's go/bad-redirect-check flagged
+// exactly this: the "//" check alone doesn't rule out "/" followed by "\").
+// Go's own url.Parse doesn't treat "\" specially -- parsed.Host stays empty
+// for "/\evil.example" and the allowlist check below would already reject
+// it today -- but that's relying on a second, independent layer to save a
+// check this one line claims to make; reject it here directly instead. See
 // https://github.com/Xore/APIARY/issues/80. The allowlist is the
-// primary control; the scheme, host, and "//" checks close the ways a value
-// can look like a dashboard path without being one.
+// primary control; the scheme, host, and "//"/"/\" checks close the ways a
+// value can look like a dashboard path without being one.
 func safeReturnPath(raw string, allowed []string) (*url.URL, bool) {
 	raw = strings.TrimSpace(raw)
-	if raw == "" || !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") {
+	if raw == "" || !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") || strings.HasPrefix(raw, `/\`) {
 		return nil, false
 	}
 	parsed, err := url.Parse(raw)

@@ -30,11 +30,18 @@
 #   ports (mailoney, dns-honeypot, and this repo's own real WireGuard
 #   tunnel respectively -- confirmed directly against vps/docker-compose.yml's
 #   RULES, not assumed) and stay unpublished. Only the HTTP channel is
-#   exposed. DNS-type tokens and NXDOMAIN detection remain a separate,
-#   not-yet-decided design question (would need a real subdomain/zone
-#   delegation through dns-honeypot); every token type #1487 actually
-#   generates (see above) fires over HTTP only, confirmed against the
-#   vendored source at CANARYTOKENS_REF.
+#   exposed. Real DNS-type tokens (a token whose trigger IS a DNS lookup,
+#   e.g. #1487's Windows-folder/UNC-path type) and true passive-DNS
+#   NXDOMAIN monitoring remain a separate, not-yet-decided design question
+#   (would need a real subdomain/zone delegation through dns-honeypot).
+#   That's a different thing from CANARY_NXDOMAINS below, which several
+#   *HTTP-triggered* token types (PDF, signed exe/dll) also consume for
+#   their embedded action -- see that var's own comment for why it's
+#   pointed at the real domain rather than left as a non-resolving
+#   placeholder. The earlier claim here that every #1487 token type fires
+#   over HTTP only, confirmed against vendored source, was incomplete: it
+#   is HTTP-only, but two of those types embedded a domain that never
+#   resolves, so the HTTP request could never be made in the first place.
 # - frontend (token management UI + REST API) stays WireGuard-tunnel-only
 #   (HP_BIND, nonstandard port 19426) -- the dashboard's own backend is the
 #   only caller, reaching it directly over WireGuard, so there's nothing to
@@ -112,7 +119,25 @@ services:
       # every other public hostname in this repo -- see
       # docs/CGNAT-DEPLOYMENT.md).
       - CANARY_DOMAINS=${CANARY_PUBLIC_HOSTNAME:-cdn.honeypot.example}
-      - CANARY_NXDOMAINS=nx.canarytokens.internal.apiary
+      # #1487 follow-up: several token types (PDF, signed exe/dll -- see
+      # pdfgen.py/authenticode.py call sites, both call get_hostname with
+      # nxdomain=True) embed *this* domain, not CANARY_DOMAINS, as their
+      # actual trigger action. The placeholder value here never resolves
+      # by design -- confirmed live: downloading a real adobe_pdf token and
+      # inflating its FlateDecode streams showed the embedded /URI action
+      # pointed at `<token>.nx.canarytokens.internal.apiary`, so opening
+      # the PDF outside this network can never phone home; the HTTP
+      # webhook_url fix (#1570) doesn't touch this, it's a separate
+      # domain baked into the artifact at creation time. Upstream's
+      # nxdomain/domain split exists for a passive-DNS-monitoring
+      # detection mode (distinguishing a security scanner's pre-resolve
+      # from a real open) that this deployment doesn't implement --
+      # explicitly deferred, not yet decided, per this file's own header.
+      # Until that's built, point NXDOMAINS at the same real, resolving
+      # domain as DOMAINS so every token type's embedded action actually
+      # fires over HTTP; this makes the domain-split distinction inert
+      # rather than broken.
+      - CANARY_NXDOMAINS=${CANARY_PUBLIC_HOSTNAME:-cdn.honeypot.example}
       - LOG_FILE=/logs/frontend.log
       - CANARY_REDIS_HOST=canarytokens-redis
       - CANARY_SWITCHBOARD_HOSTNAME=canarytokens-switchboard
@@ -175,7 +200,25 @@ services:
       # reason.
       - CANARY_PUBLIC_IP=${HP_BIND:-10.8.0.2}
       - CANARY_DOMAINS=${CANARY_PUBLIC_HOSTNAME:-cdn.honeypot.example}
-      - CANARY_NXDOMAINS=nx.canarytokens.internal.apiary
+      # #1487 follow-up: several token types (PDF, signed exe/dll -- see
+      # pdfgen.py/authenticode.py call sites, both call get_hostname with
+      # nxdomain=True) embed *this* domain, not CANARY_DOMAINS, as their
+      # actual trigger action. The placeholder value here never resolves
+      # by design -- confirmed live: downloading a real adobe_pdf token and
+      # inflating its FlateDecode streams showed the embedded /URI action
+      # pointed at `<token>.nx.canarytokens.internal.apiary`, so opening
+      # the PDF outside this network can never phone home; the HTTP
+      # webhook_url fix (#1570) doesn't touch this, it's a separate
+      # domain baked into the artifact at creation time. Upstream's
+      # nxdomain/domain split exists for a passive-DNS-monitoring
+      # detection mode (distinguishing a security scanner's pre-resolve
+      # from a real open) that this deployment doesn't implement --
+      # explicitly deferred, not yet decided, per this file's own header.
+      # Until that's built, point NXDOMAINS at the same real, resolving
+      # domain as DOMAINS so every token type's embedded action actually
+      # fires over HTTP; this makes the domain-split distinction inert
+      # rather than broken.
+      - CANARY_NXDOMAINS=${CANARY_PUBLIC_HOSTNAME:-cdn.honeypot.example}
       # SMTP(25)/DNS(53)/WireGuard(51820) channels stay enabled inside the
       # container (upstream default) but are deliberately not published as
       # host ports below -- see the file header for why.
@@ -203,7 +246,16 @@ services:
     volumes:
       - /opt/stacks/apiary/logs/canarytokens:/var/log/honeypot
       - /opt/stacks/apiary/state/init-markers:/markers:ro
-    networks: [canarytokens_net]
+    # canarytokens-adapter.internal alias: frontend/app.py's TokenRequest
+    # validates webhook_url with Pydantic's HttpUrl, which rejects a bare,
+    # dot-less Docker service name as a malformed host -- confirmed live,
+    # every generate() call failed identically ("Malformed request, invalid
+    # data supplied.") regardless of token_type until the dashboard's own
+    # canarytokensAdapterWebhookURL pointed at this dotted alias instead of
+    # plain `canarytokens-adapter`.
+    networks:
+      canarytokens_net:
+        aliases: [canarytokens-adapter.internal]
     security_opt:
       - no-new-privileges:true
     read_only: true

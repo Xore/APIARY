@@ -219,7 +219,15 @@ type canarytokensGenerateResult struct {
 // webhook or email is required") -- confirmed live, every request without
 // this field fails with "Malformed request, invalid data supplied." before
 // this constant existed.
-const canarytokensAdapterWebhookURL = "http://canarytokens-adapter:8090/"
+//
+// The dotted `.internal` suffix is load-bearing, not cosmetic: frontend/
+// app.py validates webhook_url with Pydantic's HttpUrl, which rejects a
+// bare, dot-less Docker service name as a malformed host. Every generate()
+// call failed with that same "Malformed request" error, for every
+// token_type, until this pointed at the canarytokens-adapter.internal
+// alias honeypot-canarytokens/compose.yml's adapter service now publishes
+// on canarytokens_net instead of the plain `canarytokens-adapter` name.
+const canarytokensAdapterWebhookURL = "http://canarytokens-adapter.internal:8090/"
 
 // generate calls POST {root}/generate. A file upload (web_image only)
 // forces a multipart/form-data request -- app.py's own generate() branches

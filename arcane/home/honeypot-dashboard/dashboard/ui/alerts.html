@@ -32,7 +32,13 @@
              tab, just two client-side partitions of one fetch, so
              acknowledging a row in New and reopening one in Acknowledged
              both take effect immediately on the next loadAlerts() without
-             a page reload. */}}
+             a page reload.
+             #1526: neither panel's results div wraps in card__scroll --
+             see events.html's main table for the full reasoning against
+             its fixed 340px cap on a page whose table is the whole panel's
+             content. #alerts-results/#alerts-ack-results keep their ids
+             (loadAlerts() in the script below targets them by id, not by
+             a wrapper class). */}}
         <div class="tabs" role="tablist" aria-label="Alert views">
           <button class="tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-new" data-dashboard-tab="new"><span>01</span>New</button>
           <button class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-acknowledged" data-dashboard-tab="acknowledged"><span>02</span>Acknowledged</button>
@@ -41,7 +47,7 @@
         <div class="dashboard-panel" id="panel-new" role="tabpanel" data-dashboard-panel="new">
           <div class="filters" id="alerts-filters"><a class="chip" href="/">&larr; dashboard</a><button class="copy" id="alerts-refresh" type="button">refresh</button><button class="copy" id="alerts-ack-all" type="button" data-hp-alert-ack-all hidden>acknowledge all</button>{{template "filterbar" .}}</div>
           <div class="card wide" id="alerts-card">
-            <div class="card__scroll" id="alerts-results" aria-busy="true">
+            <div id="alerts-results" aria-busy="true">
               <table class="recent data-table data-table--responsive"><thead><tr><th>state</th><th>key</th><th>message</th><th>observed</th><th>last seen</th><th>last notified</th><th>action</th></tr></thead><tbody id="alert-rows">
                 <tr class="hp-table-state" aria-hidden="true"><td class="hp-skeleton-cell" colspan="7"><span class="skeleton-line" style="width:88%"></span></td></tr>
                 <tr class="hp-table-state" aria-hidden="true"><td class="hp-skeleton-cell" colspan="7"><span class="skeleton-line" style="width:72%"></span></td></tr>
@@ -55,7 +61,7 @@
         <div class="dashboard-panel" id="panel-acknowledged" role="tabpanel" data-dashboard-panel="acknowledged" hidden>
           <div class="filters" id="alerts-ack-filters"><a class="chip" href="/">&larr; dashboard</a><button class="copy" id="alerts-ack-refresh" type="button">refresh</button></div>
           <div class="card wide" id="alerts-ack-card">
-            <div class="card__scroll" id="alerts-ack-results" aria-busy="true">
+            <div id="alerts-ack-results" aria-busy="true">
               <table class="recent data-table data-table--responsive"><thead><tr><th>state</th><th>key</th><th>message</th><th>observed</th><th>last seen</th><th>last notified</th><th>action</th></tr></thead><tbody id="alert-ack-rows">
                 <tr class="hp-table-state" aria-hidden="true"><td class="hp-skeleton-cell" colspan="7"><span class="skeleton-line" style="width:88%"></span></td></tr>
                 <tr class="hp-table-state" aria-hidden="true"><td class="hp-skeleton-cell" colspan="7"><span class="skeleton-line" style="width:72%"></span></td></tr>

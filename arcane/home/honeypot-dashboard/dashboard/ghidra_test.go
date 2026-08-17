@@ -97,6 +97,13 @@ func TestSafeReturnPathAllowlist(t *testing.T) {
 	if _, ok := safeReturnPath("//evil.example", []string{"/"}); ok {
 		t.Error("protocol-relative URL was accepted")
 	}
+	// #1487 code-scanning pass (go/bad-redirect-check): a leading "/\" is a
+	// second way to spell a protocol-relative URL some browsers normalize
+	// the same as "//" before resolving a redirect Location, even though
+	// Go's own url.Parse treats "\" as a literal path character.
+	if _, ok := safeReturnPath(`/\evil.example`, []string{"/"}); ok {
+		t.Error("backslash-prefixed protocol-relative URL was accepted")
+	}
 }
 
 func TestLoadGhidraResults(t *testing.T) {

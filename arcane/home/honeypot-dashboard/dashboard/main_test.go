@@ -1078,7 +1078,7 @@ func TestSemanticShellIsServerRendered(t *testing.T) {
 	}
 	html := out.String()
 	for _, want := range []string{
-		`class="app-shell"`, `class="app-toolbar"`, `app-toolbar__search`,
+		`class="app-shell"`, `class="app-toolbar"`, `hp-sidebar-search`,
 		`class="app-sidebar"`, `class="app-main"`, `sidebar__profile`,
 		`id="hp-command-palette"`, `class="modal modal--palette"`, `data-hp-page-content`,
 		`data-hp-theme-toggle`, `data-hp-alert-count`,

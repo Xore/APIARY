@@ -103,7 +103,13 @@
              selected event's complete normalized record in a sticky pane
              right. hp-app.js adds .hp-md--active and projects the selected
              row's article/pivots into the pane; without JS the records
-             stay inline in the rows exactly as before. */}}
+             stay inline in the rows exactly as before.
+             Supersedes #1526 (which un-wrapped this table so the page
+             itself scrolls): with the record pane sitting beside the list,
+             the list's own viewport-height card__scroll (theme#78 sizing,
+             no fixed 340px cap anymore) is what keeps the pane and the
+             rows on screen together -- the blank-page-below-short-table
+             failure #1526 fixed cannot occur in this two-column layout. */}}
         <div class="hp-md" id="events-grid">
           <div class="card wide hp-md__list" data-hp-md-list>
             {{if .Events}}
@@ -128,7 +134,7 @@
                  skeleton reads as loading; the real empty-state text would
                  read as a filter matching nothing, which is a different
                  and misleading claim this early. */}}
-            <div class="card__scroll" aria-hidden="true"><table class="recent data-table"><thead><tr><th>time</th><th>sensor</th><th>source ip</th><th>port</th><th>detail</th></tr></thead><tbody><tr><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><div class="skeleton-line" style="width:84%"></div><article class="card wide tw:mt-3"><h3>Normalized event</h3><div class="card__scroll"><div class="skeleton-line" style="width:92%"></div><div class="skeleton-line" style="width:76%"></div><div class="skeleton-line" style="width:86%"></div></div></article></td></tr><tr><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><div class="skeleton-line" style="width:72%"></div><article class="card wide tw:mt-3"><h3>Normalized event</h3><div class="card__scroll"><div class="skeleton-line" style="width:88%"></div><div class="skeleton-line" style="width:68%"></div></div></article></td></tr></tbody></table></div>
+            <table class="recent data-table" aria-hidden="true"><thead><tr><th>time</th><th>sensor</th><th>source ip</th><th>port</th><th>detail</th></tr></thead><tbody><tr><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><div class="skeleton-line" style="width:84%"></div><article class="card wide tw:mt-3"><h3>Normalized event</h3><div class="card__scroll"><div class="skeleton-line" style="width:92%"></div><div class="skeleton-line" style="width:76%"></div><div class="skeleton-line" style="width:86%"></div></div></article></td></tr><tr><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><span class="skeleton-line"></span></td><td><div class="skeleton-line" style="width:72%"></div><article class="card wide tw:mt-3"><h3>Normalized event</h3><div class="card__scroll"><div class="skeleton-line" style="width:88%"></div><div class="skeleton-line" style="width:68%"></div></div></article></td></tr></tbody></table>
             {{end}}
           </div>
           {{if .Events}}
