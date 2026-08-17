@@ -9,7 +9,7 @@
 <tr data-hp-event="{{$key}}">
   <td data-label="time" data-hp-time{{if .UTC}} data-hp-utc="{{.UTC}}"{{end}}>{{.Time}}</td>
   <td data-label="sensor"><a class="badge b-{{.Sensor}}" href="/events?sensor={{.Sensor | urlquery}}">{{.Sensor}}</a></td>
-  <td class="v" data-label="source ip">{{if .SrcIP}}<a href="/events?ip={{.SrcIP | urlquery}}" title="attack chain for {{.SrcIP}}">{{.SrcIP}}</a>{{else}}<span class="tw:text-muted" title="This event reached the sensor over the WireGuard tunnel and could not be joined back to a real client address. The tunnel peer is our own VPS, so it is deliberately not shown as the source.">unattributed</span>{{end}}{{if .Country}} <a class="badge badge--info" href="/events?country={{.Country | urlquery}}">{{.Country}}</a>{{end}}</td>
+  <td class="v" data-label="source ip">{{if .SrcIP}}<a href="/events?ip={{.SrcIP | urlquery}}" title="attack chain for {{.SrcIP}}">{{.SrcIP}}</a>{{else}}<span class="tw:text-muted" title="This event reached the sensor over the WireGuard tunnel and could not be joined back to a real client address. The tunnel peer is our own VPS, so it is deliberately not shown as the source.">unattributed</span>{{end}}{{if .Country}} <a class="badge badge--info" data-hp-country="{{.Country}}" href="/events?country={{.Country | urlquery}}">{{.Country}}</a>{{end}}</td>
   <td class="v" data-label="port">{{if .Port}}<a href="/events?port={{.Port | urlquery}}">:{{.Port}}</a>{{end}}</td>
   <td class="v" data-label="detail">
     <div class="eventdetail">{{if .ICSSeverity}}<span class="badge {{icsSeverityBadgeClass .ICSSeverity}}" title="DNP3 control-function severity: this app_function code changes equipment or device state">{{.ICSSeverity}}</span> {{end}}{{.Detail}}</div>

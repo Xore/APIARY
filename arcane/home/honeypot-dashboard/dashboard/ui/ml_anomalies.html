@@ -50,7 +50,7 @@
                   <td{{if .Timestamp}} data-hp-utc="{{.Timestamp}}"{{end}} data-hp-time>{{displayTime .Timestamp}}</td>
                   <td><span class="badge {{if eq .Severity "critical"}}badge--danger{{else if eq .Severity "high"}}badge--warning{{else if eq .Severity "medium"}}badge--info{{else}}badge--muted{{end}}">{{.Severity}}</span></td>
                   <td class="n">{{printf "%.2f" .CompositeScore}}</td>
-                  <td class="v">{{if .SrcIP}}<a href="/events?ip={{.SrcIP | urlquery}}">{{.SrcIP}}</a>{{if .SrcCountry}} <span class="badge badge--info">{{.SrcCountry}}</span>{{end}}{{else}}<span class="tw:text-muted">unattributed</span>{{end}}</td>
+                  <td class="v">{{if .SrcIP}}<a href="/events?ip={{.SrcIP | urlquery}}">{{.SrcIP}}</a>{{if .SrcCountry}} <span class="badge badge--info" data-hp-country="{{.SrcCountry}}">{{.SrcCountry}}</span>{{end}}{{else}}<span class="tw:text-muted">unattributed</span>{{end}}</td>
                   <td class="v"><small>iso {{printf "%.2f" (index .ModelScores "isolation_forest")}} &bull; lstm {{printf "%.2f" (index .ModelScores "lstm_ae")}} &bull; hbos {{printf "%.2f" (index .ModelScores "hbos")}}</small></td>
                   <td class="v">{{.Explanation}}</td>
                   <td class="v">{{if .SourceLink}}<a href="{{.SourceLink}}">view source</a>{{else}}<span class="tw:text-muted">&mdash;</span>{{end}}</td>

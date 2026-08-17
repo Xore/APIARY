@@ -56,11 +56,34 @@
   --critical: #ff5c5c;
   --critical-soft: rgba(255, 92, 92, 0.16);
   --accent-text-on-soft: #e38f74;
-  --success-text-on-soft: #77cb9e;
-  --info-text-on-soft: #8bb7dd;
-  --warning-text-on-soft: #e1b467;
-  --danger-text-on-soft: #e89b99;
+  /* success/info/warning/danger-text-on-soft (a11y -- .badge--current, the
+     *--soft tokens' other consumers below, and both light-theme blocks):
+     raised from the original values, which measured 4.6-4.7:1 against a
+     real rendered page (composited over --surface-1, a badge's realistic
+     worst-case backdrop) -- a thin pass of the 4.5:1 AA floor, one shade
+     from failing. Retuned for a ~5.3:1 margin instead, same hue, lighter.
+     Unchanged here in dark theme (already passing); see --*-badge-fill
+     just below for the actual bug this was chasing -- .badge--success/
+     info/warning/danger don't use these two soft tokens at all, they use a
+     solid fill + fixed near-black text (design refresh, pick 5D), and dark
+     theme's fills already clear 5.8-8.3:1 against that near-black
+     unmodified. */
+  --success-text-on-soft: #8ed4ae;
+  --info-text-on-soft: #9fc3e3;
+  --warning-text-on-soft: #e7c284;
+  --danger-text-on-soft: #ecaba9;
   --critical-text-on-soft: #ff8080;
+  /* success/info/warning/danger-badge-fill: identity in dark theme (the
+     solid-fill badge design's own near-black text already clears 5.8-8.3:1
+     against these unmodified) -- overridden in both light-theme blocks
+     below, where the same near-black text against these same colors
+     measured 3.4-4.0:1, failing AA. A country-code badge (badge--info,
+     e.g. events.html's {{.Country}}) reported hard to read against its own
+     background is what surfaced this. */
+  --success-badge-fill: var(--success);
+  --info-badge-fill: var(--info);
+  --warning-badge-fill: var(--warning);
+  --danger-badge-fill: var(--danger);
 
   /* Design refresh (APIARY design lab, Xore's picks): larger, calmer radii
      in the claude.ai direction. Every consumer shares the shift -- that is
@@ -177,11 +200,25 @@
   --critical: #c53030;
   --critical-soft: rgba(197, 48, 48, 0.13);
   --accent-text-on-soft: #a2472b;
-  --success-text-on-soft: #317152;
-  --info-text-on-soft: #396991;
-  --warning-text-on-soft: #885c1c;
-  --danger-text-on-soft: #a64441;
+  /* a11y: see the :root (dark) block's own comment on this same family --
+     these light-theme values were the ones actually measuring below the
+     4.5:1 AA floor (4.1-4.24:1 against --surface-1), not just thin. */
+  --success-text-on-soft: #2d674b;
+  --info-text-on-soft: #346084;
+  --warning-text-on-soft: #7a5319;
+  --danger-text-on-soft: #943d3a;
   --critical-text-on-soft: #b82929;
+  /* a11y: see the :root (dark) block's own comment on --*-badge-fill --
+     .badge--success/info/warning/danger's near-black text (#0d2417 etc.,
+     the .badge--* rules themselves) against these same light-theme
+     --success/info/warning/danger colors unmodified measured 3.4-4.0:1,
+     below the 4.5:1 AA floor. Lightened just enough (8-17%, same hue) for
+     ~4.6-4.7:1 against that same near-black text -- confirmed against a
+     real rendered page, not just this math. */
+  --success-badge-fill: #569577;
+  --info-badge-fill: #5788b1;
+  --warning-badge-fill: #ab8348;
+  --danger-badge-fill: #c06d6a;
   --shadow-raised: 0 1px 2px rgba(48, 42, 36, 0.11), 0 8px 26px rgba(48, 42, 36, 0.16);
   --shadow-dialog: 0 2px 6px rgba(48, 42, 36, 0.12), 0 24px 70px rgba(48, 42, 36, 0.19);
 }
@@ -231,11 +268,20 @@
     --critical: #c53030;
     --critical-soft: rgba(197, 48, 48, 0.13);
     --accent-text-on-soft: #a2472b;
-    --success-text-on-soft: #317152;
-    --info-text-on-soft: #396991;
-    --warning-text-on-soft: #885c1c;
-    --danger-text-on-soft: #a64441;
+    /* a11y: see the :root (dark) block's own comment on this same family --
+       kept in sync with the [data-theme="light"] block above, both light
+       surfaces. */
+    --success-text-on-soft: #2d674b;
+    --info-text-on-soft: #346084;
+    --warning-text-on-soft: #7a5319;
+    --danger-text-on-soft: #943d3a;
     --critical-text-on-soft: #b82929;
+    /* a11y: see the [data-theme="light"] block above's own comment on
+       --*-badge-fill -- kept in sync, both light surfaces. */
+    --success-badge-fill: #569577;
+    --info-badge-fill: #5788b1;
+    --warning-badge-fill: #ab8348;
+    --danger-badge-fill: #c06d6a;
     --shadow-raised: 0 1px 2px rgba(48, 42, 36, 0.11), 0 8px 26px rgba(48, 42, 36, 0.16);
     --shadow-dialog: 0 2px 6px rgba(48, 42, 36, 0.12), 0 24px 70px rgba(48, 42, 36, 0.19);
   }
@@ -831,10 +877,10 @@ select.form-input { cursor: pointer; }
    the mid-tone state colors, readable against both themes' grounds; text is
    a fixed near-black of each hue for AA contrast on the fill itself, so the
    pair never depends on which theme is active. */
-.badge--green, .badge--success { background: var(--success); color: #0d2417; }
-.badge--blue, .badge--info { background: var(--info); color: #0f1b26; }
-.badge--orange, .badge--warning { background: var(--warning); color: #2a2008; }
-.badge--red, .badge--danger { background: var(--danger); color: #2b1312; }
+.badge--green, .badge--success { background: var(--success-badge-fill); color: #0d2417; }
+.badge--blue, .badge--info { background: var(--info-badge-fill); color: #0f1b26; }
+.badge--orange, .badge--warning { background: var(--warning-badge-fill); color: #2a2008; }
+.badge--red, .badge--danger { background: var(--danger-badge-fill); color: #2b1312; }
 .badge--critical { border: 1px solid color-mix(in srgb, var(--critical) 45%, transparent); background: var(--critical-soft); color: var(--critical-text-on-soft); }
 .badge--muted { border: 1px solid var(--border-subtle); }
 .badge--current { background: var(--info-soft); color: var(--info-text-on-soft); }

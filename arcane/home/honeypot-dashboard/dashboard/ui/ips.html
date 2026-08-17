@@ -1,7 +1,7 @@
 {{define "iprow"}}<tr>
   <td class="n" data-label="events"><a href="/investigate/ip/{{.IP | urlquery}}" title="attacker profile for {{.IP}}">{{.Count}}</a></td>
   <td class="v" data-label="source ip"><a href="/investigate/ip/{{.IP | urlquery}}" title="attacker profile for {{.IP}}">{{.IP}}</a></td>
-  <td class="v" data-label="cc">{{if .Country}}<a class="badge badge--info" href="/events?country={{.Country | urlquery}}">{{.Country}}</a>{{end}}</td>
+  <td class="v" data-label="cc">{{if .Country}}<a class="badge badge--info" data-hp-country="{{.Country}}" href="/events?country={{.Country | urlquery}}">{{.Country}}</a>{{end}}</td>
   <td class="n" data-label="logins"><a href="/events?ip={{.IP | urlquery}}&amp;type=login" title="login attempts from {{.IP}}">{{.Logins}}</a></td>
   <td class="n" data-label="sessions"><a href="/events?ip={{.IP | urlquery}}" title="attack chain and sessions for {{.IP}}">{{.Sessions}}</a></td>
   <td class="v" data-label="sensors hit"><a href="/events?ip={{.IP | urlquery}}" title="sensor activity for {{.IP}}">{{.Sensors}}</a></td>
