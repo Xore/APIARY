@@ -1861,15 +1861,21 @@
      javascript: URL or an off-site redirect no matter what a poisoned
      entry contains (CodeQL js/xss /
      js/client-side-unvalidated-url-redirection). */
-  const KINDS = {
-    ip: value => "/investigate/ip/" + encodeURIComponent(value),
-    session: value => "/sessions/" + encodeURIComponent(value),
-    payload: value => "/payload-analysis/" + encodeURIComponent(value),
-    "events-ip": value => "/events?ip=" + encodeURIComponent(value),
+  /* Explicit switch, no dynamic key dispatch (CodeQL
+     js/unvalidated-dynamic-method-call): an unknown kind yields null and
+     the entry is skipped. */
+  const hrefFor = item => {
+    switch (item.kind) {
+      case "ip": return "/investigate/ip/" + encodeURIComponent(item.value);
+      case "session": return "/sessions/" + encodeURIComponent(item.value);
+      case "payload": return "/payload-analysis/" + encodeURIComponent(item.value);
+      case "events-ip": return "/events?ip=" + encodeURIComponent(item.value);
+      default: return null;
+    }
   };
   const safeEntry = item =>
-    item && typeof item.value === "string" && item.value.length > 0 &&
-    item.value.length <= 128 && Object.prototype.hasOwnProperty.call(KINDS, item.kind);
+    !!item && typeof item.value === "string" && item.value.length > 0 &&
+    item.value.length <= 128 && hrefFor(item) !== null;
   const read = () => {
     try { return (JSON.parse(localStorage.getItem(KEY)) || []).filter(safeEntry); } catch { return []; }
   };
@@ -1901,12 +1907,14 @@
     if (item.kind === "payload") return item.value.slice(0, 16) + "…";
     return item.value;
   };
-  host.replaceChildren(...list.slice(0, 5).map(item => {
+  host.replaceChildren(...list.slice(0, 5).flatMap(item => {
+    const href = hrefFor(item);
+    if (href === null) return [];
     const a = document.createElement("a");
-    a.setAttribute("href", KINDS[item.kind](item.value));
+    a.setAttribute("href", href);
     a.textContent = labelFor(item);
     a.title = labelFor(item);
-    return a;
+    return [a];
   }));
 })();
 
