@@ -1617,20 +1617,41 @@
     };
     syncPrefs();
 
-    /* Sidebar profile row from live Keycloak token verification (see
-       oidc_auth.go). #1235: a bare 401 means the OIDC session itself is
-       gone -- redirect through /auth/login rather than leaving the row
-       blank, same reasoning as hp-settings.js's own redirectToLogin
-       (Keycloak's browser SSO cookie almost always outlives this
-       dashboard's own session, so this self-heals silently). */
-    fetch("/api/whoami", {cache: "no-store"}).then(r => {
-      if (r.status === 401) {
-        const returnTo = window.location.pathname + window.location.search + window.location.hash;
-        window.location.href = "/auth/login?return_to=" + encodeURIComponent(returnTo);
-        return null;
-      }
-      return r.ok ? r.json() : null;
-    }).then(identity => {
+    /* Session liveness check, backed by live Keycloak token verification
+       (see oidc_auth.go). #1235: a bare 401 means the OIDC session itself
+       is gone -- redirect through /auth/login rather than leaving whatever
+       called this hanging, same reasoning as hp-settings.js's own
+       redirectToLogin (Keycloak's browser SSO cookie almost always
+       outlives this dashboard's own session, so this self-heals silently:
+       the redirect round-trips through Keycloak and back with no login
+       form shown, unless that SSO session is *also* gone, in which case a
+       real login prompt is exactly the right thing to surface).
+       #1563/#1534: originally ran once, at page load, to fill in the
+       sidebar profile row -- the same request doubles as the one place
+       that notices a session has quietly died and recovers it, so every
+       caller below that might hit a stale session shares this one
+       redirect path instead of failing silently on its own 401. Dedup via
+       inflight so a visibilitychange firing while the periodic check
+       below is already in flight doesn't double-navigate. */
+    let sessionCheckInflight = null;
+    const checkSessionAlive = () => {
+      if (sessionCheckInflight) return sessionCheckInflight;
+      sessionCheckInflight = fetch("/api/whoami", {cache: "no-store"}).then(r => {
+        if (r.status === 401) {
+          // #1563: LIVE has no other way to know the session, not just the
+          // SSE socket, is what actually died -- surface it the same way a
+          // stalled connection already does rather than staying green
+          // through the redirect below.
+          window.HoneypotLive.setConnectionHealthy(false);
+          const returnTo = window.location.pathname + window.location.search + window.location.hash;
+          window.location.href = "/auth/login?return_to=" + encodeURIComponent(returnTo);
+          return null;
+        }
+        return r.ok ? r.json() : null;
+      }).catch(() => null).finally(() => { sessionCheckInflight = null; });
+      return sessionCheckInflight;
+    };
+    checkSessionAlive().then(identity => {
       if (!identity || !identity.username) return;
       const name = shell.querySelector("[data-hp-user-name]");
       const avatar = shell.querySelector("[data-hp-user-avatar]");
@@ -1644,13 +1665,38 @@
         role.classList.toggle("badge--muted", identity.role !== "admin");
         role.hidden = false;
       }
-    }).catch(() => {});
+    });
+    /* #1563: a tab backgrounded long enough for the browser to throttle its
+       timers (Chrome's intensive throttling kicks in around 5 minutes
+       hidden) can miss every scheduled refreshAlertCount tick below,
+       letting the session's access token actually expire with nothing
+       left to trigger identityFromRequest's own proactive refresh --
+       silently breaking every fetch-based feature the moment the operator
+       switches back and the page still *looks* alive. visibilitychange
+       fires reliably regardless of timer throttling, so re-check the
+       instant the tab is looked at again, before any real interaction can
+       land on a dead session as a bare 401 (reproduced live on /events'
+       filter popover and #1534's Ghidra report page, both just a
+       fetch-based feature going quiet under an open, idled tab). */
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") checkSessionAlive();
+    });
 
-    /* Alert bell badge (60s polling) */
+    /* Alert bell badge (60s polling) -- also this dashboard's steady
+       keepalive heartbeat while a tab stays foregrounded: any request
+       through the OIDC middleware re-arms identityFromRequest's own
+       proactive refresh window, so as long as this keeps landing within
+       it the session never actually reaches expiry in the first place.
+       #1563: a 401 here used to be swallowed indistinguishably from any
+       other failure (this response body isn't JSON, so .json() below just
+       throws and the catch discarded it) -- route it through the same
+       recovery as checkSessionAlive instead. */
     const refreshAlertCount = async () => {
       if (window.HoneypotLive.paused()) return;
       try {
-        const records = await (await fetch("/api/alerts", {cache: "no-store"})).json();
+        const response = await fetch("/api/alerts", {cache: "no-store"});
+        if (response.status === 401) { checkSessionAlive(); return; }
+        const records = await response.json();
         const count = records.filter(record => !record.Acknowledged).length;
         const badge = shell.querySelector("[data-hp-alert-count]");
         if (!badge) return;
