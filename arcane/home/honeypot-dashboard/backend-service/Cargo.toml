@@ -1,0 +1,30 @@
+# apiary-backend — the Rust service tier of the modernization port (#1608).
+# Serves /api/v1 JSON to the Nitro BFF: Elasticsearch queries, correlation,
+# the SSE event source, result spools, and (later) PDF generation. Chosen by
+# the serving-quality decision matrix on #1608 (axum/tokio over Go/Node/
+# Elixir for latency, CPU-bound correlation, memory predictability, and
+# hostile-input correctness).
+[package]
+name = "apiary-backend"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = { version = "0.8", features = ["macros"] }
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.6", features = ["trace", "compression-gzip"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+elasticsearch = { version = "8.19.0-alpha.1", default-features = false, features = ["rustls-tls"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"
+thiserror = "2"
+chrono = { version = "0.4", features = ["serde"] }
+futures = "0.3"
+tokio-stream = { version = "0.1", features = ["sync"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
