@@ -1855,45 +1855,57 @@
   const host = document.querySelector("[data-hp-recent]");
   if (!host) return;
   const KEY = "hp-recent-investigations";
-  /* localStorage is same-origin state, but it is still a sink-adjacent
-     store: only ever render hrefs that match the exact entity-page shapes
-     this feature writes -- an anchored, root-relative allowlist, so a
-     poisoned entry can never smuggle a javascript: URL or an off-site
-     redirect into the rail (CodeQL js/xss /
+  /* localStorage never reaches the href sink: entries store an entity
+     {kind, value}, and the href is BUILT at render time from a string
+     literal plus encodeURIComponent(value) -- structurally incapable of a
+     javascript: URL or an off-site redirect no matter what a poisoned
+     entry contains (CodeQL js/xss /
      js/client-side-unvalidated-url-redirection). */
+  const KINDS = {
+    ip: value => "/investigate/ip/" + encodeURIComponent(value),
+    session: value => "/sessions/" + encodeURIComponent(value),
+    payload: value => "/payload-analysis/" + encodeURIComponent(value),
+    "events-ip": value => "/events?ip=" + encodeURIComponent(value),
+  };
   const safeEntry = item =>
-    item && typeof item.label === "string" && typeof item.href === "string" &&
-    /^\/(?:investigate\/ip\/[^/?#]+|sessions\/[^/?#]+|payload-analysis\/[^/?#]+|events\?[A-Za-z0-9=&%.:+-]*)$/.test(item.href);
+    item && typeof item.value === "string" && item.value.length > 0 &&
+    item.value.length <= 128 && Object.prototype.hasOwnProperty.call(KINDS, item.kind);
   const read = () => {
     try { return (JSON.parse(localStorage.getItem(KEY)) || []).filter(safeEntry); } catch { return []; }
   };
   const write = list => {
-    try { localStorage.setItem(KEY, JSON.stringify(list.slice(0, 5))); } catch {}
+    try {
+      localStorage.setItem(KEY, JSON.stringify(list.slice(0, 5).map(item => ({kind: item.kind, value: item.value}))));
+    } catch {}
   };
   const current = (() => {
     const p = location.pathname;
     let m;
-    if ((m = p.match(/^\/investigate\/ip\/([^/]+)$/))) return {label: decodeURIComponent(m[1]), href: p};
-    if ((m = p.match(/^\/sessions\/([^/]+)$/))) return {label: "session " + decodeURIComponent(m[1]).slice(0, 12), href: p};
-    if ((m = p.match(/^\/payload-analysis\/([^/]+)$/))) return {label: decodeURIComponent(m[1]).slice(0, 16) + "…", href: p};
+    if ((m = p.match(/^\/investigate\/ip\/([^/]+)$/))) return {kind: "ip", value: decodeURIComponent(m[1])};
+    if ((m = p.match(/^\/sessions\/([^/]+)$/))) return {kind: "session", value: decodeURIComponent(m[1])};
+    if ((m = p.match(/^\/payload-analysis\/([^/]+)$/))) return {kind: "payload", value: decodeURIComponent(m[1])};
     const q = new URLSearchParams(location.search);
-    if (p === "/events" && q.get("ip")) return {label: q.get("ip"), href: p + location.search};
+    if (p === "/events" && q.get("ip")) return {kind: "events-ip", value: q.get("ip")};
     return null;
   })();
   let list = read();
   if (current && safeEntry(current)) {
-    list = [current, ...list.filter(item => item.href !== current.href)];
+    list = [current, ...list.filter(item => item.kind !== current.kind || item.value !== current.value)];
     write(list);
   }
-  list = list.filter(safeEntry);
   if (!list.length) return;
   const label = document.querySelector("[data-hp-recent-label]");
   if (label) label.hidden = false;
+  const labelFor = item => {
+    if (item.kind === "session") return "session " + item.value.slice(0, 12);
+    if (item.kind === "payload") return item.value.slice(0, 16) + "…";
+    return item.value;
+  };
   host.replaceChildren(...list.slice(0, 5).map(item => {
     const a = document.createElement("a");
-    a.setAttribute("href", item.href);
-    a.textContent = item.label;
-    a.title = item.label;
+    a.setAttribute("href", KINDS[item.kind](item.value));
+    a.textContent = labelFor(item);
+    a.title = labelFor(item);
     return a;
   }));
 })();
