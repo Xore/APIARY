@@ -2385,6 +2385,20 @@ a.metric:hover { border-color: var(--border-strong); background: var(--surface-2
   .card, .card.half { grid-column: 1 / -1; }
 }
 
+/* #1565: overview's ASNs/Providers card pair -- ASNs is routinely a dozen-
+   plus dense rows of long "AS15169 Google LLC" strings, Providers usually
+   a handful of short single-word labels, so a forced even half/half split
+   read as an unbalanced pair. Same responsive fallbacks as every other
+   .card.half above, just an 8/4 split instead of 6/6 above that. */
+#overview-asns-card { grid-column: span 8; }
+#overview-providers-card { grid-column: span 4; }
+@media (max-width: 1180px) {
+  #overview-asns-card, #overview-providers-card { grid-column: span 6; }
+}
+@media (max-width: 800px) {
+  #overview-asns-card, #overview-providers-card { grid-column: 1 / -1; }
+}
+
 .section-heading {
   grid-column: 1 / -1;
   display: flex; align-items: flex-end; justify-content: space-between; gap: 16px;
@@ -2474,6 +2488,14 @@ td.n { color: var(--accent); font-family: var(--hp-mono); font-size: 12px; text-
 td.n a { color: inherit; text-decoration: none; border-bottom: 1px dotted color-mix(in srgb, var(--accent) 45%, transparent); }
 td.n a:hover { color: var(--text-primary); border-color: var(--accent); }
 td.v { color: var(--text-secondary); font-family: var(--hp-mono); font-size: 12px; word-break: break-all; }
+/* #1566: /commands' "sources" column (up to 6 space-joined IPs plus a
+   "+N" overflow marker -- intel.html's commandRow.Sources, already capped
+   by campaigns.go's sortedSet) is plain text, not links, so td.v's own
+   break-all -- needed elsewhere for unbroken hash-like values -- could
+   still fracture a single IP mid-character once the column gets squeezed.
+   Space-separated tokens already give the browser a wrap point between
+   IPs; only fall back to a mid-token break if one still doesn't fit. */
+.hp-ip-list { word-break: normal; overflow-wrap: break-word; }
 /* min-width (desktop only): nowrap sibling columns (td.n, td.v a) could
    crush a plain-text value column (clusters' "coverage") to
    letter-per-line width -- word-break:break-all then breaks every
@@ -2483,6 +2505,15 @@ td.v { color: var(--text-secondary); font-family: var(--hp-mono); font-size: 12p
    overflow, CI). */
 @media (min-width: 700px) {
   td.v { min-width: 180px; }
+  /* #1566: a floor under every nowrap timestamp cell too -- without it a
+     crowded row (campaigns' 8 visible columns, commands' first/last) can
+     still squeeze a [data-hp-utc] cell narrower than its own text, and
+     nowrap alone just pushes the row wider instead of the character-level
+     wrap that used to happen; the floor keeps "2026-08-16 21:55:00" (19
+     chars) on one line without the cell fighting its neighbors for space.
+     Off phones for the same reason td.v's own floor is: it would make a
+     narrow table wider than a 390px viewport. */
+  .data-table td[data-hp-utc] { min-width: 19ch; }
 }
 td.v a, td a.lnk { color: inherit; text-decoration: none; border-bottom: 1px dotted var(--border-strong); }
 td.v a:hover, td a.lnk:hover { color: var(--accent); border-color: var(--accent); }
@@ -2507,11 +2538,20 @@ td.s-waiting { color: var(--text-muted); }
 /* #1566: linked identifiers (IPs, CIDRs, sessions), timestamps and ports
    never wrap mid-value -- the "85.14.245.1(newline)22" class of bug. Plain
    text in value cells (alert keys, long hashes as text) keeps wrapping;
-   a too-wide row scrolls inside its card instead of shattering. */
+   a too-wide row scrolls inside its card instead of shattering.
+   [data-hp-utc] is included directly (not just data-hp-time/
+   data-label="time") so every table that already carries the
+   machine-readable UTC twin gets the fix for free: campaigns'/commands'
+   first/last, attackers' list, agent-campaigns' event rows, and any future
+   table that follows the same twin convention, without each needing its
+   own extra marker attribute -- exactly the two/three-line date and
+   ISO-string wraps the issue reported on /campaigns, /commands and
+   /attackers. */
 td.v a, td.n,
 .data-table td[data-label="time"],
 .data-table td[data-label="port"],
-.data-table td[data-hp-time] { white-space: nowrap; }
+.data-table td[data-hp-time],
+.data-table td[data-hp-utc] { white-space: nowrap; }
 td.v .eventdetail, td.v article, td.v .eventmeta { white-space: normal; }
 
 /* Sticky header while a table scrolls inside its card region. */
@@ -3199,10 +3239,6 @@ button.sidebar__profile:disabled:hover { background: transparent; }
 }
 .app-sidebar .tabs .tab span { width: 18px; height: 18px; }
 
-/* Design refresh 2 (pick OV-E): focus column -- a page opts into one
-   centered reading column (claude conversation geometry). */
-.hp-focus { max-width: 1180px; margin: 0 auto; width: 100%; }
-
 /* Attack sources (pick AS-D): profile card grid -- claude's projects
    page applied to attackers. Cards keep every column the table showed. */
 .hp-src-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
@@ -3218,6 +3254,11 @@ button.sidebar__profile:disabled:hover { background: transparent; }
 .hp-src-card__sensors { color: var(--text-secondary); font-size: 11.5px; text-decoration: none; overflow-wrap: anywhere; }
 .hp-src-card__sensors:hover { color: var(--accent); }
 .hp-src-card__when { color: var(--text-muted); font-size: 10.5px; font-family: var(--hp-mono); }
+/* #1566: each timestamp itself never wraps mid-value; the "first -> last"
+   line as a whole can still wrap between the two if the card gets narrow
+   (flex-wrap on the card body handles that), so this is scoped to the
+   [data-hp-utc] spans, not the whole line. */
+.hp-src-card__when [data-hp-utc] { white-space: nowrap; }
 
 /* Event explorer (pick EV-D): the table reads as a time-grouped feed --
    quiet minute-break rows between event groups. */
@@ -3338,8 +3379,16 @@ button.sidebar__profile:disabled:hover { background: transparent; }
 .hp-md__list { min-width: 0; }
 /* Wide investigate tables keep their 720px floor (readable columns); when
    the pane narrows the list, the card scrolls sideways instead of
-   spilling under the pane. */
-.hp-md--open .hp-md__list > .card { overflow-x: auto; }
+   spilling under the pane.
+   #1566: this used to be scoped to .hp-md--open only, so a table whose
+   still-visible columns (campaigns' score/network/events/ips/sensors/
+   first/last/action -- the nine heavy ones are already data-hp-md-detail,
+   pane-only) didn't quite fit at the card's own width had its trailing
+   column ("ES ->") silently clipped by .card's base overflow:hidden until
+   a row happened to be selected. Always-on scroll means the column is
+   reachable (an inline scrollbar, .card__scroll's own convention) whether
+   or not the pane is open. */
+.hp-md__list > .card { overflow-x: auto; }
 .hp-md__pane { position: sticky; top: 14px; min-width: 0; }
 .hp-md__pane .card { margin-bottom: 0; }
 .hp-md__list tbody tr { cursor: pointer; }
@@ -3623,6 +3672,11 @@ tr:hover .hp-row-actions, tr.selected .hp-row-actions { opacity: 1; }
    "World" reset control from clipping mid-word at the card edge. */
 .leaflet-container { background: var(--surface-2); }
 .leaflet-control-home { white-space: nowrap; padding: 3px 10px; }
+/* #1565: Leaflet's stock attribution strip sits flush against the map's
+   bottom-right corner with no inset -- inside .map-shell's own rounded
+   border it read as overlapping/cut off by the curve rather than sitting
+   inside it. A small margin off both edges and a matching corner radius. */
+.leaflet-bottom.leaflet-right .leaflet-control-attribution { margin: 0 8px 8px 0; border-radius: 6px; }
 
 /* ── One-off utilities ──────────────────────────────────────────────────
    #191 asked to drop the Tailwind build entirely. These ~30 classes are
