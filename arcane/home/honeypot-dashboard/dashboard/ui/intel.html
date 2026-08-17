@@ -119,16 +119,23 @@
 {{end}}
 
 {{/* #478: overview-page-only glance summary of the same campaign rows
-     campaignrows renders in full on /campaigns -- score/network/events/ips/
+     campaignrows renders in full on /campaigns -- network/events/ips/
      sensors/last-seen, the columns that answer "is this active and worth a
      look" without the ports/creds/files/alerts/ASNs/provider/fingerprints/
      sequence/why-correlated detail every wide cell needs on a card this
      size. Every row still links to the same full campaign detail
-     campaignrows' cells do. */}}
+     campaignrows' cells do.
+     #1565: the score column dropped from this summary -- correlateCampaigns'
+     own min(100, ...) weighting saturates at the cap for most real
+     multi-signal campaigns (several sensors + a payload + a couple alerts
+     is already enough), so on a typical rolling-7-day window nearly every
+     row read "100" with no way to tell them apart at a glance. /campaigns'
+     own row inspector still shows the real score; fixing the weighting
+     itself so it discriminates better is a separate, riskier change (it's
+     also the sort key for every /campaigns view) left for a follow-up. */}}
 {{define "campaignrows-summary"}}
 {{range .}}
 <tr>
-  <td class="n"><a href="{{.Link}}" title="investigate this campaign">{{.Score}}</a></td>
   <td class="v"><a href="{{.Link}}">{{.CIDR}}</a></td>
   <td class="n"><a href="{{.Link}}" title="show campaign events">{{.Events}}</a></td>
   <td class="n"><a href="{{.Link}}" title="show campaign source addresses">{{.UniqueIPs}}</a></td>

@@ -1234,8 +1234,13 @@ func TestOverviewShowsSkeletonPlaceholdersBeforeFirstRebuildInsteadOfEmptyStates
 // correlated/first/last/ES-link) -- far more than a glance-view card can
 // show without every wide cell wrapping to several lines (confirmed live
 // against production data). This asserts the overview now renders a
-// 6-column summary (score/network/events/ips/sensors/last seen) with a link
-// to the full table, while /campaigns itself keeps every column unchanged.
+// 5-column summary (network/events/ips/sensors/last seen) with a link to
+// the full table, while /campaigns itself keeps every column unchanged.
+// #1565: score itself dropped from this summary -- correlateCampaigns'
+// min(100, ...) weighting saturates at the cap for most real multi-signal
+// campaigns, so nearly every row on a live rolling-7-day window showed the
+// same "100" with no discriminating signal; see campaignrows-summary's own
+// comment in intel.html.
 func TestOverviewCampaignsCardIsADeclutteredSummary(t *testing.T) {
 	s := newSettingsAPITestStore(t, "admin")
 	tmpl, err := template.New("t").Funcs(templateFuncs(s, "")).Parse(pageTemplate)
@@ -1254,13 +1259,13 @@ func TestOverviewCampaignsCardIsADeclutteredSummary(t *testing.T) {
 	}
 	html := out.String()
 
-	if !strings.Contains(html, `<thead><tr><th>score</th><th>network</th><th>events</th><th>ips</th><th>sensors</th><th>last seen</th></tr></thead>`) {
-		t.Fatal("overview campaigns card must render the 6-column summary header")
+	if !strings.Contains(html, `<thead><tr><th>network</th><th>events</th><th>ips</th><th>sensors</th><th>last seen</th></tr></thead>`) {
+		t.Fatal("overview campaigns card must render the 5-column summary header")
 	}
 	if !strings.Contains(html, `href="/campaigns"`) {
 		t.Fatal("overview campaigns card must link to the full /campaigns table")
 	}
-	for _, detailOnly := range []string{">ports<", ">creds<", ">files<", ">alerts<", ">ASNs<", ">provider<", ">fingerprints<", ">sequence<", "why correlated"} {
+	for _, detailOnly := range []string{">score<", ">ports<", ">creds<", ">files<", ">alerts<", ">ASNs<", ">provider<", ">fingerprints<", ">sequence<", "why correlated"} {
 		if strings.Contains(html, detailOnly) {
 			t.Fatalf("overview campaigns summary must not carry detail-only column %q", detailOnly)
 		}
