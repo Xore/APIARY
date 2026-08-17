@@ -524,7 +524,7 @@ func (a *oidcAuth) identityFromRequest(r *http.Request) (authenticatedIdentity, 
 		changed = true
 	}
 	if now.Sub(session.LastValidated) >= 30*time.Second {
-		if err := a.introspect(r.Context(), session.AccessToken, session.Identity.Subject); err != nil {
+		if err := a.introspect(r.Context(), session.AccessToken, session.Identity.Username); err != nil {
 			if errors.Is(err, errIdentityUnauthorized) {
 				logSessionReject(cookie.Value, "introspection reported inactive", session, now, nil)
 				_ = a.sessions.Delete(r.Context(), "oidc:session:"+cookie.Value)
@@ -710,7 +710,26 @@ func isTransientOAuthError(err error) bool {
 	return retrieveErr.Response != nil && retrieveErr.Response.StatusCode >= 500
 }
 
-func (a *oidcAuth) introspect(ctx context.Context, accessToken, subject string) error {
+// introspect checks accessToken against the identity-provider's introspection
+// endpoint and confirms it still belongs to username.
+//
+// #1571: this used to compare the response's "sub" claim against the
+// session's subject. Live on this deployment, Keycloak's access tokens for
+// the apiary-dashboard client carry no "sub" claim at all (confirmed both in
+// the raw JWT and in the introspection response itself -- RFC 7662 lists
+// "sub" as OPTIONAL, and this realm/client combination simply never
+// populates it for access tokens, only for ID tokens), so result.Subject was
+// always "" and the old "!= subject" check rejected every session on its
+// very first 30-second re-check without exception -- not intermittent at
+// all from Keycloak's side, just gated on request timing, which is what
+// made it look intermittent from the browser: any session that made an API
+// call >=30s after login (or its last re-check) hit this every time,
+// deterministically, and silently "healed" on the next full navigation
+// because Keycloak's own SSO cookie re-authenticated invisibly. "username"
+// (also RFC 7662 OPTIONAL, unlike "sub") is reliably present in this
+// deployment's introspection responses -- confirmed live -- so that's the
+// field to match the still-authenticated identity against.
+func (a *oidcAuth) introspect(ctx context.Context, accessToken, username string) error {
 	form := url.Values{"token": {accessToken}, "token_type_hint": {"access_token"}}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, a.introspectionEndpoint, strings.NewReader(form.Encode()))
 	if err != nil {
@@ -728,14 +747,14 @@ func (a *oidcAuth) introspect(ctx context.Context, accessToken, subject string) 
 	}
 	var result struct {
 		Active   bool   `json:"active"`
-		Subject  string `json:"sub"`
+		Username string `json:"username"`
 		ClientID string `json:"client_id"`
 	}
 	decoder := json.NewDecoder(io.LimitReader(response.Body, 8192))
 	if err := decoder.Decode(&result); err != nil {
 		return errIdentityUnavailable
 	}
-	if !result.Active || result.Subject != subject || result.ClientID != oidcClientID {
+	if !result.Active || result.Username != username || result.ClientID != oidcClientID {
 		return errIdentityUnauthorized
 	}
 	return nil

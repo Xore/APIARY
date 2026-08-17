@@ -18,6 +18,11 @@ export const FIXTURE_SESSION_COOKIE_NAME = "__Host-apiary_session";
 // access token as literally being the subject, so this same string does
 // double duty as both.
 export const FIXTURE_SUBJECT = "browser-e2e-fixture-session-subject";
+// #1599: identityFromRequest()'s 30s re-check now matches the introspection
+// response's "username" (fake-oidc-issuer.mjs's stub) against this value,
+// not the subject -- exported so both files share one source of truth
+// instead of two literals that can drift apart.
+export const FIXTURE_USERNAME = "browser-check";
 export const FIXTURE_SESSION_COOKIE_VALUE = "browser-e2e-fixture-session-cookie";
 
 export async function seedFixtureSession(redisURL) {
@@ -25,7 +30,7 @@ export async function seedFixtureSession(redisURL) {
   const session = {
     identity: {
       subject: FIXTURE_SUBJECT,
-      username: "browser-check",
+      username: FIXTURE_USERNAME,
       display_name: "Browser Check",
       role: "admin",
     },

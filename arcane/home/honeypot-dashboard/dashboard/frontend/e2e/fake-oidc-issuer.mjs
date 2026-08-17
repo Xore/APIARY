@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { FIXTURE_USERNAME } from "./fixture-session.mjs";
 
 // #1034: dashboard/oidc_auth.go's newOIDCAuth() does live OIDC discovery
 // against OIDC_ISSUER_URL at process startup and refuses to boot if it
@@ -47,14 +48,17 @@ export function startFakeOIDCIssuer() {
       // dashboard/oidc_auth.go's identityFromRequest() re-introspects every
       // 30s for any session that's still in use, even one seeded directly
       // into Redis by seed-fixture-session.mjs rather than minted through a
-      // real login. Fixture access tokens ARE the fixture subject string
-      // (see seed-fixture-session.mjs), so echoing it straight back as
-      // `sub` is enough to keep introspection.go's subject-match check
-      // happy without a real token store.
+      // real login. #1599: that re-check now matches the response's
+      // "username" against the session's identity.username, not "sub" (this
+      // deployment's real Keycloak never populates "sub" on access tokens --
+      // see oidc_auth.go's introspect() doc comment) -- echo back the same
+      // fixture username seed-fixture-session.mjs seeds the session with, so
+      // this stub stays in sync with the real endpoint's match field instead
+      // of silently rejecting every fixture session on its first re-check.
       readBody(req).then((body) => {
         const token = new URLSearchParams(body).get("token") || "";
         res.writeHead(200);
-        res.end(JSON.stringify({ active: Boolean(token), sub: token, client_id: "apiary-dashboard" }));
+        res.end(JSON.stringify({ active: Boolean(token), username: FIXTURE_USERNAME, client_id: "apiary-dashboard" }));
       });
       return;
     }

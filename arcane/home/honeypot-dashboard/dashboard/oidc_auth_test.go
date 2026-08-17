@@ -316,7 +316,7 @@ func TestIdentityFromRequestSessionLifecycle(t *testing.T) {
 	t.Run("still-active session survives its 30s introspection re-check", func(t *testing.T) {
 		introspection := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{"active": true, "sub": subject, "client_id": oidcClientID})
+			_ = json.NewEncoder(w).Encode(map[string]any{"active": true, "sub": subject, "username": "analyst", "client_id": oidcClientID})
 		}))
 		defer introspection.Close()
 
@@ -340,6 +340,79 @@ func TestIdentityFromRequestSessionLifecycle(t *testing.T) {
 		identity, err := auth.identityFromRequest(request)
 		if err != nil || identity.Role != "admin" || identity.Subject != subject {
 			t.Fatalf("still-active session was rejected: identity=%#v err=%v", identity, err)
+		}
+	})
+
+	// #1571: caught live against a real Keycloak (26.7.1) -- the
+	// apiary-dashboard client's access tokens carry no "sub" claim at all
+	// (confirmed both in the raw access-token JWT and in this same
+	// deployment's own introspection responses), only in ID tokens. Every
+	// session's first 30s re-check used to compare the introspection
+	// response's (always-empty) "sub" against the session's subject and
+	// reject unconditionally -- deterministically, not intermittently, on
+	// every session that outlived 30s since its last check. This is the
+	// same live shape minus "sub" from the response entirely, matching
+	// exactly what this deployment's own Keycloak actually returns for
+	// this client.
+	t.Run("still-active session survives introspection when the response omits sub entirely", func(t *testing.T) {
+		introspection := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"active": true, "username": "analyst", "client_id": oidcClientID})
+		}))
+		defer introspection.Close()
+
+		store := newStore()
+		created := time.Now().UTC()
+		nowFn := func() time.Time { return created.Add(31 * time.Second) }
+		auth := &oidcAuth{
+			sessions: store, now: nowFn, httpClient: introspection.Client(),
+			introspectionEndpoint: introspection.URL, clientSecret: "unused-in-this-test",
+		}
+		session := oidcSession{
+			Identity:    authenticatedIdentity{Subject: subject, Username: "analyst", Role: "admin"},
+			TokenExpiry: created.Add(time.Hour), CreatedAt: created, LastValidated: created,
+			AccessToken: subject,
+		}
+		if err := auth.putJSON(context.Background(), "oidc:session:sub-less-session", session, time.Hour); err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		request.AddCookie(&http.Cookie{Name: oidcSessionCookie, Value: "sub-less-session"})
+		identity, err := auth.identityFromRequest(request)
+		if err != nil || identity.Role != "admin" || identity.Subject != subject {
+			t.Fatalf("still-active session was rejected solely for lacking a sub claim: identity=%#v err=%v", identity, err)
+		}
+	})
+
+	t.Run("session introspected under a different username is rejected and deleted", func(t *testing.T) {
+		introspection := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"active": true, "username": "someone-else", "client_id": oidcClientID})
+		}))
+		defer introspection.Close()
+
+		store := newStore()
+		created := time.Now().UTC()
+		nowFn := func() time.Time { return created.Add(31 * time.Second) }
+		auth := &oidcAuth{
+			sessions: store, now: nowFn, httpClient: introspection.Client(),
+			introspectionEndpoint: introspection.URL, clientSecret: "unused-in-this-test",
+		}
+		session := oidcSession{
+			Identity:    authenticatedIdentity{Subject: subject, Username: "analyst", Role: "admin"},
+			TokenExpiry: created.Add(time.Hour), CreatedAt: created, LastValidated: created,
+			AccessToken: subject,
+		}
+		if err := auth.putJSON(context.Background(), "oidc:session:mismatched-username", session, time.Hour); err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		request.AddCookie(&http.Cookie{Name: oidcSessionCookie, Value: "mismatched-username"})
+		if _, err := auth.identityFromRequest(request); err != errIdentityUnauthorized {
+			t.Fatalf("err = %v, want errIdentityUnauthorized (username mismatch)", err)
+		}
+		if _, getErr := store.Get(context.Background(), "oidc:session:mismatched-username"); getErr != errSessionNotFound {
+			t.Fatalf("mismatched-username session was not deleted: %v", getErr)
 		}
 	})
 
@@ -566,8 +639,10 @@ func TestIdentityFromRequestSessionLifecycle(t *testing.T) {
 				// now() is 1h past LastValidated in this test, so every
 				// request also crosses the 30s introspection re-check --
 				// this needs to succeed for the request to reach a clean
-				// identity, same as the refresh above.
-				_ = json.NewEncoder(w).Encode(map[string]any{"active": true, "sub": subject, "client_id": oidcClientID})
+				// identity, same as the refresh above. No "sub" here,
+				// matching real Keycloak's response for this deployment
+				// (#1571) -- only "username" is reliably present.
+				_ = json.NewEncoder(w).Encode(map[string]any{"active": true, "username": "analyst", "client_id": oidcClientID})
 			default:
 				http.NotFound(w, r)
 			}

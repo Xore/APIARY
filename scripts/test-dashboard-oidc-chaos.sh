@@ -21,14 +21,46 @@
 #       parts of that design live: the immediate-request grace window, the
 #       503 once the window lapses, and the no-re-login recovery.
 #   1b. Keycloak's process actually RESTARTS mid-session (crash recovery,
-#       version upgrade). This repo's Keycloak deployment doesn't
-#       configure a persistent/clustered Infinispan session cache (grepped:
-#       no KC_CACHE/infinispan/cache-config anywhere in
-#       vps/docker-compose.yml or keycloak/) -- a real restart genuinely
-#       loses all in-memory user-session state, by Keycloak's own design,
-#       not a dashboard bug. What this proves instead: the dashboard
-#       degrades to that forced re-login CLEANLY (a normal 303 redirect),
-#       not a hang/500/crash.
+#       version upgrade, node replacement) while its Postgres backing store
+#       stays up (only the kc container is restarted, not pg). #1599
+#       investigated this in depth after this scenario started failing post
+#       #1599's own fix (matching introspection identity on "username"
+#       instead of "sub" -- see introspect()'s own comment): the assertion
+#       here used to expect a forced 303 re-login, on the theory that no
+#       persistent/clustered Infinispan cache (grepped: no KC_CACHE/
+#       infinispan/cache-config beyond `KC_CACHE: local` anywhere in this
+#       repo) means a restart genuinely loses all in-memory user-session
+#       state. Direct evidence says otherwise for THIS restart shape:
+#       `docker restart` sends SIGTERM first (a graceful stop, not a kill),
+#       and Keycloak 26.7.1 -- confirmed live, repeatedly, by querying its
+#       introspection endpoint directly with the dashboard's own client
+#       credentials immediately after the restart -- comes back up having
+#       reloaded the pre-restart SSO session from the still-live Postgres
+#       DB: introspection answers a complete, authoritative
+#       `"active":true` (correct sid/username/client_id/exp) for the exact
+#       same access token the session held before the restart. Before
+#       #1599's fix, this scenario's 303 "passed" for the wrong reason --
+#       the old sub-matching bug rejected EVERY 30s re-check unconditionally
+#       (issue #1571), so the assertion never actually observed Keycloak's
+#       real answer at all. Now that introspection reports honestly, the
+#       dashboard trusting a session Keycloak itself still calls active is
+#       correct OIDC RP behavior, not a regression -- so this proves the
+#       opposite of what the scenario used to assert: the session survives
+#       a graceful restart cleanly (fresh identity re-read, no dropped
+#       request, no forced re-login) exactly because production runs this
+#       same Postgres-backed topology (vps/docker-compose.yml's KC_DB:
+#       postgres). Genuine server-side revocation is covered separately by
+#       1c below, which doesn't depend on Keycloak's restart/persistence
+#       internals at all.
+#   1c. An admin genuinely revokes a user's session at Keycloak (the
+#       real-world action a restart was originally meant to stand in for),
+#       via the admin REST API's POST /admin/realms/{realm}/users/{id}/logout
+#       -- confirmed live to flip the SAME access token's introspection
+#       response from the 1b "active":true straight to a clean RFC 7662
+#       `{"active":false}`. This is the scenario that actually exercises
+#       identityFromRequest()'s "Keycloak authoritatively says this session
+#       is gone" path: the dashboard must delete the session and cleanly
+#       303-redirect to /auth/login, not hang/500/crash.
 #   2. The realm's active signing key rotates while the dashboard is
 #      running (a real Keycloak key-rotation operation, not a restart).
 #      go-oidc's RemoteKeySet is expected to notice an unrecognized `kid`
@@ -328,13 +360,24 @@ docker network connect "${network}" "${kc}" >/dev/null
 sleep 1
 
 # --- Scenario 1b: Keycloak's process actually RESTARTS mid-session (crash
-# recovery, version upgrade, node replacement). Given no persistent/
-# clustered session cache (see the comment above), Keycloak's in-memory
-# Infinispan user-session state is genuinely gone after this -- a restart
-# is expected to require re-login, this is real Keycloak architecture, not
-# a dashboard bug. What actually matters here: the dashboard must degrade
-# to that re-login redirect CLEANLY (a normal 303 to /auth/login), not
-# hang, 500, or loop. ---
+# recovery, version upgrade, node replacement), while its Postgres backing
+# store keeps running (only the kc container restarts). #1599/#1571: this
+# used to assert a forced 303 re-login here, on the theory that this
+# deployment's `KC_CACHE: local` (no clustered/persistent Infinispan cache)
+# meant a restart genuinely wipes all in-memory session state. That
+# expectation only ever "passed" because of the bug #1599 fixed --
+# introspection used to compare the response's "sub" claim, which this
+# realm/client's access tokens never populate, so EVERY 30s re-check
+# rejected unconditionally regardless of what Keycloak actually said (see
+# introspect()'s own comment). Confirmed live, repeatedly, after the fix:
+# `docker restart` sends SIGTERM (a graceful stop, not a kill -9), and
+# Keycloak 26.7.1 reloads the pre-restart SSO session from the still-live
+# Postgres DB on startup -- querying the introspection endpoint directly
+# with the dashboard's own client credentials immediately after the
+# restart returns a complete, authoritative "active":true (correct sid/
+# username/client_id/exp) for the exact same access token. Trusting that
+# is correct OIDC relying-party behavior, not a regression, and matches
+# production's own topology (vps/docker-compose.yml: KC_DB: postgres). ---
 docker restart "${kc}" >/dev/null
 kc_recovered=0
 consecutive_ok=0
@@ -351,11 +394,30 @@ if [ "${kc_recovered}" -ne 1 ]; then
   bad "Keycloak never came back up after the restart -- cannot check post-restart behavior"
 else
   post_restart_status=$(curl -s -o /dev/null -w '%{http_code}' -b "${jar}" "http://127.0.0.1:${dash_port}/")
-  if [ "${post_restart_status}" = "303" ]; then
-    ok "a real Keycloak process restart correctly requires re-login (clean redirect, not a hang/500/crash) -- expected, since this deployment has no persistent session cache"
+  if [ "${post_restart_status}" = "200" ]; then
+    ok "a real (graceful, Postgres-backed) Keycloak restart does not force a re-login -- Keycloak itself still calls the session active, and the dashboard correctly trusts that rather than logging the user out unnecessarily"
   else
-    bad "expected a clean 303 redirect-to-login after a real Keycloak restart invalidated in-memory sessions, got ${post_restart_status}"
+    bad "expected the session to survive a graceful Keycloak restart with its DB intact (Keycloak's own introspection reports it still active), got ${post_restart_status}"
   fi
+fi
+
+# --- Scenario 1c: an admin genuinely revokes the session at Keycloak --
+# the real-world event 1b's restart was originally meant to stand in for,
+# via the admin REST API's POST /admin/realms/{realm}/users/{id}/logout.
+# Confirmed live to flip the SAME access token's introspection response
+# from 1b's "active":true straight to a clean RFC 7662 {"active":false},
+# independent of any restart/persistence internals. This is what actually
+# exercises identityFromRequest()'s "Keycloak authoritatively says this
+# session is gone" path: the dashboard must delete the session and cleanly
+# 303-redirect to /auth/login, not hang/500/crash. ---
+chaos_user_id=$(kcadm get users -r apiary -q username=chaos-test --fields id --format csv --noquotes | tail -1)
+kcadm create "users/${chaos_user_id}/logout" -r apiary -b '{}' >/dev/null
+sleep 32
+post_revoke_status=$(curl -s -o /dev/null -w '%{http_code}' -b "${jar}" "http://127.0.0.1:${dash_port}/")
+if [ "${post_revoke_status}" = "303" ]; then
+  ok "a genuine admin-triggered session revocation correctly forces re-login (clean redirect, not a hang/500/crash)"
+else
+  bad "expected a clean 303 redirect-to-login after Keycloak genuinely revoked the session, got ${post_revoke_status}"
 fi
 
 # --- Scenario 2: the realm's active signing key rotates while the
