@@ -651,6 +651,12 @@
     }
     const item = e.target.closest(".action-menu__item, .hp-open-in-item");
     if (item) item.closest(".action-menu")?.removeAttribute("open");
+    // #1567: a visible close button for the filter panel specifically --
+    // not .hp-open-in-item (that class also carries that item's own
+    // hover/layout styling, wrong for a plain corner icon button), same
+    // close-the-ancestor-<details> effect.
+    const closeBtn = e.target.closest("[data-hp-filterbar-close]");
+    if (closeBtn) closeBtn.closest(".action-menu")?.removeAttribute("open");
   });
   // Only one action menu open at a time: a second one opening (native
   // <details> "toggle" event, capture phase so it fires before the browser

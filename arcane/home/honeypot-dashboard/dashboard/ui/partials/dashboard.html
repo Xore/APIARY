@@ -222,6 +222,11 @@
        is untouched. */}}
   <summary class="btn btn-sm btn-secondary" title="Filter by one or more attributes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg> Filter&hellip;</summary>
   <div class="dropdown hp-open-in-menu hp-filterbar-menu">
+    {{/* #1567: click-away already closed this (delegated document click
+         handler, hp-app.js) -- reported anyway as having no visible way to
+         dismiss it short of clicking elsewhere, which is a real
+         discoverability gap even though the mechanism itself worked. */}}
+    <button type="button" class="hp-filterbar-menu__close" data-hp-filterbar-close aria-label="Close filter panel" title="Close">&#10005;</button>
     <form method="get" action="{{.FilterAction}}">
       {{range .FilterHidden}}<input type="hidden" name="{{.Key}}" value="{{.Value}}">{{end}}
       {{range .FilterFields}}
