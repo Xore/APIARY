@@ -1533,7 +1533,12 @@ pre {
 .app-shell {
   display: grid;
   min-height: 100dvh;
-  grid-template: var(--toolbar-height) 1fr / var(--sidebar-width) minmax(0, 1fr);
+  /* auto, not var(--toolbar-height): the 11E pill toolbar's box is
+     toolbar-height + its 8px inset (see .app-toolbar) -- a hard-sized row
+     kept the old 32px and let the pill overflow on top of .app-main
+     (browser matrix seam check, CI). The row now takes the toolbar's real
+     height whatever it is. */
+  grid-template: auto 1fr / var(--sidebar-width) minmax(0, 1fr);
   background: var(--app-bg);
 }
 .app-shell--wide { grid-template-columns: var(--sidebar-width-wide) minmax(0, 1fr); }
@@ -2176,7 +2181,7 @@ body [hidden] { display: none !important; }
    uses for a similar top-of-viewport status message. */
 .app-toolbar__banner {
   position: fixed;
-  top: calc(var(--toolbar-height) + 8px);
+  top: calc(var(--toolbar-height) + 16px);
   left: 50%;
   transform: translateX(-50%);
   z-index: 300;
