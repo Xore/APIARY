@@ -3009,18 +3009,16 @@ button.sidebar__profile:disabled:hover { background: transparent; }
    states (8B), content-shaped skeletons (2D), scroll "more" pill (9C),
    and the full settings page (13B). */
 
-/* View tabs live in the sidebar below the nav (pick 7D): hp-app.js
-   relocates each page's main [role=tablist] there. In-page fallback (JS
-   off) keeps theme's stock horizontal tabs. */
-.hp-views-label {
-  margin: 14px 9px 4px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border-subtle);
-}
+/* View tabs nest in the sidebar directly under the ACTIVE nav item
+   (pick 7D, refined per Xore): hp-app.js inserts each page's main
+   [role=tablist] right after the highlighted .sidebar__item, indented
+   like a tree branch. In-page fallback (JS off) keeps theme's stock
+   horizontal tabs. */
 .app-sidebar .tabs {
   display: flex; flex-direction: column; align-items: stretch;
-  gap: 2px; margin: 0; padding: 0 6px 8px 0;
+  gap: 1px; margin: 2px 6px 6px 22px; padding: 0;
   background: transparent; border: 0;
+  border-left: 1px solid var(--border-subtle);
 }
 .app-sidebar .tabs .tab {
   justify-content: flex-start; text-align: left;

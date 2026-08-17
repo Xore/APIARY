@@ -1772,20 +1772,19 @@
     const incoming = document.querySelector("main .tabs[role='tablist'], .app-main .tabs[role='tablist']");
     if (incoming) {
       /* A fresh tablist arrived with this page's content: it replaces
-         whatever rail the previous page left in the sidebar. */
+         whatever rail the previous page left in the sidebar, nesting
+         directly under the ACTIVE nav item (per Xore: "overview's tabs
+         belong below Overview, not at the end"). syncActiveNav registered
+         its hp-page-mounted listener earlier in this file, so the active
+         class is already correct when this runs. */
       side.querySelectorAll(".tabs[data-hp-sidebar-tabs], .hp-views-label").forEach(n => n.remove());
       incoming.dataset.hpSidebarTabs = "1";
-      const label = document.createElement("div");
-      label.className = "sidebar__section-label hp-views-label";
-      label.textContent = incoming.getAttribute("aria-label") || "Views";
-      side.append(label, incoming);
+      const active = side.querySelector(".sidebar__item.active");
+      if (active) active.after(incoming);
+      else side.append(incoming);
     } else if (!document.contains(document.querySelector("[data-hp-page-content] .tabs"))) {
       /* The new page has no view tabs at all -- drop the stale rail. */
-      const stale = side.querySelector(".tabs[data-hp-sidebar-tabs]");
-      if (stale) {
-        side.querySelectorAll(".hp-views-label").forEach(n => n.remove());
-        stale.remove();
-      }
+      side.querySelectorAll(".tabs[data-hp-sidebar-tabs], .hp-views-label").forEach(n => n.remove());
     }
   };
   sync();
