@@ -1538,17 +1538,28 @@ pre {
 }
 .app-shell--wide { grid-template-columns: var(--sidebar-width-wide) minmax(0, 1fr); }
 .app-toolbar {
+  position: relative;
   z-index: 20;
   grid-column: 1 / -1;
   display: flex;
-  height: var(--toolbar-height);
+  /* Design refresh 2 (pick 11E): a detached floating pill bar instead of a
+     full-bleed bordered strip -- breadcrumb left, status right. The pill
+     is painted by ::before INSIDE the toolbar's own box (padding makes the
+     room) rather than with margins: a grid item's margin does not grow its
+     row track, so the margined pill visually overlapped the main region
+     below (caught by the browser matrix's toolbar/main seam check). */
+  height: calc(var(--toolbar-height) + 8px);
   align-items: center;
   gap: 4px;
-  /* Design refresh 2 (pick 11E): a detached floating pill bar instead of a
-     full-bleed bordered strip -- breadcrumb left, status right. */
-  margin: 8px 14px 0;
-  padding: 0 12px;
+  padding: 8px 26px 0;
   border: 0;
+  background: transparent;
+}
+.app-toolbar::before {
+  content: "";
+  position: absolute;
+  inset: 8px 14px 0;
+  z-index: -1;
   border-radius: var(--radius-pill);
   background: var(--surface-1);
   box-shadow: 0 1px 2px rgba(0, 0, 0, .10), 0 6px 20px rgba(0, 0, 0, .12);
