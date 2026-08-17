@@ -17,3 +17,16 @@ type settingsPageData struct {
 }
 
 var settingsModal = mustReadUI("partials/settings_modal.html")
+
+// Design refresh (pick 13B): /settings renders the same settings surface
+// as a full page in the shell; hp-settings.js fetches the modal fragment
+// into the page's host and strips the modal chrome client-side.
+var pageSettingsPage = mustReadUI("settings_page.html")
+
+// settingsPageView is the full-page wrapper's template input -- the shell
+// needs a nonce; the subtitle needs the same admin resolution the modal
+// fragment does.
+type settingsPageView struct {
+	pageMeta
+	Admin bool
+}

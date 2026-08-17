@@ -37,7 +37,7 @@ func TestListingPagesShowSkeletonPlaceholdersBeforeFirstRebuildInsteadOfEmptySta
 			name:          "events",
 			emptyData:     &eventsPage{Ready: false},
 			readyData:     &eventsPage{Ready: true},
-			realEmptyText: "no events match this filter",
+			realEmptyText: "No events match this filter",
 		},
 		{
 			name:          "ips",

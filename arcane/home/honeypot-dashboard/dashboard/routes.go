@@ -366,6 +366,17 @@ func (s *store) routes(tmpl *template.Template) *http.ServeMux {
 		data := s.get()
 		renderPage(w, tmpl, "canarytokens", &data)
 	})
+	// Design refresh (pick 13B): the settings surface as a full page. Same
+	// server-side admin resolution as /api/settings/modal -- the fragment
+	// itself is fetched by hp-settings.js and carries the admin panes only
+	// when the live identity check passes.
+	mux.HandleFunc("GET /settings", func(w http.ResponseWriter, r *http.Request) {
+		var data settingsPageView
+		if identity, err := resolveIdentity(r); err == nil && identity.Role == "admin" {
+			data.Admin = true
+		}
+		renderPage(w, tmpl, "settingsPage", &data)
+	})
 	mux.HandleFunc("GET /payloads", func(w http.ResponseWriter, r *http.Request) {
 		data := s.payloadsData(parsePayloadsFilter(r))
 		data.filterBar = buildFilterBar(r, "/payloads",

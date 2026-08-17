@@ -1,0 +1,37 @@
+{{define "settingsPage"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>{{brandText}} — settings</title>
+{{template "style" .}}
+</head>
+<body>
+<div class="app-shell">
+  {{template "topbar" .}}
+  {{template "sidebar" .}}
+  <main class="app-main">
+    <div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
+      <header class="overview-header" id="settings-header">
+        <div>
+          <div class="label-section">Configuration</div>
+          <h1>Settings</h1>
+          <p class="subtitle">Personal preferences and{{if .Admin}} dashboard administration&nbsp;&mdash;{{end}} the same surface the account menu opens, as a full page.</p>
+        </div>
+      </header>
+      {{/* Design refresh (pick 13B): hp-settings.js sees the page-mode
+           attribute, fetches /api/settings/modal into this host on load,
+           and strips the modal chrome -- one settings implementation,
+           two surfaces. */}}
+      {{/* No id here: the shell's own modal root already owns
+           #hp-dash-settings-root; hp-settings.js finds this host by the
+           attribute alone, keeping ids unique. */}}
+      <div data-hp-settings-page-mode></div>
+      <footer id="settings-footer">{{brandText}} &bull; settings</footer>
+    </div>
+  </main>
+</div>
+</body>
+</html>
+{{end}}

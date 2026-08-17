@@ -70,7 +70,7 @@ func TestShellRendersConfiguredPresentation(t *testing.T) {
 	for _, want := range []string{
 		"SOCOPS<span class=\"hp-brand-accent\">//</span>NOC",
 		"<small>Blue team</small>",
-		"<h1>Operations bridge</h1>",
+		">Operations bridge</div>",
 		"Everything the night shift needs.",
 		"internal use only",
 		"alert alert--warning",
@@ -87,7 +87,7 @@ func TestShellDefaultsRenderUnchangedCopy(t *testing.T) {
 	for _, want := range []string{
 		">APIARY</strong>",
 		"<small>Defensive operations</small>",
-		"<h1>Honeypot command center</h1>",
+		">Honeypot command center</div>",
 		"Live attack telemetry, captured evidence",
 		"do not expose without auth",
 	} {

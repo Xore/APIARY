@@ -21,8 +21,18 @@
   "use strict";
 
   const trigger = document.querySelector("[data-hp-account-dashboard-settings]");
-  const host = document.getElementById("hp-dash-settings-root");
-  if (!trigger || !host) return;
+  /* Design refresh (pick 13B): /settings renders this same fragment as a
+     full page -- that page carries its own host with
+     data-hp-settings-page-mode, which wins over the shell's modal root
+     (both exist there, page host first in preference, so the fragment's
+     ids stay unique). Page mode loads immediately, strips the modal
+     chrome (no backdrop, no focus trap, no close button) and leaves the
+     surface permanently open; the modal path stays intact for #settings
+     deep links elsewhere. */
+  const pageHost = document.querySelector("[data-hp-settings-page-mode]");
+  const host = pageHost || document.getElementById("hp-dash-settings-root");
+  if (!host) return;
+  const pageMode = !!pageHost;
 
   let ready = false;
   let loading = null;
@@ -72,6 +82,19 @@
           host.innerHTML = html;
           modal = document.getElementById("hp-settings");
           backdrop = document.getElementById("hp-dash-settings-backdrop");
+          if (pageMode) {
+            backdrop.remove();
+            backdrop = null;
+            modal.classList.add("hp-dash-settings--page", "open");
+            modal.inert = false;
+            modal.setAttribute("aria-hidden", "false");
+            modal.removeAttribute("role");
+            modal.removeAttribute("aria-modal");
+            modal.querySelector("[data-hp-settings-close]")?.remove();
+            initController(host);
+            ready = true;
+            return;
+          }
           // Tab-cycling/initial-focus/return-focus delegated to focus-trap
           // (vendored, dashboard/static/vendor/focus-trap/); Escape stays
           // hand-rolled below since it has to yield to both the nested native
@@ -130,16 +153,22 @@
     // when that deferred callback runs. openSettings() overwrites it next time.
   }
 
-  trigger.addEventListener("click", event => {
-    event.preventDefault();
-    openSettings();
-  });
-  // #settings keeps old /settings bookmarks meaningful: any dashboard page
-  // loaded with the hash opens the modal directly.
-  if (window.location.hash === "#settings") openSettings();
-  window.addEventListener("hashchange", () => {
+  if (pageMode) {
+    ensureLoaded();
+  } else if (trigger) {
+    trigger.addEventListener("click", event => {
+      event.preventDefault();
+      openSettings();
+    });
+  }
+  // #settings keeps old bookmarks meaningful: any dashboard page loaded
+  // with the hash opens the modal directly (page mode is already open).
+  if (!pageMode) {
     if (window.location.hash === "#settings") openSettings();
-  });
+    window.addEventListener("hashchange", () => {
+      if (window.location.hash === "#settings") openSettings();
+    });
+  }
 
   /* Keyboard contract: while the nested native confirmation is open it owns
      Escape and Tab; otherwise Escape closes the modal and Tab cycles inside

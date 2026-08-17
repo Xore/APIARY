@@ -43,6 +43,20 @@
           {{template "filterbar" .}}
         </div>
 
+        {{/* Design refresh (AS-C, map-first): where-then-who -- the same
+             live attack-origins map the overview carries leads the page;
+             hp-app.js initializes any .leaflet-map, so this is markup +
+             config only. Marker clicks open the related events. */}}
+        {{if .MapTileURL}}
+        <div class="card wide" id="ips-map">
+          <h2>Attack origins</h2>
+          <div class="map-shell" data-map-shell>
+            <div id="attack-map" class="leaflet-map" data-tile-url="{{.MapTileURL}}" data-attribution="{{.MapAttribution}}" role="region" aria-label="interactive map of geolocated attack origins"></div>
+            <div class="map-status" data-map-status aria-live="polite">Loading attack origins&hellip;</div>
+          </div>
+        </div>
+        {{end}}
+
         <div class="card wide" id="ips-table">
           {{if .Rows}}
           <table class="recent data-table data-table--responsive">

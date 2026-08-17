@@ -47,7 +47,7 @@
               <thead><tr><th>time</th><th>severity</th><th>score</th><th>source ip</th><th>model scores</th><th>explanation</th><th>source event</th><th>status</th><th>action</th></tr></thead>
               <tbody>
                 {{range .Anomalies}}<tr>
-                  <td{{if .Timestamp}} data-hp-utc="{{.Timestamp}}"{{end}}>{{.Timestamp}}</td>
+                  <td{{if .Timestamp}} data-hp-utc="{{.Timestamp}}"{{end}} data-hp-time>{{displayTime .Timestamp}}</td>
                   <td><span class="badge {{if eq .Severity "critical"}}badge--danger{{else if eq .Severity "high"}}badge--warning{{else if eq .Severity "medium"}}badge--info{{else}}badge--muted{{end}}">{{.Severity}}</span></td>
                   <td class="n">{{printf "%.2f" .CompositeScore}}</td>
                   <td class="v">{{if .SrcIP}}<a href="/events?ip={{.SrcIP | urlquery}}">{{.SrcIP}}</a>{{if .SrcCountry}} <span class="badge badge--info">{{.SrcCountry}}</span>{{end}}{{else}}<span class="tw:text-muted">unattributed</span>{{end}}</td>

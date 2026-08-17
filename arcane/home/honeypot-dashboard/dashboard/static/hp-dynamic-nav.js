@@ -18,6 +18,12 @@
 (() => {
   "use strict";
 
+  /* #1564: loaded from the shared "style" partial on every page now; the
+     #1139 family pages still carry their own <script> tag, so guard
+     against double registration of the document-level click handler. */
+  if (window.__hpDynamicNav) return;
+  window.__hpDynamicNav = true;
+
   const pageNonce = document.querySelector("script[nonce], style[nonce]")?.nonce || "";
 
   const DYNAMIC_ROUTES = [
@@ -33,6 +39,38 @@
     // bare /sandbox index, which also 302s.
     /^\/sandbox\/(?!vnc$)[^/]+$/,
     /^\/github-analysis\/[^/]+$/,
+    // #1564 (design refresh): the whole shell navigates in place -- "one
+    // flawless page". Every full-page shell route below shares the same
+    // [data-hp-page-content] region mountPage swaps, and every controller
+    // that binds inside it re-attaches off the hp-page-mounted signal
+    // (hp-app.js). Deliberately NOT matched, so they stay full document
+    // loads: /settings (hp-settings.js resolves its page mode at script
+    // load), /sandbox/vnc, /tty/* and /revdeck/* (self-contained viewer
+    // documents), /auth/*, and anything that isn't a shell page at all
+    // (/api, /static, /export, /metrics, PDFs).
+    /^\/$/,
+    /^\/events$/,
+    /^\/search$/,
+    /^\/ips$/,
+    /^\/clusters$/,
+    /^\/campaigns$/,
+    /^\/attackers$/,
+    /^\/kill-chain$/,
+    /^\/history$/,
+    /^\/dead-letters$/,
+    /^\/source-health$/,
+    /^\/alerts$/,
+    /^\/ml-anomalies$/,
+    /^\/auth-events$/,
+    /^\/sensors$/,
+    /^\/llm-analysis$/,
+    /^\/agent-campaigns$/,
+    /^\/reports$/,
+    /^\/canarytokens$/,
+    /^\/commands$/,
+    /^\/recordings$/,
+    /^\/investigate\/[^/]+\/.+$/,
+    /^\/sessions\/[^/]+$/,
   ];
   const isDynamicRoute = pathname => DYNAMIC_ROUTES.some(re => re.test(pathname));
 

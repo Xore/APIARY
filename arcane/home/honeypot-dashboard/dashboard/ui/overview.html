@@ -13,13 +13,25 @@
   {{template "sidebar" .}}
   <main class="app-main">
       <div class="app-content app-content--wide tw:px-6 tw:pt-7 tw:pb-24 tw:lg:px-8" data-hp-page-content>
-        <header class="overview-header" id="overview-header">
-          <div>
-            <div class="label-section">Security operations</div>
-            <h1>{{presentation.DashboardTitle}}</h1>
-            <p class="subtitle">{{if presentation.DashboardSubtitle}}{{presentation.DashboardSubtitle}}{{else}}Live attack telemetry, captured evidence, correlated campaigns, and collection health in one operational view.{{end}}</p>
-          </div>
-          <div class="live-panel">
+        {{/* Design refresh (OV-B, claude focus): the overview leads with a
+             humane serif greeting, a one-line status, and the investigate
+             command bar as the centerpiece -- the same palette the topbar
+             command bar and the / shortcut open. The KPI strip and the
+             card grid follow beneath it. */}}
+        <header class="hp-hero" id="overview-header">
+          {{/* The admin-configurable identity (presentation.DashboardTitle/
+               Subtitle, Milestone E) stays rendered -- as the eyebrow and
+               the lead of the status line -- while the greeting owns the
+               headline. */}}
+          <div class="label-section">{{presentation.DashboardTitle}}</div>
+          <h1>{{overviewGreeting .ActivityState}}</h1>
+          <p class="hp-hero__status">{{if presentation.DashboardSubtitle}}{{presentation.DashboardSubtitle}}{{else}}Live attack telemetry, captured evidence, correlated campaigns, and collection health in one operational view.{{end}}<br>{{.Last24h}} events in 24h{{if .Change24h}} ({{.Change24h}}){{end}} &bull; {{.UniqueIPs}} attack sources &bull; {{.UniquePayloads}} captured payloads</p>
+          <button class="hp-hero__search" type="button" data-hp-command-palette-open>
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            Investigate anything &mdash; IP, session, hash, credential, country&#8230;
+            <kbd>/</kbd>
+          </button>
+          <div class="hp-hero__links">
             {{if .Ready}}
             <span class="gen">updated <span data-hp-utc="{{utcOrEmpty .Generated}}">{{.Generated.Format "2006-01-02 15:04:05 MST"}}</span> &bull; refreshes automatically</span>
             {{else}}
@@ -39,7 +51,15 @@
 
         <div class="tw:grid tw:grid-cols-2 tw:sm:grid-cols-3 tw:xl:grid-cols-5 tw:gap-3 tw:mb-6" id="overview-kpis">
           <a class="metric" href="/events" title="Open all normalized events in the current dashboard window"><div class="metric__value">{{.Total}}</div><div class="metric__label">All events</div></a>
-          <a class="metric" href="/events?since=24h" title="Open events received during the last 24 hours"><div class="metric__value">{{.Last24h}}</div><div class="metric__label">Events in 24 hours</div><div class="metric__trend" title="Compared with the directly preceding 24-hour period">{{.Change24h}} &bull; {{.ActivityState}}</div></a>
+          {{/* Design refresh (3B): the 24h tile carries the change as a
+               delta chip and the hourly rhythm as a sparkline (column sums
+               of the same heatmap data rendered below). Heights go through
+               a nonced style element, same CSP posture as the heatmap
+               cells. */}}
+          {{$spark := hourlySpark .SensorHeatmap}}
+          <a class="metric" href="/events?since=24h" title="Open events received during the last 24 hours"><div class="metric__value">{{.Last24h}}{{if .Change24h}}<span class="metric__delta{{if eq .ActivityState "low"}} metric__delta--down{{end}}" title="Compared with the directly preceding 24-hour period">{{.Change24h}}</span>{{end}}</div><div class="metric__label">Events in 24 hours</div>{{if $spark}}<div class="metric__spark" id="hp-kpi-spark" aria-hidden="true">{{range $spark}}<i></i>{{end}}</div>{{end}}</a>
+          {{if $spark}}<style nonce="{{.Nonce}}">{{range $spark}}#hp-kpi-spark i:nth-child({{.N}}){height:{{.Pct}}%}
+{{end}}</style>{{end}}
           <a class="metric" href="/ips" title="Distinct attacker source addresses observed by the sensors"><div class="metric__value">{{.UniqueIPs}}</div><div class="metric__label">Attack sources</div></a>
           <a class="metric" href="/events?type=login" title="Authentication attempts captured by interactive honeypots"><div class="metric__value">{{.Logins}}</div><div class="metric__label">Login attempts</div></a>
           <a class="metric" href="/payloads" title="Distinct payload binaries captured safely, same count as the Payloads page"><div class="metric__value">{{.UniquePayloads}}</div><div class="metric__label">Captured payloads</div></a>
@@ -135,7 +155,12 @@
             </div><p class="note">Approximate geolocation only. One marker per city, accumulating every IP that geolocated there. Marker radius is geographic—not fixed-size—so it changes naturally with zoom and is weighted by event count. Hover for city, country and IP count; select a marker for all related events. Map data © OpenStreetMap contributors.</p></div>{{end}}
 
           <div class="section-heading"><div><h2>Live event stream</h2><p>A balanced sample of the newest normalized events across all sensors.</p></div><a class="section-link" href="/events">Open full event explorer &rarr;</a></div>
-          <div class="card wide" id="recent-events-card">
+          {{/* Design refresh (#1565): the stream shows COMPACT rows -- the
+               full inline record (still rendered, still in the DOM) is
+               hidden here via .hp-stream-compact; the event explorer's
+               master-detail pane is where records get read. This turns the
+               11,000px "JSON wall" back into an actual stream. */}}
+          <div class="card wide hp-stream-compact" id="recent-events-card">
             <h2>Recent events</h2>
             {{if .Recent}}
             {{/* #790 chunk 2: card__scroll, same rule as the bounded "tbl"
@@ -148,8 +173,8 @@
                  at the shared 340px cap not even one complete row cleared
                  the fold, so this card gets its own taller ceiling (roughly
                  double) instead of reusing card__scroll's default. */}}
-            <div class="card__scroll" style="max-height:700px"><table class="recent data-table">
-              <thead><tr><th>time</th><th>sensor</th><th>source ip</th><th>port</th><th>detail</th></tr></thead>
+            <div class="card__scroll"><table class="recent data-table">
+              <thead><tr><th>time</th><th>sensor</th><th>source ip</th><th>port</th><th>detail</th><th></th></tr></thead>
               <tbody>
               {{range .Recent}}{{template "everow" .}}{{end}}
             </tbody></table></div>
@@ -336,10 +361,15 @@
 
         <div class="dashboard-panel tw:grid tw:grid-cols-12 tw:gap-3.5" id="panel-evidence" role="tabpanel" data-dashboard-panel="evidence" hidden>
           <div class="section-heading"><div><h2>Detection and evidence</h2><p>IDS findings, captured artifacts, and cross-sensor campaign correlation. Select an item to investigate its evidence.</p></div><a class="section-link" href="/payloads">Open payload analysis &rarr;</a></div>
+          {{/* #1565: the old hint leaked an ops diagnostic ("is the VPS
+               eve.json mount alive?") into an operator-facing empty state
+               -- and showed it even while suricata was demonstrably ACTIVE.
+               One neutral voice for both siblings; /source-health is where
+               the pipeline question belongs. */}}
           {{template "tbl" dict "t" "Suricata alerts" "rows" .Alerts "class" "half"
-            "hint" "no alerts — is the VPS eve.json mount at /logs/suricata alive?"}}
+            "hint" "No Suricata alerts in this window — pipeline status lives under Source & pipeline health."}}
           {{template "tbl" dict "t" "Alert categories" "rows" .AlertCats "class" "half"
-            "hint" "no suricata alerts yet"}}
+            "hint" "No Suricata alerts in this window."}}
 
           <div class="card wide">
             <h2>Captured payloads</h2>

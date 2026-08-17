@@ -19,8 +19,9 @@
   --surface-hover: #42423f;
   --surface-raised: #383835;
 
-  --border-subtle: rgba(255, 255, 255, 0.075);
-  --border-strong: rgba(255, 255, 255, 0.14);
+  /* Softer hairlines (design refresh): chrome recedes, content leads. */
+  --border-subtle: rgba(255, 255, 255, 0.05);
+  --border-strong: rgba(255, 255, 255, 0.11);
   --border-focus: rgba(109, 167, 236, 0.75);
 
   --text-primary: #e9e6df;
@@ -61,10 +62,13 @@
   --danger-text-on-soft: #e89b99;
   --critical-text-on-soft: #ff8080;
 
+  /* Design refresh (APIARY design lab, Xore's picks): larger, calmer radii
+     in the claude.ai direction. Every consumer shares the shift -- that is
+     the point of the refresh, not a side effect. */
   --radius-xs: 6px;
-  --radius-control: 9px;
-  --radius-panel: 14px;
-  --radius-dialog: 18px;
+  --radius-control: 12px;
+  --radius-panel: 16px;
+  --radius-dialog: 24px;
   --radius-pill: 999px;
 
   --shadow-raised: 0 1px 2px rgba(0, 0, 0, 0.18), 0 8px 26px rgba(0, 0, 0, 0.24);
@@ -74,6 +78,9 @@
   --font-sans: "Fira Sans", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   --font-display: "Space Grotesk", "Fira Sans", "Segoe UI", system-ui, sans-serif;
   --font-mono: "Fira Code", "SFMono-Regular", "Cascadia Code", "Roboto Mono", ui-monospace, monospace;
+  /* Serif voice for humane, claude.ai-style greeting headlines (design
+     refresh); platform serifs only, nothing web-loaded. */
+  --font-serif: Georgia, "Times New Roman", "DejaVu Serif", serif;
   /* A standard ease-out curve (fast start, gentle settle) rather than the
      linear-ish default `ease` keyword -- every hover/focus/panel transition
      in the theme reads slightly more deliberate with the same durations.
@@ -137,8 +144,8 @@
   --surface-3: #e1dfd8;
   --surface-hover: #e9e7e1;
   --surface-raised: #fffefa;
-  --border-subtle: rgba(34, 31, 28, 0.09);
-  --border-strong: rgba(34, 31, 28, 0.18);
+  --border-subtle: rgba(34, 31, 28, 0.07);
+  --border-strong: rgba(34, 31, 28, 0.14);
   --text-primary: #2f2b27;
   --text-secondary: #68615a;
   --text-muted: #66615b;
@@ -457,8 +464,15 @@ p { color: var(--text-secondary); }
 .btn:active { transform: translateY(1px); }
 .btn:disabled { opacity: 0.42; cursor: not-allowed; transform: none; }
 .btn svg { width: 15px; height: 15px; }
-.btn-primary { background: var(--btn-inverted-bg); color: var(--btn-inverted-text); }
-.btn-primary:hover { background: var(--btn-inverted-bg-hover); color: var(--btn-inverted-text); }
+.btn-primary {
+  /* Design refresh (pick 6D): only the primary carries color, as an accent
+     outline -- the inverted fill read heavier than anything else on the
+     page and made every action row shout. */
+  border-color: var(--accent);
+  background: transparent;
+  color: var(--accent);
+}
+.btn-primary:hover { background: var(--accent-soft); color: var(--accent-hover); }
 /* #1531 (APIARY): surface-1 sits only one step above --app-bg -- next to a
    real .btn-primary (an inverted, high-contrast fill) in an Apply/Reset or
    Filter/Reset pair, it read flat and barely-there rather than as a
@@ -467,12 +481,18 @@ p { color: var(--text-secondary); }
    the .segmented control's active state) go a full two steps -- surface-1/2
    idle, surface-hover/3 on interaction -- so this gives .btn-secondary that
    same, already-established two-step presence instead of a new one. */
-.btn-secondary { border-color: var(--border-strong); background: var(--surface-2); }
-.btn-secondary:hover { background: var(--surface-3); border-color: var(--text-disabled); }
+.btn-secondary {
+  /* Design refresh (pick 6D): ghost by default -- chrome appears on hover,
+     not before. The two-step #1531 presence now lives in the hover pair. */
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-primary);
+}
+.btn-secondary:hover { background: var(--surface-2); border-color: var(--border-strong); }
 .btn-ghost { color: var(--text-secondary); }
 .btn-ghost:hover { background: var(--surface-2); color: var(--text-primary); }
-.btn-danger { border-color: color-mix(in srgb, var(--danger) 32%, transparent); background: var(--danger-soft); color: var(--danger); }
-.btn-danger:hover { background: color-mix(in srgb, var(--danger) 20%, transparent); }
+.btn-danger { border-color: color-mix(in srgb, var(--danger) 50%, transparent); background: transparent; color: var(--danger); }
+.btn-danger:hover { background: var(--danger-soft); }
 .btn-sm { min-height: 28px; padding: 5px 9px; font-size: var(--font-size-caption); }
 .btn-lg { min-height: 42px; padding: 10px 17px; font-size: var(--font-size-body); }
 .btn-icon { width: 32px; min-height: 32px; padding: 0; border-radius: var(--radius-control); }
@@ -807,10 +827,14 @@ select.form-input { cursor: pointer; }
   text-decoration: none;
 }
 .badge--accent { background: var(--accent-soft); color: var(--accent-text-on-soft); }
-.badge--green, .badge--success { background: var(--success-soft); color: var(--success-text-on-soft); }
-.badge--blue, .badge--info { background: var(--info-soft); color: var(--info-text-on-soft); }
-.badge--orange, .badge--warning { background: var(--warning-soft); color: var(--warning-text-on-soft); }
-.badge--red, .badge--danger { background: var(--danger-soft); color: var(--danger-text-on-soft); }
+/* Design refresh (pick 5D): status badges are solid fills. The fills are
+   the mid-tone state colors, readable against both themes' grounds; text is
+   a fixed near-black of each hue for AA contrast on the fill itself, so the
+   pair never depends on which theme is active. */
+.badge--green, .badge--success { background: var(--success); color: #0d2417; }
+.badge--blue, .badge--info { background: var(--info); color: #0f1b26; }
+.badge--orange, .badge--warning { background: var(--warning); color: #2a2008; }
+.badge--red, .badge--danger { background: var(--danger); color: #2b1312; }
 .badge--critical { border: 1px solid color-mix(in srgb, var(--critical) 45%, transparent); background: var(--critical-soft); color: var(--critical-text-on-soft); }
 .badge--muted { border: 1px solid var(--border-subtle); }
 .badge--current { background: var(--info-soft); color: var(--info-text-on-soft); }
@@ -1485,8 +1509,15 @@ pre {
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
 }
+/* Design refresh (pick 10C): the active page is marked by an accent
+   keyline + a soft gradient wash instead of a plain filled block. */
+.sidebar__item { border-left: 2px solid transparent; border-radius: 0 var(--radius-xs) var(--radius-xs) 0; }
 .sidebar__item:hover { background: var(--surface-2); color: var(--text-primary); }
-.sidebar__item.active { background: var(--surface-2); color: var(--text-primary); }
+.sidebar__item.active {
+  border-left-color: var(--accent);
+  background: linear-gradient(90deg, var(--accent-soft), transparent 70%);
+  color: var(--text-primary);
+}
 .sidebar__item svg { width: 15px; height: 15px; opacity: 0.72; }
 .sidebar__profile {
   display: flex;
@@ -2130,6 +2161,18 @@ a.metric:hover { border-color: var(--border-strong); background: var(--surface-2
   content: ""; width: 7px; height: 7px; border-radius: 2px;
   background: var(--accent);
 }
+/* Design refresh (pick 1D): a card whose title leads its content gets a
+   header strip -- the title sits in a contrasting band flush with the
+   card's top edge (negative margins retract .card's own padding; .card's
+   overflow:hidden clips the corners). Scoped to h2:first-child so a title
+   that follows a toolbar or KPI row keeps the plain in-flow treatment. */
+.card > h2:first-child {
+  margin: calc(-1 * var(--space-lg)) calc(-1 * var(--space-xl)) 14px;
+  padding: 11px var(--space-xl);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 13px;
+}
 .card:has(table) { overflow: auto; }
 .card table { min-width: 0; }
 .card.wide table { min-width: 720px; }
@@ -2161,7 +2204,11 @@ a.metric:hover { border-color: var(--border-strong); background: var(--surface-2
      space between the header and whatever follows it, still capped at
      max-height with a scrollbar past that point. */
   flex: 1 1 auto; min-height: 0;
-  max-height: 340px; overflow: auto;
+  /* theme#78: viewport-driven instead of a fixed 340px peephole -- never
+     smaller than before, grows with the screen. The 320px constant is the
+     shell chrome + card header budget above/below the region. */
+  max-height: max(340px, calc(100vh - 320px)); overflow: auto;
+  overscroll-behavior: contain;
   /* 1. A thin, always-rendered scrollbar (not overlay-hidden) makes the
      region legible as "scrollable" at a glance, matching this file's own
      scrollbar-gutter precedent for the same class of invisible-affordance
@@ -2317,6 +2364,32 @@ td.s-active { color: var(--success); }
 td.s-quiet { color: var(--warning); }
 td.s-stale { color: var(--danger); }
 td.s-waiting { color: var(--text-muted); }
+/* Design refresh (pick 4C): rows as rounded slabs. border-spacing gives
+   the row gaps; every cell carries the row surface so the slab reads as
+   one piece; first/last cells round the ends. Header cells lose their
+   underline -- the slabs themselves separate the rows now. */
+.data-table { border-collapse: separate; border-spacing: 0 6px; }
+.data-table thead th { border-bottom: 0; padding-bottom: 2px; }
+.data-table td { background: var(--surface-2); border-bottom: 0; }
+.data-table td:first-child { border-radius: 10px 0 0 10px; }
+.data-table td:last-child { border-radius: 0 10px 10px 0; }
+.data-table tbody tr:hover td { background: var(--surface-hover); }
+/* #1566: linked identifiers (IPs, CIDRs, sessions), timestamps and ports
+   never wrap mid-value -- the "85.14.245.1(newline)22" class of bug. Plain
+   text in value cells (alert keys, long hashes as text) keeps wrapping;
+   a too-wide row scrolls inside its card instead of shattering. */
+td.v a, td.n,
+.data-table td[data-label="time"],
+.data-table td[data-label="port"],
+.data-table td[data-hp-time] { white-space: nowrap; }
+td.v .eventdetail, td.v article, td.v .eventmeta { white-space: normal; }
+
+/* Sticky header while a table scrolls inside its card region. */
+.card__scroll .data-table thead th {
+  position: sticky; top: 0; z-index: 2;
+  background: var(--surface-1);
+}
+
 /* table.recent matches the theme's .data-table density and first-column meta. */
 .recent td:nth-child(1) { color: var(--text-muted); font-family: var(--hp-mono); font-size: 11px; white-space: nowrap; }
 
@@ -2924,6 +2997,278 @@ button.sidebar__profile:disabled:hover { background: transparent; }
   .wb-child-grid,
   .wb-option-grid { grid-template-columns: 1fr; }
 }
+
+
+/* ── Design refresh components (APIARY design lab, Xore's picks) ────────
+   Everything below implements the element/layout selections made in the
+   design lab: sidebar view-tabs + investigate action + recents (12B/7D),
+   KPI delta+sparkline (3B), master-detail events (EV-B), overview hero
+   (OV-B), reports wizard (RP-C), hover row actions (14B), icon empty
+   states (8B), content-shaped skeletons (2D), scroll "more" pill (9C),
+   and the full settings page (13B). */
+
+/* View tabs live in the sidebar below the nav (pick 7D): hp-app.js
+   relocates each page's main [role=tablist] there. In-page fallback (JS
+   off) keeps theme's stock horizontal tabs. */
+.hp-views-label {
+  margin: 14px 9px 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+.app-sidebar .tabs {
+  display: flex; flex-direction: column; align-items: stretch;
+  gap: 2px; margin: 0; padding: 0 6px 8px 0;
+  background: transparent; border: 0;
+}
+.app-sidebar .tabs .tab {
+  justify-content: flex-start; text-align: left;
+  padding: 6px 10px; font-size: 13px;
+  border: 0; border-left: 2px solid transparent;
+  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+  background: transparent; color: var(--text-secondary);
+}
+.app-sidebar .tabs .tab:hover { background: var(--surface-2); }
+.app-sidebar .tabs .tab.active {
+  border-left-color: var(--accent);
+  background: linear-gradient(90deg, var(--accent-soft), transparent 75%);
+  color: var(--text-primary);
+}
+.app-sidebar .tabs .tab span { width: 18px; height: 18px; }
+
+/* Sidebar primary action + recents (pick 12B, claude rail). */
+.sidebar__investigate {
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  margin: 4px 9px 10px;
+  padding: 7px 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--accent);
+  font: 600 13px var(--hp-font);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+.sidebar__investigate:hover { background: var(--accent-soft); }
+.sidebar__recent { display: flex; flex-direction: column; gap: 1px; padding-right: 6px; }
+.sidebar__recent a {
+  display: block; padding: 4px 10px;
+  border-radius: var(--radius-xs);
+  color: var(--text-secondary);
+  font: 12px var(--hp-mono);
+  text-decoration: none;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sidebar__recent a:hover { background: var(--surface-2); color: var(--text-primary); }
+
+/* KPI tiles: delta chip + sparkline (pick 3B). */
+.metric__delta {
+  display: inline-block; margin-left: 8px; vertical-align: 3px;
+  border-radius: var(--radius-pill); padding: 1px 8px;
+  font: 600 11px var(--hp-font);
+  background: var(--success-soft); color: var(--success-text-on-soft);
+}
+.metric__delta--down { background: var(--danger-soft); color: var(--danger-text-on-soft); }
+.metric__spark { display: flex; align-items: flex-end; gap: 2px; height: 26px; margin-top: 8px; }
+.metric__spark i {
+  flex: 1; min-height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent-soft);
+}
+.metric__spark i:last-child { background: var(--accent); }
+
+/* Overview hero (pick OV-B): serif greeting, status subline, command bar. */
+.hp-hero { grid-column: 1 / -1; text-align: center; padding: 26px 0 6px; }
+.hp-hero h1 {
+  margin: 0;
+  font: 500 clamp(1.6rem, 2.6vw, 2.2rem)/1.2 var(--font-serif);
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+.hp-hero .hp-hero__status { margin: 8px 0 0; font-size: 13.5px; color: var(--text-secondary); }
+.hp-hero__search {
+  display: flex; align-items: center; gap: 10px;
+  max-width: 760px; margin: 20px auto 6px;
+  padding: 12px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-panel);
+  background: var(--surface-1);
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--transition-fast);
+  width: 100%;
+}
+.hp-hero__search:hover { border-color: var(--accent); }
+.hp-hero__search kbd {
+  margin-left: auto;
+  border: 1px solid var(--border-subtle); border-radius: 5px;
+  padding: 1px 7px; font: 11px var(--hp-mono); color: var(--text-muted);
+  background: var(--surface-2);
+}
+.hp-hero__links { margin: 10px 0 4px; font-size: 13px; color: var(--text-muted); }
+.hp-hero__links a { color: var(--text-link); text-decoration: none; }
+.hp-hero__links a:hover { text-decoration: underline; }
+
+/* Master-detail event explorer (pick EV-B): compact list left, sticky
+   normalized-record pane right. Falls back to stacked below 1100px. */
+.hp-md { display: grid; grid-template-columns: minmax(0, 11fr) minmax(340px, 9fr); gap: 14px; align-items: start; }
+.hp-md__list { min-width: 0; }
+.hp-md__pane { position: sticky; top: 14px; min-width: 0; }
+.hp-md__pane .card { margin-bottom: 0; }
+.hp-md__list tbody tr { cursor: pointer; }
+.hp-md__list tbody tr.selected td { background: var(--accent-soft); }
+.hp-md__list tbody tr.selected td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+/* Master-detail row-side hiding: only when the controller is active
+   (.hp-md--active added by hp-app.js) -- without JS the records stay
+   inline in the rows. The overview's live stream opts into the same
+   compact rows permanently via .hp-stream-compact (#1565's JSON wall). */
+.hp-md--active .hp-md__list td.v article[data-hp-event-detail],
+.hp-md--active .hp-md__list td.v .eventmeta,
+.hp-stream-compact td.v article[data-hp-event-detail],
+.hp-stream-compact td.v .eventmeta { display: none; }
+.hp-md__pane [data-hp-md-slot] article { margin: 0 0 12px; }
+.hp-md__pane [data-hp-md-slot] article.card.wide { grid-column: auto; }
+.hp-row-actions-cell { width: 1%; }
+
+@media (max-width: 1100px) {
+  .hp-md { grid-template-columns: 1fr; }
+  .hp-md__pane { position: static; }
+}
+
+/* Hover row actions (pick 14B): quiet icon buttons that fade in per row. */
+.hp-row-actions { display: inline-flex; gap: 4px; opacity: 0; transition: opacity var(--transition-fast); }
+tr:hover .hp-row-actions, tr.selected .hp-row-actions { opacity: 1; }
+.hp-row-actions a, .hp-row-actions button {
+  display: inline-grid; place-items: center;
+  width: 24px; height: 24px;
+  border: 0; border-radius: 6px;
+  background: var(--surface-3);
+  color: var(--text-secondary);
+  font-size: 12px; text-decoration: none; cursor: pointer;
+}
+.hp-row-actions a:hover, .hp-row-actions button:hover { background: var(--surface-hover); color: var(--text-primary); }
+
+/* Reports wizard (pick RP-C): step dots + prev/next footer. */
+.hp-wizard-progress {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  margin: 4px 0 16px;
+  font: 11px var(--hp-mono); letter-spacing: 0.08em;
+  color: var(--text-muted); text-transform: uppercase;
+}
+.hp-wizard-progress i {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--surface-3); border: 1px solid var(--border-strong);
+}
+.hp-wizard-progress i.done { background: var(--accent-soft); border-color: var(--accent); }
+.hp-wizard-progress i.on { background: var(--accent); border-color: var(--accent); }
+.hp-wizard-nav { display: flex; justify-content: space-between; gap: 10px; margin-top: 6px; }
+
+/* Icon empty states (pick 8B). */
+.empty-state { display: grid; place-items: center; text-align: center; padding: 26px 16px; }
+.empty-state__icon { font-size: 24px; opacity: 0.65; }
+.empty-state__title { margin: 8px 0 2px; font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.empty-state__hint { margin: 0; max-width: 420px; font-size: 12.5px; color: var(--text-muted); }
+.empty-state__action {
+  display: inline-block; margin-top: 12px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-pill);
+  padding: 5px 16px;
+  font-size: 12.5px; color: var(--text-primary); text-decoration: none;
+  transition: border-color var(--transition-fast);
+}
+.empty-state__action:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Content-shaped skeletons (pick 2D): ghosts that mirror the hydrated
+   layout (tile / row primitives) with a gentle pulse; .skeleton-line
+   keeps working wherever it is already used and now breathes too. */
+@keyframes hp-skeleton-pulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+.skeleton-line { animation: hp-skeleton-pulse 1.6s var(--ease-out) infinite; }
+.skeleton-tile {
+  height: 56px; border-radius: 10px;
+  background: var(--surface-2);
+  animation: hp-skeleton-pulse 1.6s var(--ease-out) infinite;
+}
+.skeleton-row {
+  height: 12px; border-radius: 6px; margin: 9px 0;
+  background: var(--surface-2);
+  animation: hp-skeleton-pulse 1.6s var(--ease-out) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-line, .skeleton-tile, .skeleton-row { animation: none; }
+}
+
+/* Scroll "more" pill (pick 9C): paired JS in hp-app.js shows it while a
+   .card__scroll region still has content below the fold. */
+.hp-scroll-more {
+  position: sticky; bottom: 8px; z-index: 3;
+  display: block; width: fit-content;
+  margin: -26px auto 4px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-pill);
+  padding: 2px 12px;
+  background: var(--surface-3);
+  color: var(--text-secondary);
+  font-size: 11px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+/* Full settings page (pick 13B): the settings surface rendered as a page
+   in the shell -- same rail/pane composition the modal uses, minus the
+   overlay chrome. */
+#hp-settings.hp-dash-settings--page {
+  position: static;
+  inset: auto;
+  width: 100%;
+  max-width: none;
+  height: auto;
+  max-height: none;
+  margin: 0;
+  transform: none;
+  box-shadow: none;
+  border: 1px solid var(--border-subtle);
+}
+#hp-settings.hp-dash-settings--page .settings-layout { max-height: none; min-height: 60vh; }
+
+
+/* Topbar command bar (pick 11C): the global search/jump control sits front
+   and center in the toolbar; page titles live in the pages themselves. */
+.app-toolbar__search { flex: 1; display: flex; justify-content: center; min-width: 0; }
+.hp-topbar-search {
+  display: flex; align-items: center; gap: 9px;
+  width: 100%; max-width: 440px;
+  padding: 6px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  background: var(--surface-1);
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+.hp-topbar-search:hover { border-color: var(--border-strong); background: var(--surface-2); }
+.hp-topbar-search svg { width: 14px; height: 14px; flex: none; }
+.hp-topbar-search span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.hp-topbar-search kbd {
+  margin-left: auto;
+  border: 1px solid var(--border-subtle); border-radius: 5px;
+  padding: 0 6px; font: 11px var(--hp-mono); color: var(--text-muted);
+  background: var(--surface-2);
+}
+@media (max-width: 700px) { .hp-topbar-search kbd, .hp-topbar-search span { display: none; } .hp-topbar-search { width: auto; } }
+
+/* #1567: the Report-a-problem dialog -- flat header+form children need a
+   column stack and content-driven height; the generic .modal box is a
+   fixed-height row flexbox meant for sidebar+content compositions. */
+.hp-pr-modal { flex-direction: column; width: min(560px, calc(100vw - 40px)); height: auto; max-height: calc(100dvh - 40px); overflow: auto; }
+.hp-pr-modal form { display: flex; flex-direction: column; gap: 12px; padding: 18px 22px 22px; }
+
+/* #1565: the attack map's zoom-2 side gutters read as broken light-gray
+   voids in dark mode -- paint the leaflet ground with a theme surface so
+   the unfilled world edge looks intentional in both themes, and keep the
+   "World" reset control from clipping mid-word at the card edge. */
+.leaflet-container { background: var(--surface-2); }
+.leaflet-control-home { white-space: nowrap; padding: 3px 10px; }
 
 /* ── One-off utilities ──────────────────────────────────────────────────
    #191 asked to drop the Tailwind build entirely. These ~30 classes are

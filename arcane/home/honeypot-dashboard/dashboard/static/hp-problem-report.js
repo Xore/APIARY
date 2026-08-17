@@ -179,7 +179,12 @@
   backdrop.hidden = true;
 
   const dialog = document.createElement("section");
-  dialog.className = "modal";
+  /* #1567: .modal.open is display:flex with the default ROW direction and a
+     fixed viewport-scaled height -- with this dialog's flat children
+     (header, form) that rendered the form BESIDE the title with the lower
+     half of the dialog empty. hp-pr-modal (theme.css) stacks it and sizes
+     to content. */
+  dialog.className = "modal hp-pr-modal";
   dialog.setAttribute("role", "dialog");
   dialog.setAttribute("aria-modal", "true");
   dialog.setAttribute("aria-label", "Report a problem");

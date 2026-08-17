@@ -280,6 +280,11 @@ type ipsPage struct {
 	Filters   []string
 	RowsURL   string
 	ExportURL string
+	// Design refresh (AS-C, map-first): the same tile/attribution config
+	// the overview's attack map uses -- hp-app.js initializes any
+	// .leaflet-map it finds, so /ips only needs the markup + config.
+	MapTileURL     string
+	MapAttribution string
 	filterBar
 }
 
@@ -451,6 +456,10 @@ func (s *store) ipsData(r *http.Request) ipsPage {
 	finish := func(page ipsPage) ipsPage {
 		page.Filters, page.RowsURL, page.ExportURL = filters, rowsURL, exportURL
 		page.filterBar = bar
+		// Design refresh (AS-C): geography leads the page; reuse the
+		// snapshot's map config the overview map already carries.
+		snap := s.get()
+		page.MapTileURL, page.MapAttribution = snap.MapTileURL, snap.MapAttribution
 		return page
 	}
 	if len(filters) == 0 {

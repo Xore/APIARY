@@ -878,6 +878,11 @@
     source.remove();
     initLazyViews(pageContent);
     reapplyTimezone();
+    /* Design refresh: one signal for every content swap -- SSE/interval
+       refresh and hp-dynamic-nav navigations alike -- so the sidebar
+       view-tabs, master-detail, wizard, and scroll-pill controllers can
+       re-attach without each polling the DOM. */
+    document.dispatchEvent(new CustomEvent("hp-page-mounted"));
   };
   window.replaceHoneypotPage = mountPage;
   window.hydrateHoneypotOverview = hydrateOverview;
@@ -1095,7 +1100,12 @@
        on close, Escape and a backdrop click close it. */
     const commandPalette = document.getElementById("hp-command-palette");
     const commandPaletteBackdrop = document.getElementById("hp-command-palette-backdrop");
-    const commandPaletteOpener = shell.querySelector("[data-hp-command-palette-open]");
+    /* Design refresh: the palette now has several openers -- the topbar
+       command bar (11C), the sidebar's Investigate action (12B), and the
+       overview hero's search field (OV-B) -- so bind them all, not just
+       the first. */
+    const commandPaletteOpeners = [...document.querySelectorAll("[data-hp-command-palette-open]")];
+    const commandPaletteOpener = commandPaletteOpeners[0] || null;
     const search = commandPalette?.querySelector("[data-hp-investigate]");
     const searchInput = search?.querySelector("textarea");
     let commandPaletteRestoreFocus = null;
@@ -1137,7 +1147,8 @@
       // setTimeout(0), so setReturnFocus's closure must still see this value
       // when that deferred callback runs. openCommandPalette() overwrites it next time.
     };
-    commandPaletteOpener?.addEventListener("click", () => openCommandPalette(commandPaletteOpener));
+    commandPaletteOpeners.forEach(opener =>
+      opener.addEventListener("click", () => openCommandPalette(opener)));
     commandPalette?.querySelector("[data-hp-command-palette-close]")?.addEventListener("click", closeCommandPalette);
     commandPaletteBackdrop?.addEventListener("click", closeCommandPalette);
     addEventListener("keydown", event => {
@@ -1513,15 +1524,29 @@
       return data && data.preferences ? data.preferences : null;
     };
     /* Fire-and-forget write; a conflict means another browser won, so resync
-       and let the server state win (multi-browser consistency). */
+       and let the server state win (multi-browser consistency).
+       #1561: a patch made before the initial sync finishes used to be
+       silently dropped -- the click landed only in localStorage and the
+       later sync reverted it on the next load. Queue it instead and flush
+       (merged, newest key wins) the moment the sync completes. */
+    let pendingPrefs = null;
     const savePrefs = patch => {
-      if (!prefState.ready) return;
+      if (!prefState.ready) {
+        pendingPrefs = {...(pendingPrefs || {}), ...patch};
+        return;
+      }
       fetch("/api/settings/me/preferences", {
         method: "PATCH", headers: prefHeaders(), body: JSON.stringify(patch),
       }).then(response => {
         if (response.status === 409) return syncPrefs().then(() => null);
         return readPrefResponse(response);
       }).catch(() => {});
+    };
+    const flushPendingPrefs = () => {
+      if (!pendingPrefs || !prefState.ready) return;
+      const patch = pendingPrefs;
+      pendingPrefs = null;
+      savePrefs(patch);
     };
     /* Timezone + clock-format display conversion (#282, #346): every
        timestamp is a fixed UTC string baked in once by the server -- either
@@ -1612,7 +1637,13 @@
         prefState.prefs = data.preferences;
         prefState.ready = true;
         const migrated = await migrateLocalPrefs();
-        applyEffectivePrefs(migrated || prefState.prefs);
+        /* #1561: anything the user changed while the sync was in flight
+           outranks the server copy -- both visually (merged into what gets
+           applied, so the sync can't revert a just-made theme choice) and
+           durably (flushed as a PATCH now that the ETag is known). */
+        const effective = {...(migrated || prefState.prefs), ...(pendingPrefs || {})};
+        flushPendingPrefs();
+        applyEffectivePrefs(effective);
       } catch {}
     };
     syncPrefs();
@@ -1712,3 +1743,214 @@
     }
   });
 })();
+
+/* ── Design refresh: sidebar view-tabs (pick 7D) ──────────────────────────
+   Each page renders its main [role=tablist] in the content flow (works
+   without JS); with JS the rail moves into the sidebar below the nav, so
+   switching a page's views reads the same as switching pages. */
+(() => {
+  const sync = () => {
+    const side = document.querySelector(".app-sidebar__body");
+    if (!side) return;
+    const incoming = document.querySelector("main .tabs[role='tablist'], .app-main .tabs[role='tablist']");
+    if (incoming) {
+      /* A fresh tablist arrived with this page's content: it replaces
+         whatever rail the previous page left in the sidebar. */
+      side.querySelectorAll(".tabs[data-hp-sidebar-tabs], .hp-views-label").forEach(n => n.remove());
+      incoming.dataset.hpSidebarTabs = "1";
+      const label = document.createElement("div");
+      label.className = "sidebar__section-label hp-views-label";
+      label.textContent = incoming.getAttribute("aria-label") || "Views";
+      side.append(label, incoming);
+    } else if (!document.contains(document.querySelector("[data-hp-page-content] .tabs"))) {
+      /* The new page has no view tabs at all -- drop the stale rail. */
+      const stale = side.querySelector(".tabs[data-hp-sidebar-tabs]");
+      if (stale) {
+        side.querySelectorAll(".hp-views-label").forEach(n => n.remove());
+        stale.remove();
+      }
+    }
+  };
+  sync();
+  document.addEventListener("hp-page-mounted", sync);
+})();
+
+/* ── Design refresh: scroll "more" pill (pick 9C) ─────────────────────────
+   Every .card__scroll region gets a floating pill while content remains
+   below the fold, and loses it at the end -- the affordance the thin
+   scrollbar alone never quite was (theme#78). */
+(() => {
+  const attach = region => {
+    if (region.dataset.hpScrollMore) return;
+    region.dataset.hpScrollMore = "1";
+    const pill = document.createElement("div");
+    pill.className = "hp-scroll-more";
+    pill.textContent = "more ↓";
+    region.appendChild(pill);
+    const update = () => {
+      const below = region.scrollHeight - region.clientHeight - region.scrollTop;
+      pill.style.opacity = (region.scrollHeight > region.clientHeight + 24 && below > 24) ? "1" : "0";
+    };
+    region.addEventListener("scroll", update, {passive: true});
+    if (window.ResizeObserver) new ResizeObserver(update).observe(region);
+    update();
+  };
+  const scan = () => document.querySelectorAll(".card__scroll").forEach(attach);
+  scan();
+  new MutationObserver(scan).observe(document.body, {subtree: true, childList: true});
+})();
+
+/* ── Design refresh: sidebar recents (pick 12B) ───────────────────────────
+   The claude-rail sidebar keeps the operator's last few investigation
+   targets one click away. Purely client-side: visiting an entity page
+   records it in localStorage; the shell renders the newest five. */
+(() => {
+  const host = document.querySelector("[data-hp-recent]");
+  if (!host) return;
+  const KEY = "hp-recent-investigations";
+  const read = () => {
+    try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch { return []; }
+  };
+  const write = list => {
+    try { localStorage.setItem(KEY, JSON.stringify(list.slice(0, 5))); } catch {}
+  };
+  const current = (() => {
+    const p = location.pathname;
+    let m;
+    if ((m = p.match(/^\/investigate\/ip\/([^/]+)$/))) return {label: decodeURIComponent(m[1]), href: p};
+    if ((m = p.match(/^\/sessions\/([^/]+)$/))) return {label: "session " + decodeURIComponent(m[1]).slice(0, 12), href: p};
+    if ((m = p.match(/^\/payload-analysis\/([^/]+)$/))) return {label: decodeURIComponent(m[1]).slice(0, 16) + "…", href: p};
+    const q = new URLSearchParams(location.search);
+    if (p === "/events" && q.get("ip")) return {label: q.get("ip"), href: p + location.search};
+    return null;
+  })();
+  let list = read();
+  if (current) {
+    list = [current, ...list.filter(item => item.href !== current.href)];
+    write(list);
+  }
+  if (!list.length) return;
+  const label = document.querySelector("[data-hp-recent-label]");
+  if (label) label.hidden = false;
+  host.replaceChildren(...list.slice(0, 5).map(item => {
+    const a = document.createElement("a");
+    a.href = item.href;
+    a.textContent = item.label;
+    a.title = item.label;
+    return a;
+  }));
+})();
+
+/* ── Design refresh: master-detail event explorer (pick EV-B) ─────────────
+   The selected row's complete normalized record (+ pivot groups) is moved
+   -- not cloned, so evidence-viewer keys stay unique -- from its row into
+   the sticky right-hand pane. Every record still arrives server-rendered
+   inside its row (#1447's no-round-trip contract, and the no-JS view);
+   .hp-md--active is what scopes the row-side hiding to JS-on. */
+(() => {
+  const init = () => {
+    const wrap = document.getElementById("events-grid");
+    if (!wrap || !wrap.classList.contains("hp-md") || wrap.dataset.hpMd) return;
+    const list = wrap.querySelector("[data-hp-md-list]");
+    const slot = wrap.querySelector("[data-hp-md-slot]");
+    if (!list || !slot) return;
+    wrap.dataset.hpMd = "1";
+    wrap.classList.add("hp-md--active");
+    const emptyNote = wrap.querySelector("[data-hp-md-empty]");
+    let home = null; // {td, nodes} of the currently projected record
+
+    const restore = () => {
+      if (home) home.nodes.forEach(node => home.td.append(node));
+      home = null;
+    };
+    const select = tr => {
+      const article = tr.querySelector("article[data-hp-event-detail]");
+      if (!article) return;
+      restore();
+      list.querySelectorAll("tr.selected").forEach(row => row.classList.remove("selected"));
+      tr.classList.add("selected");
+      const meta = tr.querySelector(".eventmeta");
+      home = {td: article.parentElement, nodes: meta ? [article, meta] : [article]};
+      slot.replaceChildren(...home.nodes);
+      if (emptyNote) emptyNote.hidden = true;
+    };
+
+    list.addEventListener("click", event => {
+      if (event.target.closest("a, button, details, input, label")) return;
+      const tr = event.target.closest("tr[data-hp-event]");
+      if (tr) select(tr);
+    });
+    const first = list.querySelector("tr[data-hp-event]");
+    if (first) select(first);
+  };
+  init();
+  new MutationObserver(init).observe(document.body, {subtree: true, childList: true});
+})();
+
+/* ── Design refresh: wizard navigation (pick RP-C) ────────────────────────
+   Drives an existing tabbed flow one decision at a time: Back/Continue
+   walk the data-hp-wizard-steps list by clicking the matching
+   data-dashboard-tab buttons (wherever they live -- the sidebar rail after
+   relocation), with progress dots in between. */
+(() => {
+  const init = () => {
+    const nav = document.querySelector("[data-hp-wizard]");
+    if (!nav || nav.dataset.hpWizardInit) return;
+    nav.dataset.hpWizardInit = "1";
+    const steps = (nav.dataset.hpWizardSteps || "").split(",").filter(Boolean);
+    if (!steps.length) return;
+    const tabFor = step => document.querySelector(`[data-dashboard-tab="${step}"]`);
+    const prev = nav.querySelector("[data-hp-wizard-prev]");
+    const next = nav.querySelector("[data-hp-wizard-next]");
+    const dots = nav.querySelector("[data-hp-wizard-progress]");
+    const currentIndex = () => {
+      const active = document.querySelector("[data-dashboard-tab].active");
+      const at = steps.indexOf(active?.dataset.dashboardTab);
+      return at === -1 ? 0 : at;
+    };
+    const render = () => {
+      const at = currentIndex();
+      if (dots) dots.replaceChildren(...steps.map((_, i) => {
+        const dot = document.createElement("i");
+        if (i < at) dot.className = "done";
+        else if (i === at) dot.className = "on";
+        return dot;
+      }));
+      if (prev) prev.disabled = at === 0;
+      if (next) next.textContent = at >= steps.length - 1 ? "Finish — save or generate ↓" : "Continue →";
+    };
+    const go = delta => {
+      const at = currentIndex();
+      const target = steps[Math.min(steps.length - 1, Math.max(0, at + delta))];
+      tabFor(target)?.click();
+      render();
+    };
+    prev?.addEventListener("click", () => go(-1));
+    next?.addEventListener("click", () => {
+      if (currentIndex() >= steps.length - 1) {
+        document.getElementById("hp-rp-actions")?.scrollIntoView({behavior: "smooth", block: "center"});
+        return;
+      }
+      go(1);
+    });
+    steps.forEach(step => tabFor(step)?.addEventListener("click", () => setTimeout(render, 0)));
+    render();
+  };
+  init();
+  new MutationObserver(init).observe(document.body, {subtree: true, childList: true});
+})();
+
+/* ── Design refresh: copy-to-clipboard quick action (pick 14B) ──────────── */
+document.addEventListener("click", event => {
+  const btn = event.target.closest("[data-hp-copy]");
+  if (!btn) return;
+  event.preventDefault();
+  navigator.clipboard?.writeText(btn.dataset.hpCopy).then(() => {
+    const flash = document.getElementById("hp-flash");
+    if (!flash) return;
+    flash.textContent = `Copied ${btn.dataset.hpCopy}`;
+    flash.dataset.state = "ok";
+    flash.classList.add("open");
+    setTimeout(() => flash.classList.remove("open"), 1600);
+  }).catch(() => {});
+});

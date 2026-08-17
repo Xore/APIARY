@@ -1078,7 +1078,7 @@ func TestSemanticShellIsServerRendered(t *testing.T) {
 	}
 	html := out.String()
 	for _, want := range []string{
-		`class="app-shell"`, `class="app-toolbar"`, `app-toolbar__title`,
+		`class="app-shell"`, `class="app-toolbar"`, `app-toolbar__search`,
 		`class="app-sidebar"`, `class="app-main"`, `sidebar__profile`,
 		`id="hp-command-palette"`, `class="modal modal--palette"`, `data-hp-page-content`,
 		`data-hp-theme-toggle`, `data-hp-alert-count`,
@@ -1116,20 +1116,18 @@ func TestSemanticShellIsServerRendered(t *testing.T) {
 			t.Fatalf("rendered shell is missing navigation route %q", route)
 		}
 	}
-	// #257: Elasticsearch history and ingest dead letters moved out of the
-	// primary Evidence nav into admin-only Settings panes -- ops/pipeline
-	// diagnostics, not analyst investigation evidence. The routes themselves
-	// still work (source-health and search link into them with specific
-	// queries/metrics), just no longer as standalone sidebar items.
-	// #344: source-health and alerts moved out of the sidebar the same way
-	// -- both already have topbar icon-button equivalents (pipeline-health
-	// icon, alerts bell with its unread badge), so the sidebar entries were
-	// a second, redundant way to reach the same two pages. The routes
-	// themselves are unaffected; only the sidebar <a data-hp-nav> is gone.
-	for _, route := range []string{"/history", "/dead-letters", "/source-health", "/alerts"} {
-		if strings.Contains(html, `data-hp-nav="`+route+`" href="`+route+`"`) {
-			t.Fatalf("rendered shell still carries the removed sidebar nav route %q", route)
+	// #1568 (design refresh): /alerts, /source-health, and /history returned
+	// to the sidebar under an Operations section -- pages reachable only by
+	// URL or a glanceable topbar icon had no navigational home (reverses
+	// #344 for those two; the topbar icons stay as status affordances).
+	// /dead-letters remains settings/source-health territory per #257.
+	for _, route := range []string{"/history", "/source-health", "/alerts"} {
+		if !strings.Contains(html, `data-hp-nav="`+route+`" href="`+route+`"`) {
+			t.Fatalf("rendered shell is missing Operations nav route %q", route)
 		}
+	}
+	if strings.Contains(html, `data-hp-nav="/dead-letters" href="/dead-letters"`) {
+		t.Fatal("dead-letters stays out of the sidebar (#257) -- admin diagnostics, not navigation")
 	}
 	// #1139: "/payload-workbench" (index), "/sandbox" (list), and
 	// "/github-analysis" (list) merged into /payloads and

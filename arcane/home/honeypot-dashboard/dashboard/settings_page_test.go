@@ -264,14 +264,14 @@ func TestSettingsServicesPaneUsesThemeDataDisplay(t *testing.T) {
 	}
 }
 
-// TestSettingsLinkedFromAccountMenu ensures the dashboard shell opens the
-// settings modal from the account dropdown next to the auth-account popup,
-// loads the modal controller on every page, and provides the injection root.
+// TestSettingsLinkedFromAccountMenu ensures the dashboard shell links the
+// full settings page (design refresh, pick 13B) from the account dropdown,
+// loads the settings controller on every page (still needed for #settings
+// deep links opening the modal), and provides the injection root.
 func TestSettingsLinkedFromAccountMenu(t *testing.T) {
 	partial := mustReadUI("partials/dashboard.html")
-	if !strings.Contains(partial, `data-hp-account-dashboard-settings`) ||
-		!strings.Contains(partial, `href="#settings"`) {
-		t.Fatal("account menu must open the settings modal via the #settings hash")
+	if !strings.Contains(partial, `href="/settings"`) {
+		t.Fatal("account menu must navigate to the /settings page")
 	}
 	if !strings.Contains(partial, "Account &amp; security") {
 		t.Fatal("auth-account popup entry must be labeled Account & security")
