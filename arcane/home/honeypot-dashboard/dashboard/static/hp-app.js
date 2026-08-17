@@ -36,6 +36,39 @@
     });
   };
 
+  /* Country-code badges ([data-hp-country], events/ips/recordings/
+     ml-anomalies/session pages) show only the raw 2-letter ISO code -- not
+     everyone recognizes "CC" (Cocos (Keeling) Islands) or "GQ" (Equatorial
+     Guinea) on sight. Title-tooltip the full name via the standard
+     Intl.DisplayNames API rather than shipping/maintaining a ~250-entry
+     country-code lookup table here; unsupported browsers just keep showing
+     the bare code with no tooltip, same as before this existed.
+     A MutationObserver, not a one-shot pass at load, because these badges
+     also arrive well after this script's own initial run: mountPage's
+     live-refresh swaps (below) and loadRemoteItems' lazy-loaded table
+     rows both inject fresh markup with its own [data-hp-country] elements
+     that a load-time-only pass would never see. */
+  if (window.Intl && Intl.DisplayNames) {
+    const countryNames = new Intl.DisplayNames(["en"], {type: "region"});
+    const titleCountryBadge = el => {
+      const code = el.dataset.hpCountry;
+      if (!code || el.title) return;
+      let name;
+      try { name = countryNames.of(code.toUpperCase()); } catch { return; }
+      if (name && name !== code.toUpperCase()) el.title = name;
+    };
+    document.querySelectorAll("[data-hp-country]").forEach(titleCountryBadge);
+    new MutationObserver(mutations => {
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+          if (node.nodeType !== 1) continue;
+          if (node.matches?.("[data-hp-country]")) titleCountryBadge(node);
+          node.querySelectorAll?.("[data-hp-country]").forEach(titleCountryBadge);
+        }
+      }
+    }).observe(document.body, {childList: true, subtree: true});
+  }
+
   /* ---------- navigation model ---------- */
   const navGroups = [
     ["Monitor", [

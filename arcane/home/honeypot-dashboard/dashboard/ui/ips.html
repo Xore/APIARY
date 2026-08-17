@@ -4,7 +4,7 @@
    with their data-hp-utc twins). */}}<div class="hp-src-card">
   <div class="hp-src-card__head">
     <a class="hp-src-card__ip" href="/investigate/ip/{{.IP | urlquery}}" title="attacker profile for {{.IP}}">{{.IP}}</a>
-    {{if .Country}}<a class="badge badge--info" href="/events?country={{.Country | urlquery}}">{{.Country}}</a>{{end}}
+    {{if .Country}}<a class="badge badge--info" data-hp-country="{{.Country}}" href="/events?country={{.Country | urlquery}}">{{.Country}}</a>{{end}}
   </div>
   <div class="hp-src-card__stats">
     <a href="/investigate/ip/{{.IP | urlquery}}"><b>{{.Count}}</b><span>events</span></a>

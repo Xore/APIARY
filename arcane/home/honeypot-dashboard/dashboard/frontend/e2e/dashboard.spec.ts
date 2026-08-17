@@ -373,6 +373,47 @@ test.describe("dashboard browser behaviour", () => {
     await expect(page.locator("#hp-llm-search-rows")).toContainText("Fixture match");
   });
 
+  // #1561: clicking the theme toggle in the first seconds after page load --
+  // before the initial GET /api/settings/me round trip resolves -- used to
+  // apply the click visually (localStorage + the DOM attribute) but drop the
+  // PATCH outright (savePrefs() early-returned on !prefState.ready), so the
+  // very next sync (a reload, or this same one finishing) silently reverted
+  // it back to the server's still-unchanged value. Holds that GET open to
+  // deterministically land the click inside the vulnerable window.
+  test("a theme toggle click before the initial preference sync completes is not lost (#1561)", async ({ page }) => {
+    let releaseSync!: () => void;
+    const syncGate = new Promise<void>((resolve) => { releaseSync = resolve; });
+    let patchedTheme: string | null = null;
+
+    await page.route("**/api/settings/me", async (route) => {
+      await syncGate;
+      await route.fulfill({
+        status: 200, contentType: "application/json", headers: { ETag: "r1" },
+        body: JSON.stringify({ preferences: { theme: "system" } }),
+      });
+    });
+    await page.route("**/api/settings/me/preferences", async (route) => {
+      const body = JSON.parse(route.request().postData() || "{}");
+      if (typeof body.theme === "string") patchedTheme = body.theme;
+      await route.fulfill({
+        status: 200, contentType: "application/json", headers: { ETag: "r2" },
+        body: JSON.stringify({ preferences: { theme: patchedTheme } }),
+      });
+    });
+
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    // The sync GET above is still held -- prefState.ready is false here.
+    await page.locator("[data-hp-theme-toggle]").click(); // system -> dark
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    expect(patchedTheme).toBeNull(); // queued, not yet sent -- still not ready
+
+    releaseSync();
+    await expect.poll(() => patchedTheme).toBe("dark");
+    // The queued click's effect must still be showing, not reverted by the
+    // sync that was in flight when the click happened.
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  });
+
   // #1563/#1534: a session that quietly died (Keycloak-side idle timeout,
   // or the access token simply expiring with nothing to trigger
   // oidc_auth.go's own proactive refresh) used to leave every fetch-based
@@ -1272,5 +1313,137 @@ test.describe("dashboard browser behaviour", () => {
     const dropdown = page.locator(".hp-filter-autocomplete");
     await expect(dropdown).toBeVisible();
     await expect(dropdown.locator(".hp-filter-autocomplete__row").first()).toContainText("cowrie");
+  });
+});
+
+// Reported live: a country-code badge (badge--info, e.g. events.html's
+// {{.Country}}) was hard to read against its own blue background. Static
+// math against theme.css's declared values (composited over --surface-1)
+// showed the light theme's whole success/info/warning/danger-text-on-soft
+// family measuring 4.1-4.24:1, below the WCAG AA 4.5:1 floor for this
+// small (font-size-xs) badge text -- dark theme passed, but thinly
+// (4.6-4.7:1). This test asks a real browser instead of trusting that
+// math: it renders the actual badge markup (mirroring events.html's real
+// nesting -- .card > .data-table > td > .badge) against the actual loaded
+// theme.css, reads back real getComputedStyle() values, and composites
+// them the same way a real renderer would. Also covers the accompanying
+// #hp-country tooltip fix (Intl.DisplayNames) in the same real page.
+test.describe("badge color-token contrast (WCAG AA) and country tooltips", () => {
+  function relativeLuminance([r, g, b]: [number, number, number]): number {
+    const f = (c: number) => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+    const [R, G, Bc] = [f(r), f(g), f(b)];
+    return 0.2126 * R + 0.7152 * G + 0.0722 * Bc;
+  }
+  function contrastRatio(a: [number, number, number], b: [number, number, number]): number {
+    const [L1, L2] = [relativeLuminance(a), relativeLuminance(b)];
+    return (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+  }
+
+  for (const theme of ["dark", "light"] as const) {
+    test(`${theme} theme: every badge--* text/background pairing meets 4.5:1 in a real card`, async ({ page }) => {
+      await page.addInitScript((selectedTheme) => {
+        localStorage.setItem("hp-theme", selectedTheme);
+        localStorage.setItem("hp-prefs-migrated", "1");
+      }, theme);
+      await isolateReadOnlyBrowserState(page);
+      // "load", not "domcontentloaded" -- this test reads real computed
+      // background/text colors straight from theme.css's cascade, and
+      // domcontentloaded fires once the HTML is parsed, not once every
+      // <link rel=stylesheet> has actually finished loading and applying.
+      // Caught live: an intermittent false failure (a transparent
+      // getComputedStyle().backgroundColor -- the browser's un-styled
+      // default -- reading as though theme.css hadn't loaded yet).
+      await page.goto("/", { waitUntil: "load" });
+      await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+
+      const results = await page.evaluate(() => {
+        const parseRgb = (s: string) => {
+          const m = s.match(/rgba?\(([^)]+)\)/);
+          if (!m) return null;
+          const parts = m[1].split(",").map((v) => parseFloat(v));
+          return { r: parts[0], g: parts[1], b: parts[2], a: parts.length > 3 ? parts[3] : 1 };
+        };
+        // Real ancestor chain, matching events.html's actual nesting, so the
+        // composited background is the real one a badge sits on, not a
+        // guess at which --surface-N level applies.
+        const card = document.createElement("div");
+        card.className = "card";
+        const table = document.createElement("table");
+        table.className = "data-table";
+        const row = table.insertRow();
+        const cell = row.insertCell();
+        cell.className = "v";
+        card.appendChild(table);
+        document.body.appendChild(card);
+
+        const variants = ["badge--success", "badge--info", "badge--warning", "badge--danger"];
+        const out: Record<string, { fg: number[]; compositedBg: number[] }> = {};
+        for (const variant of variants) {
+          const badge = document.createElement("span");
+          badge.className = `badge ${variant}`;
+          badge.textContent = "CC";
+          cell.appendChild(badge);
+
+          const badgeStyle = getComputedStyle(badge);
+          const fg = parseRgb(badgeStyle.color)!;
+          const bg = parseRgb(badgeStyle.backgroundColor)!;
+          // Walk up until fully opaque -- the badge's own background is
+          // intentionally semi-transparent (design system convention), so
+          // compositing against the real, concrete ancestor color (the
+          // card, in practice) is what the operator's eye actually sees.
+          // Standard premultiplied "src-over" accumulation: composited
+          // holds color*alpha-so-far, added to (never re-scaled) as each
+          // ancestor layer contributes its own remaining share.
+          let node: Element | null = badge;
+          let composited: [number, number, number] = [bg.r * bg.a, bg.g * bg.a, bg.b * bg.a];
+          let alphaRemaining = bg.a;
+          while (alphaRemaining < 1 && node.parentElement) {
+            node = node.parentElement;
+            const parentBg = parseRgb(getComputedStyle(node).backgroundColor);
+            if (!parentBg) continue;
+            const remainingShare = 1 - alphaRemaining;
+            composited = [
+              composited[0] + parentBg.r * parentBg.a * remainingShare,
+              composited[1] + parentBg.g * parentBg.a * remainingShare,
+              composited[2] + parentBg.b * parentBg.a * remainingShare,
+            ];
+            alphaRemaining = alphaRemaining + parentBg.a * remainingShare;
+          }
+          // composited is premultiplied by alphaRemaining -- un-premultiply
+          // for the visible color, unless it's already ~fully opaque (the
+          // expected case: .card's background is a solid, un-aliased color).
+          if (alphaRemaining > 0 && alphaRemaining < 0.999) {
+            composited = composited.map((c) => c / alphaRemaining) as [number, number, number];
+          }
+          out[variant] = { fg: [fg.r, fg.g, fg.b], compositedBg: composited };
+          badge.remove();
+        }
+        card.remove();
+        return out;
+      });
+
+      for (const [variant, { fg, compositedBg }] of Object.entries(results)) {
+        const ratio = contrastRatio(fg as [number, number, number], compositedBg as [number, number, number]);
+        expect(ratio, `${theme} .${variant} text-on-soft contrast (got ${ratio.toFixed(2)}:1)`).toBeGreaterThanOrEqual(4.5);
+      }
+    });
+  }
+
+  test("a country-code badge gets a full-name tooltip via Intl.DisplayNames", async ({ page }) => {
+    await isolateReadOnlyBrowserState(page);
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    const title = await page.evaluate(() => {
+      const badge = document.createElement("a");
+      badge.className = "badge badge--info";
+      badge.dataset.hpCountry = "CC";
+      badge.textContent = "CC";
+      document.body.appendChild(badge);
+      // The MutationObserver installed at module load picks up appended
+      // nodes asynchronously (microtask) -- give it a tick.
+      return new Promise<string>((resolve) => {
+        setTimeout(() => { resolve(badge.title); badge.remove(); }, 50);
+      });
+    });
+    expect(title).toBe("Cocos (Keeling) Islands");
   });
 });

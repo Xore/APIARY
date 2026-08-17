@@ -8,7 +8,7 @@
      fragment once on page load to replace the "session" template's
      skeleton placeholder. Mirrors ghidra.html's "ghidra-detail-body"
      split -- see that template's own comment for the general reasoning. */}}
-{{define "session-body"}}<p class="subtitle">{{.IP}} {{if .Country}}&bull; {{.Country}}{{end}} &bull; <span{{if .FirstUTC}} data-hp-utc="{{.FirstUTC}}"{{end}}>{{.First}}</span> &mdash; <span{{if .LastUTC}} data-hp-utc="{{.LastUTC}}"{{end}}>{{.Last}}</span> &bull; <strong>{{.Total}}</strong> normalized events</p>
+{{define "session-body"}}<p class="subtitle">{{.IP}} {{if .Country}}&bull; <span data-hp-country="{{.Country}}">{{.Country}}</span>{{end}} &bull; <span{{if .FirstUTC}} data-hp-utc="{{.FirstUTC}}"{{end}}>{{.First}}</span> &mdash; <span{{if .LastUTC}} data-hp-utc="{{.LastUTC}}"{{end}}>{{.Last}}</span> &bull; <strong>{{.Total}}</strong> normalized events</p>
 
 <div class="filters"><a class="chip" href="/events">&larr; event explorer</a>{{if .IP}}<a class="chip" href="/investigate/ip/{{.IP | urlquery}}">attacker profile</a>{{end}}<a class="chip" href="/events?session={{.ID | urlquery}}">filtered events</a><a class="chip" href="/export/events.csv?session={{.ID | urlquery}}">export CSV &darr;</a></div>
 
