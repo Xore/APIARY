@@ -176,10 +176,17 @@
     updateLazyTable(table);
   };
 
+  /* EV-D's minute-break rows live inside the same tbody the remote pager
+     counts -- they are presentation, not records, so both the "loaded
+     through" arithmetic and the next fetch offset must skip them or every
+     break would silently displace a real row at the end of the list. */
+  const remoteRowCount = body =>
+    [...body.children].filter(child => !child.classList.contains("hp-feed-break")).length;
+
   const updateRemoteContainer = key => {
     const state = remoteContainers.get(key);
     if (!state) return;
-    const loadedThrough = state.offset + state.body.children.length;
+    const loadedThrough = state.offset + remoteRowCount(state.body);
     state.counter.textContent = `${Math.min(loadedThrough, state.total)} of ${state.total} entries`;
     const more = loadedThrough < state.total;
     state.controls.hidden = state.total <= lazyPageSize;
@@ -191,7 +198,7 @@
 
   const loadRemoteItems = async key => {
     const state = remoteContainers.get(key);
-    const nextOffset = state ? state.offset + state.body.children.length : 0;
+    const nextOffset = state ? state.offset + remoteRowCount(state.body) : 0;
     if (!state || state.loading || nextOffset >= state.total) return;
     state.loading = true;
     state.button.disabled = true;
@@ -461,6 +468,11 @@
     window.updateHoneypotMap = update;
     update();
     setTimeout(() => map.invalidateSize(false), 0);
+    /* The one-shot invalidateSize above can run before the surrounding
+       grid settles (fonts, sidebar, card layout) -- leaflet then only
+       fetches tiles for the smaller width and the right edge of the card
+       shows bare container background. Track the real size instead. */
+    if (window.ResizeObserver) new ResizeObserver(() => map.invalidateSize(false)).observe(container);
   });
   window.initHoneypotMaps = initMaps;
 
@@ -1065,6 +1077,22 @@
       });
       const identity = shell.querySelector("[data-hp-page-name]");
       if (identity) identity.textContent = pageName();
+      /* 11E breadcrumb: the section half comes from the sidebar's own
+         grouping (the .sidebar__section-label above the active item), so
+         the crumb can never disagree with the nav. Pages outside any
+         group (or with no active item) show just the page name. */
+      const crumbSection = shell.querySelector("[data-hp-crumb-section]");
+      const crumbSep = shell.querySelector("[data-hp-crumb-sep]");
+      if (crumbSection && crumbSep) {
+        let label = "";
+        const active = shell.querySelector(".sidebar__item.active[data-hp-nav]");
+        for (let node = active?.previousElementSibling; node; node = node.previousElementSibling) {
+          if (node.classList?.contains("sidebar__section-label")) { label = node.textContent.trim(); break; }
+        }
+        crumbSection.textContent = label;
+        crumbSection.hidden = !label;
+        crumbSep.hidden = !label;
+      }
     };
     syncActiveNav();
     document.addEventListener("hp-page-mounted", syncActiveNav);
@@ -1304,8 +1332,14 @@
        the same thing everywhere. Mirrors the quick-search preview above
        (debounce + AbortController + keyboard nav) against a single field's
        real values instead of the cross-entity search index. */
-    const filterAutocompleteInputs = [...document.querySelectorAll("[data-hp-filter-field]")];
-    if (filterAutocompleteInputs.length) {
+    /* Delegated (was: bound per-input at load): the filter-bar arrives
+       with swapped-in page content on every dynamic navigation
+       (hp-dynamic-nav.js), so inputs bound once at DOMContentLoaded went
+       dead the moment the user left the initially-loaded page -- the
+       "sensor / attack path / ip / port / country never auto-fill" report.
+       Document-level focusin/input/keydown listeners work for any
+       [data-hp-filter-field] input no matter when its page mounted. */
+    {
       const box = document.createElement("div");
       // dropdown: theme.css's panel chrome (background/border/radius/
       // shadow/padding); hp-filter-autocomplete: positioning/size only.
@@ -1385,34 +1419,39 @@
           .catch(() => {});
       };
 
-      filterAutocompleteInputs.forEach(input => {
-        input.addEventListener("focus", () => {
-          activeInput = input;
-          runFilterQuery(input, input.value.trim());
-        });
-        input.addEventListener("input", () => {
-          activeInput = input;
-          clearTimeout(optionsTimer);
-          const query = input.value.trim();
-          optionsTimer = setTimeout(() => runFilterQuery(input, query), 150);
-        });
-        input.addEventListener("keydown", event => {
-          if (activeInput !== input || box.hidden) return;
-          if (event.key === "ArrowDown" && optionRows.length) {
-            event.preventDefault();
-            activeOption = Math.min(activeOption + 1, optionRows.length - 1);
-            renderOptions();
-          } else if (event.key === "ArrowUp" && optionRows.length) {
-            event.preventDefault();
-            activeOption = Math.max(activeOption - 1, -1);
-            renderOptions();
-          } else if (event.key === "Enter" && activeOption >= 0) {
-            event.preventDefault();
-            selectOption(optionRows[activeOption]);
-          } else if (event.key === "Escape") {
-            closeOptions();
-          }
-        });
+      const filterInputOf = target =>
+        target instanceof Element ? target.closest("input[data-hp-filter-field]") : null;
+      document.addEventListener("focusin", event => {
+        const input = filterInputOf(event.target);
+        if (!input) return;
+        activeInput = input;
+        runFilterQuery(input, input.value.trim());
+      });
+      document.addEventListener("input", event => {
+        const input = filterInputOf(event.target);
+        if (!input) return;
+        activeInput = input;
+        clearTimeout(optionsTimer);
+        const query = input.value.trim();
+        optionsTimer = setTimeout(() => runFilterQuery(input, query), 150);
+      });
+      document.addEventListener("keydown", event => {
+        const input = filterInputOf(event.target);
+        if (!input || activeInput !== input || box.hidden) return;
+        if (event.key === "ArrowDown" && optionRows.length) {
+          event.preventDefault();
+          activeOption = Math.min(activeOption + 1, optionRows.length - 1);
+          renderOptions();
+        } else if (event.key === "ArrowUp" && optionRows.length) {
+          event.preventDefault();
+          activeOption = Math.max(activeOption - 1, -1);
+          renderOptions();
+        } else if (event.key === "Enter" && activeOption >= 0) {
+          event.preventDefault();
+          selectOption(optionRows[activeOption]);
+        } else if (event.key === "Escape") {
+          closeOptions();
+        }
       });
 
       document.addEventListener("click", event => {
@@ -1708,11 +1747,13 @@
     checkSessionAlive().then(identity => {
       if (!identity || !identity.username) return;
       const name = shell.querySelector("[data-hp-user-name]");
-      const avatar = shell.querySelector("[data-hp-user-avatar]");
+      /* All instances: the sidebar profile card AND the toolbar's 11E
+         account avatar carry the same initials. */
+      const avatars = shell.querySelectorAll("[data-hp-user-avatar]");
       const role = shell.querySelector("[data-hp-user-role]");
       const label = identity.display_name || identity.username;
       if (name) name.textContent = label;
-      if (avatar) avatar.textContent = label.trim().slice(0, 2).toUpperCase();
+      avatars.forEach(avatar => { avatar.textContent = label.trim().slice(0, 2).toUpperCase(); });
       if (role && identity.role) {
         role.textContent = identity.role;
         role.classList.toggle("badge--accent", identity.role === "admin");
@@ -1901,7 +1942,13 @@
     const pill = document.createElement("button");
     pill.type = "button";
     pill.className = "hp-scroll-more";
-    pill.textContent = "more ↓";
+    /* Pick 9D: a circular jump button -- the glyph stays "↓"; the state
+       ("scroll for more" vs "load the next batch") lives in the
+       title/aria-label so the round control never has to fit words. */
+    pill.textContent = "↓";
+    pill.title = "Scroll for more";
+    pill.setAttribute("aria-label", "Scroll for more");
+    pill.dataset.hpMode = "scroll";
     region.appendChild(pill);
     const update = () => {
       /* Keep the sticky pill last in the region so it never rests above
@@ -1912,11 +1959,14 @@
       const nearEnd = below <= NEAR_END;
       const loadable = nearEnd ? loadControl(region) : null;
       const show = (region.scrollHeight > region.clientHeight + 24 && below > 24) || !!loadable;
-      const label = loadable ? "load more ↓" : "more ↓";
-      /* Only write on change: textContent replaces the text node even for
-         an identical string, which would loop through the MutationObserver
-         below forever. */
-      if (pill.textContent !== label) pill.textContent = label;
+      const label = loadable ? "Load 25 more" : "Scroll for more";
+      /* Only write on change: attribute writes would loop through the
+         MutationObserver below forever (it watches subtree attributes). */
+      if (pill.title !== label) {
+        pill.title = label;
+        pill.setAttribute("aria-label", label);
+        pill.dataset.hpMode = loadable ? "load" : "scroll";
+      }
       pill.classList.toggle("hp-scroll-more--on", show);
     };
     pill.addEventListener("click", () => {
@@ -2019,14 +2069,52 @@
   }));
 })();
 
-/* ── Design refresh: master-detail event explorer (pick EV-B) ─────────────
-   The selected row's complete normalized record (+ pivot groups) is moved
-   -- not cloned, so evidence-viewer keys stay unique -- from its row into
-   the sticky right-hand pane. Every record still arrives server-rendered
-   inside its row (#1447's no-round-trip contract, and the no-JS view);
-   .hp-md--active is what scopes the row-side hiding to JS-on. */
+/* ── Design refresh: master-detail investigate layout (pick EV-B, extended
+   per Xore) ──────────────────────────────────────────────────────────────
+   Closed by default: the table owns the whole width until a row is
+   clicked; the pane then opens beside it (.hp-md--open) and the pane's ×
+   (or clicking the selected row again) returns the full-width table.
+   Two flavours share the open/close/selection mechanics:
+   - events (#events-grid): the selected row's complete normalized record
+     (+ pivot groups) is MOVED -- not cloned, so evidence-viewer keys stay
+     unique -- from its row into the pane (#1447's no-round-trip contract
+     and the no-JS view keep every record server-rendered in its row).
+   - every other Investigate table ([data-hp-md-generic]): a generic row
+     inspector pairs each column header with a clone of the row's cell,
+     so nothing the table shows is hidden -- the pane only ever adds. */
 (() => {
-  const init = () => {
+  const wireGrid = (wrap, list, {project, restore, rowFor}) => {
+    const close = () => {
+      restore();
+      list.querySelectorAll("tr.selected").forEach(row => row.classList.remove("selected"));
+      wrap.classList.remove("hp-md--open");
+    };
+    const select = tr => {
+      if (tr.classList.contains("selected")) { close(); return; }
+      if (!project(tr)) return;
+      list.querySelectorAll("tr.selected").forEach(row => row.classList.remove("selected"));
+      tr.classList.add("selected");
+      wrap.classList.add("hp-md--open");
+    };
+    const pane = wrap.querySelector(".hp-md__pane");
+    if (pane && !pane.querySelector(".hp-md__close")) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "hp-md__close";
+      btn.textContent = "×";
+      btn.title = "Close details";
+      btn.setAttribute("aria-label", "Close details");
+      btn.addEventListener("click", close);
+      pane.append(btn);
+    }
+    list.addEventListener("click", event => {
+      if (event.target.closest("a, button, details, summary, input, label")) return;
+      const tr = rowFor(event.target);
+      if (tr) select(tr);
+    });
+  };
+
+  const initEvents = () => {
     const wrap = document.getElementById("events-grid");
     if (!wrap || !wrap.classList.contains("hp-md") || wrap.dataset.hpMd) return;
     const list = wrap.querySelector("[data-hp-md-list]");
@@ -2036,31 +2124,72 @@
     wrap.classList.add("hp-md--active");
     const emptyNote = wrap.querySelector("[data-hp-md-empty]");
     let home = null; // {td, nodes} of the currently projected record
-
-    const restore = () => {
-      if (home) home.nodes.forEach(node => home.td.append(node));
-      home = null;
-    };
-    const select = tr => {
-      const article = tr.querySelector("article[data-hp-event-detail]");
-      if (!article) return;
-      restore();
-      list.querySelectorAll("tr.selected").forEach(row => row.classList.remove("selected"));
-      tr.classList.add("selected");
-      const meta = tr.querySelector(".eventmeta");
-      home = {td: article.parentElement, nodes: meta ? [article, meta] : [article]};
-      slot.replaceChildren(...home.nodes);
-      if (emptyNote) emptyNote.hidden = true;
-    };
-
-    list.addEventListener("click", event => {
-      if (event.target.closest("a, button, details, input, label")) return;
-      const tr = event.target.closest("tr[data-hp-event]");
-      if (tr) select(tr);
+    wireGrid(wrap, list, {
+      rowFor: target => target.closest("tr[data-hp-event]"),
+      restore: () => {
+        if (home) home.nodes.forEach(node => home.td.append(node));
+        home = null;
+        if (emptyNote) emptyNote.hidden = false;
+      },
+      project: tr => {
+        const article = tr.querySelector("article[data-hp-event-detail]");
+        if (!article) return false;
+        if (home) home.nodes.forEach(node => home.td.append(node));
+        const meta = tr.querySelector(".eventmeta");
+        home = {td: article.parentElement, nodes: meta ? [article, meta] : [article]};
+        slot.replaceChildren(...home.nodes);
+        if (emptyNote) emptyNote.hidden = true;
+        return true;
+      },
     });
-    const first = list.querySelector("tr[data-hp-event]");
-    if (first) select(first);
   };
+
+  const initGeneric = () => document.querySelectorAll("[data-hp-md-generic]:not([data-hp-md])").forEach(card => {
+    const table = card.querySelector("table");
+    if (!table) return;
+    card.dataset.hpMd = "1";
+    const wrap = document.createElement("div");
+    wrap.className = "hp-md hp-md--active";
+    if (card.classList.contains("wide")) wrap.classList.add("wide");
+    const listDiv = document.createElement("div");
+    listDiv.className = "hp-md__list";
+    const pane = document.createElement("div");
+    pane.className = "hp-md__pane";
+    const paneCard = document.createElement("div");
+    paneCard.className = "card hp-md__rowcard";
+    const heading = document.createElement("h2");
+    heading.textContent = "Row details";
+    const fields = document.createElement("dl");
+    paneCard.append(heading, fields);
+    pane.append(paneCard);
+    card.before(wrap);
+    listDiv.append(card);
+    wrap.append(listDiv, pane);
+    wireGrid(wrap, listDiv, {
+      rowFor: target => {
+        const tr = target.closest("tbody tr");
+        return tr && tr.closest("table") === table ? tr : null;
+      },
+      restore: () => fields.replaceChildren(),
+      project: tr => {
+        const headers = [...(table.tHead?.rows[0]?.cells || [])].map(th => th.textContent.trim());
+        const pairs = [];
+        [...tr.cells].forEach((cell, i) => {
+          if (!cell.textContent.trim() && !cell.querySelector("a, img, svg")) return;
+          const dt = document.createElement("dt");
+          dt.textContent = headers[i] || "links";
+          const dd = document.createElement("dd");
+          dd.append(...[...cell.childNodes].map(node => node.cloneNode(true)));
+          pairs.push(dt, dd);
+        });
+        if (!pairs.length) return false;
+        fields.replaceChildren(...pairs);
+        return true;
+      },
+    });
+  });
+
+  const init = () => { initEvents(); initGeneric(); };
   init();
   new MutationObserver(init).observe(document.body, {subtree: true, childList: true});
 })();

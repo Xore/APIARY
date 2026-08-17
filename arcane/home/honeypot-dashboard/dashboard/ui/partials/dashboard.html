@@ -5,8 +5,12 @@
 <link rel="icon" type="image/png" sizes="16x16" href="{{asset "/static/favicon-16x16.png"}}">
 <link rel="apple-touch-icon" href="{{asset "/static/apple-touch-icon.png"}}">
 <link rel="manifest" href="{{asset "/static/site.webmanifest"}}">
-<link rel="stylesheet" href="{{asset "/static/theme.css"}}">
+{{/* leaflet.css before theme.css: both style .leaflet-container at equal
+     specificity, and leaflet's stock background (#ddd) must lose to the
+     theme's -- loaded the other way round the map showed a light-grey
+     box behind/at the edges of the tiles in dark theme. */}}
 <link rel="stylesheet" href="{{asset "/static/leaflet.css"}}">
+<link rel="stylesheet" href="{{asset "/static/theme.css"}}">
 <script defer src="{{asset "/static/leaflet.js"}}"></script>
 <script defer src="{{asset "/static/vendor/focus-trap/tabbable.umd.min.js"}}"></script>
 <script defer src="{{asset "/static/vendor/focus-trap/focus-trap.umd.min.js"}}"></script>
@@ -137,11 +141,15 @@
        middle); the sidebar's magnifier and the / shortcut open the same
        palette from anywhere. The page-name span stays for JS that keeps
        document titles in sync, just visually hidden. */}}
+  {{/* Design refresh 2 (pick 11E): the floating pill bar carries a
+       breadcrumb -- section / page -- instead of an empty middle; the
+       section span is filled by hp-app.js's syncActiveNav from the
+       sidebar's own grouping, so the two can never disagree. The clock and
+       pipeline shortcuts moved out (both live under the sidebar's
+       Operations group); alerts, theme, LIVE and the account avatar stay. */}}
+  <div class="hp-crumb"><span data-hp-crumb-section hidden></span><span class="sep" data-hp-crumb-sep hidden>/</span><b data-hp-page-name>Dashboard</b></div>
   <div class="app-toolbar__search" aria-hidden="true"></div>
-  <span class="sr-only" data-hp-page-name>Dashboard</span>
   <div class="hp-toolbar-actions">
-    <a class="btn btn-icon btn-ghost" href="/events?since=24h" title="Events from the last 24 hours" aria-label="Events from the last 24 hours"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></a>
-    <a class="btn btn-icon btn-ghost" href="/source-health" title="Pipeline health" aria-label="Pipeline health"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></a>
     <a class="btn btn-icon btn-ghost" href="/alerts" title="Open alerts" aria-label="Open alerts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span class="hp-alert-badge" data-hp-alert-count hidden>0</span></a>
     <button class="btn btn-icon btn-ghost" type="button" data-hp-theme-toggle aria-label="Switch color theme" title="Theme: system">
       <svg data-hp-theme-icon="system" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
@@ -149,6 +157,9 @@
       <svg data-hp-theme-icon="light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
     </button>
     <button class="hp-live-state" type="button" data-hp-live-toggle aria-pressed="false" title="Dashboard refresh is active — pause it"><span class="status-dot"></span><span data-hp-live-label>Live</span></button>
+    {{/* 11E: account avatar closes the pill bar; same initials fill as the
+         sidebar profile (hp-app.js /api/whoami). */}}
+    <a class="avatar hp-toolbar-avatar" href="/settings" title="Account &amp; settings" aria-label="Account and settings" data-hp-user-avatar>&middot;</a>
   </div>
   {{with activeBanner}}<div class="alert alert--{{.Severity}} app-toolbar__banner" role="status">{{.Text}}</div>{{end}}
 </header>
