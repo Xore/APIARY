@@ -352,7 +352,8 @@ func TestIdentityFromRequestSessionLifecycle(t *testing.T) {
 	// reject unconditionally -- deterministically, not intermittently, on
 	// every session that outlived 30s since its last check. This is the
 	// same live shape minus "sub" from the response entirely, matching
-	// exactly what auth.xore.rocks actually returns for this client.
+	// exactly what this deployment's own Keycloak actually returns for
+	// this client.
 	t.Run("still-active session survives introspection when the response omits sub entirely", func(t *testing.T) {
 		introspection := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
