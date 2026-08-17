@@ -145,6 +145,15 @@
               </div>
             </div>
 
+            {{/* Design refresh (RP-C): wizard navigation drives the same
+                 step tabs (now in the sidebar rail) one decision at a
+                 time -- Back/Continue plus progress dots, rendered and
+                 wired by hp-app.js. Save/Generate stay always visible. */}}
+            <div class="hp-wizard-nav" data-hp-wizard data-hp-wizard-steps="design,scope,schedule,branding">
+              <button class="btn btn-secondary" type="button" data-hp-wizard-prev>&larr; Back</button>
+              <div class="hp-wizard-progress" data-hp-wizard-progress aria-hidden="true"></div>
+              <button class="btn btn-secondary" type="button" data-hp-wizard-next>Continue &rarr;</button>
+            </div>
             <div class="hp-rp-actions" id="hp-rp-actions">
               <button class="btn btn-primary" type="submit" id="hp-rp-save">Save definition</button>
               <button class="btn btn-secondary" type="button" id="hp-rp-generate">Generate now</button>

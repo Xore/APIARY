@@ -127,11 +127,26 @@ func (w *pdfReportWriter) sandboxMetricGrid(metrics []sandboxPDFMetric) {
 		y := w.y - cellH
 		w.rect(x, y, cellW, cellH, t.Card)
 		w.strokeRect(x, y, cellW, cellH, t.CardBorder)
+		// #1567: never truncate a value in a print artifact -- "Windows
+		// DLL / pe-d..." loses exactly the information the tile exists to
+		// show. Shrink the font toward a floor instead; past that, wrap
+		// onto a second line.
 		value := firstNonEmpty(metric.Value, "not available")
-		if len(value) > 22 {
-			value = value[:19] + "..."
+		switch {
+		case len(value) <= 22:
+			w.text(x+10, y+31, 13, true, t.BrandText, value)
+		case len(value) <= 30:
+			w.text(x+10, y+31, 10, true, t.BrandText, value)
+		default:
+			lines := wrapPDFText(value, 30)
+			if len(lines) > 2 {
+				lines = lines[:2]
+			}
+			w.text(x+10, y+35, 8.5, true, t.BrandText, lines[0])
+			if len(lines) > 1 {
+				w.text(x+10, y+25, 8.5, true, t.BrandText, lines[1])
+			}
 		}
-		w.text(x+10, y+31, 13, true, t.BrandText, value)
 		w.text(x+10, y+14, 7.5, true, t.MutedText, strings.ToUpper(metric.Label))
 		if index%4 == 3 || index == len(metrics)-1 {
 			w.y -= cellH + 8

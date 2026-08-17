@@ -141,8 +141,19 @@ func templateFuncs(s *store, _ template.HTML) template.FuncMap {
 			h.Write(b)
 			return strconv.FormatUint(h.Sum64(), 36)
 		},
-		"presentation":          presentation,
-		"behavior":              behavior,
+		"presentation": presentation,
+		"behavior":     behavior,
+		// Design refresh (OV-B): the overview hero's humane one-line
+		// greeting -- salutation by server-local hour, clause from the
+		// same ActivityState the 24h KPI tile already shows.
+		"overviewGreeting": overviewGreeting,
+		// #1566: normalize raw upstream ISO timestamps for display.
+		"displayTime": displayTime,
+		// Design refresh (3B): 24 column totals of the sensor heatmap,
+		// normalized to the busiest hour, for the events-24h KPI tile's
+		// sparkline. Rendered via a nonced <style> (same CSP posture as
+		// the heatmap's own cells).
+		"hourlySpark":           hourlySpark,
 		"reportPresetRows":      func() []reportPresetRow { return reportPresetRowsFor(presentation().ReportPresets) },
 		"brandHTML":             func() template.HTML { return brandHTML(presentation().BrandPrefix + presentation().AppName) },
 		"brandText":             func() string { return brandText(presentation().BrandPrefix, presentation().AppName) },

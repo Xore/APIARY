@@ -18,6 +18,12 @@
 (() => {
   "use strict";
 
+  /* #1564: loaded from the shared "style" partial on every page now; the
+     #1139 family pages still carry their own <script> tag, so guard
+     against double registration of the document-level click handler. */
+  if (window.__hpDynamicNav) return;
+  window.__hpDynamicNav = true;
+
   const pageNonce = document.querySelector("script[nonce], style[nonce]")?.nonce || "";
 
   const DYNAMIC_ROUTES = [
@@ -33,6 +39,33 @@
     // bare /sandbox index, which also 302s.
     /^\/sandbox\/(?!vnc$)[^/]+$/,
     /^\/github-analysis\/[^/]+$/,
+    // #1564 (design refresh): shell routes navigate in place -- "one
+    // flawless page" -- but ONLY pages whose behaviour comes entirely from
+    // the shell scripts (hp-app.js delegation + hp-page-mounted
+    // re-attachers). Pages that ship their own bottom-of-content scripts
+    // (overview/ips/attackers/kill-chain/commands/ml-anomalies/reports/
+    // canarytokens/sessions/investigate: cytoscape graphs, ECharts
+    // hydration, studio bindings) stay full document loads until those
+    // scripts learn the mount/unmount convention -- a dynamically appended
+    // script executes once per session, so a second visit through a swap
+    // would leave their views stuck loading (caught by the browser matrix
+    // on the attackers graph). Also deliberately excluded: /settings
+    // (page mode resolves at script load), /sandbox/vnc, /tty/*,
+    // /revdeck/*, /auth/*, and anything that isn't a shell page (/api,
+    // /static, /export, /metrics, PDFs).
+    /^\/events$/,
+    /^\/search$/,
+    /^\/clusters$/,
+    /^\/campaigns$/,
+    /^\/history$/,
+    /^\/dead-letters$/,
+    /^\/source-health$/,
+    /^\/alerts$/,
+    /^\/auth-events$/,
+    /^\/llm-analysis$/,
+    /^\/agent-campaigns$/,
+    /^\/recordings$/,
+    /^\/sensors$/,
   ];
   const isDynamicRoute = pathname => DYNAMIC_ROUTES.some(re => re.test(pathname));
 
@@ -73,6 +106,14 @@
       if (document.querySelector(`script[src="${CSS.escape(src)}"]`)) return;
       const el = document.createElement("script");
       el.src = src;
+      // #1564 regression fix: dynamically-inserted scripts are async by
+      // default, so a page whose scripts have a load-order dependency
+      // (attackers.html: cytoscape.min.js -> hp-echarts-theme.js ->
+      // hp-attackers.js) could execute out of order -- hp-attackers.js ran
+      // before cytoscape existed and bailed, leaving the graph stuck on
+      // "Loading graph…". async=false restores insertion-order execution,
+      // matching how the server-rendered defer tags behave.
+      el.async = false;
       if (pageNonce) el.nonce = pageNonce;
       document.body.appendChild(el);
     });

@@ -43,7 +43,15 @@
                 <tr class="hp-table-state" aria-hidden="true"><td class="hp-skeleton-cell" colspan="5"><span class="skeleton-line" style="width:74%"></span></td></tr>
               </tbody>
             </table></div>
-            <p class="empty" id="ct-tokens-empty" role="status" aria-live="polite" hidden>No canarytokens created yet &mdash; use the Create bait tab.</p>
+            {{/* Design refresh (pick 8B): icon + title + hint + action. */}}
+          <div class="empty-state" id="ct-tokens-empty" role="status" aria-live="polite" hidden>
+            <div>
+              <div class="empty-state__icon" aria-hidden="true">&#129438;</div>
+              <div class="empty-state__title">No canarytokens yet</div>
+              <p class="empty-state__hint">Plant tokens outside the honeypot and track everything that fires &mdash; nothing here re-fires a token.</p>
+              <a class="empty-state__action" href="#ct-create">Create bait &rarr;</a>
+            </div>
+          </div>
             <p class="card__meta" id="ct-tokens-error" role="alert" hidden></p>
           </div>
         </div>

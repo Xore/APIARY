@@ -37,7 +37,7 @@
               <thead><tr><th>time</th><th>client</th><th>error</th><th>username tried</th><th>source ip</th></tr></thead>
               <tbody>
                 {{range .Events}}<tr>
-                  <td{{if .Timestamp}} data-hp-utc="{{.Timestamp}}"{{end}}>{{.Timestamp}}</td>
+                  <td{{if .Timestamp}} data-hp-utc="{{.Timestamp}}"{{end}} data-hp-time>{{displayTime .Timestamp}}</td>
                   <td class="v"><a href="/auth-events?client={{.ClientID | urlquery}}">{{.ClientID}}</a></td>
                   <td><span class="badge badge--warning">{{.Error}}</span></td>
                   <td class="v">{{with index .Details "username"}}{{.}}{{else}}<span class="tw:text-muted">&mdash;</span>{{end}}</td>

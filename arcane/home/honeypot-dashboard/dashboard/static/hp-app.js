@@ -878,6 +878,11 @@
     source.remove();
     initLazyViews(pageContent);
     reapplyTimezone();
+    /* Design refresh: one signal for every content swap -- SSE/interval
+       refresh and hp-dynamic-nav navigations alike -- so the sidebar
+       view-tabs, master-detail, wizard, and scroll-pill controllers can
+       re-attach without each polling the DOM. */
+    document.dispatchEvent(new CustomEvent("hp-page-mounted"));
   };
   window.replaceHoneypotPage = mountPage;
   window.hydrateHoneypotOverview = hydrateOverview;
@@ -1040,21 +1045,29 @@
     const shell = document.querySelector(".app-shell");
     if (!shell) return;
 
-    /* Active nav + page identity */
-    const current = activeHref();
-    shell.querySelectorAll("[data-hp-nav]").forEach(link => {
-      const active = link.dataset.hpNav === current;
-      link.classList.toggle("active", active);
-      if (active) link.setAttribute("aria-current", "page");
-    });
-    const identity = shell.querySelector("[data-hp-page-name]");
-    if (identity) identity.textContent = pageName();
+    /* Active nav + page identity. Re-synced on every content mount and on
+       back/forward: with #1564's shell-wide fetch-and-swap the sidebar is
+       never re-rendered by the server, so a one-shot pass left the landing
+       page highlighted forever. */
+    const syncActiveNav = () => {
+      const current = activeHref();
+      shell.querySelectorAll("[data-hp-nav]").forEach(link => {
+        const active = link.dataset.hpNav === current;
+        link.classList.toggle("active", active);
+        if (active) link.setAttribute("aria-current", "page");
+        else link.removeAttribute("aria-current");
+      });
+      const identity = shell.querySelector("[data-hp-page-name]");
+      if (identity) identity.textContent = pageName();
+    };
+    syncActiveNav();
+    document.addEventListener("hp-page-mounted", syncActiveNav);
+    addEventListener("popstate", syncActiveNav);
 
-    /* The recent-investigations rail was removed; drop anything an earlier
-       version of the dashboard left behind in this browser. */
-    try { localStorage.removeItem("hp-recent-investigations"); } catch {}
-    /* Ditto for the command bar's old show/hide preference: it's a modal
-       now (#193), there's nothing left to hide. */
+    /* hp-recent-investigations is live again (design refresh, pick 12B) --
+       the old removal cleanup is gone with it. */
+    /* The command bar's old show/hide preference: it's a modal now (#193),
+       there's nothing left to hide. */
     try { localStorage.removeItem("hp-command-dock-hidden"); } catch {}
 
     /* Sidebar collapse (persisted) / mobile off-canvas open */
@@ -1095,7 +1108,12 @@
        on close, Escape and a backdrop click close it. */
     const commandPalette = document.getElementById("hp-command-palette");
     const commandPaletteBackdrop = document.getElementById("hp-command-palette-backdrop");
-    const commandPaletteOpener = shell.querySelector("[data-hp-command-palette-open]");
+    /* Design refresh: the palette now has several openers -- the topbar
+       command bar (11C), the sidebar's Investigate action (12B), and the
+       overview hero's search field (OV-B) -- so bind them all, not just
+       the first. */
+    const commandPaletteOpeners = [...document.querySelectorAll("[data-hp-command-palette-open]")];
+    const commandPaletteOpener = commandPaletteOpeners[0] || null;
     const search = commandPalette?.querySelector("[data-hp-investigate]");
     const searchInput = search?.querySelector("textarea");
     let commandPaletteRestoreFocus = null;
@@ -1137,7 +1155,8 @@
       // setTimeout(0), so setReturnFocus's closure must still see this value
       // when that deferred callback runs. openCommandPalette() overwrites it next time.
     };
-    commandPaletteOpener?.addEventListener("click", () => openCommandPalette(commandPaletteOpener));
+    commandPaletteOpeners.forEach(opener =>
+      opener.addEventListener("click", () => openCommandPalette(opener)));
     commandPalette?.querySelector("[data-hp-command-palette-close]")?.addEventListener("click", closeCommandPalette);
     commandPaletteBackdrop?.addEventListener("click", closeCommandPalette);
     addEventListener("keydown", event => {
@@ -1469,6 +1488,15 @@
     };
     const themeToggle = shell.querySelector("[data-hp-theme-toggle]");
     const applyTheme = mode => {
+      /* A11y (design refresh): swapping the theme used to animate every
+         color/background at its own transition pace -- for a beat, light
+         ink sat on still-dark surfaces (reported live as "black text on
+         dark background"). The head bootstrap + the server-pref re-apply
+         made that beat happen on ordinary page loads whenever the two
+         disagreed. Suppress transitions for the swap frame. */
+      document.documentElement.classList.add("hp-theme-switching");
+      requestAnimationFrame(() => requestAnimationFrame(() =>
+        document.documentElement.classList.remove("hp-theme-switching")));
       if (mode === "system") delete document.documentElement.dataset.theme;
       else document.documentElement.dataset.theme = mode;
       try {
@@ -1513,15 +1541,29 @@
       return data && data.preferences ? data.preferences : null;
     };
     /* Fire-and-forget write; a conflict means another browser won, so resync
-       and let the server state win (multi-browser consistency). */
+       and let the server state win (multi-browser consistency).
+       #1561: a patch made before the initial sync finishes used to be
+       silently dropped -- the click landed only in localStorage and the
+       later sync reverted it on the next load. Queue it instead and flush
+       (merged, newest key wins) the moment the sync completes. */
+    let pendingPrefs = null;
     const savePrefs = patch => {
-      if (!prefState.ready) return;
+      if (!prefState.ready) {
+        pendingPrefs = {...(pendingPrefs || {}), ...patch};
+        return;
+      }
       fetch("/api/settings/me/preferences", {
         method: "PATCH", headers: prefHeaders(), body: JSON.stringify(patch),
       }).then(response => {
         if (response.status === 409) return syncPrefs().then(() => null);
         return readPrefResponse(response);
       }).catch(() => {});
+    };
+    const flushPendingPrefs = () => {
+      if (!pendingPrefs || !prefState.ready) return;
+      const patch = pendingPrefs;
+      pendingPrefs = null;
+      savePrefs(patch);
     };
     /* Timezone + clock-format display conversion (#282, #346): every
        timestamp is a fixed UTC string baked in once by the server -- either
@@ -1612,7 +1654,13 @@
         prefState.prefs = data.preferences;
         prefState.ready = true;
         const migrated = await migrateLocalPrefs();
-        applyEffectivePrefs(migrated || prefState.prefs);
+        /* #1561: anything the user changed while the sync was in flight
+           outranks the server copy -- both visually (merged into what gets
+           applied, so the sync can't revert a just-made theme choice) and
+           durably (flushed as a PATCH now that the ETag is known). */
+        const effective = {...(migrated || prefState.prefs), ...(pendingPrefs || {})};
+        flushPendingPrefs();
+        applyEffectivePrefs(effective);
       } catch {}
     };
     syncPrefs();
@@ -1712,3 +1760,274 @@
     }
   });
 })();
+
+/* ── Design refresh: sidebar view-tabs (pick 7D) ──────────────────────────
+   Each page renders its main [role=tablist] in the content flow (works
+   without JS); with JS the rail moves into the sidebar below the nav, so
+   switching a page's views reads the same as switching pages. */
+(() => {
+  /* Resolve which sidebar item owns the current path -- the same roll-up
+     rules activeHref() uses inside the shell closure. Duplicated here
+     deliberately: this IIFE runs at script eval, before the shell's
+     DOMContentLoaded block has set .active, so anchoring on the class
+     appended the rail to the end of the nav on every initial load (the
+     exact bug Xore reported twice). */
+  const routeFor = path => {
+    if (path.startsWith("/payload-analysis") || path.startsWith("/payload/")) return "/payloads";
+    if (path.startsWith("/payload-workbench/") || path.startsWith("/sandbox/") || path.startsWith("/github-analysis/")) return "/payload-workbench/results";
+    if (path.startsWith("/sessions/")) return "/events";
+    if (path.startsWith("/investigate/ip/")) return "/ips";
+    return path;
+  };
+  const sync = allowRemove => {
+    const side = document.querySelector(".app-sidebar__body");
+    if (!side) return;
+    /* Keep the rail positioned where the operator actually is: scroll the
+       active item (plus its nested view tabs) into view instead of leaving
+       the rail parked at the top on every navigation. */
+    const reveal = () => side.querySelector(
+      `.sidebar__item[data-hp-nav="${CSS.escape(routeFor(location.pathname))}"]`
+    )?.scrollIntoView({block: "nearest"});
+    /* data-hp-tabs-inline marks component-level tablists (ghidra's detail
+       sections, any hydrated fragment's inner tabs) that must stay in the
+       content flow -- only page-level view tabs move to the rail. */
+    const incoming = document.querySelector("main .tabs[role='tablist']:not([data-hp-tabs-inline]), .app-main .tabs[role='tablist']:not([data-hp-tabs-inline])");
+    if (incoming) {
+      /* A fresh tablist arrived with this page's content: it replaces
+         whatever rail the previous page left, nesting directly under the
+         nav item that owns this page (per Xore: "overview's tabs belong
+         below Overview, not at the end"). */
+      side.querySelectorAll(".tabs[data-hp-sidebar-tabs], .hp-views-label").forEach(n => n.remove());
+      incoming.dataset.hpSidebarTabs = "1";
+      const route = routeFor(location.pathname);
+      const anchor = side.querySelector(`.sidebar__item[data-hp-nav="${CSS.escape(route)}"]`) ||
+        side.querySelector(".sidebar__item.active");
+      if (anchor) anchor.after(incoming);
+      else side.append(incoming);
+      reveal();
+    } else if (allowRemove) {
+      /* Only a fresh content mount may conclude "this page has no view
+         tabs" -- on plain re-runs the absence just means the rail was
+         already moved into the sidebar (removing it here was the bug that
+         made the rail vanish entirely). */
+      side.querySelectorAll(".tabs[data-hp-sidebar-tabs], .hp-views-label").forEach(n => n.remove());
+      reveal();
+    } else {
+      reveal();
+    }
+  };
+  sync(false);
+  document.addEventListener("DOMContentLoaded", () => sync(false));
+  document.addEventListener("hp-page-mounted", () => sync(true));
+  addEventListener("popstate", () => sync(false));
+})();
+
+/* ── Design refresh: scroll "more" pill (pick 9C) ─────────────────────────
+   Every .card__scroll region gets a floating pill while content remains
+   below the fold, and loses it at the end -- the affordance the thin
+   scrollbar alone never quite was (theme#78). */
+(() => {
+  const attach = region => {
+    if (region.dataset.hpScrollMore) return;
+    region.dataset.hpScrollMore = "1";
+    const pill = document.createElement("div");
+    pill.className = "hp-scroll-more";
+    pill.textContent = "more ↓";
+    region.appendChild(pill);
+    const update = () => {
+      const below = region.scrollHeight - region.clientHeight - region.scrollTop;
+      pill.style.opacity = (region.scrollHeight > region.clientHeight + 24 && below > 24) ? "1" : "0";
+    };
+    region.addEventListener("scroll", update, {passive: true});
+    if (window.ResizeObserver) new ResizeObserver(update).observe(region);
+    update();
+  };
+  const scan = () => document.querySelectorAll(".card__scroll").forEach(attach);
+  scan();
+  new MutationObserver(scan).observe(document.body, {subtree: true, childList: true});
+})();
+
+/* ── Design refresh: sidebar recents (pick 12B) ───────────────────────────
+   The claude-rail sidebar keeps the operator's last few investigation
+   targets one click away. Purely client-side: visiting an entity page
+   records it in localStorage; the shell renders the newest five. */
+(() => {
+  const host = document.querySelector("[data-hp-recent]");
+  if (!host) return;
+  const KEY = "hp-recent-investigations";
+  /* localStorage never reaches the href sink: entries store an entity
+     {kind, value}, and the href is BUILT at render time from a string
+     literal plus encodeURIComponent(value) -- structurally incapable of a
+     javascript: URL or an off-site redirect no matter what a poisoned
+     entry contains (CodeQL js/xss /
+     js/client-side-unvalidated-url-redirection). */
+  /* Explicit switch, no dynamic key dispatch (CodeQL
+     js/unvalidated-dynamic-method-call): an unknown kind yields null and
+     the entry is skipped. */
+  const hrefFor = item => {
+    switch (item.kind) {
+      case "ip": return "/investigate/ip/" + encodeURIComponent(item.value);
+      case "session": return "/sessions/" + encodeURIComponent(item.value);
+      case "payload": return "/payload-analysis/" + encodeURIComponent(item.value);
+      case "events-ip": return "/events?ip=" + encodeURIComponent(item.value);
+      default: return null;
+    }
+  };
+  const safeEntry = item =>
+    !!item && typeof item.value === "string" && item.value.length > 0 &&
+    item.value.length <= 128 && hrefFor(item) !== null;
+  const read = () => {
+    try { return (JSON.parse(localStorage.getItem(KEY)) || []).filter(safeEntry); } catch { return []; }
+  };
+  const write = list => {
+    try {
+      localStorage.setItem(KEY, JSON.stringify(list.slice(0, 5).map(item => ({kind: item.kind, value: item.value}))));
+    } catch {}
+  };
+  const current = (() => {
+    const p = location.pathname;
+    let m;
+    if ((m = p.match(/^\/investigate\/ip\/([^/]+)$/))) return {kind: "ip", value: decodeURIComponent(m[1])};
+    if ((m = p.match(/^\/sessions\/([^/]+)$/))) return {kind: "session", value: decodeURIComponent(m[1])};
+    if ((m = p.match(/^\/payload-analysis\/([^/]+)$/))) return {kind: "payload", value: decodeURIComponent(m[1])};
+    const q = new URLSearchParams(location.search);
+    if (p === "/events" && q.get("ip")) return {kind: "events-ip", value: q.get("ip")};
+    return null;
+  })();
+  let list = read();
+  if (current && safeEntry(current)) {
+    list = [current, ...list.filter(item => item.kind !== current.kind || item.value !== current.value)];
+    write(list);
+  }
+  if (!list.length) return;
+  const label = document.querySelector("[data-hp-recent-label]");
+  if (label) label.hidden = false;
+  const labelFor = item => {
+    if (item.kind === "session") return "session " + item.value.slice(0, 12);
+    if (item.kind === "payload") return item.value.slice(0, 16) + "…";
+    return item.value;
+  };
+  host.replaceChildren(...list.slice(0, 5).flatMap(item => {
+    const href = hrefFor(item);
+    if (href === null) return [];
+    const a = document.createElement("a");
+    a.setAttribute("href", href);
+    a.textContent = labelFor(item);
+    a.title = labelFor(item);
+    return [a];
+  }));
+})();
+
+/* ── Design refresh: master-detail event explorer (pick EV-B) ─────────────
+   The selected row's complete normalized record (+ pivot groups) is moved
+   -- not cloned, so evidence-viewer keys stay unique -- from its row into
+   the sticky right-hand pane. Every record still arrives server-rendered
+   inside its row (#1447's no-round-trip contract, and the no-JS view);
+   .hp-md--active is what scopes the row-side hiding to JS-on. */
+(() => {
+  const init = () => {
+    const wrap = document.getElementById("events-grid");
+    if (!wrap || !wrap.classList.contains("hp-md") || wrap.dataset.hpMd) return;
+    const list = wrap.querySelector("[data-hp-md-list]");
+    const slot = wrap.querySelector("[data-hp-md-slot]");
+    if (!list || !slot) return;
+    wrap.dataset.hpMd = "1";
+    wrap.classList.add("hp-md--active");
+    const emptyNote = wrap.querySelector("[data-hp-md-empty]");
+    let home = null; // {td, nodes} of the currently projected record
+
+    const restore = () => {
+      if (home) home.nodes.forEach(node => home.td.append(node));
+      home = null;
+    };
+    const select = tr => {
+      const article = tr.querySelector("article[data-hp-event-detail]");
+      if (!article) return;
+      restore();
+      list.querySelectorAll("tr.selected").forEach(row => row.classList.remove("selected"));
+      tr.classList.add("selected");
+      const meta = tr.querySelector(".eventmeta");
+      home = {td: article.parentElement, nodes: meta ? [article, meta] : [article]};
+      slot.replaceChildren(...home.nodes);
+      if (emptyNote) emptyNote.hidden = true;
+    };
+
+    list.addEventListener("click", event => {
+      if (event.target.closest("a, button, details, input, label")) return;
+      const tr = event.target.closest("tr[data-hp-event]");
+      if (tr) select(tr);
+    });
+    const first = list.querySelector("tr[data-hp-event]");
+    if (first) select(first);
+  };
+  init();
+  new MutationObserver(init).observe(document.body, {subtree: true, childList: true});
+})();
+
+/* ── Design refresh: wizard navigation (pick RP-C) ────────────────────────
+   Drives an existing tabbed flow one decision at a time: Back/Continue
+   walk the data-hp-wizard-steps list by clicking the matching
+   data-dashboard-tab buttons (wherever they live -- the sidebar rail after
+   relocation), with progress dots in between. */
+(() => {
+  const init = () => {
+    const nav = document.querySelector("[data-hp-wizard]");
+    if (!nav || nav.dataset.hpWizardInit) return;
+    nav.dataset.hpWizardInit = "1";
+    const steps = (nav.dataset.hpWizardSteps || "").split(",").filter(Boolean);
+    if (!steps.length) return;
+    const tabFor = step => document.querySelector(`[data-dashboard-tab="${step}"]`);
+    const prev = nav.querySelector("[data-hp-wizard-prev]");
+    const next = nav.querySelector("[data-hp-wizard-next]");
+    const dots = nav.querySelector("[data-hp-wizard-progress]");
+    const currentIndex = () => {
+      const active = document.querySelector("[data-dashboard-tab].active");
+      const at = steps.indexOf(active?.dataset.dashboardTab);
+      return at === -1 ? 0 : at;
+    };
+    const render = () => {
+      const at = currentIndex();
+      if (dots) dots.replaceChildren(...steps.map((_, i) => {
+        const dot = document.createElement("i");
+        if (i < at) dot.className = "done";
+        else if (i === at) dot.className = "on";
+        return dot;
+      }));
+      if (prev) prev.disabled = at === 0;
+      if (next) next.textContent = at >= steps.length - 1 ? "Finish — save or generate ↓" : "Continue →";
+    };
+    const go = delta => {
+      const at = currentIndex();
+      const target = steps[Math.min(steps.length - 1, Math.max(0, at + delta))];
+      tabFor(target)?.click();
+      render();
+    };
+    prev?.addEventListener("click", () => go(-1));
+    next?.addEventListener("click", () => {
+      if (currentIndex() >= steps.length - 1) {
+        document.getElementById("hp-rp-actions")?.scrollIntoView({behavior: "smooth", block: "center"});
+        return;
+      }
+      go(1);
+    });
+    steps.forEach(step => tabFor(step)?.addEventListener("click", () => setTimeout(render, 0)));
+    render();
+  };
+  init();
+  new MutationObserver(init).observe(document.body, {subtree: true, childList: true});
+})();
+
+/* ── Design refresh: copy-to-clipboard quick action (pick 14B) ──────────── */
+document.addEventListener("click", event => {
+  const btn = event.target.closest("[data-hp-copy]");
+  if (!btn) return;
+  event.preventDefault();
+  navigator.clipboard?.writeText(btn.dataset.hpCopy).then(() => {
+    const flash = document.getElementById("hp-flash");
+    if (!flash) return;
+    flash.textContent = `Copied ${btn.dataset.hpCopy}`;
+    flash.dataset.state = "ok";
+    flash.classList.add("open");
+    setTimeout(() => flash.classList.remove("open"), 1600);
+  }).catch(() => {});
+});

@@ -507,7 +507,12 @@ func (w *pdfReportWriter) cover(data reportData) {
 	}
 	w.text(32, w.y, 8.5, false, t.MutedText, "Generated: "+data.Generated.Format("2006-01-02 15:04:05 MST"))
 	w.y -= 13
-	window := firstNonEmpty(data.Summary.FirstSeen, "not available") + " to " + firstNonEmpty(data.Summary.LastSeen, "not available")
+	// #1567: "not available to not available" read as a copy bug -- when
+	// neither bound is known, say so once.
+	window := "not available"
+	if data.Summary.FirstSeen != "" || data.Summary.LastSeen != "" {
+		window = firstNonEmpty(data.Summary.FirstSeen, "unknown") + " to " + firstNonEmpty(data.Summary.LastSeen, "unknown")
+	}
 	w.text(32, w.y, 8.5, false, t.MutedText, "Observed window: "+window)
 	w.y -= 13
 	w.text(32, w.y, 8.5, false, t.Accent, "Classification: "+w.branding.Classification)
