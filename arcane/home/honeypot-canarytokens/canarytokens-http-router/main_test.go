@@ -22,15 +22,15 @@ func TestExtractToken(t *testing.T) {
 		wantToken string
 		wantOK    bool
 	}{
-		{valid + ".xore.rocks", valid, true},
-		{valid + ".xore.rocks:443", valid, true},                                    // port must be stripped before matching
-		{"XORE." + valid, "", false},                                                // wrong order: label isn't the leading one
-		{"dashboard.xore.rocks", "", false},                                         // real named subdomain, not token-shaped
-		{"xore.rocks", "", false},                                                   // bare apex, no leading label to check
-		{valid[:24] + ".xore.rocks", "", false},                                     // one char short
-		{valid + "x.xore.rocks", "", false},                                         // one char long
-		{"UPPERCASE1234567890ABCDEF.xore.rocks", "uppercase1234567890abcdef", true}, // lowercased before matching (25 chars)
-		{"has-a-dash-in-it-1234567.xore.rocks", "", false},                          // dash isn't in CANARYTOKEN_ALPHABET
+		{valid + ".honeypot.example", valid, true},
+		{valid + ".honeypot.example:443", valid, true},                                    // port must be stripped before matching
+		{"XORE." + valid, "", false},                                                      // wrong order: label isn't the leading one
+		{"dashboard.honeypot.example", "", false},                                         // real named subdomain, not token-shaped
+		{"honeypot.example", "", false},                                                   // bare apex, no leading label to check
+		{valid[:24] + ".honeypot.example", "", false},                                     // one char short
+		{valid + "x.honeypot.example", "", false},                                         // one char long
+		{"UPPERCASE1234567890ABCDEF.honeypot.example", "uppercase1234567890abcdef", true}, // lowercased before matching (25 chars)
+		{"has-a-dash-in-it-1234567.honeypot.example", "", false},                          // dash isn't in CANARYTOKEN_ALPHABET
 		{"", "", false},
 	}
 	for _, c := range cases {
@@ -52,8 +52,8 @@ func TestServeHTTPRewritesPathForTokenShapedHost(t *testing.T) {
 
 	rt := newTestRouter(t, backend.URL)
 
-	req := httptest.NewRequest(http.MethodGet, "http://"+token+".xore.rocks/RANDOMPADDING", nil)
-	req.Host = token + ".xore.rocks"
+	req := httptest.NewRequest(http.MethodGet, "http://"+token+".honeypot.example/RANDOMPADDING", nil)
+	req.Host = token + ".honeypot.example"
 	w := httptest.NewRecorder()
 	rt.ServeHTTP(w, req)
 
@@ -73,8 +73,8 @@ func TestServeHTTPLeavesPathAloneForNonTokenHost(t *testing.T) {
 
 	rt := newTestRouter(t, backend.URL)
 
-	req := httptest.NewRequest(http.MethodGet, "http://dashboard.xore.rocks/some/path", nil)
-	req.Host = "dashboard.xore.rocks"
+	req := httptest.NewRequest(http.MethodGet, "http://dashboard.honeypot.example/some/path", nil)
+	req.Host = "dashboard.honeypot.example"
 	w := httptest.NewRecorder()
 	rt.ServeHTTP(w, req)
 
