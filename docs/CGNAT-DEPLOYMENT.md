@@ -350,7 +350,12 @@ Create proxied DNS records for the HTTP services you enable, normally:
   embedded in every dashboard-created PDF/Word/Excel/image/QR/Windows-Folder
   token, and a planted artifact that outs itself as a tripwire on inspection
   defeats the point. Unauthenticated, like `decoy`/`www-portal` — it must be
-  reachable by whoever opens the planted artifact, not just operators)
+  reachable by whoever opens the planted artifact, not just operators.
+  **Must be a wildcard record (`*.cdn`), not a flat one** —
+  `canarydrop.generate_random_hostname()` prepends each token's own random
+  value as a subdomain (`<token>.cdn.example.com`), so a flat `cdn` record
+  alone leaves every actual trigger URL unresolvable; confirmed live, see
+  #1487's canarytokens follow-up work)
 - `hub` (optional — galah's Traefik-routed path, #1511. Its own raw
   non-standard port isn't on Cloudflare's proxied-port allowlist, so this
   is the only way it's reachable through this domain at all. Deliberately
