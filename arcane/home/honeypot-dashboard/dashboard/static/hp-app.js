@@ -1488,6 +1488,15 @@
     };
     const themeToggle = shell.querySelector("[data-hp-theme-toggle]");
     const applyTheme = mode => {
+      /* A11y (design refresh): swapping the theme used to animate every
+         color/background at its own transition pace -- for a beat, light
+         ink sat on still-dark surfaces (reported live as "black text on
+         dark background"). The head bootstrap + the server-pref re-apply
+         made that beat happen on ordinary page loads whenever the two
+         disagreed. Suppress transitions for the swap frame. */
+      document.documentElement.classList.add("hp-theme-switching");
+      requestAnimationFrame(() => requestAnimationFrame(() =>
+        document.documentElement.classList.remove("hp-theme-switching")));
       if (mode === "system") delete document.documentElement.dataset.theme;
       else document.documentElement.dataset.theme = mode;
       try {
