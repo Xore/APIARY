@@ -2373,20 +2373,6 @@ a.metric:hover { border-color: var(--border-strong); background: var(--surface-2
   .card, .card.half { grid-column: 1 / -1; }
 }
 
-/* #1565: overview's ASNs/Providers card pair -- ASNs is routinely a dozen-
-   plus dense rows of long "AS15169 Google LLC" strings, Providers usually
-   a handful of short single-word labels, so a forced even half/half split
-   read as an unbalanced pair. Same responsive fallbacks as every other
-   .card.half above, just an 8/4 split instead of 6/6 above that. */
-#overview-asns-card { grid-column: span 8; }
-#overview-providers-card { grid-column: span 4; }
-@media (max-width: 1180px) {
-  #overview-asns-card, #overview-providers-card { grid-column: span 6; }
-}
-@media (max-width: 800px) {
-  #overview-asns-card, #overview-providers-card { grid-column: 1 / -1; }
-}
-
 .section-heading {
   grid-column: 1 / -1;
   display: flex; align-items: flex-end; justify-content: space-between; gap: 16px;
@@ -3574,11 +3560,6 @@ tr:hover .hp-row-actions, tr.selected .hp-row-actions { opacity: 1; }
    "World" reset control from clipping mid-word at the card edge. */
 .leaflet-container { background: var(--surface-2); }
 .leaflet-control-home { white-space: nowrap; padding: 3px 10px; }
-/* #1565: Leaflet's stock attribution strip sits flush against the map's
-   bottom-right corner with no inset -- inside .map-shell's own rounded
-   border it read as overlapping/cut off by the curve rather than sitting
-   inside it. A small margin off both edges and a matching corner radius. */
-.leaflet-bottom.leaflet-right .leaflet-control-attribution { margin: 0 8px 8px 0; border-radius: 6px; }
 
 /* ── One-off utilities ──────────────────────────────────────────────────
    #191 asked to drop the Tailwind build entirely. These ~30 classes are
