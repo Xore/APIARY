@@ -528,6 +528,18 @@ test.describe("dashboard browser behaviour", () => {
     await expect(controls).toContainText(`50 of ${total} entries`);
   });
 
+  // #1567: the filter panel closed on click-away already (a delegated
+  // document click handler), but had no visible way to dismiss it short
+  // of that -- this is the button that fixes the discoverability gap.
+  test("the filter panel has a visible close button, not just click-away", async ({ page }) => {
+    await page.goto("/events", { waitUntil: "domcontentloaded" });
+    const details = page.locator(".hp-open-in.action-menu").filter({ has: page.locator(".hp-filterbar-menu") });
+    await details.locator(":scope > summary").click();
+    await expect(details).toHaveAttribute("open", "");
+    await page.locator("[data-hp-filterbar-close]").click();
+    await expect(details).not.toHaveAttribute("open", "");
+  });
+
   test("live overview hydration preserves the connected map node", async ({ page }) => {
     await page.goto("/");
     const result = await page.evaluate(() => {
