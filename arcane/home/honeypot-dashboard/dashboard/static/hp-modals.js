@@ -121,8 +121,13 @@
     // believes is worse than none. github-analysis/submit always sets its own
     // text (below in payloads.html) precisely because "will be detonated" is
     // wrong for it in the other direction: publication is not local at all.
+    // #1566: /ml-anomalies/ack-all (ml_anomalies.html's bulk-acknowledge
+    // button) reuses this same listener rather than alerts.html's separate
+    // fetch-driven confirm -- it always sets its own text too, same as
+    // github-analysis/submit, so the sandbox-specific default below never
+    // shows for it.
     const form = event.target.closest(
-      'form[action="/sandbox/submit"], form[action="/ghidra/submit"], form[action="/github-analysis/submit"]',
+      'form[action="/sandbox/submit"], form[action="/ghidra/submit"], form[action="/github-analysis/submit"], form[action="/ml-anomalies/ack-all"]',
     );
     if (!form || form.dataset.hpConfirmed === "true") return;
     // Only forms that opt in are interrupted. The payloads page carries a
