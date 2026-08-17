@@ -1045,21 +1045,29 @@
     const shell = document.querySelector(".app-shell");
     if (!shell) return;
 
-    /* Active nav + page identity */
-    const current = activeHref();
-    shell.querySelectorAll("[data-hp-nav]").forEach(link => {
-      const active = link.dataset.hpNav === current;
-      link.classList.toggle("active", active);
-      if (active) link.setAttribute("aria-current", "page");
-    });
-    const identity = shell.querySelector("[data-hp-page-name]");
-    if (identity) identity.textContent = pageName();
+    /* Active nav + page identity. Re-synced on every content mount and on
+       back/forward: with #1564's shell-wide fetch-and-swap the sidebar is
+       never re-rendered by the server, so a one-shot pass left the landing
+       page highlighted forever. */
+    const syncActiveNav = () => {
+      const current = activeHref();
+      shell.querySelectorAll("[data-hp-nav]").forEach(link => {
+        const active = link.dataset.hpNav === current;
+        link.classList.toggle("active", active);
+        if (active) link.setAttribute("aria-current", "page");
+        else link.removeAttribute("aria-current");
+      });
+      const identity = shell.querySelector("[data-hp-page-name]");
+      if (identity) identity.textContent = pageName();
+    };
+    syncActiveNav();
+    document.addEventListener("hp-page-mounted", syncActiveNav);
+    addEventListener("popstate", syncActiveNav);
 
-    /* The recent-investigations rail was removed; drop anything an earlier
-       version of the dashboard left behind in this browser. */
-    try { localStorage.removeItem("hp-recent-investigations"); } catch {}
-    /* Ditto for the command bar's old show/hide preference: it's a modal
-       now (#193), there's nothing left to hide. */
+    /* hp-recent-investigations is live again (design refresh, pick 12B) --
+       the old removal cleanup is gone with it. */
+    /* The command bar's old show/hide preference: it's a modal now (#193),
+       there's nothing left to hide. */
     try { localStorage.removeItem("hp-command-dock-hidden"); } catch {}
 
     /* Sidebar collapse (persisted) / mobile off-canvas open */

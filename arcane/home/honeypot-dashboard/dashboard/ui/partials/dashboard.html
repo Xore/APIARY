@@ -24,6 +24,11 @@
 
 {{define "sidebar"}}
 <aside class="app-sidebar" aria-label="Primary navigation">
+  {{/* Design refresh: claude.ai-style search affordance in the sidebar's
+       top row -- one more opener for the same investigation palette. */}}
+  <button class="hp-sidebar-search" type="button" data-hp-command-palette-open aria-label="Search and investigate" title="Search and investigate (press /)">
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+  </button>
   <a href="/" class="hp-brand">
     <span class="hp-brand-mark" aria-hidden="true">
       <img class="theme-art--dark" src="{{asset "/static/apiary-compact-mark-for-dark.png"}}" width="28" height="28" alt="">
