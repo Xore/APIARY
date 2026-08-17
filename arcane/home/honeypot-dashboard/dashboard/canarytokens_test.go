@@ -64,8 +64,26 @@ func fakeCanarytokensServer(t *testing.T) *httptest.Server {
 			}
 			tokenType = r.FormValue("token_type")
 			memo = r.FormValue("memo")
-			if _, _, err := r.FormFile("web_image"); err != nil {
+			file, header, err := r.FormFile("web_image")
+			if err != nil {
 				t.Fatalf("server: expected web_image file part: %v", err)
+			}
+			file.Close()
+			// Mirrors canarytokens/models/web_image.py's UploadedImage.content_type
+			// (a Pydantic Literal["image/png","image/gif","image/jpeg"]) --
+			// upstream validates the multipart part's own Content-Type header,
+			// not the bytes, and rejects anything else (including Go's
+			// mime/multipart.CreateFormFile's own hardcoded
+			// "application/octet-stream" default) with a generic error. #1586
+			// item 4's web_image-always-502s bug was exactly this: the client
+			// used to send that default unconditionally. Confirmed live against
+			// the real canarytokens-frontend container.
+			switch header.Header.Get("Content-Type") {
+			case "image/png", "image/gif", "image/jpeg":
+			default:
+				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": "1", "error_message": "Malformed request, invalid data supplied."})
+				return
 			}
 		} else {
 			var body map[string]any
@@ -130,17 +148,70 @@ func TestCanarytokensClientGenerateRequiresMemo(t *testing.T) {
 	}
 }
 
+// fakePNGBytes is real PNG magic-byte content (a 1x1 image) -- long enough
+// for http.DetectContentType to positively identify it as image/png, unlike
+// a short literal such as "fake-png-bytes".
+var fakePNGBytes = []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0}
+
 func TestCanarytokensClientGenerateWithUpload(t *testing.T) {
+	srv := fakeCanarytokensServer(t)
+	client := newCanarytokensClient(srv.URL, "/root")
+	result, err := client.generate(canarytokensGenerateRequest{
+		TokenType:         canarytokensCustomImage,
+		Memo:              "logo",
+		UploadFilename:    "logo.png",
+		UploadContentType: "image/png",
+		UploadBytes:       fakePNGBytes,
+	})
+	if err != nil {
+		t.Fatalf("generate with upload: %v", err)
+	}
+	if result.Token == "" {
+		t.Fatal("expected a token")
+	}
+}
+
+// TestCanarytokensClientGenerateWithUploadRejectsWrongDeclaredContentType is
+// the regression case for #1586 item 4: web_image creation always 502'd
+// because generate() built the outbound multipart part with
+// mime/multipart.CreateFormFile, which hardcodes Content-Type:
+// application/octet-stream with no way to override it -- and upstream
+// (canarytokens/models/web_image.py's UploadedImage) rejects any Content-
+// Type other than image/png, image/gif, or image/jpeg on that part,
+// regardless of the actual bytes. fakeCanarytokensServer's own web_image
+// handling mirrors that validation, so this documents (and pins) the
+// pre-fix failure mode.
+func TestCanarytokensClientGenerateWithUploadRejectsWrongDeclaredContentType(t *testing.T) {
+	srv := fakeCanarytokensServer(t)
+	client := newCanarytokensClient(srv.URL, "/root")
+	_, err := client.generate(canarytokensGenerateRequest{
+		TokenType:         canarytokensCustomImage,
+		Memo:              "logo",
+		UploadFilename:    "logo.bin",
+		UploadContentType: "application/octet-stream",
+		UploadBytes:       []byte("not sniffable as an image"),
+	})
+	if err == nil {
+		t.Fatal("expected upstream to reject a non-image declared Content-Type for bytes it can't sniff as an image either")
+	}
+}
+
+// TestCanarytokensClientGenerateWithUploadSniffsUndeclaredImageType covers
+// createFormFileWithContentType's fallback: a declared Content-Type that
+// isn't one of upstream's accepted values (here, empty -- e.g. a browser
+// that couldn't determine a MIME type) must not doom a genuinely-valid
+// image upload; the actual bytes get sniffed instead.
+func TestCanarytokensClientGenerateWithUploadSniffsUndeclaredImageType(t *testing.T) {
 	srv := fakeCanarytokensServer(t)
 	client := newCanarytokensClient(srv.URL, "/root")
 	result, err := client.generate(canarytokensGenerateRequest{
 		TokenType:      canarytokensCustomImage,
 		Memo:           "logo",
 		UploadFilename: "logo.png",
-		UploadBytes:    []byte("fake-png-bytes"),
+		UploadBytes:    fakePNGBytes,
 	})
 	if err != nil {
-		t.Fatalf("generate with upload: %v", err)
+		t.Fatalf("generate with upload (sniffed content type): %v", err)
 	}
 	if result.Token == "" {
 		t.Fatal("expected a token")
@@ -283,7 +354,7 @@ func TestServeCanarytokensCreateImageTypeIsEmbedOnly(t *testing.T) {
 	srv := fakeCanarytokensServer(t)
 	s := newCanarytokensTestStore(t, "admin", srv.URL)
 	response := httptest.NewRecorder()
-	req := multipartCanarytokensRequest(t, true, map[string]string{"token_type": "web_image", "memo": "logo"}, "file", "logo.png", []byte("fake-png"))
+	req := multipartCanarytokensRequest(t, true, map[string]string{"token_type": "web_image", "memo": "logo"}, "file", "logo.png", fakePNGBytes)
 	s.serveCanarytokensCreate(response, req)
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
