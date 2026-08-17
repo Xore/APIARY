@@ -245,8 +245,14 @@
           {{template "tbl" dict "t" "Top source IPs" "rows" .TopIPs}}
           {{template "tbl" dict "t" "Top targeted ports" "rows" .TopPorts}}
           {{if .GeoOn}}{{template "tbl" dict "t" "Top countries" "rows" .Countries}}{{else if .Countries}}{{template "tbl" dict "t" "Top countries (cf-ipcountry)" "rows" .Countries}}{{end}}
-          {{template "tbl" dict "t" "Top autonomous systems" "rows" .ASNs "class" "half"}}
-          {{template "tbl" dict "t" "Network/provider classes" "rows" .Providers "class" "half"}}
+          {{/* #1565: ASNs routinely runs a dozen-plus dense, scrolling rows
+               of long "AS15169 Google LLC"-style strings while Providers is
+               usually a handful of short single-word labels -- an even
+               half/half split read as an unbalanced pair (one packed and
+               scrolling, its sibling mostly empty space). Ids give
+               theme.css a hook to widen the busier card instead. */}}
+          {{template "tbl" dict "t" "Top autonomous systems" "rows" .ASNs "class" "half" "id" "overview-asns-card"}}
+          {{template "tbl" dict "t" "Network/provider classes" "rows" .Providers "class" "half" "id" "overview-providers-card"}}
 
           {{/* #1278: wire-level flow volume from suricata-v2-netflow-*, live
                ES date_histogram+sum (netflow_volume.go) -- the event-count
@@ -338,13 +344,17 @@
           <div class="card wide" id="tls-fingerprints-card">
             <h2>TLS scanner fingerprints (JA4) — wire-level, last 7 days</h2>
             <p class="note">Every TLS handshake against a non-dashboard port, not just ones that triggered an alert. Two connections sharing a JA4 hash used the same TLS client implementation, regardless of whether either tripped a signature.</p>
-            <div data-echart="/api/tls-fingerprints" data-echart-kind="bar" style="width:100%;height:320px"></div>
+            {{/* #1565: horizontal bars -- a JA4 hash runs 30-60+ characters,
+                 unreadable as a rotated/truncated vertical-bar x-axis label
+                 regardless of truncation width. Click a bar to copy its
+                 full hash (hp-kill-chain.js's initBarH). */}}
+            <div data-echart="/api/tls-fingerprints" data-echart-kind="barh" style="width:100%;height:360px"></div>
             <p class="note" data-echart-status="/api/tls-fingerprints">Loading&hellip;</p>
           </div>
           <div class="card wide" id="ssh-fingerprints-card">
             <h2>SSH client software — wire-level, last 7 days</h2>
             <p class="note">Every SSH handshake's client software banner, not just ones that triggered an alert.</p>
-            <div data-echart="/api/ssh-fingerprints" data-echart-kind="bar" style="width:100%;height:320px"></div>
+            <div data-echart="/api/ssh-fingerprints" data-echart-kind="barh" style="width:100%;height:360px"></div>
             <p class="note" data-echart-status="/api/ssh-fingerprints">Loading&hellip;</p>
           </div>
           {{/* #1294: held_ms/lines were already captured per disconnect
@@ -405,7 +415,7 @@
           </div>
 
           <div class="card wide">
-            <div class="tw:flex tw:flex-wrap tw:items-center tw:justify-between tw:gap-2"><h2>Correlated campaigns — rolling 7 days</h2><a class="lnk" href="/campaigns">Every column, every network &rarr;</a></div>
+            <div class="tw:flex tw:flex-wrap tw:items-center tw:justify-between tw:gap-2"><h2>Correlated campaigns — rolling 7 days</h2><a class="lnk" href="/campaigns">Open full campaign correlation &rarr;</a></div>
             {{/* #478: the overview page previously reused /campaigns' own
                  full 17-column table (score/network/events/ips/sensors/
                  ports/creds/files/alerts/ASNs/provider/fingerprints/
@@ -421,7 +431,7 @@
             {{/* #790 chunk 2: card__scroll -- correlateCampaigns has no cap
                  either, same reasoning as the payloads card above. */}}
             <div class="card__scroll"><table class="recent data-table">
-              <thead><tr><th>score</th><th>network</th><th>events</th><th>ips</th><th>sensors</th><th>last seen</th></tr></thead>
+              <thead><tr><th>network</th><th>events</th><th>ips</th><th>sensors</th><th>last seen</th></tr></thead>
               <tbody>{{template "campaignrows-summary" .Campaigns}}</tbody>
             </table></div>
             {{else if .Ready}}<p class="empty">waiting for correlatable public source addresses</p>
