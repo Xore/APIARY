@@ -23,7 +23,19 @@
   async function api(path, options) {
     const response = await fetch(path, { cache: "no-store", ...options });
     if (!response.ok) {
-      const error = new Error(await response.text().catch(() => response.statusText));
+      // #1586: a request that never reached this dashboard's own handler at
+      // all -- an intermediate proxy 502/504/522 in front of it -- answers
+      // with its own branded HTML error page, not plain text from us. Every
+      // real error this dashboard's own /api/settings/canarytokens* routes
+      // produce is a short plain-text or JSON body (http.Error and friends);
+      // surfacing anything under a text/html Content-Type verbatim just
+      // dumps that page's full markup into the UI as if it were a message.
+      const contentType = response.headers.get("Content-Type") || "";
+      const body = await response.text().catch(() => "");
+      const message = contentType.includes("text/html")
+        ? `the server returned an unexpected response (HTTP ${response.status}) -- it may be temporarily unreachable, try again in a moment`
+        : (body || response.statusText);
+      const error = new Error(message);
       error.status = response.status;
       throw error;
     }
