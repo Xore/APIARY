@@ -184,10 +184,10 @@
     onConnectionChange: listener => { liveConnListeners.add(listener); return () => liveConnListeners.delete(listener); },
   });
 
-  /* ---------- lazy loading (sentinel + offset fetching) ---------- */
+  /* ---------- explicit paging ("View more" + offset fetching) ---------- */
   // Keep long investigation views responsive without traditional page links.
-  // The first 25 rows are visible immediately; another 25 are revealed when
-  // the sentinel approaches the viewport or the accessible button is pressed.
+  // The first 25 rows are visible immediately; each further batch of 25 is
+  // requested only through the visible "View more" button.
   const lazyPageSize = 25;
   const lazyTables = new WeakMap();
   const lazyLists = new WeakMap();
@@ -197,19 +197,47 @@
   // body.children and appends via insertAdjacentHTML, neither of which
   // cares whether body is a <tbody> or a plain container.
   const remoteContainers = new WeakMap();
-  const lazyObserver = "IntersectionObserver" in window ? new IntersectionObserver(entries => {
-    entries.filter(entry => entry.isIntersecting).forEach(entry => {
-      const table = entry.target.__hpLazyTable;
-      if (table) revealLazyRows(table);
-      const list = entry.target.__hpLazyList;
-      if (list) revealLazyItems(list);
-      const remote = entry.target.__hpRemoteContainer;
-      if (remote) loadRemoteItems(remote);
-    });
-  }, {rootMargin: "500px 0px"}) : null;
-
+  /* Per Xore: NO scroll-triggered loading anywhere -- the IntersectionObserver
+     sentinel that used to auto-reveal/auto-fetch as the reader neared the end
+     is gone. Every next batch is requested explicitly through the visible
+     "View more" control (the round scroll button's load mode clicks the same
+     control), so nothing moves under the reader without a click. */
   const lazyControlsHTML = () =>
-    `<span></span><button class="btn btn-secondary btn-sm" type="button">Load 25 more</button><span class="hp-lazy-sentinel" aria-hidden="true"></span>`;
+    `<span></span><button class="btn btn-secondary btn-sm" type="button">View more</button>`;
+
+  /* Skeleton-first (hard rule per Xore): anything fetched from the ES store
+     shows skeletons before data. A remote "View more" batch appends
+     placeholder rows/cards immediately and swaps them for the fetched
+     entries (or removes them on error). */
+  const skeletonBatch = (body, n) => {
+    const isTbody = body.tagName === "TBODY";
+    const cols = isTbody ? (body.closest("table")?.tHead?.rows[0]?.cells.length || 1) : 0;
+    const nodes = [];
+    for (let i = 0; i < n; i++) {
+      let node;
+      if (isTbody) {
+        node = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = cols;
+        const line = document.createElement("span");
+        line.className = "skeleton-line";
+        td.append(line);
+        node.append(td);
+      } else {
+        node = document.createElement("div");
+        for (let j = 0; j < 3; j++) {
+          const line = document.createElement("div");
+          line.className = "skeleton-line";
+          node.append(line);
+        }
+      }
+      node.classList.add("hp-skel-batch");
+      node.setAttribute("aria-hidden", "true");
+      body.append(node);
+      nodes.push(node);
+    }
+    return nodes;
+  };
 
   const updateLazyTable = table => {
     const state = lazyTables.get(table);
@@ -220,11 +248,7 @@
     rows.forEach((row, index) => { row.hidden = index >= state.shown; });
     state.counter.textContent = `${Math.min(state.shown, rows.length)} of ${rows.length} entries`;
     state.controls.hidden = rows.length <= lazyPageSize;
-    const more = state.shown < rows.length;
-    state.button.hidden = !more;
-    state.sentinel.hidden = !more;
-    if (!more) lazyObserver?.unobserve(state.sentinel);
-    else lazyObserver?.observe(state.sentinel);
+    state.button.hidden = state.shown >= rows.length;
   };
 
   const revealLazyRows = table => {
@@ -240,19 +264,16 @@
      through" arithmetic and the next fetch offset must skip them or every
      break would silently displace a real row at the end of the list. */
   const remoteRowCount = body =>
-    [...body.children].filter(child => !child.classList.contains("hp-feed-break")).length;
+    [...body.children].filter(child =>
+      !child.classList.contains("hp-feed-break") && !child.classList.contains("hp-skel-batch")).length;
 
   const updateRemoteContainer = key => {
     const state = remoteContainers.get(key);
     if (!state) return;
     const loadedThrough = state.offset + remoteRowCount(state.body);
     state.counter.textContent = `${Math.min(loadedThrough, state.total)} of ${state.total} entries`;
-    const more = loadedThrough < state.total;
     state.controls.hidden = state.total <= lazyPageSize;
-    state.button.hidden = !more;
-    state.sentinel.hidden = !more;
-    if (!more) lazyObserver?.unobserve(state.sentinel);
-    else lazyObserver?.observe(state.sentinel);
+    state.button.hidden = loadedThrough >= state.total;
   };
 
   const loadRemoteItems = async key => {
@@ -261,6 +282,7 @@
     if (!state || state.loading || nextOffset >= state.total) return;
     state.loading = true;
     state.button.disabled = true;
+    const skeletons = skeletonBatch(state.body, Math.min(lazyPageSize, state.total - nextOffset));
     const separator = state.url.includes("?") ? "&" : "?";
     try {
       const response = await fetch(`${state.url}${separator}offset=${nextOffset}`, {
@@ -283,6 +305,7 @@
     } catch (error) {
       state.counter.textContent = `Could not load more entries (${error.message})`;
     } finally {
+      skeletons.forEach(node => node.remove());
       state.loading = false;
       state.button.disabled = false;
     }
@@ -302,10 +325,8 @@
       controls,
       counter: controls.querySelector("span"),
       button: controls.querySelector("button"),
-      sentinel: controls.querySelector(".hp-lazy-sentinel"),
       loading: false,
     };
-    state.sentinel.__hpRemoteContainer = key;
     state.button.addEventListener("click", () => loadRemoteItems(key));
     remoteContainers.set(key, state);
     updateRemoteContainer(key);
@@ -329,10 +350,8 @@
       controls,
       counter: controls.querySelector("span"),
       button: controls.querySelector("button"),
-      sentinel: controls.querySelector(".hp-lazy-sentinel"),
       scheduled: false,
     };
-    state.sentinel.__hpLazyTable = table;
     state.button.addEventListener("click", () => revealLazyRows(table));
     lazyTables.set(table, state);
     new MutationObserver(records => {
@@ -360,9 +379,6 @@
     state.controls.hidden = items.length <= lazyPageSize;
     const more = state.shown < items.length;
     state.button.hidden = !more;
-    state.sentinel.hidden = !more;
-    if (!more) lazyObserver?.unobserve(state.sentinel);
-    else lazyObserver?.observe(state.sentinel);
   };
 
   const revealLazyItems = list => {
@@ -388,10 +404,8 @@
       controls,
       counter: controls.querySelector("span"),
       button: controls.querySelector("button"),
-      sentinel: controls.querySelector(".hp-lazy-sentinel"),
       scheduled: false,
     };
-    state.sentinel.__hpLazyList = list;
     state.button.addEventListener("click", () => revealLazyItems(list));
     lazyLists.set(list, state);
     new MutationObserver(records => {
@@ -2056,7 +2070,7 @@
    not just the scroll affordance the thin scrollbar never quite was
    (theme#78). Mid-list ("more ↓") a click pages the region down. Near the
    end of a list that still has entries to load -- the region's own lazy /
-   remote "Load 25 more" control (initLazyViews above) -- it reads
+   remote "View more" control (initLazyViews above) -- it reads
    "load more ↓", a click loads the next batch and the pill hides,
    returning when the reader nears the new end. Only at the true end of a
    fully-loaded list does it disappear for good. */
@@ -2095,7 +2109,7 @@
       const nearEnd = below <= NEAR_END;
       const loadable = nearEnd ? loadControl(region) : null;
       const show = (region.scrollHeight > region.clientHeight + 24 && below > 24) || !!loadable;
-      const label = loadable ? "Load 25 more" : "Scroll for more";
+      const label = loadable ? "View more" : "Scroll for more";
       /* Only write on change: attribute writes would loop through the
          MutationObserver below forever (it watches subtree attributes). */
       if (pill.title !== label) {

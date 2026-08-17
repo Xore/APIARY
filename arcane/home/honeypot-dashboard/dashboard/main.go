@@ -357,19 +357,13 @@ func main() {
 		// the observed warm-up time specifically so a slow-but-normal
 		// warm-up never counts as a real healthcheck failure either.
 		s.ready.Store(true)
-		// #266: with two dashboard replicas behind Traefik for zero-downtime
-		// rolling updates, both would otherwise run these two loops
-		// independently -- notifyLoop firing the same webhook alert twice
-		// (once per replica) and reportScheduleLoop generating the same
-		// scheduled PDF twice are real, user-visible duplicates, unlike
-		// rebuild() above (each replica just recomputes its own in-memory
-		// snapshot; no shared side effect to duplicate). DASHBOARD_BACKGROUND_LOOPS=false
-		// on the secondary replica (docker-compose.dashboard.yml's
-		// dashboard-b) opts it out of both, so exactly one replica ever
-		// runs them -- not a general leader-election system, just enough to
-		// avoid duplicate outbound side effects with a fixed two-replica
-		// topology. Every replica still serves HTTP and runs rebuild()
-		// regardless of this flag.
+		// DASHBOARD_BACKGROUND_LOOPS gates the two loops with outbound side
+		// effects -- notifyLoop (webhook alerts) and reportScheduleLoop
+		// (scheduled PDFs) -- which must run on exactly one replica or every
+		// alert/PDF duplicates. The #266 rolling pair that needed this is
+		// retired (single replica per Xore; unset means enabled, so the one
+		// dashboard runs both), but the flag stays for any future return to
+		// replicas. Serving HTTP and rebuild() are never gated by it.
 		if backgroundLoopsEnabled() {
 			go s.notifyLoop(os.Getenv("ALERT_WEBHOOK_URL"))
 			go s.reportScheduleLoop()

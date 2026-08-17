@@ -48,18 +48,9 @@ x-runtime-defaults: &runtime-defaults
       max-size: "25m"
       max-file: "3"
 
-# #266: shared between dashboard and dashboard-b (the zero-downtime
-# rolling-update replica pair, see that service's own header comment) so
-# the one thing that must never drift between two containers reading the
-# same host paths -- which paths those are -- lives in exactly one place.
-# environment/healthcheck/etc. below are NOT anchored the same way and are
-# duplicated verbatim between the two services instead: Compose/YAML merge
-# keys replace a list wholesale rather than appending to it, so sharing an
-# anchor there would mean dashboard-b's one real difference
-# (DASHBOARD_BACKGROUND_LOOPS=false) could only be expressed by re-stating
-# the entire environment list anyway. Keep the two services' environment
-# blocks in sync by hand when either changes -- diff them before merging
-# any PR that touches one.
+# Anchor kept from the #266 era (the rolling pair is retired -- single
+# dashboard replica now): the volume list still lives in one place so any
+# future second consumer of these host paths can share it without drift.
 x-dashboard-volumes: &dashboard-volumes
   # rslave propagation: /logs/portbridge and /logs/suricata are sshfs
   # mounts from the VPS on the host. They must be established BEFORE this
@@ -179,41 +170,18 @@ services:
       resources:
         limits: {cpus: "0.25", memory: 160M}
 
-  # #266: zero-downtime rolling updates. dashboard and dashboard-b are two
-  # identical replicas (same image, same volumes via *dashboard-volumes,
-  # same everything except container_name/host port and one env var) behind
-  # vps/traefik/dynamic.yml's honeypot-dashboard service, which lists both
-  # backends with an active healthCheck. Traefik stops routing to whichever
-  # replica is currently failing its healthcheck automatically -- a redeploy
-  # restarts one replica at a time (scripts/deploy-dashboard-rolling.sh),
-  # so the other keeps answering requests the whole time. Previously
-  # `docker compose up -d dashboard` did a blind Recreate with a real
-  # listener-down window every redeploy (#212 only masked GETs with a
-  # client-side retry, never fixed the underlying gap; writes were never
-  # retried at all).
-  #
-  # DASHBOARD_BACKGROUND_LOOPS=false on dashboard-b: see main.go's
-  # backgroundLoopsEnabled() -- exactly one replica may run notifyLoop
-  # (webhook alerts) and reportScheduleLoop (scheduled PDFs), or both would
-  # fire/generate every one of those twice. This is a fixed two-replica
-  # pick, not real leader election: during dashboard's own restart (the
-  # replica that runs both loops), they pause for that window. Accepted
-  # tradeoff over either permanently duplicating alerts/reports or building
-  # full leader election for a two-replica topology.
-  #
-  # rebuild()/es.refresh()/the retention sweep are NOT gated the same way
-  # and run on both replicas unconditionally -- each just recomputes its
-  # own in-memory snapshot or idempotently deletes already-expired rows, so
-  # duplication there is harmless, unlike a webhook POST or a generated PDF.
+  # Single replica (per Xore, supersedes #266's rolling pair): dashboard-b
+  # and scripts/deploy-dashboard-rolling.sh are retired -- one dashboard
+  # runs everything, including the background loops (main.go's
+  # backgroundLoopsEnabled() still honors DASHBOARD_BACKGROUND_LOOPS for a
+  # future return to replicas; unset means enabled). A redeploy is a plain
+  # `docker compose build dashboard && docker compose up -d`, accepting the
+  # brief recreate window on this single-operator deployment.
   dashboard:
     <<: *runtime-defaults
     build: ./dashboard
-    # Explicit shared tag: without it Compose auto-names each service's
-    # image after <project>_<service> (dashboard vs. dashboard-b would
-    # build and tag the identical Dockerfile twice). One shared tag means
-    # `docker compose build dashboard` (or scripts/deploy-dashboard-rolling.sh,
-    # which does exactly that) builds once and both services' next
-    # recreate picks it up.
+    # Explicit stable tag so redeploy tooling can `docker compose build
+    # dashboard` and recreate against a known image name.
     image: honeypot-dashboard:latest
     container_name: hp-dashboard
     restart: unless-stopped
@@ -398,137 +366,6 @@ services:
           # headroom until that lands.
           memory: 2G
 
-  # Second replica of the exact same image -- see the dashboard service's
-  # own header comment above for the full rolling-update rationale. Every
-  # line below is identical to dashboard's except container_name, the host
-  # port (19092, not 19090 -- both can't bind the same host port), and the
-  # added DASHBOARD_BACKGROUND_LOOPS=false. Keep the two in sync by hand.
-  dashboard-b:
-    <<: *runtime-defaults
-    build: ./dashboard
-    image: honeypot-dashboard:latest
-    container_name: hp-dashboard-b
-    restart: unless-stopped
-    depends_on:
-      oidc-sessions:
-        condition: service_healthy
-    ports:
-      - ${HP_BIND:-10.8.0.2}:19092:8080
-    volumes: *dashboard-volumes
-    environment:
-      - LISTEN_ADDR=:8080
-      - LOG_DIR=/logs
-      - LOG_STREAM_MAX_BYTES=${JSON_STREAM_MAX_BYTES:-67108864}
-      - LOG_STREAM_ALERT_PERCENT=${LOG_STREAM_ALERT_PERCENT:-90}
-      - GEOIP_CSV=/geoip/country.csv
-      - GEOIP_CITY_MMDB=/geoip-mmdb/GeoLite2-City.mmdb
-      - GEOIP_ASN_MMDB=/geoip-mmdb/GeoLite2-ASN.mmdb
-      - THREAT_CIDRS_FILE=/geoip/threat-cidrs.csv
-      - MAP_TILE_URL=${HONEYPOT_MAP_TILE_URL:-https://tile.openstreetmap.org/{z}/{x}/{y}.png}
-      - MAP_ATTRIBUTION=${HONEYPOT_MAP_ATTRIBUTION:-© OpenStreetMap contributors}
-      - ELASTICSEARCH_URL=http://elasticsearch:9200
-      - FILEBEAT_URL=http://filebeat:5066
-      # #151: query-time embedding for /llm-analysis semantic search.
-      # Shared with analysis/ghidra/docker-compose.ghidra.yml's own ollama
-      # service, over the honeypot-llm network below -- same service name
-      # ("ollama") that network's own internal DNS already resolves.
-      - OLLAMA_URL=http://ollama:11434
-      # Same posture and reasoning as dashboard's own CANARYTOKENS_API_URL
-      # above -- this line was missing here, leaving this replica silently
-      # unable to create tokens while dashboard could, a load-balanced
-      # split-brain (types requests landing on dashboard reported available,
-      # create requests landing here 503'd with "not configured on this
-      # host").
-      - CANARYTOKENS_API_URL=${CANARYTOKENS_API_URL:-}
-      # #1487 items 3/5: same split-brain reasoning as CANARYTOKENS_API_URL
-      # immediately above -- omitting these here would leave this replica
-      # unable to provision/rotate credentials while dashboard could.
-      - HONEYFS_IMPLANT_URL=${HONEYFS_IMPLANT_URL:-}
-      - HONEYFS_IMPLANT_TOKEN=${HONEYFS_IMPLANT_TOKEN:-}
-      - HONEYPOT_DOMAIN=${HONEYPOT_DOMAIN:-}
-      - KIBANA_PUBLIC_URL=${KIBANA_PUBLIC_URL:-}
-      - EVEBOX_PUBLIC_URL=${EVEBOX_PUBLIC_URL:-}
-      - ARKIME_PUBLIC_URL=${ARKIME_PUBLIC_URL:-}
-      - ALERT_COOLDOWN=${HONEYPOT_ALERT_COOLDOWN:-6h}
-      - PAYLOAD_DIRS=/dionaea-lib/binaries,/cowrie-downloads
-      - SCRIPT_PAYLOAD_DIR=/state/script-payloads
-      - INTELLIGENCE_STATE_FILE=/state/intelligence.json
-      - SANDBOX_RESULTS_DIR=/sandbox-results
-      - SANDBOX_REQUEST_DIR=/sandbox-requests
-      - WINDOWS_SANDBOX_RESULTS_DIR=${WINDOWS_SANDBOX_RESULTS_DIR:-}
-      - WINDOWS_SANDBOX_REQUEST_DIR=${WINDOWS_SANDBOX_REQUEST_DIR:-}
-      - GHOSTS_SANDBOX_RESULTS_DIR=${GHOSTS_SANDBOX_RESULTS_DIR:-}
-      - GHOSTS_SANDBOX_REQUEST_DIR=${GHOSTS_SANDBOX_REQUEST_DIR:-}
-      - SANDBOX_ALERT_RISK_SCORE=${SANDBOX_ALERT_RISK_SCORE:-50}
-      # #805: empty disables the "Watch live" link/route entirely, same
-      # off-by-default convention as REVDECK_API_BASE below -- the bridge
-      # itself (sandbox/windows/vnc-bridge/) is a separate host service,
-      # not something this compose file starts.
-      - SANDBOX_VNC_BRIDGE_WS=${SANDBOX_VNC_BRIDGE_WS:-}
-      - GHIDRA_RESULTS_DIR=${GHIDRA_RESULTS_DIR:-}
-      - GHIDRA_REQUEST_DIR=${GHIDRA_REQUEST_DIR:-}
-      - REVDECK_RESULTS_DIR=${REVDECK_RESULTS_DIR:-}
-      - REVDECK_REQUEST_DIR=${REVDECK_REQUEST_DIR:-}
-      # #1134: CAPE spool -- see x-dashboard-volumes' own comment on why
-      # this was silently unwired until now.
-      - CAPE_RESULTS_DIR=${CAPE_RESULTS_DIR:-}
-      - CAPE_REQUEST_DIR=${CAPE_REQUEST_DIR:-}
-      - GHIDRA_ALERT_RISK_LEVELS=${GHIDRA_ALERT_RISK_LEVELS:-high,critical}
-      - GHIDRA_ALERT_ON_CRYPTO=${GHIDRA_ALERT_ON_CRYPTO:-false}
-      # Also missing here alongside CANARYTOKENS_API_URL above -- same
-      # split-brain bug, different env var.
-      - LLM_ANALYSIS_ALERT_SEVERITIES=${LLM_ANALYSIS_ALERT_SEVERITIES:-high,critical}
-      - GITHUB_ANALYSIS_REQUEST_DIR=${GITHUB_ANALYSIS_REQUEST_DIR:-}
-      - GITHUB_ANALYSIS_RESULTS_DIR=${GITHUB_ANALYSIS_RESULTS_DIR:-}
-      - GITHUB_ANALYSIS_ALERT_POSITIVES=${GITHUB_ANALYSIS_ALERT_POSITIVES:-10}
-      - ALERT_CAMPAIGN_SCORE=${HONEYPOT_ALERT_CAMPAIGN_SCORE:-80}
-      - DASHBOARD_REQUIRE_ADMIN=${DASHBOARD_REQUIRE_ADMIN:-true}
-      - MODEL_STATUS_SOCKET=/model-status/status.sock
-      - SERVICES_ADAPTER_SOCKET=/run/services-adapter/control.sock
-      - OIDC_ISSUER_URL=${OIDC_ISSUER_URL:-https://auth.example.invalid/realms/apiary}
-      - OIDC_EXTERNAL_URL=${OIDC_EXTERNAL_URL:-https://honeypot.example.invalid}
-      - OIDC_CLIENT_SECRET_FILE=/run/dashboard-secrets/oidc-client-secret
-      - OIDC_SESSION_REDIS_URL=redis://oidc-sessions:6379/0
-      - AUTH_ACCOUNT_URL=${AUTH_ACCOUNT_URL:-https://auth.example.invalid/realms/apiary/account/}
-      - AUTH_ADMIN_URL=${AUTH_ADMIN_URL:-https://auth.example.invalid/admin/apiary/console/}
-      - EXPECTED_SENSORS=cowrie,multipot,http,api-honeypot,dionaea,dnp3,dicompot,dns-honeypot,citrix-honeypot,cisco-asa-honeypot,rdp-honeypot,conpot,conpot-s7-1200,conpot-s7-1500,conpot-iec104,conpot-guardian,conpot-kamstrup,tanner,suricata,endlessh,beelzebub,hellpot,elasticpot,galah,sentrypeer,wordpot,mailoney,canarytokens
-      - ALERT_WEBHOOK_URL=${HONEYPOT_ALERT_WEBHOOK_URL:-}
-      - TZ=Europe/Berlin
-      # The one real difference from dashboard above -- see main.go's
-      # backgroundLoopsEnabled() and this file's header comment.
-      - DASHBOARD_BACKGROUND_LOOPS=false
-    networks:
-      - honeynet
-      - honeypot-llm
-      - oidc-session
-    healthcheck:
-      test: ["CMD", "/usr/local/bin/dashboard", "-healthcheck"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      # #828: bumped from 10s -- /healthz now reports 503 until the first
-      # rebuild() has real ES-derived data (dashboard/main.go), which
-      # takes 60-120s against this host's real event volume, confirmed
-      # live. A failure during start_period never counts toward retries,
-      # so this margin is what actually keeps a normal warm-up from ever
-      # reaching "unhealthy" -- 10s was already borderline before this
-      # fix (10s start_period + 5 retries * 15s interval = 85s total
-      # tolerance, close to the observed worst case) and would have been
-      # a real regression (spurious autoheal restarts) without this bump.
-      start_period: 180s
-    labels:
-      - autoheal=true
-    cap_drop:
-      - ALL
-    cap_add:
-      - DAC_READ_SEARCH
-    security_opt:
-      - no-new-privileges:true
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 2G
 
   # #378: ships Ghidra/sandbox/GitHub-analysis/workbench-run results into
   # Elasticsearch (ghidra-analysis-v1/sandbox-analysis-v1/github-analysis-v1/

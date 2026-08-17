@@ -523,7 +523,7 @@ test.describe("dashboard browser behaviour", () => {
     const total = Number(await page.locator("table.recent tbody").getAttribute("data-hp-total"));
     expect(total).toBeGreaterThan(25);
     await expect(controls).toContainText(`25 of ${total} entries`);
-    await controls.getByRole("button", { name: "Load 25 more" }).click();
+    await controls.getByRole("button", { name: "View more" }).click();
     await expect(rows).toHaveCount(50);
     await expect(controls).toContainText(`50 of ${total} entries`);
   });
@@ -1300,9 +1300,9 @@ test.describe("dashboard browser behaviour", () => {
     await expect
       .poll(() => region.evaluate(element => element.scrollTop), { timeout: 5000 })
       .toBeGreaterThan(0);
-    // Reaching the end of the list must never leave a dead control:
-    // either the lazy sentinel auto-loads the next batch, or the pill
-    // reads "load more ↓" and a click loads it. Drain until the fixture's
+    // Reaching the end of the list must never leave a dead control: the
+    // round button flips to load mode and a click fetches the next batch
+    // (scroll-triggered loading is gone by design). Drain until the fixture's
     // 61 events (start-dashboard.mjs) are fully loaded, then the pill gets
     // out of the way for good.
     const rows = region.locator(":scope > table > tbody > tr:not([hidden])");

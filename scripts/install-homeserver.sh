@@ -1152,9 +1152,9 @@ step_provision_dashboard_oidc_secret() {
   # at that point, so it crash-loops on first boot) -- this step runs
   # after that, once Keycloak is actually up, same as
   # step_provision_events_poller_secrets right above. No need to also
-  # restart dashboard/dashboard-b here: both have restart: unless-stopped,
-  # so their own crash-restart loop picks up the freshly written secret
-  # within seconds.
+  # restart the dashboard here: it has restart: unless-stopped, so its
+  # own crash-restart loop picks up the freshly written secret within
+  # seconds.
   local secrets_dir="/var/dockge/stacks/honeypot-keycloak/secrets"
   [[ -f "$secrets_dir/bootstrap-admin-password" ]] || {
     echo "no bootstrap-admin-password at $secrets_dir -- was provision-keycloak-secrets skipped?" >&2
