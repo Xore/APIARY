@@ -1110,4 +1110,40 @@ test.describe("dashboard browser behaviour", () => {
       await page.evaluate(() => (window as unknown as Record<string, unknown>).__hpPreReloadMarker),
     ).toBeUndefined();
   });
+
+  test("scroll 'more' pill pages the region down and loads the next batch at the end", async ({ page }) => {
+    await page.goto("/events");
+    const region = page.locator(".hp-md__list > .card__scroll");
+    // :scope > -- every nested .card__scroll (one per hidden row detail)
+    // carries its own pill; this test drives the list region's own.
+    const pill = region.locator(":scope > button.hp-scroll-more");
+    await expect(pill).toHaveCount(1);
+    // The list overflows in the fixture (the master-detail spec above
+    // asserts it), so at the top the pill is the visible page-down control.
+    await expect(pill).toHaveClass(/hp-scroll-more--on/);
+    await expect(pill).toHaveText("more ↓");
+    await pill.click();
+    await expect
+      .poll(() => region.evaluate(element => element.scrollTop), { timeout: 5000 })
+      .toBeGreaterThan(0);
+    // Reaching the end of the list must never leave a dead control:
+    // either the lazy sentinel auto-loads the next batch, or the pill
+    // reads "load more ↓" and a click loads it. Drain until the fixture's
+    // 61 events (start-dashboard.mjs) are fully loaded, then the pill gets
+    // out of the way for good.
+    const rows = region.locator(":scope > table > tbody > tr:not([hidden])");
+    const rowsBefore = await rows.count();
+    await expect
+      .poll(async () => {
+        await region.evaluate(element => { element.scrollTop = element.scrollHeight; });
+        if ((await pill.textContent()) === "load more ↓") await pill.click();
+        return region
+          .locator(":scope > .hp-lazy-controls:not([hidden]) button:not([hidden])")
+          .count();
+      }, { timeout: 20_000 })
+      .toBe(0);
+    expect(await rows.count()).toBeGreaterThan(rowsBefore);
+    await region.evaluate(element => { element.scrollTop = element.scrollHeight; });
+    await expect(pill).not.toHaveClass(/hp-scroll-more--on/);
+  });
 });
