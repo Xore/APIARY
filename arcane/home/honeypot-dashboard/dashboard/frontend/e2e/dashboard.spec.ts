@@ -414,6 +414,91 @@ test.describe("dashboard browser behaviour", () => {
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   });
 
+  // #1563/#1534: a session that quietly died (Keycloak-side idle timeout,
+  // or the access token simply expiring with nothing to trigger
+  // oidc_auth.go's own proactive refresh) used to leave every fetch-based
+  // feature under an open page silently 401ing, with no recovery until a
+  // full manual reload. hp-app.js's checkSessionAlive() is the shared
+  // recovery path -- these two tests exercise its two triggers.
+  // whoamiStaysAlive/whoamiDies below deliberately don't count calls or
+  // assume there is exactly one whoami caller at page load: hp-account.js
+  // fires its own independent /api/whoami fetch at load too (a separate,
+  // pre-existing one-shot check, not routed through hp-app.js's
+  // checkSessionAlive at all), so pinning an exact call count races
+  // against however many of those land before the page settles. Answering
+  // every call the same way (alive, then -- once flipped, well after the
+  // page has already settled -- dead) sidesteps that race entirely: the
+  // page reaches a known-good state first, and only THEN does the
+  // scenario each test cares about actually start.
+  const routeWhoamiWithLiveness = async (page: Page) => {
+    let alive = true;
+    await page.route("**/api/whoami", (route) => {
+      if (!alive) return route.fulfill({ status: 401, body: "authentication required" });
+      return route.fulfill({
+        status: 200, contentType: "application/json",
+        body: JSON.stringify({ username: "browser-check", display_name: "Browser Check", role: "viewer" }),
+      });
+    });
+    return { kill: () => { alive = false; } };
+  };
+
+  test("a 401 on the alert-badge poll triggers a session recheck that redirects through login", async ({ page }) => {
+    // refreshAlertCount only re-fires on its own 60s interval once past the
+    // immediate call page load already consumes -- a fake clock installed
+    // before that setInterval is ever scheduled is what lets fastForward
+    // below actually trigger it, rather than waiting on a real one; installed
+    // afterwards it can't affect a timer the real clock already scheduled.
+    await page.clock.install();
+    const session = await routeWhoamiWithLiveness(page);
+    await page.route("**/api/alerts", (route) => route.fulfill({ status: 200, contentType: "application/json", body: "[]" }));
+
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await expect(page.locator("[data-hp-user-name]")).toHaveText("Browser Check");
+
+    // The session dies sometime after the page settled -- exactly #1563's
+    // report (an already-open, already-authenticated tab going quiet
+    // minutes later), not a session that was already dead at load (which
+    // hp-account.js's own one-shot check already redirects on, unrelated
+    // to the fix under test here).
+    session.kill();
+    await page.route("**/api/alerts", (route) => route.fulfill({ status: 401, body: "authentication required" }));
+    const loginRedirect = page.waitForRequest((request) => request.url().includes("/auth/login"));
+    await page.clock.fastForward("01:01");
+    await loginRedirect;
+  });
+
+  test("regaining tab visibility re-checks a session that died while the tab was backgrounded", async ({ page }) => {
+    const session = await routeWhoamiWithLiveness(page);
+    await page.route("**/api/alerts", (route) => route.fulfill({ status: 200, contentType: "application/json", body: "[]" }));
+
+    await page.goto("/events", { waitUntil: "domcontentloaded" });
+    await expect(page.locator("[data-hp-user-name]")).toHaveText("Browser Check");
+
+    // Same "dies well after the page already settled" shape as the alert-
+    // poll test above, but recovered through the OTHER trigger this fix
+    // adds: the tab regaining visibility, not the 60s poll.
+    session.kill();
+    const recheck = page.waitForRequest((request) => request.url().includes("/api/whoami"));
+    const loginRedirect = page.waitForRequest((request) => request.url().includes("/auth/login"));
+    // document.visibilityState has no test-facing setter -- a headless
+    // page already reports "visible", so the listener's own condition is
+    // exercised by overriding the getter Chromium otherwise controls, the
+    // standard way to simulate a visibility change under automation.
+    // Deliberately not awaited: the dispatched event synchronously starts
+    // checkSessionAlive(), whose mocked 401 resolves fast enough that the
+    // resulting redirect can navigate the page away before this
+    // evaluate()'s own CDP round trip returns, which Playwright then
+    // reports as "Execution context was destroyed" even though the
+    // triggered behavior is exactly correct -- the two waitForRequest
+    // promises above are what actually assert the outcome.
+    page.evaluate(() => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+      document.dispatchEvent(new Event("visibilitychange"));
+    }).catch(() => {});
+    await recheck;
+    await loginRedirect;
+  });
+
   test("command dock focuses with slash and routes non-empty queries through /search", async ({ page }) => {
     await page.goto("/");
     const command = page.locator("[data-hp-investigate] textarea");
@@ -1150,6 +1235,42 @@ test.describe("dashboard browser behaviour", () => {
     expect(
       await page.evaluate(() => (window as unknown as Record<string, unknown>).__hpPreReloadMarker),
     ).toBeUndefined();
+  });
+
+  test("scroll 'more' pill pages the region down and loads the next batch at the end", async ({ page }) => {
+    await page.goto("/events");
+    const region = page.locator(".hp-md__list > .card__scroll");
+    // :scope > -- every nested .card__scroll (one per hidden row detail)
+    // carries its own pill; this test drives the list region's own.
+    const pill = region.locator(":scope > button.hp-scroll-more");
+    await expect(pill).toHaveCount(1);
+    // The list overflows in the fixture (the master-detail spec above
+    // asserts it), so at the top the pill is the visible page-down control.
+    await expect(pill).toHaveClass(/hp-scroll-more--on/);
+    await expect(pill).toHaveText("more ↓");
+    await pill.click();
+    await expect
+      .poll(() => region.evaluate(element => element.scrollTop), { timeout: 5000 })
+      .toBeGreaterThan(0);
+    // Reaching the end of the list must never leave a dead control:
+    // either the lazy sentinel auto-loads the next batch, or the pill
+    // reads "load more ↓" and a click loads it. Drain until the fixture's
+    // 61 events (start-dashboard.mjs) are fully loaded, then the pill gets
+    // out of the way for good.
+    const rows = region.locator(":scope > table > tbody > tr:not([hidden])");
+    const rowsBefore = await rows.count();
+    await expect
+      .poll(async () => {
+        await region.evaluate(element => { element.scrollTop = element.scrollHeight; });
+        if ((await pill.textContent()) === "load more ↓") await pill.click();
+        return region
+          .locator(":scope > .hp-lazy-controls:not([hidden]) button:not([hidden])")
+          .count();
+      }, { timeout: 20_000 })
+      .toBe(0);
+    expect(await rows.count()).toBeGreaterThan(rowsBefore);
+    await region.evaluate(element => { element.scrollTop = element.scrollHeight; });
+    await expect(pill).not.toHaveClass(/hp-scroll-more--on/);
   });
 });
 

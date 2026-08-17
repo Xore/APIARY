@@ -1698,20 +1698,41 @@
     };
     syncPrefs();
 
-    /* Sidebar profile row from live Keycloak token verification (see
-       oidc_auth.go). #1235: a bare 401 means the OIDC session itself is
-       gone -- redirect through /auth/login rather than leaving the row
-       blank, same reasoning as hp-settings.js's own redirectToLogin
-       (Keycloak's browser SSO cookie almost always outlives this
-       dashboard's own session, so this self-heals silently). */
-    fetch("/api/whoami", {cache: "no-store"}).then(r => {
-      if (r.status === 401) {
-        const returnTo = window.location.pathname + window.location.search + window.location.hash;
-        window.location.href = "/auth/login?return_to=" + encodeURIComponent(returnTo);
-        return null;
-      }
-      return r.ok ? r.json() : null;
-    }).then(identity => {
+    /* Session liveness check, backed by live Keycloak token verification
+       (see oidc_auth.go). #1235: a bare 401 means the OIDC session itself
+       is gone -- redirect through /auth/login rather than leaving whatever
+       called this hanging, same reasoning as hp-settings.js's own
+       redirectToLogin (Keycloak's browser SSO cookie almost always
+       outlives this dashboard's own session, so this self-heals silently:
+       the redirect round-trips through Keycloak and back with no login
+       form shown, unless that SSO session is *also* gone, in which case a
+       real login prompt is exactly the right thing to surface).
+       #1563/#1534: originally ran once, at page load, to fill in the
+       sidebar profile row -- the same request doubles as the one place
+       that notices a session has quietly died and recovers it, so every
+       caller below that might hit a stale session shares this one
+       redirect path instead of failing silently on its own 401. Dedup via
+       inflight so a visibilitychange firing while the periodic check
+       below is already in flight doesn't double-navigate. */
+    let sessionCheckInflight = null;
+    const checkSessionAlive = () => {
+      if (sessionCheckInflight) return sessionCheckInflight;
+      sessionCheckInflight = fetch("/api/whoami", {cache: "no-store"}).then(r => {
+        if (r.status === 401) {
+          // #1563: LIVE has no other way to know the session, not just the
+          // SSE socket, is what actually died -- surface it the same way a
+          // stalled connection already does rather than staying green
+          // through the redirect below.
+          window.HoneypotLive.setConnectionHealthy(false);
+          const returnTo = window.location.pathname + window.location.search + window.location.hash;
+          window.location.href = "/auth/login?return_to=" + encodeURIComponent(returnTo);
+          return null;
+        }
+        return r.ok ? r.json() : null;
+      }).catch(() => null).finally(() => { sessionCheckInflight = null; });
+      return sessionCheckInflight;
+    };
+    checkSessionAlive().then(identity => {
       if (!identity || !identity.username) return;
       const name = shell.querySelector("[data-hp-user-name]");
       const avatar = shell.querySelector("[data-hp-user-avatar]");
@@ -1725,13 +1746,38 @@
         role.classList.toggle("badge--muted", identity.role !== "admin");
         role.hidden = false;
       }
-    }).catch(() => {});
+    });
+    /* #1563: a tab backgrounded long enough for the browser to throttle its
+       timers (Chrome's intensive throttling kicks in around 5 minutes
+       hidden) can miss every scheduled refreshAlertCount tick below,
+       letting the session's access token actually expire with nothing
+       left to trigger identityFromRequest's own proactive refresh --
+       silently breaking every fetch-based feature the moment the operator
+       switches back and the page still *looks* alive. visibilitychange
+       fires reliably regardless of timer throttling, so re-check the
+       instant the tab is looked at again, before any real interaction can
+       land on a dead session as a bare 401 (reproduced live on /events'
+       filter popover and #1534's Ghidra report page, both just a
+       fetch-based feature going quiet under an open, idled tab). */
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") checkSessionAlive();
+    });
 
-    /* Alert bell badge (60s polling) */
+    /* Alert bell badge (60s polling) -- also this dashboard's steady
+       keepalive heartbeat while a tab stays foregrounded: any request
+       through the OIDC middleware re-arms identityFromRequest's own
+       proactive refresh window, so as long as this keeps landing within
+       it the session never actually reaches expiry in the first place.
+       #1563: a 401 here used to be swallowed indistinguishably from any
+       other failure (this response body isn't JSON, so .json() below just
+       throws and the catch discarded it) -- route it through the same
+       recovery as checkSessionAlive instead. */
     const refreshAlertCount = async () => {
       if (window.HoneypotLive.paused()) return;
       try {
-        const records = await (await fetch("/api/alerts", {cache: "no-store"})).json();
+        const response = await fetch("/api/alerts", {cache: "no-store"});
+        if (response.status === 401) { checkSessionAlive(); return; }
+        const records = await response.json();
         const count = records.filter(record => !record.Acknowledged).length;
         const badge = shell.querySelector("[data-hp-alert-count]");
         if (!badge) return;
@@ -1855,24 +1901,73 @@
   addEventListener("popstate", () => sync(false));
 })();
 
-/* ── Design refresh: scroll "more" pill (pick 9C) ─────────────────────────
-   Every .card__scroll region gets a floating pill while content remains
-   below the fold, and loses it at the end -- the affordance the thin
-   scrollbar alone never quite was (theme#78). */
+/* ── Design refresh: scroll "more" pill (pick 9C, reworked per Xore) ──────
+   Every .card__scroll region gets a floating pill that is a real control,
+   not just the scroll affordance the thin scrollbar never quite was
+   (theme#78). Mid-list ("more ↓") a click pages the region down. Near the
+   end of a list that still has entries to load -- the region's own lazy /
+   remote "Load 25 more" control (initLazyViews above) -- it reads
+   "load more ↓", a click loads the next batch and the pill hides,
+   returning when the reader nears the new end. Only at the true end of a
+   fully-loaded list does it disappear for good. */
 (() => {
+  /* How close (px) to the region's bottom counts as "at the end". */
+  const NEAR_END = 96;
+  const loadControl = region => {
+    /* :scope > -- nested .card__scroll regions (a row detail's own bounded
+       panes) carry their own lazy controls; this region's control is the
+       direct child initLazyViews put after its table/list. */
+    const controls = region.querySelector(":scope > .hp-lazy-controls");
+    if (!controls || controls.hidden) return null;
+    const button = controls.querySelector("button");
+    return button && !button.hidden && !button.disabled ? button : null;
+  };
   const attach = region => {
     if (region.dataset.hpScrollMore) return;
     region.dataset.hpScrollMore = "1";
-    const pill = document.createElement("div");
+    const pill = document.createElement("button");
+    pill.type = "button";
     pill.className = "hp-scroll-more";
     pill.textContent = "more ↓";
     region.appendChild(pill);
     const update = () => {
+      /* Keep the sticky pill last in the region so it never rests above
+         the lazy controls appended after attach ran. Guarded, so the
+         childList mutation this causes re-enters update() as a no-op. */
+      if (region.lastElementChild !== pill) region.appendChild(pill);
       const below = region.scrollHeight - region.clientHeight - region.scrollTop;
-      pill.style.opacity = (region.scrollHeight > region.clientHeight + 24 && below > 24) ? "1" : "0";
+      const nearEnd = below <= NEAR_END;
+      const loadable = nearEnd ? loadControl(region) : null;
+      const show = (region.scrollHeight > region.clientHeight + 24 && below > 24) || !!loadable;
+      const label = loadable ? "load more ↓" : "more ↓";
+      /* Only write on change: textContent replaces the text node even for
+         an identical string, which would loop through the MutationObserver
+         below forever. */
+      if (pill.textContent !== label) pill.textContent = label;
+      pill.classList.toggle("hp-scroll-more--on", show);
     };
+    pill.addEventListener("click", () => {
+      const below = region.scrollHeight - region.clientHeight - region.scrollTop;
+      const loadable = below <= NEAR_END ? loadControl(region) : null;
+      if (loadable) {
+        /* Hide immediately; the mutations from the loaded batch re-run
+           update(), which brings the pill back the next time the reader
+           nears the (new) end. */
+        pill.classList.remove("hp-scroll-more--on");
+        loadable.click();
+      } else {
+        region.scrollBy({top: Math.max(region.clientHeight - 48, 120), behavior: "smooth"});
+      }
+    });
     region.addEventListener("scroll", update, {passive: true});
     if (window.ResizeObserver) new ResizeObserver(update).observe(region);
+    /* Content changes move the end of the list without a scroll event:
+       lazy tables reveal rows by toggling [hidden], remote containers and
+       SSE streams append nodes. */
+    new MutationObserver(update).observe(region, {
+      subtree: true, childList: true,
+      attributes: true, attributeFilter: ["hidden"],
+    });
     update();
   };
   const scan = () => document.querySelectorAll(".card__scroll").forEach(attach);
