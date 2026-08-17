@@ -1782,6 +1782,12 @@
   const sync = allowRemove => {
     const side = document.querySelector(".app-sidebar__body");
     if (!side) return;
+    /* Keep the rail positioned where the operator actually is: scroll the
+       active item (plus its nested view tabs) into view instead of leaving
+       the rail parked at the top on every navigation. */
+    const reveal = () => side.querySelector(
+      `.sidebar__item[data-hp-nav="${CSS.escape(routeFor(location.pathname))}"]`
+    )?.scrollIntoView({block: "nearest"});
     const incoming = document.querySelector("main .tabs[role='tablist'], .app-main .tabs[role='tablist']");
     if (incoming) {
       /* A fresh tablist arrived with this page's content: it replaces
@@ -1795,12 +1801,16 @@
         side.querySelector(".sidebar__item.active");
       if (anchor) anchor.after(incoming);
       else side.append(incoming);
+      reveal();
     } else if (allowRemove) {
       /* Only a fresh content mount may conclude "this page has no view
          tabs" -- on plain re-runs the absence just means the rail was
          already moved into the sidebar (removing it here was the bug that
          made the rail vanish entirely). */
       side.querySelectorAll(".tabs[data-hp-sidebar-tabs], .hp-views-label").forEach(n => n.remove());
+      reveal();
+    } else {
+      reveal();
     }
   };
   sync(false);
