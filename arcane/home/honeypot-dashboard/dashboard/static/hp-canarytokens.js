@@ -70,6 +70,11 @@
   /* ---------------- Tokens tab ---------------- */
 
   let typesByKey = null;
+  // #1575: a gallery card can be clicked before /api/settings/canarytokens/types
+  // has resolved (all three tabs hydrate in parallel, per this file's own
+  // header comment) -- the chosen type waits here and applies itself the
+  // moment the type <select> is populated.
+  let pendingGalleryType = null;
 
   function artifactCell(record) {
     const cell = document.createElement("td");
@@ -159,6 +164,10 @@
       if (!body.available) {
         Array.from(form.elements).forEach(el => { el.disabled = true; });
       }
+      if (pendingGalleryType && typesByKey[pendingGalleryType]) {
+        select.value = pendingGalleryType;
+        pendingGalleryType = null;
+      }
       updateCreateFormForType();
     } catch (error) {
       form.removeAttribute("aria-busy");
@@ -210,6 +219,30 @@
       } finally {
         submitBtn.disabled = false;
       }
+    });
+  }
+
+  // #1575: the Tokens tab's empty-state gallery -- each card names a
+  // specific, actually-supported token type (canarytokens_client.go's
+  // canarytokensSupportedTypes; no AWS-key/DNS types exist on this
+  // dashboard's scoped subset) and jumps straight into Create bait with
+  // that type preselected, the same data-dashboard-tab click mechanism
+  // hp-tty-replay.js already uses to switch tabs from other JS.
+  function wireTokensGallery() {
+    const gallery = q("ct-tokens-gallery");
+    if (!gallery) return;
+    gallery.addEventListener("click", event => {
+      const card = event.target.closest("[data-token-type]");
+      if (!card) return;
+      const type = card.dataset.tokenType;
+      if (typesByKey && typesByKey[type]) {
+        q("ct-type").value = type;
+        updateCreateFormForType();
+      } else {
+        pendingGalleryType = type;
+      }
+      document.querySelector('[data-dashboard-tab="ct-create"]')?.click();
+      q("ct-memo")?.focus();
     });
   }
 
@@ -265,6 +298,7 @@
 
   document.addEventListener("DOMContentLoaded", () => {
     wireCreateForm();
+    wireTokensGallery();
     // All three tabs hydrate together, in the background, regardless of
     // which one is active on load -- not gated on tab activation.
     loadTokens();
