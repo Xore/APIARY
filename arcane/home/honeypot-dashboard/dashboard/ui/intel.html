@@ -277,7 +277,7 @@
              page" against every other single-card page. */}}
         <div class="card wide" data-hp-md-generic id="commands-table">{{if .Rows}}<table class="recent data-table"><thead><tr><th>seen</th><th>sensor</th><th>command</th><th>sources</th><th>sessions</th><th>first</th><th>last</th><th>chain</th></tr></thead><tbody>
         {{range .Rows}}<tr><td class="n">{{.Count}}</td><td><span class="badge b-{{.Sensor}}">{{.Sensor}}</span></td>
-        <td class="v"><code>{{.Command}}</code> <button class="copy" data-copy="{{.Command}}">copy</button></td><td class="v">{{.Sources}}</td><td class="n">{{.Sessions}}</td><td{{if .FirstUTC}} data-hp-utc="{{.FirstUTC}}"{{end}}>{{.First}}</td><td{{if .LastUTC}} data-hp-utc="{{.LastUTC}}"{{end}}>{{.Last}}</td><td><a class="lnk" href="{{.Link}}">events &rarr;</a></td></tr>{{end}}
+        <td class="v"><code>{{.Command}}</code> <button class="copy" data-copy="{{.Command}}">copy</button></td><td class="v hp-ip-list">{{.Sources}}</td><td class="n">{{.Sessions}}</td><td{{if .FirstUTC}} data-hp-utc="{{.FirstUTC}}"{{end}}>{{.First}}</td><td{{if .LastUTC}} data-hp-utc="{{.LastUTC}}"{{end}}>{{.Last}}</td><td><a class="lnk" href="{{.Link}}">events &rarr;</a></td></tr>{{end}}
         </tbody></table>{{else}}<p class="empty">no commands captured yet</p>{{end}}</div>
         <footer id="commands-footer">{{brandText}} &bull; static investigation view</footer>
       </div>

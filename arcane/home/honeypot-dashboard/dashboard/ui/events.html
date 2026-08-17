@@ -60,7 +60,10 @@
         <header class="overview-header" id="events-header">
           <div>
             <div class="label-section">Investigate</div>
-            <h1>{{if .Chain}}attack chain {{.IP}}{{else}}event explorer{{end}}</h1>
+            {{/* #1566: every other page's h1 is sentence-cased ("Source
+                 IPs", "ML anomaly detection", "Executed commands") -- this
+                 was the one lowercase holdout. */}}
+            <h1>{{if .Chain}}Attack chain {{.IP}}{{else}}Event explorer{{end}}</h1>
             <p class="subtitle">Every normalized event across all sensors &mdash; pivot on any value, or export the exact filtered scope.</p>
           </div>
           <div class="live-panel">

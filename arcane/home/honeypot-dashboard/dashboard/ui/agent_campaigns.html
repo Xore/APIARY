@@ -40,9 +40,14 @@
               <div>
                 <span class="badge {{if eq .Severity "critical"}}badge--danger{{else if eq .Severity "high"}}badge--warning{{else}}badge--info{{end}}">{{.Severity}}</span>
                 <strong class="tw:ml-2">{{.EventCount}} event{{if ne .EventCount 1}}s{{end}}</strong>
-                <span class="tw:text-muted tw:ml-2" data-hp-utc="{{.Start}}">{{.Start}}</span>
+                {{/* #1566: Start/End are worker.py's own raw ISO strings
+                     (build_campaign_verdict()'s "start"/"end") -- displayTime
+                     normalizes them the same way ml-anomalies'/auth-events'
+                     Timestamp cells were fixed to; data-hp-utc keeps the raw
+                     ISO value as hp-app.js's applyTimeDisplay twin. */}}
+                <span class="tw:text-muted tw:ml-2" data-hp-utc="{{.Start}}">{{displayTime .Start}}</span>
                 <span class="tw:text-muted">&rarr;</span>
-                <span class="tw:text-muted" data-hp-utc="{{.End}}">{{.End}}</span>
+                <span class="tw:text-muted" data-hp-utc="{{.End}}">{{displayTime .End}}</span>
               </div>
               <div class="tw:text-muted"><small>campaign {{.CampaignID}}</small></div>
             </div>
@@ -60,7 +65,7 @@
                     {{if $event.MatchedRules}}
                       {{range $rule := $event.MatchedRules}}
                       <tr>
-                        <td data-label="time"{{if $event.Timestamp}} data-hp-utc="{{$event.Timestamp}}"{{end}}>{{$event.Timestamp}}</td>
+                        <td data-label="time"{{if $event.Timestamp}} data-hp-utc="{{$event.Timestamp}}"{{end}}>{{displayTime $event.Timestamp}}</td>
                         <td class="v" data-label="rule">{{$rule.Rule}}</td>
                         <td class="v" data-label="trust boundary crossed">{{$rule.TrustBoundary}}</td>
                         <td class="v" data-label="reason">{{$rule.Reason}}</td>
@@ -70,7 +75,7 @@
                       {{end}}
                     {{else}}
                       <tr>
-                        <td data-label="time"{{if $event.Timestamp}} data-hp-utc="{{$event.Timestamp}}"{{end}}>{{$event.Timestamp}}</td>
+                        <td data-label="time"{{if $event.Timestamp}} data-hp-utc="{{$event.Timestamp}}"{{end}}>{{displayTime $event.Timestamp}}</td>
                         <td class="v" data-label="rule" colspan="4"><span class="tw:text-muted">correlated into this campaign, no rule matched on its own</span></td>
                         <td class="v" data-label="source event">{{if $event.SourceLink}}<a href="{{$event.SourceLink}}">view source</a>{{else}}<span class="tw:text-muted">&mdash;</span>{{end}}</td>
                       </tr>

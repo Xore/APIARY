@@ -5,6 +5,24 @@ import (
 	"testing"
 )
 
+// TestPluralS (#1566) covers the grammar fix for /clusters' "1 sensors:"
+// summary text (intelligence.go's clusterRow.Summary).
+func TestPluralS(t *testing.T) {
+	cases := []struct {
+		n    int
+		want string
+	}{
+		{0, "s"},
+		{1, ""},
+		{2, "s"},
+	}
+	for _, c := range cases {
+		if got := pluralS(c.n); got != c.want {
+			t.Errorf("pluralS(%d) = %q, want %q", c.n, got, c.want)
+		}
+	}
+}
+
 func TestBoundedFamily(t *testing.T) {
 	short := "Mirai"
 	if got := boundedFamily(short); got != short {

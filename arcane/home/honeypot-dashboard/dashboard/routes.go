@@ -428,6 +428,7 @@ func (s *store) routes(tmpl *template.Template) *http.ServeMux {
 	mux.HandleFunc("POST /gpu-queue/abort", serveGPUQueueAbort)
 	mux.HandleFunc("POST /github-analysis/submit", s.serveGitHubAnalysisSubmit)
 	mux.HandleFunc("POST /ml-anomalies/ack", s.serveMLAnomalyAck)
+	mux.HandleFunc("POST /ml-anomalies/ack-all", s.serveMLAnomalyAckAll)
 	// #1139: the standalone artifact-selection index merged into /payloads'
 	// second tab -- old bookmarks/links redirect rather than 404.
 	mux.HandleFunc("GET /payload-workbench", func(w http.ResponseWriter, r *http.Request) {

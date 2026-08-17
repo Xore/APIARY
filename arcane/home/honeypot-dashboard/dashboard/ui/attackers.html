@@ -40,8 +40,15 @@
   </div>
   <div class="card">
     <h2>Observed activity</h2>
-    <div class="card__row"><span class="card__label">first seen</span><span class="card__value">{{if .Selected.First}}{{.Selected.First}}{{else}}not recorded{{end}}</span></div>
-    <div class="card__row"><span class="card__label">last seen</span><span class="card__value">{{if .Selected.Last}}{{.Selected.Last}}{{else}}not recorded{{end}}</span></div>
+    {{/* #1566: First/Last are attacker-identity-worker's own raw RFC3339
+         strings (identity.go's entity JSON, e.utc().Format(time.RFC3339))
+         -- rendered verbatim this is exactly the "2026-08-1(newline)6T23:
+         17:0(newline)1Z" mid-character wrap the issue reported for
+         /attackers. displayTime normalizes the text; data-hp-utc keeps the
+         raw ISO value as the twin hp-app.js's applyTimeDisplay reformats
+         per the viewer's own timezone/clock preference. */}}
+    <div class="card__row"><span class="card__label">first seen</span><span class="card__value"{{if .Selected.First}} data-hp-utc="{{.Selected.First}}"{{end}}>{{if .Selected.First}}{{displayTime .Selected.First}}{{else}}not recorded{{end}}</span></div>
+    <div class="card__row"><span class="card__label">last seen</span><span class="card__value"{{if .Selected.Last}} data-hp-utc="{{.Selected.Last}}"{{end}}>{{if .Selected.Last}}{{displayTime .Selected.Last}}{{else}}not recorded{{end}}</span></div>
   </div>
   <div class="card">
     <h2>Sensors ({{len .Selected.Sensors}})</h2>
@@ -88,7 +95,7 @@
      an otherwise-empty page. Same fix, same reasoning as events.html's
      main table and intel.html's "commands" page: let it grow with content
      and let .app-main scroll the page. */}}
-<div class="card wide tw:mt-4" data-hp-md-generic id="attackers-table"><h2>Known identities</h2>{{if .Rows}}<table class="data-table"><thead><tr><th>entity</th><th>ips</th><th>events</th><th>sensors</th><th>first</th><th>last</th><th></th><th></th></tr></thead><tbody>{{range .Rows}}<tr><td><a href="{{.Link}}">{{shortAttackerID .ID}}</a></td><td class="n"><a href="{{.Link}}">{{len .IPs}}</a></td><td class="n">{{.Events}}</td><td class="v">{{range .Sensors}}<span class="badge badge--muted">{{.}}</span> {{end}}</td><td class="v">{{.First}}</td><td class="v">{{.Last}}</td><td>{{if .Verdicts}}<span class="badge badge--accent">verdict</span>{{end}}</td><td><a class="lnk" href="{{.Link}}">graph &rarr;</a></td></tr>{{end}}</tbody></table>{{else if .Ready}}<p class="empty">No attacker entities yet &mdash; attacker-identity-worker (#1200) merges IPs sharing 2+ strong signals (fingerprint, payload hash, credential pair) into durable entities as traffic accumulates.</p>{{else}}<div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:70%"></div>{{end}}</div>
+<div class="card wide tw:mt-4" data-hp-md-generic id="attackers-table"><h2>Known identities</h2>{{if .Rows}}<table class="data-table"><thead><tr><th>entity</th><th>ips</th><th>events</th><th>sensors</th><th>first</th><th>last</th><th></th><th></th></tr></thead><tbody>{{range .Rows}}<tr><td><a href="{{.Link}}">{{shortAttackerID .ID}}</a></td><td class="n"><a href="{{.Link}}">{{len .IPs}}</a></td><td class="n">{{.Events}}</td><td class="v">{{range .Sensors}}<span class="badge badge--muted">{{.}}</span> {{end}}</td><td class="v"{{if .First}} data-hp-utc="{{.First}}"{{end}}>{{displayTime .First}}</td><td class="v"{{if .Last}} data-hp-utc="{{.Last}}"{{end}}>{{displayTime .Last}}</td><td>{{if .Verdicts}}<span class="badge badge--accent">verdict</span>{{end}}</td><td><a class="lnk" href="{{.Link}}">graph &rarr;</a></td></tr>{{end}}</tbody></table>{{else if .Ready}}<p class="empty">No attacker entities yet &mdash; attacker-identity-worker (#1200) merges IPs sharing 2+ strong signals (fingerprint, payload hash, credential pair) into durable entities as traffic accumulates.</p>{{else}}<div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:60%"></div><div class="skeleton-line" style="width:70%"></div>{{end}}</div>
 {{end}}
 {{define "attackers"}}<!doctype html>
 <html lang="en">
