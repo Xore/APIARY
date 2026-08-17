@@ -23,7 +23,36 @@
   // black/ECharts-default-grey.
   const themeColor = window.hpChartColor || (name => name);
 
-  const initFns = { sankey: initSankey, timeline: initTimeline, heatmap: initHeatmap, pie: initPie, line: initLine, bar: initBar, scatter: initScatter, radar: initRadar };
+  // #1565: large axis values (netflow bytes/packets run into the tens of
+  // billions over a 7-day window) rendered as bare digit strings on every
+  // count-shaped y-axis. One shared K/M/G/T formatter, not a bytes-specific
+  // "GB" suffix, since the same initLine/initBar functions also back
+  // unit-less consumers (ml-backlog queue depth, endlessh histogram
+  // counts) that a hardcoded byte unit would mislabel.
+  const humanizeNumber = n => {
+    const abs = Math.abs(n);
+    if (abs >= 1e12) return +(n / 1e12).toFixed(1) + "T";
+    if (abs >= 1e9) return +(n / 1e9).toFixed(1) + "G";
+    if (abs >= 1e6) return +(n / 1e6).toFixed(1) + "M";
+    if (abs >= 1e3) return +(n / 1e3).toFixed(1) + "K";
+    return String(n);
+  };
+
+  // Copy-to-clipboard flash, same feel as hp-app.js's own [data-hp-copy]
+  // handler (14B) -- reused here because a canvas-rendered chart bar has no
+  // real DOM node for that delegated listener to match against.
+  const flashCopied = text => {
+    navigator.clipboard?.writeText(text).then(() => {
+      const flash = document.getElementById("hp-flash");
+      if (!flash) return;
+      flash.textContent = `Copied ${text}`;
+      flash.dataset.state = "ok";
+      flash.classList.add("open");
+      setTimeout(() => flash.classList.remove("open"), 1600);
+    }).catch(() => {});
+  };
+
+  const initFns = { sankey: initSankey, timeline: initTimeline, heatmap: initHeatmap, pie: initPie, line: initLine, bar: initBar, barh: initBarH, scatter: initScatter, radar: initRadar };
 
   // #1277: exposed as window.initHoneypotCharts (same convention hp-app.js's
   // own window.initHoneypotMaps already uses) so a page whose content gets
@@ -41,7 +70,12 @@
       const kind = container.dataset.echartKind;
       const url = container.dataset.echart;
       const status = document.querySelector(`[data-echart-status="${url}"]`);
-      const setStatus = text => { if (status) status.textContent = text; };
+      // #1565: on empty/error, the chart's own center placeholder and the
+      // card's caption paragraph used to show the identical text twice
+      // ("No data yet." appearing both as the chart-area message and right
+      // below it) -- the caption now stays hidden while the center message
+      // carries it alone, and un-hides again the moment real data renders.
+      const setStatus = text => { if (status) { status.hidden = false; status.textContent = text; } };
       const renderState = (text, error = false) => {
         container.replaceChildren();
         container.setAttribute("aria-busy", "false");
@@ -51,7 +85,7 @@
         message.textContent = text;
         message.style.cssText = "display:grid;place-items:center;width:100%;height:100%;padding:2rem;text-align:center";
         container.appendChild(message);
-        setStatus(text);
+        if (status) status.hidden = true;
       };
       const init = initFns[kind];
       if (!init) return;
@@ -86,6 +120,17 @@
   initCharts();
   window.initHoneypotCharts = initCharts;
 
+  // #1577: operator preference is kill-chain progressions stacking top to
+  // bottom rather than the previous left-to-right flow -- matching how
+  // events.html's own single-IP attack-chain view already reads
+  // ("chronological -- the attack reads top to bottom"). ECharts' sankey
+  // series supports this as a first-class orient flip rather than a
+  // reshape of the underlying data: buildKillChainSankey (kill_chain.go)
+  // hands over the same {nodes, links} shape either way, so only the
+  // rendering options below change. label.position moves from the
+  // horizontal layout's "right" (natural next to a vertical node bar) to
+  // "top" (natural above a horizontal node bar, clear of the flow curves
+  // entering its bottom edge from the tactic above).
   function initSankey(chart, data) {
     const nodes = data.nodes || [];
     const links = data.links || [];
@@ -99,11 +144,12 @@
       tooltip: { trigger: "item" },
       series: nodes.length === 0 ? [] : [{
         type: "sankey",
+        orient: "vertical",
         emphasis: { focus: "adjacency" },
         data: nodes,
         links: links,
         lineStyle: { color: "gradient", curveness: 0.5 },
-        label: { color: themeColor("--text-primary", "#e9e6df") },
+        label: { position: "top", color: themeColor("--text-primary", "#e9e6df") },
       }],
     });
     if (nodes.length === 0) return "No attacker sessions with a recognized ATT&CK technique yet.";
@@ -118,8 +164,22 @@
     chart.setOption({
       tooltip: { position: "top" },
       grid: { height: "70%", top: "8%", left: "22%" },
-      xAxis: { type: "category", data: tactics, splitArea: { show: true }, axisLabel: { rotate: 30 } },
-      yAxis: { type: "category", data: techniques, splitArea: { show: true } },
+      // #1565: ECharts' default splitArea alternates two hardcoded
+      // near-white grays -- fine on the light theme, a set of pale washed
+      // columns/rows badly clashing with the dark theme's own dark
+      // surfaces. Same two theme surface tokens the rest of the dashboard
+      // already uses for zebra striping, so the grid reads as intentional
+      // in either theme instead of leftover default chrome.
+      xAxis: {
+        type: "category", data: tactics,
+        splitArea: { show: true, areaStyle: { color: [themeColor("--surface-1", "#2c2c2a"), themeColor("--surface-2", "#232321")] } },
+        axisLabel: { rotate: 30, color: themeColor("--text-primary", "#e9e6df") },
+      },
+      yAxis: {
+        type: "category", data: techniques,
+        splitArea: { show: true, areaStyle: { color: [themeColor("--surface-1", "#2c2c2a"), themeColor("--surface-2", "#232321")] } },
+        axisLabel: { color: themeColor("--text-primary", "#e9e6df") },
+      },
       visualMap: {
         min: 0, max: max, calculable: true, orient: "horizontal",
         left: "center", bottom: "0%",
@@ -142,6 +202,16 @@
   function initPie(chart, data) {
     data = data || [];
     const total = data.reduce((sum, d) => sum + (d.value || 0), 0);
+    // #1565: every slice's callout label piled up and crossed leader lines
+    // once a handful of categories fell under a couple percent of the
+    // whole (the OS-distribution donut's own long tail) -- the legend
+    // already names every slice by color, so a tiny slice's own callout is
+    // pure clutter, not lost information. Threshold is per-item, not a
+    // series default, so the few large slices keep their direct labels.
+    const data2 = data.map(d => {
+      const pct = total > 0 ? ((d.value || 0) / total) * 100 : 0;
+      return pct < 2 ? { ...d, label: { show: false }, labelLine: { show: false } } : d;
+    });
     chart.setOption({
       tooltip: { trigger: "item", formatter: "{b}: {c} ({d}%)" },
       legend: { orient: "vertical", left: "left", textStyle: { color: themeColor("--text-primary", "#e9e6df") } },
@@ -151,7 +221,7 @@
         avoidLabelOverlap: true,
         itemStyle: { borderColor: themeColor("--surface-1", "#2c2c2a"), borderWidth: 2 },
         label: { color: themeColor("--text-primary", "#e9e6df") },
-        data,
+        data: data2,
       }],
     });
     if (data.length === 0) return "No data yet.";
@@ -203,8 +273,19 @@
       tooltip: { trigger: "axis" },
       legend: { textStyle: { color: themeColor("--text-primary", "#e9e6df") } },
       grid: { left: "12%", right: "5%" },
-      xAxis: { type: "time" },
-      yAxis: { type: "value" },
+      // #1565: the ml-backlog card's default day-granularity ticks over a
+      // 7-day window rendered as bare day-of-month digits ("11 ... 17")
+      // whenever every visible tick landed inside the same month -- no
+      // weekday or month context at all. An explicit format per
+      // granularity keeps the month attached to every day tick regardless.
+      xAxis: { type: "time", axisLabel: { formatter: {
+        year: "{yyyy}", month: "{MMM}", day: "{MMM} {d}",
+        hour: "{HH}:{mm}", minute: "{HH}:{mm}", second: "{HH}:{mm}:{ss}",
+      } } },
+      // #1565: netflow-bytes/netflow-packets run into the tens of billions
+      // over a 7-day window -- humanized tick labels (K/M/G/T), exact value
+      // still on hover via the unformatted tooltip above.
+      yAxis: { type: "value", axisLabel: { formatter: humanizeNumber } },
       series: data.map(s => ({
         name: s.name,
         type: "line",
@@ -234,23 +315,67 @@
     const longLabels = categories.some(c => c.length > 14);
     chart.setOption({
       tooltip: { trigger: "axis" },
-      grid: { left: "10%", right: "5%", bottom: longLabels ? 110 : 30 },
+      grid: { left: "10%", right: "5%", bottom: longLabels ? 130 : 30 },
       xAxis: {
         type: "category",
         data: categories,
         axisLabel: {
           color: themeColor("--text-primary", "#e9e6df"),
           rotate: longLabels ? 30 : 0,
-          overflow: "truncate",
-          width: longLabels ? 160 : undefined,
+          // #1565: a sparse-bucket chart (e.g. 2 exploited CVEs) truncated
+          // long incident names AND still let the bar itself balloon to a
+          // near-card-width slab. Wrapping ("break") instead of truncating
+          // ("...") keeps the full name legible without relying on hover;
+          // barMaxWidth below is the actual fix for the oversized bar.
+          overflow: longLabels ? "break" : undefined,
+          width: longLabels ? 200 : undefined,
         },
       },
-      yAxis: { type: "value" },
-      series: [{ type: "bar", data: values, itemStyle: { color: themeColor("--accent", "#d97757") } }],
+      // #1565: same humanized K/M/G/T scale initLine's y-axis uses --
+      // most consumers here are small counts where this is a no-op, but
+      // keeps any future large-count bar chart readable for free.
+      yAxis: { type: "value", axisLabel: { formatter: humanizeNumber } },
+      series: [{ type: "bar", barMaxWidth: 56, data: values, itemStyle: { color: themeColor("--accent", "#d97757") } }],
     });
     const total = values.reduce((sum, v) => sum + v, 0);
     if (categories.length === 0) return "No data yet.";
     return `${categories.length} bucket${categories.length === 1 ? "" : "s"}, ${total} total.`;
+  }
+
+  // Horizontal variant of initBar: same {categories, values} shape, but
+  // the category (a full JA4/JA3/HASSH hash or client-software string,
+  // routinely 30-60+ characters) runs along the y-axis instead of a
+  // rotated, truncated x-axis label. First consumer: #1565's JA4/SSH
+  // fingerprint cards, whose vertical-bar rotated labels were unreadable
+  // regardless of truncation width.
+  function initBarH(chart, data) {
+    data = data || {};
+    const categories = data.categories || [];
+    const values = data.values || [];
+    chart.setOption({
+      tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
+      grid: { left: "34%", right: "8%", top: 10, bottom: 10 },
+      xAxis: { type: "value", axisLabel: { formatter: humanizeNumber } },
+      yAxis: {
+        type: "category",
+        data: categories,
+        inverse: true,
+        axisLabel: { color: themeColor("--text-primary", "#e9e6df"), overflow: "truncate", width: 220 },
+      },
+      series: [{ type: "bar", barMaxWidth: 18, data: values, itemStyle: { color: themeColor("--accent", "#d97757") } }],
+    });
+    // Full, untruncated hash on click -- the axis label above is width
+    // capped for layout, and hover-only tooltip text can't be selected or
+    // copied the way a flashed clipboard confirmation can.
+    chart.off("click");
+    chart.on("click", params => {
+      if (params.componentType !== "series") return;
+      const label = categories[params.dataIndex];
+      if (label) flashCopied(label);
+    });
+    const total = values.reduce((sum, v) => sum + v, 0);
+    if (categories.length === 0) return "No data yet.";
+    return `${categories.length} fingerprint${categories.length === 1 ? "" : "s"}, ${total} total. Click a bar to copy its full value.`;
   }
 
   // Generic multi-series time scatter chart -- same [{name, points:

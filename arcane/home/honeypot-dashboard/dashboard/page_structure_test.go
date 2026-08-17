@@ -213,11 +213,11 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 		// exist in "attackers-body", rendered separately by the fragment
 		// route.
 		{"attackers-body", attackersPage{Generated: now, Rows: []attackerRow{{ID: "entity-1", Link: "/attackers?id=entity-1"}}, Total: 1, Selected: &attackerRow{ID: "entity-1"}}},
-		// #1538: "sensors-populated" exercises both tabs' non-empty branch
-		// (session table rows, request table rows, and the <details>
-		// preview/headers blocks each row can carry) -- "sensors" (in the
-		// pages loop's own name, mapped below) covers the Enabled-but-empty
-		// branch of both tabs.
+		// #1538: "sensors-populated" exercises all three tabs' non-empty
+		// branch (session table rows, request table rows, and the
+		// <details> preview/headers/post-data/cookies blocks each row can
+		// carry) -- "sensors" (in the pages loop's own name, mapped below)
+		// covers the Enabled-but-empty branch of all three tabs.
 		{"sensors", sensorDetailPage{Generated: now, Enabled: true}},
 		{"sensors-populated", sensorDetailPage{Generated: now, Enabled: true,
 			Mailoney: []mailoneySession{{
@@ -232,6 +232,15 @@ func TestRenderedPagesHaveBalancedMarkup(t *testing.T) {
 				Headers: map[string]string{"x-ja4": "t13d..."}, Body: "log=admin&pwd=hunter2",
 				Username: "admin", Password: "hunter2", AuthType: "form", Status: 200, Category: "wordpress",
 				Tarpitted: true, TarpitBytes: 4096, TarpitMS: 1500,
+			}},
+			Tanner: []tannerRequest{{
+				When: now.Format(time.RFC3339), IP: "203.0.113.55", Method: "POST", Path: "/login.php",
+				UserAgent: "sqlmap/1.7", Headers: map[string]string{"user-agent": "sqlmap/1.7"},
+				Username: "admin", Password: "' OR 1=1--",
+				Tarpitted: true, TarpitBytes: 2048, TarpitMS: 900,
+				PostData:      map[string]string{"user": "admin", "pass": "' OR 1=1--"},
+				Cookies:       map[string]string{"PHPSESSID": "abc123"},
+				DetectionName: "sqli", DetectionPayload: "1 row returned",
 			}},
 		}},
 	}

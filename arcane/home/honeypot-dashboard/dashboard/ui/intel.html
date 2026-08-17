@@ -119,16 +119,23 @@
 {{end}}
 
 {{/* #478: overview-page-only glance summary of the same campaign rows
-     campaignrows renders in full on /campaigns -- score/network/events/ips/
+     campaignrows renders in full on /campaigns -- network/events/ips/
      sensors/last-seen, the columns that answer "is this active and worth a
      look" without the ports/creds/files/alerts/ASNs/provider/fingerprints/
      sequence/why-correlated detail every wide cell needs on a card this
      size. Every row still links to the same full campaign detail
-     campaignrows' cells do. */}}
+     campaignrows' cells do.
+     #1565: the score column dropped from this summary -- correlateCampaigns'
+     own min(100, ...) weighting saturates at the cap for most real
+     multi-signal campaigns (several sensors + a payload + a couple alerts
+     is already enough), so on a typical rolling-7-day window nearly every
+     row read "100" with no way to tell them apart at a glance. /campaigns'
+     own row inspector still shows the real score; fixing the weighting
+     itself so it discriminates better is a separate, riskier change (it's
+     also the sort key for every /campaigns view) left for a follow-up. */}}
 {{define "campaignrows-summary"}}
 {{range .}}
 <tr>
-  <td class="n"><a href="{{.Link}}" title="investigate this campaign">{{.Score}}</a></td>
   <td class="v"><a href="{{.Link}}">{{.CIDR}}</a></td>
   <td class="n"><a href="{{.Link}}" title="show campaign events">{{.Events}}</a></td>
   <td class="n"><a href="{{.Link}}" title="show campaign source addresses">{{.UniqueIPs}}</a></td>
@@ -277,7 +284,7 @@
              page" against every other single-card page. */}}
         <div class="card wide" data-hp-md-generic id="commands-table">{{if .Rows}}<table class="recent data-table"><thead><tr><th>seen</th><th>sensor</th><th>command</th><th>sources</th><th>sessions</th><th>first</th><th>last</th><th>chain</th></tr></thead><tbody>
         {{range .Rows}}<tr><td class="n">{{.Count}}</td><td><span class="badge b-{{.Sensor}}">{{.Sensor}}</span></td>
-        <td class="v"><code>{{.Command}}</code> <button class="copy" data-copy="{{.Command}}">copy</button></td><td class="v">{{.Sources}}</td><td class="n">{{.Sessions}}</td><td{{if .FirstUTC}} data-hp-utc="{{.FirstUTC}}"{{end}}>{{.First}}</td><td{{if .LastUTC}} data-hp-utc="{{.LastUTC}}"{{end}}>{{.Last}}</td><td><a class="lnk" href="{{.Link}}">events &rarr;</a></td></tr>{{end}}
+        <td class="v"><code>{{.Command}}</code> <button class="copy" data-copy="{{.Command}}">copy</button></td><td class="v hp-ip-list">{{.Sources}}</td><td class="n">{{.Sessions}}</td><td{{if .FirstUTC}} data-hp-utc="{{.FirstUTC}}"{{end}}>{{.First}}</td><td{{if .LastUTC}} data-hp-utc="{{.LastUTC}}"{{end}}>{{.Last}}</td><td><a class="lnk" href="{{.Link}}">events &rarr;</a></td></tr>{{end}}
         </tbody></table>{{else}}<p class="empty">no commands captured yet</p>{{end}}</div>
         <footer id="commands-footer">{{brandText}} &bull; static investigation view</footer>
       </div>

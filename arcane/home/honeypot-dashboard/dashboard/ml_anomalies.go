@@ -343,6 +343,12 @@ type mlAnomaliesPage struct {
 	Enabled   bool
 	Anomalies []mlAnomaly
 	Stats     mlAnomalyStats
+	// OpenCount (#1566) is every unacknowledged anomaly across the full
+	// polled snapshot, not just the current filter -- same "24h count sits
+	// above a table full of week-old open items" gap the issue flagged,
+	// and the count the "acknowledge all" button's confirmation shows
+	// (serveMLAnomalyAckAll acts on this same unfiltered set).
+	OpenCount int
 	Filters   []string
 	filterBar
 }
@@ -362,6 +368,11 @@ func (s *store) mlAnomaliesData(r *http.Request) mlAnomaliesPage {
 	}
 	items := s.mlAnomalies.snapshot()
 	s.applyMLAnomalyAcks(items)
+	for _, item := range items {
+		if !item.Acknowledged {
+			page.OpenCount++
+		}
+	}
 	filtered := make([]mlAnomaly, 0, len(items))
 	for _, item := range items {
 		if f.match(item) {

@@ -32,8 +32,22 @@ package main
 //     beyond a "METHOD path" summary line. Implemented below:
 //     loadHTTPHoneypotRequests reads the raw per-request fields directly.
 //
-// Deliberately NOT covered by this first slice (see the #1538 issue
-// comment and this PR's description for the fuller reasoning):
+//   - tanner (classify.go's shared tanner_report.json/http-honeypot
+//     branch, ~line 1009, gated on `ev.sensor == "tanner"` at line 1074):
+//     shares http-honeypot's method/path/headers request-log shape, but
+//     carries its own richer fields http-honeypot never sets -- post_data
+//     (the emulator's matched attack payload, e.g. a SQLi/XSS/cmd_exec
+//     string), cookies (session-hijack/injection payloads), and the
+//     detection itself (response_msg.response.message.detection.
+//     {name,payload.value} -- tannerDetectionName/tannerDetectionPayload
+//     in classify.go), a nested object BaseHandler.get_emulation_result()
+//     writes only when one of tanner's 10 emulators actually matched --
+//     not a flat per-request field the way http-honeypot's own fields
+//     are. Implemented below: loadTannerRequests reads these directly,
+//     same discipline as loadHTTPHoneypotRequests, no classify.go reuse.
+//
+// Deliberately NOT covered by this slice (see the #1538 issue comment and
+// this PR's description for the fuller reasoning):
 //
 //   - cowrie: already has dedicated per-session surfaces (session.html /
 //     page_session.go groups a whole SSH session chronologically,
@@ -42,12 +56,6 @@ package main
 //   - dionaea: its distinct fields (credentials[0], exploit/shellcode
 //     download metadata) are payload-hash-centric and already surface
 //     through /payloads' own captured-file detail view.
-//   - tanner: shares classify.go's http/tanner branch with http-honeypot
-//     and has its own richer fields (post_data, cookies, the emulator's
-//     detection payload) -- a real second candidate, left for follow-up
-//     rather than folded into this PR's http-honeypot tab, since its
-//     shape (nested detection object, not a flat event) needs its own
-//     parse, not a copy-paste of loadHTTPHoneypotRequests.
 //   - every sensor promoteCanonicalFields' own doc comment already
 //     excludes from field-promotion (dns-honeypot, every conpot persona,
 //     wordpot's template-matched fields, etc.): confirmed to have no
@@ -56,7 +64,7 @@ package main
 //     already summarize.
 //
 // Extension pattern for the next sensor: add a query/group function here
-// (loadXSensorY, same shape as the two below -- term-filter honeypot-v2-*
+// (loadXSensorY, same shape as the three below -- term-filter honeypot-v2-*
 // on event.sensor, read the raw honeypot.* fields the sensor's own source
 // actually writes, no classify.go involvement), a field to sensorDetailPage,
 // a populate call in sensorDetailData, and one more <button data-dashboard-
@@ -91,6 +99,10 @@ const mailoneySessionCap = 150
 // httpHoneypotRequestCap bounds how many raw HTTP requests render on the
 // page, same reasoning as mailoneySessionCap.
 const httpHoneypotRequestCap = 300
+
+// tannerRequestCap bounds how many raw tanner requests render on the page,
+// same reasoning as httpHoneypotRequestCap.
+const tannerRequestCap = 300
 
 // mailoneySession groups mailoney/json_log_patch.py's three flat event
 // kinds ("login", "envelope", "mail-body") by their shared session_id into
@@ -142,6 +154,35 @@ type httpHoneypotRequest struct {
 	Tarpitted   bool
 	TarpitBytes int
 	TarpitMS    int64
+}
+
+// tannerRequest mirrors one tanner_report.json request as tanner's own
+// json_log_patch.py/BaseHandler write it -- the same method/path/headers
+// request-log shape http-honeypot uses (classify.go's shared branch,
+// ~line 1009), plus the fields only tanner ever sets: PostData/Cookies
+// (raw request-side data an emulator inspects) and DetectionName/
+// DetectionPayload (the emulator's own verdict + captured execution
+// result, dug out of the nested response_msg.response.message.detection
+// object by classify.go's tannerDetectionName/tannerDetectionPayload --
+// mirrored here rather than imported, since those two helpers return a
+// single formatted string for ev.detail's one-line summary, not the
+// structured fields this page wants to show separately).
+type tannerRequest struct {
+	When             string
+	IP               string
+	Method           string
+	Path             string
+	UserAgent        string
+	Headers          map[string]string
+	Username         string
+	Password         string
+	Tarpitted        bool
+	TarpitBytes      int
+	TarpitMS         int64
+	PostData         map[string]string
+	Cookies          map[string]string
+	DetectionName    string
+	DetectionPayload string
 }
 
 // sensorRawHit is the shared _search response shape both query functions
@@ -310,7 +351,72 @@ func (s *store) loadHTTPHoneypotRequests() ([]httpHoneypotRequest, bool) {
 	return out, true
 }
 
-// sensorDetailPage is /sensors' page data. Both sensor slices are queried
+// loadTannerRequests reads tanner's raw per-request fields directly, same
+// no-grouping posture as loadHTTPHoneypotRequests (every tanner_report.json
+// record is already a complete request), but pulling the extra fields only
+// tanner carries: PostData/Cookies (raw maps, key-cased like classify.go's
+// own #575 cookie handling via stringMap, not lowercased like headers) and
+// the nested detection object (response_msg.response.message.detection --
+// present only when one of tanner's emulators actually matched, per
+// tannerDetectionName/tannerDetectionPayload's own doc comments in
+// classify.go). The legacy tanner "peer" session-report shape (classify.go
+// ~line 972, no method/category field) is skipped here the same way
+// promoteWebRequestFields (ip-enrichment-worker/canonical.go) skips it: it
+// carries none of these per-request fields, only a paths[]/attack_types[]
+// summary already visible in the generic /events list.
+func (s *store) loadTannerRequests() ([]tannerRequest, bool) {
+	hits, ok := querySensorRaw(s.es, "tanner", true)
+	if !ok {
+		return nil, false
+	}
+
+	out := make([]tannerRequest, 0, len(hits))
+	for _, h := range hits {
+		e := h.Source.Honeypot
+		if e == nil {
+			continue
+		}
+		if str(e["method"]) == "" && str(e["category"]) == "" {
+			continue // legacy "peer" shape -- no per-request fields to show
+		}
+		if str(e["category"]) == "startup" {
+			continue
+		}
+		hdr := headerMap(e["headers"])
+		// Real client IP rides in CF/proxy headers when fronted by
+		// Cloudflare, same preference order as classify.go's shared
+		// tanner_report.json/http-honeypot branch (~line 1041) -- the
+		// transport-level src_ip is Cloudflare's own edge IP otherwise.
+		ip := firstNonEmpty(headerVal(hdr, "cf-connecting-ip"), headerVal(hdr, "x-real-ip"),
+			firstHop(headerVal(hdr, "x-forwarded-for")), str(e["src_ip"]))
+		req := tannerRequest{
+			When:             h.Source.Timestamp,
+			IP:               ip,
+			Method:           str(e["method"]),
+			Path:             str(e["path"]),
+			UserAgent:        headerVal(hdr, "user-agent"),
+			Headers:          hdr,
+			Username:         str(e["username"]),
+			Password:         str(e["password"]),
+			TarpitBytes:      int(numFloat(e["tarpit_bytes"])),
+			TarpitMS:         int64(numFloat(e["tarpit_ms"])),
+			PostData:         stringMap(e["post_data"]),
+			Cookies:          stringMap(e["cookies"]),
+			DetectionName:    tannerDetectionName(e),
+			DetectionPayload: tannerDetectionPayload(e),
+		}
+		if tarpitted, ok := e["tarpitted"].(bool); ok {
+			req.Tarpitted = tarpitted
+		}
+		out = append(out, req)
+		if len(out) >= tannerRequestCap {
+			break
+		}
+	}
+	return out, true
+}
+
+// sensorDetailPage is /sensors' page data. All sensor slices are queried
 // live, synchronously, on each request -- same posture as auth_events.go's
 // authEventsData/deadLetters (elastic.go): a bounded, single-page ES query
 // per load, no background cache, appropriate for a detail view an operator
@@ -321,6 +427,7 @@ type sensorDetailPage struct {
 	Enabled      bool
 	Mailoney     []mailoneySession
 	HTTPRequests []httpHoneypotRequest
+	Tanner       []tannerRequest
 }
 
 func (s *store) sensorDetailData(r *http.Request) sensorDetailPage {
@@ -333,6 +440,9 @@ func (s *store) sensorDetailData(r *http.Request) sensorDetailPage {
 	}
 	if reqs, ok := s.loadHTTPHoneypotRequests(); ok {
 		page.HTTPRequests = reqs
+	}
+	if reqs, ok := s.loadTannerRequests(); ok {
+		page.Tanner = reqs
 	}
 	return page
 }

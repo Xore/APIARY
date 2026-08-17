@@ -282,6 +282,31 @@ func TestMLAnomaliesDataAppliesFilter(t *testing.T) {
 	// own (necessarily empty here) output.
 }
 
+// TestMLAnomaliesDataOpenCountIgnoresFilter (#1566) proves OpenCount stays
+// the full-history unacknowledged count regardless of the current filter --
+// it backs the bulk "acknowledge all (N)" button and the KPI tile, both of
+// which act on/describe every open anomaly, not just whatever a severity/
+// score/country filter happens to be narrowing the table to (same
+// "acknowledges every open one, plus anything the page doesn't show"
+// semantics /alerts' own acknowledge-all button already uses).
+func TestMLAnomaliesDataOpenCountIgnoresFilter(t *testing.T) {
+	c := &mlAnomalyStore{}
+	c.absorb([]mlAnomaly{
+		{AnomalyID: "a1", Timestamp: "2026-08-01T10:00:00Z", Severity: "critical", SrcIP: "203.0.113.9"},
+		{AnomalyID: "a2", Timestamp: "2026-08-01T10:01:00Z", Severity: "low", SrcIP: "203.0.113.10"},
+	})
+	s := &store{mlAnomalies: c, es: &esClient{}}
+
+	all := s.mlAnomaliesData(httptest.NewRequest("GET", "/ml-anomalies", nil))
+	if all.OpenCount != 2 {
+		t.Fatalf("OpenCount = %d, want 2", all.OpenCount)
+	}
+	narrowed := s.mlAnomaliesData(httptest.NewRequest("GET", "/ml-anomalies?severity=critical", nil))
+	if narrowed.OpenCount != 2 {
+		t.Fatalf("OpenCount under a severity filter = %d, want 2 (unfiltered)", narrowed.OpenCount)
+	}
+}
+
 func TestMLAnomaliesDataDisabledStoreHasNoFilters(t *testing.T) {
 	page := (&store{}).mlAnomaliesData(httptest.NewRequest("GET", "/ml-anomalies?severity=critical", nil))
 	if page.Enabled {
