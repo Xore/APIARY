@@ -313,7 +313,7 @@ func defaultPreferencesWithSiteTimezone(siteDefault string) userPreferences {
 // closed lists so a preference can never turn the dashboard into a
 // denial-of-service client against itself or Elasticsearch.
 var (
-	allowedThemes          = []string{"system", "dark", "light"}
+	allowedThemes = []string{"system", "dark", "light"}
 	// Palette presets (per Xore): accent palettes defined in Xore/theme's
 	// data-hp-palette blocks, every pair WCAG-AA validated in both themes.
 	// "" is accepted as "claude" so preference documents saved before this
