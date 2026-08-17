@@ -328,8 +328,19 @@ http:
     # match first. Don't lower this below 1 or raise it near/above the
     # shortest named Host() rule's auto-priority without re-checking that
     # ordering still holds.
+    #
+    # The rule below leaves "honeypot.example"'s own internal dot
+    # unescaped (only the separator dot before it is `\.`) so
+    # scripts/install-vps.sh's `sed s/honeypot\.example/${DOMAIN}/g`
+    # still finds and replaces the literal placeholder text verbatim --
+    # an escaped `honeypot\.example` wouldn't match that sed pattern and
+    # would silently never get templated to the real domain. The
+    # imprecision (an unescaped `.` also matches any single character,
+    # not just a literal dot) is harmless here: this is a routing
+    # convenience match, not a security boundary, and no real trigger
+    # hostname will ever collide with it by accident.
     honeypot-canarytokens:
-      rule: "HostRegexp(`^[a-z0-9]+\\.honeypot\\.example$`)"
+      rule: "HostRegexp(`^[a-z0-9]+\\.honeypot.example$`)"
       priority: 5
       entryPoints: [websecure]
       service: honeypot-canarytokens
