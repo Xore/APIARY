@@ -42,9 +42,12 @@
                  payloads.html's own data-payload-warming note already
                  uses, so the skeleton state above resolves to real content
                  within a couple seconds of the first rebuild() finishing,
-                 not the next 60s auto-refresh tick. */}}
+                 not the next 60s auto-refresh tick. #1564: the retry itself
+                 moved to the shared hp-warming-reload.js (this marker is in
+                 its WARMING_SELECTOR) -- see that file's own comment for
+                 why a page-local inline reload script here stopped being
+                 safe once "/" became a normal SPA-navigable route. */}}
             <span class="gen" data-dashboard-warming><span class="status-dot" aria-hidden="true"></span> Warming up &mdash; running the first collection pass.</span>
-            <script nonce="{{.Nonce}}">setTimeout(()=>location.reload(),1500)</script>
             {{end}}
           </div>
         </header>
@@ -451,43 +454,18 @@
      after echarts.min.js and before hp-kill-chain.js. */}}
 <script defer src="{{asset "/static/hp-echarts-theme.js"}}"></script>
 <script defer src="{{asset "/static/hp-kill-chain.js"}}"></script>
-<script nonce="{{.Nonce}}">
-let refreshing=false;
-async function refreshDashboard(){
-  // The toolbar LIVE control owns every refresh path; while it is paused the
-  // overview must keep the snapshot the operator is reading.
-  if(window.HoneypotLive&&window.HoneypotLive.paused())return;
-  if(refreshing)return;refreshing=true;
-  try {
-    const r = await fetch(location.pathname, {cache: "no-store"});
-    if (!r.ok) return;
-    const doc = new DOMParser().parseFromString(await r.text(), "text/html");
-    const next = doc.querySelector("[data-hp-page-content]"),current=document.querySelector("[data-hp-page-content]");
-    // #1393: hydrate named overview regions in the existing document rather
-    // than replacing the page-content subtree. hp-app.js also re-nonces the
-    // incoming fragment before insertion (#347), preserves the live map,
-    // focused controls, modal state, tabs, and the current viewport. If the
-    // deferred enhancement layer is not ready yet, leave the current view
-    // untouched and let the next SSE/timer tick retry.
-    if (next&&current&&window.hydrateHoneypotOverview&&window.hydrateHoneypotOverview(next)) {if(window.initDashboardTabs)window.initDashboardTabs();if(window.initHoneypotMaps)window.initHoneypotMaps();if(window.initHoneypotCharts)window.initHoneypotCharts();}
-  } catch {} finally {refreshing=false}
-}
-/* #210: the overview page used to track its own SSE connection health for a
-   page-local .live-pill. That pill is gone -- the toolbar's LIVE toggle
-   (shared across every page) is now the single indicator, so this reports
-   the same open/error signal into window.HoneypotLive's global connection
-   state instead of rendering anything itself. Native EventSource retries
-   with its own backoff after onerror; this only reflects that state, it
-   does not implement reconnection. */
-if(window.EventSource){
-  const es=new EventSource('/api/stream');
-  es.addEventListener('update',refreshDashboard);
-  es.addEventListener('open',()=>{if(window.HoneypotLive)window.HoneypotLive.setConnectionHealthy(true);});
-  es.onerror=()=>{if(window.HoneypotLive)window.HoneypotLive.setConnectionHealthy(false);};
-}
-setInterval(refreshDashboard, 60000);
-addEventListener('hp-live-resumed',refreshDashboard);
-</script>
+{{/* #1564: the overview's own in-place refresh (fetch-and-hydrate, the SSE
+     connection, the 60s poll, the hp-live-resumed listener) used to live
+     right here as a page-local inline script block. It's now owned by
+     hp-app.js itself (refreshDashboardOverview, self-guarded on
+     #overview-header so it's a no-op on every other page) so the whole
+     shell shares exactly one /api/stream connection across every
+     navigation instead of each page opening its own -- see hp-app.js's own
+     comment on refreshDashboardOverview for why a page-local EventSource
+     here could no longer be assumed to be the only one open once "/"
+     became a normal SPA-navigable route rather than only ever a full page
+     load. */}}
+<script defer src="{{asset "/static/hp-warming-reload.js"}}"></script>
 </body>
 </html>
 {{end}}

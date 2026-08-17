@@ -192,17 +192,13 @@
           <div class="card"><div class="skeleton-line" style="width:45%"></div><div class="skeleton-line" style="width:75%"></div><div class="skeleton-line" style="width:55%"></div></div>
         </div>
         </div>
-
-        <script defer src="{{asset "/static/cytoscape.min.js"}}"></script>
-        <script defer src="{{asset "/static/echarts.min.js"}}"></script>
-        {{/* #1532: registers hp-echarts-theme.js's "xore" ECharts theme and
-             window.hpChartColor -- must run after both libraries above and
-             before every consumer below (hp-attackers.js's cytoscape graph,
-             hp-kill-chain.js's echarts radar), same ordering convention
-             every other page with these scripts follows. */}}
-        <script defer src="{{asset "/static/hp-echarts-theme.js"}}"></script>
-        <script defer src="{{asset "/static/hp-attackers.js"}}"></script>
-        <script defer src="{{asset "/static/hp-kill-chain.js"}}"></script>
+        {{/* #1564: the five cytoscape/echarts/hp-attackers/hp-kill-chain
+             script tags that used to sit right here (immediately after
+             the two card grids above) moved out from inside
+             [data-hp-page-content] -- see the comment on their new location
+             below, right after the closing div for .app-shell, for why
+             leaving them in this content region breaks re-mounting via
+             hp-dynamic-nav.js's SPA navigation. */}}
         {{end}}
         {{/* #1327 shell+hydrate: see "attackers-body" above for the full
              explanation. The selected id (if any) is the only thing known
@@ -222,6 +218,38 @@
       </div>
     </main>
 </div>
+{{if .Selected}}
+{{/* #1564: moved out from inside [data-hp-page-content] (where these five
+     tags used to sit, right after the graph/fusion cards they back) to
+     here, alongside hp-attackers-detail.js's own tag below -- every other
+     script this file family injects on demand
+     (hp-dynamic-nav.js's mergeExtraContent, which now also drives
+     /attackers's default SPA navigation) already lives outside the content
+     region for exactly this reason. mergeExtraContent dedups an injected
+     script tag's src against the LIVE document, but mountPage's own
+     content swap runs first and, for a script tag that used to live inside
+     [data-hp-page-content], ends up MOVING an inert (non-executing) copy
+     of it into the live document as a side effect of swapping in the rest
+     of the page -- inert or not, it's still a real script element whose
+     src a later `document.querySelector('script[src="..."]')` check matches,
+     so mergeExtraContent believed cytoscape.min.js/echarts.min.js/
+     hp-echarts-theme.js/hp-attackers.js/hp-kill-chain.js were already
+     loaded and never appended a real, executing copy the first time an
+     entity was selected via an in-app click rather than a fresh page load
+     -- confirmed live: the graph stayed on "Loading graph…" forever.
+     Scripts that live outside [data-hp-page-content] are never touched by
+     that swap, so they don't have this problem. */}}
+<script defer src="{{asset "/static/cytoscape.min.js"}}"></script>
+<script defer src="{{asset "/static/echarts.min.js"}}"></script>
+{{/* #1532: registers hp-echarts-theme.js's "xore" ECharts theme and
+     window.hpChartColor -- must run after both libraries above and before
+     every consumer below (hp-attackers.js's cytoscape graph,
+     hp-kill-chain.js's echarts radar), same ordering convention every
+     other page with these scripts follows. */}}
+<script defer src="{{asset "/static/hp-echarts-theme.js"}}"></script>
+<script defer src="{{asset "/static/hp-attackers.js"}}"></script>
+<script defer src="{{asset "/static/hp-kill-chain.js"}}"></script>
+{{end}}
 <script defer src="{{asset "/static/hp-attackers-detail.js"}}"></script>
 </body>
 </html>

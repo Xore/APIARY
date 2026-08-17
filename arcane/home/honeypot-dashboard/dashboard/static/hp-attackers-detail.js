@@ -29,6 +29,16 @@
  * grid out of the fetched markup by id and swap it into its matching
  * shell skeleton before mounting whatever's left (chip bar + table) into
  * #attackers-root.
+ *
+ * #1564: same re-init story as hp-attackers.js -- exposed as
+ * window.initHoneypotAttackersDetail so hp-app.js's mountPage can re-run
+ * this (panel-splitting included) against the freshly-mounted
+ * #attackers-root on every later navigation to /attackers, not just the
+ * first time this script ever loads. Without it, navigating from one page
+ * to /attackers a second time in the same SPA session would leave
+ * #attackers-root's skeleton loading forever -- the exact bug
+ * hp-dynamic-nav.js's own header comment describes for this whole page
+ * family, just not yet fixed here.
  */
 (() => {
   "use strict";
@@ -39,6 +49,7 @@
     const root = document.getElementById("attackers-root");
     const url = root?.dataset.hpAttackersFragmentUrl;
     if (!root || !url) return;
+    root.setAttribute("aria-busy", "true");
     fetch(url, { cache: "no-store" })
       .then((r) => {
         if (!r.ok) throw new Error("HTTP " + r.status);
@@ -69,4 +80,5 @@
   }
 
   hydrateBody();
+  window.initHoneypotAttackersDetail = hydrateBody;
 })();

@@ -984,13 +984,24 @@ func TestProtocolDisplayNormalization(t *testing.T) {
 
 // The overview reloads itself in place, so it has to honor the pause too —
 // otherwise the one page that churns most would ignore the switch.
+//
+// #1564: refreshDashboardOverview moved from a page-local inline <script> in
+// overview.html into hp-app.js itself (self-guarded on #overview-header, so
+// the whole shell can share one persistent SSE connection instead of each
+// page opening its own) -- see hp-app.js's own comment on
+// refreshDashboardOverview for the full reasoning.
 func TestOverviewRefreshHonorsTheLivePause(t *testing.T) {
+	appJS, err := staticAssets.ReadFile("static/hp-app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(appJS)
 	for _, expected := range []string{
-		`window.HoneypotLive&&window.HoneypotLive.paused()`,
-		`addEventListener('hp-live-resumed',refreshDashboard)`,
+		"const refreshDashboardOverview = async () => {\n      if (window.HoneypotLive.paused()) return;",
+		`addEventListener("hp-live-resumed", refreshDashboardOverview);`,
 	} {
-		if !strings.Contains(pageOverview, expected) {
-			t.Fatalf("overview refresh script is missing %q", expected)
+		if !strings.Contains(js, expected) {
+			t.Fatalf("overview refresh (now in hp-app.js) is missing %q", expected)
 		}
 	}
 }
@@ -1074,7 +1085,12 @@ func TestDashboardCSSAssetsAreEmbeddedAndReferenced(t *testing.T) {
 	if !strings.Contains(string(adapter), "window.replaceHoneypotPage = mountPage") {
 		t.Fatal("dashboard enhancement layer does not expose the live-refresh content mount")
 	}
-	if !strings.Contains(pageTemplate, `document.querySelector("[data-hp-page-content]")`) || !strings.Contains(pageTemplate, "window.hydrateHoneypotOverview(next)") {
+	// #1564: refreshDashboardOverview moved from a page-local inline
+	// <script> in overview.html into hp-app.js itself (already read above
+	// as `adapter`) -- it calls the sibling hydrateOverview function
+	// directly rather than through the window.hydrateHoneypotOverview
+	// export (that export still exists, just for other/future callers).
+	if !strings.Contains(string(adapter), `doc.querySelector("[data-hp-page-content]")`) || !strings.Contains(string(adapter), "hydrateOverview(next)") {
 		t.Fatal("dashboard refresh does not target the server-rendered content container")
 	}
 	if !strings.Contains(string(adapter), "hydrateOverview") || !strings.Contains(string(adapter), "child !== mapCard") {
