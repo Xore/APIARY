@@ -3220,7 +3220,12 @@ tr:hover .hp-row-actions, tr.selected .hp-row-actions { opacity: 1; }
 }
 
 /* Scroll "more" pill (pick 9C): paired JS in hp-app.js shows it while a
-   .card__scroll region still has content below the fold. */
+   .card__scroll region still has content below the fold. A real <button>
+   now, not a passive affordance: mid-list it pages the region down, and
+   near the end of a list with more entries it triggers the region's own
+   lazy "Load 25 more", hides, and returns when the reader nears the new
+   end -- so the base state must stay click-transparent (pointer-events:
+   none) and only the --on state accepts input. */
 .hp-scroll-more {
   position: sticky; bottom: 8px; z-index: 3;
   display: block; width: fit-content;
@@ -3230,10 +3235,15 @@ tr:hover .hp-row-actions, tr.selected .hp-row-actions { opacity: 1; }
   background: var(--surface-3);
   color: var(--text-primary); /* a11y: secondary measured 4.38:1 on surface-3 */
   font-size: 11px;
+  font-family: inherit;
+  line-height: inherit;
+  cursor: pointer;
   pointer-events: none;
   opacity: 0;
   transition: opacity var(--transition-fast);
 }
+.hp-scroll-more--on { opacity: 1; pointer-events: auto; }
+.hp-scroll-more--on:hover { background: var(--surface-2); }
 
 /* Full settings page (pick 13B): the settings surface rendered as a page
    in the shell -- same rail/pane composition the modal uses, minus the

@@ -1822,24 +1822,73 @@
   addEventListener("popstate", () => sync(false));
 })();
 
-/* ── Design refresh: scroll "more" pill (pick 9C) ─────────────────────────
-   Every .card__scroll region gets a floating pill while content remains
-   below the fold, and loses it at the end -- the affordance the thin
-   scrollbar alone never quite was (theme#78). */
+/* ── Design refresh: scroll "more" pill (pick 9C, reworked per Xore) ──────
+   Every .card__scroll region gets a floating pill that is a real control,
+   not just the scroll affordance the thin scrollbar never quite was
+   (theme#78). Mid-list ("more ↓") a click pages the region down. Near the
+   end of a list that still has entries to load -- the region's own lazy /
+   remote "Load 25 more" control (initLazyViews above) -- it reads
+   "load more ↓", a click loads the next batch and the pill hides,
+   returning when the reader nears the new end. Only at the true end of a
+   fully-loaded list does it disappear for good. */
 (() => {
+  /* How close (px) to the region's bottom counts as "at the end". */
+  const NEAR_END = 96;
+  const loadControl = region => {
+    /* :scope > -- nested .card__scroll regions (a row detail's own bounded
+       panes) carry their own lazy controls; this region's control is the
+       direct child initLazyViews put after its table/list. */
+    const controls = region.querySelector(":scope > .hp-lazy-controls");
+    if (!controls || controls.hidden) return null;
+    const button = controls.querySelector("button");
+    return button && !button.hidden && !button.disabled ? button : null;
+  };
   const attach = region => {
     if (region.dataset.hpScrollMore) return;
     region.dataset.hpScrollMore = "1";
-    const pill = document.createElement("div");
+    const pill = document.createElement("button");
+    pill.type = "button";
     pill.className = "hp-scroll-more";
     pill.textContent = "more ↓";
     region.appendChild(pill);
     const update = () => {
+      /* Keep the sticky pill last in the region so it never rests above
+         the lazy controls appended after attach ran. Guarded, so the
+         childList mutation this causes re-enters update() as a no-op. */
+      if (region.lastElementChild !== pill) region.appendChild(pill);
       const below = region.scrollHeight - region.clientHeight - region.scrollTop;
-      pill.style.opacity = (region.scrollHeight > region.clientHeight + 24 && below > 24) ? "1" : "0";
+      const nearEnd = below <= NEAR_END;
+      const loadable = nearEnd ? loadControl(region) : null;
+      const show = (region.scrollHeight > region.clientHeight + 24 && below > 24) || !!loadable;
+      const label = loadable ? "load more ↓" : "more ↓";
+      /* Only write on change: textContent replaces the text node even for
+         an identical string, which would loop through the MutationObserver
+         below forever. */
+      if (pill.textContent !== label) pill.textContent = label;
+      pill.classList.toggle("hp-scroll-more--on", show);
     };
+    pill.addEventListener("click", () => {
+      const below = region.scrollHeight - region.clientHeight - region.scrollTop;
+      const loadable = below <= NEAR_END ? loadControl(region) : null;
+      if (loadable) {
+        /* Hide immediately; the mutations from the loaded batch re-run
+           update(), which brings the pill back the next time the reader
+           nears the (new) end. */
+        pill.classList.remove("hp-scroll-more--on");
+        loadable.click();
+      } else {
+        region.scrollBy({top: Math.max(region.clientHeight - 48, 120), behavior: "smooth"});
+      }
+    });
     region.addEventListener("scroll", update, {passive: true});
     if (window.ResizeObserver) new ResizeObserver(update).observe(region);
+    /* Content changes move the end of the list without a scroll event:
+       lazy tables reveal rows by toggling [hidden], remote containers and
+       SSE streams append nodes. */
+    new MutationObserver(update).observe(region, {
+      subtree: true, childList: true,
+      attributes: true, attributeFilter: ["hidden"],
+    });
     update();
   };
   const scan = () => document.querySelectorAll(".card__scroll").forEach(attach);
