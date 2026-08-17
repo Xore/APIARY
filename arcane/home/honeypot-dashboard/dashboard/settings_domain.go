@@ -245,6 +245,7 @@ func migrateOpenStreetMapOnly(payload json.RawMessage) (json.RawMessage, error) 
 
 type userPreferences struct {
 	Theme              string `json:"theme"`
+	Palette            string `json:"palette"`
 	Density            string `json:"density"`
 	ReducedMotion      string `json:"reduced_motion"`
 	CollapsedSidebar   bool   `json:"collapsed_sidebar"`
@@ -274,6 +275,7 @@ type userPreferences struct {
 func defaultPreferences() userPreferences {
 	return userPreferences{
 		Theme:              "system",
+		Palette:            "claude",
 		Density:            "comfortable",
 		ReducedMotion:      "system",
 		LandingPage:        "/",
@@ -312,6 +314,11 @@ func defaultPreferencesWithSiteTimezone(siteDefault string) userPreferences {
 // denial-of-service client against itself or Elasticsearch.
 var (
 	allowedThemes          = []string{"system", "dark", "light"}
+	// Palette presets (per Xore): accent palettes defined in Xore/theme's
+	// data-hp-palette blocks, every pair WCAG-AA validated in both themes.
+	// "" is accepted as "claude" so preference documents saved before this
+	// field existed keep validating unchanged.
+	allowedPalettes        = []string{"", "claude", "slate", "ocean", "sage", "lavender", "lime", "amber", "rose", "neon"}
 	allowedDensities       = []string{"comfortable", "compact"}
 	allowedMotionModes     = []string{"system", "on", "off"}
 	allowedLandingPages    = []string{"/", "/events", "/alerts", "/source-health", "/ips", "/payloads", "/payload-workbench/results", "/campaigns", "/clusters", "/commands", "/history", "/dead-letters"}
@@ -328,6 +335,9 @@ func validatePreferences(p userPreferences) error {
 	var problems []string
 	if !oneOf(p.Theme, allowedThemes) {
 		problems = append(problems, "theme must be system, dark or light")
+	}
+	if !oneOf(p.Palette, allowedPalettes) {
+		problems = append(problems, "palette must be one of the built-in presets")
 	}
 	if !oneOf(p.Density, allowedDensities) {
 		problems = append(problems, "density must be comfortable or compact")

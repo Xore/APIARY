@@ -1336,6 +1336,29 @@ test.describe("dashboard browser behaviour", () => {
     await expect(wrap).not.toHaveClass(/hp-md--open/);
   });
 
+  test("palette presets: picker ships in the fragment and the boot script applies a stored palette", async ({ page }) => {
+    // Prefs saves are mocked 401 in this harness (the save round-trip is
+    // covered by the Go settings API tests), and the appearance pane is
+    // hidden until navigated -- so assert against the served fragment
+    // markup directly, then exercise the pre-paint boot script.
+    await page.unroute("**/api/settings/**");
+    await page.goto("/");
+    // The toolbar avatar opens the centered settings modal; the fragment
+    // fetch runs in-page so the fixture session cookie applies.
+    await page.locator("a.hp-toolbar-avatar").click();
+    await page.locator('#hp-settings [data-hp-pane-nav="appearance"]').click();
+    const pick = page.locator('.hp-palette-pick[data-pref="palette"]');
+    await expect(pick).toBeVisible();
+    await expect(pick.locator("button[data-value]")).toHaveCount(9);
+    await page.keyboard.press("Escape");
+    await page.addInitScript(() => { localStorage.setItem("hp-palette", "ocean"); });
+    await page.goto("/");
+    await expect(page.locator("html")).toHaveAttribute("data-hp-palette", "ocean");
+    await page.addInitScript(() => { localStorage.setItem("hp-palette", "claude"); });
+    await page.goto("/");
+    await expect(page.locator("html")).not.toHaveAttribute("data-hp-palette", /./);
+  });
+
   test("filter-field autocomplete offers real values after an in-app navigation", async ({ page }) => {
     // Land on a dynamic route, then reach /events through the SPA swap --
     // the delegated widget must serve inputs that mounted after load.

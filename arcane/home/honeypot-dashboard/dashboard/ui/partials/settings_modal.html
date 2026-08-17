@@ -106,6 +106,25 @@
               <button type="button" data-value="light">Light</button>
             </div>
           </div>
+          <div class="hp-field settings-field" data-hp-search="appearance palette colors preset accent claude slate ocean sage lavender lime amber rose neon">
+            <label class="form-label">Color palette</label>
+            <!-- Same segmented data-pref contract the theme control uses;
+                 hp-palette-pick only adds the swatch dot per option. Every
+                 preset is WCAG-AA validated in both themes (Xore/theme's
+                 data-hp-palette blocks). -->
+            <div class="segmented hp-palette-pick" data-pref="palette" role="group" aria-label="Color palette">
+              <button type="button" data-value="claude"><span class="dot" aria-hidden="true"></span>Claude</button>
+              <button type="button" data-value="slate"><span class="dot" aria-hidden="true"></span>Slate</button>
+              <button type="button" data-value="ocean"><span class="dot" aria-hidden="true"></span>Ocean</button>
+              <button type="button" data-value="sage"><span class="dot" aria-hidden="true"></span>Sage</button>
+              <button type="button" data-value="lavender"><span class="dot" aria-hidden="true"></span>Lavender</button>
+              <button type="button" data-value="lime"><span class="dot" aria-hidden="true"></span>Lime</button>
+              <button type="button" data-value="amber"><span class="dot" aria-hidden="true"></span>Amber</button>
+              <button type="button" data-value="rose"><span class="dot" aria-hidden="true"></span>Rose</button>
+              <button type="button" data-value="neon"><span class="dot" aria-hidden="true"></span>Neon</button>
+            </div>
+            <div class="settings-field__desc">One-click accent presets; applied immediately in light and dark.</div>
+          </div>
           <div class="hp-field settings-field" data-hp-search="appearance density compact comfortable rows spacing">
             <label class="form-label">Density</label>
             <div class="segmented" data-pref="density" role="group" aria-label="Density">
