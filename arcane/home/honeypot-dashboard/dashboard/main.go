@@ -273,6 +273,25 @@ func main() {
 		}
 	}
 	s.canarytokensHistory = newCanarytokensManager(s.es)
+	// #1487 items 3/5: honeyfs-implant (#1553) plants a credential live
+	// into a honeypot's filesystem. Same local-only-endpoint posture as
+	// CANARYTOKENS_API_URL above -- HONEYFS_IMPLANT_URL must point at the
+	// service's own WireGuard-tunnel address (compose.yml, e.g.
+	// http://10.8.0.2:19428), never a public endpoint. Unset or rejected
+	// leaves s.honeyfsImplant nil, and every call site treats that as
+	// "credential provisioning/rotation disabled". HONEYFS_IMPLANT_TOKEN is
+	// the optional defense-in-depth bearer token honeyfs-implant's own
+	// requireToken supports (main.go, #1553) -- empty by default, matching
+	// that service's own "network reachability is the trust boundary"
+	// posture.
+	if honeyfsImplantURL := os.Getenv("HONEYFS_IMPLANT_URL"); honeyfsImplantURL != "" {
+		if honeyfsImplantURLIsLocal(honeyfsImplantURL) {
+			s.honeyfsImplant = newHoneyfsImplantClient(honeyfsImplantURL, os.Getenv("HONEYFS_IMPLANT_TOKEN"))
+		} else {
+			fmt.Fprintf(os.Stderr, "dashboard: HONEYFS_IMPLANT_URL %s rejected (must be a local/internal endpoint), credential provisioning disabled\n", honeyfsImplantURL)
+		}
+	}
+	s.credentials = newCredentialsManager(s.es)
 	// #913: same nil-when-unconfigured posture as s.alerts above -- every
 	// call site (applyMLAnomalyAcks, serveMLAnomalyAck) already treats a nil
 	// mlAnomalyAcks as "acknowledgment disabled".

@@ -279,14 +279,23 @@ type store struct {
 	// nil only disables the history/re-download list, not creation.
 	canarytokens        *canarytokensClient
 	canarytokensHistory *canarytokensManager
-	intelligence        *intelligenceStore
-	settings            *settingsService  // typed settings stores; nil only in partial test fixtures
-	reports             *reportStore      // Reports studio definitions + generated PDFs; nil only in test fixtures
-	workbench           *workbenchService // immutable recipes + correlated analyzer runs (#155)
-	expected            []string          // configured feeds shown even before their first event
-	subs                map[chan struct{}]struct{}
-	authAccountURL      string // validated once at startup; see validatedAuthAccountURL
-	authAdminURL        string // validated Keycloak admin-console URL; exposed only to dashboard admins
+	// honeyfsImplant/credentials (#1487 items 3/5): the live honeyfs-implant
+	// primitive (#1553) and the dashboard's own record of every credential
+	// provisioned/rotated through it. honeyfsImplant is nil unless
+	// HONEYFS_IMPLANT_URL is set and passes honeyfsImplantURLIsLocal --
+	// same "unconfigured, not a startup failure" posture as canarytokens
+	// above. credentials is nil only when Elasticsearch itself is
+	// unconfigured (newCredentialsManager's own nil-when-no-es shape).
+	honeyfsImplant *honeyfsImplantClient
+	credentials    *credentialsManager
+	intelligence   *intelligenceStore
+	settings       *settingsService  // typed settings stores; nil only in partial test fixtures
+	reports        *reportStore      // Reports studio definitions + generated PDFs; nil only in test fixtures
+	workbench      *workbenchService // immutable recipes + correlated analyzer runs (#155)
+	expected       []string          // configured feeds shown even before their first event
+	subs           map[chan struct{}]struct{}
+	authAccountURL string // validated once at startup; see validatedAuthAccountURL
+	authAdminURL   string // validated Keycloak admin-console URL; exposed only to dashboard admins
 	// lastActivity (#486) is a unix-second timestamp of the most recent
 	// dashboard request, touched by touchActivity (main.go's request
 	// middleware) and read by the periodic rebuild loop to skip its ES/log

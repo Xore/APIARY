@@ -61,6 +61,12 @@ func (s *store) routes(tmpl *template.Template) *http.ServeMux {
 	mux.HandleFunc("GET /api/settings/canarytokens", s.serveCanarytokensList)
 	mux.HandleFunc("POST /api/settings/canarytokens/create", s.serveCanarytokensCreate)
 	mux.HandleFunc("GET /api/settings/canarytokens/{id}/download", s.serveCanarytokensDownload)
+	// #1487 items 3/5: credential provisioning/rotation via honeyfs-implant
+	// (#1553), plus linking a credential to an existing canarytoken.
+	mux.HandleFunc("GET /api/settings/credentials", s.serveCredentialsList)
+	mux.HandleFunc("POST /api/settings/credentials/create", s.serveCredentialsCreate)
+	mux.HandleFunc("POST /api/settings/credentials/{id}/rotate", s.serveCredentialRotate)
+	mux.HandleFunc("POST /api/settings/credentials/{id}/link-token", s.serveCredentialLinkToken)
 	mux.HandleFunc("GET /api/problem-reports", s.serveProblemReports)
 	mux.HandleFunc("POST /api/problem-reports", s.serveProblemReports)
 	mux.HandleFunc("PATCH /api/problem-reports/{id}", s.serveProblemReportItem)
