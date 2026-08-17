@@ -20,6 +20,16 @@
             <p class="subtitle">Design themed, branded PDF reports from live telemetry or sandbox runs &mdash; start from a template or build fully custom, then generate, view, and download here. This is the only place PDFs are produced.</p>
           </div>
           <div class="live-panel">
+            {{/* Design refresh 2 (pick RP-D, supersedes RP-C's wizard): the
+                 studio reads as one scrolling document; its actions sit
+                 pinned at the top right, claude-doc style. form= keeps the
+                 submit wired to #hp-rp-form from outside it. */}}
+            <div class="hp-rp-actions" id="hp-rp-actions">
+              <button class="btn btn-secondary" type="button" id="hp-rp-reset">Reset to template</button>
+              <button class="btn btn-secondary" type="button" id="hp-rp-generate">Generate now</button>
+              <button class="btn btn-primary" type="submit" form="hp-rp-form" id="hp-rp-save">Save definition</button>
+              <span class="hp-rp-status" id="hp-rp-status" role="status"></span>
+            </div>
             <span class="gen">dark &amp; light themes &bull; custom branding &bull; scoped to your search criteria</span>
           </div>
         </header>
@@ -145,21 +155,6 @@
               </div>
             </div>
 
-            {{/* Design refresh (RP-C): wizard navigation drives the same
-                 step tabs (now in the sidebar rail) one decision at a
-                 time -- Back/Continue plus progress dots, rendered and
-                 wired by hp-app.js. Save/Generate stay always visible. */}}
-            <div class="hp-wizard-nav" data-hp-wizard data-hp-wizard-steps="design,scope,schedule,branding">
-              <button class="btn btn-secondary" type="button" data-hp-wizard-prev>&larr; Back</button>
-              <div class="hp-wizard-progress" data-hp-wizard-progress aria-hidden="true"></div>
-              <button class="btn btn-secondary" type="button" data-hp-wizard-next>Continue &rarr;</button>
-            </div>
-            <div class="hp-rp-actions" id="hp-rp-actions">
-              <button class="btn btn-primary" type="submit" id="hp-rp-save">Save definition</button>
-              <button class="btn btn-secondary" type="button" id="hp-rp-generate">Generate now</button>
-              <button class="btn btn-secondary" type="button" id="hp-rp-reset">Reset to template</button>
-              <span class="hp-rp-status" id="hp-rp-status" role="status"></span>
-            </div>
           </form>
 
           <div class="dashboard-panel" id="panel-library" role="tabpanel" data-dashboard-panel="library" hidden>
