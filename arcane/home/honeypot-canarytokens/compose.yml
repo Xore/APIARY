@@ -203,7 +203,16 @@ services:
     volumes:
       - /opt/stacks/apiary/logs/canarytokens:/var/log/honeypot
       - /opt/stacks/apiary/state/init-markers:/markers:ro
-    networks: [canarytokens_net]
+    # canarytokens-adapter.internal alias: frontend/app.py's TokenRequest
+    # validates webhook_url with Pydantic's HttpUrl, which rejects a bare,
+    # dot-less Docker service name as a malformed host -- confirmed live,
+    # every generate() call failed identically ("Malformed request, invalid
+    # data supplied.") regardless of token_type until the dashboard's own
+    # canarytokensAdapterWebhookURL pointed at this dotted alias instead of
+    # plain `canarytokens-adapter`.
+    networks:
+      canarytokens_net:
+        aliases: [canarytokens-adapter.internal]
     security_opt:
       - no-new-privileges:true
     read_only: true
