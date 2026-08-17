@@ -37,13 +37,29 @@ export async function serviceFetch(path: string, init?: RequestInit): Promise<Re
   })
 }
 
+/** Short-TTL payload cache behind the predictive prefetcher: a predicted
+ * route's preload warms this, so the real click (or the SSR that follows)
+ * reuses the payload instead of re-querying the Rust tier. In-process for
+ * now with a deliberately tiny TTL; the #1610 horizontal round moves it to
+ * redis so split/multiple BFF instances share warmth. */
+const payloadCache = new Map<string, { at: number; body: unknown }>()
+const PAYLOAD_TTL_MS = 15_000
+
 /** JSON convenience over serviceFetch; null on any failure so routes can
  * fall back to skeleton/error states without try/catch noise. */
 export async function serviceJSON<T>(path: string): Promise<T | null> {
+  const cached = payloadCache.get(path)
+  if (cached && Date.now() - cached.at < PAYLOAD_TTL_MS) return cached.body as T
   try {
     const response = await serviceFetch(path)
     if (!response.ok) return null
-    return (await response.json()) as T
+    const body = (await response.json()) as T
+    payloadCache.set(path, { at: Date.now(), body })
+    if (payloadCache.size > 500) {
+      const cutoff = Date.now() - PAYLOAD_TTL_MS
+      for (const [key, value] of payloadCache) if (value.at < cutoff) payloadCache.delete(key)
+    }
+    return body
   } catch {
     return null
   }

@@ -4,8 +4,10 @@
 // live in typed hooks instead of hp-app.js's delegation.
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
+import { usePredictivePrefetch } from '../lib/prefetch'
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  usePredictivePrefetch()
   return (
     <div className="app-shell">
       <Topbar />
