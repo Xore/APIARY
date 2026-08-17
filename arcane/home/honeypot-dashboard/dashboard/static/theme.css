@@ -3356,6 +3356,21 @@ button.sidebar__profile:disabled:hover { background: transparent; }
   font-size: 13px; line-height: 1; cursor: pointer;
 }
 .hp-md__close:hover { color: var(--text-primary); border-color: var(--border-strong); background: var(--surface-3); }
+/* Investigate consistency (per Xore): columns marked data-hp-md-detail
+   are pane-only -- hidden in the list so wide tables (campaigns' 17
+   columns) stay scannable, still cloned into the row inspector where the
+   full detail lives. Scoped to the LIST so the clones stay visible. */
+.hp-md--active .hp-md__list [data-hp-md-detail] { display: none; }
+/* Cast preview inside the row inspector: real terminal output, quietly. */
+.hp-md__preview {
+  max-height: 260px; overflow: auto;
+  margin: 0 0 12px; padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font: 11.5px/1.5 var(--hp-mono);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
 .hp-md__rowcard dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 7px 12px; margin: 0; }
 .hp-md__rowcard dt { color: var(--text-muted); font: 10px/18px var(--hp-mono); text-transform: uppercase; letter-spacing: .04em; }
 .hp-md__rowcard dd { margin: 0; min-width: 0; overflow-wrap: anywhere; font-size: 12px; }

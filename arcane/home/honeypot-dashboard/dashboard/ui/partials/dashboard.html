@@ -103,7 +103,7 @@
       {{/* Design refresh (pick 13B): settings is a full page now --
            /settings -- rather than a modal; hp-settings.js keeps the modal
            path alive only for #settings deep links on other pages. */}}
-      <a class="dropdown__item" role="menuitem" href="/settings">
+      <a class="dropdown__item" role="menuitem" href="/settings" data-hp-account-dashboard-settings>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         <span>Dashboard settings</span>
       </a>
@@ -159,7 +159,9 @@
     <button class="hp-live-state" type="button" data-hp-live-toggle aria-pressed="false" title="Dashboard refresh is active — pause it"><span class="status-dot"></span><span data-hp-live-label>Live</span></button>
     {{/* 11E: account avatar closes the pill bar; same initials fill as the
          sidebar profile (hp-app.js /api/whoami). */}}
-    <a class="avatar hp-toolbar-avatar" href="/settings" title="Account &amp; settings" aria-label="Account and settings" data-hp-user-avatar>&middot;</a>
+    {{/* data-hp-account-dashboard-settings: opens the centered settings
+         modal (per Xore); the href stays as no-JS fallback. */}}
+    <a class="avatar hp-toolbar-avatar" href="/settings" title="Account &amp; settings" aria-label="Account and settings" data-hp-user-avatar data-hp-account-dashboard-settings>&middot;</a>
   </div>
   {{with activeBanner}}<div class="alert alert--{{.Severity}} app-toolbar__banner" role="status">{{.Text}}</div>{{end}}
 </header>

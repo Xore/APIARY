@@ -2145,6 +2145,46 @@
       const tr = rowFor(event.target);
       if (tr) select(tr);
     });
+    /* Per Xore: a click anywhere outside the open box (and outside the
+       list, whose own clicks either re-select or are interactive) closes
+       it -- same dismissal feel as a popover. */
+    document.addEventListener("click", event => {
+      if (!wrap.classList.contains("hp-md--open") || !wrap.isConnected) return;
+      if (!(event.target instanceof Element)) return;
+      if (event.target.closest(".hp-md__pane") || list.contains(event.target)) return;
+      close();
+    });
+  };
+
+  /* Cast preview (recordings): rows carrying data-hp-md-preview name a
+     same-origin asciinema .cast; the inspector shows its terminal output,
+     ANSI stripped, as a text preview -- context the table itself never
+     carries. Best-effort: any failure just leaves the fields view. */
+  const castPreviewInto = (container, castURL) => {
+    const pre = document.createElement("pre");
+    pre.className = "hp-md__preview";
+    pre.textContent = "loading replay preview…";
+    container.append(pre);
+    fetch(castURL, {cache: "no-store", credentials: "same-origin"})
+      .then(r => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then(text => {
+        let out = "";
+        for (const line of text.split("\n").slice(1)) {
+          if (out.length > 1200 || !line.trim()) continue;
+          try {
+            const ev = JSON.parse(line);
+            if (Array.isArray(ev) && ev[1] === "o") out += ev[2];
+          } catch { /* header or trailing junk */ }
+        }
+        out = out
+          .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
+          .replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, "")
+          .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "")
+          .replace(/\n{3,}/g, "\n\n")
+          .trim();
+        pre.textContent = out ? out.slice(0, 1200) : "(no terminal output captured)";
+      })
+      .catch(() => { pre.textContent = "replay preview unavailable"; });
   };
 
   const initEvents = () => {
@@ -2192,8 +2232,10 @@
     paneCard.className = "card hp-md__rowcard";
     const heading = document.createElement("h2");
     heading.textContent = "Row details";
+    const extra = document.createElement("div");
+    extra.className = "hp-md__extra";
     const fields = document.createElement("dl");
-    paneCard.append(heading, fields);
+    paneCard.append(heading, extra, fields);
     pane.append(paneCard);
     card.before(wrap);
     listDiv.append(card);
@@ -2203,7 +2245,7 @@
         const tr = target.closest("tbody tr");
         return tr && tr.closest("table") === table ? tr : null;
       },
-      restore: () => fields.replaceChildren(),
+      restore: () => { fields.replaceChildren(); extra.replaceChildren(); },
       project: tr => {
         const headers = [...(table.tHead?.rows[0]?.cells || [])].map(th => th.textContent.trim());
         const pairs = [];
@@ -2217,6 +2259,10 @@
         });
         if (!pairs.length) return false;
         fields.replaceChildren(...pairs);
+        /* Richer-than-the-row content (per Xore): a cast preview when the
+           row names one -- the pane shows what the table can't. */
+        extra.replaceChildren();
+        if (tr.dataset.hpMdPreview) castPreviewInto(extra, tr.dataset.hpMdPreview);
         return true;
       },
     });
