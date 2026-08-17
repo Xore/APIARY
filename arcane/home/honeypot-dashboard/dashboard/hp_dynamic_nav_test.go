@@ -176,3 +176,54 @@ func TestDynamicNavScriptCoversTheConsolidatedRoutesAndWiring(t *testing.T) {
 		t.Error("hp-dynamic-nav.js does not nonce dynamically injected <script> elements")
 	}
 }
+
+// TestTopbarPageLabelCoversEverySidebarRoute (#1564): the topbar's center
+// label (data-hp-page-name) is synced client-side from hp-app.js's
+// pageLabels map on every navigation (syncActiveNav). A sidebar route
+// missing from that map silently falls back to a generic label -- this is
+// exactly the bug #1564 reported ("the topbar reads Operations on most
+// pages"): pageLabels' predecessor (navGroups) was a small hand-maintained
+// table that fell out of sync with the sidebar's own real routes as the
+// design refresh added Operations/Reports/Tools and several more
+// Monitor/Investigate entries, so most pages silently fell through to the
+// fallback string. This walks the REAL rendered sidebar rather than a
+// second hand-maintained route list, so a future sidebar addition that
+// forgets a pageLabels entry fails here instead of silently mislabeling
+// the topbar again.
+func TestTopbarPageLabelCoversEverySidebarRoute(t *testing.T) {
+	funcs := templateFuncs(nil, "")
+	tmpl, err := template.New("t").Funcs(funcs).Parse(pageTemplate)
+	if err != nil {
+		t.Fatalf("dashboard template does not parse: %v", err)
+	}
+	var out strings.Builder
+	if err := tmpl.ExecuteTemplate(&out, "page", snapshot{}); err != nil {
+		t.Fatalf("overview page does not execute with an empty snapshot: %v", err)
+	}
+	html := out.String()
+
+	navRe := regexp.MustCompile(`data-hp-nav="([^"]+)"`)
+	routes := navRe.FindAllStringSubmatch(html, -1)
+	if len(routes) == 0 {
+		t.Fatal("no data-hp-nav routes found in the rendered shell")
+	}
+
+	appJS, err := staticAssets.ReadFile("static/hp-app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := string(appJS)
+
+	seen := map[string]bool{}
+	for _, m := range routes {
+		route := m[1]
+		if seen[route] {
+			continue
+		}
+		seen[route] = true
+		if !strings.Contains(js, `"`+route+`": "`) {
+			t.Errorf("hp-app.js's pageLabels has no topbar label for sidebar route %q -- "+
+				"it will fall back to the generic \"Dashboard\" label instead of naming the page", route)
+		}
+	}
+}
