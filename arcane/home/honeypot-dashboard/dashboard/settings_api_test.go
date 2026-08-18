@@ -134,6 +134,47 @@ func TestPreferencesPatchAppliesAndPersists(t *testing.T) {
 	}
 }
 
+// Regression: the Appearance pane saves theme and palette together (the
+// palette picker's "claude" never string-matches the stored "" default, so
+// the pane's diff always includes it). preferencesPatch was missing the
+// palette field, so the strict decoder rejected the whole patch with
+// "invalid or unknown preference fields" on every appearance save.
+func TestPreferencesPatchAcceptsPalette(t *testing.T) {
+	s := newSettingsAPITestStore(t, "user")
+	_, etag := getPreferences(t, s)
+
+	request := settingsRequest(t, http.MethodPatch, "/api/settings/me/preferences", true,
+		`{"theme":"dark","palette":"ocean"}`)
+	request.Header.Set("If-Match", etag)
+	response := httptest.NewRecorder()
+	s.servePreferencesPatch(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("PATCH status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var parsed preferencesResponse
+	if err := json.NewDecoder(response.Body).Decode(&parsed); err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Preferences.Theme != "dark" || parsed.Preferences.Palette != "ocean" {
+		t.Fatalf("palette patch not applied: %+v", parsed.Preferences)
+	}
+
+	// A palette outside the allowlist still fails per-field validation
+	// (settings_domain.go's allowedPalettes), not the unknown-field guard.
+	_, etag = getPreferences(t, s)
+	bad := settingsRequest(t, http.MethodPatch, "/api/settings/me/preferences", true,
+		`{"palette":"hotdog"}`)
+	bad.Header.Set("If-Match", etag)
+	badResponse := httptest.NewRecorder()
+	s.servePreferencesPatch(badResponse, bad)
+	if badResponse.Code == http.StatusOK {
+		t.Fatal("invalid palette value must be rejected")
+	}
+	if strings.Contains(badResponse.Body.String(), "unknown preference fields") {
+		t.Fatalf("invalid palette hit the unknown-field guard instead of validation: %s", badResponse.Body.String())
+	}
+}
+
 func TestPreferencesPatchGuards(t *testing.T) {
 	s := newSettingsAPITestStore(t, "user")
 	_, etag := getPreferences(t, s)
