@@ -65,6 +65,24 @@ impl Es {
         Ok(())
     }
 
+    /// Fetch one document's _source by id; Ok(None) on 404.
+    pub async fn get_doc(&self, index: &str, id: &str) -> anyhow::Result<Option<Value>> {
+        let response = self
+            .client
+            .get(elasticsearch::GetParts::IndexId(index, id))
+            .send()
+            .await?;
+        if response.status_code().as_u16() == 404 {
+            return Ok(None);
+        }
+        let status = response.status_code();
+        let json = response.json::<Value>().await?;
+        if !status.is_success() {
+            anyhow::bail!("elasticsearch get {}: {}", status, json);
+        }
+        Ok(json.get("_source").cloned())
+    }
+
     /// Index (upsert) one document by id.
     pub async fn index_doc(&self, index: &str, id: &str, doc: Value) -> anyhow::Result<()> {
         let response = self

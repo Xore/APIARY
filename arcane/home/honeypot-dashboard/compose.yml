@@ -402,6 +402,34 @@ services:
       resources:
         limits: {cpus: "2.0", memory: 512M}
 
+  # Worker role (#1610): the same apiary-backend image with WORKER_LOOPS
+  # enabled and no service port — movable to any docker host that can
+  # reach ES (stateless, env-configured). Scale by listing loops per
+  # replica.
+  backend-worker:
+    <<: *runtime-defaults
+    profiles: ["next"]
+    image: apiary-backend:latest
+    container_name: hp-apiary-worker
+    restart: unless-stopped
+    environment:
+      - LISTEN_ADDR=127.0.0.1:8099
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - WORKER_LOOPS=alert-notifier
+      - ALERT_WEBHOOK_URL=${HONEYPOT_ALERT_WEBHOOK_URL:-}
+      - ALERT_COOLDOWN=${HONEYPOT_ALERT_COOLDOWN:-6h}
+      - ALERT_CAMPAIGN_SCORE=${HONEYPOT_ALERT_CAMPAIGN_SCORE:-80}
+      - SANDBOX_ALERT_RISK_SCORE=${SANDBOX_ALERT_RISK_SCORE:-50}
+      - LLM_ANALYSIS_ALERT_SEVERITIES=${LLM_ANALYSIS_ALERT_SEVERITIES:-high,critical}
+      - TZ=Europe/Berlin
+    networks:
+      - honeynet
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    deploy:
+      resources:
+        limits: {cpus: "0.5", memory: 256M}
+
   dashboard-next:
     <<: *runtime-defaults
     profiles: ["next"]

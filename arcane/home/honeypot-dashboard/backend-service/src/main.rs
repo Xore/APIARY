@@ -38,6 +38,7 @@ mod sensors;
 mod search;
 mod session;
 mod stores;
+mod worker;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -100,6 +101,9 @@ async fn main() -> anyhow::Result<()> {
         es: Arc::new(es::Es::connect(&es_url)?),
         service_token: Arc::new(service_token),
     };
+
+    // Worker loops (#1610): same image, role by WORKER_LOOPS env.
+    worker::spawn_enabled(state.clone());
 
     let api = Router::new()
         .route("/api/v1/overview/kpis", get(overview::kpis))
