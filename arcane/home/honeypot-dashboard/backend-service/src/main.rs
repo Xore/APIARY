@@ -35,11 +35,13 @@ mod dashboard;
 mod decode_correlate;
 mod detail;
 mod es;
+mod event_detail;
 mod es_importer;
 mod events;
 mod fusion;
 mod ghidra_submit;
 mod github_analysis_submit;
+mod gpu_queue;
 mod health;
 mod honeyfs_implant;
 mod investigate;
@@ -48,6 +50,8 @@ mod ip_enrichment;
 mod kill_chain;
 mod live;
 mod llm_search;
+mod mail;
+mod ml_health;
 mod overview;
 mod payload_bytes;
 mod payload_detail;
@@ -152,6 +156,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/overview/dashboard", get(dashboard::dashboard))
         .route("/api/v1/events", get(events::list))
         .route("/api/v1/live", get(live::stream))
+        .route("/api/v1/mail/{session_id}", get(mail::get))
+        .route("/api/v1/ml-health", get(ml_health::list))
+        .route("/api/v1/gpu-queue", get(gpu_queue::list))
         .route("/api/v1/sources", get(aggregates::sources))
         .route("/api/v1/filter-values", get(aggregates::filter_values))
         .route("/api/v1/investigate/ip/{ip}", get(investigate::ip))
@@ -184,6 +191,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/ip-block-export", get(ip_block::export))
         .route("/api/v1/sandbox/{job}", get(detail::sandbox_run))
         .route("/api/v1/ghidra/{sha}", get(detail::ghidra_run))
+        .route("/api/v1/revdeck/{sha}", get(detail::revdeck_run))
         .route("/api/v1/attackers-graph", get(detail::attackers_graph))
         .route("/api/v1/attack-vectors", get(detail::attack_vectors))
         .route("/api/v1/ml-anomalies/ack", post(detail::ml_anomaly_ack))

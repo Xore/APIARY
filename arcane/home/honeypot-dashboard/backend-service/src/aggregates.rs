@@ -12,7 +12,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::AppState;
+use crate::{es::logins_filter, AppState};
 
 fn text(v: &Value) -> String {
     v.as_str().unwrap_or("").to_string()
@@ -65,7 +65,7 @@ pub async fn sources(
                 "aggs": {
                     "country": {"terms": {"field": "source.geo.country_iso_code", "size": 1}},
                     "sensors": {"terms": {"field": "event.sensor", "size": 30}},
-                    "logins": {"filter": {"terms": {"honeypot.event": ["login", "auth_attempt"]}}},
+                    "logins": {"filter": logins_filter()},
                     "sessions": {"cardinality": {"field": "honeypot.session"}},
                     "first": {"min": {"field": "@timestamp"}},
                     "last": {"max": {"field": "@timestamp"}}

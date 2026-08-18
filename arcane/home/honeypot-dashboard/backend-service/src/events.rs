@@ -11,7 +11,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::AppState;
+use crate::{event_detail::detail_for, AppState};
 
 #[derive(Deserialize)]
 pub struct EventsQuery {
@@ -49,7 +49,11 @@ pub struct EventRow {
     pub detail: String,
     pub session: String,
     /// The complete normalized ECS document, for the record inspector pane
-    /// (the row click opens it; nothing is hidden).
+    /// (the row click opens it; nothing is hidden). #1611 workstream E.4:
+    /// this is also where `network.community_id` (when suricata populated
+    /// it) is already visible and copyable — it's the exact join key an
+    /// Arkime cross-link needs, so no separate field/endpoint is required
+    /// on this side; the pivot link itself is a frontend concern.
     pub record: Value,
 }
 
@@ -58,6 +62,18 @@ pub struct EventsPage {
     pub total: u64,
     pub offset: u64,
     pub rows: Vec<EventRow>,
+}
+
+/// Excludes suricata's high-volume, low-signal event types (flow/netflow/
+/// stats — 5700+/hour on a real deployment vs. 50 alert/anomaly events in
+/// the same window) from the default events view, matching
+/// dashboard/classify.go's own legacy posture (`ev.skip = true` for every
+/// suricata event_type except alert/anomaly — classify.go:1117). #1611
+/// workstream A: unlike classify.go, this crate DOES render http/tls/ssh/
+/// smtp/dns/fileinfo detail (src/detail.rs), so only the three genuinely
+/// swamping types stay excluded here.
+pub fn suricata_noise_exclusion() -> Value {
+    json!([{"terms": {"suricata.eve.event_type": ["flow", "netflow", "stats"]}}])
 }
 
 fn since_to_range(since: &Option<String>) -> String {
@@ -73,23 +89,38 @@ fn since_to_range(since: &Option<String>) -> String {
 /// SSE live stream so both emit identical shapes).
 pub fn row_from_source(src: &Value) -> EventRow {
     let text = |v: &Value| v.as_str().unwrap_or("").to_string();
+    let sensor = text(&src["event"]["sensor"]);
+    // Several sensors (multipot, conpot, dnp3) only ever carry proto/port
+    // under honeypot.* — network.protocol/destination.port stay empty for
+    // them, so fall back rather than showing a blank column (#1611
+    // workstream A).
+    let proto = {
+        let p = text(&src["network"]["protocol"]);
+        if p.is_empty() { text(&src["honeypot"]["proto"]) } else { p }
+    };
+    let port = {
+        let p = src["destination"]["port"].as_u64().map(|p| p.to_string()).unwrap_or_else(|| text(&src["destination"]["port"]));
+        if p.is_empty() {
+            let hp_port = src["honeypot"]["port"].as_u64().map(|p| p.to_string()).unwrap_or_else(|| text(&src["honeypot"]["port"]));
+            if hp_port.is_empty() {
+                src["honeypot"]["dst_port"].as_u64().map(|p| p.to_string()).unwrap_or_else(|| text(&src["honeypot"]["dst_port"]))
+            } else {
+                hp_port
+            }
+        } else {
+            p
+        }
+    };
     EventRow {
         time: text(&src["@timestamp"]),
-        sensor: text(&src["event"]["sensor"]),
+        sensor: sensor.clone(),
         src_ip: text(&src["source"]["ip"]),
         country: text(&src["source"]["geo"]["country_iso_code"]),
-        port: src["destination"]["port"]
-            .as_u64()
-            .map(|p| p.to_string())
-            .unwrap_or_else(|| text(&src["destination"]["port"])),
-        proto: text(&src["network"]["protocol"]),
-        // The pipeline's own namespace (honeypot.*) carries the per-sensor
-        // event kind; richer per-sensor detail rendering lands with the
-        // ES-coverage round (#1608 follow-up) directly in this tier.
-        detail: {
-            let d = text(&src["honeypot"]["event"]);
-            if d.is_empty() { text(&src["message"]) } else { d }
-        },
+        port,
+        proto,
+        // #1611 workstream A: per-sensor rich detail rendering, ported
+        // from dashboard/classify.go (src/detail.rs).
+        detail: detail_for(&sensor, src),
         session: {
             let s1 = text(&src["honeypot"]["session"]);
             if s1.is_empty() { text(&src["session"]["id"]) } else { s1 }
@@ -134,7 +165,7 @@ pub async fn list(
         "size": size,
         "track_total_hits": true,
         "sort": [{"@timestamp": {"order": "desc"}}],
-        "query": {"bool": {"filter": filters}}
+        "query": {"bool": {"filter": filters, "must_not": suricata_noise_exclusion()}}
     });
     let result = state
         .es

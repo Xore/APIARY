@@ -12,7 +12,7 @@ use axum::{extract::State, http::StatusCode, Json};
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::AppState;
+use crate::{es::logins_filter, AppState};
 
 const WINDOW: &str = "now-48h";
 
@@ -126,7 +126,7 @@ pub async fn dashboard(State(state): State<AppState>) -> Result<Json<Dashboard>,
             },
             "top_ips": {"terms": {"field": "source.ip", "size": 15, "exclude": ["127.0.0.1", "::1", "10.8.0.1"]}},
             "paths": {"terms": {"field": "url.path", "size": 15}},
-            "logins": {"filter": {"terms": {"honeypot.event": ["login", "auth_attempt"]}}},
+            "logins": {"filter": logins_filter()},
             "heatmap": {
                 "filter": {"range": {"@timestamp": {"gte": "now-24h"}}},
                 "aggs": {"sensors": {

@@ -765,6 +765,10 @@ services:
       - REVDECK_RESULTS_DIR=/revdeck-results
       - CAPE_RESULTS_DIR=/cape-results
       - COWRIE_TTYLOG_DIR=/cowrie-tty
+      # #1611 workstream B: mailoney's saved SMTP DATA bodies -- Rust-only,
+      # no Python-importer.py equivalent, since src/mail.rs's
+      # GET /api/v1/mail/{session_id} is itself new (#1611) functionality.
+      - MAILONEY_MAIL_DIR=/mailoney-mail
       - REPORTER_METRICS_DIR=/reporter-data
       - YARA_RESULTS_DIR=/yara-results
       - TZ=Europe/Berlin
@@ -778,6 +782,7 @@ services:
       - /var/lib/honeypot-cape/results:/cape-results:ro
       - es-importer-state:/state-importer
       - /opt/stacks/apiary/logs/cowrie/tty:/cowrie-tty:ro
+      - /opt/stacks/apiary/logs/mailoney/mail:/mailoney-mail:ro
       - reporter-data:/reporter-data:ro
       - yara-results:/yara-results:ro
     networks:
