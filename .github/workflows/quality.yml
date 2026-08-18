@@ -140,6 +140,32 @@ jobs:
       - name: Generated assets are current
         run: git diff --exit-code -- arcane/home/honeypot-dashboard/dashboard/static/hp-api.js
 
+  frontend-next:
+    name: Dashboard frontend (next)
+    runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.use_self_hosted_runner) && 'self-hosted' || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: arcane/home/honeypot-dashboard/frontend-next/package-lock.json
+      - run: npm ci
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+      - run: npm run generate-routes
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+      - name: Generated route tree is current
+        run: git diff --exit-code -- arcane/home/honeypot-dashboard/frontend-next/src/routeTree.gen.ts
+      - run: npm run typecheck
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+      # No live-ES smoke suite here on purpose: port-tests/ needs the real
+      # cluster over an SSH tunnel to the homeserver (see its README) --
+      # not reachable from a GitHub-hosted runner, and not appropriate to
+      # point at production data from CI. That suite stays a manual/local
+      # verification step; this job's job is catching build/type breakage.
+      - run: npm run build
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+
   dashboard-browser:
     name: Dashboard browser matrix
     runs-on: ubuntu-latest
