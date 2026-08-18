@@ -93,7 +93,9 @@ function Sources() {
             rows.map((row) => (
               <div key={row.ip} className="hp-src-card">
                 <div className="hp-src-card__head">
-                  <span className="hp-src-card__ip">{row.ip}</span>
+                  <a className="hp-src-card__ip" href={`/investigate/ip/${encodeURIComponent(row.ip)}`} title="Open full investigation">
+                    {row.ip}
+                  </a>
                   {row.country ? <span className="badge badge--info">{row.country}</span> : null}
                 </div>
                 <div className="hp-src-card__stats">

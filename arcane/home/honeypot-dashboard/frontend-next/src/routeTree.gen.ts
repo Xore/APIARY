@@ -40,6 +40,7 @@ import { Route as PayloadAnalysisHashRouteImport } from './routes/payload-analys
 import { Route as PayloadWorkbenchResultsRouteImport } from './routes/payload-workbench.results'
 import { Route as SessionsIdRouteImport } from './routes/sessions.$id'
 import { Route as ApiChartNameRouteImport } from './routes/api/chart.$name'
+import { Route as InvestigateIpIpRouteImport } from './routes/investigate.ip.$ip'
 import { Route as ApiReportIdPdfRouteImport } from './routes/api/report.$id.pdf'
 
 const IndexRoute = IndexRouteImport.update({
@@ -197,6 +198,11 @@ const ApiChartNameRoute = ApiChartNameRouteImport.update({
   path: '/api/chart/$name',
   getParentRoute: () => rootRouteImport,
 } as any)
+const InvestigateIpIpRoute = InvestigateIpIpRouteImport.update({
+  id: '/investigate/ip/$ip',
+  path: '/investigate/ip/$ip',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiReportIdPdfRoute = ApiReportIdPdfRouteImport.update({
   id: '/api/report/$id/pdf',
   path: '/api/report/$id/pdf',
@@ -235,6 +241,7 @@ export interface FileRoutesByFullPath {
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/api/chart/$name': typeof ApiChartNameRoute
+  '/investigate/ip/$ip': typeof InvestigateIpIpRoute
   '/api/report/$id/pdf': typeof ApiReportIdPdfRoute
 }
 export interface FileRoutesByTo {
@@ -269,6 +276,7 @@ export interface FileRoutesByTo {
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/api/chart/$name': typeof ApiChartNameRoute
+  '/investigate/ip/$ip': typeof InvestigateIpIpRoute
   '/api/report/$id/pdf': typeof ApiReportIdPdfRoute
 }
 export interface FileRoutesById {
@@ -304,6 +312,7 @@ export interface FileRoutesById {
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/api/chart/$name': typeof ApiChartNameRoute
+  '/investigate/ip/$ip': typeof InvestigateIpIpRoute
   '/api/report/$id/pdf': typeof ApiReportIdPdfRoute
 }
 export interface FileRouteTypes {
@@ -340,6 +349,7 @@ export interface FileRouteTypes {
     | '/payload-workbench/results'
     | '/sessions/$id'
     | '/api/chart/$name'
+    | '/investigate/ip/$ip'
     | '/api/report/$id/pdf'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -374,6 +384,7 @@ export interface FileRouteTypes {
     | '/payload-workbench/results'
     | '/sessions/$id'
     | '/api/chart/$name'
+    | '/investigate/ip/$ip'
     | '/api/report/$id/pdf'
   id:
     | '__root__'
@@ -408,6 +419,7 @@ export interface FileRouteTypes {
     | '/payload-workbench/results'
     | '/sessions/$id'
     | '/api/chart/$name'
+    | '/investigate/ip/$ip'
     | '/api/report/$id/pdf'
   fileRoutesById: FileRoutesById
 }
@@ -443,6 +455,7 @@ export interface RootRouteChildren {
   PayloadWorkbenchResultsRoute: typeof PayloadWorkbenchResultsRoute
   SessionsIdRoute: typeof SessionsIdRoute
   ApiChartNameRoute: typeof ApiChartNameRoute
+  InvestigateIpIpRoute: typeof InvestigateIpIpRoute
   ApiReportIdPdfRoute: typeof ApiReportIdPdfRoute
 }
 
@@ -665,6 +678,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiChartNameRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/investigate/ip/$ip': {
+      id: '/investigate/ip/$ip'
+      path: '/investigate/ip/$ip'
+      fullPath: '/investigate/ip/$ip'
+      preLoaderRoute: typeof InvestigateIpIpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/report/$id/pdf': {
       id: '/api/report/$id/pdf'
       path: '/api/report/$id/pdf'
@@ -707,6 +727,7 @@ const rootRouteChildren: RootRouteChildren = {
   PayloadWorkbenchResultsRoute: PayloadWorkbenchResultsRoute,
   SessionsIdRoute: SessionsIdRoute,
   ApiChartNameRoute: ApiChartNameRoute,
+  InvestigateIpIpRoute: InvestigateIpIpRoute,
   ApiReportIdPdfRoute: ApiReportIdPdfRoute,
 }
 export const routeTree = rootRouteImport

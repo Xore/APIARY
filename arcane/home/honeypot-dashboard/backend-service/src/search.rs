@@ -130,7 +130,7 @@ pub async fn search(
                 hits: vec![Hit {
                     label: needle.clone(),
                     count,
-                    url: format!("/events?ip={needle}"),
+                    url: format!("/investigate/ip/{needle}"),
                 }],
             });
         }
@@ -173,7 +173,7 @@ pub async fn search(
         let exact = hit.label.eq_ignore_ascii_case(&needle);
         match group.title.as_str() {
             "Sessions" if exact => Some(format!("/sessions/{}", hit.label)),
-            "Attack sources" => Some(format!("/events?ip={}", hit.label)),
+            "Attack sources" => Some(format!("/investigate/ip/{}", hit.label)),
             _ => None,
         }
     });
