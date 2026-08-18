@@ -20,6 +20,7 @@ use std::{net::SocketAddr, sync::Arc};
 
 mod aggregates;
 mod charts;
+mod dashboard;
 mod es;
 mod events;
 mod health;
@@ -94,6 +95,7 @@ async fn main() -> anyhow::Result<()> {
 
     let api = Router::new()
         .route("/api/v1/overview/kpis", get(overview::kpis))
+        .route("/api/v1/overview/dashboard", get(dashboard::dashboard))
         .route("/api/v1/events", get(events::list))
         .route("/api/v1/live", get(live::stream))
         .route("/api/v1/sources", get(aggregates::sources))
