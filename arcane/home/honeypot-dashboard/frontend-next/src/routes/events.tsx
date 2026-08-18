@@ -20,15 +20,50 @@ type EventRow = {
 
 type EventsPage = { total: number; offset: number; rows: EventRow[] }
 
+export type EventFilters = {
+  ip?: string
+  sensor?: string
+  country?: string
+  port?: string
+  proto?: string
+  kind?: string
+}
+
+type FilterValues = { sensors: string[]; countries: string[]; protos: string[]; ports: string[]; kinds: string[] }
+
 const fetchEvents = createServerFn({ method: 'GET' })
-  .inputValidator((input: { offset: number }) => input)
+  .inputValidator((input: { offset: number; filters?: EventFilters }) => input)
   .handler(async ({ data }): Promise<EventsPage | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
-    return serviceJSON<EventsPage>(`/api/v1/events?offset=${data.offset}&size=25`)
+    const params = new URLSearchParams({ offset: String(data.offset), size: '25' })
+    for (const [key, value] of Object.entries(data.filters ?? {})) {
+      if (value) params.set(key, value)
+    }
+    return serviceJSON<EventsPage>(`/api/v1/events?${params}`)
   })
 
+const fetchFilterValues = createServerFn({ method: 'GET' }).handler(async (): Promise<FilterValues | null> => {
+  const { serviceJSON } = await import('../lib/backend.server')
+  return serviceJSON<FilterValues>('/api/v1/filter-values')
+})
+
 export const Route = createFileRoute('/events')({
-  loader: async () => ({ first: fetchEvents({ data: { offset: 0 } }) }),
+  // Pivot links across the dashboard land here with filters in the URL
+  // (/events?ip=…, ?kind=login, ?country=CN, ?since=24h).
+  validateSearch: (search: Record<string, unknown>): EventFilters & { since?: string } => {
+    const pick = (key: string) => (typeof search[key] === 'string' ? (search[key] as string) : undefined)
+    return {
+      ip: pick('ip'),
+      sensor: pick('sensor'),
+      country: pick('country'),
+      port: pick('port'),
+      proto: pick('proto'),
+      kind: pick('kind'),
+      since: pick('since'),
+    }
+  },
+  loaderDeps: ({ search }) => search,
+  loader: async ({ deps }) => ({ first: fetchEvents({ data: { offset: 0, filters: deps } }) }),
   component: Events,
 })
 
@@ -56,11 +91,36 @@ function SkeletonRows({ count }: { count: number }) {
 
 function Events() {
   const { first } = Route.useLoaderData()
+  const search = Route.useSearch()
+  const navigate = Route.useNavigate()
+  const [values, setValues] = useState<FilterValues | null>(null)
   const [rows, setRows] = useState<EventRow[] | null>(null)
   const [total, setTotal] = useState(0)
   const [loadingMore, setLoadingMore] = useState(false)
   const [selected, setSelected] = useState<number | null>(null)
-  const [live, setLive] = useState(true)
+  const filtersActive = Boolean(search.ip || search.sensor || search.country || search.port || search.proto || search.kind || search.since)
+  // Live tail is unfiltered by design (the legacy stream is too); it
+  // pauses automatically while a filter scope is active.
+  const [live, setLive] = useState(!filtersActive)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchFilterValues().then((result) => {
+      if (!cancelled && result) setValues(result)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const setFilter = useCallback(
+    (key: keyof EventFilters | 'since', value: string) => {
+      setRows(null)
+      setSelected(null)
+      void navigate({ search: (current: Record<string, unknown>) => ({ ...current, [key]: value || undefined }) })
+    },
+    [navigate],
+  )
   const paneRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -117,7 +177,7 @@ function Events() {
     if (!rows || loadingMore) return
     setLoadingMore(true)
     try {
-      const page = await fetchEvents({ data: { offset: rows.length } })
+      const page = await fetchEvents({ data: { offset: rows.length, filters: search } })
       if (page) {
         setRows((current) => [...(current ?? []), ...page.rows])
         setTotal(page.total)
@@ -125,7 +185,7 @@ function Events() {
     } finally {
       setLoadingMore(false)
     }
-  }, [rows, loadingMore])
+  }, [rows, loadingMore, search])
 
   const open = selected !== null && rows !== null
   return (
@@ -148,6 +208,48 @@ function Events() {
         >
           {live ? '● live' : '○ paused'}
         </button>
+        <input
+          className="input"
+          type="search"
+          placeholder="source ip"
+          defaultValue={search.ip ?? ''}
+          aria-label="Filter by source IP"
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') setFilter('ip', (event.target as HTMLInputElement).value.trim())
+          }}
+          onBlur={(event) => {
+            if (event.target.value.trim() !== (search.ip ?? '')) setFilter('ip', event.target.value.trim())
+          }}
+        />
+        {(
+          [
+            ['sensor', values?.sensors],
+            ['country', values?.countries],
+            ['proto', values?.protos],
+            ['port', values?.ports],
+            ['kind', values?.kinds],
+          ] as const
+        ).map(([key, options]) => (
+          <select
+            key={key}
+            className="input"
+            aria-label={`Filter by ${key}`}
+            value={(search[key] as string | undefined) ?? ''}
+            onChange={(event) => setFilter(key, event.target.value)}
+          >
+            <option value="">{key}: all</option>
+            {(options ?? []).map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        ))}
+        {filtersActive ? (
+          <button className="chip" type="button" onClick={() => void navigate({ search: {} })}>
+            × clear filters
+          </button>
+        ) : null}
       </div>
       <div className={open ? 'hp-md hp-md--active hp-md--open wide' : 'hp-md hp-md--active wide'} id="events-grid">
         <div className="hp-md__list" ref={listRef}>

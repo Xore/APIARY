@@ -103,6 +103,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/events", get(events::list))
         .route("/api/v1/live", get(live::stream))
         .route("/api/v1/sources", get(aggregates::sources))
+        .route("/api/v1/filter-values", get(aggregates::filter_values))
         .route("/api/v1/source-health", get(health::source_health))
         .route("/api/v1/sensors", get(sensors::detail))
         .route("/api/v1/sessions/{id}", get(session::detail))

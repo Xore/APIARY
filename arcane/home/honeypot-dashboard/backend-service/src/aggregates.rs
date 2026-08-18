@@ -3,6 +3,7 @@
 //! families, same field names); each returns page-shaped JSON the BFF
 //! passes through to the routes.
 
+// (filter_values below also lives here — small shared aggregation helpers.)
 use axum::{
     extract::{Query, State},
     http::StatusCode,
@@ -105,4 +106,51 @@ pub async fn sources(
 
 fn bad_gateway(error: anyhow::Error) -> (StatusCode, String) {
     (StatusCode::BAD_GATEWAY, error.to_string())
+}
+
+#[derive(serde::Serialize)]
+pub struct FilterValues {
+    pub sensors: Vec<String>,
+    pub countries: Vec<String>,
+    pub protos: Vec<String>,
+    pub ports: Vec<String>,
+    pub kinds: Vec<String>,
+}
+
+/// /api/v1/filter-values — the filter bar's autocomplete vocabularies,
+/// mirroring the Go tier's /api/filter-values (live terms over the event
+/// window).
+pub async fn filter_values(State(state): State<AppState>) -> Result<Json<FilterValues>, (StatusCode, String)> {
+    let body = json!({
+        "size": 0,
+        "query": {"range": {"@timestamp": {"gte": "now-48h"}}},
+        "aggs": {
+            "sensors": {"terms": {"field": "event.sensor", "size": 60}},
+            "countries": {"terms": {"field": "source.geo.country_iso_code", "size": 200}},
+            "protos": {"terms": {"field": "network.protocol", "size": 60}},
+            "ports": {"terms": {"field": "destination.port", "size": 60}},
+            "kinds": {"terms": {"field": "honeypot.event", "size": 40}}
+        }
+    });
+    let result = state.es.search(body).await.map_err(bad_gateway)?;
+    let keys = |agg: &str| -> Vec<String> {
+        result["aggregations"][agg]["buckets"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|bucket| {
+                let key = &bucket["key"];
+                key.as_str().map(String::from).or_else(|| key.as_i64().map(|n| n.to_string()))
+            })
+            .collect()
+    };
+    let mut values = FilterValues {
+        sensors: keys("sensors"),
+        countries: keys("countries"),
+        protos: keys("protos"),
+        ports: keys("ports"),
+        kinds: keys("kinds"),
+    };
+    values.countries.sort();
+    Ok(Json(values))
 }
