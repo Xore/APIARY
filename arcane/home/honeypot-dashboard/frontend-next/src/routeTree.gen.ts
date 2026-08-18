@@ -16,6 +16,8 @@ import { Route as CampaignsRouteImport } from './routes/campaigns'
 import { Route as ClustersRouteImport } from './routes/clusters'
 import { Route as EventsRouteImport } from './routes/events'
 import { Route as IpsRouteImport } from './routes/ips'
+import { Route as PayloadsRouteImport } from './routes/payloads'
+import { Route as RecordingsRouteImport } from './routes/recordings'
 import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
 import { Route as AuthLoginRouteImport } from './routes/auth/login'
 import { Route as AuthLogoutRouteImport } from './routes/auth/logout'
@@ -55,6 +57,16 @@ const IpsRoute = IpsRouteImport.update({
   path: '/ips',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PayloadsRoute = PayloadsRouteImport.update({
+  id: '/payloads',
+  path: '/payloads',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RecordingsRoute = RecordingsRouteImport.update({
+  id: '/recordings',
+  path: '/recordings',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthCallbackRoute = AuthCallbackRouteImport.update({
   id: '/auth/callback',
   path: '/auth/callback',
@@ -79,6 +91,8 @@ export interface FileRoutesByFullPath {
   '/clusters': typeof ClustersRoute
   '/events': typeof EventsRoute
   '/ips': typeof IpsRoute
+  '/payloads': typeof PayloadsRoute
+  '/recordings': typeof RecordingsRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
@@ -91,6 +105,8 @@ export interface FileRoutesByTo {
   '/clusters': typeof ClustersRoute
   '/events': typeof EventsRoute
   '/ips': typeof IpsRoute
+  '/payloads': typeof PayloadsRoute
+  '/recordings': typeof RecordingsRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
@@ -104,6 +120,8 @@ export interface FileRoutesById {
   '/clusters': typeof ClustersRoute
   '/events': typeof EventsRoute
   '/ips': typeof IpsRoute
+  '/payloads': typeof PayloadsRoute
+  '/recordings': typeof RecordingsRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
@@ -118,6 +136,8 @@ export interface FileRouteTypes {
     | '/clusters'
     | '/events'
     | '/ips'
+    | '/payloads'
+    | '/recordings'
     | '/auth/callback'
     | '/auth/login'
     | '/auth/logout'
@@ -130,6 +150,8 @@ export interface FileRouteTypes {
     | '/clusters'
     | '/events'
     | '/ips'
+    | '/payloads'
+    | '/recordings'
     | '/auth/callback'
     | '/auth/login'
     | '/auth/logout'
@@ -142,6 +164,8 @@ export interface FileRouteTypes {
     | '/clusters'
     | '/events'
     | '/ips'
+    | '/payloads'
+    | '/recordings'
     | '/auth/callback'
     | '/auth/login'
     | '/auth/logout'
@@ -155,6 +179,8 @@ export interface RootRouteChildren {
   ClustersRoute: typeof ClustersRoute
   EventsRoute: typeof EventsRoute
   IpsRoute: typeof IpsRoute
+  PayloadsRoute: typeof PayloadsRoute
+  RecordingsRoute: typeof RecordingsRoute
   AuthCallbackRoute: typeof AuthCallbackRoute
   AuthLoginRoute: typeof AuthLoginRoute
   AuthLogoutRoute: typeof AuthLogoutRoute
@@ -211,6 +237,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IpsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/payloads': {
+      id: '/payloads'
+      path: '/payloads'
+      fullPath: '/payloads'
+      preLoaderRoute: typeof PayloadsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/recordings': {
+      id: '/recordings'
+      path: '/recordings'
+      fullPath: '/recordings'
+      preLoaderRoute: typeof RecordingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/auth/callback': {
       id: '/auth/callback'
       path: '/auth/callback'
@@ -243,6 +283,8 @@ const rootRouteChildren: RootRouteChildren = {
   ClustersRoute: ClustersRoute,
   EventsRoute: EventsRoute,
   IpsRoute: IpsRoute,
+  PayloadsRoute: PayloadsRoute,
+  RecordingsRoute: RecordingsRoute,
   AuthCallbackRoute: AuthCallbackRoute,
   AuthLoginRoute: AuthLoginRoute,
   AuthLogoutRoute: AuthLogoutRoute,
