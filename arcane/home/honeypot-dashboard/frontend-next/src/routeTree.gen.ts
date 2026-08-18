@@ -18,6 +18,7 @@ import { Route as CampaignsRouteImport } from './routes/campaigns'
 import { Route as CanarytokensRouteImport } from './routes/canarytokens'
 import { Route as ClustersRouteImport } from './routes/clusters'
 import { Route as CommandsRouteImport } from './routes/commands'
+import { Route as DeadLettersRouteImport } from './routes/dead-letters'
 import { Route as EventsRouteImport } from './routes/events'
 import { Route as HistoryRouteImport } from './routes/history'
 import { Route as IpsRouteImport } from './routes/ips'
@@ -25,7 +26,9 @@ import { Route as KillChainRouteImport } from './routes/kill-chain'
 import { Route as LlmAnalysisRouteImport } from './routes/llm-analysis'
 import { Route as MlAnomaliesRouteImport } from './routes/ml-anomalies'
 import { Route as PayloadsRouteImport } from './routes/payloads'
+import { Route as ProblemReportsRouteImport } from './routes/problem-reports'
 import { Route as RecordingsRouteImport } from './routes/recordings'
+import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as SensorsRouteImport } from './routes/sensors'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SourceHealthRouteImport } from './routes/source-health'
@@ -33,8 +36,10 @@ import { Route as ApiLiveRouteImport } from './routes/api/live'
 import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
 import { Route as AuthLoginRouteImport } from './routes/auth/login'
 import { Route as AuthLogoutRouteImport } from './routes/auth/logout'
+import { Route as PayloadWorkbenchResultsRouteImport } from './routes/payload-workbench.results'
 import { Route as SessionsIdRouteImport } from './routes/sessions.$id'
 import { Route as ApiChartNameRouteImport } from './routes/api/chart.$name'
+import { Route as ApiReportIdPdfRouteImport } from './routes/api/report.$id.pdf'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -81,6 +86,11 @@ const CommandsRoute = CommandsRouteImport.update({
   path: '/commands',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DeadLettersRoute = DeadLettersRouteImport.update({
+  id: '/dead-letters',
+  path: '/dead-letters',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const EventsRoute = EventsRouteImport.update({
   id: '/events',
   path: '/events',
@@ -116,9 +126,19 @@ const PayloadsRoute = PayloadsRouteImport.update({
   path: '/payloads',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProblemReportsRoute = ProblemReportsRouteImport.update({
+  id: '/problem-reports',
+  path: '/problem-reports',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RecordingsRoute = RecordingsRouteImport.update({
   id: '/recordings',
   path: '/recordings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReportsRoute = ReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SensorsRoute = SensorsRouteImport.update({
@@ -156,6 +176,11 @@ const AuthLogoutRoute = AuthLogoutRouteImport.update({
   path: '/auth/logout',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PayloadWorkbenchResultsRoute = PayloadWorkbenchResultsRouteImport.update({
+  id: '/payload-workbench/results',
+  path: '/payload-workbench/results',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SessionsIdRoute = SessionsIdRouteImport.update({
   id: '/sessions/$id',
   path: '/sessions/$id',
@@ -164,6 +189,11 @@ const SessionsIdRoute = SessionsIdRouteImport.update({
 const ApiChartNameRoute = ApiChartNameRouteImport.update({
   id: '/api/chart/$name',
   path: '/api/chart/$name',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiReportIdPdfRoute = ApiReportIdPdfRouteImport.update({
+  id: '/api/report/$id/pdf',
+  path: '/api/report/$id/pdf',
   getParentRoute: () => rootRouteImport,
 } as any)
 
@@ -177,6 +207,7 @@ export interface FileRoutesByFullPath {
   '/canarytokens': typeof CanarytokensRoute
   '/clusters': typeof ClustersRoute
   '/commands': typeof CommandsRoute
+  '/dead-letters': typeof DeadLettersRoute
   '/events': typeof EventsRoute
   '/history': typeof HistoryRoute
   '/ips': typeof IpsRoute
@@ -184,7 +215,9 @@ export interface FileRoutesByFullPath {
   '/llm-analysis': typeof LlmAnalysisRoute
   '/ml-anomalies': typeof MlAnomaliesRoute
   '/payloads': typeof PayloadsRoute
+  '/problem-reports': typeof ProblemReportsRoute
   '/recordings': typeof RecordingsRoute
+  '/reports': typeof ReportsRoute
   '/sensors': typeof SensorsRoute
   '/settings': typeof SettingsRoute
   '/source-health': typeof SourceHealthRoute
@@ -192,8 +225,10 @@ export interface FileRoutesByFullPath {
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
+  '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/api/chart/$name': typeof ApiChartNameRoute
+  '/api/report/$id/pdf': typeof ApiReportIdPdfRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -205,6 +240,7 @@ export interface FileRoutesByTo {
   '/canarytokens': typeof CanarytokensRoute
   '/clusters': typeof ClustersRoute
   '/commands': typeof CommandsRoute
+  '/dead-letters': typeof DeadLettersRoute
   '/events': typeof EventsRoute
   '/history': typeof HistoryRoute
   '/ips': typeof IpsRoute
@@ -212,7 +248,9 @@ export interface FileRoutesByTo {
   '/llm-analysis': typeof LlmAnalysisRoute
   '/ml-anomalies': typeof MlAnomaliesRoute
   '/payloads': typeof PayloadsRoute
+  '/problem-reports': typeof ProblemReportsRoute
   '/recordings': typeof RecordingsRoute
+  '/reports': typeof ReportsRoute
   '/sensors': typeof SensorsRoute
   '/settings': typeof SettingsRoute
   '/source-health': typeof SourceHealthRoute
@@ -220,8 +258,10 @@ export interface FileRoutesByTo {
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
+  '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/api/chart/$name': typeof ApiChartNameRoute
+  '/api/report/$id/pdf': typeof ApiReportIdPdfRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -234,6 +274,7 @@ export interface FileRoutesById {
   '/canarytokens': typeof CanarytokensRoute
   '/clusters': typeof ClustersRoute
   '/commands': typeof CommandsRoute
+  '/dead-letters': typeof DeadLettersRoute
   '/events': typeof EventsRoute
   '/history': typeof HistoryRoute
   '/ips': typeof IpsRoute
@@ -241,7 +282,9 @@ export interface FileRoutesById {
   '/llm-analysis': typeof LlmAnalysisRoute
   '/ml-anomalies': typeof MlAnomaliesRoute
   '/payloads': typeof PayloadsRoute
+  '/problem-reports': typeof ProblemReportsRoute
   '/recordings': typeof RecordingsRoute
+  '/reports': typeof ReportsRoute
   '/sensors': typeof SensorsRoute
   '/settings': typeof SettingsRoute
   '/source-health': typeof SourceHealthRoute
@@ -249,8 +292,10 @@ export interface FileRoutesById {
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
+  '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/api/chart/$name': typeof ApiChartNameRoute
+  '/api/report/$id/pdf': typeof ApiReportIdPdfRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -264,6 +309,7 @@ export interface FileRouteTypes {
     | '/canarytokens'
     | '/clusters'
     | '/commands'
+    | '/dead-letters'
     | '/events'
     | '/history'
     | '/ips'
@@ -271,7 +317,9 @@ export interface FileRouteTypes {
     | '/llm-analysis'
     | '/ml-anomalies'
     | '/payloads'
+    | '/problem-reports'
     | '/recordings'
+    | '/reports'
     | '/sensors'
     | '/settings'
     | '/source-health'
@@ -279,8 +327,10 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/auth/login'
     | '/auth/logout'
+    | '/payload-workbench/results'
     | '/sessions/$id'
     | '/api/chart/$name'
+    | '/api/report/$id/pdf'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -292,6 +342,7 @@ export interface FileRouteTypes {
     | '/canarytokens'
     | '/clusters'
     | '/commands'
+    | '/dead-letters'
     | '/events'
     | '/history'
     | '/ips'
@@ -299,7 +350,9 @@ export interface FileRouteTypes {
     | '/llm-analysis'
     | '/ml-anomalies'
     | '/payloads'
+    | '/problem-reports'
     | '/recordings'
+    | '/reports'
     | '/sensors'
     | '/settings'
     | '/source-health'
@@ -307,8 +360,10 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/auth/login'
     | '/auth/logout'
+    | '/payload-workbench/results'
     | '/sessions/$id'
     | '/api/chart/$name'
+    | '/api/report/$id/pdf'
   id:
     | '__root__'
     | '/'
@@ -320,6 +375,7 @@ export interface FileRouteTypes {
     | '/canarytokens'
     | '/clusters'
     | '/commands'
+    | '/dead-letters'
     | '/events'
     | '/history'
     | '/ips'
@@ -327,7 +383,9 @@ export interface FileRouteTypes {
     | '/llm-analysis'
     | '/ml-anomalies'
     | '/payloads'
+    | '/problem-reports'
     | '/recordings'
+    | '/reports'
     | '/sensors'
     | '/settings'
     | '/source-health'
@@ -335,8 +393,10 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/auth/login'
     | '/auth/logout'
+    | '/payload-workbench/results'
     | '/sessions/$id'
     | '/api/chart/$name'
+    | '/api/report/$id/pdf'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -349,6 +409,7 @@ export interface RootRouteChildren {
   CanarytokensRoute: typeof CanarytokensRoute
   ClustersRoute: typeof ClustersRoute
   CommandsRoute: typeof CommandsRoute
+  DeadLettersRoute: typeof DeadLettersRoute
   EventsRoute: typeof EventsRoute
   HistoryRoute: typeof HistoryRoute
   IpsRoute: typeof IpsRoute
@@ -356,7 +417,9 @@ export interface RootRouteChildren {
   LlmAnalysisRoute: typeof LlmAnalysisRoute
   MlAnomaliesRoute: typeof MlAnomaliesRoute
   PayloadsRoute: typeof PayloadsRoute
+  ProblemReportsRoute: typeof ProblemReportsRoute
   RecordingsRoute: typeof RecordingsRoute
+  ReportsRoute: typeof ReportsRoute
   SensorsRoute: typeof SensorsRoute
   SettingsRoute: typeof SettingsRoute
   SourceHealthRoute: typeof SourceHealthRoute
@@ -364,8 +427,10 @@ export interface RootRouteChildren {
   AuthCallbackRoute: typeof AuthCallbackRoute
   AuthLoginRoute: typeof AuthLoginRoute
   AuthLogoutRoute: typeof AuthLogoutRoute
+  PayloadWorkbenchResultsRoute: typeof PayloadWorkbenchResultsRoute
   SessionsIdRoute: typeof SessionsIdRoute
   ApiChartNameRoute: typeof ApiChartNameRoute
+  ApiReportIdPdfRoute: typeof ApiReportIdPdfRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -433,6 +498,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CommandsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/dead-letters': {
+      id: '/dead-letters'
+      path: '/dead-letters'
+      fullPath: '/dead-letters'
+      preLoaderRoute: typeof DeadLettersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/events': {
       id: '/events'
       path: '/events'
@@ -482,11 +554,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PayloadsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/problem-reports': {
+      id: '/problem-reports'
+      path: '/problem-reports'
+      fullPath: '/problem-reports'
+      preLoaderRoute: typeof ProblemReportsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/recordings': {
       id: '/recordings'
       path: '/recordings'
       fullPath: '/recordings'
       preLoaderRoute: typeof RecordingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reports': {
+      id: '/reports'
+      path: '/reports'
+      fullPath: '/reports'
+      preLoaderRoute: typeof ReportsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/sensors': {
@@ -538,6 +624,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthLogoutRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/payload-workbench/results': {
+      id: '/payload-workbench/results'
+      path: '/payload-workbench/results'
+      fullPath: '/payload-workbench/results'
+      preLoaderRoute: typeof PayloadWorkbenchResultsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sessions/$id': {
       id: '/sessions/$id'
       path: '/sessions/$id'
@@ -550,6 +643,13 @@ declare module '@tanstack/react-router' {
       path: '/api/chart/$name'
       fullPath: '/api/chart/$name'
       preLoaderRoute: typeof ApiChartNameRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/report/$id/pdf': {
+      id: '/api/report/$id/pdf'
+      path: '/api/report/$id/pdf'
+      fullPath: '/api/report/$id/pdf'
+      preLoaderRoute: typeof ApiReportIdPdfRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -565,6 +665,7 @@ const rootRouteChildren: RootRouteChildren = {
   CanarytokensRoute: CanarytokensRoute,
   ClustersRoute: ClustersRoute,
   CommandsRoute: CommandsRoute,
+  DeadLettersRoute: DeadLettersRoute,
   EventsRoute: EventsRoute,
   HistoryRoute: HistoryRoute,
   IpsRoute: IpsRoute,
@@ -572,7 +673,9 @@ const rootRouteChildren: RootRouteChildren = {
   LlmAnalysisRoute: LlmAnalysisRoute,
   MlAnomaliesRoute: MlAnomaliesRoute,
   PayloadsRoute: PayloadsRoute,
+  ProblemReportsRoute: ProblemReportsRoute,
   RecordingsRoute: RecordingsRoute,
+  ReportsRoute: ReportsRoute,
   SensorsRoute: SensorsRoute,
   SettingsRoute: SettingsRoute,
   SourceHealthRoute: SourceHealthRoute,
@@ -580,8 +683,10 @@ const rootRouteChildren: RootRouteChildren = {
   AuthCallbackRoute: AuthCallbackRoute,
   AuthLoginRoute: AuthLoginRoute,
   AuthLogoutRoute: AuthLogoutRoute,
+  PayloadWorkbenchResultsRoute: PayloadWorkbenchResultsRoute,
   SessionsIdRoute: SessionsIdRoute,
   ApiChartNameRoute: ApiChartNameRoute,
+  ApiReportIdPdfRoute: ApiReportIdPdfRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

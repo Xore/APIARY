@@ -40,15 +40,29 @@ async fn store_page(
     q: &StoreQuery,
     extra_filter: Option<Value>,
 ) -> anyhow::Result<Value> {
+    store_page_excluding(state, indices, sort_field, q, extra_filter, &[]).await
+}
+
+async fn store_page_excluding(
+    state: &AppState,
+    indices: &[&str],
+    sort_field: &str,
+    q: &StoreQuery,
+    extra_filter: Option<Value>,
+    excludes: &[&str],
+) -> anyhow::Result<Value> {
     let size = q.size.min(100);
     let query = extra_filter.unwrap_or_else(|| json!({"match_all": {}}));
-    let body = json!({
+    let mut body = json!({
         "from": q.offset,
         "size": size,
         "track_total_hits": true,
         "sort": [{sort_field: {"order": "desc", "unmapped_type": "date"}}],
         "query": query
     });
+    if !excludes.is_empty() {
+        body["_source"] = json!({"excludes": excludes});
+    }
     let result = state.es.search_index(indices, body).await?;
     let total = result["hits"]["total"]["value"].as_u64().unwrap_or(0);
     let rows: Vec<Value> = result["hits"]["hits"]
@@ -144,21 +158,27 @@ pub async fn generic(
     axum::extract::Path(name): axum::extract::Path<String>,
     Query(q): Query<StoreQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
-    let (index, sort): (&str, &str) = match name.as_str() {
-        "auth-events" => ("auth-failure-events", "last_seen"),
+    // (index, sort field, heavy fields excluded from list responses).
+    let (index, sort, excludes): (&str, &str, &[&str]) = match name.as_str() {
+        "auth-events" => ("auth-failure-events", "last_seen", &[]),
         // llm-worker output; index may not exist yet (ignore_unavailable).
-        "llm-analysis" => ("llm-analysis", "@timestamp"),
-        "ml-anomalies" => ("ml-anomalies", "timestamp"),
-        "agent-campaigns" => ("agent-intrusion-campaigns", "last_seen"),
-        "canarytokens" => ("dashboard-canarytokens-v1", "created_at"),
-        "problem-reports" => ("dashboard-problem-reports-v1", "CreatedAt"),
-        "static-analysis" => ("dashboard-static-analysis-v1", "AnalyzedAt"),
-        "workbench-runs" => ("dashboard-workbench-runs-v1", "StartedAt"),
-        "generated-reports" => ("dashboard-generated-reports-v1", "GeneratedAt"),
-        "intelligence" => ("dashboard-intelligence-archive-v1", "LastSeen"),
+        "llm-analysis" => ("llm-analysis", "@timestamp", &[]),
+        "ml-anomalies" => ("ml-anomalies", "timestamp", &[]),
+        "agent-campaigns" => ("agent-intrusion-campaigns", "last_seen", &[]),
+        "canarytokens" => ("dashboard-canarytokens-v1", "created_at", &[]),
+        "problem-reports" => ("dashboard-problem-reports-v1", "submitted_at", &["dom_snapshot"]),
+        "dead-letters" => ("dead-letter-honeypot", "@timestamp", &[]),
+        "yara" => ("yara-analysis-v1", "@timestamp", &[]),
+        "sandbox-runs" => ("sandbox-analysis-v1", "@timestamp", &[]),
+        "ghidra-runs" => ("ghidra-analysis-v1", "@timestamp", &[]),
+        "static-analysis" => ("dashboard-static-analysis-v1", "Analysis.GeneratedUTC", &[]),
+        "workbench-runs" => ("dashboard-workbench-runs-v1", "created_at", &[]),
+        "generated-reports" => ("dashboard-generated-reports-v1", "created_at", &["pdf_base64"]),
+        "report-definitions" => ("dashboard-reports-definitions-v1", "updated", &[]),
+        "intelligence" => ("dashboard-intelligence-archive-v1", "generated", &[]),
         _ => return Err((StatusCode::NOT_FOUND, format!("unknown store {name}"))),
     };
-    store_page(&state, &[index], sort, &q, None)
+    store_page_excluding(&state, &[index], sort, &q, None, excludes)
         .await
         .map(Json)
         .map_err(bad_gateway)
