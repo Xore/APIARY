@@ -41,6 +41,17 @@ export const Route = createRootRoute({
     ],
   }),
   shellComponent: RootDocument,
+  notFoundComponent: () => (
+    <header className="overview-header">
+      <div>
+        <div className="label-section">404</div>
+        <h1>page not found</h1>
+        <p className="subtitle">
+          Nothing lives at this address. <a className="lnk" href="/">Back to the overview →</a>
+        </p>
+      </div>
+    </header>
+  ),
 })
 
 function RootDocument({ children }: { children: React.ReactNode }) {

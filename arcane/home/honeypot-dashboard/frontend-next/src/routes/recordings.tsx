@@ -66,7 +66,10 @@ function ReplayPane({ shasum }: { shasum: string }) {
   return (
     <>
       <p className="subtitle">
-        {replay.frames.toLocaleString('en-US')} frames · {replay.duration_seconds.toFixed(1)}s of terminal time
+        {replay.frames.toLocaleString('en-US')} frames · {replay.duration_seconds.toFixed(1)}s of terminal time ·{' '}
+        <a className="lnk" href={`/tty-replay/${encodeURIComponent(shasum)}`}>
+          open replay page →
+        </a>
       </p>
       <pre className="hp-md__preview">{plainTranscript(replay.transcript)}</pre>
     </>

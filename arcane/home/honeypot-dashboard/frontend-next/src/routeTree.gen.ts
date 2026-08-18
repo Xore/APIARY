@@ -29,6 +29,7 @@ import { Route as PayloadsRouteImport } from './routes/payloads'
 import { Route as ProblemReportsRouteImport } from './routes/problem-reports'
 import { Route as RecordingsRouteImport } from './routes/recordings'
 import { Route as ReportsRouteImport } from './routes/reports'
+import { Route as SearchRouteImport } from './routes/search'
 import { Route as SensorsRouteImport } from './routes/sensors'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SourceHealthRouteImport } from './routes/source-health'
@@ -39,6 +40,7 @@ import { Route as AuthLogoutRouteImport } from './routes/auth/logout'
 import { Route as PayloadAnalysisHashRouteImport } from './routes/payload-analysis.$hash'
 import { Route as PayloadWorkbenchResultsRouteImport } from './routes/payload-workbench.results'
 import { Route as SessionsIdRouteImport } from './routes/sessions.$id'
+import { Route as TtyReplayShasumRouteImport } from './routes/tty-replay.$shasum'
 import { Route as ApiChartNameRouteImport } from './routes/api/chart.$name'
 import { Route as InvestigateIpIpRouteImport } from './routes/investigate.ip.$ip'
 import { Route as ApiCanarytokenIdDownloadRouteImport } from './routes/api/canarytoken.$id.download'
@@ -144,6 +146,11 @@ const ReportsRoute = ReportsRouteImport.update({
   path: '/reports',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SearchRoute = SearchRouteImport.update({
+  id: '/search',
+  path: '/search',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SensorsRoute = SensorsRouteImport.update({
   id: '/sensors',
   path: '/sensors',
@@ -194,6 +201,11 @@ const SessionsIdRoute = SessionsIdRouteImport.update({
   path: '/sessions/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TtyReplayShasumRoute = TtyReplayShasumRouteImport.update({
+  id: '/tty-replay/$shasum',
+  path: '/tty-replay/$shasum',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiChartNameRoute = ApiChartNameRouteImport.update({
   id: '/api/chart/$name',
   path: '/api/chart/$name',
@@ -237,6 +249,7 @@ export interface FileRoutesByFullPath {
   '/problem-reports': typeof ProblemReportsRoute
   '/recordings': typeof RecordingsRoute
   '/reports': typeof ReportsRoute
+  '/search': typeof SearchRoute
   '/sensors': typeof SensorsRoute
   '/settings': typeof SettingsRoute
   '/source-health': typeof SourceHealthRoute
@@ -247,6 +260,7 @@ export interface FileRoutesByFullPath {
   '/payload-analysis/$hash': typeof PayloadAnalysisHashRoute
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
   '/sessions/$id': typeof SessionsIdRoute
+  '/tty-replay/$shasum': typeof TtyReplayShasumRoute
   '/api/chart/$name': typeof ApiChartNameRoute
   '/investigate/ip/$ip': typeof InvestigateIpIpRoute
   '/api/canarytoken/$id/download': typeof ApiCanarytokenIdDownloadRoute
@@ -273,6 +287,7 @@ export interface FileRoutesByTo {
   '/problem-reports': typeof ProblemReportsRoute
   '/recordings': typeof RecordingsRoute
   '/reports': typeof ReportsRoute
+  '/search': typeof SearchRoute
   '/sensors': typeof SensorsRoute
   '/settings': typeof SettingsRoute
   '/source-health': typeof SourceHealthRoute
@@ -283,6 +298,7 @@ export interface FileRoutesByTo {
   '/payload-analysis/$hash': typeof PayloadAnalysisHashRoute
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
   '/sessions/$id': typeof SessionsIdRoute
+  '/tty-replay/$shasum': typeof TtyReplayShasumRoute
   '/api/chart/$name': typeof ApiChartNameRoute
   '/investigate/ip/$ip': typeof InvestigateIpIpRoute
   '/api/canarytoken/$id/download': typeof ApiCanarytokenIdDownloadRoute
@@ -310,6 +326,7 @@ export interface FileRoutesById {
   '/problem-reports': typeof ProblemReportsRoute
   '/recordings': typeof RecordingsRoute
   '/reports': typeof ReportsRoute
+  '/search': typeof SearchRoute
   '/sensors': typeof SensorsRoute
   '/settings': typeof SettingsRoute
   '/source-health': typeof SourceHealthRoute
@@ -320,6 +337,7 @@ export interface FileRoutesById {
   '/payload-analysis/$hash': typeof PayloadAnalysisHashRoute
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
   '/sessions/$id': typeof SessionsIdRoute
+  '/tty-replay/$shasum': typeof TtyReplayShasumRoute
   '/api/chart/$name': typeof ApiChartNameRoute
   '/investigate/ip/$ip': typeof InvestigateIpIpRoute
   '/api/canarytoken/$id/download': typeof ApiCanarytokenIdDownloadRoute
@@ -348,6 +366,7 @@ export interface FileRouteTypes {
     | '/problem-reports'
     | '/recordings'
     | '/reports'
+    | '/search'
     | '/sensors'
     | '/settings'
     | '/source-health'
@@ -358,6 +377,7 @@ export interface FileRouteTypes {
     | '/payload-analysis/$hash'
     | '/payload-workbench/results'
     | '/sessions/$id'
+    | '/tty-replay/$shasum'
     | '/api/chart/$name'
     | '/investigate/ip/$ip'
     | '/api/canarytoken/$id/download'
@@ -384,6 +404,7 @@ export interface FileRouteTypes {
     | '/problem-reports'
     | '/recordings'
     | '/reports'
+    | '/search'
     | '/sensors'
     | '/settings'
     | '/source-health'
@@ -394,6 +415,7 @@ export interface FileRouteTypes {
     | '/payload-analysis/$hash'
     | '/payload-workbench/results'
     | '/sessions/$id'
+    | '/tty-replay/$shasum'
     | '/api/chart/$name'
     | '/investigate/ip/$ip'
     | '/api/canarytoken/$id/download'
@@ -420,6 +442,7 @@ export interface FileRouteTypes {
     | '/problem-reports'
     | '/recordings'
     | '/reports'
+    | '/search'
     | '/sensors'
     | '/settings'
     | '/source-health'
@@ -430,6 +453,7 @@ export interface FileRouteTypes {
     | '/payload-analysis/$hash'
     | '/payload-workbench/results'
     | '/sessions/$id'
+    | '/tty-replay/$shasum'
     | '/api/chart/$name'
     | '/investigate/ip/$ip'
     | '/api/canarytoken/$id/download'
@@ -457,6 +481,7 @@ export interface RootRouteChildren {
   ProblemReportsRoute: typeof ProblemReportsRoute
   RecordingsRoute: typeof RecordingsRoute
   ReportsRoute: typeof ReportsRoute
+  SearchRoute: typeof SearchRoute
   SensorsRoute: typeof SensorsRoute
   SettingsRoute: typeof SettingsRoute
   SourceHealthRoute: typeof SourceHealthRoute
@@ -467,6 +492,7 @@ export interface RootRouteChildren {
   PayloadAnalysisHashRoute: typeof PayloadAnalysisHashRoute
   PayloadWorkbenchResultsRoute: typeof PayloadWorkbenchResultsRoute
   SessionsIdRoute: typeof SessionsIdRoute
+  TtyReplayShasumRoute: typeof TtyReplayShasumRoute
   ApiChartNameRoute: typeof ApiChartNameRoute
   InvestigateIpIpRoute: typeof InvestigateIpIpRoute
   ApiCanarytokenIdDownloadRoute: typeof ApiCanarytokenIdDownloadRoute
@@ -615,6 +641,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ReportsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/search': {
+      id: '/search'
+      path: '/search'
+      fullPath: '/search'
+      preLoaderRoute: typeof SearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sensors': {
       id: '/sensors'
       path: '/sensors'
@@ -685,6 +718,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SessionsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/tty-replay/$shasum': {
+      id: '/tty-replay/$shasum'
+      path: '/tty-replay/$shasum'
+      fullPath: '/tty-replay/$shasum'
+      preLoaderRoute: typeof TtyReplayShasumRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/chart/$name': {
       id: '/api/chart/$name'
       path: '/api/chart/$name'
@@ -737,6 +777,7 @@ const rootRouteChildren: RootRouteChildren = {
   ProblemReportsRoute: ProblemReportsRoute,
   RecordingsRoute: RecordingsRoute,
   ReportsRoute: ReportsRoute,
+  SearchRoute: SearchRoute,
   SensorsRoute: SensorsRoute,
   SettingsRoute: SettingsRoute,
   SourceHealthRoute: SourceHealthRoute,
@@ -747,6 +788,7 @@ const rootRouteChildren: RootRouteChildren = {
   PayloadAnalysisHashRoute: PayloadAnalysisHashRoute,
   PayloadWorkbenchResultsRoute: PayloadWorkbenchResultsRoute,
   SessionsIdRoute: SessionsIdRoute,
+  TtyReplayShasumRoute: TtyReplayShasumRoute,
   ApiChartNameRoute: ApiChartNameRoute,
   InvestigateIpIpRoute: InvestigateIpIpRoute,
   ApiCanarytokenIdDownloadRoute: ApiCanarytokenIdDownloadRoute,

@@ -73,7 +73,12 @@ export function CommandPalette() {
   const go = useCallback(
     (url: string) => {
       setOpen(false)
-      if (url.startsWith('/')) void navigate({ to: url })
+      if (!url.startsWith('/')) return
+      const [path, queryString] = url.split('?')
+      void navigate({
+        to: path,
+        search: queryString ? Object.fromEntries(new URLSearchParams(queryString)) : undefined,
+      })
     },
     [navigate],
   )
@@ -92,7 +97,7 @@ export function CommandPalette() {
           onSubmit={(event) => {
             event.preventDefault()
             if (result?.redirect) go(result.redirect)
-            else if (result?.groups[0]?.hits[0]) go(result.groups[0].hits[0].url)
+            else if (query.trim()) go(`/search?q=${encodeURIComponent(query.trim())}`)
           }}
         >
           <input
