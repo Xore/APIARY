@@ -22,6 +22,7 @@ mod aggregates;
 mod es;
 mod events;
 mod overview;
+mod stores;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -89,8 +90,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/overview/kpis", get(overview::kpis))
         .route("/api/v1/events", get(events::list))
         .route("/api/v1/sources", get(aggregates::sources))
-        .route("/api/v1/campaigns", get(aggregates::campaigns))
-        .route("/api/v1/clusters", get(aggregates::clusters))
+        .route("/api/v1/campaigns", get(stores::campaigns))
+        .route("/api/v1/clusters", get(stores::clusters))
+        .route("/api/v1/attackers", get(stores::attackers))
+        .route("/api/v1/recordings", get(stores::recordings))
+        .route("/api/v1/alerts", get(stores::alerts))
+        .route("/api/v1/payloads", get(stores::payloads))
         .layer(middleware::from_fn_with_state(state.clone(), require_service_token));
 
     let app = Router::new()

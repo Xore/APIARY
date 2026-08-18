@@ -27,9 +27,15 @@ impl Es {
     /// full query DSL. `ignore_unavailable` matches the Go client's posture
     /// so a not-yet-created index family never fails the whole query.
     pub async fn search(&self, body: Value) -> anyhow::Result<Value> {
+        self.search_index(EVENT_INDICES, body).await
+    }
+
+    /// `_search` against arbitrary indices — the worker/store index
+    /// families (campaigns-v1, attackers-v1, dashboard-*-v1, ...).
+    pub async fn search_index(&self, indices: &[&str], body: Value) -> anyhow::Result<Value> {
         let response = self
             .client
-            .search(SearchParts::Index(EVENT_INDICES))
+            .search(SearchParts::Index(indices))
             .ignore_unavailable(true)
             .body(body)
             .send()

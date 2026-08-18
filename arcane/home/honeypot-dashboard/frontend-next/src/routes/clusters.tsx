@@ -13,9 +13,11 @@ type ClusterRow = {
   sensors: string[]
 }
 
+type Page = { total: number; rows: ClusterRow[] }
+
 const fetchClusters = createServerFn({ method: 'GET' }).handler(async () => {
   const { serviceJSON } = await import('../lib/backend.server')
-  return serviceJSON<{ rows: ClusterRow[] }>('/api/v1/clusters')
+  return serviceJSON<Page>('/api/v1/clusters?size=100')
 })
 
 export const Route = createFileRoute('/clusters')({

@@ -10,6 +10,8 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AlertsRouteImport } from './routes/alerts'
+import { Route as AttackersRouteImport } from './routes/attackers'
 import { Route as CampaignsRouteImport } from './routes/campaigns'
 import { Route as ClustersRouteImport } from './routes/clusters'
 import { Route as EventsRouteImport } from './routes/events'
@@ -21,6 +23,16 @@ import { Route as AuthLogoutRouteImport } from './routes/auth/logout'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AlertsRoute = AlertsRouteImport.update({
+  id: '/alerts',
+  path: '/alerts',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AttackersRoute = AttackersRouteImport.update({
+  id: '/attackers',
+  path: '/attackers',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CampaignsRoute = CampaignsRouteImport.update({
@@ -61,6 +73,8 @@ const AuthLogoutRoute = AuthLogoutRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/alerts': typeof AlertsRoute
+  '/attackers': typeof AttackersRoute
   '/campaigns': typeof CampaignsRoute
   '/clusters': typeof ClustersRoute
   '/events': typeof EventsRoute
@@ -71,6 +85,8 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/alerts': typeof AlertsRoute
+  '/attackers': typeof AttackersRoute
   '/campaigns': typeof CampaignsRoute
   '/clusters': typeof ClustersRoute
   '/events': typeof EventsRoute
@@ -82,6 +98,8 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/alerts': typeof AlertsRoute
+  '/attackers': typeof AttackersRoute
   '/campaigns': typeof CampaignsRoute
   '/clusters': typeof ClustersRoute
   '/events': typeof EventsRoute
@@ -94,6 +112,8 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/alerts'
+    | '/attackers'
     | '/campaigns'
     | '/clusters'
     | '/events'
@@ -104,6 +124,8 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/alerts'
+    | '/attackers'
     | '/campaigns'
     | '/clusters'
     | '/events'
@@ -114,6 +136,8 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/alerts'
+    | '/attackers'
     | '/campaigns'
     | '/clusters'
     | '/events'
@@ -125,6 +149,8 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AlertsRoute: typeof AlertsRoute
+  AttackersRoute: typeof AttackersRoute
   CampaignsRoute: typeof CampaignsRoute
   ClustersRoute: typeof ClustersRoute
   EventsRoute: typeof EventsRoute
@@ -141,6 +167,20 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/alerts': {
+      id: '/alerts'
+      path: '/alerts'
+      fullPath: '/alerts'
+      preLoaderRoute: typeof AlertsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/attackers': {
+      id: '/attackers'
+      path: '/attackers'
+      fullPath: '/attackers'
+      preLoaderRoute: typeof AttackersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/campaigns': {
@@ -197,6 +237,8 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AlertsRoute: AlertsRoute,
+  AttackersRoute: AttackersRoute,
   CampaignsRoute: CampaignsRoute,
   ClustersRoute: ClustersRoute,
   EventsRoute: EventsRoute,
