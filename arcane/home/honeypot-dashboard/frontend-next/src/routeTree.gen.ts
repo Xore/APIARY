@@ -36,6 +36,7 @@ import { Route as ApiLiveRouteImport } from './routes/api/live'
 import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
 import { Route as AuthLoginRouteImport } from './routes/auth/login'
 import { Route as AuthLogoutRouteImport } from './routes/auth/logout'
+import { Route as PayloadAnalysisHashRouteImport } from './routes/payload-analysis.$hash'
 import { Route as PayloadWorkbenchResultsRouteImport } from './routes/payload-workbench.results'
 import { Route as SessionsIdRouteImport } from './routes/sessions.$id'
 import { Route as ApiChartNameRouteImport } from './routes/api/chart.$name'
@@ -176,6 +177,11 @@ const AuthLogoutRoute = AuthLogoutRouteImport.update({
   path: '/auth/logout',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PayloadAnalysisHashRoute = PayloadAnalysisHashRouteImport.update({
+  id: '/payload-analysis/$hash',
+  path: '/payload-analysis/$hash',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PayloadWorkbenchResultsRoute = PayloadWorkbenchResultsRouteImport.update({
   id: '/payload-workbench/results',
   path: '/payload-workbench/results',
@@ -225,6 +231,7 @@ export interface FileRoutesByFullPath {
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
+  '/payload-analysis/$hash': typeof PayloadAnalysisHashRoute
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/api/chart/$name': typeof ApiChartNameRoute
@@ -258,6 +265,7 @@ export interface FileRoutesByTo {
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
+  '/payload-analysis/$hash': typeof PayloadAnalysisHashRoute
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/api/chart/$name': typeof ApiChartNameRoute
@@ -292,6 +300,7 @@ export interface FileRoutesById {
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
+  '/payload-analysis/$hash': typeof PayloadAnalysisHashRoute
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/api/chart/$name': typeof ApiChartNameRoute
@@ -327,6 +336,7 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/auth/login'
     | '/auth/logout'
+    | '/payload-analysis/$hash'
     | '/payload-workbench/results'
     | '/sessions/$id'
     | '/api/chart/$name'
@@ -360,6 +370,7 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/auth/login'
     | '/auth/logout'
+    | '/payload-analysis/$hash'
     | '/payload-workbench/results'
     | '/sessions/$id'
     | '/api/chart/$name'
@@ -393,6 +404,7 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/auth/login'
     | '/auth/logout'
+    | '/payload-analysis/$hash'
     | '/payload-workbench/results'
     | '/sessions/$id'
     | '/api/chart/$name'
@@ -427,6 +439,7 @@ export interface RootRouteChildren {
   AuthCallbackRoute: typeof AuthCallbackRoute
   AuthLoginRoute: typeof AuthLoginRoute
   AuthLogoutRoute: typeof AuthLogoutRoute
+  PayloadAnalysisHashRoute: typeof PayloadAnalysisHashRoute
   PayloadWorkbenchResultsRoute: typeof PayloadWorkbenchResultsRoute
   SessionsIdRoute: typeof SessionsIdRoute
   ApiChartNameRoute: typeof ApiChartNameRoute
@@ -624,6 +637,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthLogoutRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/payload-analysis/$hash': {
+      id: '/payload-analysis/$hash'
+      path: '/payload-analysis/$hash'
+      fullPath: '/payload-analysis/$hash'
+      preLoaderRoute: typeof PayloadAnalysisHashRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/payload-workbench/results': {
       id: '/payload-workbench/results'
       path: '/payload-workbench/results'
@@ -683,6 +703,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthCallbackRoute: AuthCallbackRoute,
   AuthLoginRoute: AuthLoginRoute,
   AuthLogoutRoute: AuthLogoutRoute,
+  PayloadAnalysisHashRoute: PayloadAnalysisHashRoute,
   PayloadWorkbenchResultsRoute: PayloadWorkbenchResultsRoute,
   SessionsIdRoute: SessionsIdRoute,
   ApiChartNameRoute: ApiChartNameRoute,

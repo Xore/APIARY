@@ -104,7 +104,10 @@ function Payloads() {
                   </pre>
                 ) : null}
                 <div className="hp-src-card__when">
-                  {row.MtimeUTC.replace('T', ' ').slice(0, 19)} · {row.Copies} {row.Copies === 1 ? 'copy' : 'copies'}
+                  {row.MtimeUTC.replace('T', ' ').slice(0, 19)} · {row.Copies} {row.Copies === 1 ? 'copy' : 'copies'} ·{' '}
+                  <a className="lnk" href={`/payload-analysis/${encodeURIComponent(row.Hash)}`}>
+                    static analysis →
+                  </a>
                 </div>
               </div>
             ))

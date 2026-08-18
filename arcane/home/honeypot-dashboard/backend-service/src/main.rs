@@ -28,6 +28,7 @@ mod health;
 mod kill_chain;
 mod live;
 mod overview;
+mod payload_detail;
 mod replay;
 mod reports;
 mod sensors;
@@ -131,6 +132,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/recordings/{shasum}", get(replay::replay))
         .route("/api/v1/alerts", get(stores::alerts))
         .route("/api/v1/payloads", get(stores::payloads))
+        .route("/api/v1/payloads/{hash}", get(payload_detail::detail))
         .route("/api/v1/store/{name}", get(stores::generic))
         .layer(middleware::from_fn_with_state(state.clone(), require_service_token));
 
