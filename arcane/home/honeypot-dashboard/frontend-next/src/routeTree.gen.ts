@@ -21,6 +21,7 @@ import { Route as CommandsRouteImport } from './routes/commands'
 import { Route as EventsRouteImport } from './routes/events'
 import { Route as HistoryRouteImport } from './routes/history'
 import { Route as IpsRouteImport } from './routes/ips'
+import { Route as KillChainRouteImport } from './routes/kill-chain'
 import { Route as LlmAnalysisRouteImport } from './routes/llm-analysis'
 import { Route as MlAnomaliesRouteImport } from './routes/ml-anomalies'
 import { Route as PayloadsRouteImport } from './routes/payloads'
@@ -31,6 +32,7 @@ import { Route as ApiLiveRouteImport } from './routes/api/live'
 import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
 import { Route as AuthLoginRouteImport } from './routes/auth/login'
 import { Route as AuthLogoutRouteImport } from './routes/auth/logout'
+import { Route as ApiChartNameRouteImport } from './routes/api/chart.$name'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -92,6 +94,11 @@ const IpsRoute = IpsRouteImport.update({
   path: '/ips',
   getParentRoute: () => rootRouteImport,
 } as any)
+const KillChainRoute = KillChainRouteImport.update({
+  id: '/kill-chain',
+  path: '/kill-chain',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LlmAnalysisRoute = LlmAnalysisRouteImport.update({
   id: '/llm-analysis',
   path: '/llm-analysis',
@@ -142,6 +149,11 @@ const AuthLogoutRoute = AuthLogoutRouteImport.update({
   path: '/auth/logout',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiChartNameRoute = ApiChartNameRouteImport.update({
+  id: '/api/chart/$name',
+  path: '/api/chart/$name',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -156,6 +168,7 @@ export interface FileRoutesByFullPath {
   '/events': typeof EventsRoute
   '/history': typeof HistoryRoute
   '/ips': typeof IpsRoute
+  '/kill-chain': typeof KillChainRoute
   '/llm-analysis': typeof LlmAnalysisRoute
   '/ml-anomalies': typeof MlAnomaliesRoute
   '/payloads': typeof PayloadsRoute
@@ -166,6 +179,7 @@ export interface FileRoutesByFullPath {
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
+  '/api/chart/$name': typeof ApiChartNameRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -180,6 +194,7 @@ export interface FileRoutesByTo {
   '/events': typeof EventsRoute
   '/history': typeof HistoryRoute
   '/ips': typeof IpsRoute
+  '/kill-chain': typeof KillChainRoute
   '/llm-analysis': typeof LlmAnalysisRoute
   '/ml-anomalies': typeof MlAnomaliesRoute
   '/payloads': typeof PayloadsRoute
@@ -190,6 +205,7 @@ export interface FileRoutesByTo {
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
+  '/api/chart/$name': typeof ApiChartNameRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -205,6 +221,7 @@ export interface FileRoutesById {
   '/events': typeof EventsRoute
   '/history': typeof HistoryRoute
   '/ips': typeof IpsRoute
+  '/kill-chain': typeof KillChainRoute
   '/llm-analysis': typeof LlmAnalysisRoute
   '/ml-anomalies': typeof MlAnomaliesRoute
   '/payloads': typeof PayloadsRoute
@@ -215,6 +232,7 @@ export interface FileRoutesById {
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
+  '/api/chart/$name': typeof ApiChartNameRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -231,6 +249,7 @@ export interface FileRouteTypes {
     | '/events'
     | '/history'
     | '/ips'
+    | '/kill-chain'
     | '/llm-analysis'
     | '/ml-anomalies'
     | '/payloads'
@@ -241,6 +260,7 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/auth/login'
     | '/auth/logout'
+    | '/api/chart/$name'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -255,6 +275,7 @@ export interface FileRouteTypes {
     | '/events'
     | '/history'
     | '/ips'
+    | '/kill-chain'
     | '/llm-analysis'
     | '/ml-anomalies'
     | '/payloads'
@@ -265,6 +286,7 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/auth/login'
     | '/auth/logout'
+    | '/api/chart/$name'
   id:
     | '__root__'
     | '/'
@@ -279,6 +301,7 @@ export interface FileRouteTypes {
     | '/events'
     | '/history'
     | '/ips'
+    | '/kill-chain'
     | '/llm-analysis'
     | '/ml-anomalies'
     | '/payloads'
@@ -289,6 +312,7 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/auth/login'
     | '/auth/logout'
+    | '/api/chart/$name'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -304,6 +328,7 @@ export interface RootRouteChildren {
   EventsRoute: typeof EventsRoute
   HistoryRoute: typeof HistoryRoute
   IpsRoute: typeof IpsRoute
+  KillChainRoute: typeof KillChainRoute
   LlmAnalysisRoute: typeof LlmAnalysisRoute
   MlAnomaliesRoute: typeof MlAnomaliesRoute
   PayloadsRoute: typeof PayloadsRoute
@@ -314,6 +339,7 @@ export interface RootRouteChildren {
   AuthCallbackRoute: typeof AuthCallbackRoute
   AuthLoginRoute: typeof AuthLoginRoute
   AuthLogoutRoute: typeof AuthLogoutRoute
+  ApiChartNameRoute: typeof ApiChartNameRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -402,6 +428,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IpsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/kill-chain': {
+      id: '/kill-chain'
+      path: '/kill-chain'
+      fullPath: '/kill-chain'
+      preLoaderRoute: typeof KillChainRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/llm-analysis': {
       id: '/llm-analysis'
       path: '/llm-analysis'
@@ -472,6 +505,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthLogoutRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/chart/$name': {
+      id: '/api/chart/$name'
+      path: '/api/chart/$name'
+      fullPath: '/api/chart/$name'
+      preLoaderRoute: typeof ApiChartNameRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -488,6 +528,7 @@ const rootRouteChildren: RootRouteChildren = {
   EventsRoute: EventsRoute,
   HistoryRoute: HistoryRoute,
   IpsRoute: IpsRoute,
+  KillChainRoute: KillChainRoute,
   LlmAnalysisRoute: LlmAnalysisRoute,
   MlAnomaliesRoute: MlAnomaliesRoute,
   PayloadsRoute: PayloadsRoute,
@@ -498,6 +539,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthCallbackRoute: AuthCallbackRoute,
   AuthLoginRoute: AuthLoginRoute,
   AuthLogoutRoute: AuthLogoutRoute,
+  ApiChartNameRoute: ApiChartNameRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

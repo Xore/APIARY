@@ -22,6 +22,7 @@ mod aggregates;
 mod es;
 mod events;
 mod health;
+mod kill_chain;
 mod live;
 mod overview;
 mod replay;
@@ -97,6 +98,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/sources", get(aggregates::sources))
         .route("/api/v1/source-health", get(health::source_health))
         .route("/api/v1/sensors", get(sensors::detail))
+        .route("/api/v1/charts/kill-chain-sankey", get(kill_chain::sankey))
+        .route("/api/v1/charts/attck-coverage", get(kill_chain::attck_coverage))
+        .route("/api/v1/charts/campaign-timeline", get(kill_chain::campaign_timeline))
         .route("/api/v1/campaigns", get(stores::campaigns))
         .route("/api/v1/clusters", get(stores::clusters))
         .route("/api/v1/attackers", get(stores::attackers))
