@@ -118,6 +118,11 @@ pub fn spawn_enabled(state: AppState) {
                 tokio::spawn(async move { crate::payload_inventory::payload_inventory_loop(state).await });
                 tracing::info!("worker loop enabled: payload-inventory");
             }
+            "ip-enrichment" => {
+                let state = state.clone();
+                tokio::spawn(async move { crate::ip_enrichment::ip_enrichment_loop(state).await });
+                tracing::info!("worker loop enabled: ip-enrichment");
+            }
             other => tracing::warn!(loop_name = other, "unknown worker loop requested"),
         }
     }

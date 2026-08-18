@@ -43,6 +43,7 @@ mod health;
 mod honeyfs_implant;
 mod investigate;
 mod ip_block;
+mod ip_enrichment;
 mod kill_chain;
 mod live;
 mod llm_search;
