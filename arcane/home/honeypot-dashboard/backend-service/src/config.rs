@@ -4,12 +4,24 @@
 //!   + behavior), driving branding text across the frontend.
 //! - PUT /api/v1/config/presentation — replace the presentation block
 //!   (revision+1); the BFF enforces the admin role before calling.
+//! - GET /api/v1/config/history, POST /api/v1/config/rollback (#1612) —
+//!   revision history and restore, working at the JSON `Value` level like
+//!   everything else here rather than porting settings_admin_api.go's full
+//!   typed behavior/honeypot patch + pinned-field + impact-classification
+//!   machinery, which nothing in this Rust tier writes yet.
 //! - GET /api/v1/users — the known-operators roster (subjects, roles,
 //!   seen timestamps; per-user preference blobs stay out of the list).
 
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{
+    extract::{Query, State},
+    http::StatusCode,
+    Json,
+};
+use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::audit::AuditEvent;
+use crate::config_history::HistoryEntry;
 use crate::AppState;
 
 const CONFIG_INDEX: &str = "dashboard-config-v1";
@@ -39,8 +51,17 @@ pub async fn get_config(State(state): State<AppState>) -> Result<Json<Value>, (S
     Ok(Json(doc))
 }
 
+#[derive(Deserialize)]
+pub struct ActorQuery {
+    #[serde(default)]
+    actor_subject: String,
+    #[serde(default)]
+    actor_username: String,
+}
+
 pub async fn put_presentation(
     State(state): State<AppState>,
+    Query(actor): Query<ActorQuery>,
     Json(presentation): Json<Value>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     if !presentation.is_object() {
@@ -58,6 +79,104 @@ pub async fn put_presentation(
         .index_doc(CONFIG_INDEX, CONFIG_ID, doc.clone())
         .await
         .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?;
+    let revision = doc["revision"].as_i64().unwrap_or(0);
+    let fields = vec!["presentation".to_string()];
+    state.config_history.append(HistoryEntry {
+        revision,
+        time: String::new(),
+        actor_subject: actor.actor_subject.clone(),
+        actor_username: actor.actor_username.clone(),
+        action: "update".into(),
+        fields: fields.clone(),
+        payload: doc["payload"].clone(),
+    });
+    state.audit.log(AuditEvent {
+        actor_subject: actor.actor_subject,
+        actor_username: actor.actor_username,
+        action: "config.update".into(),
+        fields,
+        revision,
+        result: "success".into(),
+        ..Default::default()
+    });
+    Ok(Json(doc))
+}
+
+/// configHistoryView-equivalent: everything needed for review and rollback
+/// selection, without the retained payload snapshot itself.
+pub async fn history(State(state): State<AppState>) -> Json<Value> {
+    let entries: Vec<Value> = state
+        .config_history
+        .read(crate::config_history::HISTORY_READ_LIMIT)
+        .into_iter()
+        .map(|entry| {
+            json!({
+                "revision": entry["revision"],
+                "time": entry["time"],
+                "actor_subject": entry["actor_subject"],
+                "actor_username": entry["actor_username"],
+                "action": entry["action"],
+                "fields": entry["fields"],
+            })
+        })
+        .collect();
+    Json(json!({"entries": entries}))
+}
+
+#[derive(Deserialize)]
+pub struct RollbackBody {
+    revision: i64,
+    #[serde(default)]
+    actor_subject: String,
+    #[serde(default)]
+    actor_username: String,
+}
+
+/// Restores one retained revision's full payload as a NEW revision —
+/// history is append-only, rollback never rewrites the past.
+pub async fn rollback(
+    State(state): State<AppState>,
+    Json(body): Json<RollbackBody>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    if body.revision < 0 {
+        return Err((StatusCode::BAD_REQUEST, "a non-negative revision is required".into()));
+    }
+    let Some(entry) = state.config_history.find(body.revision) else {
+        return Err((StatusCode::NOT_FOUND, "revision is no longer retained".into()));
+    };
+    let restored_payload = entry["payload"].clone();
+    let mut doc = load_config(&state)
+        .await
+        .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?
+        .unwrap_or_else(|| json!({"schema_version": 4, "revision": 0, "payload": {}}));
+    doc["payload"] = restored_payload.clone();
+    doc["revision"] = json!(doc["revision"].as_u64().unwrap_or(0) + 1);
+    doc["updated"] = json!(chrono::Utc::now().to_rfc3339());
+    state
+        .es
+        .index_doc(CONFIG_INDEX, CONFIG_ID, doc.clone())
+        .await
+        .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?;
+    let revision = doc["revision"].as_i64().unwrap_or(0);
+    let fields = vec!["*".to_string()];
+    state.config_history.append(HistoryEntry {
+        revision,
+        time: String::new(),
+        actor_subject: body.actor_subject.clone(),
+        actor_username: body.actor_username.clone(),
+        action: "rollback".into(),
+        fields: fields.clone(),
+        payload: restored_payload,
+    });
+    state.audit.log(AuditEvent {
+        actor_subject: body.actor_subject,
+        actor_username: body.actor_username,
+        action: "config.rollback".into(),
+        fields,
+        revision,
+        result: "success".into(),
+        ..Default::default()
+    });
     Ok(Json(doc))
 }
 

@@ -393,7 +393,20 @@ services:
       - ELASTICSEARCH_URL=http://elasticsearch:9200
       - SERVICE_TOKEN=${DASHBOARD_SERVICE_TOKEN:-}
       - CANARYTOKENS_API_URL=${CANARYTOKENS_API_URL:-}
+      # #1612 settings admin surface: services control needs the adapter
+      # socket, retention sweep needs WORKER_LOOPS. Both dashboard-state
+      # and services-adapter-socket are mounted directly into
+      # backend-service (not backend-worker) — a tier decision, not an
+      # oversight: they're host-local, single-instance resources, and
+      # backend-service is the single-instance request/response tier,
+      # unlike backend-worker which #1610 requires to stay
+      # host-portable/statelessly scalable.
+      - SERVICES_ADAPTER_SOCKET=/run/services-adapter/control.sock
+      - WORKER_LOOPS=user-retention-sweep
       - TZ=Europe/Berlin
+    volumes:
+      - dashboard-state:/state
+      - services-adapter-socket:/run/services-adapter
     networks:
       - honeynet
     security_opt: [no-new-privileges:true]

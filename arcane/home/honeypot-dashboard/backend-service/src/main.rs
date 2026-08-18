@@ -20,9 +20,11 @@ use std::{net::SocketAddr, sync::Arc};
 
 mod aggregates;
 mod artifacts;
+mod audit;
 mod canarytokens;
 mod charts;
 mod config;
+mod config_history;
 mod dashboard;
 mod detail;
 mod es;
@@ -36,10 +38,13 @@ mod live;
 mod llm_search;
 mod overview;
 mod payload_detail;
+mod preferences;
 mod replay;
 mod reports;
+mod reporter_stats;
 mod sensors;
 mod search;
+mod services_control;
 mod session;
 mod stores;
 mod worker;
@@ -48,6 +53,8 @@ mod worker;
 pub struct AppState {
     pub es: Arc<es::Es>,
     pub service_token: Arc<Option<String>>,
+    pub audit: Arc<audit::AuditLogger>,
+    pub config_history: Arc<config_history::ConfigHistory>,
 }
 
 #[derive(Serialize)]
@@ -100,10 +107,16 @@ async fn main() -> anyhow::Result<()> {
     let es_url = std::env::var("ELASTICSEARCH_URL").unwrap_or_else(|_| "http://127.0.0.1:9200".into());
     let listen = std::env::var("LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:8081".into());
     let service_token = std::env::var("SERVICE_TOKEN").ok().filter(|t| !t.is_empty());
+    let audit_path =
+        std::env::var("DASHBOARD_AUDIT_FILE").unwrap_or_else(|_| "/state/dashboard-audit.jsonl".into());
+    let config_history_path = std::env::var("DASHBOARD_CONFIG_HISTORY_FILE")
+        .unwrap_or_else(|_| "/state/dashboard-config-history.jsonl".into());
 
     let state = AppState {
         es: Arc::new(es::Es::connect(&es_url)?),
         service_token: Arc::new(service_token),
+        audit: Arc::new(audit::AuditLogger::new(audit_path)),
+        config_history: Arc::new(config_history::ConfigHistory::new(config_history_path)),
     };
 
     // Worker loops (#1610): same image, role by WORKER_LOOPS env.
@@ -127,7 +140,19 @@ async fn main() -> anyhow::Result<()> {
             "/api/v1/config/presentation",
             axum::routing::put(config::put_presentation),
         )
+        .route("/api/v1/config/history", get(config::history))
+        .route("/api/v1/config/rollback", post(config::rollback))
         .route("/api/v1/users", get(config::users))
+        .route("/api/v1/audit", get(audit::list))
+        .route(
+            "/api/v1/preferences",
+            get(preferences::get).put(preferences::put),
+        )
+        .route("/api/v1/preferences/reset", post(preferences::reset))
+        .route("/api/v1/reporter-stats", get(reporter_stats::stats))
+        .route("/api/v1/services", get(services_control::list))
+        .route("/api/v1/services/{name}/logs", get(services_control::logs))
+        .route("/api/v1/services/{name}/{action}", post(services_control::action))
         .route("/api/v1/llm-search", get(llm_search::search))
         .route("/api/v1/ip-block", post(ip_block::set_block))
         .route("/api/v1/ip-block/{ip}", get(ip_block::get_block))

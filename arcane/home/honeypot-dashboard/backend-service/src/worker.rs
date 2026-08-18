@@ -9,11 +9,16 @@
 //! dashboard-alert-state-v1 with cooldown + optional webhook. Signals
 //! that need host-local file mounts (log-stream sizes, sandbox/ghidra
 //! spool health, filebeat stats) move in a later #1610 slice with the
-//! mounted worker role.
+//! mounted worker role. `user-retention-sweep` (#1612) — orphaned
+//! preference expiry (roadmap Milestone F), ported from
+//! userStore.SweepRetention: no in-memory cache to poll here, so this
+//! just re-reads the users doc on its own interval rather than the Go
+//! store's 3s poll tick.
 
 use serde_json::{json, Value};
 use std::time::Duration;
 
+use crate::audit::AuditEvent;
 use crate::AppState;
 
 const ALERT_INDEX: &str = "dashboard-alert-state-v1";
@@ -43,6 +48,11 @@ pub fn spawn_enabled(state: AppState) {
                 let state = state.clone();
                 tokio::spawn(async move { alert_notifier_loop(state).await });
                 tracing::info!("worker loop enabled: alert-notifier");
+            }
+            "user-retention-sweep" => {
+                let state = state.clone();
+                tokio::spawn(async move { retention_sweep_loop(state).await });
+                tracing::info!("worker loop enabled: user-retention-sweep");
             }
             other => tracing::warn!(loop_name = other, "unknown worker loop requested"),
         }
@@ -280,6 +290,79 @@ impl Notifier {
             }
         }
     }
+}
+
+const USERS_INDEX: &str = "dashboard-users-v1";
+const USERS_ID: &str = "users";
+const RETENTION_SWEEP_INTERVAL: Duration = Duration::from_secs(3600);
+
+async fn retention_sweep_loop(state: AppState) {
+    let mut ticker = tokio::time::interval(RETENTION_SWEEP_INTERVAL);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        ticker.tick().await;
+        retention_sweep_once(&state).await;
+    }
+}
+
+/// Removes projections — including their stored preferences — whose
+/// last_seen_at predates the retention window, and audits each removal.
+/// An empty sweep never writes (matches SweepRetention's contract).
+async fn retention_sweep_once(state: &AppState) {
+    let retention_days: i64 = env_or("DASHBOARD_USER_RETENTION_DAYS", "90").parse().unwrap_or(90);
+    if retention_days <= 0 {
+        return;
+    }
+    let mut doc = match state.es.get_doc(USERS_INDEX, USERS_ID).await {
+        Ok(Some(doc)) => doc,
+        Ok(None) => return,
+        Err(error) => {
+            tracing::warn!(%error, "retention sweep: users doc fetch failed");
+            return;
+        }
+    };
+    let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days);
+    let users = doc["payload"]["users"].as_array().cloned().unwrap_or_default();
+    let mut kept = Vec::with_capacity(users.len());
+    let mut removed = Vec::new();
+    for user in users {
+        let last_seen =
+            user["last_seen_at"].as_str().and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok());
+        let expired = match last_seen {
+            Some(at) => at.with_timezone(&chrono::Utc) < cutoff,
+            None => false,
+        };
+        if expired {
+            removed.push(user);
+        } else {
+            kept.push(user);
+        }
+    }
+    if removed.is_empty() {
+        return;
+    }
+    doc["payload"]["users"] = json!(kept);
+    doc["revision"] = json!(doc["revision"].as_u64().unwrap_or(0) + 1);
+    doc["updated"] = json!(chrono::Utc::now().to_rfc3339());
+    if let Err(error) = state.es.index_doc(USERS_INDEX, USERS_ID, doc).await {
+        tracing::warn!(%error, "retention sweep: users doc write failed");
+        return;
+    }
+    let removed_count = removed.len();
+    for user in removed {
+        state.audit.log(AuditEvent {
+            actor_subject: "system".into(),
+            actor_username: "retention".into(),
+            action: "users.retention".into(),
+            fields: vec![
+                user["subject"].as_str().unwrap_or_default().to_string(),
+                user["last_username"].as_str().unwrap_or_default().to_string(),
+            ],
+            result: "success".into(),
+            ..Default::default()
+        });
+    }
+    tracing::info!(removed = removed_count, "user retention sweep removed orphaned projection(s)");
 }
 
 async fn alert_notifier_loop(state: AppState) {
