@@ -5,6 +5,14 @@
 //! unlike wildcard) plus keyword wildcards where the mapping allows.
 //! `redirect` is the exact-single-entity check the caller uses to jump
 //! straight to a detail page (quick-search's "Enter" row).
+//!
+//! #1611 workstream F: "HTTP paths" used to be prefix-only, like every
+//! other flattened-field group below (`honeypot.path` can't do substring
+//! matching). It now queries `url.path` instead — a real `wildcard`-typed
+//! field the geoip-honeypot ingest pipeline already copies `honeypot.path`
+//! into (elasticsearch-setup.sh) — so this group alone gets genuine
+//! substring/infix hunting, the same trick "Suricata signatures" already
+//! used against a keyword field.
 
 use axum::{
     extract::{Query, State},
@@ -59,7 +67,7 @@ const GROUPS: &[GroupSpec] = &[
     GroupSpec { title: "Sessions", agg: "sessions", field: "honeypot.session", url: |v| format!("/sessions/{v}") },
     GroupSpec { title: "Payloads", agg: "payloads", field: "honeypot.shasum", url: |_| "/payloads".to_string() },
     GroupSpec { title: "Commands", agg: "commands", field: "honeypot.canonical_command", url: |_| "/commands".to_string() },
-    GroupSpec { title: "HTTP paths", agg: "paths", field: "honeypot.path", url: |_| "/sensors".to_string() },
+    // "HTTP paths" (url.path, wildcard) is queried separately below.
     GroupSpec { title: "Credentials (usernames)", agg: "users", field: "honeypot.username", url: |_| "/events?kind=login".to_string() },
     GroupSpec { title: "Fingerprints", agg: "fingerprints", field: "honeypot.canonical_fingerprint", url: |_| "/events".to_string() },
     GroupSpec { title: "Personas", agg: "personas", field: "honeypot.persona_id", url: |_| "/events".to_string() },
@@ -94,6 +102,16 @@ pub async fn search(
         json!({
             "filter": {"wildcard": {"suricata.eve.alert.signature.keyword": {"value": format!("*{needle}*"), "case_insensitive": true}}},
             "aggs": {"values": {"terms": {"field": "suricata.eve.alert.signature.keyword", "size": GROUP_LIMIT}}}
+        }),
+    );
+    // HTTP paths: wildcard mapping (workstream F), real substring wildcard
+    // — same trick as signatures above, on the ingest-pipeline-promoted
+    // url.path field instead of the flattened honeypot.path.
+    aggs.insert(
+        "paths".to_string(),
+        json!({
+            "filter": {"wildcard": {"url.path": {"value": format!("*{needle}*"), "case_insensitive": true}}},
+            "aggs": {"values": {"terms": {"field": "url.path", "size": GROUP_LIMIT}}}
         }),
     );
     // Exact IP (or CIDR) → source group with count.
@@ -164,6 +182,20 @@ pub async fn search(
     if !signature_hits.is_empty() {
         total += signature_hits.len();
         groups.push(Group { title: "Suricata signatures".to_string(), hits: signature_hits });
+    }
+
+    let path_hits: Vec<Hit> = result_aggs["paths"]["values"]["buckets"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|bucket| {
+            let label = bucket["key"].as_str()?.to_string();
+            Some(Hit { url: "/sensors".to_string(), count: bucket["doc_count"].as_u64().unwrap_or(0), label })
+        })
+        .collect();
+    if !path_hits.is_empty() {
+        total += path_hits.len();
+        groups.push(Group { title: "HTTP paths".to_string(), hits: path_hits });
     }
 
     // Exact-entity redirect: a session id or payload hash that matched a

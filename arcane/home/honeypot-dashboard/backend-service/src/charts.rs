@@ -13,10 +13,11 @@
 //!   portbridge-v2-* (the Go snapshot counted fingerprint occurrences;
 //!   unique attackers is the more honest distribution and is stable
 //!   across replicas).
-//! - endlessh-held-histogram buckets held_ms client-side from the raw
-//!   disconnect events (honeypot.* is flattened — stats/range
+//! - endlessh-held-histogram used to bucket held_ms client-side from the
+//!   raw disconnect events (honeypot.* is flattened — stats/range
 //!   aggregations are unsupported, the same limitation aggregate.go
-//!   documents).
+//!   documents); #1611 workstream F promoted it to a real typed field, so
+//!   this is now a genuine ES range aggregation.
 
 use axum::{extract::State, http::StatusCode, Json};
 use serde::Serialize;
@@ -344,28 +345,69 @@ const HELD_BUCKETS: &[(&str, u64)] = &[
 ];
 
 /// /api/v1/charts/endlessh-held-histogram — how long the tarpit held
-/// connections. held_ms rides the flattened honeypot.* namespace (no
-/// range aggregation possible), so the raw disconnect events are fetched
-/// and bucketed here — bounded: endlessh disconnects are low-volume.
+/// connections. #1611 workstream F: held_ms used to only ride the
+/// flattened honeypot.* namespace (no range aggregation possible), so
+/// this bucketed up to 10k raw disconnect events client-side. The
+/// geoip-honeypot ingest pipeline now also copies it to a real top-level
+/// `held_ms` (long) field (elasticsearch-setup.sh) on new documents, so
+/// this is a genuine ES `range` aggregation — no per-request document cap.
+/// Historical documents indexed before that pipeline change won't carry
+/// the typed field and are simply absent from the histogram (same
+/// no-backfill precedent as workstream D's technique promotion).
+fn held_ranges() -> Vec<Value> {
+    HELD_BUCKETS
+        .iter()
+        .scan(0u64, |from, (label, to)| {
+            let range = if *to == u64::MAX {
+                json!({"key": label, "from": *from})
+            } else {
+                json!({"key": label, "from": *from, "to": *to})
+            };
+            *from = *to;
+            Some(range)
+        })
+        .collect()
+}
+
 pub async fn endlessh_histogram(State(state): State<AppState>) -> Result<Json<Bar>, (StatusCode, String)> {
+    let ranges = held_ranges();
     let body = json!({
-        "size": 10_000,
-        "_source": ["honeypot.held_ms"],
+        "size": 0,
         "query": {"bool": {"filter": [
             {"term": {"event.sensor": "endlessh"}},
             {"term": {"honeypot.event": "disconnect"}},
             {"range": {"@timestamp": {"gte": OVERVIEW_WINDOW}}}
-        ]}}
+        ]}},
+        "aggs": {"held": {"range": {"field": "held_ms", "keyed": true, "ranges": ranges}}}
     });
     let result = state.es.search(body).await.map_err(bad_gateway)?;
-    let mut counts = vec![0u64; HELD_BUCKETS.len()];
-    for hit in result["hits"]["hits"].as_array().into_iter().flatten() {
-        let ms = hit["_source"]["honeypot"]["held_ms"].as_f64().unwrap_or(0.0).max(0.0) as u64;
-        let index = HELD_BUCKETS.iter().position(|(_, upper)| ms < *upper).unwrap_or(HELD_BUCKETS.len() - 1);
-        counts[index] += 1;
-    }
+    let buckets = &result["aggregations"]["held"]["buckets"];
+    let counts = HELD_BUCKETS.iter().map(|(label, _)| buckets[label]["doc_count"].as_u64().unwrap_or(0)).collect();
     Ok(Json(Bar {
         categories: HELD_BUCKETS.iter().map(|(label, _)| label.to_string()).collect(),
         values: counts,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn held_ranges_cover_every_bucket_contiguously_with_no_gaps_or_overlap() {
+        let ranges = held_ranges();
+        assert_eq!(ranges.len(), HELD_BUCKETS.len());
+        assert_eq!(ranges[0]["key"], "<1s");
+        assert_eq!(ranges[0]["from"], 0);
+        assert_eq!(ranges[0]["to"], 1_000);
+        // Each range's "from" must equal the previous range's "to" — no
+        // duration falls between buckets or gets double-counted.
+        for pair in ranges.windows(2) {
+            assert_eq!(pair[0]["to"], pair[1]["from"]);
+        }
+        let last = ranges.last().unwrap();
+        assert_eq!(last["key"], "5min+");
+        assert_eq!(last["from"], 300_000);
+        assert!(last.get("to").is_none(), "the open-ended top bucket must not set \"to\"");
+    }
 }
