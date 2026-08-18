@@ -146,9 +146,11 @@ pub async fn generic(
 ) -> Result<Json<Value>, (StatusCode, String)> {
     let (index, sort): (&str, &str) = match name.as_str() {
         "auth-events" => ("auth-failure-events", "last_seen"),
+        // llm-worker output; index may not exist yet (ignore_unavailable).
+        "llm-analysis" => ("llm-analysis", "@timestamp"),
         "ml-anomalies" => ("ml-anomalies", "timestamp"),
         "agent-campaigns" => ("agent-intrusion-campaigns", "last_seen"),
-        "canarytokens" => ("dashboard-canarytokens-v1", "CreatedAt"),
+        "canarytokens" => ("dashboard-canarytokens-v1", "created_at"),
         "problem-reports" => ("dashboard-problem-reports-v1", "CreatedAt"),
         "static-analysis" => ("dashboard-static-analysis-v1", "AnalyzedAt"),
         "workbench-runs" => ("dashboard-workbench-runs-v1", "StartedAt"),

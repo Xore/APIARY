@@ -15,10 +15,13 @@ import { Route as AlertsRouteImport } from './routes/alerts'
 import { Route as AttackersRouteImport } from './routes/attackers'
 import { Route as AuthEventsRouteImport } from './routes/auth-events'
 import { Route as CampaignsRouteImport } from './routes/campaigns'
+import { Route as CanarytokensRouteImport } from './routes/canarytokens'
 import { Route as ClustersRouteImport } from './routes/clusters'
 import { Route as CommandsRouteImport } from './routes/commands'
 import { Route as EventsRouteImport } from './routes/events'
+import { Route as HistoryRouteImport } from './routes/history'
 import { Route as IpsRouteImport } from './routes/ips'
+import { Route as LlmAnalysisRouteImport } from './routes/llm-analysis'
 import { Route as MlAnomaliesRouteImport } from './routes/ml-anomalies'
 import { Route as PayloadsRouteImport } from './routes/payloads'
 import { Route as RecordingsRouteImport } from './routes/recordings'
@@ -58,6 +61,11 @@ const CampaignsRoute = CampaignsRouteImport.update({
   path: '/campaigns',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CanarytokensRoute = CanarytokensRouteImport.update({
+  id: '/canarytokens',
+  path: '/canarytokens',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ClustersRoute = ClustersRouteImport.update({
   id: '/clusters',
   path: '/clusters',
@@ -73,9 +81,19 @@ const EventsRoute = EventsRouteImport.update({
   path: '/events',
   getParentRoute: () => rootRouteImport,
 } as any)
+const HistoryRoute = HistoryRouteImport.update({
+  id: '/history',
+  path: '/history',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IpsRoute = IpsRouteImport.update({
   id: '/ips',
   path: '/ips',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LlmAnalysisRoute = LlmAnalysisRouteImport.update({
+  id: '/llm-analysis',
+  path: '/llm-analysis',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MlAnomaliesRoute = MlAnomaliesRouteImport.update({
@@ -126,10 +144,13 @@ export interface FileRoutesByFullPath {
   '/attackers': typeof AttackersRoute
   '/auth-events': typeof AuthEventsRoute
   '/campaigns': typeof CampaignsRoute
+  '/canarytokens': typeof CanarytokensRoute
   '/clusters': typeof ClustersRoute
   '/commands': typeof CommandsRoute
   '/events': typeof EventsRoute
+  '/history': typeof HistoryRoute
   '/ips': typeof IpsRoute
+  '/llm-analysis': typeof LlmAnalysisRoute
   '/ml-anomalies': typeof MlAnomaliesRoute
   '/payloads': typeof PayloadsRoute
   '/recordings': typeof RecordingsRoute
@@ -146,10 +167,13 @@ export interface FileRoutesByTo {
   '/attackers': typeof AttackersRoute
   '/auth-events': typeof AuthEventsRoute
   '/campaigns': typeof CampaignsRoute
+  '/canarytokens': typeof CanarytokensRoute
   '/clusters': typeof ClustersRoute
   '/commands': typeof CommandsRoute
   '/events': typeof EventsRoute
+  '/history': typeof HistoryRoute
   '/ips': typeof IpsRoute
+  '/llm-analysis': typeof LlmAnalysisRoute
   '/ml-anomalies': typeof MlAnomaliesRoute
   '/payloads': typeof PayloadsRoute
   '/recordings': typeof RecordingsRoute
@@ -167,10 +191,13 @@ export interface FileRoutesById {
   '/attackers': typeof AttackersRoute
   '/auth-events': typeof AuthEventsRoute
   '/campaigns': typeof CampaignsRoute
+  '/canarytokens': typeof CanarytokensRoute
   '/clusters': typeof ClustersRoute
   '/commands': typeof CommandsRoute
   '/events': typeof EventsRoute
+  '/history': typeof HistoryRoute
   '/ips': typeof IpsRoute
+  '/llm-analysis': typeof LlmAnalysisRoute
   '/ml-anomalies': typeof MlAnomaliesRoute
   '/payloads': typeof PayloadsRoute
   '/recordings': typeof RecordingsRoute
@@ -189,10 +216,13 @@ export interface FileRouteTypes {
     | '/attackers'
     | '/auth-events'
     | '/campaigns'
+    | '/canarytokens'
     | '/clusters'
     | '/commands'
     | '/events'
+    | '/history'
     | '/ips'
+    | '/llm-analysis'
     | '/ml-anomalies'
     | '/payloads'
     | '/recordings'
@@ -209,10 +239,13 @@ export interface FileRouteTypes {
     | '/attackers'
     | '/auth-events'
     | '/campaigns'
+    | '/canarytokens'
     | '/clusters'
     | '/commands'
     | '/events'
+    | '/history'
     | '/ips'
+    | '/llm-analysis'
     | '/ml-anomalies'
     | '/payloads'
     | '/recordings'
@@ -229,10 +262,13 @@ export interface FileRouteTypes {
     | '/attackers'
     | '/auth-events'
     | '/campaigns'
+    | '/canarytokens'
     | '/clusters'
     | '/commands'
     | '/events'
+    | '/history'
     | '/ips'
+    | '/llm-analysis'
     | '/ml-anomalies'
     | '/payloads'
     | '/recordings'
@@ -250,10 +286,13 @@ export interface RootRouteChildren {
   AttackersRoute: typeof AttackersRoute
   AuthEventsRoute: typeof AuthEventsRoute
   CampaignsRoute: typeof CampaignsRoute
+  CanarytokensRoute: typeof CanarytokensRoute
   ClustersRoute: typeof ClustersRoute
   CommandsRoute: typeof CommandsRoute
   EventsRoute: typeof EventsRoute
+  HistoryRoute: typeof HistoryRoute
   IpsRoute: typeof IpsRoute
+  LlmAnalysisRoute: typeof LlmAnalysisRoute
   MlAnomaliesRoute: typeof MlAnomaliesRoute
   PayloadsRoute: typeof PayloadsRoute
   RecordingsRoute: typeof RecordingsRoute
@@ -308,6 +347,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CampaignsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/canarytokens': {
+      id: '/canarytokens'
+      path: '/canarytokens'
+      fullPath: '/canarytokens'
+      preLoaderRoute: typeof CanarytokensRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/clusters': {
       id: '/clusters'
       path: '/clusters'
@@ -329,11 +375,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EventsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/history': {
+      id: '/history'
+      path: '/history'
+      fullPath: '/history'
+      preLoaderRoute: typeof HistoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/ips': {
       id: '/ips'
       path: '/ips'
       fullPath: '/ips'
       preLoaderRoute: typeof IpsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/llm-analysis': {
+      id: '/llm-analysis'
+      path: '/llm-analysis'
+      fullPath: '/llm-analysis'
+      preLoaderRoute: typeof LlmAnalysisRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/ml-anomalies': {
@@ -402,10 +462,13 @@ const rootRouteChildren: RootRouteChildren = {
   AttackersRoute: AttackersRoute,
   AuthEventsRoute: AuthEventsRoute,
   CampaignsRoute: CampaignsRoute,
+  CanarytokensRoute: CanarytokensRoute,
   ClustersRoute: ClustersRoute,
   CommandsRoute: CommandsRoute,
   EventsRoute: EventsRoute,
+  HistoryRoute: HistoryRoute,
   IpsRoute: IpsRoute,
+  LlmAnalysisRoute: LlmAnalysisRoute,
   MlAnomaliesRoute: MlAnomaliesRoute,
   PayloadsRoute: PayloadsRoute,
   RecordingsRoute: RecordingsRoute,

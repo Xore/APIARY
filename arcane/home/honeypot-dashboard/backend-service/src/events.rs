@@ -26,6 +26,9 @@ pub struct EventsQuery {
     pub proto: Option<String>,
     /// honeypot.event kind filter ("command", "login", ...).
     pub kind: Option<String>,
+    /// Free-text query_string search (the /history page's q=), same
+    /// semantics as the Go tier's ES q= passthrough.
+    pub q: Option<String>,
     /// Go-style duration ("24h", "7d") relative to now; defaults to the
     /// explorer's rolling window.
     pub since: Option<String>,
@@ -119,6 +122,11 @@ pub async fn list(
     }
     if let Some(kind) = q.kind.as_deref().filter(|v| !v.is_empty()) {
         filters.push(json!({"term": {"honeypot.event": kind}}));
+    }
+    if let Some(text) = q.q.as_deref().filter(|v| !v.is_empty()) {
+        // lenient: a malformed user query returns no matches instead of a
+        // shard failure, matching the legacy page's forgiving behavior.
+        filters.push(json!({"query_string": {"query": text, "lenient": true}}));
     }
 
     let body = json!({
