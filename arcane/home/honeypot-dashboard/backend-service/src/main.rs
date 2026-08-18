@@ -19,6 +19,7 @@ use serde::Serialize;
 use std::{net::SocketAddr, sync::Arc};
 
 mod aggregates;
+mod charts;
 mod es;
 mod events;
 mod health;
@@ -101,6 +102,15 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/charts/kill-chain-sankey", get(kill_chain::sankey))
         .route("/api/v1/charts/attck-coverage", get(kill_chain::attck_coverage))
         .route("/api/v1/charts/campaign-timeline", get(kill_chain::campaign_timeline))
+        .route("/api/v1/charts/ml-backlog", get(charts::ml_backlog))
+        .route("/api/v1/charts/netflow-bytes", get(charts::netflow_bytes))
+        .route("/api/v1/charts/netflow-packets", get(charts::netflow_packets))
+        .route("/api/v1/charts/anomaly-trend", get(charts::anomaly_trend))
+        .route("/api/v1/charts/dionaea-cves", get(charts::dionaea_cves))
+        .route("/api/v1/charts/os-distribution", get(charts::os_distribution))
+        .route("/api/v1/charts/tls-fingerprints", get(charts::tls_fingerprints))
+        .route("/api/v1/charts/ssh-fingerprints", get(charts::ssh_fingerprints))
+        .route("/api/v1/charts/endlessh-held-histogram", get(charts::endlessh_histogram))
         .route("/api/v1/campaigns", get(stores::campaigns))
         .route("/api/v1/clusters", get(stores::clusters))
         .route("/api/v1/attackers", get(stores::attackers))
