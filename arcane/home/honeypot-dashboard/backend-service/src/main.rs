@@ -21,7 +21,10 @@ use std::{net::SocketAddr, sync::Arc};
 mod aggregates;
 mod es;
 mod events;
+mod health;
+mod live;
 mod overview;
+mod replay;
 mod stores;
 
 #[derive(Clone)]
@@ -89,11 +92,14 @@ async fn main() -> anyhow::Result<()> {
     let api = Router::new()
         .route("/api/v1/overview/kpis", get(overview::kpis))
         .route("/api/v1/events", get(events::list))
+        .route("/api/v1/live", get(live::stream))
         .route("/api/v1/sources", get(aggregates::sources))
+        .route("/api/v1/source-health", get(health::source_health))
         .route("/api/v1/campaigns", get(stores::campaigns))
         .route("/api/v1/clusters", get(stores::clusters))
         .route("/api/v1/attackers", get(stores::attackers))
         .route("/api/v1/recordings", get(stores::recordings))
+        .route("/api/v1/recordings/{shasum}", get(replay::replay))
         .route("/api/v1/alerts", get(stores::alerts))
         .route("/api/v1/payloads", get(stores::payloads))
         .route("/api/v1/store/{name}", get(stores::generic))

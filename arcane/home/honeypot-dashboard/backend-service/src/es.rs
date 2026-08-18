@@ -4,7 +4,7 @@
 //! query, #1136), so both tiers agree on the data until the Go tier
 //! retires at cutover.
 
-use elasticsearch::{http::transport::Transport, Elasticsearch, SearchParts};
+use elasticsearch::{cluster::ClusterHealthParts, http::transport::Transport, Elasticsearch, SearchParts};
 use serde_json::Value;
 
 pub const EVENT_INDICES: &[&str] = &["honeypot-v2-*", "suricata-v2-*"];
@@ -17,6 +17,19 @@ impl Es {
     pub fn connect(url: &str) -> anyhow::Result<Self> {
         let transport = Transport::single_node(url)?;
         Ok(Self { client: Elasticsearch::new(transport) })
+    }
+
+    /// Cluster color (green/yellow/red), "unreachable" on transport error.
+    pub async fn cluster_status(&self) -> String {
+        match self.client.cluster().health(ClusterHealthParts::None).send().await {
+            Ok(response) => response
+                .json::<Value>()
+                .await
+                .ok()
+                .and_then(|value| value["status"].as_str().map(String::from))
+                .unwrap_or_else(|| "unknown".into()),
+            Err(_) => "unreachable".into(),
+        }
     }
 
     pub async fn ping(&self) -> bool {

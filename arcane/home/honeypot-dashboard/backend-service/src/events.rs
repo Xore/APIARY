@@ -66,6 +66,35 @@ fn since_to_range(since: &Option<String>) -> String {
     }
 }
 
+/// One list/stream row from a normalized ECS `_source` (shared with the
+/// SSE live stream so both emit identical shapes).
+pub fn row_from_source(src: &Value) -> EventRow {
+    let text = |v: &Value| v.as_str().unwrap_or("").to_string();
+    EventRow {
+        time: text(&src["@timestamp"]),
+        sensor: text(&src["event"]["sensor"]),
+        src_ip: text(&src["source"]["ip"]),
+        country: text(&src["source"]["geo"]["country_iso_code"]),
+        port: src["destination"]["port"]
+            .as_u64()
+            .map(|p| p.to_string())
+            .unwrap_or_else(|| text(&src["destination"]["port"])),
+        proto: text(&src["network"]["protocol"]),
+        // The pipeline's own namespace (honeypot.*) carries the per-sensor
+        // event kind; richer per-sensor detail rendering lands with the
+        // ES-coverage round (#1608 follow-up) directly in this tier.
+        detail: {
+            let d = text(&src["honeypot"]["event"]);
+            if d.is_empty() { text(&src["message"]) } else { d }
+        },
+        session: {
+            let s1 = text(&src["honeypot"]["session"]);
+            if s1.is_empty() { text(&src["session"]["id"]) } else { s1 }
+        },
+        record: src.clone(),
+    }
+}
+
 pub async fn list(
     State(state): State<AppState>,
     Query(q): Query<EventsQuery>,
@@ -108,38 +137,7 @@ pub async fn list(
     let total = result["hits"]["total"]["value"].as_u64().unwrap_or(0);
     let rows = result["hits"]["hits"]
         .as_array()
-        .map(|hits| {
-            hits.iter()
-                .map(|hit| {
-                    let src = &hit["_source"];
-                    let text = |v: &Value| v.as_str().unwrap_or("").to_string();
-                    EventRow {
-                        time: text(&src["@timestamp"]),
-                        sensor: text(&src["event"]["sensor"]),
-                        src_ip: text(&src["source"]["ip"]),
-                        country: text(&src["source"]["geo"]["country_iso_code"]),
-                        port: src["destination"]["port"]
-                            .as_u64()
-                            .map(|p| p.to_string())
-                            .unwrap_or_else(|| text(&src["destination"]["port"])),
-                        proto: text(&src["network"]["protocol"]),
-                        // The pipeline's own namespace (honeypot.*) carries
-                        // the per-sensor event kind; richer per-sensor detail
-                        // rendering lands with the ES-coverage round (#1608
-                        // follow-up) directly in this tier.
-                        detail: {
-                            let d = text(&src["honeypot"]["event"]);
-                            if d.is_empty() { text(&src["message"]) } else { d }
-                        },
-                        session: {
-                            let s1 = text(&src["honeypot"]["session"]);
-                            if s1.is_empty() { text(&src["session"]["id"]) } else { s1 }
-                        },
-                        record: src.clone(),
-                    }
-                })
-                .collect()
-        })
+        .map(|hits| hits.iter().map(|hit| row_from_source(&hit["_source"])).collect())
         .unwrap_or_default();
 
     Ok(Json(EventsPage { total, offset, rows }))

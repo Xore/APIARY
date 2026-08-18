@@ -20,6 +20,8 @@ reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-feature
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
+async-stream = "0.3"
+base64 = "0.22"
 thiserror = "2"
 chrono = { version = "0.4", features = ["serde"] }
 futures = "0.3"
