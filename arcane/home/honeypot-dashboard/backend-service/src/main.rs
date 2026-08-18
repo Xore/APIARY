@@ -29,6 +29,7 @@ mod live;
 mod overview;
 mod replay;
 mod sensors;
+mod search;
 mod session;
 mod stores;
 
@@ -103,6 +104,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/source-health", get(health::source_health))
         .route("/api/v1/sensors", get(sensors::detail))
         .route("/api/v1/sessions/{id}", get(session::detail))
+        .route("/api/v1/search", get(search::search))
         .route("/api/v1/charts/kill-chain-sankey", get(kill_chain::sankey))
         .route("/api/v1/charts/attck-coverage", get(kill_chain::attck_coverage))
         .route("/api/v1/charts/campaign-timeline", get(kill_chain::campaign_timeline))

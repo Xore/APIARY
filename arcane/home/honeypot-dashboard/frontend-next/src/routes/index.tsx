@@ -193,7 +193,7 @@ function Overview() {
         <p className="hp-hero__status">
           Live attack telemetry, captured evidence, correlated campaigns, and collection health in one operational view.
         </p>
-        <button className="hp-hero__search" type="button">
+        <button className="hp-hero__search" type="button" onClick={() => import('../components/CommandPalette').then((m) => m.openCommandPalette())}>
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <circle cx="11" cy="11" r="8" />
             <line x1="21" y1="21" x2="16.65" y2="16.65" />
