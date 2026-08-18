@@ -98,6 +98,16 @@ pub fn spawn_enabled(state: AppState) {
                 tokio::spawn(async move { reports_scheduler_loop(state).await });
                 tracing::info!("worker loop enabled: reports-scheduler");
             }
+            "es-results-importer" => {
+                let state = state.clone();
+                tokio::spawn(async move { crate::es_importer::es_importer_loop(state).await });
+                tracing::info!("worker loop enabled: es-results-importer");
+            }
+            "attacker-identity" => {
+                let state = state.clone();
+                tokio::spawn(async move { crate::attacker_identity::attacker_identity_loop(state).await });
+                tracing::info!("worker loop enabled: attacker-identity");
+            }
             other => tracing::warn!(loop_name = other, "unknown worker loop requested"),
         }
     }

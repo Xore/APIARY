@@ -20,6 +20,7 @@ use std::{net::SocketAddr, sync::Arc};
 
 mod aggregates;
 mod artifacts;
+mod attacker_identity;
 mod audit;
 mod canarytokens;
 mod charts;
@@ -29,6 +30,7 @@ mod credentials;
 mod dashboard;
 mod detail;
 mod es;
+mod es_importer;
 mod events;
 mod fusion;
 mod ghidra_submit;

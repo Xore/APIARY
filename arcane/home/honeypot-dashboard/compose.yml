@@ -704,6 +704,72 @@ services:
           cpus: "0.5"
           memory: 256M
 
+  # #1610 worker migration: Rust port of es-results-importer above, running
+  # side by side with it behind the `next` profile (parity pass, not a
+  # cutover — #1610's own text: "each migration ships with parity tests
+  # against the current worker's observable outputs before the old one
+  # retires"). A separate service from backend-worker, not an extra
+  # WORKER_LOOPS entry bolted onto it: this worker needs the SAME root +
+  # DAC_READ_SEARCH privilege escalation the Python service above needs
+  # (Ghidra/GitHub-analysis result directories are root-owned host bind
+  # mounts a normal container user can't read) plus a persistent local
+  # dedup-state file — backend-worker is deliberately unprivileged and
+  # stateless-by-design (see its own compose comment: "movable to any
+  # docker host... state in ES"), and every other loop running there
+  # (alert-notifier, reports-scheduler, user-retention-sweep) needs neither.
+  # Also separate from backend-service-mounted (that boundary is about
+  # WRITE access to host request spools; this one only ever reads results).
+  backend-worker-importer:
+    <<: *runtime-defaults
+    profiles: ["next"]
+    image: apiary-backend:latest
+    container_name: hp-apiary-worker-importer
+    restart: unless-stopped
+    environment:
+      - LISTEN_ADDR=127.0.0.1:8098
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - WORKER_LOOPS=es-results-importer
+      - IMPORT_INTERVAL=${ES_IMPORTER_INTERVAL:-300}
+      - IMPORTER_STATE=/state-importer/es-results-importer.json
+      - SHARD_COUNT=${ES_IMPORTER_SHARD_COUNT:-1}
+      - GHIDRA_RESULTS_DIR=/ghidra-results
+      - SANDBOX_RESULTS_DIR=/sandbox-results
+      - WINDOWS_SANDBOX_RESULTS_DIR=/windows-sandbox-results
+      - GHOSTS_SANDBOX_RESULTS_DIR=/ghosts-sandbox-results
+      - GITHUB_ANALYSIS_RESULTS_DIR=/github-analysis-results
+      - REVDECK_RESULTS_DIR=/revdeck-results
+      - CAPE_RESULTS_DIR=/cape-results
+      - COWRIE_TTYLOG_DIR=/cowrie-tty
+      - REPORTER_METRICS_DIR=/reporter-data
+      - YARA_RESULTS_DIR=/yara-results
+      - TZ=Europe/Berlin
+    volumes:
+      - /var/lib/honeypot-ghidra/results:/ghidra-results:ro
+      - /var/lib/honeypot-sandbox/export:/sandbox-results:ro
+      - /var/lib/honeypot-windows-sandbox/export:/windows-sandbox-results:ro
+      - /var/lib/honeypot-ghosts-sandbox/export:/ghosts-sandbox-results:ro
+      - /var/lib/honeypot-github/results:/github-analysis-results:ro
+      - /var/lib/honeypot-revdeck/results:/revdeck-results:ro
+      - /var/lib/honeypot-cape/results:/cape-results:ro
+      - es-importer-state:/state-importer
+      - /opt/stacks/apiary/logs/cowrie/tty:/cowrie-tty:ro
+      - reporter-data:/reporter-data:ro
+      - yara-results:/yara-results:ro
+    networks:
+      - honeynet
+    user: "0:0"
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_READ_SEARCH
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
   services-adapter:
     <<: *runtime-defaults
     build: ./services-adapter
