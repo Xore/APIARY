@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 
 use crate::report_pdf::{AlertRecord, Kv, ReportData, ReportEventRow, ReportSummary};
 use crate::reports_store::{report_window_duration, ReportScope};
+use crate::es::logins_filter;
 use crate::AppState;
 
 fn text(v: &Value) -> String {
@@ -331,7 +332,7 @@ pub async fn report_data_for(
                 {"exists": {"field": "suricata.eve.alert.severity"}},
                 {"range": {"suricata.eve.alert.severity": {"lte": 2}}}
             ]}}},
-            "logins": {"filter": {"terms": {"honeypot.event": ["login", "auth_attempt"]}}},
+            "logins": {"filter": logins_filter()},
             "payloads": {"filter": {"exists": {"field": "honeypot.shasum"}}},
             "commands": {"filter": {"exists": {"field": "honeypot.canonical_command"}}},
             "sessions": {"cardinality": {"field": "honeypot.session"}},

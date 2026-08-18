@@ -15,6 +15,35 @@ use std::collections::HashSet;
 
 pub const EVENT_INDICES: &[&str] = &["honeypot-v2-*", "suricata-v2-*"];
 
+/// The "is this a login/auth attempt" query fragment (#1611 workstream C),
+/// shared by every login-counting aggregation (aggregates.rs's sources
+/// page, dashboard.rs's overview KPIs, reports_data.rs's report
+/// summaries). The original `honeypot.event ∈ {login, auth_attempt}`
+/// filter missed most real auth activity — audited against the live
+/// per-sensor vocabularies (#1611's own live-cluster audit):
+/// - cowrie logs cowrie.login.success/failed on `honeypot.eventid`, never
+///   `honeypot.event`, and is the single largest auth source (1.26M docs
+///   on the audited deployment) — entirely uncounted before this.
+/// - rdp-honeypot's auth rides on a plain `connect` event with a non-empty
+///   `honeypot.username` (the mstshash), no dedicated login/auth_attempt
+///   kind of its own.
+/// - `honeypot.canonical_user`'s existence is a sensor-agnostic catch-all:
+///   ip-enrichment-worker promotes it for beelzebub/dionaea today and will
+///   cover more sensors as that promotion's own coverage grows (#1611
+///   workstreams D/G) — this clause benefits automatically as it does,
+///   with no further change needed here.
+pub fn logins_filter() -> Value {
+    serde_json::json!({"bool": {"should": [
+        {"terms": {"honeypot.event": ["login", "auth_attempt"]}},
+        {"terms": {"honeypot.eventid": ["cowrie.login.success", "cowrie.login.failed"]}},
+        {"bool": {"filter": [
+            {"term": {"event.sensor": "rdp-honeypot"}},
+            {"exists": {"field": "honeypot.username"}}
+        ]}},
+        {"exists": {"field": "honeypot.canonical_user"}}
+    ], "minimum_should_match": 1}})
+}
+
 pub struct Es {
     client: Elasticsearch,
 }
@@ -434,5 +463,23 @@ impl Es {
             .await;
         result?;
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn logins_filter_has_four_should_clauses_any_one_matches() {
+        let f = logins_filter();
+        let should = f["bool"]["should"].as_array().expect("should array");
+        assert_eq!(should.len(), 4);
+        assert_eq!(f["bool"]["minimum_should_match"], 1);
+        assert_eq!(should[0]["terms"]["honeypot.event"], serde_json::json!(["login", "auth_attempt"]));
+        assert_eq!(should[1]["terms"]["honeypot.eventid"], serde_json::json!(["cowrie.login.success", "cowrie.login.failed"]));
+        assert_eq!(should[2]["bool"]["filter"][0]["term"]["event.sensor"], "rdp-honeypot");
+        assert_eq!(should[2]["bool"]["filter"][1]["exists"]["field"], "honeypot.username");
+        assert_eq!(should[3]["exists"]["field"], "honeypot.canonical_user");
     }
 }
