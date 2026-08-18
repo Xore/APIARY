@@ -434,7 +434,50 @@ services:
       - ALERT_CAMPAIGN_SCORE=${HONEYPOT_ALERT_CAMPAIGN_SCORE:-80}
       - SANDBOX_ALERT_RISK_SCORE=${SANDBOX_ALERT_RISK_SCORE:-50}
       - LLM_ANALYSIS_ALERT_SEVERITIES=${LLM_ANALYSIS_ALERT_SEVERITIES:-high,critical}
+      # #1612 host-local alert signals: log-stream sizes, sandbox/ghidra/
+      # cape/github-analysis spool health, and Filebeat stats all need
+      # either a bind-mounted host directory or a service URL only this
+      # worker container has (see volumes: below) — the Go dashboard read
+      # the same paths directly. Windows/GHOSTS sandbox and the three
+      # analysis spools stay off (empty var) unless the operator has
+      # actually deployed that host-side worker, same as the Go tier.
+      - LOG_DIR=/logs
+      - SANDBOX_RESULTS_DIR=/sandbox-results
+      - SANDBOX_REQUEST_DIR=/sandbox-requests
+      - WINDOWS_SANDBOX_RESULTS_DIR=${WINDOWS_SANDBOX_RESULTS_DIR:-}
+      - WINDOWS_SANDBOX_REQUEST_DIR=${WINDOWS_SANDBOX_REQUEST_DIR:-}
+      - GHOSTS_SANDBOX_RESULTS_DIR=${GHOSTS_SANDBOX_RESULTS_DIR:-}
+      - GHOSTS_SANDBOX_REQUEST_DIR=${GHOSTS_SANDBOX_REQUEST_DIR:-}
+      - GHIDRA_RESULTS_DIR=${GHIDRA_RESULTS_DIR:-}
+      - GHIDRA_REQUEST_DIR=${GHIDRA_REQUEST_DIR:-}
+      - GHIDRA_ALERT_RISK_LEVELS=${GHIDRA_ALERT_RISK_LEVELS:-high,critical}
+      - GHIDRA_ALERT_ON_CRYPTO=${GHIDRA_ALERT_ON_CRYPTO:-false}
+      - CAPE_RESULTS_DIR=${CAPE_RESULTS_DIR:-}
+      - CAPE_REQUEST_DIR=${CAPE_REQUEST_DIR:-}
+      - GITHUB_ANALYSIS_RESULTS_DIR=${GITHUB_ANALYSIS_RESULTS_DIR:-}
+      - GITHUB_ANALYSIS_REQUEST_DIR=${GITHUB_ANALYSIS_REQUEST_DIR:-}
+      - GITHUB_ANALYSIS_ALERT_POSITIVES=${GITHUB_ANALYSIS_ALERT_POSITIVES:-10}
+      - FILEBEAT_URL=${FILEBEAT_URL:-http://filebeat:5066}
       - TZ=Europe/Berlin
+    volumes:
+      - type: bind
+        source: /opt/stacks/apiary/logs
+        target: /logs
+        read_only: true
+        bind:
+          propagation: rslave
+      - /var/lib/honeypot-sandbox/export:/sandbox-results:ro
+      - /var/lib/honeypot-sandbox/requests/pending:/sandbox-requests:ro
+      - /var/lib/honeypot-windows-sandbox/export:/windows-sandbox-results:ro
+      - /var/lib/honeypot-windows-sandbox/requests/pending:/windows-sandbox-requests:ro
+      - /var/lib/honeypot-ghosts-sandbox/export:/ghosts-sandbox-results:ro
+      - /var/lib/honeypot-ghosts-sandbox/requests/pending:/ghosts-sandbox-requests:ro
+      - /var/lib/honeypot-ghidra/results:/ghidra-results:ro
+      - /var/lib/honeypot-ghidra/requests/pending:/ghidra-requests:ro
+      - /var/lib/honeypot-cape/results:/cape-results:ro
+      - /var/lib/honeypot-cape/requests/pending:/cape-requests:ro
+      - /var/lib/honeypot-github/results:/github-analysis-results:ro
+      - /var/lib/honeypot-github/requests/pending:/github-analysis-requests:ro
     networks:
       - honeynet
     security_opt: [no-new-privileges:true]
