@@ -37,6 +37,7 @@ import { Route as ApiLiveRouteImport } from './routes/api/live'
 import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
 import { Route as AuthLoginRouteImport } from './routes/auth/login'
 import { Route as AuthLogoutRouteImport } from './routes/auth/logout'
+import { Route as ExportPortbridgeManualBlackholeDottxtRouteImport } from './routes/export.portbridge-manual-blackhole[.]txt'
 import { Route as PayloadAnalysisHashRouteImport } from './routes/payload-analysis.$hash'
 import { Route as PayloadWorkbenchResultsRouteImport } from './routes/payload-workbench.results'
 import { Route as SessionsIdRouteImport } from './routes/sessions.$id'
@@ -187,6 +188,12 @@ const AuthLogoutRoute = AuthLogoutRouteImport.update({
   path: '/auth/logout',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ExportPortbridgeManualBlackholeDottxtRoute =
+  ExportPortbridgeManualBlackholeDottxtRouteImport.update({
+    id: '/export/portbridge-manual-blackhole.txt',
+    path: '/export/portbridge-manual-blackhole.txt',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const PayloadAnalysisHashRoute = PayloadAnalysisHashRouteImport.update({
   id: '/payload-analysis/$hash',
   path: '/payload-analysis/$hash',
@@ -264,6 +271,7 @@ export interface FileRoutesByFullPath {
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
+  '/export/portbridge-manual-blackhole.txt': typeof ExportPortbridgeManualBlackholeDottxtRoute
   '/payload-analysis/$hash': typeof PayloadAnalysisHashRoute
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
   '/sessions/$id': typeof SessionsIdRoute
@@ -303,6 +311,7 @@ export interface FileRoutesByTo {
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
+  '/export/portbridge-manual-blackhole.txt': typeof ExportPortbridgeManualBlackholeDottxtRoute
   '/payload-analysis/$hash': typeof PayloadAnalysisHashRoute
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
   '/sessions/$id': typeof SessionsIdRoute
@@ -343,6 +352,7 @@ export interface FileRoutesById {
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
+  '/export/portbridge-manual-blackhole.txt': typeof ExportPortbridgeManualBlackholeDottxtRoute
   '/payload-analysis/$hash': typeof PayloadAnalysisHashRoute
   '/payload-workbench/results': typeof PayloadWorkbenchResultsRoute
   '/sessions/$id': typeof SessionsIdRoute
@@ -384,6 +394,7 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/auth/login'
     | '/auth/logout'
+    | '/export/portbridge-manual-blackhole.txt'
     | '/payload-analysis/$hash'
     | '/payload-workbench/results'
     | '/sessions/$id'
@@ -423,6 +434,7 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/auth/login'
     | '/auth/logout'
+    | '/export/portbridge-manual-blackhole.txt'
     | '/payload-analysis/$hash'
     | '/payload-workbench/results'
     | '/sessions/$id'
@@ -462,6 +474,7 @@ export interface FileRouteTypes {
     | '/auth/callback'
     | '/auth/login'
     | '/auth/logout'
+    | '/export/portbridge-manual-blackhole.txt'
     | '/payload-analysis/$hash'
     | '/payload-workbench/results'
     | '/sessions/$id'
@@ -502,6 +515,7 @@ export interface RootRouteChildren {
   AuthCallbackRoute: typeof AuthCallbackRoute
   AuthLoginRoute: typeof AuthLoginRoute
   AuthLogoutRoute: typeof AuthLogoutRoute
+  ExportPortbridgeManualBlackholeDottxtRoute: typeof ExportPortbridgeManualBlackholeDottxtRoute
   PayloadAnalysisHashRoute: typeof PayloadAnalysisHashRoute
   PayloadWorkbenchResultsRoute: typeof PayloadWorkbenchResultsRoute
   SessionsIdRoute: typeof SessionsIdRoute
@@ -711,6 +725,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthLogoutRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/export/portbridge-manual-blackhole.txt': {
+      id: '/export/portbridge-manual-blackhole.txt'
+      path: '/export/portbridge-manual-blackhole.txt'
+      fullPath: '/export/portbridge-manual-blackhole.txt'
+      preLoaderRoute: typeof ExportPortbridgeManualBlackholeDottxtRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/payload-analysis/$hash': {
       id: '/payload-analysis/$hash'
       path: '/payload-analysis/$hash'
@@ -806,6 +827,8 @@ const rootRouteChildren: RootRouteChildren = {
   AuthCallbackRoute: AuthCallbackRoute,
   AuthLoginRoute: AuthLoginRoute,
   AuthLogoutRoute: AuthLogoutRoute,
+  ExportPortbridgeManualBlackholeDottxtRoute:
+    ExportPortbridgeManualBlackholeDottxtRoute,
   PayloadAnalysisHashRoute: PayloadAnalysisHashRoute,
   PayloadWorkbenchResultsRoute: PayloadWorkbenchResultsRoute,
   SessionsIdRoute: SessionsIdRoute,

@@ -37,12 +37,79 @@ type IpProfile = {
   events: EventRow[]
 }
 
+type BlockState = { IP: string; Blocked: boolean; Active: boolean; BlockedBy?: string; ExpiresAt?: string }
+
 const fetchProfile = createServerFn({ method: 'GET' })
   .inputValidator((input: { ip: string }) => input)
   .handler(async ({ data }): Promise<IpProfile | null> => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<IpProfile>(`/api/v1/investigate/ip/${encodeURIComponent(data.ip)}`)
   })
+
+const fetchBlockState = createServerFn({ method: 'GET' })
+  .inputValidator((input: { ip: string }) => input)
+  .handler(async ({ data }): Promise<BlockState | null> => {
+    const { serviceFetch } = await import('../lib/backend.server')
+    const response = await serviceFetch(`/api/v1/ip-block/${encodeURIComponent(data.ip)}`)
+    return response.ok ? ((await response.json()) as BlockState) : null
+  })
+
+const setBlock = createServerFn({ method: 'POST' })
+  .inputValidator((input: { ip: string; blocked: boolean; expires_days?: number }) => input)
+  .handler(async ({ data }): Promise<boolean> => {
+    const { getSessionUser } = await import('../lib/auth')
+    const user = await getSessionUser()
+    // Admin-gated at the BFF, same posture as the legacy action (#914).
+    if (user && user.role !== 'admin') return false
+    const { serviceFetch } = await import('../lib/backend.server')
+    const response = await serviceFetch('/api/v1/ip-block', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...data, actor: user?.username ?? '' }),
+    })
+    return response.ok
+  })
+
+function BlockControl({ ip }: { ip: string }) {
+  const [state, setState] = useState<BlockState | null>(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    fetchBlockState({ data: { ip } }).then((result) => {
+      if (!cancelled) setState(result)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [ip])
+  if (state === null) return null
+  return (
+    <button
+      className={state.Active ? 'chip is-active' : 'chip'}
+      type="button"
+      disabled={busy}
+      title={
+        state.Active
+          ? `Blocked${state.BlockedBy ? ` by ${state.BlockedBy}` : ''} — the VPS blackhole list drops this IP. Click to unblock.`
+          : 'Add this IP to the manual blackhole list (portbridge drops it within 5 minutes).'
+      }
+      onClick={async () => {
+        setBusy(true)
+        try {
+          const ok = await setBlock({ data: { ip, blocked: !state.Active } })
+          if (ok) {
+            const fresh = await fetchBlockState({ data: { ip } })
+            if (fresh) setState(fresh)
+          }
+        } finally {
+          setBusy(false)
+        }
+      }}
+    >
+      {busy ? '…' : state.Active ? '⛔ blocked — unblock' : 'block this IP'}
+    </button>
+  )
+}
 
 export const Route = createFileRoute('/investigate/ip/$ip')({
   loader: async ({ params }) => ({ first: fetchProfile({ data: { ip: params.ip } }) }),
@@ -120,6 +187,7 @@ function InvestigateIp() {
               <Link className="chip" to="/events" search={{ ip }}>
                 open in explorer →
               </Link>
+              <BlockControl ip={ip} />
             </>
           ) : undefined
         }

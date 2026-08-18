@@ -29,6 +29,7 @@ mod events;
 mod fusion;
 mod health;
 mod investigate;
+mod ip_block;
 mod kill_chain;
 mod live;
 mod llm_search;
@@ -127,6 +128,9 @@ async fn main() -> anyhow::Result<()> {
         )
         .route("/api/v1/users", get(config::users))
         .route("/api/v1/llm-search", get(llm_search::search))
+        .route("/api/v1/ip-block", post(ip_block::set_block))
+        .route("/api/v1/ip-block/{ip}", get(ip_block::get_block))
+        .route("/api/v1/ip-block-export", get(ip_block::export))
         .route("/api/v1/reports/{id}/pdf", get(reports::pdf))
         .route("/api/v1/artifacts/{kind}/{key}", get(artifacts::list))
         .route("/api/v1/artifacts/{kind}/{key}/{filename}", get(artifacts::download))
