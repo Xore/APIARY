@@ -3,10 +3,10 @@
 // landscape / Attacker behavior / Evidence & campaigns. Skeleton-first:
 // the shell renders instantly, every panel hydrates from its deferred
 // promise.
-import { Await, createFileRoute } from '@tanstack/react-router'
+import { Await, createFileRoute, useRouter } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { Suspense, useEffect, useState } from 'react'
-import { AttackMap, Heatmap, Tbl, type HeatRow, type Kv, type MapPoint } from '../components/OverviewPanels'
+import { AttackMap, AttackVectors, Heatmap, Tbl, type HeatRow, type Kv, type MapPoint } from '../components/OverviewPanels'
 import { EChart } from '../components/EChart'
 
 type OverviewKpis = {
@@ -195,6 +195,16 @@ function Overview() {
   const payloads = usePromise(data.payloads)
   const presentation = usePromise(data.presentation)
   const [tab, setTab] = useState<TabId>('live')
+  const router = useRouter()
+
+  // Auto-refresh (legacy 60s replaceHoneypotPage cycle): re-run the
+  // loaders while the tab is visible; hidden tabs skip the tick.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') void router.invalidate()
+    }, 60_000)
+    return () => clearInterval(timer)
+  }, [router])
 
   const str = (row: StoreRow, key: string) => (typeof row[key] === 'string' ? (row[key] as string) : '')
   const num = (row: StoreRow, key: string) => (typeof row[key] === 'number' ? (row[key] as number) : 0)
@@ -260,6 +270,7 @@ function Overview() {
           <div className="card wide chart-card">
             <h2>Activity — last 24h</h2>
             <Heatmap rows={dashboard ? dashboard.heatmap : null} />
+            {dashboard ? <AttackVectors sensors={dashboard.sensors.map((sensor) => sensor.name)} /> : null}
           </div>
           <div className="card wide map-card">
             <h2>Attack origins — live geographic view</h2>

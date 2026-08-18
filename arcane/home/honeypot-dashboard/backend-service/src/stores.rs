@@ -67,7 +67,17 @@ async fn store_page_excluding(
     let total = result["hits"]["total"]["value"].as_u64().unwrap_or(0);
     let rows: Vec<Value> = result["hits"]["hits"]
         .as_array()
-        .map(|hits| hits.iter().map(|hit| hit["_source"].clone()).collect())
+        .map(|hits| {
+            hits.iter()
+                .map(|hit| {
+                    // _doc_id rides along for row-level actions (e.g. the
+                    // ML anomaly ack keys on the anomalies page).
+                    let mut row = hit["_source"].clone();
+                    row["_doc_id"] = hit["_id"].clone();
+                    row
+                })
+                .collect()
+        })
         .unwrap_or_default();
     Ok(json!({"total": total, "rows": rows}))
 }
@@ -193,6 +203,11 @@ pub async fn generic(
         "sandbox-runs" => ("sandbox-analysis-v1", "@timestamp", &[]),
         "ghidra-runs" => ("ghidra-analysis-v1", "@timestamp", &[]),
         "static-analysis" => ("dashboard-static-analysis-v1", "Analysis.GeneratedUTC", &[]),
+        // Result families that may not exist yet on a given deployment
+        // (ignore_unavailable keeps them safe): revdeck, CAPE, GitHub.
+        "revdeck" => ("revdeck-analysis-v1", "@timestamp", &[]),
+        "cape" => ("cape-analysis-v1", "@timestamp", &[]),
+        "github-analysis" => ("github-analysis-v1", "@timestamp", &[]),
         "workbench-runs" => ("dashboard-workbench-runs-v1", "created_at", &[]),
         "generated-reports" => ("dashboard-generated-reports-v1", "created_at", &["pdf_base64"]),
         "report-definitions" => ("dashboard-reports-definitions-v1", "updated", &[]),

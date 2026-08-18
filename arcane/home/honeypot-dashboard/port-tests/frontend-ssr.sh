@@ -10,7 +10,7 @@ start_frontend
 for page in "" events ips campaigns clusters attackers kill-chain commands sensors recordings \
     alerts source-health history reports canarytokens payloads payload-workbench/results \
     ml-anomalies llm-analysis agent-campaigns auth-events settings problem-reports dead-letters \
-    "search?q=root"; do
+    revdeck cape github-analysis "search?q=root"; do
   check_http "page /$page" 200 "$FE_URL/$page"
 done
 check_http "404 page" 404 "$FE_URL/this-does-not-exist"
@@ -25,6 +25,10 @@ SID=$(curl -s "$BE_URL/api/v1/events?kind=command&size=1" | python3 -c 'import s
 [ -n "$SID" ] && check_http "session page" 200 "$FE_URL/sessions/$SID"
 HASH=$(curl -s "$BE_URL/api/v1/payloads?size=1" | python3 -c 'import sys,json; print(json.load(sys.stdin)["rows"][0]["Hash"])')
 check_http "payload analysis page" 200 "$FE_URL/payload-analysis/$HASH"
+JOB=$(curl -s "$ES_URL/sandbox-export-artifacts-v1/_search?size=1" | python3 -c 'import sys,json; h=json.load(sys.stdin)["hits"]["hits"]; print(h[0]["_source"]["job"] if h else "")')
+[ -n "$JOB" ] && check_http "sandbox detail page" 200 "$FE_URL/sandbox/$JOB"
+GSHA=$(curl -s "$ES_URL/ghidra-report-artifacts-v1/_search?size=1" | python3 -c 'import sys,json; h=json.load(sys.stdin)["hits"]["hits"]; print(h[0]["_source"]["sha256"] if h else "")')
+[ -n "$GSHA" ] && check_http "ghidra detail page" 200 "$FE_URL/ghidra/$GSHA"
 
 # BFF proxies.
 check_http "chart proxy" 200 "$FE_URL/api/chart/os-distribution"

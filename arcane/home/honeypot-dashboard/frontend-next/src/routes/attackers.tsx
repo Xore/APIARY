@@ -5,6 +5,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { EChart } from '../components/EChart'
+import { AttackerGraph } from '../components/AttackerGraph'
 
 type AttackerRow = {
   id: string
@@ -99,9 +100,12 @@ function Attackers() {
         loadingMore={loadingMore}
         inspectorTitle="Identity details"
         inspectorExtra={(row) => (
-          // Fusion radar (#1280): which signal categories 2+ member IPs
-          // actually share — the visual evidence for the merge decision.
-          <EChart kind="radar" url={`/api/chart/attacker-fusion?id=${encodeURIComponent(row.id)}`} height={280} />
+          <>
+            {/* Fusion radar (#1280): which signal categories 2+ member IPs
+                actually share — the visual evidence for the merge decision. */}
+            <EChart kind="radar" url={`/api/chart/attacker-fusion?id=${encodeURIComponent(row.id)}`} height={280} />
+            <AttackerGraph id={row.id} />
+          </>
         )}
       />
     </>

@@ -24,6 +24,7 @@ mod canarytokens;
 mod charts;
 mod config;
 mod dashboard;
+mod detail;
 mod es;
 mod events;
 mod fusion;
@@ -131,6 +132,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/ip-block", post(ip_block::set_block))
         .route("/api/v1/ip-block/{ip}", get(ip_block::get_block))
         .route("/api/v1/ip-block-export", get(ip_block::export))
+        .route("/api/v1/sandbox/{job}", get(detail::sandbox_run))
+        .route("/api/v1/ghidra/{sha}", get(detail::ghidra_run))
+        .route("/api/v1/attackers-graph", get(detail::attackers_graph))
+        .route("/api/v1/attack-vectors", get(detail::attack_vectors))
+        .route("/api/v1/ml-anomalies/ack", post(detail::ml_anomaly_ack))
+        .route("/api/v1/ml-anomalies/acks", get(detail::ml_anomaly_acks))
         .route("/api/v1/reports/{id}/pdf", get(reports::pdf))
         .route("/api/v1/artifacts/{kind}/{key}", get(artifacts::list))
         .route("/api/v1/artifacts/{kind}/{key}/{filename}", get(artifacts::download))

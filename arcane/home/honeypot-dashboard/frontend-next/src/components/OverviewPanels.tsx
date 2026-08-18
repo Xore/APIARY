@@ -1,7 +1,9 @@
 // Overview panel primitives, ported from the legacy templates: the "tbl"
 // top-N card, the per-sensor hourly heatmap (Xore/theme's .heatmap
-// component, CSS-var intensity), and the leaflet attack map.
-import { useEffect, useRef } from 'react'
+// component, CSS-var intensity), the per-sensor attack-vectors
+// drill-down (#471), and the leaflet attack map.
+import { createServerFn } from '@tanstack/react-start'
+import { useEffect, useRef, useState } from 'react'
 
 export type Kv = { key: string; count: number; link: string }
 
@@ -88,6 +90,89 @@ export function Heatmap({ rows }: { rows: HeatRow[] | null }) {
         <span>More</span>
       </div>
       <p className="note">Every sensor's activity in the last 24 hours, hour by hour. Hover or focus a cell for the exact count.</p>
+    </>
+  )
+}
+
+type Vectors = { sensor: string; ports: Kv[]; protocols: Kv[] }
+
+const fetchVectors = createServerFn({ method: 'GET' })
+  .inputValidator((input: { sensor: string }) => input)
+  .handler(async ({ data }): Promise<Vectors | null> => {
+    const { serviceJSON } = await import('../lib/backend.server')
+    return serviceJSON<Vectors>(`/api/v1/attack-vectors?sensor=${encodeURIComponent(data.sensor)}`)
+  })
+
+/// The heatmap's companion drill-down (#471): pick one sensor, see which
+/// ports/protocols actually drew its last-24h traffic.
+export function AttackVectors({ sensors }: { sensors: string[] }) {
+  const [sensor, setSensor] = useState('')
+  const [vectors, setVectors] = useState<Vectors | null>(null)
+  useEffect(() => {
+    if (!sensor) {
+      setVectors(null)
+      return
+    }
+    let cancelled = false
+    setVectors(null)
+    fetchVectors({ data: { sensor } }).then((result) => {
+      if (!cancelled) setVectors(result)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [sensor])
+  const options = sensors.filter((name) => name !== 'suricata' && name !== 'portbridge')
+  return (
+    <>
+      <div className="filters">
+        <select className="input" aria-label="Sensor drill-down" value={sensor} onChange={(event) => setSensor(event.target.value)}>
+          <option value="">All sensors</option>
+          {options.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+        {sensor ? (
+          <button className="chip" type="button" onClick={() => setSensor('')}>
+            × all sensors
+          </button>
+        ) : null}
+      </div>
+      {sensor && vectors === null ? <span className="skeleton-line" aria-hidden="true" /> : null}
+      {vectors ? (
+        <div className="tw:grid tw:grid-cols-2 tw:gap-3">
+          {(
+            [
+              ['Targeted ports', vectors.ports],
+              ['Protocols', vectors.protocols],
+            ] as const
+          ).map(([title, rows]) => (
+            <div key={title}>
+              <p className="note">{title} — {vectors.sensor}, last 24h</p>
+              {rows.length === 0 ? (
+                <p className="empty">No traffic in the window.</p>
+              ) : (
+                <table className="data-table">
+                  <tbody>
+                    {rows.map((row) => (
+                      <tr key={row.key}>
+                        <td className="n">
+                          <a href={row.link}>{row.count.toLocaleString('en-US')}</a>
+                        </td>
+                        <td className="v">
+                          <a href={row.link}>{row.key}</a>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : null}
     </>
   )
 }

@@ -101,6 +101,20 @@ const YARA_COLUMNS: Column<StoreRow>[] = [
 ]
 
 const SANDBOX_COLUMNS: Column<StoreRow>[] = [
+  {
+    header: 'job',
+    className: 'v',
+    render: (row) => {
+      const job = str(row, 'sandbox', 'job') || str(row, 'job')
+      return job ? (
+        <a className="lnk" href={`/sandbox/${encodeURIComponent(job)}`} onClick={(event) => event.stopPropagation()}>
+          {job.slice(0, 28)} →
+        </a>
+      ) : (
+        ''
+      )
+    },
+  },
   { header: 'detonated', render: (row) => when(str(row, '@timestamp')) },
   { header: 'platform', render: (row) => <span className="badge badge--muted">{str(row, 'platform')}</span> },
   {
@@ -118,7 +132,20 @@ const SANDBOX_COLUMNS: Column<StoreRow>[] = [
 
 const GHIDRA_COLUMNS: Column<StoreRow>[] = [
   { header: 'analyzed', render: (row) => when(str(row, '@timestamp')) },
-  { header: 'file', className: 'v', render: (row) => <code>{str(row, 'file', 'hash', 'sha256').slice(0, 16) || str(row, 'file', 'name')}</code> },
+  {
+    header: 'file',
+    className: 'v',
+    render: (row) => {
+      const sha = str(row, 'file', 'hash', 'sha256')
+      return sha ? (
+        <a className="lnk" href={`/ghidra/${encodeURIComponent(sha)}`} onClick={(event) => event.stopPropagation()}>
+          <code>{sha.slice(0, 16)}</code> →
+        </a>
+      ) : (
+        <code>{str(row, 'file', 'name')}</code>
+      )
+    },
+  },
   { header: 'exit', render: (row) => str(row, 'exit_status') },
   recordColumn,
 ]

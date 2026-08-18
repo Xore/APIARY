@@ -250,6 +250,51 @@ function Events() {
             × clear filters
           </button>
         ) : null}
+        <button
+          className="chip"
+          type="button"
+          disabled={!rows || rows.length === 0}
+          title="Download the currently loaded rows as CSV"
+          onClick={() => {
+            if (!rows) return
+            const esc = (value: string) => `"${value.replaceAll('"', '""')}"`
+            const csv = [
+              'time,sensor,source_ip,country,port,proto,detail,session',
+              ...rows.map((row) =>
+                [row.time, row.sensor, row.src_ip, row.country, row.port, row.proto, row.detail, row.session]
+                  .map((value) => esc(String(value ?? '')))
+                  .join(','),
+              ),
+            ].join('\n')
+            const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+            const link = document.createElement('a')
+            link.href = url
+            link.download = 'honeypot-events.csv'
+            link.click()
+            URL.revokeObjectURL(url)
+          }}
+        >
+          ⇩ CSV
+        </button>
+        <button
+          className="chip"
+          type="button"
+          disabled={!rows || rows.length === 0}
+          title="Download the currently loaded rows' full records as JSON"
+          onClick={() => {
+            if (!rows) return
+            const url = URL.createObjectURL(
+              new Blob([JSON.stringify(rows.map((row) => row.record), null, 2)], { type: 'application/json' }),
+            )
+            const link = document.createElement('a')
+            link.href = url
+            link.download = 'honeypot-events.json'
+            link.click()
+            URL.revokeObjectURL(url)
+          }}
+        >
+          ⇩ JSON
+        </button>
       </div>
       <div className={open ? 'hp-md hp-md--active hp-md--open wide' : 'hp-md hp-md--active wide'} id="events-grid">
         <div className="hp-md__list" ref={listRef}>

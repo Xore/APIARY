@@ -1,0 +1,97 @@
+// Ghidra decompilation detail — one binary's analysis record, call-graph
+// SVG rendered inline from the artifact store, and every report artifact.
+import { createFileRoute, Link } from '@tanstack/react-router'
+import { createServerFn } from '@tanstack/react-start'
+import { useEffect, useState } from 'react'
+import { InvestigateHeader } from '../components/Investigate'
+import { ArtifactList } from '../components/ArtifactList'
+
+type Run = Record<string, unknown>
+
+const fetchRun = createServerFn({ method: 'GET' })
+  .inputValidator((input: { sha: string }) => input)
+  .handler(async ({ data }): Promise<Run | null> => {
+    const { serviceJSON } = await import('../lib/backend.server')
+    return serviceJSON<Run>(`/api/v1/ghidra/${encodeURIComponent(data.sha)}`)
+  })
+
+export const Route = createFileRoute('/ghidra/$sha')({
+  loader: async ({ params }) => ({ first: fetchRun({ data: { sha: params.sha } }) }),
+  component: GhidraDetail,
+})
+
+const str = (row: Run | null, ...path: string[]): string => {
+  let value: unknown = row
+  for (const key of path) {
+    if (typeof value !== 'object' || value === null) return ''
+    value = (value as Run)[key]
+  }
+  return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : ''
+}
+
+function GhidraDetail() {
+  const { first } = Route.useLoaderData()
+  const { sha } = Route.useParams()
+  const [run, setRun] = useState<Run | null | 'missing'>(null)
+  useEffect(() => {
+    let cancelled = false
+    first.then((result) => {
+      if (!cancelled) setRun(result ?? 'missing')
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [first])
+
+  if (run === 'missing') {
+    return <InvestigateHeader label="Evidence" title={sha.slice(0, 24)} subtitle="No Ghidra analysis found for this hash." />
+  }
+  const doc = run === null ? null : run
+  const callgraph = str(doc, 'ghidra', 'call_graph_svg')
+  return (
+    <>
+      <InvestigateHeader
+        label="Evidence"
+        title={`Ghidra — ${sha.slice(0, 24)}…`}
+        subtitle="Static decompilation of one captured binary: capa capabilities, call graph, and the generated report artifacts."
+        chips={
+          doc ? (
+            <>
+              <span className="chip">exit {str(doc, 'exit_status')}</span>
+              <Link className="chip" to="/payload-analysis/$hash" params={{ hash: sha }}>
+                payload analysis →
+              </Link>
+              <Link className="chip" to="/payload-workbench/results">← all results</Link>
+            </>
+          ) : undefined
+        }
+      />
+      {callgraph ? (
+        <div className="card wide">
+          <h2>Call graph</h2>
+          <div className="card__scroll">
+            <img
+              src={`/api/artifact/ghidra/${encodeURIComponent(sha)}/${encodeURIComponent(callgraph)}`}
+              alt="function call graph"
+              style={{ maxWidth: '100%' }}
+            />
+          </div>
+        </div>
+      ) : null}
+      <div className="card wide">
+        <h2>Report artifacts</h2>
+        <ArtifactList kind="ghidra" artifactKey={sha} />
+      </div>
+      <div className="card wide">
+        <h2>Analysis record</h2>
+        {doc === null ? (
+          <span className="skeleton-line" aria-hidden="true" />
+        ) : (
+          <div className="card__scroll">
+            <pre className="code">{JSON.stringify(doc, null, 2)}</pre>
+          </div>
+        )}
+      </div>
+    </>
+  )
+}

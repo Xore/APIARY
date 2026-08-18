@@ -50,6 +50,22 @@ RID=$(curl -s "$BE_URL/api/v1/store/generated-reports?size=1" | python3 -c 'impo
 GSHA=$(curl -s "$ES_URL/ghidra-report-artifacts-v1/_search?size=1" | python3 -c 'import sys,json; h=json.load(sys.stdin)["hits"]["hits"]; print(h[0]["_source"]["sha256"] if h else "")')
 [ -n "$GSHA" ] && check_json "ghidra artifacts" "$BE_URL/api/v1/artifacts/ghidra/$GSHA" "len(d['rows']) > 0"
 
+check_json "attack vectors" "$BE_URL/api/v1/attack-vectors?sensor=cowrie" "len(d['ports']) > 0"
+check_json "attackers graph" "$BE_URL/api/v1/attackers-graph?id=$AID" "len(d['nodes']) > 1 and d['nodes'][0]['kind'] == 'hub'"
+JOB=$(curl -s "$ES_URL/sandbox-export-artifacts-v1/_search?size=1" | python3 -c 'import sys,json; h=json.load(sys.stdin)["hits"]["hits"]; print(h[0]["_source"]["job"] if h else "")')
+[ -n "$JOB" ] && check_json "sandbox run detail" "$BE_URL/api/v1/sandbox/$JOB" "'_doc_id' in d"
+[ -n "$GSHA" ] && check_json "ghidra run detail" "$BE_URL/api/v1/ghidra/$GSHA" "'ghidra' in d"
+for store in revdeck cape github-analysis; do
+  check_json "store $store (absent-index tolerant)" "$BE_URL/api/v1/store/$store?size=1" "'rows' in d"
+done
+
+# ML anomaly ack round trip on a synthetic key (never a real anomaly id);
+# leaves the record un-acked.
+check "ml ack set" curl -sf -X POST "$BE_URL/api/v1/ml-anomalies/ack" -H 'Content-Type: application/json' -d '{"key":"port-tests-synthetic","ack":true,"actor":"port-tests"}'
+sleep 1
+check_json "ml acks map" "$BE_URL/api/v1/ml-anomalies/acks" "d.get('port-tests-synthetic',{}).get('Acknowledged') == True"
+check "ml ack unset" curl -sf -X POST "$BE_URL/api/v1/ml-anomalies/ack" -H 'Content-Type: application/json' -d '{"key":"port-tests-synthetic","ack":false,"actor":"port-tests"}'
+
 # SSE stream: at least one event within 15s.
 check "sse live stream" bash -c "timeout 15 curl -sN $BE_URL/api/v1/live | head -c 50 | grep -q 'event:'"
 
