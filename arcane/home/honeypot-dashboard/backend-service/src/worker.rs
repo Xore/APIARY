@@ -123,6 +123,11 @@ pub fn spawn_enabled(state: AppState) {
                 tokio::spawn(async move { crate::ip_enrichment::ip_enrichment_loop(state).await });
                 tracing::info!("worker loop enabled: ip-enrichment");
             }
+            "correlator" => {
+                let state = state.clone();
+                tokio::spawn(async move { crate::correlator::correlator_loop(state).await });
+                tracing::info!("worker loop enabled: correlator");
+            }
             other => tracing::warn!(loop_name = other, "unknown worker loop requested"),
         }
     }

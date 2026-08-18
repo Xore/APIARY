@@ -28,6 +28,7 @@ mod config;
 mod config_history;
 mod agent_intrusion;
 mod campaign_correlator;
+mod correlator;
 mod credentials;
 mod criticality_rules;
 mod dashboard;

@@ -540,12 +540,18 @@ services:
       # state" shape as attacker-identity above — durable campaign verdicts
       # live in agent-intrusion-campaigns, everything else is recomputed
       # from the rolling fetch window each cycle.
-      - WORKER_LOOPS=alert-notifier,attacker-identity,agent-intrusion
+      # correlator (#1610): same shape again — campaigns-v1/attacker-
+      # clusters-v1 are fully recomputed from scratch every cycle (pure ES
+      # aggregations, no raw-document paging needed at all here, unlike its
+      # two siblings above), so it fits this stateless loop container too.
+      - WORKER_LOOPS=alert-notifier,attacker-identity,agent-intrusion,correlator
       - EVIDENCE_WINDOW=${EVIDENCE_WINDOW:-6h}
       - ATTACKER_IDENTITY_RUN_INTERVAL=${ATTACKER_IDENTITY_RUN_INTERVAL:-15m}
       - AGENT_INTRUSION_POLL_INTERVAL=${AGENT_INTRUSION_POLL_INTERVAL:-300}
       - AGENT_INTRUSION_MAX_EVENTS_PER_SOURCE=${AGENT_INTRUSION_MAX_EVENTS_PER_SOURCE:-10000}
       - AGENT_INTRUSION_FETCH_WINDOW_DAYS=${AGENT_INTRUSION_FETCH_WINDOW_DAYS:-10}
+      - CORRELATION_WINDOW=${CORRELATION_WINDOW:-168h}
+      - CORRELATOR_RUN_INTERVAL=${CORRELATOR_RUN_INTERVAL:-15m}
       - ALERT_WEBHOOK_URL=${HONEYPOT_ALERT_WEBHOOK_URL:-}
       - ALERT_COOLDOWN=${HONEYPOT_ALERT_COOLDOWN:-6h}
       - ALERT_CAMPAIGN_SCORE=${HONEYPOT_ALERT_CAMPAIGN_SCORE:-80}
