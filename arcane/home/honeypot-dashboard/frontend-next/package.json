@@ -16,6 +16,7 @@
     "@tanstack/react-start": "latest",
     "echarts": "^6.1.0",
     "ioredis": "^5.11.1",
+    "leaflet": "^1.9.4",
     "nitro": "3.0.260610-beta",
     "openid-client": "^6.8.5",
     "react": "^19.2.0",
@@ -23,6 +24,7 @@
   },
   "devDependencies": {
     "@tanstack/router-cli": "^1.132.0",
+    "@types/leaflet": "^1.9.22",
     "@types/node": "^22.10.2",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
