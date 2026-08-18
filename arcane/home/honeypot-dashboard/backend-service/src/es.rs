@@ -247,6 +247,37 @@ impl Es {
         Ok(())
     }
 
+    /// Deletes every document in `index` whose id is not in `keep` — a
+    /// "delete-by-query minus explicit ids" full-resync primitive for a
+    /// worker that recomputes its whole output set every cycle and is the
+    /// index's sole writer (correlator-worker's campaigns-v1/attacker-
+    /// clusters-v1: upsert this cycle's fresh docs, then this call removes
+    /// whatever's left over from a group/cluster that no longer qualifies).
+    /// `conflicts=proceed` matches the Go worker's own posture — a
+    /// concurrent version conflict on a doc mid-delete is not worth
+    /// aborting the sweep over. A missing index (404, first run) is not an
+    /// error, same idempotent posture as `delete_doc`.
+    pub async fn delete_by_query_except(&self, index: &str, keep: &[String]) -> anyhow::Result<()> {
+        let must_not: Vec<Value> = keep
+            .iter()
+            .map(|id| serde_json::json!({"ids": {"values": [id]}}))
+            .collect();
+        let body = serde_json::json!({"query": {"bool": {"must_not": must_not}}});
+        let response = self
+            .client
+            .delete_by_query(elasticsearch::DeleteByQueryParts::Index(&[index]))
+            .conflicts(elasticsearch::params::Conflicts::Proceed)
+            .body(body)
+            .send()
+            .await?;
+        let status = response.status_code();
+        if !status.is_success() && status.as_u16() != 404 {
+            let body = response.json::<Value>().await.unwrap_or_default();
+            anyhow::bail!("elasticsearch delete_by_query {}: {}", status, body);
+        }
+        Ok(())
+    }
+
     pub async fn ping(&self) -> bool {
         self.client
             .ping()
