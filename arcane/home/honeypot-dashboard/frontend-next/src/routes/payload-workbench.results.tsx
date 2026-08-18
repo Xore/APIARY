@@ -6,6 +6,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import { ArtifactList } from '../components/ArtifactList'
 
 type StoreRow = Record<string, unknown>
 type Page = { total: number; rows: StoreRow[] }
@@ -167,9 +168,27 @@ function Results() {
       <h2 className="label-section">YARA</h2>
       <MasterDetailTable rows={yara ? yara.rows : null} columns={YARA_COLUMNS} rowKey={(_, i) => `ya-${i}`} inspectorTitle="YARA result" />
       <h2 className="label-section">Sandbox detonations</h2>
-      <MasterDetailTable rows={sandbox ? sandbox.rows : null} columns={SANDBOX_COLUMNS} rowKey={(_, i) => `sb-${i}`} inspectorTitle="Sandbox run" />
+      <MasterDetailTable
+        rows={sandbox ? sandbox.rows : null}
+        columns={SANDBOX_COLUMNS}
+        rowKey={(_, i) => `sb-${i}`}
+        inspectorTitle="Sandbox run"
+        inspectorExtra={(row) => {
+          const job = str(row, 'sandbox', 'job') || str(row, 'job')
+          return job ? <ArtifactList kind="sandbox" artifactKey={job} /> : null
+        }}
+      />
       <h2 className="label-section">Ghidra decompilation</h2>
-      <MasterDetailTable rows={ghidra ? ghidra.rows : null} columns={GHIDRA_COLUMNS} rowKey={(_, i) => `gh-${i}`} inspectorTitle="Ghidra run" />
+      <MasterDetailTable
+        rows={ghidra ? ghidra.rows : null}
+        columns={GHIDRA_COLUMNS}
+        rowKey={(_, i) => `gh-${i}`}
+        inspectorTitle="Ghidra run"
+        inspectorExtra={(row) => {
+          const sha = str(row, 'file', 'hash', 'sha256')
+          return sha ? <ArtifactList kind="ghidra" artifactKey={sha} /> : null
+        }}
+      />
     </>
   )
 }

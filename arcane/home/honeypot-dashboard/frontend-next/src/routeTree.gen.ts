@@ -45,6 +45,7 @@ import { Route as ApiChartNameRouteImport } from './routes/api/chart.$name'
 import { Route as InvestigateIpIpRouteImport } from './routes/investigate.ip.$ip'
 import { Route as ApiCanarytokenIdDownloadRouteImport } from './routes/api/canarytoken.$id.download'
 import { Route as ApiReportIdPdfRouteImport } from './routes/api/report.$id.pdf'
+import { Route as ApiArtifactKindKeyFilenameRouteImport } from './routes/api/artifact.$kind.$key.$filename'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -227,6 +228,12 @@ const ApiReportIdPdfRoute = ApiReportIdPdfRouteImport.update({
   path: '/api/report/$id/pdf',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiArtifactKindKeyFilenameRoute =
+  ApiArtifactKindKeyFilenameRouteImport.update({
+    id: '/api/artifact/$kind/$key/$filename',
+    path: '/api/artifact/$kind/$key/$filename',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -265,6 +272,7 @@ export interface FileRoutesByFullPath {
   '/investigate/ip/$ip': typeof InvestigateIpIpRoute
   '/api/canarytoken/$id/download': typeof ApiCanarytokenIdDownloadRoute
   '/api/report/$id/pdf': typeof ApiReportIdPdfRoute
+  '/api/artifact/$kind/$key/$filename': typeof ApiArtifactKindKeyFilenameRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -303,6 +311,7 @@ export interface FileRoutesByTo {
   '/investigate/ip/$ip': typeof InvestigateIpIpRoute
   '/api/canarytoken/$id/download': typeof ApiCanarytokenIdDownloadRoute
   '/api/report/$id/pdf': typeof ApiReportIdPdfRoute
+  '/api/artifact/$kind/$key/$filename': typeof ApiArtifactKindKeyFilenameRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -342,6 +351,7 @@ export interface FileRoutesById {
   '/investigate/ip/$ip': typeof InvestigateIpIpRoute
   '/api/canarytoken/$id/download': typeof ApiCanarytokenIdDownloadRoute
   '/api/report/$id/pdf': typeof ApiReportIdPdfRoute
+  '/api/artifact/$kind/$key/$filename': typeof ApiArtifactKindKeyFilenameRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -382,6 +392,7 @@ export interface FileRouteTypes {
     | '/investigate/ip/$ip'
     | '/api/canarytoken/$id/download'
     | '/api/report/$id/pdf'
+    | '/api/artifact/$kind/$key/$filename'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -420,6 +431,7 @@ export interface FileRouteTypes {
     | '/investigate/ip/$ip'
     | '/api/canarytoken/$id/download'
     | '/api/report/$id/pdf'
+    | '/api/artifact/$kind/$key/$filename'
   id:
     | '__root__'
     | '/'
@@ -458,6 +470,7 @@ export interface FileRouteTypes {
     | '/investigate/ip/$ip'
     | '/api/canarytoken/$id/download'
     | '/api/report/$id/pdf'
+    | '/api/artifact/$kind/$key/$filename'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -497,6 +510,7 @@ export interface RootRouteChildren {
   InvestigateIpIpRoute: typeof InvestigateIpIpRoute
   ApiCanarytokenIdDownloadRoute: typeof ApiCanarytokenIdDownloadRoute
   ApiReportIdPdfRoute: typeof ApiReportIdPdfRoute
+  ApiArtifactKindKeyFilenameRoute: typeof ApiArtifactKindKeyFilenameRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -753,6 +767,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiReportIdPdfRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/artifact/$kind/$key/$filename': {
+      id: '/api/artifact/$kind/$key/$filename'
+      path: '/api/artifact/$kind/$key/$filename'
+      fullPath: '/api/artifact/$kind/$key/$filename'
+      preLoaderRoute: typeof ApiArtifactKindKeyFilenameRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -793,6 +814,7 @@ const rootRouteChildren: RootRouteChildren = {
   InvestigateIpIpRoute: InvestigateIpIpRoute,
   ApiCanarytokenIdDownloadRoute: ApiCanarytokenIdDownloadRoute,
   ApiReportIdPdfRoute: ApiReportIdPdfRoute,
+  ApiArtifactKindKeyFilenameRoute: ApiArtifactKindKeyFilenameRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
