@@ -152,10 +152,6 @@ jobs:
           cache-dependency-path: arcane/home/honeypot-dashboard/frontend-next/package-lock.json
       - run: npm ci
         working-directory: arcane/home/honeypot-dashboard/frontend-next
-      - run: npm run generate-routes
-        working-directory: arcane/home/honeypot-dashboard/frontend-next
-      - name: Generated route tree is current
-        run: git diff --exit-code -- arcane/home/honeypot-dashboard/frontend-next/src/routeTree.gen.ts
       # Informational, not blocking (#1618): TanStack Start's createServerFn
       # return type is checked against ValidateSerializableMapped, which
       # rejects `Record<string, unknown>` (the index-signature value is
@@ -175,6 +171,16 @@ jobs:
       # verification step; this job's job is catching build/type breakage.
       - run: npm run build
         working-directory: arcane/home/honeypot-dashboard/frontend-next
+      # Checked post-build, not via the standalone `tsr generate` CLI: the
+      # tanstackStart() vite plugin's own route-tree generation (used by
+      # `build`/`dev`) and the router-cli's standalone `generate-routes`
+      # disagree on one thing -- the plugin also emits a `Register` SSR
+      # type augmentation the CLI doesn't -- so diffing right after
+      # `generate-routes` flags the committed (plugin-shaped) file as
+      # stale on every single run. The build's own output is what's
+      # actually committed and actually ships; diff against that instead.
+      - name: Generated route tree is current
+        run: git diff --exit-code -- arcane/home/honeypot-dashboard/frontend-next/src/routeTree.gen.ts
 
   dashboard-browser:
     name: Dashboard browser matrix
