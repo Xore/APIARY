@@ -455,8 +455,18 @@ services:
       - WINDOWS_SANDBOX_REQUEST_DIR=${WINDOWS_SANDBOX_REQUEST_DIR:-}
       - GHOSTS_SANDBOX_REQUEST_DIR=${GHOSTS_SANDBOX_REQUEST_DIR:-}
       - WINDOWS_SANDBOX_RESULTS_DIR=${WINDOWS_SANDBOX_RESULTS_DIR:-}
+      - GHOSTS_SANDBOX_RESULTS_DIR=${GHOSTS_SANDBOX_RESULTS_DIR:-}
       - GHIDRA_REQUEST_DIR=${GHIDRA_REQUEST_DIR:-}
+      - GHIDRA_RESULTS_DIR=${GHIDRA_RESULTS_DIR:-}
       - GITHUB_ANALYSIS_REQUEST_DIR=${GITHUB_ANALYSIS_REQUEST_DIR:-}
+      # #1612 phase 3b: Payload Workbench orchestrator. REVDECK_RESULTS_DIR
+      # is also fed by ghidra-worker.py's drain_revdeck() for the "ghidra"
+      # analyzer's embedded RevDeck enrichment (read, not written, here) —
+      # SANDBOX_RESULTS_DIR is read-write-adjacent: this service only reads
+      # it (reconciliation), the host-side worker owns writing job results.
+      - SANDBOX_RESULTS_DIR=/sandbox-results
+      - REVDECK_REQUEST_DIR=${REVDECK_REQUEST_DIR:-}
+      - REVDECK_RESULTS_DIR=${REVDECK_RESULTS_DIR:-}
       - PAYLOAD_DIRS=/dionaea-lib/binaries,/cowrie-downloads
       - SCRIPT_PAYLOAD_DIR=/state/script-payloads
       - TZ=Europe/Berlin
@@ -465,16 +475,25 @@ services:
       - dionaea-lib:/dionaea-lib:ro
       - /opt/stacks/apiary/logs/cowrie/downloads:/cowrie-downloads:ro
       # Read-write: this service is the one thing that CREATES these
-      # markers. Windows/GHOSTS/Ghidra/GitHub-analysis stay inert (empty
-      # env var above) until the operator has actually deployed that
+      # markers. Windows/GHOSTS/Ghidra/GitHub-analysis/Rev·Deck stay inert
+      # (empty env var above) until the operator has actually deployed that
       # host-side worker, same posture as every other optional spool in
       # this stack.
       - /var/lib/honeypot-sandbox/requests/pending:/sandbox-requests
       - /var/lib/honeypot-windows-sandbox/requests/pending:/windows-sandbox-requests
       - /var/lib/honeypot-ghosts-sandbox/requests/pending:/ghosts-sandbox-requests
       - /var/lib/honeypot-windows-sandbox/export:/windows-sandbox-results:ro
+      - /var/lib/honeypot-ghosts-sandbox/export:/ghosts-sandbox-results:ro
       - /var/lib/honeypot-ghidra/requests/pending:/ghidra-requests
+      - /var/lib/honeypot-ghidra/results:/ghidra-results:ro
       - /var/lib/honeypot-github/requests/pending:/github-analysis-requests
+      - /var/lib/honeypot-revdeck/requests/pending:/revdeck-requests
+      - /var/lib/honeypot-revdeck/results:/revdeck-results:ro
+      # Read-only: reconciliation polls job-completion state directly off
+      # disk (never through the ES mirror — see workbench_orchestrator.rs's
+      # module comment), the same reasoning golden-image-status already
+      # established for WINDOWS_SANDBOX_RESULTS_DIR above.
+      - /var/lib/honeypot-sandbox/export:/sandbox-results:ro
     networks:
       - honeynet
     security_opt: [no-new-privileges:true]

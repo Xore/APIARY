@@ -27,6 +27,12 @@ thiserror = "2"
 chrono = { version = "0.4", features = ["serde"] }
 futures = "0.3"
 tokio-stream = { version = "0.1", features = ["sync"] }
+# Payload Workbench (#1612 phase 3b): idempotency-key hashing and recipe-id
+# generation. Both need to agree with the Go tier's algorithm (SHA-256 of
+# the same material; crypto/rand-strength ids) while both write
+# dashboard-workbench-runs-v1/-recipes-v1 during the cutover window.
+sha2 = "0.10"
+rand = "0.9"
 
 [profile.release]
 lto = "thin"

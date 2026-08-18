@@ -54,6 +54,10 @@ mod services_control;
 mod session;
 mod stores;
 mod worker;
+mod workbench_api;
+mod workbench_domain;
+mod workbench_es;
+mod workbench_orchestrator;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -209,6 +213,24 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/sandbox/golden-image-status", get(sandbox_submit::golden_image_status))
         .route("/api/v1/ghidra/submit", post(ghidra_submit::submit))
         .route("/api/v1/github-analysis/submit", post(github_analysis_submit::submit))
+        // #1612 phase 3b: Payload Workbench orchestrator (recipes, run
+        // creation/reconciliation, child cancel/retry). Same
+        // shared-route-table posture as phase 3a — only useful on
+        // backend-service-mounted, which has the write-capable spool mounts.
+        .route("/api/v1/workbench/analyzers", get(workbench_api::analyzers))
+        .route(
+            "/api/v1/workbench/runs",
+            get(workbench_api::list_runs).post(workbench_api::create_run),
+        )
+        .route("/api/v1/workbench/runs/{id}", get(workbench_api::get_run))
+        .route(
+            "/api/v1/workbench/runs/{id}/children/{analyzer_id}/{action}",
+            post(workbench_api::child_action),
+        )
+        .route(
+            "/api/v1/workbench/recipes",
+            get(workbench_api::list_recipes).post(workbench_api::save_recipe),
+        )
         .layer(middleware::from_fn_with_state(state.clone(), require_service_token));
 
     let app = Router::new()
