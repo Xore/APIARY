@@ -20,34 +20,57 @@ use std::{net::SocketAddr, sync::Arc};
 
 mod aggregates;
 mod artifacts;
+mod audit;
 mod canarytokens;
 mod charts;
 mod config;
+mod config_history;
+mod credentials;
 mod dashboard;
 mod detail;
 mod es;
 mod events;
 mod fusion;
+mod ghidra_submit;
+mod github_analysis_submit;
 mod health;
+mod honeyfs_implant;
 mod investigate;
 mod ip_block;
 mod kill_chain;
 mod live;
 mod llm_search;
 mod overview;
+mod payload_bytes;
 mod payload_detail;
+mod payload_kind;
+mod payload_paths;
+mod preferences;
 mod replay;
+mod report_pdf;
 mod reports;
+mod reports_api;
+mod reports_data;
+mod reports_store;
+mod reporter_stats;
+mod sandbox_submit;
 mod sensors;
 mod search;
+mod services_control;
 mod session;
 mod stores;
 mod worker;
+mod workbench_api;
+mod workbench_domain;
+mod workbench_es;
+mod workbench_orchestrator;
 
 #[derive(Clone)]
 pub struct AppState {
     pub es: Arc<es::Es>,
     pub service_token: Arc<Option<String>>,
+    pub audit: Arc<audit::AuditLogger>,
+    pub config_history: Arc<config_history::ConfigHistory>,
 }
 
 #[derive(Serialize)]
@@ -100,10 +123,16 @@ async fn main() -> anyhow::Result<()> {
     let es_url = std::env::var("ELASTICSEARCH_URL").unwrap_or_else(|_| "http://127.0.0.1:9200".into());
     let listen = std::env::var("LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:8081".into());
     let service_token = std::env::var("SERVICE_TOKEN").ok().filter(|t| !t.is_empty());
+    let audit_path =
+        std::env::var("DASHBOARD_AUDIT_FILE").unwrap_or_else(|_| "/state/dashboard-audit.jsonl".into());
+    let config_history_path = std::env::var("DASHBOARD_CONFIG_HISTORY_FILE")
+        .unwrap_or_else(|_| "/state/dashboard-config-history.jsonl".into());
 
     let state = AppState {
         es: Arc::new(es::Es::connect(&es_url)?),
         service_token: Arc::new(service_token),
+        audit: Arc::new(audit::AuditLogger::new(audit_path)),
+        config_history: Arc::new(config_history::ConfigHistory::new(config_history_path)),
     };
 
     // Worker loops (#1610): same image, role by WORKER_LOOPS env.
@@ -127,7 +156,19 @@ async fn main() -> anyhow::Result<()> {
             "/api/v1/config/presentation",
             axum::routing::put(config::put_presentation),
         )
+        .route("/api/v1/config/history", get(config::history))
+        .route("/api/v1/config/rollback", post(config::rollback))
         .route("/api/v1/users", get(config::users))
+        .route("/api/v1/audit", get(audit::list))
+        .route(
+            "/api/v1/preferences",
+            get(preferences::get).put(preferences::put),
+        )
+        .route("/api/v1/preferences/reset", post(preferences::reset))
+        .route("/api/v1/reporter-stats", get(reporter_stats::stats))
+        .route("/api/v1/services", get(services_control::list))
+        .route("/api/v1/services/{name}/logs", get(services_control::logs))
+        .route("/api/v1/services/{name}/{action}", post(services_control::action))
         .route("/api/v1/llm-search", get(llm_search::search))
         .route("/api/v1/ip-block", post(ip_block::set_block))
         .route("/api/v1/ip-block/{ip}", get(ip_block::get_block))
@@ -139,6 +180,21 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/ml-anomalies/ack", post(detail::ml_anomaly_ack))
         .route("/api/v1/ml-anomalies/acks", get(detail::ml_anomaly_acks))
         .route("/api/v1/reports/{id}/pdf", get(reports::pdf))
+        // #1612 phase 4: Reports studio — template/element catalog,
+        // definitions CRUD, and on-demand generate. See reports_store.rs's
+        // module doc comment for the sandbox/payload/ghidra scope decision.
+        .route("/api/v1/reports/templates", get(reports_api::templates))
+        .route(
+            "/api/v1/reports/definitions",
+            get(reports_api::list_definitions).post(reports_api::create_definition),
+        )
+        .route(
+            "/api/v1/reports/definitions/{id}",
+            get(reports_api::get_definition)
+                .put(reports_api::replace_definition)
+                .delete(reports_api::delete_definition),
+        )
+        .route("/api/v1/reports/definitions/{id}/generate", post(reports_api::generate))
         .route("/api/v1/artifacts/{kind}/{key}", get(artifacts::list))
         .route("/api/v1/artifacts/{kind}/{key}/{filename}", get(artifacts::download))
         .route("/api/v1/charts/kill-chain-sankey", get(kill_chain::sankey))
@@ -163,11 +219,52 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/alerts", get(stores::alerts))
         .route("/api/v1/alerts/{key}/ack", post(stores::acknowledge))
         .route("/api/v1/canarytokens/types", get(canarytokens::types))
-        .route("/api/v1/canarytokens", post(canarytokens::create))
+        .route(
+            "/api/v1/canarytokens",
+            get(canarytokens::list).post(canarytokens::create),
+        )
         .route("/api/v1/canarytokens/{id}/download", get(canarytokens::download))
+        // #1612 misc write paths: honeyfs-implant credential provisioning/
+        // rotation (credentials_manager.go/credentials_api.go). Plain HTTP
+        // to a WireGuard-reachable URL, no host mount — same tier as
+        // canarytokens.rs above, not the mounted-worker-role service.
+        .route(
+            "/api/v1/credentials",
+            get(credentials::list).post(credentials::create),
+        )
+        .route("/api/v1/credentials/{id}/rotate", post(credentials::rotate))
+        .route("/api/v1/credentials/{id}/link-token", post(credentials::link_token))
         .route("/api/v1/payloads", get(stores::payloads))
         .route("/api/v1/payloads/{hash}", get(payload_detail::detail))
         .route("/api/v1/store/{name}", get(stores::generic))
+        // #1612 mounted worker role (phase 3a): sandbox/ghidra/github-
+        // analysis submission + golden-image status. Registered in the
+        // same shared route table as everything else — which container
+        // these are actually reachable/useful on depends entirely on
+        // which compose service has the spool-dir mounts (backend-service-
+        // mounted), not on route registration here.
+        .route("/api/v1/sandbox/submit", post(sandbox_submit::submit))
+        .route("/api/v1/sandbox/golden-image-status", get(sandbox_submit::golden_image_status))
+        .route("/api/v1/ghidra/submit", post(ghidra_submit::submit))
+        .route("/api/v1/github-analysis/submit", post(github_analysis_submit::submit))
+        // #1612 phase 3b: Payload Workbench orchestrator (recipes, run
+        // creation/reconciliation, child cancel/retry). Same
+        // shared-route-table posture as phase 3a — only useful on
+        // backend-service-mounted, which has the write-capable spool mounts.
+        .route("/api/v1/workbench/analyzers", get(workbench_api::analyzers))
+        .route(
+            "/api/v1/workbench/runs",
+            get(workbench_api::list_runs).post(workbench_api::create_run),
+        )
+        .route("/api/v1/workbench/runs/{id}", get(workbench_api::get_run))
+        .route(
+            "/api/v1/workbench/runs/{id}/children/{analyzer_id}/{action}",
+            post(workbench_api::child_action),
+        )
+        .route(
+            "/api/v1/workbench/recipes",
+            get(workbench_api::list_recipes).post(workbench_api::save_recipe),
+        )
         .layer(middleware::from_fn_with_state(state.clone(), require_service_token));
 
     let app = Router::new()

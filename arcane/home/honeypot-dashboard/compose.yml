@@ -393,7 +393,42 @@ services:
       - ELASTICSEARCH_URL=http://elasticsearch:9200
       - SERVICE_TOKEN=${DASHBOARD_SERVICE_TOKEN:-}
       - CANARYTOKENS_API_URL=${CANARYTOKENS_API_URL:-}
+      # #1612 misc write paths: honeyfs-implant credential provisioning/
+      # rotation. Same reachability posture as CANARYTOKENS_API_URL above --
+      # a plain HTTP URL over the WireGuard tunnel, off unless configured,
+      # no host mount needed (unlike the settings-admin block below).
+      - HONEYFS_IMPLANT_URL=${HONEYFS_IMPLANT_URL:-}
+      - HONEYFS_IMPLANT_TOKEN=${HONEYFS_IMPLANT_TOKEN:-}
+      # #1612 settings admin surface: services control needs the adapter
+      # socket, retention sweep needs WORKER_LOOPS. Both dashboard-state
+      # and services-adapter-socket are mounted directly into
+      # backend-service (not backend-worker) — a tier decision, not an
+      # oversight: they're host-local, single-instance resources, and
+      # backend-service is the single-instance request/response tier,
+      # unlike backend-worker which #1610 requires to stay
+      # host-portable/statelessly scalable.
+      - SERVICES_ADAPTER_SOCKET=/run/services-adapter/control.sock
+      # reports-scheduler (#1612 phase 4b) joins the same list: ES-only
+      # (dashboard-reports-definitions-v1 due-schedule scan +
+      # dashboard-generated-reports-v1 writes), no host mount of its own,
+      # so it belongs on this single-instance tier for the same reason
+      # user-retention-sweep does.
+      - WORKER_LOOPS=user-retention-sweep,reports-scheduler
+      # #1612 payload-bytes on-demand mirror self-heal (payload_bytes.rs):
+      # read-only access to the same capture sources main.go's PAYLOAD_DIRS
+      # wiring reads, so a hash dashboard-payload-bytes-v1 hasn't mirrored
+      # yet can still be served (mirrored on demand) instead of coming back
+      # empty until payload-inventory-worker's next scan. Read-only and
+      # single-instance-safe like the Phase-1 mounts above, so it stays on
+      # backend-service rather than the new backend-service-mounted below.
+      - PAYLOAD_DIRS=/dionaea-lib/binaries,/cowrie-downloads
+      - SCRIPT_PAYLOAD_DIR=/state/script-payloads
       - TZ=Europe/Berlin
+    volumes:
+      - dashboard-state:/state
+      - services-adapter-socket:/run/services-adapter
+      - dionaea-lib:/dionaea-lib:ro
+      - /opt/stacks/apiary/logs/cowrie/downloads:/cowrie-downloads:ro
     networks:
       - honeynet
     security_opt: [no-new-privileges:true]
@@ -401,6 +436,82 @@ services:
     deploy:
       resources:
         limits: {cpus: "2.0", memory: 512M}
+
+  # #1612 mounted worker role (phase 3a/3b): sandbox/ghidra/github-analysis
+  # submission, the Payload Workbench orchestrator, and anything else that
+  # needs to WRITE into a host-side request spool. Deliberately a separate
+  # service from backend-service, not an extra mount bolted onto it: those
+  # spool dirs are the dashboard's only path to root-owned host workers
+  # (services-adapter is a narrow socket; these are real filesystem write
+  # access), a distinct trust/mount boundary worth keeping visible in the
+  # compose file rather than folding into backend-service's Phase-1 (state
+  # + services-adapter-socket) scope. Also distinct from backend-worker:
+  # this one serves HTTP request/response for submissions (LISTEN_ADDR is
+  # network-reachable), where backend-worker only runs background loops and
+  # binds loopback-only. Same image, same route table (routes aren't
+  # container-specific — see main.rs) — reachable internally at
+  # http://backend-service-mounted:8082; BFF wiring is a follow-up (owned
+  # by the parallel frontend track).
+  backend-service-mounted:
+    <<: *runtime-defaults
+    profiles: ["next"]
+    image: apiary-backend:latest
+    container_name: hp-apiary-backend-mounted
+    restart: unless-stopped
+    environment:
+      - LISTEN_ADDR=0.0.0.0:8082
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - SERVICE_TOKEN=${DASHBOARD_SERVICE_TOKEN:-}
+      - SANDBOX_REQUEST_DIR=/sandbox-requests
+      - WINDOWS_SANDBOX_REQUEST_DIR=${WINDOWS_SANDBOX_REQUEST_DIR:-}
+      - GHOSTS_SANDBOX_REQUEST_DIR=${GHOSTS_SANDBOX_REQUEST_DIR:-}
+      - WINDOWS_SANDBOX_RESULTS_DIR=${WINDOWS_SANDBOX_RESULTS_DIR:-}
+      - GHOSTS_SANDBOX_RESULTS_DIR=${GHOSTS_SANDBOX_RESULTS_DIR:-}
+      - GHIDRA_REQUEST_DIR=${GHIDRA_REQUEST_DIR:-}
+      - GHIDRA_RESULTS_DIR=${GHIDRA_RESULTS_DIR:-}
+      - GITHUB_ANALYSIS_REQUEST_DIR=${GITHUB_ANALYSIS_REQUEST_DIR:-}
+      # #1612 phase 3b: Payload Workbench orchestrator. REVDECK_RESULTS_DIR
+      # is also fed by ghidra-worker.py's drain_revdeck() for the "ghidra"
+      # analyzer's embedded RevDeck enrichment (read, not written, here) —
+      # SANDBOX_RESULTS_DIR is read-write-adjacent: this service only reads
+      # it (reconciliation), the host-side worker owns writing job results.
+      - SANDBOX_RESULTS_DIR=/sandbox-results
+      - REVDECK_REQUEST_DIR=${REVDECK_REQUEST_DIR:-}
+      - REVDECK_RESULTS_DIR=${REVDECK_RESULTS_DIR:-}
+      - PAYLOAD_DIRS=/dionaea-lib/binaries,/cowrie-downloads
+      - SCRIPT_PAYLOAD_DIR=/state/script-payloads
+      - TZ=Europe/Berlin
+    volumes:
+      - dashboard-state:/state
+      - dionaea-lib:/dionaea-lib:ro
+      - /opt/stacks/apiary/logs/cowrie/downloads:/cowrie-downloads:ro
+      # Read-write: this service is the one thing that CREATES these
+      # markers. Windows/GHOSTS/Ghidra/GitHub-analysis/Rev·Deck stay inert
+      # (empty env var above) until the operator has actually deployed that
+      # host-side worker, same posture as every other optional spool in
+      # this stack.
+      - /var/lib/honeypot-sandbox/requests/pending:/sandbox-requests
+      - /var/lib/honeypot-windows-sandbox/requests/pending:/windows-sandbox-requests
+      - /var/lib/honeypot-ghosts-sandbox/requests/pending:/ghosts-sandbox-requests
+      - /var/lib/honeypot-windows-sandbox/export:/windows-sandbox-results:ro
+      - /var/lib/honeypot-ghosts-sandbox/export:/ghosts-sandbox-results:ro
+      - /var/lib/honeypot-ghidra/requests/pending:/ghidra-requests
+      - /var/lib/honeypot-ghidra/results:/ghidra-results:ro
+      - /var/lib/honeypot-github/requests/pending:/github-analysis-requests
+      - /var/lib/honeypot-revdeck/requests/pending:/revdeck-requests
+      - /var/lib/honeypot-revdeck/results:/revdeck-results:ro
+      # Read-only: reconciliation polls job-completion state directly off
+      # disk (never through the ES mirror — see workbench_orchestrator.rs's
+      # module comment), the same reasoning golden-image-status already
+      # established for WINDOWS_SANDBOX_RESULTS_DIR above.
+      - /var/lib/honeypot-sandbox/export:/sandbox-results:ro
+    networks:
+      - honeynet
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    deploy:
+      resources:
+        limits: {cpus: "1.0", memory: 512M}
 
   # Worker role (#1610): the same apiary-backend image with WORKER_LOOPS
   # enabled and no service port — movable to any docker host that can
@@ -421,7 +532,50 @@ services:
       - ALERT_CAMPAIGN_SCORE=${HONEYPOT_ALERT_CAMPAIGN_SCORE:-80}
       - SANDBOX_ALERT_RISK_SCORE=${SANDBOX_ALERT_RISK_SCORE:-50}
       - LLM_ANALYSIS_ALERT_SEVERITIES=${LLM_ANALYSIS_ALERT_SEVERITIES:-high,critical}
+      # #1612 host-local alert signals: log-stream sizes, sandbox/ghidra/
+      # cape/github-analysis spool health, and Filebeat stats all need
+      # either a bind-mounted host directory or a service URL only this
+      # worker container has (see volumes: below) — the Go dashboard read
+      # the same paths directly. Windows/GHOSTS sandbox and the three
+      # analysis spools stay off (empty var) unless the operator has
+      # actually deployed that host-side worker, same as the Go tier.
+      - LOG_DIR=/logs
+      - SANDBOX_RESULTS_DIR=/sandbox-results
+      - SANDBOX_REQUEST_DIR=/sandbox-requests
+      - WINDOWS_SANDBOX_RESULTS_DIR=${WINDOWS_SANDBOX_RESULTS_DIR:-}
+      - WINDOWS_SANDBOX_REQUEST_DIR=${WINDOWS_SANDBOX_REQUEST_DIR:-}
+      - GHOSTS_SANDBOX_RESULTS_DIR=${GHOSTS_SANDBOX_RESULTS_DIR:-}
+      - GHOSTS_SANDBOX_REQUEST_DIR=${GHOSTS_SANDBOX_REQUEST_DIR:-}
+      - GHIDRA_RESULTS_DIR=${GHIDRA_RESULTS_DIR:-}
+      - GHIDRA_REQUEST_DIR=${GHIDRA_REQUEST_DIR:-}
+      - GHIDRA_ALERT_RISK_LEVELS=${GHIDRA_ALERT_RISK_LEVELS:-high,critical}
+      - GHIDRA_ALERT_ON_CRYPTO=${GHIDRA_ALERT_ON_CRYPTO:-false}
+      - CAPE_RESULTS_DIR=${CAPE_RESULTS_DIR:-}
+      - CAPE_REQUEST_DIR=${CAPE_REQUEST_DIR:-}
+      - GITHUB_ANALYSIS_RESULTS_DIR=${GITHUB_ANALYSIS_RESULTS_DIR:-}
+      - GITHUB_ANALYSIS_REQUEST_DIR=${GITHUB_ANALYSIS_REQUEST_DIR:-}
+      - GITHUB_ANALYSIS_ALERT_POSITIVES=${GITHUB_ANALYSIS_ALERT_POSITIVES:-10}
+      - FILEBEAT_URL=${FILEBEAT_URL:-http://filebeat:5066}
       - TZ=Europe/Berlin
+    volumes:
+      - type: bind
+        source: /opt/stacks/apiary/logs
+        target: /logs
+        read_only: true
+        bind:
+          propagation: rslave
+      - /var/lib/honeypot-sandbox/export:/sandbox-results:ro
+      - /var/lib/honeypot-sandbox/requests/pending:/sandbox-requests:ro
+      - /var/lib/honeypot-windows-sandbox/export:/windows-sandbox-results:ro
+      - /var/lib/honeypot-windows-sandbox/requests/pending:/windows-sandbox-requests:ro
+      - /var/lib/honeypot-ghosts-sandbox/export:/ghosts-sandbox-results:ro
+      - /var/lib/honeypot-ghosts-sandbox/requests/pending:/ghosts-sandbox-requests:ro
+      - /var/lib/honeypot-ghidra/results:/ghidra-results:ro
+      - /var/lib/honeypot-ghidra/requests/pending:/ghidra-requests:ro
+      - /var/lib/honeypot-cape/results:/cape-results:ro
+      - /var/lib/honeypot-cape/requests/pending:/cape-requests:ro
+      - /var/lib/honeypot-github/results:/github-analysis-results:ro
+      - /var/lib/honeypot-github/requests/pending:/github-analysis-requests:ro
     networks:
       - honeynet
     security_opt: [no-new-privileges:true]
