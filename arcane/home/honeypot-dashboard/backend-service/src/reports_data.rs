@@ -124,10 +124,16 @@ fn scope_filters(scope: &ReportScope) -> Vec<Value> {
     filters
 }
 
+/// Mirrors dashboard/payload_analysis.go's riskLevel — the one canonical
+/// risk scale this dashboard reuses across sandbox/payload/report scoring
+/// (report_pdf.go's reportDataFor calls the very same function). Any
+/// divergence here would make a ported report show a different risk word
+/// for the same score than the Go tier does/did.
 fn risk_level(score: i64) -> &'static str {
     match score {
-        s if s >= 70 => "high",
-        s if s >= 40 => "medium",
+        s if s >= 75 => "critical",
+        s if s >= 50 => "high",
+        s if s >= 25 => "medium",
         _ => "low",
     }
 }
@@ -326,7 +332,7 @@ pub async fn report_data_for(
                 {"range": {"suricata.eve.alert.severity": {"lte": 2}}}
             ]}}},
             "logins": {"filter": {"terms": {"honeypot.event": ["login", "auth_attempt"]}}},
-            "payloads": {"filter": {"exists": {"field": "honeypot.sha256"}}},
+            "payloads": {"filter": {"exists": {"field": "honeypot.shasum"}}},
             "commands": {"filter": {"exists": {"field": "honeypot.canonical_command"}}},
             "sessions": {"cardinality": {"field": "honeypot.session"}},
             "first_seen": {"min": {"field": "@timestamp"}},
