@@ -10,12 +10,16 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AgentCampaignsRouteImport } from './routes/agent-campaigns'
 import { Route as AlertsRouteImport } from './routes/alerts'
 import { Route as AttackersRouteImport } from './routes/attackers'
+import { Route as AuthEventsRouteImport } from './routes/auth-events'
 import { Route as CampaignsRouteImport } from './routes/campaigns'
 import { Route as ClustersRouteImport } from './routes/clusters'
+import { Route as CommandsRouteImport } from './routes/commands'
 import { Route as EventsRouteImport } from './routes/events'
 import { Route as IpsRouteImport } from './routes/ips'
+import { Route as MlAnomaliesRouteImport } from './routes/ml-anomalies'
 import { Route as PayloadsRouteImport } from './routes/payloads'
 import { Route as RecordingsRouteImport } from './routes/recordings'
 import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
@@ -25,6 +29,11 @@ import { Route as AuthLogoutRouteImport } from './routes/auth/logout'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentCampaignsRoute = AgentCampaignsRouteImport.update({
+  id: '/agent-campaigns',
+  path: '/agent-campaigns',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AlertsRoute = AlertsRouteImport.update({
@@ -37,6 +46,11 @@ const AttackersRoute = AttackersRouteImport.update({
   path: '/attackers',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthEventsRoute = AuthEventsRouteImport.update({
+  id: '/auth-events',
+  path: '/auth-events',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CampaignsRoute = CampaignsRouteImport.update({
   id: '/campaigns',
   path: '/campaigns',
@@ -47,6 +61,11 @@ const ClustersRoute = ClustersRouteImport.update({
   path: '/clusters',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CommandsRoute = CommandsRouteImport.update({
+  id: '/commands',
+  path: '/commands',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const EventsRoute = EventsRouteImport.update({
   id: '/events',
   path: '/events',
@@ -55,6 +74,11 @@ const EventsRoute = EventsRouteImport.update({
 const IpsRoute = IpsRouteImport.update({
   id: '/ips',
   path: '/ips',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MlAnomaliesRoute = MlAnomaliesRouteImport.update({
+  id: '/ml-anomalies',
+  path: '/ml-anomalies',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PayloadsRoute = PayloadsRouteImport.update({
@@ -85,12 +109,16 @@ const AuthLogoutRoute = AuthLogoutRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/agent-campaigns': typeof AgentCampaignsRoute
   '/alerts': typeof AlertsRoute
   '/attackers': typeof AttackersRoute
+  '/auth-events': typeof AuthEventsRoute
   '/campaigns': typeof CampaignsRoute
   '/clusters': typeof ClustersRoute
+  '/commands': typeof CommandsRoute
   '/events': typeof EventsRoute
   '/ips': typeof IpsRoute
+  '/ml-anomalies': typeof MlAnomaliesRoute
   '/payloads': typeof PayloadsRoute
   '/recordings': typeof RecordingsRoute
   '/auth/callback': typeof AuthCallbackRoute
@@ -99,12 +127,16 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/agent-campaigns': typeof AgentCampaignsRoute
   '/alerts': typeof AlertsRoute
   '/attackers': typeof AttackersRoute
+  '/auth-events': typeof AuthEventsRoute
   '/campaigns': typeof CampaignsRoute
   '/clusters': typeof ClustersRoute
+  '/commands': typeof CommandsRoute
   '/events': typeof EventsRoute
   '/ips': typeof IpsRoute
+  '/ml-anomalies': typeof MlAnomaliesRoute
   '/payloads': typeof PayloadsRoute
   '/recordings': typeof RecordingsRoute
   '/auth/callback': typeof AuthCallbackRoute
@@ -114,12 +146,16 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/agent-campaigns': typeof AgentCampaignsRoute
   '/alerts': typeof AlertsRoute
   '/attackers': typeof AttackersRoute
+  '/auth-events': typeof AuthEventsRoute
   '/campaigns': typeof CampaignsRoute
   '/clusters': typeof ClustersRoute
+  '/commands': typeof CommandsRoute
   '/events': typeof EventsRoute
   '/ips': typeof IpsRoute
+  '/ml-anomalies': typeof MlAnomaliesRoute
   '/payloads': typeof PayloadsRoute
   '/recordings': typeof RecordingsRoute
   '/auth/callback': typeof AuthCallbackRoute
@@ -130,12 +166,16 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/agent-campaigns'
     | '/alerts'
     | '/attackers'
+    | '/auth-events'
     | '/campaigns'
     | '/clusters'
+    | '/commands'
     | '/events'
     | '/ips'
+    | '/ml-anomalies'
     | '/payloads'
     | '/recordings'
     | '/auth/callback'
@@ -144,12 +184,16 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/agent-campaigns'
     | '/alerts'
     | '/attackers'
+    | '/auth-events'
     | '/campaigns'
     | '/clusters'
+    | '/commands'
     | '/events'
     | '/ips'
+    | '/ml-anomalies'
     | '/payloads'
     | '/recordings'
     | '/auth/callback'
@@ -158,12 +202,16 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/agent-campaigns'
     | '/alerts'
     | '/attackers'
+    | '/auth-events'
     | '/campaigns'
     | '/clusters'
+    | '/commands'
     | '/events'
     | '/ips'
+    | '/ml-anomalies'
     | '/payloads'
     | '/recordings'
     | '/auth/callback'
@@ -173,12 +221,16 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AgentCampaignsRoute: typeof AgentCampaignsRoute
   AlertsRoute: typeof AlertsRoute
   AttackersRoute: typeof AttackersRoute
+  AuthEventsRoute: typeof AuthEventsRoute
   CampaignsRoute: typeof CampaignsRoute
   ClustersRoute: typeof ClustersRoute
+  CommandsRoute: typeof CommandsRoute
   EventsRoute: typeof EventsRoute
   IpsRoute: typeof IpsRoute
+  MlAnomaliesRoute: typeof MlAnomaliesRoute
   PayloadsRoute: typeof PayloadsRoute
   RecordingsRoute: typeof RecordingsRoute
   AuthCallbackRoute: typeof AuthCallbackRoute
@@ -195,6 +247,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/agent-campaigns': {
+      id: '/agent-campaigns'
+      path: '/agent-campaigns'
+      fullPath: '/agent-campaigns'
+      preLoaderRoute: typeof AgentCampaignsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/alerts': {
       id: '/alerts'
       path: '/alerts'
@@ -207,6 +266,13 @@ declare module '@tanstack/react-router' {
       path: '/attackers'
       fullPath: '/attackers'
       preLoaderRoute: typeof AttackersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth-events': {
+      id: '/auth-events'
+      path: '/auth-events'
+      fullPath: '/auth-events'
+      preLoaderRoute: typeof AuthEventsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/campaigns': {
@@ -223,6 +289,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ClustersRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/commands': {
+      id: '/commands'
+      path: '/commands'
+      fullPath: '/commands'
+      preLoaderRoute: typeof CommandsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/events': {
       id: '/events'
       path: '/events'
@@ -235,6 +308,13 @@ declare module '@tanstack/react-router' {
       path: '/ips'
       fullPath: '/ips'
       preLoaderRoute: typeof IpsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/ml-anomalies': {
+      id: '/ml-anomalies'
+      path: '/ml-anomalies'
+      fullPath: '/ml-anomalies'
+      preLoaderRoute: typeof MlAnomaliesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/payloads': {
@@ -277,12 +357,16 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AgentCampaignsRoute: AgentCampaignsRoute,
   AlertsRoute: AlertsRoute,
   AttackersRoute: AttackersRoute,
+  AuthEventsRoute: AuthEventsRoute,
   CampaignsRoute: CampaignsRoute,
   ClustersRoute: ClustersRoute,
+  CommandsRoute: CommandsRoute,
   EventsRoute: EventsRoute,
   IpsRoute: IpsRoute,
+  MlAnomaliesRoute: MlAnomaliesRoute,
   PayloadsRoute: PayloadsRoute,
   RecordingsRoute: RecordingsRoute,
   AuthCallbackRoute: AuthCallbackRoute,

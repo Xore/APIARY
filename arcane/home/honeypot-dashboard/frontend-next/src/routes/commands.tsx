@@ -1,0 +1,101 @@
+// Executed commands — the events pipeline filtered to honeypot.event=
+// "command"; the full record rides the inspector.
+import { createFileRoute } from '@tanstack/react-router'
+import { createServerFn } from '@tanstack/react-start'
+import { useCallback, useEffect, useState } from 'react'
+import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+
+type EventRow = {
+  time: string
+  sensor: string
+  src_ip: string
+  country: string
+  port: string
+  proto: string
+  detail: string
+  session: string
+  record: Record<string, unknown>
+}
+
+type Page = { total: number; offset: number; rows: EventRow[] }
+
+const fetchCommands = createServerFn({ method: 'GET' })
+  .inputValidator((input: { offset: number }) => input)
+  .handler(async ({ data }): Promise<Page | null> => {
+    const { serviceJSON } = await import('../lib/backend.server')
+    return serviceJSON<Page>(`/api/v1/events?kind=command&offset=${data.offset}&size=25`)
+  })
+
+export const Route = createFileRoute('/commands')({
+  loader: async () => ({ first: fetchCommands({ data: { offset: 0 } }) }),
+  component: Commands,
+})
+
+function commandText(record: Record<string, unknown>): string {
+  const hp = record.honeypot as Record<string, unknown> | undefined
+  for (const key of ['input', 'command', 'data', 'message']) {
+    const value = hp?.[key]
+    if (typeof value === 'string' && value) return value
+  }
+  return ''
+}
+
+const COLUMNS: Column<EventRow>[] = [
+  { header: 'seen', render: (row) => row.time.replace('T', ' ').slice(0, 19) },
+  { header: 'sensor', render: (row) => <span className="badge badge--muted">{row.sensor}</span> },
+  { header: 'source ip', className: 'v', render: (row) => row.src_ip },
+  { header: 'command', className: 'v', render: (row) => <code>{commandText(row.record) || row.detail}</code> },
+  { header: 'session', detail: true, render: (row) => row.session },
+  {
+    header: 'record',
+    detail: true,
+    render: (row) => <pre className="hp-md__preview">{JSON.stringify(row.record, null, 2)}</pre>,
+  },
+]
+
+function Commands() {
+  const { first } = Route.useLoaderData()
+  const [rows, setRows] = useState<EventRow[] | null>(null)
+  const [total, setTotal] = useState(0)
+  const [loadingMore, setLoadingMore] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    first.then((page) => {
+      if (cancelled || !page) return
+      setRows(page.rows)
+      setTotal(page.total)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [first])
+  const viewMore = useCallback(async () => {
+    if (!rows || loadingMore) return
+    setLoadingMore(true)
+    try {
+      const page = await fetchCommands({ data: { offset: rows.length } })
+      if (page) setRows((current) => [...(current ?? []), ...page.rows])
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [rows, loadingMore])
+  return (
+    <>
+      <InvestigateHeader
+        label="Attacker behavior"
+        title="Executed commands"
+        subtitle="Every shell command attackers typed into interactive honeypots, newest first."
+        chips={<span className="chip">{total.toLocaleString('en-US')} commands</span>}
+      />
+      <MasterDetailTable
+        rows={rows}
+        columns={COLUMNS}
+        rowKey={(row, index) => `${row.time}-${index}`}
+        total={total}
+        onViewMore={viewMore}
+        loadingMore={loadingMore}
+        inspectorTitle="Command details"
+      />
+    </>
+  )
+}

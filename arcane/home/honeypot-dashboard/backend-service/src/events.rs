@@ -24,6 +24,8 @@ pub struct EventsQuery {
     pub country: Option<String>,
     pub port: Option<String>,
     pub proto: Option<String>,
+    /// honeypot.event kind filter ("command", "login", ...).
+    pub kind: Option<String>,
     /// Go-style duration ("24h", "7d") relative to now; defaults to the
     /// explorer's rolling window.
     pub since: Option<String>,
@@ -85,6 +87,9 @@ pub async fn list(
     }
     if let Some(proto) = q.proto.as_deref().filter(|v| !v.is_empty()) {
         filters.push(json!({"term": {"network.protocol": proto}}));
+    }
+    if let Some(kind) = q.kind.as_deref().filter(|v| !v.is_empty()) {
+        filters.push(json!({"term": {"honeypot.event": kind}}));
     }
 
     let body = json!({

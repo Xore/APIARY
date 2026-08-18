@@ -64,7 +64,7 @@ pub async fn sources(
                 "aggs": {
                     "country": {"terms": {"field": "source.geo.country_iso_code", "size": 1}},
                     "sensors": {"terms": {"field": "event.sensor", "size": 30}},
-                    "logins": {"filter": {"terms": {"honeypot.event": ["login.failed", "login.success", "auth_attempt"]}}},
+                    "logins": {"filter": {"terms": {"honeypot.event": ["login", "auth_attempt"]}}},
                     "sessions": {"cardinality": {"field": "honeypot.session"}},
                     "first": {"min": {"field": "@timestamp"}},
                     "last": {"max": {"field": "@timestamp"}}
