@@ -49,6 +49,7 @@ mod llm_search;
 mod overview;
 mod payload_bytes;
 mod payload_detail;
+mod payload_inventory;
 mod payload_kind;
 mod payload_paths;
 mod preferences;

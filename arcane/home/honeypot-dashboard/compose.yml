@@ -412,8 +412,13 @@ services:
       # (dashboard-reports-definitions-v1 due-schedule scan +
       # dashboard-generated-reports-v1 writes), no host mount of its own,
       # so it belongs on this single-instance tier for the same reason
-      # user-retention-sweep does.
-      - WORKER_LOOPS=user-retention-sweep,reports-scheduler
+      # user-retention-sweep does. payload-inventory (#1610) joins for the
+      # opposite-but-compatible reason: it needs the read-only PAYLOAD_DIRS
+      # mount below, which this service already carries for the on-demand
+      # bytes-mirror self-heal — no new mount, just a second consumer of one
+      # already here.
+      - WORKER_LOOPS=user-retention-sweep,reports-scheduler,payload-inventory
+      - SCAN_INTERVAL=${PAYLOAD_INVENTORY_SCAN_INTERVAL:-5m}
       # #1612 payload-bytes on-demand mirror self-heal (payload_bytes.rs):
       # read-only access to the same capture sources main.go's PAYLOAD_DIRS
       # wiring reads, so a hash dashboard-payload-bytes-v1 hasn't mirrored
