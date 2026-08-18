@@ -45,6 +45,7 @@ mod payload_kind;
 mod payload_paths;
 mod preferences;
 mod replay;
+mod report_pdf;
 mod reports;
 mod reporter_stats;
 mod sandbox_submit;
