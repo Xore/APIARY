@@ -64,6 +64,17 @@ fn str(e: &Value, key: &str) -> String {
     e.get(key).and_then(Value::as_str).unwrap_or("").to_string()
 }
 
+/// #1611 workstream G: telnet attackers embed NUL/control bytes in
+/// credentials; stripped here (at ingest, before the enriched line is
+/// written) rather than only display-side so every downstream consumer —
+/// ES terms aggs, attackers-v1 `credentials`, search grouping — sees one
+/// clean bucket instead of "root" and "root\0\0\0" splitting into two.
+/// Mirrors dashboard.rs's `clean()`, kept there unchanged for historical
+/// documents written before this fix landed.
+fn strip_nul_and_control(value: &str) -> String {
+    value.chars().filter(|c| !c.is_control()).collect::<String>().replace("\\x00", "")
+}
+
 fn first_non_empty(vals: &[&str]) -> String {
     vals.iter().find(|v| !v.is_empty()).map(|v| v.to_string()).unwrap_or_default()
 }
@@ -105,7 +116,19 @@ fn promote_cowrie_fields(e: &mut Value) -> bool {
     let mut changed = false;
     match eid.as_str() {
         "cowrie.login.success" | "cowrie.login.failed" => {
-            if set_creds(e, &str(e, "username"), &str(e, "password")) {
+            let raw_user = str(e, "username");
+            let raw_pass = str(e, "password");
+            let user = strip_nul_and_control(&raw_user);
+            let pass = strip_nul_and_control(&raw_pass);
+            if user != raw_user {
+                e["username"] = Value::from(user.clone());
+                changed = true;
+            }
+            if pass != raw_pass {
+                e["password"] = Value::from(pass.clone());
+                changed = true;
+            }
+            if set_creds(e, &user, &pass) {
                 changed = true;
             }
             let fp = str(e, "fingerprint");
@@ -398,6 +421,24 @@ mod tests {
         assert_eq!(e["canonical_user"], "root");
         assert_eq!(e["canonical_pass"], "toor");
         assert_eq!(e["canonical_fingerprint"], "aa:bb");
+    }
+
+    #[test]
+    fn cowrie_login_strips_nul_and_control_bytes_from_raw_and_canonical_creds() {
+        // Real telnet-attacker shape: trailing NULs on the username,
+        // embedded literal "\x00" text (not an actual NUL byte) on the
+        // password -- both forms dashboard.rs's own display-side clean()
+        // already defends against.
+        let mut e = json!({
+            "eventid": "cowrie.login.failed",
+            "username": "root\u{0}\u{0}\u{0}",
+            "password": "toor\\x00"
+        });
+        assert!(promote_canonical_fields("cowrie", &mut e));
+        assert_eq!(e["username"], "root");
+        assert_eq!(e["password"], "toor");
+        assert_eq!(e["canonical_user"], "root");
+        assert_eq!(e["canonical_pass"], "toor");
     }
 
     #[test]
