@@ -30,6 +30,8 @@ mod detail;
 mod es;
 mod events;
 mod fusion;
+mod ghidra_submit;
+mod github_analysis_submit;
 mod health;
 mod investigate;
 mod ip_block;
@@ -37,11 +39,15 @@ mod kill_chain;
 mod live;
 mod llm_search;
 mod overview;
+mod payload_bytes;
 mod payload_detail;
+mod payload_kind;
+mod payload_paths;
 mod preferences;
 mod replay;
 mod reports;
 mod reporter_stats;
+mod sandbox_submit;
 mod sensors;
 mod search;
 mod services_control;
@@ -193,6 +199,16 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/payloads", get(stores::payloads))
         .route("/api/v1/payloads/{hash}", get(payload_detail::detail))
         .route("/api/v1/store/{name}", get(stores::generic))
+        // #1612 mounted worker role (phase 3a): sandbox/ghidra/github-
+        // analysis submission + golden-image status. Registered in the
+        // same shared route table as everything else — which container
+        // these are actually reachable/useful on depends entirely on
+        // which compose service has the spool-dir mounts (backend-service-
+        // mounted), not on route registration here.
+        .route("/api/v1/sandbox/submit", post(sandbox_submit::submit))
+        .route("/api/v1/sandbox/golden-image-status", get(sandbox_submit::golden_image_status))
+        .route("/api/v1/ghidra/submit", post(ghidra_submit::submit))
+        .route("/api/v1/github-analysis/submit", post(github_analysis_submit::submit))
         .layer(middleware::from_fn_with_state(state.clone(), require_service_token));
 
     let app = Router::new()

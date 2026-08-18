@@ -75,7 +75,20 @@ pub async fn detail(
     )
     .map_err(bad_gateway)?;
 
-    let bytes_source = first_hit(&bytes);
+    let mut bytes_source = first_hit(&bytes);
+    if bytes_source.is_none() {
+        // #1612 self-heal: this replica hasn't mirrored this hash yet —
+        // mirror on demand from disk rather than serving an empty preview
+        // until payload-inventory-worker's next scan cycle catches it.
+        crate::payload_bytes::ensure_mirrored(&state, &hash).await;
+        if let Ok(result) = state
+            .es
+            .search_index(&["dashboard-payload-bytes-v1"], json!({"size": 1, "query": {"term": {"hash": hash}}}))
+            .await
+        {
+            bytes_source = first_hit(&result);
+        }
+    }
     let (size_bytes, hex_preview) = match &bytes_source {
         Some(source) => {
             let size = source["size_bytes"].as_u64().unwrap_or(0);
