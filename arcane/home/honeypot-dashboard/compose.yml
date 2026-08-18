@@ -526,7 +526,14 @@ services:
     environment:
       - LISTEN_ADDR=127.0.0.1:8099
       - ELASTICSEARCH_URL=http://elasticsearch:9200
-      - WORKER_LOOPS=alert-notifier
+      # #1610: attacker-identity is pure ES (no host mounts, no local
+      # state — durable entities live in attackers-v1), so it fits this
+      # already-stateless loop container directly, unlike es-results-
+      # importer (needs root+DAC_READ_SEARCH for root-owned result dirs
+      # plus a persistent dedup state file — its own separate service).
+      - WORKER_LOOPS=alert-notifier,attacker-identity
+      - EVIDENCE_WINDOW=${EVIDENCE_WINDOW:-6h}
+      - ATTACKER_IDENTITY_RUN_INTERVAL=${ATTACKER_IDENTITY_RUN_INTERVAL:-15m}
       - ALERT_WEBHOOK_URL=${HONEYPOT_ALERT_WEBHOOK_URL:-}
       - ALERT_COOLDOWN=${HONEYPOT_ALERT_COOLDOWN:-6h}
       - ALERT_CAMPAIGN_SCORE=${HONEYPOT_ALERT_CAMPAIGN_SCORE:-80}
