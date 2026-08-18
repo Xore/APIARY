@@ -1,0 +1,21 @@
+# apiary-backend — the Rust service tier (#1608). Multi-stage: cargo
+# release build, then a slim runtime with just the binary. rustls-only
+# (no OpenSSL); ca-certificates + curl for TLS trust and the container
+# healthcheck.
+FROM rust:1-slim-bookworm AS build
+WORKDIR /src
+COPY Cargo.toml Cargo.lock* ./
+COPY src ./src
+RUN cargo build --release
+
+FROM debian:bookworm-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /src/target/release/apiary-backend /usr/local/bin/apiary-backend
+ENV LISTEN_ADDR=0.0.0.0:8081
+EXPOSE 8081
+HEALTHCHECK --interval=15s --timeout=5s --retries=5 --start-period=20s \
+    CMD curl -sf http://127.0.0.1:8081/healthz || exit 1
+USER nobody
+CMD ["apiary-backend"]

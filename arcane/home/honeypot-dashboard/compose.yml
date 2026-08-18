@@ -367,6 +367,74 @@ services:
           memory: 2G
 
 
+  # ------------------------------------------------------------------
+  # Modernization port (#1608): the replacement stack, behind the "next"
+  # profile until cutover (deploy only at full parity — no beta URL, no
+  # proxying). At cutover: move the 19090 port mapping from `dashboard`
+  # to `dashboard-next`, drop the profile lines, retire `dashboard`.
+  #
+  # Cross-host readiness (per Xore): both tiers are stateless,
+  # env-configured containers — session/OIDC state lives in the
+  # oidc-sessions valkey (network-reachable, no localhost sockets), data
+  # access goes through BACKEND_URL/BFF_INTERNAL_URL, so either tier can
+  # move to another docker host by pointing those URLs across the
+  # WireGuard mesh, and the BFF can scale horizontally (SERVE_MODE
+  # splits frontend/bff; no compose resource limit on the BFF tier).
+  # ------------------------------------------------------------------
+  backend-service:
+    <<: *runtime-defaults
+    profiles: ["next"]
+    build: ./backend-service
+    image: apiary-backend:latest
+    container_name: hp-apiary-backend
+    restart: unless-stopped
+    environment:
+      - LISTEN_ADDR=0.0.0.0:8081
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - SERVICE_TOKEN=${DASHBOARD_SERVICE_TOKEN:-}
+      - CANARYTOKENS_API_URL=${CANARYTOKENS_API_URL:-}
+      - TZ=Europe/Berlin
+    networks:
+      - honeynet
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    deploy:
+      resources:
+        limits: {cpus: "2.0", memory: 512M}
+
+  dashboard-next:
+    <<: *runtime-defaults
+    profiles: ["next"]
+    build: ./frontend-next
+    image: apiary-dashboard-next:latest
+    container_name: hp-dashboard-next
+    restart: unless-stopped
+    depends_on:
+      oidc-sessions:
+        condition: service_healthy
+    environment:
+      - PORT=8080
+      - SERVE_MODE=${DASHBOARD_SERVE_MODE:-all}
+      - BACKEND_URL=http://backend-service:8081
+      - BFF_INTERNAL_URL=${BFF_INTERNAL_URL:-}
+      - SERVICE_TOKEN=${DASHBOARD_SERVICE_TOKEN:-}
+      - OIDC_ISSUER_URL=${OIDC_ISSUER_URL:-https://auth.example.invalid/realms/apiary}
+      - OIDC_EXTERNAL_URL=${OIDC_EXTERNAL_URL:-https://honeypot.example.invalid}
+      - OIDC_CLIENT_ID=apiary-dashboard
+      - OIDC_CLIENT_SECRET_FILE=/run/dashboard-secrets/oidc-client-secret
+      - OIDC_SESSION_REDIS_URL=redis://oidc-sessions:6379/0
+      - TZ=Europe/Berlin
+    volumes:
+      - ${DASHBOARD_SECRETS_DIR:-/var/dockge/stacks/honeypot-dashboard/secrets}:/run/dashboard-secrets:ro
+    networks:
+      - honeynet
+      - oidc-session
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    # Deliberately NO resource limit on the BFF/SSR tier (per Xore): it
+    # must scale with load rather than get throttled; horizontal scaling
+    # happens by adding replicas/hosts, not by capping this one.
+
   # #378: ships Ghidra/sandbox/GitHub-analysis/workbench-run results into
   # Elasticsearch (ghidra-analysis-v1/sandbox-analysis-v1/github-analysis-v1/
   # workbench-runs-v1, see analysis/elasticsearch-setup.sh) -- previously
