@@ -93,6 +93,11 @@ pub fn spawn_enabled(state: AppState) {
                 tokio::spawn(async move { retention_sweep_loop(state).await });
                 tracing::info!("worker loop enabled: user-retention-sweep");
             }
+            "reports-scheduler" => {
+                let state = state.clone();
+                tokio::spawn(async move { reports_scheduler_loop(state).await });
+                tracing::info!("worker loop enabled: reports-scheduler");
+            }
             other => tracing::warn!(loop_name = other, "unknown worker loop requested"),
         }
     }
@@ -867,6 +872,43 @@ async fn retention_sweep_once(state: &AppState) {
         });
     }
     tracing::info!(removed = removed_count, "user retention sweep removed orphaned projection(s)");
+}
+
+const REPORTS_SCHEDULER_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Ports reports_scheduler.go's reportScheduleLoop: every tick, render
+/// every due definition through the same pipeline as the manual generate
+/// endpoint (origin "schedule"), then advance its schedule. Unlike Go's
+/// goroutine model, a panic inside this spawned task can't take the whole
+/// process down (tokio isolates it), so there's no need to port
+/// runDueReportsRecovered's explicit recover() wrapping — Result::Err from
+/// one definition's render simply doesn't stop the rest of the tick.
+async fn reports_scheduler_loop(state: AppState) {
+    let mut ticker = tokio::time::interval(REPORTS_SCHEDULER_INTERVAL);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        ticker.tick().await;
+        reports_scheduler_tick(&state).await;
+    }
+}
+
+async fn reports_scheduler_tick(state: &AppState) {
+    let due = match crate::reports_store::due_definitions(state).await {
+        Ok(due) => due,
+        Err(error) => {
+            tracing::warn!(%error, "reports scheduler: due-definitions fetch failed");
+            return;
+        }
+    };
+    for definition in due {
+        let ran_at = chrono::Utc::now();
+        let result = crate::reports_api::render_definition_to_stored(state, &definition, "schedule").await;
+        let success = result.is_ok();
+        if let Err(error) = result {
+            tracing::warn!(id = %definition.id, name = %definition.name, %error, "scheduled report failed");
+        }
+        crate::reports_store::mark_scheduled_run(state, &definition.id, ran_at, success).await;
+    }
 }
 
 async fn alert_notifier_loop(state: AppState) {

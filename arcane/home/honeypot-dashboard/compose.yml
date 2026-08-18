@@ -402,7 +402,12 @@ services:
       # unlike backend-worker which #1610 requires to stay
       # host-portable/statelessly scalable.
       - SERVICES_ADAPTER_SOCKET=/run/services-adapter/control.sock
-      - WORKER_LOOPS=user-retention-sweep
+      # reports-scheduler (#1612 phase 4b) joins the same list: ES-only
+      # (dashboard-reports-definitions-v1 due-schedule scan +
+      # dashboard-generated-reports-v1 writes), no host mount of its own,
+      # so it belongs on this single-instance tier for the same reason
+      # user-retention-sweep does.
+      - WORKER_LOOPS=user-retention-sweep,reports-scheduler
       # #1612 payload-bytes on-demand mirror self-heal (payload_bytes.rs):
       # read-only access to the same capture sources main.go's PAYLOAD_DIRS
       # wiring reads, so a hash dashboard-payload-bytes-v1 hasn't mirrored

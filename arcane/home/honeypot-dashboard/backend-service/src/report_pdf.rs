@@ -15,12 +15,7 @@
 //! (the Go tier's `reportDataFor`) is a later phase's job.
 //!
 //! No route calls `render_report_pdf` yet — the definitions API, generate
-//! endpoint, and `ReportData` assembly land in #1612 phase 4b. Unlike a
-//! library crate, this binary's dead_code lint treats an unreferenced `pub`
-//! item as genuinely dead, so the whole module is allowed here rather than
-//! wired to a placeholder caller; phase 4b's route removes the need for
-//! this once it starts calling in.
-#![allow(dead_code)]
+//! endpoint, and `ReportData` assembly land in #1612 phase 4b.
 
 use std::fmt::Write as _;
 

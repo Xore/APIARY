@@ -229,6 +229,23 @@ impl Es {
         Ok(())
     }
 
+    /// Deletes one document by id. Ok(()) even if it was already gone
+    /// (404) — the same idempotent-delete posture Go's docDelete callers
+    /// (pruneGenerated's best-effort retention sweep) rely on.
+    pub async fn delete_doc(&self, index: &str, id: &str) -> anyhow::Result<()> {
+        let response = self
+            .client
+            .delete(elasticsearch::DeleteParts::IndexId(index, id))
+            .send()
+            .await?;
+        let status = response.status_code();
+        if !status.is_success() && status.as_u16() != 404 {
+            let body = response.json::<Value>().await.unwrap_or_default();
+            anyhow::bail!("elasticsearch delete {}: {}", status, body);
+        }
+        Ok(())
+    }
+
     pub async fn ping(&self) -> bool {
         self.client
             .ping()

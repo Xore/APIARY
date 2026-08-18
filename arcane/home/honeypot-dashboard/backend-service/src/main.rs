@@ -47,6 +47,9 @@ mod preferences;
 mod replay;
 mod report_pdf;
 mod reports;
+mod reports_api;
+mod reports_data;
+mod reports_store;
 mod reporter_stats;
 mod sandbox_submit;
 mod sensors;
@@ -175,6 +178,21 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/ml-anomalies/ack", post(detail::ml_anomaly_ack))
         .route("/api/v1/ml-anomalies/acks", get(detail::ml_anomaly_acks))
         .route("/api/v1/reports/{id}/pdf", get(reports::pdf))
+        // #1612 phase 4: Reports studio — template/element catalog,
+        // definitions CRUD, and on-demand generate. See reports_store.rs's
+        // module doc comment for the sandbox/payload/ghidra scope decision.
+        .route("/api/v1/reports/templates", get(reports_api::templates))
+        .route(
+            "/api/v1/reports/definitions",
+            get(reports_api::list_definitions).post(reports_api::create_definition),
+        )
+        .route(
+            "/api/v1/reports/definitions/{id}",
+            get(reports_api::get_definition)
+                .put(reports_api::replace_definition)
+                .delete(reports_api::delete_definition),
+        )
+        .route("/api/v1/reports/definitions/{id}/generate", post(reports_api::generate))
         .route("/api/v1/artifacts/{kind}/{key}", get(artifacts::list))
         .route("/api/v1/artifacts/{kind}/{key}/{filename}", get(artifacts::download))
         .route("/api/v1/charts/kill-chain-sankey", get(kill_chain::sankey))
