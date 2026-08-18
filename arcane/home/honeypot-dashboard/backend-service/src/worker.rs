@@ -108,6 +108,11 @@ pub fn spawn_enabled(state: AppState) {
                 tokio::spawn(async move { crate::attacker_identity::attacker_identity_loop(state).await });
                 tracing::info!("worker loop enabled: attacker-identity");
             }
+            "agent-intrusion" => {
+                let state = state.clone();
+                tokio::spawn(async move { crate::agent_intrusion::agent_intrusion_loop(state).await });
+                tracing::info!("worker loop enabled: agent-intrusion");
+            }
             other => tracing::warn!(loop_name = other, "unknown worker loop requested"),
         }
     }

@@ -531,9 +531,16 @@ services:
       # already-stateless loop container directly, unlike es-results-
       # importer (needs root+DAC_READ_SEARCH for root-owned result dirs
       # plus a persistent dedup state file — its own separate service).
-      - WORKER_LOOPS=alert-notifier,attacker-identity
+      # agent-intrusion (#1610): same "pure ES, no host mounts, no local
+      # state" shape as attacker-identity above — durable campaign verdicts
+      # live in agent-intrusion-campaigns, everything else is recomputed
+      # from the rolling fetch window each cycle.
+      - WORKER_LOOPS=alert-notifier,attacker-identity,agent-intrusion
       - EVIDENCE_WINDOW=${EVIDENCE_WINDOW:-6h}
       - ATTACKER_IDENTITY_RUN_INTERVAL=${ATTACKER_IDENTITY_RUN_INTERVAL:-15m}
+      - AGENT_INTRUSION_POLL_INTERVAL=${AGENT_INTRUSION_POLL_INTERVAL:-300}
+      - AGENT_INTRUSION_MAX_EVENTS_PER_SOURCE=${AGENT_INTRUSION_MAX_EVENTS_PER_SOURCE:-10000}
+      - AGENT_INTRUSION_FETCH_WINDOW_DAYS=${AGENT_INTRUSION_FETCH_WINDOW_DAYS:-10}
       - ALERT_WEBHOOK_URL=${HONEYPOT_ALERT_WEBHOOK_URL:-}
       - ALERT_COOLDOWN=${HONEYPOT_ALERT_COOLDOWN:-6h}
       - ALERT_CAMPAIGN_SCORE=${HONEYPOT_ALERT_CAMPAIGN_SCORE:-80}

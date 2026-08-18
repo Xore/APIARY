@@ -40,6 +40,13 @@ rand = "0.9"
 # svg/...) is disabled to skip printpdf's azul-layout+taffy+hyphenation
 # dependency chain entirely.
 printpdf = { version = "0.12.6", default-features = false }
+# agent-intrusion-worker port (#1610): bounded_decode needs real gzip/zlib
+# decompression (no equivalent in std) to verify a decoded payload actually
+# unpacks, not just that it base64-decodes.
+flate2 = "1"
+# rule_encoded_egress_external needs base32 to try-decode a DNS query label
+# (the campaign's own DNS-transport exfil shape uses base32, not base64).
+data-encoding = "2"
 
 [profile.release]
 lto = "thin"
