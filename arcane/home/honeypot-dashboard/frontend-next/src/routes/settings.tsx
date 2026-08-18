@@ -11,15 +11,97 @@ import { getSessionUser } from '../lib/auth'
 
 type Storage = { cluster_status: string; index_count: number; doc_count: number; store_bytes: number }
 
+type Presentation = {
+  dashboard_title?: string
+  dashboard_subtitle?: string
+  footer_text?: string
+  banner_text?: string
+  banner_severity?: string
+}
+
+type Operator = { subject: string; username: string; role: string; first_seen_at: string; last_seen_at: string }
+
 const fetchStorage = createServerFn({ method: 'GET' }).handler(async (): Promise<Storage | null> => {
   const { serviceJSON } = await import('../lib/backend.server')
   return serviceJSON<Storage>('/api/v1/settings/storage')
 })
 
+const fetchAdminData = createServerFn({ method: 'GET' }).handler(
+  async (): Promise<{ presentation: Presentation; users: Operator[] } | null> => {
+    const { serviceJSON } = await import('../lib/backend.server')
+    const [config, roster] = await Promise.all([
+      serviceJSON<{ payload?: { presentation?: Presentation } }>('/api/v1/config'),
+      serviceJSON<{ users: Operator[] }>('/api/v1/users'),
+    ])
+    return { presentation: config?.payload?.presentation ?? {}, users: roster?.users ?? [] }
+  },
+)
+
+const savePresentation = createServerFn({ method: 'POST' })
+  .inputValidator((input: Presentation) => input)
+  .handler(async ({ data }): Promise<boolean> => {
+    const { getSessionUser } = await import('../lib/auth')
+    const user = await getSessionUser()
+    // Admin-gated at the BFF, same posture as the legacy settings API.
+    if (user && user.role !== 'admin') return false
+    const { serviceFetch } = await import('../lib/backend.server')
+    const response = await serviceFetch('/api/v1/config/presentation', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    return response.ok
+  })
+
 export const Route = createFileRoute('/settings')({
-  loader: async () => ({ storage: fetchStorage(), user: await getSessionUser() }),
+  loader: async () => ({ storage: fetchStorage(), admin: fetchAdminData(), user: await getSessionUser() }),
   component: Settings,
 })
+
+function PresentationCard({ initial, editable }: { initial: Presentation; editable: boolean }) {
+  const [form, setForm] = useState<Presentation>(initial)
+  const [message, setMessage] = useState('')
+  const field = (key: keyof Presentation, label: string) => (
+    <label className="note" style={{ display: 'block' }}>
+      {label}
+      <input
+        className="input"
+        style={{ width: '100%' }}
+        type="text"
+        value={(form[key] as string) ?? ''}
+        disabled={!editable}
+        onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.value }))}
+      />
+    </label>
+  )
+  return (
+    <div className="card half">
+      <h2>Presentation</h2>
+      <p className="note">Branding text across the dashboard — title, subtitle, footer, and an optional banner.</p>
+      <form
+        onSubmit={async (event) => {
+          event.preventDefault()
+          setMessage('Saving…')
+          const ok = await savePresentation({ data: form })
+          setMessage(ok ? 'Saved — refresh to see it everywhere.' : 'Save failed (admin role required).')
+        }}
+      >
+        {field('dashboard_title', 'Dashboard title')}
+        {field('dashboard_subtitle', 'Subtitle')}
+        {field('footer_text', 'Footer')}
+        {field('banner_text', 'Banner text')}
+        {editable ? (
+          <button className="btn btn-secondary btn-sm" type="submit" style={{ marginTop: 8 }}>
+            Save presentation
+          </button>
+        ) : (
+          <p className="note">Admin role required to edit.</p>
+        )}
+        {message ? <p className="note">{message}</p> : null}
+      </form>
+    </div>
+  )
+}
 
 // The nine accent presets from theme.css (#32): claude is the default,
 // the rest are data-hp-palette values. Swatch colors are the dark-theme
@@ -44,11 +126,12 @@ function bytesHuman(bytes: number): string {
 }
 
 function Settings() {
-  const { storage, user } = Route.useLoaderData()
+  const { storage, admin, user } = Route.useLoaderData()
   const theme = useThemeMode()
   const [palette, setPalette] = useState('claude')
   const [prefetch, setPrefetch] = useState(true)
   const [storageData, setStorageData] = useState<Storage | null>(null)
+  const [adminData, setAdminData] = useState<{ presentation: Presentation; users: Operator[] } | null>(null)
 
   useEffect(() => {
     setPalette(document.documentElement.dataset.hpPalette ?? 'claude')
@@ -57,10 +140,13 @@ function Settings() {
     storage.then((result) => {
       if (!cancelled && result) setStorageData(result)
     })
+    admin.then((result) => {
+      if (!cancelled && result) setAdminData(result)
+    })
     return () => {
       cancelled = true
     }
-  }, [storage])
+  }, [storage, admin])
 
   const pickPalette = (id: string) => {
     applyPalette(id)
@@ -149,6 +235,30 @@ function Settings() {
           <p className="note">No session (development mode).</p>
         )}
       </div>
+      {adminData ? (
+        <PresentationCard initial={adminData.presentation} editable={!user || user.role === 'admin'} />
+      ) : null}
+      {adminData ? (
+        <div className="card half">
+          <h2>Operators</h2>
+          <p className="note">Everyone who has signed into this dashboard — accounts are managed in Keycloak.</p>
+          <table className="data-table">
+            <tbody>
+              {adminData.users.map((operator) => (
+                <tr key={operator.subject}>
+                  <td className="v">{operator.username}</td>
+                  <td>
+                    <span className={operator.role === 'admin' ? 'badge badge--warning' : 'badge badge--muted'}>
+                      {operator.role}
+                    </span>
+                  </td>
+                  <td className="ago">{operator.last_seen_at.replace('T', ' ').slice(0, 19)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
       <div className="card half">
         <h2>Elasticsearch storage</h2>
         {storageData === null ? (

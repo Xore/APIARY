@@ -22,6 +22,7 @@ mod aggregates;
 mod artifacts;
 mod canarytokens;
 mod charts;
+mod config;
 mod dashboard;
 mod es;
 mod events;
@@ -118,6 +119,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/sessions/{id}", get(session::detail))
         .route("/api/v1/search", get(search::search))
         .route("/api/v1/settings/storage", get(health::storage))
+        .route("/api/v1/config", get(config::get_config))
+        .route(
+            "/api/v1/config/presentation",
+            axum::routing::put(config::put_presentation),
+        )
+        .route("/api/v1/users", get(config::users))
         .route("/api/v1/reports/{id}/pdf", get(reports::pdf))
         .route("/api/v1/artifacts/{kind}/{key}", get(artifacts::list))
         .route("/api/v1/artifacts/{kind}/{key}/{filename}", get(artifacts::download))

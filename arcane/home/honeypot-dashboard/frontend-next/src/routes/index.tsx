@@ -51,9 +51,23 @@ type EventRow = {
 
 type StoreRow = Record<string, unknown>
 
+type Presentation = {
+  dashboard_title?: string
+  dashboard_subtitle?: string
+  footer_text?: string
+  banner_text?: string
+  banner_severity?: string
+}
+
 const fetchKpis = createServerFn({ method: 'GET' }).handler(async (): Promise<OverviewKpis | null> => {
   const { serviceJSON } = await import('../lib/backend.server')
   return serviceJSON<OverviewKpis>('/api/v1/overview/kpis')
+})
+
+const fetchPresentation = createServerFn({ method: 'GET' }).handler(async (): Promise<Presentation | null> => {
+  const { serviceJSON } = await import('../lib/backend.server')
+  const config = await serviceJSON<{ payload?: { presentation?: Presentation } }>('/api/v1/config')
+  return config?.payload?.presentation ?? null
 })
 
 const fetchDashboard = createServerFn({ method: 'GET' }).handler(async (): Promise<Dashboard | null> => {
@@ -83,6 +97,7 @@ export const Route = createFileRoute('/')({
     recent: fetchRecent(),
     campaigns: fetchCampaignsSummary(),
     payloads: fetchPayloadsSummary(),
+    presentation: fetchPresentation(),
   }),
   component: Overview,
 })
@@ -178,6 +193,7 @@ function Overview() {
   const recent = usePromise(data.recent)
   const campaigns = usePromise(data.campaigns)
   const payloads = usePromise(data.payloads)
+  const presentation = usePromise(data.presentation)
   const [tab, setTab] = useState<TabId>('live')
 
   const str = (row: StoreRow, key: string) => (typeof row[key] === 'string' ? (row[key] as string) : '')
@@ -186,12 +202,18 @@ function Overview() {
   return (
     <>
       <header className="hp-hero" id="overview-header">
-        <div className="label-section">Honeypot command center</div>
+        {presentation?.banner_text ? (
+          <div className={presentation.banner_severity === 'critical' ? 'badge badge--danger' : 'badge badge--warning'}>
+            {presentation.banner_text}
+          </div>
+        ) : null}
+        <div className="label-section">{presentation?.dashboard_title || 'Honeypot command center'}</div>
         <Suspense fallback={<h1>{greeting('')}</h1>}>
           <Await promise={data.kpis}>{(kpis) => <h1>{greeting(kpis?.change24h ?? '')}</h1>}</Await>
         </Suspense>
         <p className="hp-hero__status">
-          Live attack telemetry, captured evidence, correlated campaigns, and collection health in one operational view.
+          {presentation?.dashboard_subtitle ||
+            'Live attack telemetry, captured evidence, correlated campaigns, and collection health in one operational view.'}
         </p>
         <button className="hp-hero__search" type="button" onClick={() => import('../components/CommandPalette').then((m) => m.openCommandPalette())}>
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -491,7 +513,9 @@ function Overview() {
         </div>
       ) : null}
 
-      <footer id="overview-footer">APIARY • defensive sensor • do not expose without auth</footer>
+      <footer id="overview-footer">
+        {presentation?.footer_text || 'APIARY • defensive sensor • do not expose without auth'}
+      </footer>
     </>
   )
 }
