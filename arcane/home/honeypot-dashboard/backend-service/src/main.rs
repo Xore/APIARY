@@ -35,6 +35,7 @@ mod dashboard;
 mod decode_correlate;
 mod detail;
 mod es;
+mod event_detail;
 mod es_importer;
 mod events;
 mod fusion;

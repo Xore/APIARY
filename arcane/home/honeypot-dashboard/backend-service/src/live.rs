@@ -33,7 +33,10 @@ pub async fn stream(
             let body = json!({
                 "size": BATCH,
                 "sort": [{"@timestamp": {"order": "asc"}}],
-                "query": {"range": {"@timestamp": {"gt": watermark}}}
+                "query": {"bool": {
+                    "filter": [{"range": {"@timestamp": {"gt": watermark}}}],
+                    "must_not": events::suricata_noise_exclusion()
+                }}
             });
             let Ok(result) = state.es.search(body).await else {
                 // Transient ES failure: skip this tick, keepalive comments
