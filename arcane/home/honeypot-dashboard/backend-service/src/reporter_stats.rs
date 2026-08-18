@@ -3,6 +3,12 @@
 //! sent" glance. Elasticsearch is the only path here — es-results-importer
 //! mirrors the reporter worker's own metrics.json into reporter-metrics-v1;
 //! this never mounts the reporter's data volume directly.
+//!
+//! #1611 workstream E.7: this already satisfies the workstream's ask (a
+//! raw `reporter_metrics` passthrough necessarily carries
+//! attempted/suppressed_cooldown/dry_run/sent/failed/updated_at — whatever
+//! the reporter worker itself writes to metrics.json) — no separate
+//! health.rs field needed.
 
 use axum::{extract::State, http::StatusCode, Json};
 use serde_json::{json, Value};

@@ -68,6 +68,26 @@ pub async fn ghidra_run(
     one_doc(&state, "ghidra-analysis-v1", json!({"term": {"file.hash.sha256": sha}})).await
 }
 
+/// /api/v1/revdeck/{sha} — #1611 workstream E.8: revdeck-analysis-v1 had
+/// no detail endpoint at all, so an unconfigured-worker error state (the
+/// live audit's own example) rendered as a blank page rather than a
+/// visible error. es_importer.rs wraps the raw revdeck output (itself
+/// `{exit_status, revdeck: {...}, sha256, ...}`) one level deeper under
+/// the source label, doc id `revdeck:{sha256}` (es_importer.rs's doc_id);
+/// same nesting attacker_identity.rs's revdeck_verdict already reads.
+pub async fn revdeck_run(
+    State(state): State<AppState>,
+    Path(sha): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let doc = state
+        .es
+        .get_doc("revdeck-analysis-v1", &format!("revdeck:{sha}"))
+        .await
+        .map_err(bad_gateway)?
+        .ok_or((StatusCode::NOT_FOUND, "not found".to_string()))?;
+    Ok(Json(doc["revdeck"].clone()))
+}
+
 #[derive(Deserialize)]
 pub struct GraphQuery {
     pub id: String,

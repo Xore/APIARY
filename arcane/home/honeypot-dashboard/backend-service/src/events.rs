@@ -49,7 +49,11 @@ pub struct EventRow {
     pub detail: String,
     pub session: String,
     /// The complete normalized ECS document, for the record inspector pane
-    /// (the row click opens it; nothing is hidden).
+    /// (the row click opens it; nothing is hidden). #1611 workstream E.4:
+    /// this is also where `network.community_id` (when suricata populated
+    /// it) is already visible and copyable — it's the exact join key an
+    /// Arkime cross-link needs, so no separate field/endpoint is required
+    /// on this side; the pivot link itself is a frontend concern.
     pub record: Value,
 }
 

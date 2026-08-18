@@ -4,6 +4,15 @@
 //! dashboard-payload-inventory-v1). These carry the correlators' full
 //! output — scores, explanations, acknowledge state — so the port shows
 //! exactly what the Go tier shows, not an approximation.
+//!
+//! #1611 workstream E.10: `auth-events-worker-state`, `ml-worker-state`,
+//! and the other `dashboard-*-state`/`*-worker-state` indices are each a
+//! single worker's own resume cursor (last-processed offset/timestamp) —
+//! operational bookkeeping with no per-event or per-operator meaning, the
+//! same category as a Kafka consumer group's committed offset. They're
+//! deliberately absent from the `generic` allowlist below and from every
+//! other endpoint in this crate; this comment is that decision on record
+//! so the census question doesn't reopen.
 
 use axum::{
     extract::{Query, State},
@@ -191,6 +200,11 @@ pub async fn generic(
 ) -> Result<Json<Value>, (StatusCode, String)> {
     // (index, sort field, heavy fields excluded from list responses).
     let (index, sort, excludes): (&str, &str, &[&str]) = match name.as_str() {
+        // #1611 workstream E.9: `error`, `details.username`, and
+        // `details.redirect_uri` are already present here (no excludes) —
+        // the workstream's ask is first-class *columns* for them on the
+        // auth-events.tsx table, a frontend-only change; this passthrough
+        // already carries every field they'd need.
         "auth-events" => ("auth-failure-events", "last_seen", &[]),
         // llm-worker output; index may not exist yet (ignore_unavailable).
         "llm-analysis" => ("llm-analysis", "@timestamp", &[]),

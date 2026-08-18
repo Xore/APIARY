@@ -179,6 +179,12 @@ pub async fn anomaly_trend(State(state): State<AppState>) -> Result<Json<Vec<Ser
 
 /// /api/v1/charts/dionaea-cves — top exploited CVEs / named incidents.
 /// data.* is flattened: terms on a flattened leaf works, no .keyword.
+///
+/// #1611 workstream E.3: dionaea-incidents-v1-* is a raw duplicate of the
+/// same incidents that already flow into honeypot-v2-* (audited against
+/// the live cluster) — Workstream A's dionaea detail branch (event_detail.rs)
+/// already renders them richly there. This dedicated family stays scoped
+/// to this one chart; no separate incidents endpoint is needed.
 pub async fn dionaea_cves(State(state): State<AppState>) -> Result<Json<Bar>, (StatusCode, String)> {
     let body = json!({
         "size": 0,

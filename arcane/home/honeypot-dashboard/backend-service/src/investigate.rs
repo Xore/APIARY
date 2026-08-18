@@ -3,6 +3,13 @@
 //! tried, sessions, techniques, and the newest events. The Go tier's
 //! /investigate/ip page over its in-memory cache, re-derived as one
 //! aggregation pass + one bounded event fetch.
+//!
+//! #1611 workstream E.2: also join portbridge-v2-* (today only feeds the
+//! os-distribution chart, charts.rs) for the p0f OS guess and per-port
+//! connect counts — the only ground truth for which ports an IP actually
+//! knocked on across tunneled sensors (cowrie et al. only see the tunnel
+//! peer address, not the real source, until portbridge's via_port join —
+//! see vps/portbridge/main.go's connLogger.log doc comment).
 
 use axum::{
     extract::{Path, State},
@@ -23,6 +30,14 @@ pub struct Kv {
     pub count: u64,
 }
 
+#[derive(Serialize, Default)]
+pub struct PortbridgeProfile {
+    pub os: String,
+    pub first: String,
+    pub last: String,
+    pub ports_touched: Vec<Kv>,
+}
+
 #[derive(Serialize)]
 pub struct IpProfile {
     pub ip: String,
@@ -39,6 +54,7 @@ pub struct IpProfile {
     pub sessions: Vec<Kv>,
     pub techniques: Vec<Kv>,
     pub events: Vec<EventRow>,
+    pub portbridge: Option<PortbridgeProfile>,
 }
 
 fn kv(result: &serde_json::Value, agg: &str) -> Vec<Kv> {
@@ -100,8 +116,26 @@ pub async fn ip(
         "sort": [{"@timestamp": {"order": "desc"}}],
         "query": filter
     });
-    let (aggs, events) = tokio::try_join!(state.es.search(agg_body), state.es.search(events_body))
-        .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?;
+    let portbridge_filter = json!({"bool": {"filter": [
+        {"term": {"portbridge.src_ip": ip}},
+        {"range": {"@timestamp": {"gte": WINDOW}}}
+    ]}});
+    let portbridge_body = json!({
+        "size": 0,
+        "query": portbridge_filter,
+        "aggs": {
+            "first": {"min": {"field": "@timestamp"}},
+            "last": {"max": {"field": "@timestamp"}},
+            "os": {"terms": {"field": "portbridge.os", "size": 1}},
+            "ports": {"terms": {"field": "portbridge.port", "size": 20}}
+        }
+    });
+    let (aggs, events, portbridge) = tokio::try_join!(
+        state.es.search(agg_body),
+        state.es.search(events_body),
+        state.es.search_index(&["portbridge-v2-*"], portbridge_body)
+    )
+    .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?;
 
     let total = aggs["hits"]["total"]["value"].as_u64().unwrap_or(0);
     if total == 0 {
@@ -135,5 +169,16 @@ pub async fn ip(
         sessions: kv(&aggs, "sessions"),
         techniques: kv(&aggs, "techniques"),
         events: rows,
+        portbridge: {
+            let os = kv(&portbridge, "os").first().map(|row| row.key.clone()).unwrap_or_default();
+            let ports_touched = kv(&portbridge, "ports");
+            let first = text(&portbridge["aggregations"]["first"]["value_as_string"]);
+            let last = text(&portbridge["aggregations"]["last"]["value_as_string"]);
+            if os.is_empty() && ports_touched.is_empty() && first.is_empty() {
+                None
+            } else {
+                Some(PortbridgeProfile { os, first, last, ports_touched })
+            }
+        },
     }))
 }
