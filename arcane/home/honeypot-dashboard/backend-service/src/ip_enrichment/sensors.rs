@@ -67,7 +67,8 @@ pub fn enrich_line(line: &[u8], vm: &ViaMap, tftp_vm: &ViaMap, persona: &str) ->
 
     let port_fixed = fix_conpot_dest_port(&mut e, persona);
     let canonical_changed = promote_canonical_fields(persona, &mut e);
-    let fields_changed = super::attck::promote_attck_technique_fields(&mut e) || canonical_changed || port_fixed;
+    let attck_changed = super::attck::promote_attck_technique_fields(persona, &mut e);
+    let fields_changed = attck_changed || canonical_changed || port_fixed;
 
     let ip = str(&e, "src_ip");
     let lookup = if ip == TUNNEL_PEER_IP {
@@ -144,7 +145,8 @@ pub fn enrich_dionaea_incident_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap,
         None => (0, true),
     };
     let canonicalized = promote_canonical_fields("dionaea-incident", &mut e);
-    if changed == 0 && !canonicalized {
+    let attck_changed = super::attck::promote_attck_technique_fields("dionaea-incident", &mut e);
+    if changed == 0 && !canonicalized && !attck_changed {
         return (line.to_vec(), all_resolved);
     }
     (serde_json::to_vec(&e).unwrap_or_else(|_| line.to_vec()), all_resolved)
@@ -192,6 +194,9 @@ pub fn enrich_beelzebub_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _perso
         }
     }
     if promote_canonical_fields("beelzebub", &mut e) {
+        changed = true;
+    }
+    if super::attck::promote_attck_technique_fields("beelzebub", &mut e) {
         changed = true;
     }
 
@@ -260,6 +265,9 @@ pub fn enrich_hellpot_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _persona
             e["user_agent"] = Value::from(ua);
             changed = true;
         }
+    }
+    if super::attck::promote_attck_technique_fields("hellpot", &mut e) {
+        changed = true;
     }
 
     let Some((ip, port_str)) = split_host_port(&remote_addr) else {
@@ -344,6 +352,9 @@ pub fn enrich_galah_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _persona: 
             }
         }
     }
+    if super::attck::promote_attck_technique_fields("galah", &mut e) {
+        changed = true;
+    }
 
     let ip = e.get("srcIP").and_then(Value::as_str).unwrap_or("").to_string();
     if ip != TUNNEL_PEER_IP {
@@ -402,6 +413,9 @@ pub fn enrich_sentrypeer_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _pers
             e["user_agent"] = Value::from(ua);
             changed = true;
         }
+    }
+    if super::attck::promote_attck_technique_fields("sentrypeer", &mut e) {
+        changed = true;
     }
 
     let Some((ip, port_str)) = split_host_port(&source_addr) else {
@@ -527,6 +541,9 @@ pub fn enrich_wordpot_line(line: &[u8], vm: &ViaMap, _tftp_vm: &ViaMap, _persona
         changed = true;
     }
     changed = classify_wordpot_message(&mut e, &rest) || changed;
+    if super::attck::promote_attck_technique_fields("wordpot", &mut e) {
+        changed = true;
+    }
 
     if ip != TUNNEL_PEER_IP {
         if e.get("src_ip").and_then(Value::as_str) != Some(ip.as_str()) {

@@ -5,11 +5,15 @@
 //! intelligence.go's per-event technique heuristics over an in-memory
 //! cache, this tier aggregates the ATT&CK technique IDs
 //! ip-enrichment-worker already promotes onto documents
-//! (honeypot.canonical_attck_techniques, #1197/#1202). The worker
-//! currently emits T1110/T1059(.x)/T1595/T1105 but not the Go page's
-//! heuristic-only T1190 and ICS pair (T0886/T1692.001) — those three are
-//! supplemented with filter aggregations here; aligning the worker to
-//! emit the full set is on the ES-coverage round (#33).
+//! (honeypot.canonical_attck_techniques, #1197/#1202). #1611 workstream D
+//! widened the worker to promote the full technique set directly
+//! (T1190/T0886/T1692.001 included, see ip_enrichment/attck.rs) — this
+//! used to supplement those three with query-time filter aggregations
+//! here (a narrower, flattened-field-safe approximation of
+//! dashboard/intelligence.go's own path-substring heuristic); now that a
+//! real tag exists on new documents, this is a plain terms aggregation
+//! only. Historical documents written before this change won't carry the
+//! new tags until reindexed/rolled over — not backfilled by this change.
 
 use axum::{extract::State, http::StatusCode, Json};
 use serde::Serialize;
@@ -68,41 +72,17 @@ fn bad_gateway(error: anyhow::Error) -> (StatusCode, String) {
     (StatusCode::BAD_GATEWAY, error.to_string())
 }
 
-/// The ICS filter mirrors intelligence.go's substring checks over
-/// sensor/proto text; the write/command escalation approximates its
-/// alert/command condition with the event kinds industrial sensors emit.
-fn ics_filter() -> serde_json::Value {
-    json!({"bool": {"should": [
-        {"prefix": {"event.sensor": "conpot"}},
-        {"terms": {"network.protocol": ["modbus", "s7comm", "iec104", "dnp3", "enip", "bacnet"]}},
-        {"terms": {"honeypot.proto": ["modbus", "s7comm", "iec104", "dnp3", "enip", "bacnet"]}}
-    ], "minimum_should_match": 1}})
-}
-
-/// Technique → count over the recent window: canonical technique terms
-/// plus the three supplemental heuristic buckets.
+/// Technique → count over the recent window: a plain terms aggregation on
+/// the worker-promoted tag. #1611 workstream D removed the three
+/// query-time supplemental filter aggregations this used to also run
+/// (ICS/ICS-write/web-exploit) now that ip-enrichment-worker promotes
+/// T0886/T1692.001/T1190 directly onto canonical_attck_techniques.
 async fn technique_counts(state: &AppState) -> anyhow::Result<HashMap<String, u64>> {
     let body = json!({
         "size": 0,
         "query": {"range": {"@timestamp": {"gte": WINDOW}}},
         "aggs": {
-            "techs": {"terms": {"field": "honeypot.canonical_attck_techniques", "size": 40}},
-            "ics": {"filter": ics_filter()},
-            "ics_write": {"filter": {"bool": {"must": [ics_filter(),
-                {"terms": {"honeypot.event": ["command", "write"]}}]}}},
-            // honeypot.* is a flattened field — wildcard/substring queries
-            // are unsupported on keyed flattened fields (they fail the
-            // whole shard), so T1190 counts emulator detections and
-            // query-string probes instead of the Go tier's path-substring
-            // heuristics. Narrower than the legacy count; the ES-coverage
-            // round (#33) promotes a real technique tag for this.
-            "web_exploit": {"filter": {"bool": {
-                "must": [{"exists": {"field": "honeypot.path"}}],
-                "should": [
-                    {"exists": {"field": "honeypot.response_msg.response.message.detection.name"}},
-                    {"exists": {"field": "honeypot.query"}}
-                ],
-                "minimum_should_match": 1}}}
+            "techs": {"terms": {"field": "honeypot.canonical_attck_techniques", "size": 40}}
         }
     });
     let result = state.es.search(body).await?;
@@ -113,12 +93,6 @@ async fn technique_counts(state: &AppState) -> anyhow::Result<HashMap<String, u6
             bucket["key"].as_str().unwrap_or("").to_string(),
             bucket["doc_count"].as_u64().unwrap_or(0),
         );
-    }
-    for (technique, agg_name) in [("T0886", "ics"), ("T1692.001", "ics_write"), ("T1190", "web_exploit")] {
-        let count = aggs[agg_name]["doc_count"].as_u64().unwrap_or(0);
-        if count > 0 {
-            counts.insert(technique.to_string(), count);
-        }
     }
     Ok(counts)
 }
