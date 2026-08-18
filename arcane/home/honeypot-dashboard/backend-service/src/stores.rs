@@ -150,6 +150,27 @@ pub async fn payloads(
         .map_err(bad_gateway)
 }
 
+#[derive(Deserialize)]
+pub struct AckBody {
+    pub ack: bool,
+}
+
+/// POST /api/v1/alerts/{key}/ack — flip one alert's Acknowledged flag
+/// (dashboard-alert-state-v1 doc id == alert key), the ported
+/// alertManager.acknowledge.
+pub async fn acknowledge(
+    State(state): State<AppState>,
+    axum::extract::Path(key): axum::extract::Path<String>,
+    Json(body): Json<AckBody>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    state
+        .es
+        .update_doc("dashboard-alert-state-v1", &key, json!({"Acknowledged": body.ack}))
+        .await
+        .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?;
+    Ok(Json(json!({"ok": true, "key": key, "ack": body.ack})))
+}
+
 /// Generic allowlisted store passthrough: /api/v1/store/{name}. Every
 /// remaining store-shaped page reads through here instead of growing its
 /// own handler; the allowlist keeps arbitrary index reads impossible.

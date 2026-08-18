@@ -24,6 +24,18 @@ const fetchAlerts = createServerFn({ method: 'GET' })
     return serviceJSON<Page>(`/api/v1/alerts?offset=${data.offset}&size=25`)
   })
 
+const acknowledgeAlert = createServerFn({ method: 'POST' })
+  .inputValidator((input: { key: string; ack: boolean }) => input)
+  .handler(async ({ data }): Promise<boolean> => {
+    const { serviceFetch } = await import('../lib/backend.server')
+    const response = await serviceFetch(`/api/v1/alerts/${encodeURIComponent(data.key)}/ack`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ack: data.ack }),
+    })
+    return response.ok
+  })
+
 export const Route = createFileRoute('/alerts')({
   loader: async () => ({ first: fetchAlerts({ data: { offset: 0 } }) }),
   component: Alerts,
@@ -94,6 +106,26 @@ function Alerts() {
         onViewMore={viewMore}
         loadingMore={loadingMore}
         inspectorTitle="Alert details"
+        inspectorExtra={(row) => (
+          <button
+            className="btn btn-secondary btn-sm"
+            type="button"
+            onClick={async () => {
+              const ok = await acknowledgeAlert({ data: { key: row.Key, ack: !row.Acknowledged } })
+              if (ok) {
+                setRows((current) =>
+                  current
+                    ? current.map((candidate) =>
+                        candidate.Key === row.Key ? { ...candidate, Acknowledged: !row.Acknowledged } : candidate,
+                      )
+                    : current,
+                )
+              }
+            }}
+          >
+            {row.Acknowledged ? 'Reopen alert' : 'Acknowledge alert'}
+          </button>
+        )}
       />
     </>
   )

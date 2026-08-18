@@ -12,7 +12,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use serde::Serialize;
@@ -133,6 +133,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/recordings", get(stores::recordings))
         .route("/api/v1/recordings/{shasum}", get(replay::replay))
         .route("/api/v1/alerts", get(stores::alerts))
+        .route("/api/v1/alerts/{key}/ack", post(stores::acknowledge))
         .route("/api/v1/payloads", get(stores::payloads))
         .route("/api/v1/payloads/{hash}", get(payload_detail::detail))
         .route("/api/v1/store/{name}", get(stores::generic))

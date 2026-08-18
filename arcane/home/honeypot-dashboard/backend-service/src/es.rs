@@ -47,6 +47,24 @@ impl Es {
         Ok((indices, docs, bytes))
     }
 
+    /// Partial-document update with conflict retries — the idiomatic
+    /// equivalent of the Go tier's optimistic seq_no/primary_term loop.
+    pub async fn update_doc(&self, index: &str, id: &str, doc: Value) -> anyhow::Result<()> {
+        let response = self
+            .client
+            .update(elasticsearch::UpdateParts::IndexId(index, id))
+            .retry_on_conflict(3)
+            .body(serde_json::json!({"doc": doc}))
+            .send()
+            .await?;
+        let status = response.status_code();
+        if !status.is_success() {
+            let body = response.json::<Value>().await.unwrap_or_default();
+            anyhow::bail!("elasticsearch update {}: {}", status, body);
+        }
+        Ok(())
+    }
+
     pub async fn ping(&self) -> bool {
         self.client.ping().send().await.map(|r| r.status_code().is_success()).unwrap_or(false)
     }
