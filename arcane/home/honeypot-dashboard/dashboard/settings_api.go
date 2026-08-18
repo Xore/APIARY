@@ -75,6 +75,7 @@ func (l *writeLimiter) allow(key string) bool {
 // roadmap §6 enforceable in exactly one place.
 type preferencesPatch struct {
 	Theme              *string `json:"theme"`
+	Palette            *string `json:"palette"`
 	Density            *string `json:"density"`
 	ReducedMotion      *string `json:"reduced_motion"`
 	CollapsedSidebar   *bool   `json:"collapsed_sidebar"`
@@ -109,6 +110,9 @@ func (p preferencesPatch) empty() bool {
 func (p preferencesPatch) apply(prefs *userPreferences) {
 	if p.Theme != nil {
 		prefs.Theme = *p.Theme
+	}
+	if p.Palette != nil {
+		prefs.Palette = *p.Palette
 	}
 	if p.Density != nil {
 		prefs.Density = *p.Density
