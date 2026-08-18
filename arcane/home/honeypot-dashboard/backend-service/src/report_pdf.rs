@@ -1,23 +1,39 @@
-//! Hand-rolled, dependency-free PDF report composer, ported from
-//! dashboard/report_pdf.go + report_pdf_brandmark.go + report_pdf_watermark.go
-//! (#1612 phase 4a). No external PDF library on either side of the port —
-//! this emits raw PDF 1.4 syntax directly: uncompressed per-page content
-//! streams of plain operators (BT/ET text, rg/RG color, re rectangles, m/l
-//! lines, cm/Do/gs for the two embedded image masks), a fixed small set of
-//! indirect objects (Catalog, Pages, 3 Type1 fonts, the watermark image +
-//! its ExtGState, the header-mark image, then one Page+Contents pair per
-//! page), and a plain xref table + trailer. Object numbers 1-8 are fixed
-//! (see `bytes()` below); page objects start at 9.
+//! PDF report composer, ported from dashboard/report_pdf.go +
+//! report_pdf_brandmark.go + report_pdf_watermark.go (#1612 phase 4a),
+//! now built on the vendored `printpdf` crate (#1612 follow-up) instead of
+//! a hand-rolled raw-PDF-byte writer — printpdf handles object numbering,
+//! xref/trailer assembly, and content-stream encoding, which removes an
+//! entire class of "is this still a valid PDF" risk a hand-rolled writer
+//! carries as new report elements get added over time.
+//!
+//! Both embedded emblems (`assets_pdf/watermark.maskdata` and
+//! `assets_pdf/apiary-header-mark.maskdata`) are raw, pre-FlateDecode-
+//! compressed 1-bit PDF image masks — copied byte-for-byte from the Go
+//! source, same as phase 4a. printpdf's built-in image pipeline only
+//! accepts 8/16-bit-per-channel raster data (no 1-bit `/ImageMask`
+//! support), so both are registered as `XObject::External` — printpdf's
+//! documented escape hatch for PDF content it doesn't model natively — with
+//! the original PDF image-mask dictionary and the original compressed
+//! stream reused verbatim. This keeps the original technique intact: one
+//! shared XObject per emblem, tinted per report theme at draw time via the
+//! current fill color (`SetFillColor` before `UseXobject`), exactly like
+//! the hand-rolled version's `rg` before `Do`.
+//!
+//! Text uses printpdf's `BuiltinFont::Helvetica`/`HelveticaBold` — one of
+//! the 14 standard PDF fonts every conforming reader must supply, needing
+//! no embedding (this also means no Helvetica-substitute font file/license
+//! question at all, simpler than embedding e.g. Liberation Sans).
 //!
 //! This module is pure: given an already-assembled [`ReportData`] plus a
 //! theme/branding/element selection, it returns PDF bytes. It does not
 //! touch Elasticsearch or HTTP — gathering `ReportData` from live telemetry
-//! (the Go tier's `reportDataFor`) is a later phase's job.
-//!
-//! No route calls `render_report_pdf` yet — the definitions API, generate
-//! endpoint, and `ReportData` assembly land in #1612 phase 4b.
+//! is reports_data.rs's job (phase 4b).
 
-use std::fmt::Write as _;
+use printpdf::{
+    BuiltinFont, Color, DictItem, ExtendedGraphicsState, ExternalStream, ExternalXObject, Line,
+    LinePoint, Mm, Op, PaintMode, PdfDocument as PrintPdfDocument, PdfFontHandle, PdfPage as PrintPdfPage,
+    PdfSaveOptions, Point as PrintPoint, Pt, Rect as PrintRect, Rgb as PrintRgb, TextItem, XObjectTransform,
+};
 
 const PDF_PAGE_WIDTH: f64 = 595.0;
 const PDF_PAGE_HEIGHT: f64 = 842.0;
@@ -44,6 +60,12 @@ pub struct PdfRgb {
     pub r: f64,
     pub g: f64,
     pub b: f64,
+}
+
+impl PdfRgb {
+    fn to_color(self) -> Color {
+        Color::Rgb(PrintRgb { r: self.r as f32, g: self.g as f32, b: self.b as f32, icc_profile: None })
+    }
 }
 
 /// Carries every palette decision of the rendered report, so a definition
@@ -185,9 +207,9 @@ impl PdfBranding {
 }
 
 /// Element ID strings a report definition selects, in Reports studio order.
-/// These exact string literals are also the wire values Phase 4b's
-/// definitions API stores/accepts — keep them in sync with
-/// dashboard/reports_store.go's elementCover/etc. constants.
+/// These exact string literals are also the wire values the definitions API
+/// stores/accepts — keep them in sync with dashboard/reports_store.go's
+/// elementCover/etc. constants.
 pub const ELEMENT_COVER: &str = "cover";
 pub const ELEMENT_METRICS: &str = "metrics";
 pub const ELEMENT_ASSESSMENT: &str = "assessment";
@@ -278,35 +300,122 @@ pub struct ReportData {
     pub recommendations: Vec<String>,
 }
 
-struct PdfPage {
-    content: String,
+// -- watermark / header-mark assets (report_pdf_watermark.go / report_pdf_brandmark.go) --
+
+const WATERMARK_IMAGE_WIDTH: u32 = 360;
+const WATERMARK_IMAGE_HEIGHT: u32 = 360;
+/// Intentionally very low — this sits behind every other element on the
+/// page, so it must never compete with the report's own text.
+const WATERMARK_OPACITY: f32 = 0.05;
+/// On-page footprint in points, centered, larger than the printable column
+/// so it reads as a background mark rather than a bounded illustration.
+const WATERMARK_SIZE: f64 = 380.0;
+
+const PDF_HEADER_MARK_WIDTH: u32 = 64;
+const PDF_HEADER_MARK_HEIGHT: u32 = 64;
+const PDF_HEADER_MARK_SIZE: f64 = 22.0;
+
+/// The detailed APIARY emblem, a transparent 360x360 one-bit image mask.
+/// Its color comes from the active report theme, applied via the current
+/// fill color at draw time (see `draw_watermark`).
+static WATERMARK_MASK_DATA: &[u8] = include_bytes!("../assets_pdf/watermark.maskdata");
+
+/// The compact APIARY emblem, a 64x64 one-bit image mask for the header band.
+static PDF_HEADER_MARK_DATA: &[u8] = include_bytes!("../assets_pdf/apiary-header-mark.maskdata");
+
+/// Builds the PDF `/ImageMask` dictionary printpdf's own image pipeline
+/// can't produce (it has no 1-bit stencil-mask path) — registered as an
+/// `XObject::External` with the original, already-FlateDecode-compressed
+/// mask bytes reused verbatim as the stream content.
+fn image_mask_xobject(width: u32, height: u32, data: &'static [u8]) -> ExternalXObject {
+    let mut dict = std::collections::BTreeMap::new();
+    dict.insert("Type".to_string(), DictItem::Name(b"XObject".to_vec()));
+    dict.insert("Subtype".to_string(), DictItem::Name(b"Image".to_vec()));
+    dict.insert("Width".to_string(), DictItem::Int(width as i64));
+    dict.insert("Height".to_string(), DictItem::Int(height as i64));
+    dict.insert("ImageMask".to_string(), DictItem::Bool(true));
+    dict.insert("BitsPerComponent".to_string(), DictItem::Int(1));
+    dict.insert("Decode".to_string(), DictItem::Array(vec![DictItem::Int(1), DictItem::Int(0)]));
+    dict.insert("Filter".to_string(), DictItem::Name(b"FlateDecode".to_vec()));
+    ExternalXObject {
+        stream: ExternalStream { dict, content: data.to_vec(), compress: false },
+        width: Some(printpdf::Px(width as usize)),
+        height: Some(printpdf::Px(height as usize)),
+        dpi: None,
+    }
 }
 
-struct PdfDocument {
-    pages: Vec<PdfPage>,
-    theme: PdfTheme,
-    footer_left: String,
+/// A transform that places a `width_px`×`height_px` image at an exact
+/// `target_pt`×`target_pt` on-page size, lower-left corner at (x, y).
+/// printpdf's `XObjectTransform` scales an image by pixel-count at a given
+/// DPI (`px * 72 / dpi` points) rather than accepting a target size
+/// directly, so the DPI here is solved backwards from the target size.
+fn exact_size_transform(width_px: u32, target_pt: f64, x: f64, y: f64) -> XObjectTransform {
+    let dpi = width_px as f32 * 72.0 / target_pt as f32;
+    XObjectTransform {
+        translate_x: Some(Pt(x as f32)),
+        translate_y: Some(Pt(y as f32)),
+        rotate: None,
+        scale_x: None,
+        scale_y: None,
+        dpi: Some(dpi),
+        no_auto_scale: false,
+    }
 }
 
 struct PdfReportWriter {
-    doc: PdfDocument,
-    y: f64,
+    doc: PrintPdfDocument,
+    watermark_xobj: printpdf::XObjectId,
+    watermark_gs: printpdf::ExtendedGraphicsStateId,
+    header_mark_xobj: printpdf::XObjectId,
+    theme: PdfTheme,
     branding: PdfBranding,
+    footer_left: String,
+    pages: Vec<Vec<Op>>,
+    ops: Vec<Op>,
+    page_started: bool,
+    y: f64,
 }
 
 impl PdfReportWriter {
-    fn theme(&self) -> PdfTheme {
-        self.doc.theme
+    fn new(theme: PdfTheme, branding: PdfBranding) -> Self {
+        let mut doc = PrintPdfDocument::new("APIARY Report");
+        let watermark_xobj =
+            doc.add_xobject(&image_mask_xobject(WATERMARK_IMAGE_WIDTH, WATERMARK_IMAGE_HEIGHT, WATERMARK_MASK_DATA));
+        let header_mark_xobj = doc.add_xobject(&image_mask_xobject(
+            PDF_HEADER_MARK_WIDTH,
+            PDF_HEADER_MARK_HEIGHT,
+            PDF_HEADER_MARK_DATA,
+        ));
+        let watermark_gs =
+            doc.add_graphics_state(ExtendedGraphicsState::default().with_current_fill_alpha(WATERMARK_OPACITY));
+        let footer_left = branding.footer_left.clone();
+        PdfReportWriter {
+            doc,
+            watermark_xobj,
+            watermark_gs,
+            header_mark_xobj,
+            theme,
+            branding,
+            footer_left,
+            pages: Vec::new(),
+            ops: Vec::new(),
+            page_started: false,
+            y: 0.0,
+        }
     }
 
-    fn page_mut(&mut self) -> &mut PdfPage {
-        self.doc.pages.last_mut().expect("new_page always pushes a page before returning")
+    fn push(&mut self, op: Op) {
+        self.ops.push(op);
     }
 
     fn new_page(&mut self) {
-        let t = self.theme();
-        self.doc.pages.push(PdfPage { content: String::new() });
+        if self.page_started {
+            self.pages.push(std::mem::take(&mut self.ops));
+        }
+        self.page_started = true;
         self.y = PDF_PAGE_HEIGHT - 68.0;
+        let t = self.theme;
         self.rect(0.0, 0.0, PDF_PAGE_WIDTH, PDF_PAGE_HEIGHT, t.page);
         // Drawn immediately after the solid background and before anything
         // else -- content streams paint in the order they're written, so
@@ -329,7 +438,7 @@ impl PdfReportWriter {
     }
 
     fn cover(&mut self, data: &ReportData) {
-        let t = self.theme();
+        let t = self.theme;
         self.display_text(32.0, self.y, 25.0, t.brand_text, &data.title);
         self.y -= 29.0;
         self.text(32.0, self.y, 9.0, true, t.accent, "REPORT SCOPE");
@@ -367,7 +476,7 @@ impl PdfReportWriter {
     }
 
     fn section(&mut self, title: &str) {
-        let t = self.theme();
+        let t = self.theme;
         // Keep a section heading with at least one useful row or paragraph
         // beneath it.
         self.ensure(70.0);
@@ -379,7 +488,7 @@ impl PdfReportWriter {
     }
 
     fn paragraph(&mut self, value: &str) {
-        let t = self.theme();
+        let t = self.theme;
         let lines = wrap_pdf_text(value, 100);
         self.ensure(lines.len() as f64 * 13.0 + 10.0);
         for line in &lines {
@@ -390,7 +499,7 @@ impl PdfReportWriter {
     }
 
     fn metric_grid(&mut self, summary: &ReportSummary) {
-        let t = self.theme();
+        let t = self.theme;
         let risk_color = t.risk_color(&summary.risk_level);
         let metrics: [(&str, String, PdfRgb); 8] = [
             ("Matching events", summary.events.to_string(), t.brand_text),
@@ -421,7 +530,7 @@ impl PdfReportWriter {
     }
 
     fn bullets(&mut self, title: &str, items: &[String]) {
-        let t = self.theme();
+        let t = self.theme;
         if items.is_empty() {
             return;
         }
@@ -442,7 +551,7 @@ impl PdfReportWriter {
     }
 
     fn top_table(&mut self, title: &str, label: &str, rows: &[Kv]) {
-        let t = self.theme();
+        let t = self.theme;
         if rows.is_empty() {
             return;
         }
@@ -476,7 +585,7 @@ impl PdfReportWriter {
     }
 
     fn table_header(&mut self, left: &str, right: &str) {
-        let t = self.theme();
+        let t = self.theme;
         self.ensure(23.0);
         self.rect(32.0, self.y - 17.0, PDF_PAGE_WIDTH - 64.0, 22.0, t.table_header);
         let left = left.to_uppercase();
@@ -487,7 +596,7 @@ impl PdfReportWriter {
     }
 
     fn operational_alerts(&mut self, alerts: &[AlertRecord]) {
-        let t = self.theme();
+        let t = self.theme;
         if alerts.is_empty() {
             return;
         }
@@ -516,7 +625,7 @@ impl PdfReportWriter {
     }
 
     fn event_appendix(&mut self, events: &[ReportEventRow], appendix_limit: i64) {
-        let t = self.theme();
+        let t = self.theme;
         self.section("Evidence appendix - representative events");
         if events.is_empty() || appendix_limit <= 0 {
             self.paragraph("No matching event records were available.");
@@ -557,47 +666,72 @@ impl PdfReportWriter {
         self.paragraph("Limitations: honeypot interactions show hostile or suspicious activity directed at decoy services. GeoIP, ASN, provider, behavioral mappings, and risk scoring are contextual triage aids. They do not prove attribution, physical location, successful compromise, or impact to production systems.");
     }
 
+    // -- drawing primitives (report_pdf.go's pdfReportWriter.text/rect/line/…) --
+
     fn text(&mut self, x: f64, y: f64, size: f64, bold: bool, color: PdfRgb, value: &str) {
-        let font = if bold { "F2" } else { "F1" };
-        let escaped = escape_pdf_text(value);
-        let _ = writeln!(
-            self.page_mut().content,
-            "BT /{font} {size:.2} Tf {:.3} {:.3} {:.3} rg {x:.2} {y:.2} Td ({escaped}) Tj ET",
-            color.r, color.g, color.b
-        );
+        let font = PdfFontHandle::Builtin(if bold { BuiltinFont::HelveticaBold } else { BuiltinFont::Helvetica });
+        self.push(Op::StartTextSection);
+        self.push(Op::SetFont { font, size: Pt(size as f32) });
+        self.push(Op::SetFillColor { col: color.to_color() });
+        self.push(Op::SetTextCursor { pos: PrintPoint { x: Pt(x as f32), y: Pt(y as f32) } });
+        self.push(Op::ShowText { items: vec![TextItem::Text(value.to_string())] });
+        self.push(Op::EndTextSection);
     }
 
+    /// The original's third "display" font role — Go reused Helvetica-Bold
+    /// for both bold body text and this larger heading role (see
+    /// report_pdf.go's own "Portable sans display fallback" comment), so
+    /// this is HelveticaBold at a larger size, same as the source.
     fn display_text(&mut self, x: f64, y: f64, size: f64, color: PdfRgb, value: &str) {
-        let escaped = escape_pdf_text(value);
-        let _ = writeln!(
-            self.page_mut().content,
-            "BT /F3 {size:.2} Tf {:.3} {:.3} {:.3} rg {x:.2} {y:.2} Td ({escaped}) Tj ET",
-            color.r, color.g, color.b
-        );
+        self.push(Op::StartTextSection);
+        self.push(Op::SetFont { font: PdfFontHandle::Builtin(BuiltinFont::HelveticaBold), size: Pt(size as f32) });
+        self.push(Op::SetFillColor { col: color.to_color() });
+        self.push(Op::SetTextCursor { pos: PrintPoint { x: Pt(x as f32), y: Pt(y as f32) } });
+        self.push(Op::ShowText { items: vec![TextItem::Text(value.to_string())] });
+        self.push(Op::EndTextSection);
     }
 
     fn rect(&mut self, x: f64, y: f64, width: f64, height: f64, color: PdfRgb) {
-        let _ = writeln!(
-            self.page_mut().content,
-            "{:.3} {:.3} {:.3} rg {x:.2} {y:.2} {width:.2} {height:.2} re f",
-            color.r, color.g, color.b
-        );
+        self.push(Op::SetFillColor { col: color.to_color() });
+        self.push(Op::DrawRectangle {
+            rectangle: PrintRect {
+                x: Pt(x as f32),
+                y: Pt(y as f32),
+                width: Pt(width as f32),
+                height: Pt(height as f32),
+                mode: Some(PaintMode::Fill),
+                winding_order: None,
+            },
+        });
     }
 
     fn stroke_rect(&mut self, x: f64, y: f64, width: f64, height: f64, color: PdfRgb) {
-        let _ = writeln!(
-            self.page_mut().content,
-            "{:.3} {:.3} {:.3} RG 0.6 w {x:.2} {y:.2} {width:.2} {height:.2} re S",
-            color.r, color.g, color.b
-        );
+        self.push(Op::SetOutlineColor { col: color.to_color() });
+        self.push(Op::SetOutlineThickness { pt: Pt(0.6) });
+        self.push(Op::DrawRectangle {
+            rectangle: PrintRect {
+                x: Pt(x as f32),
+                y: Pt(y as f32),
+                width: Pt(width as f32),
+                height: Pt(height as f32),
+                mode: Some(PaintMode::Stroke),
+                winding_order: None,
+            },
+        });
     }
 
     fn line(&mut self, x1: f64, y1: f64, x2: f64, y2: f64, color: PdfRgb) {
-        let _ = writeln!(
-            self.page_mut().content,
-            "{:.3} {:.3} {:.3} RG 0.6 w {x1:.2} {y1:.2} m {x2:.2} {y2:.2} l S",
-            color.r, color.g, color.b
-        );
+        self.push(Op::SetOutlineColor { col: color.to_color() });
+        self.push(Op::SetOutlineThickness { pt: Pt(0.6) });
+        self.push(Op::DrawLine {
+            line: Line {
+                points: vec![
+                    LinePoint { p: PrintPoint { x: Pt(x1 as f32), y: Pt(y1 as f32) }, bezier: false },
+                    LinePoint { p: PrintPoint { x: Pt(x2 as f32), y: Pt(y2 as f32) }, bezier: false },
+                ],
+                is_closed: false,
+            },
+        });
     }
 
     // -- watermark / header-mark (report_pdf_watermark.go / report_pdf_brandmark.go) --
@@ -605,43 +739,64 @@ impl PdfReportWriter {
     fn draw_watermark(&mut self) {
         let x = (PDF_PAGE_WIDTH - WATERMARK_SIZE) / 2.0;
         let y = (PDF_PAGE_HEIGHT - WATERMARK_SIZE) / 2.0;
-        let t = self.theme();
-        let _ = writeln!(
-            self.page_mut().content,
-            "q /GS1 gs {:.3} {:.3} {:.3} rg {WATERMARK_SIZE:.2} 0 0 {WATERMARK_SIZE:.2} {x:.2} {y:.2} cm /Wm Do Q",
-            t.accent.r, t.accent.g, t.accent.b
-        );
+        let t = self.theme;
+        // Outer save/restore brackets the low-opacity graphics state so it
+        // never leaks into anything drawn after the watermark — UseXobject
+        // already brackets its own inner q/Do/Q for the placement matrix.
+        self.push(Op::SaveGraphicsState);
+        self.push(Op::LoadGraphicsState { gs: self.watermark_gs.clone() });
+        self.push(Op::SetFillColor { col: t.accent.to_color() });
+        self.push(Op::UseXobject {
+            id: self.watermark_xobj.clone(),
+            transform: exact_size_transform(WATERMARK_IMAGE_WIDTH, WATERMARK_SIZE, x, y),
+        });
+        self.push(Op::RestoreGraphicsState);
     }
 
     fn draw_header_mark(&mut self) {
-        let t = self.theme();
+        let t = self.theme;
         let y = PDF_PAGE_HEIGHT - 35.0;
-        let _ = writeln!(
-            self.page_mut().content,
-            "q {:.3} {:.3} {:.3} rg {PDF_HEADER_MARK_SIZE:.2} 0 0 {PDF_HEADER_MARK_SIZE:.2} 32 {y:.2} cm /HMark Do Q",
-            t.accent.r, t.accent.g, t.accent.b
-        );
+        self.push(Op::SetFillColor { col: t.accent.to_color() });
+        self.push(Op::UseXobject {
+            id: self.header_mark_xobj.clone(),
+            transform: exact_size_transform(PDF_HEADER_MARK_WIDTH, PDF_HEADER_MARK_SIZE, 32.0, y),
+        });
+    }
+
+    /// Finishes the current page, appends the page-number footer to every
+    /// page now that the total count is known, and serializes the document.
+    fn finish(mut self) -> Vec<u8> {
+        if self.page_started {
+            self.pages.push(std::mem::take(&mut self.ops));
+        }
+        let muted = self.theme.muted_text;
+        let footer_left =
+            if self.footer_left.is_empty() { default_pdf_branding().footer_left } else { self.footer_left.clone() };
+        let page_count = self.pages.len();
+        let mut pdf_pages = Vec::with_capacity(page_count);
+        for (index, mut ops) in self.pages.into_iter().enumerate() {
+            ops.push(Op::StartTextSection);
+            ops.push(Op::SetFont { font: PdfFontHandle::Builtin(BuiltinFont::Helvetica), size: Pt(7.5) });
+            ops.push(Op::SetFillColor { col: muted.to_color() });
+            ops.push(Op::SetTextCursor { pos: PrintPoint { x: Pt(32.0), y: Pt(27.0) } });
+            ops.push(Op::ShowText { items: vec![TextItem::Text(footer_left.clone())] });
+            ops.push(Op::EndTextSection);
+            ops.push(Op::StartTextSection);
+            ops.push(Op::SetFont { font: PdfFontHandle::Builtin(BuiltinFont::Helvetica), size: Pt(7.5) });
+            ops.push(Op::SetFillColor { col: muted.to_color() });
+            ops.push(Op::SetTextCursor { pos: PrintPoint { x: Pt(516.0), y: Pt(27.0) } });
+            ops.push(Op::ShowText { items: vec![TextItem::Text(format!("Page {} of {page_count}", index + 1))] });
+            ops.push(Op::EndTextSection);
+            pdf_pages.push(PrintPdfPage::new(Mm::from(Pt(PDF_PAGE_WIDTH as f32)), Mm::from(Pt(PDF_PAGE_HEIGHT as f32)), ops));
+        }
+        self.doc.with_pages(pdf_pages);
+        let mut warnings = Vec::new();
+        self.doc.save(&PdfSaveOptions::default(), &mut warnings)
     }
 }
 
 fn first_non_empty<'a>(values: &[&'a str], fallback: &'a str) -> &'a str {
     values.iter().copied().find(|v| !v.is_empty()).unwrap_or(fallback)
-}
-
-fn escape_pdf_text(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for ch in value.chars() {
-        match ch {
-            '\\' | '(' | ')' => {
-                out.push('\\');
-                out.push(ch);
-            }
-            '\n' | '\r' | '\t' => out.push(' '),
-            c if (0x20 as u32..=0x7e).contains(&(c as u32)) => out.push(c),
-            _ => out.push('?'),
-        }
-    }
-    out
 }
 
 fn wrap_pdf_text(value: &str, width: usize) -> Vec<String> {
@@ -654,8 +809,9 @@ fn wrap_pdf_text(value: &str, width: usize) -> Vec<String> {
     while remaining.len() > width {
         // Mirrors Go's strings.LastIndex(value[:width+1], " "): search for
         // the last space within the first width+1 bytes (byte-indexed, like
-        // the Go source — this text is ASCII-only after escape_pdf_text, so
-        // byte and char boundaries coincide for the values this ever wraps).
+        // the Go source — this text is plain ASCII/UTF-8 prose, and printpdf
+        // (unlike the old hand-rolled writer) needs no separate PDF-string
+        // escaping pass, so byte and char boundaries coincide here too).
         let probe_end = (width + 1).min(remaining.len());
         let probe = &remaining[..probe_end];
         let mut cut = probe.rfind(' ').unwrap_or(usize::MAX);
@@ -669,135 +825,6 @@ fn wrap_pdf_text(value: &str, width: usize) -> Vec<String> {
         lines.push(remaining.to_string());
     }
     lines
-}
-
-// -- watermark / header-mark assets (report_pdf_watermark.go / report_pdf_brandmark.go) --
-
-const WATERMARK_IMAGE_WIDTH: u32 = 360;
-const WATERMARK_IMAGE_HEIGHT: u32 = 360;
-/// Intentionally very low — this sits behind every other element on the
-/// page, so it must never compete with the report's own text.
-const WATERMARK_OPACITY: f64 = 0.05;
-/// On-page footprint in points, centered, larger than the printable column
-/// so it reads as a background mark rather than a bounded illustration.
-const WATERMARK_SIZE: f64 = 380.0;
-
-const PDF_HEADER_MARK_WIDTH: u32 = 64;
-const PDF_HEADER_MARK_HEIGHT: u32 = 64;
-const PDF_HEADER_MARK_SIZE: f64 = 22.0;
-
-/// Fixed object numbers shared with `PdfDocument::bytes()`'s own layout —
-/// not computed there.
-const PDF_WATERMARK_OBJECT_NUMBER: usize = 6;
-const PDF_WATERMARK_GSTATE_OBJECT_NUMBER: usize = 7;
-const PDF_HEADER_MARK_OBJECT_NUMBER: usize = 8;
-
-/// The detailed APIARY emblem, a transparent 360x360 one-bit image mask.
-/// Its color comes from the active report theme at draw time.
-static WATERMARK_MASK_DATA: &[u8] = include_bytes!("../assets_pdf/watermark.maskdata");
-
-/// The compact APIARY emblem, a 64x64 one-bit image mask for the header band.
-static PDF_HEADER_MARK_DATA: &[u8] = include_bytes!("../assets_pdf/apiary-header-mark.maskdata");
-
-fn pdf_watermark_image_object() -> Vec<u8> {
-    format!(
-        "<< /Type /XObject /Subtype /Image /Width {WATERMARK_IMAGE_WIDTH} /Height {WATERMARK_IMAGE_HEIGHT} /ImageMask true /BitsPerComponent 1 /Decode [1 0] /Filter /FlateDecode /Length {} >>\nstream\n",
-        WATERMARK_MASK_DATA.len()
-    )
-    .into_bytes()
-}
-
-fn pdf_watermark_gstate_object() -> Vec<u8> {
-    format!("<< /Type /ExtGState /ca {WATERMARK_OPACITY:.3} >>").into_bytes()
-}
-
-fn pdf_header_mark_image_object() -> Vec<u8> {
-    format!(
-        "<< /Type /XObject /Subtype /Image /Width {PDF_HEADER_MARK_WIDTH} /Height {PDF_HEADER_MARK_HEIGHT} /ImageMask true /BitsPerComponent 1 /Decode [1 0] /Filter /FlateDecode /Length {} >>\nstream\n",
-        PDF_HEADER_MARK_DATA.len()
-    )
-    .into_bytes()
-}
-
-// -- document assembly (report_pdf.go's (*pdfDocument).bytes()) --
-
-impl PdfDocument {
-    fn bytes(mut self) -> Vec<u8> {
-        if self.pages.is_empty() {
-            self.pages.push(PdfPage { content: String::new() });
-        }
-        let muted = self.theme.muted_text;
-        let footer_left =
-            if self.footer_left.is_empty() { default_pdf_branding().footer_left } else { self.footer_left.clone() };
-
-        // Objects 1-5 are the catalog/pages/fonts every build has always
-        // had; 6-7 are the watermark's shared Image XObject and ExtGState;
-        // object 8 is the compact header-mark image mask. Page objects
-        // start at 9.
-        let mut objects: Vec<Vec<u8>> = vec![Vec::new(); 8 + self.pages.len() * 2];
-        objects[0] = b"<< /Type /Catalog /Pages 2 0 R >>".to_vec();
-        let mut kids = String::new();
-        for index in 0..self.pages.len() {
-            let _ = write!(kids, "{} 0 R ", 9 + index * 2);
-        }
-        objects[1] = format!("<< /Type /Pages /Count {} /Kids [{kids}] >>", self.pages.len()).into_bytes();
-        objects[2] = b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_vec();
-        objects[3] =
-            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>".to_vec();
-        // Portable sans display fallback for APIARY's Space Grotesk heading role.
-        objects[4] =
-            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>".to_vec();
-
-        let mut watermark_object = pdf_watermark_image_object();
-        watermark_object.extend_from_slice(WATERMARK_MASK_DATA);
-        watermark_object.extend_from_slice(b"\nendstream");
-        objects[PDF_WATERMARK_OBJECT_NUMBER - 1] = watermark_object;
-        objects[PDF_WATERMARK_GSTATE_OBJECT_NUMBER - 1] = pdf_watermark_gstate_object();
-
-        let mut header_mark_object = pdf_header_mark_image_object();
-        header_mark_object.extend_from_slice(PDF_HEADER_MARK_DATA);
-        header_mark_object.extend_from_slice(b"\nendstream");
-        objects[PDF_HEADER_MARK_OBJECT_NUMBER - 1] = header_mark_object;
-
-        let page_count = self.pages.len();
-        for (index, page) in self.pages.iter().enumerate() {
-            let page_number = 9 + index * 2;
-            let content_number = page_number + 1;
-            let footer = format!(
-                "BT /F1 7.5 Tf {:.3} {:.3} {:.3} rg 32 27 Td ({}) Tj ET\nBT /F1 7.5 Tf {:.3} {:.3} {:.3} rg 516 27 Td (Page {} of {page_count}) Tj ET\n",
-                muted.r, muted.g, muted.b, escape_pdf_text(&footer_left), muted.r, muted.g, muted.b, index + 1
-            );
-            let mut stream = page.content.clone().into_bytes();
-            stream.extend_from_slice(footer.as_bytes());
-            objects[page_number - 1] = format!(
-                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {PDF_PAGE_WIDTH:.0} {PDF_PAGE_HEIGHT:.0}] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> /XObject << /Wm {PDF_WATERMARK_OBJECT_NUMBER} 0 R /HMark {PDF_HEADER_MARK_OBJECT_NUMBER} 0 R >> /ExtGState << /GS1 {PDF_WATERMARK_GSTATE_OBJECT_NUMBER} 0 R >> >> /Contents {content_number} 0 R >>"
-            )
-            .into_bytes();
-            let mut content_object = format!("<< /Length {} >>\nstream\n", stream.len()).into_bytes();
-            content_object.extend_from_slice(&stream);
-            content_object.extend_from_slice(b"endstream");
-            objects[content_number - 1] = content_object;
-        }
-
-        let mut output: Vec<u8> = Vec::new();
-        output.extend_from_slice(b"%PDF-1.4\n%\xd3\xf4\xcc\xe1\n");
-        let mut offsets = vec![0usize; objects.len() + 1];
-        for (index, object) in objects.iter().enumerate() {
-            offsets[index + 1] = output.len();
-            output.extend_from_slice(format!("{} 0 obj\n", index + 1).as_bytes());
-            output.extend_from_slice(object);
-            output.extend_from_slice(b"\nendobj\n");
-        }
-        let xref = output.len();
-        output.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
-        for offset in &offsets[1..] {
-            output.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
-        }
-        output.extend_from_slice(
-            format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).as_bytes(),
-        );
-        output
-    }
 }
 
 /// Keeps the designer's ordering but anchors the cover at the start and the
@@ -835,11 +862,7 @@ pub fn render_report_pdf(
     appendix_limit: i64,
 ) -> Vec<u8> {
     let branding = branding.with_defaults();
-    let mut writer = PdfReportWriter {
-        doc: PdfDocument { pages: Vec::new(), theme, footer_left: branding.footer_left.clone() },
-        y: 0.0,
-        branding,
-    };
+    let mut writer = PdfReportWriter::new(theme, branding);
     writer.new_page();
     for element in normalize_report_elements(elements) {
         match element.as_str() {
@@ -871,7 +894,7 @@ pub fn render_report_pdf(
             _ => {}
         }
     }
-    writer.doc.bytes()
+    writer.finish()
 }
 
 #[cfg(test)]
@@ -897,16 +920,31 @@ mod tests {
             ELEMENT_PARAMETERS.to_string(),
         ];
         let bytes = render_report_pdf(&data, pdf_theme_dark(), PdfBranding::default(), &elements, 120);
-        assert!(bytes.starts_with(b"%PDF-1.4"));
-        assert!(bytes.ends_with(b"%%EOF\n"));
+        assert!(bytes.starts_with(b"%PDF"));
         assert!(bytes.len() > 1000);
         let text = String::from_utf8_lossy(&bytes);
-        assert!(text.contains("/Type /Catalog"));
+        assert!(text.contains("/Catalog"));
         assert!(text.contains("trailer"));
     }
 
     #[test]
-    #[ignore = "scratch: dumps a multi-page PDF to /tmp for manual xref inspection"]
+    fn renders_light_theme_and_both_themes_differ() {
+        let data = ReportData {
+            generated: chrono::Utc::now(),
+            title: "Theme Test".into(),
+            summary: ReportSummary { risk_level: "high".into(), ..Default::default() },
+            ..Default::default()
+        };
+        let elements = vec![ELEMENT_COVER.to_string(), ELEMENT_METRICS.to_string()];
+        let dark = render_report_pdf(&data, pdf_theme_dark(), PdfBranding::default(), &elements, 10);
+        let light = render_report_pdf(&data, pdf_theme_light(), PdfBranding::default(), &elements, 10);
+        assert!(dark.starts_with(b"%PDF"));
+        assert!(light.starts_with(b"%PDF"));
+        assert_ne!(dark, light);
+    }
+
+    #[test]
+    #[ignore = "scratch: dumps a multi-page PDF to /tmp for manual inspection"]
     fn scratch_dump_multi_page_pdf() {
         let mut top_sources = Vec::new();
         for i in 0..300 {

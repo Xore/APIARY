@@ -33,6 +33,13 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 # dashboard-workbench-runs-v1/-recipes-v1 during the cutover window.
 sha2 = "0.10"
 rand = "0.9"
+# PDF report composer (#1612 follow-up): only the core Op/graphics/
+# builtin-font API is used (no HTML layout, no raster image decoding — the
+# two embedded emblems are hand-registered XObject::External stencil masks,
+# see report_pdf.rs), so every optional feature (html/text_layout/images/
+# svg/...) is disabled to skip printpdf's azul-layout+taffy+hyphenation
+# dependency chain entirely.
+printpdf = { version = "0.12.6", default-features = false }
 
 [profile.release]
 lto = "thin"
