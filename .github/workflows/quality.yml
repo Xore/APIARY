@@ -140,6 +140,48 @@ jobs:
       - name: Generated assets are current
         run: git diff --exit-code -- arcane/home/honeypot-dashboard/dashboard/static/hp-api.js
 
+  frontend-next:
+    name: Dashboard frontend (next)
+    runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.use_self_hosted_runner) && 'self-hosted' || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: arcane/home/honeypot-dashboard/frontend-next/package-lock.json
+      - run: npm ci
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+      # Informational, not blocking (#1618): TanStack Start's createServerFn
+      # return type is checked against ValidateSerializableMapped, which
+      # rejects `Record<string, unknown>` (the index-signature value is
+      # `unknown`, which can't be *proven* JSON-safe even though it always
+      # is here -- every one of these is an Elasticsearch _source document).
+      # ~14 route files use that pattern pre-existing this job; `vite build`
+      # (below, still blocking) doesn't hit this since esbuild strips types
+      # rather than checking them, so it isn't masking a real runtime bug.
+      # Flip this back to blocking once #1618 lands a real Json value type.
+      - run: npm run typecheck
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+        continue-on-error: true
+      # No live-ES smoke suite here on purpose: port-tests/ needs the real
+      # cluster over an SSH tunnel to the homeserver (see its README) --
+      # not reachable from a GitHub-hosted runner, and not appropriate to
+      # point at production data from CI. That suite stays a manual/local
+      # verification step; this job's job is catching build/type breakage.
+      - run: npm run build
+        working-directory: arcane/home/honeypot-dashboard/frontend-next
+      # Checked post-build, not via the standalone `tsr generate` CLI: the
+      # tanstackStart() vite plugin's own route-tree generation (used by
+      # `build`/`dev`) and the router-cli's standalone `generate-routes`
+      # disagree on one thing -- the plugin also emits a `Register` SSR
+      # type augmentation the CLI doesn't -- so diffing right after
+      # `generate-routes` flags the committed (plugin-shaped) file as
+      # stale on every single run. The build's own output is what's
+      # actually committed and actually ships; diff against that instead.
+      - name: Generated route tree is current
+        run: git diff --exit-code -- arcane/home/honeypot-dashboard/frontend-next/src/routeTree.gen.ts
+
   dashboard-browser:
     name: Dashboard browser matrix
     runs-on: ubuntu-latest
