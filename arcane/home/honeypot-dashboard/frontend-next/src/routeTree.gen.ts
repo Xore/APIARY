@@ -41,6 +41,7 @@ import { Route as PayloadWorkbenchResultsRouteImport } from './routes/payload-wo
 import { Route as SessionsIdRouteImport } from './routes/sessions.$id'
 import { Route as ApiChartNameRouteImport } from './routes/api/chart.$name'
 import { Route as InvestigateIpIpRouteImport } from './routes/investigate.ip.$ip'
+import { Route as ApiCanarytokenIdDownloadRouteImport } from './routes/api/canarytoken.$id.download'
 import { Route as ApiReportIdPdfRouteImport } from './routes/api/report.$id.pdf'
 
 const IndexRoute = IndexRouteImport.update({
@@ -203,6 +204,12 @@ const InvestigateIpIpRoute = InvestigateIpIpRouteImport.update({
   path: '/investigate/ip/$ip',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiCanarytokenIdDownloadRoute =
+  ApiCanarytokenIdDownloadRouteImport.update({
+    id: '/api/canarytoken/$id/download',
+    path: '/api/canarytoken/$id/download',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiReportIdPdfRoute = ApiReportIdPdfRouteImport.update({
   id: '/api/report/$id/pdf',
   path: '/api/report/$id/pdf',
@@ -242,6 +249,7 @@ export interface FileRoutesByFullPath {
   '/sessions/$id': typeof SessionsIdRoute
   '/api/chart/$name': typeof ApiChartNameRoute
   '/investigate/ip/$ip': typeof InvestigateIpIpRoute
+  '/api/canarytoken/$id/download': typeof ApiCanarytokenIdDownloadRoute
   '/api/report/$id/pdf': typeof ApiReportIdPdfRoute
 }
 export interface FileRoutesByTo {
@@ -277,6 +285,7 @@ export interface FileRoutesByTo {
   '/sessions/$id': typeof SessionsIdRoute
   '/api/chart/$name': typeof ApiChartNameRoute
   '/investigate/ip/$ip': typeof InvestigateIpIpRoute
+  '/api/canarytoken/$id/download': typeof ApiCanarytokenIdDownloadRoute
   '/api/report/$id/pdf': typeof ApiReportIdPdfRoute
 }
 export interface FileRoutesById {
@@ -313,6 +322,7 @@ export interface FileRoutesById {
   '/sessions/$id': typeof SessionsIdRoute
   '/api/chart/$name': typeof ApiChartNameRoute
   '/investigate/ip/$ip': typeof InvestigateIpIpRoute
+  '/api/canarytoken/$id/download': typeof ApiCanarytokenIdDownloadRoute
   '/api/report/$id/pdf': typeof ApiReportIdPdfRoute
 }
 export interface FileRouteTypes {
@@ -350,6 +360,7 @@ export interface FileRouteTypes {
     | '/sessions/$id'
     | '/api/chart/$name'
     | '/investigate/ip/$ip'
+    | '/api/canarytoken/$id/download'
     | '/api/report/$id/pdf'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -385,6 +396,7 @@ export interface FileRouteTypes {
     | '/sessions/$id'
     | '/api/chart/$name'
     | '/investigate/ip/$ip'
+    | '/api/canarytoken/$id/download'
     | '/api/report/$id/pdf'
   id:
     | '__root__'
@@ -420,6 +432,7 @@ export interface FileRouteTypes {
     | '/sessions/$id'
     | '/api/chart/$name'
     | '/investigate/ip/$ip'
+    | '/api/canarytoken/$id/download'
     | '/api/report/$id/pdf'
   fileRoutesById: FileRoutesById
 }
@@ -456,6 +469,7 @@ export interface RootRouteChildren {
   SessionsIdRoute: typeof SessionsIdRoute
   ApiChartNameRoute: typeof ApiChartNameRoute
   InvestigateIpIpRoute: typeof InvestigateIpIpRoute
+  ApiCanarytokenIdDownloadRoute: typeof ApiCanarytokenIdDownloadRoute
   ApiReportIdPdfRoute: typeof ApiReportIdPdfRoute
 }
 
@@ -685,6 +699,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InvestigateIpIpRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/canarytoken/$id/download': {
+      id: '/api/canarytoken/$id/download'
+      path: '/api/canarytoken/$id/download'
+      fullPath: '/api/canarytoken/$id/download'
+      preLoaderRoute: typeof ApiCanarytokenIdDownloadRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/report/$id/pdf': {
       id: '/api/report/$id/pdf'
       path: '/api/report/$id/pdf'
@@ -728,6 +749,7 @@ const rootRouteChildren: RootRouteChildren = {
   SessionsIdRoute: SessionsIdRoute,
   ApiChartNameRoute: ApiChartNameRoute,
   InvestigateIpIpRoute: InvestigateIpIpRoute,
+  ApiCanarytokenIdDownloadRoute: ApiCanarytokenIdDownloadRoute,
   ApiReportIdPdfRoute: ApiReportIdPdfRoute,
 }
 export const routeTree = rootRouteImport

@@ -65,6 +65,22 @@ impl Es {
         Ok(())
     }
 
+    /// Index (upsert) one document by id.
+    pub async fn index_doc(&self, index: &str, id: &str, doc: Value) -> anyhow::Result<()> {
+        let response = self
+            .client
+            .index(elasticsearch::IndexParts::IndexId(index, id))
+            .body(doc)
+            .send()
+            .await?;
+        let status = response.status_code();
+        if !status.is_success() {
+            let body = response.json::<Value>().await.unwrap_or_default();
+            anyhow::bail!("elasticsearch index {}: {}", status, body);
+        }
+        Ok(())
+    }
+
     pub async fn ping(&self) -> bool {
         self.client.ping().send().await.map(|r| r.status_code().is_success()).unwrap_or(false)
     }
