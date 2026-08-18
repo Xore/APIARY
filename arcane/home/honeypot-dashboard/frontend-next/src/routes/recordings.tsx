@@ -1,6 +1,5 @@
-// Session recordings — cowrie-ttylog-v1; the inspector will grow the
-// terminal-output preview once the replay decode endpoint lands (the cast
-// bytes live in the store as ttylog_base64).
+// Session recordings — cowrie-ttylog-v1. The inspector fetches the
+// decoded replay (frames + terminal transcript) lazily when a row opens.
 import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useState } from 'react'
@@ -14,12 +13,65 @@ type RecordingRow = {
 
 type Page = { total: number; rows: RecordingRow[] }
 
+type Replay = {
+  shasum: string
+  frames: number
+  duration_seconds: number
+  transcript: string
+}
+
 const fetchRecordings = createServerFn({ method: 'GET' })
   .inputValidator((input: { offset: number }) => input)
   .handler(async ({ data }) => {
     const { serviceJSON } = await import('../lib/backend.server')
     return serviceJSON<Page>(`/api/v1/recordings?offset=${data.offset}&size=25`)
   })
+
+const fetchReplay = createServerFn({ method: 'GET' })
+  .inputValidator((input: { shasum: string }) => input)
+  .handler(async ({ data }): Promise<Replay | null> => {
+    const { serviceJSON } = await import('../lib/backend.server')
+    return serviceJSON<Replay>(`/api/v1/recordings/${encodeURIComponent(data.shasum)}`)
+  })
+
+// Control bytes the transcript view drops so raw ANSI/VT sequences don't
+// litter the plain text (a real player lands with the workbench round).
+function plainTranscript(transcript: string): string {
+  // eslint-disable-next-line no-control-regex
+  return transcript
+    .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '') // CSI sequences (colors, cursor)
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?/g, '') // OSC (window title)
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '') // stray control bytes
+}
+
+function ReplayPane({ shasum }: { shasum: string }) {
+  const [replay, setReplay] = useState<Replay | null | 'loading'>('loading')
+  useEffect(() => {
+    let cancelled = false
+    setReplay('loading')
+    fetchReplay({ data: { shasum } }).then(
+      (result) => {
+        if (!cancelled) setReplay(result)
+      },
+      () => {
+        if (!cancelled) setReplay(null)
+      },
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [shasum])
+  if (replay === 'loading') return <span className="skeleton-line" aria-hidden="true" />
+  if (!replay) return <p className="subtitle">Replay unavailable for this recording.</p>
+  return (
+    <>
+      <p className="subtitle">
+        {replay.frames.toLocaleString('en-US')} frames · {replay.duration_seconds.toFixed(1)}s of terminal time
+      </p>
+      <pre className="hp-md__preview">{plainTranscript(replay.transcript)}</pre>
+    </>
+  )
+}
 
 export const Route = createFileRoute('/recordings')({
   loader: async () => ({ first: fetchRecordings({ data: { offset: 0 } }) }),
@@ -74,6 +126,7 @@ function Recordings() {
         onViewMore={viewMore}
         loadingMore={loadingMore}
         inspectorTitle="Recording details"
+        inspectorExtra={(row) => <ReplayPane shasum={row.shasum} />}
       />
     </>
   )

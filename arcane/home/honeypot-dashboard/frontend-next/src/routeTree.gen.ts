@@ -22,6 +22,8 @@ import { Route as IpsRouteImport } from './routes/ips'
 import { Route as MlAnomaliesRouteImport } from './routes/ml-anomalies'
 import { Route as PayloadsRouteImport } from './routes/payloads'
 import { Route as RecordingsRouteImport } from './routes/recordings'
+import { Route as SourceHealthRouteImport } from './routes/source-health'
+import { Route as ApiLiveRouteImport } from './routes/api/live'
 import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
 import { Route as AuthLoginRouteImport } from './routes/auth/login'
 import { Route as AuthLogoutRouteImport } from './routes/auth/logout'
@@ -91,6 +93,16 @@ const RecordingsRoute = RecordingsRouteImport.update({
   path: '/recordings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SourceHealthRoute = SourceHealthRouteImport.update({
+  id: '/source-health',
+  path: '/source-health',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiLiveRoute = ApiLiveRouteImport.update({
+  id: '/api/live',
+  path: '/api/live',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthCallbackRoute = AuthCallbackRouteImport.update({
   id: '/auth/callback',
   path: '/auth/callback',
@@ -121,6 +133,8 @@ export interface FileRoutesByFullPath {
   '/ml-anomalies': typeof MlAnomaliesRoute
   '/payloads': typeof PayloadsRoute
   '/recordings': typeof RecordingsRoute
+  '/source-health': typeof SourceHealthRoute
+  '/api/live': typeof ApiLiveRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
@@ -139,6 +153,8 @@ export interface FileRoutesByTo {
   '/ml-anomalies': typeof MlAnomaliesRoute
   '/payloads': typeof PayloadsRoute
   '/recordings': typeof RecordingsRoute
+  '/source-health': typeof SourceHealthRoute
+  '/api/live': typeof ApiLiveRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
@@ -158,6 +174,8 @@ export interface FileRoutesById {
   '/ml-anomalies': typeof MlAnomaliesRoute
   '/payloads': typeof PayloadsRoute
   '/recordings': typeof RecordingsRoute
+  '/source-health': typeof SourceHealthRoute
+  '/api/live': typeof ApiLiveRoute
   '/auth/callback': typeof AuthCallbackRoute
   '/auth/login': typeof AuthLoginRoute
   '/auth/logout': typeof AuthLogoutRoute
@@ -178,6 +196,8 @@ export interface FileRouteTypes {
     | '/ml-anomalies'
     | '/payloads'
     | '/recordings'
+    | '/source-health'
+    | '/api/live'
     | '/auth/callback'
     | '/auth/login'
     | '/auth/logout'
@@ -196,6 +216,8 @@ export interface FileRouteTypes {
     | '/ml-anomalies'
     | '/payloads'
     | '/recordings'
+    | '/source-health'
+    | '/api/live'
     | '/auth/callback'
     | '/auth/login'
     | '/auth/logout'
@@ -214,6 +236,8 @@ export interface FileRouteTypes {
     | '/ml-anomalies'
     | '/payloads'
     | '/recordings'
+    | '/source-health'
+    | '/api/live'
     | '/auth/callback'
     | '/auth/login'
     | '/auth/logout'
@@ -233,6 +257,8 @@ export interface RootRouteChildren {
   MlAnomaliesRoute: typeof MlAnomaliesRoute
   PayloadsRoute: typeof PayloadsRoute
   RecordingsRoute: typeof RecordingsRoute
+  SourceHealthRoute: typeof SourceHealthRoute
+  ApiLiveRoute: typeof ApiLiveRoute
   AuthCallbackRoute: typeof AuthCallbackRoute
   AuthLoginRoute: typeof AuthLoginRoute
   AuthLogoutRoute: typeof AuthLogoutRoute
@@ -331,6 +357,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RecordingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/source-health': {
+      id: '/source-health'
+      path: '/source-health'
+      fullPath: '/source-health'
+      preLoaderRoute: typeof SourceHealthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/live': {
+      id: '/api/live'
+      path: '/api/live'
+      fullPath: '/api/live'
+      preLoaderRoute: typeof ApiLiveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/auth/callback': {
       id: '/auth/callback'
       path: '/auth/callback'
@@ -369,6 +409,8 @@ const rootRouteChildren: RootRouteChildren = {
   MlAnomaliesRoute: MlAnomaliesRoute,
   PayloadsRoute: PayloadsRoute,
   RecordingsRoute: RecordingsRoute,
+  SourceHealthRoute: SourceHealthRoute,
+  ApiLiveRoute: ApiLiveRoute,
   AuthCallbackRoute: AuthCallbackRoute,
   AuthLoginRoute: AuthLoginRoute,
   AuthLogoutRoute: AuthLogoutRoute,

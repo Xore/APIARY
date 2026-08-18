@@ -60,8 +60,33 @@ function Events() {
   const [total, setTotal] = useState(0)
   const [loadingMore, setLoadingMore] = useState(false)
   const [selected, setSelected] = useState<number | null>(null)
+  const [live, setLive] = useState(true)
   const paneRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
+
+  // Live tail via the BFF's SSE proxy: new events prepend in arrival
+  // order; the selected index shifts with them so the open record stays
+  // the same row. Capped so an all-day tab doesn't grow unbounded.
+  useEffect(() => {
+    if (!live) return
+    const source = new EventSource('/api/live')
+    const onEvent = (event: MessageEvent) => {
+      let row: EventRow
+      try {
+        row = JSON.parse(event.data) as EventRow
+      } catch {
+        return
+      }
+      setRows((current) => (current === null ? current : [row, ...current].slice(0, 500)))
+      setTotal((count) => count + 1)
+      setSelected((index) => (index === null ? null : Math.min(index + 1, 499)))
+    }
+    source.addEventListener('event', onEvent)
+    return () => {
+      source.removeEventListener('event', onEvent)
+      source.close()
+    }
+  }, [live])
 
   useEffect(() => {
     let cancelled = false
@@ -114,6 +139,15 @@ function Events() {
       </header>
       <div className="filters">
         <span className="chip">{total.toLocaleString('en-US')} events</span>
+        <button
+          className={live ? 'chip is-active' : 'chip'}
+          type="button"
+          aria-pressed={live}
+          title={live ? 'Live tail on — new events stream in as they arrive' : 'Live tail off'}
+          onClick={() => setLive((current) => !current)}
+        >
+          {live ? '● live' : '○ paused'}
+        </button>
       </div>
       <div className={open ? 'hp-md hp-md--active hp-md--open wide' : 'hp-md hp-md--active wide'} id="events-grid">
         <div className="hp-md__list" ref={listRef}>
