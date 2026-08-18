@@ -195,7 +195,11 @@ pub async fn generic(
         // llm-worker output; index may not exist yet (ignore_unavailable).
         "llm-analysis" => ("llm-analysis", "@timestamp", &[]),
         "ml-anomalies" => ("ml-anomalies", "timestamp", &[]),
-        "agent-campaigns" => ("agent-intrusion-campaigns", "last_seen", &[]),
+        // Matches dashboard/agent_campaigns.go's own refreshAgentCampaigns
+        // sort (`sort=@timestamp:asc`) — the campaign-verdict documents
+        // this index holds have no last_seen field at all (see the
+        // agent-intrusion-worker port's build_campaign_verdict, #1610).
+        "agent-campaigns" => ("agent-intrusion-campaigns", "@timestamp", &[]),
         "canarytokens" => ("dashboard-canarytokens-v1", "created_at", &[]),
         "problem-reports" => ("dashboard-problem-reports-v1", "submitted_at", &["dom_snapshot"]),
         "dead-letters" => ("dead-letter-honeypot", "@timestamp", &[]),

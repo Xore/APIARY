@@ -96,7 +96,9 @@ dependencies = [
  "axum",
  "base64",
  "chrono",
+ "data-encoding",
  "elasticsearch",
+ "flate2",
  "futures",
  "printpdf",
  "rand 0.9.5",
@@ -479,6 +481,12 @@ dependencies = [
  "quote",
  "syn 2.0.119",
 ]
+
+[[package]]
+name = "data-encoding"
+version = "2.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
 
 [[package]]
 name = "defmt"

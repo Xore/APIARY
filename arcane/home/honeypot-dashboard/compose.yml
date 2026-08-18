@@ -412,8 +412,13 @@ services:
       # (dashboard-reports-definitions-v1 due-schedule scan +
       # dashboard-generated-reports-v1 writes), no host mount of its own,
       # so it belongs on this single-instance tier for the same reason
-      # user-retention-sweep does.
-      - WORKER_LOOPS=user-retention-sweep,reports-scheduler
+      # user-retention-sweep does. payload-inventory (#1610) joins for the
+      # opposite-but-compatible reason: it needs the read-only PAYLOAD_DIRS
+      # mount below, which this service already carries for the on-demand
+      # bytes-mirror self-heal — no new mount, just a second consumer of one
+      # already here.
+      - WORKER_LOOPS=user-retention-sweep,reports-scheduler,payload-inventory
+      - SCAN_INTERVAL=${PAYLOAD_INVENTORY_SCAN_INTERVAL:-5m}
       # #1612 payload-bytes on-demand mirror self-heal (payload_bytes.rs):
       # read-only access to the same capture sources main.go's PAYLOAD_DIRS
       # wiring reads, so a hash dashboard-payload-bytes-v1 hasn't mirrored
@@ -526,7 +531,21 @@ services:
     environment:
       - LISTEN_ADDR=127.0.0.1:8099
       - ELASTICSEARCH_URL=http://elasticsearch:9200
-      - WORKER_LOOPS=alert-notifier
+      # #1610: attacker-identity is pure ES (no host mounts, no local
+      # state — durable entities live in attackers-v1), so it fits this
+      # already-stateless loop container directly, unlike es-results-
+      # importer (needs root+DAC_READ_SEARCH for root-owned result dirs
+      # plus a persistent dedup state file — its own separate service).
+      # agent-intrusion (#1610): same "pure ES, no host mounts, no local
+      # state" shape as attacker-identity above — durable campaign verdicts
+      # live in agent-intrusion-campaigns, everything else is recomputed
+      # from the rolling fetch window each cycle.
+      - WORKER_LOOPS=alert-notifier,attacker-identity,agent-intrusion
+      - EVIDENCE_WINDOW=${EVIDENCE_WINDOW:-6h}
+      - ATTACKER_IDENTITY_RUN_INTERVAL=${ATTACKER_IDENTITY_RUN_INTERVAL:-15m}
+      - AGENT_INTRUSION_POLL_INTERVAL=${AGENT_INTRUSION_POLL_INTERVAL:-300}
+      - AGENT_INTRUSION_MAX_EVENTS_PER_SOURCE=${AGENT_INTRUSION_MAX_EVENTS_PER_SOURCE:-10000}
+      - AGENT_INTRUSION_FETCH_WINDOW_DAYS=${AGENT_INTRUSION_FETCH_WINDOW_DAYS:-10}
       - ALERT_WEBHOOK_URL=${HONEYPOT_ALERT_WEBHOOK_URL:-}
       - ALERT_COOLDOWN=${HONEYPOT_ALERT_COOLDOWN:-6h}
       - ALERT_CAMPAIGN_SCORE=${HONEYPOT_ALERT_CAMPAIGN_SCORE:-80}
@@ -691,6 +710,72 @@ services:
     # Same DAC_READ_SEARCH justification as the dashboard service above:
     # the Ghidra/GitHub-analysis result directories are root-owned host bind
     # mounts this container otherwise can't read.
+    user: "0:0"
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_READ_SEARCH
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  # #1610 worker migration: Rust port of es-results-importer above, running
+  # side by side with it behind the `next` profile (parity pass, not a
+  # cutover — #1610's own text: "each migration ships with parity tests
+  # against the current worker's observable outputs before the old one
+  # retires"). A separate service from backend-worker, not an extra
+  # WORKER_LOOPS entry bolted onto it: this worker needs the SAME root +
+  # DAC_READ_SEARCH privilege escalation the Python service above needs
+  # (Ghidra/GitHub-analysis result directories are root-owned host bind
+  # mounts a normal container user can't read) plus a persistent local
+  # dedup-state file — backend-worker is deliberately unprivileged and
+  # stateless-by-design (see its own compose comment: "movable to any
+  # docker host... state in ES"), and every other loop running there
+  # (alert-notifier, reports-scheduler, user-retention-sweep) needs neither.
+  # Also separate from backend-service-mounted (that boundary is about
+  # WRITE access to host request spools; this one only ever reads results).
+  backend-worker-importer:
+    <<: *runtime-defaults
+    profiles: ["next"]
+    image: apiary-backend:latest
+    container_name: hp-apiary-worker-importer
+    restart: unless-stopped
+    environment:
+      - LISTEN_ADDR=127.0.0.1:8098
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - WORKER_LOOPS=es-results-importer
+      - IMPORT_INTERVAL=${ES_IMPORTER_INTERVAL:-300}
+      - IMPORTER_STATE=/state-importer/es-results-importer.json
+      - SHARD_COUNT=${ES_IMPORTER_SHARD_COUNT:-1}
+      - GHIDRA_RESULTS_DIR=/ghidra-results
+      - SANDBOX_RESULTS_DIR=/sandbox-results
+      - WINDOWS_SANDBOX_RESULTS_DIR=/windows-sandbox-results
+      - GHOSTS_SANDBOX_RESULTS_DIR=/ghosts-sandbox-results
+      - GITHUB_ANALYSIS_RESULTS_DIR=/github-analysis-results
+      - REVDECK_RESULTS_DIR=/revdeck-results
+      - CAPE_RESULTS_DIR=/cape-results
+      - COWRIE_TTYLOG_DIR=/cowrie-tty
+      - REPORTER_METRICS_DIR=/reporter-data
+      - YARA_RESULTS_DIR=/yara-results
+      - TZ=Europe/Berlin
+    volumes:
+      - /var/lib/honeypot-ghidra/results:/ghidra-results:ro
+      - /var/lib/honeypot-sandbox/export:/sandbox-results:ro
+      - /var/lib/honeypot-windows-sandbox/export:/windows-sandbox-results:ro
+      - /var/lib/honeypot-ghosts-sandbox/export:/ghosts-sandbox-results:ro
+      - /var/lib/honeypot-github/results:/github-analysis-results:ro
+      - /var/lib/honeypot-revdeck/results:/revdeck-results:ro
+      - /var/lib/honeypot-cape/results:/cape-results:ro
+      - es-importer-state:/state-importer
+      - /opt/stacks/apiary/logs/cowrie/tty:/cowrie-tty:ro
+      - reporter-data:/reporter-data:ro
+      - yara-results:/yara-results:ro
+    networks:
+      - honeynet
     user: "0:0"
     cap_drop:
       - ALL

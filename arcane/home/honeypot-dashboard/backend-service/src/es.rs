@@ -8,9 +8,10 @@ use elasticsearch::{
     cluster::ClusterHealthParts,
     http::transport::Transport,
     params::{OpType, Refresh},
-    Elasticsearch, SearchParts,
+    BulkOperation, BulkParts, Elasticsearch, SearchParts,
 };
 use serde_json::Value;
+use std::collections::HashSet;
 
 pub const EVENT_INDICES: &[&str] = &["honeypot-v2-*", "suricata-v2-*"];
 
@@ -278,5 +279,129 @@ impl Es {
             anyhow::bail!("elasticsearch {}: {}", status, json);
         }
         Ok(json)
+    }
+
+    /// Bulk `index` (plain upsert, not `create`) a batch of documents, each
+    /// against its own (index, id) — the primitive es_importer.rs needs to
+    /// mirror analysis/es-results-importer/importer.py's `bulk(es, actions,
+    /// stats_only=False, raise_on_error=False)` call. Returns the `_id` of
+    /// every operation the cluster reported as failed (network/transport
+    /// failure fails every id in the batch); an empty set means every
+    /// document in `operations` was indexed. Deliberately per-item, not a
+    /// single pass/fail for the whole batch — callers need this to only
+    /// advance dedup state for documents that actually made it into ES,
+    /// matching the Python importer's own advance_state_after_bulk
+    /// semantics on a partial batch failure.
+    pub async fn bulk_index(
+        &self,
+        operations: Vec<(&str, &str, Value)>,
+    ) -> anyhow::Result<HashSet<String>> {
+        if operations.is_empty() {
+            return Ok(HashSet::new());
+        }
+        let all_ids: HashSet<String> = operations.iter().map(|(_, id, _)| id.to_string()).collect();
+        let ops: Vec<BulkOperation<Value>> = operations
+            .into_iter()
+            .map(|(index, id, doc)| BulkOperation::index(doc).index(index).id(id).into())
+            .collect();
+        let response = self.client.bulk(BulkParts::None).body(ops).send().await;
+        let response = match response {
+            Ok(r) => r,
+            Err(_) => return Ok(all_ids), // transport failure: every op unconfirmed, retry next pass
+        };
+        let status = response.status_code();
+        let json = response.json::<Value>().await?;
+        if !status.is_success() {
+            // A bulk-level rejection (e.g. auth, malformed request) fails
+            // every operation in the batch, same as a transport error above.
+            return Ok(all_ids);
+        }
+        let mut failed = HashSet::new();
+        for item in json["items"].as_array().into_iter().flatten() {
+            // Every op here is "index" (see BulkOperation::index above), so
+            // the per-item result always nests under "index".
+            let result = &item["index"];
+            let ok = result["status"].as_u64().map(|s| (200..300).contains(&s)).unwrap_or(false);
+            if !ok {
+                if let Some(id) = result["_id"].as_str() {
+                    failed.insert(id.to_string());
+                }
+            }
+        }
+        Ok(failed)
+    }
+
+    /// Point-in-time + search_after pagination, needed because
+    /// Elasticsearch's *default* `index.max_result_window` is 10,000 — a
+    /// single oversized `size` request hard-fails past that, not just
+    /// returns less. Every other query in this crate stays under that cap
+    /// by design; attacker-identity-worker's event fetch and existing-
+    /// entity load can legitimately exceed it. `body_fn` receives the
+    /// previous page's `search_after` value (`None` on the first call) and
+    /// returns the query body for the next page — the caller owns `query`/
+    /// `sort`/`_source`, this primitive only injects `size`/`pit` and walks
+    /// `search_after` forward. Returns every hit object as-is (including
+    /// `_source`/`sort`) across up to `max_pages` pages of `page_size` each.
+    /// Ported from attacker-identity-worker's own es.go
+    /// (openPointInTime/closePointInTime/docScrollAll).
+    pub async fn search_paginated(
+        &self,
+        index_pattern: &str,
+        mut body_fn: impl FnMut(Option<&Value>) -> Value,
+        page_size: u64,
+        max_pages: u32,
+    ) -> anyhow::Result<Vec<Value>> {
+        let open = self
+            .client
+            .open_point_in_time(elasticsearch::OpenPointInTimeParts::Index(&[index_pattern]))
+            .keep_alive("2m")
+            .send()
+            .await?;
+        let open_json = open.json::<Value>().await?;
+        let pit_id = open_json["id"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("open_point_in_time: no id in response: {open_json}"))?
+            .to_string();
+
+        let mut out = Vec::new();
+        let mut search_after: Option<Value> = None;
+        let result: anyhow::Result<()> = async {
+            for _ in 0..max_pages {
+                let mut body = body_fn(search_after.as_ref());
+                body["size"] = Value::from(page_size);
+                body["pit"] = Value::from(serde_json::json!({"id": pit_id, "keep_alive": "2m"}));
+                let response = self.client.search(SearchParts::None).body(body).send().await?;
+                let status = response.status_code();
+                let json = response.json::<Value>().await?;
+                if !status.is_success() {
+                    anyhow::bail!("elasticsearch pit search {status}: {json}");
+                }
+                let hits = json["hits"]["hits"].as_array().cloned().unwrap_or_default();
+                if hits.is_empty() {
+                    break;
+                }
+                let got = hits.len() as u64;
+                let last_sort = hits.last().and_then(|h| h.get("sort")).cloned();
+                out.extend(hits);
+                if got < page_size {
+                    break;
+                }
+                search_after = last_sort;
+            }
+            Ok(())
+        }
+        .await;
+
+        // Best-effort close regardless of the loop's outcome above — a PIT
+        // left open only holds a small amount of cluster state until its
+        // own keep_alive lapses, not worth masking the real error above.
+        let _ = self
+            .client
+            .close_point_in_time()
+            .body(serde_json::json!({"id": pit_id}))
+            .send()
+            .await;
+        result?;
+        Ok(out)
     }
 }
