@@ -65,6 +65,15 @@ struct Source {
     artifact_kind: Option<&'static str>,
     content_type: Option<&'static str>,
     aggregate_samples: Option<&'static str>,
+    /// #1611 workstream B: a plain binary source keyed by sha256(filename)
+    /// rather than the filename itself (cowrie_ttylog's own convention —
+    /// its filenames already ARE a content hash, so using them directly as
+    /// doc ids is safe; mailoney's saved .eml filenames carry no such
+    /// guarantee, so the doc id needs deriving instead — see #1611's own
+    /// text: "id = sha of path so re-scans are idempotent"). The document
+    /// shape is also different (body_path/eml_base64, not
+    /// shasum/ttylog_base64) — see scan_source's binary branch.
+    mailoney_mail: bool,
 }
 
 const fn source(env: &'static str, label: &'static str, index: &'static str, glob: &'static str) -> Source {
@@ -81,6 +90,7 @@ const fn source(env: &'static str, label: &'static str, index: &'static str, glo
         artifact_kind: None,
         content_type: None,
         aggregate_samples: None,
+        mailoney_mail: false,
     }
 }
 
@@ -135,6 +145,20 @@ fn sources() -> Vec<Source> {
             ..source("CAPE_RESULTS_DIR", "cape", "cape-analysis-v1", "*_cape.json")
         },
         Source { binary: true, ..source("COWRIE_TTYLOG_DIR", "cowrie_ttylog", "cowrie-ttylog-v1", "*") },
+        // #1611 workstream B: mailoney's full .eml bodies — the ES event
+        // document's own "mail-body" line carries session_id AND body_path
+        // as sibling fields (mailoney/json_log_patch.py's _emit_json_event
+        // call), but body_path is a relative filename this worker resolves
+        // to actual bytes, not something derivable from the filename alone
+        // (mailoney's upstream mail_storage.py, not vendored in this repo,
+        // owns the naming — unverified against a real saved filename).
+        // src/mail.rs's GET /api/v1/mail/{session_id} does the two-step
+        // join: honeypot-v2-* for session_id -> body_path, then this index
+        // for body_path -> content. Flat directory assumed (this importer
+        // has no subdirectory recursion anywhere) — if mail_storage.py
+        // nests files under a subdirectory this won't find them; worth
+        // confirming against a real deployment.
+        Source { binary: true, mailoney_mail: true, ..source("MAILONEY_MAIL_DIR", "mailoney_mail", "mailoney-mail-v1", "*") },
         Source { id_fields: &[], ..source("REPORTER_METRICS_DIR", "reporter_metrics", "reporter-metrics-v1", "metrics.json") },
         Source {
             aggregate_samples: Some("samples"),
@@ -400,6 +424,23 @@ fn scan_source(source: &Source, root: &Path, state: &HashMap<String, f64>, shard
                         "size_bytes": raw.len(),
                         "imported_at": now,
                         "data_base64": base64::engine::general_purpose::STANDARD.encode(&raw),
+                    }),
+                )
+            } else if source.mailoney_mail {
+                // #1611 workstream B: doc id is sha256(filename), not the
+                // filename itself — unlike cowrie's ttylog names, mailoney's
+                // saved filenames carry no content-hash guarantee, so the
+                // path is what needs hashing for a stable, idempotent id.
+                use sha2::{Digest, Sha256};
+                let digest = Sha256::digest(filename.as_bytes());
+                let id_hash: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+                (
+                    id_hash,
+                    json!({
+                        "body_path": filename,
+                        "size_bytes": raw.len(),
+                        "imported_at": now,
+                        "eml_base64": base64::engine::general_purpose::STANDARD.encode(&raw),
                     }),
                 )
             } else {

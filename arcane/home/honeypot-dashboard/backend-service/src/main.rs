@@ -49,6 +49,7 @@ mod ip_enrichment;
 mod kill_chain;
 mod live;
 mod llm_search;
+mod mail;
 mod overview;
 mod payload_bytes;
 mod payload_detail;
@@ -153,6 +154,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/overview/dashboard", get(dashboard::dashboard))
         .route("/api/v1/events", get(events::list))
         .route("/api/v1/live", get(live::stream))
+        .route("/api/v1/mail/{session_id}", get(mail::get))
         .route("/api/v1/sources", get(aggregates::sources))
         .route("/api/v1/filter-values", get(aggregates::filter_values))
         .route("/api/v1/investigate/ip/{ip}", get(investigate::ip))
