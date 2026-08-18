@@ -25,6 +25,7 @@ mod health;
 mod live;
 mod overview;
 mod replay;
+mod sensors;
 mod stores;
 
 #[derive(Clone)]
@@ -95,6 +96,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/live", get(live::stream))
         .route("/api/v1/sources", get(aggregates::sources))
         .route("/api/v1/source-health", get(health::source_health))
+        .route("/api/v1/sensors", get(sensors::detail))
         .route("/api/v1/campaigns", get(stores::campaigns))
         .route("/api/v1/clusters", get(stores::clusters))
         .route("/api/v1/attackers", get(stores::attackers))
