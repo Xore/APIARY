@@ -135,3 +135,29 @@ pub async fn payloads(
         .map(Json)
         .map_err(bad_gateway)
 }
+
+/// Generic allowlisted store passthrough: /api/v1/store/{name}. Every
+/// remaining store-shaped page reads through here instead of growing its
+/// own handler; the allowlist keeps arbitrary index reads impossible.
+pub async fn generic(
+    State(state): State<AppState>,
+    axum::extract::Path(name): axum::extract::Path<String>,
+    Query(q): Query<StoreQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let (index, sort): (&str, &str) = match name.as_str() {
+        "auth-events" => ("auth-failure-events", "last_seen"),
+        "ml-anomalies" => ("ml-anomalies", "timestamp"),
+        "agent-campaigns" => ("agent-intrusion-campaigns", "last_seen"),
+        "canarytokens" => ("dashboard-canarytokens-v1", "CreatedAt"),
+        "problem-reports" => ("dashboard-problem-reports-v1", "CreatedAt"),
+        "static-analysis" => ("dashboard-static-analysis-v1", "AnalyzedAt"),
+        "workbench-runs" => ("dashboard-workbench-runs-v1", "StartedAt"),
+        "generated-reports" => ("dashboard-generated-reports-v1", "GeneratedAt"),
+        "intelligence" => ("dashboard-intelligence-archive-v1", "LastSeen"),
+        _ => return Err((StatusCode::NOT_FOUND, format!("unknown store {name}"))),
+    };
+    store_page(&state, &[index], sort, &q, None)
+        .await
+        .map(Json)
+        .map_err(bad_gateway)
+}

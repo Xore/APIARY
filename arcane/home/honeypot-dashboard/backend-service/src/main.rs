@@ -96,6 +96,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/recordings", get(stores::recordings))
         .route("/api/v1/alerts", get(stores::alerts))
         .route("/api/v1/payloads", get(stores::payloads))
+        .route("/api/v1/store/{name}", get(stores::generic))
         .layer(middleware::from_fn_with_state(state.clone(), require_service_token));
 
     let app = Router::new()
