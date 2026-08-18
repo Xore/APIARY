@@ -23,6 +23,7 @@ mod charts;
 mod dashboard;
 mod es;
 mod events;
+mod fusion;
 mod health;
 mod kill_chain;
 mod live;
@@ -120,6 +121,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/charts/tls-fingerprints", get(charts::tls_fingerprints))
         .route("/api/v1/charts/ssh-fingerprints", get(charts::ssh_fingerprints))
         .route("/api/v1/charts/endlessh-held-histogram", get(charts::endlessh_histogram))
+        .route("/api/v1/charts/ml-anomaly-scores", get(charts::ml_anomaly_scores))
+        .route("/api/v1/charts/attacker-fusion", get(fusion::fusion))
         .route("/api/v1/campaigns", get(stores::campaigns))
         .route("/api/v1/clusters", get(stores::clusters))
         .route("/api/v1/attackers", get(stores::attackers))

@@ -17,6 +17,7 @@ export function StoreListPage({
   rowKey,
   inspectorTitle,
   chipNoun,
+  inspectorExtra,
 }: {
   fetchPage: (input: { data: { offset: number } }) => Promise<StorePage | null>
   label: string
@@ -26,6 +27,7 @@ export function StoreListPage({
   rowKey: (row: StoreRow, index: number) => string
   inspectorTitle?: string
   chipNoun: string
+  inspectorExtra?: (row: StoreRow) => React.ReactNode
 }) {
   const [rows, setRows] = useState<StoreRow[] | null>(null)
   const [total, setTotal] = useState(0)
@@ -71,6 +73,7 @@ export function StoreListPage({
         onViewMore={viewMore}
         loadingMore={loadingMore}
         inspectorTitle={inspectorTitle}
+        inspectorExtra={inspectorExtra}
       />
     </>
   )

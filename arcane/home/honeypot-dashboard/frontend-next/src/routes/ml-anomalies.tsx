@@ -3,6 +3,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { StoreListPage, str, num, when, type StorePage, type StoreRow } from '../components/StoreList'
 import type { Column } from '../components/Investigate'
+import { EChart } from '../components/EChart'
 
 const fetchPage = createServerFn({ method: 'GET' })
   .inputValidator((input: { offset: number }) => input)
@@ -32,7 +33,16 @@ export const Route = createFileRoute('/ml-anomalies')({ component: Page })
 
 function Page() {
   return (
-    <StoreListPage
+    <>
+      <div className="card wide" id="ml-anomaly-scores-card">
+        <h2>Model scores over time</h2>
+        <p className="note">
+          One point per anomaly per detector model, plus the composite — agreement across models is stronger evidence than any
+          single high score.
+        </p>
+        <EChart kind="scatter" url="/api/chart/ml-anomaly-scores" height={300} />
+      </div>
+      <StoreListPage
       fetchPage={fetchPage}
       label="Monitor"
       title="ML anomalies"
@@ -41,6 +51,7 @@ function Page() {
       rowKey={(row, index) => `${str(row, 'source_event_id')}-${index}`}
       inspectorTitle="Anomaly details"
       chipNoun="anomalies"
-    />
+      />
+    </>
   )
 }

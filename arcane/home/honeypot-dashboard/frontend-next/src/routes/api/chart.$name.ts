@@ -18,8 +18,7 @@ const CHARTS = new Set([
   'ssh-fingerprints',
   'endlessh-held-histogram',
   'ml-anomaly-scores',
-  'anomaly-severity',
-  'commands',
+  'attacker-fusion',
 ])
 
 export const Route = createFileRoute('/api/chart/$name')({
@@ -32,7 +31,9 @@ export const Route = createFileRoute('/api/chart/$name')({
         }
         if (!CHARTS.has(params.name)) return new Response('unknown chart', { status: 404 })
         const { serviceJSON } = await import('../../lib/backend.server')
-        const data = await serviceJSON<unknown>(`/api/v1/charts/${params.name}`)
+        // Forward the query string (attacker-fusion takes ?id=).
+        const search = new URL(request.url).search
+        const data = await serviceJSON<unknown>(`/api/v1/charts/${params.name}${search}`)
         if (data === null) return new Response('chart unavailable', { status: 502 })
         return Response.json(data, { headers: { 'cache-control': 'no-store' } })
       },

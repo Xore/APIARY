@@ -275,6 +275,59 @@ pub async fn ssh_fingerprints(State(state): State<AppState>) -> Result<Json<Bar>
     fingerprint_bar(&state, &["suricata-v2-ssh-*"], body, "software").await.map(Json).map_err(bad_gateway)
 }
 
+/// /api/v1/charts/ml-anomaly-scores — one scatter series per detector
+/// model plus the composite (#1284), reshaped from ml-anomalies docs.
+pub async fn ml_anomaly_scores(State(state): State<AppState>) -> Result<Json<Vec<Series>>, (StatusCode, String)> {
+    let body = json!({
+        "size": 500,
+        "sort": [{"timestamp": {"order": "desc", "unmapped_type": "date"}}],
+        "_source": ["@timestamp", "composite_score", "model_scores"],
+        "query": {"match_all": {}}
+    });
+    let result = state
+        .es
+        .search_index(&["ml-anomalies"], body)
+        .await
+        .map_err(bad_gateway)?;
+    let hits = result["hits"]["hits"].as_array().cloned().unwrap_or_default();
+
+    // Model names come from the data itself, so a new detector shows up
+    // with no dashboard change (same posture as the Go tier).
+    let mut names: Vec<String> = hits
+        .iter()
+        .flat_map(|hit| {
+            hit["_source"]["model_scores"]
+                .as_object()
+                .map(|scores| scores.keys().cloned().collect::<Vec<_>>())
+                .unwrap_or_default()
+        })
+        .collect();
+    names.sort();
+    names.dedup();
+    names.push("composite".to_string());
+
+    let series = names
+        .into_iter()
+        .map(|name| Series {
+            points: hits
+                .iter()
+                .filter_map(|hit| {
+                    let source = &hit["_source"];
+                    let time = source["@timestamp"].as_str()?.to_string();
+                    let value = if name == "composite" {
+                        source["composite_score"].as_f64()?
+                    } else {
+                        source["model_scores"][&name].as_f64()?
+                    };
+                    Some(Point { time, value })
+                })
+                .collect(),
+            name,
+        })
+        .collect();
+    Ok(Json(series))
+}
+
 const HELD_BUCKETS: &[(&str, u64)] = &[
     ("<1s", 1_000),
     ("1-5s", 5_000),

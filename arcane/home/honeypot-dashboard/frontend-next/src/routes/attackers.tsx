@@ -4,6 +4,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import { EChart } from '../components/EChart'
 
 type AttackerRow = {
   id: string
@@ -97,6 +98,11 @@ function Attackers() {
         onViewMore={viewMore}
         loadingMore={loadingMore}
         inspectorTitle="Identity details"
+        inspectorExtra={(row) => (
+          // Fusion radar (#1280): which signal categories 2+ member IPs
+          // actually share — the visual evidence for the merge decision.
+          <EChart kind="radar" url={`/api/chart/attacker-fusion?id=${encodeURIComponent(row.id)}`} height={280} />
+        )}
       />
     </>
   )
