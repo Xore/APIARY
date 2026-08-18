@@ -31,6 +31,7 @@ mod health;
 mod investigate;
 mod kill_chain;
 mod live;
+mod llm_search;
 mod overview;
 mod payload_detail;
 mod replay;
@@ -125,6 +126,7 @@ async fn main() -> anyhow::Result<()> {
             axum::routing::put(config::put_presentation),
         )
         .route("/api/v1/users", get(config::users))
+        .route("/api/v1/llm-search", get(llm_search::search))
         .route("/api/v1/reports/{id}/pdf", get(reports::pdf))
         .route("/api/v1/artifacts/{kind}/{key}", get(artifacts::list))
         .route("/api/v1/artifacts/{kind}/{key}/{filename}", get(artifacts::download))
