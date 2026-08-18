@@ -25,6 +25,7 @@ mod canarytokens;
 mod charts;
 mod config;
 mod config_history;
+mod credentials;
 mod dashboard;
 mod detail;
 mod es;
@@ -33,6 +34,7 @@ mod fusion;
 mod ghidra_submit;
 mod github_analysis_submit;
 mod health;
+mod honeyfs_implant;
 mod investigate;
 mod ip_block;
 mod kill_chain;
@@ -217,8 +219,21 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/alerts", get(stores::alerts))
         .route("/api/v1/alerts/{key}/ack", post(stores::acknowledge))
         .route("/api/v1/canarytokens/types", get(canarytokens::types))
-        .route("/api/v1/canarytokens", post(canarytokens::create))
+        .route(
+            "/api/v1/canarytokens",
+            get(canarytokens::list).post(canarytokens::create),
+        )
         .route("/api/v1/canarytokens/{id}/download", get(canarytokens::download))
+        // #1612 misc write paths: honeyfs-implant credential provisioning/
+        // rotation (credentials_manager.go/credentials_api.go). Plain HTTP
+        // to a WireGuard-reachable URL, no host mount — same tier as
+        // canarytokens.rs above, not the mounted-worker-role service.
+        .route(
+            "/api/v1/credentials",
+            get(credentials::list).post(credentials::create),
+        )
+        .route("/api/v1/credentials/{id}/rotate", post(credentials::rotate))
+        .route("/api/v1/credentials/{id}/link-token", post(credentials::link_token))
         .route("/api/v1/payloads", get(stores::payloads))
         .route("/api/v1/payloads/{hash}", get(payload_detail::detail))
         .route("/api/v1/store/{name}", get(stores::generic))

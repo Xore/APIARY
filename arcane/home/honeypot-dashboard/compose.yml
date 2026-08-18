@@ -393,6 +393,12 @@ services:
       - ELASTICSEARCH_URL=http://elasticsearch:9200
       - SERVICE_TOKEN=${DASHBOARD_SERVICE_TOKEN:-}
       - CANARYTOKENS_API_URL=${CANARYTOKENS_API_URL:-}
+      # #1612 misc write paths: honeyfs-implant credential provisioning/
+      # rotation. Same reachability posture as CANARYTOKENS_API_URL above --
+      # a plain HTTP URL over the WireGuard tunnel, off unless configured,
+      # no host mount needed (unlike the settings-admin block below).
+      - HONEYFS_IMPLANT_URL=${HONEYFS_IMPLANT_URL:-}
+      - HONEYFS_IMPLANT_TOKEN=${HONEYFS_IMPLANT_TOKEN:-}
       # #1612 settings admin surface: services control needs the adapter
       # socket, retention sweep needs WORKER_LOOPS. Both dashboard-state
       # and services-adapter-socket are mounted directly into
