@@ -27,6 +27,7 @@ import { Route as MlAnomaliesRouteImport } from './routes/ml-anomalies'
 import { Route as PayloadsRouteImport } from './routes/payloads'
 import { Route as RecordingsRouteImport } from './routes/recordings'
 import { Route as SensorsRouteImport } from './routes/sensors'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SourceHealthRouteImport } from './routes/source-health'
 import { Route as ApiLiveRouteImport } from './routes/api/live'
 import { Route as AuthCallbackRouteImport } from './routes/auth/callback'
@@ -125,6 +126,11 @@ const SensorsRoute = SensorsRouteImport.update({
   path: '/sensors',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SourceHealthRoute = SourceHealthRouteImport.update({
   id: '/source-health',
   path: '/source-health',
@@ -180,6 +186,7 @@ export interface FileRoutesByFullPath {
   '/payloads': typeof PayloadsRoute
   '/recordings': typeof RecordingsRoute
   '/sensors': typeof SensorsRoute
+  '/settings': typeof SettingsRoute
   '/source-health': typeof SourceHealthRoute
   '/api/live': typeof ApiLiveRoute
   '/auth/callback': typeof AuthCallbackRoute
@@ -207,6 +214,7 @@ export interface FileRoutesByTo {
   '/payloads': typeof PayloadsRoute
   '/recordings': typeof RecordingsRoute
   '/sensors': typeof SensorsRoute
+  '/settings': typeof SettingsRoute
   '/source-health': typeof SourceHealthRoute
   '/api/live': typeof ApiLiveRoute
   '/auth/callback': typeof AuthCallbackRoute
@@ -235,6 +243,7 @@ export interface FileRoutesById {
   '/payloads': typeof PayloadsRoute
   '/recordings': typeof RecordingsRoute
   '/sensors': typeof SensorsRoute
+  '/settings': typeof SettingsRoute
   '/source-health': typeof SourceHealthRoute
   '/api/live': typeof ApiLiveRoute
   '/auth/callback': typeof AuthCallbackRoute
@@ -264,6 +273,7 @@ export interface FileRouteTypes {
     | '/payloads'
     | '/recordings'
     | '/sensors'
+    | '/settings'
     | '/source-health'
     | '/api/live'
     | '/auth/callback'
@@ -291,6 +301,7 @@ export interface FileRouteTypes {
     | '/payloads'
     | '/recordings'
     | '/sensors'
+    | '/settings'
     | '/source-health'
     | '/api/live'
     | '/auth/callback'
@@ -318,6 +329,7 @@ export interface FileRouteTypes {
     | '/payloads'
     | '/recordings'
     | '/sensors'
+    | '/settings'
     | '/source-health'
     | '/api/live'
     | '/auth/callback'
@@ -346,6 +358,7 @@ export interface RootRouteChildren {
   PayloadsRoute: typeof PayloadsRoute
   RecordingsRoute: typeof RecordingsRoute
   SensorsRoute: typeof SensorsRoute
+  SettingsRoute: typeof SettingsRoute
   SourceHealthRoute: typeof SourceHealthRoute
   ApiLiveRoute: typeof ApiLiveRoute
   AuthCallbackRoute: typeof AuthCallbackRoute
@@ -483,6 +496,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SensorsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/source-health': {
       id: '/source-health'
       path: '/source-health'
@@ -554,6 +574,7 @@ const rootRouteChildren: RootRouteChildren = {
   PayloadsRoute: PayloadsRoute,
   RecordingsRoute: RecordingsRoute,
   SensorsRoute: SensorsRoute,
+  SettingsRoute: SettingsRoute,
   SourceHealthRoute: SourceHealthRoute,
   ApiLiveRoute: ApiLiveRoute,
   AuthCallbackRoute: AuthCallbackRoute,

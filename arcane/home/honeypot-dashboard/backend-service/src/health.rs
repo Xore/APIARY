@@ -20,6 +20,30 @@ pub struct SensorHealth {
 }
 
 #[derive(Serialize)]
+pub struct Storage {
+    pub cluster_status: String,
+    pub index_count: u64,
+    pub doc_count: u64,
+    pub store_bytes: u64,
+}
+
+/// /api/v1/settings/storage — the ES storage summary the legacy settings
+/// modal's storage pane shows.
+pub async fn storage(State(state): State<AppState>) -> Result<Json<Storage>, (StatusCode, String)> {
+    let (index_count, doc_count, store_bytes) = state
+        .es
+        .storage_summary()
+        .await
+        .map_err(|error| (StatusCode::BAD_GATEWAY, error.to_string()))?;
+    Ok(Json(Storage {
+        cluster_status: state.es.cluster_status().await,
+        index_count,
+        doc_count,
+        store_bytes,
+    }))
+}
+
+#[derive(Serialize)]
 pub struct SourceHealth {
     pub cluster_status: String,
     pub total_documents: u64,

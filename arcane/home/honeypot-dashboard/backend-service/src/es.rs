@@ -32,6 +32,21 @@ impl Es {
         }
     }
 
+    /// Cluster-wide index stats summary: (index_count, doc_count, bytes).
+    pub async fn storage_summary(&self) -> anyhow::Result<(u64, u64, u64)> {
+        let response = self
+            .client
+            .indices()
+            .stats(elasticsearch::indices::IndicesStatsParts::None)
+            .send()
+            .await?;
+        let json = response.json::<Value>().await?;
+        let indices = json["indices"].as_object().map(|map| map.len() as u64).unwrap_or(0);
+        let docs = json["_all"]["total"]["docs"]["count"].as_u64().unwrap_or(0);
+        let bytes = json["_all"]["total"]["store"]["size_in_bytes"].as_u64().unwrap_or(0);
+        Ok((indices, docs, bytes))
+    }
+
     pub async fn ping(&self) -> bool {
         self.client.ping().send().await.map(|r| r.status_code().is_success()).unwrap_or(false)
     }
