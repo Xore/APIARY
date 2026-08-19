@@ -5,6 +5,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
 import { ArtifactList } from '../components/ArtifactList'
+import { GhidraCallGraph } from '../components/GhidraCallGraph'
 import type { JsonRecord } from '../lib/json'
 
 type Run = JsonRecord
@@ -67,9 +68,19 @@ function GhidraDetail() {
           ) : undefined
         }
       />
+      {doc ? (
+        <div className="card wide">
+          <h2>Call graph (interactive)</h2>
+          <GhidraCallGraph sha={sha} />
+        </div>
+      ) : null}
       {callgraph ? (
         <div className="card wide">
-          <h2>Call graph</h2>
+          <h2>Call graph (static image)</h2>
+          <p className="note">
+            Assembled from the largest functions outward. A plain, script-free fallback for the interactive graph above —
+            always available even with JavaScript disabled, and downloadable on its own.
+          </p>
           <div className="card__scroll">
             <img
               src={`/api/artifact/ghidra/${encodeURIComponent(sha)}/${encodeURIComponent(callgraph)}`}

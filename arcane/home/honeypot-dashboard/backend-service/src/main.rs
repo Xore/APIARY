@@ -206,6 +206,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/ip-block-export", get(ip_block::export))
         .route("/api/v1/sandbox/{job}", get(detail::sandbox_run))
         .route("/api/v1/ghidra/{sha}", get(detail::ghidra_run))
+        .route("/api/v1/ghidra-callgraph/{sha}", get(detail::ghidra_callgraph))
         .route("/api/v1/revdeck/{sha}", get(detail::revdeck_run))
         .route("/api/v1/cape/{sha}", get(detail::cape_run))
         .route("/api/v1/cape/{sha}/raw", get(detail::cape_raw))

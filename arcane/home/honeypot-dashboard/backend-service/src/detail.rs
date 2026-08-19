@@ -68,6 +68,127 @@ pub async fn ghidra_run(
     one_doc(&state, "ghidra-analysis-v1", json!({"term": {"file.hash.sha256": sha}})).await
 }
 
+const GHIDRA_CALLGRAPH_MAX_NODES: usize = 200;
+
+/// /api/v1/ghidra-callgraph/{sha} — an interactive complement to the
+/// static graphviz SVG the detail page already embeds as an <img>, built
+/// from the same per-function Callers/Callees cross-reference data
+/// (recovered only for the functions the worker's deep-dive budget
+/// covered) the static image is assembled from. Ported from
+/// ghidra_callgraph.go's buildGhidraCallGraph, same graphNode/graphEdge
+/// wire shape ({id,label,kind}/{source,target}) attackers_graph above
+/// already uses for /api/v1/attackers-graph — Cytoscape.js on the
+/// frontend reads either one identically.
+pub async fn ghidra_callgraph(
+    State(state): State<AppState>,
+    Path(sha): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let result = state
+        .es
+        .search_index(&["ghidra-analysis-v1"], json!({"size": 1, "query": {"term": {"file.hash.sha256": sha}}}))
+        .await
+        .map_err(bad_gateway)?;
+    let source = result["hits"]["hits"]
+        .as_array()
+        .and_then(|hits| hits.first())
+        .map(|hit| hit["_source"].clone())
+        .ok_or((StatusCode::NOT_FOUND, "not found".to_string()))?;
+    let functions = source["ghidra"]["functions"].as_array().cloned().unwrap_or_default();
+    Ok(Json(build_ghidra_callgraph(&functions)))
+}
+
+fn non_empty_array(value: &Value) -> bool {
+    value.as_array().is_some_and(|values| !values.is_empty())
+}
+
+struct GhidraGraphBuilder<'a> {
+    by_addr: std::collections::HashMap<&'a str, &'a Value>,
+    deepened: std::collections::HashSet<&'a str>,
+    nodes: Vec<Value>,
+    node_seen: std::collections::HashSet<String>,
+    edges: Vec<Value>,
+    edge_seen: std::collections::HashSet<(String, String)>,
+    truncated: bool,
+}
+
+impl GhidraGraphBuilder<'_> {
+    /// A leaf referenced from some deepened function's own xref list gets
+    /// its label from `fallback_name` (the name that xref entry carried) —
+    /// it only gets `by_addr`'s own richer name if this address also
+    /// happens to appear as a function in the list in its own right.
+    fn add_node(&mut self, addr: &str, fallback_name: &str) {
+        if addr.is_empty() || self.node_seen.contains(addr) {
+            return;
+        }
+        if self.nodes.len() >= GHIDRA_CALLGRAPH_MAX_NODES {
+            self.truncated = true;
+            return;
+        }
+        self.node_seen.insert(addr.to_string());
+        let label = self
+            .by_addr
+            .get(addr)
+            .and_then(|function| function["name"].as_str())
+            .filter(|name| !name.is_empty())
+            .or_else(|| Some(fallback_name).filter(|name| !name.is_empty()))
+            .unwrap_or(addr);
+        let kind = if self.deepened.contains(addr) { "function" } else { "leaf" };
+        self.nodes.push(json!({"id": addr, "label": label, "kind": kind}));
+    }
+
+    fn add_edge(&mut self, from: &str, to: &str) {
+        if from.is_empty() || to.is_empty() || from == to || !self.node_seen.contains(from) || !self.node_seen.contains(to) {
+            return;
+        }
+        let key = (from.to_string(), to.to_string());
+        if self.edge_seen.contains(&key) {
+            return;
+        }
+        self.edge_seen.insert(key);
+        self.edges.push(json!({"source": from, "target": to}));
+    }
+}
+
+fn build_ghidra_callgraph(functions: &[Value]) -> Value {
+    let by_addr: std::collections::HashMap<&str, &Value> =
+        functions.iter().filter_map(|function| function["address"].as_str().filter(|addr| !addr.is_empty()).map(|addr| (addr, function))).collect();
+    let deepened: std::collections::HashSet<&str> = by_addr
+        .iter()
+        .filter(|(_, function)| non_empty_array(&function["callers"]) || non_empty_array(&function["callees"]))
+        .map(|(addr, _)| *addr)
+        .collect();
+
+    let mut graph = GhidraGraphBuilder {
+        by_addr,
+        deepened,
+        nodes: Vec::new(),
+        node_seen: std::collections::HashSet::new(),
+        edges: Vec::new(),
+        edge_seen: std::collections::HashSet::new(),
+        truncated: false,
+    };
+
+    for function in functions {
+        let Some(address) = function["address"].as_str().filter(|addr| !addr.is_empty()) else { continue };
+        if !graph.deepened.contains(address) {
+            continue;
+        }
+        graph.add_node(address, function["name"].as_str().unwrap_or(""));
+        for caller in function["callers"].as_array().into_iter().flatten() {
+            let addr = caller["addr"].as_str().unwrap_or("");
+            graph.add_node(addr, caller["name"].as_str().unwrap_or(""));
+            graph.add_edge(addr, address);
+        }
+        for callee in function["callees"].as_array().into_iter().flatten() {
+            let addr = callee["addr"].as_str().unwrap_or("");
+            graph.add_node(addr, callee["name"].as_str().unwrap_or(""));
+            graph.add_edge(address, addr);
+        }
+    }
+
+    json!({"nodes": graph.nodes, "edges": graph.edges, "truncated": graph.truncated})
+}
+
 /// /api/v1/revdeck/{sha} — #1611 workstream E.8: revdeck-analysis-v1 had
 /// no detail endpoint at all, so an unconfigured-worker error state (the
 /// live audit's own example) rendered as a blank page rather than a
