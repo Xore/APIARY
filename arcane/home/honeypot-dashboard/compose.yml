@@ -376,9 +376,15 @@ services:
 
   # ------------------------------------------------------------------
   # Modernization port (#1608): the replacement stack, behind the "next"
-  # profile until cutover (deploy only at full parity — no beta URL, no
-  # proxying). At cutover: move the 19090 port mapping from `dashboard`
-  # to `dashboard-next`, drop the profile lines, retire `dashboard`.
+  # profile until cutover. dashboard-next's own 19092 port mapping below
+  # (#1628's staged/beta path, vps/traefik/dynamic.yml's
+  # honeypot-dashboard-beta router) is a separate, currently-inert host
+  # port — bringing up the `next` profile publishes it, but nothing
+  # routes to it externally until the VPS-side socat bridge, DNS, and
+  # Keycloak client registration this still needs are set up (#1628); it
+  # does not touch the production 19090 binding at all. At cutover: move
+  # THAT (19090) port mapping from `dashboard` to `dashboard-next`, drop
+  # the profile lines, retire `dashboard`.
   #
   # Cross-host readiness (per Xore): both tiers are stateless,
   # env-configured containers — session/OIDC state lives in the
@@ -603,7 +609,15 @@ services:
       - BFF_INTERNAL_URL=${BFF_INTERNAL_URL:-}
       - SERVICE_TOKEN=${DASHBOARD_SERVICE_TOKEN:-}
       - OIDC_ISSUER_URL=${OIDC_ISSUER_URL:-https://auth.example.invalid/realms/apiary}
-      - OIDC_EXTERNAL_URL=${OIDC_EXTERNAL_URL:-https://honeypot.example.invalid}
+      # #1628 staged/beta path: a dedicated var, not the shared
+      # OIDC_EXTERNAL_URL production uses, since oidc.server.ts builds its
+      # redirect_uri directly from this and Keycloak only accepts a
+      # registered exact match — dashboard-next needs its own if it's ever
+      # reachable at a different host than production (beta.honeypot.*)
+      # without breaking either flow. Defaults to OIDC_EXTERNAL_URL so
+      # today's behavior (same host as production) is unchanged until an
+      # operator sets DASHBOARD_NEXT_OIDC_EXTERNAL_URL explicitly.
+      - OIDC_EXTERNAL_URL=${DASHBOARD_NEXT_OIDC_EXTERNAL_URL:-${OIDC_EXTERNAL_URL:-https://honeypot.example.invalid}}
       - OIDC_CLIENT_ID=apiary-dashboard
       - OIDC_CLIENT_SECRET_FILE=/run/dashboard-secrets/oidc-client-secret
       - OIDC_SESSION_REDIS_URL=redis://oidc-sessions:6379/0
@@ -615,6 +629,16 @@ services:
       - BACKEND_MAX_INFLIGHT=${DASHBOARD_BACKEND_MAX_INFLIGHT:-}
       - BACKEND_MAX_QUEUE=${DASHBOARD_BACKEND_MAX_QUEUE:-}
       - BACKEND_HTTP_MAX_SOCKETS=${DASHBOARD_BACKEND_HTTP_MAX_SOCKETS:-}
+    # #1628 staged/beta path: 19092 is a new, previously-unused port (see
+    # vps/traefik/dynamic.yml's own socat table) — this doesn't touch or
+    # conflict with `dashboard`'s production 19090 binding at all, and
+    # nothing external routes to it until the matching VPS-side socat
+    # bridge/DNS/Keycloak registration (still open, see #1628) exist.
+    # cutover-dashboard.sh's own `preflight` health check already reaches
+    # this container over the honeynet bridge without needing this port —
+    # this exists for a real, public, browser-driven validation pass.
+    ports:
+      - "${HP_BIND:-10.8.0.2}:19092:8080"
     volumes:
       - ${DASHBOARD_SECRETS_DIR:-/var/dockge/stacks/honeypot-dashboard/secrets}:/run/dashboard-secrets:ro
     networks:
