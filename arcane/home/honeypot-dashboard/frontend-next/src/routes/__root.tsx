@@ -8,12 +8,24 @@ import { AppShell } from '../components/AppShell'
 import { getSessionUser } from '../lib/auth'
 import { activeBanner, type BannerView, type BehaviorConfig, type PresentationConfig } from '../lib/banner'
 
-const fetchActiveBanner = createServerFn({ method: 'GET' }).handler(async (): Promise<BannerView | null> => {
+type ShellConfig = { banner: BannerView | null; showProblemReportButton: boolean }
+
+// One /api/v1/config read backs every shell-wide (not per-route) piece of
+// chrome: the banner and whether the "Report a problem" button shows at
+// all (behavior.show_problem_report_button) — fetched together so neither
+// costs its own round trip.
+const fetchShellConfig = createServerFn({ method: 'GET' }).handler(async (): Promise<ShellConfig> => {
   const { serviceJSON } = await import('../lib/backend.server')
   const config = await serviceJSON<{
-    payload?: { presentation?: PresentationConfig; behavior?: BehaviorConfig }
+    payload?: {
+      presentation?: PresentationConfig
+      behavior?: BehaviorConfig & { show_problem_report_button?: boolean }
+    }
   }>('/api/v1/config')
-  return activeBanner(config?.payload?.presentation, config?.payload?.behavior)
+  return {
+    banner: activeBanner(config?.payload?.presentation, config?.payload?.behavior),
+    showProblemReportButton: config?.payload?.behavior?.show_problem_report_button ?? false,
+  }
 })
 
 export const Route = createRootRoute({
@@ -31,12 +43,12 @@ export const Route = createRootRoute({
     }
     return { user }
   },
-  // The maintenance/incident banner is shell-wide in the Go dashboard (every
-  // page shares one topbar partial); fetched once here rather than per-route
-  // so /auth/* skips the extra backend round-trip pre-login.
-  loader: async ({ location }) => {
-    if (location.pathname.startsWith('/auth/')) return { banner: null }
-    return { banner: await fetchActiveBanner() }
+  // Shell-wide chrome (banner, problem-report button) is fetched once here
+  // rather than per-route, both because every page shares it and so
+  // /auth/* skips the extra backend round-trip pre-login.
+  loader: async ({ location }): Promise<ShellConfig> => {
+    if (location.pathname.startsWith('/auth/')) return { banner: null, showProblemReportButton: false }
+    return fetchShellConfig()
   },
   head: () => ({
     meta: [
@@ -72,14 +84,16 @@ export const Route = createRootRoute({
 })
 
 function RootDocument({ children }: { children: React.ReactNode }) {
-  const { banner } = Route.useLoaderData()
+  const { banner, showProblemReportButton } = Route.useLoaderData()
   return (
     <html lang="en">
       <head>
         <HeadContent />
       </head>
       <body>
-        <AppShell banner={banner}>{children}</AppShell>
+        <AppShell banner={banner} showProblemReportButton={showProblemReportButton}>
+          {children}
+        </AppShell>
         <Scripts />
       </body>
     </html>

@@ -5,14 +5,24 @@
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 import { CommandPalette } from './CommandPalette'
+import { ProblemReportButton } from './ProblemReportButton'
 import { usePredictivePrefetch } from '../lib/prefetch'
 import type { BannerView } from '../lib/banner'
 
-export function AppShell({ children, banner }: { children: React.ReactNode; banner?: BannerView | null }) {
+export function AppShell({
+  children,
+  banner,
+  showProblemReportButton,
+}: {
+  children: React.ReactNode
+  banner?: BannerView | null
+  showProblemReportButton?: boolean
+}) {
   usePredictivePrefetch()
   return (
     <div className="app-shell">
       <CommandPalette />
+      <ProblemReportButton enabled={showProblemReportButton ?? false} />
       <Topbar banner={banner} />
       <Sidebar />
       <main className="app-main">

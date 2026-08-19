@@ -12,7 +12,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{get, patch, post},
     Json, Router,
 };
 use serde::Serialize;
@@ -60,6 +60,7 @@ mod payload_kind;
 mod payload_paths;
 mod payload_static_analysis;
 mod preferences;
+mod problem_reports;
 mod replay;
 mod report_pdf;
 mod reports;
@@ -259,6 +260,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/payloads/{hash}", get(payload_detail::detail))
         .route("/api/v1/payloads/{hash}/raw", get(payload_detail::raw))
         .route("/api/v1/store/{name}", get(stores::generic).delete(stores::generic_delete))
+        .route("/api/v1/problem-reports", post(problem_reports::submit))
+        .route("/api/v1/problem-reports/{id}", patch(problem_reports::patch_status))
         // #1612 mounted worker role (phase 3a): sandbox/ghidra/github-
         // analysis submission + golden-image status. Registered in the
         // same shared route table as everything else — which container
