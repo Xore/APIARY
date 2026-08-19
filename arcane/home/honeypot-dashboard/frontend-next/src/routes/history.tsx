@@ -5,6 +5,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import type { JsonRecord } from '../lib/json'
 
 type EventRow = {
   time: string
@@ -15,7 +16,7 @@ type EventRow = {
   proto: string
   detail: string
   session: string
-  record: Record<string, unknown>
+  record: JsonRecord
 }
 
 type Page = { total: number; offset: number; rows: EventRow[] }

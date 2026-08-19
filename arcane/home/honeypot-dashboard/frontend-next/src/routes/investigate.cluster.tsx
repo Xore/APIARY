@@ -9,6 +9,7 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import type { JsonRecord } from '../lib/json'
 
 type Kv = { key: string; count: number }
 
@@ -21,7 +22,7 @@ type EventRow = {
   proto: string
   detail: string
   session: string
-  record: Record<string, unknown>
+  record: JsonRecord
 }
 
 type Correlation = {

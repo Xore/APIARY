@@ -12,12 +12,13 @@ import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
 import { getSessionUser } from '../lib/auth'
+import type { JsonRecord } from '../lib/json'
 
 type PayloadDetail = {
   hash: string
-  inventory: Record<string, unknown> | null
-  analysis: Record<string, unknown> | null
-  yara: Record<string, unknown>[]
+  inventory: JsonRecord | null
+  analysis: JsonRecord | null
+  yara: JsonRecord[]
   size_bytes: number
   hex_preview: string[]
 }

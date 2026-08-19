@@ -8,6 +8,7 @@ import { createServerFn } from '@tanstack/react-start'
 import { Suspense, useEffect, useState } from 'react'
 import { AttackMap, AttackVectors, Heatmap, Tbl, type HeatRow, type Kv, type MapPoint } from '../components/OverviewPanels'
 import { EChart } from '../components/EChart'
+import type { JsonRecord } from '../lib/json'
 
 type OverviewKpis = {
   total: number
@@ -49,7 +50,7 @@ type EventRow = {
   proto: string
 }
 
-type StoreRow = Record<string, unknown>
+type StoreRow = JsonRecord
 
 type Presentation = {
   dashboard_title?: string

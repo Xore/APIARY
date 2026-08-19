@@ -5,6 +5,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import type { JsonRecord } from '../lib/json'
 
 type Kv = { key: string; count: number }
 type Technique = { id: string; count: number; url: string }
@@ -19,7 +20,7 @@ type EventRow = {
   proto: string
   detail: string
   session: string
-  record: Record<string, unknown>
+  record: JsonRecord
 }
 
 type SessionDetail = {
@@ -96,7 +97,7 @@ const EVENT_COLUMNS: Column<EventRow>[] = [
 function hasCapturedMail(events: EventRow[]): boolean {
   return events.some((row) => {
     if (row.sensor !== 'mailoney') return false
-    const honeypot = row.record?.honeypot as Record<string, unknown> | undefined
+    const honeypot = row.record?.honeypot as JsonRecord | undefined
     return honeypot?.event === 'mail-body'
   })
 }
