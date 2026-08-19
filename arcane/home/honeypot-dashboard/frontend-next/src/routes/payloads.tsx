@@ -107,6 +107,10 @@ function Payloads() {
                   {row.MtimeUTC.replace('T', ' ').slice(0, 19)} · {row.Copies} {row.Copies === 1 ? 'copy' : 'copies'} ·{' '}
                   <a className="lnk" href={`/payload-analysis/${encodeURIComponent(row.Hash)}`}>
                     static analysis →
+                  </a>{' '}
+                  ·{' '}
+                  <a className="lnk" href={`/payload-workbench/results?hash=${encodeURIComponent(row.Hash)}#workbench-builder`}>
+                    analyze →
                   </a>
                 </div>
               </div>

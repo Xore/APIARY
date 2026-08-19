@@ -163,6 +163,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/sources", get(aggregates::sources))
         .route("/api/v1/filter-values", get(aggregates::filter_values))
         .route("/api/v1/investigate/ip/{ip}", get(investigate::ip))
+        .route("/api/v1/investigate/cidr/{cidr}", get(investigate::cidr))
+        .route("/api/v1/investigate/cluster", get(investigate::cluster))
         .route("/api/v1/source-health", get(health::source_health))
         .route("/api/v1/sensors", get(sensors::detail))
         .route("/api/v1/sessions/{id}", get(session::detail))
@@ -172,6 +174,10 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/api/v1/config/presentation",
             axum::routing::put(config::put_presentation),
+        )
+        .route(
+            "/api/v1/config/{section}",
+            axum::routing::put(config::put_config_section),
         )
         .route("/api/v1/config/history", get(config::history))
         .route("/api/v1/config/rollback", post(config::rollback))
