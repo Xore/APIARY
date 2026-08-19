@@ -134,20 +134,11 @@ fn clean_extracted_string(raw: &str) -> Option<String> {
 /// clean_extracted_string rejects.
 fn unique_strings(candidates: impl Iterator<Item = String>, limit: usize) -> Vec<String> {
     let mut seen = HashSet::new();
-    let mut out = Vec::new();
-    for raw in candidates {
-        let Some(cleaned) = clean_extracted_string(&raw) else {
-            continue;
-        };
-        if !seen.insert(cleaned.clone()) {
-            continue;
-        }
-        out.push(cleaned);
-        if out.len() == limit {
-            break;
-        }
-    }
-    out
+    candidates
+        .filter_map(|raw| clean_extracted_string(&raw))
+        .filter(|cleaned| seen.insert(cleaned.clone()))
+        .take(limit)
+        .collect()
 }
 
 fn ioc_patterns() -> &'static [Regex; 3] {

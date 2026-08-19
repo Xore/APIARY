@@ -172,100 +172,96 @@ fn mailoney_sessions(hits: &[Value]) -> Vec<MailoneySession> {
 }
 
 fn http_requests(hits: &[Value]) -> Vec<HttpRequest> {
-    let mut out = Vec::new();
-    for hit in hits {
-        let source = &hit["_source"];
-        let event = &source["honeypot"];
-        if !event.is_object() {
-            continue;
-        }
-        out.push(HttpRequest {
-            when: s(&source["@timestamp"]),
-            ip: s(&event["src_ip"]),
-            method: s(&event["method"]),
-            host: s(&event["host"]),
-            path: s(&event["path"]),
-            query: s(&event["query"]),
-            user_agent: s(&event["user_agent"]),
-            headers: header_map(&event["headers"]),
-            body: s(&event["body"]),
-            username: s(&event["username"]),
-            password: s(&event["password"]),
-            auth_type: s(&event["auth_type"]),
-            status: n(&event["status"]),
-            category: s(&event["category"]),
-            tarpitted: event["tarpitted"].as_bool().unwrap_or(false),
-            tarpit_bytes: n(&event["tarpit_bytes"]),
-            tarpit_ms: n(&event["tarpit_ms"]),
-        });
-        if out.len() >= REQUEST_CAP {
-            break;
-        }
-    }
-    out
+    hits.iter()
+        .filter_map(|hit| {
+            let source = &hit["_source"];
+            let event = &source["honeypot"];
+            if !event.is_object() {
+                return None;
+            }
+            Some(HttpRequest {
+                when: s(&source["@timestamp"]),
+                ip: s(&event["src_ip"]),
+                method: s(&event["method"]),
+                host: s(&event["host"]),
+                path: s(&event["path"]),
+                query: s(&event["query"]),
+                user_agent: s(&event["user_agent"]),
+                headers: header_map(&event["headers"]),
+                body: s(&event["body"]),
+                username: s(&event["username"]),
+                password: s(&event["password"]),
+                auth_type: s(&event["auth_type"]),
+                status: n(&event["status"]),
+                category: s(&event["category"]),
+                tarpitted: event["tarpitted"].as_bool().unwrap_or(false),
+                tarpit_bytes: n(&event["tarpit_bytes"]),
+                tarpit_ms: n(&event["tarpit_ms"]),
+            })
+        })
+        .take(REQUEST_CAP)
+        .collect()
 }
 
 fn tanner_requests(hits: &[Value]) -> Vec<TannerRequest> {
-    let mut out = Vec::new();
-    for hit in hits {
-        let source = &hit["_source"];
-        let event = &source["honeypot"];
-        if !event.is_object() {
-            continue;
-        }
-        // Legacy "peer" session-report shape has no per-request fields;
-        // startup markers are operational noise. Same skips as Go.
-        if s(&event["method"]).is_empty() && s(&event["category"]).is_empty() {
-            continue;
-        }
-        if s(&event["category"]) == "startup" {
-            continue;
-        }
-        let headers = header_map(&event["headers"]);
-        let header = |key: &str| headers.get(key).cloned().unwrap_or_default();
-        // Real client IP from CF/proxy headers when fronted by Cloudflare,
-        // same preference order as classify.go.
-        let ip = [
-            header("cf-connecting-ip"),
-            header("x-real-ip"),
-            header("x-forwarded-for").split(',').next().unwrap_or("").trim().to_string(),
-            s(&event["src_ip"]),
-        ]
-        .into_iter()
-        .find(|candidate| !candidate.is_empty())
-        .unwrap_or_default();
-        let detection = &event["response_msg"]["response"]["message"]["detection"];
-        let mut payload = s(&detection["payload"]["value"]);
-        if payload.len() > 1000 {
-            let mut cut = 1000;
-            while !payload.is_char_boundary(cut) {
-                cut -= 1;
+    hits.iter()
+        .filter_map(|hit| {
+            let source = &hit["_source"];
+            let event = &source["honeypot"];
+            if !event.is_object() {
+                return None;
             }
-            payload.truncate(cut);
-            payload.push_str("(...)");
-        }
-        out.push(TannerRequest {
-            when: s(&source["@timestamp"]),
-            ip,
-            method: s(&event["method"]),
-            path: s(&event["path"]),
-            user_agent: header("user-agent"),
-            headers,
-            username: s(&event["username"]),
-            password: s(&event["password"]),
-            tarpitted: event["tarpitted"].as_bool().unwrap_or(false),
-            tarpit_bytes: n(&event["tarpit_bytes"]),
-            tarpit_ms: n(&event["tarpit_ms"]),
-            post_data: string_map(&event["post_data"]),
-            cookies: string_map(&event["cookies"]),
-            detection_name: s(&detection["name"]),
-            detection_payload: payload,
-        });
-        if out.len() >= REQUEST_CAP {
-            break;
-        }
-    }
-    out
+            // Legacy "peer" session-report shape has no per-request fields;
+            // startup markers are operational noise. Same skips as Go.
+            if s(&event["method"]).is_empty() && s(&event["category"]).is_empty() {
+                return None;
+            }
+            if s(&event["category"]) == "startup" {
+                return None;
+            }
+            let headers = header_map(&event["headers"]);
+            let header = |key: &str| headers.get(key).cloned().unwrap_or_default();
+            // Real client IP from CF/proxy headers when fronted by Cloudflare,
+            // same preference order as classify.go.
+            let ip = [
+                header("cf-connecting-ip"),
+                header("x-real-ip"),
+                header("x-forwarded-for").split(',').next().unwrap_or("").trim().to_string(),
+                s(&event["src_ip"]),
+            ]
+            .into_iter()
+            .find(|candidate| !candidate.is_empty())
+            .unwrap_or_default();
+            let detection = &event["response_msg"]["response"]["message"]["detection"];
+            let mut payload = s(&detection["payload"]["value"]);
+            if payload.len() > 1000 {
+                let mut cut = 1000;
+                while !payload.is_char_boundary(cut) {
+                    cut -= 1;
+                }
+                payload.truncate(cut);
+                payload.push_str("(...)");
+            }
+            Some(TannerRequest {
+                when: s(&source["@timestamp"]),
+                ip,
+                method: s(&event["method"]),
+                path: s(&event["path"]),
+                user_agent: header("user-agent"),
+                headers,
+                username: s(&event["username"]),
+                password: s(&event["password"]),
+                tarpitted: event["tarpitted"].as_bool().unwrap_or(false),
+                tarpit_bytes: n(&event["tarpit_bytes"]),
+                tarpit_ms: n(&event["tarpit_ms"]),
+                post_data: string_map(&event["post_data"]),
+                cookies: string_map(&event["cookies"]),
+                detection_name: s(&detection["name"]),
+                detection_payload: payload,
+            })
+        })
+        .take(REQUEST_CAP)
+        .collect()
 }
 
 pub async fn detail(State(state): State<AppState>) -> Result<Json<SensorDetail>, (StatusCode, String)> {

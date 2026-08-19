@@ -9,7 +9,7 @@ export type User = {
   sub: string
   username: string
   displayName: string
-  role: string
+  role: 'admin' | 'user'
 }
 
 export const getSessionUser = createServerFn({ method: 'GET' }).handler(async (): Promise<User | null> => {

@@ -11,7 +11,7 @@
 // call.
 import { createFileRoute } from '@tanstack/react-router'
 import { backendURL } from '../../lib/backend.server'
-import { ConcurrencyLimiter, envInt, Overloaded, overloadedResponse, releaseOnFinish } from '../../lib/backpressure.server'
+import { ConcurrencyLimiter, envInt, limitedStreamProxy } from '../../lib/backpressure.server'
 import { getSession, sidFrom } from '../../lib/session.server'
 
 const ALLOWED_EXPORTS = new Set(['events.csv', 'commands.csv', 'ips.csv', 'campaigns.csv', 'clusters.csv', 'history.json'])
@@ -26,32 +26,17 @@ export const Route = createFileRoute('/api/export/$name')({
           if (!session) return new Response('unauthorized', { status: 401 })
         }
         if (!ALLOWED_EXPORTS.has(params.name)) return new Response('unknown export', { status: 404 })
-        let release: () => void
-        try {
-          release = await exportLimiter.acquire()
-        } catch (err) {
-          if (err instanceof Overloaded) return overloadedResponse(err)
-          throw err
-        }
         const search = new URL(request.url).search
-        const upstream = await fetch(`${backendURL()}/api/v1/export/${params.name}${search}`, {
-          headers: { 'x-service-token': process.env.SERVICE_TOKEN ?? '' },
-          signal: request.signal,
-        }).catch((err) => {
-          release()
-          throw err
-        })
-        if (!upstream.ok || !upstream.body) {
-          release()
-          return new Response('export unavailable', { status: upstream.status })
-        }
-        return new Response(releaseOnFinish(upstream.body, release), {
-          status: 200,
-          headers: {
+        return limitedStreamProxy(
+          request,
+          exportLimiter,
+          `${backendURL()}/api/v1/export/${params.name}${search}`,
+          (upstream) => ({
             'content-type': upstream.headers.get('content-type') ?? 'application/octet-stream',
             'content-disposition': upstream.headers.get('content-disposition') ?? 'attachment',
-          },
-        })
+          }),
+          { message: 'export unavailable' },
+        )
       },
     },
   },

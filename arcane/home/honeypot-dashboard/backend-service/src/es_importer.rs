@@ -228,14 +228,9 @@ fn shard_index_default() -> u64 {
 }
 
 fn first_present<'a>(payload: &'a Value, fields: &[&str]) -> Option<&'a str> {
-    for field in fields {
-        if let Some(v) = payload.get(*field).and_then(|v| v.as_str()) {
-            if !v.is_empty() {
-                return Some(v);
-            }
-        }
-    }
-    None
+    fields
+        .iter()
+        .find_map(|field| payload.get(*field).and_then(|v| v.as_str()).filter(|v| !v.is_empty()))
 }
 
 fn doc_id(source: &Source, payload: &Value, path: &Path) -> String {

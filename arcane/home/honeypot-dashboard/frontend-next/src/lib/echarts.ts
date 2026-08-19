@@ -4,14 +4,11 @@
 // the "xore" theme is re-registered on each chart init so a live theme
 // toggle is picked up by the next chart. Client-only module.
 import * as echarts from 'echarts'
+import { cssVar } from './cssVar'
 
 export { echarts }
 
-export function chartColor(name: string, fallback = ''): string {
-  if (typeof document === 'undefined') return fallback
-  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
-  return value || fallback
-}
+export const chartColor = cssVar
 
 function buildTheme() {
   const textPrimary = chartColor('--text-primary', '#e9e6df')

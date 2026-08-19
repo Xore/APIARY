@@ -8,8 +8,9 @@
 // rules + the PDF report or a JSON fallback).
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
+import { useResolved } from '../lib/hooks'
 
 type Scanner = { source: string; ok: boolean; positives?: number; total?: number; suspicious?: boolean; permalink?: string; error?: string }
 type Verdict = { malicious: number; suspicious: number; total: number; level: string }
@@ -87,17 +88,9 @@ function scannerBadge(scanner: Scanner) {
 function GithubAnalysisDetail() {
   const { first } = Route.useLoaderData()
   const { sha } = Route.useParams()
-  const [run, setRun] = useState<GithubAnalysisRun | null | 'missing'>(null)
+  const resolved = useResolved(first)
+  const run: GithubAnalysisRun | null | 'missing' = resolved === undefined ? null : resolved ?? 'missing'
   const [tab, setTab] = useState<'verdict' | 'provenance' | 'artifacts'>('verdict')
-  useEffect(() => {
-    let cancelled = false
-    first.then((result) => {
-      if (!cancelled) setRun(result ?? 'missing')
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [first])
 
   if (run === 'missing') {
     return <InvestigateHeader label="Evidence" title={sha.slice(0, 24)} subtitle="No GitHub-analysis result found for this hash." />

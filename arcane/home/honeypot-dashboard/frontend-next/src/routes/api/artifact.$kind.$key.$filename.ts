@@ -7,7 +7,7 @@
 // frees its slot immediately.
 import { createFileRoute } from '@tanstack/react-router'
 import { backendURL } from '../../lib/backend.server'
-import { ConcurrencyLimiter, envInt, Overloaded, overloadedResponse, releaseOnFinish } from '../../lib/backpressure.server'
+import { ConcurrencyLimiter, envInt, limitedStreamProxy } from '../../lib/backpressure.server'
 import { getSession, sidFrom } from '../../lib/session.server'
 
 const artifactLimiter = new ConcurrencyLimiter(envInt('ARTIFACT_MAX_CONCURRENT', 32), 16)
@@ -20,31 +20,16 @@ export const Route = createFileRoute('/api/artifact/$kind/$key/$filename')({
           const session = await getSession(sidFrom(request)).catch(() => null)
           if (!session) return new Response('unauthorized', { status: 401 })
         }
-        let release: () => void
-        try {
-          release = await artifactLimiter.acquire()
-        } catch (err) {
-          if (err instanceof Overloaded) return overloadedResponse(err)
-          throw err
-        }
-        const upstream = await fetch(
+        return limitedStreamProxy(
+          request,
+          artifactLimiter,
           `${backendURL()}/api/v1/artifacts/${encodeURIComponent(params.kind)}/${encodeURIComponent(params.key)}/${encodeURIComponent(params.filename)}`,
-          { headers: { 'x-service-token': process.env.SERVICE_TOKEN ?? '' }, signal: request.signal },
-        ).catch((err) => {
-          release()
-          throw err
-        })
-        if (!upstream.ok || !upstream.body) {
-          release()
-          return new Response('artifact unavailable', { status: upstream.status })
-        }
-        return new Response(releaseOnFinish(upstream.body, release), {
-          status: 200,
-          headers: {
+          (upstream) => ({
             'content-type': upstream.headers.get('content-type') ?? 'application/octet-stream',
             'content-disposition': upstream.headers.get('content-disposition') ?? 'attachment',
-          },
-        })
+          }),
+          { message: 'artifact unavailable' },
+        )
       },
     },
   },

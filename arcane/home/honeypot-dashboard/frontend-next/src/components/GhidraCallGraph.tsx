@@ -16,6 +16,8 @@
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useRef, useState } from 'react'
 import type { Core, NodeSingular } from 'cytoscape'
+import { cssVar as cssColor } from '../lib/cssVar'
+import { useServerQuery } from '../lib/useServerQuery'
 
 type GraphNode = { id: string; label: string; kind: 'function' | 'leaf' }
 type GraphEdge = { source: string; target: string }
@@ -28,29 +30,13 @@ const fetchCallGraph = createServerFn({ method: 'GET' })
     return serviceJSON<Graph>(`/api/v1/ghidra-callgraph/${encodeURIComponent(data.sha)}`)
   })
 
-function cssColor(name: string, fallback: string): string {
-  if (typeof document === 'undefined') return fallback
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
-}
-
 const DIM_CLASS = 'hp-gh-dim'
 
 export function GhidraCallGraph({ sha }: { sha: string }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cyRef = useRef<Core | null>(null)
-  const [graph, setGraph] = useState<Graph | null>(null)
+  const graph = useServerQuery(fetchCallGraph, { sha }, [sha])
   const [filter, setFilter] = useState('')
-
-  useEffect(() => {
-    let cancelled = false
-    setGraph(null)
-    fetchCallGraph({ data: { sha } }).then((result) => {
-      if (!cancelled) setGraph(result)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [sha])
 
   useEffect(() => {
     const container = containerRef.current

@@ -22,7 +22,7 @@ use serde_json::{json, Value};
 
 use crate::reports_store::{
     self, put_definition, report_template_catalog, GeneratedReportMeta, ReportDefinition,
-    REPORT_ELEMENT_CATALOG,
+    ReportTemplateKind, REPORT_ELEMENT_CATALOG,
 };
 use crate::AppState;
 
@@ -41,7 +41,9 @@ pub async fn templates() -> Json<Value> {
             json!({
                 "id": t.id, "name": t.name, "description": t.description, "title": t.title,
                 "theme": t.theme, "window": t.window, "elements": t.elements,
-                "sandbox": t.sandbox, "payload": t.payload, "ghidra": t.ghidra,
+                "sandbox": t.kind == ReportTemplateKind::Sandbox,
+                "payload": t.kind == ReportTemplateKind::Payload,
+                "ghidra": t.kind == ReportTemplateKind::Ghidra,
             })
         })
         .collect();
@@ -209,60 +211,65 @@ pub async fn render_definition_to_stored(
     let branding = def.branding.to_pdf_branding();
     let generated = chrono::Utc::now();
 
-    let pdf = if template.sandbox {
-        let job = def.scope.job.trim();
-        if job.is_empty() {
-            return Err("scope.job does not resolve to a completed sandbox result".to_string());
+    let pdf = match template.kind {
+        ReportTemplateKind::Sandbox => {
+            let job = def.scope.job.trim();
+            if job.is_empty() {
+                return Err("scope.job does not resolve to a completed sandbox result".to_string());
+            }
+            let doc = crate::detail::sandbox_run(State(state.clone()), Path(job.to_string()))
+                .await
+                .map_err(|_| "scope.job does not resolve to a completed sandbox result".to_string())?
+                .0;
+            crate::report_pdf::render_sandbox_pdf(&doc, generated, theme, branding)
         }
-        let doc = crate::detail::sandbox_run(State(state.clone()), Path(job.to_string()))
-            .await
-            .map_err(|_| "scope.job does not resolve to a completed sandbox result".to_string())?
-            .0;
-        crate::report_pdf::render_sandbox_pdf(&doc, generated, theme, branding)
-    } else if template.ghidra {
-        let hash = def.scope.hash.trim();
-        if hash.is_empty() {
-            return Err("scope.hash does not resolve to a completed ghidra result".to_string());
+        ReportTemplateKind::Ghidra => {
+            let hash = def.scope.hash.trim();
+            if hash.is_empty() {
+                return Err("scope.hash does not resolve to a completed ghidra result".to_string());
+            }
+            let doc = crate::detail::ghidra_run(State(state.clone()), Path(hash.to_string()))
+                .await
+                .map_err(|_| "scope.hash does not resolve to a completed ghidra result".to_string())?
+                .0;
+            crate::report_pdf::render_ghidra_pdf(&doc, generated, theme, branding)
         }
-        let doc = crate::detail::ghidra_run(State(state.clone()), Path(hash.to_string()))
-            .await
-            .map_err(|_| "scope.hash does not resolve to a completed ghidra result".to_string())?
-            .0;
-        crate::report_pdf::render_ghidra_pdf(&doc, generated, theme, branding)
-    } else if template.payload {
-        let hash = def.scope.hash.trim();
-        if hash.is_empty() {
-            return Err("scope.hash does not resolve to a captured payload".to_string());
+        ReportTemplateKind::Payload => {
+            let hash = def.scope.hash.trim();
+            if hash.is_empty() {
+                return Err("scope.hash does not resolve to a captured payload".to_string());
+            }
+            let detail = crate::payload_detail::detail(State(state.clone()), Path(hash.to_string()))
+                .await
+                .map_err(|_| "scope.hash does not resolve to a captured payload".to_string())?
+                .0;
+            let inventory = detail.inventory.unwrap_or(Value::Null);
+            let analysis = detail.analysis.unwrap_or(Value::Null);
+            let sandbox_runs = sandbox_runs_for_hash(state, hash).await.map_err(|e| e.to_string())?;
+            let github_analysis = crate::detail::github_analysis_run(State(state.clone()), Path(hash.to_string()))
+                .await
+                .map(|json| json.0)
+                .unwrap_or(Value::Null);
+            crate::report_pdf::render_payload_pdf(
+                hash,
+                &inventory,
+                &analysis,
+                &detail.yara,
+                &sandbox_runs,
+                &github_analysis,
+                generated,
+                theme,
+                branding,
+            )
         }
-        let detail = crate::payload_detail::detail(State(state.clone()), Path(hash.to_string()))
-            .await
-            .map_err(|_| "scope.hash does not resolve to a captured payload".to_string())?
-            .0;
-        let inventory = detail.inventory.unwrap_or(Value::Null);
-        let analysis = detail.analysis.unwrap_or(Value::Null);
-        let sandbox_runs = sandbox_runs_for_hash(state, hash).await.map_err(|e| e.to_string())?;
-        let github_analysis = crate::detail::github_analysis_run(State(state.clone()), Path(hash.to_string()))
-            .await
-            .map(|json| json.0)
-            .unwrap_or(Value::Null);
-        crate::report_pdf::render_payload_pdf(
-            hash,
-            &inventory,
-            &analysis,
-            &detail.yara,
-            &sandbox_runs,
-            &github_analysis,
-            generated,
-            theme,
-            branding,
-        )
-    } else {
-        let appendix_limit = if def.appendix_limit <= 0 { 120 } else { def.appendix_limit };
-        let mut data = crate::reports_data::report_data_for(state, &def.scope, title.clone(), appendix_limit)
-            .await
-            .map_err(|e| e.to_string())?;
-        data.title = title.clone();
-        crate::report_pdf::render_report_pdf(&data, theme, branding, &def.elements, appendix_limit)
+        ReportTemplateKind::Generic => {
+            let appendix_limit = if def.appendix_limit <= 0 { 120 } else { def.appendix_limit };
+            let mut data = crate::reports_data::report_data_for(state, &def.scope, title.clone(), appendix_limit)
+                .await
+                .map_err(|e| e.to_string())?;
+            data.title = title.clone();
+            crate::report_pdf::render_report_pdf(&data, theme, branding, &def.elements, appendix_limit)
+        }
     };
 
     reports_store::add_generated(

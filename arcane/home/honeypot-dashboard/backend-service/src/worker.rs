@@ -862,21 +862,12 @@ async fn retention_sweep_once(state: &AppState) {
     };
     let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days);
     let users = doc["payload"]["users"].as_array().cloned().unwrap_or_default();
-    let mut kept = Vec::with_capacity(users.len());
-    let mut removed = Vec::new();
-    for user in users {
-        let last_seen =
-            user["last_seen_at"].as_str().and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok());
-        let expired = match last_seen {
-            Some(at) => at.with_timezone(&chrono::Utc) < cutoff,
-            None => false,
-        };
-        if expired {
-            removed.push(user);
-        } else {
-            kept.push(user);
-        }
-    }
+    let (removed, kept): (Vec<Value>, Vec<Value>) = users.into_iter().partition(|user| {
+        user["last_seen_at"]
+            .as_str()
+            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+            .is_some_and(|at| at.with_timezone(&chrono::Utc) < cutoff)
+    });
     if removed.is_empty() {
         return;
     }

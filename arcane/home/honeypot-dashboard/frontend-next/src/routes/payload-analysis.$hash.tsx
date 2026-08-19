@@ -9,9 +9,10 @@
 // every other mutation here.
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
-import { getSessionUser } from '../lib/auth'
+import { getSessionUser, type User } from '../lib/auth'
+import { useResolved } from '../lib/hooks'
 import type { JsonRecord } from '../lib/json'
 
 type PayloadDetail = {
@@ -57,24 +58,30 @@ type SubmitResult = { ok: boolean; target?: string; error?: string }
 // All three submissions are admin-gated at the BFF, same posture as every
 // other mutation in this app (settings.tsx's runServiceAction) — the Rust
 // tier's own trust boundary is the service token, so this check is the
-// only one that exists.
+// only one that exists. Each handler below fetches the session once and
+// passes it in, rather than this helper fetching its own — submitGithubAnalysis
+// needs that same user for its actor_subject/actor_username fields.
+async function submitAnalysisJob(user: User | null, path: string, body: Record<string, unknown>, failMessage: string): Promise<SubmitResult> {
+  if (user && user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
+  const { serviceFetch } = await import('../lib/backend.server')
+  const response = await serviceFetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const responseBody = await response.json().catch(() => null)
+  if (response.ok && responseBody?.queued) {
+    return { ok: true, target: typeof responseBody?.target === 'string' ? responseBody.target : undefined }
+  }
+  return { ok: false, error: responseBody?.error || failMessage }
+}
+
 const submitSandbox = createServerFn({ method: 'POST' })
   .inputValidator((input: { hash: string }) => input)
   .handler(async ({ data }): Promise<SubmitResult> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
-    if (user && user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
-    const { serviceFetch } = await import('../lib/backend.server')
-    const response = await serviceFetch('/api/v1/sandbox/submit', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ hash: data.hash }),
-    })
-    const body = await response.json().catch(() => null)
-    if (response.ok && body?.queued) {
-      return { ok: true, target: typeof body?.target === 'string' ? body.target : undefined }
-    }
-    return { ok: false, error: body?.error || 'Sandbox submission failed.' }
+    return submitAnalysisJob(user, '/api/v1/sandbox/submit', { hash: data.hash }, 'Sandbox submission failed.')
   })
 
 const submitGhidra = createServerFn({ method: 'POST' })
@@ -82,16 +89,7 @@ const submitGhidra = createServerFn({ method: 'POST' })
   .handler(async ({ data }): Promise<SubmitResult> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
-    if (user && user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
-    const { serviceFetch } = await import('../lib/backend.server')
-    const response = await serviceFetch('/api/v1/ghidra/submit', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ hash: data.hash }),
-    })
-    const body = await response.json().catch(() => null)
-    if (response.ok && body?.queued) return { ok: true }
-    return { ok: false, error: body?.error || 'Ghidra submission failed.' }
+    return submitAnalysisJob(user, '/api/v1/ghidra/submit', { hash: data.hash }, 'Ghidra submission failed.')
   })
 
 // github_analysis_submit.rs refuses anything but the literal string
@@ -106,21 +104,12 @@ const submitGithubAnalysis = createServerFn({ method: 'POST' })
   .handler(async ({ data }): Promise<SubmitResult> => {
     const { getSessionUser } = await import('../lib/auth')
     const user = await getSessionUser()
-    if (user && user.role !== 'admin') return { ok: false, error: 'Admin role required.' }
-    const { serviceFetch } = await import('../lib/backend.server')
-    const response = await serviceFetch('/api/v1/github-analysis/submit', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        hash: data.hash,
-        confirm: 'publish',
-        actor_subject: user?.sub ?? '',
-        actor_username: user?.username ?? '',
-      }),
-    })
-    const body = await response.json().catch(() => null)
-    if (response.ok && body?.queued) return { ok: true }
-    return { ok: false, error: body?.error || 'GitHub-analysis submission failed.' }
+    return submitAnalysisJob(
+      user,
+      '/api/v1/github-analysis/submit',
+      { hash: data.hash, confirm: 'publish', actor_subject: user?.sub ?? '', actor_username: user?.username ?? '' },
+      'GitHub-analysis submission failed.',
+    )
   })
 
 export const Route = createFileRoute('/payload-analysis/$hash')({
@@ -305,20 +294,9 @@ function OperatorActionsCard({ hash, golden, editable }: { hash: string; golden:
 function PayloadAnalysis() {
   const { first, golden, user } = Route.useLoaderData()
   const { hash } = Route.useParams()
-  const [detail, setDetail] = useState<PayloadDetail | null | 'missing'>(null)
-  const [goldenStatus, setGoldenStatus] = useState<GoldenImageStatus | null>(null)
-  useEffect(() => {
-    let cancelled = false
-    first.then((result) => {
-      if (!cancelled) setDetail(result ?? 'missing')
-    })
-    golden.then((result) => {
-      if (!cancelled) setGoldenStatus(result)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [first, golden])
+  const resolvedDetail = useResolved(first)
+  const detail: PayloadDetail | null | 'missing' = resolvedDetail === undefined ? null : resolvedDetail ?? 'missing'
+  const goldenStatus: GoldenImageStatus | null = useResolved(golden) ?? null
 
   // Same "no session (dev mode)" posture as settings.tsx: treat a missing
   // session as admin so local/dev runs aren't blocked, and gate on role

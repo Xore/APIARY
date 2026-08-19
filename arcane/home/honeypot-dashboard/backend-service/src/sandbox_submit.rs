@@ -72,46 +72,29 @@ pub struct SubmitBody {
     hash: String,
 }
 
-pub async fn submit(State(_state): State<AppState>, Json(body): Json<SubmitBody>) -> (StatusCode, Json<Value>) {
+pub async fn submit(State(_state): State<AppState>, Json(body): Json<SubmitBody>) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    fn err(status: StatusCode, message: impl Into<String>) -> (StatusCode, Json<Value>) {
+        (status, Json(json!({"error": message.into()})))
+    }
+
     let hash = body.hash.to_lowercase();
     if !crate::payload_paths::is_valid_hash(&hash) {
-        return (StatusCode::BAD_REQUEST, Json(json!({"error": "invalid payload hash"})));
+        return Err(err(StatusCode::BAD_REQUEST, "invalid payload hash"));
     }
-    let path = match resolve_payload_path(&hash) {
-        Ok(path) => path,
-        Err(_) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "captured payload not found"})),
-            )
-        }
-    };
-    let head = match read_payload_head(&path) {
-        Ok(head) => head,
-        Err(_) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "captured payload is unreadable"})),
-            )
-        }
-    };
-    let Some(target) = determine_sandbox_target(&head) else {
-        return (
+    let path = resolve_payload_path(&hash).map_err(|_| err(StatusCode::NOT_FOUND, "captured payload not found"))?;
+    let head = read_payload_head(&path).map_err(|_| err(StatusCode::NOT_FOUND, "captured payload is unreadable"))?;
+    let target = determine_sandbox_target(&head).ok_or_else(|| {
+        err(
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "this payload has no dynamic detonation path — see its static analysis instead"})),
-        );
-    };
+            "this payload has no dynamic detonation path — see its static analysis instead",
+        )
+    })?;
     let dir = sandbox_request_dir(target);
     if dir.is_empty() {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({"error": format!("the {target} sandbox is not configured on this host")})),
-        );
+        return Err(err(StatusCode::SERVICE_UNAVAILABLE, format!("the {target} sandbox is not configured on this host")));
     }
-    match create_request_marker(&dir, &hash) {
-        Ok(()) => (StatusCode::OK, Json(json!({"target": target, "queued": true}))),
-        Err(reason) => (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": reason}))),
-    }
+    create_request_marker(&dir, &hash).map_err(|reason| err(StatusCode::SERVICE_UNAVAILABLE, reason))?;
+    Ok(Json(json!({"target": target, "queued": true})))
 }
 
 /// goldenImageStatus (#86): win11-analysis.qcow2 staleness, written by a

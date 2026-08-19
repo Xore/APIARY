@@ -8,7 +8,7 @@ import { Fragment, useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { ArtifactList } from '../components/ArtifactList'
 import { getSessionUser } from '../lib/auth'
-import type { JsonRecord } from '../lib/json'
+import { pathString, type JsonRecord } from '../lib/json'
 
 type StoreRow = JsonRecord
 type Page = { total: number; rows: StoreRow[] }
@@ -267,15 +267,6 @@ export const Route = createFileRoute('/payload-workbench/results')({
   component: Results,
 })
 
-const str = (row: StoreRow, ...path: string[]): string => {
-  let value: unknown = row
-  for (const key of path) {
-    if (typeof value !== 'object' || value === null) return ''
-    value = (value as StoreRow)[key]
-  }
-  return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : ''
-}
-
 const when = (iso: string) => iso.replace('T', ' ').slice(0, 19)
 
 const recordColumn: Column<StoreRow> = {
@@ -285,25 +276,25 @@ const recordColumn: Column<StoreRow> = {
 }
 
 const WORKBENCH_COLUMNS: Column<StoreRow>[] = [
-  { header: 'created', render: (row) => when(str(row, 'created_at')) },
-  { header: 'state', render: (row) => <span className="badge badge--muted">{str(row, 'state')}</span> },
-  { header: 'recipe', className: 'v', render: (row) => str(row, 'recipe_name') },
-  { header: 'payload', className: 'v', render: (row) => <code>{str(row, 'payload_sha256').slice(0, 16)}</code> },
-  { header: 'owner', render: (row) => str(row, 'owner') },
+  { header: 'created', render: (row) => when(pathString(row, 'created_at')) },
+  { header: 'state', render: (row) => <span className="badge badge--muted">{pathString(row, 'state')}</span> },
+  { header: 'recipe', className: 'v', render: (row) => pathString(row, 'recipe_name') },
+  { header: 'payload', className: 'v', render: (row) => <code>{pathString(row, 'payload_sha256').slice(0, 16)}</code> },
+  { header: 'owner', render: (row) => pathString(row, 'owner') },
   recordColumn,
 ]
 
 const STATIC_COLUMNS: Column<StoreRow>[] = [
-  { header: 'fingerprint', className: 'v', render: (row) => <code>{str(row, 'Fingerprint').slice(0, 24)}</code> },
-  { header: 'kind', render: (row) => str(row, 'Analysis', 'Kind') },
-  { header: 'summary', className: 'v', render: (row) => str(row, 'Analysis', 'Summary') },
+  { header: 'fingerprint', className: 'v', render: (row) => <code>{pathString(row, 'Fingerprint').slice(0, 24)}</code> },
+  { header: 'kind', render: (row) => pathString(row, 'Analysis', 'Kind') },
+  { header: 'summary', className: 'v', render: (row) => pathString(row, 'Analysis', 'Summary') },
   recordColumn,
 ]
 
 const YARA_COLUMNS: Column<StoreRow>[] = [
-  { header: 'analyzed', render: (row) => when(str(row, '@timestamp')) },
-  { header: 'file', className: 'v', render: (row) => <code>{str(row, 'file', 'hash', 'sha256').slice(0, 16) || str(row, 'file', 'name')}</code> },
-  { header: 'matches', className: 'v', render: (row) => str(row, 'yara', 'match_count') || (Array.isArray((row.yara as StoreRow | undefined)?.matches) ? String(((row.yara as StoreRow).matches as unknown[]).length) : '') },
+  { header: 'analyzed', render: (row) => when(pathString(row, '@timestamp')) },
+  { header: 'file', className: 'v', render: (row) => <code>{pathString(row, 'file', 'hash', 'sha256').slice(0, 16) || pathString(row, 'file', 'name')}</code> },
+  { header: 'matches', className: 'v', render: (row) => pathString(row, 'yara', 'match_count') || (Array.isArray((row.yara as StoreRow | undefined)?.matches) ? String(((row.yara as StoreRow).matches as unknown[]).length) : '') },
   recordColumn,
 ]
 
@@ -312,7 +303,7 @@ const SANDBOX_COLUMNS: Column<StoreRow>[] = [
     header: 'job',
     className: 'v',
     render: (row) => {
-      const job = str(row, 'sandbox', 'job') || str(row, 'job')
+      const job = pathString(row, 'sandbox', 'job') || pathString(row, 'job')
       return job ? (
         <a className="lnk" href={`/sandbox/${encodeURIComponent(job)}`} onClick={(event) => event.stopPropagation()}>
           {job.slice(0, 28)} →
@@ -322,38 +313,38 @@ const SANDBOX_COLUMNS: Column<StoreRow>[] = [
       )
     },
   },
-  { header: 'detonated', render: (row) => when(str(row, '@timestamp')) },
-  { header: 'platform', render: (row) => <span className="badge badge--muted">{str(row, 'platform')}</span> },
+  { header: 'detonated', render: (row) => when(pathString(row, '@timestamp')) },
+  { header: 'platform', render: (row) => <span className="badge badge--muted">{pathString(row, 'platform')}</span> },
   {
     header: 'risk',
     render: (row) => {
-      const level = str(row, 'risk_level')
+      const level = pathString(row, 'risk_level')
       const cls = level === 'high' || level === 'critical' ? 'badge badge--danger' : level === 'medium' ? 'badge badge--warning' : 'badge badge--muted'
-      return <span className={cls}>{level} {str(row, 'risk_score')}</span>
+      return <span className={cls}>{level} {pathString(row, 'risk_score')}</span>
     },
   },
-  { header: 'file', className: 'v', render: (row) => <code>{str(row, 'file', 'hash', 'sha256').slice(0, 16) || str(row, 'file', 'name')}</code> },
-  { header: 'exit', render: (row) => str(row, 'exit_status') },
+  { header: 'file', className: 'v', render: (row) => <code>{pathString(row, 'file', 'hash', 'sha256').slice(0, 16) || pathString(row, 'file', 'name')}</code> },
+  { header: 'exit', render: (row) => pathString(row, 'exit_status') },
   recordColumn,
 ]
 
 const GHIDRA_COLUMNS: Column<StoreRow>[] = [
-  { header: 'analyzed', render: (row) => when(str(row, '@timestamp')) },
+  { header: 'analyzed', render: (row) => when(pathString(row, '@timestamp')) },
   {
     header: 'file',
     className: 'v',
     render: (row) => {
-      const sha = str(row, 'file', 'hash', 'sha256')
+      const sha = pathString(row, 'file', 'hash', 'sha256')
       return sha ? (
         <a className="lnk" href={`/ghidra/${encodeURIComponent(sha)}`} onClick={(event) => event.stopPropagation()}>
           <code>{sha.slice(0, 16)}</code> →
         </a>
       ) : (
-        <code>{str(row, 'file', 'name')}</code>
+        <code>{pathString(row, 'file', 'name')}</code>
       )
     },
   },
-  { header: 'exit', render: (row) => str(row, 'exit_status') },
+  { header: 'exit', render: (row) => pathString(row, 'exit_status') },
   recordColumn,
 ]
 
@@ -955,9 +946,9 @@ function Results() {
         </>
       ) : null}
       <h2 className="label-section">Workbench runs</h2>
-      <MasterDetailTable rows={workbench ? workbench.rows : null} columns={WORKBENCH_COLUMNS} rowKey={(row, i) => `wb-${str(row, 'id')}-${i}`} inspectorTitle="Workbench run" />
+      <MasterDetailTable rows={workbench ? workbench.rows : null} columns={WORKBENCH_COLUMNS} rowKey={(row, i) => `wb-${pathString(row, 'id')}-${i}`} inspectorTitle="Workbench run" />
       <h2 className="label-section">Static analysis</h2>
-      <MasterDetailTable rows={statics ? statics.rows : null} columns={STATIC_COLUMNS} rowKey={(row, i) => `st-${str(row, 'Fingerprint')}-${i}`} inspectorTitle="Static analysis" />
+      <MasterDetailTable rows={statics ? statics.rows : null} columns={STATIC_COLUMNS} rowKey={(row, i) => `st-${pathString(row, 'Fingerprint')}-${i}`} inspectorTitle="Static analysis" />
       <h2 className="label-section">YARA</h2>
       <MasterDetailTable rows={yara ? yara.rows : null} columns={YARA_COLUMNS} rowKey={(_, i) => `ya-${i}`} inspectorTitle="YARA result" />
       <h2 className="label-section">Sandbox detonations</h2>
@@ -967,7 +958,7 @@ function Results() {
         rowKey={(_, i) => `sb-${i}`}
         inspectorTitle="Sandbox run"
         inspectorExtra={(row) => {
-          const job = str(row, 'sandbox', 'job') || str(row, 'job')
+          const job = pathString(row, 'sandbox', 'job') || pathString(row, 'job')
           return job ? <ArtifactList kind="sandbox" artifactKey={job} /> : null
         }}
       />
@@ -978,7 +969,7 @@ function Results() {
         rowKey={(_, i) => `gh-${i}`}
         inspectorTitle="Ghidra run"
         inspectorExtra={(row) => {
-          const sha = str(row, 'file', 'hash', 'sha256')
+          const sha = pathString(row, 'file', 'hash', 'sha256')
           return sha ? <ArtifactList kind="ghidra" artifactKey={sha} /> : null
         }}
       />

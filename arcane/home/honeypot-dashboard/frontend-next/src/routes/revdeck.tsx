@@ -4,6 +4,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { StoreListPage, str, when, type StorePage, type StoreRow } from '../components/StoreList'
 import type { Column } from '../components/Investigate'
+import { pathString } from '../lib/json'
 
 const fetchPage = createServerFn({ method: 'GET' })
   .inputValidator((input: { offset: number }) => input)
@@ -12,27 +13,19 @@ const fetchPage = createServerFn({ method: 'GET' })
     return serviceJSON<StorePage>(`/api/v1/store/revdeck?offset=${data.offset}&size=25`)
   })
 
-// es_importer.rs wraps the raw revdeck payload one level deeper under the
-// "revdeck" source label (build_document); the raw payload's own sha256
-// may also ride flat on some rows — same nested-vs-flat ambiguity the
-// sandbox job field has, resolved the same way (nested first, flat
-// fallback), e.g. payload-workbench.results.tsx's SANDBOX_COLUMNS.
-const deep = (row: StoreRow, ...path: string[]): string => {
-  let value: unknown = row
-  for (const key of path) {
-    if (typeof value !== 'object' || value === null) return ''
-    value = (value as StoreRow)[key]
-  }
-  return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : ''
-}
-
 const COLUMNS: Column<StoreRow>[] = [
   { header: 'analyzed', render: (row) => when(str(row, '@timestamp')) },
   {
     header: 'sha',
     className: 'v',
     render: (row) => {
-      const sha = deep(row, 'revdeck', 'sha256') || deep(row, 'sha256')
+      // es_importer.rs wraps the raw revdeck payload one level deeper under
+      // the "revdeck" source label (build_document); the raw payload's own
+      // sha256 may also ride flat on some rows — same nested-vs-flat
+      // ambiguity the sandbox job field has, resolved the same way (nested
+      // first, flat fallback), e.g. payload-workbench.results.tsx's
+      // SANDBOX_COLUMNS.
+      const sha = pathString(row, 'revdeck', 'sha256') || pathString(row, 'sha256')
       return sha ? (
         <a className="lnk" href={`/revdeck/${encodeURIComponent(sha)}`} onClick={(event) => event.stopPropagation()}>
           <code>{sha.slice(0, 16)}</code> →
