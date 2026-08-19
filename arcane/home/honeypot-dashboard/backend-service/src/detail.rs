@@ -68,6 +68,127 @@ pub async fn ghidra_run(
     one_doc(&state, "ghidra-analysis-v1", json!({"term": {"file.hash.sha256": sha}})).await
 }
 
+const GHIDRA_CALLGRAPH_MAX_NODES: usize = 200;
+
+/// /api/v1/ghidra-callgraph/{sha} — an interactive complement to the
+/// static graphviz SVG the detail page already embeds as an <img>, built
+/// from the same per-function Callers/Callees cross-reference data
+/// (recovered only for the functions the worker's deep-dive budget
+/// covered) the static image is assembled from. Ported from
+/// ghidra_callgraph.go's buildGhidraCallGraph, same graphNode/graphEdge
+/// wire shape ({id,label,kind}/{source,target}) attackers_graph above
+/// already uses for /api/v1/attackers-graph — Cytoscape.js on the
+/// frontend reads either one identically.
+pub async fn ghidra_callgraph(
+    State(state): State<AppState>,
+    Path(sha): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let result = state
+        .es
+        .search_index(&["ghidra-analysis-v1"], json!({"size": 1, "query": {"term": {"file.hash.sha256": sha}}}))
+        .await
+        .map_err(bad_gateway)?;
+    let source = result["hits"]["hits"]
+        .as_array()
+        .and_then(|hits| hits.first())
+        .map(|hit| hit["_source"].clone())
+        .ok_or((StatusCode::NOT_FOUND, "not found".to_string()))?;
+    let functions = source["ghidra"]["functions"].as_array().cloned().unwrap_or_default();
+    Ok(Json(build_ghidra_callgraph(&functions)))
+}
+
+fn non_empty_array(value: &Value) -> bool {
+    value.as_array().is_some_and(|values| !values.is_empty())
+}
+
+struct GhidraGraphBuilder<'a> {
+    by_addr: std::collections::HashMap<&'a str, &'a Value>,
+    deepened: std::collections::HashSet<&'a str>,
+    nodes: Vec<Value>,
+    node_seen: std::collections::HashSet<String>,
+    edges: Vec<Value>,
+    edge_seen: std::collections::HashSet<(String, String)>,
+    truncated: bool,
+}
+
+impl GhidraGraphBuilder<'_> {
+    /// A leaf referenced from some deepened function's own xref list gets
+    /// its label from `fallback_name` (the name that xref entry carried) —
+    /// it only gets `by_addr`'s own richer name if this address also
+    /// happens to appear as a function in the list in its own right.
+    fn add_node(&mut self, addr: &str, fallback_name: &str) {
+        if addr.is_empty() || self.node_seen.contains(addr) {
+            return;
+        }
+        if self.nodes.len() >= GHIDRA_CALLGRAPH_MAX_NODES {
+            self.truncated = true;
+            return;
+        }
+        self.node_seen.insert(addr.to_string());
+        let label = self
+            .by_addr
+            .get(addr)
+            .and_then(|function| function["name"].as_str())
+            .filter(|name| !name.is_empty())
+            .or_else(|| Some(fallback_name).filter(|name| !name.is_empty()))
+            .unwrap_or(addr);
+        let kind = if self.deepened.contains(addr) { "function" } else { "leaf" };
+        self.nodes.push(json!({"id": addr, "label": label, "kind": kind}));
+    }
+
+    fn add_edge(&mut self, from: &str, to: &str) {
+        if from.is_empty() || to.is_empty() || from == to || !self.node_seen.contains(from) || !self.node_seen.contains(to) {
+            return;
+        }
+        let key = (from.to_string(), to.to_string());
+        if self.edge_seen.contains(&key) {
+            return;
+        }
+        self.edge_seen.insert(key);
+        self.edges.push(json!({"source": from, "target": to}));
+    }
+}
+
+fn build_ghidra_callgraph(functions: &[Value]) -> Value {
+    let by_addr: std::collections::HashMap<&str, &Value> =
+        functions.iter().filter_map(|function| function["address"].as_str().filter(|addr| !addr.is_empty()).map(|addr| (addr, function))).collect();
+    let deepened: std::collections::HashSet<&str> = by_addr
+        .iter()
+        .filter(|(_, function)| non_empty_array(&function["callers"]) || non_empty_array(&function["callees"]))
+        .map(|(addr, _)| *addr)
+        .collect();
+
+    let mut graph = GhidraGraphBuilder {
+        by_addr,
+        deepened,
+        nodes: Vec::new(),
+        node_seen: std::collections::HashSet::new(),
+        edges: Vec::new(),
+        edge_seen: std::collections::HashSet::new(),
+        truncated: false,
+    };
+
+    for function in functions {
+        let Some(address) = function["address"].as_str().filter(|addr| !addr.is_empty()) else { continue };
+        if !graph.deepened.contains(address) {
+            continue;
+        }
+        graph.add_node(address, function["name"].as_str().unwrap_or(""));
+        for caller in function["callers"].as_array().into_iter().flatten() {
+            let addr = caller["addr"].as_str().unwrap_or("");
+            graph.add_node(addr, caller["name"].as_str().unwrap_or(""));
+            graph.add_edge(addr, address);
+        }
+        for callee in function["callees"].as_array().into_iter().flatten() {
+            let addr = callee["addr"].as_str().unwrap_or("");
+            graph.add_node(addr, callee["name"].as_str().unwrap_or(""));
+            graph.add_edge(address, addr);
+        }
+    }
+
+    json!({"nodes": graph.nodes, "edges": graph.edges, "truncated": graph.truncated})
+}
+
 /// /api/v1/revdeck/{sha} — #1611 workstream E.8: revdeck-analysis-v1 had
 /// no detail endpoint at all, so an unconfigured-worker error state (the
 /// live audit's own example) rendered as a blank page rather than a
@@ -86,6 +207,159 @@ pub async fn revdeck_run(
         .map_err(bad_gateway)?
         .ok_or((StatusCode::NOT_FOUND, "not found".to_string()))?;
     Ok(Json(doc["revdeck"].clone()))
+}
+
+/// /api/v1/cape/{sha} — one CAPE detonation result, ported from cape.go's
+/// capeData. `report` is CAPE's own raw report — tens of thousands of
+/// API-call entries per traced process is normal — so it's never shipped
+/// whole; only the bounded `report_summary` this handler reduces it to
+/// crosses the wire (mirrors cape.go's own capeReportSummary). The full
+/// report stays in Elasticsearch for anyone who needs it, same posture
+/// Go's page takes ("too large for this page" — Go links to the raw-JSON
+/// API route instead).
+pub async fn cape_run(
+    State(state): State<AppState>,
+    Path(sha): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let doc = state
+        .es
+        .get_doc("cape-analysis-v1", &format!("cape:{sha}"))
+        .await
+        .map_err(bad_gateway)?
+        .ok_or((StatusCode::NOT_FOUND, "not found".to_string()))?;
+    let mut result = doc["cape"].clone();
+    let summary = summarize_cape_report(&result["report"]);
+    if let Some(object) = result.as_object_mut() {
+        object.remove("report");
+    }
+    result["report_summary"] = summary;
+    Ok(Json(result))
+}
+
+/// /api/v1/cape/{sha}/raw — the untouched result, full report included.
+/// A distinct route from cape_run above (not a query flag on it) so the
+/// page's own fetch never accidentally pulls the full report in — this is
+/// only ever reached by an explicit "download raw report" click.
+pub async fn cape_raw(
+    State(state): State<AppState>,
+    Path(sha): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let doc = state
+        .es
+        .get_doc("cape-analysis-v1", &format!("cape:{sha}"))
+        .await
+        .map_err(bad_gateway)?
+        .ok_or((StatusCode::NOT_FOUND, "not found".to_string()))?;
+    Ok(Json(doc["cape"].clone()))
+}
+
+/// /api/v1/github-analysis/{sha} — one publication result, ported from
+/// github_analysis.go's githubAnalysisData. Adds two fields the producer
+/// scripts never write, computed here the same way Go's dashboard layer
+/// does: `requested_by` (looked up from the audit log — this tier has no
+/// session of its own, so "who submitted this" only exists as an audit
+/// trail) and `view_url` (a validated raw.githubusercontent.com link to
+/// the rendered PDF report, when one genuinely exists).
+pub async fn github_analysis_run(
+    State(state): State<AppState>,
+    Path(sha): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let doc = state
+        .es
+        .get_doc("github-analysis-v1", &format!("github_analysis:{sha}"))
+        .await
+        .map_err(bad_gateway)?
+        .ok_or((StatusCode::NOT_FOUND, "not found".to_string()))?;
+    let mut result = doc["github_analysis"].clone();
+    result["requested_by"] = json!(requester_for(&state, &sha));
+    result["view_url"] = github_analysis_pdf_url(&result).map_or(Value::Null, |url| json!(url));
+    Ok(Json(result))
+}
+
+/// Mirrors githubAnalysisRequester: the newest queued github_analysis.submit
+/// audit entry for this hash, preferring the username over the bare
+/// subject — same posture every other actor-attributed field in this
+/// crate takes.
+fn requester_for(state: &AppState, sha: &str) -> String {
+    for event in state.audit.read(500) {
+        if event["action"].as_str() != Some("github_analysis.submit") || event["result"].as_str() != Some("queued") {
+            continue;
+        }
+        let first_field = event["fields"].as_array().and_then(|fields| fields.first()).and_then(Value::as_str);
+        if !first_field.is_some_and(|field| field.eq_ignore_ascii_case(sha)) {
+            continue;
+        }
+        let username = event["actor_username"].as_str().unwrap_or("");
+        return if username.is_empty() { event["actor_subject"].as_str().unwrap_or("").to_string() } else { username.to_string() };
+    }
+    String::new()
+}
+
+/// Mirrors githubAnalysisPDFURL: report_commit (falling back to commit)
+/// must be a real 40-hex-char sha, and report_pdf can't escape the
+/// repository via ".." or an absolute path — both are producer-controlled
+/// strings that become URL path segments, so validated the same way
+/// resolve_payload_path treats a worker-written filename before it
+/// becomes a filesystem path.
+fn github_analysis_pdf_url(row: &Value) -> Option<String> {
+    let commit = row["report_commit"]
+        .as_str()
+        .filter(|value| !value.is_empty())
+        .or_else(|| row["commit"].as_str().filter(|value| !value.is_empty()))?;
+    let report_pdf = row["report_pdf"].as_str().filter(|value| !value.is_empty())?;
+    if !commit_re().is_match(commit) || report_pdf.contains("..") || report_pdf.starts_with('/') {
+        return None;
+    }
+    Some(format!("https://raw.githubusercontent.com/Xore/honeypot/{commit}/{report_pdf}"))
+}
+
+fn commit_re() -> &'static regex::Regex {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| regex::Regex::new(r"^[0-9a-f]{40}$").expect("static commit pattern"))
+}
+
+fn summarize_cape_report(report: &Value) -> Value {
+    if !report.is_object() {
+        return Value::Null;
+    }
+    let mut summary_keys: Vec<&String> = report["behavior"]["summary"].as_object().into_iter().flatten().map(|(key, _)| key).collect();
+    summary_keys.sort();
+
+    let processes: Vec<Value> = report["behavior"]["processes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|process| {
+            let call_count = process["calls"].as_array().map_or(0, Vec::len);
+            json!({
+                "process_id": process["process_id"],
+                "process_name": process["process_name"],
+                "parent_id": process["parent_id"],
+                "module_path": process["module_path"],
+                "first_seen": process["first_seen"],
+                "call_count": call_count,
+            })
+        })
+        .collect();
+    let total_calls: i64 = processes.iter().map(|process| process["call_count"].as_i64().unwrap_or(0)).sum();
+
+    json!({
+        "machine": report["info"]["machine"]["label"],
+        "package": report["info"]["package"],
+        "route": report["info"]["route"],
+        "timeout": report["info"]["timeout"],
+        "duration": report["info"]["duration"],
+        "malscore": report["malscore"],
+        "malstatus": report["malstatus"],
+        "summary": report["behavior"]["summary"],
+        "summary_keys": summary_keys,
+        "processes": processes,
+        "total_calls": total_calls,
+        "payloads": report["CAPE"]["payloads"],
+        "configs": report["CAPE"]["configs"],
+        "debug_log": report["debug"]["log"],
+        "debug_errors": report["debug"]["errors"],
+    })
 }
 
 #[derive(Deserialize)]

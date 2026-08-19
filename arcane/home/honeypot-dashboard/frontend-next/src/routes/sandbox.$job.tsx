@@ -1,6 +1,8 @@
 // Sandbox detonation detail — one job's verdict, behavior record and
 // exported artifacts. Submission of new jobs lands with #1612's mounted
-// worker role; live VNC (SANDBOX_VNC_BRIDGE_WS) rides the same slice.
+// worker role. Live read-only VNC viewing of a currently-running
+// Windows-sandbox detonation (SANDBOX_VNC_BRIDGE_WS) is a separate page,
+// not this one — see sandbox.vnc.tsx.
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'

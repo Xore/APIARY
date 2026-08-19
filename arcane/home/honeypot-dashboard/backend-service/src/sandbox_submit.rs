@@ -138,3 +138,42 @@ pub async fn golden_image_status() -> Json<Value> {
     }
     Json(value)
 }
+
+/// windowsSandboxLiveJob's regex, ported: run_pending.sh claims one
+/// request at a time by renaming {sha}.request to {sha}.request.running
+/// before it starts the guest, and the single-VM/flock design means at
+/// most one such file can exist at a time.
+fn running_sha_from(name: &str) -> Option<&str> {
+    let sha = name.strip_suffix(".request.running")?;
+    (sha.len() == 64 && sha.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())).then_some(sha)
+}
+
+/// GET /api/v1/sandbox/vnc — read-only live-view status, ported from
+/// sandbox_vnc.go's serveSandboxVNC + windowsSandboxLiveJob. This tier
+/// never touches libvirt or the VNC stream itself — it only reports
+/// whether a Windows-sandbox detonation is currently running and where
+/// the operator-configured bridge WebSocket lives; the browser's noVNC
+/// client connects to that bridge directly. Admin-gated at the BFF, same
+/// posture as every other admin action here — watching a live malware
+/// detonation is at least as sensitive as downloading its capture.
+pub async fn vnc_status() -> Result<Json<Value>, (StatusCode, String)> {
+    let bridge_ws = env_dir("SANDBOX_VNC_BRIDGE_WS");
+    if bridge_ws.is_empty() {
+        return Err((StatusCode::NOT_FOUND, "the VNC bridge is not configured on this host (SANDBOX_VNC_BRIDGE_WS unset)".into()));
+    }
+    let dir = sandbox_request_dir("windows");
+    if dir.is_empty() {
+        return Err((StatusCode::NOT_FOUND, "no Windows-sandbox detonation is currently running".into()));
+    }
+    let running_sha = std::fs::read_dir(&dir)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| entry.file_name().to_str().and_then(|name| running_sha_from(name).map(str::to_string)))
+        .next();
+    let Some(sha256) = running_sha else {
+        return Err((StatusCode::NOT_FOUND, "no Windows-sandbox detonation is currently running".into()));
+    };
+    Ok(Json(json!({"sha256": sha256, "bridge_ws": bridge_ws})))
+}

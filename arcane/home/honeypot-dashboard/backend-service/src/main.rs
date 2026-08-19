@@ -38,6 +38,7 @@ mod es;
 mod event_detail;
 mod es_importer;
 mod events;
+mod exports;
 mod fusion;
 mod ghidra_submit;
 mod github_analysis_submit;
@@ -157,6 +158,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/overview/kpis", get(overview::kpis))
         .route("/api/v1/overview/dashboard", get(dashboard::dashboard))
         .route("/api/v1/events", get(events::list))
+        .route("/api/v1/export/events.csv", get(exports::events_csv))
+        .route("/api/v1/export/commands.csv", get(exports::commands_csv))
+        .route("/api/v1/export/ips.csv", get(exports::ips_csv))
+        .route("/api/v1/export/campaigns.csv", get(exports::campaigns_csv))
+        .route("/api/v1/export/clusters.csv", get(exports::clusters_csv))
+        .route("/api/v1/export/history.json", get(exports::history_json))
         .route("/api/v1/live", get(live::stream))
         .route("/api/v1/mail/{session_id}", get(mail::get))
         .route("/api/v1/ml-health", get(ml_health::list))
@@ -199,7 +206,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/ip-block-export", get(ip_block::export))
         .route("/api/v1/sandbox/{job}", get(detail::sandbox_run))
         .route("/api/v1/ghidra/{sha}", get(detail::ghidra_run))
+        .route("/api/v1/ghidra-callgraph/{sha}", get(detail::ghidra_callgraph))
         .route("/api/v1/revdeck/{sha}", get(detail::revdeck_run))
+        .route("/api/v1/cape/{sha}", get(detail::cape_run))
+        .route("/api/v1/cape/{sha}/raw", get(detail::cape_raw))
+        .route("/api/v1/github-analysis/{sha}", get(detail::github_analysis_run))
         .route("/api/v1/attackers-graph", get(detail::attackers_graph))
         .route("/api/v1/attack-vectors", get(detail::attack_vectors))
         .route("/api/v1/ml-anomalies/ack", post(detail::ml_anomaly_ack))
@@ -270,6 +281,7 @@ async fn main() -> anyhow::Result<()> {
         // mounted), not on route registration here.
         .route("/api/v1/sandbox/submit", post(sandbox_submit::submit))
         .route("/api/v1/sandbox/golden-image-status", get(sandbox_submit::golden_image_status))
+        .route("/api/v1/sandbox/vnc", get(sandbox_submit::vnc_status))
         .route("/api/v1/ghidra/submit", post(ghidra_submit::submit))
         .route("/api/v1/github-analysis/submit", post(github_analysis_submit::submit))
         // #1612 phase 3b: Payload Workbench orchestrator (recipes, run
