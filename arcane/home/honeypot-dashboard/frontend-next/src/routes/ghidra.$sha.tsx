@@ -5,8 +5,9 @@ import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader } from '../components/Investigate'
 import { ArtifactList } from '../components/ArtifactList'
+import type { JsonRecord } from '../lib/json'
 
-type Run = Record<string, unknown>
+type Run = JsonRecord
 
 const fetchRun = createServerFn({ method: 'GET' })
   .inputValidator((input: { sha: string }) => input)

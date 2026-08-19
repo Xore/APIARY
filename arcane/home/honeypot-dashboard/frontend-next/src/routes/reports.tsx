@@ -7,8 +7,9 @@ import { createServerFn } from '@tanstack/react-start'
 import { useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
 import { getSessionUser } from '../lib/auth'
+import type { JsonRecord } from '../lib/json'
 
-type StoreRow = Record<string, unknown>
+type StoreRow = JsonRecord
 type Page = { total: number; rows: StoreRow[] }
 
 type ReportTemplate = {

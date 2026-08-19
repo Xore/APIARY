@@ -4,8 +4,9 @@
 // are the only per-page code.
 import { useCallback, useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from './Investigate'
+import type { JsonRecord } from '../lib/json'
 
-export type StoreRow = Record<string, unknown>
+export type StoreRow = JsonRecord
 export type StorePage = { total: number; rows: StoreRow[] }
 
 export function StoreListPage({

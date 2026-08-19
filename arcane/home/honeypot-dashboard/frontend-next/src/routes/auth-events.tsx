@@ -2,7 +2,7 @@
 // own realm (auth-failure-events store).
 import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
-import { StoreListPage, str, num, when, type StorePage } from '../components/StoreList'
+import { StoreListPage, str, when, type StorePage } from '../components/StoreList'
 import type { Column } from '../components/Investigate'
 import type { StoreRow } from '../components/StoreList'
 

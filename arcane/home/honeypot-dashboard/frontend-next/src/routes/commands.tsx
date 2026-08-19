@@ -4,6 +4,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { createServerFn } from '@tanstack/react-start'
 import { useCallback, useEffect, useState } from 'react'
 import { InvestigateHeader, MasterDetailTable, type Column } from '../components/Investigate'
+import type { JsonRecord } from '../lib/json'
 
 type EventRow = {
   time: string
@@ -14,7 +15,7 @@ type EventRow = {
   proto: string
   detail: string
   session: string
-  record: Record<string, unknown>
+  record: JsonRecord
 }
 
 type Page = { total: number; offset: number; rows: EventRow[] }
@@ -31,8 +32,8 @@ export const Route = createFileRoute('/commands')({
   component: Commands,
 })
 
-function commandText(record: Record<string, unknown>): string {
-  const hp = record.honeypot as Record<string, unknown> | undefined
+function commandText(record: JsonRecord): string {
+  const hp = record.honeypot as JsonRecord | undefined
   for (const key of ['input', 'command', 'data', 'message']) {
     const value = hp?.[key]
     if (typeof value === 'string' && value) return value
