@@ -375,29 +375,35 @@ fn merge_entity_into(a: &mut Working, b: &Working) {
 }
 
 /// KNOWN GAP (found during #1628's worker-retirement research, not yet
-/// resolved): this seeds on a timestamp, and the old Go worker's own
-/// newEntityID does too — but with a different string format (Go's
-/// RFC3339Nano trims trailing zero fractional digits; this always emits 9).
-/// Two uncoordinated writers that each independently see the same
-/// never-before-seen attacker IP within one cycle (a real possibility
-/// during any dual-write bake period, since neither implementation checks
-/// with the other before minting a new entity) will therefore compute two
-/// different IDs for it and create two separate attackers-v1 documents
-/// both claiming that IP — corrupting the "one IP -> one entity" invariant.
-/// This is NOT fixed by matching the timestamp format between the two
-/// implementations; the race is inherent to any two uncoordinated writers
-/// minting new primary keys concurrently, format aside. Do not assume a
-/// dual-write bake period is safe for this specific worker (unlike
-/// agent-intrusion-worker, whose campaign_id is a pure function of event
-/// content and is safely idempotent under concurrent writers) without
-/// either fixing the ID scheme to be IP-derived only (dropping the
-/// timestamp seed so repeated/concurrent runs converge on the same ID for
-/// the same IP) or stopping the old worker before starting this one,
-/// rather than running them side by side. Flag for an explicit decision —
-/// do not silently redesign this.
-fn new_entity_id(seed_ip: &str, at: chrono::DateTime<chrono::Utc>) -> String {
-    let nanos = at.format("%Y-%m-%dT%H:%M:%S%.9fZ").to_string();
-    let digest = Sha256::digest(format!("attacker:{seed_ip}:{nanos}").as_bytes());
+/// IP-derived only, deliberately not timestamp-seeded (fixed post-#1628
+/// worker-retirement research — see git history for the original
+/// timestamp-seeded version and the race it had). This function is only
+/// ever called once per IP for the lifetime of this index: resolve_identities
+/// looks the IP up in `ip_to_index` (populated from every existing entity's
+/// `ip_set`, loaded fresh from attackers-v1 each cycle) before ever reaching
+/// here, so a previously-seen IP — by this worker or, since both read/write
+/// the same shared index, by a prior run or even a differently-seeded past
+/// version of this same function — never re-derives a new id. That
+/// invariant is exactly what makes a pure function of the seed IP correct
+/// and actually useful: two Rust instances (concurrent replicas, or the
+/// same worker racing itself across a restart) that independently mint an
+/// entity for the same never-before-seen IP in the same cycle now converge
+/// on the identical id, so their concurrent writes land on one document
+/// instead of two — the same "safe idempotent upsert on a deterministic
+/// key" property agent-intrusion-worker's campaign_id already has.
+///
+/// This does NOT by itself make a Go+Rust dual-write bake period safe: the
+/// old Go worker's own newEntityID still seeds on a timestamp and was
+/// deliberately left alone (no reason to invest further in code slated for
+/// deletion) — Go and Rust computing different ids for the same
+/// simultaneously-first-seen IP remains possible for as long as both are
+/// writing attackers-v1 at once. The safe retirement path for this
+/// specific worker is still: stop the old worker, then start this one —
+/// not an extended side-by-side bake period the way agent-intrusion-worker
+/// (whose campaign_id has always been a pure function of event content) can
+/// safely do.
+fn new_entity_id(seed_ip: &str) -> String {
+    let digest = Sha256::digest(format!("attacker:{seed_ip}").as_bytes());
     to_hex(&digest[..16])
 }
 
@@ -472,7 +478,7 @@ fn resolve_identities(
                     }
                 }
             } else {
-                let new_id = new_entity_id(ip, o.first.unwrap_or_else(chrono::Utc::now));
+                let new_id = new_entity_id(ip);
                 candidates.push(new_working(new_id));
                 target_index = Some(candidates.len() - 1);
             }
@@ -741,6 +747,28 @@ mod tests {
             last: Some(chrono::Utc::now()),
             events: 1,
         }
+    }
+
+    #[test]
+    fn new_entity_id_is_a_pure_function_of_the_seed_ip() {
+        assert_eq!(new_entity_id("203.0.113.5"), new_entity_id("203.0.113.5"));
+        assert_ne!(new_entity_id("203.0.113.5"), new_entity_id("203.0.113.6"));
+    }
+
+    #[test]
+    fn two_independent_first_sightings_of_the_same_ip_converge_on_one_entity_id() {
+        // Simulates two uncoordinated writers (concurrent replicas, or the
+        // same worker racing itself across a restart) each observing the
+        // same never-before-seen IP with no existing entity yet -- the
+        // scenario that used to mint two different, colliding entity ids
+        // before new_entity_id dropped its timestamp seed.
+        let mut observations = HashMap::new();
+        observations.insert("203.0.113.9".to_string(), obs("203.0.113.9", "fp-x", "sha-x", ""));
+        let (run_a, _) = resolve_identities(Vec::new(), &observations);
+        let (run_b, _) = resolve_identities(Vec::new(), &observations);
+        assert_eq!(run_a.len(), 1);
+        assert_eq!(run_b.len(), 1);
+        assert_eq!(run_a[0].id, run_b[0].id, "two independent first-sighting runs must mint the identical entity id");
     }
 
     #[test]
