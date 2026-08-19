@@ -19,6 +19,7 @@ import { Route as CanarytokensRouteImport } from './routes/canarytokens'
 import { Route as CapeRouteImport } from './routes/cape'
 import { Route as ClustersRouteImport } from './routes/clusters'
 import { Route as CommandsRouteImport } from './routes/commands'
+import { Route as CredentialsRouteImport } from './routes/credentials'
 import { Route as DeadLettersRouteImport } from './routes/dead-letters'
 import { Route as EventsRouteImport } from './routes/events'
 import { Route as GithubAnalysisRouteImport } from './routes/github-analysis'
@@ -101,6 +102,11 @@ const ClustersRoute = ClustersRouteImport.update({
 const CommandsRoute = CommandsRouteImport.update({
   id: '/commands',
   path: '/commands',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CredentialsRoute = CredentialsRouteImport.update({
+  id: '/credentials',
+  path: '/credentials',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DeadLettersRoute = DeadLettersRouteImport.update({
@@ -283,6 +289,7 @@ export interface FileRoutesByFullPath {
   '/cape': typeof CapeRoute
   '/clusters': typeof ClustersRoute
   '/commands': typeof CommandsRoute
+  '/credentials': typeof CredentialsRoute
   '/dead-letters': typeof DeadLettersRoute
   '/events': typeof EventsRoute
   '/github-analysis': typeof GithubAnalysisRoute
@@ -328,6 +335,7 @@ export interface FileRoutesByTo {
   '/cape': typeof CapeRoute
   '/clusters': typeof ClustersRoute
   '/commands': typeof CommandsRoute
+  '/credentials': typeof CredentialsRoute
   '/dead-letters': typeof DeadLettersRoute
   '/events': typeof EventsRoute
   '/github-analysis': typeof GithubAnalysisRoute
@@ -374,6 +382,7 @@ export interface FileRoutesById {
   '/cape': typeof CapeRoute
   '/clusters': typeof ClustersRoute
   '/commands': typeof CommandsRoute
+  '/credentials': typeof CredentialsRoute
   '/dead-letters': typeof DeadLettersRoute
   '/events': typeof EventsRoute
   '/github-analysis': typeof GithubAnalysisRoute
@@ -421,6 +430,7 @@ export interface FileRouteTypes {
     | '/cape'
     | '/clusters'
     | '/commands'
+    | '/credentials'
     | '/dead-letters'
     | '/events'
     | '/github-analysis'
@@ -466,6 +476,7 @@ export interface FileRouteTypes {
     | '/cape'
     | '/clusters'
     | '/commands'
+    | '/credentials'
     | '/dead-letters'
     | '/events'
     | '/github-analysis'
@@ -511,6 +522,7 @@ export interface FileRouteTypes {
     | '/cape'
     | '/clusters'
     | '/commands'
+    | '/credentials'
     | '/dead-letters'
     | '/events'
     | '/github-analysis'
@@ -557,6 +569,7 @@ export interface RootRouteChildren {
   CapeRoute: typeof CapeRoute
   ClustersRoute: typeof ClustersRoute
   CommandsRoute: typeof CommandsRoute
+  CredentialsRoute: typeof CredentialsRoute
   DeadLettersRoute: typeof DeadLettersRoute
   EventsRoute: typeof EventsRoute
   GithubAnalysisRoute: typeof GithubAnalysisRoute
@@ -662,6 +675,13 @@ declare module '@tanstack/react-router' {
       path: '/commands'
       fullPath: '/commands'
       preLoaderRoute: typeof CommandsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/credentials': {
+      id: '/credentials'
+      path: '/credentials'
+      fullPath: '/credentials'
+      preLoaderRoute: typeof CredentialsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/dead-letters': {
@@ -909,6 +929,7 @@ const rootRouteChildren: RootRouteChildren = {
   CapeRoute: CapeRoute,
   ClustersRoute: ClustersRoute,
   CommandsRoute: CommandsRoute,
+  CredentialsRoute: CredentialsRoute,
   DeadLettersRoute: DeadLettersRoute,
   EventsRoute: EventsRoute,
   GithubAnalysisRoute: GithubAnalysisRoute,
